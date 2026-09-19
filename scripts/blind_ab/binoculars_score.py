@@ -194,6 +194,33 @@ def run_pass(model_path, adapter_path, items, cache_dir, tag, quiet=False):
     return meta
 
 
+def surprisal_diversity(nll):
+    """DivEye-style variability features over a per-token surprisal series.
+
+    Diversity Boosts AI-Generated Text Detection (arXiv 2509.18880): human
+    text has richer surprisal VARIABILITY than model text, and persona
+    fine-tuning lowers lexical surprise, so a fine-tuned twin gets MORE
+    detectable on this axis while its mean perplexity looks human. Three
+    numbers, all pure functions of the series:
+      std   -- population std of token surprisal
+      burst -- mean |s_i - s_{i-1}| (burstiness / local variability)
+      kurt  -- excess kurtosis (tail heaviness); 0.0 when std == 0
+    A 1-token series has no variability: (0, 0, 0).
+    """
+    import numpy as np
+    x = np.asarray(nll, dtype=np.float64)
+    n = int(x.size)
+    if n < 2:
+        return 0.0, 0.0, 0.0
+    std = float(x.std())
+    burst = float(np.abs(np.diff(x)).mean())
+    if std <= 1e-12:
+        return std, burst, 0.0
+    z = (x - x.mean()) / std
+    kurt = float((z ** 4).mean() - 3.0)
+    return std, burst, kurt
+
+
 def combine(items, meta, cache_dir):
     """Compute per-item logPPL / cross-entropy sums for both directions."""
     import numpy as np
@@ -229,6 +256,15 @@ def combine(items, meta, cache_dir):
         # delta log-likelihood per token (adapted minus base) — the simplest
         # persona-contrast baseline, reported alongside binoculars ratios
         it["score_dll"] = (it["sum_nll_base"] - it["sum_nll_adapted"]) / n
+        # DivEye variability features (advisory, ride along like score_dll):
+        # the base-observer series is the paper's setting; the adapted one
+        # says whether the twin's own surprisal profile flattened.
+        for tag, series in (("base", nll_base), ("adapted", nll_adpt)):
+            std, burst, kurt = surprisal_diversity(series)
+            it[f"div_std_{tag}"] = std
+            it[f"div_burst_{tag}"] = burst
+            it[f"div_kurt_{tag}"] = kurt
+        it["score_diveye"] = it["div_std_base"]
         results.append(it)
     return results
 
@@ -301,6 +337,11 @@ SCORE_DEFS = {
     "dll (adapted-base)": ("score_dll", None, "n_tokens"),
     "logppl_base":        ("logppl_base", "sum_nll_base", "n_tokens"),
     "logppl_adapted":     ("logppl_adapted", "sum_nll_adapted", "n_tokens"),
+    # non-additive per-message features: no pooled window (like dll)
+    "diveye std (base)":     ("div_std_base", None, "n_tokens"),
+    "diveye burst (base)":   ("div_burst_base", None, "n_tokens"),
+    "diveye kurt (base)":    ("div_kurt_base", None, "n_tokens"),
+    "diveye std (adapted)":  ("div_std_adapted", None, "n_tokens"),
 }
 
 
@@ -364,6 +405,12 @@ def selftest():
     thr, tpr, afpr = threshold_at_fpr(list(range(10, 20)),
                                       list(range(0, 10)), 0.10, True)
     assert tpr == 1.0 and afpr <= 0.10
+    # DivEye features: flat series has no variability, alternating one does
+    assert surprisal_diversity([2.0, 2.0, 2.0]) == (0.0, 0.0, 0.0)
+    std, burst, kurt = surprisal_diversity([1.0, 3.0, 1.0, 3.0])
+    assert abs(std - 1.0) < 1e-12 and abs(burst - 2.0) < 1e-12
+    assert abs(kurt - (-2.0)) < 1e-12  # two-point distribution: excess kurtosis -2
+    assert surprisal_diversity([5.0]) == (0.0, 0.0, 0.0)
     print("selftest OK")
 
 
