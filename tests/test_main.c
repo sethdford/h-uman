@@ -459,6 +459,7 @@ void run_outbound_persona_tests(void);
 /* Sprint 60 — persona stage ML wiring (shape-classifier upgrade). */
 void run_outbound_persona_classifier_tests(void);
 void run_outbound_moderation_tests(void);
+void run_outbound_sensitive_tests(void);
 void run_outbound_corpus_regression_tests(void);
 /* Sprint 60 — outbound stats (per-stage × per-verdict counters). */
 void run_outbound_stats_tests(void);
@@ -1490,6 +1491,7 @@ int main(int argc, char **argv) {
     run_outbound_persona_tests();
     run_outbound_persona_classifier_tests();
     run_outbound_moderation_tests();
+    run_outbound_sensitive_tests();
     run_outbound_corpus_regression_tests();
     run_outbound_stats_tests();
     run_doctor_outbound_stats_tests();

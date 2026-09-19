@@ -92,11 +92,22 @@ static const char *const hu_config_top_keys[] = {
      * {"mlx_local": {"streaming_enabled": false}} to diagnose
      * streaming-specific regressions. */
     "mlx_local",
+    /* 2026-07-30: owner's protected values for the outbound
+     * sensitive-disclosure gate. Whitelisted at the same time the parser
+     * landed — the comment above on `reaction_collection` is why: a parsed
+     * key missing from this list logs a misleading "unknown key (ignored)"
+     * on every startup and sends the next auditor hunting a phantom bug. */
+    "privacy",
 };
 static const size_t hu_config_top_keys_len =
     sizeof(hu_config_top_keys) / sizeof(hu_config_top_keys[0]);
 
 /* Nested keys per section */
+static const char *const hu_privacy_keys[] = {
+    "street_address", "employer", "city", "family_names", "financial",
+};
+static const size_t hu_privacy_keys_len = sizeof(hu_privacy_keys) / sizeof(hu_privacy_keys[0]);
+
 static const char *const hu_gateway_keys[] = {
     "enabled",
     "port",
@@ -330,6 +341,13 @@ hu_error_t hu_config_validate_strict(const hu_config_t *cfg, const hu_json_value
     if (root)
         check_unknown_top_keys(root, strict, &has_error);
     if (root) {
+        /* A typo'd category key ("street_adress") would silently leave the
+         * value undeclared and the street-address rule inert — a security
+         * control disabled by a spelling mistake, with no other signal. */
+        hu_json_value_t *priv = hu_json_object_get(root, "privacy");
+        if (priv)
+            check_unknown_nested_keys(priv, "privacy", hu_privacy_keys, hu_privacy_keys_len, strict,
+                                      &has_error);
         hu_json_value_t *gw = hu_json_object_get(root, "gateway");
         if (gw)
             check_unknown_nested_keys(gw, "gateway", hu_gateway_keys, hu_gateway_keys_len, strict,

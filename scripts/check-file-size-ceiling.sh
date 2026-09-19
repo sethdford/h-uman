@@ -4,7 +4,9 @@
 # Aspirational target documented in .claude/rules/file-size-ceiling.md: 800 LOC.
 set -euo pipefail
 
-MAX_BASELINE=14082   # src/daemon.c, 2026-07-27 post-sched-send-outcome carve (was 14090)
+MAX_BASELINE=14061   # src/daemon.c, 2026-07-30 outbound-wiring carve (was 14082):
+                     # crosstalk + sensitive registration/teardown moved to
+                     # src/daemon/daemon_outbound_wiring.c
                      # took daemon.c to 14085; 5 lines of headroom are reserved for the SIGHUP
                      # config-reload call site the carve was made to pay for. Net: -42.
                      # Lower as god-files are carved.

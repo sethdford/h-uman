@@ -11,8 +11,8 @@
  *                hit reactive either.
  *   proactive  — full pipeline. This is where Annie/Mindy/Betty
  *                shipped. Highest scrutiny.
- *   f25        — full pipeline + upstream Phase C fix at
- *                daemon_proactive.c:424.
+ *   f25        — full pipeline (aliases the proactive stage list) + upstream
+ *                Phase C fix at daemon_proactive.c:424.
  *   temporal   — strip + shape + crosstalk + persona + moderation.
  *                No echo stage because temporal prompts don't have
  *                the same directive-injection vector.
@@ -39,6 +39,7 @@ extern hu_outbound_pipeline_stage_t hu_outbound_pipeline_stage_crosstalk;
 extern hu_outbound_pipeline_stage_t hu_outbound_pipeline_stage_persona;
 extern hu_outbound_pipeline_stage_t hu_outbound_pipeline_stage_moderation;
 extern hu_outbound_pipeline_stage_t hu_outbound_pipeline_stage_style_governor;
+extern hu_outbound_pipeline_stage_t hu_outbound_pipeline_stage_sensitive;
 
 /* Per-path stage lists. NULL-terminated for ease of static
  * declaration. The build_stages function below converts to the
@@ -46,6 +47,10 @@ extern hu_outbound_pipeline_stage_t hu_outbound_pipeline_stage_style_governor;
 static hu_outbound_pipeline_stage_t *s_reactive_stages[] = {
     &hu_outbound_pipeline_stage_strip,
     &hu_outbound_pipeline_stage_crosstalk,
+    /* sensitive: owner's-own-data disclosure. On EVERY path — an address or
+     * card number leaks the same whether the message was reactive or
+     * proactive, and reactive is the only path with no moderation stage. */
+    &hu_outbound_pipeline_stage_sensitive,
     &hu_outbound_pipeline_stage_style_governor,
     NULL,
 };
@@ -54,13 +59,7 @@ static hu_outbound_pipeline_stage_t *s_proactive_stages[] = {
     &hu_outbound_pipeline_stage_strip,          &hu_outbound_pipeline_stage_shape,
     &hu_outbound_pipeline_stage_echo,           &hu_outbound_pipeline_stage_crosstalk,
     &hu_outbound_pipeline_stage_persona,        &hu_outbound_pipeline_stage_moderation,
-    &hu_outbound_pipeline_stage_style_governor, NULL,
-};
-
-static hu_outbound_pipeline_stage_t *s_f25_stages[] = {
-    &hu_outbound_pipeline_stage_strip,          &hu_outbound_pipeline_stage_shape,
-    &hu_outbound_pipeline_stage_echo,           &hu_outbound_pipeline_stage_crosstalk,
-    &hu_outbound_pipeline_stage_persona,        &hu_outbound_pipeline_stage_moderation,
+    &hu_outbound_pipeline_stage_sensitive,
     &hu_outbound_pipeline_stage_style_governor, NULL,
 };
 
@@ -70,6 +69,7 @@ static hu_outbound_pipeline_stage_t *s_temporal_stages[] = {
     &hu_outbound_pipeline_stage_crosstalk,
     &hu_outbound_pipeline_stage_persona,
     &hu_outbound_pipeline_stage_moderation,
+    &hu_outbound_pipeline_stage_sensitive,
     &hu_outbound_pipeline_stage_style_governor,
     NULL,
 };
@@ -78,6 +78,7 @@ static hu_outbound_pipeline_stage_t *s_scheduled_stages[] = {
     &hu_outbound_pipeline_stage_strip,
     &hu_outbound_pipeline_stage_crosstalk,
     &hu_outbound_pipeline_stage_moderation,
+    &hu_outbound_pipeline_stage_sensitive,
     NULL,
 };
 
@@ -97,7 +98,13 @@ static hu_outbound_pipeline_stage_t **stages_for_path(hu_outbound_path_t path, s
         list = s_proactive_stages;
         break;
     case HU_OUTBOUND_PATH_F25:
-        list = s_f25_stages;
+        /* F25 IS the full pipeline — the same stage set as proactive (its extra
+         * protection is the upstream topic-shape pre-check in
+         * daemon_proactive.c, not a different stage list). Aliased rather than
+         * copied: the two arrays were byte-identical, so every stage added to
+         * one had to be remembered for the other, and a divergence would have
+         * been silent. */
+        list = s_proactive_stages;
         break;
     case HU_OUTBOUND_PATH_TEMPORAL:
         list = s_temporal_stages;

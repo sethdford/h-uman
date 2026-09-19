@@ -44,6 +44,7 @@
 #include "human/persona/warm_response.h"
 #ifdef HU_ENABLE_SQLITE
 #include "human/agent/outbound_crosstalk_sqlite.h"
+#include "human/daemon/daemon_outbound_wiring.h"
 #endif
 #include "human/agent/persona_eval.h"
 #ifdef HU_ENABLE_RL_FULL
@@ -2273,24 +2274,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
         hu_daemon_imessage_observer_wire_personal_model(&agent->personal_model);
     }
 
-#ifdef HU_ENABLE_SQLITE
-    /* Sprint 60 follow-up — wire outbound crosstalk stage's cross-contact
-     * bleed check to the production messages table. The stage already
-     * shipped (Sprint 59 Phase B); without a registered lookup it runs
-     * in degraded mode (metadata-pattern check only). Registration is
-     * conditional on agent->memory being SQLite-backed; the corresponding
-     * unregister sits with the personal-model teardown below so the
-     * static callback never sees a freed sqlite3 *. */
-    if (agent && agent->memory) {
-        sqlite3 *crosstalk_db = hu_sqlite_memory_get_db(agent->memory);
-        hu_outbound_crosstalk_register_sqlite(crosstalk_db);
-        /* T8 (reflection retire-on-contradiction): wire the same SQLite
-         * handle into the reaction handler so a thumbs_down retires the
-         * reflection patterns that shaped the thumbed-down turn. Cleared
-         * with the personal-model teardown below. */
-        hu_reaction_handler_set_reflection_db(crosstalk_db);
-    }
-#endif
+    /* Outbound stages whose data source lives outside the pipeline (crosstalk
+     * lookup, sensitive-disclosure protected values). See
+     * src/daemon/daemon_outbound_wiring.c; teardown counterpart below. */
+    hu_daemon_outbound_wiring_init(config, agent);
 
     /* Inject the LLM fact-extraction fallback into the personal model. The
      * regex fast-path misses casual/indirect text ("Did you not get the
@@ -14039,17 +14026,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
     /* Phase 1c teardown: detach the personal-model sinks. */
     hu_reaction_handler_set_personal_model(NULL);
     hu_daemon_imessage_observer_wire_personal_model(NULL);
-#ifdef HU_ENABLE_SQLITE
-    /* Sprint 60 follow-up teardown: clear the static crosstalk lookup
-     * BEFORE the SQLite memory is closed so the callback never sees a
-     * freed sqlite3 *. Idempotent — safe if registration didn't fire
-     * (e.g. agent->memory was non-SQLite). */
-    hu_outbound_crosstalk_unregister_sqlite();
-    /* T8 teardown: clear the reaction handler's reflection-db borrow
-     * before the SQLite memory closes so a late reaction never touches
-     * a freed handle. */
-    hu_reaction_handler_set_reflection_db(NULL);
-#endif
+    /* Runs BEFORE the SQLite memory closes and before config deinit — the
+     * registrations it clears borrow both. */
+    hu_daemon_outbound_wiring_teardown();
     hu_daemon_identity_graph_teardown();
     if (agent && agent->w14_scheduler) {
         hu_w14_scheduler_close(agent->w14_scheduler, alloc);

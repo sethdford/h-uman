@@ -788,6 +788,40 @@ typedef struct hu_hardware_config {
 
 #define HU_CONFIG_VERSION_CURRENT 2
 
+/* Owner's protected values — the outbound sensitive-disclosure gate's data
+ * source (src/agent/outbound/sensitive.c). Declared per CATEGORY: the key
+ * names the category, and the category determines the tier
+ * (hu_sensitive_category_default_tier), so a value can never be filed under a
+ * tier that contradicts its kind.
+ *
+ *   "privacy": {
+ *     "street_address": ["4341 34th St S"],          <- NEVER_SEND
+ *     "employer":       ["Vanguard"],                <- TRUST_GATED
+ *     "city":           ["St Petersburg"],           <- TRUST_GATED
+ *     "family_names":   ["Annette", "Emerson"],      <- TRUST_GATED
+ *     "financial":      ["1250000"]                  <- TRUST_GATED
+ *   }
+ *
+ * Empty by default. An empty set does NOT disable the gate: card / SSN /
+ * credential SHAPES need no declared value and are always checked. What an
+ * empty set disables is the street-address rule (which requires the owner's
+ * own value, so that "meet me at 200 Central Ave" is not blocked) and the
+ * trust-gated categories. The stage logs that once at startup.
+ *
+ * All strings arena-allocated by hu_config_load; freed with the arena. */
+typedef struct hu_privacy_config {
+    char **street_address;
+    size_t street_address_count;
+    char **employer;
+    size_t employer_count;
+    char **city;
+    size_t city_count;
+    char **family_names;
+    size_t family_names_count;
+    char **financial;
+    size_t financial_count;
+} hu_privacy_config_t;
+
 typedef struct hu_config {
     int config_version; /* schema version for migration; default 1 */
     char *workspace_dir;
@@ -861,6 +895,7 @@ typedef struct hu_config {
     hu_initiative_config_t initiative;
     hu_prompt_budget_config_t prompt_budget;
     hu_response_guard_config_t response_guard;
+    hu_privacy_config_t privacy; /* owner's protected values — outbound leak gate */
     char *auto_update;                    /* "off" (default), "check", or "apply" */
     uint32_t update_check_interval_hours; /* default 24; 0 = use default */
     hu_arena_t *arena;

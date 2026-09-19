@@ -11,6 +11,7 @@
 
 #include "human/daemon/daemon_shape.h"
 
+#include "human/agent/outbound_sensitive.h"
 #include "human/agent/style_governor.h"
 #include "human/context/conversation.h"
 #include "human/persona.h"
@@ -57,4 +58,22 @@ void hu_daemon_shape_text_inplace(hu_allocator_t *alloc, char **buf, size_t *len
     /* 5. Style governor — measured-shape enforcement; NO-OP unless
      * HU_STYLE_GOVERNOR=shadow/live. Only ever shrinks, so no headroom needed. */
     *len = hu_style_governor_apply_inplace(alloc, *buf, *len);
+
+    /* 6. Owner's-own-data disclosure gate — LAST, so it inspects exactly the
+     * bytes that will be sent (an earlier mutator could otherwise reshape text
+     * the gate had already cleared).
+     *
+     * This is the reactive path's ONLY route into the check: the pipeline
+     * stage (src/agent/outbound/sensitive.c) is never reached here, because
+     * this send path runs its own mutator chain instead of
+     * hu_outbound_pipeline_run. Wiring only the stage would have left the path
+     * that answers live inbound texts unprotected while the feature looked
+     * done — and reactive is also the one path with no `moderation` stage, so
+     * it had no card/SSN screen at all.
+     *
+     * DEFAULT SHADOW: logs what it would block, changes nothing, until
+     * HU_OUTBOUND_SENSITIVE=live. No LLM is reachable here, so a live block
+     * substitutes the deflection directly rather than regenerating. Only ever
+     * shrinks or replaces in place — no headroom needed. */
+    *len = hu_outbound_sensitive_apply_inplace(*buf, *len, *cap);
 }

@@ -1032,6 +1032,14 @@ set(HU_CORE_SOURCES
     src/agent/outbound/crosstalk_sqlite.c
     src/agent/outbound/persona.c
     src/agent/outbound/moderation.c
+    # 2026-07-30 — owner's-own-data disclosure gate. The outbound path had
+    # no check for SETH's OWN sensitive data leaving (response_guard screens
+    # AI-tells, crosstalk screens other contacts' content). Unconditional:
+    # no feature flag, so every variant build gets it.
+    src/agent/outbound/sensitive.c
+    # config -> protected-set adapter (same role crosstalk_sqlite.c plays for
+    # the crosstalk stage). Keeps sensitive.c free of any config dependency.
+    src/agent/outbound/sensitive_config.c
     src/agent/outbound/stats.c
     src/agent/burst_egress.c
     src/agent/multimodal_policy.c
@@ -1238,6 +1246,10 @@ set(HU_CORE_SOURCES
     src/interactions/choices.c
     src/daemon.c
     src/daemon/daemon_shape.c
+    # Outbound-stage data-source wiring lifted out of daemon.c (crosstalk
+    # lookup + sensitive-disclosure protected values). Internally guarded by
+    # #ifdef HU_ENABLE_SQLITE so this entry stays unconditional.
+    src/daemon/daemon_outbound_wiring.c
     src/daemon/daemon_comfort_summary.c
     src/daemon/daemon_maintenance.c
     src/daemon/daemon_lifecycle.c
@@ -3649,6 +3661,8 @@ tests/test_imessage_action_telemetry.c
     tests/test_outbound_persona_classifier.c
     # Sprint 59 Phase B — moderation stage (PII + violence/hate).
     tests/test_outbound_moderation.c
+    # 2026-07-30 — owner's-own-data disclosure gate (sensitive stage).
+    tests/test_outbound_sensitive.c
     # Sprint 59 Phase E — end-to-end corpus regression against 24 incident rows.
     tests/test_outbound_corpus_regression.c
     tests/test_outbound_stats.c

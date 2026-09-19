@@ -10,8 +10,7 @@ static bool ends_with(const char *s, size_t s_len, const char *suffix) {
     if (suffix_len > s_len)
         return false;
     for (size_t i = 0; i < suffix_len; i++) {
-        if (tolower((unsigned char)s[s_len - suffix_len + i]) !=
-            tolower((unsigned char)suffix[i]))
+        if (tolower((unsigned char)s[s_len - suffix_len + i]) != tolower((unsigned char)suffix[i]))
             return false;
     }
     return true;
@@ -31,12 +30,23 @@ static bool is_digit_run(const char *s, size_t len, size_t pos, size_t count) {
 /* ── S3 keyword detection (secrets, keys, credentials) ────────────────── */
 
 static const char *S3_KEYWORDS[] = {
-    "private key", "secret key", "api key", "ssh key",
-    "access token", "refresh token", "bearer token",
-    "password is", "my password", "the password",
-    "social security number", "bank account number",
-    "credit card number", "routing number",
-    "BEGIN RSA PRIVATE", "BEGIN EC PRIVATE", "BEGIN PRIVATE KEY",
+    "private key",
+    "secret key",
+    "api key",
+    "ssh key",
+    "access token",
+    "refresh token",
+    "bearer token",
+    "password is",
+    "my password",
+    "the password",
+    "social security number",
+    "bank account number",
+    "credit card number",
+    "routing number",
+    "BEGIN RSA PRIVATE",
+    "BEGIN EC PRIVATE",
+    "BEGIN PRIVATE KEY",
     "BEGIN OPENSSH PRIVATE",
 };
 #define S3_KEYWORD_COUNT (sizeof(S3_KEYWORDS) / sizeof(S3_KEYWORDS[0]))
@@ -44,13 +54,11 @@ static const char *S3_KEYWORDS[] = {
 /* ── S2 keyword detection (PII, semi-private) ─────────────────────────── */
 
 static const char *S2_KEYWORDS[] = {
-    "date of birth", "social security", "phone number",
-    "home address", "mailing address", "street address",
-    "bank account", "credit card", "debit card",
-    "driver's license", "drivers license", "passport number",
-    "medical record", "health insurance", "diagnosis",
-    "salary", "compensation", "pay stub", "tax return",
-    "my ssn", "my email is",
+    "date of birth",   "social security", "phone number",   "home address",     "mailing address",
+    "street address",  "bank account",    "credit card",    "debit card",       "driver's license",
+    "drivers license", "passport number", "medical record", "health insurance", "diagnosis",
+    "salary",          "compensation",    "pay stub",       "tax return",       "my ssn",
+    "my email is",
 };
 #define S2_KEYWORD_COUNT (sizeof(S2_KEYWORDS) / sizeof(S2_KEYWORDS[0]))
 
@@ -59,10 +67,8 @@ static const char *S2_KEYWORDS[] = {
 /* SSN pattern: 3 digits, separator, 2 digits, separator, 4 digits */
 static bool has_ssn_pattern(const char *msg, size_t len) {
     for (size_t i = 0; i + 10 < len; i++) {
-        if (is_digit_run(msg, len, i, 3) &&
-            (msg[i + 3] == '-' || msg[i + 3] == ' ') &&
-            is_digit_run(msg, len, i + 4, 2) &&
-            (msg[i + 6] == '-' || msg[i + 6] == ' ') &&
+        if (is_digit_run(msg, len, i, 3) && (msg[i + 3] == '-' || msg[i + 3] == ' ') &&
+            is_digit_run(msg, len, i + 4, 2) && (msg[i + 6] == '-' || msg[i + 6] == ' ') &&
             is_digit_run(msg, len, i + 7, 4)) {
             return true;
         }
@@ -92,12 +98,9 @@ static bool luhn_check(const int *digits, size_t count) {
 /* Credit card: 4 groups of 4 digits separated by spaces or dashes, Luhn-validated */
 static bool has_credit_card_pattern(const char *msg, size_t len) {
     for (size_t i = 0; i + 18 < len; i++) {
-        if (is_digit_run(msg, len, i, 4) &&
-            (msg[i + 4] == '-' || msg[i + 4] == ' ') &&
-            is_digit_run(msg, len, i + 5, 4) &&
-            (msg[i + 9] == '-' || msg[i + 9] == ' ') &&
-            is_digit_run(msg, len, i + 10, 4) &&
-            (msg[i + 14] == '-' || msg[i + 14] == ' ') &&
+        if (is_digit_run(msg, len, i, 4) && (msg[i + 4] == '-' || msg[i + 4] == ' ') &&
+            is_digit_run(msg, len, i + 5, 4) && (msg[i + 9] == '-' || msg[i + 9] == ' ') &&
+            is_digit_run(msg, len, i + 10, 4) && (msg[i + 14] == '-' || msg[i + 14] == ' ') &&
             is_digit_run(msg, len, i + 15, 4)) {
             int digits[16];
             size_t offsets[] = {0, 1, 2, 3, 5, 6, 7, 8, 10, 11, 12, 13, 15, 16, 17, 18};
@@ -150,9 +153,8 @@ static bool has_phone_pattern(const char *msg, size_t len) {
     while (i < len) {
         if (msg[i] == '+' || isdigit((unsigned char)msg[i])) {
             size_t digit_count = 0;
-            while (i < len && (isdigit((unsigned char)msg[i]) || msg[i] == '-' ||
-                               msg[i] == ' ' || msg[i] == '(' || msg[i] == ')' ||
-                               msg[i] == '+' || msg[i] == '.')) {
+            while (i < len && (isdigit((unsigned char)msg[i]) || msg[i] == '-' || msg[i] == ' ' ||
+                               msg[i] == '(' || msg[i] == ')' || msg[i] == '+' || msg[i] == '.')) {
                 if (isdigit((unsigned char)msg[i]))
                     digit_count++;
                 i++;
@@ -172,12 +174,97 @@ static bool has_private_key_header(const char *msg, size_t len) {
            hu_str_contains_ci_cstr(msg, len, "PRIVATE KEY-----");
 }
 
+/* ── Hard-secret shape helpers ────────────────────────────────────────── */
+
+/* Credential token prefixes with a minimum opaque-body length. A bare prefix
+ * is not enough — "sk-" appears in ordinary prose ("ask-me"), so we require a
+ * run of token-safe characters long enough that no English word qualifies. */
+typedef struct token_prefix {
+    const char *prefix;
+    size_t min_body; /* token-safe chars required after the prefix */
+    bool upper_only; /* AKIA-style keys are uppercase+digits */
+} token_prefix_t;
+
+static const token_prefix_t TOKEN_PREFIXES[] = {
+    {"sk-", 20, false},   /* OpenAI-style secret key */
+    {"ghp_", 20, false},  /* GitHub personal access token */
+    {"gho_", 20, false},  /* GitHub OAuth token */
+    {"xoxb-", 20, false}, /* Slack bot token */
+    {"xoxp-", 20, false}, /* Slack user token */
+    {"AKIA", 16, true},   /* AWS access key id */
+};
+#define TOKEN_PREFIX_COUNT (sizeof(TOKEN_PREFIXES) / sizeof(TOKEN_PREFIXES[0]))
+
+static bool token_body_char(unsigned char c, bool upper_only) {
+    if (upper_only)
+        return (c >= 'A' && c <= 'Z') || isdigit(c);
+    return isalnum(c) || c == '_' || c == '-';
+}
+
+/* True when a credential-shaped token appears. The prefix match is
+ * case-sensitive: these are literal wire formats, and lowercasing would make
+ * "AKIA" collide with ordinary words. */
+static bool has_api_token_shape(const char *msg, size_t len) {
+    for (size_t p = 0; p < TOKEN_PREFIX_COUNT; p++) {
+        const token_prefix_t *tp = &TOKEN_PREFIXES[p];
+        size_t plen = strlen(tp->prefix);
+        if (plen + tp->min_body > len)
+            continue;
+        for (size_t i = 0; i + plen + tp->min_body <= len; i++) {
+            if (memcmp(msg + i, tp->prefix, plen) != 0)
+                continue;
+            /* Must start at a word boundary, else "ask-" style substrings of
+             * longer identifiers would match. */
+            if (i > 0 && token_body_char((unsigned char)msg[i - 1], false))
+                continue;
+            size_t body = 0;
+            size_t j = i + plen;
+            while (j < len && token_body_char((unsigned char)msg[j], tp->upper_only)) {
+                body++;
+                j++;
+            }
+            if (body >= tp->min_body)
+                return true;
+        }
+    }
+    return false;
+}
+
+hu_hard_secret_kind_t hu_sensitivity_hard_secret_shape(const char *text, size_t len) {
+    if (!text || len == 0)
+        return HU_HARD_SECRET_NONE;
+    if (has_private_key_header(text, len))
+        return HU_HARD_SECRET_PRIVATE_KEY;
+    if (has_ssn_pattern(text, len))
+        return HU_HARD_SECRET_SSN;
+    if (has_credit_card_pattern(text, len))
+        return HU_HARD_SECRET_CARD;
+    if (has_api_token_shape(text, len))
+        return HU_HARD_SECRET_API_TOKEN;
+    return HU_HARD_SECRET_NONE;
+}
+
+const char *hu_sensitivity_hard_secret_kind_str(hu_hard_secret_kind_t kind) {
+    switch (kind) {
+    case HU_HARD_SECRET_NONE:
+        return "none";
+    case HU_HARD_SECRET_SSN:
+        return "ssn";
+    case HU_HARD_SECRET_CARD:
+        return "card";
+    case HU_HARD_SECRET_PRIVATE_KEY:
+        return "private_key";
+    case HU_HARD_SECRET_API_TOKEN:
+        return "api_token";
+    }
+    return "unknown";
+}
+
 /* ── S3 path patterns ─────────────────────────────────────────────────── */
 
 static const char *S3_PATH_SEGMENTS[] = {
-    ".ssh/",     ".env",      "credentials",
-    "id_rsa",    "id_dsa",    "id_ecdsa",  "id_ed25519",
-    ".gnupg/",   ".aws/",     "secrets/",  "vault/",
+    ".ssh/",      ".env",    "credentials", "id_rsa",   "id_dsa", "id_ecdsa",
+    "id_ed25519", ".gnupg/", ".aws/",       "secrets/", "vault/",
 };
 #define S3_PATH_SEGMENT_COUNT (sizeof(S3_PATH_SEGMENTS) / sizeof(S3_PATH_SEGMENTS[0]))
 
@@ -189,8 +276,7 @@ static const char *S3_PATH_EXTENSIONS[] = {
 /* ── S3 tool patterns ─────────────────────────────────────────────────── */
 
 static const char *S3_TOOL_SEGMENTS[] = {
-    "vault", "keychain", "credential", "secret",
-    "ssh", "gpg", "pgp",
+    "vault", "keychain", "credential", "secret", "ssh", "gpg", "pgp",
 };
 #define S3_TOOL_SEGMENT_COUNT (sizeof(S3_TOOL_SEGMENTS) / sizeof(S3_TOOL_SEGMENTS[0]))
 

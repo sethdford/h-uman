@@ -1418,6 +1418,35 @@ static hu_error_t parse_feeds(hu_allocator_t *a, hu_config_t *cfg, const hu_json
     return HU_OK;
 }
 
+/* privacy — the owner's protected values, consumed by the outbound
+ * sensitive-disclosure gate. Category-keyed: the JSON key names the category,
+ * and the tier is derived from it (see hu_privacy_config_t). Every key is
+ * optional; an absent block leaves all counts at 0, which keeps the
+ * shape-based card/SSN/credential checks running and the value-based
+ * street-address + trust-gated checks inactive. */
+static void parse_privacy(hu_allocator_t *a, hu_config_t *cfg, const hu_json_value_t *obj) {
+    if (!obj || obj->type != HU_JSON_OBJECT)
+        return;
+
+    struct {
+        const char *key;
+        char ***out;
+        size_t *out_count;
+    } fields[] = {
+        {"street_address", &cfg->privacy.street_address, &cfg->privacy.street_address_count},
+        {"employer", &cfg->privacy.employer, &cfg->privacy.employer_count},
+        {"city", &cfg->privacy.city, &cfg->privacy.city_count},
+        {"family_names", &cfg->privacy.family_names, &cfg->privacy.family_names_count},
+        {"financial", &cfg->privacy.financial, &cfg->privacy.financial_count},
+    };
+
+    for (size_t i = 0; i < sizeof(fields) / sizeof(fields[0]); i++) {
+        hu_json_value_t *arr = hu_json_object_get(obj, fields[i].key);
+        if (arr && arr->type == HU_JSON_ARRAY)
+            (void)parse_string_array(a, fields[i].out, fields[i].out_count, arr);
+    }
+}
+
 hu_error_t hu_config_parse_json(hu_config_t *cfg, const char *content, size_t len) {
     if (!cfg || !content)
         return HU_ERR_INVALID_ARGUMENT;
@@ -1712,6 +1741,10 @@ hu_error_t hu_config_parse_json(hu_config_t *cfg, const char *content, size_t le
     hu_json_value_t *agent_obj = hu_json_object_get(root, "agent");
     if (agent_obj)
         parse_agent(a, cfg, agent_obj);
+
+    hu_json_value_t *privacy_obj = hu_json_object_get(root, "privacy");
+    if (privacy_obj)
+        parse_privacy(a, cfg, privacy_obj);
 
     hu_json_value_t *behavior_obj = hu_json_object_get(root, "behavior");
     if (behavior_obj)
