@@ -47,6 +47,16 @@ hu_gate_mode_t hu_memory_loader_insight_mode(void);
 /* Test seam: force a mode; -1 reverts to reading the env. */
 void hu_memory_loader_set_insight_mode_for_test(int mode);
 
+/* Wiki head gate (HU_WIKI_HEAD off|shadow|live, default off): the budgeted
+ * head of the contact's nightly-compiled page (<state>/wiki/<contact>.md,
+ * scripts/consolidate_wiki.py) appended after the insights block. When LIVE
+ * the raw recall cap drops by the page's bytes (hu_wiki_recall_cap) so the
+ * prompt does not grow. Promote shadow→live only when prompt bytes/turn go
+ * DOWN (prompt_trim snapshot) and specificity_score.py is flat or up. */
+hu_gate_mode_t hu_memory_loader_wiki_mode(void);
+/* Test seam: force a mode; -1 reverts to reading the env. */
+void hu_memory_loader_set_wiki_mode_for_test(int mode);
+
 /* Bind the W7 facade for goal-conditioned planner recall (`hu_w12_planner_recall`).
  * Call after `hu_memory_loader_init` when `agent->w7_facade` is non-NULL; safe to
  * pass NULL to clear. Do not mutate `loader->facade` directly — keeps Phase-1 wiring

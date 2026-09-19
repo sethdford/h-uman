@@ -576,6 +576,20 @@ void hu_daemon_reactive_prompt_build(hu_allocator_t *alloc, hu_agent_t *agent,
                             if (prosp_str) {
                                 memcpy(prosp_str, prosp_buf, prosp_pos + 1);
                                 PHASE6_APPEND(prosp_str, prosp_pos);
+                                /* A reminder is surfaced once. Until 2026-09-13 nothing
+                                 * set fired=1 (949 live rows, 0 fired), so the same
+                                 * intentions re-injected on every matching text. The
+                                 * log line is the item-5 gate: count these, not rows. */
+                                size_t injected = prosp_count < 3 ? prosp_count : 3;
+                                if (hu_prospective_mark_fired(db, prosp_entries, injected) != HU_OK)
+                                    hu_log_warn("prospective", agent->observer,
+                                                "could not retire %zu surfaced triggers", injected);
+                                hu_log_info("prospective", agent->observer,
+                                            "fired %zu of %zu open triggers for %.*s: %s "
+                                            "(cue: %s)",
+                                            injected, prosp_count, (int)key_len, batch_key,
+                                            prosp_entries[0].action,
+                                            prosp_entries[0].trigger_value);
                             }
                         }
                         alloc->free(alloc->ctx, prosp_entries,

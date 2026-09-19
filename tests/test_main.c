@@ -424,6 +424,7 @@ void run_semantic_recall_register_tests(void);
 void run_embedder_http_tests(void);
 void run_w1_bitemporal_tests(void);
 void run_graph_state_tests(void);
+void run_wiki_page_tests(void);
 void run_w2_autodream_tests(void);
 void run_w3_multigraph_tests(void);
 void run_w4_verifier_tests(void);
@@ -1513,6 +1514,7 @@ int main(int argc, char **argv) {
     run_embedder_http_tests();
     run_w1_bitemporal_tests();
     run_graph_state_tests();
+    run_wiki_page_tests();
     run_w2_autodream_tests();
     run_w3_multigraph_tests();
     run_w4_verifier_tests();

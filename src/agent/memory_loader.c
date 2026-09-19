@@ -7,6 +7,7 @@
 #include "human/memory/personal_model.h"
 #include "human/memory/retrieval/adaptive.h"
 #include "human/memory/trust.h"
+#include "human/memory/wiki_page.h"
 #include <string.h>
 #include <time.h>
 #ifdef HU_ENABLE_SQLITE
@@ -56,6 +57,56 @@ hu_gate_mode_t hu_memory_loader_insight_mode(void) {
 
 void hu_memory_loader_set_insight_mode_for_test(int mode) {
     s_insight_mode_override = mode;
+}
+
+/* HU_WIKI_HEAD gate (better-than-human item 4). Default OFF; -1 = read env. */
+static int s_wiki_mode_override = -1;
+
+hu_gate_mode_t hu_memory_loader_wiki_mode(void) {
+    if (s_wiki_mode_override >= 0)
+        return (hu_gate_mode_t)s_wiki_mode_override;
+    return hu_gate_mode_from_env("HU_WIKI_HEAD", HU_GATE_OFF);
+}
+
+void hu_memory_loader_set_wiki_mode_for_test(int mode) {
+    s_wiki_mode_override = mode;
+}
+
+/* Budget for the page head: the compiler caps a page at 2 KB, so 1.2 KB is
+ * the "now / open threads / what I remember" top of it. When LIVE the raw
+ * recall cap drops by the same bytes (hu_wiki_recall_cap), which is the
+ * gate: prompt bytes per turn must go DOWN, specificity flat or up. */
+#define HU_WIKI_MAX_BYTES 1200
+
+static const char k_wiki_header[] =
+    "### Your page on them (compiled nightly from what you know; weave in, never recite):\n";
+
+static void append_contact_wiki(hu_memory_loader_t *loader, hu_gate_mode_t mode,
+                                const char *wiki_text, size_t wiki_len, const char *session_id,
+                                size_t session_id_len, char **out_context,
+                                size_t *out_context_len) {
+    if (mode == HU_GATE_OFF || !wiki_text || wiki_len == 0)
+        return;
+    static atomic_bool announced = false;
+    hu_log_info_once(&announced, "wiki-head", NULL,
+                     "wiki head active: mode=%s (set HU_WIKI_HEAD=off to disable)",
+                     mode == HU_GATE_LIVE ? "live" : "shadow");
+    if (mode == HU_GATE_SHADOW) {
+        hu_log_info("wiki-head", NULL,
+                    "shadow: would add %zu bytes of page head for %.*s (prompt unchanged)",
+                    wiki_len, (int)session_id_len, session_id);
+        return;
+    }
+    const size_t hdr_len = sizeof(k_wiki_header) - 1;
+    size_t block_len = hdr_len + wiki_len;
+    char *block = (char *)loader->alloc->alloc(loader->alloc->ctx, block_len + 1);
+    if (!block)
+        return;
+    memcpy(block, k_wiki_header, hdr_len);
+    memcpy(block + hdr_len, wiki_text, wiki_len);
+    block[block_len] = '\0';
+    append_section(loader, out_context, out_context_len, block, block_len);
+    loader->alloc->free(loader->alloc->ctx, block, block_len + 1);
 }
 
 /* Budget for the insights block: 8 short notes, under 1 KB. With the 24 KB
@@ -186,6 +237,10 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
     hu_memory_entry_t *entries = NULL;
     size_t count = 0;
     hu_error_t err;
+    /* Wiki head (HU_WIKI_HEAD): read once, appended last, freed at the end. */
+    hu_gate_mode_t wiki_mode = hu_memory_loader_wiki_mode();
+    char *wiki_text = NULL;
+    size_t wiki_len = 0;
 
     if (loader->retrieval_engine && loader->retrieval_engine->ctx &&
         loader->retrieval_engine->vtable) {
@@ -381,6 +436,20 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
     } else {
         return HU_OK;
     }
+    /* Wiki head: read here, after every early return above, so nothing leaks
+     * and an empty recall still carries the page. A LIVE page pays for
+     * itself: the raw recall cap drops by the page's bytes so the prompt
+     * gets no bigger (the gate in memory_loader.h). */
+    if (wiki_mode != HU_GATE_OFF && session_id && session_id_len > 0 &&
+        hu_wiki_page_read(loader->alloc, session_id, session_id_len, HU_WIKI_MAX_BYTES, &wiki_text,
+                          &wiki_len) != HU_OK) {
+        wiki_text = NULL;
+        wiki_len = 0;
+    }
+    const size_t recall_cap = wiki_mode == HU_GATE_LIVE
+                                  ? hu_wiki_recall_cap(loader->max_context_chars, wiki_len)
+                                  : loader->max_context_chars;
+
     if (!entries || count == 0)
         goto supplement;
 
@@ -392,7 +461,7 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
     }
 
     size_t total_len = 0;
-    for (size_t i = 0; i < count && total_len < loader->max_context_chars; i++) {
+    for (size_t i = 0; i < count && total_len < recall_cap; i++) {
         const hu_memory_entry_t *e = &entries[i];
 
         /* SOTA-2026 init-09 sec 2.9: trust gate.
@@ -433,8 +502,8 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
         /* Format: ### Memory: {key}\n{content}\n(stored: {timestamp})\n\n */
         size_t overhead = 26 + key_len + timestamp_len;
         size_t block_len = overhead + content_len;
-        if (total_len + block_len > loader->max_context_chars) {
-            size_t remain = loader->max_context_chars - total_len;
+        if (total_len + block_len > recall_cap) {
+            size_t remain = recall_cap - total_len;
             if (remain <= overhead)
                 break;
             content_len = remain - overhead;
@@ -518,5 +587,10 @@ supplement:
      * reads them closest to the guard tail. */
     if (err == HU_OK && session_id && session_id_len > 0)
         append_contact_insights(loader, session_id, session_id_len, out_context, out_context_len);
+    if (err == HU_OK && session_id && session_id_len > 0)
+        append_contact_wiki(loader, wiki_mode, wiki_text, wiki_len, session_id, session_id_len,
+                            out_context, out_context_len);
+    if (wiki_text)
+        loader->alloc->free(loader->alloc->ctx, wiki_text, wiki_len + 1);
     return err;
 }
