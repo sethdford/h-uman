@@ -112,9 +112,8 @@ static void append_contact_wiki(hu_memory_loader_t *loader, hu_gate_mode_t mode,
 /* Budget for the insights block: 8 short notes, under 1 KB. With the 24 KB
  * prompt budget this fits beside recall (~1.6 KB) and the personal model
  * (~2.1 KB) without trimming on an ordinary turn. */
-#define HU_INSIGHT_MAX_ITEMS      8
-#define HU_INSIGHT_MAX_BYTES      900
-#define HU_INSIGHT_MIN_CONFIDENCE 0.5
+/* HU_INSIGHT_MAX_ITEMS / MAX_BYTES / MIN_CONFIDENCE live in memory_loader.h so
+ * the overuse scan (daemon_insight_overuse.c) re-renders exactly this block. */
 
 #ifdef HU_ENABLE_SQLITE /* only the SQLite build renders the block (see below) */
 static const char k_insight_header[] =
