@@ -27,6 +27,7 @@
 
 #include "human/ml/cli_dpo.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 #include "human/ml/dpo.h"
 #include "human/ml/rl_trainer.h"
 #include "human/provider.h"
@@ -305,6 +306,7 @@ hu_error_t hu_ml_cli_dpo_real(hu_allocator_t *alloc, int argc, const char **argv
          * legacy rows — see src/ml/dpo.c::hu_dpo_export and
          * docs/plans/2026-05-19-dpo-corpus-inverted.md). Copy up to
          * 256 rows into the stack array used by the training loop. */
+        /* Kept: the guard owns the "HOME not set" diagnostic; the helper below fails silently. */
         const char *home = getenv("HOME");
         if (!home || !*home) {
             fprintf(stderr, "[dpo-train] HOME not set; cannot find memory.db\n");
@@ -312,7 +314,7 @@ hu_error_t hu_ml_cli_dpo_real(hu_allocator_t *alloc, int argc, const char **argv
             return HU_ERR_IO;
         }
         char db_path[1024];
-        snprintf(db_path, sizeof(db_path), "%s/.human/memory.db", home);
+        hu_paths_state(db_path, sizeof(db_path), "memory.db");
         sqlite3 *db = NULL;
         if (sqlite3_open(db_path, &db) != SQLITE_OK) {
             fprintf(stderr, "[dpo-train] failed to open %s: %s\n", db_path,

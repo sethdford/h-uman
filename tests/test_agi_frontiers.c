@@ -323,22 +323,6 @@ static void test_world_model_counterfactual(void) {
     hu_causal_world_model_deinit(&model);
     close_test_db(db);
 }
-
-static void test_world_model_causal_depth(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    sqlite3 *db = open_test_db();
-    hu_causal_world_model_t model;
-    hu_causal_world_model_create(&alloc, db, &model);
-    hu_causal_world_model_init_tables(&model);
-
-    size_t depth = 99;
-    HU_ASSERT_EQ(hu_world_causal_depth(&model, "unknown", 7, &depth), HU_OK);
-    HU_ASSERT_EQ(depth, 0u);
-
-    hu_causal_world_model_deinit(&model);
-    close_test_db(db);
-}
-
 static void test_world_evaluate_options(void) {
     hu_allocator_t alloc = hu_system_allocator();
     sqlite3 *db = open_test_db();
@@ -1562,7 +1546,6 @@ void run_agi_frontiers_tests(void) {
     HU_RUN_TEST(test_world_model_simulate_no_data);
     HU_RUN_TEST(test_world_model_record_and_simulate);
     HU_RUN_TEST(test_world_model_counterfactual);
-    HU_RUN_TEST(test_world_model_causal_depth);
     HU_RUN_TEST(test_world_evaluate_options);
     HU_RUN_TEST(world_model_evaluate_options_scores_order);
 

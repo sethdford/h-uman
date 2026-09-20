@@ -167,7 +167,7 @@ static hu_error_t compose_canned(const char *reply, char *out, size_t cap) {
     s_canned = reply;
     s_canned_err = HU_OK;
     hu_followup_compose_set_llm_for_test(canned_llm, NULL);
-    hu_error_t err = hu_followup_compose_text(NULL, NULL, NULL, "imessage", "d", out, cap);
+    hu_error_t err = hu_followup_compose_text(NULL, NULL, NULL, "m", 1, "imessage", "d", out, cap);
     hu_followup_compose_set_llm_for_test(NULL, NULL);
     return err;
 }
@@ -216,19 +216,38 @@ static void compose_propagates_provider_error(void) {
     s_canned = "unused";
     s_canned_err = HU_ERR_PROVIDER_RESPONSE;
     hu_followup_compose_set_llm_for_test(canned_llm, NULL);
-    hu_error_t err = hu_followup_compose_text(NULL, NULL, NULL, "imessage", "d", out, sizeof(out));
+    hu_error_t err =
+        hu_followup_compose_text(NULL, NULL, NULL, "m", 1, "imessage", "d", out, sizeof(out));
     hu_followup_compose_set_llm_for_test(NULL, NULL);
     s_canned_err = HU_OK;
     HU_ASSERT_EQ((int)err, (int)HU_ERR_PROVIDER_RESPONSE);
     HU_ASSERT_EQ(out[0], '\0');
 }
 
+/* The contract behind the :8741-down 404. A NULL/empty model used to reach the
+ * provider, where Gemini interpolated it into `.../models/:generateContent`.
+ * Asserted at the seam so it holds without any provider in the loop. */
+static void compose_rejects_empty_model_before_reaching_provider(void) {
+    char out[HU_FOLLOWUP_COMPOSE_MAX];
+    s_canned = "would have been fine";
+    s_canned_err = HU_OK;
+    hu_followup_compose_set_llm_for_test(canned_llm, NULL);
+    hu_error_t e1 =
+        hu_followup_compose_text(NULL, NULL, NULL, NULL, 0, "imessage", "d", out, sizeof(out));
+    hu_error_t e2 =
+        hu_followup_compose_text(NULL, NULL, NULL, "", 0, "imessage", "d", out, sizeof(out));
+    hu_followup_compose_set_llm_for_test(NULL, NULL);
+    HU_ASSERT_EQ((int)e1, (int)HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ((int)e2, (int)HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(out[0], '\0');
+}
+
 static void compose_rejects_empty_directive(void) {
     char out[HU_FOLLOWUP_COMPOSE_MAX];
-    HU_ASSERT_TRUE(hu_followup_compose_text(NULL, NULL, NULL, "imessage", "", out, sizeof(out)) !=
-                   HU_OK);
-    HU_ASSERT_TRUE(hu_followup_compose_text(NULL, NULL, NULL, "imessage", NULL, out, sizeof(out)) !=
-                   HU_OK);
+    HU_ASSERT_TRUE(hu_followup_compose_text(NULL, NULL, NULL, "m", 1, "imessage", "", out,
+                                            sizeof(out)) != HU_OK);
+    HU_ASSERT_TRUE(hu_followup_compose_text(NULL, NULL, NULL, "m", 1, "imessage", NULL, out,
+                                            sizeof(out)) != HU_OK);
 }
 
 /* ── End-to-end policy: a rejected compose must not send the template ──── */
@@ -266,6 +285,7 @@ void run_followup_compose_tests(void) {
     HU_RUN_TEST(compose_rejects_empty_and_whitespace_only);
     HU_RUN_TEST(compose_rejects_overlong_rather_than_truncating);
     HU_RUN_TEST(compose_propagates_provider_error);
+    HU_RUN_TEST(compose_rejects_empty_model_before_reaching_provider);
     HU_RUN_TEST(compose_rejects_empty_directive);
     HU_RUN_TEST(rejected_compose_at_live_yields_no_send);
 }

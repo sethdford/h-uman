@@ -192,6 +192,13 @@ else()
 endif()
 option(HU_ENABLE_LIBSODIUM "Link libsodium for production-grade AEAD (XChaCha20-Poly1305) and KDF (Argon2id)" OFF)
 option(HU_ENABLE_COREML "Enable CoreML/MLX provider (macOS only)" OFF)
+# Two finished features that no build could turn on until 2026-09-12: the
+# macros were tested in src/ but defined by no option.
+option(HU_ENABLE_VISION_OCR "Apple Vision OCR bridge for the vision_ocr tool (macOS only)" OFF)
+option(HU_ENABLE_VOICE_VAD_TIMING "Randomised 200-500 ms filler-to-reply delay on voice channels" OFF)
+if(HU_ENABLE_VOICE_VAD_TIMING)
+    add_compile_definitions(HU_ENABLE_VOICE_VAD_TIMING=1)
+endif()
 if(APPLE)
     option(HU_ENABLE_APPLE_INTELLIGENCE "Enable Apple Intelligence provider (on-device)" ON)
 else()
@@ -571,6 +578,8 @@ set(HU_CORE_SOURCES
     src/core/gate_mode.c
     src/core/arena.c
     src/core/string.c
+    src/core/tokens.c
+    src/core/paths.c
     src/core/io_secure.c
     src/core/file.c
     src/core/json.c
@@ -639,6 +648,7 @@ set(HU_CORE_SOURCES
     src/doctor/check_log_hygiene.c
     src/doctor/check_imessage_cursor.c
     src/doctor/check_blind_ab_gate.c
+    src/doctor/check_persona_integrity.c
     # Read-only chat.db cursor repo: self-guarded on HU_ENABLE_SQLITE (returns
     # NOT_SUPPORTED without it) so the imessage_cursor doctor check always links.
     src/memory/repos/chatdb_cursor_repo_sqlite.c
@@ -1017,6 +1027,7 @@ set(HU_CORE_SOURCES
     # src/daemon.c (9 sites). See docs/plans/2026-05-10-memory-v2-roadmap-overview.md.
     src/memory/graph.c
     src/memory/graph_state.c
+    src/memory/wiki_page.c
     src/memory/graph_ingest.c
     src/memory/agent_facts.c
     src/memory/semantic_recall.c
@@ -1147,7 +1158,6 @@ set(HU_CORE_SOURCES
     src/memory/connections.c
     src/memory/knowledge.c
     src/memory/cognitive.c
-    src/memory/deep_memory.c
     src/memory/rag_pipeline.c
     src/memory/compression.c
     src/visual/content.c
@@ -1254,6 +1264,7 @@ set(HU_CORE_SOURCES
     src/channels/behavior_class.c
     src/channels/rate_limit.c
     src/channels/channel_embed.c
+    src/channels/channel_mock.c
     src/channels/channel_http.c
     src/channels/webhook.c
     src/security/policy_engine.c
@@ -1295,7 +1306,11 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_proactive_policy.c
     src/daemon/daemon_follow_up_watcher.c
     src/daemon/daemon_followup_sched.c
+    src/daemon/daemon_voice_reply.c
+    src/daemon/daemon_rich_media.c
+    src/daemon/daemon_housekeeping.c
     src/daemon/daemon_promise_keeper.c
+    src/daemon/daemon_insight_overuse.c
     src/daemon/cron.c
     src/daemon/crontab.c
     src/gateway/webhook.c
@@ -1510,7 +1525,9 @@ endif()
 # symbols unconditionally).  ~138 KB added to release binary.
 list(APPEND HU_CORE_SOURCES
     src/persona/persona.c
+    src/persona/card_file.c
     src/persona/style_card.c
+    src/persona/emotion_card.c
     src/persona/pacing.c
     src/persona/render.c
     src/persona/terseness.c
@@ -1667,7 +1684,9 @@ if(HU_ENABLE_SQLITE)
         src/memory/repos/celebration_repo_sqlite.c
         src/memory/repos/emotional_residue_repo_sqlite.c
         src/memory/repos/feed_items_repo_sqlite.c
+        src/memory/repos/forgetting_repo_sqlite.c
         src/memory/repos/memories_repo_sqlite.c
+        src/memory/repos/contact_insights_repo_sqlite.c
         src/memory/repos/opinions_repo_sqlite.c
         src/memory/repos/life_chapter_repo_sqlite.c
         src/memory/repos/proactive_decisions_repo_sqlite.c
@@ -2101,6 +2120,16 @@ if(APPLE)
     target_link_libraries(human_core PRIVATE "-framework ApplicationServices" "-framework ImageIO" "-framework Accelerate" "-framework IOKit" "-framework CoreFoundation")
     # New CBLAS headers; avoids -Wdeprecated-declarations on cblas_sgemm (macOS 13.3+).
     target_compile_definitions(human_core PRIVATE ACCELERATE_NEW_LAPACK=1)
+endif()
+if(HU_ENABLE_VISION_OCR)
+    if(APPLE)
+        enable_language(OBJC)
+        target_sources(human_core PRIVATE src/tools/vision_ocr_apple.m)
+        target_compile_definitions(human_core PRIVATE HU_ENABLE_VISION_OCR=1)
+        target_link_libraries(human_core PRIVATE "-framework Vision" "-framework AppKit" "-framework Foundation")
+    else()
+        message(WARNING "HU_ENABLE_VISION_OCR=ON has no effect off macOS (Apple Vision framework)")
+    endif()
 endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_package(X11 QUIET)
@@ -2864,11 +2893,17 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "MinSizeRel"
         target_compile_options(human PRIVATE -fvisibility=hidden)
         target_compile_options(human_core PRIVATE -fvisibility=hidden)
     endif()
-    if(APPLE)
-        set_target_properties(human PROPERTIES LINK_FLAGS "-Wl,-dead_strip")
-    elseif(UNIX)
-        set_target_properties(human PROPERTIES LINK_FLAGS "-Wl,--gc-sections")
-    endif()
+endif()
+
+# Dead-strip the product binary in EVERY build type. The 2026-09-10 review
+# found 1,038 exported functions unreachable from main() shipping in the
+# deployed daemon because only Release builds stripped them, while prod is
+# built from the dev preset. human_core already compiles with
+# -ffunction-sections, so this is free.
+if(APPLE)
+    set_target_properties(human PROPERTIES LINK_FLAGS "-Wl,-dead_strip")
+elseif(UNIX)
+    set_target_properties(human PROPERTIES LINK_FLAGS "-Wl,--gc-sections")
 endif()
 
 # --- Strip MinSizeRel binary (macOS: -x to preserve local syms, Linux: full strip) ---
@@ -3339,6 +3374,8 @@ set(HU_TEST_SOURCES
     tests/test_lora_subprocess.c
     tests/test_persona_overlay_render.c
     tests/test_style_card.c
+    tests/test_card_file.c
+    tests/test_emotion_card.c
     tests/test_terseness.c
     # test_channel_overlay_apply.c — moved to gated block (needs both
     # HU_HAS_IMESSAGE + HU_ENABLE_TELEGRAM since it calls
@@ -3363,6 +3400,7 @@ set(HU_TEST_SOURCES
     tests/test_trust_calibration.c
     tests/test_vision_ocr.c
     tests/test_channel_embeds.c
+    tests/test_channel_mock.c
     tests/test_declarative_tools.c
     tests/test_skill_trust.c
     tests/test_agent_modules.c
@@ -3387,6 +3425,7 @@ set(HU_TEST_SOURCES
     tests/test_init_dpo_bridge.c
     tests/test_prompt_budget.c
     tests/test_prompt_budget_snapshot.c
+    tests/test_daemon_maintenance.c
     tests/test_silent_disable_compliance.c
     tests/test_io_secure.c
     tests/test_file_slurp.c
@@ -3460,6 +3499,7 @@ set(HU_TEST_SOURCES
     tests/test_daemon_proactive.c
     tests/test_reply_delay_model.c
     tests/test_daemon_promise_keeper.c
+    tests/test_daemon_insight_overuse.c
     tests/test_daemon_config_reload.c
     tests/test_daemon_identity_graph.c
     tests/test_daemon_reply_fallback.c
@@ -3574,6 +3614,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_security_extended.c
     tests/test_security_pipeline.c
     tests/test_core_extended.c
+    tests/test_paths.c
     tests/test_gateway_extended.c
     tests/test_gateway_voice.c
     tests/test_gateway_hula_traces.c
@@ -3587,6 +3628,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_doctor_registry.c
     tests/test_doctor_chatdb.c
     tests/test_doctor_prompt_budget.c
+    tests/test_check_persona_integrity.c
     tests/test_check_eval_freshness.c
     tests/test_check_serving_stability.c
     tests/test_check_log_hygiene.c
@@ -3668,6 +3710,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_embedder_http.c
     tests/test_w1_bitemporal.c
     tests/test_graph_state.c
+    tests/test_wiki_page.c
     tests/test_w2_autodream.c
     tests/test_w3_multigraph.c
     tests/test_w4_verifier.c
@@ -3727,6 +3770,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_multimodal_policy.c
     tests/test_persona_eval.c
     tests/test_persona_refresh.c
+    tests/test_persona_creator_preserve.c
     tests/test_persona_rag.c
     tests/test_agent.c
     tests/test_agent_turn_state.c
@@ -3786,15 +3830,12 @@ tests/test_imessage_action_telemetry.c
     tests/test_salience.c
     tests/test_planning.c
     tests/test_rel_dynamics.c
-    tests/test_prospective.c
-    tests/test_prospective_memory.c
     tests/test_emotional_residue.c
     tests/test_consolidation_engine.c
     tests/test_conv_goals.c
     tests/test_knowledge.c
     tests/test_usage.c
     tests/test_cognitive.c
-    tests/test_deep_memory.c
     tests/test_compression.c
     tests/test_proactive_ext.c
     tests/test_degradation.c
@@ -3932,11 +3973,11 @@ if(HU_ENABLE_CURL)
 endif()
 
 list(APPEND HU_TEST_SOURCES tests/test_memory_features.c)
-list(APPEND HU_TEST_SOURCES tests/test_agi_frontiers.c tests/test_world_model_graph.c tests/test_mcts_planner.c)
+list(APPEND HU_TEST_SOURCES tests/test_agi_frontiers.c tests/test_mcts_planner.c)
 list(APPEND HU_TEST_SOURCES tests/test_orchestrator.c)
 list(APPEND HU_TEST_SOURCES tests/test_swarm_execution.c tests/test_dynamic_decomposition.c)
 list(APPEND HU_TEST_SOURCES tests/test_agent_matching.c tests/test_agent_communication.c)
-list(APPEND HU_TEST_SOURCES tests/test_world_simulation.c tests/test_world_context.c)
+list(APPEND HU_TEST_SOURCES tests/test_world_simulation.c)
 list(APPEND HU_TEST_SOURCES tests/test_agent_registry.c)
 list(APPEND HU_TEST_SOURCES tests/test_pwa.c)
 list(APPEND HU_TEST_SOURCES tests/test_integration.c)
@@ -4038,6 +4079,7 @@ if(HU_ENABLE_SQLITE)
     list(APPEND HU_TEST_SOURCES tests/test_celebration_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_feed_items_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_memories_repo.c)
+    list(APPEND HU_TEST_SOURCES tests/test_contact_insights_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_emotional_moments_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_emotional_residue_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_emotional_state_repo.c)
@@ -4095,6 +4137,9 @@ list(APPEND HU_TEST_SOURCES
     tests/test_persona_head_gate.c
     tests/test_state_file.c
     tests/test_daemon_followup_sched.c
+    tests/test_daemon_rich_media.c
+    tests/test_daemon_voice_reply.c
+    tests/test_prospective.c
     tests/test_eval_score.c
     tests/test_corrective_rag.c
     tests/test_adaptive_rag.c
@@ -4117,6 +4162,7 @@ list(APPEND HU_TEST_SOURCES
     # on the molora-daemon-wiring track; this de-registration unblocks the
     # configure step (the file no longer exists on disk).
     tests/test_contact_send_recency.c
+    tests/test_contact_send_recency_daemon.c
     # NOTE: 3 test files briefly registered during the PR #115 merge-
     # conflict resolution to satisfy linker refs from test_main.c are
     # de-registered here. All three were ghost-tests: present in

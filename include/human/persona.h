@@ -613,6 +613,12 @@ hu_error_t hu_persona_build_prompt_compact_immersive(hu_allocator_t *alloc,
  * Returns HU_OK on success with *out_len set; HU_ERR_INVALID_ARGUMENT
  * on NULL buf or zero cap; HU_ERR_OUT_OF_MEMORY if the static block
  * would exceed cap. */
+/* Buffer size callers hand hu_persona_build_absolute_rules(_fmt). Sized for
+ * the base rules plus BOTH measured rules (14 emotional, 15 substantive) with
+ * headroom; the builder degrades (drops 15, then 14) rather than failing when
+ * a caller passes less. 2026-09-13: both live overflowed the old 2048. */
+#define HU_PERSONA_RULES_BUF 3072
+
 hu_error_t hu_persona_build_absolute_rules(const hu_persona_t *persona, char *buf, size_t cap,
                                            size_t *out_len);
 
@@ -1001,5 +1007,11 @@ hu_error_t hu_persona_refresh_example_banks(hu_allocator_t *alloc, const char *p
 /* Pure cadence predicate for the daemon persona-refresh tick: run when enabled
  * AND (never run before OR ≥24h since last run). */
 bool hu_persona_refresh_should_run(bool enabled, int64_t now_unix, int64_t last_run_unix);
+
+/* Pure cadence predicate for the per-turn style reanalyze in agent_turn.c:
+ * gated on the SAME learning.persona_refresh_enabled switch as the daemon
+ * refresh tick (both persist the persona through the struct-only writer), then
+ * every 10 turns up to 20, every 25 up to 100, every 50 after. Never at 0. */
+bool hu_persona_style_reanalyze_due(bool enabled, size_t history_count);
 
 #endif /* HU_PERSONA_H */

@@ -1,4 +1,5 @@
 #include "human/channels/imessage_action.h"
+#include "human/core/paths.h"
 #include <math.h>
 #include <stddef.h>
 
@@ -179,10 +180,7 @@ static int resolve_log_dir(char *out, size_t out_cap) {
         int n = snprintf(out, out_cap, "%s", env_dir);
         return (n > 0 && (size_t)n < out_cap) ? 0 : -1;
     }
-    const char *home = getenv("HOME");
-    if (!home || !home[0])
-        return -1;
-    int n = snprintf(out, out_cap, "%s/.human/logs", home);
+    int n = hu_paths_state(out, out_cap, "logs");
     return (n > 0 && (size_t)n < out_cap) ? 0 : -1;
 }
 

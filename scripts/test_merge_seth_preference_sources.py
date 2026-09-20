@@ -545,3 +545,57 @@ def _run_all():
 
 if __name__ == "__main__":
     sys.exit(_run_all())
+
+
+# ---------------------------------------------------------------------------
+# valid.jsonl + config.yaml (2026-09-06: the merged corpus was not trainable
+# as-is -- train-glm-adapter.sh requires valid.jsonl and a config whose data:
+# line points at the directory)
+# ---------------------------------------------------------------------------
+import merge_seth_preference_sources as msps  # noqa: E402
+
+
+def test_split_valid_rows_is_deterministic_disjoint_and_content_keyed():
+    rows = [{"prompt": f"p{i}", "chosen": f"c{i}", "rejected": f"r{i}"} for i in range(400)]
+    v1, t1 = msps.split_valid_rows(rows, 0.1)
+    v2, t2 = msps.split_valid_rows(list(reversed(rows)), 0.1)
+    assert v1 and t1 and len(v1) + len(t1) == 400
+    assert {json.dumps(r, sort_keys=True) for r in v1} == {json.dumps(r, sort_keys=True) for r in v2}
+    assert not {json.dumps(r, sort_keys=True) for r in v1} & {json.dumps(r, sort_keys=True) for r in t1}
+    assert msps.split_valid_rows(rows, 0) == ([], rows)
+
+
+def test_render_config_rewrites_only_the_data_line():
+    with tempfile.TemporaryDirectory() as d:
+        tpl = os.path.join(d, "t.yaml")
+        with open(tpl, "w") as fh:
+            fh.write("model: m\n# data: not this one\ndata: /old/dir\niters: 400\n")
+        out = msps.render_config(tpl, "/new/dir")
+        assert "data: /new/dir\n" in out and "/old/dir" not in out and "iters: 400" in out
+        with open(tpl, "w") as fh:
+            fh.write("model: m\niters: 400\n")
+        try:
+            msps.render_config(tpl, "/new/dir")
+            assert False, "expected refusal"
+        except SystemExit as e:
+            assert "no 'data:' line" in str(e)
+
+
+def test_cli_writes_valid_and_config_and_manifest_counts():
+    with tempfile.TemporaryDirectory() as d:
+        primary, rejected_pool = _write_40x40_fixture(d)
+        tpl = os.path.join(d, "t.yaml")
+        with open(tpl, "w") as fh:
+            fh.write("model: m\ndata: /old\niters: 4\n")
+        out_dir = os.path.join(d, "out")
+        proc = _run(["--primary", primary, "--rejected-pool", rejected_pool, "--out-dir", out_dir,
+                     "--floor", "1", "--valid-frac", "0.2", "--config-template", tpl])
+        assert proc.returncode == 0, proc.stderr
+        train = [json.loads(l) for l in open(os.path.join(out_dir, "train.jsonl"))]
+        valid = [json.loads(l) for l in open(os.path.join(out_dir, "valid.jsonl"))]
+        man = json.load(open(os.path.join(out_dir, "manifest.json")))
+        assert valid and man["n_valid"] == len(valid)
+        assert len(train) + len(valid) == man["pairing"]["n_paired_rows"]
+        assert man["config_path"].endswith("config.yaml")
+        assert f"data: {os.path.abspath(out_dir)}\n" in open(man["config_path"]).read()
+        assert _validate_via_mlx_tune_train(out_dir)["ok"]

@@ -271,6 +271,13 @@ def has_emoji(text: str) -> bool:
     return any(is_emoji_char(ch) for ch in text)
 
 
+def has_dash(text: str) -> bool:
+    """Em or en dash (U+2014 / U+2013). The persona's own texts: 0/954
+    (2026-09-13); the model's substantive replies: 62–96%. The outbound
+    strip stage normalizes them to a comma on that measurement."""
+    return "\u2014" in text or "\u2013" in text
+
+
 def word_tokens(text: str):
     """Lowercased alphabetic word tokens (apostrophes kept, for contraction
     matching), digits and punctuation-only tokens dropped."""
@@ -314,6 +321,7 @@ def compute_features(text: str) -> dict:
         "terminal_period": 1.0 if term == "period" else 0.0,
         "terminal_ellipsis": 1.0 if term == "ellipsis" else 0.0,
         "has_emoji": 1.0 if has_emoji(text) else 0.0,
+        "has_dash": 1.0 if has_dash(text) else 0.0,
         "contractions_per_100_words": contractions_per_100_words(text),
         "first_person_plural_per_100_words": first_person_plural_per_100_words(text),
         "warmth_hits_per_100_words": warmth_hits_per_100_words(text),
@@ -332,6 +340,7 @@ AXES = [
     ("terminal_question", "question_rate"),
     ("terminal_exclaim", "exclamation_rate"),
     ("has_emoji", "emoji_rate"),
+    ("has_dash", "dash_rate"),
     ("contractions_per_100_words", "formality_contractions_per_100_words"),
     ("first_person_plural_per_100_words", "formality_first_person_plural_per_100_words"),
     ("warmth_hits_per_100_words", "warmth_hits_per_100_words"),

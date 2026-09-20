@@ -13,6 +13,17 @@
 # includes — when they land, lower the matching BASELINE (to 0) to lock it.
 set -euo pipefail
 
+# Auto-lock any gain so it can never be spent again (scripts/ratchet-config.tsv).
+# Sourced defensively: this gate must keep working — and keep BLOCKING growth —
+# even in a tree where the helper is absent, so a missing helper degrades to
+# "no auto-lock" rather than to "commit refused".
+_hu_root="$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
+if [ -r "$_hu_root/scripts/lib/ratchet.sh" ]; then
+    . "$_hu_root/scripts/lib/ratchet.sh"
+else
+    ratchet_autolock() { :; }
+fi
+
 # Measured 2026-05-29 at the start of Phase 0.
 FACTORY_BASELINE=4   # Phase 4 (provider injection) drives this to 0.
 MEMCMP_BASELINE=0    # Phase 1 landed: channel memcmp removed from agent core.
@@ -26,12 +37,14 @@ fail=0
 fac=$({ grep -rln '#include "human/providers/factory.h"' src/agent 2>/dev/null || true; } \
   | wc -l | tr -d ' ')
 echo "agent/ provider-factory includes: $fac (ceiling $FACTORY_BASELINE)"
+ratchet_autolock FACTORY_BASELINE "${fac}" "scripts/check-agent-core-boundary.sh"
 if [ "$fac" -gt "$FACTORY_BASELINE" ]; then
   echo "FAIL: new direct provider-factory include in agent core. Inject the" >&2
   echo "      provider vtable instead of instantiating via the factory:" >&2
   grep -rln '#include "human/providers/factory.h"' src/agent >&2
   fail=1
 elif [ "$fac" -lt "$FACTORY_BASELINE" ]; then
+  [ "${HU_RATCHET_LOCKED:-0}" = 1 ] || \
   echo "NOTE: factory includes dropped — lower FACTORY_BASELINE to $fac." >&2
 fi
 

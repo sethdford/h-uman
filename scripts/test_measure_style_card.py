@@ -32,6 +32,7 @@ def synthetic_corpus(n=400):
       i % 20 == 2  -> ends with "!"     ( 5%)   [exclaim]
       everything else has no terminal punctuation -> 60%
       i % 8 == 3   -> contains an emoji (12.5%)
+      i % 40 == 7  -> contains an em-dash (2.5%)
     """
     out = []
     for i in range(n):
@@ -39,6 +40,8 @@ def synthetic_corpus(n=400):
         body = head + " sounds good"
         if i % 8 == 3:
             body += " 😂"
+        if i % 40 == 7:
+            body += " \u2014 really"
         if i % 4 == 0:
             body += "."
         elif i % 10 == 1:
@@ -65,6 +68,7 @@ class BuildCard(unittest.TestCase):
         self.assertAlmostEqual(ax["exclamation_rate"]["value"], 0.05, places=9)
         self.assertAlmostEqual(ax["no_terminal_punct_rate"]["value"], 0.60, places=9)
         self.assertAlmostEqual(ax["emoji_rate"]["value"], 0.125, places=9)
+        self.assertAlmostEqual(ax["dash_rate"]["value"], 0.025, places=9)
         for name in msc.CARD_AXES:
             entry = ax[name]
             self.assertLessEqual(entry["ci_lo"], entry["value"], name)
@@ -96,7 +100,34 @@ class RunCli(unittest.TestCase):
         return msc.parse_args([
             "--persona", "test", "--out", out, "--min-n", "300", "--n-resamples", "50",
             "--end", (T0 + datetime.timedelta(days=1)).date().isoformat(), "--days", "2",
+            "--substantive-days", "0",  # hermetic: never read chat.db for the pair axis
         ])
+
+    def test_substantive_axis_from_given_pairs_is_judge_free_and_exact(self):
+        pairs = [("long question about the lease, what do you think of the terms?", "Yes"),
+                 ("x" * 160, "idk, probably fine"),
+                 ("another long inbound " * 8, "I'll send it over tonight."),
+                 ("do you want to postpone tennis tonight since family is in?", "No")]
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "test.style-card.json")
+            rc = msc.run(self._args(out), messages=synthetic_corpus(400), substantive_pairs=pairs)
+            self.assertEqual(rc, 0)
+            card = json.load(open(out))
+            sr = card["substantive_reply"]
+            self.assertEqual(sr["n"], 4)
+            self.assertEqual(sr["median_chars"], 18)  # sorted lens 2, 3, 18, 48 -> index 2
+            self.assertAlmostEqual(sr["share_le_60_chars"], 1.0)
+            self.assertAlmostEqual(sr["answer_first_rate"], 0.75)
+            self.assertAlmostEqual(sr["agreement_opener_rate"], 0.0)  # "Yes"/"No" answer, not agree
+            self.assertEqual(sr["min_n"], msc.SUBSTANTIVE_MIN_N)
+            for _, reply in pairs:  # no reply text on the card
+                self.assertNotIn(reply, json.dumps(card))
+
+    def test_no_pairs_given_and_axis_disabled_writes_no_axis(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "test.style-card.json")
+            self.assertEqual(msc.run(self._args(out), messages=synthetic_corpus(400)), 0)
+            self.assertNotIn("substantive_reply", json.load(open(out)))
 
     def test_refusal_writes_nothing_and_exits_nonzero(self):
         with tempfile.TemporaryDirectory() as d:

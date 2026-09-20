@@ -30,7 +30,7 @@ cmake --build --preset dev
 # Other presets: test (no ASan), release (MinSizeRel+LTO), fuzz (Clang), minimal
 cmake --list-presets               # show all available presets
 
-# Run tests (14,145+ tests, must be 0 failures, 0 ASan errors)
+# Run tests (14,271+ tests, must be 0 failures, 0 ASan errors)
 ./build/human_tests                          # full suite
 ./build/human_tests --suite=JSON             # run suites matching "JSON"
 ./build/human_tests --filter=config_parse    # run tests matching "config_parse"
@@ -79,6 +79,7 @@ Vtable-driven and modular. Extend by implementing vtable structs + factory regis
   - **`gemini-3.1-flash-lite`** — verified 200 on 2026-07-25. Cheapest tier; use for high-volume classification, reflexive tier. Successor to the shut-down `-preview` ID.
   - **`gemini-3.1-pro-preview-customtools`** — Pro variant optimized for custom-tool prioritization (view_file, search_code).
   - ❌ `gemini-3.1-flash-lite-preview` — SHUT DOWN (404 since ≤2026-07; caused 392 silent classify failures before the 2026-07-25 rename to `gemini-3.1-flash-lite`).
+  - **`gemini-3.8-flash`** — verified 200 on 2026-09-06 (braced probe, `thinkingBudget:0`, replied "ok"). Configured as `reliability.model_fallbacks` target and `initiative.propose_model` since 2026-09-06 (GLM-4.5-Air primary, this as backup). ❌ `gemini-3.8-flash-lite` — 404 on 2026-09-06; do not use.
   - ⚠️ `gemini-3.5-flash` — **re-probed 200 on 2026-07-26** against this project's `global` endpoint, contradicting the 2026-07-25 note that recorded it as 404. It is currently reachable and is the configured `reliability.model_fallbacks` target. Cause of the earlier 404 unknown — either access changed back, or that probe hit the same shell trap described below. Treat as live; re-probe before relying on it.
   - **Probe gotcha that manufactures fake 404s:** in zsh, `"$base/$model:generateContent"` applies a history-style modifier to `$model` — `gemini-3.1-pro-preview` expands to `1-pro-previewnerateContent`, so the URL names a model that does not exist and Vertex answers 404. This makes a live model look retired. Always brace the variable: `"$base/${model}:generateContent"`. Verified 2026-07-26: the braced form returns 200 for `gemini-3.5-flash`, `gemini-3.1-flash-lite`, and `gemini-3.1-pro-preview`; only `gemini-3.1-flash-lite-preview` genuinely 404s.
   - ❌ `gemini-3-pro-preview` — discontinued 2026-03-26, use `gemini-3.1-pro-preview`.
@@ -112,7 +113,7 @@ Types: `feat fix refactor test docs chore perf ci build style`
 
 | Workflow                    | What it checks                                                                                                                                    |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ci.yml`                    | C build + 14,145+ tests (Linux + macOS), UI tsc + vitest + build, website build, clang-tidy, E2E, visual regression, axe accessibility, Lighthouse |
+| `ci.yml`                    | C build + 14,271+ tests (Linux + macOS), UI tsc + vitest + build, website build, clang-tidy, E2E, visual regression, axe accessibility, Lighthouse |
 | `native-apps-fleet.yml`     | Multi-simulator iOS XCUITest + multi-API Android instrumented tests + SOTA gate (apps path / schedule / dispatch) |
 | `.github/actions/ios-uitest` | Composite: XcodeGen + HumaniOS XCUITest (shared by `ci.yml` + fleet) |
 | `benchmark.yml`             | Performance regression (binary size, startup time, RSS)                                                                                           |
@@ -137,9 +138,9 @@ Extend via: `src/persona/` (persona.c, creator.c, analyzer.c, sampler.c, example
 
 | Path                              | What                                                                  |
 | --------------------------------- | --------------------------------------------------------------------- |
-| `src/`                            | All C source (~1,050 `.c` files, ~445K lines of C)                         |
+| `src/`                            | All C source (~1,050 `.c` files, ~446K lines of C)                         |
 | `include/human/`                  | Public headers                                                        |
-| `tests/`                          | 760+ test files, 14,145+ tests                                       |
+| `tests/`                          | 760+ test files, 14,271+ tests                                       |
 | `fuzz/`                           | 31 libFuzzer harnesses                                                |
 | `ui/`                             | LitElement web dashboard                                              |
 | `website/`                        | Astro marketing site                                                  |

@@ -112,7 +112,7 @@ public enum HUTokens {
         public static let surfaceContainerHighest = Color(hex: 0xE8E7E4)
         public static let surfaceDim = Color(hex: 0xE5E4E1)
         public static let text = Color(hex: 0x2D2A26)
-        public static let textFaint = Color(hex: 0x9A9490)
+        public static let textFaint = Color(hex: 0x726C65)
         public static let textMuted = Color(hex: 0x6B655E)
         public static let textSecondary = Color(hex: 0x4A4540)
         public static let textTertiary = Color(hex: 0x6B655E)

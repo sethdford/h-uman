@@ -28,6 +28,7 @@
 #include "human/config.h"
 #include "human/context/protective.h"
 #include "human/context/self_awareness.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
 #include "human/daemon_learning_tick.h" /* hu_daemon_proactive_outcome_record_send */
 #include "human/feeds/awareness.h"
@@ -635,7 +636,7 @@ char *hu_daemon_proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *
 
     /* P6-5: shared absolute-rules block — same source of truth as the
      * reactive path (src/agent/agent_stream.c). Last-position weight. */
-    char absolute_rules_buf[2048];
+    char absolute_rules_buf[HU_PERSONA_RULES_BUF];
     size_t absolute_rules_len = 0;
     if (hu_persona_build_absolute_rules(agent ? agent->persona : NULL, absolute_rules_buf,
                                         sizeof(absolute_rules_buf), &absolute_rules_len) != HU_OK)
@@ -779,8 +780,7 @@ hu_error_t hu_daemon_follow_up_flush_for_contact(hu_allocator_t *alloc, struct h
         snprintf(db_path, sizeof(db_path), "%s/models/per_contact", cfg->workspace_dir);
     } else {
         /* Fallback: use ~/.human */
-        const char *home = getenv("HOME");
-        snprintf(db_path, sizeof(db_path), "%s/.human/models/per_contact", home ? home : "/tmp");
+        hu_paths_state_or(db_path, sizeof(db_path), "/tmp", "models/per_contact");
     }
 
     hu_error_t pm_err = hu_personal_model_load_for_contact(&contact_model, contact_handle, db_path);

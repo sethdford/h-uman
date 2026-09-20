@@ -1,5 +1,10 @@
 # File-Size Ceiling Ratchet — No `src/*.c` File May Exceed the Current Largest
 
+> **Auto-locked since 2026-07-27.** The "lower the baseline by hand" step below is
+> now performed automatically by `ratchet_autolock` (`scripts/lib/ratchet.sh`) the
+> next time this gate runs, and a decay target derived from this counter's own
+> history is reported weekly. See `.claude/rules/ratchet-decay.md`.
+
 The count of lines in the largest `src/*.c` file is frozen at a baseline and may
 only **decrease**. This ratchet prevents the silent erosion of code organization
 that let `src/daemon.c` grow ~830 LOC during a phase with no size gate.
@@ -46,6 +51,17 @@ After a successful refactor that shrinks the largest file:
 3. Commit the constant update alongside the refactor — the next phase's baseline
    is one commit behind the actual file size, locked at the moment the refactor
    landed.
+
+## Function length is a separate ratchet (added 2026-09-12)
+
+A file ceiling cannot see what is inside the file: when `src/daemon.c` was
+frozen at 12,313 lines, 10,087 of them were ONE function (`hu_service_run`,
+lines 2222-12308) and `hu_agent_turn` was 8,943. `scripts/check-function-length-ceiling.sh`
+measures the longest function body with clang's AST (brace counting is wrong
+by 20x here because of unbalanced braces across `#if` arms) and holds
+`MAX_FN_BASELINE`, lowered in the same commit as any refactor that shrinks
+the largest function. Wired into `.githooks/pre-commit` next to this gate;
+advisory when `build/compile_commands.json` is absent. Target: 300 lines.
 
 ## Related
 

@@ -29,14 +29,19 @@ def load_luar():
         return torch.nn.functional.normalize(v, dim=-1)[0]
     return profile
 
-def other_senders(chatdb, min_texts=10, max_senders=60, seed=0):
+def other_senders(chatdb, min_texts=5, max_senders=60, seed=0):
+    """Senders with >= min_texts qualifying inbound texts. The protocol samples
+    exactly 5 texts per sender for its floor profile (docstring: "20 other senders
+    have 5+ texts"), so 5 is the real requirement; the old 10 left 19-20 qualifying
+    senders in a 1,410-row inbound table and refused the 2026-09-07 and 09-13 scores
+    on a floor of 19. Scanning more rows cannot help — the table is small."""
     con = sqlite3.connect(f"file:{chatdb}?mode=ro", uri=True); con.text_factory = bytes
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__))))
     from imessage_text import decode_attributed_body
     by = {}
     for hid, txt, blob in con.execute(
             "SELECT handle_id, text, attributedBody FROM message WHERE is_from_me=0 "
-            "AND COALESCE(associated_message_type,0)=0 AND handle_id IS NOT NULL ORDER BY date DESC LIMIT 60000"):
+            "AND COALESCE(associated_message_type,0)=0 AND handle_id IS NOT NULL ORDER BY date DESC LIMIT 250000"):
         s = None
         if txt:
             s = txt.decode("utf-8", "replace")

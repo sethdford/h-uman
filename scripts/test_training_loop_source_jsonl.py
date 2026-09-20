@@ -227,6 +227,18 @@ def test_mlx_lora_training():
         print("\n=== Test 5: mlx_lm.lora Training [SKIPPED] ===")
         return
 
+    # Test 5 loads a REAL base model. Never do that beside the production server
+    # (~54 GB wired on :8741): on 2026-09-06 this test ran a second loader while
+    # GLM was serving. Refuse unless the operator explicitly allows it.
+    import socket as _sock
+    with _sock.socket() as _s:
+        _s.settimeout(0.5)
+        _serving = _s.connect_ex(("127.0.0.1", 8741)) == 0
+    if _serving and os.environ.get("HU_ALLOW_SECOND_LOADER") != "1":
+        print("\n=== Test 5: mlx_lm.lora Training [SKIPPED: :8741 is serving and "
+              "HU_ALLOW_SECOND_LOADER!=1 — never two loaders] ===")
+        return
+
     print("\n=== Test 5: mlx_lm.lora Training ===")
 
     # Check if mlx_lm is available

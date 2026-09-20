@@ -7,12 +7,167 @@
 #include "human/memory/personal_model.h"
 #include "human/memory/retrieval/adaptive.h"
 #include "human/memory/trust.h"
+#include "human/memory/wiki_page.h"
 #include <string.h>
 #include <time.h>
 #ifdef HU_ENABLE_SQLITE
 #include "human/memory.h"
 #include "human/memory/retrieval/strategy_learner.h"
 #endif
+#include "human/core/gate_mode.h"
+#include "human/memory/contact_insights_repo.h"
+#include <stdatomic.h>
+
+/* Append `text` to *out_context as a new section (newline-joined), creating the
+ * context when absent. Silent on allocation failure: the prompt is still valid
+ * without the supplement. */
+static void append_section(hu_memory_loader_t *loader, char **out_context, size_t *out_context_len,
+                           const char *text, size_t text_len) {
+    if (!text || text_len == 0)
+        return;
+    if (*out_context) {
+        size_t old_len = out_context_len ? *out_context_len : strlen(*out_context);
+        size_t total = old_len + 1 + text_len;
+        char *combined = (char *)loader->alloc->alloc(loader->alloc->ctx, total + 1);
+        if (!combined)
+            return;
+        memcpy(combined, *out_context, old_len);
+        combined[old_len] = '\n';
+        memcpy(combined + old_len + 1, text, text_len);
+        combined[total] = '\0';
+        loader->alloc->free(loader->alloc->ctx, *out_context, old_len + 1);
+        *out_context = combined;
+        if (out_context_len)
+            *out_context_len = total;
+    } else {
+        *out_context = hu_strndup(loader->alloc, text, text_len);
+        if (*out_context && out_context_len)
+            *out_context_len = text_len;
+    }
+}
+
+/* HU_INSIGHT_STREAM gate. Default OFF; -1 = read env (test seam below). */
+static int s_insight_mode_override = -1;
+
+hu_gate_mode_t hu_memory_loader_insight_mode(void) {
+    if (s_insight_mode_override >= 0)
+        return (hu_gate_mode_t)s_insight_mode_override;
+    return hu_gate_mode_from_env("HU_INSIGHT_STREAM", HU_GATE_OFF);
+}
+
+void hu_memory_loader_set_insight_mode_for_test(int mode) {
+    s_insight_mode_override = mode;
+}
+
+/* HU_WIKI_HEAD gate (better-than-human item 4). Default OFF; -1 = read env. */
+static int s_wiki_mode_override = -1;
+
+hu_gate_mode_t hu_memory_loader_wiki_mode(void) {
+    if (s_wiki_mode_override >= 0)
+        return (hu_gate_mode_t)s_wiki_mode_override;
+    return hu_gate_mode_from_env("HU_WIKI_HEAD", HU_GATE_OFF);
+}
+
+void hu_memory_loader_set_wiki_mode_for_test(int mode) {
+    s_wiki_mode_override = mode;
+}
+
+/* Budget for the page head: the compiler caps a page at 2 KB, so 1.2 KB is
+ * the "now / open threads / what I remember" top of it. When LIVE the raw
+ * recall cap drops by the same bytes (hu_wiki_recall_cap), which is the
+ * gate: prompt bytes per turn must go DOWN, specificity flat or up. */
+#define HU_WIKI_MAX_BYTES 1200
+
+static const char k_wiki_header[] =
+    "### Your page on them (compiled nightly from what you know; weave in, never recite):\n";
+
+static void append_contact_wiki(hu_memory_loader_t *loader, hu_gate_mode_t mode,
+                                const char *wiki_text, size_t wiki_len, const char *session_id,
+                                size_t session_id_len, char **out_context,
+                                size_t *out_context_len) {
+    if (mode == HU_GATE_OFF || !wiki_text || wiki_len == 0)
+        return;
+    static atomic_bool announced = false;
+    hu_log_info_once(&announced, "wiki-head", NULL,
+                     "wiki head active: mode=%s (set HU_WIKI_HEAD=off to disable)",
+                     mode == HU_GATE_LIVE ? "live" : "shadow");
+    if (mode == HU_GATE_SHADOW) {
+        hu_log_info("wiki-head", NULL,
+                    "shadow: would add %zu bytes of page head for %.*s (prompt unchanged)",
+                    wiki_len, (int)session_id_len, session_id);
+        return;
+    }
+    const size_t hdr_len = sizeof(k_wiki_header) - 1;
+    size_t block_len = hdr_len + wiki_len;
+    char *block = (char *)loader->alloc->alloc(loader->alloc->ctx, block_len + 1);
+    if (!block)
+        return;
+    memcpy(block, k_wiki_header, hdr_len);
+    memcpy(block + hdr_len, wiki_text, wiki_len);
+    block[block_len] = '\0';
+    append_section(loader, out_context, out_context_len, block, block_len);
+    loader->alloc->free(loader->alloc->ctx, block, block_len + 1);
+}
+
+/* Budget for the insights block: 8 short notes, under 1 KB. With the 24 KB
+ * prompt budget this fits beside recall (~1.6 KB) and the personal model
+ * (~2.1 KB) without trimming on an ordinary turn. */
+/* HU_INSIGHT_MAX_ITEMS / MAX_BYTES / MIN_CONFIDENCE live in memory_loader.h so
+ * the overuse scan (daemon_insight_overuse.c) re-renders exactly this block. */
+
+#ifdef HU_ENABLE_SQLITE /* only the SQLite build renders the block (see below) */
+static const char k_insight_header[] =
+    "### What you actually remember about them (weave in naturally, never recite):\n";
+#endif
+
+static void append_contact_insights(hu_memory_loader_t *loader, const char *session_id,
+                                    size_t session_id_len, char **out_context,
+                                    size_t *out_context_len) {
+    hu_gate_mode_t mode = hu_memory_loader_insight_mode();
+    if (mode == HU_GATE_OFF || !loader->memory)
+        return;
+#ifndef HU_ENABLE_SQLITE
+    /* The insight stream lives in the SQLite repo
+     * (src/memory/repos/contact_insights_repo_sqlite.c, registered under
+     * if(HU_ENABLE_SQLITE)); without it there is nothing to render. Left as
+     * an unconditional call, minimal-build / no-sqlite / cross-arm64 fail to
+     * link on hu_contact_insights_render (Human CI 2026-09-06). */
+    (void)session_id;
+    (void)session_id_len;
+    (void)out_context;
+    (void)out_context_len;
+    return;
+#else
+    char *lines = NULL;
+    size_t lines_len = 0;
+    hu_error_t rerr = hu_contact_insights_render(
+        loader->memory, loader->alloc, session_id, session_id_len, HU_INSIGHT_MAX_ITEMS,
+        HU_INSIGHT_MAX_BYTES, HU_INSIGHT_MIN_CONFIDENCE, &lines, &lines_len);
+    if (rerr != HU_OK || !lines || lines_len == 0)
+        return;
+    static atomic_bool announced = false;
+    hu_log_info_once(&announced, "insight-stream", NULL,
+                     "insight stream active: mode=%s (set HU_INSIGHT_STREAM=off to disable)",
+                     mode == HU_GATE_LIVE ? "live" : "shadow");
+    if (mode == HU_GATE_SHADOW) {
+        hu_log_info("insight-stream", NULL,
+                    "shadow: would add %zu bytes of insights for %.*s (prompt unchanged)",
+                    lines_len, (int)session_id_len, session_id);
+    } else {
+        const size_t hdr_len = sizeof(k_insight_header) - 1;
+        size_t block_len = hdr_len + lines_len;
+        char *block = (char *)loader->alloc->alloc(loader->alloc->ctx, block_len + 1);
+        if (block) {
+            memcpy(block, k_insight_header, hdr_len);
+            memcpy(block + hdr_len, lines, lines_len);
+            block[block_len] = '\0';
+            append_section(loader, out_context, out_context_len, block, block_len);
+            loader->alloc->free(loader->alloc->ctx, block, block_len + 1);
+        }
+    }
+    loader->alloc->free(loader->alloc->ctx, lines, lines_len + 1);
+#endif
+}
 
 static hu_retrieval_mode_t adaptive_to_retrieval_mode(hu_adaptive_strategy_t strategy) {
     switch (strategy) {
@@ -81,6 +236,10 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
     hu_memory_entry_t *entries = NULL;
     size_t count = 0;
     hu_error_t err;
+    /* Wiki head (HU_WIKI_HEAD): read once, appended last, freed at the end. */
+    hu_gate_mode_t wiki_mode = hu_memory_loader_wiki_mode();
+    char *wiki_text = NULL;
+    size_t wiki_len = 0;
 
     if (loader->retrieval_engine && loader->retrieval_engine->ctx &&
         loader->retrieval_engine->vtable) {
@@ -276,6 +435,20 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
     } else {
         return HU_OK;
     }
+    /* Wiki head: read here, after every early return above, so nothing leaks
+     * and an empty recall still carries the page. A LIVE page pays for
+     * itself: the raw recall cap drops by the page's bytes so the prompt
+     * gets no bigger (the gate in memory_loader.h). */
+    if (wiki_mode != HU_GATE_OFF && session_id && session_id_len > 0 &&
+        hu_wiki_page_read(loader->alloc, session_id, session_id_len, HU_WIKI_MAX_BYTES, &wiki_text,
+                          &wiki_len) != HU_OK) {
+        wiki_text = NULL;
+        wiki_len = 0;
+    }
+    const size_t recall_cap = wiki_mode == HU_GATE_LIVE
+                                  ? hu_wiki_recall_cap(loader->max_context_chars, wiki_len)
+                                  : loader->max_context_chars;
+
     if (!entries || count == 0)
         goto supplement;
 
@@ -287,7 +460,7 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
     }
 
     size_t total_len = 0;
-    for (size_t i = 0; i < count && total_len < loader->max_context_chars; i++) {
+    for (size_t i = 0; i < count && total_len < recall_cap; i++) {
         const hu_memory_entry_t *e = &entries[i];
 
         /* SOTA-2026 init-09 sec 2.9: trust gate.
@@ -328,8 +501,8 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
         /* Format: ### Memory: {key}\n{content}\n(stored: {timestamp})\n\n */
         size_t overhead = 26 + key_len + timestamp_len;
         size_t block_len = overhead + content_len;
-        if (total_len + block_len > loader->max_context_chars) {
-            size_t remain = loader->max_context_chars - total_len;
+        if (total_len + block_len > recall_cap) {
+            size_t remain = recall_cap - total_len;
             if (remain <= overhead)
                 break;
             content_len = remain - overhead;
@@ -398,30 +571,25 @@ supplement:
             NULL, 0, NULL, 0, NULL, 0, (hu_personal_model_t *)loader->personal_model,
             loader->persona_ctx);
         if (ge == HU_OK && graph_text && graph_len > 0) {
+            const size_t alloc_len = graph_len; /* free contract: original len + 1 */
             const size_t graph_cap = 500;
             if (graph_len > graph_cap)
                 graph_len = graph_cap;
-            if (*out_context) {
-                size_t old_len = out_context_len ? *out_context_len : strlen(*out_context);
-                size_t total = old_len + 1 + graph_len;
-                char *combined = (char *)loader->alloc->alloc(loader->alloc->ctx, total + 1);
-                if (combined) {
-                    memcpy(combined, *out_context, old_len);
-                    combined[old_len] = '\n';
-                    memcpy(combined + old_len + 1, graph_text, graph_len);
-                    combined[total] = '\0';
-                    loader->alloc->free(loader->alloc->ctx, *out_context, old_len + 1);
-                    *out_context = combined;
-                    if (out_context_len)
-                        *out_context_len = total;
-                }
-            } else {
-                *out_context = hu_strndup(loader->alloc, graph_text, graph_len);
-                if (*out_context && out_context_len)
-                    *out_context_len = graph_len;
-            }
-            loader->alloc->free(loader->alloc->ctx, graph_text, graph_len + 1);
+            append_section(loader, out_context, out_context_len, graph_text, graph_len);
+            loader->alloc->free(loader->alloc->ctx, graph_text, alloc_len + 1);
         }
     }
+
+    /* Insight stream (better-than-human item 3, HU_INSIGHT_STREAM). Appended
+     * LAST inside the memory section on purpose: the value-aware trim cuts
+     * the memory span head-first, so these survive longest; and the model
+     * reads them closest to the guard tail. */
+    if (err == HU_OK && session_id && session_id_len > 0)
+        append_contact_insights(loader, session_id, session_id_len, out_context, out_context_len);
+    if (err == HU_OK && session_id && session_id_len > 0)
+        append_contact_wiki(loader, wiki_mode, wiki_text, wiki_len, session_id, session_id_len,
+                            out_context, out_context_len);
+    if (wiki_text)
+        loader->alloc->free(loader->alloc->ctx, wiki_text, wiki_len + 1);
     return err;
 }

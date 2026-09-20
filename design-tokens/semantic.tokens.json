@@ -422,8 +422,9 @@
       "$description": "Tertiary text — same WCAG profile as text-muted"
     },
     "text-faint": {
-      "$value": "#9A9490",
-      "$type": "color"
+      "$value": "#726C65",
+      "$type": "color",
+      "$description": "Faint text — still WCAG AA 4.5:1 on warm light surfaces (4.75 on #F5F5F3). Was #9A9490 (2.7:1): axe failed the Overview hero subtitle and the Voice setup hint on 2026-09-05."
     },
     "accent": {
       "$value": "{color.human.500}",

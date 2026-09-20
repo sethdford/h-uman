@@ -155,14 +155,18 @@ def run_gen_worker(args):
     from mlx_lm import load
 
     if not args.adapter:
-        sys.exit("[score_candidate_offline:gen] FATAL: --adapter is required in --gen-worker mode")
+        sys.exit("[score_candidate_offline:gen] FATAL: --adapter is required in --gen-worker mode "
+                 "(pass 'none' for the bare base)")
+    if args.adapter == "none":
+        args.adapter = None
     with open(args.gen_contexts) as f:
         contexts = json.load(f)
     with open(args.gen_head) as f:
         head = f.read()
 
-    print(f"[score_candidate_offline:gen] loading {args.base} + {args.adapter}", file=sys.stderr)
-    model, tokenizer = load(args.base, adapter_path=args.adapter)
+    print(f"[score_candidate_offline:gen] loading {args.base} + {args.adapter or 'NO adapter (base arm)'}",
+          file=sys.stderr)
+    model, tokenizer = load(args.base, adapter_path=args.adapter) if args.adapter else load(args.base)
     sampler = None
     try:
         from mlx_lm.sample_utils import make_sampler
@@ -241,6 +245,8 @@ def build_parser():
     ap.add_argument("--splits", type=int, default=200)
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--skip-base", action="store_true",
+                    help="do not generate/score the bare-base reference arm (saves one model load)")
     # --- internal worker mode: re-invoked as a subprocess, never call by hand ---
     ap.add_argument("--gen-worker", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--adapter", default=None, help=argparse.SUPPRESS)
@@ -334,7 +340,13 @@ def main(argv=None):
     # frees, and EXITS before the next one starts — process exit is the
     # strongest guarantee mlx/Metal pages are actually reclaimed (see
     # never_two_llm_instances). Never run these two concurrently.
-    for label, adapter_dir in (("candidate", args.candidate), ("serving", serving)):
+    # "base" = the bare base under the same head: the reference that says whether a
+    # candidate differs from no adapter at all. 2026-09-06..12 five candidates
+    # scored 0.465-0.484 with no base arm to show they were the base.
+    arms = [("candidate", args.candidate), ("serving", serving)]
+    if not args.skip_base:
+        arms.append(("base", "none"))
+    for label, adapter_dir in arms:
         gen_out = os.path.join(tmpdir, f"{label}_trials.json")
         print(f"generating {label} replies via {args.gen_python} (base={args.base}) ...")
         cmd = [
@@ -369,6 +381,7 @@ def main(argv=None):
         with open(gap_out) as f:
             gap_results[label] = json.load(f)
 
+    base_arm = gap_results.pop("base", None)
     cand_twin = gap_results["candidate"]["twin_seth_vs_adapter"]["mean"]
     serv_twin = gap_results["serving"]["twin_seth_vs_adapter"]["mean"]
 
@@ -411,6 +424,7 @@ def main(argv=None):
     out = {
         "date": date,
         "candidate_adapter": args.candidate,
+        "base_arm": base_arm,
         "serving_adapter": serving,
         "base": args.base,
         "candidate": gap_results["candidate"],

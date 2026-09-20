@@ -244,7 +244,7 @@ Every subsystem is a **vtable interface** — swap implementations with a config
 | **Memory**        | `Memory`         | SQLite with hybrid search (FTS5 + vector cosine similarity), Markdown                                                                                                 | Any persistence backend                                   |
 | **Tools**         | `Tool`           | 85 built-in: shell, file ops, git, memory, browser, screenshot, composio, http, cron, hardware, web search, delegate, computer use, LSP, and more                     | Any capability                                            |
 | **Observability** | `Observer`       | Noop, Log, File, Multi                                                                                                                                                | Prometheus, OTel                                          |
-| **Runtime**       | `RuntimeAdapter` | Native, Docker (sandboxed), WASM (wasmtime)                                                                                                                           | Any runtime                                               |
+| **Runtime**       | `RuntimeAdapter` | Native, Docker (sandboxed); WASM and Cloudflare adapters are stubs behind `HU_ENABLE_RUNTIME_EXOTIC` (OFF)                                                                                                                           | Any runtime                                               |
 | **Security**      | `Sandbox`        | Landlock, Firejail, Bubblewrap, Docker, auto-detect                                                                                                                   | Any sandbox backend                                       |
 | **Identity**      | `IdentityConfig` | OpenClaw (markdown), AIEOS v1.1 (JSON)                                                                                                                                | Any identity format                                       |
 | **Tunnel**        | `Tunnel`         | None, Cloudflare, Tailscale, ngrok, Custom                                                                                                                            | Any tunnel binary                                         |
@@ -720,7 +720,7 @@ providers/ 50+ AI provider implementations
 memory/ SQLite + markdown + LRU backends, embeddings, vector search
 tools/ 87 tool implementations
 security/ Policy, pairing, secrets, sandbox backends
-runtime/ Runtime adapters (native, docker, wasm, cloudflare)
+runtime/ Runtime adapters (native, docker; wasm/cloudflare are gated stubs)
 core/ Allocator, arena, error, json, http, string, slice
 observability/ Log + metrics observers
 gateway/ HTTP gateway server

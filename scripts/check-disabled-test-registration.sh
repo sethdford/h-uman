@@ -37,6 +37,33 @@
 
 set -eu
 
+# --suites: repo-wide check that every `run_<x>_tests` runner defined in
+# tests/test_*.c is (a) listed in CMakeLists.txt and (b) called from
+# tests/test_main.c. The 2026-09-10 review found four compiled suites whose
+# runner was never called and two files CMake never listed: 86 registered
+# tests that could not run, invisible to the commented-out-line check below.
+if [ "${1:-}" = "--suites" ]; then
+    bad=0
+    for f in tests/test_*.c; do
+        runner=$(grep -oE '^void run_[A-Za-z0-9_]+_tests\(void\)' "$f" | head -1 | sed -E 's/^void ([^(]+)\(void\)/\1/')
+        [ -z "$runner" ] && continue
+        if ! grep -qF "$f" CMakeLists.txt; then
+            echo "  $f: not listed in CMakeLists.txt (suite never compiled)"; bad=1; continue
+        fi
+        if ! grep -qE "^[[:space:]]*${runner}\(\);" tests/test_main.c; then
+            case "$(grep -c "allow-uncalled-suite: ${runner}" tests/test_main.c)" in 0) ;; *) continue ;; esac
+            echo "  $f: ${runner}() is never called from tests/test_main.c"; bad=1
+        fi
+    done
+    if [ "$bad" -eq 1 ]; then
+        echo "ERROR: test suite(s) above are defined but never run. Register the runner in" >&2
+        echo "tests/test_main.c (and the file in CMakeLists.txt), delete the suite, or add" >&2
+        echo "'// allow-uncalled-suite: run_x_tests: <reason>' to tests/test_main.c." >&2
+        exit 1
+    fi
+    exit 0
+fi
+
 # Files to inspect. Default = staged test files; CLI args override.
 if [ $# -gt 0 ]; then
     files="$*"

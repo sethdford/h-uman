@@ -44,6 +44,64 @@ SKIP_BASE_TRAINING=0
 mkdir -p "$(dirname "$LOG")"
 log() { printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" | tee -a "$LOG"; }
 
+# ── Disk hygiene ────────────────────────────────────────────────────────────
+# 2026-09-20: the disk hit 100% (101 MB free) mid-window. training_loop's own
+# prune only matches m3-driver-* names, so 48 nightly seth-m3-outcomes-* stagings
+# (35 GB), every BLOCKed mlxtune candidate, and 376 intermediate checkpoints
+# (60 GB) had accumulated; the first SFT candidate died writing its checkpoint.
+# retain_adapters keeps the newest $HU_RETRAIN_KEEP_PER_FAMILY of each
+# UNPROMOTED family the window itself produces and never touches the served
+# adapter, anything in the registry, or hand-placed dirs. free_gb_check refuses
+# to stop production for a training run that cannot save its result.
+retain_adapters() {
+    local dir="${1:-$HOME/.human/training-data/adapters}" keep="${HU_RETRAIN_KEEP_PER_FAMILY:-5}"
+    local serving; serving=$(python3 -c 'import json,os;c=json.load(open(os.path.expanduser("~/.human/config.json")));print(c.get("personalization",{}).get("lora_adapter_path") or c.get("mlx_local",{}).get("adapter_path") or "")' 2>/dev/null)
+    local registered; registered=$(python3 -c 'import json,sys
+try:
+    r=json.load(open(sys.argv[1]))
+except Exception: sys.exit(0)
+it=r if isinstance(r,list) else r.get("adapters",r); it=it if isinstance(it,list) else list(it.values())
+for a in it:
+    for k in ("path","adapter","adapter_path","dir","name","id"):
+        v=a.get(k)
+        if isinstance(v,str) and v: print(v.rstrip("/").split("/")[-1])' "$dir/registry.json" 2>/dev/null | sort -u)
+    local fam removed=0
+    for fam in "seth-m3-outcomes-" "seth-glm-air-mlxtune-"; do
+        local n=0 d base
+        while IFS= read -r d; do
+            [[ -d "$d" ]] || continue
+            base=${d%/}; base=${base##*/}
+            n=$((n + 1)); (( n <= keep )) && continue
+            [[ -n "$serving" && "${serving%/}" == "${d%/}" ]] && continue
+            grep -qxF "$base" <<<"$registered" && continue
+            [[ -f "$d/PROMOTED" ]] && continue
+            rm -rf "$d" && removed=$((removed + 1)) && log "  retention: removed $base (beyond newest $keep of ${fam}*)"
+        done < <(ls -dt "$dir"/${fam}* 2>/dev/null)
+    done
+    # intermediate checkpoints beside a final adapters.safetensors are pure duplicates
+    local ck
+    while IFS= read -r ck; do
+        [[ -f "$(dirname "$ck")/adapters.safetensors" ]] || continue
+        rm -f "$ck" && log "  retention: removed intermediate checkpoint ${ck#$dir/}"
+    done < <(find "$dir" -maxdepth 2 -name '0*_adapters.safetensors' 2>/dev/null)
+    log "retention: $removed adapter dir(s) removed; free now $(df -g / | awk 'NR==2{print $4}') GB"
+}
+free_gb_check() {
+    local need="${HU_RETRAIN_MIN_FREE_GB:-20}" free; free=$(df -g / | awk 'NR==2{print $4}')
+    if (( free < need )); then
+        log "FATAL: only ${free} GB free on / (need ${need}); refusing to stop :8741 for a run that cannot save its adapter"
+        return 1
+    fi
+    log "disk: ${free} GB free (need ${need})"
+}
+# Keep the Mac awake for the whole window. 2026-09-11: Maintenance-Sleep /
+# DarkWake cycles from 03:00 to 03:48 stretched a 5-minute base training to 85
+# minutes and pushed the candidate stage past the arena guard (rc=1). -w $$
+# ties the assertion to this script's lifetime.
+if [[ "${HU_RETRAIN_STAGE_TEST:-0}" != "1" ]] && command -v caffeinate >/dev/null 2>&1; then
+    caffeinate -is -w $$ >/dev/null 2>&1 &
+fi
+
 # sha256 of a file, bare digest on stdout. Non-zero (and silent) when the file
 # is missing or no digest tool exists, so every caller must treat "" as
 # "unknown" rather than as a value — an empty digest must never compare equal
@@ -90,8 +148,17 @@ run_mlxtune_candidate_stage() {
     fi
 
     local max_min="${HU_RETRAIN_MLXTUNE_MAX_MIN:-90}"
+    # Trainer selection (2026-09-05): mlx_tune/simpo has never produced an
+    # adapter here; the ORPO path that made the served v6 adapter is
+    # `HU_RETRAIN_MLXTUNE_TRAINER=mlx_lm_lora HU_RETRAIN_MLXTUNE_MODE=orpo
+    # HU_RETRAIN_MLXTUNE_BETA=0.05`. Defaults keep tonight's behaviour.
+    local trainer="${HU_RETRAIN_MLXTUNE_TRAINER:-mlx_tune}"
+    local mode="${HU_RETRAIN_MLXTUNE_MODE:-simpo}"
+    local beta="${HU_RETRAIN_MLXTUNE_BETA:-}"
+    local beta_args=()
+    [[ -n "$beta" ]] && beta_args=(--beta "$beta")
     local stamp; stamp="$(date +%Y%m%d-%H%M)"
-    local mlxtune_tag="mlxtune-simpo-${stamp}"
+    local mlxtune_tag="mlxtune-${mode}-${stamp}"
     # train-glm-adapter.sh appends its OWN "-<TAG>-<its own STAMP>" naming
     # (ADAPTER=.../seth-glm-air-${TAG}-${STAMP}), so the real output directory
     # is this prefix PLUS a suffix we do not know in advance. Resolve the
@@ -103,7 +170,7 @@ run_mlxtune_candidate_stage() {
     local mlxtune_py="$HOME/.human/venvs/mlxtune312/bin/python"
     local eval_py="$HOME/.human/venvs/eval312/bin/python"
 
-    log "mlx-tune candidate stage: config=$config data=$data_dir out=${candidate_dir_prefix}-* cap=${max_min}min"
+    log "mlx-tune candidate stage: config=$config data=$data_dir trainer=$trainer mode=$mode beta=${beta:-default} out=${candidate_dir_prefix}-* cap=${max_min}min"
 
     if [[ "${HU_RETRAIN_DRY_RUN:-0}" == "1" ]]; then
         log "mlx-tune candidate stage: DRY RUN (HU_RETRAIN_DRY_RUN=1) — loading nothing"
@@ -160,8 +227,13 @@ run_mlxtune_candidate_stage() {
     # never measures. The nightly candidate path always wants this; a
     # standalone `bash scripts/train-glm-adapter.sh` invocation does not
     # unless the caller opts in (default 0 — see that script).
-    ( HU_TRAIN_SERVING_MANAGED_BY_CALLER=1 HU_TRAIN_REBALANCE_CASING=1 bash "$REPO/scripts/train-glm-adapter.sh" \
-        --config "$config" --trainer mlx_tune --train-mode simpo \
+    # HU_RETRAIN_REBALANCE_CASING=0 for an SFT corpus of real Seth replies: the
+    # rebalancer rewrites genuine text toward the style card's aggregate rates,
+    # which is right for a biased preference corpus and wrong for supervision on
+    # the author's own words (2026-09-19 SFT experiment).
+    ( HU_TRAIN_SERVING_MANAGED_BY_CALLER=1 HU_TRAIN_REBALANCE_CASING="${HU_RETRAIN_REBALANCE_CASING:-1}" \
+      HU_TRAIN_MATCH_EMOJI="${HU_TRAIN_MATCH_EMOJI:-1}" bash "$REPO/scripts/train-glm-adapter.sh" \
+        --config "$config" --trainer "$trainer" --train-mode "$mode" ${beta_args[@]+"${beta_args[@]}"} \
         --tag "$mlxtune_tag" --est-minutes "$max_min" ) >>"$LOG" 2>&1 &
     local job_pid=$!
     # Explicit >/dev/null redirect is load-bearing, not cosmetic: without it
@@ -208,6 +280,40 @@ run_mlxtune_candidate_stage() {
     local why
     if why=$(python3 "$REPO/scripts/adapter_is_real.py" "$candidate_dir" 2>&1); then
         log "mlx-tune candidate stage: adapter real: $candidate_dir — $why"
+        # Did it LEARN? A real adapter can still be a no-op: 2026-09-06..12 every
+        # SimPO run's loss sat at 0.69-0.72 for all 400 steps (beta 0.05 pinned it
+        # at ln2) and the 7-minute scoring measured the raw base five times. Read
+        # the trainer's own "Step N/M | Loss:" lines; refuse to score when the
+        # last tenth is not below the first tenth by HU_RETRAIN_MIN_LOSS_DROP.
+        local train_log; train_log=$(ls -t "$HOME/.human/logs/train-glm-${mlxtune_tag}"-*.log 2>/dev/null | head -1)
+        local loss_drop_min="${HU_RETRAIN_MIN_LOSS_DROP:-0.02}"
+        if [[ -n "$train_log" ]]; then
+            local loss_summary
+            # Preferred signal: the held-out SimPO loss mlx_tune_train.py scores on
+            # valid.jsonl before and after training (same pairs twice — immune to the
+            # ~0.3 per-sample sd that makes the step trend below unreadable). Fall
+            # back to the step trend only when that line is absent.
+            loss_summary=$(grep -a -oE 'held-out simpo loss: before=[0-9.]+ after=[0-9.]+ delta=[-+0-9.]+ n=[0-9]+' "$train_log" | tail -1 | awk -v min="$loss_drop_min" '
+                { for (i=1;i<=NF;i++){ split($i,kv,"="); v[kv[1]]=kv[2] }
+                  d=v["before"]-v["after"]; printf "%s held-out first=%.4f last=%.4f drop=%.4f n=%s", (d>=min?"LEARNED":"NO_LEARNING"), v["before"], v["after"], d, v["n"] }')
+            # mlx_lm SFT (trainer=mlx_lm) reports a periodic held-out "Val loss"; first vs last.
+            [[ -n "$loss_summary" ]] || loss_summary=$(grep -a -oE 'Iter [0-9]+: Val loss [0-9.]+' "$train_log" | awk -v min="$loss_drop_min" '
+                { v[NR]=$NF } END { if (NR < 2) exit; d=v[1]-v[NR]; printf "%s val-loss first=%.4f last=%.4f drop=%.4f n=%d", (d>=min?"LEARNED":"NO_LEARNING"), v[1], v[NR], d, NR }')
+            [[ -n "$loss_summary" ]] || loss_summary=$(grep -a -oE 'Step [0-9]+/[0-9]+ \| Loss: [0-9.]+' "$train_log" | awk -v min="$loss_drop_min" '
+                { l[NR]=$NF } END {
+                    if (NR < 10) { print "INSUFFICIENT n=" NR; exit }
+                    k=int(NR/10); if (k<1) k=1; a=0; b=0
+                    for (i=1;i<=k;i++) a+=l[i]; for (i=NR-k+1;i<=NR;i++) b+=l[i]
+                    a/=k; b/=k; printf "%s first=%.4f last=%.4f drop=%.4f", (a-b>=min?"LEARNED":"NO_LEARNING"), a, b, a-b }')
+            log "mlx-tune candidate stage: loss check: $loss_summary (min drop $loss_drop_min, $train_log)"
+            if [[ "$loss_summary" == NO_LEARNING* ]]; then
+                log "mlx-tune candidate stage: candidate did not learn — staged at $candidate_dir, NOT scored (scoring a no-op adapter measures the base, not the candidate)"
+                printf '%s\n' "$loss_summary" > "$candidate_dir/NO_LEARNING"
+                return 0
+            fi
+        else
+            log "mlx-tune candidate stage: WARNING no train log matching train-glm-${mlxtune_tag}-*.log — cannot check that training learned"
+        fi
     else
         log "mlx-tune candidate stage: adapter FAILED the real-adapter guard: $why"
         log "mlx-tune candidate stage: quarantining $candidate_dir -> $candidate_dir.rejected-$(date +%s)"
@@ -352,6 +458,8 @@ sys.exit(0 if ok else 1)
 fi
 
 log "=== nightly retrain starting (window=$WINDOW) ==="
+retain_adapters
+free_gb_check || exit 0
 
 # ── Refresh the corpus BEFORE digesting it ─────────────────────────────────
 # The export stage loads no model (it reads the daemon's ring, else
@@ -388,7 +496,12 @@ fi
 # excludes them: mtime survives the quarantine rename, so an unfiltered `ls -t`
 # would let a rejected no-op adapter authorize skipping a real retrain.
 SOURCE_SHA="$(hu_sha256 "$SOURCE_JSONL" 2>/dev/null || true)"
-if [[ "${HU_RETRAIN_FORCE_TRAIN:-0}" == "1" ]]; then
+if [[ "${HU_RETRAIN_SKIP_BASE:-0}" == "1" ]]; then
+    # Candidate-only run: keep the serving-down window, skip the m3-outcomes
+    # base training regardless of the source digest (2026-09-05).
+    SKIP_BASE_TRAINING=1
+    log "HU_RETRAIN_SKIP_BASE=1 — base (m3-outcomes) training skipped; candidate stage only"
+elif [[ "${HU_RETRAIN_FORCE_TRAIN:-0}" == "1" ]]; then
     log "HU_RETRAIN_FORCE_TRAIN=1 — training even if the source is unchanged"
 elif [[ -n "$SOURCE_SHA" ]]; then
     stamp_dir=""; stamp_sha=""
@@ -468,7 +581,7 @@ TRAIN_PY="$HOME/Documents/gemma-realtime-1/.venv312/bin/python3.12"
 # the co-residency check passes and the memory check sees real headroom. If it
 # refuses anyway, that refusal is correct and we restart serving untouched.
 if [[ "${SKIP_BASE_TRAINING:-0}" == "1" ]]; then
-    log "base training skipped (outcome corpus unchanged); candidate stage follows"
+    log "base training skipped (unchanged corpus or HU_RETRAIN_SKIP_BASE=1); candidate stage follows"
 elif [[ -f "$SOURCE_JSONL" ]]; then
     # --adapter-out is REQUIRED by training_loop.py's C3 fast path; without it the
     # script prints "ERROR: --adapter-out is required when --source-jsonl is set"
@@ -489,7 +602,18 @@ elif [[ -f "$SOURCE_JSONL" ]]; then
     staged="$ADAPTER_OUT"
     [[ -d "$staged" ]] || staged=$(ls -d "${ADAPTER_OUT}"-* 2>/dev/null | head -1)
     if [[ "$train_rc" != "0" ]]; then
-        log "  training FAILED rc=$train_rc — see the lines above; NO adapter was produced tonight"
+        # rc!=0 means one of two very different things: the trainer crashed and
+        # produced nothing, or it trained a REAL adapter and its own quality
+        # gate refused promotion. On 2026-09-06 the gate FAILed (val loss 3.548
+        # vs best-of-history 3.384, rc=1) and this line reported "NO adapter was
+        # produced" over a real 556 MB one. Tell them apart by looking.
+        if [[ -n "$staged" && -d "$staged" ]] && why=$(python3 "$REPO/scripts/adapter_is_real.py" "$staged" 2>&1); then
+            gate_line="$(grep -a -E '\[quality-gate\] Regression verdict:' "$LOG" 2>/dev/null | tail -1 | sed 's/^ *//')"
+            log "  training exited rc=$train_rc but a REAL adapter was staged: $staged — $why"
+            log "  training_loop's quality gate refused promotion (${gate_line:-no verdict line found}); adapter stays STAGED, NOT promoted"
+        else
+            log "  training FAILED rc=$train_rc — see the lines above; NO real adapter was produced tonight"
+        fi
     elif [[ -z "$staged" || ! -d "$staged" ]]; then
         log "  WARNING: rc=0 but no adapter dir at $ADAPTER_OUT — treating as failure"
         train_rc=3

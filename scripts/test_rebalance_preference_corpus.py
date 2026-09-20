@@ -547,3 +547,57 @@ def test_default_behavior_unaffected_when_match_sides_omitted():
 if __name__ == "__main__":
     import pytest
     raise SystemExit(pytest.main([__file__, "-v"]))
+
+# ---------------------------------------------------------------------------
+# --match-emoji: emoji must not be a chosen/rejected discriminator
+# (2026-09-05; see scripts/build_v6_preference_corpus.py neutralize_emoji_pairs)
+# ---------------------------------------------------------------------------
+
+def _emoji_rows():
+    rows = _pref_rows(40, lowercase_frac=0.1, punct_frac=0.2)
+    for i in range(0, 40, 4):           # 10 rejected-only emoji rows
+        rows[i]["rejected"] = "I would be happy to help with that! 😊"
+    rows[1]["chosen"] = "miss you 🙂"    # chosen-only: must be kept
+    return rows
+
+
+def test_match_emoji_strips_rejected_only_emoji_and_keeps_chosen_emoji():
+    with tempfile.TemporaryDirectory() as d:
+        inp, out = os.path.join(d, "in.jsonl"), os.path.join(d, "out.jsonl")
+        _write_jsonl(inp, _emoji_rows())
+        r = _run(["--input", inp, "--output", out, "--target-lowercase", "0.1",
+                  "--target-punct", "0.2", "--match-sides", "--match-emoji"])
+        assert r.returncode == 0, r.stderr + r.stdout
+        rows = [json.loads(l) for l in open(out)]
+        assert not any(rbc.has_emoji(x["rejected"]) for x in rows if not rbc.has_emoji(x["chosen"]))
+        assert rbc.has_emoji(rows[1]["chosen"])
+        assert rows[0]["rejected"].startswith("I would be happy to help with that!") or \
+            rows[0]["rejected"].startswith("i would be happy to help with that!")
+        stats = json.load(open(out + ".stats.json"))
+        assert stats["match_emoji"] is True
+        assert stats["stats"]["emoji_rate"]["rejected_only_before"] == 10
+        assert stats["stats"]["emoji_rate"]["rejected_only_after"] == 0
+
+
+def test_without_match_emoji_rejected_emoji_is_untouched():
+    with tempfile.TemporaryDirectory() as d:
+        inp, out = os.path.join(d, "in.jsonl"), os.path.join(d, "out.jsonl")
+        _write_jsonl(inp, _emoji_rows())
+        r = _run(["--input", inp, "--output", out, "--target-lowercase", "0.1",
+                  "--target-punct", "0.2", "--match-sides"])
+        assert r.returncode == 0, r.stderr + r.stdout
+        rows = [json.loads(l) for l in open(out)]
+        assert sum(rbc.has_emoji(x["rejected"]) for x in rows) == 10
+        stats = json.load(open(out + ".stats.json"))
+        assert stats["match_emoji"] is False
+        assert stats["stats"]["emoji_rate"]["rejected_only_after"] == 10
+
+
+def test_match_emoji_report_mentions_emoji_axis():
+    with tempfile.TemporaryDirectory() as d:
+        inp = os.path.join(d, "in.jsonl")
+        _write_jsonl(inp, _emoji_rows())
+        r = _run(["--input", inp, "--dry-run", "--target-lowercase", "0.1",
+                  "--target-punct", "0.2", "--match-sides", "--match-emoji"])
+        assert r.returncode == 0, r.stderr + r.stdout
+        assert "emoji" in r.stdout.lower()

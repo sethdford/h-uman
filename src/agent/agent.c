@@ -18,7 +18,10 @@
 #include "human/agent/workflow_event.h"
 #include "human/agent/world_model_bridge.h"
 #include "human/config.h"
+#include "human/core/endpoints.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
+#include "human/core/tokens.h"
 #include "human/memory/consolidation.h"
 #include "human/memory/promotion.h"
 #include "human/memory/tiers.h"
@@ -1356,8 +1359,10 @@ void hu_agent_m3_adapter_attach(hu_agent_t *agent, const char *path) {
          * (unknown) but the loop still functions. */
         if (!agent->m3_id_map) {
             char map_path[2048];
-            int mn = snprintf(map_path, sizeof(map_path), "%s/.human/training-data/m3_id_map.json",
-                              getenv("HOME") ? getenv("HOME") : "/tmp");
+            /* Prior code fell back to /tmp when HOME was unset; keep that exact
+             * behavior rather than let an unresolvable state dir become "". */
+            int mn = hu_paths_state_or(map_path, sizeof(map_path), "/tmp",
+                                       "training-data/m3_id_map.json");
             if (mn > 0 && (size_t)mn < sizeof(map_path)) {
                 (void)hu_m3_id_map_create(agent->alloc, map_path, &agent->m3_id_map);
             }
@@ -1399,7 +1404,7 @@ void hu_agent_m3_route_per_turn(hu_agent_t *agent) {
      * takes the v1 root, so include "/v1" suffix. */
     const char *mlx_url = getenv("HUMAN_MLX_URL");
     if (!mlx_url || !mlx_url[0])
-        mlx_url = "http://127.0.0.1:8741/v1";
+        mlx_url = HU_MLX_DEFAULT_BASE_URL;
 
     hu_mlx_admin_swap_result_t swap_result = {0};
     hu_error_t serr = hu_mlx_admin_swap_adapter(agent->alloc, mlx_url, strlen(mlx_url), target,
@@ -1502,12 +1507,12 @@ void hu_agent_m3_record_chat_outcome(hu_agent_t *agent, const char *prompt, size
     if (usage && usage->prompt_tokens > 0) {
         outcome.prompt_tokens = usage->prompt_tokens;
     } else {
-        outcome.prompt_tokens = (uint32_t)(prompt_len / 4);
+        outcome.prompt_tokens = (uint32_t)hu_tokens_estimate_len(prompt_len);
     }
     if (usage && usage->completion_tokens > 0) {
         outcome.completion_tokens = usage->completion_tokens;
     } else {
-        outcome.completion_tokens = (uint32_t)(response_len / 4);
+        outcome.completion_tokens = (uint32_t)hu_tokens_estimate_len(response_len);
     }
     outcome.guard_decision = (uint8_t)guard_decision;
     outcome.turn_kind = turn_kind;
@@ -2006,17 +2011,13 @@ hu_error_t hu_agent_bind_sqlite_graph(hu_agent_t *agent, struct hu_graph *graph,
             hu_log_warn("agent", NULL, "W7 facade open failed: %s", hu_error_string(err));
     }
     if (agent->w7_facade && !agent->w15_audit_log) {
-        const char *home = getenv("HOME");
-        if (home) {
-            char audit_path[512];
-            int ap = snprintf(audit_path, sizeof(audit_path), "%s/.human/audit_log.db", home);
-            if (ap > 0 && (size_t)ap < sizeof(audit_path)) {
-                hu_error_t ae = hu_w7_audit_log_open(agent->w7_facade, alloc, audit_path, NULL,
-                                                     &agent->w15_audit_log);
-                if (ae != HU_OK)
-                    hu_log_warn("agent", NULL, "W15 audit log open failed: %s",
-                                hu_error_string(ae));
-            }
+        char audit_path[512];
+        int ap = hu_paths_state(audit_path, sizeof(audit_path), "audit_log.db");
+        if (ap > 0 && (size_t)ap < sizeof(audit_path)) {
+            hu_error_t ae = hu_w7_audit_log_open(agent->w7_facade, alloc, audit_path, NULL,
+                                                 &agent->w15_audit_log);
+            if (ae != HU_OK)
+                hu_log_warn("agent", NULL, "W15 audit log open failed: %s", hu_error_string(ae));
         }
     }
     if (agent->w7_facade && !agent->w14_scheduler) {
@@ -2252,9 +2253,9 @@ void hu_agent_clear_history(hu_agent_t *agent) {
 }
 
 uint32_t hu_agent_estimate_tokens(const char *text, size_t len) {
-    if (!text)
-        return 0;
-    return (uint32_t)((len + 3) / 4);
+    /* Thin alias kept for its existing callers; the ratio and the measurement
+     * behind it live in human/core/tokens.h. */
+    return (uint32_t)hu_tokens_estimate_text(text, len);
 }
 
 hu_policy_action_t hu_agent_internal_check_policy(hu_agent_t *agent, const char *tool_name,

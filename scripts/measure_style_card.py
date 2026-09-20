@@ -45,6 +45,15 @@ from eval_persona_evolution import (  # noqa: E402
     aggregate_window,
     fetch_outbound_messages,
 )
+from reply_pairs import fetch_reply_pairs, is_substantive, reply_stats  # noqa: E402
+
+# Judge-free pair axis (2026-09-13): how the user answers a LONG or
+# question-bearing inbound. The multi-turn nightly's substantive scenarios
+# (debate, news reaction, advice) end judged "AI" while the casual ones hold;
+# the card so far only described single messages. Below SUBSTANTIVE_MIN_N the
+# axis is written with its n and nothing renders from it.
+SUBSTANTIVE_MIN_N = 20
+DEFAULT_SUBSTANTIVE_DAYS = 120
 
 SCHEMA = "style-card/v2"
 DEFAULT_DAYS = 60
@@ -59,6 +68,7 @@ CARD_AXES = (
     "question_rate",
     "exclamation_rate",
     "emoji_rate",
+    "dash_rate",
     "length_chars",
 )
 
@@ -114,6 +124,16 @@ def build_card(messages, persona: str, window_start: datetime.datetime,
     }
 
 
+def attach_substantive(card: dict, pairs, days: int) -> dict:
+    stats = reply_stats(pairs)
+    stats["days"] = days
+    stats["min_n"] = SUBSTANTIVE_MIN_N
+    stats["source"] = ("chat.db inbound >= 150 chars or a real question -> the user's next "
+                       "reply in-chat within 30 min")
+    card["substantive_reply"] = stats
+    return card
+
+
 def parse_args(argv=None):
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -128,11 +148,13 @@ def parse_args(argv=None):
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--out", default=None,
                    help="card path (default: $HU_PERSONA_DIR or ~/.human/personas/<persona>.style-card.json)")
+    p.add_argument("--substantive-days", type=int, default=DEFAULT_SUBSTANTIVE_DAYS,
+                   help="lookback for the judge-free substantive_reply axis")
     p.add_argument("--dry-run", action="store_true", help="print the card, write nothing")
     return p.parse_args(argv)
 
 
-def run(args, messages=None) -> int:
+def run(args, messages=None, substantive_pairs=None) -> int:
     end = (datetime.datetime.strptime(args.end, "%Y-%m-%d")
            if args.end else datetime.datetime.now())
     start = end - datetime.timedelta(days=args.days)
@@ -144,6 +166,13 @@ def run(args, messages=None) -> int:
     except InsufficientData as e:
         sys.stderr.write(f"REFUSED: {e}; wrote nothing.\n")
         return 1
+    # Pair axis: hermetic callers pass substantive_pairs (or omit
+    # substantive_days) and never touch chat.db.
+    sdays = getattr(args, "substantive_days", None)
+    if substantive_pairs is None and sdays:
+        substantive_pairs = fetch_reply_pairs(args.db, sdays, is_substantive)
+    if substantive_pairs is not None:
+        attach_substantive(card, substantive_pairs, sdays or DEFAULT_SUBSTANTIVE_DAYS)
 
     print(json.dumps(card, indent=2))
     if args.dry_run:

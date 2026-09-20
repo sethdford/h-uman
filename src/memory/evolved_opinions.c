@@ -3,8 +3,45 @@
 #ifdef HU_ENABLE_SQLITE
 
 #include "human/core/string.h"
+#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
+
+static bool word_eq_ci(const char *s, size_t n, const char *w) {
+    size_t wl = strlen(w);
+    return n == wl && strncasecmp(s, w, wl) == 0;
+}
+
+bool hu_evolved_opinion_stance_is_usable(const char *topic, size_t topic_len, const char *stance,
+                                         size_t stance_len) {
+    if (!topic || topic_len == 0 || !stance || stance_len == 0)
+        return false;
+    /* First word of the topic: a pronoun means the sentence is about the
+     * speaker or the listener, not a subject anyone holds a position on. */
+    size_t i = 0;
+    while (i < topic_len && !isalnum((unsigned char)topic[i]))
+        i++;
+    size_t start = i;
+    while (i < topic_len && (isalnum((unsigned char)topic[i]) || topic[i] == '\''))
+        i++;
+    static const char *const pronouns[] = {"i",   "i'm",    "i've",  "i'd",  "i'll",  "im",
+                                           "you", "you're", "youre", "we",   "me",    "my",
+                                           "it",  "it's",   "this",  "that", "there", NULL};
+    for (size_t p = 0; pronouns[p]; p++)
+        if (word_eq_ci(topic + start, i - start, pronouns[p]))
+            return false;
+    /* Identity / AI slips: the stance is the model narrating itself. */
+    static const char *const slips[] = {
+        "glitch",     "confusing me with", "as an ai",     "language model",         "i'm an ai",
+        "i am an ai", "i'm here to",       "i am here to", "not sure what you mean", NULL};
+    for (size_t k = 0; slips[k]; k++) {
+        size_t sl = strlen(slips[k]);
+        for (size_t j = 0; j + sl <= stance_len; j++)
+            if (strncasecmp(stance + j, slips[k], sl) == 0)
+                return false;
+    }
+    return true;
+}
 
 hu_error_t hu_evolved_opinions_ensure_table(sqlite3 *db) {
     if (!db)
@@ -147,6 +184,18 @@ hu_error_t hu_evolved_opinions_extract_and_store(sqlite3 *db, const char *respon
             size_t stance_start = i;
             size_t stance_len = sent_end - stance_start;
             if (stance_len < 10 || stance_len > 300) {
+                i = sent_end;
+                break;
+            }
+            /* Judge the WHOLE sentence, not just marker..end: "As an AI language
+             * model I think that is fair" carries its slip before the marker. */
+            size_t sent_start = i;
+            while (sent_start > 0 && response[sent_start - 1] != '.' &&
+                   response[sent_start - 1] != '!' && response[sent_start - 1] != '?' &&
+                   response[sent_start - 1] != '\n')
+                sent_start--;
+            if (!hu_evolved_opinion_stance_is_usable(topic, topic_len, response + sent_start,
+                                                     sent_end - sent_start)) {
                 i = sent_end;
                 break;
             }

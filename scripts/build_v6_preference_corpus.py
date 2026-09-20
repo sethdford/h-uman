@@ -44,6 +44,7 @@ import os
 import random
 import sqlite3
 import sys
+import unicodedata
 from pathlib import Path
 
 HOME = Path(os.path.expanduser("~"))
@@ -161,6 +162,75 @@ CYCLE4_DROP = {
 }
 
 
+# --- Emoji must not be a chosen/rejected discriminator ------------------------
+# 2026-09-05 audit of the v6 / v6.1 corpora this script wrote: chosen side
+# 0.5% emoji, rejected side 7.3% / 5.9% -- every bit of it from generated_v2,
+# whose "generic assistant" rejected replies used emoji and whose terse chosen
+# replies did not. ORPO learned "emoji => rejected" as a side effect, and the
+# served adapter emitted 0 emoji in 68/68 replies against Seth's measured 12.6%
+# (docs/plans/2026-09-02-persona-evolution/spec.md §3b). Same shape as the
+# casing confound scripts/rebalance_preference_corpus.py exists for.
+#
+# The fix strips emoji from the REJECTED side of any pair whose chosen side has
+# none, so the pair differs in content, never in emoji. Emoji on the chosen side
+# (Seth's real replies) is kept: that is the positive signal. Nothing is ever
+# invented -- a reply that was ONLY emoji, or that would collapse into its
+# partner, drops the whole pair instead.
+MAX_EMOJI_MARGIN = 0.02   # rejected_rate - chosen_rate allowed after neutralisation
+
+
+def is_emoji_char(ch):
+    """Same heuristic as scripts/eval_persona_evolution.py / persona_style_card.py."""
+    return unicodedata.category(ch) == "So" or 0x1F000 <= ord(ch) <= 0x1FAFF
+
+
+def strip_emoji(text):
+    """Remove emoji (plus the ZWJ / variation-selector glue that only exists
+    to join them) and tidy the whitespace that removal leaves behind."""
+    out = []
+    for ch in text or "":
+        if is_emoji_char(ch) or ch in ("‍", "️", "︎", "⃣"):
+            continue
+        out.append(ch)
+    return " ".join("".join(out).split())
+
+
+def has_emoji(text):
+    return any(is_emoji_char(ch) for ch in (text or ""))
+
+
+def neutralize_emoji_pairs(rows):
+    """In place: strip emoji from `rejected` where `chosen` has none. Pairs
+    that would become empty or identical are removed. Returns the number of
+    rows touched (stripped or dropped)."""
+    touched = 0
+    kept = []
+    for r in rows:
+        if has_emoji(r["rejected"]) and not has_emoji(r["chosen"]):
+            touched += 1
+            stripped = strip_emoji(r["rejected"])
+            if not stripped or stripped == r["chosen"]:
+                continue          # drop: neutralising would fabricate a degenerate pair
+            r["rejected"] = stripped
+        kept.append(r)
+    rows[:] = kept
+    return touched
+
+
+def emoji_stats(rows):
+    n = len(rows)
+    ch = sum(1 for r in rows if has_emoji(r["chosen"]))
+    rj = sum(1 for r in rows if has_emoji(r["rejected"]))
+    return {
+        "n": n,
+        "chosen_rate": (ch / n) if n else 0.0,
+        "rejected_rate": (rj / n) if n else 0.0,
+        "rejected_only": sum(1 for r in rows if has_emoji(r["rejected"]) and not has_emoji(r["chosen"])),
+        "chosen_only": sum(1 for r in rows if has_emoji(r["chosen"]) and not has_emoji(r["rejected"])),
+        "margin": ((rj - ch) / n) if n else 0.0,
+    }
+
+
 def norm(s):
     return (s or "").strip()
 
@@ -248,6 +318,13 @@ def validate(rows, floor):
             problems.append(f"row {i} ({r['_src']}): chosen == rejected")
     if problems:
         raise SystemExit("FATAL: degenerate rows:\n  " + "\n  ".join(problems[:20]))
+    es = emoji_stats(rows)
+    if es["margin"] > MAX_EMOJI_MARGIN:
+        raise SystemExit(
+            f"FATAL: emoji still marks the rejected side (rejected {es['rejected_rate']:.3f} vs "
+            f"chosen {es['chosen_rate']:.3f}, {es['rejected_only']} rejected-only rows, margin "
+            f"{es['margin']:.3f} > {MAX_EMOJI_MARGIN}). Run neutralize_emoji_pairs before "
+            f"validate -- training on this teaches 'emoji => rejected'.")
     if len(rows) < floor:
         raise SystemExit(
             f"FATAL: {len(rows)} pairs < floor {floor}. Training on this would be "
@@ -270,6 +347,9 @@ def main():
     synth = load_dpo_pairs(Path(args.db))
     human = load_human_detections()
     rows = human + gold + synth
+    emoji_before = emoji_stats(rows)
+    emoji_touched = neutralize_emoji_pairs(rows)
+    emoji_after = emoji_stats(rows)
     validate(rows, args.floor)
 
     rng = random.Random(args.seed)
@@ -297,6 +377,8 @@ def main():
         # The cycle-5 eval MUST exclude these ids -- they are now training data.
         "cycle4_ids_consumed": CYCLE4_KEEP,
         "cycle4_dropped": CYCLE4_DROP,
+        "emoji": {"before": emoji_before, "after": emoji_after,
+                  "rejected_rows_neutralized": emoji_touched, "max_margin": MAX_EMOJI_MARGIN},
         "seed": args.seed,
     }
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2))
@@ -305,6 +387,9 @@ def main():
     for k, v in sorted(by_src.items(), key=lambda kv: -kv[1]):
         print(f"  {k:20} {v:>4}")
     print(f"  {'TOTAL':20} {len(rows):>4}  (train {len(train)} / valid {len(valid)})")
+    print(f"[v6-corpus] emoji: chosen {emoji_after['chosen_rate']:.3f} / rejected "
+          f"{emoji_after['rejected_rate']:.3f} after neutralising {emoji_touched} rejected-only rows "
+          f"(was {emoji_before['chosen_rate']:.3f} / {emoji_before['rejected_rate']:.3f})")
     print(f"[v6-corpus] cycle-4 ids consumed: {len(CYCLE4_KEEP)} "
           f"(exclude ALL of these from the cycle-5 eval)")
     return 0

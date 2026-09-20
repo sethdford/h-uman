@@ -618,7 +618,19 @@ def cmd_train(args: argparse.Namespace) -> int:
         sys.exit(f"[mlx_tune_train] FATAL: unknown --train-mode {args.train_mode!r}")
 
     print(f"Training Mode: {args.train_mode}")  # matches train-glm-adapter.sh's grep
+    heldout = []
+    valid_path = data_dir / "valid.jsonl"
+    if args.train_mode == "simpo" and valid_path.is_file():
+        heldout = load_preference_pairs(valid_path)
+        before, n_ho = heldout_simpo_loss(trainer, heldout, args.beta, args.gamma)
+        if before is not None:
+            print(f"[mlx_tune_train] held-out simpo loss: before={before:.4f} n={n_ho}", flush=True)
     trainer.train()
+    if heldout and before is not None:
+        after, n_ho2 = heldout_simpo_loss(trainer, heldout, args.beta, args.gamma)
+        if after is not None:
+            print(f"[mlx_tune_train] held-out simpo loss: before={before:.4f} after={after:.4f} "
+                  f"delta={after - before:+.4f} n={n_ho2}", flush=True)
 
     adapter_out = Path(args.adapter_out)
     adapter_out.mkdir(parents=True, exist_ok=True)
@@ -635,6 +647,40 @@ def cmd_train(args: argparse.Namespace) -> int:
 
 
 # --------------------------------------------------------------------------
+
+
+HELDOUT_MAX_PAIRS = 48
+
+
+def heldout_simpo_loss(trainer, pairs, beta, gamma, max_pairs=HELDOUT_MAX_PAIRS):
+    """Mean SimPO loss over held-out preference pairs, no gradient, using the
+    trainer's own tokenisation and the same batch-1 shared-prefix path it trains
+    with. Called before and after trainer.train(): the per-step training loss at
+    beta 2.0 has a per-sample sd of ~0.3 (2026-09-13: range 0.50-1.73 over 400
+    steps), so a trend over 40 logged steps cannot tell learning from noise —
+    the same fixed pairs scored twice can. Returns (mean, n) or (None, 0)."""
+    import mlx.core as mx
+    from mlx_tune.losses import simpo_loss
+    actual_model = trainer.model.model if hasattr(trainer.model, "model") else trainer.model
+    losses = []
+    for sample in pairs[:max_pairs]:
+        if not all(k in sample for k in ("prompt", "chosen", "rejected")):
+            continue
+        t = trainer._tokenize_pair(sample)
+        cl, rl, pl = t["chosen_length"], t["rejected_length"], t["prompt_length"]
+        if cl < 2 or rl < 2:
+            continue
+        width = max(cl, rl)
+        chosen = mx.array([trainer._pad(t["chosen_ids"], width)])
+        rejected = mx.array([trainer._pad(t["rejected_ids"], width)])
+        loss, _ = simpo_loss(actual_model, chosen, rejected, mx.array([cl]), mx.array([rl]),
+                             beta=beta, gamma=gamma, prompt_length=pl,
+                             chosen_length_py=cl, rejected_length_py=rl)
+        mx.eval(loss)
+        losses.append(float(loss.item()))
+    if not losses:
+        return None, 0
+    return sum(losses) / len(losses), len(losses)
 
 
 def build_parser() -> argparse.ArgumentParser:

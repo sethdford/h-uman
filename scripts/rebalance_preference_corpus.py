@@ -88,6 +88,11 @@ from eval_persona_evolution import (  # noqa: E402
     starts_lowercase as _starts_lowercase_or_none,
 )
 from eval_persona_evolution import terminal_punctuation  # noqa: E402
+# Emoji neutralisation is defined ONCE, in the corpus builder, so a corpus
+# built today and a corpus rebalanced at train time get the same rule.
+from build_v6_preference_corpus import (  # noqa: E402
+    has_emoji, strip_emoji, MAX_EMOJI_MARGIN,
+)
 
 DEFAULT_STYLE_CARD = os.path.expanduser("~/.human/personas/seth.style-card.json")
 DEFAULT_MAX_LOWERCASE_MARGIN = 0.15
@@ -330,6 +335,42 @@ def set_indexed_texts(rows, index, texts):
         rows[i][field] = t
 
 
+
+# ---------------------------------------------------------------------------
+# emoji axis (preference rows only)
+# ---------------------------------------------------------------------------
+
+def emoji_pair_stats(rows):
+    pairs = [r for r in rows if "chosen" in r and "rejected" in r]
+    n = len(pairs)
+    ch = sum(1 for r in pairs if has_emoji(r["chosen"]))
+    rj = sum(1 for r in pairs if has_emoji(r["rejected"]))
+    return {
+        "n_pairs": n,
+        "chosen_rate": (ch / n) if n else 0.0,
+        "rejected_rate": (rj / n) if n else 0.0,
+        "rejected_only": sum(1 for r in pairs if has_emoji(r["rejected"]) and not has_emoji(r["chosen"])),
+        "chosen_only": sum(1 for r in pairs if has_emoji(r["chosen"]) and not has_emoji(r["rejected"])),
+    }
+
+
+def neutralize_emoji_rows(rows):
+    """Preference rows: strip emoji from `rejected` where `chosen` has none;
+    drop a pair that would become empty or identical. KTO rows pass through.
+    Returns (rows, n_stripped, n_dropped)."""
+    out, stripped, dropped = [], 0, 0
+    for r in rows:
+        if "chosen" in r and "rejected" in r and has_emoji(r["rejected"]) and not has_emoji(r["chosen"]):
+            t = strip_emoji(r["rejected"])
+            if not t or t == r["chosen"]:
+                dropped += 1
+                continue
+            r["rejected"] = t
+            stripped += 1
+        out.append(r)
+    return out, stripped, dropped
+
+
 # ---------------------------------------------------------------------------
 # style-card target resolution
 # ---------------------------------------------------------------------------
@@ -495,6 +536,13 @@ def build_parser():
                     help="[--match-sides only] refuse if |chosen_after - rejected_after| "
                          "exceeds this on EITHER lowercase-start or terminal-punct "
                          "(default: %(default)s)")
+    ap.add_argument("--match-emoji", action="store_true", default=False,
+                    help="strip emoji from the REJECTED side of every preference pair whose "
+                         "chosen side has none, so emoji is never a chosen/rejected "
+                         "discriminator (2026-09-05: the v6 corpus had chosen 0.5%% vs rejected "
+                         "7.3%% and the adapter learned 'emoji => rejected'). Chosen-side emoji "
+                         "is kept; a pair that would become empty or identical is dropped. "
+                         "Preference {chosen,rejected} rows only; KTO rows are untouched.")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--dry-run", action="store_true",
                     help="measure and report only; write nothing")
@@ -571,13 +619,39 @@ def main(argv=None):
                 f"sampling could not close the gap (are chosen/rejected already "
                 f"nearly identical on this axis?); nothing written")
 
+    # --match-emoji is applied to the FINAL texts (after casing/punct) on a
+    # working copy, so the report below reflects what would be written.
+    work = [dict(r) for r in rows]
+    set_indexed_texts(work, chosen_index, after_chosen)
+    if args.match_sides:
+        set_indexed_texts(work, rejected_index, after_rejected)
+    emoji = emoji_pair_stats(work)
+    dropped = 0
+    if args.match_emoji:
+        work, stripped, dropped = neutralize_emoji_rows(work)
+        after = emoji_pair_stats(work)
+        emoji = {**{k + "_before": v for k, v in emoji.items()},
+                 **{k + "_after": v for k, v in after.items()},
+                 "rejected_rows_stripped": stripped, "rows_dropped": dropped}
+        print(f"[rebalance] emoji: rejected-only rows {emoji['rejected_only_before']} -> "
+              f"{emoji['rejected_only_after']} (stripped {stripped}, dropped {dropped}); chosen rate "
+              f"{emoji['chosen_rate_after']:.3f}, rejected rate {emoji['rejected_rate_after']:.3f}")
+        if emoji["rejected_rate_after"] - emoji["chosen_rate_after"] > MAX_EMOJI_MARGIN:
+            sys.exit(f"REFUSING: --match-emoji left rejected emoji rate {emoji['rejected_rate_after']:.3f} "
+                     f"above chosen {emoji['chosen_rate_after']:.3f} by more than {MAX_EMOJI_MARGIN}; nothing written")
+    else:
+        emoji = {**{k + "_before": v for k, v in emoji.items()},
+                 **{k + "_after": v for k, v in emoji.items()}}
+        print(f"[rebalance] emoji (not matched): rejected-only rows {emoji['rejected_only_after']}, "
+              f"chosen rate {emoji['chosen_rate_after']:.3f}, rejected rate {emoji['rejected_rate_after']:.3f}"
+              + ("  <-- pass --match-emoji" if emoji["rejected_only_after"] else ""))
+    stats["emoji_rate"] = emoji
+
     if args.dry_run:
         print("[rebalance] --dry-run: nothing written")
         return 0
 
-    set_indexed_texts(rows, chosen_index, after_chosen)
-    if args.match_sides:
-        set_indexed_texts(rows, rejected_index, after_rejected)
+    rows = work
 
     out_dir = os.path.dirname(os.path.abspath(args.output))
     if out_dir:
@@ -592,6 +666,7 @@ def main(argv=None):
         "output": args.output,
         "seed": args.seed,
         "match_sides": args.match_sides,
+        "match_emoji": args.match_emoji,
         "targets": {"lowercase_start_rate": target_lowercase, "terminal_punct_rate": target_punct},
         "target_provenance": provenance,
         "max_lowercase_margin": args.max_lowercase_margin,

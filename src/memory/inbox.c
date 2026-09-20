@@ -1,5 +1,6 @@
 #include "human/memory/inbox.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
 #include "human/memory.h"
 #include "human/memory/ingest.h"
@@ -47,17 +48,8 @@ hu_error_t hu_inbox_init(hu_inbox_watcher_t *watcher, hu_allocator_t *alloc, hu_
             watcher->inbox_dir_len = 23;
         }
 #else
-        const char *home = getenv("HOME");
-        const char *tmp_dir_owned = NULL;
-        if (!home) {
-            tmp_dir_owned = hu_platform_get_temp_dir(alloc);
-            home = tmp_dir_owned ? tmp_dir_owned : "/tmp";
-        }
         char buf[1024];
-        int n = snprintf(buf, sizeof(buf), "%s/" HU_INBOX_DEFAULT_DIR, home);
-        if (tmp_dir_owned) {
-            alloc->free(alloc->ctx, (char *)tmp_dir_owned, strlen(tmp_dir_owned) + 1);
-        }
+        int n = hu_paths_state(buf, sizeof(buf), "inbox");
         if (n <= 0 || (size_t)n >= sizeof(buf))
             return HU_ERR_INVALID_ARGUMENT;
         watcher->inbox_dir = hu_strndup(alloc, buf, (size_t)n);

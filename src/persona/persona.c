@@ -3,9 +3,11 @@
 #include "human/core/gate_mode.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
 #include "human/data/loader.h"
 #include "human/persona/circadian.h"
+#include "human/persona/emotion_card.h"
 #include "human/persona/persona_fuse.h"
 #include "human/persona/relationship.h"
 #include "human/persona/style_card.h"
@@ -32,10 +34,7 @@ const char *hu_persona_base_dir(char *buf, size_t cap) {
         memcpy(buf, override, len + 1);
         return buf;
     }
-    const char *home = getenv("HOME");
-    if (!home || !home[0])
-        return NULL;
-    int n = snprintf(buf, cap, "%s/.human/personas", home);
+    int n = hu_paths_state(buf, cap, "personas");
     return (n > 0 && (size_t)n < cap) ? buf : NULL;
 }
 
@@ -119,8 +118,72 @@ hu_error_t hu_persona_build_absolute_rules_fmt(const hu_persona_t *persona, cons
         hu_error_t rerr = hu_style_card_render_casual_rules(&card, rule2, sizeof(rule2), NULL);
         if (rerr != HU_OK)
             return rerr;
-        n = snprintf(buf, cap, "%s%s%s%s", hu_rules_head, rule2, hu_rules_casual_tail,
-                     hu_rules_tail);
+        /* Rule 14 — the MEASURED emotional register, rendered from the
+         * persona's emotion card (scripts/measure_emotion_card.py). Gated on
+         * scripts/eval_emotion_register.py (nightly JSD of the twin's sent
+         * replies against the card) plus a blind A/B round: do not flip
+         * HU_EMOTION_REGISTER to live without a measurement showing the rule
+         * moves the twin TOWARD the card. OFF renders nothing; SHADOW logs
+         * once what it would send; only LIVE reaches the prompt. */
+        char rule14[768];
+        rule14[0] = '\0';
+        hu_gate_mode_t em = hu_emotion_register_mode();
+        if (em != HU_GATE_OFF) {
+            hu_emotion_card_t ecard;
+            if (hu_emotion_card_resolve(pname, pname_len, &ecard)) {
+                char rendered[768];
+                if (hu_emotion_card_render_rule(&ecard, rendered, sizeof(rendered), NULL) ==
+                    HU_OK) {
+                    if (em == HU_GATE_LIVE) {
+                        snprintf(rule14, sizeof(rule14), "%s", rendered);
+                    } else {
+                        static atomic_bool shadow_logged = false;
+                        hu_log_info_once(&shadow_logged, "persona", NULL,
+                                         "emotion register SHADOW (HU_EMOTION_REGISTER): would "
+                                         "append to the casual rules: %s",
+                                         rendered);
+                    }
+                }
+            }
+        }
+        /* Rule 15 — the MEASURED substantive register, from the style card's
+         * substantive_reply axis. Same ladder as rule 14; the gating
+         * measurement is the 3-repeat multi-turn A/B (see style_card.h). */
+        char rule15[512];
+        rule15[0] = '\0';
+        hu_gate_mode_t sm = hu_substantive_register_mode();
+        if (sm != HU_GATE_OFF) {
+            char rendered15[512];
+            if (hu_style_card_render_substantive_rule(&card, rendered15, sizeof(rendered15),
+                                                      NULL) == HU_OK) {
+                if (sm == HU_GATE_LIVE) {
+                    snprintf(rule15, sizeof(rule15), "%s", rendered15);
+                } else {
+                    static atomic_bool shadow15_logged = false;
+                    hu_log_info_once(&shadow15_logged, "persona", NULL,
+                                     "substantive register SHADOW (HU_SUBSTANTIVE_REGISTER): "
+                                     "would append to the casual rules: %s",
+                                     rendered15);
+                }
+            }
+        }
+        n = snprintf(buf, cap, "%s%s%s%s%s%s", hu_rules_head, rule2, hu_rules_casual_tail,
+                     hu_rules_tail, rule14, rule15);
+        /* The measured rules are optional; the base rules are not. A caller
+         * with a smaller buffer gets the base rules rather than nothing
+         * (agent_turn treats a failed build as "no rules at all"). */
+        if (n >= 0 && (size_t)n + 1 > cap && rule15[0]) {
+            hu_log_warn("persona", NULL, "absolute rules: %d bytes exceed %zu; dropping rule 15", n,
+                        cap);
+            n = snprintf(buf, cap, "%s%s%s%s%s", hu_rules_head, rule2, hu_rules_casual_tail,
+                         hu_rules_tail, rule14);
+        }
+        if (n >= 0 && (size_t)n + 1 > cap && rule14[0]) {
+            hu_log_warn("persona", NULL, "absolute rules: %d bytes exceed %zu; dropping rule 14", n,
+                        cap);
+            n = snprintf(buf, cap, "%s%s%s%s", hu_rules_head, rule2, hu_rules_casual_tail,
+                         hu_rules_tail);
+        }
     }
     if (n < 0 || (size_t)n + 1 > cap)
         return HU_ERR_OUT_OF_MEMORY;
@@ -3073,67 +3136,61 @@ hu_error_t hu_persona_load(hu_allocator_t *alloc, const char *name, size_t name_
      * This gives the persona runtime awareness of where the user has been lately,
      * so it can say "I was in Boston last week" instead of making things up. */
     {
-        const char *home = getenv("HOME");
-        if (home) {
-            char ra_path[HU_PERSONA_PATH_MAX];
-            int rn =
-                snprintf(ra_path, sizeof(ra_path), "%s/.human/photos/recent_activity.json", home);
-            if (rn > 0 && (size_t)rn < sizeof(ra_path)) {
-                FILE *rf = fopen(ra_path, "rb");
-                if (rf) {
-                    if (fseek(rf, 0, SEEK_END) == 0) {
-                        long rsz = ftell(rf);
-                        if (rsz > 0 && rsz < (long)(32 * 1024)) {
-                            rewind(rf);
-                            char *rbuf = (char *)alloc->alloc(alloc->ctx, (size_t)rsz + 1);
-                            if (rbuf) {
-                                size_t rrd = fread(rbuf, 1, (size_t)rsz, rf);
-                                rbuf[rrd] = '\0';
-                                /* Parse the JSON to build a concise summary string */
-                                hu_json_value_t *ra_root = NULL;
-                                hu_error_t jerr = hu_json_parse(alloc, rbuf, rrd, &ra_root);
-                                if (jerr == HU_OK && ra_root && ra_root->type == HU_JSON_OBJECT) {
-                                    hu_json_value_t *locs =
-                                        hu_json_object_get(ra_root, "locations");
-                                    int window =
-                                        (int)hu_json_get_number(ra_root, "window_days", 30);
-                                    int photo_count =
-                                        (int)hu_json_get_number(ra_root, "photo_count", 0);
-                                    if (locs && locs->type == HU_JSON_ARRAY &&
-                                        locs->data.array.len > 0 && photo_count > 0) {
-                                        char summary[1024];
-                                        int sn = snprintf(summary, sizeof(summary),
-                                                          "Recent activity (last %d days, %d "
-                                                          "photos): ",
-                                                          window, photo_count);
-                                        size_t loc_count = locs->data.array.len;
-                                        for (size_t li = 0; li < loc_count && li < 5 &&
-                                                            (size_t)sn < sizeof(summary) - 60;
-                                             li++) {
-                                            const hu_json_value_t *loc = locs->data.array.items[li];
-                                            if (!loc || loc->type != HU_JSON_OBJECT)
-                                                continue;
-                                            const char *place = hu_json_get_string(loc, "place");
-                                            int pc = (int)hu_json_get_number(loc, "photo_count", 0);
-                                            if (place && pc > 0) {
-                                                sn += snprintf(
-                                                    summary + sn, sizeof(summary) - (size_t)sn,
-                                                    "%s%s (%d)", li > 0 ? ", " : "", place, pc);
-                                            }
+        char ra_path[HU_PERSONA_PATH_MAX];
+        int rn = hu_paths_state(ra_path, sizeof(ra_path), "photos/recent_activity.json");
+        if (rn > 0 && (size_t)rn < sizeof(ra_path)) {
+            FILE *rf = fopen(ra_path, "rb");
+            if (rf) {
+                if (fseek(rf, 0, SEEK_END) == 0) {
+                    long rsz = ftell(rf);
+                    if (rsz > 0 && rsz < (long)(32 * 1024)) {
+                        rewind(rf);
+                        char *rbuf = (char *)alloc->alloc(alloc->ctx, (size_t)rsz + 1);
+                        if (rbuf) {
+                            size_t rrd = fread(rbuf, 1, (size_t)rsz, rf);
+                            rbuf[rrd] = '\0';
+                            /* Parse the JSON to build a concise summary string */
+                            hu_json_value_t *ra_root = NULL;
+                            hu_error_t jerr = hu_json_parse(alloc, rbuf, rrd, &ra_root);
+                            if (jerr == HU_OK && ra_root && ra_root->type == HU_JSON_OBJECT) {
+                                hu_json_value_t *locs = hu_json_object_get(ra_root, "locations");
+                                int window = (int)hu_json_get_number(ra_root, "window_days", 30);
+                                int photo_count =
+                                    (int)hu_json_get_number(ra_root, "photo_count", 0);
+                                if (locs && locs->type == HU_JSON_ARRAY &&
+                                    locs->data.array.len > 0 && photo_count > 0) {
+                                    char summary[1024];
+                                    int sn = snprintf(summary, sizeof(summary),
+                                                      "Recent activity (last %d days, %d "
+                                                      "photos): ",
+                                                      window, photo_count);
+                                    size_t loc_count = locs->data.array.len;
+                                    for (size_t li = 0; li < loc_count && li < 5 &&
+                                                        (size_t)sn < sizeof(summary) - 60;
+                                         li++) {
+                                        const hu_json_value_t *loc = locs->data.array.items[li];
+                                        if (!loc || loc->type != HU_JSON_OBJECT)
+                                            continue;
+                                        const char *place = hu_json_get_string(loc, "place");
+                                        int pc = (int)hu_json_get_number(loc, "photo_count", 0);
+                                        if (place && pc > 0) {
+                                            sn += snprintf(
+                                                summary + sn, sizeof(summary) - (size_t)sn,
+                                                "%s%s (%d)", li > 0 ? ", " : "", place, pc);
                                         }
-                                        if ((size_t)sn < sizeof(summary))
-                                            out->recent_activity =
-                                                hu_strndup(alloc, summary, (size_t)sn);
                                     }
+                                    if ((size_t)sn < sizeof(summary))
+                                        out->recent_activity =
+                                            hu_strndup(alloc, summary, (size_t)sn);
                                 }
-                                if (ra_root)
-                                    hu_json_free(alloc, ra_root);
-                                alloc->free(alloc->ctx, rbuf, (size_t)rsz + 1);
                             }
+                            if (ra_root)
+                                hu_json_free(alloc, ra_root);
+                            alloc->free(alloc->ctx, rbuf, (size_t)rsz + 1);
                         }
                     }
-                    fclose(rf);
                 }
+                fclose(rf);
             }
         }
     }
