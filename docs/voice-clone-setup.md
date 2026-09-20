@@ -38,6 +38,14 @@ human voice clone --file <path> [--name <name>] [--lang <code>] [--persona <name
 | `--lang` | ISO 639-1 language code | "en" |
 | `--persona` | Auto-update this persona's voice config | (none) |
 
+## Preview a Reply (hear what the daemon would send)
+
+```bash
+human voice preview --persona seth --text "ok so i thought about it more. that trip sounds amazing! we should totally do it" --incoming "wanna go to zion in october" --out ~/Desktop/preview.caf
+```
+
+This runs the exact daemon pipeline — transcript prep (sentence breaks, per-sentence emotion, thinking sounds, nonverbals), the persona's model/speed, and the channel's audio container (CAF for iMessage) — and prints the annotated transcript plus the generation config before writing the file. Use it to tune `voice.default_speed` / `voice.model` without waiting for the daemon's voice roll.
+
 ## Gateway API
 
 The `voice.clone` JSON-RPC method accepts base64-encoded audio:

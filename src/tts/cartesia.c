@@ -30,7 +30,46 @@ const char *hu_tts_format_for_channel(const char *channel_name) {
 #define MOCK_MP3_HEADER_LEN 4
 #define MOCK_MP3_REPEAT     100
 
-#if !HU_IS_TEST && defined(HU_HTTP_CURL)
+#if defined(HU_IS_TEST) && HU_IS_TEST
+/* Test-only capture of the last request handed to the mock, so tests can
+ * prove what the daemon path sends (transcript + generation config). */
+#define HU_CARTESIA_TEST_CAPTURE_CAP 8192
+static char hu_cartesia_test_transcript_buf[HU_CARTESIA_TEST_CAPTURE_CAP];
+static char hu_cartesia_test_model_buf[64];
+static char hu_cartesia_test_voice_buf[64];
+static char hu_cartesia_test_emotion_buf[32];
+static hu_cartesia_tts_config_t hu_cartesia_test_config_copy;
+
+static void cartesia_test_capture(const char *transcript, size_t transcript_len,
+                                  const hu_cartesia_tts_config_t *config) {
+    size_t n = transcript_len < HU_CARTESIA_TEST_CAPTURE_CAP - 1 ? transcript_len
+                                                                 : HU_CARTESIA_TEST_CAPTURE_CAP - 1;
+    memcpy(hu_cartesia_test_transcript_buf, transcript, n);
+    hu_cartesia_test_transcript_buf[n] = '\0';
+    memset(&hu_cartesia_test_config_copy, 0, sizeof(hu_cartesia_test_config_copy));
+    if (!config)
+        return;
+    snprintf(hu_cartesia_test_model_buf, sizeof(hu_cartesia_test_model_buf), "%s",
+             config->model_id ? config->model_id : "");
+    snprintf(hu_cartesia_test_voice_buf, sizeof(hu_cartesia_test_voice_buf), "%s",
+             config->voice_id ? config->voice_id : "");
+    snprintf(hu_cartesia_test_emotion_buf, sizeof(hu_cartesia_test_emotion_buf), "%s",
+             config->emotion ? config->emotion : "");
+    hu_cartesia_test_config_copy = *config;
+    hu_cartesia_test_config_copy.model_id = hu_cartesia_test_model_buf;
+    hu_cartesia_test_config_copy.voice_id = hu_cartesia_test_voice_buf;
+    hu_cartesia_test_config_copy.emotion = hu_cartesia_test_emotion_buf;
+}
+
+const char *hu_cartesia_test_last_transcript(void) {
+    return hu_cartesia_test_transcript_buf;
+}
+
+const hu_cartesia_tts_config_t *hu_cartesia_test_last_config(void) {
+    return &hu_cartesia_test_config_copy;
+}
+#endif /* HU_IS_TEST */
+
 /* Cartesia /tts/bytes supports mp3 and wav containers (not ogg). */
 typedef enum {
     CARTESIA_API_MP3,
@@ -81,7 +120,68 @@ static void apply_defaults(const hu_cartesia_tts_config_t *config, const char **
         *nonverbals = false;
     }
 }
-#endif /* !HU_IS_TEST && HU_HTTP_CURL */
+/* Append a string literal with its compile-time length — the hand-counted
+ * lengths this replaced were off by one for "{\"model_id\":\"" and
+ * ",\"emotion\":\"", which dropped a quote each and produced invalid JSON.
+ * Cartesia answered every real daemon request with HTTP 400 while the
+ * HU_IS_TEST mock kept the suite green (found 2026-09-20 via
+ * `human voice preview`). */
+#define CARTESIA_APPEND_LIT(jbuf, lit) hu_json_buf_append_raw((jbuf), (lit), sizeof(lit) - 1)
+
+hu_error_t hu_cartesia_build_tts_body(hu_allocator_t *alloc, const char *transcript,
+                                      size_t transcript_len, const hu_cartesia_tts_config_t *config,
+                                      const char *output_format, hu_json_buf_t *jbuf) {
+    if (!alloc || !transcript || transcript_len == 0 || !jbuf)
+        return HU_ERR_INVALID_ARGUMENT;
+    const char *model_id, *voice_id, *emotion;
+    float speed, volume;
+    bool nonverbals;
+    apply_defaults(config, &model_id, &voice_id, &emotion, &speed, &volume, &nonverbals);
+    cartesia_api_container_t api_ct = api_container_for_output_format(output_format);
+
+    hu_error_t err = hu_json_buf_init(jbuf, alloc);
+    if (err)
+        return err;
+    char num_buf[64];
+    int n;
+    if ((err = CARTESIA_APPEND_LIT(jbuf, "{\"model_id\":")) != HU_OK)
+        goto fail;
+    if ((err = hu_json_append_string(jbuf, model_id, strlen(model_id))) != HU_OK)
+        goto fail;
+    if ((err = CARTESIA_APPEND_LIT(jbuf, ",\"transcript\":")) != HU_OK)
+        goto fail;
+    if ((err = hu_json_append_string(jbuf, transcript, transcript_len)) != HU_OK)
+        goto fail;
+    if ((err = CARTESIA_APPEND_LIT(jbuf, ",\"voice\":{\"mode\":\"id\",\"id\":")) != HU_OK)
+        goto fail;
+    if ((err = hu_json_append_string(jbuf, voice_id, strlen(voice_id))) != HU_OK)
+        goto fail;
+    if ((err = CARTESIA_APPEND_LIT(jbuf, "},")) != HU_OK)
+        goto fail;
+    if ((err = append_output_format_json(jbuf, api_ct)) != HU_OK)
+        goto fail;
+    n = snprintf(num_buf, sizeof(num_buf), "\"speed\":%.2f,\"emotion\":", (double)speed);
+    if (n <= 0 || (size_t)n >= sizeof(num_buf)) {
+        err = HU_ERR_INTERNAL;
+        goto fail;
+    }
+    if ((err = hu_json_buf_append_raw(jbuf, num_buf, (size_t)n)) != HU_OK)
+        goto fail;
+    if ((err = hu_json_append_string(jbuf, emotion, strlen(emotion))) != HU_OK)
+        goto fail;
+    n = snprintf(num_buf, sizeof(num_buf), ",\"volume\":%.2f,\"nonverbals\":%s}}", (double)volume,
+                 nonverbals ? "true" : "false");
+    if (n <= 0 || (size_t)n >= sizeof(num_buf)) {
+        err = HU_ERR_INTERNAL;
+        goto fail;
+    }
+    if ((err = hu_json_buf_append_raw(jbuf, num_buf, (size_t)n)) != HU_OK)
+        goto fail;
+    return HU_OK;
+fail:
+    hu_json_buf_free(jbuf);
+    return err;
+}
 
 hu_error_t hu_cartesia_tts_synthesize(hu_allocator_t *alloc, const char *api_key,
                                       size_t api_key_len, const char *transcript,
@@ -106,8 +206,8 @@ hu_error_t hu_cartesia_tts_synthesize(hu_allocator_t *alloc, const char *api_key
         return HU_ERR_NOT_SUPPORTED;
 
 #if HU_IS_TEST
-    (void)config;
     (void)output_format;
+    cartesia_test_capture(transcript, transcript_len, config);
     /* Mock audio bytes for any output_format (no network). */
     static const unsigned char mock_header[MOCK_MP3_HEADER_LEN] = {0xFF, 0xFB, 0x90, 0x00};
     size_t mock_len = MOCK_MP3_HEADER_LEN * MOCK_MP3_REPEAT;
@@ -120,69 +220,12 @@ hu_error_t hu_cartesia_tts_synthesize(hu_allocator_t *alloc, const char *api_key
     *out_len = mock_len;
     return HU_OK;
 #elif defined(HU_HTTP_CURL)
-    const char *model_id, *voice_id, *emotion;
-    float speed, volume;
-    bool nonverbals;
-    apply_defaults(config, &model_id, &voice_id, &emotion, &speed, &volume, &nonverbals);
-    cartesia_api_container_t api_ct = api_container_for_output_format(output_format);
-
     hu_json_buf_t jbuf;
-    hu_error_t err = hu_json_buf_init(&jbuf, alloc);
+    hu_error_t err =
+        hu_cartesia_build_tts_body(alloc, transcript, transcript_len, config, output_format, &jbuf);
     if (err)
         return err;
-
-    err = hu_json_buf_append_raw(&jbuf, "{\"model_id\":\"", 12);
-    if (err)
-        goto fail;
-    err = hu_json_buf_append_raw(&jbuf, model_id, strlen(model_id));
-    if (err)
-        goto fail;
-    err = hu_json_buf_append_raw(&jbuf, "\",\"transcript\":\"", 16);
-    if (err)
-        goto fail;
-    err = hu_json_append_string(&jbuf, transcript, transcript_len);
-    if (err)
-        goto fail;
-    err = hu_json_buf_append_raw(&jbuf, "\",\"voice\":{\"mode\":\"id\",\"id\":\"", 30);
-    if (err)
-        goto fail;
-    err = hu_json_append_string(&jbuf, voice_id, strlen(voice_id));
-    if (err)
-        goto fail;
-    err = hu_json_buf_append_raw(&jbuf, "\"},", 3);
-    if (err)
-        goto fail;
-    err = append_output_format_json(&jbuf, api_ct);
-    if (err)
-        goto fail;
-
-    char num_buf[64];
-    int n = snprintf(num_buf, sizeof(num_buf), "\"speed\":%.2f", (double)speed);
-    if (n <= 0 || (size_t)n >= sizeof(num_buf)) {
-        err = HU_ERR_INTERNAL;
-        goto fail;
-    }
-    err = hu_json_buf_append_raw(&jbuf, num_buf, (size_t)n);
-    if (err)
-        goto fail;
-    err = hu_json_buf_append_raw(&jbuf, ",\"emotion\":\"", 11);
-    if (err)
-        goto fail;
-    err = hu_json_append_string(&jbuf, emotion, strlen(emotion));
-    if (err)
-        goto fail;
-    n = snprintf(num_buf, sizeof(num_buf), ",\"volume\":%.2f,\"nonverbals\":%s}", (double)volume,
-                 nonverbals ? "true" : "false");
-    if (n <= 0 || (size_t)n >= sizeof(num_buf)) {
-        err = HU_ERR_INTERNAL;
-        goto fail;
-    }
-    err = hu_json_buf_append_raw(&jbuf, num_buf, (size_t)n);
-    if (err)
-        goto fail;
-    err = hu_json_buf_append_raw(&jbuf, "}}", 2);
-    if (err)
-        goto fail;
+    int n;
 
     char headers_buf[768];
     n = snprintf(headers_buf, sizeof(headers_buf),
@@ -219,10 +262,11 @@ hu_error_t hu_cartesia_tts_synthesize(hu_allocator_t *alloc, const char *api_key
         hu_http_response_free(alloc, &resp);
         return HU_ERR_OUT_OF_MEMORY;
     }
-    memcpy(out, resp.body, resp.body_len);
+    size_t body_len = resp.body_len; /* read BEFORE free: the free zeroes resp */
+    memcpy(out, resp.body, body_len);
     hu_http_response_free(alloc, &resp);
     *out_bytes = out;
-    *out_len = resp.body_len;
+    *out_len = body_len;
     return HU_OK;
 
 fail:
@@ -249,12 +293,12 @@ hu_error_t hu_cartesia_tts_synthesize(hu_allocator_t *alloc, const char *api_key
                                       const char *output_format, unsigned char **out_bytes,
                                       size_t *out_len) {
 #if HU_IS_TEST
-    (void)config;
     (void)output_format;
     if (!alloc || !out_bytes || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
     if (!api_key || api_key_len == 0 || !transcript || transcript_len == 0)
         return HU_ERR_INVALID_ARGUMENT;
+    cartesia_test_capture(transcript, transcript_len, config);
     *out_bytes = NULL;
     *out_len = 0;
     /* Privacy kill-switch parity with the HU_ENABLE_CARTESIA build. */
