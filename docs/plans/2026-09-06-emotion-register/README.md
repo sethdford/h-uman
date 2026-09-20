@@ -242,6 +242,45 @@ holds 101 of them with the delivered text, and the judge-free rates above
 took one query. The next measurement of "substantive register" should be
 run on those, not on scripted synthetic contacts.
 
+### 2026-09-20 — the production register, measured nightly (delivered rows only)
+
+`scripts/eval_production_register.py` (nightly stage [5/5], no server, no
+judge): delivered replies from `production_outcomes` by inbound register,
+against the cards, with the cards' own definitions.
+
+**Correction made the same morning.** The first cut counted every row since
+09-01 (n=101, substantive n=19, median 47 chars) and the numbers were
+wrong in kind: `chosen` holds the DELIVERED text only for rows written
+after the send-funnel recorder landed (353434eb1, 2026-09-12). Before it
+the recorder ran ahead of the AI-tell gate, so a row could hold a draft
+the gate retried away — on 09-10 the row says "Could you please clarify
+or provide more details…" while the log shows the gate caught "please
+clarify", retried, and delivered "lol what". The stage now floors its
+window at 2026-09-13 and says so in the verdict.
+
+Delivered rows since the floor (7 days): **n=22**, agreement-opener 0.09,
+dash 0.00, scaffold 0.00, median 15 chars; **substantive inbounds: 0**,
+distress: 0. The product answered no long or question-bearing inbound in
+that week, so the substantive register is not yet measurable on the send
+path; the stage will report it when n ≥ 5. What it can say now: 22 real
+replies, none opening on reflexive agreement beyond the persona's own
+rate, none with a dash, none with a support scaffold.
+
+**Two service-desk replies were delivered in September** (found by reading
+the rows): 09-16 "Yes, I can help you with that. Please let me know the
+details of what you need" and 09-19 "This solution will effectively
+address your needs." (the contact answered "?"). Two more of the family
+were caught by the gate and retried (09-07, 09-10). None of the phrases
+appear in Seth's own 1,047 texts (chat.db minus the daemon's rows).
+The AI-tell table gained the family — "I can help (you) with that",
+"let me know what you need / the details", "information or assistance",
+"happy to provide", "This solution will", "address your needs", "what you
+need help with", "provide more details" — pinned by
+`test_ai_tell_service_desk_family_delivered_in_september`. Noted, not
+fixed: "feel free to" in the legacy list matches 4 real Seth texts (cost
+is one retry, not a drop); and on 09-19 the verifier flagged the claim
+and consistency drift scored 0.03, and neither blocks a send.
+
 ## Multi-turn A/B on the production prompt (2026-09-13)
 
 `scripts/eval_multiturn_local.py --persona-prompt production` (new: the

@@ -57,6 +57,7 @@ MULTITURN="${REPO}/scripts/eval_multiturn_local.py"
 FIDELITY="${REPO}/scripts/eval_fidelity_nightly.py"
 BLIND_AB="${REPO}/scripts/eval_blinded_ab.py"
 EMOTION_REGISTER="${REPO}/scripts/eval_emotion_register.py"
+PRODUCTION_REGISTER="${REPO}/scripts/eval_production_register.py"
 BLIND_AB_GATE="${REPO}/docs/evaluation/blind_ab_gate.json"
 GROUND_TRUTH="${REPO}/data/imessage/ground_truth.jsonl"
 
@@ -256,7 +257,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
   log "  binoculars:    HU_NIGHTLY_BINOCULARS=$HU_NIGHTLY_BINOCULARS (advisory AI-tell after stage 3)"
   log "  binoc-dpo:     HU_NIGHTLY_BINOCULARS_DPO=$HU_NIGHTLY_BINOCULARS_DPO (0=off, 1=shadow, 2=live)"
   log "  fidelity mode: $(fidelity_mode)"
-  log "  plan: [1/4] multiturn (needs :8741), [2/4] fidelity (served via :8741; in-process only if DOWN), [3/4] blind-ab gate refresh (REAL measurement), [4/4] emotion register (local judge on :8741), serial"
+  log "  plan: [1/4] multiturn (needs :8741), [2/4] fidelity (served via :8741; in-process only if DOWN), [3/4] blind-ab gate refresh (REAL measurement), [4/4] emotion register (local judge on :8741), [5/5] production register (judge-free, memory.db only), serial"
   exit 0
 fi
 
@@ -475,6 +476,23 @@ elif server_up; then
   [ "$er_rc" -eq 0 ] && archive_verdict emotion-register "$ER_OUT"
 else
   log "[4/4] emotion-register: :8741 DOWN — deferring"
+fi
+
+# ---- 5) production register (judge-free, no server) -------------------------
+# 2026-09-20: the evidence about what the product SENDS is production_outcomes,
+# not a scripted contact. Delivered replies by inbound register against the
+# persona's measured cards; refuses below 20 turns; advisory gaps only.
+if [ "$SMOKE" -eq 1 ]; then
+  log "[5/5] production-register: skipped (--smoke)"
+elif ! [ -f "$PRODUCTION_REGISTER" ]; then
+  log "[5/5] production-register: SKIPPED — missing $PRODUCTION_REGISTER"
+else
+  PR_OUT="${LOG_DIR}/eval-production-register-latest.json"
+  set +e
+  "$PY" "$PRODUCTION_REGISTER" --output-json "$PR_OUT"; pr_rc=$?
+  set -e
+  log "[5/5] production-register exit=$pr_rc ($(case $pr_rc in 0)echo MEASURED;;3)echo REFUSED-see-stderr;;*)echo "rc=$pr_rc";;esac))"
+  [ "$pr_rc" -eq 0 ] && archive_verdict production-register "$PR_OUT"
 fi
 
 log "=== nightly_eval done ==="
