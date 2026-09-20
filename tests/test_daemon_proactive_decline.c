@@ -154,12 +154,61 @@ static void test_gate_and_send_llm_skip_records_reason_and_sends_nothing(void) {
                                        HU_PROACTIVE_DECISION_DECLINE, "llm_skip", 0));
 }
 
+/* The vtable check is the one condition in the chain that is NOT a policy
+ * gate: a channel with no send entry point cannot deliver, but nothing
+ * DECIDED against the proposal. Recording a decline there would teach
+ * eval_when_to_speak.py that a gate fired when none did, so the contract is
+ * sent=false with NO proactive_decisions row and the draft left untouched
+ * (the mutating validator/complexity block is inside the vtable branch).
+ *
+ * Reaching the check means gates 1-3 must all PASS, which pins their pass
+ * conditions too. The load-bearing one is the budget: a zeroed
+ * hu_proactive_budget_t is EXHAUSTED (governor.c: weekly_used 0 < weekly_max
+ * 0 is false), so it would fail on the governor gate and write a
+ * "governor_gated" row — the row-count assert below catches that
+ * misconfiguration rather than passing sent=false for the wrong reason.
+ * ar_cfg=NULL is "quiet hours opted out"; the boundary repo creates its own
+ * schema so a fresh memory has no boundary; an empty recency ring has
+ * nothing recent. */
+static void test_gate_and_send_missing_send_vtable_is_not_a_policy_drop(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_EQ(hu_proactive_decisions_repo_ensure_schema(db), HU_OK);
+    HU_ASSERT_EQ(decline_row_count(db), 0);
+
+    struct hu_agent agent = {0};
+    agent.memory = &mem;
+    hu_contact_profile_t cp = {0};
+    cp.contact_id = "+15555550100";
+    hu_channel_vtable_t vt = {0}; /* .send NULL — the condition under test */
+    hu_channel_t chan = {.ctx = (void *)"imessage", .vtable = &vt};
+    hu_proactive_budget_t budget = {0};
+    budget.daily_max = 3;
+    budget.weekly_max = 10;
+    budget.relationship_multiplier = 1.0;
+    char response[16] = "hey there";
+    size_t response_len = 9;
+
+    bool sent = hu_daemon_proactive_gate_and_send(
+        &agent, &alloc, &chan, &cp, "imessage", "+15555550100", 12, response, &response_len,
+        1789000000, &budget, /*ar_cfg=*/NULL, /*tz_offset_s=*/0, /*throttle=*/NULL);
+
+    HU_ASSERT_FALSE(sent);
+    HU_ASSERT_EQ(response_len, 9);
+    HU_ASSERT_TRUE(memcmp(response, "hey there", 9) == 0);
+    /* No gate fired, so no gate may be blamed. */
+    HU_ASSERT_EQ(decline_row_count(db), 0);
+}
+
 void run_daemon_proactive_decline_tests(void) {
     HU_TEST_SUITE("daemon_proactive_decline");
     HU_RUN_TEST(test_record_decline_attributes_the_suppressing_gate);
     HU_RUN_TEST(test_record_decline_distinguishes_two_gates);
     HU_RUN_TEST(test_record_decline_writes_nothing_on_null_inputs);
     HU_RUN_TEST(test_gate_and_send_llm_skip_records_reason_and_sends_nothing);
+    HU_RUN_TEST(test_gate_and_send_missing_send_vtable_is_not_a_policy_drop);
 }
 
 #else
