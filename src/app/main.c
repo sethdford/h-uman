@@ -2667,10 +2667,19 @@ static hu_error_t cmd_persona(hu_allocator_t *alloc, int argc, char **argv) {
 static hu_error_t cmd_voice_preview(hu_allocator_t *alloc, int argc, char **argv) {
     const char *text = NULL, *incoming = NULL, *persona_name = NULL, *out_path = NULL;
     const char *channel = "imessage";
+    const char *model_override = NULL;
+    float speed_override = 0.f;
+    bool raw = false; /* skip transcript prep: the A/B "prep off" arm */
     for (int i = 3; i < argc; i++) {
         if (!argv[i])
             continue;
-        if (strcmp(argv[i], "--text") == 0 && i + 1 < argc)
+        if (strcmp(argv[i], "--model") == 0 && i + 1 < argc)
+            model_override = argv[++i];
+        else if (strcmp(argv[i], "--speed") == 0 && i + 1 < argc)
+            speed_override = (float)atof(argv[++i]);
+        else if (strcmp(argv[i], "--raw") == 0)
+            raw = true;
+        else if (strcmp(argv[i], "--text") == 0 && i + 1 < argc)
             text = argv[++i];
         else if (strcmp(argv[i], "--incoming") == 0 && i + 1 < argc)
             incoming = argv[++i];
@@ -2683,7 +2692,8 @@ static hu_error_t cmd_voice_preview(hu_allocator_t *alloc, int argc, char **argv
     }
     if (!text || !text[0] || !persona_name || !persona_name[0]) {
         fprintf(stderr, "Usage: human voice preview --text <reply> --persona <name> "
-                        "[--incoming <msg>] [--channel imessage] [--out <file>]\n");
+                        "[--incoming <msg>] [--channel imessage] [--out <file>] "
+                        "[--model <id>] [--speed <0.6-1.5>] [--raw]\n");
         return HU_ERR_INVALID_ARGUMENT;
     }
 
@@ -2720,10 +2730,37 @@ static hu_error_t cmd_voice_preview(hu_allocator_t *alloc, int argc, char **argv
     time_t now = time(NULL);
     struct tm tmb;
     localtime_r(&now, &tmb);
+    if (model_override && model_override[0])
+        snprintf(persona.voice.model, sizeof(persona.voice.model), "%s", model_override);
+    if (speed_override > 0.f)
+        persona.voice.default_speed = speed_override;
     hu_voice_reply_request_t req;
-    err = hu_voice_reply_build_request(&persona.voice, text, strlen(text), incoming,
-                                       incoming ? strlen(incoming) : 0, tmb.tm_hour, (uint32_t)now,
-                                       &req);
+    if (raw) {
+        memset(&req, 0, sizeof(req));
+        size_t tl = strlen(text);
+        if (tl >= sizeof(req.transcript))
+            tl = sizeof(req.transcript) - 1;
+        memcpy(req.transcript, text, tl);
+        req.transcript[tl] = '\0';
+        req.transcript_len = tl;
+        req.sentence_count = 1;
+        snprintf(req.emotion, sizeof(req.emotion), "%s",
+                 persona.voice.default_emotion[0] ? persona.voice.default_emotion : "content");
+        snprintf(req.model, sizeof(req.model), "%s",
+                 persona.voice.model[0] ? persona.voice.model : HU_VOICE_REPLY_DEFAULT_MODEL);
+        req.tts.model_id = req.model;
+        req.tts.voice_id = persona.voice.voice_id;
+        req.tts.emotion = req.emotion;
+        req.tts.speed = persona.voice.default_speed > 0.f ? persona.voice.default_speed
+                                                          : HU_VOICE_REPLY_DEFAULT_SPEED;
+        req.tts.volume = 1.0f;
+        req.tts.nonverbals = persona.voice.nonverbals;
+        err = HU_OK;
+    } else {
+        err = hu_voice_reply_build_request(&persona.voice, text, strlen(text), incoming,
+                                           incoming ? strlen(incoming) : 0, tmb.tm_hour,
+                                           (uint32_t)now, &req);
+    }
     if (err != HU_OK) {
         fprintf(stderr, "Error: transcript prep failed: %s\n", hu_error_string(err));
         hu_persona_free(&persona);
@@ -2772,7 +2809,8 @@ static hu_error_t cmd_voice(hu_allocator_t *alloc, int argc, char **argv) {
                         "Subcommands:\n"
                         "  clone --file <path> [--name <name>] [--lang <code>] [--persona <name>]\n"
                         "  preview --text <reply> --persona <name> [--incoming <msg>]\n"
-                        "          [--channel imessage] [--out <file>]\n");
+                        "          [--channel imessage] [--out <file>] [--model <id>]\n"
+                        "          [--speed <0.6-1.5>] [--raw]\n");
         return HU_ERR_INVALID_ARGUMENT;
     }
 

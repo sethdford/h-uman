@@ -17,6 +17,48 @@
 #if defined(HU_ENABLE_CARTESIA)
 #include "human/tts/voice_reply.h"
 #endif
+#if defined(HU_ENABLE_SQLITE)
+#include "human/memory.h"
+#include "human/memory/engines.h"
+#include "human/memory/proactive_decisions_repo.h"
+#endif
+
+#if defined(HU_ENABLE_CARTESIA)
+/* Log the voice/text decision (trigger='voice_reply') into proactive_decisions
+ * so voice timing gets the same When2Speak measurement as proactive sends
+ * (scripts/eval_when_to_speak.py). Best-effort: never affects the reply. */
+static void daemon_voice_record_decision(hu_agent_t *agent, const char *batch_key, size_t key_len,
+                                         bool chose_voice, const char *reason, bool sent) {
+#if defined(HU_ENABLE_SQLITE)
+    if (!agent || !agent->memory)
+        return;
+    sqlite3 *db = hu_sqlite_memory_get_db(agent->memory);
+    if (!db)
+        return;
+    char contact[128];
+    size_t n = key_len < sizeof(contact) - 1 ? key_len : sizeof(contact) - 1;
+    if (batch_key && n > 0)
+        memcpy(contact, batch_key, n);
+    contact[batch_key ? n : 0] = '\0';
+    if (hu_proactive_decisions_repo_ensure_schema(db) != HU_OK)
+        return;
+    hu_error_t err = hu_proactive_decisions_repo_record(
+        db, (int64_t)time(NULL), contact[0] ? contact : NULL, "voice_reply",
+        chose_voice ? HU_PROACTIVE_DECISION_SEND : HU_PROACTIVE_DECISION_DECLINE,
+        reason ? reason : "unknown", sent ? 1 : 0, NULL);
+    if (err != HU_OK)
+        hu_log_warn("voice_reply", NULL, "proactive_decisions_repo_record failed: err=%d",
+                    (int)err);
+#else
+    (void)agent;
+    (void)batch_key;
+    (void)key_len;
+    (void)chose_voice;
+    (void)reason;
+    (void)sent;
+#endif
+}
+#endif /* HU_ENABLE_CARTESIA */
 
 #include <math.h>
 #include <stdatomic.h>
@@ -64,9 +106,10 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, hu_agent_t *agent, const hu_co
 #if defined(HU_ENABLE_CARTESIA)
         if (voice_channel_ok && agent->persona && agent->persona->voice.voice_id[0] &&
             agent->persona->voice_messages.enabled) {
-            hu_voice_decision_t vdec = hu_voice_decision_classify(
+            const char *vreason = NULL;
+            hu_voice_decision_t vdec = hu_voice_decision_classify_ex(
                 response, response_len, combined, combined_len, &agent->persona->voice_messages,
-                true, bth_hour, (uint32_t)(time(NULL) ^ (uintptr_t)combined));
+                true, bth_hour, (uint32_t)(time(NULL) ^ (uintptr_t)combined), &vreason);
             if (vdec == HU_VOICE_SEND_VOICE) {
                 const char *cartesia_key = hu_config_get_provider_key(config, "cartesia");
                 if (cartesia_key && cartesia_key[0]) {
@@ -101,6 +144,8 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, hu_agent_t *agent, const hu_co
                     }
                 }
             }
+            daemon_voice_record_decision(agent, batch_key, key_len, vdec == HU_VOICE_SEND_VOICE,
+                                         vreason, sent_voice);
         }
 #endif
         /* Fallback: unified voice pipeline when persona Cartesia path did not send.
