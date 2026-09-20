@@ -26,6 +26,13 @@ hu_embedder_t hu_embedder_http_create(hu_allocator_t *alloc, const char *base_ur
  * OpenAI-shaped embeddings response for `expect_count` inputs. Returns
  * HU_ERR_PROVIDER_RESPONSE on any shape mismatch (missing data, wrong count, ragged or
  * zero-length vectors); on error nothing is left allocated. */
+/* Build the POST body {"model":..,"input":[..],"input_type":"query"|"document"}.
+ * input_type marks the retrieval side so an asymmetric server-side embedder can
+ * apply its prefixes (mlx-server maps it; nomic ignores it). Exposed for tests. */
+hu_error_t hu_embedder_http_build_request(hu_allocator_t *alloc, const char **texts,
+                                          const size_t *text_lens, size_t count,
+                                          const char *input_type, char **body_out,
+                                          size_t *body_len_out);
 hu_error_t hu_embedder_http_parse_response(hu_allocator_t *alloc, const char *body, size_t body_len,
                                            size_t expect_count, hu_embedding_t *out);
 

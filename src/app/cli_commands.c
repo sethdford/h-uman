@@ -77,6 +77,30 @@ hu_error_t hu_memory_facade_export_json(hu_memory_facade_t *m, hu_allocator_t *a
 #include <unistd.h>
 #if defined(__unix__) || defined(__APPLE__)
 #include <dirent.h>
+
+/* `human memory reindex [--limit N] [--full]`. Pure so a test can pin it: the
+ * 2026-09-20 loop ran `i + 1 < argc` and never looked at a trailing `--full`,
+ * so the first embedder-switch reindex silently did nothing. */
+void hu_cli_parse_reindex_args(int argc, char **argv, size_t *limit_out, bool *full_out) {
+    if (limit_out)
+        *limit_out = 0;
+    if (full_out)
+        *full_out = false;
+    if (!argv)
+        return;
+    for (int i = 3; i < argc; i++) {
+        if (!argv[i])
+            continue;
+        if (strcmp(argv[i], "--limit") == 0 && i + 1 < argc && argv[i + 1]) {
+            if (limit_out)
+                *limit_out = (size_t)strtoul(argv[i + 1], NULL, 10);
+            i++;
+        } else if (strcmp(argv[i], "--full") == 0) {
+            if (full_out)
+                *full_out = true;
+        }
+    }
+}
 #endif
 
 #define HU_INIT_CONFIG_FILE "config.json"
@@ -631,9 +655,8 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
         /* human memory reindex [--limit N] — embed every memories row missing
          * from the semantic index via the configured endpoint. */
         size_t lim = 0;
-        for (int i = 3; i + 1 < argc; i++)
-            if (strcmp(argv[i], "--limit") == 0)
-                lim = (size_t)strtoul(argv[i + 1], NULL, 10);
+        bool full = false;
+        hu_cli_parse_reindex_args(argc, argv, &lim, &full);
         hu_embedder_t semb = {0};
         hu_vector_store_t svs = {0};
         err = hu_semantic_recall_attach(alloc, &mem, &semb, &svs);
@@ -643,7 +666,8 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
         }
         size_t indexed = 0;
 #ifdef HU_ENABLE_SQLITE
-        err = hu_sqlite_memory_reindex_semantic(&mem, lim, &indexed);
+        err = full ? hu_sqlite_memory_reindex_semantic_full(&mem, lim, &indexed)
+                   : hu_sqlite_memory_reindex_semantic(&mem, lim, &indexed);
 #else
         (void)lim;
         err = HU_ERR_NOT_SUPPORTED; /* unreachable: attach refused without SQLite */

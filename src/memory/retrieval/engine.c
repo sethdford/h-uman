@@ -108,8 +108,13 @@ hu_error_t hu_semantic_retrieve(hu_allocator_t *alloc, hu_embedder_t *embedder,
         return HU_ERR_INVALID_ARGUMENT;
 
     hu_embedding_t query_embedding = {0};
+    /* Retrieval-side embedding: asymmetric embedders prefix queries differently
+     * from indexed documents (vector.h embed_query); symmetric ones leave it NULL. */
     hu_error_t err =
-        embedder->vtable->embed(embedder->ctx, alloc, query, query_len, &query_embedding);
+        embedder->vtable->embed_query
+            ? embedder->vtable->embed_query(embedder->ctx, alloc, query, query_len,
+                                            &query_embedding)
+            : embedder->vtable->embed(embedder->ctx, alloc, query, query_len, &query_embedding);
     if (err != HU_OK)
         return err;
 

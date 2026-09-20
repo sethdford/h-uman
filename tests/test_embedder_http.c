@@ -55,9 +55,45 @@ static void test_create_builds_url_and_rejects_empty(void) {
     HU_ASSERT_NULL(none.ctx);
 }
 
+static void test_build_request_marks_document_and_query_sides(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *texts[2] = {"went hiking", "office move"};
+    size_t lens[2] = {11, 11};
+    char *body = NULL;
+    size_t blen = 0;
+    HU_ASSERT_EQ(hu_embedder_http_build_request(&alloc, texts, lens, 2, "document", &body, &blen),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(strstr(body, "\"input_type\":\"document\""));
+    HU_ASSERT_NOT_NULL(strstr(body, "\"input\":[\"went hiking\",\"office move\"]"));
+    HU_ASSERT_NULL(strstr(body, "\"query\""));
+    alloc.free(alloc.ctx, body, blen + 1);
+    HU_ASSERT_EQ(hu_embedder_http_build_request(&alloc, texts, lens, 1, "query", &body, &blen),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(strstr(body, "\"input_type\":\"query\""));
+    alloc.free(alloc.ctx, body, blen + 1);
+    /* no marker -> document (the index side), never query */
+    HU_ASSERT_EQ(hu_embedder_http_build_request(&alloc, texts, lens, 1, NULL, &body, &blen), HU_OK);
+    HU_ASSERT_NOT_NULL(strstr(body, "\"input_type\":\"document\""));
+    alloc.free(alloc.ctx, body, blen + 1);
+    HU_ASSERT_EQ(hu_embedder_http_build_request(&alloc, texts, lens, 0, "query", &body, &blen),
+                 HU_ERR_INVALID_ARGUMENT);
+}
+
+static void test_http_vtable_offers_embed_query(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_embedder_t e = hu_embedder_http_create(&alloc, "http://127.0.0.1:1");
+    HU_ASSERT_NOT_NULL(e.vtable);
+    HU_ASSERT_NOT_NULL(e.vtable->embed_query); /* the query side exists for this embedder */
+    HU_ASSERT_NOT_NULL(e.vtable->embed);
+    if (e.vtable->deinit)
+        e.vtable->deinit(e.ctx, &alloc);
+}
+
 void run_embedder_http_tests(void) {
     HU_TEST_SUITE("embedder_http");
     HU_RUN_TEST(test_parse_two_vectors);
     HU_RUN_TEST(test_parse_refuses_count_mismatch_and_ragged_and_empty);
     HU_RUN_TEST(test_create_builds_url_and_rejects_empty);
+    HU_RUN_TEST(test_build_request_marks_document_and_query_sides);
+    HU_RUN_TEST(test_http_vtable_offers_embed_query);
 }

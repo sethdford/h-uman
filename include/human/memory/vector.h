@@ -36,6 +36,12 @@ typedef struct hu_embedder_vtable {
                               const size_t *text_lens, size_t count, hu_embedding_t *out);
     size_t (*dimensions)(void *ctx);
     void (*deinit)(void *ctx, hu_allocator_t *alloc);
+    /* Optional (may be NULL): embed a RETRIEVAL QUERY. Asymmetric embedders
+     * (EmbeddingGemma) encode queries and documents with different task
+     * prefixes; `embed`/`embed_batch` are the document side (indexing), this
+     * is the query side. Callers fall back to `embed` when NULL. */
+    hu_error_t (*embed_query)(void *ctx, hu_allocator_t *alloc, const char *text, size_t text_len,
+                              hu_embedding_t *out);
 } hu_embedder_vtable_t;
 
 /* Vector store vtable */

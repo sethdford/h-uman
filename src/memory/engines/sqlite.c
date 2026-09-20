@@ -1888,6 +1888,32 @@ void hu_sqlite_memory_get_semantic_index(const hu_memory_t *mem, struct hu_embed
         *store_out = self->sem_store;
 }
 
+hu_error_t hu_sqlite_memory_reindex_semantic_full(hu_memory_t *mem, size_t limit,
+                                                  size_t *indexed_out) {
+    if (indexed_out)
+        *indexed_out = 0;
+    if (!mem || !mem->ctx)
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_sqlite_memory_t *self = (hu_sqlite_memory_t *)mem->ctx;
+    if (!self->sem_embedder || !self->sem_store)
+        return HU_ERR_NOT_SUPPORTED;
+    /* Both tables belong to the sqlite-vec store; the meta table is what the
+     * incremental reindex consults, so clearing it alone would leave stale
+     * vectors that never get replaced. */
+    char *errmsg = NULL;
+    int rc = sqlite3_exec(self->db, "DELETE FROM memories_vec; DELETE FROM memories_vec_meta;",
+                          NULL, NULL, &errmsg);
+    if (rc != SQLITE_OK) {
+        hu_log_warn("memory.semantic", NULL, "full reindex: clearing index failed: %s",
+                    errmsg ? errmsg : "?");
+        if (errmsg)
+            sqlite3_free(errmsg);
+        return HU_ERR_IO;
+    }
+    hu_log_info("memory.semantic", NULL, "full reindex: index cleared, re-embedding every row");
+    return hu_sqlite_memory_reindex_semantic(mem, limit, indexed_out);
+}
+
 hu_error_t hu_sqlite_memory_reindex_semantic(hu_memory_t *mem, size_t limit, size_t *indexed_out) {
     if (indexed_out)
         *indexed_out = 0;
