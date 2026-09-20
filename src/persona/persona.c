@@ -2811,7 +2811,11 @@ static hu_error_t set_err_msg(hu_allocator_t *alloc, char **err_msg, size_t *err
 }
 
 static bool is_string_array(const hu_json_value_t *arr) {
-    if (!arr || arr->type != HU_JSON_ARRAY || !arr->data.array.items)
+    if (!arr || arr->type != HU_JSON_ARRAY)
+        return false;
+    /* The parser represents [] as items=NULL/len=0; that is a valid (empty)
+     * string array. Only a non-empty array with no storage is malformed. */
+    if (arr->data.array.len > 0 && !arr->data.array.items)
         return false;
     for (size_t i = 0; i < arr->data.array.len; i++) {
         const hu_json_value_t *item = arr->data.array.items[i];

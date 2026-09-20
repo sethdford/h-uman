@@ -200,6 +200,87 @@ static void mark_fired_retires_every_keyword_of_the_intention(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
+static void directive_build_renders_cued_intentions_and_retires_them(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_NOT_NULL(db);
+    seed(db, "keyword", "tacos", "ask about her taco suggestion", "+15550000001", 0, 0);
+    seed(db, "keyword", "taco place", "ask about her taco suggestion", "+15550000001", 0, 0);
+    seed(db, "keyword", "podcast", "send podcast recs", "+15550000001", 0, 0); /* not cued */
+    HU_ASSERT_EQ(count_open_for(db, "+15550000001"), (int64_t)3);
+
+    static const char msg[] = "we should try that TACO place friday";
+    size_t len = 0;
+    char *d = hu_prospective_directive_build(&alloc, db, msg, sizeof(msg) - 1, "+15550000001", 12,
+                                             (int64_t)time(NULL), &len);
+    HU_ASSERT_NOT_NULL(d);
+    HU_ASSERT_TRUE(len > 0 && strlen(d) == len);
+    HU_ASSERT_STR_CONTAINS(d, "[PROSPECTIVE MEMORY: Remember to: ");
+    HU_ASSERT_STR_CONTAINS(d, "ask about her taco suggestion (triggered by: taco place)");
+    HU_ASSERT_NULL(strstr(d, "podcast"));
+    HU_ASSERT_TRUE(d[len - 1] == ']');
+    alloc.free(alloc.ctx, d, len + 1);
+
+    /* Both keywords of the rendered intention are retired; the uncued one stays. */
+    HU_ASSERT_EQ(count_open_for(db, "+15550000001"), (int64_t)1);
+    sqlite3_stmt *st = NULL;
+    HU_ASSERT_EQ(sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM prospective_memories WHERE fired=1",
+                                    -1, &st, NULL),
+                 SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_step(st), SQLITE_ROW);
+    HU_ASSERT_EQ(sqlite3_column_int64(st, 0), (int64_t)2);
+    sqlite3_finalize(st);
+
+    /* Rendered once: the same text no longer produces a directive. */
+    len = 0;
+    HU_ASSERT_NULL(hu_prospective_directive_build(&alloc, db, msg, sizeof(msg) - 1, "+15550000001",
+                                                  12, (int64_t)time(NULL), &len));
+    HU_ASSERT_EQ(len, (size_t)0);
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void directive_build_returns_null_when_nothing_is_cued(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    seed(db, "keyword", "tacos", "ask about her taco suggestion", "+15550000001", 0, 0);
+    static const char msg[] = "how was the flight";
+    size_t len = 7;
+    HU_ASSERT_NULL(hu_prospective_directive_build(&alloc, db, msg, sizeof(msg) - 1, "+15550000001",
+                                                  12, (int64_t)time(NULL), &len));
+    HU_ASSERT_EQ(len, (size_t)0);
+    HU_ASSERT_EQ(count_open_for(db, "+15550000001"), (int64_t)1);
+    HU_ASSERT_NULL(hu_prospective_directive_build(NULL, db, msg, sizeof(msg) - 1, "+15550000001",
+                                                  12, (int64_t)time(NULL), &len));
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void expire_sweep_retires_only_past_due_open_rows(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    int64_t now = (int64_t)time(NULL);
+    seed(db, "keyword", "a", "act a", "+15550000001", now - 10, 0);   /* past due */
+    seed(db, "keyword", "b", "act b", "+15550000001", now + 1000, 0); /* live */
+    seed(db, "keyword", "c", "act c", "+15550000001", 0, 0);          /* never expires */
+    seed(db, "keyword", "d", "act d", "+15550000001", now - 10, 1);   /* already fired */
+    int64_t n = -1;
+    HU_ASSERT_EQ(hu_prospective_expire_sweep(db, now, &n), HU_OK);
+    HU_ASSERT_EQ(n, (int64_t)1);
+    HU_ASSERT_EQ(count_open_for(db, "+15550000001"), (int64_t)2);
+    sqlite3_stmt *st = NULL;
+    HU_ASSERT_EQ(sqlite3_prepare_v2(db,
+                                    "SELECT fired FROM prospective_memories WHERE action='act a'",
+                                    -1, &st, NULL),
+                 SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_step(st), SQLITE_ROW);
+    HU_ASSERT_EQ(sqlite3_column_int(st, 0), 3);
+    sqlite3_finalize(st);
+    HU_ASSERT_EQ(hu_prospective_expire_sweep(NULL, now, &n), HU_ERR_INVALID_ARGUMENT);
+    mem.vtable->deinit(mem.ctx);
+}
+
 void run_prospective_tests(void) {
     HU_TEST_SUITE("prospective memory triggers");
     HU_RUN_TEST(check_triggers_matches_case_folded_phrase_for_contact);
@@ -207,6 +288,9 @@ void run_prospective_tests(void) {
     HU_RUN_TEST(check_triggers_skips_fired_and_expired_rows);
     HU_RUN_TEST(check_triggers_newest_first_and_one_row_per_intention);
     HU_RUN_TEST(mark_fired_retires_every_keyword_of_the_intention);
+    HU_RUN_TEST(directive_build_renders_cued_intentions_and_retires_them);
+    HU_RUN_TEST(directive_build_returns_null_when_nothing_is_cued);
+    HU_RUN_TEST(expire_sweep_retires_only_past_due_open_rows);
 }
 
 #else
