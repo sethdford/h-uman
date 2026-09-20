@@ -993,11 +993,20 @@ hu_error_t hu_hybrid_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, hu_em
         return err;
     }
 
-    err = hu_rerank_cross_encoder(query, merged, merged_count);
-    if (err != HU_OK) {
-        hu_rerank_free_results(merged, merged_count);
-        alloc->free(alloc->ctx, merged, max_merged * sizeof(hu_search_result_t));
-        return err;
+    /* The term-overlap "cross-encoder" only when the caller asked for reranking.
+     * Run unconditionally it re-sorted the fused pool by query-word overlap
+     * before the cut to `limit`, evicting every semantic-only hit: the memory
+     * loader (use_reranking=false) measured exactly the keyword-only recall on
+     * LoCoMo (0.65) and 0.817 vs 1.0 for plain RRF on LongMemEval
+     * (memory-benchmarks-hybrid-plain-gemma-2026-09-20.json). RRF is the
+     * final order unless reranking is requested. */
+    if (opts && opts->use_reranking) {
+        err = hu_rerank_cross_encoder(query, merged, merged_count);
+        if (err != HU_OK) {
+            hu_rerank_free_results(merged, merged_count);
+            alloc->free(alloc->ctx, merged, max_merged * sizeof(hu_search_result_t));
+            return err;
+        }
     }
 
     err = search_results_to_entries(alloc, query, merged, merged_count, limit, out);

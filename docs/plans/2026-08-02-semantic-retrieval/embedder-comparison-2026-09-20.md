@@ -15,7 +15,7 @@ the `title: none | text: ` prefix (:8747, `HU_SEMANTIC_EMBED_URL_INDEX`), querie
 | keyword only (control) | 0.883 → 0.883 | 0.650 → 0.650 |
 | semantic only | 0.983 → 1.000 | 0.767 → 0.833 |
 | harness hybrid (RRF) | 0.967 → 1.000 | 0.783 → 0.850 |
-| production hybrid path (`--hybrid`) | 0.817 → 0.917 | 0.533 → 0.600 |
+| reconstructive CLI mode (`--hybrid`; CLI-only, NOT the daemon's call — see hybrid-plain-rerank-fix-2026-09-20.md) | 0.817 → 0.917 | 0.533 → 0.600 |
 
 Gemma wins every non-control cell: +6 questions of 60 on the production path for
 LongMemEval, +4 of 60 on LoCoMo. Files: `memory-benchmarks-embedder-{nomic,gemma}-2026-09-20.json`.
@@ -56,5 +56,7 @@ tolerance, and the recall-minus-control delta across the three runs is
 effect or the recall effect. The retrieval benchmarks above remain the only
 measurement that separates the two embedders, and they favour Gemma.
 
-Decision on keeping the switch or reverting is Seth's; the gate result is
-recorded as HOLD, not re-run until it passes.
+**Decision (Seth, 2026-09-20): keep Gemma.** The retrieval benchmarks are the
+embedder-separating measurement and the gate's movement is in the arm the embedder
+cannot influence. The HOLD stays on record; the weekly gate re-runs in its normal
+window and the doctor reports HOLD until a run PROMOTEs.

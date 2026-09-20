@@ -703,12 +703,18 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
         svs.vtable->deinit(svs.ctx, alloc);
         semb.vtable->deinit(semb.ctx, alloc);
     } else if (strcmp(sub, "search") == 0 && argc >= 5 && strcmp(argv[3], "--hybrid") == 0) {
-        /* human memory search --hybrid <query> — reconstructive hybrid
-         * retrieval (Contract C2): keyword + semantic merged via RRF, then
-         * scene-select -> neighbour expansion -> rerank -> time-bounded
-         * filter -> sufficiency check. This is the CLI surface the
-         * benchmark harness measures as the "hybrid_cli" (C path) column,
-         * distinct from the harness's own RRF(kw,sem) computed in Python. */
+        /* human memory search --hybrid [--plain] <query>
+         * Default: reconstructive hybrid retrieval (Contract C2): keyword +
+         * semantic merged via RRF, then scene-select -> neighbour expansion
+         * -> rerank -> time-bounded filter -> sufficiency check. The
+         * benchmark harness measures this as its "hybrid_cli" column.
+         * --plain: the SAME call the daemon's memory loader makes
+         * (hu_retrieval_options_t.reconstructive == false — see
+         * src/agent/memory_loader.c): RRF merge -> cross-encoder rerank ->
+         * cut to limit. Measured as the harness's "hybrid_plain" column, the
+         * one that reflects production. */
+        bool plain = argc >= 6 && strcmp(argv[4], "--plain") == 0;
+        const char *hq = plain ? argv[5] : argv[4];
         hu_embedder_t semb = {0};
         hu_vector_store_t svs = {0};
         bool have_vec = hu_semantic_recall_attach(alloc, &mem, &semb, &svs) == HU_OK;
@@ -716,14 +722,14 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
             fprintf(stderr, "search --hybrid: semantic index unavailable, using keyword only\n");
         hu_retrieval_options_t opts = {0};
         opts.limit = 10;
-        opts.reconstructive = true;
+        opts.reconstructive = !plain;
         hu_retrieval_result_t res = {0};
         err = hu_hybrid_retrieve(alloc, &mem, have_vec ? &semb : NULL, have_vec ? &svs : NULL, NULL,
-                                 argv[4], strlen(argv[4]), &opts, &res);
+                                 hq, strlen(hq), &opts, &res);
         if (err != HU_OK) {
             fprintf(stderr, "search --hybrid: %s\n", hu_error_string(err));
         } else if (res.count == 0) {
-            printf("No results for: %s\n", argv[4]);
+            printf("No results for: %s\n", hq);
         } else {
             memory_search_print_and_free(alloc, &res);
         }
