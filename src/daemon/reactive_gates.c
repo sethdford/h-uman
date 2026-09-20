@@ -69,6 +69,25 @@ static const char *const k_ai_tells[] = {
     "I'm sorry you're",
     "I am sorry you're",
     "that sounds really",
+    /* 2026-09-20, from the first production-register measurement: two
+     * service-desk replies DELIVERED to a real contact in September — 09-16
+     * "Yes, I can help you with that. Please let me know the details of what
+     * you need" and 09-19 "This solution will effectively address your
+     * needs." (the contact answered "?"). Two more of the family were caught
+     * and retried on 09-07 / 09-10 ("Could you please clarify or provide
+     * more details on what you need help with?"). Seth's own 1,047 texts
+     * (chat.db minus the daemon's rows) contain none of these; the only
+     * shared phrase, "feel free", is already the legacy entry above. */
+    "I can help you with that",
+    "I can help with that",
+    "let me know what you need",
+    "let me know the details",
+    "information or assistance",
+    "happy to provide",
+    "This solution will",
+    "address your needs",
+    "what you need help with",
+    "provide more details",
 };
 
 /* Measured, not authored (2026-09-13): Seth's real replies to a sad or
