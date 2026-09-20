@@ -278,3 +278,81 @@ def test_score_argv_records_arm_adapter_from_state():
 def test_score_argv_without_arm_passes_no_arm_flags():
     argv = rd.score_argv({})
     assert "--arm-adapter" not in argv and "--arm-note" not in argv
+
+
+# ── delivery confirmation ───────────────────────────────────────────────
+# Bug (2026-09-05 → 09-19): the target `sethford@me.com` stopped being an
+# alias on the iMessage account. `imsg send` exited 0 on every tick, the log
+# said "sent question", and chat.db recorded each row as is_sent=0 error=22.
+# 13 questions, 0 delivered, 4 rows skipped as "unanswered", 0/48 rated.
+# The exit code is not the artifact; the chat.db row is.
+
+def test_delivery_verdict_truth_table():
+    since = 1000.0
+    after, before = _apple(1001), _apple(999)
+    assert rd.delivery_verdict([(1, 0, after)], since) == ("delivered", 0)
+    assert rd.delivery_verdict([(0, 22, after)], since) == ("failed", 22)
+    assert rd.delivery_verdict([], since) == ("pending", None)
+    # a failed row from BEFORE this send must not be blamed on it
+    assert rd.delivery_verdict([(0, 22, before)], since) == ("pending", None)
+    # not yet marked sent and no error: still in flight
+    assert rd.delivery_verdict([(0, 0, after)], since) == ("pending", None)
+    # newest-first: the newest row decides
+    assert rd.delivery_verdict([(1, 0, _apple(1002)), (0, 22, after)], since) == ("delivered", 0)
+
+
+def test_send_question_requires_chat_db_confirmation():
+    import subprocess as sp
+    orig_run, orig_confirm = sp.run, rd.confirm_delivery
+    sp.run = _patched_run(0, [])  # imsg always "succeeds"
+    try:
+        rd.confirm_delivery = lambda *a, **k: ("failed", 22)
+        assert rd.send_question("+15555550100", "q") is False
+        rd.confirm_delivery = lambda *a, **k: ("pending", None)
+        assert rd.send_question("+15555550100", "q") is False
+        rd.confirm_delivery = lambda *a, **k: ("delivered", 0)
+        assert rd.send_question("+15555550100", "q") is True
+    finally:
+        sp.run, rd.confirm_delivery = orig_run, orig_confirm
+
+
+def _delivery_fixture_db(path, target, rows):
+    import sqlite3 as _sq
+    con = _sq.connect(path)
+    cur = con.cursor()
+    cur.execute("CREATE TABLE chat (ROWID INTEGER PRIMARY KEY, chat_identifier TEXT)")
+    cur.execute("CREATE TABLE message (ROWID INTEGER PRIMARY KEY, date INTEGER, "
+                "is_from_me INTEGER, is_sent INTEGER, error INTEGER)")
+    cur.execute("CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER)")
+    cur.execute("INSERT INTO chat (chat_identifier) VALUES (?)", (target,))
+    cid = cur.lastrowid
+    for is_sent, error, apple_ns in rows:
+        cur.execute("INSERT INTO message (date, is_from_me, is_sent, error) VALUES (?, 1, ?, ?)",
+                    (int(apple_ns), is_sent, error))
+        cur.execute("INSERT INTO chat_message_join VALUES (?, ?)", (cid, cur.lastrowid))
+    con.commit()
+    con.close()
+
+
+def test_confirm_delivery_reads_the_chat_db_row():
+    import os as _os
+    import tempfile as _tf
+    tmp = _tf.mkdtemp()
+    db = _os.path.join(tmp, "chat.db")
+    since = 1000.0
+    # the 09-05 shape: imsg exit 0, chat.db says error 22
+    _delivery_fixture_db(db, "sethford@me.com", [(0, 22, _apple(1001))])
+    assert rd.confirm_delivery("sethford@me.com", since, db_path=db, wait_secs=0) == ("failed", 22)
+    # the 09-20 shape after retargeting: a real send
+    db2 = _os.path.join(tmp, "chat2.db")
+    _delivery_fixture_db(db2, "+18012017497", [(1, 0, _apple(1001))])
+    assert rd.confirm_delivery("+18012017497", since, db_path=db2, wait_secs=0) == ("delivered", 0)
+    # another chat's row is not this send
+    assert rd.confirm_delivery("+15555550100", since, db_path=db2, wait_secs=0) == ("pending", None)
+
+
+def test_default_target_is_a_live_alias_not_the_dead_one():
+    import rating_ingest as ri
+    assert rd.DEFAULT_TARGET == "+18012017497"
+    assert ri.DEFAULT_TARGET == rd.DEFAULT_TARGET
+    assert "sethford@me.com" not in (rd.DEFAULT_TARGET, ri.DEFAULT_TARGET)
