@@ -52,7 +52,10 @@ def build_db(binp, dbp, rows):
                     [(str(uuid.uuid4()), k, c, sid, "bench", now, now, "bench") for k, sid, c in rows])
     con.execute("INSERT INTO memories_fts(memories_fts) VALUES('rebuild')")
     con.commit(); con.close()
-    out = sh(binp, dbp, ["reindex"], {"HU_SEMANTIC_EMBED_URL": os.environ.get("HU_SEMANTIC_EMBED_URL", "http://127.0.0.1:8749")})
+    # HU_SEMANTIC_EMBED_URL_INDEX lets an asymmetric embedder (EmbeddingGemma's
+    # document prefix) index with one server while queries use HU_SEMANTIC_EMBED_URL.
+    out = sh(binp, dbp, ["reindex"], {"HU_SEMANTIC_EMBED_URL": os.environ.get("HU_SEMANTIC_EMBED_URL_INDEX")
+                                     or os.environ.get("HU_SEMANTIC_EMBED_URL", "http://127.0.0.1:8749")})
     m = re.search(r'"index_size": (\d+)', out)
     return int(m.group(1)) if m else 0
 

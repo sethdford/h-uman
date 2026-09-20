@@ -12,7 +12,12 @@ LLM — and refuses to start on :8741.
 import argparse, json, sys, time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-MODEL_ID = "mlx-community/nomicai-modernbert-embed-base-8bit"
+import os
+MODEL_ID = os.environ.get("HU_EMBED_MODEL_ID", "mlx-community/nomicai-modernbert-embed-base-8bit")
+# Optional fixed prefix for every input — EmbeddingGemma is trained with task
+# prefixes ("task: search result | query: " for queries, "title: none | text: "
+# for documents); run two instances with different prefixes to embed each side.
+PREFIX = os.environ.get("HU_EMBED_PREFIX", "")
 _MODEL = _TOK = None
 
 def _load():
@@ -24,6 +29,7 @@ def _load():
 def embed(texts):
     import mlx.core as mx
     _load()
+    texts = [PREFIX + t for t in texts] if PREFIX else texts
     ins = _TOK.batch_encode_plus(texts, return_tensors="mlx", padding=True, truncation=True, max_length=512)
     out = _MODEL(ins["input_ids"], attention_mask=ins.get("attention_mask"))
     v = out.text_embeds if hasattr(out, "text_embeds") else out
@@ -50,7 +56,7 @@ class H(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(b)))
         self.end_headers(); self.wfile.write(b)
     def do_GET(self):
-        if self.path == "/health": return self._json(200, {"status": "ok", "model": MODEL_ID, "loaded": _MODEL is not None})
+        if self.path == "/health": return self._json(200, {"status": "ok", "model": MODEL_ID, "prefix": PREFIX, "loaded": _MODEL is not None})
         self._json(404, {"error": "not found"})
     def do_POST(self):
         if self.path != "/v1/embeddings": return self._json(404, {"error": "not found"})
