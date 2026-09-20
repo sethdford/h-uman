@@ -76,6 +76,7 @@ static void test_record_decline_attributes_the_suppressing_gate(void) {
     HU_ASSERT_TRUE(decline_row_matches(db, "+15555550100", "proactive_send",
                                        HU_PROACTIVE_DECISION_DECLINE, "rate_limited",
                                        /*sent=*/0));
+    mem.vtable->deinit(mem.ctx);
 }
 
 static void test_record_decline_distinguishes_two_gates(void) {
@@ -99,6 +100,7 @@ static void test_record_decline_distinguishes_two_gates(void) {
                                        HU_PROACTIVE_DECISION_DECLINE, "send_cap", 0));
 
     HU_ASSERT_EQ(decline_row_count(db), 2);
+    mem.vtable->deinit(mem.ctx);
 }
 
 static void test_record_decline_writes_nothing_on_null_inputs(void) {
@@ -116,6 +118,7 @@ static void test_record_decline_writes_nothing_on_null_inputs(void) {
 
     /* Telemetry must never invent a row it cannot describe. */
     HU_ASSERT_EQ(decline_row_count(db), 0);
+    mem.vtable->deinit(mem.ctx);
 }
 
 /* Drives the carved gate chain itself, not just the recorder. The proactive
@@ -152,6 +155,7 @@ static void test_gate_and_send_llm_skip_records_reason_and_sends_nothing(void) {
     HU_ASSERT_EQ(decline_row_count(db), 1);
     HU_ASSERT_TRUE(decline_row_matches(db, "+15555550100", "proactive_send",
                                        HU_PROACTIVE_DECISION_DECLINE, "llm_skip", 0));
+    mem.vtable->deinit(mem.ctx);
 }
 
 /* The vtable check is the one condition in the chain that is NOT a policy
@@ -200,6 +204,7 @@ static void test_gate_and_send_missing_send_vtable_is_not_a_policy_drop(void) {
     HU_ASSERT_TRUE(memcmp(response, "hey there", 9) == 0);
     /* No gate fired, so no gate may be blamed. */
     HU_ASSERT_EQ(decline_row_count(db), 0);
+    mem.vtable->deinit(mem.ctx);
 }
 
 void run_daemon_proactive_decline_tests(void) {
