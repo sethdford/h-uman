@@ -15,7 +15,7 @@ the `title: none | text: ` prefix (:8747, `HU_SEMANTIC_EMBED_URL_INDEX`), querie
 | keyword only (control) | 0.883 → 0.883 | 0.650 → 0.650 |
 | semantic only | 0.983 → 1.000 | 0.767 → 0.833 |
 | harness hybrid (RRF) | 0.967 → 1.000 | 0.783 → 0.850 |
-| production hybrid path (`--hybrid`) | 0.817 → 0.917 | 0.533 → 0.600 |
+| reconstructive CLI mode (`--hybrid`; CLI-only, NOT the daemon's call — see hybrid-plain-rerank-fix-2026-09-20.md) | 0.817 → 0.917 | 0.533 → 0.600 |
 
 Gemma wins every non-control cell: +6 questions of 60 on the production path for
 LongMemEval, +4 of 60 on LoCoMo. Files: `memory-benchmarks-embedder-{nomic,gemma}-2026-09-20.json`.
