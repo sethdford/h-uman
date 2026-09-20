@@ -104,6 +104,11 @@ fi
 # Treat an empty extraction (binary ran but no Results: line) as unknown too
 [ -n "$TEST_COUNT" ] || TEST_COUNT="unknown"
 
+# Format the README stats-block counts with a thousands separator: that block
+# reads "Source files: 1,093", and the comma-less pattern this script used
+# never matched it, so the line sat at 1,093 while the tree grew past 2,000.
+SRC_COUNT_FMT=$(printf "%'d" "$SRC_COUNT" 2>/dev/null || echo "$SRC_COUNT")
+
 # Format test count with comma
 if [ "$TEST_COUNT" != "unknown" ]; then
     TEST_COUNT_FMT=$(printf "%'d" "$TEST_COUNT" 2>/dev/null || echo "$TEST_COUNT")
@@ -260,7 +265,7 @@ sed -i.bak -E \
 
 # Stats block: "Source files:", "Lines of code:", "Test files:", "Tests:"
 sed -i.bak -E \
-    "s/^Source files: [0-9]+$/Source files: ${SRC_COUNT}/" \
+    "s/^Source files: [0-9,]+$/Source files: ${SRC_COUNT_FMT}/" \
     README.md && rm -f README.md.bak
 
 sed -i.bak -E \
