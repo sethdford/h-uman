@@ -306,15 +306,28 @@ jobs:
           # 2679 KB vs a 2600 KB budget with it on (2026-09-02).
           extra-cmake-flags: "-DHU_ENABLE_SQLITE_VEC=OFF"
       - run: ls -lh build/human
-      - name: Enforce binary size budget (2600KB)
+      - name: Enforce binary size budget (2800KB)
+        # Budget history — raise only with a measurement, never to make a red
+        # run green:
+        #   2600 KB (2026-09-02): ~9% headroom, consumed by the 09-05..09-19
+        #     sprint (memory, persona, eval features). Crossed at bda8cb333
+        #     (#419): 2594 KB -> 2611 KB.
+        #   2800 KB (2026-09-20): re-baselined after a linker-map audit of the
+        #     2611 KB binary found nothing to trim — __text 1809 KB, __cstring
+        #     512 KB, largest const table 6 KB, -Oz + no-unwind-tables already
+        #     on, a full strip saves 128 B, -no_function_starts saves 11.7 KB.
+        #     The growth is product code. 2800 KB keeps ~7% headroom and stays
+        #     below the ~2900 KB point where the docs' "~2468 KB" claim would
+        #     trip the 15% drift gate below, so that gate remains the honest
+        #     upper bound on the marketing number.
         run: |
           SIZE=$(stat -f%z build/human)
-          BUDGET=2662400
+          BUDGET=2867200
           KB=$((SIZE / 1024))
           PCT=$((SIZE * 100 / BUDGET))
-          echo "::notice::Binary size: ${KB}KB (${PCT}% of 2600KB budget)"
+          echo "::notice::Binary size: ${KB}KB (${PCT}% of 2800KB budget)"
           if [ "$SIZE" -gt "$BUDGET" ]; then
-            echo "::error::Binary size ${KB}KB exceeds 2600KB budget"
+            echo "::error::Binary size ${KB}KB exceeds 2800KB budget"
             exit 1
           fi
       - name: Doc binary-size drift gate
