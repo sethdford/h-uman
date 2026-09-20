@@ -364,8 +364,6 @@ static void set_defaults(hu_config_t *cfg, hu_allocator_t *a) {
     cfg->security.sandbox_config.net_proxy.proxy_addr = NULL;
     cfg->security.sandbox_config.net_proxy.allowed_domains = NULL;
     cfg->security.sandbox_config.net_proxy.allowed_domains_len = 0;
-    cfg->security.resource_limits.max_file_size = 0;
-    cfg->security.resource_limits.max_read_size = 0;
     cfg->security.resource_limits.max_memory_mb = 0;
     cfg->security.audit.enabled = false;
     cfg->security.audit.log_path = NULL;

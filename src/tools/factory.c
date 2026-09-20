@@ -251,6 +251,8 @@ hu_error_t hu_tools_create_default(hu_allocator_t *alloc, const char *workspace_
                       hu_file_read_create);
     if (err != HU_OK)
         goto fail;
+    if (config)
+        hu_file_read_set_max_size(&tools[idx - 1], config->tools.max_file_size_bytes);
 
     err = add_tool_ws(alloc, tools, &idx, workspace_dir, workspace_dir_len, policy,
                       hu_file_write_create);

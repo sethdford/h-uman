@@ -448,6 +448,20 @@ static hu_proactive_context_t g_proactive_ctx;
 static hu_proactive_throttle_t g_proactive_throttle;
 static int g_proactive_throttle_initialized;
 
+/* Persist scheduled.json after a slot changes. A failed save leaves memory and
+ * disk disagreeing and the stale file replays on restart (the 2026-07-27
+ * sched-send incident class), so the failure is logged rather than dropped. */
+static void daemon_sched_persist(hu_agent_t *agent, const char *what) {
+    char sp[512];
+    int sn = hu_paths_state(sp, sizeof(sp), "scheduled.json");
+    if (sn <= 0 || (size_t)sn >= sizeof(sp))
+        return;
+    hu_error_t se = hu_conversation_sched_save(sp, (size_t)sn);
+    if (se != HU_OK)
+        hu_log_error("human", agent ? agent->observer : NULL,
+                     "scheduled.json not persisted after %s (%d)", what, (int)se);
+}
+
 static hu_proactive_throttle_t *daemon_throttle(hu_allocator_t *alloc) {
     if (!g_proactive_throttle_initialized) {
         hu_proactive_throttle_init(&g_proactive_throttle, alloc);
@@ -769,10 +783,7 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                 }
                 hu_daemon_sched_send_and_log(agent, channels[sc].channel, sched_ch, sched_contact,
                                              sched_msg, sched_len);
-                char sp[512];
-                int sn = hu_paths_state(sp, sizeof(sp), "scheduled.json");
-                if (sn > 0 && (size_t)sn < sizeof(sp))
-                    hu_conversation_sched_save(sp, (size_t)sn);
+                daemon_sched_persist(agent, "send");
             }
         }
     }
@@ -1723,10 +1734,7 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                                     "scheduled morning message for %s: %.*s",
                                     cp->name ? cp->name : cp->contact_id, (int)greeting_len,
                                     greeting);
-                        char sp[512];
-                        int sn = hu_paths_state(sp, sizeof(sp), "scheduled.json");
-                        if (sn > 0 && (size_t)sn < sizeof(sp))
-                            hu_conversation_sched_save(sp, (size_t)sn);
+                        daemon_sched_persist(agent, "scheduling morning message");
                     }
                 }
             }
@@ -9141,7 +9149,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                              agent ? agent->observer : NULL,
                                              "promise-keeper subsystem disabled by config "
                                              "(HU_PROMISE_KEEPER env not set); set "
-                                             "HU_PROMISE_KEEPER=on or HU_PROMISE_KEEPER=shadow "
+                                             "HU_PROMISE_KEEPER=live or HU_PROMISE_KEEPER=shadow "
                                              "to activate");
                         } else if (agent && agent->memory && send_len > 0) {
                             hu_error_t pk_err = hu_daemon_promise_keeper_scan_outbound(

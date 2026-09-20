@@ -63,6 +63,7 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/json.h"
+#include "human/core/log.h"
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -176,7 +177,9 @@ static int matrix_dispatch_reaction(const hu_json_value_t *event, const char *ro
     evt.timestamp_unix = (int64_t)ts_ms / 1000;
     evt.emoji = (k == HU_REACTION_KIND_CUSTOM_EMOJI) ? strdup(key) : NULL;
 
-    hu_reaction_handler_handle_event(&evt);
+    hu_error_t herr = hu_reaction_handler_handle_event(&evt);
+    if (herr != HU_OK)
+        hu_log_warn("matrix", NULL, "reaction not recorded (%d)", (int)herr);
 
     free((void *)evt.target_thread_id);
     free((void *)evt.target_message_ref);
