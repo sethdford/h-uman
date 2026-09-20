@@ -703,6 +703,7 @@ void register_voice_clone_tests(void);
 void run_audio_pipeline_tests(void);
 void run_voice_decision_tests(void);
 void run_emotion_map_tests(void);
+void run_voice_reply_tests(void);
 #endif
 #ifdef HU_ENABLE_ML
 void run_ml_tests(void);
@@ -1779,6 +1780,7 @@ int main(int argc, char **argv) {
     run_audio_pipeline_tests();
     run_voice_decision_tests();
     run_emotion_map_tests();
+    run_voice_reply_tests();
 #endif
 #ifdef HU_ENABLE_ML
     run_ml_tests();

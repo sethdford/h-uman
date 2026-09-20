@@ -38,6 +38,8 @@ typedef struct hu_prep_result {
     size_t sentence_count;
     const char *dominant_emotion;
     float volume;
+    float base_speed; /* request-level speed after late-night adjustment; <speed> tags are relative
+                         to it */
 } hu_prep_result_t;
 
 /*
@@ -58,8 +60,8 @@ hu_error_t hu_transcript_prep(const char *transcript, size_t transcript_len,
  * and avoids splitting on decimal numbers or ellipsis.
  * Returns sentence count. Sentences point into the original text buffer.
  */
-size_t hu_transcript_segment(const char *text, size_t text_len,
-                             hu_prep_sentence_t *out, size_t max_sentences);
+size_t hu_transcript_segment(const char *text, size_t text_len, hu_prep_sentence_t *out,
+                             size_t max_sentences);
 
 /*
  * Map emotion enum to a volume multiplier.

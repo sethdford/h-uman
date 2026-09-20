@@ -11,7 +11,14 @@
  * LIVE, or skipped a non-iMessage contact, or failed OPEN on junk env — fails
  * here. Under HU_IS_TEST the chat.db inference is compiled out and the
  * predicate is a fail-closed stub (HOLD unless HU_IMESSAGE_ALLOW_GREEN), which
- * is exactly the seam these tests use to drive both verdicts. */
+ * is exactly the seam these tests use to drive both verdicts.
+ *
+ * The oracle itself (hu_imessage_blue_guard_verdict) only exists when the
+ * iMessage channel is built (HU_HAS_IMESSAGE: macOS default, and Linux only
+ * under HU_ENABLE_ALL_CHANNELS). The default Linux CI jobs build without it,
+ * so the LIVE-skips test is gated on the same define as its source
+ * (test-source-gate-symmetry.md) and the #else branch pins the no-oracle
+ * contract instead: LIVE with nothing to infer from must never skip. */
 #include "test_framework.h"
 
 #include "human/daemon_proactive.h"
@@ -116,6 +123,7 @@ static void test_should_skip_shadow_never_skips(void) {
     env_restore(&e);
 }
 
+#ifdef HU_HAS_IMESSAGE
 static void test_should_skip_live_skips_only_unreachable(void) {
     reach_env_t e;
     env_save(&e);
@@ -128,6 +136,17 @@ static void test_should_skip_live_skips_only_unreachable(void) {
     HU_ASSERT_FALSE(should_skip("imessage"));
     env_restore(&e);
 }
+#else
+static void test_should_skip_live_without_oracle_never_skips(void) {
+    reach_env_t e;
+    env_save(&e);
+    setenv("HU_PROACTIVE_REACHABILITY", "live", 1);
+    /* No iMessage channel → no reachability evidence → PASS. A gate that
+     * failed closed here would silence every proactive fire on such a build. */
+    HU_ASSERT_FALSE(should_skip("imessage"));
+    env_restore(&e);
+}
+#endif
 
 static void test_should_skip_ignores_channels_without_an_oracle(void) {
     reach_env_t e;
@@ -146,6 +165,10 @@ void run_daemon_proactive_reachability_tests(void) {
     HU_RUN_TEST(test_reach_decide_truth_table);
     HU_RUN_TEST(test_should_skip_off_never_skips);
     HU_RUN_TEST(test_should_skip_shadow_never_skips);
+#ifdef HU_HAS_IMESSAGE
     HU_RUN_TEST(test_should_skip_live_skips_only_unreachable);
+#else
+    HU_RUN_TEST(test_should_skip_live_without_oracle_never_skips);
+#endif
     HU_RUN_TEST(test_should_skip_ignores_channels_without_an_oracle);
 }

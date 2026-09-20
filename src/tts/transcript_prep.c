@@ -743,18 +743,22 @@ static float speed_for_sentence(const char *sentence, size_t len, float base_spe
     }
 
     /* Emotional keywords: slower for weight */
-    if (hu_str_contains_ci_cstr(sentence, len, "feel") || hu_str_contains_ci_cstr(sentence, len, "love") ||
-        hu_str_contains_ci_cstr(sentence, len, "care") || hu_str_contains_ci_cstr(sentence, len, "heart") ||
+    if (hu_str_contains_ci_cstr(sentence, len, "feel") ||
+        hu_str_contains_ci_cstr(sentence, len, "love") ||
+        hu_str_contains_ci_cstr(sentence, len, "care") ||
+        hu_str_contains_ci_cstr(sentence, len, "heart") ||
         hu_str_contains_ci_cstr(sentence, len, "worry"))
         return base_speed * 0.90f;
 
     /* Important/emphasis words: slower, deliberate */
-    if (hu_str_contains_ci_cstr(sentence, len, "important") || hu_str_contains_ci_cstr(sentence, len, "crucial") ||
+    if (hu_str_contains_ci_cstr(sentence, len, "important") ||
+        hu_str_contains_ci_cstr(sentence, len, "crucial") ||
         hu_str_contains_ci_cstr(sentence, len, "remember"))
         return base_speed * 0.92f;
 
     /* Conclusions: slower, more weight */
-    if (hu_str_contains_ci_cstr(sentence, len, "so ") || hu_str_contains_ci_cstr(sentence, len, "therefore") ||
+    if (hu_str_contains_ci_cstr(sentence, len, "so ") ||
+        hu_str_contains_ci_cstr(sentence, len, "therefore") ||
         hu_str_contains_ci_cstr(sentence, len, "the point is"))
         return base_speed * 0.93f;
 
@@ -767,8 +771,10 @@ static float speed_for_sentence(const char *sentence, size_t len, float base_spe
         return base_speed * 0.92f;
 
     /* Lists/examples: slightly faster */
-    if (hu_str_contains_ci_cstr(sentence, len, "for example") || hu_str_contains_ci_cstr(sentence, len, "such as") ||
-        hu_str_contains_ci_cstr(sentence, len, "first") || hu_str_contains_ci_cstr(sentence, len, "second"))
+    if (hu_str_contains_ci_cstr(sentence, len, "for example") ||
+        hu_str_contains_ci_cstr(sentence, len, "such as") ||
+        hu_str_contains_ci_cstr(sentence, len, "first") ||
+        hu_str_contains_ci_cstr(sentence, len, "second"))
         return base_speed * 1.05f;
 
     /* Long compound sentences: slightly faster to stay natural */
@@ -917,7 +923,8 @@ static const char *pick_nonverbal(const char *sentence, size_t len, const char *
         return NULL;
 
     /* Context-appropriate nonverbal */
-    if (hu_str_contains_ci_cstr(sentence, len, "lol") || hu_str_contains_ci_cstr(sentence, len, "haha") ||
+    if (hu_str_contains_ci_cstr(sentence, len, "lol") ||
+        hu_str_contains_ci_cstr(sentence, len, "haha") ||
         hu_str_contains_ci_cstr(sentence, len, "funny"))
         return "[laughter] ";
 
@@ -1013,6 +1020,7 @@ hu_error_t hu_transcript_prep(const char *transcript, size_t transcript_len,
         result->output_len = cp;
         result->dominant_emotion = config->default_emotion ? config->default_emotion : "content";
         result->volume = hu_emotion_to_volume(result->dominant_emotion);
+        result->base_speed = config->base_speed > 0.0f ? config->base_speed : 0.95f;
         return HU_OK;
     }
 
@@ -1025,6 +1033,7 @@ hu_error_t hu_transcript_prep(const char *transcript, size_t transcript_len,
         base_speed *= 0.92f;
         pause_factor *= 1.25f;
     }
+    result->base_speed = base_speed;
 
     /* Tag each sentence with emotion and speed */
     for (size_t i = 0; i < result->sentence_count; i++) {
@@ -1090,6 +1099,7 @@ hu_error_t hu_transcript_prep(const char *transcript, size_t transcript_len,
             pos += (size_t)n;
     }
 
+    bool speed_tag_open = false; /* a non-1.0 <speed> tag persists until reset */
     for (size_t i = 0; i < result->sentence_count; i++) {
         hu_prep_sentence_t *s = &result->sentences[i];
 
@@ -1123,13 +1133,18 @@ hu_error_t hu_transcript_prep(const char *transcript, size_t transcript_len,
                 pos += (size_t)n;
         }
 
-        /* Speed tag if non-default (SSML mode only) */
+        /* Speed tag (SSML mode only). Cartesia applies <speed ratio> as a
+         * multiplier on generation_config.speed (= base_speed, see
+         * result->base_speed) and it persists until the next tag, so emit the
+         * RELATIVE factor and reset to 1.00 once a tagged sentence ends. */
         float speed_delta = s->speed_ratio - base_speed;
-        if (!strip && (speed_delta > 0.03f || speed_delta < -0.03f)) {
-            int n =
-                snprintf(out + pos, cap - pos, "<speed ratio=\"%.2f\"/>", (double)s->speed_ratio);
+        bool speed_tagged = (speed_delta > 0.03f || speed_delta < -0.03f);
+        if (!strip && (speed_tagged || speed_tag_open)) {
+            double rel = speed_tagged ? (double)(s->speed_ratio / base_speed) : 1.0;
+            int n = snprintf(out + pos, cap - pos, "<speed ratio=\"%.2f\"/>", rel);
             if (n > 0 && pos + (size_t)n < cap)
                 pos += (size_t)n;
+            speed_tag_open = speed_tagged;
         }
 
         /* Per-sentence volume (SSML mode only) */

@@ -1670,6 +1670,7 @@ if(HU_ENABLE_CARTESIA)
         src/tts/audio_pipeline.c
         src/context/voice_decision.c
         src/tts/emotion_map.c
+        src/tts/voice_reply.c
     )
     message(STATUS "Cartesia TTS: enabled")
 else()
@@ -3042,7 +3043,7 @@ endif()
 if(NOT HU_ENABLE_CARTESIA)
     list(APPEND HU_TEST_EXTRA_MODULES
         src/tts/audio_pipeline.c
-        src/context/voice_decision.c src/tts/emotion_map.c)
+        src/context/voice_decision.c src/tts/emotion_map.c src/tts/voice_reply.c)
 endif()
 # Phase 7 modules (experience, forgetting, weakness) — tests need them when SQLite is OFF (minimal build)
 if(NOT HU_ENABLE_SQLITE)
@@ -3943,7 +3944,7 @@ list(APPEND HU_TEST_SOURCES tests/test_transcript_prep.c)
 list(APPEND HU_TEST_SOURCES tests/test_send_voice_message.c)
 list(APPEND HU_TEST_SOURCES tests/test_voice_message_integration.c)
 if(HU_ENABLE_CARTESIA)
-    list(APPEND HU_TEST_SOURCES tests/test_audio_pipeline.c tests/test_voice_decision.c tests/test_emotion_map.c)
+    list(APPEND HU_TEST_SOURCES tests/test_audio_pipeline.c tests/test_voice_decision.c tests/test_emotion_map.c tests/test_voice_reply.c)
 endif()
 if(HU_ENABLE_AUTHENTIC)
     list(APPEND HU_TEST_SOURCES tests/test_cognitive_load.c tests/test_phase9_integration.c)
