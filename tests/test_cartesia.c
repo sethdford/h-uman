@@ -4,6 +4,7 @@
  */
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/json.h"
 #include "human/core/privacy.h"
 #include "human/tts/cartesia.h"
 #include "human/voice.h"
@@ -26,6 +27,60 @@ static void test_tts_format_for_channel_null_and_slack_default_mp3(void) {
 }
 
 #if HU_ENABLE_CARTESIA
+
+/* Pins the 2026-09-20 400s: the body must PARSE, and carry the SSML transcript
+ * and generation config verbatim. Hand-counted literal lengths had dropped a
+ * quote after model_id and before emotion. */
+static void test_cartesia_build_tts_body_is_valid_json_with_ssml(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *transcript = "<break time=\"250ms\"/><emotion value=\"content\"/>hey there. "
+                             "<speed ratio=\"0.92\"/>it's \"quoted\" & tagged!";
+    hu_cartesia_tts_config_t cfg = {
+        .model_id = "sonic-3.6",
+        .voice_id = "voice-uuid-1",
+        .emotion = "content",
+        .speed = 0.85f,
+        .volume = 1.15f,
+        .nonverbals = true,
+    };
+    hu_json_buf_t jbuf;
+    HU_ASSERT_EQ(
+        hu_cartesia_build_tts_body(&alloc, transcript, strlen(transcript), &cfg, "caf", &jbuf),
+        HU_OK);
+    hu_json_value_t *root = NULL;
+    HU_ASSERT_EQ(hu_json_parse(&alloc, jbuf.ptr, jbuf.len, &root), HU_OK);
+    HU_ASSERT_NOT_NULL(root);
+    HU_ASSERT_STR_EQ(hu_json_get_string(root, "model_id"), "sonic-3.6");
+    HU_ASSERT_STR_EQ(hu_json_get_string(root, "transcript"), transcript);
+    hu_json_value_t *voice = hu_json_object_get(root, "voice");
+    HU_ASSERT_NOT_NULL(voice);
+    HU_ASSERT_STR_EQ(hu_json_get_string(voice, "mode"), "id");
+    HU_ASSERT_STR_EQ(hu_json_get_string(voice, "id"), "voice-uuid-1");
+    hu_json_value_t *of = hu_json_object_get(root, "output_format");
+    HU_ASSERT_NOT_NULL(of);
+    HU_ASSERT_STR_EQ(hu_json_get_string(of, "container"), "mp3"); /* caf is converted locally */
+    hu_json_value_t *gc = hu_json_object_get(root, "generation_config");
+    HU_ASSERT_NOT_NULL(gc);
+    HU_ASSERT_FLOAT_EQ((float)hu_json_get_number(gc, "speed", 0), 0.85f, 0.001f);
+    HU_ASSERT_FLOAT_EQ((float)hu_json_get_number(gc, "volume", 0), 1.15f, 0.001f);
+    HU_ASSERT_STR_EQ(hu_json_get_string(gc, "emotion"), "content");
+    hu_json_free(&alloc, root);
+    hu_json_buf_free(&jbuf);
+}
+
+static void test_cartesia_build_tts_body_wav_container_for_ogg_channels(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_json_buf_t jbuf;
+    HU_ASSERT_EQ(hu_cartesia_build_tts_body(&alloc, "hi there.", 9, NULL, "ogg", &jbuf), HU_OK);
+    hu_json_value_t *root = NULL;
+    HU_ASSERT_EQ(hu_json_parse(&alloc, jbuf.ptr, jbuf.len, &root), HU_OK);
+    hu_json_value_t *of = hu_json_object_get(root, "output_format");
+    HU_ASSERT_NOT_NULL(of);
+    HU_ASSERT_STR_EQ(hu_json_get_string(of, "container"), "wav");
+    HU_ASSERT_STR_EQ(hu_json_get_string(root, "model_id"), "sonic-3-2026-01-12"); /* default */
+    hu_json_free(&alloc, root);
+    hu_json_buf_free(&jbuf);
+}
 
 static void test_cartesia_null_api_key_returns_error(void) {
     hu_allocator_t alloc = hu_system_allocator();
@@ -206,6 +261,8 @@ void run_cartesia_tests(void) {
     HU_RUN_TEST(test_tts_format_for_channel_telegram_discord_return_ogg);
     HU_RUN_TEST(test_tts_format_for_channel_null_and_slack_default_mp3);
 #if HU_ENABLE_CARTESIA
+    HU_RUN_TEST(test_cartesia_build_tts_body_is_valid_json_with_ssml);
+    HU_RUN_TEST(test_cartesia_build_tts_body_wav_container_for_ogg_channels);
     HU_RUN_TEST(test_cartesia_null_api_key_returns_error);
     HU_RUN_TEST(test_cartesia_empty_transcript_returns_error);
     HU_RUN_TEST(test_cartesia_null_config_uses_defaults);
