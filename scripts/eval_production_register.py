@@ -40,6 +40,12 @@ from eval_persona_evolution import has_dash  # noqa: E402
 from reply_pairs import is_distress, is_substantive, reply_stats  # noqa: E402
 
 SCHEMA = "production-register/v1"
+# production_outcomes.chosen holds the DELIVERED text only for rows written
+# after 353434eb1 (2026-09-12, deployed the same day): before it the recorder
+# ran ahead of the AI-tell gate, so a row could hold a draft the gate retried
+# away (09-10: "Could you please clarify…" recorded, "lol what" delivered).
+# Rows older than this are drafts and never counted here.
+DELIVERED_TEXT_SINCE = int(datetime.datetime(2026, 9, 13).timestamp())
 DEFAULT_DB = os.path.expanduser("~/.human/memory.db")
 DEFAULT_OUTPUT = os.path.expanduser("~/.human/logs/eval-production-register-latest.json")
 # Provisional: named here and in the verdict; nothing gates on them yet.
@@ -71,7 +77,7 @@ def fetch_turns(db_path, days):
             "SELECT prompt, chosen, send_timestamp, channel FROM production_outcomes "
             "WHERE send_timestamp >= ? AND chosen IS NOT NULL AND chosen <> '' "
             "ORDER BY send_timestamp",
-            (int(datetime.datetime.now().timestamp()) - int(days) * 86400,),
+            (max(DELIVERED_TEXT_SINCE, int(datetime.datetime.now().timestamp()) - int(days) * 86400),),
         ).fetchall()
     finally:
         con.close()
@@ -200,6 +206,7 @@ def main(argv=None) -> int:
         "what": "delivered production replies (production_outcomes.chosen) by inbound register, "
                 "judge-free, against the persona's measured cards",
         "window": {"days": args.days, "n": len(turns), "min_n": args.min_n,
+                   "delivered_text_since": datetime.datetime.fromtimestamp(DELIVERED_TEXT_SINCE).isoformat(),
                    "min_register_n": args.min_register_n, "channels": channels,
                    "first": datetime.datetime.fromtimestamp(turns[0][2]).isoformat(timespec="seconds"),
                    "last": datetime.datetime.fromtimestamp(turns[-1][2]).isoformat(timespec="seconds")},

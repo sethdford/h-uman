@@ -116,6 +116,20 @@ class Cli(unittest.TestCase):
             self.assertEqual(epr.main(["--db", db, "--days", "14", "--min-n", "1", "--output-json", out]), 3)
             self.assertFalse(os.path.exists(out))
 
+    def test_rows_before_the_delivered_text_recorder_are_drafts_and_excluded(self):
+        with tempfile.TemporaryDirectory() as d:
+            db = os.path.join(d, "m.db")
+            con = sqlite3.connect(db)
+            con.execute("CREATE TABLE production_outcomes(id INTEGER PRIMARY KEY, channel TEXT, target TEXT, "
+                        "message_ref TEXT, prompt TEXT, chosen TEXT, send_timestamp INTEGER)")
+            con.executemany("INSERT INTO production_outcomes(channel,target,prompt,chosen,send_timestamp) VALUES(?,?,?,?,?)",
+                            [("imessage", "t", "hi", "draft", epr.DELIVERED_TEXT_SINCE - 60)] * 5 +
+                            [("imessage", "t", "hi", "sent", epr.DELIVERED_TEXT_SINCE + 60)] * 3)
+            con.commit(); con.close()
+            turns = epr.fetch_turns(db, days=10_000)
+            self.assertEqual(len(turns), 3)
+            self.assertTrue(all(c == "sent" for _, c, _, _ in turns))
+
     def test_unreadable_db_refuses(self):
         with tempfile.TemporaryDirectory() as d:
             out = os.path.join(d, "v.json")
