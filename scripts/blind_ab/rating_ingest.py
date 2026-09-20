@@ -2,7 +2,7 @@
 """rating_ingest — harvest Seth's replies from chat.db and write into rating sheet.
 
 The rating_drip sends one blind-A/B question per day to Seth's self-chat
-(sethford@me.com). This script reads his replies and ingests them into the
+(his own number; see DEFAULT_TARGET). This script reads his replies and ingests them into the
 rating_sheet.csv.
 
 Ingest is idempotent: re-running never double-ingests (tracks ingested message
@@ -35,7 +35,11 @@ CHAT_DB = os.path.join(HOME, "Library", "Messages", "chat.db")
 SCORE_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "score.py")
 from rating_drip import REPO_GATE  # noqa: E402 — one gate path, owned by the drip
 
-DEFAULT_TARGET = "sethford@me.com"  # Seth's self-chat
+# Seth's self-chat, addressed by his own number. `sethford@me.com` stopped
+# being an alias on the account ~2026-09-05 and every send to it recorded
+# error=22 in chat.db while imsg exited 0 — keep this in sync with
+# rating_drip.DEFAULT_TARGET (pinned by test_rating_drip).
+DEFAULT_TARGET = "+18012017497"
 
 
 def load_sheet(path=None):
