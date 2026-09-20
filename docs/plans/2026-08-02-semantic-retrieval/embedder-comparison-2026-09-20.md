@@ -56,5 +56,7 @@ tolerance, and the recall-minus-control delta across the three runs is
 effect or the recall effect. The retrieval benchmarks above remain the only
 measurement that separates the two embedders, and they favour Gemma.
 
-Decision on keeping the switch or reverting is Seth's; the gate result is
-recorded as HOLD, not re-run until it passes.
+**Decision (Seth, 2026-09-20): keep Gemma.** The retrieval benchmarks are the
+embedder-separating measurement and the gate's movement is in the arm the embedder
+cannot influence. The HOLD stays on record; the weekly gate re-runs in its normal
+window and the doctor reports HOLD until a run PROMOTEs.
