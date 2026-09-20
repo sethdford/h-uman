@@ -46,6 +46,29 @@ human voice preview --persona seth --text "ok so i thought about it more. that t
 
 This runs the exact daemon pipeline — transcript prep (sentence breaks, per-sentence emotion, thinking sounds, nonverbals), the persona's model/speed, and the channel's audio container (CAF for iMessage) — and prints the annotated transcript plus the generation config before writing the file. Use it to tune `voice.default_speed` / `voice.model` without waiting for the daemon's voice roll.
 
+## Measure It: Voice A/B Drip
+
+```bash
+python3 scripts/blind_ab/voice_ab.py gen --pairs 12      # clips from your real texts, one axis per pair
+python3 scripts/blind_ab/voice_ab.py tick                 # one pair to your self-chat (launchd: ai.human.voice-ab)
+python3 scripts/blind_ab/voice_ab.py score                # per-axis preference + 95% CI -> ~/.human/voice_ab/verdict.json
+```
+
+Axes: model (sonic-3.6 vs sonic-3), speed (0.85 vs 0.95), prep (on vs off). Reply "A" or "B" (optionally + 1-5) on your phone. Promote a model/speed/clone change only when its axis clears 0.5 with the CI.
+
+Every voice/text decision the daemon makes is logged into `proactive_decisions` with `trigger='voice_reply'` (decision, reason, sent) so `scripts/eval_when_to_speak.py` can score voice timing the way it scores proactive sends.
+
+## Pro Voice Clone (30+ min of your audio)
+
+```bash
+python3 scripts/voice/pro_clone.py prepare --in ~/Recordings/   # -> 44.1k mono WAV + manifest, checks the 30-min floor
+python3 scripts/voice/pro_clone.py submit --name "Seth Pro"     # datasets -> files -> fine-tune (Startup plan)
+python3 scripts/voice/pro_clone.py status                       # poll until completed (up to ~3h)
+python3 scripts/voice/pro_clone.py adopt --persona seth         # writes the new voice_id (old kept as previous_voice_id)
+```
+
+Then restart the daemon and A/B the new id against the old one before trusting it.
+
 ## Gateway API
 
 The `voice.clone` JSON-RPC method accepts base64-encoded audio:

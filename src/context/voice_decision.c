@@ -78,47 +78,52 @@ static bool has_prefer_for_boost(const char *response_text, size_t response_len,
     return false;
 }
 
-hu_voice_decision_t hu_voice_decision_classify(const char *response_text, size_t response_len,
-                                               const char *incoming_msg, size_t incoming_len,
-                                               const hu_voice_messages_config_t *voice_msg_config,
-                                               bool has_voice_id, int hour_local, uint32_t seed) {
+#define RETURN_TEXT(why)           \
+    do {                           \
+        *reason = (why);           \
+        return HU_VOICE_SEND_TEXT; \
+    } while (0)
 
-    (void)seed;
+static hu_voice_decision_t classify_with_reason(const char *response_text, size_t response_len,
+                                                const char *incoming_msg, size_t incoming_len,
+                                                const hu_voice_messages_config_t *voice_msg_config,
+                                                bool has_voice_id, int hour_local, uint32_t seed,
+                                                const char **reason) {
 
     if (!has_voice_id)
-        return HU_VOICE_SEND_TEXT;
+        RETURN_TEXT("no_voice_id");
     if (!voice_msg_config || !voice_msg_config->enabled) {
         static atomic_bool warned_voice_decision_disabled = false;
         hu_log_info_once(&warned_voice_decision_disabled, "voice_decision", NULL,
                          "voice messaging disabled — set "
                          "voice_messaging.enabled=true in config.json "
                          "to enable TTS reply routing (currently always text)");
-        return HU_VOICE_SEND_TEXT;
+        RETURN_TEXT("disabled");
     }
 
     /* Never: incoming is question ('?') */
     if (incoming_msg && incoming_len > 0 && ends_with_question(incoming_msg, incoming_len))
-        return HU_VOICE_SEND_TEXT;
+        RETURN_TEXT("incoming_question");
 
     /* Never: response < 20 chars ("ok", "sure", "yeah") */
     if (response_len < 20)
-        return HU_VOICE_SEND_TEXT;
+        RETURN_TEXT("response_short");
 
     /* Never: logistics ("what time", "where", "when", "address") */
     if (incoming_msg && incoming_len > 0 && is_logistics(incoming_msg, incoming_len))
-        return HU_VOICE_SEND_TEXT;
+        RETURN_TEXT("logistics");
 
     /* Never: response would exceed max_duration_sec (~5 chars/sec speaking rate) */
     if (voice_msg_config->max_duration_sec > 0) {
         uint32_t est_sec = (uint32_t)(response_len / 5);
         if (est_sec > voice_msg_config->max_duration_sec)
-            return HU_VOICE_SEND_TEXT;
+            RETURN_TEXT("too_long");
     }
 
     /* Prefer for: need at least one boost to consider voice. Otherwise TEXT. */
     if (!has_prefer_for_boost(response_text, response_len, incoming_msg, incoming_len,
                               voice_msg_config, hour_local))
-        return HU_VOICE_SEND_TEXT;
+        RETURN_TEXT("no_prefer_boost");
 
     /* Frequency roll: rare=5%, occasional=15%, frequent=30% */
     float base_prob = 0.05f;
@@ -130,10 +135,34 @@ hu_voice_decision_t hu_voice_decision_classify(const char *response_text, size_t
     }
 
     uint32_t roll = seed % 100;
-    if ((float)roll / 100.0f < base_prob)
+    if ((float)roll / 100.0f < base_prob) {
+        *reason = "voice";
         return HU_VOICE_SEND_VOICE;
+    }
+    RETURN_TEXT("roll_miss");
+}
+#undef RETURN_TEXT
 
-    return HU_VOICE_SEND_TEXT;
+hu_voice_decision_t
+hu_voice_decision_classify_ex(const char *response_text, size_t response_len,
+                              const char *incoming_msg, size_t incoming_len,
+                              const hu_voice_messages_config_t *voice_msg_config, bool has_voice_id,
+                              int hour_local, uint32_t seed, const char **out_reason) {
+    const char *why = "voice";
+    hu_voice_decision_t r =
+        classify_with_reason(response_text, response_len, incoming_msg, incoming_len,
+                             voice_msg_config, has_voice_id, hour_local, seed, &why);
+    if (out_reason)
+        *out_reason = why;
+    return r;
+}
+
+hu_voice_decision_t hu_voice_decision_classify(const char *response_text, size_t response_len,
+                                               const char *incoming_msg, size_t incoming_len,
+                                               const hu_voice_messages_config_t *voice_msg_config,
+                                               bool has_voice_id, int hour_local, uint32_t seed) {
+    return hu_voice_decision_classify_ex(response_text, response_len, incoming_msg, incoming_len,
+                                         voice_msg_config, has_voice_id, hour_local, seed, NULL);
 }
 
 #else
@@ -151,6 +180,17 @@ hu_voice_decision_t hu_voice_decision_classify(const char *response_text, size_t
     (void)hour_local;
     (void)seed;
     return HU_VOICE_SEND_TEXT;
+}
+
+hu_voice_decision_t
+hu_voice_decision_classify_ex(const char *response_text, size_t response_len,
+                              const char *incoming_msg, size_t incoming_len,
+                              const hu_voice_messages_config_t *voice_msg_config, bool has_voice_id,
+                              int hour_local, uint32_t seed, const char **out_reason) {
+    if (out_reason)
+        *out_reason = "disabled";
+    return hu_voice_decision_classify(response_text, response_len, incoming_msg, incoming_len,
+                                      voice_msg_config, has_voice_id, hour_local, seed);
 }
 
 #endif /* HU_ENABLE_CARTESIA */
