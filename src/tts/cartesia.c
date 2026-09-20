@@ -18,18 +18,6 @@ const char *hu_tts_format_for_channel(const char *channel_name) {
     return "mp3";
 }
 
-#if defined(HU_ENABLE_CARTESIA)
-
-#define CARTESIA_TTS_URL    "https://api.cartesia.ai/tts/bytes"
-#define CARTESIA_VERSION    "2026-03-01"
-#define DEFAULT_MODEL       "sonic-3-2026-01-12"
-#define DEFAULT_EMOTION     "content"
-#define DEFAULT_SPEED       0.95f
-#define DEFAULT_VOLUME      1.0f
-#define MOCK_MP3_HEADER     0xFF
-#define MOCK_MP3_HEADER_LEN 4
-#define MOCK_MP3_REPEAT     100
-
 #if defined(HU_IS_TEST) && HU_IS_TEST
 /* Test-only capture of the last request handed to the mock, so tests can
  * prove what the daemon path sends (transcript + generation config). */
@@ -69,6 +57,18 @@ const hu_cartesia_tts_config_t *hu_cartesia_test_last_config(void) {
     return &hu_cartesia_test_config_copy;
 }
 #endif /* HU_IS_TEST */
+
+#if defined(HU_ENABLE_CARTESIA)
+
+#define CARTESIA_TTS_URL    "https://api.cartesia.ai/tts/bytes"
+#define CARTESIA_VERSION    "2026-03-01"
+#define DEFAULT_MODEL       "sonic-3-2026-01-12"
+#define DEFAULT_EMOTION     "content"
+#define DEFAULT_SPEED       0.95f
+#define DEFAULT_VOLUME      1.0f
+#define MOCK_MP3_HEADER     0xFF
+#define MOCK_MP3_HEADER_LEN 4
+#define MOCK_MP3_REPEAT     100
 
 /* Cartesia /tts/bytes supports mp3 and wav containers (not ogg). */
 typedef enum {
