@@ -9,6 +9,7 @@
 #include "human/daemon/promise_keeper.h"
 
 #include "human/context/conversation.h"
+#include "human/core/gate_mode.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
 #include "human/core/string.h"
@@ -20,14 +21,20 @@
 #include <strings.h>
 #include <time.h>
 
+/* Canonical gate vocabulary (core/gate_mode.h): off | shadow | on|live|1,
+ * case-insensitive, unknown fails closed. The previous exact-match "on"-only
+ * parser rejected the "live" the prod plist actually set (2026-09-12..20), so
+ * the subsystem ran OFF while every other gate on the box read "live". */
 hu_promise_keeper_mode_t hu_promise_keeper_mode_from_env(const char *env_value) {
-    if (!env_value)
-        return HU_PROMISE_KEEPER_OFF;
-    if (strcmp(env_value, "on") == 0)
+    switch (hu_gate_mode_parse(env_value, HU_GATE_OFF)) {
+    case HU_GATE_LIVE:
         return HU_PROMISE_KEEPER_LIVE;
-    if (strcmp(env_value, "shadow") == 0)
+    case HU_GATE_SHADOW:
         return HU_PROMISE_KEEPER_SHADOW;
-    return HU_PROMISE_KEEPER_OFF;
+    case HU_GATE_OFF:
+    default:
+        return HU_PROMISE_KEEPER_OFF;
+    }
 }
 
 /* Courtesy vocabulary — DATA, not code. Source of truth is

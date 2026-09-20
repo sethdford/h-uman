@@ -43,9 +43,10 @@ typedef struct hu_sandbox_config {
     hu_net_proxy_config_t net_proxy;
 } hu_sandbox_config_t;
 
+/* File-size caps live in tools.max_file_size_bytes (enforced by file_read);
+ * the former max_file_size / max_read_size here were parsed but read by
+ * nothing. */
 typedef struct hu_resource_limits {
-    uint64_t max_file_size;
-    uint64_t max_read_size;
     uint32_t max_memory_mb;
 } hu_resource_limits_t;
 

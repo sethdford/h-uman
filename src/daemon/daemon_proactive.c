@@ -20,12 +20,17 @@
 #include "human/daemon_proactive.h"
 #include "human/agent.h"
 #include "human/agent/governor.h"
+#include "human/agent/init_proposer.h"
+#include "human/agent/outbound_sanitize.h"
 #include "human/agent/proactive.h"
 #include "human/agent/proactive_throttle.h"
+#include "human/agent/validators/builtin.h"
 #include "human/agent/weather_awareness.h"
 #include "human/agent/weather_fetch.h"
 #include "human/autoresponder.h"
 #include "human/config.h"
+#include "human/contact_send_recency.h"
+#include "human/context/conversation.h"
 #include "human/context/protective.h"
 #include "human/context/self_awareness.h"
 #include "human/core/paths.h"
@@ -951,6 +956,143 @@ static void daemon_proactive_record_decision(struct hu_agent *agent, const char 
  * ZERO matching rows in chat.db.
  *
  * Returns true only when the message was actually accepted for delivery. */
+/* See daemon_proactive.h — attributes a pre-send drop so eval_when_to_speak.py
+ * can tell a deliberate silence from a gate that ate the message. Thin wrapper
+ * over the same recorder the send path uses, so both outcomes land in one
+ * table with one schema. */
+void hu_daemon_proactive_record_decline(struct hu_agent *agent, const char *contact,
+                                        const char *reason, int64_t now) {
+    if (!agent || !contact || !reason)
+        return;
+    daemon_proactive_record_decision(agent, contact, HU_PROACTIVE_DECISION_DECLINE, reason,
+                                     /*sent=*/0, /*message=*/NULL, /*message_len=*/0, now);
+}
+
+bool hu_daemon_proactive_gate_and_send(struct hu_agent *agent, hu_allocator_t *alloc,
+                                       hu_channel_t *channel, const struct hu_contact_profile *cp,
+                                       const char *ch_name, const char *target, size_t target_len,
+                                       char *response, size_t *response_len_io, int64_t now,
+                                       hu_proactive_budget_t *gov_budget,
+                                       const struct hu_autoresponder_config *ar_cfg,
+                                       int32_t tz_offset_s, hu_proactive_throttle_t *throttle) {
+    size_t response_len = *response_len_io;
+    bool sent = false;
+    bool skip = (response_len == 4 && memcmp(response, "SKIP", 4) == 0);
+    /* Which gate suppressed a fired proposal. Stays NULL when nothing skipped
+     * and when send_and_record itself failed — that path records its own
+     * outcome row, so attributing it here would double-count. */
+    const char *skip_reason = skip ? "llm_skip" : NULL;
+
+    /* F68: Protective boundary — skip proactive if topic is boundary */
+    if (!skip && agent->memory &&
+        hu_protective_is_boundary(agent->memory, cp->contact_id, strlen(cp->contact_id),
+                                  "proactive", 9)) {
+        skip = true;
+        skip_reason = "protective_boundary";
+    }
+    /* Sprint 41 follow-up #2 — single-source-of-truth proactive
+     * arbiter. Replaces the two explicit predicates (quiet hours
+     * + daily budget) with one call to the same gate stack
+     * init_proposer.tick uses. Daemon-side recency stays handled
+     * by FU-1 below (different semantic — outbound vs inbound),
+     * so we pass last_inbound_unix=0 to disable the arbiter's
+     * inbound-recency gate. cfg=NULL is intentional: daemon
+     * doesn't have an initiative_config in scope and the
+     * arbiter's NULL-safe defaults apply. */
+    if (!skip) {
+        hu_init_proposer_result_t gate = hu_init_proposer_governor_check_only(
+            /*cfg=*/NULL, ar_cfg, tz_offset_s, gov_budget, /*last_inbound_unix=*/0, now);
+        if (gate != HU_INIT_RESULT_SKIP) {
+            const char *why = (gate == HU_INIT_RESULT_GATED_QUIET)    ? "autoresponder quiet hours"
+                              : (gate == HU_INIT_RESULT_GATED_BUDGET) ? "daily budget exhausted"
+                                                                      : "governor gated";
+            hu_log_info("human", agent ? agent->observer : NULL,
+                        "proactive check-in to %s skipped: %s",
+                        cp->name ? cp->name : cp->contact_id, why);
+            skip = true;
+            skip_reason = "governor_gated";
+        }
+    }
+    /* FU-1: defer proactive check-in if reactive turn fired recently. */
+    if (!skip && hu_daemon_proactive_should_defer(&agent->contact_send_recency, cp->contact_id,
+                                                  strlen(cp->contact_id), now)) {
+        hu_log_info("human", agent ? agent->observer : NULL,
+                    "proactive check-in deferred for %s "
+                    "(reactive turn within %ds)",
+                    cp->name ? cp->name : cp->contact_id, HU_DAEMON_REACTIVE_GATE_WINDOW_S);
+        skip = true;
+        skip_reason = "reactive_recent";
+    }
+    if (!skip && channel->vtable->send) {
+        hu_validator_chain_apply_default_in_place(alloc, agent ? agent->observer : NULL, NULL, 0,
+                                                  "proactive send", response, &response_len,
+                                                  response_len + 1);
+        if (response_len == 0) {
+            skip = true;
+            skip_reason = "validator_emptied";
+        }
+        response_len = hu_conversation_vary_complexity(response, response_len, (uint32_t)now);
+        if (response_len > 1 && response[0] >= 'A' && response[0] <= 'Z' && response[1] >= 'a' &&
+            response[1] <= 'z' && response[0] != 'I') {
+            response[0] = (char)(response[0] + 32);
+        }
+        if (response_len > 1 && response[response_len - 1] == '.') {
+            response[response_len - 1] = '\0';
+            response_len--;
+        }
+        /* 2026-05-16 P1-6 / P4-6: rate-limit + per-contact send-cap on
+         * proactive outbound. The pre-fix path called vtable->send
+         * directly with no throttle, leading to 4x burst sends. */
+        if (!hu_proactive_throttle_channel_try_consume(throttle, ch_name)) {
+            hu_log_info("human", agent ? agent->observer : NULL,
+                        "proactive check-in to %s skipped: rate-limited",
+                        cp->name ? cp->name : cp->contact_id);
+            skip = true;
+            skip_reason = "rate_limited";
+        }
+        if (!skip && !hu_proactive_throttle_record_send(throttle, cp->contact_id, "proactive",
+                                                        (uint64_t)now * 1000ULL)) {
+            hu_log_info("human", agent ? agent->observer : NULL,
+                        "proactive check-in to %s skipped: send-cap",
+                        cp->name ? cp->name : cp->contact_id);
+            skip = true;
+            skip_reason = "send_cap";
+        }
+        if (!skip) {
+            /* 2026-05-26 Annie/Mindy/Betty incident fix:
+             * sanitize outbound BEFORE channel send. Strips
+             * U+FFFC (iMessage attachment placeholder) and
+             * rejects messages that look like LLM directive
+             * echoes (e.g. "shared history", "principle",
+             * "[SAFETY] ..."). See
+             * include/human/agent/outbound_sanitize.h. */
+            const char *sanitize_reason = NULL;
+            if (!hu_outbound_sanitize(response, &response_len, &sanitize_reason)) {
+                hu_log_warn("human", agent ? agent->observer : NULL,
+                            "proactive check-in to %s REJECTED by sanitizer: %s "
+                            "(would have sent: %.*s)",
+                            cp->name ? cp->name : cp->contact_id,
+                            sanitize_reason ? sanitize_reason : "unknown",
+                            (int)(response_len > 80 ? 80 : response_len),
+                            response ? response : "(null)");
+                skip = true;
+                skip_reason = "sanitize_refused";
+            }
+        }
+        /* A failed send must not log "sent" nor charge recency/outcome/governor;
+         * send_and_record writes the outcome row for that case itself. */
+        if (!skip &&
+            !hu_daemon_proactive_send_and_record(agent, channel, cp, ch_name, target, target_len,
+                                                 response, response_len, now, gov_budget))
+            skip = true;
+        sent = !skip;
+    }
+    if (skip && skip_reason)
+        hu_daemon_proactive_record_decline(agent, cp->contact_id, skip_reason, now);
+    *response_len_io = response_len;
+    return sent;
+}
+
 bool hu_daemon_proactive_send_and_record(struct hu_agent *agent, hu_channel_t *channel,
                                          const struct hu_contact_profile *cp, const char *ch_name,
                                          const char *target, size_t target_len, const char *message,

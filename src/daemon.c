@@ -448,6 +448,20 @@ static hu_proactive_context_t g_proactive_ctx;
 static hu_proactive_throttle_t g_proactive_throttle;
 static int g_proactive_throttle_initialized;
 
+/* Persist scheduled.json after a slot changes. A failed save leaves memory and
+ * disk disagreeing and the stale file replays on restart (the 2026-07-27
+ * sched-send incident class), so the failure is logged rather than dropped. */
+static void daemon_sched_persist(hu_agent_t *agent, const char *what) {
+    char sp[512];
+    int sn = hu_paths_state(sp, sizeof(sp), "scheduled.json");
+    if (sn <= 0 || (size_t)sn >= sizeof(sp))
+        return;
+    hu_error_t se = hu_conversation_sched_save(sp, (size_t)sn);
+    if (se != HU_OK)
+        hu_log_error("human", agent ? agent->observer : NULL,
+                     "scheduled.json not persisted after %s (%d)", what, (int)se);
+}
+
 static hu_proactive_throttle_t *daemon_throttle(hu_allocator_t *alloc) {
     if (!g_proactive_throttle_initialized) {
         hu_proactive_throttle_init(&g_proactive_throttle, alloc);
@@ -769,10 +783,7 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                 }
                 hu_daemon_sched_send_and_log(agent, channels[sc].channel, sched_ch, sched_contact,
                                              sched_msg, sched_len);
-                char sp[512];
-                int sn = hu_paths_state(sp, sizeof(sp), "scheduled.json");
-                if (sn > 0 && (size_t)sn < sizeof(sp))
-                    hu_conversation_sched_save(sp, (size_t)sn);
+                daemon_sched_persist(agent, "send");
             }
         }
     }
@@ -1563,144 +1574,47 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                 agent->proactive_turn = false;
 
                 if (err == HU_OK && response && response_len > 0) {
-                    bool skip = (response_len == 4 && memcmp(response, "SKIP", 4) == 0);
-                    /* F68: Protective boundary — skip proactive if topic is boundary */
-                    if (!skip && agent->memory &&
-                        hu_protective_is_boundary(agent->memory, cp->contact_id,
-                                                  strlen(cp->contact_id), "proactive", 9))
-                        skip = true;
-                    /* Sprint 41 follow-up #2 — single-source-of-truth proactive
-                     * arbiter. Replaces the two explicit predicates (quiet hours
-                     * + daily budget) with one call to the same gate stack
-                     * init_proposer.tick uses. Daemon-side recency stays handled
-                     * by FU-1 below (different semantic — outbound vs inbound),
-                     * so we pass last_inbound_unix=0 to disable the arbiter's
-                     * inbound-recency gate. cfg=NULL is intentional: daemon
-                     * doesn't have an initiative_config in scope and the
-                     * arbiter's NULL-safe defaults apply. */
-                    if (!skip) {
-                        hu_init_proposer_result_t gate = hu_init_proposer_governor_check_only(
-                            /*cfg=*/NULL, daemon_autoresponder_config(),
-                            daemon_local_tz_offset_seconds((int64_t)now), &gov_budget,
-                            /*last_inbound_unix=*/0, (int64_t)now);
-                        if (gate != HU_INIT_RESULT_SKIP) {
-                            const char *why =
-                                (gate == HU_INIT_RESULT_GATED_QUIET) ? "autoresponder quiet hours"
-                                : (gate == HU_INIT_RESULT_GATED_BUDGET) ? "daily budget exhausted"
-                                                                        : "governor gated";
+                    /* Gate chain + send carved to daemon_proactive.c (2026-09-20); post-send
+                     * bookkeeping below runs only on confirmed delivery, as before. */
+                    bool sent = hu_daemon_proactive_gate_and_send(
+                        agent, alloc, channels[c].channel, cp, ch_part, target_part, target_len,
+                        response, &response_len, (int64_t)now, &gov_budget,
+                        daemon_autoresponder_config(), daemon_local_tz_offset_seconds((int64_t)now),
+                        daemon_throttle(alloc));
+                    if (sent) {
+                        if (had_important_date && strcmp(important_date_type, "birthday") == 0)
                             hu_log_info("human", agent ? agent->observer : NULL,
-                                        "proactive check-in to %s skipped: %s",
-                                        cp->name ? cp->name : cp->contact_id, why);
-                            skip = true;
-                        }
-                    }
-                    /* FU-1: defer proactive check-in if reactive turn fired recently. */
-                    if (!skip && hu_daemon_proactive_should_defer(
-                                     &agent->contact_send_recency, cp->contact_id,
-                                     strlen(cp->contact_id), (int64_t)now)) {
-                        hu_log_info("human", agent ? agent->observer : NULL,
-                                    "proactive check-in deferred for %s "
-                                    "(reactive turn within %ds)",
-                                    cp->name ? cp->name : cp->contact_id,
-                                    HU_DAEMON_REACTIVE_GATE_WINDOW_S);
-                        skip = true;
-                    }
-                    if (!skip && channels[c].channel->vtable->send) {
-                        hu_validator_chain_apply_default_in_place(
-                            alloc, agent ? agent->observer : NULL, NULL, 0, "proactive send",
-                            response, &response_len, response_len + 1);
-                        if (response_len == 0)
-                            skip = true;
-                        response_len =
-                            hu_conversation_vary_complexity(response, response_len, (uint32_t)now);
-                        if (response_len > 1 && response[0] >= 'A' && response[0] <= 'Z' &&
-                            response[1] >= 'a' && response[1] <= 'z' && response[0] != 'I') {
-                            response[0] = (char)(response[0] + 32);
-                        }
-                        if (response_len > 1 && response[response_len - 1] == '.') {
-                            response[response_len - 1] = '\0';
-                            response_len--;
-                        }
-                        /* 2026-05-16 P1-6 / P4-6: rate-limit + per-contact send-cap on
-                         * proactive outbound. The pre-fix path called vtable->send
-                         * directly with no throttle, leading to 4x burst sends. */
-                        hu_proactive_throttle_t *th_main = daemon_throttle(alloc);
-                        if (!hu_proactive_throttle_channel_try_consume(th_main, ch_part)) {
-                            hu_log_info("human", agent ? agent->observer : NULL,
-                                        "proactive check-in to %s skipped: rate-limited",
-                                        cp->name ? cp->name : cp->contact_id);
-                            skip = true;
-                        }
-                        if (!skip &&
-                            !hu_proactive_throttle_record_send(th_main, cp->contact_id, "proactive",
-                                                               (uint64_t)now * 1000ULL)) {
-                            hu_log_info("human", agent ? agent->observer : NULL,
-                                        "proactive check-in to %s skipped: send-cap",
-                                        cp->name ? cp->name : cp->contact_id);
-                            skip = true;
-                        }
-                        if (!skip) {
-                            /* 2026-05-26 Annie/Mindy/Betty incident fix:
-                             * sanitize outbound BEFORE channel send. Strips
-                             * U+FFFC (iMessage attachment placeholder) and
-                             * rejects messages that look like LLM directive
-                             * echoes (e.g. "shared history", "principle",
-                             * "[SAFETY] ..."). See
-                             * include/human/agent/outbound_sanitize.h. */
-                            const char *sanitize_reason = NULL;
-                            if (!hu_outbound_sanitize(response, &response_len, &sanitize_reason)) {
-                                hu_log_warn("human", agent ? agent->observer : NULL,
-                                            "proactive check-in to %s REJECTED by sanitizer: %s "
-                                            "(would have sent: %.*s)",
-                                            cp->name ? cp->name : cp->contact_id,
-                                            sanitize_reason ? sanitize_reason : "unknown",
-                                            (int)(response_len > 80 ? 80 : response_len),
-                                            response ? response : "(null)");
-                                skip = true;
-                            }
-                        }
-                        /* Send + bookkeeping live in daemon_proactive.c: a failed send must
-                         * not log "sent" nor charge recency/outcome/governor. */
-                        if (!skip &&
-                            !hu_daemon_proactive_send_and_record(
-                                agent, channels[c].channel, cp, ch_part, target_part, target_len,
-                                response, response_len, (int64_t)now, &gov_budget))
-                            skip = true;
-                        if (!skip) {
-                            if (had_important_date && strcmp(important_date_type, "birthday") == 0)
-                                hu_log_info("human", agent ? agent->observer : NULL,
-                                            "F53: birthday message — use confetti effect");
-                            if (had_important_date) {
-                                /* 2026-05-16 P1-7: authoritative heap-backed dedup. */
-                                (void)hu_proactive_throttle_dedup_first_today(
-                                    &g_proactive_throttle, "important_date", cp->contact_id,
-                                    throttle_ymd);
-                                /* Legacy [8] ring kept in lockstep until removal. */
-                                if (g_sent_important_date_count < 8) {
-                                    size_t cid_len = strlen(cp->contact_id);
-                                    if (cid_len < 64) {
-                                        memcpy(g_sent_important_date_contacts
-                                                   [g_sent_important_date_count],
-                                               cp->contact_id, cid_len + 1);
-                                        g_sent_important_date_count++;
-                                    }
+                                        "F53: birthday message — use confetti effect");
+                        if (had_important_date) {
+                            /* 2026-05-16 P1-7: authoritative heap-backed dedup. */
+                            (void)hu_proactive_throttle_dedup_first_today(
+                                &g_proactive_throttle, "important_date", cp->contact_id,
+                                throttle_ymd);
+                            /* Legacy [8] ring kept in lockstep until removal. */
+                            if (g_sent_important_date_count < 8) {
+                                size_t cid_len = strlen(cp->contact_id);
+                                if (cid_len < 64) {
+                                    memcpy(
+                                        g_sent_important_date_contacts[g_sent_important_date_count],
+                                        cp->contact_id, cid_len + 1);
+                                    g_sent_important_date_count++;
                                 }
                             }
-                            if (joke_id_to_reference >= 0 && agent->memory)
-                                (void)hu_superhuman_inside_joke_reference(agent->memory,
-                                                                          joke_id_to_reference);
-#ifdef HU_ENABLE_SQLITE
-                            for (size_t mi = 0; mi < commitment_ids_count; mi++)
-                                (void)hu_superhuman_commitment_mark_followed_up(agent->memory,
-                                                                                commitment_ids[mi]);
-                            /* 2026-05-16 P4-4: mark delayed_followup as sent only
-                             * on confirmed delivery so a failed send leaves the
-                             * row in the queue for retry. */
-                            if (delayed_followup_id_to_mark >= 0 && agent->memory)
-                                (void)hu_superhuman_delayed_followup_mark_sent(
-                                    agent->memory, delayed_followup_id_to_mark);
-#endif
                         }
+                        if (joke_id_to_reference >= 0 && agent->memory)
+                            (void)hu_superhuman_inside_joke_reference(agent->memory,
+                                                                      joke_id_to_reference);
+#ifdef HU_ENABLE_SQLITE
+                        for (size_t mi = 0; mi < commitment_ids_count; mi++)
+                            (void)hu_superhuman_commitment_mark_followed_up(agent->memory,
+                                                                            commitment_ids[mi]);
+                        /* 2026-05-16 P4-4: mark delayed_followup as sent only
+                         * on confirmed delivery so a failed send leaves the
+                         * row in the queue for retry. */
+                        if (delayed_followup_id_to_mark >= 0 && agent->memory)
+                            (void)hu_superhuman_delayed_followup_mark_sent(
+                                agent->memory, delayed_followup_id_to_mark);
+#endif
                     }
                 }
                 if (response)
@@ -1820,10 +1734,7 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                                     "scheduled morning message for %s: %.*s",
                                     cp->name ? cp->name : cp->contact_id, (int)greeting_len,
                                     greeting);
-                        char sp[512];
-                        int sn = hu_paths_state(sp, sizeof(sp), "scheduled.json");
-                        if (sn > 0 && (size_t)sn < sizeof(sp))
-                            hu_conversation_sched_save(sp, (size_t)sn);
+                        daemon_sched_persist(agent, "scheduling morning message");
                     }
                 }
             }
@@ -9238,7 +9149,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                              agent ? agent->observer : NULL,
                                              "promise-keeper subsystem disabled by config "
                                              "(HU_PROMISE_KEEPER env not set); set "
-                                             "HU_PROMISE_KEEPER=on or HU_PROMISE_KEEPER=shadow "
+                                             "HU_PROMISE_KEEPER=live or HU_PROMISE_KEEPER=shadow "
                                              "to activate");
                         } else if (agent && agent->memory && send_len > 0) {
                             hu_error_t pk_err = hu_daemon_promise_keeper_scan_outbound(

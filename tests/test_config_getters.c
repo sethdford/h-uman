@@ -369,54 +369,6 @@ static void test_reload_flag_get_again_returns_false_cleared(void) {
     HU_ASSERT_FALSE(hu_config_get_and_clear_reload_requested());
 }
 
-/* ─── hu_config_get_tool_model_override ─────────────────────────────────────── */
-
-static void test_config_get_tool_model_override_null_cfg(void) {
-    const char *prov = NULL, *mod = NULL;
-    HU_ASSERT_FALSE(hu_config_get_tool_model_override(NULL, "web_search", &prov, &mod));
-}
-
-static void test_config_get_tool_model_override_null_tool(void) {
-    hu_config_t cfg = {0};
-    const char *prov = NULL, *mod = NULL;
-    HU_ASSERT_FALSE(hu_config_get_tool_model_override(&cfg, NULL, &prov, &mod));
-}
-
-static void test_config_get_tool_model_override_not_found(void) {
-    hu_config_t *cfg = make_config_with_arena();
-    cfg->default_provider = hu_strdup(&cfg->allocator, "openai");
-    cfg->default_model = hu_strdup(&cfg->allocator, "gpt-4");
-    const char *prov = NULL, *mod = NULL;
-    HU_ASSERT_FALSE(hu_config_get_tool_model_override(cfg, "web_search", &prov, &mod));
-    free_config(cfg);
-}
-
-static void test_config_get_tool_model_override_found(void) {
-    hu_config_t *cfg = make_config_with_arena();
-    cfg->default_provider = hu_strdup(&cfg->allocator, "openai");
-    cfg->default_model = hu_strdup(&cfg->allocator, "gpt-4");
-    const char *json = "{\"tools\":{\"tool_model_overrides\":{"
-                       "\"web_search\":{\"provider\":\"gemini\",\"model\":\"gemini-3-flash-preview\"},"
-                       "\"shell\":{\"provider\":\"anthropic\",\"model\":\"claude-sonnet-4.6\"}"
-                       "}}}";
-    hu_error_t err = hu_config_parse_json(cfg, json, strlen(json));
-    HU_ASSERT_EQ(err, HU_OK);
-    const char *prov = NULL, *mod = NULL;
-    HU_ASSERT_TRUE(hu_config_get_tool_model_override(cfg, "web_search", &prov, &mod));
-    HU_ASSERT_NOT_NULL(prov);
-    HU_ASSERT_NOT_NULL(mod);
-    HU_ASSERT_STR_EQ(prov, "gemini");
-    HU_ASSERT_STR_EQ(mod, "gemini-3-flash-preview");
-    prov = NULL;
-    mod = NULL;
-    HU_ASSERT_TRUE(hu_config_get_tool_model_override(cfg, "shell", &prov, &mod));
-    HU_ASSERT_NOT_NULL(prov);
-    HU_ASSERT_NOT_NULL(mod);
-    HU_ASSERT_STR_EQ(prov, "anthropic");
-    HU_ASSERT_STR_EQ(mod, "claude-sonnet-4.6");
-    free_config(cfg);
-}
-
 /* ─── run ──────────────────────────────────────────────────────────────────── */
 
 void run_config_getters_tests(void) {
@@ -457,8 +409,4 @@ void run_config_getters_tests(void) {
     HU_RUN_TEST(test_persona_for_channel_falls_back_to_default);
     HU_RUN_TEST(test_reload_flag_set_then_get_returns_true);
     HU_RUN_TEST(test_reload_flag_get_again_returns_false_cleared);
-    HU_RUN_TEST(test_config_get_tool_model_override_null_cfg);
-    HU_RUN_TEST(test_config_get_tool_model_override_null_tool);
-    HU_RUN_TEST(test_config_get_tool_model_override_not_found);
-    HU_RUN_TEST(test_config_get_tool_model_override_found);
 }

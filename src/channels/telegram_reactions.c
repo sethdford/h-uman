@@ -53,6 +53,7 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/json.h"
+#include "human/core/log.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -201,6 +202,17 @@ static void free_event_strings(hu_reaction_event_t *e) {
     memset(e, 0, sizeof(*e));
 }
 
+/* Hand normalized events to the reaction handler. A failure there is a lost
+ * DPO/reflection signal, so it is logged rather than dropped. */
+static void dispatch_reaction_events(hu_reaction_event_t *events, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        hu_error_t herr = hu_reaction_handler_handle_event(&events[i]);
+        if (herr != HU_OK)
+            hu_log_warn("telegram", NULL, "reaction not recorded (%d)", (int)herr);
+        free_event_strings(&events[i]);
+    }
+}
+
 /* Diff/filter/normalize one parsed message_reaction object.
  * `mr` must be the `message_reaction` JSON object (not the whole update).
  * Same return contract as parse_reaction_update below. */
@@ -333,10 +345,7 @@ int hu_telegram_dispatch_reaction_from_update(const hu_json_value_t *up, const c
          * the update so caller skips its message branch. */
         return 1;
     }
-    for (size_t i = 0; i < n; i++) {
-        hu_reaction_handler_handle_event(&events[i]);
-        free_event_strings(&events[i]);
-    }
+    dispatch_reaction_events(events, n);
     return 1;
 }
 
@@ -377,10 +386,7 @@ int hu_telegram_handle_reaction_update(const char *body, size_t body_len, hu_all
      * informational only — the handler resolves (channel, thread,
      * msg_ref) → assistant message and writes a dpo_pairs row when the
      * lookup hits and polarity is non-neutral. */
-    for (size_t i = 0; i < n; i++) {
-        hu_reaction_handler_handle_event(&events[i]);
-        free_event_strings(&events[i]);
-    }
+    dispatch_reaction_events(events, n);
     return 1;
 }
 

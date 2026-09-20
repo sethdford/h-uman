@@ -114,7 +114,6 @@
                 "HU_ENABLE_SQLITE": "OFF",
                 "HU_ENABLE_CURL": "OFF",
                 "HU_ENABLE_TLS": "OFF",
-                "HU_ENABLE_PERSONA": "OFF",
                 "HU_ENABLE_SKILLS": "OFF",
                 "HU_ENABLE_ML": "OFF"
             }

@@ -12,6 +12,7 @@
 
 struct hu_agent;
 struct hu_contact_profile;
+struct hu_autoresponder_config;
 struct hu_legacy_memory;
 struct hu_memory_vtable;
 
@@ -183,6 +184,33 @@ hu_error_t hu_daemon_proactive_get_contact_feed_items(hu_allocator_t *alloc, sql
                                                       size_t *out_count);
 #endif
 
+/* Run the full proactive gate chain and, if every gate passes, send.
+ *
+ * Carved out of hu_service_run_proactive_checkins (daemon.c) on 2026-09-20 —
+ * 103 lines that sat between the LLM draft and the post-send bookkeeping.
+ * Behaviour is unchanged; what is new is that a proposal suppressed by any
+ * gate now leaves a proactive_decisions row naming the gate (see
+ * hu_daemon_proactive_record_decline), where before it reached only the
+ * service log and eval_when_to_speak.py counted it as `dropped_pre_send`
+ * with no way to say why (89 of 115 fires, 2026-09-20).
+ *
+ * `response` is mutated IN PLACE (validator, complexity variation,
+ * trailing-period strip, sanitizer) and `*response_len` is updated to match —
+ * the caller frees the buffer with that length, exactly as the inline code
+ * did. `ar_cfg`, `tz_offset_s` and `throttle` are passed in because the
+ * daemon.c helpers that produce them are static there.
+ *
+ * Returns true iff the channel accepted delivery. Post-send bookkeeping
+ * (important-date ring, commitments, jokes, delayed follow-ups) is the
+ * caller's, gated on that return. */
+bool hu_daemon_proactive_gate_and_send(struct hu_agent *agent, hu_allocator_t *alloc,
+                                       hu_channel_t *channel, const struct hu_contact_profile *cp,
+                                       const char *ch_name, const char *target, size_t target_len,
+                                       char *response, size_t *response_len, int64_t now,
+                                       hu_proactive_budget_t *gov_budget,
+                                       const struct hu_autoresponder_config *ar_cfg,
+                                       int32_t tz_offset_s, hu_proactive_throttle_t *throttle);
+
 /* Send a proactive check-in and record it ONLY if the channel accepted it.
  * Returns true when the message was actually accepted for delivery; false means
  * nothing was sent and NO bookkeeping (send-recency, proactive outcome, governor
@@ -192,5 +220,25 @@ bool hu_daemon_proactive_send_and_record(struct hu_agent *agent, hu_channel_t *c
                                          const char *target, size_t target_len, const char *message,
                                          size_t message_len, int64_t now,
                                          hu_proactive_budget_t *gov_budget);
+
+/* Record a proactive check-in that was DECLINED before any channel send was
+ * attempted — the gates between the proposer firing and the send call
+ * (boundary, governor, reactive-recency, validator, throttle, sanitizer).
+ *
+ * Why this exists (2026-09-20): `scripts/eval_when_to_speak.py` measures the
+ * FIR/MIR calibration of the proactive policy, and reported
+ * `fir_dropped_pre_send=89` against only 10 delivered sends — 89 FIRED
+ * proposals died in those gates with NO row saying which one. They log to the
+ * service log, which nothing reads, and are invisible to the metric. With no
+ * attribution the script cannot tell "policy correctly stayed quiet" from
+ * "a rate-limiter ate it", and FIR has no denominator to work with.
+ *
+ * `reason` is a short stable slug (e.g. "rate_limited", "sanitize_refused") —
+ * it is grouped in SQL, so keep it a closed vocabulary, not free prose.
+ * Best-effort and never fails the tick: this is telemetry, not a gate.
+ * Do NOT call this after hu_daemon_proactive_send_and_record returns false —
+ * that path records its own outcome row and would double-count. */
+void hu_daemon_proactive_record_decline(struct hu_agent *agent, const char *contact,
+                                        const char *reason, int64_t now);
 
 #endif /* HU_DAEMON_PROACTIVE_H */

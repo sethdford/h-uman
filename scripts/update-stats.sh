@@ -5,7 +5,9 @@
 #   Without --apply: prints stats only (dry run).
 #   With --apply: patches all files in place.
 #   --test-count <N>: trust this count (from a suite the caller just ran)
-#       instead of executing a local test binary. The pre-push hook passes
+#       instead of executing a local test binary. N is the REGISTERED total,
+#       passed + skipped from the Results: line (skips vary by machine; the
+#       sum does not — see .githooks/pre-push). The pre-push hook passes
 #       the N it parsed from its own Results: line; without it the script
 #       re-ran whichever build*/human_tests sorted first — on 2026-09-03 a
 #       two-day-old build/ binary — and stamped a count the hook never
@@ -89,7 +91,11 @@ else
             bin_mtime=$(stat -f '%Sm' -t '%Y-%m-%d %H:%M' "$test_bin" 2>/dev/null \
                 || stat -c '%y' "$test_bin" 2>/dev/null | cut -c1-16 || echo "?")
             echo "Test count: running ${test_bin} (mtime ${bin_mtime}) — pass --test-count to use a count you already measured"
-            TEST_COUNT=$("$test_bin" 2>/dev/null | grep 'Results:' | sed 's|.*: \([0-9]*\)/.*|\1|' || echo "unknown")
+            # Registered total = passed + skipped, same parse as .githooks/pre-push.
+            results_line=$("$test_bin" 2>/dev/null | grep '^--- Results: ' | head -1 || true)
+            passed=$(printf '%s\n' "$results_line" | sed -n 's|^--- Results: \([0-9][0-9]*\)/.*|\1|p')
+            skipped=$(printf '%s\n' "$results_line" | sed -n 's|.*, \([0-9][0-9]*\) skipped.*|\1|p')
+            TEST_COUNT=$([ -n "$passed" ] && echo $((passed + ${skipped:-0})) || echo "unknown")
             break
         fi
     done
@@ -212,10 +218,12 @@ if [ "$TEST_COUNT" != "unknown" ]; then
         README.md && rm -f README.md.bak
 fi
 
-# "Tests:" stat line
+# "Tests:" stat line. Both this and the "^Tests: N" block pattern below accept
+# a trailing "+": the committed lines read "11,924+ passing" and "6374+", so
+# the strict patterns never matched and the two lines rotted from 2026-07 on.
 if [ "$TEST_COUNT" != "unknown" ]; then
     sed -i.bak -E \
-        "s/Tests:[[:space:]]+[0-9,]+ passing/Tests:         ${TEST_COUNT_FMT} passing/" \
+        "s/Tests:[[:space:]]+[0-9,]+\+? passing/Tests:         ${TEST_COUNT_FMT} passing/" \
         README.md && rm -f README.md.bak
 fi
 
@@ -265,7 +273,7 @@ sed -i.bak -E \
 
 if [ "$TEST_COUNT" != "unknown" ]; then
     sed -i.bak -E \
-        "s/^Tests: [0-9,]+$/Tests: ${TEST_COUNT_FMT}/" \
+        "s/^Tests: [0-9,]+\+?$/Tests: ${TEST_COUNT_FMT}/" \
         README.md && rm -f README.md.bak
 fi
 
@@ -281,6 +289,7 @@ fi
 echo "Patching PROJECT_STATUS.md..."
 
 if [ -f PROJECT_STATUS.md ]; then
+    ps_before=$(git hash-object PROJECT_STATUS.md)
     # Test files
     sed -i.bak -E \
         "s/Test files[[:space:]]+\| [0-9]+/Test files                     | ${TEST_FILES}/" \
@@ -315,10 +324,14 @@ if [ -f PROJECT_STATUS.md ]; then
         "s/All [0-9]+ Real \(with all feature flags\)/All ${TOOL_COUNT} Real (with all feature flags)/" \
         PROJECT_STATUS.md && rm -f PROJECT_STATUS.md.bak
 
-    # Update date
-    sed -i.bak -E \
-        "s/Last updated: [0-9]{4}-[0-9]{2}-[0-9]{2}/Last updated: $(date +%Y-%m-%d)/" \
-        PROJECT_STATUS.md && rm -f PROJECT_STATUS.md.bak
+    # Update date — only when a metric above actually moved. An unconditional
+    # stamp dirtied PROJECT_STATUS.md on every push that crossed a midnight
+    # even when no number changed, so the hook's output never converged.
+    if [ "$(git hash-object PROJECT_STATUS.md)" != "$ps_before" ]; then
+        sed -i.bak -E \
+            "s/Last updated: [0-9]{4}-[0-9]{2}-[0-9]{2}/Last updated: $(date +%Y-%m-%d)/" \
+            PROJECT_STATUS.md && rm -f PROJECT_STATUS.md.bak
+    fi
 fi
 
 echo "Patching human/STUBS.md..."

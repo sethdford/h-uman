@@ -1091,7 +1091,7 @@ static const hu_cli_config_schema_row_t hu_cli_config_schema_rows[] = {
     {"gateway.host", "string", "Bind address / host"},
     {"memory", "object", "backend, sqlite_path, consolidation_interval_hours, ..."},
     {"memory.backend", "string", "sqlite | markdown | lru | ..."},
-    {"tools", "object", "shell timeouts, enabled_tools, disabled_tools, model_overrides"},
+    {"tools", "object", "shell timeouts, max_file_size_bytes, enabled_tools, disabled_tools"},
     {"cron", "object", "Scheduled task defaults"},
     {"scheduler", "object", "max_concurrent"},
     {"runtime", "object", "kind, docker_image, GCE fields"},

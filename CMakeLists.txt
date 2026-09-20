@@ -127,7 +127,14 @@ option(HU_ENABLE_CRON "Build cron scheduler support" OFF)
 option(HU_ENABLE_PUSH "Build push notification support (FCM/APNS)" OFF)
 option(HU_ENABLE_UPDATE "Build update check/apply support" OFF)
 option(HU_ENABLE_SKILLS "Build skill acquisition and continuous learning" OFF)
-option(HU_ENABLE_PERSONA "Enable persona system" ON)
+option(HU_ENABLE_PERSONA "Persona system (compiled unconditionally; OFF is rejected)" ON)
+if(NOT HU_ENABLE_PERSONA)
+    # Until 2026-09-20 this option was accepted and silently ignored: the persona
+    # sources were compiled regardless and HU_HAS_PERSONA=1 was defined
+    # unconditionally. Fail loudly rather than pretend the toggle works.
+    message(FATAL_ERROR "HU_ENABLE_PERSONA=OFF is not supported: the persona system is compiled "
+                        "unconditionally. Drop the flag (see docs/platform-support.md).")
+endif()
 option(HU_ENABLE_AUTHENTIC "Build authentic existence features" OFF)
 option(HU_ENABLE_CARTESIA "Enable Cartesia TTS for voice messages" OFF)
 option(HU_ENABLE_ML "Build ML training subsystem (BPE tokenizer, dataloader, experiment loop)" OFF)
@@ -2179,7 +2186,6 @@ endif()
 if(HU_ENABLE_FEEDS)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_FEEDS=1)
 endif()
-target_compile_definitions(human_core PUBLIC HU_HAS_PERSONA=1)
 if(HU_ENABLE_CARTESIA)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_CARTESIA=1)
 endif()
@@ -3135,7 +3141,7 @@ if(HU_ENABLE_CARTESIA)
 endif()
 target_compile_definitions(human_core_test PRIVATE HU_ENABLE_PERSONA=1)
 # Tests always have all module groups available
-target_compile_definitions(human_core_test PRIVATE HU_HAS_PERIPHERALS=1 HU_HAS_TUNNELS=1 HU_HAS_RUNTIME_EXOTIC=1 HU_HAS_TOOLS_BROWSER=1 HU_HAS_TOOLS_ADVANCED=1 HU_HAS_OTEL=1 HU_HAS_CRON=1 HU_HAS_PUSH=1 HU_HAS_UPDATE=1 HU_HAS_SKILLS=1 HU_HAS_PERSONA=1)
+target_compile_definitions(human_core_test PRIVATE HU_HAS_PERIPHERALS=1 HU_HAS_TUNNELS=1 HU_HAS_RUNTIME_EXOTIC=1 HU_HAS_TOOLS_BROWSER=1 HU_HAS_TOOLS_ADVANCED=1 HU_HAS_OTEL=1 HU_HAS_CRON=1 HU_HAS_PUSH=1 HU_HAS_UPDATE=1 HU_HAS_SKILLS=1)
 if(HU_ENABLE_ML)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_ML=1)
 endif()
@@ -3497,6 +3503,7 @@ set(HU_TEST_SOURCES
     tests/test_daemon_lifecycle.c
     tests/test_daemon_routing.c
     tests/test_daemon_proactive.c
+    tests/test_daemon_proactive_decline.c
     tests/test_reply_delay_model.c
     tests/test_daemon_promise_keeper.c
     tests/test_daemon_insight_overuse.c
@@ -4339,8 +4346,7 @@ target_compile_definitions(human_tests PRIVATE "HU_EVAL_SUITES_DIR=\"${HU_ROOT}/
 # Phase D Task D-1 (CF-7 RL SOTA): same HU_ML_SCRIPTS_DIR for tests.
 target_compile_definitions(human_tests PRIVATE "HU_ML_SCRIPTS_DIR=\"${HU_ROOT}/scripts\"")
 target_compile_definitions(human_tests PRIVATE "HU_TEST_DATA_DIR=\"${HU_ROOT}/data\"")
-# HU_HAS_PERSONA always set for tests: test lib has persona (main or extra), struct layout must match
-target_compile_definitions(human_tests PRIVATE HU_IS_TEST=1 HU_GATEWAY_TEST_MODE=1 HU_HAS_NONE_ENGINE=1 HU_HAS_CRON=1 HU_HAS_PUSH=1 HU_HAS_UPDATE=1 HU_HAS_SKILLS=1 HU_HAS_PERSONA=1 HU_HAS_RUNTIME_EXOTIC=1)
+target_compile_definitions(human_tests PRIVATE HU_IS_TEST=1 HU_GATEWAY_TEST_MODE=1 HU_HAS_NONE_ENGINE=1 HU_HAS_CRON=1 HU_HAS_PUSH=1 HU_HAS_UPDATE=1 HU_HAS_SKILLS=1 HU_HAS_RUNTIME_EXOTIC=1)
 # Mirror HU_HAS_LIBSODIUM onto human_tests so tests/test_main.c's
 # `#ifdef HU_HAS_LIBSODIUM` call-site guard for run_persona_encryption_tests()
 # actually activates. Without this, the runner is registered (because
@@ -4785,7 +4791,7 @@ if(HU_ENABLE_CHANNEL_TESTS)
             HU_HAS_DINGTALK=1 HU_HAS_TEAMS=1 HU_HAS_TWILIO=1 HU_HAS_GOOGLE_CHAT=1
             HU_HAS_GOOGLE_RCS=1 HU_HAS_SIGNAL=1 HU_HAS_NOSTR=1 HU_HAS_QQ=1
             HU_HAS_MAIXCAM=1 HU_HAS_MQTT=1 HU_HAS_GMAIL=1 HU_HAS_CLI=1
-            HU_HAS_DISPATCH=1 HU_HAS_PERSONA=1 HU_HAS_TIKTOK=1)
+            HU_HAS_DISPATCH=1 HU_HAS_TIKTOK=1)
     else()
         if(HU_ENABLE_TELEGRAM)
             target_compile_definitions(human_channel_tests PRIVATE HU_HAS_TELEGRAM=1)
@@ -4805,7 +4811,7 @@ if(HU_ENABLE_CHANNEL_TESTS)
         if(HU_ENABLE_SIGNAL)
             target_compile_definitions(human_channel_tests PRIVATE HU_HAS_SIGNAL=1)
         endif()
-        target_compile_definitions(human_channel_tests PRIVATE HU_HAS_DISPATCH=1 HU_HAS_PERSONA=1)
+        target_compile_definitions(human_channel_tests PRIVATE HU_HAS_DISPATCH=1)
     endif()
 endif()
 
@@ -4933,7 +4939,7 @@ if(HU_ENABLE_FUZZ)
 
     add_executable(fuzz_persona_parse fuzz/fuzz_persona_parse.c)
     set_target_properties(fuzz_persona_parse PROPERTIES LINKER_LANGUAGE CXX)
-    target_compile_definitions(fuzz_persona_parse PRIVATE HU_IS_TEST=1 HU_HAS_PERSONA=1)
+    target_compile_definitions(fuzz_persona_parse PRIVATE HU_IS_TEST=1)
     target_compile_options(fuzz_persona_parse PRIVATE -Wall -Wextra -Wpedantic)
     target_link_libraries(fuzz_persona_parse PRIVATE human_core_test ${FUZZ_EXTRA_LIBS})
     target_compile_options(fuzz_persona_parse PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME})
