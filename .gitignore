@@ -92,6 +92,9 @@ ui/blob-report/
 # auto-cds back). Already covered for ui/, but not root. PR #113 round
 # 25 caught a stray test-results/.last-run.json commit (Bugbot 150b4dcb).
 /test-results/
+# Root-level results/ — a specificity-measurement run with the repo as its
+# CWD dropped results/specificity-2026-09-20.json here mid-suite (2026-09-20).
+/results/
 /playwright-report/
 ui/visual-regression/
 ui/coverage/
