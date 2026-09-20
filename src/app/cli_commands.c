@@ -631,9 +631,12 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
         /* human memory reindex [--limit N] — embed every memories row missing
          * from the semantic index via the configured endpoint. */
         size_t lim = 0;
+        bool full = false;
         for (int i = 3; i + 1 < argc; i++)
             if (strcmp(argv[i], "--limit") == 0)
                 lim = (size_t)strtoul(argv[i + 1], NULL, 10);
+            else if (strcmp(argv[i], "--full") == 0)
+                full = true; /* embedder changed: drop every vector, re-embed all */
         hu_embedder_t semb = {0};
         hu_vector_store_t svs = {0};
         err = hu_semantic_recall_attach(alloc, &mem, &semb, &svs);
@@ -643,7 +646,8 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
         }
         size_t indexed = 0;
 #ifdef HU_ENABLE_SQLITE
-        err = hu_sqlite_memory_reindex_semantic(&mem, lim, &indexed);
+        err = full ? hu_sqlite_memory_reindex_semantic_full(&mem, lim, &indexed)
+                   : hu_sqlite_memory_reindex_semantic(&mem, lim, &indexed);
 #else
         (void)lim;
         err = HU_ERR_NOT_SUPPORTED; /* unreachable: attach refused without SQLite */

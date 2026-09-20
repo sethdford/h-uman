@@ -198,6 +198,11 @@ void hu_sqlite_memory_get_semantic_index(const hu_memory_t *mem, struct hu_embed
 /* Embed every `memories` row missing from the index (up to `limit`, 0 = all).
  * HU_ERR_NOT_SUPPORTED when no index is attached — never a silent 0. */
 hu_error_t hu_sqlite_memory_reindex_semantic(hu_memory_t *mem, size_t limit, size_t *indexed_out);
+/* Drop EVERY row of the semantic index, then reindex. Required when the
+ * embedder changes (vectors from two models are not comparable) — the plain
+ * reindex only embeds rows missing from the index. */
+hu_error_t hu_sqlite_memory_reindex_semantic_full(hu_memory_t *mem, size_t limit,
+                                                  size_t *indexed_out);
 
 #ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>

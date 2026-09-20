@@ -80,19 +80,16 @@ done:
     return err;
 }
 
-static hu_error_t embed_batch_impl(void *vctx, hu_allocator_t *alloc, const char **texts,
-                                   const size_t *text_lens, size_t count, hu_embedding_t *out) {
-    http_embedder_ctx_t *ctx = (http_embedder_ctx_t *)vctx;
-    if (!ctx || !alloc || !texts || !text_lens || count == 0 || count > HU_EMBED_HTTP_MAX_BATCH ||
-        !out)
+hu_error_t hu_embedder_http_build_request(hu_allocator_t *alloc, const char **texts,
+                                          const size_t *text_lens, size_t count,
+                                          const char *input_type, char **body_out,
+                                          size_t *body_len_out) {
+    if (!alloc || !texts || !text_lens || count == 0 || !body_out || !body_len_out)
         return HU_ERR_INVALID_ARGUMENT;
-    for (size_t i = 0; i < count; i++) {
-        out[i].values = NULL;
-        out[i].dim = 0;
-        if (!texts[i] || text_lens[i] == 0)
-            return HU_ERR_INVALID_ARGUMENT; /* the server rejects empty input; fail early */
-    }
-    /* Build {"model":..., "input":[...]} with hu_json so escaping is correct. */
+    *body_out = NULL;
+    *body_len_out = 0;
+    if (!input_type || !*input_type)
+        input_type = "document";
     hu_json_value_t *req = hu_json_object_new(alloc);
     hu_json_value_t *arr = hu_json_array_new(alloc);
     if (!req || !arr) {
@@ -115,12 +112,34 @@ static hu_error_t embed_batch_impl(void *vctx, hu_allocator_t *alloc, const char
     hu_json_object_set(alloc, req, "model",
                        hu_json_string_new(alloc, HU_EMBED_HTTP_MODEL, strlen(HU_EMBED_HTTP_MODEL)));
     hu_json_object_set(alloc, req, "input", arr);
+    hu_json_object_set(alloc, req, "input_type",
+                       hu_json_string_new(alloc, input_type, strlen(input_type)));
+    hu_error_t err = hu_json_stringify(alloc, req, body_out, body_len_out);
+    hu_json_free(alloc, req);
+    if (err != HU_OK || !*body_out)
+        return err != HU_OK ? err : HU_ERR_OUT_OF_MEMORY;
+    return HU_OK;
+}
+
+static hu_error_t embed_batch_typed(void *vctx, hu_allocator_t *alloc, const char **texts,
+                                    const size_t *text_lens, size_t count, const char *input_type,
+                                    hu_embedding_t *out) {
+    http_embedder_ctx_t *ctx = (http_embedder_ctx_t *)vctx;
+    if (!ctx || !alloc || !texts || !text_lens || count == 0 || count > HU_EMBED_HTTP_MAX_BATCH ||
+        !out)
+        return HU_ERR_INVALID_ARGUMENT;
+    for (size_t i = 0; i < count; i++) {
+        out[i].values = NULL;
+        out[i].dim = 0;
+        if (!texts[i] || text_lens[i] == 0)
+            return HU_ERR_INVALID_ARGUMENT; /* the server rejects empty input; fail early */
+    }
     char *body = NULL;
     size_t body_len = 0;
-    hu_error_t err = hu_json_stringify(alloc, req, &body, &body_len);
-    hu_json_free(alloc, req);
-    if (err != HU_OK || !body)
-        return err != HU_OK ? err : HU_ERR_OUT_OF_MEMORY;
+    hu_error_t err = hu_embedder_http_build_request(alloc, texts, text_lens, count, input_type,
+                                                    &body, &body_len);
+    if (err != HU_OK)
+        return err;
 
     hu_http_response_t resp;
     memset(&resp, 0, sizeof(resp));
@@ -148,11 +167,23 @@ static hu_error_t embed_batch_impl(void *vctx, hu_allocator_t *alloc, const char
     return err;
 }
 
+static hu_error_t embed_batch_impl(void *vctx, hu_allocator_t *alloc, const char **texts,
+                                   const size_t *text_lens, size_t count, hu_embedding_t *out) {
+    return embed_batch_typed(vctx, alloc, texts, text_lens, count, "document", out);
+}
+
 static hu_error_t embed_impl(void *vctx, hu_allocator_t *alloc, const char *text, size_t text_len,
                              hu_embedding_t *out) {
     const char *texts[1] = {text};
     size_t lens[1] = {text_len};
-    return embed_batch_impl(vctx, alloc, texts, lens, 1, out);
+    return embed_batch_typed(vctx, alloc, texts, lens, 1, "document", out);
+}
+
+static hu_error_t embed_query_impl(void *vctx, hu_allocator_t *alloc, const char *text,
+                                   size_t text_len, hu_embedding_t *out) {
+    const char *texts[1] = {text};
+    size_t lens[1] = {text_len};
+    return embed_batch_typed(vctx, alloc, texts, lens, 1, "query", out);
 }
 
 static size_t dimensions_impl(void *vctx) {
@@ -168,6 +199,7 @@ static void deinit_impl(void *vctx, hu_allocator_t *alloc) {
 static const hu_embedder_vtable_t http_vtable = {
     .embed = embed_impl,
     .embed_batch = embed_batch_impl,
+    .embed_query = embed_query_impl,
     .dimensions = dimensions_impl,
     .deinit = deinit_impl,
 };
