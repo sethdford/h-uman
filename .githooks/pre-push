@@ -37,6 +37,23 @@ if [ -f "CMakeLists.txt" ]; then
     # different test count) — update-stats.sh reports whatever this tree
     # builds, so treat its output as "this tree", not "the project".
     #
+    # Ignore a DEVELOPER_DIR that points at a different toolchain than this
+    # cache was configured against. The cache records /usr/bin/cc, /usr/bin/ld
+    # (xcrun shims) and the Xcode SDK as sysroot; DEVELOPER_DIR redirects the
+    # shims, so `DEVELOPER_DIR=/Library/Developer/CommandLineTools git push`
+    # (a stale workaround for an Xcode-license prompt) linked with the CLT's
+    # ld-1267 against Xcode's SDK and failed on every .tbd stub ("unknown
+    # architecture arm64e.x1", "tapi error: malformed file"). Both 2026-09-20
+    # build failures were this; both passed on a retry without the variable.
+    if [ -n "${DEVELOPER_DIR:-}" ] && [ -f CMakeCache.txt ]; then
+        sysroot=$(sed -n 's/^CMAKE_OSX_SYSROOT:PATH=//p' CMakeCache.txt)
+        case "$sysroot" in
+            ""|"$DEVELOPER_DIR"/*) ;;
+            *)  echo "NOTE: ignoring DEVELOPER_DIR=$DEVELOPER_DIR for this build:"
+                echo "  $BUILD_DIR was configured against $sysroot"
+                unset DEVELOPER_DIR ;;
+        esac
+    fi
     # Configure unconditionally: the old `if [ ! -f CMakeCache.txt ]` guard
     # meant an existing build-check kept its original flags forever, so a
     # change here would never reach anyone who already had one. Re-running
@@ -65,9 +82,9 @@ if [ -f "CMakeLists.txt" ]; then
     # On failure, keep the log and surface the error-bearing lines: with -j
     # the failing job's diagnostics are rarely in the last three lines (the
     # 2026-09-20 16:22 failure showed only "make: *** [all] Error 2"), and a
-    # failure that passes on immediate retry — both 09-20 failures coincided
-    # with another worktree's build, and the one resource builds share is the
-    # codesign keychain — can only be diagnosed from the log it left behind.
+    # failure that passes on immediate retry can only be diagnosed from the
+    # log it left behind — this is what exposed the DEVELOPER_DIR mismatch
+    # guarded against above.
     build_log=$(mktemp "${TMPDIR:-/tmp}/human_build.XXXXXX") || exit 1
     cmake --build . -j"$JOBS" >"$build_log" 2>&1
     build_rc=$?
