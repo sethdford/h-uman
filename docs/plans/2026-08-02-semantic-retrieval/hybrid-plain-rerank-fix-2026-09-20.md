@@ -44,8 +44,9 @@ Evidence: `memory-benchmarks-hybrid-plain-gemma-2026-09-20.json` (before),
 
 ## Left open
 
-- LoCoMo: C plain path 0.783 vs the harness's Python RRF 0.850 on the same keyword and
-  semantic lists. The C merge sees different inputs (leg limits or list lengths) from
-  the harness; the gap is real and unmeasured as to cause.
+- ~~LoCoMo: C plain path 0.783 vs the harness's Python RRF 0.850.~~ Resolved the same
+  day: the merge and the semantic leg were identical; the keyword leg was
+  `hu_keyword_retrieve` (matched-word fraction) instead of the backend's BM25 `recall`.
+  See `hybrid-plain-keyword-leg-2026-09-20.md` (production call now 0.850).
 - Deploying the fix changes what reaches the prompt on every daemon turn. The next
   weekly semantic gate is the downstream measurement.

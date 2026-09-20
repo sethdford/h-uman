@@ -695,6 +695,75 @@ static hu_error_t hybrid_reconstruct_commit(
     return hu_retrieval_filter_by_namespace(alloc, out, opts);
 }
 
+/* Keyword leg of the fusion.
+ *
+ * Prefer the backend's own ranked recall (FTS5 BM25 on SQLite -- the list
+ * `human memory search <q>` prints) over hu_keyword_retrieve, which lists
+ * every row and scores it by the fraction of query words it contains. That
+ * fraction has no term weighting and no length normalisation, so on a real
+ * corpus most candidates tie and the leg fills in list order, not relevance.
+ * Measured 2026-09-20 on LoCoMo-10 (60 questions, seed 3, EmbeddingGemma
+ * index): the fraction leg held the evidence in 27/60 top-10 lists vs 39/60
+ * for BM25, cut at a tied score in 57/60, and the fused R@10 was 0.783 vs
+ * 0.850 for the same RRF over the BM25 list. The semantic leg and the merge
+ * were byte-identical between the two runs (dumped lists in
+ * docs/plans/2026-08-02-semantic-retrieval/hybrid-plain-keyword-leg-2026-09-20.md).
+ *
+ * The leg only feeds RRF, which reads ranks, so scores are rank-derived
+ * (1/(rank+1), higher is better): the no-vector fallback that returns this
+ * leg as-is and the engine's temporal/MMR passes still see a positive,
+ * monotone score whatever the engine reports (SQLite's bm25() is negative).
+ * Falls back to hu_keyword_retrieve when the backend has no recall, recall
+ * fails or returns nothing, or the caller set min_score (recall has no
+ * score threshold to honour, and the fraction is what min_score means).
+ *
+ * Reconstructive mode (Contract C2, CLI-only -- no daemon path sets it)
+ * keeps the fraction leg: its scene-select stage and its ablation tests were
+ * tuned against that leg's tied-score truncation (tests/test_hybrid_
+ * reconstructive.c says so at each fixture), and its `hybrid_cli` benchmark
+ * column is measured separately. Switching that leg is its own measured
+ * change, not a side effect of fixing the production merge. */
+static hu_error_t hybrid_keyword_leg(hu_allocator_t *alloc, hu_memory_t *backend, const char *query,
+                                     size_t query_len, const hu_retrieval_options_t *opts,
+                                     size_t limit, hu_retrieval_result_t *out) {
+    out->entries = NULL;
+    out->count = 0;
+    out->scores = NULL;
+    bool min_score_set = opts && opts->min_score > 0.0;
+    bool reconstructive = opts && opts->reconstructive;
+    if (backend && backend->ctx && backend->vtable && backend->vtable->recall && !min_score_set &&
+        !reconstructive) {
+        hu_memory_entry_t *entries = NULL;
+        size_t count = 0;
+        hu_error_t err = backend->vtable->recall(backend->ctx, alloc, query, query_len, limit,
+                                                 opts ? opts->session_id : NULL,
+                                                 opts ? opts->session_id_len : 0, &entries, &count);
+        if (err == HU_OK && entries && count > 0) {
+            double *scores = (double *)alloc->alloc(alloc->ctx, count * sizeof(double));
+            if (!scores) {
+                for (size_t i = 0; i < count; i++)
+                    hu_memory_entry_free_fields(alloc, &entries[i]);
+                alloc->free(alloc->ctx, entries, count * sizeof(hu_memory_entry_t));
+                return HU_ERR_OUT_OF_MEMORY;
+            }
+            for (size_t i = 0; i < count; i++) {
+                scores[i] = 1.0 / (double)(i + 1);
+                entries[i].score = scores[i];
+            }
+            out->entries = entries;
+            out->count = count;
+            out->scores = scores;
+            return hu_retrieval_filter_by_namespace(alloc, out, opts);
+        }
+        if (entries) {
+            for (size_t i = 0; i < count; i++)
+                hu_memory_entry_free_fields(alloc, &entries[i]);
+            alloc->free(alloc->ctx, entries, count * sizeof(hu_memory_entry_t));
+        }
+    }
+    return hu_keyword_retrieve(alloc, backend, query, query_len, opts, out);
+}
+
 hu_error_t hu_hybrid_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, hu_embedder_t *embedder,
                               hu_vector_store_t *vector_store, hu_graph_t *graph, const char *query,
                               size_t query_len, const hu_retrieval_options_t *opts,
@@ -719,7 +788,8 @@ hu_error_t hu_hybrid_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, hu_em
 #endif
 
     hu_retrieval_result_t keyword_result = {0};
-    hu_error_t err = hu_keyword_retrieve(alloc, backend, query, query_len, opts, &keyword_result);
+    hu_error_t err =
+        hybrid_keyword_leg(alloc, backend, query, query_len, opts, limit, &keyword_result);
     if (err != HU_OK)
         return err;
 
