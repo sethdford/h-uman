@@ -1318,19 +1318,23 @@ static bool imsg_validate_target(hu_imessage_ctx_t *c) {
  * One `imsg status` per process. Everything advanced gates on this; when the
  * bridge is absent (SIP on) every native verb declines and the caller degrades
  * honestly — never UI puppetry, never a green bubble. */
-static const hu_imessage_caps_t *imsg_caps_cached(hu_imessage_ctx_t *c) {
+static const hu_imessage_caps_t *imsg_caps_cached_alloc(hu_allocator_t *alloc) {
     static hu_imessage_caps_t caps;
     static bool probed = false;
-    if (!c || !c->alloc)
+    if (!alloc)
         return NULL;
     if (!probed) {
         probed = true;
-        (void)hu_imessage_caps_probe(c->alloc, &caps);
+        (void)hu_imessage_caps_probe(alloc, &caps);
         char desc[160];
         hu_imessage_caps_describe(&caps, desc, sizeof(desc));
         hu_log_info("imessage", NULL, "%s", desc);
     }
     return &caps;
+}
+
+static const hu_imessage_caps_t *imsg_caps_cached(hu_imessage_ctx_t *c) {
+    return c ? imsg_caps_cached_alloc(c->alloc) : NULL;
 }
 
 /* Resolve a chat.db message ROWID to its GUID (the bridge verbs address
@@ -1461,6 +1465,54 @@ static void imsg_lookup_services_for_handle(const char *handle, size_t handle_le
 #endif
 }
 
+/* The T0.1 blue-guard predicate as ONE function (2026-09-20). Two callers:
+ * the send path (imessage_send) and the daemon's proactive reachability
+ * pre-filter (hu_daemon_proactive_reach_should_skip). Sharing the definition
+ * is what makes the pre-filter's "would-exclude" set equal blue_guard's HOLD
+ * set by construction — a second copy of this chain would drift the moment one
+ * side gained a clause.
+ *
+ * Reproduces the send path exactly: HU_IMESSAGE_ALLOW_GREEN short-circuits to
+ * ALLOW (the operator opted into SMS); otherwise chat.db services are looked
+ * up, the email attribution filter is applied, the whois probe runs only when
+ * the bridge is advanced, and HU_IMESSAGE_WHOIS_STRICT makes a negative
+ * binding. Out-params are optional; they exist for the callers' log lines.
+ * NULL/empty handle ⇒ HOLD (fail closed, exactly as "no evidence" does). */
+hu_blue_verdict_t hu_imessage_blue_guard_verdict(hu_allocator_t *alloc, const char *handle,
+                                                 size_t handle_len, hu_whois_reach_t *live_out,
+                                                 hu_imessage_service_t *recent_out,
+                                                 hu_imessage_service_t *handle_out) {
+    hu_whois_reach_t live = HU_WHOIS_INDETERMINATE;
+    hu_imessage_service_t recent = HU_IMSG_SERVICE_UNKNOWN;
+    hu_imessage_service_t handle_svc = HU_IMSG_SERVICE_UNKNOWN;
+    hu_blue_verdict_t verdict = HU_BLUE_HOLD;
+    if (getenv("HU_IMESSAGE_ALLOW_GREEN")) {
+        verdict = HU_BLUE_ALLOW;
+    } else if (handle && handle_len > 0) {
+        imsg_lookup_services_for_handle(handle, handle_len, &recent, &handle_svc);
+        /* Email handles: SMS/RCS message rows are chat.db attribution
+         * artifacts (impossible routes) — must not bind the verdict. */
+        recent = hu_imessage_recent_service_email_filter(memchr(handle, '@', handle_len) != NULL,
+                                                         recent);
+        /* T0.1b: chat.db only says how this handle routed in the PAST. When the
+         * IMCore bridge is live, ask Apple the current question directly and
+         * let that answer win; an unavailable/failed lookup returns
+         * INDETERMINATE and falls back to the chat.db inference above. */
+        const hu_imessage_caps_t *caps = imsg_caps_cached_alloc(alloc);
+        if (caps && caps->advanced)
+            live = hu_imessage_whois_probe_cached(alloc, handle, handle_len);
+        verdict = hu_imessage_blue_verdict_live(live, recent, handle_svc,
+                                                getenv("HU_IMESSAGE_WHOIS_STRICT") != NULL);
+    }
+    if (live_out)
+        *live_out = live;
+    if (recent_out)
+        *recent_out = recent;
+    if (handle_out)
+        *handle_out = handle_svc;
+    return verdict;
+}
+
 /* Resolve a handle (phone/email) to the chat GUID owning its most recent
  * message — the bridge verbs address chats by GUID. Declared in
  * human/channels/imessage_schema.h; defined here so it shares the single
@@ -1545,6 +1597,26 @@ static bool imsg_try_react(hu_imessage_ctx_t *c, int64_t message_id, hu_reaction
     return rok;
 }
 
+#else
+/* Test / non-Apple builds: the chat.db + whois inference above is compiled out,
+ * so the predicate degrades the way the send path does — no evidence ⇒ HOLD —
+ * while still honouring HU_IMESSAGE_ALLOW_GREEN so the daemon-side pre-filter
+ * test can drive both verdicts. */
+hu_blue_verdict_t hu_imessage_blue_guard_verdict(hu_allocator_t *alloc, const char *handle,
+                                                 size_t handle_len, hu_whois_reach_t *live_out,
+                                                 hu_imessage_service_t *recent_out,
+                                                 hu_imessage_service_t *handle_out) {
+    (void)alloc;
+    (void)handle;
+    (void)handle_len;
+    if (live_out)
+        *live_out = HU_WHOIS_INDETERMINATE;
+    if (recent_out)
+        *recent_out = HU_IMSG_SERVICE_UNKNOWN;
+    if (handle_out)
+        *handle_out = HU_IMSG_SERVICE_UNKNOWN;
+    return getenv("HU_IMESSAGE_ALLOW_GREEN") ? HU_BLUE_ALLOW : HU_BLUE_HOLD;
+}
 #endif /* __APPLE__ && __MACH__ && !HU_IS_TEST */
 
 static hu_error_t imessage_start(void *ctx) {
@@ -2154,24 +2226,14 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
      * which service a handle actually routes over; RCS counts as green. When
      * the evidence says not-iMessage (or says nothing at all), HOLD — staying
      * silent beats texting as SMS from a persona that only ever texts blue.
-     * Override for deliberate SMS use: HU_IMESSAGE_ALLOW_GREEN=1. */
-    if (!getenv("HU_IMESSAGE_ALLOW_GREEN")) {
+     * Override for deliberate SMS use: HU_IMESSAGE_ALLOW_GREEN=1. The predicate
+     * is hu_imessage_blue_guard_verdict, shared with the daemon's proactive
+     * reachability pre-filter so both sides HOLD the same handles. */
+    {
+        hu_whois_reach_t live = HU_WHOIS_INDETERMINATE;
         hu_imessage_service_t recent = HU_IMSG_SERVICE_UNKNOWN;
         hu_imessage_service_t handle_svc = HU_IMSG_SERVICE_UNKNOWN;
-        imsg_lookup_services_for_handle(tgt, tgt_len, &recent, &handle_svc);
-        /* Email handles: SMS/RCS message rows are chat.db attribution
-         * artifacts (impossible routes) — must not bind the verdict. */
-        recent = hu_imessage_recent_service_email_filter(memchr(tgt, '@', tgt_len) != NULL, recent);
-        /* T0.1b: chat.db only says how this handle routed in the PAST. When the
-         * IMCore bridge is live, ask Apple the current question directly and
-         * let that answer win; an unavailable/failed lookup returns
-         * INDETERMINATE and falls back to the chat.db inference above. */
-        hu_whois_reach_t live = HU_WHOIS_INDETERMINATE;
-        const hu_imessage_caps_t *caps = imsg_caps_cached(c);
-        if (caps && caps->advanced)
-            live = hu_imessage_whois_probe_cached(c->alloc, tgt, tgt_len);
-        const bool whois_negative_binds = getenv("HU_IMESSAGE_WHOIS_STRICT") != NULL;
-        if (hu_imessage_blue_verdict_live(live, recent, handle_svc, whois_negative_binds) ==
+        if (hu_imessage_blue_guard_verdict(c->alloc, tgt, tgt_len, &live, &recent, &handle_svc) ==
             HU_BLUE_HOLD) {
             hu_log_warn(
                 "imessage", NULL,

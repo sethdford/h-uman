@@ -45,6 +45,9 @@
 #include "human/memory/proactive_decisions_repo.h" /* C5 Part A: decision log */
 #include "human/persona.h"
 #include "human/platform.h"
+#ifdef HU_HAS_IMESSAGE
+#include "human/channels/imessage.h" /* hu_imessage_blue_guard_verdict (reachability pre-filter) */
+#endif
 #ifdef HU_ENABLE_SQLITE
 #include "human/memory/superhuman.h"
 #endif
@@ -1127,4 +1130,67 @@ bool hu_daemon_proactive_send_and_record(struct hu_agent *agent, hu_channel_t *c
     if (gov_budget)
         hu_governor_record_sent(gov_budget, (uint64_t)time(NULL) * 1000ULL);
     return true;
+}
+
+/* ── Proactive reachability pre-filter (2026-09-20) ─────────────────────
+ * Contract in daemon_proactive.h. */
+
+hu_proactive_reach_mode_t hu_daemon_proactive_reach_mode_from_env(void) {
+    const char *v = getenv("HU_PROACTIVE_REACHABILITY");
+    if (!v)
+        return HU_PROACTIVE_REACH_OFF;
+    if (strcmp(v, "shadow") == 0)
+        return HU_PROACTIVE_REACH_SHADOW;
+    if (strcmp(v, "live") == 0)
+        return HU_PROACTIVE_REACH_LIVE;
+    /* "off" or any unrecognized value: fail closed. */
+    return HU_PROACTIVE_REACH_OFF;
+}
+
+hu_proactive_reach_action_t hu_daemon_proactive_reach_decide(hu_proactive_reach_mode_t mode,
+                                                             bool reachable) {
+    if (reachable || mode == HU_PROACTIVE_REACH_OFF)
+        return HU_PROACTIVE_REACH_PASS;
+    return mode == HU_PROACTIVE_REACH_LIVE ? HU_PROACTIVE_REACH_SKIP
+                                           : HU_PROACTIVE_REACH_WOULD_SKIP;
+}
+
+bool hu_daemon_proactive_reach_should_skip(struct hu_agent *agent, hu_allocator_t *alloc,
+                                           const char *ch_name, const char *contact_id,
+                                           const char *target, size_t target_len) {
+    hu_proactive_reach_mode_t mode = hu_daemon_proactive_reach_mode_from_env();
+    if (mode == HU_PROACTIVE_REACH_OFF)
+        return false; /* OFF never probes: zero cost, zero behaviour change */
+    /* iMessage is the only channel with a reachability oracle. */
+    if (!ch_name || strcmp(ch_name, "imessage") != 0)
+        return false;
+#ifdef HU_HAS_IMESSAGE
+    hu_whois_reach_t live = HU_WHOIS_INDETERMINATE;
+    hu_imessage_service_t recent = HU_IMSG_SERVICE_UNKNOWN;
+    hu_imessage_service_t handle_svc = HU_IMSG_SERVICE_UNKNOWN;
+    bool reachable = hu_imessage_blue_guard_verdict(alloc, target, target_len, &live, &recent,
+                                                    &handle_svc) == HU_BLUE_ALLOW;
+    hu_proactive_reach_action_t act = hu_daemon_proactive_reach_decide(mode, reachable);
+    if (act == HU_PROACTIVE_REACH_PASS)
+        return false;
+    /* Per-process count so a shadow reading is one grep of the service log:
+     * `grep "proactive reachability" ~/.human/logs/service.log | tail -1`. */
+    static unsigned excluded = 0;
+    excluded++;
+    hu_log_info("human", agent ? agent->observer : NULL,
+                "proactive reachability [%s]: %s %s (%.*s) — not iMessage-reachable "
+                "(whois=%d recent=%d handle=%d) [n=%u this process]",
+                mode == HU_PROACTIVE_REACH_LIVE ? "live" : "shadow",
+                act == HU_PROACTIVE_REACH_SKIP ? "excluded" : "would-exclude",
+                contact_id ? contact_id : "?", (int)(target_len > 24 ? 24 : target_len),
+                target ? target : "", (int)live, (int)recent, (int)handle_svc, excluded);
+    return act == HU_PROACTIVE_REACH_SKIP;
+#else
+    (void)agent;
+    (void)alloc;
+    (void)contact_id;
+    (void)target;
+    (void)target_len;
+    return false; /* no chat.db on this build: nothing to infer from */
+#endif
 }
