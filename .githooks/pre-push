@@ -56,8 +56,18 @@ if [ -f "CMakeLists.txt" ]; then
         echo "cmake configure failed. Fix before pushing."
         exit 1
     }
-    cmake --build . -j"$JOBS" 2>&1 | tail -3
-    if [ $? -ne 0 ]; then
+    # Test the BUILD's exit status, not tail's. `cmake --build | tail -3;
+    # [ $? -ne 0 ]` tested tail (always 0), so a failed build fell through to
+    # running whatever build-check/human_tests already existed. On 2026-09-20
+    # a push compiled 566 library objects and no test objects, then ran the
+    # binary last linked on 09-13 and stamped 14,247 tests; the next push, from
+    # the SAME tree, built to completion and stamped 14,303.
+    build_log=$(mktemp "${TMPDIR:-/tmp}/human_build.XXXXXX") || exit 1
+    cmake --build . -j"$JOBS" >"$build_log" 2>&1
+    build_rc=$?
+    tail -3 "$build_log"
+    rm -f "$build_log"
+    if [ "$build_rc" -ne 0 ]; then
         echo "Build failed. Fix before pushing."
         exit 1
     fi
@@ -66,14 +76,24 @@ if [ -f "CMakeLists.txt" ]; then
     # ./human_tests from inside the build dir made those ~44 tests fail
     # spuriously (CWD couldn't resolve the relative paths).
     cd ..
-    # Tee the run so its own "--- Results: N/N passed ---" line can be parsed
-    # below: that N is the only test count this hook has verified, and it is
-    # the one the stats sync must stamp. (POSIX sh has no pipefail, so the
-    # suite's exit status is written to a side file.)
+    # Tee the run so its own "--- Results: P/P passed[, K skipped] ---" line
+    # can be parsed below. The count stamped is P + K: the tests this binary
+    # REGISTERED. HU_SKIP_IF removes a skipped test from the P/P denominator
+    # (hu__total--), and which tests skip depends on the machine (daemon
+    # bundle built or not, fixture present, HU_HAVE_MLX_LM, macOS), so P alone
+    # can move on an unchanged tree while P + K cannot (measured 14303 + 7 on
+    # two consecutive runs, 2026-09-20). Never count PASS lines instead:
+    # forking tests lose ~50 of them per run (14,256 lines for a 14,303
+    # counter). (POSIX sh has no pipefail, so the suite's exit status is
+    # written to a side file.)
     results_log=$(mktemp "${TMPDIR:-/tmp}/human_tests.XXXXXX") || exit 1
     { "$BUILD_DIR/human_tests"; echo $? > "$results_log.rc"; } | tee "$results_log"
     tests_rc=$(cat "$results_log.rc" 2>/dev/null || echo 1)
-    TEST_COUNT=$(sed -n 's|^--- Results: \([0-9][0-9]*\)/[0-9][0-9]* passed.*|\1|p' "$results_log" | head -1)
+    results_line=$(grep '^--- Results: ' "$results_log" | head -1)
+    passed=$(printf '%s\n' "$results_line" | sed -n 's|^--- Results: \([0-9][0-9]*\)/[0-9][0-9]* passed.*|\1|p')
+    skipped=$(printf '%s\n' "$results_line" | sed -n 's|.*, \([0-9][0-9]*\) skipped.*|\1|p')
+    TEST_COUNT=""
+    [ -n "$passed" ] && TEST_COUNT=$((passed + ${skipped:-0}))
     rm -f "$results_log" "$results_log.rc"
     if [ "$tests_rc" -ne 0 ]; then
         echo "Tests failed. Fix before pushing."
@@ -108,13 +128,20 @@ if [ -f "CMakeLists.txt" ]; then
     # release binary's age (a five-week-old build-release/ stamped ~2952 KB
     # the same day); --keep-binary-size leaves the committed value alone.
     # Rule: .claude/rules/no-number-without-a-measurement.md.
+    #
+    # Run-to-run drift on an UNCHANGED tree (2026-09-20: 14,247 then 14,303
+    # from two pushes whose only diff was these five docs) had two causes,
+    # both fixed above: a masked build failure ran a week-old binary, and the
+    # passed-only numerator moved with environment-dependent skips. The sync
+    # stays on because a fresh binary's registered total is stable; if the
+    # docs still churn on a re-push, suspect the binary, not the tree.
     if [ -x "scripts/update-stats.sh" ]; then
         behind=$(git rev-list --count HEAD..origin/main 2>/dev/null || echo unknown)
         if [ "$behind" = "0" ] && [ -z "$TEST_COUNT" ]; then
             echo "WARN: could not parse a test count from this run's Results: line;"
             echo "  skipping stats sync rather than stamping a count from a stale binary."
         elif [ "$behind" = "0" ]; then
-            echo "Syncing project stats (${TEST_COUNT} tests, measured by this run)..."
+            echo "Syncing project stats (${TEST_COUNT} registered tests = passed + skipped, measured by this run)..."
             if ! bash scripts/update-stats.sh --apply --test-count "$TEST_COUNT" --keep-binary-size 2>/dev/null; then
                 echo "Warning: stats sync failed. Run 'scripts/update-stats.sh --apply --test-count ${TEST_COUNT} --keep-binary-size' manually."
             fi
