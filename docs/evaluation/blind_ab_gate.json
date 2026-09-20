@@ -3,15 +3,29 @@
   "commit": "a4ac57f142bf99e1dfd6539056722d55d54ffb22",
   "proxy": {
     "tool": "eval_blinded_ab.py",
-    "timestamp": "2026-08-03T05:31:22",
+    "timestamp": "2026-09-20T04:50:44",
     "verdict": "PASS",
     "mode": "ENFORCING",
-    "fool_rate": 51.162790697674424,
-    "baseline_fool_rate": 44.89795918367347,
-    "n_trials": 43,
-    "n_real_pairs": 43,
+    "fool_rate": 46.0,
+    "baseline_fool_rate": 42.0,
+    "n_trials": 50,
+    "n_real_pairs": 50,
     "fail_under": 45.0,
-    "max_regression": 5.0
+    "max_regression": 5.0,
+    "run_mode": "gateway",
+    "judge_model": "gemini-3.1-pro-preview",
+    "claims_adapter": true,
+    "serving": {
+      "server": "http://127.0.0.1:8741",
+      "asked_at": "2026-09-20T04:50:44",
+      "model": "GLM-4.5-Air-4bit",
+      "adapter_path": "/Users/sethford/.human/training-data/adapters/seth-glm-air-mlxtune-orpo-20260905-0856-20260905-085655",
+      "tensors_loaded": 160,
+      "adapter_bound": true,
+      "provenance_available": true,
+      "head_sha256": "b245dc8db2828d12cc20afc0123144954b3adb4e31c7725c7e9220ff8ce2f581",
+      "head_bytes": 4908
+    }
   },
   "human": {
     "tool": "blind_ab/score.py",
