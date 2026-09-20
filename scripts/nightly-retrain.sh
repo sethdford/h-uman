@@ -43,6 +43,57 @@ SKIP_BASE_TRAINING=0
 
 mkdir -p "$(dirname "$LOG")"
 log() { printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" | tee -a "$LOG"; }
+
+# ── Disk hygiene ────────────────────────────────────────────────────────────
+# 2026-09-20: the disk hit 100% (101 MB free) mid-window. training_loop's own
+# prune only matches m3-driver-* names, so 48 nightly seth-m3-outcomes-* stagings
+# (35 GB), every BLOCKed mlxtune candidate, and 376 intermediate checkpoints
+# (60 GB) had accumulated; the first SFT candidate died writing its checkpoint.
+# retain_adapters keeps the newest $HU_RETRAIN_KEEP_PER_FAMILY of each
+# UNPROMOTED family the window itself produces and never touches the served
+# adapter, anything in the registry, or hand-placed dirs. free_gb_check refuses
+# to stop production for a training run that cannot save its result.
+retain_adapters() {
+    local dir="${1:-$HOME/.human/training-data/adapters}" keep="${HU_RETRAIN_KEEP_PER_FAMILY:-5}"
+    local serving; serving=$(python3 -c 'import json,os;c=json.load(open(os.path.expanduser("~/.human/config.json")));print(c.get("personalization",{}).get("lora_adapter_path") or c.get("mlx_local",{}).get("adapter_path") or "")' 2>/dev/null)
+    local registered; registered=$(python3 -c 'import json,sys
+try:
+    r=json.load(open(sys.argv[1]))
+except Exception: sys.exit(0)
+it=r if isinstance(r,list) else r.get("adapters",r); it=it if isinstance(it,list) else list(it.values())
+for a in it:
+    for k in ("path","adapter","adapter_path","dir","name","id"):
+        v=a.get(k)
+        if isinstance(v,str) and v: print(v.rstrip("/").split("/")[-1])' "$dir/registry.json" 2>/dev/null | sort -u)
+    local fam removed=0
+    for fam in "seth-m3-outcomes-" "seth-glm-air-mlxtune-"; do
+        local n=0 d base
+        while IFS= read -r d; do
+            [[ -d "$d" ]] || continue
+            base=${d%/}; base=${base##*/}
+            n=$((n + 1)); (( n <= keep )) && continue
+            [[ -n "$serving" && "${serving%/}" == "${d%/}" ]] && continue
+            grep -qxF "$base" <<<"$registered" && continue
+            [[ -f "$d/PROMOTED" ]] && continue
+            rm -rf "$d" && removed=$((removed + 1)) && log "  retention: removed $base (beyond newest $keep of ${fam}*)"
+        done < <(ls -dt "$dir"/${fam}* 2>/dev/null)
+    done
+    # intermediate checkpoints beside a final adapters.safetensors are pure duplicates
+    local ck
+    while IFS= read -r ck; do
+        [[ -f "$(dirname "$ck")/adapters.safetensors" ]] || continue
+        rm -f "$ck" && log "  retention: removed intermediate checkpoint ${ck#$dir/}"
+    done < <(find "$dir" -maxdepth 2 -name '0*_adapters.safetensors' 2>/dev/null)
+    log "retention: $removed adapter dir(s) removed; free now $(df -g / | awk 'NR==2{print $4}') GB"
+}
+free_gb_check() {
+    local need="${HU_RETRAIN_MIN_FREE_GB:-20}" free; free=$(df -g / | awk 'NR==2{print $4}')
+    if (( free < need )); then
+        log "FATAL: only ${free} GB free on / (need ${need}); refusing to stop :8741 for a run that cannot save its adapter"
+        return 1
+    fi
+    log "disk: ${free} GB free (need ${need})"
+}
 # Keep the Mac awake for the whole window. 2026-09-11: Maintenance-Sleep /
 # DarkWake cycles from 03:00 to 03:48 stretched a 5-minute base training to 85
 # minutes and pushed the candidate stage past the arena guard (rc=1). -w $$
@@ -407,6 +458,8 @@ sys.exit(0 if ok else 1)
 fi
 
 log "=== nightly retrain starting (window=$WINDOW) ==="
+retain_adapters
+free_gb_check || exit 0
 
 # ── Refresh the corpus BEFORE digesting it ─────────────────────────────────
 # The export stage loads no model (it reads the daemon's ring, else
