@@ -12,6 +12,7 @@
 
 struct hu_agent;
 struct hu_contact_profile;
+struct hu_autoresponder_config;
 struct hu_legacy_memory;
 struct hu_memory_vtable;
 
@@ -182,6 +183,33 @@ hu_error_t hu_daemon_proactive_get_contact_feed_items(hu_allocator_t *alloc, sql
                                                       size_t limit, hu_feed_item_stored_t **out,
                                                       size_t *out_count);
 #endif
+
+/* Run the full proactive gate chain and, if every gate passes, send.
+ *
+ * Carved out of hu_service_run_proactive_checkins (daemon.c) on 2026-09-20 —
+ * 103 lines that sat between the LLM draft and the post-send bookkeeping.
+ * Behaviour is unchanged; what is new is that a proposal suppressed by any
+ * gate now leaves a proactive_decisions row naming the gate (see
+ * hu_daemon_proactive_record_decline), where before it reached only the
+ * service log and eval_when_to_speak.py counted it as `dropped_pre_send`
+ * with no way to say why (89 of 115 fires, 2026-09-20).
+ *
+ * `response` is mutated IN PLACE (validator, complexity variation,
+ * trailing-period strip, sanitizer) and `*response_len` is updated to match —
+ * the caller frees the buffer with that length, exactly as the inline code
+ * did. `ar_cfg`, `tz_offset_s` and `throttle` are passed in because the
+ * daemon.c helpers that produce them are static there.
+ *
+ * Returns true iff the channel accepted delivery. Post-send bookkeeping
+ * (important-date ring, commitments, jokes, delayed follow-ups) is the
+ * caller's, gated on that return. */
+bool hu_daemon_proactive_gate_and_send(struct hu_agent *agent, hu_allocator_t *alloc,
+                                       hu_channel_t *channel, const struct hu_contact_profile *cp,
+                                       const char *ch_name, const char *target, size_t target_len,
+                                       char *response, size_t *response_len, int64_t now,
+                                       hu_proactive_budget_t *gov_budget,
+                                       const struct hu_autoresponder_config *ar_cfg,
+                                       int32_t tz_offset_s, hu_proactive_throttle_t *throttle);
 
 /* Send a proactive check-in and record it ONLY if the channel accepted it.
  * Returns true when the message was actually accepted for delivery; false means

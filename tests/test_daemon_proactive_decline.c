@@ -17,6 +17,7 @@
 #ifdef HU_ENABLE_SQLITE
 
 #include "human/agent.h"
+#include "human/channel.h"
 #include "human/daemon_proactive.h"
 #include "human/memory.h"
 #include "human/memory/engines.h"
@@ -117,11 +118,48 @@ static void test_record_decline_writes_nothing_on_null_inputs(void) {
     HU_ASSERT_EQ(decline_row_count(db), 0);
 }
 
+/* Drives the carved gate chain itself, not just the recorder. The proactive
+ * tick is compiled out under HU_IS_TEST (daemon_housekeeping.c:73), so nothing
+ * else in the suite reaches hu_daemon_proactive_gate_and_send. The LLM "SKIP"
+ * path is fully determined: it short-circuits before the channel, governor and
+ * throttle are touched, so those can be inert. A build that dropped the
+ * recorder call, wrote the length back wrong, or reported sent=true would
+ * fail this. */
+static void test_gate_and_send_llm_skip_records_reason_and_sends_nothing(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_EQ(hu_proactive_decisions_repo_ensure_schema(db), HU_OK);
+    HU_ASSERT_EQ(decline_row_count(db), 0);
+
+    struct hu_agent agent = {0};
+    agent.memory = &mem;
+    hu_contact_profile_t cp = {0};
+    cp.contact_id = "+15555550100";
+    hu_channel_vtable_t vt = {0}; /* .send NULL — must never be reached */
+    hu_channel_t chan = {.ctx = (void *)"imessage", .vtable = &vt};
+    hu_proactive_budget_t budget = {0};
+    char response[8] = "SKIP";
+    size_t response_len = 4;
+
+    bool sent = hu_daemon_proactive_gate_and_send(
+        &agent, &alloc, &chan, &cp, "imessage", "+15555550100", 12, response, &response_len,
+        1789000000, &budget, /*ar_cfg=*/NULL, /*tz_offset_s=*/0, /*throttle=*/NULL);
+
+    HU_ASSERT_FALSE(sent);
+    HU_ASSERT_EQ(response_len, 4); /* written back, unchanged: nothing mutated it */
+    HU_ASSERT_EQ(decline_row_count(db), 1);
+    HU_ASSERT_TRUE(decline_row_matches(db, "+15555550100", "proactive_send",
+                                       HU_PROACTIVE_DECISION_DECLINE, "llm_skip", 0));
+}
+
 void run_daemon_proactive_decline_tests(void) {
     HU_TEST_SUITE("daemon_proactive_decline");
     HU_RUN_TEST(test_record_decline_attributes_the_suppressing_gate);
     HU_RUN_TEST(test_record_decline_distinguishes_two_gates);
     HU_RUN_TEST(test_record_decline_writes_nothing_on_null_inputs);
+    HU_RUN_TEST(test_gate_and_send_llm_skip_records_reason_and_sends_nothing);
 }
 
 #else
