@@ -242,6 +242,33 @@ holds 101 of them with the delivered text, and the judge-free rates above
 took one query. The next measurement of "substantive register" should be
 run on those, not on scripted synthetic contacts.
 
+### 2026-09-20 — the production register, measured nightly
+
+`scripts/eval_production_register.py` (nightly stage [5/5], no server, no
+judge): delivered replies from `production_outcomes` by inbound register,
+against the cards, with the cards' own definitions. First run, 20 days:
+
+| register | n | median chars | agreement-opener | dash | scaffold |
+|---|---|---|---|---|---|
+| substantive (twin) | 19 | 47 | 0.11 | 0.00 | 0.00 |
+| substantive (Seth, style card) | 65 | 26 | 0.06 | | |
+| casual (twin) | 81 | 18 | 0.09 | 0.00 | 0.01 |
+| distress (twin) | 1 | | | | 1.00 (n too small to measure) |
+| all delivered turns | 101 | 21 | 0.09 | 0.00 | 0.02 |
+
+The product's substantive replies are 1.8× the persona's median length
+and 4 points higher on agreement openers; both inside the provisional gap
+thresholds. That is the whole measured "substantive register" gap on the
+real send path, and it is a length gap, not an agreement gap. Rule 15's
+length facts are the right lever for it; the agreement clause is not.
+
+Also visible in the same rows: on 09-19 03:24 the daemon delivered "This
+solution will effectively address your needs" to a real contact asking
+about a chicken caesar wrap — an assistant register that neither the
+AI-tell table nor the scaffold regex names. One in 101 turns, but it was
+delivered. The AI-tell table should gain the "this solution will",
+"address your needs" family.
+
 ## Multi-turn A/B on the production prompt (2026-09-13)
 
 `scripts/eval_multiturn_local.py --persona-prompt production` (new: the
