@@ -284,6 +284,9 @@ def cmd_gen(a):
 def cmd_tick(a, now=None):
     now = now if now is not None else time.time()
     st = load_state()
+    # A dry-run must not persist: the first real tick after one would believe
+    # a pair was already sent and sit waiting on an answer that never comes.
+    save = (lambda st: None) if a.dry_run else save_state
     pairs = load_sheet()
     total = len(pairs)
     if st.get("pending") and st.get("question_unix"):
@@ -301,7 +304,7 @@ def cmd_tick(a, now=None):
         if not st.get("complete"):
             cmd_score(a)
             st["complete"] = True
-        save_state(st)
+        save(st)
         return 0
     in_hours = rd.within_send_hours(time.localtime(now).tm_hour)
     if st.get("pending"):
@@ -329,7 +332,7 @@ def cmd_tick(a, now=None):
             st.update({"pending": p["id"], "question_unix": now, "asks": 1,
                        "sent": st.get("sent", 0) + 1})
             print(f"sent {p['id']} ({answered + 1}/{total})")
-    save_state(st)
+    save(st)
     return 0
 
 

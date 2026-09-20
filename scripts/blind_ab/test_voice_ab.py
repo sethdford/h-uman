@@ -99,3 +99,15 @@ def test_compose_question_is_short_and_explains_order():
     q = va.compose_question({"id": "p01"}, 2, 12)
     assert "3/12" in q and "A then B" in q and "reply A or B" in q
     assert len(q) < 300
+
+
+def test_dry_run_tick_does_not_persist_state(tmp_path, monkeypatch):
+    import types
+    monkeypatch.setattr(va, "SHEET", str(tmp_path / "sheet.json"))
+    monkeypatch.setattr(va, "STATE", str(tmp_path / "state.json"))
+    monkeypatch.setattr(va, "CLIPS", str(tmp_path))
+    monkeypatch.setattr(va.rd, "within_send_hours", lambda h: True)
+    va.save_sheet([{"id": "p01", "axis": "model", "text": "t", "A": "a.caf", "B": "b.caf"}])
+    va.cmd_tick(types.SimpleNamespace(dry_run=True), now=1000.0)
+    assert not (tmp_path / "state.json").exists()
+    assert va.load_state()["pending"] is None
