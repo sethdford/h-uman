@@ -68,3 +68,67 @@ def test_no_context_no_bos_single_token_reply_is_unscoreable_not_a_crash():
 def test_with_context_span_is_the_reply_tokens():
     ids, rs, rl = bs.response_token_span(NoBosTokenizer(), "you up?", "yeah")
     assert ids[rs:rs + rl] == [ord(c) for c in "yeah"]
+
+
+# ---- DivEye variability features (arXiv 2509.18880) ------------------------
+
+def test_surprisal_diversity_is_zero_for_flat_and_single_token_series():
+    assert bs.surprisal_diversity([0.7, 0.7, 0.7, 0.7]) == (0.0, 0.0, 0.0)
+    assert bs.surprisal_diversity([4.2]) == (0.0, 0.0, 0.0)
+    assert bs.surprisal_diversity([]) == (0.0, 0.0, 0.0)
+
+
+def test_surprisal_diversity_orders_bursty_above_smooth():
+    # Same mean surprisal (2.0), very different variability: the human-shaped
+    # series must score higher on every DivEye feature than the flat one.
+    smooth = [1.9, 2.0, 2.1, 2.0, 1.9, 2.1]
+    bursty = [0.2, 3.8, 0.2, 3.8, 0.2, 3.8]
+    s_std, s_burst, _ = bs.surprisal_diversity(smooth)
+    b_std, b_burst, _ = bs.surprisal_diversity(bursty)
+    assert b_std > s_std and b_burst > s_burst
+
+
+def test_combine_emits_diveye_keys_from_the_real_token_series():
+    import numpy as np
+    with tempfile.TemporaryDirectory() as d:
+        # 3 reply tokens over a 4-token vocab; token i is predicted at row i.
+        base = np.log(np.array([[0.7, 0.1, 0.1, 0.1],
+                                [0.1, 0.1, 0.7, 0.1],
+                                [0.1, 0.7, 0.1, 0.1]], dtype=np.float32))
+        adpt = np.log(np.full((3, 4), 0.25, dtype=np.float32))  # flat: no variability
+        np.save(os.path.join(d, "base_00000.npy"), base)
+        np.save(os.path.join(d, "adapted_00000.npy"), adpt)
+        items = [{"text": "abc", "context": "", "label": "real"}]
+        meta = [{"idx": 0, "resp_tokens": [0, 2, 1], "n_tokens": 3}]
+        (r,) = bs.combine(items, meta, d)
+    # base predicts every chosen token at p=0.7 -> flat surprisal -> zero variability
+    assert r["div_std_base"] == 0.0 and r["div_burst_base"] == 0.0
+    assert r["div_std_adapted"] == 0.0
+    assert r["score_diveye"] == r["div_std_base"]
+    for k in ("div_kurt_base", "div_kurt_adapted", "div_burst_adapted"):
+        assert k in r
+    # the analyzer knows the new feature names
+    assert "diveye std (base)" in bs.SCORE_DEFS
+
+
+def test_combine_diveye_separates_a_peaked_reply_from_a_flat_one():
+    import numpy as np
+    with tempfile.TemporaryDirectory() as d:
+        # item 0: chosen tokens at p = .9, .05, .9  (bursty surprisal)
+        # item 1: chosen tokens at p = .5, .5, .5   (flat surprisal)
+        b0 = np.log(np.array([[0.9, 0.05, 0.03, 0.02],
+                              [0.9, 0.05, 0.03, 0.02],
+                              [0.9, 0.05, 0.03, 0.02]], dtype=np.float32))
+        b1 = np.log(np.array([[0.5, 0.3, 0.1, 0.1]] * 3, dtype=np.float32))
+        flat = np.log(np.full((3, 4), 0.25, dtype=np.float32))
+        np.save(os.path.join(d, "base_00000.npy"), b0)
+        np.save(os.path.join(d, "base_00001.npy"), b1)
+        np.save(os.path.join(d, "adapted_00000.npy"), flat)
+        np.save(os.path.join(d, "adapted_00001.npy"), flat)
+        items = [{"text": "x", "context": "", "label": "real"},
+                 {"text": "y", "context": "", "label": "ai"}]
+        meta = [{"idx": 0, "resp_tokens": [0, 1, 0], "n_tokens": 3},
+                {"idx": 1, "resp_tokens": [0, 0, 0], "n_tokens": 3}]
+        r0, r1 = bs.combine(items, meta, d)
+    assert r0["div_std_base"] > r1["div_std_base"] == 0.0
+    assert r0["div_burst_base"] > r1["div_burst_base"] == 0.0
