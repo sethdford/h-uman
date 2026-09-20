@@ -241,4 +241,52 @@ bool hu_daemon_proactive_send_and_record(struct hu_agent *agent, hu_channel_t *c
 void hu_daemon_proactive_record_decline(struct hu_agent *agent, const char *contact,
                                         const char *reason, int64_t now);
 
+/* ── Proactive reachability pre-filter (2026-09-20) ──────────────────────
+ *
+ * Why: docs/plans/2026-09-20-october-roadmap.md O3. Attributing pre-send
+ * drops showed 91% of proactive fires (2026-09-20) targeted ONE contact the
+ * iMessage blue_guard then HELD as not-iMessage-reachable. Every such fire
+ * burns a proposer LLM call, lands in the FIR numerator, and can never be
+ * delivered. The fix is to ask the SAME predicate blue_guard asks — before
+ * the proposer runs — and leave that contact out of the candidate set.
+ *
+ * Gate: HU_PROACTIVE_REACHABILITY = off (default) | shadow | live. Unrecognised
+ * values fail closed to OFF (same idiom as HU_REPLY_DELAY_MODEL). SHADOW
+ * probes and logs "would-exclude" but changes nothing; LIVE skips the
+ * proposer for that contact. Promotion to LIVE is gated on a measurement:
+ * scripts/eval_when_to_speak.py FIR at n≥30 fires must be not-worse than the
+ * pre-LIVE reading (feature-gate-requires-measurement.md).
+ *
+ * Only iMessage has a reachability oracle (chat.db + whois); other channels
+ * always PASS. Builds without HU_HAS_IMESSAGE always PASS. */
+typedef enum hu_proactive_reach_mode {
+    HU_PROACTIVE_REACH_OFF = 0,
+    HU_PROACTIVE_REACH_SHADOW,
+    HU_PROACTIVE_REACH_LIVE,
+} hu_proactive_reach_mode_t;
+
+typedef enum hu_proactive_reach_action {
+    HU_PROACTIVE_REACH_PASS = 0,   /* run the proposer as before */
+    HU_PROACTIVE_REACH_WOULD_SKIP, /* SHADOW: log, then run the proposer as before */
+    HU_PROACTIVE_REACH_SKIP,       /* LIVE: do not run the proposer for this contact */
+} hu_proactive_reach_action_t;
+
+/* Parse HU_PROACTIVE_REACHABILITY. Fail-closed: unset/"off"/junk ⇒ OFF. */
+hu_proactive_reach_mode_t hu_daemon_proactive_reach_mode_from_env(void);
+
+/* Pure decision: mode × reachable → action. Extracted so the truth table is
+ * pinned without a daemon (security-predicate-extraction.md). */
+hu_proactive_reach_action_t hu_daemon_proactive_reach_decide(hu_proactive_reach_mode_t mode,
+                                                             bool reachable);
+
+/* Probe (iMessage only) + decide + log. Returns true iff the caller MUST skip
+ * the proposer for this contact this tick — i.e. only LIVE and unreachable.
+ * SHADOW logs the would-exclude line (grep "proactive reachability") and
+ * returns false. Never writes a proactive_decisions row: a pre-filter changes
+ * the candidate set, it is not a decision on a fired proposal, and a row here
+ * would inflate the FIR denominator the pre-filter is meant to clean. */
+bool hu_daemon_proactive_reach_should_skip(struct hu_agent *agent, hu_allocator_t *alloc,
+                                           const char *ch_name, const char *contact_id,
+                                           const char *target, size_t target_len);
+
 #endif /* HU_DAEMON_PROACTIVE_H */

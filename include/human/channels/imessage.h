@@ -3,6 +3,7 @@
 
 #include "human/channel.h"
 #include "human/channel_loop.h"
+#include "human/channels/imessage_caps.h" /* verdict + evidence enums */
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include <stdbool.h>
@@ -605,6 +606,19 @@ hu_error_t hu_imessage_send_sticker(void *ctx, const char *target, size_t target
  * avoid resolving the wrong parent on a mid-token substring hit. Pure and
  * NULL-safe; defined unconditionally so it is unit-testable in every build. */
 bool hu_imessage_desc_prefix_match(const char *haystack, const char *prefix);
+
+/** T0.1 blue-guard predicate as one function (2026-09-20). What the iMessage
+ * send path asks before every send — "would this bubble be blue?" — exposed so
+ * the daemon's proactive reachability pre-filter can ask the SAME question
+ * before spending a proposer fire on a contact the send would HOLD anyway.
+ * ALLOW ⇒ proven iMessage-reachable (or HU_IMESSAGE_ALLOW_GREEN set); HOLD ⇒
+ * green or unproven. Out-params (optional) carry the evidence for log lines.
+ * Real chat.db + whois inference on macOS non-test builds; elsewhere a stub
+ * that HOLDs unless HU_IMESSAGE_ALLOW_GREEN is set. */
+hu_blue_verdict_t hu_imessage_blue_guard_verdict(hu_allocator_t *alloc, const char *handle,
+                                                 size_t handle_len, hu_whois_reach_t *live_out,
+                                                 hu_imessage_service_t *recent_out,
+                                                 hu_imessage_service_t *handle_out);
 
 #ifdef HU_IS_TEST
 /** Test-only: set a callback function pointer that will be invoked instead of imsg send.
