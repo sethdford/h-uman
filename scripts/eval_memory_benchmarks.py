@@ -90,6 +90,7 @@ def longmemeval(binp, limit, seed, tmp):
         kw = parse_keys(sh(binp, dbp, ["search", q["question"]]))
         sem = parse_keys(sh(binp, dbp, ["search", "--semantic", q["question"]], env))
         hyb_cli = parse_keys(sh(binp, dbp, ["search", "--hybrid", q["question"]], env))
+        hyb_plain = parse_keys(sh(binp, dbp, ["search", "--hybrid", "--plain", q["question"]], env))
         ans = set(str(s) for s in q["answer_session_ids"])
         def sess_r5(keys):
             seen = []
@@ -99,8 +100,8 @@ def longmemeval(binp, limit, seed, tmp):
                 if len(seen) == 5: break
             return int(bool(ans & set(seen)))
         r = {"type": q["question_type"], "kw": sess_r5(kw), "sem": sess_r5(sem), "hybrid": sess_r5(rrf(kw, sem)),
-             "hybrid_cli": sess_r5(hyb_cli), "rows": len(rows)}
-        res.append(r); print(f"  [{n}/{len(qs)}] {q['question_type'][:22]:22} kw={r['kw']} sem={r['sem']} hyb={r['hybrid']} hyb_cli={r['hybrid_cli']} rows={len(rows)}", flush=True)
+             "hybrid_cli": sess_r5(hyb_cli), "hybrid_plain": sess_r5(hyb_plain), "rows": len(rows)}
+        res.append(r); print(f"  [{n}/{len(qs)}] {q['question_type'][:22]:22} kw={r['kw']} sem={r['sem']} hyb={r['hybrid']} hyb_cli={r['hybrid_cli']} hyb_plain={r['hybrid_plain']} rows={len(rows)}", flush=True)
     if len(skipped) > max(2, len(qs) // 10): sys.exit(f"REFUSING: {len(skipped)} questions skipped for embedder crashes: {skipped}")
     longmemeval.skipped = skipped
     return res
@@ -125,14 +126,16 @@ def locomo(binp, limit, seed, tmp):
             kw = parse_keys(sh(binp, dbp, ["search", q["question"]]))[:10]
             sem = parse_keys(sh(binp, dbp, ["search", "--semantic", q["question"]], env))[:10]
             hyb_cli = parse_keys(sh(binp, dbp, ["search", "--hybrid", q["question"]], env))[:10]
+            hyb_plain = parse_keys(sh(binp, dbp, ["search", "--hybrid", "--plain", q["question"]], env))[:10]
             ev = set(q["evidence"])
             r = {"category": q.get("category"), "kw": int(bool(ev & set(kw))), "sem": int(bool(ev & set(sem))),
-                 "hybrid": int(bool(ev & set(rrf(kw, sem)[:10]))), "hybrid_cli": int(bool(ev & set(hyb_cli)))}
+                 "hybrid": int(bool(ev & set(rrf(kw, sem)[:10]))), "hybrid_cli": int(bool(ev & set(hyb_cli))),
+                 "hybrid_plain": int(bool(ev & set(hyb_plain)))}
             res.append(r)
         print(f"  conv {ci}: {len(rows)} turns, {len(qa)} questions, running kw={sum(r['kw'] for r in res)}/{len(res)}", flush=True)
     return res
 
-METRICS = ("kw", "sem", "hybrid", "hybrid_cli")
+METRICS = ("kw", "sem", "hybrid", "hybrid_cli", "hybrid_plain")
 
 def summarize(res, key_field):
     out = {"n": len(res)}
@@ -160,7 +163,9 @@ def main():
         "hybrid": "harness-side RRF(k=60) of kw+sem lists (Python, no C hybrid path)",
         "hybrid_cli": "human memory search --hybrid <q> -- Contract C2 reconstructive retrieval "
                       "(scene-select -> neighbour expansion -> rerank -> time-bounded filter -> "
-                      "sufficiency check) measured through the C binary"}}
+                      "sufficiency check) measured through the C binary -- CLI-only mode, no daemon path sets reconstructive",
+        "hybrid_plain": "human memory search --hybrid --plain <q> -- the daemon memory loader's call "
+                        "(reconstructive=false: RRF merge -> term-overlap rerank -> cut to limit); this is production"}}
     if a.bench in ("longmemeval", "both"):
         r = longmemeval(a.bin, a.limit, a.seed, tmp)
         if len(r) < a.min_q: sys.exit(f"REFUSING: {len(r)} LongMemEval questions < {a.min_q}")
