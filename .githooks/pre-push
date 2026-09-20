@@ -62,15 +62,23 @@ if [ -f "CMakeLists.txt" ]; then
     # a push compiled 566 library objects and no test objects, then ran the
     # binary last linked on 09-13 and stamped 14,247 tests; the next push, from
     # the SAME tree, built to completion and stamped 14,303.
+    # On failure, keep the log and surface the error-bearing lines: with -j
+    # the failing job's diagnostics are rarely in the last three lines (the
+    # 2026-09-20 16:22 failure showed only "make: *** [all] Error 2"), and a
+    # failure that passes on immediate retry — both 09-20 failures coincided
+    # with another worktree's build, and the one resource builds share is the
+    # codesign keychain — can only be diagnosed from the log it left behind.
     build_log=$(mktemp "${TMPDIR:-/tmp}/human_build.XXXXXX") || exit 1
     cmake --build . -j"$JOBS" >"$build_log" 2>&1
     build_rc=$?
     tail -3 "$build_log"
-    rm -f "$build_log"
     if [ "$build_rc" -ne 0 ]; then
-        echo "Build failed. Fix before pushing."
+        echo "Build failed. Fix before pushing. Error lines from the build log:"
+        grep -nE 'error|Error|\*\*\*|codesign|undefined|ld: ' "$build_log" | tail -20
+        echo "Full build log kept at: $build_log"
         exit 1
     fi
+    rm -f "$build_log"
     # Run from the repo root: a number of tests open fixtures by repo-relative
     # path (docs/, scripts/release/, .github/workflows/, Formula/). Running
     # ./human_tests from inside the build dir made those ~44 tests fail
