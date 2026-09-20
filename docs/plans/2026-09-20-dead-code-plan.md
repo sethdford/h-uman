@@ -79,7 +79,7 @@ public-API keeps (Appendix B).
 | `src/doctor/doctor.c:474` | "Exec env sanitization: active (blocks LD_PRELOAD, ...)" | `hu_exec_env_sanitize` has no caller; `src/tools/shell.c:172-205` builds the child env with bare `setenv` |
 | `docs/standards/security/threat-model.md:431` | SC-8 HTTPS enforcement credited to `security/net_security.c` | the reached path is `src/tools/validation.c:330`; net_security.c is never linked |
 | `README.md:251,386` | Heartbeat engine + `"heartbeat": {"every":"30m"}` config key | `hu_heartbeat_tick` never called; daemon has its own ad-hoc 60 s cadence |
-| `src/app/bootstrap.c:1108-1121` | accepts `agent.context_engine: "rag"` | logs "not implemented; using legacy engine"; `context_engine_rag.c` is complete and unlinked |
+| `src/app/bootstrap.c:1108-1121` | accepts `agent.context_engine: "rag"` | logged "not implemented; using legacy engine"; `context_engine_rag.c` was complete and unlinked. **Fixed (task 3):** `"rag"` now installs the RAG context engine, which assembles context from a recent-message window plus memory-backed retrieval of the latest user message, instead of the legacy heuristic. |
 | `include/human/memory/personal_model.h:391` | expire_pending_facts "called from the existing decay-pruning path" | it is not; `hu_personal_model_apply_decay` (`personal_model.c:2734`) never calls it |
 | `CMakeLists.txt` `HU_ENABLE_ALL_CHANNELS=ON` | compiles 21 channels, bootstrap has `#if HU_HAS_X` blocks for them | target `human` received 11 of 44 defines; a Discord token in config was silently ignored. **Fixed on branch `fix/channel-defines-reach-human` (a6c3bc0de), unmerged** |
 

@@ -1,5 +1,7 @@
+#include "human/agent.h"
 #include "human/bootstrap.h"
 #include "human/channels/pwa.h"
+#include "human/context_engine.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/memory.h"
@@ -151,6 +153,65 @@ static void bootstrap_semantic_index_points_at_app_lifetime_embedder(void) {
 }
 #endif
 
+/* 2026-09-20 dead-code audit (task 3): `agent.context_engine: "rag"` parsed
+ * fine but bootstrap logged "not implemented" and silently installed the
+ * legacy engine instead — `context_engine_rag.c` was complete and unlinked.
+ * Pin both directions: "rag" must install the rag vtable, and "legacy"
+ * (already covered implicitly by bootstrap_with_agent) must keep installing
+ * the legacy one, so a regression that always installs one engine either
+ * way is caught. */
+static void bootstrap_context_engine_rag_installs_rag_engine(void) {
+    char dir[] = "/tmp/hu_bootstrap_ce_rag_XXXXXX";
+    HU_ASSERT_NOT_NULL(mkdtemp(dir));
+    char cfg_path[256];
+    snprintf(cfg_path, sizeof(cfg_path), "%s/config.json", dir);
+    FILE *f = fopen(cfg_path, "w");
+    HU_ASSERT_NOT_NULL(f);
+    fputs("{\"default_provider\":\"ollama\",\"agent\":{\"context_engine\":\"rag\"}}", f);
+    fclose(f);
+
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_app_ctx_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    HU_ASSERT_EQ(hu_app_bootstrap(&ctx, &alloc, cfg_path, true, false), HU_OK);
+    HU_ASSERT_NOT_NULL(ctx.agent);
+    hu_context_engine_t *ce = (hu_context_engine_t *)ctx.agent->infra.context_engine;
+    HU_ASSERT_NOT_NULL(ce);
+    HU_ASSERT_NOT_NULL(ce->vtable);
+    HU_ASSERT_NOT_NULL(ce->vtable->get_name);
+    HU_ASSERT_STR_EQ(ce->vtable->get_name(ce->ctx), "rag");
+
+    hu_app_teardown(&ctx);
+    unlink(cfg_path);
+    rmdir(dir);
+}
+
+static void bootstrap_context_engine_legacy_installs_legacy_engine(void) {
+    char dir[] = "/tmp/hu_bootstrap_ce_legacy_XXXXXX";
+    HU_ASSERT_NOT_NULL(mkdtemp(dir));
+    char cfg_path[256];
+    snprintf(cfg_path, sizeof(cfg_path), "%s/config.json", dir);
+    FILE *f = fopen(cfg_path, "w");
+    HU_ASSERT_NOT_NULL(f);
+    fputs("{\"default_provider\":\"ollama\",\"agent\":{\"context_engine\":\"legacy\"}}", f);
+    fclose(f);
+
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_app_ctx_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    HU_ASSERT_EQ(hu_app_bootstrap(&ctx, &alloc, cfg_path, true, false), HU_OK);
+    HU_ASSERT_NOT_NULL(ctx.agent);
+    hu_context_engine_t *ce = (hu_context_engine_t *)ctx.agent->infra.context_engine;
+    HU_ASSERT_NOT_NULL(ce);
+    HU_ASSERT_NOT_NULL(ce->vtable);
+    HU_ASSERT_NOT_NULL(ce->vtable->get_name);
+    HU_ASSERT_STR_EQ(ce->vtable->get_name(ce->ctx), "legacy");
+
+    hu_app_teardown(&ctx);
+    unlink(cfg_path);
+    rmdir(dir);
+}
+
 void run_bootstrap_tests(void) {
     HU_TEST_SUITE("Bootstrap");
 
@@ -160,6 +221,8 @@ void run_bootstrap_tests(void) {
     HU_RUN_TEST(teardown_zero_ctx_is_safe);
     HU_RUN_TEST(bootstrap_minimal_no_agent_no_channels);
     HU_RUN_TEST(bootstrap_with_agent);
+    HU_RUN_TEST(bootstrap_context_engine_rag_installs_rag_engine);
+    HU_RUN_TEST(bootstrap_context_engine_legacy_installs_legacy_engine);
 #ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(bootstrap_semantic_index_points_at_app_lifetime_embedder);
 #if HU_HAS_PWA
