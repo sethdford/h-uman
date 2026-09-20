@@ -483,13 +483,16 @@ static hu_error_t cmd_schedule(hu_allocator_t *alloc, int argc, char **argv) {
             }
             return err;
         }
-        hu_conversation_sched_save(sched_path, (size_t)sn);
-        printf("Scheduled message for %s at %" PRIu64 "ms\n", contact, deliver_ms);
+        err = hu_conversation_sched_save(sched_path, (size_t)sn);
+        if (err != HU_OK)
+            fprintf(stderr, "Failed to persist schedule to %s: error %d\n", sched_path, (int)err);
+        else
+            printf("Scheduled message for %s at %" PRIu64 "ms\n", contact, deliver_ms);
         if (lock_fd >= 0) {
             flock(lock_fd, LOCK_UN);
             close(lock_fd);
         }
-        return HU_OK;
+        return err;
     }
 
     if (argc >= 4 && strcmp(argv[2], "cancel") == 0) {
@@ -514,14 +517,18 @@ static hu_error_t cmd_schedule(hu_allocator_t *alloc, int argc, char **argv) {
             }
             return HU_ERR_INVALID_ARGUMENT;
         }
-        printf("Cancelled: \"%s\" to %s\n", slot->message, slot->contact_id);
         slot->active = false;
-        hu_conversation_sched_save(sched_path, (size_t)sn);
+        hu_error_t serr = hu_conversation_sched_save(sched_path, (size_t)sn);
+        if (serr != HU_OK)
+            fprintf(stderr, "Failed to persist cancellation to %s: error %d\n", sched_path,
+                    (int)serr);
+        else
+            printf("Cancelled: \"%s\" to %s\n", slot->message, slot->contact_id);
         if (lock_fd >= 0) {
             flock(lock_fd, LOCK_UN);
             close(lock_fd);
         }
-        return HU_OK;
+        return serr;
     }
 
     if (lock_fd >= 0) {
@@ -2621,7 +2628,6 @@ static hu_error_t cmd_pwa(hu_allocator_t *alloc, int argc, char **argv) {
 }
 
 static hu_error_t cmd_persona(hu_allocator_t *alloc, int argc, char **argv) {
-#ifdef HU_HAS_PERSONA
     hu_persona_cli_args_t args;
     hu_error_t err = hu_persona_cli_parse(argc, (const char **)argv, &args);
     if (err != HU_OK) {
@@ -2650,13 +2656,6 @@ static hu_error_t cmd_persona(hu_allocator_t *alloc, int argc, char **argv) {
         return err;
     }
     return hu_persona_cli_run(alloc, &args);
-#else
-    (void)alloc;
-    (void)argc;
-    (void)argv;
-    fprintf(stderr, "Persona support not compiled in (HU_ENABLE_PERSONA=OFF)\n");
-    return HU_ERR_NOT_SUPPORTED;
-#endif
 }
 
 #ifdef HU_ENABLE_CARTESIA

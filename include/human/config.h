@@ -735,14 +735,6 @@ typedef struct hu_security_config {
     hu_audit_config_t audit;
 } hu_security_config_t;
 
-#define HU_TOOL_MODEL_OVERRIDES_MAX 16
-
-typedef struct hu_tool_model_override {
-    char *tool_name;
-    char *provider;
-    char *model;
-} hu_tool_model_override_t;
-
 typedef struct hu_tools_config {
     uint64_t shell_timeout_secs;
     uint32_t shell_max_output_bytes;
@@ -753,8 +745,6 @@ typedef struct hu_tools_config {
     size_t enabled_tools_len;
     char **disabled_tools;
     size_t disabled_tools_len;
-    hu_tool_model_override_t model_overrides[HU_TOOL_MODEL_OVERRIDES_MAX];
-    size_t model_overrides_len;
 } hu_tools_config_t;
 
 typedef struct hu_voice_settings {
@@ -914,8 +904,6 @@ bool hu_config_get_provider_native_tools(const hu_config_t *cfg, const char *nam
 const char *hu_config_get_web_search_provider(const hu_config_t *cfg);
 size_t hu_config_get_channel_configured_count(const hu_config_t *cfg, const char *key);
 bool hu_config_get_provider_ws_streaming(const hu_config_t *cfg, const char *name);
-bool hu_config_get_tool_model_override(const hu_config_t *cfg, const char *tool_name,
-                                       const char **provider_out, const char **model_out);
 
 /** Returns channel-specific persona if configured, else NULL. Uses global persona as fallback. */
 const char *hu_config_persona_for_channel(const hu_config_t *cfg, const char *channel);
