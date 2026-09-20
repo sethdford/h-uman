@@ -1012,8 +1012,7 @@ uint32_t hu_agent_estimate_tokens(const char *text, size_t len);
 hu_error_t hu_agent_execute_plan(hu_agent_t *agent, const char *plan_json, size_t plan_json_len,
                                  char **summary_out, size_t *summary_len_out);
 
-/* Switch persona mid-conversation. name=NULL or name_len=0 clears the persona.
- * Requires HU_ENABLE_PERSONA to be compiled in; returns HU_ERR_NOT_SUPPORTED otherwise. */
+/* Switch persona mid-conversation. name=NULL or name_len=0 clears the persona. */
 hu_error_t hu_agent_set_persona(hu_agent_t *agent, const char *name, size_t name_len);
 
 /* B8 — Set / clear an optional theory-of-mind scenario merged into the world

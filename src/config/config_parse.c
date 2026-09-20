@@ -2,7 +2,6 @@
 #include "human/config.h"
 #include "human/core/log.h"
 #include "human/core/string.h"
-#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -776,51 +775,6 @@ static hu_error_t parse_tools(hu_allocator_t *a, hu_config_t *cfg, const hu_json
             parse_string_array(a, &cfg->tools.disabled_tools, &cfg->tools.disabled_tools_len, dis);
         if (dis_err != HU_OK)
             return dis_err;
-    }
-    hu_json_value_t *tmo = hu_json_object_get(obj, "tool_model_overrides");
-    if (tmo && tmo->type == HU_JSON_OBJECT && tmo->data.object.pairs) {
-        for (size_t i = 0; i < cfg->tools.model_overrides_len; i++) {
-            hu_tool_model_override_t *o = &cfg->tools.model_overrides[i];
-            if (o->tool_name) {
-                a->free(a->ctx, o->tool_name, strlen(o->tool_name) + 1);
-                o->tool_name = NULL;
-            }
-            if (o->provider) {
-                a->free(a->ctx, o->provider, strlen(o->provider) + 1);
-                o->provider = NULL;
-            }
-            if (o->model) {
-                a->free(a->ctx, o->model, strlen(o->model) + 1);
-                o->model = NULL;
-            }
-        }
-        cfg->tools.model_overrides_len = 0;
-        for (size_t i = 0; i < tmo->data.object.len &&
-                           cfg->tools.model_overrides_len < HU_TOOL_MODEL_OVERRIDES_MAX;
-             i++) {
-            hu_json_pair_t *p = &tmo->data.object.pairs[i];
-            if (!p->key || !p->value || p->value->type != HU_JSON_OBJECT)
-                continue;
-            const char *prov = hu_json_get_string(p->value, "provider");
-            const char *mod = hu_json_get_string(p->value, "model");
-            if (!prov || !prov[0] || !mod || !mod[0])
-                continue;
-            hu_tool_model_override_t *o =
-                &cfg->tools.model_overrides[cfg->tools.model_overrides_len];
-            o->tool_name = hu_strdup(a, p->key);
-            o->provider = hu_strdup(a, prov);
-            o->model = hu_strdup(a, mod);
-            if (o->tool_name && o->provider && o->model)
-                cfg->tools.model_overrides_len++;
-            else {
-                if (o->tool_name)
-                    a->free(a->ctx, o->tool_name, strlen(o->tool_name) + 1);
-                if (o->provider)
-                    a->free(a->ctx, o->provider, strlen(o->provider) + 1);
-                if (o->model)
-                    a->free(a->ctx, o->model, strlen(o->model) + 1);
-            }
-        }
     }
     return HU_OK;
 }
@@ -1893,16 +1847,6 @@ hu_error_t hu_config_parse_json(hu_config_t *cfg, const char *content, size_t le
         }
         hu_json_value_t *res = hu_json_object_get(sec, "resources");
         if (res && res->type == HU_JSON_OBJECT) {
-            double mfs = hu_json_get_number(res, "max_file_size",
-                                            (double)cfg->security.resource_limits.max_file_size);
-            if (!isfinite(mfs) || mfs < 0.0 || mfs > 1e15)
-                mfs = 0.0; /* use default */
-            cfg->security.resource_limits.max_file_size = (uint64_t)mfs;
-            double mrs = hu_json_get_number(res, "max_read_size",
-                                            (double)cfg->security.resource_limits.max_read_size);
-            if (!isfinite(mrs) || mrs < 0.0 || mrs > 1e15)
-                mrs = 0.0; /* use default */
-            cfg->security.resource_limits.max_read_size = (uint64_t)mrs;
             double mmb = hu_json_get_number(res, "max_memory_mb",
                                             cfg->security.resource_limits.max_memory_mb);
             if (mmb >= 0 && mmb <= 1048576)

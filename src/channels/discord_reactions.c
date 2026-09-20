@@ -35,6 +35,7 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/json.h"
+#include "human/core/log.h"
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -187,11 +188,13 @@ int hu_discord_handle_reaction_gateway(const char *body, size_t body_len, hu_all
     evt.timestamp_unix = (int64_t)time(NULL);
     evt.emoji = (is_custom && emoji_name) ? strdup(emoji_name) : NULL;
 
-    /* Fire-and-forget; return code is informational only. The handler
-     * resolves (channel, thread, msg_ref) -> assistant message and
-     * writes a dpo_pairs row when the lookup hits and polarity is
-     * non-neutral. */
-    hu_reaction_handler_handle_event(&evt);
+    /* The handler resolves (channel, thread, msg_ref) -> assistant message
+     * and writes a dpo_pairs row when the lookup hits and polarity is
+     * non-neutral. A failure here is a lost training signal, so it is
+     * logged rather than dropped. */
+    hu_error_t herr = hu_reaction_handler_handle_event(&evt);
+    if (herr != HU_OK)
+        hu_log_warn("discord", NULL, "reaction not recorded (%d)", (int)herr);
 
 done:
     free((void *)evt.target_thread_id);
