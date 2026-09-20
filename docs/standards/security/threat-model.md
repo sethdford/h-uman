@@ -428,7 +428,7 @@ Trust boundaries exist at:
 | Path access when policy NULL          | AC-3        | **Bypass**          | file\_\* tools skip check when c->policy is NULL                        |
 | Command allowlist                     | AC-6        | Implemented         | hu_policy_validate_command, allowed_commands                            |
 | Tool path validation                  | SI-10       | Partial             | hu_tool_validate_path used by file_read, file_write; git, snapshot gaps |
-| HTTPS enforcement for tools           | SC-8        | Implemented         | hu_validate_url, net_security.c — HTTP rejected except localhost        |
+| HTTPS enforcement for tools           | SC-8        | Implemented         | hu_tool_validate_url, validation.c — HTTP rejected except localhost     |
 | libcurl TLS verification              | SC-8        | Implemented         | CURLOPT_SSL_VERIFYPEER, CURLOPT_SSL_VERIFYHOST in http.c                |
 | Pairing guard                         | IA-2        | Implemented         | 6–8 digit code, lockout, constant-time token comparison                 |
 | Audit logging                         | AU-2, AU-3  | Implemented         | command_execution, file_access, auth, policy_violation                  |
