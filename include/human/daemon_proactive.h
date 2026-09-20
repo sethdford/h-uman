@@ -193,4 +193,24 @@ bool hu_daemon_proactive_send_and_record(struct hu_agent *agent, hu_channel_t *c
                                          size_t message_len, int64_t now,
                                          hu_proactive_budget_t *gov_budget);
 
+/* Record a proactive check-in that was DECLINED before any channel send was
+ * attempted — the gates between the proposer firing and the send call
+ * (boundary, governor, reactive-recency, validator, throttle, sanitizer).
+ *
+ * Why this exists (2026-09-20): `scripts/eval_when_to_speak.py` measures the
+ * FIR/MIR calibration of the proactive policy, and reported
+ * `fir_dropped_pre_send=89` against only 10 delivered sends — 89 FIRED
+ * proposals died in those gates with NO row saying which one. They log to the
+ * service log, which nothing reads, and are invisible to the metric. With no
+ * attribution the script cannot tell "policy correctly stayed quiet" from
+ * "a rate-limiter ate it", and FIR has no denominator to work with.
+ *
+ * `reason` is a short stable slug (e.g. "rate_limited", "sanitize_refused") —
+ * it is grouped in SQL, so keep it a closed vocabulary, not free prose.
+ * Best-effort and never fails the tick: this is telemetry, not a gate.
+ * Do NOT call this after hu_daemon_proactive_send_and_record returns false —
+ * that path records its own outcome row and would double-count. */
+void hu_daemon_proactive_record_decline(struct hu_agent *agent, const char *contact,
+                                        const char *reason, int64_t now);
+
 #endif /* HU_DAEMON_PROACTIVE_H */

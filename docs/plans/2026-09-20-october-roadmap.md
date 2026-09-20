@@ -53,13 +53,51 @@ defer      1
 **92% of proactive send-decisions never reach a human.** An open loop with no
 metric on it.
 
+## Correction, 2026-09-20 (same day, before any code changed)
+
+Two of the five items below were misdiagnosed on first writing, and one number
+quoted here was not trustworthy. All three were caught by running the queries
+this document recommends. Recorded rather than silently edited, because the
+*shape* of the error is the point:
+
+1. **"115 proactive send-decisions never sent" was a row-type conflation.**
+   `init_proposer_llm` rows are proposals and carry `sent=0` **by design**; only
+   `trigger='proactive_send'` rows record delivery. Both call sites document
+   this in comments I had not read when I wrote the claim.
+2. **The FDR/MNR metric I proposed building already exists** —
+   `scripts/eval_when_to_speak.py`, since 09-05, critic-reviewed, with the
+   recipient-engagement ground truth I described as our unfair advantage.
+3. **The only MIR/FIR reading on record (09-02: MIR 0.613 / FIR 0.670) is a
+   population conflation and must not be quoted.** It ran on the `fallback`
+   source, which merges `proactive_sends` (25 genuinely proactive check-ins in
+   90d) with `production_outcomes` (432 rows = ALL production replies,
+   reactive included) and marks every row `sent=True`. FIR over that population
+   measures "of all sends, how many got no reply" — not "of proactive
+   interruptions". Same shape as the `starts_lowercase` 17.3%-vs-8.9% trap.
+
+**What is actually true about the superhuman axis today:** genuinely proactive
+sends number **10** (decision log) to **25** (`proactive_sends`) over 90 days,
+against the script's `min_n=30`. Run today it prints
+
+```
+REFUSE: insufficient n (MIR n=921, FIR n=10, min_n=30) — not writing a result.
+resolved_events=354   fir_dropped_pre_send=89   fir_send_failed=16
+```
+
+The metric is not broken — **it correctly refuses**, which is the
+`no-number-without-a-measurement` contract working. The binding constraint is
+that the system barely speaks first: `HU_PROACTIVE_CONTEXTUAL=off`, and 89 of
+115 fires die before reaching a channel. **You cannot measure calibration on a
+system that does not act.** O3 (attributing the 89) is therefore the
+prerequisite for O2, not a parallel item.
+
 ## The items
 
 | # | Frontier (paper) | Status | What ships | Gate |
 |---|---|---|---|---|
 | **O1** | — (this is ours) | blocked | **Unblock the human gate.** 48 ratings, or a shortened sheet: cycle-4 showed 5/5 repeated-context rater consistency at n=40, so ~20 rows likely carries enough power to refresh a 53-day-old verdict. Nothing downstream is trustworthy until this clears | human verdict age < 45 days; doctor `blind_ab_gate` error clears |
-| **O2** | **ProEvent** (2607.17701): first event-centric benchmark for tracking upcoming events *from IM chats*. LLMs systematically **over-fire** — DeepSeek-V3.2 FDR **96.5%** vs MNR **21.9%**; GPT-5.1 **26.7%** timetable accuracy; **human 94.4%** Event Success Rate. Explicit reasoning about response *necessity* (ProCoT) cut false detection 70% | not built | **Calibration metric for A.** Item A's gate (`fired=1 > 0`) is a liveness check and cannot see over-firing — the field-wide dominant failure. Compute FDR / MNR from the 380 existing `proactive_decisions` rows (`trigger`, `reason`, `message_ref`), joined to **the recipient's next inbound** — the ground truth ProEvent does not have. Human 94.4% is a beatable number and the first genuinely superhuman target in this program | FDR and MNR on the nightly card; FDR trending down with MNR flat; acknowledged-fire rate (item A "beyond") reported alongside |
-| **O3** | — | live bug | **Close the send gap.** 115 send-decisions with `sent=0`. Determine whether `sent` means "not yet" or "silently failed", then make the failure loud. Precedes any new proactive mechanism | `send` decisions with `sent=0` and no recorded failure reason = 0 |
+| **O2** | **ProEvent** (2607.17701): first event-centric benchmark for tracking upcoming events *from IM chats*. LLMs systematically **over-fire** — DeepSeek-V3.2 FDR **96.5%** vs MNR **21.9%**; GPT-5.1 **26.7%** timetable accuracy; **human 94.4%** Event Success Rate | **ALREADY BUILT — and dark** | **Correction (2026-09-20, same day):** this item as first written proposed building FDR/MNR. It exists. `scripts/eval_when_to_speak.py` (Contract C5 Part B, 09-05, critic-reviewed) computes **MIR** (Missed-Intervention Rate = MNR) and **FIR** (False-Interruption Rate = FDR), against Seth's own initiation moments and the contact's actual engagement — strictly better than ProEvent's formulation, which has no real recipient. It has run **once**, on 09-02, is referenced by **zero** plists, and is on neither the nightly card nor doctor. The work is scheduling, not building | `when-to-speak-*.json` written nightly; MIR/FIR on the card |
+| **O3** | — | live gap, correctly located | **Correction:** the original O3 ("115 send-decisions never sent") was a **row-type conflation**. `init_proposer_llm` rows are *proposals* and carry `sent=0` by design; only `trigger='proactive_send'` rows record delivery. The real gap is narrower and worse: of 115 FIRED proposals, **89 are `dropped_pre_send`** — killed by a validator/gate/dedup/rate-limit between `daemon.c:1573` and `:1666` — and **no row records which gate**. Those drops log to the service log and are invisible to the metric. Fix: write a `proactive_send`/`decline` row with a specific reason at each skip point | every FIRED proposal has either a delivery or an attributed decline; `fir_dropped_pre_send` → 0 |
 | **O4** | **ProActor** (2605.24900, ACL 2026): timing-aware RL; proactiveness metrics quantifying timing/prediction alignment | not built | **Make criteria 2–4 measurable.** Re-run and *persist* the specificity A/B (the n=108 result file is gone); get a first prospective-F1 reading now that O2 gives the denominator; add a timing axis to the rater sheet (the 4th criterion has never been asked) | all four `better-than-human` criteria have a dated number, even a failing one |
 | **O5** | **CHIIR 2026 workshop** (2608.18638): proactivity as *calibrated initiative* — when to act, what evidence justifies it, how communicated, **and how users correct, contest or refuse** | absent | **Contestability.** For a system texting real people as Seth, the recipient has no channel to decline proactive contact. The `unanswered_count` backoff governor is a one-way damper, not consent. Minimum: a recognised opt-out phrase that writes a per-contact suppression, and a nightly count of suppressed contacts | opt-out honoured within one turn; suppression count on the card |
 

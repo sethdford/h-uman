@@ -951,6 +951,18 @@ static void daemon_proactive_record_decision(struct hu_agent *agent, const char 
  * ZERO matching rows in chat.db.
  *
  * Returns true only when the message was actually accepted for delivery. */
+/* See daemon_proactive.h — attributes a pre-send drop so eval_when_to_speak.py
+ * can tell a deliberate silence from a gate that ate the message. Thin wrapper
+ * over the same recorder the send path uses, so both outcomes land in one
+ * table with one schema. */
+void hu_daemon_proactive_record_decline(struct hu_agent *agent, const char *contact,
+                                        const char *reason, int64_t now) {
+    if (!agent || !contact || !reason)
+        return;
+    daemon_proactive_record_decision(agent, contact, HU_PROACTIVE_DECISION_DECLINE, reason,
+                                     /*sent=*/0, /*message=*/NULL, /*message_len=*/0, now);
+}
+
 bool hu_daemon_proactive_send_and_record(struct hu_agent *agent, hu_channel_t *channel,
                                          const struct hu_contact_profile *cp, const char *ch_name,
                                          const char *target, size_t target_len, const char *message,
