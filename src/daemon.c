@@ -1474,7 +1474,13 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                  * docs/plans/2026-05-26-m3-dispatch-unification/. */
                 char *unified_mem_ctx = NULL;
                 size_t unified_mem_ctx_len = 0;
-                if (config && agent && agent->provider.vtable) {
+                /* Reachability pre-filter (2026-09-20, HU_PROACTIVE_REACHABILITY):
+                 * skip the proposer for a contact blue_guard would HOLD anyway.
+                 * OFF/SHADOW never take this branch; see daemon_proactive.h. */
+                if (hu_daemon_proactive_reach_should_skip(agent, alloc, ch_part, cp->contact_id,
+                                                          target_part, target_len)) {
+                    /* LIVE: no proposer fire, no send, nothing recorded. */
+                } else if (config && agent && agent->provider.vtable) {
                     if (agent->memory) {
                         unified_mem_ctx = hu_daemon_build_callback_context(
                             alloc, agent->memory, cp->contact_id, strlen(cp->contact_id), prompt,

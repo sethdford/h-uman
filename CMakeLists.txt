@@ -3504,6 +3504,7 @@ set(HU_TEST_SOURCES
     tests/test_daemon_routing.c
     tests/test_daemon_proactive.c
     tests/test_daemon_proactive_decline.c
+    tests/test_daemon_proactive_reachability.c
     tests/test_reply_delay_model.c
     tests/test_daemon_promise_keeper.c
     tests/test_daemon_insight_overuse.c
