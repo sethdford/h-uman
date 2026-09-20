@@ -541,60 +541,15 @@ void hu_daemon_reactive_prompt_build(hu_allocator_t *alloc, hu_agent_t *agent,
             if (db) {
                 int64_t now_ts = (int64_t)time(NULL);
 
-                /* 9. Prospective memory — check triggers from current message */
+                /* 9. Prospective memory — cued intentions, rendered once. The
+                 * builder lives in src/memory/prospective.c so the llm_decides
+                 * path below and the tests share it. */
                 if (combined_len > 0) {
-                    hu_prospective_entry_t *prosp_entries = NULL;
-                    size_t prosp_count = 0;
-                    if (hu_prospective_check_triggers(alloc, db, "keyword", combined, combined_len,
-                                                      batch_key, key_len, now_ts, &prosp_entries,
-                                                      &prosp_count) == HU_OK &&
-                        prosp_entries && prosp_count > 0) {
-                        char prosp_buf[1024];
-                        size_t prosp_pos = 0;
-                        int n = snprintf(prosp_buf, sizeof(prosp_buf),
-                                         "[PROSPECTIVE MEMORY: Remember to: ");
-                        if (n > 0 && (size_t)n < sizeof(prosp_buf))
-                            prosp_pos = (size_t)n;
-                        for (size_t pi = 0;
-                             pi < prosp_count && pi < 3 && prosp_pos < sizeof(prosp_buf) - 64;
-                             pi++) {
-                            if (pi > 0) {
-                                prosp_buf[prosp_pos++] = ' ';
-                                prosp_buf[prosp_pos++] = '|';
-                                prosp_buf[prosp_pos++] = ' ';
-                            }
-                            int w = snprintf(prosp_buf + prosp_pos, sizeof(prosp_buf) - prosp_pos,
-                                             "%s (triggered by: %s)", prosp_entries[pi].action,
-                                             prosp_entries[pi].trigger_value);
-                            if (w > 0 && prosp_pos + (size_t)w < sizeof(prosp_buf))
-                                prosp_pos += (size_t)w;
-                        }
-                        if (prosp_pos + 2 < sizeof(prosp_buf)) {
-                            prosp_buf[prosp_pos++] = ']';
-                            prosp_buf[prosp_pos] = '\0';
-                            char *prosp_str = (char *)alloc->alloc(alloc->ctx, prosp_pos + 1);
-                            if (prosp_str) {
-                                memcpy(prosp_str, prosp_buf, prosp_pos + 1);
-                                PHASE6_APPEND(prosp_str, prosp_pos);
-                                /* A reminder is surfaced once. Until 2026-09-13 nothing
-                                 * set fired=1 (949 live rows, 0 fired), so the same
-                                 * intentions re-injected on every matching text. The
-                                 * log line is the item-5 gate: count these, not rows. */
-                                size_t injected = prosp_count < 3 ? prosp_count : 3;
-                                if (hu_prospective_mark_fired(db, prosp_entries, injected) != HU_OK)
-                                    hu_log_warn("prospective", agent->observer,
-                                                "could not retire %zu surfaced triggers", injected);
-                                hu_log_info("prospective", agent->observer,
-                                            "fired %zu of %zu open triggers for %.*s: %s "
-                                            "(cue: %s)",
-                                            injected, prosp_count, (int)key_len, batch_key,
-                                            prosp_entries[0].action,
-                                            prosp_entries[0].trigger_value);
-                            }
-                        }
-                        alloc->free(alloc->ctx, prosp_entries,
-                                    prosp_count * sizeof(hu_prospective_entry_t));
-                    }
+                    size_t pd_len = 0;
+                    char *pd = hu_prospective_directive_build(alloc, db, combined, combined_len,
+                                                              batch_key, key_len, now_ts, &pd_len);
+                    if (pd)
+                        PHASE6_APPEND(pd, pd_len);
                 }
 
                 /* 10. Emotional residue — active valence/intensity for this contact */
@@ -1262,6 +1217,43 @@ void hu_daemon_reactive_prompt_build(hu_allocator_t *alloc, hu_agent_t *agent,
 
 #undef PHASE6_APPEND
     }
+
+#if defined(HU_ENABLE_SQLITE)
+    /* Prospective memory is retrieval, not a heuristic gate, so it reaches the
+     * prompt in llm_decides mode too. Until 2026-09-20 it lived only inside the
+     * !llm_decides block above, and production (llm_decides on) never fired one
+     * of 461 open intentions: the write side ran nightly, the read side never. */
+    if (llm_decides && agent && agent->memory && combined_len > 0 && batch_key && key_len > 0) {
+        sqlite3 *pdb = hu_sqlite_memory_get_db(agent->memory);
+        if (pdb) {
+            size_t pd_len = 0;
+            char *pd = hu_prospective_directive_build(alloc, pdb, combined, combined_len, batch_key,
+                                                      key_len, (int64_t)time(NULL), &pd_len);
+            if (pd && pd_len > 0) {
+                if (convo_ctx && convo_ctx_len > 0) {
+                    size_t total = pd_len + convo_ctx_len + 2;
+                    char *merged = (char *)alloc->alloc(alloc->ctx, total + 1);
+                    if (merged) {
+                        memcpy(merged, pd, pd_len);
+                        merged[pd_len] = '\n';
+                        merged[pd_len + 1] = '\n';
+                        memcpy(merged + pd_len + 2, convo_ctx, convo_ctx_len);
+                        merged[total] = '\0';
+                        alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
+                        convo_ctx = merged;
+                        convo_ctx_len = total;
+                    }
+                    alloc->free(alloc->ctx, pd, pd_len + 1);
+                } else {
+                    convo_ctx = pd;
+                    convo_ctx_len = pd_len;
+                }
+            } else if (pd) {
+                alloc->free(alloc->ctx, pd, pd_len + 1);
+            }
+        }
+    }
+#endif
 
     /* 3. Build awareness context from history via shared analyzer.
      * Skip in llm_decides: director + persona are sufficient. */
