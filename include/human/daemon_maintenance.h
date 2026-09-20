@@ -65,6 +65,28 @@ bool hu_daemon_prompt_budget_flush(struct hu_prompt_budget *budget, int64_t now_
 bool hu_daemon_verifier_metrics_flush(const struct hu_verifier_metrics *snap, int64_t now_ms,
                                       int64_t *last_flush_ms);
 
+/** Ensure the heartbeat tasks file (HEARTBEAT.md, under `workspace_dir`)
+ *  exists and tick it once `interval_ms` has elapsed since `*last_tick_ms`
+ *  (0 = never ticked; the first call always ticks, same first-call contract
+ *  as the two flush gates above). `enabled=false` or `interval_ms<=0` is a
+ *  no-op that creates no file — this is how an unconfigured/disabled
+ *  heartbeat (config->heartbeat.enabled == false) stays fully inert.
+ *
+ *  `now_ms` MUST be a monotonic clock (hu_time_get_current_ms) — it only
+ *  drives the elapsed-interval gate. `wall_ms` MUST be wall-clock
+ *  (hu_time_wall_ms) — on a due tick it is written as the file's mtime
+ *  (via utime), because hu_heartbeat_tick only reads HEARTBEAT.md and never
+ *  writes it, so without an explicit touch the mtime would stay pinned at
+ *  creation time forever and could never signal "still alive" the way the
+ *  verifier/scheduler heartbeat files already do for `human doctor`.
+ *
+ *  A failed ensure/tick is logged once per process (never asserted) and
+ *  `*last_tick_ms` still advances, matching the flush gates' failure
+ *  contract. Returns true when a tick was attempted this call. */
+bool hu_daemon_heartbeat_flush(hu_allocator_t *alloc, bool enabled, int64_t interval_ms,
+                               const char *workspace_dir, int64_t now_ms, int64_t wall_ms,
+                               int64_t *last_tick_ms);
+
 #if defined(HU_HAS_CRON) && !defined(HU_IS_TEST)
 
 /** Once-per-minute maintenance flush: W4 verifier-metrics snapshot (60s

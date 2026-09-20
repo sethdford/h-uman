@@ -248,7 +248,7 @@ Every subsystem is a **vtable interface** — swap implementations with a config
 | **Security**      | `Sandbox`        | Landlock, Firejail, Bubblewrap, Docker, auto-detect                                                                                                                   | Any sandbox backend                                       |
 | **Identity**      | `IdentityConfig` | OpenClaw (markdown), AIEOS v1.1 (JSON)                                                                                                                                | Any identity format                                       |
 | **Tunnel**        | `Tunnel`         | None, Cloudflare, Tailscale, ngrok, Custom                                                                                                                            | Any tunnel binary                                         |
-| **Heartbeat**     | Engine           | [`src/observability/heartbeat.c`](src/observability/heartbeat.c) periodic tasks                                                                                                                   | —                                                         |
+| **Heartbeat**     | Engine           | [`src/observability/heartbeat.c`](src/observability/heartbeat.c) — reads periodic tasks from `HEARTBEAT.md` in the state dir (`$HU_STATE_DIR` or `~/.human`), on the `heartbeat.interval_minutes` cadence (`heartbeat.enabled`, off by default) | —                                                         |
 | **Skills**        | Loader           | TOML manifests + SKILL.md instructions                                                                                                                                | Community skill packs                                     |
 | **Peripherals**   | `Peripheral`     | Serial, Arduino, Raspberry Pi GPIO, STM32/Nucleo                                                                                                                      | Any hardware interface                                    |
 | **Cron**          | Scheduler        | Cron expressions + one-shot timers with JSON persistence                                                                                                              | —                                                         |
@@ -381,10 +381,10 @@ Config: `~/.human/config.json` (created by `onboard`)
   "default_provider": "openrouter",
   "default_model": "anthropic/claude-sonnet-4",
 
+  "heartbeat": { "enabled": true, "interval_minutes": 30 },
+
   "agents": {
-    "defaults": {
-      "heartbeat": { "every": "30m" }
-    },
+    "defaults": {},
     "list": [
       {
         "id": "researcher",
