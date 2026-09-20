@@ -33,8 +33,28 @@ static void test_print_len_never_splits_multibyte_char_at_ceiling(void) {
     HU_ASSERT_EQ((long)hu_cli_memory_print_len(s, sizeof(s)), (long)CEIL);
 }
 
+static void test_reindex_args_trailing_full_is_seen(void) {
+    char *argv1[] = {"human", "memory", "reindex", "--full"};
+    size_t lim = 99;
+    bool full = false;
+    hu_cli_parse_reindex_args(4, argv1, &lim, &full);
+    HU_ASSERT_TRUE(full); /* the 2026-09-20 loop bound dropped this */
+    HU_ASSERT_EQ(lim, (size_t)0);
+    char *argv2[] = {"human", "memory", "reindex", "--limit", "250", "--full"};
+    hu_cli_parse_reindex_args(6, argv2, &lim, &full);
+    HU_ASSERT_TRUE(full);
+    HU_ASSERT_EQ(lim, (size_t)250);
+    char *argv3[] = {"human", "memory", "reindex", "--limit"}; /* dangling value */
+    hu_cli_parse_reindex_args(4, argv3, &lim, &full);
+    HU_ASSERT_FALSE(full);
+    HU_ASSERT_EQ(lim, (size_t)0);
+    hu_cli_parse_reindex_args(3, argv3, &lim, &full);
+    HU_ASSERT_FALSE(full);
+}
+
 void run_cli_commands_memory_print_tests(void) {
     HU_TEST_SUITE("cli_commands_memory_print");
     HU_RUN_TEST(test_print_len_ascii_under_ceiling_is_untouched);
     HU_RUN_TEST(test_print_len_never_splits_multibyte_char_at_ceiling);
+    HU_RUN_TEST(test_reindex_args_trailing_full_is_seen);
 }

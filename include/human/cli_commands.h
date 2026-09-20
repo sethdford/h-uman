@@ -3,6 +3,8 @@
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdio.h>
 
 hu_error_t cmd_channel(hu_allocator_t *alloc, int argc, char **argv);
@@ -47,5 +49,9 @@ hu_error_t cmd_autoresponder(hu_allocator_t *alloc, int argc, char **argv);
 hu_error_t cmd_export_dpo(hu_allocator_t *alloc, int argc, char **argv);
 hu_error_t cmd_export_kto(hu_allocator_t *alloc, int argc, char **argv);
 hu_error_t cmd_hula(hu_allocator_t *alloc, int argc, char **argv);
+
+/* Argument parser for `human memory reindex [--limit N] [--full]`; pure so a
+ * test can pin that a trailing `--full` is honoured (cli_commands.c). */
+void hu_cli_parse_reindex_args(int argc, char **argv, size_t *limit_out, bool *full_out);
 
 #endif /* HU_CLI_COMMANDS_H */
