@@ -218,10 +218,12 @@ if [ "$TEST_COUNT" != "unknown" ]; then
         README.md && rm -f README.md.bak
 fi
 
-# "Tests:" stat line
+# "Tests:" stat line. Both this and the "^Tests: N" block pattern below accept
+# a trailing "+": the committed lines read "11,924+ passing" and "6374+", so
+# the strict patterns never matched and the two lines rotted from 2026-07 on.
 if [ "$TEST_COUNT" != "unknown" ]; then
     sed -i.bak -E \
-        "s/Tests:[[:space:]]+[0-9,]+ passing/Tests:         ${TEST_COUNT_FMT} passing/" \
+        "s/Tests:[[:space:]]+[0-9,]+\+? passing/Tests:         ${TEST_COUNT_FMT} passing/" \
         README.md && rm -f README.md.bak
 fi
 
@@ -271,7 +273,7 @@ sed -i.bak -E \
 
 if [ "$TEST_COUNT" != "unknown" ]; then
     sed -i.bak -E \
-        "s/^Tests: [0-9,]+$/Tests: ${TEST_COUNT_FMT}/" \
+        "s/^Tests: [0-9,]+\+?$/Tests: ${TEST_COUNT_FMT}/" \
         README.md && rm -f README.md.bak
 fi
 
