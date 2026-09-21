@@ -411,9 +411,10 @@ if(HU_ENABLE_IMAP)
 endif()
 if(HU_HAS_IMESSAGE)
     list(APPEND CHANNEL_SOURCES src/channels/imessage.c)
-    # E2: sticker send action surface. Wired via vtable. Genuine Apple deps
-    # (AX / sticker injection), so stays gated.
-    list(APPEND CHANNEL_SOURCES src/channels/imessage_sticker.c)
+    # E2: sticker send action surface. Task 12 moved it to human_devlib —
+    # nothing on the daemon's link path references hu_imessage_send_sticker
+    # (it is not in any channel vtable), so imessage_sticker.c.o was a
+    # never-loaded member of libhuman_core.a. Only tests call it.
     # Phase 6 of docs/plans/2026-05-18-imessage-sota.md: schema-version
     # probe + drift canary. Caches the chat.db PRAGMA table_info result;
     # logs unknown columns at startup so operators see Apple-added fields
@@ -517,7 +518,6 @@ if(HU_ENABLE_ALL_CHANNELS)
         src/channels/signal.c
         src/channels/nostr.c
         src/channels/qq.c
-        src/channels/dispatch.c
     )
     if(NOT HU_ENABLE_GMAIL)
         list(APPEND CHANNEL_SOURCES src/channels/gmail_base64.c src/channels/gmail.c)
@@ -576,9 +576,7 @@ set(HU_CORE_SOURCES
     src/agent/bus.c
     src/agent/session.c
     src/channels/channel_loop.c
-    src/channels/channel_manager.c
     src/security/auth.c
-    src/security/identity.c
     src/observability/heartbeat.c
     src/core/accel.c
     src/core/allocator.c
@@ -867,10 +865,8 @@ set(HU_CORE_SOURCES
     src/behavior/pressure.c
     src/behavior/behavior_trust.c
     src/behavior/trust_prompt.c
-    src/behavior/user_sim.c
     src/behavior/pressure_history.c
     src/behavior/tapback_band.c
-    src/behavior/user_sim_scenario.c
     src/context/repair.c
     src/calibration/timing_analyzer.c
     src/calibration/style_analyzer.c
@@ -937,7 +933,6 @@ set(HU_CORE_SOURCES
     src/agent/prosocial_routine.c
     src/security/permission.c
     src/mcp/mcp_manager.c
-    src/mcp/mcp_tool_wrapper.c
     src/agent/compaction_structured.c
     src/agent/session_persist.c
     src/agent/instruction_discover.c
@@ -954,7 +949,6 @@ set(HU_CORE_SOURCES
     src/providers/ensemble.c
     src/providers/codex_cli.c
     src/providers/openai_codex.c
-    src/providers/runtime_bundle.c
     src/providers/openai.c
     src/providers/anthropic.c
     src/providers/gemini.c
@@ -1502,7 +1496,6 @@ list(APPEND HU_CORE_SOURCES
     src/persona/cli.c
     src/persona/feedback.c
     src/persona/eval.c
-    src/persona/eval_rubric.c
     src/persona/replay.c
     src/persona/circadian.c
     src/agent/follow_up.c
@@ -1791,10 +1784,9 @@ if(HU_ENABLE_ML)
         # `human ml fidelity-status` (CLI) and `metrics.fidelity`
         # (gateway) so both surfaces produce identical numbers.
         src/ml/fidelity.c
-        # Spec 2026-05-19 M3 closure / AC-M3-5: fidelity-based A/B gate
-        # comparing candidate vs baseline adapter outputs on a held-out
-        # prompt set. Pure judging math; no inference, no HTTP.
-        src/ml/m3_ab_fidelity_gate.c
+        # (Spec 2026-05-19 M3 closure / AC-M3-5: m3_ab_fidelity_gate.c — the
+        # fidelity-based A/B gate — moved to human_devlib in Task 12. It is
+        # an offline judging tool with no daemon caller.)
         # Phase A1.2 SOTA roadmap: PII redactor + quality filter for the
         # continuous-learning training-data pipeline. Pure C, no SQLite.
         src/ml/training_data_quality.c
@@ -2049,7 +2041,12 @@ if(HU_ENABLE_RL_FULL)
     list(APPEND HU_CORE_SOURCES src/eval/eval_judge_external.c)
     list(APPEND HU_CORE_SOURCES src/eval/leaderboard.c)
     list(APPEND HU_CORE_SOURCES src/eval/eval_gate.c)
-    list(APPEND HU_CORE_SOURCES src/eval/stock_baseline.c)
+    # stock_baseline.c moved to human_devlib (Task 12) — no daemon caller.
+    # external_judge_fixture.c STAYS: apple_fm_client.c and
+    # gemini_nano_client.c (both core TUs, right below) call
+    # hu_eval_judge_create_from_external_fixture under `#if HU_IS_TEST`,
+    # so it is a core dependency of the test library's own sources, not a
+    # standalone library module.
     list(APPEND HU_CORE_SOURCES src/eval/external_judge_fixture.c)
     list(APPEND HU_CORE_SOURCES src/eval/apple_fm_client.c)
     list(APPEND HU_CORE_SOURCES src/eval/gemini_nano_client.c)
@@ -2539,14 +2536,14 @@ if(HU_ENABLE_LIBSODIUM)
             target_link_directories(human_core PUBLIC ${HU_LIBSODIUM_LIBRARY_DIRS})
         endif()
         target_compile_definitions(human_core PRIVATE HU_HAS_LIBSODIUM=1)
-        # Add persona_crypt.c here (rather than to HU_CORE_SOURCES) so
-        # it only compiles when libsodium is actually available. The TU
-        # has `#error if !defined(HU_HAS_LIBSODIUM)`, so including it
-        # unconditionally breaks every CI variant where the option is
-        # off (default OFF). The matching human_core_test wiring is in
-        # a parallel block AFTER add_library(human_core_test ...) — see
-        # search for "persona_crypt.c" in the test-library section.
-        target_sources(human_core PRIVATE src/persona/persona_crypt.c)
+        # persona_crypt.c used to be added to human_core here. Task 12
+        # moved it to human_devlib: the daemon never calls
+        # hu_persona_load_encrypted/_save_encrypted/_migrate_to_encrypted
+        # (persona.c reads plaintext cards), so the TU was a never-loaded
+        # member of libhuman_core.a and only tests/test_persona_encryption.c
+        # references it. The devlib block still gates it on
+        # HU_LIBSODIUM_FOUND for the same reason the gate lived here: the
+        # TU has `#error if !defined(HU_HAS_LIBSODIUM)`.
         message(STATUS "libsodium: enabled (XChaCha20-Poly1305 + Argon2id)")
     else()
         message(WARNING "HU_ENABLE_LIBSODIUM=ON but libsodium not found; falling back to PBKDF2 + ChaCha20+HMAC")
@@ -2892,7 +2889,6 @@ if(NOT HU_ENABLE_ALL_CHANNELS)
     # with undefined references to hu_{mattermost,web}_{create,destroy}.
     list(APPEND HU_TEST_EXTRA_CHANNELS
         src/channels/signal.c src/channels/nostr.c src/channels/qq.c
-        src/channels/dispatch.c
         src/channels/mattermost.c src/channels/web.c)
     # Task 11: dev/prod presets now turn HU_ENABLE_ALL_CHANNELS off (they
     # enable only the channels actually run in production), which exposed
@@ -3081,10 +3077,11 @@ target_compile_definitions(human_core_test PRIVATE HU_E2E_TMP_ROOT="${HU_ROOT}/t
 # human_core_test library) inherits the libsodium link directory and library
 # without needing to repeat the discovery dance.
 #
-# Also pulls in src/persona/persona_crypt.c — that source hard-#errors when
-# HU_HAS_LIBSODIUM is undefined, so it MUST be gated here and cannot live in
-# the unconditional HU_CORE_SOURCES list (see persona_crypt.c top comment +
-# Sprint-7 merge-regression that re-broke this once before).
+# persona_crypt.c used to be pulled in here too; Task 12 moved it to
+# human_devlib, which re-applies the same `if(HU_LIBSODIUM_FOUND)` gate —
+# that source hard-#errors when HU_HAS_LIBSODIUM is undefined, so it can
+# never live in an unconditional source list (see persona_crypt.c top
+# comment + the Sprint-7 merge-regression that re-broke this once before).
 #
 # NOTE: tests/test_persona_encryption.c is registered AFTER the
 # `set(HU_TEST_SOURCES ...)` at line ~2834 (which would otherwise discard
@@ -3092,7 +3089,6 @@ target_compile_definitions(human_core_test PRIVATE HU_E2E_TMP_ROOT="${HU_ROOT}/t
 # the gated test-sources section near line ~3440. Bugbot 8b687b9c caught
 # this set-after-append silent loss.
 if(HU_LIBSODIUM_FOUND)
-    target_sources(human_core_test PRIVATE src/persona/persona_crypt.c)
     target_include_directories(human_core_test PRIVATE ${HU_LIBSODIUM_INCLUDE_DIRS})
     target_link_libraries(human_core_test PUBLIC ${HU_LIBSODIUM_LIBRARIES})
     if(HU_LIBSODIUM_LIBRARY_DIRS)
@@ -3287,6 +3283,116 @@ endif()
 if(HU_ENABLE_ASAN)
     target_compile_options(human_core_test PRIVATE -fsanitize=address -fno-omit-frame-pointer)
     target_link_options(human_core_test PRIVATE -fsanitize=address)
+endif()
+
+# --- Developer/SDK library (test + eval + SDK modules, never the daemon) ---
+#
+# Task 12 of docs/plans/2026-09-20-dead-code-plan.md. Each TU below was a
+# never-loaded member of libhuman_core.a: compiled, archived, and never
+# pulled into `human` by the linker, because the daemon has no call site for
+# any symbol it exports. They are not dead — every one of them is a library
+# for something OUTSIDE the daemon: the test suite, an offline eval/judging
+# tool, or the public channel SDK. Keeping them in human_core made the
+# dead-strip ratchet's count A (never-loaded archive members,
+# .claude/rules/dead-strip-ratchet.md) measure "library code the daemon
+# doesn't use" mixed in with "code nobody uses", which is the signal the
+# ratchet exists to isolate. Moving them here makes human_core daemon code
+# only, so A means one thing again.
+#
+# WHY IT IS COMPILED LIKE human_core_test (HU_IS_TEST=1, same defines):
+# every consumer of these symbols is a test-mode target — the whole
+# reference set is tests/*.c plus fuzz/fuzz_mcp_json_rpc.c, all of which
+# link human_core_test. Four of the TUs (dispatch.c, imessage_sticker.c,
+# persona_crypt.c, and the eval_rubric/user_sim family's callees) have
+# `#if HU_IS_TEST` branches whose test-mode form is what those tests
+# exercise today, because today they get their copy out of
+# libhuman_core_test.a. Compiling devlib with anything else would silently
+# change which branch the suite runs. The properties are copied from
+# human_core_test rather than restated so the two can never drift; this
+# block must therefore stay AFTER every target_compile_definitions() on
+# human_core_test above.
+#
+# NOT moved here, and why (the rest of lists/keep-modules.txt):
+#   memory/engines/{postgres,redis}.c, providers/llamacpp_{decode,sampling}.c
+#       opt-in backends — real daemon code whenever their HU_ENABLE_* is on.
+#   asm/generic/chacha20.c
+#       the portable fallback for the aarch64/x86 assembly; arch-gated, and
+#       it IS the implementation on any host without the .S files.
+#   eval/external_judge_fixture.c
+#       a core TU dependency, not a library: apple_fm_client.c and
+#       gemini_nano_client.c call it under `#if HU_IS_TEST`.
+#   tools/vision_ocr.c
+#       its backend src/tools/vision_ocr_apple.m is production-only (added
+#       to human_core under HU_ENABLE_VISION_OCR, never to human_core_test),
+#       so the .m cannot follow the .c into a HU_IS_TEST library. Per the
+#       task brief, the .c stays where the .m is.
+set(HU_DEVLIB_SOURCES
+    # Channel SDK surface. channel_manager.c is documented public API
+    # (docs/api/channels.md, sdk/README.md, sdk/templates/channel/) — the
+    # daemon drives channels through channel_loop.c instead, but the SDK
+    # contract is pinned by tests/test_sdk_channel_template.c.
+    src/channels/channel_manager.c
+    # Fan-out helper over hu_channel_t. Was ALL_CHANNELS-gated in
+    # CHANNEL_SOURCES and duplicated into HU_TEST_EXTRA_CHANNELS when that
+    # was off; unconditional here, which is what the test library always
+    # wanted (tests/test_dispatch.c et al. are not preset-gated).
+    src/channels/dispatch.c
+    # Offline persona-eval scoring + scripted-user simulation. Driven by
+    # tests and the eval harness, never by the running agent.
+    src/persona/eval_rubric.c
+    src/behavior/user_sim.c
+    src/behavior/user_sim_scenario.c
+    # MCP tool-name encode/decode helpers. mcp_manager.c does its own
+    # naming; only tests and fuzz/fuzz_mcp_json_rpc.c call these.
+    src/mcp/mcp_tool_wrapper.c
+    # Unified identity/permission resolution — an SDK-shaped helper with no
+    # daemon call site (src/security/permission.c is the one the agent uses).
+    src/security/identity.c
+    # Provider bundle helper used by tests/test_runtime_bundle.c only.
+    src/providers/runtime_bundle.c
+)
+if(HU_HAS_IMESSAGE)
+    # E2 sticker send. Not in any channel vtable — tests only.
+    list(APPEND HU_DEVLIB_SOURCES src/channels/imessage_sticker.c)
+endif()
+if(HU_ENABLE_ML)
+    # Offline candidate-vs-baseline fidelity gate (pure judging math).
+    list(APPEND HU_DEVLIB_SOURCES src/ml/m3_ab_fidelity_gate.c)
+endif()
+if(HU_ENABLE_RL_FULL)
+    # Canned stock-model baseline for the eval leaderboard.
+    list(APPEND HU_DEVLIB_SOURCES src/eval/stock_baseline.c)
+endif()
+if(HU_LIBSODIUM_FOUND)
+    # Encrypted-persona at-rest format. Same gate it had in human_core:
+    # the TU #errors without HU_HAS_LIBSODIUM.
+    list(APPEND HU_DEVLIB_SOURCES src/persona/persona_crypt.c)
+endif()
+
+add_library(human_devlib STATIC ${HU_DEVLIB_SOURCES})
+add_dependencies(human_devlib hu_git_sha_stamp)
+# PUBLIC so devlib's consumers get human_core_test transitively AND get it
+# placed after devlib on the link line: devlib TUs reference core symbols,
+# never the reverse (external_judge_fixture.c, the one module core TUs do
+# call, deliberately stayed in core above).
+target_link_libraries(human_devlib PUBLIC human_core_test)
+# Copy human_core_test's PRIVATE build settings verbatim so the two libraries
+# can never disagree about HU_IS_TEST, HU_HAS_<channel>, include paths or
+# warning flags. Restating them would be a second source of truth.
+get_target_property(_hu_devlib_defs human_core_test COMPILE_DEFINITIONS)
+if(_hu_devlib_defs)
+    target_compile_definitions(human_devlib PRIVATE ${_hu_devlib_defs})
+endif()
+get_target_property(_hu_devlib_incs human_core_test INCLUDE_DIRECTORIES)
+if(_hu_devlib_incs)
+    target_include_directories(human_devlib PRIVATE ${_hu_devlib_incs})
+endif()
+get_target_property(_hu_devlib_opts human_core_test COMPILE_OPTIONS)
+if(_hu_devlib_opts)
+    target_compile_options(human_devlib PRIVATE ${_hu_devlib_opts})
+endif()
+if(HU_ENABLE_ASAN)
+    target_link_options(human_devlib PRIVATE -fsanitize=address)
 endif()
 
 # --- Tests ---
@@ -3540,6 +3646,10 @@ set(HU_TEST_SOURCES
     tests/test_bus.c
     tests/test_identity.c
     tests/test_channel_manager.c
+    # Task 12: pins the public channel SDK surface — compiles
+    # sdk/templates/channel/my_channel.h against include/human/channel_manager.h
+    # and runs the registration sequence the template's doc comment prescribes.
+    tests/test_sdk_channel_template.c
     tests/test_new_modules.c
     tests/test_provider_all.c
     tests/test_chat_response_diag.c
@@ -4277,11 +4387,21 @@ if(HU_ENABLE_RL_FULL)
     list(APPEND HU_TEST_SOURCES tests/test_e2e_rl_loop.c)
 endif()
 
-add_executable(human_tests ${HU_TEST_SOURCES} wasm/wasm_alloc.c src/app/bootstrap.c)
-target_link_libraries(human_tests human_core_test)
+add_executable(human_tests ${HU_TEST_SOURCES} wasm/wasm_alloc.c src/app/bootstrap.c
+    # Public channel-SDK template, compiled as a real consumer of
+    # include/human/channel_manager.h. tests/test_sdk_channel_template.c
+    # registers the channel it creates, so the SDK contract is executed,
+    # not just parsed.
+    sdk/templates/channel/my_channel.c)
+# human_devlib carries the test/eval/SDK modules that used to sit unused in
+# libhuman_core.a (see the human_devlib block above). It PUBLIC-links
+# human_core_test, so naming it here is enough to get both, in that order.
+target_link_libraries(human_tests human_core_test human_devlib)
 target_include_directories(human_tests PRIVATE ${HU_ROOT}/tests ${HU_ROOT}/tests/include
     ${HU_ROOT}/src/gateway
     ${HU_ROOT}/src/channels
+    # sdk/templates/channel/my_channel.c includes "my_channel.h" beside it.
+    ${HU_ROOT}/sdk/templates/channel
     # Phase 4 Task 3 (RL SOTA): tests/test_grpo_loss.c needs
     # src/ml/grpo_loss_priv.h (private header — NOT exported via
     # include/ to keep the public surface lean).  Same pattern used by
@@ -4657,7 +4777,11 @@ if(HU_ENABLE_CHANNEL_TESTS)
         tests/synthetic/synthetic_regression.c
         tests/synthetic/synthetic_utils.c)
     add_executable(human_channel_tests ${HU_CHANNEL_TEST_SOURCES})
-    target_link_libraries(human_channel_tests human_core_test)
+    # No channel_*.c source references a human_devlib symbol today, but this
+    # harness is a human_core_test consumer built from a file(GLOB), so it
+    # gets devlib for the same reason human_tests does — a new channel_*.c
+    # calling hu_dispatch_* or hu_channel_manager_* must not fail to link.
+    target_link_libraries(human_channel_tests human_core_test human_devlib)
     target_include_directories(human_channel_tests PRIVATE
         ${HU_ROOT}/include ${HU_ROOT}/src ${HU_ROOT}/tests/synthetic)
     target_compile_definitions(human_channel_tests PRIVATE
@@ -4989,7 +5113,9 @@ if(HU_ENABLE_FUZZ)
     set_target_properties(fuzz_mcp_json_rpc PROPERTIES LINKER_LANGUAGE CXX)
     target_compile_definitions(fuzz_mcp_json_rpc PRIVATE HU_IS_TEST=1)
     target_compile_options(fuzz_mcp_json_rpc PRIVATE -Wall -Wextra -Wpedantic)
-    target_link_libraries(fuzz_mcp_json_rpc PRIVATE human_core_test ${FUZZ_EXTRA_LIBS})
+    # The only fuzz target that references a human_devlib symbol
+    # (hu_mcp_tool_parse_name / _build_name, from mcp_tool_wrapper.c).
+    target_link_libraries(fuzz_mcp_json_rpc PRIVATE human_core_test human_devlib ${FUZZ_EXTRA_LIBS})
     target_compile_options(fuzz_mcp_json_rpc PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME})
     target_link_options(fuzz_mcp_json_rpc PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME} ${FUZZ_EXTRA_LINK})
 

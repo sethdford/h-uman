@@ -19,6 +19,12 @@ baseline and allowed only to **decrease**:
 Floors come from `docs/plans/2026-09-20-dead-code-plan.md` §6 ("A = 0 after P5,
 B < 20"), not from a number invented here.
 
+Both counters read `libhuman_core.a`, which since Task 12 holds **daemon code
+only**: the test/eval/SDK modules the daemon never links moved to the
+`human_devlib` archive (see the `human_devlib` block in `CMakeLists.txt`), so a
+never-loaded member of `human_core` now means dead code rather than "library
+code with no daemon caller".
+
 ## The hazard
 
 The September 2026 audit found ~27K LOC of code that compiles, archives, and is

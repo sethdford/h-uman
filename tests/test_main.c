@@ -260,6 +260,7 @@ void run_session_tests(void);
 void run_bus_tests(void);
 void run_identity_tests(void);
 void run_channel_manager_tests(void);
+void run_sdk_channel_template_tests(void);
 void run_new_modules_tests(void);
 void run_provider_all_tests(void);
 void run_chat_response_diag_tests(void);
@@ -1322,6 +1323,7 @@ int main(int argc, char **argv) {
     run_bus_tests();
     run_identity_tests();
     run_channel_manager_tests();
+    run_sdk_channel_template_tests();
     run_new_modules_tests();
     run_provider_all_tests();
     run_chat_response_diag_tests();
