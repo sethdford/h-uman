@@ -60,7 +60,7 @@ static void test_daemon_tick_respects_interval(void) {
     int64_t now = 1100; /* 100 seconds later — NOT enough for 300s interval */
 
     hu_error_t err = hu_daemon_tick_follow_up_watcher(&cfg, now, &last_poll, &watermark, NULL, NULL,
-                                                      NULL, 0, NULL);
+                                                      NULL, 0, NULL, NULL, NULL);
     if (err != HU_OK) {
         fprintf(stderr, "FAIL: returned %d\n", err);
         abort();
@@ -83,7 +83,7 @@ static void test_daemon_tick_respects_interval(void) {
     /* Now test with interval elapsed: 1400 is 400 seconds later, > 300s interval. */
     now = 1400;
     err = hu_daemon_tick_follow_up_watcher(&cfg, now, &last_poll, &watermark, NULL, NULL, NULL, 0,
-                                           NULL);
+                                           NULL, NULL, NULL);
     if (err != HU_OK) {
         fprintf(stderr, "FAIL: returned %d\n", err);
         abort();
@@ -126,7 +126,7 @@ static void test_followup_watcher_disabled_logs_once(void) {
 
     /* Reset guard would go here; skipped for stub. */
     hu_error_t err = hu_daemon_tick_follow_up_watcher(&cfg, now, &last_poll, &watermark, NULL, NULL,
-                                                      NULL, 0, NULL);
+                                                      NULL, 0, NULL, NULL, NULL);
     if (err != HU_OK) {
         fprintf(stderr, "FAIL: returned %d\n", err);
         abort();

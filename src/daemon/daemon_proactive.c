@@ -933,8 +933,15 @@ void hu_daemon_record_decision_row(struct hu_agent *agent, const char *trigger, 
         hu_log_warn("daemon_proactive", NULL, "proactive_decisions_repo_record failed: err=%d",
                     (int)err);
 #else
-    (void)agent, (void)trigger, (void)contact, (void)decision;
-    (void)reason, (void)sent, (void)message, (void)message_len, (void)now;
+    (void)agent;
+    (void)trigger;
+    (void)contact;
+    (void)decision;
+    (void)reason;
+    (void)sent;
+    (void)message;
+    (void)message_len;
+    (void)now;
 #endif
 }
 

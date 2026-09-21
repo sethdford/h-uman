@@ -14,12 +14,19 @@
  * Gate: HU_FOLLOW_UP_WATCHER = off | shadow | on, DEFAULT SHADOW.
  *   off    — return after the config/interval checks; the finder is never
  *            called, so there is zero chat.db cost.
- *   shadow — run detection + the send-now predicate, log one line per
- *            contact per process, and write a proactive_decisions row with
- *            trigger='follow_up', decision='send', sent=0. NO send path is
- *            invoked and the production throttle ledger is NOT charged.
+ *   shadow — run detection + the send-now predicate, then log one line and
+ *            write ONE proactive_decisions row per contact per UTC day:
+ *            trigger='follow_up', decision='defer',
+ *            reason='shadow:would_send', sent=0. NO send path is invoked
+ *            and the production throttle ledger is NOT charged. 'defer'
+ *            rather than 'send' because eval_when_to_speak.py:406 counts
+ *            any decision='send' in the window as "not missed" regardless
+ *            of the sent column, so a shadow 'send' would deflate MIR.
  *   on     — additionally hand the proposal to the real proactive gate
- *            stack. Inert in production today: see the text-source note.
+ *            stack, but ONLY when every prerequisite is present (text
+ *            source, gov_budget, ar_cfg); otherwise it degrades to shadow
+ *            and names the missing one. Inert in production today: no
+ *            direction-correct text source exists (see daemon.h).
  *
  * Exported tick function hu_daemon_tick_follow_up_watcher is called from
  * daemon.c at configurable intervals (default 5 min).
@@ -99,35 +106,76 @@ unsigned hu_daemon_follow_up_watcher_proposals_for_test(void) {
 }
 #endif
 
-/* ── Per-contact shadow-log throttle ──────────────────────────────────────
- * Same static-table shape as max_tokens_shadow_mark_and_check_seen
- * (src/agent/agent.c:170): one line per contact per process, so a 5-minute
- * tick loop cannot flood the service log. */
+/* ── Per-contact, per-UTC-day shadow ledger ───────────────────────────────
+ * Static-table shape borrowed from max_tokens_shadow_mark_and_check_seen
+ * (src/agent/agent.c:170), keyed by (contact, UTC day).
+ *
+ * This gates BOTH the shadow log line and the shadow decision row. Without it
+ * a contact who stays unreplied yields a row every tick — ~288/day at the
+ * 5-minute default — because the send-now predicate runs against a fresh
+ * throttle copy each tick and so never self-limits. That would swamp
+ * scripts/eval_when_to_speak.py's per-contact decision window with duplicates
+ * of a single standing proposal. */
 
 #define HU_FUW_SEEN_CAP     32
 #define HU_FUW_SEEN_KEY_CAP 64
 
 static char g_fuw_seen[HU_FUW_SEEN_CAP][HU_FUW_SEEN_KEY_CAP];
+static uint32_t g_fuw_seen_ymd[HU_FUW_SEEN_CAP];
 static size_t g_fuw_seen_count = 0;
 
-/* Returns true (suppress the log) if `contact` was already marked seen;
- * otherwise marks it seen (space permitting) and returns false (log it). */
-static bool follow_up_mark_and_check_seen(const char *contact) {
+/* YYYYMMDD in UTC. Deliberately UTC, not local: the caller's now_unix is the
+ * only clock input, so the bucket stays deterministic across DST shifts and
+ * in tests. */
+static uint32_t follow_up_utc_ymd(int64_t now_unix) {
+    time_t t = (time_t)now_unix;
+    struct tm g;
+    if (!gmtime_r(&t, &g))
+        return 0;
+    return (uint32_t)((g.tm_year + 1900) * 10000 + (g.tm_mon + 1) * 100 + g.tm_mday);
+}
+
+/* Returns true (SUPPRESS: already recorded for this contact today) or false
+ * (first time today — marks it and the caller should log + record). */
+static bool follow_up_mark_and_check_seen_today(const char *contact, uint32_t ymd) {
     if (!contact || !contact[0])
         return true;
     size_t n = strlen(contact);
     if (n >= HU_FUW_SEEN_KEY_CAP)
         n = HU_FUW_SEEN_KEY_CAP - 1;
     for (size_t i = 0; i < g_fuw_seen_count; i++) {
-        if (strncmp(g_fuw_seen[i], contact, n) == 0 && g_fuw_seen[i][n] == '\0')
-            return true;
+        if (strncmp(g_fuw_seen[i], contact, n) != 0 || g_fuw_seen[i][n] != '\0')
+            continue;
+        if (g_fuw_seen_ymd[i] == ymd)
+            return true;         /* already recorded today */
+        g_fuw_seen_ymd[i] = ymd; /* new day: let one through, reuse the slot */
+        return false;
     }
     if (g_fuw_seen_count < HU_FUW_SEEN_CAP) {
         memcpy(g_fuw_seen[g_fuw_seen_count], contact, n);
         g_fuw_seen[g_fuw_seen_count][n] = '\0';
+        g_fuw_seen_ymd[g_fuw_seen_count] = ymd;
         g_fuw_seen_count++;
     }
     return false;
+}
+
+/* Names every reason `on` cannot send, so the warn-once is actionable rather
+ * than just "not sending". Returns true if any blocker applies. */
+static bool follow_up_on_blockers(char *out, size_t cap, bool has_text, bool has_budget,
+                                  bool has_ar_cfg) {
+    if (!out || cap == 0)
+        return true;
+    out[0] = '\0';
+    if (has_text && has_budget && has_ar_cfg)
+        return false;
+    snprintf(out, cap, "%s%s%s",
+             has_text ? "" : "no follow-up text source is wired (see daemon.h); ",
+             has_budget ? ""
+                        : "gov_budget is NULL, so a send would be neither limited by nor "
+                          "counted against the shared daily proactive budget; ",
+             has_ar_cfg ? "" : "ar_cfg is NULL, so autoresponder quiet hours are not enforced; ");
+    return true;
 }
 
 #if HU_IS_TEST
@@ -192,20 +240,26 @@ static void follow_up_record_decision(struct hu_agent *agent, const char *contac
  * Returns true iff the channel accepted delivery. */
 static bool follow_up_gate_and_send(struct hu_agent *agent, hu_channel_t *channel,
                                     const hu_contact_profile_t *cp, const char *ch_name,
-                                    hu_proactive_throttle_t *throttle, uint64_t age_ms,
+                                    hu_proactive_throttle_t *throttle,
+                                    hu_proactive_budget_t *gov_budget,
+                                    const struct hu_autoresponder_config *ar_cfg, uint64_t age_ms,
                                     int64_t now_unix, int32_t tz_offset_s) {
-    if (!agent || !agent->alloc || !channel || !cp || !cp->contact_id)
+    /* g_text_fn is checked by the caller, but re-check locally: this function
+     * dereferences it, and a future caller must not be able to reach that
+     * dereference by forgetting the guard. */
+    if (!agent || !agent->alloc || !channel || !cp || !cp->contact_id || !g_text_fn)
         return false;
 
     const char *target = cp->contact_id;
     size_t target_len = strlen(target);
 
+    /* No decision row here: hu_daemon_proactive_reach_should_skip's contract
+     * (daemon_proactive.h:285) is explicit that a pre-filter never writes one —
+     * it changes which contacts are CONSIDERED, and logging a decline would
+     * make the eval count a policy decision that was never made. */
     if (hu_daemon_proactive_reach_should_skip(agent, agent->alloc, ch_name, cp->contact_id, target,
-                                              target_len)) {
-        follow_up_record_decision(agent, cp->contact_id, HU_PROACTIVE_DECISION_DECLINE,
-                                  "unreachable", 0, now_unix);
+                                              target_len))
         return false;
-    }
 
     /* Buffer is mutated in place by the validator/sanitizer chain inside
      * gate_and_send, so it must be writable and larger than the text. */
@@ -221,22 +275,38 @@ static bool follow_up_gate_and_send(struct hu_agent *agent, hu_channel_t *channe
 
     bool sent = hu_daemon_proactive_gate_and_send(agent, agent->alloc, channel, cp, ch_name, target,
                                                   target_len, response, &response_len, now_unix,
-                                                  /*gov_budget=*/NULL, /*ar_cfg=*/NULL, tz_offset_s,
-                                                  throttle);
+                                                  gov_budget, ar_cfg, tz_offset_s, throttle);
     follow_up_record_decision(agent, cp->contact_id,
                               sent ? HU_PROACTIVE_DECISION_SEND : HU_PROACTIVE_DECISION_DECLINE,
                               sent ? NULL : "gated", sent ? 1 : 0, now_unix);
     return sent;
 }
 
+/* Everything the per-contact scan needs that is constant across the tick.
+ * Bundled so the scan keeps a readable signature as the governor state grew. */
+typedef struct follow_up_tick_ctx {
+    hu_gate_mode_t mode;
+    struct hu_agent *agent;
+    hu_channel_t *channel;
+    const char *ch_name;
+    hu_proactive_throttle_t *throttle;           /* real ledger — live sends only */
+    hu_proactive_throttle_t *predicate_throttle; /* per-tick copy — see the tick */
+    hu_proactive_budget_t *gov_budget;
+    const struct hu_autoresponder_config *ar_cfg;
+    int64_t now_unix;
+    uint32_t ymd; /* UTC day, for the per-contact-per-day shadow ledger */
+    int32_t tz_offset_s;
+    bool can_send;        /* mode==LIVE AND every `on` prerequisite is present */
+    const char *blockers; /* non-empty when can_send is false in LIVE */
+} follow_up_tick_ctx_t;
+
 /* ── Per-contact scan ─────────────────────────────────────────────────────
  * Returns after handling one contact; factored out to keep the tick's
  * nesting shallow. */
-static void follow_up_scan_contact(hu_gate_mode_t mode, struct hu_agent *agent,
-                                   hu_channel_t *channel, const hu_contact_profile_t *cp,
-                                   const char *ch_name, hu_proactive_throttle_t *throttle,
-                                   hu_proactive_throttle_t *predicate_throttle, int64_t now_unix,
-                                   int32_t tz_offset_s) {
+static void follow_up_scan_contact(const follow_up_tick_ctx_t *tc, const hu_contact_profile_t *cp) {
+    struct hu_agent *agent = tc->agent;
+    int64_t now_unix = tc->now_unix;
+
     if (!cp->contact_id || !cp->contact_id[0] || !cp->warmth_level)
         return;
     /* Same warmth rule the live outbound scheduler applies: acquaintances
@@ -265,50 +335,56 @@ static void follow_up_scan_contact(hu_gate_mode_t mode, struct hu_agent *agent,
         return; /* still inside the grace window */
 
     g_send_now_calls++;
-    if (!hu_follow_up_should_send_now(cp->contact_id, now_ms, predicate_throttle)) {
+    if (!hu_follow_up_should_send_now(cp->contact_id, now_ms, tc->predicate_throttle)) {
         follow_up_record_decision(agent, cp->contact_id, HU_PROACTIVE_DECISION_DECLINE, "throttled",
                                   0, now_unix);
         return;
     }
     g_proposals++;
 
-    unsigned age_hours = (unsigned)(age_ms / 3600000ULL);
-    if (!follow_up_mark_and_check_seen(cp->contact_id))
-        hu_log_info("follow_up_watcher", agent ? agent->observer : NULL,
-                    "[follow-up-watcher %s] would follow up %s after %uh",
-                    mode == HU_GATE_LIVE ? "live" : "shadow", cp->contact_id, age_hours);
-
-    if (mode != HU_GATE_LIVE || !g_text_fn) {
-        /* SHADOW, or LIVE with no direction-correct text source wired.
-         * Record the proposal without claiming delivery, and say once why
-         * `on` is not sending. */
-        if (mode == HU_GATE_LIVE)
-            hu_log_warn_once(&g_warned_followup_watcher_on_inert, "follow_up_watcher",
-                             agent ? agent->observer : NULL,
-                             "HU_FOLLOW_UP_WATCHER=on but no follow-up text source is wired, so "
-                             "proposals behave as shadow. The repo's only follow-up copy "
-                             "(hu_followup_compose_directive, hu_followup_decide.template_text) "
-                             "phrases the OUTBOUND case ('<contact> read your message and hasn't "
-                             "replied'); this watcher detects the INBOUND case (they wrote, seth "
-                             "never answered), where that text is exactly backwards. Wire a "
-                             "direction-correct source via "
-                             "hu_daemon_follow_up_watcher_set_text_source before flipping on.");
-        follow_up_record_decision(agent, cp->contact_id, HU_PROACTIVE_DECISION_SEND, NULL, 0,
-                                  now_unix);
+    if (tc->can_send) {
+        (void)follow_up_gate_and_send(agent, tc->channel, cp, tc->ch_name, tc->throttle,
+                                      tc->gov_budget, tc->ar_cfg, age_ms, now_unix,
+                                      tc->tz_offset_s);
         return;
     }
 
-    (void)follow_up_gate_and_send(agent, channel, cp, ch_name, throttle, age_ms, now_unix,
-                                  tz_offset_s);
+    /* SHADOW, or LIVE missing a prerequisite. Say once which. */
+    if (tc->mode == HU_GATE_LIVE)
+        hu_log_warn_once(&g_warned_followup_watcher_on_inert, "follow_up_watcher",
+                         agent ? agent->observer : NULL,
+                         "HU_FOLLOW_UP_WATCHER=on but proposals behave as shadow: %s. The repo's "
+                         "only follow-up copy (hu_followup_compose_directive, "
+                         "hu_followup_decide.template_text) phrases the OUTBOUND case ('<contact> "
+                         "read your message and hasn't replied'); this watcher detects the INBOUND "
+                         "case (they wrote, seth never answered), where that text is exactly "
+                         "backwards. See the flip prerequisites in include/human/daemon.h.",
+                         tc->blockers ? tc->blockers : "prerequisite missing");
+
+    /* One shadow row + one log line per contact per UTC day. */
+    if (follow_up_mark_and_check_seen_today(cp->contact_id, tc->ymd))
+        return;
+
+    unsigned age_hours = (unsigned)(age_ms / 3600000ULL);
+    hu_log_info("follow_up_watcher", agent ? agent->observer : NULL,
+                "[follow-up-watcher shadow] would follow up %s after %uh", cp->contact_id,
+                age_hours);
+
+    /* DEFER, not SEND. scripts/eval_when_to_speak.py:406 counts ANY
+     * decision='send' row in the window as "not missed", regardless of the
+     * `sent` column — so a shadow row claiming 'send' would mark a genuinely
+     * missed opportunity as caught and silently deflate MIR. 'defer' is also
+     * the honest word: the proposal fired and was held, not delivered. */
+    follow_up_record_decision(agent, cp->contact_id, HU_PROACTIVE_DECISION_DEFER,
+                              "shadow:would_send", 0, now_unix);
 }
 
-hu_error_t hu_daemon_tick_follow_up_watcher(const struct hu_follow_up_watcher_config *cfg,
-                                            int64_t now_unix, int64_t *last_poll_unix_inout,
-                                            int64_t *watermark_inout, struct hu_agent *agent,
-                                            const struct hu_config *config,
-                                            hu_service_channel_t *channels, size_t channel_count,
-                                            struct hu_proactive_throttle *throttle) {
-    (void)config; /* no autoresponder config hangs off hu_config; see ar_cfg note above */
+hu_error_t hu_daemon_tick_follow_up_watcher(
+    const struct hu_follow_up_watcher_config *cfg, int64_t now_unix, int64_t *last_poll_unix_inout,
+    int64_t *watermark_inout, struct hu_agent *agent, const struct hu_config *config,
+    hu_service_channel_t *channels, size_t channel_count, struct hu_proactive_throttle *throttle,
+    struct hu_proactive_budget *gov_budget, const struct hu_autoresponder_config *ar_cfg) {
+    (void)config; /* governor state arrives explicitly as gov_budget / ar_cfg */
     if (!cfg || !last_poll_unix_inout || !watermark_inout)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -391,6 +467,31 @@ hu_error_t hu_daemon_tick_follow_up_watcher(const struct hu_follow_up_watcher_co
             return HU_OK;
         }
 
+        /* `on` sends only when EVERY prerequisite is present. A missing
+         * gov_budget is not a soft default here: the governor skips the gate
+         * on NULL (init_proposer.c:168) and send_and_record only debits
+         * `if (gov_budget)` (daemon_proactive.c:1130), so sending without it
+         * would be unlimited by and invisible to the shared daily budget. */
+        char blockers[256];
+        bool blocked = follow_up_on_blockers(blockers, sizeof(blockers), g_text_fn != NULL,
+                                             gov_budget != NULL, ar_cfg != NULL);
+
+        follow_up_tick_ctx_t tc = {
+            .mode = mode,
+            .agent = agent,
+            .channel = NULL,
+            .ch_name = NULL,
+            .throttle = throttle,
+            .predicate_throttle = predicate_throttle,
+            .gov_budget = gov_budget,
+            .ar_cfg = ar_cfg,
+            .now_unix = now_unix,
+            .ymd = follow_up_utc_ymd(now_unix),
+            .tz_offset_s = tz_offset_s,
+            .can_send = (mode == HU_GATE_LIVE) && !blocked,
+            .blockers = blockers,
+        };
+
         for (size_t ci = 0; ci < channel_count; ci++) {
             hu_channel_t *ch = channels[ci].channel;
             if (!ch || !ch->vtable || !ch->vtable->name)
@@ -400,13 +501,24 @@ hu_error_t hu_daemon_tick_follow_up_watcher(const struct hu_follow_up_watcher_co
             if (!ch_name || strcmp(ch_name, "imessage") != 0)
                 continue;
 
+            tc.channel = ch;
+            tc.ch_name = ch_name;
             for (size_t pi = 0; pi < agent->persona->contacts_count; pi++)
-                follow_up_scan_contact(mode, agent, ch, &agent->persona->contacts[pi], ch_name,
-                                       throttle, predicate_throttle, now_unix, tz_offset_s);
+                follow_up_scan_contact(&tc, &agent->persona->contacts[pi]);
         }
 
-        if (predicate_throttle && agent->alloc && agent->alloc->free)
-            agent->alloc->free(agent->alloc->ctx, predicate_throttle, sizeof(*throttle));
+        /* Free whenever we allocated. An allocator that hands out memory but
+         * has no free is a broken contract, not a reason to leak 121 KB every
+         * tick — say so loudly rather than swallowing it. */
+        if (predicate_throttle) {
+            if (agent->alloc && agent->alloc->free)
+                agent->alloc->free(agent->alloc->ctx, predicate_throttle, sizeof(*throttle));
+            else
+                hu_log_warn("follow_up_watcher", agent->observer,
+                            "allocator contract violation: alloc() succeeded but free() is NULL; "
+                            "leaking the %zu-byte shadow throttle ledger this tick",
+                            sizeof(*throttle));
+        }
     }
 
     *last_poll_unix_inout = now_unix;

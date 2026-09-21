@@ -10260,9 +10260,13 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 if (followup_watermark == 0)
                     followup_watermark = now_unix_fu;
                 hu_proactive_throttle_t *th = daemon_throttle(alloc);
+                /* Same governor state the proactive check-in path passes at
+                 * :1587 — a follow-up must draw from, and be limited by, the
+                 * ONE shared daily proactive budget, not a private allowance. */
                 (void)hu_daemon_tick_follow_up_watcher(
                     &config->follow_up_watcher, now_unix_fu, &followup_last_poll_unix,
-                    &followup_watermark, agent, config, channels, channel_count, th);
+                    &followup_watermark, agent, config, channels, channel_count, th, &gov_budget,
+                    daemon_autoresponder_config());
             } else {
                 hu_log_info_once(&daemon_loop_followup_disabled_warned, "daemon",
                                  agent ? agent->observer : NULL,

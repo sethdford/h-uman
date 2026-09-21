@@ -197,13 +197,22 @@ void hu_daemon_personalization_warn_reset_for_test(void);
  * unresponded reads and schedules follow-ups via daemon_proactive. */
 struct hu_follow_up_watcher_config;
 struct hu_config;
+struct hu_proactive_budget;
+struct hu_autoresponder_config;
 typedef struct hu_proactive_throttle hu_proactive_throttle_t; /* forward decl */
-hu_error_t hu_daemon_tick_follow_up_watcher(const struct hu_follow_up_watcher_config *cfg,
-                                            int64_t now_unix, int64_t *last_poll_unix_inout,
-                                            int64_t *watermark_inout, struct hu_agent *agent,
-                                            const struct hu_config *config,
-                                            hu_service_channel_t *channels, size_t channel_count,
-                                            hu_proactive_throttle_t *throttle);
+
+/* `gov_budget` and `ar_cfg` are the SHARED proactive governor state — the same
+ * objects the check-in path passes at src/daemon.c:1587. They are not optional
+ * here: without `gov_budget` a follow-up send is neither limited by nor counted
+ * against the daily proactive budget (`hu_init_proposer_governor_check_only`
+ * skips the gate on NULL, and `hu_daemon_proactive_send_and_record` only debits
+ * `if (gov_budget)`), and without `ar_cfg` quiet hours are not enforced. If
+ * either is NULL the `on` mode degrades to shadow and says which is missing. */
+hu_error_t hu_daemon_tick_follow_up_watcher(
+    const struct hu_follow_up_watcher_config *cfg, int64_t now_unix, int64_t *last_poll_unix_inout,
+    int64_t *watermark_inout, struct hu_agent *agent, const struct hu_config *config,
+    hu_service_channel_t *channels, size_t channel_count, hu_proactive_throttle_t *throttle,
+    struct hu_proactive_budget *gov_budget, const struct hu_autoresponder_config *ar_cfg);
 
 /* ── Follow-up watcher seams (Task 18) ──────────────────────────────────
  *
