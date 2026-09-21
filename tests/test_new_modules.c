@@ -12,7 +12,6 @@
 #include "human/max_tokens.h"
 #include "human/migration.h"
 #include "human/onboard.h"
-#include "human/portable_atomic.h"
 #include "human/skillforge.h"
 #include "human/tool.h"
 #include "test_framework.h"
@@ -21,27 +20,6 @@
 static void test_config_types_constants(void) {
     HU_ASSERT_EQ(HU_DEFAULT_AGENT_TOKEN_LIMIT, 200000u);
     HU_ASSERT_EQ(HU_DEFAULT_MODEL_MAX_TOKENS, 8192u);
-}
-
-static void test_portable_atomic_u64(void) {
-    hu_atomic_u64_t *a = hu_atomic_u64_create(42);
-    HU_ASSERT_NOT_NULL(a);
-    HU_ASSERT_EQ(hu_atomic_u64_load(a), 42u);
-    hu_atomic_u64_store(a, 99);
-    HU_ASSERT_EQ(hu_atomic_u64_load(a), 99u);
-    uint64_t old = hu_atomic_u64_fetch_add(a, 5);
-    HU_ASSERT_EQ(old, 99u);
-    HU_ASSERT_EQ(hu_atomic_u64_load(a), 104u);
-    hu_atomic_u64_destroy(a);
-}
-
-static void test_portable_atomic_bool(void) {
-    hu_atomic_bool_t *b = hu_atomic_bool_create(0);
-    HU_ASSERT_NOT_NULL(b);
-    HU_ASSERT_FALSE(hu_atomic_bool_load(b));
-    hu_atomic_bool_store(b, 1);
-    HU_ASSERT_TRUE(hu_atomic_bool_load(b));
-    hu_atomic_bool_destroy(b);
 }
 
 static void test_context_tokens_resolve_override(void) {
@@ -1713,8 +1691,6 @@ static void test_push_control_protocol_fcm_then_apns(void) {
 void run_new_modules_tests(void) {
     HU_TEST_SUITE("New Modules");
     HU_RUN_TEST(test_config_types_constants);
-    HU_RUN_TEST(test_portable_atomic_u64);
-    HU_RUN_TEST(test_portable_atomic_bool);
     HU_RUN_TEST(test_context_tokens_resolve_override);
     HU_RUN_TEST(test_context_tokens_lookup_known_model);
     HU_RUN_TEST(test_context_tokens_default_fallback);

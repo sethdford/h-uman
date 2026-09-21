@@ -14,11 +14,9 @@ agents auditing "what's actually wired e2e" should start here.
 | Channel | LOC | What's missing | What it would take | Action |
 |---------|----:|----------------|--------------------|--------|
 | `mattermost.c` | ~700 | Config schema, bootstrap call, daemon-config slot. | Add `hu_mattermost_channel_config_t`, parser, bootstrap, daemon entry. Medium effort. | Experimental — defer until product wants it |
-| `maixcam.c` | ~370 | Config schema, bootstrap call, daemon-config slot. AIoT vision board. | Same as above. Niche; gated on hardware availability. | Experimental — defer |
 | `web.c` | ~280 | Config schema, bootstrap call, daemon-config slot. Browser-tab "channel". | Replaced by PWA channel for most use cases. | Experimental — likely subsumed by `pwa.c` |
 | `cli.c` | ~170 | Production runs `human agent` directly via `cmd_agent`, not through this channel. Used in tests. | Either wire into a `--channel cli` mode or remove the channel facade. | Test-only utility — keep, document |
 | `dispatch.c` | ~150 | Multiplex/router channel. Used in tests; production routes through `bootstrap.c` directly. | Could replace per-channel iteration in daemon if performance demands it. | Test-only utility — keep, document |
-| `webhook.c` | ~250 | Outbound webhook formatter. The gateway HTTP server uses webhook handlers directly; this channel is unused in production. | Decide: delete or wire as a generic outbound webhook channel. | Cosmetic — document, decide later |
 
 `twilio_media.c` was DELETED in FIX 5 — its `send()` was a no-op in production
 (silently dropped every outbound message) and it had no inbound hooks. Real

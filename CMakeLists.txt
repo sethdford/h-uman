@@ -512,7 +512,6 @@ if(HU_ENABLE_ALL_CHANNELS)
         src/channels/signal.c
         src/channels/nostr.c
         src/channels/qq.c
-        src/channels/maixcam.c
         src/channels/dispatch.c
     )
     if(NOT HU_ENABLE_GMAIL)
@@ -696,7 +695,6 @@ set(HU_CORE_SOURCES
     src/voice/voice_config.c
     src/voice/local_stt.c
     src/voice/local_tts.c
-    src/util/portable_atomic.c
     src/agent/agent_routing.c
     src/observability/health.c
     src/security/security.c
@@ -708,7 +706,6 @@ set(HU_CORE_SOURCES
     src/security/arg_inspector.c
     src/security/pairing.c
     src/security/secrets.c
-    src/security/vault.c
     src/security/vault_aead.c
     src/security/audit.c
     src/security/delegation.c
@@ -718,20 +715,16 @@ set(HU_CORE_SOURCES
     src/security/exec_env.c
     src/security/adversarial.c
     src/security/sensitivity.c
-    src/security/sandbox.c
     src/security/skill_trust.c
     src/security/keystore.c
     src/security/audit_log.c
     src/observability/observability.c
     src/observability/log_observer.c
     src/observability/metrics_observer.c
-    src/observability/multi_observer.c
     src/observability/bth_metrics.c
     src/observability/otlp.c
     src/observability/background_registry.c
     src/observability/validator_telemetry.c
-    src/tunnel/none.c
-    src/tunnel/root.c
     src/gateway/gateway.c
     src/gateway/thread_pool.c
     src/gateway/openai_compat.c
@@ -777,14 +770,12 @@ set(HU_CORE_SOURCES
     src/persona/social_insights.c
     src/persona/sticker.c
     src/gateway/event_bridge.c
-    src/gateway/tenant.c
     src/runtime/native.c
     src/runtime/docker.c
     src/runtime/gce.c
     src/runtime/factory.c
     src/security/hook.c
     src/security/hook_pipeline.c
-    src/agent/action_preview.c
     src/agent/agent.c
     src/agent/agent_plan.c
     src/agent/agent_stream.c
@@ -825,7 +816,6 @@ set(HU_CORE_SOURCES
     src/agent/orchestrator.c
     src/agent/orchestrator_llm.c
     src/agent/swarm.c
-    src/agent/agent_profile.c
     src/agent/model_router.c
     src/agent/model_router_health.c
     src/agent/registry.c
@@ -871,7 +861,6 @@ set(HU_CORE_SOURCES
     src/context/temporal_events.c
     src/context/vision.c
     src/context/intelligence.c
-    src/intelligence/skill_system.c
     src/intelligence/trust.c
     src/feeds/processor.c
     src/feeds/awareness.c
@@ -898,7 +887,6 @@ set(HU_CORE_SOURCES
     src/calibration/style_analyzer.c
     src/calibration/calibrate.c
     src/calibration/clone.c
-    src/calibration/ab_compare.c
     src/predictive/drafts.c
     src/agent/autoresponder.c
     src/research/contact_narrative.c
@@ -910,7 +898,6 @@ set(HU_CORE_SOURCES
     src/agent/token_budget.c
     src/agent/data_quality.c
     src/agent/mar.c
-    src/agent/prompt_optimizer.c
     src/agent/checkpoint.c
     src/agent/approval_gate.c
     src/agent/workflow_event.c
@@ -930,7 +917,6 @@ set(HU_CORE_SOURCES
     src/agent/inner_thoughts.c
     src/agent/weather_awareness.c
     src/agent/weather_fetch.c
-    src/agent/workspace_context.c
     src/agent/timing.c
     src/agent/governor.c
     src/agent/activation_steering.c
@@ -973,7 +959,6 @@ set(HU_CORE_SOURCES
     src/providers/helpers.c
     src/providers/provider_http.c
     src/providers/sse.c
-    src/util/sse_parser.c
     src/providers/scrub.c
     src/providers/reliable.c
     src/providers/from_config.c
@@ -1063,7 +1048,6 @@ set(HU_CORE_SOURCES
     src/agent/scheduler_status_json.c
     src/agent/simulation/counterfactual.c
     src/agent/autodream_runner.c
-    src/agent/case_based.c
     src/agent/response_verifier.c
     src/agent/response_guard.c
     src/agent/response_guard_dpo.c
@@ -1139,13 +1123,9 @@ set(HU_CORE_SOURCES
     src/agent/belief_reverify_runner.c
     src/persona/persona_deltas.c
     src/persona/delta_observer.c
-    src/memory/multimodal_index.c
     src/memory/lifecycle/cache.c
     src/memory/lifecycle/hygiene.c
-    src/memory/lifecycle/snapshot.c
     src/memory/lifecycle/summarizer.c
-    src/memory/lifecycle/diagnostics.c
-    src/memory/lifecycle/rollout.c
     src/memory/lifecycle/migrate.c
     src/memory/retrieval/keyword.c
     src/memory/retrieval/namespace.c
@@ -1156,12 +1136,9 @@ set(HU_CORE_SOURCES
     src/memory/retrieval/rrf.c
     src/memory/retrieval/entropy_gate.c
     src/memory/rerank.c
-    src/memory/retrieval/qmd.c
-    src/memory/retrieval/query_expansion.c
     src/memory/retrieval/llm_reranker.c
     src/memory/retrieval/strategy_learner.c
     src/memory/retrieval/engine.c
-    src/memory/retrieval/multigraph.c
     src/memory/connections.c
     src/memory/knowledge.c
     src/memory/cognitive.c
@@ -1259,12 +1236,9 @@ set(HU_CORE_SOURCES
     src/tools/media_video.c
     src/tools/media_gif.c
     src/tools/factory.c
-    src/tools/canvas_render.c
     src/tools/canvas_store.c
     src/tools/canvas_persist.c
     src/tools/declarative.c
-    src/tools/mcp_resource_tools.c
-    src/tools/cron_session_tools.c
     src/mcp/mcp_server.c
     src/channels/thread_binding.c
     src/channels/format.c
@@ -1272,10 +1246,7 @@ set(HU_CORE_SOURCES
     src/channels/rate_limit.c
     src/channels/channel_embed.c
     src/channels/channel_mock.c
-    src/channels/channel_http.c
-    src/channels/webhook.c
     src/security/policy_engine.c
-    src/security/replay.c
     src/plugins/registry.c
     src/plugins/plugin_loader.c
     src/plugins/plugin_discovery.c
@@ -1344,8 +1315,6 @@ set(HU_CORE_SOURCES
     src/memory/vector/embeddings_gemini.c
     src/memory/vector/embeddings_ollama.c
     src/memory/vector/embeddings_voyage.c
-    src/memory/vector/provider_router.c
-    src/memory/vector/outbox.c
     src/memory/vector/store.c
     src/memory/vector/store_pgvector.c
     src/memory/vector/store_qdrant.c
@@ -1496,7 +1465,6 @@ list(APPEND HU_CORE_SOURCES
     src/tools/visual_grounding.c
     src/tools/browser_use.c
     src/tools/gui_agent.c
-    src/tools/lsp.c
     src/tools/tool_search.c
     src/voice/webrtc.c
     src/voice/webrtc_ice.c
@@ -1508,12 +1476,10 @@ list(APPEND HU_CORE_SOURCES
     src/voice/mlx_local.c
     src/voice/duplex.c
     src/voice/session.c
-    src/voice/opus.c
     src/voice/turn_signal.c
     src/voice/semantic_eot.c
     src/providers/embedded.c
     src/providers/llamacpp.c
-    src/providers/mlx.c
     src/providers/mlx_stream_utf8.c
     src/providers/llamacpp_sampling.c
     src/providers/llamacpp_kvcache.c
@@ -1707,7 +1673,6 @@ if(HU_ENABLE_SQLITE)
         src/memory/prospective.c
         src/memory/emotional_residue.c
         src/memory/graph/memory_graph.c
-        src/feeds/oauth.c
         src/intelligence/skills.c
         src/intelligence/self_improve.c
         src/intelligence/value_learning.c
@@ -1746,7 +1711,7 @@ if(HU_ENABLE_SOCIAL)
     list(APPEND HU_CORE_SOURCES src/feeds/social.c)
 endif()
 if(HU_ENABLE_FEEDS)
-    list(APPEND HU_CORE_SOURCES src/feeds/apple.c src/feeds/google.c src/feeds/music.c
+    list(APPEND HU_CORE_SOURCES src/feeds/apple.c
         src/feeds/news.c src/feeds/email.c src/feeds/gmail.c src/feeds/imessage.c
         src/feeds/twitter.c src/feeds/file_ingest.c src/feeds/research.c src/feeds/findings.c
         src/feeds/research_executor.c src/feeds/trends.c)
@@ -2929,7 +2894,7 @@ if(NOT HU_ENABLE_ALL_CHANNELS)
     # with undefined references to hu_{mattermost,web}_{create,destroy}.
     list(APPEND HU_TEST_EXTRA_CHANNELS
         src/channels/signal.c src/channels/nostr.c src/channels/qq.c
-        src/channels/maixcam.c src/channels/dispatch.c
+        src/channels/dispatch.c
         src/channels/gmail_base64.c src/channels/gmail.c
         src/channels/mattermost.c src/channels/web.c)
 endif()
@@ -3018,7 +2983,7 @@ if(NOT HU_ENABLE_SOCIAL)
     list(APPEND HU_TEST_EXTRA_MODULES src/feeds/social.c)
 endif()
 if(NOT HU_ENABLE_FEEDS)
-    list(APPEND HU_TEST_EXTRA_MODULES src/feeds/apple.c src/feeds/google.c src/feeds/music.c
+    list(APPEND HU_TEST_EXTRA_MODULES src/feeds/apple.c
         src/feeds/news.c src/feeds/email.c src/feeds/gmail.c src/feeds/imessage.c
         src/feeds/twitter.c src/feeds/file_ingest.c src/feeds/research.c src/feeds/findings.c
         src/feeds/research_executor.c src/feeds/trends.c)
@@ -3311,12 +3276,10 @@ set(HU_TEST_SOURCES
     tests/test_agent_git.c
     tests/test_agent_app_config.c
     tests/test_bg_registry.c
-    tests/test_canvas_render.c
     tests/test_canvas_e2e.c
     tests/test_canvas_persist.c
     tests/test_canvas_tool.c
     tests/test_consistency.c
-    tests/test_mlx_provider.c
     tests/test_mlx_stream_utf8.c
     tests/test_persona_fidelity.c
     tests/test_persona_fidelity_cross.c
@@ -3424,7 +3387,6 @@ set(HU_TEST_SOURCES
     tests/test_contextual_bandit.c
     tests/test_humanization_bandit.c
     tests/test_memory.c
-    tests/test_mlx_load_adapter.c
     tests/test_m3_route_per_turn.c
     tests/test_m3_route_per_turn_call_sites.c
     tests/test_m3_swap_failure_observability.c
@@ -3441,7 +3403,6 @@ set(HU_TEST_SOURCES
     tests/test_auth.c
     tests/test_security.c
     tests/test_sensitivity.c
-    tests/test_vault.c
     tests/test_vault_aead.c
     tests/test_app_bundle_structure.c
     tests/test_pkg_builder.c
@@ -3456,8 +3417,6 @@ set(HU_TEST_SOURCES
     tests/test_channel_format.c
     tests/test_channel_behavior_class.c
     tests/test_channel_rate_limit.c
-    tests/test_channel_http.c
-    tests/test_webhook_channel.c
     tests/test_cp_tasks.c
     tests/test_cp_canvas.c
     tests/test_vector_retrieval_remote.c
@@ -3515,7 +3474,6 @@ set(HU_TEST_SOURCES
     tests/test_memory_new.c
     tests/test_http.c
     tests/test_sse.c
-    tests/test_sse_parser.c
     tests/test_streaming.c
     tests/test_websocket.c
     tests/test_ws_integration.c
@@ -3523,12 +3481,10 @@ set(HU_TEST_SOURCES
     tests/test_path_security.c
     tests/test_process_util.c
     tests/test_cron.c
-    tests/test_cron_session_tools.c
     tests/test_channel_loop.c
     tests/test_rag.c
     tests/test_multimodal.c
     tests/test_multimodal_pipeline.c
-    tests/test_multimodal_memory.c
     tests/test_multimodal_audio.c
     tests/test_multimodal_video.c
     tests/test_voice_duplex.c
@@ -3652,7 +3608,6 @@ tests/test_imessage_action_telemetry.c
     tests/test_ollama_integration.c
     tests/test_oauth.c
     tests/test_plugin.c
-    tests/test_tenant.c
     tests/test_agent_teams.c
     tests/test_delegation.c
     tests/test_diagnostic_commands.c
@@ -3660,7 +3615,6 @@ tests/test_imessage_action_telemetry.c
     tests/test_modules_coverage.c
     tests/test_coverage_new.c
     tests/test_context.c
-    tests/test_qmd.c
     tests/test_terminal.c
     tests/test_tavily.c
     tests/test_awareness.c
@@ -3863,7 +3817,6 @@ tests/test_imessage_action_telemetry.c
     tests/test_prosocial_routine.c
     tests/test_life_chapters.c
     tests/test_social_graph.c
-    tests/test_skill_system.c
     tests/test_feeds.c
     tests/test_apple_feeds.c
     tests/test_social_feeds.c
@@ -3893,7 +3846,6 @@ tests/test_imessage_action_telemetry.c
     tests/test_mcp_transport.c
     tests/test_mcp_transport_sse.c
     tests/test_mcp_audit.c
-    tests/test_multigraph.c
     tests/test_memory_graph.c
     tests/test_experience.c
     tests/test_experience_engine.c
@@ -3926,7 +3878,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_release_workflow.c
 )
 if(HU_ENABLE_FEEDS)
-    list(APPEND HU_TEST_SOURCES tests/test_google_feeds.c tests/test_music_feeds.c
+    list(APPEND HU_TEST_SOURCES
         tests/test_research_feeds.c tests/test_research_executor.c)
 endif()
 list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/test_relationship.c tests/test_replay.c tests/test_style_clone.c tests/test_life_sim.c tests/test_persona_mood.c tests/test_persona_feedback.c tests/test_persona_examples_style.c tests/test_persona_cli.c tests/test_voice_maturity.c tests/test_style_mirror.c tests/test_style_learner.c tests/test_temporal.c tests/test_inner_world.c tests/test_persona_eval.c tests/test_persona_filler_roundtrip.c tests/test_style_critique_patterns.c tests/test_style_self_critique.c tests/test_persona_sticker.c)
@@ -3967,7 +3919,7 @@ list(APPEND HU_TEST_SOURCES tests/test_memory_features.c)
 list(APPEND HU_TEST_SOURCES tests/test_agi_frontiers.c tests/test_mcts_planner.c)
 list(APPEND HU_TEST_SOURCES tests/test_orchestrator.c)
 list(APPEND HU_TEST_SOURCES tests/test_swarm_execution.c tests/test_dynamic_decomposition.c)
-list(APPEND HU_TEST_SOURCES tests/test_agent_matching.c tests/test_agent_communication.c)
+list(APPEND HU_TEST_SOURCES tests/test_agent_communication.c)
 list(APPEND HU_TEST_SOURCES tests/test_world_simulation.c)
 list(APPEND HU_TEST_SOURCES tests/test_agent_registry.c)
 list(APPEND HU_TEST_SOURCES tests/test_pwa.c)
@@ -4100,14 +4052,12 @@ list(APPEND HU_TEST_SOURCES
     tests/test_otlp.c
     tests/test_mar.c
     tests/test_mem_policy.c
-    tests/test_prompt_optimizer.c
     tests/test_chaos.c
     tests/test_checkpoint.c
     tests/test_approval_gate.c
     tests/test_workflow_commands.c
     tests/test_scratchpad.c
     tests/test_mcp_resources.c
-    tests/test_mcp_resource_tools.c
     tests/test_context_engine.c
     tests/test_exec_env.c
     tests/test_channel_monitor.c
@@ -4183,7 +4133,6 @@ list(APPEND HU_TEST_SOURCES
     tests/test_visual_grounding.c
     tests/test_browser_use.c
     tests/test_gui_agent.c
-    tests/test_lsp.c
     tests/test_webrtc.c
     tests/test_embedded_provider.c
     tests/test_llamacpp_provider.c

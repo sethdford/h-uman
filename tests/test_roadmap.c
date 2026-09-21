@@ -12,7 +12,6 @@
 #include "human/plugin.h"
 #include "human/plugin_loader.h"
 #include "human/security/policy_engine.h"
-#include "human/security/replay.h"
 #include "human/tools/agent_query.h"
 #include "human/tools/agent_spawn.h"
 #include "human/tools/apply_patch.h"
@@ -354,24 +353,6 @@ static void test_otel_span(void) {
     hu_span_set_attr_int(span, "tokens", 100);
     hu_span_set_attr_double(span, "cost", 0.05);
     HU_ASSERT_EQ(hu_span_end(span, &a), HU_OK);
-}
-
-static void test_replay_record(void) {
-    hu_allocator_t a = hu_system_allocator();
-    hu_replay_recorder_t *r = hu_replay_recorder_create(&a, 100);
-    HU_ASSERT_NOT_NULL(r);
-    HU_ASSERT_EQ(hu_replay_record(r, HU_REPLAY_TOOL_CALL, "{\"tool\":\"shell\"}", 16), HU_OK);
-    HU_ASSERT_EQ(hu_replay_record(r, HU_REPLAY_TOOL_RESULT, "ok", 2), HU_OK);
-    HU_ASSERT_EQ(hu_replay_event_count(r), 2);
-    hu_replay_event_t ev;
-    HU_ASSERT_EQ(hu_replay_get_event(r, 0, &ev), HU_OK);
-    HU_ASSERT_EQ(ev.type, HU_REPLAY_TOOL_CALL);
-    char *json = NULL;
-    size_t jlen = 0;
-    HU_ASSERT_EQ(hu_replay_export_json(r, &a, &json, &jlen), HU_OK);
-    HU_ASSERT_NOT_NULL(json);
-    a.free(a.ctx, json, jlen + 1);
-    hu_replay_recorder_destroy(r);
 }
 
 static void test_plugin_registry(void) {
@@ -772,8 +753,8 @@ static void test_integ_factory_pool(void) {
     hu_agent_pool_t *pool = hu_agent_pool_create(&a, 2);
     hu_tool_t *tools = NULL;
     size_t count = 0;
-    hu_error_t err =
-        hu_tools_create_default(&a, ".", 1, NULL, NULL, NULL, NULL, pool, NULL, NULL, NULL, &tools, &count);
+    hu_error_t err = hu_tools_create_default(&a, ".", 1, NULL, NULL, NULL, NULL, pool, NULL, NULL,
+                                             NULL, &tools, &count);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT(count > 0);
     hu_tools_destroy_default(&a, tools, count);
@@ -784,8 +765,8 @@ static void test_integ_factory_null_pool(void) {
     hu_allocator_t a = hu_system_allocator();
     hu_tool_t *tools = NULL;
     size_t count = 0;
-    hu_error_t err =
-        hu_tools_create_default(&a, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &tools, &count);
+    hu_error_t err = hu_tools_create_default(&a, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+                                             NULL, &tools, &count);
     HU_ASSERT_EQ(err, HU_OK);
     hu_tools_destroy_default(&a, tools, count);
 }
@@ -948,7 +929,6 @@ void run_roadmap_tests(void) {
     HU_RUN_TEST(test_otel_span);
 
     HU_TEST_SUITE("Roadmap: Action Replay (4D)");
-    HU_RUN_TEST(test_replay_record);
 
     HU_TEST_SUITE("Roadmap: Plugin System (5B)");
     HU_RUN_TEST(test_plugin_registry);

@@ -87,9 +87,7 @@ behind options would reduce binary size for deployments that don't need them.
 | `src/memory/retrieval/keyword.c`         | 12.2 KB     | BM25 keyword search     |
 | `src/memory/retrieval/reranker.c`        | 12.0 KB     | Cross-encoder reranking |
 | `src/memory/retrieval/llm_reranker.c`    | 7.3 KB      | LLM-based reranking     |
-| `src/memory/retrieval/query_expansion.c` | 12.4 KB     | Query expansion         |
 | `src/memory/retrieval/rrf.c`             | 12.0 KB     | Reciprocal rank fusion  |
-| `src/memory/retrieval/qmd.c`             | 10.0 KB     | Query-memory distance   |
 | `src/memory/retrieval/temporal.c`        | 6.3 KB      | Temporal decay          |
 | `src/memory/retrieval/adaptive.c`        | 6.0 KB      | Adaptive strategy       |
 | `src/memory/retrieval/engine.c`          | 11.6 KB     | Retrieval orchestrator  |
@@ -104,7 +102,6 @@ behind options would reduce binary size for deployments that don't need them.
 | `src/memory/vector/embeddings_voyage.c` | 12.0 KB     | Voyage AI embeddings         |
 | `src/memory/vector/embeddings_ollama.c` | 11.3 KB     | Ollama local embeddings      |
 | `src/memory/vector/embedder_local.c`    | 9.8 KB      | Local vector embedder        |
-| `src/memory/vector/outbox.c`            | 8.3 KB      | Embedding outbox queue       |
 
 ### Observability (~33 KB object total)
 

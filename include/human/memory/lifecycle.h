@@ -48,15 +48,6 @@ hu_error_t hu_memory_hygiene_run(hu_allocator_t *alloc, hu_memory_t *memory,
                                  const hu_hygiene_config_t *config, hu_hygiene_stats_t *stats);
 
 /* ──────────────────────────────────────────────────────────────────────────
- * Snapshot: export/import memory state
- * ────────────────────────────────────────────────────────────────────────── */
-
-hu_error_t hu_memory_snapshot_export(hu_allocator_t *alloc, hu_memory_t *memory, const char *path,
-                                     size_t path_len);
-hu_error_t hu_memory_snapshot_import(hu_allocator_t *alloc, hu_memory_t *memory, const char *path,
-                                     size_t path_len);
-
-/* ──────────────────────────────────────────────────────────────────────────
  * Summarizer: compress old memories
  * ────────────────────────────────────────────────────────────────────────── */
 

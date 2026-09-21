@@ -104,7 +104,7 @@ Use this to find the right files for a given task without searching the full cod
 | **Web / network tools** | `src/tools/http_request.c`, `web_fetch.c`                            | `test_tools_all.c` (Web/Network suite)    |
 | **Memory tools**        | `src/tools/memory_recall.c`, `memory_store.c`                        | `test_tools_all.c` (Memory/Message suite) |
 | **Cron tools**          | `src/tools/cron_add.c`, `cron_remove.c`, `cron_list.c`, `cron_run.c` | `test_cron.c`                             |
-| **Computer use / LSP**  | `src/tools/computer_use.c`, `lsp.c`                                  | `test_computer_use.c`, `test_lsp.c`       |
+| **Computer use**        | `src/tools/computer_use.c`                                           | `test_computer_use.c`                     |
 | **Tool result cache (TTL)** | `src/tools/cache_ttl.c`, `include/human/tools/cache_ttl.h`         | `test_sota_wiring.c`                      |
 | **Live Canvas / A2UI**  | `src/tools/canvas.c`, `include/human/tools/canvas.h`, `src/gateway/cp_canvas.c` | `test_canvas_tool.c`, `test_canvas_e2e.c` |
 | **Canvas UI**           | `ui/src/components/hu-canvas.ts`, `hu-canvas-sandbox.ts`, `hu-canvas-editor.ts`, `ui/src/canvas-harness.ts`, `ui/src/views/canvas-view.ts` | — |
@@ -117,7 +117,6 @@ Use this to find the right files for a given task without searching the full cod
 | **SQL transaction helper**      | `src/memory/sql_transaction.c`, `include/human/memory/sql_transaction.h`                                       | `test_sql_transaction.c`                                                         |
 | **Retrieval / hybrid search**   | `src/memory/retrieval/engine.c`, `hybrid.c`, `keyword.c`, `reranker.c`                                         | `test_retrieval.c`                                                               |
 | **Vector / embeddings**         | `src/memory/vector/embeddings.c`, `store.c`, `chunker.c`                                                       | `test_vector.c`, `test_vector_full.c`, `test_vector_stores.c`                    |
-| **QMD (query memory dispatch)** | `src/memory/retrieval/qmd.c`                                                                                   | `test_qmd.c`                                                                     |
 | **Consolidation**               | `src/memory/consolidation.c`, `consolidation_engine.c`                                                         | `test_consolidation.c`, `test_consolidation_engine.c`                            |
 | **RAG pipeline**                | `src/memory/rag.c`, `src/memory/rag_pipeline.c`                                                                       | `test_rag.c`, `test_rag_pipeline.c`                                              |
 | **Relational episodes**         | `src/memory/relational_episode.c`, `include/human/memory/relational_episode.h`                                 | `test_humanness_frontiers.c`                                                     |
@@ -136,10 +135,10 @@ Use this to find the right files for a given task without searching the full cod
 
 | Concept             | Primary Source Files                                                 | Test Files                                                                |
 | ------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| **Vault / secrets** | `src/security/vault.c`, `secrets.c`                                  | `test_vault.c`, `test_crypto.c`                                           |
+| **Secrets**         | `src/security/secrets.c`                                             | `test_crypto.c`                                                           |
 | **Pairing**         | `src/security/pairing.c`                                             | `test_pairing.c`                                                          |
 | **Policy engine**   | `src/security/policy.c`, `policy_engine.c`                           | `test_security.c`, `test_security_extended.c`, `test_security_pipeline.c` |
-| **Sandbox**         | `src/security/sandbox.c`, `landlock.c`, `firejail.c`, `bubblewrap.c` | `test_security.c`                                                         |
+| **Sandbox**         | `src/security/landlock.c`, `firejail.c`, `bubblewrap.c`              | `test_security.c`                                                         |
 | **Adversarial**     | `src/security/adversarial.c`                                         | `test_adversarial.c`, `test_adversarial_detect.c`                         |
 | **Auth**            | `src/security/auth.c`                                                         | `test_auth.c`                                                             |
 | **Path security**   | `src/security/net_security.c`                                                 | `test_net_security.c`, `test_path_security.c`                             |
@@ -160,7 +159,6 @@ Use this to find the right files for a given task without searching the full cod
 | **OpenAI compat**    | `src/gateway/openai_compat.c`                                                             | `test_gateway_extended.c`               |
 | **Event bridge**     | `src/gateway/event_bridge.c`                                                              | `test_gateway_extended.c`               |
 | **Streaming voice**  | `src/gateway/cp_voice_stream.c`, `src/tts/cartesia_stream.c`, `docs/streaming-voice.md`   | `test_cartesia_stream.c`, `test_gateway_voice.c` |
-| **Tenancy**          | `src/gateway/tenant.c`                                                                    | `test_tenant.c`                         |
 | **Control protocol: security (CoT audit)** | `src/gateway/cp_security.c`                                                     | `test_gateway_extended.c`               |
 | **Control protocol: Turing score** | `src/gateway/cp_turing.c`                                                         | `test_gateway_extended.c`               |
 
@@ -226,7 +224,7 @@ Use this to find the right files for a given task without searching the full cod
 | **Runtime (native/docker/wasm)**                       | `src/runtime/native.c`, `docker.c`, `wasm_rt.c`, `factory.c`                                                                    | `test_runtime.c`, `test_runtime_bundle.c`                                          |
 | **Feeds (social/google/apple/gmail/imessage/twitter)** | `src/feeds/processor.c`, `social.c`, `google.c`, `apple.c`, `gmail.c`, `imessage.c`, `twitter.c`, `research.c`, `file_ingest.c` | `test_feeds.c`, `test_feed_processor.c`, `test_research_feeds.c`                   |
 | **Feed content sandboxing**    | `src/feeds/research.c` (XML quarantine for feed content)                                                                                    | `test_research_feeds.c`                                                            |
-| **Intelligence / skills**                              | `src/intelligence/skills.c`, `skill_system.c`, `reflection.c`, `experience.c`                                                   | `test_skills.c`, `test_skill_system.c`, `test_intelligence.c`, `test_experience.c` |
+| **Intelligence / skills**                              | `src/intelligence/skills.c`, `reflection.c`, `experience.c`                                                                    | `test_skills.c`, `test_intelligence.c`, `test_experience.c`                        |
 | **Peripherals**                                        | `src/peripherals/factory.c`, `arduino.c`, `stm32.c`, `rpi.c`                                                                    | `test_peripheral.c`                                                                |
 | **Observability**                                      | `src/observability/log_observer.c`, `metrics_observer.c`, `bth_metrics.c`                                                       | `test_observer.c`, `test_bth_metrics.c`                                            |
 | **Subagent / MCP**                                     | `src/subagent.c`, `src/mcp/mcp.c`, `src/mcp/mcp_server.c`                                                                               | `test_subagent.c`, `test_mcp.c`                                                    |

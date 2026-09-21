@@ -53,7 +53,6 @@ void run_contextual_bandit_tests(void);
 void run_humanization_bandit_tests(void);
 void run_memory_tests(void);
 void run_w7_render_null_safety_tests(void);
-void run_mlx_load_adapter_tests(void);
 void run_m3_route_per_turn_tests(void);
 void run_m3_route_per_turn_call_sites_tests(void);
 void run_m3_swap_failure_observability_tests(void);
@@ -70,7 +69,6 @@ void run_oauth_tests(void);
 void run_security_tests(void);
 void run_normalize_tests(void);
 void run_sensitivity_tests(void);
-void run_vault_tests(void);
 void run_vault_aead_tests(void);
 void run_app_bundle_structure_tests(void);
 void run_pkg_builder_tests(void);
@@ -86,8 +84,6 @@ void run_channel_class_tests(void);
 void run_channel_format_tests(void);
 void run_channel_behavior_class_tests(void);
 void run_channel_rate_limit_tests(void);
-void run_channel_http_tests(void);
-void run_webhook_channel_tests(void);
 void run_bg_registry_tests(void);
 void run_channel_embeds_tests(void);
 void run_channel_mock_tests(void);
@@ -181,7 +177,6 @@ void run_tools_all_tests(void);
 void run_rag_tests(void);
 void run_multimodal_tests(void);
 void run_multimodal_pipeline_tests(void);
-void run_multimodal_memory_tests(void);
 void run_multimodal_audio_tests(void);
 void run_multimodal_video_tests(void);
 void run_voice_duplex_tests(void);
@@ -320,7 +315,6 @@ void run_cli_ctl_tests(void);
 void run_doctor_local_voice_tests(void);
 void run_onboard_step_provider_tests(void);
 void run_cron_tests(void);
-void run_cron_session_tools_tests(void);
 void run_subagent_tests(void);
 void run_task_manager_tests(void);
 void run_task_tools_tests(void);
@@ -328,7 +322,6 @@ void run_tool_ask_user_tests(void);
 void run_mcp_tests(void);
 void run_mcp_jsonrpc_tests(void);
 void run_mcp_manager_tests(void);
-void run_mcp_resource_tools_tests(void);
 void run_mcp_transport_tests(void);
 void run_mcp_transport_sse_tests(void);
 void run_mcp_http_integration_tests(void);
@@ -349,7 +342,6 @@ void run_roadmap_tests(void);
 void run_new_features_tests(void);
 void run_ollama_integration_tests(void);
 void run_plugin_tests(void);
-void run_tenant_tests(void);
 void run_gmail_tests(void);
 void run_imessage_extended_tests(void);
 void run_imessage_reply_style_tests(void);
@@ -392,7 +384,6 @@ void run_untested_modules_tests(void);
 void run_modules_coverage_tests(void);
 void run_coverage_new_tests(void);
 void run_context_tests(void);
-void run_qmd_tests(void);
 void run_terminal_tests(void);
 void run_tavily_tests(void);
 void run_awareness_tests(void);
@@ -638,7 +629,6 @@ void run_intrinsic_drive_tests(void);
 void run_prosocial_routine_tests(void);
 void run_life_chapters_tests(void);
 void run_social_graph_tests(void);
-void run_skill_system_tests(void);
 void run_feeds_tests(void);
 #ifdef HU_ENABLE_FEEDS
 void run_apple_feeds_tests(void);
@@ -648,8 +638,6 @@ void run_news_health_email_tests(void);
 void run_social_feeds_tests(void);
 #endif
 #ifdef HU_ENABLE_FEEDS
-void run_google_feeds_tests(void);
-void run_music_feeds_tests(void);
 void run_research_feeds_tests(void);
 void run_research_executor_tests(void);
 #endif
@@ -675,7 +663,6 @@ void run_agi_frontiers_tests(void);
 void run_orchestrator_tests(void);
 void run_swarm_execution_tests(void);
 void run_dynamic_decomposition_tests(void);
-void run_agent_matching_tests(void);
 void run_agent_communication_tests(void);
 void run_mcts_planner_tests(void);
 void run_world_simulation_tests(void);
@@ -779,7 +766,6 @@ void run_reward_source_tests(void);
  * smokes (adapter file written; --kl-beta 0 disables KL via CLI). */
 void run_cli_grpo_tests(void);
 #endif
-void run_multigraph_tests(void);
 void run_memory_graph_tests(void);
 void run_experience_tests(void);
 void run_experience_engine_tests(void);
@@ -800,7 +786,6 @@ void run_otlp_tests(void);
 void run_token_budget_tests(void);
 void run_mar_tests(void);
 void run_mem_policy_tests(void);
-void run_prompt_optimizer_tests(void);
 void run_chaos_tests(void);
 void run_checkpoint_tests(void);
 void run_scratchpad_tests(void);
@@ -844,7 +829,6 @@ void run_visual_grounding_tests(void);
 void run_browser_use_tests(void);
 void run_local_voice_tests(void);
 void run_gui_agent_tests(void);
-void run_lsp_tests(void);
 void run_webrtc_tests(void);
 void run_embedded_provider_tests(void);
 void run_llamacpp_provider_tests(void);
@@ -929,11 +913,9 @@ void run_anticipatory_state_tests(void);
 void run_canvas_tool_tests(void);
 void run_canvas_e2e_tests(void);
 void run_canvas_persist_tests(void);
-void run_canvas_render_tests(void);
 void run_homebrew_formula_tests(void);
 void run_background_registry_tests(void);
 void run_consistency_tests(void);
-void run_mlx_provider_tests(void);
 void run_mlx_stream_utf8_tests(void);
 void run_persona_fidelity_tests(void);
 void run_persona_fidelity_judge_tests(void);
@@ -1002,7 +984,6 @@ void run_filler_recency_tests(void);
 void run_contact_send_recency_tests(void);
 /* 2026-09-10 review: these six suites were compiled (or, for the last two,
  * not even listed in CMake) but never called from main(). */
-void run_sse_parser_tests(void);
 void run_contact_send_recency_daemon_tests(void);
 #ifdef HU_ENABLE_ML
 void run_ml_scripts_dir_tests(void);
@@ -1176,7 +1157,6 @@ int main(int argc, char **argv) {
     run_humanization_bandit_tests();
     run_memory_tests();
     run_w7_render_null_safety_tests();
-    run_mlx_load_adapter_tests();
     run_m3_route_per_turn_tests();
     run_m3_route_per_turn_call_sites_tests();
     run_m3_swap_failure_observability_tests();
@@ -1193,7 +1173,6 @@ int main(int argc, char **argv) {
     run_security_tests();
     run_normalize_tests();
     run_sensitivity_tests();
-    run_vault_tests();
     run_vault_aead_tests();
     run_app_bundle_structure_tests();
     run_pkg_builder_tests();
@@ -1209,8 +1188,6 @@ int main(int argc, char **argv) {
     run_channel_format_tests();
     run_channel_behavior_class_tests();
     run_channel_rate_limit_tests();
-    run_channel_http_tests();
-    run_webhook_channel_tests();
     run_bg_registry_tests();
     run_channel_embeds_tests();
     run_channel_mock_tests();
@@ -1277,7 +1254,6 @@ int main(int argc, char **argv) {
     run_rag_tests();
     run_multimodal_tests();
     run_multimodal_pipeline_tests();
-    run_multimodal_memory_tests();
     run_multimodal_audio_tests();
     run_multimodal_video_tests();
     run_voice_duplex_tests();
@@ -1292,7 +1268,6 @@ int main(int argc, char **argv) {
     run_autonomy_tests();
     run_retrieval_tests();
     run_retrieval_contact_isolation_tests();
-    run_multigraph_tests();
     run_memory_graph_tests();
     run_vector_tests();
     run_vector_full_tests();
@@ -1417,12 +1392,10 @@ int main(int argc, char **argv) {
     run_doctor_local_voice_tests();
     run_onboard_step_provider_tests();
     run_cron_tests();
-    run_cron_session_tools_tests();
     run_subagent_tests();
     run_mcp_tests();
     run_mcp_jsonrpc_tests();
     run_mcp_manager_tests();
-    run_mcp_resource_tools_tests();
     run_mcp_transport_tests();
     run_mcp_transport_sse_tests();
     run_mcp_http_integration_tests();
@@ -1442,7 +1415,6 @@ int main(int argc, char **argv) {
     run_new_features_tests();
     run_ollama_integration_tests();
     run_plugin_tests();
-    run_tenant_tests();
     run_gmail_tests();
     run_imessage_extended_tests();
     run_imessage_reply_style_tests();
@@ -1486,7 +1458,6 @@ int main(int argc, char **argv) {
     run_modules_coverage_tests();
     run_coverage_new_tests();
     run_context_tests();
-    run_qmd_tests();
     run_terminal_tests();
     run_tavily_tests();
     run_awareness_tests();
@@ -1723,13 +1694,10 @@ int main(int argc, char **argv) {
     run_prosocial_routine_tests();
     run_life_chapters_tests();
     run_social_graph_tests();
-    run_skill_system_tests();
     run_feeds_tests();
 #ifdef HU_ENABLE_FEEDS
     run_apple_feeds_tests();
     run_news_health_email_tests();
-    run_google_feeds_tests();
-    run_music_feeds_tests();
     run_research_feeds_tests();
     run_research_executor_tests();
 #endif
@@ -1758,7 +1726,6 @@ int main(int argc, char **argv) {
     run_orchestrator_tests();
     run_swarm_execution_tests();
     run_dynamic_decomposition_tests();
-    run_agent_matching_tests();
     run_agent_communication_tests();
     run_mcts_planner_tests();
     run_world_simulation_tests();
@@ -1863,7 +1830,6 @@ int main(int argc, char **argv) {
     run_token_budget_tests();
     run_mar_tests();
     run_mem_policy_tests();
-    run_prompt_optimizer_tests();
     run_chaos_tests();
     run_checkpoint_tests();
     run_scratchpad_tests();
@@ -1907,7 +1873,6 @@ int main(int argc, char **argv) {
     run_browser_use_tests();
     run_local_voice_tests();
     run_gui_agent_tests();
-    run_lsp_tests();
     run_webrtc_tests();
     run_embedded_provider_tests();
     run_llamacpp_provider_tests();
@@ -1992,7 +1957,6 @@ int main(int argc, char **argv) {
     run_vector_retrieval_remote_tests();
     run_background_registry_tests();
     run_consistency_tests();
-    run_mlx_provider_tests();
     run_mlx_stream_utf8_tests();
     run_persona_fidelity_tests();
     run_persona_fidelity_judge_tests();
@@ -2059,7 +2023,6 @@ int main(int argc, char **argv) {
 #endif
     run_filler_recency_tests();
     run_contact_send_recency_tests();
-    run_sse_parser_tests();
     run_contact_send_recency_daemon_tests();
 #ifdef HU_ENABLE_ML
     run_ml_scripts_dir_tests();
@@ -2088,7 +2051,6 @@ int main(int argc, char **argv) {
     run_canvas_tool_tests();
     run_canvas_e2e_tests();
     run_canvas_persist_tests();
-    run_canvas_render_tests();
     run_homebrew_formula_tests();
 #ifdef HU_ENABLE_RL_FULL
     /* Phase 5 Task 2 (RL SOTA): bootstrap CI suite — only linked when

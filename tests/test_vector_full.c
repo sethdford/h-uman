@@ -4,8 +4,6 @@
 #include "human/memory/vector/embeddings_gemini.h"
 #include "human/memory/vector/embeddings_ollama.h"
 #include "human/memory/vector/embeddings_voyage.h"
-#include "human/memory/vector/outbox.h"
-#include "human/memory/vector/provider_router.h"
 #include "human/memory/vector/store.h"
 #include "human/memory/vector/store_pgvector.h"
 #include "human/memory/vector/store_qdrant.h"
@@ -90,42 +88,6 @@ static void test_voyage_create_and_embed_mock(void) {
     p.vtable->deinit(p.ctx, &alloc);
 }
 
-static void test_provider_router_single(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_embedding_provider_t noop = hu_embedding_provider_noop_create(&alloc);
-    hu_embedding_provider_t p = hu_embedding_provider_router_create(&alloc, noop, NULL, 0, NULL, 0);
-    HU_ASSERT_NOT_NULL(p.ctx);
-    HU_ASSERT_STR_EQ(p.vtable->name(p.ctx), "auto");
-
-    hu_embedding_provider_result_t res = {0};
-    hu_error_t err = p.vtable->embed(p.ctx, &alloc, "route", 5, &res);
-    HU_ASSERT_EQ(err, HU_OK);
-    hu_embedding_provider_free(&alloc, &res);
-
-    p.vtable->deinit(p.ctx, &alloc);
-}
-
-static void test_outbox_enqueue_flush(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_embedding_outbox_t *ob = hu_embedding_outbox_create(&alloc);
-    HU_ASSERT_NOT_NULL(ob);
-
-    hu_error_t err = hu_embedding_outbox_enqueue(ob, "id1", 3, "text one", 8);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_EQ(hu_embedding_outbox_pending_count(ob), 1);
-
-    hu_embedding_outbox_enqueue(ob, "id2", 3, "text two", 8);
-    HU_ASSERT_EQ(hu_embedding_outbox_pending_count(ob), 2);
-
-    hu_embedding_provider_t prov = hu_embedding_provider_noop_create(&alloc);
-    err = hu_embedding_outbox_flush(ob, &alloc, &prov, NULL, NULL);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_EQ(hu_embedding_outbox_pending_count(ob), 0);
-
-    prov.vtable->deinit(prov.ctx, &alloc);
-    hu_embedding_outbox_destroy(&alloc, ob);
-}
-
 static void test_vector_store_upsert_search_mock(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_vector_store_t store = hu_vector_store_mem_vec_create(&alloc);
@@ -183,36 +145,6 @@ static void test_qdrant_mock(void) {
 #endif
 
     store.vtable->deinit(store.ctx, &alloc);
-}
-
-static void test_outbox_multiple_enqueue(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_embedding_outbox_t *ob = hu_embedding_outbox_create(&alloc);
-    HU_ASSERT_NOT_NULL(ob);
-
-    for (int i = 0; i < 5; i++) {
-        char id[16];
-        snprintf(id, sizeof(id), "id%d", i);
-        hu_embedding_outbox_enqueue(ob, id, strlen(id), "text", 4);
-    }
-    HU_ASSERT_EQ(hu_embedding_outbox_pending_count(ob), 5);
-
-    hu_embedding_provider_t prov = hu_embedding_provider_noop_create(&alloc);
-    hu_embedding_outbox_flush(ob, &alloc, &prov, NULL, NULL);
-    HU_ASSERT_EQ(hu_embedding_outbox_pending_count(ob), 0);
-
-    prov.vtable->deinit(prov.ctx, &alloc);
-    hu_embedding_outbox_destroy(&alloc, ob);
-}
-
-static void test_outbox_empty_flush(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_embedding_outbox_t *ob = hu_embedding_outbox_create(&alloc);
-    hu_embedding_provider_t prov = hu_embedding_provider_noop_create(&alloc);
-    hu_error_t err = hu_embedding_outbox_flush(ob, &alloc, &prov, NULL, NULL);
-    HU_ASSERT_EQ(err, HU_OK);
-    prov.vtable->deinit(prov.ctx, &alloc);
-    hu_embedding_outbox_destroy(&alloc, ob);
 }
 
 static void test_semantic_cache_put_then_get_exact(void) {
@@ -274,10 +206,6 @@ void run_vector_full_tests(void) {
     HU_RUN_TEST(test_gemini_create_and_embed_mock);
     HU_RUN_TEST(test_ollama_create_and_embed_mock);
     HU_RUN_TEST(test_voyage_create_and_embed_mock);
-    HU_RUN_TEST(test_provider_router_single);
-    HU_RUN_TEST(test_outbox_enqueue_flush);
-    HU_RUN_TEST(test_outbox_multiple_enqueue);
-    HU_RUN_TEST(test_outbox_empty_flush);
     HU_RUN_TEST(test_vector_store_upsert_search_mock);
     HU_RUN_TEST(test_pgvector_not_supported);
     HU_RUN_TEST(test_qdrant_mock);

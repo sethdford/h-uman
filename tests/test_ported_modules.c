@@ -510,12 +510,6 @@ static void test_rate_tracker(void) {
     hu_rate_tracker_destroy(t);
 }
 
-static void test_sandbox_create_noop(void) {
-    hu_sandbox_t sb = hu_sandbox_create_noop();
-    HU_ASSERT_TRUE(hu_sandbox_is_available(&sb));
-    HU_ASSERT_STR_EQ(hu_sandbox_name(&sb), "none");
-}
-
 static void test_capabilities_manifest(void) {
     hu_allocator_t alloc = hu_system_allocator();
     char *json = NULL;
@@ -885,7 +879,6 @@ void run_ported_modules_tests(void) {
     HU_RUN_TEST(test_agent_commands_parse);
     HU_RUN_TEST(test_agent_commands_bare_reset_prompt);
     HU_RUN_TEST(test_rate_tracker);
-    HU_RUN_TEST(test_sandbox_create_noop);
     HU_RUN_TEST(test_capabilities_manifest);
     HU_RUN_TEST(test_config_mutator_mutate);
     HU_RUN_TEST(test_update_check_mock);

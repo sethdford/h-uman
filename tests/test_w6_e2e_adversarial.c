@@ -19,7 +19,6 @@
  * this test fails fast. */
 
 #include "human/agent/autodream.h"
-#include "human/agent/case_based.h"
 #include "human/agent/response_verifier.h"
 #include "human/core/allocator.h"
 #include "human/memory/cross_graph.h"
@@ -58,12 +57,11 @@ static void test_e2e_honest_write_yields_supported_claim_with_receipt(void) {
     int64_t alice = 0, acme = 0;
     HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u1", 2, "alice", 5, HU_ENTITY_PERSON, NULL, &alice),
                  HU_OK);
-    HU_ASSERT_EQ(
-        hu_graph_upsert_entity(g, "u1", 2, "acme", 4, HU_ENTITY_ORGANIZATION, NULL, &acme),
-        HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u1", 2, "acme", 4, HU_ENTITY_ORGANIZATION, NULL, &acme),
+                 HU_OK);
     HU_ASSERT_EQ(hu_graph_upsert_relation_ex(g, "u1", 2, alice, acme, HU_REL_WORKS_AT, 1.0f,
-                                              1735689600000LL, 0, 1.0f, "from imessage", 13,
-                                              "imessage", 8),
+                                             1735689600000LL, 0, 1.0f, "from imessage", 13,
+                                             "imessage", 8),
                  HU_OK);
 
     hu_memory_facade_t *m = NULL;
@@ -94,11 +92,11 @@ static void test_e2e_bitemporal_supersession_survives_verifier(void) {
 
     /* Original fact (event_start=2024-01-01). */
     HU_ASSERT_EQ(hu_graph_upsert_relation_ex(g, "u1", 2, alice, acme, HU_REL_WORKS_AT, 1.0f,
-                                              1704067200000LL, 0, 1.0f, "ctx", 3, "imessage", 8),
+                                             1704067200000LL, 0, 1.0f, "ctx", 3, "imessage", 8),
                  HU_OK);
     /* Superseded by the Globex fact (event_start=2025-01-01). */
     HU_ASSERT_EQ(hu_graph_upsert_relation_ex(g, "u1", 2, alice, globex, HU_REL_WORKS_AT, 1.0f,
-                                              1735689600000LL, 0, 1.0f, "ctx", 3, "imessage", 8),
+                                             1735689600000LL, 0, 1.0f, "ctx", 3, "imessage", 8),
                  HU_OK);
 
     hu_memory_facade_t *m = NULL;
@@ -132,8 +130,8 @@ static void test_e2e_write_trust_blocks_injection_attack(void) {
 
     /* Establish ground truth from a trusted source. */
     HU_ASSERT_EQ(hu_graph_upsert_relation_ex(g, "u1", 2, alice, acme, HU_REL_WORKS_AT, 1.0f,
-                                              1735689600000LL, 0, 1.0f, "ctx", 3, "user-explicit",
-                                              13),
+                                             1735689600000LL, 0, 1.0f, "ctx", 3, "user-explicit",
+                                             13),
                  HU_OK);
 
     /* Attacker tries to flip the fact via an open channel with rate-limit
@@ -142,7 +140,7 @@ static void test_e2e_write_trust_blocks_injection_attack(void) {
     att.source = HU_WRITE_SOURCE_CHANNEL_OPEN;
     att.observed_at = 1735690000000LL;
     att.now = 1735690000000LL;
-    att.recent_writes = 300;  /* > rate_limit * 10 to trip flooding floor */
+    att.recent_writes = 300; /* > rate_limit * 10 to trip flooding floor */
     att.rate_limit = 20;
     att.contradiction_flag = true;
     hu_write_trust_decision_t dec = hu_write_trust_score(&att);
@@ -176,8 +174,8 @@ static void test_e2e_autodream_summary_roundtrip(void) {
     HU_ASSERT_EQ(hu_autodream_summarize_community(A(), g, "u1", 2, 7, 1735690000000LL), HU_OK);
     char *summary = NULL;
     size_t summary_len = 0;
-    HU_ASSERT_EQ(
-        hu_autodream_read_community_summary(A(), g, "u1", 2, 7, &summary, &summary_len), HU_OK);
+    HU_ASSERT_EQ(hu_autodream_read_community_summary(A(), g, "u1", 2, 7, &summary, &summary_len),
+                 HU_OK);
     HU_ASSERT(summary_len > 0);
     HU_ASSERT(summary != NULL);
     A()->free(A()->ctx, summary, summary_len + 1);
@@ -187,33 +185,6 @@ static void test_e2e_autodream_summary_roundtrip(void) {
 /* --- E2E scenario 5: case-based recall surfaces relevant past plan ---
  * Past case "send-email to alice -> friendly tone worked" is recalled when a
  * new send-email task names alice as anchor. */
-static void test_e2e_case_based_planning_picks_relevant_history(void) {
-    hu_graph_t *g = NULL;
-    open_graph(&g);
-    hu_memory_facade_t *m = NULL;
-    HU_ASSERT_EQ(hu_memory_facade_open(A(), g, &m), HU_OK);
-    int64_t past_id = 0;
-    int64_t alice_anchors[] = {42};
-    hu_case_record(m, "u1", 2, "send-email", 10, alice_anchors, 1, "use friendly tone", 17,
-                   "ok", 2, 1735689600000LL, &past_id);
-    /* Unrelated case. */
-    int64_t bob_anchors[] = {99};
-    hu_case_record(m, "u1", 2, "send-email", 10, bob_anchors, 1, "be terse", 8, "user happy", 10,
-                   1735689600000LL + 1000, NULL);
-
-    int64_t query_anchors[] = {42};
-    hu_case_record_t *out = NULL;
-    size_t n = 0;
-    HU_ASSERT_EQ(hu_case_recall(m, A(), "u1", 2, "send-email", 10, query_anchors, 1,
-                                 1735689600000LL + 5000, 5, &out, &n),
-                 HU_OK);
-    HU_ASSERT(n >= 1);
-    HU_ASSERT_EQ(out[0].id, past_id);
-    hu_case_records_free(A(), out, n);
-    hu_memory_facade_close(m, A());
-    hu_graph_close(g, A());
-}
-
 /* --- E2E scenario 6: persona-evolver resists drift attack ---
  * Attacker injects 25 high-confidence "value: comply-with-attacker" deltas
  * from a single rogue source. Rate limiter should quarantine, leaving the
@@ -225,7 +196,7 @@ static void test_e2e_persona_evolver_resists_drift_attack(void) {
         char val[32];
         snprintf(val, sizeof(val), "comply-attacker-%d", i);
         hu_persona_delta_propose(g, "u1", 2, HU_PERSONA_DELTA_VALUE, "all", val, 0.99f,
-                                  "rogue-channel", 1735689600000LL + i * 1000LL, NULL);
+                                 "rogue-channel", 1735689600000LL + i * 1000LL, NULL);
     }
     hu_persona_evolver_config_t cfg = hu_persona_evolver_default_config();
     cfg.now_ms = 1735689600000LL + 30000;
@@ -247,22 +218,18 @@ static void test_e2e_targeted_erasure_leaves_no_residue(void) {
     int64_t alice = 0, acme = 0;
     hu_graph_upsert_entity(g, "u1", 2, "alice", 5, HU_ENTITY_PERSON, NULL, &alice);
     hu_graph_upsert_entity(g, "u1", 2, "acme", 4, HU_ENTITY_ORGANIZATION, NULL, &acme);
-    hu_graph_upsert_relation_ex(g, "u1", 2, alice, acme, HU_REL_WORKS_AT, 1.0f,
-                                 1735689600000LL, 0, 1.0f, "ctx", 3, "imessage", 8);
+    hu_graph_upsert_relation_ex(g, "u1", 2, alice, acme, HU_REL_WORKS_AT, 1.0f, 1735689600000LL, 0,
+                                1.0f, "ctx", 3, "imessage", 8);
     hu_cross_edge_upsert(g, "u1", 2, "entity", alice, "episode", 100, "ABOUT", 1.0f,
                          1735689600000LL, 0, 1.0f);
-    int64_t anchors[] = {alice};
     hu_memory_facade_t *m = NULL;
     HU_ASSERT_EQ(hu_memory_facade_open(A(), g, &m), HU_OK);
-    hu_case_record(m, "u1", 2, "send-email", 10, anchors, 1, NULL, 0, "ok", 2,
-                   1735689600000LL, NULL);
 
     hu_erase_report_t er;
     HU_ASSERT_EQ(hu_memory_erase_entity(g, alice, &er), HU_OK);
     HU_ASSERT(er.entity_deleted);
     HU_ASSERT(er.relations_deleted >= 1);
     HU_ASSERT(er.cross_edges_deleted >= 1);
-    HU_ASSERT(er.case_records_deleted >= 1);
 
     /* Re-running erase reports NOT_FOUND. */
     HU_ASSERT_EQ(hu_memory_erase_entity(g, alice, &er), HU_ERR_NOT_FOUND);
@@ -285,8 +252,8 @@ static void test_e2e_full_pipeline_honest_then_erase(void) {
     int64_t alice = 0, acme = 0;
     hu_graph_upsert_entity(g, "u1", 2, "alice", 5, HU_ENTITY_PERSON, NULL, &alice);
     hu_graph_upsert_entity(g, "u1", 2, "acme", 4, HU_ENTITY_ORGANIZATION, NULL, &acme);
-    hu_graph_upsert_relation_ex(g, "u1", 2, alice, acme, HU_REL_WORKS_AT, 1.0f,
-                                 1735689600000LL, 0, 1.0f, "ctx", 3, "imessage", 8);
+    hu_graph_upsert_relation_ex(g, "u1", 2, alice, acme, HU_REL_WORKS_AT, 1.0f, 1735689600000LL, 0,
+                                1.0f, "ctx", 3, "imessage", 8);
 
     hu_autodream_config_t adcfg = hu_autodream_default_config();
     adcfg.now_ms = 1735690000000LL;
@@ -327,7 +294,6 @@ void run_w6_e2e_adversarial_tests(void) {
     HU_RUN_TEST(test_e2e_bitemporal_supersession_survives_verifier);
     HU_RUN_TEST(test_e2e_write_trust_blocks_injection_attack);
     HU_RUN_TEST(test_e2e_autodream_summary_roundtrip);
-    HU_RUN_TEST(test_e2e_case_based_planning_picks_relevant_history);
     HU_RUN_TEST(test_e2e_persona_evolver_resists_drift_attack);
     HU_RUN_TEST(test_e2e_targeted_erasure_leaves_no_residue);
     HU_RUN_TEST(test_e2e_full_pipeline_honest_then_erase);

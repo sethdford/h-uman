@@ -271,72 +271,6 @@ static void test_hygiene_deduplicates(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
-static void test_snapshot_export_import(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-#ifdef HU_ENABLE_SQLITE
-    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
-#else
-    hu_memory_t mem = hu_none_memory_create(&alloc);
-#endif
-    HU_ASSERT_NOT_NULL(mem.ctx);
-
-    hu_memory_category_t cat = {.tag = HU_MEMORY_CATEGORY_CORE};
-#ifdef HU_ENABLE_SQLITE
-    mem.vtable->store(mem.ctx, "snap_key1", 9, "snap_val1", 9, &cat, NULL, 0);
-    mem.vtable->store(mem.ctx, "snap_key2", 9, "snap_val2", 9, &cat, NULL, 0);
-#endif
-
-    char path_buf[] = "/tmp/human_snap_XXXXXX";
-#ifdef _WIN32
-    (void)path_buf;
-    const char *path = "human_snap_test.json";
-    size_t path_len = strlen(path);
-#else
-    int fd = mkstemp(path_buf);
-    HU_ASSERT_TRUE(fd >= 0);
-    close(fd);
-    const char *path = path_buf;
-    size_t path_len = strlen(path);
-#endif
-
-    hu_error_t err = hu_memory_snapshot_export(&alloc, &mem, path, path_len);
-    HU_ASSERT_EQ(err, HU_OK);
-
-#ifdef HU_ENABLE_SQLITE
-    hu_memory_t mem2 = hu_sqlite_memory_create(&alloc, ":memory:");
-    HU_ASSERT_NOT_NULL(mem2.ctx);
-
-    err = hu_memory_snapshot_import(&alloc, &mem2, path, path_len);
-    HU_ASSERT_EQ(err, HU_OK);
-
-    hu_memory_entry_t *entries = NULL;
-    size_t count = 0;
-    err = mem2.vtable->list(mem2.ctx, &alloc, NULL, NULL, 0, &entries, &count);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_TRUE(count >= 1);
-
-    bool found_any = false;
-    for (size_t i = 0; i < count; i++) {
-        if (entries[i].key_len == 9) {
-            if (memcmp(entries[i].key, "snap_key1", 9) == 0 ||
-                memcmp(entries[i].key, "snap_key2", 9) == 0)
-                found_any = true;
-        }
-        hu_memory_entry_free_fields(&alloc, &entries[i]);
-    }
-    if (entries)
-        alloc.free(alloc.ctx, entries, count * sizeof(hu_memory_entry_t));
-    HU_ASSERT_TRUE(found_any);
-
-    mem2.vtable->deinit(mem2.ctx);
-#endif
-
-#ifndef _WIN32
-    unlink(path);
-#endif
-    mem.vtable->deinit(mem.ctx);
-}
-
 static void test_summarizer_truncation(void) {
     hu_allocator_t alloc = hu_system_allocator();
 #ifdef HU_ENABLE_SQLITE
@@ -481,6 +415,5 @@ void run_lifecycle_tests(void) {
     HU_RUN_TEST(test_hygiene_removes_oversized);
     HU_RUN_TEST(test_hygiene_removes_expired);
     HU_RUN_TEST(test_hygiene_deduplicates);
-    HU_RUN_TEST(test_snapshot_export_import);
     HU_RUN_TEST(test_summarizer_truncation);
 }
