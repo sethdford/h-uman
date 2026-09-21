@@ -63,13 +63,28 @@ fi
 # outbound/{strip,shape,echo,persona,moderation}.c.o stage tables, which export
 # only D/S) and are excluded from A by construction — a member with no code in
 # it is not a never-loaded module.
-NEVER_LOADED_BASELINE=50
+#
+# Re-measured 2026-09-21, same day, after Task 11 (docs/plans/2026-09-20-
+# dead-code-plan.md) turned HU_ENABLE_ALL_CHANNELS off in the dev preset (991
+# archive members, down from 1,024 — the ~16 channels no build ever configures
+# stopped compiling). This is a manual lock, not an auto-lock: the pre-commit
+# hook's ratchet_autolock only fires when a staged src/**/*.c or *.h changes,
+# and Task 11 touched only CMakeLists.txt/CMakePresets.json, so the mechanism
+# never ran. The commit that changed the presets also fixed two never-loaded
+# members the config change exposed (meta_common.c's stray "OR
+# HU_ENABLE_WHATSAPP", and src/voice/webrtc*.c sitting unconditionally in
+# HU_CORE_SOURCES); this baseline reflects the fixed tree, not the raw
+# preset flip.
+NEVER_LOADED_BASELINE=47
 # Composition at the baseline: 40 whole function symbols plus 59 function-local
 # statics (`_hu_fn.CONSTANT`, `_hu_fn.sql`), which the linker emits as separate
 # symbols of the function that owns them. Both are counted, per the plan's
 # definition; the statics move with their function, so they are correlated
 # rather than independent noise. The FAIL output prints every name.
-DEAD_UNREF_BASELINE=99
+#
+# Re-measured 2026-09-21 alongside NEVER_LOADED_BASELINE above, same config
+# change and same reason the auto-lock didn't fire.
+DEAD_UNREF_BASELINE=79
 
 cd "$_hu_root"
 
