@@ -143,6 +143,4 @@ void hu_audit_logger_destroy(hu_audit_logger_t *logger, hu_allocator_t *alloc);
 
 hu_error_t hu_audit_logger_log(hu_audit_logger_t *logger,
     const hu_audit_event_t *event);
-hu_error_t hu_audit_logger_log_command(hu_audit_logger_t *logger,
-    const hu_audit_cmd_log_t *entry);
 ```

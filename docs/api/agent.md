@@ -99,7 +99,6 @@ Handles `/help`, `/quit`, `/clear`, `/model`, `/status`. Returns owned string or
 
 ```c
 void hu_agent_clear_history(hu_agent_t *agent);
-uint32_t hu_agent_estimate_tokens(const char *text, size_t len);
 ```
 
 ### Plan Execution

@@ -33,6 +33,21 @@ cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DHU_ENABLE_LTO=ON
 cmake --build . -j$(nproc)
 ```
 
+**Pre-push: the pause before the dead-strip gate is a rebuild, not a hang.**
+Enable the hooks with `git config core.hooksPath .githooks`. After the suite
+passes, `pre-push` runs the dead-strip ratchet, which measures `build/` — the
+dev-preset tree the committed baselines were taken against — rather than the
+`build-check/` tree it has just compiled, because `build-check` configures a
+different feature set and its counts are not comparable. So it first refreshes
+`build/` incrementally whenever anything under `src/` or `include/` is newer
+than the built artifacts, printing `Refreshing build/ for the dead-strip
+ratchet...`: roughly a second on a warm tree, around 48 seconds when the
+dependency scan has to walk every object. Without that refresh the gate would
+measure an older tree than the one being pushed. A missing `build/`, or one
+that fails to build, skips the gate with a single line instead of blocking the
+push. The two counters and how to respond when one grows:
+`.claude/rules/dead-strip-ratchet.md`.
+
 ## Code Style
 
 - Functions, variables, fields: `snake_case`
