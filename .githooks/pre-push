@@ -153,11 +153,19 @@ if [ -f "CMakeLists.txt" ]; then
             # measured 46 s here; "nothing under src/ or include/ is newer than
             # the linked artifacts" is the same test make itself would apply, so
             # skipping it when that holds changes nothing but the clock.
+            # The \( ... \) around the -o are REQUIRED, not style. find's -o binds
+            # looser than the implicit -a, so `-name '*.[ch]' -o -name '*.m' -newer X
+            # -print -quit` parses as (.[ch]) OR (.m AND newer AND print), and because
+            # an explicit action suppresses find's default -print, a NEWER .c matches
+            # the first branch, short-circuits, and prints nothing. Verified: the
+            # unparenthesized form reports a freshly-touched src/NEWER.c as CLEAN.
+            # Adding .m without the parens would have broken the .c/.h detection the
+            # probe already did.
             ds_stale=0
             for ds_artifact in human human_tests; do
                 if [ ! -f "build/$ds_artifact" ]; then
                     ds_stale=1
-                elif [ -n "$(find src include -name '*.[ch]' -newer "build/$ds_artifact" -print -quit 2>/dev/null)" ]; then
+                elif [ -n "$(find src include \( -name '*.[ch]' -o -name '*.m' \) -newer "build/$ds_artifact" -print -quit 2>/dev/null)" ]; then
                     ds_stale=1
                 fi
             done
