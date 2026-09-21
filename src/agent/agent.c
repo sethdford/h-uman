@@ -148,8 +148,50 @@ void hu_agent_internal_apply_turn_request_overrides(const hu_agent_t *agent,
         req->thinking_budget = agent->turn_thinking_budget;
 }
 
-void hu_agent_internal_resolve_max_tokens(hu_chat_request_t *req, const char *model_ref,
-                                          size_t model_ref_len) {
+/* SHADOW log-throttle for hu_agent_internal_resolve_max_tokens — see the
+ * contract comment in agent_internal.h (review round 1: both call sites
+ * are inside a per-turn tool-iteration loop, so without this, SHADOW logs
+ * at INFO on every provider round trip). Fixed-size table of distinct
+ * model_refs already logged this process; deliberately NOT locked — a
+ * racy duplicate log (or, past HU_MAX_TOKENS_SHADOW_LOG_CAP distinct
+ * models in one process, a resumed "log every time" for the overflow) is
+ * an acceptable best-effort trade-off on this hot path, and prod runs two
+ * models. */
+#define HU_MAX_TOKENS_SHADOW_LOG_CAP 8
+#define HU_MAX_TOKENS_SHADOW_REF_CAP 96
+
+static char s_max_tokens_shadow_seen[HU_MAX_TOKENS_SHADOW_LOG_CAP][HU_MAX_TOKENS_SHADOW_REF_CAP];
+static size_t s_max_tokens_shadow_seen_len[HU_MAX_TOKENS_SHADOW_LOG_CAP];
+static size_t s_max_tokens_shadow_seen_count = 0;
+
+/* Returns true (suppress the log) if `model_ref` was already marked seen;
+ * otherwise marks it seen (space permitting) and returns false (log it). */
+static bool max_tokens_shadow_mark_and_check_seen(const char *model_ref, size_t model_ref_len) {
+    const char *ref = (model_ref && model_ref_len > 0) ? model_ref : "(none)";
+    size_t ref_len = (model_ref && model_ref_len > 0) ? model_ref_len : 6;
+    size_t trunc =
+        ref_len < HU_MAX_TOKENS_SHADOW_REF_CAP - 1 ? ref_len : HU_MAX_TOKENS_SHADOW_REF_CAP - 1;
+
+    for (size_t i = 0; i < s_max_tokens_shadow_seen_count; i++) {
+        if (s_max_tokens_shadow_seen_len[i] == trunc &&
+            memcmp(s_max_tokens_shadow_seen[i], ref, trunc) == 0)
+            return true;
+    }
+    if (s_max_tokens_shadow_seen_count < HU_MAX_TOKENS_SHADOW_LOG_CAP) {
+        memcpy(s_max_tokens_shadow_seen[s_max_tokens_shadow_seen_count], ref, trunc);
+        s_max_tokens_shadow_seen_len[s_max_tokens_shadow_seen_count] = trunc;
+        s_max_tokens_shadow_seen_count++;
+    }
+    return false;
+}
+
+void hu_agent_internal_resolve_max_tokens_reset_for_test(void) {
+    s_max_tokens_shadow_seen_count = 0;
+}
+
+hu_max_tokens_resolve_result_t hu_agent_internal_resolve_max_tokens(hu_chat_request_t *req,
+                                                                    const char *model_ref,
+                                                                    size_t model_ref_len) {
     /* See agent_internal.h for contract. src/agent/max_tokens.c has resolved
      * a model's output cap since 2026-07-27 (the GLM serving-base fix), but
      * nothing populated hu_chat_request_t.max_tokens with it — providers
@@ -157,7 +199,7 @@ void hu_agent_internal_resolve_max_tokens(hu_chat_request_t *req, const char *mo
      * gemini.c ~768). Wiring it changes reply length caps in production, so
      * it lands behind HU_MAX_TOKENS_RESOLVE (hu_gate_mode_from_env), default
      * SHADOW: unlike a net-new capability, "leave max_tokens at 0" already
-     * IS today's behavior, so SHADOW gives free visibility (this log line)
+     * IS today's behavior, so SHADOW gives free visibility (throttled log)
      * into what the resolver would pick with zero risk before flipping ON.
      *
      * "Fill when 0" is unconditional and gate-independent: a positive
@@ -167,20 +209,23 @@ void hu_agent_internal_resolve_max_tokens(hu_chat_request_t *req, const char *mo
      * mode including LIVE. Only an actually-unset (0) request is a
      * candidate for filling. */
     if (!req || req->max_tokens > 0)
-        return;
+        return HU_MAX_TOKENS_RESOLVE_NOOP;
 
     hu_gate_mode_t mode = hu_gate_mode_from_env("HU_MAX_TOKENS_RESOLVE", HU_GATE_SHADOW);
     if (mode == HU_GATE_OFF)
-        return;
+        return HU_MAX_TOKENS_RESOLVE_NOOP;
 
     uint32_t resolved = hu_max_tokens_resolve(0, model_ref, model_ref_len);
     if (mode == HU_GATE_SHADOW) {
+        if (max_tokens_shadow_mark_and_check_seen(model_ref, model_ref_len))
+            return HU_MAX_TOKENS_RESOLVE_SHADOW_THROTTLED;
         hu_log_info("agent", NULL, "[max-tokens-resolve SHADOW] would set max_tokens=%u for %.*s",
                     resolved, (int)(model_ref_len > 64 ? 64 : model_ref_len),
                     model_ref ? model_ref : "(none)");
-        return;
+        return HU_MAX_TOKENS_RESOLVE_SHADOW_LOGGED;
     }
     req->max_tokens = resolved;
+    return HU_MAX_TOKENS_RESOLVE_APPLIED;
 }
 
 hu_error_t hu_agent_internal_build_unavailable_fallback(hu_allocator_t *alloc, char **out,

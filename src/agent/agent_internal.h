@@ -134,6 +134,17 @@ bool hu_agent_internal_is_transport_error(hu_error_t err);
 void hu_agent_internal_apply_turn_request_overrides(const hu_agent_t *agent,
                                                     hu_chat_request_t *req);
 
+/* Outcome of hu_agent_internal_resolve_max_tokens, returned so the SHADOW
+ * log-throttle (see below) is observable by tests without a log-capture
+ * harness — a test can assert on the return value directly instead of
+ * scraping stdout. */
+typedef enum hu_max_tokens_resolve_result {
+    HU_MAX_TOKENS_RESOLVE_NOOP = 0,      /* NULL req, req->max_tokens already > 0, or gate OFF */
+    HU_MAX_TOKENS_RESOLVE_APPLIED,       /* LIVE: wrote req->max_tokens */
+    HU_MAX_TOKENS_RESOLVE_SHADOW_LOGGED, /* SHADOW: logged (first time this model_ref was seen) */
+    HU_MAX_TOKENS_RESOLVE_SHADOW_THROTTLED, /* SHADOW: resolved, log suppressed (already logged) */
+} hu_max_tokens_resolve_result_t;
+
 /* Task 13 (2026-09-20 dead-code-plan) — fill req->max_tokens from the
  * model's known output cap (src/agent/max_tokens.c) when the request does
  * not already carry a positive value.
@@ -147,19 +158,39 @@ void hu_agent_internal_apply_turn_request_overrides(const hu_agent_t *agent,
  * rerouting) and AFTER model selection is final — it is a fill-if-empty
  * step, not a router.
  *
- * Gated OFF -> SHADOW -> LIVE via HU_MAX_TOKENS_RESOLVE
- * (hu_gate_mode_from_env), default SHADOW:
+ * Both call sites sit inside a per-turn tool-iteration loop, so this runs
+ * once per provider round trip, not once per turn. Gated OFF -> SHADOW ->
+ * LIVE via HU_MAX_TOKENS_RESOLVE (hu_gate_mode_from_env), default SHADOW:
  *   OFF    — no-op, req->max_tokens is left exactly as the caller set it.
- *   SHADOW — resolves the value and logs it
- *            ("[max-tokens-resolve SHADOW] would set max_tokens=<n> for
- *            <model>"), but does NOT write it.
- *   LIVE   — writes the resolved value into req->max_tokens.
+ *   SHADOW — resolves the value and logs it AT MOST ONCE PER DISTINCT
+ *            model_ref PER PROCESS ("[max-tokens-resolve SHADOW] would set
+ *            max_tokens=<n> for <model>"), never writes it. Fix (review
+ *            round 1): with req.max_tokens staying 0 in the common case and
+ *            HU_LOG_LEVEL defaulting to INFO, logging on every round trip
+ *            was live per-provider-call log volume in prod under the
+ *            default gate. The throttle is a small fixed-size (8-entry),
+ *            lock-free table of model_refs already logged this process —
+ *            see max_tokens_shadow_mark_and_check_seen in agent.c. Racy
+ *            under concurrent turns (a duplicate log or, past 8 distinct
+ *            models, a resumed "log every time") is an accepted best-effort
+ *            trade-off; prod runs two models.
+ *   LIVE   — writes the resolved value into req->max_tokens, every call,
+ *            no throttle (the throttle is a log-volume concern only).
  * In every mode, a request whose max_tokens is already > 0 is left
  * untouched — this never overrides a value some other step deliberately
- * set. NULL-safe on `req` (no-op); NULL/empty `model_ref` still resolves
- * to hu_max_tokens_default() when the gate is not OFF. */
-void hu_agent_internal_resolve_max_tokens(hu_chat_request_t *req, const char *model_ref,
-                                          size_t model_ref_len);
+ * set. NULL-safe on `req` (returns NOOP); NULL/empty `model_ref` still
+ * resolves to hu_max_tokens_default() when the gate is not OFF. */
+hu_max_tokens_resolve_result_t hu_agent_internal_resolve_max_tokens(hu_chat_request_t *req,
+                                                                    const char *model_ref,
+                                                                    size_t model_ref_len);
+
+/* Test-only: clears the SHADOW log-throttle table (see above) so a test
+ * doesn't observe stale "already logged" state left by an earlier test or
+ * by an unrelated integration test that exercised the same model_ref
+ * string earlier in the same process. Always compiled (no HU_IS_TEST
+ * fork) — a no-op call in production, same shape as
+ * hu_world_model_cache_reset_for_tests / hu_outbound_stats_reset_for_test. */
+void hu_agent_internal_resolve_max_tokens_reset_for_test(void);
 
 /* Build the fallback response text for a provider-unavailable bail-out.
  *
