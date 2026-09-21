@@ -132,6 +132,10 @@ bool hu_daemon_heartbeat_flush(hu_allocator_t *alloc, bool enabled, int64_t inte
         return true;
     }
     hu_heartbeat_engine_t engine;
+    /* `enabled` and the interval are passed for completeness only:
+     * hu_heartbeat_tick reads engine->workspace_dir and nothing else, so the
+     * engine's clamped interval_minutes has no consumer. The `interval_ms`
+     * gate at the top of this function is what actually paces the tick. */
     hu_heartbeat_engine_init(&engine, enabled, (uint32_t)(interval_ms / 60000), workspace_dir);
     hu_heartbeat_result_t result = {0};
     err = hu_heartbeat_tick(&engine, alloc, &result);
