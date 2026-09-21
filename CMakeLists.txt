@@ -1533,11 +1533,18 @@ list(APPEND HU_CORE_SOURCES
     # when HU_ENABLE_LIBSODIUM=ON.
     #
     # The honest fix: only compile persona_crypt.c when libsodium is
-    # actually present. Callers (src/persona/persona_storage.c) already
-    # guard `hu_persona_crypt_*` calls with `#ifdef HU_HAS_LIBSODIUM`
-    # so no API break. When libsodium IS enabled and found, the layer
-    # is built; otherwise persona storage falls back to the PBKDF2 +
-    # ChaCha20+HMAC path documented at CMakeLists.txt:2102.
+    # actually present. Nothing under src/ calls `hu_persona_crypt_*` —
+    # `grep -rn 'hu_persona_{crypt_derive_key,save_encrypted,
+    # load_encrypted,migrate_to_encrypted,load_legacy,classify_bytes}'
+    # src include` returns only the declarations in
+    # include/human/persona/crypto.h — so there is no API break to guard
+    # against. The one consumer is tests/test_persona_encryption.c, which
+    # carries the SAME gate: it is appended to HU_TEST_SOURCES inside an
+    # `if(HU_LIBSODIUM_FOUND)` block in the gated test-sources section.
+    # (An earlier revision of this comment named a caller
+    # `src/persona/persona_storage.c`; no such file exists.) Task 12 moved
+    # the TU itself out of HU_CORE_SOURCES entirely — it now sits in
+    # human_devlib behind the same `if(HU_LIBSODIUM_FOUND)`.
     src/context/theory_of_mind.c
     src/context/self_awareness.c
     src/context/anticipatory.c
@@ -3307,10 +3314,10 @@ endif()
 # `#if HU_IS_TEST` branches whose test-mode form is what those tests
 # exercise today, because today they get their copy out of
 # libhuman_core_test.a. Compiling devlib with anything else would silently
-# change which branch the suite runs. The properties are copied from
-# human_core_test rather than restated so the two can never drift; this
-# block must therefore stay AFTER every target_compile_definitions() on
-# human_core_test above.
+# change which branch the suite runs. The build settings are mirrored from
+# human_core_test through generator expressions rather than restated, so the
+# two can never drift and this block has no ordering requirement — see the
+# note on that mirror below.
 #
 # NOT moved here, and why (the rest of lists/keep-modules.txt):
 #   memory/engines/{postgres,redis}.c, providers/llamacpp_{decode,sampling}.c
@@ -3376,21 +3383,27 @@ add_dependencies(human_devlib hu_git_sha_stamp)
 # never the reverse (external_judge_fixture.c, the one module core TUs do
 # call, deliberately stayed in core above).
 target_link_libraries(human_devlib PUBLIC human_core_test)
-# Copy human_core_test's PRIVATE build settings verbatim so the two libraries
-# can never disagree about HU_IS_TEST, HU_HAS_<channel>, include paths or
-# warning flags. Restating them would be a second source of truth.
-get_target_property(_hu_devlib_defs human_core_test COMPILE_DEFINITIONS)
-if(_hu_devlib_defs)
-    target_compile_definitions(human_devlib PRIVATE ${_hu_devlib_defs})
-endif()
-get_target_property(_hu_devlib_incs human_core_test INCLUDE_DIRECTORIES)
-if(_hu_devlib_incs)
-    target_include_directories(human_devlib PRIVATE ${_hu_devlib_incs})
-endif()
-get_target_property(_hu_devlib_opts human_core_test COMPILE_OPTIONS)
-if(_hu_devlib_opts)
-    target_compile_options(human_devlib PRIVATE ${_hu_devlib_opts})
-endif()
+# Mirror human_core_test's PRIVATE build settings so the two libraries can
+# never disagree about HU_IS_TEST, HU_HAS_<channel>, include paths or warning
+# flags. Restating them would be a second source of truth.
+#
+# These MUST be generator expressions, not get_target_property(). A
+# get_target_property() copy reads the property as it stands AT THIS LINE, and
+# eight more target_compile_definitions/include_directories(human_core_test
+# ...) calls run further down the file (HU_ENABLE_RL_FULL,
+# HU_EVAL_JUDGE_HAVE_{APPLE_FM,GEMINI_NANO}_IMPL, HU_GRPO_HAVE_{HUML,MLX}_IMPL,
+# ...). The first version of this block did exactly that and compiled devlib
+# with 60 defines against human_core_test's 65 — including compiling
+# stock_baseline.c, which is selected by `if(HU_ENABLE_RL_FULL)`, without
+# -DHU_ENABLE_RL_FULL=1. $<TARGET_PROPERTY:...> is evaluated at generate time,
+# after the whole file has run, so it cannot miss a later addition and this
+# block has no ordering requirement.
+target_compile_definitions(human_devlib PRIVATE
+    $<TARGET_PROPERTY:human_core_test,COMPILE_DEFINITIONS>)
+target_include_directories(human_devlib PRIVATE
+    $<TARGET_PROPERTY:human_core_test,INCLUDE_DIRECTORIES>)
+target_compile_options(human_devlib PRIVATE
+    $<TARGET_PROPERTY:human_core_test,COMPILE_OPTIONS>)
 if(HU_ENABLE_ASAN)
     target_link_options(human_devlib PRIVATE -fsanitize=address)
 endif()

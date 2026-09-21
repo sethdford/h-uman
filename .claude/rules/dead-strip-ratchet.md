@@ -11,10 +11,14 @@
 Two counters, both measured by relinking the real binary, both frozen at a
 baseline and allowed only to **decrease**:
 
-| Counter | What it counts | Baseline (2026-09-21) | Floor |
+| Counter | What it counts | Baseline (2026-09-21, after Task 12) | Floor |
 |---|---|---:|---:|
-| **A** — never-loaded archive members | objects in `libhuman_core.a` that the linker never saw a single global symbol of, live *or* dead-stripped. A whole translation unit nobody links. | 50 | 0 |
-| **B** — unreferenced dead symbols | `_hu_` symbols the linker dead-stripped out of `libhuman_core.a` members that no `human_tests` object references either. Dead in the product **and** unpinned by a test. | 99 | 20 |
+| **A** — never-loaded archive members | objects in `libhuman_core.a` that the linker never saw a single global symbol of, live *or* dead-stripped. A whole translation unit nobody links. | 36 | 0 |
+| **B** — unreferenced dead symbols | `_hu_` symbols the linker dead-stripped out of `libhuman_core.a` members that no `human_tests` object references either. Dead in the product **and** unpinned by a test. | 79 | 20 |
+
+The baselines live in `scripts/check-dead-strip-ratchet.sh`
+(`NEVER_LOADED_BASELINE`, `DEAD_UNREF_BASELINE`) — that script is the source of
+truth, this table is a copy, so re-read it before quoting a number.
 
 Floors come from `docs/plans/2026-09-20-dead-code-plan.md` §6 ("A = 0 after P5,
 B < 20"), not from a number invented here.
@@ -23,7 +27,11 @@ Both counters read `libhuman_core.a`, which since Task 12 holds **daemon code
 only**: the test/eval/SDK modules the daemon never links moved to the
 `human_devlib` archive (see the `human_devlib` block in `CMakeLists.txt`), so a
 never-loaded member of `human_core` now means dead code rather than "library
-code with no daemon caller".
+code with no daemon caller". The flip side: **`human_devlib` is a region
+neither counter measures.** Both A and B are read off a `-dead_strip` relink of
+`human`, and `human` links only `human_core` — nothing in `libhuman_devlib.a`
+can ever appear in that link map. What fences devlib instead is the test suite:
+a devlib module with no test is caught by nothing here.
 
 ## The hazard
 
