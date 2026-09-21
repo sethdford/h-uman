@@ -592,8 +592,6 @@ static void test_w7_add_temporal_event_rejects_null_args(void) {
     close_facade(g, m);
 }
 
-/* --- case rowid via hu_memory_facade_last_case_rowid (no raw graph sqlite in case_based.c) --- */
-
 /* --- list_entities through facade ------------------------------------ */
 
 static void test_w7_list_entities_returns_inserted_entity(void) {

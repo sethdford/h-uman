@@ -63,9 +63,6 @@ static const hu_channel_meta_t catalog[] = {
 #ifdef HU_HAS_QQ
     {HU_CHANNEL_QQ, "qq", "QQ", "", HU_LISTENER_POLLING},
 #endif
-#ifdef HU_HAS_MAIXCAM
-    {HU_CHANNEL_MAIXCAM, "maixcam", "MaixCam", "", HU_LISTENER_SEND_ONLY},
-#endif
 #ifdef HU_HAS_TEAMS
     {HU_CHANNEL_TEAMS, "teams", "Microsoft Teams", "", HU_LISTENER_POLLING},
 #endif
@@ -181,10 +178,6 @@ bool hu_channel_catalog_is_build_enabled(hu_channel_id_t id) {
 #endif
 #ifdef HU_HAS_QQ
     case HU_CHANNEL_QQ:
-        return true;
-#endif
-#ifdef HU_HAS_MAIXCAM
-    case HU_CHANNEL_MAIXCAM:
         return true;
 #endif
 #ifdef HU_HAS_TEAMS

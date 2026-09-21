@@ -1,4 +1,4 @@
-/* W3 — Multi-graph cross-edges + case-based recall.
+/* W3 — Multi-graph cross-edges.
  * All tests use :memory: via the test-build path of graph.c. */
 
 #include "human/core/allocator.h"
@@ -103,7 +103,7 @@ static void test_w3_cross_graph_traverse_filters_by_window(void) {
 #endif /* HU_ENABLE_SQLITE */
 
 void run_w3_multigraph_tests(void) {
-    HU_TEST_SUITE("W3 multi-graph + case-based");
+    HU_TEST_SUITE("W3 multi-graph");
 #ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(test_w3_cross_edge_upsert_is_idempotent);
     HU_RUN_TEST(test_w3_cross_graph_traverse_returns_top_weighted);

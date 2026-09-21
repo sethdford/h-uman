@@ -245,7 +245,6 @@ option(HU_ENABLE_DINGTALK "Build DingTalk channel" OFF)
 option(HU_ENABLE_SIGNAL "Build Signal channel" OFF)
 option(HU_ENABLE_NOSTR "Build Nostr channel" OFF)
 option(HU_ENABLE_QQ "Build QQ channel" OFF)
-option(HU_ENABLE_MAIXCAM "Build MaixCam channel" OFF)
 option(HU_ENABLE_DISPATCH "Build Dispatch channel" OFF)
 option(HU_ENABLE_GMAIL "Build Gmail channel (read-only OAuth2)" OFF)
 option(HU_ENABLE_TEAMS "Build Microsoft Teams channel" OFF)
@@ -311,7 +310,6 @@ if(HU_ENABLE_ALL_CHANNELS)
     set(HU_ENABLE_SIGNAL ON)
     set(HU_ENABLE_NOSTR ON)
     set(HU_ENABLE_QQ ON)
-    set(HU_ENABLE_MAIXCAM ON)
     set(HU_ENABLE_DISPATCH ON)
     set(HU_ENABLE_GMAIL ON)
     set(HU_ENABLE_TEAMS ON)
@@ -506,7 +504,7 @@ endif()
 if(HU_ENABLE_MQTT)
     list(APPEND CHANNEL_SOURCES src/channels/mqtt.c)
 endif()
-# signal, nostr, qq, maixcam, dispatch: only when all-channels build (saves ~60KB in default)
+# signal, nostr, qq, dispatch: only when all-channels build (saves ~60KB in default)
 if(HU_ENABLE_ALL_CHANNELS)
     list(APPEND CHANNEL_SOURCES
         src/channels/signal.c
@@ -2275,9 +2273,6 @@ endif()
 if(HU_ENABLE_QQ)
     list(APPEND HU_CHANNEL_DEFINES HU_HAS_QQ=1)
 endif()
-if(HU_ENABLE_MAIXCAM)
-    list(APPEND HU_CHANNEL_DEFINES HU_HAS_MAIXCAM=1)
-endif()
 if(HU_ENABLE_DISPATCH)
     list(APPEND HU_CHANNEL_DEFINES HU_HAS_DISPATCH=1)
 endif()
@@ -2884,7 +2879,7 @@ if(APPLE AND NOT CMAKE_CROSSCOMPILING)
 endif()
 
 # --- Test-mode core library (same sources, compiled with HU_IS_TEST=1) ---
-# When HU_ENABLE_ALL_CHANNELS=OFF, prod binary omits signal/nostr/qq/maixcam/dispatch,
+# When HU_ENABLE_ALL_CHANNELS=OFF, prod binary omits signal/nostr/qq/dispatch,
 # but tests need them — add to test lib only.
 set(HU_TEST_EXTRA_CHANNELS)
 if(NOT HU_ENABLE_ALL_CHANNELS)
@@ -3193,7 +3188,7 @@ endif()
 if(HU_ENABLE_VOICE)
     target_compile_definitions(human_core_test PRIVATE HU_HAS_VOICE_CHANNEL=1 HU_ENABLE_VOICE=1)
 endif()
-target_compile_definitions(human_core_test PRIVATE HU_HAS_SIGNAL=1 HU_HAS_NOSTR=1 HU_HAS_QQ=1 HU_HAS_MAIXCAM=1 HU_HAS_DISPATCH=1 HU_HAS_GMAIL=1 HU_HAS_MQTT=1 HU_HAS_THREAD_BINDING=1 HU_HAS_FACEBOOK=1 HU_HAS_INSTAGRAM=1 HU_HAS_TWITTER=1 HU_HAS_TIKTOK=1 HU_HAS_GOOGLE_RCS=1)
+target_compile_definitions(human_core_test PRIVATE HU_HAS_SIGNAL=1 HU_HAS_NOSTR=1 HU_HAS_QQ=1 HU_HAS_DISPATCH=1 HU_HAS_GMAIL=1 HU_HAS_MQTT=1 HU_HAS_THREAD_BINDING=1 HU_HAS_FACEBOOK=1 HU_HAS_INSTAGRAM=1 HU_HAS_TWITTER=1 HU_HAS_TIKTOK=1 HU_HAS_GOOGLE_RCS=1)
 target_compile_definitions(human_core_test PRIVATE HU_HAS_NONE_ENGINE=1 HU_HAS_MARKDOWN_ENGINE=1)
 if(HU_ENABLE_MEMORY_LRU_ENGINE)
     target_compile_definitions(human_core_test PRIVATE HU_HAS_MEMORY_LRU_ENGINE=1)
@@ -4724,7 +4719,7 @@ if(HU_ENABLE_CHANNEL_TESTS)
             HU_HAS_IMAP=1 HU_HAS_IMESSAGE=1 HU_HAS_MATTERMOST=1 HU_HAS_ONEBOT=1
             HU_HAS_DINGTALK=1 HU_HAS_TEAMS=1 HU_HAS_TWILIO=1 HU_HAS_GOOGLE_CHAT=1
             HU_HAS_GOOGLE_RCS=1 HU_HAS_SIGNAL=1 HU_HAS_NOSTR=1 HU_HAS_QQ=1
-            HU_HAS_MAIXCAM=1 HU_HAS_MQTT=1 HU_HAS_GMAIL=1 HU_HAS_CLI=1
+            HU_HAS_MQTT=1 HU_HAS_GMAIL=1 HU_HAS_CLI=1
             HU_HAS_DISPATCH=1 HU_HAS_TIKTOK=1)
     else()
         if(HU_ENABLE_TELEGRAM)

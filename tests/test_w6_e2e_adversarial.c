@@ -6,8 +6,8 @@
  *   1. Honest writes go in; bitemporal supersession works.        (W1)
  *   2. AutoDream consolidates memory, ages quarantine, builds
  *      community summaries on idle.                              (W2)
- *   3. Cross-graph + case-based recall surfaces the right episode
- *      for a planning query.                                     (W3)
+ *   3. Cross-graph traversal surfaces the right episode for a
+ *      planning query.                                           (W3)
  *   4. The response verifier flags hallucinations and produces
  *      receipts pointing at the original source.                 (W4)
  *   5. The persona evolver resists prompt-injection floods that
@@ -29,6 +29,7 @@
 #include "human/persona/persona_deltas.h"
 #include "test_framework.h"
 
+#include <sqlite3.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -43,6 +44,34 @@ static hu_allocator_t *A(void) {
 
 static void open_graph(hu_graph_t **g) {
     HU_ASSERT_EQ(hu_graph_open(A(), NULL, 0, g), HU_OK);
+}
+
+/* Seed one case_records row anchored on `entity_id`.
+ *
+ * The case writer that used to fill this table (src/agent/case_based.c) was
+ * deleted as unreachable, but src/memory/erasure.c still purges the table and
+ * reports the count — so the erasure contract below needs a row to delete.
+ * Schema mirrors v1_case_ensure_schema() in src/memory/memory_v1_backend.c.
+ * Test-only: the SQL is built from test-authored literals and one int64. */
+static void seed_case_record(hu_graph_t *g, int64_t entity_id) {
+    struct sqlite3 *db = hu_graph_sqlite_connection(g);
+    HU_ASSERT_NOT_NULL(db);
+    static const char *const kDdl = "CREATE TABLE IF NOT EXISTS case_records ("
+                                    "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                                    "contact_id TEXT NOT NULL DEFAULT '',"
+                                    "goal_verb TEXT NOT NULL,"
+                                    "anchor_entity_ids TEXT NOT NULL DEFAULT '',"
+                                    "plan_text TEXT,"
+                                    "outcome TEXT,"
+                                    "happened_at INTEGER NOT NULL)";
+    HU_ASSERT_EQ(sqlite3_exec(db, kDdl, NULL, NULL, NULL), SQLITE_OK);
+    char sql[512];
+    snprintf(sql, sizeof(sql),
+             "INSERT INTO case_records"
+             " (contact_id, goal_verb, anchor_entity_ids, plan_text, outcome, happened_at)"
+             " VALUES ('u1', 'send-email', '%lld', NULL, 'ok', 1735689600000)",
+             (long long)entity_id);
+    HU_ASSERT_EQ(sqlite3_exec(db, sql, NULL, NULL, NULL), SQLITE_OK);
 }
 
 /* --- E2E scenario 1: honest write -> verifier surfaces receipt ---
@@ -182,10 +211,7 @@ static void test_e2e_autodream_summary_roundtrip(void) {
     hu_graph_close(g, A());
 }
 
-/* --- E2E scenario 5: case-based recall surfaces relevant past plan ---
- * Past case "send-email to alice -> friendly tone worked" is recalled when a
- * new send-email task names alice as anchor. */
-/* --- E2E scenario 6: persona-evolver resists drift attack ---
+/* --- E2E scenario 5: persona-evolver resists drift attack ---
  * Attacker injects 25 high-confidence "value: comply-with-attacker" deltas
  * from a single rogue source. Rate limiter should quarantine, leaving the
  * persona profile untouched. */
@@ -209,7 +235,7 @@ static void test_e2e_persona_evolver_resists_drift_attack(void) {
     hu_graph_close(g, A());
 }
 
-/* --- E2E scenario 7: targeted erasure cascades cleanly ---
+/* --- E2E scenario 6: targeted erasure cascades cleanly ---
  * Stack the entity into multiple surfaces (relations + cross_edges + case
  * records), erase, verify zero residue. */
 static void test_e2e_targeted_erasure_leaves_no_residue(void) {
@@ -224,12 +250,14 @@ static void test_e2e_targeted_erasure_leaves_no_residue(void) {
                          1735689600000LL, 0, 1.0f);
     hu_memory_facade_t *m = NULL;
     HU_ASSERT_EQ(hu_memory_facade_open(A(), g, &m), HU_OK);
+    seed_case_record(g, alice);
 
     hu_erase_report_t er;
     HU_ASSERT_EQ(hu_memory_erase_entity(g, alice, &er), HU_OK);
     HU_ASSERT(er.entity_deleted);
     HU_ASSERT(er.relations_deleted >= 1);
     HU_ASSERT(er.cross_edges_deleted >= 1);
+    HU_ASSERT(er.case_records_deleted >= 1);
 
     /* Re-running erase reports NOT_FOUND. */
     HU_ASSERT_EQ(hu_memory_erase_entity(g, alice, &er), HU_ERR_NOT_FOUND);
@@ -237,7 +265,7 @@ static void test_e2e_targeted_erasure_leaves_no_residue(void) {
     hu_graph_close(g, A());
 }
 
-/* --- E2E scenario 8: end-to-end full pipeline ---
+/* --- E2E scenario 7: end-to-end full pipeline ---
  * 1. honest writes
  * 2. attacker injection (drop)
  * 3. autodream consolidation

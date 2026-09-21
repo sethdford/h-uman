@@ -60,14 +60,14 @@ typedef hu_graph_relation_t hu_memory_relation_row_t;
 typedef enum hu_memory_kind {
     HU_MEM_ENTITY = 0,
     HU_MEM_RELATION = 1,
-    HU_MEM_HYPEREDGE = 2,        /* W8 */
-    HU_MEM_PERSONA_DELTA = 3,    /* v1 W5 */
-    HU_MEM_CASE = 4,             /* v1 W3 */
-    HU_MEM_CROSS_EDGE = 5,       /* v1 W3 */
-    HU_MEM_QUARANTINE = 6,       /* v1 W1 */
-    HU_MEM_KV_CACHE = 7,         /* W10 */
-    HU_MEM_REASONING_TRACE = 8,  /* W10 */
-    HU_MEM_BLOB = 9,             /* W10 multimodal */
+    HU_MEM_HYPEREDGE = 2,       /* W8 */
+    HU_MEM_PERSONA_DELTA = 3,   /* v1 W5 */
+    HU_MEM_CASE = 4,            /* v1 W3 */
+    HU_MEM_CROSS_EDGE = 5,      /* v1 W3 */
+    HU_MEM_QUARANTINE = 6,      /* v1 W1 */
+    HU_MEM_KV_CACHE = 7,        /* W10 */
+    HU_MEM_REASONING_TRACE = 8, /* W10 */
+    HU_MEM_BLOB = 9,            /* W10 multimodal */
     HU_MEM_KIND_MAX
 } hu_memory_kind_t;
 
@@ -79,13 +79,13 @@ typedef enum hu_memory_kind {
  * backend infers the variant from non-zero fields, which is risky but
  * matches pre-tag behavior. New callers should set this explicitly. */
 typedef enum hu_memory_query_variant {
-    HU_MEMORY_QUERY_AUTO      = 0, /* legacy heuristic; backend infers */
-    HU_MEMORY_QUERY_BY_NAME   = 1,
+    HU_MEMORY_QUERY_AUTO = 0, /* legacy heuristic; backend infers */
+    HU_MEMORY_QUERY_BY_NAME = 1,
     HU_MEMORY_QUERY_NEIGHBORS = 2,
-    HU_MEMORY_QUERY_WINDOW    = 3,
-    HU_MEMORY_QUERY_BY_ID     = 4,
-    HU_MEMORY_QUERY_KV        = 5,
-    HU_MEMORY_QUERY_CASE      = 6,
+    HU_MEMORY_QUERY_WINDOW = 3,
+    HU_MEMORY_QUERY_BY_ID = 4,
+    HU_MEMORY_QUERY_KV = 5,
+    HU_MEMORY_QUERY_CASE = 6,
 } hu_memory_query_variant_t;
 
 /* Kind-specific query payloads (tagged-union; caller must set `kind` then
@@ -124,7 +124,7 @@ typedef struct hu_memory_query {
             size_t limit;
         } cases;
         struct {
-            int64_t id; /* generic id-based fetch; see HU_MEMORY_REL_VERIFIER_SCAN */
+            int64_t id;   /* generic id-based fetch; see HU_MEMORY_REL_VERIFIER_SCAN */
             size_t limit; /* used with HU_MEM_RELATION + HU_MEMORY_REL_VERIFIER_SCAN */
         } by_id;
     } as;
@@ -144,17 +144,17 @@ typedef struct hu_memory_record {
      * unscoped writes (e.g. global hyperedges). */
     const char *contact_id;
     size_t contact_id_len;
-    char *provenance;       /* nullable; owned-by-record when read returns it */
+    char *provenance; /* nullable; owned-by-record when read returns it */
     size_t provenance_len;
     int64_t event_start;
     int64_t event_end;
-    float confidence;       /* 0.0-1.0; 1.0 default. W8 mean estimate. */
+    float confidence; /* 0.0-1.0; 1.0 default. W8 mean estimate. */
     /* P2G — W8 Bayesian belief variance. 0.0 == fully certain. Backends MUST
      * honor this when present. If `confidence_variance < 0`, the backend
      * derives a default from provenance via
      * `hu_belief_initial_variance_for_provenance`. */
     float confidence_variance;
-    void *payload;          /* kind-specific struct; cast via `kind`. */
+    void *payload; /* kind-specific struct; cast via `kind`. */
     size_t payload_len;
 } hu_memory_record_t;
 
@@ -176,7 +176,8 @@ typedef struct hu_memory_facade hu_memory_facade_t;
 /* Lifecycle. `hu_memory_facade_open` registers the v1 backend for entity,
  * relation, hyperedge, and (when SQLite is enabled) case_records. Other kinds
  * return HU_ERR_NOT_SUPPORTED until a backend is registered for them. */
-hu_error_t hu_memory_facade_open(hu_allocator_t *alloc, hu_graph_t *graph, hu_memory_facade_t **out);
+hu_error_t hu_memory_facade_open(hu_allocator_t *alloc, hu_graph_t *graph,
+                                 hu_memory_facade_t **out);
 hu_error_t hu_memory_facade_open_on_graph(hu_allocator_t *alloc, struct hu_graph *graph,
                                           hu_memory_facade_t **out);
 void hu_memory_facade_close(hu_memory_facade_t *m, hu_allocator_t *alloc);
@@ -190,11 +191,10 @@ typedef enum hu_memory_audit_op {
     HU_MEMORY_AUDIT_ERASE = 1,
 } hu_memory_audit_op_t;
 
-typedef void (*hu_memory_audit_fn)(void *ctx, hu_memory_audit_op_t op,
-                                   hu_memory_kind_t kind, int64_t id);
+typedef void (*hu_memory_audit_fn)(void *ctx, hu_memory_audit_op_t op, hu_memory_kind_t kind,
+                                   int64_t id);
 
-void hu_memory_facade_set_audit_hook(hu_memory_facade_t *m,
-                                     hu_memory_audit_fn fn, void *ctx);
+void hu_memory_facade_set_audit_hook(hu_memory_facade_t *m, hu_memory_audit_fn fn, void *ctx);
 
 /* Backend registration. Replaces an existing backend for `kind` if present.
  * The previous backend's deinit() is called. Caller retains ownership of `vt`
@@ -204,15 +204,10 @@ hu_error_t hu_memory_facade_register_backend(hu_memory_facade_t *m, hu_memory_ki
                                              hu_memory_facade_vtable_t *vt, void *ctx);
 
 /* Dispatching API. */
-hu_error_t hu_memory_facade_read(hu_memory_facade_t *m, const hu_memory_query_t *q, hu_allocator_t *alloc,
-                                hu_memory_record_t **out, size_t *out_count);
+hu_error_t hu_memory_facade_read(hu_memory_facade_t *m, const hu_memory_query_t *q,
+                                 hu_allocator_t *alloc, hu_memory_record_t **out,
+                                 size_t *out_count);
 hu_error_t hu_memory_facade_write(hu_memory_facade_t *m, const hu_memory_record_t *rec);
-
-/* After a successful `hu_memory_facade_write` with `rec->kind == HU_MEM_CASE`, returns
- * `sqlite3_last_insert_rowid()` for the graph connection (0 if unavailable). The facade
- * clears this to 0 at the start of every `hu_memory_facade_write` call, then refreshes it
- * only when the case write succeeds — best-effort; do not rely across concurrent writers. */
-int64_t hu_memory_facade_last_case_rowid(const hu_memory_facade_t *m);
 
 hu_error_t hu_memory_facade_erase(hu_memory_facade_t *m, hu_memory_kind_t kind, int64_t id);
 
@@ -220,7 +215,8 @@ hu_error_t hu_memory_facade_erase(hu_memory_facade_t *m, hu_memory_kind_t kind, 
  * `hu_memory_erase_by_provenance(hu_graph_t*, ...)` in erasure.h: that walks
  * the graph only; this fans out across every registered backend whose
  * vtable implements `erase_by_provenance`. */
-hu_error_t hu_memory_facade_purge_by_provenance(hu_memory_facade_t *m, const char *substring, size_t len);
+hu_error_t hu_memory_facade_purge_by_provenance(hu_memory_facade_t *m, const char *substring,
+                                                size_t len);
 
 /* Free a record array previously returned by `hu_memory_facade_read`. Routes back to
  * the originating backend's `records_free`. Calling with `n == 0` is a no-op. */
@@ -253,13 +249,10 @@ void hu_memory_v1_graph_close(struct hu_graph *g, hu_allocator_t *alloc);
 
 /* Delegates to `hu_graph_upsert_relation_with_belief` for graph-only promotion paths. */
 hu_error_t hu_memory_v1_upsert_relation_with_belief(
-    struct hu_graph *g, const char *contact_id, size_t contact_id_len,
-    int64_t source_id, int64_t target_id, hu_relation_type_t type,
-    float weight, int64_t event_start, int64_t event_end,
-    float belief_mean, float belief_variance,
-    const char *context, size_t context_len,
-    const char *provenance, size_t provenance_len,
-    int64_t *out_id);
+    struct hu_graph *g, const char *contact_id, size_t contact_id_len, int64_t source_id,
+    int64_t target_id, hu_relation_type_t type, float weight, int64_t event_start,
+    int64_t event_end, float belief_mean, float belief_variance, const char *context,
+    size_t context_len, const char *provenance, size_t provenance_len, int64_t *out_id);
 
 #ifdef HU_ENABLE_SQLITE
 /* Shared SQLite connection backing the v1 graph (scheduler DDL, counterfactual
@@ -279,13 +272,9 @@ struct sqlite3 *hu_memory_sqlite_from_graph(struct hu_graph *g);
  * over hu_memory_facade_graph_handle + hu_graph_list_entities directly so
  * the facade remains the single entry point. Free results with
  * hu_memory_facade_free_listed_entities. */
-hu_error_t hu_memory_facade_list_entities(hu_memory_facade_t *m,
-                                          hu_allocator_t *alloc,
-                                          const char *contact_id,
-                                          size_t cid_len,
-                                          size_t limit,
-                                          hu_graph_entity_t **out,
-                                          size_t *out_count);
+hu_error_t hu_memory_facade_list_entities(hu_memory_facade_t *m, hu_allocator_t *alloc,
+                                          const char *contact_id, size_t cid_len, size_t limit,
+                                          hu_graph_entity_t **out, size_t *out_count);
 
 /* Frees arrays returned by hu_memory_facade_list_entities (delegates to the
  * graph helper; `m` is reserved for future invariant checks). */
@@ -298,9 +287,9 @@ void hu_memory_facade_free_listed_entities(hu_memory_facade_t *m, hu_allocator_t
  * Output buffers are allocator-owned (same contract as the underlying graph
  * helpers). */
 hu_error_t hu_memory_facade_query_temporal(hu_memory_facade_t *m, hu_allocator_t *alloc,
-                                            const char *contact_id, size_t contact_id_len,
-                                            int64_t from_ts, int64_t to_ts, size_t limit,
-                                            char **out, size_t *out_len);
+                                           const char *contact_id, size_t contact_id_len,
+                                           int64_t from_ts, int64_t to_ts, size_t limit, char **out,
+                                           size_t *out_len);
 
 /* Record an entity-linked temporal event in the knowledge graph so the
  * anticipatory reader (hu_memory_facade_query_temporal -> anticipatory.c) can
@@ -315,9 +304,9 @@ hu_error_t hu_memory_facade_add_temporal_event(hu_memory_facade_t *m, const char
                                                int64_t duration_sec);
 
 hu_error_t hu_memory_facade_query_causal(hu_memory_facade_t *m, hu_allocator_t *alloc,
-                                        const char *contact_id, size_t contact_id_len,
-                                        int64_t entity_id, size_t max_results, char **out,
-                                        size_t *out_len);
+                                         const char *contact_id, size_t contact_id_len,
+                                         int64_t entity_id, size_t max_results, char **out,
+                                         size_t *out_len);
 
 /* W8 / W14 — read or UPDATE-by-id belief columns on an existing relation row.
  * Delegates to `hu_graph_get_relation_belief` / `hu_graph_set_relation_belief`.

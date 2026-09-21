@@ -23,7 +23,6 @@ typedef enum hu_channel_id {
     HU_CHANNEL_LINE,
     HU_CHANNEL_QQ,
     HU_CHANNEL_ONEBOT,
-    HU_CHANNEL_MAIXCAM,
     HU_CHANNEL_NOSTR,
     HU_CHANNEL_WEB,
     HU_CHANNEL_TEAMS,

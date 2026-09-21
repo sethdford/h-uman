@@ -300,7 +300,15 @@ if [ -n "$staged_src_c" ] && [ -x "scripts/check-no-new-root-files.sh" ]; then
     fi
 fi
 
-if [ -n "$staged_src_c" ] && [ -x "scripts/check-clone-ratchet.sh" ]; then
+# Deletions count here. The clone ratchet re-scans the whole src/ tree rather
+# than the staged paths, so a commit that only REMOVES .c files still changes
+# the measurement — and, before 2026-09-20, silently skipped this gate and so
+# never locked the gain it produced (a 37-module deletion dropped the count by
+# 163 groups with the baseline left untouched). ACMD, not ACM. The gates above
+# keep ACM on purpose: two of them pass $staged_src_c as file arguments, and a
+# deleted path handed to those is an unreadable file.
+staged_or_deleted_src_c=$(git diff --cached --name-only --diff-filter=ACMD -- 'src/**/*.c' 'src/*.c' 'src/**/*.h')
+if [ -n "$staged_or_deleted_src_c" ] && [ -x "scripts/check-clone-ratchet.sh" ]; then
     if ! bash scripts/check-clone-ratchet.sh; then
         echo ""
         echo "Pre-commit blocked: code duplication increased past the ratchet."
