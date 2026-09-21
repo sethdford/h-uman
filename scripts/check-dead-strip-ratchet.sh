@@ -91,7 +91,12 @@ fi
 # predates the auto-lock block added to this worktree's copy — so this
 # constant is set by hand to the number the gate printed on a freshly built
 # tree, same as the prior manual lock below.
-NEVER_LOADED_BASELINE=33
+# Manual lock again (2026-09-21, Task 17): deleting the unwired
+# persona/style_mirror.c (zero production callers; casing/punctuation are
+# owned by the live style governor hu_daemon_shape_text_inplace) dropped a
+# freshly-built measurement from 33 to 32. Auto-lock still does not fire for
+# the same reason as above — hand-locking again.
+NEVER_LOADED_BASELINE=32
 # Composition at the baseline: 40 whole function symbols plus 59 function-local
 # statics (`_hu_fn.CONSTANT`, `_hu_fn.sql`), which the linker emits as separate
 # symbols of the function that owns them. Both are counted, per the plan's
