@@ -54,6 +54,17 @@ typedef struct hu_app_ctx {
     bool agent_ok;
 } hu_app_ctx_t;
 
+/* True when `key` names a channel this binary was NOT built with, i.e. a
+ * `channels.<key>` block the running binary will silently ignore. Unknown
+ * keys return false — the config validator owns unknown-key reporting.
+ * See .claude/rules/silent-config-gated-subsystems.md. */
+bool hu_app_channel_missing_from_build(const char *key);
+
+/* Emits one hu_log_warn per configured-but-not-compiled channel and returns
+ * how many were reported. Called by hu_app_bootstrap before channel setup;
+ * exposed so the contract is testable without a full bootstrap. */
+size_t hu_app_warn_channels_missing_from_build(const hu_config_t *cfg, hu_observer_t *obs);
+
 /* Initialize the full app context: load config, create provider, tools, security,
  * optionally channels and agent. config_path may be NULL (use default).
  * with_agent: create provider, memory, agent, retrieval.
