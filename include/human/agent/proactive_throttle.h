@@ -107,9 +107,6 @@ uint32_t hu_proactive_throttle_count_in_window(const hu_proactive_throttle_t *t,
                                                const char *contact_id, uint64_t now_ms,
                                                uint64_t window_ms);
 
-/* Reset the entire throttle state — tests only. */
-void hu_proactive_throttle_reset(hu_proactive_throttle_t *t);
-
 #ifdef __cplusplus
 }
 #endif

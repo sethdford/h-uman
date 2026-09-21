@@ -28,10 +28,6 @@ const char *hu_weakness_type_str(hu_weakness_type_t type) {
     return "unknown";
 }
 
-const char *hu_weakness_type_name(hu_weakness_type_t type) {
-    return hu_weakness_type_str(type);
-}
-
 static hu_weakness_type_t classify_by_category(const char *cat) {
     if (!cat || cat[0] == '\0')
         return HU_WEAKNESS_UNKNOWN;

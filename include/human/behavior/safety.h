@@ -56,8 +56,6 @@ typedef struct hu_behavior_safety_assessment {
     char rationale[200];
 } hu_behavior_safety_assessment_t;
 
-const char *hu_behavior_risk_name(hu_behavior_risk_t r);
-
 /* Compose the existing safety + vulnerability + attachment signals into
  * an actionable assessment. Pure computation, no I/O. */
 hu_error_t hu_behavior_safety_assess(const hu_behavior_safety_input_t *in,

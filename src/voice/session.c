@@ -19,20 +19,6 @@ static void latency_reset_marks(hu_voice_session_t *session) {
     session->latency_await_interrupt_silence = false;
 }
 
-#if !HU_IS_TEST
-static void running_avg_update(double *avg, size_t *count, int64_t sample) {
-    if (!avg || !count)
-        return;
-    (*count)++;
-    double n = (double)*count;
-    double s = (double)sample;
-    if (*count <= 1u)
-        *avg = s;
-    else
-        *avg = *avg * ((n - 1.0) / n) + s / n;
-}
-#endif
-
 hu_error_t hu_voice_session_start(hu_allocator_t *alloc, hu_voice_session_t *session,
                                   const char *channel_name, size_t channel_name_len,
                                   const hu_config_t *config) {
@@ -187,59 +173,6 @@ hu_error_t hu_voice_session_on_interrupt(hu_voice_session_t *session) {
     return HU_OK;
 }
 
-void hu_voice_session_note_response_first_byte(hu_voice_session_t *session) {
-    if (!session || !session->active || !session->latency_first_byte_pending)
-        return;
-#if HU_IS_TEST
-    (void)session;
-#else
-    int64_t now = voice_session_now_ms();
-    int64_t dt = now - session->latency_send_mark_ms;
-    if (dt < 0)
-        dt = 0;
-    session->latency.first_byte_ms = dt;
-    running_avg_update(&session->latency.avg_first_byte_ms, &session->latency.measurements, dt);
-    session->latency_first_byte_pending = false;
-#endif
-}
-
-void hu_voice_session_note_response_complete(hu_voice_session_t *session) {
-    if (!session || !session->active)
-        return;
-#if HU_IS_TEST
-    (void)session;
-#else
-    int64_t now = voice_session_now_ms();
-    int64_t dt = now - session->latency_rt_mark_ms;
-    if (dt < 0)
-        dt = 0;
-    session->latency.total_round_trip_ms = dt;
-    running_avg_update(&session->latency_avg_round_trip_ms,
-                       &session->latency_round_trip_measurements, dt);
-    session->latency_rt_mark_ms = now;
-    session->latency_first_byte_pending = false;
-#endif
-}
-
-void hu_voice_session_note_interrupt_silence(hu_voice_session_t *session) {
-    if (!session || !session->active)
-        return;
-#if HU_IS_TEST
-    (void)session;
-#else
-    if (!session->latency_await_interrupt_silence)
-        return;
-    int64_t now = voice_session_now_ms();
-    int64_t dt = now - session->latency_interrupt_mark_ms;
-    if (dt < 0)
-        dt = 0;
-    session->latency.interrupt_latency_ms = dt;
-    running_avg_update(&session->latency_avg_interrupt_ms, &session->latency_interrupt_measurements,
-                       dt);
-    session->latency_await_interrupt_silence = false;
-#endif
-}
-
 hu_error_t hu_voice_session_get_latency(const hu_voice_session_t *session,
                                         int64_t *out_avg_first_byte_ms,
                                         int64_t *out_avg_round_trip_ms,
@@ -284,81 +217,3 @@ void hu_voice_session_warn_first_byte_latency_if_needed(const hu_voice_session_t
 }
 
 /* ── Micro-turn API ─────────────────────────────────────────────── */
-
-hu_error_t hu_voice_session_user_turn_signal(hu_voice_session_t *session, hu_turn_signal_t signal,
-                                             hu_turn_action_t *out_action) {
-    if (!session || !out_action)
-        return HU_ERR_INVALID_ARGUMENT;
-    if (!session->active)
-        return HU_ERR_INVALID_ARGUMENT;
-
-    int64_t now = voice_session_now_ms();
-    hu_error_t err = hu_duplex_user_chunk(&session->duplex, now, signal, out_action);
-    session->last_action = *out_action;
-    return err;
-}
-
-hu_error_t hu_voice_session_agent_turn_signal(hu_voice_session_t *session, hu_turn_signal_t signal,
-                                              hu_turn_action_t *out_action) {
-    if (!session || !out_action)
-        return HU_ERR_INVALID_ARGUMENT;
-    if (!session->active)
-        return HU_ERR_INVALID_ARGUMENT;
-
-    int64_t now = voice_session_now_ms();
-    hu_error_t err = hu_duplex_agent_chunk(&session->duplex, now, signal, out_action);
-    session->last_action = *out_action;
-    return err;
-}
-
-hu_turn_action_t hu_voice_session_last_action(const hu_voice_session_t *session) {
-    if (!session)
-        return HU_TURN_ACTION_NONE;
-    return session->last_action;
-}
-
-hu_error_t hu_voice_session_recv_event(hu_voice_session_t *session, hu_allocator_t *alloc,
-                                       hu_voice_rt_event_t *out, int timeout_ms) {
-    if (!session || !alloc || !out)
-        return HU_ERR_INVALID_ARGUMENT;
-    if (!session->active || !session->provider.vtable || !session->provider.vtable->recv_event)
-        return HU_ERR_NOT_SUPPORTED;
-    hu_error_t err =
-        session->provider.vtable->recv_event(session->provider.ctx, alloc, out, timeout_ms);
-    if (err == HU_OK && out->audio_base64 && out->audio_base64_len > 0 &&
-        session->latency_first_byte_pending) {
-        session->latency.first_byte_ms = voice_session_now_ms() - session->latency_send_mark_ms;
-        session->latency_first_byte_pending = false;
-        session->latency.measurements++;
-        double n = (double)session->latency.measurements;
-        session->latency.avg_first_byte_ms = session->latency.avg_first_byte_ms * ((n - 1.0) / n) +
-                                             (double)session->latency.first_byte_ms / n;
-    }
-    return err;
-}
-
-hu_error_t hu_voice_session_activity_start(hu_voice_session_t *session) {
-    if (!session || !session->active)
-        return HU_ERR_INVALID_ARGUMENT;
-    if (!session->provider.vtable || !session->provider.vtable->send_activity_start)
-        return HU_ERR_NOT_SUPPORTED;
-    return session->provider.vtable->send_activity_start(session->provider.ctx);
-}
-
-hu_error_t hu_voice_session_activity_end(hu_voice_session_t *session) {
-    if (!session || !session->active)
-        return HU_ERR_INVALID_ARGUMENT;
-    if (!session->provider.vtable || !session->provider.vtable->send_activity_end)
-        return HU_ERR_NOT_SUPPORTED;
-    return session->provider.vtable->send_activity_end(session->provider.ctx);
-}
-
-hu_error_t hu_voice_session_send_tool_response(hu_voice_session_t *session, const char *name,
-                                               const char *call_id, const char *response_json) {
-    if (!session || !session->active || !name || !call_id || !response_json)
-        return HU_ERR_INVALID_ARGUMENT;
-    if (!session->provider.vtable || !session->provider.vtable->send_tool_response)
-        return HU_ERR_NOT_SUPPORTED;
-    return session->provider.vtable->send_tool_response(session->provider.ctx, name, call_id,
-                                                        response_json);
-}

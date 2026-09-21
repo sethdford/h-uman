@@ -120,7 +120,4 @@ void hu_cost_get_summary(const hu_cost_tracker_t *t, int64_t at_secs, hu_cost_su
 
 hu_error_t hu_cost_load_history(hu_cost_tracker_t *t);
 
-hu_error_t hu_cost_get_usage_json(hu_allocator_t *alloc, const hu_cost_tracker_t *t,
-                                  int64_t at_secs, char **out_json);
-
 #endif /* HU_COST_H */

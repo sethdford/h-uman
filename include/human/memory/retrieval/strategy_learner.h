@@ -65,14 +65,5 @@ hu_error_t hu_strategy_learner_record(hu_strategy_learner_t *learner, hu_query_c
 hu_retrieval_strategy_t hu_strategy_learner_recommend(hu_strategy_learner_t *learner,
                                                       hu_query_category_t category);
 
-/* Get stats for a category+strategy pair. */
-hu_error_t hu_strategy_learner_get_stats(hu_strategy_learner_t *learner,
-                                         hu_query_category_t category,
-                                         hu_retrieval_strategy_t strategy,
-                                         hu_strategy_stats_t *out);
-
-const char *hu_query_category_str(hu_query_category_t cat);
-const char *hu_retrieval_strategy_str(hu_retrieval_strategy_t strat);
-
 #endif /* HU_ENABLE_SQLITE */
 #endif

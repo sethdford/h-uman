@@ -90,13 +90,6 @@ static const hu_tool_vtable_t message_vtable = {
     .deinit = message_deinit,
 };
 
-void hu_message_tool_set_channel(hu_tool_t *tool, hu_channel_t *channel) {
-    if (!tool || !tool->ctx || tool->vtable != &message_vtable)
-        return;
-    hu_message_ctx_t *mc = (hu_message_ctx_t *)tool->ctx;
-    mc->channel = channel;
-}
-
 hu_error_t hu_message_create(hu_allocator_t *alloc, hu_channel_t *channel, hu_tool_t *out) {
     hu_message_ctx_t *c = (hu_message_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
     if (!c)

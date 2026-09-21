@@ -266,9 +266,6 @@ hu_error_t hu_hula_exec_init_full(hu_hula_exec_t *exec, hu_allocator_t alloc,
 void hu_hula_exec_set_spawn(hu_hula_exec_t *exec, struct hu_agent_pool *pool,
                             struct hu_spawn_config *spawn_cfg);
 
-/* Optional: registry for delegate nodes with delegate_agent_id (spawn_named). */
-void hu_hula_exec_set_delegate_registry(hu_hula_exec_t *exec, struct hu_agent_registry *registry);
-
 /* Optional: idempotency registry for crash-proof tool execution (workflow replay). */
 void hu_hula_exec_set_idempotency_registry(hu_hula_exec_t *exec,
                                            struct hu_idempotency_registry *registry);

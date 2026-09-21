@@ -885,8 +885,6 @@ void run_roadmap_tests(void) {
     HU_RUN_TEST(test_otel_observer);
     HU_RUN_TEST(test_otel_span);
 
-    HU_TEST_SUITE("Roadmap: Action Replay (4D)");
-
     HU_TEST_SUITE("Roadmap: Plugin System (5B)");
     HU_RUN_TEST(test_plugin_registry);
     HU_RUN_TEST(test_plugin_bad_version);

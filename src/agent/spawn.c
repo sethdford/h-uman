@@ -385,19 +385,6 @@ hu_agent_pool_t *hu_agent_pool_create(hu_allocator_t *alloc, uint32_t max_concur
     return p;
 }
 
-void hu_agent_pool_set_worktree_manager(hu_agent_pool_t *pool,
-                                        hu_worktree_manager_t *worktree_mgr) {
-    if (!pool)
-        return;
-    pool->worktree_mgr = worktree_mgr;
-}
-
-void hu_agent_pool_set_team_config(hu_agent_pool_t *pool, hu_team_config_t *team_config) {
-    if (!pool)
-        return;
-    pool->team_config = team_config;
-}
-
 void hu_agent_pool_set_fleet_limits(hu_agent_pool_t *pool, const hu_fleet_limits_t *limits) {
     if (!pool)
         return;
@@ -411,18 +398,6 @@ void hu_agent_pool_set_fleet_limits(hu_agent_pool_t *pool, const hu_fleet_limits
     } else {
         pool->fleet_limits = *limits;
     }
-#if !defined(HU_IS_TEST) || HU_IS_TEST == 0
-    pthread_mutex_unlock(&pool->mu);
-#endif
-}
-
-void hu_agent_pool_bind_fleet_cost_tracker(hu_agent_pool_t *pool, hu_cost_tracker_t *tracker) {
-    if (!pool)
-        return;
-#if !defined(HU_IS_TEST) || HU_IS_TEST == 0
-    pthread_mutex_lock(&pool->mu);
-#endif
-    pool->fleet_cost_tracker = tracker;
 #if !defined(HU_IS_TEST) || HU_IS_TEST == 0
     pthread_mutex_unlock(&pool->mu);
 #endif

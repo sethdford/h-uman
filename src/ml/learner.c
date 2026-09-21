@@ -68,12 +68,6 @@ void hu_dp_accountant_record_query(hu_dp_accountant_t *a, double epsilon_step) {
     a->queries_count++;
 }
 
-double hu_dp_accountant_total_epsilon(const hu_dp_accountant_t *a) {
-    if (!a)
-        return 0.0;
-    return a->epsilon_spent;
-}
-
 static hu_error_t open_with(hu_allocator_t *alloc, const hu_learner_vtable_t *vt,
                             hu_error_t (*opener)(hu_allocator_t *, void **), hu_learner_t **out) {
     void *ctx = NULL;

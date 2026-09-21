@@ -822,13 +822,3 @@ void hu_browser_use_destroy(hu_allocator_t *alloc, hu_tool_t *tool) {
     alloc->free(alloc->ctx, tool->ctx, sizeof(hu_browser_use_ctx_t));
     tool->ctx = NULL;
 }
-
-void hu_browser_use_set_grounding(hu_tool_t *tool, hu_provider_t *provider, const char *model,
-                                  size_t model_len) {
-    if (!tool || !tool->ctx)
-        return;
-    hu_browser_use_ctx_t *b = (hu_browser_use_ctx_t *)tool->ctx;
-    b->ground_provider = provider;
-    b->ground_model = model;
-    b->ground_model_len = model_len;
-}

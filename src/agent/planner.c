@@ -629,64 +629,6 @@ hu_error_t hu_planner_replan(hu_allocator_t *alloc, hu_provider_t *provider, con
 #endif
 }
 
-hu_error_t hu_planner_decompose_with_llm(hu_allocator_t *alloc, hu_provider_t *provider,
-                                         const char *model, size_t model_len, const char *goal,
-                                         size_t goal_len, hu_plan_t **out) {
-    if (!alloc || !goal || !out)
-        return HU_ERR_INVALID_ARGUMENT;
-    *out = NULL;
-
-    hu_decomposition_t decomp;
-    memset(&decomp, 0, sizeof(decomp));
-    hu_error_t err = hu_orchestrator_decompose_goal(alloc, provider, model, model_len, goal,
-                                                    goal_len, NULL, 0, &decomp);
-    if (err != HU_OK)
-        return err;
-
-    if (decomp.task_count == 0) {
-        hu_decomposition_free(alloc, &decomp);
-        return HU_ERR_NOT_FOUND;
-    }
-
-    hu_plan_t *plan = (hu_plan_t *)alloc->alloc(alloc->ctx, sizeof(hu_plan_t));
-    if (!plan) {
-        hu_decomposition_free(alloc, &decomp);
-        return HU_ERR_OUT_OF_MEMORY;
-    }
-    memset(plan, 0, sizeof(hu_plan_t));
-    plan->steps_count =
-        decomp.task_count > HU_ORCH_LLM_MAX_SUBTASKS ? HU_ORCH_LLM_MAX_SUBTASKS : decomp.task_count;
-
-    plan->steps =
-        (hu_plan_step_t *)alloc->alloc(alloc->ctx, plan->steps_count * sizeof(hu_plan_step_t));
-    if (!plan->steps) {
-        hu_decomposition_free(alloc, &decomp);
-        alloc->free(alloc->ctx, plan, sizeof(hu_plan_t));
-        return HU_ERR_OUT_OF_MEMORY;
-    }
-    memset(plan->steps, 0, plan->steps_count * sizeof(hu_plan_step_t));
-    plan->steps_cap = plan->steps_count;
-
-    for (size_t i = 0; i < plan->steps_count; i++) {
-        const char *desc = decomp.tasks[i].description;
-        size_t desc_len = decomp.tasks[i].description_len;
-        plan->steps[i].tool_name = hu_strndup(alloc, desc && desc_len > 0 ? desc : "task",
-                                              desc && desc_len > 0 ? desc_len : 4);
-        plan->steps[i].description = hu_strndup(alloc, desc ? desc : "", desc ? desc_len : 0);
-        plan->steps[i].args_json = hu_strdup(alloc, "{}");
-        plan->steps[i].status = HU_PLAN_STEP_PENDING;
-        if (!plan->steps[i].tool_name || !plan->steps[i].args_json) {
-            hu_plan_free(alloc, plan);
-            hu_decomposition_free(alloc, &decomp);
-            return HU_ERR_OUT_OF_MEMORY;
-        }
-    }
-
-    hu_decomposition_free(alloc, &decomp);
-    *out = plan;
-    return HU_OK;
-}
-
 void hu_plan_free(hu_allocator_t *alloc, hu_plan_t *plan) {
     if (!alloc || !plan)
         return;

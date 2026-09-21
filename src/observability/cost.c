@@ -360,30 +360,3 @@ hu_error_t hu_cost_load_history(hu_cost_tracker_t *t) {
     return HU_OK;
 #endif
 }
-
-hu_error_t hu_cost_get_usage_json(hu_allocator_t *alloc, const hu_cost_tracker_t *t,
-                                  int64_t at_secs, char **out_json) {
-    if (!alloc || !t || !out_json)
-        return HU_ERR_INVALID_ARGUMENT;
-    *out_json = NULL;
-
-    hu_cost_summary_t s = {0};
-    hu_cost_get_summary(t, at_secs, &s);
-
-    size_t cap = 256;
-    char *buf = (char *)alloc->alloc(alloc->ctx, cap);
-    if (!buf)
-        return HU_ERR_OUT_OF_MEMORY;
-
-    int n = snprintf(buf, cap,
-                     "{\"session_cost_usd\":%.6f,\"daily_cost_usd\":%.6f,\"monthly_cost_usd\":%.6f,"
-                     "\"total_tokens\":%llu,\"request_count\":%zu}",
-                     s.session_cost_usd, s.daily_cost_usd, s.monthly_cost_usd,
-                     (unsigned long long)s.total_tokens, s.request_count);
-    if (n < 0 || (size_t)n >= cap) {
-        alloc->free(alloc->ctx, buf, cap);
-        return HU_ERR_IO;
-    }
-    *out_json = buf;
-    return HU_OK;
-}

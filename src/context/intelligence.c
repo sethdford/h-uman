@@ -5,89 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#define HU_INTELLIGENCE_ESCAPE_BUF 512
-
-/* ── SQL escape ────────────────────────────────────────────────────────── */
-
-static size_t escape_sql_string(const char *s, size_t len, char *out, size_t out_cap) {
-    size_t n = 0;
-    (void)hu_sql_quote_escape_into(s, len, out, out_cap, &n);
-    return n;
-}
-
 /* ── F68 Protective Intelligence ─────────────────────────────────────────── */
-
-hu_error_t hu_protective_create_table_sql(char *buf, size_t cap, size_t *out_len) {
-    if (!buf || !out_len || cap < 512)
-        return HU_ERR_INVALID_ARGUMENT;
-    static const char sql[] = "CREATE TABLE IF NOT EXISTS boundaries (\n"
-                              "    id INTEGER PRIMARY KEY,\n"
-                              "    contact_id TEXT NOT NULL,\n"
-                              "    topic TEXT NOT NULL,\n"
-                              "    type TEXT NOT NULL,\n"
-                              "    set_at INTEGER NOT NULL,\n"
-                              "    source TEXT\n"
-                              ")";
-    size_t len = sizeof(sql) - 1;
-    if (len >= cap)
-        return HU_ERR_INVALID_ARGUMENT;
-    memcpy(buf, sql, len + 1);
-    *out_len = len;
-    return HU_OK;
-}
-
-hu_error_t hu_protective_insert_sql(const hu_boundary_t *b, char *buf, size_t cap,
-                                    size_t *out_len) {
-    if (!b || !buf || !out_len || cap < 256)
-        return HU_ERR_INVALID_ARGUMENT;
-    if (!b->contact_id || !b->topic || !b->type)
-        return HU_ERR_INVALID_ARGUMENT;
-
-    char contact_esc[HU_INTELLIGENCE_ESCAPE_BUF];
-    char topic_esc[HU_INTELLIGENCE_ESCAPE_BUF];
-    char type_esc[HU_INTELLIGENCE_ESCAPE_BUF];
-
-    size_t ce_len =
-        escape_sql_string(b->contact_id, b->contact_id_len, contact_esc, sizeof(contact_esc));
-    size_t te_len = escape_sql_string(b->topic, b->topic_len, topic_esc, sizeof(topic_esc));
-    size_t ty_len = escape_sql_string(b->type, b->type_len, type_esc, sizeof(type_esc));
-
-    if (ce_len == 0 && b->contact_id_len > 0)
-        return HU_ERR_INVALID_ARGUMENT;
-    if (te_len == 0 && b->topic_len > 0)
-        return HU_ERR_INVALID_ARGUMENT;
-    if (ty_len == 0 && b->type_len > 0)
-        return HU_ERR_INVALID_ARGUMENT;
-
-    int n = snprintf(buf, cap,
-                     "INSERT INTO boundaries (contact_id, topic, type, set_at, source) "
-                     "VALUES ('%s', '%s', '%s', %llu, 'user')",
-                     contact_esc, topic_esc, type_esc, (unsigned long long)b->set_at);
-    if (n < 0 || (size_t)n >= cap)
-        return HU_ERR_INVALID_ARGUMENT;
-    *out_len = (size_t)n;
-    return HU_OK;
-}
-
-hu_error_t hu_protective_query_sql(const char *contact_id, size_t len, char *buf, size_t cap,
-                                   size_t *out_len) {
-    if (!contact_id || len == 0 || !buf || !out_len || cap < 128)
-        return HU_ERR_INVALID_ARGUMENT;
-
-    char contact_esc[HU_INTELLIGENCE_ESCAPE_BUF];
-    size_t ce_len = escape_sql_string(contact_id, len, contact_esc, sizeof(contact_esc));
-    if (ce_len == 0 && len > 0)
-        return HU_ERR_INVALID_ARGUMENT;
-
-    int n = snprintf(buf, cap,
-                     "SELECT id, contact_id, topic, type, set_at, source FROM boundaries "
-                     "WHERE contact_id = '%s'",
-                     contact_esc);
-    if (n < 0 || (size_t)n >= cap)
-        return HU_ERR_INVALID_ARGUMENT;
-    *out_len = (size_t)n;
-    return HU_OK;
-}
 
 static bool topic_match_case_insensitive(const char *haystack, size_t hay_len, const char *needle,
                                          size_t needle_len) {
@@ -187,26 +105,6 @@ hu_error_t hu_protective_build_prompt(hu_allocator_t *alloc, const hu_boundary_t
     return HU_OK;
 }
 
-void hu_boundary_deinit(hu_allocator_t *alloc, hu_boundary_t *b) {
-    if (!b || !alloc)
-        return;
-    if (b->contact_id) {
-        alloc->free(alloc->ctx, b->contact_id, b->contact_id_len + 1);
-        b->contact_id = NULL;
-        b->contact_id_len = 0;
-    }
-    if (b->topic) {
-        alloc->free(alloc->ctx, b->topic, b->topic_len + 1);
-        b->topic = NULL;
-        b->topic_len = 0;
-    }
-    if (b->type) {
-        alloc->free(alloc->ctx, b->type, b->type_len + 1);
-        b->type = NULL;
-        b->type_len = 0;
-    }
-}
-
 /* ── F69 Humor Generation ────────────────────────────────────────────────── */
 
 /* LCG: state = (a * state + c) mod m. Returns next value in [0, 1). */
@@ -261,50 +159,6 @@ const char *hu_humor_style_str(hu_humor_style_t style) {
     default:
         return "none";
     }
-}
-
-hu_error_t hu_humor_build_directive(hu_allocator_t *alloc, hu_humor_style_t style, char **out,
-                                    size_t *out_len) {
-    if (!alloc || !out || !out_len)
-        return HU_ERR_INVALID_ARGUMENT;
-    *out = NULL;
-    *out_len = 0;
-
-    if (style == HU_HUMOR_STYLE_NONE)
-        return HU_OK;
-
-    const char *directive = NULL;
-    switch (style) {
-    case HU_HUMOR_STYLE_OBSERVATIONAL:
-        directive = "[HUMOR STYLE: observational] — Notice something funny about the situation. "
-                    "Keep it subtle.";
-        break;
-    case HU_HUMOR_STYLE_CALLBACK:
-        directive = "[HUMOR STYLE: callback] — Reference a previous funny moment if relevant. "
-                    "Keep it subtle.";
-        break;
-    case HU_HUMOR_STYLE_SELF_DEPRECATING:
-        directive = "[HUMOR STYLE: self_deprecating] — Make light fun of yourself if appropriate. "
-                    "Keep it subtle.";
-        break;
-    case HU_HUMOR_STYLE_ABSURD:
-        directive = "[HUMOR STYLE: absurd] — Use unexpected or surreal humor if it fits. "
-                    "Keep it subtle.";
-        break;
-    case HU_HUMOR_STYLE_DEADPAN:
-        directive = "[HUMOR STYLE: deadpan] — Use dry, understated humor. Keep it subtle.";
-        break;
-    default:
-        return HU_OK;
-    }
-
-    size_t len = strlen(directive);
-    char *result = hu_strndup(alloc, directive, len);
-    if (!result)
-        return HU_ERR_OUT_OF_MEMORY;
-    *out = result;
-    *out_len = len;
-    return HU_OK;
 }
 
 /* ── F102 Cognitive Load ────────────────────────────────────────────────── */

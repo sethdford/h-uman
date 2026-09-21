@@ -967,12 +967,6 @@ void hu_hula_exec_set_spawn(hu_hula_exec_t *exec, struct hu_agent_pool *pool,
     exec->spawn_cfg = spawn_cfg;
 }
 
-void hu_hula_exec_set_delegate_registry(hu_hula_exec_t *exec, struct hu_agent_registry *registry) {
-    if (!exec)
-        return;
-    exec->delegate_registry = registry;
-}
-
 void hu_hula_exec_set_security_agent(hu_hula_exec_t *exec, struct hu_agent *agent) {
     if (!exec)
         return;

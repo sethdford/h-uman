@@ -127,7 +127,6 @@ typedef struct hu_dp_accountant {
 
 void hu_dp_accountant_init(hu_dp_accountant_t *a, double delta);
 void hu_dp_accountant_record_query(hu_dp_accountant_t *a, double epsilon_step);
-double hu_dp_accountant_total_epsilon(const hu_dp_accountant_t *a);
 
 typedef struct hu_learner_report {
     size_t signals_consumed;

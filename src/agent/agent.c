@@ -430,18 +430,6 @@ void hu_agent_internal_record_cost(hu_agent_t *agent, const hu_token_usage_t *us
     }
 }
 
-void hu_agent_internal_set_scene_direction(hu_agent_t *agent, const char *text, size_t text_len) {
-    if (!agent)
-        return;
-    if (!text || text_len == 0) {
-        agent->scene_direction_text = NULL;
-        agent->scene_direction_text_len = 0;
-        return;
-    }
-    agent->scene_direction_text = text;
-    agent->scene_direction_text_len = text_len;
-}
-
 void hu_agent_internal_clear_scene_direction(hu_agent_t *agent) {
     if (!agent)
         return;
@@ -1289,12 +1277,6 @@ void hu_agent_set_cost_tracker(hu_agent_t *agent, hu_cost_tracker_t *tracker) {
     if (!agent)
         return;
     agent->cost_tracker = tracker;
-}
-
-void hu_agent_set_task_list(hu_agent_t *agent, hu_task_list_t *task_list) {
-    if (!agent)
-        return;
-    agent->task_list = task_list;
 }
 
 void hu_agent_set_retrieval_engine(hu_agent_t *agent, hu_retrieval_engine_t *engine) {
@@ -2250,12 +2232,6 @@ void hu_agent_clear_history(hu_agent_t *agent) {
         agent->session_store->vtable->clear_messages) {
         (void)agent->session_store->vtable->clear_messages(agent->session_store->ctx, "", 0);
     }
-}
-
-uint32_t hu_agent_estimate_tokens(const char *text, size_t len) {
-    /* Thin alias kept for its existing callers; the ratio and the measurement
-     * behind it live in human/core/tokens.h. */
-    return (uint32_t)hu_tokens_estimate_text(text, len);
 }
 
 hu_policy_action_t hu_agent_internal_check_policy(hu_agent_t *agent, const char *tool_name,

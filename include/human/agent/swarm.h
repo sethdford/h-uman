@@ -61,10 +61,6 @@ hu_error_t hu_swarm_execute(hu_allocator_t *alloc, const hu_swarm_config_t *conf
 hu_error_t hu_swarm_aggregate(const hu_swarm_result_t *result, hu_swarm_aggregation_t strategy,
                               char *out, size_t out_size, size_t *out_len);
 
-hu_error_t hu_swarm_aggregate_llm(hu_allocator_t *alloc, const hu_swarm_result_t *result,
-                                  hu_provider_t *provider, const char *model, size_t model_len,
-                                  char *out, size_t out_size, size_t *out_len);
-
 void hu_swarm_result_free(hu_allocator_t *alloc, hu_swarm_result_t *result);
 
 #endif /* HU_AGENT_SWARM_H */

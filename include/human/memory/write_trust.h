@@ -73,7 +73,6 @@ hu_write_trust_decision_t hu_write_trust_score(const hu_write_trust_input_t *in)
 
 /* Convenience: source label for logs / quarantine. */
 const char *hu_write_source_str(hu_write_source_t s);
-const char *hu_write_outcome_str(hu_write_outcome_t o);
 
 /* Insert a relation into quarantine_relations instead of the live graph.
  * The caller passes the same fields it would have given to upsert_ex, plus

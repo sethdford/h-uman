@@ -5,24 +5,6 @@
 #include <stdio.h>
 #include <string.h>
 
-static const char *const HU_BRISK_NAMES[HU_BRISK_COUNT] = {
-    "none",
-    "attachment_high",
-    "exclusivity",
-    "goodbye_manipulation",
-    "human_displacement",
-    "dependency_pattern",
-    "vulnerable_user",
-    "escalation_needed",
-};
-
-const char *hu_behavior_risk_name(hu_behavior_risk_t r) {
-    if (r < 0 || r >= HU_BRISK_COUNT) {
-        return "none";
-    }
-    return HU_BRISK_NAMES[r];
-}
-
 static void bsafe_set_rationale(hu_behavior_safety_assessment_t *out, const char *msg) {
     if (!out || !msg) {
         return;

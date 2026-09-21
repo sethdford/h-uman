@@ -154,26 +154,6 @@ const hu_delegation_token_t *hu_delegation_get_token(hu_delegation_registry_t *r
                                                      const char *token_id);
 
 /**
- * Get all tokens issued by an agent.
- *
- * issuer_id: agent ID
- * out: output array (caller frees)
- * out_count: count
- *
- * Returns HU_OK on success.
- */
-hu_error_t hu_delegation_tokens_by_issuer(hu_delegation_registry_t *reg, hu_allocator_t *alloc,
-                                          const char *issuer_id, const char ***out,
-                                          size_t *out_count);
-
-/**
- * Get all tokens held by an agent.
- */
-hu_error_t hu_delegation_tokens_by_target(hu_delegation_registry_t *reg, hu_allocator_t *alloc,
-                                          const char *target_id, const char ***out,
-                                          size_t *out_count);
-
-/**
  * Get current token count.
  */
 size_t hu_delegation_token_count(hu_delegation_registry_t *reg);

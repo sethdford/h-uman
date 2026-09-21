@@ -215,7 +215,6 @@ hu_error_t hu_evaluation_legacy_bridge(hu_allocator_t *alloc, hu_evaluation_t *o
  * reference strings. The agent is borrowed (not owned); caller must keep
  * it alive for the lifetime of the backend. Pass NULL to revert. */
 struct hu_agent;
-void hu_evaluation_frontier_compare_set_agent(hu_evaluation_t *backend, struct hu_agent *agent);
 
 #ifdef __cplusplus
 }

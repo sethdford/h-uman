@@ -4,38 +4,9 @@
 #include <stdio.h>
 #include <string.h>
 
-#define HU_REL_ESCAPE_BUF 1024
 #define HU_REL_MS_PER_DAY 86400000ULL
 
 #define CLAMP(x, lo, hi) (((x) < (lo)) ? (lo) : (((x) > (hi)) ? (hi) : (x)))
-
-static void escape_sql_string(const char *s, size_t len, char *buf, size_t cap, size_t *out_len) {
-    (void)hu_sql_quote_escape_into(s, len, buf, cap, out_len);
-}
-
-hu_error_t hu_rel_dynamics_create_table_sql(char *buf, size_t cap, size_t *out_len) {
-    if (!buf || !out_len || cap < 512)
-        return HU_ERR_INVALID_ARGUMENT;
-    static const char sql[] = "CREATE TABLE IF NOT EXISTS relationship_dynamics (\n"
-                              "    id INTEGER PRIMARY KEY AUTOINCREMENT,\n"
-                              "    contact_id TEXT NOT NULL,\n"
-                              "    messages_sent INTEGER NOT NULL,\n"
-                              "    messages_received INTEGER NOT NULL,\n"
-                              "    initiations_sent INTEGER NOT NULL,\n"
-                              "    initiations_received INTEGER NOT NULL,\n"
-                              "    avg_response_time_ms INTEGER NOT NULL,\n"
-                              "    interaction_quality REAL NOT NULL,\n"
-                              "    velocity REAL NOT NULL,\n"
-                              "    trend TEXT NOT NULL,\n"
-                              "    measured_at INTEGER NOT NULL\n"
-                              ")";
-    size_t len = sizeof(sql) - 1;
-    if (len >= cap)
-        return HU_ERR_INVALID_ARGUMENT;
-    memcpy(buf, sql, len + 1);
-    *out_len = len;
-    return HU_OK;
-}
 
 float hu_rel_velocity_compute(hu_rel_velocity_t *vel) {
     if (!vel)
@@ -78,114 +49,6 @@ hu_rel_trend_t hu_rel_trend_classify(float velocity, float prev_velocity) {
     if (velocity < -0.15f)
         return HU_REL_TREND_COOLING;
     return HU_REL_TREND_STABLE;
-}
-
-hu_error_t hu_rel_dynamics_insert_sql(const hu_rel_velocity_t *vel, uint64_t timestamp_ms,
-                                      char *buf, size_t cap, size_t *out_len) {
-    if (!vel || !buf || !out_len || cap < 512)
-        return HU_ERR_INVALID_ARGUMENT;
-
-    const char *cid = vel->contact_id ? vel->contact_id : "";
-    size_t cid_len = vel->contact_id_len;
-    if (cid_len == 0 && cid[0] != '\0')
-        cid_len = strlen(cid);
-
-    char contact_esc[HU_REL_ESCAPE_BUF];
-    size_t ce_len;
-    escape_sql_string(cid, cid_len, contact_esc, sizeof(contact_esc), &ce_len);
-
-    const char *trend_str = hu_rel_trend_str(vel->trend);
-
-    int n = snprintf(
-        buf, cap,
-        "INSERT INTO relationship_dynamics (contact_id, messages_sent, messages_received, "
-        "initiations_sent, initiations_received, avg_response_time_ms, interaction_quality, "
-        "velocity, trend, measured_at) VALUES ('%s', %u, %u, %u, %u, %llu, %f, %f, '%s', %llu)",
-        contact_esc, vel->messages_sent_30d, vel->messages_received_30d, vel->initiations_sent_30d,
-        vel->initiations_received_30d, (unsigned long long)vel->avg_response_time_ms,
-        (double)vel->interaction_quality, (double)vel->velocity, trend_str,
-        (unsigned long long)timestamp_ms);
-
-    if (n < 0 || (size_t)n >= cap)
-        return HU_ERR_INVALID_ARGUMENT;
-    *out_len = (size_t)n;
-    return HU_OK;
-}
-
-hu_error_t hu_rel_dynamics_query_sql(const char *contact_id, size_t contact_id_len, size_t limit,
-                                     char *buf, size_t cap, size_t *out_len) {
-    if (!contact_id || contact_id_len == 0 || !buf || !out_len || cap < 256)
-        return HU_ERR_INVALID_ARGUMENT;
-
-    char contact_esc[HU_REL_ESCAPE_BUF];
-    size_t ce_len;
-    escape_sql_string(contact_id, contact_id_len, contact_esc, sizeof(contact_esc), &ce_len);
-
-    int n = snprintf(buf, cap,
-                     "SELECT contact_id, messages_sent, messages_received, "
-                     "initiations_sent, initiations_received, avg_response_time_ms, "
-                     "interaction_quality, velocity, trend, measured_at "
-                     "FROM relationship_dynamics WHERE contact_id = '%s' "
-                     "ORDER BY measured_at DESC LIMIT %zu",
-                     contact_esc, limit > 0 ? limit : 100);
-
-    if (n < 0 || (size_t)n >= cap)
-        return HU_ERR_INVALID_ARGUMENT;
-    *out_len = (size_t)n;
-    return HU_OK;
-}
-
-bool hu_drift_detect(const hu_rel_velocity_t *measurements, size_t count,
-                     hu_drift_signal_t *signal) {
-    if (!measurements || !signal || count < 2)
-        return false;
-
-    signal->consecutive_negative_periods = 0;
-    signal->last_velocity = 0.0f;
-    signal->current_velocity = measurements[count - 1].velocity;
-    signal->is_drifting = false;
-
-    if (count > 0) {
-        signal->contact_id = measurements[0].contact_id;
-        signal->contact_id_len = measurements[0].contact_id_len;
-    }
-
-    for (size_t i = count; i > 0; i--) {
-        size_t idx = i - 1;
-        if (measurements[idx].velocity < 0.0f) {
-            signal->consecutive_negative_periods++;
-            if (idx > 0)
-                signal->last_velocity = measurements[idx - 1].velocity;
-        } else {
-            break;
-        }
-    }
-
-    signal->is_drifting = signal->consecutive_negative_periods >= 2;
-    return signal->is_drifting;
-}
-
-bool hu_repair_should_activate(const hu_drift_signal_t *signal, float interaction_quality) {
-    if (!signal || !signal->is_drifting)
-        return false;
-    return interaction_quality < -0.3f;
-}
-
-float hu_rel_dynamics_budget_multiplier(hu_rel_trend_t trend) {
-    switch (trend) {
-    case HU_REL_TREND_DEEPENING:
-        return 1.2f;
-    case HU_REL_TREND_STABLE:
-        return 1.0f;
-    case HU_REL_TREND_COOLING:
-        return 0.7f;
-    case HU_REL_TREND_STRAINED:
-        return 0.4f;
-    case HU_REL_TREND_REPAIR:
-        return 0.5f;
-    default:
-        return 1.0f;
-    }
 }
 
 const char *hu_rel_trend_str(hu_rel_trend_t trend) {
@@ -235,27 +98,4 @@ hu_error_t hu_rel_dynamics_build_prompt(hu_allocator_t *alloc, const hu_rel_velo
     *out = result;
     *out_len = strlen(result);
     return HU_OK;
-}
-
-void hu_rel_velocity_deinit(hu_allocator_t *alloc, hu_rel_velocity_t *vel) {
-    (void)alloc;
-    if (!vel)
-        return;
-    vel->contact_id = NULL;
-    vel->contact_id_len = 0;
-}
-
-void hu_repair_state_deinit(hu_allocator_t *alloc, hu_repair_state_t *state) {
-    if (!alloc || !state)
-        return;
-    if (state->contact_id) {
-        hu_str_free(alloc, state->contact_id);
-        state->contact_id = NULL;
-        state->contact_id_len = 0;
-    }
-    if (state->reason) {
-        hu_str_free(alloc, state->reason);
-        state->reason = NULL;
-        state->reason_len = 0;
-    }
 }

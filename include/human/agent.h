@@ -707,9 +707,6 @@ void hu_agent_set_skillforge(hu_agent_t *agent, struct hu_skillforge *skillforge
 /* Optional: share session cost accounting with spawned workers (borrowed pointer). */
 void hu_agent_set_cost_tracker(hu_agent_t *agent, hu_cost_tracker_t *tracker);
 
-/* Optional: set shared task list for multi-agent collaboration. Caller owns task_list. */
-void hu_agent_set_task_list(hu_agent_t *agent, hu_task_list_t *task_list);
-
 /* Optional: set retrieval engine for semantic/hybrid recall. Caller owns engine lifecycle. */
 void hu_agent_set_retrieval_engine(hu_agent_t *agent, hu_retrieval_engine_t *engine);
 
@@ -1002,9 +999,6 @@ void hu_agent_clear_history(hu_agent_t *agent);
  * Returns owned response string or NULL if not a slash command.
  * Caller must free the returned string. */
 char *hu_agent_handle_slash_command(hu_agent_t *agent, const char *message, size_t message_len);
-
-/* Estimate tokens for a string (rough: ~4 chars per token). */
-uint32_t hu_agent_estimate_tokens(const char *text, size_t len);
 
 /* Execute a structured plan (Tier 1.4 planner integration).
  * plan_json format: {"steps": [{"tool": "name", "args": {...}, "description": "..."}]}

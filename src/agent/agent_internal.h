@@ -159,7 +159,6 @@ hu_error_t hu_agent_internal_build_unavailable_fallback(hu_allocator_t *alloc, c
  * `hu_guard_context_t.director_text` so a verbatim quote of "casual
  * short, dry" by the model triggers G6 → REJECT. (Sprint 34 — wires
  * Sprint 31's G6 into production.) */
-void hu_agent_internal_set_scene_direction(hu_agent_t *agent, const char *text, size_t text_len);
 void hu_agent_internal_clear_scene_direction(hu_agent_t *agent);
 
 /* Sprint 37 — Push the about-to-go-stale director string into the

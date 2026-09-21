@@ -2794,11 +2794,6 @@ size_t hu_conversation_extract_topic(const char *msg, size_t msg_len, char *out,
     return extract_significant_topic(msg, msg_len, out, cap);
 }
 
-size_t hu_conversation_extract_followup_topic(const char *msg, size_t msg_len, char *topic_out,
-                                              size_t cap) {
-    return extract_significant_topic(msg, msg_len, topic_out, cap);
-}
-
 /* ── Double-text decision (F9) ──────────────────────────────────────────── */
 
 static const char *const DEFAULT_FAREWELL_PHRASES[] = {
@@ -5678,49 +5673,6 @@ hu_group_response_t hu_conversation_classify_group(const char *msg, size_t msg_l
 }
 
 /* ── Group chat @ mentions (F56) ───────────────────────────────────────── */
-
-size_t hu_conversation_build_group_member_directive(const char *const *members, size_t member_count,
-                                                    char *buf, size_t cap) {
-    if (!buf || cap == 0 || !members || member_count == 0)
-        return 0;
-
-    size_t pos = 0;
-    int n = snprintf(buf, cap, "[GROUP: Members present: ");
-    if (n <= 0 || (size_t)n >= cap)
-        return 0;
-    pos += (size_t)n;
-
-    bool added_any = false;
-    for (size_t i = 0; i < member_count && pos < cap; i++) {
-        const char *name = members[i];
-        if (!name || name[0] == '\0')
-            continue;
-        size_t name_len = strlen(name);
-        if (name_len > 64)
-            name_len = 64;
-        if (added_any) {
-            if (pos + 2 >= cap)
-                break;
-            memcpy(buf + pos, ", ", 2);
-            pos += 2;
-        }
-        if (pos + name_len >= cap)
-            break;
-        memcpy(buf + pos, name, name_len);
-        pos += name_len;
-        added_any = true;
-    }
-
-    if (!added_any)
-        return 0;
-
-    const char *suffix = ". You can address them by name.]";
-    size_t suffix_len = strlen(suffix);
-    if (pos + suffix_len >= cap)
-        return 0;
-    memcpy(buf + pos, suffix, suffix_len + 1);
-    return pos + suffix_len;
-}
 
 /* ── Outbound parrot guard ──────────────────────────────────────────────── */
 

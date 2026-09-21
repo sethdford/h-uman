@@ -51,7 +51,4 @@ hu_error_t hu_commitment_detect(hu_allocator_t *alloc, const char *text, size_t 
 void hu_commitment_deinit(hu_commitment_t *c, hu_allocator_t *alloc);
 void hu_commitment_detect_result_deinit(hu_commitment_detect_result_t *r, hu_allocator_t *alloc);
 
-hu_error_t hu_commitment_data_init(hu_allocator_t *alloc);
-void hu_commitment_data_cleanup(hu_allocator_t *alloc);
-
 #endif /* HU_AGENT_COMMITMENT_H */

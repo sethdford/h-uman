@@ -472,62 +472,6 @@ const hu_delegation_token_t *hu_delegation_get_token(hu_delegation_registry_t *r
     return NULL;
 }
 
-hu_error_t hu_delegation_tokens_by_issuer(hu_delegation_registry_t *reg, hu_allocator_t *alloc,
-                                          const char *issuer_id, const char ***out,
-                                          size_t *out_count) {
-    if (!reg || !alloc || !issuer_id || !out || !out_count)
-        return HU_ERR_INVALID_ARGUMENT;
-
-    size_t count = 0;
-    for (size_t i = 0; i < reg->token_count; i++) {
-        if (strcmp(reg->tokens[i].issuer_agent_id, issuer_id) == 0)
-            count++;
-    }
-
-    const char **result = (const char **)alloc->alloc(alloc->ctx, count * sizeof(char *));
-    if (!result)
-        return HU_ERR_OUT_OF_MEMORY;
-
-    size_t idx = 0;
-    for (size_t i = 0; i < reg->token_count; i++) {
-        if (strcmp(reg->tokens[i].issuer_agent_id, issuer_id) == 0) {
-            result[idx++] = reg->tokens[i].token_id;
-        }
-    }
-
-    *out = result;
-    *out_count = count;
-    return HU_OK;
-}
-
-hu_error_t hu_delegation_tokens_by_target(hu_delegation_registry_t *reg, hu_allocator_t *alloc,
-                                          const char *target_id, const char ***out,
-                                          size_t *out_count) {
-    if (!reg || !alloc || !target_id || !out || !out_count)
-        return HU_ERR_INVALID_ARGUMENT;
-
-    size_t count = 0;
-    for (size_t i = 0; i < reg->token_count; i++) {
-        if (strcmp(reg->tokens[i].target_agent_id, target_id) == 0)
-            count++;
-    }
-
-    const char **result = (const char **)alloc->alloc(alloc->ctx, count * sizeof(char *));
-    if (!result)
-        return HU_ERR_OUT_OF_MEMORY;
-
-    size_t idx = 0;
-    for (size_t i = 0; i < reg->token_count; i++) {
-        if (strcmp(reg->tokens[i].target_agent_id, target_id) == 0) {
-            result[idx++] = reg->tokens[i].token_id;
-        }
-    }
-
-    *out = result;
-    *out_count = count;
-    return HU_OK;
-}
-
 size_t hu_delegation_token_count(hu_delegation_registry_t *reg) {
     if (!reg)
         return 0;

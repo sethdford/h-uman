@@ -49,9 +49,6 @@ bool hu_conflict_relation_is_single_valued(hu_relation_type_t type);
 hu_error_t hu_conflict_apply(hu_graph_t *g, hu_conflict_resolution_t decision, int64_t proposed_id,
                              int64_t existing_id, int64_t cutover_ts);
 
-/* Convenience: human-readable label for logs / tests / UI. */
-const char *hu_conflict_resolution_str(hu_conflict_resolution_t r);
-
 /* W8 Phase 5 — Semantic-judge fallback.
  *
  * The strict classifier above keys on (source_id, type, target_id). When

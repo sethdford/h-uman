@@ -96,14 +96,7 @@ void hu_agent_pool_destroy(hu_agent_pool_t *pool);
 /* Default fleet limits: max_spawn_depth=8, unlimited spawns/budget. Pass NULL for defaults. */
 void hu_agent_pool_set_fleet_limits(hu_agent_pool_t *pool, const hu_fleet_limits_t *limits);
 
-/* Optional: bind a cost tracker for fleet budget fallback and hu_agent_pool_fleet_status. */
-void hu_agent_pool_bind_fleet_cost_tracker(hu_agent_pool_t *pool, hu_cost_tracker_t *tracker);
-
 void hu_agent_pool_fleet_status(hu_agent_pool_t *pool, hu_fleet_status_t *out);
-
-void hu_agent_pool_set_worktree_manager(hu_agent_pool_t *pool, hu_worktree_manager_t *worktree_mgr);
-
-void hu_agent_pool_set_team_config(hu_agent_pool_t *pool, hu_team_config_t *team_config);
 
 hu_error_t hu_agent_pool_spawn(hu_agent_pool_t *pool, const hu_spawn_config_t *cfg,
                                const char *task, size_t task_len, const char *label,

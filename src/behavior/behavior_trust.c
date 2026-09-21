@@ -106,18 +106,3 @@ hu_error_t hu_trust_calibrate(const hu_trust_input_t *in, hu_trust_decision_t *o
     trust_set_rationale(out, "default answer with normal confidence");
     return HU_OK;
 }
-
-int hu_trust_directive_worth_emitting(const hu_trust_decision_t *d) {
-    if (!d) {
-        return 0;
-    }
-    switch (d->action) {
-    case HU_TRUST_REFUSE_TO_AGREE:
-    case HU_TRUST_ABSTAIN:
-        return 1;
-    case HU_TRUST_PUSH_BACK:
-        return d->firmness >= 0.5f ? 1 : 0;
-    default:
-        return 0;
-    }
-}

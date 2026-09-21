@@ -50,16 +50,4 @@ const char *hu_skill_trust_get_policy(hu_skill_sandbox_tier_t tier);
  * Under HU_IS_TEST: no-op. Non-test: appends JSON line to ~/.human/skill_audit.log */
 hu_error_t hu_skill_trust_audit_record(hu_allocator_t *alloc, const hu_skill_audit_entry_t *entry);
 
-/* Load trusted publishers from ~/.human/trusted_publishers.json.
- * Under HU_IS_TEST: returns 0 publishers. Caller frees. */
-hu_error_t hu_skill_trust_load_publishers(hu_allocator_t *alloc, hu_publisher_key_t **out,
-                                          size_t *out_count);
-
-/* Free publisher keys array. */
-void hu_skill_trust_free_publishers(hu_allocator_t *alloc, hu_publisher_key_t *publishers,
-                                    size_t count);
-
-/* Free an audit entry's strings. */
-void hu_skill_audit_entry_deinit(hu_skill_audit_entry_t *e, hu_allocator_t *alloc);
-
 #endif

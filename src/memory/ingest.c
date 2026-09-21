@@ -566,15 +566,3 @@ hu_error_t hu_ingest_file_with_provider(hu_allocator_t *alloc, hu_memory_t *memo
 
     return HU_ERR_NOT_SUPPORTED;
 }
-
-void hu_ingest_result_deinit(hu_ingest_result_t *result, hu_allocator_t *alloc) {
-    if (!result || !alloc)
-        return;
-    if (result->content)
-        alloc->free(alloc->ctx, result->content, result->content_len + 1);
-    if (result->summary)
-        alloc->free(alloc->ctx, result->summary, result->summary_len + 1);
-    if (result->source_path)
-        alloc->free(alloc->ctx, result->source_path, result->source_path_len + 1);
-    memset(result, 0, sizeof(*result));
-}

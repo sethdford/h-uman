@@ -60,9 +60,6 @@ const char *hu_trust_action_name(hu_trust_action_t a);
 /* Calibrate the next response action given the trust input. Pure function. */
 hu_error_t hu_trust_calibrate(const hu_trust_input_t *in, hu_trust_decision_t *out);
 
-/* B11: short system-prompt tag for high-stakes trust actions (anti-sycophancy). */
-int hu_trust_directive_worth_emitting(const hu_trust_decision_t *d);
-
 /* Richer directive text; implemented in `src/behavior/trust_prompt.c`. */
 hu_error_t hu_trust_build_directive(hu_allocator_t *alloc, const hu_trust_decision_t *d, char **out,
                                     size_t *out_len);

@@ -58,18 +58,6 @@ const char *hu_write_source_str(hu_write_source_t s) {
     return "unknown";
 }
 
-const char *hu_write_outcome_str(hu_write_outcome_t o) {
-    switch (o) {
-    case HU_WRITE_OUTCOME_LIVE:
-        return "live";
-    case HU_WRITE_OUTCOME_QUARANTINE:
-        return "quarantine";
-    case HU_WRITE_OUTCOME_DROP:
-        return "drop";
-    }
-    return "unknown";
-}
-
 /* Recency: 1.0 at t=now, ~0.6 at 24h, ~0.13 at 7d. Half-life ~36h. */
 static float recency_score(int64_t observed_at, int64_t now) {
     if (observed_at <= 0 || now <= 0)

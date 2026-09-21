@@ -205,10 +205,6 @@ size_t hu_conversation_build_mirror_directive(const char *distinctive_words, siz
                                               uint32_t seed, float probability, char *buf,
                                               size_t cap);
 
-/* ── Delayed follow-up topic extraction (F8) ─────────────────────────────── */
-size_t hu_conversation_extract_followup_topic(const char *msg, size_t msg_len, char *topic_out,
-                                              size_t cap);
-
 /* ── Double-text decision (F9) ───────────────────────────────────────────── */
 bool hu_conversation_should_double_text(const char *last_response, size_t resp_len,
                                         const hu_channel_history_entry_t *entries, size_t count,

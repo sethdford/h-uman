@@ -216,13 +216,6 @@ static hu_error_t anticipatory_predict_impl(hu_allocator_t *alloc, hu_memory_t *
     return HU_OK;
 }
 
-hu_error_t hu_anticipatory_predict(hu_allocator_t *alloc, hu_memory_t *memory,
-                                   const char *contact_id, size_t contact_id_len, int64_t now_ts,
-                                   hu_emotional_prediction_t **out, size_t *out_count) {
-    return anticipatory_predict_impl(alloc, memory, NULL, NULL, 0, contact_id, contact_id_len,
-                                     now_ts, out, out_count);
-}
-
 hu_error_t hu_anticipatory_predict_with_provider(hu_allocator_t *alloc, hu_memory_t *memory,
                                                  hu_provider_t *provider, const char *model,
                                                  size_t model_len, const char *contact_id,
@@ -304,19 +297,6 @@ void hu_anticipatory_predictions_free(hu_allocator_t *alloc, hu_emotional_predic
 #include "human/provider.h"
 #include <stddef.h>
 #include <string.h>
-
-hu_error_t hu_anticipatory_predict(hu_allocator_t *alloc, hu_memory_t *memory,
-                                   const char *contact_id, size_t contact_id_len, int64_t now_ts,
-                                   hu_emotional_prediction_t **out, size_t *out_count) {
-    (void)alloc;
-    (void)memory;
-    (void)contact_id;
-    (void)contact_id_len;
-    (void)now_ts;
-    (void)out;
-    (void)out_count;
-    return HU_ERR_NOT_SUPPORTED;
-}
 
 char *hu_anticipatory_build_directive(hu_allocator_t *alloc, const hu_emotional_prediction_t *preds,
                                       size_t count, const char *contact_name, size_t name_len,

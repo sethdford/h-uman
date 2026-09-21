@@ -22,7 +22,6 @@ retrieval/           Query and retrieval pipeline
   hybrid.c           Combines vector + keyword results
   keyword.c          Keyword/BM25 retrieval
   reranker.c         Result reranking
-  qmd.c             Query-Memory Dispatch (routes queries to best retrieval strategy)
 
 vector/              Vector search and embeddings
   embeddings.c       Embedding generation (via provider)

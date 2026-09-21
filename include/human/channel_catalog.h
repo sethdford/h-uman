@@ -77,10 +77,4 @@ const hu_channel_meta_t *hu_channel_catalog_find_by_key(const char *key);
 /* Has any non-CLI channel configured. */
 bool hu_channel_catalog_has_any_configured(const hu_config_t *cfg, bool include_cli);
 
-/* Does channel contribute to daemon supervision. */
-bool hu_channel_catalog_contributes_to_daemon(hu_channel_id_t id);
-
-/* Does channel require runtime (polling/gateway/webhook). */
-bool hu_channel_catalog_requires_runtime(hu_channel_id_t id);
-
 #endif /* HU_CHANNEL_CATALOG_H */

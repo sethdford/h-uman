@@ -641,100 +641,11 @@ hu_error_t hu_swarm_aggregate(const hu_swarm_result_t *result, hu_swarm_aggregat
         break;
     }
     case HU_SWARM_AGG_LLM_SYNTHESIZE:
-        /* LLM synthesis requires a provider — use hu_swarm_aggregate_llm() directly.
-         * Fall back to concatenation here. */
+        /* LLM synthesis requires a provider, which this entry point does
+         * not take. Fall back to concatenation here. */
         return hu_swarm_aggregate(result, HU_SWARM_AGG_CONCATENATE, out, out_size, out_len);
     }
 
-    return HU_OK;
-}
-
-hu_error_t hu_swarm_aggregate_llm(hu_allocator_t *alloc, const hu_swarm_result_t *result,
-                                  hu_provider_t *provider, const char *model, size_t model_len,
-                                  char *out, size_t out_size, size_t *out_len) {
-    if (!alloc || !result || !out || !out_len || out_size == 0)
-        return HU_ERR_INVALID_ARGUMENT;
-    out[0] = '\0';
-    *out_len = 0;
-
-    if (result->task_count == 0 || !result->tasks)
-        return HU_OK;
-
-    /* Collect completed results */
-    size_t valid = 0;
-    for (size_t i = 0; i < result->task_count; i++) {
-        if (result->tasks[i].completed && result->tasks[i].result_len > 0)
-            valid++;
-    }
-    if (valid == 0)
-        return HU_OK;
-    if (valid == 1) {
-        /* Single result — return directly */
-        for (size_t i = 0; i < result->task_count; i++) {
-            if (result->tasks[i].completed && result->tasks[i].result_len > 0) {
-                size_t to_copy = result->tasks[i].result_len;
-                if (to_copy > out_size - 1)
-                    to_copy = out_size - 1;
-                memcpy(out, result->tasks[i].result, to_copy);
-                out[to_copy] = '\0';
-                *out_len = to_copy;
-                return HU_OK;
-            }
-        }
-    }
-
-    /* No provider — fall back to concatenation */
-    if (!provider || !provider->vtable || !provider->vtable->chat_with_system)
-        return hu_swarm_aggregate(result, HU_SWARM_AGG_CONCATENATE, out, out_size, out_len);
-
-    /* Build synthesis prompt with all results */
-    char prompt[8192];
-    int plen = snprintf(
-        prompt, sizeof(prompt),
-        "You are synthesizing results from %zu parallel sub-agents into one coherent response.\n\n"
-        "Sub-agent results:\n",
-        valid);
-
-    size_t idx = 0;
-    for (size_t i = 0; i < result->task_count && plen < (int)sizeof(prompt) - 256; i++) {
-        if (!result->tasks[i].completed || result->tasks[i].result_len == 0)
-            continue;
-        idx++;
-        int added = snprintf(
-            prompt + plen, sizeof(prompt) - (size_t)plen,
-            "\n--- Agent %zu (task: %.*s) ---\n%.*s\n", idx,
-            (int)(result->tasks[i].description_len < 100 ? result->tasks[i].description_len : 100),
-            result->tasks[i].description,
-            (int)(result->tasks[i].result_len < 1500 ? result->tasks[i].result_len : 1500),
-            result->tasks[i].result);
-        if (added > 0)
-            plen += added;
-    }
-    int added =
-        snprintf(prompt + plen, sizeof(prompt) - (size_t)plen,
-                 "\nSynthesize these into a single coherent, comprehensive response. "
-                 "Resolve any contradictions. Keep the most relevant and accurate information.");
-    if (added > 0)
-        plen += added;
-
-    static const char sys[] = "You synthesize multiple agent outputs into one coherent answer.";
-    char *llm_out = NULL;
-    size_t llm_out_len = 0;
-    hu_error_t err = provider->vtable->chat_with_system(provider->ctx, alloc, sys, sizeof(sys) - 1u,
-                                                        prompt, (size_t)plen, model ? model : "",
-                                                        model_len, 0.0, &llm_out, &llm_out_len);
-
-    if (err != HU_OK || !llm_out || llm_out_len == 0) {
-        if (llm_out)
-            alloc->free(alloc->ctx, llm_out, llm_out_len + 1);
-        return hu_swarm_aggregate(result, HU_SWARM_AGG_CONCATENATE, out, out_size, out_len);
-    }
-
-    size_t to_copy = llm_out_len < out_size - 1 ? llm_out_len : out_size - 1;
-    memcpy(out, llm_out, to_copy);
-    out[to_copy] = '\0';
-    *out_len = to_copy;
-    alloc->free(alloc->ctx, llm_out, llm_out_len + 1);
     return HU_OK;
 }
 

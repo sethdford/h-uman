@@ -59,8 +59,6 @@ hu_error_t hu_pwa_list_tabs(hu_allocator_t *alloc, hu_pwa_browser_t browser,
 hu_error_t hu_pwa_exec_js(hu_allocator_t *alloc, const hu_pwa_tab_t *tab, const char *javascript,
                           char **out_result, size_t *out_len);
 
-hu_error_t hu_pwa_activate_tab(hu_allocator_t *alloc, const hu_pwa_tab_t *tab);
-
 /* ── App Drivers ───────────────────────────────────────────────────── */
 
 #define HU_PWA_MAX_DRIVERS 16

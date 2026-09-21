@@ -26,14 +26,6 @@ typedef struct vec_store_ctx {
     size_t dim;
 } vec_store_ctx_t;
 
-bool hu_sqlite_vec_register(void) {
-    /* sqlite3_auto_extension is deprecated on Apple platforms (process-global
-     * auto-extensions unsupported), so the extension is loaded PER CONNECTION
-     * in hu_vector_store_sqlite_vec_create via sqlite3_vec_init(db, ...).
-     * Kept as an idempotent no-op for callers that expect a registration step. */
-    return true;
-}
-
 static bool ensure_schema(sqlite3 *db, size_t dim) {
     char sql[256];
     int n = snprintf(sql, sizeof(sql),
@@ -262,10 +254,6 @@ hu_vector_store_t hu_vector_store_sqlite_vec_create(hu_allocator_t *alloc, struc
 }
 
 #else /* !HU_ENABLE_SQLITE || !HU_ENABLE_SQLITE_VEC: stub, attach refuses */
-
-bool hu_sqlite_vec_register(void) {
-    return false;
-}
 
 hu_vector_store_t hu_vector_store_sqlite_vec_create(hu_allocator_t *alloc, struct sqlite3 *db,
                                                     size_t dim) {

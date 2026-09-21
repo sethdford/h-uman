@@ -717,11 +717,6 @@ hu_error_t hu_config_load_from(hu_allocator_t *backing, const char *path, hu_con
     return config_load_impl(backing, out, path);
 }
 
-const char *hu_config_env_get(const char *name) {
-    const char *v = getenv(name);
-    return (v && v[0]) ? v : NULL;
-}
-
 void hu_config_apply_env_str(hu_allocator_t *a, char **dst, const char *v) {
     if (!v || !v[0])
         return;

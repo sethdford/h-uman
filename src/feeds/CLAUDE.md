@@ -15,14 +15,11 @@ gmail.c               Gmail feed source (OAuth, IMAP)
 imessage.c            iMessage feed source (macOS ChatDB)
 twitter.c             Twitter/X feed source (Bearer token API)
 social.c              Social feed source (Facebook, Instagram, TikTok)
-google.c              Google feed source (photos, contacts)
 research.c            Research feed source
 research_executor.c   Research execution engine
 findings.c            Research findings storage
 trends.c              Trend detection and tracking
 news.c                News/RSS feed source
-music.c               Music feed source
-oauth.c               OAuth flow for feed authentication
 file_ingest.c         Local file ingestion from ~/.human/ingest/
 ```
 

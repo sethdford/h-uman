@@ -18,15 +18,10 @@ typedef struct hu_boundary {
     uint64_t set_at;
 } hu_boundary_t;
 
-hu_error_t hu_protective_create_table_sql(char *buf, size_t cap, size_t *out_len);
-hu_error_t hu_protective_insert_sql(const hu_boundary_t *b, char *buf, size_t cap, size_t *out_len);
-hu_error_t hu_protective_query_sql(const char *contact_id, size_t len, char *buf, size_t cap,
-                                   size_t *out_len);
 bool hu_protective_topic_is_blocked(const hu_boundary_t *boundaries, size_t count,
                                     const char *topic, size_t topic_len);
 hu_error_t hu_protective_build_prompt(hu_allocator_t *alloc, const hu_boundary_t *boundaries,
                                       size_t count, char **out, size_t *out_len);
-void hu_boundary_deinit(hu_allocator_t *alloc, hu_boundary_t *b);
 
 /* F69 — Humor Generation */
 typedef enum hu_humor_style {
@@ -48,8 +43,6 @@ typedef struct hu_humor_config {
 hu_humor_style_t hu_humor_select_style(double closeness, bool serious_topic, bool in_crisis,
                                        const hu_humor_config_t *config, uint32_t seed);
 const char *hu_humor_style_str(hu_humor_style_t style);
-hu_error_t hu_humor_build_directive(hu_allocator_t *alloc, hu_humor_style_t style, char **out,
-                                    size_t *out_len);
 
 /* F102 — Cognitive Load */
 typedef struct hu_cognitive_state {

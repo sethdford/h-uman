@@ -54,20 +54,6 @@ hu_conflict_resolution_t hu_conflict_classify(const hu_graph_relation_t *propose
     return HU_CONFLICT_BRANCH;
 }
 
-const char *hu_conflict_resolution_str(hu_conflict_resolution_t r) {
-    switch (r) {
-    case HU_CONFLICT_NONE:
-        return "NONE";
-    case HU_CONFLICT_SUPERSEDE:
-        return "SUPERSEDE";
-    case HU_CONFLICT_BRANCH:
-        return "BRANCH";
-    case HU_CONFLICT_FLAG:
-        return "FLAG";
-    }
-    return "UNKNOWN";
-}
-
 /* W8 Phase 5 — semantic-judge fallback.
  *
  * Pure helper, no DB I/O. Walks `candidates` in order, runs
