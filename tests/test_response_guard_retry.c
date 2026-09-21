@@ -1,6 +1,7 @@
 #include "human/agent.h"
 #include "human/core/allocator.h"
 #include "human/core/string.h"
+#include "human/daemon/director.h"
 #include "human/persona.h"
 #include "human/provider.h"
 #include "test_framework.h"
@@ -44,12 +45,11 @@ static hu_error_t retry_provider_chat(void *ctx, hu_allocator_t *alloc,
 
     const char *text = NULL;
     if (r->calls == 1) {
-        text =
-            "Like <|channel>thoughtThe user said said \"Here! \" \" \" \" \" \" \" \" \" \" \" "
-            "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" "
-            "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" "
-            "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" "
-            "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" ";
+        text = "Like <|channel>thoughtThe user said said \"Here! \" \" \" \" \" \" \" \" \" \" \" "
+               "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" "
+               "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" "
+               "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" "
+               "\" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" \" ";
     } else {
         text = "haha yeah, fair 😂";
     }
@@ -116,9 +116,9 @@ static void guard_reject_retry_produces_human_like_replacement(void) {
     hu_provider_t provider = retry_provider_create(&provider_ctx);
 
     hu_agent_t agent;
-    hu_error_t err = hu_agent_from_config(&agent, &alloc, provider, NULL, 0, NULL, NULL, NULL,
-                                          NULL, "test-model", 10, "retry_guard_mock", 16, 0.7,
-                                          "/tmp", 4, 5, 50, false, 1, NULL, 0, NULL, 0, NULL);
+    hu_error_t err = hu_agent_from_config(&agent, &alloc, provider, NULL, 0, NULL, NULL, NULL, NULL,
+                                          "test-model", 10, "retry_guard_mock", 16, 0.7, "/tmp", 4,
+                                          5, 50, false, 1, NULL, 0, NULL, 0, NULL);
     HU_ASSERT_EQ(err, HU_OK);
     agent.active_channel = "imessage";
     agent.active_channel_len = 8;
@@ -146,9 +146,9 @@ static void stream_guard_reject_retry_produces_human_like_replacement(void) {
     hu_provider_t provider = retry_provider_create(&provider_ctx);
 
     hu_agent_t agent;
-    hu_error_t err = hu_agent_from_config(&agent, &alloc, provider, NULL, 0, NULL, NULL, NULL,
-                                          NULL, "test-model", 10, "retry_guard_mock", 16, 0.7,
-                                          "/tmp", 4, 5, 50, false, 1, NULL, 0, NULL, 0, NULL);
+    hu_error_t err = hu_agent_from_config(&agent, &alloc, provider, NULL, 0, NULL, NULL, NULL, NULL,
+                                          "test-model", 10, "retry_guard_mock", 16, 0.7, "/tmp", 4,
+                                          5, 50, false, 1, NULL, 0, NULL, 0, NULL);
     HU_ASSERT_EQ(err, HU_OK);
     agent.active_channel = "imessage";
     agent.active_channel_len = 8;
@@ -194,9 +194,9 @@ static void stream_guard_buffers_raw_output_until_retry_passes(void) {
     hu_provider_t provider = retry_provider_create(&provider_ctx);
 
     hu_agent_t agent;
-    hu_error_t err = hu_agent_from_config(&agent, &alloc, provider, NULL, 0, NULL, NULL, NULL,
-                                          NULL, "test-model", 10, "retry_guard_mock", 16, 0.7,
-                                          "/tmp", 4, 5, 50, false, 1, NULL, 0, NULL, 0, NULL);
+    hu_error_t err = hu_agent_from_config(&agent, &alloc, provider, NULL, 0, NULL, NULL, NULL, NULL,
+                                          "test-model", 10, "retry_guard_mock", 16, 0.7, "/tmp", 4,
+                                          5, 50, false, 1, NULL, 0, NULL, 0, NULL);
     HU_ASSERT_EQ(err, HU_OK);
     agent.active_channel = "imessage";
     agent.active_channel_len = 8;
@@ -311,9 +311,8 @@ static void agent_g5_length_anomaly_rejects_and_retries(void) {
      * fixture pattern in test_response_guard.c: long enough to trip G5
      * but varied enough not to trip Phase 2 / Phase 3). */
     static char long_reply[1600];
-    static const char phrase[] =
-        "Sure thing, that all sounds reasonable to me right now. "
-        "Maybe we can grab coffee tomorrow if you have free time then. ";
+    static const char phrase[] = "Sure thing, that all sounds reasonable to me right now. "
+                                 "Maybe we can grab coffee tomorrow if you have free time then. ";
     size_t plen = sizeof(phrase) - 1;
     size_t target = 1500;
     size_t i = 0;
@@ -324,9 +323,9 @@ static void agent_g5_length_anomaly_rejects_and_retries(void) {
     long_reply[i] = '\0';
     size_t long_len = i;
 
-    static const char short1[] = "yeah, sounds good lol";       /* 21 */
-    static const char short2[] = "hahaha ok, fair enough";      /* 22 */
-    static const char retry_ok[] = "ok cool, sounds good";      /* 20 */
+    static const char short1[] = "yeah, sounds good lol";  /* 21 */
+    static const char short2[] = "hahaha ok, fair enough"; /* 22 */
+    static const char retry_ok[] = "ok cool, sounds good"; /* 20 */
     pctx.call_text[0] = short1;
     pctx.call_text_len[0] = sizeof(short1) - 1;
     pctx.call_text[1] = short2;
@@ -340,8 +339,8 @@ static void agent_g5_length_anomaly_rejects_and_retries(void) {
     hu_provider_t provider = length_provider_create(&pctx);
     hu_agent_t agent;
     hu_error_t err = hu_agent_from_config(&agent, &alloc, provider, NULL, 0, NULL, NULL, NULL, NULL,
-                                          "test-model", 10, "length_anomaly_mock", 19, 0.7,
-                                          "/tmp", 4, 5, 50, false, 3, NULL, 0, NULL, 0, NULL);
+                                          "test-model", 10, "length_anomaly_mock", 19, 0.7, "/tmp",
+                                          4, 5, 50, false, 3, NULL, 0, NULL, 0, NULL);
     HU_ASSERT_EQ(err, HU_OK);
     agent.active_channel = "imessage";
     agent.active_channel_len = 8;
@@ -399,8 +398,7 @@ static void agent_g6_director_echo_rejects_and_retries(void) {
     /* Mock first reply: model leaks the director text verbatim back
      * (>= 30 bytes). Guard's G6 must REJECT this. */
     static char leaked[256];
-    int n = snprintf(leaked, sizeof(leaked),
-                     "got it - %s. yeah lol", director);
+    int n = snprintf(leaked, sizeof(leaked), "got it - %s. yeah lol", director);
     HU_ASSERT(n > 0 && (size_t)n < sizeof(leaked));
     static const char retry_ok[] = "got it lol";
     pctx.call_text[0] = leaked;
@@ -412,8 +410,8 @@ static void agent_g6_director_echo_rejects_and_retries(void) {
     hu_provider_t provider = length_provider_create(&pctx);
     hu_agent_t agent;
     hu_error_t err = hu_agent_from_config(&agent, &alloc, provider, NULL, 0, NULL, NULL, NULL, NULL,
-                                          "test-model", 10, "length_anomaly_mock", 19, 0.7,
-                                          "/tmp", 4, 5, 50, false, 1, NULL, 0, NULL, 0, NULL);
+                                          "test-model", 10, "length_anomaly_mock", 19, 0.7, "/tmp",
+                                          4, 5, 50, false, 1, NULL, 0, NULL, 0, NULL);
     HU_ASSERT_EQ(err, HU_OK);
     agent.active_channel = "imessage";
     agent.active_channel_len = 8;
@@ -452,8 +450,7 @@ static void agent_g7_persona_pii_echo_rejects_and_retries(void) {
     length_provider_ctx_t pctx;
     memset(&pctx, 0, sizeof(pctx));
 
-    static const char leaked[] =
-        "yeah testname is a software developer who loves dry humor";
+    static const char leaked[] = "yeah testname is a software developer who loves dry humor";
     static const char retry_ok[] = "yeah lol";
     pctx.call_text[0] = leaked;
     pctx.call_text_len[0] = sizeof(leaked) - 1;
@@ -463,8 +460,8 @@ static void agent_g7_persona_pii_echo_rejects_and_retries(void) {
     hu_provider_t provider = length_provider_create(&pctx);
     hu_agent_t agent;
     hu_error_t err = hu_agent_from_config(&agent, &alloc, provider, NULL, 0, NULL, NULL, NULL, NULL,
-                                          "test-model", 10, "length_anomaly_mock", 19, 0.7,
-                                          "/tmp", 4, 5, 50, false, 1, NULL, 0, NULL, 0, NULL);
+                                          "test-model", 10, "length_anomaly_mock", 19, 0.7, "/tmp",
+                                          4, 5, 50, false, 1, NULL, 0, NULL, 0, NULL);
     HU_ASSERT_EQ(err, HU_OK);
     agent.active_channel = "imessage";
     agent.active_channel_len = 8;
@@ -515,8 +512,7 @@ static void agent_g8_persona_identity_echo_rejects_and_retries(void) {
 
     /* identity string is 40 bytes; leaked response quotes 40 bytes
      * verbatim (first-person, no name — would slip past G7). */
-    static const char leaked[] =
-        "yeah i'm a Chief Architect at Pure Health Solutions, busy day";
+    static const char leaked[] = "yeah i'm a Chief Architect at Pure Health Solutions, busy day";
     static const char retry_ok[] = "yeah lol";
     pctx.call_text[0] = leaked;
     pctx.call_text_len[0] = sizeof(leaked) - 1;
@@ -526,8 +522,8 @@ static void agent_g8_persona_identity_echo_rejects_and_retries(void) {
     hu_provider_t provider = length_provider_create(&pctx);
     hu_agent_t agent;
     hu_error_t err = hu_agent_from_config(&agent, &alloc, provider, NULL, 0, NULL, NULL, NULL, NULL,
-                                          "test-model", 10, "identity_echo_mock", 18, 0.7,
-                                          "/tmp", 4, 5, 50, false, 1, NULL, 0, NULL, 0, NULL);
+                                          "test-model", 10, "identity_echo_mock", 18, 0.7, "/tmp",
+                                          4, 5, 50, false, 1, NULL, 0, NULL, 0, NULL);
     HU_ASSERT_EQ(err, HU_OK);
     agent.active_channel = "imessage";
     agent.active_channel_len = 8;
@@ -565,8 +561,7 @@ static void agent_g8_persona_identity_echo_rejects_and_retries(void) {
 
 /* Forward declaration — director history helpers (Sprint 37). The
  * test binary links against agent.c so the symbols resolve. */
-void hu_agent_internal_push_director_history(hu_agent_t *agent, const char *text,
-                                              size_t text_len);
+void hu_agent_internal_push_director_history(hu_agent_t *agent, const char *text, size_t text_len);
 
 /* G6 — cross-turn director-history echo through agent_turn (Sprint 37).
  *
@@ -582,8 +577,7 @@ static void agent_g6_history_cross_turn_rejects_and_retries(void) {
 
     static const char yesterday_director[] =
         "casual short, dry; respond briefly with a skeptical follow-up";
-    static const char leaked[] =
-        "yeah respond briefly with a skeptical follow-up question, sure";
+    static const char leaked[] = "yeah respond briefly with a skeptical follow-up question, sure";
     static const char retry_ok[] = "yeah lol";
     pctx.call_text[0] = leaked;
     pctx.call_text_len[0] = sizeof(leaked) - 1;
@@ -593,8 +587,8 @@ static void agent_g6_history_cross_turn_rejects_and_retries(void) {
     hu_provider_t provider = length_provider_create(&pctx);
     hu_agent_t agent;
     hu_error_t err = hu_agent_from_config(&agent, &alloc, provider, NULL, 0, NULL, NULL, NULL, NULL,
-                                          "test-model", 10, "history_echo_mock", 17, 0.7,
-                                          "/tmp", 4, 5, 50, false, 1, NULL, 0, NULL, 0, NULL);
+                                          "test-model", 10, "history_echo_mock", 17, 0.7, "/tmp", 4,
+                                          5, 50, false, 1, NULL, 0, NULL, 0, NULL);
     HU_ASSERT_EQ(err, HU_OK);
     agent.active_channel = "imessage";
     agent.active_channel_len = 8;
@@ -602,7 +596,7 @@ static void agent_g6_history_cross_turn_rejects_and_retries(void) {
     /* Simulate the daemon at end-of-previous-turn: push yesterday's
      * director into history, leave scene_direction_text NULL. */
     hu_agent_internal_push_director_history(&agent, yesterday_director,
-                                             sizeof(yesterday_director) - 1);
+                                            sizeof(yesterday_director) - 1);
     HU_ASSERT_EQ(agent.director_history_count, (size_t)1);
     HU_ASSERT(agent.scene_direction_text == NULL);
 
@@ -651,8 +645,8 @@ static void agent_clear_on_exit_no_stale_memory(void) {
     hu_provider_t provider = length_provider_create(&pctx);
     hu_agent_t agent;
     hu_error_t err = hu_agent_from_config(&agent, &alloc, provider, NULL, 0, NULL, NULL, NULL, NULL,
-                                          "test-model", 10, "clear_on_exit_mock", 18, 0.7,
-                                          "/tmp", 4, 5, 50, false, 1, NULL, 0, NULL, 0, NULL);
+                                          "test-model", 10, "clear_on_exit_mock", 18, 0.7, "/tmp",
+                                          4, 5, 50, false, 1, NULL, 0, NULL, 0, NULL);
     HU_ASSERT_EQ(err, HU_OK);
     agent.active_channel = "imessage";
     agent.active_channel_len = 8;
@@ -662,15 +656,14 @@ static void agent_clear_on_exit_no_stale_memory(void) {
     {
         char turn1_director[256];
         memset(turn1_director, 0, sizeof(turn1_director));
-        const char *t1 =
-            "warm and curious; ask one clarifying question; minimum two sentences";
+        const char *t1 = "warm and curious; ask one clarifying question; minimum two sentences";
         size_t t1_len = strlen(t1);
         memcpy(turn1_director, t1, t1_len);
         agent.scene_direction_text = turn1_director;
         agent.scene_direction_text_len = t1_len;
         /* End-of-turn: push then clear. */
         hu_agent_internal_push_director_history(&agent, agent.scene_direction_text,
-                                                 agent.scene_direction_text_len);
+                                                agent.scene_direction_text_len);
         agent.scene_direction_text = NULL;
         agent.scene_direction_text_len = 0;
     }
@@ -694,6 +687,194 @@ static void agent_clear_on_exit_no_stale_memory(void) {
     hu_agent_deinit(&agent);
 }
 
+/* ── Sprint 34/37/40 wiring (2026-09-21) — G6 armed through the DAEMON seam ──
+ *
+ * The tests above simulate the daemon by poking agent-internal state
+ * directly (hu_agent_internal_push_director_history, manual pointer
+ * assignment). That proved the guard logic but NOT that anything in
+ * production ever arms it — and in fact nothing did: every writer of
+ * `scene_direction_text` / `director_history` had zero callers in src/,
+ * so both arms of G6 were inert on the reply path while all three guard
+ * call sites looked wired.
+ *
+ * These tests drive the real production seam instead:
+ * hu_daemon_director_arm_guard / _end_turn / _contact_boundary, the
+ * functions daemon.c's batch loop now calls, with a real
+ * hu_director_result_t standing in for the Flash-Lite director call. */
+
+/* Build the director result the daemon would hand the agent. */
+static hu_director_result_t g6w_director(const char *direction) {
+    hu_director_result_t r;
+    memset(&r, 0, sizeof(r));
+    r.action = DIR_TEXT;
+    snprintf(r.direction, sizeof(r.direction), "%s", direction);
+    return r;
+}
+
+static hu_error_t g6w_make_agent(hu_agent_t *agent, hu_allocator_t *alloc, hu_provider_t provider,
+                                 const char *tag) {
+    hu_error_t err = hu_agent_from_config(agent, alloc, provider, NULL, 0, NULL, NULL, NULL, NULL,
+                                          "test-model", 10, tag, strlen(tag), 0.7, "/tmp", 4, 5, 50,
+                                          false, 1, NULL, 0, NULL, 0, NULL);
+    if (err == HU_OK) {
+        agent->active_channel = "imessage";
+        agent->active_channel_len = 8;
+    }
+    return err;
+}
+
+/* The director text the daemon injects; >= 30 bytes so it can trip G6
+ * (HU_GUARD_DIRECTOR_ECHO_MIN_MATCH). */
+static const char G6W_DIRECTION[] = "casual short, dry; deflect the question with a joke";
+
+/* POSITIVE — arming through the daemon seam makes G6 reject a verbatim echo.
+ *
+ * Non-vacuous by construction: the mock's FIRST reply quotes the director
+ * verbatim. If arming were still broken (the pre-fix state), G6 would not
+ * fire, the guard would accept, the provider would be called exactly once,
+ * and the quote would reach the caller — all three asserts below fail. */
+static void daemon_arm_g6_rejects_verbatim_director_echo(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    length_provider_ctx_t pctx;
+    memset(&pctx, 0, sizeof(pctx));
+
+    static const char leaked[] = "sure — deflect the question with a joke, that's the move";
+    static const char retry_ok[] = "ha, nice try";
+    pctx.call_text[0] = leaked;
+    pctx.call_text_len[0] = sizeof(leaked) - 1;
+    pctx.call_text[1] = retry_ok;
+    pctx.call_text_len[1] = sizeof(retry_ok) - 1;
+
+    hu_provider_t provider = length_provider_create(&pctx);
+    hu_agent_t agent;
+    HU_ASSERT_EQ(g6w_make_agent(&agent, &alloc, provider, "g6_arm_mock"), HU_OK);
+
+    /* Precondition: G6 is disarmed before the daemon arms it. */
+    HU_ASSERT(agent.scene_direction_text == NULL);
+
+    hu_director_result_t dr = g6w_director(G6W_DIRECTION);
+    char *convo = NULL;
+    size_t convo_len = 0;
+    hu_daemon_director_arm_guard(&alloc, &agent, &dr, &convo, &convo_len);
+
+    /* Postcondition: armed, and the direction really did reach the prompt
+     * context (that is WHY the model can echo it). */
+    HU_ASSERT_NOT_NULL(agent.scene_direction_text);
+    HU_ASSERT_EQ(agent.scene_direction_text_len, strlen(G6W_DIRECTION));
+    HU_ASSERT_NOT_NULL(convo);
+    HU_ASSERT(strstr(convo, G6W_DIRECTION) != NULL);
+
+    char *r = NULL;
+    size_t rlen = 0;
+    HU_ASSERT_EQ(hu_agent_turn(&agent, "what do you think?", 18, &r, &rlen), HU_OK);
+
+    /* The verbatim quote must not reach the user, and the guard must have
+     * forced a second provider call to get a clean reply. */
+    HU_ASSERT_NOT_NULL(r);
+    HU_ASSERT(strstr(r, "deflect the question with a joke") == NULL);
+    HU_ASSERT(pctx.calls >= 2);
+
+    hu_daemon_director_end_turn(&agent);
+    /* end_turn must drop the borrowed pointer into `dr` (a stack local
+     * that dies with this function) and retain a heap-owned copy. */
+    HU_ASSERT(agent.scene_direction_text == NULL);
+    HU_ASSERT_EQ(agent.director_history_count, (size_t)1);
+
+    alloc.free(alloc.ctx, r, rlen + 1);
+    alloc.free(alloc.ctx, convo, convo_len + 1);
+    hu_agent_deinit(&agent);
+}
+
+/* NEGATIVE control — arming does NOT reject a reply that merely follows the
+ * direction without quoting it. Without this, the positive test above could
+ * pass on an always-reject guard. */
+static void daemon_arm_g6_allows_non_quoting_reply(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    length_provider_ctx_t pctx;
+    memset(&pctx, 0, sizeof(pctx));
+
+    /* Obeys "dry, deflect with a joke" in spirit; shares no 30-byte window
+     * with the director string. */
+    static const char clean[] = "ha, ask me again after coffee";
+    pctx.call_text[0] = clean;
+    pctx.call_text_len[0] = sizeof(clean) - 1;
+
+    hu_provider_t provider = length_provider_create(&pctx);
+    hu_agent_t agent;
+    HU_ASSERT_EQ(g6w_make_agent(&agent, &alloc, provider, "g6_clean_mock"), HU_OK);
+
+    hu_director_result_t dr = g6w_director(G6W_DIRECTION);
+    char *convo = NULL;
+    size_t convo_len = 0;
+    hu_daemon_director_arm_guard(&alloc, &agent, &dr, &convo, &convo_len);
+    HU_ASSERT_NOT_NULL(agent.scene_direction_text);
+
+    char *r = NULL;
+    size_t rlen = 0;
+    HU_ASSERT_EQ(hu_agent_turn(&agent, "what do you think?", 18, &r, &rlen), HU_OK);
+
+    /* Accepted on the FIRST call — no guard retry. */
+    HU_ASSERT_NOT_NULL(r);
+    HU_ASSERT_EQ(pctx.calls, (size_t)1);
+
+    hu_daemon_director_end_turn(&agent);
+    alloc.free(alloc.ctx, r, rlen + 1);
+    alloc.free(alloc.ctx, convo, convo_len + 1);
+    hu_agent_deinit(&agent);
+}
+
+/* CROSS-CONTACT — the director ring must not follow the agent to a new
+ * contact (post-mortem rowid 56355).
+ *
+ * Non-vacuous: assert the ring is non-empty for contact A, then empty
+ * after the boundary, then that a reply quoting A's director is ACCEPTED
+ * on the first provider call while replying to contact B. If the boundary
+ * were unwired (the pre-fix state), G6 would fire on B and force a retry. */
+static void daemon_contact_boundary_clears_director_ring(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    length_provider_ctx_t pctx;
+    memset(&pctx, 0, sizeof(pctx));
+
+    /* A verbatim quote of contact A's director — harmless for contact B. */
+    static const char quotes_a[] = "sure — deflect the question with a joke, that's the move";
+    pctx.call_text[0] = quotes_a;
+    pctx.call_text_len[0] = sizeof(quotes_a) - 1;
+
+    hu_provider_t provider = length_provider_create(&pctx);
+    hu_agent_t agent;
+    HU_ASSERT_EQ(g6w_make_agent(&agent, &alloc, provider, "g6_boundary_mock"), HU_OK);
+
+    /* Contact A: arm, then end the turn so the director lands in the ring. */
+    hu_daemon_director_contact_boundary(&agent, "imessage:+15551110000", 21);
+    hu_director_result_t dr = g6w_director(G6W_DIRECTION);
+    char *convo = NULL;
+    size_t convo_len = 0;
+    hu_daemon_director_arm_guard(&alloc, &agent, &dr, &convo, &convo_len);
+    hu_daemon_director_end_turn(&agent);
+    HU_ASSERT_EQ(agent.director_history_count, (size_t)1);
+
+    /* Same contact again — history is deliberately preserved. */
+    hu_daemon_director_contact_boundary(&agent, "imessage:+15551110000", 21);
+    HU_ASSERT_EQ(agent.director_history_count, (size_t)1);
+
+    /* Switch to contact B — the ring must be dropped. */
+    hu_daemon_director_contact_boundary(&agent, "imessage:+15552220000", 21);
+    HU_ASSERT_EQ(agent.director_history_count, (size_t)0);
+    HU_ASSERT(agent.scene_direction_text == NULL);
+
+    /* B's turn: the reply quotes A's director, but G6 has nothing to match
+     * against, so it is accepted on the first call. */
+    char *r = NULL;
+    size_t rlen = 0;
+    HU_ASSERT_EQ(hu_agent_turn(&agent, "hey", 3, &r, &rlen), HU_OK);
+    HU_ASSERT_NOT_NULL(r);
+    HU_ASSERT_EQ(pctx.calls, (size_t)1);
+
+    alloc.free(alloc.ctx, r, rlen + 1);
+    alloc.free(alloc.ctx, convo, convo_len + 1);
+    hu_agent_deinit(&agent);
+}
+
 void run_response_guard_retry_tests(void) {
     HU_TEST_SUITE("Response Guard Retry");
     HU_RUN_TEST(guard_reject_retry_produces_human_like_replacement);
@@ -714,4 +895,10 @@ void run_response_guard_retry_tests(void) {
      * daemon clear-on-exit lifetime safety. */
     HU_RUN_TEST(agent_g6_history_cross_turn_rejects_and_retries);
     HU_RUN_TEST(agent_clear_on_exit_no_stale_memory);
+
+    /* 2026-09-21 — G6 armed through the real daemon seam (arm/end_turn/
+     * contact_boundary), not by poking agent internals. */
+    HU_RUN_TEST(daemon_arm_g6_rejects_verbatim_director_echo);
+    HU_RUN_TEST(daemon_arm_g6_allows_non_quoting_reply);
+    HU_RUN_TEST(daemon_contact_boundary_clears_director_ring);
 }

@@ -12,6 +12,11 @@
 #include "human/memory/deep_extract.h"
 #include "human/provider.h"
 
+/* Private agent header: the G6 wiring below sets agent-internal director
+ * state (borrowed scene pointer + history ring). Same cross-module
+ * private include the gateway uses (src/gateway/openai_compat.c:2). */
+#include "../agent/agent_internal.h"
+
 #ifdef HU_ENABLE_SQLITE
 #include "human/memory/superhuman.h"
 #endif
@@ -314,4 +319,79 @@ void hu_daemon_classify_comfort_response_type(const char *response, size_t respo
         return;
     }
     snprintf(out_type, out_cap, "empathy");
+}
+
+/* ── G6 director-echo guard wiring ─────────────────────────────────────
+ * Contract, ownership rules and call order: include/human/daemon/director.h.
+ * Extracted from daemon.c's batch loop 2026-09-21 so the prompt injection
+ * and the guard arming that must accompany it live in one place. */
+
+void hu_daemon_director_arm_guard(hu_allocator_t *alloc, hu_agent_t *agent,
+                                  const hu_director_result_t *result, char **convo_ctx,
+                                  size_t *convo_ctx_len) {
+    if (!alloc || !agent || !result || !convo_ctx || !convo_ctx_len)
+        return;
+    if (result->direction[0] == '\0')
+        return;
+
+    size_t dn_len = strlen(result->direction);
+    static const char dn_hdr[] = "\n--- Scene Direction (this message only) ---\n";
+    static const char dn_tail[] = "\n";
+    size_t old_len = *convo_ctx_len;
+    size_t new_len = old_len + sizeof(dn_hdr) - 1 + dn_len + sizeof(dn_tail) - 1 + 1;
+    char *new_convo = (char *)alloc->alloc(alloc->ctx, new_len);
+    if (!new_convo)
+        return; /* direction never reached the prompt — leave G6 disarmed */
+
+    if (*convo_ctx && old_len > 0)
+        memcpy(new_convo, *convo_ctx, old_len);
+    memcpy(new_convo + old_len, dn_hdr, sizeof(dn_hdr) - 1);
+    memcpy(new_convo + old_len + sizeof(dn_hdr) - 1, result->direction, dn_len);
+    memcpy(new_convo + old_len + sizeof(dn_hdr) - 1 + dn_len, dn_tail, sizeof(dn_tail) - 1);
+    new_convo[new_len - 1] = '\0';
+    alloc->free(alloc->ctx, *convo_ctx, old_len + 1);
+    *convo_ctx = new_convo;
+    *convo_ctx_len = new_len - 1;
+    agent->conversation_context = new_convo;
+    agent->conversation_context_len = new_len - 1;
+
+    /* Arm G6. The agent borrows a const pointer into the caller's
+     * `result->direction`; hu_daemon_director_end_turn drops it. */
+    hu_agent_internal_set_scene_direction(agent, result->direction, dn_len);
+}
+
+void hu_daemon_director_end_turn(hu_agent_t *agent) {
+    if (!agent)
+        return;
+    /* Push BEFORE clearing — the push copies onto agent->alloc, so the
+     * ring survives the daemon's stack buffer going out of scope and G6
+     * can still catch a cross-turn echo on the next turn. */
+    hu_agent_internal_push_director_history(agent, agent->scene_direction_text,
+                                            agent->scene_direction_text_len);
+    hu_agent_internal_clear_scene_direction(agent);
+}
+
+void hu_daemon_director_contact_boundary(hu_agent_t *agent, const char *key, size_t key_len) {
+    /* The daemon drives one agent across every contact, so this is the
+     * only place the cross-contact carry is broken. Static last-key state
+     * is safe here for the same reason g_classify_provider above is: the
+     * poll loop that calls this is single-threaded. */
+    static char last_key[320];
+    static size_t last_key_len = 0;
+
+    if (!agent)
+        return;
+    if (key && key_len > 0 && key_len == last_key_len && memcmp(last_key, key, key_len) == 0)
+        return; /* same contact — keep multi-turn director history */
+
+    hu_agent_internal_reset_contact_boundary_state(agent);
+
+    if (key && key_len > 0 && key_len < sizeof(last_key)) {
+        memcpy(last_key, key, key_len);
+        last_key_len = key_len;
+    } else {
+        /* Unknown or oversized key: record nothing, so the next batch
+         * also resets. Conservative — never carries state it can't prove. */
+        last_key_len = 0;
+    }
 }
