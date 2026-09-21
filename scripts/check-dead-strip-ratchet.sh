@@ -75,7 +75,18 @@ fi
 # HU_ENABLE_WHATSAPP", and src/voice/webrtc*.c sitting unconditionally in
 # HU_CORE_SOURCES); this baseline reflects the fixed tree, not the raw
 # preset flip.
-NEVER_LOADED_BASELINE=47
+#
+# Re-measured 2026-09-21 after Task 12 (daba0dfb2) moved 12 test/eval/SDK
+# modules out of human_core into the new human_devlib archive: 983 members,
+# down from 994, and A 47 -> 36 — the 11 moved modules that this preset
+# compiled into human_core (the 12th, src/channels/dispatch.c, was
+# ALL_CHANNELS-gated and so absent from the dev preset's core archive).
+# Nothing was deleted; libhuman_core.a now holds daemon code only, which is
+# what makes A mean "dead" rather than "library the daemon doesn't use".
+# Manual lock again: the pre-commit auto-lock did not fire on that commit
+# (the gate reported its counts advisory), so this constant is set by hand
+# to the number the gate printed on a freshly built tree.
+NEVER_LOADED_BASELINE=36
 # Composition at the baseline: 40 whole function symbols plus 59 function-local
 # statics (`_hu_fn.CONSTANT`, `_hu_fn.sql`), which the linker emits as separate
 # symbols of the function that owns them. Both are counted, per the plan's
