@@ -30,8 +30,11 @@ size_t hu_daemon_outbound_utf8_safe_truncate(const char *buf, size_t len) {
             seq_len = 3;
         else if ((lead & 0xF8) == 0xF0)
             seq_len = 4;
-        if (pos - 1 + seq_len > len)
-            pos = pos - 1;
+        /* A complete trailing sequence is kept whole; an incomplete one loses
+         * its lead byte too. Before 2026-09-20 the complete case returned the
+         * index just past the lead, leaving a dangling lead byte (invalid
+         * UTF-8) whenever the clamp landed exactly on a character end. */
+        pos = (pos - 1 + seq_len <= len) ? pos - 1 + seq_len : pos - 1;
     }
     return pos;
 }

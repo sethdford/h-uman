@@ -118,10 +118,12 @@ static void test_utf8_truncate_backs_off_to_character_boundary(void) {
     HU_ASSERT_EQ(hu_daemon_outbound_utf8_safe_truncate(s, 0), 0u);
     HU_ASSERT_EQ(hu_daemon_outbound_utf8_safe_truncate(s, 1), 1u);
     HU_ASSERT_EQ(hu_daemon_outbound_utf8_safe_truncate(s, 2), 1u);
+    HU_ASSERT_EQ(hu_daemon_outbound_utf8_safe_truncate(s, 3), 3u);
     /* 4-byte emoji F0 9F 98 80 truncated at 2 or 3 bytes → 0 (lead dropped). */
     const char e[] = "\xF0\x9F\x98\x80";
     HU_ASSERT_EQ(hu_daemon_outbound_utf8_safe_truncate(e, 2), 0u);
     HU_ASSERT_EQ(hu_daemon_outbound_utf8_safe_truncate(e, 3), 0u);
+    HU_ASSERT_EQ(hu_daemon_outbound_utf8_safe_truncate(e, 4), 4u);
 }
 
 static void test_bus_set_message_clamps_on_utf8_boundary(void) {
@@ -142,6 +144,17 @@ static void test_bus_set_message_clamps_on_utf8_boundary(void) {
     hu_daemon_outbound_bus_set_message(&ev, big, HU_BUS_MSG_LEN + 1);
     HU_ASSERT_EQ(strlen(ev.message), (size_t)HU_BUS_MSG_LEN - 2);
     HU_ASSERT_EQ(ev.message[HU_BUS_MSG_LEN - 3], 'a');
+
+    /* Clamp landing exactly on the END of a complete 2-byte char: the char
+     * is kept whole (regression: a dangling C3 lead byte used to survive). */
+    memset(big, 'a', HU_BUS_MSG_LEN - 3);
+    big[HU_BUS_MSG_LEN - 3] = '\xC3';
+    big[HU_BUS_MSG_LEN - 2] = '\xA9';
+    big[HU_BUS_MSG_LEN - 1] = 'z';
+    hu_daemon_outbound_bus_set_message(&ev, big, HU_BUS_MSG_LEN);
+    HU_ASSERT_EQ(strlen(ev.message), (size_t)HU_BUS_MSG_LEN - 1);
+    HU_ASSERT_EQ((unsigned char)ev.message[HU_BUS_MSG_LEN - 3], 0xC3u);
+    HU_ASSERT_EQ((unsigned char)ev.message[HU_BUS_MSG_LEN - 2], 0xA9u);
 }
 
 /* ── find_channel ─────────────────────────────────────────────────────── */
