@@ -83,10 +83,15 @@ fi
 # ALL_CHANNELS-gated and so absent from the dev preset's core archive).
 # Nothing was deleted; libhuman_core.a now holds daemon code only, which is
 # what makes A mean "dead" rather than "library the daemon doesn't use".
-# Manual lock again: the pre-commit auto-lock did not fire on that commit
-# (the gate reported its counts advisory), so this constant is set by hand
-# to the number the gate printed on a freshly built tree.
-NEVER_LOADED_BASELINE=36
+# Manual lock again (2026-09-21, Task 15): deleting the unwired
+# cot_audit_validator wrapper (zero production callers; the live CoT audit
+# is a direct hu_cot_audit() call in agent_turn.c) dropped a freshly-built
+# measurement from 36 to 33. The auto-lock again did not fire — the shared
+# core.hooksPath resolves to the main checkout's .githooks/pre-commit, which
+# predates the auto-lock block added to this worktree's copy — so this
+# constant is set by hand to the number the gate printed on a freshly built
+# tree, same as the prior manual lock below.
+NEVER_LOADED_BASELINE=33
 # Composition at the baseline: 40 whole function symbols plus 59 function-local
 # statics (`_hu_fn.CONSTANT`, `_hu_fn.sql`), which the linker emits as separate
 # symbols of the function that owns them. Both are counted, per the plan's
