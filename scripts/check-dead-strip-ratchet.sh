@@ -13,15 +13,29 @@
 #      Dead in the product AND unpinned by a test.
 #
 # USAGE
-#   bash scripts/check-dead-strip-ratchet.sh
+#   bash scripts/check-dead-strip-ratchet.sh                  # ad-hoc / pre-commit
+#   HU_DEAD_STRIP_STRICT=1 bash scripts/check-dead-strip-ratchet.sh   # pre-push
 #   HU_BUILD_DIR=build2 bash scripts/check-dead-strip-ratchet.sh
+#
+# TWO CALLERS, TWO JOBS
+#   .githooks/pre-commit  runs it plain, so ratchet_autolock can rewrite and
+#                         STAGE a lowered constant — that only happens from the
+#                         pre-commit hook (HU_RATCHET_FROM_HOOK=1), so this is
+#                         the only place a gain can ever be locked.
+#   .githooks/pre-push    rebuilds build/ first, then runs it with
+#                         HU_DEAD_STRIP_STRICT=1. That is the ENFORCEMENT point.
+#
+#   HU_DEAD_STRIP_STRICT=1 disables the stale-build demotion below. Without it
+#   (ad-hoc runs, and pre-commit) a build dir older than src/ reports its counts
+#   as advisory and exits 0, because they describe a different tree.
 #
 # EXIT CODES
 #   0  A and B are at or below their baselines — or the gate could not measure
-#      (no build dir, non-Darwin, stale build dir) and said so. An unmeasurable
-#      gate must never block a push (.claude/rules/no-number-without-a-measurement.md);
-#      it prints `RATCHET_SKIP: <reason>` so scripts/ratchet-debt-report.sh can
-#      tell "not measured here" from "measurement broke".
+#      (no build dir, non-Darwin, stale build dir outside strict mode) and said
+#      so. An unmeasurable gate must never block a commit or a push
+#      (.claude/rules/no-number-without-a-measurement.md); it prints
+#      `RATCHET_SKIP: <reason>` so scripts/ratchet-debt-report.sh can tell
+#      "not measured here" from "measurement broke".
 #   1  A or B grew past its baseline. The offending names are printed.
 #
 # THE BASELINES ARE CONFIGURATION-SPECIFIC. They were measured against the dev
@@ -77,15 +91,28 @@ skip() {
 [ -f "$HUMAN_LINK" ] || skip "no $HUMAN_LINK (configure and build first)"
 [ -f "$CORE_LINK" ]  || skip "no $CORE_LINK (configure and build first)"
 
-# A build dir older than the sources describes a different tree, so its counts
-# cannot fail THIS push. Report them, flagged, and exit 0.
+# Freshness. The anchors are the two LINKED artifacts this gate reads through —
+# `human` (whose link line is replayed) and `human_tests` (whose objects supply
+# the reference set) — not libhuman_core.a, which can be current while the
+# binaries are not. Anything under src/ or include/ newer than either means the
+# build dir describes a different tree than the one being committed or pushed.
+for _artifact in human human_tests libhuman_core.a; do
+    [ -f "$BUILD_DIR/$_artifact" ] || \
+        skip "no $BUILD_DIR/$_artifact (build the human + human_tests targets first)"
+done
 STALE=0
-if [ -f "$BUILD_DIR/libhuman_core.a" ]; then
-    if [ -n "$(find src include -name '*.[ch]' -newer "$BUILD_DIR/libhuman_core.a" -print -quit 2>/dev/null)" ]; then
+for _artifact in human human_tests; do
+    if [ -n "$(find src include -name '*.[ch]' -newer "$BUILD_DIR/$_artifact" -print -quit 2>/dev/null)" ]; then
         STALE=1
     fi
-else
-    skip "no $BUILD_DIR/libhuman_core.a (build the human + human_tests targets first)"
+done
+# Strict mode is the pre-push path, which rebuilds build/ immediately before
+# calling this. If it is STILL stale there, the rebuild did not take — enforce
+# on what we measured rather than waving the push through, and say so.
+if [ "$STALE" = "1" ] && [ "${HU_DEAD_STRIP_STRICT:-0}" = "1" ]; then
+    echo "NOTE: $BUILD_DIR still looks older than src/ after the rebuild;" >&2
+    echo "      HU_DEAD_STRIP_STRICT=1, so the counts below are enforced anyway." >&2
+    STALE=0
 fi
 
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/hu-dead-strip.XXXXXX")
@@ -147,6 +174,14 @@ tr ' ' '\n' < "$CORE_LINK" | grep '\.o$' | sed "s|^|$BUILD_DIR/|" | sort -u > "$
 xargs nm -g --defined-only < "$TMP/members.txt" > "$TMP/nm_members.txt" 2>/dev/null || true
 # nm reads every member or this gate measures nothing: an unreadable path makes
 # A collapse silently to 0, which reads as a clean sweep. Refuse instead.
+#
+# Counting `path:` headers is the check because nm emits one per file ONLY when
+# handed more than one file. That makes the count exact here (1,024 members in
+# one or more multi-file xargs batches) and makes the guard also catch the
+# nastier variant: if xargs ever splits the list so that a trailing batch holds
+# exactly ONE object, nm prints no header for it and its symbols are silently
+# attributed to the previous object — headers would then be short by one and
+# this comparison fails rather than mis-attributing.
 n_members=$(wc -l < "$TMP/members.txt" | tr -d ' ')
 n_read=$(grep -c ':$' "$TMP/nm_members.txt" || true)
 [ "$n_read" = "$n_members" ] || \
@@ -199,9 +234,21 @@ if [ -s "$TMP/testobjs.txt" ]; then
     mkdir -p "$cache_dir"
     TESTREFS="$cache_dir/testrefs-$dirkey-${newest:-0}-$nobj.txt"
     if [ ! -s "$TESTREFS" ]; then
-        xargs nm -u < "$TMP/testobjs.txt" 2>/dev/null \
-            | awk 'NF==1 { print $1 }' | sort -u > "$TESTREFS.$$" || true
-        mv -f "$TESTREFS.$$" "$TESTREFS"
+        # `NF == 1` alone also admits nm's own `path/to/foo.c.o:` headers as if
+        # they were symbols. Harmless for B today (a header can never equal an
+        # `_hu_` name), but it pollutes a set whose whole job is membership
+        # testing, so drop them.
+        #
+        # Publish the cache ONLY on success: a partial reference set written
+        # under a valid key is worse than no cache, because every later run
+        # reuses it and B silently inflates.
+        if xargs nm -u < "$TMP/testobjs.txt" 2>/dev/null \
+               | awk 'NF == 1 && $1 !~ /:$/ { print $1 }' | sort -u > "$TESTREFS.$$"; then
+            mv -f "$TESTREFS.$$" "$TESTREFS"
+        else
+            rm -f "$TESTREFS.$$"
+            skip "nm -u over the test objects failed; refusing to cache a partial reference set"
+        fi
     fi
 fi
 if [ -s "${TESTREFS:-/nonexistent}" ]; then
@@ -220,10 +267,24 @@ echo "B = unreferenced dead symbols: $B (ceiling $DEAD_UNREF_BASELINE)"
 
 if [ "$STALE" = "1" ]; then
     echo "RATCHET_SKIP: $BUILD_DIR is older than src/ — counts describe an earlier tree"
-    echo "NOTE: $BUILD_DIR predates the current sources, so these counts are advisory." >&2
-    echo "      Rebuild ('cmake --build $BUILD_DIR --target human human_tests') to enforce." >&2
+    echo "NOTE: $BUILD_DIR predates the current sources, so these counts are advisory" >&2
+    echo "      and nothing is locked. Rebuild to enforce (and to let the baselines" >&2
+    echo "      ratchet down): cmake --build $BUILD_DIR --target human human_tests" >&2
+    echo "      The pre-push hook does that rebuild for you before it enforces." >&2
     exit 0
 fi
+
+# Auto-lock can ONLY fire from .githooks/pre-commit: scripts/lib/ratchet.sh
+# refuses to rewrite a constant unless HU_RATCHET_FROM_HOOK=1, which only that
+# hook exports (pre-push cannot — its `git add` would stage a file into no
+# commit). So the honest advice is "it locks at your next commit", not the
+# sibling ratchets' "lower it by hand", which is the step nobody performed.
+lock_note() {  # lock_note NOUN VALUE VAR
+    [ "${HU_RATCHET_LOCKED:-0}" = 1 ] && return 0
+    echo "NOTE: $1 dropped to $2 — $3 locks to it on the next commit that stages" >&2
+    echo "      a src/ change with build/ freshly built (.githooks/pre-commit)." >&2
+    return 0
+}
 
 ratchet_autolock NEVER_LOADED_BASELINE "$A" "scripts/check-dead-strip-ratchet.sh"
 ratchet_autolock DEAD_UNREF_BASELINE   "$B" "scripts/check-dead-strip-ratchet.sh"
@@ -236,8 +297,7 @@ if [ "$A" -gt "$NEVER_LOADED_BASELINE" ]; then
     echo "      Delete it, or wire it — see .claude/rules/dead-strip-ratchet.md." >&2
     fail=1
 elif [ "$A" -lt "$NEVER_LOADED_BASELINE" ]; then
-    [ "${HU_RATCHET_LOCKED:-0}" = 1 ] || \
-    echo "NOTE: never-loaded members dropped to $A — lower NEVER_LOADED_BASELINE to lock the gain." >&2
+    lock_note "never-loaded members" "$A" NEVER_LOADED_BASELINE
 fi
 
 if [ "$B" -gt "$DEAD_UNREF_BASELINE" ]; then
@@ -247,8 +307,7 @@ if [ "$B" -gt "$DEAD_UNREF_BASELINE" ]; then
     echo "      Delete it, or give it a caller — see .claude/rules/dead-strip-ratchet.md." >&2
     fail=1
 elif [ "$B" -lt "$DEAD_UNREF_BASELINE" ]; then
-    [ "${HU_RATCHET_LOCKED:-0}" = 1 ] || \
-    echo "NOTE: unreferenced dead symbols dropped to $B — lower DEAD_UNREF_BASELINE to lock the gain." >&2
+    lock_note "unreferenced dead symbols" "$B" DEAD_UNREF_BASELINE
 fi
 
 exit $fail

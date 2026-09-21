@@ -22,6 +22,14 @@ set -uo pipefail
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
       GIT_COMMON_DIR GIT_PREFIX GIT_ALTERNATE_OBJECT_DIRECTORIES
 
+# Belt to that braces: pin the global and system config to /dev/null for every
+# git invocation in this file, so even a case that escapes its throwaway repo
+# cannot write to ~/.gitconfig or /etc/gitconfig. (The `git config user.*`
+# calls in new_repo are what appended a bogus `[user] t@t` identity during the
+# incident above; they are repo-local, but this makes the whole file
+# structurally unable to reach outside a temp dir.)
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+
 LIB="$(cd "$(dirname "$0")" && pwd)/lib/ratchet.sh"
 [ -f "$LIB" ] || { echo "missing $LIB" >&2; exit 1; }
 
@@ -35,6 +43,16 @@ check() { # check DESC EXPECTED ACTUAL
 # new_repo -> prints path to a fresh repo containing gate.sh with FOO_BASELINE=100
 new_repo() {
     local d; d=$(mktemp -d)
+    # An EMPTY or relative $d makes every `git -C "$d"` below run against the
+    # caller's cwd — the repo being committed — which is precisely how the
+    # 2026-09-21 incident wrote core.bare=true into the real config. A failed
+    # mktemp must abort the test, never silently retarget it.
+    case "$d" in
+        /*) [ -d "$d" ] || { echo "new_repo: mktemp -d gave no directory" >&2; return 1; } ;;
+        *)  echo "new_repo: mktemp -d gave no absolute path ('$d')" >&2; return 1 ;;
+    esac
+    # HOME inside the throwaway too, so nothing can resolve to the real one.
+    export HOME="$d"
     git -C "$d" init -q
     git -C "$d" config user.email t@t; git -C "$d" config user.name t
     printf 'FOO_BASELINE=100   # seeded\nOTHER=1\n' > "$d/gate.sh"

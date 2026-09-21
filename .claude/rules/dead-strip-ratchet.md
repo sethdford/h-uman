@@ -1,9 +1,12 @@
 # Dead-Strip Ratchet — The Linker Is the Oracle, and Its Two Counters May Only Fall
 
-> **Auto-locked from the start.** Both baselines are rewritten downward by
-> `ratchet_autolock` (`scripts/lib/ratchet.sh`) the next time the gate runs from
-> the pre-commit hook, and a decay target derived from each counter's own history
-> is reported weekly. See `.claude/rules/ratchet-decay.md`.
+> **Auto-locked from the start — precisely: a gain locks on your next commit
+> that stages a `src/` change with `build/` freshly built.** `ratchet_autolock`
+> (`scripts/lib/ratchet.sh`) only rewrites a baseline when it runs from
+> `.githooks/pre-commit` (`HU_RATCHET_FROM_HOOK=1`), which is why this gate is
+> wired into *both* hooks: pre-commit for the lock, pre-push for the
+> enforcement. A decay target derived from each counter's own history is
+> reported weekly. See `.claude/rules/ratchet-decay.md`.
 
 Two counters, both measured by relinking the real binary, both frozen at a
 baseline and allowed only to **decrease**:
@@ -79,33 +82,54 @@ function and unit-testing it in isolation is not wiring — see
 `.claude/rules/ground-truth-over-proxy-signals.md`). As deletion work lands,
 auto-lock captures the gain; no manual baseline edit is needed.
 
-## Enforcement, and the honest limits
+## Enforcement: two hooks, two jobs
 
-`scripts/check-dead-strip-ratchet.sh`, wired into `.githooks/pre-push` (not
-pre-commit: it needs a built tree). ~1 s warm — 0.1 s to relink, the rest `nm`
-over 1,024 archive members and ~2,000 test objects, with the test-reference set
-cached in `$TMPDIR` on the newest test `.o` mtime.
+`scripts/check-dead-strip-ratchet.sh` is wired into **both** hooks, because the
+two things a ratchet must do live in different places:
+
+| Hook | Fires when | What it does |
+|---|---|---|
+| `.githooks/pre-commit` | a `src/` `.c`/`.h` is staged (`ACMD`, like the clone ratchet) | runs the gate plain, so **`ratchet_autolock` can rewrite and stage a lowered baseline**. This is the *only* place that can happen: `scripts/lib/ratchet.sh` refuses to rewrite unless `HU_RATCHET_FROM_HOOK=1`, which only pre-commit exports — pre-push cannot, since its `git add` would stage a file into no commit. Skips in one line when `build/` is absent or stale. |
+| `.githooks/pre-push` | every push, after the suite passes | **rebuilds `build/` incrementally** (`cmake --build build --target human human_tests`), then runs the gate with `HU_DEAD_STRIP_STRICT=1`. This is the enforcement point. |
+
+Without the pre-commit half the baselines could only ever freeze, never ratchet
+down — the exact pathology `.claude/rules/ratchet-decay.md` exists to prevent.
+Without the pre-push rebuild the enforcement half would wave through most real
+pushes, because pre-push builds `build-check` while the gate measures `build/`,
+which would therefore usually be stale and self-demote (see below).
+
+Cost: ~1 s warm — 0.1 s to relink, the rest `nm` over 1,024 archive members and
+~2,000 test objects, with the test-reference set cached in `$TMPDIR` on the
+newest test `.o` mtime. Plus the pre-push incremental rebuild, which is seconds
+on a `build/` the developer was already using.
+
+## The honest limits
 
 Unlike every other ratchet in `scripts/ratchet-config.tsv`, this one measures a
 **build directory**, not source text. Three consequences, all deliberate:
 
 - **The baselines are configuration-specific.** They were measured against the
   dev preset in `build/` (ASan, full feature set). `build-check` — what the
-  pre-push hook itself builds — enables a different feature set and therefore
-  compiles a different set of translation units, so its counts are *not*
-  comparable to these constants. That is why the hook does not point
-  `HU_BUILD_DIR` at the tree it just built.
+  pre-push hook itself builds for the test suite — enables a different feature
+  set and therefore compiles a different set of translation units, so its counts
+  are *not* comparable to these constants. That is why neither hook points
+  `HU_BUILD_DIR` at `build-check`.
 - **The gate skips rather than guesses.** No `build/`, no link map, not macOS,
-  `nm` unable to read every member → it prints `RATCHET_SKIP: <reason>` and
-  exits 0. A gate that cannot measure must not block a push
+  `nm` unable to read every member, `nm -u` failing over the test objects → it
+  prints `RATCHET_SKIP: <reason>` and exits 0. A gate that cannot measure must
+  not block a commit or a push
   (`.claude/rules/no-number-without-a-measurement.md`), and
   `scripts/ratchet-debt-report.sh` reads that marker so a skip is shown as
   "skipped", not INCONCLUSIVE.
-- **A stale `build/` demotes the gate to advisory.** If any `src/` or
-  `include/` header is newer than `build/libhuman_core.a`, the counts describe
-  an earlier tree, so they are printed and the gate exits 0. **Keep `build/`
-  current if you want this gate to bite** —
-  `cmake --build build --target human human_tests`.
+- **A stale `build/` demotes the gate to advisory — except under
+  `HU_DEAD_STRIP_STRICT=1`.** If any `src/` or `include/` file is newer than
+  `build/human` or `build/human_tests`, the counts describe an earlier tree, so
+  they are printed and the gate exits 0. This is the right answer for an ad-hoc
+  run and for pre-commit (which must not block a commit on a tree nobody built).
+  It is the *wrong* answer for pre-push, which is why pre-push rebuilds first
+  and then sets `HU_DEAD_STRIP_STRICT=1` to disable the demotion. For a manual
+  run that you want to bite: `cmake --build build --target human human_tests`
+  first, or pass `HU_DEAD_STRIP_STRICT=1` yourself.
 
 Linux CI is a documented gap: the map parser is macOS `ld`'s
 (`# Object files:` / `# Symbols:` / `# Dead Stripped Symbols:`). GNU `ld -Map`

@@ -284,8 +284,11 @@ Baselines today: A = 146, B = 125. Targets: A = 0 after P5, B < 20.
 Runs in pre-push (the suite already takes ~4 min; this adds seconds).
 
 **As built (2026-09-21, Task 10, on `4d376689b`).** Shipped as
-`scripts/check-dead-strip-ratchet.sh`, wired into `.githooks/pre-push` and
-registered as the `dead-strip-objects` / `dead-strip-symbols` rows of
+`scripts/check-dead-strip-ratchet.sh`, wired into **both** hooks — `pre-commit`
+for the auto-lock (the only place `ratchet_autolock` can rewrite and stage a
+baseline) and `pre-push`, which rebuilds `build/` incrementally and then
+enforces in strict mode — and registered as the
+`dead-strip-objects` / `dead-strip-symbols` rows of
 `scripts/ratchet-config.tsv` (floors 0 and 20, from the targets above). The
 gate is documented in `.claude/rules/dead-strip-ratchet.md`, beside
 `.claude/rules/clone-ratchet.md`. Measured after Tasks 6-9 landed:

@@ -317,6 +317,29 @@ if [ -n "$staged_or_deleted_src_c" ] && [ -x "scripts/check-clone-ratchet.sh" ];
     fi
 fi
 
+# Dead-strip ratchet — THE AUTO-LOCK HALF. Enforcement lives in .githooks/pre-push
+# (which rebuilds build/ first and runs the gate in strict mode); this invocation
+# exists because auto-lock can only ever fire from HERE: scripts/lib/ratchet.sh
+# refuses to rewrite a baseline unless HU_RATCHET_FROM_HOOK=1, exported at the
+# top of this file, and pre-push cannot set it — its `git add` would stage a
+# file into no commit. Without this block the two constants could only ever
+# freeze, never ratchet down, which is the exact pathology .claude/rules/
+# ratchet-decay.md was written about.
+#
+# Cheap and self-limiting: the gate needs a FRESH build/ (it relinks `human`
+# from build/CMakeFiles/human.dir/link.txt), and prints one line and exits 0
+# when build/ is missing or older than src/. So it costs ~1 s on a commit made
+# from a built tree and nothing otherwise.
+if [ -n "$staged_or_deleted_src_c" ] && [ -x "scripts/check-dead-strip-ratchet.sh" ]; then
+    if ! bash scripts/check-dead-strip-ratchet.sh; then
+        echo ""
+        echo "Pre-commit blocked: dead code grew past the dead-strip ratchet."
+        echo "Delete the never-loaded objects / unreferenced dead symbols listed above,"
+        echo "or wire them — see .claude/rules/dead-strip-ratchet.md."
+        exit 1
+    fi
+fi
+
 # Modeled-Person layering: persona -> cognition -> behavior is unidirectional;
 # no cognition<->behavior cross-talk and no persona dependency on either.
 staged_mperson=$(git diff --cached --name-only --diff-filter=ACM -- \
