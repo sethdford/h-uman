@@ -1541,6 +1541,12 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
          * hu_agent_internal_resolve_max_tokens. */
         hu_agent_internal_resolve_max_tokens(&req, turn_model, turn_model_len);
 
+        /* Task 14: fill req.stop_sequences from the provider's registry
+         * defaults right after the max_tokens fill above — same call-order
+         * contract as agent_turn.c. Gated by HU_STOP_SEQUENCES, default
+         * SHADOW — see hu_agent_internal_resolve_stop_sequences. */
+        hu_agent_internal_resolve_stop_sequences(&req, prov_name, agent);
+
         /* Realtime streaming hint (gemma-realtime Option B): casual tiers stream
          * incrementally for a live feel; analytical/deep stay buffered+cleaned so
          * bare-markdown deliberation never leaks. Inert unless on-device streaming

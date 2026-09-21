@@ -490,6 +490,7 @@ void run_agent_turn_transport_tests(void);         /* M4 follow-up: transport-er
 void run_agent_llm_latency_wall_clock_tests(void); /* M3 latency_ms measures wall clock */
 void run_agent_turn_request_overrides_tests(void); /* G11: per-turn override parity */
 void run_agent_max_tokens_resolve_tests(void);     /* Task 13: HU_MAX_TOKENS_RESOLVE gate parity */
+void run_agent_stop_sequences_resolve_tests(void); /* Task 14: HU_STOP_SEQUENCES gate parity */
 void run_w6_e2e_adversarial_tests(void);
 void run_w7_memory_facade_tests(void);
 void run_w8_belief_layer_tests(void);
@@ -1544,6 +1545,8 @@ int main(int argc, char **argv) {
     run_agent_turn_request_overrides_tests();
     /* Task 13: HU_MAX_TOKENS_RESOLVE gate — per-model max_tokens wiring */
     run_agent_max_tokens_resolve_tests();
+    /* Task 14: HU_STOP_SEQUENCES gate — per-provider stop_sequences wiring */
+    run_agent_stop_sequences_resolve_tests();
     run_w6_e2e_adversarial_tests();
     run_w7_memory_facade_tests();
     run_w8_belief_layer_tests();

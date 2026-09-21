@@ -192,6 +192,89 @@ hu_max_tokens_resolve_result_t hu_agent_internal_resolve_max_tokens(hu_chat_requ
  * hu_world_model_cache_reset_for_tests / hu_outbound_stats_reset_for_test. */
 void hu_agent_internal_resolve_max_tokens_reset_for_test(void);
 
+/* Outcome of hu_agent_internal_resolve_stop_sequences, mirroring
+ * hu_max_tokens_resolve_result_t's shape for the same reason: the SHADOW
+ * log-throttle (see below) needs to be observable by tests without a
+ * log-capture harness. */
+typedef enum hu_stop_sequences_resolve_result {
+    HU_STOP_SEQUENCES_RESOLVE_NOOP = 0,         /* NULL req, req already has sequences, gate OFF,
+                                                 * or the registry has no defaults for this
+                                                 * provider */
+    HU_STOP_SEQUENCES_RESOLVE_APPLIED,          /* LIVE: wrote req->stop_sequences/_count */
+    HU_STOP_SEQUENCES_RESOLVE_SHADOW_LOGGED,    /* SHADOW: logged (first time this
+                                                 * (provider, channel) pair was seen) */
+    HU_STOP_SEQUENCES_RESOLVE_SHADOW_THROTTLED, /* SHADOW: resolved, log suppressed (already
+                                                 * logged for this pair) */
+} hu_stop_sequences_resolve_result_t;
+
+/* Task 14 (2026-09-20 dead-code-plan) — fill req->stop_sequences from the
+ * provider's known defaults (src/agent/stop_sequence_registry.c) when the
+ * request does not already carry any. Every provider (anthropic.c ~382,
+ * openai.c, gemini.c, ollama.c, apple.c, compatible.c) already sends
+ * `stop_sequences` on the wire when the request carries them; nothing has
+ * ever populated the field. Sibling of hu_agent_internal_resolve_max_tokens
+ * (Task 13) — same shape, same call sites, same gate-mode contract:
+ *
+ * Called immediately after hu_agent_internal_resolve_max_tokens at both
+ * request-build sites (agent_turn.c after the S3 reroute so the model/
+ * provider is final; agent_stream.c after
+ * hu_agent_internal_apply_turn_request_overrides).
+ *
+ * `provider_name` MUST be the provider actually serving this turn
+ * (agent->provider.vtable->get_name(agent->provider.ctx), already computed
+ * once per turn as `prov_name` in both call sites for observer events) — a
+ * plain NUL-terminated string, like every other use of that same value in
+ * both call sites (hu_log_info("...%s...", prov_name), observer events);
+ * the helper strlen()s it once internally rather than asking both call
+ * sites to also carry its length (agent_turn.c sits exactly at the
+ * file-size ceiling — see .claude/rules/file-size-ceiling.md — so the call
+ * site is a bare one-liner, not a 4-arg wrapped block).
+ *
+ * `agent` supplies the channel context: `agent->active_channel`/`_len`, the
+ * daemon-owned channel-name string src/agent/ already threads through
+ * untouched elsewhere in these same two files (persona overlays, memory
+ * loader context, etc.) — this helper folds it only into the SHADOW
+ * log-throttle key/message, never into the registry lookup, which stays
+ * provider-only per stop_sequence_registry.h's own contract ("Per-channel
+ * stop sequences are not implemented; provider-only lookup"). `agent` may
+ * be NULL (channel context unavailable) — the throttle key/message then use
+ * "(none)" for the channel, same normalization as a NULL/empty provider_name.
+ *
+ * Ownership: the registry's arrays are static storage the registry itself
+ * never frees ("never freed by caller" per its own header); `req->stop_sequences`
+ * is already a `const char *const *` BORROWED pointer per every provider's
+ * read-only use of it (none of them free it). Applying is therefore a bare
+ * pointer + count assignment — no allocation, no copy, nothing for the
+ * caller to free.
+ *
+ * Gated OFF -> SHADOW -> LIVE via HU_STOP_SEQUENCES (hu_gate_mode_from_env),
+ * default SHADOW: like Task 13, "leave stop_sequences empty" already IS
+ * today's behavior, so SHADOW is free visibility before flipping ON:
+ *   OFF    — no-op, req->stop_sequences is left exactly as the caller set it.
+ *   SHADOW — resolves the value and logs it AT MOST ONCE PER DISTINCT
+ *            (provider, channel) PAIR PER PROCESS ("[stop-sequences-resolve
+ *            SHADOW] would set N stop sequence(s) for provider=<p>
+ *            channel=<c>"), never writes it. Same small fixed-size,
+ *            lock-free, best-effort throttle table shape as Task 13's
+ *            max_tokens_shadow_mark_and_check_seen — see
+ *            stop_sequences_shadow_mark_and_check_seen in agent.c.
+ *   LIVE   — writes the resolved array/count into req->stop_sequences /
+ *            req->stop_sequences_count, every call, no throttle (the
+ *            throttle is a log-volume concern only).
+ * In every mode, a request whose stop_sequences is already non-empty is
+ * left untouched. A provider with no known registry defaults (unknown
+ * provider, or NULL/empty provider_name) always resolves to NOOP — there is
+ * nothing to apply or usefully log. NULL-safe on `req` (returns NOOP). */
+hu_stop_sequences_resolve_result_t
+hu_agent_internal_resolve_stop_sequences(hu_chat_request_t *req, const char *provider_name,
+                                         const hu_agent_t *agent);
+
+/* Test-only: clears the SHADOW log-throttle table (see above) so a test
+ * doesn't observe stale "already logged" state left by an earlier test.
+ * Always compiled (no HU_IS_TEST fork), same shape as
+ * hu_agent_internal_resolve_max_tokens_reset_for_test. */
+void hu_agent_internal_resolve_stop_sequences_reset_for_test(void);
+
 /* Build the fallback response text for a provider-unavailable bail-out.
  *
  * Caller-owned string written to *out / *out_len; free with alloc->free
