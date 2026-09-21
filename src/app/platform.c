@@ -169,7 +169,8 @@ void hu_platform_sleep_ms(unsigned int ms) {
         ms -= sec * 1000;
     }
     if (ms > 0) {
-        struct timespec ts = {.tv_sec = (time_t)(ms / 1000), .tv_nsec = (long)((ms % 1000) * 1000000)};
+        struct timespec ts = {.tv_sec = (time_t)(ms / 1000),
+                              .tv_nsec = (long)((ms % 1000) * 1000000)};
         nanosleep(&ts, NULL);
     }
 #endif

@@ -32,7 +32,7 @@ fi
 # 2026-07-18: origin/main itself measured 11557 (baseline had gone stale);
 # the S2.1b carve merge lands at 11553 — a net -4 vs main with zero new
 # groups (verified by set-diffing merged-tree windows against origin/main).
-CLONE_BASELINE=10521   # auto-locked 2026-09-20 (was 10522)
+CLONE_BASELINE=10513   # auto-locked 2026-09-20 (was 10521)
 # prior: 10854         # locked by hand 2026-09-20 (was 11021) after deleting
                        # 37 abandoned modules. The autolock could not fire on
                        # that commit: this gate runs from .githooks/pre-commit,

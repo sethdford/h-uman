@@ -252,8 +252,8 @@ hu_error_t hu_relationship_build_prompt(hu_allocator_t *alloc, const hu_relation
     const char *guidance;
     if (stage_ix >= s_stage_count) {
         stage_name = "unknown";
-        guidance =
-            "Relationship stage is indeterminate; be clear, professional, and avoid assuming depth.";
+        guidance = "Relationship stage is indeterminate; be clear, professional, and avoid "
+                   "assuming depth.";
     } else {
         stage_name = s_stage_names[stage_ix];
         guidance = s_stage_guidance[stage_ix];

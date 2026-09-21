@@ -16,22 +16,22 @@
  * ───────────────────────────────────────────────────────────────────────── */
 
 typedef struct hu_delegation_caveat {
-    char *key;              /* "tool", "path", "ttl", "max_cost", etc. */
+    char *key; /* "tool", "path", "ttl", "max_cost", etc. */
     size_t key_len;
-    char *value;            /* specific constraint value */
+    char *value; /* specific constraint value */
     size_t value_len;
 } hu_delegation_caveat_t;
 
 typedef struct hu_delegation_token {
-    char token_id[64];          /* unique token identifier */
-    char issuer_agent_id[64];   /* agent that issued this token */
-    char target_agent_id[64];   /* agent that can use this token */
+    char token_id[64];        /* unique token identifier */
+    char issuer_agent_id[64]; /* agent that issued this token */
+    char target_agent_id[64]; /* agent that can use this token */
     hu_delegation_caveat_t *caveats;
     size_t caveat_count;
-    int64_t issued_at;          /* Unix timestamp */
-    int64_t expires_at;         /* Unix timestamp; 0 = no expiry */
-    bool revoked;               /* manually revoked */
-    char parent_token_id[64];   /* empty string if root token */
+    int64_t issued_at;        /* Unix timestamp */
+    int64_t expires_at;       /* Unix timestamp; 0 = no expiry */
+    bool revoked;             /* manually revoked */
+    char parent_token_id[64]; /* empty string if root token */
 } hu_delegation_token_t;
 
 typedef struct hu_delegation_registry hu_delegation_registry_t;
@@ -67,9 +67,8 @@ void hu_delegation_registry_destroy(hu_delegation_registry_t *reg);
  * Returns token_id on success, NULL on failure (alloc error, registry full).
  */
 const char *hu_delegation_issue(hu_delegation_registry_t *reg, hu_allocator_t *alloc,
-                                const char *issuer_id, const char *target_id,
-                                uint32_t ttl_seconds, const hu_delegation_caveat_t *caveats,
-                                size_t caveat_count);
+                                const char *issuer_id, const char *target_id, uint32_t ttl_seconds,
+                                const hu_delegation_caveat_t *caveats, size_t caveat_count);
 
 /* ─────────────────────────────────────────────────────────────────────────
  * Token attenuation (capability delegation with narrowing)
@@ -110,8 +109,8 @@ const char *hu_delegation_attenuate(hu_delegation_registry_t *reg, hu_allocator_
  * Returns HU_OK if authorized, HU_ERR_UNAUTHORIZED if not, other on error.
  */
 hu_error_t hu_delegation_verify(hu_delegation_registry_t *reg, const char *token_id,
-                                const char *agent_id, const char *tool_name,
-                                const char *resource, double cost_usd);
+                                const char *agent_id, const char *tool_name, const char *resource,
+                                double cost_usd);
 
 /* ─────────────────────────────────────────────────────────────────────────
  * Revocation
@@ -152,7 +151,7 @@ hu_error_t hu_delegation_chain(hu_delegation_registry_t *reg, hu_allocator_t *al
  * Get token by ID. Returns NULL if not found.
  */
 const hu_delegation_token_t *hu_delegation_get_token(hu_delegation_registry_t *reg,
-                                                      const char *token_id);
+                                                     const char *token_id);
 
 /**
  * Get all tokens issued by an agent.

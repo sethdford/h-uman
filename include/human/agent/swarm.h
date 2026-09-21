@@ -18,10 +18,10 @@
 
 typedef struct hu_swarm_config {
     int max_parallel;        /* default 4 */
-    int64_t timeout_ms;     /* per-agent timeout, default 30000 */
+    int64_t timeout_ms;      /* per-agent timeout, default 30000 */
     int retry_on_failure;    /* default 1 */
     hu_provider_t *provider; /* LLM provider for sub-agent calls (NULL = echo fallback) */
-    const char *model;     /* model name */
+    const char *model;       /* model name */
     size_t model_len;
     hu_tool_t *tools; /* tool registry (reserved; single-round chat may use later) */
     size_t tools_count;
@@ -56,15 +56,14 @@ typedef struct hu_swarm_result {
 hu_swarm_config_t hu_swarm_config_default(void);
 
 hu_error_t hu_swarm_execute(hu_allocator_t *alloc, const hu_swarm_config_t *config,
-                           hu_swarm_task_t *tasks, size_t task_count,
-                           hu_swarm_result_t *result);
+                            hu_swarm_task_t *tasks, size_t task_count, hu_swarm_result_t *result);
 
 hu_error_t hu_swarm_aggregate(const hu_swarm_result_t *result, hu_swarm_aggregation_t strategy,
-                               char *out, size_t out_size, size_t *out_len);
+                              char *out, size_t out_size, size_t *out_len);
 
 hu_error_t hu_swarm_aggregate_llm(hu_allocator_t *alloc, const hu_swarm_result_t *result,
-                                   hu_provider_t *provider, const char *model, size_t model_len,
-                                   char *out, size_t out_size, size_t *out_len);
+                                  hu_provider_t *provider, const char *model, size_t model_len,
+                                  char *out, size_t out_size, size_t *out_len);
 
 void hu_swarm_result_free(hu_allocator_t *alloc, hu_swarm_result_t *result);
 

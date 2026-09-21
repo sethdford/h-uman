@@ -554,8 +554,7 @@ hu_error_t hu_mcp_client_refresh_tools(hu_mcp_client_t *srv, hu_allocator_t *all
     if (err != HU_OK)
         return err;
 
-    hu_tool_t *tools =
-        (hu_tool_t *)alloc->alloc(alloc->ctx, tool_count * sizeof(hu_tool_t));
+    hu_tool_t *tools = (hu_tool_t *)alloc->alloc(alloc->ctx, tool_count * sizeof(hu_tool_t));
     if (!tools) {
         for (size_t i = 0; i < tool_count; i++) {
             alloc->free(alloc->ctx, names[i], strlen(names[i]) + 1);

@@ -1,13 +1,13 @@
-#include "human/core/log.h"
 #include "human/agent/spawn.h"
 #include "human/agent.h"
-#include "human/agent/tool_context.h"
-#include "human/cost.h"
-#include "human/core/error.h"
 #include "human/agent/mailbox.h"
 #include "human/agent/team.h"
+#include "human/agent/tool_context.h"
 #include "human/agent/worktree.h"
+#include "human/core/error.h"
+#include "human/core/log.h"
 #include "human/core/string.h"
+#include "human/cost.h"
 #include "human/providers/factory.h"
 #include "human/security.h"
 #include "human/security/delegation.h"
@@ -174,27 +174,27 @@ static void *spawn_thread(void *arg) {
             goto done;
         }
         memset(ag, 0, sizeof(*ag));
-        if (hu_agent_from_config(ag, a, prov, s->inherit_tools, s->inherit_tools_count,
-                                 (hu_memory_t *)s->inherit_memory,
-                                 (hu_session_store_t *)s->inherit_session,
-                                 (hu_observer_t *)s->inherit_observer, s->policy, mdl,
-                                 strlen(mdl), pn, strlen(pn), temp, ws, strlen(ws), mi, 50, false,
-                                 s->inherit_autonomy, sys, strlen(sys), s->persona_name,
-                                 s->persona_name ? strlen(s->persona_name) : 0, NULL) != HU_OK) {
+        if (hu_agent_from_config(
+                ag, a, prov, s->inherit_tools, s->inherit_tools_count,
+                (hu_memory_t *)s->inherit_memory, (hu_session_store_t *)s->inherit_session,
+                (hu_observer_t *)s->inherit_observer, s->policy, mdl, strlen(mdl), pn, strlen(pn),
+                temp, ws, strlen(ws), mi, 50, false, s->inherit_autonomy, sys, strlen(sys),
+                s->persona_name, s->persona_name ? strlen(s->persona_name) : 0, NULL) != HU_OK) {
             a->free(a->ctx, ag, sizeof(*ag));
             result = hu_strndup(a, "(agent create failed)", 21);
             goto done;
         }
 #ifdef HU_ENABLE_SQLITE
         if (s->inherit_verifier_graph) {
-            hu_error_t ge = hu_agent_bind_sqlite_graph(
-                ag, (struct hu_graph *)s->inherit_verifier_graph, a);
+            hu_error_t ge =
+                hu_agent_bind_sqlite_graph(ag, (struct hu_graph *)s->inherit_verifier_graph, a);
             if (ge != HU_OK)
                 hu_log_warn("spawn", NULL, "spawn graph bind: %s", hu_error_string(ge));
         }
 #endif
         if (s->inherit_metacognition_policy)
-            hu_metacognition_apply_config(&ag->infra.metacognition, s->inherit_metacognition_policy);
+            hu_metacognition_apply_config(&ag->infra.metacognition,
+                                          s->inherit_metacognition_policy);
         ag->agent_id = s->agent_id;
         ag->spawn_depth = s->child_spawn_depth;
         ag->worktree_mgr = pool->worktree_mgr;
@@ -210,9 +210,11 @@ static void *spawn_thread(void *arg) {
 
         /* Issue delegation token from parent to child if parent has delegation registry */
         if (s->parent_delegation_registry) {
-            hu_delegation_registry_t *parent_reg = (hu_delegation_registry_t *)s->parent_delegation_registry;
+            hu_delegation_registry_t *parent_reg =
+                (hu_delegation_registry_t *)s->parent_delegation_registry;
             char parent_id_str[64];
-            snprintf(parent_id_str, sizeof(parent_id_str), "%llu", (unsigned long long)s->parent_agent_id);
+            snprintf(parent_id_str, sizeof(parent_id_str), "%llu",
+                     (unsigned long long)s->parent_agent_id);
             char child_id_str[64];
             snprintf(child_id_str, sizeof(child_id_str), "%llu", (unsigned long long)s->agent_id);
 
@@ -223,8 +225,8 @@ static void *spawn_thread(void *arg) {
             caveat.value = "*"; /* unrestricted tool access by default */
             caveat.value_len = 1;
 
-            const char *token_id = hu_delegation_issue(parent_reg, a, parent_id_str, child_id_str,
-                                                      3600, &caveat, 1);
+            const char *token_id =
+                hu_delegation_issue(parent_reg, a, parent_id_str, child_id_str, 3600, &caveat, 1);
             if (token_id && strlen(token_id) < 64) {
                 strncpy(ag->delegation_token_id, token_id, 63);
                 ag->delegation_token_id[63] = '\0';
@@ -257,20 +259,19 @@ static void *spawn_thread(void *arg) {
         pthread_mutex_unlock(&pool->mu);
     } else {
         hu_agent_t ag = {0};
-        if (hu_agent_from_config(&ag, a, prov, s->inherit_tools, s->inherit_tools_count,
-                                 (hu_memory_t *)s->inherit_memory,
-                                 (hu_session_store_t *)s->inherit_session,
-                                 (hu_observer_t *)s->inherit_observer, s->policy, mdl,
-                                 strlen(mdl), pn, strlen(pn), temp, ws, strlen(ws), mi, 50, false,
-                                 s->inherit_autonomy, sys, strlen(sys), s->persona_name,
-                                 s->persona_name ? strlen(s->persona_name) : 0, NULL) != HU_OK) {
+        if (hu_agent_from_config(
+                &ag, a, prov, s->inherit_tools, s->inherit_tools_count,
+                (hu_memory_t *)s->inherit_memory, (hu_session_store_t *)s->inherit_session,
+                (hu_observer_t *)s->inherit_observer, s->policy, mdl, strlen(mdl), pn, strlen(pn),
+                temp, ws, strlen(ws), mi, 50, false, s->inherit_autonomy, sys, strlen(sys),
+                s->persona_name, s->persona_name ? strlen(s->persona_name) : 0, NULL) != HU_OK) {
             result = hu_strndup(a, "(agent create failed)", 21);
             goto done;
         }
 #ifdef HU_ENABLE_SQLITE
         if (s->inherit_verifier_graph) {
-            hu_error_t ge = hu_agent_bind_sqlite_graph(
-                &ag, (struct hu_graph *)s->inherit_verifier_graph, a);
+            hu_error_t ge =
+                hu_agent_bind_sqlite_graph(&ag, (struct hu_graph *)s->inherit_verifier_graph, a);
             if (ge != HU_OK)
                 hu_log_warn("spawn", NULL, "spawn graph bind: %s", hu_error_string(ge));
         }
@@ -292,9 +293,11 @@ static void *spawn_thread(void *arg) {
 
         /* Issue delegation token from parent to child if parent has delegation registry */
         if (s->parent_delegation_registry) {
-            hu_delegation_registry_t *parent_reg = (hu_delegation_registry_t *)s->parent_delegation_registry;
+            hu_delegation_registry_t *parent_reg =
+                (hu_delegation_registry_t *)s->parent_delegation_registry;
             char parent_id_str[64];
-            snprintf(parent_id_str, sizeof(parent_id_str), "%llu", (unsigned long long)s->parent_agent_id);
+            snprintf(parent_id_str, sizeof(parent_id_str), "%llu",
+                     (unsigned long long)s->parent_agent_id);
             char child_id_str[64];
             snprintf(child_id_str, sizeof(child_id_str), "%llu", (unsigned long long)s->agent_id);
 
@@ -304,8 +307,8 @@ static void *spawn_thread(void *arg) {
             caveat.value = "*";
             caveat.value_len = 1;
 
-            const char *token_id = hu_delegation_issue(parent_reg, a, parent_id_str, child_id_str,
-                                                      3600, &caveat, 1);
+            const char *token_id =
+                hu_delegation_issue(parent_reg, a, parent_id_str, child_id_str, 3600, &caveat, 1);
             if (token_id && strlen(token_id) < 64) {
                 strncpy(ag.delegation_token_id, token_id, 63);
                 ag.delegation_token_id[63] = '\0';
@@ -512,8 +515,8 @@ hu_error_t hu_agent_pool_spawn(hu_agent_pool_t *pool, const hu_spawn_config_t *c
 #endif
             return HU_ERR_FLEET_SPAWN_CAP;
         }
-        hu_cost_tracker_t *acct = cfg->shared_cost_tracker ? cfg->shared_cost_tracker
-                                                           : pool->fleet_cost_tracker;
+        hu_cost_tracker_t *acct =
+            cfg->shared_cost_tracker ? cfg->shared_cost_tracker : pool->fleet_cost_tracker;
         if (pool->fleet_limits.budget_limit_usd > 0.0) {
             if (!acct) {
 #if !defined(HU_IS_TEST) || HU_IS_TEST == 0
@@ -587,8 +590,8 @@ hu_error_t hu_agent_pool_spawn(hu_agent_pool_t *pool, const hu_spawn_config_t *c
     s->inherit_observer = cfg->observer;
     s->inherit_autonomy = cfg->autonomy_level > 0 ? cfg->autonomy_level : 2;
     s->child_spawn_depth = cfg->caller_spawn_depth + 1u;
-    s->inherit_cost_tracker = cfg->shared_cost_tracker ? cfg->shared_cost_tracker
-                                                       : pool->fleet_cost_tracker;
+    s->inherit_cost_tracker =
+        cfg->shared_cost_tracker ? cfg->shared_cost_tracker : pool->fleet_cost_tracker;
     s->inherit_metacognition_policy = cfg->metacognition_policy;
     s->parent_delegation_registry = cfg->parent_delegation_registry;
     s->parent_agent_id = cfg->parent_agent_id;

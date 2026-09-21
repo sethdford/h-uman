@@ -1,7 +1,7 @@
 #include "human/memory/fast_capture.h"
+#include "human/core/json.h"
 #include "human/core/string.h"
 #include "human/data/loader.h"
-#include "human/core/json.h"
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
@@ -73,14 +73,22 @@ static size_t s_emotion_adj_count = 20;
 
 /* Emotion tag map: string name -> hu_emotion_tag_t */
 static hu_emotion_tag_t emotion_tag_from_string(const char *str) {
-    if (!str) return 0;
-    if (strcmp(str, "joy") == 0) return HU_EMOTION_JOY;
-    if (strcmp(str, "excitement") == 0) return HU_EMOTION_EXCITEMENT;
-    if (strcmp(str, "sadness") == 0) return HU_EMOTION_SADNESS;
-    if (strcmp(str, "anger") == 0) return HU_EMOTION_ANGER;
-    if (strcmp(str, "fear") == 0) return HU_EMOTION_FEAR;
-    if (strcmp(str, "frustration") == 0) return HU_EMOTION_FRUSTRATION;
-    if (strcmp(str, "anxiety") == 0) return HU_EMOTION_ANXIETY;
+    if (!str)
+        return 0;
+    if (strcmp(str, "joy") == 0)
+        return HU_EMOTION_JOY;
+    if (strcmp(str, "excitement") == 0)
+        return HU_EMOTION_EXCITEMENT;
+    if (strcmp(str, "sadness") == 0)
+        return HU_EMOTION_SADNESS;
+    if (strcmp(str, "anger") == 0)
+        return HU_EMOTION_ANGER;
+    if (strcmp(str, "fear") == 0)
+        return HU_EMOTION_FEAR;
+    if (strcmp(str, "frustration") == 0)
+        return HU_EMOTION_FRUSTRATION;
+    if (strcmp(str, "anxiety") == 0)
+        return HU_EMOTION_ANXIETY;
     return 0;
 }
 
@@ -154,7 +162,8 @@ hu_error_t hu_fast_capture_data_init(hu_allocator_t *alloc) {
     /* Load relationship words */
     char *json_rel = NULL;
     size_t json_rel_len = 0;
-    hu_error_t err = hu_data_load(alloc, "memory/relationship_words.json", &json_rel, &json_rel_len);
+    hu_error_t err =
+        hu_data_load(alloc, "memory/relationship_words.json", &json_rel, &json_rel_len);
     if (err == HU_OK && json_rel) {
         hu_json_value_t *root_rel = NULL;
         err = hu_json_parse(alloc, json_rel, json_rel_len, &root_rel);
@@ -164,13 +173,15 @@ hu_error_t hu_fast_capture_data_init(hu_allocator_t *alloc) {
             if (words_arr && words_arr->type == HU_JSON_ARRAY) {
                 size_t count = words_arr->data.array.len;
                 if (count > 0) {
-                    const char **words = (const char **)alloc->alloc(alloc->ctx, (count + 1) * sizeof(const char *));
+                    const char **words =
+                        (const char **)alloc->alloc(alloc->ctx, (count + 1) * sizeof(const char *));
                     if (words) {
                         memset(words, 0, (count + 1) * sizeof(const char *));
                         for (size_t i = 0; i < count; i++) {
                             hu_json_value_t *item = words_arr->data.array.items[i];
                             if (item && item->type == HU_JSON_STRING) {
-                                words[i] = hu_strndup(alloc, item->data.string.ptr, item->data.string.len);
+                                words[i] =
+                                    hu_strndup(alloc, item->data.string.ptr, item->data.string.len);
                             }
                         }
                         words[count] = NULL;
@@ -187,41 +198,42 @@ hu_error_t hu_fast_capture_data_init(hu_allocator_t *alloc) {
         char *json_emo = NULL;
         size_t json_emo_len = 0;
         err = hu_data_load(alloc, "memory/emotion_adjectives.json", &json_emo, &json_emo_len);
-    if (err == HU_OK && json_emo) {
-        hu_json_value_t *root_emo = NULL;
-        err = hu_json_parse(alloc, json_emo, json_emo_len, &root_emo);
-        alloc->free(alloc->ctx, json_emo, json_emo_len);
-        if (err == HU_OK && root_emo) {
-            hu_json_value_t *adj_arr = hu_json_object_get(root_emo, "adjectives");
-            if (adj_arr && adj_arr->type == HU_JSON_ARRAY) {
-                size_t count = adj_arr->data.array.len;
-                if (count > 0) {
-                    struct emotion_adj *adjs = (struct emotion_adj *)alloc->alloc(alloc->ctx, (count + 1) * sizeof(struct emotion_adj));
-                    if (adjs) {
-                        memset(adjs, 0, (count + 1) * sizeof(struct emotion_adj));
-                        for (size_t i = 0; i < count; i++) {
-                            hu_json_value_t *item = adj_arr->data.array.items[i];
-                            if (item && item->type == HU_JSON_OBJECT) {
-                                const char *word = hu_json_get_string(item, "word");
-                                const char *emotion = hu_json_get_string(item, "emotion");
-                                if (word) {
-                                    adjs[i].word = hu_strndup(alloc, word, strlen(word));
-                                    adjs[i].word_len = strlen(adjs[i].word);
-                                    adjs[i].tag = emotion_tag_from_string(emotion);
+        if (err == HU_OK && json_emo) {
+            hu_json_value_t *root_emo = NULL;
+            err = hu_json_parse(alloc, json_emo, json_emo_len, &root_emo);
+            alloc->free(alloc->ctx, json_emo, json_emo_len);
+            if (err == HU_OK && root_emo) {
+                hu_json_value_t *adj_arr = hu_json_object_get(root_emo, "adjectives");
+                if (adj_arr && adj_arr->type == HU_JSON_ARRAY) {
+                    size_t count = adj_arr->data.array.len;
+                    if (count > 0) {
+                        struct emotion_adj *adjs = (struct emotion_adj *)alloc->alloc(
+                            alloc->ctx, (count + 1) * sizeof(struct emotion_adj));
+                        if (adjs) {
+                            memset(adjs, 0, (count + 1) * sizeof(struct emotion_adj));
+                            for (size_t i = 0; i < count; i++) {
+                                hu_json_value_t *item = adj_arr->data.array.items[i];
+                                if (item && item->type == HU_JSON_OBJECT) {
+                                    const char *word = hu_json_get_string(item, "word");
+                                    const char *emotion = hu_json_get_string(item, "emotion");
+                                    if (word) {
+                                        adjs[i].word = hu_strndup(alloc, word, strlen(word));
+                                        adjs[i].word_len = strlen(adjs[i].word);
+                                        adjs[i].tag = emotion_tag_from_string(emotion);
+                                    }
                                 }
                             }
+                            adjs[count].word = NULL;
+                            adjs[count].word_len = 0;
+                            adjs[count].tag = 0;
+                            s_emotion_adjectives = adjs;
+                            s_emotion_adj_count = count;
                         }
-                        adjs[count].word = NULL;
-                        adjs[count].word_len = 0;
-                        adjs[count].tag = 0;
-                        s_emotion_adjectives = adjs;
-                        s_emotion_adj_count = count;
                     }
                 }
+                hu_json_free(alloc, root_emo);
             }
-            hu_json_free(alloc, root_emo);
         }
-    }
     }
 
     /* Load topic patterns */
@@ -238,7 +250,8 @@ hu_error_t hu_fast_capture_data_init(hu_allocator_t *alloc) {
                 if (arr && arr->type == HU_JSON_ARRAY) {
                     size_t count = arr->data.array.len;
                     if (count > 0) {
-                        struct topic_pattern *patterns = (struct topic_pattern *)alloc->alloc(alloc->ctx, (count + 1) * sizeof(struct topic_pattern));
+                        struct topic_pattern *patterns = (struct topic_pattern *)alloc->alloc(
+                            alloc->ctx, (count + 1) * sizeof(struct topic_pattern));
                         if (patterns) {
                             memset(patterns, 0, (count + 1) * sizeof(struct topic_pattern));
                             for (size_t i = 0; i < count; i++) {
@@ -248,7 +261,8 @@ hu_error_t hu_fast_capture_data_init(hu_allocator_t *alloc) {
                                     const char *word = hu_json_get_string(item, "word");
                                     const char *topic = hu_json_get_string(item, "topic");
                                     if (prefix && word && topic) {
-                                        patterns[i].prefix = hu_strndup(alloc, prefix, strlen(prefix));
+                                        patterns[i].prefix =
+                                            hu_strndup(alloc, prefix, strlen(prefix));
                                         patterns[i].prefix_len = strlen(patterns[i].prefix);
                                         patterns[i].word = hu_strndup(alloc, word, strlen(word));
                                         patterns[i].word_len = strlen(patterns[i].word);
@@ -287,13 +301,15 @@ hu_error_t hu_fast_capture_data_init(hu_allocator_t *alloc) {
                 if (arr && arr->type == HU_JSON_ARRAY) {
                     size_t count = arr->data.array.len;
                     if (count > 0) {
-                        const char **prefixes = (const char **)alloc->alloc(alloc->ctx, (count + 1) * sizeof(const char *));
+                        const char **prefixes = (const char **)alloc->alloc(
+                            alloc->ctx, (count + 1) * sizeof(const char *));
                         if (prefixes) {
                             memset(prefixes, 0, (count + 1) * sizeof(const char *));
                             for (size_t i = 0; i < count; i++) {
                                 hu_json_value_t *item = arr->data.array.items[i];
                                 if (item && item->type == HU_JSON_STRING) {
-                                    prefixes[i] = hu_strndup(alloc, item->data.string.ptr, item->data.string.len);
+                                    prefixes[i] = hu_strndup(alloc, item->data.string.ptr,
+                                                             item->data.string.len);
                                 }
                             }
                             prefixes[count] = NULL;
@@ -311,7 +327,8 @@ hu_error_t hu_fast_capture_data_init(hu_allocator_t *alloc) {
     {
         char *json_data = NULL;
         size_t json_len = 0;
-        hu_error_t load_err = hu_data_load(alloc, "memory/emotion_prefixes.json", &json_data, &json_len);
+        hu_error_t load_err =
+            hu_data_load(alloc, "memory/emotion_prefixes.json", &json_data, &json_len);
         if (load_err == HU_OK && json_data) {
             hu_json_value_t *root = NULL;
             load_err = hu_json_parse(alloc, json_data, json_len, &root);
@@ -321,13 +338,15 @@ hu_error_t hu_fast_capture_data_init(hu_allocator_t *alloc) {
                 if (arr && arr->type == HU_JSON_ARRAY) {
                     size_t count = arr->data.array.len;
                     if (count > 0) {
-                        const char **prefixes = (const char **)alloc->alloc(alloc->ctx, (count + 1) * sizeof(const char *));
+                        const char **prefixes = (const char **)alloc->alloc(
+                            alloc->ctx, (count + 1) * sizeof(const char *));
                         if (prefixes) {
                             memset(prefixes, 0, (count + 1) * sizeof(const char *));
                             for (size_t i = 0; i < count; i++) {
                                 hu_json_value_t *item = arr->data.array.items[i];
                                 if (item && item->type == HU_JSON_STRING) {
-                                    prefixes[i] = hu_strndup(alloc, item->data.string.ptr, item->data.string.len);
+                                    prefixes[i] = hu_strndup(alloc, item->data.string.ptr,
+                                                             item->data.string.len);
                                 }
                             }
                             prefixes[count] = NULL;
@@ -351,10 +370,12 @@ void hu_fast_capture_data_cleanup(hu_allocator_t *alloc) {
     /* Free relationship words if not default */
     if (s_relationship_words != (const char **)DEFAULT_RELATIONSHIP_WORDS) {
         for (size_t i = 0; s_relationship_words[i]; i++) {
-            alloc->free(alloc->ctx, (char *)s_relationship_words[i], strlen(s_relationship_words[i]) + 1);
+            alloc->free(alloc->ctx, (char *)s_relationship_words[i],
+                        strlen(s_relationship_words[i]) + 1);
         }
         size_t count = 0;
-        for (size_t i = 0; s_relationship_words[i]; i++) count++;
+        for (size_t i = 0; s_relationship_words[i]; i++)
+            count++;
         alloc->free(alloc->ctx, s_relationship_words, (count + 1) * sizeof(const char *));
     }
 
@@ -362,10 +383,12 @@ void hu_fast_capture_data_cleanup(hu_allocator_t *alloc) {
     if (s_emotion_adjectives != (struct emotion_adj *)DEFAULT_EMOTION_ADJECTIVES) {
         for (size_t i = 0; i < s_emotion_adj_count; i++) {
             if (s_emotion_adjectives[i].word) {
-                alloc->free(alloc->ctx, (char *)s_emotion_adjectives[i].word, strlen(s_emotion_adjectives[i].word) + 1);
+                alloc->free(alloc->ctx, (char *)s_emotion_adjectives[i].word,
+                            strlen(s_emotion_adjectives[i].word) + 1);
             }
         }
-        alloc->free(alloc->ctx, s_emotion_adjectives, (s_emotion_adj_count + 1) * sizeof(struct emotion_adj));
+        alloc->free(alloc->ctx, s_emotion_adjectives,
+                    (s_emotion_adj_count + 1) * sizeof(struct emotion_adj));
     }
 
     s_relationship_words = (const char **)DEFAULT_RELATIONSHIP_WORDS;
@@ -444,7 +467,8 @@ static void scan_relationships(const char *text, size_t text_len, hu_fc_result_t
 
 /* Structural: find "I feel/I'm feeling/I am/I'm " then look for emotion adjective in remainder. */
 static void scan_emotions(const char *text, size_t text_len, hu_fc_result_t *out) {
-    static const char *DEFAULT_EMOTION_PREFIXES[] = {"I feel ", "I'm feeling ", "I am ", "I'm ", NULL};
+    static const char *DEFAULT_EMOTION_PREFIXES[] = {"I feel ", "I'm feeling ", "I am ", "I'm ",
+                                                     NULL};
     const char **prefixes = s_emotion_prefixes ? s_emotion_prefixes : DEFAULT_EMOTION_PREFIXES;
     size_t count = s_emotion_prefixes ? s_emotion_prefixes_count : 4;
     for (size_t p = 0; p < count && prefixes[p]; p++) {
@@ -532,7 +556,8 @@ hu_error_t hu_fast_capture(hu_allocator_t *alloc, const char *text, size_t text_
     }
     if (!s_commitment_prefixes) {
         s_commitment_prefixes = (const char **)COMMITMENT_PREFIXES;
-        s_commitment_prefixes_count = sizeof(COMMITMENT_PREFIXES) / sizeof(COMMITMENT_PREFIXES[0]) - 1;
+        s_commitment_prefixes_count =
+            sizeof(COMMITMENT_PREFIXES) / sizeof(COMMITMENT_PREFIXES[0]) - 1;
     }
 
     scan_relationships(text, text_len, out, alloc);

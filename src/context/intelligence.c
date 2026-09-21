@@ -17,19 +17,17 @@ static size_t escape_sql_string(const char *s, size_t len, char *out, size_t out
 
 /* ── F68 Protective Intelligence ─────────────────────────────────────────── */
 
-hu_error_t hu_protective_create_table_sql(char *buf, size_t cap, size_t *out_len)
-{
+hu_error_t hu_protective_create_table_sql(char *buf, size_t cap, size_t *out_len) {
     if (!buf || !out_len || cap < 512)
         return HU_ERR_INVALID_ARGUMENT;
-    static const char sql[] =
-        "CREATE TABLE IF NOT EXISTS boundaries (\n"
-        "    id INTEGER PRIMARY KEY,\n"
-        "    contact_id TEXT NOT NULL,\n"
-        "    topic TEXT NOT NULL,\n"
-        "    type TEXT NOT NULL,\n"
-        "    set_at INTEGER NOT NULL,\n"
-        "    source TEXT\n"
-        ")";
+    static const char sql[] = "CREATE TABLE IF NOT EXISTS boundaries (\n"
+                              "    id INTEGER PRIMARY KEY,\n"
+                              "    contact_id TEXT NOT NULL,\n"
+                              "    topic TEXT NOT NULL,\n"
+                              "    type TEXT NOT NULL,\n"
+                              "    set_at INTEGER NOT NULL,\n"
+                              "    source TEXT\n"
+                              ")";
     size_t len = sizeof(sql) - 1;
     if (len >= cap)
         return HU_ERR_INVALID_ARGUMENT;
@@ -38,8 +36,8 @@ hu_error_t hu_protective_create_table_sql(char *buf, size_t cap, size_t *out_len
     return HU_OK;
 }
 
-hu_error_t hu_protective_insert_sql(const hu_boundary_t *b, char *buf, size_t cap, size_t *out_len)
-{
+hu_error_t hu_protective_insert_sql(const hu_boundary_t *b, char *buf, size_t cap,
+                                    size_t *out_len) {
     if (!b || !buf || !out_len || cap < 256)
         return HU_ERR_INVALID_ARGUMENT;
     if (!b->contact_id || !b->topic || !b->type)
@@ -49,8 +47,8 @@ hu_error_t hu_protective_insert_sql(const hu_boundary_t *b, char *buf, size_t ca
     char topic_esc[HU_INTELLIGENCE_ESCAPE_BUF];
     char type_esc[HU_INTELLIGENCE_ESCAPE_BUF];
 
-    size_t ce_len = escape_sql_string(b->contact_id, b->contact_id_len, contact_esc,
-                                       sizeof(contact_esc));
+    size_t ce_len =
+        escape_sql_string(b->contact_id, b->contact_id_len, contact_esc, sizeof(contact_esc));
     size_t te_len = escape_sql_string(b->topic, b->topic_len, topic_esc, sizeof(topic_esc));
     size_t ty_len = escape_sql_string(b->type, b->type_len, type_esc, sizeof(type_esc));
 
@@ -72,8 +70,7 @@ hu_error_t hu_protective_insert_sql(const hu_boundary_t *b, char *buf, size_t ca
 }
 
 hu_error_t hu_protective_query_sql(const char *contact_id, size_t len, char *buf, size_t cap,
-                                   size_t *out_len)
-{
+                                   size_t *out_len) {
     if (!contact_id || len == 0 || !buf || !out_len || cap < 128)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -92,9 +89,8 @@ hu_error_t hu_protective_query_sql(const char *contact_id, size_t len, char *buf
     return HU_OK;
 }
 
-static bool topic_match_case_insensitive(const char *haystack, size_t hay_len,
-                                         const char *needle, size_t needle_len)
-{
+static bool topic_match_case_insensitive(const char *haystack, size_t hay_len, const char *needle,
+                                         size_t needle_len) {
     if (needle_len == 0 || hay_len < needle_len)
         return false;
     for (size_t i = 0; i <= hay_len - needle_len; i++) {
@@ -110,8 +106,7 @@ static bool topic_match_case_insensitive(const char *haystack, size_t hay_len,
 }
 
 bool hu_protective_topic_is_blocked(const hu_boundary_t *boundaries, size_t count,
-                                    const char *topic, size_t topic_len)
-{
+                                    const char *topic, size_t topic_len) {
     if (!boundaries || !topic || topic_len == 0)
         return false;
     for (size_t i = 0; i < count; i++) {
@@ -125,8 +120,7 @@ bool hu_protective_topic_is_blocked(const hu_boundary_t *boundaries, size_t coun
 }
 
 hu_error_t hu_protective_build_prompt(hu_allocator_t *alloc, const hu_boundary_t *boundaries,
-                                      size_t count, char **out, size_t *out_len)
-{
+                                      size_t count, char **out, size_t *out_len) {
     if (!alloc || !out || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
@@ -152,14 +146,15 @@ hu_error_t hu_protective_build_prompt(hu_allocator_t *alloc, const hu_boundary_t
                                        (int)b->topic_len, b->topic);
         } else if (b->type_len >= 8 && strncmp(b->type, "redirect", 8) == 0) {
             if (redirect_len > 0)
-                redirect_len = hu_buf_appendf(redirect_buf, sizeof(redirect_buf), redirect_len, ", ");
+                redirect_len =
+                    hu_buf_appendf(redirect_buf, sizeof(redirect_buf), redirect_len, ", ");
             redirect_len = hu_buf_appendf(redirect_buf, sizeof(redirect_buf), redirect_len, "%.*s",
-                                        (int)b->topic_len, b->topic);
+                                          (int)b->topic_len, b->topic);
         } else if (b->type_len >= 3 && strncmp(b->type, "lie", 3) == 0) {
             if (lie_len > 0)
                 lie_len = hu_buf_appendf(lie_buf, sizeof(lie_buf), lie_len, ", ");
-            lie_len = hu_buf_appendf(lie_buf, sizeof(lie_buf), lie_len, "%.*s",
-                                     (int)b->topic_len, b->topic);
+            lie_len = hu_buf_appendf(lie_buf, sizeof(lie_buf), lie_len, "%.*s", (int)b->topic_len,
+                                     b->topic);
         }
     }
 
@@ -192,8 +187,7 @@ hu_error_t hu_protective_build_prompt(hu_allocator_t *alloc, const hu_boundary_t
     return HU_OK;
 }
 
-void hu_boundary_deinit(hu_allocator_t *alloc, hu_boundary_t *b)
-{
+void hu_boundary_deinit(hu_allocator_t *alloc, hu_boundary_t *b) {
     if (!b || !alloc)
         return;
     if (b->contact_id) {
@@ -216,15 +210,13 @@ void hu_boundary_deinit(hu_allocator_t *alloc, hu_boundary_t *b)
 /* ── F69 Humor Generation ────────────────────────────────────────────────── */
 
 /* LCG: state = (a * state + c) mod m. Returns next value in [0, 1). */
-static double lcg_next(uint32_t *state)
-{
+static double lcg_next(uint32_t *state) {
     *state = (uint32_t)((1103515245 * (uint64_t)*state + 12345) % 2147483648u);
     return (double)*state / 2147483648.0;
 }
 
 hu_humor_style_t hu_humor_select_style(double closeness, bool serious_topic, bool in_crisis,
-                                       const hu_humor_config_t *config, uint32_t seed)
-{
+                                       const hu_humor_config_t *config, uint32_t seed) {
     hu_humor_config_t cfg;
     if (config) {
         cfg = *config;
@@ -252,8 +244,7 @@ hu_humor_style_t hu_humor_select_style(double closeness, bool serious_topic, boo
     return (r < 0.5) ? HU_HUMOR_STYLE_OBSERVATIONAL : HU_HUMOR_STYLE_DEADPAN;
 }
 
-const char *hu_humor_style_str(hu_humor_style_t style)
-{
+const char *hu_humor_style_str(hu_humor_style_t style) {
     switch (style) {
     case HU_HUMOR_STYLE_NONE:
         return "none";
@@ -273,8 +264,7 @@ const char *hu_humor_style_str(hu_humor_style_t style)
 }
 
 hu_error_t hu_humor_build_directive(hu_allocator_t *alloc, hu_humor_style_t style, char **out,
-                                    size_t *out_len)
-{
+                                    size_t *out_len) {
     if (!alloc || !out || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
@@ -320,10 +310,9 @@ hu_error_t hu_humor_build_directive(hu_allocator_t *alloc, hu_humor_style_t styl
 /* ── F102 Cognitive Load ────────────────────────────────────────────────── */
 
 double hu_cognitive_compute_load(uint32_t active_convos, uint32_t msgs_this_hour,
-                                  bool complex_topic)
-{
-    double load = (double)active_convos * 0.2 + (double)msgs_this_hour * 0.01 +
-                  (complex_topic ? 0.3 : 0.0);
+                                 bool complex_topic) {
+    double load =
+        (double)active_convos * 0.2 + (double)msgs_this_hour * 0.01 + (complex_topic ? 0.3 : 0.0);
     if (load < 0.0)
         return 0.0;
     if (load > 1.0)
@@ -332,8 +321,7 @@ double hu_cognitive_compute_load(uint32_t active_convos, uint32_t msgs_this_hour
 }
 
 hu_error_t hu_cognitive_build_directive(hu_allocator_t *alloc, const hu_cognitive_state_t *state,
-                                        char **out, size_t *out_len)
-{
+                                        char **out, size_t *out_len) {
     if (!alloc || !out || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;

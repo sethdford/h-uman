@@ -60,7 +60,8 @@ static hu_error_t parse_step(hu_allocator_t *alloc, const hu_json_value_t *step_
                     out->depends_on[out->depends_count++] = (int)d;
             }
         }
-    } else if (deps_val && deps_val->type == HU_JSON_NUMBER && out->depends_count < HU_PLAN_STEP_MAX_DEPS) {
+    } else if (deps_val && deps_val->type == HU_JSON_NUMBER &&
+               out->depends_count < HU_PLAN_STEP_MAX_DEPS) {
         double d = deps_val->data.number;
         if (d >= 0.0 && d <= (double)INT_MAX)
             out->depends_on[out->depends_count++] = (int)d;
@@ -459,7 +460,8 @@ hu_error_t hu_planner_plan_mcts(hu_allocator_t *alloc, hu_provider_t *provider, 
 
     static const char prefix[] = "\n\n[MCTS suggested first focus]: ";
     const size_t prefix_len = sizeof(prefix) - 1;
-    if (mr.best_action_len > SIZE_MAX - prefix_len || goal_len > SIZE_MAX - prefix_len - mr.best_action_len - 1)
+    if (mr.best_action_len > SIZE_MAX - prefix_len ||
+        goal_len > SIZE_MAX - prefix_len - mr.best_action_len - 1)
         return hu_planner_generate(alloc, provider, model, model_len, goal, goal_len, tool_names,
                                    tool_count, out);
 
@@ -473,21 +475,21 @@ hu_error_t hu_planner_plan_mcts(hu_allocator_t *alloc, hu_provider_t *provider, 
     memcpy(aug + goal_len + prefix_len, mr.best_action, mr.best_action_len);
     aug[aug_len] = '\0';
 
-    hu_error_t gerr =
-        hu_planner_generate(alloc, provider, model, model_len, aug, aug_len, tool_names, tool_count, out);
+    hu_error_t gerr = hu_planner_generate(alloc, provider, model, model_len, aug, aug_len,
+                                          tool_names, tool_count, out);
     alloc->free(alloc->ctx, aug, aug_cap);
     return gerr;
 }
 
 /* ── Replan after step failure ───────────────────────────────────────────── */
 
-#define HU_REPLAN_SYS_PREFIX                                                          \
-    "You are a task planner. A plan step failed. Create a REVISED plan to achieve "   \
-    "the remaining goal.\nReturn ONLY valid JSON with this exact format:\n"           \
-    "{\"steps\":[{\"tool\":\"tool_name\",\"args\":{...},\"description\":\"...\",\""     \
-    "depends_on\":[]}]}\n"                                                            \
-    "depends_on is optional ([] or omitted = none); otherwise 0-based indices of "     \
-    "prior steps. "                                                                   \
+#define HU_REPLAN_SYS_PREFIX                                                        \
+    "You are a task planner. A plan step failed. Create a REVISED plan to achieve " \
+    "the remaining goal.\nReturn ONLY valid JSON with this exact format:\n"         \
+    "{\"steps\":[{\"tool\":\"tool_name\",\"args\":{...},\"description\":\"...\",\"" \
+    "depends_on\":[]}]}\n"                                                          \
+    "depends_on is optional ([] or omitted = none); otherwise 0-based indices of "  \
+    "prior steps. "                                                                 \
     "Available tools: "
 
 #define HU_REPLAN_SYS_SUFFIX "\nKeep plans minimal — fewest steps that accomplish the goal."
@@ -574,8 +576,8 @@ hu_error_t hu_planner_replan(hu_allocator_t *alloc, hu_provider_t *provider, con
                              (int)failure_detail_len, failure_detail);
     }
 
-    off = hu_buf_appendf(user, user_cap, off,
-                         "Create a revised plan to achieve the remaining goal.");
+    off =
+        hu_buf_appendf(user, user_cap, off, "Create a revised plan to achieve the remaining goal.");
     size_t user_len = off;
 
     hu_chat_message_t msgs[2];
@@ -628,8 +630,8 @@ hu_error_t hu_planner_replan(hu_allocator_t *alloc, hu_provider_t *provider, con
 }
 
 hu_error_t hu_planner_decompose_with_llm(hu_allocator_t *alloc, hu_provider_t *provider,
-                                         const char *model, size_t model_len,
-                                         const char *goal, size_t goal_len, hu_plan_t **out) {
+                                         const char *model, size_t model_len, const char *goal,
+                                         size_t goal_len, hu_plan_t **out) {
     if (!alloc || !goal || !out)
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
@@ -668,11 +670,9 @@ hu_error_t hu_planner_decompose_with_llm(hu_allocator_t *alloc, hu_provider_t *p
     for (size_t i = 0; i < plan->steps_count; i++) {
         const char *desc = decomp.tasks[i].description;
         size_t desc_len = decomp.tasks[i].description_len;
-        plan->steps[i].tool_name =
-            hu_strndup(alloc, desc && desc_len > 0 ? desc : "task",
-                       desc && desc_len > 0 ? desc_len : 4);
-        plan->steps[i].description =
-            hu_strndup(alloc, desc ? desc : "", desc ? desc_len : 0);
+        plan->steps[i].tool_name = hu_strndup(alloc, desc && desc_len > 0 ? desc : "task",
+                                              desc && desc_len > 0 ? desc_len : 4);
+        plan->steps[i].description = hu_strndup(alloc, desc ? desc : "", desc ? desc_len : 0);
         plan->steps[i].args_json = hu_strdup(alloc, "{}");
         plan->steps[i].status = HU_PLAN_STEP_PENDING;
         if (!plan->steps[i].tool_name || !plan->steps[i].args_json) {

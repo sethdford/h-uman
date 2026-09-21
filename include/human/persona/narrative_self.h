@@ -6,9 +6,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define HU_NARRATIVE_MAX_THEMES 8
+#define HU_NARRATIVE_MAX_THEMES         8
 #define HU_NARRATIVE_MAX_ORIGIN_STORIES 4
-#define HU_NARRATIVE_MAX_GROWTH_ARCS 6
+#define HU_NARRATIVE_MAX_GROWTH_ARCS    6
 
 typedef struct hu_narrative_self {
     char *identity_statement;

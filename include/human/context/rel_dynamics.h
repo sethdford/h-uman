@@ -24,7 +24,7 @@ typedef struct hu_rel_velocity {
     uint32_t initiations_received_30d;
     uint64_t avg_response_time_ms;
     float interaction_quality; /* -1.0..1.0 */
-    float velocity;             /* computed */
+    float velocity;            /* computed */
     hu_rel_trend_t trend;
 } hu_rel_velocity_t;
 
@@ -53,11 +53,11 @@ hu_error_t hu_rel_dynamics_create_table_sql(char *buf, size_t cap, size_t *out_l
 
 /* Build SQL to record a velocity measurement */
 hu_error_t hu_rel_dynamics_insert_sql(const hu_rel_velocity_t *vel, uint64_t timestamp_ms,
-                                       char *buf, size_t cap, size_t *out_len);
+                                      char *buf, size_t cap, size_t *out_len);
 
 /* Build SQL to fetch history for a contact */
-hu_error_t hu_rel_dynamics_query_sql(const char *contact_id, size_t contact_id_len,
-                                      size_t limit, char *buf, size_t cap, size_t *out_len);
+hu_error_t hu_rel_dynamics_query_sql(const char *contact_id, size_t contact_id_len, size_t limit,
+                                     char *buf, size_t cap, size_t *out_len);
 
 /* Compute velocity from metrics; mutates vel->velocity and vel->trend */
 float hu_rel_velocity_compute(hu_rel_velocity_t *vel);

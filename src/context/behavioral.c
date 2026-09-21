@@ -246,8 +246,7 @@ hu_error_t hu_mirror_build_directive(hu_allocator_t *alloc, const hu_mirror_anal
     if (analysis->uses_lowercase) {
         if (!first)
             pos = hu_buf_appendf(buf, sizeof(buf), pos, " ");
-        pos = hu_buf_appendf(buf, sizeof(buf), pos,
-                             "They type in lowercase — match their style.");
+        pos = hu_buf_appendf(buf, sizeof(buf), pos, "They type in lowercase — match their style.");
         first = 0;
     }
     if (analysis->uses_abbreviations) {

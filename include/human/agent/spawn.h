@@ -44,10 +44,10 @@ typedef struct hu_spawn_config {
     hu_mailbox_t *mailbox; /* optional; when set, child agents share this mailbox */
     /* Optional parity with parent agent (pointers alias parent; not copied). When set with
      * tools_count > 0, child gets same tool surface + memory + skill catalog as parent. */
-    void *skillforge; /* hu_skillforge_t * when HU_HAS_SKILLS */
+    void *skillforge;         /* hu_skillforge_t * when HU_HAS_SKILLS */
     const void *parent_tools; /* const hu_tool_t * */
     size_t parent_tools_count;
-    void *memory;           /* hu_memory_t * */
+    void *memory; /* hu_memory_t * */
     /* Optional struct hu_graph * (SQLite session graph). Child opens its own W7 facade via
      * hu_agent_bind_sqlite_graph; not owned by the pool. Typically parent's verifier_graph. */
     void *verifier_graph;
@@ -67,9 +67,9 @@ typedef struct hu_spawn_config {
 
 /* Limits for the agent pool ("fleet") — concurrent slots still use max_concurrent. */
 typedef struct hu_fleet_limits {
-    uint32_t max_spawn_depth;   /* 0 = unlimited nested spawns */
-    uint32_t max_total_spawns;  /* 0 = unlimited lifetime spawns started in this pool */
-    double budget_limit_usd;    /* 0 = unlimited; else need shared_cost_tracker or pool bind */
+    uint32_t max_spawn_depth;  /* 0 = unlimited nested spawns */
+    uint32_t max_total_spawns; /* 0 = unlimited lifetime spawns started in this pool */
+    double budget_limit_usd;   /* 0 = unlimited; else need shared_cost_tracker or pool bind */
 } hu_fleet_limits_t;
 
 typedef struct hu_fleet_status {
@@ -135,17 +135,15 @@ typedef struct hu_agent_registry hu_agent_registry_t;
 
 /* Spawn an agent from a named config in the registry. Looks up the agent
  * definition by name, builds a spawn config from it, and spawns. */
-hu_error_t hu_agent_pool_spawn_named(hu_agent_pool_t *pool,
-                                     const hu_agent_registry_t *registry,
-                                     const char *agent_name, const char *task,
-                                     size_t task_len, uint64_t *out_id);
+hu_error_t hu_agent_pool_spawn_named(hu_agent_pool_t *pool, const hu_agent_registry_t *registry,
+                                     const char *agent_name, const char *task, size_t task_len,
+                                     uint64_t *out_id);
 
 /* Build a hu_spawn_config_t from a hu_named_agent_config_t. Caller provides
  * the spawn_config struct; string pointers reference the named config
  * (caller must keep the named config alive). */
 struct hu_named_agent_config;
-void hu_spawn_config_from_named(hu_spawn_config_t *out,
-                                const struct hu_named_agent_config *cfg);
+void hu_spawn_config_from_named(hu_spawn_config_t *out, const struct hu_named_agent_config *cfg);
 
 /* If hu_agent_get_current_for_tools() is set, copy caller_spawn_depth,
  * shared_cost_tracker, and metacognition_policy from that agent into *cfg.

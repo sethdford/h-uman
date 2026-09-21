@@ -18,7 +18,8 @@ typedef enum {
  * policy->autonomy must be >= HU_AUTONOMY_SUPERVISED. Test builds ignore autonomy when
  * returning mocks.
  */
-hu_error_t hu_computer_use_create(hu_allocator_t *alloc, hu_security_policy_t *policy, hu_tool_t *out);
+hu_error_t hu_computer_use_create(hu_allocator_t *alloc, hu_security_policy_t *policy,
+                                  hu_tool_t *out);
 
 /* Optional: bind a vision-capable provider for click-by-target (see JSON "target"). */
 void hu_computer_use_set_grounding(hu_tool_t *tool, hu_provider_t *provider, const char *model,

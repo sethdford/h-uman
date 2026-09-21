@@ -21,16 +21,16 @@ static void swarm_run_one_task(hu_allocator_t *alloc, const hu_swarm_config_t *c
     t->completed = false;
     t->failed = false;
 
-    if (!cfg->provider || !cfg->provider->vtable ||
-        !cfg->provider->vtable->chat_with_system) {
+    if (!cfg->provider || !cfg->provider->vtable || !cfg->provider->vtable->chat_with_system) {
         t->completed = true;
         t->failed = false;
-        int n = snprintf(t->result, sizeof(t->result), "processed: %.*s",
-            (int)(t->description_len < sizeof(t->result) - 16u
-                ? t->description_len : sizeof(t->result) - 16u),
-            t->description);
-        t->result_len = (n > 0 && (size_t)n < sizeof(t->result))
-            ? (size_t)n : sizeof(t->result) - 1u;
+        int n =
+            snprintf(t->result, sizeof(t->result), "processed: %.*s",
+                     (int)(t->description_len < sizeof(t->result) - 16u ? t->description_len
+                                                                        : sizeof(t->result) - 16u),
+                     t->description);
+        t->result_len =
+            (n > 0 && (size_t)n < sizeof(t->result)) ? (size_t)n : sizeof(t->result) - 1u;
         t->result[t->result_len] = '\0';
         return;
     }
@@ -41,8 +41,8 @@ static void swarm_run_one_task(hu_allocator_t *alloc, const hu_swarm_config_t *c
     hu_tool_spec_t *specs = NULL;
     size_t specs_count = 0;
     if (cfg->tools && cfg->tools_count > 0 && vt->chat) {
-        specs = (hu_tool_spec_t *)alloc->alloc(alloc->ctx,
-                                                 cfg->tools_count * sizeof(hu_tool_spec_t));
+        specs =
+            (hu_tool_spec_t *)alloc->alloc(alloc->ctx, cfg->tools_count * sizeof(hu_tool_spec_t));
         if (specs) {
             for (size_t ti = 0; ti < cfg->tools_count; ti++) {
                 if (!cfg->tools[ti].vtable || !cfg->tools[ti].vtable->name ||
@@ -50,7 +50,8 @@ static void swarm_run_one_task(hu_allocator_t *alloc, const hu_swarm_config_t *c
                     continue;
                 const char *nm = cfg->tools[ti].vtable->name(cfg->tools[ti].ctx);
                 const char *desc = cfg->tools[ti].vtable->description
-                    ? cfg->tools[ti].vtable->description(cfg->tools[ti].ctx) : "";
+                                       ? cfg->tools[ti].vtable->description(cfg->tools[ti].ctx)
+                                       : "";
                 const char *pj = cfg->tools[ti].vtable->parameters_json(cfg->tools[ti].ctx);
                 if (!nm || !pj)
                     continue;
@@ -65,10 +66,9 @@ static void swarm_run_one_task(hu_allocator_t *alloc, const hu_swarm_config_t *c
         }
     }
 
-    static const char sys[] =
-        "You are a focused sub-agent working on a specific subtask. "
-        "Use available tools to gather information and complete the task. "
-        "Return your final answer concisely.";
+    static const char sys[] = "You are a focused sub-agent working on a specific subtask. "
+                              "Use available tools to gather information and complete the task. "
+                              "Return your final answer concisely.";
 
     char context[4096];
     size_t dlen = t->description_len;
@@ -137,7 +137,8 @@ static void swarm_run_one_task(hu_allocator_t *alloc, const hu_swarm_config_t *c
                     }
                     if (tool && tool->vtable->execute) {
                         hu_json_value_t *args = NULL;
-                        if (resp.tool_calls[tci].arguments && resp.tool_calls[tci].arguments_len > 0) {
+                        if (resp.tool_calls[tci].arguments &&
+                            resp.tool_calls[tci].arguments_len > 0) {
                             (void)hu_json_parse(alloc, resp.tool_calls[tci].arguments,
                                                 resp.tool_calls[tci].arguments_len, &args);
                         }
@@ -149,7 +150,8 @@ static void swarm_run_one_task(hu_allocator_t *alloc, const hu_swarm_config_t *c
 
                         if (tr.output && tr.output_len > 0 && ctx_pos < sizeof(context) - 1u) {
                             size_t room = sizeof(context) - 1u - ctx_pos;
-                            int add = snprintf(context + ctx_pos, room + 1u, "\n[Tool %.*s result]: %.*s",
+                            int add = snprintf(
+                                context + ctx_pos, room + 1u, "\n[Tool %.*s result]: %.*s",
                                 (int)(call_len < 64 ? (int)call_len : 64), call_name,
                                 (int)(tr.output_len < 512u ? (int)tr.output_len : 512), tr.output);
                             if (add > 0) {
@@ -169,8 +171,9 @@ static void swarm_run_one_task(hu_allocator_t *alloc, const hu_swarm_config_t *c
             if (resp.content && resp.content_len > 0) {
                 t->completed = true;
                 t->failed = false;
-                size_t copy_len = resp.content_len < sizeof(t->result) - 1u ? resp.content_len
-                                                                          : sizeof(t->result) - 1u;
+                size_t copy_len = resp.content_len < sizeof(t->result) - 1u
+                                      ? resp.content_len
+                                      : sizeof(t->result) - 1u;
                 memcpy(t->result, resp.content, copy_len);
                 t->result[copy_len] = '\0';
                 t->result_len = copy_len;
@@ -184,14 +187,14 @@ static void swarm_run_one_task(hu_allocator_t *alloc, const hu_swarm_config_t *c
             /* No tools or no vt->chat: single chat_with_system call */
             char *llm_out = NULL;
             size_t llm_out_len = 0;
-            hu_error_t err = vt->chat_with_system(
-                pctx, alloc, sys, sizeof(sys) - 1u,
-                context, ctx_pos, model, model_len, 0.0, &llm_out, &llm_out_len);
+            hu_error_t err =
+                vt->chat_with_system(pctx, alloc, sys, sizeof(sys) - 1u, context, ctx_pos, model,
+                                     model_len, 0.0, &llm_out, &llm_out_len);
             if (err == HU_OK && llm_out && llm_out_len > 0) {
                 t->completed = true;
                 t->failed = false;
-                size_t copy_len = llm_out_len < sizeof(t->result) - 1u ? llm_out_len
-                                                                     : sizeof(t->result) - 1u;
+                size_t copy_len =
+                    llm_out_len < sizeof(t->result) - 1u ? llm_out_len : sizeof(t->result) - 1u;
                 memcpy(t->result, llm_out, copy_len);
                 t->result[copy_len] = '\0';
                 t->result_len = copy_len;
@@ -260,8 +263,8 @@ static void *swarm_worker(void *arg) {
         swarm_run_one_task(ctx->alloc, ctx->config, t);
 
         gettimeofday(&tv_end, NULL);
-        t->elapsed_ms = (int64_t)(tv_end.tv_sec - tv_start.tv_sec) * 1000
-            + (int64_t)(tv_end.tv_usec - tv_start.tv_usec) / 1000;
+        t->elapsed_ms = (int64_t)(tv_end.tv_sec - tv_start.tv_sec) * 1000 +
+                        (int64_t)(tv_end.tv_usec - tv_start.tv_usec) / 1000;
         if (t->elapsed_ms < 1)
             t->elapsed_ms = 1;
 
@@ -285,8 +288,7 @@ hu_swarm_config_t hu_swarm_config_default(void) {
 }
 
 hu_error_t hu_swarm_execute(hu_allocator_t *alloc, const hu_swarm_config_t *config,
-                           hu_swarm_task_t *tasks, size_t task_count,
-                           hu_swarm_result_t *result) {
+                            hu_swarm_task_t *tasks, size_t task_count, hu_swarm_result_t *result) {
     if (!alloc || !result)
         return HU_ERR_INVALID_ARGUMENT;
     if (task_count > 0 && !tasks)
@@ -304,8 +306,8 @@ hu_error_t hu_swarm_execute(hu_allocator_t *alloc, const hu_swarm_config_t *conf
 
     hu_swarm_config_t cfg = config ? *config : hu_swarm_config_default();
 
-    result->tasks = (hu_swarm_task_t *)alloc->alloc(
-        alloc->ctx, task_count * sizeof(hu_swarm_task_t));
+    result->tasks =
+        (hu_swarm_task_t *)alloc->alloc(alloc->ctx, task_count * sizeof(hu_swarm_task_t));
     if (!result->tasks)
         return HU_ERR_OUT_OF_MEMORY;
 
@@ -319,8 +321,7 @@ hu_error_t hu_swarm_execute(hu_allocator_t *alloc, const hu_swarm_config_t *conf
         *t = tasks[i];
 
         /* Simulate failure for tasks containing "fail" in description */
-        bool sim_fail = (t->description_len >= 4 &&
-                         strstr(t->description, "fail") != NULL);
+        bool sim_fail = (t->description_len >= 4 && strstr(t->description, "fail") != NULL);
         bool task_done = false;
 
         for (int attempt = 0; attempt <= max_retries && !task_done; attempt++) {
@@ -379,8 +380,7 @@ hu_error_t hu_swarm_execute(hu_allocator_t *alloc, const hu_swarm_config_t *conf
     if (num_threads < 1)
         num_threads = 1;
 
-    pthread_t *threads = (pthread_t *)alloc->alloc(
-        alloc->ctx, num_threads * sizeof(pthread_t));
+    pthread_t *threads = (pthread_t *)alloc->alloc(alloc->ctx, num_threads * sizeof(pthread_t));
     if (!threads) {
         pthread_mutex_destroy(&ctx.next_mu);
         alloc->free(alloc->ctx, result->tasks, task_count * sizeof(hu_swarm_task_t));
@@ -432,8 +432,8 @@ hu_error_t hu_swarm_execute(hu_allocator_t *alloc, const hu_swarm_config_t *conf
 }
 
 #define HU_SWARM_JACCARD_MAX_WORDS 64
-#define HU_SWARM_JACCARD_WORD_LEN 48
-#define HU_SWARM_VOTE_MAX_INDICES 128
+#define HU_SWARM_JACCARD_WORD_LEN  48
+#define HU_SWARM_VOTE_MAX_INDICES  128
 
 static int swarm_vote_extract_words(const char *s, size_t s_len,
                                     char words[][HU_SWARM_JACCARD_WORD_LEN]) {
@@ -508,14 +508,13 @@ static void swarm_vote_union(int *parent, int a, int b) {
 }
 
 static double swarm_vote_pair_similarity(const hu_swarm_task_t *x, const hu_swarm_task_t *y) {
-    if (x->result_len == y->result_len &&
-        memcmp(x->result, y->result, x->result_len) == 0)
+    if (x->result_len == y->result_len && memcmp(x->result, y->result, x->result_len) == 0)
         return 1.0;
     return swarm_jaccard_similarity(x->result, x->result_len, y->result, y->result_len);
 }
 
 hu_error_t hu_swarm_aggregate(const hu_swarm_result_t *result, hu_swarm_aggregation_t strategy,
-                               char *out, size_t out_size, size_t *out_len) {
+                              char *out, size_t out_size, size_t *out_len) {
     if (!result || !out || !out_len || out_size == 0)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -586,8 +585,8 @@ hu_error_t hu_swarm_aggregate(const hu_swarm_result_t *result, hu_swarm_aggregat
 
         for (size_t ii = 0; ii < nv; ii++) {
             for (size_t jj = ii + 1; jj < nv; jj++) {
-                double sim = swarm_vote_pair_similarity(&result->tasks[idxs[ii]],
-                                                        &result->tasks[idxs[jj]]);
+                double sim =
+                    swarm_vote_pair_similarity(&result->tasks[idxs[ii]], &result->tasks[idxs[jj]]);
                 if (sim >= 1.0 || sim > 0.5)
                     swarm_vote_union(parent, (int)ii, (int)jj);
             }
@@ -621,8 +620,8 @@ hu_error_t hu_swarm_aggregate(const hu_swarm_result_t *result, hu_swarm_aggregat
             for (size_t jj = 0; jj < nv; jj++) {
                 if (swarm_vote_find_root(parent, (int)jj) != wr_best || jj == ii)
                     continue;
-                sum += swarm_vote_pair_similarity(&result->tasks[idxs[ii]],
-                                                  &result->tasks[idxs[jj]]);
+                sum +=
+                    swarm_vote_pair_similarity(&result->tasks[idxs[ii]], &result->tasks[idxs[jj]]);
                 cnt++;
             }
             double avg = cnt > 0 ? sum / (double)cnt : 1.0;
@@ -651,8 +650,8 @@ hu_error_t hu_swarm_aggregate(const hu_swarm_result_t *result, hu_swarm_aggregat
 }
 
 hu_error_t hu_swarm_aggregate_llm(hu_allocator_t *alloc, const hu_swarm_result_t *result,
-                                   hu_provider_t *provider, const char *model, size_t model_len,
-                                   char *out, size_t out_size, size_t *out_len) {
+                                  hu_provider_t *provider, const char *model, size_t model_len,
+                                  char *out, size_t out_size, size_t *out_len) {
     if (!alloc || !result || !out || !out_len || out_size == 0)
         return HU_ERR_INVALID_ARGUMENT;
     out[0] = '\0';
@@ -690,18 +689,20 @@ hu_error_t hu_swarm_aggregate_llm(hu_allocator_t *alloc, const hu_swarm_result_t
 
     /* Build synthesis prompt with all results */
     char prompt[8192];
-    int plen = snprintf(prompt, sizeof(prompt),
+    int plen = snprintf(
+        prompt, sizeof(prompt),
         "You are synthesizing results from %zu parallel sub-agents into one coherent response.\n\n"
-        "Sub-agent results:\n", valid);
+        "Sub-agent results:\n",
+        valid);
 
     size_t idx = 0;
     for (size_t i = 0; i < result->task_count && plen < (int)sizeof(prompt) - 256; i++) {
         if (!result->tasks[i].completed || result->tasks[i].result_len == 0)
             continue;
         idx++;
-        int added = snprintf(prompt + plen, sizeof(prompt) - (size_t)plen,
-            "\n--- Agent %zu (task: %.*s) ---\n%.*s\n",
-            idx,
+        int added = snprintf(
+            prompt + plen, sizeof(prompt) - (size_t)plen,
+            "\n--- Agent %zu (task: %.*s) ---\n%.*s\n", idx,
             (int)(result->tasks[i].description_len < 100 ? result->tasks[i].description_len : 100),
             result->tasks[i].description,
             (int)(result->tasks[i].result_len < 1500 ? result->tasks[i].result_len : 1500),
@@ -709,20 +710,19 @@ hu_error_t hu_swarm_aggregate_llm(hu_allocator_t *alloc, const hu_swarm_result_t
         if (added > 0)
             plen += added;
     }
-    int added = snprintf(prompt + plen, sizeof(prompt) - (size_t)plen,
-        "\nSynthesize these into a single coherent, comprehensive response. "
-        "Resolve any contradictions. Keep the most relevant and accurate information.");
+    int added =
+        snprintf(prompt + plen, sizeof(prompt) - (size_t)plen,
+                 "\nSynthesize these into a single coherent, comprehensive response. "
+                 "Resolve any contradictions. Keep the most relevant and accurate information.");
     if (added > 0)
         plen += added;
 
     static const char sys[] = "You synthesize multiple agent outputs into one coherent answer.";
     char *llm_out = NULL;
     size_t llm_out_len = 0;
-    hu_error_t err = provider->vtable->chat_with_system(
-        provider->ctx, alloc, sys, sizeof(sys) - 1u,
-        prompt, (size_t)plen,
-        model ? model : "", model_len,
-        0.0, &llm_out, &llm_out_len);
+    hu_error_t err = provider->vtable->chat_with_system(provider->ctx, alloc, sys, sizeof(sys) - 1u,
+                                                        prompt, (size_t)plen, model ? model : "",
+                                                        model_len, 0.0, &llm_out, &llm_out_len);
 
     if (err != HU_OK || !llm_out || llm_out_len == 0) {
         if (llm_out)
@@ -742,8 +742,7 @@ void hu_swarm_result_free(hu_allocator_t *alloc, hu_swarm_result_t *result) {
     if (!alloc || !result)
         return;
     if (result->tasks) {
-        alloc->free(alloc->ctx, result->tasks,
-                    result->task_count * sizeof(hu_swarm_task_t));
+        alloc->free(alloc->ctx, result->tasks, result->task_count * sizeof(hu_swarm_task_t));
         result->tasks = NULL;
         result->task_count = 0;
         result->completed = 0;

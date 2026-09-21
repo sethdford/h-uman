@@ -53,7 +53,9 @@ void hu_bg_registry_tick_all(hu_bg_registry_t *r, hu_allocator_t *alloc, hu_app_
     }
 }
 
-size_t hu_bg_registry_count(const hu_bg_registry_t *r) { return r ? r->count : 0; }
+size_t hu_bg_registry_count(const hu_bg_registry_t *r) {
+    return r ? r->count : 0;
+}
 
 const hu_bg_observer_t *hu_bg_registry_get(const hu_bg_registry_t *r, size_t idx) {
     if (!r || idx >= r->count) {

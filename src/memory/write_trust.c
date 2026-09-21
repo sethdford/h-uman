@@ -10,45 +10,62 @@
 #include <string.h>
 
 /* Weights (sum to 1.0). Tunable via hu_write_trust_set_weights for tests. */
-#define W_SOURCE   0.40f
-#define W_RECENCY  0.10f
-#define W_CONSIST  0.30f
-#define W_ANOMALY  0.20f
+#define W_SOURCE  0.40f
+#define W_RECENCY 0.10f
+#define W_CONSIST 0.30f
+#define W_ANOMALY 0.20f
 
 #define LIVE_THRESHOLD 0.60f
 #define DROP_THRESHOLD 0.30f
 
 static float source_score(hu_write_source_t s) {
     switch (s) {
-        case HU_WRITE_SOURCE_USER:             return 1.00f;
-        case HU_WRITE_SOURCE_CHANNEL_TRUSTED:  return 0.85f;
-        case HU_WRITE_SOURCE_CHANNEL_OPEN:     return 0.55f;
-        case HU_WRITE_SOURCE_FEED_FILE:        return 0.70f;
-        case HU_WRITE_SOURCE_FEED_WEB:         return 0.50f;
-        case HU_WRITE_SOURCE_AGENT:            return 0.45f;
-        case HU_WRITE_SOURCE_UNKNOWN:          return 0.30f;
+    case HU_WRITE_SOURCE_USER:
+        return 1.00f;
+    case HU_WRITE_SOURCE_CHANNEL_TRUSTED:
+        return 0.85f;
+    case HU_WRITE_SOURCE_CHANNEL_OPEN:
+        return 0.55f;
+    case HU_WRITE_SOURCE_FEED_FILE:
+        return 0.70f;
+    case HU_WRITE_SOURCE_FEED_WEB:
+        return 0.50f;
+    case HU_WRITE_SOURCE_AGENT:
+        return 0.45f;
+    case HU_WRITE_SOURCE_UNKNOWN:
+        return 0.30f;
     }
     return 0.30f;
 }
 
 const char *hu_write_source_str(hu_write_source_t s) {
     switch (s) {
-        case HU_WRITE_SOURCE_USER:             return "user";
-        case HU_WRITE_SOURCE_CHANNEL_TRUSTED:  return "channel-trusted";
-        case HU_WRITE_SOURCE_CHANNEL_OPEN:     return "channel-open";
-        case HU_WRITE_SOURCE_FEED_FILE:        return "feed-file";
-        case HU_WRITE_SOURCE_FEED_WEB:         return "feed-web";
-        case HU_WRITE_SOURCE_AGENT:            return "agent";
-        case HU_WRITE_SOURCE_UNKNOWN:          return "unknown";
+    case HU_WRITE_SOURCE_USER:
+        return "user";
+    case HU_WRITE_SOURCE_CHANNEL_TRUSTED:
+        return "channel-trusted";
+    case HU_WRITE_SOURCE_CHANNEL_OPEN:
+        return "channel-open";
+    case HU_WRITE_SOURCE_FEED_FILE:
+        return "feed-file";
+    case HU_WRITE_SOURCE_FEED_WEB:
+        return "feed-web";
+    case HU_WRITE_SOURCE_AGENT:
+        return "agent";
+    case HU_WRITE_SOURCE_UNKNOWN:
+        return "unknown";
     }
     return "unknown";
 }
 
 const char *hu_write_outcome_str(hu_write_outcome_t o) {
     switch (o) {
-        case HU_WRITE_OUTCOME_LIVE:       return "live";
-        case HU_WRITE_OUTCOME_QUARANTINE: return "quarantine";
-        case HU_WRITE_OUTCOME_DROP:       return "drop";
+    case HU_WRITE_OUTCOME_LIVE:
+        return "live";
+    case HU_WRITE_OUTCOME_QUARANTINE:
+        return "quarantine";
+    case HU_WRITE_OUTCOME_DROP:
+        return "drop";
     }
     return "unknown";
 }
@@ -142,14 +159,11 @@ hu_write_trust_decision_t hu_write_trust_score(const hu_write_trust_input_t *in)
 
 #ifdef HU_ENABLE_SQLITE
 
-hu_error_t hu_write_trust_quarantine_relation(hu_graph_t *g, const char *contact_id,
-                                              size_t contact_id_len, int64_t source_id,
-                                              int64_t target_id, hu_relation_type_t type,
-                                              float weight, int64_t event_start, int64_t event_end,
-                                              float confidence, const char *context,
-                                              size_t context_len, const char *provenance,
-                                              size_t provenance_len,
-                                              const hu_write_trust_decision_t *decision) {
+hu_error_t hu_write_trust_quarantine_relation(
+    hu_graph_t *g, const char *contact_id, size_t contact_id_len, int64_t source_id,
+    int64_t target_id, hu_relation_type_t type, float weight, int64_t event_start,
+    int64_t event_end, float confidence, const char *context, size_t context_len,
+    const char *provenance, size_t provenance_len, const hu_write_trust_decision_t *decision) {
     if (!g || !decision)
         return HU_ERR_INVALID_ARGUMENT;
     struct sqlite3 *db = hu_graph_sqlite_connection(g);
@@ -222,14 +236,11 @@ hu_error_t hu_write_trust_quarantine_count(hu_graph_t *g, const char *contact_id
 
 #else /* !HU_ENABLE_SQLITE */
 
-hu_error_t hu_write_trust_quarantine_relation(hu_graph_t *g, const char *contact_id,
-                                              size_t contact_id_len, int64_t source_id,
-                                              int64_t target_id, hu_relation_type_t type,
-                                              float weight, int64_t event_start, int64_t event_end,
-                                              float confidence, const char *context,
-                                              size_t context_len, const char *provenance,
-                                              size_t provenance_len,
-                                              const hu_write_trust_decision_t *decision) {
+hu_error_t hu_write_trust_quarantine_relation(
+    hu_graph_t *g, const char *contact_id, size_t contact_id_len, int64_t source_id,
+    int64_t target_id, hu_relation_type_t type, float weight, int64_t event_start,
+    int64_t event_end, float confidence, const char *context, size_t context_len,
+    const char *provenance, size_t provenance_len, const hu_write_trust_decision_t *decision) {
     (void)g;
     (void)contact_id;
     (void)contact_id_len;

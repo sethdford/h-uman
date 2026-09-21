@@ -81,7 +81,7 @@ hu_query_category_t hu_strategy_classify_query(const char *query, size_t query_l
 }
 
 hu_error_t hu_strategy_learner_create(hu_allocator_t *alloc, sqlite3 *db,
-                                       hu_strategy_learner_t *out) {
+                                      hu_strategy_learner_t *out) {
     if (!alloc || !db || !out)
         return HU_ERR_INVALID_ARGUMENT;
     memset(out, 0, sizeof(*out));
@@ -112,10 +112,9 @@ hu_error_t hu_strategy_learner_init_tables(hu_strategy_learner_t *learner) {
     return HU_OK;
 }
 
-hu_error_t hu_strategy_learner_record(hu_strategy_learner_t *learner,
-                                       hu_query_category_t category,
-                                       hu_retrieval_strategy_t strategy,
-                                       bool success, int64_t now_ts) {
+hu_error_t hu_strategy_learner_record(hu_strategy_learner_t *learner, hu_query_category_t category,
+                                      hu_retrieval_strategy_t strategy, bool success,
+                                      int64_t now_ts) {
     if (!learner || !learner->db)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -139,7 +138,7 @@ hu_error_t hu_strategy_learner_record(hu_strategy_learner_t *learner,
 }
 
 hu_retrieval_strategy_t hu_strategy_learner_recommend(hu_strategy_learner_t *learner,
-                                                       hu_query_category_t category) {
+                                                      hu_query_category_t category) {
     if (!learner || !learner->db)
         return HU_RSTRAT_HYBRID;
 
@@ -165,9 +164,9 @@ hu_retrieval_strategy_t hu_strategy_learner_recommend(hu_strategy_learner_t *lea
 }
 
 hu_error_t hu_strategy_learner_get_stats(hu_strategy_learner_t *learner,
-                                          hu_query_category_t category,
-                                          hu_retrieval_strategy_t strategy,
-                                          hu_strategy_stats_t *out) {
+                                         hu_query_category_t category,
+                                         hu_retrieval_strategy_t strategy,
+                                         hu_strategy_stats_t *out) {
     if (!learner || !learner->db || !out)
         return HU_ERR_INVALID_ARGUMENT;
 

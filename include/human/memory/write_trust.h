@@ -54,18 +54,18 @@ typedef enum hu_write_outcome {
 
 typedef struct hu_write_trust_input {
     hu_write_source_t source;
-    int64_t observed_at;       /* unix ms when fact was observed */
-    int64_t now;               /* unix ms; for recency decay */
-    bool contradiction_flag;   /* set when conflict_resolver returned FLAG */
-    bool supersession;         /* set when conflict_resolver returned SUPERSEDE */
-    uint32_t recent_writes;    /* count from the source in the rate window */
-    uint32_t rate_limit;       /* trip when recent_writes > rate_limit */
+    int64_t observed_at;     /* unix ms when fact was observed */
+    int64_t now;             /* unix ms; for recency decay */
+    bool contradiction_flag; /* set when conflict_resolver returned FLAG */
+    bool supersession;       /* set when conflict_resolver returned SUPERSEDE */
+    uint32_t recent_writes;  /* count from the source in the rate window */
+    uint32_t rate_limit;     /* trip when recent_writes > rate_limit */
 } hu_write_trust_input_t;
 
 typedef struct hu_write_trust_decision {
-    float score;                 /* 0.0-1.0 */
+    float score; /* 0.0-1.0 */
     hu_write_outcome_t outcome;
-    char reason[128];            /* short human-readable label */
+    char reason[128]; /* short human-readable label */
 } hu_write_trust_decision_t;
 
 /* Pure scorer: no DB access. Always succeeds; never returns HU_ERR. */
@@ -78,14 +78,11 @@ const char *hu_write_outcome_str(hu_write_outcome_t o);
 /* Insert a relation into quarantine_relations instead of the live graph.
  * The caller passes the same fields it would have given to upsert_ex, plus
  * the trust decision. Returns HU_OK on success, HU_ERR_IO on failure. */
-hu_error_t hu_write_trust_quarantine_relation(hu_graph_t *g, const char *contact_id,
-                                              size_t contact_id_len, int64_t source_id,
-                                              int64_t target_id, hu_relation_type_t type,
-                                              float weight, int64_t event_start, int64_t event_end,
-                                              float confidence, const char *context,
-                                              size_t context_len, const char *provenance,
-                                              size_t provenance_len,
-                                              const hu_write_trust_decision_t *decision);
+hu_error_t hu_write_trust_quarantine_relation(
+    hu_graph_t *g, const char *contact_id, size_t contact_id_len, int64_t source_id,
+    int64_t target_id, hu_relation_type_t type, float weight, int64_t event_start,
+    int64_t event_end, float confidence, const char *context, size_t context_len,
+    const char *provenance, size_t provenance_len, const hu_write_trust_decision_t *decision);
 
 /* Counts entries currently in quarantine for a contact. */
 hu_error_t hu_write_trust_quarantine_count(hu_graph_t *g, const char *contact_id,

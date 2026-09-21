@@ -46,8 +46,8 @@ bool hu_conflict_relation_is_single_valued(hu_relation_type_t type);
  * already inserted `proposed`. On SUPERSEDE, this sets the prior row's
  * event_end and the proposed row's supersedes_id. On BRANCH/NONE/FLAG, no
  * additional writes happen — the caller's INSERT already completed. */
-hu_error_t hu_conflict_apply(hu_graph_t *g, hu_conflict_resolution_t decision,
-                             int64_t proposed_id, int64_t existing_id, int64_t cutover_ts);
+hu_error_t hu_conflict_apply(hu_graph_t *g, hu_conflict_resolution_t decision, int64_t proposed_id,
+                             int64_t existing_id, int64_t cutover_ts);
 
 /* Convenience: human-readable label for logs / tests / UI. */
 const char *hu_conflict_resolution_str(hu_conflict_resolution_t r);
@@ -71,10 +71,9 @@ const char *hu_conflict_resolution_str(hu_conflict_resolution_t r);
  * returns HU_CONFLICT_NONE with `*out_matched_existing_id = 0`.
  * `out_matched_existing_id` may be NULL — the resolution is still
  * returned but the id is silently dropped. */
-hu_conflict_resolution_t hu_conflict_classify_semantic(
-    const hu_graph_relation_t *proposed,
-    const hu_graph_relation_t *candidates,
-    size_t n_candidates,
-    int64_t *out_matched_existing_id);
+hu_conflict_resolution_t hu_conflict_classify_semantic(const hu_graph_relation_t *proposed,
+                                                       const hu_graph_relation_t *candidates,
+                                                       size_t n_candidates,
+                                                       int64_t *out_matched_existing_id);
 
 #endif /* HU_MEMORY_CONFLICT_RESOLVER_H */

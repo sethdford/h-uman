@@ -25,7 +25,7 @@ typedef enum hu_trust_action {
     HU_TRUST_DISCLOSE_UNCERTAINTY,
     HU_TRUST_PUSH_BACK,
     HU_TRUST_ABSTAIN,
-    HU_TRUST_REFUSE_TO_AGREE,   /* anti-sycophancy under pressure */
+    HU_TRUST_REFUSE_TO_AGREE, /* anti-sycophancy under pressure */
     HU_TRUST_REFER_OUT,
     HU_TRUST_COUNT
 } hu_trust_action_t;
@@ -34,24 +34,24 @@ typedef struct hu_trust_input {
     /* Evidence about the disagreement, if any. */
     bool memory_contradicts_user;
     bool tool_output_contradicts_user;
-    bool source_is_tool_output;        /* highest trust source */
-    bool source_is_user_assertion;     /* lowest trust source */
+    bool source_is_tool_output;    /* highest trust source */
+    bool source_is_user_assertion; /* lowest trust source */
 
     /* Pressure signals from the user. */
     bool user_reasserted_after_pushback;
-    uint32_t user_pressure_count;      /* count of reassertions in window */
-    bool user_invoked_authority;       /* "everyone knows", "you should know" */
-    bool user_emotional_pressure;      /* anger / threats ≠ truth */
+    uint32_t user_pressure_count; /* count of reassertions in window */
+    bool user_invoked_authority;  /* "everyone knows", "you should know" */
+    bool user_emotional_pressure; /* anger / threats ≠ truth */
 
     /* Confidence about the assistant's own answer. */
-    float trust_score;                 /* 0..1 calibrated belief */
+    float trust_score; /* 0..1 calibrated belief */
     bool answer_is_speculative;
 } hu_trust_input_t;
 
 typedef struct hu_trust_decision {
     hu_trust_action_t action;
-    float firmness;                    /* 0..1 — push-back intensity */
-    float confidence;                  /* 0..1 — confidence in choice */
+    float firmness;   /* 0..1 — push-back intensity */
+    float confidence; /* 0..1 — confidence in choice */
     char rationale[160];
 } hu_trust_decision_t;
 
