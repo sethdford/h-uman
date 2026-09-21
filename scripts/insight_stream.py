@@ -525,9 +525,18 @@ def prospective_pass(db, a, identity, contacts, targets, now_ms):
             total += new
             print(f"    wrote {new} new triggers")
     if a.write:
+        # Retire past-due rows (fired=3) so "live" counts what can still fire, and
+        # report fired=1 — the only number that proves the read side runs. Until
+        # 2026-09-20 this line counted writes while the daemon never read them.
+        expired = db.execute(
+            "UPDATE prospective_memories SET fired=3 WHERE fired=0 AND expires_at > 0 AND "
+            "expires_at <= strftime('%s','now')").rowcount
+        db.commit()
         live = db.execute("SELECT COUNT(*) FROM prospective_memories WHERE fired=0 AND "
                           "expires_at > strftime('%s','now')").fetchone()[0]
-        print(f"prospective done: {total} new triggers, {live} live")
+        fired = db.execute("SELECT COUNT(*) FROM prospective_memories WHERE fired=1").fetchone()[0]
+        print(f"prospective done: {total} new triggers, {live} live, {expired} expired, "
+              f"{fired} fired all-time")
 
 
 # ---- supersession (PGMem 2608.01708 / A-TMA 2607.01935 "ghost memory") ----

@@ -15,9 +15,20 @@ else
     ratchet_autolock() { :; }
 fi
 
-MAX_BASELINE=10511   # auto-locked 2026-09-21 (was 10512)
+MAX_BASELINE=10522   # set by hand 2026-09-21 at the origin/main merge (was 10511).
+                     # This is the one place a merge legitimately raises the ceiling, so the
+                     # arithmetic is written out. The largest file flipped from
+                     # src/agent/agent_turn.c (10511 on this branch after the dead-code sweep)
+                     # to src/daemon.c, which arrived from main at 10518 — already 6 lines
+                     # above main's own stale 10512 baseline, latent there because this gate
+                     # only measures when a src/*.c is staged. The follow-up watcher's
+                     # governor plumbing (shared proactive budget + autoresponder config,
+                     # required by review) adds the last 4. Nothing here shrank a file and
+                     # then re-spent the gain.
                      # carve-out (context loading -> src/daemon/daemon_reactive_context.c,
                      # prompt phases -> daemon_reactive_prompt.c; was 14058). Lower as god-files are carved.
+                     # src/daemon.c is the next carve target: docs/plans/2026-09-20-october-roadmap.md
+                     # and the 2026-09-20 clean-architecture review both scope hu_service_run.
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 

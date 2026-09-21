@@ -652,6 +652,7 @@ set(HU_CORE_SOURCES
     src/doctor/check_log_hygiene.c
     src/doctor/check_imessage_cursor.c
     src/doctor/check_blind_ab_gate.c
+    src/doctor/check_contact_optout.c
     src/doctor/check_persona_integrity.c
     # Read-only chat.db cursor repo: self-guarded on HU_ENABLE_SQLITE (returns
     # NOT_SUPPORTED without it) so the imessage_cursor doctor check always links.
@@ -1242,6 +1243,7 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_cron.c
     src/daemon/daemon_routing.c
     src/daemon/daemon_proactive.c
+    src/daemon/daemon_contact_optout.c
     src/daemon/daemon_reply_delay.c
     src/daemon/daemon_director.c
     src/daemon/reply_dedup.c
@@ -1623,6 +1625,7 @@ if(HU_ENABLE_CARTESIA)
         src/tts/audio_pipeline.c
         src/context/voice_decision.c
         src/tts/emotion_map.c
+        src/tts/voice_reply.c
     )
     message(STATUS "Cartesia TTS: enabled")
 else()
@@ -1650,6 +1653,8 @@ if(HU_ENABLE_SQLITE)
         src/memory/repos/opinions_repo_sqlite.c
         src/memory/repos/life_chapter_repo_sqlite.c
         src/memory/repos/proactive_decisions_repo_sqlite.c
+        src/memory/repos/contact_optout_repo_sqlite.c
+        src/memory/repos/repo_util_sqlite.c
         src/memory/repos/social_graph_repo_sqlite.c
         src/memory/repos/self_awareness_repo_sqlite.c
         src/memory/sql_transaction.c
@@ -3056,7 +3061,7 @@ endif()
 if(NOT HU_ENABLE_CARTESIA)
     list(APPEND HU_TEST_EXTRA_MODULES
         src/tts/audio_pipeline.c
-        src/context/voice_decision.c src/tts/emotion_map.c)
+        src/context/voice_decision.c src/tts/emotion_map.c src/tts/voice_reply.c)
 endif()
 # Phase 7 modules (experience, forgetting, weakness) — tests need them when SQLite is OFF (minimal build)
 if(NOT HU_ENABLE_SQLITE)
@@ -3589,6 +3594,7 @@ set(HU_TEST_SOURCES
     tests/test_daemon_proactive.c
     tests/test_daemon_proactive_decline.c
     tests/test_daemon_proactive_reachability.c
+    tests/test_daemon_contact_optout.c
     tests/test_reply_delay_model.c
     tests/test_daemon_promise_keeper.c
     tests/test_daemon_insight_overuse.c
@@ -4032,7 +4038,7 @@ list(APPEND HU_TEST_SOURCES tests/test_transcript_prep.c)
 list(APPEND HU_TEST_SOURCES tests/test_send_voice_message.c)
 list(APPEND HU_TEST_SOURCES tests/test_voice_message_integration.c)
 if(HU_ENABLE_CARTESIA)
-    list(APPEND HU_TEST_SOURCES tests/test_audio_pipeline.c tests/test_voice_decision.c tests/test_emotion_map.c)
+    list(APPEND HU_TEST_SOURCES tests/test_audio_pipeline.c tests/test_voice_decision.c tests/test_emotion_map.c tests/test_voice_reply.c)
 endif()
 if(HU_ENABLE_AUTHENTIC)
     list(APPEND HU_TEST_SOURCES tests/test_cognitive_load.c tests/test_phase9_integration.c)
@@ -4154,6 +4160,7 @@ if(HU_ENABLE_SQLITE)
     list(APPEND HU_TEST_SOURCES tests/test_opinions_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_life_chapter_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_proactive_decisions_repo.c)
+    list(APPEND HU_TEST_SOURCES tests/test_contact_optout_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_social_graph_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_self_awareness_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_celebration_repo.c)

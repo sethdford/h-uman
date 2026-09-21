@@ -450,6 +450,8 @@ void run_life_chapter_repo_tests(void);
 void run_proactive_decisions_repo_tests(void);
 void run_daemon_proactive_decline_tests(void);
 void run_daemon_proactive_reachability_tests(void);
+void run_daemon_contact_optout_tests(void);
+void run_contact_optout_repo_tests(void);
 void run_social_graph_repo_tests(void);
 void run_self_awareness_repo_tests(void);
 void run_feed_items_repo_tests(void);
@@ -681,6 +683,7 @@ void register_voice_clone_tests(void);
 void run_audio_pipeline_tests(void);
 void run_voice_decision_tests(void);
 void run_emotion_map_tests(void);
+void run_voice_reply_tests(void);
 #endif
 #ifdef HU_ENABLE_ML
 void run_ml_tests(void);
@@ -1505,6 +1508,8 @@ int main(int argc, char **argv) {
     run_proactive_decisions_repo_tests();
     run_daemon_proactive_decline_tests();
     run_daemon_proactive_reachability_tests();
+    run_daemon_contact_optout_tests();
+    run_contact_optout_repo_tests();
     run_social_graph_repo_tests();
     run_self_awareness_repo_tests();
     run_feed_items_repo_tests();
@@ -1724,6 +1729,7 @@ int main(int argc, char **argv) {
     run_audio_pipeline_tests();
     run_voice_decision_tests();
     run_emotion_map_tests();
+    run_voice_reply_tests();
 #endif
 #ifdef HU_ENABLE_ML
     run_ml_tests();

@@ -5,8 +5,10 @@ typedef int hu_prospective_unused_;
 #include "human/memory/prospective.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/log.h"
 #include "human/core/string.h"
 #include <sqlite3.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -170,6 +172,86 @@ hu_error_t hu_prospective_mark_fired(sqlite3 *db, const hu_prospective_entry_t *
     sqlite3_finalize(stmt);
     return err;
 }
+#define PROSPECTIVE_RENDER_CAP 3
+
+char *hu_prospective_directive_build(hu_allocator_t *alloc, sqlite3 *db, const char *text,
+                                     size_t text_len, const char *contact_id, size_t cid_len,
+                                     int64_t now_ts, size_t *out_len) {
+    if (out_len)
+        *out_len = 0;
+    if (!alloc || !db || !text || text_len == 0 || !out_len)
+        return NULL;
+
+    hu_prospective_entry_t *entries = NULL;
+    size_t count = 0;
+    if (hu_prospective_check_triggers(alloc, db, "keyword", text, text_len, contact_id, cid_len,
+                                      now_ts, &entries, &count) != HU_OK ||
+        !entries || count == 0)
+        return NULL;
+
+    char buf[1024];
+    size_t pos = 0;
+    int n = snprintf(buf, sizeof(buf), "[PROSPECTIVE MEMORY: Remember to: ");
+    if (n > 0 && (size_t)n < sizeof(buf))
+        pos = (size_t)n;
+    size_t rendered = 0;
+    for (size_t i = 0; i < count && i < PROSPECTIVE_RENDER_CAP && pos < sizeof(buf) - 64; i++) {
+        if (i > 0) {
+            memcpy(buf + pos, " | ", 3);
+            pos += 3;
+        }
+        int w = snprintf(buf + pos, sizeof(buf) - pos, "%s (triggered by: %s)", entries[i].action,
+                         entries[i].trigger_value);
+        if (w <= 0 || pos + (size_t)w >= sizeof(buf))
+            break;
+        pos += (size_t)w;
+        rendered++;
+    }
+    char *out = NULL;
+    if (rendered > 0 && pos + 2 < sizeof(buf)) {
+        buf[pos++] = ']';
+        buf[pos] = '\0';
+        out = (char *)alloc->alloc(alloc->ctx, pos + 1);
+        if (out) {
+            memcpy(out, buf, pos + 1);
+            *out_len = pos;
+            /* A reminder is surfaced once: retire every keyword of the rendered
+             * intentions so the next text does not re-inject them. */
+            if (hu_prospective_mark_fired(db, entries, rendered) != HU_OK)
+                hu_log_warn("prospective", NULL, "could not retire %zu surfaced triggers",
+                            rendered);
+            hu_log_info("prospective", NULL,
+                        "fired %zu of %zu open triggers for %.*s: %s (cue: %s)", rendered, count,
+                        (int)cid_len, contact_id ? contact_id : "", entries[0].action,
+                        entries[0].trigger_value);
+        }
+    }
+    alloc->free(alloc->ctx, entries, count * sizeof(hu_prospective_entry_t));
+    return out;
+}
+
+hu_error_t hu_prospective_expire_sweep(sqlite3 *db, int64_t now_ts, int64_t *out_n) {
+    if (out_n)
+        *out_n = 0;
+    if (!db)
+        return HU_ERR_INVALID_ARGUMENT;
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(db,
+                                "UPDATE prospective_memories SET fired=3 WHERE fired=0 AND "
+                                "expires_at > 0 AND expires_at <= ?1",
+                                -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+        return HU_ERR_MEMORY_BACKEND;
+    sqlite3_bind_int64(stmt, 1, now_ts);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    if (rc != SQLITE_DONE)
+        return HU_ERR_MEMORY_BACKEND;
+    if (out_n)
+        *out_n = (int64_t)sqlite3_changes(db);
+    return HU_OK;
+}
+
 #else /* !HU_ENABLE_SQLITE */
 
 #include "human/core/error.h"

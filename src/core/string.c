@@ -187,21 +187,25 @@ bool hu_str_contains_ci_cstr(const char *hay, size_t hlen, const char *needle) {
     return hu_str_contains_ci(hay, hlen, needle, strlen(needle));
 }
 
-bool hu_str_contains_word_ci_n(const char *hay, size_t hlen, const char *needle) {
+long hu_str_find_word_ci_n(const char *hay, size_t hlen, const char *needle) {
     if (!hay || !needle || !needle[0])
-        return false;
+        return -1;
     size_t nlen = strlen(needle);
     if (hlen < nlen)
-        return false;
+        return -1;
     for (size_t i = 0; i + nlen <= hlen; i++) {
         if (strncasecmp(hay + i, needle, nlen) != 0)
             continue;
         bool left_ok = (i == 0) || !isalnum((unsigned char)hay[i - 1]);
         bool right_ok = (i + nlen == hlen) || !isalnum((unsigned char)hay[i + nlen]);
         if (left_ok && right_ok)
-            return true;
+            return (long)i;
     }
-    return false;
+    return -1;
+}
+
+bool hu_str_contains_word_ci_n(const char *hay, size_t hlen, const char *needle) {
+    return hu_str_find_word_ci_n(hay, hlen, needle) >= 0;
 }
 
 bool hu_str_contains_word_ci(const char *s, const char *needle) {

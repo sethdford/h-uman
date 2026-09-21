@@ -112,6 +112,7 @@
 #include "human/youtube.h"
 /* Daemon modules */
 #include "human/daemon_comfort_summary.h"
+#include "human/daemon_contact_optout.h"
 #include "human/daemon_cron.h"
 #include "human/daemon_learning_tick.h"
 #include "human/daemon_lifecycle.h"
@@ -1477,8 +1478,11 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                 /* Reachability pre-filter (2026-09-20, HU_PROACTIVE_REACHABILITY):
                  * skip the proposer for a contact blue_guard would HOLD anyway.
                  * OFF/SHADOW never take this branch; see daemon_proactive.h. */
-                if (hu_daemon_proactive_reach_should_skip(agent, alloc, ch_part, cp->contact_id,
-                                                          target_part, target_len)) {
+                if (hu_daemon_contact_optout_should_skip(agent, cp->contact_id)) {
+                    /* Contact asked us to stop (O5): no proposer fire, no send,
+                     * nothing recorded — consent is not a candidate. */
+                } else if (hu_daemon_proactive_reach_should_skip(
+                               agent, alloc, ch_part, cp->contact_id, target_part, target_len)) {
                     /* LIVE: no proposer fire, no send, nothing recorded. */
                 } else if (config && agent && agent->provider.vtable) {
                     if (agent->memory) {
@@ -3538,6 +3542,13 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             (unsigned)extra_delay_ms, (int)(key_len > 20 ? 20 : key_len),
                             batch_key);
 
+                /* Contestability (2026-09-20, HU_CONTACT_OPTOUT): "stop texting me"
+                 * writes a per-contact suppression the proactive loop honours from
+                 * the next tick. The reactive reply still goes out — that IS the
+                 * acknowledgement. See daemon_contact_optout.h. */
+                (void)hu_daemon_contact_optout_observe(agent, batch_key, key_len, combined,
+                                                       combined_len);
+
                 /* Consecutive-reply limiter — cap and burst window from config;
                  * a silenced direct question is logged at WARN, never quietly. */
                 if (hu_reactive_gate_active(HU_REACTIVE_GATE_CONSECUTIVE_LIMIT, llm_decides) &&
@@ -4368,7 +4379,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 /* 2c. Length calibration fallback for channels without history.
                  * When history exists, calibration runs inside build_awareness.
                  * When it doesn't, we still want message-type guidance. */
-                if (!convo_ctx && combined_len > 0) {
+                if ((!convo_ctx || llm_decides) && combined_len > 0) {
+                    /* In llm_decides mode build_awareness is skipped, so the only
+                     * context the prompt builder can return is the prospective
+                     * directive; calibration must still be appended after it. */
                     char cal_buf[1024];
                     const hu_contact_profile_t *cp_cal =
                         (agent->persona && batch_key && key_len > 0)
@@ -4377,12 +4391,25 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     size_t cal_len = hu_conversation_calibrate_length_for_contact(
                         combined, combined_len, NULL, 0, msgs[batch_start].is_group, cp_cal,
                         agent->relationship.stage, cal_buf, sizeof(cal_buf));
-                    if (cal_len > 0) {
+                    if (cal_len > 0 && !convo_ctx) {
                         convo_ctx = (char *)alloc->alloc(alloc->ctx, cal_len + 1);
                         if (convo_ctx) {
                             memcpy(convo_ctx, cal_buf, cal_len);
                             convo_ctx[cal_len] = '\0';
                             convo_ctx_len = cal_len;
+                        }
+                    } else if (cal_len > 0) {
+                        size_t total = convo_ctx_len + cal_len + 2;
+                        char *merged = (char *)alloc->alloc(alloc->ctx, total + 1);
+                        if (merged) {
+                            memcpy(merged, convo_ctx, convo_ctx_len);
+                            merged[convo_ctx_len] = '\n';
+                            merged[convo_ctx_len + 1] = '\n';
+                            memcpy(merged + convo_ctx_len + 2, cal_buf, cal_len);
+                            merged[total] = '\0';
+                            alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
+                            convo_ctx = merged;
+                            convo_ctx_len = total;
                         }
                     }
                 }
