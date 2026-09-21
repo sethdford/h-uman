@@ -202,6 +202,26 @@ if [ -f "CMakeLists.txt" ]; then
         fi
     fi
 
+    # devlib flag mirror — fences the generator-expression fix from 45d98a4d6.
+    #
+    # Sits beside the dead-strip gate because it guards the same split: Task 12
+    # moved the daemon-never-links modules into human_devlib, and those modules
+    # are selected by the same HU_ENABLE_* options as the rest of the tree, so
+    # human_devlib must compile with human_core_test's exact flags. The first
+    # mirror used get_target_property() and silently captured 60 of 65 defines.
+    #
+    # Reads flags.make, which CMake writes at CONFIGURE time, so unlike the
+    # dead-strip ratchet it needs no fresh build and no rebuild step — and it
+    # skips with exit 0 whenever build/ or either target is absent.
+    if [ -x "scripts/check-devlib-flags.sh" ]; then
+        if ! bash scripts/check-devlib-flags.sh; then
+            echo ""
+            echo "Push blocked: human_devlib's compile flags diverged from human_core_test's."
+            echo "Mirror them with \$<TARGET_PROPERTY:human_core_test,...> generator expressions."
+            exit 1
+        fi
+    fi
+
     # Auto-sync stats across all docs (AGENTS.md, README.md, CONTRIBUTING.md, etc.)
     # Only sync from a tree that actually contains all of origin/main.
     #
