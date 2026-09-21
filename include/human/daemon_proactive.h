@@ -143,15 +143,6 @@ bool hu_daemon_proactive_should_skip_for_budget(struct hu_proactive_budget *budg
 /* Forward declare throttle type. */
 struct hu_proactive_throttle;
 
-/* Follow-up watcher flush function (US-48-3). Generates a follow-up draft
- * for a contact and sends it via iMessage if throttle allows. Called by
- * hu_daemon_tick_follow_up_watcher() when a scheduled follow-up is ready. */
-hu_error_t hu_daemon_follow_up_flush_for_contact(hu_allocator_t *alloc, struct hu_agent *agent,
-                                                 const char *contact_handle, struct hu_config *cfg,
-                                                 hu_service_channel_t *channels,
-                                                 size_t channel_count,
-                                                 struct hu_proactive_throttle *throttle);
-
 /* Sprint 59 Phase C (2026-05-26 Annie/Mindy/Betty incident) — per-contact
  * scope for proactive bring-up feed items. The previous call site at the
  * FEED AWARENESS context block in hu_daemon_proactive_prompt_for_contact
