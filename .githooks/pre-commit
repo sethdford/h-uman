@@ -279,7 +279,10 @@ if [ -n "$staged_state_path_ch" ] && [ -x "scripts/check-state-path-literals.sh"
     fi
 fi
 
-staged_realpath_c=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '^src/.*\.(c|m)$' || true)
+# Trigger must cover every tree the gate scans (src apps sdk tools) and every
+# extension it reads (.c .m .h) — widened 2026-09-21 alongside the scan, or a
+# raw realpath() added under tools/ would never fire the gate at commit time.
+staged_realpath_c=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '^(src|apps|sdk|tools)/.*\.(c|m|h)$' || true)
 if [ -n "$staged_realpath_c" ] && [ -x "scripts/check-realpath-wrapper.sh" ]; then
     if ! bash scripts/check-realpath-wrapper.sh; then
         echo ""
