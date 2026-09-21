@@ -436,7 +436,7 @@ Trust boundaries exist at:
 | Sandbox backends                      | AC-6, SC-39 | Implemented         | Landlock, seccomp, bwrap, Firecracker, WASI                             |
 | Secret store (hu_secret_store)        | SC-13       | Implemented         | ChaCha20+HMAC; not used for auth.json persistence                       |
 | Secure memory clearing                | IA-5        | Partial             | pairing.c uses volatile/asm; secrets.c uses memset (H-02)               |
-| Private IP blocking                   | SC-8        | Implemented         | hu_is_private_ip, hu_validate_url for tools                             |
+| Private IP blocking                   | SC-8        | Implemented         | hu_tool_validate_url (parse_ipv4_private / parse_ipv6_private), src/tools/validation.c |
 | SQLite parameterized queries          | SI-10       | Implemented         | Prevents most SQL injection                                             |
 | PostgreSQL identifier validation      | SI-10       | **Not implemented** | C-06                                                                    |
 | FTS5 query escaping                   | SI-10       | **Not implemented** | H-11                                                                    |
