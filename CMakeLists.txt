@@ -366,7 +366,14 @@ endif()
 if(HU_ENABLE_WHATSAPP)
     list(APPEND CHANNEL_SOURCES src/channels/whatsapp.c)
 endif()
-if(HU_ENABLE_WHATSAPP OR HU_ENABLE_FACEBOOK OR HU_ENABLE_INSTAGRAM)
+if(HU_ENABLE_FACEBOOK OR HU_ENABLE_INSTAGRAM)
+    # meta_common.c's helpers (hu_meta_common_*) are called only from
+    # facebook.c and instagram.c — whatsapp.c never includes meta_common.h.
+    # It used to say "OR HU_ENABLE_WHATSAPP" too, which was harmless while
+    # HU_ENABLE_ALL_CHANNELS forced every channel on together, but became a
+    # never-loaded archive member once Task 11 (docs/plans/2026-09-20-
+    # dead-code-plan.md) made WhatsApp compile without Facebook/Instagram:
+    # the dead-strip ratchet caught it (scripts/check-dead-strip-ratchet.sh).
     list(APPEND CHANNEL_SOURCES src/channels/meta_common.c)
 endif()
 if(HU_ENABLE_FACEBOOK)
@@ -1435,10 +1442,6 @@ list(APPEND HU_CORE_SOURCES
     src/tools/browser_use.c
     src/tools/gui_agent.c
     src/tools/tool_search.c
-    src/voice/webrtc.c
-    src/voice/webrtc_ice.c
-    src/voice/webrtc_dtls.c
-    src/voice/webrtc_srtp.c
     src/voice/realtime.c
     src/voice/gemini_live.c
     src/voice/provider_factory.c
@@ -1457,6 +1460,22 @@ list(APPEND HU_CORE_SOURCES
 
 if(HU_ENABLE_COREML)
     list(APPEND HU_CORE_SOURCES src/providers/coreml.c)
+endif()
+
+# hu_webrtc_* is called only from src/channels/voice_channel.c (grep-verified),
+# which is itself gated `if(HU_ENABLE_VOICE)` below — these 4 files used to sit
+# unconditionally in HU_CORE_SOURCES above, which was harmless while
+# HU_ENABLE_ALL_CHANNELS forced HU_ENABLE_VOICE on right alongside them, but
+# became 4 never-loaded archive members once Task 11 (docs/plans/2026-09-20-
+# dead-code-plan.md) turned HU_ENABLE_VOICE off in dev/prod without a live
+# caller left to keep them reachable. The dead-strip ratchet
+# (scripts/check-dead-strip-ratchet.sh) caught it; tests/test_webrtc.c calls
+# these functions directly and unconditionally, so it needs the mirrored
+# HU_TEST_EXTRA_CHANNELS entry below whenever HU_ENABLE_VOICE is off.
+if(HU_ENABLE_VOICE)
+    list(APPEND HU_CORE_SOURCES
+        src/voice/webrtc.c src/voice/webrtc_ice.c
+        src/voice/webrtc_dtls.c src/voice/webrtc_srtp.c)
 endif()
 
 if(HU_ENABLE_APPLE_INTELLIGENCE)
@@ -2858,6 +2877,23 @@ if(NOT HU_ENABLE_ALL_CHANNELS)
         src/channels/dispatch.c
         src/channels/gmail_base64.c src/channels/gmail.c
         src/channels/mattermost.c src/channels/web.c)
+    # Task 11 (docs/plans/2026-09-20-dead-code-plan.md): dev/prod presets now
+    # turn HU_ENABLE_ALL_CHANNELS off (they enable only the channels actually
+    # run in production), which exposed the same class of gap the comment
+    # above already describes for mattermost/web — human_tests still calls
+    # hu_{discord,matrix,irc,line,lark,imap,onebot,dingtalk,teams,twilio,
+    # google_chat}_{create,destroy,...} unconditionally (test_channel.c,
+    # test_channel_all.c, test_channel_overlay_apply.c, test_orphan_channel_
+    # audit.c, synthetic/channel_registry.c, integration/test_integ_imap.c),
+    # so those objects must always be in the test library too.
+    list(APPEND HU_TEST_EXTRA_CHANNELS
+        src/channels/discord.c src/channels/discord_reactions.c
+        src/channels/matrix.c src/channels/matrix_reactions.c
+        src/channels/irc.c src/channels/line.c src/channels/lark.c
+        src/channels/imap.c
+        src/channels/onebot.c src/channels/dingtalk.c
+        src/channels/teams.c src/channels/twilio.c
+        src/channels/google_chat.c)
 endif()
 if(NOT HU_ENABLE_MQTT)
     list(APPEND HU_TEST_EXTRA_CHANNELS src/channels/mqtt.c)
@@ -2865,7 +2901,10 @@ endif()
 if(NOT HU_ENABLE_FACEBOOK)
     list(APPEND HU_TEST_EXTRA_CHANNELS src/channels/facebook.c)
 endif()
-if(NOT HU_ENABLE_FACEBOOK AND NOT HU_ENABLE_INSTAGRAM AND NOT HU_ENABLE_WHATSAPP)
+if(NOT HU_ENABLE_FACEBOOK AND NOT HU_ENABLE_INSTAGRAM)
+    # Mirrors the CHANNEL_SOURCES gate above (Facebook/Instagram only, not
+    # WhatsApp — see the comment there); tests/test_meta_common.c still needs
+    # the object when neither of those two channels pulls it in.
     list(APPEND HU_TEST_EXTRA_CHANNELS src/channels/meta_common.c)
 endif()
 if(NOT HU_ENABLE_INSTAGRAM)
@@ -2882,6 +2921,13 @@ if(NOT HU_ENABLE_GOOGLE_RCS)
 endif()
 if(NOT HU_ENABLE_SLACK)
     list(APPEND HU_TEST_EXTRA_CHANNELS src/channels/slack.c src/channels/slack_reactions.c)
+endif()
+if(NOT HU_ENABLE_VOICE)
+    # Mirrors the HU_CORE_SOURCES gate near HU_ENABLE_COREML above;
+    # tests/test_webrtc.c calls hu_webrtc_* unconditionally.
+    list(APPEND HU_TEST_EXTRA_CHANNELS
+        src/voice/webrtc.c src/voice/webrtc_ice.c
+        src/voice/webrtc_dtls.c src/voice/webrtc_srtp.c)
 endif()
 # Tests always compile all optional modules so test suites don't break
 set(HU_TEST_EXTRA_MODULES)
