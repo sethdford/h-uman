@@ -112,6 +112,7 @@
 #include "human/youtube.h"
 /* Daemon modules */
 #include "human/daemon_comfort_summary.h"
+#include "human/daemon_contact_optout.h"
 #include "human/daemon_cron.h"
 #include "human/daemon_learning_tick.h"
 #include "human/daemon_lifecycle.h"
@@ -1477,8 +1478,11 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                 /* Reachability pre-filter (2026-09-20, HU_PROACTIVE_REACHABILITY):
                  * skip the proposer for a contact blue_guard would HOLD anyway.
                  * OFF/SHADOW never take this branch; see daemon_proactive.h. */
-                if (hu_daemon_proactive_reach_should_skip(agent, alloc, ch_part, cp->contact_id,
-                                                          target_part, target_len)) {
+                if (hu_daemon_contact_optout_should_skip(agent, cp->contact_id)) {
+                    /* Contact asked us to stop (O5): no proposer fire, no send,
+                     * nothing recorded — consent is not a candidate. */
+                } else if (hu_daemon_proactive_reach_should_skip(
+                               agent, alloc, ch_part, cp->contact_id, target_part, target_len)) {
                     /* LIVE: no proposer fire, no send, nothing recorded. */
                 } else if (config && agent && agent->provider.vtable) {
                     if (agent->memory) {
@@ -3537,6 +3541,13 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             "classify result: action=%d delay=%u for %.*s", (int)action,
                             (unsigned)extra_delay_ms, (int)(key_len > 20 ? 20 : key_len),
                             batch_key);
+
+                /* Contestability (2026-09-20, HU_CONTACT_OPTOUT): "stop texting me"
+                 * writes a per-contact suppression the proactive loop honours from
+                 * the next tick. The reactive reply still goes out — that IS the
+                 * acknowledgement. See daemon_contact_optout.h. */
+                (void)hu_daemon_contact_optout_observe(agent, batch_key, key_len, combined,
+                                                       combined_len);
 
                 /* Consecutive-reply limiter — cap and burst window from config;
                  * a silenced direct question is logged at WARN, never quietly. */

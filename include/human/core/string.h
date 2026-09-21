@@ -49,6 +49,11 @@ bool hu_str_contains_word_ci(const char *s, const char *needle);
  * hu_str_contains_word_ci is the strlen(s) convenience wrapper over this. */
 bool hu_str_contains_word_ci_n(const char *hay, size_t hlen, const char *needle);
 
+/* Position form of hu_str_contains_word_ci_n: byte offset of the first
+ * whole-word, case-insensitive match, or -1. For callers that must inspect
+ * what precedes the match (e.g. a negation before an opt-out phrase). */
+long hu_str_find_word_ci_n(const char *hay, size_t hlen, const char *needle);
+
 /* Bounded buffer append — returns new offset, clamped to cap on truncation.
    Prevents the pos+=snprintf overflow pattern. */
 size_t hu_buf_appendf(char *buf, size_t cap, size_t off, const char *fmt, ...)

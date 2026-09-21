@@ -9,6 +9,7 @@
 
 #ifdef HU_ENABLE_SQLITE
 
+#include "human/memory/repo_util.h"
 #include <stdbool.h>
 #include <string.h>
 
@@ -37,14 +38,7 @@ hu_error_t hu_proactive_decisions_repo_ensure_schema(sqlite3 *db) {
         "CREATE INDEX IF NOT EXISTS idx_proactive_decisions_contact "
         "  ON proactive_decisions(contact);";
 
-    char *errmsg = NULL;
-    int rc = sqlite3_exec(db, kSchema, NULL, NULL, &errmsg);
-    if (rc != SQLITE_OK) {
-        if (errmsg)
-            sqlite3_free(errmsg);
-        return HU_ERR_MEMORY_STORE;
-    }
-    return HU_OK;
+    return hu_repo_exec_ddl(db, kSchema);
 }
 
 hu_error_t hu_proactive_decisions_repo_record(sqlite3 *db, int64_t ts, const char *contact,

@@ -32,7 +32,7 @@ fi
 # 2026-07-18: origin/main itself measured 11557 (baseline had gone stale);
 # the S2.1b carve merge lands at 11553 — a net -4 vs main with zero new
 # groups (verified by set-diffing merged-tree windows against origin/main).
-CLONE_BASELINE=11021   # auto-locked 2026-09-20 (was 11030)
+CLONE_BASELINE=11020   # auto-locked 2026-09-20 (was 11021)
                        # scheduled.json persist folded into one helper each
 # prior: 11036         # auto-locked 2026-09-19 (was 11103)
                        # earlier baselines); channel mock harness + clock + JSON-locator copies folded
