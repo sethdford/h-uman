@@ -11,11 +11,11 @@ GENERATED FILE. Do not hand-edit — regenerate with:
 bash scripts/dev/build-options-table.sh --write
 ```
 
-Last generated: 2026-09-21, from `CMakeLists.txt` + `CMakePresets.json` at that commit.
+Reflects `CMakeLists.txt` + `CMakePresets.json` as of commit `1fe6abb3f` (the most recent commit to touch either file) — keyed to a commit rather than wall-clock time so re-running this script with no changes to either file produces byte-identical output.
 
 The "Presets ON" column lists every `configurePresets` entry (after resolving `inherits` chains) whose effective cache value for that option is `ON` — either because the preset (or a preset it inherits from) sets it explicitly, or because no preset in the chain overrides it and the option's own default (below) is `ON`.
 
-**Not reflected here:** `HU_ENABLE_ALL_CHANNELS=ON` (set by the `test`, `release`, `fuzz` presets) also flips ~20 more `HU_ENABLE_<channel>` options ON at CMake configure time, via an `if(HU_ENABLE_ALL_CHANNELS) set(HU_ENABLE_TELEGRAM ON) ... endif()` block in `CMakeLists.txt` — that is control flow, not a declared default or a preset cache variable, so a preset that relies on it will show those channel options as off below even though they compile in. Only options declared with an unconditional top-level `option(HU_ENABLE_...)` appear in this table; options declared inside an `if()/else()` for a platform-dependent default (for example `HU_ENABLE_APPLE_INTELLIGENCE`, `HU_ENABLE_PWA`) are intentionally excluded — see the script's header comment.
+**Not reflected here:** `HU_ENABLE_ALL_CHANNELS=ON` (set by the `test`, `release`, `fuzz` presets) also flips ~20 more `HU_ENABLE_<channel>` options ON at CMake configure time, via an `if(HU_ENABLE_ALL_CHANNELS) set(HU_ENABLE_TELEGRAM ON) ... endif()` block in `CMakeLists.txt` — that is control flow, not a declared default or a preset cache variable, so a preset that relies on it will show those channel options as off below even though they compile in. Only options declared with an unconditional top-level `option(HU_ENABLE_...)` (or `cmake_dependent_option`) appear in this table; options declared inside an `if()/else()` for a platform-dependent default (for example `HU_ENABLE_APPLE_INTELLIGENCE`, `HU_ENABLE_PWA`) are intentionally excluded — see the script's header comment.
 
 | Option | Default | Presets ON | Gates |
 |---|---|---|---|
@@ -70,7 +70,7 @@ The "Presets ON" column lists every `configurePresets` entry (after resolving `i
 | `HU_ENABLE_LARK` | OFF | *(none)* | Build Lark channel |
 | `HU_ENABLE_WEB` | OFF | *(none)* | Build Web channel |
 | `HU_ENABLE_EMAIL` | OFF | dev, prod, dev-neural, rl_sota | Build Email channel |
-| `HU_ENABLE_IMAP` | OFF | integration | Build IMAP channel |
+| `HU_ENABLE_IMAP` | OFF | dev, prod, integration, dev-neural, rl_sota | Build IMAP channel |
 | `HU_ENABLE_MATTERMOST` | OFF | *(none)* | Build Mattermost channel |
 | `HU_ENABLE_ONEBOT` | OFF | *(none)* | Build OneBot channel |
 | `HU_ENABLE_DINGTALK` | OFF | *(none)* | Build DingTalk channel |
@@ -78,7 +78,7 @@ The "Presets ON" column lists every `configurePresets` entry (after resolving `i
 | `HU_ENABLE_NOSTR` | OFF | *(none)* | Build Nostr channel |
 | `HU_ENABLE_QQ` | OFF | *(none)* | Build QQ channel |
 | `HU_ENABLE_DISPATCH` | OFF | *(none)* | Build Dispatch channel |
-| `HU_ENABLE_GMAIL` | OFF | *(none)* | Build Gmail channel (read-only OAuth2) |
+| `HU_ENABLE_GMAIL` | OFF | dev, prod, dev-neural, rl_sota | Build Gmail channel (read-only OAuth2) |
 | `HU_ENABLE_TEAMS` | OFF | *(none)* | Build Microsoft Teams channel |
 | `HU_ENABLE_TWILIO` | OFF | *(none)* | Build Twilio SMS channel |
 | `HU_ENABLE_GOOGLE_CHAT` | OFF | *(none)* | Build Google Chat channel |
@@ -99,5 +99,6 @@ The "Presets ON" column lists every `configurePresets` entry (after resolving `i
 | `HU_ENABLE_REDIS_ENGINE` | OFF | *(none)* | Build Redis memory engine |
 | `HU_ENABLE_SONATA` | OFF | *(none)* | Enable native Sonata voice pipeline (Rust) |
 | `HU_ENABLE_SQLITE_VEC` | ON | dev, prod, test, release, fuzz, minimal, minimal-release, integration, dev-neural, rl_sota, release-reproducible | Vendored sqlite-vec store for semantic recall (adds ~300 KB; release-size builds turn it off) |
+| `HU_ENABLE_TOPOLOGY_CHECK` | ON | dev, prod, test, release, fuzz, minimal, minimal-release, integration, dev-neural, rl_sota, release-reproducible | Enforce 7-layer architectural dependency direction (memory v2 P2E) |
 | `HU_ENABLE_FUZZ` | OFF | fuzz | Build fuzz harnesses (JSON, config, tool params, URL, HTTP) |
 | `HU_ENABLE_BENCH` | OFF | *(none)* | Build human_bench executable for core operation benchmarks |

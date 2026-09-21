@@ -1463,15 +1463,17 @@ if(HU_ENABLE_COREML)
 endif()
 
 # hu_webrtc_* is called only from src/channels/voice_channel.c (grep-verified),
-# which is itself gated `if(HU_ENABLE_VOICE)` below — these 4 files used to sit
-# unconditionally in HU_CORE_SOURCES above, which was harmless while
-# HU_ENABLE_ALL_CHANNELS forced HU_ENABLE_VOICE on right alongside them, but
-# became 4 never-loaded archive members once Task 11 (docs/plans/2026-09-20-
-# dead-code-plan.md) turned HU_ENABLE_VOICE off in dev/prod without a live
-# caller left to keep them reachable. The dead-strip ratchet
-# (scripts/check-dead-strip-ratchet.sh) caught it; tests/test_webrtc.c calls
-# these functions directly and unconditionally, so it needs the mirrored
-# HU_TEST_EXTRA_CHANNELS entry below whenever HU_ENABLE_VOICE is off.
+# which is itself gated `if(HU_ENABLE_VOICE)` above (~line 508) — these 4
+# files used to sit unconditionally in HU_CORE_SOURCES above, which was
+# harmless while HU_ENABLE_ALL_CHANNELS forced HU_ENABLE_VOICE on right
+# alongside them, but became 4 never-loaded archive members once Task 11
+# (docs/plans/2026-09-20-dead-code-plan.md) turned HU_ENABLE_VOICE off in
+# dev/prod without a live caller left to keep them reachable. The dead-strip
+# ratchet (scripts/check-dead-strip-ratchet.sh) caught it; tests/test_webrtc.c
+# calls these functions directly and unconditionally, so it needs the
+# mirrored HU_TEST_EXTRA_MODULES entry (not HU_TEST_EXTRA_CHANNELS — these
+# are helper modules, not a channel of their own) whenever HU_ENABLE_VOICE
+# is off.
 if(HU_ENABLE_VOICE)
     list(APPEND HU_CORE_SOURCES
         src/voice/webrtc.c src/voice/webrtc_ice.c
@@ -2866,6 +2868,22 @@ endif()
 # --- Test-mode core library (same sources, compiled with HU_IS_TEST=1) ---
 # When HU_ENABLE_ALL_CHANNELS=OFF, prod binary omits signal/nostr/qq/dispatch,
 # but tests need them — add to test lib only.
+#
+# The RULE (Task 11 fix round 1, docs/plans/2026-09-20-dead-code-plan.md):
+# the test library compiles every channel, full stop — every channel below
+# is present in human_core_test/human_tests EITHER via CHANNEL_SOURCES
+# (when the executable's HU_ENABLE_<channel> is ON) OR via this
+# HU_TEST_EXTRA_CHANNELS list (when it's OFF); the two conditions are always
+# complementary so exactly one path supplies the object. Because the object
+# is always present, the corresponding HU_HAS_<channel> compile definition
+# for the TEST targets (human_core_test / human_tests / human_channel_tests
+# — see their target_compile_definitions blocks below) is unconditional too,
+# independent of the executable's HU_ENABLE_<channel>. Getting the object
+# into the test library without ALSO defining HU_HAS_<channel> is why
+# ./build/human_tests silently dropped from ~13861 to 13648 tests under the
+# new dev preset: every `#if HU_HAS_<channel>`-gated test body compiled OUT
+# because HU_HAS_<channel> followed the (now narrower) executable option
+# set, not what the test library actually contained.
 set(HU_TEST_EXTRA_CHANNELS)
 if(NOT HU_ENABLE_ALL_CHANNELS)
     # Orphan channels referenced by tests/test_orphan_channel_audit.c.
@@ -2875,22 +2893,26 @@ if(NOT HU_ENABLE_ALL_CHANNELS)
     list(APPEND HU_TEST_EXTRA_CHANNELS
         src/channels/signal.c src/channels/nostr.c src/channels/qq.c
         src/channels/dispatch.c
-        src/channels/gmail_base64.c src/channels/gmail.c
         src/channels/mattermost.c src/channels/web.c)
-    # Task 11 (docs/plans/2026-09-20-dead-code-plan.md): dev/prod presets now
-    # turn HU_ENABLE_ALL_CHANNELS off (they enable only the channels actually
-    # run in production), which exposed the same class of gap the comment
-    # above already describes for mattermost/web — human_tests still calls
-    # hu_{discord,matrix,irc,line,lark,imap,onebot,dingtalk,teams,twilio,
-    # google_chat}_{create,destroy,...} unconditionally (test_channel.c,
-    # test_channel_all.c, test_channel_overlay_apply.c, test_orphan_channel_
-    # audit.c, synthetic/channel_registry.c, integration/test_integ_imap.c),
-    # so those objects must always be in the test library too.
+    # Task 11: dev/prod presets now turn HU_ENABLE_ALL_CHANNELS off (they
+    # enable only the channels actually run in production), which exposed
+    # the same class of gap the comment above already describes for
+    # mattermost/web. A guard-aware scan of tests/ found only discord
+    # (tests/test_channel_overlay_apply.c, tests/test_discord_reactions.c —
+    # 20 refs) and matrix (tests/test_matrix_reactions.c — 11 refs) call
+    # hu_{discord,matrix}_* with NO `#if HU_HAS_*` guard at all, so those two
+    # would fail to LINK regardless of any define fix. irc/line/lark/onebot/
+    # dingtalk/teams/twilio/google_chat ARE already `#if HU_HAS_<channel>`
+    # guarded in test_channel.c/test_channel_all.c/synthetic/
+    # channel_registry.c — which is exactly why they silently compiled OUT
+    # (not failed to link) once HU_HAS_<channel> stopped being defined for
+    # the test targets. Keep all of them here regardless: once the defines
+    # below make those guarded bodies compile back IN, they need the same
+    # objects to link.
     list(APPEND HU_TEST_EXTRA_CHANNELS
         src/channels/discord.c src/channels/discord_reactions.c
         src/channels/matrix.c src/channels/matrix_reactions.c
         src/channels/irc.c src/channels/line.c src/channels/lark.c
-        src/channels/imap.c
         src/channels/onebot.c src/channels/dingtalk.c
         src/channels/teams.c src/channels/twilio.c
         src/channels/google_chat.c)
@@ -2922,15 +2944,35 @@ endif()
 if(NOT HU_ENABLE_SLACK)
     list(APPEND HU_TEST_EXTRA_CHANNELS src/channels/slack.c src/channels/slack_reactions.c)
 endif()
-if(NOT HU_ENABLE_VOICE)
-    # Mirrors the HU_CORE_SOURCES gate near HU_ENABLE_COREML above;
-    # tests/test_webrtc.c calls hu_webrtc_* unconditionally.
-    list(APPEND HU_TEST_EXTRA_CHANNELS
-        src/voice/webrtc.c src/voice/webrtc_ice.c
-        src/voice/webrtc_dtls.c src/voice/webrtc_srtp.c)
+if(NOT HU_ENABLE_IMAP)
+    # Same pattern as facebook/instagram/slack/twitter above. imap.c used to
+    # sit unconditionally in the `if(NOT HU_ENABLE_ALL_CHANNELS)` block, which
+    # double-listed it (once via CHANNEL_SOURCES, once here) for any preset
+    # that turns HU_ENABLE_IMAP on individually without HU_ENABLE_ALL_CHANNELS
+    # — e.g. the `integration` preset.
+    list(APPEND HU_TEST_EXTRA_CHANNELS src/channels/imap.c)
+endif()
+if(NOT HU_ENABLE_GMAIL)
+    # Same reasoning as HU_ENABLE_IMAP above. gmail_base64.c/gmail.c used to
+    # sit unconditionally in the `if(NOT HU_ENABLE_ALL_CHANNELS)` block too,
+    # which would double-list them now that Task 11 fix round 1 turns
+    # HU_ENABLE_GMAIL on directly in the dev/prod presets (still with
+    # HU_ENABLE_ALL_CHANNELS off).
+    list(APPEND HU_TEST_EXTRA_CHANNELS src/channels/gmail_base64.c src/channels/gmail.c)
 endif()
 # Tests always compile all optional modules so test suites don't break
 set(HU_TEST_EXTRA_MODULES)
+if(NOT HU_ENABLE_VOICE)
+    # hu_webrtc_* (src/voice/webrtc*.c) is called only from
+    # src/channels/voice_channel.c, itself gated `if(HU_ENABLE_VOICE)` in the
+    # CHANNEL_SOURCES block above (~line 508) — these are helper modules, not
+    # a channel of their own, so they belong here rather than in
+    # HU_TEST_EXTRA_CHANNELS above. tests/test_webrtc.c calls hu_webrtc_*
+    # unconditionally with no guard, so the objects must always be present.
+    list(APPEND HU_TEST_EXTRA_MODULES
+        src/voice/webrtc.c src/voice/webrtc_ice.c
+        src/voice/webrtc_dtls.c src/voice/webrtc_srtp.c)
+endif()
 if(NOT HU_ENABLE_PERIPHERALS)
     list(APPEND HU_TEST_EXTRA_MODULES
         src/peripherals/arduino.c src/peripherals/stm32.c src/peripherals/rpi.c
@@ -3127,35 +3169,17 @@ endif()
 if(HU_ENABLE_TELEGRAM)
     target_compile_definitions(human_core_test PRIVATE HU_HAS_TELEGRAM=1)
 endif()
-if(HU_ENABLE_DISCORD)
-    target_compile_definitions(human_core_test PRIVATE HU_HAS_DISCORD=1)
-endif()
 if(HU_ENABLE_SLACK)
     target_compile_definitions(human_core_test PRIVATE HU_HAS_SLACK=1)
 endif()
 if(HU_ENABLE_WHATSAPP)
     target_compile_definitions(human_core_test PRIVATE HU_HAS_WHATSAPP=1)
 endif()
-if(HU_ENABLE_MATRIX)
-    target_compile_definitions(human_core_test PRIVATE HU_HAS_MATRIX=1)
-endif()
-if(HU_ENABLE_IRC)
-    target_compile_definitions(human_core_test PRIVATE HU_HAS_IRC=1)
-endif()
-if(HU_ENABLE_LINE)
-    target_compile_definitions(human_core_test PRIVATE HU_HAS_LINE=1)
-endif()
-if(HU_ENABLE_LARK)
-    target_compile_definitions(human_core_test PRIVATE HU_HAS_LARK=1)
-endif()
 if(HU_ENABLE_WEB)
     target_compile_definitions(human_core_test PRIVATE HU_HAS_WEB=1)
 endif()
 if(HU_ENABLE_EMAIL)
     target_compile_definitions(human_core_test PRIVATE HU_HAS_EMAIL=1)
-endif()
-if(HU_ENABLE_IMAP)
-    target_compile_definitions(human_core_test PRIVATE HU_HAS_IMAP=1)
 endif()
 if(HU_HAS_IMESSAGE)
     target_compile_definitions(human_core_test PRIVATE HU_HAS_IMESSAGE=1)
@@ -3165,21 +3189,6 @@ if(HU_ENABLE_PWA)
 endif()
 if(HU_ENABLE_MATTERMOST)
     target_compile_definitions(human_core_test PRIVATE HU_HAS_MATTERMOST=1)
-endif()
-if(HU_ENABLE_ONEBOT)
-    target_compile_definitions(human_core_test PRIVATE HU_HAS_ONEBOT=1)
-endif()
-if(HU_ENABLE_DINGTALK)
-    target_compile_definitions(human_core_test PRIVATE HU_HAS_DINGTALK=1)
-endif()
-if(HU_ENABLE_TEAMS)
-    target_compile_definitions(human_core_test PRIVATE HU_HAS_TEAMS=1)
-endif()
-if(HU_ENABLE_TWILIO)
-    target_compile_definitions(human_core_test PRIVATE HU_HAS_TWILIO=1)
-endif()
-if(HU_ENABLE_GOOGLE_CHAT)
-    target_compile_definitions(human_core_test PRIVATE HU_HAS_GOOGLE_CHAT=1)
 endif()
 if(HU_ENABLE_GOOGLE_RCS)
     target_compile_definitions(human_core_test PRIVATE HU_HAS_GOOGLE_RCS=1)
@@ -3200,6 +3209,17 @@ if(HU_ENABLE_VOICE)
     target_compile_definitions(human_core_test PRIVATE HU_HAS_VOICE_CHANNEL=1 HU_ENABLE_VOICE=1)
 endif()
 target_compile_definitions(human_core_test PRIVATE HU_HAS_SIGNAL=1 HU_HAS_NOSTR=1 HU_HAS_QQ=1 HU_HAS_DISPATCH=1 HU_HAS_GMAIL=1 HU_HAS_MQTT=1 HU_HAS_THREAD_BINDING=1 HU_HAS_FACEBOOK=1 HU_HAS_INSTAGRAM=1 HU_HAS_TWITTER=1 HU_HAS_TIKTOK=1 HU_HAS_GOOGLE_RCS=1)
+# Task 11 fix round 1 (docs/plans/2026-09-20-dead-code-plan.md): these 11
+# channels' sources are ALWAYS present in the test library — either via
+# CHANNEL_SOURCES (HU_ENABLE_<channel> ON) or via the complementary
+# HU_TEST_EXTRA_CHANNELS entries above (HU_ENABLE_<channel> OFF) — so their
+# HU_HAS_<channel> defines must be unconditional too, matching the line
+# above for signal/nostr/qq/dispatch/gmail/mqtt/facebook/instagram/twitter/
+# tiktok/google_rcs. Previously these were gated on `if(HU_ENABLE_<channel>)`
+# alone, which is why tests/test_channel.c's `#if HU_HAS_<channel>` bodies
+# for irc/line/lark/imap/onebot/dingtalk/teams/twilio/google_chat compiled
+# out silently once the dev preset stopped enabling them individually.
+target_compile_definitions(human_core_test PRIVATE HU_HAS_DISCORD=1 HU_HAS_MATRIX=1 HU_HAS_IRC=1 HU_HAS_LINE=1 HU_HAS_LARK=1 HU_HAS_IMAP=1 HU_HAS_ONEBOT=1 HU_HAS_DINGTALK=1 HU_HAS_TEAMS=1 HU_HAS_TWILIO=1 HU_HAS_GOOGLE_CHAT=1)
 target_compile_definitions(human_core_test PRIVATE HU_HAS_NONE_ENGINE=1 HU_HAS_MARKDOWN_ENGINE=1)
 if(HU_ENABLE_MEMORY_LRU_ENGINE)
     target_compile_definitions(human_core_test PRIVATE HU_HAS_MEMORY_LRU_ENGINE=1)
@@ -4316,44 +4336,11 @@ endif()
 if(HU_ENABLE_TELEGRAM)
     target_compile_definitions(human_tests PRIVATE HU_HAS_TELEGRAM=1)
 endif()
-if(HU_ENABLE_DISCORD)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_DISCORD=1)
-endif()
-if(HU_ENABLE_SLACK)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_SLACK=1)
-endif()
 if(HU_ENABLE_WHATSAPP)
     target_compile_definitions(human_tests PRIVATE HU_HAS_WHATSAPP=1)
 endif()
-if(HU_ENABLE_FACEBOOK)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_FACEBOOK=1)
-endif()
-if(HU_ENABLE_MATRIX)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_MATRIX=1)
-endif()
-if(HU_ENABLE_IRC)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_IRC=1)
-endif()
-if(HU_ENABLE_LINE)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_LINE=1)
-endif()
-if(HU_ENABLE_LARK)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_LARK=1)
-endif()
-if(HU_ENABLE_WEB)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_WEB=1)
-endif()
 if(HU_ENABLE_EMAIL)
     target_compile_definitions(human_tests PRIVATE HU_HAS_EMAIL=1)
-endif()
-if(HU_ENABLE_IMAP)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_IMAP=1)
-endif()
-if(HU_ENABLE_NOSTR)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_NOSTR=1)
-endif()
-if(HU_ENABLE_MQTT)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_MQTT=1)
 endif()
 if(HU_HAS_IMESSAGE)
     target_compile_definitions(human_tests PRIVATE HU_HAS_IMESSAGE=1)
@@ -4364,45 +4351,32 @@ endif()
 if(HU_ENABLE_PWA)
     target_compile_definitions(human_tests PRIVATE HU_HAS_PWA=1)
 endif()
-if(HU_ENABLE_MATTERMOST)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_MATTERMOST=1)
-endif()
-if(HU_ENABLE_ONEBOT)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_ONEBOT=1)
-endif()
-if(HU_ENABLE_DINGTALK)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_DINGTALK=1)
-endif()
-if(HU_ENABLE_TEAMS)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_TEAMS=1)
-endif()
-if(HU_ENABLE_TWILIO)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_TWILIO=1)
-endif()
-if(HU_ENABLE_GOOGLE_CHAT)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_GOOGLE_CHAT=1)
-endif()
-if(HU_ENABLE_GOOGLE_RCS)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_GOOGLE_RCS=1)
-endif()
-if(HU_ENABLE_INSTAGRAM)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_INSTAGRAM=1)
-endif()
-if(HU_ENABLE_TWITTER)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_TWITTER=1)
-endif()
-if(HU_ENABLE_TIKTOK)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_TIKTOK=1)
-endif()
-if(HU_ENABLE_GMAIL)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_GMAIL=1)
-endif()
-if(HU_ENABLE_DISPATCH)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_DISPATCH=1)
-endif()
 if(HU_ENABLE_VOICE)
     target_compile_definitions(human_tests PRIVATE HU_ENABLE_VOICE=1 HU_HAS_VOICE_CHANNEL=1)
 endif()
+# Task 11 fix round 1 (docs/plans/2026-09-20-dead-code-plan.md): every one of
+# these channels' sources is ALWAYS present in the test library — either via
+# CHANNEL_SOURCES (its HU_ENABLE_<channel> is ON for the executable) or via
+# the complementary HU_TEST_EXTRA_CHANNELS entry above (OFF) — so its
+# HU_HAS_<channel> define must be unconditional too, mirroring
+# human_core_test's equivalent block. These used to be gated on
+# `if(HU_ENABLE_<channel>)` alone, which tracked the EXECUTABLE's option set
+# instead of what the TEST LIBRARY actually contains: harmless while
+# HU_ENABLE_ALL_CHANNELS forced every one of these ON for the dev preset too,
+# but the moment it stopped, every `#if HU_HAS_<channel>`-guarded test body
+# for these channels compiled OUT silently (not a link failure — a silently
+# shrinking test count, 13861 -> 13648). telegram/whatsapp/email/pwa/voice
+# above stay conditional: none of them has a complementary
+# HU_TEST_EXTRA_CHANNELS entry, so their object is genuinely absent from the
+# test library when their HU_ENABLE_<channel> is off, and defining HU_HAS_
+# unconditionally would fail to LINK, not just mis-count.
+target_compile_definitions(human_tests PRIVATE
+    HU_HAS_DISCORD=1 HU_HAS_MATRIX=1 HU_HAS_IRC=1 HU_HAS_LINE=1 HU_HAS_LARK=1
+    HU_HAS_ONEBOT=1 HU_HAS_DINGTALK=1 HU_HAS_TEAMS=1 HU_HAS_TWILIO=1
+    HU_HAS_GOOGLE_CHAT=1 HU_HAS_IMAP=1 HU_HAS_GMAIL=1
+    HU_HAS_NOSTR=1 HU_HAS_MQTT=1 HU_HAS_DISPATCH=1 HU_HAS_MATTERMOST=1
+    HU_HAS_WEB=1 HU_HAS_SLACK=1 HU_HAS_FACEBOOK=1 HU_HAS_INSTAGRAM=1
+    HU_HAS_TWITTER=1 HU_HAS_TIKTOK=1 HU_HAS_GOOGLE_RCS=1)
 if(HU_ENABLE_LUCID_ENGINE)
     target_compile_definitions(human_tests PRIVATE HU_HAS_LUCID_ENGINE=1)
 endif()

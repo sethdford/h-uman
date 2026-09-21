@@ -20,6 +20,8 @@
                 "HU_ENABLE_TELEGRAM": "ON",
                 "HU_ENABLE_WHATSAPP": "ON",
                 "HU_ENABLE_EMAIL": "ON",
+                "HU_ENABLE_GMAIL": "ON",
+                "HU_ENABLE_IMAP": "ON",
                 "HU_ENABLE_SQLITE": "ON",
                 "HU_ENABLE_PERSONA": "ON",
                 "HU_ENABLE_SKILLS": "ON",
