@@ -56,6 +56,20 @@ row → daemon-side proactive pre-filter (next to the reachability filter)
 skips the contact → count on doctor. Tests pin: phrase detected within one
 turn; suppressed contact never proposed; non-opt-out text does not suppress.
 
+## Outcomes (same evening)
+
+| Item | Result |
+|---|---|
+| PR #436 | squash `89838702a`, deployed 20:15, `RESULT_deploy_verify=PASS`, pid 50652; doctor `contact_optout` on the card (0 today) |
+| Proxy gate, timing + principles | **44% fool rate (22/50) < 45 floor** → principles reverted to `[]` (`results/blind-ab-proxy-2026-09-20-timing-plus-principles.json`) |
+| Proxy gate, timing only | **55% fool rate (26/47)**, floor 45, baseline 46 → timing sections KEPT (`results/blind-ab-proxy-2026-09-20-timing-only.json`) |
+| Prospective reading | open=254 fired=0 cued_since_deploy=0 → REFUSE (`~/.human/logs/prospective-memory-2026-09-20.json`) |
+| When-to-speak | REFUSE at FIR n=10 (nightly from 05:35) |
+
+Two proxy runs of n≈50 differ by 11 points on the same daemon; the gate is a
+regression tripwire, not a ranking. Principles stay out until a larger-n or
+human measurement says otherwise.
+
 ## Left to the operator (decisions, not work)
 1. **O1** — 48 ratings; nothing here refreshes the 53-day-old human verdict.
 2. `HU_PROACTIVE_CONTEXTUAL` off→on and reachability shadow→live change who
