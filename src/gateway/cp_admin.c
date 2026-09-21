@@ -204,15 +204,8 @@ hu_error_t cp_admin_health(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_c
     size_t tool_count = app ? app->tools_count : 0;
     hu_json_object_set(alloc, obj, "tool_count", hu_json_number_new(alloc, (double)tool_count));
 
-    size_t ch_count = 0;
-    if (app && app->config) {
-        size_t total = 0;
-        const hu_channel_meta_t *catalog = hu_channel_catalog_all(&total);
-        for (size_t i = 0; i < total; i++) {
-            if (hu_channel_catalog_is_configured(app->config, catalog[i].id))
-                ch_count++;
-        }
-    }
+    size_t ch_count =
+        (app && app->config) ? hu_capabilities_channels_configured_count(app->config) : 0;
     hu_json_object_set(alloc, obj, "channel_count", hu_json_number_new(alloc, (double)ch_count));
 
     if (app && app->config) {

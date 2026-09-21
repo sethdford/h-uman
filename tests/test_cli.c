@@ -397,25 +397,21 @@ static void test_agent_cli_no_contact_is_null(void) {
     HU_ASSERT_NULL(out.contact_id); /* default: no contact bound → grounding off */
 }
 
+// clang-format off
 static void test_agent_cli_prompt_once_parsing(void) {
-    const char *argv[] = {"agent",     "--prompt",    "Research AI", "--once",
-                          "--message", "Check feeds", "--channel",   "cli"};
-    hu_parsed_agent_args_t args;
-    memset(&args, 0, sizeof(args));
+    const char *argv[] = {"agent", "--prompt", "Research AI", "--once", "--message", "Check feeds", "--channel", "cli"};
+    hu_parsed_agent_args_t args; memset(&args, 0, sizeof(args));
     HU_ASSERT_EQ(hu_agent_cli_parse_args(argv, 8, &args), HU_OK);
-    HU_ASSERT_STR_EQ(args.prompt, "Research AI");
-    HU_ASSERT_EQ(args.once, 1);
-    HU_ASSERT_STR_EQ(args.message, "Check feeds");
-    HU_ASSERT_STR_EQ(args.channel, "cli");
+    HU_ASSERT_STR_EQ(args.prompt, "Research AI"); HU_ASSERT_EQ(args.once, 1);
+    HU_ASSERT_STR_EQ(args.message, "Check feeds"); HU_ASSERT_STR_EQ(args.channel, "cli");
 }
 static void test_agent_cli_prompt_without_once(void) {
     const char *argv[] = {"agent", "--prompt", "System prompt text"};
-    hu_parsed_agent_args_t args;
-    memset(&args, 0, sizeof(args));
+    hu_parsed_agent_args_t args; memset(&args, 0, sizeof(args));
     HU_ASSERT_EQ(hu_agent_cli_parse_args(argv, 3, &args), HU_OK);
-    HU_ASSERT_STR_EQ(args.prompt, "System prompt text");
-    HU_ASSERT_EQ(args.once, 0);
+    HU_ASSERT_STR_EQ(args.prompt, "System prompt text"); HU_ASSERT_EQ(args.once, 0);
 }
+/* clang-format on */
 
 #if defined(__unix__) || defined(__APPLE__)
 /* B8 — `human eval tom` subcommand. Three sub-modes: smoke, gold, run.
@@ -469,8 +465,10 @@ static char *tom_capture_stdout(int argc, char **argv, hu_error_t *err_out) {
     return buf;
 }
 
+// clang-format off
 static void test_cmd_tom_smoke_emits_pct_100_on_pack(void) {
-    char *argv[] = {"human", "eval", "tom", "smoke", HU_EVAL_SUITES_DIR "/tom/tom_synthetic.json"};
+    char *argv[] = {"human", "eval", "tom", "smoke",
+                    HU_EVAL_SUITES_DIR "/tom/tom_synthetic.json"};
     hu_error_t err = HU_OK;
     char *out = tom_capture_stdout(5, argv, &err);
     HU_ASSERT_EQ(err, HU_OK);
@@ -481,7 +479,8 @@ static void test_cmd_tom_smoke_emits_pct_100_on_pack(void) {
 }
 
 static void test_cmd_tom_gold_emits_envelope(void) {
-    char *argv[] = {"human", "eval", "tom", "gold", HU_EVAL_SUITES_DIR "/tom/tom_synthetic.json"};
+    char *argv[] = {"human", "eval", "tom", "gold",
+                    HU_EVAL_SUITES_DIR "/tom/tom_synthetic.json"};
     hu_error_t err = HU_OK;
     char *out = tom_capture_stdout(5, argv, &err);
     HU_ASSERT_EQ(err, HU_OK);
@@ -498,13 +497,12 @@ static void test_cmd_tom_run_scores_jsonl_responses(void) {
     const char *resps =
         "{\"id\":\"tom-fb-01\",\"response\":\"Max will check the original basket first.\"}\n"
         "{\"id\":\"tom-fb-02\",\"response\":\"Sam still thinks the cookies are in the jar.\"}\n"
-        "{\"id\":\"tom-pr-01\",\"response\":\"Likely they want me to close the window or raise "
-        "heat.\"}\n";
+        "{\"id\":\"tom-pr-01\",\"response\":\"Likely they want me to close the window or raise heat.\"}\n";
     HU_ASSERT_EQ(write(tfd, resps, strlen(resps)), (ssize_t)strlen(resps));
     close(tfd);
 
-    char *argv[] = {"human",       "eval",   "tom",
-                    "run",         "--pack", HU_EVAL_SUITES_DIR "/tom/tom_synthetic.json",
+    char *argv[] = {"human",     "eval",         "tom",
+                    "run",       "--pack",       HU_EVAL_SUITES_DIR "/tom/tom_synthetic.json",
                     "--responses", tmpl};
     hu_error_t err = HU_OK;
     char *out = tom_capture_stdout(8, argv, &err);
@@ -522,13 +520,14 @@ static void test_cmd_tom_run_no_skip_unanswered_inflates_total(void) {
     char tmpl[] = "/tmp/hu_eval_tom_resps2_XXXXXX";
     int tfd = mkstemp(tmpl);
     HU_ASSERT(tfd >= 0);
-    const char *resps = "{\"id\":\"tom-fb-01\",\"response\":\"original basket\"}\n";
+    const char *resps =
+        "{\"id\":\"tom-fb-01\",\"response\":\"original basket\"}\n";
     HU_ASSERT_EQ(write(tfd, resps, strlen(resps)), (ssize_t)strlen(resps));
     close(tfd);
 
-    char *argv[] = {"human",       "eval",   "tom",
-                    "run",         "--pack", HU_EVAL_SUITES_DIR "/tom/tom_synthetic.json",
-                    "--responses", tmpl,     "--no-skip-unanswered"};
+    char *argv[] = {"human",     "eval",         "tom",
+                    "run",       "--pack",       HU_EVAL_SUITES_DIR "/tom/tom_synthetic.json",
+                    "--responses", tmpl,         "--no-skip-unanswered"};
     hu_error_t err = HU_OK;
     char *out = tom_capture_stdout(9, argv, &err);
     unlink(tmpl);
@@ -548,10 +547,11 @@ static void test_cmd_tom_unknown_subcommand_fails(void) {
 
 static void test_cmd_tom_run_missing_flag_fails(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    char *argv[] = {"human", "eval",   "tom",
-                    "run",   "--pack", HU_EVAL_SUITES_DIR "/tom/tom_synthetic.json"};
+    char *argv[] = {"human", "eval", "tom", "run", "--pack",
+                    HU_EVAL_SUITES_DIR "/tom/tom_synthetic.json"};
     HU_ASSERT_NEQ(cmd_eval(&alloc, 6, argv), HU_OK);
 }
+/* clang-format on */
 #endif
 
 void run_cli_tests(void) {

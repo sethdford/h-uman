@@ -1753,8 +1753,6 @@ void run_new_modules_tests(void) {
     HU_RUN_TEST(test_max_tokens_resolve_override_nonzero);
     HU_RUN_TEST(test_max_tokens_empty_model_name);
 
-    /* Capabilities */
-
     /* Interactions */
     HU_RUN_TEST(test_choices_prompt_returns_default_in_test_mode);
     HU_RUN_TEST(test_choices_prompt_first_default);
