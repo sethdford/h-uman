@@ -15,7 +15,7 @@ else
     ratchet_autolock() { :; }
 fi
 
-MAX_BASELINE=10512   # auto-locked 2026-09-20 (was 10574)
+MAX_BASELINE=10511   # auto-locked 2026-09-21 (was 10512)
                      # carve-out (context loading -> src/daemon/daemon_reactive_context.c,
                      # prompt phases -> daemon_reactive_prompt.c; was 14058). Lower as god-files are carved.
 

@@ -30,7 +30,6 @@
 #include "human/persona/persona_deltas.h"
 #include "human/persona/somatic.h"
 #include "human/persona/style_critique.h"
-#include "human/persona/style_mirror.h"
 #include "human/persona/voice_maturity.h"
 
 #include "human/agent/conv_goals.h"

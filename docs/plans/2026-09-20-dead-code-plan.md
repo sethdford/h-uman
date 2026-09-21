@@ -171,7 +171,7 @@ fifth mechanism before the fourth is measured).
 | `behavior/change.c` | plan says verbatim "still not called from agent_turn.c" | `agent_turn.c:5052` |
 | `validators/cot_audit_validator.c` | DELETED 2026-09-21: the audit is live via a direct call in agent_turn.c; the validator wrapper was a duplicate route | `validators/default_chains.c:35-52` |
 | `agent/stop_sequence_registry.c` | providers honor the field; nothing fills it | `agent_turn.c` request build — **wired (Task 14, 2026-09-21): `HU_STOP_SEQUENCES` (off\|shadow\|on via `hu_gate_mode_from_env`, default `shadow`) gates a shared helper `hu_agent_internal_resolve_stop_sequences` (`src/agent/agent.c`), called from both request-build sites right after Task 13's `hu_agent_internal_resolve_max_tokens`; fills `req.stop_sequences`/`_count` only when empty, never overrides an earlier value. Registry lookup stays provider-only per `stop_sequence_registry.h`'s own contract — the helper takes `provider_name` (a plain string) plus the `agent` pointer for channel context (`agent->active_channel`/`_len`, the daemon-owned string already passed through unchanged elsewhere in these files, never interpreted by `src/agent/`); `agent` is folded only into the SHADOW throttle key/message, never into the registry lookup. (Signature note: `agent_turn.c` sits exactly at the file-size ceiling ratchet — `.claude/rules/file-size-ceiling.md` — so both call sites had to stay a true one-line addition; taking `agent` instead of separate channel+length args keeps the call short enough that clang-format doesn't wrap it, and a one-line whitespace trim elsewhere in `hu_agent_turn` offset the net LOC growth to zero.) SHADOW logs `[stop-sequences-resolve SHADOW] would set N stop sequence(s) for provider=<p> channel=<c>` at most once per distinct (provider, channel) pair per process and writes nothing — zero production behavior change until flipped to `on`. `req->stop_sequences` is a borrowed pointer straight into the registry's static arrays (never freed by caller on either side), so applying is a bare pointer + count assignment, no copy.** |
-| `persona/style_mirror.c` | header already included at `agent_turn.c:33`, no call (US-19 mirroring) | `agent_turn.c:33` |
+| `persona/style_mirror.c` | DELETED 2026-09-21: casing/punctuation are owned by the live style governor (hu_daemon_shape_text_inplace); partner-style mirroring (US-19) is a product decision to fold into the governor or drop | `agent_turn.c:33` |
 | `hu_platform_realpath` | the mandated wrapper; 11 live sites bypass it with raw `realpath()` | `file_edit.c:127,159`, `process_util.c:24`, `update.c:126`, ... |
 | `behavior/rel_dynamics.c` | half-finished relocation from `context/`; finish it, then P1 deletes the old copy | `include/human/daemon/context_facade.h:16` |
 
@@ -431,7 +431,7 @@ tables archived in the 2026-09-20 session; the class is the decision.
 | `src/agent/max_tokens.c` | 242 | WIRE |
 | `src/agent/stop_sequence_registry.c` | 46 | WIRE |
 | `src/agent/task_store.c` | 511 | WIRE |
-| `src/agent/validators/cot_audit_validator.c` | 55 | WIRE |
+| `src/agent/validators/cot_audit_validator.c` | 55 | DELETED |
 | `src/behavior/change.c` | 163 | WIRE |
 | `src/behavior/rel_dynamics.c` | 333 | WIRE |
 | `src/channels/channel_loop.c` | 61 | WIRE |
@@ -449,7 +449,7 @@ tables archived in the 2026-09-20 session; the class is the decision.
 | `src/onboard/state.c` | 167 | WIRE |
 | `src/onboard/step_provider.c` | 367 | WIRE |
 | `src/onboard/step_welcome.c` | 117 | WIRE |
-| `src/persona/style_mirror.c` | 189 | WIRE |
+| `src/persona/style_mirror.c` | 189 | DELETED |
 | `src/security/exec_env.c` | 190 | WIRE |
 | `src/security/vault_aead.c` | 566 | WIRE |
 | `src/tts/transcript_prep.c` | 1229 | WIRE |
