@@ -1533,6 +1533,14 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
          * impossible without breaking tests/test_agent_turn_request_overrides.c. */
         hu_agent_internal_apply_turn_request_overrides(agent, &req);
 
+        /* Task 13: fill req.max_tokens from the resolved model cap when no
+         * earlier step (somatic caps above) already staged a positive
+         * value. turn_model is final at this point (no later reroute in
+         * this file, unlike agent_turn.c's S3 sensitivity path). Gated by
+         * HU_MAX_TOKENS_RESOLVE, default SHADOW — see
+         * hu_agent_internal_resolve_max_tokens. */
+        hu_agent_internal_resolve_max_tokens(&req, turn_model, turn_model_len);
+
         /* Realtime streaming hint (gemma-realtime Option B): casual tiers stream
          * incrementally for a live feel; analytical/deep stay buffered+cleaned so
          * bare-markdown deliberation never leaks. Inert unless on-device streaming

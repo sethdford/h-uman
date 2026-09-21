@@ -5904,7 +5904,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 }
             }
         }
-
+        hu_agent_internal_resolve_max_tokens(&req, turn_model, turn_model_len); /* Task 13 */
         /* Wall clock, NOT clock(). `clock()` returns process CPU time; a
          * provider round trip is spent BLOCKED in poll()/recv() burning
          * ~zero CPU, so CPU-clock timing reported a 150ms call as ~27ms

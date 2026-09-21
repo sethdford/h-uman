@@ -134,6 +134,33 @@ bool hu_agent_internal_is_transport_error(hu_error_t err);
 void hu_agent_internal_apply_turn_request_overrides(const hu_agent_t *agent,
                                                     hu_chat_request_t *req);
 
+/* Task 13 (2026-09-20 dead-code-plan) — fill req->max_tokens from the
+ * model's known output cap (src/agent/max_tokens.c) when the request does
+ * not already carry a positive value.
+ *
+ * `model_ref`/`model_ref_len` MUST be the model actually being sent to the
+ * provider for this turn (agent_turn.c/agent_stream.c call this "turn_model",
+ * not agent->model_name — turn_model reflects per-turn router overrides and,
+ * in agent_turn.c, the S3-sensitivity local-model reroute). Callers must
+ * invoke this AFTER every other step that might set req->max_tokens
+ * (somatic-energy caps, empathy-mode floor, adaptive token budget, S3
+ * rerouting) and AFTER model selection is final — it is a fill-if-empty
+ * step, not a router.
+ *
+ * Gated OFF -> SHADOW -> LIVE via HU_MAX_TOKENS_RESOLVE
+ * (hu_gate_mode_from_env), default SHADOW:
+ *   OFF    — no-op, req->max_tokens is left exactly as the caller set it.
+ *   SHADOW — resolves the value and logs it
+ *            ("[max-tokens-resolve SHADOW] would set max_tokens=<n> for
+ *            <model>"), but does NOT write it.
+ *   LIVE   — writes the resolved value into req->max_tokens.
+ * In every mode, a request whose max_tokens is already > 0 is left
+ * untouched — this never overrides a value some other step deliberately
+ * set. NULL-safe on `req` (no-op); NULL/empty `model_ref` still resolves
+ * to hu_max_tokens_default() when the gate is not OFF. */
+void hu_agent_internal_resolve_max_tokens(hu_chat_request_t *req, const char *model_ref,
+                                          size_t model_ref_len);
+
 /* Build the fallback response text for a provider-unavailable bail-out.
  *
  * Caller-owned string written to *out / *out_len; free with alloc->free

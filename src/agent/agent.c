@@ -19,9 +19,11 @@
 #include "human/agent/world_model_bridge.h"
 #include "human/config.h"
 #include "human/core/endpoints.h"
+#include "human/core/gate_mode.h"
 #include "human/core/log.h"
 #include "human/core/paths.h"
 #include "human/core/tokens.h"
+#include "human/max_tokens.h"
 #include "human/memory/consolidation.h"
 #include "human/memory/promotion.h"
 #include "human/memory/tiers.h"
@@ -144,6 +146,41 @@ void hu_agent_internal_apply_turn_request_overrides(const hu_agent_t *agent,
         return;
     if (agent->turn_thinking_budget > 0)
         req->thinking_budget = agent->turn_thinking_budget;
+}
+
+void hu_agent_internal_resolve_max_tokens(hu_chat_request_t *req, const char *model_ref,
+                                          size_t model_ref_len) {
+    /* See agent_internal.h for contract. src/agent/max_tokens.c has resolved
+     * a model's output cap since 2026-07-27 (the GLM serving-base fix), but
+     * nothing populated hu_chat_request_t.max_tokens with it — providers
+     * fell back to their own hardcoded constants instead (anthropic.c ~142,
+     * gemini.c ~768). Wiring it changes reply length caps in production, so
+     * it lands behind HU_MAX_TOKENS_RESOLVE (hu_gate_mode_from_env), default
+     * SHADOW: unlike a net-new capability, "leave max_tokens at 0" already
+     * IS today's behavior, so SHADOW gives free visibility (this log line)
+     * into what the resolver would pick with zero risk before flipping ON.
+     *
+     * "Fill when 0" is unconditional and gate-independent: a positive
+     * req->max_tokens already staged by an earlier request-shaping step
+     * (somatic-energy caps, empathy-mode floor, adaptive token budget —
+     * see agent_turn.c / agent_stream.c) is never overwritten, in ANY gate
+     * mode including LIVE. Only an actually-unset (0) request is a
+     * candidate for filling. */
+    if (!req || req->max_tokens > 0)
+        return;
+
+    hu_gate_mode_t mode = hu_gate_mode_from_env("HU_MAX_TOKENS_RESOLVE", HU_GATE_SHADOW);
+    if (mode == HU_GATE_OFF)
+        return;
+
+    uint32_t resolved = hu_max_tokens_resolve(0, model_ref, model_ref_len);
+    if (mode == HU_GATE_SHADOW) {
+        hu_log_info("agent", NULL, "[max-tokens-resolve SHADOW] would set max_tokens=%u for %.*s",
+                    resolved, (int)(model_ref_len > 64 ? 64 : model_ref_len),
+                    model_ref ? model_ref : "(none)");
+        return;
+    }
+    req->max_tokens = resolved;
 }
 
 hu_error_t hu_agent_internal_build_unavailable_fallback(hu_allocator_t *alloc, char **out,
