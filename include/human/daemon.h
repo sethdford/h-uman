@@ -205,6 +205,48 @@ hu_error_t hu_daemon_tick_follow_up_watcher(const struct hu_follow_up_watcher_co
                                             hu_service_channel_t *channels, size_t channel_count,
                                             hu_proactive_throttle_t *throttle);
 
+/* ── Follow-up watcher seams (Task 18) ──────────────────────────────────
+ *
+ * Gate: HU_FOLLOW_UP_WATCHER = off | shadow | on, default SHADOW.
+ *
+ * Minimum age of an unreplied INBOUND message before the watcher proposes
+ * a follow-up. hu_follow_up_watcher_config_t carries only enabled +
+ * interval_seconds, so this threshold is a compile-time constant rather
+ * than a config field; it lives in the header so tests build candidates
+ * relative to it instead of duplicating the number. */
+#define HU_FOLLOW_UP_WATCHER_MIN_AGE_MS (6ULL * 60ULL * 60ULL * 1000ULL)
+
+/* Finder seam. Contract matches hu_imessage_find_inbound_unreplied:
+ * HU_OK with *out_msg_id == 0 means "nothing unreplied"; non-OK means the
+ * query itself failed.
+ *
+ * This is dependency injection, NOT a test fork: the DEFAULT finder is the
+ * real chat.db query and production never calls the setter. The seam
+ * exists because hu_imessage_find_inbound_unreplied is compiled out under
+ * HU_IS_TEST (src/channels/imessage.c:3235), so no chat.db fixture can
+ * drive it from inside the test binary. */
+typedef hu_error_t (*hu_follow_up_finder_fn)(void *ctx, const char *contact_id,
+                                             size_t contact_id_len, int64_t *out_msg_id,
+                                             uint64_t *out_inbound_at_ms);
+
+/* Text seam for the `on` path. Writes a NUL-terminated follow-up message
+ * into `out` (cap bytes) and returns HU_OK, or non-OK to decline.
+ *
+ * NULL by DEFAULT, and production never sets it — so `HU_FOLLOW_UP_WATCHER=on`
+ * degrades to shadow plus one warning until a direction-correct text source
+ * is wired. The repo has no such source today: hu_followup_compose_directive
+ * (src/agent/followup_compose.c:66) and hu_followup_decide's template_text
+ * both phrase the OUTBOUND case ("<contact> read your last message and
+ * hasn't replied"). This watcher detects the INBOUND case (the contact
+ * wrote, seth never replied), where that copy is exactly backwards and
+ * would accuse a real person of ignoring a message they in fact sent. */
+typedef hu_error_t (*hu_follow_up_text_fn)(void *ctx, const char *contact_id, uint64_t age_ms,
+                                           char *out, size_t cap);
+
+/* Pass fn=NULL to restore the built-in default (real finder / no text source). */
+void hu_daemon_follow_up_watcher_set_finder(hu_follow_up_finder_fn fn, void *ctx);
+void hu_daemon_follow_up_watcher_set_text_source(hu_follow_up_text_fn fn, void *ctx);
+
 /* iMessage Action Surface Dispatcher (F2) — Phase A–E integration.
  *
  * Routes outbound iMessage replies through the predicate (Phase A) to choose
