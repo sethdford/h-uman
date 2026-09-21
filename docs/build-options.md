@@ -11,7 +11,7 @@ GENERATED FILE. Do not hand-edit — regenerate with:
 bash scripts/dev/build-options-table.sh --write
 ```
 
-Reflects `CMakeLists.txt` + `CMakePresets.json` as of commit `1fe6abb3f` (the most recent commit to touch either file) — keyed to a commit rather than wall-clock time so re-running this script with no changes to either file produces byte-identical output.
+Reflects `CMakeLists.txt` + `CMakePresets.json` as of commit `d3be0c4cb` (the most recent commit to touch either file) — keyed to a commit rather than wall-clock time so re-running this script with no changes to either file produces byte-identical output.
 
 The "Presets ON" column lists every `configurePresets` entry (after resolving `inherits` chains) whose effective cache value for that option is `ON` — either because the preset (or a preset it inherits from) sets it explicitly, or because no preset in the chain overrides it and the option's own default (below) is `ON`.
 

@@ -818,6 +818,20 @@ jobs:
           if ! git diff --exit-code docs/icon-inventory.md docs/components.md 2>/dev/null; then
             echo "::warning::Generated docs are stale. Run 'cd ui && npm run docs' to update."
           fi
+          # docs/build-options.md is generated from CMakeLists.txt + CMakePresets.json
+          # and had drifted unnoticed since it was introduced. Unlike the two above
+          # this is a HARD failure: the table tells people which options a preset
+          # turns on, and a wrong answer there sends them to configure a build that
+          # does not exist.
+          #
+          # --check compares the regenerated table against the committed one and
+          # ignores ONLY the "as of commit <sha>" provenance line. That line cannot
+          # be self-consistent — a commit that edits CMakeLists.txt and regenerates
+          # the table in the same commit necessarily writes the previous sha — and
+          # it is also meaningless on the shallow clone actions/checkout makes by
+          # default. Gating on it would fail every legitimate build-option change.
+          # Needs python3 + git only, no build.
+          bash scripts/dev/build-options-table.sh --check
       - name: Doc fleet (index, drift, terminology, frontmatter, relative links)
         run: scripts/doc-fleet.sh
 
