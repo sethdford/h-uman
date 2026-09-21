@@ -174,7 +174,6 @@ void run_adversarial_detect_tests(void);
 void run_gateway_http_tests(void);
 void run_memory_full_tests(void);
 void run_tools_all_tests(void);
-void run_rag_tests(void);
 void run_multimodal_tests(void);
 void run_multimodal_pipeline_tests(void);
 void run_multimodal_audio_tests(void);
@@ -196,11 +195,9 @@ void run_vector_full_tests(void);
 void run_infrastructure_tests(void);
 void run_memory_subsystems_tests(void);
 void run_http_tests(void);
-void run_sse_tests(void);
 void run_streaming_tests(void);
 void run_websocket_tests(void);
 void run_ws_integration_tests(void);
-void run_net_security_tests(void);
 void run_path_security_tests(void);
 void run_process_util_tests(void);
 void run_prompt_tests(void);
@@ -222,7 +219,6 @@ void run_persona_feedback_tests(void);
 void run_persona_examples_style_tests(void);
 void run_persona_filler_roundtrip_tests(void);
 void run_persona_cli_tests(void);
-void run_persona_sticker_tests(void);
 void run_voice_maturity_tests(void);
 void run_style_learner_tests(void);
 void run_persona_refresh_tests(void);
@@ -255,7 +251,6 @@ void run_tom_scenario_tests(void);
 void run_behavior_trust_prompt_tests(void);
 void run_behavior_pressure_tests(void);
 void run_sycophancy_pack_tests(void);
-void run_longmemeval_tests(void);
 void run_user_sim_scenario_tests(void);
 void run_chronotype_tests(void);
 void run_lifecycle_tests(void);
@@ -315,7 +310,6 @@ void run_cli_ctl_tests(void);
 void run_doctor_local_voice_tests(void);
 void run_onboard_step_provider_tests(void);
 void run_cron_tests(void);
-void run_subagent_tests(void);
 void run_task_manager_tests(void);
 void run_task_tools_tests(void);
 void run_tool_ask_user_tests(void);
@@ -326,12 +320,10 @@ void run_mcp_transport_tests(void);
 void run_mcp_transport_sse_tests(void);
 void run_mcp_http_integration_tests(void);
 void run_otel_trace_tests(void);
-void run_mcp_audit_tests(void);
 void run_voice_tests(void);
 void run_cli_tests(void);
 void run_diagnose_notary_tests(void);
 void run_update_tests(void);
-void run_vector_stores_tests(void);
 void run_memory_engines_ext_tests(void);
 void run_memory_poisoning_tests(void);
 void run_runtime_tests(void);
@@ -384,7 +376,6 @@ void run_untested_modules_tests(void);
 void run_modules_coverage_tests(void);
 void run_coverage_new_tests(void);
 void run_context_tests(void);
-void run_terminal_tests(void);
 void run_tavily_tests(void);
 void run_awareness_tests(void);
 void run_entropy_gate_tests(void);
@@ -561,7 +552,6 @@ void run_calibration_tests(void);
  * 2026-05-24 — they caused both suites to run twice. */
 void run_behavioral_clone_tests(void);
 void run_governor_tests(void);
-void run_activation_steering_tests(void);
 void run_model_router_tests(void);
 void run_model_router_health_tests(void);
 void run_cp_admin_tests(void);
@@ -577,15 +567,12 @@ void run_consolidation_engine_tests(void);
 void run_conv_goals_tests(void);
 void run_knowledge_tests(void);
 void run_usage_tests(void);
-void run_cognitive_tests(void);
 #ifdef HU_ENABLE_AUTHENTIC
 void run_cognitive_load_tests(void);
 void run_phase9_integration_tests(void);
 #endif
 void run_compression_tests(void);
 void run_proactive_ext_tests(void);
-void run_degradation_tests(void);
-void run_memory_degradation_tests(void);
 void run_self_awareness_tests(void);
 void run_superhuman_tests(void);
 void run_contact_graph_tests(void);
@@ -631,7 +618,6 @@ void run_life_chapters_tests(void);
 void run_social_graph_tests(void);
 void run_feeds_tests(void);
 #ifdef HU_ENABLE_FEEDS
-void run_apple_feeds_tests(void);
 void run_news_health_email_tests(void);
 #endif
 #ifdef HU_ENABLE_SOCIAL
@@ -702,9 +688,7 @@ void run_fidelity_delta_tests(void);
  * architecture rework — files deleted, declarations removed. Sprint 12
  * FU-11.5.a will re-target against main's new framework. */
 void run_dpo_judge_naming_tests(void);
-void run_dp_sgd_tests(void);
 void run_lora_tests(void);
-void run_agent_trainer_tests(void);
 void run_training_data_tests(void);
 void run_training_data_extractor_tests(void);
 void run_training_data_quality_tests(void);
@@ -766,7 +750,6 @@ void run_reward_source_tests(void);
  * smokes (adapter file written; --kl-beta 0 disables KL via CLI). */
 void run_cli_grpo_tests(void);
 #endif
-void run_memory_graph_tests(void);
 void run_experience_tests(void);
 void run_experience_engine_tests(void);
 void run_intelligence_wiring_tests(void);
@@ -1017,7 +1000,6 @@ void run_self_improve_tests(void);
 void run_sycophancy_guard_tests(void);
 void run_trust_calibration_tests(void);
 void run_vision_ocr_tests(void);
-void run_markdown_loader_tests(void);
 void run_structured_output_tests(void);
 #ifdef HU_ENABLE_RL_FULL
 extern void run_bootstrap_ci_tests(void);
@@ -1251,7 +1233,6 @@ int main(int argc, char **argv) {
     run_memory_full_tests();
     run_tools_all_tests();
     run_diagnose_notary_tests();
-    run_rag_tests();
     run_multimodal_tests();
     run_multimodal_pipeline_tests();
     run_multimodal_audio_tests();
@@ -1268,17 +1249,14 @@ int main(int argc, char **argv) {
     run_autonomy_tests();
     run_retrieval_tests();
     run_retrieval_contact_isolation_tests();
-    run_memory_graph_tests();
     run_vector_tests();
     run_vector_full_tests();
     run_infrastructure_tests();
     run_memory_subsystems_tests();
     run_http_tests();
-    run_sse_tests();
     run_streaming_tests();
     run_websocket_tests();
     run_ws_integration_tests();
-    run_net_security_tests();
     run_path_security_tests();
     run_process_util_tests();
     run_prompt_tests();
@@ -1300,7 +1278,6 @@ int main(int argc, char **argv) {
     run_persona_examples_style_tests();
     run_persona_filler_roundtrip_tests();
     run_persona_cli_tests();
-    run_persona_sticker_tests();
     run_voice_maturity_tests();
     run_style_mirror_tests();
     run_style_learner_tests();
@@ -1334,7 +1311,6 @@ int main(int argc, char **argv) {
     run_behavior_trust_prompt_tests();
     run_behavior_pressure_tests();
     run_sycophancy_pack_tests();
-    run_longmemeval_tests();
     run_user_sim_scenario_tests();
     run_chronotype_tests();
     run_lifecycle_tests();
@@ -1392,7 +1368,6 @@ int main(int argc, char **argv) {
     run_doctor_local_voice_tests();
     run_onboard_step_provider_tests();
     run_cron_tests();
-    run_subagent_tests();
     run_mcp_tests();
     run_mcp_jsonrpc_tests();
     run_mcp_manager_tests();
@@ -1400,9 +1375,7 @@ int main(int argc, char **argv) {
     run_mcp_transport_sse_tests();
     run_mcp_http_integration_tests();
     run_otel_trace_tests();
-    run_mcp_audit_tests();
     run_voice_tests();
-    run_vector_stores_tests();
     run_cli_tests();
     run_update_tests();
     run_memory_engines_ext_tests();
@@ -1458,7 +1431,6 @@ int main(int argc, char **argv) {
     run_modules_coverage_tests();
     run_coverage_new_tests();
     run_context_tests();
-    run_terminal_tests();
     run_tavily_tests();
     run_awareness_tests();
     run_entropy_gate_tests();
@@ -1624,7 +1596,6 @@ int main(int argc, char **argv) {
      * called earlier (line ~881). Duplicates removed 2026-05-24. */
     run_behavioral_clone_tests();
     run_governor_tests();
-    run_activation_steering_tests();
     run_model_router_tests();
     run_model_router_health_tests();
     run_cp_admin_tests();
@@ -1642,15 +1613,12 @@ int main(int argc, char **argv) {
     run_conv_goals_tests();
     run_knowledge_tests();
     run_usage_tests();
-    run_cognitive_tests();
 #ifdef HU_ENABLE_AUTHENTIC
     run_cognitive_load_tests();
     run_phase9_integration_tests();
 #endif
     run_compression_tests();
     run_proactive_ext_tests();
-    run_degradation_tests();
-    run_memory_degradation_tests();
     run_self_awareness_tests();
     run_superhuman_tests();
     run_contact_graph_tests();
@@ -1696,7 +1664,6 @@ int main(int argc, char **argv) {
     run_social_graph_tests();
     run_feeds_tests();
 #ifdef HU_ENABLE_FEEDS
-    run_apple_feeds_tests();
     run_news_health_email_tests();
     run_research_feeds_tests();
     run_research_executor_tests();
@@ -1759,9 +1726,7 @@ int main(int argc, char **argv) {
      * per-trainer factory pattern, orphaned by main's RL architecture
      * rework. See declaration block at ~line 441. */
     run_dpo_judge_naming_tests();
-    run_dp_sgd_tests();
     run_lora_tests();
-    run_agent_trainer_tests();
     run_training_data_tests();
     run_training_data_extractor_tests();
     run_training_data_quality_tests();
@@ -2045,7 +2010,6 @@ int main(int argc, char **argv) {
     run_sycophancy_guard_tests();
     run_trust_calibration_tests();
     run_vision_ocr_tests();
-    run_markdown_loader_tests();
     run_structured_output_tests();
     run_anticipatory_state_tests();
     run_canvas_tool_tests();

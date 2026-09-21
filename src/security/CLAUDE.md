@@ -22,7 +22,6 @@ detect.c             Adversarial input detection
 adversarial.c        Adversarial defense strategies
 moderation.c         Content moderation enforcement
 cot_audit.c          Chain-of-thought audit trail
-mcp_audit.c          MCP tool usage audit
 ```
 
 ## Sandbox Backends

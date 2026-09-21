@@ -1,44 +1,17 @@
-/* Cross-module suite: covers the memory engine registry, the adaptive and
- * RRF/LLM retrieval helpers, and the vector circuit breaker. The filename
- * heuristic in scripts/check-test-references.sh resolves "memory_new" to
+/* Cross-module suite: covers the adaptive and RRF retrieval helpers and the
+ * vector circuit breaker. The filename heuristic in
+ * scripts/check-test-references.sh resolves "memory_new" to
  * src/memory/memory.c, which this file does not exercise.
  *
  * // @covers-none — heuristic picks src/memory/memory.c; see header above.
  */
 #include "human/core/allocator.h"
 #include "human/memory.h"
-#include "human/memory/engines/registry.h"
 #include "human/memory/retrieval/adaptive.h"
-#include "human/memory/retrieval/llm_reranker.h"
 #include "human/memory/retrieval/rrf.h"
 #include "human/memory/vector/circuit_breaker.h"
 #include "test_framework.h"
 #include <string.h>
-
-static void test_registry_find_none(void) {
-    const hu_backend_descriptor_t *d = hu_registry_find_backend("none", 4);
-#ifdef HU_HAS_NONE_ENGINE
-    HU_ASSERT_NOT_NULL(d);
-    HU_ASSERT_STR_EQ(d->name, "none");
-    HU_ASSERT_FALSE(d->capabilities.supports_keyword_rank);
-    HU_ASSERT_FALSE(d->needs_db_path);
-#else
-    HU_ASSERT_NULL(d);
-#endif
-}
-
-static void test_registry_is_known(void) {
-    HU_ASSERT_TRUE(hu_registry_is_known_backend("sqlite", 6));
-    HU_ASSERT_TRUE(hu_registry_is_known_backend("none", 4));
-    HU_ASSERT_FALSE(hu_registry_is_known_backend("unknown", 7));
-}
-
-static void test_registry_engine_token(void) {
-    const char *t = hu_registry_engine_token_for_backend("sqlite", 6);
-    HU_ASSERT_NOT_NULL(t);
-    HU_ASSERT_STR_EQ(t, "sqlite");
-    HU_ASSERT_NULL(hu_registry_engine_token_for_backend("x", 1));
-}
 
 static void test_adaptive_keyword_special(void) {
     hu_adaptive_config_t cfg = {.enabled = true, .keyword_max_tokens = 5, .vector_min_tokens = 6};
@@ -62,15 +35,6 @@ static void test_circuit_breaker_lifecycle(void) {
     hu_circuit_breaker_record_failure(&cb);
     HU_ASSERT_TRUE(hu_circuit_breaker_is_open(&cb));
     HU_ASSERT_FALSE(hu_circuit_breaker_allow(&cb));
-}
-
-static void test_llm_reranker_parse_response(void) {
-    size_t indices[8];
-    size_t n = hu_llm_reranker_parse_response("3,1,5,2,4", 9, indices, 8);
-    HU_ASSERT_EQ(n, 5u);
-    HU_ASSERT_EQ(indices[0], 2u); /* 3 -> index 2 */
-    HU_ASSERT_EQ(indices[1], 0u);
-    HU_ASSERT_EQ(indices[2], 4u);
 }
 
 static void test_rrf_two_sources_merge(void) {
@@ -115,19 +79,6 @@ static void test_adaptive_short_query(void) {
               a.recommended_strategy <= HU_ADAPTIVE_HYBRID);
 }
 
-static void test_llm_reranker_parse_empty(void) {
-    size_t indices[8];
-    size_t n = hu_llm_reranker_parse_response("", 0, indices, 8);
-    HU_ASSERT_EQ(n, 0u);
-}
-
-static void test_llm_reranker_parse_single(void) {
-    size_t indices[8];
-    size_t n = hu_llm_reranker_parse_response("1", 1, indices, 8);
-    HU_ASSERT_EQ(n, 1u);
-    HU_ASSERT_EQ(indices[0], 0u);
-}
-
 static void test_rrf_single_source(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_memory_entry_t e0 = {.key = "a", .key_len = 1, .content = "A", .content_len = 1};
@@ -145,18 +96,12 @@ static void test_rrf_single_source(void) {
 }
 
 void run_memory_new_tests(void) {
-    HU_TEST_SUITE("Memory new (registry, retrieval)");
-    HU_RUN_TEST(test_registry_find_none);
-    HU_RUN_TEST(test_registry_is_known);
-    HU_RUN_TEST(test_registry_engine_token);
+    HU_TEST_SUITE("Memory new (retrieval)");
     HU_RUN_TEST(test_adaptive_keyword_special);
     HU_RUN_TEST(test_adaptive_hybrid);
     HU_RUN_TEST(test_adaptive_disabled);
     HU_RUN_TEST(test_adaptive_short_query);
     HU_RUN_TEST(test_circuit_breaker_lifecycle);
-    HU_RUN_TEST(test_llm_reranker_parse_response);
-    HU_RUN_TEST(test_llm_reranker_parse_empty);
-    HU_RUN_TEST(test_llm_reranker_parse_single);
     HU_RUN_TEST(test_rrf_single_source);
     HU_RUN_TEST(test_rrf_two_sources_merge);
     HU_RUN_TEST(test_rrf_empty_sources);

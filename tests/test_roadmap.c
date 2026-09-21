@@ -7,7 +7,6 @@
 #include "human/core/allocator.h"
 #include "human/core/string.h"
 #include "human/daemon.h"
-#include "human/mcp_registry.h"
 #include "human/observability/otel.h"
 #include "human/plugin.h"
 #include "human/plugin_loader.h"
@@ -399,48 +398,6 @@ static void test_plugin_load_api_mismatch(void) {
     hu_error_t err = hu_plugin_load(&a, "/bad_api/plugin.so", &host, &info, &handle);
     HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT_NULL(handle);
-}
-
-static void test_mcp_registry_add_remove_list(void) {
-    hu_allocator_t a = hu_system_allocator();
-    hu_mcp_registry_t *reg = hu_mcp_registry_create(&a);
-    HU_ASSERT_NOT_NULL(reg);
-    HU_ASSERT_EQ(hu_mcp_registry_add(reg, "srv1", "echo", "hello"), HU_OK);
-    HU_ASSERT_EQ(hu_mcp_registry_add(reg, "srv2", "cat", NULL), HU_OK);
-    hu_mcp_registry_entry_t out[4];
-    int count = 0;
-    HU_ASSERT_EQ(hu_mcp_registry_list(reg, out, 4, &count), HU_OK);
-    HU_ASSERT_EQ(count, 2);
-    HU_ASSERT_STR_EQ(out[0].name, "srv1");
-    HU_ASSERT_EQ(hu_mcp_registry_remove(reg, "srv1"), HU_OK);
-    HU_ASSERT_EQ(hu_mcp_registry_list(reg, out, 4, &count), HU_OK);
-    HU_ASSERT_EQ(count, 1);
-    hu_mcp_registry_destroy(reg);
-}
-
-static void test_mcp_registry_start_stop_toggles_running(void) {
-    hu_allocator_t a = hu_system_allocator();
-    hu_mcp_registry_t *reg = hu_mcp_registry_create(&a);
-    HU_ASSERT_NOT_NULL(reg);
-    HU_ASSERT_EQ(hu_mcp_registry_add(reg, "srv", "echo", "x"), HU_OK);
-    HU_ASSERT_EQ(hu_mcp_registry_start(reg, "srv"), HU_OK);
-    hu_mcp_registry_entry_t out[1];
-    int count = 0;
-    HU_ASSERT_EQ(hu_mcp_registry_list(reg, out, 1, &count), HU_OK);
-    HU_ASSERT_TRUE(out[0].running);
-    HU_ASSERT_EQ(hu_mcp_registry_stop(reg, "srv"), HU_OK);
-    HU_ASSERT_EQ(hu_mcp_registry_list(reg, out, 1, &count), HU_OK);
-    HU_ASSERT_FALSE(out[0].running);
-    hu_mcp_registry_destroy(reg);
-}
-
-static void test_mcp_registry_remove_nonexistent(void) {
-    hu_allocator_t a = hu_system_allocator();
-    hu_mcp_registry_t *reg = hu_mcp_registry_create(&a);
-    HU_ASSERT_NOT_NULL(reg);
-    hu_error_t err = hu_mcp_registry_remove(reg, "nonexistent");
-    HU_ASSERT_EQ(err, HU_ERR_NOT_FOUND);
-    hu_mcp_registry_destroy(reg);
 }
 
 static void test_profile_get_coding(void) {
@@ -935,11 +892,6 @@ void run_roadmap_tests(void) {
     HU_RUN_TEST(test_plugin_bad_version);
     HU_RUN_TEST(test_plugin_load_nonexistent);
     HU_RUN_TEST(test_plugin_load_api_mismatch);
-
-    HU_TEST_SUITE("Roadmap: MCP Registry");
-    HU_RUN_TEST(test_mcp_registry_add_remove_list);
-    HU_RUN_TEST(test_mcp_registry_start_stop_toggles_running);
-    HU_RUN_TEST(test_mcp_registry_remove_nonexistent);
 
     HU_TEST_SUITE("Roadmap: Stub Boundaries (6)");
     HU_RUN_TEST(test_daemon_start_returns_valid);

@@ -86,7 +86,6 @@ behind options would reduce binary size for deployments that don't need them.
 | ---------------------------------------- | ----------- | ----------------------- |
 | `src/memory/retrieval/keyword.c`         | 12.2 KB     | BM25 keyword search     |
 | `src/memory/retrieval/reranker.c`        | 12.0 KB     | Cross-encoder reranking |
-| `src/memory/retrieval/llm_reranker.c`    | 7.3 KB      | LLM-based reranking     |
 | `src/memory/retrieval/rrf.c`             | 12.0 KB     | Reciprocal rank fusion  |
 | `src/memory/retrieval/temporal.c`        | 6.3 KB      | Temporal decay          |
 | `src/memory/retrieval/adaptive.c`        | 6.0 KB      | Adaptive strategy       |
@@ -96,8 +95,6 @@ behind options would reduce binary size for deployments that don't need them.
 
 | File                                    | Object Size | Notes                        |
 | --------------------------------------- | ----------- | ---------------------------- |
-| `src/memory/vector/store_qdrant.c`      | 13.9 KB     | Qdrant HTTP client           |
-| `src/memory/vector/store_pgvector.c`    | 8.1 KB      | pgvector (requires Postgres) |
 | `src/memory/vector/embeddings_gemini.c` | 12.6 KB     | Gemini embeddings API        |
 | `src/memory/vector/embeddings_voyage.c` | 12.0 KB     | Voyage AI embeddings         |
 | `src/memory/vector/embeddings_ollama.c` | 11.3 KB     | Ollama local embeddings      |

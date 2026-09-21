@@ -8,7 +8,6 @@ Hardware peripheral drivers implementing `hu_peripheral_t` vtable. Supports Ardu
 - `stm32.c` — probe-rs CLI for STM32/Nucleo flash and debug
 - `rpi.c` — Raspberry Pi GPIO and SPI access
 - `factory.c` — Peripheral registry and creation
-- `maixcam.c` — MaixCAM vision module integration
 
 ## Rules
 

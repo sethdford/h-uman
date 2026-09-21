@@ -99,7 +99,6 @@
 #endif
 #include "human/tools/ask_user.h"
 #include "human/tools/db_introspect.h"
-#include "human/tools/lsp.h"
 #include "human/tools/send_voice_message.h"
 #include "human/tools/skill_write.h"
 #include "human/tools/spawn.h"

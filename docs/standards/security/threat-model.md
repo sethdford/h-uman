@@ -342,7 +342,7 @@ Trust boundaries exist at:
 
 | Control                           | Implementation                                           | Status          |
 | --------------------------------- | -------------------------------------------------------- | --------------- |
-| SC-8 Transmission Confidentiality | HTTPS for tools (`hu_validate_url`), libcurl TLS         | Implemented     |
+| SC-8 Transmission Confidentiality | HTTPS for tools (`hu_tool_validate_url`), libcurl TLS    | Implemented     |
 | SC-13 Cryptographic Protection    | ChaCha20+HMAC in `hu_secret_store`, HMAC-SHA256 webhooks | Implemented     |
 | SC-28 Protection at Rest          | **Gap** — credentials plaintext (C-03)                   | Not implemented |
 | SC-39 Process Isolation           | Landlock, seccomp, Firecracker, bwrap, WASI              | Implemented     |

@@ -62,23 +62,6 @@ typedef struct hu_vector_store_vtable {
     void (*deinit)(void *ctx, hu_allocator_t *alloc);
 } hu_vector_store_vtable_t;
 
-/* Chunker for splitting text before embedding */
-typedef struct hu_chunker_options {
-    size_t max_chunk_size;
-    size_t overlap;
-} hu_chunker_options_t;
-
-typedef struct hu_text_chunk {
-    const char *text;
-    size_t text_len;
-    size_t offset;
-} hu_text_chunk_t;
-
-hu_error_t hu_chunker_split(hu_allocator_t *alloc, const char *text, size_t text_len,
-                            const hu_chunker_options_t *opts, hu_text_chunk_t **out,
-                            size_t *out_count);
-void hu_chunker_free(hu_allocator_t *alloc, hu_text_chunk_t *chunks, size_t count);
-
 /* Utility */
 float hu_cosine_similarity(const float *a, const float *b, size_t dim);
 void hu_embedding_free(hu_allocator_t *alloc, hu_embedding_t *e);

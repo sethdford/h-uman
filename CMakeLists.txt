@@ -564,7 +564,6 @@ find_package(Threads QUIET)
 set(HU_CORE_SOURCES
     src/app/platform.c
     src/platform/calendar_macos.c
-    src/peripherals/terminal.c
     src/util/util.c
     src/util/json_util.c
     src/agent/bus.c
@@ -573,7 +572,6 @@ set(HU_CORE_SOURCES
     src/channels/channel_manager.c
     src/security/auth.c
     src/security/identity.c
-    src/agent/state.c
     src/observability/heartbeat.c
     src/core/accel.c
     src/core/allocator.c
@@ -622,9 +620,7 @@ set(HU_CORE_SOURCES
     src/core/vertex_auth.c
     src/core/process_util.c
     src/core/log.c
-    src/sse/sse_client.c
     src/websocket/websocket.c
-    src/security/net_security.c
     src/config/config.c
     src/config/config_schema.c
     src/config/config_merge.c
@@ -641,7 +637,6 @@ set(HU_CORE_SOURCES
     src/config/config_parse_behavior.c
     src/app/capabilities.c
     src/channels/channel_catalog.c
-    src/channels/channel_adapters.c
     src/doctor/doctor.c
     src/doctor/registry.c
     src/doctor/check_chatdb.c
@@ -670,24 +665,16 @@ set(HU_CORE_SOURCES
     src/channels/channel_class.c
     src/channels/channel_monitor.c
     src/memory/evolved_opinions.c
-    src/observability/status.c
-    src/util/http_util.c
     src/mcp/mcp.c
     src/mcp/mcp_jsonrpc.c
     src/mcp/mcp_transport_stdio.c
     src/mcp/mcp_transport_sse.c
     src/mcp/mcp_transport_http.c
     src/multimodal.c
-    src/multimodal/calendar.c
-    src/multimodal/document.c
-    src/multimodal/image.c
     src/multimodal/audio.c
     src/multimodal/video.c
     src/multimodal/multimodal.c
-    src/memory/rag.c
-    src/agent/service.c
     src/skills/skill_registry.c
-    src/subagent.c
     src/core/privacy.c
     src/voice/voice.c
     src/voice/voice_config.c
@@ -697,7 +684,6 @@ set(HU_CORE_SOURCES
     src/observability/health.c
     src/security/security.c
     src/security/sycophancy_guard.c
-    src/security/mcp_audit.c
     src/security/policy.c
     src/security/causal_armor.c
     src/security/history_scorer.c
@@ -755,7 +741,6 @@ set(HU_CORE_SOURCES
     src/persona/persona_fuse.c
     src/persona/relationship_tone.c
     src/persona/humor.c
-    src/persona/markdown_loader.c
     src/persona/somatic.c
     src/persona/taste.c
     src/persona/celebration.c
@@ -766,7 +751,6 @@ set(HU_CORE_SOURCES
     # (from calibrate) into a prompt-ready paragraph, ready to splice
     # into the agent's persona context.
     src/persona/social_insights.c
-    src/persona/sticker.c
     src/gateway/event_bridge.c
     src/runtime/native.c
     src/runtime/docker.c
@@ -917,7 +901,6 @@ set(HU_CORE_SOURCES
     src/agent/weather_fetch.c
     src/agent/timing.c
     src/agent/governor.c
-    src/agent/activation_steering.c
     src/agent/arbitrator.c
     src/agent/salience.c
     src/agent/intent.c
@@ -976,7 +959,6 @@ set(HU_CORE_SOURCES
     src/providers/factory.c
     ${CHANNEL_SOURCES}
     ${MEMORY_ENGINE_SOURCES}
-    src/memory/engines/registry.c
     src/memory/factory.c
     src/memory/encrypted_store.c
     src/memory/util.c
@@ -1122,9 +1104,6 @@ set(HU_CORE_SOURCES
     src/persona/persona_deltas.c
     src/persona/delta_observer.c
     src/memory/lifecycle/cache.c
-    src/memory/lifecycle/hygiene.c
-    src/memory/lifecycle/summarizer.c
-    src/memory/lifecycle/migrate.c
     src/memory/retrieval/keyword.c
     src/memory/retrieval/namespace.c
     src/memory/retrieval/temporal.c
@@ -1134,12 +1113,10 @@ set(HU_CORE_SOURCES
     src/memory/retrieval/rrf.c
     src/memory/retrieval/entropy_gate.c
     src/memory/rerank.c
-    src/memory/retrieval/llm_reranker.c
     src/memory/retrieval/strategy_learner.c
     src/memory/retrieval/engine.c
     src/memory/connections.c
     src/memory/knowledge.c
-    src/memory/cognitive.c
     src/memory/rag_pipeline.c
     src/memory/compression.c
     src/visual/content.c
@@ -1251,7 +1228,6 @@ set(HU_CORE_SOURCES
     src/skills/skill_scaffold.c
     src/context/context_engine.c
     src/context/context_engine_rag.c
-    src/mcp/mcp_registry.c
     src/onboard/onboard.c
     src/onboard/state.c
     src/onboard/dispatcher.c
@@ -1304,7 +1280,6 @@ set(HU_CORE_SOURCES
     src/agent/prompt_budget.c
     src/memory/vector/math.c
     src/memory/vector/cosine.c
-    src/memory/vector/chunker.c
     src/memory/vector/store_mem.c
     src/memory/vector/embedder_local.c
     src/memory/vector/embedder_http.c
@@ -1313,9 +1288,6 @@ set(HU_CORE_SOURCES
     src/memory/vector/embeddings_gemini.c
     src/memory/vector/embeddings_ollama.c
     src/memory/vector/embeddings_voyage.c
-    src/memory/vector/store.c
-    src/memory/vector/store_pgvector.c
-    src/memory/vector/store_qdrant.c
     src/memory/vector/vector_retrieval_remote.c
     src/memory/lifecycle/semantic_cache.c
 )
@@ -1425,7 +1397,6 @@ list(APPEND HU_CORE_SOURCES
     src/evaluation/evaluation_regression.c
     src/eval/turing_score.c
     src/eval/turing_adversarial.c
-    src/eval/longmemeval.c
     src/eval/eval_judge.c
     src/eval/eval_benchmarks.c
     src/mcp/mcp_resources.c
@@ -1559,7 +1530,6 @@ list(APPEND HU_CORE_SOURCES
     src/context/protective.c
     src/cognition/humor.c
     src/context/social_graph.c
-    src/memory/degradation.c
     src/memory/opinions.c
     src/memory/life_chapters.c
 )
@@ -1670,7 +1640,6 @@ if(HU_ENABLE_SQLITE)
         src/memory/forgetting_curve.c
         src/memory/prospective.c
         src/memory/emotional_residue.c
-        src/memory/graph/memory_graph.c
         src/intelligence/skills.c
         src/intelligence/self_improve.c
         src/intelligence/value_learning.c
@@ -1709,8 +1678,8 @@ if(HU_ENABLE_SOCIAL)
     list(APPEND HU_CORE_SOURCES src/feeds/social.c)
 endif()
 if(HU_ENABLE_FEEDS)
-    list(APPEND HU_CORE_SOURCES src/feeds/apple.c
-        src/feeds/news.c src/feeds/email.c src/feeds/gmail.c src/feeds/imessage.c
+    list(APPEND HU_CORE_SOURCES
+        src/feeds/news.c src/feeds/gmail.c src/feeds/imessage.c
         src/feeds/twitter.c src/feeds/file_ingest.c src/feeds/research.c src/feeds/findings.c
         src/feeds/research_executor.c src/feeds/trends.c)
 endif()
@@ -1719,7 +1688,6 @@ endif()
 if(HU_ENABLE_SKILLS)
     list(APPEND HU_CORE_SOURCES
         src/skills/skillforge.c
-        src/skills/skills.c
         src/skills/skill_scaffold.c
         src/tools/skill_run.c
         src/intelligence/reflection.c
@@ -1771,7 +1739,6 @@ if(HU_ENABLE_ML)
         # They are subprocess + file I/O helpers with no learner dependency
         # and must link in HU_ENABLE_ML=OFF builds that still compile
         # lora_retrain_runner.c.
-        src/ml/agent_trainer.c
         src/ml/m3_contact_routes.c
         src/ml/m3_frontier_adapter.c
         src/ml/m3_id_map.c
@@ -1799,7 +1766,6 @@ if(HU_ENABLE_ML)
         # Sprint 8 US-8.1: DP-SGD with RDP accountant (verifiable privacy).
         # Pure-math privacy accounting + per-sample-clipped noisy SGD;
         # links inside HU_ENABLE_ML=ON alongside the other learners.
-        src/ml/dp_sgd.c
         # Track D D2.2: persona-fidelity compute primitives shared by
         # `human ml fidelity-status` (CLI) and `metrics.fidelity`
         # (gateway) so both surfaces produce identical numbers.
@@ -2965,7 +2931,6 @@ endif()
 if(NOT HU_ENABLE_SKILLS)
     list(APPEND HU_TEST_EXTRA_MODULES
         src/skills/skillforge.c
-        src/skills/skills.c
         src/tools/skill_run.c
         src/intelligence/skills.c
         src/intelligence/reflection.c
@@ -2978,8 +2943,8 @@ if(NOT HU_ENABLE_SOCIAL)
     list(APPEND HU_TEST_EXTRA_MODULES src/feeds/social.c)
 endif()
 if(NOT HU_ENABLE_FEEDS)
-    list(APPEND HU_TEST_EXTRA_MODULES src/feeds/apple.c
-        src/feeds/news.c src/feeds/email.c src/feeds/gmail.c src/feeds/imessage.c
+    list(APPEND HU_TEST_EXTRA_MODULES
+        src/feeds/news.c src/feeds/gmail.c src/feeds/imessage.c
         src/feeds/twitter.c src/feeds/file_ingest.c src/feeds/research.c src/feeds/findings.c
         src/feeds/research_executor.c src/feeds/trends.c)
 endif()
@@ -3339,7 +3304,6 @@ set(HU_TEST_SOURCES
     tests/test_filler_pctt.c
     tests/test_hallucination_guard.c
     tests/test_humor_fw.c
-    tests/test_markdown_loader.c
     tests/test_mcp_http_integration.c
     tests/test_self_improve.c
     tests/test_sycophancy_guard.c
@@ -3468,16 +3432,13 @@ set(HU_TEST_SOURCES
     tests/test_memory_subsystems.c
     tests/test_memory_new.c
     tests/test_http.c
-    tests/test_sse.c
     tests/test_streaming.c
     tests/test_websocket.c
     tests/test_ws_integration.c
-    tests/test_net_security.c
     tests/test_path_security.c
     tests/test_process_util.c
     tests/test_cron.c
     tests/test_channel_loop.c
-    tests/test_rag.c
     tests/test_multimodal.c
     tests/test_multimodal_pipeline.c
     tests/test_multimodal_audio.c
@@ -3585,12 +3546,10 @@ tests/test_imessage_action_telemetry.c
     tests/test_doctor_exit_codes.c
     tests/test_doctor_json_output.c
     tests/test_onboard_step_provider.c
-    tests/test_subagent.c
     tests/test_mcp.c
     tests/test_mcp_jsonrpc.c
     tests/test_voice.c
     tests/test_local_voice.c
-    tests/test_vector_stores.c
     tests/test_cli.c
     tests/test_update.c
     tests/test_memory_engines_ext.c
@@ -3610,7 +3569,6 @@ tests/test_imessage_action_telemetry.c
     tests/test_modules_coverage.c
     tests/test_coverage_new.c
     tests/test_context.c
-    tests/test_terminal.c
     tests/test_tavily.c
     tests/test_awareness.c
     tests/test_intelligence.c
@@ -3765,7 +3723,6 @@ tests/test_imessage_action_telemetry.c
     tests/test_predictive_drafts.c
     tests/test_behavioral_clone.c
     tests/test_governor.c
-    tests/test_activation_steering.c
     tests/test_arbitrator.c
     tests/test_salience.c
     tests/test_planning.c
@@ -3775,11 +3732,8 @@ tests/test_imessage_action_telemetry.c
     tests/test_conv_goals.c
     tests/test_knowledge.c
     tests/test_usage.c
-    tests/test_cognitive.c
     tests/test_compression.c
     tests/test_proactive_ext.c
-    tests/test_degradation.c
-    tests/test_memory_degradation.c
     tests/test_self_awareness.c
     tests/test_superhuman.c
     tests/test_contact_graph.c
@@ -3813,7 +3767,6 @@ tests/test_imessage_action_telemetry.c
     tests/test_life_chapters.c
     tests/test_social_graph.c
     tests/test_feeds.c
-    tests/test_apple_feeds.c
     tests/test_social_feeds.c
     tests/test_feed_processor.c
     tests/test_feed_awareness.c
@@ -3829,8 +3782,8 @@ tests/test_imessage_action_telemetry.c
     tests/test_privacy_audit.c
     tests/test_collab_planning.c
     # ML-coupled tests (test_ml.c, test_ml_cli_actually_trains.c,
-    # test_ml_fidelity_judgment.c, test_dpo_judge_naming.c, test_dp_sgd.c,
-    # test_lora.c, test_training_data*.c, test_agent_trainer.c) are
+    # test_ml_fidelity_judgment.c, test_dpo_judge_naming.c,
+    # test_lora.c, test_training_data*.c) are
     # added below in the if(HU_ENABLE_ML) gate (CMakeLists.txt:3349+).
     # The sprint-7 main-merge re-introduced them here unconditionally,
     # regressing my round-10/12 fix. Re-applied: minimal-build /
@@ -3840,8 +3793,6 @@ tests/test_imessage_action_telemetry.c
     tests/test_otel_traces.c
     tests/test_mcp_transport.c
     tests/test_mcp_transport_sse.c
-    tests/test_mcp_audit.c
-    tests/test_memory_graph.c
     tests/test_experience.c
     tests/test_experience_engine.c
     tests/test_intelligence_wiring.c
@@ -3876,13 +3827,13 @@ if(HU_ENABLE_FEEDS)
     list(APPEND HU_TEST_SOURCES
         tests/test_research_feeds.c tests/test_research_executor.c)
 endif()
-list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/test_relationship.c tests/test_replay.c tests/test_style_clone.c tests/test_life_sim.c tests/test_persona_mood.c tests/test_persona_feedback.c tests/test_persona_examples_style.c tests/test_persona_cli.c tests/test_voice_maturity.c tests/test_style_mirror.c tests/test_style_learner.c tests/test_temporal.c tests/test_inner_world.c tests/test_persona_eval.c tests/test_persona_filler_roundtrip.c tests/test_style_critique_patterns.c tests/test_style_self_critique.c tests/test_persona_sticker.c)
+list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/test_relationship.c tests/test_replay.c tests/test_style_clone.c tests/test_life_sim.c tests/test_persona_mood.c tests/test_persona_feedback.c tests/test_persona_examples_style.c tests/test_persona_cli.c tests/test_voice_maturity.c tests/test_style_mirror.c tests/test_style_learner.c tests/test_temporal.c tests/test_inner_world.c tests/test_persona_eval.c tests/test_persona_filler_roundtrip.c tests/test_style_critique_patterns.c tests/test_style_self_critique.c)
 # Moment Context Decision Layer (Task 0.2) — paired with src/persona/moment.c
 # and src/persona/moment_render.c above; unconditional per gate-symmetry rule.
 list(APPEND HU_TEST_SOURCES tests/test_moment_compose.c tests/test_moment_render.c)
 # Self-test for the flaky-test quarantine + auto-retry harness (unconditional).
 list(APPEND HU_TEST_SOURCES tests/test_flaky_harness.c)
-list(APPEND HU_TEST_SOURCES tests/test_behavior_policy.c tests/test_behavior_dialog_act.c tests/test_behavior_affect.c tests/test_behavior_change.c tests/test_behavior_safety.c tests/test_behavior_prosocial.c tests/test_win_detect.c tests/test_celebration.c tests/test_prosocial_moment.c tests/test_behavior_prompt.c tests/test_behavior_support_strategy.c tests/test_behavior_trust.c tests/test_behavior_corpora.c tests/test_user_sim.c tests/test_tom_scenario_b8.c tests/test_chronotype.c tests/test_behavior_pressure.c tests/test_behavior_trust_prompt.c tests/test_longmemeval.c tests/test_sycophancy_pack.c tests/test_user_sim_scenario.c tests/test_tapback_band.c)
+list(APPEND HU_TEST_SOURCES tests/test_behavior_policy.c tests/test_behavior_dialog_act.c tests/test_behavior_affect.c tests/test_behavior_change.c tests/test_behavior_safety.c tests/test_behavior_prosocial.c tests/test_win_detect.c tests/test_celebration.c tests/test_prosocial_moment.c tests/test_behavior_prompt.c tests/test_behavior_support_strategy.c tests/test_behavior_trust.c tests/test_behavior_corpora.c tests/test_user_sim.c tests/test_tom_scenario_b8.c tests/test_chronotype.c tests/test_behavior_pressure.c tests/test_behavior_trust_prompt.c tests/test_sycophancy_pack.c tests/test_user_sim_scenario.c tests/test_tapback_band.c)
 list(APPEND HU_TEST_SOURCES tests/test_cartesia.c)
 list(APPEND HU_TEST_SOURCES tests/test_cartesia_stream.c)
 list(APPEND HU_TEST_SOURCES tests/test_voice_clone.c)
@@ -4171,7 +4122,6 @@ if(HU_ENABLE_ML)
         tests/test_mlx_admin.c
         tests/test_ml_cli_actually_trains.c
         tests/test_ml_fidelity_judgment.c
-        tests/test_dp_sgd.c
         tests/test_dpo_miner.c
         tests/test_dpo_judge_naming.c
         tests/test_rl_trainer.c
@@ -4199,8 +4149,7 @@ if(HU_ENABLE_ML)
         tests/test_training_data.c
         tests/test_training_data_extractor.c
         tests/test_training_data_quality.c
-        tests/test_dpo_extractor_integration.c
-        tests/test_agent_trainer.c)
+        tests/test_dpo_extractor_integration.c)
 endif()
 
 # test_channel_overlay_apply.c needs both iMessage AND Telegram symbols.

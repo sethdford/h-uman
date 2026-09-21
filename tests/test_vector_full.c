@@ -4,9 +4,6 @@
 #include "human/memory/vector/embeddings_gemini.h"
 #include "human/memory/vector/embeddings_ollama.h"
 #include "human/memory/vector/embeddings_voyage.h"
-#include "human/memory/vector/store.h"
-#include "human/memory/vector/store_pgvector.h"
-#include "human/memory/vector/store_qdrant.h"
 #include "test_framework.h"
 #include <stdio.h>
 #include <string.h>
@@ -88,65 +85,6 @@ static void test_voyage_create_and_embed_mock(void) {
     p.vtable->deinit(p.ctx, &alloc);
 }
 
-static void test_vector_store_upsert_search_mock(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_vector_store_t store = hu_vector_store_mem_vec_create(&alloc);
-    HU_ASSERT_NOT_NULL(store.ctx);
-
-    float emb[] = {1.0f, 0.0f, 0.0f};
-    hu_error_t err = store.vtable->upsert(store.ctx, &alloc, "k1", 2, emb, 3, NULL, 0);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_EQ(store.vtable->count(store.ctx), 1);
-
-    hu_vector_search_result_t *results = NULL;
-    size_t n = 0;
-    err = store.vtable->search(store.ctx, &alloc, emb, 3, 5, &results, &n);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_TRUE(n >= 1);
-    hu_vector_search_results_free(&alloc, results, n);
-
-    store.vtable->deinit(store.ctx, &alloc);
-}
-
-static void test_pgvector_not_supported(void) {
-#if !defined(HU_ENABLE_PGVECTOR)
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_pgvector_config_t cfg = {.connection_url = "postgresql://localhost/test",
-                                .table_name = "memory_vectors",
-                                .dimensions = 768};
-    hu_vector_store_t store = hu_vector_store_pgvector_create(&alloc, &cfg);
-    HU_ASSERT_NOT_NULL(store.ctx);
-
-    float emb[] = {0.1f, 0.2f, 0.3f};
-    hu_error_t err = store.vtable->upsert(store.ctx, &alloc, "x", 1, emb, 3, NULL, 0);
-    HU_ASSERT_EQ(err, HU_ERR_NOT_SUPPORTED);
-
-    store.vtable->deinit(store.ctx, &alloc);
-#endif
-}
-
-static void test_qdrant_mock(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_qdrant_config_t cfg = {.url = "http://localhost:6333",
-                              .api_key = NULL,
-                              .collection_name = "test",
-                              .dimensions = 3};
-    hu_vector_store_t store = hu_vector_store_qdrant_create(&alloc, &cfg);
-    HU_ASSERT_NOT_NULL(store.ctx);
-
-#if HU_IS_TEST
-    float q[] = {0.1f, 0.2f, 0.3f};
-    hu_vector_search_result_t *results = NULL;
-    size_t n = 0;
-    hu_error_t err = store.vtable->search(store.ctx, &alloc, q, 3, 5, &results, &n);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_EQ(n, 0u); /* mock returns empty */
-    HU_ASSERT_NULL(results);
-#endif
-
-    store.vtable->deinit(store.ctx, &alloc);
-}
-
 static void test_semantic_cache_put_then_get_exact(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_embedding_provider_t prov = hu_embedding_provider_noop_create(&alloc);
@@ -199,16 +137,13 @@ static void test_semantic_cache_hit_miss(void) {
 }
 
 void run_vector_full_tests(void) {
-    HU_TEST_SUITE("Vector Full (embeddings, store, cache)");
+    HU_TEST_SUITE("Vector Full (embeddings, cache)");
     HU_RUN_TEST(test_embedding_mock_and_free);
     HU_RUN_TEST(test_embedding_free_null_safe);
     HU_RUN_TEST(test_embedder_noop_dimensions);
     HU_RUN_TEST(test_gemini_create_and_embed_mock);
     HU_RUN_TEST(test_ollama_create_and_embed_mock);
     HU_RUN_TEST(test_voyage_create_and_embed_mock);
-    HU_RUN_TEST(test_vector_store_upsert_search_mock);
-    HU_RUN_TEST(test_pgvector_not_supported);
-    HU_RUN_TEST(test_qdrant_mock);
     HU_RUN_TEST(test_semantic_cache_hit_miss);
     HU_RUN_TEST(test_semantic_cache_put_then_get_exact);
 }

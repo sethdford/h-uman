@@ -40,7 +40,6 @@
 #include "human/feeds/processor.h"
 #include "human/memory.h"
 #include "human/memory/compression.h"
-#include "human/memory/degradation.h"
 #include "human/memory/personal_model.h"
 #include "human/memory/proactive_decisions_repo.h" /* C5 Part A: decision log */
 #include "human/persona.h"
