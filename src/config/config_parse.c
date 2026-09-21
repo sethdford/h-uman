@@ -986,6 +986,25 @@ static hu_error_t parse_heartbeat(hu_allocator_t *a, hu_config_t *cfg, const hu_
     return HU_OK;
 }
 
+/* 2026-09-21: src/daemon.c gates the follow-up watcher tick on
+ * cfg->follow_up_watcher.enabled and tells operators to "set
+ * follow_up_watcher.enabled=true in config.json" when it is off — but nothing
+ * in src/config/ read the key, so the field was always false and the advice
+ * was unfollowable. Mirrors parse_heartbeat. */
+static hu_error_t parse_follow_up_watcher(hu_allocator_t *a, hu_config_t *cfg,
+                                          const hu_json_value_t *obj) {
+    (void)a;
+    if (!obj || obj->type != HU_JSON_OBJECT)
+        return HU_OK;
+    cfg->follow_up_watcher.enabled =
+        hu_json_get_bool(obj, "enabled", cfg->follow_up_watcher.enabled);
+    double iv =
+        hu_json_get_number(obj, "interval_seconds", cfg->follow_up_watcher.interval_seconds);
+    if (iv > 0 && iv <= 86400)
+        cfg->follow_up_watcher.interval_seconds = (int)iv;
+    return HU_OK;
+}
+
 static hu_error_t parse_reliability(hu_allocator_t *a, hu_config_t *cfg,
                                     const hu_json_value_t *obj) {
     if (!obj || obj->type != HU_JSON_OBJECT)
@@ -1711,6 +1730,10 @@ hu_error_t hu_config_parse_json(hu_config_t *cfg, const char *content, size_t le
     hu_json_value_t *heartbeat_obj = hu_json_object_get(root, "heartbeat");
     if (heartbeat_obj)
         parse_heartbeat(a, cfg, heartbeat_obj);
+
+    hu_json_value_t *follow_up_watcher_obj = hu_json_object_get(root, "follow_up_watcher");
+    if (follow_up_watcher_obj)
+        parse_follow_up_watcher(a, cfg, follow_up_watcher_obj);
 
     hu_json_value_t *reliability_obj = hu_json_object_get(root, "reliability");
     if (reliability_obj) {
