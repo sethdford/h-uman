@@ -283,6 +283,33 @@ before/after.
 Baselines today: A = 146, B = 125. Targets: A = 0 after P5, B < 20.
 Runs in pre-push (the suite already takes ~4 min; this adds seconds).
 
+**As built (2026-09-21, Task 10, on `4d376689b`).** Shipped as
+`scripts/check-dead-strip-ratchet.sh`, wired into `.githooks/pre-push` and
+registered as the `dead-strip-objects` / `dead-strip-symbols` rows of
+`scripts/ratchet-config.tsv` (floors 0 and 20, from the targets above). The
+gate is documented in `.claude/rules/dead-strip-ratchet.md`, beside
+`.claude/rules/clone-ratchet.md`. Measured after Tasks 6-9 landed:
+**A = 50, B = 99** (down from the 146 / 125 above), in **~1 s** warm.
+
+Three measurement rules the steps above do not state, each of which was wrong
+before it was right (details in the rule doc):
+
+- A member is counted in A only if it exports **≥1 global `T` symbol**. 56 of
+  the 1,024 members export none — the `data_prompts_*_txt.c.o` blobs and
+  `outbound/{strip,shape,echo,persona,moderation}.c.o`, which carry only `D`/`S`
+  stage tables. Counting them would inflate A by 56.
+- **Common symbols (`nm` type `C`) are excluded** from the liveness test. ASan
+  gives every object a common `____asan_globals_registered`, which the linker
+  coalesces into one map entry; testing it by name marks all 1,024 members live
+  and collapses A to 0.
+- B counts **symbols, not functions**: 40 function symbols + 59 function-local
+  statics (`_hu_fn.DEFAULT_LEN`, `_hu_fn.sql`) at this baseline.
+
+Two limits, both deliberate: the baselines are specific to `build/`'s
+configuration (`build-check` compiles a different set of translation units), and
+the map parser is macOS `ld`'s, so the gate prints `RATCHET_SKIP` and exits 0 on
+Linux, on a missing build dir, or when `build/` is older than `src/`.
+
 ## 7. Do not
 
 - Do not delete the 840 test-referenced dead functions in linked files as

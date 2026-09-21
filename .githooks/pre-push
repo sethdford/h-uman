@@ -125,6 +125,28 @@ if [ -f "CMakeLists.txt" ]; then
         exit 1
     fi
 
+    # Dead-strip ratchet: never-loaded archive members (A) and dead-stripped
+    # _hu_ symbols no test references (B) may only shrink. Lives here rather
+    # than in pre-commit because it needs a built tree — it relinks `human`
+    # with -dead_strip and reads the link map (~1 s on a warm build dir).
+    #
+    # It deliberately measures HU_BUILD_DIR (default `build`, the dev preset
+    # the baselines were taken against), NOT the $BUILD_DIR this hook just
+    # built: build-check configures a different feature set, so it compiles a
+    # different set of translation units and its counts are not comparable to
+    # the committed constants. When `build/` is missing, stale, or this is not
+    # macOS, the gate prints RATCHET_SKIP and exits 0 — an unmeasurable gate
+    # must never block a push. Keep `build/` current if you want it to bite.
+    if [ -x "scripts/check-dead-strip-ratchet.sh" ]; then
+        if ! bash scripts/check-dead-strip-ratchet.sh; then
+            echo ""
+            echo "Push blocked: dead code grew past the dead-strip ratchet."
+            echo "Delete the never-loaded objects / unreferenced dead symbols listed above,"
+            echo "or wire them — see .claude/rules/dead-strip-ratchet.md."
+            exit 1
+        fi
+    fi
+
     # Auto-sync stats across all docs (AGENTS.md, README.md, CONTRIBUTING.md, etc.)
     # Only sync from a tree that actually contains all of origin/main.
     #

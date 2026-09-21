@@ -11,6 +11,17 @@
 # scripts/check-*.sh baselines are never touched.
 set -uo pipefail
 
+# Hermetic means hermetic ABOUT GIT TOO. .githooks/pre-commit is the only place
+# this test ever runs (it fires when the mechanism itself is staged), and git
+# exports GIT_DIR / GIT_INDEX_FILE into hook children — so every `git -C $d`
+# below addressed the REPO BEING COMMITTED instead of the throwaway repo and
+# died with "fatal: this operation must be run in a work tree". The two cases
+# that need a live git (tighten + stage) failed, and the gate blocked the
+# commit, on every tree. Run from a shell: green. Run from the hook: red. Unset
+# the inherited state so both agree.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+      GIT_COMMON_DIR GIT_PREFIX GIT_ALTERNATE_OBJECT_DIRECTORIES
+
 LIB="$(cd "$(dirname "$0")" && pwd)/lib/ratchet.sh"
 [ -f "$LIB" ] || { echo "missing $LIB" >&2; exit 1; }
 
@@ -93,10 +104,18 @@ cfgdir="$(cd "$(dirname "$0")/.." && pwd)"
   f=$(ratchet_config_field file-size floor)
   r=$(ratchet_config_field edge-cross-channel rate)
   u=$(ratchet_config_field no-such-ratchet var)
+  # Two rows pointing at ONE script (check-dead-strip-ratchet.sh emits both
+  # counters). A row whose columns are space- not tab-separated fails the
+  # parser's `NF < 7` guard and vanishes silently, taking its counter out of
+  # the weekly report with no error anywhere — so assert both rows resolve.
+  o=$(ratchet_config_field dead-strip-objects var)
+  s=$(ratchet_config_field dead-strip-symbols floor)
   [ "$v" = "CLONE_BASELINE" ] && echo "  PASS  reads var column"   || { echo "  FAIL  var column: $v"; exit 1; }
   [ "$f" = "800" ]            && echo "  PASS  reads floor column" || { echo "  FAIL  floor column: $f"; exit 1; }
   [ "$r" = "off" ]            && echo "  PASS  reads rate column"  || { echo "  FAIL  rate column: $r"; exit 1; }
   [ -z "$u" ]                 && echo "  PASS  unknown name is empty" || { echo "  FAIL  unknown name: $u"; exit 1; }
+  [ "$o" = "NEVER_LOADED_BASELINE" ] && echo "  PASS  multi-counter row 1 resolves" || { echo "  FAIL  dead-strip-objects var: $o"; exit 1; }
+  [ "$s" = "20" ]             && echo "  PASS  multi-counter row 2 resolves" || { echo "  FAIL  dead-strip-symbols floor: $s"; exit 1; }
 ) || fail=$((fail+1))
 
 echo
