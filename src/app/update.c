@@ -123,12 +123,9 @@ static char *get_exe_path(hu_allocator_t *alloc) {
     uint32_t size = (uint32_t)sizeof(buf);
     if (_NSGetExecutablePath(buf, &size) != 0)
         return NULL;
-    char *resolved = realpath(buf, NULL);
-    if (resolved) {
-        char *out = hu_strdup(alloc, resolved);
-        free(resolved);
-        return out;
-    }
+    char *resolved = hu_platform_realpath(alloc, buf);
+    if (resolved)
+        return resolved;
     return hu_strdup(alloc, buf);
 #else
     return NULL;

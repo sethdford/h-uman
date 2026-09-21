@@ -6,6 +6,7 @@
 #include "human/core/paths.h"
 #include "human/core/process_util.h"
 #include "human/core/string.h"
+#include "human/platform.h"
 #include "human/skill_registry.h"
 #include <stdint.h>
 #include <stdio.h>
@@ -1528,12 +1529,9 @@ static char *resolve_binary_path(hu_allocator_t *alloc) {
     uint32_t size = (uint32_t)sizeof(buf);
     if (_NSGetExecutablePath(buf, &size) != 0)
         return NULL;
-    char *resolved = realpath(buf, NULL);
-    if (resolved) {
-        char *out = hu_strdup(alloc, resolved);
-        free(resolved);
-        return out;
-    }
+    char *resolved = hu_platform_realpath(alloc, buf);
+    if (resolved)
+        return resolved;
     return hu_strdup(alloc, buf);
 #else
     (void)alloc;

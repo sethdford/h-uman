@@ -279,6 +279,16 @@ if [ -n "$staged_state_path_ch" ] && [ -x "scripts/check-state-path-literals.sh"
     fi
 fi
 
+staged_realpath_c=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '^src/.*\.(c|m)$' || true)
+if [ -n "$staged_realpath_c" ] && [ -x "scripts/check-realpath-wrapper.sh" ]; then
+    if ! bash scripts/check-realpath-wrapper.sh; then
+        echo ""
+        echo "Pre-commit blocked: a raw realpath() call outside src/app/platform.c."
+        echo "Route it through hu_platform_realpath — see include/human/platform.h."
+        exit 1
+    fi
+fi
+
 # Function-length ratchet (2026-09-12): the file-size gate cannot see a
 # 10,087-line function inside a frozen file. Advisory when clang or
 # build/compile_commands.json is missing.
