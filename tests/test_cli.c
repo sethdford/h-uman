@@ -1,4 +1,5 @@
 #include "human/agent/cli.h"
+#include "human/channel_catalog.h"
 #include "human/cli_commands.h"
 #include "human/config.h"
 #include "human/core/allocator.h"
@@ -82,6 +83,64 @@ static void test_cmd_capabilities_json(void) {
     hu_error_t err = cmd_capabilities(&alloc, 3, argv);
     HU_ASSERT_EQ(err, HU_OK);
 }
+
+#if defined(__unix__) || defined(__APPLE__)
+/* `human capabilities` must list channels from channel_catalog.h — the
+ * build's single source of truth — not a hardcoded literal. Pick a
+ * catalog channel that's actually compiled into this build (falling back
+ * to the CLI channel's own key, which every build has) so the assertion
+ * is derived from the catalog, never a literal typed into this test. */
+static void test_cmd_capabilities_lists_a_catalog_channel(void) {
+    set_test_home();
+    hu_allocator_t alloc = hu_system_allocator();
+
+    size_t n = 0;
+    const hu_channel_meta_t *catalog = hu_channel_catalog_all(&n);
+    HU_ASSERT(n > 0);
+    const char *expect_key = catalog[0].key;
+    for (size_t i = 0; i < n; i++) {
+        if (catalog[i].id != HU_CHANNEL_CLI) {
+            expect_key = catalog[i].key;
+            break;
+        }
+    }
+
+    char tmpl[] = "/tmp/hu_cli_caps_catXXXXXX";
+    int tfd = mkstemp(tmpl);
+    HU_ASSERT(tfd >= 0);
+    if (close(tfd) != 0) {
+        unlink(tmpl);
+        HU_FAIL("close tmp");
+    }
+
+    int save_out = dup(STDOUT_FILENO);
+    HU_ASSERT(save_out >= 0);
+    if (!freopen(tmpl, "w", stdout)) {
+        dup2(save_out, STDOUT_FILENO);
+        close(save_out);
+        unlink(tmpl);
+        HU_FAIL("freopen stdout");
+    }
+
+    char *argv[] = {"human", "capabilities"};
+    hu_error_t err = cmd_capabilities(&alloc, 2, argv);
+
+    fflush(stdout);
+    dup2(save_out, STDOUT_FILENO);
+    close(save_out);
+
+    FILE *rf = fopen(tmpl, "r");
+    HU_ASSERT_NOT_NULL(rf);
+    char buf[4096];
+    size_t len = fread(buf, 1, sizeof(buf) - 1, rf);
+    buf[len] = '\0';
+    fclose(rf);
+    unlink(tmpl);
+
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(strstr(buf, expect_key) != NULL);
+}
+#endif
 
 static void test_cmd_models_list(void) {
     set_test_home();
@@ -339,17 +398,23 @@ static void test_agent_cli_no_contact_is_null(void) {
 }
 
 static void test_agent_cli_prompt_once_parsing(void) {
-    const char *argv[] = {"agent", "--prompt", "Research AI", "--once", "--message", "Check feeds", "--channel", "cli"};
-    hu_parsed_agent_args_t args; memset(&args, 0, sizeof(args));
+    const char *argv[] = {"agent",     "--prompt",    "Research AI", "--once",
+                          "--message", "Check feeds", "--channel",   "cli"};
+    hu_parsed_agent_args_t args;
+    memset(&args, 0, sizeof(args));
     HU_ASSERT_EQ(hu_agent_cli_parse_args(argv, 8, &args), HU_OK);
-    HU_ASSERT_STR_EQ(args.prompt, "Research AI"); HU_ASSERT_EQ(args.once, 1);
-    HU_ASSERT_STR_EQ(args.message, "Check feeds"); HU_ASSERT_STR_EQ(args.channel, "cli");
+    HU_ASSERT_STR_EQ(args.prompt, "Research AI");
+    HU_ASSERT_EQ(args.once, 1);
+    HU_ASSERT_STR_EQ(args.message, "Check feeds");
+    HU_ASSERT_STR_EQ(args.channel, "cli");
 }
 static void test_agent_cli_prompt_without_once(void) {
     const char *argv[] = {"agent", "--prompt", "System prompt text"};
-    hu_parsed_agent_args_t args; memset(&args, 0, sizeof(args));
+    hu_parsed_agent_args_t args;
+    memset(&args, 0, sizeof(args));
     HU_ASSERT_EQ(hu_agent_cli_parse_args(argv, 3, &args), HU_OK);
-    HU_ASSERT_STR_EQ(args.prompt, "System prompt text"); HU_ASSERT_EQ(args.once, 0);
+    HU_ASSERT_STR_EQ(args.prompt, "System prompt text");
+    HU_ASSERT_EQ(args.once, 0);
 }
 
 #if defined(__unix__) || defined(__APPLE__)
@@ -405,8 +470,7 @@ static char *tom_capture_stdout(int argc, char **argv, hu_error_t *err_out) {
 }
 
 static void test_cmd_tom_smoke_emits_pct_100_on_pack(void) {
-    char *argv[] = {"human", "eval", "tom", "smoke",
-                    HU_EVAL_SUITES_DIR "/tom/tom_synthetic.json"};
+    char *argv[] = {"human", "eval", "tom", "smoke", HU_EVAL_SUITES_DIR "/tom/tom_synthetic.json"};
     hu_error_t err = HU_OK;
     char *out = tom_capture_stdout(5, argv, &err);
     HU_ASSERT_EQ(err, HU_OK);
@@ -417,8 +481,7 @@ static void test_cmd_tom_smoke_emits_pct_100_on_pack(void) {
 }
 
 static void test_cmd_tom_gold_emits_envelope(void) {
-    char *argv[] = {"human", "eval", "tom", "gold",
-                    HU_EVAL_SUITES_DIR "/tom/tom_synthetic.json"};
+    char *argv[] = {"human", "eval", "tom", "gold", HU_EVAL_SUITES_DIR "/tom/tom_synthetic.json"};
     hu_error_t err = HU_OK;
     char *out = tom_capture_stdout(5, argv, &err);
     HU_ASSERT_EQ(err, HU_OK);
@@ -435,12 +498,13 @@ static void test_cmd_tom_run_scores_jsonl_responses(void) {
     const char *resps =
         "{\"id\":\"tom-fb-01\",\"response\":\"Max will check the original basket first.\"}\n"
         "{\"id\":\"tom-fb-02\",\"response\":\"Sam still thinks the cookies are in the jar.\"}\n"
-        "{\"id\":\"tom-pr-01\",\"response\":\"Likely they want me to close the window or raise heat.\"}\n";
+        "{\"id\":\"tom-pr-01\",\"response\":\"Likely they want me to close the window or raise "
+        "heat.\"}\n";
     HU_ASSERT_EQ(write(tfd, resps, strlen(resps)), (ssize_t)strlen(resps));
     close(tfd);
 
-    char *argv[] = {"human",     "eval",         "tom",
-                    "run",       "--pack",       HU_EVAL_SUITES_DIR "/tom/tom_synthetic.json",
+    char *argv[] = {"human",       "eval",   "tom",
+                    "run",         "--pack", HU_EVAL_SUITES_DIR "/tom/tom_synthetic.json",
                     "--responses", tmpl};
     hu_error_t err = HU_OK;
     char *out = tom_capture_stdout(8, argv, &err);
@@ -458,14 +522,13 @@ static void test_cmd_tom_run_no_skip_unanswered_inflates_total(void) {
     char tmpl[] = "/tmp/hu_eval_tom_resps2_XXXXXX";
     int tfd = mkstemp(tmpl);
     HU_ASSERT(tfd >= 0);
-    const char *resps =
-        "{\"id\":\"tom-fb-01\",\"response\":\"original basket\"}\n";
+    const char *resps = "{\"id\":\"tom-fb-01\",\"response\":\"original basket\"}\n";
     HU_ASSERT_EQ(write(tfd, resps, strlen(resps)), (ssize_t)strlen(resps));
     close(tfd);
 
-    char *argv[] = {"human",     "eval",         "tom",
-                    "run",       "--pack",       HU_EVAL_SUITES_DIR "/tom/tom_synthetic.json",
-                    "--responses", tmpl,         "--no-skip-unanswered"};
+    char *argv[] = {"human",       "eval",   "tom",
+                    "run",         "--pack", HU_EVAL_SUITES_DIR "/tom/tom_synthetic.json",
+                    "--responses", tmpl,     "--no-skip-unanswered"};
     hu_error_t err = HU_OK;
     char *out = tom_capture_stdout(9, argv, &err);
     unlink(tmpl);
@@ -485,8 +548,8 @@ static void test_cmd_tom_unknown_subcommand_fails(void) {
 
 static void test_cmd_tom_run_missing_flag_fails(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    char *argv[] = {"human", "eval", "tom", "run", "--pack",
-                    HU_EVAL_SUITES_DIR "/tom/tom_synthetic.json"};
+    char *argv[] = {"human", "eval",   "tom",
+                    "run",   "--pack", HU_EVAL_SUITES_DIR "/tom/tom_synthetic.json"};
     HU_ASSERT_NEQ(cmd_eval(&alloc, 6, argv), HU_OK);
 }
 #endif
@@ -500,6 +563,9 @@ void run_cli_tests(void) {
     HU_RUN_TEST(test_cmd_workspace_show);
     HU_RUN_TEST(test_cmd_capabilities_default);
     HU_RUN_TEST(test_cmd_capabilities_json);
+#if defined(__unix__) || defined(__APPLE__)
+    HU_RUN_TEST(test_cmd_capabilities_lists_a_catalog_channel);
+#endif
     HU_RUN_TEST(test_cmd_models_list);
     HU_RUN_TEST(test_cmd_auth_status);
     HU_RUN_TEST(test_cmd_update_check);

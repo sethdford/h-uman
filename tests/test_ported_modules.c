@@ -1,7 +1,6 @@
 /* Tests for newly ported modules (capabilities, channel_catalog, config_mutator, update, etc.) */
 #include "human/agent/commands.h"
 #include "human/agent/scheduler_status_json.h"
-#include "human/capabilities.h"
 #include "human/channel_catalog.h"
 #include "human/config.h"
 #include "human/config_mutator.h"
@@ -499,17 +498,6 @@ static void test_rate_tracker(void) {
     hu_rate_tracker_destroy(t);
 }
 
-static void test_capabilities_manifest(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    char *json = NULL;
-    hu_error_t err = hu_capabilities_build_manifest_json(&alloc, NULL, NULL, 0, &json);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_NOT_NULL(json);
-    HU_ASSERT(strstr(json, "\"channels\"") != NULL);
-    HU_ASSERT(strstr(json, "\"memory_engines\"") != NULL);
-    alloc.free(alloc.ctx, json, strlen(json) + 1);
-}
-
 static void test_config_mutator_mutate(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_mutation_result_t res = {0};
@@ -833,7 +821,6 @@ void run_ported_modules_tests(void) {
     HU_RUN_TEST(test_agent_commands_parse);
     HU_RUN_TEST(test_agent_commands_bare_reset_prompt);
     HU_RUN_TEST(test_rate_tracker);
-    HU_RUN_TEST(test_capabilities_manifest);
     HU_RUN_TEST(test_config_mutator_mutate);
     HU_RUN_TEST(test_update_check_mock);
     HU_RUN_TEST(test_update_apply_mock);

@@ -3527,6 +3527,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_agent_security.c
     tests/test_skills.c
     tests/test_ported_modules.c
+    tests/test_capabilities.c
     tests/test_doctor_imessage_diagnose.c
     tests/test_doctor_registry.c
     tests/test_doctor_chatdb.c

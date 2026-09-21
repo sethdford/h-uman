@@ -291,6 +291,7 @@ void run_diagnostic_commands_tests(void);
 void run_skills_tests(void);
 void run_memory_new_tests(void);
 void run_ported_modules_tests(void);
+void run_capabilities_tests(void);
 void run_doctor_imessage_diagnose_tests(void);
 void run_doctor_registry_tests(void);
 void run_doctor_chatdb_tests(void);
@@ -1349,6 +1350,7 @@ int main(int argc, char **argv) {
     run_skills_tests();
     run_memory_new_tests();
     run_ported_modules_tests();
+    run_capabilities_tests();
     run_doctor_imessage_diagnose_tests();
     run_doctor_registry_tests();
     run_doctor_chatdb_tests();

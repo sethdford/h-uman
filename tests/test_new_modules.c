@@ -1,6 +1,5 @@
 #include "human/agent_routing.h"
 #include "human/bus.h"
-#include "human/capabilities.h"
 #include "human/config.h"
 #include "human/config_types.h"
 #include "human/context_tokens.h"
@@ -1054,47 +1053,6 @@ static void test_max_tokens_empty_model_name(void) {
     HU_ASSERT_EQ(r, HU_DEFAULT_MODEL_MAX_TOKENS);
 }
 
-/* ─── Capabilities ────────────────────────────────────────────────────────── */
-static void test_capabilities_build_summary_text(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    char *out = NULL;
-    hu_error_t err = hu_capabilities_build_summary_text(&alloc, NULL, NULL, 0, &out);
-    if (err == HU_OK) {
-        HU_ASSERT_NOT_NULL(out);
-        HU_ASSERT(strlen(out) > 0);
-        alloc.free(alloc.ctx, out, strlen(out) + 1);
-    }
-}
-
-static void test_capabilities_build_manifest_json(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    char *out = NULL;
-    hu_error_t err = hu_capabilities_build_manifest_json(&alloc, NULL, NULL, 0, &out);
-    if (err == HU_OK) {
-        HU_ASSERT_NOT_NULL(out);
-        HU_ASSERT_TRUE(strstr(out, "version") != NULL);
-        alloc.free(alloc.ctx, out, strlen(out) + 1);
-    }
-}
-
-static void test_capabilities_build_prompt_section(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    char *out = NULL;
-    hu_error_t err = hu_capabilities_build_prompt_section(&alloc, NULL, NULL, 0, &out);
-    if (err == HU_OK) {
-        HU_ASSERT_NOT_NULL(out);
-        alloc.free(alloc.ctx, out, strlen(out) + 1);
-    }
-}
-
-static void test_capabilities_null_alloc_rejected(void) {
-    char *out = NULL;
-    hu_error_t e1 = hu_capabilities_build_summary_text(NULL, NULL, NULL, 0, &out);
-    hu_error_t e2 = hu_capabilities_build_manifest_json(NULL, NULL, NULL, 0, &out);
-    HU_ASSERT(e1 != HU_OK);
-    HU_ASSERT(e2 != HU_OK);
-}
-
 /* ─── Interactions (choices) ──────────────────────────────────────────────── */
 static void test_choices_prompt_returns_default_in_test_mode(void) {
     hu_choice_t choices[] = {
@@ -1796,10 +1754,6 @@ void run_new_modules_tests(void) {
     HU_RUN_TEST(test_max_tokens_empty_model_name);
 
     /* Capabilities */
-    HU_RUN_TEST(test_capabilities_build_summary_text);
-    HU_RUN_TEST(test_capabilities_build_manifest_json);
-    HU_RUN_TEST(test_capabilities_build_prompt_section);
-    HU_RUN_TEST(test_capabilities_null_alloc_rejected);
 
     /* Interactions */
     HU_RUN_TEST(test_choices_prompt_returns_default_in_test_mode);
