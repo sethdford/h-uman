@@ -215,5 +215,3 @@ void hu_voice_session_warn_first_byte_latency_if_needed(const hu_voice_session_t
                  session->latency.avg_first_byte_ms, HU_VOICE_TARGET_FIRST_BYTE_MS);
     s_warned = 1;
 }
-
-/* ── Micro-turn API ─────────────────────────────────────────────── */
