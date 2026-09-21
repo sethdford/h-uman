@@ -335,6 +335,21 @@ void hu_daemon_director_arm_guard(hu_allocator_t *alloc, hu_agent_t *agent,
         return;
 
     size_t dn_len = strlen(result->direction);
+
+    /* Idempotent per turn. daemon.c's batch loop is a `do { } while (1)`
+     * with five paths that `continue` back to the top for another provider
+     * call (local->cloud fallback, ai-tell, quality, turing and llm-judge
+     * retries), and it builds `convo_ctx` ONCE above that loop. Arming per
+     * iteration therefore appended to the already-appended buffer, so a
+     * retried turn carried two "this message only" blocks and a second
+     * retry three. G6 is already armed with this exact direction and the
+     * text is already in the prompt, so there is nothing left to do;
+     * hu_daemon_director_end_turn drops the arming, which is what lets the
+     * NEXT turn inject again. */
+    if (agent->scene_direction_text && agent->scene_direction_text_len == dn_len &&
+        memcmp(agent->scene_direction_text, result->direction, dn_len) == 0)
+        return;
+
     static const char dn_hdr[] = "\n--- Scene Direction (this message only) ---\n";
     static const char dn_tail[] = "\n";
     size_t old_len = *convo_ctx_len;

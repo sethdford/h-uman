@@ -59,7 +59,9 @@ bool hu_daemon_director_call(hu_allocator_t *alloc, const char *combined, size_t
  *   1. hu_daemon_director_contact_boundary(agent, batch_key, key_len)
  *        — before anything else, so a previous contact's director ring
  *          cannot gate this contact's reply (post-mortem rowid 56355).
- *   2. hu_daemon_director_arm_guard(...)  — before the agent turn.
+ *   2. hu_daemon_director_arm_guard(...)  — ONCE, before the agent turn,
+ *        OUTSIDE the retry loop (daemon.c builds `convo_ctx` once above
+ *        that loop, so arming per iteration appended a second block).
  *   3. hu_daemon_director_end_turn(agent) — after the LAST retry of the
  *        turn, and MUST run before `result` leaves scope, or G6 reads
  *        freed stack memory on the next turn.
@@ -71,6 +73,13 @@ bool hu_daemon_director_call(hu_allocator_t *alloc, const char *combined, size_t
  * `agent->conversation_context`. On allocation failure the context is
  * left untouched and the guard is NOT armed — the direction never
  * reached the prompt, so there is nothing for G6 to catch.
+ *
+ * Idempotent within a turn: calling it again with the same direction
+ * while the guard is still armed is a no-op, so the prompt carries the
+ * "this message only" block exactly once however many times the caller's
+ * retry loop re-enters. end_turn clears the arming; the next turn injects
+ * again. (Re-arming with a DIFFERENT direction mid-turn is not a supported
+ * pattern — no caller does it — and would append a second block.)
  *
  * `result` must outlive the turn and the matching end_turn call. */
 void hu_daemon_director_arm_guard(hu_allocator_t *alloc, hu_agent_t *agent,

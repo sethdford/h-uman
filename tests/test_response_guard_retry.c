@@ -875,6 +875,85 @@ static void daemon_contact_boundary_clears_director_ring(void) {
     hu_agent_deinit(&agent);
 }
 
+/* Count non-overlapping occurrences of `needle` in `hay`. */
+static size_t g6w_count(const char *hay, const char *needle) {
+    size_t n = 0, nlen = strlen(needle);
+    for (const char *p = hay; (p = strstr(p, needle)) != NULL; p += nlen)
+        n++;
+    return n;
+}
+
+/* RETRY IDEMPOTENCE — the Scene Direction block must appear ONCE in the
+ * prompt no matter how many times the daemon's turn loop re-arms.
+ *
+ * daemon.c's batch loop is a `do { ... } while (1)` with five paths that
+ * `continue` back to the top for another provider call (local->cloud
+ * fallback, ai-tell retry, quality retry, turing retry, llm-judge retry).
+ * `convo_ctx` is built ONCE above that loop, so a per-iteration arm call
+ * appends to the already-appended buffer: a retried turn used to carry the
+ * block twice, a second retry three times — while the header it injects
+ * literally reads "this message only".
+ *
+ * Non-vacuous by construction: before the fix this test reports 2 header
+ * occurrences and 2 copies of the direction. The trailing asserts also pin
+ * that suppressing the duplicate does NOT disarm G6 or corrupt the buffer. */
+static void daemon_arm_g6_injects_direction_once_across_retry(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    length_provider_ctx_t pctx;
+    memset(&pctx, 0, sizeof(pctx));
+
+    static const char clean[] = "ha, ask me again after coffee";
+    pctx.call_text[0] = clean;
+    pctx.call_text_len[0] = sizeof(clean) - 1;
+
+    hu_provider_t provider = length_provider_create(&pctx);
+    hu_agent_t agent;
+    HU_ASSERT_EQ(g6w_make_agent(&agent, &alloc, provider, "g6_retry_mock"), HU_OK);
+
+    /* Stand in for the context daemon.c assembles above its turn loop. */
+    static const char base[] = "them: what do you think?";
+    char *convo = (char *)alloc.alloc(alloc.ctx, sizeof(base));
+    HU_ASSERT_NOT_NULL(convo);
+    memcpy(convo, base, sizeof(base));
+    size_t convo_len = sizeof(base) - 1;
+
+    hu_director_result_t dr = g6w_director(G6W_DIRECTION);
+
+    /* Iteration 1 of the turn loop. */
+    hu_daemon_director_arm_guard(&alloc, &agent, &dr, &convo, &convo_len);
+    HU_ASSERT_NOT_NULL(convo);
+    HU_ASSERT_EQ(g6w_count(convo, "Scene Direction"), (size_t)1);
+
+    /* A retry path fired and `continue`d — iteration 2 re-arms with the
+     * same director_result and the same (already-appended) convo_ctx. */
+    hu_daemon_director_arm_guard(&alloc, &agent, &dr, &convo, &convo_len);
+
+    /* THE CONTRACT: still exactly one block, one copy of the direction. */
+    HU_ASSERT_EQ(g6w_count(convo, "Scene Direction"), (size_t)1);
+    HU_ASSERT_EQ(g6w_count(convo, G6W_DIRECTION), (size_t)1);
+    HU_ASSERT_EQ(strlen(convo), convo_len);
+    HU_ASSERT_STR_CONTAINS(convo, base);
+
+    /* The agent must still see the buffer we hold, and G6 must still be
+     * armed — suppressing the duplicate must not disarm the guard. */
+    HU_ASSERT(agent.conversation_context == convo);
+    HU_ASSERT_EQ(agent.conversation_context_len, convo_len);
+    HU_ASSERT_NOT_NULL(agent.scene_direction_text);
+    HU_ASSERT_EQ(agent.scene_direction_text_len, strlen(G6W_DIRECTION));
+
+    /* And it still guards: a non-quoting reply passes on the first call. */
+    char *r = NULL;
+    size_t rlen = 0;
+    HU_ASSERT_EQ(hu_agent_turn(&agent, "what do you think?", 18, &r, &rlen), HU_OK);
+    HU_ASSERT_NOT_NULL(r);
+    HU_ASSERT_EQ(pctx.calls, (size_t)1);
+
+    hu_daemon_director_end_turn(&agent);
+    alloc.free(alloc.ctx, r, rlen + 1);
+    alloc.free(alloc.ctx, convo, convo_len + 1);
+    hu_agent_deinit(&agent);
+}
+
 void run_response_guard_retry_tests(void) {
     HU_TEST_SUITE("Response Guard Retry");
     HU_RUN_TEST(guard_reject_retry_produces_human_like_replacement);
@@ -901,4 +980,5 @@ void run_response_guard_retry_tests(void) {
     HU_RUN_TEST(daemon_arm_g6_rejects_verbatim_director_echo);
     HU_RUN_TEST(daemon_arm_g6_allows_non_quoting_reply);
     HU_RUN_TEST(daemon_contact_boundary_clears_director_ring);
+    HU_RUN_TEST(daemon_arm_g6_injects_direction_once_across_retry);
 }

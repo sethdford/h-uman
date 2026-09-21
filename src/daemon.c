@@ -7257,6 +7257,16 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 hu_log_info("human", agent ? agent->observer : NULL,
                             "calling agent turn for %.*s...", (int)(key_len > 20 ? 20 : key_len),
                             batch_key);
+
+                /* Inject the director's scene direction and arm G6 against a
+                 * verbatim echo. ONCE PER TURN, outside the retry loop:
+                 * convo_ctx is built once above and never rebuilt between
+                 * iterations, so arming per iteration appended a second "this
+                 * message only" block. Contract: daemon/director.h. */
+                if (llm_decides && director_result_valid)
+                    hu_daemon_director_arm_guard(alloc, agent, &director_result, &convo_ctx,
+                                                 &convo_ctx_len);
+
                 do {
                     if (response) {
                         agent->alloc->free(agent->alloc->ctx, response, response_len + 1);
@@ -7288,15 +7298,6 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             memcpy(stream_ctx.id, batch_key, ik);
                             stream_ctx.id[ik] = '\0';
                         }
-                        /* Inject the director's scene direction into the
-                         * conversation context AND arm G6 against a verbatim
-                         * echo of it. The director call was made earlier
-                         * (before delays); the result is in director_result,
-                         * which the agent borrows until end_turn below. */
-                        if (llm_decides && director_result_valid)
-                            hu_daemon_director_arm_guard(alloc, agent, &director_result, &convo_ctx,
-                                                         &convo_ctx_len);
-
                         /* Sprint 46 R5.1 — inbound arrival latency ingest.
                          *
                          * Before running agent_turn for this inbound, attribute
