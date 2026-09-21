@@ -189,6 +189,7 @@ void run_voice_streaming_e2e_tests(void);
 void run_mlx_local_voice_tests(void);
 void run_autonomy_tests(void);
 void run_retrieval_tests(void);
+void run_reranker_tests(void);
 void run_retrieval_contact_isolation_tests(void);
 void run_vector_tests(void);
 void run_vector_full_tests(void);
@@ -1249,6 +1250,7 @@ int main(int argc, char **argv) {
     run_mlx_local_voice_tests();
     run_autonomy_tests();
     run_retrieval_tests();
+    run_reranker_tests();
     run_retrieval_contact_isolation_tests();
     run_vector_tests();
     run_vector_full_tests();
