@@ -825,7 +825,6 @@ set(HU_CORE_SOURCES
     src/agent/validators/channel_tags_validator.c
     src/agent/validators/ai_phrases_validator.c
     src/agent/validators/formal_structure_validator.c
-    src/agent/validators/cot_audit_validator.c
     src/agent/validators/persona_narrator_validator.c
     src/agent/validators/assistant_closer_validator.c
     src/agent/validators/role_consistency_validator.c
