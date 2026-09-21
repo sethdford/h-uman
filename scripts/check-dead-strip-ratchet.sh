@@ -226,7 +226,7 @@ n_read=$(grep -c ':$' "$TMP/nm_members.txt" || true)
 # Common symbols (nm type C) are EXCLUDED from the liveness test. Under ASan
 # every object defines ____asan_globals_registered as a common symbol, and the
 # linker coalesces them into one map entry, so testing that name by set
-# membership would mark all 1,024 members live and collapse A to 0. Only
+# membership would mark all 981 members live and collapse A to 0. Only
 # T/D/S/R-style defined symbols identify their own object.
 #
 # nm prints a `path:` header before each file's symbols when handed more than

@@ -11,10 +11,10 @@
 Two counters, both measured by relinking the real binary, both frozen at a
 baseline and allowed only to **decrease**:
 
-| Counter | What it counts | Baseline (2026-09-21, after Task 12) | Floor |
+| Counter | What it counts | Baseline (2026-09-21, after Task 17) | Floor |
 |---|---|---:|---:|
-| **A** — never-loaded archive members | objects in `libhuman_core.a` that the linker never saw a single global symbol of, live *or* dead-stripped. A whole translation unit nobody links. | 36 | 0 |
-| **B** — unreferenced dead symbols | `_hu_` symbols the linker dead-stripped out of `libhuman_core.a` members that no `human_tests` object references either. Dead in the product **and** unpinned by a test. | 79 | 20 |
+| **A** — never-loaded archive members | objects in `libhuman_core.a` that the linker never saw a single global symbol of, live *or* dead-stripped. A whole translation unit nobody links. | 32 | 0 |
+| **B** — unreferenced dead symbols | `_hu_` symbols the linker dead-stripped out of `libhuman_core.a` members that no `human_tests` object references either. Dead in the product **and** unpinned by a test. | 79 (measuring 76 at the time of writing; auto-lock will tighten) | 20 |
 
 The baselines live in `scripts/check-dead-strip-ratchet.sh`
 (`NEVER_LOADED_BASELINE`, `DEAD_UNREF_BASELINE`) — that script is the source of
@@ -71,7 +71,7 @@ Three of these were measured mistakes before the gate was correct:
    two `context.c`), so basename attribution silently merges unrelated modules.
    The object universe comes from `human_core.dir/link.txt`; liveness is tested
    per object through `nm -g --defined-only`.
-2. **A member with no code is not a never-loaded module.** 56 of the 1,024
+2. **A member with no code is not a never-loaded module.** 56 of the 981
    members export no global `T` symbol at all — the embedded
    `data_prompts_*_txt.c.o` blobs, and `outbound/{strip,shape,echo,persona,
    moderation}.c.o`, which export only `D`/`S` stage tables. Requiring ≥1 `T`
@@ -79,14 +79,17 @@ Three of these were measured mistakes before the gate was correct:
 3. **Common symbols (`nm` type `C`) must be excluded from the liveness test.**
    Under ASan every object defines `____asan_globals_registered` as a common
    symbol and the linker coalesces them into one map entry, so a by-name
-   membership test marks all 1,024 members live and collapses A to 0.
+   membership test marks all 981 members live and collapses A to 0.
 
-**B counts symbols, not functions.** At the baseline, B = 40 whole function
-symbols + 59 function-local statics (`_hu_fn.DEFAULT_LEN`, `_hu_fn.sql`), which
-the compiler emits as separate symbols. Statics move with the function that owns
-them, so they are correlated with the thing being measured rather than
-independent noise — but do not read B as "99 dead functions". The FAIL output
-prints every name.
+**B counts symbols, not functions.** At the baseline (79, currently measuring
+76), B is a mix of whole function symbols and function-local statics
+(`_hu_fn.DEFAULT_LEN`, `_hu_fn.sql`), which the compiler emits as separate
+symbols. The original measurement put that split at roughly 40 whole-function
+symbols to 59 statics; the split is approximate and dates from that original
+measurement, not from the current count. Statics move with the function that
+owns them, so they are correlated with the thing being measured rather than
+independent noise — but do not read B as a fixed function count. The FAIL
+output prints every name.
 
 ## The rule
 
@@ -112,7 +115,7 @@ Without the pre-push rebuild the enforcement half would wave through most real
 pushes, because pre-push builds `build-check` while the gate measures `build/`,
 which would therefore usually be stale and self-demote (see below).
 
-Cost: ~1 s warm — 0.1 s to relink, the rest `nm` over 1,024 archive members and
+Cost: ~1 s warm — 0.1 s to relink, the rest `nm` over 981 archive members and
 ~2,000 test objects, with the test-reference set cached in `$TMPDIR` on the
 newest test `.o` mtime. Plus the pre-push incremental rebuild, which is seconds
 on a `build/` the developer was already using.

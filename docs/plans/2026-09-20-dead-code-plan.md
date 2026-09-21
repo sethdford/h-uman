@@ -437,20 +437,20 @@ tables archived in the 2026-09-20 session; the class is the decision.
 | `src/channels/channel_loop.c` | 61 | WIRE |
 | `src/channels/imessage_private/client.c` | 225 | WIRE |
 | `src/config/config_mutator.c` | 625 | WIRE |
-| `src/context/context_engine_rag.c` | 331 | WIRE |
+| `src/context/context_engine_rag.c` | 331 | WIRED (Task 3: context_engine "rag" selects it) |
 | `src/doctor/ws_consumer.c` | 609 | WIRE |
 | `src/gateway/cp_tasks.c` | 305 | WIRE |
 | `src/memory/cross_channel.c` | 332 | DECISION (different feature, data pipeline missing) |
 | `src/memory/cross_graph.c` | 266 | WIRE |
 | `src/memory/lifecycle/cache.c` | 256 | WIRE |
 | `src/memory/vector/vector_retrieval_remote.c` | 683 | WIRE |
-| `src/observability/heartbeat.c` | 260 | WIRE |
+| `src/observability/heartbeat.c` | 260 | WIRED (Task 4: maintenance tick) |
 | `src/onboard/dispatcher.c` | 134 | WIRE |
 | `src/onboard/state.c` | 167 | WIRE |
 | `src/onboard/step_provider.c` | 367 | WIRE |
 | `src/onboard/step_welcome.c` | 117 | WIRE |
 | `src/persona/style_mirror.c` | 189 | DELETED |
-| `src/security/exec_env.c` | 190 | WIRE |
+| `src/security/exec_env.c` | 190 | WIRED (Task 2: shell tool child env) |
 | `src/security/vault_aead.c` | 566 | WIRE |
 | `src/tts/transcript_prep.c` | 1229 | WIRE |
 | `src/channels/nostr.c` | 575 | WIRE-PENDING-FIX |
@@ -474,9 +474,9 @@ tables archived in the 2026-09-20 session; the class is the decision.
 | tool/provider setters | browser_use, computer_use, message, openai, hula | set_grounding ×2, set_channel, set_ws_streaming, set_delegate_registry | DELETE-NOW |
 | reaction wire wrappers | `daemon/daemon_reaction_poll.c` | wire_collector, wire_personal_model | DELETE-NOW (daemon.c:2171/2180 wires directly) |
 | memory facade erase | `memory/memory.c` | facade_erase, purge_by_provenance | UNCONFIRMED (product decision) |
-| platform realpath | `app/platform.c` | platform_realpath | **WIRE** (11 bypass sites) |
+| platform realpath | `app/platform.c` | platform_realpath | DONE (Task 20) |
 | platform/config trivia | platform.c, config_merge.c | get_home_env, parse_datetime, config_env_get | DELETE-NOW |
-| pending-fact expiry | `memory/personal_model.c` | expire_pending_facts | **WIRE** (`apply_decay`, :2734) |
+| pending-fact expiry | `memory/personal_model.c` | expire_pending_facts | WIRED (Task 5) |
 | world-model bridge | `agent/world_model_bridge.c` | w14_register_belief_reverify (UNCONFIRMED), w7_facade_graph_db (DELETE-NOW) | mixed; the real gap is that nothing enqueues the job |
 | directive builders | anticipatory, circadian, conversation ×2, goals, behavioral, narrative_self, behavior_trust | 8 unadopted variants of live builders | DELETE-NOW |
 | security extras | audit, delegation, skill_trust | 6 unadopted siblings | DELETE-NOW |
@@ -486,7 +486,7 @@ tables archived in the 2026-09-20 session; the class is the decision.
 | LLM-backed variants | learner, evaluation_frontier_compare, planner, swarm | 4 | DELETE-NOW |
 | vector/retrieval extras | embeddings, retrieval/engine, store_sqlite_vec, strategy_learner | 4 | DELETE-NOW |
 | feeds extras | `feeds/processor.c` | item_provenance, semantic_search | DELETE-NOW |
-| follow-up watcher halves | `agent/follow_up.c`, `channels/imessage.c` | should_send_now, find_inbound_unreplied | **WIRE** (`daemon_follow_up_watcher.c:73`) |
+| follow-up watcher halves | `agent/follow_up.c`, `channels/imessage.c` | should_send_now, find_inbound_unreplied | WIRED (Task 18, HU_FOLLOW_UP_WATCHER shadow) |
 | graph/memory scoring | graph ×3, promotion, reflection/storage | 5 | DELETE-NOW |
 | MCP client lifecycle | `mcp/mcp.c` | reconnect, refresh_tools | DELETE-NOW |
 | throttle reset, PWA tab, channel extras | proactive_throttle, pwa/bridge, telegram_reactions, thread_binding | 4 | DELETE-NOW |
