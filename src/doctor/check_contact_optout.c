@@ -15,8 +15,13 @@
 #include <string.h>
 #include <unistd.h>
 
+#ifdef HU_ENABLE_SQLITE
+/* Only the SQLite path formats into these; without it the check returns a
+ * literal N/A string, and file-scope statics would trip -Werror=unused-variable
+ * on the no-sqlite build (see check_reflection_loop.c for the same guard). */
 static char s_reason[320];
 static char s_detail[96];
+#endif
 
 static hu_doctor_check_result_t run(hu_doctor_check_t *self, void *vctx) {
     (void)self;
