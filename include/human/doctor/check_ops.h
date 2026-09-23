@@ -107,4 +107,10 @@ extern const hu_doctor_check_t hu_doctor_check_blind_ab_gate;
 /* Gate timestamp ("YYYY-MM-DDTHH:MM:SS", local time) → unix; 0 when unparseable. */
 int64_t hu_doctor_gate_parse_ts(const char *ts);
 
+/* ── contact_optout: who asked us to stop texting first? (O5) ───────── */
+typedef struct hu_doctor_contact_optout_ctx {
+    const char *memory_db; /* NULL → ~/.human/memory.db */
+} hu_doctor_contact_optout_ctx_t;
+extern const hu_doctor_check_t hu_doctor_check_contact_optout;
+
 #endif /* HU_DOCTOR_CHECK_OPS_H */

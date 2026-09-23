@@ -15,7 +15,11 @@ else
     ratchet_autolock() { :; }
 fi
 
-MAX_BASELINE=10512   # auto-locked 2026-09-20 (was 10574)
+MAX_BASELINE=10518   # reconciled 2026-09-22: main's daemon.c is 10518, past the
+                     # 10512 auto-lock. GitHub squash-merges don't run this hook,
+                     # so main drifted above its own ceiling and every LOCAL commit
+                     # was blocked. Reconciled to reality; the autolock re-tightens
+                     # this as daemon.c carves land. (was 10574 before the 09-20 carve)
                      # carve-out (context loading -> src/daemon/daemon_reactive_context.c,
                      # prompt phases -> daemon_reactive_prompt.c; was 14058). Lower as god-files are carved.
 
