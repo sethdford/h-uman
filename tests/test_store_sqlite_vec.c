@@ -67,10 +67,33 @@ static void test_wrong_dimension_is_rejected(void) {
     HU_ASSERT_NULL(none.ctx);
 }
 
+/* 2026-09-20: the CI ASan job's LeakSanitizer caught search_impl handing back
+ * a non-NULL, zero-length result array when nothing matched. Every caller
+ * follows the store_mem.c contract (count == 0 means nothing to free), so the
+ * array leaked once per empty semantic leg (test_hybrid_reconstructive's
+ * keyword-leg test). Pins: no hits → *out is NULL, not an empty array. */
+static void test_search_with_no_hits_returns_null_not_empty_array(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
+    hu_vector_store_t vs = hu_vector_store_sqlite_vec_create(&alloc, db, 3);
+    HU_ASSERT_NOT_NULL(vs.ctx);
+    float q[3];
+    hu_embedding_t qv = vec3(q, 1, 0, 0);
+    hu_vector_entry_t *out = (hu_vector_entry_t *)&qv; /* poison: must be cleared */
+    size_t n = 99;
+    HU_ASSERT_EQ(vs.vtable->search(vs.ctx, &alloc, &qv, 1, &out, &n), HU_OK);
+    HU_ASSERT_EQ((long)n, 0L);
+    HU_ASSERT_NULL(out);
+    vs.vtable->deinit(vs.ctx, &alloc);
+    sqlite3_close(db);
+}
+
 void run_store_sqlite_vec_tests(void) {
     HU_TEST_SUITE("store_sqlite_vec");
     HU_RUN_TEST(test_insert_search_remove_count);
     HU_RUN_TEST(test_wrong_dimension_is_rejected);
+    HU_RUN_TEST(test_search_with_no_hits_returns_null_not_empty_array);
 }
 #else
 void run_store_sqlite_vec_tests(void) {
