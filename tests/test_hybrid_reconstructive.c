@@ -660,8 +660,116 @@ static void test_ablate_scene_coverage_first_admits_second_session(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
+/* The plain (non-reconstructive) merge is what the daemon's memory loader
+ * calls, with use_reranking=false. RRF must be the final order there: the
+ * term-overlap "cross-encoder" re-sorted the fused pool by query-word
+ * overlap before the cut to `limit`, which evicted every semantic-only hit
+ * and collapsed production recall to the keyword-only number (LoCoMo R@10
+ * 0.65 == keyword 0.65, LongMemEval 0.817 vs 1.0 for plain RRF; measured
+ * 2026-09-20, memory-benchmarks-hybrid-plain-gemma-2026-09-20.json).
+ *
+ * Fixture (stub embedder = first-character class mod 3): the query "zebra
+ * migration" is class 2. "insight:herd" is the semantic hit — class-2 text
+ * with none of the query words. The two keyword hits carry every query word
+ * but live under "experience:" keys, which the index write path never
+ * embeds, so they get no fusion boost. Plain RRF top-2 = {herd, one keyword
+ * hit}; an overlap rerank makes it {both keyword hits} and drops herd. */
+static void test_plain_hybrid_without_reranking_keeps_semantic_only_hit(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.vtable);
+    hu_embedder_t emb = {.ctx = NULL, .vtable = &stub_vt};
+    hu_vector_store_t vs =
+        hu_vector_store_sqlite_vec_create(&alloc, hu_sqlite_memory_get_db(&mem), 3);
+    HU_ASSERT_NOT_NULL(vs.ctx);
+    hu_sqlite_memory_set_semantic_index(&mem, &emb, &vs);
+    HU_ASSERT_EQ(store_row(&mem, "insight:herd", "the herd crossed the river at dawn", "s1"),
+                 HU_OK);
+    HU_ASSERT_EQ(store_row(&mem, "insight:coffee", "cold morning coffee on the porch", "s1"),
+                 HU_OK);
+    HU_ASSERT_EQ(store_row(&mem, "insight:dinner", "dinner plans for friday night", "s1"), HU_OK);
+    HU_ASSERT_EQ(store_row(&mem, "experience:b1", "annual zebra migration begins", "s2"), HU_OK);
+    HU_ASSERT_EQ(store_row(&mem, "experience:b2", "facts about zebra migration", "s2"), HU_OK);
+
+    hu_retrieval_options_t opts = {0};
+    opts.limit = 2;
+    opts.reconstructive = false;
+    opts.use_reranking = false; /* the memory loader's setting */
+    hu_retrieval_result_t res = {0};
+    const char *q = "zebra migration";
+    HU_ASSERT_EQ(hu_hybrid_retrieve(&alloc, &mem, &emb, &vs, NULL, q, strlen(q), &opts, &res),
+                 HU_OK);
+    HU_ASSERT_EQ(res.count, (size_t)2);
+    HU_ASSERT_TRUE(result_has_key(&res, "insight:herd")); /* semantic-only hit survives */
+    HU_ASSERT_TRUE(result_has_key(&res, "experience:b1") || result_has_key(&res, "experience:b2"));
+
+    hu_retrieval_result_free(&alloc, &res);
+    hu_sqlite_memory_set_semantic_index(&mem, NULL, NULL);
+    vs.vtable->deinit(vs.ctx, &alloc);
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* The keyword leg of the plain merge must be the backend's ranked recall
+ * (FTS5 BM25 on SQLite -- the list `human memory search <q>` prints), not
+ * hu_keyword_retrieve's matched-word fraction. The fraction has no term
+ * weighting and no length normalisation, so a padded row that mentions every
+ * query word once outranks a short row that is nothing but the query; on
+ * LoCoMo-10 (60 questions, seed 3, EmbeddingGemma index, 2026-09-20) that leg
+ * held the evidence in 27/60 top-10 lists vs 39/60 for BM25 and the fused
+ * R@10 was 0.783 vs 0.850 for RRF over the BM25 list, with the semantic leg
+ * and the merge byte-identical (hybrid-plain-keyword-leg-2026-09-20.md).
+ *
+ * Fixture: every row lives under an "experience:" key, which the index write
+ * path never embeds, so the semantic leg is empty and limit=1 returns the
+ * keyword leg's rank 1. "stuffed" carries all three query words inside 120
+ * filler words (fraction 1.0, rank 1 under the old scorer); "short" is the
+ * two-word "zebra migration" (fraction 0.667). BM25 ranks short first
+ * (-1.04 vs -0.78, measured on the same rows in sqlite). */
+static void test_plain_hybrid_keyword_leg_ranks_by_backend_recall_not_word_fraction(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.vtable);
+    hu_embedder_t emb = {.ctx = NULL, .vtable = &stub_vt};
+    hu_vector_store_t vs =
+        hu_vector_store_sqlite_vec_create(&alloc, hu_sqlite_memory_get_db(&mem), 3);
+    HU_ASSERT_NOT_NULL(vs.ctx);
+    hu_sqlite_memory_set_semantic_index(&mem, &emb, &vs);
+
+    static const char filler[] =
+        "lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor "
+        "incididunt ut labore et dolore magna aliqua enim ad minim veniam quis nostrud "
+        "exercitation ullamco laboris nisi aliquip ex ea commodo consequat duis aute irure "
+        "in reprehenderit voluptate ";
+    char stuffed[1024];
+    snprintf(stuffed, sizeof(stuffed), "zebra migration season %s%s%s", filler, filler, filler);
+    HU_ASSERT_EQ(store_row(&mem, "experience:stuffed", stuffed, "s1"), HU_OK);
+    HU_ASSERT_EQ(store_row(&mem, "experience:short", "zebra migration", "s1"), HU_OK);
+    HU_ASSERT_EQ(store_row(&mem, "experience:f1", "cold morning coffee on the porch", "s1"), HU_OK);
+    HU_ASSERT_EQ(store_row(&mem, "experience:f2", "dinner plans for friday night", "s1"), HU_OK);
+    HU_ASSERT_EQ(store_row(&mem, "experience:f3", "the herd crossed the river at dawn", "s1"),
+                 HU_OK);
+
+    hu_retrieval_options_t opts = {0};
+    opts.limit = 1;
+    opts.reconstructive = false;
+    opts.use_reranking = false; /* the memory loader's setting */
+    hu_retrieval_result_t res = {0};
+    const char *q = "zebra migration season";
+    HU_ASSERT_EQ(hu_hybrid_retrieve(&alloc, &mem, &emb, &vs, NULL, q, strlen(q), &opts, &res),
+                 HU_OK);
+    HU_ASSERT_EQ(res.count, (size_t)1);
+    HU_ASSERT_STR_EQ(res.entries[0].key, "experience:short");
+
+    hu_retrieval_result_free(&alloc, &res);
+    hu_sqlite_memory_set_semantic_index(&mem, NULL, NULL);
+    vs.vtable->deinit(vs.ctx, &alloc);
+    mem.vtable->deinit(mem.ctx);
+}
+
 void run_hybrid_reconstructive_tests(void) {
     HU_TEST_SUITE("hybrid_reconstructive");
+    HU_RUN_TEST(test_plain_hybrid_without_reranking_keeps_semantic_only_hit);
+    HU_RUN_TEST(test_plain_hybrid_keyword_leg_ranks_by_backend_recall_not_word_fraction);
     HU_RUN_TEST(test_scene_select_prefers_two_hit_session_over_one_hit);
     HU_RUN_TEST(test_temporal_cue_prefers_newer_same_prefix_row);
     HU_RUN_TEST(test_sufficiency_fallback_returns_plain_result_for_one_scene);

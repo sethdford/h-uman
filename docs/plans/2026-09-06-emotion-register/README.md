@@ -129,6 +129,158 @@ prompt builder, or at least the opinion block) so opinion-hold is
 measurable at all; (3) only then a real stance source, mined from Seth's
 own texts with provenance, never from the twin's output.
 
+### 2026-09-19 — the judge outages, rule 15 v3, and what three prompt variants proved
+
+**Nightly stage 1 has produced nothing usable since 09-13.** Two causes.
+The shared checkout launchd runs from is still at e9c7ceae2 (behind main
+since 09-13), so every night ran the OLD stage: reconstructed prompt, one
+repeat, no agreement metric. And three of six nights (09-14/15/16) were
+`SKIPPED-judge`: one Gemini 429 on one scenario, three retries spanning
+20 s, then the run-level fallback threw away the five scenarios the judge
+had already scored. Fixed in eefa4c79d: 5 retries at 5/20/45/90 s honoring
+Retry-After (cap 120 s); a judge outage now costs ONE scenario's
+qualitative axes (re-driven latency-only, `judge_skipped`), the rest keep
+judging; `aggregate_repeats` means over judged repeats; the run reports
+`judge: PARTIAL` with `judge_skipped_scenarios` and gates on the judged
+scenarios with the pass floor scaled to their count. None of it runs until
+the shared checkout is pulled.
+
+**Rule 15 v3** adds the measured opener fact from the card
+(`substantive_reply.agreement_opener_rate`, persona 0.06): "You open on
+agreement (yeah, exactly, totally) about 1 in 16 of them; usually you just
+say the thing." Same 3-repeat A/B, off vs live:
+
+| arm | last-third mean (n=9) | hard-AI | agreement-opener (last third) | em-dash |
+|---|---|---|---|---|
+| off | 6.11 | 5/9 | 0.47 | 8/24 |
+| live v3 | 4.89 | 6/9 | 0.49 | 15/24 |
+
+The judge-free number did not move at all. Across three prompt variants
+(v1 ban, v2 positive shape, v3 stated fact) and five arms, the twin's
+agreement-opener rate on the substantive scenarios sits at 0.46–0.62 with
+the persona at 0.06. Stating the measurement in the prompt does not change
+the behavior. The judge delta (−1.2) is inside the 1.1–1.5 noise band, and
+its reasoning names the same two tells as before ("every response begins
+with yeah/true/exactly", "em-dash in all 10"). Gate stays SHADOW; the v3
+clause is a candidate for removal, not promotion. The lever is not prompt
+wording: it is the adapter/corpus (the v6 ORPO corpus's chosen side is
+what taught "yeah — [comment]") and, for the dash, the strip stage that
+already runs on the real send path.
+
+**Dash strip in production (item 5):** since the 09-13 deploy the daemon
+made 21 turns; 0 of them produced a dash before shaping and 0 of 304
+delivered rows carry one (the 2 that do are rating prompts Seth sent
+himself). The stage is wired and tested; production has not yet presented
+it a dash to strip.
+
+**Product path in the harness (item 3) — deferred, with the reason.** The
+daemon's full prompt comes from `hu_daemon_reactive_prompt_build`, which
+needs a live agent + memory and has side effects (consumes the pending
+comfort record, advances the drift counter, writes the inner-thought
+store). Rendering it from the harness against production state would
+mutate production; against a scratch state it renders exactly the
+`persona show` prompt plus an opinion block that is EMPTY today (0 rows
+after the purge). A `--persona-prompt reactive` mode would measure nothing
+new until a real stance source exists. Do the stance source first
+(mined from Seth's own texts with provenance), then the harness mode.
+
+**Human-judged round (item 4) — built, needs Seth.**
+`scripts/build_rule_preference_sheet.py` (6ccb94c83) wrote
+`~/.human/blind_ab_preference/rules-2026-09-19/`: 54 rows (14 rule-14
+distress inbounds, 40 rule-15 substantive inbounds, 1 identical pair
+skipped), each a real inbound answered OFF vs LIVE by the serving model on
+:8741 with the product prompt, sides randomised, key = side of the LIVE
+reply, scored by `score_preference.py` unchanged (win rate = share where
+the rule helped). The 2026-09-05 preference sheet is also still unrated.
+
+### 2026-09-19 — the corpus measured: the agreement tell is a harness artifact
+
+The obvious next lever after three prompt variants failed was the corpus
+(the emoji gap was found that way: chosen 0.5% vs rejected 7.3%). Measured
+with the shipped definitions (`reply_pairs.is_agreement_opener`,
+`eval_persona_evolution.has_dash`), chosen / rejected side:
+
+| corpus | n pairs | agreement-opener | dash |
+|---|---|---|---|
+| serving adapter's (`glm-v61-pref`, ORPO 09-05) | 426 | 0.10 / 0.05 | 0.00 / 0.03 |
+| nightly base (`glm-v6-merged-20260906`) | 1290 | 0.05 / 0.06 | 0.00 / 0.03 |
+| every nightly casing rebalance 09-07 → 09-19 | 1290 | 0.05 / 0.06 | 0.00 / 0.03 |
+
+The chosen side does not carry the tell; if anything the rejected side
+carries the dash. Contrast on both axes is a few points, so no adapter
+trained on this corpus learns them in either direction. Then the two
+numbers that settle it:
+
+| where | n | agreement-opener | dash |
+|---|---|---|---|
+| Seth, substantive replies | 65 | 0.06 | 0.00 |
+| **the twin, real production turns since 09-01** | **101** | **0.09** | **0.00** |
+| the harness twin, last third, five arms | 24 each | 0.46–0.62 | 0.33–1.00 |
+| the harness's scripted contact, last third, debate / advice | 10 each | 0.30 | — |
+
+In real use the twin opens on agreement 9% of the time and has emitted no
+dash in 101 turns. The 50% rate — and the judge's "yes-man" verdict, and
+the "[affirmation] — [comment]" shape — exist only inside the harness: a
+30-turn scripted exchange with a contact who itself opens on agreement a
+third of the time in the substantive scenarios, posted to :8741 with a
+single system prompt, no daemon context, no history budget, no outbound
+pipeline. The model mirrors the script. Everything measured on this axis
+since 09-13 (rules 15 v1–v3, the dash strip's motivation, the 4-arm A/Bs)
+was measuring the harness's conversation dynamics, not the product. The
+strip stage is harmless and correct (Seth 0/954) but has had nothing to
+strip; rule 15's substantive-length facts still stand (those were measured
+on Seth's texts, not the harness).
+
+What changes: (1) every multi-turn verdict now carries the scripted
+contact's own agreement-opener rate beside the twin's
+(`last_third_contact_agreement_opener_rate`) so the number is never read
+without its reference; (2) the judge's "AI" verdicts on the substantive
+scenarios are not evidence about production until the harness either
+scripts a contact that pushes back like a real one or is replaced by real
+production turns as the measured artifact — `production_outcomes` already
+holds 101 of them with the delivered text, and the judge-free rates above
+took one query. The next measurement of "substantive register" should be
+run on those, not on scripted synthetic contacts.
+
+### 2026-09-20 — the production register, measured nightly (delivered rows only)
+
+`scripts/eval_production_register.py` (nightly stage [5/5], no server, no
+judge): delivered replies from `production_outcomes` by inbound register,
+against the cards, with the cards' own definitions.
+
+**Correction made the same morning.** The first cut counted every row since
+09-01 (n=101, substantive n=19, median 47 chars) and the numbers were
+wrong in kind: `chosen` holds the DELIVERED text only for rows written
+after the send-funnel recorder landed (353434eb1, 2026-09-12). Before it
+the recorder ran ahead of the AI-tell gate, so a row could hold a draft
+the gate retried away — on 09-10 the row says "Could you please clarify
+or provide more details…" while the log shows the gate caught "please
+clarify", retried, and delivered "lol what". The stage now floors its
+window at 2026-09-13 and says so in the verdict.
+
+Delivered rows since the floor (7 days): **n=22**, agreement-opener 0.09,
+dash 0.00, scaffold 0.00, median 15 chars; **substantive inbounds: 0**,
+distress: 0. The product answered no long or question-bearing inbound in
+that week, so the substantive register is not yet measurable on the send
+path; the stage will report it when n ≥ 5. What it can say now: 22 real
+replies, none opening on reflexive agreement beyond the persona's own
+rate, none with a dash, none with a support scaffold.
+
+**Two service-desk replies were delivered in September** (found by reading
+the rows): 09-16 "Yes, I can help you with that. Please let me know the
+details of what you need" and 09-19 "This solution will effectively
+address your needs." (the contact answered "?"). Two more of the family
+were caught by the gate and retried (09-07, 09-10). None of the phrases
+appear in Seth's own 1,047 texts (chat.db minus the daemon's rows).
+The AI-tell table gained the family — "I can help (you) with that",
+"let me know what you need / the details", "information or assistance",
+"happy to provide", "This solution will", "address your needs", "what you
+need help with", "provide more details" — pinned by
+`test_ai_tell_service_desk_family_delivered_in_september`. Noted, not
+fixed: "feel free to" in the legacy list matches 4 real Seth texts (cost
+is one retry, not a drop); and on 09-19 the verifier flagged the claim
+and consistency drift scored 0.03, and neither blocks a send.
+
 ## Multi-turn A/B on the production prompt (2026-09-13)
 
 `scripts/eval_multiturn_local.py --persona-prompt production` (new: the

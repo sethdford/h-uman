@@ -1,0 +1,1182 @@
+{
+ "protocol": "LoCoMo-10, scripts/eval_memory_benchmarks.py selection (seed 3, limit 60), EmbeddingGemma on :8741; C legs dumped from inside hu_hybrid_retrieve (plain, use_reranking=false) via a temporary env-gated stderr print, before the keyword-leg fix",
+ "summary": {
+  "hit_kw": 0.65,
+  "hit_sem": 0.833,
+  "hit_py": 0.85,
+  "hit_plain": 0.783,
+  "n": 60,
+  "sem_leg_equal_to_cli": 60,
+  "kw_leg_equal_to_cli": 0,
+  "py_hit_c_miss": 5,
+  "c_hit_py_miss": 1
+ },
+ "mismatches": [
+  {
+   "conv": 1,
+   "category": 4,
+   "question": "What did Jon say about Gina's progress with her store?",
+   "evidence": [
+    "D3:3"
+   ],
+   "kw_cli_fts5": [
+    "D4:8",
+    "D4:1",
+    "D1:15",
+    "D11:15",
+    "D8:8",
+    "D8:21",
+    "D13:12",
+    "D5:14",
+    "D6:7",
+    "D7:6"
+   ],
+   "c_kw_leg": [
+    "D4:1",
+    "D1:4",
+    "D10:10",
+    "D11:6",
+    "D11:15",
+    "D14:1",
+    "D14:5",
+    "D18:1",
+    "D18:9",
+    "D18:19"
+   ],
+   "c_kw_leg_scores": [
+    0.4,
+    0.3,
+    0.3,
+    0.3,
+    0.3,
+    0.3,
+    0.3,
+    0.3,
+    0.3,
+    0.3
+   ],
+   "sem_cli": [
+    "D7:3",
+    "D8:21",
+    "D4:2",
+    "D2:2",
+    "D4:1",
+    "D3:3",
+    "D16:2",
+    "D10:2",
+    "D4:3",
+    "D14:2"
+   ],
+   "c_sem_leg": [
+    "D7:3",
+    "D8:21",
+    "D4:2",
+    "D2:2",
+    "D4:1",
+    "D3:3",
+    "D16:2",
+    "D10:2",
+    "D4:3",
+    "D14:2"
+   ],
+   "py_rrf": [
+    "D4:1",
+    "D8:21",
+    "D4:8",
+    "D7:3",
+    "D1:15",
+    "D4:2",
+    "D11:15",
+    "D2:2",
+    "D8:8",
+    "D3:3"
+   ],
+   "c_plain_out": [
+    "D4:1",
+    "D7:3",
+    "D1:4",
+    "D8:21",
+    "D10:10",
+    "D4:2",
+    "D11:6",
+    "D2:2",
+    "D11:15",
+    "D14:1"
+   ],
+   "hit_py": 1,
+   "hit_plain": 0
+  },
+  {
+   "conv": 1,
+   "category": 5,
+   "question": "What did Jon find for his clothing store on 1 February, 2023?",
+   "evidence": [
+    "D3:2"
+   ],
+   "kw_cli_fts5": [
+    "D1:15",
+    "D2:3",
+    "D2:1",
+    "D16:1",
+    "D4:1",
+    "D10:2",
+    "D8:7",
+    "D18:2",
+    "D7:2",
+    "D1:1"
+   ],
+   "c_kw_leg": [
+    "D10:2",
+    "D16:1",
+    "D18:2",
+    "D2:1",
+    "D7:6",
+    "D8:12",
+    "D10:1",
+    "D16:2",
+    "D4:1",
+    "D5:1"
+   ],
+   "c_kw_leg_scores": [
+    0.416667,
+    0.416667,
+    0.416667,
+    0.416667,
+    0.416667,
+    0.416667,
+    0.333333,
+    0.333333,
+    0.333333,
+    0.333333
+   ],
+   "sem_cli": [
+    "D5:1",
+    "D3:7",
+    "D8:12",
+    "D2:1",
+    "D18:2",
+    "D3:2",
+    "D6:7",
+    "D16:2",
+    "D16:1",
+    "D7:2"
+   ],
+   "c_sem_leg": [
+    "D5:1",
+    "D3:7",
+    "D8:12",
+    "D2:1",
+    "D18:2",
+    "D3:2",
+    "D6:7",
+    "D16:2",
+    "D16:1",
+    "D7:2"
+   ],
+   "py_rrf": [
+    "D2:1",
+    "D16:1",
+    "D18:2",
+    "D7:2",
+    "D1:15",
+    "D5:1",
+    "D2:3",
+    "D3:7",
+    "D8:12",
+    "D4:1"
+   ],
+   "c_plain_out": [
+    "D18:2",
+    "D2:1",
+    "D8:12",
+    "D5:1",
+    "D16:1",
+    "D16:2",
+    "D10:2",
+    "D3:7",
+    "D7:6",
+    "D3:2"
+   ],
+   "hit_py": 0,
+   "hit_plain": 1
+  },
+  {
+   "conv": 3,
+   "category": 4,
+   "question": "What does Joanna do while she writes?",
+   "evidence": [
+    "D24:4"
+   ],
+   "kw_cli_fts5": [
+    "D22:21",
+    "D24:4",
+    "D22:20",
+    "D25:25",
+    "D27:29",
+    "D25:18",
+    "D16:10",
+    "D1:12",
+    "D21:12",
+    "D4:7"
+   ],
+   "c_kw_leg": [
+    "D1:12",
+    "D21:12",
+    "D22:4",
+    "D22:9",
+    "D22:21",
+    "D23:20",
+    "D24:4",
+    "D25:18",
+    "D29:7",
+    "D9:13"
+   ],
+   "c_kw_leg_scores": [
+    0.428571,
+    0.428571,
+    0.428571,
+    0.428571,
+    0.428571,
+    0.428571,
+    0.428571,
+    0.428571,
+    0.428571,
+    0.428571
+   ],
+   "sem_cli": [
+    "D2:25",
+    "D27:10",
+    "D12:10",
+    "D18:3",
+    "D18:1",
+    "D6:10",
+    "D11:13",
+    "D9:7",
+    "D11:15",
+    "D27:7"
+   ],
+   "c_sem_leg": [
+    "D2:25",
+    "D27:10",
+    "D12:10",
+    "D18:3",
+    "D18:1",
+    "D6:10",
+    "D11:13",
+    "D9:7",
+    "D11:15",
+    "D27:7"
+   ],
+   "py_rrf": [
+    "D22:21",
+    "D2:25",
+    "D24:4",
+    "D27:10",
+    "D22:20",
+    "D12:10",
+    "D25:25",
+    "D18:3",
+    "D27:29",
+    "D18:1"
+   ],
+   "c_plain_out": [
+    "D1:12",
+    "D2:25",
+    "D21:12",
+    "D27:10",
+    "D22:4",
+    "D12:10",
+    "D22:9",
+    "D18:3",
+    "D22:21",
+    "D18:1"
+   ],
+   "hit_py": 1,
+   "hit_plain": 0
+  },
+  {
+   "conv": 4,
+   "category": 4,
+   "question": "What language does Tim know besides German?",
+   "evidence": [
+    "D27:6"
+   ],
+   "kw_cli_fts5": [
+    "D27:6",
+    "D27:7",
+    "D27:5",
+    "D5:17",
+    "D27:11",
+    "D27:12",
+    "D20:31",
+    "D27:13",
+    "D14:4",
+    "D27:8"
+   ],
+   "c_kw_leg": [
+    "D14:4",
+    "D21:1",
+    "D27:7",
+    "D5:17",
+    "D10:7",
+    "D10:13",
+    "D11:10",
+    "D11:12",
+    "D11:14",
+    "D11:18"
+   ],
+   "c_kw_leg_scores": [
+    0.428571,
+    0.428571,
+    0.428571,
+    0.428571,
+    0.285714,
+    0.285714,
+    0.285714,
+    0.285714,
+    0.285714,
+    0.285714
+   ],
+   "sem_cli": [
+    "D27:5",
+    "D27:7",
+    "D27:13",
+    "D27:11",
+    "D27:9",
+    "D21:9",
+    "D21:2",
+    "D21:11",
+    "D4:13",
+    "D27:6"
+   ],
+   "c_sem_leg": [
+    "D27:5",
+    "D27:7",
+    "D27:13",
+    "D27:11",
+    "D27:9",
+    "D21:9",
+    "D21:2",
+    "D21:11",
+    "D4:13",
+    "D27:6"
+   ],
+   "py_rrf": [
+    "D27:5",
+    "D27:7",
+    "D27:11",
+    "D27:6",
+    "D27:13",
+    "D5:17",
+    "D27:9",
+    "D27:12",
+    "D21:9",
+    "D20:31"
+   ],
+   "c_plain_out": [
+    "D27:7",
+    "D14:4",
+    "D27:5",
+    "D21:1",
+    "D27:13",
+    "D5:17",
+    "D27:11",
+    "D10:7",
+    "D27:9",
+    "D10:13"
+   ],
+   "hit_py": 1,
+   "hit_plain": 0
+  },
+  {
+   "conv": 7,
+   "category": 4,
+   "question": "What did Jolene and Deb discuss as a helpful strategy for studying and time management?",
+   "evidence": [
+    "D8:19"
+   ],
+   "kw_cli_fts5": [
+    "D8:18",
+    "D18:3",
+    "D19:5",
+    "D8:19",
+    "D8:4",
+    "D21:15",
+    "D9:14",
+    "D22:15",
+    "D7:15",
+    "D13:20"
+   ],
+   "c_kw_leg": [
+    "D18:3",
+    "D19:5",
+    "D19:2",
+    "D12:6",
+    "D22:15",
+    "D26:6",
+    "D7:15",
+    "D19:3",
+    "D16:2",
+    "D19:8"
+   ],
+   "c_kw_leg_scores": [
+    0.533333,
+    0.533333,
+    0.466667,
+    0.466667,
+    0.466667,
+    0.466667,
+    0.466667,
+    0.4,
+    0.4,
+    0.4
+   ],
+   "sem_cli": [
+    "D8:18",
+    "D10:9",
+    "D18:3",
+    "D20:22",
+    "D9:15",
+    "D10:2",
+    "D15:2",
+    "D22:14",
+    "D8:19",
+    "D5:2"
+   ],
+   "c_sem_leg": [
+    "D8:18",
+    "D10:9",
+    "D18:3",
+    "D20:22",
+    "D9:15",
+    "D10:2",
+    "D15:2",
+    "D22:14",
+    "D8:19",
+    "D5:2"
+   ],
+   "py_rrf": [
+    "D8:18",
+    "D18:3",
+    "D8:19",
+    "D10:9",
+    "D19:5",
+    "D20:22",
+    "D8:4",
+    "D9:15",
+    "D21:15",
+    "D10:2"
+   ],
+   "c_plain_out": [
+    "D18:3",
+    "D8:18",
+    "D19:5",
+    "D10:9",
+    "D19:2",
+    "D12:6",
+    "D20:22",
+    "D22:15",
+    "D9:15",
+    "D26:6"
+   ],
+   "hit_py": 1,
+   "hit_plain": 0
+  },
+  {
+   "conv": 7,
+   "category": 5,
+   "question": "When did Deborah's parents give her first console?",
+   "evidence": [
+    "D24:6"
+   ],
+   "kw_cli_fts5": [
+    "D3:2",
+    "D24:6",
+    "D2:3",
+    "D26:11",
+    "D15:21",
+    "D16:6",
+    "D3:11",
+    "D2:15",
+    "D2:22",
+    "D2:5"
+   ],
+   "c_kw_leg": [
+    "D3:2",
+    "D15:20",
+    "D15:21",
+    "D16:6",
+    "D2:3",
+    "D2:15",
+    "D2:22",
+    "D21:7",
+    "D24:5",
+    "D24:6"
+   ],
+   "c_kw_leg_scores": [
+    0.375,
+    0.25,
+    0.25,
+    0.25,
+    0.25,
+    0.25,
+    0.25,
+    0.25,
+    0.25,
+    0.25
+   ],
+   "sem_cli": [
+    "D24:9",
+    "D2:3",
+    "D1:7",
+    "D19:19",
+    "D20:6",
+    "D22:29",
+    "D12:3",
+    "D29:9",
+    "D2:13",
+    "D4:28"
+   ],
+   "c_sem_leg": [
+    "D24:9",
+    "D2:3",
+    "D1:7",
+    "D19:19",
+    "D20:6",
+    "D22:29",
+    "D12:3",
+    "D29:9",
+    "D2:13",
+    "D4:28"
+   ],
+   "py_rrf": [
+    "D2:3",
+    "D3:2",
+    "D24:9",
+    "D24:6",
+    "D1:7",
+    "D26:11",
+    "D19:19",
+    "D15:21",
+    "D20:6",
+    "D16:6"
+   ],
+   "c_plain_out": [
+    "D2:3",
+    "D3:2",
+    "D24:9",
+    "D15:20",
+    "D15:21",
+    "D1:7",
+    "D16:6",
+    "D19:19",
+    "D20:6",
+    "D2:15"
+   ],
+   "hit_py": 1,
+   "hit_plain": 0
+  }
+ ],
+ "per_question": [
+  {
+   "conv": 0,
+   "category": 4,
+   "hit_kw": 0,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 0,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 0,
+   "category": 5,
+   "hit_kw": 0,
+   "hit_sem": 0,
+   "hit_py": 0,
+   "hit_plain": 0,
+   "evidence_in_c_kw_leg": 0,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 0,
+   "category": 3,
+   "hit_kw": 1,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 1,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 0,
+   "category": 4,
+   "hit_kw": 0,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 0,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 0,
+   "category": 2,
+   "hit_kw": 1,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 1,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 0,
+   "category": 4,
+   "hit_kw": 1,
+   "hit_sem": 0,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 1,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 1,
+   "category": 4,
+   "hit_kw": 0,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 0,
+   "evidence_in_c_kw_leg": 0,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 1,
+   "category": 2,
+   "hit_kw": 1,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 0,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 1,
+   "category": 5,
+   "hit_kw": 0,
+   "hit_sem": 1,
+   "hit_py": 0,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 0,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 1,
+   "category": 4,
+   "hit_kw": 0,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 0,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 1,
+   "category": 2,
+   "hit_kw": 1,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 1,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 1,
+   "category": 5,
+   "hit_kw": 1,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 1,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 2,
+   "category": 5,
+   "hit_kw": 1,
+   "hit_sem": 0,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 1,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 2,
+   "category": 5,
+   "hit_kw": 1,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 0,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 2,
+   "category": 4,
+   "hit_kw": 0,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 0,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 2,
+   "category": 1,
+   "hit_kw": 1,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 1,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 2,
+   "category": 4,
+   "hit_kw": 1,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 1,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 2,
+   "category": 5,
+   "hit_kw": 1,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 1,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 3,
+   "category": 1,
+   "hit_kw": 0,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 0,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 3,
+   "category": 4,
+   "hit_kw": 1,
+   "hit_sem": 0,
+   "hit_py": 1,
+   "hit_plain": 0,
+   "evidence_in_c_kw_leg": 1,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 3,
+   "category": 4,
+   "hit_kw": 0,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 0,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 3,
+   "category": 1,
+   "hit_kw": 1,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 1,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 3,
+   "category": 3,
+   "hit_kw": 0,
+   "hit_sem": 1,
+   "hit_py": 0,
+   "hit_plain": 0,
+   "evidence_in_c_kw_leg": 0,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 3,
+   "category": 5,
+   "hit_kw": 0,
+   "hit_sem": 0,
+   "hit_py": 0,
+   "hit_plain": 0,
+   "evidence_in_c_kw_leg": 0,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 4,
+   "category": 5,
+   "hit_kw": 0,
+   "hit_sem": 0,
+   "hit_py": 0,
+   "hit_plain": 0,
+   "evidence_in_c_kw_leg": 0,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 4,
+   "category": 3,
+   "hit_kw": 1,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 0,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 4,
+   "category": 5,
+   "hit_kw": 1,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 1,
+   "c_kw_leg_tied_at_cut": 0
+  },
+  {
+   "conv": 4,
+   "category": 2,
+   "hit_kw": 1,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 0,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 4,
+   "category": 4,
+   "hit_kw": 1,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 0,
+   "evidence_in_c_kw_leg": 0,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 4,
+   "category": 1,
+   "hit_kw": 0,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 0,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 5,
+   "category": 5,
+   "hit_kw": 1,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 1,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 5,
+   "category": 5,
+   "hit_kw": 1,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 1,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 5,
+   "category": 1,
+   "hit_kw": 0,
+   "hit_sem": 1,
+   "hit_py": 0,
+   "hit_plain": 0,
+   "evidence_in_c_kw_leg": 0,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 5,
+   "category": 4,
+   "hit_kw": 1,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 0,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 5,
+   "category": 4,
+   "hit_kw": 1,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 0,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 5,
+   "category": 5,
+   "hit_kw": 1,
+   "hit_sem": 0,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 1,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 6,
+   "category": 1,
+   "hit_kw": 0,
+   "hit_sem": 1,
+   "hit_py": 0,
+   "hit_plain": 0,
+   "evidence_in_c_kw_leg": 0,
+   "c_kw_leg_tied_at_cut": 0
+  },
+  {
+   "conv": 6,
+   "category": 4,
+   "hit_kw": 1,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 0,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 6,
+   "category": 1,
+   "hit_kw": 0,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 1,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 6,
+   "category": 5,
+   "hit_kw": 1,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 1,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 6,
+   "category": 4,
+   "hit_kw": 1,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 1,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 6,
+   "category": 2,
+   "hit_kw": 0,
+   "hit_sem": 0,
+   "hit_py": 0,
+   "hit_plain": 0,
+   "evidence_in_c_kw_leg": 0,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 7,
+   "category": 2,
+   "hit_kw": 1,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 1,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 7,
+   "category": 2,
+   "hit_kw": 1,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 0,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 7,
+   "category": 4,
+   "hit_kw": 1,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 0,
+   "evidence_in_c_kw_leg": 0,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 7,
+   "category": 4,
+   "hit_kw": 1,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 0,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 7,
+   "category": 5,
+   "hit_kw": 1,
+   "hit_sem": 0,
+   "hit_py": 1,
+   "hit_plain": 0,
+   "evidence_in_c_kw_leg": 1,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 7,
+   "category": 4,
+   "hit_kw": 0,
+   "hit_sem": 0,
+   "hit_py": 0,
+   "hit_plain": 0,
+   "evidence_in_c_kw_leg": 0,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 8,
+   "category": 5,
+   "hit_kw": 0,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 0,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 8,
+   "category": 4,
+   "hit_kw": 1,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 1,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 8,
+   "category": 2,
+   "hit_kw": 0,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 0,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 8,
+   "category": 2,
+   "hit_kw": 1,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 1,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 8,
+   "category": 1,
+   "hit_kw": 1,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 1,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 8,
+   "category": 2,
+   "hit_kw": 1,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 1,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 9,
+   "category": 2,
+   "hit_kw": 1,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 1,
+   "c_kw_leg_tied_at_cut": 0
+  },
+  {
+   "conv": 9,
+   "category": 4,
+   "hit_kw": 1,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 0,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 9,
+   "category": 4,
+   "hit_kw": 1,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 1,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 9,
+   "category": 2,
+   "hit_kw": 1,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 0,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 9,
+   "category": 5,
+   "hit_kw": 0,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 0,
+   "c_kw_leg_tied_at_cut": 1
+  },
+  {
+   "conv": 9,
+   "category": 4,
+   "hit_kw": 1,
+   "hit_sem": 1,
+   "hit_py": 1,
+   "hit_plain": 1,
+   "evidence_in_c_kw_leg": 1,
+   "c_kw_leg_tied_at_cut": 1
+  }
+ ]
+}

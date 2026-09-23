@@ -77,6 +77,30 @@ hu_error_t hu_memory_facade_export_json(hu_memory_facade_t *m, hu_allocator_t *a
 #include <unistd.h>
 #if defined(__unix__) || defined(__APPLE__)
 #include <dirent.h>
+
+/* `human memory reindex [--limit N] [--full]`. Pure so a test can pin it: the
+ * 2026-09-20 loop ran `i + 1 < argc` and never looked at a trailing `--full`,
+ * so the first embedder-switch reindex silently did nothing. */
+void hu_cli_parse_reindex_args(int argc, char **argv, size_t *limit_out, bool *full_out) {
+    if (limit_out)
+        *limit_out = 0;
+    if (full_out)
+        *full_out = false;
+    if (!argv)
+        return;
+    for (int i = 3; i < argc; i++) {
+        if (!argv[i])
+            continue;
+        if (strcmp(argv[i], "--limit") == 0 && i + 1 < argc && argv[i + 1]) {
+            if (limit_out)
+                *limit_out = (size_t)strtoul(argv[i + 1], NULL, 10);
+            i++;
+        } else if (strcmp(argv[i], "--full") == 0) {
+            if (full_out)
+                *full_out = true;
+        }
+    }
+}
 #endif
 
 #define HU_INIT_CONFIG_FILE "config.json"
@@ -631,9 +655,8 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
         /* human memory reindex [--limit N] — embed every memories row missing
          * from the semantic index via the configured endpoint. */
         size_t lim = 0;
-        for (int i = 3; i + 1 < argc; i++)
-            if (strcmp(argv[i], "--limit") == 0)
-                lim = (size_t)strtoul(argv[i + 1], NULL, 10);
+        bool full = false;
+        hu_cli_parse_reindex_args(argc, argv, &lim, &full);
         hu_embedder_t semb = {0};
         hu_vector_store_t svs = {0};
         err = hu_semantic_recall_attach(alloc, &mem, &semb, &svs);
@@ -643,7 +666,8 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
         }
         size_t indexed = 0;
 #ifdef HU_ENABLE_SQLITE
-        err = hu_sqlite_memory_reindex_semantic(&mem, lim, &indexed);
+        err = full ? hu_sqlite_memory_reindex_semantic_full(&mem, lim, &indexed)
+                   : hu_sqlite_memory_reindex_semantic(&mem, lim, &indexed);
 #else
         (void)lim;
         err = HU_ERR_NOT_SUPPORTED; /* unreachable: attach refused without SQLite */
@@ -679,12 +703,18 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
         svs.vtable->deinit(svs.ctx, alloc);
         semb.vtable->deinit(semb.ctx, alloc);
     } else if (strcmp(sub, "search") == 0 && argc >= 5 && strcmp(argv[3], "--hybrid") == 0) {
-        /* human memory search --hybrid <query> — reconstructive hybrid
-         * retrieval (Contract C2): keyword + semantic merged via RRF, then
-         * scene-select -> neighbour expansion -> rerank -> time-bounded
-         * filter -> sufficiency check. This is the CLI surface the
-         * benchmark harness measures as the "hybrid_cli" (C path) column,
-         * distinct from the harness's own RRF(kw,sem) computed in Python. */
+        /* human memory search --hybrid [--plain] <query>
+         * Default: reconstructive hybrid retrieval (Contract C2): keyword +
+         * semantic merged via RRF, then scene-select -> neighbour expansion
+         * -> rerank -> time-bounded filter -> sufficiency check. The
+         * benchmark harness measures this as its "hybrid_cli" column.
+         * --plain: the SAME call the daemon's memory loader makes
+         * (hu_retrieval_options_t.reconstructive == false — see
+         * src/agent/memory_loader.c): RRF merge -> cross-encoder rerank ->
+         * cut to limit. Measured as the harness's "hybrid_plain" column, the
+         * one that reflects production. */
+        bool plain = argc >= 6 && strcmp(argv[4], "--plain") == 0;
+        const char *hq = plain ? argv[5] : argv[4];
         hu_embedder_t semb = {0};
         hu_vector_store_t svs = {0};
         bool have_vec = hu_semantic_recall_attach(alloc, &mem, &semb, &svs) == HU_OK;
@@ -692,14 +722,14 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
             fprintf(stderr, "search --hybrid: semantic index unavailable, using keyword only\n");
         hu_retrieval_options_t opts = {0};
         opts.limit = 10;
-        opts.reconstructive = true;
+        opts.reconstructive = !plain;
         hu_retrieval_result_t res = {0};
         err = hu_hybrid_retrieve(alloc, &mem, have_vec ? &semb : NULL, have_vec ? &svs : NULL, NULL,
-                                 argv[4], strlen(argv[4]), &opts, &res);
+                                 hq, strlen(hq), &opts, &res);
         if (err != HU_OK) {
             fprintf(stderr, "search --hybrid: %s\n", hu_error_string(err));
         } else if (res.count == 0) {
-            printf("No results for: %s\n", argv[4]);
+            printf("No results for: %s\n", hq);
         } else {
             memory_search_print_and_free(alloc, &res);
         }
@@ -1061,7 +1091,7 @@ static const hu_cli_config_schema_row_t hu_cli_config_schema_rows[] = {
     {"gateway.host", "string", "Bind address / host"},
     {"memory", "object", "backend, sqlite_path, consolidation_interval_hours, ..."},
     {"memory.backend", "string", "sqlite | markdown | lru | ..."},
-    {"tools", "object", "shell timeouts, enabled_tools, disabled_tools, model_overrides"},
+    {"tools", "object", "shell timeouts, max_file_size_bytes, enabled_tools, disabled_tools"},
     {"cron", "object", "Scheduled task defaults"},
     {"scheduler", "object", "max_concurrent"},
     {"runtime", "object", "kind, docker_image, GCE fields"},

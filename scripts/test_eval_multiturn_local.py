@@ -703,3 +703,83 @@ def test_aggregate_repeats_means_the_agreement_rate_and_tolerates_absence():
     assert abs(out[0]["voice"]["last_third_agreement_opener_rate"] - 0.5) < 1e-9
     old = [[_sv("debate", 1.0, 8, 3, "AI")]]
     assert mt.aggregate_repeats(old)[0]["voice"]["last_third_agreement_opener_rate"] is None
+
+
+def test_retry_delay_honors_retry_after_and_caps_it():
+    class _E(Exception):
+        def __init__(self, ra):
+            self.headers = {"Retry-After": ra}
+    assert mt._retry_delay(0, None) == 5
+    assert mt._retry_delay(1, TimeoutError()) == 20
+    assert mt._retry_delay(0, _E("60")) == 60          # server asked for longer: honored
+    assert mt._retry_delay(3, _E("10")) == 90          # backoff already longer: kept
+    assert mt._retry_delay(0, _E("900")) == mt.JUDGE_RETRY_AFTER_CAP_S
+    assert mt._retry_delay(0, _E("soon")) == 5         # junk header: ignored
+    assert mt.JUDGE_RETRIES == 5 and sum(mt.JUDGE_RETRY_BACKOFF_S) >= 150
+
+
+def test_run_all_scenarios_degrades_one_scenario_and_keeps_judging_the_rest():
+    calls = []
+    def fake_run(scenario, backend, judge_on, persona_prompt=None, max_turns=None):
+        calls.append((scenario["name"], judge_on))
+        if judge_on and scenario["name"] == "a":
+            raise mt.JudgeUnavailable("HTTP Error 429")
+        return _sv(scenario["name"], 1.0, 5, 8, "HUMAN", skipped=not judge_on)
+    out = []
+    with mock.patch.object(mt, "run_scenario", side_effect=fake_run):
+        mt.run_all_scenarios([{"name": "a"}, {"name": "b"}], mock.Mock(), True, None, None, out)
+    assert [sv["scenario"] for sv in out] == ["a", "b"]
+    assert out[0]["voice"].get("skipped") is True and out[0].get("judge_skipped") is True
+    assert out[1]["voice"]["last_third_score"] == 8 and "judge_skipped" not in out[1]
+    assert calls == [("a", True), ("a", False), ("b", True)]
+
+
+def test_aggregate_means_over_judged_repeats_when_one_repeat_lost_its_judge():
+    runs = [[_sv("debate", 1.0, 0, 0, "AI", skipped=True)],
+            [_sv("debate", 1.0, 4, 8, "HUMAN")],
+            [_sv("debate", 1.0, 6, 8, "HUMAN")]]
+    out = mt.aggregate_repeats(runs)
+    v = out[0]["voice"]
+    assert not v.get("skipped") and v["last_third_score"] == 8 and v["first_third_score"] == 5
+    assert v["repeats"] == 3 and v["judged_repeats"] == 2 and v["hard_ai_repeats"] == 0
+    assert out[0]["repeats"][0]["last_third_score"] is None
+    all_skipped = mt.aggregate_repeats([[_sv("d", 1.0, 0, 0, "AI", skipped=True)]] * 2)
+    assert all_skipped[0]["voice"].get("skipped") is True
+
+
+def test_main_reports_partial_when_the_judge_dies_on_one_scenario_only():
+    backend = mock.Mock()
+    backend.chat.side_effect = [("reply", 100.0, 200.0)] * 2000
+    state = {"n": 0}
+    def anchor(*a, **k):
+        state["n"] += 1
+        if state["n"] == 1:
+            raise mt.JudgeUnavailable("HTTP Error 429: Too Many Requests")
+        return True
+    with tempfile.TemporaryDirectory() as d:
+        out = Path(d) / "verdict.json"
+        with mock.patch.object(mt, "LocalBackend", return_value=backend), \
+             mock.patch.object(mt, "judge_available", return_value=True), \
+             mock.patch.object(mt, "judge_anchor_retention", side_effect=anchor), \
+             mock.patch.object(mt, "judge_voice_window", return_value=(8.0, "HUMAN")):
+            code = mt.main(["--output-json", str(out), "--server-url", "http://x"])
+        verdict = json.loads(out.read_text())
+    assert verdict["judge"] == "PARTIAL", verdict["judge"]
+    assert len(verdict["judge_skipped_scenarios"]) == 1
+    judged = [sv for sv in verdict["scenarios"] if not sv["voice"].get("skipped")]
+    assert verdict["scenarios_total"] == len(judged) and len(judged) == len(verdict["scenarios"]) - 1
+    assert code in (0, 1)  # gated on the judged scenarios, never exit 3
+
+
+def test_verdict_carries_the_contacts_own_agreement_rate_beside_the_twins():
+    # A scripted contact that opens on agreement every turn is the reference the
+    # twin's rate is read against; the verdict must carry both.
+    backend = mock.Mock()
+    backend.chat.side_effect = [("yeah same", 100.0, 200.0)] * 40
+    scenario = {"name": "s", "turns": ["yeah ok", "exactly", "totally"] * 3, "anchors": []}
+    with mock.patch.object(mt, "judge_voice_window", return_value=(7.0, "BORDERLINE")):
+        sv = mt.run_scenario(scenario, backend, judge_on=True)
+    assert sv["voice"]["last_third_agreement_opener_rate"] == 1.0
+    assert sv["voice"]["last_third_contact_agreement_opener_rate"] == 1.0
+    agg = mt.aggregate_repeats([[sv], [sv]])
+    assert agg[0]["voice"]["last_third_contact_agreement_opener_rate"] == 1.0

@@ -181,8 +181,12 @@ static void test_hybrid_retrieve_register_gate_live_suppresses_casual_turn(void)
     HU_ASSERT_EQ(store_row(&mem, "mem2", "xyzbcd likes to cook pizza"), HU_OK);
     HU_ASSERT_EQ(store_row(&mem, "mem3", "xyzdef enjoys reading books"), HU_OK);
 
-    /* Query: "xyz" (1 word) - casual, should be suppressed in LIVE mode.
-     * This query won't match via keyword search but will match via semantic embedding. */
+    /* Query: "xq" (1 word) - casual, should be suppressed in LIVE mode.
+     * First char 'x' puts it in the stub embedder's class of the three rows,
+     * so it matches semantically; it is not a whole word OR a substring of
+     * any row, so the keyword leg (backend recall: FTS5, then a LIKE
+     * substring fallback) finds nothing. "xyz" was used before the leg
+     * switched to backend recall; it is a substring of every row. */
     unsetenv("HU_SEMANTIC_RECALL");
     unsetenv("HU_SEMANTIC_RECALL_REGISTER_GATE");
     setenv("HU_SEMANTIC_RECALL", "live", 1);
@@ -191,7 +195,7 @@ static void test_hybrid_retrieve_register_gate_live_suppresses_casual_turn(void)
     hu_retrieval_options_t opts = {0};
     opts.limit = 10;
     hu_retrieval_result_t res_casual = {0};
-    const char *q_casual = "xyz";
+    const char *q_casual = "xq";
     HU_ASSERT_EQ(hu_hybrid_retrieve(&alloc, &mem, &emb, &vs, NULL, q_casual, strlen(q_casual),
                                     &opts, &res_casual),
                  HU_OK);

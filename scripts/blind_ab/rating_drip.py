@@ -2,7 +2,7 @@
 """rating_drip — measurement-as-conversation for the blind A/B keystone.
 
 The 12-row rating sheet sat unrated for a month because it's homework. This
-drip serves it ONE question at a time to Seth's self-chat (sethford@me.com):
+drip serves it ONE question at a time to Seth's self-chat (his own number):
 
     which sounds more like you?
     <context>
@@ -50,7 +50,17 @@ REPO_GATE = os.path.normpath(os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "..",
     "docs", "evaluation", "blind_ab_gate.json"))
 
-DEFAULT_TARGET = "sethford@me.com"  # Seth's self-chat (notes-to-self)
+# Seth's self-chat (notes-to-self), addressed by his own number. The previous
+# value, `sethford@me.com`, stopped being an alias on the iMessage account
+# around 2026-09-05; from then until 09-19 every question recorded
+# is_sent=0 error=22 in chat.db while `imsg send` exited 0, so the drip
+# re-asked into the void, skipped 4 rows as "unanswered", and reported 0/48.
+# The state file pins the live target; this default only seeds a fresh state.
+DEFAULT_TARGET = "+18012017497"
+# How long to wait for Messages to write the sent row before calling a send
+# unconfirmed. Observed latency is ~1-6 s; a miss here costs one duplicate
+# question next tick, a false "sent" costs the whole sheet.
+CONFIRM_WAIT_SECS = 10
 APPLE_EPOCH = 978307200  # 2001-01-01 in unix seconds
 SEND_HOUR_START = 9
 SEND_HOUR_END = 21  # exclusive
@@ -248,10 +258,57 @@ def imsg_bin():
     return "imsg"
 
 
+def delivery_verdict(rows_desc, since_unix):
+    """Pure. rows_desc = [(is_sent, error, apple_ns), ...] — the from-me rows
+    in the target chat, newest first. Judges only rows written after
+    since_unix (this send); an older failed row is not this send's failure.
+
+    Returns ("delivered", 0) | ("failed", <chat.db error>) | ("pending", None).
+    error=22 is what Messages records for a recipient that is not registered
+    with iMessage — a dead alias looks exactly like `test@example.com`."""
+    for is_sent, error, apple_ns in rows_desc:
+        if apple_ts_to_unix(apple_ns) < since_unix:
+            break
+        if error:
+            return ("failed", int(error))
+        if is_sent:
+            return ("delivered", 0)
+    return ("pending", None)
+
+
+def confirm_delivery(target, since_unix, db_path=CHAT_DB, wait_secs=CONFIRM_WAIT_SECS):
+    """Read the artifact, not the exit code: poll chat.db for the row Messages
+    wrote for this send and return delivery_verdict() on it. Gives up as
+    ("pending", None) after wait_secs so a slow write costs at most one
+    duplicate question on the next tick, never a phantom "sent"."""
+    q = (
+        "SELECT m.is_sent, m.error, m.date FROM message m "
+        "JOIN chat_message_join cmj ON cmj.message_id = m.ROWID "
+        "JOIN chat c ON c.ROWID = cmj.chat_id "
+        "WHERE c.chat_identifier = ? AND m.is_from_me = 1 "
+        "ORDER BY m.date DESC LIMIT 5"
+    )
+    deadline = time.time() + wait_secs
+    while True:
+        try:
+            con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+            rows = con.execute(q, (target,)).fetchall()
+            con.close()
+        except sqlite3.Error:
+            rows = []
+        verdict = delivery_verdict(rows, since_unix)
+        if verdict[0] != "pending" or time.time() >= deadline:
+            return verdict
+        time.sleep(1)
+
+
 def send_question(target, text, dry_run=False):
     if dry_run or os.environ.get("HU_IS_TEST"):
         print(f"[dry-run] would send to {target}:\n{text}")
         return True
+    # One second of slack: Messages stamps the row at its own clock, and the
+    # verdict must not miss a row written a few ms before this timestamp.
+    sent_at = time.time() - 1.0
     try:
         r = subprocess.run([imsg_bin(), "send", "--to", target, "--text", text],
                            capture_output=True, text=True, timeout=30)
@@ -264,7 +321,22 @@ def send_question(target, text, dry_run=False):
     if r.returncode != 0:
         print(f"send failed: {r.stderr.strip()[:200]}", file=sys.stderr)
         return False
-    return True
+    # imsg exit 0 means Messages ACCEPTED the message, not that it left the
+    # machine. 2026-09-05 -> 09-19: 13 sends to a dead alias all exited 0 and
+    # all sat in chat.db as is_sent=0 error=22. Only the row is evidence.
+    verdict, err = confirm_delivery(target, sent_at)
+    if verdict == "delivered":
+        return True
+    if verdict == "failed":
+        hint = " (22 = recipient not registered with iMessage; check the account's aliases)" \
+            if err == 22 else ""
+        print(f"send NOT delivered to {target}: chat.db error={err}{hint} — "
+              "row left unsent, will retry next tick", file=sys.stderr)
+    else:
+        print(f"send unconfirmed: no from-me row for {target} in chat.db within "
+              f"{CONFIRM_WAIT_SECS}s — treating as not sent, will retry next tick",
+              file=sys.stderr)
+    return False
 
 
 # ── the tick ────────────────────────────────────────────────────────────

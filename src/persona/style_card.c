@@ -36,6 +36,7 @@ void hu_style_card_default(hu_style_card_t *out) {
     out->exclamation_rate = 0.039;
     out->emoji_rate = 0.126;
     out->n = 0;
+    out->substantive_agreement_opener_rate = -1.0;
     out->from_card = false;
 }
 
@@ -88,6 +89,8 @@ hu_error_t hu_style_card_parse(hu_allocator_t *alloc, const char *json, size_t l
                 card.substantive_median_chars = (unsigned)lround(med);
                 card.substantive_share_short = sh;
                 card.substantive_answer_first_rate = af;
+                double ag = hu_json_get_number(sr, "agreement_opener_rate", -1.0);
+                card.substantive_agreement_opener_rate = (ag >= 0.0 && ag <= 1.0) ? ag : -1.0;
             }
         }
         card.from_card = true;
@@ -149,14 +152,28 @@ hu_error_t hu_style_card_render_substantive_rule(const hu_style_card_t *card, ch
      * 3-repeat A/B produced MORE of it: last-third replies with an em-dash
      * went 62% -> 96%. A negated pattern in the prompt primes the pattern, so
      * this text describes what the persona does and never names the tell. */
+    /* v3 (2026-09-19): the measured opener fact. Once dashes were handled the
+     * judge's remaining tell was reflexive agreement — the persona opens a
+     * substantive reply on "yeah/exactly/totally" 0.06 of the time, the twin
+     * ~0.5. Stated as what the persona does, never as a ban (see v2 note). */
+    char opener[128] = "";
+    double ag = card->substantive_agreement_opener_rate;
+    if (ag >= 0.0 && ag < 0.005)
+        snprintf(opener, sizeof(opener),
+                 " You almost never open on agreement; you just say the thing.");
+    else if (ag >= 0.005)
+        snprintf(opener, sizeof(opener),
+                 " You open on agreement (yeah, exactly, totally) about 1 in %d of them; "
+                 "usually you just say the thing.",
+                 (int)lround(1.0 / ag));
     int n = snprintf(buf, cap,
                      "15. When someone sends something long or asks a real question, "
                      "answer it the way you do: your real replies to those (n=%u) run "
-                     "about %u characters, %d%% under 60, one plain sentence. Say the "
+                     "about %u characters, %d%% under 60, one plain sentence.%s Say the "
                      "answer or your take first, in your own words, then stop; one "
                      "reason at most. Take a side when you have one.\n",
                      card->substantive_n, card->substantive_median_chars,
-                     (int)lround(card->substantive_share_short * 100.0));
+                     (int)lround(card->substantive_share_short * 100.0), opener);
     if (n < 0 || (size_t)n + 1 > cap)
         return HU_ERR_OUT_OF_MEMORY;
     if (out_len)

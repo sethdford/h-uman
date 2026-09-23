@@ -773,14 +773,19 @@ def _run_binoculars(results_path):
         rows = binoc.get("results", [])
         real = [r["score_dirA"] for r in rows if r.get("label") == "real"]
         ai = [r["score_dirA"] for r in rows if r.get("label") == "ai"]
-        dira = ((binoc.get("analysis") or {}).get("scores") or {}).get(
-            "dirA (obs=base)") or {}
+        scores = (binoc.get("analysis") or {}).get("scores") or {}
+        dira = scores.get("dirA (obs=base)") or {}
+        # DivEye (arXiv 2509.18880) surprisal-variability AUCs ride along;
+        # advisory like everything under this key. Absent on old scorers.
+        diveye = {name: (scores.get(f"diveye {name} (base)") or {}).get("auc_oriented")
+                  for name in ("std", "burst", "kurt")}
         summary = {
             "direction": "dirA (obs=base, performer=adapted)",
             "adapter": binoc.get("adapter"),
             "n_real": len(real), "n_ai": len(ai),
             "auc_per_message": dira.get("auc_oriented"),
             "auc_windowed_k5": (dira.get("windowed") or {}).get("k=5"),
+            "diveye_auc": diveye,
             "mean_real": round(sum(real) / len(real), 4) if real else None,
             "mean_ai": round(sum(ai) / len(ai), 4) if ai else None,
             "fpr5_threshold": thr_fpr5,

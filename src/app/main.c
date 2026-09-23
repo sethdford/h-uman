@@ -72,7 +72,9 @@
 #endif
 #include "human/persona.h"
 #ifdef HU_ENABLE_CARTESIA
+#include "human/tts/cartesia.h"
 #include "human/tts/voice_clone.h"
+#include "human/tts/voice_reply.h"
 #endif
 #ifdef HU_ENABLE_FEEDS
 #include "human/feeds/processor.h"
@@ -483,13 +485,16 @@ static hu_error_t cmd_schedule(hu_allocator_t *alloc, int argc, char **argv) {
             }
             return err;
         }
-        hu_conversation_sched_save(sched_path, (size_t)sn);
-        printf("Scheduled message for %s at %" PRIu64 "ms\n", contact, deliver_ms);
+        err = hu_conversation_sched_save(sched_path, (size_t)sn);
+        if (err != HU_OK)
+            fprintf(stderr, "Failed to persist schedule to %s: error %d\n", sched_path, (int)err);
+        else
+            printf("Scheduled message for %s at %" PRIu64 "ms\n", contact, deliver_ms);
         if (lock_fd >= 0) {
             flock(lock_fd, LOCK_UN);
             close(lock_fd);
         }
-        return HU_OK;
+        return err;
     }
 
     if (argc >= 4 && strcmp(argv[2], "cancel") == 0) {
@@ -514,14 +519,18 @@ static hu_error_t cmd_schedule(hu_allocator_t *alloc, int argc, char **argv) {
             }
             return HU_ERR_INVALID_ARGUMENT;
         }
-        printf("Cancelled: \"%s\" to %s\n", slot->message, slot->contact_id);
         slot->active = false;
-        hu_conversation_sched_save(sched_path, (size_t)sn);
+        hu_error_t serr = hu_conversation_sched_save(sched_path, (size_t)sn);
+        if (serr != HU_OK)
+            fprintf(stderr, "Failed to persist cancellation to %s: error %d\n", sched_path,
+                    (int)serr);
+        else
+            printf("Cancelled: \"%s\" to %s\n", slot->message, slot->contact_id);
         if (lock_fd >= 0) {
             flock(lock_fd, LOCK_UN);
             close(lock_fd);
         }
-        return HU_OK;
+        return serr;
     }
 
     if (lock_fd >= 0) {
@@ -2621,7 +2630,6 @@ static hu_error_t cmd_pwa(hu_allocator_t *alloc, int argc, char **argv) {
 }
 
 static hu_error_t cmd_persona(hu_allocator_t *alloc, int argc, char **argv) {
-#ifdef HU_HAS_PERSONA
     hu_persona_cli_args_t args;
     hu_error_t err = hu_persona_cli_parse(argc, (const char **)argv, &args);
     if (err != HU_OK) {
@@ -2650,24 +2658,164 @@ static hu_error_t cmd_persona(hu_allocator_t *alloc, int argc, char **argv) {
         return err;
     }
     return hu_persona_cli_run(alloc, &args);
-#else
-    (void)alloc;
-    (void)argc;
-    (void)argv;
-    fprintf(stderr, "Persona support not compiled in (HU_ENABLE_PERSONA=OFF)\n");
-    return HU_ERR_NOT_SUPPORTED;
-#endif
 }
 
 #ifdef HU_ENABLE_CARTESIA
-static hu_error_t cmd_voice(hu_allocator_t *alloc, int argc, char **argv) {
-    if (argc < 3 || !argv[2]) {
-        fprintf(stderr,
-                "Usage: human voice <subcommand>\n\n"
-                "Subcommands:\n"
-                "  clone --file <path> [--name <name>] [--lang <code>] [--persona <name>]\n");
+/* `human voice preview` — synthesize one reply exactly the way the daemon
+ * does (same hu_voice_reply_build_request, same channel container) and write
+ * the file, without waiting for the daemon's voice roll. */
+static hu_error_t cmd_voice_preview(hu_allocator_t *alloc, int argc, char **argv) {
+    const char *text = NULL, *incoming = NULL, *persona_name = NULL, *out_path = NULL;
+    const char *channel = "imessage";
+    const char *model_override = NULL;
+    float speed_override = 0.f;
+    bool raw = false; /* skip transcript prep: the A/B "prep off" arm */
+    for (int i = 3; i < argc; i++) {
+        if (!argv[i])
+            continue;
+        if (strcmp(argv[i], "--model") == 0 && i + 1 < argc)
+            model_override = argv[++i];
+        else if (strcmp(argv[i], "--speed") == 0 && i + 1 < argc)
+            speed_override = (float)atof(argv[++i]);
+        else if (strcmp(argv[i], "--raw") == 0)
+            raw = true;
+        else if (strcmp(argv[i], "--text") == 0 && i + 1 < argc)
+            text = argv[++i];
+        else if (strcmp(argv[i], "--incoming") == 0 && i + 1 < argc)
+            incoming = argv[++i];
+        else if (strcmp(argv[i], "--persona") == 0 && i + 1 < argc)
+            persona_name = argv[++i];
+        else if (strcmp(argv[i], "--out") == 0 && i + 1 < argc)
+            out_path = argv[++i];
+        else if (strcmp(argv[i], "--channel") == 0 && i + 1 < argc)
+            channel = argv[++i];
+    }
+    if (!text || !text[0] || !persona_name || !persona_name[0]) {
+        fprintf(stderr, "Usage: human voice preview --text <reply> --persona <name> "
+                        "[--incoming <msg>] [--channel imessage] [--out <file>] "
+                        "[--model <id>] [--speed <0.6-1.5>] [--raw]\n");
         return HU_ERR_INVALID_ARGUMENT;
     }
+
+    hu_config_t cfg;
+    hu_error_t err = hu_config_load(alloc, &cfg);
+    if (err != HU_OK) {
+        fprintf(stderr, "Error: config load failed: %s\n", hu_error_string(err));
+        return err;
+    }
+    const char *api_key = getenv("CARTESIA_API_KEY");
+    if (!api_key || api_key[0] == '\0')
+        api_key = hu_config_get_provider_key(&cfg, "cartesia");
+    if (!api_key || api_key[0] == '\0') {
+        fprintf(stderr, "Error: set CARTESIA_API_KEY or configure providers.cartesia.api_key\n");
+        return HU_ERR_PROVIDER_AUTH;
+    }
+
+    hu_persona_t persona;
+    err = hu_persona_load(alloc, persona_name, strlen(persona_name), &persona);
+    if (err != HU_OK) {
+        fprintf(stderr, "Error: persona '%s' load failed: %s\n", persona_name,
+                hu_error_string(err));
+        return err;
+    }
+    if (!persona.voice.voice_id[0]) {
+        fprintf(stderr,
+                "Error: persona '%s' has no voice.voice_id (run `human voice clone "
+                "--persona %s` first)\n",
+                persona_name, persona_name);
+        hu_persona_free(&persona);
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+
+    time_t now = time(NULL);
+    struct tm tmb;
+    localtime_r(&now, &tmb);
+    if (model_override && model_override[0])
+        snprintf(persona.voice.model, sizeof(persona.voice.model), "%s", model_override);
+    if (speed_override > 0.f)
+        persona.voice.default_speed = speed_override;
+    hu_voice_reply_request_t req;
+    if (raw) {
+        memset(&req, 0, sizeof(req));
+        size_t tl = strlen(text);
+        if (tl >= sizeof(req.transcript))
+            tl = sizeof(req.transcript) - 1;
+        memcpy(req.transcript, text, tl);
+        req.transcript[tl] = '\0';
+        req.transcript_len = tl;
+        req.sentence_count = 1;
+        snprintf(req.emotion, sizeof(req.emotion), "%s",
+                 persona.voice.default_emotion[0] ? persona.voice.default_emotion : "content");
+        snprintf(req.model, sizeof(req.model), "%s",
+                 persona.voice.model[0] ? persona.voice.model : HU_VOICE_REPLY_DEFAULT_MODEL);
+        req.tts.model_id = req.model;
+        req.tts.voice_id = persona.voice.voice_id;
+        req.tts.emotion = req.emotion;
+        req.tts.speed = persona.voice.default_speed > 0.f ? persona.voice.default_speed
+                                                          : HU_VOICE_REPLY_DEFAULT_SPEED;
+        req.tts.volume = 1.0f;
+        req.tts.nonverbals = persona.voice.nonverbals;
+        err = HU_OK;
+    } else {
+        err = hu_voice_reply_build_request(&persona.voice, text, strlen(text), incoming,
+                                           incoming ? strlen(incoming) : 0, tmb.tm_hour,
+                                           (uint32_t)now, &req);
+    }
+    if (err != HU_OK) {
+        fprintf(stderr, "Error: transcript prep failed: %s\n", hu_error_string(err));
+        hu_persona_free(&persona);
+        return err;
+    }
+    printf("transcript (%zu sentences):\n%s\n\nmodel=%s emotion=%s speed=%.2f volume=%.2f "
+           "nonverbals=%s channel=%s\n",
+           req.sentence_count, req.transcript, req.tts.model_id, req.tts.emotion,
+           (double)req.tts.speed, (double)req.tts.volume, req.tts.nonverbals ? "on" : "off",
+           channel);
+
+    unsigned char *bytes = NULL;
+    size_t len = 0;
+    err = hu_cartesia_tts_synthesize(alloc, api_key, strlen(api_key), req.transcript,
+                                     req.transcript_len, &req.tts,
+                                     hu_tts_format_for_channel(channel), &bytes, &len);
+    if (err != HU_OK || !bytes || len == 0) {
+        fprintf(stderr, "Error: Cartesia synthesis failed: %s\n", hu_error_string(err));
+        hu_persona_free(&persona);
+        return err != HU_OK ? err : HU_ERR_IO;
+    }
+    char path[512];
+    err = hu_voice_reply_audio_to_temp(alloc, channel, bytes, len, path, sizeof(path));
+    hu_cartesia_tts_free_bytes(alloc, bytes, len);
+    hu_persona_free(&persona);
+    if (err != HU_OK) {
+        fprintf(stderr, "Error: audio conversion failed: %s\n", hu_error_string(err));
+        return err;
+    }
+    if (out_path && out_path[0]) {
+        if (rename(path, out_path) != 0) {
+            fprintf(stderr, "Error: could not move %s to %s\n", path, out_path);
+            return HU_ERR_IO;
+        }
+        printf("wrote %s (%zu bytes of audio)\n", out_path, len);
+    } else {
+        printf("wrote %s (%zu bytes of audio; temp file, move it before the next run)\n", path,
+               len);
+    }
+    return HU_OK;
+}
+
+static hu_error_t cmd_voice(hu_allocator_t *alloc, int argc, char **argv) {
+    if (argc < 3 || !argv[2]) {
+        fprintf(stderr, "Usage: human voice <subcommand>\n\n"
+                        "Subcommands:\n"
+                        "  clone --file <path> [--name <name>] [--lang <code>] [--persona <name>]\n"
+                        "  preview --text <reply> --persona <name> [--incoming <msg>]\n"
+                        "          [--channel imessage] [--out <file>] [--model <id>]\n"
+                        "          [--speed <0.6-1.5>] [--raw]\n");
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+
+    if (strcmp(argv[2], "preview") == 0)
+        return cmd_voice_preview(alloc, argc, argv);
 
     if (strcmp(argv[2], "clone") != 0) {
         fprintf(stderr, "Unknown voice subcommand: %s\n", argv[2]);

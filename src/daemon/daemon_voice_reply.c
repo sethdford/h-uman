@@ -14,6 +14,51 @@
 #include "human/daemon.h"
 #include "human/daemon/voice_facade.h"
 #include "human/platform.h"
+#if defined(HU_ENABLE_CARTESIA)
+#include "human/tts/voice_reply.h"
+#endif
+#if defined(HU_ENABLE_SQLITE)
+#include "human/memory.h"
+#include "human/memory/engines.h"
+#include "human/memory/proactive_decisions_repo.h"
+#endif
+
+#if defined(HU_ENABLE_CARTESIA)
+/* Log the voice/text decision (trigger='voice_reply') into proactive_decisions
+ * so voice timing gets the same When2Speak measurement as proactive sends
+ * (scripts/eval_when_to_speak.py). Best-effort: never affects the reply. */
+static void daemon_voice_record_decision(hu_agent_t *agent, const char *batch_key, size_t key_len,
+                                         bool chose_voice, const char *reason, bool sent) {
+#if defined(HU_ENABLE_SQLITE)
+    if (!agent || !agent->memory)
+        return;
+    sqlite3 *db = hu_sqlite_memory_get_db(agent->memory);
+    if (!db)
+        return;
+    char contact[128];
+    size_t n = key_len < sizeof(contact) - 1 ? key_len : sizeof(contact) - 1;
+    if (batch_key && n > 0)
+        memcpy(contact, batch_key, n);
+    contact[batch_key ? n : 0] = '\0';
+    if (hu_proactive_decisions_repo_ensure_schema(db) != HU_OK)
+        return;
+    hu_error_t err = hu_proactive_decisions_repo_record(
+        db, (int64_t)time(NULL), contact[0] ? contact : NULL, "voice_reply",
+        chose_voice ? HU_PROACTIVE_DECISION_SEND : HU_PROACTIVE_DECISION_DECLINE,
+        reason ? reason : "unknown", sent ? 1 : 0, NULL);
+    if (err != HU_OK)
+        hu_log_warn("voice_reply", NULL, "proactive_decisions_repo_record failed: err=%d",
+                    (int)err);
+#else
+    (void)agent;
+    (void)batch_key;
+    (void)key_len;
+    (void)chose_voice;
+    (void)reason;
+    (void)sent;
+#endif
+}
+#endif /* HU_ENABLE_CARTESIA */
 
 #include <math.h>
 #include <stdatomic.h>
@@ -61,70 +106,30 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, hu_agent_t *agent, const hu_co
 #if defined(HU_ENABLE_CARTESIA)
         if (voice_channel_ok && agent->persona && agent->persona->voice.voice_id[0] &&
             agent->persona->voice_messages.enabled) {
-            hu_voice_decision_t vdec = hu_voice_decision_classify(
+            const char *vreason = NULL;
+            hu_voice_decision_t vdec = hu_voice_decision_classify_ex(
                 response, response_len, combined, combined_len, &agent->persona->voice_messages,
-                true, bth_hour, (uint32_t)(time(NULL) ^ (uintptr_t)combined));
+                true, bth_hour, (uint32_t)(time(NULL) ^ (uintptr_t)combined), &vreason);
             if (vdec == HU_VOICE_SEND_VOICE) {
                 const char *cartesia_key = hu_config_get_provider_key(config, "cartesia");
                 if (cartesia_key && cartesia_key[0]) {
-                    char voice_transcript[4096];
-                    size_t vt_len = response_len < sizeof(voice_transcript) - 64
-                                        ? response_len
-                                        : sizeof(voice_transcript) - 64;
-                    memcpy(voice_transcript, response, vt_len);
-                    voice_transcript[vt_len] = '\0';
-                    vt_len = hu_conversation_inject_nonverbals(
-                        voice_transcript, vt_len, sizeof(voice_transcript), (uint32_t)time(NULL),
-                        agent->persona->voice.nonverbals);
-
-                    const char *emo_str = hu_cartesia_emotion_from_context(
-                        combined, combined_len, response, response_len, (uint8_t)bth_hour);
-
-                    /* Emotion voice map: detect emotion + derive expressive params
-                     */
-                    hu_voice_emotion_t detected_emotion = HU_VOICE_EMOTION_NEUTRAL;
-                    float emotion_confidence = 0.0f;
-                    hu_emotion_detect_from_text(response, response_len, &detected_emotion,
-                                                &emotion_confidence);
-                    hu_voice_params_t evo_params = hu_emotion_voice_map(detected_emotion);
-                    float base_speed = agent->persona->voice.default_speed > 0.f
-                                           ? agent->persona->voice.default_speed
-                                           : 0.95f;
-
-                    hu_cartesia_tts_config_t tts_cfg = {
-                        .model_id = agent->persona->voice.model[0] ? agent->persona->voice.model
-                                                                   : "sonic-3-2026-01-12",
-                        .voice_id = agent->persona->voice.voice_id,
-                        .emotion = emo_str,
-                        .speed = base_speed * evo_params.rate_factor,
-                        .volume = 1.0f,
-                        .nonverbals = agent->persona->voice.nonverbals,
-                    };
-
-                    const char *voice_fmt = hu_tts_format_for_channel(chn_voice);
+                    hu_voice_reply_request_t req;
+                    hu_error_t prep_err = hu_voice_reply_build_request(
+                        &agent->persona->voice, response, response_len, combined, combined_len,
+                        bth_hour, (uint32_t)time(NULL), &req);
                     unsigned char *audio_bytes = NULL;
                     size_t audio_len = 0;
-                    hu_error_t tts_err = hu_cartesia_tts_synthesize(
-                        alloc, cartesia_key, strlen(cartesia_key), voice_transcript, vt_len,
-                        &tts_cfg, voice_fmt, &audio_bytes, &audio_len);
+                    hu_error_t tts_err = prep_err;
+                    if (prep_err == HU_OK)
+                        tts_err = hu_cartesia_tts_synthesize(
+                            alloc, cartesia_key, strlen(cartesia_key), req.transcript,
+                            req.transcript_len, &req.tts, hu_tts_format_for_channel(chn_voice),
+                            &audio_bytes, &audio_len);
                     if (tts_err == HU_OK && audio_bytes && audio_len > 0) {
                         char audio_path[512];
-                        hu_error_t pipe_err;
-                        if (strcmp(voice_fmt, "caf") == 0) {
-                            pipe_err = hu_audio_mp3_to_caf(alloc, audio_bytes, audio_len,
-                                                           audio_path, sizeof(audio_path));
-                        } else {
-                            const char *temp_ext = "mp3";
-                            if (strcmp(voice_fmt, "wav") == 0)
-                                temp_ext = "wav";
-                            else if (strcmp(voice_fmt, "ogg") == 0)
-                                /* Cartesia has no OGG; WAV on disk until Opus
-                                 * encode */
-                                temp_ext = "wav";
-                            pipe_err =
-                                hu_audio_tts_bytes_to_temp(alloc, audio_bytes, audio_len, temp_ext,
-                                                           audio_path, sizeof(audio_path));
-                        }
+                        hu_error_t pipe_err =
+                            hu_voice_reply_audio_to_temp(alloc, chn_voice, audio_bytes, audio_len,
+                                                         audio_path, sizeof(audio_path));
                         hu_cartesia_tts_free_bytes(alloc, audio_bytes, audio_len);
                         if (pipe_err == HU_OK) {
                             const char *media_paths[] = {audio_path};
@@ -139,6 +144,8 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, hu_agent_t *agent, const hu_co
                     }
                 }
             }
+            daemon_voice_record_decision(agent, batch_key, key_len, vdec == HU_VOICE_SEND_VOICE,
+                                         vreason, sent_voice);
         }
 #endif
         /* Fallback: unified voice pipeline when persona Cartesia path did not send.
@@ -156,22 +163,8 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, hu_agent_t *agent, const hu_co
                     char audio_path[512];
                     hu_error_t pipe_err = HU_ERR_IO;
 #if defined(HU_ENABLE_CARTESIA)
-                    {
-                        const char *voice_fmt = hu_tts_format_for_channel(chn_voice);
-                        if (strcmp(voice_fmt, "caf") == 0) {
-                            pipe_err = hu_audio_mp3_to_caf(alloc, audio_bytes, audio_len,
-                                                           audio_path, sizeof(audio_path));
-                        } else {
-                            const char *temp_ext = "mp3";
-                            if (strcmp(voice_fmt, "wav") == 0)
-                                temp_ext = "wav";
-                            else if (strcmp(voice_fmt, "ogg") == 0)
-                                temp_ext = "wav";
-                            pipe_err =
-                                hu_audio_tts_bytes_to_temp(alloc, audio_bytes, audio_len, temp_ext,
-                                                           audio_path, sizeof(audio_path));
-                        }
-                    }
+                    pipe_err = hu_voice_reply_audio_to_temp(
+                        alloc, chn_voice, audio_bytes, audio_len, audio_path, sizeof(audio_path));
 #else
                     {
                         char *tmp_dir = hu_platform_get_temp_dir(alloc);

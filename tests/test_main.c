@@ -424,6 +424,7 @@ void run_semantic_recall_register_tests(void);
 void run_embedder_http_tests(void);
 void run_w1_bitemporal_tests(void);
 void run_graph_state_tests(void);
+void run_wiki_page_tests(void);
 void run_w2_autodream_tests(void);
 void run_w3_multigraph_tests(void);
 void run_w4_verifier_tests(void);
@@ -462,6 +463,11 @@ void run_boundary_repo_tests(void);
 void run_opinions_repo_tests(void);
 void run_life_chapter_repo_tests(void);
 void run_proactive_decisions_repo_tests(void);
+void run_daemon_proactive_decline_tests(void);
+void run_daemon_proactive_reachability_tests(void);
+void run_daemon_contact_optout_tests(void);
+void run_contact_optout_repo_tests(void);
+void run_repo_util_sqlite_tests(void);
 void run_social_graph_repo_tests(void);
 void run_self_awareness_repo_tests(void);
 void run_feed_items_repo_tests(void);
@@ -700,6 +706,7 @@ void register_voice_clone_tests(void);
 void run_audio_pipeline_tests(void);
 void run_voice_decision_tests(void);
 void run_emotion_map_tests(void);
+void run_voice_reply_tests(void);
 #endif
 #ifdef HU_ENABLE_ML
 void run_ml_tests(void);
@@ -899,6 +906,7 @@ void run_daemon_routing_tests(void);
 void run_daemon_proactive_tests(void);
 void run_reply_delay_model_tests(void);
 void run_daemon_promise_keeper_tests(void);
+void run_daemon_insight_overuse_tests(void);
 void run_daemon_config_reload_tests(void);
 void run_daemon_identity_graph_tests(void);
 void run_daemon_reply_fallback_tests(void);
@@ -1513,6 +1521,7 @@ int main(int argc, char **argv) {
     run_embedder_http_tests();
     run_w1_bitemporal_tests();
     run_graph_state_tests();
+    run_wiki_page_tests();
     run_w2_autodream_tests();
     run_w3_multigraph_tests();
     run_w4_verifier_tests();
@@ -1548,6 +1557,11 @@ int main(int argc, char **argv) {
     run_opinions_repo_tests();
     run_life_chapter_repo_tests();
     run_proactive_decisions_repo_tests();
+    run_daemon_proactive_decline_tests();
+    run_daemon_proactive_reachability_tests();
+    run_daemon_contact_optout_tests();
+    run_contact_optout_repo_tests();
+    run_repo_util_sqlite_tests();
     run_social_graph_repo_tests();
     run_self_awareness_repo_tests();
     run_feed_items_repo_tests();
@@ -1772,6 +1786,7 @@ int main(int argc, char **argv) {
     run_audio_pipeline_tests();
     run_voice_decision_tests();
     run_emotion_map_tests();
+    run_voice_reply_tests();
 #endif
 #ifdef HU_ENABLE_ML
     run_ml_tests();
@@ -1963,6 +1978,7 @@ int main(int argc, char **argv) {
     run_daemon_proactive_tests();
     run_reply_delay_model_tests();
     run_daemon_promise_keeper_tests();
+    run_daemon_insight_overuse_tests();
     run_daemon_config_reload_tests();
     run_daemon_identity_graph_tests();
     run_daemon_reply_fallback_tests();

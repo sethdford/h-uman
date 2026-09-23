@@ -70,6 +70,26 @@ static void test_ai_tell_incident_phrases_detected(void) {
     HU_ASSERT_NOT_NULL(hit);
 }
 
+/* 2026-09-20: the service-desk family. The first two reached a real contact
+ * (production_outcomes, delivered text); the third was caught on 09-10 and
+ * retried into "lol what". All four must be tells. */
+static void test_ai_tell_service_desk_family_delivered_in_september(void) {
+    HU_ASSERT_NOT_NULL(hu_reactive_response_ai_tell(
+        "Yes, I can help you with that. Please let me know the details of what you need"));
+    HU_ASSERT_NOT_NULL(
+        hu_reactive_response_ai_tell("This solution will effectively address your needs."));
+    HU_ASSERT_NOT_NULL(hu_reactive_response_ai_tell(
+        "Could you please clarify or provide more details on what you need help with?"));
+    HU_ASSERT_NOT_NULL(hu_reactive_response_ai_tell(
+        "Please let me know what specific information or assistance you need, and I will be "
+        "happy to provide it directly."));
+    /* Seth's register around the same words stays clean (chat.db, 2026-09). */
+    HU_ASSERT_NULL(hu_reactive_response_ai_tell("I know what it is, toss it in the garage"));
+    HU_ASSERT_NULL(hu_reactive_response_ai_tell("yeah send me the details when you have them"));
+    HU_ASSERT_NULL(hu_reactive_response_ai_tell("what do you need"));
+    HU_ASSERT_NULL(hu_reactive_response_ai_tell("I can help Saturday"));
+}
+
 static void test_ai_tell_support_register_on_distress_detected(void) {
     /* 2026-09-12 15:18 retry that passed the old table. */
     HU_ASSERT_NOT_NULL(
@@ -179,4 +199,5 @@ void run_reactive_gates_tests(void) {
     HU_RUN_TEST(test_consecutive_limit_fires_at_cap);
     HU_RUN_TEST(test_consecutive_burst_expires_only_after_the_window);
     HU_RUN_TEST(test_message_is_question_finds_a_question_mark);
+    HU_RUN_TEST(test_ai_tell_service_desk_family_delivered_in_september);
 }

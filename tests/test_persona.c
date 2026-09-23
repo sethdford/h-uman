@@ -436,6 +436,24 @@ static void test_persona_validate_json_valid(void) {
     HU_ASSERT_TRUE(err == NULL);
 }
 
+/* An empty array is a valid array of strings. The parser represents [] as
+ * items=NULL/len=0; the validator must not reject that (the loader accepts it). */
+static void test_persona_validate_accepts_empty_string_arrays(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *json = "{\"version\":1,\"name\":\"test\","
+                       "\"core\":{\"identity\":\"Test person\",\"traits\":[],"
+                       "\"principles\":[],\"values\":[],\"communication_rules\":[],"
+                       "\"vocabulary\":{\"preferred\":[],\"avoided\":[],\"slang\":[]}}}";
+    char *err = NULL;
+    size_t err_len = 0;
+    hu_error_t e = hu_persona_validate_json(&alloc, json, strlen(json), &err, &err_len);
+    if (err) {
+        fprintf(stderr, "validate error: %s\n", err);
+        alloc.free(alloc.ctx, err, err_len + 1);
+    }
+    HU_ASSERT_EQ(e, HU_OK);
+}
+
 static void test_persona_validate_json_missing_name(void) {
     hu_allocator_t alloc = hu_system_allocator();
     const char *json = "{\"version\":1,\"core\":{\"identity\":\"X\",\"traits\":[]}}";
@@ -5210,6 +5228,7 @@ void run_persona_tests(void) {
     HU_RUN_TEST(test_persona_cli_parse_feedback_apply);
     HU_RUN_TEST(test_cli_parse_diff);
     HU_RUN_TEST(test_persona_validate_json_valid);
+    HU_RUN_TEST(test_persona_validate_accepts_empty_string_arrays);
     HU_RUN_TEST(test_persona_validate_json_missing_name);
     HU_RUN_TEST(test_persona_validate_json_missing_core);
     HU_RUN_TEST(test_persona_validate_json_malformed);

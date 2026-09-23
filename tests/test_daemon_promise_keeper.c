@@ -14,11 +14,23 @@ static void promise_keeper_mode_from_env_truth_table(void) {
     HU_ASSERT_EQ((int)hu_promise_keeper_mode_from_env(NULL), (int)HU_PROMISE_KEEPER_OFF);
     HU_ASSERT_EQ((int)hu_promise_keeper_mode_from_env(""), (int)HU_PROMISE_KEEPER_OFF);
     HU_ASSERT_EQ((int)hu_promise_keeper_mode_from_env("off"), (int)HU_PROMISE_KEEPER_OFF);
-    HU_ASSERT_EQ((int)hu_promise_keeper_mode_from_env("1"), (int)HU_PROMISE_KEEPER_OFF);
     HU_ASSERT_EQ((int)hu_promise_keeper_mode_from_env("shadow"), (int)HU_PROMISE_KEEPER_SHADOW);
     HU_ASSERT_EQ((int)hu_promise_keeper_mode_from_env("on"), (int)HU_PROMISE_KEEPER_LIVE);
-    /* Exact-match only: "ON"/"On" are not silently live. */
-    HU_ASSERT_EQ((int)hu_promise_keeper_mode_from_env("ON"), (int)HU_PROMISE_KEEPER_OFF);
+    /* Unknown input fails closed (core/gate_mode.h contract). */
+    HU_ASSERT_EQ((int)hu_promise_keeper_mode_from_env("bogus"), (int)HU_PROMISE_KEEPER_OFF);
+}
+
+/* 2026-09-20: the prod launchd plist set HU_PROMISE_KEEPER=live, the one
+ * spelling this parser did NOT accept, so the subsystem was silently OFF in
+ * production. The parser must speak the canonical gate vocabulary
+ * (include/human/core/gate_mode.h): live | on | 1, case-insensitive. */
+static void promise_keeper_mode_from_env_accepts_canonical_gate_vocabulary(void) {
+    HU_ASSERT_EQ((int)hu_promise_keeper_mode_from_env("live"), (int)HU_PROMISE_KEEPER_LIVE);
+    HU_ASSERT_EQ((int)hu_promise_keeper_mode_from_env("LIVE"), (int)HU_PROMISE_KEEPER_LIVE);
+    HU_ASSERT_EQ((int)hu_promise_keeper_mode_from_env("ON"), (int)HU_PROMISE_KEEPER_LIVE);
+    HU_ASSERT_EQ((int)hu_promise_keeper_mode_from_env("1"), (int)HU_PROMISE_KEEPER_LIVE);
+    HU_ASSERT_EQ((int)hu_promise_keeper_mode_from_env("Shadow"), (int)HU_PROMISE_KEEPER_SHADOW);
+    HU_ASSERT_EQ((int)hu_promise_keeper_mode_from_env("OFF"), (int)HU_PROMISE_KEEPER_OFF);
 }
 
 static void courtesy_data_init_loads_embedded_json(void) {
@@ -294,6 +306,7 @@ static void promise_keeper_live_rejects_courtesy_invitation(void) {
 void run_daemon_promise_keeper_tests(void) {
     HU_TEST_SUITE("DaemonPromiseKeeper");
     HU_RUN_TEST(promise_keeper_mode_from_env_truth_table);
+    HU_RUN_TEST(promise_keeper_mode_from_env_accepts_canonical_gate_vocabulary);
     HU_RUN_TEST(courtesy_data_init_loads_embedded_json);
     HU_RUN_TEST(courtesy_predicate_rejects_bare_invitations);
     HU_RUN_TEST(courtesy_predicate_accepts_genuine_commitments);

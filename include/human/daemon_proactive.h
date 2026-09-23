@@ -12,6 +12,7 @@
 
 struct hu_agent;
 struct hu_contact_profile;
+struct hu_autoresponder_config;
 struct hu_legacy_memory;
 struct hu_memory_vtable;
 
@@ -183,6 +184,33 @@ hu_error_t hu_daemon_proactive_get_contact_feed_items(hu_allocator_t *alloc, sql
                                                       size_t *out_count);
 #endif
 
+/* Run the full proactive gate chain and, if every gate passes, send.
+ *
+ * Carved out of hu_service_run_proactive_checkins (daemon.c) on 2026-09-20 —
+ * 103 lines that sat between the LLM draft and the post-send bookkeeping.
+ * Behaviour is unchanged; what is new is that a proposal suppressed by any
+ * gate now leaves a proactive_decisions row naming the gate (see
+ * hu_daemon_proactive_record_decline), where before it reached only the
+ * service log and eval_when_to_speak.py counted it as `dropped_pre_send`
+ * with no way to say why (89 of 115 fires, 2026-09-20).
+ *
+ * `response` is mutated IN PLACE (validator, complexity variation,
+ * trailing-period strip, sanitizer) and `*response_len` is updated to match —
+ * the caller frees the buffer with that length, exactly as the inline code
+ * did. `ar_cfg`, `tz_offset_s` and `throttle` are passed in because the
+ * daemon.c helpers that produce them are static there.
+ *
+ * Returns true iff the channel accepted delivery. Post-send bookkeeping
+ * (important-date ring, commitments, jokes, delayed follow-ups) is the
+ * caller's, gated on that return. */
+bool hu_daemon_proactive_gate_and_send(struct hu_agent *agent, hu_allocator_t *alloc,
+                                       hu_channel_t *channel, const struct hu_contact_profile *cp,
+                                       const char *ch_name, const char *target, size_t target_len,
+                                       char *response, size_t *response_len, int64_t now,
+                                       hu_proactive_budget_t *gov_budget,
+                                       const struct hu_autoresponder_config *ar_cfg,
+                                       int32_t tz_offset_s, hu_proactive_throttle_t *throttle);
+
 /* Send a proactive check-in and record it ONLY if the channel accepted it.
  * Returns true when the message was actually accepted for delivery; false means
  * nothing was sent and NO bookkeeping (send-recency, proactive outcome, governor
@@ -192,5 +220,73 @@ bool hu_daemon_proactive_send_and_record(struct hu_agent *agent, hu_channel_t *c
                                          const char *target, size_t target_len, const char *message,
                                          size_t message_len, int64_t now,
                                          hu_proactive_budget_t *gov_budget);
+
+/* Record a proactive check-in that was DECLINED before any channel send was
+ * attempted — the gates between the proposer firing and the send call
+ * (boundary, governor, reactive-recency, validator, throttle, sanitizer).
+ *
+ * Why this exists (2026-09-20): `scripts/eval_when_to_speak.py` measures the
+ * FIR/MIR calibration of the proactive policy, and reported
+ * `fir_dropped_pre_send=89` against only 10 delivered sends — 89 FIRED
+ * proposals died in those gates with NO row saying which one. They log to the
+ * service log, which nothing reads, and are invisible to the metric. With no
+ * attribution the script cannot tell "policy correctly stayed quiet" from
+ * "a rate-limiter ate it", and FIR has no denominator to work with.
+ *
+ * `reason` is a short stable slug (e.g. "rate_limited", "sanitize_refused") —
+ * it is grouped in SQL, so keep it a closed vocabulary, not free prose.
+ * Best-effort and never fails the tick: this is telemetry, not a gate.
+ * Do NOT call this after hu_daemon_proactive_send_and_record returns false —
+ * that path records its own outcome row and would double-count. */
+void hu_daemon_proactive_record_decline(struct hu_agent *agent, const char *contact,
+                                        const char *reason, int64_t now);
+
+/* ── Proactive reachability pre-filter (2026-09-20) ──────────────────────
+ *
+ * Why: docs/plans/2026-09-20-october-roadmap.md O3. Attributing pre-send
+ * drops showed 91% of proactive fires (2026-09-20) targeted ONE contact the
+ * iMessage blue_guard then HELD as not-iMessage-reachable. Every such fire
+ * burns a proposer LLM call, lands in the FIR numerator, and can never be
+ * delivered. The fix is to ask the SAME predicate blue_guard asks — before
+ * the proposer runs — and leave that contact out of the candidate set.
+ *
+ * Gate: HU_PROACTIVE_REACHABILITY = off (default) | shadow | live. Unrecognised
+ * values fail closed to OFF (same idiom as HU_REPLY_DELAY_MODEL). SHADOW
+ * probes and logs "would-exclude" but changes nothing; LIVE skips the
+ * proposer for that contact. Promotion to LIVE is gated on a measurement:
+ * scripts/eval_when_to_speak.py FIR at n≥30 fires must be not-worse than the
+ * pre-LIVE reading (feature-gate-requires-measurement.md).
+ *
+ * Only iMessage has a reachability oracle (chat.db + whois); other channels
+ * always PASS. Builds without HU_HAS_IMESSAGE always PASS. */
+typedef enum hu_proactive_reach_mode {
+    HU_PROACTIVE_REACH_OFF = 0,
+    HU_PROACTIVE_REACH_SHADOW,
+    HU_PROACTIVE_REACH_LIVE,
+} hu_proactive_reach_mode_t;
+
+typedef enum hu_proactive_reach_action {
+    HU_PROACTIVE_REACH_PASS = 0,   /* run the proposer as before */
+    HU_PROACTIVE_REACH_WOULD_SKIP, /* SHADOW: log, then run the proposer as before */
+    HU_PROACTIVE_REACH_SKIP,       /* LIVE: do not run the proposer for this contact */
+} hu_proactive_reach_action_t;
+
+/* Parse HU_PROACTIVE_REACHABILITY. Fail-closed: unset/"off"/junk ⇒ OFF. */
+hu_proactive_reach_mode_t hu_daemon_proactive_reach_mode_from_env(void);
+
+/* Pure decision: mode × reachable → action. Extracted so the truth table is
+ * pinned without a daemon (security-predicate-extraction.md). */
+hu_proactive_reach_action_t hu_daemon_proactive_reach_decide(hu_proactive_reach_mode_t mode,
+                                                             bool reachable);
+
+/* Probe (iMessage only) + decide + log. Returns true iff the caller MUST skip
+ * the proposer for this contact this tick — i.e. only LIVE and unreachable.
+ * SHADOW logs the would-exclude line (grep "proactive reachability") and
+ * returns false. Never writes a proactive_decisions row: a pre-filter changes
+ * the candidate set, it is not a decision on a fired proposal, and a row here
+ * would inflate the FIR denominator the pre-filter is meant to clean. */
+bool hu_daemon_proactive_reach_should_skip(struct hu_agent *agent, hu_allocator_t *alloc,
+                                           const char *ch_name, const char *contact_id,
+                                           const char *target, size_t target_len);
 
 #endif /* HU_DAEMON_PROACTIVE_H */

@@ -127,7 +127,14 @@ option(HU_ENABLE_CRON "Build cron scheduler support" OFF)
 option(HU_ENABLE_PUSH "Build push notification support (FCM/APNS)" OFF)
 option(HU_ENABLE_UPDATE "Build update check/apply support" OFF)
 option(HU_ENABLE_SKILLS "Build skill acquisition and continuous learning" OFF)
-option(HU_ENABLE_PERSONA "Enable persona system" ON)
+option(HU_ENABLE_PERSONA "Persona system (compiled unconditionally; OFF is rejected)" ON)
+if(NOT HU_ENABLE_PERSONA)
+    # Until 2026-09-20 this option was accepted and silently ignored: the persona
+    # sources were compiled regardless and HU_HAS_PERSONA=1 was defined
+    # unconditionally. Fail loudly rather than pretend the toggle works.
+    message(FATAL_ERROR "HU_ENABLE_PERSONA=OFF is not supported: the persona system is compiled "
+                        "unconditionally. Drop the flag (see docs/platform-support.md).")
+endif()
 option(HU_ENABLE_AUTHENTIC "Build authentic existence features" OFF)
 option(HU_ENABLE_CARTESIA "Enable Cartesia TTS for voice messages" OFF)
 option(HU_ENABLE_ML "Build ML training subsystem (BPE tokenizer, dataloader, experiment loop)" OFF)
@@ -648,6 +655,7 @@ set(HU_CORE_SOURCES
     src/doctor/check_log_hygiene.c
     src/doctor/check_imessage_cursor.c
     src/doctor/check_blind_ab_gate.c
+    src/doctor/check_contact_optout.c
     src/doctor/check_persona_integrity.c
     # Read-only chat.db cursor repo: self-guarded on HU_ENABLE_SQLITE (returns
     # NOT_SUPPORTED without it) so the imessage_cursor doctor check always links.
@@ -1027,6 +1035,7 @@ set(HU_CORE_SOURCES
     # src/daemon.c (9 sites). See docs/plans/2026-05-10-memory-v2-roadmap-overview.md.
     src/memory/graph.c
     src/memory/graph_state.c
+    src/memory/wiki_page.c
     src/memory/graph_ingest.c
     src/memory/agent_facts.c
     src/memory/semantic_recall.c
@@ -1289,6 +1298,7 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_cron.c
     src/daemon/daemon_routing.c
     src/daemon/daemon_proactive.c
+    src/daemon/daemon_contact_optout.c
     src/daemon/daemon_reply_delay.c
     src/daemon/daemon_director.c
     src/daemon/reply_dedup.c
@@ -1309,6 +1319,7 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_rich_media.c
     src/daemon/daemon_housekeeping.c
     src/daemon/daemon_promise_keeper.c
+    src/daemon/daemon_insight_overuse.c
     src/daemon/cron.c
     src/daemon/crontab.c
     src/gateway/webhook.c
@@ -1661,6 +1672,7 @@ if(HU_ENABLE_CARTESIA)
         src/tts/audio_pipeline.c
         src/context/voice_decision.c
         src/tts/emotion_map.c
+        src/tts/voice_reply.c
     )
     message(STATUS "Cartesia TTS: enabled")
 else()
@@ -1688,6 +1700,8 @@ if(HU_ENABLE_SQLITE)
         src/memory/repos/opinions_repo_sqlite.c
         src/memory/repos/life_chapter_repo_sqlite.c
         src/memory/repos/proactive_decisions_repo_sqlite.c
+        src/memory/repos/contact_optout_repo_sqlite.c
+        src/memory/repos/repo_util_sqlite.c
         src/memory/repos/social_graph_repo_sqlite.c
         src/memory/repos/self_awareness_repo_sqlite.c
         src/memory/sql_transaction.c
@@ -2177,7 +2191,6 @@ endif()
 if(HU_ENABLE_FEEDS)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_FEEDS=1)
 endif()
-target_compile_definitions(human_core PUBLIC HU_HAS_PERSONA=1)
 if(HU_ENABLE_CARTESIA)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_CARTESIA=1)
 endif()
@@ -2209,108 +2222,117 @@ if(HU_ENABLE_MCP)
 endif()
 
 # --- Compile definitions for enabled channels (for conditional compilation in source) ---
+# Collected into ONE list and applied to BOTH human_core and the human
+# executable. human_core's PRIVATE defines never reach src/app/bootstrap.c,
+# so every channel that was only defined here compiled as `#if 0` in
+# bootstrap: Discord/Matrix/Signal/Teams/... could never start even with
+# HU_ENABLE_ALL_CHANNELS=ON and a configured token (found 2026-09-20).
+set(HU_CHANNEL_DEFINES "")
 if(HU_ENABLE_CLI)
-    target_compile_definitions(human_core PRIVATE HU_HAS_CLI=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_CLI=1)
 endif()
 if(HU_ENABLE_TELEGRAM)
-    target_compile_definitions(human_core PRIVATE HU_HAS_TELEGRAM=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_TELEGRAM=1)
 endif()
 if(HU_ENABLE_DISCORD)
-    target_compile_definitions(human_core PRIVATE HU_HAS_DISCORD=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_DISCORD=1)
 endif()
 if(HU_ENABLE_SLACK)
-    target_compile_definitions(human_core PRIVATE HU_HAS_SLACK=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_SLACK=1)
 endif()
 if(HU_ENABLE_WHATSAPP)
-    target_compile_definitions(human_core PRIVATE HU_HAS_WHATSAPP=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_WHATSAPP=1)
 endif()
 if(HU_ENABLE_FACEBOOK)
-    target_compile_definitions(human_core PRIVATE HU_HAS_FACEBOOK=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_FACEBOOK=1)
 endif()
 if(HU_ENABLE_INSTAGRAM)
-    target_compile_definitions(human_core PRIVATE HU_HAS_INSTAGRAM=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_INSTAGRAM=1)
 endif()
 if(HU_ENABLE_TWITTER)
-    target_compile_definitions(human_core PRIVATE HU_HAS_TWITTER=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_TWITTER=1)
 endif()
 if(HU_ENABLE_TIKTOK)
-    target_compile_definitions(human_core PRIVATE HU_HAS_TIKTOK=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_TIKTOK=1)
 endif()
 if(HU_ENABLE_MATRIX)
-    target_compile_definitions(human_core PRIVATE HU_HAS_MATRIX=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_MATRIX=1)
 endif()
 if(HU_ENABLE_IRC)
-    target_compile_definitions(human_core PRIVATE HU_HAS_IRC=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_IRC=1)
 endif()
 if(HU_ENABLE_LINE)
-    target_compile_definitions(human_core PRIVATE HU_HAS_LINE=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_LINE=1)
 endif()
 if(HU_ENABLE_LARK)
-    target_compile_definitions(human_core PRIVATE HU_HAS_LARK=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_LARK=1)
 endif()
 if(HU_ENABLE_WEB)
-    target_compile_definitions(human_core PRIVATE HU_HAS_WEB=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_WEB=1)
 endif()
 if(HU_ENABLE_EMAIL)
-    target_compile_definitions(human_core PRIVATE HU_HAS_EMAIL=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_EMAIL=1)
 endif()
 if(HU_ENABLE_IMAP)
-    target_compile_definitions(human_core PRIVATE HU_HAS_IMAP=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_IMAP=1)
 endif()
 if(HU_HAS_IMESSAGE)
-    target_compile_definitions(human_core PRIVATE HU_HAS_IMESSAGE=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_IMESSAGE=1)
     if(HU_IMESSAGE_TAPBACK_ENABLED)
-        target_compile_definitions(human_core PRIVATE HU_IMESSAGE_TAPBACK_ENABLED=1)
+        list(APPEND HU_CHANNEL_DEFINES HU_IMESSAGE_TAPBACK_ENABLED=1)
     endif()
 endif()
 if(HU_ENABLE_PWA)
-    target_compile_definitions(human_core PRIVATE HU_HAS_PWA=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_PWA=1)
 endif()
 if(HU_ENABLE_MATTERMOST)
-    target_compile_definitions(human_core PRIVATE HU_HAS_MATTERMOST=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_MATTERMOST=1)
 endif()
 if(HU_ENABLE_ONEBOT)
-    target_compile_definitions(human_core PRIVATE HU_HAS_ONEBOT=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_ONEBOT=1)
 endif()
 if(HU_ENABLE_DINGTALK)
-    target_compile_definitions(human_core PRIVATE HU_HAS_DINGTALK=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_DINGTALK=1)
 endif()
 if(HU_ENABLE_TEAMS)
-    target_compile_definitions(human_core PRIVATE HU_HAS_TEAMS=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_TEAMS=1)
 endif()
 if(HU_ENABLE_TWILIO)
-    target_compile_definitions(human_core PRIVATE HU_HAS_TWILIO=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_TWILIO=1)
 endif()
 if(HU_ENABLE_GOOGLE_CHAT)
-    target_compile_definitions(human_core PRIVATE HU_HAS_GOOGLE_CHAT=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_GOOGLE_CHAT=1)
 endif()
 if(HU_ENABLE_GOOGLE_RCS)
-    target_compile_definitions(human_core PRIVATE HU_HAS_GOOGLE_RCS=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_GOOGLE_RCS=1)
 endif()
 if(HU_ENABLE_SIGNAL)
-    target_compile_definitions(human_core PRIVATE HU_HAS_SIGNAL=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_SIGNAL=1)
 endif()
 if(HU_ENABLE_NOSTR)
-    target_compile_definitions(human_core PRIVATE HU_HAS_NOSTR=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_NOSTR=1)
 endif()
 if(HU_ENABLE_QQ)
-    target_compile_definitions(human_core PRIVATE HU_HAS_QQ=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_QQ=1)
 endif()
 if(HU_ENABLE_MAIXCAM)
-    target_compile_definitions(human_core PRIVATE HU_HAS_MAIXCAM=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_MAIXCAM=1)
 endif()
 if(HU_ENABLE_DISPATCH)
-    target_compile_definitions(human_core PRIVATE HU_HAS_DISPATCH=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_DISPATCH=1)
 endif()
 if(HU_ENABLE_GMAIL)
-    target_compile_definitions(human_core PRIVATE HU_HAS_GMAIL=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_GMAIL=1)
 endif()
 if(HU_ENABLE_VOICE)
     # Voice channel (realtime/webrtc); Sonata Rust FFI only when HU_ENABLE_SONATA.
-    target_compile_definitions(human_core PRIVATE HU_HAS_VOICE_CHANNEL=1 HU_ENABLE_VOICE=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_VOICE_CHANNEL=1 HU_ENABLE_VOICE=1)
 endif()
 if(HU_ENABLE_MQTT)
-    target_compile_definitions(human_core PRIVATE HU_HAS_MQTT=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_MQTT=1)
+endif()
+if(HU_CHANNEL_DEFINES)
+    target_compile_definitions(human_core PRIVATE ${HU_CHANNEL_DEFINES})
 endif()
 
 # --- Compile definitions for memory engines ---
@@ -2806,8 +2828,9 @@ if(HU_ENABLE_LEARNING)
     # every shipped daemon (found 2026-07-25).
     target_compile_definitions(human PRIVATE HU_ENABLE_LEARNING=1)
 endif()
-if(HU_HAS_IMESSAGE)
-    target_compile_definitions(human PRIVATE HU_HAS_IMESSAGE=1)
+# Same channel defines as human_core (see HU_CHANNEL_DEFINES above).
+if(HU_CHANNEL_DEFINES)
+    target_compile_definitions(human PRIVATE ${HU_CHANNEL_DEFINES})
 endif()
 if(HU_ENABLE_SELF_MODEL)
     target_compile_definitions(human PRIVATE HU_ENABLE_SELF_MODEL=1)
@@ -2823,33 +2846,6 @@ if(HU_ENABLE_PUSH)
 endif()
 if(HU_ENABLE_UPDATE)
     target_compile_definitions(human PRIVATE HU_HAS_UPDATE=1)
-endif()
-if(HU_ENABLE_EMAIL)
-    target_compile_definitions(human PRIVATE HU_HAS_EMAIL=1)
-endif()
-if(HU_HAS_IMESSAGE)
-    target_compile_definitions(human PRIVATE HU_HAS_IMESSAGE=1)
-    if(HU_IMESSAGE_TAPBACK_ENABLED)
-        target_compile_definitions(human PRIVATE HU_IMESSAGE_TAPBACK_ENABLED=1)
-    endif()
-endif()
-if(HU_ENABLE_PWA)
-    target_compile_definitions(human PRIVATE HU_HAS_PWA=1)
-endif()
-if(HU_ENABLE_IMAP)
-    target_compile_definitions(human PRIVATE HU_HAS_IMAP=1)
-endif()
-if(HU_ENABLE_TELEGRAM)
-    target_compile_definitions(human PRIVATE HU_HAS_TELEGRAM=1)
-endif()
-if(HU_ENABLE_SLACK)
-    target_compile_definitions(human PRIVATE HU_HAS_SLACK=1)
-endif()
-if(HU_ENABLE_WHATSAPP)
-    target_compile_definitions(human PRIVATE HU_HAS_WHATSAPP=1)
-endif()
-if(HU_ENABLE_GMAIL)
-    target_compile_definitions(human PRIVATE HU_HAS_GMAIL=1)
 endif()
 if(HU_ENABLE_FEEDS)
     target_compile_definitions(human PRIVATE HU_ENABLE_FEEDS=1)
@@ -3051,7 +3047,7 @@ endif()
 if(NOT HU_ENABLE_CARTESIA)
     list(APPEND HU_TEST_EXTRA_MODULES
         src/tts/audio_pipeline.c
-        src/context/voice_decision.c src/tts/emotion_map.c)
+        src/context/voice_decision.c src/tts/emotion_map.c src/tts/voice_reply.c)
 endif()
 # Phase 7 modules (experience, forgetting, weakness) — tests need them when SQLite is OFF (minimal build)
 if(NOT HU_ENABLE_SQLITE)
@@ -3133,7 +3129,7 @@ if(HU_ENABLE_CARTESIA)
 endif()
 target_compile_definitions(human_core_test PRIVATE HU_ENABLE_PERSONA=1)
 # Tests always have all module groups available
-target_compile_definitions(human_core_test PRIVATE HU_HAS_PERIPHERALS=1 HU_HAS_TUNNELS=1 HU_HAS_RUNTIME_EXOTIC=1 HU_HAS_TOOLS_BROWSER=1 HU_HAS_TOOLS_ADVANCED=1 HU_HAS_OTEL=1 HU_HAS_CRON=1 HU_HAS_PUSH=1 HU_HAS_UPDATE=1 HU_HAS_SKILLS=1 HU_HAS_PERSONA=1)
+target_compile_definitions(human_core_test PRIVATE HU_HAS_PERIPHERALS=1 HU_HAS_TUNNELS=1 HU_HAS_RUNTIME_EXOTIC=1 HU_HAS_TOOLS_BROWSER=1 HU_HAS_TOOLS_ADVANCED=1 HU_HAS_OTEL=1 HU_HAS_CRON=1 HU_HAS_PUSH=1 HU_HAS_UPDATE=1 HU_HAS_SKILLS=1)
 if(HU_ENABLE_ML)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_ML=1)
 endif()
@@ -3495,8 +3491,12 @@ set(HU_TEST_SOURCES
     tests/test_daemon_lifecycle.c
     tests/test_daemon_routing.c
     tests/test_daemon_proactive.c
+    tests/test_daemon_proactive_decline.c
+    tests/test_daemon_proactive_reachability.c
+    tests/test_daemon_contact_optout.c
     tests/test_reply_delay_model.c
     tests/test_daemon_promise_keeper.c
+    tests/test_daemon_insight_overuse.c
     tests/test_daemon_config_reload.c
     tests/test_daemon_identity_graph.c
     tests/test_daemon_reply_fallback.c
@@ -3707,6 +3707,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_embedder_http.c
     tests/test_w1_bitemporal.c
     tests/test_graph_state.c
+    tests/test_wiki_page.c
     tests/test_w2_autodream.c
     tests/test_w3_multigraph.c
     tests/test_w4_verifier.c
@@ -3948,7 +3949,7 @@ list(APPEND HU_TEST_SOURCES tests/test_transcript_prep.c)
 list(APPEND HU_TEST_SOURCES tests/test_send_voice_message.c)
 list(APPEND HU_TEST_SOURCES tests/test_voice_message_integration.c)
 if(HU_ENABLE_CARTESIA)
-    list(APPEND HU_TEST_SOURCES tests/test_audio_pipeline.c tests/test_voice_decision.c tests/test_emotion_map.c)
+    list(APPEND HU_TEST_SOURCES tests/test_audio_pipeline.c tests/test_voice_decision.c tests/test_emotion_map.c tests/test_voice_reply.c)
 endif()
 if(HU_ENABLE_AUTHENTIC)
     list(APPEND HU_TEST_SOURCES tests/test_cognitive_load.c tests/test_phase9_integration.c)
@@ -4070,6 +4071,8 @@ if(HU_ENABLE_SQLITE)
     list(APPEND HU_TEST_SOURCES tests/test_opinions_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_life_chapter_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_proactive_decisions_repo.c)
+    list(APPEND HU_TEST_SOURCES tests/test_contact_optout_repo.c)
+    list(APPEND HU_TEST_SOURCES tests/test_repo_util_sqlite.c)
     list(APPEND HU_TEST_SOURCES tests/test_social_graph_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_self_awareness_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_celebration_repo.c)
@@ -4335,8 +4338,7 @@ target_compile_definitions(human_tests PRIVATE "HU_EVAL_SUITES_DIR=\"${HU_ROOT}/
 # Phase D Task D-1 (CF-7 RL SOTA): same HU_ML_SCRIPTS_DIR for tests.
 target_compile_definitions(human_tests PRIVATE "HU_ML_SCRIPTS_DIR=\"${HU_ROOT}/scripts\"")
 target_compile_definitions(human_tests PRIVATE "HU_TEST_DATA_DIR=\"${HU_ROOT}/data\"")
-# HU_HAS_PERSONA always set for tests: test lib has persona (main or extra), struct layout must match
-target_compile_definitions(human_tests PRIVATE HU_IS_TEST=1 HU_GATEWAY_TEST_MODE=1 HU_HAS_NONE_ENGINE=1 HU_HAS_CRON=1 HU_HAS_PUSH=1 HU_HAS_UPDATE=1 HU_HAS_SKILLS=1 HU_HAS_PERSONA=1 HU_HAS_RUNTIME_EXOTIC=1)
+target_compile_definitions(human_tests PRIVATE HU_IS_TEST=1 HU_GATEWAY_TEST_MODE=1 HU_HAS_NONE_ENGINE=1 HU_HAS_CRON=1 HU_HAS_PUSH=1 HU_HAS_UPDATE=1 HU_HAS_SKILLS=1 HU_HAS_RUNTIME_EXOTIC=1)
 # Mirror HU_HAS_LIBSODIUM onto human_tests so tests/test_main.c's
 # `#ifdef HU_HAS_LIBSODIUM` call-site guard for run_persona_encryption_tests()
 # actually activates. Without this, the runner is registered (because
@@ -4781,7 +4783,7 @@ if(HU_ENABLE_CHANNEL_TESTS)
             HU_HAS_DINGTALK=1 HU_HAS_TEAMS=1 HU_HAS_TWILIO=1 HU_HAS_GOOGLE_CHAT=1
             HU_HAS_GOOGLE_RCS=1 HU_HAS_SIGNAL=1 HU_HAS_NOSTR=1 HU_HAS_QQ=1
             HU_HAS_MAIXCAM=1 HU_HAS_MQTT=1 HU_HAS_GMAIL=1 HU_HAS_CLI=1
-            HU_HAS_DISPATCH=1 HU_HAS_PERSONA=1 HU_HAS_TIKTOK=1)
+            HU_HAS_DISPATCH=1 HU_HAS_TIKTOK=1)
     else()
         if(HU_ENABLE_TELEGRAM)
             target_compile_definitions(human_channel_tests PRIVATE HU_HAS_TELEGRAM=1)
@@ -4801,7 +4803,7 @@ if(HU_ENABLE_CHANNEL_TESTS)
         if(HU_ENABLE_SIGNAL)
             target_compile_definitions(human_channel_tests PRIVATE HU_HAS_SIGNAL=1)
         endif()
-        target_compile_definitions(human_channel_tests PRIVATE HU_HAS_DISPATCH=1 HU_HAS_PERSONA=1)
+        target_compile_definitions(human_channel_tests PRIVATE HU_HAS_DISPATCH=1)
     endif()
 endif()
 
@@ -4929,7 +4931,7 @@ if(HU_ENABLE_FUZZ)
 
     add_executable(fuzz_persona_parse fuzz/fuzz_persona_parse.c)
     set_target_properties(fuzz_persona_parse PROPERTIES LINKER_LANGUAGE CXX)
-    target_compile_definitions(fuzz_persona_parse PRIVATE HU_IS_TEST=1 HU_HAS_PERSONA=1)
+    target_compile_definitions(fuzz_persona_parse PRIVATE HU_IS_TEST=1)
     target_compile_options(fuzz_persona_parse PRIVATE -Wall -Wextra -Wpedantic)
     target_link_libraries(fuzz_persona_parse PRIVATE human_core_test ${FUZZ_EXTRA_LIBS})
     target_compile_options(fuzz_persona_parse PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME})

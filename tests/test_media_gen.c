@@ -7,9 +7,9 @@
 #include "human/core/string.h"
 #include "human/core/vertex_auth.h"
 #include "human/tools/cache_ttl.h"
+#include "human/tools/media_gif.h"
 #include "human/tools/media_image.h"
 #include "human/tools/media_video.h"
-#include "human/tools/media_gif.h"
 #include "test_framework.h"
 #include <string.h>
 
@@ -55,6 +55,18 @@ static void vertex_auth_get_bearer_small_buf_fails(void) {
     char buf[8];
     HU_ASSERT_EQ(hu_vertex_auth_get_bearer(&auth, buf, sizeof(buf)), HU_ERR_INVALID_ARGUMENT);
     hu_vertex_auth_free(&auth);
+}
+
+/* Pins the media-tool contract: callers pass auth_buf straight to
+ * hu_http_post_json as a C string, so a failed bearer lookup must leave an
+ * empty string, never an untouched (uninitialized) buffer. */
+static void vertex_auth_get_bearer_no_token_yields_empty_string(void) {
+    hu_vertex_auth_t auth;
+    memset(&auth, 0, sizeof(auth));
+    char buf[64];
+    memset(buf, 'x', sizeof(buf));
+    HU_ASSERT_EQ(hu_vertex_auth_get_bearer(&auth, buf, sizeof(buf)), HU_ERR_PROVIDER_AUTH);
+    HU_ASSERT_EQ(buf[0], '\0');
 }
 
 static void vertex_auth_null_args_rejected(void) {
@@ -459,8 +471,7 @@ static void media_agent_deinit_cleans_generated_media(void) {
     /* Simulate the cleanup loop from hu_agent_deinit */
     for (size_t gm = 0; gm < agent.generated_media_count && gm < 4; gm++) {
         if (agent.generated_media[gm]) {
-            alloc.free(alloc.ctx, agent.generated_media[gm],
-                       strlen(agent.generated_media[gm]) + 1);
+            alloc.free(alloc.ctx, agent.generated_media[gm], strlen(agent.generated_media[gm]) + 1);
             agent.generated_media[gm] = NULL;
         }
     }
@@ -468,7 +479,6 @@ static void media_agent_deinit_cleans_generated_media(void) {
     HU_ASSERT(agent.generated_media[0] == NULL);
     HU_ASSERT(agent.generated_media[1] == NULL);
 }
-
 
 /* Verify daemon merge pattern produces correct media array for channel send,
  * including both proactive and tool-generated media with correct ordering. */
@@ -541,8 +551,7 @@ static void media_daemon_full_pipeline_with_channel_send(void) {
 #ifdef HU_HAS_IMESSAGE
     hu_channel_t ch;
     hu_imessage_create(&alloc, "+15559876543", 12, NULL, 0, &ch);
-    hu_error_t err = ch.vtable->send(ch.ctx, "+15559876543", 12,
-                                     "Check these out!", 16,
+    hu_error_t err = ch.vtable->send(ch.ctx, "+15559876543", 12, "Check these out!", 16,
                                      all_send_media_ptr, all_send_media_cnt);
     HU_ASSERT_EQ(err, HU_OK);
     size_t msg_len = 0;
@@ -573,6 +582,7 @@ void run_media_gen_tests(void) {
     HU_RUN_TEST(vertex_auth_ensure_token_mock);
     HU_RUN_TEST(vertex_auth_get_bearer_formats);
     HU_RUN_TEST(vertex_auth_get_bearer_small_buf_fails);
+    HU_RUN_TEST(vertex_auth_get_bearer_no_token_yields_empty_string);
     HU_RUN_TEST(vertex_auth_null_args_rejected);
     HU_RUN_TEST(vertex_auth_free_null_safe);
 

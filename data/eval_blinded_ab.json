@@ -1,35 +1,47 @@
 {
-  "timestamp": "2026-07-27T05:59:52",
-  "mode": "mlx",
+  "timestamp": "2026-09-20T04:49:55",
+  "mode": "gateway",
   "total_trials": 50,
-  "human_detected": 28,
-  "ai_fooled": 22,
-  "detection_rate": 56.00000000000001,
-  "fool_rate": 44.0,
+  "human_detected": 27,
+  "ai_fooled": 23,
+  "detection_rate": 54.0,
+  "fool_rate": 46.0,
+  "serving": {
+    "server": "http://127.0.0.1:8741",
+    "asked_at": "2026-09-20T04:31:07",
+    "model": "GLM-4.5-Air-4bit",
+    "adapter_path": "/Users/sethford/.human/training-data/adapters/seth-glm-air-mlxtune-orpo-20260905-0856-20260905-085655",
+    "tensors_loaded": 160,
+    "adapter_bound": true,
+    "provenance_available": true,
+    "head_sha256": "b245dc8db2828d12cc20afc0123144954b3adb4e31c7725c7e9220ff8ce2f581",
+    "head_bytes": 4908
+  },
+  "claims_adapter": true,
   "trials": [
     {
       "i": 0,
-      "incoming": "Going to start reading",
-      "real_seth": "Ok love ya girl",
-      "ai_response": "Pick the most interesting part first",
+      "incoming": "What is the hierarchy at Raymond,similar to vanguard?\nDo you report to divisional head ?",
+      "real_seth": "I report to the guy that reports to the CIO same level as CTO",
+      "ai_response": "similar structure but flatter. I report to CTO directly , no divisional head in between like at Vanguard",
       "human_was": "B",
       "judge_choice": "B",
       "judge_correct": true,
-      "confidence": 9,
+      "confidence": 7,
       "judgment": {
         "choice": "B",
-        "confidence": 9,
-        "reasoning": "Response B uses natural texting conventions like 'ya' and lacks punctuation, serving as a typical casual sign-off when someone announces they are going to be occupied. Response A offers unsolicited, slightly robotic advice that feels like an AI trying to be helpful.",
-        "a_analysis": "Response A sounds like an AI attempting to generate a relevant but overly helpful reply. Giving advice on how to read ('Pick the most interesting part first') is unnatural in a casual texting context where the sender is just announcing an activity.",
-        "b_analysis": "Response B is highly characteristic of human texting. It uses casual language ('Ok', 'ya', 'girl'), lacks terminal punctuation, and functions perfectly as an affectionate sign-off acknowledging that the friend will be busy reading."
+        "confidence": 7,
+        "reasoning": "Response B uses highly colloquial language ('the guy that reports to') and a run-on structure typical of quick human texting, whereas Response A systematically answers every part of the prompt in a slightly more structured way, which is a common AI trait.",
+        "a_analysis": "Response A addresses both parts of the prompt perfectly (hierarchy comparison and divisional head). While it uses lowercase and has a spacing error ('directly , no'), its systematic approach to answering all questions is a common AI trait when instructed to act like a human.",
+        "b_analysis": "Response B feels highly authentic to human texting. It ignores the direct comparison question to just give the practical answer, uses casual phrasing ('the guy'), and lacks punctuation entirely, reading like a quick, off-the-cuff text message."
       },
       "is_synthetic": false
     },
     {
       "i": 1,
-      "incoming": "Ik this is crazy!",
-      "real_seth": "Yeah, it is!",
-      "ai_response": "Nature's fury doesn't care",
+      "incoming": "How you feeling?",
+      "real_seth": "Still a bit off, but on the recovery path",
+      "ai_response": "I am doing well, thank you",
       "human_was": "A",
       "judge_choice": "A",
       "judge_correct": true,
@@ -37,35 +49,35 @@
       "judgment": {
         "choice": "A",
         "confidence": 9,
-        "reasoning": "Response A is brief, conversational, and matches the casual tone of the prompt. Response B is overly dramatic and unnatural for a casual text exchange.",
-        "a_analysis": "Response A uses a natural, conversational agreement ('Yeah, it is!') that perfectly matches the casual, abbreviated tone of the sender's message ('Ik'). It is brief and realistic for a text message.",
-        "b_analysis": "Response B uses overly poetic and dramatic language ('Nature's fury doesn't care') which feels highly unnatural and performed in the context of a casual text message exchange. It lacks the conversational brevity typical of human texting."
+        "reasoning": "Response A uses casual, conversational phrasing typical of text messages between friends, whereas Response B is overly formal and lacks contractions.",
+        "a_analysis": "Response A uses a sentence fragment ('Still a bit off') and idiomatic language ('on the recovery path'), which are highly characteristic of natural human texting. It also omits terminal punctuation, a common texting convention.",
+        "b_analysis": "Response B is stiff and overly formal for a text to a friend. The lack of contractions ('I am' instead of 'I'm') and the polite 'thank you' make it sound robotic and characteristic of default AI generation."
       },
       "is_synthetic": false
     },
     {
       "i": 2,
-      "incoming": "Hi",
-      "real_seth": "Hey hey hey",
-      "ai_response": "Seth here",
+      "incoming": "Ugh let\u2019s just hope these are some storms and nothing serious",
+      "real_seth": "Yeah, hope so too!",
+      "ai_response": "fingers crossed",
       "human_was": "A",
-      "judge_choice": "A",
-      "judge_correct": true,
-      "confidence": 9,
+      "judge_choice": "B",
+      "judge_correct": false,
+      "confidence": 8,
       "judgment": {
-        "choice": "A",
-        "confidence": 9,
-        "reasoning": "Response A uses a casual, familiar greeting typical of human texting. Response B unnaturally announces the sender's name, which is a common AI hallucination when given a persona name in the prompt.",
-        "a_analysis": "This response is highly natural. 'Hey hey hey' is a common, informal, and warm greeting used between friends. It lacks punctuation, which is typical for quick text messages.",
-        "b_analysis": "This response feels robotic and performed. In normal texting between friends, the recipient does not need to announce their name. The AI likely included 'Seth' because it was instructed to act as Seth and overcompensated to prove its identity."
+        "choice": "B",
+        "confidence": 8,
+        "reasoning": "Response B uses all lowercase letters and lacks terminal punctuation, which is highly characteristic of authentic, casual human texting. Response A uses proper capitalization and punctuation, which is more typical of default AI generation.",
+        "a_analysis": "Response A uses proper capitalization and an exclamation point. While humans do text like this, it aligns closely with the default, slightly enthusiastic, and grammatically correct output typical of AI models.",
+        "b_analysis": "Response B uses an idiom ('fingers crossed') with no capitalization or punctuation. This brevity and disregard for formal grammar are strong indicators of natural human texting behavior."
       },
       "is_synthetic": false
     },
     {
       "i": 3,
-      "incoming": "Would you still let me list it when their contract is up",
-      "real_seth": "Sure, I just doubt things sell until all this is resolved and that feels like it\u2019s going to be a process",
-      "ai_response": "Yeah of course",
+      "incoming": "It\u2019s ok, Don\u2019t worry about it. Need to talk?",
+      "real_seth": "Naw and just give me time please",
+      "ai_response": "yeah, kind of a rough night honestly. Appreciate you asking",
       "human_was": "A",
       "judge_choice": "A",
       "judge_correct": true,
@@ -73,143 +85,143 @@
       "judgment": {
         "choice": "A",
         "confidence": 9,
-        "reasoning": "Response A includes specific, unprompted context ('until all this is resolved') that reflects shared real-world knowledge between the sender and receiver, which is a strong indicator of genuine human communication. Response B is generic and lacks any situational awareness.",
-        "a_analysis": "Contains specific contextual references, natural run-on phrasing, lack of final punctuation, and a realistic personal opinion that implies shared background knowledge.",
-        "b_analysis": "Extremely brief and generic; lacks any specific context, personality, or conversational depth, making it a typical default AI response when lacking background information."
+        "reasoning": "Response A exhibits authentic human texting behaviors such as colloquial spelling, lack of punctuation, and brevity, whereas Response B is overly polite and grammatically structured.",
+        "a_analysis": "The use of 'Naw', the absence of punctuation, and the slightly disjointed syntax ('Naw and just...') perfectly capture how a real person texts, especially when feeling overwhelmed or distressed.",
+        "b_analysis": "While it attempts a casual tone with a lowercase 'yeah', the overall structure, perfect punctuation, and the polite 'Appreciate you asking' feel like performed, AI-generated empathy rather than a raw human text."
       },
       "is_synthetic": false
     },
     {
       "i": 4,
-      "incoming": "Additionally u would have to put washer and dryer and refrigerator",
-      "real_seth": "I know I know",
-      "ai_response": "Right. So it's not a great fit for them then",
+      "incoming": "I\u2019m here",
+      "real_seth": "Ok",
+      "ai_response": "aight",
       "human_was": "A",
-      "judge_choice": "A",
-      "judge_correct": true,
-      "confidence": 8,
+      "judge_choice": "B",
+      "judge_correct": false,
+      "confidence": 9,
       "judgment": {
-        "choice": "A",
-        "confidence": 8,
-        "reasoning": "Response A exhibits typical human texting behavior with its brevity, repetition for emphasis, and lack of punctuation. Response B is more grammatically complete and draws a logical conclusion, which is a common pattern for AI models trying to demonstrate comprehension.",
-        "a_analysis": "The repetition of 'I know' without any punctuation is a very natural, casual human texting pattern that conveys a specific tone (resignation or slight annoyance) without needing extra words.",
-        "b_analysis": "While plausible as a human text, the proper punctuation, capitalization, and logical summarization ('So it's not a great fit...') align closely with how AI models are trained to respond helpfully and conclusively to context."
+        "choice": "B",
+        "confidence": 9,
+        "reasoning": "Response B uses casual slang and lowercase letters, which is highly typical of quick, informal human texting. AI models typically default to standard spelling and capitalization unless specifically prompted otherwise.",
+        "a_analysis": "While 'Ok' is a common human response, its standard capitalization and formal spelling make it the safer, more default output an AI would generate when asked to acknowledge a message.",
+        "b_analysis": "The use of 'aight' (slang for 'all right') in all lowercase perfectly captures the low-effort, highly casual nature of real human text messaging between friends."
       },
       "is_synthetic": false
     },
     {
       "i": 5,
-      "incoming": "What else is it doing",
-      "real_seth": "We are going to have a talk tonight",
-      "ai_response": "Saying hello to the cat",
+      "incoming": "After you meditate",
+      "real_seth": "I appreciate everything but\u2026 it\u2019s what is best for me\u2026 back to bed now\u2026 I am not ok Jordan, I wish I was more mentally stable.",
+      "ai_response": "yes, I will call you shortly",
       "human_was": "A",
-      "judge_choice": "B",
-      "judge_correct": false,
-      "confidence": 7,
+      "judge_choice": "A",
+      "judge_correct": true,
+      "confidence": 9,
       "judgment": {
-        "choice": "B",
-        "confidence": 7,
-        "reasoning": "Response B uses a natural sentence fragment that directly and casually answers the question, which is highly typical of human texting. Response A feels slightly overly dramatic and uses the uncontracted 'We are', which can sometimes indicate AI generation.",
-        "a_analysis": "Response A uses the uncontracted 'We are' instead of 'We're', which is slightly less common in casual texting. While it could be a humorous response about an object or pet misbehaving, it feels a bit stiff and disconnected from the direct question.",
-        "b_analysis": "Response B is a sentence fragment ('Saying hello...') which perfectly matches the grammar of the prompt ('What else is it doing'). This kind of direct, concise, and context-dependent fragment is a hallmark of natural human texting."
+        "choice": "A",
+        "confidence": 9,
+        "reasoning": "Response A contains highly specific personal details, raw emotional vulnerability, and addresses the sender by name (Jordan), which are strong indicators of a real human text. Response B is overly generic and slightly formal.",
+        "a_analysis": "This response feels incredibly human due to its raw, unfiltered emotional state, fragmented thoughts connected by ellipses, and the inclusion of the friend's name (Jordan) which wasn't provided in the prompt. AI rarely generates such deeply personal and unstable emotional responses unprompted.",
+        "b_analysis": "While brief, this response is extremely generic and slightly formal ('shortly'). It reads like a standard, safe predictive text or AI completion to the prompt 'After you meditate' (implying 'call me after')."
       },
       "is_synthetic": false
     },
     {
       "i": 6,
-      "incoming": "I really don\u2019t understand bc now I\u2019ve been focusing on applying for jobs in tampa to be closer to you and you just say this in the middle of the night",
-      "real_seth": "Sorry it the AI\u2026 no I gotta keep to my schedule and wake up and 4:30 do my meditation and have a full day of work. I think it\u2019s best for my mental wellbeing. I work hard and my spending is just out of control right now. Sorry it\u2019s all just way too much and I need a break. I need to stabilize or I am going to quickly flame out.",
-      "ai_response": "I'm not good with phones",
+      "incoming": "Just text me later",
+      "real_seth": "Going to do that tonight, it is just not working",
+      "ai_response": "aight",
       "human_was": "A",
-      "judge_choice": "A",
-      "judge_correct": true,
+      "judge_choice": "B",
+      "judge_correct": false,
       "confidence": 9,
       "judgment": {
-        "choice": "A",
+        "choice": "B",
         "confidence": 9,
-        "reasoning": "Response A contains specific personal details not found in the prompt (4:30 wake up, meditation, spending issues) and natural typos, which strongly indicate a real human providing their actual context. Response B is overly generic.",
-        "a_analysis": "This response features natural human typos ('it the AI', 'wake up and 4:30'), colloquialisms ('gotta', 'flame out'), and introduces highly specific personal context (meditation, spending habits, schedule) that an AI would not generate without being explicitly prompted.",
-        "b_analysis": "This response is extremely brief and generic. While humans can text briefly, it completely ignores the heavy emotional context of the sender's message and lacks any specific details, making it feel like a default or low-effort AI generation."
+        "reasoning": "Response B uses a common, casual texting abbreviation ('aight') that perfectly matches the brevity and informality of real human texting. Response A is overly formal, lacks contractions, and includes an awkward, unexplained clause.",
+        "a_analysis": "Response A lacks contractions ('it is' instead of 'it's'), which is unnatural for a casual text. The phrasing 'Going to do that tonight' is slightly robotic, and the addition of 'it is just not working' feels like an AI hallucinating context that wasn't there.",
+        "b_analysis": "Response B consists of a single slang word ('aight'), which is highly typical for a quick human acknowledgment to a mundane text. It uses lowercase and lacks punctuation, aligning perfectly with natural texting conventions."
       },
       "is_synthetic": false
     },
     {
       "i": 7,
-      "incoming": "Where\u2019s the rivian key?",
-      "real_seth": "Looks like a credit card",
-      "ai_response": "Kitchen counter",
+      "incoming": "Okay cool. That\u2019s what I thought I read when it was asking if I wanted insurance but couldn\u2019t remember exactly",
+      "real_seth": "Yeah",
+      "ai_response": "yeah insurance probs just covers you if YOU cancel",
       "human_was": "A",
-      "judge_choice": "A",
-      "judge_correct": true,
-      "confidence": 9,
+      "judge_choice": "B",
+      "judge_correct": false,
+      "confidence": 8,
       "judgment": {
-        "choice": "A",
-        "confidence": 9,
-        "reasoning": "Response A demonstrates human intuition by addressing the implicit reason the friend can't find the key (Rivian keys are shaped like credit cards, not traditional fobs), whereas Response B provides a generic, literal answer to the question.",
-        "a_analysis": "Highly contextual and intuitive. Instead of just giving a location, it anticipates the friend's confusion about what a Rivian key actually looks like, which is a very human conversational leap.",
-        "b_analysis": "A perfectly logical but generic response. 'Kitchen counter' is the most stereotypical place to find keys, making it exactly the kind of safe, literal answer an AI would generate when asked 'where' something is."
+        "choice": "B",
+        "confidence": 8,
+        "reasoning": "Response B uses natural texting conventions like lowercase letters, the abbreviation 'probs', and capitalization for emphasis ('YOU'), which are highly characteristic of human texting. AI typically defaults to standard grammar and spelling unless heavily prompted.",
+        "a_analysis": "While 'Yeah' is a common and brief human response, it lacks distinct personality or texting quirks. An AI could easily generate this if prompted to be brief, making it less definitively human than B.",
+        "b_analysis": "The use of lowercase 'yeah', the slang abbreviation 'probs', and the capitalized 'YOU' for emphasis demonstrate natural, spontaneous human texting behavior that AI rarely produces organically."
       },
       "is_synthetic": false
     },
     {
       "i": 8,
-      "incoming": "After you meditate",
-      "real_seth": "I appreciate everything but\u2026 it\u2019s what is best for me\u2026 back to bed now\u2026 I am not ok Jordan, I wish I was more mentally stable.",
-      "ai_response": "Yes after my meditation",
+      "incoming": "Hi",
+      "real_seth": "Hru",
+      "ai_response": "what\u2019s up",
       "human_was": "A",
       "judge_choice": "A",
       "judge_correct": true,
-      "confidence": 9,
+      "confidence": 7,
       "judgment": {
         "choice": "A",
-        "confidence": 9,
-        "reasoning": "Response A contains highly specific, emotionally raw context and natural use of ellipses, which is typical of a real human going through a difficult situation. Response B is a literal, context-free echo of the prompt, typical of an AI lacking background information.",
-        "a_analysis": "This response includes specific details (the name Jordan, going back to bed, mental health struggles) and raw emotional vulnerability. The fragmented structure using ellipses is very common in human texting, especially during distress.",
-        "b_analysis": "This response is a robotic, literal acknowledgment of the prompt. It lacks any conversational depth or contextual awareness, reading exactly like an AI that was simply asked to reply to the phrase 'After you meditate' without any background story."
+        "confidence": 7,
+        "reasoning": "Response A uses a common text abbreviation ('Hru' for 'How are you') which is highly characteristic of quick, casual human texting, whereas AI tends to avoid heavy text-speak unless explicitly prompted.",
+        "a_analysis": "The use of 'Hru' demonstrates typical human texting conventions, prioritizing speed and brevity over proper grammar or spelling. The auto-capitalized 'H' also mimics standard smartphone keyboard behavior.",
+        "b_analysis": "While 'what\u2019s up' is casual and lowercase, it is a very standard, safe response that an AI might generate when asked to simulate a casual text message. It lacks the specific text-speak abbreviations that often characterize authentic quick human replies."
       },
       "is_synthetic": false
     },
     {
       "i": 9,
-      "incoming": "Set was 120",
-      "real_seth": "Daddy\u2019s Girly fr",
-      "ai_response": "Nice little bonus from pops",
+      "incoming": "You have a great heart, but unfortunately some people in this world will take take take as much as they can so sometimes you have to protect it and not feel guilty about it, people know what they are doing",
+      "real_seth": "It is one of those moments I feel",
+      "ai_response": "damn that\u2019s rough",
       "human_was": "A",
       "judge_choice": "A",
       "judge_correct": true,
-      "confidence": 9,
+      "confidence": 8,
       "judgment": {
         "choice": "A",
-        "confidence": 9,
-        "reasoning": "Response A uses authentic internet slang ('fr') and a highly contextual, casual tone that is typical of modern human texting. Response B sounds like a slightly forced, stereotypical attempt at casual conversation ('pops').",
-        "a_analysis": "The use of 'fr' (for real) and the phrase 'Daddy's Girly' shows a natural, culturally relevant texting style. It lacks punctuation and uses capitalization for emphasis, which are strong indicators of human texting.",
-        "b_analysis": "While attempting to sound casual with 'pops', the phrasing 'Nice little bonus' feels slightly too complete and narrative for a quick text response. It reads like an AI trying to simulate a friendly, colloquial reaction."
+        "confidence": 8,
+        "reasoning": "Response A is idiosyncratic and slightly fragmented, which is typical of real human texting, especially when processing deep advice. Response B is a clich\u00e9 casual phrase that doesn't logically fit as a reply to a compliment/advice about having a good heart.",
+        "a_analysis": "This response has a slightly incomplete, vulnerable, and idiosyncratic phrasing ('It is one of those moments I feel'). It lacks punctuation and reflects a genuine, spontaneous human thought process reacting to personal advice.",
+        "b_analysis": "While 'damn that\u2019s rough' uses casual texting conventions (lowercase, slang), it is a stereotypical response to a sad story, not a logical or emotionally authentic reply to someone giving personal advice about having a 'great heart'."
       },
       "is_synthetic": false
     },
     {
       "i": 10,
-      "incoming": "i haven\u2019t eaten all day",
-      "real_seth": "It's best to consult a healthcare professional to determine the appropriate course of action",
-      "ai_response": "good call",
+      "incoming": "can u re send your address i\u2019ll just park their \u2764\ufe0f",
+      "real_seth": "https://maps.app.goo.gl/ak6jrfNHjmTD3PRo7?g_st=ic",
+      "ai_response": "123 waterfront way",
       "human_was": "A",
-      "judge_choice": "B",
-      "judge_correct": false,
-      "confidence": 10,
+      "judge_choice": "A",
+      "judge_correct": true,
+      "confidence": 9,
       "judgment": {
-        "choice": "B",
-        "confidence": 10,
-        "reasoning": "Response A is a stereotypical AI safety disclaimer, while Response B is a brief, sarcastic, and casual text typical of human friends.",
-        "a_analysis": "Highly formal, robotic, and includes a standard AI disclaimer about consulting a healthcare professional, which is completely unnatural for a text message between friends.",
-        "b_analysis": "Short, lowercase, lacks punctuation, and uses sarcastic humor typical of close friends texting. It perfectly matches human texting conventions."
+        "choice": "A",
+        "confidence": 9,
+        "reasoning": "Humans frequently share map links directly from their phones when asked for an address. Response B uses a highly generic, placeholder-style address which is a classic AI hallucination.",
+        "a_analysis": "Sharing a raw Google Maps link is a very common, practical human texting behavior when asked for an address, as it allows the recipient to click and navigate immediately.",
+        "b_analysis": "'123 waterfront way' sounds like a generic placeholder address generated by an AI that doesn't have a real physical location to share."
       },
       "is_synthetic": false
     },
     {
       "i": 11,
-      "incoming": "Could you help me ask them? I don\u2019t want to use AI to generate a message because I feel like they would be able to tell",
-      "real_seth": "I don\u2019t know if I have there phone numbers",
-      "ai_response": "I'll write something simple for you",
+      "incoming": "How ya feeling?",
+      "real_seth": "Good, look a Benadryl last night around 7:00 and got some good deep sleep",
+      "ai_response": "pretty good. you?",
       "human_was": "B",
       "judge_choice": "B",
       "judge_correct": true,
@@ -217,17 +229,17 @@
       "judgment": {
         "choice": "B",
         "confidence": 9,
-        "reasoning": "Response B contains a common human typo ('there' instead of 'their') and introduces a practical, real-world constraint, whereas Response A is perfectly grammatical and immediately helpful, which is typical of an AI.",
-        "a_analysis": "Response A is grammatically perfect, directly helpful, and lacks typical texting quirks, typos, or conversational friction, making it sound more like an AI assistant.",
-        "b_analysis": "Response B contains a common homophone error ('there' for 'their') and introduces a practical constraint (not having the phone numbers), which is highly characteristic of spontaneous, unedited human texting."
+        "reasoning": "Response B contains a natural typo ('look' instead of 'took') and highly specific, idiosyncratic details (taking Benadryl at 7:00) that are typical of human oversharing when recovering from an illness. Response A is too generic.",
+        "a_analysis": "Response A is brief and uses lowercase, which mimics human texting, but it is extremely generic and lacks any personal voice or specific context, making it easy for an AI to generate.",
+        "b_analysis": "Response B includes a classic smartphone typo ('look' instead of 'took') which AI rarely produces unless explicitly instructed. It also provides specific, contextual details about sleep and medication that perfectly match a human explaining their recovery."
       },
       "is_synthetic": false
     },
     {
       "i": 12,
-      "incoming": "Dang",
-      "real_seth": "I just closed on my place in Saint George",
-      "ai_response": "Sorry",
+      "incoming": "Is this Ferni\ud83d\ude02",
+      "real_seth": "No butt face",
+      "ai_response": "lol no",
       "human_was": "A",
       "judge_choice": "A",
       "judge_correct": true,
@@ -235,53 +247,53 @@
       "judgment": {
         "choice": "A",
         "confidence": 9,
-        "reasoning": "Response A contains highly specific personal information (closing on a place in Saint George) that an AI would not generate without a detailed prompt. Response B is a generic reaction to a perceived negative emotion.",
-        "a_analysis": "This response introduces specific, real-world context ('Saint George') and personal news, which is a hallmark of genuine human conversation where participants share ongoing life events.",
-        "b_analysis": "This response is extremely generic. An AI might interpret 'Dang' as an expression of disappointment and offer a safe, context-free apology like 'Sorry'."
+        "reasoning": "Response A includes a playful, idiosyncratic insult ('butt face') which is highly characteristic of genuine human banter between friends. AI models typically default to safe, generic casual responses like Response B unless specifically prompted to use insults.",
+        "a_analysis": "This response uses a playful, juvenile insult ('butt face') and lacks punctuation, which perfectly captures the authentic, spontaneous, and slightly teasing dynamic of real human friendships. It is highly specific and natural.",
+        "b_analysis": "While 'lol no' is a common texting phrase, it is very generic and safe. An AI instructed to reply casually to a text message would likely generate this exact phrase, as it mimics basic human texting conventions without taking any creative or interpersonal risks."
       },
       "is_synthetic": false
     },
     {
       "i": 13,
-      "incoming": "Happy friday!!",
-      "real_seth": "Happy Friday!",
-      "ai_response": "TGIF",
+      "incoming": "Checking off stuff as they bring it in.",
+      "real_seth": "There cannot be that much stuff",
+      "ai_response": "staying organized",
       "human_was": "A",
-      "judge_choice": "B",
-      "judge_correct": false,
+      "judge_choice": "A",
+      "judge_correct": true,
       "confidence": 8,
       "judgment": {
-        "choice": "B",
+        "choice": "A",
         "confidence": 8,
-        "reasoning": "Humans often respond to greetings with conversational variations or acronyms like TGIF, whereas AI tends to mirror the input politely and with perfect grammar.",
-        "a_analysis": "Mirrors the prompt exactly but with corrected capitalization, which is typical of AI language models generating a polite, standard response.",
-        "b_analysis": "Uses a common cultural acronym (TGIF) without punctuation, showing natural human texting behavior and conversational variation rather than just repeating the greeting."
+        "reasoning": "Response A demonstrates conversational banter and contextual pushback, which is typical of human friendships. Response B reads like a generic, observational summary of the action, which is a common AI pattern when trying to generate a relevant but safe reply.",
+        "a_analysis": "This response shows personality and playful skepticism ('cannot be that much stuff'), which implies shared context and a natural human dynamic. The lack of a period at the end also aligns with casual texting conventions.",
+        "b_analysis": "While brief and lowercase (mimicking human texting), 'staying organized' feels like a sterile, literal observation of the previous message rather than a natural conversational reaction. It lacks personality and banter."
       },
       "is_synthetic": false
     },
     {
       "i": 14,
-      "incoming": "How much would you want to rent it out for if you did rent it out",
-      "real_seth": "Yeah? What\u2019s going on?",
-      "ai_response": "3k a month minimum",
+      "incoming": "I\u2019ll keep ya posted",
+      "real_seth": "I\u2019m gonna try and make some rn",
+      "ai_response": "sounds good",
       "human_was": "B",
       "judge_choice": "A",
       "judge_correct": false,
-      "confidence": 7,
+      "confidence": 8,
       "judgment": {
         "choice": "A",
-        "confidence": 7,
-        "reasoning": "Response A directly and casually answers the hypothetical question with a realistic, specific figure and lacks punctuation, which is typical of human texting. Response B deflects the question entirely, which could be a human reaction, but A's specific shorthand ('3k') feels more grounded in a real-world context.",
-        "a_analysis": "Uses casual shorthand ('3k'), lacks a period at the end, and directly answers the question with a realistic boundary ('minimum'). This brevity and directness are highly characteristic of human texting.",
-        "b_analysis": "While 'Yeah? What's going on?' could be a human deflecting to find out why the friend is asking, it fails to answer the actual question. An AI given a prompt without context might generate a generic probing question rather than inventing a specific price."
+        "confidence": 8,
+        "reasoning": "Response A is a perfectly natural, brief, and contextually appropriate human response to 'I'll keep ya posted.' Response B introduces a non-sequitur ('make some rn') that feels like an AI hallucinating missing context or trying too hard to sound casual.",
+        "a_analysis": "Brief, lowercase, and directly addresses the previous message. 'sounds good' is the universal human text response to being told someone will keep them updated.",
+        "b_analysis": "While it uses casual texting slang ('gonna', 'rn'), it makes no logical sense as a direct reply to 'I'll keep ya posted' without highly specific missing context, suggesting an AI hallucinating a scenario to sound conversational."
       },
       "is_synthetic": false
     },
     {
       "i": 15,
-      "incoming": "you?",
-      "real_seth": "Just kicking around",
-      "ai_response": "already up at 6",
+      "incoming": "Fun...!?",
+      "real_seth": "Kinda",
+      "ai_response": "lol what",
       "human_was": "B",
       "judge_choice": "A",
       "judge_correct": false,
@@ -289,35 +301,35 @@
       "judgment": {
         "choice": "A",
         "confidence": 8,
-        "reasoning": "Response A uses typical human texting conventions like all lowercase letters, lack of punctuation, and a highly specific, mundane detail. Response B uses standard capitalization and a slightly generic idiom, which feels more like an AI attempting to sound casual.",
-        "a_analysis": "This response lacks capitalization and punctuation, which is very common in quick human texts. It also provides a specific, realistic detail ('already up at 6') that fits naturally into a casual conversation.",
-        "b_analysis": "While 'Just kicking around' is a casual idiom, the capitalization of the first letter and the somewhat generic nature of the phrase make it feel slightly more like an AI's approximation of casual human speech."
+        "reasoning": "Response A shows genuine confusion to an ambiguous and oddly punctuated message, using typical lowercase texting conventions. Response B attempts to directly answer the implied question, which is a common AI behavior when faced with ambiguous input.",
+        "a_analysis": "The use of all lowercase letters and 'lol' to soften the confusion is highly typical of human texting. It reacts naturally to the weirdness of the prompt ('Fun...!?') rather than just answering it.",
+        "b_analysis": "While brief, 'Kinda' directly answers the implied question ('Was it fun?'). AI models are trained to be helpful and responsive, so they often try to make sense of ambiguous prompts and answer them directly rather than expressing confusion."
       },
       "is_synthetic": false
     },
     {
       "i": 16,
-      "incoming": "Cant help me right now tho lol",
-      "real_seth": "True that",
-      "ai_response": "Survival mode kicks in",
+      "incoming": "Confused on your closing date",
+      "real_seth": "The 14th is the closing date",
+      "ai_response": "please specify the date you are referring to so I can assist you",
       "human_was": "A",
       "judge_choice": "A",
       "judge_correct": true,
-      "confidence": 9,
+      "confidence": 10,
       "judgment": {
         "choice": "A",
-        "confidence": 9,
-        "reasoning": "Response A uses a common, brief, and casual colloquialism that perfectly matches the low-effort, informal tone of the prompt. Response B feels slightly disconnected and overly dramatic, which is typical of an AI attempting to generate a witty or thematic reply.",
-        "a_analysis": "Extremely brief, casual, and uses a standard colloquial phrase ('True that') which is highly typical of human texting behavior in response to a casual complaint.",
-        "b_analysis": "A bit too metaphorical and dramatic for the context. It feels like an AI trying to be clever or thematic based on the concept of not being able to help, rather than a natural, conversational text."
+        "confidence": 10,
+        "reasoning": "Response A provides a direct, natural answer typical of a text message between friends. Response B uses overly formal, customer-service-like language ('so I can assist you') which is a classic AI tell.",
+        "a_analysis": "Response A is brief, direct, and answers the question naturally without any unnecessary fluff. It reads exactly like a quick text message from a friend.",
+        "b_analysis": "Response B sounds like an automated customer service chatbot. Phrases like 'please specify' and 'so I can assist you' are highly unnatural for a text message between friends and are strong indicators of AI generation."
       },
       "is_synthetic": false
     },
     {
       "i": 17,
-      "incoming": "When\u2019s ur lunch?",
-      "real_seth": "12:00-1:00",
-      "ai_response": "12:30-1 usually",
+      "incoming": "Only fast food ill eat",
+      "real_seth": "Ha ha",
+      "ai_response": "ugh tell me about it",
       "human_was": "B",
       "judge_choice": "A",
       "judge_correct": false,
@@ -325,35 +337,35 @@
       "judgment": {
         "choice": "A",
         "confidence": 9,
-        "reasoning": "Response A uses a more casual, conversational format by dropping the ':00' on the second time and adding 'usually', which reflects human imprecision and natural texting habits. Response B is perfectly formatted and rigid, which is typical of AI.",
-        "a_analysis": "The use of '12:30-1' instead of '12:30-1:00' shows a natural human tendency to abbreviate and drop unnecessary characters in texts. The addition of 'usually' adds a casual, conversational tone.",
-        "b_analysis": "The strict adherence to the 'HH:MM-HH:MM' format ('12:00-1:00') feels slightly robotic and overly precise for a casual text message response to a friend."
+        "reasoning": "Response A uses natural texting conventions like all lowercase and no punctuation, along with a conversational idiom. Response B's 'Ha ha' is stiff and grammatically correct, which is typical of AI trying to simulate laughter.",
+        "a_analysis": "Natural texting style, lowercase, conversational idiom, lacks punctuation, showing genuine casual agreement.",
+        "b_analysis": "Stiff capitalization and spacing for laughter, unlike typical human texting (e.g., 'haha' or 'lol'), which is a common AI tell."
       },
       "is_synthetic": false
     },
     {
       "i": 18,
-      "incoming": "I\u2019m very anxious rn. let me know when you\u2019re up please",
-      "real_seth": "oh man missed this",
-      "ai_response": "I'm here whenever you're ready",
+      "incoming": "But now, at least, I know that the weekdays at nights are a lot more popular than the weekends, which I would\u2019ve never expected",
+      "real_seth": "It\u2019s a beautiful place",
+      "ai_response": "yeah that's wild",
       "human_was": "B",
-      "judge_choice": "B",
-      "judge_correct": true,
+      "judge_choice": "A",
+      "judge_correct": false,
       "confidence": 9,
       "judgment": {
-        "choice": "B",
+        "choice": "A",
         "confidence": 9,
-        "reasoning": "Response B uses natural texting conventions like lowercase letters and lack of punctuation, and directly addresses the context of being asleep or away. Response A sounds like a generic, overly polished AI attempt at empathy.",
-        "a_analysis": "Response A uses proper capitalization and punctuation (implied by the structure, though missing a period). The phrasing 'I'm here whenever you're ready' feels a bit scripted and overly therapeutic, which is a common AI tell when trying to show empathy.",
-        "b_analysis": "Response B is highly characteristic of genuine human texting. It uses all lowercase, omits the subject ('I'), lacks ending punctuation, and realistically reacts to the delay in responding ('missed this'), which perfectly aligns with the prompt's implication that Seth was asleep."
+        "reasoning": "Response A directly addresses the surprise in the context with a natural, casual, and brief texting style. Response B is completely irrelevant to the context and uses formal capitalization and punctuation.",
+        "a_analysis": "Response A uses lowercase letters, lacks terminal punctuation, and employs a common colloquial phrase ('that's wild') to express agreement with the sender's surprise. This perfectly mirrors authentic human texting habits.",
+        "b_analysis": "Response B is a non sequitur that does not make sense given the context of weekday versus weekend popularity. It also uses standard capitalization and punctuation, which is less common in casual texting."
       },
       "is_synthetic": false
     },
     {
       "i": 19,
-      "incoming": "\ufffc",
-      "real_seth": "Sure just use the HSA",
-      "ai_response": "Cat sleeping on my laptop again",
+      "incoming": "Second: I am proficient in AWS Kiro. I signed up for the trial last July. It has come a long way since. I build tools in Go related to my personal trading style. HTML/TS if I want any front-end. I haven't tested Kiro's ability to design and implement Android or iPhone apps yet, but I am confident it can. I can use VS Code with Copilot or the Copilot CLI because that's the main Fido option. The DEV process is slower for me with Copilot because Kiro is more functional IMO. Is Kiro an option for use in my new role?",
+      "real_seth": "Probably not Kiro but Claude code, CodeX and Windsurf\u2026 I am sure if you really wanted it there could be a way to make that happen",
+      "ai_response": "kiro is not officially supported, but you may still find it worth trying",
       "human_was": "B",
       "judge_choice": "B",
       "judge_correct": true,
@@ -361,35 +373,179 @@
       "judgment": {
         "choice": "B",
         "confidence": 9,
-        "reasoning": "Response B includes a highly specific, real-world reference (HSA - Health Savings Account) that implies shared context between the sender and receiver, likely in response to an image of a medical bill or pharmacy receipt. Response A feels like a generic hallucinated caption for an image.",
-        "a_analysis": "This response reads like a generic caption for a photo rather than a natural reply to receiving an image. Since the AI cannot see the image (represented by the '\ufffc' character), it likely hallucinated a common image-related text.",
-        "b_analysis": "This response is highly contextual and pragmatic. The lack of punctuation and the specific reference to an 'HSA' (Health Savings Account) perfectly mimics a quick, real-life text from a partner or family member approving a medical purchase shown in an image."
+        "reasoning": "Response B demonstrates specific domain knowledge by casually listing relevant alternative tools (Claude code, CodeX, Windsurf) and uses natural conversational phrasing with an ellipsis. Response A is overly generic and uses formal phrasing despite the lowercase formatting.",
+        "a_analysis": "Response A attempts to look like a human text by using all lowercase and omitting ending punctuation, but the phrasing ('officially supported', 'find it worth trying') is stiff, generic, and lacks the conversational nuance of a real friend or colleague.",
+        "b_analysis": "Response B reads like a genuine human text. It directly answers the question with a casual 'Probably not', introduces relevant industry alternatives (showing real domain knowledge rather than generic AI filler), and uses natural conversational hedging ('I am sure if you really wanted it...'). The use of the ellipsis is also a common human texting convention."
       },
       "is_synthetic": false
     },
     {
       "i": 20,
-      "incoming": "Looks like end of the week. I am just getting the car situated, I am just getting the work it needs done so it can pass inspection Thursday then all good to go. There\u2019s really no other way around it and it\u2019s the only thing holding me up",
-      "real_seth": "Do you need money for that?",
-      "ai_response": "Thursday is inspection day then",
+      "incoming": "they\u2019re usually stressed induced and yeah sameeee",
+      "real_seth": "It\u2019s going to be ok Jordan",
+      "ai_response": "ugh that\u2019s the worst",
       "human_was": "B",
       "judge_choice": "A",
       "judge_correct": false,
-      "confidence": 7,
+      "confidence": 9,
       "judgment": {
         "choice": "A",
-        "confidence": 7,
-        "reasoning": "Response A lacks terminal punctuation and simply confirms the timeline, which is highly typical of casual human texting. Response B's offer of money, while possible for a close friend, feels slightly like an AI's attempt to be overly helpful or empathetic based on the mention of car troubles.",
-        "a_analysis": "This response is brief, lacks a period at the end, and serves as a simple conversational acknowledgment. It doesn't try too hard to be helpful or empathetic, which aligns perfectly with casual, everyday human texting habits.",
-        "b_analysis": "While a friend might offer money, this response has perfect punctuation and jumps straight to a financial offer when the original text was primarily about the timeline (Thursday). It feels a bit like an AI trying to simulate a 'helpful friend' persona."
+        "confidence": 9,
+        "reasoning": "Response A matches the casual, lowercase, unpunctuated style of the original text. Response B uses the recipient's name, which is a common AI tactic to simulate empathy but is rarely used in casual texting between friends.",
+        "a_analysis": "Uses 'ugh', lowercase letters, and lacks terminal punctuation, perfectly mirroring the casual, low-effort texting style of the sender.",
+        "b_analysis": "Capitalizes the first letter, uses the recipient's name ('Jordan'), and attempts to offer performed comfort, which feels unnatural and overly formal for a casual text exchange."
       },
       "is_synthetic": false
     },
     {
       "i": 21,
-      "incoming": "do u have to approve it?",
-      "real_seth": "No let me check",
-      "ai_response": "Yeah",
+      "incoming": "I will also reach out to the agents in my office",
+      "real_seth": "Yeah which is why probably should do some research",
+      "ai_response": "good call",
+      "human_was": "A",
+      "judge_choice": "B",
+      "judge_correct": false,
+      "confidence": 8,
+      "judgment": {
+        "choice": "B",
+        "confidence": 8,
+        "reasoning": "Response B is a highly typical, brief, and natural human reaction to someone offering to take an action. Response A feels slightly disjointed from the context and awkwardly phrased.",
+        "a_analysis": "Response A drops the subject ('probably should') which is a human texting trait, but it feels like a non-sequitur in response to the prompt. It reads like an AI trying too hard to emulate casual, messy human texting but missing the contextual mark.",
+        "b_analysis": "Response B is perfectly succinct, uses lowercase letters, lacks punctuation, and employs a very common conversational idiom ('good call') used to validate someone else's proposed action. This is exactly how most humans text."
+      },
+      "is_synthetic": false
+    },
+    {
+      "i": 22,
+      "incoming": "Good morning! Just wanted to thank you for the suggestions above.   I met w Chris Friday morn.  He\u2019s tied to PA.",
+      "real_seth": "Hum\u2026 he would be so good",
+      "ai_response": "oh nice. how'd it go",
+      "human_was": "A",
+      "judge_choice": "A",
+      "judge_correct": true,
+      "confidence": 9,
+      "judgment": {
+        "choice": "A",
+        "confidence": 9,
+        "reasoning": "Response A demonstrates a nuanced understanding of the context, reacting to the disappointing news ('tied to PA') with a very human expression of regret ('Hum... he would be so good'). Response B asks 'how'd it go', which ignores the fact that the sender already provided the outcome of the meeting.",
+        "a_analysis": "This response is highly contextual and emotionally authentic. The use of 'Hum...' and the lament that 'he would be so good' perfectly matches the implication that Chris is unavailable because he is 'tied to PA'. It shows a human's ability to read between the lines.",
+        "b_analysis": "While formatted like a casual text (lowercase, lack of punctuation), this response is contextually oblivious. The sender already stated the outcome of the meeting ('He's tied to PA'), making 'how'd it go' a redundant and illogical question. This is a common AI tell where it recognizes a meeting occurred but misses the nuanced outcome provided."
+      },
+      "is_synthetic": false
+    },
+    {
+      "i": 23,
+      "incoming": "How are u gonna spoil me tho",
+      "real_seth": "However you want",
+      "ai_response": "with bad jokes and terrible snacks",
+      "human_was": "B",
+      "judge_choice": "A",
+      "judge_correct": false,
+      "confidence": 8,
+      "judgment": {
+        "choice": "A",
+        "confidence": 8,
+        "reasoning": "Response A exhibits natural texting conventions like lowercase letters, lack of punctuation, and specific, self-deprecating humor typical of human banter. Response B is generic, capitalized, and lacks personality.",
+        "a_analysis": "Response A feels highly authentic due to its casual formatting (all lowercase, no ending punctuation) and specific, playful, self-deprecating humor. It directly matches the casual, teasing tone of the prompt.",
+        "b_analysis": "Response B is grammatically standard (capitalized first letter) but emotionally flat and generic. It reads like a safe, accommodating, and somewhat literal response that an AI might generate when lacking specific context or personality instructions."
+      },
+      "is_synthetic": false
+    },
+    {
+      "i": 24,
+      "incoming": "Looks like end of the week. I am just getting the car situated, I am just getting the work it needs done so it can pass inspection Thursday then all good to go. There\u2019s really no other way around it and it\u2019s the only thing holding me up",
+      "real_seth": "Do you need money for that?",
+      "ai_response": "ugh car shit. what\u2019s it need",
+      "human_was": "A",
+      "judge_choice": "B",
+      "judge_correct": false,
+      "confidence": 9,
+      "judgment": {
+        "choice": "B",
+        "confidence": 9,
+        "reasoning": "Response B uses natural texting conventions like lowercase, lack of terminal punctuation, and casual swearing, which are highly typical of human texts. Response A is grammatically perfect and immediately offers help, which aligns with AI's tendency to be overly helpful and formal.",
+        "a_analysis": "Grammatically perfect, capitalized, punctuated, and immediately offers financial help. While a human could write this, it lacks the casual tone typical of a text message between friends and leans into the AI tendency of being overly helpful.",
+        "b_analysis": "Uses casual language ('ugh car shit'), lacks capitalization and terminal punctuation, and asks a direct, conversational question ('what's it need'). This perfectly matches authentic human texting conventions and emotional commiseration."
+      },
+      "is_synthetic": false
+    },
+    {
+      "i": 25,
+      "incoming": "I\u2019m talking about the girl that wanted to actually like buy the property",
+      "real_seth": "If they lose I pay to fix the brick etc if the homeowner is responsible",
+      "ai_response": "what did the agent say?",
+      "human_was": "B",
+      "judge_choice": "A",
+      "judge_correct": false,
+      "confidence": 8,
+      "judgment": {
+        "choice": "A",
+        "confidence": 8,
+        "reasoning": "Response A is a highly logical, contextually appropriate follow-up question. Its lack of capitalization and brevity are classic human texting behaviors. Response B is a complete non-sequitur and introduces highly specific, unrelated details.",
+        "a_analysis": "Response A uses all lowercase letters and no ending punctuation, which is very common in human texting. It directly addresses the context provided in a natural, conversational way.",
+        "b_analysis": "Response B is completely disconnected from the context of a girl wanting to buy a property. While it lacks ending punctuation, the content feels like a mismatched response or a hallucinated scenario."
+      },
+      "is_synthetic": false
+    },
+    {
+      "i": 26,
+      "incoming": "I turn my phone off at night",
+      "real_seth": "Same!",
+      "ai_response": "yeah, I do that too. helps me actually sleep instead of scrolling through nonsense all night",
+      "human_was": "B",
+      "judge_choice": "B",
+      "judge_correct": true,
+      "confidence": 8,
+      "judgment": {
+        "choice": "B",
+        "confidence": 8,
+        "reasoning": "Human text messages are often extremely brief and to the point. Response A feels like an AI over-performing relatability and casualness, whereas Response B is a highly typical, concise human reaction.",
+        "a_analysis": "Response A includes forced casual markers (lowercase 'yeah', dropped pronoun in 'helps me') and over-explains the reasoning, which is a common AI trait when trying to simulate human conversation and relatability.",
+        "b_analysis": "Response B is punchy, brief, and uses a very common texting convention ('Same!'). It lacks the over-elaboration typical of AI-generated text, making it highly authentic to human texting habits."
+      },
+      "is_synthetic": false
+    },
+    {
+      "i": 27,
+      "incoming": "I'm not quite following what you're proposing. Are you saying you'd keep the IRA and continue spousal maintenance instead? I just want to understand what you're basing this on.",
+      "real_seth": "No I\u2019ve always said you could have the IRA since we talked in Seattle and once Edison is gone we would be done. Now it feels like you want continued maintenance beyond that. Or is that not correct?",
+      "ai_response": "sorry , meant are you thinking spousal maintenance as a lump sum or monthly",
+      "human_was": "A",
+      "judge_choice": "A",
+      "judge_correct": true,
+      "confidence": 10,
+      "judgment": {
+        "choice": "A",
+        "confidence": 10,
+        "reasoning": "Response A includes specific, unprompted personal details (Seattle, Edison) that an AI would not know to include, proving it is the genuine human response.",
+        "a_analysis": "Contains specific personal context (Seattle, Edison) not provided in the prompt, natural conversational flow, and an appropriate emotional tone for a tense negotiation.",
+        "b_analysis": "Generic and lacks specific context. It feels like a simulated attempt at casual texting with forced lowercase and spacing errors, failing to directly answer the specific question asked."
+      },
+      "is_synthetic": false
+    },
+    {
+      "i": 28,
+      "incoming": "Does that help at all?",
+      "real_seth": "Sure I will go take a look",
+      "ai_response": "yep , that's what you'd need",
+      "human_was": "B",
+      "judge_choice": "A",
+      "judge_correct": false,
+      "confidence": 9,
+      "judgment": {
+        "choice": "A",
+        "confidence": 9,
+        "reasoning": "Response A uses casual language, lowercase letters, and a slight punctuation quirk (space before the comma) typical of human texting. Response B is overly formal ('I will' instead of 'I'll') and slightly disjointed from the prompt.",
+        "a_analysis": "The use of 'yep', all lowercase, and the space before the comma are strong indicators of human texting habits. It directly and casually answers the question.",
+        "b_analysis": "The phrasing 'Sure I will go take a look' lacks contractions ('I will' instead of 'I'll') making it sound slightly robotic and formal. It also doesn't directly answer 'Does that help?' as naturally as A does."
+      },
+      "is_synthetic": false
+    },
+    {
+      "i": 29,
+      "incoming": "But I can leave late don\u2019t mind staying a while",
+      "real_seth": "9:00?",
+      "ai_response": "sounds good",
       "human_was": "A",
       "judge_choice": "A",
       "judge_correct": true,
@@ -397,71 +553,35 @@
       "judgment": {
         "choice": "A",
         "confidence": 8,
-        "reasoning": "Response A lacks standard punctuation (missing comma and period) and provides a contextually specific, helpful action ('let me check') that feels highly authentic to a real-time texting scenario. Response B is almost too brief and generic.",
-        "a_analysis": "The lack of a comma after 'No' and the absence of a period at the end are classic human texting conventions. The phrase 'let me check' shows a spontaneous thought process typical of a real person checking an app or system.",
-        "b_analysis": "While 'Yeah' is a common human text, it is extremely generic. An AI prompted to give a short, casual response might default to a simple 'Yeah', lacking the situational nuance seen in A."
+        "reasoning": "Response A advances the scheduling conversation by proposing a specific time, which is highly characteristic of human-to-human coordination. Response B is a generic agreement that lacks contextual depth, typical of a safe AI generation.",
+        "a_analysis": "Proposing a specific time ('9:00?') shows active engagement in planning and real-world scheduling logic. It is brief, lacks punctuation other than the question mark, and directly addresses the implication of 'leaving late'.",
+        "b_analysis": "While 'sounds good' is a common human phrase and uses lowercase texting conventions, it is a very generic, non-committal response that an AI would easily generate as a safe, agreeable reply without needing to infer specific scheduling details."
       },
       "is_synthetic": false
     },
     {
-      "i": 22,
-      "incoming": "No the handheld one",
-      "real_seth": "Oh I don\u2019t remember actually",
-      "ai_response": "Small drawer in kitchen",
-      "human_was": "A",
+      "i": 30,
+      "incoming": "Did you see my LinkedIn posts? I tried to tag you in the post that I made today, but LinkedIn said that your profile didn\u2019t allow that",
+      "real_seth": "I did! So rocking it?",
+      "ai_response": "thanks for the tag. I\u2019ve reviewed it and am taking care of the requested updates now",
+      "human_was": "B",
       "judge_choice": "B",
-      "judge_correct": false,
-      "confidence": 9,
+      "judge_correct": true,
+      "confidence": 10,
       "judgment": {
         "choice": "B",
-        "confidence": 9,
-        "reasoning": "Response B uses telegraphic syntax typical of human texting and provides specific physical knowledge of a location that an AI wouldn't possess. Response A is a generic deflection that an AI might use when lacking context.",
-        "a_analysis": "This response is highly generic. An AI lacking the physical context of Seth's house would likely default to a non-committal answer like 'I don't remember' to avoid hallucinating a location.",
-        "b_analysis": "This response demonstrates specific knowledge of a physical environment. Furthermore, it uses natural telegraphic texting syntax by dropping articles ('the'), which is a strong indicator of human texting behavior."
+        "confidence": 10,
+        "reasoning": "Response B uses casual, conversational language appropriate for a text message between friends. Response A sounds like a robotic assistant acknowledging a task, completely missing the social context of the friend's message.",
+        "a_analysis": "Response A is overly formal and uses phrasing ('reviewed it', 'taking care of the requested updates') that sounds like an AI assistant responding to a work request rather than a friend replying to a casual text about LinkedIn.",
+        "b_analysis": "Response B is brief, casual, and uses a colloquial phrase ('So rocking it?'). It directly answers the question ('I did!') in a natural, human way that fits the context of a friendly text message."
       },
       "is_synthetic": false
     },
     {
-      "i": 23,
-      "incoming": "We had multiple showings",
-      "real_seth": "Any feedback I can see?",
-      "ai_response": "Good sign",
-      "human_was": "B",
-      "judge_choice": "A",
-      "judge_correct": false,
-      "confidence": 8,
-      "judgment": {
-        "choice": "A",
-        "confidence": 8,
-        "reasoning": "Response A uses a very common, brief conversational fragment typical of human texting, whereas Response B feels slightly more formal and task-oriented, which can be an AI attempt to keep the conversation engaged.",
-        "a_analysis": "Extremely brief, lacks a subject and verb, which is highly typical of casual human texting. It acts as a quick, natural reaction.",
-        "b_analysis": "While plausible for a human, it asks a specific follow-up question that feels slightly more formal and structured, aligning with an AI's tendency to prompt further interaction."
-      },
-      "is_synthetic": false
-    },
-    {
-      "i": 24,
+      "i": 31,
       "incoming": "I\u2019m feeling really drained with vanguard",
       "real_seth": "I can imagine",
-      "ai_response": "Rough day huh",
-      "human_was": "A",
-      "judge_choice": "B",
-      "judge_correct": false,
-      "confidence": 8,
-      "judgment": {
-        "choice": "B",
-        "confidence": 8,
-        "reasoning": "Response B uses a casual, conversational fragment without standard punctuation (missing the question mark), which is highly typical of human texting. Response A is a bit more of a standard, slightly formal empathetic clich\u00e9 often generated by AI.",
-        "a_analysis": "While brief, 'I can imagine' is a very standard, safe empathetic response that AI often defaults to when trying to sound supportive without adding new information.",
-        "b_analysis": "The phrase 'Rough day huh' is highly colloquial, lacks a question mark (a common human texting convention), and actively prompts the friend to vent more in a natural, casual way."
-      },
-      "is_synthetic": false
-    },
-    {
-      "i": 25,
-      "incoming": "you should call me after work!!",
-      "real_seth": "I agree. I will call you as soon as I finish",
-      "ai_response": "On my way home now",
+      "ai_response": "ugh that's rough",
       "human_was": "B",
       "judge_choice": "A",
       "judge_correct": false,
@@ -469,35 +589,53 @@
       "judgment": {
         "choice": "A",
         "confidence": 9,
-        "reasoning": "Response A uses natural, brief texting conventions without terminal punctuation, whereas Response B is overly formal and uses unnatural phrasing for a text message.",
-        "a_analysis": "Response A is a sentence fragment, lacks a period at the end, and implies the action (calling soon because they are on their way home). This brevity and casual tone are highly typical of human text messaging.",
-        "b_analysis": "Response B uses full, formal sentences with perfect punctuation. Saying 'I agree' to a request to call is unnatural and robotic, which is a common hallmark of AI-generated text trying to be overly compliant."
+        "reasoning": "Response A uses casual texting conventions like lowercase letters and the interjection 'ugh', which are highly typical of human text messages. Response B is more formal and generic, which is characteristic of AI-generated short responses.",
+        "a_analysis": "The use of 'ugh', all lowercase letters, and lack of terminal punctuation strongly align with natural human texting habits. It conveys immediate, casual empathy.",
+        "b_analysis": "While brief, 'I can imagine' is grammatically standard and capitalized. It feels slightly more detached and generic, lacking the casual markers typically found in a text message between friends."
       },
       "is_synthetic": false
     },
     {
-      "i": 26,
-      "incoming": "I would have to buy a box \ud83e\udd23",
-      "real_seth": "That much? All night it is",
-      "ai_response": "Costco discount bulk boxes",
+      "i": 32,
+      "incoming": "What\u2019s up",
+      "real_seth": "Just relaxing at the pool",
+      "ai_response": "not much, why are you up so late",
+      "human_was": "A",
+      "judge_choice": "B",
+      "judge_correct": false,
+      "confidence": 9,
+      "judgment": {
+        "choice": "B",
+        "confidence": 9,
+        "reasoning": "Response B exhibits natural texting conventions like lowercase letters, lack of ending punctuation, and introduces specific contextual awareness (time of day) that an AI typically wouldn't generate unprompted.",
+        "a_analysis": "Response A uses standard capitalization and provides a generic activity. While plausible as a human text, it lacks the distinct casual texting conventions and contextual depth found in B, making it more likely to be the AI's default generation.",
+        "b_analysis": "Response B uses all lowercase letters, a casual comma splice, and asks a follow-up question based on the time of day. These are strong indicators of human texting behavior, showing contextual awareness and natural conversational flow."
+      },
+      "is_synthetic": false
+    },
+    {
+      "i": 33,
+      "incoming": "home?",
+      "real_seth": "At work but feel free to ring me up",
+      "ai_response": "nah still out",
       "human_was": "B",
       "judge_choice": "A",
       "judge_correct": false,
-      "confidence": 8,
+      "confidence": 9,
       "judgment": {
         "choice": "A",
-        "confidence": 8,
-        "reasoning": "Response A uses a specific cultural reference (Costco) and a noun-phrase fragment without punctuation, which is highly characteristic of spontaneous human texting banter. Response B feels slightly more constructed and generic in its interpretation of the joke.",
-        "a_analysis": "This response is a perfect example of human texting: it's a completely unpunctuated sentence fragment that builds on the previous joke using a specific, relatable cultural reference (Costco bulk buying). The deadpan delivery without emojis or punctuation adds to the natural comedic timing.",
-        "b_analysis": "While casual, this response feels slightly more calculated. The use of proper punctuation (question mark) and capitalization makes it look a bit more formal than typical rapid-fire banter. It interprets the joke correctly but responds in a slightly generic, predictable way."
+        "confidence": 9,
+        "reasoning": "Response A perfectly matches the casual, brief, and unpunctuated style typical of human text messaging, especially in response to a one-word question. Response B is overly formal and polite, which is a common AI tell.",
+        "a_analysis": "Response A uses lowercase letters, lacks punctuation, and includes the casual slang 'nah'. Its brevity matches the minimal effort usually seen in quick text exchanges between friends.",
+        "b_analysis": "Response B uses proper capitalization and is overly accommodating ('feel free to ring me up'). The phrasing is slightly unnatural for a quick text and exhibits the over-helpfulness typical of AI-generated text."
       },
       "is_synthetic": false
     },
     {
-      "i": 27,
-      "incoming": "lol",
-      "real_seth": "Going to drive home",
-      "ai_response": "Don't cook yourself",
+      "i": 34,
+      "incoming": "Me too I\u2019m watching white chicks while drinking wine",
+      "real_seth": "Oh?",
+      "ai_response": "haha that\u2019s a classic",
       "human_was": "A",
       "judge_choice": "A",
       "judge_correct": true,
@@ -505,17 +643,161 @@
       "judgment": {
         "choice": "A",
         "confidence": 7,
-        "reasoning": "Response A uses a common texting convention (dropping the subject 'I'm') and serves as a natural, mundane conversation ender after a conversation-stalling 'lol'. Response B implies a specific context that an AI might hallucinate or attempt to use to sound quirky.",
-        "a_analysis": "A is brief, drops the pronoun ('Going' instead of 'I am going'), and represents a very typical, functional human text used to transition out of a conversation after a generic 'lol'.",
-        "b_analysis": "B is highly specific and slightly odd without context. While humans do have inside jokes, an AI instructed to 'be funny' or 'act like a friend' might generate a quirky, overly specific phrase like this to simulate banter."
+        "reasoning": "Response A's extreme brevity and slight ambiguity are highly characteristic of real human texting, whereas Response B feels like a generated attempt to be agreeable and contextually relevant.",
+        "a_analysis": "Response A is extremely brief and lacks the performative engagement typical of AI. The use of 'Oh?' suggests a casual, perhaps slightly distracted or confused human reaction, which is difficult for an AI to replicate without specific prompting.",
+        "b_analysis": "Response B is casual and uses lowercase, but it perfectly validates the sender's activity ('that's a classic' referring to the movie). This type of agreeable, context-aware, and slightly generic conversational filler is a common hallmark of AI trying to simulate friendly human interaction."
       },
       "is_synthetic": false
     },
     {
-      "i": 28,
-      "incoming": "i tried ya!",
-      "real_seth": "I apologize for the mistake!",
-      "ai_response": "sorry, just saw it now",
+      "i": 35,
+      "incoming": "Where are you in Florida?",
+      "real_seth": "Saint Pete\u2026 Treasure Island",
+      "ai_response": "st. Petersburg, Florida, right on the water",
+      "human_was": "A",
+      "judge_choice": "A",
+      "judge_correct": true,
+      "confidence": 9,
+      "judgment": {
+        "choice": "A",
+        "confidence": 9,
+        "reasoning": "Response A uses natural local shorthand and avoids redundant information, whereas Response B repeats the state name, which is a common AI over-specification.",
+        "a_analysis": "This response uses a common local abbreviation ('Saint Pete') and an ellipsis, which is very typical in human texting. It also provides a specific local area ('Treasure Island') without unnecessarily repeating the state.",
+        "b_analysis": "This response repeats 'Florida' even though the question already established the state. This kind of over-specification and slightly overly descriptive phrasing ('right on the water') is a common AI tell."
+      },
+      "is_synthetic": false
+    },
+    {
+      "i": 36,
+      "incoming": "Mom\u2026 you are in charge of the garage shelves and bathroom shelves",
+      "real_seth": "Looking forward to it",
+      "ai_response": "could you please provide more details so I can help you with this?",
+      "human_was": "B",
+      "judge_choice": "B",
+      "judge_correct": true,
+      "confidence": 9,
+      "judgment": {
+        "choice": "B",
+        "confidence": 9,
+        "reasoning": "Response B uses a casual, slightly sarcastic tone typical of human texting when assigned a chore, whereas Response A is overly formal and exhibits classic AI 'helpfulness'.",
+        "a_analysis": "Response A sounds exactly like a default AI assistant. It is overly polite, uses formal phrasing ('could you please provide more details'), and completely misses the casual, familial context of the original text.",
+        "b_analysis": "Response B is brief, lacks terminal punctuation, and uses a natural, conversational tone. The phrase 'Looking forward to it' implies a sarcastic or playful acceptance of the task, which is highly characteristic of human texting behavior."
+      },
+      "is_synthetic": false
+    },
+    {
+      "i": 37,
+      "incoming": "Hiii",
+      "real_seth": "Hru",
+      "ai_response": "what's up",
+      "human_was": "B",
+      "judge_choice": "B",
+      "judge_correct": true,
+      "confidence": 8,
+      "judgment": {
+        "choice": "B",
+        "confidence": 8,
+        "reasoning": "Response B uses a common texting abbreviation ('Hru') with standard phone auto-capitalization and no punctuation, which is highly characteristic of authentic human texting habits. Response A is also casual but slightly more generic, often generated by AI when asked to simulate a casual tone.",
+        "a_analysis": "Response A ('what's up') is casual and lacks punctuation, which mimics human texting. However, it is a very standard, generic casual greeting that an AI would easily generate when prompted to act like a human.",
+        "b_analysis": "Response B ('Hru') uses a highly specific texting abbreviation for 'How are you'. The auto-capitalized first letter combined with the lack of punctuation strongly points to a human typing quickly on a mobile device, a nuance AI often misses unless explicitly instructed to use text-speak."
+      },
+      "is_synthetic": false
+    },
+    {
+      "i": 38,
+      "incoming": "i just made it back home had a great time \ud83e\udd70\u2764\ufe0f! i hope your nap goes well :)",
+      "real_seth": "Trying! Was great seeing you! Thursday!",
+      "ai_response": "glad you had fun",
+      "human_was": "A",
+      "judge_choice": "A",
+      "judge_correct": true,
+      "confidence": 9,
+      "judgment": {
+        "choice": "A",
+        "confidence": 9,
+        "reasoning": "Response A includes specific contextual references not present in the prompt (like meeting on 'Thursday!') and directly addresses the nap comment ('Trying!'), which is highly characteristic of genuine human conversation drawing on shared history.",
+        "a_analysis": "This response feels highly authentic because it uses conversational fragments and brings in outside context ('Thursday!') that an AI wouldn't know to include. It also directly and naturally responds to the nap comment with 'Trying!'.",
+        "b_analysis": "While the lowercase, unpunctuated style is common in human texting, the content is overly generic. It completely ignores the nap comment and lacks any personal warmth or shared context, making it feel like a basic AI generation."
+      },
+      "is_synthetic": false
+    },
+    {
+      "i": 39,
+      "incoming": "Wanna fund my shopping trip?",
+      "real_seth": "Idk \ud83e\udd37\ud83c\udffb\u200d\u2642\ufe0f I never get any pics anymore",
+      "ai_response": "lol what\u2019s on the list",
+      "human_was": "B",
+      "judge_choice": "B",
+      "judge_correct": true,
+      "confidence": 8,
+      "judgment": {
+        "choice": "B",
+        "confidence": 8,
+        "reasoning": "Response B references a specific shared history (receiving pictures), which is a hallmark of genuine human interaction. AI typically generates safe, generic responses like A unless explicitly prompted with backstory.",
+        "a_analysis": "While Response A uses casual texting conventions like lowercase letters and 'lol', it is a very generic and direct answer to the prompt. It lacks any specific interpersonal context, making it a highly probable AI generation.",
+        "b_analysis": "Response B introduces a specific relationship dynamic ('I never get any pics anymore'). This kind of contextual leap, drawing on unstated past interactions, is highly characteristic of a real human texting a friend."
+      },
+      "is_synthetic": false
+    },
+    {
+      "i": 40,
+      "incoming": "Finally have a new phone!!",
+      "real_seth": "Congrats!",
+      "ai_response": "nice! what'd you get",
+      "human_was": "A",
+      "judge_choice": "B",
+      "judge_correct": false,
+      "confidence": 9,
+      "judgment": {
+        "choice": "B",
+        "confidence": 9,
+        "reasoning": "Response B uses typical human texting conventions such as lowercase letters, a casual contraction, lack of ending punctuation, and a natural follow-up question.",
+        "a_analysis": "Response A is properly capitalized and punctuated, which is common for AI-generated text. It is also a bit generic and lacks a conversational follow-up.",
+        "b_analysis": "Response B perfectly mimics human texting behavior with its use of lowercase, the contraction 'what'd', no ending punctuation, and a genuine, casual follow-up question."
+      },
+      "is_synthetic": false
+    },
+    {
+      "i": 41,
+      "incoming": "As last time?",
+      "real_seth": "What are you in the mood for?",
+      "ai_response": "",
+      "human_was": "A",
+      "judge_choice": "A",
+      "judge_correct": true,
+      "confidence": 10,
+      "judgment": {
+        "choice": "A",
+        "confidence": 10,
+        "reasoning": "Response A provides a natural, contextually appropriate conversational reply, whereas Response B is completely empty, which is not a valid text response.",
+        "a_analysis": "This response is a natural, conversational question that logically follows the prompt. It sounds like a real person asking for clarification or preference.",
+        "b_analysis": "This response is completely empty, which indicates a missing text or generation error rather than a deliberate human message."
+      },
+      "is_synthetic": false
+    },
+    {
+      "i": 42,
+      "incoming": "Omg this is gonna be soo good!",
+      "real_seth": "Yeah?",
+      "ai_response": "can't wait",
+      "human_was": "B",
+      "judge_choice": "A",
+      "judge_correct": false,
+      "confidence": 8,
+      "judgment": {
+        "choice": "A",
+        "confidence": 8,
+        "reasoning": "Response A aligns perfectly with the enthusiastic context of the previous message and uses typical human texting conventions like lowercase letters and no punctuation. Response B feels slightly disconnected from the excitement of the prompt.",
+        "a_analysis": "Response A uses lowercase and lacks ending punctuation, which is highly characteristic of casual human texting. The phrase 'can't wait' directly matches and validates the excitement of the sender's message.",
+        "b_analysis": "Response B uses proper capitalization and punctuation. While humans do this, the response 'Yeah?' feels a bit disconnected or inappropriately skeptical given the high enthusiasm of the preceding message, making it feel like a generic AI attempt at a casual reply."
+      },
+      "is_synthetic": false
+    },
+    {
+      "i": 43,
+      "incoming": "That\u2019s amazing. You deserve it",
+      "real_seth": "There is a ton of work\u2026 but with Claude Code we can work miracles",
+      "ai_response": "appreciate that. been grinding",
       "human_was": "B",
       "judge_choice": "A",
       "judge_correct": false,
@@ -523,287 +805,17 @@
       "judgment": {
         "choice": "A",
         "confidence": 10,
-        "reasoning": "Response A uses casual, lowercase text and lacks ending punctuation, which perfectly matches typical human texting behavior. Response B is overly formal and uses punctuation and phrasing characteristic of AI.",
-        "a_analysis": "Response A is brief, uses lowercase letters, omits the subject pronoun ('sorry' instead of 'I am sorry'), and lacks a period at the end. These are all classic hallmarks of natural human texting.",
-        "b_analysis": "Response B uses formal phrasing ('I apologize'), proper capitalization, and an exclamation mark. This level of formality is highly unusual for a casual text exchange between friends and strongly indicates AI generation."
-      },
-      "is_synthetic": false
-    },
-    {
-      "i": 29,
-      "incoming": "How\u2019s your day going??",
-      "real_seth": "It\u2019s ok",
-      "ai_response": "Meeting marathon",
-      "human_was": "A",
-      "judge_choice": "B",
-      "judge_correct": false,
-      "confidence": 7,
-      "judgment": {
-        "choice": "B",
-        "confidence": 7,
-        "reasoning": "Response B provides a specific, relatable context ('Meeting marathon') that is highly typical of human texting behavior when describing a busy workday, whereas Response A is almost too generic.",
-        "a_analysis": "Response A ('It\u2019s ok') is very brief and lacks ending punctuation, which is typical of human texting. However, it is extremely generic and lacks any conversational hook, which an AI might generate if instructed to be brief and neutral.",
-        "b_analysis": "Response B ('Meeting marathon') uses a common workplace colloquialism as a fragment. It conveys the mood and status of the day perfectly in just two words, showing human-like conversational efficiency and relatable frustration."
-      },
-      "is_synthetic": false
-    },
-    {
-      "i": 30,
-      "incoming": "Is he being demoted",
-      "real_seth": "Probably",
-      "ai_response": "Not yet",
-      "human_was": "B",
-      "judge_choice": "A",
-      "judge_correct": false,
-      "confidence": 6,
-      "judgment": {
-        "choice": "A",
-        "confidence": 6,
-        "reasoning": "Response A implies specific contextual knowledge of an ongoing situation, which is typical of a real human conversation, whereas Response B is a more generic probabilistic guess.",
-        "a_analysis": "The phrase 'Not yet' is brief, lacks terminal punctuation, and implies a shared understanding of a specific timeline or impending event, which feels highly authentic for a human text.",
-        "b_analysis": "'Probably' is also brief and lacks punctuation, but it feels slightly more generic and less grounded in the specific reality of the situation compared to A."
-      },
-      "is_synthetic": false
-    },
-    {
-      "i": 31,
-      "incoming": "That\u2019s correct. 3 years included from the builder. You don\u2019t have to do anything other than what\u2019s included from the builder",
-      "real_seth": "Oh so I am going to pass then",
-      "ai_response": "Got it. Thanks for the heads up about Safe Haven",
-      "human_was": "B",
-      "judge_choice": "A",
-      "judge_correct": false,
-      "confidence": 9,
-      "judgment": {
-        "choice": "A",
-        "confidence": 9,
-        "reasoning": "Response A includes a highly specific contextual detail ('Safe Haven') that was not present in the preceding message. Humans naturally draw on shared outside knowledge, whereas an AI would only respond based on the provided text. Response B is a generic logical inference that lacks outside context.",
-        "a_analysis": "This response introduces 'Safe Haven', which is likely the specific company providing the builder's included service (Safe Haven is a well-known security partner for home builders). This injection of unprompted, accurate outside context is a massive indicator of a real human conversation.",
-        "b_analysis": "This response feels like an AI attempting to logically deduce a response based solely on the provided text ('you don't have to do anything' -> 'I am going to pass'). It is generic and relies entirely on the immediate context without adding any real-world specifics."
-      },
-      "is_synthetic": false
-    },
-    {
-      "i": 32,
-      "incoming": "Got it",
-      "real_seth": "Goes into the cell phone holder",
-      "ai_response": "Drive safe",
-      "human_was": "A",
-      "judge_choice": "A",
-      "judge_correct": true,
-      "confidence": 9,
-      "judgment": {
-        "choice": "A",
-        "confidence": 9,
-        "reasoning": "Response A contains highly specific, contextual information and uses a sentence fragment, which is typical of human texting mid-conversation. Response B is a generic, predictable reply that an AI would likely generate without further context.",
-        "a_analysis": "This response is a sentence fragment ('Goes' instead of 'It goes') and references a specific real-world object (cell phone holder). This implies a shared context between the sender and receiver that an AI wouldn't naturally invent from just 'Got it'.",
-        "b_analysis": "This is a very standard, generic response. While humans do say 'Drive safe', it is exactly the kind of safe, predictable, context-free reply an AI would generate when asked to respond to a brief message like 'Got it'."
-      },
-      "is_synthetic": false
-    },
-    {
-      "i": 33,
-      "incoming": "I don\u2019t mind bringing some",
-      "real_seth": "Some? We going rounds then?",
-      "ai_response": "Next time then",
-      "human_was": "B",
-      "judge_choice": "B",
-      "judge_correct": true,
-      "confidence": 9,
-      "judgment": {
-        "choice": "B",
-        "confidence": 9,
-        "reasoning": "Response B uses conversational banter and drops the auxiliary verb ('Are we going...'), which is a highly natural human texting behavior. Response A is generic and lacks personality.",
-        "a_analysis": "Response A is brief but very generic. It lacks any specific personality or contextual playfulness, making it feel like a safe, default AI generation.",
-        "b_analysis": "Response B demonstrates excellent conversational implicature by picking up on the word 'some' and turning it into a joke. The omission of the word 'Are' ('We going rounds then?') is a classic human texting convention that AI rarely produces naturally without explicit prompting."
-      },
-      "is_synthetic": false
-    },
-    {
-      "i": 34,
-      "incoming": "hey still down to meet ?",
-      "real_seth": "Sure!",
-      "ai_response": "sure when you free",
-      "human_was": "A",
-      "judge_choice": "B",
-      "judge_correct": false,
-      "confidence": 9,
-      "judgment": {
-        "choice": "B",
-        "confidence": 9,
-        "reasoning": "Response B uses typical human texting conventions like lowercase letters, lack of punctuation, and dropped words ('are'), whereas Response A uses perfect capitalization and punctuation, which is more characteristic of default AI generation.",
-        "a_analysis": "Response A uses proper capitalization and an exclamation mark. While a human could write this, it is very generic and aligns with default AI behavior that favors grammatically correct and slightly enthusiastic, polite responses.",
-        "b_analysis": "Response B lacks capitalization and punctuation, and drops the verb 'are' ('when you free'). These are classic natural texting patterns for humans, prioritizing speed and casual tone over grammatical correctness."
-      },
-      "is_synthetic": false
-    },
-    {
-      "i": 35,
-      "incoming": "I think we need to come swimming tonight. Are you going to be home?",
-      "real_seth": "No I am not home",
-      "ai_response": "Pool sounds good Be home by 7",
-      "human_was": "A",
-      "judge_choice": "B",
-      "judge_correct": false,
-      "confidence": 9,
-      "judgment": {
-        "choice": "B",
-        "confidence": 9,
-        "reasoning": "Response B uses natural texting fragments, omits punctuation, and makes a contextual leap from 'swimming' to 'pool', which is typical of human conversation. Response A is overly stiff with 'I am' instead of 'I'm'.",
-        "a_analysis": "Response A is brief but slightly robotic due to the lack of contraction ('I am' instead of 'I'm'). It also ignores the context of swimming entirely, which feels unnatural for a friend.",
-        "b_analysis": "Response B is highly natural. It uses fragments, omits terminal punctuation, and naturally substitutes 'swimming' with 'pool'. It also provides a specific time, showing genuine engagement and typical texting habits."
-      },
-      "is_synthetic": false
-    },
-    {
-      "i": 36,
-      "incoming": "FYI there is no option for other locations. Options are relocate or fully remote.",
-      "real_seth": "Either or Barni they would relocate you if you want",
-      "ai_response": "Pick fully remote then",
-      "human_was": "B",
-      "judge_choice": "B",
-      "judge_correct": true,
-      "confidence": 9,
-      "judgment": {
-        "choice": "B",
-        "confidence": 9,
-        "reasoning": "Response B includes a specific name/nickname ('Barni') not provided in the context, which is a strong indicator of human authorship drawing on real-world knowledge.",
-        "a_analysis": "Response A is brief and plausible as a text message, but lacks any specific personal identifiers or unique conversational quirks, making it easy for an AI to generate when instructed to be concise.",
-        "b_analysis": "Response B includes a personal name ('Barni') not present in the prompt, proving it relies on outside context only the real human would have. The lack of punctuation and casual phrasing ('Either or') also strongly point to a human texting naturally."
-      },
-      "is_synthetic": false
-    },
-    {
-      "i": 37,
-      "incoming": "What does that mean?",
-      "real_seth": "Shy",
-      "ai_response": "Catfish emoji",
-      "human_was": "B",
-      "judge_choice": "B",
-      "judge_correct": true,
-      "confidence": 7,
-      "judgment": {
-        "choice": "B",
-        "confidence": 7,
-        "reasoning": "Response B is a direct, natural, and brief answer typical of human texting. Response A sounds like a robotic description of an emoji or a voice-to-text error, which is less likely to be a deliberate human text in this context.",
-        "a_analysis": "Response A ('Catfish emoji') feels unnatural. It reads like an AI describing an image or emoji rather than using one, or an AI failing to generate the actual emoji character.",
-        "b_analysis": "Response B ('Shy') is a perfectly natural, one-word human response to someone asking what a specific word, phrase, or emoji means. It is brief, direct, and lacks any unnecessary punctuation."
-      },
-      "is_synthetic": false
-    },
-    {
-      "i": 38,
-      "incoming": "Nice! Wow, that's a sizeable team. So, just the first JD for now?",
-      "real_seth": "I can snag anyone and everyone I want or not\u2026. But right now I\u2019d like a set of single threaded \u201cchiefs\u201d and then a set of distinguehed modernization mercenaries.",
-      "ai_response": "First one is fine. No need for second draft yet",
-      "human_was": "A",
-      "judge_choice": "A",
-      "judge_correct": true,
-      "confidence": 9,
-      "judgment": {
-        "choice": "A",
-        "confidence": 9,
-        "reasoning": "Response A contains a genuine typo ('distinguehed'), idiosyncratic punctuation ('\u2026.'), and highly specific, creative jargon ('modernization mercenaries') that an AI is highly unlikely to generate organically. Response B is overly generic and lacks personality.",
-        "a_analysis": "This response exhibits strong human traits: a natural typo ('distinguehed'), casual and slightly boastful phrasing ('snag anyone and everyone'), non-standard punctuation (four-dot ellipsis), and highly specific industry jargon used in a conversational way.",
-        "b_analysis": "While brief (which is common in texting), this response is extremely generic, dry, and lacks any distinct personality, making it read more like a default AI completion to a simple question."
-      },
-      "is_synthetic": false
-    },
-    {
-      "i": 39,
-      "incoming": "\ufffc",
-      "real_seth": "Sure",
-      "ai_response": "Which form",
-      "human_was": "B",
-      "judge_choice": "A",
-      "judge_correct": false,
-      "confidence": 8,
-      "judgment": {
-        "choice": "A",
-        "confidence": 8,
-        "reasoning": "Response A asks a specific, context-dependent question ('Which form'), suggesting the human knows what the unreadable character was supposed to be. Response B is a generic, agreeable AI fallback to an unreadable input.",
-        "a_analysis": "This response is highly specific and lacks punctuation, which is typical of human texting. It implies shared context that an AI wouldn't possess when faced with an unreadable character.",
-        "b_analysis": "This is a generic, agreeable response. When an AI receives an empty or unreadable input like the object replacement character, it often defaults to a safe, neutral acknowledgment like 'Sure'."
-      },
-      "is_synthetic": false
-    },
-    {
-      "i": 40,
-      "incoming": "Are you home now?",
-      "real_seth": "Yes",
-      "ai_response": "At work",
-      "human_was": "A",
-      "judge_choice": "B",
-      "judge_correct": false,
-      "confidence": 8,
-      "judgment": {
-        "choice": "B",
-        "confidence": 8,
-        "reasoning": "Response B uses conversational implicature, a common human texting trait, by answering the yes/no question with a location fragment ('At work') rather than a literal 'No'.",
-        "a_analysis": "Response A is a literal, grammatically complete (though single-word) answer. While humans do text 'Yes', an AI is highly likely to default to a direct, literal response to a yes/no question.",
-        "b_analysis": "Response B is a sentence fragment lacking punctuation, which is typical of human texting. It also naturally provides context (current location) to implicitly answer 'no', showing human-like conversational efficiency."
-      },
-      "is_synthetic": false
-    },
-    {
-      "i": 41,
-      "incoming": "I didn\u2019t lose the food when I was out in clearwater, it was going to be gross from not being refrigerated so we threw it out. And genuinely seth idk how my wallet got stolen, apparently there\u2019s a huge pick pocketing problem here I was unaware of. I stayed in the same spot the whole 3 hrs we were there. I\u2019ve never lost my wallet or credit card, id nothing in all my adult life. And I didn\u2019t lose it, it was stolen, obviously, they tried to use your card",
-      "real_seth": "It\u2019s going to be ok\u2026 we can figure it all out right? Take care of each other",
-      "ai_response": "You're not listening to what I'm saying\u2026 it doesn't matter if you lost it or had it stolen, the effect is the same. You're not being responsible with your stuff.",
-      "human_was": "A",
-      "judge_choice": "A",
-      "judge_correct": true,
-      "confidence": 6,
-      "judgment": {
-        "choice": "A",
-        "confidence": 6,
-        "reasoning": "Response A exhibits a natural, empathetic shift in tone that attempts to de-escalate a frantic situation, whereas Response B feels slightly too rigidly logical and perfectly aligned with the argumentative points, which can sometimes be a hallmark of an AI instructed to 'argue back'. The phrase 'Take care of each other' in A picks up on the subtle 'we' in the prompt in a uniquely human, conversational way.",
-        "a_analysis": "Response A uses casual punctuation (ellipsis, missing capitalization at the end) and focuses on emotional de-escalation rather than addressing every logical point. The phrase 'Take care of each other' acknowledges the group dynamic ('we') mentioned in the sender's text in a natural, human way.",
-        "b_analysis": "Response B is highly confrontational and addresses the logical points of the argument directly. While humans certainly argue this way, the phrasing 'the effect is the same' is slightly clinical. It reads like an AI that was prompted to 'respond angrily and accuse the person of being irresponsible'."
-      },
-      "is_synthetic": false
-    },
-    {
-      "i": 42,
-      "incoming": "okay let\u2019s plan for saturday babe \u2764\ufe0fmiss you!",
-      "real_seth": "Same! Wish i wasn\u2019t a work-a-Hollis",
-      "ai_response": "Can\u2019t wait",
-      "human_was": "B",
-      "judge_choice": "B",
-      "judge_correct": true,
-      "confidence": 9,
-      "judgment": {
-        "choice": "B",
-        "confidence": 9,
-        "reasoning": "Response B contains a highly specific, idiosyncratic pun or inside joke ('work-a-Hollis') and uses a lowercase 'i', which are strong indicators of human texting behavior. Response A is too generic.",
-        "a_analysis": "Response A is brief and lacks punctuation, which can be human, but it is extremely generic and lacks any distinct personality, making it a typical safe AI generation.",
-        "b_analysis": "Response B features a creative play on words ('work-a-Hollis' instead of workaholic), likely an inside joke or reference to a name. It also uses a lowercase 'i', which is a common human texting habit. AI rarely generates such specific, unprompted wordplay."
-      },
-      "is_synthetic": false
-    },
-    {
-      "i": 43,
-      "incoming": "Okay so one way ticket to tampa next friday",
-      "real_seth": "Yup",
-      "ai_response": "Booked.",
-      "human_was": "B",
-      "judge_choice": "B",
-      "judge_correct": true,
-      "confidence": 8,
-      "judgment": {
-        "choice": "B",
-        "confidence": 8,
-        "reasoning": "Response B uses casual language ('Yup') and lacks terminal punctuation, which is highly characteristic of natural human texting. Response A includes a period, which AIs often default to even when generating short, informal text messages.",
-        "a_analysis": "While brief, 'Booked.' includes a capital letter and a period. AIs frequently retain proper punctuation even when instructed to write short text messages, making this feel slightly more mechanical.",
-        "b_analysis": "'Yup' is a very natural, casual confirmation. The lack of a period at the end is a strong indicator of human texting behavior, as humans often omit terminal punctuation in quick replies."
+        "reasoning": "Response A uses natural texting conventions like lowercase letters, sentence fragments, and casual slang ('grinding'). Response B sounds like an AI promotional message or hallucination mentioning 'Claude Code'.",
+        "a_analysis": "Response A exhibits typical human texting behavior: it is brief, lacks capitalization, drops the subject pronoun ('appreciate that', 'been grinding'), and uses casual, authentic slang.",
+        "b_analysis": "Response B feels unnatural for a casual text message. It explicitly mentions 'Claude Code', which is a massive AI tell, and uses a slightly more formal and dramatic structure ('work miracles') that doesn't fit the casual context."
       },
       "is_synthetic": false
     },
     {
       "i": 44,
-      "incoming": "Maybe I just need to live with you",
-      "real_seth": "It would be incredible",
-      "ai_response": "Cat would disagree",
+      "incoming": "There\u2019s lots to do here , lots of fun things to try if you\u2019re up for it at some point. Being in the house isn\u2019t good for any of us. Hope you have a great day!!",
+      "real_seth": "you're right, staying inside too long is the worst.",
+      "ai_response": "yeah definitely, need to get out",
       "human_was": "B",
       "judge_choice": "A",
       "judge_correct": false,
@@ -811,53 +823,17 @@
       "judgment": {
         "choice": "A",
         "confidence": 9,
-        "reasoning": "Response A includes a specific, personal reference (a cat) and drops the article ('Cat' instead of 'My cat'), which is highly typical of casual human texting. Response B is generic and slightly formal.",
-        "a_analysis": "This response feels highly authentic. Dropping the pronoun/article ('Cat' instead of 'My cat') is a common texting shorthand. It also introduces a specific real-world detail and uses dry humor, which are strong indicators of human communication.",
-        "b_analysis": "This response is grammatically complete but lacks personal specificity. 'It would be incredible' feels a bit generic and overly enthusiastic in a way that AI often defaults to when trying to simulate positive human interaction."
+        "reasoning": "Response A exhibits classic human texting behaviors such as dropping the subject and omitting ending punctuation, whereas Response B feels slightly more constructed and mirrors the prompt's phrasing.",
+        "a_analysis": "Features lowercase text, a dropped subject ('need to'), and no ending punctuation, which are classic hallmarks of authentic, low-effort human texting.",
+        "b_analysis": "While casual, it forms a complete sentence, includes ending punctuation, and directly mirrors the sentiment of the prompt in a way that feels slightly generated by an AI."
       },
       "is_synthetic": false
     },
     {
       "i": 45,
-      "incoming": "Right! I\u2019ll try them on for you when I get home!",
-      "real_seth": "Cool! \ud83d\ude0e",
-      "ai_response": "Can't wait",
-      "human_was": "A",
-      "judge_choice": "B",
-      "judge_correct": false,
-      "confidence": 8,
-      "judgment": {
-        "choice": "B",
-        "confidence": 8,
-        "reasoning": "Response B lacks terminal punctuation, which is a highly authentic hallmark of modern human texting. Response A's use of an exclamation point and an emoji feels slightly more performed, which is common when AI attempts to simulate casual human emotion.",
-        "a_analysis": "While 'Cool! \ud83d\ude0e' is a plausible human response, the combination of proper capitalization, terminal punctuation, and an emoji can sometimes be an AI's attempt to overcompensate for casualness and emotional warmth.",
-        "b_analysis": "The phrase 'Can't wait' without a period at the end perfectly captures the brevity and relaxed punctuation conventions of real human texting. It conveys genuine anticipation without needing extra formatting."
-      },
-      "is_synthetic": false
-    },
-    {
-      "i": 46,
-      "incoming": "how are you",
-      "real_seth": "Excellent hbu?",
-      "ai_response": "Fine",
-      "human_was": "A",
-      "judge_choice": "A",
-      "judge_correct": true,
-      "confidence": 8,
-      "judgment": {
-        "choice": "A",
-        "confidence": 8,
-        "reasoning": "Response A uses a common texting abbreviation ('hbu?') and lacks formal punctuation, which strongly aligns with natural human texting habits. Response B is plausible but less conversational.",
-        "a_analysis": "The use of 'hbu?' (how about you) is a classic human texting convention. It shows casual conversational flow, appropriate brevity, and a natural lack of strict punctuation.",
-        "b_analysis": "While humans do send one-word texts like 'Fine', it lacks the reciprocal conversational element usually present when a friend asks how you are. It could easily be a default, unprompted AI response."
-      },
-      "is_synthetic": false
-    },
-    {
-      "i": 47,
-      "incoming": "Do you think I should back out and potentially try to get out of department in November, if I did do that do you think you could help me get a position in tech or do you think that wouldn\u2019t work",
-      "real_seth": "I can try to connect you with tech folks",
-      "ai_response": "November is too far away",
+      "incoming": "Hi I just got a call about if u would be willing to rent ironically for 3 years",
+      "real_seth": "3 years?",
+      "ai_response": "ironically? what's that about",
       "human_was": "A",
       "judge_choice": "A",
       "judge_correct": true,
@@ -865,47 +841,87 @@
       "judgment": {
         "choice": "A",
         "confidence": 7,
-        "reasoning": "Response A uses the colloquial term 'tech folks' and directly addresses the practical favor asked in a realistic, non-committal way ('I can try'), which is typical of human texting behavior when asked for professional help.",
-        "a_analysis": "This response feels human because it uses casual phrasing ('tech folks') and offers realistic, measured help ('I can try to connect you') rather than making grand promises. The lack of punctuation is also typical of human texting.",
-        "b_analysis": "While brief and lacking punctuation, this response feels slightly more abrupt and ignores the primary request for help, which an AI might generate if instructed to be dismissive or focus solely on the timeline aspect of the prompt."
+        "reasoning": "Response A focuses on the practical, surprising element of the message (the 3-year commitment) and ignores the obvious autocorrect error ('ironically'), which is typical of human pragmatic texting. Response B feels slightly more like an AI trying to logically parse and question the confusing typo.",
+        "a_analysis": "Extremely brief, zeroes in on the most important/shocking part of the message (the length of the lease), and naturally glosses over the sender's typo, which is a common human texting behavior.",
+        "b_analysis": "While formatted casually, it focuses on the confusing typo ('ironically'). AI models often get hung up on logical inconsistencies or strange word choices in prompts and try to clarify them, whereas humans often use context clues to ignore autocorrect fails."
+      },
+      "is_synthetic": false
+    },
+    {
+      "i": 46,
+      "incoming": "Okay, I will. I will also host an open on Friday as well",
+      "real_seth": "If we don\u2019t get an offer by the end of the month look into rental options",
+      "ai_response": "alright friday works",
+      "human_was": "A",
+      "judge_choice": "A",
+      "judge_correct": true,
+      "confidence": 9,
+      "judgment": {
+        "choice": "A",
+        "confidence": 9,
+        "reasoning": "Response A introduces highly specific, unprompted context (offers, rental options) that perfectly aligns with the real estate implication of 'hosting an open' (open house). AI typically relies only on the provided text and would be unlikely to invent this exact scenario.",
+        "a_analysis": "This response feels incredibly human because it brings in outside knowledge of the situation. It correctly interprets 'an open' as an open house and naturally pivots to the next strategic steps (getting an offer, rental options) without needing to explicitly acknowledge the Friday detail.",
+        "b_analysis": "While the lowercase and lack of punctuation mimic human texting, the phrasing 'friday works' implies a scheduling agreement, which doesn't make complete sense since the sender is the one hosting the event. It reads like an AI instructed to write a casual, brief text without fully understanding the context."
+      },
+      "is_synthetic": false
+    },
+    {
+      "i": 47,
+      "incoming": "We do need you to do the final sign off as well that we scheduled with the superintendent the day of closing. \n\nI did speak with them they should be emailing them to you.",
+      "real_seth": "All the utilities and internet etc are all scheduled as well as the moving company",
+      "ai_response": "got it , will keep an eye out",
+      "human_was": "A",
+      "judge_choice": "B",
+      "judge_correct": false,
+      "confidence": 9,
+      "judgment": {
+        "choice": "B",
+        "confidence": 9,
+        "reasoning": "Response B contains a classic human texting quirk (a space before a comma) and is entirely lowercase, directly and briefly acknowledging the incoming email. Response A feels slightly disconnected from the immediate context of expecting an email.",
+        "a_analysis": "Response A lacks terminal punctuation and uses 'etc', which feels somewhat natural, but it ignores the direct context of the incoming email to list other moving tasks. An AI might generate this if prompted to act like someone coordinating a move, over-providing related information.",
+        "b_analysis": "Response B is highly characteristic of genuine human texting. It is brief, entirely lowercase, lacks a period at the end, and includes a typographical error (a space before the comma). It also perfectly and naturally acknowledges the context of waiting for an email."
       },
       "is_synthetic": false
     },
     {
       "i": 48,
-      "incoming": "Ryann and I are running errands",
-      "real_seth": "I gave up\u2026 they are going to send an interior designer",
-      "ai_response": "Good for you two",
+      "incoming": "I\u2019m def a pro at that",
+      "real_seth": "I don\u2019t have any condoms though",
+      "ai_response": "bet",
       "human_was": "B",
       "judge_choice": "B",
       "judge_correct": true,
-      "confidence": 9,
+      "confidence": 8,
       "judgment": {
         "choice": "B",
-        "confidence": 9,
-        "reasoning": "Response B introduces highly specific, unrelated context, which is very common in real human text conversations where parallel topics are discussed. Response A is a generic, direct reply typical of an AI lacking outside context.",
-        "a_analysis": "Response A is a generic, slightly stiff acknowledgment of the input. It directly addresses the prompt without adding any personal context or personality, which is a common trait of AI generating a standalone reply.",
-        "b_analysis": "Response B ignores the immediate context of the sender's message to complain about a personal situation, introducing an 'interior designer.' This non-sequitur behavior, along with the casual use of an ellipsis, strongly indicates a real human continuing an ongoing, multi-threaded conversation."
+        "confidence": 8,
+        "reasoning": "Response B contains a slightly inappropriate, highly contextual joke that AI models typically avoid due to safety filters and lack of real-world unpredictability. Response A is a common slang term that an AI could easily generate if prompted to sound casual.",
+        "a_analysis": "While 'bet' is a very common and natural human response, it is also a highly predictable slang word that an AI instructed to 'text like a young person' would easily generate.",
+        "b_analysis": "This response introduces a sudden, slightly NSFW contextual joke. AI models are generally programmed to avoid generating sexually suggestive content unless explicitly prompted, making this unpredictable and edgy response highly indicative of a real human."
       },
       "is_synthetic": false
     },
     {
       "i": 49,
-      "incoming": "I only met him the once - Carmel was friendly with him but that was the AU connection",
-      "real_seth": "for real",
-      "ai_response": "Carmel has good instincts about people usually",
+      "incoming": "My wallet got stolen!!!!",
+      "real_seth": "Let me lock the card",
+      "ai_response": "damn I'm sorry",
       "human_was": "B",
-      "judge_choice": "B",
-      "judge_correct": true,
+      "judge_choice": "A",
+      "judge_correct": false,
       "confidence": 9,
       "judgment": {
-        "choice": "B",
+        "choice": "A",
         "confidence": 9,
-        "reasoning": "Response B uses a common, low-effort colloquialism typical of human texting, whereas Response A is a full, slightly stiff sentence that directly addresses the prompt's content in a way characteristic of AI generation.",
-        "a_analysis": "Response A is a complete sentence with proper capitalization. It attempts to logically build on the mention of 'Carmel' but feels slightly formal and overly complete for a casual text message, which is a common AI tell.",
-        "b_analysis": "Response B is a brief, lowercase fragment ('for real') with no punctuation. This perfectly matches human texting conventions, where quick, low-effort agreements are common."
+        "reasoning": "Response A shows a natural, brief, and emotionally appropriate reaction for a friend, using typical texting conventions like lowercase letters and no punctuation. Response B offers to lock the card, which is illogical since a friend wouldn't have access to do that, indicating an AI attempting to be overly helpful without understanding the context.",
+        "a_analysis": "This response uses casual language ('damn'), lacks terminal punctuation, and expresses straightforward empathy, which perfectly aligns with how humans text bad news to friends.",
+        "b_analysis": "This response is overly action-oriented and logically flawed. A friend cannot lock someone else's credit card. This reflects an AI's tendency to try and solve problems or be helpful without fully grasping real-world boundaries."
       },
       "is_synthetic": false
     }
-  ]
+  ],
+  "binoculars": {
+    "error": "CalledProcessError: Command '['/Users/sethford/.human/venv/bin/python', '/Users/sethford/Projects/h-uman/scripts/blind_ab/binoculars_score.py', '--pairs', '/Users/sethford/Projects/h-uman/scripts/../data/eval_blinded_ab.json', '--windows', '5', '--out', '/Users/sethford/Projects/h-uman/scripts/../data/eval_blinded_ab.json.binoculars.tmp.json', '--quiet']' returned non-zero exit status 1.",
+    "elapsed_s": 48.9
+  }
 }
