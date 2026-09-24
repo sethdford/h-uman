@@ -781,6 +781,89 @@ static void test_prompt_continuity_survives_under_pressure(void) {
     alloc.free(alloc.ctx, mem, 20000 + 64);
 }
 
+/* ── HU_IMMERSIVE_HUMANNESS: humanness block on the immersive persona path ──
+ * The daemon builds shared references / curiosity / absence directives on the
+ * streaming path, but the immersive branch returned before the non-immersive
+ * "## Humanness" append, so production never saw them. */
+static const char k_hum_marker[] = "HUMANNESS_MARKER ask how the interview went";
+
+static char *build_with_humanness(hu_allocator_t *alloc, const char *mode, const char *mem,
+                                  size_t mem_len, const char *trim_mode, size_t *out_len) {
+    static const char *reinforce[] = {"TAIL_REMINDER_MARKER never break character."};
+    hu_persona_t persona;
+    memset(&persona, 0, sizeof(persona));
+    persona.immersive_reinforcement = (char **)reinforce;
+    persona.immersive_reinforcement_count = 1;
+    hu_prompt_config_t cfg = immersive_cfg(mem, mem_len, &persona);
+    cfg.humanness_context = k_hum_marker;
+    cfg.humanness_context_len = sizeof(k_hum_marker) - 1;
+    if (mode)
+        setenv("HU_IMMERSIVE_HUMANNESS", mode, 1);
+    else
+        unsetenv("HU_IMMERSIVE_HUMANNESS");
+    if (trim_mode)
+        setenv("HU_PROMPT_TRIM", trim_mode, 1);
+    char *out = NULL;
+    *out_len = 0;
+    hu_error_t err = hu_prompt_build_system(alloc, &cfg, NULL, NULL, &out, out_len);
+    unsetenv("HU_IMMERSIVE_HUMANNESS");
+    unsetenv("HU_PROMPT_TRIM");
+    return err == HU_OK ? out : NULL;
+}
+
+static void test_prompt_immersive_humanness_absent_when_gate_unset(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    size_t n = 0;
+    char *out = build_with_humanness(&alloc, NULL, NULL, 0, NULL, &n);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_NULL(strstr(out, "HUMANNESS_MARKER"));
+    alloc.free(alloc.ctx, out, n + 1);
+}
+
+static void test_prompt_immersive_humanness_shadow_leaves_prompt_unchanged(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    size_t off_len = 0, sh_len = 0;
+    char *off = build_with_humanness(&alloc, NULL, NULL, 0, NULL, &off_len);
+    char *sh = build_with_humanness(&alloc, "shadow", NULL, 0, NULL, &sh_len);
+    HU_ASSERT_NOT_NULL(off);
+    HU_ASSERT_NOT_NULL(sh);
+    HU_ASSERT_NULL(strstr(sh, "HUMANNESS_MARKER"));
+    HU_ASSERT_EQ(sh_len, off_len);
+    alloc.free(alloc.ctx, off, off_len + 1);
+    alloc.free(alloc.ctx, sh, sh_len + 1);
+}
+
+static void test_prompt_immersive_humanness_live_lands_before_guard_tail(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    size_t n = 0;
+    char *out = build_with_humanness(&alloc, "live", NULL, 0, NULL, &n);
+    HU_ASSERT_NOT_NULL(out);
+    const char *hum = strstr(out, "HUMANNESS_MARKER");
+    const char *tail = strstr(out, "TAIL_REMINDER_MARKER");
+    HU_ASSERT_NOT_NULL(hum);
+    HU_ASSERT_NOT_NULL(tail);
+    /* Middle section, not tail: the reinforcement guard must stay last. */
+    HU_ASSERT_TRUE(hum < tail);
+    alloc.free(alloc.ctx, out, n + 1);
+}
+
+static void test_prompt_immersive_humanness_outlasts_memory_under_trim(void) {
+    /* Pre: memory alone overflows the budget. Humanness is the last trim slot,
+     * so the live trim must cut memory and keep the (small) humanness block. */
+    hu_allocator_t alloc = hu_system_allocator();
+    size_t mem_len = 0;
+    char *mem = big_memory_context(&alloc, &mem_len);
+    HU_ASSERT_TRUE(mem_len > (size_t)HU_PROMPT_TRIM_BUDGET_BYTES);
+    size_t n = 0;
+    char *out = build_with_humanness(&alloc, "live", mem, mem_len, "live", &n);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_TRUE(n <= (size_t)HU_PROMPT_TRIM_BUDGET_BYTES);
+    HU_ASSERT_NOT_NULL(strstr(out, "HUMANNESS_MARKER"));
+    HU_ASSERT_NOT_NULL(strstr(out, "TAIL_REMINDER_MARKER"));
+    alloc.free(alloc.ctx, out, n + 1);
+    alloc.free(alloc.ctx, mem, mem_len + 1);
+}
+
 void run_prompt_tests(void) {
     HU_TEST_SUITE("Prompt and memory loader");
     HU_RUN_TEST(test_prompt_build_basic);
@@ -790,6 +873,10 @@ void run_prompt_tests(void) {
     HU_RUN_TEST(test_prompt_graph_context_absent_is_noop);
     HU_RUN_TEST(test_prompt_graph_context_present_immersive);
     HU_RUN_TEST(test_prompt_immersive_trim_live_drops_middle_keeps_tail);
+    HU_RUN_TEST(test_prompt_immersive_humanness_absent_when_gate_unset);
+    HU_RUN_TEST(test_prompt_immersive_humanness_shadow_leaves_prompt_unchanged);
+    HU_RUN_TEST(test_prompt_immersive_humanness_live_lands_before_guard_tail);
+    HU_RUN_TEST(test_prompt_immersive_humanness_outlasts_memory_under_trim);
     HU_RUN_TEST(test_prompt_immersive_trim_off_preserves_positional_behavior);
     HU_RUN_TEST(test_prompt_immersive_trim_shadow_output_unchanged);
     HU_RUN_TEST(test_prompt_immersive_safety_section_live_only_and_early);
