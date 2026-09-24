@@ -23,6 +23,7 @@
  */
 
 #include "human/core/error.h"
+#include <stdbool.h>
 #include <stdint.h>
 
 /* Valid `decision` values. Storage is TEXT (for easy ad-hoc SQL from
@@ -79,6 +80,39 @@ hu_error_t hu_proactive_decisions_repo_record(sqlite3 *db, int64_t ts, const cha
  * (Part B falls back to production_outcomes/proactive_sends until this
  * table has real rows). */
 hu_error_t hu_proactive_decisions_repo_count(sqlite3 *db, int64_t *out_count);
+
+/* How many proactive sends to `contact` have FAILED TO DELIVER since that
+ * contact last actually received one (0 if it never failed, or if the most
+ * recent outcome was a delivery). The proactive circuit breaker gates on this.
+ *
+ * Counts only reason="send_failed" — a channel refused the message. Declines
+ * that mean something else (send_cap = rate limit doing its job, llm_skip =
+ * the model chose silence, quiet_hours, protective_boundary) are NOT evidence
+ * the contact is unreachable and must never trip the breaker.
+ *
+ * Exists because a failed send deliberately records no send-recency (a message
+ * nobody received must not suppress a later real one), which left a
+ * permanently-unreachable contact with no negative feedback at all: measured
+ * 2026-09-22, one RCS-only contact absorbed 124 proposals and 0 deliveries at
+ * ~10/day. This is the feedback a delivery's recency record would have given. */
+hu_error_t hu_proactive_decisions_repo_consecutive_send_failures(sqlite3 *db, const char *contact,
+                                                                 int64_t *out_n);
+
+/* Proactive send circuit breaker: true when we should STOP proposing check-ins
+ * to `contact` because delivery keeps failing.
+ *
+ * Opens at HU_PROACTIVE_SEND_CIRCUIT_THRESHOLD undelivered sends since the
+ * contact's last real delivery. Half-opens after
+ * HU_PROACTIVE_SEND_CIRCUIT_COOLDOWN_S of quiet, letting exactly one probe
+ * through — without that the circuit would wedge shut forever, since only a
+ * delivery closes it and a delivery needs an attempt. A failed probe re-opens
+ * it for another full window; a delivery closes it outright.
+ *
+ * State is derived from the decision log, not held in memory, so it survives
+ * daemon restarts — the retry storm this exists to stop would otherwise resume
+ * on every deploy. Fails CLOSED (returns false) on any read error: a breaker
+ * that cannot read its own evidence must not silence a contact. */
+bool hu_proactive_send_circuit_is_open(sqlite3 *db, const char *contact, int64_t now);
 
 #ifdef __cplusplus
 }

@@ -158,6 +158,66 @@ static void test_gate_and_send_llm_skip_records_reason_and_sends_nothing(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
+/* The circuit breaker, driven through the real gate chain rather than called
+ * directly — this is the wiring proof. The draft is a REAL message, not "SKIP",
+ * so the llm_skip short-circuit cannot be what stops it: only the breaker can.
+ * The channel vtable has .send = NULL, so if the breaker failed to fire and the
+ * chain reached the send, the contract below (no send, one send_circuit_open
+ * row) would not hold.
+ *
+ * Pins the 2026-09-22 failure: 5 undelivered sends to a contact must stop the
+ * proposer, and a delivery must let it resume. */
+static void test_gate_and_send_open_circuit_skips_and_attributes(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_EQ(hu_proactive_decisions_repo_ensure_schema(db), HU_OK);
+
+    const char *who = "+15555550177";
+    /* Five sends that never reached the contact — the shape of an unreachable
+     * address, not a policy decline. */
+    for (int i = 1; i <= 5; i++)
+        HU_ASSERT_EQ(hu_proactive_decisions_repo_record(db, 1789000000 + i, who, "proactive_send",
+                                                        HU_PROACTIVE_DECISION_DECLINE,
+                                                        "send_failed", 0, NULL),
+                     HU_OK);
+    int64_t before = decline_row_count(db);
+
+    struct hu_agent agent = {0};
+    agent.memory = &mem;
+    hu_contact_profile_t cp = {0};
+    cp.contact_id = who;
+    hu_channel_vtable_t vt = {0}; /* .send NULL — reaching it would be the bug */
+    hu_channel_t chan = {.ctx = (void *)"imessage", .vtable = &vt};
+    hu_proactive_budget_t budget = {0};
+    char response[64] = "hey, you around this weekend?";
+    size_t response_len = 29;
+
+    bool sent =
+        hu_daemon_proactive_gate_and_send(&agent, &alloc, &chan, &cp, "imessage", who, 12, response,
+                                          &response_len, 1789000010, &budget, NULL, 0, NULL);
+
+    HU_ASSERT_FALSE(sent);
+    HU_ASSERT_EQ(decline_row_count(db), before + 1);
+    HU_ASSERT_TRUE(decline_row_matches(db, who, "proactive_send", HU_PROACTIVE_DECISION_DECLINE,
+                                       "send_circuit_open", 0));
+
+    /* And it is not a permanent ban: once the contact actually receives one,
+     * the breaker closes and the next proposal is gated by policy again
+     * (governor, with a zeroed budget) rather than by the circuit. */
+    HU_ASSERT_EQ(hu_proactive_decisions_repo_record(db, 1789000020, who, "proactive_send",
+                                                    HU_PROACTIVE_DECISION_SEND, NULL, 1, NULL),
+                 HU_OK);
+    response_len = 29;
+    (void)hu_daemon_proactive_gate_and_send(&agent, &alloc, &chan, &cp, "imessage", who, 12,
+                                            response, &response_len, 1789000030, &budget, NULL, 0,
+                                            NULL);
+    HU_ASSERT_TRUE(!decline_row_matches(db, who, "proactive_send", HU_PROACTIVE_DECISION_DECLINE,
+                                        "send_circuit_open", 1789000030));
+    mem.vtable->deinit(mem.ctx);
+}
+
 /* The vtable check is the one condition in the chain that is NOT a policy
  * gate: a channel with no send entry point cannot deliver, but nothing
  * DECIDED against the proposal. Recording a decline there would teach
@@ -214,6 +274,7 @@ void run_daemon_proactive_decline_tests(void) {
     HU_RUN_TEST(test_record_decline_writes_nothing_on_null_inputs);
     HU_RUN_TEST(test_gate_and_send_llm_skip_records_reason_and_sends_nothing);
     HU_RUN_TEST(test_gate_and_send_missing_send_vtable_is_not_a_policy_drop);
+    HU_RUN_TEST(test_gate_and_send_open_circuit_skips_and_attributes);
 }
 
 #else
