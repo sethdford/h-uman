@@ -213,7 +213,7 @@ def contact_to_chat(messages):
 # ── decision-log extraction (~/.human/memory.db) ────────────────────────
 
 
-def load_decisions(memory_db, since_unix):
+def load_decisions(memory_db, since_unix, trigger=None):
     """Returns (rows, source) where rows is a list of
       {ts, contact, decision, sent, trigger}
     and source is 'proactive_decisions' or 'fallback'.
@@ -230,11 +230,23 @@ def load_decisions(memory_db, since_unix):
         "SELECT name FROM sqlite_master WHERE type='table' AND name='proactive_decisions'"
     )
     if cur.fetchone():
-        cur.execute(
-            "SELECT ts, contact, decision, sent, trigger FROM proactive_decisions "
-            "WHERE ts >= ? AND contact IS NOT NULL",
-            (since_unix,),
-        )
+        # `trigger` narrows to one decision family, e.g. 'voice_reply' (the
+        # daemon's voice-vs-text choice, logged since 2026-09-20). Those rows are
+        # single outcome rows (decision + sent), not proposal/outcome pairs, so
+        # resolve_decision_events() passes them through unresolved — exactly
+        # the treatment they need. None = every trigger (the proactive join).
+        if trigger:
+            cur.execute(
+                "SELECT ts, contact, decision, sent, trigger FROM proactive_decisions "
+                "WHERE ts >= ? AND contact IS NOT NULL AND trigger = ?",
+                (since_unix, trigger),
+            )
+        else:
+            cur.execute(
+                "SELECT ts, contact, decision, sent, trigger FROM proactive_decisions "
+                "WHERE ts >= ? AND contact IS NOT NULL",
+                (since_unix,),
+            )
         rows = [
             {"ts": ts, "contact": contact, "decision": decision, "sent": bool(sent), "trigger": trigger}
             for ts, contact, decision, sent, trigger in cur.fetchall()
@@ -564,6 +576,8 @@ def main(argv=None):
                     help="FIR exclusion window: Seth sent something in this window before "
                          "the daemon's send (default 6h)")
     ap.add_argument("--min-n", type=int, default=30, help="refuse below this denominator (default 30)")
+    ap.add_argument("--trigger", default=None,
+                    help="score one decision family only, e.g. voice_reply (default: all, the proactive join)")
     ap.add_argument("--chat-db", default=os.path.expanduser("~/Library/Messages/chat.db"))
     ap.add_argument("--memory-db", default=os.path.expanduser("~/.human/memory.db"))
     ap.add_argument("--out-dir", default=os.path.expanduser("~/.human/logs"))
@@ -594,7 +608,7 @@ def main(argv=None):
     contact_chat_map = contact_to_chat(messages)
     contact_replies = contact_inbound_ts(messages)
 
-    decisions, decisions_source = load_decisions(memory_db, since)
+    decisions, decisions_source = load_decisions(memory_db, since, args.trigger)
     events = resolve_decision_events(decisions)
     decisions_by_contact = decisions_by_contact_index(events)
 
@@ -640,6 +654,7 @@ def main(argv=None):
             "decision_window_before_hours": args.decision_window_before_hours,
             "decision_window_after_hours": args.decision_window_after_hours,
             "seth_already_engaged_hours": args.seth_already_engaged_hours,
+            "trigger": args.trigger,
         },
         "inputs": {
             "dm_messages": len(messages),
@@ -656,7 +671,8 @@ def main(argv=None):
 
     os.makedirs(args.out_dir, exist_ok=True)
     date_str = time.strftime("%Y-%m-%d", time.localtime(now))
-    out_path = os.path.join(args.out_dir, f"when-to-speak-{date_str}.json")
+    family = f"-{args.trigger}" if args.trigger else ""
+    out_path = os.path.join(args.out_dir, f"when-to-speak{family}-{date_str}.json")
     with open(out_path, "w") as f:
         json.dump(result, f, indent=2)
 
