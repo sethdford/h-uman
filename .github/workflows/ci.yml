@@ -595,6 +595,11 @@ jobs:
           fi
       - name: Run scripts/check.sh
         run: HU_SKIP_FORMAT=1 scripts/check.sh
+      - name: File-size ratchet
+        # Same gate as .githooks/pre-commit. Enforced here because the hook is
+        # bypassable and a merge commit that stages src/daemon.c past the
+        # ceiling then blocks every other branch (PR #436, 2026-09-20).
+        run: bash scripts/check-file-size-ceiling.sh
 
   benchmark:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'

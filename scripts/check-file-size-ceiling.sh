@@ -15,13 +15,12 @@ else
     ratchet_autolock() { :; }
 fi
 
-MAX_BASELINE=10518   # reconciled 2026-09-22: main's daemon.c is 10518, past the
-                     # 10512 auto-lock. GitHub squash-merges don't run this hook,
-                     # so main drifted above its own ceiling and every LOCAL commit
-                     # was blocked. Reconciled to reality; the autolock re-tightens
-                     # this as daemon.c carves land. (was 10574 before the 09-20 carve)
-                     # carve-out (context loading -> src/daemon/daemon_reactive_context.c,
-                     # prompt phases -> daemon_reactive_prompt.c; was 14058). Lower as god-files are carved.
+MAX_BASELINE=10512   # 2026-09-24 (PR #438): daemon.c carved to 10256, largest is now
+                     # src/agent/agent_turn.c at 10512. main had reconciled this to 10518
+                     # on 09-22 because squash-merges skip the hook and daemon.c drifted
+                     # past its own ceiling; ci.yml local-check now runs this gate so it
+                     # cannot drift again. (was 10574 before the 09-20 carve, 14058 before
+                     # the reactive context/prompt carves.) Lower as god-files are carved.
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 
