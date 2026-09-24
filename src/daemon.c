@@ -3169,6 +3169,12 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 char backchannel_buf[32];
                 size_t backchannel_len = 0;
 
+                /* Break the cross-contact carry before this batch arms G6:
+                 * one agent serves every contact, so the previous contact's
+                 * director ring would otherwise gate this reply
+                 * (post-mortem rowid 56355). */
+                hu_daemon_director_contact_boundary(agent, batch_key, key_len);
+
                 /* Director meta-behavior result — persists through batch scope */
                 hu_director_result_t director_result;
                 memset(&director_result, 0, sizeof(director_result));
@@ -6989,6 +6995,16 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 hu_log_info("human", agent ? agent->observer : NULL,
                             "calling agent turn for %.*s...", (int)(key_len > 20 ? 20 : key_len),
                             batch_key);
+
+                /* Inject the director's scene direction and arm G6 against a
+                 * verbatim echo. ONCE PER TURN, outside the retry loop:
+                 * convo_ctx is built once above and never rebuilt between
+                 * iterations, so arming per iteration appended a second "this
+                 * message only" block. Contract: daemon/director.h. */
+                if (llm_decides && director_result_valid)
+                    hu_daemon_director_arm_guard(alloc, agent, &director_result, &convo_ctx,
+                                                 &convo_ctx_len);
+
                 do {
                     if (response) {
                         agent->alloc->free(agent->alloc->ctx, response, response_len + 1);
@@ -7020,35 +7036,6 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             memcpy(stream_ctx.id, batch_key, ik);
                             stream_ctx.id[ik] = '\0';
                         }
-                        /* Inject director's scene direction into conversation context.
-                         * The director call was made earlier (before delays) and the
-                         * result is stored in director_result. */
-                        if (llm_decides && director_result_valid &&
-                            director_result.direction[0] != '\0') {
-                            size_t dn_len = strlen(director_result.direction);
-                            static const char dn_hdr[] =
-                                "\n--- Scene Direction (this message only) ---\n";
-                            static const char dn_tail[] = "\n";
-                            size_t new_len = convo_ctx_len + sizeof(dn_hdr) - 1 + dn_len +
-                                             sizeof(dn_tail) - 1 + 1;
-                            char *new_convo = (char *)alloc->alloc(alloc->ctx, new_len);
-                            if (new_convo) {
-                                if (convo_ctx && convo_ctx_len > 0)
-                                    memcpy(new_convo, convo_ctx, convo_ctx_len);
-                                memcpy(new_convo + convo_ctx_len, dn_hdr, sizeof(dn_hdr) - 1);
-                                memcpy(new_convo + convo_ctx_len + sizeof(dn_hdr) - 1,
-                                       director_result.direction, dn_len);
-                                memcpy(new_convo + convo_ctx_len + sizeof(dn_hdr) - 1 + dn_len,
-                                       dn_tail, sizeof(dn_tail) - 1);
-                                new_convo[new_len - 1] = '\0';
-                                alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
-                                convo_ctx = new_convo;
-                                convo_ctx_len = new_len - 1;
-                                agent->conversation_context = convo_ctx;
-                                agent->conversation_context_len = convo_ctx_len;
-                            }
-                        }
-
                         /* Sprint 46 R5.1 — inbound arrival latency ingest.
                          *
                          * Before running agent_turn for this inbound, attribute
@@ -7635,6 +7622,13 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 
                     break;
                 } while (1);
+
+                /* G6 end-of-turn: push the going-stale director into the
+                 * agent's heap-owned ring and drop the borrowed pointer into
+                 * `director_result`, which dies with this batch iteration.
+                 * MUST stay after the retry loop — every retry is
+                 * still guarded against the current director. */
+                hu_daemon_director_end_turn(agent);
 
                 /* DPO: pair rejected response from Turing retry with chosen retry result */
                 if (turing_rejected_resp && turing_rejected_len > 0 && response &&
