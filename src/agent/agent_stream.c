@@ -9,6 +9,7 @@
 #include "human/agent/graph_grounding.h"
 #include "human/agent/growth_narrative.h"
 #include "human/agent/gvr.h"
+#include "human/agent/hard_moment.h"
 #include "human/agent/humanness.h"
 #include "human/agent/input_guard.h"
 #include "human/agent/memory_loader.h"
@@ -715,6 +716,18 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
      * route; the 2026-07-11 wiring lived only in hu_agent_turn, so the gate
      * never fired in production (shadow soak: zero warmth_tone lines). */
     hu_agent_apply_relationship_tone(agent, &persona_prompt, &persona_prompt_len);
+
+    /* Hard-moment note (HU_HARD_MOMENT): distress and low-mood detection never
+     * ran on this path, so hard moments got an ordinary reply. Appended to the
+     * persona head, which prompt trimming never cuts. HU_HARD_MOMENT activation
+     * gated on the blind-A/B proxy gate plus the conversation-quality dead-end
+     * rate on hard-moment turns (scripts/eval_conversation_quality.py --split):
+     * do not flip to default-ON without a measurement showing replies to hard
+     * moments read at least as much like Seth and keep the conversation going
+     * (.claude/rules/feature-gate-requires-measurement.md). */
+    if (persona_prompt)
+        (void)hu_hard_moment_apply(agent->alloc, hu_hard_moment_mode(), msg, msg_len,
+                                   &persona_prompt, &persona_prompt_len);
 
     /* Intelligence context: learned behaviors, online learning, value learning.
      * Skip in lean_prompt mode: not needed for fast texting. */

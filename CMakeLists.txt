@@ -940,6 +940,7 @@ set(HU_CORE_SOURCES
     src/agent/activation_steering.c
     src/agent/arbitrator.c
     src/agent/salience.c
+    src/agent/hard_moment.c
     src/agent/intent.c
     src/agent/self_uncertainty.c
     src/agent/planning.c
@@ -3833,6 +3834,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_activation_steering.c
     tests/test_arbitrator.c
     tests/test_salience.c
+    tests/test_hard_moment.c
     tests/test_planning.c
     tests/test_rel_dynamics.c
     tests/test_emotional_residue.c
