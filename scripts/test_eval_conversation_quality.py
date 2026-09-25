@@ -1,0 +1,241 @@
+#!/usr/bin/env python3
+"""Tests for eval_conversation_quality.py — hermetic: synthetic chat.db and
+memory.db in a temp dir, no real messages (stdlib unittest)."""
+import datetime as dt
+import json
+import os
+import sqlite3
+import subprocess
+import sys
+import tempfile
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import eval_conversation_quality as cq  # noqa: E402
+
+T0 = dt.datetime(2026, 9, 1, 12, 0, tzinfo=dt.timezone.utc)
+MIN = 60
+HOUR = 3600
+
+
+def apple_ns(t):
+    return int((t - cq.APPLE_EPOCH).total_seconds() * 1e9)
+
+
+class Fixture:
+    """Builds chat.db (message/handle) + memory.db (messages) with the real
+    column names eval_conversation_quality.py reads."""
+
+    def __init__(self, d):
+        self.chat_path = os.path.join(d, "chat.db")
+        self.mem_path = os.path.join(d, "memory.db")
+        self.chat = sqlite3.connect(self.chat_path)
+        self.chat.executescript(
+            "create table handle(ROWID integer primary key, id text);"
+            "create table message(ROWID integer primary key, guid text, text text,"
+            " attributedBody blob, handle_id integer, is_from_me integer, date integer,"
+            " cache_roomnames text, item_type integer default 0,"
+            " associated_message_guid text, associated_message_type integer default 0);")
+        self.mem = sqlite3.connect(self.mem_path)
+        self.mem.execute("create table messages(id integer primary key autoincrement,"
+                         " session_id text, role text, content text, created_at text)")
+        self.handles = {}
+        self.n = 0
+
+    def handle(self, contact):
+        if contact not in self.handles:
+            cur = self.chat.execute("insert into handle(id) values (?)", (contact,))
+            self.handles[contact] = cur.lastrowid
+        return self.handles[contact]
+
+    def msg(self, contact, secs, text, from_me, huuman=False, room=None):
+        self.n += 1
+        guid = f"G{self.n}"
+        self.chat.execute(
+            "insert into message(guid,text,handle_id,is_from_me,date,cache_roomnames)"
+            " values (?,?,?,?,?,?)",
+            (guid, text, self.handle(contact), 1 if from_me else 0,
+             apple_ns(T0 + dt.timedelta(seconds=secs)), room))
+        if huuman:
+            self.mem.execute(
+                "insert into messages(session_id,role,content,created_at) values (?,?,?,?)",
+                (contact, "assistant", text,
+                 (T0 + dt.timedelta(seconds=secs)).strftime("%Y-%m-%d %H:%M:%S")))
+        return guid
+
+    def tapback(self, contact, secs, target_guid, kind=2000):
+        self.n += 1
+        self.chat.execute(
+            "insert into message(guid,text,handle_id,is_from_me,date,"
+            "associated_message_guid,associated_message_type) values (?,?,?,?,?,?,?)",
+            (f"G{self.n}", None, self.handle(contact), 0,
+             apple_ns(T0 + dt.timedelta(seconds=secs)), f"p:0/{target_guid}", kind))
+
+    def close(self):
+        self.chat.commit()
+        self.mem.commit()
+        self.chat.close()
+        self.mem.close()
+
+
+class TestTurnsAndOutcomes(unittest.TestCase):
+    def build(self, fill):
+        self.tmp = tempfile.TemporaryDirectory()
+        fx = Fixture(self.tmp.name)
+        fill(fx)
+        fx.close()
+        now = T0 + dt.timedelta(days=30)
+        return cq.analyze(self.tmp.name + "/chat.db", self.tmp.name + "/memory.db",
+                          since=T0 - dt.timedelta(days=1), now=now)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_consecutive_sends_form_one_turn(self):
+        def fill(fx):
+            fx.msg("+1", 0, "hey how was the trip", True)
+            fx.msg("+1", 30, "also did you see the game", True)
+            fx.msg("+1", 5 * MIN, "yes it was great", False)
+        r = self.build(fill)
+        self.assertEqual(r["turns"]["seth"], 1)
+        self.assertEqual(r["per_turn"][0]["dead_end"], False)
+
+    def test_no_reply_within_24h_is_dead_end(self):
+        def fill(fx):
+            fx.msg("+1", 0, "ok", True)
+            fx.msg("+1", 26 * HOUR, "hi again", False)  # outside 24h
+        r = self.build(fill)
+        self.assertTrue(r["per_turn"][0]["dead_end"])
+
+    def test_huuman_turn_attributed_by_memory_match(self):
+        def fill(fx):
+            fx.msg("+1", 0, "Why so down? How can I help?", True, huuman=True)
+            fx.msg("+1", 2 * MIN, "just a long week", False)
+        r = self.build(fill)
+        self.assertEqual(r["turns"]["huuman"], 1)
+        self.assertEqual(r["turns"]["seth"], 0)
+
+    def test_burst_split_reply_is_all_huuman(self):
+        # h-uman logs one reply; the egress splitter delivers it as two texts.
+        # The second part must match the logged reply too, or the whole turn
+        # falls into "ambiguous" and the h-uman arm keeps only unsplit replies.
+        def fill(fx):
+            fx.mem.execute(
+                "insert into messages(session_id,role,content,created_at) values (?,?,?,?)",
+                ("+1", "assistant", "that sounds rough. want to grab dinner tomorrow and talk it through",
+                 T0.strftime("%Y-%m-%d %H:%M:%S")))
+            fx.msg("+1", 5, "that sounds rough", True)
+            fx.msg("+1", 20, "want to grab dinner tomorrow and talk it through", True)
+            fx.msg("+1", 5 * MIN, "yes please", False)
+        r = self.build(fill)
+        self.assertEqual(r["turns"]["huuman"], 1)
+        self.assertEqual(r["turns"]["ambiguous"], 0)
+
+    def test_proactive_send_is_not_counted_as_seth(self):
+        # Proactive check-ins are h-uman sends with no `assistant` row; they
+        # must not leak into Seth's arm.
+        def fill(fx):
+            fx.mem.execute("create table if not exists proactive_sends(id integer primary key,"
+                           " channel text, contact text, message_ref text, sent_timestamp integer,"
+                           " outcome_type integer, outcome_timestamp integer, processed integer)")
+            fx.mem.execute("insert into proactive_sends(channel,contact,sent_timestamp) values (?,?,?)",
+                           ("imessage", "+1", int(T0.timestamp())))
+            fx.msg("+1", 10, "thinking of you, how did the move go", True)
+            fx.msg("+1", 5 * MIN, "so good!", False)
+        r = self.build(fill)
+        self.assertEqual(r["turns"]["seth"], 0)
+        self.assertEqual(r["turns"]["ambiguous"], 1)
+
+    def test_unmatched_send_near_huuman_activity_is_ambiguous(self):
+        # h-uman logged a reply but the delivered text differs (rewritten):
+        # it must not be counted as Seth's.
+        def fill(fx):
+            fx.mem.execute(
+                "insert into messages(session_id,role,content,created_at) values (?,?,?,?)",
+                ("+1", "assistant", "totally different logged text",
+                 T0.strftime("%Y-%m-%d %H:%M:%S")))
+            fx.msg("+1", 60, "something else was delivered", True)
+            fx.msg("+1", 5 * MIN, "reply", False)
+        r = self.build(fill)
+        self.assertEqual(r["turns"]["seth"], 0)
+        self.assertEqual(r["turns"]["huuman"], 0)
+        self.assertEqual(r["turns"]["ambiguous"], 1)
+
+    def test_turn_younger_than_24h_is_censored(self):
+        def fill(fx):
+            fx.msg("+1", 0, "hey", True)
+        self.tmp = tempfile.TemporaryDirectory()
+        fx = Fixture(self.tmp.name)
+        fill(fx)
+        fx.close()
+        r = cq.analyze(self.tmp.name + "/chat.db", self.tmp.name + "/memory.db",
+                       since=T0 - dt.timedelta(days=1), now=T0 + dt.timedelta(hours=3))
+        self.assertEqual(r["turns"]["seth"], 0)
+        self.assertEqual(r["turns"]["censored"], 1)
+
+    def test_group_chats_excluded(self):
+        def fill(fx):
+            fx.msg("+1", 0, "group hello", True, room="chat123")
+            fx.msg("+1", 60, "hi all", False, room="chat123")
+        r = self.build(fill)
+        self.assertEqual(sum(r["turns"][k] for k in ("seth", "huuman")), 0)
+
+    def test_depth_counts_speaker_changes_until_hour_gap(self):
+        def fill(fx):
+            fx.msg("+1", 0, "you around?", True)
+            fx.msg("+1", 1 * MIN, "yeah", False)
+            fx.msg("+1", 2 * MIN, "want to grab lunch", True)
+            fx.msg("+1", 3 * MIN, "sure where", False)
+            fx.msg("+1", 3 * HOUR, "late msg", True)  # after a >60m gap
+        r = self.build(fill)
+        first = r["per_turn"][0]
+        self.assertEqual(first["depth"], 3)  # them, me, them
+
+    def test_positive_tapback_counts_and_is_not_a_reply(self):
+        def fill(fx):
+            g = fx.msg("+1", 0, "made it home", True)
+            fx.tapback("+1", MIN, g, kind=2000)  # love
+        r = self.build(fill)
+        t = r["per_turn"][0]
+        self.assertTrue(t["positive_tapback"])
+        self.assertTrue(t["dead_end"])  # a tapback alone is not a reply
+
+
+class TestSummary(unittest.TestCase):
+    def test_refuses_verdict_when_arm_too_small(self):
+        rows = [{"arm": "seth", "contact": "+1", "dead_end": False}] * 50 + \
+               [{"arm": "huuman", "contact": "+1", "dead_end": True}] * 3
+        s = cq.summarize(rows, min_turns=30)
+        self.assertEqual(s["verdict"], "INSUFFICIENT")
+        self.assertIsNone(s["dead_end_rate"]["huuman"])
+
+    def test_paired_contacts_only_and_rates(self):
+        rows = ([{"arm": "seth", "contact": "+1", "dead_end": d} for d in [False] * 30 + [True] * 10]
+                + [{"arm": "huuman", "contact": "+1", "dead_end": d} for d in [False] * 20 + [True] * 20]
+                + [{"arm": "seth", "contact": "+2", "dead_end": False}] * 40)  # +2 has no h-uman turns
+        s = cq.summarize(rows, min_turns=30, min_contacts=1, seed=1)
+        self.assertEqual(s["contacts_paired"], 1)
+        self.assertAlmostEqual(s["dead_end_rate"]["seth"], 0.25)
+        self.assertAlmostEqual(s["dead_end_rate"]["huuman"], 0.5)
+        lo, hi = s["delta_ci95"]
+        self.assertLessEqual(lo, 0.25)
+        self.assertGreaterEqual(hi, 0.25)
+
+
+class TestCli(unittest.TestCase):
+    def test_insufficient_data_exits_2_and_writes_no_verdict(self):
+        with tempfile.TemporaryDirectory() as d:
+            fx = Fixture(d)
+            fx.msg("+1", 0, "hey", True)
+            fx.close()
+            out = os.path.join(d, "out.json")
+            rc = subprocess.run([sys.executable, os.path.join(HERE, "eval_conversation_quality.py"),
+                                 "--chat-db", fx.chat_path, "--memory-db", fx.mem_path,
+                                 "--since", "2026-08-01", "--out", out]).returncode
+            self.assertEqual(rc, 2)
+            self.assertFalse(os.path.exists(out))
+
+
+if __name__ == "__main__":
+    unittest.main()

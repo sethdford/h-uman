@@ -987,12 +987,16 @@ jobs:
       # convention as the sibling tests above.
       - name: Preference-corpus merge tests (hermetic, stdlib-only)
         run: python3 scripts/test_merge_seth_preference_sources.py
-      # Depth upweighting (2026-09-24): hermetic, stdlib-only; the .sh runs
-      # the real block extracted from train-glm-adapter.sh on a scratch corpus.
       # Adapter promotion gates (scale / smoke / authorship / evidence). Hermetic:
       # HOME is a temp dir and the MLX server is a local fake on 127.0.0.1:0.
       - name: Adapter promotion gate tests (hermetic, stdlib-only)
         run: python3 scripts/test_m3_promote.py
+      # Behavioral conversation-quality metric: synthetic chat.db/memory.db
+      # fixtures in a temp dir, no real messages.
+      - name: Conversation-quality metric tests (hermetic, stdlib-only)
+        run: python3 scripts/test_eval_conversation_quality.py
+      # Depth upweighting (2026-09-24): hermetic, stdlib-only; the .sh runs
+      # the real block extracted from train-glm-adapter.sh on a scratch corpus.
       - name: Training depth-upweight tests (hermetic, stdlib-only)
         run: |
           python3 scripts/test_upweight_depth_examples.py
