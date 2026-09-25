@@ -49,6 +49,29 @@ void hu_imessage_set_exclude_from(hu_channel_t *ch, const char *const *exclude, 
  */
 bool hu_imessage_handle_excluded(const char *handle, const char *const *exclude, size_t count);
 
+/** Which service an outbound send is addressed to: "auto" (default),
+ * "imessage", or "sms". Read from HU_IMESSAGE_SEND_SERVICE; any other value
+ * falls back to "auto" rather than passing through, because the result is
+ * spliced directly into the imsg argv. Never NULL, never empty.
+ *
+ * "auto" is iMessage-first with the CLI's own SMS fallback for text-only phone
+ * sends, so contacts that HAVE iMessage are unaffected. It exists because
+ * hardcoding "imessage" opted out of that fallback and silently black-holed
+ * every send to a non-iMessage contact (measured 2026-09-22: 124 proactive
+ * check-ins to one RCS/Android number, 0 delivered). Set
+ * HU_IMESSAGE_SEND_SERVICE=imessage to restore the old iMessage-only behaviour. */
+const char *hu_imessage_send_service(void);
+
+/** AppleScript `service type = <token>` for a service string from
+ * hu_imessage_send_service(). "sms" -> "SMS", everything else -> "iMessage".
+ *
+ * "auto" degrades to iMessage deliberately: one `send` statement names exactly
+ * one service, and an iMessage send to a non-iMessage buddy is accepted and
+ * then never delivered rather than raising a catchable error, so there is no
+ * honest single-script fallback. Reaching a non-iMessage contact therefore
+ * depends on the imsg CLI path. NULL/unknown -> "iMessage". */
+const char *hu_imessage_applescript_service_type(const char *service);
+
 /** Returns true if default target (phone/email) is configured. */
 bool hu_imessage_is_configured(hu_channel_t *ch);
 

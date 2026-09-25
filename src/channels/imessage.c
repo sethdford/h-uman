@@ -2113,6 +2113,30 @@ size_t hu_imessage_build_inline_reply_hint_for_batch(hu_allocator_t *alloc,
     return hu_conversation_build_inline_reply_hint(orig_text, orig_len, out_buf, out_cap);
 }
 
+/* See include/human/channels/imessage.h. Whitelist, not passthrough: this value
+ * becomes an argv element. */
+const char *hu_imessage_send_service(void) {
+    const char *v = getenv("HU_IMESSAGE_SEND_SERVICE");
+    if (v) {
+        if (strcmp(v, "imessage") == 0)
+            return "imessage";
+        if (strcmp(v, "sms") == 0)
+            return "sms";
+        if (strcmp(v, "auto") == 0)
+            return "auto";
+        /* Unrecognised — fall through to the default rather than hand the CLI
+         * an unvalidated string. */
+    }
+    return "auto";
+}
+
+/* See header. Whitelist: the result is interpolated into a script we execute. */
+const char *hu_imessage_applescript_service_type(const char *service) {
+    if (service && strcmp(service, "sms") == 0)
+        return "SMS";
+    return "iMessage";
+}
+
 static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len,
                                 const char *message, size_t message_len, const char *const *media,
                                 size_t media_count) {
@@ -2350,8 +2374,12 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
                 size_t tb = tgt_len < sizeof(tgt_buf) - 1 ? tgt_len : sizeof(tgt_buf) - 1;
                 memcpy(tgt_buf, tgt, tb);
                 tgt_buf[tb] = '\0';
-                const char *imsg_argv[] = {"imsg",  "send",      "--to",     tgt_buf, "--text",
-                                           message, "--service", "imessage", NULL};
+                /* "auto" lets the CLI fall back to SMS for a contact with no
+                 * iMessage account; hardcoding "imessage" here is what
+                 * black-holed 124 sends to one RCS number. */
+                const char *imsg_service = hu_imessage_send_service();
+                const char *imsg_argv[] = {"imsg",  "send",      "--to",       tgt_buf, "--text",
+                                           message, "--service", imsg_service, NULL};
                 hu_run_result_t imsg_result = {0};
                 hu_error_t imsg_err =
                     hu_process_run_with_timeout(c->alloc, imsg_argv, NULL, 65536, 15, &imsg_result);
@@ -2388,7 +2416,8 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
         escape_for_applescript(tgt_esc, tgt_esc_cap, tgt, tgt_len);
 
         /* Target the iMessage service explicitly for reliability on modern macOS */
-        size_t script_cap = 256 + strlen(msg_esc) + strlen(tgt_esc);
+        size_t script_cap =
+            256 + strlen(msg_esc) + strlen(tgt_esc); /* 256 covers the service token */
         char *script = (char *)c->alloc->alloc(c->alloc->ctx, script_cap);
         if (!script) {
             c->alloc->free(c->alloc->ctx, msg_esc, msg_esc_cap);
@@ -2396,13 +2425,14 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
             send_err = HU_ERR_OUT_OF_MEMORY;
             goto imsg_cleanup;
         }
+        const char *as_service = hu_imessage_applescript_service_type(hu_imessage_send_service());
         int n = snprintf(script, script_cap,
                          "tell application \"Messages\"\n"
-                         "  set targetService to 1st service whose service type = iMessage\n"
+                         "  set targetService to 1st service whose service type = %s\n"
                          "  set targetBuddy to buddy \"%s\" of targetService\n"
                          "  send \"%s\" to targetBuddy\n"
                          "end tell",
-                         tgt_esc, msg_esc);
+                         as_service, tgt_esc, msg_esc);
 
         c->alloc->free(c->alloc->ctx, msg_esc, msg_esc_cap);
         c->alloc->free(c->alloc->ctx, tgt_esc, tgt_esc_cap);

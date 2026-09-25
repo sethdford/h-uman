@@ -3992,6 +3992,7 @@ list(APPEND HU_TEST_SOURCES tests/test_reaction_event.c)
 # (compile-time define) + HU_CHATDB env var (runtime path to a real chat.db).
 list(APPEND HU_TEST_SOURCES tests/test_imessage_reactions.c)
 list(APPEND HU_TEST_SOURCES tests/test_imessage_caps.c)
+list(APPEND HU_TEST_SOURCES tests/test_imessage_send_service.c)
 list(APPEND HU_TEST_SOURCES tests/test_imessage_bb_event.c)
 # Phase 1a of docs/plans/2026-05-18-imessage-sota.md: pure-synthesis tests
 # for src/channels/imessage_ingest.c. No chat.db / Apple deps; tests run

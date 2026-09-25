@@ -470,6 +470,7 @@ void run_contact_optout_repo_tests(void);
 void run_daemon_outbound_bus_tests(void);
 void run_repo_util_sqlite_tests(void);
 void run_proactive_send_circuit_tests(void);
+void run_imessage_send_service_tests(void);
 void run_social_graph_repo_tests(void);
 void run_self_awareness_repo_tests(void);
 void run_feed_items_repo_tests(void);
@@ -1566,6 +1567,7 @@ int main(int argc, char **argv) {
     run_daemon_outbound_bus_tests();
     run_repo_util_sqlite_tests();
     run_proactive_send_circuit_tests();
+    run_imessage_send_service_tests();
     run_social_graph_repo_tests();
     run_self_awareness_repo_tests();
     run_feed_items_repo_tests();
