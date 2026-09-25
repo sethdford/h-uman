@@ -21,6 +21,14 @@ delivered send once attributedBody is decoded):
   * Otherwise AMBIGUOUS (h-uman was active but the delivered text differs --
     split, restyled, or a guard rewrite). Dropped and counted, never guessed:
     guessing would leak h-uman replies into Seth's arm.
+EXACT attribution supersedes that heuristic from the first memory.db
+`outbound_sends` row onward (daemon send provenance, one row per delivered
+iMessage): a record claims the first is_from_me row for its contact with
+ROWID above its pre-send boundary, within 5 min, whose text matches; every
+unclaimed send after that point is Seth's. Records that never resolve are
+counted (`exact_unmatched_records`) -- a rising count means provenance and
+chat.db have drifted. Sends from outside the daemon (e.g. another tool
+texting as Seth) would still count as Seth's.
 Consecutive sends (gaps <= 60 min, no contact message between) form one TURN;
 a turn is h-uman or Seth only if every send in it agrees. Turns younger than
 24 h are CENSORED (not yet had the chance to get a reply). Group chats are
@@ -117,21 +125,80 @@ def _load_assistant(mem_path, since):
 def _load_messages(chat_path, since):
     con = sqlite3.connect(f"file:{chat_path}?mode=ro", uri=True)
     per_contact = {}
-    for (guid, text, body, contact, from_me, date, room, assoc, atype) in con.execute(
-            "select m.guid, m.text, m.attributedBody, h.id, m.is_from_me, m.date, "
+    for (rowid, guid, text, body, contact, from_me, date, room, assoc, atype) in con.execute(
+            "select m.ROWID, m.guid, m.text, m.attributedBody, h.id, m.is_from_me, m.date, "
             "m.cache_roomnames, m.associated_message_guid, m.associated_message_type "
             "from message m join handle h on m.handle_id = h.ROWID "
             "where m.date >= ? and (m.cache_roomnames is null or m.cache_roomnames = '') "
             "order by m.date", (_to_ns(since),)):
         per_contact.setdefault(contact, []).append({
-            "guid": guid, "from_me": bool(from_me), "t": _from_ns(date),
+            "rowid": rowid, "guid": guid, "from_me": bool(from_me), "t": _from_ns(date),
             "text": msg_text(text, body) or "", "assoc": assoc, "atype": atype or 0,
         })
     con.close()
     return per_contact
 
 
-def _label_send(msg, assistant_rows):
+# Exact provenance: memory.db outbound_sends, written by the daemon for every
+# DELIVERED iMessage (src/daemon/daemon_send_provenance.c). A record resolves
+# to the first unclaimed is_from_me row for its contact with ROWID above the
+# pre-send boundary, within this window of the record time, whose text matches.
+EXACT_WINDOW_S = 5 * 60
+
+
+def _load_outbound(mem_path, since):
+    """Per-contact outbound_sends records (sorted by time) and the time of the
+    first record ever — provenance is complete only from then on. (None, None)
+    for a memory.db that predates the table."""
+    con = sqlite3.connect(f"file:{mem_path}?mode=ro", uri=True)
+    try:
+        first = con.execute("select min(sent_at_ms) from outbound_sends").fetchone()[0]
+        rows = con.execute(
+            "select contact, sent_at_ms, prior_max_rowid, text from outbound_sends "
+            "where sent_at_ms >= ? order by sent_at_ms, id", (int(since.timestamp() * 1000),)
+        ).fetchall()
+    except sqlite3.OperationalError:
+        con.close()
+        return None, None
+    con.close()
+    if first is None:
+        return {}, None
+    out = {}
+    for contact, ms, prior, text in rows:
+        out.setdefault(contact, []).append(
+            (dt.datetime.fromtimestamp(ms / 1000, dt.timezone.utc), prior, _norm(text)))
+    return out, dt.datetime.fromtimestamp(first / 1000, dt.timezone.utc)
+
+
+def _resolve_exact(timeline, records):
+    """Claim chat.db rows for outbound records. Returns (claimed guids,
+    number of records that found no delivered row)."""
+    claimed, unmatched = set(), 0
+    sends = [m for m in timeline if m["from_me"]]
+    for t, prior, text in records:
+        hit = None
+        for m in sends:
+            if m["guid"] in claimed or (prior is not None and prior >= 0 and m["rowid"] <= prior):
+                continue
+            if abs((m["t"] - t).total_seconds()) > EXACT_WINDOW_S:
+                continue
+            if not text or _texts_match(text, _norm(m["text"])):
+                hit = m
+                break
+        if hit:
+            claimed.add(hit["guid"])
+        else:
+            unmatched += 1
+    return claimed, unmatched
+
+
+def _label_send(msg, assistant_rows, exact_guids=frozenset(), exact_from=None):
+    if msg["guid"] in exact_guids:
+        return "huuman"
+    if exact_from is not None and msg["t"] >= exact_from:
+        # Provenance is complete from its first record on: every delivered
+        # h-uman send has a row, so an unclaimed send is Seth's.
+        return "seth"
     near = [n for (t, n) in assistant_rows
             if abs((t - msg["t"]).total_seconds()) <= MATCH_WINDOW_S]
     if not near:
@@ -144,11 +211,20 @@ def analyze(chat_path, mem_path, since, now):
     """Per-turn outcomes for every 1:1 contact. Returns counts + per_turn rows
     (no message text)."""
     assistant = _load_assistant(mem_path, since)
+    outbound, exact_from = _load_outbound(mem_path, since)
+    outbound = outbound or {}
     counts = {"seth": 0, "huuman": 0, "ambiguous": 0, "censored": 0}
     per_turn = []
-    for contact, msgs in _load_messages(chat_path, since).items():
+    messages = _load_messages(chat_path, since)
+    exact_matched = 0
+    # Records for contacts with no chat.db rows in the window never resolve.
+    exact_unmatched = sum(len(v) for c, v in outbound.items() if c not in messages)
+    for contact, msgs in messages.items():
         reactions = [m for m in msgs if m["atype"] in REACTION_RANGE]
         timeline = [m for m in msgs if m["atype"] not in REACTION_RANGE]
+        exact_guids, unmatched = _resolve_exact(timeline, outbound.get(contact, []))
+        exact_matched += len(exact_guids)
+        exact_unmatched += unmatched
         positive_targets = {_target_guid(r["assoc"]) for r in reactions
                             if not r["from_me"] and r["atype"] in POSITIVE_TAPBACKS}
         i = 0
@@ -167,7 +243,8 @@ def analyze(chat_path, mem_path, since, now):
             if (now - end).total_seconds() < REPLY_WINDOW_S:
                 counts["censored"] += 1
                 continue
-            labels = {_label_send(m, assistant.get(contact, [])) for m in turn}
+            labels = {_label_send(m, assistant.get(contact, []), exact_guids, exact_from)
+                      for m in turn}
             arm = labels.pop() if len(labels) == 1 else "ambiguous"
             counts[arm] += 1
 
@@ -192,7 +269,10 @@ def analyze(chat_path, mem_path, since, now):
                 "positive_tapback": any(m["guid"] in positive_targets for m in turn),
             })
     per_turn.sort(key=lambda r: r["end"])
-    return {"turns": counts, "per_turn": per_turn}
+    return {"turns": counts, "per_turn": per_turn,
+            "attribution": {"exact_from": exact_from.isoformat() if exact_from else None,
+                            "exact_matched": exact_matched,
+                            "exact_unmatched_records": exact_unmatched}}
 
 
 def _rate(rows):
@@ -283,6 +363,9 @@ def main(argv=None):
 
     head = summary["all"]
     print(f"turns: {res['turns']}  paired contacts: {head['contacts_paired']}")
+    att = res["attribution"]
+    print(f"attribution: exact from {att['exact_from'] or '(no outbound_sends yet)'}; "
+          f"{att['exact_matched']} sends resolved, {att['exact_unmatched_records']} records unresolved")
     if head["verdict"] != "MEASURED":
         print(f"INSUFFICIENT: {head['reason']} -- no verdict written", file=sys.stderr)
         return 2
@@ -296,7 +379,10 @@ def main(argv=None):
             "generated_at": now.isoformat(),
             "provenance": {"source": "chat.db (delivered) + memory.db (assistant rows)",
                            "rater": "behavioral: contacts' replies, not a judge",
-                           "attribution": "text match within +/-15 min; ambiguous dropped",
+                           "attribution": ("exact via memory.db outbound_sends from exact_from "
+                                           "on; before that, text match within +/-15 min with "
+                                           "ambiguous dropped"),
+                           "exact": res["attribution"],
                            "since": since.isoformat(), "split": a.split},
             "turn_counts": res["turns"], "summary": summary,
         }, f, indent=2)
