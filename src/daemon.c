@@ -83,6 +83,7 @@
 #include "human/daemon/reactive_gates.h"
 #include "human/daemon/reactive_turn.h"
 #include "human/daemon/send_budget.h"
+#include "human/daemon/send_provenance.h"
 #include "human/daemon/voice_facade.h"
 
 /* Channel helpers */
@@ -1942,6 +1943,13 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
          * reflection patterns that shaped the thumbed-down turn. Cleared
          * with the personal-model teardown below. */
         hu_reaction_handler_set_reflection_db(crosstalk_db);
+        /* Send provenance: record every delivered iMessage into
+         * outbound_sends so offline measurement can tell h-uman's chat.db
+         * rows from Seth's own. Logging only; uninstalled with the crosstalk
+         * teardown below, before the SQLite memory closes. */
+        if (crosstalk_db && hu_daemon_send_provenance_install(crosstalk_db) != HU_OK)
+            hu_log_warn("human", agent->observer,
+                        "send provenance: install failed; outbound_sends will not be recorded");
     }
 #endif
 
@@ -10217,6 +10225,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
      * before the SQLite memory closes so a late reaction never touches
      * a freed handle. */
     hu_reaction_handler_set_reflection_db(NULL);
+    /* Send-provenance teardown: same reason — no send may reach a freed db. */
+    hu_daemon_send_provenance_uninstall();
 #endif
     hu_daemon_identity_graph_teardown();
     if (agent && agent->w14_scheduler) {
