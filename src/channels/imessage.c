@@ -932,8 +932,11 @@ int64_t hu_imessage_test_get_last_success_epoch(const hu_channel_t *ch) {
 
 /* Send provenance: report one delivered send to the observer (no-op when
  * none is registered). Called only after the channel confirmed delivery —
- * from both the production send tiers and the HU_IS_TEST branch, so it sits
- * outside the platform gate below. */
+ * from the HU_IS_TEST branch of imessage_send and from its Apple send tiers.
+ * The guard mirrors exactly those two branches: on non-Apple production
+ * builds imessage_send is a NOT_SUPPORTED stub, and an unused static fails
+ * -Werror=unused-function (caught by the no-skills Linux CI variant). */
+#if HU_IS_TEST || (defined(__APPLE__) && defined(__MACH__))
 static void imessage_report_sent(const char *tgt, size_t tgt_len, const char *text, size_t text_len,
                                  const char *kind, int64_t prior_max_rowid) {
     hu_imessage_sent_event_t ev = {.handle = tgt,
@@ -944,6 +947,7 @@ static void imessage_report_sent(const char *tgt, size_t tgt_len, const char *te
                                    .prior_max_rowid = prior_max_rowid};
     hu_imessage_send_observer_notify(&ev);
 }
+#endif
 
 #if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
 
