@@ -987,6 +987,12 @@ jobs:
       # convention as the sibling tests above.
       - name: Preference-corpus merge tests (hermetic, stdlib-only)
         run: python3 scripts/test_merge_seth_preference_sources.py
+      # Depth upweighting (2026-09-24): hermetic, stdlib-only; the .sh runs
+      # the real block extracted from train-glm-adapter.sh on a scratch corpus.
+      - name: Training depth-upweight tests (hermetic, stdlib-only)
+        run: |
+          python3 scripts/test_upweight_depth_examples.py
+          bash scripts/test_train_upweight_block.sh
       # Measurement-integrity pins for the fidelity nightly. Both are hermetic
       # and stdlib-only (no mlx, no model, no ~/.human reads), so they belong on
       # this job rather than a GPU host. They guard the class where the harness

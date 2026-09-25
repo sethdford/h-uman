@@ -51,6 +51,14 @@ REBALANCE_CASING="${HU_TRAIN_REBALANCE_CASING:-0}"
 # 7.3% in the v6 corpus; the served adapter emitted 0 emoji in 68/68 replies).
 # Only takes effect when the rebalance pass runs (HU_TRAIN_REBALANCE_CASING=1).
 MATCH_EMOJI="${HU_TRAIN_MATCH_EMOJI:-1}"
+# HU_TRAIN_UPWEIGHT_DEPTH=1 (default): train on up to 3 copies of Seth's depth
+# replies -- long, asking something back, or answering an emotional message --
+# via scripts/upweight_depth_examples.py. At weight 1 they are ~27% of the
+# corpus and get averaged into his 27-char median, which reads as flat,
+# dead-end replies (2026-09-24). Runs on the staged train.jsonl AFTER the
+# rebalance so no dedup can collapse the copies; valid.jsonl is untouched.
+# Candidates still go through m3_promote.py's gate before serving. =0 disables.
+UPWEIGHT_DEPTH="${HU_TRAIN_UPWEIGHT_DEPTH:-1}"
 
 # Defaults are the v6 run; v6.1 and later pass --config/--beta/--tag rather than
 # forking this script, so every run keeps the same guards.
@@ -278,6 +286,28 @@ if [ "$REBALANCE_CASING" = "1" ]; then
   sed "s|^data:.*|data: $REBAL_DIR|" "$CONFIG" > "$REBAL_DIR/config.yaml"
   CONFIG="$REBAL_DIR/config.yaml"
   say "casing rebalance done -- training from $CONFIG (stats: $REBAL_DIR/train.rebalance_stats.json)"
+fi
+
+# --- depth upweighting (HU_TRAIN_UPWEIGHT_DEPTH=1, default) ---------------------
+# Reads whatever corpus $CONFIG now points at (the rebalanced copy if that ran)
+# and stages a weighted copy; never mutates the source dir.
+if [ "$UPWEIGHT_DEPTH" = "1" ]; then
+  SRC_DIR=$(awk '/^data:/{print $2; exit}' "$CONFIG" 2>/dev/null)
+  [ -n "$SRC_DIR" ] && [ -f "$SRC_DIR/train.jsonl" ] || die "depth upweight: no train.jsonl under data dir '$SRC_DIR' from $CONFIG"
+  DEPTH_DIR="${SRC_DIR}-depth-${STAMP}"
+  say "HU_TRAIN_UPWEIGHT_DEPTH=1 -- upweighting $SRC_DIR/train.jsonl -> $DEPTH_DIR"
+  mkdir -p "$DEPTH_DIR"
+  "$TRAIN_PY" "$(dirname "$0")/upweight_depth_examples.py" \
+      --input "$SRC_DIR/train.jsonl" \
+      --output "$DEPTH_DIR/train.jsonl" \
+      --sidecar "$DEPTH_DIR/train.upweight_stats.json" \
+      2>&1 | tee -a "$LOG"
+  UPW_RC=${PIPESTATUS[0]}
+  [ "$UPW_RC" -eq 0 ] || die "depth upweight failed (rc=$UPW_RC, see $LOG) -- refusing to train on a requested-but-failed upweight"
+  cp "$SRC_DIR/valid.jsonl" "$DEPTH_DIR/valid.jsonl"
+  sed "s|^data:.*|data: $DEPTH_DIR|" "$CONFIG" > "$DEPTH_DIR/config.yaml"
+  CONFIG="$DEPTH_DIR/config.yaml"
+  say "depth upweight done -- training from $CONFIG (stats: $DEPTH_DIR/train.upweight_stats.json)"
 fi
 
 # SimPO's reward is a per-token log-prob (|r_c - r_r| ~ 0.1-1 nat), so its beta
