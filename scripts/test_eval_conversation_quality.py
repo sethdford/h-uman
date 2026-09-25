@@ -49,6 +49,20 @@ class Fixture:
             self.handles[contact] = cur.lastrowid
         return self.handles[contact]
 
+    def outbound(self, contact, secs, text, prior, kind="text"):
+        """A daemon send-provenance row (src/daemon/daemon_send_provenance.c)."""
+        self.mem.execute("create table if not exists outbound_sends(id integer primary key,"
+                         " sent_at_ms integer, channel text, contact text, kind text, text text,"
+                         " prior_max_rowid integer)")
+        self.mem.execute(
+            "insert into outbound_sends(sent_at_ms,channel,contact,kind,text,prior_max_rowid)"
+            " values (?,?,?,?,?,?)",
+            (int((T0 + dt.timedelta(seconds=secs)).timestamp() * 1000), "imessage", contact, kind,
+             text, prior))
+
+    def max_rowid(self):
+        return self.chat.execute("select coalesce(max(ROWID),0) from message").fetchone()[0]
+
     def msg(self, contact, secs, text, from_me, huuman=False, room=None):
         self.n += 1
         guid = f"G{self.n}"
@@ -200,6 +214,81 @@ class TestTurnsAndOutcomes(unittest.TestCase):
         t = r["per_turn"][0]
         self.assertTrue(t["positive_tapback"])
         self.assertTrue(t["dead_end"])  # a tapback alone is not a reply
+
+
+class TestExactProvenance(unittest.TestCase):
+    """outbound_sends rows (daemon send provenance) make attribution exact from
+    the first recorded send onward; earlier periods keep the text heuristic."""
+
+    def run_fixture(self, fill):
+        self.tmp = tempfile.TemporaryDirectory()
+        fx = Fixture(self.tmp.name)
+        fill(fx)
+        fx.close()
+        return cq.analyze(self.tmp.name + "/chat.db", self.tmp.name + "/memory.db",
+                          since=T0 - dt.timedelta(days=1), now=T0 + dt.timedelta(days=30))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_rewritten_huuman_send_is_huuman_with_provenance(self):
+        # memory.db logged different text (would be ambiguous by heuristic),
+        # but outbound_sends recorded exactly what was delivered.
+        def fill(fx):
+            fx.mem.execute(
+                "insert into messages(session_id,role,content,created_at) values (?,?,?,?)",
+                ("+1", "assistant", "pre-egress draft text", T0.strftime("%Y-%m-%d %H:%M:%S")))
+            prior = fx.max_rowid()
+            fx.outbound("+1", 5, "what was actually delivered", prior)
+            fx.msg("+1", 5, "what was actually delivered", True)
+            fx.msg("+1", 3 * MIN, "nice", False)
+        r = self.run_fixture(fill)
+        self.assertEqual(r["turns"]["huuman"], 1)
+        self.assertEqual(r["turns"]["ambiguous"], 0)
+        self.assertEqual(r["attribution"]["exact_matched"], 1)
+
+    def test_seth_send_after_provenance_start_is_seth_not_ambiguous(self):
+        def fill(fx):
+            fx.mem.execute(
+                "insert into messages(session_id,role,content,created_at) values (?,?,?,?)",
+                ("+1", "assistant", "hey how was the interview", T0.strftime("%Y-%m-%d %H:%M:%S")))
+            prior = fx.max_rowid()
+            fx.outbound("+1", 0, "hey how was the interview", prior)
+            fx.msg("+1", 0, "hey how was the interview", True)
+            fx.msg("+1", 2 * MIN, "it went great", False)
+            fx.msg("+1", 5 * MIN, "so proud of you", True)  # Seth, typed by hand
+            fx.msg("+1", 8 * MIN, "thanks!!", False)
+        r = self.run_fixture(fill)
+        self.assertEqual(r["turns"]["huuman"], 1)
+        self.assertEqual(r["turns"]["seth"], 1)
+        self.assertEqual(r["turns"]["ambiguous"], 0)
+
+    def test_send_before_provenance_start_uses_text_heuristic(self):
+        def fill(fx):
+            # Day 0: no outbound_sends yet -> heuristic; rewritten reply is ambiguous.
+            fx.mem.execute(
+                "insert into messages(session_id,role,content,created_at) values (?,?,?,?)",
+                ("+1", "assistant", "draft that differs", T0.strftime("%Y-%m-%d %H:%M:%S")))
+            fx.msg("+1", 60, "delivered text", True)
+            fx.msg("+1", 5 * MIN, "ok", False)
+            # Day 3: provenance begins.
+            prior = fx.max_rowid()
+            fx.outbound("+1", 3 * 86400, "later exact send", prior)
+            fx.msg("+1", 3 * 86400, "later exact send", True)
+            fx.msg("+1", 3 * 86400 + 60, "cool", False)
+        r = self.run_fixture(fill)
+        self.assertEqual(r["turns"]["ambiguous"], 1)
+        self.assertEqual(r["turns"]["huuman"], 1)
+        self.assertIsNotNone(r["attribution"]["exact_from"])
+
+    def test_record_without_delivered_row_is_counted_unmatched(self):
+        def fill(fx):
+            fx.outbound("+1", 0, "never landed in chat.db", fx.max_rowid())
+            fx.msg("+1", 10 * MIN, "unrelated thing seth typed", True)
+            fx.msg("+1", 12 * MIN, "k", False)
+        r = self.run_fixture(fill)
+        self.assertEqual(r["attribution"]["exact_unmatched_records"], 1)
+        self.assertEqual(r["turns"]["seth"], 1)
 
 
 class TestSummary(unittest.TestCase):
