@@ -27,7 +27,11 @@ files (`imessage`, `imessage_reply`, `imessage_ingest`, `imessage_action`,
 
 Exempt from the count: a file including its own header, and the shared infra
 headers `format`, `dispatch`, `contact_signature`, `channel_embed`,
-`behavior_class`, `reaction_event`, `meta_common`.
+`behavior_class`, `reaction_event`, `meta_common`, `channel_mock`, plus the
+iMessage-family shared headers `imessage_caps`, `imessage_schema`,
+`imessage_bb_event`, `imessage_send_observer` (small leaf headers that several
+imessage*.c files share instead of reaching into `imessage.h`). The script's
+`case` list is the source of truth; keep this sentence in step with it.
 
 ## Enforcement
 
