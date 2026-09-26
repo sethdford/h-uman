@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { TEXT_ROLES } from "../../design-tokens/contrast-lib.ts";
 
 const TOKENS_CSS = readFileSync(
   fileURLToPath(new URL("../src/styles/_tokens.css", import.meta.url)),
@@ -116,6 +117,32 @@ test.describe("Quiet Room cascade", () => {
     expect(await prop(page, "html", "--hu-accent")).toBe(norm(QUIET.light.accent.$value));
     expect(await prop(page, "html", "--hu-link")).toBe(norm(QUIET.light.link.$value));
   });
+
+  // The base P3 block sets --hu-error (and friends) on :root. When the explicit
+  // data-theme disagrees with the OS scheme it overrides the theme's inherited
+  // value, so any semantic color the quiet layer does not own leaks a P3 value
+  // that was never measured against paper. Every quiet override must win, and
+  // no text role may resolve to a P3 value at all.
+  for (const [mode, scheme] of [
+    ["light", "dark"],
+    ["dark", "light"],
+  ] as const) {
+    test(`P3, data-theme=${mode} on OS ${scheme}: every quiet ${mode} color wins, no text role is P3`, async ({
+      page,
+    }) => {
+      await load(page, `data-brand="quiet" data-theme="${mode}"`, "", { scheme, p3: true });
+      const colors = Object.entries(QUIET[mode] as Record<string, { $value: string; $type?: string }>).filter(
+        ([, t]) => t.$type === "color",
+      );
+      expect(colors.length, "precondition: the quiet layer overrides colors in this mode").toBeGreaterThan(0);
+      for (const [name, t] of colors) {
+        expect(await prop(page, "html", `--hu-${name}`), `--hu-${name}`).toBe(norm(t.$value));
+      }
+      for (const role of TEXT_ROLES) {
+        expect(await prop(page, "html", `--hu-${role}`), `--hu-${role}`).not.toMatch(/^color\(display-p3/);
+      }
+    });
+  }
 
   test("prefers-contrast: more wins over quiet colors; quiet type still applies", async ({ page }) => {
     const hcBlock = TOKENS_CSS.match(/@media \(prefers-contrast: more\)\s*\{\s*:root\s*\{([^}]*)\}/);

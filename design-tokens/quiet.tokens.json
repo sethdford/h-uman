@@ -39,6 +39,7 @@
       "accent-brand": { "$value": "oklch(71.5% 0.155 131)", "$type": "color", "$description": "Decorative only in light mode (2.25:1 on paper)" },
       "success": { "$value": "oklch(50% 0.130 150)", "$type": "color" },
       "warning": { "$value": "oklch(53% 0.105 65)", "$type": "color" },
+      "error": { "$value": "#cc0000", "$type": "color" },
       "info": { "$value": "oklch(50% 0.160 258)", "$type": "color" }
     },
     "dark": {
@@ -62,6 +63,7 @@
       "accent-brand": { "$value": "oklch(80% 0.170 135)", "$type": "color" },
       "success": { "$value": "#10b981", "$type": "color" },
       "warning": { "$value": "#eab308", "$type": "color" },
+      "error": { "$value": "#f97066", "$type": "color" },
       "info": { "$value": "#3b82f6", "$type": "color" }
     }
   }

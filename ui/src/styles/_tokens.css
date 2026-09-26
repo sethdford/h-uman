@@ -1101,6 +1101,7 @@
     --hu-bg-inset: oklch(94.5% 0.012 95);
     --hu-bg-surface: oklch(99.5% 0.004 95);
     --hu-border: oklch(89% 0.012 95);
+    --hu-error: #cc0000;
     --hu-focus-ring: oklch(58% 0.14 135);
     --hu-info: oklch(50% 0.16 258);
     --hu-link: oklch(50% 0.13 135);
@@ -1128,6 +1129,7 @@
       --hu-bg-inset: oklch(20.5% 0.014 150);
       --hu-bg-surface: oklch(22.5% 0.014 150);
       --hu-border: oklch(32% 0.016 150);
+      --hu-error: #f97066;
       --hu-focus-ring: oklch(80% 0.17 135);
       --hu-info: #3b82f6;
       --hu-link: oklch(82% 0.16 135);
@@ -1152,6 +1154,7 @@
     --hu-bg-inset: oklch(20.5% 0.014 150);
     --hu-bg-surface: oklch(22.5% 0.014 150);
     --hu-border: oklch(32% 0.016 150);
+    --hu-error: #f97066;
     --hu-focus-ring: oklch(80% 0.17 135);
     --hu-info: #3b82f6;
     --hu-link: oklch(82% 0.16 135);
@@ -1175,6 +1178,7 @@
     --hu-bg-inset: oklch(94.5% 0.012 95);
     --hu-bg-surface: oklch(99.5% 0.004 95);
     --hu-border: oklch(89% 0.012 95);
+    --hu-error: #cc0000;
     --hu-focus-ring: oklch(58% 0.14 135);
     --hu-info: oklch(50% 0.16 258);
     --hu-link: oklch(50% 0.13 135);
@@ -1198,6 +1202,7 @@
     --hu-bg-inset: oklch(20.5% 0.014 150);
     --hu-bg-surface: oklch(22.5% 0.014 150);
     --hu-border: oklch(32% 0.016 150);
+    --hu-error: #f97066;
     --hu-focus-ring: oklch(80% 0.17 135);
     --hu-info: #3b82f6;
     --hu-link: oklch(82% 0.16 135);
@@ -1221,6 +1226,7 @@
     --hu-bg-inset: oklch(94.5% 0.012 95);
     --hu-bg-surface: oklch(99.5% 0.004 95);
     --hu-border: oklch(89% 0.012 95);
+    --hu-error: #cc0000;
     --hu-focus-ring: oklch(58% 0.14 135);
     --hu-info: oklch(50% 0.16 258);
     --hu-link: oklch(50% 0.13 135);
