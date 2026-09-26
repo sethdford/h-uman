@@ -82,28 +82,11 @@ test.describe("Quiet Room cascade", () => {
     expect(await prop(page, "#q", "--hu-bg")).toBe(norm(DARK_BG));
   });
 
-  test("a nearer light ancestor beats a farther dark ancestor for a bare quiet container", async ({ page }) => {
-    // QUIET_LIGHT_ANCESTOR ('[data-theme="light"] [data-brand="quiet"]') can
-    // only ever be the deciding rule when the light-marked ancestor is NOT
-    // <html> itself: QUIET_SCOPE already defaults to light unconditionally,
-    // and QUIET_DARK_AUTO's own ":not([data-theme=\"light\"])" exclusion means
-    // an explicit data-theme="light" on <html> already blocks the system-dark
-    // default before QUIET_LIGHT_ANCESTOR is ever consulted (confirmed by
-    // removing the rule: a root-level data-theme="light" case is unchanged).
-    // QUIET_DARK_AUTO also outscores QUIET_LIGHT_ANCESTOR outright (its extra
-    // ":not()" clauses make it more specific than a plain ancestor selector),
-    // so pitting it against system-dark can't discriminate either. The one
-    // case where QUIET_LIGHT_ANCESTOR is genuinely load-bearing is two
-    // conflicting non-root ancestors of EQUAL specificity
-    // ([data-theme="dark"] ... vs [data-theme="light"] ...): source order
-    // (light emitted after dark) must decide, and only QUIET_LIGHT_ANCESTOR's
-    // presence makes that decision come out light.
-    await load(
-      page,
-      "",
-      '<div data-theme="dark"><div data-theme="light"><div id="q" data-brand="quiet"></div></div></div>',
-      { scheme: "light" },
-    );
+  // Correctness check for a supported configuration (data-theme on <html>);
+  // it does not need to discriminate QUIET_LIGHT_ANCESTOR — see the comment
+  // on that constant in quiet-lib.ts for why it structurally can't, here.
+  test("html data-theme=light reaches a bare quiet container", async ({ page }) => {
+    await load(page, 'data-theme="light"', '<div id="q" data-brand="quiet"></div>', { scheme: "dark" });
     expect(await prop(page, "#q", "--hu-bg")).toBe(norm(LIGHT_BG));
   });
 

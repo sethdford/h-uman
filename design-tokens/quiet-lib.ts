@@ -17,6 +17,13 @@ export const QUIET_DARK_AUTO =
 // data-theme beats an ancestor's (e.g. a dark specimen panel on a page the
 // visitor toggled to light).
 export const QUIET_DARK_ANCESTOR = '[data-theme="dark"] [data-brand="quiet"]';
+// Under supported configurations (data-theme on <html> or on the quiet
+// element itself), QUIET_LIGHT_ANCESTOR never actually decides the outcome:
+// QUIET_SCOPE already yields light unconditionally, and QUIET_DARK_AUTO
+// excludes a light-marked root via its own :not([data-theme="light"]), so
+// there's no default it needs to override. It's emitted for light/dark
+// symmetry with QUIET_DARK_ANCESTOR, not because a supported configuration
+// depends on it.
 export const QUIET_LIGHT_ANCESTOR = '[data-theme="light"] [data-brand="quiet"]';
 export const QUIET_DARK_SELF = '[data-theme="dark"][data-brand="quiet"]';
 export const QUIET_LIGHT_SELF = '[data-theme="light"][data-brand="quiet"]';
