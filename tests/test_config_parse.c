@@ -1677,12 +1677,17 @@ static void test_config_parse_follow_up_watcher_enabled(void) {
     memset(&cfg_local, 0, sizeof(cfg_local));
     hu_arena_t *arena = hu_arena_create(backing);
     HU_ASSERT_NOT_NULL(arena);
+    hu_allocator_t a = hu_arena_allocator(arena);
+    /* include/human/config.h: callers driving hu_config_parse_json directly
+     * must seed defaults first. apply_defaults memsets, so the arena goes in
+     * after it. */
+    hu_config_apply_defaults(&cfg_local, &a);
     cfg_local.arena = arena;
-    cfg_local.allocator = hu_arena_allocator(arena);
+    cfg_local.allocator = a;
 
-    /* Precondition: nothing has set these yet. */
+    /* Precondition: the defaults a real user starts from. */
     HU_ASSERT_FALSE(cfg_local.follow_up_watcher.enabled);
-    HU_ASSERT_EQ(cfg_local.follow_up_watcher.interval_seconds, 0);
+    HU_ASSERT_EQ(cfg_local.follow_up_watcher.interval_seconds, 300);
 
     const char *json = "{\"follow_up_watcher\":{\"enabled\":true,\"interval_seconds\":120}}";
     hu_error_t err = hu_config_parse_json(&cfg_local, json, strlen(json));
@@ -1713,6 +1718,25 @@ static void test_config_parse_follow_up_watcher_defaults_when_block_absent(void)
     /* Opt-in subsystem: off by default, but carrying the 300s interval
      * src/daemon.c documents, not a zero that would fall back silently. */
     HU_ASSERT_FALSE(cfg_local.follow_up_watcher.enabled);
+    HU_ASSERT_EQ(cfg_local.follow_up_watcher.interval_seconds, 300);
+    hu_arena_destroy(arena);
+}
+
+static void test_config_parse_follow_up_watcher_rejects_fractional_interval(void) {
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg_local;
+    memset(&cfg_local, 0, sizeof(cfg_local));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    hu_allocator_t a = hu_arena_allocator(arena);
+    hu_config_apply_defaults(&cfg_local, &a);
+    cfg_local.arena = arena;
+    cfg_local.allocator = a;
+
+    /* 0.5 passes `> 0` but truncates to 0. It must keep the default, never
+     * store a zero interval. */
+    const char *json = "{\"follow_up_watcher\":{\"interval_seconds\":0.5}}";
+    HU_ASSERT_EQ(hu_config_parse_json(&cfg_local, json, strlen(json)), HU_OK);
     HU_ASSERT_EQ(cfg_local.follow_up_watcher.interval_seconds, 300);
     hu_arena_destroy(arena);
 }
@@ -1846,4 +1870,5 @@ void run_config_parse_tests(void) {
     HU_RUN_TEST(test_config_parse_follow_up_watcher_enabled);
     HU_RUN_TEST(test_config_parse_follow_up_watcher_defaults_when_block_absent);
     HU_RUN_TEST(test_config_parse_follow_up_watcher_rejects_out_of_range_interval);
+    HU_RUN_TEST(test_config_parse_follow_up_watcher_rejects_fractional_interval);
 }

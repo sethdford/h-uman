@@ -1000,7 +1000,9 @@ static hu_error_t parse_follow_up_watcher(hu_allocator_t *a, hu_config_t *cfg,
         hu_json_get_bool(obj, "enabled", cfg->follow_up_watcher.enabled);
     double iv =
         hu_json_get_number(obj, "interval_seconds", cfg->follow_up_watcher.interval_seconds);
-    if (iv > 0 && iv <= 86400)
+    /* >= 1, not > 0: (int)0.5 is 0, and a stored 0 is a tight poll loop for
+     * any consumer that lacks the `> 0 ? v : 300` fallback today's two have. */
+    if (iv >= 1 && iv <= 86400)
         cfg->follow_up_watcher.interval_seconds = (int)iv;
     return HU_OK;
 }
