@@ -28,6 +28,7 @@ _human() {
                 setup:Local / on-device model setup
                 doctor:Run system diagnostics
                 drafts:Predictive draft suggestions (Sprint B Story 1)
+                reply-prompt:Print the system prompt the daemon would send for a 1:1 reply (offline)
                 demo:Reproducible end-to-end demonstrations
                 cron:Manage scheduled tasks
                 channel:Channel management
