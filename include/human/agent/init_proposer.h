@@ -360,6 +360,13 @@ typedef struct hu_proactive_compose_inputs {
     bool (*content_is_safe)(const char *content, size_t content_len);
 } hu_proactive_compose_inputs_t;
 
+/* System prompt for a propose-or-skip decision. With a contact set
+ * (inputs->contact_id non-empty) the decision is whether SETH should text
+ * that contact, and the draft is written from Seth to them. Without one
+ * (NULL inputs or empty contact_id) it is the original Initiative-Layer
+ * prompt about messaging Seth. Returns a static string; never NULL. */
+const char *hu_init_proposer_system_prompt_for(const hu_proactive_compose_inputs_t *inputs);
+
 /* T1 extension to hu_init_proposer_tick_with_provider.
  *
  * Identical semantics to the original except:

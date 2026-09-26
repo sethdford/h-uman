@@ -68,7 +68,12 @@ static void compose_all_fields_present_renders_all_labels(void) {
     HU_ASSERT(strstr(buf, "--- feeds ---\nindustry layoffs trending") != NULL);
     /* Header + question always. */
     HU_ASSERT(strstr(buf, "last_inbound=1779830000") != NULL);
-    HU_ASSERT(strstr(buf, "Should h-uman send Seth a message right now?") != NULL);
+    /* A contact is set, so the question is about Seth texting THEM. This
+     * assertion used to pin "Should h-uman send Seth a message right now?",
+     * the framing that made the model decline ~49 of 57 contact check-ins
+     * as "confused" (2026-09-26 decline audit). */
+    HU_ASSERT_NULL(strstr(buf, "send Seth a message"));
+    HU_ASSERT(strstr(buf, "Should Seth text this contact right now?") != NULL);
 }
 
 /* ── 3. Partial population → only present sources rendered ─────────── */
@@ -403,10 +408,54 @@ static void t4_tick_with_provider_ex_accepts_daemon_shape_inputs(void) {
     HU_ASSERT_EQ((int)result, (int)HU_INIT_RESULT_SKIP);
 }
 
+/* ── Contact framing (2026-09-26): contact check-ins ask whether SETH should
+ * text the contact, not whether h-uman should message Seth. ─────────────── */
+
+static void contact_system_prompt_frames_seth_as_sender(void) {
+    hu_proactive_compose_inputs_t inputs;
+    memset(&inputs, 0, sizeof(inputs));
+    inputs.contact_id = "+15555550123";
+    inputs.contact_id_len = strlen(inputs.contact_id);
+    const char *sys = hu_init_proposer_system_prompt_for(&inputs);
+    HU_ASSERT_NOT_NULL(sys);
+    HU_ASSERT_NULL(strstr(sys, "send Seth a message"));
+    HU_ASSERT_NULL(strstr(sys, "text to send to Seth"));
+    HU_ASSERT(strstr(sys, "from Seth") != NULL);
+    HU_ASSERT(strstr(sys, "SKIP") != NULL);
+    /* Same JSON contract as the Seth path. */
+    HU_ASSERT(strstr(sys, "should_propose") != NULL);
+    HU_ASSERT(strstr(sys, "confidence") != NULL);
+    HU_ASSERT(strstr(sys, "JSON") != NULL);
+    /* Must fit the tick_ex system-prompt buffer (1536 incl. NUL). */
+    HU_ASSERT(strlen(sys) < 1535);
+}
+
+static void no_contact_keeps_seth_system_prompt(void) {
+    hu_proactive_compose_inputs_t inputs;
+    memset(&inputs, 0, sizeof(inputs));
+    const char *empty = hu_init_proposer_system_prompt_for(&inputs);
+    const char *null_inputs = hu_init_proposer_system_prompt_for(NULL);
+    HU_ASSERT(strstr(empty, "send Seth a message") != NULL);
+    HU_ASSERT(strstr(null_inputs, "Initiative Layer") != NULL);
+    HU_ASSERT(empty == null_inputs);
+}
+
+static void contact_and_seth_prompts_differ(void) {
+    hu_proactive_compose_inputs_t with_contact;
+    memset(&with_contact, 0, sizeof(with_contact));
+    with_contact.contact_id = "betty";
+    with_contact.contact_id_len = 5;
+    HU_ASSERT(hu_init_proposer_system_prompt_for(&with_contact) !=
+              hu_init_proposer_system_prompt_for(NULL));
+}
+
 void run_init_proposer_compose_tests(void);
 void run_init_proposer_compose_tests(void) {
     HU_TEST_SUITE("init_proposer_compose");
     HU_RUN_TEST(compose_empty_inputs_emits_header_and_question);
+    HU_RUN_TEST(contact_system_prompt_frames_seth_as_sender);
+    HU_RUN_TEST(no_contact_keeps_seth_system_prompt);
+    HU_RUN_TEST(contact_and_seth_prompts_differ);
     HU_RUN_TEST(compose_all_fields_present_renders_all_labels);
     HU_RUN_TEST(compose_partial_fields_renders_only_present_labels);
     HU_RUN_TEST(compose_unsafe_memory_filtered_when_predicate_rejects);
