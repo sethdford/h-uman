@@ -885,6 +885,17 @@ void hu_agent_apply_relationship_tone(hu_agent_t *agent, char **persona_prompt,
 hu_error_t hu_agent_build_persona_head(hu_agent_t *agent, const char *topic, size_t topic_len,
                                        char **out, size_t *out_len);
 
+/* The lean persona head the llm_decides (production iMessage) path sends:
+ * identity, output constraint, communication rules, core anchor, immersive
+ * reinforcement, anti-patterns, style rules, channel examples, optional RAG
+ * grounding (config rag_grounding_enabled + analytical tier; `msg` is the
+ * query) and the channel overlay line. Used by hu_agent_turn_stream_v2 and by
+ * offline prompt rendering, so both produce identical bytes. *out is NULL
+ * when the agent has no persona or the head is empty; otherwise the caller
+ * frees *out_len + 1 bytes. */
+hu_error_t hu_agent_build_lean_persona_head(hu_agent_t *agent, const char *msg, size_t msg_len,
+                                            char **out, size_t *out_len);
+
 /* Finish an assembled system prompt the way every turn path must: cap it to
  * HU_PROMPT_TRIM_BUDGET_BYTES (keeping `guard_tail_reserved` bytes of the
  * prompt.c guard tail) and make the persona's formality-aware ABSOLUTE RULES

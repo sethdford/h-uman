@@ -508,7 +508,9 @@ void run_doctor_outbound_stats_tests(void);
 void run_doctor_unified_dispatch_tests(void);
 void run_multimodal_policy_tests(void);
 void run_persona_eval_tests(void);
-void run_agent_tests(void);                        /* Sprint 46 R5.3 carryover */
+void run_agent_tests(void); /* Sprint 46 R5.3 carryover */
+void run_lean_head_tests(void);
+void run_reply_prompt_tests(void);
 void run_agent_turn_state_tests(void);             /* #26: per-turn state tracking */
 void run_agent_turn_transport_tests(void);         /* M4 follow-up: transport-error fast-fail */
 void run_agent_llm_latency_wall_clock_tests(void); /* M3 latency_ms measures wall clock */
@@ -1603,6 +1605,8 @@ int main(int argc, char **argv) {
     run_persona_eval_tests();
     /* Sprint 46 R5.3 carryover (audit FAIL fix) — agent integration tests */
     run_agent_tests();
+    run_lean_head_tests();
+    run_reply_prompt_tests();
     /* #26: per-turn state tracking unit tests (tool_count, hash, registers) */
     run_agent_turn_state_tests();
     /* M4 follow-up: transport-error fast-fail in agent_turn tool-loop */

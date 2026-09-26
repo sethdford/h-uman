@@ -792,6 +792,8 @@ set(HU_CORE_SOURCES
     src/agent/agent.c
     src/agent/agent_plan.c
     src/agent/agent_stream.c
+    src/agent/lean_head.c
+    src/agent/reply_prompt.c
     src/agent/agent_turn.c
     src/agent/best_of_n.c
     src/agent/humanness.c
@@ -3781,6 +3783,8 @@ tests/test_imessage_action_telemetry.c
     tests/test_persona_creator_preserve.c
     tests/test_persona_rag.c
     tests/test_agent.c
+    tests/test_lean_head.c
+    tests/test_reply_prompt.c
     tests/test_agent_turn_state.c
     tests/test_agent_turn_transport.c
     tests/test_agent_llm_latency_wall_clock.c
