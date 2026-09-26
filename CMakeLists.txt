@@ -1303,6 +1303,7 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_routing.c
     src/daemon/daemon_proactive.c
     src/daemon/daemon_contact_optout.c
+    src/daemon/daemon_hurt_handoff.c
     src/daemon/daemon_outbound_bus.c
     src/daemon/daemon_send_provenance.c
     src/daemon/daemon_reply_delay.c
@@ -3501,6 +3502,7 @@ set(HU_TEST_SOURCES
     tests/test_daemon_proactive_decline.c
     tests/test_daemon_proactive_reachability.c
     tests/test_daemon_contact_optout.c
+    tests/test_daemon_hurt_handoff.c
     tests/test_daemon_outbound_bus.c
     tests/test_reply_delay_model.c
     tests/test_daemon_promise_keeper.c
