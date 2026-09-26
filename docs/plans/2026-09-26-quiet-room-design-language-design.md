@@ -141,15 +141,31 @@ Selectors emitted to the **CSS outputs only** (`ui/src/styles/_tokens.css`,
 `website/src/styles/_tokens.css`):
 
 ```css
-:root[data-brand="quiet"]                         { /* typography (all modes) */ }
+/* Q = :is(:root[data-brand="quiet"], [data-brand="quiet"]), specificity (0,2,0) either way */
+Q                                                  { /* typography (all modes) */ }
 @media not (prefers-contrast: more) {
-  :root[data-brand="quiet"]                       { /* light colors */ }
+  Q                                                { /* light colors */ }
   @media (prefers-color-scheme: dark) {
-    :root[data-brand="quiet"]:not([data-theme="light"]) { /* dark colors */ }
+    :is(:root:not([data-theme="light"])[data-brand="quiet"],
+        :root:not([data-theme="light"]) [data-brand="quiet"]):not([data-theme="light"])
+                                                   { /* dark colors */ }
   }
-  :root[data-brand="quiet"][data-theme="dark"]    { /* dark colors */ }
+  :is([data-theme="dark"][data-brand="quiet"],
+      [data-theme="dark"] [data-brand="quiet"])    { /* dark colors */ }
+  :is([data-theme="light"][data-brand="quiet"],
+      [data-theme="light"] [data-brand="quiet"])   { /* light colors */ }
 }
 ```
+
+**Why `:is()` (corrected 2026-09-26 while planning).** The first draft used bare
+`:root[data-brand="quiet"]`, which can't match the `/design` page's specimen *container*
+(II.6). Two cascade facts drive this shape:
+- `:is()` takes the specificity of its most specific argument, so Q scores **(0,2,0)**
+  even when it matches a nested container. It therefore beats the existing
+  `@media (color-gamut: p3) { :root {…} }` accent overrides, which come *later* in
+  `_tokens.css` at (0,1,0). That block applies on essentially every modern Mac.
+- Explicit `data-theme` beats the system preference, and a nested container can carry its
+  own `data-theme` so the specimen can show light and dark side by side.
 
 - **It overrides existing semantic names; it adds no parallel vocabulary.** The quiet layer
   re-values `--hu-bg*`, `--hu-surface-container*`, `--hu-text*`, `--hu-accent*`,
@@ -240,19 +256,24 @@ considered and not chosen: Fraunces (its "wonk" axis is too quirky for trust), I
 
 ### II.5 Build pipeline changes (`design-tokens/build.ts`)
 
-1. **Fail loudly on unhandled color formats.** Today any value that isn't `#hex` or
-   `rgb[a]()` falls through to black, so an `oklch()` token would ship **black** to every
-   native app with a green build. There are six fall-through sites (verified 2026-09-26,
-   line numbers as of `d7306a191`):
-   - the three hex parsers (~150, ~157, ~164);
-   - `colorToSwift` (~179);
+1. **Fail loudly on unhandled color formats.** Today any value that isn't 6-digit `#hex`
+   or `rgb[a]()` falls through to black, so an `oklch()` token would ship **black** to
+   every native app with a green build. There are five **live** fall-through sites (line
+   numbers as of `d7306a191`):
+   - `hexToSwift` (~150);
+   - `hexToKotlin` (~157);
+   - `rgbaToKotlin` (~164);
    - `colorToKotlin` (~185);
-   - the SwiftUI `Color(...)` emitter (~1929).
+   - `formatSwiftColor` (~1929), the actual Swift color emitter.
 
-   Replace each with a thrown error that names the token path and value. `generateCHeader`
-   has no color conversion and needs no change.
-   **Measure first:** before flipping, log every token that reaches a fall-through today. If
-   any does, that's a live native bug to list in the PR, not something to silence.
+   Replace each with a thrown error that names the value. `generateCHeader` has no color
+   conversion and needs no change. **Delete `colorToSwift` (~176):** it has zero callers
+   (only its own definition matches), so it's dead code.
+   **Measured 2026-09-26, two independent runs:** an instrumented build logged **zero**
+   fall-through hits. A separate session classified all 163 color-ish tokens (117 hex via
+   `Color(hex:)`, 28 `rgba()` via `Color(red:green:blue:opacity:)`, 18 non-colors
+   filtered out), and deleting `colorToSwift` left the Swift, Kotlin, CSS and C outputs
+   byte-identical. The throw therefore can't break today's build.
 2. **Honor `com.human.platform`.** A file declaring `"web"` goes to the CSS emitters only.
    `quiet.tokens.json` never reaches the Swift, Kotlin, C, or JSON/TS docs outputs. An
    unknown platform value is also a thrown error.
@@ -261,11 +282,10 @@ considered and not chosen: Fraunces (its "wonk" axis is too quirky for trust), I
 4. **No OKLCH to native conversion in this sub-project** (YAGNI). The native redesign will
    need it; the fail-loud guard in step 1 makes sure that need can't be met by accident.
 
-Known and **out of scope**: `colorToSwift` (~line 178) deliberately maps `rgba()` to
-black as a "placeholder," even though the SwiftUI emitter (~1920) already converts
-`rgba()` correctly. That's the same silent-wrong shape, but fixing it changes native
-rendering, so it will be a separate follow-up. It stays a *handled* format, so step 1's
-throw doesn't fire on it.
+*Correction (2026-09-26):* an earlier draft called `colorToSwift`'s `rgba()`→black
+placeholder a live native bug. It isn't: the function has no callers, and the real
+emitter, `formatSwiftColor`, converts `rgba()` correctly. Deleting the function (step 1)
+closes it with no output change.
 
 ### II.6 Consumption and specimen
 
