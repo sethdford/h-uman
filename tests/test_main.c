@@ -454,6 +454,7 @@ void run_daemon_proactive_decline_tests(void);
 void run_daemon_proactive_reachability_tests(void);
 void run_daemon_contact_optout_tests(void);
 void run_daemon_hurt_handoff_tests(void);
+void run_daemon_dated_followup_tests(void);
 void run_contact_optout_repo_tests(void);
 void run_daemon_outbound_bus_tests(void);
 void run_repo_util_sqlite_tests(void);
@@ -1522,6 +1523,7 @@ int main(int argc, char **argv) {
     run_daemon_proactive_reachability_tests();
     run_daemon_contact_optout_tests();
     run_daemon_hurt_handoff_tests();
+    run_daemon_dated_followup_tests();
     run_contact_optout_repo_tests();
     run_daemon_outbound_bus_tests();
     run_repo_util_sqlite_tests();
