@@ -335,6 +335,20 @@ class TestExactProvenance(unittest.TestCase):
         self.assertEqual(r["attribution"]["exact_matched"], 0)
         self.assertEqual(r["attribution"]["exact_unmatched_records"], 1)
 
+    def test_invalid_utf8_in_memory_db_does_not_abort(self):
+        # A real memory.db row held non-UTF-8 bytes; the default text factory
+        # raised OperationalError and the whole metric aborted.
+        def fill(fx):
+            fx.mem.execute(
+                "insert into messages(session_id,role,content,created_at) "
+                "values (?,?,CAST(X'68656c6c6fff' AS TEXT),?)",
+                ("+1", "assistant", T0.strftime("%Y-%m-%d %H:%M:%S")))
+            fx.msg("+1", 60, "typed by hand", True)
+            fx.msg("+1", 5 * MIN, "ok", False)
+        r = self.run_fixture(fill)  # raised OperationalError before the fix
+        t = r["turns"]
+        self.assertEqual(t["seth"] + t["huuman"] + t["ambiguous"], 1)
+
 
 class TestSummary(unittest.TestCase):
     def test_refuses_verdict_when_arm_too_small(self):
