@@ -584,6 +584,8 @@ static const hu_command_t commands[] = {
     {"calibrate", "Analyze messaging patterns and calibrate persona", cmd_calibrate},
     {"drafts", "Generate predictive draft suggestions for a contact", cmd_drafts},
     {"narrate", "Generate a long-horizon narrative for a contact from chat.db", cmd_narrate},
+    {"reply-prompt", "Print the system prompt the daemon would send for a 1:1 reply (offline)",
+     cmd_reply_prompt},
     {"autoresponder", "Manage the DND autoresponder (digest of recent replies)", cmd_autoresponder},
     {"initiative", "Inspect init_proposer JSONL (log | status)", cmd_initiative},
     {"export-dpo", "Export collector dpo_pairs to JSONL for LoRA fine-tuning (M3)", cmd_export_dpo},
