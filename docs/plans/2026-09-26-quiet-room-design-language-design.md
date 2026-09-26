@@ -201,10 +201,16 @@ sRGB hex is shown for reference; all values are in gamut.
 |---|---|---|
 | `bg` (paper) | `oklch(97.5% 0.010 95)` #F9F7EF | `oklch(17% 0.012 150)` #0C110D |
 | `bg-inset` / `surface-container` (paper-2) | `oklch(94.5% 0.012 95)` #EFEDE4 | `oklch(20.5% 0.014 150)` #131914 |
+| `surface-container-high` (final review) | `oklch(93.5% 0.012 95)` #ECEAE1 | `oklch(24.5% 0.014 150)` #1C221D |
+| `surface-container-highest` (final review) | `oklch(92.5% 0.012 95)` #E8E6DD | `oklch(27% 0.014 150)` #222823 |
 | `bg-surface` / `bg-elevated` (card) | `oklch(99.5% 0.004 95)` #FEFDFA | `oklch(22.5% 0.014 150)` #171E18 |
+| `bg-overlay` (final review) | `oklch(99.5% 0.004 95)` #FEFDFA | `oklch(24.5% 0.014 150)` #1C221D |
 | `text` (ink) | `oklch(23% 0.020 150)` #162018 | `oklch(95% 0.010 120)` #EDF0E8 |
 | `text-secondary` / `text-muted` | `oklch(50% 0.015 150)` #5D665F | `oklch(74% 0.012 120)` #AAACA4 |
+| `text-tertiary` (final review) | `oklch(50% 0.012 95)` #65635C | `oklch(70% 0.010 120)` #9D9F99 |
+| `text-faint` (final review) | `oklch(50.5% 0.012 95)` #67655D | `oklch(68% 0.010 120)` #979992 |
 | `border` (line) | `oklch(89% 0.012 95)` #DDDBD2 | `oklch(32% 0.016 150)` #2D352F |
+| `border-subtle` (decorative, final review) | `oklch(92% 0.010 95)` #E6E5DD | `oklch(28% 0.014 150)` #242B25 |
 | `accent` / `accent-text` / `link` | `oklch(50% 0.130 135)` #40731A | `oklch(82% 0.160 135)` #95DB6C |
 | `on-accent` | card #FEFDFA | paper #0C110D |
 | `focus-ring` | `oklch(58% 0.140 135)` #538C2D | `oklch(80% 0.170 135)` #8CD55E |
@@ -241,18 +247,45 @@ layer overrides them too:
 
 | Token | Existing value → min ratio | Quiet override → min ratio |
 |---|---|---|
-| light `text-faint` | #726c65 → 4.42 | `oklch(52.5% 0.012 95)` → 4.59 |
-| light `link-active` | #7ab648 → **2.08** | `oklch(45% 0.125 135)` → 6.06 |
+| light `text-faint` | #726c65 → 4.42 | ~~`oklch(52.5% 0.012 95)` → 4.59~~ `oklch(50.5% 0.012 95)` → 4.71 |
+| light `link-active` | #7ab648 → **2.08** | `oklch(45% 0.125 135)` → 5.70 |
 | light `accent-hover` (fill) | #5a9a30 → **2.93** | `oklch(45% 0.125 135)` → 6.06; on-accent label 7.01 |
-| light `success` | #008000 → 4.38 | `oklch(50% 0.130 150)` → 4.81 |
-| light `warning` | #ca8a04 → **2.50** | `oklch(53% 0.105 65)` → 4.62 (C 0.120 was out of sRGB gamut) |
-| light `info` | #2563eb → 4.40 | `oklch(50% 0.160 258)` → 5.21 |
-| dark `text-faint` | #56504a → **2.14** | `oklch(64% 0.010 120)` → 5.08 |
-| dark `accent-hover`, `link-active` | set for light/dark symmetry | `oklch(86% 0.150 135)` → 11.62 |
+| light `success` | #008000 → 4.38 | `oklch(50% 0.130 150)` → 4.53 |
+| light `warning` | #ca8a04 → **2.50** | ~~`oklch(53% 0.105 65)` → 4.62~~ `oklch(51.5% 0.100 65)` → 4.63 (C 0.120 was out of sRGB gamut) |
+| light `info` | #2563eb → 4.40 | `oklch(50% 0.160 258)` → 4.90 |
+| light `text-tertiary` (final review) | #6b655e → 4.62 | `oklch(50% 0.012 95)` → 4.81 (owned so both modes carry the same key set) |
+| light `link-visited` (final review) | #3a6a24 → 5.16 | `#3a6a24` → 5.16 (same value, owned for key-set symmetry) |
+| light / dark `error` (final review) | #cc0000 / #f97066 | same values → 4.72 / 5.38 (owned so the P3 block cannot leak into it) |
+| dark `text-faint` | #56504a → **2.14** | ~~`oklch(64% 0.010 120)` → 5.08~~ `oklch(68% 0.010 120)` → 5.22 |
+| dark `text-tertiary` (final review) | #8a847e → **4.06** | `oklch(70% 0.010 120)` → 5.63 |
+| dark `info` (final review) | #3b82f6 → **4.08** | `oklch(70% 0.140 258)` → 5.58 |
+| dark `link-visited` (final review) | #5a9a30 → **4.35** | `oklch(76% 0.130 135)` → 7.27 |
+| dark `accent-hover`, `link-active` | set for light/dark symmetry | `oklch(86% 0.150 135)` → 11.62 (`link-active` 10.23 on the eight roles) |
 
-"Min ratio" is the worst case across bg, bg-inset/surface-container and card.
-Inheritance is still used where it passes (light `error` 5.02; dark `text-tertiary` 4.61,
-`info` 4.63, `link-visited` 4.95), and the checker re-measures those on every build.
+"Min ratio" in the override column is the worst case across the eight background roles in
+`design-tokens/contrast-lib.ts` (`BG_ROLES`): bg, bg-inset, bg-surface, bg-elevated,
+surface-container, surface-container-high, surface-container-highest and bg-overlay. The
+"existing value" column keeps the planning-time three-background measurement, except for rows
+marked *final review*, which are measured on the eight. The `accent-hover` 6.06 is its
+planning-time text ratio; the checker measures it only as a fill under `on-accent`.
+The checker's tightest pair is now **light `success` on `surface-container-highest`, 4.53:1**
+(244 pairs, 0 failed, 0 out of gamut).
+
+**Final-review correction, 2026-09-26.** The planning-time palette was measured on three
+backgrounds, but the quiet layer also paints `--hu-surface-container-high`,
+`--hu-surface-container-highest` and `--hu-bg-overlay`, which it neither re-valued nor
+measured. Left inherited, those surfaces keep the default theme's greys under paper-and-ink
+text. The layer now re-values all three (plus a decorative `border-subtle`) and the checker
+measures every text and UI role on all eight. On the new darkest light surface
+(`oklch(92.5% 0.012 95)`), the old light `text-faint` measured 4.32 and the old light
+`warning` 4.35. On the new lightest dark surface (`oklch(27% 0.014 150)`), the old dark `info`
+measured 4.08, and the inherited dark `text-tertiary` and `link-visited` measured 4.06 and
+4.35. Those five were re-valued. `text-tertiary` and `link-visited` are now owned in both
+modes because the build requires light and dark to override the same key set. `error` is
+owned in both modes for a different reason: the base P3 block overrides an inherited
+`--hu-error` whenever an explicit `data-theme` disagrees with the OS scheme (2.30–3.15:1).
+Of the measured text roles, only `link-hover` is still inherited (5.16 light, 8.70 dark on
+the eight backgrounds), and the checker re-measures it with the rest on every run.
 
 These are the proposed starting values. The checker in II.7 is the authority: if a later
 tweak fails it, the build fails.

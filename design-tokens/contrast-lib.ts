@@ -74,7 +74,10 @@ export function contrastRatio(fg: string, bg: string): number {
 }
 
 /** Backgrounds every text/UI role must read on (spec II.3). */
-export const BG_ROLES = ["bg", "bg-inset", "bg-surface", "bg-elevated", "surface-container"] as const;
+export const BG_ROLES = [
+  "bg", "bg-inset", "bg-surface", "bg-elevated", "surface-container",
+  "surface-container-high", "surface-container-highest", "bg-overlay",
+] as const;
 /** Roles rendered as text: ≥ 4.5:1 on every background. */
 export const TEXT_ROLES = [
   "text", "text-secondary", "text-muted", "text-tertiary", "text-faint",
