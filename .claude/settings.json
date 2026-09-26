@@ -103,7 +103,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 $CLAUDE_PROJECT_DIR/.claude/hooks/redact-message-display.py 2>/dev/null || true",
+            "command": "payload=$(cat); p=\"\"; for d in \"${CLAUDE_PROJECT_DIR:-}\" \"$(git rev-parse --show-toplevel 2>/dev/null)\"; do if [ -n \"$d\" ] && [ -f \"$d/.claude/hooks/redact-message-display.py\" ]; then p=\"$d/.claude/hooks/redact-message-display.py\"; break; fi; done; if [ -n \"$p\" ]; then printf '%s' \"$payload\" | python3 \"$p\"; exit $?; fi; sid=$(printf '%s' \"$payload\" | jq -r '.session_id // empty' 2>/dev/null || true); m=\"${TMPDIR:-/tmp}/hu-hook-nopath-redact-${sid:-nosession}\"; if [ ! -e \"$m\" ]; then : > \"$m\" 2>/dev/null; echo \"MESSAGE REDACTION HOOK DID NOT RUN: cannot locate .claude/hooks/redact-message-display.py (CLAUDE_PROJECT_DIR unset and $(pwd) is not inside the h-uman repo). On-screen secret redaction is NOT active in this session -- this is the display-only cosmetic guard, so transcript/log protection is unaffected, but secrets WILL render verbatim on screen during screen-shares and screenshots. Relaunch Claude Code from the repo root, or export CLAUDE_PROJECT_DIR.\" >&2; fi; exit 0",
             "timeout": 5
           }
         ]
