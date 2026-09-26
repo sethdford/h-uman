@@ -1205,6 +1205,13 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                 alloc->free(alloc->ctx, bookend_ctx, bookend_ctx_len + 1);
                 bookend_ctx = NULL;
             }
+            /* The due follow-up surfaced to the proposer this tick (one per
+             * message); marked sent only after a confirmed delivery. Declared
+             * outside the SQLite block: the listing below is not gated. */
+            int64_t due_followup_id_listed = -1;
+#ifndef HU_ENABLE_SQLITE
+            (void)due_followup_id_listed; /* marked sent only in SQLite builds */
+#endif
 #ifdef HU_ENABLE_SQLITE
             if (prompt && commitment_ctx && commitment_ctx_len > 0) {
                 size_t merged_len = prompt_len + 1 + commitment_ctx_len + 1;
@@ -1327,9 +1334,6 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
              * is confirmed. Pre-fix the followup row was never marked sent so the
              * same followup re-fired every proactive cycle. */
             int64_t delayed_followup_id_to_mark = -1;
-            /* The due follow-up surfaced to the proposer this tick (one per
-             * message); marked sent only after a confirmed delivery. */
-            int64_t due_followup_id_listed = -1;
             {
                 char callback_buf[512];
                 uint32_t seed_cb = (uint32_t)((uintptr_t)cp + (uintptr_t)now + 1);
