@@ -70,6 +70,7 @@
 #include "human/daemon/config_reload.h"
 #include "human/daemon/consecutive_limiter.h"
 #include "human/daemon/context_facade.h"
+#include "human/daemon/dated_followup.h"
 #include "human/daemon/director.h"
 #include "human/daemon/feeds_facade.h"
 #include "human/daemon/hurt_handoff.h"
@@ -1030,28 +1031,13 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
             }
 #endif /* !HU_IS_TEST */
 
-#ifdef HU_ENABLE_SQLITE
-            /* Temporal event follow-up — upcoming events can trigger check-in */
-            if (!should_checkin && agent && agent->memory && cp->contact_id) {
-                sqlite3 *tev_db2 = hu_sqlite_memory_get_db(agent->memory);
-                if (tev_db2) {
-                    hu_temporal_event_t upcoming[3];
-                    size_t upcoming_count = 0;
-                    hu_temporal_events_get_upcoming(tev_db2, alloc, (int64_t)now, 24 * 3600,
-                                                    upcoming, 3, &upcoming_count);
-                    for (size_t ui = 0; ui < upcoming_count; ui++) {
-                        if (strcmp(upcoming[ui].contact_id, cp->contact_id) == 0) {
-                            should_checkin = true;
-                            hu_temporal_events_mark_followed_up(tev_db2, upcoming[ui].id);
-                            hu_log_info("human", agent ? agent->observer : NULL,
-                                        "temporal follow-up triggered for %s: %s", cp->contact_id,
-                                        upcoming[ui].description);
-                            break;
-                        }
-                    }
-                }
-            }
-#endif
+            /* The temporal_events "upcoming event" trigger that lived here was
+             * removed 2026-09-26: it fired in the 24h BEFORE an event, marked the
+             * event followed-up before the emotion gate or any send, and never put
+             * the event into the prompt (134 events consumed, no check-in about any
+             * of them). Dated check-ins now come from the contextual-proactive
+             * detector via hu_daemon_dated_followup_apply (after the event, with
+             * the situation as context, marked sent only on delivery). */
 
             /* P6-3: emotional-tone gate. If the contact's most-recent
              * inbound message was heavy/grief, skip the generic
@@ -1219,6 +1205,13 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                 alloc->free(alloc->ctx, bookend_ctx, bookend_ctx_len + 1);
                 bookend_ctx = NULL;
             }
+            /* The due follow-up surfaced to the proposer this tick (one per
+             * message); marked sent only after a confirmed delivery. Declared
+             * outside the SQLite block: the listing below is not gated. */
+            int64_t due_followup_id_listed = -1;
+#ifndef HU_ENABLE_SQLITE
+            (void)due_followup_id_listed; /* marked sent only in SQLite builds */
+#endif
 #ifdef HU_ENABLE_SQLITE
             if (prompt && commitment_ctx && commitment_ctx_len > 0) {
                 size_t merged_len = prompt_len + 1 + commitment_ctx_len + 1;
@@ -1528,9 +1521,10 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                             due_arr && due_n > 0) {
                             size_t pos = 0;
                             size_t listed = 0;
-                            for (size_t fi = 0; fi < due_n && listed < 4; fi++) {
+                            for (size_t fi = 0; fi < due_n && listed < 1; fi++) {
                                 if (strcmp(due_arr[fi].contact_id, cp->contact_id) != 0)
                                     continue;
+                                due_followup_id_listed = due_arr[fi].id;
                                 int w =
                                     snprintf(due_fu_buf + pos, sizeof(due_fu_buf) - pos,
                                              "- %s (due %llds ago)\n", due_arr[fi].topic,
@@ -1627,6 +1621,10 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                         if (delayed_followup_id_to_mark >= 0 && agent->memory)
                             (void)hu_superhuman_delayed_followup_mark_sent(
                                 agent->memory, delayed_followup_id_to_mark);
+                        if (due_followup_id_listed >= 0 &&
+                            due_followup_id_listed != delayed_followup_id_to_mark && agent->memory)
+                            (void)hu_superhuman_delayed_followup_mark_sent(agent->memory,
+                                                                           due_followup_id_listed);
 #endif
                     }
                 }
@@ -3977,25 +3975,27 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     hu_log_info("human", agent ? agent->observer : NULL, "%s",
                                                 cp_metric);
                             }
-                            /* Detections are SITUATIONS now, not messages — the
-                             * frozen "how'd the %s go?" enqueue is gone; see the
-                             * rationale on hu_contextual_proactive_decision_t.
-                             * Composition moves to send time in init_proposer via
-                             * hu_proactive_compose_inputs.situation_context. Until
-                             * that wiring lands this logs the frame and enqueues
-                             * NOTHING (subsystem is OFF by default). */
+                            /* Detections are SITUATIONS, not messages: each one is
+                             * queued as ONE delayed follow-up due at send_at (after
+                             * the event), carrying the situation text. The proactive
+                             * proposer lists it as due_followups context and it is
+                             * marked sent only on confirmed delivery. SHADOW logs
+                             * what would be queued (lengths only). Activation to ON
+                             * gated on a shadow review of what gets queued (volume,
+                             * timing, false detections) plus the hurt_after /
+                             * dead-end metrics on the resulting check-ins: do not
+                             * flip to default-ON without that measurement. */
                             for (size_t cpi = 0; cpi < cpr.count; cpi++) {
                                 const hu_contextual_proactive_decision_t *cpd = &cpr.items[cpi];
                                 char cp_frame[320];
-                                if (hu_contextual_proactive_situation_frame(cpd, cp_now, cp_frame,
-                                                                            sizeof(cp_frame)) == 0)
+                                size_t cp_frame_len = hu_contextual_proactive_situation_frame(
+                                    cpd, cp_now, cp_frame, sizeof(cp_frame));
+                                if (cp_frame_len == 0)
                                     continue;
-                                hu_log_info("human", agent ? agent->observer : NULL,
-                                            "[contextual-proactive] situation for %s via %s "
-                                            "relevant at %lld: %s (awaiting init_proposer "
-                                            "compose-at-send wiring; nothing enqueued)",
-                                            batch_key, cp_channel,
-                                            (long long)(cpd->send_at_ms / 1000), cp_frame);
+                                (void)hu_daemon_dated_followup_apply(
+                                    agent ? agent->memory : NULL, alloc, cp_mode, batch_key,
+                                    key_len, cp_frame, cp_frame_len, cpd->send_at_ms / 1000,
+                                    cp_now);
                             }
                         }
                     }

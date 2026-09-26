@@ -96,7 +96,7 @@ fi
 # owned by the live style governor hu_daemon_shape_text_inplace) dropped a
 # freshly-built measurement from 33 to 32. Auto-lock still does not fire for
 # the same reason as above — hand-locking again.
-NEVER_LOADED_BASELINE=32
+NEVER_LOADED_BASELINE=31   # auto-locked 2026-09-26 (was 32)
 # Composition at the baseline: 40 whole function symbols plus 59 function-local
 # statics (`_hu_fn.CONSTANT`, `_hu_fn.sql`), which the linker emits as separate
 # symbols of the function that owns them. Both are counted, per the plan's
@@ -105,7 +105,7 @@ NEVER_LOADED_BASELINE=32
 #
 # Re-measured 2026-09-21 alongside NEVER_LOADED_BASELINE above, same config
 # change and same reason the auto-lock didn't fire.
-DEAD_UNREF_BASELINE=79
+DEAD_UNREF_BASELINE=76   # auto-locked 2026-09-26 (was 79)
 
 cd "$_hu_root"
 
