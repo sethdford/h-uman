@@ -96,8 +96,19 @@ def _target_guid(assoc):
     return assoc.split("/")[-1].split(":")[-1] if assoc else None
 
 
+def _connect_ro(path):
+    """Read-only connection that tolerates invalid UTF-8 in TEXT columns.
+    memory.db holds at least one assistant row whose bytes are not valid
+    UTF-8 (found 2026-09-26 by a 365-day window); the default text factory
+    raised OperationalError and aborted the whole run. Undecodable bytes
+    become U+FFFD, which never matches a delivered message."""
+    con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    con.text_factory = lambda b: b.decode("utf-8", "replace")
+    return con
+
+
 def _load_assistant(mem_path, since):
-    con = sqlite3.connect(f"file:{mem_path}?mode=ro", uri=True)
+    con = _connect_ro(mem_path)
     out = {}
     for sid, content, created in con.execute(
             "select session_id, content, created_at from messages where role='assistant' "
@@ -123,7 +134,7 @@ def _load_assistant(mem_path, since):
 
 
 def _load_messages(chat_path, since):
-    con = sqlite3.connect(f"file:{chat_path}?mode=ro", uri=True)
+    con = _connect_ro(chat_path)
     per_contact = {}
     for (rowid, guid, text, body, contact, from_me, date, room, assoc, atype) in con.execute(
             "select m.ROWID, m.guid, m.text, m.attributedBody, h.id, m.is_from_me, m.date, "
@@ -157,7 +168,7 @@ def _load_outbound(mem_path, since):
     time of the first wall-clock-stamped record ever (or None), and the count
     of uptime-stamped rows. (None, None, 0) for a memory.db that predates the
     table."""
-    con = sqlite3.connect(f"file:{mem_path}?mode=ro", uri=True)
+    con = _connect_ro(mem_path)
     try:
         first = con.execute("select min(sent_at_ms) from outbound_sends where sent_at_ms >= ?",
                             (UPTIME_STAMP_MAX_MS,)).fetchone()[0]
