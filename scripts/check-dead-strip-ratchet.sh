@@ -17,13 +17,19 @@
 #   HU_DEAD_STRIP_STRICT=1 bash scripts/check-dead-strip-ratchet.sh   # pre-push
 #   HU_BUILD_DIR=build2 bash scripts/check-dead-strip-ratchet.sh
 #
-# TWO CALLERS, TWO JOBS
+# THREE CALLERS, THREE JOBS
 #   .githooks/pre-commit  runs it plain, so ratchet_autolock can rewrite and
 #                         STAGE a lowered constant — that only happens from the
 #                         pre-commit hook (HU_RATCHET_FROM_HOOK=1), so this is
 #                         the only place a gain can ever be locked.
 #   .githooks/pre-push    rebuilds build/ first, then runs it with
-#                         HU_DEAD_STRIP_STRICT=1. That is the ENFORCEMENT point.
+#                         HU_DEAD_STRIP_STRICT=1. The LOCAL enforcement point —
+#                         but it skips when the worktree has no build/ at all.
+#   ci.yml dead-strip-    configures --preset dev on macos-latest and runs it
+#   ratchet job           with HU_DEAD_STRIP_STRICT=1. The BACKSTOP for that
+#                         skip, and the only caller that treats RATCHET_SKIP as
+#                         a failure — a runner built for the gate that cannot
+#                         measure is broken, not merely unmeasurable.
 #
 #   HU_DEAD_STRIP_STRICT=1 disables the stale-build demotion below. Without it
 #   (ad-hoc runs, and pre-commit) a build dir older than src/ reports its counts
