@@ -302,6 +302,10 @@ static void set_defaults(hu_config_t *cfg, hu_allocator_t *a) {
     cfg->memory.encrypt_at_rest = false;
     cfg->heartbeat.enabled = false;
     cfg->heartbeat.interval_minutes = 30;
+    /* Opt-in: the watcher polls chat.db for read-without-reply threads. The
+     * 300s interval matches the default documented in src/daemon.c. */
+    cfg->follow_up_watcher.enabled = false;
+    cfg->follow_up_watcher.interval_seconds = 300;
     cfg->channels.cli = true;
 #ifdef __APPLE__
     cfg->channels.imessage.action_surface_v2.enabled = true;
