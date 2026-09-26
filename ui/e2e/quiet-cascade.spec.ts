@@ -7,6 +7,10 @@ const TOKENS_CSS = readFileSync(
   fileURLToPath(new URL("../src/styles/_tokens.css", import.meta.url)),
   "utf-8",
 );
+const HIGH_CONTRAST_CSS = readFileSync(
+  fileURLToPath(new URL("../src/styles/high-contrast.css", import.meta.url)),
+  "utf-8",
+);
 const QUIET = JSON.parse(
   readFileSync(fileURLToPath(new URL("../../design-tokens/quiet.tokens.json", import.meta.url)), "utf-8"),
 ).quiet;
@@ -29,7 +33,8 @@ async function load(
   page: Page,
   htmlAttrs: string,
   body: string,
-  media: { scheme: "light" | "dark"; p3?: boolean; contrastMore?: boolean },
+  media: { scheme: "light" | "dark"; p3?: boolean; contrastMore?: boolean; forcedColors?: boolean },
+  extraCss = "",
 ) {
   const cdp = await page.context().newCDPSession(page);
   await cdp.send("Emulation.setEmulatedMedia", {
@@ -37,10 +42,11 @@ async function load(
       { name: "prefers-color-scheme", value: media.scheme },
       { name: "color-gamut", value: media.p3 ? "p3" : "srgb" },
       { name: "prefers-contrast", value: media.contrastMore ? "more" : "no-preference" },
+      { name: "forced-colors", value: media.forcedColors ? "active" : "none" },
     ],
   });
   await page.setContent(
-    `<!doctype html><html ${htmlAttrs}><head><style>${TOKENS_CSS}</style></head><body>${body}</body></html>`,
+    `<!doctype html><html ${htmlAttrs}><head><style>${TOKENS_CSS}</style><style>${extraCss}</style></head><body>${body}</body></html>`,
   );
 }
 const prop = (page: Page, sel: string, name: string) =>
@@ -151,5 +157,16 @@ test.describe("Quiet Room cascade", () => {
     await load(page, 'data-brand="quiet"', "", { scheme: "light", contrastMore: true });
     expect(await prop(page, "html", "--hu-text")).toBe(norm(hcText!));
     expect(await prop(page, "html", "--hu-font-display")).toContain("Newsreader Variable");
+  });
+
+  // Forced colors (Windows High Contrast) does not imply prefers-contrast: more.
+  // high-contrast.css's :root forced-colors overrides score (0,1,0); unguarded
+  // quiet colors at (0,2,0) would beat them.
+  test("forced-colors: active wins over quiet colors even without prefers-contrast: more", async ({ page }) => {
+    await load(page, 'data-brand="quiet"', "", { scheme: "light", forcedColors: true }, HIGH_CONTRAST_CSS);
+    expect(await page.evaluate(() => matchMedia("(forced-colors: active)").matches), "precondition").toBe(true);
+    expect(await page.evaluate(() => matchMedia("(prefers-contrast: more)").matches), "precondition").toBe(false);
+    expect(await prop(page, "html", "--hu-bg")).not.toBe(norm(LIGHT_BG));
+    expect(await prop(page, "html", "--hu-bg")).toBe("Canvas");
   });
 });

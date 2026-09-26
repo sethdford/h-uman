@@ -77,7 +77,7 @@ export function generateQuietCSS(web: TokenMap): string {
   if (type.size) out.push(`${QUIET_SCOPE} {`, ...decls(type, "  "), "}");
   if (light.size) {
     out.push(
-      "@media not (prefers-contrast: more) {",
+      "@media not ((prefers-contrast: more) or (forced-colors: active)) {",
       `  ${QUIET_SCOPE} {`, ...decls(light, "    "), "  }",
       "  @media (prefers-color-scheme: dark) {",
       `    ${QUIET_DARK_AUTO} {`, ...decls(dark, "      "), "    }",

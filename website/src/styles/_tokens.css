@@ -1090,7 +1090,7 @@
   --hu-type-headline-md-family: var(--hu-font-display);
   --hu-type-headline-sm-family: var(--hu-font-display);
 }
-@media not (prefers-contrast: more) {
+@media not ((prefers-contrast: more) or (forced-colors: active)) {
   :is(:root[data-brand="quiet"], [data-brand="quiet"]) {
     --hu-accent: oklch(50% 0.13 135);
     --hu-accent-brand: oklch(71.5% 0.155 131);

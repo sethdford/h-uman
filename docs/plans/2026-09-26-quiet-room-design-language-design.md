@@ -143,7 +143,7 @@ Selectors emitted to the **CSS outputs only** (`ui/src/styles/_tokens.css`,
 ```css
 /* Q = :is(:root[data-brand="quiet"], [data-brand="quiet"]), specificity (0,2,0) either way */
 Q                                                  { /* typography (all modes) */ }
-@media not (prefers-contrast: more) {
+@media not ((prefers-contrast: more) or (forced-colors: active)) {
   Q                                                { /* light colors */ }
   @media (prefers-color-scheme: dark) {
     :is(:root:not([data-theme="light"])[data-brand="quiet"],
@@ -183,7 +183,9 @@ and it's shown to fail when the order is reversed.
   (status colors, overlays, shadows). They are still subject to the contrast check in II.7.
 - **High contrast wins.** The existing high-contrast values are emitted under
   `@media (prefers-contrast: more)` (`build.ts` ~line 960). The quiet color overrides are
-  wrapped in `@media not (prefers-contrast: more)` so they never beat it. The quiet
+  wrapped in `@media not ((prefers-contrast: more) or (forced-colors: active))` so they
+  never beat it, nor `ui/src/styles/high-contrast.css`'s forced-colors overrides (forced
+  colors does not imply `prefers-contrast: more`; final-review correction, 2026-09-26). The quiet
   typography applies in both.
 - **Source location:** a new `design-tokens/quiet.tokens.json` (W3C format like its
   siblings), carrying the **existing** extension key `"com.human.platform": "web"`. All 13

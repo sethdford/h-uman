@@ -27,7 +27,7 @@ test("emits every selector, the contrast guard, and both modes", () => {
   ]) {
     assert.ok(css.includes(sel), `missing selector ${sel}`);
   }
-  assert.ok(css.includes("@media not (prefers-contrast: more)"));
+  assert.ok(css.includes("@media not ((prefers-contrast: more) or (forced-colors: active))"));
   assert.ok(css.includes("@media (prefers-color-scheme: dark)"));
   assert.ok(css.includes("--hu-font-display: \"Newsreader Variable\", serif;"));
   assert.equal(css.match(/--hu-bg: oklch\(97\.5% 0\.010 95\);/g)?.length, 3); // scope + light ancestor + light self
@@ -45,9 +45,10 @@ test("never declares on bare :root (no leakage into non-quiet pages)", () => {
   assert.doesNotMatch(generateQuietCSS(MIN), /^\s*:root\s*\{/m);
 });
 
-test("colors are guarded by prefers-contrast; typography is not", () => {
+test("colors are guarded by prefers-contrast and forced-colors; typography is not", () => {
   const css = generateQuietCSS(MIN);
-  const guard = css.indexOf("@media not (prefers-contrast: more)");
+  const guard = css.indexOf("@media not ((prefers-contrast: more) or (forced-colors: active))");
+  assert.ok(guard > 0, "the combined contrast/forced-colors guard must be emitted");
   assert.ok(css.indexOf("--hu-font-display") < guard, "type must precede the contrast guard");
   assert.ok(css.indexOf("--hu-bg") > guard, "colors must sit inside the contrast guard");
 });
