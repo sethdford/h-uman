@@ -1,8 +1,8 @@
 /* Commitment detection — promises, intentions, reminders, goals from text */
 #include "human/agent/commitment.h"
+#include "human/core/json.h"
 #include "human/core/string.h"
 #include "human/data/loader.h"
-#include "human/core/json.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,8 +12,8 @@
 static void generate_commitment_id(hu_allocator_t *alloc, char **out) {
     static size_t counter = 0;
     char buf[64];
-    int n = snprintf(buf, sizeof(buf), "commit-%llu-%zu",
-                     (unsigned long long)time(NULL), counter++);
+    int n =
+        snprintf(buf, sizeof(buf), "commit-%llu-%zu", (unsigned long long)time(NULL), counter++);
     if (n > 0 && (size_t)n < sizeof(buf)) {
         *out = hu_strndup(alloc, buf, (size_t)n);
     } else {
@@ -23,9 +23,10 @@ static void generate_commitment_id(hu_allocator_t *alloc, char **out) {
 
 /* Default fallback pattern arrays (NULL-terminated) */
 static const char *DEFAULT_PROMISE_PATTERNS[] = {"I will ", "I'll ", "I promise ", NULL};
-static const char *DEFAULT_INTENTION_PATTERNS[] = {"I'm going to ", "I am going to ", "I plan to ", NULL};
-static const char *DEFAULT_REMINDER_PATTERNS[] = {"remind me ", "don't let me forget ", "don't forget to ",
-                                         NULL};
+static const char *DEFAULT_INTENTION_PATTERNS[] = {"I'm going to ", "I am going to ", "I plan to ",
+                                                   NULL};
+static const char *DEFAULT_REMINDER_PATTERNS[] = {"remind me ", "don't let me forget ",
+                                                  "don't forget to ", NULL};
 static const char *DEFAULT_GOAL_PATTERNS[] = {"I want to ", "my goal is ", "I hope to ", NULL};
 static const char *DEFAULT_NEGATION_PREFIXES[] = {"not ", "n't ", "never ", NULL};
 
@@ -35,86 +36,6 @@ static const char **s_intention_patterns = (const char **)DEFAULT_INTENTION_PATT
 static const char **s_reminder_patterns = (const char **)DEFAULT_REMINDER_PATTERNS;
 static const char **s_goal_patterns = (const char **)DEFAULT_GOAL_PATTERNS;
 static const char **s_negation_prefixes = (const char **)DEFAULT_NEGATION_PREFIXES;
-
-static void load_patterns(hu_allocator_t *alloc, hu_json_value_t *root, const char *key,
-                         const char ***dest) {
-    if (!root || !dest)
-        return;
-    hu_json_value_t *arr = hu_json_object_get(root, key);
-    if (!arr || arr->type != HU_JSON_ARRAY)
-        return;
-    size_t count = arr->data.array.len;
-    if (count == 0)
-        return;
-    /* Allocate for count + 1 (NULL terminator) */
-    const char **patterns = (const char **)alloc->alloc(alloc->ctx, (count + 1) * sizeof(const char *));
-    if (!patterns)
-        return;
-    memset(patterns, 0, (count + 1) * sizeof(const char *));
-    for (size_t i = 0; i < count; i++) {
-        hu_json_value_t *item = arr->data.array.items[i];
-        if (item && item->type == HU_JSON_STRING) {
-            patterns[i] = hu_strndup(alloc, item->data.string.ptr, item->data.string.len);
-        }
-    }
-    patterns[count] = NULL; /* NULL-terminate */
-    *dest = patterns;
-}
-
-hu_error_t hu_commitment_data_init(hu_allocator_t *alloc) {
-    if (!alloc)
-        return HU_ERR_INVALID_ARGUMENT;
-
-    char *json_data = NULL;
-    size_t json_len = 0;
-    hu_error_t err = hu_data_load(alloc, "agent/commitment_patterns.json", &json_data, &json_len);
-    if (err != HU_OK)
-        return HU_OK; /* Fail gracefully, keep defaults */
-
-    hu_json_value_t *root = NULL;
-    err = hu_json_parse(alloc, json_data, json_len, &root);
-    alloc->free(alloc->ctx, json_data, json_len);
-    if (err != HU_OK || !root)
-        return HU_OK; /* Fail gracefully, keep defaults */
-
-    load_patterns(alloc, root, "promise", &s_promise_patterns);
-    load_patterns(alloc, root, "intention", &s_intention_patterns);
-    load_patterns(alloc, root, "reminder", &s_reminder_patterns);
-    load_patterns(alloc, root, "goal", &s_goal_patterns);
-    load_patterns(alloc, root, "negation", &s_negation_prefixes);
-
-    hu_json_free(alloc, root);
-    return HU_OK;
-}
-
-static void free_patterns(hu_allocator_t *alloc, const char **arr, const char **default_arr) {
-    if (arr != default_arr && arr) {
-        for (size_t i = 0; arr[i]; i++) {
-            alloc->free(alloc->ctx, (char *)arr[i], strlen(arr[i]) + 1);
-        }
-        /* Count items to free the array itself */
-        size_t count = 0;
-        for (size_t i = 0; arr[i]; i++) count++;
-        alloc->free(alloc->ctx, arr, (count + 1) * sizeof(const char *));
-    }
-}
-
-void hu_commitment_data_cleanup(hu_allocator_t *alloc) {
-    if (!alloc)
-        return;
-
-    free_patterns(alloc, s_promise_patterns, (const char **)DEFAULT_PROMISE_PATTERNS);
-    free_patterns(alloc, s_intention_patterns, (const char **)DEFAULT_INTENTION_PATTERNS);
-    free_patterns(alloc, s_reminder_patterns, (const char **)DEFAULT_REMINDER_PATTERNS);
-    free_patterns(alloc, s_goal_patterns, (const char **)DEFAULT_GOAL_PATTERNS);
-    free_patterns(alloc, s_negation_prefixes, (const char **)DEFAULT_NEGATION_PREFIXES);
-
-    s_promise_patterns = (const char **)DEFAULT_PROMISE_PATTERNS;
-    s_intention_patterns = (const char **)DEFAULT_INTENTION_PATTERNS;
-    s_reminder_patterns = (const char **)DEFAULT_REMINDER_PATTERNS;
-    s_goal_patterns = (const char **)DEFAULT_GOAL_PATTERNS;
-    s_negation_prefixes = (const char **)DEFAULT_NEGATION_PREFIXES;
-}
 
 static void fill_timestamp(char *buf, size_t buf_size) {
     time_t now = time(NULL);
@@ -149,8 +70,8 @@ static size_t extract_clause_end(const char *text, size_t text_len, size_t start
 
 static hu_error_t add_commitment(hu_allocator_t *alloc, hu_commitment_detect_result_t *result,
                                  const char *text, size_t text_len, size_t pattern_start,
-                                 size_t pattern_len, hu_commitment_type_t type,
-                                 const char *role, size_t role_len) {
+                                 size_t pattern_len, hu_commitment_type_t type, const char *role,
+                                 size_t role_len) {
     if (result->count >= HU_COMMITMENT_DETECT_MAX)
         return HU_OK;
 
@@ -184,7 +105,8 @@ static hu_error_t add_commitment(hu_allocator_t *alloc, hu_commitment_detect_res
         return HU_ERR_OUT_OF_MEMORY;
     }
 
-    char *owner = role && role_len > 0 ? hu_strndup(alloc, role, role_len) : hu_strndup(alloc, "user", 4);
+    char *owner =
+        role && role_len > 0 ? hu_strndup(alloc, role, role_len) : hu_strndup(alloc, "user", 4);
     if (!owner) {
         alloc->free(alloc->ctx, created_at_dup, strlen(created_at_dup) + 1);
         alloc->free(alloc->ctx, id, strlen(id) + 1);
@@ -218,9 +140,9 @@ static hu_error_t add_commitment(hu_allocator_t *alloc, hu_commitment_detect_res
 }
 
 static hu_error_t scan_patterns(hu_allocator_t *alloc, const char *text, size_t text_len,
-                               const char *role, size_t role_len,
-                               hu_commitment_detect_result_t *result,
-                               const char *const *patterns, hu_commitment_type_t type) {
+                                const char *role, size_t role_len,
+                                hu_commitment_detect_result_t *result, const char *const *patterns,
+                                hu_commitment_type_t type) {
     for (size_t p = 0; patterns[p]; p++) {
         size_t plen = strlen(patterns[p]);
         if (plen > text_len)
@@ -232,8 +154,8 @@ static hu_error_t scan_patterns(hu_allocator_t *alloc, const char *text, size_t 
                                  text[i - 1] == ',' || text[i - 1] == '.';
             if (!word_boundary)
                 continue;
-            hu_error_t err = add_commitment(alloc, result, text, text_len, i, plen, type, role,
-                                            role_len);
+            hu_error_t err =
+                add_commitment(alloc, result, text, text_len, i, plen, type, role, role_len);
             if (err != HU_OK)
                 return err;
             if (result->count >= HU_COMMITMENT_DETECT_MAX)
@@ -244,8 +166,8 @@ static hu_error_t scan_patterns(hu_allocator_t *alloc, const char *text, size_t 
 }
 
 hu_error_t hu_commitment_detect(hu_allocator_t *alloc, const char *text, size_t text_len,
-                               const char *role, size_t role_len,
-                               hu_commitment_detect_result_t *result) {
+                                const char *role, size_t role_len,
+                                hu_commitment_detect_result_t *result) {
     if (!alloc || !result)
         return HU_ERR_INVALID_ARGUMENT;
     if (!text)
@@ -257,7 +179,7 @@ hu_error_t hu_commitment_detect(hu_allocator_t *alloc, const char *text, size_t 
 
     hu_error_t err;
     err = scan_patterns(alloc, text, text_len, role, role_len, result, s_promise_patterns,
-                       HU_COMMITMENT_PROMISE);
+                        HU_COMMITMENT_PROMISE);
     if (err != HU_OK)
         return err;
     err = scan_patterns(alloc, text, text_len, role, role_len, result, s_intention_patterns,
@@ -265,11 +187,11 @@ hu_error_t hu_commitment_detect(hu_allocator_t *alloc, const char *text, size_t 
     if (err != HU_OK)
         return err;
     err = scan_patterns(alloc, text, text_len, role, role_len, result, s_reminder_patterns,
-                       HU_COMMITMENT_REMINDER);
+                        HU_COMMITMENT_REMINDER);
     if (err != HU_OK)
         return err;
     err = scan_patterns(alloc, text, text_len, role, role_len, result, s_goal_patterns,
-                       HU_COMMITMENT_GOAL);
+                        HU_COMMITMENT_GOAL);
     if (err != HU_OK)
         return err;
     return HU_OK;

@@ -248,7 +248,7 @@ static hu_error_t read_binary_file(hu_allocator_t *alloc, const char *path, size
 
 /* Extract printable text sequences from binary (e.g. PDF). Joins runs with newlines. */
 static hu_error_t extract_printable_text(hu_allocator_t *alloc, const void *raw, size_t raw_len,
-                                          char **out, size_t *out_len) {
+                                         char **out, size_t *out_len) {
     if (!alloc || !raw || !out || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
@@ -363,8 +363,8 @@ static void strip_md_json(const char *in, size_t in_len, const char **out, size_
 }
 
 static hu_error_t store_raw_text(hu_allocator_t *alloc, hu_memory_t *memory, const char *content,
-                                  size_t content_len, const char *path, size_t path_len,
-                                  const char *fname, size_t fname_len) {
+                                 size_t content_len, const char *path, size_t path_len,
+                                 const char *fname, size_t fname_len) {
     if (!content || content_len == 0)
         return HU_ERR_PARSE;
     char *key = hu_sprintf(alloc, "ingest:%.*s", (int)fname_len, fname);
@@ -377,9 +377,8 @@ static hu_error_t store_raw_text(hu_allocator_t *alloc, hu_memory_t *memory, con
         return HU_ERR_OUT_OF_MEMORY;
     }
     hu_memory_category_t cat = {.tag = HU_MEMORY_CATEGORY_DAILY};
-    hu_error_t err =
-        hu_memory_store_with_source(memory, key, strlen(key), content, content_len, &cat, NULL, 0,
-                                    source, strlen(source));
+    hu_error_t err = hu_memory_store_with_source(memory, key, strlen(key), content, content_len,
+                                                 &cat, NULL, 0, source, strlen(source));
     hu_str_free(alloc, source);
     hu_str_free(alloc, key);
     return err;
@@ -556,7 +555,7 @@ hu_error_t hu_ingest_file_with_provider(hu_allocator_t *alloc, hu_memory_t *memo
 
     if (type == HU_INGEST_AUDIO || type == HU_INGEST_VIDEO) {
         char *desc = hu_sprintf(alloc, "Ingested %s file: %.*s",
-                               type == HU_INGEST_AUDIO ? "audio" : "video", (int)fname_len, fname);
+                                type == HU_INGEST_AUDIO ? "audio" : "video", (int)fname_len, fname);
         if (!desc)
             return HU_ERR_OUT_OF_MEMORY;
         hu_error_t err =
@@ -566,16 +565,4 @@ hu_error_t hu_ingest_file_with_provider(hu_allocator_t *alloc, hu_memory_t *memo
     }
 
     return HU_ERR_NOT_SUPPORTED;
-}
-
-void hu_ingest_result_deinit(hu_ingest_result_t *result, hu_allocator_t *alloc) {
-    if (!result || !alloc)
-        return;
-    if (result->content)
-        alloc->free(alloc->ctx, result->content, result->content_len + 1);
-    if (result->summary)
-        alloc->free(alloc->ctx, result->summary, result->summary_len + 1);
-    if (result->source_path)
-        alloc->free(alloc->ctx, result->source_path, result->source_path_len + 1);
-    memset(result, 0, sizeof(*result));
 }

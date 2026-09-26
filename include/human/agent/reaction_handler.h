@@ -49,8 +49,8 @@ void hu_reaction_handler_set_collector(hu_dpo_collector_t *collector);
  * model sink. When non-NULL, iMessage reactions on registered assistant
  * messages are ingested as canonical English into the personal model
  * (separate concern from the DPO collector which exists for training
- * data). Wired by the daemon at init via
- * hu_daemon_reaction_wire_personal_model. Pass NULL at shutdown to clear. */
+ * data). Wired by the daemon at init (src/daemon.c). Pass NULL at
+ * shutdown to clear. */
 void hu_reaction_handler_set_personal_model(struct hu_personal_model *model);
 
 /* Sprint A.7: optional identity-resolver wire. When non-NULL, reaction

@@ -1874,8 +1874,8 @@ function generateCHeader(tokens: TokenMap): string {
  *   HU_COLOR_BG_<NAME>     — 256-color background
  *   HU_COLOR_BG_<NAME>_TC  — truecolor (24-bit) background
  *
- * Use hu_terminal_color_level() from <human/terminal.h> to pick the right
- * variant at runtime, or use hu_color_fg()/hu_color_bg() for dynamic colors.
+ * Pick the 256-color variant for widest compatibility; use the _TC variants
+ * when the terminal advertises truecolor (COLORTERM=truecolor|24bit).
  */
 
 ${darkSection}

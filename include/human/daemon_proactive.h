@@ -289,4 +289,25 @@ bool hu_daemon_proactive_reach_should_skip(struct hu_agent *agent, hu_allocator_
                                            const char *ch_name, const char *contact_id,
                                            const char *target, size_t target_len);
 
+/* Contract C5, Part A — write one row to the proactive_decisions log.
+ *
+ * The single writer for every daemon-side subsystem that makes a
+ * "should I speak now?" call, parameterized by `trigger` so each policy stays
+ * separable in scripts/eval_when_to_speak.py ("proactive_send" for check-ins,
+ * "follow_up" for the follow-up watcher). Extracted 2026-09-21 when the
+ * watcher landed: the resolve-db-then-record preamble was otherwise copied
+ * verbatim into a second file (clone-ratchet).
+ *
+ *   trigger     — non-NULL subsystem name; the row is dropped if NULL.
+ *   decision    — one of HU_PROACTIVE_DECISION_{SEND,DECLINE,DEFER}.
+ *   sent        — 1 only when a channel actually accepted delivery.
+ *   message     — optional; stored as a bounded 64-byte PREFIX, never in full.
+ *   now         — unix SECONDS (the `ts` column's contract), never ms.
+ *
+ * Best-effort: a logging failure never affects the caller's send outcome.
+ * A no-op when built without HU_ENABLE_SQLITE. */
+void hu_daemon_record_decision_row(struct hu_agent *agent, const char *trigger, const char *contact,
+                                   const char *decision, const char *reason, int sent,
+                                   const char *message, size_t message_len, int64_t now);
+
 #endif /* HU_DAEMON_PROACTIVE_H */

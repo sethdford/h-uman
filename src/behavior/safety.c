@@ -5,24 +5,6 @@
 #include <stdio.h>
 #include <string.h>
 
-static const char *const HU_BRISK_NAMES[HU_BRISK_COUNT] = {
-    "none",
-    "attachment_high",
-    "exclusivity",
-    "goodbye_manipulation",
-    "human_displacement",
-    "dependency_pattern",
-    "vulnerable_user",
-    "escalation_needed",
-};
-
-const char *hu_behavior_risk_name(hu_behavior_risk_t r) {
-    if (r < 0 || r >= HU_BRISK_COUNT) {
-        return "none";
-    }
-    return HU_BRISK_NAMES[r];
-}
-
 static void bsafe_set_rationale(hu_behavior_safety_assessment_t *out, const char *msg) {
     if (!out || !msg) {
         return;
@@ -45,8 +27,7 @@ hu_error_t hu_behavior_safety_assess(const hu_behavior_safety_input_t *in,
     out->rationale[0] = '\0';
 
     /* 1. Crisis / vulnerability — highest priority. */
-    if (in->vulnerability.level >= HU_VULNERABILITY_CRISIS ||
-        in->vulnerability.crisis_keywords) {
+    if (in->vulnerability.level >= HU_VULNERABILITY_CRISIS || in->vulnerability.crisis_keywords) {
         out->primary_risk = HU_BRISK_ESCALATION_NEEDED;
         out->severity = 1.f;
         out->require_referral = true;
@@ -96,8 +77,7 @@ hu_error_t hu_behavior_safety_assess(const hu_behavior_safety_input_t *in,
     }
 
     /* 5. Dependency pattern — frequency + late-night. */
-    if (in->attachment.sessions_per_day_avg >= 10 ||
-        in->attachment.late_night_sessions_30d >= 20) {
+    if (in->attachment.sessions_per_day_avg >= 10 || in->attachment.late_night_sessions_30d >= 20) {
         out->primary_risk = HU_BRISK_DEPENDENCY_PATTERN;
         out->severity = 0.6f;
         out->encourage_human_relationship = true;
@@ -106,8 +86,7 @@ hu_error_t hu_behavior_safety_assess(const hu_behavior_safety_input_t *in,
     }
 
     /* 6. Parasocial signals — soft warning. */
-    if (in->attachment.parasocial_signal_count >= 5 ||
-        in->attachment.attachment_estimate >= 0.7f) {
+    if (in->attachment.parasocial_signal_count >= 5 || in->attachment.attachment_estimate >= 0.7f) {
         out->primary_risk = HU_BRISK_HUMAN_DISPLACEMENT;
         out->severity = 0.55f;
         out->encourage_human_relationship = true;

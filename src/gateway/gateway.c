@@ -548,50 +548,6 @@ static bool send_response(int fd, int status, const char *content_type, const ch
     return true;
 }
 
-/* Send SSE headers for chunked streaming (no Content-Length). */
-bool hu_gateway_send_sse_headers(int fd) {
-    const char *cors_origin = get_cors_origin_for_response();
-    char hdr[2048];
-    char cors_line[256] = "";
-    if (cors_origin[0] != '\0')
-        snprintf(cors_line, sizeof(cors_line), "Access-Control-Allow-Origin: %s\r\n", cors_origin);
-    int n = snprintf(hdr, sizeof(hdr),
-                     "HTTP/1.1 200 OK\r\n"
-                     "Content-Type: text/event-stream\r\n"
-                     "Cache-Control: no-cache\r\n"
-                     "Connection: keep-alive\r\n"
-                     "Transfer-Encoding: chunked\r\n"
-                     "X-Content-Type-Options: nosniff\r\n"
-                     "%s"
-                     "\r\n",
-                     cors_line);
-    if (n < 0)
-        return false;
-    if ((size_t)n >= sizeof(hdr))
-        n = (int)(sizeof(hdr) - 1);
-    return send_all(fd, hdr, (size_t)n);
-}
-
-/* Send a single HTTP chunked-encoding frame (hex length + CRLF + data + CRLF). */
-bool hu_gateway_send_sse_chunk(int fd, const char *data, size_t data_len) {
-    if (data_len == 0)
-        return true;
-    char len_line[32];
-    int len_n = snprintf(len_line, sizeof(len_line), "%zx\r\n", data_len);
-    if (len_n < 0)
-        return false;
-    if (!send_all(fd, len_line, (size_t)len_n))
-        return false;
-    if (!send_all(fd, data, data_len))
-        return false;
-    return send_all(fd, "\r\n", 2);
-}
-
-/* Terminate chunked transfer encoding with the zero-length chunk. */
-bool hu_gateway_send_sse_end(int fd) {
-    return send_all(fd, "0\r\n\r\n", 5);
-}
-
 static bool send_json(int fd, int status, const char *body) {
     return send_response(fd, status, "application/json", body, body ? strlen(body) : 0, 0);
 }

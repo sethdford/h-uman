@@ -24,8 +24,6 @@ typedef struct hu_config {
     uint32_t max_tokens;
     char *memory_backend;
     bool memory_auto_save;
-    bool heartbeat_enabled;
-    uint32_t heartbeat_interval_minutes;
     char *gateway_host;
     uint16_t gateway_port;
     bool workspace_only;

@@ -201,8 +201,6 @@ typedef struct hu_composite_observer_ctx {
     hu_observer_t *observers;
     size_t count;
 } hu_composite_observer_ctx_t;
-hu_observer_t hu_observer_composite_create(hu_composite_observer_ctx_t *ctx,
-                                           hu_observer_t *observers, size_t count);
 
 /** Registry — create observer from backend string (log, verbose, noop, none). */
 hu_observer_t hu_observer_registry_create(const char *backend, void *user_ctx);

@@ -40,7 +40,6 @@
 #include "human/feeds/processor.h"
 #include "human/memory.h"
 #include "human/memory/compression.h"
-#include "human/memory/degradation.h"
 #include "human/memory/personal_model.h"
 #include "human/memory/proactive_decisions_repo.h" /* C5 Part A: decision log */
 #include "human/persona.h"
@@ -910,11 +909,11 @@ bool hu_daemon_proactive_should_skip_for_budget(hu_proactive_budget_t *budget, u
  * row that carries sent=1 + a message_ref, because this is the one call
  * site that knows delivery actually happened. Best-effort: a logging
  * failure must never affect the send outcome itself. */
-static void daemon_proactive_record_decision(struct hu_agent *agent, const char *contact,
-                                             const char *decision, const char *reason, int sent,
-                                             const char *message, size_t message_len, int64_t now) {
+void hu_daemon_record_decision_row(struct hu_agent *agent, const char *trigger, const char *contact,
+                                   const char *decision, const char *reason, int sent,
+                                   const char *message, size_t message_len, int64_t now) {
 #ifdef HU_ENABLE_SQLITE
-    if (!agent || !agent->memory)
+    if (!agent || !agent->memory || !trigger)
         return;
     struct sqlite3 *db = hu_sqlite_memory_get_db(agent->memory);
     if (!db)
@@ -928,13 +927,14 @@ static void daemon_proactive_record_decision(struct hu_agent *agent, const char 
         memcpy(ref_buf, message, n);
         ref_buf[n] = '\0';
     }
-    hu_error_t err = hu_proactive_decisions_repo_record(
-        db, now, contact, "proactive_send", decision, reason, sent, ref_buf[0] ? ref_buf : NULL);
+    hu_error_t err = hu_proactive_decisions_repo_record(db, now, contact, trigger, decision, reason,
+                                                        sent, ref_buf[0] ? ref_buf : NULL);
     if (err != HU_OK)
         hu_log_warn("daemon_proactive", NULL, "proactive_decisions_repo_record failed: err=%d",
                     (int)err);
 #else
     (void)agent;
+    (void)trigger;
     (void)contact;
     (void)decision;
     (void)reason;
@@ -943,6 +943,13 @@ static void daemon_proactive_record_decision(struct hu_agent *agent, const char 
     (void)message_len;
     (void)now;
 #endif
+}
+
+static void daemon_proactive_record_decision(struct hu_agent *agent, const char *contact,
+                                             const char *decision, const char *reason, int sent,
+                                             const char *message, size_t message_len, int64_t now) {
+    hu_daemon_record_decision_row(agent, "proactive_send", contact, decision, reason, sent, message,
+                                  message_len, now);
 }
 
 /* Send a proactive check-in and record it, ONLY if the channel accepted it.

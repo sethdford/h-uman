@@ -12,7 +12,6 @@
 
 const char *hu_config_sandbox_backend_to_string(hu_sandbox_backend_t b);
 hu_sandbox_backend_t hu_config_parse_sandbox_backend(const char *s);
-const char *hu_config_env_get(const char *name);
 void hu_config_apply_env_str(hu_allocator_t *a, char **dst, const char *v);
 
 #endif

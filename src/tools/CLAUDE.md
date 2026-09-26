@@ -112,7 +112,6 @@ homeassistant.c   Home Assistant integration
 
 ```
 git.c             Git operations
-lsp.c             Language Server Protocol operations
 code_sandbox.c    Sandboxed code execution
 claude_code.c     Claude Code integration
 apply_patch.c     Apply code patches

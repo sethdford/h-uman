@@ -51,9 +51,6 @@ hu_error_t hu_task_list_next_available(hu_task_list_t *list, hu_task_t *out);
 /* Get task by ID */
 hu_error_t hu_task_list_get(hu_task_list_t *list, uint64_t task_id, hu_task_t *out);
 
-/* List all tasks */
-hu_error_t hu_task_list_all(hu_task_list_t *list, hu_task_t **out, size_t *out_count);
-
 /* Check if a task is blocked (any blocked_by task not yet COMPLETED) */
 bool hu_task_list_is_blocked(hu_task_list_t *list, uint64_t task_id);
 

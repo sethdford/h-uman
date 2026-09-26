@@ -16,26 +16,18 @@ factory.c           Engine registry and creation (hu_memory_t vtable)
     redis.c          Redis-backed memory (HU_ENABLE_REDIS_ENGINE)
     api.c            Remote API memory backend
     none.c           No-op backend
-    registry.c       Engine registration
 
 retrieval/           Query and retrieval pipeline
   engine.c           Main retrieval engine (coordinates hybrid search)
   hybrid.c           Combines vector + keyword results
   keyword.c          Keyword/BM25 retrieval
   reranker.c         Result reranking
-  qmd.c             Query-Memory Dispatch (routes queries to best retrieval strategy)
 
 vector/              Vector search and embeddings
   embeddings.c       Embedding generation (via provider)
-  store.c            Local vector store
-  store_qdrant.c     Qdrant integration
-  store_pgvector.c   pgvector integration
-  chunker.c          Document chunking for embedding
 
 lifecycle/           Memory maintenance
   cache.c            Semantic cache
-  hygiene.c          Memory cleanup and quality
-  summarizer.c       Memory summarization
 ```
 
 ## Key Concepts
@@ -43,7 +35,7 @@ lifecycle/           Memory maintenance
 - **Engines** implement `hu_memory_t` vtable (store, retrieve, search, delete)
 - **Retrieval** orchestrates hybrid search: vector similarity + keyword match + reranking
 - **QMD** classifies incoming queries to pick the optimal retrieval strategy
-- **Lifecycle** handles background maintenance (summarize, clean, consolidate)
+- **Lifecycle** caches memory entries and semantic query results
 
 ## Cognitive/Emotional Layer
 
@@ -51,7 +43,6 @@ lifecycle/           Memory maintenance
 emotional_graph.c       Tracks emotional patterns across conversations
 emotional_residue.c     Persists emotional context between sessions
 emotional_moments.c     Identifies emotionally significant memories
-cognitive.c             Cognitive processing and memory integration
 comfort_patterns.c      Learned comfort/coping patterns
 episodic.c              Episodic memory formation
 stm.c                   Short-term memory buffer
@@ -67,7 +58,6 @@ consolidation.c         Merges and deduplicates memories
 consolidation_engine.c  Background consolidation processing
 forgetting.c            Spaced-repetition based forgetting
 forgetting_curve.c      Ebbinghaus forgetting curve implementation
-degradation.c           Gradual memory quality degradation
 promotion.c             Promotes important short-term to long-term
 compression.c           Compresses verbose memories
 connections.c           Cross-memory connection discovery

@@ -272,44 +272,6 @@ uint64_t hu_observer_metrics_get(hu_metrics_observer_ctx_t *ctx, hu_observer_met
     return 0;
 }
 
-static void composite_record_event(void *ctx, const hu_observer_event_t *event) {
-    hu_composite_observer_ctx_t *c = (hu_composite_observer_ctx_t *)ctx;
-    for (size_t i = 0; i < c->count; i++)
-        hu_observer_record_event(c->observers[i], event);
-}
-static void composite_record_metric(void *ctx, const hu_observer_metric_t *metric) {
-    hu_composite_observer_ctx_t *c = (hu_composite_observer_ctx_t *)ctx;
-    for (size_t i = 0; i < c->count; i++)
-        hu_observer_record_metric(c->observers[i], metric);
-}
-static void composite_flush(void *ctx) {
-    hu_composite_observer_ctx_t *c = (hu_composite_observer_ctx_t *)ctx;
-    for (size_t i = 0; i < c->count; i++)
-        hu_observer_flush(c->observers[i]);
-}
-static const char *composite_name(void *ctx) {
-    (void)ctx;
-    return "multi";
-}
-static void composite_deinit(void *ctx) {
-    (void)ctx;
-}
-
-static const hu_observer_vtable_t composite_vtable = {
-    .record_event = composite_record_event,
-    .record_metric = composite_record_metric,
-    .flush = composite_flush,
-    .name = composite_name,
-    .deinit = composite_deinit,
-};
-
-hu_observer_t hu_observer_composite_create(hu_composite_observer_ctx_t *ctx,
-                                           hu_observer_t *observers, size_t count) {
-    ctx->observers = observers;
-    ctx->count = count;
-    return (hu_observer_t){.ctx = ctx, .vtable = &composite_vtable};
-}
-
 hu_observer_t hu_observer_registry_create(const char *backend, void *user_ctx) {
     if (!backend)
         return hu_observer_noop();

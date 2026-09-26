@@ -11,7 +11,7 @@ fixtures or experimental work parked for later.
 **Orphans (test-only, not wired into production):**
 
 - `signal.c` — implementation complete, missing config schema fields.
-- `mattermost.c`, `maixcam.c`, `web.c` — missing config schema and bootstrap.
+- `mattermost.c`, `web.c` — missing config schema and bootstrap.
 - `cli.c`, `dispatch.c`, `webhook.c` — used as test fixtures; production paths
   bypass these facades.
 
@@ -67,7 +67,6 @@ Generated from designated initializers in each `src/channels/*.c` vtable. **hist
  * irc            |  ✓   |    ✓    |   ·   |      ·       |   ·    |     ·
  * lark           |  ✓   |    ·    |   ·   |      ·       |   ·    |     ·
  * line           |  ✓   |    ·    |   ·   |      ·       |   ·    |     ·
- * maixcam        |  ✓   |    ·    |   ·   |      ·       |   ·    |     ·
  * matrix         |  ✓   |    ✓    |   ✓   |      ✓       |   ✓    |     ·
  * mattermost     |  ✓   |    ✓    |   ✓   |      ✓       |   ✓    |     ·
  * mqtt           |  ✓   |    ✓    |   ·   |      ·       |   ·    |     ·
@@ -125,7 +124,6 @@ Generated from designated initializers in each `src/channels/*.c` vtable. **hist
 | irc | ✓ | · | · | · | · |
 | lark | · | · | · | · | · |
 | line | · | · | · | · | · |
-| maixcam | · | · | · | · | · |
 | matrix | ✓ | ✓ | ✓ | ✓ | · |
 | mattermost | ✓ | ✓ | ✓ | ✓ | · |
 | mqtt | ✓ | · | · | · | · |
@@ -205,7 +203,6 @@ onebot.c             OneBot protocol
 voice_channel.c      Voice call channel
 voice_integration.c  Voice subsystem integration
 voice_realtime.c     Real-time voice streaming
-maixcam.c            MaixCAM IoT device
 ```
 
 ### PWA

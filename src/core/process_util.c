@@ -1,6 +1,7 @@
 #include "human/core/process_util.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/platform.h"
 #include "human/security.h"
 #include "human/security/sandbox.h"
 #include <stdio.h>
@@ -21,13 +22,15 @@ bool hu_process_self_exe_path(char *buf, size_t cap) {
     uint32_t size = (uint32_t)sizeof(tmp);
     if (_NSGetExecutablePath(tmp, &size) != 0)
         return false;
-    char *resolved = realpath(tmp, NULL);
+    hu_allocator_t alloc = hu_system_allocator();
+    char *resolved = hu_platform_realpath(&alloc, tmp);
     const char *src = resolved ? resolved : tmp;
     size_t n = strlen(src);
     bool ok = n > 0 && n < cap;
     if (ok)
         memcpy(buf, src, n + 1);
-    free(resolved);
+    if (resolved)
+        alloc.free(alloc.ctx, resolved, strlen(resolved) + 1);
     return ok;
 #elif defined(__linux__)
     /* readlink() silently truncates; a result that fills the buffer is not a

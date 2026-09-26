@@ -1,3 +1,20 @@
+/*
+ * PUBLIC SDK SURFACE — do not delete for want of an in-tree caller.
+ *
+ * hu_channel_manager_* is documented, published API for third-party channel
+ * authors: docs/api/channels.md, sdk/README.md, and the copy-paste starting
+ * point sdk/templates/channel/{my_channel.h,my_channel.c}, whose doc comment
+ * tells the reader to register with hu_channel_manager_register().
+ *
+ * The daemon itself does not use it — it drives channels through
+ * src/channels/channel_loop.c — so this TU has no call site on the `human`
+ * link path and lives in the human_devlib archive rather than human_core
+ * (Task 12 of docs/plans/2026-09-20-dead-code-plan.md). That is deliberate,
+ * not an oversight, and it is why a dead-code sweep will keep finding this
+ * file. tests/test_sdk_channel_template.c is the executable contract:
+ * it builds the SDK template against include/human/channel_manager.h and
+ * runs the documented registration sequence.
+ */
 #include "human/channel_manager.h"
 #include <string.h>
 

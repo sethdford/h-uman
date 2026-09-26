@@ -125,6 +125,103 @@ if [ -f "CMakeLists.txt" ]; then
         exit 1
     fi
 
+    # Dead-strip ratchet — THE ENFORCEMENT POINT. Never-loaded archive members
+    # (A) and dead-stripped _hu_ symbols no test references (B) may only shrink.
+    # Lives here rather than in pre-commit because it needs a built tree: it
+    # relinks `human` with -dead_strip and reads the link map (~1 s warm).
+    #
+    # It measures `build/` (the dev preset the baselines were taken against),
+    # NOT the build-check this hook just made: build-check configures a
+    # different feature set, so it compiles a different set of translation
+    # units and its counts are not comparable to the committed constants.
+    #
+    # That is why the incremental rebuild below is not optional. `build/` is
+    # whatever state the developer last left it in, and the gate demotes itself
+    # to advisory on a stale tree — so without this rebuild the gate would wave
+    # through most real pushes, measuring an older tree than the one being
+    # pushed. Rebuilding first makes the measured tree the pushed tree, which
+    # is what lets HU_DEAD_STRIP_STRICT=1 (no stale demotion) be honest.
+    # Incremental and warm: seconds when `build/` is current, and the developer
+    # was almost certainly building there anyway.
+    #
+    # No `build/` at all -> skip with one line, per the gate's own contract: an
+    # unmeasurable gate must never block a push.
+    if [ -x "scripts/check-dead-strip-ratchet.sh" ]; then
+        if [ -f "build/CMakeCache.txt" ]; then
+            # Pay for the rebuild only when build/ is actually behind. A no-op
+            # `cmake --build` still re-scans dependencies for ~1,000 objects and
+            # measured 46 s here; "nothing under src/ or include/ is newer than
+            # the linked artifacts" is the same test make itself would apply, so
+            # skipping it when that holds changes nothing but the clock.
+            # The \( ... \) around the -o are REQUIRED, not style. find's -o binds
+            # looser than the implicit -a, so `-name '*.[ch]' -o -name '*.m' -newer X
+            # -print -quit` parses as (.[ch]) OR (.m AND newer AND print), and because
+            # an explicit action suppresses find's default -print, a NEWER .c matches
+            # the first branch, short-circuits, and prints nothing. Verified: the
+            # unparenthesized form reports a freshly-touched src/NEWER.c as CLEAN.
+            # Adding .m without the parens would have broken the .c/.h detection the
+            # probe already did.
+            ds_stale=0
+            for ds_artifact in human human_tests; do
+                if [ ! -f "build/$ds_artifact" ]; then
+                    ds_stale=1
+                elif [ -n "$(find src include \( -name '*.[ch]' -o -name '*.m' \) -newer "build/$ds_artifact" -print -quit 2>/dev/null)" ]; then
+                    ds_stale=1
+                fi
+            done
+            ds_ready=1
+            if [ "$ds_stale" = "1" ]; then
+                echo "Refreshing build/ for the dead-strip ratchet..."
+                ds_log=$(mktemp "${TMPDIR:-/tmp}/human_deadstrip.XXXXXX") || exit 1
+                if cmake --build build --target human human_tests -j"$JOBS" >"$ds_log" 2>&1; then
+                    rm -f "$ds_log"
+                else
+                    # A build/ that cannot build is not evidence about this
+                    # push: build-check already proved the tree compiles and the
+                    # suite passes, so this is a broken dev dir, not a broken
+                    # change. Skipping is the gate's own contract for an
+                    # unmeasurable tree.
+                    ds_ready=0
+                    echo "NOTE: could not rebuild build/ — skipping the dead-strip ratchet."
+                    echo "  (build-check compiled and the suite passed, so this is build/'s"
+                    echo "   own state, not this change. Log: $ds_log)"
+                fi
+            fi
+            if [ "$ds_ready" = "1" ]; then
+                if ! HU_DEAD_STRIP_STRICT=1 bash scripts/check-dead-strip-ratchet.sh; then
+                    echo ""
+                    echo "Push blocked: dead code grew past the dead-strip ratchet."
+                    echo "Delete the never-loaded objects / unreferenced dead symbols listed above,"
+                    echo "or wire them — see .claude/rules/dead-strip-ratchet.md."
+                    exit 1
+                fi
+            fi
+        else
+            echo "No configured build/ — skipping the dead-strip ratchet."
+            echo "  Configure one to enable it; see .claude/rules/dead-strip-ratchet.md."
+        fi
+    fi
+
+    # devlib flag mirror — fences the generator-expression fix from 45d98a4d6.
+    #
+    # Sits beside the dead-strip gate because it guards the same split: Task 12
+    # moved the daemon-never-links modules into human_devlib, and those modules
+    # are selected by the same HU_ENABLE_* options as the rest of the tree, so
+    # human_devlib must compile with human_core_test's exact flags. The first
+    # mirror used get_target_property() and silently captured 60 of 65 defines.
+    #
+    # Reads flags.make, which CMake writes at CONFIGURE time, so unlike the
+    # dead-strip ratchet it needs no fresh build and no rebuild step — and it
+    # skips with exit 0 whenever build/ or either target is absent.
+    if [ -x "scripts/check-devlib-flags.sh" ]; then
+        if ! bash scripts/check-devlib-flags.sh; then
+            echo ""
+            echo "Push blocked: human_devlib's compile flags diverged from human_core_test's."
+            echo "Mirror them with \$<TARGET_PROPERTY:human_core_test,...> generator expressions."
+            exit 1
+        fi
+    fi
+
     # Auto-sync stats across all docs (AGENTS.md, README.md, CONTRIBUTING.md, etc.)
     # Only sync from a tree that actually contains all of origin/main.
     #

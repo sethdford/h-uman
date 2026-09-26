@@ -11,6 +11,7 @@
 #include "human/cognition/metacognition.h"
 #include "human/config.h"
 #include "human/context_engine.h"
+#include "human/context_engine_rag.h"
 #include "human/core/log.h"
 #include "human/core/paths.h"
 #include "human/data/loader.h"
@@ -1105,12 +1106,25 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
                 bi->agent.infra.context_engine = (struct hu_context_engine *)ce;
             else if (ce)
                 alloc->free(alloc->ctx, ce, sizeof(hu_context_engine_t));
+        } else if (strcmp(bi->cfg.agent.context_engine_type, "rag") == 0) {
+            /* SOTA: RAG context engine — recency window plus memory-backed
+             * retrieval of the user's latest message, injected into the
+             * assembled context alongside the recent-message window. */
+            hu_context_engine_t *ce =
+                (hu_context_engine_t *)alloc->alloc(alloc->ctx, sizeof(hu_context_engine_t));
+            hu_context_engine_rag_config_t rag_cfg = {0};
+            rag_cfg.memory = bi->memory.vtable ? &bi->memory : NULL;
+            rag_cfg.provider = bi->provider.vtable ? &bi->provider : NULL;
+            if (ce && hu_context_engine_rag_create(alloc, &rag_cfg, ce) == HU_OK)
+                bi->agent.infra.context_engine = (struct hu_context_engine *)ce;
+            else if (ce)
+                alloc->free(alloc->ctx, ce, sizeof(hu_context_engine_t));
         } else {
-            /* Only "legacy" is wired. A silently-NULL engine was the 2026-09-10
-             * review's most misleading finding: "rag" parsed fine and did less
-             * than the default. Fall back loudly. */
+            /* Unknown engine name. A silently-NULL engine was the 2026-09-10
+             * review's most misleading finding: an unrecognized value parsed
+             * fine and did less than the default. Fall back loudly. */
             hu_log_warn("bootstrap", NULL,
-                        "agent.context_engine='%s' is not implemented; using legacy engine",
+                        "agent.context_engine='%s' is not recognized; using legacy engine",
                         bi->cfg.agent.context_engine_type);
             hu_context_engine_t *ce =
                 (hu_context_engine_t *)alloc->alloc(alloc->ctx, sizeof(hu_context_engine_t));

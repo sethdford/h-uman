@@ -247,15 +247,6 @@ hu_error_t hu_graph_list_relations_verifier_scan(hu_graph_t *g, hu_allocator_t *
 void hu_graph_entities_free(hu_allocator_t *alloc, hu_graph_entity_t *entities, size_t count);
 void hu_graph_relations_free(hu_allocator_t *alloc, hu_graph_relation_t *relations, size_t count);
 
-/* W14 belief-reverify support — write back a refined scalar confidence
- * on an existing relation row. Variance is forced to 0 (treats the
- * update as deterministic). `last_seen_now_ms` advances `last_seen`
- * so re-verification counts as recency. NO-OP and HU_OK on
- * relation_id <= 0. For full Bayesian (mean, variance) updates use
- * hu_graph_set_relation_belief instead. */
-hu_error_t hu_graph_set_relation_confidence(hu_graph_t *g, int64_t relation_id, float confidence,
-                                            int64_t last_seen_now_ms);
-
 /* W8 P2A — write back a full Bayesian posterior (mean + variance).
  * Both `mean` and `variance` are clamped to safe ranges:
  * mean ∈ [0,1], variance ∈ [0, 0.25] (Beta posterior cap). Mirrors
@@ -272,9 +263,6 @@ hu_error_t hu_graph_get_relation_belief(hu_graph_t *g, int64_t relation_id, floa
 /* Ebbinghaus recall tracking: record that an entity was recalled */
 hu_error_t hu_graph_record_recall(hu_graph_t *g, const char *contact_id, size_t contact_id_len,
                                   int64_t entity_id);
-
-/* Ebbinghaus retention score: compute recall probability (0.0-1.0) */
-double hu_graph_retention_score(int64_t last_recalled_ts, int32_t recall_count, int64_t now_ts);
 
 /* Conflict-aware reconsolidation: detect and resolve contradictions */
 bool hu_graph_detect_conflict(hu_graph_t *g, hu_allocator_t *alloc, const char *contact_id,
@@ -293,11 +281,6 @@ hu_error_t hu_graph_leiden_communities(hu_graph_t *g, hu_allocator_t *alloc, con
 hu_error_t hu_graph_add_temporal_event(hu_graph_t *g, const char *contact_id, size_t contact_id_len,
                                        int64_t entity_id, const char *description, size_t desc_len,
                                        int64_t occurred_at, int64_t duration_sec);
-
-/* Causal link management */
-hu_error_t hu_graph_add_causal_link(hu_graph_t *g, const char *contact_id, size_t contact_id_len,
-                                    int64_t action_entity_id, int64_t outcome_entity_id,
-                                    const char *context, size_t context_len, float confidence);
 
 /* Helper: parse entity type from string */
 hu_entity_type_t hu_entity_type_from_string(const char *s, size_t len);

@@ -12,6 +12,7 @@
 #include "human/core/file.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
+#include "human/platform.h"
 #include "human/security.h"
 #include "human/tool.h"
 #include "human/tools/path_security.h"
@@ -123,8 +124,7 @@ static hu_error_t file_edit_execute(void *ctx, hu_allocator_t *alloc, const hu_j
         }
     }
 
-#ifndef _WIN32
-    char *resolved = realpath(full_path, NULL);
+    char *resolved = hu_platform_realpath(alloc, full_path);
     if (!resolved) {
         char *err_msg = hu_sprintf(alloc, "Failed to resolve file path: %s", strerror(errno));
         if (err_msg) {
@@ -134,47 +134,23 @@ static hu_error_t file_edit_execute(void *ctx, hu_allocator_t *alloc, const hu_j
         }
         return HU_OK;
     }
-#else
-    char resolved_buf[HU_PATH_BUF];
-    if (_fullpath(resolved_buf, full_path, sizeof(resolved_buf)) == NULL) {
-        *out = hu_tool_result_fail("Failed to resolve file path", 27);
-        return HU_OK;
-    }
-    char *resolved = hu_strdup(alloc, resolved_buf);
-    if (!resolved) {
-        *out = hu_tool_result_fail("out of memory", 12);
-        return HU_ERR_OUT_OF_MEMORY;
-    }
-#endif
 
     char *ws_resolved = NULL;
     if (c->workspace_dir && c->workspace_dir_len > 0) {
-#ifndef _WIN32
         char ws_buf[HU_PATH_BUF];
         size_t wlen = c->workspace_dir_len;
         if (wlen >= sizeof(ws_buf))
             wlen = sizeof(ws_buf) - 1;
         memcpy(ws_buf, c->workspace_dir, wlen);
         ws_buf[wlen] = '\0';
-        char *wr = realpath(ws_buf, NULL);
-        if (wr) {
-            ws_resolved = hu_strdup(alloc, wr);
-            free(wr);
-        }
-#else
-        ws_resolved = hu_strndup(alloc, c->workspace_dir, c->workspace_dir_len);
-#endif
+        ws_resolved = hu_platform_realpath(alloc, ws_buf);
     }
     const char *ws = ws_resolved ? ws_resolved : "";
     const char *const *allowed =
         (c->policy && c->policy->allowed_paths) ? c->policy->allowed_paths : NULL;
     size_t allowed_count = c->policy ? c->policy->allowed_paths_count : 0;
     if (!hu_path_resolved_allowed(alloc, resolved, ws, allowed, allowed_count)) {
-#ifndef _WIN32
-        free(resolved);
-#else
         alloc->free(alloc->ctx, resolved, strlen(resolved) + 1);
-#endif
         if (ws_resolved)
             alloc->free(alloc->ctx, ws_resolved, strlen(ws_resolved) + 1);
         *out = hu_tool_result_fail("Path is outside allowed areas", 29);
@@ -189,11 +165,7 @@ static hu_error_t file_edit_execute(void *ctx, hu_allocator_t *alloc, const hu_j
     hu_error_t rerr =
         hu_file_slurp(alloc, resolved, (size_t)HU_FILE_EDIT_MAX_SIZE, &contents, &content_len);
     if (rerr != HU_OK) {
-#ifndef _WIN32
-        free(resolved);
-#else
         alloc->free(alloc->ctx, resolved, strlen(resolved) + 1);
-#endif
         if (rerr == HU_ERR_NOT_FOUND) {
             char *err_msg = hu_sprintf(alloc, "Failed to open file: %s", strerror(errno));
             if (err_msg)
@@ -217,11 +189,7 @@ static hu_error_t file_edit_execute(void *ctx, hu_allocator_t *alloc, const hu_j
     char *pos = strstr(contents, old_text);
     if (!pos) {
         alloc->free(alloc->ctx, contents, content_len + 1);
-#ifndef _WIN32
-        free(resolved);
-#else
         alloc->free(alloc->ctx, resolved, strlen(resolved) + 1);
-#endif
         *out = hu_tool_result_fail("old_text not found in file", 25);
         return HU_OK;
     }
@@ -233,11 +201,7 @@ static hu_error_t file_edit_execute(void *ctx, hu_allocator_t *alloc, const hu_j
     char *new_contents = (char *)alloc->alloc(alloc->ctx, total_new + 1);
     if (!new_contents) {
         alloc->free(alloc->ctx, contents, content_len + 1);
-#ifndef _WIN32
-        free(resolved);
-#else
         alloc->free(alloc->ctx, resolved, strlen(resolved) + 1);
-#endif
         *out = hu_tool_result_fail("out of memory", 12);
         return HU_ERR_OUT_OF_MEMORY;
     }
@@ -252,14 +216,14 @@ static hu_error_t file_edit_execute(void *ctx, hu_allocator_t *alloc, const hu_j
     int nwr = snprintf(tmp_path_buf, sizeof(tmp_path_buf), "%s.XXXXXX", resolved);
     if (nwr < 0 || (size_t)nwr >= sizeof(tmp_path_buf)) {
         alloc->free(alloc->ctx, new_contents, total_new + 1);
-        free(resolved);
+        alloc->free(alloc->ctx, resolved, strlen(resolved) + 1);
         *out = hu_tool_result_fail("path too long", 13);
         return HU_OK;
     }
     int fd = mkstemp(tmp_path_buf);
     if (fd < 0) {
         alloc->free(alloc->ctx, new_contents, total_new + 1);
-        free(resolved);
+        alloc->free(alloc->ctx, resolved, strlen(resolved) + 1);
         char *err_msg = hu_sprintf(alloc, "Failed to create temp file: %s", strerror(errno));
         if (err_msg)
             *out = hu_tool_result_fail_owned(err_msg, strlen(err_msg));
@@ -283,11 +247,7 @@ static hu_error_t file_edit_execute(void *ctx, hu_allocator_t *alloc, const hu_j
         close(fd);
 #endif
         alloc->free(alloc->ctx, new_contents, total_new + 1);
-#ifndef _WIN32
-        free(resolved);
-#else
         alloc->free(alloc->ctx, resolved, strlen(resolved) + 1);
-#endif
         *out = hu_tool_result_fail("Failed to open temp file", 24);
         return HU_OK;
     }
@@ -298,18 +258,17 @@ static hu_error_t file_edit_execute(void *ctx, hu_allocator_t *alloc, const hu_j
     if (written != total_new) {
 #ifndef _WIN32
         unlink(tmp_path_buf);
-        free(resolved);
 #else
         remove(tmp_path_buf);
-        alloc->free(alloc->ctx, resolved, strlen(resolved) + 1);
 #endif
+        alloc->free(alloc->ctx, resolved, strlen(resolved) + 1);
         *out = hu_tool_result_fail("Failed to write file", 19);
         return HU_OK;
     }
 #ifndef _WIN32
     if (rename(tmp_path_buf, resolved) != 0) {
         unlink(tmp_path_buf);
-        free(resolved);
+        alloc->free(alloc->ctx, resolved, strlen(resolved) + 1);
         char *err_msg = hu_sprintf(alloc, "Failed to rename temp file: %s", strerror(errno));
         if (err_msg)
             *out = hu_tool_result_fail_owned(err_msg, strlen(err_msg));
@@ -317,7 +276,7 @@ static hu_error_t file_edit_execute(void *ctx, hu_allocator_t *alloc, const hu_j
             *out = hu_tool_result_fail("Failed to rename temp file", 27);
         return HU_OK;
     }
-    free(resolved);
+    alloc->free(alloc->ctx, resolved, strlen(resolved) + 1);
 #else
     if (remove(resolved) != 0) { /* Delete original first on Windows */
         remove(tmp_path_buf);

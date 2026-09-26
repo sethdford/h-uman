@@ -158,8 +158,6 @@ static void set_defaults(hu_config_t *cfg, hu_allocator_t *a) {
         return;
     }
     cfg->memory_auto_save = true;
-    cfg->heartbeat_enabled = false;
-    cfg->heartbeat_interval_minutes = 30;
     cfg->gateway_host = hu_strdup(a, "127.0.0.1");
     if (!cfg->gateway_host) {
         set_defaults_rollback(cfg, a);
@@ -575,8 +573,6 @@ static void sync_flat_fields(hu_config_t *cfg) {
         cfg->memory_backend = cfg->memory.backend;
     cfg->memory_auto_save = cfg->memory.auto_save;
     cfg->consolidation_interval_hours = cfg->memory.consolidation_interval_hours;
-    cfg->heartbeat_enabled = cfg->heartbeat.enabled;
-    cfg->heartbeat_interval_minutes = cfg->heartbeat.interval_minutes;
     if (cfg->gateway.host)
         cfg->gateway_host = cfg->gateway.host;
     cfg->gateway_port = cfg->gateway.port;
@@ -715,11 +711,6 @@ hu_error_t hu_config_load_from(hu_allocator_t *backing, const char *path, hu_con
     if (!path || !path[0])
         return hu_config_load(backing, out);
     return config_load_impl(backing, out, path);
-}
-
-const char *hu_config_env_get(const char *name) {
-    const char *v = getenv(name);
-    return (v && v[0]) ? v : NULL;
 }
 
 void hu_config_apply_env_str(hu_allocator_t *a, char **dst, const char *v) {

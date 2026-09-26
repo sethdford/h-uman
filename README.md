@@ -22,7 +22,7 @@
 The smallest fully autonomous AI assistant infrastructure — a static C binary that fits on any $5 board, boots in milliseconds, and requires nothing but libc.
 
 ```
-~2468 KB binary · <30 ms startup · 14,406+ tests · 97 providers · 31 channels · 87 tools · Pluggable everything
+~2468 KB binary · <30 ms startup · 13,985+ tests · 97 providers · 31 channels · 87 tools · Pluggable everything
 ```
 
 ### Features
@@ -76,7 +76,7 @@ Human's verified numbers (measured on macOS arm64, March 2026):
 Binary size:   ~2468 KB (MinSizeRel + LTO, all channels)
 Peak RSS:      ~5.7 MB (--version), ~5.9 MB (test suite)
 Startup:       6–27 ms avg (Apple Silicon M4 Max)
-Tests:         14,406 passing, 0 ASan errors
+Tests:         13,985 passing, 0 ASan errors
 ```
 
 ### Why Switch from OpenClaw?
@@ -248,7 +248,7 @@ Every subsystem is a **vtable interface** — swap implementations with a config
 | **Security**      | `Sandbox`        | Landlock, Firejail, Bubblewrap, Docker, auto-detect                                                                                                                   | Any sandbox backend                                       |
 | **Identity**      | `IdentityConfig` | OpenClaw (markdown), AIEOS v1.1 (JSON)                                                                                                                                | Any identity format                                       |
 | **Tunnel**        | `Tunnel`         | None, Cloudflare, Tailscale, ngrok, Custom                                                                                                                            | Any tunnel binary                                         |
-| **Heartbeat**     | Engine           | [`src/observability/heartbeat.c`](src/observability/heartbeat.c) periodic tasks                                                                                                                   | —                                                         |
+| **Heartbeat**     | Engine           | [`src/observability/heartbeat.c`](src/observability/heartbeat.c) — reads periodic tasks from `HEARTBEAT.md` in the state dir (`$HU_STATE_DIR` or `~/.human`), on the `heartbeat.interval_minutes` cadence (`heartbeat.enabled`, off by default) | —                                                         |
 | **Skills**        | Loader           | TOML manifests + SKILL.md instructions                                                                                                                                | Community skill packs                                     |
 | **Peripherals**   | `Peripheral`     | Serial, Arduino, Raspberry Pi GPIO, STM32/Nucleo                                                                                                                      | Any hardware interface                                    |
 | **Cron**          | Scheduler        | Cron expressions + one-shot timers with JSON persistence                                                                                                              | —                                                         |
@@ -381,10 +381,10 @@ Config: `~/.human/config.json` (created by `onboard`)
   "default_provider": "openrouter",
   "default_model": "anthropic/claude-sonnet-4",
 
+  "heartbeat": { "enabled": true, "interval_minutes": 30 },
+
   "agents": {
-    "defaults": {
-      "heartbeat": { "every": "30m" }
-    },
+    "defaults": {},
     "list": [
       {
         "id": "researcher",
@@ -655,7 +655,7 @@ Build and tests require a C11 compiler and CMake 3.20+. One-time setup:
 mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Debug -DHU_ENABLE_ALL_CHANNELS=ON
 cmake --build .                            # Dev build
-./human_tests                             # 14,406+ tests
+./human_tests                             # 13,985+ tests
 cd ..
 ```
 
@@ -697,10 +697,10 @@ Channel CJM coverage (ingress parsing/filtering, session key routing, account pr
 ```
 
 Language: C11 + ASM (aarch64, x86_64)
-Source files: 2,093
-Lines of code: ~433K
-Test files: 893
-Tests: 14,406
+Source files: 1,952
+Lines of code: ~414K
+Test files: 861
+Tests: 13,985
 Binary: ~2468 KB (MinSizeRel + LTO, all channels)
 Peak RSS: ~5.7 MB
 Startup: 6–27 ms avg (Apple Silicon)
@@ -734,7 +734,7 @@ config.c Config loading/merging (~/.human/config.json)
 ...
 
 include/human/ Public C headers
-tests/ 580+ test files, 14,406+ tests
+tests/ 580+ test files, 13,985+ tests
 asm/ Platform-specific assembly (aarch64, x86_64, generic C)
 
 ui/ Web UI (LitElement + Vite)

@@ -342,7 +342,7 @@ Trust boundaries exist at:
 
 | Control                           | Implementation                                           | Status          |
 | --------------------------------- | -------------------------------------------------------- | --------------- |
-| SC-8 Transmission Confidentiality | HTTPS for tools (`hu_validate_url`), libcurl TLS         | Implemented     |
+| SC-8 Transmission Confidentiality | HTTPS for tools (`hu_tool_validate_url`), libcurl TLS    | Implemented     |
 | SC-13 Cryptographic Protection    | ChaCha20+HMAC in `hu_secret_store`, HMAC-SHA256 webhooks | Implemented     |
 | SC-28 Protection at Rest          | **Gap** — credentials plaintext (C-03)                   | Not implemented |
 | SC-39 Process Isolation           | Landlock, seccomp, Firecracker, bwrap, WASI              | Implemented     |
@@ -428,7 +428,7 @@ Trust boundaries exist at:
 | Path access when policy NULL          | AC-3        | **Bypass**          | file\_\* tools skip check when c->policy is NULL                        |
 | Command allowlist                     | AC-6        | Implemented         | hu_policy_validate_command, allowed_commands                            |
 | Tool path validation                  | SI-10       | Partial             | hu_tool_validate_path used by file_read, file_write; git, snapshot gaps |
-| HTTPS enforcement for tools           | SC-8        | Implemented         | hu_validate_url, net_security.c — HTTP rejected except localhost        |
+| HTTPS enforcement for tools           | SC-8        | Implemented         | hu_tool_validate_url, validation.c — HTTP rejected except localhost     |
 | libcurl TLS verification              | SC-8        | Implemented         | CURLOPT_SSL_VERIFYPEER, CURLOPT_SSL_VERIFYHOST in http.c                |
 | Pairing guard                         | IA-2        | Implemented         | 6–8 digit code, lockout, constant-time token comparison                 |
 | Audit logging                         | AU-2, AU-3  | Implemented         | command_execution, file_access, auth, policy_violation                  |
@@ -436,7 +436,7 @@ Trust boundaries exist at:
 | Sandbox backends                      | AC-6, SC-39 | Implemented         | Landlock, seccomp, bwrap, Firecracker, WASI                             |
 | Secret store (hu_secret_store)        | SC-13       | Implemented         | ChaCha20+HMAC; not used for auth.json persistence                       |
 | Secure memory clearing                | IA-5        | Partial             | pairing.c uses volatile/asm; secrets.c uses memset (H-02)               |
-| Private IP blocking                   | SC-8        | Implemented         | hu_is_private_ip, hu_validate_url for tools                             |
+| Private IP blocking                   | SC-8        | Implemented         | hu_tool_validate_url (parse_ipv4_private / parse_ipv6_private), src/tools/validation.c |
 | SQLite parameterized queries          | SI-10       | Implemented         | Prevents most SQL injection                                             |
 | PostgreSQL identifier validation      | SI-10       | **Not implemented** | C-06                                                                    |
 | FTS5 query escaping                   | SI-10       | **Not implemented** | H-11                                                                    |

@@ -579,16 +579,6 @@ hu_error_t hu_daemon_dispatch_imessage_reply_msg_ex(
         out_text_sent);
 }
 
-hu_error_t hu_daemon_dispatch_imessage_reply_msg(void *ch, const void *persona,
-                                                 const struct hu_agent *agent,
-                                                 const struct hu_config *config, const char *target,
-                                                 size_t target_len,
-                                                 const struct hu_channel_loop_msg *msg,
-                                                 const char *body, size_t body_len) {
-    return hu_daemon_dispatch_imessage_reply_msg_ex(ch, persona, agent, config, target, target_len,
-                                                    msg, body, body_len, NULL);
-}
-
 /* ── production_outcomes: one row per DELIVERED reply ─────────────────────── */
 
 hu_error_t hu_daemon_record_delivered_reply(struct hu_agent *agent, const char *ch_name,
