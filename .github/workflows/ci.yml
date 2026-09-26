@@ -999,6 +999,10 @@ jobs:
       # asserts only Seth-authored texts are measured and n<min writes nothing.
       - name: Contact reply-length measurement tests (hermetic, stdlib-only)
         run: python3 scripts/test_measure_contact_reply_lengths.py
+      # Stale contact-profile checker (2026-09-26): pure per-contact checks plus
+      # a synthetic chat.db run; asserts reports carry no message text.
+      - name: Contact profile staleness tests (hermetic, stdlib-only)
+        run: python3 scripts/test_check_contact_profiles.py
       # Depth upweighting (2026-09-24): hermetic, stdlib-only; the .sh runs
       # the real block extracted from train-glm-adapter.sh on a scratch corpus.
       - name: Training depth-upweight tests (hermetic, stdlib-only)
