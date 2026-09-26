@@ -64,7 +64,6 @@ static void bootstrap_with_agent(void) {
     }
 }
 
-#if HU_HAS_PWA || defined(HU_ENABLE_SQLITE)
 /* 0600 explicitly: fopen(..., "w") creates 0666 minus umask, which CodeQL
  * flags as cpp/world-writable-file-creation even inside a 0700 mkdtemp dir. */
 static void write_config_fixture(const char *path, const char *json) {
@@ -81,7 +80,6 @@ static void write_config_fixture(const char *path, const char *json) {
     HU_ASSERT_TRUE(put >= 0);
     HU_ASSERT_EQ(closed, 0);
 }
-#endif
 
 #if HU_HAS_PWA
 /* 2026-09-04 audit: bootstrap registered the PWA poll fn but never called
@@ -184,10 +182,8 @@ static void bootstrap_context_engine_rag_installs_rag_engine(void) {
     HU_ASSERT_NOT_NULL(mkdtemp(dir));
     char cfg_path[256];
     snprintf(cfg_path, sizeof(cfg_path), "%s/config.json", dir);
-    FILE *f = fopen(cfg_path, "w");
-    HU_ASSERT_NOT_NULL(f);
-    fputs("{\"default_provider\":\"ollama\",\"agent\":{\"context_engine\":\"rag\"}}", f);
-    fclose(f);
+    write_config_fixture(
+        cfg_path, "{\"default_provider\":\"ollama\",\"agent\":{\"context_engine\":\"rag\"}}");
 
     hu_allocator_t alloc = hu_system_allocator();
     hu_app_ctx_t ctx;
@@ -210,10 +206,8 @@ static void bootstrap_context_engine_legacy_installs_legacy_engine(void) {
     HU_ASSERT_NOT_NULL(mkdtemp(dir));
     char cfg_path[256];
     snprintf(cfg_path, sizeof(cfg_path), "%s/config.json", dir);
-    FILE *f = fopen(cfg_path, "w");
-    HU_ASSERT_NOT_NULL(f);
-    fputs("{\"default_provider\":\"ollama\",\"agent\":{\"context_engine\":\"legacy\"}}", f);
-    fclose(f);
+    write_config_fixture(
+        cfg_path, "{\"default_provider\":\"ollama\",\"agent\":{\"context_engine\":\"legacy\"}}");
 
     hu_allocator_t alloc = hu_system_allocator();
     hu_app_ctx_t ctx;
