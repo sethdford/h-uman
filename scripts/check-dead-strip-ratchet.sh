@@ -31,7 +31,8 @@
 #
 # EXIT CODES
 #   0  A and B are at or below their baselines — or the gate could not measure
-#      (no build dir, non-Darwin, stale build dir outside strict mode) and said
+#      (no build dir, build dir not configured as the dev preset, non-Darwin,
+#      stale build dir outside strict mode) and said
 #      so. An unmeasurable gate must never block a commit or a push
 #      (.claude/rules/no-number-without-a-measurement.md); it prints
 #      `RATCHET_SKIP: <reason>` so scripts/ratchet-debt-report.sh can tell
@@ -42,7 +43,9 @@
 # preset in `build/` (ASan, the full feature set). A differently-configured tree
 # compiles a different set of translation units, so pointing HU_BUILD_DIR at
 # e.g. build-check measures a DIFFERENT universe and its numbers are not
-# comparable to these constants. See .claude/rules/dead-strip-ratchet.md.
+# comparable to these constants. The gate checks this rather than assuming it:
+# any build dir whose CMakeCache.txt disagrees with the dev preset is skipped
+# (RATCHET_SKIP), strict mode or not. See .claude/rules/dead-strip-ratchet.md.
 set -euo pipefail
 
 # Auto-lock any gain so it can never be spent again (scripts/ratchet-config.tsv).
@@ -118,6 +121,101 @@ skip() {
     echo "dead-strip ratchet did not run: $1" >&2
     exit 0
 }
+
+# Configuration. The baselines above describe the dev preset's translation-unit
+# universe, so a build/ configured any other way measures a different universe
+# and its A/B are not comparable to them. That is not hypothetical: on
+# 2026-09-26 the main checkout's build/ had been hand-configured with
+# HU_ENABLE_ALL_CHANNELS=ON, compiled 1,026 archive members instead of 991, and
+# reported A=33 / B=96 against ceilings 31 / 76, failing every push. On a real
+# dev-preset build of the same commit (f714418ac) A=31 and B=76.
+#
+# So compare every cache variable the dev preset sets (resolved through
+# `inherits`, the same way scripts/dev/build-options-table.sh does) against
+# $BUILD_DIR/CMakeCache.txt, and SKIP on any mismatch. This applies under
+# HU_DEAD_STRIP_STRICT=1 as well: strict mode turns off stale-tree demotion
+# (a rebuild makes that tree current), but no rebuild can make a
+# differently-configured tree into the dev preset. And because it exits before
+# ratchet_autolock, a mismatched build can never lock a baseline.
+#
+# It runs before the platform check so the fixture test
+# (tests/fixtures/check-dead-strip-config/) exercises it on Linux CI too.
+dev_preset_mismatches() {  # dev_preset_mismatches CACHE_FILE -> "VAR=cached vs preset expected" lines
+    python3 - "$1" CMakePresets.json dev <<'PYEOF'
+import json, re, sys
+
+cache_path, presets_path, preset_name = sys.argv[1:4]
+
+# Cache variables that do not change which translation units compile.
+NOT_FEATURE_SELECTING = {"CMAKE_EXPORT_COMPILE_COMMANDS"}
+
+with open(presets_path) as f:
+    by_name = {p["name"]: p for p in json.load(f).get("configurePresets", [])}
+
+def resolved(name, seen=None):
+    """Merge cacheVariables along the inherits chain; child overrides parent."""
+    seen = seen or set()
+    if name in seen or name not in by_name:
+        return {}
+    seen.add(name)
+    preset, merged = by_name[name], {}
+    parents = preset.get("inherits") or []
+    for parent in parents if isinstance(parents, list) else [parents]:
+        merged.update(resolved(parent, seen))
+    merged.update(preset.get("cacheVariables", {}))
+    return merged
+
+if preset_name not in by_name:
+    sys.exit(f"no '{preset_name}' configurePreset in {presets_path}")
+expected = resolved(preset_name)
+
+cached = {}
+with open(cache_path, errors="replace") as f:
+    for line in f:
+        m = re.match(r"^([A-Za-z0-9_.+-]+):[A-Z_]+=(.*)$", line.rstrip("\n"))
+        if m:
+            cached[m.group(1)] = m.group(2)
+
+# CMake's own truthiness (if(<constant>)), so ON vs TRUE vs 1 is not a mismatch.
+def as_bool(v):
+    u = v.strip().upper()
+    if u in ("ON", "YES", "TRUE", "Y") or re.fullmatch(r"[1-9][0-9]*", u):
+        return True
+    if u in ("OFF", "NO", "FALSE", "N", "0", "IGNORE", "NOTFOUND", "") or u.endswith("-NOTFOUND"):
+        return False
+    return None
+
+for var, want in sorted(expected.items()):
+    if isinstance(want, dict):          # {"type": "BOOL", "value": "ON"}
+        want = want.get("value", "")
+    want = str(want)
+    if var in NOT_FEATURE_SELECTING or "$" in want:   # macros: not comparable
+        continue
+    got = cached.get(var)
+    if got is None:
+        print(f"{var}=<unset> vs preset {want}")
+        continue
+    wb, gb = as_bool(want), as_bool(got)
+    same = (wb == gb) if (wb is not None and gb is not None) else got.lower() == want.lower()
+    if not same:
+        print(f"{var}={got} vs preset {want}")
+PYEOF
+}
+
+[ -f "$BUILD_DIR/CMakeCache.txt" ] || skip "no $BUILD_DIR/CMakeCache.txt (configure first: cmake --preset dev)"
+command -v python3 >/dev/null 2>&1 || \
+    skip "python3 not found; cannot confirm $BUILD_DIR is the dev preset the baselines describe"
+if ! _mismatches=$(dev_preset_mismatches "$BUILD_DIR/CMakeCache.txt"); then
+    skip "could not read the dev preset from CMakePresets.json; cannot confirm $BUILD_DIR matches it"
+fi
+if [ -n "$_mismatches" ]; then
+    # Name at most three: this reason lands in a ratchet-debt-report.sh table
+    # cell, and one mismatch is already enough to void the measurement.
+    _n=$(printf '%s\n' "$_mismatches" | wc -l | tr -d ' ')
+    _shown=$(printf '%s\n' "$_mismatches" | awk 'NR <= 3' | paste -sd ';' - | sed 's/;/; /g')
+    [ "$_n" -gt 3 ] && _shown="$_shown; +$((_n - 3)) more"
+    skip "$BUILD_DIR is not the dev preset ($_shown); reconfigure with: cmake --preset dev"
+fi
 
 # The map parser below is macOS ld's (`# Object files:` / `# Symbols:` /
 # `# Dead Stripped Symbols:`). GNU ld's -Map is a different format; until that
