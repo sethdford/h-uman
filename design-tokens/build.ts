@@ -15,6 +15,7 @@ import {
   isColorLike,
 } from "./color-emit-lib.js";
 import { generateDynamicColorCSS } from "./dynamic-color-lib.js";
+import { generateQuietCSS } from "./quiet-lib.js";
 import {
   TOKEN_FILES,
   collectTokens,
@@ -245,11 +246,13 @@ function main() {
   // emitters cannot see them. Consumed by the CSS emitter in Task 4.
   let webTokens: TokenMap = {};
   for (const { data } of web) webTokens = { ...webTokens, ...collectTokens(data) };
-  void webTokens;
 
   const outdir = parseOutdir();
 
-  const css = generateCSS(tokens, p3Colors);
+  const quietCss = generateQuietCSS(webTokens);
+  const css = quietCss
+    ? `${generateCSS(tokens, p3Colors)}\n\n${quietCss}\n`
+    : generateCSS(tokens, p3Colors);
   writeOutput(
     outdir,
     path.join(ROOT, "ui", "src", "styles", "_tokens.css"),

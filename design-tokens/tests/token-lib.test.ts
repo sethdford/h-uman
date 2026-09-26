@@ -16,7 +16,9 @@ const DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 test("every real token file declares platform 'all'", () => {
   const sources = readTokenSources(DIR, TOKEN_FILES);
   assert.equal(sources.length, TOKEN_FILES.length);
-  for (const s of sources) assert.equal(platformOf(s), "all", s.file);
+  for (const s of sources) {
+    assert.equal(platformOf(s), s.file === "quiet.tokens.json" ? "web" : "all", s.file);
+  }
 });
 
 test("platformOf throws when the key is missing, naming the file", () => {

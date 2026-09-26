@@ -15,6 +15,7 @@ const TOKEN_FILES = [
   "spatial.tokens.json",
   "ambient.tokens.json",
   "3d.tokens.json",
+  "quiet.tokens.json",
 ];
 
 type TokenValue = string | number;

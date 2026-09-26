@@ -1,0 +1,68 @@
+{
+  "$schema": "https://design-tokens.github.io/community-group/format/",
+  "$extensions": {
+    "com.human.platform": "web",
+    "com.human.version": "0.5.0"
+  },
+  "$description": "Quiet Room — web-only, opt-in (data-brand=\"quiet\"). Paper and ink, green by role. Values measured in docs/plans/2026-09-26-quiet-room-design-language-design.md §II.3; design-tokens/check-contrast.ts re-measures on every build.",
+  "quiet": {
+    "type": {
+      "font-display": { "$value": "\"Newsreader Variable\", \"Iowan Old Style\", \"Palatino Linotype\", Georgia, serif", "$type": "fontFamily" },
+      "text-display-xl": { "$value": "clamp(2.75rem, 1.5rem + 5vw, 6rem)", "$type": "dimension" },
+      "type-display-lg-family": { "$value": "var(--hu-font-display)" },
+      "type-display-md-family": { "$value": "var(--hu-font-display)" },
+      "type-headline-lg-family": { "$value": "var(--hu-font-display)" },
+      "type-headline-md-family": { "$value": "var(--hu-font-display)" },
+      "type-headline-sm-family": { "$value": "var(--hu-font-display)" },
+      "type-display-lg-weight": { "$value": "400" },
+      "type-display-md-weight": { "$value": "400" },
+      "type-display-lg-letter-spacing": { "$value": "-0.02em" }
+    },
+    "light": {
+      "bg": { "$value": "oklch(97.5% 0.010 95)", "$type": "color" },
+      "bg-inset": { "$value": "oklch(94.5% 0.012 95)", "$type": "color" },
+      "surface-container": { "$value": "oklch(94.5% 0.012 95)", "$type": "color" },
+      "bg-surface": { "$value": "oklch(99.5% 0.004 95)", "$type": "color" },
+      "bg-elevated": { "$value": "oklch(99.5% 0.004 95)", "$type": "color" },
+      "text": { "$value": "oklch(23% 0.020 150)", "$type": "color" },
+      "text-secondary": { "$value": "oklch(50% 0.015 150)", "$type": "color" },
+      "text-muted": { "$value": "oklch(50% 0.015 150)", "$type": "color" },
+      "text-faint": { "$value": "oklch(52.5% 0.012 95)", "$type": "color" },
+      "border": { "$value": "oklch(89% 0.012 95)", "$type": "color" },
+      "accent": { "$value": "oklch(50% 0.130 135)", "$type": "color" },
+      "accent-text": { "$value": "oklch(50% 0.130 135)", "$type": "color" },
+      "accent-hover": { "$value": "oklch(45% 0.125 135)", "$type": "color" },
+      "link": { "$value": "oklch(50% 0.130 135)", "$type": "color" },
+      "link-active": { "$value": "oklch(45% 0.125 135)", "$type": "color" },
+      "on-accent": { "$value": "oklch(99.5% 0.004 95)", "$type": "color" },
+      "focus-ring": { "$value": "oklch(58% 0.140 135)", "$type": "color" },
+      "accent-brand": { "$value": "oklch(71.5% 0.155 131)", "$type": "color", "$description": "Decorative only in light mode (2.25:1 on paper)" },
+      "success": { "$value": "oklch(50% 0.130 150)", "$type": "color" },
+      "warning": { "$value": "oklch(53% 0.105 65)", "$type": "color" },
+      "info": { "$value": "oklch(50% 0.160 258)", "$type": "color" }
+    },
+    "dark": {
+      "bg": { "$value": "oklch(17% 0.012 150)", "$type": "color" },
+      "bg-inset": { "$value": "oklch(20.5% 0.014 150)", "$type": "color" },
+      "surface-container": { "$value": "oklch(20.5% 0.014 150)", "$type": "color" },
+      "bg-surface": { "$value": "oklch(22.5% 0.014 150)", "$type": "color" },
+      "bg-elevated": { "$value": "oklch(22.5% 0.014 150)", "$type": "color" },
+      "text": { "$value": "oklch(95% 0.010 120)", "$type": "color" },
+      "text-secondary": { "$value": "oklch(74% 0.012 120)", "$type": "color" },
+      "text-muted": { "$value": "oklch(74% 0.012 120)", "$type": "color" },
+      "text-faint": { "$value": "oklch(64% 0.010 120)", "$type": "color" },
+      "border": { "$value": "oklch(32% 0.016 150)", "$type": "color" },
+      "accent": { "$value": "oklch(82% 0.160 135)", "$type": "color" },
+      "accent-text": { "$value": "oklch(82% 0.160 135)", "$type": "color" },
+      "accent-hover": { "$value": "oklch(86% 0.150 135)", "$type": "color" },
+      "link": { "$value": "oklch(82% 0.160 135)", "$type": "color" },
+      "link-active": { "$value": "oklch(86% 0.150 135)", "$type": "color" },
+      "on-accent": { "$value": "oklch(17% 0.012 150)", "$type": "color" },
+      "focus-ring": { "$value": "oklch(80% 0.170 135)", "$type": "color" },
+      "accent-brand": { "$value": "oklch(80% 0.170 135)", "$type": "color" },
+      "success": { "$value": "#10b981", "$type": "color" },
+      "warning": { "$value": "#eab308", "$type": "color" },
+      "info": { "$value": "#3b82f6", "$type": "color" }
+    }
+  }
+}

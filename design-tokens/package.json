@@ -8,8 +8,9 @@
     "postbuild": "npx -y prettier --write --config ../ui/.prettierrc ../ui/src/styles/_tokens.css ../ui/src/styles/_dynamic-color.css ../website/src/styles/_tokens.css ../website/src/styles/_dynamic-color.css 2>/dev/null || true",
     "dynamic-color": "tsx dynamic-color.ts",
     "docs": "npx tsx generate-docs.ts",
-    "check": "npm run build",
+    "check": "npm run build && npm test && npm run check:contrast",
     "check:drift": "bash check-drift.sh",
+    "check:contrast": "tsx check-contrast.ts",
     "test": "tsx --test tests/*.test.ts"
   },
   "devDependencies": {
