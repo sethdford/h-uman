@@ -1,12 +1,12 @@
 ---
 title: K3 teacher lane — offline judge ranking the student's own samples
 date: 2026-09-26
-status: draft (awaiting review; throughput pending spike)
+status: draft (awaiting review; spike measured — drive rule FAIL, engine prefill is the blocker)
 ---
 
 # K3 Teacher Lane — Design
 
-**Date:** 2026-09-26 · **Status:** DRAFT, awaiting review · **Throughput:** PENDING SPIKE (§9)
+**Date:** 2026-09-26 · **Status:** DRAFT, awaiting review · **Throughput:** measured, FAILS the drive rule (§9)
 
 Kimi K3 (2.78T MoE) runs locally, overnight, as a **judge** that ranks the serving
 student's own reply samples. Its rankings become on-policy preference pairs for the
@@ -265,7 +265,7 @@ the first calibration item is ranked.
 **Process.** Each task closes on a `verifier` PASS with captured output, then one
 critic pass (max 2 rounds).
 
-## 9. Throughput — PENDING SPIKE
+## 9. Throughput — measured 2026-09-26
 
 **Prefill, not decode, dominates.** The engine hard-codes `CHUNK = 64` for batched
 prefill (`src/core/k3_ops.c:707`) and fetches each unique expert once per chunk. A
@@ -283,13 +283,52 @@ SSD, so an **optimistic bound**) measures:
 Extrapolation: experts × 92/9, trunk × 93/10, MLA share corrected (2/10 sampled vs
 24/93), disk time rescaled to 5.3 GB/s (OWC Envoy Ultra, measured read).
 
-| Quantity | Value |
+**Measured 2026-09-26** (M4 Max, layers 0–9, internal SSD, `--cache-gb 8`, GLM
+live but idle-ish; synthetic prompts; `~/k3spike/results/`). Prefill seconds at 10
+layers → full model at ×9.3–10.2:
+
+| Run | Tokens | Prefill (10 layers) | GB read | Full model (est.) |
+|---|---|---|---|---|
+| R0 chunk 64 | 816 | 257.9 s | 411.2 | — |
+| R0 chunk 4096 | 816 | 237.6 s | 132.5 | 37–40 min |
+| R1 full prompt, chunk 64 (as shipped) | 3,793 | 1,524.7 s | 1,854.3 | **3.9–4.3 h** |
+| R2 full prompt, chunk 4096 | 3,793 | 1,163.4 s | 140.4 | 3.0–3.3 h |
+| R3 prefix only (save state) | 2,977 | 844.2 s | 139.3 | 2.2–2.4 h, **one-time** |
+| R4 suffix after `--load-state` | 816 | 322.4 s | 134.3 | **50–55 min/item** |
+
+- **Wide chunk is exact:** first-step logits bit-identical, chunk 64 vs 4096 (R0).
+  Reads fall 3.1× (816 tok) to 13× (3,793 tok), but wall time falls only 8–24%.
+- **Prefill is compute-bound, not disk-bound.** ~0.1–0.6 GB/s effective read vs
+  6–9 GB/s measured trunk load; ~5.8 of 16 cores busy. The cause is in the code:
+  prefill projections and expert applications run one token at a time
+  (`k3_mmw` / `k3_matmul_mxfp4` inside `for (t < T)`, e.g. `src/core/k3_ops.c:865`),
+  each opening its own OpenMP region. Every weight matrix streams from RAM once per
+  prompt token.
+- **Cached prefix works**, but the suffix pays for attending to the prefix
+  (816 tokens: 237.6 s alone vs 322.4 s after a 2,977-token prefix, +36%). The
+  prefix state is contact-independent, so it can be computed **once and reused
+  across nights** until the rubric or persona changes.
+- Decode, once prefilled: ~1.0 s/token at 10 layers (≈ 10 s/token full model, RAM
+  and internal SSD). For a ~20-token ranking that adds ~3–7 min/item.
+
+| Quantity | Value (optimistic) |
 |---|---|
-| s/item, as shipped | PENDING |
-| s/item, wide chunk | PENDING |
-| s/item, cached prefix + wide chunk | PENDING |
-| items/night (6 h, net of preemption) | PENDING |
-| nights to 80 calibration items | PENDING |
+| min/item, best config (cached prefix + wide chunk + ~20 output tokens) | **~55–62** |
+| items/night (6 h, before preemption) | **~6** |
+| nights to 80 calibration items | **~12–14** |
+| nights to 500 pairs | **~80+** |
+
+**Drive rule result: FAIL** (≤ 15 min/item required; measured ~4× over). A faster
+drive cannot fix a compute-bound prefill. **Do not buy the drive yet.**
+
+**Next step (separate task, needs its own approval):** a token-tiled batched
+prefill kernel in the fork (read each weight row once per block of 32–64 tokens).
+Per-element summation order is unchanged, so the R0 bit-identical gate applies.
+Then re-run R4. Independently, trim the per-item suffix (the synthetic suffix
+carried ~330 words of "earlier context"; ~400 tokens is realistic), since prefill
+scales roughly linearly with it. **If R4 is still above 15 min/item after both,
+close the local-K3 lane** and record the result. The GLM-as-judge baseline (§7.2)
+remains available as the cheap judge.
 
 **Drive rule:** buy the 4 TB TB5 drive only if the best configuration comes out at
 ≤ **15 min/item** (≥ ~25 items/night). If that relies on the wide chunk, R0 must show
