@@ -8,7 +8,6 @@
 @theme {
   --font-sans: var(--hu-font);
   --font-mono: var(--hu-font-mono);
-  --font-display: var(--hu-font-display, var(--hu-font));
   --text-2xs: var(--hu-text-2xs);
   --text-xs: var(--hu-text-xs);
   --text-sm: var(--hu-text-sm);
@@ -21,6 +20,13 @@
   --breakpoint-md: 905px;
   --breakpoint-lg: 1240px;
   --breakpoint-xl: 1440px;
+}
+
+/* inline: the utility emits var(--hu-font-display, …) itself, so it resolves on the
+   element and picks up a [data-brand="quiet"] container's display face. In plain @theme
+   it would read --font-display, which is resolved once at :root. */
+@theme inline {
+  --font-display: var(--hu-font-display, var(--hu-font));
 }
 
 @font-face {
