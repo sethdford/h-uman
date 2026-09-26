@@ -136,7 +136,7 @@
 #define HU_COLOR_LIGHT_ERROR            "\033[38;5;160m"
 #define HU_COLOR_LIGHT_INFO             "\033[38;5;69m"
 #define HU_COLOR_LIGHT_FOCUS_RING       "\033[38;5;107m"
-#define HU_COLOR_LIGHT_LINK             "\033[38;5;107m"
+#define HU_COLOR_LIGHT_LINK             "\033[38;5;65m"
 
 /* Light theme — truecolor (24-bit) foreground */
 #define HU_COLOR_LIGHT_BG_TC               "\033[38;2;245;245;243m"
@@ -161,7 +161,7 @@
 #define HU_COLOR_LIGHT_ERROR_TC            "\033[38;2;204;0;0m"
 #define HU_COLOR_LIGHT_INFO_TC             "\033[38;2;37;99;235m"
 #define HU_COLOR_LIGHT_FOCUS_RING_TC       "\033[38;2;90;154;48m"
-#define HU_COLOR_LIGHT_LINK_TC             "\033[38;2;90;154;48m"
+#define HU_COLOR_LIGHT_LINK_TC             "\033[38;2;58;106;36m"
 
 /* Light theme — truecolor (24-bit) background */
 #define HU_COLOR_LIGHT_BG_BG_TC               "\033[48;2;245;245;243m"
@@ -186,7 +186,7 @@
 #define HU_COLOR_LIGHT_BG_ERROR_TC            "\033[48;2;204;0;0m"
 #define HU_COLOR_LIGHT_BG_INFO_TC             "\033[48;2;37;99;235m"
 #define HU_COLOR_LIGHT_BG_FOCUS_RING_TC       "\033[48;2;90;154;48m"
-#define HU_COLOR_LIGHT_BG_LINK_TC             "\033[48;2;90;154;48m"
+#define HU_COLOR_LIGHT_BG_LINK_TC             "\033[48;2;58;106;36m"
 
 /* Light theme — ANSI 256-color background */
 #define HU_COLOR_LIGHT_BG_BG               "\033[48;5;231m"
@@ -211,7 +211,7 @@
 #define HU_COLOR_LIGHT_BG_ERROR            "\033[48;5;160m"
 #define HU_COLOR_LIGHT_BG_INFO             "\033[48;5;69m"
 #define HU_COLOR_LIGHT_BG_FOCUS_RING       "\033[48;5;107m"
-#define HU_COLOR_LIGHT_BG_LINK             "\033[48;5;107m"
+#define HU_COLOR_LIGHT_BG_LINK             "\033[48;5;65m"
 
 /* Legacy aliases */
 #define HU_COLOR_MUTED HU_COLOR_TEXT_MUTED

@@ -558,11 +558,11 @@
       "$type": "dimension"
     },
     "link": {
-      "$value": "{color.human.light-500}",
+      "$value": "{color.human.light-600}",
       "$type": "color"
     },
     "link-hover": {
-      "$value": "{color.human.light-600}",
+      "$value": "{color.human.900}",
       "$type": "color"
     },
     "link-active": {
