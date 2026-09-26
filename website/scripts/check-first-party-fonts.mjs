@@ -3,10 +3,13 @@
 // @font-face source. Run after `npm run build`.
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const DIST = new URL("../dist/", import.meta.url).pathname;
+// fileURLToPath, not .pathname: .pathname keeps %20 for spaces and breaks readdirSync.
+const DIST = fileURLToPath(new URL("../dist/", import.meta.url));
 const GOOGLE = /fonts\.(googleapis|gstatic)\.com/;
-const REMOTE_FACE = /@font-face\s*{[^}]*url\(\s*["']?https?:\/\//;
+// Absolute (https://host) and protocol-relative (//host) sources are both remote.
+const REMOTE_FACE = /@font-face\s*{[^}]*url\(\s*["']?(?:https?:)?\/\//;
 
 function* walk(dir) {
   for (const name of readdirSync(dir)) {
