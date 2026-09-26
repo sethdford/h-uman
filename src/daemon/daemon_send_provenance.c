@@ -11,9 +11,9 @@
 
 static void send_provenance_record(void *user, const hu_imessage_sent_event_t *ev) {
     sqlite3 *db = (sqlite3 *)user;
-    hu_error_t err = hu_outbound_sends_repo_record(db, hu_time_get_current_ms(), "imessage",
-                                                   ev->handle, ev->handle_len, ev->kind, ev->text,
-                                                   ev->text_len, ev->prior_max_rowid);
+    hu_error_t err =
+        hu_outbound_sends_repo_record(db, hu_time_wall_ms(), "imessage", ev->handle, ev->handle_len,
+                                      ev->kind, ev->text, ev->text_len, ev->prior_max_rowid);
     if (err != HU_OK) {
         /* Never fail the send over bookkeeping, but never go silent either:
          * a provenance log that stops writing makes the metric undercount

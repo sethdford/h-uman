@@ -7,6 +7,7 @@
  * production files are named above. */
 #ifdef HU_ENABLE_SQLITE
 #include "human/channels/imessage_send_observer.h"
+#include "human/core/time.h"
 #include "human/daemon/send_provenance.h"
 #include "human/memory.h"
 #include "human/memory/outbound_sends_repo.h"
@@ -101,7 +102,9 @@ static void send_provenance_install_records_observed_sends(void) {
                                    .text_len = 12,
                                    .kind = HU_IMESSAGE_SENT_KIND_REPLY,
                                    .prior_max_rowid = 900};
+    int64_t wall_before = hu_time_wall_ms();
     hu_imessage_send_observer_notify(&ev);
+    int64_t wall_after = hu_time_wall_ms();
 
     int64_t n = -1;
     HU_ASSERT_EQ(hu_outbound_sends_repo_count(db, &n), HU_OK);
@@ -118,7 +121,12 @@ static void send_provenance_install_records_observed_sends(void) {
     HU_ASSERT_STR_EQ((const char *)sqlite3_column_text(st, 2), "reply");
     HU_ASSERT_STR_EQ((const char *)sqlite3_column_text(st, 3), "running late");
     HU_ASSERT_EQ(sqlite3_column_int64(st, 4), 900);
-    HU_ASSERT_TRUE(sqlite3_column_int64(st, 5) > 0);
+    /* Wall-clock epoch ms, bracketed by the notify: the metric joins these
+     * rows to chat.db send times. A monotonic (uptime) stamp is also > 0,
+     * which is how the 2026-09-25 deploy shipped uptime values unnoticed. */
+    int64_t stamped = sqlite3_column_int64(st, 5);
+    HU_ASSERT_TRUE(stamped >= wall_before);
+    HU_ASSERT_TRUE(stamped <= wall_after);
     sqlite3_finalize(st);
 
     hu_daemon_send_provenance_uninstall();

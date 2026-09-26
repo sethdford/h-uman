@@ -146,41 +146,58 @@ def _load_messages(chat_path, since):
 EXACT_WINDOW_S = 5 * 60
 
 
+# Rows below this are not epoch ms: the 2026-09-25 deploys stamped sent_at_ms
+# with CLOCK_MONOTONIC (uptime). Their time is unknown, but prior_max_rowid is
+# correct, so they resolve by rowid boundary + text with no time window.
+UPTIME_STAMP_MAX_MS = 10 ** 12  # 2001-09-09 in epoch ms
+
+
 def _load_outbound(mem_path, since):
-    """Per-contact outbound_sends records (sorted by time) and the time of the
-    first record ever — provenance is complete only from then on. (None, None)
-    for a memory.db that predates the table."""
+    """Per-contact outbound_sends records as (time or None, prior, text), the
+    time of the first wall-clock-stamped record ever (or None), and the count
+    of uptime-stamped rows. (None, None, 0) for a memory.db that predates the
+    table."""
     con = sqlite3.connect(f"file:{mem_path}?mode=ro", uri=True)
     try:
-        first = con.execute("select min(sent_at_ms) from outbound_sends").fetchone()[0]
+        first = con.execute("select min(sent_at_ms) from outbound_sends where sent_at_ms >= ?",
+                            (UPTIME_STAMP_MAX_MS,)).fetchone()[0]
         rows = con.execute(
             "select contact, sent_at_ms, prior_max_rowid, text from outbound_sends "
-            "where sent_at_ms >= ? order by sent_at_ms, id", (int(since.timestamp() * 1000),)
+            "where sent_at_ms >= ? or sent_at_ms < ? order by id",
+            (int(since.timestamp() * 1000), UPTIME_STAMP_MAX_MS),
         ).fetchall()
     except sqlite3.OperationalError:
         con.close()
-        return None, None
+        return None, None, 0
     con.close()
-    if first is None:
-        return {}, None
-    out = {}
+    out, uptime = {}, 0
     for contact, ms, prior, text in rows:
-        out.setdefault(contact, []).append(
-            (dt.datetime.fromtimestamp(ms / 1000, dt.timezone.utc), prior, _norm(text)))
-    return out, dt.datetime.fromtimestamp(first / 1000, dt.timezone.utc)
+        if ms < UPTIME_STAMP_MAX_MS:
+            uptime += 1
+            t = None
+        else:
+            t = dt.datetime.fromtimestamp(ms / 1000, dt.timezone.utc)
+        out.setdefault(contact, []).append((t, prior, _norm(text)))
+    first_t = dt.datetime.fromtimestamp(first / 1000, dt.timezone.utc) if first else None
+    return out, first_t, uptime
 
 
 def _resolve_exact(timeline, records):
     """Claim chat.db rows for outbound records. Returns (claimed guids,
-    number of records that found no delivered row)."""
+    number of records that found no delivered row). A record with no time
+    (uptime-stamped) needs a rowid boundary to resolve at all."""
     claimed, unmatched = set(), 0
     sends = [m for m in timeline if m["from_me"]]
     for t, prior, text in records:
+        bounded = prior is not None and prior >= 0
+        if t is None and not bounded:
+            unmatched += 1
+            continue
         hit = None
         for m in sends:
-            if m["guid"] in claimed or (prior is not None and prior >= 0 and m["rowid"] <= prior):
+            if m["guid"] in claimed or (bounded and m["rowid"] <= prior):
                 continue
-            if abs((m["t"] - t).total_seconds()) > EXACT_WINDOW_S:
+            if t is not None and abs((m["t"] - t).total_seconds()) > EXACT_WINDOW_S:
                 continue
             if not text or _texts_match(text, _norm(m["text"])):
                 hit = m
@@ -211,20 +228,31 @@ def analyze(chat_path, mem_path, since, now):
     """Per-turn outcomes for every 1:1 contact. Returns counts + per_turn rows
     (no message text)."""
     assistant = _load_assistant(mem_path, since)
-    outbound, exact_from = _load_outbound(mem_path, since)
+    outbound, first_stamped, uptime_stamped = _load_outbound(mem_path, since)
     outbound = outbound or {}
     counts = {"seth": 0, "huuman": 0, "ambiguous": 0, "censored": 0}
     per_turn = []
     messages = _load_messages(chat_path, since)
-    exact_matched = 0
     # Records for contacts with no chat.db rows in the window never resolve.
     exact_unmatched = sum(len(v) for c, v in outbound.items() if c not in messages)
+    timelines, resolved = {}, {}
+    for contact, msgs in messages.items():
+        timelines[contact] = [m for m in msgs if m["atype"] not in REACTION_RANGE]
+        resolved[contact], unmatched = _resolve_exact(timelines[contact],
+                                                      outbound.get(contact, []))
+        exact_unmatched += unmatched
+    exact_matched = sum(len(g) for g in resolved.values())
+    # Provenance is complete from its first record. Uptime-stamped rows have
+    # no usable time, so their chat.db send time stands in (reading the stamp
+    # as epoch ms would say 1970 and make every unclaimed send Seth's).
+    starts = [m["t"] for c, tl in timelines.items() for m in tl if m["guid"] in resolved[c]]
+    if first_stamped is not None:
+        starts.append(first_stamped)
+    exact_from = min(starts) if starts else None
     for contact, msgs in messages.items():
         reactions = [m for m in msgs if m["atype"] in REACTION_RANGE]
-        timeline = [m for m in msgs if m["atype"] not in REACTION_RANGE]
-        exact_guids, unmatched = _resolve_exact(timeline, outbound.get(contact, []))
-        exact_matched += len(exact_guids)
-        exact_unmatched += unmatched
+        timeline = timelines[contact]
+        exact_guids = resolved[contact]
         positive_targets = {_target_guid(r["assoc"]) for r in reactions
                             if not r["from_me"] and r["atype"] in POSITIVE_TAPBACKS}
         i = 0
@@ -271,6 +299,7 @@ def analyze(chat_path, mem_path, since, now):
     per_turn.sort(key=lambda r: r["end"])
     return {"turns": counts, "per_turn": per_turn,
             "attribution": {"exact_from": exact_from.isoformat() if exact_from else None,
+                            "uptime_stamped_records": uptime_stamped,
                             "exact_matched": exact_matched,
                             "exact_unmatched_records": exact_unmatched}}
 
