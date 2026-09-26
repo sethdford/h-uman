@@ -392,8 +392,8 @@ void run_bootstrap_tests(void) {
     HU_RUN_TEST(bootstrap_channel_gate_table_matches_build);
 #ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(bootstrap_semantic_index_points_at_app_lifetime_embedder);
+#endif
 #if HU_HAS_PWA
     HU_RUN_TEST(bootstrap_starts_the_pwa_channel_it_registers);
-#endif
 #endif
 }
