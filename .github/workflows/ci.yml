@@ -154,6 +154,7 @@ jobs:
           bash tests/fixtures/check-gate-symmetry/run-smoke-test.sh
           bash tests/fixtures/check-markdown-links/run-smoke-test.sh
           bash tests/fixtures/check-realpath-wrapper/run-smoke-test.sh
+          bash tests/fixtures/check-dead-strip-config/run-smoke-test.sh
           bash tests/fixtures/pre-push-deletion/run-smoke-test.sh
 
   integration-tests:
