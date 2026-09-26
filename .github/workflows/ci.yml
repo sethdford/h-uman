@@ -1010,6 +1010,10 @@ jobs:
       # fixtures in a temp dir, no real messages.
       - name: Conversation-quality metric tests (hermetic, stdlib-only)
         run: python3 scripts/test_eval_conversation_quality.py
+      # Python twin of hu_hurt_signal_detect: phrase lists are read from
+      # src/daemon/daemon_hurt_handoff.c; cases mirror the C tests.
+      - name: Hurt-signal twin tests (hermetic, stdlib-only)
+        run: python3 scripts/test_hurt_signal.py
       # On-policy preference-pair miner (2026-09-26): same fixtures; a pair is
       # only minted when h-uman and Seth answered the same inbound message.
       - name: On-policy pair miner tests (hermetic, stdlib-only)

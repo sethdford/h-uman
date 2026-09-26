@@ -278,10 +278,39 @@ def attribute(chat_path, mem_path, since):
             "exact_unmatched": exact_unmatched, "uptime_stamped": uptime_stamped}
 
 
+def _hurt_detector():
+    """hurt_signal.Detector built from the daemon's own phrase lists, or None
+    when the C source is unavailable (the metric is then reported as absent,
+    never as zero)."""
+    try:
+        import hurt_signal
+        return hurt_signal.Detector()
+    except (ImportError, OSError, ValueError):
+        return None
+
+
+def _reply_burst(after, end):
+    """The contact's first burst of messages after a turn: consecutive
+    inbound messages starting within REPLY_WINDOW_S, ending at our next send
+    or a THREAD_GAP_S gap."""
+    burst, prev_t = [], None
+    for m in after:
+        if m["from_me"]:
+            break
+        if not burst and (m["t"] - end).total_seconds() > REPLY_WINDOW_S:
+            break
+        if burst and (m["t"] - prev_t).total_seconds() > THREAD_GAP_S:
+            break
+        burst.append(m)
+        prev_t = m["t"]
+    return burst
+
+
 def analyze(chat_path, mem_path, since, now):
     """Per-turn outcomes for every 1:1 contact. Returns counts + per_turn rows
     (no message text)."""
     att = attribute(chat_path, mem_path, since)
+    hurt = _hurt_detector()
     exact_from, uptime_stamped = att["exact_from"], att["uptime_stamped"]
     exact_matched, exact_unmatched = att["exact_matched"], att["exact_unmatched"]
     counts = {"seth": 0, "huuman": 0, "ambiguous": 0, "censored": 0}
@@ -330,9 +359,16 @@ def analyze(chat_path, mem_path, since, now):
                 "reply_len": None if reply is None else len(reply["text"]),
                 "depth": depth,
                 "positive_tapback": any(m["guid"] in positive_targets for m in turn),
+                # Did their reply say they feel hurt or worried about us ("u mad
+                # at me?")? None when they did not reply or the detector is
+                # unavailable. Dead-end rate cannot see this: a hurt contact keeps
+                # replying (2026-09-26: 0.000 dead ends on a thread that ended in
+                # "Nvrmind goodnight").
+                "hurt_after": (None if reply is None or hurt is None else
+                               hurt("\n".join(m["text"] or "" for m in _reply_burst(after, end)))),
             })
     per_turn.sort(key=lambda r: r["end"])
-    return {"turns": counts, "per_turn": per_turn,
+    return {"turns": counts, "per_turn": per_turn, "hurt_detector": hurt is not None,
             "attribution": {"exact_from": exact_from.isoformat() if exact_from else None,
                             "uptime_stamped_records": uptime_stamped,
                             "exact_matched": exact_matched,
@@ -360,6 +396,17 @@ def _secondary(rows):
         "positive_tapback_rate": (round(sum(bool(r.get("positive_tapback")) for r in rows) / len(rows), 3)
                                   if rows else None),
     }
+
+
+def hurt_after_counts(rows):
+    """Per arm: replies that carried a hurt signal, out of replies. Counts, not
+    a rate: early windows have a handful of h-uman turns, and "1 of 3" must not
+    be read as 33%."""
+    out = {}
+    for arm in ("seth", "huuman"):
+        seen = [r["hurt_after"] for r in rows if r["arm"] == arm and r.get("hurt_after") is not None]
+        out[arm] = {"hurt": sum(seen), "replies": len(seen)}
+    return out
 
 
 def summarize(rows, min_turns=30, min_contacts=3, seed=1234, n_boot=2000):
@@ -427,6 +474,14 @@ def main(argv=None):
 
     head = summary["all"]
     print(f"turns: {res['turns']}  paired contacts: {head['contacts_paired']}")
+    if res["hurt_detector"]:
+        ha = hurt_after_counts(rows)
+        summary["hurt_after"] = ha
+        print("hurt signal in their reply: "
+              + ", ".join(f"{a} {v['hurt']}/{v['replies']}" for a, v in ha.items()))
+    else:
+        summary["hurt_after"] = None
+        print("hurt signal in their reply: unavailable (daemon_hurt_handoff.c not readable)")
     att = res["attribution"]
     print(f"attribution: exact from {att['exact_from'] or '(no outbound_sends yet)'}; "
           f"{att['exact_matched']} sends resolved, {att['exact_unmatched_records']} records unresolved")
