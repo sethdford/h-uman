@@ -6,13 +6,7 @@
     <meta name="description" content="h-uman Control — not quite human. AI assistant dashboard." />
     <meta name="theme-color" content="#0c0c0c" media="(prefers-color-scheme: dark)" />
     <meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)" />
-    <link
-      rel="prefetch"
-      href="/fonts/inter/inter-latin-wght-normal.woff2"
-      as="font"
-      type="font/woff2"
-      crossorigin
-    />
+    <link rel="prefetch" href="/fonts/inter/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="icon" type="image/svg+xml" href="/src/assets/logo.svg" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <title>h-uman Control</title>
@@ -21,14 +15,8 @@
     <a href="#main-content" class="skip-link">Skip to main content</a>
     <svg class="hu-glass-refraction-svg" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
       <defs>
-        <filter
-          id="hu-refract"
-          x="-10%"
-          y="-10%"
-          width="120%"
-          height="120%"
-          color-interpolation-filters="sRGB"
-        >
+        <filter id="hu-refract" x="-10%" y="-10%" width="120%" height="120%"
+                color-interpolation-filters="sRGB">
           <feTurbulence
             type="fractalNoise"
             baseFrequency="0.012 0.014"
@@ -50,8 +38,8 @@
     <script type="module" src="/src/main.ts"></script>
     <script>
       if ("serviceWorker" in navigator) {
-        window.addEventListener("load", function () {
-          navigator.serviceWorker.register("/sw.js").catch(function () {});
+        window.addEventListener("load", function() {
+          navigator.serviceWorker.register("/sw.js").catch(function() {});
         });
       }
     </script>
