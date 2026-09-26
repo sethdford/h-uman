@@ -245,6 +245,18 @@ for _artifact in human human_tests; do
     if [ -n "$(find src include \( -name '*.[ch]' -o -name '*.m' \) -newer "$BUILD_DIR/$_artifact" -print -quit 2>/dev/null)" ]; then
         STALE=1
     fi
+    # A reconfigure without a rebuild is stale too, and src/ mtimes cannot see
+    # it: link.txt is regenerated for the NEW configuration while human_tests'
+    # objects still come from the old one. Measured 2026-09-26 on the main
+    # checkout right after `cmake --preset dev` over an ALL_CHANNELS=ON tree:
+    # the new 995-member link.txt against the old test objects gave B=96.
+    # Anchored on the two link.txt files this gate reads, NOT CMakeCache.txt:
+    # CMake rewrites the cache on every re-run (a comment edit in
+    # CMakeLists.txt would mark the tree stale forever) but writes link.txt
+    # copy-if-different, so its mtime moves only when the link line does.
+    if [ "$HUMAN_LINK" -nt "$BUILD_DIR/$_artifact" ] || [ "$CORE_LINK" -nt "$BUILD_DIR/$_artifact" ]; then
+        STALE=1
+    fi
 done
 # Strict mode is the pre-push path, which rebuilds build/ immediately before
 # calling this. If it is STILL stale there, the rebuild did not take — enforce
@@ -406,8 +418,8 @@ echo "A = never-loaded archive members: $A (ceiling $NEVER_LOADED_BASELINE)"
 echo "B = unreferenced dead symbols: $B (ceiling $DEAD_UNREF_BASELINE)"
 
 if [ "$STALE" = "1" ]; then
-    echo "RATCHET_SKIP: $BUILD_DIR is older than src/ — counts describe an earlier tree"
-    echo "NOTE: $BUILD_DIR predates the current sources, so these counts are advisory" >&2
+    echo "RATCHET_SKIP: $BUILD_DIR is older than src/ or its link.txt — counts describe an earlier tree"
+    echo "NOTE: $BUILD_DIR predates the current sources or configuration, so these counts are advisory" >&2
     echo "      and nothing is locked. Rebuild to enforce (and to let the baselines" >&2
     echo "      ratchet down): cmake --build $BUILD_DIR --target human human_tests" >&2
     echo "      The pre-push hook does that rebuild for you before it enforces." >&2

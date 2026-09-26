@@ -158,7 +158,11 @@ Unlike every other ratchet in `scripts/ratchet-config.tsv`, this one measures a
 - **A stale `build/` demotes the gate to advisory — except under
   `HU_DEAD_STRIP_STRICT=1`.** If any `src/` or `include/` file is newer than
   `build/human` or `build/human_tests`, the counts describe an earlier tree, so
-  they are printed and the gate exits 0. This is the right answer for an ad-hoc
+  they are printed and the gate exits 0. The same holds when either link.txt
+  the gate reads is newer than those binaries — a reconfigure that has not
+  been rebuilt yet (link.txt is written copy-if-different, so a no-op
+  re-configure does not trip this; CMakeCache.txt, rewritten on every run,
+  would). This is the right answer for an ad-hoc
   run and for pre-commit (which must not block a commit on a tree nobody built).
   It is the *wrong* answer for pre-push, which is why pre-push rebuilds first
   and then sets `HU_DEAD_STRIP_STRICT=1` to disable the demotion. For a manual
