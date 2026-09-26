@@ -983,33 +983,39 @@ function generateCSS(
   lines.push("  }");
   lines.push("}");
 
-  // Wide gamut (P3) color overrides
+  // Wide gamut (P3) color overrides. Each theme's P3 map may only apply where
+  // that theme is active: the maps are partial, so a dark map applied under the
+  // light theme leaves dark values on every key the light map omits (dark link
+  // at 2.14:1 on the light background). Suppressed under prefers-contrast: more
+  // because the high-contrast theme above is a full palette of its own.
   const p3Entries = Object.entries(p3Colors);
-  if (p3Entries.length > 0) {
+  const p3Block = (media: string, selector: string, theme: string) => {
+    const decls = p3Entries
+      .filter(([k]) => k.startsWith(`${theme}.`))
+      .sort()
+      .map(([k, v]) => `    --hu-${k.slice(theme.length + 1)}: ${v};`);
+    if (decls.length === 0) return;
     lines.push("");
-    lines.push("@media (color-gamut: p3) {");
-    lines.push("  :root {");
-    lines.push(
-      "    /* Wide gamut P3 color overrides — more vivid on supported displays */",
-    );
-    const darkP3 = p3Entries.filter(([k]) => k.startsWith("dark."));
-    for (const [k, v] of darkP3.sort()) {
-      const name = k.replace("dark.", "").replace(/-/g, "-");
-      lines.push(`    --hu-${name}: ${v};`);
-    }
+    lines.push(`@media ${media} {`);
+    lines.push(`  ${selector} {`);
+    lines.push(...decls);
     lines.push("  }");
-    const lightP3 = p3Entries.filter(([k]) => k.startsWith("light."));
-    if (lightP3.length > 0) {
-      lines.push("  @media (prefers-color-scheme: light) {");
-      lines.push("    :root {");
-      for (const [k, v] of lightP3.sort()) {
-        const name = k.replace("light.", "").replace(/-/g, "-");
-        lines.push(`      --hu-${name}: ${v};`);
-      }
-      lines.push("    }");
-      lines.push("  }");
-    }
     lines.push("}");
+  };
+  if (p3Entries.length > 0) {
+    const p3 = "(color-gamut: p3) and (not (prefers-contrast: more))";
+    p3Block(
+      `${p3} and (prefers-color-scheme: dark)`,
+      ':root:not([data-theme="light"])',
+      "dark",
+    );
+    p3Block(
+      `${p3} and (prefers-color-scheme: light)`,
+      ':root:not([data-theme="dark"])',
+      "light",
+    );
+    p3Block(p3, '[data-theme="dark"]', "dark");
+    p3Block(p3, '[data-theme="light"]', "light");
   }
 
   return lines.join("\n");
