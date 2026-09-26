@@ -105,6 +105,22 @@ const base = rawBase.endsWith("/") ? rawBase : rawBase + "/";
         color: var(--hu-accent);
         background: color-mix(in srgb, var(--hu-accent) 10%, transparent);
       }
+
+      .quiet-lede { color: var(--hu-text-secondary); max-width: 60ch; margin-bottom: var(--hu-space-xl); }
+      .quiet-pair { display: grid; gap: var(--hu-space-lg); grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); }
+      .quiet-panel { background: var(--hu-bg); color: var(--hu-text); border: 1px solid var(--hu-border); border-radius: var(--hu-radius-lg); padding: var(--hu-space-xl); }
+      .quiet-eyebrow { font-size: var(--hu-text-2xs); letter-spacing: 0.18em; text-transform: uppercase; color: var(--hu-text-muted); margin-bottom: var(--hu-space-sm); }
+      .quiet-hero { font-family: var(--hu-type-display-lg-family, var(--hu-font)); font-size: clamp(2.25rem, 1.5rem + 3vw, 3.75rem); font-weight: var(--hu-type-display-lg-weight); letter-spacing: var(--hu-type-display-lg-letter-spacing); line-height: 1; margin-bottom: var(--hu-space-md); }
+      .quiet-hero em { color: var(--hu-accent-text); }
+      .quiet-greeting { font-family: var(--hu-type-headline-md-family, var(--hu-font)); font-size: var(--hu-text-xl); margin-bottom: var(--hu-space-xs); }
+      .quiet-body { color: var(--hu-text-secondary); margin-bottom: var(--hu-space-lg); }
+      .quiet-actions { display: flex; flex-wrap: wrap; gap: var(--hu-space-md); align-items: center; margin-bottom: var(--hu-space-lg); }
+      .quiet-primary { background: var(--hu-accent); color: var(--hu-on-accent); padding: var(--hu-space-sm) var(--hu-space-lg); border-radius: var(--hu-radius-full); text-decoration: none; }
+      .quiet-primary:hover { background: var(--hu-accent-hover); }
+      .quiet-link { color: var(--hu-link); }
+      .quiet-primary:focus-visible, .quiet-link:focus-visible { outline: 2px solid var(--hu-focus-ring); outline-offset: 2px; }
+      .quiet-swatches { display: flex; flex-wrap: wrap; gap: var(--hu-space-xs); list-style: none; padding: 0; font-size: var(--hu-text-2xs); }
+      .quiet-swatches li { border: 1px solid var(--hu-border); border-radius: var(--hu-radius-sm); padding: var(--hu-space-sm) var(--hu-space-md); }
     </style>
   </head>
   <body
@@ -137,6 +153,7 @@ const base = rawBase.endsWith("/") ? rawBase : rawBase + "/";
 
       {/* ═══ Section Nav ═══ */}
       <nav class="design-section-nav" aria-label="Design system sections">
+        <a href="#quiet-room">Quiet Room</a>
         <a href="#principles">Principles</a>
         <a href="#color">Color</a>
         <a href="#typography">Type</a>
@@ -269,6 +286,39 @@ const base = rawBase.endsWith("/") ? rawBase : rawBase + "/";
                 update everywhere.
               </p>
             </article>
+          </div>
+        </div>
+      </section>
+
+      {/* ═══ 2b. QUIET ROOM (opt-in web layer; spec docs/plans/2026-09-26-quiet-room-design-language-design.md) ═══ */}
+      <section id="quiet-room" class="py-24 md:py-32 px-6 cv-defer">
+        <div class="max-w-5xl mx-auto">
+          <h2 class="text-3xl font-bold mb-4">Quiet Room</h2>
+          <p class="quiet-lede">
+            The web-only editorial layer. Opt in with <code>data-brand="quiet"</code>. Light and dark
+            are shown side by side; every text pair below is measured by
+            <code>design-tokens/check-contrast.ts</code> on each build.
+          </p>
+          <div class="quiet-pair">
+            {["light", "dark"].map((mode) => (
+              <div class="quiet-panel" data-brand="quiet" data-theme={mode}>
+                <p class="quiet-eyebrow">Personal AI, on your hardware · {mode}</p>
+                <p class="quiet-hero">The assistant that's <em>actually yours.</em></p>
+                <p class="quiet-greeting">Good evening. Three people are waiting on you.</p>
+                <p class="quiet-body">Your memory, persona and history never leave your machine.</p>
+                <div class="quiet-actions">
+                  <a class="quiet-primary" href="#quiet-room">Get h-uman</a>
+                  <a class="quiet-link" href="#quiet-room">See how it learns you</a>
+                </div>
+                <ul class="quiet-swatches" aria-label={`${mode} palette`}>
+                  <li style="background: var(--hu-bg)">bg</li>
+                  <li style="background: var(--hu-bg-inset)">inset</li>
+                  <li style="background: var(--hu-bg-surface)">card</li>
+                  <li style="background: var(--hu-accent); color: var(--hu-on-accent)">accent</li>
+                  <li style="background: var(--hu-accent-brand)" aria-label="accent-brand, decorative only">brand</li>
+                </ul>
+              </div>
+            ))}
           </div>
         </div>
       </section>

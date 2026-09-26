@@ -1,9 +1,10 @@
 import { html, css } from "lit";
-import { customElement } from "lit/decorators.js";
+import { customElement, state } from "lit/decorators.js";
 import { LitElement } from "lit";
 import "../components/hu-page-hero.js";
 import "../components/hu-section-header.js";
 import "../components/hu-card.js";
+import "../components/hu-switch.js";
 import "../components/hu-chart.js";
 import "../components/hu-ring-progress.js";
 import "../components/hu-radial-gauge.js";
@@ -37,6 +38,15 @@ import {
 @customElement("hu-design-system-view")
 export class HuDesignSystemView extends LitElement {
   private readonly _heatmap = demoHeatmapData();
+
+  /** Mirrors <html data-brand="quiet">; persists for the session so other views preview it too. */
+  @state() private _quiet = document.documentElement.dataset.brand === "quiet";
+
+  private _onQuietChange(e: CustomEvent<{ checked: boolean }>) {
+    this._quiet = e.detail.checked;
+    if (this._quiet) document.documentElement.dataset.brand = "quiet";
+    else delete document.documentElement.dataset.brand;
+  }
 
   static override styles = css`
     :host {
@@ -171,6 +181,23 @@ export class HuDesignSystemView extends LitElement {
       color: var(--hu-accent-text, var(--hu-accent));
       overflow-wrap: anywhere;
     }
+
+    .quiet-toggle {
+      margin-top: var(--hu-space-md);
+    }
+
+    .quiet-display {
+      font-family: var(--hu-type-display-lg-family, var(--hu-font));
+      font-size: var(--hu-text-display-xl, var(--hu-text-3xl));
+      font-weight: var(--hu-type-display-lg-weight);
+      letter-spacing: var(--hu-type-display-lg-letter-spacing);
+      line-height: 1;
+      margin: 0 0 var(--hu-space-sm);
+    }
+
+    .quiet-display em {
+      color: var(--hu-accent-text);
+    }
   `;
 
   override render() {
@@ -188,6 +215,13 @@ export class HuDesignSystemView extends LitElement {
           <code class="path">--hu-*</code> custom properties. Demo datasets:
           <code class="path">ui/src/design-system/demo-data.ts</code>.
         </p>
+        <hu-switch
+          class="quiet-toggle"
+          data-testid="quiet-toggle"
+          label="Quiet Room preview"
+          .checked=${this._quiet}
+          @hu-change=${this._onQuietChange}
+        ></hu-switch>
       </hu-page-hero>
 
       <section class="section" aria-label="Foundations">
@@ -196,6 +230,15 @@ export class HuDesignSystemView extends LitElement {
           description="Typography, brand accents, categorical chart ramp, tonal surfaces, glass."
         ></hu-section-header>
         <div class="foundations-grid">
+          <hu-card>
+            <h3 class="card-title">Quiet Room display</h3>
+            <p class="quiet-display">Actually <em>yours.</em></p>
+            <p class="type-body">
+              Newsreader with optical sizing when the preview is on; Avenir otherwise.
+              <code class="path">--hu-font-display</code>,
+              <code class="path">--hu-text-display-xl</code>.
+            </p>
+          </hu-card>
           <hu-card>
             <h3 class="card-title">Typography</h3>
             <p class="type-sample">Avenir + tabular numerals</p>
