@@ -49,16 +49,18 @@ class Fixture:
             self.handles[contact] = cur.lastrowid
         return self.handles[contact]
 
-    def outbound(self, contact, secs, text, prior, kind="text"):
-        """A daemon send-provenance row (src/daemon/daemon_send_provenance.c)."""
+    def outbound(self, contact, secs, text, prior, kind="text", raw_ms=None):
+        """A daemon send-provenance row (src/daemon/daemon_send_provenance.c).
+        raw_ms stores a literal sent_at_ms, e.g. a pre-fix uptime stamp."""
         self.mem.execute("create table if not exists outbound_sends(id integer primary key,"
                          " sent_at_ms integer, channel text, contact text, kind text, text text,"
                          " prior_max_rowid integer)")
         self.mem.execute(
             "insert into outbound_sends(sent_at_ms,channel,contact,kind,text,prior_max_rowid)"
             " values (?,?,?,?,?,?)",
-            (int((T0 + dt.timedelta(seconds=secs)).timestamp() * 1000), "imessage", contact, kind,
-             text, prior))
+            (raw_ms if raw_ms is not None
+             else int((T0 + dt.timedelta(seconds=secs)).timestamp() * 1000),
+             "imessage", contact, kind, text, prior))
 
     def max_rowid(self):
         return self.chat.execute("select coalesce(max(ROWID),0) from message").fetchone()[0]
@@ -289,6 +291,49 @@ class TestExactProvenance(unittest.TestCase):
         r = self.run_fixture(fill)
         self.assertEqual(r["attribution"]["exact_unmatched_records"], 1)
         self.assertEqual(r["turns"]["seth"], 1)
+
+    # Deploys of 2026-09-25 stamped sent_at_ms with CLOCK_MONOTONIC (uptime),
+    # e.g. 1831484402. Those rows still carry a correct prior_max_rowid.
+    UPTIME_MS = 1_831_484_402
+
+    def test_uptime_stamped_row_resolves_by_rowid_and_text(self):
+        def fill(fx):
+            fx.outbound("+1", 0, "Morning", fx.max_rowid(), raw_ms=self.UPTIME_MS)
+            fx.msg("+1", 0, "Morning", True)
+            fx.msg("+1", 2 * MIN, "Tired boo?", False)
+        r = self.run_fixture(fill)
+        self.assertEqual(r["turns"]["huuman"], 1)
+        self.assertEqual(r["attribution"]["exact_matched"], 1)
+        self.assertEqual(r["attribution"]["uptime_stamped_records"], 1)
+
+    def test_uptime_stamp_does_not_label_earlier_sends_as_seth(self):
+        # An uptime stamp read as epoch ms is 1970: provenance must not be
+        # treated as complete from 1970, or every unclaimed send becomes Seth's.
+        def fill(fx):
+            fx.mem.execute(
+                "insert into messages(session_id,role,content,created_at) values (?,?,?,?)",
+                ("+1", "assistant", "draft that differs", T0.strftime("%Y-%m-%d %H:%M:%S")))
+            fx.msg("+1", 60, "delivered text", True)
+            fx.msg("+1", 5 * MIN, "ok", False)
+            fx.outbound("+1", 3 * 86400, "later exact send", fx.max_rowid(),
+                        raw_ms=self.UPTIME_MS)
+            fx.msg("+1", 3 * 86400, "later exact send", True)
+            fx.msg("+1", 3 * 86400 + 60, "cool", False)
+        r = self.run_fixture(fill)
+        self.assertEqual(r["turns"]["ambiguous"], 1)
+        self.assertEqual(r["turns"]["seth"], 0)
+        self.assertEqual(r["turns"]["huuman"], 1)
+        # Completeness starts at the first resolved send, not 1970.
+        self.assertTrue(r["attribution"]["exact_from"].startswith("2026-09-04"))
+
+    def test_uptime_stamped_row_without_rowid_boundary_is_unmatched(self):
+        def fill(fx):
+            fx.outbound("+1", 0, "hey", -1, raw_ms=self.UPTIME_MS)
+            fx.msg("+1", 0, "hey", True)
+            fx.msg("+1", 2 * MIN, "hi", False)
+        r = self.run_fixture(fill)
+        self.assertEqual(r["attribution"]["exact_matched"], 0)
+        self.assertEqual(r["attribution"]["exact_unmatched_records"], 1)
 
 
 class TestSummary(unittest.TestCase):
