@@ -150,12 +150,19 @@ Q                                                  { /* typography (all modes) *
         :root:not([data-theme="light"]) [data-brand="quiet"]):not([data-theme="light"])
                                                    { /* dark colors */ }
   }
-  :is([data-theme="dark"][data-brand="quiet"],
-      [data-theme="dark"] [data-brand="quiet"])    { /* dark colors */ }
-  :is([data-theme="light"][data-brand="quiet"],
-      [data-theme="light"] [data-brand="quiet"])   { /* light colors */ }
+  [data-theme="dark"] [data-brand="quiet"]         { /* dark colors  — ancestor form */ }
+  [data-theme="light"] [data-brand="quiet"]        { /* light colors — ancestor form */ }
+  [data-theme="dark"][data-brand="quiet"]          { /* dark colors  — self form, last */ }
+  [data-theme="light"][data-brand="quiet"]         { /* light colors — self form, last */ }
 }
 ```
+
+*Also corrected while planning:* the explicit-theme rules were first drafted as
+`:is(self, ancestor)` pairs. But `:is()` scores as its most specific argument whichever
+one matched, so self and ancestor tie at (0,2,0) and source order decides. A dark specimen
+panel on a page the visitor had toggled to light would then have rendered light. The
+fix is separate rules, with the self forms last. The plan's cascade matrix pins this case,
+and it's shown to fail when the order is reversed.
 
 **Why `:is()` (corrected 2026-09-26 while planning).** The first draft used bare
 `:root[data-brand="quiet"]`, which can't match the `/design` page's specimen *container*
@@ -226,6 +233,26 @@ Measured contrast (WCAG 2.x relative luminance; script in II.7):
 | muted text on paper / card (dark) | 8.30 / 7.41 | 4.5 |
 | accent text on paper / card (dark) | 11.45 / 10.23 | 4.5 |
 | on-accent (paper) on accent fill (dark) | 10.74 | 4.5 |
+
+**Inherited tokens that fail on paper (measured while planning, 2026-09-26).** The first
+draft relied on the quiet layer *inheriting* status and link-state colors from the
+existing themes. Measured against the new backgrounds, eight of them fail, so the quiet
+layer overrides them too:
+
+| Token | Existing value → min ratio | Quiet override → min ratio |
+|---|---|---|
+| light `text-faint` | #726c65 → 4.42 | `oklch(52.5% 0.012 95)` → 4.59 |
+| light `link-active` | #7ab648 → **2.08** | `oklch(45% 0.125 135)` → 6.06 |
+| light `accent-hover` (fill) | #5a9a30 → **2.93** | `oklch(45% 0.125 135)` → 6.06; on-accent label 7.01 |
+| light `success` | #008000 → 4.38 | `oklch(50% 0.130 150)` → 4.81 |
+| light `warning` | #ca8a04 → **2.50** | `oklch(53% 0.105 65)` → 4.62 (C 0.120 was out of sRGB gamut) |
+| light `info` | #2563eb → 4.40 | `oklch(50% 0.160 258)` → 5.21 |
+| dark `text-faint` | #56504a → **2.14** | `oklch(64% 0.010 120)` → 5.08 |
+| dark `accent-hover`, `link-active` | set for light/dark symmetry | `oklch(86% 0.150 135)` → 11.62 |
+
+"Min ratio" is the worst case across bg, bg-inset/surface-container and card.
+Inheritance is still used where it passes (light `error` 5.02; dark `text-tertiary` 4.61,
+`info` 4.63, `link-visited` 4.95), and the checker re-measures those on every build.
 
 These are the proposed starting values. The checker in II.7 is the authority: if a later
 tweak fails it, the build fails.
