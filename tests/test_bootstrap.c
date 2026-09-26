@@ -67,9 +67,15 @@ static void write_config_fixture(const char *path, const char *json) {
     int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
     HU_ASSERT_TRUE(fd >= 0);
     FILE *f = fdopen(fd, "w");
+    if (!f)
+        close(fd);
     HU_ASSERT_NOT_NULL(f);
-    fputs(json, f);
-    fclose(f);
+    /* Close before asserting: HU_FAIL longjmps, so a failed assert here must
+     * not strand the stream. */
+    int put = fputs(json, f);
+    int closed = fclose(f);
+    HU_ASSERT_TRUE(put >= 0);
+    HU_ASSERT_EQ(closed, 0);
 }
 #endif
 
