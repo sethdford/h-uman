@@ -8,6 +8,11 @@
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
+import {
+  colorToKotlin,
+  formatSwiftColor,
+  hexToKotlin,
+} from "./color-emit-lib.js";
 import { generateDynamicColorCSS } from "./dynamic-color-lib.js";
 import {
   TOKEN_FILES,
@@ -86,47 +91,6 @@ function hexToRGB(hex: string): [number, number, number] | null {
     parseInt(m[1].substring(2, 4), 16),
     parseInt(m[1].substring(4, 6), 16),
   ];
-}
-
-/** Convert hex color #rrggbb to 0xRRGGBB for Swift */
-function hexToSwift(hex: string): string {
-  const m = hex.match(/^#([0-9a-fA-F]{6})$/);
-  if (!m) return "0x000000";
-  return "0x" + m[1].toUpperCase();
-}
-
-/** Convert hex color to Kotlin Color(0xFFRRGGBB) */
-function hexToKotlin(hex: string): string {
-  const m = hex.match(/^#([0-9a-fA-F]{6})$/);
-  if (!m) return "0xFF000000";
-  return "0xFF" + m[1].toUpperCase();
-}
-
-/** Convert rgba(r,g,b,a) to Kotlin Color - approximate as opaque for simplicity */
-function rgbaToKotlin(rgba: string): string {
-  const m = rgba.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
-  if (!m) return "0xFF000000";
-  const r = parseInt(m[1], 10);
-  const g = parseInt(m[2], 10);
-  const b = parseInt(m[3], 10);
-  const a = m[4] ? Math.round(parseFloat(m[4]) * 255) : 255;
-  const hex = (((a << 24) | (r << 16) | (g << 8) | b) >>> 0)
-    .toString(16)
-    .padStart(8, "0")
-    .toUpperCase();
-  return "0x" + hex;
-}
-
-function colorToSwift(val: string): string {
-  if (val.startsWith("#")) return hexToSwift(val);
-  if (val.startsWith("rgba")) return hexToSwift("#000000"); // Swift Color(hex:) doesn't support alpha directly; use placeholder
-  return "0x000000";
-}
-
-function colorToKotlin(val: string): string {
-  if (val.startsWith("#")) return hexToKotlin(val);
-  if (val.startsWith("rgba")) return rgbaToKotlin(val);
-  return "0xFF000000";
 }
 
 /** k=stiffness, c=damping, m=mass. SwiftUI: response ≈ 2π/√(k/m), dampingFraction = c/(2√(km)) */
@@ -1862,21 +1826,6 @@ ${aliasLines}
 
 #endif /* HU_DESIGN_TOKENS_H */
 `;
-}
-
-function formatSwiftColor(val: string): string {
-  if (val.startsWith("#")) {
-    return `Color(hex: ${hexToSwift(val)})`;
-  }
-  const m = val.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
-  if (m) {
-    const r = Math.round((parseInt(m[1], 10) / 255) * 10000) / 10000;
-    const g = Math.round((parseInt(m[2], 10) / 255) * 10000) / 10000;
-    const b = Math.round((parseInt(m[3], 10) / 255) * 10000) / 10000;
-    const a = m[4] ? Math.round(parseFloat(m[4]) * 10000) / 10000 : 1;
-    return `Color(red: ${r}, green: ${g}, blue: ${b}, opacity: ${a})`;
-  }
-  return "Color(hex: 0x000000)";
 }
 
 function toSwiftCase(s: string): string {
