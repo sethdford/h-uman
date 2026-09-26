@@ -289,22 +289,25 @@ void hu_agent_internal_resolve_stop_sequences_reset_for_test(void);
 hu_error_t hu_agent_internal_build_unavailable_fallback(hu_allocator_t *alloc, char **out,
                                                         size_t *out_len);
 
-/* Clear the active scene-direction text. The daemon owns the buffer
- * (typically `hu_director_result_t.direction[512]`); the agent only
- * borrows a const pointer + length, so this must run when the daemon's
- * director_result goes out of scope — otherwise the guard could read
- * freed memory on the next turn. NULL-safe; reached today only through
- * `hu_agent_internal_reset_contact_boundary_state`.
+/* Set / clear the active scene-direction text for the next turn. The
+ * daemon owns the buffer (typically `hu_director_result_t.direction[512]`);
+ * the agent only borrows a const pointer + length. Setter is a plain
+ * field assignment — no allocation, no copy. Clear must be called when
+ * the daemon's director_result goes out of scope, otherwise the guard
+ * could read freed memory on the next turn.
  *
- * The matching setter (`hu_agent_internal_set_scene_direction`, a plain
- * field assignment — no allocation, no copy) was deleted on 2026-09-20
- * with zero callers; see `docs/plans/2026-09-20-dead-code-plan.md`
- * Appendix B. Nothing assigns `agent->scene_direction_text` today, so it
- * stays NULL and the three response_guard call sites pass NULL for
- * `hu_guard_context_t.director_text` — G6's current-turn director-echo
- * check (Sprint 31, wired in Sprint 34) cannot fire until a daemon path
- * sets the field again. Re-add a setter together with that caller, not
- * ahead of it. */
+ * Used by the response_guard call sites to populate
+ * `hu_guard_context_t.director_text` so a verbatim quote of "casual
+ * short, dry" by the model triggers G6 → REJECT. (Sprint 34 — wires
+ * Sprint 31's G6 into production.)
+ *
+ * History: the setter was deleted on 2026-09-20 by the dead-code sweep
+ * (docs/plans/2026-09-20-dead-code-plan.md Appendix B) because it had zero
+ * callers, which left G6's director-echo check inert. #439 armed the guard
+ * by giving it a real caller in src/daemon/daemon_director.c, so it was
+ * restored at the 2026-09-26 main merge — together with that caller, as
+ * the deletion note asked, not ahead of it. */
+void hu_agent_internal_set_scene_direction(hu_agent_t *agent, const char *text, size_t text_len);
 void hu_agent_internal_clear_scene_direction(hu_agent_t *agent);
 
 /* Sprint 37 — Push the about-to-go-stale director string into the
