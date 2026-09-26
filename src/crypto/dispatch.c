@@ -87,10 +87,3 @@ void hu_hmac_sha256(const uint8_t *key, size_t key_len, const uint8_t *msg, size
                     uint8_t out[32]) {
     hu_hmac_sha256_generic(key, key_len, msg, msg_len, out);
 }
-
-/* THROWAWAY — deliberate dead-strip ratchet regression, dropped before merge.
- * A global _hu_ symbol with no production caller and no test reference: the
- * linker dead-strips it, so counter B rises 76 -> 77 and the CI gate must go
- * red. Proving the job fails is the only way to know it gates anything. */
-void hu_ci_deadstrip_probe_unused_20260926(void);
-void hu_ci_deadstrip_probe_unused_20260926(void) {}
