@@ -250,9 +250,10 @@ static char *hu_test_slurp(const char *path) {
     return buf;
 }
 
-/* Parse `json` into a fresh arena-backed config, run the warning, and return
- * how many channels it reported. Captured stderr lands in `log_path`. */
-static size_t hu_test_warn_for_config(const char *json, const char *log_path) {
+/* Parse `json` into a fresh arena-backed config, run the warning with stderr
+ * pointed at `log_fd`, and return how many channels it reported. The log is
+ * truncated first, so it holds only this call's output. */
+static size_t hu_test_warn_for_config(const char *json, int log_fd) {
     hu_allocator_t backing = hu_system_allocator();
     hu_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
@@ -266,16 +267,18 @@ static size_t hu_test_warn_for_config(const char *json, const char *log_path) {
     cfg.allocator = a;
     HU_ASSERT_EQ(hu_config_parse_json(&cfg, json, strlen(json)), HU_OK);
 
-    int dup_fd = dup(fileno(stderr));
-    FILE *saved = (dup_fd >= 0) ? fdopen(dup_fd, "w") : NULL;
-    HU_ASSERT_NOT_NULL(saved);
-    HU_ASSERT_NOT_NULL(freopen(log_path, "w", stderr));
+    HU_ASSERT_EQ(ftruncate(log_fd, 0), 0);
+    HU_ASSERT_EQ(lseek(log_fd, 0, SEEK_SET), 0);
+    fflush(stderr);
+    int saved_fd = dup(fileno(stderr));
+    HU_ASSERT_TRUE(saved_fd >= 0);
+    HU_ASSERT_TRUE(dup2(log_fd, fileno(stderr)) >= 0);
 
     size_t warned = hu_app_warn_channels_missing_from_build(&cfg, NULL);
 
     fflush(stderr);
-    dup2(fileno(saved), fileno(stderr));
-    fclose(saved);
+    dup2(saved_fd, fileno(stderr));
+    close(saved_fd);
 
     hu_arena_destroy(arena);
     return warned;
@@ -292,13 +295,18 @@ static void bootstrap_warns_for_configured_channel_missing_from_build(void) {
             present = k;
     }
 
-    char log_path[256];
-    snprintf(log_path, sizeof(log_path), "/tmp/hu_bootstrap_chan_warn_%d.log", (int)getpid());
+    /* mkstemp, not a pid-named path: it creates the file 0600 with O_EXCL, so
+     * the name is unguessable and nobody else can write to it. A predictable
+     * name opened with "w" in /tmp is exactly what CodeQL flags as
+     * cpp/world-writable-file-creation. */
+    char log_path[] = "/tmp/hu_bootstrap_chan_warn_XXXXXX";
+    int log_fd = mkstemp(log_path);
+    HU_ASSERT_TRUE(log_fd >= 0);
     char json[256];
 
     if (absent) {
         snprintf(json, sizeof(json), "{\"channels\":{\"%s\":{\"token\":\"t\"}}}", absent);
-        size_t warned = hu_test_warn_for_config(json, log_path);
+        size_t warned = hu_test_warn_for_config(json, log_fd);
         /* Exactly one line, for the one channel this binary cannot start. */
         HU_ASSERT_EQ(warned, 1);
 
@@ -317,12 +325,13 @@ static void bootstrap_warns_for_configured_channel_missing_from_build(void) {
     if (present) {
         /* A channel this binary does have stays silent. */
         snprintf(json, sizeof(json), "{\"channels\":{\"%s\":{\"token\":\"t\"}}}", present);
-        HU_ASSERT_EQ(hu_test_warn_for_config(json, log_path), 0);
+        HU_ASSERT_EQ(hu_test_warn_for_config(json, log_fd), 0);
     }
 
     /* A config naming no channels reports nothing, and a NULL config is safe. */
-    HU_ASSERT_EQ(hu_test_warn_for_config("{}", log_path), 0);
+    HU_ASSERT_EQ(hu_test_warn_for_config("{}", log_fd), 0);
     HU_ASSERT_EQ(hu_app_warn_channels_missing_from_build(NULL, NULL), 0);
+    close(log_fd);
     unlink(log_path);
 }
 
