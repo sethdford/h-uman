@@ -208,6 +208,14 @@ jobs:
   # worse than skipping. Naming `--preset dev` rather than copying its flags also
   # means this job follows the preset if it is ever retuned, instead of drifting
   # away from the constants in silence.
+  #
+  # Since #473 this is load-bearing for correctness, not just for accuracy: the
+  # gate now compares $BUILD_DIR/CMakeCache.txt against the dev preset and
+  # RATCHET_SKIPs on any mismatch, even under HU_DEAD_STRIP_STRICT=1. Pointing
+  # this job at another job's build would therefore skip every run — and because
+  # this job treats a skip as a failure, it would be permanently red. Verified
+  # that `--preset dev -DCMAKE_C_COMPILER_LAUNCHER=ccache` passes that check:
+  # the launcher is not a preset variable, so it is not compared.
   dead-strip-ratchet:
     runs-on: macos-latest
     needs: changes
