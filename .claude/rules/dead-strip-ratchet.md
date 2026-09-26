@@ -99,15 +99,23 @@ function and unit-testing it in isolation is not wiring — see
 `.claude/rules/ground-truth-over-proxy-signals.md`). As deletion work lands,
 auto-lock captures the gain; no manual baseline edit is needed.
 
-## Enforcement: two hooks, two jobs
+## Enforcement: two hooks and a CI job
 
 `scripts/check-dead-strip-ratchet.sh` is wired into **both** hooks, because the
-two things a ratchet must do live in different places:
+two things a ratchet must do live in different places — and into CI, because a
+local hook cannot enforce what it cannot measure:
 
 | Hook | Fires when | What it does |
 |---|---|---|
 | `.githooks/pre-commit` | a `src/` `.c`/`.h` is staged (`ACMD`, like the clone ratchet) | runs the gate plain, so **`ratchet_autolock` can rewrite and stage a lowered baseline**. This is the *only* place that can happen: `scripts/lib/ratchet.sh` refuses to rewrite unless `HU_RATCHET_FROM_HOOK=1`, which only pre-commit exports — pre-push cannot, since its `git add` would stage a file into no commit. Skips in one line when `build/` is absent or stale. |
-| `.githooks/pre-push` | every push, after the suite passes | **rebuilds `build/` incrementally** (`cmake --build build --target human human_tests`), then runs the gate with `HU_DEAD_STRIP_STRICT=1`. This is the enforcement point. |
+| `.githooks/pre-push` | every push, after the suite passes | **rebuilds `build/` incrementally** (`cmake --build build --target human human_tests`), then runs the gate with `HU_DEAD_STRIP_STRICT=1`. The **local** enforcement point — but it skips in one line when the worktree has no configured `build/`, which on 2026-09-26 was 9 of this repo's 19 worktrees. |
+| `dead-strip-ratchet` job in `.github/workflows/ci.yml` | every PR touching `src/`, `include/`, the CMake config or the gate itself, and every push to main | configures **`--preset dev` by name** on `macos-latest`, builds `human` + `human_tests`, runs the gate with `HU_DEAD_STRIP_STRICT=1`. The backstop: unlike the hooks it always has a build, so it can always measure — and a `RATCHET_SKIP` there is treated as a FAILURE, because on a runner configured for the gate a skip means the gate malfunctioned. |
+
+Without the CI half the gate was bypassable: a push from a worktree with no
+`build/` printed `No configured build/ — skipping the dead-strip ratchet.`
+and exited 0, and a skipped gate is indistinguishable from a passing one.
+The hooks now say so in one line when they skip, naming CI as the place the
+check actually happens.
 
 Without the pre-commit half the baselines could only ever freeze, never ratchet
 down — the exact pathology `.claude/rules/ratchet-decay.md` exists to prevent.
@@ -172,6 +180,8 @@ Unlike every other ratchet in `scripts/ratchet-config.tsv`, this one measures a
 Linux CI is a documented gap: the map parser is macOS `ld`'s
 (`# Object files:` / `# Symbols:` / `# Dead Stripped Symbols:`). GNU `ld -Map`
 is a different format; on any non-Darwin host the gate skips.
+That is why the CI job runs on `macos-latest` and not on one of the many
+cheaper Linux jobs: on Linux it would skip every time and prove nothing.
 
 ## Related
 

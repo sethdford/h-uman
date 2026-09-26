@@ -210,6 +210,7 @@ if [ -f "CMakeLists.txt" ]; then
                     echo "NOTE: could not rebuild build/ — skipping the dead-strip ratchet."
                     echo "  (build-check compiled and the suite passed, so this is build/'s"
                     echo "   own state, not this change. Log: $ds_log)"
+                    echo "  NOT ENFORCED on this push — the dead-strip-ratchet job in CI is."
                 fi
             fi
             if [ "$ds_ready" = "1" ]; then
@@ -224,6 +225,7 @@ if [ -f "CMakeLists.txt" ]; then
         else
             echo "No configured build/ — skipping the dead-strip ratchet."
             echo "  Configure one to enable it; see .claude/rules/dead-strip-ratchet.md."
+            echo "  NOT ENFORCED on this push — the dead-strip-ratchet job in CI is."
         fi
     fi
 
