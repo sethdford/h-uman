@@ -995,6 +995,10 @@ jobs:
       # fixtures in a temp dir, no real messages.
       - name: Conversation-quality metric tests (hermetic, stdlib-only)
         run: python3 scripts/test_eval_conversation_quality.py
+      # On-policy preference-pair miner (2026-09-26): same fixtures; a pair is
+      # only minted when h-uman and Seth answered the same inbound message.
+      - name: On-policy pair miner tests (hermetic, stdlib-only)
+        run: python3 scripts/test_mine_onpolicy_pairs.py
       # Per-contact reply-length floor measurement (2026-09-26): same fixtures,
       # asserts only Seth-authored texts are measured and n<min writes nothing.
       - name: Contact reply-length measurement tests (hermetic, stdlib-only)
