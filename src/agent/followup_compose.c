@@ -61,13 +61,19 @@ size_t hu_followup_compose_directive(const char *contact_id, hu_followup_warmth_
      * ("just checking in") across every contact, which is the same tell as the
      * hardcoded strings this replaces, only one layer down. Naming the elapsed
      * time lets the nudge scale — a 2-hour bump and a 2-day bump are not the
-     * same sentence from a real person. */
+     * same sentence from a real person.
+     *
+     * Framed as care, not a nudge (2026-09-24): under "Nudge them" the shadow
+     * soak composed "Leaving me on read i see" and "yo u alive" for close
+     * contacts — guilt and slang, the opposite of the warmth the persona is
+     * tuned toward. The read-receipt dig is ruled out by name. */
     int n =
         snprintf(out, cap,
                  "%s (%s) read your last message on %s about %u hour%s ago and hasn't "
-                 "replied yet. Nudge them — however you'd actually say it, this time, to "
-                 "this person. Keep it to one short line under 120 characters. Don't use "
-                 "stock check-in phrasing. Output only the message text, nothing else.",
+                 "replied. Send one warm, easy follow-up because you care how they are, "
+                 "not because they owe you a reply. No guilt, no teasing about being left "
+                 "on read. One short line under 120 characters, no stock check-in "
+                 "phrasing. Output only the message text, nothing else.",
                  contact_id, relationship, channel, read_age_hours, read_age_hours == 1 ? "" : "s");
 
     /* Refuse on encoding error or truncation — a clipped directive would

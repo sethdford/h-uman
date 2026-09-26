@@ -153,6 +153,7 @@ jobs:
           bash tests/fixtures/check-test-refs/run-smoke-test.sh
           bash tests/fixtures/check-gate-symmetry/run-smoke-test.sh
           bash tests/fixtures/check-markdown-links/run-smoke-test.sh
+          bash tests/fixtures/check-realpath-wrapper/run-smoke-test.sh
 
   integration-tests:
     runs-on: ubuntu-latest
@@ -595,6 +596,11 @@ jobs:
           fi
       - name: Run scripts/check.sh
         run: HU_SKIP_FORMAT=1 scripts/check.sh
+      - name: File-size ratchet
+        # Same gate as .githooks/pre-commit. Enforced here because the hook is
+        # bypassable and a merge commit that stages src/daemon.c past the
+        # ceiling then blocks every other branch (PR #436, 2026-09-20).
+        run: bash scripts/check-file-size-ceiling.sh
 
   benchmark:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -817,6 +823,20 @@ jobs:
           if ! git diff --exit-code docs/icon-inventory.md docs/components.md 2>/dev/null; then
             echo "::warning::Generated docs are stale. Run 'cd ui && npm run docs' to update."
           fi
+          # docs/build-options.md is generated from CMakeLists.txt + CMakePresets.json
+          # and had drifted unnoticed since it was introduced. Unlike the two above
+          # this is a HARD failure: the table tells people which options a preset
+          # turns on, and a wrong answer there sends them to configure a build that
+          # does not exist.
+          #
+          # --check compares the regenerated table against the committed one and
+          # ignores ONLY the "as of commit <sha>" provenance line. That line cannot
+          # be self-consistent — a commit that edits CMakeLists.txt and regenerates
+          # the table in the same commit necessarily writes the previous sha — and
+          # it is also meaningless on the shallow clone actions/checkout makes by
+          # default. Gating on it would fail every legitimate build-option change.
+          # Needs python3 + git only, no build.
+          bash scripts/dev/build-options-table.sh --check
       - name: Doc fleet (index, drift, terminology, frontmatter, relative links)
         run: scripts/doc-fleet.sh
 
@@ -982,6 +1002,20 @@ jobs:
       # convention as the sibling tests above.
       - name: Preference-corpus merge tests (hermetic, stdlib-only)
         run: python3 scripts/test_merge_seth_preference_sources.py
+      # Adapter promotion gates (scale / smoke / authorship / evidence). Hermetic:
+      # HOME is a temp dir and the MLX server is a local fake on 127.0.0.1:0.
+      - name: Adapter promotion gate tests (hermetic, stdlib-only)
+        run: python3 scripts/test_m3_promote.py
+      # Behavioral conversation-quality metric: synthetic chat.db/memory.db
+      # fixtures in a temp dir, no real messages.
+      - name: Conversation-quality metric tests (hermetic, stdlib-only)
+        run: python3 scripts/test_eval_conversation_quality.py
+      # Depth upweighting (2026-09-24): hermetic, stdlib-only; the .sh runs
+      # the real block extracted from train-glm-adapter.sh on a scratch corpus.
+      - name: Training depth-upweight tests (hermetic, stdlib-only)
+        run: |
+          python3 scripts/test_upweight_depth_examples.py
+          bash scripts/test_train_upweight_block.sh
       # Measurement-integrity pins for the fidelity nightly. Both are hermetic
       # and stdlib-only (no mlx, no model, no ~/.human reads), so they belong on
       # this job rather than a GPU host. They guard the class where the harness

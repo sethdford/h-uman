@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Voice A/B drip: one clip pair to the self-chat every 2h inside send hours.
+         Install:  cp scripts/blind_ab/ai.human.voice-ab.plist ~/Library/LaunchAgents/
+                   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.human.voice-ab.plist
+         Generate first: python3 scripts/blind_ab/voice_ab.py gen -/-pairs 12 -->
+    <key>Label</key>
+    <string>ai.human.voice-ab</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>/Users/sethford/Projects/h-uman/scripts/blind_ab/voice_ab.py</string>
+        <string>tick</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>/Users/sethford</string>
+    </dict>
+    <key>StartInterval</key>
+    <integer>7200</integer>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>StandardOutPath</key>
+    <string>/Users/sethford/.human/logs/voice-ab.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/sethford/.human/logs/voice-ab-error.log</string>
+</dict>
+</plist>

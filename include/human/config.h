@@ -813,8 +813,6 @@ typedef struct hu_config {
     char *memory_backend;
     bool memory_auto_save;
     uint32_t consolidation_interval_hours; /* 0 = disabled, default 24 */
-    bool heartbeat_enabled;
-    uint32_t heartbeat_interval_minutes;
     char *gateway_host;
     uint16_t gateway_port;
     bool workspace_only;

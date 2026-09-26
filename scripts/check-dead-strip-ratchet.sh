@@ -132,13 +132,19 @@ skip() {
 # the reference set) — not libhuman_core.a, which can be current while the
 # binaries are not. Anything under src/ or include/ newer than either means the
 # build dir describes a different tree than the one being committed or pushed.
+#
+# .m counts: src/tools/vision_ocr_apple.m is compiled into human_core
+# (CMakeLists.txt target_sources), so an Objective-C-only edit changes what this
+# gate measures. It was invisible to the old '*.[ch]' probe, which reported such
+# a tree as fresh and enforced stale counts. The \( \) are required: see the
+# matching note in .githooks/pre-push.
 for _artifact in human human_tests libhuman_core.a; do
     [ -f "$BUILD_DIR/$_artifact" ] || \
         skip "no $BUILD_DIR/$_artifact (build the human + human_tests targets first)"
 done
 STALE=0
 for _artifact in human human_tests; do
-    if [ -n "$(find src include -name '*.[ch]' -newer "$BUILD_DIR/$_artifact" -print -quit 2>/dev/null)" ]; then
+    if [ -n "$(find src include \( -name '*.[ch]' -o -name '*.m' \) -newer "$BUILD_DIR/$_artifact" -print -quit 2>/dev/null)" ]; then
         STALE=1
     fi
 done

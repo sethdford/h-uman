@@ -7,6 +7,12 @@ Modules that could be removed or further gated to reduce binary size.
 Status key: **STUB** = returns HU_ERR_NOT_SUPPORTED for core operations,
 **PARTIAL** = some functions work but core ones are stubbed on certain platforms.
 
+Per-file object sizes were measured once, in the 2026-03-03 binary-size pass
+(`0822b790a`) — read them as that date's numbers, not today's. Each section
+total below is simply the sum of the rows in its own table, recomputed
+2026-09-21 after the dead-code sweep deleted six rows (three retrieval, three
+vector-store). Re-measure before quoting any of these in a size budget.
+
 ## Stub Runtimes (always return HU_ERR_NOT_SUPPORTED)
 
 | File                       | Object Size | Status | Notes                                                   |
@@ -30,7 +36,7 @@ Status key: **STUB** = returns HU_ERR_NOT_SUPPORTED for core operations,
 | `src/tools/i2c.c`             | 8.6 KB      | REAL            | I2C bus tool                   |
 | `src/tools/spi.c`             | 8.6 KB      | REAL            | SPI bus tool                   |
 
-**Now gated** behind `HU_ENABLE_PERIPHERALS` (OFF by default). ~98 KB object total.
+**Now gated** behind `HU_ENABLE_PERIPHERALS` (OFF by default). 98.4 KB across the 9 rows above.
 
 ## Tunnels
 
@@ -41,7 +47,7 @@ Status key: **STUB** = returns HU_ERR_NOT_SUPPORTED for core operations,
 | `src/tunnel/tailscale.c`  | 10.3 KB     | REAL   | tailscale funnel wrapper |
 | `src/tunnel/custom.c`     | 12.1 KB     | REAL   | Generic command wrapper  |
 
-**Now gated** behind `HU_ENABLE_TUNNELS` (OFF by default). ~43 KB object total.
+**Now gated** behind `HU_ENABLE_TUNNELS` (OFF by default). 42.9 KB across the 4 rows above.
 
 ## Platform-Specific Security Sandboxes (Pruned via Auto-Detect)
 
@@ -65,7 +71,7 @@ On macOS, only seatbelt.c compiles. On Linux, only Linux-specific sandboxes comp
 These modules are real implementations but serve niche use cases. Gating them
 behind options would reduce binary size for deployments that don't need them.
 
-### Tools (~130 KB object total)
+### Tools (174.4 KB across 10 rows)
 
 | File                       | Object Size | Use Case                           |
 | -------------------------- | ----------- | ---------------------------------- |
@@ -80,7 +86,7 @@ behind options would reduce binary size for deployments that don't need them.
 | `src/tools/browser.c`      | 29.7 KB     | Full browser automation            |
 | `src/tools/browser_open.c` | 15.9 KB     | Open URL in browser                |
 
-### Memory Retrieval Pipeline (~100 KB object total)
+### Memory Retrieval Pipeline (60.1 KB across 6 rows)
 
 | File                                     | Object Size | Notes                   |
 | ---------------------------------------- | ----------- | ----------------------- |
@@ -91,7 +97,7 @@ behind options would reduce binary size for deployments that don't need them.
 | `src/memory/retrieval/adaptive.c`        | 6.0 KB      | Adaptive strategy       |
 | `src/memory/retrieval/engine.c`          | 11.6 KB     | Retrieval orchestrator  |
 
-### Memory Vector Stores (~85 KB object total)
+### Memory Vector Stores (45.7 KB across 4 rows)
 
 | File                                    | Object Size | Notes                        |
 | --------------------------------------- | ----------- | ---------------------------- |
@@ -100,7 +106,7 @@ behind options would reduce binary size for deployments that don't need them.
 | `src/memory/vector/embeddings_ollama.c` | 11.3 KB     | Ollama local embeddings      |
 | `src/memory/vector/embedder_local.c`    | 9.8 KB      | Local vector embedder        |
 
-### Observability (~33 KB object total)
+### Observability (32.4 KB across 3 rows)
 
 | File                                   | Object Size | Notes                  |
 | -------------------------------------- | ----------- | ---------------------- |
@@ -108,7 +114,7 @@ behind options would reduce binary size for deployments that don't need them.
 | `src/observability/metrics_observer.c` | 8.4 KB      | Metrics collection     |
 | `src/observability/log_observer.c`     | 14.6 KB     | Log observer           |
 
-### Other Niche Modules
+### Other Niche Modules (110.9 KB across 6 rows)
 
 | File               | Object Size | Notes                    |
 | ------------------ | ----------- | ------------------------ |
@@ -121,14 +127,20 @@ behind options would reduce binary size for deployments that don't need them.
 
 ## Summary
 
-| Category                     | Object Size | Savings After LTO (est.) | Status                               |
-| ---------------------------- | ----------- | ------------------------ | ------------------------------------ |
-| Stub runtimes                | 9.5 KB      | ~2 KB                    | **Gated** (HU_ENABLE_RUNTIME_EXOTIC) |
-| Peripherals + HW tools       | 98 KB       | ~15-20 KB                | **Gated** (HU_ENABLE_PERIPHERALS)    |
-| Tunnels                      | 43 KB       | ~10-15 KB                | **Gated** (HU_ENABLE_TUNNELS)        |
-| Platform sandbox auto-detect | 50 KB       | ~5-8 KB                  | **Auto-detected**                    |
-| Future: niche tools          | 130 KB      | ~20-30 KB                | Candidate                            |
-| Future: retrieval pipeline   | 100 KB      | ~15-25 KB                | Candidate                            |
-| Future: vector stores        | 85 KB       | ~12-20 KB                | Candidate                            |
-| Future: observability        | 33 KB       | ~5-8 KB                  | Candidate                            |
-| Future: niche modules        | 110 KB      | ~15-25 KB                | Candidate                            |
+| Category                     | Object Size | Status                               |
+| ---------------------------- | ----------- | ------------------------------------ |
+| Stub runtimes                | 9.5 KB      | **Gated** (HU_ENABLE_RUNTIME_EXOTIC) |
+| Peripherals + HW tools       | 98.4 KB     | **Gated** (HU_ENABLE_PERIPHERALS)    |
+| Tunnels                      | 42.9 KB     | **Gated** (HU_ENABLE_TUNNELS)        |
+| Platform sandbox auto-detect | 56.6 KB     | **Auto-detected**                    |
+| Future: niche tools          | 174.4 KB    | Candidate                            |
+| Future: retrieval pipeline   | 60.1 KB     | Candidate                            |
+| Future: vector stores        | 45.7 KB     | Candidate                            |
+| Future: observability        | 32.4 KB     | Candidate                            |
+| Future: niche modules        | 110.9 KB    | Candidate                            |
+
+The former "Savings After LTO (est.)" column is gone: every figure in it was
+projected from the pre-sweep totals above, several of which were already wrong
+(the tools row read ~130 KB against a 174.4 KB column sum). Nobody has measured
+a post-LTO delta since, and a projection off a corrected total would be just as
+invented. Measure one before putting the column back.

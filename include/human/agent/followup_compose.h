@@ -71,6 +71,11 @@ extern "C" {
  * mid-word. */
 #define HU_FOLLOWUP_COMPOSE_MAX 192
 
+/* Directive buffer size for hu_followup_compose_directive callers. Sized for
+ * an email-handle contact (iMessage allows them) plus the full instruction;
+ * a too-small buffer makes the directive refuse, which skips the follow-up. */
+#define HU_FOLLOWUP_COMPOSE_DIRECTIVE_MAX 512
+
 /* Current gate mode. Reads HU_FOLLOWUP_COMPOSE (off|shadow|live), default OFF
  * — an unrecognized value fails closed, per hu_gate_mode_parse. */
 hu_gate_mode_t hu_followup_compose_mode(void);

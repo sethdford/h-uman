@@ -1,6 +1,7 @@
 #ifndef HU_TOOLS_SHELL_INTERNAL_H
 #define HU_TOOLS_SHELL_INTERNAL_H
 
+#include <stdbool.h>
 #include <stddef.h>
 
 /*
@@ -27,5 +28,39 @@
  */
 size_t hu_shell_build_child_env(char *const *in_env, size_t in_count, char **out_env,
                                 size_t out_cap);
+
+/*
+ * Maximum inherited env vars considered for sanitization. Generous relative
+ * to a normal process environment (tens of entries). Entries past the cap
+ * are NOT examined: they reach the shell child untouched rather than the
+ * child's environment being silently truncated. shell.c logs one WARN per
+ * process (in the parent, before fork) when a live environment exceeds it.
+ */
+#define HU_SHELL_MAX_ENV_VARS 512
+
+/*
+ * Count the entries of a NULL-terminated "KEY=VALUE" array, examining at most
+ * `cap` slots. Returns min(count, cap). Sets *truncated (if non-NULL) to true
+ * when a non-NULL entry exists at index `cap`, i.e. the array is longer than
+ * the caller is willing to look at. Pure.
+ */
+size_t hu_shell_count_env(char *const *env, size_t cap, bool *truncated);
+
+/*
+ * Pure core of shell.c's fork-child environment sanitizer, seamed so it can be
+ * exercised on an arbitrary array instead of the live `environ`.
+ *
+ * Examines the first min(cap, HU_SHELL_MAX_ENV_VARS) entries of the
+ * NULL-terminated `env`, runs them through hu_shell_build_child_env(), and
+ * writes the entries that sanitization DROPPED (the blocklisted ones) into
+ * `blocked_out`, in their original order, sharing string pointers with `env`.
+ * Stops writing at `blocked_cap`. Sets *truncated exactly as
+ * hu_shell_count_env() does. Returns the number of entries written.
+ *
+ * Does not mutate `env` and does not call unsetenv(); the caller applies the
+ * decision (shell.c does so with unsetenv in the fork child).
+ */
+size_t hu_shell_collect_blocked_env(char *const *env, size_t cap, char **blocked_out,
+                                    size_t blocked_cap, bool *truncated);
 
 #endif /* HU_TOOLS_SHELL_INTERNAL_H */

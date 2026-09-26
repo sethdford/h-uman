@@ -15,6 +15,23 @@
 # USAGE
 #   bash scripts/dev/build-options-table.sh            # print to stdout
 #   bash scripts/dev/build-options-table.sh --write    # regenerate docs/build-options.md
+#   bash scripts/dev/build-options-table.sh --check    # exit 1 if the committed table drifted
+#
+# --check is the CI freshness gate (.github/workflows/ci.yml, docs job). It
+# compares the regenerated table against the committed file and exits 1 on any
+# difference, with a unified diff — EXCEPT for the "as of commit <sha>"
+# provenance line, which it masks.
+#
+# Masking that one line is not a loophole, it is the only way the gate can be
+# correct. The sha is `git log -1 -- CMakeLists.txt CMakePresets.json`, so a
+# commit that edits CMakeLists.txt AND regenerates this table in the same
+# commit necessarily writes the PREVIOUS sha: a commit cannot contain its own
+# hash. The table is then stale by exactly one commit the moment it lands, and
+# an unmasked gate would fail CI on every legitimate build-option change while
+# rewarding changes that touch nothing. It is not hypothetical — 041baf14f
+# added the provenance line while also touching CMakeLists.txt, which is why
+# the committed table read `1fe6abb3f` against a true value of `d3be0c4cb`.
+# The TABLE is the artifact worth gating; the sha is provenance metadata.
 #
 # The option() parser is multi-line aware (HU_ENABLE_TOPOLOGY_CHECK wraps its
 # help string onto a second line) and refuses to emit a short table: the
@@ -33,18 +50,23 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo "$(dirname "$0")/../..")"
 
 OUT="docs/build-options.md"
-WRITE=0
-[ "${1:-}" = "--write" ] && WRITE=1
+MODE=print
+case "${1:-}" in
+    --write) MODE=write ;;
+    --check) MODE=check ;;
+    "")      MODE=print ;;
+    *) echo "usage: $0 [--write|--check]" >&2; exit 2 ;;
+esac
 
 # Reproducibility: key the "as of" line to the last commit that touched
 # either input file, not wall-clock time, so re-running on a later day with
 # no changes to either file produces byte-identical output.
 LAST_SHA=$(git log -1 --format=%h -- CMakeLists.txt CMakePresets.json 2>/dev/null || echo "unknown")
 
-python3 - "$WRITE" "$OUT" "$LAST_SHA" <<'PYEOF'
+python3 - "$MODE" "$OUT" "$LAST_SHA" <<'PYEOF'
 import json, re, subprocess, sys
 
-write = sys.argv[1] == "1"
+mode = sys.argv[1]
 out_path = sys.argv[2]
 last_sha = sys.argv[3]
 
@@ -245,13 +267,56 @@ for name, desc, default in options:
 lines_out.append("")
 
 output = "\n".join(lines_out)
-if write:
+
+
+def mask_provenance(text):
+    """Split into lines with the as-of-commit sha neutralised.
+
+    See this script's header: a commit cannot contain its own hash, so the
+    sha on that line is legitimately one commit behind whenever the same
+    commit edits CMakeLists.txt. Everything else must match exactly.
+
+    The pattern is `[^`]*` rather than a hex class on purpose: LAST_SHA
+    falls back to the literal "unknown" (and is empty when git knows the
+    path but has no commit for it), which happens on the shallow clone
+    actions/checkout makes by default. A hex-only mask would leave that
+    line unmasked and fail CI for a reason that has nothing to do with
+    the table.
+    """
+    return [
+        re.sub(r"as of commit `[^`]*`", "as of commit `<sha>`", ln)
+        for ln in text.split("\n")
+    ]
+
+
+if mode == "write":
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(output)
     print(
         f"Wrote {out_path} ({len(options)} options, {len(order)} presets, as of {last_sha}).",
         file=sys.stderr,
     )
+elif mode == "check":
+    try:
+        with open(out_path, encoding="utf-8") as f:
+            committed = f.read()
+    except FileNotFoundError:
+        print(f"FAIL: {out_path} does not exist — run --write.", file=sys.stderr)
+        sys.exit(1)
+    want, have = mask_provenance(output), mask_provenance(committed)
+    if want == have:
+        print(f"OK: {out_path} is current ({len(options)} options, {len(order)} presets).")
+        sys.exit(0)
+    import difflib
+
+    print(f"FAIL: {out_path} is stale — regenerate it:", file=sys.stderr)
+    print("      bash scripts/dev/build-options-table.sh --write", file=sys.stderr)
+    print("", file=sys.stderr)
+    for line in difflib.unified_diff(
+        have, want, fromfile=f"{out_path} (committed)", tofile="regenerated", lineterm=""
+    ):
+        print(line, file=sys.stderr)
+    sys.exit(1)
 else:
     print(output)
 PYEOF

@@ -64,6 +64,4 @@ hu_error_t hu_voice_session_get_latency(const hu_voice_session_t *session,
  */
 void hu_voice_session_warn_first_byte_latency_if_needed(const hu_voice_session_t *session);
 
-/* ── Micro-turn API ─────────────────────────────────────────────── */
-
 #endif

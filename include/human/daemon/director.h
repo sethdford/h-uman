@@ -41,6 +41,61 @@ bool hu_daemon_director_call(hu_allocator_t *alloc, const char *combined, size_t
                              const hu_channel_history_entry_t *entries, size_t entry_count,
                              hu_director_result_t *result);
 
+/* ── G6 director-echo guard wiring (Sprint 34/37/40, wired 2026-09-21) ──
+ *
+ * The director's `direction` string is injected into the model's prompt
+ * ("--- Scene Direction (this message only) ---"), so the model can quote
+ * it back verbatim. The response_guard's G6 check exists to reject exactly
+ * that. Until this seam was wired, G6 read `agent->scene_direction_text`
+ * and `agent->director_history[]`, which nothing in src/ ever wrote — so
+ * G6 was inert in production while looking wired at all three guard call
+ * sites (agent_stream.c:1735/2711, agent_turn.c:7312).
+ *
+ * Ownership (see src/agent/agent_internal.h:152): the DAEMON owns the
+ * `hu_director_result_t`; the agent only borrows a const pointer into
+ * `result->direction`. Hence the strict pairing below.
+ *
+ * Call order, once per batch iteration:
+ *   1. hu_daemon_director_contact_boundary(agent, batch_key, key_len)
+ *        — before anything else, so a previous contact's director ring
+ *          cannot gate this contact's reply (post-mortem rowid 56355).
+ *   2. hu_daemon_director_arm_guard(...)  — ONCE, before the agent turn,
+ *        OUTSIDE the retry loop (daemon.c builds `convo_ctx` once above
+ *        that loop, so arming per iteration appended a second block).
+ *   3. hu_daemon_director_end_turn(agent) — after the LAST retry of the
+ *        turn, and MUST run before `result` leaves scope, or G6 reads
+ *        freed stack memory on the next turn.
+ */
+
+/* Append the scene direction to *convo_ctx and arm G6 for this turn.
+ * No-op unless `result->direction` is non-empty. Reallocates *convo_ctx
+ * on `alloc` (freeing the old buffer) and republishes it onto
+ * `agent->conversation_context`. On allocation failure the context is
+ * left untouched and the guard is NOT armed — the direction never
+ * reached the prompt, so there is nothing for G6 to catch.
+ *
+ * Idempotent within a turn: calling it again with the same direction
+ * while the guard is still armed is a no-op, so the prompt carries the
+ * "this message only" block exactly once however many times the caller's
+ * retry loop re-enters. end_turn clears the arming; the next turn injects
+ * again. (Re-arming with a DIFFERENT direction mid-turn is not a supported
+ * pattern — no caller does it — and would append a second block.)
+ *
+ * `result` must outlive the turn and the matching end_turn call. */
+void hu_daemon_director_arm_guard(hu_allocator_t *alloc, hu_agent_t *agent,
+                                  const hu_director_result_t *result, char **convo_ctx,
+                                  size_t *convo_ctx_len);
+
+/* End-of-turn: push the going-stale director into the agent's heap-owned
+ * history ring (so G6 still catches it on the NEXT turn) and drop the
+ * borrowed pointer into the daemon's stack buffer. Idempotent. */
+void hu_daemon_director_end_turn(hu_agent_t *agent);
+
+/* Drop all borrowed/retained director state when the daemon switches to a
+ * different contact. Same-contact consecutive batches keep their history.
+ * `key`/`key_len` is the batch session key. */
+void hu_daemon_director_contact_boundary(hu_agent_t *agent, const char *key, size_t key_len);
+
 /* F27: Classify our response type for comfort pattern learning.
  * Heuristic: haha/lol/joke -> distraction; sorry/i understand/that sucks -> empathy;
  * very short (<20 chars) -> space; you should/try this/maybe -> advice; default empathy. */

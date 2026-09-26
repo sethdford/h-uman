@@ -15,9 +15,14 @@ else
     ratchet_autolock() { :; }
 fi
 
-MAX_BASELINE=10511   # auto-locked 2026-09-21 (was 10512)
-                     # carve-out (context loading -> src/daemon/daemon_reactive_context.c,
-                     # prompt phases -> daemon_reactive_prompt.c; was 14058). Lower as god-files are carved.
+MAX_BASELINE=10511   # measured 2026-09-26 on the origin/main merge into PR #440.
+                     # main's #438 carved src/daemon.c to 10256 (10264 here with this
+                     # branch's changes), so the largest file is src/agent/agent_turn.c,
+                     # which the dead-code sweep had taken to 10511 against main's 10512.
+                     # Both conflicting sides (branch 10522, main 10512) sat above the
+                     # merged tree; this is its own measurement, so the merge tightens.
+                     # (was 10574 before the 09-20 carve, 14058 before the reactive
+                     # context/prompt carves.) Lower as god-files are carved.
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 

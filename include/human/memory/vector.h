@@ -55,6 +55,9 @@ typedef struct hu_vector_store {
 typedef struct hu_vector_store_vtable {
     hu_error_t (*insert)(void *ctx, hu_allocator_t *alloc, const char *id, size_t id_len,
                          const hu_embedding_t *embedding, const char *content, size_t content_len);
+    /* On HU_OK: *out is NULL when *out_count == 0 (caller frees nothing),
+     * otherwise an array of exactly *out_count entries the caller releases
+     * with hu_vector_entries_free(alloc, *out, *out_count). */
     hu_error_t (*search)(void *ctx, hu_allocator_t *alloc, const hu_embedding_t *query,
                          size_t limit, hu_vector_entry_t **out, size_t *out_count);
     hu_error_t (*remove)(void *ctx, const char *id, size_t id_len);

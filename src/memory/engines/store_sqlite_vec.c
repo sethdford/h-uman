@@ -172,6 +172,22 @@ static hu_error_t search_impl(void *vctx, hu_allocator_t *alloc, const hu_embedd
         alloc->free(alloc->ctx, res, limit * sizeof(*res));
         return err;
     }
+    /* Contract shared with store_mem.c and relied on by every caller
+     * (hu_semantic_retrieve returns early on count == 0 without freeing):
+     * no hits → *out stays NULL; otherwise the array is sized to the count we
+     * report, since callers free it with hu_vector_entries_free(alloc, out, n).
+     * Returning a limit-sized array for n == 0 leaked it once per empty
+     * semantic leg (CI LeakSanitizer, 2026-09-20). */
+    if (n == 0) {
+        alloc->free(alloc->ctx, res, limit * sizeof(*res));
+        return HU_OK;
+    }
+    if (n < limit) {
+        hu_vector_entry_t *fit = (hu_vector_entry_t *)alloc->realloc(
+            alloc->ctx, res, limit * sizeof(*res), n * sizeof(*res));
+        if (fit)
+            res = fit;
+    }
     *out = res;
     *out_count = n;
     return HU_OK;

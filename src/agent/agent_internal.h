@@ -299,7 +299,15 @@ hu_error_t hu_agent_internal_build_unavailable_fallback(hu_allocator_t *alloc, c
  * Used by the response_guard call sites to populate
  * `hu_guard_context_t.director_text` so a verbatim quote of "casual
  * short, dry" by the model triggers G6 → REJECT. (Sprint 34 — wires
- * Sprint 31's G6 into production.) */
+ * Sprint 31's G6 into production.)
+ *
+ * History: the setter was deleted on 2026-09-20 by the dead-code sweep
+ * (docs/plans/2026-09-20-dead-code-plan.md Appendix B) because it had zero
+ * callers, which left G6's director-echo check inert. #439 armed the guard
+ * by giving it a real caller in src/daemon/daemon_director.c, so it was
+ * restored at the 2026-09-26 main merge — together with that caller, as
+ * the deletion note asked, not ahead of it. */
+void hu_agent_internal_set_scene_direction(hu_agent_t *agent, const char *text, size_t text_len);
 void hu_agent_internal_clear_scene_direction(hu_agent_t *agent);
 
 /* Sprint 37 — Push the about-to-go-stale director string into the

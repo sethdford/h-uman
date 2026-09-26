@@ -627,6 +627,18 @@ void hu_agent_internal_record_cost(hu_agent_t *agent, const hu_token_usage_t *us
     }
 }
 
+void hu_agent_internal_set_scene_direction(hu_agent_t *agent, const char *text, size_t text_len) {
+    if (!agent)
+        return;
+    if (!text || text_len == 0) {
+        agent->scene_direction_text = NULL;
+        agent->scene_direction_text_len = 0;
+        return;
+    }
+    agent->scene_direction_text = text;
+    agent->scene_direction_text_len = text_len;
+}
+
 void hu_agent_internal_clear_scene_direction(hu_agent_t *agent) {
     if (!agent)
         return;

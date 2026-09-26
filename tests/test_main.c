@@ -357,6 +357,7 @@ void run_follow_up_tests(void);
 void run_imessage_action_telemetry_tests(void);
 void run_imessage_reply_pacing_tests(void);
 void run_imessage_threaded_reply_tests(void);
+void run_imessage_send_observer_tests(void);
 void run_imessage_custom_tapback_tests(void);
 void run_imessage_action_facts_tests(void);
 void run_imessage_dispatcher_tests(void);
@@ -448,8 +449,16 @@ void run_boundary_repo_tests(void);
 void run_opinions_repo_tests(void);
 void run_life_chapter_repo_tests(void);
 void run_proactive_decisions_repo_tests(void);
+void run_outbound_sends_repo_tests(void);
 void run_daemon_proactive_decline_tests(void);
 void run_daemon_proactive_reachability_tests(void);
+void run_daemon_contact_optout_tests(void);
+void run_daemon_hurt_handoff_tests(void);
+void run_contact_optout_repo_tests(void);
+void run_daemon_outbound_bus_tests(void);
+void run_repo_util_sqlite_tests(void);
+void run_proactive_send_circuit_tests(void);
+void run_imessage_send_service_tests(void);
 void run_social_graph_repo_tests(void);
 void run_self_awareness_repo_tests(void);
 void run_feed_items_repo_tests(void);
@@ -565,6 +574,7 @@ void run_turing_score_tests(void);
 void run_adversarial_turing_tests(void);
 void run_arbitrator_tests(void);
 void run_salience_tests(void);
+void run_hard_moment_tests(void);
 void run_planning_tests(void);
 void run_rel_dynamics_tests(void);
 void run_emotional_residue_tests(void);
@@ -681,6 +691,7 @@ void register_voice_clone_tests(void);
 void run_audio_pipeline_tests(void);
 void run_voice_decision_tests(void);
 void run_emotion_map_tests(void);
+void run_voice_reply_tests(void);
 #endif
 #ifdef HU_ENABLE_ML
 void run_ml_tests(void);
@@ -1415,6 +1426,7 @@ int main(int argc, char **argv) {
     run_imessage_action_telemetry_tests();
     run_imessage_reply_pacing_tests();
     run_imessage_threaded_reply_tests();
+    run_imessage_send_observer_tests();
     run_imessage_custom_tapback_tests();
     run_imessage_action_facts_tests();
     run_imessage_dispatcher_tests();
@@ -1503,8 +1515,16 @@ int main(int argc, char **argv) {
     run_opinions_repo_tests();
     run_life_chapter_repo_tests();
     run_proactive_decisions_repo_tests();
+    run_outbound_sends_repo_tests();
     run_daemon_proactive_decline_tests();
     run_daemon_proactive_reachability_tests();
+    run_daemon_contact_optout_tests();
+    run_daemon_hurt_handoff_tests();
+    run_contact_optout_repo_tests();
+    run_daemon_outbound_bus_tests();
+    run_repo_util_sqlite_tests();
+    run_proactive_send_circuit_tests();
+    run_imessage_send_service_tests();
     run_social_graph_repo_tests();
     run_self_awareness_repo_tests();
     run_feed_items_repo_tests();
@@ -1614,6 +1634,7 @@ int main(int argc, char **argv) {
     run_adversarial_turing_tests();
     run_arbitrator_tests();
     run_salience_tests();
+    run_hard_moment_tests();
     run_planning_tests();
     run_rel_dynamics_tests();
 #ifdef HU_ENABLE_SQLITE
@@ -1724,6 +1745,7 @@ int main(int argc, char **argv) {
     run_audio_pipeline_tests();
     run_voice_decision_tests();
     run_emotion_map_tests();
+    run_voice_reply_tests();
 #endif
 #ifdef HU_ENABLE_ML
     run_ml_tests();
