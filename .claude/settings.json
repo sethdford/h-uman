@@ -62,7 +62,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "file=$(jq -r '.tool_input.file_path // .tool_input.path // empty' 2>/dev/null); if [ -n \"$file\" ] && echo \"$file\" | grep -qE '\\.(c|h)$'; then bash \"${CLAUDE_PROJECT_DIR:-.}/scripts/format-c-file.sh\" \"$file\" 2>&1 | tail -1; fi; exit 0"
+            "command": "payload=$(cat); file=$(printf '%s' \"$payload\" | jq -r '.tool_input.file_path // .tool_input.path // empty' 2>/dev/null); echo \"$file\" | grep -qE '\\.(c|h)$' || exit 0; s=\"\"; for d in \"${CLAUDE_PROJECT_DIR:-}\" \"$(git rev-parse --show-toplevel 2>/dev/null)\"; do if [ -n \"$d\" ] && [ -f \"$d/scripts/format-c-file.sh\" ]; then s=\"$d/scripts/format-c-file.sh\"; break; fi; done; if [ -n \"$s\" ]; then bash \"$s\" \"$file\" 2>&1 | tail -1; exit 0; fi; sid=$(printf '%s' \"$payload\" | jq -r '.session_id // empty' 2>/dev/null || true); m=\"${TMPDIR:-/tmp}/hu-hook-nopath-format-c-${sid:-nosession}\"; if [ ! -e \"$m\" ]; then : > \"$m\" 2>/dev/null; echo \"C FORMAT HOOK DID NOT RUN: cannot locate scripts/format-c-file.sh (CLAUDE_PROJECT_DIR unset and $(pwd) is not inside the h-uman repo). Edited .c/.h files are NOT being formatted in this session -- relaunch Claude Code from the repo root, or export CLAUDE_PROJECT_DIR.\" >&2; fi; exit 0"
           }
         ]
       },
@@ -71,7 +71,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/scripts/persona_voice_guard.py\"",
+            "command": "payload=$(cat); g=\"\"; for d in \"${CLAUDE_PROJECT_DIR:-}\" \"$(git rev-parse --show-toplevel 2>/dev/null)\"; do if [ -n \"$d\" ] && [ -f \"$d/scripts/persona_voice_guard.py\" ]; then g=\"$d/scripts/persona_voice_guard.py\"; break; fi; done; if [ -n \"$g\" ]; then python3 \"$g\"; exit $?; fi; sid=$(printf '%s' \"$payload\" | jq -r '.session_id // empty' 2>/dev/null || true); m=\"${TMPDIR:-/tmp}/hu-hook-nopath-voiceguard-${sid:-nosession}\"; if [ ! -e \"$m\" ]; then : > \"$m\" 2>/dev/null; echo \"PERSONA VOICE GUARD DID NOT RUN: cannot locate scripts/persona_voice_guard.py (CLAUDE_PROJECT_DIR unset and $(pwd) is not inside the h-uman repo). Loss of the persona voice/voice_messages blocks will go UNDETECTED in this session, which is the exact regression the guard exists to catch -- relaunch Claude Code from the repo root, or export CLAUDE_PROJECT_DIR.\" >&2; fi; exit 0",
             "timeout": 5
           }
         ]
