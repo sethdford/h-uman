@@ -1192,13 +1192,3 @@ hu_error_t hu_computer_use_create(hu_allocator_t *alloc, hu_security_policy_t *p
     *out = (hu_tool_t){.ctx = ctx, .vtable = &computer_use_vtable};
     return HU_OK;
 }
-
-void hu_computer_use_set_grounding(hu_tool_t *tool, hu_provider_t *provider, const char *model,
-                                   size_t model_len) {
-    if (!tool || !tool->ctx)
-        return;
-    hu_computer_use_ctx_t *c = (hu_computer_use_ctx_t *)tool->ctx;
-    c->ground_provider = provider;
-    c->ground_model = model;
-    c->ground_model_len = model_len;
-}

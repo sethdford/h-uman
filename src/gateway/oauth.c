@@ -33,25 +33,6 @@ static int oauth_form_encode_char(char *out, size_t cap, size_t *j, unsigned cha
     return 0;
 }
 #endif
-hu_error_t hu_oauth_init(hu_allocator_t *alloc, const hu_oauth_config_t *config,
-                         hu_oauth_ctx_t **out) {
-    if (!alloc || !config || !out)
-        return HU_ERR_INVALID_ARGUMENT;
-    hu_oauth_ctx_t *ctx = (hu_oauth_ctx_t *)alloc->alloc(alloc->ctx, sizeof(hu_oauth_ctx_t));
-    if (!ctx)
-        return HU_ERR_OUT_OF_MEMORY;
-    memset(ctx, 0, sizeof(*ctx));
-    ctx->alloc = alloc;
-    ctx->config = *config;
-    *out = ctx;
-    return HU_OK;
-}
-
-void hu_oauth_destroy(hu_oauth_ctx_t *ctx) {
-    if (!ctx || !ctx->alloc)
-        return;
-    ctx->alloc->free(ctx->alloc->ctx, ctx, sizeof(hu_oauth_ctx_t));
-}
 
 hu_error_t hu_oauth_generate_pkce(hu_oauth_ctx_t *ctx, char *verifier, size_t verifier_size,
                                   char *challenge, size_t challenge_size) {
@@ -338,12 +319,6 @@ hu_error_t hu_oauth_refresh_token(hu_oauth_ctx_t *ctx, hu_oauth_session_t *sessi
     (void)session;
     return HU_ERR_NOT_SUPPORTED;
 #endif
-}
-
-bool hu_oauth_session_valid(const hu_oauth_session_t *session) {
-    if (!session || session->session_id[0] == '\0')
-        return false;
-    return (int64_t)time(NULL) < session->expires_at;
 }
 
 const char *hu_oauth_get_provider(hu_oauth_ctx_t *ctx) {

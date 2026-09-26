@@ -1,11 +1,11 @@
 #include "human/security/delegation.h"
 #include "human/core/string.h"
-#include <string.h>
-#include <time.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <time.h>
 
-#define HU_DELEGATION_MAX_TOKENS 256
+#define HU_DELEGATION_MAX_TOKENS  256
 #define HU_DELEGATION_MAX_CAVEATS 16
 
 struct hu_delegation_registry {
@@ -20,8 +20,7 @@ struct hu_delegation_registry {
  * Utility functions
  * ───────────────────────────────────────────────────────────────────────── */
 
-static void free_caveats(hu_allocator_t *alloc, hu_delegation_caveat_t *caveats,
-                         size_t count) {
+static void free_caveats(hu_allocator_t *alloc, hu_delegation_caveat_t *caveats, size_t count) {
     if (!alloc || !caveats)
         return;
     for (size_t i = 0; i < count; i++) {
@@ -181,9 +180,8 @@ void hu_delegation_registry_destroy(hu_delegation_registry_t *reg) {
  * ───────────────────────────────────────────────────────────────────────── */
 
 const char *hu_delegation_issue(hu_delegation_registry_t *reg, hu_allocator_t *alloc,
-                                const char *issuer_id, const char *target_id,
-                                uint32_t ttl_seconds, const hu_delegation_caveat_t *caveats,
-                                size_t caveat_count) {
+                                const char *issuer_id, const char *target_id, uint32_t ttl_seconds,
+                                const hu_delegation_caveat_t *caveats, size_t caveat_count) {
     if (!reg || !alloc || !issuer_id || !target_id)
         return NULL;
 
@@ -262,8 +260,7 @@ const char *hu_delegation_attenuate(hu_delegation_registry_t *reg, hu_allocator_
     /* Copy parent caveats */
     for (size_t i = 0; i < parent->caveat_count; i++) {
         combined[i].key_len = parent->caveats[i].key_len;
-        combined[i].key =
-            (char *)alloc->alloc(alloc->ctx, parent->caveats[i].key_len + 1);
+        combined[i].key = (char *)alloc->alloc(alloc->ctx, parent->caveats[i].key_len + 1);
         if (!combined[i].key) {
             free_caveats(alloc, combined, i);
             return NULL;
@@ -272,8 +269,7 @@ const char *hu_delegation_attenuate(hu_delegation_registry_t *reg, hu_allocator_
         combined[i].key[parent->caveats[i].key_len] = '\0';
 
         combined[i].value_len = parent->caveats[i].value_len;
-        combined[i].value =
-            (char *)alloc->alloc(alloc->ctx, parent->caveats[i].value_len + 1);
+        combined[i].value = (char *)alloc->alloc(alloc->ctx, parent->caveats[i].value_len + 1);
         if (!combined[i].value) {
             free_caveats(alloc, combined, i + 1);
             return NULL;
@@ -286,8 +282,7 @@ const char *hu_delegation_attenuate(hu_delegation_registry_t *reg, hu_allocator_
     for (size_t i = 0; i < additional_caveat_count; i++) {
         size_t idx = parent->caveat_count + i;
         combined[idx].key_len = additional_caveats[i].key_len;
-        combined[idx].key =
-            (char *)alloc->alloc(alloc->ctx, additional_caveats[i].key_len + 1);
+        combined[idx].key = (char *)alloc->alloc(alloc->ctx, additional_caveats[i].key_len + 1);
         if (!combined[idx].key) {
             free_caveats(alloc, combined, idx);
             return NULL;
@@ -296,14 +291,12 @@ const char *hu_delegation_attenuate(hu_delegation_registry_t *reg, hu_allocator_
         combined[idx].key[additional_caveats[i].key_len] = '\0';
 
         combined[idx].value_len = additional_caveats[i].value_len;
-        combined[idx].value =
-            (char *)alloc->alloc(alloc->ctx, additional_caveats[i].value_len + 1);
+        combined[idx].value = (char *)alloc->alloc(alloc->ctx, additional_caveats[i].value_len + 1);
         if (!combined[idx].value) {
             free_caveats(alloc, combined, idx + 1);
             return NULL;
         }
-        memcpy(combined[idx].value, additional_caveats[i].value,
-               additional_caveats[i].value_len);
+        memcpy(combined[idx].value, additional_caveats[i].value, additional_caveats[i].value_len);
         combined[idx].value[additional_caveats[i].value_len] = '\0';
     }
 
@@ -338,8 +331,8 @@ const char *hu_delegation_attenuate(hu_delegation_registry_t *reg, hu_allocator_
  * ───────────────────────────────────────────────────────────────────────── */
 
 hu_error_t hu_delegation_verify(hu_delegation_registry_t *reg, const char *token_id,
-                                const char *agent_id, const char *tool_name,
-                                const char *resource, double cost_usd) {
+                                const char *agent_id, const char *tool_name, const char *resource,
+                                double cost_usd) {
     if (!reg || !token_id || !agent_id || !tool_name)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -467,7 +460,7 @@ hu_error_t hu_delegation_chain(hu_delegation_registry_t *reg, hu_allocator_t *al
  * ───────────────────────────────────────────────────────────────────────── */
 
 const hu_delegation_token_t *hu_delegation_get_token(hu_delegation_registry_t *reg,
-                                                      const char *token_id) {
+                                                     const char *token_id) {
     if (!reg || !token_id)
         return NULL;
 
@@ -477,62 +470,6 @@ const hu_delegation_token_t *hu_delegation_get_token(hu_delegation_registry_t *r
         }
     }
     return NULL;
-}
-
-hu_error_t hu_delegation_tokens_by_issuer(hu_delegation_registry_t *reg, hu_allocator_t *alloc,
-                                          const char *issuer_id, const char ***out,
-                                          size_t *out_count) {
-    if (!reg || !alloc || !issuer_id || !out || !out_count)
-        return HU_ERR_INVALID_ARGUMENT;
-
-    size_t count = 0;
-    for (size_t i = 0; i < reg->token_count; i++) {
-        if (strcmp(reg->tokens[i].issuer_agent_id, issuer_id) == 0)
-            count++;
-    }
-
-    const char **result = (const char **)alloc->alloc(alloc->ctx, count * sizeof(char *));
-    if (!result)
-        return HU_ERR_OUT_OF_MEMORY;
-
-    size_t idx = 0;
-    for (size_t i = 0; i < reg->token_count; i++) {
-        if (strcmp(reg->tokens[i].issuer_agent_id, issuer_id) == 0) {
-            result[idx++] = reg->tokens[i].token_id;
-        }
-    }
-
-    *out = result;
-    *out_count = count;
-    return HU_OK;
-}
-
-hu_error_t hu_delegation_tokens_by_target(hu_delegation_registry_t *reg, hu_allocator_t *alloc,
-                                          const char *target_id, const char ***out,
-                                          size_t *out_count) {
-    if (!reg || !alloc || !target_id || !out || !out_count)
-        return HU_ERR_INVALID_ARGUMENT;
-
-    size_t count = 0;
-    for (size_t i = 0; i < reg->token_count; i++) {
-        if (strcmp(reg->tokens[i].target_agent_id, target_id) == 0)
-            count++;
-    }
-
-    const char **result = (const char **)alloc->alloc(alloc->ctx, count * sizeof(char *));
-    if (!result)
-        return HU_ERR_OUT_OF_MEMORY;
-
-    size_t idx = 0;
-    for (size_t i = 0; i < reg->token_count; i++) {
-        if (strcmp(reg->tokens[i].target_agent_id, target_id) == 0) {
-            result[idx++] = reg->tokens[i].token_id;
-        }
-    }
-
-    *out = result;
-    *out_count = count;
-    return HU_OK;
 }
 
 size_t hu_delegation_token_count(hu_delegation_registry_t *reg) {

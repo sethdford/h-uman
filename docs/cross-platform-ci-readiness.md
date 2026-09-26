@@ -24,7 +24,6 @@ All cross-platform time, sleep, and filesystem helpers live here:
 - `hu_platform_sleep_ms` — Sleep(ms) on Windows, nanosleep on POSIX
 - `hu_platform_mkdir` — \_mkdir on Windows, mkdir on POSIX
 - `hu_platform_realpath` — \_fullpath on Windows, realpath on POSIX
-- `hu_platform_parse_datetime` — sscanf fallback on Windows (strptime not available)
 - `hu_platform_get_home_dir` — USERPROFILE/HOMEDRIVE+HOMEPATH on Windows, HOME on POSIX
 - `hu_platform_get_temp_dir` — TEMP/TMP on Windows, TMPDIR/`/tmp` on POSIX
 

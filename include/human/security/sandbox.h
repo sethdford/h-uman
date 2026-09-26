@@ -125,9 +125,6 @@ typedef struct hu_available_backends {
 hu_available_backends_t hu_sandbox_detect_available(const char *workspace_dir,
                                                     const hu_sandbox_alloc_t *alloc);
 
-/** Create a noop sandbox (no isolation). Zig parity: createNoopSandbox. */
-hu_sandbox_t hu_sandbox_create_noop(void);
-
 /* ── Network isolation proxy ──────────────────────────────────────── */
 
 /**

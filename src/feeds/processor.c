@@ -413,33 +413,6 @@ hu_error_t hu_feeds_build_prompt(hu_allocator_t *alloc, const hu_feed_item_t *it
 #include "human/memory/trust.h"
 #include <sqlite3.h>
 
-/* SOTA-2026 init-09: feed-origin provenance stamp.
- *
- * Feed items (RSS, social, news, gmail-from-others, twitter, ...) are
- * THIRD_PARTY by definition: they are content the user did not type
- * into a 1:1 session. Any downstream code that promotes a feed item
- * into the personal model or the memories table MUST stamp this tier
- * before calling `hu_personal_model_ingest` or `hu_memory_store_with_source`.
- *
- * This is the canonical helper for that stamp. Exported for future
- * call sites; the processor itself stores feed items in the dedicated
- * `feed_items` SQLite table (not in `memories`), so it doesn't ingest
- * here today — but the contract is pinned. */
-hu_provenance_t hu_feed_processor_item_provenance(const hu_feed_item_stored_t *item,
-                                                  int64_t now_ts) {
-    char chan[HU_PROV_CHANNEL_MAX];
-    if (item && item->source[0]) {
-        int n = snprintf(chan, sizeof(chan), "feed:%s", item->source);
-        if (n < 0)
-            chan[0] = '\0';
-    } else {
-        const char fallback[] = "feed:unknown";
-        memcpy(chan, fallback, sizeof(fallback));
-    }
-    return hu_provenance_make(HU_TRUST_THIRD_PARTY, chan,
-                              (item && item->contact_id[0]) ? item->contact_id : NULL, now_ts);
-}
-
 hu_error_t hu_feed_processor_store_item(hu_feed_processor_t *proc,
                                         const hu_feed_item_stored_t *item) {
     if (!proc || !proc->db || !item)
@@ -1193,87 +1166,6 @@ hu_error_t hu_feed_correlate_recent(hu_allocator_t *alloc, sqlite3 *db, int64_t 
     if (clusters_formed > 0)
         hu_log_info("feeds", NULL, "correlated %zu clusters from %zu items", clusters_formed,
                     count);
-    return HU_OK;
-}
-
-hu_error_t hu_feed_semantic_search(hu_allocator_t *alloc, sqlite3 *db, hu_embedder_t *embedder,
-                                   hu_vector_store_t *store, const char *query, size_t query_len,
-                                   size_t limit, hu_feed_item_stored_t **out, size_t *out_count) {
-    if (!alloc || !db || !embedder || !store || !query || !out || !out_count)
-        return HU_ERR_INVALID_ARGUMENT;
-    *out = NULL;
-    *out_count = 0;
-
-    hu_embedding_t qe = {0};
-    hu_error_t err = embedder->vtable->embed(embedder->ctx, alloc, query, query_len, &qe);
-    if (err != HU_OK)
-        return err;
-
-    hu_vector_entry_t *entries = NULL;
-    size_t entry_count = 0;
-    err = store->vtable->search(store->ctx, alloc, &qe, limit, &entries, &entry_count);
-    hu_embedding_free(alloc, &qe);
-    if (err != HU_OK)
-        return err;
-
-    if (entry_count == 0) {
-        hu_vector_entries_free(alloc, entries, 0);
-        return HU_OK;
-    }
-
-    hu_feed_item_stored_t *items = (hu_feed_item_stored_t *)alloc->alloc(
-        alloc->ctx, entry_count * sizeof(hu_feed_item_stored_t));
-    if (!items) {
-        hu_vector_entries_free(alloc, entries, entry_count);
-        return HU_ERR_OUT_OF_MEMORY;
-    }
-
-    size_t found = 0;
-    const char *sql = "SELECT source, contact_id, content_type, content, url, ingested_at "
-                      "FROM feed_items WHERE id = ?";
-    for (size_t i = 0; i < entry_count; i++) {
-        if (!entries[i].id)
-            continue;
-        int64_t row_id = 0;
-        for (const char *p = entries[i].id; *p >= '0' && *p <= '9'; p++)
-            row_id = row_id * 10 + (*p - '0');
-        if (row_id == 0)
-            continue;
-
-        sqlite3_stmt *stmt = NULL;
-        if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
-            continue;
-        sqlite3_bind_int64(stmt, 1, row_id);
-
-        if (sqlite3_step(stmt) == SQLITE_ROW) {
-            hu_feed_item_stored_t *it = &items[found];
-            memset(it, 0, sizeof(*it));
-            const char *s = (const char *)sqlite3_column_text(stmt, 0);
-            if (s)
-                snprintf(it->source, sizeof(it->source), "%s", s);
-            s = (const char *)sqlite3_column_text(stmt, 1);
-            if (s)
-                snprintf(it->contact_id, sizeof(it->contact_id), "%s", s);
-            s = (const char *)sqlite3_column_text(stmt, 2);
-            if (s)
-                snprintf(it->content_type, sizeof(it->content_type), "%s", s);
-            s = (const char *)sqlite3_column_text(stmt, 3);
-            if (s) {
-                snprintf(it->content, sizeof(it->content), "%s", s);
-                it->content_len = strlen(it->content);
-            }
-            s = (const char *)sqlite3_column_text(stmt, 4);
-            if (s)
-                snprintf(it->url, sizeof(it->url), "%s", s);
-            it->ingested_at = sqlite3_column_int64(stmt, 5);
-            found++;
-        }
-        sqlite3_finalize(stmt);
-    }
-
-    hu_vector_entries_free(alloc, entries, entry_count);
-    *out = items;
-    *out_count = found;
     return HU_OK;
 }
 

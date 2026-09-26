@@ -435,42 +435,6 @@ hu_error_t hu_task_list_get(hu_task_list_t *list, uint64_t task_id, hu_task_t *o
     return HU_OK;
 }
 
-hu_error_t hu_task_list_all(hu_task_list_t *list, hu_task_t **out, size_t *out_count) {
-    if (!list || !out || !out_count)
-        return HU_ERR_INVALID_ARGUMENT;
-    *out = NULL;
-    *out_count = 0;
-    if (list->count == 0)
-        return HU_OK;
-    hu_task_t *arr =
-        (hu_task_t *)list->alloc->alloc(list->alloc->ctx, list->count * sizeof(hu_task_t));
-    if (!arr)
-        return HU_ERR_OUT_OF_MEMORY;
-    memset(arr, 0, list->count * sizeof(hu_task_t));
-    for (size_t i = 0; i < list->count; i++) {
-        arr[i] = list->tasks[i];
-        if (arr[i].subject)
-            arr[i].subject = hu_strndup(list->alloc, arr[i].subject, strlen(arr[i].subject));
-        if (arr[i].description)
-            arr[i].description =
-                hu_strndup(list->alloc, arr[i].description, strlen(arr[i].description));
-        if (arr[i].blocked_by && arr[i].blocked_by_count > 0) {
-            uint64_t *cpy = (uint64_t *)list->alloc->alloc(
-                list->alloc->ctx, arr[i].blocked_by_count * sizeof(uint64_t));
-            if (cpy) {
-                memcpy(cpy, list->tasks[i].blocked_by, arr[i].blocked_by_count * sizeof(uint64_t));
-                arr[i].blocked_by = cpy;
-            } else {
-                arr[i].blocked_by = NULL;
-                arr[i].blocked_by_count = 0;
-            }
-        }
-    }
-    *out = arr;
-    *out_count = list->count;
-    return HU_OK;
-}
-
 size_t hu_task_list_count_by_status(hu_task_list_t *list, hu_task_list_status_t status) {
     if (!list)
         return 0;

@@ -32,7 +32,21 @@ fi
 # 2026-07-18: origin/main itself measured 11557 (baseline had gone stale);
 # the S2.1b carve merge lands at 11553 — a net -4 vs main with zero new
 # groups (verified by set-diffing merged-tree windows against origin/main).
-CLONE_BASELINE=11015   # auto-locked 2026-09-20 (was 11020)
+CLONE_BASELINE=10442   # measured 2026-09-26 on the origin/main merge into PR #440.
+                       # Both sides conflicted here (branch 10447, main 11015), and
+                       # neither is right for the merged tree: this is its own
+                       # measurement, below both, so the merge tightens the ratchet.
+# prior: 10447         # auto-locked 2026-09-21 on the branch (was 10457)
+# prior: 11015         # main's value at the 2026-09-26 merge point
+# prior: 10854         # locked by hand 2026-09-20 (was 11021) after deleting
+                       # 37 abandoned modules. The autolock could not fire on
+                       # that commit: this gate runs from .githooks/pre-commit,
+                       # core.hooksPath resolves to the MAIN checkout, and the
+                       # hook there still gated on --diff-filter=ACM, so a
+                       # deletion-only commit matched nothing and skipped the
+                       # gate outright. That hook now uses ACMD (see the
+                       # clone-ratchet block in .githooks/pre-commit), which is
+                       # how the follow-up commit reached 10846 on its own.
                        # scheduled.json persist folded into one helper each
 # prior: 11036         # auto-locked 2026-09-19 (was 11103)
                        # earlier baselines); channel mock harness + clock + JSON-locator copies folded

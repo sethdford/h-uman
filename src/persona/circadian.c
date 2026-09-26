@@ -205,54 +205,6 @@ static const hu_routine_block_t *find_routine_block_for_hour(const hu_routine_bl
     return best;
 }
 
-hu_error_t hu_circadian_build_prompt_with_routine(hu_allocator_t *alloc, uint8_t hour,
-                                                  const struct hu_daily_routine *routine,
-                                                  char **out, size_t *out_len) {
-    if (!alloc || !out || !out_len)
-        return HU_ERR_INVALID_ARGUMENT;
-
-    /* No routine — fall back to default */
-    if (!routine || routine->weekday_count == 0)
-        return hu_circadian_build_prompt(alloc, hour, out, out_len);
-
-    /* Find the routine block active at this hour (weekday for now) */
-    const hu_routine_block_t *block =
-        find_routine_block_for_hour(routine->weekday, routine->weekday_count, hour);
-
-    /* No matching block or empty mood_modifier — fall back */
-    if (!block || block->mood_modifier[0] == '\0')
-        return hu_circadian_build_prompt(alloc, hour, out, out_len);
-
-    hu_time_phase_t phase = hu_circadian_phase(hour);
-    const char *name = s_phase_names[(size_t)phase];
-    const char *default_guidance = s_phase_guidance[(size_t)phase];
-
-#define HU_CIRCADIAN_ROUTINE_BUF_CAP 512
-    char *buf = (char *)alloc->alloc(alloc->ctx, HU_CIRCADIAN_ROUTINE_BUF_CAP);
-    if (!buf)
-        return HU_ERR_OUT_OF_MEMORY;
-
-    int n = snprintf(buf, HU_CIRCADIAN_ROUTINE_BUF_CAP,
-                     "\n### Time Awareness\nCurrent phase: %s. "
-                     "Persona energy: %s (activity: %s). %s\n",
-                     name, block->mood_modifier, block->activity, default_guidance);
-    if (n <= 0 || (size_t)n >= HU_CIRCADIAN_ROUTINE_BUF_CAP) {
-        alloc->free(alloc->ctx, buf, HU_CIRCADIAN_ROUTINE_BUF_CAP);
-        return HU_ERR_INVALID_ARGUMENT;
-    }
-
-    size_t need = (size_t)n + 1;
-    char *shrunk = (char *)alloc->realloc(alloc->ctx, buf, HU_CIRCADIAN_ROUTINE_BUF_CAP, need);
-    if (!shrunk) {
-        alloc->free(alloc->ctx, buf, HU_CIRCADIAN_ROUTINE_BUF_CAP);
-        return HU_ERR_OUT_OF_MEMORY;
-    }
-    *out = shrunk;
-    *out_len = (size_t)n;
-#undef HU_CIRCADIAN_ROUTINE_BUF_CAP
-    return HU_OK;
-}
-
 /* ── Persona-aware circadian prompt ──────────────────────────────── */
 
 const char *hu_circadian_persona_overlay(const struct hu_persona *persona, hu_time_phase_t phase) {

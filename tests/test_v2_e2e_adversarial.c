@@ -22,7 +22,6 @@
  */
 
 #include "human/agent/autodream.h"
-#include "human/agent/case_based.h"
 #include "human/agent/response_verifier.h"
 #include "human/agent/retrieval_planner.h"
 #include "human/agent/scheduler.h"

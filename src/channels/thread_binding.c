@@ -136,17 +136,6 @@ hu_error_t hu_thread_binding_lookup(hu_thread_binding_t *tb, const char *channel
     return HU_OK;
 }
 
-hu_error_t hu_thread_binding_touch(hu_thread_binding_t *tb, const char *channel_name,
-                                   const char *thread_id) {
-    if (!tb || !channel_name || !thread_id)
-        return HU_ERR_INVALID_ARGUMENT;
-    hu_tb_entry_t *e = find_entry(tb, channel_name, thread_id);
-    if (!e)
-        return HU_ERR_NOT_FOUND;
-    e->last_active = (int64_t)time(NULL);
-    return HU_OK;
-}
-
 size_t hu_thread_binding_expire_idle(hu_thread_binding_t *tb, int64_t now) {
     if (!tb)
         return 0;

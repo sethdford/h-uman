@@ -45,6 +45,11 @@ JOBS=(
   # 530k lines, no rotation on 2026-09-02). rotate-logs.sh copy-truncates
   # oversized logs once a day and writes its own dated marker line.
   "logrotate|line|$LOGDIR/logrotate.log|$REPO/scripts/rotate-logs.sh|any"
+  # Weekly stale-contact-profile check (2026-09-26): compares each persona
+  # contact profile with Seth's own recent texts to that person and h-uman's
+  # last week of replies; banner + JSON on a mismatch, never edits the persona.
+  # Read-only and fast (chat.db + memory.db), so no window.
+  "profile-check|file|$LOGDIR/profile-check-DATE.json|$REPO/scripts/profile_check_weekly.sh|any|7"
   # Weekly re-measurement of the HU_SEMANTIC_RECALL LIVE gate (contract C1,
   # flipped live 2026-09-03 on one PROMOTE; EI fell ~0.1 per run for three
   # runs). Lookback 7 = weekly. Window 10-16 local: the 03:07 retrain (window

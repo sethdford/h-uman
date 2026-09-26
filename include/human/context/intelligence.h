@@ -18,38 +18,31 @@ typedef struct hu_boundary {
     uint64_t set_at;
 } hu_boundary_t;
 
-hu_error_t hu_protective_create_table_sql(char *buf, size_t cap, size_t *out_len);
-hu_error_t hu_protective_insert_sql(const hu_boundary_t *b, char *buf, size_t cap, size_t *out_len);
-hu_error_t hu_protective_query_sql(const char *contact_id, size_t len, char *buf, size_t cap,
-                                   size_t *out_len);
 bool hu_protective_topic_is_blocked(const hu_boundary_t *boundaries, size_t count,
                                     const char *topic, size_t topic_len);
 hu_error_t hu_protective_build_prompt(hu_allocator_t *alloc, const hu_boundary_t *boundaries,
                                       size_t count, char **out, size_t *out_len);
-void hu_boundary_deinit(hu_allocator_t *alloc, hu_boundary_t *b);
 
 /* F69 — Humor Generation */
 typedef enum hu_humor_style {
     HU_HUMOR_STYLE_NONE = 0,
-    HU_HUMOR_STYLE_CALLBACK,        /* reference to previous funny moment */
-    HU_HUMOR_STYLE_OBSERVATIONAL,   /* noticing something funny about situation */
-    HU_HUMOR_STYLE_SELF_DEPRECATING,/* making fun of self */
-    HU_HUMOR_STYLE_ABSURD,          /* unexpected/surreal */
-    HU_HUMOR_STYLE_DEADPAN          /* dry/understated */
+    HU_HUMOR_STYLE_CALLBACK,         /* reference to previous funny moment */
+    HU_HUMOR_STYLE_OBSERVATIONAL,    /* noticing something funny about situation */
+    HU_HUMOR_STYLE_SELF_DEPRECATING, /* making fun of self */
+    HU_HUMOR_STYLE_ABSURD,           /* unexpected/surreal */
+    HU_HUMOR_STYLE_DEADPAN           /* dry/understated */
 } hu_humor_style_t;
 
 typedef struct hu_humor_config {
-    double humor_probability; /* default 0.2 */
-    bool never_during_crisis; /* default true */
-    bool never_during_serious;/* default true */
+    double humor_probability;   /* default 0.2 */
+    bool never_during_crisis;   /* default true */
+    bool never_during_serious;  /* default true */
     hu_humor_style_t preferred; /* default OBSERVATIONAL */
 } hu_humor_config_t;
 
 hu_humor_style_t hu_humor_select_style(double closeness, bool serious_topic, bool in_crisis,
                                        const hu_humor_config_t *config, uint32_t seed);
 const char *hu_humor_style_str(hu_humor_style_t style);
-hu_error_t hu_humor_build_directive(hu_allocator_t *alloc, hu_humor_style_t style, char **out,
-                                    size_t *out_len);
 
 /* F102 — Cognitive Load */
 typedef struct hu_cognitive_state {
@@ -60,7 +53,7 @@ typedef struct hu_cognitive_state {
 } hu_cognitive_state_t;
 
 double hu_cognitive_compute_load(uint32_t active_convos, uint32_t msgs_this_hour,
-                                  bool complex_topic);
+                                 bool complex_topic);
 hu_error_t hu_cognitive_build_directive(hu_allocator_t *alloc, const hu_cognitive_state_t *state,
                                         char **out, size_t *out_len);
 

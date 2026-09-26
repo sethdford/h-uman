@@ -2,7 +2,6 @@
 #include "human/core/error.h"
 #include "human/observability/log_observer.h"
 #include "human/observability/metrics_observer.h"
-#include "human/observability/multi_observer.h"
 #include "human/observer.h"
 #include "test_framework.h"
 #include <stdio.h>
@@ -125,46 +124,6 @@ static void test_metrics_observer_snapshot(void) {
 
     if (obs.vtable && obs.vtable->deinit)
         obs.vtable->deinit(obs.ctx);
-}
-
-static void test_multi_observer_forwards(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    char buf1[256], buf2[256];
-    memset(buf1, 0, sizeof(buf1));
-    memset(buf2, 0, sizeof(buf2));
-    FILE *f1 = tmpfile();
-    FILE *f2 = tmpfile();
-    HU_ASSERT_NOT_NULL(f1);
-    HU_ASSERT_NOT_NULL(f2);
-
-    hu_observer_t obs1 = hu_log_observer_create(&alloc, f1);
-    hu_observer_t obs2 = hu_log_observer_create(&alloc, f2);
-    hu_observer_t observers[2] = {obs1, obs2};
-
-    hu_observer_t multi = hu_multi_observer_create(&alloc, observers, 2);
-    HU_ASSERT_NOT_NULL(multi.ctx);
-
-    hu_observer_event_t ev = {.tag = HU_OBSERVER_EVENT_TURN_COMPLETE, .data = {{0}}};
-    hu_observer_record_event(multi, &ev);
-    hu_observer_flush(multi);
-
-    rewind(f1);
-    rewind(f2);
-    size_t n1 = fread(buf1, 1, sizeof(buf1) - 1, f1);
-    size_t n2 = fread(buf2, 1, sizeof(buf2) - 1, f2);
-    buf1[n1] = '\0';
-    buf2[n2] = '\0';
-    fclose(f1);
-    fclose(f2);
-    HU_ASSERT_TRUE(strstr(buf1, "turn_complete") != NULL);
-    HU_ASSERT_TRUE(strstr(buf2, "turn_complete") != NULL);
-
-    if (multi.vtable && multi.vtable->deinit)
-        multi.vtable->deinit(multi.ctx);
-    if (obs1.vtable && obs1.vtable->deinit)
-        obs1.vtable->deinit(obs1.ctx);
-    if (obs2.vtable && obs2.vtable->deinit)
-        obs2.vtable->deinit(obs2.ctx);
 }
 
 static void test_observer_null_safe(void) {
@@ -350,40 +309,6 @@ static void test_metrics_observer_multiple_requests(void) {
         obs.vtable->deinit(obs.ctx);
 }
 
-static void test_multi_observer_three_observers(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    FILE *f1 = tmpfile();
-    FILE *f2 = tmpfile();
-    FILE *f3 = tmpfile();
-    HU_ASSERT_NOT_NULL(f1);
-    HU_ASSERT_NOT_NULL(f2);
-    HU_ASSERT_NOT_NULL(f3);
-    hu_observer_t obs1 = hu_log_observer_create(&alloc, f1);
-    hu_observer_t obs2 = hu_log_observer_create(&alloc, f2);
-    hu_observer_t obs3 = hu_log_observer_create(&alloc, f3);
-    hu_observer_t observers[3] = {obs1, obs2, obs3};
-    hu_observer_t multi = hu_multi_observer_create(&alloc, observers, 3);
-    hu_observer_event_t ev = {.tag = HU_OBSERVER_EVENT_HEARTBEAT_TICK, .data = {{0}}};
-    hu_observer_record_event(multi, &ev);
-    hu_observer_flush(multi);
-    char buf[256];
-    rewind(f1);
-    size_t n1 = fread(buf, 1, sizeof(buf) - 1, f1);
-    buf[n1] = '\0';
-    fclose(f1);
-    fclose(f2);
-    fclose(f3);
-    HU_ASSERT_TRUE(n1 > 0);
-    if (multi.vtable && multi.vtable->deinit)
-        multi.vtable->deinit(multi.ctx);
-    if (obs1.vtable && obs1.vtable->deinit)
-        obs1.vtable->deinit(obs1.ctx);
-    if (obs2.vtable && obs2.vtable->deinit)
-        obs2.vtable->deinit(obs2.ctx);
-    if (obs3.vtable && obs3.vtable->deinit)
-        obs3.vtable->deinit(obs3.ctx);
-}
-
 /* Log observer creation/destruction */
 static void test_log_observer_create_has_ctx(void) {
     hu_allocator_t alloc = hu_system_allocator();
@@ -421,40 +346,6 @@ static void test_log_observer_llm_request_event(void) {
 }
 
 /* Multiple observers receive same event */
-static void test_multi_observer_both_receive_event(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    char buf1[256], buf2[256];
-    memset(buf1, 0, sizeof(buf1));
-    memset(buf2, 0, sizeof(buf2));
-    FILE *f1 = tmpfile();
-    FILE *f2 = tmpfile();
-    HU_ASSERT_NOT_NULL(f1);
-    HU_ASSERT_NOT_NULL(f2);
-    hu_observer_t obs1 = hu_log_observer_create(&alloc, f1);
-    hu_observer_t obs2 = hu_log_observer_create(&alloc, f2);
-    hu_observer_t observers[2] = {obs1, obs2};
-    hu_observer_t multi = hu_multi_observer_create(&alloc, observers, 2);
-    hu_observer_event_t ev = {.tag = HU_OBSERVER_EVENT_TOOL_CALL_START, .data = {{0}}};
-    ev.data.tool_call_start.tool = "file_read";
-    hu_observer_record_event(multi, &ev);
-    hu_observer_flush(multi);
-    rewind(f1);
-    rewind(f2);
-    size_t n1 = fread(buf1, 1, sizeof(buf1) - 1, f1);
-    size_t n2 = fread(buf2, 1, sizeof(buf2) - 1, f2);
-    buf1[n1] = '\0';
-    buf2[n2] = '\0';
-    fclose(f1);
-    fclose(f2);
-    HU_ASSERT_TRUE(n1 > 0 || n2 > 0);
-    if (multi.vtable && multi.vtable->deinit)
-        multi.vtable->deinit(multi.ctx);
-    if (obs1.vtable && obs1.vtable->deinit)
-        obs1.vtable->deinit(obs1.ctx);
-    if (obs2.vtable && obs2.vtable->deinit)
-        obs2.vtable->deinit(obs2.ctx);
-}
-
 /* Metric recording */
 static void test_log_observer_metric_request_latency(void) {
     hu_allocator_t alloc = hu_system_allocator();
@@ -537,19 +428,6 @@ static void test_metrics_observer_name(void) {
         obs.vtable->deinit(obs.ctx);
 }
 
-static void test_multi_observer_name(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_observer_t obs1 = hu_metrics_observer_create(&alloc);
-    hu_observer_t observers[1] = {obs1};
-    hu_observer_t multi = hu_multi_observer_create(&alloc, observers, 1);
-    const char *name = hu_observer_name(multi);
-    HU_ASSERT_NOT_NULL(name);
-    if (multi.vtable && multi.vtable->deinit)
-        multi.vtable->deinit(multi.ctx);
-    if (obs1.vtable && obs1.vtable->deinit)
-        obs1.vtable->deinit(obs1.ctx);
-}
-
 /* Tool iterations exhausted event */
 static void test_log_observer_tool_iterations_exhausted(void) {
     hu_allocator_t alloc = hu_system_allocator();
@@ -621,25 +499,12 @@ static void test_log_observer_flush_idempotent(void) {
 }
 
 /* Multi observer empty array (count=0) */
-static void test_multi_observer_empty_does_not_crash(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_observer_t multi = hu_multi_observer_create(&alloc, NULL, 0);
-    HU_ASSERT_NOT_NULL(multi.ctx);
-    hu_observer_event_t ev = {.tag = HU_OBSERVER_EVENT_TURN_COMPLETE, .data = {{0}}};
-    hu_observer_record_event(multi, &ev);
-    hu_observer_flush(multi);
-    if (multi.vtable && multi.vtable->deinit)
-        multi.vtable->deinit(multi.ctx);
-}
-
 void run_observer_tests(void) {
     HU_TEST_SUITE("Observer");
     HU_RUN_TEST(test_log_observer_records_event);
     HU_RUN_TEST(test_log_observer_records_metric);
     HU_RUN_TEST(test_metrics_observer_counts);
     HU_RUN_TEST(test_metrics_observer_snapshot);
-    HU_RUN_TEST(test_multi_observer_forwards);
-    HU_RUN_TEST(test_multi_observer_three_observers);
     HU_RUN_TEST(test_observer_null_safe);
     HU_RUN_TEST(test_log_observer_agent_start_event);
     HU_RUN_TEST(test_log_observer_agent_end_event);
@@ -652,16 +517,13 @@ void run_observer_tests(void) {
     HU_RUN_TEST(test_metrics_observer_multiple_requests);
     HU_RUN_TEST(test_log_observer_create_has_ctx);
     HU_RUN_TEST(test_log_observer_llm_request_event);
-    HU_RUN_TEST(test_multi_observer_both_receive_event);
     HU_RUN_TEST(test_log_observer_metric_request_latency);
     HU_RUN_TEST(test_log_observer_metric_active_sessions);
     HU_RUN_TEST(test_log_observer_metric_queue_depth);
     HU_RUN_TEST(test_log_observer_name);
     HU_RUN_TEST(test_metrics_observer_name);
-    HU_RUN_TEST(test_multi_observer_name);
     HU_RUN_TEST(test_log_observer_tool_iterations_exhausted);
     HU_RUN_TEST(test_metrics_observer_avg_latency_multiple);
-    HU_RUN_TEST(test_multi_observer_empty_does_not_crash);
     HU_RUN_TEST(test_log_observer_all_metric_tags);
     HU_RUN_TEST(test_log_observer_flush_idempotent);
 }

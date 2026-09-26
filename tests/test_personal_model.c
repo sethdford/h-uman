@@ -3118,6 +3118,55 @@ static void personal_model_apply_decay_zeros_vacant_slots(void) {
     HU_ASSERT_STR_EQ(m.facts[0].object, "");
 }
 
+/* Task 5: `hu_personal_model_expire_pending_facts` must actually run from
+ * `hu_personal_model_apply_decay` — the header claimed this was already
+ * wired but the linker showed no caller. Pin the pre/post contract
+ * directly on the pending queue, independent of fact-extraction
+ * behavior: a pending fact whose `pending_since` is more than
+ * HU_PM_PENDING_FACT_TTL_SEC in the past is expired (1 -> 0); one still
+ * inside the TTL survives. */
+static void personal_model_apply_decay_expires_past_ttl_pending_fact(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+
+    snprintf(m.pending_facts[0].subject, sizeof(m.pending_facts[0].subject), "user");
+    snprintf(m.pending_facts[0].predicate, sizeof(m.pending_facts[0].predicate), "likes");
+    snprintf(m.pending_facts[0].object, sizeof(m.pending_facts[0].object), "hiking");
+    m.pending_facts[0].confidence = 0.4f;
+    int64_t since = 1700000000LL;
+    m.pending_since[0] = since;
+    m.pending_fact_count = 1;
+
+    HU_ASSERT_EQ((long)m.pending_fact_count, 1L);
+
+    /* One second past the TTL boundary. */
+    int64_t now = since + HU_PM_PENDING_FACT_TTL_SEC + 1;
+    hu_personal_model_apply_decay(&m, now);
+
+    HU_ASSERT_EQ((long)m.pending_fact_count, 0L);
+}
+
+static void personal_model_apply_decay_keeps_future_ttl_pending_fact(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+
+    snprintf(m.pending_facts[0].subject, sizeof(m.pending_facts[0].subject), "user");
+    snprintf(m.pending_facts[0].predicate, sizeof(m.pending_facts[0].predicate), "likes");
+    snprintf(m.pending_facts[0].object, sizeof(m.pending_facts[0].object), "hiking");
+    m.pending_facts[0].confidence = 0.4f;
+    int64_t since = 1700000000LL;
+    m.pending_since[0] = since;
+    m.pending_fact_count = 1;
+
+    HU_ASSERT_EQ((long)m.pending_fact_count, 1L);
+
+    /* Well inside the 24h TTL. */
+    int64_t now = since + 100;
+    hu_personal_model_apply_decay(&m, now);
+
+    HU_ASSERT_EQ((long)m.pending_fact_count, 1L);
+}
+
 void run_personal_model_tests(void) {
     HU_TEST_SUITE("PersonalModel");
     HU_RUN_TEST(personal_model_init_sets_defaults);
@@ -3296,6 +3345,8 @@ void run_personal_model_tests(void) {
     HU_RUN_TEST(personal_model_apply_decay_prunes_inactive_goals);
     HU_RUN_TEST(personal_model_apply_decay_is_idempotent);
     HU_RUN_TEST(personal_model_apply_decay_zeros_vacant_slots);
+    HU_RUN_TEST(personal_model_apply_decay_expires_past_ttl_pending_fact);
+    HU_RUN_TEST(personal_model_apply_decay_keeps_future_ttl_pending_fact);
 #if defined(__unix__) || defined(__APPLE__)
     HU_RUN_TEST(personal_model_survives_real_sigkill);
 #endif

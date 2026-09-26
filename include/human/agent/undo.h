@@ -30,6 +30,5 @@ void hu_undo_stack_destroy(hu_undo_stack_t *stack);
 hu_error_t hu_undo_stack_push(hu_undo_stack_t *stack, const hu_undo_entry_t *entry);
 size_t hu_undo_stack_count(const hu_undo_stack_t *stack);
 hu_error_t hu_undo_stack_execute_undo(hu_undo_stack_t *stack, hu_allocator_t *alloc);
-void hu_undo_entry_free(hu_allocator_t *alloc, hu_undo_entry_t *entry);
 
 #endif

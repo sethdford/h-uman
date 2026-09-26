@@ -90,14 +90,6 @@ bool hu_gateway_is_allowed_origin(const char *origin, const char *const *allowed
  * HU_ERR_GATEWAY_BODY_TOO_LARGE (exceeds max). value is the part after "Content-Length: " */
 hu_error_t hu_gateway_parse_content_length(const char *value, size_t max_body, size_t *out_len);
 
-/* SSE streaming helpers for chunked transfer encoding.
- * send_sse_headers: sends HTTP 200 with text/event-stream + chunked TE.
- * send_sse_chunk: sends one HTTP chunk frame (hex len + data).
- * send_sse_end: terminates chunked transfer with zero-length chunk. */
-bool hu_gateway_send_sse_headers(int fd);
-bool hu_gateway_send_sse_chunk(int fd, const char *data, size_t data_len);
-bool hu_gateway_send_sse_end(int fd);
-
 #if HU_IS_TEST
 /* Test-only: process POST /api/pair body, return HTTP status and JSON body.
  * guard may be NULL (pairing not enabled). out_body allocated via alloc; caller must free. */

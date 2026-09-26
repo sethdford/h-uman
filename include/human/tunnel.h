@@ -33,8 +33,6 @@ typedef enum hu_tunnel_error {
     HU_TUNNEL_ERR_NOT_IMPLEMENTED,
 } hu_tunnel_error_t;
 
-const char *hu_tunnel_error_string(hu_tunnel_error_t err);
-
 /* ──────────────────────────────────────────────────────────────────────────
  * Tunnel vtable
  * ────────────────────────────────────────────────────────────────────────── */
@@ -73,13 +71,9 @@ typedef struct hu_tunnel_config {
 } hu_tunnel_config_t;
 
 /* ──────────────────────────────────────────────────────────────────────────
- * Factory
+ * Backend constructors
  * ────────────────────────────────────────────────────────────────────────── */
 
-hu_tunnel_t hu_tunnel_create(hu_allocator_t *alloc, const hu_tunnel_config_t *config);
-
-/* Implementation-specific constructors (for factory use) */
-hu_tunnel_t hu_none_tunnel_create(hu_allocator_t *alloc);
 hu_tunnel_t hu_cloudflare_tunnel_create(hu_allocator_t *alloc, const char *token, size_t token_len);
 hu_tunnel_t hu_ngrok_tunnel_create(hu_allocator_t *alloc, const char *auth_token,
                                    size_t auth_token_len, const char *domain, size_t domain_len);

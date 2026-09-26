@@ -6,9 +6,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define HU_NARRATIVE_MAX_THEMES 8
+#define HU_NARRATIVE_MAX_THEMES         8
 #define HU_NARRATIVE_MAX_ORIGIN_STORIES 4
-#define HU_NARRATIVE_MAX_GROWTH_ARCS 6
+#define HU_NARRATIVE_MAX_GROWTH_ARCS    6
 
 typedef struct hu_narrative_self {
     char *identity_statement;
@@ -33,9 +33,6 @@ hu_error_t hu_narrative_self_add_theme(hu_allocator_t *alloc, hu_narrative_self_
 
 hu_error_t hu_narrative_self_add_growth_arc(hu_allocator_t *alloc, hu_narrative_self_t *self,
                                             const char *arc, size_t len);
-
-hu_error_t hu_narrative_self_add_origin(hu_allocator_t *alloc, hu_narrative_self_t *self,
-                                        const char *story, size_t len);
 
 hu_error_t hu_narrative_self_set_preoccupation(hu_allocator_t *alloc, hu_narrative_self_t *self,
                                                const char *text, size_t len);

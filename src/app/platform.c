@@ -169,7 +169,8 @@ void hu_platform_sleep_ms(unsigned int ms) {
         ms -= sec * 1000;
     }
     if (ms > 0) {
-        struct timespec ts = {.tv_sec = (time_t)(ms / 1000), .tv_nsec = (long)((ms % 1000) * 1000000)};
+        struct timespec ts = {.tv_sec = (time_t)(ms / 1000),
+                              .tv_nsec = (long)((ms % 1000) * 1000000)};
         nanosleep(&ts, NULL);
     }
 #endif
@@ -217,59 +218,5 @@ char *hu_platform_realpath(hu_allocator_t *alloc, const char *path) {
     memcpy(out, r, len);
     free(r);
     return out;
-#endif
-}
-
-bool hu_platform_parse_datetime(const char *ts, struct tm *out) {
-    if (!ts || !ts[0] || !out)
-        return false;
-    memset(out, 0, sizeof(*out));
-#if defined(_WIN32) && !defined(__CYGWIN__)
-    int y = 0, mo = 0, d = 0, h = 0, mi = 0;
-    if (sscanf(ts, "%d-%d-%d %d:%d", &y, &mo, &d, &h, &mi) == 5) {
-        out->tm_year = y - 1900;
-        out->tm_mon = mo - 1;
-        out->tm_mday = d;
-        out->tm_hour = h;
-        out->tm_min = mi;
-        out->tm_isdst = -1;
-        return true;
-    }
-    if (sscanf(ts, "%d:%d", &h, &mi) == 2) {
-        time_t now = time(NULL);
-        struct tm now_tm;
-        if (hu_platform_localtime_r(&now, &now_tm)) {
-            out->tm_year = now_tm.tm_year;
-            out->tm_mon = now_tm.tm_mon;
-            out->tm_mday = now_tm.tm_mday;
-        }
-        out->tm_hour = h;
-        out->tm_min = mi;
-        out->tm_isdst = -1;
-        return true;
-    }
-    return false;
-#else
-    char *p = strptime(ts, "%Y-%m-%d %H:%M", out);
-    if (p && *p == '\0')
-        return true;
-    memset(out, 0, sizeof(*out));
-    time_t now = time(NULL);
-    struct tm now_tm;
-    if (!hu_platform_localtime_r(&now, &now_tm))
-        return false;
-    out->tm_year = now_tm.tm_year;
-    out->tm_mon = now_tm.tm_mon;
-    out->tm_mday = now_tm.tm_mday;
-    p = strptime(ts, "%H:%M", out);
-    return (p && *p == '\0');
-#endif
-}
-
-const char *hu_platform_get_home_env(void) {
-#if defined(_WIN32) && !defined(__CYGWIN__)
-    return getenv("USERPROFILE") ? getenv("USERPROFILE") : getenv("HOME");
-#else
-    return getenv("HOME");
 #endif
 }

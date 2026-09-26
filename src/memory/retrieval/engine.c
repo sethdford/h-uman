@@ -220,27 +220,6 @@ hu_retrieval_engine_t hu_retrieval_create_with_vector(hu_allocator_t *alloc, hu_
     };
 }
 
-hu_error_t hu_retrieval_index_entry(hu_retrieval_engine_t *engine, hu_allocator_t *alloc,
-                                    const char *key, size_t key_len, const char *content,
-                                    size_t content_len) {
-    if (!engine || !engine->ctx || !engine->vtable || !alloc)
-        return HU_ERR_INVALID_ARGUMENT;
-    hu_retrieval_engine_ctx_t *e = (hu_retrieval_engine_ctx_t *)engine->ctx;
-    if (!e->embedder || !e->embedder->vtable || !e->vector_store || !e->vector_store->vtable)
-        return HU_ERR_NOT_SUPPORTED;
-
-    hu_embedding_t emb = {0};
-    hu_error_t err =
-        e->embedder->vtable->embed(e->embedder->ctx, alloc, content, content_len, &emb);
-    if (err != HU_OK)
-        return err;
-
-    err = e->vector_store->vtable->insert(e->vector_store->ctx, alloc, key, key_len, &emb, content,
-                                          content_len);
-    hu_embedding_free(alloc, &emb);
-    return err;
-}
-
 void hu_retrieval_set_graph(hu_retrieval_engine_t *engine, hu_graph_t *graph) {
     if (!engine || !engine->ctx)
         return;

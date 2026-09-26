@@ -258,3 +258,9 @@ hu_error_t hu_heartbeat_ensure_file(const char *workspace_dir, hu_allocator_t *a
     fclose(f);
     return HU_OK;
 }
+
+int hu_heartbeat_file_path(const char *workspace_dir, char *buf, size_t cap) {
+    if (!workspace_dir || !buf || cap == 0)
+        return -1;
+    return snprintf(buf, cap, "%s/%s", workspace_dir, HU_HEARTBEAT_PATH);
+}

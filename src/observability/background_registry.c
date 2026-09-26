@@ -53,32 +53,15 @@ void hu_bg_registry_tick_all(hu_bg_registry_t *r, hu_allocator_t *alloc, hu_app_
     }
 }
 
-size_t hu_bg_registry_count(const hu_bg_registry_t *r) { return r ? r->count : 0; }
+size_t hu_bg_registry_count(const hu_bg_registry_t *r) {
+    return r ? r->count : 0;
+}
 
 const hu_bg_observer_t *hu_bg_registry_get(const hu_bg_registry_t *r, size_t idx) {
     if (!r || idx >= r->count) {
         return NULL;
     }
     return &r->observers[idx];
-}
-
-hu_error_t hu_bg_registry_set_enabled(hu_bg_registry_t *r, const char *name, bool enabled) {
-    if (!r || !name) {
-        return HU_ERR_INVALID_ARGUMENT;
-    }
-    for (size_t i = 0; i < r->count; i++) {
-        hu_bg_observer_t *o = &r->observers[i];
-        const hu_bg_observer_vtable_t *vt = o->vtable;
-        if (!vt || !vt->name || !vt->set_enabled) {
-            continue;
-        }
-        const char *n = vt->name(o->ctx);
-        if (n && strcmp(n, name) == 0) {
-            vt->set_enabled(o->ctx, enabled);
-            return HU_OK;
-        }
-    }
-    return HU_ERR_NOT_FOUND;
 }
 
 void hu_bg_registry_deinit(hu_bg_registry_t *r, hu_allocator_t *alloc) {

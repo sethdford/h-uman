@@ -39,14 +39,6 @@ void hu_daemon_reaction_poll_reset_warn_guards_for_test(void) {
 }
 #endif
 
-void hu_daemon_reaction_wire_collector(struct hu_dpo_collector *collector) {
-    hu_reaction_handler_set_collector((hu_dpo_collector_t *)collector);
-}
-
-void hu_daemon_reaction_wire_personal_model(struct hu_personal_model *model) {
-    hu_reaction_handler_set_personal_model(model);
-}
-
 #if HU_IS_TEST
 static int *g_imessage_poll_call_counter = NULL;
 static int g_poll_count_for_test = 0;

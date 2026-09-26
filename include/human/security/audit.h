@@ -110,9 +110,6 @@ void hu_audit_event_with_action(hu_audit_event_t *ev, const char *command, const
 void hu_audit_event_with_result(hu_audit_event_t *ev, bool success, int32_t exit_code,
                                 uint64_t duration_ms, const char *err_msg);
 
-/** Set security context (sandbox_backend). */
-void hu_audit_event_with_security(hu_audit_event_t *ev, const char *sandbox_backend);
-
 /** Set identity (agent_id, model_version, auth_token_hash). */
 void hu_audit_event_with_identity(hu_audit_event_t *ev, uint64_t agent_id,
                                   const char *model_version, const char *auth_token_hash);
@@ -168,9 +165,6 @@ void hu_audit_logger_destroy(hu_audit_logger_t *logger, hu_allocator_t *alloc);
 
 /** Log an event. No-op if disabled. */
 hu_error_t hu_audit_logger_log(hu_audit_logger_t *logger, const hu_audit_event_t *event);
-
-/** Log a command execution event (convenience). */
-hu_error_t hu_audit_logger_log_command(hu_audit_logger_t *logger, const hu_audit_cmd_log_t *entry);
 
 /** Rotate audit HMAC key. Writes key_rotation entry, saves new key, clears old. */
 hu_error_t hu_audit_rotate_key(hu_audit_logger_t *logger);
