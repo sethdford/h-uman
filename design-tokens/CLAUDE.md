@@ -30,6 +30,7 @@ npm run docs           # generate token reference docs
 | `breakpoints.tokens.json` | Responsive breakpoints                        |
 | `opacity.tokens.json`     | Opacity scale                                 |
 | `components.tokens.json`  | Component-specific tokens                     |
+| `quiet.tokens.json`       | Quiet Room web-only layer (paper & ink, OKLCH) — `com.human.platform: "web"` |
 
 ## Generated Outputs
 
@@ -43,3 +44,9 @@ npm run docs           # generate token reference docs
 ## Companion files (manual drift risk)
 
 - `docs/tokens-studio.json` — Tokens Studio / Figma-style export: **not** emitted by `build.ts`. After changing `color.*` references or token aliases in `*.tokens.json`, search-replace or re-export so `{color.human.*}` / `{color.blue.*}` / `{color.sky.*}` stay aligned with `base.tokens.json`. When extending charts, keep `base.color.viz-extended` and the top-level `data-viz.chart.categorical` block (resolved hexes 1–16) in sync with `base.tokens.json` + `data-viz.tokens.json`.
+
+## Platform routing and checks
+
+- Every `*.tokens.json` declares `$extensions["com.human.platform"]`: `"all"` (CSS, Swift, Kotlin, C, docs JSON) or `"web"` (CSS only). Missing or unknown values fail the build.
+- Native color emitters (`color-emit-lib.ts`) accept only `#RRGGBB` and `rgb()/rgba()`. Any other color-like value (`isColorLike`: oklch, display-p3, hsl, …) throws `UnsupportedColorError` instead of being emitted black or silently dropped; non-colors (px, deg, %, gradients) are skipped. Put `oklch()`/`display-p3` colors in a `"web"` file.
+- `npm test` runs the `node:test` suites in `tests/`. `npm run check:contrast` measures every Quiet Room text/UI/fill pair in both modes (inherited values included) and exits 1 on any failure, 2 if there is nothing to measure. `npm run check` runs build + test + contrast.
