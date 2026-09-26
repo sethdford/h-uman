@@ -999,6 +999,10 @@ jobs:
       # only minted when h-uman and Seth answered the same inbound message.
       - name: On-policy pair miner tests (hermetic, stdlib-only)
         run: python3 scripts/test_mine_onpolicy_pairs.py
+      # On-policy rejected-sample generator: fake human-daemon + fake model
+      # server on 127.0.0.1:0; asserts guards, env gates and the fidelity check.
+      - name: On-policy generator tests (hermetic, stdlib-only)
+        run: python3 scripts/test_gen_onpolicy_rejected.py
       # Per-contact reply-length floor measurement (2026-09-26): same fixtures,
       # asserts only Seth-authored texts are measured and n<min writes nothing.
       - name: Contact reply-length measurement tests (hermetic, stdlib-only)

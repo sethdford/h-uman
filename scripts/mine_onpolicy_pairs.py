@@ -64,11 +64,13 @@ def _context(timeline, start):
     return turns
 
 
-def mine_thread(timeline, labels):
-    """Pairs and counts for one contact's 1:1 timeline (reactions removed).
-    `labels` maps guid -> "seth" | "huuman" | "ambiguous" for from-me sends."""
-    pairs, counts = [], {"natural_pairs": 0, "seth_after_huuman": 0,
-                         "gold_moments": 0, "huuman_only": 0, "skipped_ambiguous": 0}
+def iter_moments(timeline, labels):
+    """One record per run of from-me messages that answers an inbound:
+    {"kind": "pair"|"gold"|"huuman"|"ambiguous", "turns": context for
+    render_prompt, "seth": [texts], "huuman": [texts], "t": first send time,
+    "seth_after_huuman": bool}. `labels` maps guid -> "seth" | "huuman" |
+    "ambiguous" for from-me sends. "pair" means both answered the same
+    inbound; "gold" only Seth; "huuman" only h-uman."""
     i, n = 0, len(timeline)
     while i < n:
         if timeline[i]["from_me"] or i + 1 >= n or not timeline[i + 1]["from_me"]:
@@ -83,24 +85,40 @@ def mine_thread(timeline, labels):
         i = end
         kinds = [labels.get(m["guid"], "ambiguous") for m in run]
         if "ambiguous" in kinds:
-            counts["skipped_ambiguous"] += 1
+            yield {"kind": "ambiguous"}
             continue
-        seth = [_clean(m["text"]) for m, k in zip(run, kinds) if k == "seth"]
-        huuman = [_clean(m["text"]) for m, k in zip(run, kinds) if k == "huuman"]
-        seth, huuman = [t for t in seth if t], [t for t in huuman if t]
-        if seth and huuman:
-            chosen, rejected = "\n".join(seth), "\n".join(huuman)
-            prompt = render_prompt(_context(timeline, start))
+        seth = [t for t in (_clean(m["text"]) for m, k in zip(run, kinds) if k == "seth") if t]
+        huuman = [t for t in (_clean(m["text"]) for m, k in zip(run, kinds) if k == "huuman") if t]
+        if not seth and not huuman:
+            continue
+        kind = "pair" if seth and huuman else ("gold" if seth else "huuman")
+        after = False
+        if kind == "pair":
+            first_h = kinds.index("huuman")
+            after = "seth" in kinds[first_h:]
+        yield {"kind": kind, "turns": _context(timeline, start), "seth": seth,
+               "huuman": huuman, "t": run[0]["t"], "seth_after_huuman": after}
+
+
+def mine_thread(timeline, labels):
+    """Pairs and counts for one contact's 1:1 timeline (reactions removed)."""
+    pairs, counts = [], {"natural_pairs": 0, "seth_after_huuman": 0,
+                         "gold_moments": 0, "huuman_only": 0, "skipped_ambiguous": 0}
+    for m in iter_moments(timeline, labels):
+        if m["kind"] == "ambiguous":
+            counts["skipped_ambiguous"] += 1
+        elif m["kind"] == "gold":
+            counts["gold_moments"] += 1
+        elif m["kind"] == "huuman":
+            counts["huuman_only"] += 1
+        else:
+            chosen, rejected = "\n".join(m["seth"]), "\n".join(m["huuman"])
+            prompt = render_prompt(m["turns"])
             if prompt and chosen != rejected:
                 pairs.append({"prompt": prompt, "chosen": chosen, "rejected": rejected})
                 counts["natural_pairs"] += 1
-                first_h = kinds.index("huuman")
-                if "seth" in kinds[first_h:]:
+                if m["seth_after_huuman"]:
                     counts["seth_after_huuman"] += 1
-        elif seth:
-            counts["gold_moments"] += 1
-        elif huuman:
-            counts["huuman_only"] += 1
     return pairs, counts
 
 
