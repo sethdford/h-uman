@@ -350,6 +350,78 @@ class TestExactProvenance(unittest.TestCase):
         self.assertEqual(t["seth"] + t["huuman"] + t["ambiguous"], 1)
 
 
+class TestHurtAfter(unittest.TestCase):
+    """hurt_after: did the contact's next reply say they feel hurt or worried
+    about us? The dead-end rate scored a hurt thread 0.000 because she kept
+    replying (2026-09-26)."""
+
+    def run_fixture(self, fill, detector=True):
+        self.tmp = tempfile.TemporaryDirectory()
+        fx = Fixture(self.tmp.name)
+        fill(fx)
+        fx.close()
+        saved = cq._hurt_detector
+        if not detector:
+            cq._hurt_detector = lambda: None
+        try:
+            return cq.analyze(self.tmp.name + "/chat.db", self.tmp.name + "/memory.db",
+                              since=T0 - dt.timedelta(days=1), now=T0 + dt.timedelta(days=30))
+        finally:
+            cq._hurt_detector = saved
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    @staticmethod
+    def huuman(fx, secs, text):
+        fx.outbound("+1", secs, text, fx.max_rowid())
+        fx.msg("+1", secs, text, True)
+
+    def test_hurt_reply_after_huuman_turn_is_counted(self):
+        def fill(fx):
+            fx.msg("+1", 0, "Have to go to din for my dads bday", False)
+            self.huuman(fx, 60, "Enjoy")
+            fx.msg("+1", 120, "U mad at me?", False)
+            fx.msg("+1", 10 * MIN, "i'm fine, was just driving. have fun at dinner", True)
+            fx.msg("+1", 12 * MIN, "ok thank u", False)
+        r = self.run_fixture(fill)
+        rows = {row["arm"]: row for row in r["per_turn"]}
+        self.assertTrue(rows["huuman"]["hurt_after"])
+        self.assertFalse(rows["seth"]["hurt_after"])
+        self.assertEqual(cq.hurt_after_counts(r["per_turn"]),
+                         {"seth": {"hurt": 0, "replies": 1}, "huuman": {"hurt": 1, "replies": 1}})
+
+    def test_no_reply_is_not_scored(self):
+        def fill(fx):
+            fx.msg("+1", 0, "Heyo", False)
+            self.huuman(fx, 60, "Hey")
+        r = self.run_fixture(fill)
+        self.assertIsNone(r["per_turn"][0]["hurt_after"])
+        self.assertEqual(cq.hurt_after_counts(r["per_turn"])["huuman"], {"hurt": 0, "replies": 0})
+
+    def test_only_the_first_reply_burst_counts(self):
+        # The hurt message answers Seth's later send, not h-uman's earlier one.
+        def fill(fx):
+            fx.msg("+1", 0, "Heyo", False)
+            self.huuman(fx, 60, "Hey")
+            fx.msg("+1", 120, "whats up", False)
+            fx.msg("+1", 10 * MIN, "nm", True)
+            fx.msg("+1", 11 * MIN, "why are you being short", False)
+        r = self.run_fixture(fill)
+        rows = {row["arm"]: row for row in r["per_turn"]}
+        self.assertFalse(rows["huuman"]["hurt_after"])
+        self.assertTrue(rows["seth"]["hurt_after"])
+
+    def test_unavailable_detector_reports_absent_not_zero(self):
+        def fill(fx):
+            fx.msg("+1", 0, "Heyo", False)
+            self.huuman(fx, 60, "Hey")
+            fx.msg("+1", 120, "U mad at me?", False)
+        r = self.run_fixture(fill, detector=False)
+        self.assertFalse(r["hurt_detector"])
+        self.assertIsNone(r["per_turn"][0]["hurt_after"])
+
+
 class TestSummary(unittest.TestCase):
     def test_refuses_verdict_when_arm_too_small(self):
         rows = [{"arm": "seth", "contact": "+1", "dead_end": False}] * 50 + \
