@@ -11,12 +11,13 @@ const QUIET = JSON.parse(
 ).quiet;
 const LIGHT_BG: string = QUIET.light.bg.$value;
 const DARK_BG: string = QUIET.dark.bg.$value;
-// getComputedStyle serializes custom-property number tokens canonically —
-// Chromium strips insignificant trailing zeros (0.010 -> 0.01, 0.130 -> 0.13)
-// per CSS's <number-token> serialization rules — so a raw literal copied
-// from quiet.tokens.json (which spells "0.010" for alignment with the spec
-// table) never string-equals the computed value even though the color is
-// identical. Canonicalize decimal numbers the same way before comparing.
+// getComputedStyle returns custom-property values verbatim — Chromium does
+// not reserialize them. The mismatch is upstream of the browser: design-tokens'
+// `postbuild` prettier pass reformats the committed _tokens.css, stripping
+// insignificant trailing zeros (0.010 -> 0.01, 0.130 -> 0.13), while
+// quiet.tokens.json's literal keeps the spec table's "0.010" / "0.130"
+// spelling. Canonicalize decimal numbers the same way before comparing so
+// the two sources agree regardless of formatting.
 const norm = (s: string) =>
   s
     .trim()
@@ -69,6 +70,41 @@ test.describe("Quiet Room cascade", () => {
     await load(page, "", '<div id="q" data-brand="quiet"></div>', { scheme: "light" });
     expect(await prop(page, "#q", "--hu-bg")).toBe(norm(LIGHT_BG));
     expect(await prop(page, "html", "--hu-bg")).not.toBe(norm(LIGHT_BG));
+  });
+
+  test("bare quiet container follows system dark", async ({ page }) => {
+    await load(page, "", '<div id="q" data-brand="quiet"></div>', { scheme: "dark" });
+    expect(await prop(page, "#q", "--hu-bg")).toBe(norm(DARK_BG));
+  });
+
+  test("html data-theme=dark reaches a bare quiet container", async ({ page }) => {
+    await load(page, 'data-theme="dark"', '<div id="q" data-brand="quiet"></div>', { scheme: "light" });
+    expect(await prop(page, "#q", "--hu-bg")).toBe(norm(DARK_BG));
+  });
+
+  test("a nearer light ancestor beats a farther dark ancestor for a bare quiet container", async ({ page }) => {
+    // QUIET_LIGHT_ANCESTOR ('[data-theme="light"] [data-brand="quiet"]') can
+    // only ever be the deciding rule when the light-marked ancestor is NOT
+    // <html> itself: QUIET_SCOPE already defaults to light unconditionally,
+    // and QUIET_DARK_AUTO's own ":not([data-theme=\"light\"])" exclusion means
+    // an explicit data-theme="light" on <html> already blocks the system-dark
+    // default before QUIET_LIGHT_ANCESTOR is ever consulted (confirmed by
+    // removing the rule: a root-level data-theme="light" case is unchanged).
+    // QUIET_DARK_AUTO also outscores QUIET_LIGHT_ANCESTOR outright (its extra
+    // ":not()" clauses make it more specific than a plain ancestor selector),
+    // so pitting it against system-dark can't discriminate either. The one
+    // case where QUIET_LIGHT_ANCESTOR is genuinely load-bearing is two
+    // conflicting non-root ancestors of EQUAL specificity
+    // ([data-theme="dark"] ... vs [data-theme="light"] ...): source order
+    // (light emitted after dark) must decide, and only QUIET_LIGHT_ANCESTOR's
+    // presence makes that decision come out light.
+    await load(
+      page,
+      "",
+      '<div data-theme="dark"><div data-theme="light"><div id="q" data-brand="quiet"></div></div></div>',
+      { scheme: "light" },
+    );
+    expect(await prop(page, "#q", "--hu-bg")).toBe(norm(LIGHT_BG));
   });
 
   test("an element's own data-theme beats an ancestor's (dark panel on a page toggled light)", async ({ page }) => {
