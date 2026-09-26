@@ -1046,9 +1046,8 @@
   }
 }
 
-@media (color-gamut: p3) {
-  :root {
-    /* Wide gamut P3 color overrides — more vivid on supported displays */
+@media (color-gamut: p3) and (not (prefers-contrast: more)) and (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
     --hu-accent: color(display-p3 0.42 0.68 0.22);
     --hu-accent-hover: color(display-p3 0.49 0.74 0.18);
     --hu-accent-secondary: color(display-p3 0.961 0.62 0.043);
@@ -1062,14 +1061,43 @@
     --hu-success: color(display-p3 0.063 0.725 0.506);
     --hu-warning: color(display-p3 0.918 0.702 0.031);
   }
-  @media (prefers-color-scheme: light) {
-    :root {
-      --hu-accent: color(display-p3 0.42 0.68 0.22);
-      --hu-accent-text: color(display-p3 0.24 0.48 0.13);
-      --hu-error: color(display-p3 0.76 0 0);
-      --hu-info: color(display-p3 0.145 0.388 0.922);
-      --hu-success: color(display-p3 0 0.48 0);
-      --hu-warning: color(display-p3 0.792 0.541 0.016);
-    }
+}
+
+@media (color-gamut: p3) and (not (prefers-contrast: more)) and (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --hu-accent: color(display-p3 0.42 0.68 0.22);
+    --hu-accent-text: color(display-p3 0.24 0.48 0.13);
+    --hu-error: color(display-p3 0.76 0 0);
+    --hu-info: color(display-p3 0.145 0.388 0.922);
+    --hu-success: color(display-p3 0 0.48 0);
+    --hu-warning: color(display-p3 0.792 0.541 0.016);
+  }
+}
+
+@media (color-gamut: p3) and (not (prefers-contrast: more)) {
+  [data-theme="dark"] {
+    --hu-accent: color(display-p3 0.42 0.68 0.22);
+    --hu-accent-hover: color(display-p3 0.49 0.74 0.18);
+    --hu-accent-secondary: color(display-p3 0.961 0.62 0.043);
+    --hu-accent-strong: color(display-p3 0.57 0.8 0.33);
+    --hu-accent-tertiary: color(display-p3 0.29 0.435 0.647);
+    --hu-accent-text: color(display-p3 0.49 0.74 0.18);
+    --hu-error: color(display-p3 0.976 0.439 0.4);
+    --hu-focus-ring: color(display-p3 0.42 0.68 0.22);
+    --hu-info: color(display-p3 0.231 0.51 0.965);
+    --hu-link: color(display-p3 0.49 0.74 0.18);
+    --hu-success: color(display-p3 0.063 0.725 0.506);
+    --hu-warning: color(display-p3 0.918 0.702 0.031);
+  }
+}
+
+@media (color-gamut: p3) and (not (prefers-contrast: more)) {
+  [data-theme="light"] {
+    --hu-accent: color(display-p3 0.42 0.68 0.22);
+    --hu-accent-text: color(display-p3 0.24 0.48 0.13);
+    --hu-error: color(display-p3 0.76 0 0);
+    --hu-info: color(display-p3 0.145 0.388 0.922);
+    --hu-success: color(display-p3 0 0.48 0);
+    --hu-warning: color(display-p3 0.792 0.541 0.016);
   }
 }
