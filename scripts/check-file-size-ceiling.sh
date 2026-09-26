@@ -15,20 +15,14 @@ else
     ratchet_autolock() { :; }
 fi
 
-MAX_BASELINE=10522   # set by hand 2026-09-21 at the origin/main merge (was 10511).
-                     # This is the one place a merge legitimately raises the ceiling, so the
-                     # arithmetic is written out. The largest file flipped from
-                     # src/agent/agent_turn.c (10511 on this branch after the dead-code sweep)
-                     # to src/daemon.c, which arrived from main at 10518 — already 6 lines
-                     # above main's own stale 10512 baseline, latent there because this gate
-                     # only measures when a src/*.c is staged. The follow-up watcher's
-                     # governor plumbing (shared proactive budget + autoresponder config,
-                     # required by review) adds the last 4. Nothing here shrank a file and
-                     # then re-spent the gain.
-                     # carve-out (context loading -> src/daemon/daemon_reactive_context.c,
-                     # prompt phases -> daemon_reactive_prompt.c; was 14058). Lower as god-files are carved.
-                     # src/daemon.c is the next carve target: docs/plans/2026-09-20-october-roadmap.md
-                     # and the 2026-09-20 clean-architecture review both scope hu_service_run.
+MAX_BASELINE=10511   # measured 2026-09-26 on the origin/main merge into PR #440.
+                     # main's #438 carved src/daemon.c to 10256 (10264 here with this
+                     # branch's changes), so the largest file is src/agent/agent_turn.c,
+                     # which the dead-code sweep had taken to 10511 against main's 10512.
+                     # Both conflicting sides (branch 10522, main 10512) sat above the
+                     # merged tree; this is its own measurement, so the merge tightens.
+                     # (was 10574 before the 09-20 carve, 14058 before the reactive
+                     # context/prompt carves.) Lower as god-files are carved.
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 

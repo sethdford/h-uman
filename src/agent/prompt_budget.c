@@ -69,6 +69,7 @@ static const char *const s_field_names[HU_PROMPT_FIELD_COUNT] = {
     [HU_PROMPT_FIELD_GRAPH_CONTEXT] = "graph_context",
     [HU_PROMPT_FIELD_CONTINUITY_CONTEXT] = "continuity_context",
     [HU_PROMPT_FIELD_GUARD_TAIL] = "guard_tail",
+    [HU_PROMPT_FIELD_HUMANNESS_CONTEXT] = "humanness_context",
 };
 
 const char *hu_prompt_field_name(hu_prompt_field_t field) {

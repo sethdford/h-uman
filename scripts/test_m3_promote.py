@@ -133,6 +133,7 @@ def test_promote_dry_run_no_swap():
         with tempfile.TemporaryDirectory() as d:
             adapter = Path(d) / "new-lora.bin"
             adapter.touch()
+            _write_smoke_fixture(Path(d), str(adapter))  # clean base-capability smoke run
             # --evidence is required even for --dry-run: the gate runs before
             # the dry-run short-circuit in m3_promote.py, deliberately. A
             # dry-run that exits 0 where the real promote would exit 2 is a
@@ -166,6 +167,7 @@ def test_promote_real_swap_and_lineage():
         with tempfile.TemporaryDirectory() as d:
             adapter = Path(d) / "new-lora.bin"
             adapter.touch()
+            _write_smoke_fixture(Path(d), str(adapter))  # clean base-capability smoke run
             result = run_cli(Path(d), url, "promote", "--adapter", str(adapter),
                               "--yes", "--no-prod-check", "--skip-authorship-gate",
                               "--evidence", "blind_ab gate PASS (test fixture)")
@@ -218,6 +220,7 @@ def test_rollback_reverses_promote():
             home = Path(d)
             new_adapter = home / "new-lora.bin"
             new_adapter.touch()
+            _write_smoke_fixture(home, str(new_adapter))  # clean base-capability smoke run
             # First promote
             r1 = run_cli(home, url, "promote", "--adapter", str(new_adapter),
                           "--yes", "--no-prod-check", "--skip-authorship-gate",
@@ -276,6 +279,7 @@ def test_promote_blocked_without_evidence():
         with tempfile.TemporaryDirectory() as d:
             adapter = Path(d) / "new-lora.bin"
             adapter.touch()
+            _write_smoke_fixture(Path(d), str(adapter))  # clean base-capability smoke run
             r = run_cli(Path(d), url, "promote", "--adapter", str(adapter),
                         "--yes", "--no-prod-check")
             _ok("promote without --evidence exits non-zero", r.returncode != 0,
@@ -352,6 +356,32 @@ def _write_gate_fixture(home: Path, adapter_path: str, candidate_twin: float,
     return out_path
 
 
+def _write_smoke_fixture(home: Path, adapter_path: str, regressions: list | None = None,
+                         stamp: str = "20260101-000000"):
+    """Write a v6-smoke-<stamp>.json at <home>/.human/logs/ in the real shape
+    scripts/blind_ab/adapter_smoke_test.py writes (adapter_b = candidate,
+    report.regressions = base-capability regressions). regressions=None/[]
+    is a clean run; the 2026-09-05 shape is two reasoning regressions."""
+    logs_dir = home / ".human" / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    out_path = logs_dir / f"v6-smoke-{stamp}.json"
+    out_path.write_text(json.dumps({
+        "base": "mlx-community/GLM-4.5-Air-4bit",
+        "adapter_a": "/v5-baseline",
+        "adapter_b": adapter_path,
+        "report": {"categories": {}, "regressions": regressions or [], "fixes": [],
+                   "leading_artifact_counts": {}, "unmeasured": {}, "rows": []},
+    }, indent=2))
+    return out_path
+
+
+# The 2026-09-05 promotion shape: v6 ORPO emitted '' on two reasoning prompts.
+_SMOKE_REGRESSIONS_0905 = [
+    {"id": "r2", "cat": "reasoning", "a_ok": True, "b_ok": False},
+    {"id": "r3", "cat": "reasoning", "a_ok": True, "b_ok": False},
+]
+
+
 def _read_registry(home: Path) -> dict:
     reg_path = home / ".human" / "training-data" / "adapters" / "registry.json"
     if not reg_path.exists():
@@ -379,6 +409,7 @@ def test_m3_promote_holds_on_noisy_regressed_gate():
             home = Path(d)
             adapter = home / "candidate-lora.bin"
             adapter.touch()
+            _write_smoke_fixture(home, str(adapter))  # clean base-capability smoke run
             _write_gate_fixture(home, str(adapter), candidate_twin=0.625,
                                 serving_twin=0.70, floor=0.62)
             result = run_cli(home, url, "promote", "--adapter", str(adapter),
@@ -415,6 +446,7 @@ def test_m3_promote_blocks_on_ci_distinguishable_regression():
             home = Path(d)
             adapter = home / "candidate-lora.bin"
             adapter.touch()
+            _write_smoke_fixture(home, str(adapter))  # clean base-capability smoke run
             _write_gate_fixture(home, str(adapter), candidate_twin=0.55,
                                 serving_twin=0.70, floor=0.50,
                                 candidate_ci95=(0.45, 0.65))
@@ -448,6 +480,7 @@ def test_m3_promote_passes_on_improved_gate():
             home = Path(d)
             adapter = home / "candidate-lora.bin"
             adapter.touch()
+            _write_smoke_fixture(home, str(adapter))  # clean base-capability smoke run
             _write_gate_fixture(home, str(adapter), candidate_twin=0.71,
                                 serving_twin=0.625, floor=0.62)
             result = run_cli(home, url, "promote", "--adapter", str(adapter),
@@ -483,6 +516,7 @@ def test_m3_promote_skip_flag_records_override():
             home = Path(d)
             adapter = home / "candidate-lora.bin"
             adapter.touch()
+            _write_smoke_fixture(home, str(adapter))  # clean base-capability smoke run
             _write_gate_fixture(home, str(adapter), candidate_twin=0.625,
                                 serving_twin=0.70, floor=0.62)
             result = run_cli(home, url, "promote", "--adapter", str(adapter),
@@ -503,6 +537,125 @@ def test_m3_promote_skip_flag_records_override():
         srv.shutdown()
 
 
+# ─────────────────────────────────────────────────────────────────────
+# Base-capability smoke gate (scripts/blind_ab/adapter_smoke_test.py output)
+# ─────────────────────────────────────────────────────────────────────
+# 2026-09-05: seth-glm-air-mlxtune-orpo-20260905 was promoted although its own
+# smoke run ended "BLOCKED — base-capability regression" (2/4 reasoning prompts
+# returned ''). Every test below asserts on the fake server's swap history, not
+# just the exit code — a refusal that still swaps is the bug.
+
+def test_m3_promote_blocks_on_smoke_regression():
+    print("\n--- test_m3_promote_blocks_on_smoke_regression ---")
+    FakeMLX.CURRENT_ADAPTER = "/serving-adapter"
+    FakeMLX.SWAP_HISTORY = []
+    srv, url = serve_fake()
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            home = Path(d)
+            adapter = home / "candidate-lora.bin"
+            adapter.touch()
+            # Authorship gate PASSES, so only the smoke gate can refuse.
+            _write_gate_fixture(home, str(adapter), candidate_twin=0.71,
+                                serving_twin=0.625, floor=0.62)
+            _write_smoke_fixture(home, str(adapter), regressions=_SMOKE_REGRESSIONS_0905)
+            result = run_cli(home, url, "promote", "--adapter", str(adapter),
+                              "--yes", "--no-prod-check",
+                              "--evidence", "blind_ab gate PASS (test fixture)")
+            _ok("smoke-blocked promote exits 6", result.returncode == 6,
+                f"rc={result.returncode}\n{result.stdout}\n{result.stderr}")
+            _ok("stderr names the smoke gate and the regressed prompt ids",
+                "smoke gate" in result.stderr and "BLOCK" in result.stderr
+                and "r2" in result.stderr and "r3" in result.stderr, result.stderr)
+            _ok("fake server NEVER received the swap POST",
+                len(FakeMLX.SWAP_HISTORY) == 0, f"swap history: {FakeMLX.SWAP_HISTORY}")
+            _ok("no registry promotion written", _read_registry(home) == {})
+    finally:
+        srv.shutdown()
+
+
+def test_m3_promote_refuses_without_smoke_measurement():
+    print("\n--- test_m3_promote_refuses_without_smoke_measurement ---")
+    FakeMLX.CURRENT_ADAPTER = "/serving-adapter"
+    FakeMLX.SWAP_HISTORY = []
+    srv, url = serve_fake()
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            home = Path(d)
+            adapter = home / "candidate-lora.bin"
+            adapter.touch()
+            _write_gate_fixture(home, str(adapter), candidate_twin=0.71,
+                                serving_twin=0.625, floor=0.62)
+            # A clean smoke run exists, but for a DIFFERENT adapter: it must
+            # not vouch for this one.
+            _write_smoke_fixture(home, str(home / "some-other-adapter"))
+            result = run_cli(home, url, "promote", "--adapter", str(adapter),
+                              "--yes", "--no-prod-check",
+                              "--evidence", "blind_ab gate PASS (test fixture)")
+            _ok("unmeasured promote exits 6", result.returncode == 6,
+                f"rc={result.returncode}\n{result.stdout}\n{result.stderr}")
+            _ok("stderr says INCONCLUSIVE", "INCONCLUSIVE" in result.stderr, result.stderr)
+            _ok("fake server NEVER received the swap POST",
+                len(FakeMLX.SWAP_HISTORY) == 0, f"swap history: {FakeMLX.SWAP_HISTORY}")
+    finally:
+        srv.shutdown()
+
+
+def test_m3_promote_uses_newest_smoke_for_adapter():
+    """A later clean re-run for the same adapter supersedes an older BLOCK."""
+    print("\n--- test_m3_promote_uses_newest_smoke_for_adapter ---")
+    FakeMLX.CURRENT_ADAPTER = "/serving-adapter"
+    FakeMLX.SWAP_HISTORY = []
+    srv, url = serve_fake()
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            home = Path(d)
+            adapter = home / "candidate-lora.bin"
+            adapter.touch()
+            _write_gate_fixture(home, str(adapter), candidate_twin=0.71,
+                                serving_twin=0.625, floor=0.62)
+            _write_smoke_fixture(home, str(adapter), regressions=_SMOKE_REGRESSIONS_0905,
+                                 stamp="20260101-000000")
+            _write_smoke_fixture(home, str(adapter), regressions=[], stamp="20260102-000000")
+            result = run_cli(home, url, "promote", "--adapter", str(adapter),
+                              "--yes", "--no-prod-check",
+                              "--evidence", "blind_ab gate PASS (test fixture)")
+            _ok("newest clean smoke lets promote through (exit 0)", result.returncode == 0,
+                f"rc={result.returncode}\n{result.stdout}\n{result.stderr}")
+            _ok("swap DID fire", FakeMLX.CURRENT_ADAPTER == str(adapter),
+                f"current={FakeMLX.CURRENT_ADAPTER}")
+    finally:
+        srv.shutdown()
+
+
+def test_m3_promote_skip_smoke_gate_records_override():
+    print("\n--- test_m3_promote_skip_smoke_gate_records_override ---")
+    FakeMLX.CURRENT_ADAPTER = "/serving-adapter"
+    FakeMLX.SWAP_HISTORY = []
+    srv, url = serve_fake()
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            home = Path(d)
+            adapter = home / "candidate-lora.bin"
+            adapter.touch()
+            _write_gate_fixture(home, str(adapter), candidate_twin=0.71,
+                                serving_twin=0.625, floor=0.62)
+            _write_smoke_fixture(home, str(adapter), regressions=_SMOKE_REGRESSIONS_0905)
+            result = run_cli(home, url, "promote", "--adapter", str(adapter),
+                              "--yes", "--no-prod-check", "--skip-smoke-gate",
+                              "--evidence", "blind_ab gate PASS (test fixture)")
+            _ok("override promote exits 0", result.returncode == 0,
+                f"rc={result.returncode}\n{result.stdout}\n{result.stderr}")
+            _ok("swap DID fire (override works)", FakeMLX.CURRENT_ADAPTER == str(adapter),
+                f"current={FakeMLX.CURRENT_ADAPTER}")
+            entry = _read_registry(home).get("adapters", {}).get(adapter.name, {})
+            evidence = (entry.get("promotion") or {}).get("evidence", "")
+            _ok("registry evidence records the smoke override",
+                "smoke gate OVERRIDDEN" in evidence and "BLOCK" in evidence, evidence)
+    finally:
+        srv.shutdown()
+
+
 def main():
     print("M3 promote CLI (G2) verifier")
     test_current_against_unreachable()
@@ -516,6 +669,10 @@ def main():
     test_m3_promote_blocks_on_ci_distinguishable_regression()
     test_m3_promote_passes_on_improved_gate()
     test_m3_promote_skip_flag_records_override()
+    test_m3_promote_blocks_on_smoke_regression()
+    test_m3_promote_refuses_without_smoke_measurement()
+    test_m3_promote_uses_newest_smoke_for_adapter()
+    test_m3_promote_skip_smoke_gate_records_override()
     print(f"\n--- Results: {_PASS} passed, {_FAIL} failed ---")
     return 0 if _FAIL == 0 else 1
 

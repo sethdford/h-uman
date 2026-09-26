@@ -462,6 +462,9 @@ list(APPEND CHANNEL_SOURCES src/channels/contact_signature.c)
 # Threaded inline reply path (hu_imessage_reply + test stubs). External calls
 # only to unconditional symbols (hu_imessage_action_log_jsonl, log, time).
 list(APPEND CHANNEL_SOURCES src/channels/imessage_reply.c)
+# Send provenance observer: pure C, no Apple deps, so unconditional like
+# imessage_reply.c (the daemon records every delivered send through it).
+list(APPEND CHANNEL_SOURCES src/channels/imessage_send_observer.c)
 # Tier 1 Phase 2 (iMessage action surface): pure reply-style classifier +
 # facts bridge (hu_imessage_action_*). Zero chat.db / Apple deps (only libc +
 # error.h/persona.h); core callers (src/daemon.c
@@ -906,6 +909,7 @@ set(HU_CORE_SOURCES
     src/agent/governor.c
     src/agent/arbitrator.c
     src/agent/salience.c
+    src/agent/hard_moment.c
     src/agent/intent.c
     src/agent/self_uncertainty.c
     src/agent/planning.c
@@ -1244,6 +1248,8 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_routing.c
     src/daemon/daemon_proactive.c
     src/daemon/daemon_contact_optout.c
+    src/daemon/daemon_outbound_bus.c
+    src/daemon/daemon_send_provenance.c
     src/daemon/daemon_reply_delay.c
     src/daemon/daemon_director.c
     src/daemon/reply_dedup.c
@@ -1653,6 +1659,7 @@ if(HU_ENABLE_SQLITE)
         src/memory/repos/opinions_repo_sqlite.c
         src/memory/repos/life_chapter_repo_sqlite.c
         src/memory/repos/proactive_decisions_repo_sqlite.c
+        src/memory/repos/outbound_sends_repo_sqlite.c
         src/memory/repos/contact_optout_repo_sqlite.c
         src/memory/repos/repo_util_sqlite.c
         src/memory/repos/social_graph_repo_sqlite.c
@@ -3595,6 +3602,7 @@ set(HU_TEST_SOURCES
     tests/test_daemon_proactive_decline.c
     tests/test_daemon_proactive_reachability.c
     tests/test_daemon_contact_optout.c
+    tests/test_daemon_outbound_bus.c
     tests/test_reply_delay_model.c
     tests/test_daemon_promise_keeper.c
     tests/test_daemon_insight_overuse.c
@@ -3694,6 +3702,7 @@ tests/test_imessage_action_telemetry.c
 tests/test_imessage_action_telemetry.c
     tests/test_imessage_reply_pacing.c
     tests/test_imessage_threaded_reply.c
+    tests/test_imessage_send_observer.c
     tests/test_imessage_custom_tapback.c
     tests/test_imessage_action_facts.c
     tests/test_imessage_dispatcher.c
@@ -3922,6 +3931,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_governor.c
     tests/test_arbitrator.c
     tests/test_salience.c
+    tests/test_hard_moment.c
     tests/test_planning.c
     tests/test_rel_dynamics.c
     tests/test_emotional_residue.c
@@ -4079,6 +4089,7 @@ list(APPEND HU_TEST_SOURCES tests/test_reaction_event.c)
 # (compile-time define) + HU_CHATDB env var (runtime path to a real chat.db).
 list(APPEND HU_TEST_SOURCES tests/test_imessage_reactions.c)
 list(APPEND HU_TEST_SOURCES tests/test_imessage_caps.c)
+list(APPEND HU_TEST_SOURCES tests/test_imessage_send_service.c)
 list(APPEND HU_TEST_SOURCES tests/test_imessage_bb_event.c)
 # Phase 1a of docs/plans/2026-05-18-imessage-sota.md: pure-synthesis tests
 # for src/channels/imessage_ingest.c. No chat.db / Apple deps; tests run
@@ -4160,7 +4171,10 @@ if(HU_ENABLE_SQLITE)
     list(APPEND HU_TEST_SOURCES tests/test_opinions_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_life_chapter_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_proactive_decisions_repo.c)
+    list(APPEND HU_TEST_SOURCES tests/test_outbound_sends_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_contact_optout_repo.c)
+    list(APPEND HU_TEST_SOURCES tests/test_repo_util_sqlite.c)
+    list(APPEND HU_TEST_SOURCES tests/test_proactive_send_circuit.c)
     list(APPEND HU_TEST_SOURCES tests/test_social_graph_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_self_awareness_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_celebration_repo.c)

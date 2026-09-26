@@ -993,6 +993,24 @@ bool hu_daemon_proactive_gate_and_send(struct hu_agent *agent, hu_allocator_t *a
      * outcome row, so attributing it here would double-count. */
     const char *skip_reason = skip ? "llm_skip" : NULL;
 
+    /* Send circuit breaker — stop proposing to a contact whose sends keep
+     * failing to deliver. Measured 2026-09-22: +1801xxx8303 absorbed 124 of
+     * 136 proactive proposals (91% of all capacity) and delivered ZERO — it is
+     * RCS/Android and this path forces iMessage. A failed send deliberately
+     * records no send-recency (a message nobody received must not suppress a
+     * later real one), so nothing ever damped the retry: ~10 attempts/day,
+     * indefinitely. This supplies the negative feedback a delivery would have.
+     * Checked before the boundary gate so a dead address costs no further work. */
+#ifdef HU_ENABLE_SQLITE
+    if (!skip && agent->memory) {
+        struct sqlite3 *cb_db = hu_sqlite_memory_get_db(agent->memory);
+        if (cb_db && hu_proactive_send_circuit_is_open(cb_db, cp->contact_id, (int64_t)now)) {
+            skip = true;
+            skip_reason = "send_circuit_open";
+        }
+    }
+#endif
+
     /* F68: Protective boundary — skip proactive if topic is boundary */
     if (!skip && agent->memory &&
         hu_protective_is_boundary(agent->memory, cp->contact_id, strlen(cp->contact_id),

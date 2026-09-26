@@ -142,7 +142,7 @@ void hu_daemon_followup_sched_tick(hu_agent_t *agent, hu_service_channel_t *chan
                 uint64_t fnow_ms = (uint64_t)fnow_t * 1000ULL;
                 unsigned age_h =
                     (unsigned)((fnow_ms > fread_at_ms ? fnow_ms - fread_at_ms : 0) / 3600000ULL);
-                char directive[384];
+                char directive[HU_FOLLOWUP_COMPOSE_DIRECTIVE_MAX];
                 hu_error_t cerr = HU_ERR_INVALID_ARGUMENT;
                 if (hu_followup_compose_directive(cp->contact_id, warmth, age_h, "imessage",
                                                   directive, sizeof(directive)) > 0)
