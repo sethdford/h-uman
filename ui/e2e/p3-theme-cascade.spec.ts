@@ -110,12 +110,14 @@ function tokensOnly(r: Rendered): Record<string, string> {
 // WCAG 2.x contrast. display-p3 uses the sRGB transfer curve with P3 primaries.
 function luminance(css: string): number {
   const lin = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
-  const p3 = css.match(/^color\(display-p3 ([\d.e-]+) ([\d.e-]+) ([\d.e-]+)/);
+  const num = String.raw`([\d.e+-]+)`;
+  const p3 = css.match(new RegExp(String.raw`^color\(\s*display-p3\s+${num}\s+${num}\s+${num}`));
   if (p3) {
     const [r, g, b] = p3.slice(1, 4).map((x) => lin(Number(x)));
     return 0.2289746 * r + 0.6917385 * g + 0.0792869 * b;
   }
-  const rgb = css.match(/^rgba?\((\d+), (\d+), (\d+)/);
+  // Legacy "rgb(1, 2, 3)" and modern "rgb(1 2 3)" / "rgb(1 2 3 / a)" forms.
+  const rgb = css.match(new RegExp(String.raw`^rgba?\(\s*${num}[\s,]+${num}[\s,]+${num}`));
   if (!rgb) throw new Error(`unparseable color: ${css}`);
   const [r, g, b] = rgb.slice(1, 4).map((x) => lin(Number(x) / 255));
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
