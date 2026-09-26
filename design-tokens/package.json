@@ -9,7 +9,8 @@
     "dynamic-color": "tsx dynamic-color.ts",
     "docs": "npx tsx generate-docs.ts",
     "check": "npm run build",
-    "check:drift": "bash check-drift.sh"
+    "check:drift": "bash check-drift.sh",
+    "test": "tsx --test tests/*.test.ts"
   },
   "devDependencies": {
     "tsx": "^4.23.13"

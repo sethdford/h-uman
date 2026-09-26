@@ -763,6 +763,7 @@ jobs:
           cache: npm
           cache-dependency-path: design-tokens/package-lock.json
       - run: cd design-tokens && npm ci && npm run build -- --outdir /tmp/dt-check
+      - run: cd design-tokens && npm test
       - run: bash design-tokens/check-drift.sh
 
   nix:

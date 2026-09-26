@@ -9,75 +9,19 @@ import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
 import { generateDynamicColorCSS } from "./dynamic-color-lib.js";
+import {
+  TOKEN_FILES,
+  collectTokens,
+  partitionByPlatform,
+  readTokenSources,
+  resolveRefs,
+  type TokenMap,
+} from "./token-lib.js";
 
 const REM_PX = 16;
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(SCRIPT_DIR, "..");
 const TOKENS_DIR = path.join(ROOT, "design-tokens");
-
-const TOKEN_FILES = [
-  "base.tokens.json",
-  "typography.tokens.json",
-  "motion.tokens.json",
-  "semantic.tokens.json",
-  "components.tokens.json",
-  "opacity.tokens.json",
-  "elevation.tokens.json",
-  "breakpoints.tokens.json",
-  "glass.tokens.json",
-  "data-viz.tokens.json",
-  "spatial.tokens.json",
-  "ambient.tokens.json",
-  "3d.tokens.json",
-];
-
-type TokenValue = string | number;
-type TokenMap = Record<string, TokenValue>;
-
-/** Recursively collect all $value entries into a flat path -> value map */
-function collectTokens(obj: unknown, prefix = ""): TokenMap {
-  const result: TokenMap = {};
-  if (obj === null || typeof obj !== "object") return result;
-  const rec = obj as Record<string, unknown>;
-
-  for (const [key, val] of Object.entries(rec)) {
-    if (key.startsWith("$")) continue;
-    const pathPart = prefix ? `${prefix}.${key}` : key;
-    if (val !== null && typeof val === "object" && "$value" in val) {
-      const v = (val as { $value: TokenValue }).$value;
-      result[pathPart] = v;
-    } else if (typeof val === "object" && val !== null) {
-      Object.assign(result, collectTokens(val, pathPart));
-    }
-  }
-  return result;
-}
-
-/**
- * Resolve {path.to.token} references in place; repeat until stable.
- * Gradient tokens (surface-gradient, surface-glow, etc.) use raw string values
- * and are emitted as-is in CSS — they contain linear-gradient/radial-gradient
- * and cannot be resolved like color tokens.
- */
-function resolveRefs(tokens: TokenMap): TokenMap {
-  const resolved = { ...tokens };
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const [key, val] of Object.entries(resolved)) {
-      if (typeof val !== "string") continue;
-      const ref = val.match(/^\{([^}]+)\}$/);
-      if (ref) {
-        const target = resolved[ref[1]];
-        if (target !== undefined) {
-          resolved[key] = target;
-          changed = true;
-        }
-      }
-    }
-  }
-  return resolved;
-}
 
 /** Convert rem to px (1rem = 16px). Returns number for px, string unchanged if not rem. */
 function remToPx(val: string): number | null {
@@ -316,21 +260,27 @@ function generateDocsReference(tokens: TokenMap): string {
 }
 
 function main() {
+  const { shared, web } = partitionByPlatform(
+    readTokenSources(TOKENS_DIR, TOKEN_FILES),
+  );
   let tokens: TokenMap = {};
   let p3Colors: Record<string, string> = {};
-  for (const file of TOKEN_FILES) {
-    const p = path.join(TOKENS_DIR, file);
-    if (!fs.existsSync(p)) {
-      console.error(`Missing token file: ${p}`);
-      process.exit(1);
-    }
-    const data = JSON.parse(fs.readFileSync(p, "utf-8"));
+  for (const { data } of shared) {
     tokens = { ...tokens, ...collectTokens(data) };
-    if (data.$extensions?.["human.p3Colors"]) {
-      p3Colors = { ...p3Colors, ...data.$extensions["human.p3Colors"] };
+    const ext = data.$extensions as Record<string, unknown> | undefined;
+    if (ext?.["human.p3Colors"]) {
+      p3Colors = {
+        ...p3Colors,
+        ...(ext["human.p3Colors"] as Record<string, string>),
+      };
     }
   }
   tokens = resolveRefs(tokens);
+  // Web-only tokens never enter `tokens`, so the Swift/Kotlin/C/docs
+  // emitters cannot see them. Consumed by the CSS emitter in Task 4.
+  let webTokens: TokenMap = {};
+  for (const { data } of web) webTokens = { ...webTokens, ...collectTokens(data) };
+  void webTokens;
 
   const outdir = parseOutdir();
 
