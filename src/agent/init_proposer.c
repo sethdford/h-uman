@@ -454,6 +454,38 @@ static const char *const s_system_prompt =
     "threshold (typically 0.85) gates the send; your job is to provide an honest "
     "confidence score, not to second-guess the threshold.";
 
+/* Contact check-ins (the _ex path with inputs->contact_id set) decide whether
+ * SETH should text a specific person, and draft that text in his voice. They
+ * used to reuse s_system_prompt, which asks whether h-uman should message
+ * Seth, while the daemon's situation brief says "You're initiating a check-in
+ * text to <contact>". Given two opposite tasks, the model declined ~49 of 57
+ * contact check-ins as "confused" (2026-09-26 decline audit). */
+static const char *const s_contact_system_prompt =
+    "You are the Initiative Layer of h-uman, a private assistant that texts on "
+    "Seth's behalf from his own phone. Decide whether Seth should send a text to "
+    "the contact identified in the user message right now, and if so, draft it. "
+    "The draft is a text from Seth to that person, written in his voice. Nobody "
+    "is messaging Seth.\n"
+    "\n"
+    "The situation section is Seth's brief for this text (who they are to him, "
+    "tone, length). Treat its instructions as drafting guidance. Where it says to "
+    "reply SKIP, set should_propose=false instead. Bias toward silence: no text "
+    "beats a generic or awkward one. Use only the context provided and do NOT "
+    "invent facts.\n"
+    "\n"
+    "Return ONLY a single JSON object on a single line: no prose, no preamble, no "
+    "markdown code fences. The first character MUST be `{` and the last `}`. "
+    "Shape:\n"
+    "{\n"
+    "  \"should_propose\": <true|false>,\n"
+    "  \"confidence\": <0.0..1.0>,\n"
+    "  \"draft\": \"<the text from Seth to this contact, only when should_propose=true>\",\n"
+    "  \"reason\": \"<one short sentence why, when should_propose=false>\"\n"
+    "}\n"
+    "\n"
+    "Score confidence honestly (0.0-1.0): how certain are you that this text "
+    "would be welcome and natural coming from Seth? A threshold gates the send.";
+
 size_t hu_init_proposer_build_propose_prompt(const hu_init_context_bundle_t *bundle,
                                              char *out_system_prompt, size_t system_prompt_cap,
                                              char *out_user_message, size_t user_message_cap) {
@@ -949,6 +981,12 @@ hu_error_t hu_init_proposer_tick_with_provider(
  * caller is forced to migrate; T2-T8 (separate sprint tasks) wire callers
  * over and eventually delete the legacy path. */
 
+const char *hu_init_proposer_system_prompt_for(const hu_proactive_compose_inputs_t *inputs) {
+    if (inputs && inputs->contact_id && inputs->contact_id_len > 0)
+        return s_contact_system_prompt;
+    return s_system_prompt;
+}
+
 size_t hu_init_proposer_build_propose_user_message_ex(const hu_proactive_compose_inputs_t *inputs,
                                                       int64_t now_unix, int64_t last_inbound_unix,
                                                       char *out, size_t out_cap) {
@@ -1030,8 +1068,10 @@ size_t hu_init_proposer_build_propose_user_message_ex(const hu_proactive_compose
 
     /* Final question — same wording as the bundle-based path. */
     if (pos + 1 < out_cap) {
-        int n =
-            snprintf(out + pos, out_cap - pos, "\n\nShould h-uman send Seth a message right now?");
+        const char *question = (inputs->contact_id && inputs->contact_id_len > 0)
+                                   ? "\n\nShould Seth text this contact right now?"
+                                   : "\n\nShould h-uman send Seth a message right now?";
+        int n = snprintf(out + pos, out_cap - pos, "%s", question);
         if (n > 0 && (size_t)n < out_cap - pos)
             pos += (size_t)n;
     }
@@ -1106,9 +1146,10 @@ hu_error_t hu_init_proposer_tick_with_provider_ex(
     /* Build prompt from inputs (NOT from agent's cached context). */
     static char sys_prompt[1536];
     static char user_msg[16384];
-    size_t sys_len = strlen(s_system_prompt);
+    const char *sys_src = hu_init_proposer_system_prompt_for(inputs);
+    size_t sys_len = strlen(sys_src);
     size_t sys_copy = sys_len < sizeof(sys_prompt) - 1 ? sys_len : sizeof(sys_prompt) - 1;
-    memcpy(sys_prompt, s_system_prompt, sys_copy);
+    memcpy(sys_prompt, sys_src, sys_copy);
     sys_prompt[sys_copy] = '\0';
     hu_init_proposer_build_propose_user_message_ex(inputs, now_unix, last_inbound_unix, user_msg,
                                                    sizeof(user_msg));
