@@ -3753,9 +3753,21 @@ int hu_conversation_max_response_chars(size_t incoming_len) {
     return result;
 }
 
-int hu_conversation_max_response_chars_relational(size_t incoming_len,
-                                                  const hu_contact_profile_t *contact,
-                                                  hu_relationship_stage_t session_stage) {
+/* Floor a 1:1 length cap at the owner's own measured reply length to this
+ * contact. The ratio heuristics scale with THEIR message, but a person's
+ * reply length does not: 2026-09-26 a contact who texts "Heyo" got a 15-char
+ * cap and the prompt said "Maximum 15 characters. Keep it tight.", producing
+ * one-word replies she read as anger. The owner's own p90 to her is the truth. */
+static uint32_t floor_at_measured_reply_len(uint32_t cap, const hu_contact_profile_t *contact) {
+    if (!contact || contact->reply_chars_p90 == 0 || cap >= contact->reply_chars_p90)
+        return cap;
+    return contact->reply_chars_p90 < g_max_response_chars ? contact->reply_chars_p90
+                                                           : g_max_response_chars;
+}
+
+static int max_response_chars_relational_default(size_t incoming_len,
+                                                 const hu_contact_profile_t *contact,
+                                                 hu_relationship_stage_t session_stage) {
     if (incoming_len == 0)
         return (int)g_min_response_chars;
     double mult = 2.0;
@@ -3807,8 +3819,15 @@ int hu_conversation_max_response_chars_relational(size_t incoming_len,
     return result;
 }
 
-uint32_t hu_conversation_brief_char_cap(bool is_group, const hu_contact_profile_t *contact,
-                                        hu_relationship_stage_t session_stage) {
+int hu_conversation_max_response_chars_relational(size_t incoming_len,
+                                                  const hu_contact_profile_t *contact,
+                                                  hu_relationship_stage_t session_stage) {
+    int base = max_response_chars_relational_default(incoming_len, contact, session_stage);
+    return (int)floor_at_measured_reply_len(base > 0 ? (uint32_t)base : 0u, contact);
+}
+
+static uint32_t brief_char_cap_default(bool is_group, const hu_contact_profile_t *contact,
+                                       hu_relationship_stage_t session_stage) {
     if (is_group)
         return 50u;
 
@@ -3853,6 +3872,12 @@ uint32_t hu_conversation_brief_char_cap(bool is_group, const hu_contact_profile_
     }
 
     return 96u;
+}
+
+uint32_t hu_conversation_brief_char_cap(bool is_group, const hu_contact_profile_t *contact,
+                                        hu_relationship_stage_t session_stage) {
+    uint32_t cap = brief_char_cap_default(is_group, contact, session_stage);
+    return is_group ? cap : floor_at_measured_reply_len(cap, contact);
 }
 
 /*

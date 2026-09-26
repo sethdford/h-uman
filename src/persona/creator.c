@@ -1343,6 +1343,8 @@ hu_error_t hu_persona_creator_write(hu_allocator_t *alloc, const hu_persona_t *p
             fprintf(f, ",\n      \"uses_emoji\": %s", c->uses_emoji ? "true" : "false");
             fprintf(f, ",\n      \"sends_links_often\": %s",
                     c->sends_links_often ? "true" : "false");
+            if (c->reply_chars_p90 > 0)
+                fprintf(f, ",\n      \"reply_chars_p90\": %u", (unsigned)c->reply_chars_p90);
             if (c->proactive_checkin) {
                 fputs(",\n      \"proactive_checkin\": true", f);
                 if (c->proactive_channel) {

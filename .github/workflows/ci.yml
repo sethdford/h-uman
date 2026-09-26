@@ -995,6 +995,10 @@ jobs:
       # fixtures in a temp dir, no real messages.
       - name: Conversation-quality metric tests (hermetic, stdlib-only)
         run: python3 scripts/test_eval_conversation_quality.py
+      # Per-contact reply-length floor measurement (2026-09-26): same fixtures,
+      # asserts only Seth-authored texts are measured and n<min writes nothing.
+      - name: Contact reply-length measurement tests (hermetic, stdlib-only)
+        run: python3 scripts/test_measure_contact_reply_lengths.py
       # Depth upweighting (2026-09-24): hermetic, stdlib-only; the .sh runs
       # the real block extracted from train-glm-adapter.sh on a scratch corpus.
       - name: Training depth-upweight tests (hermetic, stdlib-only)
