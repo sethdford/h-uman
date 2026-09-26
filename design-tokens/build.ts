@@ -12,6 +12,7 @@ import {
   colorToKotlin,
   formatSwiftColor,
   hexToKotlin,
+  isColorLike,
 } from "./color-emit-lib.js";
 import { generateDynamicColorCSS } from "./dynamic-color-lib.js";
 import {
@@ -945,12 +946,11 @@ function generateSwift(tokens: TokenMap): string {
       k.startsWith("dark.") &&
       !k.includes("shadow") &&
       typeof tokens[k] === "string" &&
-      ((tokens[k] as string).startsWith("#") ||
-        (tokens[k] as string).startsWith("rgba")),
+      isColorLike(tokens[k] as string),
   );
   for (const k of darkKeys.sort()) {
     const v = tokens[k] as string;
-    if (!v.startsWith("#") && !v.startsWith("rgba")) continue;
+    if (!isColorLike(v)) continue;
     const name = toSwiftCase(k.replace("dark.", ""));
     const colorExpr = formatSwiftColor(v);
     lines.push(`        public static let ${name} = ${colorExpr}`);
@@ -966,12 +966,11 @@ function generateSwift(tokens: TokenMap): string {
       k.startsWith("light.") &&
       !k.includes("shadow") &&
       typeof tokens[k] === "string" &&
-      ((tokens[k] as string).startsWith("#") ||
-        (tokens[k] as string).startsWith("rgba")),
+      isColorLike(tokens[k] as string),
   );
   for (const k of lightKeys.sort()) {
     const v = tokens[k] as string;
-    if (!v.startsWith("#") && !v.startsWith("rgba")) continue;
+    if (!isColorLike(v)) continue;
     const name = toSwiftCase(k.replace("light.", ""));
     const colorExpr = formatSwiftColor(v);
     lines.push(`        public static let ${name} = ${colorExpr}`);
@@ -1179,13 +1178,7 @@ function generateSwift(tokens: TokenMap): string {
   for (const k of chartKeysSwift) {
     const v = tokens[k];
     if (typeof v !== "string") continue;
-    const vTrim = v.trim();
-    if (
-      !/^#[0-9a-fA-F]{6}$/.test(v) &&
-      !/^rgba?\(/i.test(vTrim)
-    ) {
-      continue;
-    }
+    if (!isColorLike(v)) continue;
     const suffix = k.replace(/^chart\./, "");
     const name =
       "chart" +
@@ -1293,8 +1286,7 @@ function generateKotlin(tokens: TokenMap): string {
       k.startsWith("dark.") &&
       !k.includes("shadow") &&
       typeof tokens[k] === "string" &&
-      ((tokens[k] as string).startsWith("#") ||
-        (tokens[k] as string).startsWith("rgba")),
+      isColorLike(tokens[k] as string),
   );
   for (const k of darkKeys.sort()) {
     const v = tokens[k] as string;
@@ -1313,8 +1305,7 @@ function generateKotlin(tokens: TokenMap): string {
       k.startsWith("light.") &&
       !k.includes("shadow") &&
       typeof tokens[k] === "string" &&
-      ((tokens[k] as string).startsWith("#") ||
-        (tokens[k] as string).startsWith("rgba")),
+      isColorLike(tokens[k] as string),
   );
   for (const k of lightKeys.sort()) {
     const v = tokens[k] as string;
@@ -1582,13 +1573,7 @@ function generateKotlin(tokens: TokenMap): string {
   for (const k of chartKeysKotlin) {
     const v = tokens[k];
     if (typeof v !== "string") continue;
-    const vTrim = v.trim();
-    if (
-      !/^#[0-9a-fA-F]{6}$/.test(v) &&
-      !/^rgba?\(/i.test(vTrim)
-    ) {
-      continue;
-    }
+    if (!isColorLike(v)) continue;
     const suffix = k.replace(/^chart\./, "");
     const name =
       "chart" +

@@ -18,6 +18,13 @@ export class UnsupportedColorError extends Error {
 const HEX6 = /^#([0-9a-fA-F]{6})$/;
 const RGBA = /rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/;
 
+/** True for values written in a CSS color syntax (supported by native emitters or not). Non-colors — dimensions, angles, percentages, gradients, numbers — are false. */
+export function isColorLike(v: string): boolean {
+  return /^(#|rgba?\(|hsla?\(|hwb\(|lab\(|lch\(|oklab\(|oklch\(|color\()/i.test(
+    v.trim(),
+  );
+}
+
 /** #rrggbb → 0xRRGGBB */
 export function hexToSwift(hex: string): string {
   const m = hex.match(HEX6);
