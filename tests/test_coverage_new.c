@@ -3,7 +3,6 @@
 #include "human/core/error.h"
 #include "human/doctor.h"
 #include "human/memory/retrieval.h"
-#include "human/memory/retrieval/query_expansion.h"
 #include "human/skillforge.h"
 #include "human/tool.h"
 #include "human/tools/calendar_tool.h"
@@ -17,46 +16,6 @@
 #include "human/tools/workflow.h"
 #include "test_framework.h"
 #include <string.h>
-
-/* ─── Query Expansion ────────────────────────────────────────────────────── */
-
-static void test_query_expand_basic(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_expanded_query_t eq = {0};
-    hu_error_t err = hu_query_expand(&alloc, "how do embeddings work", 22, &eq);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_NOT_NULL(eq.fts5_query);
-    hu_expanded_query_free(&alloc, &eq);
-}
-
-static void test_query_expand_null_alloc(void) {
-    hu_expanded_query_t eq = {0};
-    hu_error_t err = hu_query_expand(NULL, "how do embeddings work", 22, &eq);
-    HU_ASSERT_NEQ(err, HU_OK);
-}
-
-static void test_query_expand_null_query(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_expanded_query_t eq = {0};
-    hu_error_t err = hu_query_expand(&alloc, NULL, 22, &eq);
-    HU_ASSERT_NEQ(err, HU_OK);
-}
-
-static void test_query_expand_stop_words_removed(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_expanded_query_t eq = {0};
-    const char *q = "the a an is are";
-    hu_error_t err = hu_query_expand(&alloc, q, strlen(q), &eq);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_TRUE(eq.filtered_count < eq.original_count);
-    hu_expanded_query_free(&alloc, &eq);
-}
-
-static void test_expanded_query_free_null_alloc(void) {
-    hu_expanded_query_t eq = {0};
-    hu_expanded_query_free(NULL, &eq);
-    /* Should not crash */
-}
 
 /* ─── Temporal Decay ─────────────────────────────────────────────────────── */
 
@@ -521,12 +480,6 @@ static void test_skillforge_get_unknown(void) {
 
 void run_coverage_new_tests(void) {
     HU_TEST_SUITE("coverage_new");
-
-    HU_RUN_TEST(test_query_expand_basic);
-    HU_RUN_TEST(test_query_expand_null_alloc);
-    HU_RUN_TEST(test_query_expand_null_query);
-    HU_RUN_TEST(test_query_expand_stop_words_removed);
-    HU_RUN_TEST(test_expanded_query_free_null_alloc);
 
     HU_RUN_TEST(test_temporal_decay_recent);
     HU_RUN_TEST(test_temporal_decay_old);

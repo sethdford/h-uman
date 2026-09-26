@@ -38,7 +38,6 @@ hu_error_t hu_bg_registry_register(hu_bg_registry_t *r, hu_bg_observer_t obs);
 void hu_bg_registry_tick_all(hu_bg_registry_t *r, hu_allocator_t *alloc, hu_app_context_t *app);
 size_t hu_bg_registry_count(const hu_bg_registry_t *r);
 const hu_bg_observer_t *hu_bg_registry_get(const hu_bg_registry_t *r, size_t idx);
-hu_error_t hu_bg_registry_set_enabled(hu_bg_registry_t *r, const char *name, bool enabled);
 void hu_bg_registry_deinit(hu_bg_registry_t *r, hu_allocator_t *alloc);
 
 /* Built-in observer constructors */

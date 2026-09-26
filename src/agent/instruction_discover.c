@@ -7,6 +7,7 @@
 #include "human/agent/instruction_discover.h"
 #include "human/core/paths.h"
 #include "human/core/string.h"
+#include "human/platform.h"
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>
@@ -34,20 +35,14 @@ hu_error_t hu_instruction_validate_path(hu_allocator_t *alloc, const char *path,
     if (!tmp)
         return HU_ERR_OUT_OF_MEMORY;
 
-    char resolved[PATH_MAX];
-    char *rp = realpath(tmp, resolved);
+    char *rp = hu_platform_realpath(alloc, tmp);
     alloc->free(alloc->ctx, tmp, path_len + 1);
 
     if (!rp)
         return HU_ERR_NOT_FOUND;
 
-    size_t rlen = strlen(resolved);
-    char *canon = hu_strndup(alloc, resolved, rlen);
-    if (!canon)
-        return HU_ERR_OUT_OF_MEMORY;
-
-    *out_canonical = canon;
-    *out_canonical_len = rlen;
+    *out_canonical = rp;
+    *out_canonical_len = strlen(rp);
     return HU_OK;
 }
 
@@ -276,10 +271,11 @@ hu_error_t hu_instruction_discovery_run(hu_allocator_t *alloc, const char *works
             current[workspace_dir_len] = '\0';
 
             /* Canonicalize starting directory */
-            char resolved_start[PATH_MAX];
-            if (realpath(current, resolved_start)) {
+            char *resolved_start = hu_platform_realpath(alloc, current);
+            if (resolved_start) {
                 strncpy(current, resolved_start, sizeof(current) - 1);
                 current[sizeof(current) - 1] = '\0';
+                alloc->free(alloc->ctx, resolved_start, strlen(resolved_start) + 1);
             }
 
             for (int level = 0; level < HU_INSTRUCTION_MAX_WALK_LEVELS; level++) {

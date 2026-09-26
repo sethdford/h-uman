@@ -99,7 +99,6 @@
 #endif
 #include "human/tools/ask_user.h"
 #include "human/tools/db_introspect.h"
-#include "human/tools/lsp.h"
 #include "human/tools/send_voice_message.h"
 #include "human/tools/skill_write.h"
 #include "human/tools/spawn.h"
@@ -108,7 +107,6 @@
 #include "human/tools/voice_clone.h"
 #include "human/tools/web_fetch.h"
 #include "human/tools/web_search.h"
-#include "human/tools/webhook_tools.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -677,10 +675,13 @@ hu_error_t hu_tools_create_default(hu_allocator_t *alloc, const char *workspace_
     idx++;
 
     /* lsp tool removed from default registry pending a real implementation.
-     * src/tools/lsp.c currently returns canned empty diagnostics in test and
-     * "LSP not supported" in production with no LSP client behind it. The
-     * source file remains on disk for a future chip to flesh out, but it must
-     * not be exposed to agents as if it worked. */
+     * src/tools/lsp.c was a canned stub — empty diagnostics in test, "LSP not
+     * supported" in production, with no LSP client behind it — and the stub
+     * was deleted on 2026-09-20 along with include/human/tools/lsp.h. The tool
+     * stays unregistered until someone writes a real implementation; it must
+     * not be exposed to agents as if it worked. The counter below still fires
+     * so the absence stays visible in the logs.
+     * (The log line's wording is left as-is: it is observable output.) */
     g_factory_lsp_skipped_count++;
     hu_log_info_once(&g_factory_lsp_warned_once, "tools/factory", NULL,
                      "lsp tool removed pending real implementation "

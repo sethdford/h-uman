@@ -9,6 +9,7 @@
 #include "human/agent/pattern_radar.h"
 #include "human/agent/persona_eval.h"
 #include "human/agent/response_verifier.h"
+#include "human/agent/stop_sequence_registry.h"
 #include "human/agent/superhuman.h"
 #include "human/agent/superhuman_commitment.h"
 #include "human/agent/superhuman_emotional.h"
@@ -19,9 +20,11 @@
 #include "human/agent/world_model_bridge.h"
 #include "human/config.h"
 #include "human/core/endpoints.h"
+#include "human/core/gate_mode.h"
 #include "human/core/log.h"
 #include "human/core/paths.h"
 #include "human/core/tokens.h"
+#include "human/max_tokens.h"
 #include "human/memory/consolidation.h"
 #include "human/memory/promotion.h"
 #include "human/memory/tiers.h"
@@ -144,6 +147,200 @@ void hu_agent_internal_apply_turn_request_overrides(const hu_agent_t *agent,
         return;
     if (agent->turn_thinking_budget > 0)
         req->thinking_budget = agent->turn_thinking_budget;
+}
+
+/* SHADOW log-throttle for hu_agent_internal_resolve_max_tokens — see the
+ * contract comment in agent_internal.h (review round 1: both call sites
+ * are inside a per-turn tool-iteration loop, so without this, SHADOW logs
+ * at INFO on every provider round trip). Fixed-size table of distinct
+ * model_refs already logged this process; deliberately NOT locked — a
+ * racy duplicate log (or, past HU_MAX_TOKENS_SHADOW_LOG_CAP distinct
+ * models in one process, a resumed "log every time" for the overflow) is
+ * an acceptable best-effort trade-off on this hot path, and prod runs two
+ * models. */
+#define HU_MAX_TOKENS_SHADOW_LOG_CAP 8
+#define HU_MAX_TOKENS_SHADOW_REF_CAP 96
+
+static char s_max_tokens_shadow_seen[HU_MAX_TOKENS_SHADOW_LOG_CAP][HU_MAX_TOKENS_SHADOW_REF_CAP];
+static size_t s_max_tokens_shadow_seen_len[HU_MAX_TOKENS_SHADOW_LOG_CAP];
+static size_t s_max_tokens_shadow_seen_count = 0;
+
+/* Returns true (suppress the log) if `model_ref` was already marked seen;
+ * otherwise marks it seen (space permitting) and returns false (log it). */
+static bool max_tokens_shadow_mark_and_check_seen(const char *model_ref, size_t model_ref_len) {
+    const char *ref = (model_ref && model_ref_len > 0) ? model_ref : "(none)";
+    size_t ref_len = (model_ref && model_ref_len > 0) ? model_ref_len : 6;
+    size_t trunc =
+        ref_len < HU_MAX_TOKENS_SHADOW_REF_CAP - 1 ? ref_len : HU_MAX_TOKENS_SHADOW_REF_CAP - 1;
+
+    for (size_t i = 0; i < s_max_tokens_shadow_seen_count; i++) {
+        if (s_max_tokens_shadow_seen_len[i] == trunc &&
+            memcmp(s_max_tokens_shadow_seen[i], ref, trunc) == 0)
+            return true;
+    }
+    if (s_max_tokens_shadow_seen_count < HU_MAX_TOKENS_SHADOW_LOG_CAP) {
+        memcpy(s_max_tokens_shadow_seen[s_max_tokens_shadow_seen_count], ref, trunc);
+        s_max_tokens_shadow_seen_len[s_max_tokens_shadow_seen_count] = trunc;
+        s_max_tokens_shadow_seen_count++;
+    }
+    return false;
+}
+
+void hu_agent_internal_resolve_max_tokens_reset_for_test(void) {
+    s_max_tokens_shadow_seen_count = 0;
+}
+
+hu_max_tokens_resolve_result_t hu_agent_internal_resolve_max_tokens(hu_chat_request_t *req,
+                                                                    const char *model_ref,
+                                                                    size_t model_ref_len) {
+    /* See agent_internal.h for contract. src/agent/max_tokens.c has resolved
+     * a model's output cap since 2026-07-27 (the GLM serving-base fix), but
+     * nothing populated hu_chat_request_t.max_tokens with it — providers
+     * fell back to their own hardcoded constants instead (anthropic.c ~142,
+     * gemini.c ~768). Wiring it changes reply length caps in production, so
+     * it lands behind HU_MAX_TOKENS_RESOLVE (hu_gate_mode_from_env), default
+     * SHADOW: unlike a net-new capability, "leave max_tokens at 0" already
+     * IS today's behavior, so SHADOW gives free visibility (throttled log)
+     * into what the resolver would pick with zero risk before flipping ON.
+     *
+     * "Fill when 0" is unconditional and gate-independent: a positive
+     * req->max_tokens already staged by an earlier request-shaping step
+     * (somatic-energy caps, empathy-mode floor, adaptive token budget —
+     * see agent_turn.c / agent_stream.c) is never overwritten, in ANY gate
+     * mode including LIVE. Only an actually-unset (0) request is a
+     * candidate for filling. */
+    if (!req || req->max_tokens > 0)
+        return HU_MAX_TOKENS_RESOLVE_NOOP;
+
+    hu_gate_mode_t mode = hu_gate_mode_from_env("HU_MAX_TOKENS_RESOLVE", HU_GATE_SHADOW);
+    if (mode == HU_GATE_OFF)
+        return HU_MAX_TOKENS_RESOLVE_NOOP;
+
+    uint32_t resolved = hu_max_tokens_resolve(0, model_ref, model_ref_len);
+    if (mode == HU_GATE_SHADOW) {
+        if (max_tokens_shadow_mark_and_check_seen(model_ref, model_ref_len))
+            return HU_MAX_TOKENS_RESOLVE_SHADOW_THROTTLED;
+        hu_log_info("agent", NULL, "[max-tokens-resolve SHADOW] would set max_tokens=%u for %.*s",
+                    resolved, (int)(model_ref_len > 64 ? 64 : model_ref_len),
+                    model_ref ? model_ref : "(none)");
+        return HU_MAX_TOKENS_RESOLVE_SHADOW_LOGGED;
+    }
+    req->max_tokens = resolved;
+    return HU_MAX_TOKENS_RESOLVE_APPLIED;
+}
+
+/* SHADOW log-throttle for hu_agent_internal_resolve_stop_sequences — see the
+ * contract comment in agent_internal.h. Sibling of
+ * max_tokens_shadow_mark_and_check_seen above (Task 13), keyed on the pair
+ * (provider, channel) rather than a single string: two independent small
+ * fixed-size tables, one per key component, indexed together. Same
+ * deliberately-unlocked, best-effort trade-off — an occasional duplicate log
+ * or, past the cap distinct pairs, a resumed "log every time" is acceptable
+ * on this hot path. */
+#define HU_STOP_SEQUENCES_SHADOW_LOG_CAP 8
+#define HU_STOP_SEQUENCES_SHADOW_KEY_CAP 64
+
+static char s_stop_seq_shadow_provider[HU_STOP_SEQUENCES_SHADOW_LOG_CAP]
+                                      [HU_STOP_SEQUENCES_SHADOW_KEY_CAP];
+static size_t s_stop_seq_shadow_provider_len[HU_STOP_SEQUENCES_SHADOW_LOG_CAP];
+static char s_stop_seq_shadow_channel[HU_STOP_SEQUENCES_SHADOW_LOG_CAP]
+                                     [HU_STOP_SEQUENCES_SHADOW_KEY_CAP];
+static size_t s_stop_seq_shadow_channel_len[HU_STOP_SEQUENCES_SHADOW_LOG_CAP];
+static size_t s_stop_seq_shadow_seen_count = 0;
+
+/* Returns true (suppress the log) if (provider, channel) was already marked
+ * seen; otherwise marks it seen (space permitting) and returns false (log
+ * it). Missing/empty provider or channel is normalized to "(none)" so a
+ * NULL channel doesn't collide with an actual "(none)"-named channel (there
+ * isn't one, but this matches the model_ref normalization above). */
+static bool stop_sequences_shadow_mark_and_check_seen(const char *provider, size_t provider_len,
+                                                      const char *channel, size_t channel_len) {
+    const char *prov = (provider && provider_len > 0) ? provider : "(none)";
+    size_t prov_len = (provider && provider_len > 0) ? provider_len : 6;
+    size_t prov_trunc = prov_len < HU_STOP_SEQUENCES_SHADOW_KEY_CAP - 1
+                            ? prov_len
+                            : HU_STOP_SEQUENCES_SHADOW_KEY_CAP - 1;
+    const char *chan = (channel && channel_len > 0) ? channel : "(none)";
+    size_t chan_len = (channel && channel_len > 0) ? channel_len : 6;
+    size_t chan_trunc = chan_len < HU_STOP_SEQUENCES_SHADOW_KEY_CAP - 1
+                            ? chan_len
+                            : HU_STOP_SEQUENCES_SHADOW_KEY_CAP - 1;
+
+    for (size_t i = 0; i < s_stop_seq_shadow_seen_count; i++) {
+        if (s_stop_seq_shadow_provider_len[i] == prov_trunc &&
+            memcmp(s_stop_seq_shadow_provider[i], prov, prov_trunc) == 0 &&
+            s_stop_seq_shadow_channel_len[i] == chan_trunc &&
+            memcmp(s_stop_seq_shadow_channel[i], chan, chan_trunc) == 0)
+            return true;
+    }
+    if (s_stop_seq_shadow_seen_count < HU_STOP_SEQUENCES_SHADOW_LOG_CAP) {
+        size_t idx = s_stop_seq_shadow_seen_count;
+        memcpy(s_stop_seq_shadow_provider[idx], prov, prov_trunc);
+        s_stop_seq_shadow_provider_len[idx] = prov_trunc;
+        memcpy(s_stop_seq_shadow_channel[idx], chan, chan_trunc);
+        s_stop_seq_shadow_channel_len[idx] = chan_trunc;
+        s_stop_seq_shadow_seen_count++;
+    }
+    return false;
+}
+
+void hu_agent_internal_resolve_stop_sequences_reset_for_test(void) {
+    s_stop_seq_shadow_seen_count = 0;
+}
+
+hu_stop_sequences_resolve_result_t
+hu_agent_internal_resolve_stop_sequences(hu_chat_request_t *req, const char *provider_name,
+                                         const hu_agent_t *agent) {
+    /* See agent_internal.h for the full contract. "Fill when empty" is
+     * unconditional and gate-independent: a request that already carries
+     * stop sequences from an earlier step is never overwritten, in ANY gate
+     * mode including LIVE. `provider_name` is a plain NUL-terminated string
+     * (same assumption both call sites already make of it for logging), so
+     * a single strlen() here replaces a 4th/5th call-site argument. */
+    if (!req || (req->stop_sequences && req->stop_sequences_count > 0))
+        return HU_STOP_SEQUENCES_RESOLVE_NOOP;
+
+    hu_gate_mode_t mode = hu_gate_mode_from_env("HU_STOP_SEQUENCES", HU_GATE_SHADOW);
+    if (mode == HU_GATE_OFF)
+        return HU_STOP_SEQUENCES_RESOLVE_NOOP;
+
+    size_t provider_name_len = provider_name ? strlen(provider_name) : 0;
+    const char *channel = agent ? agent->active_channel : NULL;
+    size_t channel_len = agent ? agent->active_channel_len : 0;
+
+    const char *const *seqs = NULL;
+    size_t count = 0;
+    /* Registry lookup is provider-only by its own contract (see
+     * stop_sequence_registry.h) — `channel` is never passed into it, only
+     * used below for the SHADOW throttle key/message. */
+    hu_stop_sequence_registry_lookup(provider_name, provider_name_len, &seqs, &count);
+    if (count == 0)
+        return HU_STOP_SEQUENCES_RESOLVE_NOOP;
+
+    if (mode == HU_GATE_SHADOW) {
+        if (stop_sequences_shadow_mark_and_check_seen(provider_name, provider_name_len, channel,
+                                                      channel_len))
+            return HU_STOP_SEQUENCES_RESOLVE_SHADOW_THROTTLED;
+        /* Normalize NULL/empty to the literal "(none)" for BOTH the pointer
+         * and its printed length together — a %.*s precision of 0 prints
+         * nothing even when the pointer falls back to "(none)", so the
+         * length fallback must match the string fallback, not stay 0. */
+        const char *disp_provider =
+            (provider_name && provider_name_len > 0) ? provider_name : "(none)";
+        size_t disp_provider_len = (provider_name && provider_name_len > 0) ? provider_name_len : 6;
+        const char *disp_channel = (channel && channel_len > 0) ? channel : "(none)";
+        size_t disp_channel_len = (channel && channel_len > 0) ? channel_len : 6;
+        hu_log_info("agent", NULL,
+                    "[stop-sequences-resolve SHADOW] would set %zu stop sequence(s) for "
+                    "provider=%.*s channel=%.*s",
+                    count, (int)(disp_provider_len > 64 ? 64 : disp_provider_len), disp_provider,
+                    (int)(disp_channel_len > 64 ? 64 : disp_channel_len), disp_channel);
+        return HU_STOP_SEQUENCES_RESOLVE_SHADOW_LOGGED;
+    }
+
+    req->stop_sequences = seqs;
+    req->stop_sequences_count = count;
+    return HU_STOP_SEQUENCES_RESOLVE_APPLIED;
 }
 
 hu_error_t hu_agent_internal_build_unavailable_fallback(hu_allocator_t *alloc, char **out,
@@ -1291,12 +1488,6 @@ void hu_agent_set_cost_tracker(hu_agent_t *agent, hu_cost_tracker_t *tracker) {
     agent->cost_tracker = tracker;
 }
 
-void hu_agent_set_task_list(hu_agent_t *agent, hu_task_list_t *task_list) {
-    if (!agent)
-        return;
-    agent->task_list = task_list;
-}
-
 void hu_agent_set_retrieval_engine(hu_agent_t *agent, hu_retrieval_engine_t *engine) {
     if (!agent)
         return;
@@ -2250,12 +2441,6 @@ void hu_agent_clear_history(hu_agent_t *agent) {
         agent->session_store->vtable->clear_messages) {
         (void)agent->session_store->vtable->clear_messages(agent->session_store->ctx, "", 0);
     }
-}
-
-uint32_t hu_agent_estimate_tokens(const char *text, size_t len) {
-    /* Thin alias kept for its existing callers; the ratio and the measurement
-     * behind it live in human/core/tokens.h. */
-    return (uint32_t)hu_tokens_estimate_text(text, len);
 }
 
 hu_policy_action_t hu_agent_internal_check_policy(hu_agent_t *agent, const char *tool_name,

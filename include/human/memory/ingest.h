@@ -41,6 +41,4 @@ hu_error_t hu_ingest_file_with_provider(hu_allocator_t *alloc, hu_memory_t *memo
                                         hu_provider_t *provider, const char *path, size_t path_len,
                                         const char *model, size_t model_len);
 
-void hu_ingest_result_deinit(hu_ingest_result_t *result, hu_allocator_t *alloc);
-
 #endif

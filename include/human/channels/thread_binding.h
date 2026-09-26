@@ -38,9 +38,6 @@ hu_error_t hu_thread_binding_unbind(hu_thread_binding_t *tb, const char *channel
 hu_error_t hu_thread_binding_lookup(hu_thread_binding_t *tb, const char *channel_name,
                                     const char *thread_id, uint64_t *out_agent_id);
 
-hu_error_t hu_thread_binding_touch(hu_thread_binding_t *tb, const char *channel_name,
-                                   const char *thread_id);
-
 size_t hu_thread_binding_expire_idle(hu_thread_binding_t *tb, int64_t now);
 
 hu_error_t hu_thread_binding_list(hu_thread_binding_t *tb, hu_allocator_t *alloc,

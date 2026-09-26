@@ -24,7 +24,7 @@ cmake --build . -j$(nproc)
 ./human_tests
 ```
 
-All 14,317+ tests must pass. AddressSanitizer must report zero errors — every allocation must be freed.
+All 13,985+ tests must pass. AddressSanitizer must report zero errors — every allocation must be freed.
 
 **Release build:**
 
@@ -32,6 +32,29 @@ All 14,317+ tests must pass. AddressSanitizer must report zero errors — every 
 cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DHU_ENABLE_LTO=ON
 cmake --build . -j$(nproc)
 ```
+
+**Pre-push: the pause before the dead-strip gate is a rebuild, not a hang.**
+Enable the hooks with `git config core.hooksPath .githooks`. After the suite
+passes, `pre-push` runs the dead-strip ratchet, which measures `build/` — the
+dev-preset tree the committed baselines were taken against — rather than the
+`build-check/` tree it has just compiled, because `build-check` configures a
+different feature set and its counts are not comparable. So it first refreshes
+`build/` incrementally whenever anything under `src/` or `include/` is newer
+than the built artifacts, printing `Refreshing build/ for the dead-strip
+ratchet...`. When nothing is newer it skips that step entirely, because a no-op
+`cmake --build` still re-scans dependencies for ~1,000 objects and measured 46 s
+(see the comment at the gate in `.githooks/pre-push`); the ratchet's own relink
+and link-map read is about a second on a warm tree. Without the refresh the gate
+would measure an older tree than the one being pushed. A missing `build/`, or one
+that fails to build, skips the gate with a single line instead of blocking the
+push.
+
+Note that `core.hooksPath` is set to an absolute path, so every worktree runs the
+hooks from the main checkout's working tree rather than from the branch being
+pushed. A branch that adds or edits a hook therefore does not exercise it on its
+own pushes: check the gate's own output in the push log rather than inferring from
+a clean exit, and run the script directly to test it. The two counters and how to respond when one grows:
+`.claude/rules/dead-strip-ratchet.md`.
 
 ## Code Style
 

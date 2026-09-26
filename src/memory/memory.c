@@ -8,9 +8,9 @@
 #include "human/memory/memory.h"
 
 #include "human/core/error.h"
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdint.h>
 #include <string.h>
 
 #ifdef HU_ENABLE_SQLITE
@@ -44,27 +44,29 @@ static void facade_routes_run(struct sqlite3 *db, const char *sql) {
 }
 
 static void facade_routes_ensure(hu_graph_t *graph) {
-    if (!graph) return;
+    if (!graph)
+        return;
     struct sqlite3 *db = hu_graph_sqlite_connection(graph);
-    if (!db) return;
-    facade_routes_run(db,
-        "CREATE TABLE IF NOT EXISTS memory_facade_routes ("
-        "kind INTEGER PRIMARY KEY,"
-        "backend_name TEXT NOT NULL,"
-        "registered_at INTEGER NOT NULL DEFAULT 0)");
+    if (!db)
+        return;
+    facade_routes_run(db, "CREATE TABLE IF NOT EXISTS memory_facade_routes ("
+                          "kind INTEGER PRIMARY KEY,"
+                          "backend_name TEXT NOT NULL,"
+                          "registered_at INTEGER NOT NULL DEFAULT 0)");
 }
 
 static void facade_routes_upsert(hu_graph_t *graph, hu_memory_kind_t kind,
                                  const char *backend_name) {
-    if (!graph || !backend_name) return;
+    if (!graph || !backend_name)
+        return;
     struct sqlite3 *db = hu_graph_sqlite_connection(graph);
-    if (!db) return;
+    if (!db)
+        return;
     sqlite3_stmt *st = NULL;
-    const char *sql =
-        "INSERT INTO memory_facade_routes (kind, backend_name, registered_at)"
-        " VALUES (?, ?, strftime('%s','now')*1000)"
-        " ON CONFLICT(kind) DO UPDATE SET backend_name = excluded.backend_name,"
-        " registered_at = strftime('%s','now')*1000";
+    const char *sql = "INSERT INTO memory_facade_routes (kind, backend_name, registered_at)"
+                      " VALUES (?, ?, strftime('%s','now')*1000)"
+                      " ON CONFLICT(kind) DO UPDATE SET backend_name = excluded.backend_name,"
+                      " registered_at = strftime('%s','now')*1000";
     if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
         return;
     sqlite3_bind_int(st, 1, (int)kind);
@@ -73,15 +75,15 @@ static void facade_routes_upsert(hu_graph_t *graph, hu_memory_kind_t kind,
     sqlite3_finalize(st);
 }
 
-static char *facade_routes_lookup(hu_graph_t *graph, hu_memory_kind_t kind,
-                                   hu_allocator_t *alloc) {
-    if (!graph || !alloc) return NULL;
+static char *facade_routes_lookup(hu_graph_t *graph, hu_memory_kind_t kind, hu_allocator_t *alloc) {
+    if (!graph || !alloc)
+        return NULL;
     struct sqlite3 *db = hu_graph_sqlite_connection(graph);
-    if (!db) return NULL;
+    if (!db)
+        return NULL;
     sqlite3_stmt *st = NULL;
-    if (sqlite3_prepare_v2(db,
-            "SELECT backend_name FROM memory_facade_routes WHERE kind = ?",
-            -1, &st, NULL) != SQLITE_OK)
+    if (sqlite3_prepare_v2(db, "SELECT backend_name FROM memory_facade_routes WHERE kind = ?", -1,
+                           &st, NULL) != SQLITE_OK)
         return NULL;
     sqlite3_bind_int(st, 1, (int)kind);
     char *out = NULL;
@@ -100,14 +102,19 @@ static char *facade_routes_lookup(hu_graph_t *graph, hu_memory_kind_t kind,
     return out;
 }
 #else
-static void facade_routes_ensure(hu_graph_t *graph) { (void)graph; }
+static void facade_routes_ensure(hu_graph_t *graph) {
+    (void)graph;
+}
 static void facade_routes_upsert(hu_graph_t *graph, hu_memory_kind_t kind,
                                  const char *backend_name) {
-    (void)graph; (void)kind; (void)backend_name;
+    (void)graph;
+    (void)kind;
+    (void)backend_name;
 }
-static char *facade_routes_lookup(hu_graph_t *graph, hu_memory_kind_t kind,
-                                   hu_allocator_t *alloc) {
-    (void)graph; (void)kind; (void)alloc;
+static char *facade_routes_lookup(hu_graph_t *graph, hu_memory_kind_t kind, hu_allocator_t *alloc) {
+    (void)graph;
+    (void)kind;
+    (void)alloc;
     return NULL;
 }
 #endif
@@ -131,19 +138,18 @@ struct hu_memory_facade_slot {
  * facade_close with non-empty outstanding_reads is a programming error
  * (records leaked); we free the bookkeeping nodes and log a warning. */
 struct hu_memory_facade_read_origin {
-    hu_memory_record_t *records;      /* the array pointer the caller holds */
-    size_t count;                     /* size of the records array */
-    hu_memory_facade_vtable_t *vt;    /* backend vt that owned the array */
-    void *ctx;                        /* backend ctx that owned the array */
+    hu_memory_record_t *records;   /* the array pointer the caller holds */
+    size_t count;                  /* size of the records array */
+    hu_memory_facade_vtable_t *vt; /* backend vt that owned the array */
+    void *ctx;                     /* backend ctx that owned the array */
     struct hu_memory_facade_read_origin *next;
 };
 
 struct hu_memory_facade {
     hu_allocator_t *alloc;
-    hu_graph_t *graph; /* not owned; provided at open() */
+    hu_graph_t *graph;   /* not owned; provided at open() */
     void *v1_bundle_ctx; /* malloc'd v1 shared ctx; freed once in hu_memory_facade_close */
     struct hu_memory_facade_slot slots[HU_MEM_KIND_MAX];
-    int64_t last_case_rowid; /* HU_MEM_CASE insert rowid; see hu_memory_facade_last_case_rowid */
     hu_memory_audit_fn audit_fn; /* optional write/erase audit hook */
     void *audit_ctx;
     /* W7 P14: head of the outstanding-read origin list. NULL when no
@@ -156,7 +162,8 @@ void hu_memory__v1_set_bundle_for_close(hu_memory_facade_t *m, void *ctx) {
         m->v1_bundle_ctx = ctx;
 }
 
-static bool memory_slot_ctx_shared_elsewhere(hu_memory_facade_t *m, hu_memory_kind_t kind, void *ctx) {
+static bool memory_slot_ctx_shared_elsewhere(hu_memory_facade_t *m, hu_memory_kind_t kind,
+                                             void *ctx) {
     if (m == NULL || ctx == NULL)
         return false;
     for (int i = 0; i < HU_MEM_KIND_MAX; i++) {
@@ -175,7 +182,8 @@ static bool memory_vt_is_v1_entity_owner(const hu_memory_facade_vtable_t *vt) {
     return vt != NULL && vt->name != NULL && strcmp(vt->name, "v1-entity") == 0;
 }
 
-hu_error_t hu_memory_facade_open(hu_allocator_t *alloc, hu_graph_t *graph, hu_memory_facade_t **out) {
+hu_error_t hu_memory_facade_open(hu_allocator_t *alloc, hu_graph_t *graph,
+                                 hu_memory_facade_t **out) {
     if (alloc == NULL || graph == NULL || out == NULL) {
         return HU_ERR_INVALID_ARGUMENT;
     }
@@ -208,7 +216,8 @@ hu_error_t hu_memory_facade_open_on_graph(hu_allocator_t *alloc, struct hu_graph
 }
 
 void hu_memory_facade_close(hu_memory_facade_t *m, hu_allocator_t *alloc) {
-    if (m == NULL) return;
+    if (m == NULL)
+        return;
     /* W7 P14: drain the outstanding-reads bookkeeping. Each leftover
      * node means a caller held records past the facade lifetime — that's
      * a programming bug on the caller (records would dangle anyway once
@@ -241,8 +250,7 @@ void hu_memory_facade_close(hu_memory_facade_t *m, hu_allocator_t *alloc) {
     alloc->free(alloc->ctx, m, sizeof(*m));
 }
 
-void hu_memory_facade_set_audit_hook(hu_memory_facade_t *m,
-                                     hu_memory_audit_fn fn, void *ctx) {
+void hu_memory_facade_set_audit_hook(hu_memory_facade_t *m, hu_memory_audit_fn fn, void *ctx) {
     if (m) {
         m->audit_fn = fn;
         m->audit_ctx = ctx;
@@ -254,20 +262,20 @@ void hu_memory_facade_set_audit_hook(hu_memory_facade_t *m,
  * the node count is bounded by "callers holding live records right now",
  * which in practice is small (1-3 simultaneous reads). */
 static bool facade_outstanding_for_ctx(const hu_memory_facade_t *m,
-                                       const hu_memory_facade_vtable_t *vt,
-                                       const void *ctx) {
-    for (const struct hu_memory_facade_read_origin *o = m->outstanding_reads;
-         o != NULL; o = o->next) {
-        if (o->vt == vt && o->ctx == ctx) return true;
+                                       const hu_memory_facade_vtable_t *vt, const void *ctx) {
+    for (const struct hu_memory_facade_read_origin *o = m->outstanding_reads; o != NULL;
+         o = o->next) {
+        if (o->vt == vt && o->ctx == ctx)
+            return true;
     }
     return false;
 }
 
 static void facade_push_outstanding(hu_memory_facade_t *m, hu_memory_record_t *records,
                                     size_t count, hu_memory_facade_vtable_t *vt, void *ctx) {
-    if (records == NULL || count == 0) return; /* nothing to track */
-    struct hu_memory_facade_read_origin *node =
-        m->alloc->alloc(m->alloc->ctx, sizeof(*node));
+    if (records == NULL || count == 0)
+        return; /* nothing to track */
+    struct hu_memory_facade_read_origin *node = m->alloc->alloc(m->alloc->ctx, sizeof(*node));
     if (node == NULL) {
         /* Out-of-memory on the bookkeeping node is non-fatal: fall back
          * to the legacy "route by current slot" behavior. records_free
@@ -289,11 +297,12 @@ static void facade_push_outstanding(hu_memory_facade_t *m, hu_memory_record_t *r
 static bool facade_pop_outstanding(hu_memory_facade_t *m, hu_memory_record_t *records,
                                    hu_memory_facade_vtable_t **out_vt, void **out_ctx) {
     struct hu_memory_facade_read_origin **prev = &m->outstanding_reads;
-    for (struct hu_memory_facade_read_origin *o = *prev; o != NULL;
-         prev = &o->next, o = o->next) {
+    for (struct hu_memory_facade_read_origin *o = *prev; o != NULL; prev = &o->next, o = o->next) {
         if (o->records == records) {
-            if (out_vt) *out_vt = o->vt;
-            if (out_ctx) *out_ctx = o->ctx;
+            if (out_vt)
+                *out_vt = o->vt;
+            if (out_ctx)
+                *out_ctx = o->ctx;
             *prev = o->next;
             m->alloc->free(m->alloc->ctx, o, sizeof(*o));
             return true;
@@ -317,8 +326,7 @@ hu_error_t hu_memory_facade_register_backend(hu_memory_facade_t *m, hu_memory_ki
      * can be bound to multiple kinds (the v1 entity/relation/hyperedge
      * triple-bind), and reads on any of those kinds count against the
      * replacement. */
-    if (s->vt != NULL && s->ctx != NULL &&
-        facade_outstanding_for_ctx(m, s->vt, s->ctx)) {
+    if (s->vt != NULL && s->ctx != NULL && facade_outstanding_for_ctx(m, s->vt, s->ctx)) {
         return HU_ERR_MEMORY_BACKEND;
     }
     if (s->vt && s->vt->deinit && s->ctx) {
@@ -340,19 +348,23 @@ hu_error_t hu_memory_facade_register_backend(hu_memory_facade_t *m, hu_memory_ki
 }
 
 static inline struct hu_memory_facade_slot *slot_for(hu_memory_facade_t *m, hu_memory_kind_t kind) {
-    if (m == NULL || (int)kind < 0 || kind >= HU_MEM_KIND_MAX) return NULL;
+    if (m == NULL || (int)kind < 0 || kind >= HU_MEM_KIND_MAX)
+        return NULL;
     struct hu_memory_facade_slot *s = &m->slots[kind];
-    if (s->vt == NULL) return NULL;
+    if (s->vt == NULL)
+        return NULL;
     return s;
 }
 
-hu_error_t hu_memory_facade_read(hu_memory_facade_t *m, const hu_memory_query_t *q, hu_allocator_t *alloc,
-                                hu_memory_record_t **out, size_t *out_count) {
+hu_error_t hu_memory_facade_read(hu_memory_facade_t *m, const hu_memory_query_t *q,
+                                 hu_allocator_t *alloc, hu_memory_record_t **out,
+                                 size_t *out_count) {
     if (m == NULL || q == NULL || alloc == NULL || out == NULL || out_count == NULL) {
         return HU_ERR_INVALID_ARGUMENT;
     }
     struct hu_memory_facade_slot *s = slot_for(m, q->kind);
-    if (s == NULL || s->vt->read == NULL) return HU_ERR_NOT_SUPPORTED;
+    if (s == NULL || s->vt->read == NULL)
+        return HU_ERR_NOT_SUPPORTED;
     hu_error_t e = s->vt->read(s->ctx, q, alloc, out, out_count);
     if (e == HU_OK && *out != NULL && *out_count > 0) {
         /* W7 P14: capture the (vt, ctx) that produced these records so
@@ -366,39 +378,33 @@ hu_error_t hu_memory_facade_read(hu_memory_facade_t *m, const hu_memory_query_t 
 }
 
 hu_error_t hu_memory_facade_write(hu_memory_facade_t *m, const hu_memory_record_t *rec) {
-    if (m == NULL || rec == NULL) return HU_ERR_INVALID_ARGUMENT;
+    if (m == NULL || rec == NULL)
+        return HU_ERR_INVALID_ARGUMENT;
     struct hu_memory_facade_slot *s = slot_for(m, rec->kind);
-    if (s == NULL || s->vt->write == NULL) return HU_ERR_NOT_SUPPORTED;
-    m->last_case_rowid = 0;
+    if (s == NULL || s->vt->write == NULL)
+        return HU_ERR_NOT_SUPPORTED;
     hu_error_t e = s->vt->write(s->ctx, rec);
-#ifdef HU_ENABLE_SQLITE
-    if (e == HU_OK && rec->kind == HU_MEM_CASE && m->graph) {
-        struct sqlite3 *db = hu_graph_sqlite_connection(m->graph);
-        if (db)
-            m->last_case_rowid = sqlite3_last_insert_rowid(db);
-    }
-#endif
     if (e == HU_OK && m->audit_fn)
         m->audit_fn(m->audit_ctx, HU_MEMORY_AUDIT_WRITE, rec->kind, rec->id);
     return e;
 }
 
-int64_t hu_memory_facade_last_case_rowid(const hu_memory_facade_t *m) {
-    return m ? m->last_case_rowid : 0;
-}
-
 hu_error_t hu_memory_facade_erase(hu_memory_facade_t *m, hu_memory_kind_t kind, int64_t id) {
-    if (m == NULL) return HU_ERR_INVALID_ARGUMENT;
+    if (m == NULL)
+        return HU_ERR_INVALID_ARGUMENT;
     struct hu_memory_facade_slot *s = slot_for(m, kind);
-    if (s == NULL || s->vt->erase == NULL) return HU_ERR_NOT_SUPPORTED;
+    if (s == NULL || s->vt->erase == NULL)
+        return HU_ERR_NOT_SUPPORTED;
     hu_error_t e = s->vt->erase(s->ctx, kind, id);
     if (e == HU_OK && m->audit_fn)
         m->audit_fn(m->audit_ctx, HU_MEMORY_AUDIT_ERASE, kind, id);
     return e;
 }
 
-hu_error_t hu_memory_facade_purge_by_provenance(hu_memory_facade_t *m, const char *substring, size_t len) {
-    if (m == NULL || substring == NULL || len == 0) return HU_ERR_INVALID_ARGUMENT;
+hu_error_t hu_memory_facade_purge_by_provenance(hu_memory_facade_t *m, const char *substring,
+                                                size_t len) {
+    if (m == NULL || substring == NULL || len == 0)
+        return HU_ERR_INVALID_ARGUMENT;
     /* Fan out to every registered backend; first error wins, but we still
      * call the rest so that erasure is best-effort across backends. The W4
      * v1 helper hu_memory_erase_by_provenance does this for the graph; here
@@ -407,18 +413,22 @@ hu_error_t hu_memory_facade_purge_by_provenance(hu_memory_facade_t *m, const cha
     bool any_attempted = false;
     for (int i = 0; i < HU_MEM_KIND_MAX; i++) {
         struct hu_memory_facade_slot *s = &m->slots[i];
-        if (s->vt == NULL || s->vt->erase_by_provenance == NULL) continue;
+        if (s->vt == NULL || s->vt->erase_by_provenance == NULL)
+            continue;
         any_attempted = true;
         hu_error_t e = s->vt->erase_by_provenance(s->ctx, substring, len);
-        if (e != HU_OK && first_err == HU_OK) first_err = e;
+        if (e != HU_OK && first_err == HU_OK)
+            first_err = e;
     }
-    if (!any_attempted) return HU_ERR_NOT_SUPPORTED;
+    if (!any_attempted)
+        return HU_ERR_NOT_SUPPORTED;
     return first_err;
 }
 
 void hu_memory_facade_records_free(hu_memory_facade_t *m, hu_allocator_t *alloc,
                                    hu_memory_record_t *r, size_t n) {
-    if (m == NULL || r == NULL || n == 0) return;
+    if (m == NULL || r == NULL || n == 0)
+        return;
     /* W7 P14: prefer the captured origin from facade_read. This routes
      * the free back to the backend that actually allocated these records,
      * even if a different backend now occupies the slot. Tracked records
@@ -435,12 +445,14 @@ void hu_memory_facade_records_free(hu_memory_facade_t *m, hu_allocator_t *alloc,
      * to the kind-based dispatch. Mixing kinds in one read is not
      * permitted, so r[0].kind identifies the backend. */
     struct hu_memory_facade_slot *s = slot_for(m, r[0].kind);
-    if (s == NULL || s->vt->records_free == NULL) return;
+    if (s == NULL || s->vt->records_free == NULL)
+        return;
     s->vt->records_free(s->ctx, alloc, r, n);
 }
 
 const char *hu_memory_facade_backend_name(hu_memory_facade_t *m, hu_memory_kind_t kind) {
-    if (m == NULL || (int)kind < 0 || kind >= HU_MEM_KIND_MAX) return NULL;
+    if (m == NULL || (int)kind < 0 || kind >= HU_MEM_KIND_MAX)
+        return NULL;
     struct hu_memory_facade_slot *s = &m->slots[kind];
     return (s->vt != NULL) ? s->vt->name : NULL;
 }
@@ -471,17 +483,14 @@ void hu_memory_v1_graph_close(struct hu_graph *g, hu_allocator_t *alloc) {
 }
 
 hu_error_t hu_memory_v1_upsert_relation_with_belief(
-    struct hu_graph *g, const char *contact_id, size_t contact_id_len,
-    int64_t source_id, int64_t target_id, hu_relation_type_t type,
-    float weight, int64_t event_start, int64_t event_end,
-    float belief_mean, float belief_variance,
-    const char *context, size_t context_len,
-    const char *provenance, size_t provenance_len,
-    int64_t *out_id) {
-    return hu_graph_upsert_relation_with_belief(
-        (hu_graph_t *)g, contact_id, contact_id_len, source_id, target_id, type, weight,
-        event_start, event_end, belief_mean, belief_variance, context, context_len, provenance,
-        provenance_len, out_id);
+    struct hu_graph *g, const char *contact_id, size_t contact_id_len, int64_t source_id,
+    int64_t target_id, hu_relation_type_t type, float weight, int64_t event_start,
+    int64_t event_end, float belief_mean, float belief_variance, const char *context,
+    size_t context_len, const char *provenance, size_t provenance_len, int64_t *out_id) {
+    return hu_graph_upsert_relation_with_belief((hu_graph_t *)g, contact_id, contact_id_len,
+                                                source_id, target_id, type, weight, event_start,
+                                                event_end, belief_mean, belief_variance, context,
+                                                context_len, provenance, provenance_len, out_id);
 }
 
 #ifdef HU_ENABLE_SQLITE
@@ -495,19 +504,15 @@ struct sqlite3 *hu_memory_sqlite_from_graph(struct hu_graph *g) {
 }
 #endif
 
-hu_error_t hu_memory_facade_list_entities(hu_memory_facade_t *m,
-                                          hu_allocator_t *alloc,
-                                          const char *contact_id,
-                                          size_t cid_len,
-                                          size_t limit,
-                                          hu_graph_entity_t **out,
-                                          size_t *out_count) {
+hu_error_t hu_memory_facade_list_entities(hu_memory_facade_t *m, hu_allocator_t *alloc,
+                                          const char *contact_id, size_t cid_len, size_t limit,
+                                          hu_graph_entity_t **out, size_t *out_count) {
     if (!m || !alloc || !contact_id || !out || !out_count)
         return HU_ERR_INVALID_ARGUMENT;
     hu_graph_t *g = m->graph;
-    if (!g) return HU_ERR_NOT_SUPPORTED;
-    return hu_graph_list_entities(g, alloc, contact_id, cid_len, limit, out,
-                                 out_count);
+    if (!g)
+        return HU_ERR_NOT_SUPPORTED;
+    return hu_graph_list_entities(g, alloc, contact_id, cid_len, limit, out, out_count);
 }
 
 void hu_memory_facade_free_listed_entities(hu_memory_facade_t *m, hu_allocator_t *alloc,
@@ -520,8 +525,8 @@ void hu_memory_facade_free_listed_entities(hu_memory_facade_t *m, hu_allocator_t
 
 hu_error_t hu_memory_facade_query_temporal(hu_memory_facade_t *m, hu_allocator_t *alloc,
                                            const char *contact_id, size_t contact_id_len,
-                                           int64_t from_ts, int64_t to_ts, size_t limit,
-                                           char **out, size_t *out_len) {
+                                           int64_t from_ts, int64_t to_ts, size_t limit, char **out,
+                                           size_t *out_len) {
     if (!m || !alloc || !out || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
@@ -604,17 +609,28 @@ hu_error_t hu_memory_facade_set_relation_belief(hu_memory_facade_t *m, int64_t r
 
 static const char *kind_name(hu_memory_kind_t k) {
     switch (k) {
-    case HU_MEM_ENTITY:          return "entity";
-    case HU_MEM_RELATION:        return "relation";
-    case HU_MEM_HYPEREDGE:       return "hyperedge";
-    case HU_MEM_PERSONA_DELTA:   return "persona_delta";
-    case HU_MEM_CASE:            return "case";
-    case HU_MEM_CROSS_EDGE:      return "cross_edge";
-    case HU_MEM_QUARANTINE:      return "quarantine";
-    case HU_MEM_KV_CACHE:        return "kv_cache";
-    case HU_MEM_REASONING_TRACE: return "reasoning_trace";
-    case HU_MEM_BLOB:            return "blob";
-    default:                     return "unknown";
+    case HU_MEM_ENTITY:
+        return "entity";
+    case HU_MEM_RELATION:
+        return "relation";
+    case HU_MEM_HYPEREDGE:
+        return "hyperedge";
+    case HU_MEM_PERSONA_DELTA:
+        return "persona_delta";
+    case HU_MEM_CASE:
+        return "case";
+    case HU_MEM_CROSS_EDGE:
+        return "cross_edge";
+    case HU_MEM_QUARANTINE:
+        return "quarantine";
+    case HU_MEM_KV_CACHE:
+        return "kv_cache";
+    case HU_MEM_REASONING_TRACE:
+        return "reasoning_trace";
+    case HU_MEM_BLOB:
+        return "blob";
+    default:
+        return "unknown";
     }
 }
 
@@ -622,11 +638,21 @@ static void write_escaped(FILE *fp, const char *s, size_t len) {
     for (size_t i = 0; i < len; i++) {
         unsigned char c = (unsigned char)s[i];
         switch (c) {
-        case '"':  fputs("\\\"", fp); break;
-        case '\\': fputs("\\\\", fp); break;
-        case '\n': fputs("\\n", fp);  break;
-        case '\r': fputs("\\r", fp);  break;
-        case '\t': fputs("\\t", fp);  break;
+        case '"':
+            fputs("\\\"", fp);
+            break;
+        case '\\':
+            fputs("\\\\", fp);
+            break;
+        case '\n':
+            fputs("\\n", fp);
+            break;
+        case '\r':
+            fputs("\\r", fp);
+            break;
+        case '\t':
+            fputs("\\t", fp);
+            break;
         default:
             if (c < 0x20)
                 fprintf(fp, "\\u%04x", c);
@@ -727,8 +753,7 @@ hu_error_t hu_memory_facade_export_json(hu_memory_facade_t *m, hu_allocator_t *a
         /* Only skip the generic entity/relation pass when this path actually
          * emitted rows. Otherwise (zero DISTINCT rows, step errors, empty
          * reads) the flag must stay false or GDPR export becomes an empty file. */
-        exported_entity_relation_per_contact =
-            (contact_passes > 0 && total_exported > 0);
+        exported_entity_relation_per_contact = (contact_passes > 0 && total_exported > 0);
     }
 #else
     bool exported_entity_relation_per_contact = false;
@@ -763,15 +788,15 @@ hu_error_t hu_memory_facade_export_json(hu_memory_facade_t *m, hu_allocator_t *a
 
         for (size_t i = 0; i < count; i++) {
             const hu_memory_record_t *r = &recs[i];
-            fprintf(fp, "{\"kind\":\"%s\",\"id\":%lld,\"confidence\":%.3f",
-                    kind_name(r->kind), (long long)r->id, (double)r->confidence);
+            fprintf(fp, "{\"kind\":\"%s\",\"id\":%lld,\"confidence\":%.3f", kind_name(r->kind),
+                    (long long)r->id, (double)r->confidence);
             if (r->provenance && r->provenance_len > 0) {
                 fputs(",\"provenance\":\"", fp);
                 write_escaped(fp, r->provenance, r->provenance_len);
                 fputc('"', fp);
             }
-            fprintf(fp, ",\"event_start\":%lld,\"event_end\":%lld",
-                    (long long)r->event_start, (long long)r->event_end);
+            fprintf(fp, ",\"event_start\":%lld,\"event_end\":%lld", (long long)r->event_start,
+                    (long long)r->event_end);
             fprintf(fp, ",\"payload_len\":%zu}\n", r->payload_len);
             total_exported++;
         }

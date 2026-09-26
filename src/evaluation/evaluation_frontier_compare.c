@@ -468,10 +468,3 @@ hu_error_t hu_evaluation_frontier_compare(hu_allocator_t *alloc, hu_evaluation_t
     out->alloc = alloc;
     return HU_OK;
 }
-
-void hu_evaluation_frontier_compare_set_agent(hu_evaluation_t *e, hu_agent_t *agent) {
-    if (!e || !e->ctx)
-        return;
-    frontier_ctx_t *fctx = (frontier_ctx_t *)e->ctx;
-    fctx->agent = agent;
-}

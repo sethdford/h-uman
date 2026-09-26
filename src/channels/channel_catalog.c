@@ -63,9 +63,6 @@ static const hu_channel_meta_t catalog[] = {
 #ifdef HU_HAS_QQ
     {HU_CHANNEL_QQ, "qq", "QQ", "", HU_LISTENER_POLLING},
 #endif
-#ifdef HU_HAS_MAIXCAM
-    {HU_CHANNEL_MAIXCAM, "maixcam", "MaixCam", "", HU_LISTENER_SEND_ONLY},
-#endif
 #ifdef HU_HAS_TEAMS
     {HU_CHANNEL_TEAMS, "teams", "Microsoft Teams", "", HU_LISTENER_POLLING},
 #endif
@@ -183,10 +180,6 @@ bool hu_channel_catalog_is_build_enabled(hu_channel_id_t id) {
     case HU_CHANNEL_QQ:
         return true;
 #endif
-#ifdef HU_HAS_MAIXCAM
-    case HU_CHANNEL_MAIXCAM:
-        return true;
-#endif
 #ifdef HU_HAS_TEAMS
     case HU_CHANNEL_TEAMS:
         return true;
@@ -284,43 +277,4 @@ bool hu_channel_catalog_has_any_configured(const hu_config_t *cfg, bool include_
             return true;
     }
     return false;
-}
-
-bool hu_channel_catalog_contributes_to_daemon(hu_channel_id_t id) {
-    (void)id;
-    return false;
-}
-
-bool hu_channel_catalog_requires_runtime(hu_channel_id_t id) {
-    switch (id) {
-    case HU_CHANNEL_TELEGRAM:
-    case HU_CHANNEL_DISCORD:
-    case HU_CHANNEL_SLACK:
-    case HU_CHANNEL_WHATSAPP:
-    case HU_CHANNEL_MATRIX:
-    case HU_CHANNEL_IRC:
-    case HU_CHANNEL_LINE:
-    case HU_CHANNEL_LARK:
-    case HU_CHANNEL_WEB:
-    case HU_CHANNEL_MATTERMOST:
-    case HU_CHANNEL_ONEBOT:
-    case HU_CHANNEL_DINGTALK:
-    case HU_CHANNEL_SIGNAL:
-    case HU_CHANNEL_NOSTR:
-    case HU_CHANNEL_QQ:
-    case HU_CHANNEL_EMAIL:
-    case HU_CHANNEL_IMAP:
-    case HU_CHANNEL_IMESSAGE:
-    case HU_CHANNEL_TEAMS:
-    case HU_CHANNEL_TWILIO:
-    case HU_CHANNEL_GOOGLE_CHAT:
-    case HU_CHANNEL_GMAIL:
-    case HU_CHANNEL_FACEBOOK:
-    case HU_CHANNEL_INSTAGRAM:
-    case HU_CHANNEL_TWITTER:
-    case HU_CHANNEL_GOOGLE_RCS:
-        return true;
-    default:
-        return false;
-    }
 }

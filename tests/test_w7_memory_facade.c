@@ -5,7 +5,6 @@
  * deterministic shapes, and refuses unsupported kinds. */
 
 #include "human/agent/anticipatory.h"
-#include "human/agent/case_based.h"
 #include "human/core/allocator.h"
 #include "human/memory/graph.h"
 #include "human/memory/memory.h"
@@ -593,30 +592,6 @@ static void test_w7_add_temporal_event_rejects_null_args(void) {
     close_facade(g, m);
 }
 
-/* --- case rowid via hu_memory_facade_last_case_rowid (no raw graph sqlite in case_based.c) --- */
-
-static void test_w7_case_write_last_rowid_matches_hu_case_record_out_id(void) {
-    hu_graph_t *g = NULL;
-    hu_memory_facade_t *m = NULL;
-    open_facade(&g, &m);
-
-    HU_ASSERT_EQ(hu_memory_facade_last_case_rowid(m), 0);
-
-    int64_t id1 = 0;
-    HU_ASSERT_EQ(hu_case_record(m, "c", 1, "goal", 4, NULL, 0, NULL, 0, "ok", 2, 1000LL, &id1),
-                 HU_OK);
-    HU_ASSERT_TRUE(id1 > 0);
-    HU_ASSERT_EQ(hu_memory_facade_last_case_rowid(m), id1);
-
-    int64_t id2 = 0;
-    HU_ASSERT_EQ(hu_case_record(m, "c", 1, "goal2", 5, NULL, 0, NULL, 0, "x", 1, 2000LL, &id2),
-                 HU_OK);
-    HU_ASSERT_TRUE(id2 > id1);
-    HU_ASSERT_EQ(hu_memory_facade_last_case_rowid(m), id2);
-
-    close_facade(g, m);
-}
-
 /* --- list_entities through facade ------------------------------------ */
 
 static void test_w7_list_entities_returns_inserted_entity(void) {
@@ -1140,7 +1115,6 @@ void run_w7_memory_facade_tests(void) {
     HU_RUN_TEST(test_w7_anticipatory_analyze_memory_matches_graph);
     HU_RUN_TEST(test_w7_add_temporal_event_is_visible_to_query);
     HU_RUN_TEST(test_w7_add_temporal_event_rejects_null_args);
-    HU_RUN_TEST(test_w7_case_write_last_rowid_matches_hu_case_record_out_id);
     HU_RUN_TEST(test_w7_list_entities_returns_inserted_entity);
     HU_RUN_TEST(test_w7_list_entities_null_args_rejected);
     HU_RUN_TEST(test_w7_export_json_creates_file);

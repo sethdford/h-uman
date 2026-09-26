@@ -1283,10 +1283,3 @@ hu_error_t hu_openai_create(hu_allocator_t *alloc, const char *api_key, size_t a
     out->vtable = &openai_vtable;
     return HU_OK;
 }
-
-void hu_openai_set_ws_streaming(hu_provider_t *p, bool enabled) {
-    if (!p || !p->ctx)
-        return;
-    hu_openai_ctx_t *oc = (hu_openai_ctx_t *)p->ctx;
-    oc->ws_streaming = enabled;
-}

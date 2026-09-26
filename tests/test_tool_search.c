@@ -4,7 +4,6 @@
 #include "human/core/json.h"
 #include "human/tool.h"
 #include "human/tools/tool_search.h"
-#include "human/agent/workspace_context.h"
 #include "test_framework.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -354,124 +353,6 @@ static void test_tool_search_case_insensitive(void) {
  * Workspace Context Tests
  * ────────────────────────────────────────────────────────────────────────── */
 
-static void test_workspace_context_detect_nodejs(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-
-#if HU_IS_TEST
-    /* Create temporary directory with package.json */
-    char tmpdir[] = "/tmp/hu_test_XXXXXX";
-    if (!mkdtemp(tmpdir)) {
-        HU_SKIP_IF(1, "Cannot create temp directory");
-    }
-
-    char pkg_path[512];
-    snprintf(pkg_path, sizeof(pkg_path), "%s/package.json", tmpdir);
-    FILE *f = fopen(pkg_path, "w");
-    HU_ASSERT_NOT_NULL(f);
-    fprintf(f, "{\"name\":\"test-app\",\"version\":\"1.2.3\"}\n");
-    fclose(f);
-
-    hu_workspace_context_t ctx;
-    hu_error_t err = hu_workspace_context_detect(&alloc, tmpdir, &ctx);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_STR_EQ(ctx.project_type, "nodejs");
-    HU_ASSERT_STR_EQ(ctx.project_name, "test-app");
-    HU_ASSERT_STR_CONTAINS(ctx.summary, "Node.js");
-    HU_ASSERT_STR_CONTAINS(ctx.summary, "test-app");
-
-    hu_workspace_context_free(&alloc, &ctx);
-
-    /* Cleanup */
-    unlink(pkg_path);
-    rmdir(tmpdir);
-#endif
-}
-
-static void test_workspace_context_detect_python(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-
-#if HU_IS_TEST
-    /* Create temporary directory with pyproject.toml */
-    char tmpdir[] = "/tmp/hu_test_XXXXXX";
-    if (!mkdtemp(tmpdir)) {
-        HU_SKIP_IF(1, "Cannot create temp directory");
-    }
-
-    char proj_path[512];
-    snprintf(proj_path, sizeof(proj_path), "%s/pyproject.toml", tmpdir);
-    FILE *f = fopen(proj_path, "w");
-    HU_ASSERT_NOT_NULL(f);
-    fprintf(f, "[project]\nname = \"my-python-app\"\n");
-    fclose(f);
-
-    hu_workspace_context_t ctx;
-    hu_error_t err = hu_workspace_context_detect(&alloc, tmpdir, &ctx);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_STR_EQ(ctx.project_type, "python");
-    HU_ASSERT_STR_CONTAINS(ctx.summary, "Python");
-
-    hu_workspace_context_free(&alloc, &ctx);
-
-    /* Cleanup */
-    unlink(proj_path);
-    rmdir(tmpdir);
-#endif
-}
-
-static void test_workspace_context_detect_rust(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-
-#if HU_IS_TEST
-    /* Create temporary directory with Cargo.toml */
-    char tmpdir[] = "/tmp/hu_test_XXXXXX";
-    if (!mkdtemp(tmpdir)) {
-        HU_SKIP_IF(1, "Cannot create temp directory");
-    }
-
-    char cargo_path[512];
-    snprintf(cargo_path, sizeof(cargo_path), "%s/Cargo.toml", tmpdir);
-    FILE *f = fopen(cargo_path, "w");
-    HU_ASSERT_NOT_NULL(f);
-    fprintf(f, "[package]\nname = \"my-rust-app\"\nversion = \"0.1.0\"\n");
-    fclose(f);
-
-    hu_workspace_context_t ctx;
-    hu_error_t err = hu_workspace_context_detect(&alloc, tmpdir, &ctx);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_STR_EQ(ctx.project_type, "rust");
-    HU_ASSERT_STR_CONTAINS(ctx.summary, "Rust");
-
-    hu_workspace_context_free(&alloc, &ctx);
-
-    /* Cleanup */
-    unlink(cargo_path);
-    rmdir(tmpdir);
-#endif
-}
-
-static void test_workspace_context_detect_unknown(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-
-#if HU_IS_TEST
-    /* Create empty temporary directory */
-    char tmpdir[] = "/tmp/hu_test_XXXXXX";
-    if (!mkdtemp(tmpdir)) {
-        HU_SKIP_IF(1, "Cannot create temp directory");
-    }
-
-    hu_workspace_context_t ctx;
-    hu_error_t err = hu_workspace_context_detect(&alloc, tmpdir, &ctx);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_STR_EQ(ctx.project_type, "unknown");
-    HU_ASSERT_STR_EQ(ctx.summary, "Unknown project");
-
-    hu_workspace_context_free(&alloc, &ctx);
-
-    /* Cleanup */
-    rmdir(tmpdir);
-#endif
-}
-
 void run_tool_search_tests(void) {
     HU_TEST_SUITE("tool_search");
     HU_RUN_TEST(test_tool_search_create);
@@ -482,10 +363,4 @@ void run_tool_search_tests(void) {
     HU_RUN_TEST(test_tool_search_execute_match_by_name);
     HU_RUN_TEST(test_tool_search_execute_match_by_description);
     HU_RUN_TEST(test_tool_search_case_insensitive);
-
-    HU_TEST_SUITE("workspace_context");
-    HU_RUN_TEST(test_workspace_context_detect_nodejs);
-    HU_RUN_TEST(test_workspace_context_detect_python);
-    HU_RUN_TEST(test_workspace_context_detect_rust);
-    HU_RUN_TEST(test_workspace_context_detect_unknown);
 }

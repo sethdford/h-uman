@@ -2,8 +2,8 @@
 """
 Phase 1a — LIVE correctness + speed proof for prompt-cache prefix reuse.
 
-Opt-in (needs a cached MLX model + Apple Silicon GPU), mirroring the
-test_mlx_streaming_live.sh convention. NOT part of the always-run suite.
+Opt-in (needs a cached MLX model + Apple Silicon GPU): it skips cleanly when
+the prerequisites are absent. NOT part of the always-run suite.
 
 It proves the property that makes prefix reuse safe to ship: a request whose
 prompt SHARES a long prefix with a prior request produces output BYTE-

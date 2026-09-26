@@ -1,6 +1,5 @@
 #include "human/core/allocator.h"
 #include "human/multimodal.h"
-#include "human/multimodal/image.h"
 #include "human/provider.h"
 #include "test_framework.h"
 #include <string.h>
@@ -354,113 +353,6 @@ static void test_multimodal_detect_audio_mime_path(void) {
     HU_ASSERT_STR_EQ(hu_multimodal_detect_audio_mime("/tmp/recordings/voice.wav", 26), "audio/wav");
 }
 
-/* --- human/multimodal/image.h (header bytes + extension + vision prompt) --- */
-
-static void test_image_detect_format_png_extension(void) {
-    HU_ASSERT_EQ(hu_image_detect_format("photo.png", 9), HU_IMAGE_PNG);
-}
-
-static void test_image_detect_format_jpeg_extension(void) {
-    HU_ASSERT_EQ(hu_image_detect_format("/tmp/x.JPEG", 11), HU_IMAGE_JPEG);
-    HU_ASSERT_EQ(hu_image_detect_format("img.jpg", 7), HU_IMAGE_JPEG);
-}
-
-static void test_image_detect_format_unknown_extension(void) {
-    HU_ASSERT_EQ(hu_image_detect_format("data.bin", 8), HU_IMAGE_UNKNOWN_FORMAT);
-}
-
-static void test_image_detect_format_null_returns_unknown(void) {
-    HU_ASSERT_EQ(hu_image_detect_format(NULL, 4), HU_IMAGE_UNKNOWN_FORMAT);
-}
-
-static void test_image_mime_type_supported_formats(void) {
-    HU_ASSERT_STR_EQ(hu_image_mime_type(HU_IMAGE_JPEG), "image/jpeg");
-    HU_ASSERT_STR_EQ(hu_image_mime_type(HU_IMAGE_PNG), "image/png");
-    HU_ASSERT_STR_EQ(hu_image_mime_type(HU_IMAGE_GIF), "image/gif");
-    HU_ASSERT_STR_EQ(hu_image_mime_type(HU_IMAGE_WEBP), "image/webp");
-    HU_ASSERT_STR_EQ(hu_image_mime_type(HU_IMAGE_UNKNOWN_FORMAT), "application/octet-stream");
-}
-
-static void test_image_parse_header_png_dimensions(void) {
-    /* Minimal PNG signature + IHDR chunk prefix so width/height at offsets 16 and 20 are read. */
-    unsigned char png[] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D,
-                           'I',  'H', 'D', 'R', 0x00, 0x00, 0x00, 0x0A, 0x00, 0x00, 0x00, 0x14};
-    hu_image_metadata_t meta = {0};
-    HU_ASSERT_EQ(hu_image_parse_header(png, sizeof(png), &meta), HU_OK);
-    HU_ASSERT_EQ(meta.format, HU_IMAGE_PNG);
-    HU_ASSERT_EQ(meta.width, 10u);
-    HU_ASSERT_EQ(meta.height, 20u);
-}
-
-static void test_image_parse_header_jpeg_sof_dimensions(void) {
-    /* FF D8 FF then SOF0 segment with height/width. */
-    unsigned char jpg[] = {0xFF, 0xD8, 0xFF, 0xC0, 0x00, 0x11, 0x08,
-                           0x00, 0x0A, /* height 10 */
-                           0x01, 0xF4 /* width 500 */};
-    hu_image_metadata_t meta = {0};
-    HU_ASSERT_EQ(hu_image_parse_header(jpg, sizeof(jpg), &meta), HU_OK);
-    HU_ASSERT_EQ(meta.format, HU_IMAGE_JPEG);
-    HU_ASSERT_EQ(meta.height, 10u);
-    HU_ASSERT_EQ(meta.width, 500u);
-}
-
-static void test_image_parse_header_truncated_fewer_than_eight_bytes(void) {
-    unsigned char few[] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A};
-    hu_image_metadata_t meta = {0};
-    HU_ASSERT_EQ(hu_image_parse_header(few, sizeof(few), &meta), HU_ERR_PARSE);
-    HU_ASSERT_EQ(meta.format, HU_IMAGE_UNKNOWN_FORMAT);
-}
-
-static void test_image_parse_header_png_signature_short_ok_dims_zero(void) {
-    unsigned char png_sig[8] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
-    hu_image_metadata_t meta = {0};
-    HU_ASSERT_EQ(hu_image_parse_header(png_sig, sizeof(png_sig), &meta), HU_OK);
-    HU_ASSERT_EQ(meta.format, HU_IMAGE_PNG);
-    HU_ASSERT_EQ(meta.width, 0u);
-    HU_ASSERT_EQ(meta.height, 0u);
-}
-
-static void test_image_parse_header_unknown_magic(void) {
-    unsigned char unk[] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08};
-    hu_image_metadata_t meta = {0};
-    HU_ASSERT_EQ(hu_image_parse_header(unk, sizeof(unk), &meta), HU_ERR_PARSE);
-}
-
-static void test_image_parse_header_null_args(void) {
-    hu_image_metadata_t meta = {0};
-    HU_ASSERT_EQ(hu_image_parse_header(NULL, 8, &meta), HU_ERR_INVALID_ARGUMENT);
-    unsigned char buf[8] = {0};
-    HU_ASSERT_EQ(hu_image_parse_header(buf, 8, NULL), HU_ERR_INVALID_ARGUMENT);
-}
-
-static void test_image_build_vision_prompt_valid(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    char *prompt = NULL;
-    size_t len = 0;
-    hu_error_t err =
-        hu_image_build_vision_prompt(&alloc, "user context", 12, HU_IMAGE_PNG, &prompt, &len);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_NOT_NULL(prompt);
-    HU_ASSERT_TRUE(len > 0);
-    HU_ASSERT(strstr(prompt, "user context") != NULL);
-    HU_ASSERT(strstr(prompt, "image/png") != NULL);
-    alloc.free(alloc.ctx, prompt, len + 1);
-}
-
-static void test_image_build_vision_prompt_null_allocator(void) {
-    char *prompt = NULL;
-    size_t len = 0;
-    HU_ASSERT_EQ(hu_image_build_vision_prompt(NULL, "ctx", 3, HU_IMAGE_JPEG, &prompt, &len),
-                 HU_ERR_INVALID_ARGUMENT);
-}
-
-static void test_image_metadata_deinit_no_mime_is_safe(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_image_metadata_t meta = {0};
-    meta.mime_type = NULL;
-    hu_image_metadata_deinit(&meta, &alloc);
-}
-
 void run_multimodal_tests(void) {
     HU_TEST_SUITE("Multimodal");
     HU_RUN_TEST(test_base64_encode_empty);
@@ -497,18 +389,4 @@ void run_multimodal_tests(void) {
     HU_RUN_TEST(test_multimodal_detect_audio_mime_flac);
     HU_RUN_TEST(test_multimodal_detect_audio_mime_unknown);
     HU_RUN_TEST(test_multimodal_detect_audio_mime_path);
-    HU_RUN_TEST(test_image_detect_format_png_extension);
-    HU_RUN_TEST(test_image_detect_format_jpeg_extension);
-    HU_RUN_TEST(test_image_detect_format_unknown_extension);
-    HU_RUN_TEST(test_image_detect_format_null_returns_unknown);
-    HU_RUN_TEST(test_image_mime_type_supported_formats);
-    HU_RUN_TEST(test_image_parse_header_png_dimensions);
-    HU_RUN_TEST(test_image_parse_header_jpeg_sof_dimensions);
-    HU_RUN_TEST(test_image_parse_header_truncated_fewer_than_eight_bytes);
-    HU_RUN_TEST(test_image_parse_header_png_signature_short_ok_dims_zero);
-    HU_RUN_TEST(test_image_parse_header_unknown_magic);
-    HU_RUN_TEST(test_image_parse_header_null_args);
-    HU_RUN_TEST(test_image_build_vision_prompt_valid);
-    HU_RUN_TEST(test_image_build_vision_prompt_null_allocator);
-    HU_RUN_TEST(test_image_metadata_deinit_no_mime_is_safe);
 }

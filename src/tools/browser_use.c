@@ -41,8 +41,8 @@ static int bu_b64_val(unsigned char c) {
 
 static hu_error_t bu_b64_png_write_path(hu_allocator_t *alloc, const char *b64, size_t b64_len,
                                         const char *path) {
-    while (b64_len > 0 && (b64[b64_len - 1] == '=' || b64[b64_len - 1] == '\n' ||
-                           b64[b64_len - 1] == '\r'))
+    while (b64_len > 0 &&
+           (b64[b64_len - 1] == '=' || b64[b64_len - 1] == '\n' || b64[b64_len - 1] == '\r'))
         b64_len--;
     size_t raw_cap = (b64_len * 3) / 4 + 4;
     if (raw_cap > HU_MULTIMODAL_MAX_IMAGE_SIZE)
@@ -113,7 +113,8 @@ static const char k_params[] =
     "\"action\":{\"type\":\"string\","
     "\"enum\":[\"navigate\",\"screenshot\",\"click\",\"type\",\"extract_text\",\"execute_js\"]},"
     "\"url\":{\"type\":\"string\",\"description\":\"Target URL (navigate)\"},"
-    "\"selector\":{\"type\":\"string\",\"description\":\"CSS selector (click, type, extract_text)\"},"
+    "\"selector\":{\"type\":\"string\",\"description\":\"CSS selector (click, type, "
+    "extract_text)\"},"
     "\"target\":{\"type\":\"string\",\"description\":\"Natural language description of UI element "
     "to interact with (uses vision to locate)\"},"
     "\"text\":{\"type\":\"string\",\"description\":\"Text to type (type)\"},"
@@ -312,8 +313,8 @@ static hu_error_t browser_use_execute(void *ctx, hu_allocator_t *alloc, const hu
             char *gsel = NULL;
             size_t gsel_len = 0;
             double gx = 0, gy = 0;
-            hu_error_t ge = hu_visual_ground_action(alloc, NULL, NULL, 0, "mock.png", 9, target, tgtlen,
-                                                    &gx, &gy, &gsel, &gsel_len);
+            hu_error_t ge = hu_visual_ground_action(alloc, NULL, NULL, 0, "mock.png", 9, target,
+                                                    tgtlen, &gx, &gy, &gsel, &gsel_len);
             if (ge != HU_OK) {
                 if (gsel)
                     alloc->free(alloc->ctx, gsel, gsel_len + 1);
@@ -321,9 +322,9 @@ static hu_error_t browser_use_execute(void *ctx, hu_allocator_t *alloc, const hu
                 return HU_OK;
             }
             if (gsel && gsel[0]) {
-                char *msg =
-                    hu_sprintf(alloc, "{\"status\":\"ok\",\"click_via\":\"selector\",\"selector\":\"%s\"}",
-                               gsel);
+                char *msg = hu_sprintf(
+                    alloc, "{\"status\":\"ok\",\"click_via\":\"selector\",\"selector\":\"%s\"}",
+                    gsel);
                 alloc->free(alloc->ctx, gsel, gsel_len + 1);
                 if (!msg) {
                     *out = hu_tool_result_fail("out of memory", 13);
@@ -334,9 +335,9 @@ static hu_error_t browser_use_execute(void *ctx, hu_allocator_t *alloc, const hu
             }
             if (gsel)
                 alloc->free(alloc->ctx, gsel, gsel_len + 1);
-            char *msg = hu_sprintf(alloc,
-                                   "{\"status\":\"ok\",\"click_via\":\"coordinates\",\"x\":%.0f,\"y\":%.0f}",
-                                   gx, gy);
+            char *msg = hu_sprintf(
+                alloc, "{\"status\":\"ok\",\"click_via\":\"coordinates\",\"x\":%.0f,\"y\":%.0f}",
+                gx, gy);
             if (!msg) {
                 *out = hu_tool_result_fail("out of memory", 13);
                 return HU_OK;
@@ -405,8 +406,7 @@ static hu_error_t browser_use_execute(void *ctx, hu_allocator_t *alloc, const hu
     memset(&session, 0, sizeof(session));
     hu_error_t cerr = hu_cdp_connect(alloc, "127.0.0.1", 9222, &session);
     if (cerr != HU_OK || !session.connected) {
-        static const char msg_cdp[] =
-            "could not connect to Chrome DevTools (127.0.0.1:9222)";
+        static const char msg_cdp[] = "could not connect to Chrome DevTools (127.0.0.1:9222)";
         *out = hu_tool_result_fail(msg_cdp, sizeof(msg_cdp) - 1);
         hu_cdp_disconnect(&session);
         return HU_OK;
@@ -483,8 +483,8 @@ static hu_error_t browser_use_execute(void *ctx, hu_allocator_t *alloc, const hu
                 *out = hu_tool_result_fail("click failed", 12);
                 goto done;
             }
-            char *msg0 = hu_sprintf(alloc, "{\"status\":\"ok\",\"selector\":\"%s\"}",
-                                    sel ? sel : "");
+            char *msg0 =
+                hu_sprintf(alloc, "{\"status\":\"ok\",\"selector\":\"%s\"}", sel ? sel : "");
             if (!msg0) {
                 *out = hu_tool_result_fail("out of memory", 13);
                 goto done;
@@ -520,8 +520,8 @@ static hu_error_t browser_use_execute(void *ctx, hu_allocator_t *alloc, const hu
             char *gsel = NULL;
             size_t gsel_len = 0;
             err = hu_visual_ground_action(alloc, bctx->ground_provider, bctx->ground_model,
-                                          bctx->ground_model_len, tmpl, strlen(tmpl), target, tgtlen,
-                                          &gx, &gy, &gsel, &gsel_len);
+                                          bctx->ground_model_len, tmpl, strlen(tmpl), target,
+                                          tgtlen, &gx, &gy, &gsel, &gsel_len);
             (void)unlink(tmpl);
             if (err != HU_OK || gx < 0.0 || gy < 0.0) {
                 if (gsel)
@@ -540,15 +540,15 @@ static hu_error_t browser_use_execute(void *ctx, hu_allocator_t *alloc, const hu
                 hu_error_t ee = bu_escape_json_string_body(alloc, gsel, gsel_len, &esel, &esel_cap);
                 if (ee == HU_OK && esel) {
                     char expr[4096];
-                    int en = snprintf(expr, sizeof(expr),
-                                      "(function(){var e=document.querySelector(\"%s\");if(!e)return "
-                                      "false;e.click();return true;})()",
-                                      esel);
+                    int en =
+                        snprintf(expr, sizeof(expr),
+                                 "(function(){var e=document.querySelector(\"%s\");if(!e)return "
+                                 "false;e.click();return true;})()",
+                                 esel);
                     alloc->free(alloc->ctx, esel, esel_cap);
                     if (en > 0 && (size_t)en < sizeof(expr)) {
                         hu_json_value_t *vreq = NULL;
-                        hu_error_t ev =
-                            bu_eval_expression(&session, expr, (size_t)en, &vreq);
+                        hu_error_t ev = bu_eval_expression(&session, expr, (size_t)en, &vreq);
                         if (ev == HU_OK && vreq && vreq->type == HU_JSON_BOOL &&
                             vreq->data.boolean) {
                             selector_ok = 1;
@@ -573,13 +573,13 @@ static hu_error_t browser_use_execute(void *ctx, hu_allocator_t *alloc, const hu
 
             char *msg = NULL;
             if (selector_ok && gsel) {
-                msg = hu_sprintf(alloc,
-                                 "{\"status\":\"ok\",\"click_via\":\"selector\",\"selector\":\"%s\"}",
-                                 gsel);
+                msg = hu_sprintf(
+                    alloc, "{\"status\":\"ok\",\"click_via\":\"selector\",\"selector\":\"%s\"}",
+                    gsel);
             } else {
-                msg = hu_sprintf(alloc,
-                                 "{\"status\":\"ok\",\"click_via\":\"coordinates\",\"x\":%d,\"y\":%d}", cx,
-                                 cy);
+                msg = hu_sprintf(
+                    alloc, "{\"status\":\"ok\",\"click_via\":\"coordinates\",\"x\":%d,\"y\":%d}",
+                    cx, cy);
             }
             if (gsel)
                 alloc->free(alloc->ctx, gsel, gsel_len + 1);
@@ -603,8 +603,8 @@ static hu_error_t browser_use_execute(void *ctx, hu_allocator_t *alloc, const hu
         const char *text = hu_json_get_string(args, "text");
         size_t sellen = sel ? strlen(sel) : 0;
         size_t textlen = text ? strlen(text) : 0;
-        if (!sel || sellen == 0 || sellen > HU_BU_MAX_SELECTOR || !text || textlen > HU_BU_MAX_TEXT ||
-            bu_str_has_disallowed_cdp_chars(sel, sellen) ||
+        if (!sel || sellen == 0 || sellen > HU_BU_MAX_SELECTOR || !text ||
+            textlen > HU_BU_MAX_TEXT || bu_str_has_disallowed_cdp_chars(sel, sellen) ||
             bu_str_has_disallowed_cdp_chars(text, textlen)) {
             *out = hu_tool_result_fail("invalid selector or text", 24);
             goto done;
@@ -625,12 +625,13 @@ static hu_error_t browser_use_execute(void *ctx, hu_allocator_t *alloc, const hu
             goto done;
         }
         char expr[8192];
-        int en = snprintf(expr, sizeof(expr),
-                           "(function(){var s=\"%s\";var t=\"%s\";"
-                           "var e=document.querySelector(s);if(!e)return\"\";"
-                           "e.focus();if(\"value\" in e&&e.tagName!==\"DIV\"){e.value=t;}"
-                           "else{e.textContent=t;}return(e.innerText||e.value||\"\").slice(0,4096);})()",
-                           esel, etext);
+        int en =
+            snprintf(expr, sizeof(expr),
+                     "(function(){var s=\"%s\";var t=\"%s\";"
+                     "var e=document.querySelector(s);if(!e)return\"\";"
+                     "e.focus();if(\"value\" in e&&e.tagName!==\"DIV\"){e.value=t;}"
+                     "else{e.textContent=t;}return(e.innerText||e.value||\"\").slice(0,4096);})()",
+                     esel, etext);
         alloc->free(alloc->ctx, esel, esel_cap);
         alloc->free(alloc->ctx, etext, etext_cap);
         if (en <= 0 || (size_t)en >= sizeof(expr)) {
@@ -820,14 +821,4 @@ void hu_browser_use_destroy(hu_allocator_t *alloc, hu_tool_t *tool) {
         return;
     alloc->free(alloc->ctx, tool->ctx, sizeof(hu_browser_use_ctx_t));
     tool->ctx = NULL;
-}
-
-void hu_browser_use_set_grounding(hu_tool_t *tool, hu_provider_t *provider, const char *model,
-                                  size_t model_len) {
-    if (!tool || !tool->ctx)
-        return;
-    hu_browser_use_ctx_t *b = (hu_browser_use_ctx_t *)tool->ctx;
-    b->ground_provider = provider;
-    b->ground_model = model;
-    b->ground_model_len = model_len;
 }

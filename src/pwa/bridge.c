@@ -217,12 +217,6 @@ hu_error_t hu_pwa_exec_js(hu_allocator_t *alloc, const hu_pwa_tab_t *tab, const 
     return HU_OK;
 }
 
-hu_error_t hu_pwa_activate_tab(hu_allocator_t *alloc, const hu_pwa_tab_t *tab) {
-    (void)alloc;
-    (void)tab;
-    return HU_OK;
-}
-
 #elif !defined(__APPLE__)
 
 hu_error_t hu_pwa_find_tab(hu_allocator_t *alloc, hu_pwa_browser_t browser, const char *url_pattern,
@@ -251,12 +245,6 @@ hu_error_t hu_pwa_exec_js(hu_allocator_t *alloc, const hu_pwa_tab_t *tab, const 
     (void)javascript;
     (void)out_result;
     (void)out_len;
-    return HU_ERR_NOT_SUPPORTED;
-}
-
-hu_error_t hu_pwa_activate_tab(hu_allocator_t *alloc, const hu_pwa_tab_t *tab) {
-    (void)alloc;
-    (void)tab;
     return HU_ERR_NOT_SUPPORTED;
 }
 
@@ -543,39 +531,6 @@ hu_error_t hu_pwa_exec_js(hu_allocator_t *alloc, const hu_pwa_tab_t *tab, const 
 
     err = run_applescript(alloc, script, out_result, out_len);
     alloc->free(alloc->ctx, script, script_size);
-    return err;
-}
-
-hu_error_t hu_pwa_activate_tab(hu_allocator_t *alloc, const hu_pwa_tab_t *tab) {
-    if (!alloc || !tab)
-        return HU_ERR_INVALID_ARGUMENT;
-
-    const char *app = hu_pwa_browser_name(tab->browser);
-    char script[512];
-    int n;
-    if (HU_PWA_BROWSER_IS_SAFARI(tab->browser)) {
-        n = snprintf(script, sizeof(script),
-                     "tell application \"%s\"\n"
-                     "  activate\n"
-                     "  set current tab of window %d to tab %d of window %d\n"
-                     "end tell",
-                     app, tab->window_idx, tab->tab_idx, tab->window_idx);
-    } else {
-        n = snprintf(script, sizeof(script),
-                     "tell application \"%s\"\n"
-                     "  activate\n"
-                     "  set active tab index of window %d to %d\n"
-                     "end tell",
-                     app, tab->window_idx, tab->tab_idx);
-    }
-    if (n <= 0 || (size_t)n >= sizeof(script))
-        return HU_ERR_PARSE;
-
-    char *out = NULL;
-    size_t out_len = 0;
-    hu_error_t err = run_applescript(alloc, script, &out, &out_len);
-    if (out)
-        alloc->free(alloc->ctx, out, out_len + 1);
     return err;
 }
 

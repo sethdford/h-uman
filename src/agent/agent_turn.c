@@ -30,7 +30,6 @@
 #include "human/persona/persona_deltas.h"
 #include "human/persona/somatic.h"
 #include "human/persona/style_critique.h"
-#include "human/persona/style_mirror.h"
 #include "human/persona/voice_maturity.h"
 
 #include "human/agent/conv_goals.h"
@@ -5823,7 +5822,6 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
          * Centralized so parity with agent_stream.c is enforced — see
          * tests/test_agent_turn_request_overrides.c. */
         hu_agent_internal_apply_turn_request_overrides(agent, &req);
-
         /* Planning mode: give the model more room to reason when the cognition
          * system detects a complex task, without overriding explicit CoT config. */
         if (cognition_budget.enable_planning && req.thinking_budget == 0)
@@ -5904,7 +5902,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 }
             }
         }
-
+        hu_agent_internal_resolve_max_tokens(&req, turn_model, turn_model_len); /* Task 13 */
+        hu_agent_internal_resolve_stop_sequences(&req, prov_name, agent);       /* Task 14 */
         /* Wall clock, NOT clock(). `clock()` returns process CPU time; a
          * provider round trip is spent BLOCKED in poll()/recv() burning
          * ~zero CPU, so CPU-clock timing reported a 150ms call as ~27ms
