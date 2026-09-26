@@ -9,6 +9,7 @@
 #include "human/memory.h"
 #include "human/memory/vector.h"
 #include "test_framework.h"
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -63,6 +64,23 @@ static void bootstrap_with_agent(void) {
     }
 }
 
+/* 0600 explicitly: fopen(..., "w") creates 0666 minus umask, which CodeQL
+ * flags as cpp/world-writable-file-creation even inside a 0700 mkdtemp dir. */
+static void write_config_fixture(const char *path, const char *json) {
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    HU_ASSERT_TRUE(fd >= 0);
+    FILE *f = fdopen(fd, "w");
+    if (!f)
+        close(fd);
+    HU_ASSERT_NOT_NULL(f);
+    /* Close before asserting: HU_FAIL longjmps, so a failed assert here must
+     * not strand the stream. */
+    int put = fputs(json, f);
+    int closed = fclose(f);
+    HU_ASSERT_TRUE(put >= 0);
+    HU_ASSERT_EQ(closed, 0);
+}
+
 #if HU_HAS_PWA
 /* 2026-09-04 audit: bootstrap registered the PWA poll fn but never called
  * the channel's start(), so hu_pwa_channel_poll returned on every tick and
@@ -73,10 +91,9 @@ static void bootstrap_starts_the_pwa_channel_it_registers(void) {
     HU_ASSERT_NOT_NULL(mkdtemp(dir));
     char cfg_path[256];
     snprintf(cfg_path, sizeof(cfg_path), "%s/config.json", dir);
-    FILE *f = fopen(cfg_path, "w");
-    HU_ASSERT_NOT_NULL(f);
-    fputs("{\"default_provider\":\"ollama\",\"channels\":{\"pwa\":{\"apps\":[\"slack\"]}}}", f);
-    fclose(f);
+    write_config_fixture(
+        cfg_path,
+        "{\"default_provider\":\"ollama\",\"channels\":{\"pwa\":{\"apps\":[\"slack\"]}}}");
 
     hu_allocator_t alloc = hu_system_allocator();
     hu_app_ctx_t ctx;
@@ -108,10 +125,8 @@ static void bootstrap_semantic_index_points_at_app_lifetime_embedder(void) {
     HU_ASSERT_NOT_NULL(mkdtemp(dir));
     char cfg_path[256];
     snprintf(cfg_path, sizeof(cfg_path), "%s/config.json", dir);
-    FILE *f = fopen(cfg_path, "w");
-    HU_ASSERT_NOT_NULL(f);
-    fputs("{\"default_provider\":\"ollama\",\"memory\":{\"backend\":\"sqlite\"}}", f);
-    fclose(f);
+    write_config_fixture(cfg_path,
+                         "{\"default_provider\":\"ollama\",\"memory\":{\"backend\":\"sqlite\"}}");
     /* Never the real ~/.human/memory.db; the embed URL is never reached
      * because the test transport is a mock (the index insert fails and is
      * logged, exactly as in test_semantic_recall). */
@@ -167,10 +182,8 @@ static void bootstrap_context_engine_rag_installs_rag_engine(void) {
     HU_ASSERT_NOT_NULL(mkdtemp(dir));
     char cfg_path[256];
     snprintf(cfg_path, sizeof(cfg_path), "%s/config.json", dir);
-    FILE *f = fopen(cfg_path, "w");
-    HU_ASSERT_NOT_NULL(f);
-    fputs("{\"default_provider\":\"ollama\",\"agent\":{\"context_engine\":\"rag\"}}", f);
-    fclose(f);
+    write_config_fixture(
+        cfg_path, "{\"default_provider\":\"ollama\",\"agent\":{\"context_engine\":\"rag\"}}");
 
     hu_allocator_t alloc = hu_system_allocator();
     hu_app_ctx_t ctx;
@@ -193,10 +206,8 @@ static void bootstrap_context_engine_legacy_installs_legacy_engine(void) {
     HU_ASSERT_NOT_NULL(mkdtemp(dir));
     char cfg_path[256];
     snprintf(cfg_path, sizeof(cfg_path), "%s/config.json", dir);
-    FILE *f = fopen(cfg_path, "w");
-    HU_ASSERT_NOT_NULL(f);
-    fputs("{\"default_provider\":\"ollama\",\"agent\":{\"context_engine\":\"legacy\"}}", f);
-    fclose(f);
+    write_config_fixture(
+        cfg_path, "{\"default_provider\":\"ollama\",\"agent\":{\"context_engine\":\"legacy\"}}");
 
     hu_allocator_t alloc = hu_system_allocator();
     hu_app_ctx_t ctx;
