@@ -224,14 +224,18 @@ def _label_send(msg, assistant_rows, exact_guids=frozenset(), exact_from=None):
     return "huuman" if any(_texts_match(n, delivered) for n in near) else "ambiguous"
 
 
-def analyze(chat_path, mem_path, since, now):
-    """Per-turn outcomes for every 1:1 contact. Returns counts + per_turn rows
-    (no message text)."""
+def attribute(chat_path, mem_path, since):
+    """Who sent each 1:1 outbound message: "seth", "huuman" or "ambiguous".
+    The single source of attribution for this metric and for tools that must
+    learn only from Seth's own texts (measure_contact_reply_lengths.py).
+
+    Returns {"messages": {contact: [msg...]}, "timelines": {contact: [msg...]
+    without reactions}, "labeled": {contact: [(msg, label)] for from-me
+    messages}, "labels": {guid: label}, "exact_from", "exact_matched",
+    "exact_unmatched", "uptime_stamped"}."""
     assistant = _load_assistant(mem_path, since)
     outbound, first_stamped, uptime_stamped = _load_outbound(mem_path, since)
     outbound = outbound or {}
-    counts = {"seth": 0, "huuman": 0, "ambiguous": 0, "censored": 0}
-    per_turn = []
     messages = _load_messages(chat_path, since)
     # Records for contacts with no chat.db rows in the window never resolve.
     exact_unmatched = sum(len(v) for c, v in outbound.items() if c not in messages)
@@ -241,7 +245,6 @@ def analyze(chat_path, mem_path, since, now):
         resolved[contact], unmatched = _resolve_exact(timelines[contact],
                                                       outbound.get(contact, []))
         exact_unmatched += unmatched
-    exact_matched = sum(len(g) for g in resolved.values())
     # Provenance is complete from its first record. Uptime-stamped rows have
     # no usable time, so their chat.db send time stands in (reading the stamp
     # as epoch ms would say 1970 and make every unclaimed send Seth's).
@@ -249,10 +252,32 @@ def analyze(chat_path, mem_path, since, now):
     if first_stamped is not None:
         starts.append(first_stamped)
     exact_from = min(starts) if starts else None
-    for contact, msgs in messages.items():
+    labeled, labels = {}, {}
+    for contact, timeline in timelines.items():
+        rows = []
+        for m in timeline:
+            if m["from_me"]:
+                label = _label_send(m, assistant.get(contact, []), resolved[contact], exact_from)
+                labels[m["guid"]] = label
+                rows.append((m, label))
+        labeled[contact] = rows
+    return {"messages": messages, "timelines": timelines, "labeled": labeled,
+            "labels": labels, "exact_from": exact_from,
+            "exact_matched": sum(len(g) for g in resolved.values()),
+            "exact_unmatched": exact_unmatched, "uptime_stamped": uptime_stamped}
+
+
+def analyze(chat_path, mem_path, since, now):
+    """Per-turn outcomes for every 1:1 contact. Returns counts + per_turn rows
+    (no message text)."""
+    att = attribute(chat_path, mem_path, since)
+    exact_from, uptime_stamped = att["exact_from"], att["uptime_stamped"]
+    exact_matched, exact_unmatched = att["exact_matched"], att["exact_unmatched"]
+    counts = {"seth": 0, "huuman": 0, "ambiguous": 0, "censored": 0}
+    per_turn = []
+    for contact, msgs in att["messages"].items():
         reactions = [m for m in msgs if m["atype"] in REACTION_RANGE]
-        timeline = timelines[contact]
-        exact_guids = resolved[contact]
+        timeline = att["timelines"][contact]
         positive_targets = {_target_guid(r["assoc"]) for r in reactions
                             if not r["from_me"] and r["atype"] in POSITIVE_TAPBACKS}
         i = 0
@@ -271,8 +296,7 @@ def analyze(chat_path, mem_path, since, now):
             if (now - end).total_seconds() < REPLY_WINDOW_S:
                 counts["censored"] += 1
                 continue
-            labels = {_label_send(m, assistant.get(contact, []), exact_guids, exact_from)
-                      for m in turn}
+            labels = {att["labels"][m["guid"]] for m in turn}
             arm = labels.pop() if len(labels) == 1 else "ambiguous"
             counts[arm] += 1
 

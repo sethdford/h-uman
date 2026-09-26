@@ -24,7 +24,7 @@ cmake --build . -j$(nproc)
 ./human_tests
 ```
 
-All 13,903+ tests must pass. AddressSanitizer must report zero errors — every allocation must be freed.
+All 13,985+ tests must pass. AddressSanitizer must report zero errors — every allocation must be freed.
 
 **Release build:**
 
@@ -41,11 +41,19 @@ dev-preset tree the committed baselines were taken against — rather than the
 different feature set and its counts are not comparable. So it first refreshes
 `build/` incrementally whenever anything under `src/` or `include/` is newer
 than the built artifacts, printing `Refreshing build/ for the dead-strip
-ratchet...`: roughly a second on a warm tree, around 48 seconds when the
-dependency scan has to walk every object. Without that refresh the gate would
-measure an older tree than the one being pushed. A missing `build/`, or one
+ratchet...`. When nothing is newer it skips that step entirely, because a no-op
+`cmake --build` still re-scans dependencies for ~1,000 objects and measured 46 s
+(see the comment at the gate in `.githooks/pre-push`); the ratchet's own relink
+and link-map read is about a second on a warm tree. Without the refresh the gate
+would measure an older tree than the one being pushed. A missing `build/`, or one
 that fails to build, skips the gate with a single line instead of blocking the
-push. The two counters and how to respond when one grows:
+push.
+
+Note that `core.hooksPath` is set to an absolute path, so every worktree runs the
+hooks from the main checkout's working tree rather than from the branch being
+pushed. A branch that adds or edits a hook therefore does not exercise it on its
+own pushes: check the gate's own output in the push log rather than inferring from
+a clean exit, and run the script directly to test it. The two counters and how to respond when one grows:
 `.claude/rules/dead-strip-ratchet.md`.
 
 ## Code Style
