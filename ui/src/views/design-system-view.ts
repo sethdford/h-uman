@@ -186,9 +186,15 @@ export class HuDesignSystemView extends LitElement {
       margin-top: var(--hu-space-md);
     }
 
+    /* Own size container so 14cqi tracks this card, not hu-card's shadow internals. */
+    .quiet-card {
+      container-type: inline-size;
+    }
+
     .quiet-display {
       font-family: var(--hu-type-display-lg-family, var(--hu-font));
-      font-size: var(--hu-text-display-xl, var(--hu-text-3xl));
+      /* Capped by card width: at 6rem, "Actually" overflowed the grid card. */
+      font-size: min(var(--hu-text-display-xl, var(--hu-text-3xl)), 14cqi);
       font-weight: var(--hu-type-display-lg-weight);
       letter-spacing: var(--hu-type-display-lg-letter-spacing);
       line-height: 1;
@@ -231,13 +237,15 @@ export class HuDesignSystemView extends LitElement {
         ></hu-section-header>
         <div class="foundations-grid">
           <hu-card>
-            <h3 class="card-title">Quiet Room display</h3>
-            <p class="quiet-display">Actually <em>yours.</em></p>
-            <p class="type-body">
-              Newsreader with optical sizing when the preview is on; Avenir otherwise.
-              <code class="path">--hu-font-display</code>,
-              <code class="path">--hu-text-display-xl</code>.
-            </p>
+            <div class="quiet-card">
+              <h3 class="card-title">Quiet Room display</h3>
+              <p class="quiet-display">Actually <em>yours.</em></p>
+              <p class="type-body">
+                Newsreader with optical sizing when the preview is on; the UI face otherwise.
+                <code class="path">--hu-font-display</code>,
+                <code class="path">--hu-text-display-xl</code>.
+              </p>
+            </div>
           </hu-card>
           <hu-card>
             <h3 class="card-title">Typography</h3>

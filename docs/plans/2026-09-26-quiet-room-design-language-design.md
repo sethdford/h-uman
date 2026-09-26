@@ -88,7 +88,11 @@ persona and history**. It is **not** true of a message sent to a cloud model: th
 crosses the boundary. Every privacy claim on the site and in the dashboard must say which
 of the two it means. Concretely:
 
-- Allowed: "Your memory, persona and history never leave your machine." "Choose a local model and nothing leaves at all."
+- Candidate, UNVERIFIED — first item of SP2's claim-by-claim review: "Your memory, persona and history never leave your machine." "Choose a local model and nothing leaves at all."
+  The first sentence is doubtful as written: the streaming turn builds memory context and
+  the persona head into the prompt it sends to the configured provider
+  (`src/agent/agent_stream.c` ~517–551), so with a cloud model, parts of memory and persona
+  plausibly cross the boundary inside that prompt (final-review correction, 2026-09-26).
 - Not allowed: "Nothing leaves your device." "0 bytes of you sent" (when cloud model calls happened).
 
 A privacy site that overclaims privacy is a bigger reputational risk for this product than
