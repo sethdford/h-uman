@@ -121,6 +121,8 @@ const base = rawBase.endsWith("/") ? rawBase : rawBase + "/";
       .quiet-primary:focus-visible, .quiet-link:focus-visible { outline: 2px solid var(--hu-focus-ring); outline-offset: 2px; }
       .quiet-swatches { display: flex; flex-wrap: wrap; gap: var(--hu-space-xs); list-style: none; padding: 0; font-size: var(--hu-text-2xs); }
       .quiet-swatches li { border: 1px solid var(--hu-border); border-radius: var(--hu-radius-sm); padding: var(--hu-space-sm) var(--hu-space-md); }
+      .quiet-swatches li.quiet-swatch-brand { display: flex; align-items: center; gap: var(--hu-space-xs); border: none; padding-inline: 0; color: var(--hu-text-secondary); }
+      .quiet-brand-chip { display: inline-block; inline-size: var(--hu-space-lg); block-size: var(--hu-space-lg); border: 1px solid var(--hu-border); border-radius: var(--hu-radius-sm); }
     </style>
   </head>
   <body
@@ -297,7 +299,7 @@ const base = rawBase.endsWith("/") ? rawBase : rawBase + "/";
           <p class="quiet-lede">
             The web-only editorial layer. Opt in with <code>data-brand="quiet"</code>. Light and dark
             are shown side by side; every text pair below is measured by
-            <code>design-tokens/check-contrast.ts</code> on each build.
+            <code>design-tokens/check-contrast.ts</code> in CI; the brand swatch is decorative and carries no text.
           </p>
           <div class="quiet-pair">
             {["light", "dark"].map((mode) => (
@@ -315,7 +317,10 @@ const base = rawBase.endsWith("/") ? rawBase : rawBase + "/";
                   <li style="background: var(--hu-bg-inset)">inset</li>
                   <li style="background: var(--hu-bg-surface)">card</li>
                   <li style="background: var(--hu-accent); color: var(--hu-on-accent)">accent</li>
-                  <li style="background: var(--hu-accent-brand)" aria-label="accent-brand, decorative only">brand</li>
+                  <li class="quiet-swatch-brand">
+                    <span class="quiet-brand-chip" role="img" style="background: var(--hu-accent-brand)" aria-label="accent-brand, decorative only"></span>
+                    <span>brand (decorative)</span>
+                  </li>
                 </ul>
               </div>
             ))}
