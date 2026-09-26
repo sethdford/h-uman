@@ -213,6 +213,15 @@ static const hu_channel_gate_t hu_channel_gates[] = {
     {"twilio", "HU_ENABLE_TWILIO", HU_BUILT_IN(HU_HAS_TWILIO)},
     {"onebot", "HU_ENABLE_ONEBOT", HU_BUILT_IN(HU_HAS_ONEBOT)},
     {"qq", "HU_ENABLE_QQ", HU_BUILT_IN(HU_HAS_QQ)},
+    /* Not created in the block below — web and mattermost listen through the
+     * gateway, voice through Sonata — but each is still dead in a binary
+     * built without its gate, which is all this table answers. Cross-checked
+     * against src/channels/channel_catalog.c, which cannot answer it itself:
+     * its entries sit inside the same gates, so an absent channel is absent
+     * from the catalog too. */
+    {"web", "HU_ENABLE_WEB", HU_BUILT_IN(HU_HAS_WEB)},
+    {"mattermost", "HU_ENABLE_MATTERMOST", HU_BUILT_IN(HU_HAS_MATTERMOST)},
+    {"voice", "HU_ENABLE_SONATA", HU_BUILT_IN(HU_HAS_SONATA)},
 };
 
 static const hu_channel_gate_t *hu_channel_gate_find(const char *key) {

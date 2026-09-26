@@ -225,10 +225,11 @@ static void bootstrap_context_engine_legacy_installs_legacy_engine(void) {
  * would silently flip the test between its positive and negative branch
  * without ever failing. Ask the build which channel it lacks instead. */
 static const char *const hu_test_channel_keys[] = {
-    "email",   "imap",     "imessage",   "gmail",  "pwa",         "telegram", "discord",
-    "slack",   "signal",   "whatsapp",   "line",   "google_chat", "facebook", "instagram",
-    "twitter", "tiktok",   "google_rcs", "mqtt",   "matrix",      "irc",      "nostr",
-    "lark",    "dingtalk", "teams",      "twilio", "onebot",      "qq",
+    "email",    "imap",      "imessage", "gmail",    "pwa",        "telegram",
+    "discord",  "slack",     "signal",   "whatsapp", "line",       "google_chat",
+    "facebook", "instagram", "twitter",  "tiktok",   "google_rcs", "mqtt",
+    "matrix",   "irc",       "nostr",    "lark",     "dingtalk",   "teams",
+    "twilio",   "onebot",    "qq",       "web",      "mattermost", "voice",
 };
 
 static int hu_test_count_substr(const char *haystack, const char *needle) {
@@ -257,8 +258,12 @@ static size_t hu_test_warn_for_config(const char *json, const char *log_path) {
     memset(&cfg, 0, sizeof(cfg));
     hu_arena_t *arena = hu_arena_create(backing);
     HU_ASSERT_NOT_NULL(arena);
+    hu_allocator_t a = hu_arena_allocator(arena);
+    /* include/human/config.h: seed defaults before parse_json, as the real
+     * load path does. apply_defaults memsets, so the arena goes in after. */
+    hu_config_apply_defaults(&cfg, &a);
     cfg.arena = arena;
-    cfg.allocator = hu_arena_allocator(arena);
+    cfg.allocator = a;
     HU_ASSERT_EQ(hu_config_parse_json(&cfg, json, strlen(json)), HU_OK);
 
     int dup_fd = dup(fileno(stderr));
