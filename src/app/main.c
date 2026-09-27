@@ -67,6 +67,8 @@
 #include "human/session.h"
 #include "human/skill_registry.h"
 #include "human/skill_scaffold.h"
+#include "human/tts/speech_direction.h"
+#include "human/tts/speech_perform.h"
 #include "human/tts/speech_rewrite.h"
 #include "human/version.h"
 #ifdef HU_HAS_SKILLS
@@ -2668,12 +2670,46 @@ static hu_error_t cmd_persona(hu_allocator_t *alloc, int argc, char **argv) {
 /* `human voice preview` — synthesize one reply exactly the way the daemon
  * does (same hu_voice_reply_build_request, same channel container) and write
  * the file, without waiting for the daemon's voice roll. */
+/* Synthesize one request and write it to `out_path` (NULL/"" = temp file). */
+static hu_error_t preview_render(hu_allocator_t *alloc, const char *api_key, const char *channel,
+                                 hu_voice_reply_request_t *req, const char *out_path) {
+    unsigned char *bytes = NULL;
+    size_t len = 0;
+    hu_error_t err = hu_cartesia_tts_synthesize(alloc, api_key, strlen(api_key), req->transcript,
+                                                req->transcript_len, &req->tts,
+                                                hu_tts_format_for_channel(channel), &bytes, &len);
+    if (err != HU_OK || !bytes || len == 0) {
+        fprintf(stderr, "Error: Cartesia synthesis failed: %s\n", hu_error_string(err));
+        return err != HU_OK ? err : HU_ERR_IO;
+    }
+    char path[512];
+    err = hu_voice_reply_audio_to_temp(alloc, channel, bytes, len, path, sizeof(path));
+    hu_cartesia_tts_free_bytes(alloc, bytes, len);
+    if (err != HU_OK) {
+        fprintf(stderr, "Error: audio conversion failed: %s\n", hu_error_string(err));
+        return err;
+    }
+    if (out_path && out_path[0]) {
+        if (rename(path, out_path) != 0) {
+            fprintf(stderr, "Error: could not move %s to %s\n", path, out_path);
+            return HU_ERR_IO;
+        }
+        printf("wrote %s (%zu bytes of audio)\n", out_path, len);
+    } else {
+        printf("wrote %s (%zu bytes of audio; temp file, move it before the next run)\n", path,
+               len);
+    }
+    return HU_OK;
+}
+
 static hu_error_t cmd_voice_preview(hu_allocator_t *alloc, int argc, char **argv) {
     const char *text = NULL, *incoming = NULL, *persona_name = NULL, *out_path = NULL;
     const char *channel = "imessage";
     const char *model_override = NULL;
     const char *voice_override = NULL; /* the A/B "voice" arm (e.g. Ferni) */
     const char *rewrite_arg = NULL;    /* F1 S1: off|shadow|live (default HU_SPEECH_REWRITE) */
+    bool direct = false;               /* F2-voice: the model performs the line */
+    const char *to_name = NULL, *relationship = NULL, *laugh_arg = NULL, *baseline_out = NULL;
     float speed_override = 0.f;
     bool raw = false; /* skip transcript prep: the A/B "prep off" arm */
     for (int i = 3; i < argc; i++) {
@@ -2685,6 +2721,16 @@ static hu_error_t cmd_voice_preview(hu_allocator_t *alloc, int argc, char **argv
             voice_override = argv[++i];
         else if (strcmp(argv[i], "--rewrite") == 0 && i + 1 < argc)
             rewrite_arg = argv[++i];
+        else if (strcmp(argv[i], "--direct") == 0)
+            direct = true;
+        else if (strcmp(argv[i], "--to") == 0 && i + 1 < argc)
+            to_name = argv[++i];
+        else if (strcmp(argv[i], "--relationship") == 0 && i + 1 < argc)
+            relationship = argv[++i];
+        else if (strcmp(argv[i], "--laugh") == 0 && i + 1 < argc)
+            laugh_arg = argv[++i];
+        else if (strcmp(argv[i], "--baseline-out") == 0 && i + 1 < argc)
+            baseline_out = argv[++i];
         else if (strcmp(argv[i], "--speed") == 0 && i + 1 < argc)
             speed_override = (float)atof(argv[++i]);
         else if (strcmp(argv[i], "--raw") == 0)
@@ -2704,7 +2750,8 @@ static hu_error_t cmd_voice_preview(hu_allocator_t *alloc, int argc, char **argv
         fprintf(stderr, "Usage: human voice preview --text <reply> --persona <name> "
                         "[--incoming <msg>] [--channel imessage] [--out <file>] "
                         "[--model <id>] [--voice <id>] [--speed <0.6-1.5>] [--raw] "
-                        "[--rewrite off|shadow|live]\n");
+                        "[--rewrite off|shadow|live] [--direct [--to NAME] "
+                        "[--relationship REL] [--laugh text|cartesia] [--baseline-out PATH]]\n");
         return HU_ERR_INVALID_ARGUMENT;
     }
 
@@ -2748,6 +2795,7 @@ static hu_error_t cmd_voice_preview(hu_allocator_t *alloc, int argc, char **argv
     if (speed_override > 0.f)
         persona.voice.default_speed = speed_override;
     hu_voice_reply_request_t req;
+    bool directed_ready = false;
     if (raw) {
         memset(&req, 0, sizeof(req));
         size_t tl = strlen(text);
@@ -2776,7 +2824,8 @@ static hu_error_t cmd_voice_preview(hu_allocator_t *alloc, int argc, char **argv
             hu_speech_rewrite_mode_parse(rewrite_arg ? rewrite_arg : getenv("HU_SPEECH_REWRITE"));
         hu_provider_t prov = {0};
         bool have_prov = false;
-        if (rw != HU_SPEECH_REWRITE_OFF && cfg.default_provider && cfg.default_provider[0])
+        if ((rw != HU_SPEECH_REWRITE_OFF || direct) && cfg.default_provider &&
+            cfg.default_provider[0])
             have_prov =
                 hu_provider_create_from_config(alloc, &cfg, cfg.default_provider,
                                                strlen(cfg.default_provider), &prov) == HU_OK;
@@ -2784,8 +2833,6 @@ static hu_error_t cmd_voice_preview(hu_allocator_t *alloc, int argc, char **argv
         hu_speech_result_t sp;
         (void)hu_speech_prepare(alloc, have_prov ? &prov : NULL, mdl, strlen(mdl), &persona, rw,
                                 text, strlen(text), incoming, incoming ? strlen(incoming) : 0, &sp);
-        if (have_prov && prov.vtable && prov.vtable->deinit)
-            prov.vtable->deinit(prov.ctx, alloc);
         printf("speech: rewrite=%s used=%d reason=%s\nspoken: %s\n",
                rw == HU_SPEECH_REWRITE_LIVE ? "live"
                                             : (rw == HU_SPEECH_REWRITE_SHADOW ? "shadow" : "off"),
@@ -2794,12 +2841,51 @@ static hu_error_t cmd_voice_preview(hu_allocator_t *alloc, int argc, char **argv
             printf("rewrite (not spoken): %s\n", sp.rewritten);
         if (sp.spoken_len == 0) {
             fprintf(stderr, "Error: nothing speakable in --text\n");
+            if (have_prov && prov.vtable && prov.vtable->deinit)
+                prov.vtable->deinit(prov.ctx, alloc);
             hu_persona_free(&persona);
             return HU_ERR_INVALID_ARGUMENT;
         }
-        err = hu_voice_reply_build_request_ex(&persona.voice, sp.spoken, sp.spoken_len, incoming,
-                                              incoming ? strlen(incoming) : 0, tmb.tm_hour,
-                                              (uint32_t)now, sp.laughter_cue, &req);
+        if (direct) {
+            /* The ear test: the directed memo (--out) beside today's (--baseline-out). */
+            hu_perform_scene_t scene = {.speaker = persona.name,
+                                        .listener = to_name,
+                                        .relationship = relationship,
+                                        .hour_local = tmb.tm_hour,
+                                        .weekday = tmb.tm_wday,
+                                        .inbound = incoming,
+                                        .inbound_len = incoming ? strlen(incoming) : 0};
+            static hu_perform_result_t pr;
+            (void)hu_speech_perform(alloc, have_prov ? &prov : NULL, mdl, strlen(mdl), &scene,
+                                    sp.spoken, sp.spoken_len, &pr);
+            printf("direction: ok=%d reason=%s\nwords: %s\n", pr.ok ? 1 : 0, pr.reason,
+                   pr.dir.words);
+            if (baseline_out && baseline_out[0]) {
+                hu_voice_reply_request_t base;
+                if (hu_voice_reply_build_request_ex(&persona.voice, sp.spoken, sp.spoken_len,
+                                                    incoming, incoming ? strlen(incoming) : 0,
+                                                    tmb.tm_hour, (uint32_t)now, sp.laughter_cue,
+                                                    &base) == HU_OK)
+                    (void)preview_render(alloc, api_key, channel, &base, baseline_out);
+            }
+            if (pr.ok) {
+                static char rendered[HU_DIRECTION_RENDER_CAP];
+                size_t rn = hu_direction_render(&pr.dir, hu_laugh_style_parse(laugh_arg), rendered,
+                                                sizeof(rendered));
+                if (rn > 0 && hu_voice_reply_build_request_directed(
+                                  &persona.voice, rendered, rn, hu_direction_first_emotion(&pr.dir),
+                                  pr.dir.sentences, &req) == HU_OK)
+                    directed_ready = true;
+            }
+        }
+        if (have_prov && prov.vtable && prov.vtable->deinit)
+            prov.vtable->deinit(prov.ctx, alloc);
+        if (!directed_ready)
+            err = hu_voice_reply_build_request_ex(
+                &persona.voice, sp.spoken, sp.spoken_len, incoming, incoming ? strlen(incoming) : 0,
+                tmb.tm_hour, (uint32_t)now, sp.laughter_cue, &req);
+        else
+            err = HU_OK;
     }
     if (err != HU_OK) {
         fprintf(stderr, "Error: transcript prep failed: %s\n", hu_error_string(err));
@@ -2812,35 +2898,9 @@ static hu_error_t cmd_voice_preview(hu_allocator_t *alloc, int argc, char **argv
            (double)req.tts.speed, (double)req.tts.volume, req.tts.nonverbals ? "on" : "off",
            channel);
 
-    unsigned char *bytes = NULL;
-    size_t len = 0;
-    err = hu_cartesia_tts_synthesize(alloc, api_key, strlen(api_key), req.transcript,
-                                     req.transcript_len, &req.tts,
-                                     hu_tts_format_for_channel(channel), &bytes, &len);
-    if (err != HU_OK || !bytes || len == 0) {
-        fprintf(stderr, "Error: Cartesia synthesis failed: %s\n", hu_error_string(err));
-        hu_persona_free(&persona);
-        return err != HU_OK ? err : HU_ERR_IO;
-    }
-    char path[512];
-    err = hu_voice_reply_audio_to_temp(alloc, channel, bytes, len, path, sizeof(path));
-    hu_cartesia_tts_free_bytes(alloc, bytes, len);
+    err = preview_render(alloc, api_key, channel, &req, out_path);
     hu_persona_free(&persona);
-    if (err != HU_OK) {
-        fprintf(stderr, "Error: audio conversion failed: %s\n", hu_error_string(err));
-        return err;
-    }
-    if (out_path && out_path[0]) {
-        if (rename(path, out_path) != 0) {
-            fprintf(stderr, "Error: could not move %s to %s\n", path, out_path);
-            return HU_ERR_IO;
-        }
-        printf("wrote %s (%zu bytes of audio)\n", out_path, len);
-    } else {
-        printf("wrote %s (%zu bytes of audio; temp file, move it before the next run)\n", path,
-               len);
-    }
-    return HU_OK;
+    return err;
 }
 
 /* Operator test path for native Messages voice delivery (W3): the same
