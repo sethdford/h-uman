@@ -13,9 +13,8 @@
 #include "human/core/log.h"
 #include "human/daemon.h"
 #include "human/daemon/voice_facade.h"
-#include "human/memory/verify_claim.h"
+#include "human/daemon_outbound_bus.h"
 #include "human/platform.h"
-#include "human/security/companion_safety.h"
 #include "human/security/moderation.h"
 #if defined(HU_ENABLE_CARTESIA)
 #include "human/tts/voice_reply.h"
@@ -80,26 +79,13 @@ bool hu_voice_reply_gates_clear(hu_allocator_t *alloc, const char *text, size_t 
     if (text && text_len > 0) {
         hu_moderation_result_t in_mod;
         memset(&in_mod, 0, sizeof(in_mod));
-        hu_moderation_result_t mod;
-        memset(&mod, 0, sizeof(mod));
-        hu_companion_safety_result_t cs;
-        memset(&cs, 0, sizeof(cs));
         /* Same criterion as the daemon's SHIELD-005 inbound_crisis flag. */
         if (inbound && inbound_len > 0 &&
             (hu_moderation_check(alloc, inbound, inbound_len, &in_mod) != HU_OK ||
              in_mod.self_harm))
             why = "inbound_crisis";
-        else if (hu_moderation_check(alloc, text, text_len, &mod) != HU_OK || mod.flagged)
-            why = "moderation";
-        else if (hu_companion_safety_check(alloc, text, text_len, NULL, 0, &cs) != HU_OK ||
-                 cs.flagged)
-            why = "companion_safety";
-        else if (hu_memory_has_claim_language(text, text_len))
-            why = "claim_language";
-        else {
-            why = "clear";
-            clear = true;
-        }
+        else /* the reply itself: the one definition of the outbound gates */
+            clear = hu_daemon_outbound_final_gates_clear(alloc, text, text_len, &why);
     }
     if (reason_out)
         *reason_out = why;

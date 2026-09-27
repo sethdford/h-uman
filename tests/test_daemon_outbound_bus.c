@@ -7,6 +7,7 @@
  * a final message goes via send, stops typing and flags
  * text_delivered_via_bus; iMessage finals are deferred to the post-turn
  * dispatcher (never sent here, flag stays false). */
+#include "human/config.h"
 #include "human/daemon_outbound_bus.h"
 #include "test_framework.h"
 
@@ -20,6 +21,7 @@ typedef struct mock_chan {
     int send_event_calls;
     int start_typing_calls;
     int stop_typing_calls;
+    size_t last_media_count;
     hu_outbound_stage_t last_stage;
     char last_msg[HU_BUS_MSG_LEN];
     char last_target[HU_BUS_ID_LEN];
@@ -42,9 +44,9 @@ static void mock_capture(mock_chan_t *m, const char *target, size_t target_len, 
 static hu_error_t mock_send(void *ctx, const char *target, size_t target_len, const char *msg,
                             size_t msg_len, const char *const *media, size_t media_count) {
     (void)media;
-    (void)media_count;
     mock_chan_t *m = (mock_chan_t *)ctx;
     m->send_calls++;
+    m->last_media_count = media_count;
     mock_capture(m, target, target_len, msg, msg_len);
     return HU_OK;
 }
@@ -334,6 +336,185 @@ static void test_outbound_imessage_final_is_deferred_to_dispatcher(void) {
     HU_ASSERT_FALSE(f.turn.text_delivered_via_bus);
 }
 
+/* ── Safety gates on final delivery ───────────────────────────────────── */
+
+#define FIX_MODERATION "kill them with violence and murder"
+#define FIX_COMPANION  "don't go, please stay, after everything we did you want to leave?"
+#define FIX_CLAIM      "you told me the trip was next week"
+
+static void test_final_gates_clear_truth_table(void) {
+    hu_allocator_t a = hu_system_allocator();
+    const char *why = NULL;
+
+    HU_ASSERT_TRUE(hu_daemon_outbound_final_gates_clear(&a, "sounds good, see you then", 25, &why));
+    HU_ASSERT_STR_EQ(why, "clear");
+
+    HU_ASSERT_FALSE(
+        hu_daemon_outbound_final_gates_clear(&a, FIX_MODERATION, strlen(FIX_MODERATION), &why));
+    HU_ASSERT_STR_EQ(why, "moderation");
+
+    HU_ASSERT_FALSE(
+        hu_daemon_outbound_final_gates_clear(&a, FIX_COMPANION, strlen(FIX_COMPANION), &why));
+    HU_ASSERT_STR_EQ(why, "companion_safety");
+
+    HU_ASSERT_FALSE(hu_daemon_outbound_final_gates_clear(&a, FIX_CLAIM, strlen(FIX_CLAIM), &why));
+    HU_ASSERT_STR_EQ(why, "claim_language");
+
+    /* Fails closed on nothing to check. */
+    HU_ASSERT_FALSE(hu_daemon_outbound_final_gates_clear(&a, NULL, 0, &why));
+    HU_ASSERT_STR_EQ(why, "invalid");
+    HU_ASSERT_FALSE(hu_daemon_outbound_final_gates_clear(NULL, "hi", 2, NULL));
+}
+
+/* A flagged final must not reach the channel raw: the bridge defers (sends
+ * nothing, leaves text_delivered_via_bus false) so the daemon's text path
+ * runs SHIELD-004/005, SHIELD-001 and MEM-002 and sends the replacement. */
+static void assert_final_deferred(const hu_channel_vtable_t *vt, const char *reply) {
+    fixture_t f;
+    fixture_init(&f, "mock", vt);
+    hu_bus_event_t ev = make_event(HU_BUS_MESSAGE_SENT, "mock", "u1", reply);
+    ev.payload = (void *)reply;
+
+    HU_ASSERT_TRUE(hu_daemon_outbound_bus_cb(HU_BUS_MESSAGE_SENT, &ev, &f.br));
+    HU_ASSERT_EQ(f.m.send_calls, 0);
+    HU_ASSERT_EQ(f.m.send_event_calls, 0);
+    HU_ASSERT_FALSE(f.turn.text_delivered_via_bus);
+}
+
+static void test_outbound_final_moderation_flagged_defers_to_text_path(void) {
+    assert_final_deferred(&mock_vt_plain, FIX_MODERATION);
+}
+
+static void test_outbound_final_companion_flagged_defers_to_text_path(void) {
+    assert_final_deferred(&mock_vt_plain, FIX_COMPANION);
+}
+
+static void test_outbound_final_flagged_on_streaming_channel_defers(void) {
+    assert_final_deferred(&mock_vt_stream, FIX_MODERATION);
+}
+
+/* A reply longer than 200 bytes takes the rich-embed branch for discord /
+ * slack / telegram; the gate must run before that branch too. */
+static void test_outbound_final_flagged_long_discord_reply_defers(void) {
+    char longmsg[320];
+    memset(longmsg, 'a', sizeof(longmsg));
+    memcpy(longmsg, FIX_MODERATION " ", strlen(FIX_MODERATION) + 1);
+    longmsg[sizeof(longmsg) - 1] = '\0';
+
+    fixture_t f;
+    fixture_init(&f, "discord", &mock_vt_plain);
+    hu_bus_event_t ev = make_event(HU_BUS_MESSAGE_SENT, "discord", "u1", "");
+    ev.payload = longmsg;
+
+    HU_ASSERT_TRUE(hu_daemon_outbound_bus_cb(HU_BUS_MESSAGE_SENT, &ev, &f.br));
+    HU_ASSERT_EQ(f.m.send_calls, 0);
+    HU_ASSERT_FALSE(f.turn.text_delivered_via_bus);
+}
+
+/* ── Final reply ordering: voice first, then bus ──────────────────────── */
+
+/* hu_daemon_voice_reply's fallback arm is deterministic under HU_IS_TEST
+ * (hu_voice_tts mocks audio), so a voice-enabled config really sends a memo
+ * through vtable->send with one media path. "cartesia" is the provider that
+ * arm mocks with HU_ENABLE_CARTESIA on or off (src/tts/cartesia.c stubs mock
+ * too); an empty tts_provider switches the fallback arm off entirely. */
+static hu_config_t g_voice_cfg;
+
+static const hu_config_t *voice_config(void) {
+    memset(&g_voice_cfg, 0, sizeof(g_voice_cfg));
+    g_voice_cfg.channels.default_daemon.voice_enabled = true;
+    g_voice_cfg.voice.tts_provider = "cartesia";
+    return &g_voice_cfg;
+}
+
+typedef struct deliver_fixture {
+    fixture_t f;
+    hu_bus_t bus;
+    hu_agent_t agent;
+    hu_allocator_t alloc;
+    hu_daemon_final_reply_t r;
+} deliver_fixture_t;
+
+static void deliver_init(deliver_fixture_t *d, const hu_channel_vtable_t *vt,
+                         const hu_config_t *config, const char *reply) {
+    memset(d, 0, sizeof(*d));
+    fixture_init(&d->f, "mock", vt);
+    d->f.br.delivery_turn = NULL; /* the delivery function owns it */
+    hu_bus_init(&d->bus);
+    (void)hu_bus_subscribe(&d->bus, hu_daemon_outbound_bus_cb, &d->f.br, HU_BUS_EVENT_COUNT);
+    d->alloc = hu_system_allocator();
+    d->r.alloc = &d->alloc;
+    d->r.agent = &d->agent;
+    d->r.config = config;
+    d->r.ch = &d->f.sch[0];
+    d->r.batch_key = "u1";
+    d->r.key_len = 2;
+    d->r.combined = "hey";
+    d->r.combined_len = 3;
+    d->r.response = reply;
+    d->r.response_len = strlen(reply);
+    d->r.bth_hour = 14;
+    d->r.text_ready = true;
+    d->r.bus = &d->bus;
+    d->r.bridge = &d->f.br;
+    d->r.turn = &d->f.turn;
+}
+
+static void deliver_fini(deliver_fixture_t *d) {
+    hu_bus_unsubscribe(&d->bus, hu_daemon_outbound_bus_cb, &d->f.br);
+    hu_bus_deinit(&d->bus);
+}
+
+/* Reachability control: with no voice config the bus delivers the text once. */
+static void test_deliver_final_without_voice_goes_out_as_text_via_bus(void) {
+    deliver_fixture_t d;
+    deliver_init(&d, &mock_vt_plain, NULL, "sounds good");
+    HU_ASSERT_FALSE(hu_daemon_deliver_final_reply(&d.r));
+    HU_ASSERT_EQ(d.f.m.send_calls, 1);
+    HU_ASSERT_EQ((int)d.f.m.last_media_count, 0);
+    HU_ASSERT_STR_EQ(d.f.m.last_msg, "sounds good");
+    HU_ASSERT_TRUE(d.f.turn.text_delivered_via_bus);
+    HU_ASSERT_TRUE(d.f.br.delivery_turn == NULL);
+    deliver_fini(&d);
+}
+
+/* One reply, one delivery: a sent voice memo means the bus never sends text. */
+static void test_deliver_final_voice_sent_skips_bus_text(void) {
+    deliver_fixture_t d;
+    deliver_init(&d, &mock_vt_plain, voice_config(), "yeah call whenever");
+    HU_ASSERT_TRUE(hu_daemon_deliver_final_reply(&d.r));
+    HU_ASSERT_EQ(d.f.m.send_calls, 1);
+    HU_ASSERT_EQ((int)d.f.m.last_media_count, 1);
+    HU_ASSERT_FALSE(d.f.turn.text_delivered_via_bus);
+    deliver_fini(&d);
+}
+
+/* Bus delivery used to stop the typing indicator; after a voice memo nothing
+ * else would, so the delivery function stops it. */
+static void test_deliver_final_voice_on_streaming_channel_stops_typing(void) {
+    deliver_fixture_t d;
+    deliver_init(&d, &mock_vt_stream, voice_config(), "yeah call whenever");
+    d.f.turn.typing_started = true;
+    HU_ASSERT_TRUE(hu_daemon_deliver_final_reply(&d.r));
+    HU_ASSERT_EQ(d.f.m.send_event_calls, 0);
+    HU_ASSERT_EQ(d.f.m.stop_typing_calls, 1);
+    HU_ASSERT_FALSE(d.f.turn.text_delivered_via_bus);
+    deliver_fini(&d);
+}
+
+/* A failed turn publishes nothing and leaves the flag clear for the caller. */
+static void test_deliver_final_not_text_ready_publishes_nothing(void) {
+    deliver_fixture_t d;
+    deliver_init(&d, &mock_vt_plain, NULL, "partial");
+    d.r.text_ready = false;
+    d.f.turn.text_delivered_via_bus = true; /* stale from a previous turn */
+    HU_ASSERT_FALSE(hu_daemon_deliver_final_reply(&d.r));
+    HU_ASSERT_EQ(d.f.m.send_calls, 0);
+    HU_ASSERT_FALSE(d.f.turn.text_delivered_via_bus);
+    HU_ASSERT_FALSE(hu_daemon_deliver_final_reply(NULL));
+    deliver_fini(&d);
+}
+
 static void test_outbound_ignores_other_events_unknown_channels_and_empty(void) {
     fixture_t f;
     fixture_init(&f, "mock", &mock_vt_plain);
@@ -359,4 +540,13 @@ void run_daemon_outbound_bus_tests(void) {
     HU_RUN_TEST(test_outbound_chunk_starts_typing_once_and_streams);
     HU_RUN_TEST(test_outbound_imessage_final_is_deferred_to_dispatcher);
     HU_RUN_TEST(test_outbound_ignores_other_events_unknown_channels_and_empty);
+    HU_RUN_TEST(test_final_gates_clear_truth_table);
+    HU_RUN_TEST(test_outbound_final_moderation_flagged_defers_to_text_path);
+    HU_RUN_TEST(test_outbound_final_companion_flagged_defers_to_text_path);
+    HU_RUN_TEST(test_outbound_final_flagged_on_streaming_channel_defers);
+    HU_RUN_TEST(test_outbound_final_flagged_long_discord_reply_defers);
+    HU_RUN_TEST(test_deliver_final_without_voice_goes_out_as_text_via_bus);
+    HU_RUN_TEST(test_deliver_final_voice_sent_skips_bus_text);
+    HU_RUN_TEST(test_deliver_final_voice_on_streaming_channel_stops_typing);
+    HU_RUN_TEST(test_deliver_final_not_text_ready_publishes_nothing);
 }

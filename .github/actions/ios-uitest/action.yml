@@ -27,6 +27,12 @@ runs:
       run: cd apps/ios && xcodegen generate
       shell: bash
 
+    - name: Wait for simulator and boot it
+      env:
+        DEST: ${{ inputs.destination }}
+      run: bash "$GITHUB_ACTION_PATH/wait-for-simulator.sh" "$DEST"
+      shell: bash
+
     - name: XCUITest (HumaniOSUITests)
       env:
         DEST: ${{ inputs.destination }}
