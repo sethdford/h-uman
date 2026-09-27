@@ -347,6 +347,21 @@ layers → full model at ×9.3–10.2:
 **Drive rule result: FAIL** (≤ 15 min/item required; measured ~4× over). A faster
 drive cannot fix a compute-bound prefill. **Do not buy the drive yet.**
 
+**Follow-up measured 2026-09-27.**
+- **Token-batched projections** (fork branch `perf/batched-prefill`, `69118b3`):
+  first-step logits **bit-identical** to the pristine engine (independently
+  re-verified), but **no speedup**: CPU time 1,402.7 s vs 1,404.1 s on the same
+  816-token run. Wall time was worse, from machine contention. The expert-batch
+  kernel it defines has no callers. Not merged.
+- **Profile** (macOS `sample`, 30 s mid-prefill, all threads): **64.2% idle in
+  `__psynch_cvwait`**, 15.6% `k3_matmul_mxfp4`, 11.0% `k3_matmul_bf16`, 6.2%
+  `pread`, 2.3% MLA + router. Most threads sit parked. The cost is fine-grained
+  parallelism (one OpenMP region per small matvec), not memory re-reads. The
+  plausible fix is **expert-parallel prefill** (threads take whole experts). Its
+  ceiling is ≈ 16 / 5.8 busy cores ≈ **2.7×**, which puts the best case near
+  **~20 min/item**, still over the 15-min rule. The local teacher stays marginal
+  on this Mac even with a good kernel.
+
 **Next step (separate task, needs its own approval):** a token-tiled batched
 prefill kernel in the fork (read each weight row once per block of 32–64 tokens).
 Per-element summation order is unchanged, so the R0 bit-identical gate applies.
