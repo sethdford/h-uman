@@ -263,6 +263,13 @@ final class HumaniOSFleetUITests: XCTestCase {
         let more = moreTabButton()
         assertTouchTargetReachable(more, context: "More tab")
         tapReachable(more, context: "More tab")
+        // The system More controller keeps its navigation stack across tab switches:
+        // after visiting Tools, reopening More lands on Tools, not on the overflow list.
+        // Pop back to the list (a user would tap the "More" back button too).
+        let backToList = app.navigationBars["More"].buttons["BackButton"]
+        if backToList.waitForExistence(timeout: 2) {
+            tapReachable(backToList, context: "More back button")
+        }
     }
 
     private func tapOverflowTabRow(_ label: String) {

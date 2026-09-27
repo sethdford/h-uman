@@ -30,12 +30,21 @@ interface HealthRes {
   uptime_secs?: number;
 }
 
+/** Reply of the gateway's `update.check`. `disabled` means auto_update is
+ * "off" and the gateway did not contact GitHub; only `{ force: true }` does. */
 interface UpdateInfo {
   available?: boolean;
+  disabled?: boolean;
+  current?: string;
+  latest?: string;
+  error?: string;
+  /** Legacy field names, still accepted from older gateways. */
   current_version?: string;
   latest_version?: string;
   url?: string;
 }
+
+const RELEASES_URL = "https://github.com/sethdford/h-uman/releases/latest";
 
 interface CapabilitiesRes {
   version?: string;
@@ -118,6 +127,25 @@ export class ScOverviewView extends GatewayAwareLitElement {
           &:hover {
             color: var(--hu-accent-tertiary-hover);
             text-decoration: underline;
+          }
+        }
+
+        & button.update-link {
+          background: none;
+          border: 0;
+          padding: 0;
+          font: inherit;
+          cursor: pointer;
+
+          &:focus-visible {
+            outline: var(--hu-focus-ring-width) solid var(--hu-accent);
+            outline-offset: 2px;
+          }
+
+          &:disabled {
+            cursor: default;
+            color: var(--hu-text-muted);
+            text-decoration: none;
           }
         }
       }
@@ -367,6 +395,9 @@ export class ScOverviewView extends GatewayAwareLitElement {
   @state() private loading = true;
   @state() private error = "";
   @state() private updateInfo: UpdateInfo = {};
+  /** Result of an explicit "Check now"; survives the 30 s auto-refresh. */
+  @state() private manualUpdate: UpdateInfo | null = null;
+  @state() private updateChecking = false;
   @state() private activityEvents: ActivityEvent[] = [];
   @state() private channelsExpanded = false;
   @state() private hulaAnalytics: {
@@ -543,6 +574,48 @@ export class ScOverviewView extends GatewayAwareLitElement {
     }
   }
 
+  /** User-initiated update check: the only path that reaches GitHub when
+   * auto_update is off. */
+  private async _checkForUpdates(): Promise<void> {
+    const gw = this.gateway;
+    if (!gw || this.updateChecking) return;
+    this.updateChecking = true;
+    try {
+      this.manualUpdate = await gw.request<UpdateInfo>("update.check", { force: true });
+    } catch {
+      this.manualUpdate = { error: "unreachable" };
+    } finally {
+      this.updateChecking = false;
+    }
+  }
+
+  private _renderUpdateStatus() {
+    const info = this.manualUpdate ?? this.updateInfo;
+    if (info.available) {
+      return html`<span>&middot;</span>
+        <a class="update-link" href=${info.url ?? RELEASES_URL} target="_blank" rel="noopener">
+          Update to ${info.latest ?? info.latest_version}
+        </a>`;
+    }
+    if (this.manualUpdate) {
+      return html`<span>&middot;</span>
+        <span>${this.manualUpdate.error ? "Couldn't check for updates" : "Up to date"}</span>`;
+    }
+    if (info.disabled) {
+      return html`<span>&middot;</span>
+        <span>Update checks are off</span>
+        <span>&middot;</span>
+        <button
+          class="update-link"
+          ?disabled=${this.updateChecking}
+          @click=${() => this._checkForUpdates()}
+        >
+          ${this.updateChecking ? "Checking…" : "Check now"}
+        </button>`;
+    }
+    return nothing;
+  }
+
   private _updateWelcome(): void {
     const welcome = this.shadowRoot?.querySelector("hu-welcome") as
       (HTMLElement & { markStep: (k: string) => void }) | null;
@@ -673,19 +746,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
             <div class="hero-status">
               <div class="hero-meta">
                 <span>v${cap.version ?? "h-uman"}</span>
-                ${
-                  this.updateInfo.available
-                    ? html`<span>&middot;</span>
-                        <a
-                          class="update-link"
-                          href=${this.updateInfo.url ?? "#"}
-                          target="_blank"
-                          rel="noopener"
-                        >
-                          Update to ${this.updateInfo.latest_version}
-                        </a>`
-                    : nothing
-                }
+                ${this._renderUpdateStatus()}
               </div>
             </div>
           </div>
