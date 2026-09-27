@@ -17,8 +17,9 @@ const SHADOW_DOM_EXCLUDED_RULES: string[] = [];
  * - Time-based animations: wait until none has run for `quietMs`, looping
  *   because every data arrival starts a new entrance wave.
  * - Scroll-driven animations (`animation-timeline: view()` reveals such as
- *   hu-card-enter): cancelled. Nobody scrolls a headless page, so below-the-fold
- *   cards would otherwise sit at partial opacity forever.
+ *   hu-card-enter): cancelled inside the quiet window, so any transition the
+ *   cancel itself starts is waited on too. Nobody scrolls a headless page, so
+ *   below-the-fold cards would otherwise sit at partial opacity forever.
  * - Ignored: anything not `running` (idle transitions never settle `finished`),
  *   infinite loops (status pulses), and transitions of properties axe never
  *   reads for contrast: `filter` (the 3s ambient-warmth sepia on hu-app) and
@@ -42,14 +43,11 @@ async function settlePage(page: Page, quietMs = 250, timeout = 5000): Promise<vo
         walk(document);
         return [...out];
       };
-      const pending = (): Animation[] =>
-        all().filter(
-          (a) =>
-            a.playState === "running" &&
-            a.timeline instanceof DocumentTimeline &&
-            a.effect?.getComputedTiming().iterations !== Infinity &&
-            !["filter", "scrollbar-color"].includes((a as CSSTransition).transitionProperty),
-        );
+      const isPending = (a: Animation): boolean =>
+        a.playState === "running" &&
+        a.timeline instanceof DocumentTimeline &&
+        a.effect?.getComputedTiming().iterations !== Infinity &&
+        !["filter", "scrollbar-color"].includes((a as CSSTransition).transitionProperty);
       const gatewayBusy = (): boolean => {
         const gw = (document.querySelector("hu-app") as { gateway?: unknown } | null)?.gateway as
           { status?: string; inFlight?: number } | undefined;
@@ -58,15 +56,19 @@ async function settlePage(page: Page, quietMs = 250, timeout = 5000): Promise<vo
       const deadline = performance.now() + timeout;
       let quietSince = performance.now();
       while (performance.now() - quietSince < quietMs) {
+        const anims = all();
+        const scrollDriven = anims.filter((a) => !(a.timeline instanceof DocumentTimeline));
+        for (const a of scrollDriven) a.cancel();
+        const busy = gatewayBusy();
+        const active = anims.filter(isPending);
         if (performance.now() > deadline) {
-          const names = pending().map(
+          const names = active.map(
             (a) => (a as CSSAnimation).animationName ?? (a as CSSTransition).transitionProperty,
           );
-          const gw = gatewayBusy() ? "gateway busy; " : "";
+          const gw = busy ? "gateway busy; " : "";
           throw new Error(`page not settled after ${timeout}ms: ${gw}${names.join(", ")}`);
         }
-        const active = pending();
-        if (gatewayBusy()) {
+        if (busy || scrollDriven.length > 0) {
           quietSince = performance.now();
         } else if (active.length > 0) {
           await Promise.race([
@@ -77,7 +79,6 @@ async function settlePage(page: Page, quietMs = 250, timeout = 5000): Promise<vo
         }
         await new Promise((r) => setTimeout(r, 50));
       }
-      for (const a of all()) if (!(a.timeline instanceof DocumentTimeline)) a.cancel();
     },
     { quietMs, timeout },
   );
