@@ -8,76 +8,27 @@
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
+import {
+  colorToKotlin,
+  formatSwiftColor,
+  hexToKotlin,
+  isColorLike,
+} from "./color-emit-lib.js";
 import { generateDynamicColorCSS } from "./dynamic-color-lib.js";
+import { generateQuietCSS } from "./quiet-lib.js";
+import {
+  TOKEN_FILES,
+  collectTokens,
+  partitionByPlatform,
+  readTokenSources,
+  resolveRefs,
+  type TokenMap,
+} from "./token-lib.js";
 
 const REM_PX = 16;
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(SCRIPT_DIR, "..");
 const TOKENS_DIR = path.join(ROOT, "design-tokens");
-
-const TOKEN_FILES = [
-  "base.tokens.json",
-  "typography.tokens.json",
-  "motion.tokens.json",
-  "semantic.tokens.json",
-  "components.tokens.json",
-  "opacity.tokens.json",
-  "elevation.tokens.json",
-  "breakpoints.tokens.json",
-  "glass.tokens.json",
-  "data-viz.tokens.json",
-  "spatial.tokens.json",
-  "ambient.tokens.json",
-  "3d.tokens.json",
-];
-
-type TokenValue = string | number;
-type TokenMap = Record<string, TokenValue>;
-
-/** Recursively collect all $value entries into a flat path -> value map */
-function collectTokens(obj: unknown, prefix = ""): TokenMap {
-  const result: TokenMap = {};
-  if (obj === null || typeof obj !== "object") return result;
-  const rec = obj as Record<string, unknown>;
-
-  for (const [key, val] of Object.entries(rec)) {
-    if (key.startsWith("$")) continue;
-    const pathPart = prefix ? `${prefix}.${key}` : key;
-    if (val !== null && typeof val === "object" && "$value" in val) {
-      const v = (val as { $value: TokenValue }).$value;
-      result[pathPart] = v;
-    } else if (typeof val === "object" && val !== null) {
-      Object.assign(result, collectTokens(val, pathPart));
-    }
-  }
-  return result;
-}
-
-/**
- * Resolve {path.to.token} references in place; repeat until stable.
- * Gradient tokens (surface-gradient, surface-glow, etc.) use raw string values
- * and are emitted as-is in CSS — they contain linear-gradient/radial-gradient
- * and cannot be resolved like color tokens.
- */
-function resolveRefs(tokens: TokenMap): TokenMap {
-  const resolved = { ...tokens };
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const [key, val] of Object.entries(resolved)) {
-      if (typeof val !== "string") continue;
-      const ref = val.match(/^\{([^}]+)\}$/);
-      if (ref) {
-        const target = resolved[ref[1]];
-        if (target !== undefined) {
-          resolved[key] = target;
-          changed = true;
-        }
-      }
-    }
-  }
-  return resolved;
-}
 
 /** Convert rem to px (1rem = 16px). Returns number for px, string unchanged if not rem. */
 function remToPx(val: string): number | null {
@@ -142,47 +93,6 @@ function hexToRGB(hex: string): [number, number, number] | null {
     parseInt(m[1].substring(2, 4), 16),
     parseInt(m[1].substring(4, 6), 16),
   ];
-}
-
-/** Convert hex color #rrggbb to 0xRRGGBB for Swift */
-function hexToSwift(hex: string): string {
-  const m = hex.match(/^#([0-9a-fA-F]{6})$/);
-  if (!m) return "0x000000";
-  return "0x" + m[1].toUpperCase();
-}
-
-/** Convert hex color to Kotlin Color(0xFFRRGGBB) */
-function hexToKotlin(hex: string): string {
-  const m = hex.match(/^#([0-9a-fA-F]{6})$/);
-  if (!m) return "0xFF000000";
-  return "0xFF" + m[1].toUpperCase();
-}
-
-/** Convert rgba(r,g,b,a) to Kotlin Color - approximate as opaque for simplicity */
-function rgbaToKotlin(rgba: string): string {
-  const m = rgba.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
-  if (!m) return "0xFF000000";
-  const r = parseInt(m[1], 10);
-  const g = parseInt(m[2], 10);
-  const b = parseInt(m[3], 10);
-  const a = m[4] ? Math.round(parseFloat(m[4]) * 255) : 255;
-  const hex = (((a << 24) | (r << 16) | (g << 8) | b) >>> 0)
-    .toString(16)
-    .padStart(8, "0")
-    .toUpperCase();
-  return "0x" + hex;
-}
-
-function colorToSwift(val: string): string {
-  if (val.startsWith("#")) return hexToSwift(val);
-  if (val.startsWith("rgba")) return hexToSwift("#000000"); // Swift Color(hex:) doesn't support alpha directly; use placeholder
-  return "0x000000";
-}
-
-function colorToKotlin(val: string): string {
-  if (val.startsWith("#")) return hexToKotlin(val);
-  if (val.startsWith("rgba")) return rgbaToKotlin(val);
-  return "0xFF000000";
 }
 
 /** k=stiffness, c=damping, m=mass. SwiftUI: response ≈ 2π/√(k/m), dampingFraction = c/(2√(km)) */
@@ -316,21 +226,26 @@ function generateDocsReference(tokens: TokenMap): string {
 }
 
 function main() {
+  const { shared, web } = partitionByPlatform(
+    readTokenSources(TOKENS_DIR, TOKEN_FILES),
+  );
   let tokens: TokenMap = {};
   let p3Colors: Record<string, string> = {};
-  for (const file of TOKEN_FILES) {
-    const p = path.join(TOKENS_DIR, file);
-    if (!fs.existsSync(p)) {
-      console.error(`Missing token file: ${p}`);
-      process.exit(1);
-    }
-    const data = JSON.parse(fs.readFileSync(p, "utf-8"));
+  for (const { data } of shared) {
     tokens = { ...tokens, ...collectTokens(data) };
-    if (data.$extensions?.["human.p3Colors"]) {
-      p3Colors = { ...p3Colors, ...data.$extensions["human.p3Colors"] };
+    const ext = data.$extensions as Record<string, unknown> | undefined;
+    if (ext?.["human.p3Colors"]) {
+      p3Colors = {
+        ...p3Colors,
+        ...(ext["human.p3Colors"] as Record<string, string>),
+      };
     }
   }
   tokens = resolveRefs(tokens);
+  // Web-only tokens never enter `tokens`, so the Swift/Kotlin/C/docs
+  // emitters cannot see them. Consumed by the CSS emitter in Task 4.
+  let webTokens: TokenMap = {};
+  for (const { data } of web) webTokens = { ...webTokens, ...collectTokens(data) };
 
   const outdir = parseOutdir();
 
@@ -347,6 +262,27 @@ function main() {
       path.join(ROOT, "website", "src", "styles", "_tokens.css"),
       "_tokens.css",
       css,
+    );
+  }
+
+  // The Quiet Room layer is its own file so the dashboard can load it with the
+  // design-system view (the only place it can be switched on) instead of in
+  // the entry bundle; the website imports it globally from global.css.
+  const quietCss =
+    generateQuietCSS(webTokens) ||
+    "/* Quiet Room: no web-only tokens (design-tokens/quiet.tokens.json). */";
+  writeOutput(
+    outdir,
+    path.join(ROOT, "ui", "src", "styles", "_quiet.css"),
+    "_quiet.css",
+    `${quietCss}\n`,
+  );
+  if (!outdir) {
+    writeOutput(
+      null,
+      path.join(ROOT, "website", "src", "styles", "_quiet.css"),
+      "_quiet.css",
+      `${quietCss}\n`,
     );
   }
 
@@ -1037,12 +973,11 @@ function generateSwift(tokens: TokenMap): string {
       k.startsWith("dark.") &&
       !k.includes("shadow") &&
       typeof tokens[k] === "string" &&
-      ((tokens[k] as string).startsWith("#") ||
-        (tokens[k] as string).startsWith("rgba")),
+      isColorLike(tokens[k] as string),
   );
   for (const k of darkKeys.sort()) {
     const v = tokens[k] as string;
-    if (!v.startsWith("#") && !v.startsWith("rgba")) continue;
+    if (!isColorLike(v)) continue;
     const name = toSwiftCase(k.replace("dark.", ""));
     const colorExpr = formatSwiftColor(v);
     lines.push(`        public static let ${name} = ${colorExpr}`);
@@ -1058,12 +993,11 @@ function generateSwift(tokens: TokenMap): string {
       k.startsWith("light.") &&
       !k.includes("shadow") &&
       typeof tokens[k] === "string" &&
-      ((tokens[k] as string).startsWith("#") ||
-        (tokens[k] as string).startsWith("rgba")),
+      isColorLike(tokens[k] as string),
   );
   for (const k of lightKeys.sort()) {
     const v = tokens[k] as string;
-    if (!v.startsWith("#") && !v.startsWith("rgba")) continue;
+    if (!isColorLike(v)) continue;
     const name = toSwiftCase(k.replace("light.", ""));
     const colorExpr = formatSwiftColor(v);
     lines.push(`        public static let ${name} = ${colorExpr}`);
@@ -1271,13 +1205,7 @@ function generateSwift(tokens: TokenMap): string {
   for (const k of chartKeysSwift) {
     const v = tokens[k];
     if (typeof v !== "string") continue;
-    const vTrim = v.trim();
-    if (
-      !/^#[0-9a-fA-F]{6}$/.test(v) &&
-      !/^rgba?\(/i.test(vTrim)
-    ) {
-      continue;
-    }
+    if (!isColorLike(v)) continue;
     const suffix = k.replace(/^chart\./, "");
     const name =
       "chart" +
@@ -1385,8 +1313,7 @@ function generateKotlin(tokens: TokenMap): string {
       k.startsWith("dark.") &&
       !k.includes("shadow") &&
       typeof tokens[k] === "string" &&
-      ((tokens[k] as string).startsWith("#") ||
-        (tokens[k] as string).startsWith("rgba")),
+      isColorLike(tokens[k] as string),
   );
   for (const k of darkKeys.sort()) {
     const v = tokens[k] as string;
@@ -1405,8 +1332,7 @@ function generateKotlin(tokens: TokenMap): string {
       k.startsWith("light.") &&
       !k.includes("shadow") &&
       typeof tokens[k] === "string" &&
-      ((tokens[k] as string).startsWith("#") ||
-        (tokens[k] as string).startsWith("rgba")),
+      isColorLike(tokens[k] as string),
   );
   for (const k of lightKeys.sort()) {
     const v = tokens[k] as string;
@@ -1674,13 +1600,7 @@ function generateKotlin(tokens: TokenMap): string {
   for (const k of chartKeysKotlin) {
     const v = tokens[k];
     if (typeof v !== "string") continue;
-    const vTrim = v.trim();
-    if (
-      !/^#[0-9a-fA-F]{6}$/.test(v) &&
-      !/^rgba?\(/i.test(vTrim)
-    ) {
-      continue;
-    }
+    if (!isColorLike(v)) continue;
     const suffix = k.replace(/^chart\./, "");
     const name =
       "chart" +
@@ -1918,21 +1838,6 @@ ${aliasLines}
 
 #endif /* HU_DESIGN_TOKENS_H */
 `;
-}
-
-function formatSwiftColor(val: string): string {
-  if (val.startsWith("#")) {
-    return `Color(hex: ${hexToSwift(val)})`;
-  }
-  const m = val.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
-  if (m) {
-    const r = Math.round((parseInt(m[1], 10) / 255) * 10000) / 10000;
-    const g = Math.round((parseInt(m[2], 10) / 255) * 10000) / 10000;
-    const b = Math.round((parseInt(m[3], 10) / 255) * 10000) / 10000;
-    const a = m[4] ? Math.round(parseFloat(m[4]) * 10000) / 10000 : 1;
-    return `Color(red: ${r}, green: ${g}, blue: ${b}, opacity: ${a})`;
-  }
-  return "Color(hex: 0x000000)";
 }
 
 function toSwiftCase(s: string): string {

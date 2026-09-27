@@ -216,7 +216,7 @@ static bool run_rewrite_voice_on(const char *reply, const char *rewrite, bool vo
     static hu_config_t config;
     memset(&config, 0, sizeof(config));
     config.channels.default_daemon.voice_enabled = voice_enabled;
-    config.voice.tts_provider = tts_provider;
+    config.voice.tts_provider = (char *)tts_provider; /* test-owned literal, never freed */
     hu_channel_vtable_t vt;
     memset(&vt, 0, sizeof(vt));
     vt.name = vr_name_generic;

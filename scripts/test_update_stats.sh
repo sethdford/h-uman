@@ -91,7 +91,13 @@ check "build/ binary was not run"          "[ ! -e '$T/build/human_tests.ran' ]"
 write_docs
 rm -rf "$T/build" "$T/build-check"
 mkdir -p "$T/build-size"
-printf 'CMAKE_BUILD_TYPE:STRING=MinSizeRel\nHU_ENABLE_ASAN:BOOL=OFF\n' > "$T/build-size/CMakeCache.txt"
+# The flags the release-size job in ci.yml passes (update-stats.sh requires all).
+RELEASE_SIZE_CACHE='CMAKE_BUILD_TYPE:STRING=MinSizeRel
+HU_ENABLE_ASAN:BOOL=OFF
+HU_ENABLE_LTO:BOOL=ON
+HU_ENABLE_ALL_CHANNELS:BOOL=ON
+HU_ENABLE_SQLITE_VEC:BOOL=OFF'
+printf '%s\n' "$RELEASE_SIZE_CACHE" > "$T/build-size/CMakeCache.txt"
 head -c 4096 /dev/zero > "$T/build-size/human"
 out=$(run --test-count 222 --keep-binary-size --apply)
 check "--keep-binary-size leaves README size"    "grep -q '^~2952 KB$' '$T/README.md'"
@@ -101,6 +107,25 @@ check "--keep-binary-size still stamps the count" "grep -q '^Tests: 222$' '$T/RE
 write_docs
 out=$(run --test-count 222 --apply)
 check "release binary measured without the flag" "grep -q '^~4 KB$' '$T/README.md'"
+
+# 6. A MinSizeRel build that is NOT the release-size config is not measured.
+#    The `release` preset leaves sqlite-vec ON; it measured 18.7% over the
+#    release-size build (docs/perf/footprint.json), past the 15% drift gate
+#    that job enforces, so stamping it would turn that job red.
+write_docs
+rm -rf "$T/build-size"
+mkdir -p "$T/build-release"
+printf '%s\n' "$RELEASE_SIZE_CACHE" | sed 's/SQLITE_VEC:BOOL=OFF/SQLITE_VEC:BOOL=ON/' > "$T/build-release/CMakeCache.txt"
+head -c 8192 /dev/zero > "$T/build-release/human"
+out=$(run --test-count 222 --apply)
+check "sqlite-vec-ON release build not stamped" "grep -q '^~2952 KB$' '$T/README.md'"
+check "sqlite-vec-ON release build reported skipped" "[[ \"$out\" == *'not the release-size config'* ]]"
+# ...and the same dir with sqlite-vec OFF is measured (8192 B = 8 KB).
+write_docs
+printf '%s\n' "$RELEASE_SIZE_CACHE" > "$T/build-release/CMakeCache.txt"
+out=$(run --test-count 222 --apply)
+check "release-size config in build-release/ measured" "grep -q '^~8 KB$' '$T/README.md'"
+rm -rf "$T/build-release"
 
 # 7. Generated, gitignored C is a BUILD ARTIFACT, not source. The counters read
 #    git's index, so a tree that has been built reports the same numbers as a

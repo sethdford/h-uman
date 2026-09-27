@@ -142,10 +142,23 @@ fi
 # (commits 6b0f8926, 2edbdd74). When no release binary exists, keep the
 # committed value untouched (BINARY_KB stays "unknown" and every patch site
 # below skips). CI/release callers with no build dir can pass --binary-size.
+#
+# MinSizeRel alone is not enough: the "~NNNN KB" claims are gated
+# (check-metrics-drift.sh --binary, 15%) against the release-size job's build
+# in ci.yml, which passes LTO + all channels + sqlite-vec OFF. The `release`
+# preset is also MinSizeRel but turns sqlite-vec, ML, cartesia and more ON —
+# 3,275,488 B vs 2,758,976 B at b277f7de0 (docs/perf/footprint.json), 18.7%
+# over, so stamping it would turn release-size red. Require every flag that
+# job sets explicitly. Residual: flags it leaves at their defaults are not
+# checked, so a build with extras switched on can still pass; the gate is the
+# backstop for that.
 is_release_build_dir() {
     cache="$1/CMakeCache.txt"
     [ -f "$cache" ] || return 1
     grep -q '^CMAKE_BUILD_TYPE:[^=]*=MinSizeRel$' "$cache" || return 1
+    grep -q '^HU_ENABLE_LTO:[^=]*=ON$' "$cache" || return 1
+    grep -q '^HU_ENABLE_ALL_CHANNELS:[^=]*=ON$' "$cache" || return 1
+    grep -q '^HU_ENABLE_SQLITE_VEC:[^=]*=OFF$' "$cache" || return 1
     ! grep -q '^HU_ENABLE_ASAN:[^=]*=ON$' "$cache"
 }
 
@@ -167,7 +180,7 @@ else
         fi
     done
     if [ "$BINARY_KB" = "unknown" ] && [ -n "$SKIPPED_BIN" ]; then
-        echo "Binary size: skipping — ${SKIPPED_BIN} is not a MinSizeRel release build (Debug/ASan); keeping committed value. Use --binary-size <KB> to override."
+        echo "Binary size: skipping — ${SKIPPED_BIN} is not the release-size config (MinSizeRel + LTO + all channels + sqlite-vec OFF, no ASan); keeping committed value. Use --binary-size <KB> to override."
     fi
 fi
 
