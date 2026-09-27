@@ -94,7 +94,7 @@ const KNOWN_VIOLATIONS: Record<string, Record<string, number>> = {
   // hu-model-selector combobox trigger has no accessible name.
   Overview: { "button-name": 1 },
   Chat: { "button-name": 1 },
-  // hu-segmented-control active segment contrast (see Channels).
+  // Active tag chip: --hu-bg text on --hu-accent is 2.23:1 (not the segmented control).
   Skills: { "color-contrast": 1 },
   // Number inputs rendered with aria-label="".
   Config: { label: 2 },
