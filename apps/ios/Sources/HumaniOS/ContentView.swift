@@ -41,13 +41,17 @@ struct ContentView: View {
                 }
                 .tag(AppTab.sessions)
                 .accessibilityIdentifier("tab_sessions")
-            LazyView(ToolsView())
+            // Tools and Settings are NOT wrapped in LazyView: on iPhone they overflow
+            // into the system More list, and a destination pushed from there never
+            // fires the placeholder's onAppear on iOS 26, so LazyView stayed
+            // Color.clear forever (More → Settings rendered a blank screen).
+            ToolsView()
                 .tabItem {
                     Label("Tools", systemImage: "wrench.and.screwdriver")
                 }
                 .tag(AppTab.tools)
                 .accessibilityIdentifier("tab_tools")
-            LazyView(SettingsView())
+            SettingsView()
                 .tabItem {
                     Label("Settings", systemImage: "gear")
                 }

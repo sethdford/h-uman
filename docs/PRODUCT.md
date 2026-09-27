@@ -16,7 +16,7 @@ created: 2026-05-29
 
 Every other AI assistant in 2026 is someone else's product renting you access. Gemini is Google's agent that happens to know your Gmail. Siri is Apple's voice layer that outsources its brain to Google. Claude Cowork is Anthropic's operator working in your folder. OpenClaw is a framework — powerful, but personality-free.
 
-human is different: **a private, personal AI that runs on your hardware, learns who you are locally, and never sends your identity to a cloud.** The "every device" story is how we get there. The "actually yours" story is why someone chooses us.
+human is different: **a private, personal AI that runs on your hardware, stores who you are on your machine, and lets you choose which model sees it — including a local one.** The "every device" story is how we get there. The "actually yours" story is why someone chooses us.
 
 ## Red-Teamed Reality Check (April 2026)
 
@@ -43,10 +43,20 @@ This thesis was stress-tested. Here's what survived and what didn't.
 ## What Actually Makes Us Better (Honest Moats)
 
 1. **Persona as compiled architecture, not markdown templates.** 41 C modules with runtime integration (circadian timing, somatic markers, emotional cognition, humor bridging) vs OpenClaw's SOUL.md text files. The difference: our persona *changes how the agent behaves at the code level* — timing, tool selection, tone adaptation, proactive messaging. Theirs is a system prompt wrapper.
-2. **Privacy by architecture, not by settings.** Data never leaves the device as a structural property. No "opt-in to privacy" toggle. Gemini's Personal Intelligence processes your data in Google's cloud (their privacy doc confirms this). We can't match their data breadth (Gmail/Photos/YouTube), but we own the trust story.
+2. **Local storage by architecture, not by settings.** Memory, persona and history live in a local SQLite store (`~/.human`) with no sync code. A cloud model sees only the context of the reply it is writing; a local model keeps even that on your machine. **Honest gap:** that per-reply context is substantial — with a cloud model, every reply's system prompt carries the persona (identity, traits, vocabulary, example conversations), retrieved memories and personal-model facts, the contact profile (name, relationship, sensitive topics) and the recent conversation, with no redaction (see *Known privacy gaps* below). Gemini's Personal Intelligence stores and processes your data in Google's cloud (their privacy doc confirms this). We can't match their data breadth (Gmail/Photos/YouTube); our trust story is who holds the store and who picks the model.
 3. **On-device personalization pipeline (partial — see honest status below).** MLX LoRA fine-tuning on Apple Silicon is proven at 1B-7B models. Our ML subsystem has the training loop. **Gap:** our LoRA path currently trains a reference GPT, not the frontier model users chat with. Bridging this gap (via ggml/MLX integration) is the real technical challenge.
 4. **HuLa IR.** Typed tool-orchestration with compiler and emergence. Genuinely novel. **Gap:** tightly coupled to internal agent; not yet a platform.
 5. **Runs anywhere, owned by you.** Same binary from $5 board to data center. No subscription lock-in.
+
+### Known privacy gaps (2026-09-26)
+
+Traced read-only; each is a roadmap target (sub-project 4 / a future text privacy mode), not a settled design.
+
+- **No redaction or context boundary on the text path.** The whole system prompt becomes message 0 (`src/agent/agent_stream.c:1318-1319`) and is sent as the provider's `system` field (`src/providers/anthropic.c:953`). It includes memory context (`src/agent/prompt.c:1027-1030`) and the contact profile (`src/persona/persona.c:800-806`). `voice.privacy_mode` only gates voice, TTS, vision and video: every reader of `hu_privacy_enforced()` is in those paths (`src/core/privacy.c`, set at `src/agent/agent.c:2844`). `src/providers/scrub.c` scrubs logs, not requests.
+- **The `llm_decides` classifier calls out even with a local reply model.** If any channel uses `llm_decides`, the daemon creates a Gemini classifier (`src/daemon.c:2022-2027`) and sends it the last 5 thread messages plus the new inbound message (`src/daemon/daemon_director.c:249-263`).
+- **Cloud embeddings are picked up automatically.** The Gemini embedder is used whenever Vertex ADC or `GEMINI_API_KEY` is available (`src/app/bootstrap.c:980-991`). It is not an explicit opt-in, and it also runs when the reply model is local.
+
+These claims are true and should stay true: storage is local SQLite with no sync; update checks and telemetry are off by default; the user chooses the reply model; with a local model the reply is written on the machine.
 
 ## Strategic Missions (Red-Teamed)
 
@@ -68,7 +78,7 @@ Every mission below includes an honest difficulty assessment from code-level red
 | Persona depth | **Deep** (41 compiled modules) | Basic (Personal Intelligence) | None | **Growing** (SOUL.md plugins, personality-dynamics) |
 | Personalization | Memory stack with typed propositional/prescriptive fact extraction + half-life decay | **Google apps data** (Gmail, Photos, YouTube) | Chat memory | SOUL.md + MEMORY.md |
 | On-device learning | Reference only (CPU, toy GPT) | No | No | No |
-| Privacy architecture | **Structural** (local-first) | Cloud (Google infra) | Cloud (Anthropic) | Self-hosted (Node.js) |
+| Privacy architecture | **Local storage**, no sync; reply context goes to the model you choose (local or cloud; no redaction) | Cloud (Google infra) | Cloud (Anthropic) | Self-hosted (Node.js) |
 | Tool orchestration | **HuLa IR** (compiled) | Prompt-chained | Prompt-chained | Prompt-chained |
 | Distribution | **None** (0 users) | **2B+ devices** | **Desktop + API** | **100K+ GitHub stars** |
 | Ecosystem | Small | **Google apps** | **Mac + tools** | **ClawHub** |

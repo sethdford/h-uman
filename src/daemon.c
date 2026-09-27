@@ -8656,8 +8656,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #endif
                     /* Final delivery: voice memo first; only when none went out does
                      * the bus send the text (send_event FINAL or send). One reply is
-                     * never both. A false return with text_delivered_via_bus still
-                     * false leaves delivery to the text path below. */
+                     * never both. hu_daemon_voice_reply declines voice unless the reply
+                     * passes the same safety gates the text path below applies, and the
+                     * bus defers a gate-flagged final; a false return with
+                     * text_delivered_via_bus still false leaves delivery to that path. */
                     hu_daemon_final_reply_t final_reply = {
                         .alloc = alloc,
                         .agent = agent,
