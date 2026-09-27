@@ -1,7 +1,13 @@
 package ai.human.app
 
 import android.content.Intent
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.and
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.AndroidComposeTestRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
@@ -39,6 +45,19 @@ class NativeFleetAwardTierTest {
             requireNotNull(activity)
         }
 
+    /**
+     * A bottom-nav destination as accessibility services see it: the merged Tab node whose
+     * text is [label]. Not `onNodeWithContentDescription(label)`: Material3's
+     * NavigationBarItem wraps the icon in `clearAndSetSemantics {}` whenever a label is
+     * shown, so the icon's contentDescription exists only in the unmerged tree — the finder
+     * matched nothing, which `assertIsDisplayed` reports as "is not displayed" and
+     * `performClick` as "Failed to inject touch input".
+     */
+    private fun navTab(label: String): SemanticsNodeInteraction =
+        composeRule.onNode(
+            hasText(label) and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab),
+        )
+
     @Test
     fun bottom_nav_destinations_exist() {
         for (label in
@@ -50,13 +69,13 @@ class NativeFleetAwardTierTest {
                 "Tools",
                 "Settings",
             )) {
-            composeRule.onNodeWithContentDescription(label).assertIsDisplayed()
+            navTab(label).assertIsDisplayed()
         }
     }
 
     @Test
     fun overview_shows_welcome_heading() {
-        composeRule.onNodeWithContentDescription("Overview").performClick()
+        navTab("Overview").performClick()
         composeRule.onNodeWithContentDescription("Welcome back").assertIsDisplayed()
     }
 
@@ -71,7 +90,7 @@ class NativeFleetAwardTierTest {
                 "Tools",
                 "Settings",
             )) {
-            composeRule.onNodeWithContentDescription(label).performClick()
+            navTab(label).performClick()
         }
         composeRule.onNodeWithContentDescription("Gateway settings").assertIsDisplayed()
     }
