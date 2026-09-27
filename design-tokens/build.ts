@@ -21,6 +21,7 @@ import {
   TOKEN_FILES,
   collectTokens,
   collectTypes,
+  parseOutdir,
   partitionByPlatform,
   readTokenSources,
   resolveRefs,
@@ -102,15 +103,6 @@ function springToSwiftDampingFraction(
   return (
     Math.round((damping / (2 * Math.sqrt(stiffness * mass))) * 1000) / 1000
   );
-}
-
-function parseOutdir(): string | null {
-  const args = process.argv.slice(2);
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--outdir" && args[i + 1]) return args[i + 1];
-    if (args[i].startsWith("--outdir=")) return args[i].split("=")[1];
-  }
-  return null;
 }
 
 function writeOutput(

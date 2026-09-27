@@ -2,18 +2,26 @@
 /**
  * Design tokens documentation generator
  * Reads W3C token JSON files and generates a human-readable markdown reference.
- * Run: npx tsx generate-docs.ts
+ * Run: npx tsx generate-docs.ts [--outdir DIR]
  */
 
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
-import { collectTokens, resolveRefs, type TokenMap } from "./token-lib.js";
+import {
+  collectTokens,
+  parseOutdir,
+  resolveRefs,
+  type TokenMap,
+} from "./token-lib.js";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(SCRIPT_DIR, "..");
 const TOKENS_DIR = path.join(ROOT, "design-tokens");
-const OUTPUT_PATH = path.join(ROOT, "docs", "design-tokens.md");
+const OUTDIR = parseOutdir();
+const OUTPUT_PATH = OUTDIR
+  ? path.join(OUTDIR, "design-tokens.md")
+  : path.join(ROOT, "docs", "design-tokens.md");
 
 const TOKEN_FILES = [
   "base.tokens.json",

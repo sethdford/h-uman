@@ -33,6 +33,20 @@ static void test_vrec_mode_parse_defaults_to_attachment(void) {
     HU_ASSERT_EQ(hu_voice_delivery_mode_parse("messages"), HU_VOICE_DELIVERY_MESSAGES);
 }
 
+/* HU_VOICE_DELIVERY_ONLY: native recording for listed handles only; unset = everyone. */
+static void test_vrec_handle_allowed_limits_native_delivery_to_the_list(void) {
+    HU_ASSERT_TRUE(hu_voice_record_handle_allowed(NULL, "+15550000001", 12));
+    HU_ASSERT_TRUE(hu_voice_record_handle_allowed("", "+15550000001", 12));
+    const char *list = "+15550000001 , user_a@example.com,+15550000002";
+    HU_ASSERT_TRUE(hu_voice_record_handle_allowed(list, "+15550000001", 12));
+    HU_ASSERT_TRUE(hu_voice_record_handle_allowed(list, "+15550000002", 12));
+    HU_ASSERT_TRUE(hu_voice_record_handle_allowed(list, "User_A@Example.com", 18));
+    HU_ASSERT_FALSE(hu_voice_record_handle_allowed(list, "+15550000009", 12));
+    HU_ASSERT_FALSE(hu_voice_record_handle_allowed(list, "+1555000000", 11)); /* no prefixes */
+    HU_ASSERT_FALSE(hu_voice_record_handle_allowed(list, "+155500000011", 13));
+    HU_ASSERT_FALSE(hu_voice_record_handle_allowed(list, NULL, 0));
+}
+
 static void test_vrec_memo_send_requires_empty_text_and_one_audio(void) {
     const char *caf[] = {"/tmp/a/Audio Message.caf"};
     const char *mp3[] = {"/tmp/human_dtts_1.mp3"};
@@ -595,6 +609,7 @@ static void test_vrec_send_from_env_blocks_under_test(void) {
 void run_imessage_voice_record_tests(void) {
     HU_TEST_SUITE("imessage voice record");
     HU_RUN_TEST(test_vrec_mode_parse_defaults_to_attachment);
+    HU_RUN_TEST(test_vrec_handle_allowed_limits_native_delivery_to_the_list);
     HU_RUN_TEST(test_vrec_memo_send_requires_empty_text_and_one_audio);
     HU_RUN_TEST(test_vrec_preflight_ok_when_all_facts_hold);
     HU_RUN_TEST(test_vrec_preflight_blocks_each_fact);

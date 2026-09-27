@@ -3,10 +3,11 @@
  * Figma Variables API Sync
  *
  * Pushes Human design tokens to Figma Variables, keeping the design file
- * in sync with code. Also exports Tokens Studio-compatible format.
+ * in sync with code. Also exports Tokens Studio-compatible format
+ * (`--export` delegates to tokens-studio-lib.ts, same as sync-tokens-studio.ts).
  *
  * Usage:
- *   npx tsx design-tokens/figma-sync.ts --export   # Export Tokens Studio format
+ *   npx tsx design-tokens/figma-sync.ts --export [--outdir DIR]  # Export Tokens Studio format
  *   npx tsx design-tokens/figma-sync.ts --push      # Push to Figma Variables API
  *     --file-key <FIGMA_FILE_KEY>
  *     --token <FIGMA_ACCESS_TOKEN>
@@ -19,10 +20,10 @@
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
+import { writeTokensStudio } from "./tokens-studio-lib.js";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const TOKENS_DIR = SCRIPT_DIR;
-const OUT_DIR = path.resolve(SCRIPT_DIR, "..", "docs");
 
 const TOKEN_FILES = [
   "base.tokens.json",
@@ -80,28 +81,6 @@ function collectFlatTokens(
     }
   }
   return result;
-}
-
-function exportTokensStudio(): void {
-  const tokensStudioFormat: Record<string, Record<string, unknown>> = {};
-
-  for (const file of TOKEN_FILES) {
-    const p = path.join(TOKENS_DIR, file);
-    if (!fs.existsSync(p)) continue;
-    const data = JSON.parse(fs.readFileSync(p, "utf-8"));
-    const setName = file.replace(".tokens.json", "");
-    tokensStudioFormat[setName] = {};
-
-    for (const [key, val] of Object.entries(data)) {
-      if (key.startsWith("$")) continue;
-      tokensStudioFormat[setName][key] = val;
-    }
-  }
-
-  const outPath = path.join(OUT_DIR, "tokens-studio.json");
-  if (!fs.existsSync(OUT_DIR)) fs.mkdirSync(OUT_DIR, { recursive: true });
-  fs.writeFileSync(outPath, JSON.stringify(tokensStudioFormat, null, 2));
-  console.log(`Wrote Tokens Studio format: ${outPath}`);
 }
 
 function buildFigmaVariables(): FigmaVariable[] {
@@ -204,7 +183,8 @@ async function main() {
   const args = process.argv.slice(2);
 
   if (args.includes("--export")) {
-    exportTokensStudio();
+    // Same writer as `npm run sync:tokens-studio`, so the two cannot diverge.
+    console.log(`Wrote Tokens Studio format: ${writeTokensStudio()}`);
     return;
   }
 

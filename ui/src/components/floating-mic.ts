@@ -28,7 +28,7 @@ export class ScFloatingMic extends LitElement {
       height: 3rem;
       border-radius: 50%;
       background: var(--hu-accent);
-      color: var(--hu-bg);
+      color: var(--hu-on-accent);
       border: none;
       cursor: pointer;
       display: flex;
@@ -51,10 +51,12 @@ export class ScFloatingMic extends LitElement {
     }
     .btn.listening {
       background: var(--hu-error);
+      color: var(--hu-bg);
       animation: hu-pulse-red var(--hu-duration-slow) var(--hu-ease-in-out, ease-in-out) infinite;
     }
     .btn.transcribing {
       background: var(--hu-accent-secondary);
+      color: var(--hu-on-accent-secondary);
       opacity: 0.8;
       cursor: wait;
     }
