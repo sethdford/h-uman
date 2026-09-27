@@ -33,8 +33,12 @@ test("global scroll-driven utilities run on a scroll timeline in the built bundl
 }) => {
   await page.goto("/?demo#metrics");
   await waitForViewReady(page, "hu-metrics-view");
-  const supported = await page.evaluate(() => CSS.supports("animation-timeline: view()"));
-  test.skip(!supported, "requires animation-timeline: view() support");
+  // The probes cover both view() and scroll() utilities, so both must be supported.
+  const supported = await page.evaluate(
+    () =>
+      CSS.supports("animation-timeline: view()") && CSS.supports("animation-timeline: scroll()"),
+  );
+  test.skip(!supported, "requires animation-timeline: view() and scroll() support");
 
   const timelines = await page.evaluate((utilities) => {
     // A scrollable light-DOM container so both view() and scroll(nearest) timelines
