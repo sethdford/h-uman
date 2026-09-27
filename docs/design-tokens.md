@@ -64,9 +64,10 @@ Auto-generated from W3C token files in `design-tokens/`.
 | `--hu-surface-container-highest` | #35302a | #e8e7e4 |
 | `--hu-surface-dim` | #080604 | #e5e4e1 |
 | `--hu-text` | #ddd8d3 | #2D2A26 |
-| `--hu-text-faint` | #56504a | #9A9490 |
+| `--hu-text-faint` | #56504a | #726C65 |
 | `--hu-text-muted` | #8a847e | #6B655E |
 | `--hu-text-secondary` | #9e9892 | #4A4540 |
+| `--hu-text-tertiary` | #8a847e | #6B655E |
 | `--hu-warning` | #eab308 | #ca8a04 |
 | `--hu-warning-dim` | rgba(234, 179, 8, 0.15) | rgba(202, 138, 4, 0.1) |
 
@@ -201,4 +202,4 @@ Auto-generated from W3C token files in `design-tokens/`.
 
 ---
 
-_Generated: 2026-04-11T15:58:37Z_
+_Generated: 2026-09-27T01:17:47Z_
