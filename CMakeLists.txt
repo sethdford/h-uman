@@ -1217,6 +1217,7 @@ set(HU_CORE_SOURCES
     src/tools/media_image.c
     src/tools/media_video.c
     src/tools/media_gif.c
+    src/tools/media_vertex_common.c
     src/tools/factory.c
     src/tools/canvas_store.c
     src/tools/canvas_persist.c

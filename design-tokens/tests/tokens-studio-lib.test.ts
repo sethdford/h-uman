@@ -36,6 +36,15 @@ test("buildTokensStudio resolves every chart.categorical ref to a value", () => 
   }
 });
 
+test("tokensStudioOutPath takes --out FILE over --outdir and rejects a flag", () => {
+  assert.equal(
+    tokensStudioOutPath(["--out", "/tmp/y/ts.json", "--outdir", "/tmp/x"]),
+    "/tmp/y/ts.json",
+  );
+  assert.throws(() => tokensStudioOutPath(["--out"]), /needs a file path/);
+  assert.throws(() => tokensStudioOutPath(["--out", "--help"]), /needs a file path/);
+});
+
 test("tokensStudioOutPath honors --outdir and defaults to docs/", () => {
   assert.equal(
     tokensStudioOutPath(["--outdir", "/tmp/x"]),

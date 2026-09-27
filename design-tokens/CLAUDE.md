@@ -48,7 +48,8 @@ All of the above are diffed against a fresh regeneration by `check-drift.sh` (th
 
 ## Tokens Studio export
 
-- `docs/tokens-studio.json` is generated, never hand-edited: `base.color` (plus spacing, radius, blur, z-index) is copied verbatim from `base.tokens.json`, and `data-viz.chart.categorical` is emitted with its `{ref}`s resolved to hex (1–16) via `resolveRefs`. After changing `*.tokens.json`, run `npm run sync:tokens-studio`. Chart extensions still need `base.color.viz-extended` in `base.tokens.json` and the matching entries in `data-viz.tokens.json`.
+- `docs/tokens-studio.json` is generated, never hand-edited: `base.color` (plus spacing, radius, blur, z-index) is copied verbatim from `base.tokens.json`, and `data-viz.chart.categorical` is emitted with its `{ref}`s resolved to hex (1–16) via `resolveRefs`. Chart extensions still need `base.color.viz-extended` in `base.tokens.json` and the matching entries in `data-viz.tokens.json`.
+- `check-drift.sh` fails when any committed output differs from its generator, so a `*.tokens.json` change needs `npm run build && npm run docs && npm run sync:tokens-studio`. `sync-tokens-studio.ts` takes `--out FILE` or `--outdir DIR`.
 
 ## Platform routing and checks
 

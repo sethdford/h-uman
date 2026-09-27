@@ -348,4 +348,164 @@ check "knobs: tag names the mode (mlxtune-orpo-...)" "grep -q '^TAG=mlxtune-orpo
 check "knobs: stage still reaches the scoring step" "[[ \"\$out9\" == *'scoring candidate vs serving (offline LUAR)'* ]]" "$out9"
 rm -rf "$T9" "$T6_FAKE_TRAIN_BACKUP" "$T6_FAKE_SCORE_BACKUP"
 
+
+# ── Cases 10-13: the trainer exits NON-ZERO. rc!=0 conflates two outcomes:
+#    "crashed, produced nothing" and "wrote a complete adapter, then died".
+#    On 2026-09-20 the first SFT candidate wrote its COMPLETE 2.2 GB adapter at
+#    iter 2000 and the trainer then died writing an INTERMEDIATE checkpoint
+#    (ENOSPC). The stage returned on rc!=0 and the night produced no
+#    measurement at all. These cases pin the discrimination in both directions.
+#
+#    $1 = what the fake trainer leaves behind: complete | truncated | none
+make_crashing_fake_train() {
+    cat > "$1" <<FAKE_CRASH
+#!/usr/bin/env bash
+# FAKE train-glm-adapter.sh that exits NON-ZERO. LEAVES=$2 controls the artifact.
+set -u
+TAG=""
+while [ \$# -gt 0 ]; do
+  case "\$1" in
+    --tag) TAG=\$2; shift 2 ;;
+    --config|--trainer|--train-mode|--beta|--gamma|--est-minutes) shift 2 ;;
+    *) shift ;;
+  esac
+done
+STAMP="\$(date +%Y%m%d%H%M%S)fake"
+mkdir -p "\$HOME/.human/logs"
+# A trainer that ran long enough to learn, then died on a checkpoint write.
+{
+  echo "Iter 1: Val loss 5.545, Val took 14.1s"
+  echo "Iter 1000: Val loss 2.187, Val took 13.1s"
+  echo "Iter 2000: Val loss 2.390, Val took 12.0s"
+  echo "RuntimeError: [write] Unable to write 11534336 bytes to file."
+} > "\$HOME/.human/logs/train-glm-\${TAG}-\${STAMP}.log"
+
+if [ "$2" != "none" ]; then
+  OUT="\$HOME/.human/training-data/adapters/seth-glm-air-\${TAG}-\${STAMP}"
+  mkdir -p "\$OUT"
+  python3 - "\$OUT" "$2" <<'PY_ADAPTER'
+import json, os, struct, sys
+d, leaves = sys.argv[1], sys.argv[2]
+a = struct.pack("<f", 0.0) * 300000
+b = struct.pack("<f", 1.0) * 16
+hdr = {"l.lora_a": {"dtype": "F32", "shape": [300000], "data_offsets": [0, len(a)]},
+       "l.lora_b": {"dtype": "F32", "shape": [16], "data_offsets": [len(a), len(a) + len(b)]}}
+h = json.dumps(hdr).encode()
+p = os.path.join(d, "adapters.safetensors")
+with open(p, "wb") as f:
+    f.write(struct.pack("<Q", len(h))); f.write(h); f.write(a); f.write(b)
+if leaves == "truncated":                 # killed mid-write: header intact, bytes short
+    os.truncate(p, os.path.getsize(p) - 4000)
+json.dump({"iters": 2500, "lora_parameters": {"rank": 16, "scale": 2.0, "dropout": 0.0}},
+          open(os.path.join(d, "adapter_config.json"), "w"))
+PY_ADAPTER
+  if [ "$2" = "complete_with_rejected" ]; then
+    # a quarantined sibling whose name sorts AFTER the live one
+    REJ="\${OUT}.rejected-999"
+    mkdir -p "\$REJ"
+    cp "\$OUT/adapters.safetensors" "\$REJ/adapters.safetensors"
+    cp "\$OUT/adapter_config.json"  "\$REJ/adapter_config.json"
+    python3 -c "import os,sys; p=sys.argv[1]; os.truncate(p, os.path.getsize(p)-4000)" "\$REJ/adapters.safetensors"
+  fi
+fi
+echo "[fake-train-glm-adapter] simulating trainer crash (leaves=$2)" >&2
+exit 1
+FAKE_CRASH
+    chmod +x "$1"
+}
+
+# Runs the stage against a crashing fake trainer; echoes the stage's log output.
+run_crash_case() {
+    local home=$1 leaves=$2 repo="$1/fake-repo"
+    mkdir -p "$repo/scripts/blind_ab" "$home/.human/training-data/glm-v61-pref" "$home/.human/venvs/eval312/bin"
+    # Self-contained: Case 9's cleanup has already removed the shared backup.
+    cat > "$repo/scripts/blind_ab/score_candidate_offline.py" <<'FAKE_SCORE_CRASH'
+#!/usr/bin/env python3
+# FAKE score_candidate_offline.py -- records invocation, loads nothing.
+import os, sys
+with open(os.path.join(os.environ["HOME"], ".fake-score.record"), "a") as f:
+    f.write("ARGS:" + " ".join(sys.argv[1:]) + "\n")
+print("[fake score_candidate_offline] invoked")
+sys.exit(0)
+FAKE_SCORE_CRASH
+    cp "$HERE/adapter_is_real.py" "$repo/scripts/adapter_is_real.py"
+    make_crashing_fake_train "$repo/scripts/train-glm-adapter.sh" "$leaves"
+    for i in $(seq 1 200); do
+        printf '{"prompt":"p%d","chosen":"c%d","rejected":"r%d"}\n' "$i" "$i" "$i"
+    done > "$home/.human/training-data/glm-v61-pref/train.jsonl"
+    ln -s "$(command -v python3)" "$home/.human/venvs/eval312/bin/python"
+    HOME="$home" HU_REPO_DIR="$repo" HU_RETRAIN_PORT=19741 \
+      HU_RETRAIN_STAGE_TEST=1 HU_RETRAIN_MLXTUNE=1 bash -c '
+        source "'"$SCRIPT"'"
+        serving_stopped=1
+        run_mlxtune_candidate_stage
+    '
+}
+
+# ── Case 10: rc!=0 but a COMPLETE adapter survives -> salvage and SCORE it ──
+T10=$(mktemp -d); out10=$(run_crash_case "$T10" complete)
+check "crash+complete: names the rc and that a complete adapter survived" \
+    "[[ \"\$out10\" == *'trainer exited rc=1 but left a COMPLETE adapter'* ]]" "$out10"
+check "crash+complete: does NOT take the old bail-out path" \
+    "[[ \"\$out10\" != *'and no complete adapter survives'* ]]" "$out10"
+check "crash+complete: reports how far training actually got (2000 of 2500)" \
+    "[[ \"\$out10\" == *'reached iter 2000 of 2500'* ]]" "$out10"
+check "crash+complete: the loss check still runs and sees learning" \
+    "[[ \"\$out10\" == *'loss check: LEARNED'* ]]" "$out10"
+check "crash+complete: REACHES the scoring step (the measurement that was lost)" \
+    "[[ \"\$out10\" == *'scoring candidate vs serving (offline LUAR)'* ]]" "$out10"
+check "crash+complete: score_candidate_offline.py was actually invoked" \
+    "[ -f \"$T10/.fake-score.record\" ] && grep -q -- '--candidate' \"$T10/.fake-score.record\"" \
+    "$(cat "$T10/.fake-score.record" 2>/dev/null)"
+pr10=$(cat "$T10"/.human/training-data/adapters/*/PARTIAL_RUN 2>/dev/null)
+check "crash+complete: PARTIAL_RUN provenance records the non-zero exit" \
+    "grep -q '^trainer_exit_rc=1$' <<<\"\$pr10\"" "$pr10"
+check "crash+complete: PARTIAL_RUN records reached vs configured iters" \
+    "grep -q '^reached_iter=2000$' <<<\"\$pr10\" && grep -q '^configured_iters=2500$' <<<\"\$pr10\"" "$pr10"
+check "crash+complete: PARTIAL_RUN records the trainer's own error" \
+    "grep -q 'Unable to write' <<<\"\$pr10\"" "$pr10"
+check "crash+complete: still never promotes" \
+    "[[ \"\$out10\" == *'(NOT promoted)'* ]]" "$out10"
+rm -rf "$T10"
+
+# ── Case 11: rc!=0 and the adapter is TRUNCATED -> must NOT be salvaged ────
+#    This is the case salvage would break if adapter_is_real.py could not see
+#    truncation; before 2026-09-20 it reported such a file as REAL.
+T11=$(mktemp -d); out11=$(run_crash_case "$T11" truncated)
+check "crash+truncated: refuses to salvage a half-written adapter" \
+    "[[ \"\$out11\" == *'no complete adapter survives'* ]]" "$out11"
+check "crash+truncated: never claims a complete adapter survived" \
+    "[[ \"\$out11\" != *'left a COMPLETE adapter'* ]]" "$out11"
+check "crash+truncated: NEVER reaches scoring (would measure a broken adapter)" \
+    "[[ \"\$out11\" != *'scoring candidate vs serving'* ]] && [ ! -f \"$T11/.fake-score.record\" ]" "$out11"
+check "crash+truncated: writes no PARTIAL_RUN provenance" \
+    "[ -z \"\$(ls \"$T11\"/.human/training-data/adapters/*/PARTIAL_RUN 2>/dev/null)\" ]" "$out11"
+rm -rf "$T11"
+
+# ── Case 12: rc!=0 with NO adapter at all -> unchanged bail-out ────────────
+T12=$(mktemp -d); out12=$(run_crash_case "$T12" none)
+check "crash+nothing: bails out exactly as before" \
+    "[[ \"\$out12\" == *'training FAILED rc=1'* ]]" "$out12"
+check "crash+nothing: never reaches scoring" \
+    "[[ \"\$out12\" != *'scoring candidate vs serving'* ]]" "$out12"
+rm -rf "$T12"
+
+# ── Case 13: a QUARANTINED dir must never be resurrected. `.rejected-` sorts
+#    AFTER the plain directory name, so an unfiltered `sort | tail -1` picks it
+#    -- reachable only on the failure path, which is precisely where salvage
+#    now looks. Behavioural, not textual: the fake trainer writes a GOOD
+#    adapter and plants a TRUNCATED `.rejected-` sibling that sorts last. If
+#    resolution picked the quarantined one, the guard would reject it and the
+#    stage would bail instead of salvaging. (Verified by mutation: deleting the
+#    `grep -v` from nightly-retrain.sh flips these two checks to FAIL.)
+T13=$(mktemp -d); out13=$(run_crash_case "$T13" complete_with_rejected)
+check "quarantine: resolves to the LIVE adapter, not the .rejected- sibling" \
+    "[[ \"\$out13\" == *'left a COMPLETE adapter'* ]]" "$out13"
+check "quarantine: therefore still reaches the measurement" \
+    "[[ \"\$out13\" == *'scoring candidate vs serving (offline LUAR)'* ]]" "$out13"
+check "quarantine: the planted .rejected- sibling really does sort last" \
+    "[[ \"\$(ls -d \"$T13\"/.human/training-data/adapters/seth-glm-air-* | sort | tail -1)\" == *'.rejected-'* ]]" \
+    "$(ls -d "$T13"/.human/training-data/adapters/seth-glm-air-* 2>/dev/null | sort)"
+rm -rf "$T13"
+
 exit $fail

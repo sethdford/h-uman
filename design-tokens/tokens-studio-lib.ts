@@ -11,10 +11,23 @@ import { collectTokens, parseOutdir, resolveRefs } from "./token-lib.js";
 
 const TOKENS_DIR = path.dirname(fileURLToPath(import.meta.url));
 
-/** docs/tokens-studio.json, or tokens-studio.json inside `--outdir DIR`. */
+/**
+ * `--out FILE` (an exact path, resolved against cwd), else tokens-studio.json
+ * inside `--outdir DIR`, else docs/tokens-studio.json. A malformed `--out`
+ * throws for the same reason parseOutdir does: falling back would overwrite
+ * the committed file.
+ */
 export function tokensStudioOutPath(
   argv: string[] = process.argv.slice(2),
 ): string {
+  const i = argv.indexOf("--out");
+  if (i !== -1) {
+    const file = argv[i + 1];
+    if (!file || file.startsWith("-")) {
+      throw new Error("--out needs a file path");
+    }
+    return path.resolve(file);
+  }
   const outdir = parseOutdir(argv);
   return outdir
     ? path.join(outdir, "tokens-studio.json")

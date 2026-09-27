@@ -41,7 +41,7 @@ interface Env {
 }
 
 interface Rendered {
-  /** computed color of var(--hu-<key>) for every P3 key, plus "bg" */
+  /** computed color of var(--hu-<key>) for every P3 key, plus "bg" and "link-hover" */
   tokens: Record<string, string>;
   /** computed color of each literal P3 source value, keyed by that value */
   literals: Record<string, string>;
@@ -83,7 +83,7 @@ async function render(page: Page, env: Env, gamut: "p3" | "srgb"): Promise<Rende
         return getComputedStyle(probe).color;
       };
       const tokens: Record<string, string> = {};
-      for (const k of [...keys, "bg"]) tokens[k] = resolve(`var(--hu-${k})`);
+      for (const k of [...keys, "bg", "link-hover"]) tokens[k] = resolve(`var(--hu-${k})`);
       const lit: Record<string, string> = {};
       for (const v of literals) lit[v] = resolve(v);
       return { tokens, literals: lit };
@@ -169,5 +169,14 @@ test.describe("P3 overrides follow the active theme", () => {
     // WCAG 1.4.11 non-text (3:1) and 1.4.3 text (4.5:1).
     expect(contrast(tokens["focus-ring"], tokens.bg)).toBeGreaterThanOrEqual(3);
     expect(contrast(tokens["accent-text"], tokens.bg)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  test("light theme on sRGB keeps link and link hover legible and distinct", async ({ page }) => {
+    const { tokens } = await render(page, { scheme: "light" }, "srgb");
+    // WCAG 1.4.3 text (4.5:1) for both link states on the page background.
+    expect(contrast(tokens.link, tokens.bg)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(tokens["link-hover"], tokens.bg)).toBeGreaterThanOrEqual(4.5);
+    // Hover must still read as a change, not the same color.
+    expect(tokens["link-hover"]).not.toBe(tokens.link);
   });
 });

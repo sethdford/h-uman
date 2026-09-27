@@ -48,9 +48,9 @@ Auto-generated from W3C token files in `design-tokens/`.
 | `--hu-hover-overlay` | rgba(255, 255, 255, 0.08) | rgba(0, 0, 0, 0.06) |
 | `--hu-info` | #3b82f6 | #2563eb |
 | `--hu-info-dim` | rgba(59, 130, 246, 0.15) | rgba(37, 99, 235, 0.1) |
-| `--hu-link` | #8DC63F | #5A9A30 |
+| `--hu-link` | #8DC63F | #3a6a24 |
 | `--hu-link-active` | #7AB648 | #7AB648 |
-| `--hu-link-hover` | #a3d46a | #3a6a24 |
+| `--hu-link-hover` | #a3d46a | #264A17 |
 | `--hu-link-visited` | #5A9A30 | #3a6a24 |
 | `--hu-on-accent` | #ffffff | #ffffff |
 | `--hu-on-accent-secondary` | #0c0a08 | #ffffff |
@@ -202,4 +202,4 @@ Auto-generated from W3C token files in `design-tokens/`.
 
 ---
 
-_Generated: 2026-09-27T01:17:47Z_
+_Generated: 2026-09-27T11:30:41Z_

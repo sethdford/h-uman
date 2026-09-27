@@ -22,18 +22,16 @@ judged runs under a separate key that never gates promotion. Without
 --rater nothing is written (2026-07-26: an unconditional write let a
 synthetic-judge run replace the genuine human verdict).
 """
-import argparse, csv, json, math, os, sys, time
+import argparse, csv, json, os, sys, time
 
-
-def wilson(k, n, z=1.96):
-    """95% Wilson score interval for a binomial proportion."""
-    if n == 0:
-        return (0.0, 0.0, 0.0)
-    p = k / n
-    d = 1 + z * z / n
-    centre = (p + z * z / (2 * n)) / d
-    half = (z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))) / d
-    return (p, max(0.0, centre - half), min(1.0, centre + half))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+# Both tiers must quantify uncertainty identically -- until 2026-09-20 this file
+# gated on a Wilson bound while the proxy tier compared a point estimate to a
+# fixed floor, and the proxy tier failed a perfectly indistinguishable model
+# 24.8 % of the time as a result. blind_ab_gate owns the gate's statistics now;
+# re-exported here because eval_seth_initiation_baseline.py does
+# `from score import wilson`.
+from blind_ab_gate import wilson  # noqa: E402,F401
 
 
 def likert_to_01(likert_val):
