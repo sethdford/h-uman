@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-27T13:57:00.645Z",
+  "generated": "2026-09-27T16:30:15.649Z",
   "groups": {
     "color.neutral": [
       {
@@ -2558,6 +2558,23 @@
       {
         "name": "focus-ring-offset",
         "value": "2px"
+      },
+      {
+        "name": "surface-container",
+        "value": "rgba(255, 255, 255, 0.08)"
+      },
+      {
+        "name": "surface-container-high",
+        "value": "rgba(255, 255, 255, 0.12)"
+      },
+      {
+        "name": "surface-container-highest",
+        "value": "#28231e",
+        "hex": "#28231e"
+      },
+      {
+        "name": "hover-overlay",
+        "value": "rgba(255, 255, 255, 0.12)"
       }
     ],
     "composite": [
