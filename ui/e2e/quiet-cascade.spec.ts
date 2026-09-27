@@ -160,6 +160,28 @@ test.describe("Quiet Room cascade", () => {
     expect(await prop(page, "html", "--hu-font-display")).toContain("Newsreader Variable");
   });
 
+  // high-contrast.css loads after _tokens.css, so any colour it sets under
+  // prefers-contrast: more replaces the generated black palette. It used to set
+  // text-faint #6b7280 (4.3:1 on black) and, under data-theme=light, dark-on-light
+  // text and borders (~2:1) while the background stayed black.
+  for (const [scheme, attrs] of [
+    ["dark", ""],
+    ["light", ""],
+    ["dark", 'data-theme="light"'],
+  ] as const) {
+    test(`prefers-contrast: more, ${scheme} ${attrs || "no data-theme"}: generated palette survives high-contrast.css`, async ({
+      page,
+    }) => {
+      const hcBlock = TOKENS_CSS.match(/@media \(prefers-contrast: more\)\s*\{\s*:root\s*\{([^}]*)\}/)?.[1] ?? "";
+      const colors = [...hcBlock.matchAll(/(--hu-[\w-]+):\s*([^;]+);/g)].filter(([, , v]) => !/px$/.test(v.trim()));
+      expect(colors.length, "precondition: the high-contrast block defines colours").toBeGreaterThan(20);
+      await load(page, attrs, "", { scheme, contrastMore: true }, HIGH_CONTRAST_CSS);
+      for (const [, name, value] of colors) {
+        expect(await prop(page, "html", name), name).toBe(norm(value));
+      }
+    });
+  }
+
   // Forced colors (Windows High Contrast) does not imply prefers-contrast: more.
   // high-contrast.css's :root forced-colors overrides score (0,1,0); unguarded
   // quiet colors at (0,2,0) would beat them.

@@ -1,28 +1,6 @@
-/* High-contrast and forced-colors support — WCAG AAA alignment */
-
-@media (prefers-contrast: more) {
-  :root {
-    --hu-border: #6b7280;
-    --hu-border-subtle: #4b5563;
-    --hu-text-muted: #9ca3af;
-    --hu-text-faint: #6b7280;
-    --hu-surface-container: rgba(255, 255, 255, 0.08);
-    --hu-surface-container-high: rgba(255, 255, 255, 0.12);
-    --hu-hover-overlay: rgba(255, 255, 255, 0.12);
-    --hu-focus-ring: #ffffff;
-  }
-
-  :root[data-theme="light"] {
-    --hu-border: #374151;
-    --hu-border-subtle: #6b7280;
-    --hu-text-muted: #374151;
-    --hu-text-faint: #6b7280;
-    --hu-surface-container: rgba(0, 0, 0, 0.06);
-    --hu-surface-container-high: rgba(0, 0, 0, 0.1);
-    --hu-hover-overlay: rgba(0, 0, 0, 0.08);
-    --hu-focus-ring: #000000;
-  }
-}
+/* Forced-colors support. The prefers-contrast: more palette is generated into
+   _tokens.css from design-tokens/semantic.tokens.json ("high-contrast" group);
+   do not override its colours here — this file loads after it and would win. */
 
 @media (forced-colors: active) {
   :root {
