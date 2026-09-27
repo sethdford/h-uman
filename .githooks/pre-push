@@ -5,6 +5,31 @@
 #
 # Set HU_FULL_PREPUSH=1 to also run UI typecheck/tests and website build.
 
+# A deletion-only push carries no content, so there is nothing to build, test
+# or gate. Before this check the hook never read its stdin, so
+# `git push origin --delete <branch>` paid the full build and suite and could
+# be refused outright: on 2026-09-26 the dead-strip ratchet blocked the
+# deletion of an already-merged branch. The workaround was
+# `gh api -X DELETE .../git/refs/heads/<branch>`.
+#
+# stdin can only be read once, so the ref list is kept in PUSH_REFS for any
+# later step that needs it. Nothing below reads stdin today. A tty stdin means
+# the hook was run by hand, not by git; reading it would block, so skip it.
+# A push that mixes deletions with real refs, or an empty ref list, falls
+# through and runs everything.
+PUSH_REFS=""
+if [ ! -t 0 ]; then
+    PUSH_REFS=$(cat)
+fi
+push_refs_lib="$(dirname "$0")/lib/push-refs.sh"
+if [ -f "$push_refs_lib" ]; then
+    . "$push_refs_lib"
+    if printf '%s\n' "$PUSH_REFS" | prepush_deletion_only; then
+        echo "pre-push: deletion-only push; skipping build and content gates"
+        exit 0
+    fi
+fi
+
 JOBS=$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)
 BUILD_DIR="build-check"
 
@@ -185,6 +210,7 @@ if [ -f "CMakeLists.txt" ]; then
                     echo "NOTE: could not rebuild build/ — skipping the dead-strip ratchet."
                     echo "  (build-check compiled and the suite passed, so this is build/'s"
                     echo "   own state, not this change. Log: $ds_log)"
+                    echo "  NOT ENFORCED on this push — the dead-strip-ratchet job in CI is."
                 fi
             fi
             if [ "$ds_ready" = "1" ]; then
@@ -199,6 +225,7 @@ if [ -f "CMakeLists.txt" ]; then
         else
             echo "No configured build/ — skipping the dead-strip ratchet."
             echo "  Configure one to enable it; see .claude/rules/dead-strip-ratchet.md."
+            echo "  NOT ENFORCED on this push — the dead-strip-ratchet job in CI is."
         fi
     fi
 

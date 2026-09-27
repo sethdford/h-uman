@@ -54,6 +54,7 @@ gate. CI runs them on every PR but their failure does not block merge:
 | `lighthouse` | Performance scores fluctuate ±5% run-to-run |
 | `lighthouse-dashboard` | Same as above |
 | `coverage` | Codecov tokens / network occasionally flake |
+| `dead-strip-ratchet` | New 2026-09-26. NOT flaky and not environment-dependent — it is deterministic and fails only on a real baseline regression. Advisory purely because it is new: promote to Tier 1 under the ≥50-PR bar below. Until then it is visible-but-not-blocking, which is strictly more than the zero CI coverage the dead-strip ratchet had before it. |
 
 ## Tier 3 — Main-only / on-demand
 
