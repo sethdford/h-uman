@@ -3156,6 +3156,45 @@ describe("hu-model-selector", () => {
     expect(t?.getAttribute("aria-expanded")).toBe("false");
     el.remove();
   });
+  it("trigger is named and points at the highlighted option", async () => {
+    const el = document.createElement("hu-model-selector") as HTMLElement & {
+      models: Array<{ id: string; name: string }>;
+      updateComplete: Promise<boolean>;
+    };
+    el.models = [
+      { id: "a", name: "A" },
+      { id: "b", name: "B" },
+    ];
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const t = el.shadowRoot?.querySelector("[role='combobox']") as HTMLElement;
+    expect(t.getAttribute("aria-label")).toBe("Model");
+    expect(t.hasAttribute("aria-activedescendant")).toBe(false);
+    // aria-controls resolves even while collapsed: the listbox is present, just hidden.
+    const closedList = el.shadowRoot?.getElementById(t.getAttribute("aria-controls") ?? "");
+    expect(closedList?.getAttribute("role")).toBe("listbox");
+    expect(closedList?.hidden).toBe(true);
+    const key = (k: string) =>
+      t.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true }));
+    key("ArrowDown");
+    await el.updateComplete;
+    key("ArrowDown");
+    await el.updateComplete;
+    const listbox = el.shadowRoot?.querySelector("[role='listbox']") as HTMLElement;
+    expect(t.getAttribute("aria-controls")).toBe(listbox.id);
+    const active = el.shadowRoot?.getElementById(t.getAttribute("aria-activedescendant") ?? "");
+    expect(active?.textContent).toContain("B");
+    let detail: { model: string } | null = null;
+    el.addEventListener("hu-model-change", ((e: CustomEvent) => {
+      detail = e.detail;
+    }) as EventListener);
+    // Enter must be cancelled, or the trigger's native click reopens the list.
+    expect(key("Enter")).toBe(false);
+    await el.updateComplete;
+    expect(detail).toEqual({ model: "b" });
+    expect(t.getAttribute("aria-expanded")).toBe("false");
+    el.remove();
+  });
 });
 
 describe("hu-tapback-menu", () => {
