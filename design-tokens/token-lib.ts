@@ -162,5 +162,18 @@ export function partitionByPlatform(sources: TokenSource[]): {
   };
 }
 
+/**
+ * `--outdir DIR` / `--outdir=DIR` from a generator's argv, or null. With it, a
+ * generator writes each output flat into DIR instead of its committed path, so
+ * check-drift.sh can regenerate into a temp dir and diff.
+ */
+export function parseOutdir(argv: string[] = process.argv.slice(2)): string | null {
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "--outdir" && argv[i + 1]) return argv[i + 1];
+    if (argv[i].startsWith("--outdir=")) return argv[i].slice("--outdir=".length);
+  }
+  return null;
+}
+
 export { TOKEN_FILES, collectTokens, collectTypes, resolveRefs };
 export type { TokenValue, TokenMap, TypeMap };

@@ -6,6 +6,7 @@ import {
   TOKEN_FILES,
   collectTokens,
   collectTypes,
+  parseOutdir,
   partitionByPlatform,
   platformOf,
   readTokenSources,
@@ -99,4 +100,12 @@ test("resolveRefs leaves non-whole-value braces alone", () => {
   assert.deepEqual(resolveRefs({ g: "linear-gradient({x}, red)" }), {
     g: "linear-gradient({x}, red)",
   });
+});
+
+test("parseOutdir reads both flag spellings and keeps '=' inside the path", () => {
+  assert.equal(parseOutdir([]), null);
+  assert.equal(parseOutdir(["--outdir"]), null);
+  assert.equal(parseOutdir(["--outdir", "/tmp/a"]), "/tmp/a");
+  assert.equal(parseOutdir(["--x", "--outdir=/tmp/b"]), "/tmp/b");
+  assert.equal(parseOutdir(["--outdir=/tmp/k=v"]), "/tmp/k=v");
 });

@@ -1,18 +1,21 @@
 #!/usr/bin/env npx tsx
 /**
  * Regenerate docs/tokens-studio.json from canonical *.tokens.json sources.
- * Run from repo root: npx tsx design-tokens/sync-tokens-studio.ts
+ * Run from repo root: npx tsx design-tokens/sync-tokens-studio.ts [--outdir DIR]
  */
 
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
-import { collectTokens, resolveRefs } from "./token-lib.js";
+import { collectTokens, parseOutdir, resolveRefs } from "./token-lib.js";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(SCRIPT_DIR, "..");
 const DT = path.join(ROOT, "design-tokens");
-const OUT = path.join(ROOT, "docs/tokens-studio.json");
+const OUTDIR = parseOutdir();
+const OUT = OUTDIR
+  ? path.join(OUTDIR, "tokens-studio.json")
+  : path.join(ROOT, "docs/tokens-studio.json");
 
 function stripSchema(obj: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
