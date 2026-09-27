@@ -188,7 +188,7 @@ export class ScModelSelector extends LitElement {
       <button
         class="trigger"
         role="combobox"
-        aria-label=${`Model: ${label}`}
+        aria-label="Model"
         aria-expanded=${this._open}
         aria-haspopup="listbox"
         @click=${this._onTriggerClick}
