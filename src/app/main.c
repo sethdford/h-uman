@@ -2880,6 +2880,12 @@ static hu_error_t cmd_voice_preview(hu_allocator_t *alloc, int argc, char **argv
         }
         if (have_prov && prov.vtable && prov.vtable->deinit)
             prov.vtable->deinit(prov.ctx, alloc);
+        if (direct && !directed_ready) {
+            /* A baseline written as "directed" would contaminate the ear test. */
+            fprintf(stderr, "direction failed; no directed clip written to --out\n");
+            hu_persona_free(&persona);
+            return HU_ERR_PROVIDER_RESPONSE;
+        }
         if (!directed_ready)
             err = hu_voice_reply_build_request_ex(
                 &persona.voice, sp.spoken, sp.spoken_len, incoming, incoming ? strlen(incoming) : 0,
