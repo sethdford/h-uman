@@ -105,8 +105,7 @@ const KNOWN_VIOLATIONS: Record<string, Record<string, number>> = {
   Channels: { "color-contrast": 1 },
   Usage: { "color-contrast": 1 },
   Memory: { "color-contrast": 1 },
-  // Plus .log-row role=listitem with no list parent.
-  Logs: { "aria-required-parent": 1, "color-contrast": 1 },
+  Logs: { "color-contrast": 1 },
 };
 
 const VIEWS = [
