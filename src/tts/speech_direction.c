@@ -132,11 +132,26 @@ static bool is_markup(char c) {
 
 static size_t count_sentences(const char *s, size_t n) {
     size_t c = 0;
-    for (size_t i = 0; i < n; i++)
-        if ((s[i] == '.' || s[i] == '!' || s[i] == '?') &&
-            (i + 1 == n || (s[i + 1] != '.' && s[i + 1] != '!' && s[i + 1] != '?')))
+    for (size_t i = 0; i < n; i++) {
+        if (s[i] != '.' && s[i] != '!' && s[i] != '?')
+            continue;
+        if (s[i] == '.' && i > 0 && i + 1 < n && isdigit((unsigned char)s[i - 1]) &&
+            isdigit((unsigned char)s[i + 1]))
+            continue; /* "7.5" is a number, not a sentence end */
+        if (i + 1 == n || (s[i + 1] != '.' && s[i + 1] != '!' && s[i + 1] != '?'))
             c++;
+    }
     return c ? c : 1;
+}
+
+/* A tag or laugh splitting a word ("the<break/>re") is garbled markup. */
+static bool glued(const char *line, size_t len, size_t start, size_t end) {
+    return start > 0 && isalnum((unsigned char)line[start - 1]) && end < len &&
+           isalnum((unsigned char)line[end]);
+}
+
+static bool emoji_at(const char *line, size_t len, size_t i) {
+    return (unsigned char)line[i] >= 0xE0 && hu_transcript_is_emoji(line + i, len - i);
 }
 
 typedef struct {
@@ -151,6 +166,10 @@ static size_t read_tag(const char *line, size_t len, size_t i, const hu_directio
     const char *gt = memchr(line + i, '>', len - i);
     const char *lt = i + 1 < len ? memchr(line + i + 1, '<', len - i - 1) : NULL;
     if (!gt || (lt && lt < gt)) {
+        *v = HU_DIRECTION_BAD_TAG;
+        return 0;
+    }
+    if (glued(line, len, i, (size_t)(gt - line) + 1)) {
         *v = HU_DIRECTION_BAD_TAG;
         return 0;
     }
@@ -251,6 +270,8 @@ hu_direction_verdict_t hu_direction_parse(const char *line, size_t len,
             static const char laugh[] = "[laughter]";
             if (len - i >= sizeof(laugh) - 1 &&
                 strncasecmp(line + i, laugh, sizeof(laugh) - 1) == 0) {
+                if (glued(line, len, i, i + sizeof(laugh) - 1))
+                    return HU_DIRECTION_BAD_TAG;
                 st.pend.laugh = true;
                 pending = true;
                 st.laughs++;
@@ -261,10 +282,10 @@ hu_direction_verdict_t hu_direction_parse(const char *line, size_t len,
         }
         if (is_markup(c))
             return c == '>' ? HU_DIRECTION_BAD_TAG : HU_DIRECTION_STAGE_DIRECTION;
-        if ((unsigned char)c == 0xF0)
+        if (emoji_at(line, len, i))
             return HU_DIRECTION_EMOJI;
         size_t s = i;
-        while (i < len && !is_markup(line[i]) && (unsigned char)line[i] != 0xF0)
+        while (i < len && !is_markup(line[i]) && !emoji_at(line, len, i))
             i++;
         const char *t = line + s;
         size_t tn = i - s;
@@ -326,6 +347,8 @@ size_t hu_direction_render(const hu_direction_t *d, hu_laugh_style_t laugh, char
         char norm[HU_DIRECTION_TEXT_CAP * 2];
         size_t nn =
             hu_transcript_normalize_for_speech(g->text, g->text_len, norm, sizeof(norm), false);
+        if (nn >= sizeof(norm) - 1)
+            return 0; /* expansion filled the buffer: never speak a cut-off line */
         if (o > 0 && !emit(out, cap, &o, "%s", " ", 0))
             return 0;
         if (g->break_ms && !emit(out, cap, &o, "<break time=\"%.0fms\"/>", NULL, g->break_ms))
@@ -347,4 +370,32 @@ size_t hu_direction_render(const hu_direction_t *d, hu_laugh_style_t laugh, char
         out[o] = '\0';
     }
     return o;
+}
+
+size_t hu_direction_summary(const hu_direction_t *d, char *out, size_t cap) {
+    if (!d || !out || cap == 0)
+        return 0;
+    size_t o = 0;
+    unsigned breaks = 0, laughs = 0, speeds = 0, volumes = 0;
+    if (!emit(out, cap, &o, "%s", "emotions=", 0))
+        return 0;
+    bool first = true;
+    for (size_t i = 0; i < d->count; i++) {
+        const hu_direction_segment_t *g = &d->seg[i];
+        breaks += g->break_ms ? 1u : 0u;
+        laughs += g->laugh ? 1u : 0u;
+        speeds += g->speed > 0.f ? 1u : 0u;
+        volumes += g->volume > 0.f ? 1u : 0u;
+        if (g->emotion[0]) {
+            if ((!first && !emit(out, cap, &o, "%s", ",", 0)) ||
+                !emit(out, cap, &o, "%s", g->emotion, 0))
+                return 0;
+            first = false;
+        }
+    }
+    int w = snprintf(out + o, cap - o, " breaks=%u laughs=%u speed=%u volume=%u", breaks, laughs,
+                     speeds, volumes);
+    if (w < 0 || (size_t)w >= cap - o)
+        return 0;
+    return o + (size_t)w;
 }

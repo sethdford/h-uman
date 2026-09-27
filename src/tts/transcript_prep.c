@@ -43,6 +43,10 @@ static bool is_emoji_codepoint(const unsigned char *p, size_t remain) {
     return false;
 }
 
+bool hu_transcript_is_emoji(const char *p, size_t remain) {
+    return p && is_emoji_codepoint((const unsigned char *)p, remain);
+}
+
 size_t hu_transcript_strip_junk(const char *text, size_t text_len, char *out, size_t cap) {
     if (!text || text_len == 0 || !out || cap == 0)
         return 0;

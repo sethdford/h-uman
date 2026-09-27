@@ -123,6 +123,53 @@ static void test_direction_render_laugh_styles(void) {
     HU_ASSERT_EQ(hu_laugh_style_parse(NULL), HU_LAUGH_CARTESIA);
 }
 
+/* Deferred minors, fixed 2026-09-27. */
+static void test_direction_rejects_a_tag_inside_a_word(void) {
+    static hu_direction_t d;
+    HU_ASSERT_EQ(parse("hey the<break time=\"200ms\"/>re", &d), HU_DIRECTION_BAD_TAG);
+    HU_ASSERT_EQ(parse("ha[laughter]ha you", &d), HU_DIRECTION_BAD_TAG);
+    HU_ASSERT_EQ(parse("Love you too.<break time=\"200ms\"/>So proud.", &d), HU_DIRECTION_OK);
+}
+
+static void test_direction_rejects_symbol_emoji(void) {
+    static hu_direction_t d;
+    HU_ASSERT_EQ(parse("love you \xE2\x9D\xA4", &d), HU_DIRECTION_EMOJI);     /* U+2764 */
+    HU_ASSERT_EQ(parse("so good \xE2\x9C\xA8 yeah", &d), HU_DIRECTION_EMOJI); /* U+2728 */
+    HU_ASSERT_EQ(parse("wait\xE2\x80\x94really?", &d), HU_DIRECTION_OK);      /* em dash is text */
+}
+
+static void test_direction_decimals_are_not_sentence_ends(void) {
+    static hu_direction_t d;
+    HU_ASSERT_EQ(parse("it's 7.5 miles.", &d), HU_DIRECTION_OK);
+    HU_ASSERT_EQ(d.sentences, 1);
+    HU_ASSERT_EQ(parse("<emotion value=\"sad\"/>it's 7.5 or <emotion value=\"calm\"/>8.5 "
+                       "<emotion value=\"excited\"/>miles.",
+                       &d),
+                 HU_DIRECTION_OVER_BUDGET); /* 2 changes in ONE sentence */
+}
+
+static void test_direction_render_fails_rather_than_truncates(void) {
+    static hu_direction_t d;
+    memset(&d, 0, sizeof(d));
+    d.count = 1;
+    for (size_t i = 0; i < 190; i++)
+        memcpy(d.seg[0].text + i * 3, "99 ", 3); /* "ninety-nine " x190 > the norm buffer */
+    d.seg[0].text_len = 570;
+    char out[HU_DIRECTION_RENDER_CAP];
+    HU_ASSERT_EQ(hu_direction_render(&d, HU_LAUGH_CARTESIA, out, sizeof(out)), 0);
+}
+
+static void test_direction_summary_names_emotions_and_tags(void) {
+    static hu_direction_t d;
+    HU_ASSERT_EQ(parse("<emotion value=\"excited\"/>No way! <break time=\"300ms\"/>"
+                       "<emotion value=\"proud\"/><speed ratio=\"0.9\"/>So proud.",
+                       &d),
+                 HU_DIRECTION_OK);
+    char s[160];
+    HU_ASSERT_TRUE(hu_direction_summary(&d, s, sizeof(s)) > 0);
+    HU_ASSERT_STR_EQ(s, "emotions=excited,proud breaks=1 laughs=0 speed=1 volume=0");
+}
+
 void run_speech_direction_tests(void) {
     HU_TEST_SUITE("speech direction (D2)");
     HU_RUN_TEST(test_direction_parses_a_valid_line);
@@ -137,4 +184,9 @@ void run_speech_direction_tests(void) {
     HU_RUN_TEST(test_direction_render_normalizes_words_not_tags);
     HU_RUN_TEST(test_direction_render_reemits_only_parsed_tags);
     HU_RUN_TEST(test_direction_render_laugh_styles);
+    HU_RUN_TEST(test_direction_rejects_a_tag_inside_a_word);
+    HU_RUN_TEST(test_direction_rejects_symbol_emoji);
+    HU_RUN_TEST(test_direction_decimals_are_not_sentence_ends);
+    HU_RUN_TEST(test_direction_render_fails_rather_than_truncates);
+    HU_RUN_TEST(test_direction_summary_names_emotions_and_tags);
 }

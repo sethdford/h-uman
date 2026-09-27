@@ -69,4 +69,6 @@ hu_laugh_style_t hu_laugh_style_parse(const char *s);
 /* D3: canonical Cartesia transcript re-emitted from the parsed values, each
  * segment's words normalized for speech. Returns the length (0 on overflow). */
 size_t hu_direction_render(const hu_direction_t *d, hu_laugh_style_t laugh, char *out, size_t cap);
+/* For logs (no words): "emotions=a,b breaks=N laughs=N speed=N volume=N". */
+size_t hu_direction_summary(const hu_direction_t *d, char *out, size_t cap);
 #endif
