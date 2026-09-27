@@ -137,6 +137,21 @@ static bool laugh_token_rule(const char *core, size_t n) {
            is_laugh_syllables(core, n);
 }
 
+bool hu_speech_has_laugh_token(const char *s, size_t n) {
+    if (!s)
+        return false;
+    for (size_t i = 0; i < n;) {
+        while (i < n && !isalnum((unsigned char)s[i]))
+            i++;
+        size_t b = i;
+        while (i < n && isalnum((unsigned char)s[i]))
+            i++;
+        if (i > b && laugh_token_rule(s + b, i - b))
+            return true;
+    }
+    return false;
+}
+
 static bool append(char *out, size_t cap, size_t *o, const char *s, size_t n) {
     if (*o + n + 1 > cap) {
         n = cap > *o + 1 ? cap - *o - 1 : 0;

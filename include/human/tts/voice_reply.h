@@ -45,6 +45,14 @@ hu_error_t hu_voice_reply_build_request(const struct hu_persona_voice_config *vo
                                         const char *incoming, size_t incoming_len, int hour_local,
                                         uint32_t seed, hu_voice_reply_request_t *out);
 
+/* Same, with the laughter cue from speech cleanup (the reply said lol/haha):
+ * lets transcript prep add one real laugh. */
+hu_error_t hu_voice_reply_build_request_ex(const struct hu_persona_voice_config *voice,
+                                           const char *response, size_t response_len,
+                                           const char *incoming, size_t incoming_len,
+                                           int hour_local, uint32_t seed, bool laughter_cue,
+                                           hu_voice_reply_request_t *out);
+
 /* Write synthesized audio to a temp file in the container the channel wants
  * (CAF via afconvert for iMessage, otherwise mp3/wav). Caller must
  * hu_audio_cleanup_temp(out_path). `channel_name` may be NULL. */

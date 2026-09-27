@@ -24,6 +24,10 @@
  * NUL-terminated when cap > 0. laughter_cue may be NULL. */
 size_t hu_speech_cleanup(const char *in, size_t in_len, char *out, size_t cap, bool *laughter_cue);
 
+/* True when the text contains a laugh token (lol, lmao, haha, hehe…),
+ * word-boundary. Shared with transcript prep's laughter decision. */
+bool hu_speech_has_laugh_token(const char *s, size_t n);
+
 typedef enum {
     HU_SPEECH_DRIFT_OK = 0,
     HU_SPEECH_DRIFT_NEW_NUMBER,

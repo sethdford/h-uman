@@ -139,7 +139,6 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, hu_agent_t *agent, const hu_co
     bool laughter_cue = false;
     size_t spoken_len =
         hu_speech_cleanup(response, response_len, spoken, sizeof(spoken), &laughter_cue);
-    (void)laughter_cue; /* consumed by transcript prep (F1 Task 2) */
     if (spoken_len == 0)
         return false;
     /* F1 S4: the gates also judge what is actually spoken. */
@@ -178,9 +177,9 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, hu_agent_t *agent, const hu_co
                 const char *cartesia_key = hu_config_get_provider_key(config, "cartesia");
                 if (cartesia_key && cartesia_key[0]) {
                     hu_voice_reply_request_t req;
-                    hu_error_t prep_err = hu_voice_reply_build_request(
+                    hu_error_t prep_err = hu_voice_reply_build_request_ex(
                         &agent->persona->voice, spoken, spoken_len, combined, combined_len,
-                        bth_hour, (uint32_t)time(NULL), &req);
+                        bth_hour, (uint32_t)time(NULL), laughter_cue, &req);
                     unsigned char *audio_bytes = NULL;
                     size_t audio_len = 0;
                     hu_error_t tts_err = prep_err;
