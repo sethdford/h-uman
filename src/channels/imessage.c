@@ -17,6 +17,7 @@
 #include "human/core/string.h"
 #include "human/observability/validator_telemetry.h"
 #include "human/persona.h"
+#include "human/util/typedstream.h"
 #ifndef HU_CODENAME
 #define HU_CODENAME "human"
 #endif
@@ -5917,6 +5918,31 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
                     attr_blob, (size_t)attr_len, attr_text_buf, sizeof(attr_text_buf));
                 if (extracted > 0)
                     text = attr_text_buf;
+            }
+        }
+
+        /* A voice memo: Messages keeps iOS's transcript of it in attributedBody
+         * (IMAudioTranscription). Reply to what they said, not to "[Audio]" —
+         * 2026-09-27 the daemon answered Mindy's memo without hearing it. The
+         * log line measures whether a local STT fallback is ever needed. */
+        char audio_text_buf[4200];
+        if (has_audio) {
+            const unsigned char *ab = sqlite3_column_blob(stmt, 10);
+            int abl = sqlite3_column_bytes(stmt, 10);
+            const char pre[] = "[Audio transcription: ";
+            size_t pl = sizeof(pre) - 1;
+            memcpy(audio_text_buf, pre, pl);
+            size_t tn =
+                (ab && abl > 0)
+                    ? hu_imessage_extract_audio_transcription(ab, (size_t)abl, audio_text_buf + pl,
+                                                              sizeof(audio_text_buf) - pl - 1)
+                    : 0;
+            hu_log_info("imessage", NULL, "inbound audio rowid=%lld transcript=%s",
+                        (long long)rowid, tn > 0 ? "ios" : "none");
+            if (tn > 0) {
+                audio_text_buf[pl + tn] = ']';
+                audio_text_buf[pl + tn + 1] = '\0';
+                text = audio_text_buf;
             }
         }
 

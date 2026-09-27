@@ -91,6 +91,12 @@ bool hu_imessage_runs_contain_otp(const hu_attribute_run_t *runs, size_t count);
 const hu_attribute_run_t *hu_imessage_runs_first_mention(const hu_attribute_run_t *runs,
                                                          size_t count);
 
+/* Messages stores iOS's transcript of an audio message as the
+ * IMAudioTranscription attribute of attributedBody. Copies it (UTF-8,
+ * NUL-terminated, never split mid-character) and returns its length, or 0. */
+size_t hu_imessage_extract_audio_transcription(const unsigned char *blob, size_t blob_len,
+                                               char *out, size_t cap);
+
 #ifdef __cplusplus
 }
 #endif

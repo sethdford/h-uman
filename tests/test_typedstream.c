@@ -309,6 +309,82 @@ static void helpers_null_safe(void) {
     HU_ASSERT_FALSE(hu_imessage_runs_contain_otp(r, 1));
 }
 
+/* ── IMAudioTranscription (iOS's transcript of an audio message) ── */
+
+/* Framing observed in chat.db 2026-09-27: key, 86 92 84 96 96, a typedstream
+ * length, the UTF-8 text, then 0x86. */
+static size_t build_audio_blob(unsigned char *b, const char *text, bool with_end) {
+    static const unsigned char head[] = {0x04, 0x0b, 's', 't', 'r', 'e',  'a',  'm',
+                                         't',  'y',  'p', 'e', 'd', 0x81, 0xe8, 0x03};
+    static const unsigned char pre[] = {0x86, 0x92, 0x84, 0x96, 0x96};
+    static const char key[] = "IMAudioTranscription";
+    size_t o = 0, n = strlen(text);
+    memcpy(b + o, head, sizeof(head));
+    o += sizeof(head);
+    memcpy(b + o, key, sizeof(key) - 1);
+    o += sizeof(key) - 1;
+    memcpy(b + o, pre, sizeof(pre));
+    o += sizeof(pre);
+    if (n < 0x80) {
+        b[o++] = (unsigned char)n;
+    } else {
+        b[o++] = 0x81;
+        b[o++] = (unsigned char)(n & 0xff);
+        b[o++] = (unsigned char)(n >> 8);
+    }
+    memcpy(b + o, text, n);
+    o += n;
+    if (with_end)
+        b[o++] = 0x86;
+    b[o++] = 0x92;
+    b[o++] = 0x84;
+    return o;
+}
+
+static void test_audio_transcription_extracts_the_ios_transcript(void) {
+    unsigned char b[1024];
+    size_t n = build_audio_blob(b, "OK, see you at church", true);
+    char out[256];
+    HU_ASSERT_EQ(hu_imessage_extract_audio_transcription(b, n, out, sizeof(out)), 21);
+    HU_ASSERT_STR_EQ(out, "OK, see you at church");
+}
+
+static void test_audio_transcription_long_length_prefix(void) {
+    char text[301];
+    memset(text, 'a', 300);
+    text[300] = '\0';
+    unsigned char b[1024];
+    size_t n = build_audio_blob(b, text, true);
+    char out[512];
+    HU_ASSERT_EQ(hu_imessage_extract_audio_transcription(b, n, out, sizeof(out)), 300);
+    HU_ASSERT_STR_EQ(out, text);
+}
+
+static void test_audio_transcription_absent_key_returns_zero(void) {
+    static const unsigned char b[] = {0x04, 0x0b, 'N', 'S', 'S', 't', 'r', 'i', 'n', 'g', 0x86};
+    char out[64] = "x";
+    HU_ASSERT_EQ(hu_imessage_extract_audio_transcription(b, sizeof(b), out, sizeof(out)), 0);
+    HU_ASSERT_STR_EQ(out, "");
+}
+
+static void test_audio_transcription_requires_end_marker(void) {
+    unsigned char b[1024];
+    size_t n = build_audio_blob(b, "no end marker here", false);
+    char out[256];
+    HU_ASSERT_EQ(hu_imessage_extract_audio_transcription(b, n, out, sizeof(out)), 0);
+    /* truncated blob: the length points past the end */
+    n = build_audio_blob(b, "cut short", true);
+    HU_ASSERT_EQ(hu_imessage_extract_audio_transcription(b, n - 6, out, sizeof(out)), 0);
+}
+
+static void test_audio_transcription_truncates_on_a_character_boundary(void) {
+    unsigned char b[1024];
+    size_t n = build_audio_blob(b, "caf\xC3\xA9 later", true); /* "café later" */
+    char out[5];                                               /* room for "caf" + 1 byte */
+    HU_ASSERT_EQ(hu_imessage_extract_audio_transcription(b, n, out, sizeof(out)), 3);
+    HU_ASSERT_STR_EQ(out, "caf");
+}
+
 /* ── runner ──────────────────────────────────────────────────────── */
 
 void run_typedstream_tests(void) {
@@ -328,4 +404,9 @@ void run_typedstream_tests(void) {
     HU_RUN_TEST(null_args_return_error);
     HU_RUN_TEST(text_capacity_overflow_reported);
     HU_RUN_TEST(helpers_null_safe);
+    HU_RUN_TEST(test_audio_transcription_extracts_the_ios_transcript);
+    HU_RUN_TEST(test_audio_transcription_long_length_prefix);
+    HU_RUN_TEST(test_audio_transcription_absent_key_returns_zero);
+    HU_RUN_TEST(test_audio_transcription_requires_end_marker);
+    HU_RUN_TEST(test_audio_transcription_truncates_on_a_character_boundary);
 }
