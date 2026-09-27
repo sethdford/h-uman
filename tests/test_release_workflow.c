@@ -332,6 +332,37 @@ static void test_release_workflow_sign_job_is_conditional(void) {
     fclose(f);
 }
 
+/* Publishing a public unsigned pre-release on every main push is opt-in: the
+ * publish job's own if: must require the PUBLISH_PRERELEASE repo variable. */
+static void test_release_workflow_prerelease_publish_is_opt_in(void) {
+    FILE *f = fopen(".github/workflows/release-macos.yml", "r");
+    HU_ASSERT_NOT_NULL(f);
+
+    char line[256];
+    bool in_publish_job = false;
+    bool found_publish_job = false;
+    bool gated = false;
+
+    while (fgets(line, sizeof(line), f)) {
+        /* A job key is indented exactly two spaces under jobs:. */
+        bool job_key = line[0] == ' ' && line[1] == ' ' && isalpha((unsigned char)line[2]);
+        if (job_key) {
+            in_publish_job = strncmp(line + 2, "publish-prerelease:", 19) == 0;
+            found_publish_job = found_publish_job || in_publish_job;
+            continue;
+        }
+        if (in_publish_job && strstr(line, "if:") &&
+            strstr(line, "vars.PUBLISH_PRERELEASE == 'true'")) {
+            gated = true;
+            break;
+        }
+    }
+
+    HU_ASSERT_TRUE(found_publish_job);
+    HU_ASSERT_TRUE(gated);
+    fclose(f);
+}
+
 static void test_sign_notarize_script_exists(void) {
     FILE *f = fopen("scripts/release/sign-and-notarize.sh", "r");
     HU_ASSERT_NOT_NULL(f);
@@ -376,6 +407,7 @@ void run_release_workflow_tests(void) {
     HU_RUN_TEST(test_release_workflow_uploads_artifact);
     HU_RUN_TEST(test_release_workflow_tags_create_release);
     HU_RUN_TEST(test_release_workflow_sign_job_is_conditional);
+    HU_RUN_TEST(test_release_workflow_prerelease_publish_is_opt_in);
     HU_RUN_TEST(test_sign_notarize_script_exists);
     HU_RUN_TEST(test_diagnose_notary_script_exists);
     HU_RUN_TEST(test_sign_notarize_script_has_pkg_arg);

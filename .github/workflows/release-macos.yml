@@ -211,7 +211,11 @@ jobs:
     name: Publish unsigned pre-release to main
     needs: build
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    # Opt-in: publishing a public unsigned pre-release on every main push only
+    # happens once the repository variable PUBLISH_PRERELEASE is set to 'true'
+    # (Settings → Secrets and variables → Actions → Variables). Unset, the
+    # build job still runs and uploads the .pkg as a workflow artifact.
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && vars.PUBLISH_PRERELEASE == 'true'
     permissions:
       contents: write
     steps:
