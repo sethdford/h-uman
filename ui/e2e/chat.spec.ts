@@ -47,30 +47,24 @@ test.describe("Chat View", () => {
     const chatView = page.locator("hu-app >> hu-chat-view");
     await expect(chatView).toBeAttached({ timeout: 5000 });
     // Message log lives inside hu-message-thread shadow (role="log")
-    const messagesArea = page.locator("hu-app >> hu-chat-view >> hu-message-thread >> [role='log']");
+    const messagesArea = page.locator(
+      "hu-app >> hu-chat-view >> hu-message-thread >> [role='log']",
+    );
     await expect(messagesArea).toBeAttached({ timeout: 5000 });
   });
 
-  test("hu-message-thread component is available", async ({ page }) => {
-    const registered = await page.evaluate(() => {
-      return customElements.get("hu-message-thread") !== undefined;
+  // These elements are registered by the chat view's lazily loaded chunk, which
+  // can land after hu-chat-view attaches, so poll for registration instead of
+  // reading customElements once.
+  for (const tag of ["hu-message-thread", "hu-thinking", "hu-tool-result"]) {
+    test(`${tag} component is available`, async ({ page }) => {
+      await expect
+        .poll(() => page.evaluate((t) => customElements.get(t) !== undefined, tag), {
+          timeout: 10000,
+        })
+        .toBe(true);
     });
-    expect(registered).toBe(true);
-  });
-
-  test("hu-thinking component is available", async ({ page }) => {
-    const registered = await page.evaluate(() => {
-      return customElements.get("hu-thinking") !== undefined;
-    });
-    expect(registered).toBe(true);
-  });
-
-  test("hu-tool-result component is available", async ({ page }) => {
-    const registered = await page.evaluate(() => {
-      return customElements.get("hu-tool-result") !== undefined;
-    });
-    expect(registered).toBe(true);
-  });
+  }
 
   test("keyboard shortcut focuses input", async ({ page }) => {
     // Slash key should focus the chat input
