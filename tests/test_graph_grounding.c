@@ -5,6 +5,7 @@
 #include "human/agent/scheduler.h"
 #include "human/agent/world_model_bridge.h"
 #include "human/core/allocator.h"
+#include "human/core/gate_mode.h"
 #include "human/memory/graph.h"
 #include "test_framework.h"
 #include <stdbool.h>
@@ -417,6 +418,43 @@ static void test_compose_ex_fallback_skips_emotion_entities(void) {
     gg_fixture_close(&fx);
 }
 
+/* Owner ("self") facts are matched only when the message carries the entity's
+ * FULL name: a topic phrase like "different direction" must not seed on a lone
+ * shared word ("different"), while plain lexical matching would seed it. */
+static void test_compose_ex_require_full_name_blocks_partial_hits(void) {
+    gg_fixture_t fx;
+    gg_fixture_open(&fx);
+    int64_t id = 0;
+    HU_ASSERT_EQ(hu_graph_upsert_entity(fx.graph, "self", 4, "different direction", 19,
+                                        HU_ENTITY_TOPIC, NULL, &id),
+                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(fx.graph, "self", 4, "tampa bay", 9, HU_ENTITY_PLACE, NULL, &id),
+        HU_OK);
+    const char *partial = "i went a totally different way";
+    char *out = NULL;
+    size_t out_len = 0;
+    HU_ASSERT_EQ(hu_graph_ground_compose(&fx.loader, "self", 4, partial, strlen(partial), 0, &out,
+                                         &out_len, NULL),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(out); /* plain lexical seeds on the lone word... */
+    fx.alloc.free(fx.alloc.ctx, out, out_len + 1);
+    out = (char *)0x1;
+    HU_ASSERT_EQ(hu_graph_ground_compose_ex(&fx.loader, "self", 4, partial, strlen(partial), 0,
+                                            HU_GG_REQUIRE_FULL_NAME, &out, &out_len, NULL),
+                 HU_OK);
+    HU_ASSERT_TRUE(out == NULL); /* ...full-name mode does not */
+
+    const char *full = "hows the weather down in tampa bay";
+    HU_ASSERT_EQ(hu_graph_ground_compose_ex(&fx.loader, "self", 4, full, strlen(full), 0,
+                                            HU_GG_REQUIRE_FULL_NAME, &out, &out_len, NULL),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_TRUE(strstr(out, "tampa bay") != NULL);
+    fx.alloc.free(fx.alloc.ctx, out, out_len + 1);
+    gg_fixture_close(&fx);
+}
+
 /* The fallback honors the same output budget as lexical composition. */
 static void test_compose_ex_fallback_respects_budget(void) {
     gg_fixture_t fx;
@@ -462,6 +500,62 @@ static size_t load_grounding_len(gg_fixture_t *fx, const char *fb_mode, int tier
     unsetenv("HU_GRAPH_GROUNDING_CONTACT_FALLBACK");
     free(agent);
     return ctx_len;
+}
+
+/* Self-facts gate through the real loader: the contact ("alice") has no
+ * lexical hit and the contact fallback is OFF, but the message names one of
+ * the OWNER's facts. OFF/SHADOW inject nothing; LIVE injects it under an
+ * "About you:" label on analytical turns; casual turns still drop it. */
+static char *load_self_facts(gg_fixture_t *fx, const char *mode, int tier, size_t *len_out) {
+    int64_t id = 0;
+    (void)hu_graph_upsert_entity(fx->graph, "self", 4, "tampa bay", 9, HU_ENTITY_PLACE, NULL, &id);
+    hu_agent_t *agent = (hu_agent_t *)calloc(1, sizeof(hu_agent_t));
+    HU_ASSERT_NOT_NULL(agent);
+    agent->alloc = &fx->alloc;
+    agent->memory_session_id = "alice";
+    agent->memory_session_id_len = 5;
+    agent->turn_tier = tier;
+    setenv("HU_GRAPH_GROUNDING", "on", 1);
+    unsetenv("HU_GRAPH_GROUNDING_CONTACT_FALLBACK");
+    if (mode)
+        setenv("HU_GRAPH_GROUNDING_SELF_FACTS", mode, 1);
+    else
+        unsetenv("HU_GRAPH_GROUNDING_SELF_FACTS");
+    const char *msg = "hows the weather down in tampa bay";
+    char *ctx = NULL;
+    size_t ctx_len = 0;
+    hu_agent_load_graph_grounding(agent, &fx->loader, msg, strlen(msg), &ctx, &ctx_len);
+    unsetenv("HU_GRAPH_GROUNDING");
+    unsetenv("HU_GRAPH_GROUNDING_SELF_FACTS");
+    free(agent);
+    *len_out = ctx_len;
+    return ctx;
+}
+
+static void test_load_grounding_self_facts_gate(void) {
+    gg_fixture_t fx;
+    gg_fixture_open(&fx);
+    size_t len = 99;
+    HU_ASSERT_TRUE(load_self_facts(&fx, NULL, (int)HU_TIER_ANALYTICAL, &len) == NULL);
+    HU_ASSERT_TRUE(load_self_facts(&fx, "shadow", (int)HU_TIER_ANALYTICAL, &len) == NULL);
+    HU_ASSERT_TRUE(load_self_facts(&fx, "live", (int)HU_TIER_REFLEXIVE, &len) == NULL);
+    char *ctx = load_self_facts(&fx, "live", (int)HU_TIER_ANALYTICAL, &len);
+    HU_ASSERT_NOT_NULL(ctx);
+    HU_ASSERT_TRUE(strstr(ctx, "About you:") != NULL);
+    HU_ASSERT_TRUE(strstr(ctx, "tampa bay") != NULL);
+    HU_ASSERT_TRUE(strstr(ctx, "slip 14") == NULL); /* alice's facts only via her own path */
+    fx.alloc.free(fx.alloc.ctx, ctx, len + 1);
+    gg_fixture_close(&fx);
+}
+
+static void test_self_facts_mode_defaults_off(void) {
+    unsetenv("HU_GRAPH_GROUNDING_SELF_FACTS");
+    HU_ASSERT_EQ((int)hu_graph_grounding_self_facts_mode(), (int)HU_GATE_OFF);
+    setenv("HU_GRAPH_GROUNDING_SELF_FACTS", "shadow", 1);
+    HU_ASSERT_EQ((int)hu_graph_grounding_self_facts_mode(), (int)HU_GATE_SHADOW);
+    setenv("HU_GRAPH_GROUNDING_SELF_FACTS", "garbage", 1);
+    HU_ASSERT_EQ((int)hu_graph_grounding_self_facts_mode(), (int)HU_GATE_OFF);
+    unsetenv("HU_GRAPH_GROUNDING_SELF_FACTS");
 }
 
 static void test_load_grounding_contact_fallback_gate(void) {
@@ -800,6 +894,9 @@ void run_graph_grounding_tests(void) {
     HU_RUN_TEST(test_compose_ex_fallback_scoped_to_contact);
     HU_RUN_TEST(test_compose_ex_fallback_respects_budget);
     HU_RUN_TEST(test_compose_ex_fallback_skips_emotion_entities);
+    HU_RUN_TEST(test_compose_ex_require_full_name_blocks_partial_hits);
+    HU_RUN_TEST(test_load_grounding_self_facts_gate);
+    HU_RUN_TEST(test_self_facts_mode_defaults_off);
     HU_RUN_TEST(test_load_grounding_contact_fallback_gate);
     HU_RUN_TEST(test_compose_no_graph_is_failopen);
     HU_RUN_TEST(test_compose_renders_current_employer_with_predecessor);

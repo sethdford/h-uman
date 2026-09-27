@@ -55,6 +55,11 @@ hu_graph_grounding_fallback_mode_t hu_graph_grounding_contact_fallback_mode(void
     }
 }
 
+hu_gate_mode_t hu_graph_grounding_self_facts_mode(void) {
+    /* Default OFF: owner facts reaching the prompt change what is sent. */
+    return hu_gate_mode_from_env("HU_GRAPH_GROUNDING_SELF_FACTS", HU_GATE_OFF);
+}
+
 /* ── Pure retrieval-scoring predicates ──────────────────────────────────── */
 
 static bool gg_word_char(char c) {
@@ -330,7 +335,10 @@ hu_error_t hu_graph_ground_compose_ex(hu_memory_loader_t *loader, const char *co
         const hu_graph_entity_t *e = &cands[i];
         size_t words = hu_graph_ground_name_word_count(e->name, e->name_len);
         size_t hits = hu_graph_ground_entity_match_count(msg, msg_len, e->name, e->name_len);
-        scores[i] = hu_graph_ground_score(hits, words, e->mention_count, e->last_seen, now_ms);
+        bool partial = (flags & HU_GG_REQUIRE_FULL_NAME) && hits < words;
+        scores[i] =
+            partial ? 0.0
+                    : hu_graph_ground_score(hits, words, e->mention_count, e->last_seen, now_ms);
     }
     size_t seeds[GG_TOP_K];
     size_t seed_count = gg_pick_top_k(scores, cand_count, seeds);
@@ -473,6 +481,42 @@ hu_error_t hu_graph_ground_compose_ex(hu_memory_loader_t *loader, const char *co
     return HU_OK;
 }
 
+/* SHADOW contract for grounding sub-gates: log size + fingerprint only (never
+ * text), then drop. */
+static void gg_log_shadow_and_free(hu_memory_loader_t *loader, const char *what, char *buf,
+                                   size_t len, int tier) {
+    hu_log_info("graph_grounding", NULL, "%s shadow: %zu bytes tier=%d fp=%08x (not injected)",
+                what, len, tier, (unsigned)hu_graph_ground_fingerprint(buf, len));
+    if (buf)
+        loader->alloc->free(loader->alloc->ctx, buf, len + 1);
+}
+
+/* *ctx = *ctx + ("\n" if non-empty) + label + add. Takes ownership of add; on
+ * allocation failure keeps *ctx unchanged and drops add (fail-open). */
+static void gg_append_labeled(hu_memory_loader_t *loader, char **ctx, size_t *ctx_len,
+                              const char *label, char *add, size_t add_len) {
+    hu_allocator_t *a = loader->alloc;
+    size_t lab = strlen(label), sep = *ctx_len > 0 ? 1 : 0;
+    size_t n = *ctx_len + sep + lab + add_len;
+    char *buf = a->alloc(a->ctx, n + 1);
+    if (buf) {
+        size_t pos = 0;
+        if (*ctx_len > 0) {
+            memcpy(buf, *ctx, *ctx_len);
+            pos = *ctx_len;
+            buf[pos++] = '\n';
+        }
+        memcpy(buf + pos, label, lab);
+        memcpy(buf + pos + lab, add, add_len);
+        buf[n] = '\0';
+        if (*ctx)
+            a->free(a->ctx, *ctx, *ctx_len + 1);
+        *ctx = buf;
+        *ctx_len = n;
+    }
+    a->free(a->ctx, add, add_len + 1);
+}
+
 /* Graph grounding load, shared by BOTH turn paths (see agent.h). Composes
  * QUERY-CONDITIONED graph context for the incoming message (entity-overlap
  * scored, 1-hop; empty when nothing matches — see hu_graph_ground_compose)
@@ -506,17 +550,27 @@ void hu_agent_load_graph_grounding(hu_agent_t *agent, void *loader_v, const char
                                        agent->memory_session_id_len, msg, msg_len, 0,
                                        HU_GG_CONTACT_FALLBACK, &fb, &fb_len, NULL);
             if (fb_mode == HU_GG_FALLBACK_SHADOW) {
-                hu_log_info("graph_grounding", NULL,
-                            "contact_fallback shadow: %zu bytes tier=%d fp=%08x (not injected)",
-                            fb_len, agent->turn_tier,
-                            (unsigned)hu_graph_ground_fingerprint(fb, fb_len));
-                if (fb)
-                    loader->alloc->free(loader->alloc->ctx, fb, fb_len + 1);
+                gg_log_shadow_and_free(loader, "contact_fallback", fb, fb_len, agent->turn_tier);
             } else if (fb) {
                 *graph_ctx = fb;
                 *graph_ctx_len = fb_len;
             }
         }
+    }
+    /* Owner ("self") facts the message names in full. Activation gated on a
+     * blind A/B, default OFF: SHADOW logs size only; LIVE appends them under
+     * an "About you:" label (so the model never mistakes them for the
+     * contact's), then the same tier gate below applies. */
+    hu_gate_mode_t self_mode = hu_graph_grounding_self_facts_mode();
+    if (self_mode != HU_GATE_OFF) {
+        char *sf = NULL;
+        size_t sf_len = 0;
+        hu_graph_ground_compose_ex(loader, "self", 4, msg, msg_len, 0, HU_GG_REQUIRE_FULL_NAME, &sf,
+                                   &sf_len, NULL);
+        if (self_mode == HU_GATE_SHADOW)
+            gg_log_shadow_and_free(loader, "self_facts", sf, sf_len, agent->turn_tier);
+        else if (sf)
+            gg_append_labeled(loader, graph_ctx, graph_ctx_len, "About you:\n", sf, sf_len);
     }
     const char *drop_reason = NULL;
     if (graph_mode == HU_GRAPH_GROUNDING_SHADOW) {
