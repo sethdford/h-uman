@@ -92,14 +92,11 @@ async function settlePage(page: Page, quietMs = 250, timeout = 5000): Promise<vo
  * entry here so the freed slack cannot hide the next regression.
  */
 const KNOWN_VIOLATIONS: Record<string, Record<string, number>> = {
-  // hu-model-selector combobox trigger has no accessible name; session rows
-  // (role=option) contain a focusable Delete button.
-  Overview: { "button-name": 1, "nested-interactive": 5 },
-  Chat: { "button-name": 1, "nested-interactive": 5 },
-  // Session cards are role=button with aria-label="" and a nested Delete button.
-  Sessions: { "nested-interactive": 5 },
-  // Skill cards are role=button with a nested role=switch toggle (+ segment contrast).
-  Skills: { "color-contrast": 1, "nested-interactive": 11 },
+  // hu-model-selector combobox trigger has no accessible name.
+  Overview: { "button-name": 1 },
+  Chat: { "button-name": 1 },
+  // Active tag chip: --hu-bg text on --hu-accent is 2.23:1 (not the segmented control).
+  Skills: { "color-contrast": 1 },
   // Number inputs rendered with aria-label="".
   Config: { label: 2 },
   // hu-segmented-control active segment: --hu-on-accent on --hu-accent is 2.43:1.
