@@ -36,6 +36,7 @@ npm run docs           # generate token reference docs
 
 - `ui/src/styles/_tokens.css` — CSS custom properties
 - `website/src/styles/_tokens.css` — CSS (website)
+- `ui/src/styles/_quiet.css`, `website/src/styles/_quiet.css` — the Quiet Room layer, a separate file so the dashboard can lazy-load it (imported by `design-system-view.ts`; the website imports it right after `_tokens.css` in `global.css`)
 - `apps/shared/HumanKit/Sources/HumanChatUI/DesignTokens.swift` — Swift constants
 - `apps/android/app/src/main/java/ai/human/app/ui/DesignTokens.kt` — Kotlin constants
 - `include/human/design_tokens.h` — C macros
@@ -52,6 +53,6 @@ All of the above are diffed against a fresh regeneration by `check-drift.sh` (th
 ## Platform routing and checks
 
 - Every `*.tokens.json` declares `$extensions["com.human.platform"]`: `"all"` (CSS, Swift, Kotlin, C, docs JSON) or `"web"` (CSS only). Missing or unknown values fail the build.
-- Native emitters pick colors by `$type: "color"` (collected by `collectTypes` in `token-lib.ts`, group-level `$type` inherited), never by how the value is spelled. Swift/Kotlin (`nativeColorEntries`) accept only `#RRGGBB` and `rgb()/rgba()`; the C header (`terminalRGB`) accepts only `#RRGGBB`. Any other color-typed value (oklch, display-p3, `transparent`, `color-mix()`, `var()`, …) throws `UnsupportedColorError` naming the token path, instead of being emitted black or gray. Tokens of any other `$type` are skipped whatever they look like, so a color wrongly declared `$type: "string"` is still skipped silently: the guarantee holds only as long as `$type` is right. Put `oklch()`/`display-p3` colors in a `"web"` file.
+- Native emitters pick colors by `$type: "color"` (collected by `collectTypes` in `token-lib.ts`, group-level `$type` inherited), never by how the value is spelled. Swift/Kotlin (`nativeColorEntries`) accept only `#RRGGBB` and `rgb()/rgba()` with channels 0–255 and alpha 0–1; the C header (`terminalRGB`) accepts only `#RRGGBB`. Any other color-typed value (oklch, display-p3, `transparent`, `color-mix()`, `var()`, …) throws `UnsupportedColorError` naming the token path, instead of being emitted black or gray. Tokens of any other `$type` are skipped whatever they look like, so a color wrongly declared `$type: "string"` is still skipped silently: the guarantee holds only as long as `$type` is right. Put `oklch()`/`display-p3` colors in a `"web"` file.
 - `resolveRefs` throws on a whole-value `{ref}` whose target does not exist, and on reference cycles, naming the token. Braces inside a larger value (gradients) are not references. `build.ts`, `check-contrast.ts`, `generate-docs.ts` and `sync-tokens-studio.ts` all import it from `token-lib.ts`; don't add a private copy.
 - `npm test` runs the `node:test` suites in `tests/`. `npm run check:contrast` measures every Quiet Room text/UI pair against the 8 background roles in `contrast-lib.ts`, plus the on-accent fill pairs, in both modes (inherited values included) and exits 1 on any failure, 2 if there is nothing to measure. `npm run check` runs build + test + contrast.

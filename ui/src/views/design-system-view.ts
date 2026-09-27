@@ -16,6 +16,13 @@ import "../components/hu-forecast-chart.js";
 import "../components/hu-animated-value.js";
 import "../components/hu-stat-card.js";
 import "../components/hu-progress.js";
+// Quiet Room assets load with this view: its switch is the only way to set
+// data-brand="quiet", so keeping them here holds ~9 KB of CSS out of the
+// entry bundle (ui/scripts/check-bundle-size.sh). Once loaded they are
+// document-level, so the preview still applies to other views.
+import "../styles/_quiet.css";
+import "@fontsource-variable/newsreader/opsz.css";
+import "@fontsource-variable/newsreader/opsz-italic.css";
 import {
   DEMO_BAR_CHART,
   DEMO_DOUGHNUT_CHART,

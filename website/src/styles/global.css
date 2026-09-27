@@ -1,4 +1,5 @@
 @import "./_tokens.css";
+@import "./_quiet.css";
 @import "./_dynamic-color.css";
 @import "tailwindcss";
 @import "@fontsource-variable/geist-mono";
