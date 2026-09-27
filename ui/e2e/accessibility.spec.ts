@@ -92,9 +92,6 @@ async function settlePage(page: Page, quietMs = 250, timeout = 5000): Promise<vo
  * entry here so the freed slack cannot hide the next regression.
  */
 const KNOWN_VIOLATIONS: Record<string, Record<string, number>> = {
-  // hu-model-selector combobox trigger has no accessible name.
-  Overview: { "button-name": 1 },
-  Chat: { "button-name": 1 },
   // Active tag chip: --hu-bg text on --hu-accent is 2.23:1 (not the segmented control).
   Skills: { "color-contrast": 1 },
   // hu-segmented-control active segment: --hu-on-accent on --hu-accent is 2.43:1.
@@ -105,7 +102,8 @@ const KNOWN_VIOLATIONS: Record<string, Record<string, number>> = {
 };
 
 const VIEWS = [
-  { path: "/", name: "Overview" },
+  // An empty hash routes to chat, so Overview needs its own hash to be scanned at all.
+  { path: "/#overview", name: "Overview" },
   { path: "/#chat", name: "Chat" },
   { path: "/#agents", name: "Agents" },
   { path: "/#sessions", name: "Sessions" },
@@ -127,8 +125,7 @@ const VIEWS = [
 test.describe("Accessibility", () => {
   for (const view of VIEWS) {
     test(`${view.name} view passes axe accessibility`, async ({ page }) => {
-      const url = view.path === "/" ? "/?demo" : `/?demo${view.path.slice(1)}`;
-      await page.goto(url);
+      await page.goto(`/?demo${view.path.slice(1)}`);
       await page.waitForLoadState("domcontentloaded");
       await settlePage(page);
       const results = await new AxeBuilder({ page })
