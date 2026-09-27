@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { waitForViewReady } from "./helpers";
 
 /**
  * Full chat flow test using demo mode.
@@ -8,33 +9,26 @@ import { test, expect } from "@playwright/test";
 test.describe("Chat Gemini Flow", () => {
   test("full chat flow - send message and get demo response", async ({ page }) => {
     await page.goto("/?demo#chat");
-    await page.waitForLoadState("domcontentloaded");
     const chatView = page.locator("hu-app >> hu-chat-view");
     await expect(chatView).toBeAttached({ timeout: 10000 });
+    // The view chunk loads lazily; wait for it to upgrade and render the composer.
+    await waitForViewReady(page, "hu-chat-view", 10000);
 
-    // Type into the composer textarea via shadow DOM traversal
-    const typed = await page.evaluate(() => {
-      const app = document.querySelector("hu-app");
-      const view = app?.shadowRoot?.querySelector("hu-chat-view");
-      const composer = view?.shadowRoot?.querySelector("hu-chat-composer");
-      const textarea = composer?.shadowRoot?.querySelector(
-        "textarea",
-      ) as HTMLTextAreaElement | null;
-      if (!textarea) return false;
-      textarea.focus();
-      textarea.value = "Hello! What can you do?";
-      textarea.dispatchEvent(new Event("input", { bubbles: true }));
-      return true;
-    });
-    expect(typed).toBe(true);
+    const prompt = "Hello! What can you do?";
+    const textarea = chatView.locator("hu-chat-composer textarea");
+    await textarea.fill(prompt);
+    await textarea.press("Enter");
 
-    // Press Enter on the focused textarea to send
-    await page.keyboard.press("Enter");
-
-    // Verify message thread is present (demo response ~600ms + render)
-    const messagesArea = chatView.locator(
-      "[role='log'], .messages, .chat-messages, hu-message-thread",
-    );
-    await expect(messagesArea.first()).toBeAttached({ timeout: 10000 });
+    // The thread starts empty in demo mode. The sent message lands as a user
+    // bubble, then the demo gateway streams one assistant reply after its
+    // simulated latency. Bubble text lives in hu-chat-bubble's shadow root.
+    const thread = chatView.locator("hu-message-thread");
+    const userBubbles = thread.locator(".bubble-wrapper.user hu-chat-bubble");
+    const assistantBubbles = thread.locator(".bubble-wrapper.assistant hu-chat-bubble");
+    await expect(userBubbles).toHaveCount(1, { timeout: 10000 });
+    await expect(userBubbles).toContainText(prompt);
+    await expect(assistantBubbles).toHaveCount(1, { timeout: 10000 });
+    // The bubble always carries a timestamp ("10:19 AM"); require an actual word.
+    await expect(assistantBubbles).toHaveText(/[A-Za-z]{4,}/, { timeout: 10000 });
   });
 });
