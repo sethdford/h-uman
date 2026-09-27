@@ -41,7 +41,7 @@ interface Env {
 }
 
 interface Rendered {
-  /** computed color of var(--hu-<key>) for every P3 key, plus "bg" and "link-hover" */
+  /** computed color of var(--hu-<key>) for every P3 key, plus "bg", "link-hover" and "on-accent" */
   tokens: Record<string, string>;
   /** computed color of each literal P3 source value, keyed by that value */
   literals: Record<string, string>;
@@ -83,7 +83,8 @@ async function render(page: Page, env: Env, gamut: "p3" | "srgb"): Promise<Rende
         return getComputedStyle(probe).color;
       };
       const tokens: Record<string, string> = {};
-      for (const k of [...keys, "bg", "link-hover"]) tokens[k] = resolve(`var(--hu-${k})`);
+      for (const k of [...keys, "bg", "link-hover", "on-accent"])
+        tokens[k] = resolve(`var(--hu-${k})`);
       const lit: Record<string, string> = {};
       for (const v of literals) lit[v] = resolve(v);
       return { tokens, literals: lit };
@@ -179,4 +180,18 @@ test.describe("P3 overrides follow the active theme", () => {
     // Hover must still read as a change, not the same color.
     expect(tokens["link-hover"]).not.toBe(tokens.link);
   });
+
+  for (const scheme of ["light", "dark"] as const) {
+    for (const gamut of ["srgb", "p3"] as const) {
+      test(`${scheme} theme on ${gamut} keeps on-accent text legible on accent fills`, async ({
+        page,
+      }) => {
+        const { tokens } = await render(page, { scheme }, gamut);
+        // WCAG 1.4.3 text (4.5:1): primary buttons and chips put on-accent over
+        // accent at rest and accent-hover under the pointer. White was 2.44:1.
+        expect(contrast(tokens["on-accent"], tokens.accent)).toBeGreaterThanOrEqual(4.5);
+        expect(contrast(tokens["on-accent"], tokens["accent-hover"])).toBeGreaterThanOrEqual(4.5);
+      });
+    }
+  }
 });
