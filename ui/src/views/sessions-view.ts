@@ -122,6 +122,27 @@ export class ScSessionsView extends GatewayAwareLitElement {
         position: relative;
       }
 
+      .session-card:has(.session-card-open:focus-visible) {
+        outline: var(--hu-focus-ring-width) solid var(--hu-focus-ring);
+        outline-offset: var(--hu-focus-ring-offset);
+        border-radius: var(--hu-radius-xl);
+      }
+
+      /* The card's primary action: pointer clicks anywhere on the card bubble to
+         its handler, and this button is the keyboard/AT entry point, so Delete
+         stays a sibling instead of nesting inside a role=button card. */
+      .session-card-open {
+        padding: 0;
+        background: transparent;
+        border: none;
+        font: inherit;
+        text-align: start;
+        cursor: pointer;
+      }
+      .session-card-open:focus-visible {
+        outline: none;
+      }
+
       .session-card-header {
         display: flex;
         align-items: flex-start;
@@ -516,13 +537,18 @@ export class ScSessionsView extends GatewayAwareLitElement {
                 <hu-card
                   class="session-card"
                   hoverable
-                  clickable
                   ?accent=${this.selectedSession?.key === s.key}
                   @click=${(e: Event) => void this._onSessionClick(s, e)}
                   role="listitem"
                 >
                   <div class="session-card-header">
-                    <span class="session-card-title">${this.sessionTitle(s)}</span>
+                    <button
+                      type="button"
+                      class="session-card-title session-card-open"
+                      aria-current=${this.selectedSession?.key === s.key ? "true" : nothing}
+                    >
+                      ${this.sessionTitle(s)}
+                    </button>
                     <div class="session-card-actions">
                       <hu-badge variant=${s.status === "archived" ? "neutral" : "success"}>
                         ${s.status === "archived" ? "Archived" : "Active"}

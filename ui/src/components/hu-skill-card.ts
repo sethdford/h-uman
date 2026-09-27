@@ -59,9 +59,24 @@ export class ScSkillCard extends LitElement {
       transform: translateY(var(--hu-physics-card-hover-translateY, -2px));
     }
 
-    .skill-card:focus-visible {
+    .skill-card:has(.skill-open:focus-visible) {
       outline: 2px solid var(--hu-accent);
       outline-offset: 2px;
+      border-radius: var(--hu-radius-xl);
+    }
+    /* The card's primary action. Pointer clicks anywhere on the card bubble to
+       its handler; this button is the keyboard/AT entry point, so the switch and
+       Install button are siblings rather than descendants of a role=button card. */
+    .skill-open {
+      padding: 0;
+      background: transparent;
+      border: none;
+      font: inherit;
+      text-align: start;
+      cursor: pointer;
+    }
+    .skill-open:focus-visible {
+      outline: none;
     }
 
     .skill-card-inner {
@@ -171,23 +186,12 @@ export class ScSkillCard extends LitElement {
         : `View ${this.skill.name} in registry`;
 
     return html`
-      <hu-card
-        glass=${isInstalled}
-        class="skill-card"
-        tabindex="0"
-        role="button"
-        aria-label=${ariaLabel}
-        @click=${this._onCardClick}
-        @keydown=${(e: KeyboardEvent) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            this._onCardClick();
-          }
-        }}
-      >
+      <hu-card glass=${isInstalled} class="skill-card" @click=${this._onCardClick}>
         <div class="skill-card-inner">
           <div class="skill-header">
-            <span class="skill-name">${this.skill.name}</span>
+            <button type="button" class="skill-name skill-open" aria-label=${ariaLabel}>
+              ${this.skill.name}
+            </button>
             ${
               isInstalled
                 ? html`<hu-badge variant=${inst.enabled ? "success" : "neutral"}
@@ -220,6 +224,7 @@ export class ScSkillCard extends LitElement {
                     .checked=${inst.enabled}
                     .label=${`Toggle ${this.skill.name}`}
                     @hu-change=${this._onToggle}
+                    @click=${(e: Event) => e.stopPropagation()}
                   ></hu-switch>`
                 : this.installed
                   ? html`<hu-badge variant="success">Installed</hu-badge>`
