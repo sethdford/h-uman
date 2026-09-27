@@ -44,6 +44,11 @@ typedef enum {
 
 hu_speech_drift_t hu_speech_drift_check(const char *original, size_t original_len,
                                         const char *rewritten, size_t rewritten_len);
+/* Same, with names the rewrite may use without them being new facts (the
+ * scene's speaker and listener, space-separated; NULL = none). */
+hu_speech_drift_t hu_speech_drift_check_ex(const char *original, size_t original_len,
+                                           const char *rewritten, size_t rewritten_len,
+                                           const char *known_names);
 const char *hu_speech_drift_name(hu_speech_drift_t d);
 
 #endif /* HU_TTS_SPEECH_TEXT_H */
