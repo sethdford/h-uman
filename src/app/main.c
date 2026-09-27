@@ -2671,6 +2671,7 @@ static hu_error_t cmd_voice_preview(hu_allocator_t *alloc, int argc, char **argv
     const char *text = NULL, *incoming = NULL, *persona_name = NULL, *out_path = NULL;
     const char *channel = "imessage";
     const char *model_override = NULL;
+    const char *voice_override = NULL; /* the A/B "voice" arm (e.g. Ferni) */
     float speed_override = 0.f;
     bool raw = false; /* skip transcript prep: the A/B "prep off" arm */
     for (int i = 3; i < argc; i++) {
@@ -2678,6 +2679,8 @@ static hu_error_t cmd_voice_preview(hu_allocator_t *alloc, int argc, char **argv
             continue;
         if (strcmp(argv[i], "--model") == 0 && i + 1 < argc)
             model_override = argv[++i];
+        else if (strcmp(argv[i], "--voice") == 0 && i + 1 < argc)
+            voice_override = argv[++i];
         else if (strcmp(argv[i], "--speed") == 0 && i + 1 < argc)
             speed_override = (float)atof(argv[++i]);
         else if (strcmp(argv[i], "--raw") == 0)
@@ -2696,7 +2699,7 @@ static hu_error_t cmd_voice_preview(hu_allocator_t *alloc, int argc, char **argv
     if (!text || !text[0] || !persona_name || !persona_name[0]) {
         fprintf(stderr, "Usage: human voice preview --text <reply> --persona <name> "
                         "[--incoming <msg>] [--channel imessage] [--out <file>] "
-                        "[--model <id>] [--speed <0.6-1.5>] [--raw]\n");
+                        "[--model <id>] [--voice <id>] [--speed <0.6-1.5>] [--raw]\n");
         return HU_ERR_INVALID_ARGUMENT;
     }
 
@@ -2735,6 +2738,8 @@ static hu_error_t cmd_voice_preview(hu_allocator_t *alloc, int argc, char **argv
     localtime_r(&now, &tmb);
     if (model_override && model_override[0])
         snprintf(persona.voice.model, sizeof(persona.voice.model), "%s", model_override);
+    if (voice_override && voice_override[0])
+        snprintf(persona.voice.voice_id, sizeof(persona.voice.voice_id), "%s", voice_override);
     if (speed_override > 0.f)
         persona.voice.default_speed = speed_override;
     hu_voice_reply_request_t req;
