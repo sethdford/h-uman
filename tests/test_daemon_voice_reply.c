@@ -9,9 +9,11 @@
 #include "human/agent.h"
 #include "human/config.h"
 #include "human/daemon.h"
+#include "human/provider.h"
 #include "human/tts/cartesia.h"
 #include "test_framework.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 static int g_voice_sends;
@@ -163,6 +165,73 @@ static void test_voice_reply_nothing_speakable_goes_as_text(void) {
     HU_ASSERT_EQ(g_voice_sends, 0);
 }
 
+/* F1 S4 through the daemon: with HU_SPEECH_REWRITE=live, a rewrite that
+ * passes the drift guard but trips moderation must not be spoken. */
+static const char *g_rewrite_out;
+
+static hu_error_t rw_mock_chat(void *ctx, hu_allocator_t *alloc, const char *sys, size_t sl,
+                               const char *msg, size_t ml, const char *model, size_t mlen, double t,
+                               char **out, size_t *out_len) {
+    (void)ctx;
+    (void)sys;
+    (void)sl;
+    (void)msg;
+    (void)ml;
+    (void)model;
+    (void)mlen;
+    (void)t;
+    size_t n = strlen(g_rewrite_out);
+    char *b = alloc->alloc(alloc->ctx, n + 1);
+    memcpy(b, g_rewrite_out, n + 1);
+    *out = b;
+    *out_len = n;
+    return HU_OK;
+}
+
+static bool run_rewrite_voice(const char *reply, const char *rewrite) {
+    static hu_provider_vtable_t pvt;
+    memset(&pvt, 0, sizeof(pvt));
+    pvt.chat_with_system = rw_mock_chat;
+    g_rewrite_out = rewrite;
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.provider.vtable = &pvt;
+    static hu_config_t config;
+    memset(&config, 0, sizeof(config));
+    config.channels.default_daemon.voice_enabled = true;
+    config.voice.tts_provider = "cartesia";
+    hu_channel_vtable_t vt;
+    memset(&vt, 0, sizeof(vt));
+    vt.name = vr_name_generic;
+    vt.send = vr_send;
+    hu_channel_t channel;
+    memset(&channel, 0, sizeof(channel));
+    channel.vtable = &vt;
+    hu_service_channel_t ch;
+    memset(&ch, 0, sizeof(ch));
+    ch.channel = &channel;
+    setenv("HU_SPEECH_REWRITE", "live", 1);
+    bool sent = hu_daemon_voice_reply(&alloc, &agent, &config, &ch, "+15550000001", 12, "hey", 3,
+                                      reply, strlen(reply), 14);
+    unsetenv("HU_SPEECH_REWRITE");
+    return sent;
+}
+
+static void test_voice_reply_live_rewrite_is_spoken(void) {
+    g_voice_sends = 0;
+    HU_ASSERT_TRUE(run_rewrite_voice("yeah sounds good lmk", "Yeah, sounds good. Let me know."));
+    HU_ASSERT_EQ(g_voice_sends, 1);
+    HU_ASSERT_STR_EQ(hu_cartesia_test_last_transcript(), "Yeah, sounds good. Let me know.");
+}
+
+static void test_voice_reply_rewrite_that_trips_moderation_is_not_spoken(void) {
+    g_voice_sends = 0;
+    HU_ASSERT_FALSE(run_rewrite_voice("we watched that show with the kids",
+                                      "kill them with violence and murder"));
+    HU_ASSERT_EQ(g_voice_sends, 0);
+}
+
 static void test_voice_reply_sends_clean_reply_as_voice(void) {
     g_voice_sends = 0;
     HU_ASSERT_TRUE(run_fallback_voice("yeah call whenever, i'm around", "you free later?"));
@@ -194,6 +263,8 @@ void run_daemon_voice_reply_tests(void) {
     HU_RUN_TEST(test_voice_reply_sends_clean_reply_as_voice);
     HU_RUN_TEST(test_voice_reply_speaks_cleaned_text);
     HU_RUN_TEST(test_voice_reply_nothing_speakable_goes_as_text);
+    HU_RUN_TEST(test_voice_reply_live_rewrite_is_spoken);
+    HU_RUN_TEST(test_voice_reply_rewrite_that_trips_moderation_is_not_spoken);
     HU_RUN_TEST(test_voice_reply_flagged_reply_is_not_sent_as_voice);
     HU_RUN_TEST(test_voice_reply_inbound_crisis_is_not_sent_as_voice);
 }

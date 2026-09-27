@@ -17,7 +17,7 @@
 #include "human/platform.h"
 #include "human/security/companion_safety.h"
 #include "human/security/moderation.h"
-#include "human/tts/speech_text.h"
+#include "human/tts/speech_rewrite.h"
 #if defined(HU_ENABLE_CARTESIA)
 #include "human/tts/voice_reply.h"
 #endif
@@ -135,10 +135,21 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, hu_agent_t *agent, const hu_co
         return false;
     /* F1 S2: speak the spoken form of the reply — texting shorthand expanded,
      * narrated actions, emoji and URLs removed. Nothing speakable: text goes. */
-    char spoken[2048];
-    bool laughter_cue = false;
-    size_t spoken_len =
-        hu_speech_cleanup(response, response_len, spoken, sizeof(spoken), &laughter_cue);
+    /* F1 S1: with HU_SPEECH_REWRITE=live the reply is rewritten for the ear
+     * (drift-guarded; any problem falls back to the cleaned reply). LIVE as a
+     * default is gated on the voice A/B drip preferring the rewrite over
+     * cleanup-only, then the W5 real-or-clone test — do not flip without them. */
+    hu_speech_rewrite_mode_t rw_mode = hu_speech_rewrite_mode_parse(getenv("HU_SPEECH_REWRITE"));
+    hu_speech_result_t sp;
+    (void)hu_speech_prepare(alloc, agent ? &agent->provider : NULL,
+                            agent ? agent->model_name : NULL, agent ? agent->model_name_len : 0,
+                            agent ? agent->persona : NULL, rw_mode, response, response_len,
+                            combined, combined_len, &sp);
+    if (rw_mode == HU_SPEECH_REWRITE_SHADOW)
+        hu_speech_shadow_record(alloc, &sp);
+    const char *spoken = sp.spoken;
+    size_t spoken_len = sp.spoken_len;
+    bool laughter_cue = sp.laughter_cue;
     if (spoken_len == 0)
         return false;
     /* F1 S4: the gates also judge what is actually spoken. */
