@@ -91,9 +91,6 @@ async function settlePage(page: Page, quietMs = 250, timeout = 5000): Promise<vo
  * entry here so the freed slack cannot hide the next regression.
  */
 const KNOWN_VIOLATIONS: Record<string, Record<string, number>> = {
-  // hu-model-selector combobox trigger has no accessible name.
-  Overview: { "button-name": 1 },
-  Chat: { "button-name": 1 },
   // hu-segmented-control active segment contrast (see Channels).
   Skills: { "color-contrast": 1 },
   // Number inputs rendered with aria-label="".
