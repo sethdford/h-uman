@@ -29,7 +29,7 @@ Key extension points:
 - `src/persona/` — persona system (profile loading, prompt builder, example selection)
 - `src/ml/` — on-device ML training (BPE, GPT, DPO, LoRA, feed predictor) — `HU_ENABLE_ML`
 
-Current scale: **1966 source + header files, ~417K lines of C, ~291K lines of tests, 14,046 tests, 30 channels**.
+Current scale: **1966 source + header files, ~417K lines of C, ~292K lines of tests, 14,051 tests, 30 channels**.
 
 Performance baseline (macOS arm64, release-size build, rev b277f7de0, 2026-09-27 — `docs/perf/footprint.json`):
 
@@ -77,7 +77,7 @@ These codebase realities should drive every design decision:
    - All code compiles with `-Wall -Wextra -Wpedantic -Werror`.
    - Use `HU_IS_TEST` guards to bypass side effects (spawning, opening URLs, real hardware I/O).
 
-5. **All 14,046+ tests must pass at zero ASan errors**
+5. **All 14,051+ tests must pass at zero ASan errors**
    - The test suite uses AddressSanitizer for leak and overflow detection.
    - Every allocation must be freed (`free()` or cleanup function).
    - Use `HU_IS_TEST` mock paths in tests — no network, no process spawning.
