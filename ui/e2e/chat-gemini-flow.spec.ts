@@ -12,24 +12,15 @@ test.describe("Chat Gemini Flow", () => {
     const chatView = page.locator("hu-app >> hu-chat-view");
     await expect(chatView).toBeAttached({ timeout: 10000 });
 
-    // Type into the composer textarea via shadow DOM traversal
-    const typed = await page.evaluate(() => {
-      const app = document.querySelector("hu-app");
-      const view = app?.shadowRoot?.querySelector("hu-chat-view");
-      const composer = view?.shadowRoot?.querySelector("hu-chat-composer");
-      const textarea = composer?.shadowRoot?.querySelector(
-        "textarea",
-      ) as HTMLTextAreaElement | null;
-      if (!textarea) return false;
-      textarea.focus();
-      textarea.value = "Hello! What can you do?";
-      textarea.dispatchEvent(new Event("input", { bubbles: true }));
-      return true;
-    });
-    expect(typed).toBe(true);
+    // The composer renders its textarea after hu-chat-view attaches; a waiting
+    // locator (which pierces open shadow roots) avoids racing that render.
+    const input = chatView.getByRole("textbox", { name: "Message input" });
+    await expect(input).toBeVisible({ timeout: 10000 });
+    const prompt = "Hello! What can you do?";
+    await input.fill(prompt);
+    await input.press("Enter");
 
-    // Press Enter on the focused textarea to send
-    await page.keyboard.press("Enter");
+    await expect(chatView.getByText(prompt).first()).toBeVisible({ timeout: 10000 });
 
     // Verify message thread is present (demo response ~600ms + render)
     const messagesArea = chatView.locator(
