@@ -23,6 +23,7 @@
 #include "human/bootstrap.h"
 #include "human/bus.h"
 #include "human/channel.h"
+#include "human/channels/imessage_voice_record.h"
 #include "human/channels/thread_binding.h"
 #include "human/cli_commands.h"
 #include "human/config.h"
@@ -2805,6 +2806,31 @@ static hu_error_t cmd_voice_preview(hu_allocator_t *alloc, int argc, char **argv
     return HU_OK;
 }
 
+/* Operator test path for native Messages voice delivery (W3): the same
+ * request + orchestrator the daemon's HU_VOICE_DELIVERY=messages branch uses.
+ * Exit 0 only when the memo is confirmed in chat.db AND the mic is restored. */
+static hu_error_t cmd_voice_record_send(int argc, char **argv) {
+    const char *to = NULL;
+    const char *file = NULL;
+    for (int i = 3; i < argc; i++) {
+        if (strcmp(argv[i], "--to") == 0 && i + 1 < argc)
+            to = argv[++i];
+        else if (strcmp(argv[i], "--file") == 0 && i + 1 < argc)
+            file = argv[++i];
+    }
+    if (!to || !to[0] || !file || file[0] != '/') {
+        fprintf(stderr, "Usage: human voice record-send --to <handle> --file </abs/audio>\n");
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+    hu_voice_record_result_t res;
+    hu_error_t err = hu_voice_record_send_from_env(to, strlen(to), file, &res);
+    printf("result=%s stage=%d block=%s verified=%d restored=%d\n",
+           err == HU_OK ? "sent" : (err == HU_ERR_NOT_SUPPORTED ? "blocked" : "failed"),
+           (int)res.stage, hu_voice_record_block_name(res.block), res.verified ? 1 : 0,
+           res.restored ? 1 : 0);
+    return (err == HU_OK && res.verified && res.restored) ? HU_OK : HU_ERR_IO;
+}
+
 static hu_error_t cmd_voice(hu_allocator_t *alloc, int argc, char **argv) {
     if (argc < 3 || !argv[2]) {
         fprintf(stderr, "Usage: human voice <subcommand>\n\n"
@@ -2812,12 +2838,16 @@ static hu_error_t cmd_voice(hu_allocator_t *alloc, int argc, char **argv) {
                         "  clone --file <path> [--name <name>] [--lang <code>] [--persona <name>]\n"
                         "  preview --text <reply> --persona <name> [--incoming <msg>]\n"
                         "          [--channel imessage] [--out <file>] [--model <id>]\n"
-                        "          [--speed <0.6-1.5>] [--raw]\n");
+                        "          [--speed <0.6-1.5>] [--raw]\n"
+                        "  record-send --to <handle> --file <audio>   (Messages-recorded memo;\n"
+                        "          uses HU_VOICE_REAL_INPUT, HU_VOICE_MIN_IDLE_SEC)\n");
         return HU_ERR_INVALID_ARGUMENT;
     }
 
     if (strcmp(argv[2], "preview") == 0)
         return cmd_voice_preview(alloc, argc, argv);
+    if (strcmp(argv[2], "record-send") == 0)
+        return cmd_voice_record_send(argc, argv);
 
     if (strcmp(argv[2], "clone") != 0) {
         fprintf(stderr, "Unknown voice subcommand: %s\n", argv[2]);

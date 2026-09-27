@@ -2,8 +2,11 @@
  * No Apple or chat.db dependencies; see include/human/channels/imessage_voice_record.h. */
 #include "human/channels/imessage_voice_record.h"
 
+#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <time.h>
+#include <unistd.h>
 
 hu_voice_delivery_mode_t hu_voice_delivery_mode_parse(const char *s) {
     if (s && strcmp(s, "messages") == 0)
@@ -163,4 +166,27 @@ restore:
         out->verified =
             p->audio_row_after(p->ctx, req->handle, req->handle_len, out->prior_max_rowid, 10000);
     return rc;
+}
+
+void hu_voice_record_request_from_env(const char *handle, size_t handle_len, const char *audio_path,
+                                      uint32_t seed, hu_voice_record_request_t *out) {
+    if (!out)
+        return;
+    memset(out, 0, sizeof(*out));
+    out->handle = handle;
+    out->handle_len = handle_len;
+    out->audio_path = audio_path;
+    const char *mic = getenv("HU_VOICE_REAL_INPUT");
+    out->real_mic = mic ? mic : "";
+    const char *idle = getenv("HU_VOICE_MIN_IDLE_SEC");
+    out->min_idle_sec = (idle && idle[0]) ? atof(idle) : 20.0;
+    out->seed = seed;
+}
+
+hu_error_t hu_voice_record_send_from_env(const char *handle, size_t handle_len,
+                                         const char *audio_path, hu_voice_record_result_t *out) {
+    hu_voice_record_request_t req;
+    hu_voice_record_request_from_env(handle, handle_len, audio_path,
+                                     (uint32_t)time(NULL) ^ (uint32_t)getpid(), &req);
+    return hu_voice_record_send(hu_voice_record_macos_port(), &req, out);
 }

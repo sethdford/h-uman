@@ -2525,17 +2525,40 @@ imsg_media:
                                   message_len, media, media_count);
         if (vroute == HU_VREC_ROUTE_SHADOW) {
             const hu_voice_record_port_t *vport = hu_voice_record_macos_port();
+            hu_voice_record_request_t vreq;
+            hu_voice_record_request_from_env(tgt, tgt_len, media[0], 0, &vreq);
             hu_voice_record_facts_t vfacts;
             memset(&vfacts, 0, sizeof(vfacts));
-            const char *vidle = getenv("HU_VOICE_MIN_IDLE_SEC");
-            if (vport->gather_facts(vport->ctx, getenv("HU_VOICE_REAL_INPUT"), &vfacts) != HU_OK)
+            if (vport->gather_facts(vport->ctx, vreq.real_mic, &vfacts) != HU_OK)
                 vfacts.ax_trusted = false;
-            vfacts.min_idle_sec = (vidle && vidle[0]) ? atof(vidle) : 20.0;
+            vfacts.min_idle_sec = vreq.min_idle_sec;
             hu_voice_record_block_t vblock = hu_voice_record_preflight(&vfacts);
             hu_log_info("imessage", NULL, "voice delivery shadow: would_record=%d block=%s",
                         vblock == HU_VREC_OK ? 1 : 0, hu_voice_record_block_name(vblock));
         } else if (vroute == HU_VREC_ROUTE_RECORD) {
-            hu_log_info("imessage", NULL, "voice delivery route=record (not yet active)");
+            /* HU_VOICE_DELIVERY=messages as a default is gated on the W5 "real or
+             * clone?" measurement (spec 2026-09-26 W5): do not flip without it.
+             * Once Send is pressed the memo is out — never also send the file,
+             * even when chat.db is slow to confirm it. Any failure before Send
+             * falls through to the attachment below. */
+            hu_voice_record_result_t vres;
+            hu_error_t verr = hu_voice_record_send_from_env(tgt, tgt_len, media[0], &vres);
+            if (verr == HU_OK) {
+                if (!vres.restored)
+                    hu_log_error("imessage", NULL,
+                                 "voice record: default input NOT restored to the real mic");
+                hu_log_info("imessage", NULL,
+                            "voice delivered via Messages: verified=%d restored=%d",
+                            vres.verified ? 1 : 0, vres.restored ? 1 : 0);
+                imessage_report_sent(tgt, tgt_len, NULL, 0, HU_IMESSAGE_SENT_KIND_MEDIA,
+                                     vres.prior_max_rowid);
+                goto imsg_cleanup;
+            }
+            if (verr == HU_ERR_IO && !vres.restored)
+                hu_log_error("imessage", NULL,
+                             "voice record: default input NOT restored to the real mic");
+            hu_log_info("imessage", NULL, "voice record fell back to attachment: block=%s stage=%d",
+                        hu_voice_record_block_name(vres.block), (int)vres.stage);
         }
     }
     /* Send media attachments (local file paths only) after text succeeds.

@@ -144,6 +144,17 @@ hu_error_t hu_voice_record_send(const hu_voice_record_port_t *port,
                                 const hu_voice_record_request_t *req,
                                 hu_voice_record_result_t *out);
 
+/* Request from the environment: HU_VOICE_REAL_INPUT (the mic to restore;
+ * "" when unset, which preflight blocks as no_real_mic) and
+ * HU_VOICE_MIN_IDLE_SEC (default 20). Shared by imessage_send and the CLI. */
+void hu_voice_record_request_from_env(const char *handle, size_t handle_len, const char *audio_path,
+                                      uint32_t seed, hu_voice_record_request_t *out);
+
+/* Build the request from the environment and run it on the macOS port. Same
+ * return contract as hu_voice_record_send. */
+hu_error_t hu_voice_record_send_from_env(const char *handle, size_t handle_len,
+                                         const char *audio_path, hu_voice_record_result_t *out);
+
 /* ── macOS port (src/channels/imessage_voice_record_macos.c) ─────────────
  * Apple production builds: CoreAudio + AudioQueue + AX + IOKit. Test and
  * non-Apple builds: a stub whose preflight always blocks (HU_VREC_NO_AX) and

@@ -7,6 +7,8 @@
 #include "human/channels/imessage_voice_record.h"
 #include "test_framework.h"
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static hu_voice_record_facts_t all_ok(void) {
@@ -307,6 +309,45 @@ static void test_vrec_macos_port_blocks_under_test(void) {
     HU_ASSERT_EQ(res.block, HU_VREC_NO_AX);
 }
 
+/* The request the daemon and the CLI both build from the environment. */
+static void test_vrec_request_from_env_reads_mic_and_idle(void) {
+    const char *old_mic = getenv("HU_VOICE_REAL_INPUT");
+    const char *old_idle = getenv("HU_VOICE_MIN_IDLE_SEC");
+    char saved_mic[128] = {0}, saved_idle[32] = {0};
+    if (old_mic)
+        snprintf(saved_mic, sizeof(saved_mic), "%s", old_mic);
+    if (old_idle)
+        snprintf(saved_idle, sizeof(saved_idle), "%s", old_idle);
+
+    setenv("HU_VOICE_REAL_INPUT", "Shure MV7", 1);
+    setenv("HU_VOICE_MIN_IDLE_SEC", "45", 1);
+    hu_voice_record_request_t r;
+    hu_voice_record_request_from_env("+15550000001", 12, "/tmp/a.caf", 9, &r);
+    HU_ASSERT_STR_EQ(r.real_mic, "Shure MV7");
+    HU_ASSERT_TRUE(r.min_idle_sec > 44.9 && r.min_idle_sec < 45.1);
+    HU_ASSERT_STR_EQ(r.audio_path, "/tmp/a.caf");
+    HU_ASSERT_EQ(r.handle_len, 12);
+    HU_ASSERT_EQ(r.seed, 9u);
+
+    unsetenv("HU_VOICE_REAL_INPUT");
+    unsetenv("HU_VOICE_MIN_IDLE_SEC");
+    hu_voice_record_request_from_env("+15550000001", 12, "/tmp/a.caf", 9, &r);
+    HU_ASSERT_STR_EQ(r.real_mic, ""); /* unset -> preflight blocks as no_real_mic */
+    HU_ASSERT_TRUE(r.min_idle_sec > 19.9 && r.min_idle_sec < 20.1);
+
+    if (old_mic)
+        setenv("HU_VOICE_REAL_INPUT", saved_mic, 1);
+    if (old_idle)
+        setenv("HU_VOICE_MIN_IDLE_SEC", saved_idle, 1);
+}
+
+static void test_vrec_send_from_env_blocks_under_test(void) {
+    hu_voice_record_result_t res;
+    HU_ASSERT_EQ(hu_voice_record_send_from_env("+15550000001", 12, "/tmp/a.caf", &res),
+                 HU_ERR_NOT_SUPPORTED);
+    HU_ASSERT_EQ(res.block, HU_VREC_NO_AX);
+}
+
 void run_imessage_voice_record_tests(void) {
     HU_TEST_SUITE("imessage voice record");
     HU_RUN_TEST(test_vrec_mode_parse_defaults_to_attachment);
@@ -324,4 +365,6 @@ void run_imessage_voice_record_tests(void) {
     HU_RUN_TEST(test_vrec_send_unverified_row_is_ok_not_resent);
     HU_RUN_TEST(test_vrec_send_restore_readback_failure_is_reported);
     HU_RUN_TEST(test_vrec_macos_port_blocks_under_test);
+    HU_RUN_TEST(test_vrec_request_from_env_reads_mic_and_idle);
+    HU_RUN_TEST(test_vrec_send_from_env_blocks_under_test);
 }
