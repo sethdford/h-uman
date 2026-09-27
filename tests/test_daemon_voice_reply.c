@@ -9,6 +9,7 @@
 #include "human/agent.h"
 #include "human/config.h"
 #include "human/daemon.h"
+#include "human/tts/cartesia.h"
 #include "test_framework.h"
 
 #include <string.h>
@@ -144,6 +145,24 @@ static bool run_fallback_voice(const char *reply, const char *inbound) {
                                  strlen(inbound), reply, strlen(reply), 14);
 }
 
+/* F1 S2: the memo speaks the cleaned reply, not the texting shorthand. */
+static void test_voice_reply_speaks_cleaned_text(void) {
+    g_voice_sends = 0;
+    HU_ASSERT_TRUE(run_fallback_voice("lmk when ur free lol", "you around later?"));
+    HU_ASSERT_EQ(g_voice_sends, 1);
+    const char *spoken = hu_cartesia_test_last_transcript();
+    HU_ASSERT_NOT_NULL(spoken);
+    HU_ASSERT_STR_CONTAINS(spoken, "let me know");
+    HU_ASSERT_STR_NOT_CONTAINS(spoken, "lmk");
+    HU_ASSERT_STR_NOT_CONTAINS(spoken, "lol");
+}
+
+static void test_voice_reply_nothing_speakable_goes_as_text(void) {
+    g_voice_sends = 0;
+    HU_ASSERT_FALSE(run_fallback_voice("\xF0\x9F\x91\x8D", "you around later?"));
+    HU_ASSERT_EQ(g_voice_sends, 0);
+}
+
 static void test_voice_reply_sends_clean_reply_as_voice(void) {
     g_voice_sends = 0;
     HU_ASSERT_TRUE(run_fallback_voice("yeah call whenever, i'm around", "you free later?"));
@@ -173,6 +192,8 @@ void run_daemon_voice_reply_tests(void) {
     HU_RUN_TEST(test_voice_gates_fail_closed_on_invalid_input);
     HU_RUN_TEST(test_voice_gates_decline_when_inbound_is_crisis);
     HU_RUN_TEST(test_voice_reply_sends_clean_reply_as_voice);
+    HU_RUN_TEST(test_voice_reply_speaks_cleaned_text);
+    HU_RUN_TEST(test_voice_reply_nothing_speakable_goes_as_text);
     HU_RUN_TEST(test_voice_reply_flagged_reply_is_not_sent_as_voice);
     HU_RUN_TEST(test_voice_reply_inbound_crisis_is_not_sent_as_voice);
 }

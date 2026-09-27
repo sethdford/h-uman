@@ -17,6 +17,7 @@
 #include "human/platform.h"
 #include "human/security/companion_safety.h"
 #include "human/security/moderation.h"
+#include "human/tts/speech_text.h"
 #if defined(HU_ENABLE_CARTESIA)
 #include "human/tts/voice_reply.h"
 #endif
@@ -106,6 +107,15 @@ bool hu_voice_reply_gates_clear(hu_allocator_t *alloc, const char *text, size_t 
     return clear;
 }
 
+static bool voice_gates_pass(hu_allocator_t *alloc, const char *text, size_t len,
+                             const char *inbound, size_t inbound_len, const char *what) {
+    const char *why = NULL;
+    if (hu_voice_reply_gates_clear(alloc, text, len, inbound, inbound_len, &why))
+        return true;
+    hu_log_info("voice_reply", NULL, "voice declined by safety gate (%s): %s", what, why);
+    return false;
+}
+
 bool hu_daemon_voice_reply(hu_allocator_t *alloc, hu_agent_t *agent, const hu_config_t *config,
                            hu_service_channel_t *ch, const char *batch_key, size_t key_len,
                            const char *combined, size_t combined_len, const char *response,
@@ -121,14 +131,20 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, hu_agent_t *agent, const hu_co
      * claim hedging inside `if (!sent_voice …)` in daemon.c, so a voice memo would
      * skip all three. Decline voice unless every gate is clear; the caller then
      * delivers the reply through the text path, which applies them. */
-    {
-        const char *gate_why = NULL;
-        if (!hu_voice_reply_gates_clear(alloc, response, response_len, combined, combined_len,
-                                        &gate_why)) {
-            hu_log_info("voice_reply", NULL, "voice declined by safety gate: %s", gate_why);
-            return false;
-        }
-    }
+    if (!voice_gates_pass(alloc, response, response_len, combined, combined_len, "reply"))
+        return false;
+    /* F1 S2: speak the spoken form of the reply — texting shorthand expanded,
+     * narrated actions, emoji and URLs removed. Nothing speakable: text goes. */
+    char spoken[2048];
+    bool laughter_cue = false;
+    size_t spoken_len =
+        hu_speech_cleanup(response, response_len, spoken, sizeof(spoken), &laughter_cue);
+    (void)laughter_cue; /* consumed by transcript prep (F1 Task 2) */
+    if (spoken_len == 0)
+        return false;
+    /* F1 S4: the gates also judge what is actually spoken. */
+    if (!voice_gates_pass(alloc, spoken, spoken_len, combined, combined_len, "spoken"))
+        return false;
     bool sent_voice = false;
     {
         const char *chn_voice =
@@ -163,7 +179,7 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, hu_agent_t *agent, const hu_co
                 if (cartesia_key && cartesia_key[0]) {
                     hu_voice_reply_request_t req;
                     hu_error_t prep_err = hu_voice_reply_build_request(
-                        &agent->persona->voice, response, response_len, combined, combined_len,
+                        &agent->persona->voice, spoken, spoken_len, combined, combined_len,
                         bth_hour, (uint32_t)time(NULL), &req);
                     unsigned char *audio_bytes = NULL;
                     size_t audio_len = 0;
@@ -205,7 +221,7 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, hu_agent_t *agent, const hu_co
                 void *audio = NULL;
                 size_t audio_len = 0;
                 hu_error_t tts_err =
-                    hu_voice_tts(alloc, &voice_cfg, response, response_len, &audio, &audio_len);
+                    hu_voice_tts(alloc, &voice_cfg, spoken, spoken_len, &audio, &audio_len);
                 if (tts_err == HU_OK && audio && audio_len > 0) {
                     unsigned char *audio_bytes = (unsigned char *)audio;
                     char audio_path[512];
