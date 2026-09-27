@@ -1,10 +1,22 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
+import { waitForViewReady } from "./helpers";
+
+/** Whether `tag` is registered. Call this only after waitForViewReady.
+ *  chat-view.js imports these components statically, so they are defined by
+ *  the time the view has upgraded and rendered. */
+function isDefined(page: Page, tag: string): Promise<boolean> {
+  return page.evaluate((t) => customElements.get(t) !== undefined, tag);
+}
 
 test.describe("Chat View", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/#chat");
     await page.waitForLoadState("domcontentloaded");
     await expect(page.locator("hu-app >> hu-chat-view")).toBeAttached({ timeout: 5000 });
+    // hu-app renders <hu-chat-view> before the lazy chat-view chunk has loaded,
+    // so "attached" can still be an un-upgraded element. Wait until it is
+    // defined and has rendered its shadow root.
+    await waitForViewReady(page, "hu-chat-view");
   });
 
   test("chat view renders", async ({ page }) => {
@@ -47,29 +59,31 @@ test.describe("Chat View", () => {
     const chatView = page.locator("hu-app >> hu-chat-view");
     await expect(chatView).toBeAttached({ timeout: 5000 });
     // Message log lives inside hu-message-thread shadow (role="log")
-    const messagesArea = page.locator("hu-app >> hu-chat-view >> hu-message-thread >> [role='log']");
+    const messagesArea = page.locator(
+      "hu-app >> hu-chat-view >> hu-message-thread >> [role='log']",
+    );
     await expect(messagesArea).toBeAttached({ timeout: 5000 });
   });
 
   test("hu-message-thread component is available", async ({ page }) => {
-    const registered = await page.evaluate(() => {
-      return customElements.get("hu-message-thread") !== undefined;
-    });
-    expect(registered).toBe(true);
+    expect(
+      await isDefined(page, "hu-message-thread"),
+      "hu-message-thread not registered after hu-chat-view rendered",
+    ).toBe(true);
   });
 
   test("hu-thinking component is available", async ({ page }) => {
-    const registered = await page.evaluate(() => {
-      return customElements.get("hu-thinking") !== undefined;
-    });
-    expect(registered).toBe(true);
+    expect(
+      await isDefined(page, "hu-thinking"),
+      "hu-thinking not registered after hu-chat-view rendered",
+    ).toBe(true);
   });
 
   test("hu-tool-result component is available", async ({ page }) => {
-    const registered = await page.evaluate(() => {
-      return customElements.get("hu-tool-result") !== undefined;
-    });
-    expect(registered).toBe(true);
+    expect(
+      await isDefined(page, "hu-tool-result"),
+      "hu-tool-result not registered after hu-chat-view rendered",
+    ).toBe(true);
   });
 
   test("keyboard shortcut focuses input", async ({ page }) => {
