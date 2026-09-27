@@ -664,7 +664,7 @@
     }
   },
   "high-contrast": {
-    "$description": "High contrast mode for accessibility",
+    "$description": "High contrast mode, dark scheme (prefers-contrast: more). Layered over the dark theme; high-contrast-light is its light-scheme twin. Every text role measured >=7:1 (faint/status >=4.5:1) on every bg role.",
     "bg": {
       "$value": "{color.neutral.0}",
       "$type": "color"
@@ -711,7 +711,7 @@
       "$type": "color"
     },
     "accent-text": {
-      "$value": "#3a6a24",
+      "$value": "{color.human.300}",
       "$type": "color"
     },
     "accent-hover": {
@@ -770,8 +770,181 @@
       "$value": "rgba(96, 165, 250, 0.2)",
       "$type": "color"
     },
+    "surface-container": {
+      "$value": "{color.neutral.100}",
+      "$type": "color"
+    },
+    "surface-container-high": {
+      "$value": "{color.neutral.150}",
+      "$type": "color"
+    },
+    "surface-container-highest": {
+      "$value": "{color.neutral.200}",
+      "$type": "color"
+    },
+    "link-visited": {
+      "$value": "{color.human.200}",
+      "$type": "color",
+      "$description": "Dark theme's human.600 visited link is 3.79:1 on the darkest container"
+    },
+    "hover-overlay": {
+      "$value": "rgba(255, 255, 255, 0.12)",
+      "$type": "color"
+    },
     "focus-ring": {
       "$value": "#ffffff",
+      "$type": "color"
+    },
+    "focus-ring-width": {
+      "$value": "3px",
+      "$type": "dimension"
+    },
+    "focus-ring-offset": {
+      "$value": "2px",
+      "$type": "dimension"
+    }
+  },
+  "high-contrast-light": {
+    "$description": "High contrast mode, light scheme (prefers-contrast: more). Layered over the light theme: near-black text on white surfaces. Every text role measured >=7:1 (faint/status >=4.5:1) on every bg role.",
+    "bg": {
+      "$value": "{color.neutral.1000}",
+      "$type": "color"
+    },
+    "bg-inset": {
+      "$value": "{color.neutral.850}",
+      "$type": "color"
+    },
+    "bg-surface": {
+      "$value": "{color.neutral.1000}",
+      "$type": "color"
+    },
+    "bg-elevated": {
+      "$value": "{color.neutral.1000}",
+      "$type": "color"
+    },
+    "bg-overlay": {
+      "$value": "{color.neutral.1000}",
+      "$type": "color"
+    },
+    "surface-container": {
+      "$value": "{color.neutral.900}",
+      "$type": "color"
+    },
+    "surface-container-high": {
+      "$value": "{color.neutral.850}",
+      "$type": "color"
+    },
+    "surface-container-highest": {
+      "$value": "{color.neutral.825}",
+      "$type": "color"
+    },
+    "text": {
+      "$value": "{color.neutral.0}",
+      "$type": "color"
+    },
+    "text-secondary": {
+      "$value": "{color.neutral.200}",
+      "$type": "color"
+    },
+    "text-muted": {
+      "$value": "{color.neutral.300}",
+      "$type": "color"
+    },
+    "text-tertiary": {
+      "$value": "{color.neutral.300}",
+      "$type": "color",
+      "$description": "Tertiary text — same WCAG profile as text-muted (high-contrast theme)"
+    },
+    "text-faint": {
+      "$value": "{color.neutral.400}",
+      "$type": "color"
+    },
+    "accent": {
+      "$value": "{color.human.700}",
+      "$type": "color"
+    },
+    "accent-text": {
+      "$value": "{color.human.900}",
+      "$type": "color"
+    },
+    "accent-hover": {
+      "$value": "{color.human.800}",
+      "$type": "color"
+    },
+    "accent-subtle": {
+      "$value": "rgba(58, 106, 36, 0.12)",
+      "$type": "color"
+    },
+    "accent-strong": {
+      "$value": "{color.human.900}",
+      "$type": "color"
+    },
+    "on-accent": {
+      "$value": "{color.neutral.1000}",
+      "$type": "color"
+    },
+    "link": {
+      "$value": "{color.human.900}",
+      "$type": "color"
+    },
+    "link-hover": {
+      "$value": "{color.human.800}",
+      "$type": "color"
+    },
+    "link-active": {
+      "$value": "{color.human.700}",
+      "$type": "color"
+    },
+    "link-visited": {
+      "$value": "{color.human.800}",
+      "$type": "color"
+    },
+    "border": {
+      "$value": "{color.neutral.400}",
+      "$type": "color"
+    },
+    "border-subtle": {
+      "$value": "{color.neutral.500}",
+      "$type": "color"
+    },
+    "success": {
+      "$value": "#006b1f",
+      "$type": "color"
+    },
+    "success-dim": {
+      "$value": "rgba(0, 107, 31, 0.12)",
+      "$type": "color"
+    },
+    "warning": {
+      "$value": "#7a5200",
+      "$type": "color"
+    },
+    "warning-dim": {
+      "$value": "rgba(122, 82, 0, 0.12)",
+      "$type": "color"
+    },
+    "error": {
+      "$value": "#a30000",
+      "$type": "color"
+    },
+    "error-dim": {
+      "$value": "rgba(163, 0, 0, 0.12)",
+      "$type": "color"
+    },
+    "info": {
+      "$value": "#1d4ed8",
+      "$type": "color"
+    },
+    "info-dim": {
+      "$value": "rgba(29, 78, 216, 0.12)",
+      "$type": "color"
+    },
+    "hover-overlay": {
+      "$value": "rgba(0, 0, 0, 0.08)",
+      "$type": "color"
+    },
+    "focus-ring": {
+      "$value": "{color.neutral.0}",
       "$type": "color"
     },
     "focus-ring-width": {

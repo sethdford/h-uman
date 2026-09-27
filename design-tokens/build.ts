@@ -952,23 +952,36 @@ function generateCSS(
   lines.push("}");
   lines.push("");
 
-  // High-contrast theme
-  const highContrastKeys = Object.keys(tokens).filter((k) =>
-    k.startsWith("high-contrast."),
-  );
-  if (highContrastKeys.length > 0) {
-    lines.push("@media (prefers-contrast: more) {");
-    lines.push("  :root {");
-    for (const k of highContrastKeys.sort()) {
-      const v = tokens[k];
-      if (v == null) continue;
-      const name = k.replace("high-contrast.", "").replace(/-/g, "-");
-      lines.push(`    --hu-${name}: ${v};`);
-    }
+  // High-contrast themes. Each set is layered over the theme it belongs to and
+  // may only apply where that theme is active, mirroring the P3 blocks below:
+  // the dark set on bare :root turned the light theme's #f8f8f6 cards into
+  // white-on-white (1.06:1).
+  const hcBlock = (media: string, selector: string, group: string) => {
+    const decls = Object.keys(tokens)
+      .filter((k) => k.startsWith(`${group}.`) && tokens[k] != null)
+      .sort()
+      .map((k) => `    --hu-${k.slice(group.length + 1)}: ${tokens[k]};`);
+    if (decls.length === 0) return;
+    lines.push(`@media ${media} {`);
+    lines.push(`  ${selector} {`);
+    lines.push(...decls);
     lines.push("  }");
     lines.push("}");
     lines.push("");
-  }
+  };
+  const hc = "(prefers-contrast: more)";
+  hcBlock(
+    `${hc} and (prefers-color-scheme: dark)`,
+    ':root:not([data-theme="light"])',
+    "high-contrast",
+  );
+  hcBlock(
+    `${hc} and (prefers-color-scheme: light)`,
+    ':root:not([data-theme="dark"])',
+    "high-contrast-light",
+  );
+  hcBlock(hc, '[data-theme="dark"]', "high-contrast");
+  hcBlock(hc, '[data-theme="light"]', "high-contrast-light");
 
   // Reduced motion
   lines.push("@media (prefers-reduced-motion: reduce) {");
@@ -987,7 +1000,7 @@ function generateCSS(
   // that theme is active: the maps are partial, so a dark map applied under the
   // light theme leaves dark values on every key the light map omits (dark link
   // at 2.14:1 on the light background). Suppressed under prefers-contrast: more
-  // because the high-contrast theme above is a full palette of its own.
+  // so vivid P3 values never repaint the measured high-contrast palettes above.
   const p3Entries = Object.entries(p3Colors);
   const p3Block = (media: string, selector: string, theme: string) => {
     const decls = p3Entries

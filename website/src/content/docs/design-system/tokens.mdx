@@ -50,7 +50,7 @@ Light theme tokens mirror dark theme with adjusted values for white backgrounds.
 
 ### High Contrast Theme
 
-High contrast tokens maximize luminance ratios for users with low vision. All text/background pairs exceed 7:1 contrast ratio (WCAG AAA).
+High contrast tokens maximize luminance ratios for users with low vision. `high-contrast` layers over the dark theme and `high-contrast-light` over the light theme; each applies under `prefers-contrast: more` only where its theme is active. Body text exceeds 7:1 (WCAG AAA) on every surface; faint, link and status text exceed 4.5:1. `ui/e2e/high-contrast-theme.spec.ts` measures every pair.
 
 ## Spacing Tokens
 
