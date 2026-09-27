@@ -28,7 +28,7 @@ export class ScFloatingMic extends LitElement {
       height: 3rem;
       border-radius: 50%;
       background: var(--hu-accent);
-      color: var(--hu-bg);
+      color: var(--hu-on-accent);
       border: none;
       cursor: pointer;
       display: flex;
