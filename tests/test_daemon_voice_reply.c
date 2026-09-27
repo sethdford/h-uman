@@ -55,7 +55,7 @@ static void test_voice_reply_without_config_sends_nothing_and_returns_false(void
     static const char reply[] = "yeah call whenever";
     g_voice_sends = 0;
     bool sent = hu_daemon_voice_reply(&alloc, &agent, NULL, &ch, "+15550000001", 12, "hey", 3,
-                                      reply, sizeof(reply) - 1, 14);
+                                      reply, sizeof(reply) - 1, NULL, 0, 14);
     HU_ASSERT_FALSE(sent);
     HU_ASSERT_EQ(g_voice_sends, 0);
 }
@@ -125,6 +125,10 @@ static const char *vr_name_generic(void *ctx) {
     return "voicetest";
 }
 
+/* F1 Task 4: the reply as written, before text shaping (typos, "haha "
+ * prefixes). NULL = speak `reply`. */
+static const char *g_unshaped;
+
 static bool run_fallback_voice(const char *reply, const char *inbound) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_agent_t agent;
@@ -144,7 +148,8 @@ static bool run_fallback_voice(const char *reply, const char *inbound) {
     memset(&ch, 0, sizeof(ch));
     ch.channel = &channel;
     return hu_daemon_voice_reply(&alloc, &agent, &config, &ch, "+15550000001", 12, inbound,
-                                 strlen(inbound), reply, strlen(reply), 14);
+                                 strlen(inbound), reply, strlen(reply), g_unshaped,
+                                 g_unshaped ? strlen(g_unshaped) : 0, 14);
 }
 
 /* F1 S2: the memo speaks the cleaned reply, not the texting shorthand. */
@@ -213,7 +218,7 @@ static bool run_rewrite_voice(const char *reply, const char *rewrite) {
     ch.channel = &channel;
     setenv("HU_SPEECH_REWRITE", "live", 1);
     bool sent = hu_daemon_voice_reply(&alloc, &agent, &config, &ch, "+15550000001", 12, "hey", 3,
-                                      reply, strlen(reply), 14);
+                                      reply, strlen(reply), NULL, 0, 14);
     unsetenv("HU_SPEECH_REWRITE");
     return sent;
 }
@@ -230,6 +235,42 @@ static void test_voice_reply_rewrite_that_trips_moderation_is_not_spoken(void) {
     HU_ASSERT_FALSE(run_rewrite_voice("we watched that show with the kids",
                                       "kill them with violence and murder"));
     HU_ASSERT_EQ(g_voice_sends, 0);
+}
+
+/* F1 Task 4: speak the reply as written — not the copy text shaping styled
+ * for iMessage (injected typos, "haha " fillers). */
+static void test_voice_reply_speaks_unshaped_reply(void) {
+    g_voice_sends = 0;
+    g_unshaped = "let me know when you're free";
+    bool sent = run_fallback_voice("haha let me knwo when youre free", "you around later?");
+    g_unshaped = NULL;
+    HU_ASSERT_TRUE(sent);
+    const char *spoken = hu_cartesia_test_last_transcript();
+    HU_ASSERT_STR_EQ(spoken, "let me know when you're free");
+}
+
+static void test_voice_capture_unshaped_only_when_voice_possible(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    static hu_config_t config;
+    memset(&config, 0, sizeof(config));
+    hu_channel_vtable_t vt;
+    memset(&vt, 0, sizeof(vt));
+    vt.name = vr_name_generic;
+    hu_channel_t channel;
+    memset(&channel, 0, sizeof(channel));
+    channel.vtable = &vt;
+    hu_service_channel_t ch;
+    memset(&ch, 0, sizeof(ch));
+    ch.channel = &channel;
+    size_t n = 99;
+    HU_ASSERT_NULL(hu_daemon_voice_capture_unshaped(&alloc, &config, &ch, "hi there", 8, &n));
+    HU_ASSERT_EQ(n, 0);
+    config.channels.default_daemon.voice_enabled = true;
+    char *copy = hu_daemon_voice_capture_unshaped(&alloc, &config, &ch, "hi there", 8, &n);
+    HU_ASSERT_NOT_NULL(copy);
+    HU_ASSERT_EQ(n, 8);
+    HU_ASSERT_STR_EQ(copy, "hi there");
+    alloc.free(alloc.ctx, copy, n + 1);
 }
 
 static void test_voice_reply_sends_clean_reply_as_voice(void) {
@@ -263,6 +304,8 @@ void run_daemon_voice_reply_tests(void) {
     HU_RUN_TEST(test_voice_reply_sends_clean_reply_as_voice);
     HU_RUN_TEST(test_voice_reply_speaks_cleaned_text);
     HU_RUN_TEST(test_voice_reply_nothing_speakable_goes_as_text);
+    HU_RUN_TEST(test_voice_reply_speaks_unshaped_reply);
+    HU_RUN_TEST(test_voice_capture_unshaped_only_when_voice_possible);
     HU_RUN_TEST(test_voice_reply_live_rewrite_is_spoken);
     HU_RUN_TEST(test_voice_reply_rewrite_that_trips_moderation_is_not_spoken);
     HU_RUN_TEST(test_voice_reply_flagged_reply_is_not_sent_as_voice);

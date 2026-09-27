@@ -116,10 +116,39 @@ static bool voice_gates_pass(hu_allocator_t *alloc, const char *text, size_t len
     return false;
 }
 
+char *hu_daemon_voice_capture_unshaped(hu_allocator_t *alloc, const hu_config_t *config,
+                                       hu_service_channel_t *ch, const char *response,
+                                       size_t response_len, size_t *out_len) {
+    if (out_len)
+        *out_len = 0;
+    if (!alloc || !config || !ch || !ch->channel || !response || response_len == 0 || !out_len)
+        return NULL;
+    const char *chn = ch->channel->vtable && ch->channel->vtable->name
+                          ? ch->channel->vtable->name(ch->channel->ctx)
+                          : NULL;
+    const hu_channel_daemon_config_t *dc = hu_daemon_active_daemon_config(config, chn);
+    if (!dc || !dc->voice_enabled)
+        return NULL;
+    char *copy = alloc->alloc(alloc->ctx, response_len + 1);
+    if (!copy)
+        return NULL;
+    memcpy(copy, response, response_len);
+    copy[response_len] = '\0';
+    *out_len = response_len;
+    return copy;
+}
+
 bool hu_daemon_voice_reply(hu_allocator_t *alloc, hu_agent_t *agent, const hu_config_t *config,
                            hu_service_channel_t *ch, const char *batch_key, size_t key_len,
                            const char *combined, size_t combined_len, const char *response,
-                           size_t response_len, int bth_hour) {
+                           size_t response_len, const char *unshaped, size_t unshaped_len,
+                           int bth_hour) {
+    /* F1: a memo says the reply as written, not the copy text shaping styled
+     * for iMessage (typos, lowercase quirks, "haha " fillers). */
+    if (unshaped && unshaped_len > 0) {
+        response = unshaped;
+        response_len = unshaped_len;
+    }
     /* Only the Cartesia arm below reads these; without HU_ENABLE_CARTESIA the
      * legacy path ignores them. Stated here so -Werror builds of every preset
      * agree on the signature. */

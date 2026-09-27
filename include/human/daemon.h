@@ -97,7 +97,14 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, struct hu_agent *agent,
                            const struct hu_config *config, hu_service_channel_t *ch,
                            const char *batch_key, size_t key_len, const char *combined,
                            size_t combined_len, const char *response, size_t response_len,
-                           int bth_hour);
+                           const char *unshaped, size_t unshaped_len, int bth_hour);
+
+/* F1: a copy of the reply taken BEFORE text shaping (typos, texting quirks,
+ * "haha " fillers) — what a voice memo should say. NULL (and *out_len = 0)
+ * unless this channel can send voice. Caller frees with alloc (len + 1). */
+char *hu_daemon_voice_capture_unshaped(hu_allocator_t *alloc, const struct hu_config *config,
+                                       hu_service_channel_t *ch, const char *response,
+                                       size_t response_len, size_t *out_len);
 
 /* True only when the reply passes every outbound gate the text path applies
  * (moderation, companion safety, claim language) and the inbound message is not
