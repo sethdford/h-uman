@@ -304,6 +304,17 @@ static void test_voice_reply_directed_line_that_trips_moderation_is_not_spoken(v
     HU_ASSERT_STR_CONTAINS(t, "we watched that show with the kids");
 }
 
+/* Final review #6: SHADOW direction observes; it must not switch off the
+ * rewrite (its own measurement, or LIVE speech). */
+static void test_voice_reply_direction_shadow_keeps_the_rewrite(void) {
+    g_voice_sends = 0;
+    g_rewrite_calls = 0;
+    setenv("HU_SPEECH_REWRITE", "shadow", 1);
+    HU_ASSERT_TRUE(run_direct_voice("yeah sounds good", "Yeah, sounds good.", "shadow"));
+    unsetenv("HU_SPEECH_REWRITE");
+    HU_ASSERT_EQ(g_rewrite_calls, 2); /* the rewrite and the performance both ran */
+}
+
 static void test_voice_reply_direction_off_is_todays_path(void) {
     g_voice_sends = 0;
     g_rewrite_calls = 0;
@@ -415,6 +426,7 @@ void run_daemon_voice_reply_tests(void) {
     HU_RUN_TEST(test_voice_reply_direction_shadow_speaks_plain_text);
     HU_RUN_TEST(test_voice_reply_directed_line_that_trips_moderation_is_not_spoken);
     HU_RUN_TEST(test_voice_reply_direction_off_is_todays_path);
+    HU_RUN_TEST(test_voice_reply_direction_shadow_keeps_the_rewrite);
     HU_RUN_TEST(test_voice_reply_speaks_unshaped_reply);
     HU_RUN_TEST(test_voice_capture_unshaped_only_when_voice_possible);
     HU_RUN_TEST(test_voice_reply_live_rewrite_is_spoken);

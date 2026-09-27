@@ -202,9 +202,10 @@ static bool voice_spoken_final(hu_allocator_t *alloc, hu_agent_t *agent, const c
         hu_speech_rewrite_mode_t dm = hu_speech_rewrite_mode_parse(getenv("HU_SPEECH_DIRECTION"));
         /* LIVE as a default is gated on the voice A/B drip preferring the
          * rewrite over cleanup-only, then the W5 real-or-clone test — do not
-         * flip without them. Direction supersedes the rewrite. */
+         * flip without them. LIVE direction supersedes the rewrite; SHADOW
+         * direction only observes, so the rewrite keeps running. */
         hu_speech_rewrite_mode_t m = hu_speech_rewrite_mode_parse(getenv("HU_SPEECH_REWRITE"));
-        if (m != HU_SPEECH_REWRITE_OFF && dm == HU_SPEECH_REWRITE_OFF) {
+        if (m != HU_SPEECH_REWRITE_OFF && dm != HU_SPEECH_REWRITE_LIVE) {
             (void)hu_speech_prepare(
                 alloc, agent ? &agent->provider : NULL, agent ? agent->model_name : NULL,
                 agent ? agent->model_name_len : 0, agent ? agent->persona : NULL, m, response,
