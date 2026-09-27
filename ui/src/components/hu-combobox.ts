@@ -307,7 +307,7 @@ export class ScCombobox extends LitElement {
             id=${this._inputId}
             type="text"
             role="combobox"
-            aria-expanded=${this._open}
+            aria-expanded=${listboxShown}
             aria-autocomplete="list"
             aria-controls=${ifDefined(listboxShown ? this._listboxId : undefined)}
             aria-activedescendant=${ifDefined(activeId)}
