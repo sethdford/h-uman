@@ -1,0 +1,19 @@
+[TOK] 163584 ranks (max id 163583) + 16 added tokens | kimi=1 rankbpe=1
+      325.90 real      1513.12 user       103.57 sys
+         25668173824  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+             3262292  page reclaims
+                  14  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+              111370  voluntary context switches
+            11696688  involuntary context switches
+      28478777834088  instructions retired
+       5941345614785  cycles elapsed
+         27317358200  peak memory footprint

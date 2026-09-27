@@ -1,0 +1,66 @@
+config: /Users/sethford/k3spike/model/config.json (nested shape) | hidden=7168 layers=93 vocab=163840 | 24 MLA + 69 KDA | experts 896 top16 shared2 | latent=3584
+NOTE: binding only the first 10 of 93 layers. Output is NOT the full model; it is a partial stack for testing the machinery.
+
+  tokenized: 3036 bytes -> 816 ids
+  KV cache : 1.94 GB for 819 positions (2.37 MB/position)
+Kimi K3, pure C, released checkpoint
+  model    : /Users/sethford/k3spike/model
+  prompt   : 816 tokens, generating 2
+
+indexed 48820 tensors from 13 shards in 0.02 s
+resident trunk: 13.02 GB in RAM (large matrices kept in the checkpoint's bf16,
+  fp32 only for the norms and biases that kernels read elementwise)
+
+memory plan
+  trunk (resident) 13.02 GB
+  embed + lm_head  4.70 GB (resident)
+  expert cache     8.00 GB
+  recurrent state  67.34 MB
+  buffers          548.46 MB
+  KV cache         1.94 GB
+  TOTAL            28.27 GB
+
+  bound 10/10 layers, 1.6 s elapsed
+trunk loaded in 1.6 s (7978 MB/s from disk)
+embedding, final norm and lm_head: 4.70 GB in 0.4 s
+
+peak RSS after loading weights: 17.76 GB  (the plan above is a forecast, this is measured)
+expert cache: 455 slots x 17.56 MB = 7.99 GB (0.55% of the 1.45 TB expert pool)
+
+resuming from /Users/sethford/k3spike/results/prefix.state: 2977 prior positions, 816 new
+
+recurrent state for 10 layers: 67.34 MB
+
+incremental decode: KV cache 748.27 MB for 2 MLA layers at 3796 positions
+
+restored 2977 positions in 0.06 s: decode continues without re-reading the prior context
+
+STEP   TOKEN      SECONDS      CACHE HIT  READ GB    TOK/S
+--------------------------------------------------------------------
+0      17185      322.37       7.5        134.29     0.003
+1      15036      1.04         100.0      2.51       0.965
+--------------------------------------------------------------------
+2 tokens in 323.4 s, 161.70 s/token average
+
+--- generated text ---
+lev vir
+----------------------
+
+PEAK RSS for the whole run: 25.67 GB   <- quote this, not the plan
+layers completed: 10/10; routed expert drops: 0
+
+cache [final step]
+  slots        : 455 of 17.56 MB = 7.99 GB arena (455 resident, 0 pinned)
+  requests     : 144  hits 144 (100.00%)  misses 0  evictions 143
+  of those hits : 143 came from the batch prefetch, i.e. read from disk
+                  this token; TRUE resident hit rate 0.69%
+  read from disk: 2.51 GB in 0.33 s (7602 MB/s while loading)
+
+wrote /Users/sethford/k3spike/results/r4_suffix_load.json
+I/O share of wall clock: 8.1%  (trunk 0.0 s + experts 26.3 s + model tables 0.0 s of 323.4 s)
+  both figures are WHOLE-RUN totals over 2 steps
+  experts, whole run: 136.80 GB read | 456 of 7797 requests retained in RAM (5.85%) | 7341 evictions
+    (retention = requests - evictions; the raw `hits` counter includes
+     experts the prefetcher had just read from disk, so it is not a
+     measure of avoided I/O)
+

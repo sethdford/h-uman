@@ -1,0 +1,24 @@
+[TOK] 163584 ranks (max id 163583) + 16 added tokens | kimi=1 rankbpe=1
+config: model/config.json (nested shape) | hidden=7168 layers=93 vocab=163840 | 24 MLA + 69 KDA | experts 896 top16 shared2 | latent=3584
+NOTE: binding only the first 10 of 93 layers. Output is NOT the full model; it is a partial stack for testing the machinery.
+
+  tokenized: 3036 bytes -> 816 ids
+  KV cache : 1.94 GB for 818 positions (2.37 MB/position)
+Kimi K3, pure C, released checkpoint
+  model    : model
+  prompt   : 816 tokens, generating 1
+
+indexed 48820 tensors from 13 shards in 0.02 s
+resident trunk: 13.02 GB in RAM (large matrices kept in the checkpoint's bf16,
+  fp32 only for the norms and biases that kernels read elementwise)
+
+memory plan
+  trunk (resident) 13.02 GB
+  embed + lm_head  4.70 GB (resident)
+  expert cache     8.00 GB
+  recurrent state  67.34 MB
+  buffers          547.79 MB
+  KV cache         1.93 GB
+  TOTAL            28.27 GB
+
+  bound 10/10 layers, 2.0 s elapsed

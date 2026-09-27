@@ -1,0 +1,15 @@
+diff --git a/src/core/k3_ops.c b/src/core/k3_ops.c
+index 07bece3..a92f6cb 100644
+--- a/src/core/k3_ops.c
++++ b/src/core/k3_ops.c
+@@ -704,7 +704,9 @@ void k3_moe_prefill(float *out, const float *x, const K3MoeW *w, const K3Cfg *c,
+      * how long the prompt is; a 32k prefill would otherwise want 7.3 GB of it. Most of
+      * the dedup is already captured at this width: the unique-expert count grows far
+      * slower than the request count under near-uniform routing. */
+-    const int CHUNK = 64;
++    /* SPIKE (throwaway): K3_PREFILL_CHUNK overrides the sub-chunk width. */
++    static int CHUNK = 0;
++    if (!CHUNK) { const char *e = getenv("K3_PREFILL_CHUNK"); CHUNK = (e && atoi(e) > 0) ? atoi(e) : 64; }
+     for (int t0 = 0; t0 < T; t0 += CHUNK) {
+         const int n = (T - t0) < CHUNK ? (T - t0) : CHUNK;
+         if (n == 1) { k3_moe(out + (size_t)t0 * c->hidden, x + (size_t)t0 * c->hidden,

@@ -1,0 +1,69 @@
+REMEMBERED ABOUT SAM: sister Priya moved to Denver in June; Sam's dog Biscuit had knee surgery last week; Sam and Jordan are planning a kayak trip to Weedon Island in October; Sam started a new job at a hospital lab; Sam hates cilantro; they last saw each other at Jordan's birthday.
+
+EARLIER CONTEXT:
+c
+/ Silent numerical corruption that exits 0 is indistinguishable from a good run. /
+if k3expertdrops {
+    fprintfstderr,
+            "\nRUN INVALID: %ld routed expert loads failed and were dropped from\n"
+            "the MoE sum. The token ids above are CORRUPT. Re-run; if this repeats,\n"
+            "the shard set or the storage is at fault.\n", k3expertdrops;
+    return 4;
+}
+return 0;
+
+One expert at 17.55 MB becomes 132 MB once expanded to float32. Each token touches 16
+experts across 92 layers 1,472 experts, so decoding them all would mean writing out
+194 gigabytes per token of pure format conversion, before a single multiply-accumulate.
+
+Four minutes, once, and layer L lives at a known offset and can be read in a single call.
+The last line sizes everything downstream: the largest layer run is 2.341 GB, so any
+buffer that has to hold one arbitrary layer must be at least that big.
+
+text
+CAVEAT, and it matters
+This trace was recorded during a run that re-prefills the whole prefix every step, so
+the same experts are legitimately touched ~68 times. Steady-state incremental decode
+has far less reuse, and its hit rates will be LOWER than this curve suggests. Treat
+these numbers as an upper bound on what caching can do, not a forecast.
+
+c
+/ Stable LatentMoE for one token.
+ 
+  Six steps, and step 4 is the one people get wrong: the RMSNorm is applied to the
+  AGGREGATE of the weighted expert outputs, not to each expert individually. Norming
+  per expert and then summing is a different function.
+ 
+  The two shared experts run on the ORIGINAL full-width input, not the latent, and
+  their output is added UNWEIGHTED. They are not part of the top-k sum. /
+void k3moefloat out, const float x, const K3MoeW w, const K3Cfg c,
+            int T, int idx, float wt, float scratch
+{
+    const int E = c-hidden, L = c-latent, I = c-moeinter;
+    float z = scratch, accL = z + L, gu = accL + L, act = gu + 2  I;
+    float edn = act + I;
+
+RECENT CONVERSATION:
+JORDAN: how was the weekend
+SAM: good, rode out to the pier sunday. you?
+JORDAN: long one. biscuit is finally walking on the leg
+SAM: oh nice, how's he doing
+JORDAN: slow but happy. vet says two more weeks
+SAM: glad he's ok
+JORDAN: also still on for october?
+SAM: yeah, need to check the tides
+JORDAN: ok let me know
+SAM: will do
+JORDAN: work is insane this week btw
+SAM: new place still?
+JORDAN: yeah the lab is short two people
+SAM: that sounds rough
+JORDAN: it is lol. anyway what are you up to tonight
+
+CANDIDATES:
+A: not much, probably just chill. you?
+B: nothing big. how's biscuit's leg holding up after the walk
+C: prob grabbing tacos, no cilantro for you if you come lol
+D: I'm planning to relax this evening! How about you? Anything fun planned?
+
+JSON:

@@ -1,0 +1,40 @@
+=== r0_chunk64 (K3_PREFILL_CHUNK=64) 14:15:02
+exit=0 ;  266.84 real 1404.07 user 140.55 sys  23970906112 maximum resident set size 
+  prompt   : 816 tokens, generating 1
+STEP   TOKEN      SECONDS      CACHE HIT  READ GB    TOK/S
+0      17185      257.90       64.2       411.22     0.004
+1 tokens in 257.9 s, 257.90 s/token average
+=== r0_chunk4096 (K3_PREFILL_CHUNK=4096) 14:19:29
+exit=0 ;  241.27 real 1388.08 user 98.35 sys  21440249856 maximum resident set size 
+  prompt   : 816 tokens, generating 1
+STEP   TOKEN      SECONDS      CACHE HIT  READ GB    TOK/S
+0      17185      237.64       7.6        132.45     0.004
+1 tokens in 237.6 s, 237.64 s/token average
+R0: logits BIT-IDENTICAL
+=== r1_full_chunk64 (K3_PREFILL_CHUNK=64) 14:23:30
+exit=0 ;  1529.99 real 6638.56 user 562.85 sys  25901236224 maximum resident set size 
+  prompt   : 3793 tokens, generating 2
+STEP   TOKEN      SECONDS      CACHE HIT  READ GB    TOK/S
+0      17185      1524.72      66.1       1854.29    0.001
+1      15036      2.88         100.0      2.32       0.348
+2 tokens in 1527.6 s, 763.80 s/token average
+=== r2_full_chunk4096 (K3_PREFILL_CHUNK=4096) 14:49:00
+exit=0 ;  1167.45 real 6612.52 user 361.14 sys  26818641920 maximum resident set size 
+  prompt   : 3793 tokens, generating 2
+STEP   TOKEN      SECONDS      CACHE HIT  READ GB    TOK/S
+0      17185      1163.36      7.2        140.40     0.001
+1      15036      1.09         100.0      2.53       0.913
+2 tokens in 1164.5 s, 582.23 s/token average
+=== r3_prefix_save (K3_PREFILL_CHUNK=4096) 15:08:28
+exit=0 ;  846.76 real 5111.46 user 290.39 sys  28821880832 maximum resident set size 
+  prompt   : 2977 tokens, generating 0
+STEP   TOKEN      SECONDS      CACHE HIT  READ GB    TOK/S
+0      69244      844.18       7.3        139.33     0.001
+=== r4_suffix_load (K3_PREFILL_CHUNK=4096) 15:22:35
+exit=0 ;  325.90 real 1513.12 user 103.57 sys  25668173824 maximum resident set size 
+  prompt   : 816 tokens, generating 2
+STEP   TOKEN      SECONDS      CACHE HIT  READ GB    TOK/S
+0      17185      322.37       7.5        134.29     0.003
+1      15036      1.04         100.0      2.51       0.965
+2 tokens in 323.4 s, 161.70 s/token average
+=== done 15:28:01

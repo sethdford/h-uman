@@ -1,0 +1,194 @@
+You judge text-message replies for a fictional person, Jordan Reyes. Given the persona notes, what is remembered about the other person, and the recent conversation, pick the candidate reply that best uses specific, correct remembered details in Jordan's own terse voice, and the worst one. A reply that invents details not in memory is worse than a generic one. Length is not quality. Answer with strict JSON only: {"best":"A|B|C|D","worst":"A|B|C|D"}.
+
+PERSONA NOTES (Jordan Reyes, 41, lives in Tampa, bikes to work, texts in lowercase, rarely uses emoji):
+
+table
+tr
+th align="left"the machine you have/th
+th align="right"RAM/th
+th align="right"time per token/th
+th align="left"what is going on/th
+/tr
+tr
+td align="left"an ordinary laptop/td
+td align="right"8 GB/td
+td align="right"b26.5 s/b/td
+tdthe whole model streams off the disk on every step/td
+/tr
+tr
+td align="left"a high-end laptop/td
+td align="right"32 GB/td
+td align="right"b24.2 s/b/td
+tdsome of the model now sits in memory/td
+/tr
+tr
+td align="left"a desktop/td
+td align="right"64 GB/td
+td align="right"b19.8 s/b/td
+tdmore of it sits in memory/td
+/tr
+tr
+td align="left"a heavy workstation/td
+td align="right"128 GB+/td
+td align="right"b5.6 s/b/td
+tdthe model fits entirely in memory, the disk wait is gone/td
+/tr
+/table
+
+subSame short prompt at every size, and the output is bbyte-identical/b from the smallest machine to the largest; only the clock changes. One machine, 124 cores, fast NVMe drive: the first three rows still read the model from disk each step, so a slower drive is slower there, while the 128 GB+ row keeps everything in memory and no longer waits on the disk. On that same machine v1.0.0 made the math per token about b8&times;/b lighter, a follow-up question in a chat b3.9&times;/b faster, and long prompts about bhalf/b as costly. A token is roughly a short word-piece; the two runnable demos below are the original captures on a slower drive, so their clock reads a little higher. Full data in a href="docs/data/"docs/data//a./sub
+
+Slow, and answering correctly, in 8.24 GB, from a checkpoint of 1.56 TB. This particular
+batch command deliberately asks for a raw continuation. The official Kimi K3 checkpoint
+is also chat-capable; use the XTML REPL below when you want answers and multi-turn history.
+Give the same batch request more memory and the answer does not change, only the clock:
+
+The dense trunk stays in memory to whatever depth you choose and streams the rest; the
+1.45 TB of routed experts are never resident, and are multiplied straight out of their
+packed 4-bit form. The consequence is that the same model runs in 8 GB and in 224 GB and
+produces byte-identical output at every budget between.
+
+GATE 1  teacher forcing : 32/32 positions match tfpred
+        generated span  : 20/20  - must be exact
+GATE 2  greedy decode   : 20/20 generated tokens match fullids
+GATE 3  incremental    : 20/20 generated tokens match fullids  - KV cache + carried KDA state
+
+That is the whole engine: every kernel, the streaming cache, the safetensors reader, the
+config reader, the tokenizer, and an end-to-end oracle over a 13-layer model built with the
+same tensor graph as the released one, checked against a PyTorch reference from fixtures
+committed to the repository.
+
+A partial download does not fail loudly; it produces wrong tokens. Treat a FAIL here as
+a stop. Checking per shard also turns "re-download 1.56 terabytes" into "re-download this
+one 17 gigabyte file", and it catches the one case a total cannot: two shards wrong in
+opposite directions by the same amount.
+
+About four minutes, once. It rewrites the 93 dense layers into one 109 GB file where layer
+L lives at a known offset and can be read in a single call. This is what turns the
+memory requirement into a dial. Put the output on the fastest disk you have.
+
+flag  argument  
+---------
+ --prompt  TEXT  tokenize TEXT and run it. Requires --tok. 
+ --prompt-file  PATH  tokenize the file's bytes. Requires --tok. Preferred for anything non-ASCII: the shell re-encodes argv, whereas a file is read verbatim 
+ --ids  1,2,3  token ids directly. No tokenizer is loaded at all, so this works on a machine with no tokenizer files. The reproducible channel the tests use
+
+flag  argument  default  
+------------
+ --preset  NAME  none  laptop · desktop · workstation · server · max. Sets both budgets below 
+ --trunk  DIR  off  the packed trunk directory from step 5. This is what enables streaming. Without it the trunk loads fully resident, around 113.5 GB 
+ --trunk-gb  X  16  budget for pinned layers plus the streaming ring 
+ --cache-gb  X  64  budget for the routed-expert LRU cache 
+ --ultra-low-memory  none  off  stream exact embedding rows and lmhead chunks; full recompute also reuses one recurrent-state slot. Requires --trunk
+
+flag  argument  default  
+------------
+ --gen  N  8  tokens to generate. Ceiling 4096; prompts may be up to 32768 tokens 
+ --incremental  none  off  carry the KV cache and the recurrent state between tokens instead of re-running the whole prefix 
+ --tok  DIR  none  directory holding tiktoken.model and tokenizerconfig.json
+
+Pass --incremental for any generation of length. Without it every step re-runs the
+entire prefix, which is OT²; with it, step 0 pays for the prompt and every later step
+costs the same fixed amount. Both paths are gated on producing identical tokens, so this
+is a pure speed choice.
+
+Treat that file as sensitive: it can contain every user message and the complete assistant
+reasoning record, which K3 requires to continue a conversation faithfully. On restart the
+engine validates, re-renders, and re-prefills the transcript; it deliberately does not
+serialize opaque KV, MLA, or KDA state. A supplied --system must exactly match an existing
+initial system record. Literal control-marker text in user messages is encoded as ordinary
+text, never as an XTML control token.
+
+Chat defaults to --gen 4096 and, like batch generation, to greedy decoding. Passing any
+of --temperature, --top-p or --seed turns sampling on temperature 1.0, top-p
+0.95 unless given; --greedy forces argmax even then. Sampling uses
+PCG32; --seed N deterministically derives one stream per assistant turn, so replaying the
+same transcript with the same seed is reproducible. The 32K prompt / 4096 generation limits
+are existing engine limits, not new chat limits; chat fails clearly and retains the history
+when either context or safe KV allocation is reached.
+
+Thinking is on by default with thinkingeffort=max, which is exactly what the checkpoint's
+own tokenizer does when applychattemplate is given nothing; --thinking-effort low or
+high changes only that setting. --no-think is the encoder's thinking=False: no
+thinking-effort system message, prior assistant turns rendered without a think channel, and
+a generation prompt that opens the response channel directly, so the model answers at once
+and the REPL prints no think block. On a streamed trunk this is the largest speed lever
+there is: in a real-checkpoint run, 119 of the 150 tokens of a five-word answer were the
+think block. Reasoning already stored in the transcript is left in place and is rendered
+again the next time the conversation runs with thinking on. Both flags are byte- and
+id-exact against the official tokenizer in tests/unit/testchat.c.
+
+flag  argument  
+---------
+ --config  PATH  model config; defaults to modeldir/config.json 
+ --layers  N  bind only the first N layers, for partial shard sets 
+ --out  FILE  JSON results default k3run.json 
+ --dump-logits  PATH  float32 logits for the first step, for elementwise comparison 
+ --dump-cache-trace  DIR  writes experthist.json and experttrace.bin, which tools/simcache.py replays
+
+variable  used by  
+---------
+ HFTOKEN  download-model.sh  HuggingFace token, read from the environment and never echoed 
+ OMPNUMTHREADS  the engine  thread count, defaulting to all cores 
+ K3TOKFILES  tokenizer tools and CI  directory holding tiktoken.model, when it is not in a default location 
+ K3MODELDIR  tools/budget.py  checkpoint directory, when not given as an argument
+
+console
+$ ./bin/k3 --list-presets
+presets trunk / expert-cache, in GB:
+  ultra          2.50 / 0.31    ~3 GB planned: streamed model tables, one state slot. Slow.
+  laptop         3.00 / 1.00    8.2 GB peak RSS. The ordinary-path floor.
+  desktop       16.00 / 10.00   31.9 GB peak RSS.
+  workstation   60.00 / 30.00   95.5 GB peak RSS; the expert cache starts to matter here.
+  server       110.00 / 13.00   ~128 GB peak RSS; 90 of 93 trunk layers pinned. Fastest.
+  max          110.00 / 109.00  ~224 GB peak RSS; trunk pinned and a large expert cache.
+
+cache final step
+  requests     : 1472  hits 1472 100.00%  misses 0  evictions 729
+                 TRUE resident hit rate 50.48%
+I/O share of wall clock: 71.1%  trunk 62.4 s + experts 34.2 s of 135.8 s
+trunk final
+  pinned 48/93 layers, ring 1 slots
+  read 368.65 GB in 62.40 s 5908 MB/s
+PEAK RSS for the whole run: 94.74 GB   - quote this, not the plan
+
+Throughput is well below the table. Almost always storage. python3 tools/devbw.py
+file-on-that-disk measures the disk the way the engine reads it, using large random
+ODIRECT reads at queue depth 1 and 16, which dd does not. Network volumes run several
+times slower than local NVMe; keep ~/k3trunk local.
+
+The run refused to start over the KV cache. Context costs about 2.37 MB per position
+regardless of budget, and the engine computes that up front rather than discovering it an
+hour in. Shorten the request, or drop --incremental, which carries no KV cache at all.
+
+macOS, Windows, WSL? Linux is the reference platform. macOS/arm64 builds with plain
+make see the Makefile's platform block. Windows builds natively too, via MSYS2's
+MinGW-w64 GCC pacman -S mingw-w64-x8664-gcc, then open the "MSYS2 MinGW x64" shell
+specifically -- make, make test, and make test-all all pass every gate unmodified,
+including the full-model oracle and tokenizer parity against real Kimi K3 weights.
+Four Linux-only calls needed porting -- ODIRECT, pread, posixmemalign, and
+getrusage -- documented in src/io/k3portableio.h. One real bug surfaced during the
+port and is worth knowing if you extend this code on Windows: alignedmalloc, which
+backs the posixmemalign shim, must be freed with alignedfree, not plain free;
+POSIX's posixmemalign carries no such restriction, so this is easy to get wrong
+silently -- it compiles, and Windows terminates the process with STATUSHEAPCORRUPTION
+only once the corrupted allocator metadata is actually used. make asan/make ubsan
+switch to Clang on Windows pacman -S mingw-w64-clang-x8664-clang
+mingw-w64-clang-x8664-compiler-rt: MinGW-w64's GCC package ships no sanitizer runtime
+at all, confirmed directly rather than assumed. WSL works too, unmodified, since it is
+just Linux -- the tokenizer and config reader are portable C99 either way and build
+anywhere, in CI included.
+
+But it is a mixture of expertshttps://huggingface.co/blog/moe, so only 16 of its 896
+experts per layer fire for any given token and the rest sit asleep on disk. Keep the
+always-on part in memory, stream the sleeping experts, and it fits in 8.24 gigabytes
+on one CPU with no GPU.
+
+End to end that is a 675× reduction from the bfloat16 model and 189× from the
+shipped checkpoint. Nothing is approximated and no weight is dropped: the output at the
+bottom of that ladder is byte for byte the output at the top. The chart at the top of
+this document is that ledger drawn to scale.
+
+Every measurement here comes from one workstation: a two-socket AMD EPYC 7763 with 124
+cores and no SMT, 228 GB of RAM, and 3.2 TB of NVMe. It also has four NVIDIA L40 GPUs,
+which sat completely idle for the entire campaign, because this engine has no GPU path.
+
