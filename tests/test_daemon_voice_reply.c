@@ -164,6 +164,14 @@ static void test_voice_reply_speaks_cleaned_text(void) {
     HU_ASSERT_STR_NOT_CONTAINS(spoken, "lol");
 }
 
+/* Final review #4: a memo cannot carry a link — the reply goes as text. */
+static void test_voice_reply_with_link_goes_as_text(void) {
+    g_voice_sends = 0;
+    HU_ASSERT_FALSE(run_fallback_voice("this is the place https://example.com/a", "where?"));
+    HU_ASSERT_FALSE(run_fallback_voice("https://example.com/a", "where?"));
+    HU_ASSERT_EQ(g_voice_sends, 0);
+}
+
 static void test_voice_reply_nothing_speakable_goes_as_text(void) {
     g_voice_sends = 0;
     HU_ASSERT_FALSE(run_fallback_voice("\xF0\x9F\x91\x8D", "you around later?"));
@@ -173,6 +181,7 @@ static void test_voice_reply_nothing_speakable_goes_as_text(void) {
 /* F1 S4 through the daemon: with HU_SPEECH_REWRITE=live, a rewrite that
  * passes the drift guard but trips moderation must not be spoken. */
 static const char *g_rewrite_out;
+static int g_rewrite_calls;
 
 static hu_error_t rw_mock_chat(void *ctx, hu_allocator_t *alloc, const char *sys, size_t sl,
                                const char *msg, size_t ml, const char *model, size_t mlen, double t,
@@ -185,6 +194,7 @@ static hu_error_t rw_mock_chat(void *ctx, hu_allocator_t *alloc, const char *sys
     (void)model;
     (void)mlen;
     (void)t;
+    g_rewrite_calls++;
     size_t n = strlen(g_rewrite_out);
     char *b = alloc->alloc(alloc->ctx, n + 1);
     memcpy(b, g_rewrite_out, n + 1);
@@ -193,7 +203,8 @@ static hu_error_t rw_mock_chat(void *ctx, hu_allocator_t *alloc, const char *sys
     return HU_OK;
 }
 
-static bool run_rewrite_voice(const char *reply, const char *rewrite) {
+static bool run_rewrite_voice_on(const char *reply, const char *rewrite, bool voice_enabled,
+                                 const char *tts_provider) {
     static hu_provider_vtable_t pvt;
     memset(&pvt, 0, sizeof(pvt));
     pvt.chat_with_system = rw_mock_chat;
@@ -204,8 +215,8 @@ static bool run_rewrite_voice(const char *reply, const char *rewrite) {
     agent.provider.vtable = &pvt;
     static hu_config_t config;
     memset(&config, 0, sizeof(config));
-    config.channels.default_daemon.voice_enabled = true;
-    config.voice.tts_provider = "cartesia";
+    config.channels.default_daemon.voice_enabled = voice_enabled;
+    config.voice.tts_provider = tts_provider;
     hu_channel_vtable_t vt;
     memset(&vt, 0, sizeof(vt));
     vt.name = vr_name_generic;
@@ -221,6 +232,24 @@ static bool run_rewrite_voice(const char *reply, const char *rewrite) {
                                       reply, strlen(reply), NULL, 0, 14);
     unsetenv("HU_SPEECH_REWRITE");
     return sent;
+}
+
+static bool run_rewrite_voice(const char *reply, const char *rewrite) {
+    return run_rewrite_voice_on(reply, rewrite, true, "cartesia");
+}
+
+/* Final review #2: the rewrite is an LLM call; it runs only for a memo that
+ * is actually going out, never for every text reply. */
+static void test_voice_reply_rewrite_skipped_when_no_memo_can_go(void) {
+    g_voice_sends = 0;
+    g_rewrite_calls = 0;
+    HU_ASSERT_FALSE(
+        run_rewrite_voice_on("yeah sounds good", "Yeah, sounds good.", false, "cartesia"));
+    HU_ASSERT_FALSE(run_rewrite_voice_on("yeah sounds good", "Yeah, sounds good.", true, NULL));
+    HU_ASSERT_EQ(g_rewrite_calls, 0);
+    HU_ASSERT_TRUE(run_rewrite_voice("yeah sounds good", "Yeah, sounds good."));
+    HU_ASSERT_EQ(g_rewrite_calls, 1);
+    HU_ASSERT_EQ(g_voice_sends, 1);
 }
 
 static void test_voice_reply_live_rewrite_is_spoken(void) {
@@ -304,6 +333,8 @@ void run_daemon_voice_reply_tests(void) {
     HU_RUN_TEST(test_voice_reply_sends_clean_reply_as_voice);
     HU_RUN_TEST(test_voice_reply_speaks_cleaned_text);
     HU_RUN_TEST(test_voice_reply_nothing_speakable_goes_as_text);
+    HU_RUN_TEST(test_voice_reply_with_link_goes_as_text);
+    HU_RUN_TEST(test_voice_reply_rewrite_skipped_when_no_memo_can_go);
     HU_RUN_TEST(test_voice_reply_speaks_unshaped_reply);
     HU_RUN_TEST(test_voice_capture_unshaped_only_when_voice_possible);
     HU_RUN_TEST(test_voice_reply_live_rewrite_is_spoken);

@@ -8480,6 +8480,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 uint32_t typo_seed = 0;
                 char *original_response = NULL;
                 size_t original_len = 0;
+                char *unshaped = NULL; /* F1: what a voice memo should say */
+                size_t unshaped_len = 0;
                 if (err == HU_OK && response && response_len > 0) {
                     const char *proactive_vis_m[1] = {NULL};
                     size_t proactive_vis_n = 0;
@@ -8552,9 +8554,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                      * here under #ifndef HU_IS_TEST, so the suite never exercised the
                      * production shaping ORDER (2026-07-12 egress audit). The overlay
                      * is resolved here because the typo block below also consults it. */
-                    size_t unshaped_len = 0; /* F1: what a voice memo should say */
-                    char *unshaped = hu_daemon_voice_capture_unshaped(alloc, config, ch, response,
-                                                                      response_len, &unshaped_len);
+                    unshaped = hu_daemon_voice_capture_unshaped(alloc, config, ch, response,
+                                                                response_len, &unshaped_len);
                     const hu_persona_overlay_t *overlay =
                         (agent->persona && agent->active_channel)
                             ? hu_persona_find_overlay(agent->persona, agent->active_channel,
@@ -8690,8 +8691,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     sent_voice = hu_daemon_voice_reply(
                         alloc, agent, config, ch, batch_key, key_len, combined, combined_len,
                         response, response_len, unshaped, unshaped_len, bth_hour);
-                    if (unshaped)
+                    if (unshaped) {
                         alloc->free(alloc->ctx, unshaped, unshaped_len + 1);
+                        unshaped = NULL;
+                    }
                     if (!sent_voice && !turn_out_state.text_delivered_via_bus) {
                         const char *eff_ch = ch->channel->vtable->name
                                                  ? ch->channel->vtable->name(ch->channel->ctx)
@@ -9824,6 +9827,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
             skip_send:
                 if (original_response)
                     alloc->free(alloc->ctx, original_response, original_len + 1);
+                if (unshaped) /* the pre-send abort jumps past its free */
+                    alloc->free(alloc->ctx, unshaped, unshaped_len + 1);
                 if (ch && ch->channel && ch->channel->vtable && ch->channel->vtable->stop_typing) {
                     ch->channel->vtable->stop_typing(ch->channel->ctx, batch_key, key_len);
                 }

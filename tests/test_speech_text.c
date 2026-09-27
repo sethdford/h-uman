@@ -48,6 +48,25 @@ static void test_speech_cleanup_urls_and_emoji(void) {
     HU_ASSERT_EQ(hu_speech_cleanup("\xF0\x9F\x91\x8D", 4, out, sizeof(out), &cue), 0);
 }
 
+/* Final review #5: bracket/quote bodies go through the same URL + emoji pass. */
+static void test_speech_cleanup_strips_urls_and_emoji_inside_brackets(void) {
+    expect_clean("more here (https://example.com/abc) ok", "more here ok", false);
+    expect_clean("love it (so good \xF0\x9F\x98\x8D)", "love it so good", false);
+    expect_clean("see:https://x.example/a ok", "see: ok", false);
+    char out[128];
+    const char *q = "look \"https://ex.example/a\"";
+    (void)hu_speech_cleanup(q, strlen(q), out, sizeof(out), NULL);
+    HU_ASSERT_STR_NOT_CONTAINS(out, "http");
+}
+
+/* Final review #4: a memo never carries the link, so a reply with one goes as text. */
+static void test_speech_has_url_finds_links_anywhere(void) {
+    HU_ASSERT_TRUE(hu_speech_has_url("https://x.example/a", 19));
+    HU_ASSERT_TRUE(hu_speech_has_url("the place (www.example.com)", 27));
+    HU_ASSERT_FALSE(hu_speech_has_url("meet at the cafe on 5th", 23));
+    HU_ASSERT_FALSE(hu_speech_has_url(NULL, 0));
+}
+
 static void test_speech_cleanup_null_and_tiny_buffer_safe(void) {
     char out[8];
     bool cue = true;
@@ -81,6 +100,23 @@ static void test_speech_drift_rejects_each_kind_of_drift(void) {
     expect_drift("sounds good to me", "Good question, sounds good to me.", HU_SPEECH_DRIFT_BANNED);
 }
 
+/* Final review #3: facts a capital letter does not mark. */
+static void test_speech_drift_rejects_spelled_numbers_and_dates(void) {
+    expect_drift("ok see you tomorrow evening then", "Ok, see you at seven tomorrow evening then.",
+                 HU_SPEECH_DRIFT_NEW_NUMBER);
+    expect_drift("see you soon then ok", "see you monday then, ok.", HU_SPEECH_DRIFT_NEW_NUMBER);
+    expect_drift("sounds good see you later", "Sounds good, see you tonight.",
+                 HU_SPEECH_DRIFT_NEW_NUMBER);
+    expect_drift("see you at seven on monday", "See you at seven on Monday.", HU_SPEECH_DRIFT_OK);
+}
+
+static void test_speech_drift_rejects_negation_flip(void) {
+    expect_drift("i can make it tonight", "I can't make it tonight.", HU_SPEECH_DRIFT_NEGATION);
+    expect_drift("i don't think so", "I think so.", HU_SPEECH_DRIFT_NEGATION);
+    expect_drift("i don't know yet", "I don't know yet.", HU_SPEECH_DRIFT_OK);
+    expect_drift("no worries at all", "No worries at all.", HU_SPEECH_DRIFT_OK);
+}
+
 static void test_speech_drift_known_name_is_fine(void) {
     expect_drift("tell sarah i said hi", "Tell Sarah I said hi.", HU_SPEECH_DRIFT_OK);
     /* Live preview 2026-09-27: a possessive is the same name, not a new one. */
@@ -99,9 +135,13 @@ void run_speech_text_tests(void) {
     HU_RUN_TEST(test_speech_cleanup_word_boundaries_only);
     HU_RUN_TEST(test_speech_cleanup_drops_actions_keeps_emphasis);
     HU_RUN_TEST(test_speech_cleanup_urls_and_emoji);
+    HU_RUN_TEST(test_speech_cleanup_strips_urls_and_emoji_inside_brackets);
+    HU_RUN_TEST(test_speech_has_url_finds_links_anywhere);
     HU_RUN_TEST(test_speech_cleanup_null_and_tiny_buffer_safe);
     HU_RUN_TEST(test_speech_drift_accepts_a_faithful_rewrite);
     HU_RUN_TEST(test_speech_drift_rejects_each_kind_of_drift);
+    HU_RUN_TEST(test_speech_drift_rejects_spelled_numbers_and_dates);
+    HU_RUN_TEST(test_speech_drift_rejects_negation_flip);
     HU_RUN_TEST(test_speech_drift_known_name_is_fine);
     HU_RUN_TEST(test_speech_drift_names_are_distinct);
 }

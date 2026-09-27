@@ -53,14 +53,34 @@ static bool starts_url(const char *s, size_t n) {
            (n >= 4 && strncasecmp(s, "www.", 4) == 0);
 }
 
+static bool url_at(const char *s, size_t n, size_t i) {
+    return (i == 0 || !isalnum((unsigned char)s[i - 1])) && starts_url(s + i, n - i);
+}
+
+bool hu_speech_has_url(const char *s, size_t n) {
+    for (size_t i = 0; s && i < n; i++)
+        if (url_at(s, n, i))
+            return true;
+    return false;
+}
+
+#define SPEECH_MAX_OPEN 8
+
 /* Pass 1: drop URLs, narrated actions, brackets and emoji; keep emphasis words
- * and parenthetical content. */
+ * and parenthetical content. A kept body is not copied raw: only its
+ * delimiters are dropped, so URLs and emoji inside it are stripped too. */
 static size_t strip_structure(const char *in, size_t n, char *w, size_t cap, bool *had_url) {
     size_t o = 0;
+    size_t closes[SPEECH_MAX_OPEN];
+    size_t nclose = 0;
     *had_url = false;
     for (size_t i = 0; i < n && o + 1 < cap;) {
-        bool at_word_start = i == 0 || isspace((unsigned char)in[i - 1]);
-        if (at_word_start && starts_url(in + i, n - i)) {
+        if (nclose > 0 && i == closes[nclose - 1]) {
+            nclose--;
+            i++;
+            continue;
+        }
+        if (url_at(in, n, i)) {
             *had_url = true;
             while (i < n && !isspace((unsigned char)in[i]))
                 i++;
@@ -73,12 +93,15 @@ static size_t strip_structure(const char *in, size_t n, char *w, size_t cap, boo
             if (end) {
                 const char *body = in + i + 1;
                 size_t blen = (size_t)(end - body);
-                bool drop = c == '[' || is_action_body(body, blen);
-                if (!drop)
-                    for (size_t k = 0; k < blen && o + 1 < cap; k++)
-                        w[o++] = body[k];
-                i = (size_t)(end - in) + 1;
-                continue;
+                if (c == '[' || is_action_body(body, blen)) {
+                    i = (size_t)(end - in) + 1;
+                    continue;
+                }
+                if (nclose < SPEECH_MAX_OPEN) {
+                    closes[nclose++] = (size_t)(end - in);
+                    i++;
+                    continue;
+                }
             }
         }
         size_t el = emoji_len((const unsigned char *)in + i, n - i);
@@ -282,6 +305,20 @@ size_t hu_speech_cleanup(const char *in, size_t in_len, char *out, size_t cap, b
 /* Openers a spoken rewrite must never start with (Ferni bans them). */
 static const char *const k_openers[] = {"well", "so", "hmm", "hmmm", "um", "uh"};
 
+/* Times, dates and amounts written as words ("seven", "monday", "tonight").
+ * "one" and "may" are left out: too common as ordinary words. */
+static const char *const k_fact_words[] = {
+    "two",      "three",     "four",      "five",     "six",       "seven",    "eight",
+    "nine",     "ten",       "eleven",    "twelve",   "twenty",    "thirty",   "forty",
+    "fifty",    "hundred",   "thousand",  "noon",     "midnight",  "today",    "tonight",
+    "tomorrow", "yesterday", "monday",    "tuesday",  "wednesday", "thursday", "friday",
+    "saturday", "sunday",    "january",   "february", "march",     "april",    "june",
+    "july",     "august",    "september", "october",  "november",  "december",
+};
+
+static const char *const k_negations[] = {"not",    "no",   "never", "nothing",
+                                          "nobody", "none", "nope",  "cannot"};
+
 typedef struct {
     const char *p;
     size_t n;
@@ -334,6 +371,15 @@ static bool has_digit(const char *p, size_t n) {
     return false;
 }
 
+static size_t negation_count(const dword_t *w, size_t n) {
+    size_t c = 0;
+    for (size_t i = 0; i < n; i++)
+        if (word_in(w[i].p, w[i].n, k_negations, sizeof(k_negations) / sizeof(k_negations[0])) ||
+            (w[i].n > 3 && strncasecmp(w[i].p + w[i].n - 3, "n't", 3) == 0))
+            c++;
+    return c;
+}
+
 static bool is_first_person_i(const char *p, size_t n) {
     return (n == 1 && p[0] == 'I') || (n >= 2 && p[0] == 'I' && p[1] == '\'');
 }
@@ -351,14 +397,20 @@ hu_speech_drift_t hu_speech_drift_check(const char *orig, size_t on, const char 
     size_t oc = orig ? words_of(orig, on, ow, SPEECH_MAX_WORDS) : 0;
     size_t rc = rew ? words_of(rew, rn, rw, SPEECH_MAX_WORDS) : 0;
 
-    for (size_t i = 0; i < rc; i++) /* digits are facts: times, amounts, counts */
-        if (has_digit(rw[i].p, rw[i].n) && !has_word_ci(ow, oc, rw[i].p, rw[i].n))
+    for (size_t i = 0; i < rc; i++) /* digits and their words are facts: times, dates */
+        if ((has_digit(rw[i].p, rw[i].n) ||
+             word_in(rw[i].p, rw[i].n, k_fact_words,
+                     sizeof(k_fact_words) / sizeof(k_fact_words[0]))) &&
+            !has_word_ci(ow, oc, rw[i].p, rw[i].n))
             return HU_SPEECH_DRIFT_NEW_NUMBER;
 
     for (size_t i = 0; i < rc; i++) /* a new proper noun is a new fact */
         if (!rw[i].sentence_initial && isupper((unsigned char)rw[i].p[0]) &&
             !is_first_person_i(rw[i].p, rw[i].n) && !has_word_ci(ow, oc, rw[i].p, rw[i].n))
             return HU_SPEECH_DRIFT_NEW_NAME;
+
+    if (negation_count(ow, oc) != negation_count(rw, rc)) /* "can" -> "can't" */
+        return HU_SPEECH_DRIFT_NEGATION;
 
     bool oq = orig && memchr(orig, '?', on) != NULL;
     bool rq = rew && memchr(rew, '?', rn) != NULL;
@@ -390,6 +442,8 @@ const char *hu_speech_drift_name(hu_speech_drift_t d) {
         return "length";
     case HU_SPEECH_DRIFT_BANNED:
         return "banned";
+    case HU_SPEECH_DRIFT_NEGATION:
+        return "negation";
     }
     return "unknown";
 }

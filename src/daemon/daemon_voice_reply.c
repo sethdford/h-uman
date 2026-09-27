@@ -18,6 +18,7 @@
 #include "human/security/companion_safety.h"
 #include "human/security/moderation.h"
 #include "human/tts/speech_rewrite.h"
+#include "human/tts/speech_text.h"
 #if defined(HU_ENABLE_CARTESIA)
 #include "human/tts/voice_reply.h"
 #endif
@@ -138,6 +139,34 @@ char *hu_daemon_voice_capture_unshaped(hu_allocator_t *alloc, const hu_config_t 
     return copy;
 }
 
+/* F1 S1 + S4 for a memo that is about to be synthesized. The rewrite is an
+ * LLM call, so it runs here — once — rather than for every reply. `*state`:
+ * 0 not yet run, 1 speak `sp`, -1 declined. */
+static bool voice_spoken_final(hu_allocator_t *alloc, hu_agent_t *agent, const char *response,
+                               size_t response_len, const char *combined, size_t combined_len,
+                               hu_speech_result_t *sp, int *state) {
+    if (*state == 0) {
+        /* LIVE as a default is gated on the voice A/B drip preferring the
+         * rewrite over cleanup-only, then the W5 real-or-clone test — do not
+         * flip without them. */
+        hu_speech_rewrite_mode_t m = hu_speech_rewrite_mode_parse(getenv("HU_SPEECH_REWRITE"));
+        if (m != HU_SPEECH_REWRITE_OFF) {
+            (void)hu_speech_prepare(
+                alloc, agent ? &agent->provider : NULL, agent ? agent->model_name : NULL,
+                agent ? agent->model_name_len : 0, agent ? agent->persona : NULL, m, response,
+                response_len, combined, combined_len, sp);
+            if (m == HU_SPEECH_REWRITE_SHADOW)
+                hu_speech_shadow_record(alloc, sp);
+        }
+        /* F1 S4: the gates also judge what is actually spoken. */
+        *state = sp->spoken_len > 0 && voice_gates_pass(alloc, sp->spoken, sp->spoken_len, combined,
+                                                        combined_len, "spoken")
+                     ? 1
+                     : -1;
+    }
+    return *state == 1;
+}
+
 bool hu_daemon_voice_reply(hu_allocator_t *alloc, hu_agent_t *agent, const hu_config_t *config,
                            hu_service_channel_t *ch, const char *batch_key, size_t key_len,
                            const char *combined, size_t combined_len, const char *response,
@@ -162,28 +191,19 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, hu_agent_t *agent, const hu_co
      * delivers the reply through the text path, which applies them. */
     if (!voice_gates_pass(alloc, response, response_len, combined, combined_len, "reply"))
         return false;
+    /* A memo cannot carry a link: speaking "I'll send you the link" would
+     * promise a send that never happens. Text goes, link intact. */
+    if (hu_speech_has_url(response, response_len))
+        return false;
     /* F1 S2: speak the spoken form of the reply — texting shorthand expanded,
-     * narrated actions, emoji and URLs removed. Nothing speakable: text goes. */
-    /* F1 S1: with HU_SPEECH_REWRITE=live the reply is rewritten for the ear
-     * (drift-guarded; any problem falls back to the cleaned reply). LIVE as a
-     * default is gated on the voice A/B drip preferring the rewrite over
-     * cleanup-only, then the W5 real-or-clone test — do not flip without them. */
-    hu_speech_rewrite_mode_t rw_mode = hu_speech_rewrite_mode_parse(getenv("HU_SPEECH_REWRITE"));
+     * narrated actions and emoji removed. Nothing speakable: text goes. The
+     * S1 rewrite (HU_SPEECH_REWRITE) waits for voice_spoken_final. */
     hu_speech_result_t sp;
-    (void)hu_speech_prepare(alloc, agent ? &agent->provider : NULL,
-                            agent ? agent->model_name : NULL, agent ? agent->model_name_len : 0,
-                            agent ? agent->persona : NULL, rw_mode, response, response_len,
-                            combined, combined_len, &sp);
-    if (rw_mode == HU_SPEECH_REWRITE_SHADOW)
-        hu_speech_shadow_record(alloc, &sp);
-    const char *spoken = sp.spoken;
-    size_t spoken_len = sp.spoken_len;
-    bool laughter_cue = sp.laughter_cue;
-    if (spoken_len == 0)
+    (void)hu_speech_prepare(alloc, NULL, NULL, 0, NULL, HU_SPEECH_REWRITE_OFF, response,
+                            response_len, combined, combined_len, &sp);
+    if (sp.spoken_len == 0)
         return false;
-    /* F1 S4: the gates also judge what is actually spoken. */
-    if (!voice_gates_pass(alloc, spoken, spoken_len, combined, combined_len, "spoken"))
-        return false;
+    int spoken_state = 0;
     bool sent_voice = false;
     {
         const char *chn_voice =
@@ -215,11 +235,13 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, hu_agent_t *agent, const hu_co
                 true, bth_hour, (uint32_t)(time(NULL) ^ (uintptr_t)combined), &vreason);
             if (vdec == HU_VOICE_SEND_VOICE) {
                 const char *cartesia_key = hu_config_get_provider_key(config, "cartesia");
-                if (cartesia_key && cartesia_key[0]) {
+                if (cartesia_key && cartesia_key[0] &&
+                    voice_spoken_final(alloc, agent, response, response_len, combined, combined_len,
+                                       &sp, &spoken_state)) {
                     hu_voice_reply_request_t req;
                     hu_error_t prep_err = hu_voice_reply_build_request_ex(
-                        &agent->persona->voice, spoken, spoken_len, combined, combined_len,
-                        bth_hour, (uint32_t)time(NULL), laughter_cue, &req);
+                        &agent->persona->voice, sp.spoken, sp.spoken_len, combined, combined_len,
+                        bth_hour, (uint32_t)time(NULL), sp.laughter_cue, &req);
                     unsigned char *audio_bytes = NULL;
                     size_t audio_len = 0;
                     hu_error_t tts_err = prep_err;
@@ -256,11 +278,13 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, hu_agent_t *agent, const hu_co
         if (!sent_voice && voice_channel_ok && !unified_voice_active && config) {
             hu_voice_config_t voice_cfg = {0};
             if (hu_voice_config_from_settings(config, &voice_cfg) == HU_OK &&
-                voice_cfg.tts_provider && voice_cfg.tts_provider[0]) {
+                voice_cfg.tts_provider && voice_cfg.tts_provider[0] &&
+                voice_spoken_final(alloc, agent, response, response_len, combined, combined_len,
+                                   &sp, &spoken_state)) {
                 void *audio = NULL;
                 size_t audio_len = 0;
                 hu_error_t tts_err =
-                    hu_voice_tts(alloc, &voice_cfg, spoken, spoken_len, &audio, &audio_len);
+                    hu_voice_tts(alloc, &voice_cfg, sp.spoken, sp.spoken_len, &audio, &audio_len);
                 if (tts_err == HU_OK && audio && audio_len > 0) {
                     unsigned char *audio_bytes = (unsigned char *)audio;
                     char audio_path[512];
