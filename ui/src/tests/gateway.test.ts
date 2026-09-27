@@ -22,8 +22,7 @@ describe("DemoGatewayClient", () => {
     const first = demo.request("sessions.list");
     const second = demo.request("unknown.method");
     expect(demo.inFlight).toBe(2);
-    await first;
-    await second;
+    await Promise.allSettled([first, second]);
     expect(demo.inFlight).toBe(0);
   });
 });
