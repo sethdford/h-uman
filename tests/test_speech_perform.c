@@ -158,6 +158,30 @@ static void test_perform_fences_the_inbound_message(void) {
     HU_ASSERT_STR_CONTAINS(m.msg, "Intent (what the memo must say): \"sounds good\"");
 }
 
+/* Deferred minors, fixed 2026-09-27: the scene keeps their LATEST words, and a
+ * long intent still reaches the model instead of reporting provider_error. */
+static void test_perform_scene_keeps_the_latest_words(void) {
+    static char in[800];
+    memset(in, 'a', 700);
+    memcpy(in + 700, " LATEST", 8);
+    char msg[2048];
+    hu_perform_scene_t s = {.listener = "Mindy", .inbound = in, .inbound_len = strlen(in)};
+    HU_ASSERT_TRUE(hu_speech_perform_user_message(&s, "ok", 2, msg, sizeof(msg)) > 0);
+    HU_ASSERT_STR_CONTAINS(msg, "LATEST");
+}
+
+static void test_perform_long_intent_still_reaches_the_model(void) {
+    static char intent[1951];
+    for (size_t i = 0; i < 1950; i += 5)
+        memcpy(intent + i, "word ", 5);
+    intent[1950] = 0;
+    static perf_mock_t m = {.reply = "word word word"};
+    m.calls = 0;
+    hu_perform_result_t *r = run(&m, intent);
+    HU_ASSERT_EQ(m.calls, 1);
+    HU_ASSERT_STR_NOT_CONTAINS(r->reason, "provider_error");
+}
+
 void run_speech_perform_tests(void) {
     HU_TEST_SUITE("speech perform (D1)");
     HU_RUN_TEST(test_perform_directed_line_is_ok);
@@ -170,4 +194,6 @@ void run_speech_perform_tests(void) {
     HU_RUN_TEST(test_perform_rejects_changed_meaning);
     HU_RUN_TEST(test_perform_allows_the_listeners_name_on_a_short_intent);
     HU_RUN_TEST(test_perform_fences_the_inbound_message);
+    HU_RUN_TEST(test_perform_scene_keeps_the_latest_words);
+    HU_RUN_TEST(test_perform_long_intent_still_reaches_the_model);
 }

@@ -106,9 +106,12 @@ size_t hu_speech_perform_user_message(const hu_perform_scene_t *s, const char *i
         /* Their words are quoted material, never instructions: no quote or
          * newline of theirs can open a line of its own (final review #1). */
         char fenced[601];
-        size_t fn = s->inbound_len > 600 ? 600 : s->inbound_len;
+        size_t from = s->inbound_len > 600 ? s->inbound_len - 600 : 0;
+        while (from < s->inbound_len && ((unsigned char)s->inbound[from] & 0xC0) == 0x80)
+            from++; /* keep their LATEST words; never start mid-character */
+        size_t fn = s->inbound_len - from;
         for (size_t k = 0; k < fn; k++) {
-            char c = s->inbound[k];
+            char c = s->inbound[from + k];
             fenced[k] = c == '"' ? '\'' : (c == '\n' || c == '\r') ? ' ' : c;
         }
         fenced[fn] = '\0';
@@ -222,9 +225,14 @@ hu_error_t hu_speech_perform(hu_allocator_t *alloc, const hu_provider_t *provide
     char *sys = alloc->alloc(alloc->ctx, PERFORM_SYS_CAP);
     if (!sys)
         return HU_ERR_OUT_OF_MEMORY;
-    char msg[2048];
+    size_t mcap = intent_len + 2048; /* scene + fenced inbound + a long intent */
+    char *msg = alloc->alloc(alloc->ctx, mcap);
+    if (!msg) {
+        alloc->free(alloc->ctx, sys, PERFORM_SYS_CAP);
+        return HU_ERR_OUT_OF_MEMORY;
+    }
     size_t sn = hu_speech_perform_system_prompt(sys, PERFORM_SYS_CAP);
-    size_t mn = hu_speech_perform_user_message(scene, intent, intent_len, msg, sizeof(msg));
+    size_t mn = hu_speech_perform_user_message(scene, intent, intent_len, msg, mcap);
     char *raw = NULL;
     size_t raw_len = 0;
     hu_error_t err = HU_ERR_INVALID_ARGUMENT;
@@ -232,6 +240,7 @@ hu_error_t hu_speech_perform(hu_allocator_t *alloc, const hu_provider_t *provide
         err = provider->vtable->chat_with_system(provider->ctx, alloc, sys, sn, msg, mn, model,
                                                  model_len, 0.7, &raw, &raw_len);
     alloc->free(alloc->ctx, sys, PERFORM_SYS_CAP);
+    alloc->free(alloc->ctx, msg, mcap);
     if (err != HU_OK || !raw) {
         out->reason = "provider_error";
         return HU_OK;
