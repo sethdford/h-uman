@@ -21,7 +21,9 @@ concurrency:
 jobs:
   build:
     name: Build macOS release binary
-    runs-on: macos-14-arm64
+    # macos-15 is GitHub's arm64 image. "macos-14-arm64" is an image name, not a
+    # runner label: no runner ever picked the job up.
+    runs-on: macos-15
     timeout-minutes: 30
     env:
       MACOS_DEPLOYMENT_TARGET: '10.15'
@@ -94,7 +96,7 @@ jobs:
   sign-and-release:
     name: Sign, notarize, and publish release
     needs: build
-    runs-on: macos-14-arm64
+    runs-on: macos-15
     timeout-minutes: 45
     if: |
       (github.ref_type == 'tag' && startswith(github.ref, 'refs/tags/v')) ||
@@ -209,7 +211,11 @@ jobs:
     name: Publish unsigned pre-release to main
     needs: build
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    # Opt-in: publishing a public unsigned pre-release on every main push only
+    # happens once the repository variable PUBLISH_PRERELEASE is set to 'true'
+    # (Settings → Secrets and variables → Actions → Variables). Unset, the
+    # build job still runs and uploads the .pkg as a workflow artifact.
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && vars.PUBLISH_PRERELEASE == 'true'
     permissions:
       contents: write
     steps:
