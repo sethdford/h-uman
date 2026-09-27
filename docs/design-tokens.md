@@ -18,7 +18,7 @@ Auto-generated from W3C token files in `design-tokens/`.
 | `--hu-accent-hover` | #8DC63F | #5A9A30 |
 | `--hu-accent-light` | — | #e2f2c8 |
 | `--hu-accent-secondary` | #f59e0b | #d97706 |
-| `--hu-accent-secondary-hover` | #fbbf24 | #b45309 |
+| `--hu-accent-secondary-hover` | #fbbf24 | #f59e0b |
 | `--hu-accent-secondary-strong` | #fcd34d | #f59e0b |
 | `--hu-accent-secondary-subtle` | rgba(245, 158, 11, 0.14) | rgba(217, 119, 6, 0.10) |
 | `--hu-accent-secondary-text` | #fbbf24 | #b45309 |
@@ -53,7 +53,7 @@ Auto-generated from W3C token files in `design-tokens/`.
 | `--hu-link-hover` | #a3d46a | #264A17 |
 | `--hu-link-visited` | #5A9A30 | #3a6a24 |
 | `--hu-on-accent` | #0c0a08 | #0c0a08 |
-| `--hu-on-accent-secondary` | #0c0a08 | #ffffff |
+| `--hu-on-accent-secondary` | #0c0a08 | #0c0a08 |
 | `--hu-on-accent-tertiary` | #ffffff | #ffffff |
 | `--hu-pressed-overlay` | rgba(255, 255, 255, 0.12) | rgba(0, 0, 0, 0.10) |
 | `--hu-success` | #10b981 | #008000 |
@@ -202,4 +202,4 @@ Auto-generated from W3C token files in `design-tokens/`.
 
 ---
 
-_Generated: 2026-09-27T02:31:02Z_
+_Generated: 2026-09-27T13:10:48Z_

@@ -1303,7 +1303,7 @@
         "$description": "WCAG AA: amber accent for text on light backgrounds"
       },
       "accent-secondary-hover": {
-        "$value": "{color.amber.light-600}",
+        "$value": "{color.amber.light-400}",
         "$type": "color"
       },
       "accent-secondary-subtle": {
@@ -1315,7 +1315,7 @@
         "$type": "color"
       },
       "on-accent-secondary": {
-        "$value": "#ffffff",
+        "$value": "{color.neutral.50}",
         "$type": "color"
       },
       "accent-tertiary": {
