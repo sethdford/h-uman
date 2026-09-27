@@ -269,7 +269,7 @@ export async function waitForAnimationsSettled(
       return true;
     },
     undefined,
-    { timeout },
+    { timeout, polling: 100 },
   );
 }
 
