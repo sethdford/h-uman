@@ -112,7 +112,7 @@ jobs:
           Homepage: https://h-uman.ai
           Description: The smallest fully autonomous AI assistant infrastructure
            Zero-dependency C11 runtime for autonomous AI assistants.
-           Sub-2 MB binary, <6 MB RAM, <30 ms startup.
+           Single self-contained binary; measured footprint in docs/perf/footprint.json.
           CTRL
           sed -i 's/^          //' "${PKG}/DEBIAN/control"
           dpkg-deb --build --root-owner-group "${PKG}"

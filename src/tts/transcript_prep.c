@@ -11,6 +11,13 @@
  *   - Emotion-derived volume
  */
 #include "human/tts/transcript_prep.h"
+#include "human/tts/speech_text.h"
+
+/* F1 restraint budgets (Ferni: "SSML is for emphasis, not every sentence"). */
+#define HU_PREP_LAUGH_PCT           18
+#define HU_PREP_MAX_EMOTION_TAGS    2
+#define HU_PREP_MAX_VOLUME_TAGS     1
+#define HU_PREP_MAX_SPEED_SENTENCES 1
 #include "human/core/string.h"
 #include "human/tts/emotion_map.h"
 #include <stdbool.h>
@@ -832,17 +839,24 @@ static size_t inject_clause_breaks(const char *text, size_t len, float pause_fac
 
         if (text[i] == ',' || text[i] == ';' || text[i] == ':') {
             if (i + 1 < len && text[i + 1] == ' ') {
-                int ms = (text[i] == ',') ? (int)(150 * pause_factor) : (int)(200 * pause_factor);
-                /* Before conjunctions: slightly longer pause */
+                int ms = (int)(200 * pause_factor);
+                bool contrast = false;
                 if (i + 2 < len) {
                     const char *after = text + i + 2;
                     size_t remain = len - (i + 2);
-                    if ((remain >= 4 &&
-                         (memcmp(after, "but ", 4) == 0 || memcmp(after, "yet ", 4) == 0)) ||
-                        (remain >= 8 && memcmp(after, "however ", 8) == 0) ||
-                        (remain >= 9 && memcmp(after, "although ", 9) == 0))
+                    contrast = (remain >= 4 &&
+                                (memcmp(after, "but ", 4) == 0 || memcmp(after, "yet ", 4) == 0)) ||
+                               (remain >= 8 && memcmp(after, "however ", 8) == 0) ||
+                               (remain >= 9 && memcmp(after, "although ", 9) == 0) ||
+                               (remain >= 7 && memcmp(after, "though ", 7) == 0);
+                    if (contrast)
                         ms = (int)(250 * pause_factor);
                 }
+                /* F1 restraint (Ferni): pause on meaning, not punctuation. A
+                 * plain comma is spoken through; ';' / ':' and a comma before a
+                 * contrast word still breathe. */
+                if (text[i] == ',' && !contrast)
+                    continue;
                 if (strip_ssml) {
                     /* SSML-free mode: use punctuation spacing (already have comma) */
                 } else if (pos + 30 < cap) {
@@ -904,42 +918,27 @@ static const char *pick_discourse_marker(const char *sentence, size_t len, uint3
 
 /* ── Enhanced nonverbal injection ─────────────────────────────────────── */
 
+static bool is_heavy_emotion(const char *emotion) {
+    return emotion && (strcmp(emotion, "sympathetic") == 0 || strcmp(emotion, "sad") == 0 ||
+                       strcmp(emotion, "contemplative") == 0);
+}
+
+/* F1 restraint (Ferni contextual laughter): a real laugh only when the reply
+ * itself laughed (a laugh token in the sentence, or the cue carried from
+ * speech cleanup), at most once per memo, never on a heavy moment. Heavy
+ * moments may get a pause instead. Nothing is inserted at random. */
 static const char *pick_nonverbal(const char *sentence, size_t len, const char *emotion,
-                                  uint32_t seed) {
+                                  uint32_t seed, bool cue, bool already_laughed) {
     if (!sentence || len == 0)
         return NULL;
-
-    /* Higher probability for emotional content (25%), lower for neutral (10%) */
-    int threshold = 10;
-    if (emotion) {
-        if (strcmp(emotion, "sympathetic") == 0 || strcmp(emotion, "sad") == 0 ||
-            strcmp(emotion, "contemplative") == 0)
-            threshold = 20;
-        else if (strcmp(emotion, "excited") == 0 || strcmp(emotion, "joking/comedic") == 0)
-            threshold = 25;
-    }
-
-    if ((seed % 100) >= (uint32_t)threshold)
-        return NULL;
-
-    /* Context-appropriate nonverbal */
-    if (hu_str_contains_ci_cstr(sentence, len, "lol") ||
-        hu_str_contains_ci_cstr(sentence, len, "haha") ||
-        hu_str_contains_ci_cstr(sentence, len, "funny"))
+    bool heavy = is_heavy_emotion(emotion);
+    bool laughing = cue || hu_speech_has_laugh_token(sentence, len);
+    if (laughing && !already_laughed && !heavy && (seed % 100) < HU_PREP_LAUGH_PCT)
         return "[laughter] ";
-
-    if (emotion && (strcmp(emotion, "contemplative") == 0 || strcmp(emotion, "calm") == 0))
-        return "<break time=\"500ms\"/>";
-
-    if (emotion && strcmp(emotion, "sympathetic") == 0)
-        return "<break time=\"400ms\"/>";
-
-    uint32_t pick = seed % 3;
-    if (pick == 0)
-        return "[laughter] ";
-    if (pick == 1)
-        return "Hmm... ";
-    return "<break time=\"300ms\"/>";
+    if (heavy && (seed % 100) < 20)
+        return strcmp(emotion, "contemplative") == 0 ? "<break time=\"500ms\"/>"
+                                                     : "<break time=\"400ms\"/>";
+    return NULL;
 }
 
 /* ── Main preprocessor ───────────────────────────────────────────────── */
@@ -1100,6 +1099,8 @@ hu_error_t hu_transcript_prep(const char *transcript, size_t transcript_len,
     }
 
     bool speed_tag_open = false; /* a non-1.0 <speed> tag persists until reset */
+    int emotion_tags = 0, volume_tags = 0, speed_sentences = 0;
+    bool laughed = false;
     for (size_t i = 0; i < result->sentence_count; i++) {
         hu_prep_sentence_t *s = &result->sentences[i];
 
@@ -1126,11 +1127,13 @@ hu_error_t hu_transcript_prep(const char *transcript, size_t transcript_len,
         }
 
         /* Emotion tag if different from previous (SSML mode only) */
-        if (!strip && s->emotion &&
+        if (!strip && s->emotion && emotion_tags < HU_PREP_MAX_EMOTION_TAGS &&
             (i == 0 || strcmp(s->emotion, result->sentences[i - 1].emotion) != 0)) {
             int n = snprintf(out + pos, cap - pos, "<emotion value=\"%s\"/>", s->emotion);
-            if (n > 0 && pos + (size_t)n < cap)
+            if (n > 0 && pos + (size_t)n < cap) {
                 pos += (size_t)n;
+                emotion_tags++;
+            }
         }
 
         /* Speed tag (SSML mode only). Cartesia applies <speed ratio> as a
@@ -1138,7 +1141,10 @@ hu_error_t hu_transcript_prep(const char *transcript, size_t transcript_len,
          * result->base_speed) and it persists until the next tag, so emit the
          * RELATIVE factor and reset to 1.00 once a tagged sentence ends. */
         float speed_delta = s->speed_ratio - base_speed;
-        bool speed_tagged = (speed_delta > 0.03f || speed_delta < -0.03f);
+        bool speed_tagged = (speed_delta > 0.03f || speed_delta < -0.03f) &&
+                            speed_sentences < HU_PREP_MAX_SPEED_SENTENCES;
+        if (speed_tagged)
+            speed_sentences++;
         if (!strip && (speed_tagged || speed_tag_open)) {
             double rel = speed_tagged ? (double)(s->speed_ratio / base_speed) : 1.0;
             int n = snprintf(out + pos, cap - pos, "<speed ratio=\"%.2f\"/>", rel);
@@ -1151,18 +1157,24 @@ hu_error_t hu_transcript_prep(const char *transcript, size_t transcript_len,
         if (!strip) {
             float sv = hu_emotion_to_volume(s->emotion);
             float vol_delta = sv - result->volume;
-            if (vol_delta > 0.05f || vol_delta < -0.05f) {
+            if ((vol_delta > 0.05f || vol_delta < -0.05f) &&
+                volume_tags < HU_PREP_MAX_VOLUME_TAGS) {
                 int n = snprintf(out + pos, cap - pos, "<volume ratio=\"%.2f\"/>", (double)sv);
-                if (n > 0 && pos + (size_t)n < cap)
+                if (n > 0 && pos + (size_t)n < cap) {
                     pos += (size_t)n;
+                    volume_tags++;
+                }
             }
         }
 
         /* Nonverbal before sentence (context-dependent) */
         if (config->nonverbals_enabled) {
             const char *nv =
-                pick_nonverbal(s->text, s->len, s->emotion, config->seed ^ (uint32_t)(i * 97));
+                pick_nonverbal(s->text, s->len, s->emotion, config->seed ^ (uint32_t)(i * 97),
+                               config->laughter_cue, laughed);
             if (nv) {
+                if (nv[0] == '[')
+                    laughed = true;
                 if (strip) {
                     /* In strip mode, only emit text nonverbals, not SSML breaks */
                     if (nv[0] != '<') {

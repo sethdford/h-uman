@@ -846,6 +846,11 @@ jobs:
       - run: cd website && npm run format:check
       - run: cd website && npm run check
       - run: cd website && npm run build
+      - run: cd website && npm run check:fonts
+      - name: Quiet Room selectors and font-display survive the build
+        run: |
+          grep -q ':is(:root\[data-brand=quiet\]' website/dist/_astro/*.css
+          grep -q 'font-family:var(--hu-font-display' website/dist/_astro/*.css
       - run: test -d website/dist
 
   lighthouse:
@@ -898,6 +903,8 @@ jobs:
           cache: npm
           cache-dependency-path: design-tokens/package-lock.json
       - run: cd design-tokens && npm ci && npm run build -- --outdir /tmp/dt-check
+      - run: cd design-tokens && npm test
+      - run: cd design-tokens && npm run check:contrast
       - run: bash design-tokens/check-drift.sh
 
   nix:

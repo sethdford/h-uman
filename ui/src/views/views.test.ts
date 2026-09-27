@@ -510,3 +510,31 @@ describe("hu-settings-view", () => {
     el.remove();
   });
 });
+
+describe("hu-design-system-view quiet preview", () => {
+  it("sets and clears data-brand on <html>", async () => {
+    await import("./design-system-view.js");
+    delete document.documentElement.dataset.brand;
+    const el = document.createElement("hu-design-system-view") as HTMLElement & {
+      updateComplete: Promise<boolean>;
+    };
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const sw = el.shadowRoot!.querySelector(
+      'hu-switch[data-testid="quiet-toggle"]',
+    ) as HTMLElement & {
+      checked: boolean;
+    };
+    expect(sw).toBeTruthy();
+    expect(sw.checked).toBe(false);
+    sw.dispatchEvent(
+      new CustomEvent("hu-change", { detail: { checked: true }, bubbles: true, composed: true }),
+    );
+    expect(document.documentElement.dataset.brand).toBe("quiet");
+    sw.dispatchEvent(
+      new CustomEvent("hu-change", { detail: { checked: false }, bubbles: true, composed: true }),
+    );
+    expect(document.documentElement.dataset.brand).toBeUndefined();
+    el.remove();
+  });
+});

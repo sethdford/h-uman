@@ -1,6 +1,7 @@
 # h-uman — not quite human.
 
-C11 autonomous AI assistant runtime. ~2468 KB binary, <6 MB RAM, <30 ms startup.
+C11 autonomous AI assistant runtime. ~2694 KB binary, <9 MB idle RSS, <10 ms startup
+(release-size build, macOS arm64 — measured in `docs/perf/footprint.json`).
 Zero dependencies beyond libc (optional SQLite and libcurl).
 
 Read `AGENTS.md` for the full engineering protocol. This file is the quick reference.
@@ -32,7 +33,7 @@ cmake --build --preset dev
 # Other presets: test (no ASan), release (MinSizeRel+LTO), fuzz (Clang), minimal
 cmake --list-presets               # show all available presets
 
-# Run tests (13,920+ tests, must be 0 failures, 0 ASan errors)
+# Run tests (14,038+ tests, must be 0 failures, 0 ASan errors)
 ./build/human_tests                          # full suite
 ./build/human_tests --suite=JSON             # run suites matching "JSON"
 ./build/human_tests --filter=config_parse    # run tests matching "config_parse"
@@ -115,7 +116,7 @@ Types: `feat fix refactor test docs chore perf ci build style`
 
 | Workflow                    | What it checks                                                                                                                                    |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ci.yml`                    | C build + 13,920+ tests (Linux + macOS), UI tsc + vitest + build, website build, clang-tidy, E2E, visual regression, axe accessibility, Lighthouse |
+| `ci.yml`                    | C build + 14,038+ tests (Linux + macOS), UI tsc + vitest + build, website build, clang-tidy, E2E, visual regression, axe accessibility, Lighthouse |
 | `native-apps-fleet.yml`     | Multi-simulator iOS XCUITest + multi-API Android instrumented tests + SOTA gate (apps path / schedule / dispatch) |
 | `.github/actions/ios-uitest` | Composite: XcodeGen + HumaniOS XCUITest (shared by `ci.yml` + fleet) |
 | `benchmark.yml`             | Performance regression (binary size, startup time, RSS)                                                                                           |
@@ -140,9 +141,9 @@ Extend via: `src/persona/` (persona.c, creator.c, analyzer.c, sampler.c, example
 
 | Path                              | What                                                                  |
 | --------------------------------- | --------------------------------------------------------------------- |
-| `src/`                            | All C source (~1,050 `.c` files, ~415K lines of C)                         |
+| `src/`                            | All C source (~1,050 `.c` files, ~417K lines of C)                         |
 | `include/human/`                  | Public headers                                                        |
-| `tests/`                          | 760+ test files, 13,920+ tests                                       |
+| `tests/`                          | 760+ test files, 14,038+ tests                                       |
 | `fuzz/`                           | 31 libFuzzer harnesses                                                |
 | `ui/`                             | LitElement web dashboard                                              |
 | `website/`                        | Astro marketing site                                                  |
@@ -186,7 +187,7 @@ All project standards live in `docs/standards/`. This is the single source of tr
 
 ## Design System (all platforms)
 
-- Typeface: **Avenir** (web: `var(--hu-font)`, never Google Fonts)
+- Typeface: **Avenir** for UI and body on all platforms (web: `var(--hu-font)`); **Newsreader** (self-hosted, OFL) for display/headline roles on the web Quiet Room layer (`var(--hu-font-display)`). Never load fonts from Google or any third-party host.
 - Icons: **Phosphor Regular** (web: `ui/src/icons.ts`)
 - Tokens: `--hu-*` CSS custom properties from `design-tokens/`
 - Never use raw hex colors, pixel spacing, or pixel radii in any UI code.

@@ -87,7 +87,7 @@ static const char RESEARCH_PROMPT[] =
     "\n"
     "## h-uman Architecture Reference\n"
     "\n"
-    "h-uman is a C11 autonomous AI assistant runtime (~1696 KB binary, <6 MB RAM).\n"
+    "h-uman is a C11 autonomous AI assistant runtime (~3 MB binary, <9 MB idle RSS).\n"
     "Key extension points:\n"
     "- src/providers/ — AI model providers (vtable: hu_provider_t)\n"
     "- src/channels/ — messaging channels (vtable: hu_channel_t)\n"
