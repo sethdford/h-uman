@@ -122,12 +122,6 @@ export class ScSessionsView extends GatewayAwareLitElement {
         position: relative;
       }
 
-      .session-card:has(.session-card-open:focus-visible) {
-        outline: var(--hu-focus-ring-width) solid var(--hu-focus-ring);
-        outline-offset: var(--hu-focus-ring-offset);
-        border-radius: var(--hu-radius-xl);
-      }
-
       /* The card's primary action: pointer clicks anywhere on the card bubble to
          its handler, and this button is the keyboard/AT entry point, so Delete
          stays a sibling instead of nesting inside a role=button card. */
@@ -140,7 +134,20 @@ export class ScSessionsView extends GatewayAwareLitElement {
         cursor: pointer;
       }
       .session-card-open:focus-visible {
-        outline: none;
+        outline: var(--hu-focus-ring-width) solid var(--hu-focus-ring);
+        outline-offset: var(--hu-focus-ring-offset);
+      }
+
+      /* Where :has() is supported, ring the whole card instead of the button. */
+      @supports selector(:has(*)) {
+        .session-card:has(.session-card-open:focus-visible) {
+          outline: var(--hu-focus-ring-width) solid var(--hu-focus-ring);
+          outline-offset: var(--hu-focus-ring-offset);
+          border-radius: var(--hu-radius-xl);
+        }
+        .session-card-open:focus-visible {
+          outline: none;
+        }
       }
 
       .session-card-header {

@@ -242,10 +242,6 @@ export class ScChatSessionsPanel extends LitElement {
         border-left-color: var(--hu-accent-subtle);
         background: var(--hu-surface-container-high);
       }
-      &:has(.session-open:focus-visible) {
-        outline: 2px solid var(--hu-accent);
-        outline-offset: 2px;
-      }
     }
 
     /* The row's primary action. Pointer clicks anywhere on the row bubble to
@@ -265,6 +261,18 @@ export class ScChatSessionsPanel extends LitElement {
       text-align: start;
       cursor: pointer;
       &:focus-visible {
+        outline: 2px solid var(--hu-accent);
+        outline-offset: 2px;
+      }
+    }
+
+    /* Where :has() is supported, ring the whole row instead of the button. */
+    @supports selector(:has(*)) {
+      .session-item:has(.session-open:focus-visible) {
+        outline: 2px solid var(--hu-accent);
+        outline-offset: 2px;
+      }
+      .session-open:focus-visible {
         outline: none;
       }
     }
@@ -500,6 +508,15 @@ export class ScChatSessionsPanel extends LitElement {
     );
   }
 
+  private _onRowClick(e: Event, id: string): void {
+    // While the title is being renamed, clicks inside it, and the click Chromium
+    // synthesizes on the enclosing .session-open button when Space is typed, must
+    // not select the session.
+    const title = (e.currentTarget as HTMLElement).querySelector<HTMLElement>(".session-title");
+    if (title?.isContentEditable) return;
+    this._onSelect(id);
+  }
+
   private _onDelete(e: Event, id: string): void {
     e.stopPropagation();
     this.dispatchEvent(
@@ -548,7 +565,11 @@ export class ScChatSessionsPanel extends LitElement {
     );
     if (buttons.length === 0) return;
     e.preventDefault();
-    const current = buttons.indexOf(this.shadowRoot?.activeElement as HTMLButtonElement);
+    // Resolve the row from any control inside it (e.g. Delete), not just the open button.
+    const row = (this.shadowRoot?.activeElement as HTMLElement | null)?.closest(".session-item");
+    const current = row
+      ? buttons.indexOf(row.querySelector<HTMLButtonElement>(".session-open") as HTMLButtonElement)
+      : -1;
     const next =
       current < 0
         ? 0
@@ -582,14 +603,14 @@ export class ScChatSessionsPanel extends LitElement {
   }
 
   private _renameKeydown(e: KeyboardEvent, _id: string): void {
-    const el = e.target as HTMLElement;
+    const el = e.currentTarget as HTMLElement;
     if (el.isContentEditable) e.stopPropagation();
     if (e.key === "Enter") {
       e.preventDefault();
-      (e.target as HTMLElement).blur();
+      el.blur();
     }
     if (e.key === "Escape") {
-      (e.target as HTMLElement).contentEditable = "false";
+      el.contentEditable = "false";
       this.requestUpdate();
     }
   }
@@ -785,7 +806,7 @@ export class ScChatSessionsPanel extends LitElement {
                         return html`
                           <div
                             class="session-item ${s.active ? "active" : ""}"
-                            @click=${() => this._onSelect(s.id)}
+                            @click=${(e: Event) => this._onRowClick(e, s.id)}
                           >
                             <button
                               type="button"
@@ -795,11 +816,6 @@ export class ScChatSessionsPanel extends LitElement {
                               <span
                                 class="session-title"
                                 @dblclick=${(e: Event) => this._startRename(e, s)}
-                                @click=${(e: Event) => {
-                                  if ((e.target as HTMLElement).isContentEditable) {
-                                    e.stopPropagation();
-                                  }
-                                }}
                                 @blur=${(e: Event) => this._finishRename(e, s.id)}
                                 @keydown=${(e: KeyboardEvent) => this._renameKeydown(e, s.id)}
                                 >${this._renderProjectDot(s)}${s.title || "Untitled"}</span
