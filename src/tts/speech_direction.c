@@ -1,5 +1,6 @@
 /* Voice direction D2 (+ D3 in Task 4); see include/human/tts/speech_direction.h. */
 #include "human/tts/speech_direction.h"
+#include "human/tts/transcript_prep.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -300,4 +301,50 @@ hu_direction_verdict_t hu_direction_parse(const char *line, size_t len,
         st.emotions > emotion_cap)
         return HU_DIRECTION_OVER_BUDGET;
     return HU_DIRECTION_OK;
+}
+
+hu_laugh_style_t hu_laugh_style_parse(const char *s) {
+    return s && strcmp(s, "text") == 0 ? HU_LAUGH_TEXT : HU_LAUGH_CARTESIA;
+}
+
+/* Append a formatted piece; false on overflow. */
+static bool emit(char *out, size_t cap, size_t *o, const char *fmt, const char *a, double f) {
+    int w = a ? snprintf(out + *o, cap - *o, fmt, a) : snprintf(out + *o, cap - *o, fmt, f);
+    if (w < 0 || (size_t)w >= cap - *o)
+        return false;
+    *o += (size_t)w;
+    return true;
+}
+
+size_t hu_direction_render(const hu_direction_t *d, hu_laugh_style_t laugh, char *out, size_t cap) {
+    if (!d || !out || cap == 0)
+        return 0;
+    size_t o = 0;
+    out[0] = '\0';
+    for (size_t i = 0; i < d->count; i++) {
+        const hu_direction_segment_t *g = &d->seg[i];
+        char norm[HU_DIRECTION_TEXT_CAP * 2];
+        size_t nn =
+            hu_transcript_normalize_for_speech(g->text, g->text_len, norm, sizeof(norm), false);
+        if (o > 0 && !emit(out, cap, &o, "%s", " ", 0))
+            return 0;
+        if (g->break_ms && !emit(out, cap, &o, "<break time=\"%.0fms\"/>", NULL, g->break_ms))
+            return 0;
+        if (g->laugh &&
+            !emit(out, cap, &o, "%s",
+                  laugh == HU_LAUGH_TEXT ? "haha, <break time=\"150ms\"/>" : "[laughter] ", 0))
+            return 0;
+        if (g->emotion[0] && !emit(out, cap, &o, "<emotion value=\"%s\"/>", g->emotion, 0))
+            return 0;
+        if (g->speed > 0.f && !emit(out, cap, &o, "<speed ratio=\"%.2f\"/>", NULL, g->speed))
+            return 0;
+        if (g->volume > 0.f && !emit(out, cap, &o, "<volume ratio=\"%.2f\"/>", NULL, g->volume))
+            return 0;
+        if (nn >= cap - o)
+            return 0;
+        memcpy(out + o, norm, nn);
+        o += nn;
+        out[o] = '\0';
+    }
+    return o;
 }

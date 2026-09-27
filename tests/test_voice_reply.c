@@ -165,6 +165,21 @@ static void test_voice_reply_audio_to_temp_null_channel_still_writes(void) {
                  HU_ERR_INVALID_ARGUMENT);
 }
 
+static void test_voice_reply_directed_request_keeps_the_rendered_transcript(void) {
+    hu_persona_voice_config_t v;
+    memset(&v, 0, sizeof(v));
+    snprintf(v.voice_id, sizeof(v.voice_id), "voice-test");
+    v.default_speed = 0.95f;
+    const char *r = "<emotion value=\"proud\"/>I'm so proud of you.";
+    hu_voice_reply_request_t req;
+    HU_ASSERT_EQ(hu_voice_reply_build_request_directed(&v, r, strlen(r), "proud", 1, &req), HU_OK);
+    HU_ASSERT_STR_EQ(req.transcript, r);
+    HU_ASSERT_STR_EQ(req.tts.emotion, "proud");
+    HU_ASSERT_STR_EQ(req.tts.model_id, HU_VOICE_REPLY_DEFAULT_MODEL);
+    HU_ASSERT_TRUE(req.tts.speed > 0.94f && req.tts.speed < 0.96f);
+    HU_ASSERT_EQ(req.sentence_count, 1);
+}
+
 void run_voice_reply_tests(void) {
     HU_TEST_SUITE("voice_reply");
     HU_RUN_TEST(test_voice_reply_build_request_rejects_null);
@@ -175,4 +190,5 @@ void run_voice_reply_tests(void) {
     HU_RUN_TEST(test_voice_reply_request_reaches_cartesia_with_ssml);
     HU_RUN_TEST(test_voice_reply_audio_to_temp_imessage_yields_caf);
     HU_RUN_TEST(test_voice_reply_audio_to_temp_null_channel_still_writes);
+    HU_RUN_TEST(test_voice_reply_directed_request_keeps_the_rendered_transcript);
 }

@@ -61,4 +61,12 @@ hu_direction_verdict_t hu_direction_parse(const char *line, size_t len,
 const char *hu_direction_verdict_name(hu_direction_verdict_t v);
 /* The first segment's emotion, or NULL. */
 const char *hu_direction_first_emotion(const hu_direction_t *d);
+
+typedef enum { HU_LAUGH_CARTESIA = 0, HU_LAUGH_TEXT } hu_laugh_style_t;
+/* HU_VOICE_LAUGH: "text" writes a spoken laugh; anything else uses Cartesia's
+ * [laughter] (the ear A/B decides — voiceai avoids the stock laugh). */
+hu_laugh_style_t hu_laugh_style_parse(const char *s);
+/* D3: canonical Cartesia transcript re-emitted from the parsed values, each
+ * segment's words normalized for speech. Returns the length (0 on overflow). */
+size_t hu_direction_render(const hu_direction_t *d, hu_laugh_style_t laugh, char *out, size_t cap);
 #endif

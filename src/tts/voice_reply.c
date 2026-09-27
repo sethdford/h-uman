@@ -24,6 +24,33 @@ hu_error_t hu_voice_reply_build_request(const hu_persona_voice_config_t *voice,
                                            hour_local, seed, false, out);
 }
 
+hu_error_t hu_voice_reply_build_request_directed(const hu_persona_voice_config_t *voice,
+                                                 const char *rendered, size_t rendered_len,
+                                                 const char *first_emotion, size_t sentence_count,
+                                                 hu_voice_reply_request_t *out) {
+    if (!voice || !rendered || rendered_len == 0 || !out || rendered_len >= sizeof(out->transcript))
+        return HU_ERR_INVALID_ARGUMENT;
+    memset(out, 0, sizeof(*out));
+    memcpy(out->transcript, rendered, rendered_len);
+    out->transcript[rendered_len] = '\0';
+    out->transcript_len = rendered_len;
+    out->sentence_count = sentence_count;
+    snprintf(out->emotion, sizeof(out->emotion), "%s",
+             first_emotion && first_emotion[0]
+                 ? first_emotion
+                 : (voice->default_emotion[0] ? voice->default_emotion : "content"));
+    snprintf(out->model, sizeof(out->model), "%s",
+             voice->model[0] ? voice->model : HU_VOICE_REPLY_DEFAULT_MODEL);
+    out->tts.model_id = out->model;
+    out->tts.voice_id = voice->voice_id;
+    out->tts.emotion = out->emotion;
+    out->tts.speed =
+        voice->default_speed > 0.f ? voice->default_speed : HU_VOICE_REPLY_DEFAULT_SPEED;
+    out->tts.volume = 1.0f;
+    out->tts.nonverbals = voice->nonverbals;
+    return HU_OK;
+}
+
 hu_error_t hu_voice_reply_build_request_ex(const hu_persona_voice_config_t *voice,
                                            const char *response, size_t response_len,
                                            const char *incoming, size_t incoming_len,

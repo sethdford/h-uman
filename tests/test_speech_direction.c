@@ -88,6 +88,41 @@ static void test_direction_verdict_names_are_distinct(void) {
     HU_ASSERT_STR_EQ(hu_direction_verdict_name(HU_DIRECTION_OVER_BUDGET), "over_budget");
 }
 
+static void test_direction_render_normalizes_words_not_tags(void) {
+    static hu_direction_t d;
+    HU_ASSERT_EQ(parse("<speed ratio=\"0.93\"/>See you at 7 tonight.", &d), HU_DIRECTION_OK);
+    char out[HU_DIRECTION_RENDER_CAP];
+    size_t n = hu_direction_render(&d, HU_LAUGH_CARTESIA, out, sizeof(out));
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_STR_CONTAINS(out, "<speed ratio=\"0.93\"/>");
+    HU_ASSERT_STR_CONTAINS(out, "seven");
+    HU_ASSERT_STR_NOT_CONTAINS(out, "point nine");
+}
+
+static void test_direction_render_reemits_only_parsed_tags(void) {
+    static hu_direction_t d;
+    HU_ASSERT_EQ(
+        parse("<emotion value=\"Excited\"/>No way! <break time=\"400ms\"/>That's huge.", &d),
+        HU_DIRECTION_OK);
+    char out[HU_DIRECTION_RENDER_CAP];
+    hu_direction_render(&d, HU_LAUGH_CARTESIA, out, sizeof(out));
+    HU_ASSERT_STR_CONTAINS(out, "<emotion value=\"excited\"/>No way!");
+    HU_ASSERT_STR_CONTAINS(out, "<break time=\"400ms\"/>That's huge.");
+}
+
+static void test_direction_render_laugh_styles(void) {
+    static hu_direction_t d;
+    HU_ASSERT_EQ(parse("[laughter] you're ridiculous.", &d), HU_DIRECTION_OK);
+    char out[HU_DIRECTION_RENDER_CAP];
+    hu_direction_render(&d, HU_LAUGH_CARTESIA, out, sizeof(out));
+    HU_ASSERT_STR_CONTAINS(out, "[laughter]");
+    hu_direction_render(&d, HU_LAUGH_TEXT, out, sizeof(out));
+    HU_ASSERT_STR_NOT_CONTAINS(out, "[laughter]");
+    HU_ASSERT_STR_CONTAINS(out, "haha");
+    HU_ASSERT_EQ(hu_laugh_style_parse("text"), HU_LAUGH_TEXT);
+    HU_ASSERT_EQ(hu_laugh_style_parse(NULL), HU_LAUGH_CARTESIA);
+}
+
 void run_speech_direction_tests(void) {
     HU_TEST_SUITE("speech direction (D2)");
     HU_RUN_TEST(test_direction_parses_a_valid_line);
@@ -99,4 +134,7 @@ void run_speech_direction_tests(void) {
     HU_RUN_TEST(test_direction_empty_and_tags_only);
     HU_RUN_TEST(test_direction_emotion_list_is_cartesias);
     HU_RUN_TEST(test_direction_verdict_names_are_distinct);
+    HU_RUN_TEST(test_direction_render_normalizes_words_not_tags);
+    HU_RUN_TEST(test_direction_render_reemits_only_parsed_tags);
+    HU_RUN_TEST(test_direction_render_laugh_styles);
 }
