@@ -196,7 +196,10 @@ export class ScModelSelector extends LitElement {
     /* role=combobox does not take its name from content (unlike a plain
        button): the text is the combobox's value, so the name must be explicit.
        Focus stays on the trigger; aria-activedescendant announces the option
-       the arrow keys highlight. */
+       the arrow keys highlight. The listbox stays in the DOM (hidden when
+       closed) so aria-controls always resolves. Options are non-focusable, and
+       mousedown is cancelled so a pointer pick never moves focus off the
+       trigger. */
     return html`
       <button
         class="trigger"
@@ -204,46 +207,42 @@ export class ScModelSelector extends LitElement {
         aria-label="Model"
         aria-expanded=${this._open}
         aria-haspopup="listbox"
-        aria-controls=${this._open ? this._listboxId : nothing}
+        aria-controls=${this._listboxId}
         aria-activedescendant=${activeId}
         @click=${this._onTriggerClick}
         @keydown=${this._onKeydown}
       >
         ${label} ${icons["caret-down"]}
       </button>
-      ${
-        this._open
-          ? html`
-              <div class="dropdown" role="listbox" id=${this._listboxId} aria-label="Models">
-                ${this.models.map(
-                  (m, i) => html`
-                    <button
-                      class="option ${m.id === this.value ? "selected" : ""} ${
-                        i === this._focusedIndex ? "focused" : ""
-                      }"
-                      id="${this._listboxId}-opt-${i}"
-                      role="option"
-                      tabindex="-1"
-                      aria-selected=${m.id === this.value}
-                      @click=${() => this._onSelect(m.id)}
-                    >
-                      <span
-                        >${m.name}${
-                          m.provider ? html`<span class="provider">${m.provider}</span>` : nothing
-                        }</span
-                      >
-                      ${
-                        m.id === this.value
-                          ? html`<span class="check">${icons.check}</span>`
-                          : nothing
-                      }
-                    </button>
-                  `,
-                )}
-              </div>
-            `
-          : nothing
-      }
+      <div
+        class="dropdown"
+        role="listbox"
+        id=${this._listboxId}
+        aria-label="Model"
+        ?hidden=${!this._open}
+        @mousedown=${(e: MouseEvent) => e.preventDefault()}
+      >
+        ${this.models.map(
+          (m, i) => html`
+            <div
+              class="option ${m.id === this.value ? "selected" : ""} ${
+                i === this._focusedIndex ? "focused" : ""
+              }"
+              id="${this._listboxId}-opt-${i}"
+              role="option"
+              aria-selected=${m.id === this.value}
+              @click=${() => this._onSelect(m.id)}
+            >
+              <span
+                >${m.name}${
+                  m.provider ? html`<span class="provider">${m.provider}</span>` : nothing
+                }</span
+              >
+              ${m.id === this.value ? html`<span class="check">${icons.check}</span>` : nothing}
+            </div>
+          `,
+        )}
+      </div>
     `;
   }
 }

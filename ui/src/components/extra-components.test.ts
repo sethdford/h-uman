@@ -3123,6 +3123,10 @@ describe("hu-model-selector", () => {
     const t = el.shadowRoot?.querySelector("[role='combobox']") as HTMLElement;
     expect(t.getAttribute("aria-label")).toBe("Model");
     expect(t.hasAttribute("aria-activedescendant")).toBe(false);
+    // aria-controls resolves even while collapsed: the listbox is present, just hidden.
+    const closedList = el.shadowRoot?.getElementById(t.getAttribute("aria-controls") ?? "");
+    expect(closedList?.getAttribute("role")).toBe("listbox");
+    expect(closedList?.hidden).toBe(true);
     const key = (k: string) =>
       t.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true }));
     key("ArrowDown");
