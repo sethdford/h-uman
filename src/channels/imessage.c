@@ -5929,7 +5929,7 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
         if (has_audio) {
             const unsigned char *ab = sqlite3_column_blob(stmt, 10);
             int abl = sqlite3_column_bytes(stmt, 10);
-            const char pre[] = "[Audio transcription: ";
+            const char pre[] = HU_AUDIO_TRANSCRIPTION_PREFIX;
             size_t pl = sizeof(pre) - 1;
             memcpy(audio_text_buf, pre, pl);
             size_t tn =

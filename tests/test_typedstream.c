@@ -385,6 +385,16 @@ static void test_audio_transcription_truncates_on_a_character_boundary(void) {
     HU_ASSERT_STR_EQ(out, "caf");
 }
 
+/* Final review #4: text that already carries a transcript is not sent for
+ * transcription again (and its audio never leaves the Mac for that). */
+static void test_text_has_audio_transcription(void) {
+    const char *t = "[Audio transcription: see you at church]";
+    HU_ASSERT_TRUE(hu_text_has_audio_transcription(t, strlen(t)));
+    HU_ASSERT_FALSE(hu_text_has_audio_transcription("[Audio]", 7));
+    HU_ASSERT_FALSE(hu_text_has_audio_transcription("[Voice Message]", 15));
+    HU_ASSERT_FALSE(hu_text_has_audio_transcription(NULL, 0));
+}
+
 /* ── runner ──────────────────────────────────────────────────────── */
 
 void run_typedstream_tests(void) {
@@ -409,4 +419,5 @@ void run_typedstream_tests(void) {
     HU_RUN_TEST(test_audio_transcription_absent_key_returns_zero);
     HU_RUN_TEST(test_audio_transcription_requires_end_marker);
     HU_RUN_TEST(test_audio_transcription_truncates_on_a_character_boundary);
+    HU_RUN_TEST(test_text_has_audio_transcription);
 }

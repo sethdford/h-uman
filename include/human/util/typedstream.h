@@ -97,6 +97,11 @@ const hu_attribute_run_t *hu_imessage_runs_first_mention(const hu_attribute_run_
 size_t hu_imessage_extract_audio_transcription(const unsigned char *blob, size_t blob_len,
                                                char *out, size_t cap);
 
+/* The prefix the iMessage poll gives a memo's transcript. */
+#define HU_AUDIO_TRANSCRIPTION_PREFIX "[Audio transcription: "
+/* True when `s` already carries a transcript (so it is not transcribed again). */
+bool hu_text_has_audio_transcription(const char *s, size_t n);
+
 #ifdef __cplusplus
 }
 #endif

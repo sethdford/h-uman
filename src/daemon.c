@@ -401,6 +401,7 @@ bool gov_budget_inited = true;
 #include "human/channels/imessage_action_facts.h"
 #include "human/core/time.h"
 #include "human/persona/pacing.h"
+#include "human/util/typedstream.h"
 
 /* hu_daemon_dispatch_imessage_reply (iMessage reply-route dispatcher)
  * extracted to src/daemon/daemon_message_router.c — DDD Phase 2.5.
@@ -2909,6 +2910,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 ext && (strcmp(ext, ".mp4") == 0 || strcmp(ext, ".mov") == 0 ||
                                         strcmp(ext, ".webm") == 0);
 
+                            /* Final review #4: the poll already put iOS's transcript in
+                             * the text — never route that audio again (cloud STT would
+                             * upload the memo and append a second transcript). */
+                            if (is_audio && hu_text_has_audio_transcription(content_to_add, mlen))
+                                is_audio = false;
                             if (is_audio || is_video) {
                                 char *media_desc = NULL;
                                 size_t media_desc_len = 0;

@@ -547,3 +547,12 @@ size_t hu_imessage_extract_audio_transcription(const unsigned char *blob, size_t
     }
     return 0;
 }
+
+bool hu_text_has_audio_transcription(const char *s, size_t n) {
+    static const char tag[] = HU_AUDIO_TRANSCRIPTION_PREFIX;
+    size_t tl = sizeof(tag) - 1;
+    for (size_t i = 0; s && i + tl <= n; i++)
+        if (memcmp(s + i, tag, tl) == 0)
+            return true;
+    return false;
+}
