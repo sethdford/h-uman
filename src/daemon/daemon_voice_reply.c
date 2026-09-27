@@ -170,9 +170,12 @@ static void voice_direct(hu_allocator_t *alloc, hu_agent_t *agent, const char *b
     (void)hu_speech_perform(alloc, agent ? &agent->provider : NULL,
                             agent ? agent->model_name : NULL, agent ? agent->model_name_len : 0,
                             &scene, sp->spoken, sp->spoken_len, r);
-    hu_log_info("voice_reply", NULL, "direction %s: ok=%d reason=%s segments=%zu",
+    char summary[192];
+    if (hu_direction_summary(&r->dir, summary, sizeof(summary)) == 0)
+        summary[0] = '\0';
+    hu_log_info("voice_reply", NULL, "direction %s: ok=%d reason=%s segments=%zu %s",
                 mode == HU_SPEECH_REWRITE_LIVE ? "live" : "shadow", r->ok ? 1 : 0, r->reason,
-                r->dir.count);
+                r->dir.count, summary);
     if (mode == HU_SPEECH_REWRITE_LIVE && r->ok &&
         voice_gates_pass(alloc, r->dir.words, r->dir.words_len, combined, combined_len,
                          "directed")) {
@@ -260,8 +263,11 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, hu_agent_t *agent, const hu_co
                             response_len, combined, combined_len, &sp);
     if (sp.spoken_len == 0)
         return false;
-    voice_final_t vf;
-    memset(&vf, 0, sizeof(vf));
+    /* ~6 KB of memo state: heap, not the service loop's stack. */
+    voice_final_t *vf = alloc->alloc(alloc->ctx, sizeof(*vf));
+    if (!vf)
+        return false; /* text goes */
+    memset(vf, 0, sizeof(*vf));
     bool sent_voice = false;
     {
         const char *chn_voice =
@@ -295,13 +301,13 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, hu_agent_t *agent, const hu_co
                 const char *cartesia_key = hu_config_get_provider_key(config, "cartesia");
                 if (cartesia_key && cartesia_key[0] &&
                     voice_spoken_final(alloc, agent, batch_key, key_len, response, response_len,
-                                       combined, combined_len, &sp, &vf)) {
+                                       combined, combined_len, &sp, vf)) {
                     hu_voice_reply_request_t req;
                     hu_error_t prep_err =
-                        vf.directed
+                        vf->directed
                             ? hu_voice_reply_build_request_directed(
-                                  &agent->persona->voice, vf.rendered, vf.rendered_len,
-                                  vf.emotion[0] ? vf.emotion : NULL, vf.sentences, &req)
+                                  &agent->persona->voice, vf->rendered, vf->rendered_len,
+                                  vf->emotion[0] ? vf->emotion : NULL, vf->sentences, &req)
                             : hu_voice_reply_build_request_ex(&agent->persona->voice, sp.spoken,
                                                               sp.spoken_len, combined, combined_len,
                                                               bth_hour, (uint32_t)time(NULL),
@@ -344,14 +350,16 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, hu_agent_t *agent, const hu_co
             if (hu_voice_config_from_settings(config, &voice_cfg) == HU_OK &&
                 voice_cfg.tts_provider && voice_cfg.tts_provider[0] &&
                 voice_spoken_final(alloc, agent, batch_key, key_len, response, response_len,
-                                   combined, combined_len, &sp, &vf)) {
+                                   combined, combined_len, &sp, vf)) {
                 void *audio = NULL;
                 size_t audio_len = 0;
                 /* Tags mean something only to Cartesia; others get the words. */
-                bool tags_ok = strcmp(voice_cfg.tts_provider, "cartesia") == 0;
-                const char *say = vf.directed ? (tags_ok ? vf.rendered : vf.words) : sp.spoken;
+                bool tags_ok = strcmp(voice_cfg.tts_provider, "cartesia") == 0 &&
+                               (!voice_cfg.tts_model || !voice_cfg.tts_model[0] ||
+                                strncmp(voice_cfg.tts_model, "sonic-3", 7) == 0);
+                const char *say = vf->directed ? (tags_ok ? vf->rendered : vf->words) : sp.spoken;
                 size_t say_len =
-                    vf.directed ? (tags_ok ? vf.rendered_len : vf.words_len) : sp.spoken_len;
+                    vf->directed ? (tags_ok ? vf->rendered_len : vf->words_len) : sp.spoken_len;
                 hu_error_t tts_err =
                     hu_voice_tts(alloc, &voice_cfg, say, say_len, &audio, &audio_len);
                 if (tts_err == HU_OK && audio && audio_len > 0) {
@@ -406,5 +414,6 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, hu_agent_t *agent, const hu_co
             (void)hu_voice_session_stop(&unified_voice);
         }
     }
+    alloc->free(alloc->ctx, vf, sizeof(*vf));
     return sent_voice;
 }

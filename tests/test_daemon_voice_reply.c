@@ -239,6 +239,8 @@ static bool run_rewrite_voice(const char *reply, const char *rewrite) {
 }
 
 /* F2-voice direction (spec 2026-09-27): the model performs the line. */
+static const char *g_direct_tts_model; /* NULL = the Cartesia default (sonic-3) */
+
 static bool run_direct_voice(const char *reply, const char *model_line, const char *mode) {
     static hu_provider_vtable_t pvt;
     memset(&pvt, 0, sizeof(pvt));
@@ -252,6 +254,7 @@ static bool run_direct_voice(const char *reply, const char *model_line, const ch
     memset(&config, 0, sizeof(config));
     config.channels.default_daemon.voice_enabled = true;
     config.voice.tts_provider = "cartesia";
+    config.voice.tts_model = (char *)g_direct_tts_model; /* test-owned literal, never freed */
     hu_channel_vtable_t vt;
     memset(&vt, 0, sizeof(vt));
     vt.name = vr_name_generic;
@@ -313,6 +316,19 @@ static void test_voice_reply_direction_shadow_keeps_the_rewrite(void) {
     HU_ASSERT_TRUE(run_direct_voice("yeah sounds good", "Yeah, sounds good.", "shadow"));
     unsetenv("HU_SPEECH_REWRITE");
     HU_ASSERT_EQ(g_rewrite_calls, 2); /* the rewrite and the performance both ran */
+}
+
+/* Deferred minor, fixed 2026-09-27: tags go only to a model that reads them
+ * (Sonic-3 family); an older model would ignore or speak them. */
+static void test_voice_reply_directed_tags_only_for_sonic3(void) {
+    g_voice_sends = 0;
+    g_direct_tts_model = "sonic-english";
+    HU_ASSERT_TRUE(run_direct_voice("yeah sounds good",
+                                    "<emotion value=\"excited\"/>Yeah, sounds good!", "live"));
+    g_direct_tts_model = NULL;
+    const char *t = hu_cartesia_test_last_transcript();
+    HU_ASSERT_STR_NOT_CONTAINS(t, "<emotion");
+    HU_ASSERT_STR_CONTAINS(t, "Yeah, sounds good!");
 }
 
 static void test_voice_reply_direction_off_is_todays_path(void) {
@@ -427,6 +443,7 @@ void run_daemon_voice_reply_tests(void) {
     HU_RUN_TEST(test_voice_reply_directed_line_that_trips_moderation_is_not_spoken);
     HU_RUN_TEST(test_voice_reply_direction_off_is_todays_path);
     HU_RUN_TEST(test_voice_reply_direction_shadow_keeps_the_rewrite);
+    HU_RUN_TEST(test_voice_reply_directed_tags_only_for_sonic3);
     HU_RUN_TEST(test_voice_reply_speaks_unshaped_reply);
     HU_RUN_TEST(test_voice_capture_unshaped_only_when_voice_possible);
     HU_RUN_TEST(test_voice_reply_live_rewrite_is_spoken);
