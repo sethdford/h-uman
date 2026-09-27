@@ -30,11 +30,13 @@ npm run docs           # generate token reference docs
 | `breakpoints.tokens.json` | Responsive breakpoints                        |
 | `opacity.tokens.json`     | Opacity scale                                 |
 | `components.tokens.json`  | Component-specific tokens                     |
+| `quiet.tokens.json`       | Quiet Room web-only layer (paper & ink, OKLCH) — `com.human.platform: "web"` |
 
 ## Generated Outputs
 
 - `ui/src/styles/_tokens.css` — CSS custom properties
 - `website/src/styles/_tokens.css` — CSS (website)
+- `ui/src/styles/_quiet.css`, `website/src/styles/_quiet.css` — the Quiet Room layer, a separate file so the dashboard can lazy-load it (imported by `design-system-view.ts`; the website imports it right after `_tokens.css` in `global.css`)
 - `apps/shared/HumanKit/Sources/HumanChatUI/DesignTokens.swift` — Swift constants
 - `apps/android/app/src/main/java/ai/human/app/ui/DesignTokens.kt` — Kotlin constants
 - `include/human/design_tokens.h` — C macros
@@ -43,3 +45,9 @@ npm run docs           # generate token reference docs
 ## Companion files (manual drift risk)
 
 - `docs/tokens-studio.json` — Tokens Studio / Figma-style export: **not** emitted by `build.ts`. Regenerate with `npm run sync:tokens-studio` (`sync-tokens-studio.ts` is the canonical generator; `figma-sync.ts --export` writes the same path in a different, incomplete layout — don't use it for this file). `check-drift.sh` fails when the committed file differs from the generator's output, so any `*.tokens.json` change needs both `npm run build` and `npm run sync:tokens-studio`.
+
+## Platform routing and checks
+
+- Every `*.tokens.json` declares `$extensions["com.human.platform"]`: `"all"` (CSS, Swift, Kotlin, C, docs JSON) or `"web"` (CSS only). Missing or unknown values fail the build.
+- Native color emitters (`color-emit-lib.ts`) accept only `#RRGGBB` and `rgb()/rgba()`. Any other color-like value (`isColorLike`: oklch, display-p3, hsl, …) throws `UnsupportedColorError` instead of being emitted black or silently dropped; non-colors (px, deg, %, gradients) are skipped. Put `oklch()`/`display-p3` colors in a `"web"` file.
+- `npm test` runs the `node:test` suites in `tests/`. `npm run check:contrast` measures every Quiet Room text/UI pair against the 8 background roles in `contrast-lib.ts`, plus the on-accent fill pairs, in both modes (inherited values included) and exits 1 on any failure, 2 if there is nothing to measure. `npm run check` runs build + test + contrast.

@@ -1,7 +1,7 @@
 {
   "name": "human-control-ui",
   "version": "0.5.0",
-  "description": "h-uman Control \u2014 not quite human. Real-time AI assistant dashboard.",
+  "description": "h-uman Control — not quite human. Real-time AI assistant dashboard.",
   "author": "h-uman Contributors",
   "private": true,
   "type": "module",
@@ -40,6 +40,7 @@
     "@codemirror/language": "^6.12.4",
     "@codemirror/state": "^6.7.5",
     "@codemirror/view": "^6.43.12",
+    "@fontsource-variable/newsreader": "^5.3.0",
     "chart.js": "^4.5.1",
     "dompurify": "^3.4.15",
     "katex": "^0.18.7",

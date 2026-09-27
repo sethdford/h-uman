@@ -18,9 +18,11 @@ npx tsx build.ts --outdir "$TMPDIR" 2>/dev/null || {
 
 # Format generated CSS to match committed (prettier) version
 # Use ui/.prettierrc so output matches postbuild formatting
-if [ -f "$TMPDIR/_tokens.css" ] && [ -f "$REPO_ROOT/ui/.prettierrc" ]; then
-  npx -y prettier --write --config "$REPO_ROOT/ui/.prettierrc" "$TMPDIR/_tokens.css" 2>/dev/null || true
-fi
+for css in _tokens.css _quiet.css; do
+  if [ -f "$TMPDIR/$css" ] && [ -f "$REPO_ROOT/ui/.prettierrc" ]; then
+    npx -y prettier --write --config "$REPO_ROOT/ui/.prettierrc" "$TMPDIR/$css" 2>/dev/null || true
+  fi
+done
 
 DRIFT=0
 
@@ -36,6 +38,15 @@ if ! diff -q "$TMPDIR/_tokens.css" "$REPO_ROOT/website/src/styles/_tokens.css" >
   echo "DRIFT: website/src/styles/_tokens.css differs from generated output"
   DRIFT=1
 fi
+
+# Check the Quiet Room layer (ui + website)
+for dest in ui/src/styles/_quiet.css website/src/styles/_quiet.css; do
+  if ! diff -q "$TMPDIR/_quiet.css" "$REPO_ROOT/$dest" >/dev/null 2>&1; then
+    echo "DRIFT: $dest differs from generated output"
+    diff "$TMPDIR/_quiet.css" "$REPO_ROOT/$dest" || true
+    DRIFT=1
+  fi
+done
 
 # Check C header output (compare raw build.ts output — no clang-format, since
 # version differences between CI and local create false drift positives)
