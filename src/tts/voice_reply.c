@@ -20,6 +20,15 @@ hu_error_t hu_voice_reply_build_request(const hu_persona_voice_config_t *voice,
                                         const char *response, size_t response_len,
                                         const char *incoming, size_t incoming_len, int hour_local,
                                         uint32_t seed, hu_voice_reply_request_t *out) {
+    return hu_voice_reply_build_request_ex(voice, response, response_len, incoming, incoming_len,
+                                           hour_local, seed, false, out);
+}
+
+hu_error_t hu_voice_reply_build_request_ex(const hu_persona_voice_config_t *voice,
+                                           const char *response, size_t response_len,
+                                           const char *incoming, size_t incoming_len,
+                                           int hour_local, uint32_t seed, bool laughter_cue,
+                                           hu_voice_reply_request_t *out) {
     if (!voice || !response || response_len == 0 || !out)
         return HU_ERR_INVALID_ARGUMENT;
     memset(out, 0, sizeof(*out));
@@ -32,10 +41,14 @@ hu_error_t hu_voice_reply_build_request(const hu_persona_voice_config_t *voice,
         .base_speed =
             voice->default_speed > 0.f ? voice->default_speed : HU_VOICE_REPLY_DEFAULT_SPEED,
         .pause_factor = 1.0f,
-        .discourse_rate = 0.3f,
+        /* F1 restraint (Ferni bans stock openers and inserted markers): the
+         * wording is the reply's own; prep only adds pauses, tags and a real
+         * laugh when the reply laughed. */
+        .discourse_rate = 0.0f,
         .nonverbals_enabled = voice->nonverbals,
         .strip_ssml = false,
-        .thinking_sounds = true,
+        .thinking_sounds = false,
+        .laughter_cue = laughter_cue,
         .seed = seed,
         .hour_local = (uint8_t)hour,
     };

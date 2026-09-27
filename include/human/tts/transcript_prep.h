@@ -20,6 +20,7 @@ typedef struct hu_prep_config {
     bool nonverbals_enabled;
     bool strip_ssml;
     bool thinking_sounds; /* prepend "hmm"/"well" for complex responses */
+    bool laughter_cue;    /* the reply laughed (lol/haha, removed by speech cleanup) */
     uint32_t seed;
     uint8_t hour_local;
 } hu_prep_config_t;

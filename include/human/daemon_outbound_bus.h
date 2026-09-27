@@ -92,6 +92,8 @@ typedef struct hu_daemon_final_reply {
     size_t combined_len;
     const char *response;
     size_t response_len;
+    const char *unshaped; /* F1: the reply before text shaping; NULL = response */
+    size_t unshaped_len;
     int bth_hour;
     bool text_ready; /* the turn succeeded: the reply may be published as text */
     hu_bus_t *bus;
