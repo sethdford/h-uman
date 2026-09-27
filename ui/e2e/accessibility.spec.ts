@@ -97,16 +97,12 @@ const KNOWN_VIOLATIONS: Record<string, Record<string, number>> = {
   Chat: { "button-name": 1, "nested-interactive": 5 },
   // Session cards are role=button with aria-label="" and a nested Delete button.
   Sessions: { "nested-interactive": 5 },
-  // Skill cards are role=button with a nested role=switch toggle (+ segment contrast).
-  Skills: { "color-contrast": 1, "nested-interactive": 11 },
+  // Skill cards are role=button with a nested role=switch toggle.
+  Skills: { "nested-interactive": 11 },
   // Number inputs rendered with aria-label="".
   Config: { label: 2 },
-  // hu-segmented-control active segment: --hu-on-accent on --hu-accent is 2.43:1.
-  Channels: { "color-contrast": 1 },
-  Usage: { "color-contrast": 1 },
-  Memory: { "color-contrast": 1 },
-  // Plus .log-row role=listitem with no list parent.
-  Logs: { "aria-required-parent": 1, "color-contrast": 1 },
+  // .log-row role=listitem with no list parent.
+  Logs: { "aria-required-parent": 1 },
 };
 
 const VIEWS = [

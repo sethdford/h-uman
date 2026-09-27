@@ -141,10 +141,18 @@ export class ScSkillsView extends GatewayAwareLitElement {
         outline: 2px solid var(--hu-accent);
         outline-offset: 2px;
       }
+      /* Same pairing as hu-segmented-control: --hu-bg on --hu-accent is 2.2:1 in
+         the light theme; on --hu-accent-text it is 9.7:1 dark, 5.9:1 light. */
       .tag-chip[aria-checked="true"] {
-        background: var(--hu-accent);
+        background: var(--hu-accent-text);
         color: var(--hu-bg);
-        border-color: var(--hu-accent);
+        border-color: var(--hu-accent-text);
+      }
+      @media (prefers-contrast: more) {
+        .tag-chip[aria-checked="true"] {
+          background: var(--hu-accent);
+          border-color: var(--hu-accent);
+        }
       }
       .skills-grid {
         display: grid;

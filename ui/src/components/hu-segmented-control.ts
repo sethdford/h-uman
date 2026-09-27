@@ -43,7 +43,10 @@ export class ScSegmentedControl extends LitElement {
       top: var(--hu-space-2xs);
       bottom: var(--hu-space-2xs);
       left: var(--hu-space-2xs);
-      background: var(--hu-accent);
+      /* --hu-on-accent on --hu-accent is 2.4:1 in both themes. This pair is
+         the accent-text-on-surface pairing inverted, so it inherits that
+         pairing's contrast: 8.5:1 dark, 6.4:1 light. */
+      background: var(--hu-accent-text);
       border-radius: calc(var(--hu-radius-lg) - var(--hu-space-2xs));
       transition: transform var(--hu-duration-normal) var(--hu-spring-bounce);
       pointer-events: none;
@@ -77,7 +80,20 @@ export class ScSegmentedControl extends LitElement {
     }
 
     .segment.active {
-      color: var(--hu-on-accent);
+      color: var(--hu-bg-surface);
+    }
+
+    /* prefers-contrast: more forces a black surface but keeps --hu-accent-text
+       dark, which would drop the pair above to 3.3:1. Its accent/on-accent pair
+       (lime on black) is the one tuned for that mode. */
+    @media (prefers-contrast: more) {
+      .indicator {
+        background: var(--hu-accent);
+      }
+
+      .segment.active {
+        color: var(--hu-on-accent);
+      }
     }
 
     .segment:focus-visible {
