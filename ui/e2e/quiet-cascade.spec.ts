@@ -172,11 +172,27 @@ test.describe("Quiet Room cascade", () => {
     test(`prefers-contrast: more, ${scheme} ${attrs || "no data-theme"}: generated palette survives high-contrast.css`, async ({
       page,
     }) => {
-      const hcBlock = TOKENS_CSS.match(/@media \(prefers-contrast: more\)\s*\{\s*:root\s*\{([^}]*)\}/)?.[1] ?? "";
-      const colors = [...hcBlock.matchAll(/(--hu-[\w-]+):\s*([^;]+);/g)].filter(([, , v]) => !/px$/.test(v.trim()));
-      expect(colors.length, "precondition: the high-contrast block defines colours").toBeGreaterThan(20);
       await load(page, attrs, "", { scheme, contrastMore: true }, HIGH_CONTRAST_CSS);
-      for (const [, name, value] of colors) {
+      // Read the generated declarations through the CSSOM of the first <style>
+      // (TOKENS_CSS), not a regex: any selector list or rule order the generator
+      // emits is handled, and only rules that actually match <html> count.
+      const generated = await page.evaluate(() => {
+        const decls = new Map<string, string>();
+        for (const rule of Array.from(document.styleSheets[0].cssRules)) {
+          if (!(rule instanceof CSSMediaRule) || rule.conditionText !== "(prefers-contrast: more)") continue;
+          for (const inner of Array.from(rule.cssRules)) {
+            if (!(inner instanceof CSSStyleRule) || !document.documentElement.matches(inner.selectorText)) continue;
+            for (let i = 0; i < inner.style.length; i++) {
+              const name = inner.style[i];
+              if (name.startsWith("--hu-")) decls.set(name, inner.style.getPropertyValue(name));
+            }
+          }
+        }
+        return [...decls];
+      });
+      const colors = generated.filter(([, v]) => !/px$/.test(v.trim()));
+      expect(colors.length, "precondition: the high-contrast block defines colours").toBeGreaterThan(20);
+      for (const [name, value] of colors) {
         expect(await prop(page, "html", name), name).toBe(norm(value));
       }
     });

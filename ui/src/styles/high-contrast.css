@@ -1,6 +1,8 @@
-/* Forced-colors support. The prefers-contrast: more palette is generated into
-   _tokens.css from design-tokens/semantic.tokens.json ("high-contrast" group);
-   do not override its colours here — this file loads after it and would win. */
+/* Forced-colors (Windows High Contrast) overrides only — those below are
+   intentional. Do NOT add @media (prefers-contrast: more) or unguarded colour
+   overrides: that palette is generated into _tokens.css from
+   design-tokens/semantic.tokens.json ("high-contrast" group), and this file
+   loads after it, so anything set here would replace it. */
 
 @media (forced-colors: active) {
   :root {
