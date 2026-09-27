@@ -23,6 +23,7 @@
 #include "human/bootstrap.h"
 #include "human/bus.h"
 #include "human/channel.h"
+#include "human/channels/imessage_voice_record.h"
 #include "human/channels/thread_binding.h"
 #include "human/cli_commands.h"
 #include "human/config.h"
@@ -2670,6 +2671,7 @@ static hu_error_t cmd_voice_preview(hu_allocator_t *alloc, int argc, char **argv
     const char *text = NULL, *incoming = NULL, *persona_name = NULL, *out_path = NULL;
     const char *channel = "imessage";
     const char *model_override = NULL;
+    const char *voice_override = NULL; /* the A/B "voice" arm (e.g. Ferni) */
     float speed_override = 0.f;
     bool raw = false; /* skip transcript prep: the A/B "prep off" arm */
     for (int i = 3; i < argc; i++) {
@@ -2677,6 +2679,8 @@ static hu_error_t cmd_voice_preview(hu_allocator_t *alloc, int argc, char **argv
             continue;
         if (strcmp(argv[i], "--model") == 0 && i + 1 < argc)
             model_override = argv[++i];
+        else if (strcmp(argv[i], "--voice") == 0 && i + 1 < argc)
+            voice_override = argv[++i];
         else if (strcmp(argv[i], "--speed") == 0 && i + 1 < argc)
             speed_override = (float)atof(argv[++i]);
         else if (strcmp(argv[i], "--raw") == 0)
@@ -2695,7 +2699,7 @@ static hu_error_t cmd_voice_preview(hu_allocator_t *alloc, int argc, char **argv
     if (!text || !text[0] || !persona_name || !persona_name[0]) {
         fprintf(stderr, "Usage: human voice preview --text <reply> --persona <name> "
                         "[--incoming <msg>] [--channel imessage] [--out <file>] "
-                        "[--model <id>] [--speed <0.6-1.5>] [--raw]\n");
+                        "[--model <id>] [--voice <id>] [--speed <0.6-1.5>] [--raw]\n");
         return HU_ERR_INVALID_ARGUMENT;
     }
 
@@ -2734,6 +2738,8 @@ static hu_error_t cmd_voice_preview(hu_allocator_t *alloc, int argc, char **argv
     localtime_r(&now, &tmb);
     if (model_override && model_override[0])
         snprintf(persona.voice.model, sizeof(persona.voice.model), "%s", model_override);
+    if (voice_override && voice_override[0])
+        snprintf(persona.voice.voice_id, sizeof(persona.voice.voice_id), "%s", voice_override);
     if (speed_override > 0.f)
         persona.voice.default_speed = speed_override;
     hu_voice_reply_request_t req;
@@ -2805,6 +2811,32 @@ static hu_error_t cmd_voice_preview(hu_allocator_t *alloc, int argc, char **argv
     return HU_OK;
 }
 
+/* Operator test path for native Messages voice delivery (W3): the same
+ * request + orchestrator the daemon's HU_VOICE_DELIVERY=messages branch uses.
+ * Exit 0 only when the memo is confirmed in chat.db AND the mic is restored. */
+static hu_error_t cmd_voice_record_send(int argc, char **argv) {
+    const char *to = NULL;
+    const char *file = NULL;
+    for (int i = 3; i < argc; i++) {
+        if (strcmp(argv[i], "--to") == 0 && i + 1 < argc)
+            to = argv[++i];
+        else if (strcmp(argv[i], "--file") == 0 && i + 1 < argc)
+            file = argv[++i];
+    }
+    if (!to || !to[0] || !file || file[0] != '/') {
+        fprintf(stderr, "Usage: human voice record-send --to <handle> --file </abs/audio>\n");
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+    hu_voice_record_result_t res;
+    hu_error_t err = hu_voice_record_send_from_env(to, strlen(to), file, &res);
+    printf("result=%s stage=%d block=%s reason=%s verified=%d restored=%d cancel_failed=%d\n",
+           err == HU_OK ? "sent" : (err == HU_ERR_NOT_SUPPORTED ? "blocked" : "failed"),
+           (int)res.stage, hu_voice_record_block_name(res.block),
+           res.abort_reason ? res.abort_reason : "-", res.verified ? 1 : 0, res.restored ? 1 : 0,
+           res.cancel_failed ? 1 : 0);
+    return (err == HU_OK && res.verified && res.restored) ? HU_OK : HU_ERR_IO;
+}
+
 static hu_error_t cmd_voice(hu_allocator_t *alloc, int argc, char **argv) {
     if (argc < 3 || !argv[2]) {
         fprintf(stderr, "Usage: human voice <subcommand>\n\n"
@@ -2812,12 +2844,16 @@ static hu_error_t cmd_voice(hu_allocator_t *alloc, int argc, char **argv) {
                         "  clone --file <path> [--name <name>] [--lang <code>] [--persona <name>]\n"
                         "  preview --text <reply> --persona <name> [--incoming <msg>]\n"
                         "          [--channel imessage] [--out <file>] [--model <id>]\n"
-                        "          [--speed <0.6-1.5>] [--raw]\n");
+                        "          [--speed <0.6-1.5>] [--raw]\n"
+                        "  record-send --to <handle> --file <audio>   (Messages-recorded memo;\n"
+                        "          uses HU_VOICE_REAL_INPUT, HU_VOICE_MIN_IDLE_SEC)\n");
         return HU_ERR_INVALID_ARGUMENT;
     }
 
     if (strcmp(argv[2], "preview") == 0)
         return cmd_voice_preview(alloc, argc, argv);
+    if (strcmp(argv[2], "record-send") == 0)
+        return cmd_voice_record_send(argc, argv);
 
     if (strcmp(argv[2], "clone") != 0) {
         fprintf(stderr, "Unknown voice subcommand: %s\n", argv[2]);
