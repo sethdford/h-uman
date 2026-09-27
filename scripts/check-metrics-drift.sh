@@ -84,7 +84,7 @@ if [ "$MODE" = "--binary" ]; then
     echo "  No binary-size drift detected (within 15% of ${BIN_KB} KB)."
   else
     echo "  Found $DRIFT_COUNT binary-size drift(s). Run scripts/update-stats.sh --apply with a"
-    echo "  MinSizeRel binary in build/ to regenerate, or fix the '~NNNNN KB' claims by hand."
+    echo "  release-size build in build-size/ (see README) to regenerate, or fix the '~NNNNN KB' claims by hand."
   fi
   exit $EXIT_CODE
 fi

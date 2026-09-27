@@ -111,3 +111,42 @@ def test_dry_run_tick_does_not_persist_state(tmp_path, monkeypatch):
     va.cmd_tick(types.SimpleNamespace(dry_run=True), now=1000.0)
     assert not (tmp_path / "state.json").exists()
     assert va.load_state()["pending"] is None
+
+
+def test_voice_axis_swaps_only_the_voice_id():
+    fer = va.preview_argv("human", "seth", "hi there.", "voice", "ferni", "/tmp/x.caf")
+    own = va.preview_argv("human", "seth", "hi there.", "voice", "clone", "/tmp/x.caf")
+    assert fer[fer.index("--voice") + 1] == va.VOICE_IDS["ferni"]
+    assert "--voice" not in own  # the persona's own cloned voice
+    for argv in (fer, own):
+        assert "--model" not in argv and "--speed" not in argv and "--raw" not in argv
+
+
+def test_plan_pairs_can_restrict_to_one_axis():
+    texts = [f"text number {i} is long enough to be spoken aloud nicely, right." for i in range(8)]
+    pairs, key = va.plan_pairs(texts, 8, seed=5, axes=("voice",))
+    assert {p["axis"] for p in pairs} == {"voice"}
+    assert all({key[p["id"]]["A"], key[p["id"]]["B"]} == {"ferni", "clone"} for p in pairs)
+
+
+def test_default_rotation_never_includes_the_voice_axis():
+    texts = [f"text number {i} is long enough to be spoken aloud nicely, right." for i in range(9)]
+    pairs, _ = va.plan_pairs(texts, 9, seed=1)
+    assert "voice" not in {p["axis"] for p in pairs}
+
+
+def test_voice_axis_question_asks_about_a_real_person_not_you():
+    q = va.compose_question({"id": "p01", "axis": "voice"}, 0, 8)
+    assert "real person" in q and "like you" not in q
+    assert "A then B" in q and "reply A or B" in q
+    q2 = va.compose_question({"id": "p01", "axis": "model"}, 0, 8)
+    assert "like you" in q2
+
+
+def test_score_sheet_reports_the_voice_axis():
+    pairs = [{"id": "p01", "axis": "voice", "choice": "A"},
+             {"id": "p02", "axis": "voice", "choice": "B"}]
+    key = {"p01": {"axis": "voice", "A": "ferni", "B": "clone"},
+           "p02": {"axis": "voice", "A": "ferni", "B": "clone"}}
+    res = va.score_sheet(pairs, key)
+    assert res["voice"]["n"] == 2 and res["voice"]["v1_wins"] == 1
