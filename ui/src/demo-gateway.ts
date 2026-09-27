@@ -1068,6 +1068,7 @@ export class DemoGatewayClient extends EventTarget {
   #onBinary: ((data: ArrayBuffer) => void) | null = null;
   #glMode = false;
   #userHasSentMessage = false;
+  #inFlight = 0;
 
   private state = {
     sessions: makeSessions(),
@@ -1107,6 +1108,10 @@ export class DemoGatewayClient extends EventTarget {
 
   get status(): GatewayStatus {
     return this.#status;
+  }
+  /** Requests still inside their simulated latency. The a11y e2e scan waits for 0. */
+  get inFlight(): number {
+    return this.#inFlight;
   }
   get features(): ServerFeatures {
     return this.#features;
@@ -2686,8 +2691,13 @@ export class DemoGatewayClient extends EventTarget {
   }
 
   async request<T = unknown>(method: string, params?: Record<string, unknown>): Promise<T> {
-    await new Promise((r) => setTimeout(r, 80 + Math.random() * 200));
-    return this.#handleRequest(method, params) as T;
+    this.#inFlight++;
+    try {
+      await new Promise((r) => setTimeout(r, 80 + Math.random() * 200));
+      return this.#handleRequest(method, params) as T;
+    } finally {
+      this.#inFlight--;
+    }
   }
 
   abort(): Promise<{ aborted?: boolean }> {
