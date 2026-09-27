@@ -73,3 +73,47 @@ test("global scroll-driven utilities run on a scroll timeline in the built bundl
     }
   }
 });
+
+/**
+ * Component-scoped entrance animations (Lit `scrollEntranceStyles`, which lives inside
+ * each shadow root). Two classes of element carried the entrance class but never
+ * animated: the metrics view's `.hu-scroll-reveal` sections (the shared styles only
+ * defined the `-stagger` variant) and the skill registry's cards (the registry never
+ * adopted the shared styles at all).
+ */
+test.describe("component scroll entrances run on a view timeline", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/?demo#metrics");
+    const supported = await page.evaluate(() => CSS.supports("animation-timeline: view()"));
+    test.skip(!supported, "requires animation-timeline: view() support");
+  });
+
+  test("metrics .hu-scroll-reveal sections", async ({ page }) => {
+    await waitForViewReady(page, "hu-metrics-view");
+    const sections = await page.evaluate(() => {
+      const view = document.querySelector("hu-app")?.shadowRoot?.querySelector("hu-metrics-view");
+      return [...(view?.shadowRoot?.querySelectorAll(".hu-scroll-reveal") ?? [])].map((el) =>
+        el.getAnimations().map((a) => a.timeline?.constructor.name ?? "null"),
+      );
+    });
+    expect(sections.length, "metrics renders .hu-scroll-reveal sections").toBeGreaterThan(0);
+    for (const kinds of sections) expect(kinds).toContain("ViewTimeline");
+  });
+
+  test("skill registry cards", async ({ page }) => {
+    await page.goto("/?demo#skills");
+    await waitForViewReady(page, "hu-skills-view");
+    const readCards = () =>
+      page.evaluate(() => {
+        const registry = document
+          .querySelector("hu-app")
+          ?.shadowRoot?.querySelector("hu-skills-view")
+          ?.shadowRoot?.querySelector("hu-skill-registry");
+        return [
+          ...(registry?.shadowRoot?.querySelectorAll(".hu-scroll-reveal-stagger > *") ?? []),
+        ].map((el) => el.getAnimations().map((a) => a.timeline?.constructor.name ?? "null"));
+      });
+    await expect.poll(async () => (await readCards()).length).toBeGreaterThan(0);
+    for (const kinds of await readCards()) expect(kinds).toContain("ViewTimeline");
+  });
+});

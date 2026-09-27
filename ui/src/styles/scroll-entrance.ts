@@ -6,7 +6,11 @@
 import { css } from "lit";
 
 export const scrollEntranceStyles = css`
+  /* .hu-scroll-reveal is deliberately absent from the IntersectionObserver fallback
+     below: the views' observers only watch .hu-scroll-reveal-stagger > *, so hiding it
+     there would leave it invisible. Without view() support it renders statically. */
   @supports (animation-timeline: view()) {
+    .hu-scroll-reveal,
     .hu-scroll-reveal-stagger > * {
       animation: hu-card-enter linear both;
       animation-timeline: view();
@@ -41,6 +45,7 @@ export const scrollEntranceStyles = css`
   }
 
   @media (prefers-reduced-motion: reduce) {
+    .hu-scroll-reveal,
     .hu-scroll-reveal-stagger > * {
       animation: none !important;
       opacity: 1 !important;
