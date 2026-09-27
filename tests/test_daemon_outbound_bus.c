@@ -415,7 +415,9 @@ static void test_outbound_final_flagged_long_discord_reply_defers(void) {
 
 /* hu_daemon_voice_reply's fallback arm is deterministic under HU_IS_TEST
  * (hu_voice_tts mocks audio), so a voice-enabled config really sends a memo
- * through vtable->send with one media path. */
+ * through vtable->send with one media path. "cartesia" is the provider that
+ * arm mocks with HU_ENABLE_CARTESIA on or off (src/tts/cartesia.c stubs mock
+ * too); an empty tts_provider switches the fallback arm off entirely. */
 static hu_config_t g_voice_cfg;
 
 static const hu_config_t *voice_config(void) {

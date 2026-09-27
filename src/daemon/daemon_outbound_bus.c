@@ -17,7 +17,6 @@
 #include "human/security/companion_safety.h"
 #include "human/security/moderation.h"
 
-#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -182,10 +181,15 @@ bool hu_daemon_outbound_final_gates_clear(hu_allocator_t *alloc, const char *tex
         memset(&mod, 0, sizeof(mod));
         hu_companion_safety_result_t cs;
         memset(&cs, 0, sizeof(cs));
-        if (hu_moderation_check(alloc, text, text_len, &mod) != HU_OK || mod.flagged)
+        /* A check that errors blocks like a flag (fail closed) but reports its
+         * own reason, so an outage is not mistaken for flagged content. */
+        if (hu_moderation_check(alloc, text, text_len, &mod) != HU_OK)
+            why = "moderation_error";
+        else if (mod.flagged)
             why = "moderation";
-        else if (hu_companion_safety_check(alloc, text, text_len, NULL, 0, &cs) != HU_OK ||
-                 cs.flagged)
+        else if (hu_companion_safety_check(alloc, text, text_len, NULL, 0, &cs) != HU_OK)
+            why = "companion_safety_error";
+        else if (cs.flagged)
             why = "companion_safety";
         else if (hu_memory_has_claim_language(text, text_len))
             why = "claim_language";
@@ -339,7 +343,7 @@ bool hu_daemon_deliver_final_reply(const hu_daemon_final_reply_t *r) {
         memcpy(rev.id, r->batch_key, idk);
         rev.id[idk] = '\0';
     }
-    rev.payload = (void *)(uintptr_t)r->response;
+    rev.payload = (void *)r->response;
     hu_daemon_outbound_bus_set_message(&rev, r->response, r->response_len);
     if (r->bridge)
         r->bridge->delivery_turn = r->turn;

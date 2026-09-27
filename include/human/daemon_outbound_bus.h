@@ -67,7 +67,8 @@ void hu_daemon_outbound_stream_event_cb(const hu_agent_stream_event_t *event, vo
  * replacement/crisis text they produce, live on the daemon's text path, so a
  * reply that trips any of them must go there instead. Fails closed: a check
  * error or NULL/empty input returns false. *reason_out (optional) is one of
- * "clear", "moderation", "companion_safety", "claim_language", "invalid". */
+ * "clear", "moderation", "companion_safety", "claim_language", "invalid", or
+ * "moderation_error" / "companion_safety_error" when that check itself failed. */
 bool hu_daemon_outbound_final_gates_clear(hu_allocator_t *alloc, const char *text, size_t text_len,
                                           const char **reason_out);
 
