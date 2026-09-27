@@ -104,8 +104,14 @@ test("resolveRefs leaves non-whole-value braces alone", () => {
 
 test("parseOutdir reads both flag spellings and keeps '=' inside the path", () => {
   assert.equal(parseOutdir([]), null);
-  assert.equal(parseOutdir(["--outdir"]), null);
   assert.equal(parseOutdir(["--outdir", "/tmp/a"]), "/tmp/a");
   assert.equal(parseOutdir(["--x", "--outdir=/tmp/b"]), "/tmp/b");
   assert.equal(parseOutdir(["--outdir=/tmp/k=v"]), "/tmp/k=v");
+  assert.equal(parseOutdir(["--outdir=-odd"]), "-odd");
+});
+
+test("parseOutdir throws instead of falling back to the committed paths", () => {
+  assert.throws(() => parseOutdir(["--outdir"]), /needs a directory/);
+  assert.throws(() => parseOutdir(["--outdir", "--help"]), /needs a directory/);
+  assert.throws(() => parseOutdir(["--outdir="]), /needs a directory/);
 });

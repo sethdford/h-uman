@@ -166,11 +166,27 @@ export function partitionByPlatform(sources: TokenSource[]): {
  * `--outdir DIR` / `--outdir=DIR` from a generator's argv, or null. With it, a
  * generator writes each output flat into DIR instead of its committed path, so
  * check-drift.sh can regenerate into a temp dir and diff.
+ *
+ * A malformed flag throws rather than returning null: null means "write the
+ * committed files", so `--outdir --help` must not quietly overwrite docs/.
  */
 export function parseOutdir(argv: string[] = process.argv.slice(2)): string | null {
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--outdir" && argv[i + 1]) return argv[i + 1];
-    if (argv[i].startsWith("--outdir=")) return argv[i].slice("--outdir=".length);
+    let dir: string | undefined;
+    if (argv[i] === "--outdir") {
+      dir = argv[i + 1];
+      if (dir?.startsWith("-")) dir = undefined; // next token is a flag
+    } else if (argv[i].startsWith("--outdir=")) {
+      dir = argv[i].slice("--outdir=".length);
+    } else {
+      continue;
+    }
+    if (!dir) {
+      throw new Error(
+        "--outdir needs a directory (use --outdir=DIR for a path starting with '-')",
+      );
+    }
+    return dir;
   }
   return null;
 }
