@@ -10,7 +10,7 @@ LitElement web components for the human dashboard.
 - Icons: import from `src/icons.ts` (Phosphor Regular). Never use emoji as UI icons.
 - **SVG assets**: `src/assets/logo.svg` — import with `?raw` for inline SVG (e.g. sidebar brand mark, `currentColor` theming). `public/noise-grain.svg` — film grain; referenced from `theme.css` as `/noise-grain.svg`. Do not duplicate logo markup in components.
 - **Fonts**: self-hosted only. Inter fallback lives in `public/fonts/inter/` (from `@fontsource-variable/inter` 5.3.0, OFL); Newsreader comes from `@fontsource-variable/newsreader`. `e2e/fonts-first-party.spec.ts` fails on any non-origin font request.
-- **Quiet Room**: web-only layer toggled by `data-brand="quiet"` on `<html>` (design-system view has a preview switch). Components need no changes — they already read `--hu-*` (colors only: the `--hu-type-*-family` tokens have no consumers yet; wiring type roles is an SP3 task).
+- **Quiet Room**: web-only layer toggled by `data-brand="quiet"` on `<html>` (design-system view has a preview switch). Its CSS (`_quiet.css`) and the Newsreader faces are imported by `design-system-view.ts`, not `theme.css`, to stay out of the entry bundle (200 KB budget); the switch is the only way to set the attribute, so they are always loaded first. Components need no changes — they already read `--hu-*` (colors only: the `--hu-type-*-family` tokens have no consumers yet; wiring type roles is an SP3 task).
 - ARIA: every interactive component needs `role`, `aria-label` or `aria-labelledby`
 - Focus: visible focus ring with `outline: 2px solid var(--hu-accent)` on `:focus-visible`
 - Keyboard: Tab, Escape (overlays), Enter/Space (buttons), Arrow keys (lists/tabs)

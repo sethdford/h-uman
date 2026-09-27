@@ -36,6 +36,7 @@ npm run docs           # generate token reference docs
 
 - `ui/src/styles/_tokens.css` — CSS custom properties
 - `website/src/styles/_tokens.css` — CSS (website)
+- `ui/src/styles/_quiet.css`, `website/src/styles/_quiet.css` — the Quiet Room layer, a separate file so the dashboard can lazy-load it (imported by `design-system-view.ts`; the website imports it right after `_tokens.css` in `global.css`)
 - `apps/shared/HumanKit/Sources/HumanChatUI/DesignTokens.swift` — Swift constants
 - `apps/android/app/src/main/java/ai/human/app/ui/DesignTokens.kt` — Kotlin constants
 - `include/human/design_tokens.h` — C macros

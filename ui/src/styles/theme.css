@@ -2,8 +2,6 @@
 @import "./_dynamic-color.css";
 @import "./high-contrast.css";
 @import "./scroll-driven.css";
-@import "@fontsource-variable/newsreader/opsz.css";
-@import "@fontsource-variable/newsreader/opsz-italic.css";
 
 /* Inter: cross-platform fallback when Avenir is unavailable (Windows, Linux).
    Only loads if Avenir isn't found locally — browsers skip unused @font-face.
