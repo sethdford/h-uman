@@ -385,6 +385,25 @@ static void test_audio_transcription_truncates_on_a_character_boundary(void) {
     HU_ASSERT_STR_EQ(out, "caf");
 }
 
+/* Deferred minor, fixed 2026-09-27: a stray byte that looks like a length and
+ * happens to land on 0x86 is not taken when its "text" is not valid UTF-8. */
+static void test_audio_transcription_skips_a_false_length(void) {
+    static const char key[] = "IMAudioTranscription";
+    unsigned char b[128];
+    size_t o = 0;
+    memcpy(b, key, sizeof(key) - 1);
+    o += sizeof(key) - 1;
+    const unsigned char fake[] = {0x02, 0xC3, 0x28, 0x86}; /* "len 2", invalid UTF-8, 0x86 */
+    memcpy(b + o, fake, sizeof(fake));
+    o += sizeof(fake);
+    const unsigned char real[] = {0x92, 0x84, 0x05, 'h', 'e', 'l', 'l', 'o', 0x86, 0x92};
+    memcpy(b + o, real, sizeof(real));
+    o += sizeof(real);
+    char out[64];
+    HU_ASSERT_EQ(hu_imessage_extract_audio_transcription(b, o, out, sizeof(out)), 5);
+    HU_ASSERT_STR_EQ(out, "hello");
+}
+
 /* Final review #4: text that already carries a transcript is not sent for
  * transcription again (and its audio never leaves the Mac for that). */
 static void test_text_has_audio_transcription(void) {
@@ -420,4 +439,5 @@ void run_typedstream_tests(void) {
     HU_RUN_TEST(test_audio_transcription_requires_end_marker);
     HU_RUN_TEST(test_audio_transcription_truncates_on_a_character_boundary);
     HU_RUN_TEST(test_text_has_audio_transcription);
+    HU_RUN_TEST(test_audio_transcription_skips_a_false_length);
 }

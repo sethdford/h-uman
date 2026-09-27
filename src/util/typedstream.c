@@ -519,6 +519,25 @@ static size_t read_ts_length(const unsigned char *b, size_t n, size_t at, size_t
     return 0;
 }
 
+/* Well-formed UTF-8 with no control bytes below TAB. */
+static bool utf8_text(const unsigned char *s, size_t n) {
+    for (size_t i = 0; i < n;) {
+        unsigned char c = s[i];
+        size_t extra = c < 0x80             ? 0
+                       : (c & 0xE0) == 0xC0 ? 1
+                       : (c & 0xF0) == 0xE0 ? 2
+                       : (c & 0xF8) == 0xF0 ? 3
+                                            : 9;
+        if (extra == 9 || (c < 0x09) || i + extra >= n + (extra ? 0 : 1))
+            return false;
+        for (size_t k = 1; k <= extra; k++)
+            if ((s[i + k] & 0xC0) != 0x80)
+                return false;
+        i += extra + 1;
+    }
+    return true;
+}
+
 size_t hu_imessage_extract_audio_transcription(const unsigned char *blob, size_t blob_len,
                                                char *out, size_t cap) {
     static const char key[] = "IMAudioTranscription";
@@ -536,8 +555,8 @@ size_t hu_imessage_extract_audio_transcription(const unsigned char *blob, size_t
         if (h == 0 || len == 0)
             continue;
         size_t s = o + h;
-        if (s + len >= blob_len || blob[s + len] != 0x86)
-            continue; /* not a real length: the value must end at the object marker */
+        if (s + len >= blob_len || blob[s + len] != 0x86 || !utf8_text(blob + s, len))
+            continue; /* not a real length: the value must be text ending at the object marker */
         size_t n = len < cap - 1 ? len : cap - 1;
         while (n > 0 && n < len && (blob[s + n] & 0xC0) == 0x80)
             n--; /* never split a UTF-8 character */
