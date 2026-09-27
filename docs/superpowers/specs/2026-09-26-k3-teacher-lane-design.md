@@ -176,6 +176,32 @@ analysis attributes the specificity gap to an extractor that stores topic phrase
 - **Pre-registered:** spread below **30%** → pause the lane. The recommendation
   then becomes the extractor fix (store named entities), done first.
 
+**Result, measured 2026-09-27** (throwaway script; 39 real 1:1 moments from the
+last 14 days; 3 GLM samples each at batch priority; fixed scorer from `f5e3d402c`,
+vocab 310; counts only):
+
+| Metric | Value |
+|---|---|
+| Recall non-empty | **0 / 39 (0%)** — `human memory ground` returned `matched=0 bytes=0` for every item |
+| Recall has names | 0% |
+| Candidate spread | 12 / 39 = **30.8%**, Wilson 95% CI **[18.6%, 46.5%]** |
+| ≥ 1 specific candidate | 33.3% |
+| Seth's real reply specific | 28.2% |
+
+- **Verdict: INCONCLUSIVE.** The point estimate sits on the 30% bar, and the CI
+  spans both sides of it. Spread was measured **without** recall, because recall
+  was empty.
+- **The live path agrees recall is empty.** Every `[graph_grounding]` line in
+  `~/.human/logs/service-loop-error.log` (85 of 85) reads `live: N bytes skipped
+  for casual register`, with N = 0 in 84 and 76 bytes in one. In production,
+  grounding almost never produces anything, and when it does, the casual-register
+  gate drops it. So the model has no remembered specifics to name, which is
+  consistent with the 09-22 root cause (topic phrases, not names) and with a
+  second, independent cause (the register skip).
+- **Consequence:** the teacher lane cannot fix a retrieval pipeline that returns
+  nothing. The higher-leverage work is upstream, making recall return named facts
+  (see the sleep-time curator proposal), before any preference training.
+
 ### 7.2 Calibration gate (pre-registered)
 
 Written to `docs/evaluation/k3_judge_preregistration.json` and committed **before**
