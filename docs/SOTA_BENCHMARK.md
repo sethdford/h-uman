@@ -89,7 +89,7 @@ This document benchmarks the `human` runtime against state-of-the-art AI agent p
 
 | Capability | SOTA Reference | human Status | Rating | Gap |
 |-----------|---------------|-------------|--------|-----|
-| **Binary footprint** | — | ~3 MB release (measured ~2974 KB MinSizeRel+LTO); <6 MB RAM; <30 ms startup | **SOTA** | Measured size/RSS leadership vs Node agent stacks. |
+| **Binary footprint** | — | ~2694 KB release-size build, 3.3 MB `release` preset; 8.6–8.8 MB idle RSS; 4–9 ms startup (macOS arm64, 2026-09-27, `docs/perf/footprint.json`) | **SOTA** | Measured size/RSS leadership vs Node agent stacks. |
 | **Sandbox** | OpenHands (Docker) | Landlock + seccomp, Seatbelt, Docker, WASI | **COMPETITIVE** | Multiple backends; platform parity incomplete. |
 | **Security policy** | Anthropic Cowork containment | Deny-by-default, autonomy, pairing, HTTPS-only; Wave A unifies tool pre-execute gate | **COMPETITIVE** | Envelope parity across dispatcher/stream/DAG/HuLa is the bar; vault/SSRF follow-ups remain. |
 | **Eval framework** | SWE-bench, GAIA, LongMemEval | Suite runner + LLM-as-judge + regression gates | **COMPETITIVE** | Strong in-repo harness; external memory benches not yet gated. |
