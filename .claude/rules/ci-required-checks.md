@@ -41,6 +41,7 @@ build matrix and core test surface across configurations:
 | `completions` | Shell completions regen |
 | `docker` | Container image build |
 | `build-android` | Android shared lib build |
+| `iOS UI tests` | Gate job in `native-apps-fleet.yml`: passes only when every iOS simulator leg (XCUITest) passed, or when the `changes` job measured no `apps/**` change. Always reports, so it cannot strand unrelated PRs. Promoted early; see History. |
 
 ## Tier 2 — Advisory (must run, may fail)
 
@@ -107,7 +108,8 @@ gh api -X PUT repos/sethdford/h-uman/branches/main/protection \
       {"context": "design-tokens"},
       {"context": "completions"},
       {"context": "docker"},
-      {"context": "build-android"}
+      {"context": "build-android"},
+      {"context": "iOS UI tests"}
     ]
   },
   "enforce_admins": false,
@@ -143,3 +145,19 @@ This is the ONLY legitimate use of `--admin` against a red gate.
   red gates in a quarter (genuine flake).
 
 Always document promotion/demotion in this file's history.
+
+## History
+
+- **2026-09-27: `iOS UI tests` promoted to Tier 1** by the user, *before* the
+  ≥50-clean-run bar. The iOS fleet had been quarantined (`continue-on-error`)
+  since June under #271. #485 found the cause: a real app bug where More →
+  Settings rendered blank because `LazyView`'s `onAppear` never fires on iOS
+  26. After the fix, every iOS leg passed at job level on PR runs and on the
+  merge to main (run 36315183931). Why the early promotion was safe: the
+  requirement is on a single always-reporting gate job, not on the matrix
+  checks. The workflow no longer path-filters `pull_request`; a `changes` job
+  does the filtering, so non-apps PRs get a passing gate in seconds instead of
+  hanging on "Expected". `continue-on-error` was removed so a failed leg
+  actually reaches the gate. iPad (`ipad-10`) is still excluded; the iOS 26
+  iPad tab-bar hang is unfixed. Demote under the usual rule (≥3
+  false-positive reds in a quarter).

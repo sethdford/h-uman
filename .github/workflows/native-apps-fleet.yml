@@ -9,16 +9,18 @@ on:
   workflow_dispatch:
   schedule:
     - cron: "0 11 * * 1"
+  # No `paths:` filter on pull_request: the `iOS UI tests` gate below is a
+  # required check, and a required check whose workflow never triggers blocks
+  # the PR forever ("Expected — waiting"). The `changes` job does the filtering
+  # instead, so non-apps PRs still get a (passing) gate in ~10 s.
   pull_request:
-    paths:
-      - "apps/**"
-      - ".github/workflows/native-apps-fleet.yml"
   push:
     branches:
       - main
     paths:
       - "apps/**"
       - ".github/workflows/native-apps-fleet.yml"
+      - ".github/actions/ios-uitest/**"
 
 permissions:
   contents: read
@@ -31,8 +33,39 @@ env:
   GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.workers.max=4 -Dkotlin.incremental=false"
 
 jobs:
+  changes:
+    name: Detect apps/** changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      apps: ${{ steps.diff.outputs.apps }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+      - id: diff
+        # On pull_request the checkout is GitHub's merge commit, whose first
+        # parent is the base tip it was merged onto — so HEAD^1..HEAD is exactly
+        # what merging this PR changes. push-to-main keeps its workflow-level
+        # paths filter, and schedule/dispatch always run the full fleet.
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "apps=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed=$(git diff --name-only HEAD^1 HEAD)
+          echo "$changed"
+          if printf '%s\n' "$changed" | grep -qE '^(apps/|\.github/workflows/native-apps-fleet\.yml$|\.github/actions/ios-uitest/)'; then
+            echo "apps=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "apps=false" >> "$GITHUB_OUTPUT"
+          fi
+
   human-kit-swift:
     name: HumanKit · Swift PM
+    needs: changes
+    if: needs.changes.outputs.apps == 'true'
     runs-on: macos-15
     timeout-minutes: 30
     steps:
@@ -42,14 +75,13 @@ jobs:
 
   ios-simulator-fleet:
     name: iOS · ${{ matrix.slug }}
+    needs: changes
+    if: needs.changes.outputs.apps == 'true'
     runs-on: macos-15
     timeout-minutes: 45
-    # QUARANTINED (non-blocking) — tracked in #271. The two tab-overflow UITests
-    # were catching a real app bug: More → Settings rendered a blank screen,
-    # because LazyView's onAppear never fires for a destination pushed from the
-    # iOS 26 More list (fixed in ContentView.swift). Advisory until the fleet has
-    # a clean track record (ci-required-checks.md: >=50 clean runs to promote).
-    continue-on-error: true
+    # BLOCKING via the `iOS UI tests` gate job below (Tier 1, promoted
+    # 2026-09-27). No continue-on-error: it would make needs.*.result read
+    # `success` for a failed leg and turn the gate into a rubber stamp.
     strategy:
       fail-fast: false
       matrix:
@@ -60,12 +92,10 @@ jobs:
             destination: "platform=iOS Simulator,name=iPhone 16 Pro,OS=latest"
           - slug: iphone-se-3
             destination: "platform=iOS Simulator,name=iPhone SE (3rd generation),OS=latest"
-          # ipad-10 removed (tracked in #271): on iOS 26 the iPad tab-bar detection
-          # hangs (45s waits, retried) until the 45-min job timeout, which records
-          # as `cancelled` — and `continue-on-error` suppresses `failure`, NOT
-          # `cancelled`, so it poisoned the whole run's conclusion. The iPhone
-          # devices fail fast and are suppressed cleanly. Restore iPad coverage
-          # when the iOS 26 tab-overflow UITests are fixed.
+          # ipad-10 still out: on iOS 26 the iPad tab-bar detection hangs (45 s
+          # waits, retried) until the 45-min job timeout. #485 fixed the iPhone
+          # More-overflow path only; iPad needs its own fix before it returns
+          # to this (now blocking) matrix.
     steps:
       - uses: actions/checkout@v7
 
@@ -103,6 +133,8 @@ jobs:
 
   android-emulator-fleet:
     name: Android · API ${{ matrix.api-level }}
+    needs: changes
+    if: needs.changes.outputs.apps == 'true'
     # ubuntu-22.04, NOT ubuntu-latest (24.04): the Android emulator fails to boot
     # ("Timeout waiting for emulator to boot") on the 24.04 runner image even with
     # KVM enabled — a widely-reported android-emulator-runner regression. 22.04 is
@@ -174,6 +206,8 @@ jobs:
 
   macos-app-build:
     name: macOS app · Swift
+    needs: changes
+    if: needs.changes.outputs.apps == 'true'
     runs-on: macos-15
     timeout-minutes: 20
     steps:
@@ -183,6 +217,8 @@ jobs:
 
   macos-app-archive:
     name: macOS app · Archive + codesign
+    needs: changes
+    if: needs.changes.outputs.apps == 'true'
     runs-on: macos-15
     timeout-minutes: 25
     # The `secrets` context is NOT permitted inside step-level `if:` conditions
@@ -268,12 +304,15 @@ jobs:
     name: Fleet SOTA gate (award-tier)
     runs-on: ubuntu-latest
     needs:
+      - changes
       - human-kit-swift
       - ios-simulator-fleet
       - android-emulator-fleet
       - macos-app-build
       - macos-app-archive
-    if: always()
+    # Skipped (not failed) when no apps/** change: the fleet didn't run, so
+    # there is nothing to summarize.
+    if: always() && needs.changes.outputs.apps == 'true'
     steps:
       - name: Summarize + enforce all-green
         env:
@@ -298,23 +337,53 @@ jobs:
             echo ""
             echo "### What this fleet proves"
             echo "- **Inclusivity**: Tab journeys + labeled controls exercised under automation (VoiceOver/TalkBack-oriented labels)."
-            echo "- **Cross-device**: Multiple iPhone / iPad + API 29–34 emulators."
+            echo "- **Cross-device**: Multiple iPhones (iPad pending) + API 29–34 emulators."
             echo "- **Reliability**: Xcode test retries + disabled emulator animations + Gradle caches."
             echo "- **Distribution-ready**: macOS archive built + codesigned (or unsigned-fallback on fork PRs)."
           } >> "$GITHUB_STEP_SUMMARY"
 
-          # iOS + Android are ADVISORY (quarantined, tracked in #271): the iOS
-          # UITests fail on iOS 26's tab-bar overflow and the Android emulator
-          # won't boot on GitHub runners — both pre-existing and unrelated to the
-          # Swift-6 toolchain fix that made this fleet buildable again. The gate
-          # hard-requires only the Swift/macOS jobs; the advisory rows surface
-          # iOS/Android status without blocking.
-          if [ "$IOS" != success ] || [ "$AND" != success ]; then
-            echo "::warning::Advisory (non-blocking, see #271): iOS=$IOS Android=$AND — known pre-existing native-CI issues."
+          # Android is ADVISORY (quarantined): the emulator won't boot on GitHub
+          # runners (#483). iOS became blocking on 2026-09-27 once #485 fixed the
+          # More-overflow bug; its branch-protection gate is `iOS UI tests`.
+          if [ "$AND" != success ]; then
+            echo "::warning::Advisory (non-blocking, see #483): Android=$AND — known emulator-boot issue."
           fi
-          if [ "$HK" != success ] || [ "$MAC" != success ] || [ "$MAC_ARCHIVE" != success ]; then
-            echo "::error::Fleet SOTA gate failed — required Swift/macOS jobs must be success (HK=$HK MAC=$MAC MAC_ARCHIVE=$MAC_ARCHIVE)."
+          if [ "$HK" != success ] || [ "$IOS" != success ] || [ "$MAC" != success ] || [ "$MAC_ARCHIVE" != success ]; then
+            echo "::error::Fleet SOTA gate failed — required jobs must be success (HK=$HK IOS=$IOS MAC=$MAC MAC_ARCHIVE=$MAC_ARCHIVE)."
             exit 1
           fi
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "✅ **Fleet SOTA gate passed** (Swift/macOS required green; iOS+Android advisory — #271)." >> "$GITHUB_STEP_SUMMARY"
+          echo "✅ **Fleet SOTA gate passed** (Swift/macOS/iOS required green; Android advisory — #483)." >> "$GITHUB_STEP_SUMMARY"
+
+  # Required status check on main. Always reports (unlike the matrix legs, which
+  # skip on non-apps PRs), so branch protection can require it without blocking
+  # unrelated PRs. Passes only on evidence: the fleet ran and every leg passed,
+  # or `changes` measured "no apps/** change".
+  ios-ui-tests:
+    name: iOS UI tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [changes, ios-simulator-fleet]
+    if: always()
+    steps:
+      - name: Enforce iOS simulator fleet result
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          APPS: ${{ needs.changes.outputs.apps }}
+          IOS: ${{ needs.ios-simulator-fleet.result }}
+        run: |
+          # A failed/cancelled `changes` leaves APPS empty, which must NOT read
+          # as "no apps change" — a gate that could not measure does not pass.
+          if [ "$CHANGES" != success ]; then
+            echo "::error::changes job did not succeed ($CHANGES); cannot tell whether iOS UI tests were needed."
+            exit 1
+          fi
+          if [ "$APPS" != true ]; then
+            echo "No apps/** changes — iOS simulator fleet skipped by design (fleet=$IOS)."
+            exit 0
+          fi
+          if [ "$IOS" != success ]; then
+            echo "::error::iOS simulator fleet result: $IOS (required: success)."
+            exit 1
+          fi
+          echo "iOS simulator fleet passed on every device."
