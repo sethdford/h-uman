@@ -2557,8 +2557,13 @@ imsg_media:
             if (verr == HU_ERR_IO && !vres.restored)
                 hu_log_error("imessage", NULL,
                              "voice record: default input NOT restored to the real mic");
-            hu_log_info("imessage", NULL, "voice record fell back to attachment: block=%s stage=%d",
-                        hu_voice_record_block_name(vres.block), (int)vres.stage);
+            if (vres.cancel_failed)
+                hu_log_error("imessage", NULL,
+                             "voice record: Cancel failed — a recording may be left in Messages");
+            hu_log_info("imessage", NULL,
+                        "voice record fell back to attachment: block=%s stage=%d reason=%s",
+                        hu_voice_record_block_name(vres.block), (int)vres.stage,
+                        vres.abort_reason ? vres.abort_reason : "-");
         }
     }
     /* Send media attachments (local file paths only) after text succeeds.

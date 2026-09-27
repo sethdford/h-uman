@@ -2829,10 +2829,11 @@ static hu_error_t cmd_voice_record_send(int argc, char **argv) {
     }
     hu_voice_record_result_t res;
     hu_error_t err = hu_voice_record_send_from_env(to, strlen(to), file, &res);
-    printf("result=%s stage=%d block=%s verified=%d restored=%d\n",
+    printf("result=%s stage=%d block=%s reason=%s verified=%d restored=%d cancel_failed=%d\n",
            err == HU_OK ? "sent" : (err == HU_ERR_NOT_SUPPORTED ? "blocked" : "failed"),
-           (int)res.stage, hu_voice_record_block_name(res.block), res.verified ? 1 : 0,
-           res.restored ? 1 : 0);
+           (int)res.stage, hu_voice_record_block_name(res.block),
+           res.abort_reason ? res.abort_reason : "-", res.verified ? 1 : 0, res.restored ? 1 : 0,
+           res.cancel_failed ? 1 : 0);
     return (err == HU_OK && res.verified && res.restored) ? HU_OK : HU_ERR_IO;
 }
 

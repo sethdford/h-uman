@@ -54,7 +54,9 @@ typedef struct {
     bool blackhole_present;
     bool real_mic_configured; /* HU_VOICE_REAL_INPUT set and non-empty */
     bool real_mic_present;
-    bool real_mic_busy; /* another process is using the real mic */
+    bool real_mic_busy;             /* another process is using the real mic */
+    bool default_input_is_real_mic; /* else a call may be on another mic (AirPods) */
+    bool blackhole_busy;            /* another app already routes audio into BlackHole */
     double user_idle_sec;
     double min_idle_sec;
 } hu_voice_record_facts_t;
@@ -67,11 +69,25 @@ typedef enum {
     HU_VREC_NO_REAL_MIC,
     HU_VREC_MIC_BUSY,
     HU_VREC_USER_ACTIVE,
+    HU_VREC_INPUT_NOT_REAL_MIC,
+    HU_VREC_BLACKHOLE_BUSY,
+    HU_VREC_BAD_HANDLE,   /* not a plain phone number or email: never open it */
+    HU_VREC_LOCKED,       /* another recording is in progress (any process) */
+    HU_VREC_UNKNOWN_CHAT, /* Messages could not name the target conversation */
 } hu_voice_record_block_t;
 
 /* Fails closed: NULL facts block as HU_VREC_NO_AX. */
 hu_voice_record_block_t hu_voice_record_preflight(const hu_voice_record_facts_t *f);
 const char *hu_voice_record_block_name(hu_voice_record_block_t b);
+
+/* Only plain phone numbers (+digits, >= 7 digits) and emails are opened —
+ * never group GUIDs or anything carrying URL syntax. */
+bool hu_voice_record_handle_ok(const char *handle, size_t handle_len);
+
+/* The open conversation is the target: Messages' window title equals the
+ * display name Messages itself gives the target handle (trimmed, case-folded).
+ * Empty on either side never matches — the wrong-recipient check fails closed. */
+bool hu_voice_record_title_matches(const char *window_title, const char *expected_title);
 
 /* Human-sized pauses around the clip: lead-in 350-700 ms, tail 500-900 ms. */
 typedef struct {
@@ -110,6 +126,13 @@ typedef struct hu_voice_record_port {
     int64_t (*max_rowid)(void *ctx); /* -1 unknown */
     bool (*audio_row_after)(void *ctx, const char *handle, size_t handle_len, int64_t after_rowid,
                             uint32_t timeout_ms);
+    hu_error_t (*chat_title)(void *ctx, char *buf, size_t cap); /* open conversation's title */
+    hu_error_t (*expected_title)(void *ctx, const char *handle, size_t handle_len, char *buf,
+                                 size_t cap); /* Messages' own display name for the handle */
+    double (*idle_sec)(void *ctx);            /* seconds since the last keyboard/mouse input */
+    uint64_t (*now_ms)(void *ctx);            /* monotonic */
+    bool (*try_lock)(void *ctx);              /* one recording at a time, across processes */
+    void (*unlock)(void *ctx);
 } hu_voice_record_port_t;
 
 typedef struct {
@@ -137,11 +160,13 @@ typedef struct {
     hu_voice_record_stage_t stage; /* furthest stage reached */
     bool verified;                 /* chat.db shows the memo */
     bool restored;                 /* default input read back == real_mic */
+    bool cancel_failed;            /* a recording may be left in the compose bar */
+    const char *abort_reason;      /* static: wrong_chat, user_returned, send_unconfirmed, ... */
     int64_t prior_max_rowid;
 } hu_voice_record_result_t;
 
-/* HU_OK: Send was pressed (see out->verified; never re-send on !verified).
- * HU_ERR_NOT_SUPPORTED: preflight blocked, nothing touched.
+/* HU_OK: the memo left (see out->verified; never re-send on !verified).
+ * HU_ERR_NOT_SUPPORTED: blocked before anything was touched.
  * HU_ERR_IO: failed before Send; recording cancelled and input/UI restored —
  * the caller falls back to the attachment send. */
 hu_error_t hu_voice_record_send(const hu_voice_record_port_t *port,

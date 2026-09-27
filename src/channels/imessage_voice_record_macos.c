@@ -11,20 +11,26 @@
 #include <stddef.h>
 #include <string.h>
 
-#if defined(__APPLE__) && defined(__MACH__) && !HU_IS_TEST
+#if defined(__APPLE__) && defined(__MACH__) && !HU_IS_TEST && defined(HU_HAS_IMESSAGE) && \
+    HU_HAS_IMESSAGE
 
 #include "human/core/allocator.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 #include "human/core/process_util.h"
 
 #include <ApplicationServices/ApplicationServices.h>
 #include <AudioToolbox/AudioToolbox.h>
 #include <CoreAudio/CoreAudio.h>
 #include <CoreFoundation/CoreFoundation.h>
+#include <fcntl.h>
 #include <IOKit/IOKitLib.h>
+#include <pthread.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/file.h>
+#include <time.h>
 #include <unistd.h>
 
 #define VREC_AX_MAX_DEPTH 40
@@ -307,7 +313,11 @@ static void mac_restore_ui(void *ctx) {
     vrec_mac_ctx_t *m = (vrec_mac_ctx_t *)ctx;
     /* Best effort: reselect the conversation the user had open when its
      * sidebar entry is an AX button with that title (pinned chats are). */
-    if (m->win_title[0] && mac_press(ctx, m->win_title) != HU_OK)
+    bool is_control = strcmp(m->win_title, HU_VREC_LABEL_RECORD) == 0 ||
+                      strcmp(m->win_title, HU_VREC_LABEL_STOP) == 0 ||
+                      strcmp(m->win_title, HU_VREC_LABEL_SEND) == 0 ||
+                      strcmp(m->win_title, HU_VREC_LABEL_CANCEL) == 0;
+    if (m->win_title[0] && !is_control && mac_press(ctx, m->win_title) != HU_OK)
         hu_log_info("imessage", NULL, "voice record: previous conversation not reselected");
     if (m->front_pid > 0)
         set_frontmost(m->front_pid);
@@ -469,7 +479,6 @@ static hu_error_t mac_playback_run(void *ctx) {
 /* ── facts, timing, chat.db ────────────────────────────────────────────── */
 
 static hu_error_t mac_gather_facts(void *ctx, const char *real_mic, hu_voice_record_facts_t *out) {
-    (void)ctx;
     memset(out, 0, sizeof(*out));
     out->ax_trusted = AXIsProcessTrusted();
     out->messages_running = hu_imessage_messages_pid() > 0;
@@ -479,6 +488,12 @@ static hu_error_t mac_gather_facts(void *ctx, const char *real_mic, hu_voice_rec
         out->real_mic_configured ? find_input_device(real_mic) : kAudioObjectUnknown;
     out->real_mic_present = mic != kAudioObjectUnknown;
     out->real_mic_busy = out->real_mic_present && dev_running_somewhere(mic);
+    char cur[256] = {0};
+    out->default_input_is_real_mic = out->real_mic_configured &&
+                                     mac_get_input(ctx, cur, sizeof(cur)) == HU_OK &&
+                                     strcmp(cur, real_mic) == 0;
+    AudioObjectID bh = find_input_device(HU_VREC_BLACKHOLE_NAME);
+    out->blackhole_busy = bh != kAudioObjectUnknown && dev_running_somewhere(bh);
     out->user_idle_sec = hid_idle_sec();
     return HU_OK;
 }
@@ -504,10 +519,110 @@ static bool mac_audio_row_after(void *ctx, const char *handle, size_t handle_len
     return false;
 }
 
+static hu_error_t mac_chat_title(void *ctx, char *buf, size_t cap) {
+    (void)ctx;
+    if (!buf || cap == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    buf[0] = '\0';
+    AXUIElementRef win = messages_window();
+    if (!win)
+        return HU_ERR_NOT_FOUND;
+    CFTypeRef t = NULL;
+    bool ok = false;
+    if (AXUIElementCopyAttributeValue(win, kAXTitleAttribute, &t) == kAXErrorSuccess && t) {
+        ok = CFGetTypeID(t) == CFStringGetTypeID() &&
+             CFStringGetCString((CFStringRef)t, buf, (CFIndex)cap, kCFStringEncodingUTF8);
+        CFRelease(t);
+    }
+    CFRelease(win);
+    return ok ? HU_OK : HU_ERR_NOT_FOUND;
+}
+
+/* Messages resolves the display name exactly as it titles the conversation
+ * window. The handle was validated (phone/email characters only), so it can
+ * be quoted into the script verbatim. */
+static hu_error_t mac_expected_title(void *ctx, const char *handle, size_t handle_len, char *buf,
+                                     size_t cap) {
+    (void)ctx;
+    if (!buf || cap == 0 || !hu_voice_record_handle_ok(handle, handle_len))
+        return HU_ERR_INVALID_ARGUMENT;
+    buf[0] = '\0';
+    char script[384];
+    int n = snprintf(script, sizeof(script),
+                     "tell application \"Messages\" to get name of first participant whose "
+                     "handle is \"%.*s\"",
+                     (int)handle_len, handle);
+    if (n <= 0 || (size_t)n >= sizeof(script))
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *argv[] = {"osascript", "-e", script, NULL};
+    hu_run_result_t rr = {0};
+    hu_error_t e = hu_process_run_with_timeout(&alloc, argv, NULL, 4096, 5, &rr);
+    bool ok = e == HU_OK && rr.success && rr.exit_code == 0 && rr.stdout_buf && rr.stdout_len;
+    if (ok) {
+        size_t len = rr.stdout_len;
+        while (len > 0 && (rr.stdout_buf[len - 1] == '\n' || rr.stdout_buf[len - 1] == '\r'))
+            len--;
+        ok = len > 0 && len < cap;
+        if (ok) {
+            memcpy(buf, rr.stdout_buf, len);
+            buf[len] = '\0';
+        }
+    }
+    hu_run_result_free(&alloc, &rr);
+    return ok ? HU_OK : HU_ERR_NOT_FOUND;
+}
+
+static double mac_idle_sec(void *ctx) {
+    (void)ctx;
+    return hid_idle_sec();
+}
+
+static uint64_t mac_now_ms(void *ctx) {
+    (void)ctx;
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u;
+}
+
+/* One recording at a time: a mutex for this process, an flock for the daemon
+ * and `human voice record-send` running side by side. */
+static pthread_mutex_t g_vrec_mu = PTHREAD_MUTEX_INITIALIZER;
+static int g_vrec_lock_fd = -1;
+
+static bool mac_try_lock(void *ctx) {
+    (void)ctx;
+    if (pthread_mutex_trylock(&g_vrec_mu) != 0)
+        return false;
+    char path[512];
+    int n = hu_paths_state(path, sizeof(path), "voice_record.lock");
+    int fd = (n > 0 && (size_t)n < sizeof(path)) ? open(path, O_CREAT | O_RDWR, 0600) : -1;
+    if (fd < 0 || flock(fd, LOCK_EX | LOCK_NB) != 0) {
+        if (fd >= 0)
+            close(fd);
+        pthread_mutex_unlock(&g_vrec_mu);
+        return false;
+    }
+    g_vrec_lock_fd = fd;
+    return true;
+}
+
+static void mac_unlock(void *ctx) {
+    (void)ctx;
+    if (g_vrec_lock_fd >= 0) {
+        flock(g_vrec_lock_fd, LOCK_UN);
+        close(g_vrec_lock_fd);
+        g_vrec_lock_fd = -1;
+    }
+    pthread_mutex_unlock(&g_vrec_mu);
+}
+
 static const hu_voice_record_port_t k_mac_port = {
     &g_vrec,          mac_gather_facts,     mac_set_input, mac_get_input,  mac_remember_ui,
     mac_restore_ui,   mac_open_chat,        mac_press,     mac_wait_label, mac_playback_prepare,
     mac_playback_run, mac_playback_dispose, mac_sleep_ms,  mac_max_rowid,  mac_audio_row_after,
+    mac_chat_title,   mac_expected_title,   mac_idle_sec,  mac_now_ms,     mac_try_lock,
+    mac_unlock,
 };
 
 const hu_voice_record_port_t *hu_voice_record_macos_port(void) {
@@ -580,10 +695,34 @@ static bool stub_row(void *c, const char *h, size_t n, int64_t a, uint32_t t) {
     return false;
 }
 
+static hu_error_t stub_title(void *c, char *b, size_t n) {
+    (void)c;
+    if (b && n)
+        b[0] = '\0';
+    return HU_ERR_NOT_SUPPORTED;
+}
+static hu_error_t stub_expected(void *c, const char *h, size_t hl, char *b, size_t n) {
+    (void)h;
+    (void)hl;
+    return stub_title(c, b, n);
+}
+static double stub_idle(void *c) {
+    (void)c;
+    return 0.0;
+}
+static uint64_t stub_now(void *c) {
+    (void)c;
+    return 0;
+}
+static bool stub_lock(void *c) {
+    (void)c;
+    return true; /* preflight blocks right after; unlock follows */
+}
+
 static const hu_voice_record_port_t k_stub_port = {
-    NULL,          stub_facts, stub_set_input, stub_get_input, stub_ctx_only,
-    stub_void,     stub_open,  stub_press,     stub_wait,      stub_prepare,
-    stub_ctx_only, stub_void,  stub_sleep,     stub_rowid,     stub_row,
+    NULL,       stub_facts, stub_set_input, stub_get_input, stub_ctx_only, stub_void,  stub_open,
+    stub_press, stub_wait,  stub_prepare,   stub_ctx_only,  stub_void,     stub_sleep, stub_rowid,
+    stub_row,   stub_title, stub_expected,  stub_idle,      stub_now,      stub_lock,  stub_void,
 };
 
 const hu_voice_record_port_t *hu_voice_record_macos_port(void) {

@@ -18,6 +18,8 @@ static hu_voice_record_facts_t all_ok(void) {
                                  .real_mic_configured = true,
                                  .real_mic_present = true,
                                  .real_mic_busy = false,
+                                 .default_input_is_real_mic = true,
+                                 .blackhole_busy = false,
                                  .user_idle_sec = 120.0,
                                  .min_idle_sec = 20.0};
     return f;
@@ -113,6 +115,14 @@ typedef struct {
     bool row_found;
     int send_presses;      /* Send presses so far */
     int record_back_after; /* compose bar returns to Record after this many Sends; 0 = never */
+    bool stop_pressed;
+    bool cancel_fails;            /* Cancel press reports an error */
+    const char *title;            /* open conversation */
+    const char *title_after_stop; /* conversation switched under us after Stop */
+    const char *expected;         /* Messages' name for the target */
+    double idle;                  /* seconds since last user input, during the run */
+    uint64_t clock_ms;
+    bool lock_busy;
 } fake_port_t;
 
 static void fp_log(fake_port_t *f, const char *s) {
@@ -158,10 +168,14 @@ static hu_error_t fp_press(void *c, const char *label) {
     fake_port_t *f = c;
     if (strcmp(label, HU_VREC_LABEL_SEND) == 0)
         f->send_presses++;
+    if (strcmp(label, HU_VREC_LABEL_STOP) == 0)
+        f->stop_pressed = true;
     char b[48];
     snprintf(b, sizeof(b), "press:%s", label);
     fp_log(c, b);
-    return HU_OK;
+    if (f->cancel_fails && strcmp(label, HU_VREC_LABEL_CANCEL) == 0)
+        return HU_ERR_IO;
+    return fp_fail(f, b) ? HU_ERR_IO : HU_OK;
 }
 static bool fp_wait(void *c, const char *label, uint32_t timeout_ms) {
     (void)timeout_ms;
@@ -201,11 +215,43 @@ static bool fp_row(void *c, const char *h, size_t n, int64_t after, uint32_t tim
     return ((fake_port_t *)c)->row_found;
 }
 
+static hu_error_t fp_chat_title(void *c, char *b, size_t n) {
+    fake_port_t *f = c;
+    const char *t = (f->stop_pressed && f->title_after_stop) ? f->title_after_stop : f->title;
+    snprintf(b, n, "%s", t ? t : "");
+    return HU_OK;
+}
+static hu_error_t fp_expected(void *c, const char *h, size_t hl, char *b, size_t n) {
+    (void)h;
+    (void)hl;
+    fake_port_t *f = c;
+    if (!f->expected)
+        return HU_ERR_NOT_FOUND;
+    snprintf(b, n, "%s", f->expected);
+    return HU_OK;
+}
+static double fp_idle(void *c) {
+    return ((fake_port_t *)c)->idle;
+}
+static uint64_t fp_now(void *c) {
+    fake_port_t *f = c;
+    f->clock_ms += 1000; /* every look at the clock is a second later */
+    return f->clock_ms;
+}
+static bool fp_lock(void *c) {
+    fake_port_t *f = c;
+    fp_log(f, "lock");
+    return !f->lock_busy;
+}
+static void fp_unlock(void *c) {
+    fp_log(c, "unlock");
+}
+
 static hu_voice_record_port_t fake_port(fake_port_t *f) {
-    hu_voice_record_port_t p = {f,           fp_gather,     fp_set_input, fp_get_input,
-                                fp_remember, fp_restore_ui, fp_open,      fp_press,
-                                fp_wait,     fp_prep,       fp_run,       fp_dispose,
-                                fp_sleep,    fp_rowid,      fp_row};
+    hu_voice_record_port_t p = {
+        f,        fp_gather,     fp_set_input, fp_get_input, fp_remember, fp_restore_ui, fp_open,
+        fp_press, fp_wait,       fp_prep,      fp_run,       fp_dispose,  fp_sleep,      fp_rowid,
+        fp_row,   fp_chat_title, fp_expected,  fp_idle,      fp_now,      fp_lock,       fp_unlock};
     return p;
 }
 
@@ -215,6 +261,9 @@ static fake_port_t fake_ok(void) {
     f.facts = all_ok();
     f.row_found = true;
     f.record_back_after = 1;
+    f.title = "Test Contact";
+    f.expected = "Test Contact";
+    f.idle = 1e6; /* the user is away for the whole run */
     snprintf(f.input, sizeof(f.input), "Shure MV7");
     return f;
 }
@@ -230,8 +279,8 @@ static void test_vrec_send_happy_path_order(void) {
     hu_voice_record_request_t r = req_ok();
     hu_voice_record_result_t res;
     HU_ASSERT_EQ(hu_voice_record_send(&p, &r, &res), HU_OK);
-    HU_ASSERT_STR_EQ(f.trace, "facts,remember,prep,in:bh,open,press:Record audio,play,"
-                              "press:Stop,settle,press:Send,dispose,in:real,restore_ui,");
+    HU_ASSERT_STR_EQ(f.trace, "lock,facts,remember,prep,in:bh,open,press:Record audio,play,"
+                              "press:Stop,settle,press:Send,dispose,in:real,restore_ui,unlock,");
     HU_ASSERT_TRUE(res.verified);
     HU_ASSERT_TRUE(res.restored);
     HU_ASSERT_EQ(res.stage, HU_VREC_STAGE_SENT);
@@ -245,7 +294,7 @@ static void test_vrec_send_mic_busy_touches_nothing(void) {
     hu_voice_record_request_t r = req_ok();
     hu_voice_record_result_t res;
     HU_ASSERT_EQ(hu_voice_record_send(&p, &r, &res), HU_ERR_NOT_SUPPORTED);
-    HU_ASSERT_STR_EQ(f.trace, "facts,");
+    HU_ASSERT_STR_EQ(f.trace, "lock,facts,unlock,");
     HU_ASSERT_EQ(res.block, HU_VREC_MIC_BUSY);
 }
 
@@ -345,6 +394,151 @@ static void test_vrec_send_ui_unconfirmed_but_in_chatdb_counts_as_sent(void) {
     HU_ASSERT_TRUE(strstr(f.trace, "press:Cancel audio recording") == NULL);
 }
 
+/* ── Review fix pass (2026-09-27): wrong chat, other-mic calls, hot
+ * recordings, duplicates, the user coming back, BlackHole in use, and two
+ * recordings at once. ─────────────────────────────────────────────────── */
+static void test_vrec_handle_ok_accepts_only_phone_or_email(void) {
+    HU_ASSERT_TRUE(hu_voice_record_handle_ok("+18012017497", 12));
+    HU_ASSERT_TRUE(hu_voice_record_handle_ok("user_a@example.com", 18));
+    HU_ASSERT_FALSE(hu_voice_record_handle_ok("iMessage;+;chat123456", 21));
+    HU_ASSERT_FALSE(hu_voice_record_handle_ok("+1801?x=1", 9));
+    HU_ASSERT_FALSE(hu_voice_record_handle_ok("12345", 5));
+    HU_ASSERT_FALSE(hu_voice_record_handle_ok("a@b@c.com", 9));
+    HU_ASSERT_FALSE(hu_voice_record_handle_ok("", 0));
+}
+
+static void test_vrec_title_matches_is_exact_but_case_and_space_tolerant(void) {
+    HU_ASSERT_TRUE(hu_voice_record_title_matches("Seth Ford", "Seth Ford"));
+    HU_ASSERT_TRUE(hu_voice_record_title_matches("  seth ford ", "Seth Ford"));
+    HU_ASSERT_FALSE(hu_voice_record_title_matches("Betty Ford", "Seth Ford"));
+    HU_ASSERT_FALSE(hu_voice_record_title_matches("Seth Fordham", "Seth Ford"));
+    HU_ASSERT_FALSE(hu_voice_record_title_matches("", ""));
+    HU_ASSERT_FALSE(hu_voice_record_title_matches("Seth Ford", NULL));
+}
+
+static void test_vrec_preflight_blocks_other_mic_and_busy_blackhole(void) {
+    hu_voice_record_facts_t f = all_ok();
+    f.default_input_is_real_mic = false;
+    HU_ASSERT_EQ(hu_voice_record_preflight(&f), HU_VREC_INPUT_NOT_REAL_MIC);
+    f = all_ok();
+    f.blackhole_busy = true;
+    HU_ASSERT_EQ(hu_voice_record_preflight(&f), HU_VREC_BLACKHOLE_BUSY);
+}
+
+static void test_vrec_bad_handle_touches_nothing(void) {
+    fake_port_t f = fake_ok();
+    hu_voice_record_port_t p = fake_port(&f);
+    hu_voice_record_request_t r = req_ok();
+    r.handle = "iMessage;+;chat123456";
+    r.handle_len = strlen(r.handle);
+    hu_voice_record_result_t res;
+    HU_ASSERT_EQ(hu_voice_record_send(&p, &r, &res), HU_ERR_NOT_SUPPORTED);
+    HU_ASSERT_EQ(res.block, HU_VREC_BAD_HANDLE);
+    HU_ASSERT_STR_EQ(f.trace, "");
+}
+
+static void test_vrec_second_recording_touches_nothing(void) {
+    fake_port_t f = fake_ok();
+    f.lock_busy = true;
+    hu_voice_record_port_t p = fake_port(&f);
+    hu_voice_record_request_t r = req_ok();
+    hu_voice_record_result_t res;
+    HU_ASSERT_EQ(hu_voice_record_send(&p, &r, &res), HU_ERR_NOT_SUPPORTED);
+    HU_ASSERT_EQ(res.block, HU_VREC_LOCKED);
+    HU_ASSERT_STR_EQ(f.trace, "lock,"); /* never unlock a lock we do not hold */
+}
+
+static void test_vrec_unnamed_target_touches_nothing(void) {
+    fake_port_t f = fake_ok();
+    f.expected = NULL;
+    hu_voice_record_port_t p = fake_port(&f);
+    hu_voice_record_request_t r = req_ok();
+    hu_voice_record_result_t res;
+    HU_ASSERT_EQ(hu_voice_record_send(&p, &r, &res), HU_ERR_NOT_SUPPORTED);
+    HU_ASSERT_EQ(res.block, HU_VREC_UNKNOWN_CHAT);
+    HU_ASSERT_STR_EQ(f.trace, "lock,facts,unlock,");
+}
+
+static void test_vrec_wrong_chat_never_records(void) {
+    fake_port_t f = fake_ok();
+    f.title = "Betty Ford"; /* Messages did not switch to the target */
+    hu_voice_record_port_t p = fake_port(&f);
+    hu_voice_record_request_t r = req_ok();
+    hu_voice_record_result_t res;
+    HU_ASSERT_EQ(hu_voice_record_send(&p, &r, &res), HU_ERR_IO);
+    HU_ASSERT_TRUE(strstr(f.trace, "press:Record audio") == NULL);
+    HU_ASSERT_STR_EQ(res.abort_reason, "wrong_chat");
+    HU_ASSERT_TRUE(res.restored);
+}
+
+static void test_vrec_chat_switched_before_send_cancels(void) {
+    fake_port_t f = fake_ok();
+    f.title_after_stop = "Betty Ford";
+    hu_voice_record_port_t p = fake_port(&f);
+    hu_voice_record_request_t r = req_ok();
+    hu_voice_record_result_t res;
+    HU_ASSERT_EQ(hu_voice_record_send(&p, &r, &res), HU_ERR_IO);
+    HU_ASSERT_TRUE(strstr(f.trace, "press:Send") == NULL);
+    HU_ASSERT_TRUE(strstr(f.trace, "press:Cancel audio recording") != NULL);
+    HU_ASSERT_STR_EQ(res.abort_reason, "wrong_chat");
+}
+
+static void test_vrec_user_returned_mid_clip_cancels(void) {
+    fake_port_t f = fake_ok();
+    f.idle = 0.2; /* keyboard/mouse input since the run started */
+    hu_voice_record_port_t p = fake_port(&f);
+    hu_voice_record_request_t r = req_ok();
+    hu_voice_record_result_t res;
+    HU_ASSERT_EQ(hu_voice_record_send(&p, &r, &res), HU_ERR_IO);
+    HU_ASSERT_TRUE(strstr(f.trace, "press:Send") == NULL);
+    HU_ASSERT_TRUE(strstr(f.trace, "press:Cancel audio recording") != NULL);
+    HU_ASSERT_STR_EQ(res.abort_reason, "user_returned");
+}
+
+static void test_vrec_operator_override_ignores_activity(void) {
+    fake_port_t f = fake_ok();
+    f.idle = 0.2;
+    f.facts.user_idle_sec = 0.2;
+    hu_voice_record_port_t p = fake_port(&f);
+    hu_voice_record_request_t r = req_ok();
+    r.min_idle_sec = 0.0; /* HU_VOICE_MIN_IDLE_SEC=0: operator testing at the Mac */
+    hu_voice_record_result_t res;
+    HU_ASSERT_EQ(hu_voice_record_send(&p, &r, &res), HU_OK);
+}
+
+static void test_vrec_record_press_error_still_cancels(void) {
+    fake_port_t f = fake_ok();
+    f.fail_at = "press:Record audio"; /* AX can report failure after acting */
+    hu_voice_record_port_t p = fake_port(&f);
+    hu_voice_record_request_t r = req_ok();
+    hu_voice_record_result_t res;
+    HU_ASSERT_EQ(hu_voice_record_send(&p, &r, &res), HU_ERR_IO);
+    HU_ASSERT_TRUE(strstr(f.trace, "press:Cancel audio recording") != NULL);
+}
+
+static void test_vrec_unconfirmed_send_that_cannot_cancel_counts_as_sent(void) {
+    fake_port_t f = fake_ok();
+    f.record_back_after = 0;
+    f.row_found = false;
+    f.cancel_fails = true; /* nothing left to cancel: the memo went */
+    hu_voice_record_port_t p = fake_port(&f);
+    hu_voice_record_request_t r = req_ok();
+    hu_voice_record_result_t res;
+    HU_ASSERT_EQ(hu_voice_record_send(&p, &r, &res), HU_OK); /* no attachment duplicate */
+    HU_ASSERT_FALSE(res.verified);
+}
+
+static void test_vrec_failed_cancel_is_reported(void) {
+    fake_port_t f = fake_ok();
+    f.fail_at = "play";
+    f.cancel_fails = true;
+    hu_voice_record_port_t p = fake_port(&f);
+    hu_voice_record_request_t r = req_ok();
+    hu_voice_record_result_t res;
+    HU_ASSERT_EQ(hu_voice_record_send(&p, &r, &res), HU_ERR_IO);
+    HU_ASSERT_TRUE(res.cancel_failed);
+}
+
 /* The test binary never touches audio/AX: the macOS port is a stub here that
  * always blocks at preflight, and none of its members is NULL. */
 static void test_vrec_macos_port_blocks_under_test(void) {
@@ -416,6 +610,19 @@ void run_imessage_voice_record_tests(void) {
     HU_RUN_TEST(test_vrec_send_ignored_first_press_is_retried);
     HU_RUN_TEST(test_vrec_send_never_confirmed_cancels_and_falls_back);
     HU_RUN_TEST(test_vrec_send_ui_unconfirmed_but_in_chatdb_counts_as_sent);
+    HU_RUN_TEST(test_vrec_handle_ok_accepts_only_phone_or_email);
+    HU_RUN_TEST(test_vrec_title_matches_is_exact_but_case_and_space_tolerant);
+    HU_RUN_TEST(test_vrec_preflight_blocks_other_mic_and_busy_blackhole);
+    HU_RUN_TEST(test_vrec_bad_handle_touches_nothing);
+    HU_RUN_TEST(test_vrec_second_recording_touches_nothing);
+    HU_RUN_TEST(test_vrec_unnamed_target_touches_nothing);
+    HU_RUN_TEST(test_vrec_wrong_chat_never_records);
+    HU_RUN_TEST(test_vrec_chat_switched_before_send_cancels);
+    HU_RUN_TEST(test_vrec_user_returned_mid_clip_cancels);
+    HU_RUN_TEST(test_vrec_operator_override_ignores_activity);
+    HU_RUN_TEST(test_vrec_record_press_error_still_cancels);
+    HU_RUN_TEST(test_vrec_unconfirmed_send_that_cannot_cancel_counts_as_sent);
+    HU_RUN_TEST(test_vrec_failed_cancel_is_reported);
     HU_RUN_TEST(test_vrec_macos_port_blocks_under_test);
     HU_RUN_TEST(test_vrec_request_from_env_reads_mic_and_idle);
     HU_RUN_TEST(test_vrec_send_from_env_blocks_under_test);
