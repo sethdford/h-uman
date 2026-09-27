@@ -20,6 +20,7 @@ const TOKEN_FILES = [
 
 type TokenValue = string | number;
 type TokenMap = Record<string, TokenValue>;
+type TypeMap = Record<string, string>;
 
 /** Recursively collect all $value entries into a flat path -> value map */
 function collectTokens(obj: unknown, prefix = ""): TokenMap {
@@ -41,10 +42,41 @@ function collectTokens(obj: unknown, prefix = ""): TokenMap {
 }
 
 /**
- * Resolve {path.to.token} references in place; repeat until stable.
- * Gradient tokens (surface-gradient, surface-glow, etc.) use raw string values
- * and are emitted as-is in CSS — they contain linear-gradient/radial-gradient
- * and cannot be resolved like color tokens.
+ * Path -> $type for every token, parallel to collectTokens. A token without
+ * its own $type inherits the nearest enclosing group's $type (W3C DTCG).
+ * Emitters select by this map, never by how a value happens to be spelled:
+ * a color written `transparent` or `var(--x)` is still a color, and must be
+ * refused by an emitter that cannot convert it rather than skipped.
+ */
+function collectTypes(obj: unknown, prefix = "", inherited?: string): TypeMap {
+  const result: TypeMap = {};
+  if (obj === null || typeof obj !== "object") return result;
+  const rec = obj as Record<string, unknown>;
+
+  for (const [key, val] of Object.entries(rec)) {
+    if (key.startsWith("$")) continue;
+    if (val === null || typeof val !== "object") continue;
+    const node = val as Record<string, unknown>;
+    const pathPart = prefix ? `${prefix}.${key}` : key;
+    const own = typeof node.$type === "string" ? node.$type : undefined;
+    if ("$value" in node) {
+      const t = own ?? inherited;
+      if (t !== undefined) result[pathPart] = t;
+    } else {
+      Object.assign(result, collectTypes(node, pathPart, own ?? inherited));
+    }
+  }
+  return result;
+}
+
+const WHOLE_REF = /^\{([^}]+)\}$/;
+
+/**
+ * Resolve whole-value {path.to.token} references; repeat until stable.
+ * A reference to a path that does not exist, or a reference cycle, throws
+ * naming the token: leaving the literal `{ref}` in place let it reach the
+ * emitters as a value no selector recognised. Braces inside a larger value
+ * (gradients) are not references and are left alone.
  */
 function resolveRefs(tokens: TokenMap): TokenMap {
   const resolved = { ...tokens };
@@ -53,15 +85,25 @@ function resolveRefs(tokens: TokenMap): TokenMap {
     changed = false;
     for (const [key, val] of Object.entries(resolved)) {
       if (typeof val !== "string") continue;
-      const ref = val.match(/^\{([^}]+)\}$/);
-      if (ref) {
-        const target = resolved[ref[1]];
-        if (target !== undefined) {
-          resolved[key] = target;
-          changed = true;
-        }
+      const ref = val.match(WHOLE_REF);
+      if (!ref) continue;
+      if (!Object.hasOwn(resolved, ref[1])) {
+        throw new Error(
+          `${key}: unresolved reference {${ref[1]}} (no token at that path)`,
+        );
+      }
+      const target = resolved[ref[1]];
+      if (target !== val) {
+        resolved[key] = target;
+        changed = true;
       }
     }
+  }
+  const cyclic = Object.keys(resolved).filter(
+    (k) => typeof resolved[k] === "string" && WHOLE_REF.test(resolved[k] as string),
+  );
+  if (cyclic.length > 0) {
+    throw new Error(`circular token references: ${cyclic.join(", ")}`);
   }
   return resolved;
 }
@@ -120,5 +162,5 @@ export function partitionByPlatform(sources: TokenSource[]): {
   };
 }
 
-export { TOKEN_FILES, collectTokens, resolveRefs };
-export type { TokenValue, TokenMap };
+export { TOKEN_FILES, collectTokens, collectTypes, resolveRefs };
+export type { TokenValue, TokenMap, TypeMap };
