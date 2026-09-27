@@ -41,6 +41,7 @@ build matrix and core test surface across configurations:
 | `completions` | Shell completions regen |
 | `docker` | Container image build |
 | `build-android` | Android shared lib build |
+| `ui-e2e` | Dashboard Playwright suite incl. per-view axe scan (promoted 2026-09-27, see History) |
 
 ## Tier 2 — Advisory (must run, may fail)
 
@@ -49,7 +50,6 @@ gate. CI runs them on every PR but their failure does not block merge:
 
 | Workflow | Why advisory |
 |---|---|
-| `ui-e2e` | Vite WS proxy churn under cold start; live LLM tests skip on no-provider |
 | `visual-regression` | Snapshot drift on font rendering / pixel diff |
 | `lighthouse` | Performance scores fluctuate ±5% run-to-run |
 | `lighthouse-dashboard` | Same as above |
@@ -143,3 +143,13 @@ This is the ONLY legitimate use of `--admin` against a red gate.
   red gates in a quarter (genuine flake).
 
 Always document promotion/demotion in this file's history.
+
+## History
+
+- **2026-09-27: `ui-e2e` promoted Advisory → Required** (user decision, ahead
+  of the ≥50-PR bar). All 3 `ui-e2e` failures in the preceding 13 completed
+  `main` runs (36285820022, 36257002769, 36253284792) were the per-view axe
+  scan sampling text mid-fade (Chat ×3, Overview, Voice), not WS proxy churn.
+  PR #494 made that scan wait for data + animations and pinned the
+  remaining real violations in `KNOWN_VIOLATIONS`. Demote under the rule
+  above if it flakes again.
