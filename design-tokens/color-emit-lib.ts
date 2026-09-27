@@ -1,15 +1,30 @@
 /**
- * Native (Swift/Kotlin) color emitters. Anything these cannot represent is
+ * Native (Swift/Kotlin/C) color emitters. Anything these cannot represent is
  * refused: the previous fall-through returned black, so an unsupported value
  * (e.g. oklch) shipped black to every native app with a green build.
+ *
+ * Colors are selected by `$type: "color"`, never by value spelling. Selecting
+ * by spelling silently skipped any color written as `transparent`,
+ * `color-mix()`, `var()` or an unresolved `{ref}`, because it did not look
+ * like a color.
  */
 
+import type { TokenMap, TypeMap } from "./token-lib.js";
+
+const NATIVE_ACCEPTS = "#RRGGBB or rgb()/rgba()";
+
 export class UnsupportedColorError extends Error {
-  constructor(fn: string, value: string) {
+  constructor(
+    fn: string,
+    value: string,
+    tokenPath?: string,
+    accepts = NATIVE_ACCEPTS,
+  ) {
+    const who = tokenPath ? `token ${tokenPath}: ` : "";
     super(
-      `${fn}: unsupported color ${JSON.stringify(value)}. Native emitters accept ` +
-        `#RRGGBB or rgb()/rgba(). Put web-only colors (oklch, display-p3) in a ` +
-        `token file with "com.human.platform": "web".`,
+      `${fn}: ${who}unsupported color ${JSON.stringify(value)}. This emitter accepts ` +
+        `${accepts}. Put web-only colors (oklch, display-p3) in a ` +
+        `token file whose $extensions["com.human.platform"]: "web".`,
     );
     this.name = "UnsupportedColorError";
   }
@@ -17,12 +32,54 @@ export class UnsupportedColorError extends Error {
 
 const HEX6 = /^#([0-9a-fA-F]{6})$/;
 const RGBA = /rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/;
+const RGBA_EXACT = /^rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*(\d*\.?\d+))?\)$/;
 
-/** True for values written in a CSS color syntax (supported by native emitters or not). Non-colors — dimensions, angles, percentages, gradients, numbers — are false. */
-export function isColorLike(v: string): boolean {
-  return /^(#|rgba?\(|hsla?\(|hwb\(|lab\(|lch\(|oklab\(|oklch\(|color\()/i.test(
-    v.trim(),
-  );
+/** rgb()/rgba() with channels 0–255 and alpha 0–1; anything else would emit out-of-range Swift/Kotlin values. */
+function isNativeRGBA(v: string): boolean {
+  const m = v.match(RGBA_EXACT);
+  if (!m) return false;
+  const channelsOk = [m[1], m[2], m[3]].every((c) => Number(c) <= 255);
+  const alphaOk = m[4] === undefined || Number(m[4]) <= 1;
+  return channelsOk && alphaOk;
+}
+
+/**
+ * Every `$type: "color"` token whose path starts with `prefix`, sorted by
+ * path, as [path, value]. A color-typed value the Swift/Kotlin converters
+ * cannot represent throws UnsupportedColorError naming the token; tokens of
+ * any other $type are skipped whatever their value looks like.
+ */
+export function nativeColorEntries(
+  tokens: TokenMap,
+  types: TypeMap,
+  prefix: string,
+): Array<[string, string]> {
+  return Object.keys(tokens)
+    .filter((k) => k.startsWith(prefix) && types[k] === "color")
+    .sort()
+    .map((k) => {
+      const v = tokens[k];
+      if (typeof v !== "string" || !(HEX6.test(v) || isNativeRGBA(v))) {
+        throw new UnsupportedColorError("nativeColorEntries", String(v), k);
+      }
+      return [k, v];
+    });
+}
+
+/** #RRGGBB → [r, g, b] for the C header's terminal escapes. No alpha there, so rgba() is refused too. */
+export function terminalRGB(
+  tokenPath: string,
+  value: unknown,
+): [number, number, number] {
+  const m = typeof value === "string" ? value.match(HEX6) : null;
+  if (!m) {
+    throw new UnsupportedColorError("terminalRGB", String(value), tokenPath, "#RRGGBB");
+  }
+  return [
+    parseInt(m[1].substring(0, 2), 16),
+    parseInt(m[1].substring(2, 4), 16),
+    parseInt(m[1].substring(4, 6), 16),
+  ];
 }
 
 /** #rrggbb → 0xRRGGBB */
