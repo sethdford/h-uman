@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-27T01:11:51.179Z",
+  "generated": "2026-09-27T02:21:31.655Z",
   "groups": {
     "color.neutral": [
       {
@@ -2189,8 +2189,8 @@
       },
       {
         "name": "accent-secondary-hover",
-        "value": "#b45309",
-        "hex": "#b45309"
+        "value": "#f59e0b",
+        "hex": "#f59e0b"
       },
       {
         "name": "accent-secondary-subtle",
@@ -2203,8 +2203,8 @@
       },
       {
         "name": "on-accent-secondary",
-        "value": "#ffffff",
-        "hex": "#ffffff"
+        "value": "#0c0a08",
+        "hex": "#0c0a08"
       },
       {
         "name": "accent-tertiary",
