@@ -539,8 +539,9 @@ static void test_vrec_failed_cancel_is_reported(void) {
     HU_ASSERT_TRUE(res.cancel_failed);
 }
 
-/* The test binary never touches audio/AX: the macOS port is a stub here that
- * always blocks at preflight, and none of its members is NULL. */
+/* Covers src/channels/imessage_voice_record_macos.c. The test binary never
+ * touches audio/AX: the macOS port is a stub here that always blocks at
+ * preflight, and none of its members is NULL. */
 static void test_vrec_macos_port_blocks_under_test(void) {
     const hu_voice_record_port_t *p = hu_voice_record_macos_port();
     HU_ASSERT_NOT_NULL(p);
