@@ -14,4 +14,16 @@ describe("DemoGatewayClient", () => {
     expect(status).toBe("connected");
     demo.disconnect();
   });
+
+  it("inFlight counts a request only until it resolves", async () => {
+    const { DemoGatewayClient } = await import("../demo-gateway.js");
+    const demo = new DemoGatewayClient();
+    expect(demo.inFlight).toBe(0);
+    const first = demo.request("sessions.list");
+    const second = demo.request("unknown.method");
+    expect(demo.inFlight).toBe(2);
+    await first;
+    await second;
+    expect(demo.inFlight).toBe(0);
+  });
 });

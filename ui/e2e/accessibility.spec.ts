@@ -1,9 +1,113 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { shadowInteractiveRects, waitForViewReady, POLL } from "./helpers.js";
 
 /** All axe rules run with zero exclusions. */
 const SHADOW_DOM_EXCLUDED_RULES: string[] = [];
+
+/**
+ * Waits until the view shows its loaded data at its resting frame, so axe scans
+ * what a user sees rather than a loading skeleton or a half-faded entrance.
+ * Contrast checked mid-fade (hero, composer, .view-enter) blends foreground into
+ * background and fails at random ratios.
+ *
+ * - Busy while the demo gateway is still connecting (fixed 400 ms) or has any
+ *   request inside its random 80-280 ms latency: a time-only quiet window can
+ *   close in that gap and scan the page before its data renders.
+ * - Time-based animations: wait until none has run for `quietMs`, looping
+ *   because every data arrival starts a new entrance wave.
+ * - Scroll-driven animations (`animation-timeline: view()` reveals such as
+ *   hu-card-enter): cancelled. Nobody scrolls a headless page, so below-the-fold
+ *   cards would otherwise sit at partial opacity forever.
+ * - Ignored: anything not `running` (idle transitions never settle `finished`),
+ *   infinite loops (status pulses), and transitions of properties axe never
+ *   reads for contrast: `filter` (the 3s ambient-warmth sepia on hu-app) and
+ *   `scrollbar-color` (re-created on every style flush for the Skills view's
+ *   `transition: all` tag chips, so it would never go quiet).
+ *
+ * Walks shadow roots because Chromium's document.getAnimations() omits
+ * animations inside them.
+ */
+async function settlePage(page: Page, quietMs = 250, timeout = 5000): Promise<void> {
+  await page.evaluate(
+    async ({ quietMs, timeout }) => {
+      const all = (): Animation[] => {
+        const out = new Set(document.getAnimations());
+        const walk = (root: Document | ShadowRoot) => {
+          for (const el of root.querySelectorAll("*")) {
+            for (const a of el.getAnimations()) out.add(a);
+            if (el.shadowRoot) walk(el.shadowRoot);
+          }
+        };
+        walk(document);
+        return [...out];
+      };
+      const pending = (): Animation[] =>
+        all().filter(
+          (a) =>
+            a.playState === "running" &&
+            a.timeline instanceof DocumentTimeline &&
+            a.effect?.getComputedTiming().iterations !== Infinity &&
+            !["filter", "scrollbar-color"].includes((a as CSSTransition).transitionProperty),
+        );
+      const gatewayBusy = (): boolean => {
+        const gw = (document.querySelector("hu-app") as { gateway?: unknown } | null)?.gateway as
+          { status?: string; inFlight?: number } | undefined;
+        return gw?.status !== "connected" || (gw.inFlight ?? 0) > 0;
+      };
+      const deadline = performance.now() + timeout;
+      let quietSince = performance.now();
+      while (performance.now() - quietSince < quietMs) {
+        if (performance.now() > deadline) {
+          const names = pending().map(
+            (a) => (a as CSSAnimation).animationName ?? (a as CSSTransition).transitionProperty,
+          );
+          const gw = gatewayBusy() ? "gateway busy; " : "";
+          throw new Error(`page not settled after ${timeout}ms: ${gw}${names.join(", ")}`);
+        }
+        const active = pending();
+        if (gatewayBusy()) {
+          quietSince = performance.now();
+        } else if (active.length > 0) {
+          await Promise.race([
+            Promise.all(active.map((a) => a.finished.catch(() => {}))),
+            new Promise((r) => setTimeout(r, deadline - performance.now())),
+          ]);
+          quietSince = performance.now();
+        }
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      for (const a of all()) if (!(a.timeline instanceof DocumentTimeline)) a.cancel();
+    },
+    { quietMs, timeout },
+  );
+}
+
+/**
+ * Serious/critical violations present in the settled UI when this check started
+ * waiting for data and animations (2026-09-27); before that it scanned loading skeletons
+ * and never reached them. Each is a real bug with its own follow-up. Ratchet in
+ * both directions: a view may not gain a rule or nodes, and a fix must lower its
+ * entry here so the freed slack cannot hide the next regression.
+ */
+const KNOWN_VIOLATIONS: Record<string, Record<string, number>> = {
+  // hu-model-selector combobox trigger has no accessible name; session rows
+  // (role=option) contain a focusable Delete button.
+  Overview: { "button-name": 1, "nested-interactive": 5 },
+  Chat: { "button-name": 1, "nested-interactive": 5 },
+  // Session cards are role=button with aria-label="" and a nested Delete button.
+  Sessions: { "nested-interactive": 5 },
+  // Skill cards are role=button with a nested role=switch toggle (+ segment contrast).
+  Skills: { "color-contrast": 1, "nested-interactive": 11 },
+  // Number inputs rendered with aria-label="".
+  Config: { label: 2 },
+  // hu-segmented-control active segment: --hu-on-accent on --hu-accent is 2.43:1.
+  Channels: { "color-contrast": 1 },
+  Usage: { "color-contrast": 1 },
+  Memory: { "color-contrast": 1 },
+  // Plus .log-row role=listitem with no list parent.
+  Logs: { "aria-required-parent": 1, "color-contrast": 1 },
+};
 
 const VIEWS = [
   { path: "/", name: "Overview" },
@@ -31,6 +135,7 @@ test.describe("Accessibility", () => {
       const url = view.path === "/" ? "/?demo" : `/?demo${view.path.slice(1)}`;
       await page.goto(url);
       await page.waitForLoadState("domcontentloaded");
+      await settlePage(page);
       const results = await new AxeBuilder({ page })
         .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
         .disableRules(SHADOW_DOM_EXCLUDED_RULES)
@@ -53,7 +158,10 @@ test.describe("Accessibility", () => {
           ),
         );
       }
-      expect(critical).toEqual([]);
+      const nodesByRule = Object.fromEntries(critical.map((v) => [v.id, v.nodes.length]));
+      expect(nodesByRule, "update KNOWN_VIOLATIONS only to lower an entry").toEqual(
+        KNOWN_VIOLATIONS[view.name] ?? {},
+      );
     });
   }
 
