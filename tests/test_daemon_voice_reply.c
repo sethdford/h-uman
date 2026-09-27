@@ -56,7 +56,55 @@ static void test_voice_reply_without_config_sends_nothing_and_returns_false(void
     HU_ASSERT_EQ(g_voice_sends, 0);
 }
 
+/* Voice memos must pass the same outbound gates as text replies. Fixtures are
+ * taken from the gate modules' own suites (test_moderation.c,
+ * test_companion_safety.c, test_verify_claim.c). */
+static void test_voice_gates_allow_clean_reply(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *t = "hey how's your day going? did you finish that project?";
+    const char *why = NULL;
+    HU_ASSERT_TRUE(hu_voice_reply_gates_clear(&alloc, t, strlen(t), &why));
+    HU_ASSERT_STR_EQ(why, "clear");
+}
+
+static void test_voice_gates_decline_moderation_flag(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *t = "kill them with violence and murder";
+    const char *why = NULL;
+    HU_ASSERT_FALSE(hu_voice_reply_gates_clear(&alloc, t, strlen(t), &why));
+    HU_ASSERT_STR_EQ(why, "moderation");
+}
+
+static void test_voice_gates_decline_companion_safety_flag(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *t = "don't go, please stay, after everything we did you want to leave?";
+    const char *why = NULL;
+    HU_ASSERT_FALSE(hu_voice_reply_gates_clear(&alloc, t, strlen(t), &why));
+    HU_ASSERT_STR_EQ(why, "companion_safety");
+}
+
+static void test_voice_gates_decline_claim_language(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *t = "I remember when you told me about your trip";
+    const char *why = NULL;
+    HU_ASSERT_FALSE(hu_voice_reply_gates_clear(&alloc, t, strlen(t), &why));
+    HU_ASSERT_STR_EQ(why, "claim_language");
+}
+
+static void test_voice_gates_fail_closed_on_invalid_input(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *why = NULL;
+    HU_ASSERT_FALSE(hu_voice_reply_gates_clear(&alloc, NULL, 0, &why));
+    HU_ASSERT_STR_EQ(why, "invalid");
+    HU_ASSERT_FALSE(hu_voice_reply_gates_clear(&alloc, "", 0, NULL));
+}
+
 void run_daemon_voice_reply_tests(void) {
     HU_TEST_SUITE("daemon voice reply (carved)");
     HU_RUN_TEST(test_voice_reply_without_config_sends_nothing_and_returns_false);
+    HU_RUN_TEST(test_voice_gates_allow_clean_reply);
+    HU_RUN_TEST(test_voice_gates_decline_moderation_flag);
+    HU_RUN_TEST(test_voice_gates_decline_companion_safety_flag);
+    HU_RUN_TEST(test_voice_gates_decline_claim_language);
+    HU_RUN_TEST(test_voice_gates_fail_closed_on_invalid_input);
 }

@@ -13,7 +13,10 @@
 #include "human/core/log.h"
 #include "human/daemon.h"
 #include "human/daemon/voice_facade.h"
+#include "human/memory/verify_claim.h"
 #include "human/platform.h"
+#include "human/security/companion_safety.h"
+#include "human/security/moderation.h"
 #if defined(HU_ENABLE_CARTESIA)
 #include "human/tts/voice_reply.h"
 #endif
@@ -69,6 +72,32 @@ static void daemon_voice_record_decision(hu_agent_t *agent, const char *batch_ke
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+
+bool hu_voice_reply_gates_clear(hu_allocator_t *alloc, const char *text, size_t text_len,
+                                const char **reason_out) {
+    const char *why = "invalid";
+    bool clear = false;
+    if (text && text_len > 0) {
+        hu_moderation_result_t mod;
+        memset(&mod, 0, sizeof(mod));
+        hu_companion_safety_result_t cs;
+        memset(&cs, 0, sizeof(cs));
+        if (hu_moderation_check(alloc, text, text_len, &mod) != HU_OK || mod.flagged)
+            why = "moderation";
+        else if (hu_companion_safety_check(alloc, text, text_len, NULL, 0, &cs) != HU_OK ||
+                 cs.flagged)
+            why = "companion_safety";
+        else if (hu_memory_has_claim_language(text, text_len))
+            why = "claim_language";
+        else {
+            why = "clear";
+            clear = true;
+        }
+    }
+    if (reason_out)
+        *reason_out = why;
+    return clear;
+}
 
 bool hu_daemon_voice_reply(hu_allocator_t *alloc, hu_agent_t *agent, const hu_config_t *config,
                            hu_service_channel_t *ch, const char *batch_key, size_t key_len,

@@ -99,6 +99,13 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, struct hu_agent *agent,
                            size_t combined_len, const char *response, size_t response_len,
                            int bth_hour);
 
+/* True only when the reply passes every outbound gate the text path applies
+ * (moderation, companion safety, claim language). Fails closed: invalid input
+ * or a gate error returns false. `reason_out` receives a static string:
+ * "clear", "invalid", "moderation", "companion_safety" or "claim_language". */
+bool hu_voice_reply_gates_clear(hu_allocator_t *alloc, const char *text, size_t text_len,
+                                const char **reason_out);
+
 void hu_daemon_followup_sched_tick(struct hu_agent *agent, hu_service_channel_t *channels,
                                    size_t channel_count);
 
