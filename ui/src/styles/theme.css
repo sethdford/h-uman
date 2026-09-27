@@ -468,7 +468,9 @@ hu-card.hu-entrance.hu-visible {
 }
 @supports (animation-timeline: scroll()) {
   .hu-glass-scroll-aware {
-    animation: hu-glass-scroll-deepen linear forwards;
+    animation-name: hu-glass-scroll-deepen;
+    animation-timing-function: linear;
+    animation-fill-mode: forwards;
     animation-timeline: scroll(nearest block);
   }
 }

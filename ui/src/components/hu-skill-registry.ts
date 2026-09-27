@@ -1,6 +1,7 @@
-import { LitElement, html, css, nothing } from "lit";
+import { LitElement, html, css, nothing, type PropertyValues } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { icons } from "../icons.js";
+import { scrollEntranceStyles } from "../styles/scroll-entrance.js";
 import type { RegistrySkill } from "./hu-skill-card.js";
 import "../components/hu-input.js";
 import "../components/hu-empty-state.js";
@@ -25,13 +26,45 @@ export class ScSkillRegistry extends LitElement {
   @property({ type: String }) query = "";
   @state() private activeTag = "";
   private _searchTimer = 0;
+  private _scrollEntranceObserver: IntersectionObserver | null = null;
+
+  override updated(changedProperties: PropertyValues): void {
+    super.updated(changedProperties);
+    this.updateComplete.then(() => this._setupScrollEntrance());
+  }
 
   override disconnectedCallback(): void {
+    this._scrollEntranceObserver?.disconnect();
+    this._scrollEntranceObserver = null;
     if (this._searchTimer) {
       clearTimeout(this._searchTimer);
       this._searchTimer = 0;
     }
     super.disconnectedCallback();
+  }
+
+  /* Fallback for browsers without animation-timeline: view(). The cards live in this
+     shadow root, which the parent skills view's observer cannot reach. */
+  private _setupScrollEntrance(): void {
+    if (typeof CSS !== "undefined" && CSS.supports?.("animation-timeline", "view()")) return;
+    const root = this.renderRoot;
+    if (!root) return;
+    const elements = root.querySelectorAll(".hu-scroll-reveal-stagger > *");
+    if (elements.length === 0) return;
+    if (!this._scrollEntranceObserver) {
+      this._scrollEntranceObserver = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((e) => {
+            if (e.isIntersecting) {
+              (e.target as HTMLElement).classList.add("entered");
+              this._scrollEntranceObserver?.unobserve(e.target);
+            }
+          });
+        },
+        { threshold: 0.1 },
+      );
+    }
+    elements.forEach((el) => this._scrollEntranceObserver!.observe(el));
   }
 
   private get _filteredResults(): RegistrySkill[] {
@@ -147,101 +180,104 @@ export class ScSkillRegistry extends LitElement {
     `;
   }
 
-  static override styles = css`
-    :host {
-      display: block;
-      width: 100%;
-      contain: layout style;
-      container-type: inline-size;
-    }
+  static override styles = [
+    scrollEntranceStyles,
+    css`
+      :host {
+        display: block;
+        width: 100%;
+        contain: layout style;
+        container-type: inline-size;
+      }
 
-    .section {
-      margin-bottom: var(--hu-space-2xl);
-    }
+      .section {
+        margin-bottom: var(--hu-space-2xl);
+      }
 
-    .section-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: var(--hu-space-md);
-      margin-bottom: var(--hu-space-md);
-    }
+      .section-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--hu-space-md);
+        margin-bottom: var(--hu-space-md);
+      }
 
-    .section-title {
-      font-size: var(--hu-text-lg);
-      font-weight: var(--hu-weight-semibold);
-      color: var(--hu-text);
-    }
-
-    .section-count {
-      font-size: var(--hu-text-sm);
-      color: var(--hu-text-secondary);
-    }
-
-    .registry-search-row {
-      margin-bottom: var(--hu-space-lg);
-      max-width: 25rem;
-    }
-
-    .tag-chips {
-      display: flex;
-      flex-wrap: wrap;
-      gap: var(--hu-space-xs);
-      margin-bottom: var(--hu-space-lg);
-    }
-
-    .tag-chip {
-      display: inline-flex;
-      align-items: center;
-      padding: var(--hu-space-2xs) var(--hu-space-sm);
-      border-radius: var(--hu-radius-full);
-      font-size: var(--hu-text-xs);
-      font-weight: var(--hu-weight-medium);
-      cursor: pointer;
-      border: 1px solid var(--hu-border);
-      background: transparent;
-      color: var(--hu-text-secondary);
-      font-family: var(--hu-font);
-      transition: all var(--hu-duration-fast) var(--hu-ease-out);
-      &:hover {
+      .section-title {
+        font-size: var(--hu-text-lg);
+        font-weight: var(--hu-weight-semibold);
         color: var(--hu-text);
-        border-color: var(--hu-text-secondary);
       }
-      &:focus-visible {
-        outline: 2px solid var(--hu-accent);
-        outline-offset: 2px;
-      }
-      &[aria-checked="true"] {
-        background: var(--hu-accent);
-        color: var(--hu-bg);
-        border-color: var(--hu-accent);
-      }
-    }
 
-    .skills-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(min(17.5rem, 100%), 1fr));
-      gap: var(--hu-space-lg);
-    }
-
-    @container (max-width: 30rem) /* cq-sm */ {
-      .skills-grid {
-        grid-template-columns: 1fr;
+      .section-count {
+        font-size: var(--hu-text-sm);
+        color: var(--hu-text-secondary);
       }
-    }
 
-    @container (max-width: 48rem) /* cq-medium */ {
-      .skills-grid {
-        grid-template-columns: 1fr 1fr;
+      .registry-search-row {
+        margin-bottom: var(--hu-space-lg);
+        max-width: 25rem;
       }
-    }
 
-    @media (prefers-reduced-motion: reduce) {
+      .tag-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--hu-space-xs);
+        margin-bottom: var(--hu-space-lg);
+      }
+
       .tag-chip {
-        transition: none;
+        display: inline-flex;
+        align-items: center;
+        padding: var(--hu-space-2xs) var(--hu-space-sm);
+        border-radius: var(--hu-radius-full);
+        font-size: var(--hu-text-xs);
+        font-weight: var(--hu-weight-medium);
+        cursor: pointer;
+        border: 1px solid var(--hu-border);
+        background: transparent;
+        color: var(--hu-text-secondary);
+        font-family: var(--hu-font);
+        transition: all var(--hu-duration-fast) var(--hu-ease-out);
+        &:hover {
+          color: var(--hu-text);
+          border-color: var(--hu-text-secondary);
+        }
+        &:focus-visible {
+          outline: 2px solid var(--hu-accent);
+          outline-offset: 2px;
+        }
+        &[aria-checked="true"] {
+          background: var(--hu-accent);
+          color: var(--hu-bg);
+          border-color: var(--hu-accent);
+        }
       }
-    }
-  `;
+
+      .skills-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(min(17.5rem, 100%), 1fr));
+        gap: var(--hu-space-lg);
+      }
+
+      @container (max-width: 30rem) /* cq-sm */ {
+        .skills-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @container (max-width: 48rem) /* cq-medium */ {
+        .skills-grid {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .tag-chip {
+          transition: none;
+        }
+      }
+    `,
+  ];
 }
 
 declare global {
