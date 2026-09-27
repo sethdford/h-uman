@@ -118,3 +118,5 @@ AGENTS.md                <- Full engineering protocol
 | [data-privacy.md](security/data-privacy.md) | Data classification, lifecycle, retention, user rights, isolation | Data handling, memory, logging       |
 | [compliance.md](security/compliance.md)     | GDPR, CCPA/CPRA compliance mapping, DPA requirements, audit trail | Data privacy compliance, deployments |
 | [canvas-security.md](security/canvas-security.md) | Live Canvas sandbox model, iframe isolation, CSP, threat mitigations | Canvas rendering, security review    |
+
+<!-- scratch probe for #495: docs-only PR must get a passing iOS UI tests gate; do not merge -->
