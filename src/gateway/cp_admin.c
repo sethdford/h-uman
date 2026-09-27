@@ -2522,15 +2522,29 @@ hu_error_t cp_admin_skills_update(hu_allocator_t *alloc, hu_app_context_t *app, 
 hu_error_t cp_admin_update_check(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
                                  const hu_control_protocol_t *proto, const hu_json_value_t *root,
                                  char **out, size_t *out_len) {
-    (void)app;
     (void)conn;
     (void)proto;
-    (void)root;
     hu_json_value_t *obj = hu_json_object_new(alloc);
     if (!obj)
         return HU_ERR_OUT_OF_MEMORY;
     const char *current = hu_version_string();
     cp_json_set_str(alloc, obj, "current", current);
+
+    /* auto_update="off" (the default) must not contact GitHub just because a
+     * dashboard page loaded; only an explicit {"force":true} may. A missing
+     * config is treated as off. No "latest" is reported: nothing was checked. */
+    const hu_json_value_t *params = root ? hu_json_object_get(root, "params") : NULL;
+    bool force = params ? hu_json_get_bool(params, "force", false) : false;
+    hu_update_mode_t mode =
+        hu_update_mode_from_config((app && app->config) ? app->config->auto_update : NULL);
+    if (!hu_update_check_allowed(mode, force)) {
+        hu_json_object_set(alloc, obj, "available", hu_json_bool_new(alloc, false));
+        hu_json_object_set(alloc, obj, "disabled", hu_json_bool_new(alloc, true));
+        hu_error_t err = hu_json_stringify(alloc, obj, out, out_len);
+        hu_json_free(alloc, obj);
+        return err;
+    }
+
     char latest[64] = {0};
     hu_error_t check_err = hu_update_check(latest, sizeof(latest));
     if (check_err == HU_OK && latest[0]) {
