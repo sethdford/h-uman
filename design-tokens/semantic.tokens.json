@@ -664,7 +664,7 @@
     }
   },
   "high-contrast": {
-    "$description": "High contrast mode for accessibility",
+    "$description": "High contrast mode for accessibility. Emitted as @media (prefers-contrast: more) :root after the light-scheme block, so this black palette wins in BOTH color schemes. Any text-colour token omitted here inherits the light theme's dark-on-light value on black: define it here.",
     "bg": {
       "$value": "{color.neutral.0}",
       "$type": "color"
@@ -711,8 +711,34 @@
       "$type": "color"
     },
     "accent-text": {
-      "$value": "#3a6a24",
-      "$type": "color"
+      "$value": "{color.human.400}",
+      "$type": "color",
+      "$description": "WCAG AAA on the forced-black palette: 10.3:1 on bg, 9.2:1 on bg-surface, 7.6:1 on bg-overlay"
+    },
+    "accent-secondary-text": {
+      "$value": "{color.amber.400}",
+      "$type": "color",
+      "$description": "12.6:1 on bg. Without it the light scheme leaks amber.700 onto black (4.2:1)"
+    },
+    "accent-tertiary-text": {
+      "$value": "{color.blue.300}",
+      "$type": "color",
+      "$description": "10.3:1 on bg. Without it the light scheme leaks blue.700 onto black (2.4:1); dark's blue.400 is 6.9:1, short of AAA"
+    },
+    "link": {
+      "$value": "{color.human.400}",
+      "$type": "color",
+      "$description": "10.3:1 on bg. Without it the light scheme leaks human.light-600 onto black (3.3:1)"
+    },
+    "link-hover": {
+      "$value": "{color.human.300}",
+      "$type": "color",
+      "$description": "12.2:1 on bg. Without it the light scheme leaks human.900 onto black (2.1:1)"
+    },
+    "link-visited": {
+      "$value": "{color.human.400}",
+      "$type": "color",
+      "$description": "Same as link, as in the light theme; dark's human.600 is 6.1:1, short of AAA"
     },
     "accent-hover": {
       "$value": "#a3d46a",

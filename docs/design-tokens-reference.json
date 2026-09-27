@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-27T02:21:31.655Z",
+  "generated": "2026-09-27T13:27:51.012Z",
   "groups": {
     "color.neutral": [
       {
@@ -2453,8 +2453,33 @@
       },
       {
         "name": "accent-text",
-        "value": "#3a6a24",
-        "hex": "#3a6a24"
+        "value": "#8DC63F",
+        "hex": "#8DC63F"
+      },
+      {
+        "name": "accent-secondary-text",
+        "value": "#fbbf24",
+        "hex": "#fbbf24"
+      },
+      {
+        "name": "accent-tertiary-text",
+        "value": "#9fb8d9",
+        "hex": "#9fb8d9"
+      },
+      {
+        "name": "link",
+        "value": "#8DC63F",
+        "hex": "#8DC63F"
+      },
+      {
+        "name": "link-hover",
+        "value": "#a3d46a",
+        "hex": "#a3d46a"
+      },
+      {
+        "name": "link-visited",
+        "value": "#8DC63F",
+        "hex": "#8DC63F"
       },
       {
         "name": "accent-hover",

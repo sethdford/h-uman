@@ -1002,9 +1002,11 @@
   :root {
     --hu-accent: #8dc63f;
     --hu-accent-hover: #a3d46a;
+    --hu-accent-secondary-text: #fbbf24;
     --hu-accent-strong: #7ab648;
     --hu-accent-subtle: rgba(122, 182, 72, 0.2);
-    --hu-accent-text: #3a6a24;
+    --hu-accent-tertiary-text: #9fb8d9;
+    --hu-accent-text: #8dc63f;
     --hu-bg: #000000;
     --hu-bg-elevated: #1e1a16;
     --hu-bg-inset: #000000;
@@ -1019,6 +1021,9 @@
     --hu-focus-ring-width: 3px;
     --hu-info: #60a5fa;
     --hu-info-dim: rgba(96, 165, 250, 0.2);
+    --hu-link: #8dc63f;
+    --hu-link-hover: #a3d46a;
+    --hu-link-visited: #8dc63f;
     --hu-on-accent: #000000;
     --hu-success: #34d399;
     --hu-success-dim: rgba(52, 211, 153, 0.2);
