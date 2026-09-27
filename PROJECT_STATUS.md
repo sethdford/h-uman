@@ -10,8 +10,11 @@ Last updated: 2026-09-26
 | Lines of C/H/ASM code          | **~415K**              |
 | Test files                     | ~308                   |
 | Tests passing                  | **13,920/13,920 (100%)** |
-| Binary size (MinSizeRel+LTO)   | **~2468 KB**           |
-| Peak RSS (test suite)          | **~6.0 MB**            |
+| Binary size (MinSizeRel+LTO)   | **~2694 KB**           |
+| Idle RSS (`human mcp`)         | **8.6 MB**             |
+
+Binary size and RSS are the release-size build (LTO, all channels, sqlite-vec off), measured
+2026-09-27 on macOS arm64 — see [`docs/perf/footprint.json`](docs/perf/footprint.json).
 
 ## Channels — Honest Status
 
