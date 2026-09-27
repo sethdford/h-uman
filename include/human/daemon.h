@@ -102,9 +102,10 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, struct hu_agent *agent,
 /* True only when the reply passes every outbound gate the text path applies
  * (moderation, companion safety, claim language) and the inbound message is not
  * a crisis (SHIELD-005: a person in crisis gets text with tappable resources).
- * `inbound` may be NULL. Fails closed: invalid reply or a gate error returns
- * false. `reason_out` receives a static string: "clear", "invalid",
- * "inbound_crisis", "moderation", "companion_safety" or "claim_language". */
+ * `inbound` may be NULL. The reply-side checks are
+ * hu_daemon_outbound_final_gates_clear (human/daemon_outbound_bus.h). Fails
+ * closed: invalid reply or a gate error returns false. `reason_out` receives a
+ * static string: "inbound_crisis" or any reason that function reports. */
 bool hu_voice_reply_gates_clear(hu_allocator_t *alloc, const char *text, size_t text_len,
                                 const char *inbound, size_t inbound_len, const char **reason_out);
 
