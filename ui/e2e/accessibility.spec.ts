@@ -1,12 +1,17 @@
 import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
-import { shadowInteractiveRects, waitForViewReady, POLL } from "./helpers.js";
+import {
+  shadowInteractiveRects,
+  waitForAnimationsSettled,
+  waitForViewReady,
+  POLL,
+} from "./helpers.js";
 
 /** All axe rules run with zero exclusions. */
 const SHADOW_DOM_EXCLUDED_RULES: string[] = [];
 
 const VIEWS = [
-  { path: "/", name: "Overview" },
+  { path: "/#overview", name: "Overview" },
   { path: "/#chat", name: "Chat" },
   { path: "/#agents", name: "Agents" },
   { path: "/#sessions", name: "Sessions" },
@@ -26,36 +31,52 @@ const VIEWS = [
 ];
 
 test.describe("Accessibility", () => {
-  for (const view of VIEWS) {
-    test(`${view.name} view passes axe accessibility`, async ({ page }) => {
-      const url = view.path === "/" ? "/?demo" : `/?demo${view.path.slice(1)}`;
-      await page.goto(url);
-      await page.waitForLoadState("domcontentloaded");
-      const results = await new AxeBuilder({ page })
-        .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
-        .disableRules(SHADOW_DOM_EXCLUDED_RULES)
-        .analyze();
-      const critical = results.violations.filter(
-        (v) => v.impact === "critical" || v.impact === "serious",
-      );
-      if (critical.length > 0) {
-        console.log(
-          `A11y violations on ${view.name}:`,
-          JSON.stringify(
-            critical.map((v) => ({
-              id: v.id,
-              impact: v.impact,
-              description: v.description,
-              nodes: v.nodes.length,
-            })),
-            null,
-            2,
-          ),
+  test.describe("axe scans of settled views", () => {
+    // axe's color-contrast rule samples computed colours at scan time. Scanning
+    // mid-entrance measures text part-way through an opacity fade and reports the
+    // blended colour (e.g. .hero-sub at 4.3:1 while settling to a passing token),
+    // which made these tests fail 30-80% of runs regardless of the code under test.
+    //
+    // Two kinds of entrance motion, handled separately:
+    // - Scroll-driven entrances (animation-timeline: view(), scroll-entrance.ts)
+    //   never "finish", so no wait can settle them. Reduced motion is the route
+    //   chosen over scrolling #main-content end-to-end: the UI's reduced-motion
+    //   blocks force `opacity: 1 !important` on every entrance class, so axe sees
+    //   exactly the settled colours with no dependence on scroll geometry.
+    // - Time-based fades that survive reduced motion are waited out explicitly.
+    test.use({ reducedMotion: "reduce" });
+
+    for (const view of VIEWS) {
+      test(`${view.name} view passes axe accessibility`, async ({ page }) => {
+        await page.goto(`/?demo${view.path.slice(1)}`);
+        await waitForViewReady(page, `hu-${view.path.slice(2)}-view`);
+        await waitForAnimationsSettled(page);
+        const results = await new AxeBuilder({ page })
+          .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
+          .disableRules(SHADOW_DOM_EXCLUDED_RULES)
+          .analyze();
+        const critical = results.violations.filter(
+          (v) => v.impact === "critical" || v.impact === "serious",
         );
-      }
-      expect(critical).toEqual([]);
-    });
-  }
+        if (critical.length > 0) {
+          console.log(
+            `A11y violations on ${view.name}:`,
+            JSON.stringify(
+              critical.map((v) => ({
+                id: v.id,
+                impact: v.impact,
+                description: v.description,
+                nodes: v.nodes.length,
+              })),
+              null,
+              2,
+            ),
+          );
+        }
+        expect(critical).toEqual([]);
+      });
+    }
+  });
 
   test("all navigation views are keyboard accessible", async ({ page }) => {
     await page.goto("/?demo");

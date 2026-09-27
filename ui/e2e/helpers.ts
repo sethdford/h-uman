@@ -242,6 +242,38 @@ export async function waitForViewReady(
 }
 
 /**
+ * Waits until every finite, time-based animation on the page has finished,
+ * including those inside shadow roots — `document.getAnimations()` skips
+ * shadow-tree targets, so this walks every root and asks each element.
+ * Scroll-driven animations (non-DocumentTimeline) never finish and infinite
+ * ones (breathing dots) never end, so both are ignored.
+ */
+export async function waitForAnimationsSettled(
+  page: import("@playwright/test").Page,
+  timeout = POLL,
+): Promise<void> {
+  await page.waitForFunction(
+    () => {
+      const roots: Array<Document | ShadowRoot> = [document];
+      for (let i = 0; i < roots.length; i++) {
+        for (const el of roots[i].querySelectorAll("*")) {
+          if (el.shadowRoot) roots.push(el.shadowRoot);
+          for (const a of el.getAnimations()) {
+            if (!(a.timeline instanceof DocumentTimeline)) continue;
+            const end = a.effect?.getComputedTiming().endTime;
+            if (typeof end !== "number" || !Number.isFinite(end)) continue;
+            if (a.playState === "running") return false;
+          }
+        }
+      }
+      return true;
+    },
+    undefined,
+    { timeout },
+  );
+}
+
+/**
  * Waits for a selector inside a view's shadow DOM.
  * Use for LitElement rendering (e.g. detail sheet, panel).
  */
