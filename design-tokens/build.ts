@@ -21,6 +21,7 @@ import {
   TOKEN_FILES,
   collectTokens,
   collectTypes,
+  parseOutdir,
   partitionByPlatform,
   readTokenSources,
   resolveRefs,
@@ -102,15 +103,6 @@ function springToSwiftDampingFraction(
   return (
     Math.round((damping / (2 * Math.sqrt(stiffness * mass))) * 1000) / 1000
   );
-}
-
-function parseOutdir(): string | null {
-  const args = process.argv.slice(2);
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--outdir" && args[i + 1]) return args[i + 1];
-    if (args[i].startsWith("--outdir=")) return args[i].split("=")[1];
-  }
-  return null;
 }
 
 function writeOutput(
@@ -878,7 +870,9 @@ function generateCSS(
   lines.push("}");
   lines.push("");
 
-  // High-contrast theme
+  // High-contrast theme. Emitted after the light-scheme :root block at equal
+  // specificity, so this black palette wins in both color schemes; a text
+  // token it omits keeps the light theme's dark-on-light value on black.
   const highContrastKeys = Object.keys(tokens).filter((k) =>
     k.startsWith("high-contrast."),
   );

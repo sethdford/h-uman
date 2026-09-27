@@ -493,7 +493,7 @@ static void gg_log_shadow_and_free(hu_memory_loader_t *loader, const char *what,
 
 /* *ctx = *ctx + ("\n" if non-empty) + label + add. Takes ownership of add; on
  * allocation failure keeps *ctx unchanged and drops add (fail-open). */
-static void gg_append_labeled(hu_memory_loader_t *loader, char **ctx, size_t *ctx_len,
+static bool gg_append_labeled(hu_memory_loader_t *loader, char **ctx, size_t *ctx_len,
                               const char *label, char *add, size_t add_len) {
     hu_allocator_t *a = loader->alloc;
     size_t lab = strlen(label), sep = *ctx_len > 0 ? 1 : 0;
@@ -515,6 +515,7 @@ static void gg_append_labeled(hu_memory_loader_t *loader, char **ctx, size_t *ct
         *ctx_len = n;
     }
     a->free(a->ctx, add, add_len + 1);
+    return buf != NULL;
 }
 
 /* Graph grounding load, shared by BOTH turn paths (see agent.h). Composes
@@ -534,6 +535,7 @@ void hu_agent_load_graph_grounding(hu_agent_t *agent, void *loader_v, const char
         agent->memory_session_id_len == 0)
         return;
     size_t matched_entities = 0;
+    bool via_fallback = false, via_self = false;
     hu_graph_ground_compose(loader, agent->memory_session_id, agent->memory_session_id_len, msg,
                             msg_len, 0, graph_ctx, graph_ctx_len, &matched_entities);
     /* Contact-anchored fallback on a lexical miss. Activation gated on a
@@ -554,6 +556,7 @@ void hu_agent_load_graph_grounding(hu_agent_t *agent, void *loader_v, const char
             } else if (fb) {
                 *graph_ctx = fb;
                 *graph_ctx_len = fb_len;
+                via_fallback = true;
             }
         }
     }
@@ -570,7 +573,8 @@ void hu_agent_load_graph_grounding(hu_agent_t *agent, void *loader_v, const char
         if (self_mode == HU_GATE_SHADOW)
             gg_log_shadow_and_free(loader, "self_facts", sf, sf_len, agent->turn_tier);
         else if (sf)
-            gg_append_labeled(loader, graph_ctx, graph_ctx_len, "About you:\n", sf, sf_len);
+            via_self =
+                gg_append_labeled(loader, graph_ctx, graph_ctx_len, "About you:\n", sf, sf_len);
     }
     const char *drop_reason = NULL;
     if (graph_mode == HU_GRAPH_GROUNDING_SHADOW) {
@@ -589,6 +593,13 @@ void hu_agent_load_graph_grounding(hu_agent_t *agent, void *loader_v, const char
                     agent->turn_tier);
         drop_reason = "casual";
     }
+    if (!drop_reason && *graph_ctx_len > 0)
+        /* LIVE injection is otherwise silent; this line is what makes the
+         * fallback / self-facts activation measurable (sizes only, no text). */
+        hu_log_info("graph_grounding", NULL,
+                    "live: injected %zu bytes tier=%d lexical=%zu fallback=%d self=%d fp=%08x",
+                    *graph_ctx_len, agent->turn_tier, matched_entities, via_fallback, via_self,
+                    (unsigned)hu_graph_ground_fingerprint(*graph_ctx, *graph_ctx_len));
     if (drop_reason) {
         if (*graph_ctx)
             agent->alloc->free(agent->alloc->ctx, *graph_ctx, *graph_ctx_len + 1);

@@ -157,7 +157,7 @@ export class ScDialog extends LitElement {
 
     .btn-confirm-danger {
       background: var(--hu-error);
-      color: var(--hu-on-accent);
+      color: var(--hu-bg);
     }
 
     .btn-confirm-danger:hover {

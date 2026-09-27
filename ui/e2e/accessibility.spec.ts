@@ -91,23 +91,11 @@ async function settlePage(page: Page, quietMs = 250, timeout = 5000): Promise<vo
  * both directions: a view may not gain a rule or nodes, and a fix must lower its
  * entry here so the freed slack cannot hide the next regression.
  */
-const KNOWN_VIOLATIONS: Record<string, Record<string, number>> = {
-  // hu-model-selector combobox trigger has no accessible name.
-  Overview: { "button-name": 1 },
-  Chat: { "button-name": 1 },
-  // Active tag chip: --hu-bg text on --hu-accent is 2.23:1 (not the segmented control).
-  Skills: { "color-contrast": 1 },
-  // Number inputs rendered with aria-label="".
-  Config: { label: 2 },
-  // hu-segmented-control active segment: --hu-on-accent on --hu-accent is 2.43:1.
-  Channels: { "color-contrast": 1 },
-  Usage: { "color-contrast": 1 },
-  Memory: { "color-contrast": 1 },
-  Logs: { "color-contrast": 1 },
-};
+const KNOWN_VIOLATIONS: Record<string, Record<string, number>> = {};
 
 const VIEWS = [
-  { path: "/", name: "Overview" },
+  // An empty hash routes to chat, so Overview needs its own hash to be scanned at all.
+  { path: "/#overview", name: "Overview" },
   { path: "/#chat", name: "Chat" },
   { path: "/#agents", name: "Agents" },
   { path: "/#sessions", name: "Sessions" },
@@ -129,8 +117,7 @@ const VIEWS = [
 test.describe("Accessibility", () => {
   for (const view of VIEWS) {
     test(`${view.name} view passes axe accessibility`, async ({ page }) => {
-      const url = view.path === "/" ? "/?demo" : `/?demo${view.path.slice(1)}`;
-      await page.goto(url);
+      await page.goto(`/?demo${view.path.slice(1)}`);
       await page.waitForLoadState("domcontentloaded");
       await settlePage(page);
       const results = await new AxeBuilder({ page })
@@ -169,6 +156,63 @@ test.describe("Accessibility", () => {
     }
     const focused = await page.evaluate(() => document.activeElement?.tagName);
     expect(focused).toBeTruthy();
+  });
+
+  test("chat session list: Tab reaches it, arrows move, Enter selects, Delete removes", async ({
+    page,
+  }) => {
+    await page.goto("/?demo#chat");
+    await waitForViewReady(page, "hu-chat-view");
+    const panel = page.locator("hu-chat-sessions-panel");
+    const rows = panel.locator(".session-item");
+    await expect(rows.first()).toBeVisible({ timeout: POLL });
+    const before = await rows.count();
+    expect(before).toBeGreaterThan(2);
+    // Id of the row holding focus, read through both shadow roots.
+    const focusedRow = () =>
+      page.evaluate(() => {
+        let a: Element | null = document.activeElement;
+        while (a?.shadowRoot?.activeElement) a = a.shadowRoot.activeElement;
+        return (a as HTMLElement | null)?.closest<HTMLElement>(".session-item")?.dataset.sessionId;
+      });
+    const ids = await rows.evaluateAll((els) =>
+      els.map((e) => (e as HTMLElement).dataset.sessionId),
+    );
+
+    // The list is one Tab stop: search box, then a single session row.
+    await panel.locator(".search-input, input[aria-label='Search sessions']").first().focus();
+    await page.keyboard.press("Tab");
+    const first = await focusedRow();
+    expect(first).toBeTruthy();
+    const start = ids.indexOf(first);
+    // Tab again reaches that row's Delete, and once more leaves the list.
+    await page.keyboard.press("Tab");
+    expect(await focusedRow()).toBe(first);
+    await page.keyboard.press("Tab");
+    expect(await focusedRow()).toBeUndefined();
+    await panel.locator(".session-item .session-open[tabindex='0']").focus();
+
+    await page.keyboard.press("ArrowDown");
+    expect(await focusedRow()).toBe(ids[start + 1]);
+
+    // Enter selects: the chat switches to that session, which the row announces.
+    await page.keyboard.press("Enter");
+    await expect(panel.locator(".session-open[aria-current='true']")).toHaveCount(1);
+    await expect(rows.nth(start + 1).locator(".session-open")).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+
+    await rows
+      .nth(start + 1)
+      .locator(".session-open")
+      .focus();
+    await page.keyboard.press("Delete");
+    await expect(rows).toHaveCount(before - 1);
+    await expect(panel.locator(`.session-item[data-session-id="${ids[start + 1]}"]`)).toHaveCount(
+      0,
+    );
+    expect(await focusedRow()).toBe(ids[start + 2]);
   });
 
   test("command palette is keyboard navigable", async ({ page }) => {
