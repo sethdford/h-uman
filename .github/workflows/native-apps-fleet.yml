@@ -160,7 +160,15 @@ jobs:
           force-avd-creation: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          script: cd apps/android && chmod +x gradlew && ./gradlew connectedDebugAndroidTest --no-daemon --stacktrace
+          # TEMP DIAGNOSTIC (#483): capture screen/keyguard/focus state before the
+          # run and a screenshot on failure — the tests see a RESUMED activity but
+          # report "not displayed" / "Failed to inject touch input".
+          script: |
+            mkdir -p /tmp/fleet-diag
+            adb shell dumpsys window | grep -E 'mCurrentFocus|mFocusedApp|isKeyguardShowing|KeyguardShowing|mDreamingLockscreen|mScreenOn|mAwake|mShowingDream' > /tmp/fleet-diag/window-before.txt || true
+            adb shell dumpsys power | grep -E 'mWakefulness|Display Power|mHoldingDisplaySuspendBlocker' > /tmp/fleet-diag/power-before.txt || true
+            adb exec-out screencap -p > /tmp/fleet-diag/before.png || true
+            cd apps/android && chmod +x gradlew && ./gradlew connectedDebugAndroidTest --no-daemon --stacktrace || (adb exec-out screencap -p > /tmp/fleet-diag/after-fail.png; adb shell dumpsys window | grep -E 'mCurrentFocus|mFocusedApp|KeyguardShowing' > /tmp/fleet-diag/window-after.txt; exit 1)
 
       - name: Upload Android test outputs on failure
         if: failure()
@@ -170,6 +178,7 @@ jobs:
           path: |
             apps/android/app/build/outputs/androidTest-results
             apps/android/app/build/reports/androidTests
+            /tmp/fleet-diag
           retention-days: 7
           if-no-files-found: ignore
 
