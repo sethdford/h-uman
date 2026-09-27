@@ -1,9 +1,9 @@
 import { test, expect, type Page } from "@playwright/test";
 import { waitForViewReady } from "./helpers";
 
-/** Whether `tag` is registered. Read only after waitForViewReady: chat-view.js
- *  imports these components statically, so they are defined by the time the
- *  view has upgraded and rendered. */
+/** Whether `tag` is registered. Call this only after waitForViewReady.
+ *  chat-view.js imports these components statically, so they are defined by
+ *  the time the view has upgraded and rendered. */
 function isDefined(page: Page, tag: string): Promise<boolean> {
   return page.evaluate((t) => customElements.get(t) !== undefined, tag);
 }

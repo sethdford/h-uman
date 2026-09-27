@@ -21,14 +21,16 @@ test.describe("Chat Gemini Flow", () => {
 
     // The thread starts empty in demo mode. The sent message lands as a user
     // bubble, then the demo gateway streams one assistant reply after its
-    // simulated latency. Bubble text lives in hu-chat-bubble's shadow root.
+    // simulated latency. Bubbles are role="article", labelled by sender.
     const thread = chatView.locator("hu-message-thread");
-    const userBubbles = thread.locator(".bubble-wrapper.user hu-chat-bubble");
-    const assistantBubbles = thread.locator(".bubble-wrapper.assistant hu-chat-bubble");
+    const userBubbles = thread.getByRole("article", { name: /from user|Your message/ });
+    const assistantBubbles = thread.getByRole("article", {
+      name: /from assistant|Assistant message/,
+    });
     await expect(userBubbles).toHaveCount(1, { timeout: 10000 });
     await expect(userBubbles).toContainText(prompt);
     await expect(assistantBubbles).toHaveCount(1, { timeout: 10000 });
-    // The bubble always carries a timestamp ("10:19 AM"); require an actual word.
-    await expect(assistantBubbles).toHaveText(/[A-Za-z]{4,}/, { timeout: 10000 });
+    // .content holds the message body only; the timestamp is slotted outside it.
+    await expect(assistantBubbles.locator(".content")).toHaveText(/\S/, { timeout: 10000 });
   });
 });
