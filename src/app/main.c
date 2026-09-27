@@ -67,6 +67,7 @@
 #include "human/session.h"
 #include "human/skill_registry.h"
 #include "human/skill_scaffold.h"
+#include "human/tts/speech_rewrite.h"
 #include "human/version.h"
 #ifdef HU_HAS_SKILLS
 #include "human/skillforge.h"
@@ -2672,6 +2673,7 @@ static hu_error_t cmd_voice_preview(hu_allocator_t *alloc, int argc, char **argv
     const char *channel = "imessage";
     const char *model_override = NULL;
     const char *voice_override = NULL; /* the A/B "voice" arm (e.g. Ferni) */
+    const char *rewrite_arg = NULL;    /* F1 S1: off|shadow|live (default HU_SPEECH_REWRITE) */
     float speed_override = 0.f;
     bool raw = false; /* skip transcript prep: the A/B "prep off" arm */
     for (int i = 3; i < argc; i++) {
@@ -2681,6 +2683,8 @@ static hu_error_t cmd_voice_preview(hu_allocator_t *alloc, int argc, char **argv
             model_override = argv[++i];
         else if (strcmp(argv[i], "--voice") == 0 && i + 1 < argc)
             voice_override = argv[++i];
+        else if (strcmp(argv[i], "--rewrite") == 0 && i + 1 < argc)
+            rewrite_arg = argv[++i];
         else if (strcmp(argv[i], "--speed") == 0 && i + 1 < argc)
             speed_override = (float)atof(argv[++i]);
         else if (strcmp(argv[i], "--raw") == 0)
@@ -2699,7 +2703,8 @@ static hu_error_t cmd_voice_preview(hu_allocator_t *alloc, int argc, char **argv
     if (!text || !text[0] || !persona_name || !persona_name[0]) {
         fprintf(stderr, "Usage: human voice preview --text <reply> --persona <name> "
                         "[--incoming <msg>] [--channel imessage] [--out <file>] "
-                        "[--model <id>] [--voice <id>] [--speed <0.6-1.5>] [--raw]\n");
+                        "[--model <id>] [--voice <id>] [--speed <0.6-1.5>] [--raw] "
+                        "[--rewrite off|shadow|live]\n");
         return HU_ERR_INVALID_ARGUMENT;
     }
 
@@ -2765,9 +2770,36 @@ static hu_error_t cmd_voice_preview(hu_allocator_t *alloc, int argc, char **argv
         req.tts.nonverbals = persona.voice.nonverbals;
         err = HU_OK;
     } else {
-        err = hu_voice_reply_build_request(&persona.voice, text, strlen(text), incoming,
-                                           incoming ? strlen(incoming) : 0, tmb.tm_hour,
-                                           (uint32_t)now, &req);
+        /* The daemon's voice path: cleanup (S2), optional rewrite for the ear
+         * (S1, drift-guarded), then transcript prep with the laughter cue. */
+        hu_speech_rewrite_mode_t rw =
+            hu_speech_rewrite_mode_parse(rewrite_arg ? rewrite_arg : getenv("HU_SPEECH_REWRITE"));
+        hu_provider_t prov = {0};
+        bool have_prov = false;
+        if (rw != HU_SPEECH_REWRITE_OFF && cfg.default_provider && cfg.default_provider[0])
+            have_prov =
+                hu_provider_create_from_config(alloc, &cfg, cfg.default_provider,
+                                               strlen(cfg.default_provider), &prov) == HU_OK;
+        const char *mdl = cfg.default_model ? cfg.default_model : "";
+        hu_speech_result_t sp;
+        (void)hu_speech_prepare(alloc, have_prov ? &prov : NULL, mdl, strlen(mdl), &persona, rw,
+                                text, strlen(text), incoming, incoming ? strlen(incoming) : 0, &sp);
+        if (have_prov && prov.vtable && prov.vtable->deinit)
+            prov.vtable->deinit(prov.ctx, alloc);
+        printf("speech: rewrite=%s used=%d reason=%s\nspoken: %s\n",
+               rw == HU_SPEECH_REWRITE_LIVE ? "live"
+                                            : (rw == HU_SPEECH_REWRITE_SHADOW ? "shadow" : "off"),
+               sp.used_rewrite ? 1 : 0, sp.reason ? sp.reason : "-", sp.spoken);
+        if (sp.rewritten[0] && !sp.used_rewrite)
+            printf("rewrite (not spoken): %s\n", sp.rewritten);
+        if (sp.spoken_len == 0) {
+            fprintf(stderr, "Error: nothing speakable in --text\n");
+            hu_persona_free(&persona);
+            return HU_ERR_INVALID_ARGUMENT;
+        }
+        err = hu_voice_reply_build_request_ex(&persona.voice, sp.spoken, sp.spoken_len, incoming,
+                                              incoming ? strlen(incoming) : 0, tmb.tm_hour,
+                                              (uint32_t)now, sp.laughter_cue, &req);
     }
     if (err != HU_OK) {
         fprintf(stderr, "Error: transcript prep failed: %s\n", hu_error_string(err));
