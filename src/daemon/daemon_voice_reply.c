@@ -110,6 +110,17 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, hu_agent_t *agent, const hu_co
     (void)combined;
     (void)combined_len;
     (void)bth_hour;
+    /* SHIELD parity: the text path runs moderation/crisis, companion safety and
+     * claim hedging inside `if (!sent_voice …)` in daemon.c, so a voice memo would
+     * skip all three. Decline voice unless every gate is clear; the caller then
+     * delivers the reply through the text path, which applies them. */
+    {
+        const char *gate_why = NULL;
+        if (!hu_voice_reply_gates_clear(alloc, response, response_len, &gate_why)) {
+            hu_log_info("voice_reply", NULL, "voice declined by safety gate: %s", gate_why);
+            return false;
+        }
+    }
     bool sent_voice = false;
     {
         const char *chn_voice =
