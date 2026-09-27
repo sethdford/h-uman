@@ -8654,37 +8654,28 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         }
                     }
 #endif
-                    /* Bus final delivery: post-processed text (send_event FINAL or send). */
-                    turn_out_state.text_delivered_via_bus = false;
-                    if (err == HU_OK && response && response_len > 0) {
-                        hu_bus_event_t rev;
-                        memset(&rev, 0, sizeof(rev));
-                        rev.type = HU_BUS_MESSAGE_SENT;
-                        if (agent->active_channel && agent->active_channel[0]) {
-                            int nc4 = snprintf(rev.channel, HU_BUS_CHANNEL_LEN, "%s",
-                                               agent->active_channel);
-                            (void)nc4;
-                        } else if (ch->channel->vtable->name) {
-                            const char *cn4 = ch->channel->vtable->name(ch->channel->ctx);
-                            if (cn4)
-                                (void)snprintf(rev.channel, HU_BUS_CHANNEL_LEN, "%s", cn4);
-                        }
-                        {
-                            size_t idk = key_len < HU_BUS_ID_LEN - 1 ? key_len : HU_BUS_ID_LEN - 1;
-                            memcpy(rev.id, batch_key, idk);
-                            rev.id[idk] = '\0';
-                        }
-                        rev.payload = response;
-                        hu_daemon_outbound_bus_set_message(&rev, response, response_len);
-                        daemon_out_bus_bridge.delivery_turn = &turn_out_state;
-                        hu_bus_publish(&daemon_outbound_bus, &rev);
-                        daemon_out_bus_bridge.delivery_turn = NULL;
-                    }
-                    /* ── Voice decision: TTS when channel has voice_enabled ───── */
-                    bool sent_voice = false;
-                    sent_voice = hu_daemon_voice_reply(alloc, agent, config, ch, batch_key, key_len,
-                                                       combined, combined_len, response,
-                                                       response_len, bth_hour);
+                    /* Final delivery: voice memo first; only when none went out does
+                     * the bus send the text (send_event FINAL or send). One reply is
+                     * never both. A false return with text_delivered_via_bus still
+                     * false leaves delivery to the text path below. */
+                    hu_daemon_final_reply_t final_reply = {
+                        .alloc = alloc,
+                        .agent = agent,
+                        .config = config,
+                        .ch = ch,
+                        .batch_key = batch_key,
+                        .key_len = key_len,
+                        .combined = combined,
+                        .combined_len = combined_len,
+                        .response = response,
+                        .response_len = response_len,
+                        .bth_hour = bth_hour,
+                        .text_ready = (err == HU_OK),
+                        .bus = &daemon_outbound_bus,
+                        .bridge = &daemon_out_bus_bridge,
+                        .turn = &turn_out_state,
+                    };
+                    bool sent_voice = hu_daemon_deliver_final_reply(&final_reply);
                     if (!sent_voice && !turn_out_state.text_delivered_via_bus) {
                         const char *eff_ch = ch->channel->vtable->name
                                                  ? ch->channel->vtable->name(ch->channel->ctx)

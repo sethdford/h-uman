@@ -78,4 +78,33 @@ bool hu_daemon_outbound_final_gates_clear(hu_allocator_t *alloc, const char *tex
  * applies the gates. */
 bool hu_daemon_outbound_bus_cb(hu_bus_event_type_t type, const hu_bus_event_t *ev, void *user_ctx);
 
+/* One reactive reply's final delivery. Voice fields are the arguments of
+ * hu_daemon_voice_reply; bus fields route the text through the bridge. */
+typedef struct hu_daemon_final_reply {
+    hu_allocator_t *alloc;
+    hu_agent_t *agent;
+    const hu_config_t *config;
+    hu_service_channel_t *ch;
+    const char *batch_key;
+    size_t key_len;
+    const char *combined; /* inbound batch text */
+    size_t combined_len;
+    const char *response;
+    size_t response_len;
+    int bth_hour;
+    bool text_ready; /* the turn succeeded: the reply may be published as text */
+    hu_bus_t *bus;
+    hu_daemon_out_bus_bridge_t *bridge;
+    hu_daemon_out_turn_state_t *turn; /* text_delivered_via_bus is reset, then set by the bridge */
+} hu_daemon_final_reply_t;
+
+/* Voice first, then bus: tries hu_daemon_voice_reply; only when no voice memo
+ * went out does it publish the text as MESSAGE_SENT (with r->turn as the
+ * bridge's delivery_turn). One reply is never sent as both a memo and a text.
+ * After a memo it stops a typing indicator the stream started. Returns true
+ * when a voice memo was sent. When it returns false and
+ * r->turn->text_delivered_via_bus is still false, the caller's text path owns
+ * delivery (iMessage, a gate-deferred final, or a failed turn). */
+bool hu_daemon_deliver_final_reply(const hu_daemon_final_reply_t *r);
+
 #endif /* HU_DAEMON_OUTBOUND_BUS_H */

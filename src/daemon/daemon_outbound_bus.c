@@ -17,6 +17,8 @@
 #include "human/security/companion_safety.h"
 #include "human/security/moderation.h"
 
+#include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 size_t hu_daemon_outbound_utf8_safe_truncate(const char *buf, size_t len) {
@@ -302,4 +304,47 @@ bool hu_daemon_outbound_bus_cb(hu_bus_event_type_t type, const hu_bus_event_t *e
     if (br->delivery_turn && se == HU_OK)
         br->delivery_turn->text_delivered_via_bus = true;
     return true;
+}
+
+bool hu_daemon_deliver_final_reply(const hu_daemon_final_reply_t *r) {
+    if (!r || !r->ch || !r->ch->channel || !r->ch->channel->vtable)
+        return false;
+    if (r->turn)
+        r->turn->text_delivered_via_bus = false;
+    const hu_channel_vtable_t *vt = r->ch->channel->vtable;
+    void *cctx = r->ch->channel->ctx;
+
+    if (hu_daemon_voice_reply(r->alloc, r->agent, r->config, r->ch, r->batch_key, r->key_len,
+                              r->combined, r->combined_len, r->response, r->response_len,
+                              r->bth_hour)) {
+        if (r->turn && r->turn->typing_started && vt->stop_typing)
+            (void)vt->stop_typing(cctx, r->batch_key, r->key_len);
+        return true;
+    }
+
+    if (!r->text_ready || !r->bus || !r->response || r->response_len == 0)
+        return false;
+    hu_bus_event_t rev;
+    memset(&rev, 0, sizeof(rev));
+    rev.type = HU_BUS_MESSAGE_SENT;
+    if (r->agent && r->agent->active_channel && r->agent->active_channel[0]) {
+        (void)snprintf(rev.channel, HU_BUS_CHANNEL_LEN, "%s", r->agent->active_channel);
+    } else if (vt->name) {
+        const char *cn = vt->name(cctx);
+        if (cn)
+            (void)snprintf(rev.channel, HU_BUS_CHANNEL_LEN, "%s", cn);
+    }
+    if (r->batch_key) {
+        size_t idk = r->key_len < HU_BUS_ID_LEN - 1 ? r->key_len : HU_BUS_ID_LEN - 1;
+        memcpy(rev.id, r->batch_key, idk);
+        rev.id[idk] = '\0';
+    }
+    rev.payload = (void *)(uintptr_t)r->response;
+    hu_daemon_outbound_bus_set_message(&rev, r->response, r->response_len);
+    if (r->bridge)
+        r->bridge->delivery_turn = r->turn;
+    hu_bus_publish(r->bus, &rev);
+    if (r->bridge)
+        r->bridge->delivery_turn = NULL;
+    return false;
 }
