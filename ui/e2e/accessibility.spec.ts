@@ -91,15 +91,7 @@ async function settlePage(page: Page, quietMs = 250, timeout = 5000): Promise<vo
  * both directions: a view may not gain a rule or nodes, and a fix must lower its
  * entry here so the freed slack cannot hide the next regression.
  */
-const KNOWN_VIOLATIONS: Record<string, Record<string, number>> = {
-  // Active tag chip: --hu-bg text on --hu-accent is 2.23:1 (not the segmented control).
-  Skills: { "color-contrast": 1 },
-  // hu-segmented-control active segment: --hu-on-accent on --hu-accent is 2.43:1.
-  Channels: { "color-contrast": 1 },
-  Usage: { "color-contrast": 1 },
-  Memory: { "color-contrast": 1 },
-  Logs: { "color-contrast": 1 },
-};
+const KNOWN_VIOLATIONS: Record<string, Record<string, number>> = {};
 
 const VIEWS = [
   // An empty hash routes to chat, so Overview needs its own hash to be scanned at all.

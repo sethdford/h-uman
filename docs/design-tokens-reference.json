@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-27T13:41:51.452Z",
+  "generated": "2026-09-27T16:30:30.359Z",
   "groups": {
     "color.neutral": [
       {
@@ -1825,8 +1825,8 @@
       },
       {
         "name": "on-accent",
-        "value": "#ffffff",
-        "hex": "#ffffff"
+        "value": "#0c0a08",
+        "hex": "#0c0a08"
       },
       {
         "name": "accent-secondary",
@@ -2174,8 +2174,8 @@
       },
       {
         "name": "on-accent",
-        "value": "#ffffff",
-        "hex": "#ffffff"
+        "value": "#0c0a08",
+        "hex": "#0c0a08"
       },
       {
         "name": "accent-secondary",

@@ -955,7 +955,7 @@
         "$type": "color"
       },
       "on-accent": {
-        "$value": "#ffffff",
+        "$value": "{color.neutral.50}",
         "$type": "color"
       },
       "accent-secondary": {
@@ -1290,7 +1290,7 @@
         "$type": "color"
       },
       "on-accent": {
-        "$value": "#ffffff",
+        "$value": "{color.neutral.50}",
         "$type": "color"
       },
       "accent-secondary": {
