@@ -6,6 +6,7 @@
 #include "human/channels/imessage_caps.h"     /* native capability gate (T0.4) */
 #include "human/channels/imessage_reply.h"
 #include "human/channels/imessage_send_observer.h" /* send provenance */
+#include "human/channels/imessage_voice_record.h"  /* native Messages voice delivery */
 #include "human/context/conversation.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
@@ -2516,6 +2517,16 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
 
 #if !HU_IS_TEST
 imsg_media:
+    {
+        /* Native Messages voice delivery (W3), not yet active: log the route a
+         * memo-shaped send would take under HU_VOICE_DELIVERY. Behavior unchanged. */
+        hu_voice_record_route_t vroute =
+            hu_voice_record_route(hu_voice_delivery_mode_parse(getenv("HU_VOICE_DELIVERY")),
+                                  message_len, media, media_count);
+        if (vroute != HU_VREC_ROUTE_ATTACHMENT)
+            hu_log_info("imessage", NULL, "voice delivery route=%s (not yet active)",
+                        vroute == HU_VREC_ROUTE_SHADOW ? "shadow" : "record");
+    }
     /* Send media attachments (local file paths only) after text succeeds.
      * Prefer imsg send --file when available (faster, better error reporting);
      * fall back to AppleScript per-attachment on failure. */

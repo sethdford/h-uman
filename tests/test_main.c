@@ -358,6 +358,7 @@ void run_imessage_action_telemetry_tests(void);
 void run_imessage_reply_pacing_tests(void);
 void run_imessage_threaded_reply_tests(void);
 void run_imessage_send_observer_tests(void);
+void run_imessage_voice_record_tests(void);
 void run_imessage_custom_tapback_tests(void);
 void run_imessage_action_facts_tests(void);
 void run_imessage_dispatcher_tests(void);
@@ -1430,6 +1431,7 @@ int main(int argc, char **argv) {
     run_imessage_reply_pacing_tests();
     run_imessage_threaded_reply_tests();
     run_imessage_send_observer_tests();
+    run_imessage_voice_record_tests();
     run_imessage_custom_tapback_tests();
     run_imessage_action_facts_tests();
     run_imessage_dispatcher_tests();

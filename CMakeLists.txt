@@ -465,6 +465,9 @@ list(APPEND CHANNEL_SOURCES src/channels/imessage_reply.c)
 # Send provenance observer: pure C, no Apple deps, so unconditional like
 # imessage_reply.c (the daemon records every delivered send through it).
 list(APPEND CHANNEL_SOURCES src/channels/imessage_send_observer.c)
+# Native Messages voice delivery (W3): pure policy + orchestrator, no Apple
+# deps, so unconditional; imessage.c calls it from the production send path.
+list(APPEND CHANNEL_SOURCES src/channels/imessage_voice_record.c)
 # Tier 1 Phase 2 (iMessage action surface): pure reply-style classifier +
 # facts bridge (hu_imessage_action_*). Zero chat.db / Apple deps (only libc +
 # error.h/persona.h); core callers (src/daemon.c
@@ -3710,6 +3713,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_imessage_reply_pacing.c
     tests/test_imessage_threaded_reply.c
     tests/test_imessage_send_observer.c
+    tests/test_imessage_voice_record.c
     tests/test_imessage_custom_tapback.c
     tests/test_imessage_action_facts.c
     tests/test_imessage_dispatcher.c
