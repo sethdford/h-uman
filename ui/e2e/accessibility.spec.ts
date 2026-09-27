@@ -105,7 +105,8 @@ const KNOWN_VIOLATIONS: Record<string, Record<string, number>> = {
 };
 
 const VIEWS = [
-  { path: "/", name: "Overview" },
+  // An empty hash routes to chat, so Overview needs its own hash to be scanned at all.
+  { path: "/#overview", name: "Overview" },
   { path: "/#chat", name: "Chat" },
   { path: "/#agents", name: "Agents" },
   { path: "/#sessions", name: "Sessions" },
@@ -127,8 +128,7 @@ const VIEWS = [
 test.describe("Accessibility", () => {
   for (const view of VIEWS) {
     test(`${view.name} view passes axe accessibility`, async ({ page }) => {
-      const url = view.path === "/" ? "/?demo" : `/?demo${view.path.slice(1)}`;
-      await page.goto(url);
+      await page.goto(`/?demo${view.path.slice(1)}`);
       await page.waitForLoadState("domcontentloaded");
       await settlePage(page);
       const results = await new AxeBuilder({ page })
