@@ -86,4 +86,61 @@ typedef enum {
 hu_voice_record_route_t hu_voice_record_route(hu_voice_delivery_mode_t mode, size_t message_len,
                                               const char *const *media, size_t media_count);
 
+/* ── Orchestrator ────────────────────────────────────────────────────────
+ * Every real-world effect goes through this port; tests supply a fake. */
+typedef struct hu_voice_record_port {
+    void *ctx;
+    hu_error_t (*gather_facts)(void *ctx, const char *real_mic, hu_voice_record_facts_t *out);
+    hu_error_t (*set_input)(void *ctx, const char *device_name); /* sets default input */
+    hu_error_t (*get_input)(void *ctx, char *buf, size_t cap);   /* default input's name */
+    hu_error_t (*remember_ui)(void *ctx);
+    void (*restore_ui)(void *ctx);
+    hu_error_t (*open_chat)(void *ctx, const char *handle, size_t handle_len);
+    hu_error_t (*press)(void *ctx, const char *label);
+    bool (*wait_label)(void *ctx, const char *label, uint32_t timeout_ms);
+    hu_error_t (*playback_prepare)(void *ctx, const char *audio_path);
+    hu_error_t (*playback_run)(void *ctx); /* blocks until the clip has fully played */
+    void (*playback_dispose)(void *ctx);
+    void (*sleep_ms)(void *ctx, uint32_t ms);
+    int64_t (*max_rowid)(void *ctx); /* -1 unknown */
+    bool (*audio_row_after)(void *ctx, const char *handle, size_t handle_len, int64_t after_rowid,
+                            uint32_t timeout_ms);
+} hu_voice_record_port_t;
+
+typedef struct {
+    const char *handle;
+    size_t handle_len;
+    const char *audio_path;
+    const char *real_mic; /* HU_VOICE_REAL_INPUT: the input to restore, always */
+    double min_idle_sec;
+    uint32_t seed;
+} hu_voice_record_request_t;
+
+typedef enum {
+    HU_VREC_STAGE_NONE = 0,
+    HU_VREC_STAGE_PREFLIGHT,
+    HU_VREC_STAGE_INPUT,
+    HU_VREC_STAGE_OPEN,
+    HU_VREC_STAGE_RECORD,
+    HU_VREC_STAGE_PLAY,
+    HU_VREC_STAGE_STOP,
+    HU_VREC_STAGE_SENT,
+} hu_voice_record_stage_t;
+
+typedef struct {
+    hu_voice_record_block_t block;
+    hu_voice_record_stage_t stage; /* furthest stage reached */
+    bool verified;                 /* chat.db shows the memo */
+    bool restored;                 /* default input read back == real_mic */
+    int64_t prior_max_rowid;
+} hu_voice_record_result_t;
+
+/* HU_OK: Send was pressed (see out->verified; never re-send on !verified).
+ * HU_ERR_NOT_SUPPORTED: preflight blocked, nothing touched.
+ * HU_ERR_IO: failed before Send; recording cancelled and input/UI restored —
+ * the caller falls back to the attachment send. */
+hu_error_t hu_voice_record_send(const hu_voice_record_port_t *port,
+                                const hu_voice_record_request_t *req,
+                                hu_voice_record_result_t *out);
+
 #endif /* HU_CHANNELS_IMESSAGE_VOICE_RECORD_H */

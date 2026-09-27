@@ -87,3 +87,80 @@ hu_voice_record_route_t hu_voice_record_route(hu_voice_delivery_mode_t mode, siz
         return HU_VREC_ROUTE_ATTACHMENT;
     return mode == HU_VOICE_DELIVERY_SHADOW ? HU_VREC_ROUTE_SHADOW : HU_VREC_ROUTE_RECORD;
 }
+
+static bool input_is(const hu_voice_record_port_t *p, const char *want) {
+    char cur[128] = {0};
+    return p->get_input(p->ctx, cur, sizeof(cur)) == HU_OK && strcmp(cur, want) == 0;
+}
+
+hu_error_t hu_voice_record_send(const hu_voice_record_port_t *p,
+                                const hu_voice_record_request_t *req,
+                                hu_voice_record_result_t *out) {
+    if (!p || !req || !out || !req->audio_path || !req->handle || !req->real_mic)
+        return HU_ERR_INVALID_ARGUMENT;
+    memset(out, 0, sizeof(*out));
+    out->prior_max_rowid = -1;
+
+    hu_voice_record_facts_t facts;
+    memset(&facts, 0, sizeof(facts));
+    if (p->gather_facts(p->ctx, req->real_mic, &facts) != HU_OK)
+        facts.ax_trusted = false;
+    facts.min_idle_sec = req->min_idle_sec;
+    out->stage = HU_VREC_STAGE_PREFLIGHT;
+    out->block = hu_voice_record_preflight(&facts);
+    if (out->block != HU_VREC_OK)
+        return HU_ERR_NOT_SUPPORTED;
+
+    hu_voice_record_timing_t tm;
+    hu_voice_record_timing(req->seed, &tm);
+    hu_error_t rc = HU_ERR_IO;
+    bool sent = false;
+
+    if (p->remember_ui(p->ctx) != HU_OK)
+        goto restore;
+    out->prior_max_rowid = p->max_rowid(p->ctx);
+    if (p->playback_prepare(p->ctx, req->audio_path) != HU_OK)
+        goto restore;
+    out->stage = HU_VREC_STAGE_INPUT;
+    if (p->set_input(p->ctx, HU_VREC_BLACKHOLE_NAME) != HU_OK ||
+        !input_is(p, HU_VREC_BLACKHOLE_NAME))
+        goto restore;
+    out->stage = HU_VREC_STAGE_OPEN;
+    if (p->open_chat(p->ctx, req->handle, req->handle_len) != HU_OK ||
+        !p->wait_label(p->ctx, HU_VREC_LABEL_RECORD, 3000))
+        goto restore;
+    if (p->press(p->ctx, HU_VREC_LABEL_RECORD) != HU_OK)
+        goto restore;
+    out->stage = HU_VREC_STAGE_RECORD;
+    if (!p->wait_label(p->ctx, HU_VREC_LABEL_STOP, 3000))
+        goto restore;
+    p->sleep_ms(p->ctx, tm.lead_in_ms);
+    out->stage = HU_VREC_STAGE_PLAY;
+    if (p->playback_run(p->ctx) != HU_OK)
+        goto restore;
+    p->sleep_ms(p->ctx, tm.tail_ms);
+    out->stage = HU_VREC_STAGE_STOP;
+    if (p->press(p->ctx, HU_VREC_LABEL_STOP) != HU_OK ||
+        !p->wait_label(p->ctx, HU_VREC_LABEL_SEND, 3000))
+        goto restore;
+    if (p->press(p->ctx, HU_VREC_LABEL_SEND) != HU_OK)
+        goto restore;
+    sent = true;
+    out->stage = HU_VREC_STAGE_SENT;
+    rc = HU_OK;
+
+restore:
+    /* Always: never leave a half-made recording, the mic on BlackHole, or the
+     * user's screen on Messages. The real mic is restored by name — not "the
+     * previous input" — and read back. */
+    if (!sent && out->stage >= HU_VREC_STAGE_RECORD)
+        (void)p->press(p->ctx, HU_VREC_LABEL_CANCEL);
+    p->playback_dispose(p->ctx);
+    (void)p->set_input(p->ctx, req->real_mic);
+    out->restored = input_is(p, req->real_mic);
+    p->restore_ui(p->ctx);
+    if (sent)
+        out->verified =
+            p->audio_row_after(p->ctx, req->handle, req->handle_len, out->prior_max_rowid, 10000);
+    return rc;
+}

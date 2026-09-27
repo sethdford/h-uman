@@ -101,6 +101,199 @@ static void test_vrec_route_only_memo_sends_in_non_attachment_modes(void) {
                  HU_VREC_ROUTE_ATTACHMENT);
 }
 
+/* ── Orchestrator: a fake port records every call so the order and the
+ * restore-on-every-path contract are asserted exactly. ─────────────────── */
+typedef struct {
+    char trace[1024];
+    const char *fail_at; /* call name that fails */
+    hu_voice_record_facts_t facts;
+    char input[64];
+    bool row_found;
+} fake_port_t;
+
+static void fp_log(fake_port_t *f, const char *s) {
+    strncat(f->trace, s, sizeof(f->trace) - strlen(f->trace) - 2);
+    strncat(f->trace, ",", sizeof(f->trace) - strlen(f->trace) - 1);
+}
+static bool fp_fail(const fake_port_t *f, const char *s) {
+    return f->fail_at && strcmp(f->fail_at, s) == 0;
+}
+static hu_error_t fp_gather(void *c, const char *mic, hu_voice_record_facts_t *o) {
+    (void)mic;
+    fake_port_t *f = c;
+    fp_log(f, "facts");
+    *o = f->facts;
+    return HU_OK;
+}
+static hu_error_t fp_set_input(void *c, const char *d) {
+    fake_port_t *f = c;
+    fp_log(f, strcmp(d, HU_VREC_BLACKHOLE_NAME) == 0 ? "in:bh" : "in:real");
+    if (!fp_fail(f, "set_input"))
+        snprintf(f->input, sizeof(f->input), "%s", d);
+    return HU_OK;
+}
+static hu_error_t fp_get_input(void *c, char *b, size_t n) {
+    fake_port_t *f = c;
+    snprintf(b, n, "%s", f->input);
+    return HU_OK;
+}
+static hu_error_t fp_remember(void *c) {
+    fp_log(c, "remember");
+    return HU_OK;
+}
+static void fp_restore_ui(void *c) {
+    fp_log(c, "restore_ui");
+}
+static hu_error_t fp_open(void *c, const char *h, size_t n) {
+    (void)h;
+    (void)n;
+    fp_log(c, "open");
+    return HU_OK;
+}
+static hu_error_t fp_press(void *c, const char *label) {
+    char b[48];
+    snprintf(b, sizeof(b), "press:%s", label);
+    fp_log(c, b);
+    return HU_OK;
+}
+static bool fp_wait(void *c, const char *label, uint32_t timeout_ms) {
+    (void)timeout_ms;
+    char b[48];
+    snprintf(b, sizeof(b), "wait:%s", label);
+    return !fp_fail(c, b);
+}
+static hu_error_t fp_prep(void *c, const char *path) {
+    (void)path;
+    fp_log(c, "prep");
+    return HU_OK;
+}
+static hu_error_t fp_run(void *c) {
+    fp_log(c, "play");
+    return fp_fail(c, "play") ? HU_ERR_IO : HU_OK;
+}
+static void fp_dispose(void *c) {
+    fp_log(c, "dispose");
+}
+static void fp_sleep(void *c, uint32_t ms) {
+    (void)c;
+    (void)ms;
+}
+static int64_t fp_rowid(void *c) {
+    (void)c;
+    return 73000;
+}
+static bool fp_row(void *c, const char *h, size_t n, int64_t after, uint32_t timeout_ms) {
+    (void)h;
+    (void)n;
+    (void)after;
+    (void)timeout_ms;
+    return ((fake_port_t *)c)->row_found;
+}
+
+static hu_voice_record_port_t fake_port(fake_port_t *f) {
+    hu_voice_record_port_t p = {f,           fp_gather,     fp_set_input, fp_get_input,
+                                fp_remember, fp_restore_ui, fp_open,      fp_press,
+                                fp_wait,     fp_prep,       fp_run,       fp_dispose,
+                                fp_sleep,    fp_rowid,      fp_row};
+    return p;
+}
+
+static fake_port_t fake_ok(void) {
+    fake_port_t f;
+    memset(&f, 0, sizeof(f));
+    f.facts = all_ok();
+    f.row_found = true;
+    snprintf(f.input, sizeof(f.input), "Shure MV7");
+    return f;
+}
+
+static hu_voice_record_request_t req_ok(void) {
+    hu_voice_record_request_t r = {"+15550000001", 12, "/tmp/a.caf", "Shure MV7", 20.0, 7};
+    return r;
+}
+
+static void test_vrec_send_happy_path_order(void) {
+    fake_port_t f = fake_ok();
+    hu_voice_record_port_t p = fake_port(&f);
+    hu_voice_record_request_t r = req_ok();
+    hu_voice_record_result_t res;
+    HU_ASSERT_EQ(hu_voice_record_send(&p, &r, &res), HU_OK);
+    HU_ASSERT_STR_EQ(f.trace, "facts,remember,prep,in:bh,open,press:Record audio,play,"
+                              "press:Stop,press:Send,dispose,in:real,restore_ui,");
+    HU_ASSERT_TRUE(res.verified);
+    HU_ASSERT_TRUE(res.restored);
+    HU_ASSERT_EQ(res.stage, HU_VREC_STAGE_SENT);
+    HU_ASSERT_EQ(res.prior_max_rowid, 73000);
+}
+
+static void test_vrec_send_mic_busy_touches_nothing(void) {
+    fake_port_t f = fake_ok();
+    f.facts.real_mic_busy = true;
+    hu_voice_record_port_t p = fake_port(&f);
+    hu_voice_record_request_t r = req_ok();
+    hu_voice_record_result_t res;
+    HU_ASSERT_EQ(hu_voice_record_send(&p, &r, &res), HU_ERR_NOT_SUPPORTED);
+    HU_ASSERT_STR_EQ(f.trace, "facts,");
+    HU_ASSERT_EQ(res.block, HU_VREC_MIC_BUSY);
+}
+
+static void test_vrec_send_input_readback_mismatch_aborts_before_record(void) {
+    fake_port_t f = fake_ok();
+    f.fail_at = "set_input";
+    hu_voice_record_port_t p = fake_port(&f);
+    hu_voice_record_request_t r = req_ok();
+    hu_voice_record_result_t res;
+    HU_ASSERT_EQ(hu_voice_record_send(&p, &r, &res), HU_ERR_IO);
+    HU_ASSERT_TRUE(strstr(f.trace, "press:Record audio") == NULL);
+    HU_ASSERT_TRUE(strstr(f.trace, "restore_ui") != NULL);
+}
+
+static void test_vrec_send_playback_failure_cancels_and_restores(void) {
+    fake_port_t f = fake_ok();
+    f.fail_at = "play";
+    hu_voice_record_port_t p = fake_port(&f);
+    hu_voice_record_request_t r = req_ok();
+    hu_voice_record_result_t res;
+    HU_ASSERT_EQ(hu_voice_record_send(&p, &r, &res), HU_ERR_IO);
+    HU_ASSERT_TRUE(strstr(f.trace, "press:Cancel audio recording") != NULL);
+    HU_ASSERT_TRUE(strstr(f.trace, "press:Send") == NULL);
+    HU_ASSERT_TRUE(strstr(f.trace, "in:real,restore_ui,") != NULL);
+    HU_ASSERT_TRUE(res.restored);
+}
+
+static void test_vrec_send_missing_send_button_cancels(void) {
+    fake_port_t f = fake_ok();
+    f.fail_at = "wait:Send";
+    hu_voice_record_port_t p = fake_port(&f);
+    hu_voice_record_request_t r = req_ok();
+    hu_voice_record_result_t res;
+    HU_ASSERT_EQ(hu_voice_record_send(&p, &r, &res), HU_ERR_IO);
+    HU_ASSERT_TRUE(strstr(f.trace, "press:Cancel audio recording") != NULL);
+}
+
+static void test_vrec_send_unverified_row_is_ok_not_resent(void) {
+    fake_port_t f = fake_ok();
+    f.row_found = false;
+    hu_voice_record_port_t p = fake_port(&f);
+    hu_voice_record_request_t r = req_ok();
+    hu_voice_record_result_t res;
+    HU_ASSERT_EQ(hu_voice_record_send(&p, &r, &res), HU_OK); /* caller must NOT fall back */
+    HU_ASSERT_FALSE(res.verified);
+}
+
+static void test_vrec_send_restore_readback_failure_is_reported(void) {
+    /* set_input silently does nothing and the input starts on BlackHole, so the
+     * recording proceeds but restore cannot bring the real mic back. */
+    fake_port_t f = fake_ok();
+    f.fail_at = "set_input";
+    snprintf(f.input, sizeof(f.input), HU_VREC_BLACKHOLE_NAME);
+    hu_voice_record_port_t p = fake_port(&f);
+    hu_voice_record_request_t r = req_ok();
+    hu_voice_record_result_t res;
+    (void)hu_voice_record_send(&p, &r, &res);
+    HU_ASSERT_FALSE(res.restored);
+}
+
 void run_imessage_voice_record_tests(void) {
     HU_TEST_SUITE("imessage voice record");
     HU_RUN_TEST(test_vrec_mode_parse_defaults_to_attachment);
@@ -110,4 +303,11 @@ void run_imessage_voice_record_tests(void) {
     HU_RUN_TEST(test_vrec_timing_stays_in_human_ranges);
     HU_RUN_TEST(test_vrec_block_names_are_distinct);
     HU_RUN_TEST(test_vrec_route_only_memo_sends_in_non_attachment_modes);
+    HU_RUN_TEST(test_vrec_send_happy_path_order);
+    HU_RUN_TEST(test_vrec_send_mic_busy_touches_nothing);
+    HU_RUN_TEST(test_vrec_send_input_readback_mismatch_aborts_before_record);
+    HU_RUN_TEST(test_vrec_send_playback_failure_cancels_and_restores);
+    HU_RUN_TEST(test_vrec_send_missing_send_button_cancels);
+    HU_RUN_TEST(test_vrec_send_unverified_row_is_ok_not_resent);
+    HU_RUN_TEST(test_vrec_send_restore_readback_failure_is_reported);
 }
