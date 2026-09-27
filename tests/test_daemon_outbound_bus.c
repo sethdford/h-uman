@@ -334,6 +334,81 @@ static void test_outbound_imessage_final_is_deferred_to_dispatcher(void) {
     HU_ASSERT_FALSE(f.turn.text_delivered_via_bus);
 }
 
+/* ── Safety gates on final delivery ───────────────────────────────────── */
+
+#define FIX_MODERATION "kill them with violence and murder"
+#define FIX_COMPANION  "don't go, please stay, after everything we did you want to leave?"
+#define FIX_CLAIM      "you told me the trip was next week"
+
+static void test_final_gates_clear_truth_table(void) {
+    hu_allocator_t a = hu_system_allocator();
+    const char *why = NULL;
+
+    HU_ASSERT_TRUE(hu_daemon_outbound_final_gates_clear(&a, "sounds good, see you then", 25, &why));
+    HU_ASSERT_STR_EQ(why, "clear");
+
+    HU_ASSERT_FALSE(
+        hu_daemon_outbound_final_gates_clear(&a, FIX_MODERATION, strlen(FIX_MODERATION), &why));
+    HU_ASSERT_STR_EQ(why, "moderation");
+
+    HU_ASSERT_FALSE(
+        hu_daemon_outbound_final_gates_clear(&a, FIX_COMPANION, strlen(FIX_COMPANION), &why));
+    HU_ASSERT_STR_EQ(why, "companion_safety");
+
+    HU_ASSERT_FALSE(hu_daemon_outbound_final_gates_clear(&a, FIX_CLAIM, strlen(FIX_CLAIM), &why));
+    HU_ASSERT_STR_EQ(why, "claim_language");
+
+    /* Fails closed on nothing to check. */
+    HU_ASSERT_FALSE(hu_daemon_outbound_final_gates_clear(&a, NULL, 0, &why));
+    HU_ASSERT_STR_EQ(why, "invalid");
+    HU_ASSERT_FALSE(hu_daemon_outbound_final_gates_clear(NULL, "hi", 2, NULL));
+}
+
+/* A flagged final must not reach the channel raw: the bridge defers (sends
+ * nothing, leaves text_delivered_via_bus false) so the daemon's text path
+ * runs SHIELD-004/005, SHIELD-001 and MEM-002 and sends the replacement. */
+static void assert_final_deferred(const hu_channel_vtable_t *vt, const char *reply) {
+    fixture_t f;
+    fixture_init(&f, "mock", vt);
+    hu_bus_event_t ev = make_event(HU_BUS_MESSAGE_SENT, "mock", "u1", reply);
+    ev.payload = (void *)reply;
+
+    HU_ASSERT_TRUE(hu_daemon_outbound_bus_cb(HU_BUS_MESSAGE_SENT, &ev, &f.br));
+    HU_ASSERT_EQ(f.m.send_calls, 0);
+    HU_ASSERT_EQ(f.m.send_event_calls, 0);
+    HU_ASSERT_FALSE(f.turn.text_delivered_via_bus);
+}
+
+static void test_outbound_final_moderation_flagged_defers_to_text_path(void) {
+    assert_final_deferred(&mock_vt_plain, FIX_MODERATION);
+}
+
+static void test_outbound_final_companion_flagged_defers_to_text_path(void) {
+    assert_final_deferred(&mock_vt_plain, FIX_COMPANION);
+}
+
+static void test_outbound_final_flagged_on_streaming_channel_defers(void) {
+    assert_final_deferred(&mock_vt_stream, FIX_MODERATION);
+}
+
+/* A reply longer than 200 bytes takes the rich-embed branch for discord /
+ * slack / telegram; the gate must run before that branch too. */
+static void test_outbound_final_flagged_long_discord_reply_defers(void) {
+    char longmsg[320];
+    memset(longmsg, 'a', sizeof(longmsg));
+    memcpy(longmsg, FIX_MODERATION " ", strlen(FIX_MODERATION) + 1);
+    longmsg[sizeof(longmsg) - 1] = '\0';
+
+    fixture_t f;
+    fixture_init(&f, "discord", &mock_vt_plain);
+    hu_bus_event_t ev = make_event(HU_BUS_MESSAGE_SENT, "discord", "u1", "");
+    ev.payload = longmsg;
+
+    HU_ASSERT_TRUE(hu_daemon_outbound_bus_cb(HU_BUS_MESSAGE_SENT, &ev, &f.br));
+    HU_ASSERT_EQ(f.m.send_calls, 0);
+    HU_ASSERT_FALSE(f.turn.text_delivered_via_bus);
+}
+
 static void test_outbound_ignores_other_events_unknown_channels_and_empty(void) {
     fixture_t f;
     fixture_init(&f, "mock", &mock_vt_plain);
@@ -359,4 +434,9 @@ void run_daemon_outbound_bus_tests(void) {
     HU_RUN_TEST(test_outbound_chunk_starts_typing_once_and_streams);
     HU_RUN_TEST(test_outbound_imessage_final_is_deferred_to_dispatcher);
     HU_RUN_TEST(test_outbound_ignores_other_events_unknown_channels_and_empty);
+    HU_RUN_TEST(test_final_gates_clear_truth_table);
+    HU_RUN_TEST(test_outbound_final_moderation_flagged_defers_to_text_path);
+    HU_RUN_TEST(test_outbound_final_companion_flagged_defers_to_text_path);
+    HU_RUN_TEST(test_outbound_final_flagged_on_streaming_channel_defers);
+    HU_RUN_TEST(test_outbound_final_flagged_long_discord_reply_defers);
 }

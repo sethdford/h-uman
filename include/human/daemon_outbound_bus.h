@@ -61,8 +61,21 @@ hu_service_channel_t *hu_daemon_outbound_find_channel(hu_service_channel_t *chan
  * TOOL_CALL_RESULT). */
 void hu_daemon_outbound_stream_event_cb(const hu_agent_stream_event_t *event, void *ctx);
 
+/* True only when a final reply may be delivered raw by the bus: it passes
+ * moderation (SHIELD-004/005), companion safety (SHIELD-001) and carries no
+ * memory-claim language (MEM-002 would verify/hedge it). Those gates, and the
+ * replacement/crisis text they produce, live on the daemon's text path, so a
+ * reply that trips any of them must go there instead. Fails closed: a check
+ * error or NULL/empty input returns false. *reason_out (optional) is one of
+ * "clear", "moderation", "companion_safety", "claim_language", "invalid". */
+bool hu_daemon_outbound_final_gates_clear(hu_allocator_t *alloc, const char *text, size_t text_len,
+                                          const char **reason_out);
+
 /* hu_bus_subscriber_fn: user_ctx is a hu_daemon_out_bus_bridge_t. Delivers
- * MESSAGE_CHUNK / MESSAGE_SENT to the named channel; always stays subscribed. */
+ * MESSAGE_CHUNK / MESSAGE_SENT to the named channel; always stays subscribed.
+ * A MESSAGE_SENT whose text fails hu_daemon_outbound_final_gates_clear is
+ * deferred (nothing sent, text_delivered_via_bus left false) so the text path
+ * applies the gates. */
 bool hu_daemon_outbound_bus_cb(hu_bus_event_type_t type, const hu_bus_event_t *ev, void *user_ctx);
 
 #endif /* HU_DAEMON_OUTBOUND_BUS_H */

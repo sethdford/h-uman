@@ -11,7 +11,11 @@
 #include "human/channel.h"
 #include "human/channels/channel_embed.h"
 #include "human/context/conversation.h"
+#include "human/core/log.h"
+#include "human/memory/verify_claim.h"
 #include "human/observability/validator_telemetry.h"
+#include "human/security/companion_safety.h"
+#include "human/security/moderation.h"
 
 #include <string.h>
 
@@ -167,6 +171,32 @@ void hu_daemon_outbound_stream_event_cb(const hu_agent_stream_event_t *event, vo
     hu_bus_publish(sc->bus, &ev);
 }
 
+bool hu_daemon_outbound_final_gates_clear(hu_allocator_t *alloc, const char *text, size_t text_len,
+                                          const char **reason_out) {
+    const char *why = "invalid";
+    bool clear = false;
+    if (alloc && text && text_len > 0) {
+        hu_moderation_result_t mod;
+        memset(&mod, 0, sizeof(mod));
+        hu_companion_safety_result_t cs;
+        memset(&cs, 0, sizeof(cs));
+        if (hu_moderation_check(alloc, text, text_len, &mod) != HU_OK || mod.flagged)
+            why = "moderation";
+        else if (hu_companion_safety_check(alloc, text, text_len, NULL, 0, &cs) != HU_OK ||
+                 cs.flagged)
+            why = "companion_safety";
+        else if (hu_memory_has_claim_language(text, text_len))
+            why = "claim_language";
+        else {
+            why = "clear";
+            clear = true;
+        }
+    }
+    if (reason_out)
+        *reason_out = why;
+    return clear;
+}
+
 bool hu_daemon_outbound_bus_cb(hu_bus_event_type_t type, const hu_bus_event_t *ev, void *user_ctx) {
     hu_daemon_out_bus_bridge_t *br = (hu_daemon_out_bus_bridge_t *)user_ctx;
     if (!br || !ev)
@@ -216,6 +246,19 @@ bool hu_daemon_outbound_bus_cb(hu_bus_event_type_t type, const hu_bus_event_t *e
         const char *cn = sch->channel->vtable->name(sch->channel->ctx);
         if (cn && strcmp(cn, "imessage") == 0)
             return true;
+    }
+
+    /* The daemon's SHIELD/MEM-002 gates sit behind !text_delivered_via_bus,
+     * so a raw bus delivery here would skip them entirely. Defer any reply a
+     * gate would touch, exactly like iMessage above: the text path then sends
+     * the replacement (and crisis resources) instead of the raw reply. */
+    {
+        hu_allocator_t gate_alloc = hu_system_allocator();
+        const char *gate_why = NULL;
+        if (!hu_daemon_outbound_final_gates_clear(&gate_alloc, msg, msg_len, &gate_why)) {
+            hu_log_info("outbound_bus", NULL, "final deferred to text path: %s", gate_why);
+            return true;
+        }
     }
 
     hu_error_t se = HU_OK;
