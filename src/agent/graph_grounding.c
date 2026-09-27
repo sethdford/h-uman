@@ -344,7 +344,13 @@ hu_error_t hu_graph_ground_compose_ex(hu_memory_loader_t *loader, const char *co
          * contact and tracks recency. */
         for (size_t i = 0; i < cand_count && i < GG_SCORE_CAP; i++) {
             const hu_graph_entity_t *e = &cands[i];
-            scores[i] = hu_graph_ground_name_word_count(e->name, e->name_len) > 0
+            /* EMOTION entities are never volunteered unprompted: the most-
+             * mentioned feeling ("heartbreak") would otherwise surface on
+             * every unrelated casual text. The lexical path still grounds
+             * on one when the contact names it. */
+            bool eligible = e->type != HU_ENTITY_EMOTION &&
+                            hu_graph_ground_name_word_count(e->name, e->name_len) > 0;
+            scores[i] = eligible
                             ? hu_graph_ground_score(1, 1, e->mention_count, e->last_seen, now_ms)
                             : 0.0;
         }

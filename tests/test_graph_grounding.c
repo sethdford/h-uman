@@ -385,6 +385,38 @@ static void test_compose_ex_fallback_scoped_to_contact(void) {
     gg_fixture_close(&fx);
 }
 
+/* The fallback never volunteers an EMOTION entity, even the contact's most-
+ * mentioned one: surfacing "grief" on every unrelated casual text is the
+ * opposite of human. (A lexical hit on it, when the contact names it, is fine
+ * and unaffected.) Critic finding on af1d94b31. */
+static void test_compose_ex_fallback_skips_emotion_entities(void) {
+    gg_fixture_t fx;
+    gg_fixture_open(&fx);
+    int64_t id = 0;
+    for (int i = 0; i < 5; i++) /* 5 mentions: outranks every other alice entity */
+        HU_ASSERT_EQ(hu_graph_upsert_entity(fx.graph, "alice", 5, "heartbreak", 10,
+                                            HU_ENTITY_EMOTION, NULL, &id),
+                     HU_OK);
+    const char *msg = "wanna grab tacos tonight";
+    char *out = NULL;
+    size_t out_len = 0;
+    HU_ASSERT_EQ(hu_graph_ground_compose_ex(&fx.loader, "alice", 5, msg, strlen(msg), 0,
+                                            HU_GG_CONTACT_FALLBACK, &out, &out_len, NULL),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(out); /* other entities still seed */
+    HU_ASSERT_TRUE(strstr(out, "heartbreak") == NULL);
+    fx.alloc.free(fx.alloc.ctx, out, out_len + 1);
+
+    const char *named = "still thinking about the heartbreak";
+    HU_ASSERT_EQ(hu_graph_ground_compose(&fx.loader, "alice", 5, named, strlen(named), 0, &out,
+                                         &out_len, NULL),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(out); /* the lexical path still grounds on it when named */
+    HU_ASSERT_TRUE(strstr(out, "heartbreak") != NULL);
+    fx.alloc.free(fx.alloc.ctx, out, out_len + 1);
+    gg_fixture_close(&fx);
+}
+
 /* The fallback honors the same output budget as lexical composition. */
 static void test_compose_ex_fallback_respects_budget(void) {
     gg_fixture_t fx;
@@ -767,6 +799,7 @@ void run_graph_grounding_tests(void) {
     HU_RUN_TEST(test_compose_ex_fallback_inert_on_lexical_hit);
     HU_RUN_TEST(test_compose_ex_fallback_scoped_to_contact);
     HU_RUN_TEST(test_compose_ex_fallback_respects_budget);
+    HU_RUN_TEST(test_compose_ex_fallback_skips_emotion_entities);
     HU_RUN_TEST(test_load_grounding_contact_fallback_gate);
     HU_RUN_TEST(test_compose_no_graph_is_failopen);
     HU_RUN_TEST(test_compose_renders_current_employer_with_predecessor);
