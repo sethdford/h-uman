@@ -84,9 +84,19 @@ if [ -f "$TMPDIR/design-tokens-reference.json" ] && [ -f "$REPO_ROOT/docs/design
   fi
 fi
 
+# Check Tokens Studio export (not emitted by build.ts; has its own generator)
+if ! npx tsx sync-tokens-studio.ts --out "$TMPDIR/tokens-studio.json" >/dev/null 2>&1; then
+  echo "Error: sync-tokens-studio.ts failed"
+  exit 1
+fi
+if ! diff -q "$TMPDIR/tokens-studio.json" "$REPO_ROOT/docs/tokens-studio.json" >/dev/null 2>&1; then
+  echo "DRIFT: docs/tokens-studio.json differs from generated output (run: cd design-tokens && npm run sync:tokens-studio)"
+  DRIFT=1
+fi
+
 if [ "$DRIFT" -eq 1 ]; then
   echo ""
-  echo "Token drift detected! Run 'cd design-tokens && npm run build' to regenerate."
+  echo "Token drift detected! Run 'cd design-tokens && npm run build && npm run sync:tokens-studio' to regenerate."
   exit 1
 else
   echo "No token drift detected."
