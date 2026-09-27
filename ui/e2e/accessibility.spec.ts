@@ -97,8 +97,6 @@ const KNOWN_VIOLATIONS: Record<string, Record<string, number>> = {
   Chat: { "button-name": 1 },
   // Active tag chip: --hu-bg text on --hu-accent is 2.23:1 (not the segmented control).
   Skills: { "color-contrast": 1 },
-  // Number inputs rendered with aria-label="".
-  Config: { label: 2 },
   // hu-segmented-control active segment: --hu-on-accent on --hu-accent is 2.43:1.
   Channels: { "color-contrast": 1 },
   Usage: { "color-contrast": 1 },
