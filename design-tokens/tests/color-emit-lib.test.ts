@@ -92,6 +92,33 @@ for (const bad of [
   });
 }
 
+for (const bad of [
+  "rgb(999, 0, 0)",
+  "rgb(0, 256, 0)",
+  "rgba(0, 0, 0, 1.5)",
+  "rgba(0, 0, 0, 0.5.5)",
+]) {
+  test(`nativeColorEntries refuses out-of-range ${bad}, naming the token path`, () => {
+    assert.throws(
+      () => nativeColorEntries({ "light.zz": bad }, { "light.zz": "color" }, "light."),
+      (e: unknown) => e instanceof UnsupportedColorError && e.message.includes("light.zz"),
+    );
+  });
+}
+
+test("nativeColorEntries accepts rgb()/rgba() at the channel and alpha bounds", () => {
+  const tokens = { "light.a": "rgb(255, 255, 255)", "light.b": "rgba(0, 0, 0, 1)", "light.c": "rgba(0, 0, 0, 0)" };
+  const types = { "light.a": "color", "light.b": "color", "light.c": "color" };
+  assert.equal(nativeColorEntries(tokens, types, "light.").length, 3);
+});
+
+test("the error points at the real platform-routing key", () => {
+  assert.throws(
+    () => formatSwiftColor("oklch(50% 0.13 135)"),
+    /\$extensions\["com\.human\.platform"\]: "web"/,
+  );
+});
+
 test("nativeColorEntries refuses a color-typed number", () => {
   assert.throws(
     () => nativeColorEntries({ "chart.n": 3 }, { "chart.n": "color" }, "chart."),

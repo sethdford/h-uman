@@ -24,7 +24,7 @@ export class UnsupportedColorError extends Error {
     super(
       `${fn}: ${who}unsupported color ${JSON.stringify(value)}. This emitter accepts ` +
         `${accepts}. Put web-only colors (oklch, display-p3) in a ` +
-        `token file with "com.human.platform": "web".`,
+        `token file whose $extensions["com.human.platform"]: "web".`,
     );
     this.name = "UnsupportedColorError";
   }
@@ -32,7 +32,16 @@ export class UnsupportedColorError extends Error {
 
 const HEX6 = /^#([0-9a-fA-F]{6})$/;
 const RGBA = /rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/;
-const RGBA_EXACT = /^rgba?\(\d+,\s*\d+,\s*\d+(?:,\s*[\d.]+)?\)$/;
+const RGBA_EXACT = /^rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*(\d*\.?\d+))?\)$/;
+
+/** rgb()/rgba() with channels 0–255 and alpha 0–1; anything else would emit out-of-range Swift/Kotlin values. */
+function isNativeRGBA(v: string): boolean {
+  const m = v.match(RGBA_EXACT);
+  if (!m) return false;
+  const channelsOk = [m[1], m[2], m[3]].every((c) => Number(c) <= 255);
+  const alphaOk = m[4] === undefined || Number(m[4]) <= 1;
+  return channelsOk && alphaOk;
+}
 
 /**
  * Every `$type: "color"` token whose path starts with `prefix`, sorted by
@@ -50,7 +59,7 @@ export function nativeColorEntries(
     .sort()
     .map((k) => {
       const v = tokens[k];
-      if (typeof v !== "string" || !(HEX6.test(v) || RGBA_EXACT.test(v))) {
+      if (typeof v !== "string" || !(HEX6.test(v) || isNativeRGBA(v))) {
         throw new UnsupportedColorError("nativeColorEntries", String(v), k);
       }
       return [k, v];
