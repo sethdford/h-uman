@@ -9,8 +9,8 @@ Scope: entire repository.
 
 human is a C11 autonomous AI assistant runtime optimized for:
 
-- minimal binary size (~2468 KB release with LTO)
-- minimal memory footprint (5–6 MB peak RSS measured)
+- minimal binary size (~2694 KB release-size build: MinSizeRel + LTO, all channels, sqlite-vec off)
+- minimal memory footprint (8.6 MB idle RSS, 6.9 MB `--version` peak RSS; `docs/perf/footprint.json`)
 - zero dependencies beyond libc, optional SQLite and libcurl
 - Zig reference implementation archived in `archive/zig-reference/`
 
@@ -31,15 +31,15 @@ Key extension points:
 
 Current scale: **1955 source + header files, ~415K lines of C, ~289K lines of tests, 13,920 tests, 30 channels**.
 
-Performance baseline (macOS aarch64, MinSizeRel+LTO):
+Performance baseline (macOS arm64, release-size build, rev b277f7de0, 2026-09-27 — `docs/perf/footprint.json`):
 
 | Metric                   | Measured       |
 | ------------------------ | -------------- |
-| Binary size              | ~2468 KB       |
-| Text section             | 480 KB         |
-| Cold-start (`--version`) | 4–27 ms avg    |
-| Peak RSS (`--version`)   | ~5.7 MB        |
-| Peak RSS (test suite)    | ~6.0 MB        |
+| Binary size              | ~2694 KB       |
+| Text section (`__text`)  | 1881 KB        |
+| Cold-start (`--version`) | 4–9 ms         |
+| Peak RSS (`--version`)   | 6.9 MB         |
+| Idle RSS (`human mcp`)   | 8.6 MB         |
 | Test throughput          | 700+ tests/sec |
 
 Build and test:
@@ -64,7 +64,7 @@ These codebase realities should drive every design decision:
 2. **Binary size and memory are hard product constraints**
    - `cmake -DCMAKE_BUILD_TYPE=MinSizeRel -DHU_ENABLE_LTO=ON` is the release target. Every dependency and abstraction has a size cost.
    - Avoid adding unnecessary runtime allocations or large data tables without justification.
-   - Current release binary: ~2468 KB (all features with LTO).
+   - Current release-size binary: ~2694 KB (MinSizeRel + LTO, all channels, sqlite-vec off). `cmake --preset release` turns on sqlite-vec, ML and more: 3.3 MB.
 
 3. **Security-critical surfaces are first-class**
    - `src/gateway/gateway.c`, `src/security/`, `src/tools/`, `src/runtime/` carry high blast radius.
