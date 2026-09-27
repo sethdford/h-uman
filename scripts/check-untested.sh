@@ -59,6 +59,18 @@ while IFS= read -r src; do
         fi
     fi
 
+    # Exported-symbol fallback. Every pattern above derives the symbol from
+    # the FILE name, so a module whose exported API is named differently is
+    # reported untested even when a test calls it: e.g.
+    # src/channels/imessage_voice_record_macos.c exports only
+    # hu_voice_record_macos_port(), which tests/test_imessage_voice_record.c
+    # calls. Collect the hu_* functions this file defines at column 0 (not
+    # static, not a declaration) and accept the file if a test calls any.
+    syms=$(perl -ne 'next if /^(static|typedef|extern|#)/; print "$1\n" if /^(?:[A-Za-z_][A-Za-z0-9_ *]*[ *])?(hu_[A-Za-z0-9_]+)\(/ && !/;\s*$/' "$src" | sort -u | paste -sd'|' -)
+    if [ -n "$syms" ] && grep -rqE "(^|[^A-Za-z0-9_])(${syms})[[:space:]]*\(" tests/ >/dev/null 2>&1; then
+        continue
+    fi
+
     echo "  NO TEST: $src"
     FOUND=$((FOUND + 1))
 done < <(find src -name '*.c' | sort)
