@@ -10,7 +10,7 @@
 
 <p align="center">
   <strong>Bring AI to every device on Earth.</strong><br>
-  <strong>~2468 KB binary. < 6 MB RAM. Boots in <30 ms. Runs on anything with a CPU.</strong>
+  <strong>~2694 KB binary. < 9 MB idle RAM. Boots in <10 ms. Runs on anything with a CPU.</strong>
 </p>
 
 <p align="center">
@@ -22,14 +22,14 @@
 The smallest fully autonomous AI assistant infrastructure — a static C binary that fits on any $5 board, boots in milliseconds, and requires nothing but libc.
 
 ```
-~2468 KB binary · <30 ms startup · 13,920+ tests · 97 providers · 31 channels · 87 tools · Pluggable everything
+~2694 KB binary · <10 ms startup · 13,920+ tests · 97 providers · 31 channels · 87 tools · Pluggable everything
 ```
 
 ### Features
 
-- **Impossibly Small:** ~2468 KB static binary — no runtime, no VM, no framework overhead.
-- **Near-Zero Memory:** < 6 MB peak RSS. Runs comfortably on the cheapest ARM SBCs and microcontrollers.
-- **Instant Startup:** 6–27 ms on Apple Silicon, sub-50 ms on edge cores.
+- **Impossibly Small:** ~2694 KB static binary — no runtime, no VM, no framework overhead.
+- **Small Memory Footprint:** < 9 MB idle RSS (`human mcp`, no config). Runs comfortably on low-end ARM SBCs.
+- **Instant Startup:** 4–9 ms for `human --version` on Apple Silicon.
 - **True Portability:** Single self-contained binary across ARM, x86, and RISC-V. Drop it anywhere, it just runs.
 - **Feature-Complete:** 97 providers (9 core + 88 compatible), 31 channels, 87 tools, hybrid vector+FTS5 memory, multi-layer sandbox, tunnels, hardware peripherals, MCP, subagents, streaming, voice — the full stack.
 - **Interactive TUI:** Full-screen terminal UI with split panes, markdown rendering, multi-session tabs (Ctrl+T), tool approval prompts, streaming output, and input history. Build with `-DHU_ENABLE_TUI=ON` and run with `--tui`.
@@ -64,18 +64,24 @@ Similar projects in the autonomous AI assistant space (data sourced from each pr
 |                   | [OpenClaw](https://github.com/openclaw/openclaw) | [NanoBot](https://github.com/HKUDS/nanobot) | [PicoClaw](https://github.com/sipeed/picoclaw) | [ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw) | **Human**         |
 | ----------------- | ------------------------------------------------ | ------------------------------------------- | ---------------------------------------------- | ----------------------------------------------------- | ----------------- |
 | **Language**      | TypeScript                                       | Python                                      | Go                                             | Rust                                                  | **C**             |
-| **RAM** ¹         | —                                                | —                                           | < 10 MB                                        | < 5 MB                                                | **< 6 MB**        |
-| **Binary Size** ¹ | ~28 MB (npm dist)                                | N/A (Python)                                | ~8 MB                                          | ~8.8 MB                                               | **~2468 KB**      |
+| **RAM** ¹         | —                                                | —                                           | < 10 MB                                        | < 5 MB                                                | **< 9 MB** ²      |
+| **Binary Size** ¹ | ~28 MB (npm dist)                                | N/A (Python)                                | ~8 MB                                          | ~8.8 MB                                               | **~2694 KB** ²    |
 | **Runtime Deps**  | Node.js ≥22                                      | Python ≥3.11                                | None (static)                                  | None (static)                                         | **None (static)** |
 
-> ¹ RAM and binary size figures for other projects are self-reported from their respective READMEs. Human's numbers are measured locally with `/usr/bin/time -l` on a MinSizeRel + LTO build.
+> ¹ RAM and binary size figures for other projects are self-reported from their respective READMEs.
+> ² Human's numbers are the release-size build (MinSizeRel + LTO, all channels, sqlite-vec off), measured with `scripts/measure-build-footprint.sh`; RAM is idle RSS of `human mcp`. Raw output with git rev and platform: [`docs/perf/footprint.json`](docs/perf/footprint.json).
 
-Human's verified numbers (measured on macOS arm64, March 2026):
+Human's measured numbers (macOS arm64, 2026-09-27, rev b277f7de0 — [`docs/perf/footprint.json`](docs/perf/footprint.json)):
 
 ```
-Binary size:   ~2468 KB (MinSizeRel + LTO, all channels)
-Peak RSS:      ~5.7 MB (--version), ~5.9 MB (test suite)
-Startup:       6–27 ms avg (Apple Silicon M4 Max)
+Release-size build (MinSizeRel + LTO, all channels, sqlite-vec off):
+  Binary size:   ~2694 KB
+  Idle RSS:      8.6 MB (human mcp, isolated HOME, no config)
+  Peak RSS:      6.9 MB (human --version)
+  Startup:       4–9 ms (human --version, median of 10 warm runs)
+cmake --preset release (adds sqlite-vec, ML, embedded model, Cartesia, ...):
+  Binary size:   3.3 MB (3,275,488 bytes)
+  Idle RSS:      8.8 MB
 Tests:         13,920 passing, 0 ASan errors
 ```
 
@@ -674,13 +680,15 @@ cmake --preset integration && cmake --build --preset integration
 ./build-integration/human_integration_tests
 ```
 
-Release build (~2468 KB):
+Release-size build (~2694 KB — the configuration CI checks the size claims against):
 
 ```bash
-mkdir -p build-release && cd build-release
-cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DHU_ENABLE_LTO=ON
-cmake --build .
+cmake -B build-size -DCMAKE_BUILD_TYPE=MinSizeRel -DHU_ENABLE_LTO=ON \
+  -DHU_ENABLE_ALL_CHANNELS=ON -DHU_ENABLE_SQLITE_VEC=OFF
+cmake --build build-size
 ```
+
+Full-feature release (3.3 MB): `cmake --preset release && cmake --build --preset release`.
 
 ### Channel Flow Coverage
 
@@ -701,9 +709,9 @@ Source files: 1,955
 Lines of code: ~415K
 Test files: 863
 Tests: 13,920
-Binary: ~2468 KB (MinSizeRel + LTO, all channels)
-Peak RSS: ~5.7 MB
-Startup: 6–27 ms avg (Apple Silicon)
+Binary: ~2694 KB (release-size build: MinSizeRel + LTO, all channels, sqlite-vec off)
+Idle RSS: 8.6 MB (human mcp)
+Startup: 4–9 ms (Apple Silicon)
 Dependencies: libc + optional SQLite, libcurl
 
 ```

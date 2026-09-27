@@ -97,7 +97,14 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, struct hu_agent *agent,
                            const struct hu_config *config, hu_service_channel_t *ch,
                            const char *batch_key, size_t key_len, const char *combined,
                            size_t combined_len, const char *response, size_t response_len,
-                           int bth_hour);
+                           const char *unshaped, size_t unshaped_len, int bth_hour);
+
+/* F1: a copy of the reply taken BEFORE text shaping (typos, texting quirks,
+ * "haha " fillers) — what a voice memo should say. NULL (and *out_len = 0)
+ * unless this channel can send voice. Caller frees with alloc (len + 1). */
+char *hu_daemon_voice_capture_unshaped(hu_allocator_t *alloc, const struct hu_config *config,
+                                       hu_service_channel_t *ch, const char *response,
+                                       size_t response_len, size_t *out_len);
 
 /* True only when the reply passes every outbound gate the text path applies
  * (moderation, companion safety, claim language) and the inbound message is not
@@ -105,6 +112,16 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, struct hu_agent *agent,
  * `inbound` may be NULL. Fails closed: invalid reply or a gate error returns
  * false. `reason_out` receives a static string: "clear", "invalid",
  * "inbound_crisis", "moderation", "companion_safety" or "claim_language". */
+bool hu_voice_reply_gates_clear(hu_allocator_t *alloc, const char *text, size_t text_len,
+                                const char *inbound, size_t inbound_len, const char **reason_out);
+
+/* True only when the reply passes every outbound gate the text path applies
+ * (moderation, companion safety, claim language) and the inbound message is not
+ * a crisis (SHIELD-005: a person in crisis gets text with tappable resources).
+ * `inbound` may be NULL. The reply-side checks are
+ * hu_daemon_outbound_final_gates_clear (human/daemon_outbound_bus.h). Fails
+ * closed: invalid reply or a gate error returns false. `reason_out` receives a
+ * static string: "inbound_crisis" or any reason that function reports. */
 bool hu_voice_reply_gates_clear(hu_allocator_t *alloc, const char *text, size_t text_len,
                                 const char *inbound, size_t inbound_len, const char **reason_out);
 

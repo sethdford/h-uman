@@ -697,7 +697,7 @@
     --hu-accent-hover: #5a9a30;
     --hu-accent-light: #e2f2c8;
     --hu-accent-secondary: #d97706;
-    --hu-accent-secondary-hover: #b45309;
+    --hu-accent-secondary-hover: #f59e0b;
     --hu-accent-secondary-strong: #f59e0b;
     --hu-accent-secondary-subtle: rgba(217, 119, 6, 0.1);
     --hu-accent-secondary-text: #b45309;
@@ -745,7 +745,7 @@
     --hu-link-hover: #264a17;
     --hu-link-visited: #3a6a24;
     --hu-on-accent: #ffffff;
-    --hu-on-accent-secondary: #ffffff;
+    --hu-on-accent-secondary: #0c0a08;
     --hu-on-accent-tertiary: #ffffff;
     --hu-pressed-overlay: rgba(0, 0, 0, 0.1);
     --hu-shadow-card: 0 1px 2px rgba(45, 36, 24, 0.04), 0 2px 8px rgba(45, 36, 24, 0.03);
@@ -909,7 +909,7 @@
   --hu-accent-hover: #5a9a30;
   --hu-accent-light: #e2f2c8;
   --hu-accent-secondary: #d97706;
-  --hu-accent-secondary-hover: #b45309;
+  --hu-accent-secondary-hover: #f59e0b;
   --hu-accent-secondary-strong: #f59e0b;
   --hu-accent-secondary-subtle: rgba(217, 119, 6, 0.1);
   --hu-accent-secondary-text: #b45309;
@@ -957,7 +957,7 @@
   --hu-link-hover: #264a17;
   --hu-link-visited: #3a6a24;
   --hu-on-accent: #ffffff;
-  --hu-on-accent-secondary: #ffffff;
+  --hu-on-accent-secondary: #0c0a08;
   --hu-on-accent-tertiary: #ffffff;
   --hu-pressed-overlay: rgba(0, 0, 0, 0.1);
   --hu-shadow-card: 0 1px 2px rgba(45, 36, 24, 0.04), 0 2px 8px rgba(45, 36, 24, 0.03);
@@ -1017,11 +1017,15 @@
     --hu-focus-ring: #ffffff;
     --hu-focus-ring-offset: 2px;
     --hu-focus-ring-width: 3px;
+    --hu-hover-overlay: rgba(255, 255, 255, 0.12);
     --hu-info: #60a5fa;
     --hu-info-dim: rgba(96, 165, 250, 0.2);
     --hu-on-accent: #000000;
     --hu-success: #34d399;
     --hu-success-dim: rgba(52, 211, 153, 0.2);
+    --hu-surface-container: rgba(255, 255, 255, 0.08);
+    --hu-surface-container-high: rgba(255, 255, 255, 0.12);
+    --hu-surface-container-highest: #28231e;
     --hu-text: #ffffff;
     --hu-text-faint: #9e9892;
     --hu-text-muted: #c8c2bc;
