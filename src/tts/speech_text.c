@@ -310,9 +310,19 @@ static size_t words_of(const char *s, size_t n, dword_t *w, size_t cap) {
     return c;
 }
 
+/* "Airbnb's" / "James'" name the same thing as "Airbnb" / "James". */
+static size_t possessive_stem(const char *p, size_t n) {
+    if (n > 2 && p[n - 2] == '\'' && (p[n - 1] == 's' || p[n - 1] == 'S'))
+        return n - 2;
+    if (n > 1 && p[n - 1] == '\'')
+        return n - 1;
+    return n;
+}
+
 static bool has_word_ci(const dword_t *w, size_t n, const char *p, size_t len) {
+    len = possessive_stem(p, len);
     for (size_t i = 0; i < n; i++)
-        if (w[i].n == len && strncasecmp(w[i].p, p, len) == 0)
+        if (possessive_stem(w[i].p, w[i].n) == len && strncasecmp(w[i].p, p, len) == 0)
             return true;
     return false;
 }

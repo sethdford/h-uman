@@ -83,6 +83,8 @@ static void test_speech_drift_rejects_each_kind_of_drift(void) {
 
 static void test_speech_drift_known_name_is_fine(void) {
     expect_drift("tell sarah i said hi", "Tell Sarah I said hi.", HU_SPEECH_DRIFT_OK);
+    /* Live preview 2026-09-27: a possessive is the same name, not a new one. */
+    expect_drift("the airbnb option is great", "Yeah the Airbnb's great.", HU_SPEECH_DRIFT_OK);
 }
 
 static void test_speech_drift_names_are_distinct(void) {
