@@ -213,7 +213,7 @@ export class ScSkillRegistry extends LitElement {
       }
       &[aria-checked="true"] {
         background: var(--hu-accent);
-        color: var(--hu-bg);
+        color: var(--hu-on-accent);
         border-color: var(--hu-accent);
       }
     }
