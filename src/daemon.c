@@ -8680,7 +8680,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         hu_bus_publish(&daemon_outbound_bus, &rev);
                         daemon_out_bus_bridge.delivery_turn = NULL;
                     }
-                    /* ── Voice decision: TTS when channel has voice_enabled ───── */
+                    /* ── Voice decision: TTS when channel has voice_enabled.
+                     * hu_daemon_voice_reply declines voice unless the reply passes
+                     * the same safety gates the text path below applies. ───── */
                     bool sent_voice = false;
                     sent_voice = hu_daemon_voice_reply(alloc, agent, config, ch, batch_key, key_len,
                                                        combined, combined_len, response,
