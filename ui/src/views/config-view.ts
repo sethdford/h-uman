@@ -678,6 +678,7 @@ export class ScConfigView extends GatewayAwareLitElement {
               <label for="max_tokens">Max tokens</label>
               <hu-input
                 id="max_tokens"
+                aria-label="Max tokens"
                 type="number"
                 .min=${0}
                 .value=${String(this.edited.max_tokens ?? 0)}
@@ -692,6 +693,7 @@ export class ScConfigView extends GatewayAwareLitElement {
               <label for="temperature">Temperature (0–2)</label>
               <hu-input
                 id="temperature"
+                aria-label="Temperature"
                 type="number"
                 .min=${0}
                 .max=${2}
@@ -722,6 +724,7 @@ export class ScConfigView extends GatewayAwareLitElement {
               <label for="workspace_dir">Workspace directory</label>
               <hu-input
                 id="workspace_dir"
+                aria-label="Workspace directory"
                 type="text"
                 .value=${this.edited.workspace_dir ?? ""}
                 placeholder="."
