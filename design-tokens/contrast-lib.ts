@@ -90,10 +90,15 @@ export const UI_ROLES = ["focus-ring"] as const;
 export const FILL_PAIRS = [
   ["on-accent", "accent"],
   ["on-accent", "accent-hover"],
+  // Error fills carry --hu-bg as their label (dialog danger button, composer
+  // stop, floating mic); there is no on-error token.
+  ["bg", "error"],
 ] as const;
 
+export type Mode = "light" | "dark";
+
 export interface PairResult {
-  mode: "light" | "dark";
+  mode: Mode;
   fg: string;
   bg: string;
   need: number;
@@ -108,10 +113,22 @@ export interface PairResult {
  * render on paper whether or not the quiet file mentions them.
  */
 export function checkQuietContrast(shared: TokenMap, web: TokenMap): PairResult[] {
+  return measureRoles((mode, n) => web[`quiet.${mode}.${n}`] ?? shared[`${mode}.${n}`]);
+}
+
+/**
+ * The base semantic themes (`light.*`, `dark.*`) on their own — what every
+ * surface without the Quiet layer renders. Same roles, same thresholds.
+ */
+export function checkBaseContrast(shared: TokenMap): PairResult[] {
+  return measureRoles((mode, n) => shared[`${mode}.${n}`]);
+}
+
+function measureRoles(lookup: (mode: Mode, name: string) => unknown): PairResult[] {
   const results: PairResult[] = [];
   for (const mode of ["light", "dark"] as const) {
     const eff = (n: string) => {
-      const v = web[`quiet.${mode}.${n}`] ?? shared[`${mode}.${n}`];
+      const v = lookup(mode, n);
       return v === undefined ? undefined : String(v);
     };
     const measure = (fg: string, bg: string, need: number) => {
@@ -135,6 +152,46 @@ export function checkQuietContrast(shared: TokenMap, web: TokenMap): PairResult[
     for (const [label, fill] of FILL_PAIRS) measure(label, fill, 4.5);
   }
   return results;
+}
+
+/**
+ * Known failures, keyed by pairKey(), each holding the ratio measured when it
+ * was baselined (null = unmeasurable then). A baselined pair may stay failing
+ * but may not get worse; anything else that fails is new.
+ */
+export type ContrastBaseline = Record<string, number | null>;
+
+export const pairKey = (r: Pick<PairResult, "mode" | "fg" | "bg">) =>
+  `${r.mode} ${r.fg} on ${r.bg}`;
+
+export interface BaselineVerdict {
+  /** Failures not in the baseline, or baselined pairs below their recorded ratio. */
+  fresh: PairResult[];
+  /** Failures held at or above their recorded ratio: tolerated, still debt. */
+  known: PairResult[];
+  /** Baseline keys that no longer fail. The gate fails on these until they are deleted. */
+  fixed: string[];
+}
+
+export function applyBaseline(results: PairResult[], baseline: ContrastBaseline): BaselineVerdict {
+  const fresh: PairResult[] = [];
+  const known: PairResult[] = [];
+  const failing = new Set<string>();
+  for (const r of results) {
+    if (r.ok) continue;
+    const key = pairKey(r);
+    failing.add(key);
+    if (!(key in baseline)) {
+      fresh.push(r);
+      continue;
+    }
+    const floor = baseline[key];
+    // Recorded ratios are rounded to 2 dp, hence the half-step tolerance.
+    const worse = floor !== null && (r.ratio === null || r.ratio < floor - 0.005);
+    (worse ? fresh : known).push(r);
+  }
+  const fixed = Object.keys(baseline).filter((k) => !failing.has(k));
+  return { fresh, known, fixed };
 }
 
 /** Every oklch() value in the web layer must be inside sRGB. */
