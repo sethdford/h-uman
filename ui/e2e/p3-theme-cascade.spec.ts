@@ -40,11 +40,15 @@ interface Env {
   dataTheme?: "light" | "dark";
 }
 
-/** Non-P3 tokens the contrast tests below read. */
+/**
+ * Tokens the contrast tests below read. Listed even when a P3 override also
+ * puts them in P3_KEYS, so no test depends on which tokens have P3 values.
+ */
 const EXTRA_KEYS = [
   "bg",
   "link-hover",
   "on-accent-secondary",
+  "accent-secondary",
   "accent-secondary-hover",
   "accent-secondary-strong",
 ];
