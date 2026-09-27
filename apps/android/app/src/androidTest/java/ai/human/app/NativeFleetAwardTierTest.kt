@@ -24,10 +24,14 @@ class NativeFleetAwardTierTest {
             MainActivity::class.java,
         ).putExtra(EXTRA_SKIP_ONBOARDING_FOR_TEST, true)
 
-    @get:Rule(order = 0)
-    val activityRule = ActivityScenarioRule<MainActivity>(launchIntent)
+    // NOT a @Rule of its own: AndroidComposeTestRule applies the rule it wraps, so
+    // registering it here too launched MainActivity twice per test (two
+    // "Displayed ai.human.app/.MainActivity" lines in every logcat), and the
+    // Compose assertions ran against a covered instance ("is not displayed",
+    // "Failed to inject touch input").
+    private val activityRule = ActivityScenarioRule<MainActivity>(launchIntent)
 
-    @get:Rule(order = 1)
+    @get:Rule
     val composeRule: AndroidComposeTestRule<ActivityScenarioRule<MainActivity>, MainActivity> =
         AndroidComposeTestRule(activityRule) { rule ->
             var activity: MainActivity? = null
