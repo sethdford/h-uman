@@ -16,6 +16,7 @@
     "format": "prettier --write 'src/**/*.{astro,ts,css,mdx,md}'",
     "format:check": "prettier --check 'src/**/*.{astro,ts,css,mdx,md}'",
     "check:install": "node scripts/check-install-matches-formula.mjs",
+    "check:fonts": "node scripts/check-first-party-fonts.mjs",
     "test": "vitest run",
     "astro": "astro"
   },
@@ -23,6 +24,7 @@
     "@astrojs/sitemap": "^3.7.3",
     "@astrojs/starlight": "^0.41.4",
     "@fontsource-variable/geist-mono": "^5.2.8",
+    "@fontsource-variable/newsreader": "^5.3.0",
     "@tailwindcss/vite": "^4.3.0",
     "astro": "^7.1.3",
     "sharp": "^0.35.3",

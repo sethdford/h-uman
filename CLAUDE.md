@@ -1,6 +1,7 @@
 # h-uman — not quite human.
 
-C11 autonomous AI assistant runtime. ~2468 KB binary, <6 MB RAM, <30 ms startup.
+C11 autonomous AI assistant runtime. ~2694 KB binary, <9 MB idle RSS, <10 ms startup
+(release-size build, macOS arm64 — measured in `docs/perf/footprint.json`).
 Zero dependencies beyond libc (optional SQLite and libcurl).
 
 Read `AGENTS.md` for the full engineering protocol. This file is the quick reference.
@@ -186,7 +187,7 @@ All project standards live in `docs/standards/`. This is the single source of tr
 
 ## Design System (all platforms)
 
-- Typeface: **Avenir** (web: `var(--hu-font)`, never Google Fonts)
+- Typeface: **Avenir** for UI and body on all platforms (web: `var(--hu-font)`); **Newsreader** (self-hosted, OFL) for display/headline roles on the web Quiet Room layer (`var(--hu-font-display)`). Never load fonts from Google or any third-party host.
 - Icons: **Phosphor Regular** (web: `ui/src/icons.ts`)
 - Tokens: `--hu-*` CSS custom properties from `design-tokens/`
 - Never use raw hex colors, pixel spacing, or pixel radii in any UI code.

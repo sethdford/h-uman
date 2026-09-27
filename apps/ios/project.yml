@@ -40,6 +40,10 @@ targets:
         GENERATE_INFOPLIST_FILE: false
     info:
       path: Sources/HumaniOS/Resources/Info.plist
+      properties:
+        # Without a launch screen iOS runs the app in legacy compatibility
+        # mode: letterboxed, window ~590pt tall instead of full screen.
+        UILaunchScreen: {}
 
   HumanWidgetExtension:
     type: app-extension

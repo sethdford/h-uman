@@ -8,6 +8,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
+import { collectTokens, resolveRefs } from "./token-lib.js";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(SCRIPT_DIR, "..");
@@ -17,45 +18,6 @@ const OUT =
   outFlag !== -1 && process.argv[outFlag + 1]
     ? path.resolve(process.argv[outFlag + 1])
     : path.join(ROOT, "docs/tokens-studio.json");
-
-type TokenMap = Record<string, string | number>;
-
-function collectTokens(obj: unknown, prefix = ""): TokenMap {
-  const result: TokenMap = {};
-  if (obj === null || typeof obj !== "object") return result;
-  const rec = obj as Record<string, unknown>;
-  for (const [key, val] of Object.entries(rec)) {
-    if (key.startsWith("$")) continue;
-    const pathPart = prefix ? `${prefix}.${key}` : key;
-    if (val !== null && typeof val === "object" && "$value" in val) {
-      const v = (val as { $value: string | number }).$value;
-      result[pathPart] = v;
-    } else if (typeof val === "object" && val !== null) {
-      Object.assign(result, collectTokens(val, pathPart));
-    }
-  }
-  return result;
-}
-
-function resolveRefs(tokens: TokenMap): TokenMap {
-  const resolved = { ...tokens };
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const [key, val] of Object.entries(resolved)) {
-      if (typeof val !== "string") continue;
-      const ref = val.match(/^\{([^}]+)\}$/);
-      if (ref) {
-        const target = resolved[ref[1]];
-        if (target !== undefined && typeof target === "string") {
-          resolved[key] = target;
-          changed = true;
-        }
-      }
-    }
-  }
-  return resolved;
-}
 
 function stripSchema(obj: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -99,8 +61,13 @@ function main(): void {
     const ref = token.$value.match(/^\{([^}]+)\}$/);
     let outVal: string | number = token.$value;
     if (ref) {
-      const target = resolved[ref[1]];
-      if (typeof target === "string") outVal = target;
+      // A dangling ref used to be written out verbatim as `{path}`.
+      if (!Object.hasOwn(resolved, ref[1])) {
+        throw new Error(
+          `data-viz chart.categorical.${k}: unresolved reference {${ref[1]}} (no token at that path in base.tokens.json)`,
+        );
+      }
+      outVal = resolved[ref[1]];
     }
     resolvedCategorical[k] = {
       $value: outVal,

@@ -141,10 +141,11 @@ jobs:
     # the documented stable image for emulator CI.
     runs-on: ubuntu-22.04
     timeout-minutes: 45
-    # QUARANTINED (non-blocking) — tracked in #271. The emulator still fails to
-    # boot on GitHub-hosted runners even with KVM + ubuntu-22.04 (the well-known
-    # emulator-on-CI problem). Next options: AVD snapshot caching, a different
-    # api/target, self-hosted runners, or Firebase Test Lab. Advisory until fixed.
+    # QUARANTINED (non-blocking) — tracked in #271. The "boot timeout" was never
+    # a boot problem: the action installs the latest emulator every run, and
+    # emulator 37.x rejects `-no-bootanim` ("unknown option"), exiting at once, so
+    # the runner polled a dead process for 600s. Advisory until the fleet has a
+    # clean track record (ci-required-checks.md: >=50 clean runs to promote).
     continue-on-error: true
     strategy:
       fail-fast: false
@@ -189,7 +190,7 @@ jobs:
           target: google_apis
           profile: Nexus 6
           force-avd-creation: true
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-bootanim -camera-back none
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
           disable-animations: true
           script: cd apps/android && chmod +x gradlew && ./gradlew connectedDebugAndroidTest --no-daemon --stacktrace
 

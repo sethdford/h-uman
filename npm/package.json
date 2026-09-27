@@ -1,7 +1,7 @@
 {
   "name": "human",
   "version": "0.5.0",
-  "description": "not quite human. Autonomous AI assistant runtime in C11. ~1696 KB binary. Zero dependencies. 83+ tools, 38 channels, 50+ providers.",
+  "description": "not quite human. Autonomous AI assistant runtime in C11. ~3 MB binary. Zero dependencies. 83+ tools, 38 channels, 50+ providers.",
   "license": "MIT",
   "repository": {
     "type": "git",
