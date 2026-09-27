@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-27T13:41:51.452Z",
+  "generated": "2026-09-27T18:33:45.489Z",
   "groups": {
     "color.neutral": [
       {
@@ -1825,8 +1825,13 @@
       },
       {
         "name": "on-accent",
-        "value": "#ffffff",
-        "hex": "#ffffff"
+        "value": "#0c0a08",
+        "hex": "#0c0a08"
+      },
+      {
+        "name": "on-error",
+        "value": "#0c0a08",
+        "hex": "#0c0a08"
       },
       {
         "name": "accent-secondary",
@@ -2174,6 +2179,11 @@
       },
       {
         "name": "on-accent",
+        "value": "#0c0a08",
+        "hex": "#0c0a08"
+      },
+      {
+        "name": "on-error",
         "value": "#ffffff",
         "hex": "#ffffff"
       },

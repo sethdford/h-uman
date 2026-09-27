@@ -955,8 +955,14 @@
         "$type": "color"
       },
       "on-accent": {
-        "$value": "#ffffff",
-        "$type": "color"
+        "$value": "{color.neutral.50}",
+        "$type": "color",
+        "$description": "WCAG AA: label on accent/accent-hover fills. White measured 2.4:1 on human.500; neutral.50 is >=5.7:1 on every accent fill"
+      },
+      "on-error": {
+        "$value": "{color.neutral.50}",
+        "$type": "color",
+        "$description": "WCAG AA: label on error fills (danger buttons, disconnect banner)"
       },
       "accent-secondary": {
         "$value": "{color.amber.500}",
@@ -1290,8 +1296,14 @@
         "$type": "color"
       },
       "on-accent": {
+        "$value": "{color.neutral.50}",
+        "$type": "color",
+        "$description": "WCAG AA: label on accent/accent-hover fills. White measured 2.4:1 on human.500; neutral.50 is >=5.7:1 on every accent fill"
+      },
+      "on-error": {
         "$value": "#ffffff",
-        "$type": "color"
+        "$type": "color",
+        "$description": "WCAG AA: label on error fills (danger buttons, disconnect banner)"
       },
       "accent-secondary": {
         "$value": "{color.amber.600}",

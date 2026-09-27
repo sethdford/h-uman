@@ -430,9 +430,10 @@
     radial-gradient(ellipse at 20% 50%, rgba(122, 182, 72, 0.06) 0%, transparent 50%),
     radial-gradient(ellipse at 80% 20%, rgba(74, 111, 165, 0.04) 0%, transparent 50%),
     radial-gradient(ellipse at 50% 80%, rgba(245, 158, 11, 0.03) 0%, transparent 50%);
-  --hu-on-accent: #ffffff;
+  --hu-on-accent: #0c0a08;
   --hu-on-accent-secondary: #0c0a08;
   --hu-on-accent-tertiary: #ffffff;
+  --hu-on-error: #0c0a08;
   --hu-pressed-overlay: rgba(255, 255, 255, 0.12);
   --hu-shadow-card:
     0 1px 3px rgba(12, 8, 4, 0.35), 0 8px 24px rgba(12, 8, 4, 0.25),
@@ -744,9 +745,10 @@
     --hu-link-active: #7ab648;
     --hu-link-hover: #264a17;
     --hu-link-visited: #3a6a24;
-    --hu-on-accent: #ffffff;
+    --hu-on-accent: #0c0a08;
     --hu-on-accent-secondary: #0c0a08;
     --hu-on-accent-tertiary: #ffffff;
+    --hu-on-error: #ffffff;
     --hu-pressed-overlay: rgba(0, 0, 0, 0.1);
     --hu-shadow-card: 0 1px 2px rgba(45, 36, 24, 0.04), 0 2px 8px rgba(45, 36, 24, 0.03);
     --hu-shadow-glow-accent: 0 0 0 1px rgba(90, 154, 48, 0.12), 0 4px 16px rgba(90, 154, 48, 0.15);
@@ -850,9 +852,10 @@
     radial-gradient(ellipse at 20% 50%, rgba(122, 182, 72, 0.06) 0%, transparent 50%),
     radial-gradient(ellipse at 80% 20%, rgba(74, 111, 165, 0.04) 0%, transparent 50%),
     radial-gradient(ellipse at 50% 80%, rgba(245, 158, 11, 0.03) 0%, transparent 50%);
-  --hu-on-accent: #ffffff;
+  --hu-on-accent: #0c0a08;
   --hu-on-accent-secondary: #0c0a08;
   --hu-on-accent-tertiary: #ffffff;
+  --hu-on-error: #0c0a08;
   --hu-pressed-overlay: rgba(255, 255, 255, 0.12);
   --hu-shadow-card:
     0 1px 3px rgba(12, 8, 4, 0.35), 0 8px 24px rgba(12, 8, 4, 0.25),
@@ -956,9 +959,10 @@
   --hu-link-active: #7ab648;
   --hu-link-hover: #264a17;
   --hu-link-visited: #3a6a24;
-  --hu-on-accent: #ffffff;
+  --hu-on-accent: #0c0a08;
   --hu-on-accent-secondary: #0c0a08;
   --hu-on-accent-tertiary: #ffffff;
+  --hu-on-error: #ffffff;
   --hu-pressed-overlay: rgba(0, 0, 0, 0.1);
   --hu-shadow-card: 0 1px 2px rgba(45, 36, 24, 0.04), 0 2px 8px rgba(45, 36, 24, 0.03);
   --hu-shadow-glow-accent: 0 0 0 1px rgba(90, 154, 48, 0.12), 0 4px 16px rgba(90, 154, 48, 0.15);

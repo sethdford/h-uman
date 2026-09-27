@@ -164,7 +164,7 @@ fun HumanTheme(
             surfaceContainerHigh = t.surfaceContainerHigh,
             surfaceContainerHighest = t.surfaceContainerHighest,
             error = t.error,
-            onError = t.onAccent,
+            onError = t.onError,
             outline = t.border,
             outlineVariant = t.borderSubtle,
         )
@@ -189,7 +189,7 @@ fun HumanTheme(
             surfaceContainerHigh = t.surfaceContainerHigh,
             surfaceContainerHighest = t.surfaceContainerHighest,
             error = t.error,
-            onError = t.onAccent,
+            onError = t.onError,
             outline = t.border,
             outlineVariant = t.borderSubtle,
         )

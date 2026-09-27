@@ -307,15 +307,17 @@ export class ScApp extends LitElement {
       justify-content: center;
       gap: var(--hu-space-sm);
       padding: var(--hu-space-2xs) var(--hu-space-md);
-      color: var(--hu-on-accent);
+      color: var(--banner-fg);
       font-size: var(--hu-text-xs);
       font-weight: var(--hu-weight-medium);
       animation: hu-slide-down var(--hu-duration-normal) var(--hu-ease-out);
     }
     .disconnect-banner {
+      --banner-fg: var(--hu-on-error);
       background: color-mix(in srgb, var(--hu-error) 85%, var(--hu-bg));
     }
     .demo-fallback-banner {
+      --banner-fg: var(--hu-on-accent-secondary);
       background: color-mix(in srgb, var(--hu-accent-secondary) 85%, var(--hu-bg));
     }
     .banner-fading {
@@ -332,7 +334,7 @@ export class ScApp extends LitElement {
     .disconnect-banner button,
     .demo-fallback-banner button {
       background: var(--hu-bg);
-      border: 1px solid var(--hu-on-accent);
+      border: 1px solid var(--banner-fg);
       color: var(--hu-text);
       padding: var(--hu-space-2xs) var(--hu-space-sm);
       border-radius: var(--hu-radius-sm);
@@ -350,7 +352,7 @@ export class ScApp extends LitElement {
     .banner-dismiss {
       background: transparent;
       border: none;
-      color: var(--hu-on-accent);
+      color: var(--banner-fg);
       cursor: pointer;
       padding: var(--hu-space-2xs);
       font-size: var(--hu-text-xs);
