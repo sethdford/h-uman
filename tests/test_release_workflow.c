@@ -1,3 +1,4 @@
+// @covers-none — asserts on .github/workflows/release-macos.yml, not a C module
 #include "test_framework.h"
 #include <ctype.h>
 #include <stdbool.h>
@@ -110,23 +111,50 @@ static void test_release_workflow_has_tag_trigger(void) {
     fclose(f);
 }
 
+/* GitHub-hosted arm64 macOS runner labels (actions/runner-images README).
+ * "macos-14-arm64" is an image NAME, not a label: a job requesting it is never
+ * assigned a runner and waits in the queue until cancelled. */
+static bool is_hosted_macos_arm64_label(const char *label) {
+    static const char *const labels[] = {"macos-14", "macos-14-xlarge", "macos-15",
+                                         "macos-15-xlarge"};
+    for (size_t i = 0; i < sizeof(labels) / sizeof(labels[0]); i++) {
+        if (strcmp(label, labels[i]) == 0)
+            return true;
+    }
+    return false;
+}
+
 static void test_release_workflow_runs_on_macos_arm64(void) {
     FILE *f = fopen(".github/workflows/release-macos.yml", "r");
     HU_ASSERT_NOT_NULL(f);
 
     char line[256];
-    bool found_arm64 = false;
+    int macos_jobs = 0;
+    int valid_macos_jobs = 0;
 
     while (fgets(line, sizeof(line), f)) {
-        if (strstr(line, "macos-14-arm64") ||
-            (strstr(line, "runs-on:") && fgets(line, sizeof(line), f) &&
-             strstr(line, "macos-14-arm64"))) {
-            found_arm64 = true;
-            break;
+        const char *p = strstr(line, "runs-on:");
+        if (!p)
+            continue;
+        p += strlen("runs-on:");
+        while (*p == ' ' || *p == '\t')
+            p++;
+        char label[64];
+        size_t n = 0;
+        while (p[n] && !isspace((unsigned char)p[n]) && n + 1 < sizeof(label)) {
+            label[n] = p[n];
+            n++;
         }
+        label[n] = '\0';
+        if (strncmp(label, "macos", 5) != 0)
+            continue;
+        macos_jobs++;
+        if (is_hosted_macos_arm64_label(label))
+            valid_macos_jobs++;
     }
 
-    HU_ASSERT_TRUE(found_arm64);
+    HU_ASSERT_TRUE(macos_jobs > 0);
+    HU_ASSERT_EQ(valid_macos_jobs, macos_jobs);
     fclose(f);
 }
 
