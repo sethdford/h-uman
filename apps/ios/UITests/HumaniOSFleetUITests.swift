@@ -316,7 +316,12 @@ final class HumaniOSFleetUITests: XCTestCase {
     func test_main_window_fills_screen_not_letterboxed() throws {
         launchAndSettle()
         let screen = app.frame
-        let window = app.windows.firstMatch.frame
+        let mainWindow = app.windows.firstMatch
+        XCTAssertTrue(
+            mainWindow.waitForExistence(timeout: Timeout.content),
+            "Main window should exist before its geometry is checked",
+        )
+        let window = mainWindow.frame
         XCTAssertGreaterThan(screen.height, 0, "Application frame should be measurable")
         XCTAssertEqual(window.minY, screen.minY, accuracy: 1, "Main window should start at the screen top (window=\(window), screen=\(screen))")
         XCTAssertEqual(window.height, screen.height, accuracy: 1, "Main window should span the full screen height (window=\(window), screen=\(screen))")
