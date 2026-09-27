@@ -124,6 +124,31 @@ static bool is_hosted_macos_arm64_label(const char *label) {
     return false;
 }
 
+/* If `line` is a job-level `key: value` (exactly four spaces of indentation,
+ * so comments and step-level keys never match), copy the value into `out`
+ * with surrounding quotes and trailing whitespace removed. */
+static bool job_level_value(const char *line, const char *key, char *out, size_t cap) {
+    size_t klen = strlen(key);
+    if (strncmp(line, "    ", 4) != 0 || strncmp(line + 4, key, klen) != 0 || line[4 + klen] != ':')
+        return false;
+    const char *p = line + 4 + klen + 1;
+    while (*p == ' ' || *p == '\t')
+        p++;
+    size_t n = 0;
+    while (p[n] && p[n] != '\n' && p[n] != '\r' && n + 1 < cap) {
+        out[n] = p[n];
+        n++;
+    }
+    while (n > 0 && isspace((unsigned char)out[n - 1]))
+        n--;
+    if (n >= 2 && (out[0] == '\'' || out[0] == '"') && out[n - 1] == out[0]) {
+        memmove(out, out + 1, n - 2);
+        n -= 2;
+    }
+    out[n] = '\0';
+    return true;
+}
+
 static void test_release_workflow_runs_on_macos_arm64(void) {
     FILE *f = fopen(".github/workflows/release-macos.yml", "r");
     HU_ASSERT_NOT_NULL(f);
@@ -133,19 +158,9 @@ static void test_release_workflow_runs_on_macos_arm64(void) {
     int valid_macos_jobs = 0;
 
     while (fgets(line, sizeof(line), f)) {
-        const char *p = strstr(line, "runs-on:");
-        if (!p)
-            continue;
-        p += strlen("runs-on:");
-        while (*p == ' ' || *p == '\t')
-            p++;
         char label[64];
-        size_t n = 0;
-        while (p[n] && !isspace((unsigned char)p[n]) && n + 1 < sizeof(label)) {
-            label[n] = p[n];
-            n++;
-        }
-        label[n] = '\0';
+        if (!job_level_value(line, "runs-on", label, sizeof(label)))
+            continue;
         if (strncmp(label, "macos", 5) != 0)
             continue;
         macos_jobs++;
@@ -351,8 +366,11 @@ static void test_release_workflow_prerelease_publish_is_opt_in(void) {
             found_publish_job = found_publish_job || in_publish_job;
             continue;
         }
-        if (in_publish_job && strstr(line, "if:") &&
-            strstr(line, "vars.PUBLISH_PRERELEASE == 'true'")) {
+        /* Job-level if: only. A step-level if: (deeper indentation) would
+         * still let the job start, so it must not satisfy this test. */
+        char cond[256];
+        if (in_publish_job && job_level_value(line, "if", cond, sizeof(cond)) &&
+            strstr(cond, "vars.PUBLISH_PRERELEASE == 'true'")) {
             gated = true;
             break;
         }
