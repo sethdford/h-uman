@@ -392,7 +392,29 @@ static bool contains_ci(const char *h, size_t hn, const char *needle) {
     return false;
 }
 
-hu_speech_drift_t hu_speech_drift_check(const char *orig, size_t on, const char *rew, size_t rn) {
+/* U+2019, the iPhone apostrophe, -> ASCII ', so both sides tokenize alike. */
+static size_t ascii_apostrophes(const char *in, size_t n, char *out, size_t cap) {
+    size_t o = 0;
+    for (size_t i = 0; in && i < n && o + 1 < cap; i++) {
+        if (i + 2 < n && (unsigned char)in[i] == 0xE2 && (unsigned char)in[i + 1] == 0x80 &&
+            (unsigned char)in[i + 2] == 0x99) {
+            out[o++] = '\'';
+            i += 2;
+        } else {
+            out[o++] = in[i];
+        }
+    }
+    out[o] = '\0';
+    return o;
+}
+
+hu_speech_drift_t hu_speech_drift_check(const char *orig_in, size_t on, const char *rew_in,
+                                        size_t rn) {
+    char orig_buf[SPEECH_WORK_CAP], rew_buf[SPEECH_WORK_CAP];
+    const char *orig = orig_in ? orig_buf : NULL;
+    const char *rew = rew_in ? rew_buf : NULL;
+    on = ascii_apostrophes(orig_in, on, orig_buf, sizeof(orig_buf));
+    rn = ascii_apostrophes(rew_in, rn, rew_buf, sizeof(rew_buf));
     dword_t ow[SPEECH_MAX_WORDS], rw[SPEECH_MAX_WORDS];
     size_t oc = orig ? words_of(orig, on, ow, SPEECH_MAX_WORDS) : 0;
     size_t rc = rew ? words_of(rew, rn, rw, SPEECH_MAX_WORDS) : 0;

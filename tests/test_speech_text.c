@@ -117,6 +117,14 @@ static void test_speech_drift_rejects_negation_flip(void) {
     expect_drift("no worries at all", "No worries at all.", HU_SPEECH_DRIFT_OK);
 }
 
+/* Live preview: iPhone texts use U+2019 ("won’t"); the model writes ASCII. */
+static void test_speech_drift_curly_apostrophe_is_an_apostrophe(void) {
+    expect_drift("i won\xE2\x80\x99t be there much", "I won't be there much.", HU_SPEECH_DRIFT_OK);
+    expect_drift("the airbnb option is great", "Yeah the Airbnb\xE2\x80\x99s great.",
+                 HU_SPEECH_DRIFT_OK);
+    expect_drift("i will be there", "I won\xE2\x80\x99t be there.", HU_SPEECH_DRIFT_NEGATION);
+}
+
 static void test_speech_drift_known_name_is_fine(void) {
     expect_drift("tell sarah i said hi", "Tell Sarah I said hi.", HU_SPEECH_DRIFT_OK);
     /* Live preview 2026-09-27: a possessive is the same name, not a new one. */
@@ -142,6 +150,7 @@ void run_speech_text_tests(void) {
     HU_RUN_TEST(test_speech_drift_rejects_each_kind_of_drift);
     HU_RUN_TEST(test_speech_drift_rejects_spelled_numbers_and_dates);
     HU_RUN_TEST(test_speech_drift_rejects_negation_flip);
+    HU_RUN_TEST(test_speech_drift_curly_apostrophe_is_an_apostrophe);
     HU_RUN_TEST(test_speech_drift_known_name_is_fine);
     HU_RUN_TEST(test_speech_drift_names_are_distinct);
 }
