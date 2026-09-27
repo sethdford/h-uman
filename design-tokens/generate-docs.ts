@@ -8,6 +8,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
+import { collectTokens, resolveRefs, type TokenMap } from "./token-lib.js";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(SCRIPT_DIR, "..");
@@ -21,49 +22,6 @@ const TOKEN_FILES = [
   "semantic.tokens.json",
   "components.tokens.json",
 ];
-
-type TokenValue = string | number;
-type TokenMap = Record<string, TokenValue>;
-
-/** Recursively collect all $value entries into a flat path -> value map */
-function collectTokens(obj: unknown, prefix = ""): TokenMap {
-  const result: TokenMap = {};
-  if (obj === null || typeof obj !== "object") return result;
-  const rec = obj as Record<string, unknown>;
-
-  for (const [key, val] of Object.entries(rec)) {
-    if (key.startsWith("$")) continue;
-    const pathPart = prefix ? `${prefix}.${key}` : key;
-    if (val !== null && typeof val === "object" && "$value" in val) {
-      const v = (val as { $value: TokenValue }).$value;
-      result[pathPart] = v;
-    } else if (typeof val === "object" && val !== null) {
-      Object.assign(result, collectTokens(val, pathPart));
-    }
-  }
-  return result;
-}
-
-/** Resolve {path.to.token} references in place; repeat until stable */
-function resolveRefs(tokens: TokenMap): TokenMap {
-  const resolved = { ...tokens };
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const [key, val] of Object.entries(resolved)) {
-      if (typeof val !== "string") continue;
-      const ref = val.match(/^\{([^}]+)\}$/);
-      if (ref) {
-        const target = resolved[ref[1]];
-        if (target !== undefined) {
-          resolved[key] = target;
-          changed = true;
-        }
-      }
-    }
-  }
-  return resolved;
-}
 
 function main(): void {
   let tokens: TokenMap = {};
