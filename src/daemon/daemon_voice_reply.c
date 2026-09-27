@@ -74,15 +74,22 @@ static void daemon_voice_record_decision(hu_agent_t *agent, const char *batch_ke
 #include <unistd.h>
 
 bool hu_voice_reply_gates_clear(hu_allocator_t *alloc, const char *text, size_t text_len,
-                                const char **reason_out) {
+                                const char *inbound, size_t inbound_len, const char **reason_out) {
     const char *why = "invalid";
     bool clear = false;
     if (text && text_len > 0) {
+        hu_moderation_result_t in_mod;
+        memset(&in_mod, 0, sizeof(in_mod));
         hu_moderation_result_t mod;
         memset(&mod, 0, sizeof(mod));
         hu_companion_safety_result_t cs;
         memset(&cs, 0, sizeof(cs));
-        if (hu_moderation_check(alloc, text, text_len, &mod) != HU_OK || mod.flagged)
+        /* Same criterion as the daemon's SHIELD-005 inbound_crisis flag. */
+        if (inbound && inbound_len > 0 &&
+            (hu_moderation_check(alloc, inbound, inbound_len, &in_mod) != HU_OK ||
+             in_mod.self_harm))
+            why = "inbound_crisis";
+        else if (hu_moderation_check(alloc, text, text_len, &mod) != HU_OK || mod.flagged)
             why = "moderation";
         else if (hu_companion_safety_check(alloc, text, text_len, NULL, 0, &cs) != HU_OK ||
                  cs.flagged)
@@ -116,7 +123,8 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, hu_agent_t *agent, const hu_co
      * delivers the reply through the text path, which applies them. */
     {
         const char *gate_why = NULL;
-        if (!hu_voice_reply_gates_clear(alloc, response, response_len, &gate_why)) {
+        if (!hu_voice_reply_gates_clear(alloc, response, response_len, combined, combined_len,
+                                        &gate_why)) {
             hu_log_info("voice_reply", NULL, "voice declined by safety gate: %s", gate_why);
             return false;
         }
