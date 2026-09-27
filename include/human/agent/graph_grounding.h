@@ -64,4 +64,30 @@ hu_error_t hu_graph_ground_compose(hu_memory_loader_t *loader, const char *conta
                                    size_t max_chars, char **out, size_t *out_len,
                                    size_t *out_matched_entities);
 
+/* ── Contact-anchored fallback (2026-09-27) ───────────────────────────────
+ * Lexical seeding needs the incoming message to NAME an entity; casual texts
+ * almost never do (0 of 40 real moments, 2026-09-27), so compose returned
+ * nothing even for contacts with a populated graph. With
+ * HU_GG_CONTACT_FALLBACK, a lexical miss seeds instead from the contact's own
+ * top entities (mention count + recency) and renders them the same way.
+ * A lexical hit is unaffected. *out_matched_entities stays 0 on the fallback
+ * path so logs can tell the two apart. */
+#define HU_GG_CONTACT_FALLBACK 0x1u
+
+hu_error_t hu_graph_ground_compose_ex(hu_memory_loader_t *loader, const char *contact_id,
+                                      size_t contact_id_len, const char *msg, size_t msg_len,
+                                      size_t max_chars, unsigned flags, char **out, size_t *out_len,
+                                      size_t *out_matched_entities);
+
+typedef enum hu_graph_grounding_fallback_mode {
+    HU_GG_FALLBACK_OFF = 0,
+    HU_GG_FALLBACK_SHADOW,
+    HU_GG_FALLBACK_LIVE,
+} hu_graph_grounding_fallback_mode_t;
+
+/* Reads HU_GRAPH_GROUNDING_CONTACT_FALLBACK per hu_gate_mode_parse:
+ * unset -> OFF (default), "shadow" -> SHADOW, "on"/"live" -> LIVE,
+ * unknown -> OFF. */
+hu_graph_grounding_fallback_mode_t hu_graph_grounding_contact_fallback_mode(void);
+
 #endif /* HU_AGENT_GRAPH_GROUNDING_H */
