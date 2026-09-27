@@ -3,10 +3,11 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { TEXT_ROLES } from "../../design-tokens/contrast-lib.ts";
 
-const TOKENS_CSS = readFileSync(
-  fileURLToPath(new URL("../src/styles/_tokens.css", import.meta.url)),
-  "utf-8",
-);
+// The Quiet Room layer is generated into its own file (the dashboard loads it
+// with the design-system view); in the page it always follows _tokens.css.
+const TOKENS_CSS = ["_tokens.css", "_quiet.css"]
+  .map((f) => readFileSync(fileURLToPath(new URL(`../src/styles/${f}`, import.meta.url)), "utf-8"))
+  .join("\n");
 const HIGH_CONTRAST_CSS = readFileSync(
   fileURLToPath(new URL("../src/styles/high-contrast.css", import.meta.url)),
   "utf-8",

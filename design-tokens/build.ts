@@ -239,10 +239,7 @@ function main() {
 
   const outdir = parseOutdir();
 
-  const quietCss = generateQuietCSS(webTokens);
-  const css = quietCss
-    ? `${generateCSS(tokens, p3Colors)}\n\n${quietCss}\n`
-    : generateCSS(tokens, p3Colors);
+  const css = generateCSS(tokens, p3Colors);
   writeOutput(
     outdir,
     path.join(ROOT, "ui", "src", "styles", "_tokens.css"),
@@ -255,6 +252,27 @@ function main() {
       path.join(ROOT, "website", "src", "styles", "_tokens.css"),
       "_tokens.css",
       css,
+    );
+  }
+
+  // The Quiet Room layer is its own file so the dashboard can load it with the
+  // design-system view (the only place it can be switched on) instead of in
+  // the entry bundle; the website imports it globally from global.css.
+  const quietCss =
+    generateQuietCSS(webTokens) ||
+    "/* Quiet Room: no web-only tokens (design-tokens/quiet.tokens.json). */";
+  writeOutput(
+    outdir,
+    path.join(ROOT, "ui", "src", "styles", "_quiet.css"),
+    "_quiet.css",
+    `${quietCss}\n`,
+  );
+  if (!outdir) {
+    writeOutput(
+      null,
+      path.join(ROOT, "website", "src", "styles", "_quiet.css"),
+      "_quiet.css",
+      `${quietCss}\n`,
     );
   }
 
