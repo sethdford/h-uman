@@ -8,12 +8,14 @@ Read `AGENTS.md` for the full engineering protocol. This file is the quick refer
 ## Product Thesis (summary)
 
 **The assistant that's actually yours** — a private, personal AI that runs on
-your hardware, learns who you are locally, and never sends your identity to a
-cloud. We don't compete on task execution, channel count, or benchmark scores
-(table stakes). The honest moats are: **persona as compiled architecture** (41 C
-modules, not markdown templates), **privacy by architecture** (local-first, not a
-settings toggle), an **on-device personalization pipeline**, and **HuLa IR**
-(typed, compiled tool orchestration).
+your hardware, stores who you are on your machine, and lets you choose which
+model sees it, including a local one. We don't compete on task execution,
+channel count, or benchmark scores (table stakes). The honest moats are:
+**persona as compiled architecture** (41 C modules, not markdown templates),
+**local storage by architecture** (SQLite, no sync; a cloud model does receive
+each reply's full context with no redaction — see `docs/PRODUCT.md` "Known privacy gaps"),
+an **on-device personalization pipeline**, and **HuLa IR** (typed, compiled tool
+orchestration).
 
 Full thesis, the red-teamed reality check, the M1–M6 strategic missions, and the
 competitive matrix live in **[`docs/PRODUCT.md`](docs/PRODUCT.md)** — kept out of

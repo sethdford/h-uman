@@ -453,6 +453,10 @@ hu_update_mode_t hu_update_mode_from_config(const char *auto_update) {
     return HU_UPDATE_MODE_CHECK;
 }
 
+bool hu_update_check_allowed(hu_update_mode_t mode, bool force) {
+    return force || mode != HU_UPDATE_MODE_OFF;
+}
+
 hu_error_t hu_update_maybe_check(hu_allocator_t *alloc, const hu_config_t *cfg) {
     if (!alloc || !cfg)
         return HU_ERR_INVALID_ARGUMENT;

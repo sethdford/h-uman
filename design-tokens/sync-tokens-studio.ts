@@ -2,6 +2,7 @@
 /**
  * Regenerate docs/tokens-studio.json from canonical *.tokens.json sources.
  * Run from repo root: npx tsx design-tokens/sync-tokens-studio.ts
+ * `--out <path>` writes elsewhere (check-drift.sh diffs that against the committed file).
  */
 
 import * as fs from "fs";
@@ -12,7 +13,11 @@ import { collectTokens, resolveRefs } from "./token-lib.js";
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(SCRIPT_DIR, "..");
 const DT = path.join(ROOT, "design-tokens");
-const OUT = path.join(ROOT, "docs/tokens-studio.json");
+const outFlag = process.argv.indexOf("--out");
+const OUT =
+  outFlag !== -1 && process.argv[outFlag + 1]
+    ? path.resolve(process.argv[outFlag + 1])
+    : path.join(ROOT, "docs/tokens-studio.json");
 
 function stripSchema(obj: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
