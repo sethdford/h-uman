@@ -14,8 +14,11 @@
 #include "human/daemon.h"
 #include "human/daemon/voice_facade.h"
 #include "human/daemon_outbound_bus.h"
+#include "human/persona.h"
 #include "human/platform.h"
 #include "human/security/moderation.h"
+#include "human/tts/speech_direction.h"
+#include "human/tts/speech_perform.h"
 #include "human/tts/speech_rewrite.h"
 #include "human/tts/speech_text.h"
 #if defined(HU_ENABLE_CARTESIA)
@@ -125,18 +128,83 @@ char *hu_daemon_voice_capture_unshaped(hu_allocator_t *alloc, const hu_config_t 
     return copy;
 }
 
-/* F1 S1 + S4 for a memo that is about to be synthesized. The rewrite is an
- * LLM call, so it runs here — once — rather than for every reply. `*state`:
- * 0 not yet run, 1 speak `sp`, -1 declined. */
-static bool voice_spoken_final(hu_allocator_t *alloc, hu_agent_t *agent, const char *response,
-                               size_t response_len, const char *combined, size_t combined_len,
-                               hu_speech_result_t *sp, int *state) {
-    if (*state == 0) {
+/* One memo's spoken form (F1) and its direction (F2-voice, spec 2026-09-27). */
+typedef struct {
+    int state;     /* 0 not yet run, 1 speak, -1 declined */
+    bool directed; /* LIVE direction passed: speak `rendered` */
+    char rendered[HU_DIRECTION_RENDER_CAP];
+    size_t rendered_len;
+    char words[HU_DIRECTION_WORDS_CAP];
+    size_t words_len;
+    char emotion[24];
+    size_t sentences;
+} voice_final_t;
+
+/* D1 + D2 + S3 (inside hu_speech_perform), then S4 on the words and D3. SHADOW
+ * runs and logs only. HU_SPEECH_DIRECTION as a default is gated on Seth's ear
+ * test (>= 8/10 directed) and the W5 real-or-clone test rated by Mindy — do
+ * not flip without both. */
+static void voice_direct(hu_allocator_t *alloc, hu_agent_t *agent, const char *batch_key,
+                         size_t key_len, const char *combined, size_t combined_len,
+                         const hu_speech_result_t *sp, hu_speech_rewrite_mode_t mode,
+                         voice_final_t *vf) {
+    hu_perform_result_t *r = alloc->alloc(alloc->ctx, sizeof(*r));
+    if (!r)
+        return;
+    const hu_contact_profile_t *cp =
+        agent && agent->persona && batch_key
+            ? hu_persona_find_contact(agent->persona, batch_key, key_len)
+            : NULL;
+    time_t now = time(NULL);
+    struct tm tmv;
+    localtime_r(&now, &tmv);
+    hu_perform_scene_t scene = {
+        .speaker = agent && agent->persona ? agent->persona->name : NULL,
+        .listener = cp ? cp->name : NULL,
+        .relationship = cp ? cp->relationship : NULL,
+        .hour_local = tmv.tm_hour,
+        .weekday = tmv.tm_wday,
+        .inbound = combined,
+        .inbound_len = combined_len,
+    };
+    (void)hu_speech_perform(alloc, agent ? &agent->provider : NULL,
+                            agent ? agent->model_name : NULL, agent ? agent->model_name_len : 0,
+                            &scene, sp->spoken, sp->spoken_len, r);
+    hu_log_info("voice_reply", NULL, "direction %s: ok=%d reason=%s segments=%zu",
+                mode == HU_SPEECH_REWRITE_LIVE ? "live" : "shadow", r->ok ? 1 : 0, r->reason,
+                r->dir.count);
+    if (mode == HU_SPEECH_REWRITE_LIVE && r->ok &&
+        voice_gates_pass(alloc, r->dir.words, r->dir.words_len, combined, combined_len,
+                         "directed")) {
+        vf->rendered_len =
+            hu_direction_render(&r->dir, hu_laugh_style_parse(getenv("HU_VOICE_LAUGH")),
+                                vf->rendered, sizeof(vf->rendered));
+        if (vf->rendered_len > 0) {
+            memcpy(vf->words, r->dir.words, r->dir.words_len + 1);
+            vf->words_len = r->dir.words_len;
+            const char *fe = hu_direction_first_emotion(&r->dir);
+            snprintf(vf->emotion, sizeof(vf->emotion), "%s", fe ? fe : "");
+            vf->sentences = r->dir.sentences;
+            vf->directed = true;
+        }
+    }
+    alloc->free(alloc->ctx, r, sizeof(*r));
+}
+
+/* F1 S1 + S4 (and F2-voice direction) for a memo that is about to be
+ * synthesized. The rewrite and the performance are LLM calls, so they run
+ * here — once — rather than for every reply. */
+static bool voice_spoken_final(hu_allocator_t *alloc, hu_agent_t *agent, const char *batch_key,
+                               size_t key_len, const char *response, size_t response_len,
+                               const char *combined, size_t combined_len, hu_speech_result_t *sp,
+                               voice_final_t *vf) {
+    if (vf->state == 0) {
+        hu_speech_rewrite_mode_t dm = hu_speech_rewrite_mode_parse(getenv("HU_SPEECH_DIRECTION"));
         /* LIVE as a default is gated on the voice A/B drip preferring the
          * rewrite over cleanup-only, then the W5 real-or-clone test — do not
-         * flip without them. */
+         * flip without them. Direction supersedes the rewrite. */
         hu_speech_rewrite_mode_t m = hu_speech_rewrite_mode_parse(getenv("HU_SPEECH_REWRITE"));
-        if (m != HU_SPEECH_REWRITE_OFF) {
+        if (m != HU_SPEECH_REWRITE_OFF && dm == HU_SPEECH_REWRITE_OFF) {
             (void)hu_speech_prepare(
                 alloc, agent ? &agent->provider : NULL, agent ? agent->model_name : NULL,
                 agent ? agent->model_name_len : 0, agent ? agent->persona : NULL, m, response,
@@ -145,12 +213,14 @@ static bool voice_spoken_final(hu_allocator_t *alloc, hu_agent_t *agent, const c
                 hu_speech_shadow_record(alloc, sp);
         }
         /* F1 S4: the gates also judge what is actually spoken. */
-        *state = sp->spoken_len > 0 && voice_gates_pass(alloc, sp->spoken, sp->spoken_len, combined,
-                                                        combined_len, "spoken")
-                     ? 1
-                     : -1;
+        vf->state = sp->spoken_len > 0 && voice_gates_pass(alloc, sp->spoken, sp->spoken_len,
+                                                           combined, combined_len, "spoken")
+                        ? 1
+                        : -1;
+        if (vf->state == 1 && dm != HU_SPEECH_REWRITE_OFF)
+            voice_direct(alloc, agent, batch_key, key_len, combined, combined_len, sp, dm, vf);
     }
-    return *state == 1;
+    return vf->state == 1;
 }
 
 bool hu_daemon_voice_reply(hu_allocator_t *alloc, hu_agent_t *agent, const hu_config_t *config,
@@ -189,7 +259,8 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, hu_agent_t *agent, const hu_co
                             response_len, combined, combined_len, &sp);
     if (sp.spoken_len == 0)
         return false;
-    int spoken_state = 0;
+    voice_final_t vf;
+    memset(&vf, 0, sizeof(vf));
     bool sent_voice = false;
     {
         const char *chn_voice =
@@ -222,12 +293,18 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, hu_agent_t *agent, const hu_co
             if (vdec == HU_VOICE_SEND_VOICE) {
                 const char *cartesia_key = hu_config_get_provider_key(config, "cartesia");
                 if (cartesia_key && cartesia_key[0] &&
-                    voice_spoken_final(alloc, agent, response, response_len, combined, combined_len,
-                                       &sp, &spoken_state)) {
+                    voice_spoken_final(alloc, agent, batch_key, key_len, response, response_len,
+                                       combined, combined_len, &sp, &vf)) {
                     hu_voice_reply_request_t req;
-                    hu_error_t prep_err = hu_voice_reply_build_request_ex(
-                        &agent->persona->voice, sp.spoken, sp.spoken_len, combined, combined_len,
-                        bth_hour, (uint32_t)time(NULL), sp.laughter_cue, &req);
+                    hu_error_t prep_err =
+                        vf.directed
+                            ? hu_voice_reply_build_request_directed(
+                                  &agent->persona->voice, vf.rendered, vf.rendered_len,
+                                  vf.emotion[0] ? vf.emotion : NULL, vf.sentences, &req)
+                            : hu_voice_reply_build_request_ex(&agent->persona->voice, sp.spoken,
+                                                              sp.spoken_len, combined, combined_len,
+                                                              bth_hour, (uint32_t)time(NULL),
+                                                              sp.laughter_cue, &req);
                     unsigned char *audio_bytes = NULL;
                     size_t audio_len = 0;
                     hu_error_t tts_err = prep_err;
@@ -265,12 +342,17 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, hu_agent_t *agent, const hu_co
             hu_voice_config_t voice_cfg = {0};
             if (hu_voice_config_from_settings(config, &voice_cfg) == HU_OK &&
                 voice_cfg.tts_provider && voice_cfg.tts_provider[0] &&
-                voice_spoken_final(alloc, agent, response, response_len, combined, combined_len,
-                                   &sp, &spoken_state)) {
+                voice_spoken_final(alloc, agent, batch_key, key_len, response, response_len,
+                                   combined, combined_len, &sp, &vf)) {
                 void *audio = NULL;
                 size_t audio_len = 0;
+                /* Tags mean something only to Cartesia; others get the words. */
+                bool tags_ok = strcmp(voice_cfg.tts_provider, "cartesia") == 0;
+                const char *say = vf.directed ? (tags_ok ? vf.rendered : vf.words) : sp.spoken;
+                size_t say_len =
+                    vf.directed ? (tags_ok ? vf.rendered_len : vf.words_len) : sp.spoken_len;
                 hu_error_t tts_err =
-                    hu_voice_tts(alloc, &voice_cfg, sp.spoken, sp.spoken_len, &audio, &audio_len);
+                    hu_voice_tts(alloc, &voice_cfg, say, say_len, &audio, &audio_len);
                 if (tts_err == HU_OK && audio && audio_len > 0) {
                     unsigned char *audio_bytes = (unsigned char *)audio;
                     char audio_path[512];

@@ -238,6 +238,81 @@ static bool run_rewrite_voice(const char *reply, const char *rewrite) {
     return run_rewrite_voice_on(reply, rewrite, true, "cartesia");
 }
 
+/* F2-voice direction (spec 2026-09-27): the model performs the line. */
+static bool run_direct_voice(const char *reply, const char *model_line, const char *mode) {
+    static hu_provider_vtable_t pvt;
+    memset(&pvt, 0, sizeof(pvt));
+    pvt.chat_with_system = rw_mock_chat;
+    g_rewrite_out = model_line;
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.provider.vtable = &pvt;
+    static hu_config_t config;
+    memset(&config, 0, sizeof(config));
+    config.channels.default_daemon.voice_enabled = true;
+    config.voice.tts_provider = "cartesia";
+    hu_channel_vtable_t vt;
+    memset(&vt, 0, sizeof(vt));
+    vt.name = vr_name_generic;
+    vt.send = vr_send;
+    hu_channel_t channel;
+    memset(&channel, 0, sizeof(channel));
+    channel.vtable = &vt;
+    hu_service_channel_t ch;
+    memset(&ch, 0, sizeof(ch));
+    ch.channel = &channel;
+    setenv("HU_SPEECH_DIRECTION", mode, 1);
+    bool sent = hu_daemon_voice_reply(&alloc, &agent, &config, &ch, "+15550000001", 12, "hey", 3,
+                                      reply, strlen(reply), NULL, 0, 14);
+    unsetenv("HU_SPEECH_DIRECTION");
+    return sent;
+}
+
+static void test_voice_reply_speaks_the_directed_line(void) {
+    g_voice_sends = 0;
+    HU_ASSERT_TRUE(run_direct_voice("yeah sounds good",
+                                    "<emotion value=\"excited\"/>Yeah, sounds good!", "live"));
+    HU_ASSERT_EQ(g_voice_sends, 1);
+    const char *t = hu_cartesia_test_last_transcript();
+    HU_ASSERT_STR_CONTAINS(t, "<emotion value=\"excited\"/>");
+    HU_ASSERT_STR_CONTAINS(t, "Yeah, sounds good!");
+}
+
+static void test_voice_reply_invalid_direction_speaks_plain_text(void) {
+    g_voice_sends = 0;
+    HU_ASSERT_TRUE(run_direct_voice("yeah sounds good", "<prosody>Yeah</prosody>", "live"));
+    HU_ASSERT_STR_EQ(hu_cartesia_test_last_transcript(), "yeah sounds good");
+}
+
+static void test_voice_reply_direction_shadow_speaks_plain_text(void) {
+    g_voice_sends = 0;
+    g_rewrite_calls = 0;
+    HU_ASSERT_TRUE(run_direct_voice("yeah sounds good",
+                                    "<emotion value=\"excited\"/>Yeah, sounds good!", "shadow"));
+    HU_ASSERT_EQ(g_rewrite_calls, 1);
+    HU_ASSERT_STR_EQ(hu_cartesia_test_last_transcript(), "yeah sounds good");
+}
+
+static void test_voice_reply_directed_line_that_trips_moderation_is_not_spoken(void) {
+    g_voice_sends = 0;
+    HU_ASSERT_TRUE(run_direct_voice("we watched that show with the kids",
+                                    "<emotion value=\"calm\"/>kill them with violence and murder",
+                                    "live"));
+    const char *t = hu_cartesia_test_last_transcript();
+    HU_ASSERT_STR_NOT_CONTAINS(t, "kill");
+    HU_ASSERT_STR_CONTAINS(t, "we watched that show with the kids");
+}
+
+static void test_voice_reply_direction_off_is_todays_path(void) {
+    g_voice_sends = 0;
+    g_rewrite_calls = 0;
+    HU_ASSERT_TRUE(
+        run_direct_voice("yeah sounds good", "<emotion value=\"excited\"/>Yeah!", "off"));
+    HU_ASSERT_EQ(g_rewrite_calls, 0);
+    HU_ASSERT_STR_EQ(hu_cartesia_test_last_transcript(), "yeah sounds good");
+}
+
 /* Final review #2: the rewrite is an LLM call; it runs only for a memo that
  * is actually going out, never for every text reply. */
 static void test_voice_reply_rewrite_skipped_when_no_memo_can_go(void) {
@@ -335,6 +410,11 @@ void run_daemon_voice_reply_tests(void) {
     HU_RUN_TEST(test_voice_reply_nothing_speakable_goes_as_text);
     HU_RUN_TEST(test_voice_reply_with_link_goes_as_text);
     HU_RUN_TEST(test_voice_reply_rewrite_skipped_when_no_memo_can_go);
+    HU_RUN_TEST(test_voice_reply_speaks_the_directed_line);
+    HU_RUN_TEST(test_voice_reply_invalid_direction_speaks_plain_text);
+    HU_RUN_TEST(test_voice_reply_direction_shadow_speaks_plain_text);
+    HU_RUN_TEST(test_voice_reply_directed_line_that_trips_moderation_is_not_spoken);
+    HU_RUN_TEST(test_voice_reply_direction_off_is_todays_path);
     HU_RUN_TEST(test_voice_reply_speaks_unshaped_reply);
     HU_RUN_TEST(test_voice_capture_unshaped_only_when_voice_possible);
     HU_RUN_TEST(test_voice_reply_live_rewrite_is_spoken);
