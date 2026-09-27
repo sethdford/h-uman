@@ -3,6 +3,7 @@
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include <stdbool.h>
 #include <stddef.h>
 
 struct hu_config;
@@ -22,6 +23,12 @@ typedef enum {
 } hu_update_mode_t;
 
 hu_update_mode_t hu_update_mode_from_config(const char *auto_update);
+
+/* Whether an update check may contact the network (api.github.com).
+ * OFF allows it only when the user explicitly asked (force, e.g. the
+ * dashboard's "Check now" button); CHECK and APPLY have already opted in.
+ * Pure: tests pin the truth table without any network. */
+bool hu_update_check_allowed(hu_update_mode_t mode, bool force);
 
 /* Semver comparison: returns <0 if a<b, 0 if a==b, >0 if a>b.
  * Parses "major.minor.patch" numerically. Leading 'v' is stripped. */

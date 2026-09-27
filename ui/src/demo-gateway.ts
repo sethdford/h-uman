@@ -1439,7 +1439,10 @@ export class DemoGatewayClient extends EventTarget {
       }
 
       case "update.check":
-        return { available: false, current_version: "0.42.0" };
+        // Mirrors cp_admin_update_check: auto_update defaults to "off", so an
+        // unforced check never reaches GitHub; { force: true } does.
+        if (params?.force === true) return { current: "0.42.0", latest: "0.43.0", available: true };
+        return { current: "0.42.0", available: false, disabled: true };
       case "update.run":
         return { status: "up_to_date", current_version: "0.4.0" };
       case "push.register":
