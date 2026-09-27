@@ -12,17 +12,20 @@ import {
   colorToKotlin,
   formatSwiftColor,
   hexToKotlin,
-  isColorLike,
+  nativeColorEntries,
+  terminalRGB,
 } from "./color-emit-lib.js";
 import { generateDynamicColorCSS } from "./dynamic-color-lib.js";
 import { generateQuietCSS } from "./quiet-lib.js";
 import {
   TOKEN_FILES,
   collectTokens,
+  collectTypes,
   partitionByPlatform,
   readTokenSources,
   resolveRefs,
   type TokenMap,
+  type TypeMap,
 } from "./token-lib.js";
 
 const REM_PX = 16;
@@ -73,26 +76,11 @@ function parseEmValue(val: string): number | null {
 }
 
 /** Convert hex #rrggbb to ANSI 256-color code (6x6x6 cube, indices 16-231) */
-function hexToAnsi256(hex: string): number {
-  const m = hex.match(/^#([0-9a-fA-F]{6})$/);
-  if (!m) return 7;
-  const r = parseInt(m[1].substring(0, 2), 16);
-  const g = parseInt(m[1].substring(2, 4), 16);
-  const b = parseInt(m[1].substring(4, 6), 16);
+function rgbToAnsi256([r, g, b]: [number, number, number]): number {
   const ri = Math.round((r / 255) * 5);
   const gi = Math.round((g / 255) * 5);
   const bi = Math.round((b / 255) * 5);
   return 16 + 36 * ri + 6 * gi + bi;
-}
-
-function hexToRGB(hex: string): [number, number, number] | null {
-  const m = hex.match(/^#([0-9a-fA-F]{6})$/);
-  if (!m) return null;
-  return [
-    parseInt(m[1].substring(0, 2), 16),
-    parseInt(m[1].substring(2, 4), 16),
-    parseInt(m[1].substring(4, 6), 16),
-  ];
 }
 
 /** k=stiffness, c=damping, m=mass. SwiftUI: response ≈ 2π/√(k/m), dampingFraction = c/(2√(km)) */
@@ -230,9 +218,11 @@ function main() {
     readTokenSources(TOKENS_DIR, TOKEN_FILES),
   );
   let tokens: TokenMap = {};
+  let types: TypeMap = {};
   let p3Colors: Record<string, string> = {};
   for (const { data } of shared) {
     tokens = { ...tokens, ...collectTokens(data) };
+    types = { ...types, ...collectTypes(data) };
     const ext = data.$extensions as Record<string, unknown> | undefined;
     if (ext?.["human.p3Colors"]) {
       p3Colors = {
@@ -268,7 +258,7 @@ function main() {
     );
   }
 
-  const swift = generateSwift(tokens);
+  const swift = generateSwift(tokens, types);
   writeOutput(
     outdir,
     path.join(
@@ -284,7 +274,7 @@ function main() {
     swift,
   );
 
-  const kotlin = generateKotlin(tokens);
+  const kotlin = generateKotlin(tokens, types);
   writeOutput(
     outdir,
     path.join(
@@ -939,7 +929,7 @@ function generateCSS(
   return lines.join("\n");
 }
 
-function generateSwift(tokens: TokenMap): string {
+function generateSwift(tokens: TokenMap, types: TypeMap): string {
   const lines: string[] = [
     "// Auto-generated from design-tokens/ — do not edit manually",
     "import SwiftUI",
@@ -950,16 +940,7 @@ function generateSwift(tokens: TokenMap): string {
   // Dark colors (exclude shadows - they're CSS values, not colors)
   lines.push("    // MARK: - Colors (Dark)");
   lines.push("    public enum Dark {");
-  const darkKeys = Object.keys(tokens).filter(
-    (k) =>
-      k.startsWith("dark.") &&
-      !k.includes("shadow") &&
-      typeof tokens[k] === "string" &&
-      isColorLike(tokens[k] as string),
-  );
-  for (const k of darkKeys.sort()) {
-    const v = tokens[k] as string;
-    if (!isColorLike(v)) continue;
+  for (const [k, v] of nativeColorEntries(tokens, types, "dark.")) {
     const name = toSwiftCase(k.replace("dark.", ""));
     const colorExpr = formatSwiftColor(v);
     lines.push(`        public static let ${name} = ${colorExpr}`);
@@ -970,16 +951,7 @@ function generateSwift(tokens: TokenMap): string {
   // Light colors (exclude shadows)
   lines.push("    // MARK: - Colors (Light)");
   lines.push("    public enum Light {");
-  const lightKeys = Object.keys(tokens).filter(
-    (k) =>
-      k.startsWith("light.") &&
-      !k.includes("shadow") &&
-      typeof tokens[k] === "string" &&
-      isColorLike(tokens[k] as string),
-  );
-  for (const k of lightKeys.sort()) {
-    const v = tokens[k] as string;
-    if (!isColorLike(v)) continue;
+  for (const [k, v] of nativeColorEntries(tokens, types, "light.")) {
     const name = toSwiftCase(k.replace("light.", ""));
     const colorExpr = formatSwiftColor(v);
     lines.push(`        public static let ${name} = ${colorExpr}`);
@@ -1179,15 +1151,9 @@ function generateSwift(tokens: TokenMap): string {
   }
   lines.push("");
 
-  // Chart / Data visualization (hex or rgb/rgba only)
+  // Chart / Data visualization ($type color; anything but hex/rgb/rgba throws)
   lines.push("    // MARK: - Chart / Data Visualization");
-  const chartKeysSwift = Object.keys(tokens)
-    .filter((k) => k.startsWith("chart."))
-    .sort();
-  for (const k of chartKeysSwift) {
-    const v = tokens[k];
-    if (typeof v !== "string") continue;
-    if (!isColorLike(v)) continue;
+  for (const [k, v] of nativeColorEntries(tokens, types, "chart.")) {
     const suffix = k.replace(/^chart\./, "");
     const name =
       "chart" +
@@ -1275,7 +1241,7 @@ function generateSwift(tokens: TokenMap): string {
   return lines.join("\n");
 }
 
-function generateKotlin(tokens: TokenMap): string {
+function generateKotlin(tokens: TokenMap, types: TypeMap): string {
   const lines: string[] = [
     "// Auto-generated from design-tokens/ — do not edit manually",
     "package ai.human.app.ui",
@@ -1290,15 +1256,7 @@ function generateKotlin(tokens: TokenMap): string {
   // Dark
   lines.push("    // Colors (Dark)");
   lines.push("    object Dark {");
-  const darkKeys = Object.keys(tokens).filter(
-    (k) =>
-      k.startsWith("dark.") &&
-      !k.includes("shadow") &&
-      typeof tokens[k] === "string" &&
-      isColorLike(tokens[k] as string),
-  );
-  for (const k of darkKeys.sort()) {
-    const v = tokens[k] as string;
+  for (const [k, v] of nativeColorEntries(tokens, types, "dark.")) {
     const name = toKotlinCase(k.replace("dark.", ""));
     const color = v.startsWith("#") ? hexToKotlin(v) : colorToKotlin(v);
     lines.push(`        val ${name} = Color(${color})`);
@@ -1309,15 +1267,7 @@ function generateKotlin(tokens: TokenMap): string {
   // Light
   lines.push("    // Colors (Light)");
   lines.push("    object Light {");
-  const lightKeys = Object.keys(tokens).filter(
-    (k) =>
-      k.startsWith("light.") &&
-      !k.includes("shadow") &&
-      typeof tokens[k] === "string" &&
-      isColorLike(tokens[k] as string),
-  );
-  for (const k of lightKeys.sort()) {
-    const v = tokens[k] as string;
+  for (const [k, v] of nativeColorEntries(tokens, types, "light.")) {
     const name = toKotlinCase(k.replace("light.", ""));
     const color = v.startsWith("#") ? hexToKotlin(v) : colorToKotlin(v);
     lines.push(`        val ${name} = Color(${color})`);
@@ -1574,15 +1524,9 @@ function generateKotlin(tokens: TokenMap): string {
   }
   lines.push("");
 
-  // Chart / Data visualization (hex or rgb/rgba only)
+  // Chart / Data visualization ($type color; anything but hex/rgb/rgba throws)
   lines.push("    // Chart / Data Visualization");
-  const chartKeysKotlin = Object.keys(tokens)
-    .filter((k) => k.startsWith("chart."))
-    .sort();
-  for (const k of chartKeysKotlin) {
-    const v = tokens[k];
-    if (typeof v !== "string") continue;
-    if (!isColorLike(v)) continue;
+  for (const [k, v] of nativeColorEntries(tokens, types, "chart.")) {
     const suffix = k.replace(/^chart\./, "");
     const name =
       "chart" +
@@ -1699,16 +1643,18 @@ function generateCHeader(tokens: TokenMap): string {
     section: string,
   ): string {
     const lines: string[] = [];
+    // A missing or unparseable color throws: the old fallback emitted
+    // ANSI color 7 (gray) for it, so the header built green and wrong.
     const rgbOf = (key: string) => {
       const val = tokens[key];
-      return typeof val === "string" ? { val, rgb: hexToRGB(val) } : null;
+      return { rgb: terminalRGB(key, val) };
     };
     lines.push(`/* ${section} — ANSI 256-color foreground */`);
     lines.push(
       ...alignMacros(
         entries.map(([key, name]) => {
           const c = rgbOf(key);
-          const code = c && c.rgb ? hexToAnsi256(c.val) : 7;
+          const code = rgbToAnsi256(c.rgb);
           return [`${prefix}${name}`, `"\\033[38;5;${code}m"`];
         }),
       ),
@@ -1719,10 +1665,7 @@ function generateCHeader(tokens: TokenMap): string {
       ...alignMacros(
         entries.map(([key, name]) => {
           const c = rgbOf(key);
-          const v =
-            c && c.rgb
-              ? `"\\033[38;2;${c.rgb[0]};${c.rgb[1]};${c.rgb[2]}m"`
-              : `"\\033[38;5;7m"`;
+          const v = `"\\033[38;2;${c.rgb[0]};${c.rgb[1]};${c.rgb[2]}m"`;
           return [`${prefix}${name}_TC`, v];
         }),
       ),
@@ -1733,10 +1676,7 @@ function generateCHeader(tokens: TokenMap): string {
       ...alignMacros(
         entries.map(([key, name]) => {
           const c = rgbOf(key);
-          const v =
-            c && c.rgb
-              ? `"\\033[48;2;${c.rgb[0]};${c.rgb[1]};${c.rgb[2]}m"`
-              : `"\\033[48;5;7m"`;
+          const v = `"\\033[48;2;${c.rgb[0]};${c.rgb[1]};${c.rgb[2]}m"`;
           return [`${prefix}BG_${name}_TC`, v];
         }),
       ),
@@ -1747,7 +1687,7 @@ function generateCHeader(tokens: TokenMap): string {
       ...alignMacros(
         entries.map(([key, name]) => {
           const c = rgbOf(key);
-          const code = c && c.rgb ? hexToAnsi256(c.val) : 7;
+          const code = rgbToAnsi256(c.rgb);
           return [`${prefix}BG_${name}`, `"\\033[48;5;${code}m"`];
         }),
       ),
