@@ -28,7 +28,6 @@ export class ScChatSessionsPanel extends LitElement {
   @property({ type: Boolean, reflect: true }) open = false;
 
   @state() private _searchQuery = "";
-  @state() private _focusedIndex = -1;
   @state() private _activeProjectFilter: string | null = null;
   @state() private _creatingProject = false;
   @state() private _newProjectName = "";
@@ -243,21 +242,39 @@ export class ScChatSessionsPanel extends LitElement {
         border-left-color: var(--hu-accent-subtle);
         background: var(--hu-surface-container-high);
       }
-      &.focused {
-        background: var(--hu-surface-container-high);
-      }
+    }
+
+    /* The row's primary action. Pointer clicks anywhere on the row bubble to
+       the row handler; this button is what keyboard and AT users reach, and it
+       keeps Delete a sibling rather than a descendant of an interactive row. */
+    .session-open {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: var(--hu-space-2xs);
+      padding: 0;
+      background: transparent;
+      border: none;
+      color: inherit;
+      font: inherit;
+      text-align: start;
+      cursor: pointer;
       &:focus-visible {
         outline: 2px solid var(--hu-accent);
         outline-offset: 2px;
       }
     }
 
-    .session-content {
-      flex: 1;
-      min-width: 0;
-      display: flex;
-      flex-direction: column;
-      gap: var(--hu-space-2xs);
+    /* Where :has() is supported, ring the whole row instead of the button. */
+    @supports selector(:has(*)) {
+      .session-item:has(.session-open:focus-visible) {
+        outline: 2px solid var(--hu-accent);
+        outline-offset: 2px;
+      }
+      .session-open:focus-visible {
+        outline: none;
+      }
     }
 
     .session-title {
@@ -292,7 +309,8 @@ export class ScChatSessionsPanel extends LitElement {
         background var(--hu-duration-fast) var(--hu-ease-out);
     }
 
-    .session-item:hover .delete-btn {
+    .session-item:hover .delete-btn,
+    .session-item:focus-within .delete-btn {
       opacity: 1;
     }
 
@@ -490,6 +508,15 @@ export class ScChatSessionsPanel extends LitElement {
     );
   }
 
+  private _onRowClick(e: Event, id: string): void {
+    // While the title is being renamed, clicks inside it, and the click Chromium
+    // synthesizes on the enclosing .session-open button when Space is typed, must
+    // not select the session.
+    const title = (e.currentTarget as HTMLElement).querySelector<HTMLElement>(".session-title");
+    if (title?.isContentEditable) return;
+    this._onSelect(id);
+  }
+
   private _onDelete(e: Event, id: string): void {
     e.stopPropagation();
     this.dispatchEvent(
@@ -530,21 +557,26 @@ export class ScChatSessionsPanel extends LitElement {
     return groups;
   }
 
+  /** Arrow keys move focus between sessions; Enter/Space are the buttons' own. */
   private _onListKeydown(e: KeyboardEvent): void {
-    const groups = this._groupSessions(this._filteredSessions);
-    const flatSessions = groups.flatMap((g) => g.sessions);
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      this._focusedIndex = Math.min(this._focusedIndex + 1, flatSessions.length - 1);
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      this._focusedIndex = Math.max(this._focusedIndex - 1, 0);
-    } else if (e.key === "Enter" && this._focusedIndex >= 0 && flatSessions[this._focusedIndex]) {
-      e.preventDefault();
-      this._onSelect(flatSessions[this._focusedIndex].id);
-    } else if (e.key === "Escape") {
-      this._focusedIndex = -1;
-    }
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    const buttons = Array.from(
+      this.shadowRoot?.querySelectorAll<HTMLButtonElement>(".session-open") ?? [],
+    );
+    if (buttons.length === 0) return;
+    e.preventDefault();
+    // Resolve the row from any control inside it (e.g. Delete), not just the open button.
+    const row = (this.shadowRoot?.activeElement as HTMLElement | null)?.closest(".session-item");
+    const current = row
+      ? buttons.indexOf(row.querySelector<HTMLButtonElement>(".session-open") as HTMLButtonElement)
+      : -1;
+    const next =
+      current < 0
+        ? 0
+        : e.key === "ArrowDown"
+          ? Math.min(current + 1, buttons.length - 1)
+          : Math.max(current - 1, 0);
+    buttons[next].focus();
   }
 
   private _startRename(e: Event, _s: ChatSession): void {
@@ -571,19 +603,20 @@ export class ScChatSessionsPanel extends LitElement {
   }
 
   private _renameKeydown(e: KeyboardEvent, _id: string): void {
+    const el = e.currentTarget as HTMLElement;
+    if (el.isContentEditable) e.stopPropagation();
     if (e.key === "Enter") {
       e.preventDefault();
-      (e.target as HTMLElement).blur();
+      el.blur();
     }
     if (e.key === "Escape") {
-      (e.target as HTMLElement).contentEditable = "false";
+      el.contentEditable = "false";
       this.requestUpdate();
     }
   }
 
   private _toggleProjectFilter(projectId: string): void {
     this._activeProjectFilter = this._activeProjectFilter === projectId ? null : projectId;
-    this._focusedIndex = -1;
   }
 
   private _startCreateProject(): void {
@@ -636,12 +669,6 @@ export class ScChatSessionsPanel extends LitElement {
 
   override render() {
     const filteredGroups = this._groupSessions(this._filteredSessions);
-    let startIndex = 0;
-    const groupsWithIndices = filteredGroups.map((g) => {
-      const result = { ...g, startIndex };
-      startIndex += g.sessions.length;
-      return result;
-    });
 
     return html`
       <div class="panel" role="navigation" aria-label="Chat sessions">
@@ -744,15 +771,13 @@ export class ScChatSessionsPanel extends LitElement {
             .value=${this._searchQuery}
             @input=${(e: Event) => {
               this._searchQuery = (e.target as HTMLInputElement).value;
-              this._focusedIndex = -1;
             }}
             aria-label="Search sessions"
           />
         </div>
         <div
           class="session-list"
-          role=${filteredGroups.length > 0 ? "listbox" : "region"}
-          tabindex="0"
+          role="region"
           aria-label="Session list"
           @keydown=${this._onListKeydown}
         >
@@ -773,30 +798,21 @@ export class ScChatSessionsPanel extends LitElement {
                       .icon=${icons["chat-circle"] ?? icons["message-square"]}
                     ></hu-empty-state>
                   `
-              : groupsWithIndices.map((group) => {
+              : filteredGroups.map((group) => {
                   return html`
                     <div class="session-group" role="group" aria-label=${group.label}>
                       <span class="group-label">${group.label}</span>
-                      ${group.sessions.map((s, si) => {
-                        const flatIndex = group.startIndex + si;
-                        const isFocused = flatIndex === this._focusedIndex;
+                      ${group.sessions.map((s) => {
                         return html`
                           <div
-                            class="session-item ${s.active ? "active" : ""} ${
-                              isFocused ? "focused" : ""
-                            }"
-                            role="option"
-                            tabindex="-1"
-                            aria-selected=${isFocused}
-                            @click=${() => this._onSelect(s.id)}
-                            @keydown=${(e: KeyboardEvent) => {
-                              if (e.key === "Enter" || e.key === " ") {
-                                e.preventDefault();
-                                this._onSelect(s.id);
-                              }
-                            }}
+                            class="session-item ${s.active ? "active" : ""}"
+                            @click=${(e: Event) => this._onRowClick(e, s.id)}
                           >
-                            <div class="session-content">
+                            <button
+                              type="button"
+                              class="session-open"
+                              aria-current=${s.active ? "true" : nothing}
+                            >
                               <span
                                 class="session-title"
                                 @dblclick=${(e: Event) => this._startRename(e, s)}
@@ -805,7 +821,7 @@ export class ScChatSessionsPanel extends LitElement {
                                 >${this._renderProjectDot(s)}${s.title || "Untitled"}</span
                               >
                               <span class="session-ts">${formatRelative(s.ts)}</span>
-                            </div>
+                            </button>
                             <button
                               type="button"
                               class="delete-btn"
