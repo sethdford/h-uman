@@ -88,22 +88,6 @@ hu_error_t hu_narrative_self_add_growth_arc(hu_allocator_t *alloc, hu_narrative_
     return HU_OK;
 }
 
-hu_error_t hu_narrative_self_add_origin(hu_allocator_t *alloc, hu_narrative_self_t *self,
-                                        const char *story, size_t len) {
-    if (!alloc || !self)
-        return HU_ERR_INVALID_ARGUMENT;
-    if (self->origin_count >= HU_NARRATIVE_MAX_ORIGIN_STORIES)
-        return HU_ERR_LIMIT_REACHED;
-
-    const char *src = story ? story : "";
-    char *copy = hu_strndup(alloc, src, len);
-    if (!copy)
-        return HU_ERR_OUT_OF_MEMORY;
-
-    self->origin_stories[self->origin_count++] = copy;
-    return HU_OK;
-}
-
 hu_error_t hu_narrative_self_set_preoccupation(hu_allocator_t *alloc, hu_narrative_self_t *self,
                                                const char *text, size_t len) {
     if (!alloc || !self)

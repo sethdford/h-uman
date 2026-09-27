@@ -55,7 +55,5 @@ void hu_relationship_new_session_quality(hu_relationship_state_t *state,
 void hu_relationship_update(hu_relationship_state_t *state, uint32_t turn_count);
 hu_error_t hu_relationship_build_prompt(hu_allocator_t *alloc, const hu_relationship_state_t *state,
                                         char **out, size_t *out_len);
-hu_error_t hu_relationship_data_init(hu_allocator_t *alloc);
-void hu_relationship_data_cleanup(hu_allocator_t *alloc);
 
 #endif

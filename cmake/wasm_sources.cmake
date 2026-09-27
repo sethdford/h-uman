@@ -21,7 +21,6 @@ set(HU_WASM_CORE_SOURCES
     src/security/security.c
     src/security/policy.c
     src/memory/engines/none.c
-    src/tunnel/none.c
     src/runtime/wasm_rt.c
     src/agent/agent.c
     src/agent/agent_plan.c

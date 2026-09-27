@@ -105,12 +105,6 @@ typedef struct hu_feed_item_stored {
 hu_error_t hu_feed_processor_store_item(hu_feed_processor_t *proc,
                                         const hu_feed_item_stored_t *item);
 
-/* SOTA-2026 init-09: canonical provenance stamp for a stored feed item.
- * Returns HU_TRUST_THIRD_PARTY plus the source-qualified channel string.
- * Use this whenever a feed item is promoted into `memories` or the
- * personal model. */
-hu_provenance_t hu_feed_processor_item_provenance(const hu_feed_item_stored_t *item,
-                                                  int64_t now_ts);
 hu_error_t hu_feed_processor_get_recent(hu_allocator_t *alloc, sqlite3 *db, const char *source,
                                         size_t src_len, size_t limit, hu_feed_item_stored_t **out,
                                         size_t *out_count);
@@ -138,10 +132,6 @@ hu_error_t hu_feed_correlate_recent(hu_allocator_t *alloc, sqlite3 *db, int64_t 
 
 struct hu_embedder;
 struct hu_vector_store;
-hu_error_t hu_feed_semantic_search(hu_allocator_t *alloc, sqlite3 *db, struct hu_embedder *embedder,
-                                   struct hu_vector_store *store, const char *query,
-                                   size_t query_len, size_t limit, hu_feed_item_stored_t **out,
-                                   size_t *out_count);
 
 #endif /* HU_ENABLE_SQLITE */
 

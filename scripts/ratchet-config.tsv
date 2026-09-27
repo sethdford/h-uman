@@ -41,6 +41,15 @@
 # "= N LOC (ceiling B)"). The report reads the integer immediately preceding
 # "(ceiling" on the matched line.
 #
+# A script may carry MORE THAN ONE row when it emits more than one counter
+# (dead-strip-objects / dead-strip-symbols are both check-dead-strip-ratchet.sh,
+# selected by PATTERN). The report then runs that script once per row, so give a
+# multi-counter gate a cheap measurement or accept the repeat cost.
+#
+# A gate that CANNOT measure here — wrong platform, no build dir — prints
+# `RATCHET_SKIP: <reason>` and exits 0. The report shows it as skipped instead
+# of INCONCLUSIVE: not measuring is not the same as a broken measurement.
+#
 # name	script	var	floor	rate	rule	pattern
 clone	scripts/check-clone-ratchet.sh	CLONE_BASELINE	none	auto	.claude/rules/clone-ratchet.md	^Clone groups found:
 file-size	scripts/check-file-size-ceiling.sh	MAX_BASELINE	800	auto	.claude/rules/file-size-ceiling.md	^largest src/
@@ -48,3 +57,5 @@ sqlite-includers	scripts/check-sqlite-includer-ratchet.sh	BASELINE	0	auto	.claud
 root-files	scripts/check-no-new-root-files.sh	ROOT_BASELINE	0	auto	.claude/rules/no-new-root-files.md	^loose src/
 agent-factory	scripts/check-agent-core-boundary.sh	FACTORY_BASELINE	0	auto	.claude/rules/agent-core-boundary.md	provider-factory includes:
 edge-cross-channel	scripts/check-edge-context-isolation.sh	BASELINE	6	off	.claude/rules/edge-context-isolation.md	cross-channel
+dead-strip-objects	scripts/check-dead-strip-ratchet.sh	NEVER_LOADED_BASELINE	0	auto	.claude/rules/dead-strip-ratchet.md	^A = never-loaded
+dead-strip-symbols	scripts/check-dead-strip-ratchet.sh	DEAD_UNREF_BASELINE	20	auto	.claude/rules/dead-strip-ratchet.md	^B = unreferenced

@@ -33,9 +33,4 @@ void hu_embedding_provider_free(hu_allocator_t *alloc, hu_embedding_provider_res
 /* Noop provider: returns empty vector, keyword-only fallback */
 hu_embedding_provider_t hu_embedding_provider_noop_create(hu_allocator_t *alloc);
 
-/* Factory: create provider by name. Returns noop for unknown. */
-hu_embedding_provider_t hu_embedding_provider_create(hu_allocator_t *alloc,
-                                                     const char *provider_name, const char *api_key,
-                                                     const char *model, size_t dims);
-
 #endif

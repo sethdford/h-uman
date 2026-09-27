@@ -21,8 +21,6 @@ hu_error_t hu_context_format_messages(hu_allocator_t *alloc, const hu_owned_mess
                                       const bool *include_mask, hu_chat_message_t **out_messages,
                                       size_t *out_count);
 
-uint32_t hu_context_estimate_tokens(const hu_chat_message_t *messages, size_t messages_count);
-
 /* Estimate the serialized byte weight of one chat message INCLUDING multimodal
  * content parts (image/audio base64). Unlike a content_len-only sum, this
  * accounts for the multi-MB base64 payloads that dominate a multimodal request

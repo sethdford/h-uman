@@ -2075,46 +2075,6 @@ void hu_graph_relations_free(hu_allocator_t *alloc, hu_graph_relation_t *relatio
 }
 
 #ifdef HU_ENABLE_SQLITE
-hu_error_t hu_graph_set_relation_confidence(hu_graph_t *g, int64_t relation_id, float confidence,
-                                            int64_t last_seen_now_ms) {
-    if (!g || !g->db)
-        return HU_ERR_INVALID_ARGUMENT;
-    if (relation_id <= 0)
-        return HU_OK;
-    if (confidence < 0.0f)
-        confidence = 0.0f;
-    if (confidence > 1.0f)
-        confidence = 1.0f;
-    sqlite3_stmt *stmt = NULL;
-    /* W8 P2A — keep the legacy `confidence` column in sync with the
-     * new `confidence_mean`. Variance is intentionally NOT touched
-     * here: callers who do a Bayesian update should use
-     * hu_graph_set_relation_belief() (added below) to write the full
-     * posterior. The scalar setter assumes "deterministic update",
-     * which is variance = 0. */
-    const char *sql = "UPDATE relations SET confidence = ?, confidence_mean = ?, "
-                      "confidence_variance = 0.0, last_seen = "
-                      "CASE WHEN ? > 0 THEN ? ELSE last_seen END WHERE id = ?";
-    int rc = sqlite3_prepare_v2(g->db, sql, -1, &stmt, NULL);
-    if (rc != SQLITE_OK)
-        return HU_ERR_IO;
-    sqlite3_bind_double(stmt, 1, (double)confidence);
-    sqlite3_bind_double(stmt, 2, (double)confidence);
-    sqlite3_bind_int64(stmt, 3, last_seen_now_ms);
-    sqlite3_bind_int64(stmt, 4, last_seen_now_ms);
-    sqlite3_bind_int64(stmt, 5, relation_id);
-    rc = sqlite3_step(stmt);
-    sqlite3_finalize(stmt);
-    if (rc != SQLITE_DONE)
-        return HU_ERR_IO;
-    /* P2 #7 — confidence change is a write; invalidate any cached
-     * world-model that depends on this relation. We don't have the
-     * contact_id at this granularity (it's an indexed by relation_id),
-     * so wildcard-invalidate. The cache is small (HU_WM_CACHE_SLOTS),
-     * the cost of dropping all slots is bounded. */
-    hu_world_model_invalidate(NULL, 0);
-    return HU_OK;
-}
 
 hu_error_t hu_graph_set_relation_belief(hu_graph_t *g, int64_t relation_id, float mean,
                                         float variance, int64_t last_seen_now_ms) {
@@ -2175,14 +2135,6 @@ hu_error_t hu_graph_get_relation_belief(hu_graph_t *g, int64_t relation_id, floa
     return rc == SQLITE_DONE ? HU_ERR_NOT_FOUND : HU_ERR_IO;
 }
 #else  /* !HU_ENABLE_SQLITE: graph belief setters are no-ops without SQLite */
-hu_error_t hu_graph_set_relation_confidence(hu_graph_t *g, int64_t relation_id, float confidence,
-                                            int64_t last_seen_now_ms) {
-    (void)g;
-    (void)relation_id;
-    (void)confidence;
-    (void)last_seen_now_ms;
-    return HU_ERR_NOT_SUPPORTED;
-}
 hu_error_t hu_graph_set_relation_belief(hu_graph_t *g, int64_t relation_id, float mean,
                                         float variance, int64_t last_seen_now_ms) {
     (void)g;
@@ -2379,33 +2331,6 @@ hu_error_t hu_graph_query_temporal(hu_graph_t *g, hu_allocator_t *alloc, const c
     *out = buf;
     *out_len = pos;
     return HU_OK;
-}
-
-hu_error_t hu_graph_add_causal_link(hu_graph_t *g, const char *contact_id, size_t contact_id_len,
-                                    int64_t action_entity_id, int64_t outcome_entity_id,
-                                    const char *context, size_t context_len, float confidence) {
-    if (!g || !g->db)
-        return HU_ERR_INVALID_ARGUMENT;
-    const char *cid = contact_id ? contact_id : "";
-    int cid_len = contact_id ? (int)contact_id_len : 0;
-    const char *sql =
-        "INSERT OR REPLACE INTO causal_links(contact_id, action_entity_id, outcome_entity_id,"
-        " context, confidence, created_at) VALUES(?, ?, ?, ?, ?, ?)";
-    sqlite3_stmt *stmt = NULL;
-    if (sqlite3_prepare_v2(g->db, sql, -1, &stmt, NULL) != SQLITE_OK)
-        return HU_ERR_IO;
-    sqlite3_bind_text(stmt, 1, cid, cid_len, SQLITE_STATIC);
-    sqlite3_bind_int64(stmt, 2, action_entity_id);
-    sqlite3_bind_int64(stmt, 3, outcome_entity_id);
-    if (context && context_len > 0)
-        sqlite3_bind_text(stmt, 4, context, (int)context_len, NULL);
-    else
-        sqlite3_bind_null(stmt, 4);
-    sqlite3_bind_double(stmt, 5, (double)confidence);
-    sqlite3_bind_int64(stmt, 6, (int64_t)time(NULL));
-    int rc = sqlite3_step(stmt);
-    sqlite3_finalize(stmt);
-    return rc == SQLITE_DONE ? HU_OK : HU_ERR_IO;
 }
 
 hu_error_t hu_graph_query_causal(hu_graph_t *g, hu_allocator_t *alloc, const char *contact_id,
@@ -2780,16 +2705,6 @@ hu_error_t hu_graph_record_recall(hu_graph_t *g, const char *contact_id, size_t 
 #endif /* HU_ENABLE_SQLITE */
 
 #include <math.h>
-
-double hu_graph_retention_score(int64_t last_recalled_ts, int32_t recall_count, int64_t now_ts) {
-    if (recall_count <= 0 || last_recalled_ts <= 0)
-        return 0.0;
-    double elapsed_days = (double)(now_ts - last_recalled_ts) / 86400.0;
-    if (elapsed_days < 0.0)
-        elapsed_days = 0.0;
-    double stability = 1.0 + (double)recall_count * 0.5;
-    return exp(-elapsed_days / stability);
-}
 
 /* ── Phase 3d: Conflict-aware reconsolidation ───────────────────────── */
 

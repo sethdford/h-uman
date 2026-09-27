@@ -587,6 +587,11 @@ static hu_doctor_check_result_t run_blind_ab_gate_check(hu_doctor_check_t *self,
     return hu_doctor_check_blind_ab_gate.run(self, &gctx);
 }
 
+static hu_doctor_check_result_t run_contact_optout_check(hu_doctor_check_t *self, void *ctx) {
+    (void)ctx;
+    return hu_doctor_check_contact_optout.run(self, NULL);
+}
+
 hu_error_t hu_doctor_registry_register_defaults(hu_doctor_registry_t *r) {
     if (!r)
         return HU_ERR_INVALID_ARGUMENT;
@@ -637,6 +642,8 @@ hu_error_t hu_doctor_registry_register_defaults(hu_doctor_registry_t *r) {
         {"persona_integrity",
          "Live persona has not lost authored keys (contacts/proactive/...) vs its backups",
          run_persona_integrity_check, NULL, NULL},
+        {"contact_optout", "Contacts who asked us to stop texting first (O5 contestability)",
+         run_contact_optout_check, NULL, NULL},
     };
 
     size_t num_checks = sizeof(checks) / sizeof(checks[0]);

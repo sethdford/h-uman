@@ -48,24 +48,43 @@ while [ $# -gt 0 ]; do
     shift
 done
 
+# --- tracked-file counters --------------------------------------------------
+# Every metric below reads git's INDEX, not the filesystem. src/data/data_*.c
+# are generated embedded-data blobs, gitignored (.gitignore:152) but present in
+# any checkout that has been built: counting them made the same commit measure
+# 2105 files / 446,620 LOC built vs 2093 / 433,125 clean. The stamped numbers
+# therefore depended on the machine, every push re-dirtied the docs, and
+# "~445K lines of C" was counting embedded training data as source.
+#
+# grep exits 1 on no match and these scripts run under `set -e` + pipefail, so
+# both helpers swallow that into a literal 0 / empty file list.
+count_tracked() {  # count_tracked <ere> <pathspec...>
+    _re="$1"; shift
+    git ls-files -- "$@" | { grep -cE "$_re" || true; }
+}
+loc_tracked() {  # loc_tracked <ere> <pathspec...>  — total lines, xargs-batch safe
+    _re="$1"; shift
+    git ls-files -- "$@" | { grep -E "$_re" || true; } | xargs cat 2>/dev/null | wc -l | tr -d ' '
+}
+
 # Count source + header files
-SRC_COUNT=$(find src include \( -name '*.c' -o -name '*.h' \) | wc -l | tr -d ' ')
+SRC_COUNT=$(count_tracked '\.(c|h)$' src include)
 
 # Count lines of C (round to nearest K)
 # MUST match scripts/repo-metrics.sh SRC_LOC (src/ only, no include/) — that is
 # what the metrics-drift gate checks "[0-9]+K lines of C" claims against.
-C_LINES_RAW=$(find src \( -name '*.c' -o -name '*.h' \) -exec cat {} + | wc -l | tr -d ' ')
+C_LINES_RAW=$(loc_tracked '\.(c|h)$' src)
 C_LINES_K=$(( (C_LINES_RAW + 500) / 1000 ))
 
 # Count test files
-TEST_FILES=$(find tests -name 'test_*.c' | wc -l | tr -d ' ')
+TEST_FILES=$(count_tracked '(^|/)test_[^/]*\.c$' tests)
 
 # Count test lines (round to nearest K)
-TEST_LINES_RAW=$(find tests \( -name '*.c' -o -name '*.h' \) -exec cat {} + | wc -l | tr -d ' ')
+TEST_LINES_RAW=$(loc_tracked '\.(c|h)$' tests)
 TEST_LINES_K=$(( (TEST_LINES_RAW + 500) / 1000 ))
 
 # Channel .c file count — for the "N channel implementations" repo-map line only.
-CHANNEL_COUNT=$(find src/channels -maxdepth 1 -name '*.c' ! -name 'factory.c' ! -name 'meta_common.c' | wc -l | tr -d ' ')
+CHANNEL_COUNT=$(git ls-files -- src/channels | { grep -E '^src/channels/[^/]+\.c$' || true; } | { grep -vcE '/(factory|meta_common)\.c$' || true; })
 # Canonical channel count = HU_CHANNEL_* enum entries in channel_catalog.h.
 # MUST match scripts/repo-metrics.sh — the source of truth the docs metrics-drift
 # gate (scripts/check-metrics-drift.sh) checks. Use this for every "N channels"
@@ -74,7 +93,7 @@ CHANNEL_COUNT=$(find src/channels -maxdepth 1 -name '*.c' ! -name 'factory.c' ! 
 CHANNEL_ENUM=$(grep -cE '^[[:space:]]+HU_CHANNEL_[A-Z_]+,' include/human/channel_catalog.h 2>/dev/null | tr -d ' ')
 
 # Count tools (exclude factory)
-TOOL_COUNT=$(find src/tools -maxdepth 1 -name '*.c' ! -name 'factory.c' | wc -l | tr -d ' ')
+TOOL_COUNT=$(git ls-files -- src/tools | { grep -E '^src/tools/[^/]+\.c$' || true; } | { grep -vcE '/factory\.c$' || true; })
 
 # Get test count: the caller's measurement if given, else re-run a binary.
 # build-check/ comes first — it is what the pre-push hook built from THIS tree

@@ -31,6 +31,9 @@ static const char *const hu_config_top_keys[] = {
     "channels",
     "agent",
     "heartbeat",
+    /* 2026-09-21: parsed by config_parse.c parse_follow_up_watcher. Without
+     * this entry the validator warns "unknown key" for a block it does read. */
+    "follow_up_watcher",
     "reliability",
     "router",
     "ensemble",

@@ -42,9 +42,9 @@ extern "C" {
 struct hu_memory_facade;
 
 typedef enum hu_training_signal_kind {
-    HU_TRAIN_DPO_PAIR = 0,        /* (preferred, dispreferred) — from W4 flags */
-    HU_TRAIN_PERSONA_DELTA = 1,   /* style adjustment — from W5 applied deltas */
-    HU_TRAIN_CASE_OUTCOME = 2,    /* (case_id, reward) — from W3 outcomes */
+    HU_TRAIN_DPO_PAIR = 0,      /* (preferred, dispreferred) — from W4 flags */
+    HU_TRAIN_PERSONA_DELTA = 1, /* style adjustment — from W5 applied deltas */
+    HU_TRAIN_CASE_OUTCOME = 2,  /* (case_id, reward) — from W3 outcomes */
     HU_TRAIN_KIND_MAX
 } hu_training_signal_kind_t;
 
@@ -52,7 +52,7 @@ typedef struct hu_dpo_pair {
     char prompt[1024];
     char preferred[1024];
     char dispreferred[1024];
-    float weight;                 /* margin/confidence; default 1.0 */
+    float weight; /* margin/confidence; default 1.0 */
 } hu_dpo_pair_t;
 
 typedef struct hu_training_signal {
@@ -64,47 +64,47 @@ typedef struct hu_training_signal {
         } persona;
         struct {
             int64_t case_id;
-            float reward;         /* 0.0–1.0; >0.5 is "good case to imitate" */
+            float reward; /* 0.0–1.0; >0.5 is "good case to imitate" */
         } case_outcome;
     } as;
-    int64_t observed_at;          /* unix ms, for watermark/dedup by callers */
+    int64_t observed_at; /* unix ms, for watermark/dedup by callers */
 } hu_training_signal_t;
 
 typedef struct hu_learner_config {
     char base_model_path[256];
     char adapter_output_path[256];
-    char model_version[64];       /* propagates into adapter file + report */
-    int rank;                     /* LoRA rank, default 8 */
-    int max_steps;                /* default 200 */
-    float learning_rate;          /* default 1e-4 */
-    int batch_size;               /* default 4 */
-    bool dp_enabled;              /* W15: DP-SGD — all backends (mlx, ggml, cpu) MUST
-                                   * honor this flag. When true, gradient updates are
-                                   * clipped per-sample and Gaussian noise is added
-                                   * before the optimizer step. The privacy accountant
-                                   * tracks cumulative (epsilon, delta) and aborts
-                                   * training when the budget is exhausted. */
-    float dp_epsilon;             /* W15: privacy budget; > 0 required if dp_enabled.
-                                   * Recommended range: 1.0–10.0. Lower values give
-                                   * stronger privacy but slower convergence. The CPU
-                                   * backend enforces this; MLX/ggml backends MUST
-                                   * also implement DP-SGD clipping + noise when this
-                                   * flag is set. */
-    float dp_clip_norm;            /* W15: per-sample gradient clipping max norm.
-                                    * 0 = use default (1.0). Only applies when
-                                    * dp_enabled is true. */
-    int64_t budget_ms;            /* total wall budget; 0 = short-circuit */
-    uint64_t seed;                /* seeds the backend PRNG; 0 → default */
+    char model_version[64]; /* propagates into adapter file + report */
+    int rank;               /* LoRA rank, default 8 */
+    int max_steps;          /* default 200 */
+    float learning_rate;    /* default 1e-4 */
+    int batch_size;         /* default 4 */
+    bool dp_enabled;        /* W15: DP-SGD — all backends (mlx, ggml, cpu) MUST
+                             * honor this flag. When true, gradient updates are
+                             * clipped per-sample and Gaussian noise is added
+                             * before the optimizer step. The privacy accountant
+                             * tracks cumulative (epsilon, delta) and aborts
+                             * training when the budget is exhausted. */
+    float dp_epsilon;       /* W15: privacy budget; > 0 required if dp_enabled.
+                             * Recommended range: 1.0–10.0. Lower values give
+                             * stronger privacy but slower convergence. The CPU
+                             * backend enforces this; MLX/ggml backends MUST
+                             * also implement DP-SGD clipping + noise when this
+                             * flag is set. */
+    float dp_clip_norm;     /* W15: per-sample gradient clipping max norm.
+                             * 0 = use default (1.0). Only applies when
+                             * dp_enabled is true. */
+    int64_t budget_ms;      /* total wall budget; 0 = short-circuit */
+    uint64_t seed;          /* seeds the backend PRNG; 0 → default */
 
     /* Frontier LoRA fields (Bridge B — MLX backend). When data_dir is set,
      * the MLX backend uses it directly as `--data <dir>` and ignores the
      * signal array. This lets callers point at pre-existing JSONL data
      * (e.g. ~/.human/training-data/finetune/) instead of synthesizing
      * signals. */
-    char data_dir[256];           /* pre-existing JSONL data directory */
-    int num_layers;               /* LoRA layers to fine-tune; 0 = backend default */
-    int max_seq_length;           /* max sequence length; 0 = backend default */
-    int save_every;               /* checkpoint save frequency; 0 = don't pass */
+    char data_dir[256]; /* pre-existing JSONL data directory */
+    int num_layers;     /* LoRA layers to fine-tune; 0 = backend default */
+    int max_seq_length; /* max sequence length; 0 = backend default */
+    int save_every;     /* checkpoint save frequency; 0 = don't pass */
 } hu_learner_config_t;
 
 hu_learner_config_t hu_learner_default_config(void);
@@ -120,14 +120,13 @@ hu_learner_config_t hu_learner_default_config(void);
  * ──────────────────────────────────────────────────────────────────────── */
 
 typedef struct hu_dp_accountant {
-    double epsilon_spent;         /* cumulative epsilon consumed */
-    double delta;                 /* fixed delta (per-run, not cumulative) */
-    int queries_count;            /* number of training rounds recorded */
+    double epsilon_spent; /* cumulative epsilon consumed */
+    double delta;         /* fixed delta (per-run, not cumulative) */
+    int queries_count;    /* number of training rounds recorded */
 } hu_dp_accountant_t;
 
 void hu_dp_accountant_init(hu_dp_accountant_t *a, double delta);
 void hu_dp_accountant_record_query(hu_dp_accountant_t *a, double epsilon_step);
-double hu_dp_accountant_total_epsilon(const hu_dp_accountant_t *a);
 
 typedef struct hu_learner_report {
     size_t signals_consumed;
@@ -140,7 +139,7 @@ typedef struct hu_learner_report {
 } hu_learner_report_t;
 
 typedef struct hu_learner_vtable {
-    const char *name;             /* "mlx", "ggml", "cpu" */
+    const char *name; /* "mlx", "ggml", "cpu" */
     bool (*available)(void);
     hu_error_t (*train)(void *ctx, const hu_learner_config_t *cfg,
                         const hu_training_signal_t *signals, size_t signals_count,
@@ -215,15 +214,7 @@ hu_error_t hu_learner_signals_from_persona_deltas(struct hu_memory_facade *m, hu
                                                   const char *contact_id, size_t cid_len,
                                                   hu_training_signal_t **out, size_t *out_count);
 
-/* W3 case outcomes → reward signal. Reward is derived from the outcome
- * string ("ok"/"good"/"success" → 1.0, "bad"/"pushed back"/"failed" → 0.0,
- * everything else → 0.5). */
-hu_error_t hu_learner_signals_from_case_outcomes(struct hu_memory_facade *m, hu_allocator_t *alloc,
-                                                 const char *contact_id, size_t cid_len,
-                                                 hu_training_signal_t **out, size_t *out_count);
-
-void hu_learner_signals_free(hu_allocator_t *alloc, hu_training_signal_t *signals,
-                             size_t count);
+void hu_learner_signals_free(hu_allocator_t *alloc, hu_training_signal_t *signals, size_t count);
 
 /* ──────────────────────────────────────────────────────────────────────────
  * PLANNED — provider extension method signatures (NOT installed in this
@@ -253,7 +244,7 @@ void hu_learner_signals_free(hu_allocator_t *alloc, hu_training_signal_t *signal
  *
  * Total size: 88 + num_weights*4 bytes. Always <= 25 MB by construction
  * (rank * 2 * 4096 * 4 ~ 64 KB at rank=8). */
-#define HU_LEARNER_ADAPTER_MAGIC "HLAD"
+#define HU_LEARNER_ADAPTER_MAGIC   "HLAD"
 #define HU_LEARNER_ADAPTER_VERSION 1u
 
 #ifdef __cplusplus

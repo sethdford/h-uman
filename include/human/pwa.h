@@ -48,18 +48,16 @@ typedef struct hu_pwa_tab {
 void hu_pwa_tab_free(hu_allocator_t *alloc, hu_pwa_tab_t *tab);
 void hu_pwa_tabs_free(hu_allocator_t *alloc, hu_pwa_tab_t *tabs, size_t count);
 
-hu_error_t hu_pwa_find_tab(hu_allocator_t *alloc, hu_pwa_browser_t browser,
-                           const char *url_pattern, hu_pwa_tab_t *out);
+hu_error_t hu_pwa_find_tab(hu_allocator_t *alloc, hu_pwa_browser_t browser, const char *url_pattern,
+                           hu_pwa_tab_t *out);
 
 hu_error_t hu_pwa_list_tabs(hu_allocator_t *alloc, hu_pwa_browser_t browser,
                             const char *url_pattern, hu_pwa_tab_t **out, size_t *count);
 
 /* ── JavaScript Execution ──────────────────────────────────────────── */
 
-hu_error_t hu_pwa_exec_js(hu_allocator_t *alloc, const hu_pwa_tab_t *tab,
-                          const char *javascript, char **out_result, size_t *out_len);
-
-hu_error_t hu_pwa_activate_tab(hu_allocator_t *alloc, const hu_pwa_tab_t *tab);
+hu_error_t hu_pwa_exec_js(hu_allocator_t *alloc, const hu_pwa_tab_t *tab, const char *javascript,
+                          char **out_result, size_t *out_len);
 
 /* ── App Drivers ───────────────────────────────────────────────────── */
 
@@ -94,7 +92,7 @@ hu_error_t hu_pwa_driver_registry_init(hu_pwa_driver_registry_t *reg);
 void hu_pwa_driver_registry_destroy(hu_allocator_t *alloc, hu_pwa_driver_registry_t *reg);
 
 hu_error_t hu_pwa_driver_registry_load_dir(hu_allocator_t *alloc, hu_pwa_driver_registry_t *reg,
-                                          const char *dir_path);
+                                           const char *dir_path);
 
 hu_error_t hu_pwa_driver_registry_add(hu_allocator_t *alloc, hu_pwa_driver_registry_t *reg,
                                       const hu_pwa_driver_t *driver);
@@ -112,8 +110,8 @@ const hu_pwa_driver_t *hu_pwa_driver_resolve(const char *app_name);
 /* ── High-Level Actions ────────────────────────────────────────────── */
 
 hu_error_t hu_pwa_send_message(hu_allocator_t *alloc, hu_pwa_browser_t browser,
-                               const char *app_name, const char *target,
-                               const char *message, char **out_result, size_t *out_len);
+                               const char *app_name, const char *target, const char *message,
+                               char **out_result, size_t *out_len);
 
 hu_error_t hu_pwa_read_messages(hu_allocator_t *alloc, hu_pwa_browser_t browser,
                                 const char *app_name, char **out_result, size_t *out_len);

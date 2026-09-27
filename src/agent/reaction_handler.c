@@ -66,7 +66,8 @@ static hu_dpo_collector_t *s_collector = NULL;
  * sink. When non-NULL, iMessage reactions on registered assistant messages
  * are also ingested into the personal model (separate from the DPO collector
  * which exists for training-data collection). Mirrors the set_collector
- * pattern: daemon sets at init via hu_daemon_reaction_wire_personal_model. */
+ * pattern: the daemon sets it at init via
+ * hu_reaction_handler_set_personal_model. */
 static hu_personal_model_t *s_personal_model = NULL;
 /* Sprint A.7: optional identity-graph wire. NULL == no canonicalization;
  * non-NULL == reactions are looked up via hu_identity_lookup before

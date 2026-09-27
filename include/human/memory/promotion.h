@@ -16,12 +16,7 @@ double hu_promotion_entity_importance(const hu_stm_entity_t *entity, const hu_st
 hu_error_t hu_promotion_run(hu_allocator_t *alloc, const hu_stm_buffer_t *buf, hu_memory_t *memory,
                             const hu_promotion_config_t *config);
 hu_error_t hu_promotion_run_emotions(hu_allocator_t *alloc, const hu_stm_buffer_t *buf,
-                                      hu_memory_t *memory, const char *contact_id,
-                                      size_t contact_id_len);
-
-/* Promote existing memories from one category tier to another (SQLite-backed memory only). */
-hu_error_t hu_promotion_promote_tier(hu_memory_t *memory, const char *from_category,
-                                     size_t from_category_len, const char *to_category,
-                                     size_t to_category_len, size_t max_count);
+                                     hu_memory_t *memory, const char *contact_id,
+                                     size_t contact_id_len);
 
 #endif

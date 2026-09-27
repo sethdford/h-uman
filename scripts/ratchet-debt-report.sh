@@ -93,8 +93,21 @@ while IFS=$'\t' read -r name script var floor rate rule pattern; do
 
     baseline=$(grep -oE "^${var}=[0-9]+" "$script" 2>/dev/null | head -1 | cut -d= -f2)
     # Measure by running the gate and reading the integer before "(ceiling".
-    current=$(bash "$script" 2>&1 | grep -E "$pattern" \
+    gate_out=$(bash "$script" 2>&1)
+    current=$(printf '%s\n' "$gate_out" | grep -E "$pattern" \
               | grep -oE '[0-9]+[^0-9]*\(ceiling' | grep -oE '^[0-9]+' | head -1)
+
+    # A gate that declares it cannot run HERE (wrong platform, no build dir) is
+    # not a failed measurement, and must not fail the weekly job. Without this,
+    # check-dead-strip-ratchet.sh — which needs a macOS build tree the
+    # ubuntu-latest runner does not have — would report every week as
+    # INCONCLUSIVE and the workflow would error out. See scripts/ratchet-config.tsv.
+    if [ -z "${current:-}" ] && printf '%s\n' "$gate_out" | grep -q '^RATCHET_SKIP: '; then
+        reason=$(printf '%s\n' "$gate_out" | sed -n 's/^RATCHET_SKIP: //p' | head -1)
+        printf '%-20s %10s %10s %10s %9s  %s\n' \
+            "$name" "-" "${baseline:-?}" "-" "-" "skipped ($reason)"
+        continue
+    fi
 
     if [ -z "${baseline:-}" ] || [ -z "${current:-}" ]; then
         printf '%-20s %10s %10s %10s %9s  %s\n' \

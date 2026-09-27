@@ -216,7 +216,11 @@ fi
 # and the matching .claude/rules/*.md.
 
 # T1: no new file may #include <sqlite3.h> outside the engine/repo layers.
-staged_src_c=$(git diff --cached --name-only --diff-filter=ACM -- 'src/**/*.c' 'src/*.c' 'src/**/*.h')
+# 'src/*.h' is NOT redundant with 'src/**/*.c'-style globs: git pathspec '**' does
+# not match a file at src/ root (measured — 'src/**/*.c' returns 0 of the 3 root
+# .c files, which is why 'src/*.c' is spelled out beside it). The .h side was
+# missing that twin, so a header added at src/ root skipped this gate.
+staged_src_c=$(git diff --cached --name-only --diff-filter=ACM -- 'src/**/*.c' 'src/*.c' 'src/**/*.h' 'src/*.h')
 if [ -n "$staged_src_c" ] && [ -x "scripts/check-sqlite-includer-ratchet.sh" ]; then
     if ! scripts/check-sqlite-includer-ratchet.sh; then
         echo ""
@@ -279,6 +283,19 @@ if [ -n "$staged_state_path_ch" ] && [ -x "scripts/check-state-path-literals.sh"
     fi
 fi
 
+# Trigger must cover every tree the gate scans (src apps sdk tools) and every
+# extension it reads (.c .m .h) — widened 2026-09-21 alongside the scan, or a
+# raw realpath() added under tools/ would never fire the gate at commit time.
+staged_realpath_c=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '^(src|apps|sdk|tools)/.*\.(c|m|h)$' || true)
+if [ -n "$staged_realpath_c" ] && [ -x "scripts/check-realpath-wrapper.sh" ]; then
+    if ! bash scripts/check-realpath-wrapper.sh; then
+        echo ""
+        echo "Pre-commit blocked: a raw realpath() call outside src/app/platform.c."
+        echo "Route it through hu_platform_realpath — see include/human/platform.h."
+        exit 1
+    fi
+fi
+
 # Function-length ratchet (2026-09-12): the file-size gate cannot see a
 # 10,087-line function inside a frozen file. Advisory when clang or
 # build/compile_commands.json is missing.
@@ -300,11 +317,45 @@ if [ -n "$staged_src_c" ] && [ -x "scripts/check-no-new-root-files.sh" ]; then
     fi
 fi
 
-if [ -n "$staged_src_c" ] && [ -x "scripts/check-clone-ratchet.sh" ]; then
+# Deletions count here. The clone ratchet re-scans the whole src/ tree rather
+# than the staged paths, so a commit that only REMOVES .c files still changes
+# the measurement — and, before 2026-09-20, silently skipped this gate and so
+# never locked the gain it produced (a 37-module deletion dropped the count by
+# 163 groups with the baseline left untouched). ACMD, not ACM. The gates above
+# keep ACM on purpose: two of them pass $staged_src_c as file arguments, and a
+# deleted path handed to those is an unreadable file.
+# Adds 'src/*.h' (see the note above) and the .m globs: this variable gates the
+# dead-strip auto-lock, and src/tools/vision_ocr_apple.m compiles into
+# human_core, so an .m-only commit changes the counts the gate locks.
+staged_or_deleted_src_c=$(git diff --cached --name-only --diff-filter=ACMD -- 'src/**/*.c' 'src/*.c' 'src/**/*.h' 'src/*.h' 'src/**/*.m' 'src/*.m')
+if [ -n "$staged_or_deleted_src_c" ] && [ -x "scripts/check-clone-ratchet.sh" ]; then
     if ! bash scripts/check-clone-ratchet.sh; then
         echo ""
         echo "Pre-commit blocked: code duplication increased past the ratchet."
         echo "Extract a shared helper — see .claude/rules/clone-ratchet.md."
+        exit 1
+    fi
+fi
+
+# Dead-strip ratchet — THE AUTO-LOCK HALF. Enforcement lives in .githooks/pre-push
+# (which rebuilds build/ first and runs the gate in strict mode); this invocation
+# exists because auto-lock can only ever fire from HERE: scripts/lib/ratchet.sh
+# refuses to rewrite a baseline unless HU_RATCHET_FROM_HOOK=1, exported at the
+# top of this file, and pre-push cannot set it — its `git add` would stage a
+# file into no commit. Without this block the two constants could only ever
+# freeze, never ratchet down, which is the exact pathology .claude/rules/
+# ratchet-decay.md was written about.
+#
+# Cheap and self-limiting: the gate needs a FRESH build/ (it relinks `human`
+# from build/CMakeFiles/human.dir/link.txt), and prints one line and exits 0
+# when build/ is missing or older than src/. So it costs ~1 s on a commit made
+# from a built tree and nothing otherwise.
+if [ -n "$staged_or_deleted_src_c" ] && [ -x "scripts/check-dead-strip-ratchet.sh" ]; then
+    if ! bash scripts/check-dead-strip-ratchet.sh; then
+        echo ""
+        echo "Pre-commit blocked: dead code grew past the dead-strip ratchet."
+        echo "Delete the never-loaded objects / unreferenced dead symbols listed above,"
+        echo "or wire them — see .claude/rules/dead-strip-ratchet.md."
         exit 1
     fi
 fi

@@ -67,7 +67,7 @@ Audited 2026-05-24 against actual code, not memory:
 | KV cache reuse | [llamacpp.c:237-260](../../src/providers/llamacpp.c#L237) — records hash + `n_past`, BUT still re-decodes on hit (per the comment at :251 "the prefix-skip optimization is Phase 3+") | The hash hit is recorded but not yet *used* to skip decode. Bigger one-line win than it looks. |
 | KV quantization | None. KV is FP16 in llama.cpp Metal default. | INT8 via `--cache-type-k q8_0 --cache-type-v q8_0` (llama.cpp) or `QuantizedKVCache` (MLX) is a one-flag change. |
 | Flash Attention on Metal | `grep -i flash src/providers/llamacpp*.c CMakeLists.txt` → no hits | Probably already enabled by llama.cpp default but not visibly verified in our build. Confirm + bench. |
-| Streaming on MLX provider | [mlx.c:513-514](../../src/providers/mlx.c#L513) — `supports_streaming = NULL, stream_chat = NULL` | The MLX provider is wired as a one-shot subprocess (`python3 -m mlx_lm.generate`). Every call pays cold model load. |
+| Streaming on MLX provider | `src/providers/mlx.c:513-514` (deleted 2026-09-21) — `supports_streaming = NULL, stream_chat = NULL` | The subprocess MLX provider was wired as a one-shot `python3 -m mlx_lm.generate`, so every call paid a cold model load. That file was deleted by the dead-code sweep: prod routes `mlx_local` / `mlx-http` through `src/providers/factory.c` to the HTTP server instead, which does stream. |
 | Speculative decoding | None in llama.cpp wrapper; none in MLX path | llama.cpp has had `--draft-model` for >18 months; we don't pass it. |
 | Persona-aware prefix | Persona overlay is applied per-turn in [agent_turn.c:3404,3566](../../src/agent/agent_turn.c#L3404) but the rendered persona prefix isn't surfaced as a stable cache key | Cache miss every turn. |
 | MLX backend default | We invoke `mlx_lm.generate` per-call (subprocess) AND we run `mlx-server.py` separately | Two MLX paths with different perf characteristics; no benchmark comparing them to llama.cpp Metal head-to-head on our actual persona prompts |
@@ -199,7 +199,7 @@ files.
 | # | Slice | File:line |
 |---|---|---|
 | 3a.1 | Replace `generate()` with `stream_generate()` in the inline handler | [scripts/mlx-server.py:302-305](../../scripts/mlx-server.py#L302). Emit `data: {...}\n\n` SSE chunks per token. Match the OpenAI streaming schema the rest of the codebase consumes. |
-| 3a.2 | Wire `supports_streaming = true` + implement `stream_chat` in the MLX provider | [src/providers/mlx.c:513-514](../../src/providers/mlx.c#L513) currently NULL. Mirror the pattern in [src/providers/compatible.c](../../src/providers/compatible.c) which already does SSE parsing. |
+| 3a.2 | Wire `supports_streaming = true` + implement `stream_chat` in the MLX provider | Superseded 2026-09-21: `src/providers/mlx.c` (the subprocess bridge, NULL at :513-514) was deleted by the dead-code sweep. The live path is the HTTP route through `src/providers/factory.c`; [src/providers/compatible.c](../../src/providers/compatible.c) remains the SSE-parsing pattern to mirror. |
 | 3a.3 | Test parity | `tests/test_mlx_server_swap.py::test_streaming_total_matches_nonstreaming_total` |
 
 ### 3b — Cross-model spec decode (NOT self-spec — see structural caveat)

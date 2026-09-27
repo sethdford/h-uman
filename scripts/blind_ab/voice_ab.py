@@ -177,12 +177,16 @@ def next_unanswered(pairs, skipped=None):
 
 # ── io ──────────────────────────────────────────────────────────────────
 
-def load_sheet(path=SHEET):
-    with open(path) as f:
+def load_sheet(path=None):
+    # Resolve the module global at call time (a default arg would bind at
+    # import, so a test's path override would silently write the LIVE sheet —
+    # which is exactly what happened on 2026-09-20).
+    with open(path or SHEET) as f:
         return json.load(f)
 
 
-def save_sheet(pairs, path=SHEET):
+def save_sheet(pairs, path=None):
+    path = path or SHEET
     tmp = path + ".tmp"
     with open(tmp, "w") as f:
         json.dump(pairs, f, indent=1)

@@ -5,6 +5,7 @@
 #include "human/channels/imessage_bb_event.h" /* IMCore bridge event stream */
 #include "human/channels/imessage_caps.h"     /* native capability gate (T0.4) */
 #include "human/channels/imessage_reply.h"
+#include "human/channels/imessage_send_observer.h" /* send provenance */
 #include "human/context/conversation.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
@@ -926,6 +927,25 @@ int64_t hu_imessage_test_get_last_success_epoch(const hu_channel_t *ch) {
     if (!ch || !ch->ctx)
         return 0;
     return ((const hu_imessage_ctx_t *)ch->ctx)->last_successful_poll_epoch;
+}
+#endif
+
+/* Send provenance: report one delivered send to the observer (no-op when
+ * none is registered). Called only after the channel confirmed delivery —
+ * from the HU_IS_TEST branch of imessage_send and from its Apple send tiers.
+ * The guard mirrors exactly those two branches: on non-Apple production
+ * builds imessage_send is a NOT_SUPPORTED stub, and an unused static fails
+ * -Werror=unused-function (caught by the no-skills Linux CI variant). */
+#if HU_IS_TEST || (defined(__APPLE__) && defined(__MACH__))
+static void imessage_report_sent(const char *tgt, size_t tgt_len, const char *text, size_t text_len,
+                                 const char *kind, int64_t prior_max_rowid) {
+    hu_imessage_sent_event_t ev = {.handle = tgt,
+                                   .handle_len = tgt_len,
+                                   .text = text,
+                                   .text_len = text_len,
+                                   .kind = kind,
+                                   .prior_max_rowid = prior_max_rowid};
+    hu_imessage_send_observer_notify(&ev);
 }
 #endif
 
@@ -2113,6 +2133,30 @@ size_t hu_imessage_build_inline_reply_hint_for_batch(hu_allocator_t *alloc,
     return hu_conversation_build_inline_reply_hint(orig_text, orig_len, out_buf, out_cap);
 }
 
+/* See include/human/channels/imessage.h. Whitelist, not passthrough: this value
+ * becomes an argv element. */
+const char *hu_imessage_send_service(void) {
+    const char *v = getenv("HU_IMESSAGE_SEND_SERVICE");
+    if (v) {
+        if (strcmp(v, "imessage") == 0)
+            return "imessage";
+        if (strcmp(v, "sms") == 0)
+            return "sms";
+        if (strcmp(v, "auto") == 0)
+            return "auto";
+        /* Unrecognised — fall through to the default rather than hand the CLI
+         * an unvalidated string. */
+    }
+    return "auto";
+}
+
+/* See header. Whitelist: the result is interpolated into a script we execute. */
+const char *hu_imessage_applescript_service_type(const char *service) {
+    if (service && strcmp(service, "sms") == 0)
+        return "SMS";
+    return "iMessage";
+}
+
 static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len,
                                 const char *message, size_t message_len, const char *const *media,
                                 size_t media_count) {
@@ -2194,6 +2238,21 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
         c->last_message_len = len;
         if (rendered)
             c->alloc->free(c->alloc->ctx, rendered, rendered_len + 1);
+        /* Mirror production's send-provenance reports (no chat.db here, so
+         * the boundary is unknown). */
+        {
+            const char *rt = target;
+            size_t rt_len = target_len;
+            if ((!rt || rt_len == 0) && c->default_target) {
+                rt = c->default_target;
+                rt_len = c->default_target_len;
+            }
+            if (len > 0)
+                imessage_report_sent(rt, rt_len, c->last_message, len, HU_IMESSAGE_SENT_KIND_TEXT,
+                                     -1);
+            if (media_count > 0)
+                imessage_report_sent(rt, rt_len, NULL, 0, HU_IMESSAGE_SENT_KIND_MEDIA, -1);
+        }
         return HU_OK;
     }
 #elif !defined(__APPLE__) || !defined(__MACH__)
@@ -2269,6 +2328,12 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
         message = overlay_buf;
         message_len = overlay_buf_len;
     }
+
+    /* Send provenance boundary: newest is_from_me ROWID for this handle
+     * BEFORE sending, so the offline resolver can take the first row above
+     * it as ours. Read only when an observer is listening. */
+    int64_t prov_prior =
+        hu_imessage_send_observer_active() ? hu_imessage_get_latest_sent_rowid(tgt, tgt_len) : -1;
 
     hu_error_t send_err = HU_OK;
     char *clean = NULL;
@@ -2350,8 +2415,12 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
                 size_t tb = tgt_len < sizeof(tgt_buf) - 1 ? tgt_len : sizeof(tgt_buf) - 1;
                 memcpy(tgt_buf, tgt, tb);
                 tgt_buf[tb] = '\0';
-                const char *imsg_argv[] = {"imsg",  "send",      "--to",     tgt_buf, "--text",
-                                           message, "--service", "imessage", NULL};
+                /* "auto" lets the CLI fall back to SMS for a contact with no
+                 * iMessage account; hardcoding "imessage" here is what
+                 * black-holed 124 sends to one RCS number. */
+                const char *imsg_service = hu_imessage_send_service();
+                const char *imsg_argv[] = {"imsg",  "send",      "--to",       tgt_buf, "--text",
+                                           message, "--service", imsg_service, NULL};
                 hu_run_result_t imsg_result = {0};
                 hu_error_t imsg_err =
                     hu_process_run_with_timeout(c->alloc, imsg_argv, NULL, 65536, 15, &imsg_result);
@@ -2360,6 +2429,8 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
                 hu_run_result_free(c->alloc, &imsg_result);
                 if (imsg_ok) {
                     imessage_record_sent(c, message, message_len);
+                    imessage_report_sent(tgt, tgt_len, message, message_len,
+                                         HU_IMESSAGE_SENT_KIND_TEXT, prov_prior);
                     goto imsg_media;
                 }
                 if (getenv("HU_DEBUG"))
@@ -2388,7 +2459,8 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
         escape_for_applescript(tgt_esc, tgt_esc_cap, tgt, tgt_len);
 
         /* Target the iMessage service explicitly for reliability on modern macOS */
-        size_t script_cap = 256 + strlen(msg_esc) + strlen(tgt_esc);
+        size_t script_cap =
+            256 + strlen(msg_esc) + strlen(tgt_esc); /* 256 covers the service token */
         char *script = (char *)c->alloc->alloc(c->alloc->ctx, script_cap);
         if (!script) {
             c->alloc->free(c->alloc->ctx, msg_esc, msg_esc_cap);
@@ -2396,13 +2468,14 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
             send_err = HU_ERR_OUT_OF_MEMORY;
             goto imsg_cleanup;
         }
+        const char *as_service = hu_imessage_applescript_service_type(hu_imessage_send_service());
         int n = snprintf(script, script_cap,
                          "tell application \"Messages\"\n"
-                         "  set targetService to 1st service whose service type = iMessage\n"
+                         "  set targetService to 1st service whose service type = %s\n"
                          "  set targetBuddy to buddy \"%s\" of targetService\n"
                          "  send \"%s\" to targetBuddy\n"
                          "end tell",
-                         tgt_esc, msg_esc);
+                         as_service, tgt_esc, msg_esc);
 
         c->alloc->free(c->alloc->ctx, msg_esc, msg_esc_cap);
         c->alloc->free(c->alloc->ctx, tgt_esc, tgt_esc_cap);
@@ -2434,8 +2507,11 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
 #endif
         }
 
-        if (send_err == HU_OK)
+        if (send_err == HU_OK) {
             imessage_record_sent(c, message, message_len);
+            imessage_report_sent(tgt, tgt_len, message, message_len, HU_IMESSAGE_SENT_KIND_TEXT,
+                                 prov_prior);
+        }
     }
 
 #if !HU_IS_TEST
@@ -2460,6 +2536,9 @@ imsg_media:
                 escape_for_applescript(m_tgt_esc, m_tgt_cap, tgt, tgt_len);
         }
 
+        /* The loop skips unreadable paths silently, so only attachments that
+         * actually went out count toward the provenance report. */
+        size_t media_delivered = 0;
         for (size_t i = 0; i < media_count && send_err == HU_OK; i++) {
             const char *url = media[i];
             if (!url || url[0] != '/')
@@ -2474,8 +2553,10 @@ imsg_media:
                 hu_error_t ie = hu_process_run_with_timeout(c->alloc, fa, NULL, 65536, 15, &ir);
                 bool fok = (ie == HU_OK && ir.success && ir.exit_code == 0);
                 hu_run_result_free(c->alloc, &ir);
-                if (fok)
+                if (fok) {
+                    media_delivered++;
                     continue;
+                }
                 if (getenv("HU_DEBUG"))
                     hu_log_info("imessage", NULL,
                                 "imsg send --file failed, falling back to AppleScript");
@@ -2505,7 +2586,9 @@ imsg_media:
                     hu_error_t err = hu_process_run(c->alloc, argv, NULL, 65536, &result);
                     bool ok = (err == HU_OK && result.success && result.exit_code == 0);
                     hu_run_result_free(c->alloc, &result);
-                    if (!ok)
+                    if (ok)
+                        media_delivered++;
+                    else
                         send_err = HU_ERR_CHANNEL_SEND;
                 }
                 c->alloc->free(c->alloc->ctx, m_script, m_script_cap);
@@ -2516,6 +2599,8 @@ imsg_media:
 
         if (m_tgt_esc)
             c->alloc->free(c->alloc->ctx, m_tgt_esc, m_tgt_cap);
+        if (media_delivered > 0)
+            imessage_report_sent(tgt, tgt_len, NULL, 0, HU_IMESSAGE_SENT_KIND_MEDIA, prov_prior);
     }
 #endif
 

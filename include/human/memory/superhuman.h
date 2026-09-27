@@ -100,6 +100,12 @@ hu_error_t hu_superhuman_delayed_followup_list_due(void *sqlite_ctx, hu_allocato
                                                    int64_t now_ts, hu_delayed_followup_t **out,
                                                    size_t *out_count);
 hu_error_t hu_superhuman_delayed_followup_mark_sent(void *sqlite_ctx, int64_t id);
+/* *out_exists = an UNSENT follow-up with exactly this contact and topic is
+ * already queued. Lets producers that may see the same event twice (a
+ * contact mentioning "interview Thursday" in two messages) queue it once. */
+hu_error_t hu_superhuman_delayed_followup_pending_exists(void *sqlite_ctx, const char *contact_id,
+                                                         size_t contact_id_len, const char *topic,
+                                                         size_t topic_len, bool *out_exists);
 void hu_superhuman_delayed_followup_free(hu_allocator_t *alloc, hu_delayed_followup_t *arr,
                                          size_t count);
 

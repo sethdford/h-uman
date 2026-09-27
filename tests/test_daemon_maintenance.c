@@ -278,6 +278,118 @@ static void test_vm_flush_null_inputs_are_noops(void) {
     vm_fixture_teardown(&f);
 }
 
+/* ── heartbeat engine ─────────────────────────────────────────────────────
+ * Contract for hu_daemon_heartbeat_flush — the gate that wires the
+ * previously-inert config->heartbeat.{enabled,interval_minutes} into
+ * src/observability/heartbeat.c's hu_heartbeat_ensure_file/hu_heartbeat_tick.
+ * The production tick that calls this is compiled out under HU_IS_TEST (same
+ * as the flush gates above), so the gate is extracted and pinned here.
+ *
+ *   (a) disabled (or interval_ms<=0) creates no file at all
+ *   (b) the first call always ticks and creates HEARTBEAT.md
+ *   (c) a call inside the configured interval does not tick again
+ *   (d) two ticks whose wall-clock times differ advance the file's mtime —
+ *       hu_heartbeat_tick only reads the file, so this pins the explicit
+ *       utime() touch that makes the file usable as a liveness signal
+ *   (e) NULL alloc / workspace_dir / last_tick_ms are no-ops
+ */
+
+typedef struct hb_fixture {
+    char dir[256];
+    char path[320]; /* HEARTBEAT.md */
+    hu_allocator_t alloc;
+} hb_fixture_t;
+
+static void hb_fixture_setup(hb_fixture_t *f) {
+    memset(f, 0, sizeof(*f));
+    HU_ASSERT_TRUE(hu_test_mkdtemp("/tmp/hu_daemon_hb_flush_", f->dir, sizeof(f->dir)));
+    snprintf(f->path, sizeof(f->path), "%s/HEARTBEAT.md", f->dir);
+    f->alloc = hu_system_allocator();
+}
+
+static void hb_fixture_teardown(hb_fixture_t *f) {
+    hu_test_rm_rf(f->dir);
+}
+
+static time_t hb_file_mtime(const char *path) {
+    struct stat st;
+    return stat(path, &st) == 0 ? st.st_mtime : (time_t)-1;
+}
+
+static void test_hb_flush_disabled_creates_no_file(void) {
+    hb_fixture_t f;
+    hb_fixture_setup(&f);
+    int64_t last = 0;
+
+    HU_ASSERT_FALSE(hu_daemon_heartbeat_flush(&f.alloc, false, 60000, f.dir, 1000, 1000000, &last));
+    HU_ASSERT_EQ(file_size(f.path), -1L);
+    HU_ASSERT_EQ(last, (int64_t)0);
+
+    /* interval_ms<=0 is equally inert, even when enabled. */
+    HU_ASSERT_FALSE(hu_daemon_heartbeat_flush(&f.alloc, true, 0, f.dir, 1000, 1000000, &last));
+    HU_ASSERT_EQ(file_size(f.path), -1L);
+
+    hb_fixture_teardown(&f);
+}
+
+static void test_hb_flush_first_tick_creates_file(void) {
+    hb_fixture_t f;
+    hb_fixture_setup(&f);
+    int64_t last = 0;
+
+    HU_ASSERT_EQ(file_size(f.path), -1L); /* precondition: nothing on disk */
+    HU_ASSERT_TRUE(hu_daemon_heartbeat_flush(&f.alloc, true, 60000, f.dir, 1000, 1000000, &last));
+    HU_ASSERT(file_size(f.path) > 0);
+    HU_ASSERT_EQ(last, (int64_t)1000);
+
+    hb_fixture_teardown(&f);
+}
+
+static void test_hb_flush_skips_inside_interval(void) {
+    hb_fixture_t f;
+    hb_fixture_setup(&f);
+    int64_t last = 0;
+    HU_ASSERT_TRUE(hu_daemon_heartbeat_flush(&f.alloc, true, 60000, f.dir, 1000, 1000000, &last));
+
+    HU_ASSERT_FALSE(
+        hu_daemon_heartbeat_flush(&f.alloc, true, 60000, f.dir, 1000 + 59999, 2000000, &last));
+    HU_ASSERT_EQ(last, (int64_t)1000); /* state untouched when not due */
+
+    hb_fixture_teardown(&f);
+}
+
+static void test_hb_flush_two_ticks_advance_file_mtime(void) {
+    hb_fixture_t f;
+    hb_fixture_setup(&f);
+    int64_t last = 0;
+
+    /* interval_ms=1: any positive monotonic gap is due. */
+    HU_ASSERT_TRUE(hu_daemon_heartbeat_flush(&f.alloc, true, 1, f.dir, 1000, 1000000, &last));
+    time_t first_mtime = hb_file_mtime(f.path);
+    HU_ASSERT(first_mtime > 0);
+
+    HU_ASSERT_TRUE(hu_daemon_heartbeat_flush(&f.alloc, true, 1, f.dir, 1001, 2000000, &last));
+    time_t second_mtime = hb_file_mtime(f.path);
+    HU_ASSERT(second_mtime > first_mtime);
+    HU_ASSERT_EQ(last, (int64_t)1001);
+
+    hb_fixture_teardown(&f);
+}
+
+static void test_hb_flush_null_inputs_are_noops(void) {
+    hb_fixture_t f;
+    hb_fixture_setup(&f);
+    int64_t last = 0;
+
+    HU_ASSERT_FALSE(hu_daemon_heartbeat_flush(NULL, true, 1, f.dir, 1000, 1000000, &last));
+    HU_ASSERT_EQ(last, (int64_t)0);
+    HU_ASSERT_FALSE(hu_daemon_heartbeat_flush(&f.alloc, true, 1, NULL, 1000, 1000000, &last));
+    HU_ASSERT_FALSE(hu_daemon_heartbeat_flush(&f.alloc, true, 1, f.dir, 1000, 1000000, NULL));
+    HU_ASSERT_EQ(file_size(f.path), -1L);
+
+    hb_fixture_teardown(&f);
+}
+
 void run_daemon_maintenance_tests(void);
 void run_daemon_maintenance_tests(void) {
     HU_TEST_SUITE("daemon-maintenance");
@@ -291,4 +403,9 @@ void run_daemon_maintenance_tests(void) {
     HU_RUN_TEST(test_vm_flush_rewrites_after_60s_tick_with_zero_turns);
     HU_RUN_TEST(test_vm_flush_minute_ticks_with_short_gap_never_skip);
     HU_RUN_TEST(test_vm_flush_null_inputs_are_noops);
+    HU_RUN_TEST(test_hb_flush_disabled_creates_no_file);
+    HU_RUN_TEST(test_hb_flush_first_tick_creates_file);
+    HU_RUN_TEST(test_hb_flush_skips_inside_interval);
+    HU_RUN_TEST(test_hb_flush_two_ticks_advance_file_mtime);
+    HU_RUN_TEST(test_hb_flush_null_inputs_are_noops);
 }

@@ -123,12 +123,9 @@ static char *get_exe_path(hu_allocator_t *alloc) {
     uint32_t size = (uint32_t)sizeof(buf);
     if (_NSGetExecutablePath(buf, &size) != 0)
         return NULL;
-    char *resolved = realpath(buf, NULL);
-    if (resolved) {
-        char *out = hu_strdup(alloc, resolved);
-        free(resolved);
-        return out;
-    }
+    char *resolved = hu_platform_realpath(alloc, buf);
+    if (resolved)
+        return resolved;
     return hu_strdup(alloc, buf);
 #else
     return NULL;
@@ -448,11 +445,19 @@ hu_error_t hu_update_apply(void) {
 
 /* ── periodic auto-check ────────────────────────────────────────────── */
 
+hu_update_mode_t hu_update_mode_from_config(const char *auto_update) {
+    if (!auto_update || auto_update[0] == '\0' || strcmp(auto_update, "off") == 0)
+        return HU_UPDATE_MODE_OFF;
+    if (strcmp(auto_update, "apply") == 0)
+        return HU_UPDATE_MODE_APPLY;
+    return HU_UPDATE_MODE_CHECK;
+}
+
 hu_error_t hu_update_maybe_check(hu_allocator_t *alloc, const hu_config_t *cfg) {
     if (!alloc || !cfg)
         return HU_ERR_INVALID_ARGUMENT;
 
-    if (!cfg->auto_update || strcmp(cfg->auto_update, "off") == 0)
+    if (hu_update_mode_from_config(cfg->auto_update) == HU_UPDATE_MODE_OFF)
         return HU_OK;
 
 #if HU_IS_TEST
@@ -505,7 +510,7 @@ hu_error_t hu_update_maybe_check(hu_allocator_t *alloc, const hu_config_t *cfg) 
     if (hu_version_compare(current, remote) >= 0)
         return HU_OK;
 
-    if (strcmp(cfg->auto_update, "apply") == 0) {
+    if (hu_update_mode_from_config(cfg->auto_update) == HU_UPDATE_MODE_APPLY) {
         printf("Update available: %s -> %s. Downloading...\n", current, latest);
         err = hu_update_apply();
         if (err != HU_OK)

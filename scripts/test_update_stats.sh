@@ -25,6 +25,10 @@ echo 'int b;' > "$T/src/channels/b.c"
 echo 'int c;' > "$T/src/tools/c.c"
 printf 'enum {\n    HU_CHANNEL_ONE,\n};\n' > "$T/include/human/channel_catalog.h"
 echo 'void test_a(void) {}' > "$T/tests/test_a.c"
+# The counters read `git ls-files`, not the filesystem, so the fake tree's files
+# have to be in the index. (No commit needed — ls-files reads the index, and a
+# commit would need a user.name/email this harness must not depend on.)
+git -C "$T" add -A
 
 # Doc phrasings the script rewrites, at their committed values.
 write_docs() {
@@ -98,5 +102,30 @@ write_docs
 out=$(run --test-count 222 --apply)
 check "release binary measured without the flag" "grep -q '^~4 KB$' '$T/README.md'"
 
+# 7. Generated, gitignored C is a BUILD ARTIFACT, not source. The counters read
+#    git's index, so a tree that has been built reports the same numbers as a
+#    fresh clone.
+#
+#    Why: src/data/data_*.c are generated blobs (.gitignore:152). With the old
+#    filesystem `find`, a built checkout counted them — 2105 files / 446,620 LOC
+#    against 2093 / 433,125 for the same commit clean. So the stamped figures
+#    depended on whether the machine had run a build, every push re-dirtied the
+#    docs with whichever number that checkout produced, and "~445K lines of C"
+#    was silently counting embedded training data as source.
+write_docs
+mkdir -p "$T/src/data"
+: > "$T/src/data/data_generated_blob.c"
+i=0; while [ $i -lt 1000 ]; do echo 'static const char b[] = "x";' >> "$T/src/data/data_generated_blob.c"; i=$((i+1)); done
+printf 'src/data/data_*.c\n' > "$T/.gitignore"
+git -C "$T" add -A
+out=$(run --test-count 222 --apply)
+# Tracked src+include .c/.h: src/a.c, src/channels/b.c, src/tools/c.c,
+# include/human/channel_catalog.h = 4. The blob would make it 5.
+check "ignored generated .c is not a source file" \
+    "printf '%s' \"\$out\" | grep -qE 'Source \+ header files: *4$'"
+# Tracked src LOC = 3 (one line each, include/ excluded). The 1000-line blob
+# would push this to 1003, i.e. ~1K instead of ~0K.
+check "ignored generated .c does not inflate lines of C" \
+    "printf '%s' \"\$out\" | grep -qE 'Lines of C: *~0K \\(3\\)'"
 rm -rf "$T"
 exit $fail

@@ -786,3 +786,23 @@ def test_refusal_prints_diagnostic_counters_on_stderr(tmp_path, capsys):
     assert "resolved_events=1" in captured.err
     assert "fir_n=1" in captured.err
     assert "mir_n=1" in captured.err
+
+
+def test_load_decisions_trigger_filter_isolates_voice_rows():
+    import sqlite3
+    import eval_when_to_speak as ew
+    db = sqlite3.connect(":memory:")
+    db.execute("CREATE TABLE proactive_decisions (id INTEGER PRIMARY KEY, ts INTEGER, contact TEXT, "
+               "trigger TEXT, decision TEXT, reason TEXT, sent INTEGER, message_ref TEXT)")
+    rows = [(100, "+1", "init_proposer_llm", "send", "x", 0), (101, "+1", "proactive_send", "send", "x", 1),
+            (102, "+1", "voice_reply", "decline", "roll_miss", 0), (103, "+2", "voice_reply", "send", "voice", 1)]
+    db.executemany("INSERT INTO proactive_decisions(ts,contact,trigger,decision,reason,sent) VALUES(?,?,?,?,?,?)", rows)
+    all_rows, src = ew.load_decisions(db, 0)
+    assert src == "proactive_decisions" and len(all_rows) == 4
+    voice, src = ew.load_decisions(db, 0, "voice_reply")
+    assert src == "proactive_decisions"
+    assert [r["trigger"] for r in voice] == ["voice_reply", "voice_reply"]
+    assert [r["sent"] for r in voice] == [False, True]
+    # unknown trigger -> no rows -> falls to the fallback source, never a crash
+    none, src = ew.load_decisions(db, 0, "nope")
+    assert src != "proactive_decisions" or none == []

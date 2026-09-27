@@ -151,12 +151,6 @@ void hu_audit_event_with_result(hu_audit_event_t *ev, bool success, int32_t exit
     ev->result.err_msg = err_msg;
 }
 
-void hu_audit_event_with_security(hu_audit_event_t *ev, const char *sandbox_backend) {
-    if (!ev)
-        return;
-    ev->security.sandbox_backend = sandbox_backend;
-}
-
 void hu_audit_event_with_identity(hu_audit_event_t *ev, uint64_t agent_id,
                                   const char *model_version, const char *auth_token_hash) {
     if (!ev)
@@ -750,20 +744,6 @@ hu_error_t hu_audit_logger_log(hu_audit_logger_t *logger, const hu_audit_event_t
     fflush(f);
     fclose(f);
     return HU_OK;
-}
-
-hu_error_t hu_audit_logger_log_command(hu_audit_logger_t *logger, const hu_audit_cmd_log_t *entry) {
-    if (!logger || !entry)
-        return HU_ERR_INVALID_ARGUMENT;
-
-    hu_audit_event_t ev;
-    hu_audit_event_init(&ev, HU_AUDIT_COMMAND_EXECUTION);
-    hu_audit_event_with_actor(&ev, entry->channel, NULL, NULL);
-    hu_audit_event_with_action(&ev, entry->command, entry->risk_level, entry->approved,
-                               entry->allowed);
-    hu_audit_event_with_result(&ev, entry->success, -1, entry->duration_ms, NULL);
-
-    return hu_audit_logger_log(logger, &ev);
 }
 
 void hu_audit_set_rotation_interval(hu_audit_logger_t *logger, uint32_t hours) {

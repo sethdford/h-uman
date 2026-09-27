@@ -1,8 +1,6 @@
 /* Tests for newly ported modules (capabilities, channel_catalog, config_mutator, update, etc.) */
 #include "human/agent/commands.h"
 #include "human/agent/scheduler_status_json.h"
-#include "human/capabilities.h"
-#include "human/channel_adapters.h"
 #include "human/channel_catalog.h"
 #include "human/config.h"
 #include "human/config_mutator.h"
@@ -12,7 +10,6 @@
 #include "human/ml/lora_retrain_runner.h"
 #include "human/security.h"
 #include "human/security/sandbox.h"
-#include "human/service.h"
 #include "human/update.h"
 #include "test_framework.h"
 #include "test_tmpdir.h"
@@ -56,15 +53,6 @@ static void test_channel_catalog_find_by_key(void) {
     const hu_channel_meta_t *t = hu_channel_catalog_find_by_key("cli");
     HU_ASSERT_NOT_NULL(t);
     HU_ASSERT_STR_EQ(t->key, "cli");
-}
-
-static void test_channel_catalog_parse_peer_kind(void) {
-    int r = hu_channel_adapters_parse_peer_kind("direct", 6);
-    HU_ASSERT_EQ(r, (int)HU_CHAT_DIRECT);
-    r = hu_channel_adapters_parse_peer_kind("group", 5);
-    HU_ASSERT_EQ(r, (int)HU_CHAT_GROUP);
-    r = hu_channel_adapters_parse_peer_kind("invalid", 7);
-    HU_ASSERT_EQ(r, -1);
 }
 
 static void test_config_mutator_path_requires_restart(void) {
@@ -510,23 +498,6 @@ static void test_rate_tracker(void) {
     hu_rate_tracker_destroy(t);
 }
 
-static void test_sandbox_create_noop(void) {
-    hu_sandbox_t sb = hu_sandbox_create_noop();
-    HU_ASSERT_TRUE(hu_sandbox_is_available(&sb));
-    HU_ASSERT_STR_EQ(hu_sandbox_name(&sb), "none");
-}
-
-static void test_capabilities_manifest(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    char *json = NULL;
-    hu_error_t err = hu_capabilities_build_manifest_json(&alloc, NULL, NULL, 0, &json);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_NOT_NULL(json);
-    HU_ASSERT(strstr(json, "\"channels\"") != NULL);
-    HU_ASSERT(strstr(json, "\"memory_engines\"") != NULL);
-    alloc.free(alloc.ctx, json, strlen(json) + 1);
-}
-
 static void test_config_mutator_mutate(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_mutation_result_t res = {0};
@@ -578,40 +549,6 @@ static void test_update_apply_mock(void) {
     /* In HU_IS_TEST mode, returns HU_OK without applying */
     hu_error_t err = hu_update_apply();
     HU_ASSERT_EQ(err, HU_OK);
-}
-
-static void test_service_start_stop(void) {
-    hu_error_t err = hu_service_start();
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_TRUE(hu_service_status());
-    hu_service_stop();
-    HU_ASSERT_FALSE(hu_service_status());
-}
-
-static void test_service_configure_null(void) {
-    hu_service_configure(NULL, NULL);
-    hu_error_t err = hu_service_start();
-    HU_ASSERT_EQ(err, HU_OK);
-    hu_service_stop();
-}
-
-static void test_service_double_start(void) {
-    hu_error_t err = hu_service_start();
-    HU_ASSERT_EQ(err, HU_OK);
-    err = hu_service_start();
-    HU_ASSERT_EQ(err, HU_OK);
-    hu_service_stop();
-}
-
-static void test_service_configure_with_ctx(void) {
-    hu_channel_loop_ctx_t ctx = {0};
-    hu_channel_loop_state_t state = {0};
-    hu_service_configure(&ctx, &state);
-    hu_error_t err = hu_service_start();
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_TRUE(hu_service_status());
-    hu_service_stop();
-    hu_service_configure(NULL, NULL);
 }
 
 /* ── hu_doctor_check_imessage red-team ─────────────────────────────────
@@ -852,7 +789,6 @@ void run_ported_modules_tests(void) {
     HU_TEST_SUITE("Ported Modules");
     HU_RUN_TEST(test_channel_catalog_all);
     HU_RUN_TEST(test_channel_catalog_find_by_key);
-    HU_RUN_TEST(test_channel_catalog_parse_peer_kind);
     HU_RUN_TEST(test_config_mutator_path_requires_restart);
     HU_RUN_TEST(test_config_mutator_get_path_denied);
     HU_RUN_TEST(test_config_mutator_mutate_denied_path);
@@ -885,15 +821,9 @@ void run_ported_modules_tests(void) {
     HU_RUN_TEST(test_agent_commands_parse);
     HU_RUN_TEST(test_agent_commands_bare_reset_prompt);
     HU_RUN_TEST(test_rate_tracker);
-    HU_RUN_TEST(test_sandbox_create_noop);
-    HU_RUN_TEST(test_capabilities_manifest);
     HU_RUN_TEST(test_config_mutator_mutate);
     HU_RUN_TEST(test_update_check_mock);
     HU_RUN_TEST(test_update_apply_mock);
-    HU_RUN_TEST(test_service_start_stop);
-    HU_RUN_TEST(test_service_configure_null);
-    HU_RUN_TEST(test_service_double_start);
-    HU_RUN_TEST(test_service_configure_with_ctx);
 
     /* hu_doctor_check_imessage red-team */
     HU_RUN_TEST(test_doctor_check_imessage_null_args_rejected);

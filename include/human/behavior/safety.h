@@ -32,31 +32,29 @@ typedef enum hu_behavior_risk {
 } hu_behavior_risk_t;
 
 typedef struct hu_attachment_trajectory {
-    uint32_t sessions_per_day_avg;        /* rolling */
-    uint32_t late_night_sessions_30d;     /* sessions started 23:00..05:00 */
-    uint32_t exclusivity_signal_count;    /* "you're the only one who gets me" */
-    uint32_t parasocial_signal_count;     /* romantic / overly intimate framing */
-    float    attachment_estimate;         /* 0..1 derived elsewhere */
+    uint32_t sessions_per_day_avg;     /* rolling */
+    uint32_t late_night_sessions_30d;  /* sessions started 23:00..05:00 */
+    uint32_t exclusivity_signal_count; /* "you're the only one who gets me" */
+    uint32_t parasocial_signal_count;  /* romantic / overly intimate framing */
+    float attachment_estimate;         /* 0..1 derived elsewhere */
 } hu_attachment_trajectory_t;
 
 typedef struct hu_behavior_safety_input {
     /* Existing module results — caller fills these in. */
     hu_companion_safety_result_t companion; /* SHIELD-001 */
-    hu_vulnerability_result_t    vulnerability;
-    hu_attachment_trajectory_t   attachment;
+    hu_vulnerability_result_t vulnerability;
+    hu_attachment_trajectory_t attachment;
 } hu_behavior_safety_input_t;
 
 typedef struct hu_behavior_safety_assessment {
     hu_behavior_risk_t primary_risk;
-    float severity;                       /* 0..1 */
+    float severity; /* 0..1 */
     bool require_boundary;
     bool encourage_human_relationship;
-    bool require_referral;                /* mental-health resources */
-    bool pause_behavior_change;           /* halt B4 interventions */
+    bool require_referral;      /* mental-health resources */
+    bool pause_behavior_change; /* halt B4 interventions */
     char rationale[200];
 } hu_behavior_safety_assessment_t;
-
-const char *hu_behavior_risk_name(hu_behavior_risk_t r);
 
 /* Compose the existing safety + vulnerability + attachment signals into
  * an actionable assessment. Pure computation, no I/O. */

@@ -46,15 +46,6 @@ static void test_mcp_init_tools_empty_configs_returns_ok(void) {
 
 /* ─── Tunnel tests ───────────────────────────────────────────────────────── */
 
-static void test_tunnel_none_create_destroy(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_tunnel_t t = hu_none_tunnel_create(&alloc);
-    HU_ASSERT_NOT_NULL(t.ctx);
-    HU_ASSERT_NOT_NULL(t.vtable);
-    if (t.vtable->deinit)
-        t.vtable->deinit(t.ctx, &alloc);
-}
-
 static void test_tunnel_tailscale_create_destroy(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_tunnel_t t = hu_tailscale_tunnel_create(&alloc);
@@ -88,16 +79,6 @@ static void test_tunnel_custom_create_destroy(void) {
     hu_tunnel_t t = hu_custom_tunnel_create(&alloc, cmd, strlen(cmd));
     HU_ASSERT_NOT_NULL(t.ctx);
     HU_ASSERT_STR_EQ(t.vtable->provider_name(t.ctx), "custom");
-    if (t.vtable->deinit)
-        t.vtable->deinit(t.ctx, &alloc);
-}
-
-static void test_tunnel_factory_none(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_tunnel_config_t config = {.provider = HU_TUNNEL_NONE};
-    hu_tunnel_t t = hu_tunnel_create(&alloc, &config);
-    HU_ASSERT_NOT_NULL(t.ctx);
-    HU_ASSERT_STR_EQ(t.vtable->provider_name(t.ctx), "none");
     if (t.vtable->deinit)
         t.vtable->deinit(t.ctx, &alloc);
 }
@@ -478,12 +459,10 @@ void run_modules_coverage_tests(void) {
     HU_RUN_TEST(test_mcp_init_tools_empty_configs_returns_ok);
 
     HU_TEST_SUITE("Modules coverage: Tunnel");
-    HU_RUN_TEST(test_tunnel_none_create_destroy);
     HU_RUN_TEST(test_tunnel_tailscale_create_destroy);
     HU_RUN_TEST(test_tunnel_cloudflare_create_destroy);
     HU_RUN_TEST(test_tunnel_ngrok_create_destroy);
     HU_RUN_TEST(test_tunnel_custom_create_destroy);
-    HU_RUN_TEST(test_tunnel_factory_none);
 
     HU_TEST_SUITE("Modules coverage: Daemon");
     HU_RUN_TEST(test_daemon_start_stop_test_mode);

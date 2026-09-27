@@ -1664,6 +1664,105 @@ static void test_config_inference_kvcache_skip_operator_env_wins(void) {
     hu_arena_destroy(arena);
 }
 
+/* ── follow_up_watcher (2026-09-21) ──────────────────────────────────────────
+ * src/daemon.c gates the follow-up watcher tick on
+ * config->follow_up_watcher.enabled, and both src/daemon.c and
+ * src/daemon/daemon_follow_up_watcher.c tell operators to "set
+ * follow_up_watcher.enabled=true in config.json" when it is off. No parser
+ * read the key, so the field was always false: the subsystem could not be
+ * turned on and the log line pointed at a setting that did nothing. */
+static void test_config_parse_follow_up_watcher_enabled(void) {
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg_local;
+    memset(&cfg_local, 0, sizeof(cfg_local));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    hu_allocator_t a = hu_arena_allocator(arena);
+    /* include/human/config.h: callers driving hu_config_parse_json directly
+     * must seed defaults first. apply_defaults memsets, so the arena goes in
+     * after it. */
+    hu_config_apply_defaults(&cfg_local, &a);
+    cfg_local.arena = arena;
+    cfg_local.allocator = a;
+
+    /* Precondition: the defaults a real user starts from. */
+    HU_ASSERT_FALSE(cfg_local.follow_up_watcher.enabled);
+    HU_ASSERT_EQ(cfg_local.follow_up_watcher.interval_seconds, 300);
+
+    const char *json = "{\"follow_up_watcher\":{\"enabled\":true,\"interval_seconds\":120}}";
+    hu_error_t err = hu_config_parse_json(&cfg_local, json, strlen(json));
+    HU_ASSERT_EQ(err, HU_OK);
+
+    /* Postcondition: both fields moved, and only the parser could move them. */
+    HU_ASSERT_TRUE(cfg_local.follow_up_watcher.enabled);
+    HU_ASSERT_EQ(cfg_local.follow_up_watcher.interval_seconds, 120);
+    hu_arena_destroy(arena);
+}
+
+static void test_config_parse_follow_up_watcher_defaults_when_block_absent(void) {
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg_local;
+    memset(&cfg_local, 0, sizeof(cfg_local));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    hu_allocator_t a = hu_arena_allocator(arena);
+    /* hu_config_apply_defaults memsets the struct, so the arena is installed
+     * after it — the order src/config/config_merge.c uses when it loads. */
+    hu_config_apply_defaults(&cfg_local, &a);
+    cfg_local.arena = arena;
+    cfg_local.allocator = a;
+
+    hu_error_t err = hu_config_parse_json(&cfg_local, "{}", 2);
+    HU_ASSERT_EQ(err, HU_OK);
+
+    /* Opt-in subsystem: off by default, but carrying the 300s interval
+     * src/daemon.c documents, not a zero that would fall back silently. */
+    HU_ASSERT_FALSE(cfg_local.follow_up_watcher.enabled);
+    HU_ASSERT_EQ(cfg_local.follow_up_watcher.interval_seconds, 300);
+    hu_arena_destroy(arena);
+}
+
+static void test_config_parse_follow_up_watcher_rejects_fractional_interval(void) {
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg_local;
+    memset(&cfg_local, 0, sizeof(cfg_local));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    hu_allocator_t a = hu_arena_allocator(arena);
+    hu_config_apply_defaults(&cfg_local, &a);
+    cfg_local.arena = arena;
+    cfg_local.allocator = a;
+
+    /* 0.5 passes `> 0` but truncates to 0. It must keep the default, never
+     * store a zero interval. */
+    const char *json = "{\"follow_up_watcher\":{\"interval_seconds\":0.5}}";
+    HU_ASSERT_EQ(hu_config_parse_json(&cfg_local, json, strlen(json)), HU_OK);
+    HU_ASSERT_EQ(cfg_local.follow_up_watcher.interval_seconds, 300);
+    hu_arena_destroy(arena);
+}
+
+static void test_config_parse_follow_up_watcher_rejects_out_of_range_interval(void) {
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg_local;
+    memset(&cfg_local, 0, sizeof(cfg_local));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    hu_allocator_t a = hu_arena_allocator(arena);
+    /* hu_config_apply_defaults memsets the struct, so the arena is installed
+     * after it — the order src/config/config_merge.c uses when it loads. */
+    hu_config_apply_defaults(&cfg_local, &a);
+    cfg_local.arena = arena;
+    cfg_local.allocator = a;
+
+    /* Negative and absurd intervals keep the default rather than producing a
+     * hot-spin poll or an int that never elapses. */
+    const char *json = "{\"follow_up_watcher\":{\"enabled\":true,\"interval_seconds\":-5}}";
+    HU_ASSERT_EQ(hu_config_parse_json(&cfg_local, json, strlen(json)), HU_OK);
+    HU_ASSERT_TRUE(cfg_local.follow_up_watcher.enabled);
+    HU_ASSERT_EQ(cfg_local.follow_up_watcher.interval_seconds, 300);
+    hu_arena_destroy(arena);
+}
+
 void run_config_parse_tests(void) {
     HU_TEST_SUITE("Config parse");
     HU_RUN_TEST(test_config_parse_empty_json);
@@ -1766,4 +1865,10 @@ void run_config_parse_tests(void) {
     HU_RUN_TEST(test_config_parse_reflection_partial_block_keeps_other_defaults);
     HU_RUN_TEST(test_config_parse_reflection_provider_override);
     HU_RUN_TEST(test_config_parse_reflection_clamps_pathological_hours);
+
+    HU_TEST_SUITE("follow_up_watcher config");
+    HU_RUN_TEST(test_config_parse_follow_up_watcher_enabled);
+    HU_RUN_TEST(test_config_parse_follow_up_watcher_defaults_when_block_absent);
+    HU_RUN_TEST(test_config_parse_follow_up_watcher_rejects_out_of_range_interval);
+    HU_RUN_TEST(test_config_parse_follow_up_watcher_rejects_fractional_interval);
 }

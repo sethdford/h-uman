@@ -97,12 +97,6 @@ hu_conversation_snapshot_t hu_daemon_snapshot_for_msg(int64_t msg_timestamp_sec)
  * the daemon reply loop: derives parent guid, snapshot (incl. parent age for
  * the stale-tapback demotion), and react message id from the inbound msg. */
 struct hu_channel_loop_msg;
-hu_error_t hu_daemon_dispatch_imessage_reply_msg(void *ch, const void *persona,
-                                                 const struct hu_agent *agent,
-                                                 const struct hu_config *config, const char *target,
-                                                 size_t target_len,
-                                                 const struct hu_channel_loop_msg *msg,
-                                                 const char *body, size_t body_len);
 
 /* Same, reporting whether TEXT reached the contact: false when the dispatch
  * ended as a bare tapback, was dropped by the parrot guard, or failed. The

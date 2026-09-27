@@ -9,6 +9,4 @@
 
 hu_error_t hu_message_create(hu_allocator_t *alloc, hu_channel_t *channel, hu_tool_t *out);
 
-void hu_message_tool_set_channel(hu_tool_t *tool, hu_channel_t *channel);
-
 #endif

@@ -17,7 +17,7 @@ else
 fi
 
 # Measured 2026-05-31
-ROOT_BASELINE=4
+ROOT_BASELINE=3   # auto-locked 2026-09-20 (was 4)
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 

@@ -95,6 +95,30 @@ static void directive_includes_situation_and_output_rule(void) {
     HU_ASSERT_NOT_NULL(strstr(buf, "stock check-in phrasing"));
 }
 
+static void directive_asks_for_care_not_guilt(void) {
+    /* Shadow soak 2026-09-20..23 under the old "Nudge them" wording produced
+     * "Leaving me on read i see" and "yo u alive" — guilt and slang aimed at
+     * close contacts. The directive must frame the bump as care and rule out
+     * the read-receipt dig explicitly. */
+    char buf[384];
+    HU_ASSERT_TRUE(hu_followup_compose_directive("+15555550123", HU_FOLLOWUP_WARMTH_CLOSE, 5,
+                                                 "imessage", buf, sizeof(buf)) > 0);
+    HU_ASSERT_NULL(strstr(buf, "Nudge them"));
+    HU_ASSERT_NOT_NULL(strstr(buf, "because you care"));
+    HU_ASSERT_NOT_NULL(strstr(buf, "No guilt"));
+    HU_ASSERT_NOT_NULL(strstr(buf, "left on read"));
+}
+
+static void directive_fits_email_contact_in_caller_buffer(void) {
+    /* iMessage contacts can be email handles; the daemon's directive buffer
+     * must hold the longest realistic one or the truncation guard skips the
+     * follow-up entirely. */
+    char buf[HU_FOLLOWUP_COMPOSE_DIRECTIVE_MAX];
+    HU_ASSERT_TRUE(hu_followup_compose_directive("first.lastname.long@example-domain.com",
+                                                 HU_FOLLOWUP_WARMTH_CLOSE, 100, "imessage", buf,
+                                                 sizeof(buf)) > 0);
+}
+
 static void directive_singular_hour_reads_naturally(void) {
     char buf[384];
     HU_ASSERT_TRUE(hu_followup_compose_directive("+15555550123", HU_FOLLOWUP_WARMTH_FRIEND, 1,
@@ -275,6 +299,8 @@ void run_followup_compose_tests(void) {
     HU_RUN_TEST(pick_live_empty_composed_sends_nothing);
     HU_RUN_TEST(directive_none_warmth_refuses);
     HU_RUN_TEST(directive_includes_situation_and_output_rule);
+    HU_RUN_TEST(directive_asks_for_care_not_guilt);
+    HU_RUN_TEST(directive_fits_email_contact_in_caller_buffer);
     HU_RUN_TEST(directive_singular_hour_reads_naturally);
     HU_RUN_TEST(directive_distinguishes_warmth_tiers);
     HU_RUN_TEST(directive_truncation_refuses_rather_than_clipping);

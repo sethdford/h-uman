@@ -1475,6 +1475,42 @@ static void brief_char_cap_redteam(void) {
     HU_ASSERT_EQ(hu_conversation_brief_char_cap(false, &cp, HU_REL_TRUSTED), 72u);
 }
 
+/* Reply-length floor (2026-09-26): a contact who texts "Heyo" must not cap
+ * Seth's reply at 15 chars when his own measured p90 to her is higher. */
+static void max_response_chars_relational_measured_floor_lifts_short_incoming(void) {
+    hu_contact_profile_t cp = {0};
+    HU_ASSERT_EQ(hu_conversation_max_response_chars_relational(4, &cp, HU_REL_NEW), 15);
+    cp.reply_chars_p90 = 38;
+    HU_ASSERT_EQ(hu_conversation_max_response_chars_relational(4, &cp, HU_REL_NEW), 38);
+    /* Short-texter flag no longer drags the cap below what Seth sends. */
+    cp.prefers_short_texts = true;
+    HU_ASSERT_EQ(hu_conversation_max_response_chars_relational(4, &cp, HU_REL_NEW), 38);
+}
+
+static void max_response_chars_relational_measured_floor_never_lowers_cap(void) {
+    hu_contact_profile_t cp = {0};
+    int base = hu_conversation_max_response_chars_relational(120, &cp, HU_REL_NEW);
+    cp.reply_chars_p90 = 38;
+    HU_ASSERT_TRUE(base > 38);
+    HU_ASSERT_EQ(hu_conversation_max_response_chars_relational(120, &cp, HU_REL_NEW), base);
+}
+
+static void max_response_chars_relational_measured_floor_clamped_to_max(void) {
+    hu_contact_profile_t cp = {0};
+    cp.reply_chars_p90 = 900;
+    HU_ASSERT_EQ(hu_conversation_max_response_chars_relational(4, &cp, HU_REL_NEW), 300);
+}
+
+static void brief_char_cap_measured_floor_dm_only(void) {
+    hu_contact_profile_t cp = {0};
+    cp.prefers_short_texts = true;
+    HU_ASSERT_EQ(hu_conversation_brief_char_cap(false, &cp, HU_REL_TRUSTED), 72u);
+    cp.reply_chars_p90 = 110;
+    HU_ASSERT_EQ(hu_conversation_brief_char_cap(false, &cp, HU_REL_TRUSTED), 110u);
+    /* Groups keep their tight cap: the measurement is from 1:1 texts. */
+    HU_ASSERT_EQ(hu_conversation_brief_char_cap(true, &cp, HU_REL_TRUSTED), 50u);
+}
+
 static void calibrate_for_contact_softens_ping_for_warm_dm(void) {
     char buf[1024];
     hu_contact_profile_t cp = {0};
@@ -4984,6 +5020,10 @@ void run_conversation_tests(void) {
     HU_RUN_TEST(max_response_chars_relational_default_matches_plain);
     HU_RUN_TEST(max_response_chars_relational_trusted_higher);
     HU_RUN_TEST(brief_char_cap_redteam);
+    HU_RUN_TEST(max_response_chars_relational_measured_floor_lifts_short_incoming);
+    HU_RUN_TEST(max_response_chars_relational_measured_floor_never_lowers_cap);
+    HU_RUN_TEST(max_response_chars_relational_measured_floor_clamped_to_max);
+    HU_RUN_TEST(brief_char_cap_measured_floor_dm_only);
     HU_RUN_TEST(calibrate_for_contact_softens_ping_for_warm_dm);
     HU_RUN_TEST(calibrate_for_contact_group_uses_neutral_ratio);
     HU_RUN_TEST(quality_needs_revision_at_5x_ratio);

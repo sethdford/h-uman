@@ -8,7 +8,7 @@ fail=0; check() { if eval "$2"; then echo "PASS $1"; else echo "FAIL $1"; fail=1
 
 # 1. nothing present -> all six missing
 out=$(bash "$HERE/nightly-watchdog.sh" --dry-run)
-check "all missing when no artifacts" "[[ \"$out\" == *'missing=[humanness doctor retrain drift authorship llm-judge eval logrotate semantic-gate]'* ]]"
+check "all missing when no artifacts" "[[ \"$out\" == *'missing=[humanness doctor retrain drift authorship llm-judge eval logrotate profile-check semantic-gate]'* ]]"
 
 # 2. today's humanness verdict present (non-empty) -> not missing
 echo '{"composite":0.9}' > "$T/.human/logs/humanness-verdict-$TODAY.json"
@@ -78,4 +78,14 @@ check "empty semantic-gate file is not an artifact" "[[ \"$out\" == *'semantic-g
 rm -f "$T/.human/logs/humanness-verdict-$TODAY.json"; echo '{"composite":0.9}' > "$T/.human/logs/humanness-verdict-$(day_ago 5).json"
 out=$(HU_REPO_DIR="$T/repo" bash "$HERE/nightly-watchdog.sh" --dry-run)
 check "5-day-old humanness verdict does NOT satisfy a nightly marker" "[[ \"$out\" == *'missing=[humanness'* ]]"
+# profile-check is WEEKLY (lookback 7): a 5-day-old report satisfies it, a
+# 9-day-old one does not, and it runs at any hour.
+printf '#!/bin/bash\necho fake-profile-check\n' > "$T/repo/scripts/profile_check_weekly.sh"; chmod +x "$T/repo/scripts/profile_check_weekly.sh"
+echo '{"stale":[]}' > "$T/.human/logs/profile-check-$(day_ago 5).json"
+out=$(HU_REPO_DIR="$T/repo" bash "$HERE/nightly-watchdog.sh" --dry-run)
+check "profile-check report 5 days old satisfies the weekly marker" "[[ \"$out\" != *'profile-check'* ]]"
+rm -f "$T/.human/logs/profile-check-$(day_ago 5).json"
+echo '{"stale":[]}' > "$T/.human/logs/profile-check-$(day_ago 9).json"
+out=$(HU_REPO_DIR="$T/repo" HU_WATCHDOG_HOUR=03 bash "$HERE/nightly-watchdog.sh" --dry-run)
+check "profile-check report 9 days old is stale -> eligible at any hour" "[[ \"$out\" == *'profile-check(dry)'* ]]"
 rm -rf "$T"; exit $fail

@@ -27,10 +27,6 @@ typedef struct hu_oauth_session {
 
 typedef struct hu_oauth_ctx hu_oauth_ctx_t;
 
-hu_error_t hu_oauth_init(hu_allocator_t *alloc, const hu_oauth_config_t *config,
-                         hu_oauth_ctx_t **out);
-void hu_oauth_destroy(hu_oauth_ctx_t *ctx);
-
 hu_error_t hu_oauth_generate_pkce(hu_oauth_ctx_t *ctx, char *verifier, size_t verifier_size,
                                   char *challenge, size_t challenge_size);
 
@@ -43,8 +39,6 @@ hu_error_t hu_oauth_exchange_code(hu_oauth_ctx_t *ctx, const char *code, size_t 
                                   hu_oauth_session_t *session_out);
 
 hu_error_t hu_oauth_refresh_token(hu_oauth_ctx_t *ctx, hu_oauth_session_t *session);
-
-bool hu_oauth_session_valid(const hu_oauth_session_t *session);
 
 const char *hu_oauth_get_provider(hu_oauth_ctx_t *ctx);
 

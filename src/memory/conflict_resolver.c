@@ -13,18 +13,18 @@
  * Multi-valued relations (KNOWS, INTERESTED_IN, etc.) branch instead. */
 bool hu_conflict_relation_is_single_valued(hu_relation_type_t type) {
     switch (type) {
-        case HU_REL_WORKS_AT:
-        case HU_REL_LIVES_IN:
-            return true;
-        case HU_REL_KNOWS:
-        case HU_REL_FAMILY_OF:
-        case HU_REL_INTERESTED_IN:
-        case HU_REL_DISCUSSED_WITH:
-        case HU_REL_FEELS_ABOUT:
-        case HU_REL_PROMISED_TO:
-        case HU_REL_SHARED_EXPERIENCE:
-        case HU_REL_RELATED_TO:
-            return false;
+    case HU_REL_WORKS_AT:
+    case HU_REL_LIVES_IN:
+        return true;
+    case HU_REL_KNOWS:
+    case HU_REL_FAMILY_OF:
+    case HU_REL_INTERESTED_IN:
+    case HU_REL_DISCUSSED_WITH:
+    case HU_REL_FEELS_ABOUT:
+    case HU_REL_PROMISED_TO:
+    case HU_REL_SHARED_EXPERIENCE:
+    case HU_REL_RELATED_TO:
+        return false;
     }
     return false;
 }
@@ -54,16 +54,6 @@ hu_conflict_resolution_t hu_conflict_classify(const hu_graph_relation_t *propose
     return HU_CONFLICT_BRANCH;
 }
 
-const char *hu_conflict_resolution_str(hu_conflict_resolution_t r) {
-    switch (r) {
-        case HU_CONFLICT_NONE:      return "NONE";
-        case HU_CONFLICT_SUPERSEDE: return "SUPERSEDE";
-        case HU_CONFLICT_BRANCH:    return "BRANCH";
-        case HU_CONFLICT_FLAG:      return "FLAG";
-    }
-    return "UNKNOWN";
-}
-
 /* W8 Phase 5 — semantic-judge fallback.
  *
  * Pure helper, no DB I/O. Walks `candidates` in order, runs
@@ -76,11 +66,10 @@ const char *hu_conflict_resolution_str(hu_conflict_resolution_t r) {
  * most recently observed paraphrase is the right thing to supersede.
  *
  * Skips candidates with empty context — there's nothing to compare. */
-hu_conflict_resolution_t hu_conflict_classify_semantic(
-    const hu_graph_relation_t *proposed,
-    const hu_graph_relation_t *candidates,
-    size_t n_candidates,
-    int64_t *out_matched_existing_id) {
+hu_conflict_resolution_t hu_conflict_classify_semantic(const hu_graph_relation_t *proposed,
+                                                       const hu_graph_relation_t *candidates,
+                                                       size_t n_candidates,
+                                                       int64_t *out_matched_existing_id) {
     if (out_matched_existing_id)
         *out_matched_existing_id = 0;
     if (!proposed || !candidates || n_candidates == 0)
@@ -93,8 +82,7 @@ hu_conflict_resolution_t hu_conflict_classify_semantic(
         if (!ex->context || ex->context_len == 0 || ex->id <= 0)
             continue;
         hu_belief_conflict_t verdict = hu_belief_semantic_conflict(
-            proposed->context, proposed->context_len,
-            ex->context, ex->context_len);
+            proposed->context, proposed->context_len, ex->context, ex->context_len);
         if (verdict == HU_BELIEF_CONFLICT_PARAPHRASE) {
             if (out_matched_existing_id)
                 *out_matched_existing_id = ex->id;
@@ -113,8 +101,8 @@ hu_conflict_resolution_t hu_conflict_classify_semantic(
 
 /* graph.c exposes a tiny accessor so we don't drag the full struct here. */
 
-hu_error_t hu_conflict_apply(hu_graph_t *g, hu_conflict_resolution_t decision,
-                             int64_t proposed_id, int64_t existing_id, int64_t cutover_ts) {
+hu_error_t hu_conflict_apply(hu_graph_t *g, hu_conflict_resolution_t decision, int64_t proposed_id,
+                             int64_t existing_id, int64_t cutover_ts) {
     if (!g)
         return HU_ERR_INVALID_ARGUMENT;
     struct sqlite3 *db = hu_graph_sqlite_connection(g);
@@ -168,8 +156,8 @@ hu_error_t hu_conflict_apply(hu_graph_t *g, hu_conflict_resolution_t decision,
 
 #else /* !HU_ENABLE_SQLITE */
 
-hu_error_t hu_conflict_apply(hu_graph_t *g, hu_conflict_resolution_t decision,
-                             int64_t proposed_id, int64_t existing_id, int64_t cutover_ts) {
+hu_error_t hu_conflict_apply(hu_graph_t *g, hu_conflict_resolution_t decision, int64_t proposed_id,
+                             int64_t existing_id, int64_t cutover_ts) {
     (void)g;
     (void)decision;
     (void)proposed_id;

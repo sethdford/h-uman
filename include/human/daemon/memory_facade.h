@@ -3,16 +3,12 @@
 #define HU_DAEMON_MEMORY_FACADE_H
 
 #include "human/memory.h"
-#define HU_COGNITIVE_SKIP_LIFE_CHAPTER 1
-#include "human/memory/cognitive.h"
-#undef HU_COGNITIVE_SKIP_LIFE_CHAPTER
 #include "human/memory/comfort_patterns.h"
 #include "human/memory/compression.h"
 #include "human/memory/consolidation.h"
 #include "human/memory/consolidation_engine.h"
 #include "human/memory/contact_graph.h"
 #include "human/memory/deep_extract.h"
-#include "human/memory/degradation.h"
 #include "human/memory/emotional_graph.h"
 #include "human/memory/emotional_moments.h"
 #include "human/memory/emotional_residue.h"

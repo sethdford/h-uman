@@ -463,14 +463,8 @@ hu_error_t hu_world_model_load_with_channel(hu_memory_facade_t *m, hu_allocator_
  * `hu_world_model_invalidate(contact_id, len)` (non-NULL) clears ALL
  * channel-keyed entries for that contact — the right default because
  * most writes (graph upsert, negative memory, residue) are not channel-
- * scoped at the data layer.
- *
- * `hu_world_model_invalidate_channel(contact_id, len, channel, ch_len)`
- * clears only the (contact, channel) entry. Use when a write is
- * known-scoped to one channel (e.g., a channel-only ToM scenario). */
+ * scoped at the data layer. */
 void hu_world_model_invalidate(const char *contact_id, size_t cid_len);
-void hu_world_model_invalidate_channel(const char *contact_id, size_t cid_len, const char *channel,
-                                       size_t channel_len);
 
 /* P2.5 — observability: report cache slot capacity, total loads, hits,
  * and total evictions since process start (or last `_reset_for_tests`).

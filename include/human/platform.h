@@ -57,10 +57,4 @@ int hu_platform_mkdir(const char *path, unsigned int mode);
 /* Resolve path to absolute. Caller frees result. Returns NULL on failure. */
 char *hu_platform_realpath(hu_allocator_t *alloc, const char *path);
 
-/* Parse "YYYY-MM-DD HH:MM" or "HH:MM" into tm. Returns true on success. */
-bool hu_platform_parse_datetime(const char *ts, struct tm *out);
-
-/* Get home env var (HOME or USERPROFILE). Returns non-owned pointer or NULL. */
-const char *hu_platform_get_home_env(void);
-
 #endif /* HU_PLATFORM_H */

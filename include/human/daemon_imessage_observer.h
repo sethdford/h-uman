@@ -29,7 +29,7 @@ extern "C" {
 
 /* Daemon-init wiring: attach the personal_model the observer will ingest
  * into. Pass NULL at shutdown to detach. Mirrors the
- * hu_daemon_reaction_wire_personal_model pattern. */
+ * hu_reaction_handler_set_personal_model pattern. */
 void hu_daemon_imessage_observer_wire_personal_model(struct hu_personal_model *model);
 
 /* Single tick — pulls every chat.db message with date > `since_unix`,

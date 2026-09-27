@@ -4,6 +4,7 @@
 #include "human/agent/prompt.h"
 #include "human/agent/prompt_budget.h"
 #include "human/agent/prompt_trim.h"
+#include "human/core/gate_mode.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
 #include "human/core/string.h"
@@ -421,6 +422,9 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
             HU_TRIM_SLOT_RELATIONAL_EPISODE,
             HU_TRIM_SLOT_MOMENT,
             HU_TRIM_SLOT_PERSONAL_MODEL,
+            /* Last: a few hundred bytes of distilled "what to pick up on"
+             * (callbacks, curiosity, absence) outranks bulk middle context. */
+            HU_TRIM_SLOT_HUMANNESS,
             HU_TRIM_SLOT_COUNT,
         };
         hu_prompt_trim_span_t spans[HU_TRIM_SLOT_COUNT] = {{0, 0}};
@@ -486,11 +490,33 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
                         hu_persona_direction_text_len, len);
         }
 
+        /* Humanness directives (shared references, curiosity, absence) are
+         * built on the streaming path but were only appended on the
+         * NON-immersive path below — production, which is immersive, never
+         * saw them. HU_IMMERSIVE_HUMANNESS activation gated on the blind-A/B
+         * proxy gate (scripts/blind_ab_gate.py): do not flip to default-ON
+         * without a measurement showing replies with it read at least as much
+         * like Seth (.claude/rules/feature-gate-requires-measurement.md). */
+        const char *hum_text = NULL;
+        size_t hum_text_len = 0;
+        if (config->humanness_context && config->humanness_context_len > 0) {
+            hu_gate_mode_t hum_mode = hu_gate_mode_from_env("HU_IMMERSIVE_HUMANNESS", HU_GATE_OFF);
+            if (hum_mode == HU_GATE_LIVE) {
+                hum_text = config->humanness_context;
+                hum_text_len = config->humanness_context_len;
+            } else if (hum_mode == HU_GATE_SHADOW) {
+                hu_log_info("immersive_humanness", NULL,
+                            "shadow: would add %zu B of humanness directives: %.160s",
+                            config->humanness_context_len, config->humanness_context);
+            }
+        }
+
         /* Immersive middle sections, in prompt order. One row per section
          * collapses what were 12 copy-paste blocks (07-12 review): each row
          * appends optional header + text + optional trailer, records its
          * per-field byte stats, and (for trimmable sections) its span. */
         {
+            static const char k_hdr_humanness[] = "\n## In the moment\n";
             static const char k_hdr_exemplars[] =
                 "HOW YOU SOUND TO THIS PERSON (verbatim recent messages):\n";
             static const char k_hdr_stm[] = "\n\n### Session Context\n";
@@ -532,6 +558,8 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
                  HU_TRIM_SLOT_GRAPH},
                 {config->continuity_context, config->continuity_context_len, NULL, 0, k_sep1, 1,
                  HU_PROMPT_FIELD_CONTINUITY_CONTEXT, HU_TRIM_SLOT_CONTINUITY},
+                {hum_text, hum_text_len, k_hdr_humanness, sizeof(k_hdr_humanness) - 1, k_sep1, 1,
+                 HU_PROMPT_FIELD_HUMANNESS_CONTEXT, HU_TRIM_SLOT_HUMANNESS},
                 {config->contact_context, config->contact_context_len, NULL, 0, NULL, 0,
                  HU_PROMPT_FIELD_CONTACT_CONTEXT, -1},
                 {config->conversation_context, config->conversation_context_len, NULL, 0, NULL, 0,
@@ -695,28 +723,31 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
                  * shadow events had exemplars=0 graph=0 and memory alone was
                  * short on most). Sizes come straight from the config so no
                  * extra bookkeeping is paid on the happy path. */
-                hu_log_info("prompt_trim", NULL,
-                            "shadow: would trim %zu of %zu overage (cont=%zu exemplars=%zu "
-                            "graph=%zu memory=%zu wm=%zu rel=%zu moment=%zu pm=%zu); positional "
-                            "cut drops the tail %zu instead; persona=%zu total=%zu sections "
-                            "stm=%zu conv=%zu contact=%zu instr=%zu custom=%zu",
-                            planned, positional_cut, cuts[HU_TRIM_SLOT_CONTINUITY],
-                            cuts[HU_TRIM_SLOT_EXEMPLARS], cuts[HU_TRIM_SLOT_GRAPH],
-                            cuts[HU_TRIM_SLOT_MEMORY], cuts[HU_TRIM_SLOT_WORLD_MODEL],
-                            cuts[HU_TRIM_SLOT_RELATIONAL_EPISODE], cuts[HU_TRIM_SLOT_MOMENT],
-                            cuts[HU_TRIM_SLOT_PERSONAL_MODEL], positional_cut,
-                            config->persona_prompt_len, len, config->stm_context_len,
-                            config->conversation_context_len, config->contact_context_len,
-                            config->instruction_context_len, config->custom_instructions_len);
+                hu_log_info(
+                    "prompt_trim", NULL,
+                    "shadow: would trim %zu of %zu overage (cont=%zu exemplars=%zu "
+                    "graph=%zu memory=%zu wm=%zu rel=%zu moment=%zu pm=%zu hum=%zu); positional "
+                    "cut drops the tail %zu instead; persona=%zu total=%zu sections "
+                    "stm=%zu conv=%zu contact=%zu instr=%zu custom=%zu",
+                    planned, positional_cut, cuts[HU_TRIM_SLOT_CONTINUITY],
+                    cuts[HU_TRIM_SLOT_EXEMPLARS], cuts[HU_TRIM_SLOT_GRAPH],
+                    cuts[HU_TRIM_SLOT_MEMORY], cuts[HU_TRIM_SLOT_WORLD_MODEL],
+                    cuts[HU_TRIM_SLOT_RELATIONAL_EPISODE], cuts[HU_TRIM_SLOT_MOMENT],
+                    cuts[HU_TRIM_SLOT_PERSONAL_MODEL], cuts[HU_TRIM_SLOT_HUMANNESS], positional_cut,
+                    config->persona_prompt_len, len, config->stm_context_len,
+                    config->conversation_context_len, config->contact_context_len,
+                    config->instruction_context_len, config->custom_instructions_len);
             } else if (planned > 0) {
                 len = hu_prompt_trim_apply(buf, len, spans, HU_TRIM_SLOT_COUNT, cuts);
-                hu_log_info("prompt_trim", NULL,
-                            "live: trimmed %zu bytes (cont=%zu exemplars=%zu graph=%zu "
-                            "memory=%zu wm=%zu rel=%zu moment=%zu pm=%zu); prompt now %zu bytes",
-                            planned, cuts[HU_TRIM_SLOT_CONTINUITY], cuts[HU_TRIM_SLOT_EXEMPLARS],
-                            cuts[HU_TRIM_SLOT_GRAPH], cuts[HU_TRIM_SLOT_MEMORY],
-                            cuts[HU_TRIM_SLOT_WORLD_MODEL], cuts[HU_TRIM_SLOT_RELATIONAL_EPISODE],
-                            cuts[HU_TRIM_SLOT_MOMENT], cuts[HU_TRIM_SLOT_PERSONAL_MODEL], len);
+                hu_log_info(
+                    "prompt_trim", NULL,
+                    "live: trimmed %zu bytes (cont=%zu exemplars=%zu graph=%zu "
+                    "memory=%zu wm=%zu rel=%zu moment=%zu pm=%zu hum=%zu); prompt now %zu bytes",
+                    planned, cuts[HU_TRIM_SLOT_CONTINUITY], cuts[HU_TRIM_SLOT_EXEMPLARS],
+                    cuts[HU_TRIM_SLOT_GRAPH], cuts[HU_TRIM_SLOT_MEMORY],
+                    cuts[HU_TRIM_SLOT_WORLD_MODEL], cuts[HU_TRIM_SLOT_RELATIONAL_EPISODE],
+                    cuts[HU_TRIM_SLOT_MOMENT], cuts[HU_TRIM_SLOT_PERSONAL_MODEL],
+                    cuts[HU_TRIM_SLOT_HUMANNESS], len);
             }
         }
         *out = buf;

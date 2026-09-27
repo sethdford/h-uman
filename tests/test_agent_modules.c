@@ -1,6 +1,5 @@
-/* Tests for thin agent modules: outcomes, awareness, action_preview, episodic,
+/* Tests for thin agent modules: outcomes, awareness, episodic,
  * memory_loader, context_tokens, dispatcher, mailbox, compaction, reflection, planner. */
-#include "human/agent/action_preview.h"
 #include "human/agent/awareness.h"
 #include "human/agent/compaction.h"
 #include "human/agent/constitutional.h"
@@ -104,28 +103,6 @@ static void test_awareness_context_null_when_empty(void) {
     char *ctx = hu_awareness_context(&aw, &alloc, &len);
     HU_ASSERT_NULL(ctx);
     hu_awareness_deinit(&aw);
-}
-
-/* ─── action_preview ────────────────────────────────────────────────────── */
-
-static void test_action_preview_generate_simple(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_action_preview_t p;
-    const char *args = "{\"path\":\"/tmp/test.txt\"}";
-    hu_error_t err = hu_action_preview_generate(&alloc, "file_read", args, strlen(args), &p);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_NOT_NULL(p.description);
-    HU_ASSERT_TRUE(strstr(p.description, "/tmp/test.txt") != NULL);
-    HU_ASSERT_STR_EQ(p.risk_level, "low");
-
-    char *formatted = NULL;
-    size_t fmt_len = 0;
-    err = hu_action_preview_format(&alloc, &p, &formatted, &fmt_len);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_NOT_NULL(formatted);
-    HU_ASSERT_TRUE(strstr(formatted, "file_read") != NULL);
-    alloc.free(alloc.ctx, formatted, fmt_len + 1);
-    hu_action_preview_free(&alloc, &p);
 }
 
 /* ─── episodic ───────────────────────────────────────────────────────────── */
@@ -538,7 +515,6 @@ void run_agent_modules_tests(void) {
     HU_RUN_TEST(test_awareness_init_with_bus);
     HU_RUN_TEST(test_awareness_context_returns_non_null_when_data);
     HU_RUN_TEST(test_awareness_context_null_when_empty);
-    HU_RUN_TEST(test_action_preview_generate_simple);
     HU_RUN_TEST(test_episodic_summarize_and_store_recall);
     HU_RUN_TEST(test_memory_loader_null_memory_graceful);
     HU_RUN_TEST(test_memory_loader_set_facade_null_loader_noop);

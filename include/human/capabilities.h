@@ -2,31 +2,28 @@
 #define HU_CAPABILITIES_H
 
 #include "human/config.h"
-#include "human/core/allocator.h"
-#include "human/core/error.h"
-#include "human/tool.h"
+#include <stdbool.h>
 #include <stddef.h>
 
 /**
- * Build JSON manifest of runtime capabilities (channels, memory engines, tools).
- * Caller owns returned string; free with allocator.
+ * The single source of truth for "which channels can this build talk on" —
+ * both the CLI (`human capabilities`) and the RPC (`admin.capabilities`)
+ * render channel lists through this helper instead of hardcoding names.
+ *
+ * Writes the catalog channel keys (channel_catalog.h) compiled into this
+ * build into out[out_cap], always NUL-terminated. When json is true, writes
+ * a JSON string array (e.g. ["cli","imessage"], or "[]" if empty);
+ * otherwise a comma-separated list (e.g. "cli, imessage", or "(none)" if
+ * empty). Returns the number of bytes written, excluding the terminator.
+ * No-op (returns 0) if out is NULL or out_cap is 0.
  */
-hu_error_t hu_capabilities_build_manifest_json(hu_allocator_t *alloc, const hu_config_t *cfg_opt,
-                                               const hu_tool_t *runtime_tools,
-                                               size_t runtime_tools_count, char **out_json);
+size_t hu_capabilities_channels_built_list(char *out, size_t out_cap, bool json);
 
 /**
- * Build human-readable summary text.
+ * Number of catalog channels that are both compiled into this build and
+ * configured under cfg_opt (see hu_channel_catalog_is_configured). Returns
+ * 0 if cfg_opt is NULL.
  */
-hu_error_t hu_capabilities_build_summary_text(hu_allocator_t *alloc, const hu_config_t *cfg_opt,
-                                              const hu_tool_t *runtime_tools,
-                                              size_t runtime_tools_count, char **out_text);
-
-/**
- * Build prompt section for agent context.
- */
-hu_error_t hu_capabilities_build_prompt_section(hu_allocator_t *alloc, const hu_config_t *cfg_opt,
-                                                const hu_tool_t *runtime_tools,
-                                                size_t runtime_tools_count, char **out_text);
+size_t hu_capabilities_channels_configured_count(const hu_config_t *cfg_opt);
 
 #endif /* HU_CAPABILITIES_H */

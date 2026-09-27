@@ -2642,6 +2642,13 @@ hu_error_t hu_persona_load_json(hu_allocator_t *alloc, const char *json, size_t 
                     cp->leave_on_read_pct = (uint8_t)(v > 100 ? 100 : (v < 0 ? 0 : v));
                 }
             }
+            {
+                hu_json_value_t *rl = hu_json_object_get(cval, "reply_chars_p90");
+                if (rl && rl->type == HU_JSON_NUMBER && rl->data.number >= 1) {
+                    double v = rl->data.number;
+                    cp->reply_chars_p90 = (uint16_t)(v > 2000 ? 2000 : v);
+                }
+            }
 
             /* Proactive engagement config */
             hu_json_value_t *proactive = hu_json_object_get(cval, "proactive");

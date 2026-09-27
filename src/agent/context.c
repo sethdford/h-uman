@@ -96,16 +96,6 @@ hu_error_t hu_context_format_messages(hu_allocator_t *alloc, const hu_owned_mess
     return HU_OK;
 }
 
-/* Estimate context window size in tokens (rough). */
-uint32_t hu_context_estimate_tokens(const hu_chat_message_t *messages, size_t messages_count) {
-    uint32_t total = 0;
-    for (size_t i = 0; i < messages_count; i++) {
-        total += (uint32_t)hu_tokens_estimate_text(messages[i].content, messages[i].content_len);
-        total += 4; /* chat formatting overhead per message — not part of the ratio */
-    }
-    return total;
-}
-
 /* Byte weight of a single message's multimodal content parts (base64/url
  * payloads). This is the dimension the pre-2026-07 history-budget cap ignored:
  * it summed only content_len, so a message carrying a multi-MB base64 image

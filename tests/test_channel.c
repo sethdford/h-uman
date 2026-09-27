@@ -19,9 +19,6 @@
 #if HU_HAS_QQ
 #include "human/channels/qq.h"
 #endif
-#if HU_HAS_MAIXCAM
-#include "human/channels/maixcam.h"
-#endif
 #if HU_HAS_DISPATCH
 #include "human/channels/dispatch.h"
 #endif
@@ -181,8 +178,7 @@ static void test_telegram_react_ok_in_test_mode(void) {
     hu_channel_t ch;
     hu_telegram_create(&alloc, "t", 1, &ch);
     HU_ASSERT_NOT_NULL(ch.vtable->react);
-    hu_error_t err =
-        ch.vtable->react(ch.ctx, "12345", 5, (int64_t)1, HU_REACTION_THUMBS_UP);
+    hu_error_t err = ch.vtable->react(ch.ctx, "12345", 5, (int64_t)1, HU_REACTION_THUMBS_UP);
     HU_ASSERT_EQ(err, HU_OK);
     hu_telegram_destroy(&ch);
 }
@@ -203,8 +199,8 @@ static void test_telegram_load_conversation_history_empty_in_test(void) {
     HU_ASSERT_NOT_NULL(ch.vtable->load_conversation_history);
     hu_channel_history_entry_t *entries = NULL;
     size_t count = 0;
-    hu_error_t err = ch.vtable->load_conversation_history(ch.ctx, &alloc, "chat1", 5, 10, &entries,
-                                                          &count);
+    hu_error_t err =
+        ch.vtable->load_conversation_history(ch.ctx, &alloc, "chat1", 5, 10, &entries, &count);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_EQ(count, 0u);
     HU_ASSERT_NULL(entries);
@@ -380,27 +376,6 @@ static void test_qq_send_in_test_mode(void) {
     err = ch.vtable->send(ch.ctx, "channel", 7, "hello", 5, NULL, 0);
     HU_ASSERT_EQ(err, HU_OK);
     hu_qq_destroy(&ch);
-}
-#endif
-
-#if HU_HAS_MAIXCAM
-static void test_maixcam_create_succeeds(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_channel_t ch;
-    hu_error_t err = hu_maixcam_create(&alloc, "localhost", 9, 8080, &ch);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_NOT_NULL(ch.ctx);
-    HU_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "maixcam");
-    hu_maixcam_destroy(&ch);
-}
-static void test_maixcam_send_in_test_mode(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_channel_t ch;
-    hu_error_t err = hu_maixcam_create(&alloc, "localhost", 9, 8080, &ch);
-    HU_ASSERT_EQ(err, HU_OK);
-    err = ch.vtable->send(ch.ctx, NULL, 0, "hello", 5, NULL, 0);
-    HU_ASSERT_EQ(err, HU_OK);
-    hu_maixcam_destroy(&ch);
 }
 #endif
 
@@ -725,10 +700,6 @@ void run_channel_tests(void) {
 #if HU_HAS_QQ
     HU_RUN_TEST(test_qq_create_succeeds);
     HU_RUN_TEST(test_qq_send_in_test_mode);
-#endif
-#if HU_HAS_MAIXCAM
-    HU_RUN_TEST(test_maixcam_create_succeeds);
-    HU_RUN_TEST(test_maixcam_send_in_test_mode);
 #endif
 #if HU_HAS_DISPATCH
     HU_RUN_TEST(test_dispatch_create_succeeds);

@@ -136,9 +136,3 @@ hu_error_t hu_undo_stack_execute_undo(hu_undo_stack_t *stack, hu_allocator_t *al
     stack->count = (stack->count > 0) ? stack->count - 1 : 0;
     return HU_OK;
 }
-
-void hu_undo_entry_free(hu_allocator_t *alloc, hu_undo_entry_t *entry) {
-    if (!alloc || !entry)
-        return;
-    free_entry(alloc, entry);
-}

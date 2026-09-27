@@ -95,6 +95,10 @@ typedef struct hu_contact_profile {
     char *dunbar_layer;
     float affect_mirror_ceiling; /* per-contact ceiling override. 0 = use stage default */
     uint8_t leave_on_read_pct;   /* per-contact override (0-100). 0 = use overlay/default */
+    /* 90th-percentile length (UTF-8 bytes) of the persona owner's OWN texts to
+     * this contact, measured by scripts/measure_contact_reply_lengths.py.
+     * Floors the 1:1 reply cap. 0 = not measured (cap heuristics unchanged). */
+    uint16_t reply_chars_p90;
 } hu_contact_profile_t;
 
 /* Motivation — the character's core drive (anti-drift anchor) */

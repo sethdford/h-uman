@@ -1,95 +1,23 @@
-/* Skills and skill registry tests. */
+/* Skill registry, skillforge and skill-run tool tests.
+ *
+ * The filename heuristic in scripts/check-test-references.sh resolves
+ * "skills" to src/intelligence/skills.c, which this file does not exercise;
+ * it covers src/skills/skill_registry.c, src/skills/skillforge.c and
+ * src/tools/skill_run.c.
+ *
+ * // @covers-none — heuristic picks src/intelligence/skills.c; see above.
+ */
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/json.h"
 #include "human/skill_registry.h"
 #include "human/skillforge.h"
-#include "human/skills.h"
 #include "human/tools/skill_run.h"
-#include "human/core/json.h"
 #include "test_framework.h"
 #include <string.h>
 
 extern void hu_skill_registry_resolve_tags_string(hu_json_value_t *tags_val, char *tags_buf,
                                                   size_t tags_buf_len, const char **out_tags_str);
-
-static void test_skills_list_delegates_to_skillforge(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_skill_t *skills = NULL;
-    size_t count = 99;
-    hu_error_t err = hu_skills_list(&alloc, "/tmp", &skills, &count);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_NOT_NULL(skills);
-    HU_ASSERT_EQ(count, 4u);
-    HU_ASSERT_STR_EQ(skills[0].name, "test-skill");
-    hu_skills_free(&alloc, skills, count);
-}
-
-static void test_skills_list_null_workspace_uses_dot(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_skill_t *skills = NULL;
-    size_t count = 0;
-    hu_error_t err = hu_skills_list(&alloc, NULL, &skills, &count);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_NOT_NULL(skills);
-    HU_ASSERT_EQ(count, 4u);
-    hu_skills_free(&alloc, skills, count);
-}
-
-static void test_skills_free_null_safe(void) {
-    /* Crash safety test: verifies NULL skills pointer does not cause segfault.
-     * hu_skills_free is void — no return code to assert. */
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_skills_free(&alloc, NULL, 0);
-}
-
-static void test_skills_free_with_null_skills(void) {
-    /* Crash safety test: NULL skills with nonzero count must not crash. */
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_skills_free(&alloc, NULL, 5);
-}
-
-static void test_skills_list_resets_output(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_skill_t *skills = (hu_skill_t *)0xdeadbeef;
-    size_t count = 42;
-    hu_error_t err = hu_skills_list(&alloc, ".", &skills, &count);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_NOT_NULL(skills);
-    HU_ASSERT_EQ(count, 4u);
-    hu_skills_free(&alloc, skills, count);
-}
-
-static void test_skills_list_null_out_returns_error(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_skill_t *skills = NULL;
-    size_t count = 0;
-    hu_error_t err = hu_skills_list(&alloc, "/tmp", NULL, &count);
-    HU_ASSERT_NEQ(err, HU_OK);
-    err = hu_skills_list(&alloc, "/tmp", &skills, NULL);
-    HU_ASSERT_NEQ(err, HU_OK);
-}
-
-static void test_skills_list_empty_workspace_path(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_skill_t *skills = NULL;
-    size_t count = 0;
-    hu_error_t err = hu_skills_list(&alloc, "", &skills, &count);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_NOT_NULL(skills);
-    HU_ASSERT_TRUE(count >= 1);
-    hu_skills_free(&alloc, skills, count);
-}
-
-static void test_skills_list_dot_workspace(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_skill_t *skills = NULL;
-    size_t count = 0;
-    hu_error_t err = hu_skills_list(&alloc, ".", &skills, &count);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_NOT_NULL(skills);
-    HU_ASSERT_EQ(count, 4u);
-    hu_skills_free(&alloc, skills, count);
-}
 
 /* HU_IS_TEST: skill registry returns mock data without network */
 static void test_skill_registry_search_mock(void) {
@@ -368,8 +296,7 @@ static void test_skill_run_returns_instructions_content(void) {
     hu_tool_t tool;
     HU_ASSERT_EQ(hu_skill_run_create(&alloc, &tool, &sf, NULL, 0, NULL), HU_OK);
     hu_json_value_t *args = hu_json_object_new(&alloc);
-    hu_json_object_set(&alloc, args, "skill",
-                       hu_json_string_new(&alloc, "skill-md-mock", 14));
+    hu_json_object_set(&alloc, args, "skill", hu_json_string_new(&alloc, "skill-md-mock", 14));
     hu_tool_result_t result = {0};
     HU_ASSERT_EQ(tool.vtable->execute(tool.ctx, &alloc, args, &result), HU_OK);
     HU_ASSERT_TRUE(result.success);
@@ -385,14 +312,6 @@ static void test_skill_run_returns_instructions_content(void) {
 
 void run_skills_tests(void) {
     HU_TEST_SUITE("Skills");
-    HU_RUN_TEST(test_skills_list_delegates_to_skillforge);
-    HU_RUN_TEST(test_skills_list_null_workspace_uses_dot);
-    HU_RUN_TEST(test_skills_free_null_safe);
-    HU_RUN_TEST(test_skills_free_with_null_skills);
-    HU_RUN_TEST(test_skills_list_resets_output);
-    HU_RUN_TEST(test_skills_list_null_out_returns_error);
-    HU_RUN_TEST(test_skills_list_empty_workspace_path);
-    HU_RUN_TEST(test_skills_list_dot_workspace);
     HU_RUN_TEST(test_skill_registry_search_mock);
     HU_RUN_TEST(test_skill_registry_install_mock);
     HU_RUN_TEST(test_skill_registry_install_by_name_mock);

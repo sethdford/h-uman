@@ -3297,6 +3297,26 @@ static void test_creator_synthesize_merges_research_fields(void) {
     hu_persona_deinit(&alloc, &merged);
 }
 
+static void test_contact_profile_reply_chars_p90_parsed(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *json = "{\"version\":1,\"name\":\"rltest\","
+                       "\"core\":{\"identity\":\"Test\",\"traits\":[\"a\"]},"
+                       "\"contacts\":{\"a\":{\"name\":\"A\",\"reply_chars_p90\":38},"
+                       "\"b\":{\"name\":\"B\",\"reply_chars_p90\":0},"
+                       "\"c\":{\"name\":\"C\"}}}";
+    hu_persona_t p = {0};
+    HU_ASSERT_EQ(hu_persona_load_json(&alloc, json, strlen(json), &p), HU_OK);
+    HU_ASSERT_EQ(p.contacts_count, 3);
+    for (size_t i = 0; i < p.contacts_count; i++) {
+        const char *n = p.contacts[i].name;
+        if (strcmp(n, "A") == 0)
+            HU_ASSERT_EQ((int)p.contacts[i].reply_chars_p90, 38);
+        else /* 0 and missing both mean "not measured" */
+            HU_ASSERT_EQ((int)p.contacts[i].reply_chars_p90, 0);
+    }
+    hu_persona_deinit(&alloc, &p);
+}
+
 static void test_contact_profile_attachment_and_dunbar(void) {
     hu_allocator_t alloc = hu_system_allocator();
     const char *json = "{\"version\":1,\"name\":\"cptest\","
@@ -5431,6 +5451,7 @@ void run_persona_tests(void) {
     HU_RUN_TEST(test_contact_json_parses_affect_mirror_ceiling);
     HU_RUN_TEST(test_contact_json_clamps_affect_mirror_ceiling_out_of_range);
     HU_RUN_TEST(test_leave_on_read_pct_effective_contact_override_wins);
+    HU_RUN_TEST(test_contact_profile_reply_chars_p90_parsed);
     HU_RUN_TEST(test_leave_on_read_pct_effective_falls_back_to_overlay);
     HU_RUN_TEST(test_leave_on_read_pct_effective_zero_when_neither_set);
     HU_RUN_TEST(test_leave_on_read_pct_effective_null_contact_uses_overlay);

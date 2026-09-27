@@ -34,6 +34,9 @@
 #include "human/config.h"
 #include "human/core/error.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
+#include "human/core/time.h"
+#include "human/heartbeat.h"
 #include "human/intelligence/meta_learning.h"
 #include "human/intelligence/reflection.h"
 #include "human/intelligence/skills.h"
@@ -51,6 +54,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <time.h>
+#include <utime.h>
 
 hu_consolidation_config_t hu_daemon_consolidation_config(const hu_config_t *config,
                                                          struct hu_agent *agent) {
@@ -110,6 +114,52 @@ bool hu_daemon_verifier_metrics_flush(const hu_verifier_metrics_t *snap, int64_t
     return true;
 }
 
+bool hu_daemon_heartbeat_flush(hu_allocator_t *alloc, bool enabled, int64_t interval_ms,
+                               const char *workspace_dir, int64_t now_ms, int64_t wall_ms,
+                               int64_t *last_tick_ms) {
+    if (!alloc || !workspace_dir || !last_tick_ms || !enabled || interval_ms <= 0)
+        return false;
+    if (*last_tick_ms != 0 && now_ms - *last_tick_ms < interval_ms)
+        return false;
+    hu_error_t err = hu_heartbeat_ensure_file(workspace_dir, alloc);
+    if (err != HU_OK) {
+        static atomic_bool warned_ensure = false;
+        hu_log_warn_once(&warned_ensure, "human", NULL,
+                         "heartbeat ensure_file failed: %s — HEARTBEAT.md will not exist "
+                         "under the state dir until a future tick succeeds",
+                         hu_error_string(err));
+        *last_tick_ms = now_ms;
+        return true;
+    }
+    hu_heartbeat_engine_t engine;
+    /* `enabled` and the interval are passed for completeness only:
+     * hu_heartbeat_tick reads engine->workspace_dir and nothing else, so the
+     * engine's clamped interval_minutes has no consumer. The `interval_ms`
+     * gate at the top of this function is what actually paces the tick. */
+    hu_heartbeat_engine_init(&engine, enabled, (uint32_t)(interval_ms / 60000), workspace_dir);
+    hu_heartbeat_result_t result = {0};
+    err = hu_heartbeat_tick(&engine, alloc, &result);
+    if (err != HU_OK) {
+        static atomic_bool warned_tick = false;
+        hu_log_warn_once(&warned_tick, "human", NULL, "heartbeat tick failed: %s",
+                         hu_error_string(err));
+    }
+    /* hu_heartbeat_tick only reads HEARTBEAT.md — it never writes — so
+     * without an explicit touch here the file's mtime would stay pinned at
+     * creation time forever and could never serve as a liveness signal the
+     * way the verifier/scheduler heartbeat files already do for `human
+     * doctor`. wall_ms (not now_ms) is used because this is a timestamp
+     * written to disk, not an elapsed-interval comparison. */
+    char path[1024];
+    if (hu_heartbeat_file_path(workspace_dir, path, sizeof(path)) > 0) {
+        struct utimbuf times = {.actime = (time_t)(wall_ms / 1000),
+                                .modtime = (time_t)(wall_ms / 1000)};
+        (void)utime(path, &times);
+    }
+    *last_tick_ms = now_ms;
+    return true;
+}
+
 #if defined(HU_HAS_CRON) && !defined(HU_IS_TEST)
 
 void hu_daemon_maintenance_tick(hu_allocator_t *alloc, struct hu_agent *agent,
@@ -147,6 +197,25 @@ void hu_daemon_maintenance_tick(hu_allocator_t *alloc, struct hu_agent *agent,
          * See docs/plans/2026-05-25-doctor-prompt-budget-initiative/. */
         static int64_t last_pb_flush_ms = 0;
         (void)hu_daemon_prompt_budget_flush(agent->prompt_budget, now_vf_ms, &last_pb_flush_ms);
+    }
+    /* Heartbeat engine — README-documented, previously inert: config parsed
+     * heartbeat.enabled/interval_minutes but nothing read them. Ensures
+     * HEARTBEAT.md exists under the state dir and ticks it (parses periodic
+     * tasks) once the configured interval elapses. Off by default
+     * (heartbeat.enabled == false), so an unconfigured daemon creates no
+     * file. Gate + mtime-touch logic lives in hu_daemon_heartbeat_flush
+     * (testable, pinned by tests/test_daemon_maintenance.c) so this stays a
+     * thin dispatch; independent of `agent` since the engine only needs the
+     * state dir. */
+    if (config && config->heartbeat.enabled) {
+        static int64_t last_heartbeat_tick_ms = 0;
+        char heartbeat_dir[1024];
+        if (hu_paths_state_mkdir(heartbeat_dir, sizeof(heartbeat_dir)) >= 0) {
+            (void)hu_daemon_heartbeat_flush(alloc, config->heartbeat.enabled,
+                                            (int64_t)config->heartbeat.interval_minutes * 60000,
+                                            heartbeat_dir, hu_time_get_current_ms(),
+                                            hu_time_wall_ms(), &last_heartbeat_tick_ms);
+        }
     }
     /* Periodic memory consolidation */
     if (config && config->consolidation_interval_hours > 0 && agent && agent->memory) {

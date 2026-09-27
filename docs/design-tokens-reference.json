@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-06T11:59:52.791Z",
+  "generated": "2026-09-26T18:22:48.631Z",
   "groups": {
     "color.neutral": [
       {
@@ -2296,13 +2296,13 @@
       },
       {
         "name": "link",
-        "value": "#5A9A30",
-        "hex": "#5A9A30"
+        "value": "#3a6a24",
+        "hex": "#3a6a24"
       },
       {
         "name": "link-hover",
-        "value": "#3a6a24",
-        "hex": "#3a6a24"
+        "value": "#264A17",
+        "hex": "#264A17"
       },
       {
         "name": "link-active",

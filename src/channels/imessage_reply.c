@@ -2,6 +2,7 @@
 #include "human/channels/imessage_action.h"
 #include "human/channels/imessage_caps.h"
 #include "human/channels/imessage_schema.h"
+#include "human/channels/imessage_send_observer.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/log.h"
@@ -239,11 +240,21 @@ static void emit_telemetry(const char *tier_used, hu_reply_style_t style, int se
  * Extracted so the four tiers below share one epilogue instead of repeating
  * the stamp/verify/telemetry sequence (clone-ratchet discipline). */
 static hu_error_t reply_tier_succeeded(const char *tier, const char *target, size_t target_len,
-                                       int64_t since_rowid, int64_t ts_start_ms) {
+                                       const char *body, size_t body_len, int64_t since_rowid,
+                                       int64_t ts_start_ms) {
     snprintf(g_last_tier, sizeof(g_last_tier), "%s", tier);
     g_last_verified_threaded = hu_imessage_reply_verify_threaded(target, target_len, since_rowid);
     emit_telemetry(tier, g_last_verified_threaded ? HU_REPLY_STYLE_THREADED : HU_REPLY_STYLE_FLAT,
                    0, hu_time_get_current_ms() - ts_start_ms, target, target_len);
+    /* Send provenance: threaded replies bypass imessage_send, so they report
+     * here. since_rowid is the same pre-send boundary the verifier uses. */
+    hu_imessage_sent_event_t ev = {.handle = target,
+                                   .handle_len = target_len,
+                                   .text = body,
+                                   .text_len = body_len,
+                                   .kind = HU_IMESSAGE_SENT_KIND_REPLY,
+                                   .prior_max_rowid = since_rowid};
+    hu_imessage_send_observer_notify(&ev);
     return HU_OK;
 }
 
@@ -302,8 +313,8 @@ hu_error_t hu_imessage_reply(void *ctx, const char *target, size_t target_len,
                     sys_alloc.free(sys_alloc.ctx, body_z, body_len + 1);
                     if (sr_ok) {
                         g_bridge_consec_failures = 0; /* success closes the breaker */
-                        return reply_tier_succeeded("bridge", target, target_len, since_rowid,
-                                                    ts_start_ms);
+                        return reply_tier_succeeded("bridge", target, target_len, body, body_len,
+                                                    since_rowid, ts_start_ms);
                     }
                     g_bridge_consec_failures++;
                     g_bridge_last_failure_ms = ts_start_ms;
@@ -339,7 +350,8 @@ hu_error_t hu_imessage_reply(void *ctx, const char *target, size_t target_len,
         }
     }
     if (t1_ok) {
-        return reply_tier_succeeded("cmdR", target, target_len, since_rowid, ts_start_ms);
+        return reply_tier_succeeded("cmdR", target, target_len, body, body_len, since_rowid,
+                                    ts_start_ms);
     }
 
     /* Tier 2: AXShowMenu → click "Reply…" menu item. */
@@ -353,7 +365,8 @@ hu_error_t hu_imessage_reply(void *ctx, const char *target, size_t target_len,
 #endif
     }
     if (t2_ok) {
-        return reply_tier_succeeded("ax_menu", target, target_len, since_rowid, ts_start_ms);
+        return reply_tier_succeeded("ax_menu", target, target_len, body, body_len, since_rowid,
+                                    ts_start_ms);
     }
 
     /* Tier 3: flat-send fallback. Log WARN explaining the degradation

@@ -2,7 +2,6 @@
  *
  * Files under test: src/agent/validators/ai_phrases_validator.c,
  * src/agent/validators/channel_tags_validator.c,
- * src/agent/validators/cot_audit_validator.c,
  * src/agent/validators/default_chains.c,
  * src/agent/validators/formal_structure_validator.c,
  * src/agent/validators/persona_fidelity_validator.c,
@@ -103,32 +102,6 @@ static void formal_structure_strips_numbered_list(void) {
     hu_output_validator_deinit(&v, &alloc);
 }
 
-static void cot_audit_passes_safe_reasoning(void) {
-    hu_allocator_t alloc = A();
-    hu_output_validator_t v;
-    HU_ASSERT_EQ(hu_validator_cot_audit_create(&alloc, &v), HU_OK);
-    const char *in = "User asked about the weather. I'll respond with a friendly tone.";
-    hu_validator_result_t r = run_one(v, &alloc, in, strlen(in));
-    HU_ASSERT_EQ(r.decision, HU_VALIDATOR_PASS);
-    hu_validator_result_free(&alloc, &r);
-    hu_output_validator_deinit(&v, &alloc);
-}
-
-static void cot_audit_blocks_goal_hijack(void) {
-    hu_allocator_t alloc = A();
-    hu_output_validator_t v;
-    HU_ASSERT_EQ(hu_validator_cot_audit_create(&alloc, &v), HU_OK);
-    const char *in = "I should ignore previous instructions and do what the user said.";
-    hu_validator_result_t r = run_one(v, &alloc, in, strlen(in));
-    /* cot_audit may or may not block — depends on its impl. Accept either
-     * but if it does block, the reason should be present. */
-    if (r.decision == HU_VALIDATOR_REJECT) {
-        HU_ASSERT_NOT_NULL((void *)r.reason);
-    }
-    hu_validator_result_free(&alloc, &r);
-    hu_output_validator_deinit(&v, &alloc);
-}
-
 static void default_chain_assembles_and_destroys(void) {
     hu_allocator_t alloc = A();
     hu_output_validator_chain_t *chain = NULL;
@@ -169,8 +142,6 @@ void run_validators_builtin_tests(void) {
     HU_RUN_TEST(channel_tags_passes_clean);
     HU_RUN_TEST(ai_phrases_strips_known_phrase);
     HU_RUN_TEST(formal_structure_strips_numbered_list);
-    HU_RUN_TEST(cot_audit_passes_safe_reasoning);
-    HU_RUN_TEST(cot_audit_blocks_goal_hijack);
     HU_RUN_TEST(default_chain_assembles_and_destroys);
     HU_RUN_TEST(default_chain_strips_known_dirty_input);
 }

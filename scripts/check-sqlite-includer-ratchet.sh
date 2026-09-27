@@ -36,7 +36,7 @@ fi
 # Updated 2026-05-29 after life_chapters aggregate migration (life_chapters.c): 100 -> 99
 # Updated 2026-05-29 after social_graph aggregate migration (social_graph.c): 99 -> 98
 # Updated 2026-05-29 after self_awareness aggregate migration (self_awareness.c): 98 -> 97
-BASELINE=94   # auto-locked 2026-07-27 (was 97)
+BASELINE=90   # auto-locked 2026-09-20 (was 92)
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 

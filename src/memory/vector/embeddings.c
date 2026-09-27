@@ -58,25 +58,3 @@ hu_embedding_provider_t hu_embedding_provider_noop_create(hu_allocator_t *alloc)
     p.ctx = ctx;
     return p;
 }
-
-hu_embedding_provider_t hu_embedding_provider_create(hu_allocator_t *alloc,
-                                                     const char *provider_name, const char *api_key,
-                                                     const char *model, size_t dims) {
-    if (!alloc || !provider_name)
-        return hu_embedding_provider_noop_create(alloc);
-
-    const char *key = api_key ? api_key : "";
-    const char *mod = model ? model : "";
-
-    if (strcmp(provider_name, "gemini") == 0) {
-        return hu_embedding_gemini_create(alloc, key, mod, dims);
-    }
-    if (strcmp(provider_name, "ollama") == 0) {
-        return hu_embedding_ollama_create(alloc, mod, dims);
-    }
-    if (strcmp(provider_name, "voyage") == 0) {
-        return hu_embedding_voyage_create(alloc, key, mod, dims);
-    }
-
-    return hu_embedding_provider_noop_create(alloc);
-}

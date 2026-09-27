@@ -26,8 +26,8 @@ typedef struct hu_plan_step {
     char *args_json;   /* owned; JSON object string */
     char *description; /* optional, owned */
     hu_plan_step_status_t status;
-    size_t depends_count;                    /* parsed from optional depends_on in JSON */
-    int depends_on[HU_PLAN_STEP_MAX_DEPS];   /* 0-based indices of prior steps */
+    size_t depends_count;                  /* parsed from optional depends_on in JSON */
+    int depends_on[HU_PLAN_STEP_MAX_DEPS]; /* 0-based indices of prior steps */
 } hu_plan_step_t;
 
 typedef struct hu_plan {
@@ -80,12 +80,6 @@ void hu_planner_mark_step(hu_plan_t *plan, size_t index, hu_plan_step_status_t s
 
 /* Check if all steps are done or failed (no pending/running). */
 bool hu_planner_is_complete(const hu_plan_t *plan);
-
-/* Decompose a goal using the LLM orchestrator and return a plan.
- * Caller must call hu_plan_free on the result. */
-hu_error_t hu_planner_decompose_with_llm(hu_allocator_t *alloc, hu_provider_t *provider,
-                                         const char *model, size_t model_len,
-                                         const char *goal, size_t goal_len, hu_plan_t **out);
 
 /* Free plan and all owned strings. */
 void hu_plan_free(hu_allocator_t *alloc, hu_plan_t *plan);

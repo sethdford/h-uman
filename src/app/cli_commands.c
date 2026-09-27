@@ -9,6 +9,7 @@
 #include "human/bootstrap.h"
 #include "human/calibration.h"
 #include "human/calibration/clone.h"
+#include "human/capabilities.h"
 #include "human/cli_eval_w16_internal.h"
 #include "human/config.h"
 #include "human/core/error.h"
@@ -1159,15 +1160,21 @@ hu_error_t cmd_capabilities(hu_allocator_t *alloc, int argc, char **argv) {
     }
     const char *prov = (err == HU_OK && cfg.default_provider) ? cfg.default_provider : "gemini";
     const char *backend = (err == HU_OK && cfg.memory.backend) ? cfg.memory.backend : "none";
+
+    /* channel_catalog is the source of truth for which channels are
+     * compiled into this build — never a hardcoded channel name here. */
+    char channels[1024];
+    hu_capabilities_channels_built_list(channels, sizeof(channels), json_mode);
+
     if (json_mode) {
-        printf("{\"channels\":[\"cli\"],\"tools\":[\"shell\",\"file_read\",\"file_write\",\"file_"
+        printf("{\"channels\":%s,\"tools\":[\"shell\",\"file_read\",\"file_write\",\"file_"
                "edit\","
                "\"git\",\"web_search\",\"web_fetch\",\"memory_store\",\"memory_recall\"],"
                "\"providers\":[\"%s\"],\"memory\":\"%s\"}\n",
-               prov, backend);
+               channels, prov, backend);
     } else {
         printf("Capabilities:\n");
-        printf("  Channels: cli\n");
+        printf("  Channels: %s\n", channels);
         printf("  Tools: shell, file_read, file_write, file_edit, file_append, git,\n");
         printf("         web_search, web_fetch, http_request, memory_store, memory_recall,\n");
         printf("         memory_list, memory_forget, browser, image, screenshot,\n");

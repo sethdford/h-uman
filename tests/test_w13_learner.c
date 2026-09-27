@@ -5,7 +5,6 @@
  * contract: the CPU backend must produce byte-identical adapters for the
  * same (seed, signals, model_version) triple. */
 
-#include "human/agent/case_based.h"
 #include "human/core/allocator.h"
 #include "human/memory/graph.h"
 #include "human/memory/memory.h"
@@ -27,8 +26,8 @@ static hu_allocator_t *A(void) {
 }
 
 static void scratch_path(char *out, size_t cap, const char *suffix) {
-    snprintf(out, cap, "/tmp/hu-w13-test-%d-%s.adapter",
-             (int)getpid(), suffix ? suffix : "default");
+    snprintf(out, cap, "/tmp/hu-w13-test-%d-%s.adapter", (int)getpid(),
+             suffix ? suffix : "default");
     /* Best-effort wipe so a previous test run doesn't pollute round-trip. */
     unlink(out);
 }
@@ -255,8 +254,8 @@ static void test_w13_adapter_file_round_trip(void) {
 
     uint8_t v[4];
     HU_ASSERT_EQ(fread(v, 1, 4, f), 4);
-    uint32_t version = (uint32_t)v[0] | ((uint32_t)v[1] << 8) | ((uint32_t)v[2] << 16) |
-                       ((uint32_t)v[3] << 24);
+    uint32_t version =
+        (uint32_t)v[0] | ((uint32_t)v[1] << 8) | ((uint32_t)v[2] << 16) | ((uint32_t)v[3] << 24);
     HU_ASSERT_EQ(version, HU_LEARNER_ADAPTER_VERSION);
 
     char mv[64];
@@ -280,12 +279,10 @@ static void test_w13_adversarial_training_data_poisoning_does_not_crash(void) {
     for (size_t i = 0; i < 20; i++) {
         if (i % 2 == 0) {
             s[i].kind = HU_TRAIN_DPO_PAIR;
-            snprintf(s[i].as.dpo.prompt, sizeof(s[i].as.dpo.prompt),
-                     "benign prompt %zu", i);
-            snprintf(s[i].as.dpo.preferred, sizeof(s[i].as.dpo.preferred),
-                     "benign reply %zu", i);
-            snprintf(s[i].as.dpo.dispreferred, sizeof(s[i].as.dpo.dispreferred),
-                     "bad reply %zu", i);
+            snprintf(s[i].as.dpo.prompt, sizeof(s[i].as.dpo.prompt), "benign prompt %zu", i);
+            snprintf(s[i].as.dpo.preferred, sizeof(s[i].as.dpo.preferred), "benign reply %zu", i);
+            snprintf(s[i].as.dpo.dispreferred, sizeof(s[i].as.dpo.dispreferred), "bad reply %zu",
+                     i);
             s[i].as.dpo.weight = 1.0f;
         } else {
             /* Adversarial: empty preferred + dispreferred, garbage prompt. */
@@ -375,10 +372,8 @@ static void test_w13_mlx_backend_trains_fake_adapter(void) {
     hu_training_signal_t signals[1];
     memset(signals, 0, sizeof(signals));
     signals[0].kind = HU_TRAIN_DPO_PAIR;
-    snprintf(signals[0].as.dpo.prompt, sizeof(signals[0].as.dpo.prompt),
-             "test prompt");
-    snprintf(signals[0].as.dpo.preferred, sizeof(signals[0].as.dpo.preferred),
-             "good response");
+    snprintf(signals[0].as.dpo.prompt, sizeof(signals[0].as.dpo.prompt), "test prompt");
+    snprintf(signals[0].as.dpo.preferred, sizeof(signals[0].as.dpo.preferred), "good response");
     snprintf(signals[0].as.dpo.dispreferred, sizeof(signals[0].as.dpo.dispreferred),
              "bad response");
     signals[0].as.dpo.weight = 1.0f;
@@ -428,8 +423,7 @@ static void test_w13_mlx_frontier_data_dir_trains_adapter(void) {
 
     hu_learner_config_t cfg = hu_learner_default_config();
     snprintf(cfg.adapter_output_path, sizeof(cfg.adapter_output_path), "%s", path);
-    snprintf(cfg.base_model_path, sizeof(cfg.base_model_path),
-             "mlx-community/gemma-4-31b-it-4bit");
+    snprintf(cfg.base_model_path, sizeof(cfg.base_model_path), "mlx-community/gemma-4-31b-it-4bit");
     snprintf(cfg.data_dir, sizeof(cfg.data_dir), "/tmp/fake-data");
     cfg.rank = 8;
     cfg.max_steps = 100;
@@ -480,8 +474,8 @@ static void test_w13_ggml_backend_trains_fake_adapter(void) {
     memset(signals, 0, sizeof(signals));
     signals[0].kind = HU_TRAIN_PERSONA_DELTA;
     signals[0].as.persona.delta.kind = HU_PERSONA_DELTA_TONE;
-    snprintf(signals[0].as.persona.delta.value,
-             sizeof(signals[0].as.persona.delta.value), "warmer");
+    snprintf(signals[0].as.persona.delta.value, sizeof(signals[0].as.persona.delta.value),
+             "warmer");
     signals[0].as.persona.delta.confidence = 0.8f;
     signals[1].kind = HU_TRAIN_CASE_OUTCOME;
     signals[1].as.case_outcome.case_id = 99;
@@ -582,8 +576,8 @@ static void test_w13_signals_from_verifier_flags_skips_already_consumed(void) {
      * The status enum value 3 == HU_DELTA_STATUS_QUARANTINED. */
     int64_t did = 0;
     HU_ASSERT_EQ(hu_persona_delta_propose(g, "u1", 2, HU_PERSONA_DELTA_VOCAB_AVOID, "all",
-                                          "obviously", 0.6f, "agent-inference",
-                                          1735690000000LL, &did),
+                                          "obviously", 0.6f, "agent-inference", 1735690000000LL,
+                                          &did),
                  HU_OK);
     /* Manually flip to quarantined via list/free pattern + UPDATE. We use
      * a second proposal with a different value that the evolver would
@@ -612,9 +606,8 @@ static void test_w13_signals_from_verifier_flags_skips_already_consumed(void) {
     /* Now drive a quarantine via the evolver: many proposals from the
      * same source within an hour → quarantined. */
     for (int i = 0; i < 12; i++) {
-        hu_persona_delta_propose(g, "u1", 2, HU_PERSONA_DELTA_TONE, "slack",
-                                 "spam-tone", 0.3f, "noisy-source",
-                                 1735690000000LL + i * 1000, NULL);
+        hu_persona_delta_propose(g, "u1", 2, HU_PERSONA_DELTA_TONE, "slack", "spam-tone", 0.3f,
+                                 "noisy-source", 1735690000000LL + i * 1000, NULL);
     }
     hu_persona_evolver_config_t cfg = hu_persona_evolver_default_config();
     cfg.now_ms = 1735690000000LL + 60 * 1000;
@@ -646,9 +639,8 @@ static void test_w13_dpo_pairs_have_no_self_inconsistencies(void) {
 
     /* Drive a quarantine. */
     for (int i = 0; i < 12; i++) {
-        hu_persona_delta_propose(g, "u2", 2, HU_PERSONA_DELTA_VALUE, "all",
-                                 "be-rude", 0.4f, "noisy-source",
-                                 1735690000000LL + i * 1000, NULL);
+        hu_persona_delta_propose(g, "u2", 2, HU_PERSONA_DELTA_VALUE, "all", "be-rude", 0.4f,
+                                 "noisy-source", 1735690000000LL + i * 1000, NULL);
     }
     hu_persona_evolver_config_t cfg = hu_persona_evolver_default_config();
     cfg.now_ms = 1735690000000LL + 60 * 1000;
@@ -708,55 +700,6 @@ static void test_w13_signals_from_persona_deltas_round_trip(void) {
     close_facade_(g, m);
 }
 
-static void test_w13_signals_from_case_outcomes_returns_positive_for_high_reward(void) {
-    hu_graph_t *g = NULL;
-    hu_memory_facade_t *m = NULL;
-    open_facade_(&g, &m);
-
-    int64_t cid_ok = 0, cid_bad = 0, cid_meh = 0;
-    HU_ASSERT_EQ(hu_case_record(m, "u4", 2, "schedule", 8, NULL, 0, "plan A", 6, "ok", 2,
-                                1735690000000LL, &cid_ok),
-                 HU_OK);
-    HU_ASSERT_EQ(hu_case_record(m, "u4", 2, "schedule", 8, NULL, 0, "plan B", 6,
-                                "user pushed back", 16, 1735690500000LL, &cid_bad),
-                 HU_OK);
-    HU_ASSERT_EQ(hu_case_record(m, "u4", 2, "schedule", 8, NULL, 0, "plan C", 6,
-                                "unclear", 7, 1735691000000LL, &cid_meh),
-                 HU_OK);
-
-    hu_training_signal_t *s = NULL;
-    size_t n = 0;
-    HU_ASSERT_EQ(hu_learner_signals_from_case_outcomes(m, A(), "u4", 2, &s, &n), HU_OK);
-    HU_ASSERT_EQ((int)n, 3);
-
-    int high = 0, low = 0, mid = 0;
-    for (size_t i = 0; i < n; i++) {
-        HU_ASSERT_EQ(s[i].kind, HU_TRAIN_CASE_OUTCOME);
-        if (s[i].as.case_outcome.case_id == cid_ok) {
-            HU_ASSERT(s[i].as.case_outcome.reward >= 0.99f);
-            high = 1;
-        } else if (s[i].as.case_outcome.case_id == cid_bad) {
-            HU_ASSERT(s[i].as.case_outcome.reward <= 0.01f);
-            low = 1;
-        } else if (s[i].as.case_outcome.case_id == cid_meh) {
-            HU_ASSERT(s[i].as.case_outcome.reward > 0.4f &&
-                      s[i].as.case_outcome.reward < 0.6f);
-            mid = 1;
-        }
-    }
-    HU_ASSERT(high && low && mid);
-
-    /* Idempotency: second call returns the same set. */
-    hu_training_signal_t *s2 = NULL;
-    size_t n2 = 0;
-    HU_ASSERT_EQ(hu_learner_signals_from_case_outcomes(m, A(), "u4", 2, &s2, &n2), HU_OK);
-    HU_ASSERT_EQ(n, n2);
-
-    hu_learner_signals_free(A(), s, n);
-    hu_learner_signals_free(A(), s2, n2);
-    close_facade_(g, m);
-}
-
 #endif /* HU_ENABLE_SQLITE */
 
 /* ── Test runner ──────────────────────────────────────────────────────── */
@@ -792,6 +735,5 @@ void run_w13_learner_tests(void) {
     HU_RUN_TEST(test_w13_signals_from_verifier_flags_skips_already_consumed);
     HU_RUN_TEST(test_w13_dpo_pairs_have_no_self_inconsistencies);
     HU_RUN_TEST(test_w13_signals_from_persona_deltas_round_trip);
-    HU_RUN_TEST(test_w13_signals_from_case_outcomes_returns_positive_for_high_reward);
 #endif
 }

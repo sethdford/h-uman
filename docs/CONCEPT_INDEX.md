@@ -15,7 +15,7 @@ Use this to find the right files for a given task without searching the full cod
 | **Allocator / arena / error** | `src/core/allocator.c`, `arena.c`, `error.c`                                                                                   | `test_allocator.c`, `test_core_extended.c`      |
 | **JSON parsing / building**   | `src/core/json.c`, `src/util/json_util.c`                                                                                           | `test_json.c`, `test_json_extended.c`           |
 | **String / slice**            | `src/core/string.c`, `src/core/slice.c`                                                                                        | `test_string.c`, `test_slice.c`                 |
-| **HTTP client**               | `src/core/http.c`, `src/util/http_util.c`                                                                                           | `test_http.c`                                   |
+| **HTTP client**               | `src/core/http.c`                                                                                           | `test_http.c`                                   |
 | **Config parsing**            | `src/config/config_parse.c`, `config_parse_agent.c`, `config_parse_channels.c`, `config_parse_providers.c`, `config_parse_behavior.c` | `test_config_parse.c`, `test_config_extended.c` |
 | **Config validation**         | `src/config/config_validate.c`, `src/config/config_schema.c`                                                                                 | `test_config_validation.c`                      |
 | **Config merge / migrate**    | `src/config/config_merge.c`, `src/config/config_migrate.c`                                                                                   | `test_config_migrate.c`                         |
@@ -53,7 +53,7 @@ Use this to find the right files for a given task without searching the full cod
 | **OpenAI / Anthropic / Gemini** | `src/providers/openai.c`, `anthropic.c`, `gemini.c` | `test_provider_all.c`                    |
 | **Ollama / local**              | `src/providers/ollama.c`                            | `test_ollama_integration.c`              |
 | **CoreML / MLX (on-device)**    | `src/providers/coreml.c`, `include/human/providers/coreml.h` | `test_coreml_provider.c`            |
-| **SSE streaming**               | `src/providers/sse.c`, `src/sse/sse_client.c`       | `test_sse.c`, `test_streaming.c`         |
+| **SSE streaming**               | `src/providers/sse.c`       | `test_streaming.c`         |
 | **HUML checkpoint (on-device)** | `src/providers/huml.c`, `include/human/providers/huml.h` | `test_ml.c`                          |
 | **Embedded / llama-cli**        | `src/providers/embedded.c`, `include/human/providers/embedded.h` | `test_ml.c`                    |
 | **Apple Intelligence (on-device)** | `src/providers/apple.c`, `include/human/providers/apple.h`, `apps/shared/HumanKit/Sources/HumanOnDeviceServer/` | `test_apple_provider.c`, `OnDeviceServerTests.swift` |
@@ -104,7 +104,7 @@ Use this to find the right files for a given task without searching the full cod
 | **Web / network tools** | `src/tools/http_request.c`, `web_fetch.c`                            | `test_tools_all.c` (Web/Network suite)    |
 | **Memory tools**        | `src/tools/memory_recall.c`, `memory_store.c`                        | `test_tools_all.c` (Memory/Message suite) |
 | **Cron tools**          | `src/tools/cron_add.c`, `cron_remove.c`, `cron_list.c`, `cron_run.c` | `test_cron.c`                             |
-| **Computer use / LSP**  | `src/tools/computer_use.c`, `lsp.c`                                  | `test_computer_use.c`, `test_lsp.c`       |
+| **Computer use**        | `src/tools/computer_use.c`                                           | `test_computer_use.c`                     |
 | **Tool result cache (TTL)** | `src/tools/cache_ttl.c`, `include/human/tools/cache_ttl.h`         | `test_sota_wiring.c`                      |
 | **Live Canvas / A2UI**  | `src/tools/canvas.c`, `include/human/tools/canvas.h`, `src/gateway/cp_canvas.c` | `test_canvas_tool.c`, `test_canvas_e2e.c` |
 | **Canvas UI**           | `ui/src/components/hu-canvas.ts`, `hu-canvas-sandbox.ts`, `hu-canvas-editor.ts`, `ui/src/canvas-harness.ts`, `ui/src/views/canvas-view.ts` | — |
@@ -113,20 +113,18 @@ Use this to find the right files for a given task without searching the full cod
 
 | Concept                         | Primary Source Files                                                                                           | Test Files                                                                       |
 | ------------------------------- | -------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| **Memory factory / engines**    | `src/memory/factory.c`, `engines/registry.c`, `engines/sqlite.c`, `engines/markdown.c`, `engines/memory_lru.c` | `test_memory.c`, `test_memory_full.c`, `test_memory_engines_ext.c`               |
+| **Memory factory / engines**    | `src/memory/factory.c`, `engines/sqlite.c`, `engines/markdown.c`, `engines/memory_lru.c` | `test_memory.c`, `test_memory_full.c`, `test_memory_engines_ext.c`               |
 | **SQL transaction helper**      | `src/memory/sql_transaction.c`, `include/human/memory/sql_transaction.h`                                       | `test_sql_transaction.c`                                                         |
 | **Retrieval / hybrid search**   | `src/memory/retrieval/engine.c`, `hybrid.c`, `keyword.c`, `reranker.c`                                         | `test_retrieval.c`                                                               |
-| **Vector / embeddings**         | `src/memory/vector/embeddings.c`, `store.c`, `chunker.c`                                                       | `test_vector.c`, `test_vector_full.c`, `test_vector_stores.c`                    |
-| **QMD (query memory dispatch)** | `src/memory/retrieval/qmd.c`                                                                                   | `test_qmd.c`                                                                     |
+| **Vector / embeddings**         | `src/memory/vector/embeddings.c`                                                       | `test_vector.c`, `test_vector_full.c`                    |
 | **Consolidation**               | `src/memory/consolidation.c`, `consolidation_engine.c`                                                         | `test_consolidation.c`, `test_consolidation_engine.c`                            |
-| **RAG pipeline**                | `src/memory/rag.c`, `src/memory/rag_pipeline.c`                                                                       | `test_rag.c`, `test_rag_pipeline.c`                                              |
+| **RAG pipeline**                | `src/memory/rag_pipeline.c`                                                                       | `test_rag_pipeline.c`                                              |
 | **Relational episodes**         | `src/memory/relational_episode.c`, `include/human/memory/relational_episode.h`                                 | `test_humanness_frontiers.c`                                                     |
 | **Episodic / STM**              | `src/memory/episodic.c`, `stm.c`                                                                               | `test_episodic.c`, `test_stm.c`                                                  |
 | **Emotional graph**             | `src/memory/emotional_graph.c`, `emotional_residue.c`, `emotional_moments.c`                                   | `test_emotional_graph.c`, `test_emotional_residue.c`, `test_emotional_moments.c` |
-| **Forgetting / degradation**    | `src/memory/forgetting.c`, `forgetting_curve.c`, `degradation.c`                                               | `test_forgetting_curve.c`, `test_degradation.c`, `test_memory_degradation.c`     |
-| **Lifecycle / hygiene**         | `src/memory/lifecycle/cache.c`, `hygiene.c`, `summarizer.c`                                                    | `test_lifecycle.c`                                                               |
+| **Forgetting**                  | `src/memory/forgetting.c`, `forgetting_curve.c`                                               | `test_forgetting_curve.c`     |
+| **Lifecycle / cache**           | `src/memory/lifecycle/cache.c`                                                    | `test_lifecycle.c`                                                               |
 | **Deep memory / extract**       | `src/memory/deep_memory.c`, `deep_extract.c`                                                                   | `test_deep_memory.c`, `test_deep_extract.c`                                      |
-| **Cognitive**                   | `src/memory/cognitive.c`                                                                                       | `test_cognitive.c`                                                               |
 | **Graph (knowledge)**           | `src/memory/graph.c`, `fast_capture.c`                                                                         | `test_graph.c`, `test_fast_capture.c`                                            |
 | **Connections / promotion**     | `src/memory/connections.c`, `promotion.c`                                                                      | `test_promotion.c`                                                               |
 | **Graph index (MAGMA, spreading activation)** | `src/memory/graph_index.c`, `include/human/memory/graph_index.h`                               | `test_sota_research.c`, `test_sota_wiring.c`                                     |
@@ -136,13 +134,13 @@ Use this to find the right files for a given task without searching the full cod
 
 | Concept             | Primary Source Files                                                 | Test Files                                                                |
 | ------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| **Vault / secrets** | `src/security/vault.c`, `secrets.c`                                  | `test_vault.c`, `test_crypto.c`                                           |
+| **Secrets**         | `src/security/secrets.c`                                             | `test_crypto.c`                                                           |
 | **Pairing**         | `src/security/pairing.c`                                             | `test_pairing.c`                                                          |
 | **Policy engine**   | `src/security/policy.c`, `policy_engine.c`                           | `test_security.c`, `test_security_extended.c`, `test_security_pipeline.c` |
-| **Sandbox**         | `src/security/sandbox.c`, `landlock.c`, `firejail.c`, `bubblewrap.c` | `test_security.c`                                                         |
+| **Sandbox**         | `src/security/landlock.c`, `firejail.c`, `bubblewrap.c`              | `test_security.c`                                                         |
 | **Adversarial**     | `src/security/adversarial.c`                                         | `test_adversarial.c`, `test_adversarial_detect.c`                         |
 | **Auth**            | `src/security/auth.c`                                                         | `test_auth.c`                                                             |
-| **Path security**   | `src/security/net_security.c`                                                 | `test_net_security.c`, `test_path_security.c`                             |
+| **Path security**   | `src/tools/path_security.c`                                                   | `test_path_security.c`                             |
 | **Privacy audit**   | `src/security/audit.c`                                               | `test_privacy_audit.c`                                                    |
 | **Arg inspector (AEGIS-style)** | `src/security/arg_inspector.c`, `include/human/security/arg_inspector.h`                       | `test_sota_wiring.c`                                                      |
 | **CoT audit**       | `src/security/cot_audit.c`, `include/human/security/cot_audit.h`     | `test_cot_audit.c`, `test_sota_wiring.c`                                  |
@@ -160,7 +158,6 @@ Use this to find the right files for a given task without searching the full cod
 | **OpenAI compat**    | `src/gateway/openai_compat.c`                                                             | `test_gateway_extended.c`               |
 | **Event bridge**     | `src/gateway/event_bridge.c`                                                              | `test_gateway_extended.c`               |
 | **Streaming voice**  | `src/gateway/cp_voice_stream.c`, `src/tts/cartesia_stream.c`, `docs/streaming-voice.md`   | `test_cartesia_stream.c`, `test_gateway_voice.c` |
-| **Tenancy**          | `src/gateway/tenant.c`                                                                    | `test_tenant.c`                         |
 | **Control protocol: security (CoT audit)** | `src/gateway/cp_security.c`                                                     | `test_gateway_extended.c`               |
 | **Control protocol: Turing score** | `src/gateway/cp_turing.c`                                                         | `test_gateway_extended.c`               |
 
@@ -224,12 +221,12 @@ Use this to find the right files for a given task without searching the full cod
 | Concept                                                | Primary Source Files                                                                                                            | Test Files                                                                         |
 | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
 | **Runtime (native/docker/wasm)**                       | `src/runtime/native.c`, `docker.c`, `wasm_rt.c`, `factory.c`                                                                    | `test_runtime.c`, `test_runtime_bundle.c`                                          |
-| **Feeds (social/google/apple/gmail/imessage/twitter)** | `src/feeds/processor.c`, `social.c`, `google.c`, `apple.c`, `gmail.c`, `imessage.c`, `twitter.c`, `research.c`, `file_ingest.c` | `test_feeds.c`, `test_feed_processor.c`, `test_research_feeds.c`                   |
+| **Feeds (social/gmail/imessage/twitter)** | `src/feeds/processor.c`, `social.c`, `gmail.c`, `imessage.c`, `twitter.c`, `research.c`, `file_ingest.c` | `test_feeds.c`, `test_feed_processor.c`, `test_research_feeds.c`                   |
 | **Feed content sandboxing**    | `src/feeds/research.c` (XML quarantine for feed content)                                                                                    | `test_research_feeds.c`                                                            |
-| **Intelligence / skills**                              | `src/intelligence/skills.c`, `skill_system.c`, `reflection.c`, `experience.c`                                                   | `test_skills.c`, `test_skill_system.c`, `test_intelligence.c`, `test_experience.c` |
+| **Intelligence / skills**                              | `src/intelligence/skills.c`, `reflection.c`, `experience.c`                                                                    | `test_skills.c`, `test_intelligence.c`, `test_experience.c`                        |
 | **Peripherals**                                        | `src/peripherals/factory.c`, `arduino.c`, `stm32.c`, `rpi.c`                                                                    | `test_peripheral.c`                                                                |
 | **Observability**                                      | `src/observability/log_observer.c`, `metrics_observer.c`, `bth_metrics.c`                                                       | `test_observer.c`, `test_bth_metrics.c`                                            |
-| **Subagent / MCP**                                     | `src/subagent.c`, `src/mcp/mcp.c`, `src/mcp/mcp_server.c`                                                                               | `test_subagent.c`, `test_mcp.c`                                                    |
+| **MCP**                                                | `src/mcp/mcp.c`, `src/mcp/mcp_server.c`                                                                               | `test_mcp.c`                                                    |
 | **Session**                                            | `src/agent/session.c`                                                                                                                 | `test_session.c`                                                                   |
 | **WebSocket client**                                   | `src/websocket/websocket.c`                                                                                                     | `test_websocket.c`, `test_ws_integration.c`                                        |
 | **Tunnel**                                             | `src/tunnel/ngrok.c`, `cloudflare.c`, `tailscale.c`                                                                             | `test_tunnel.c`                                                                    |
@@ -276,7 +273,7 @@ Use this to find the right files for a given task without searching the full cod
 | **Skills ↔ agents**         | `docs/standards/ai/skills-vs-agents.md`, `docs/plans/2026-03-20-static-skills-dynamic-agents-unification.md` | `test_subsystems` (catalog) |
 | **Skill prompt catalog**    | `src/skills/skillforge.c` (`hu_skillforge_build_prompt_catalog`), `src/agent/agent_turn.c`                     | `test_subsystems`        |
 | **PWA bridge**              | `src/pwa/bridge.c`, `context.c`, `drivers.c`, `learner.c`                                                | `test_pwa.c`             |
-| **ML subsystem**            | `src/ml/gpt.c`, `train.c`, `prepare.c`, `tokenizer_bpe.c`, `dataloader.c`, `evaluator.c`, `experiment.c`, `dpo.c`, `lora.c`, `cli.c`, `checkpoint.c`, `agent_trainer.c`, `m3_frontier_adapter.c`, `include/human/ml/m3_frontier_adapter.h` | `test_ml.c` |
+| **ML subsystem**            | `src/ml/gpt.c`, `train.c`, `prepare.c`, `tokenizer_bpe.c`, `dataloader.c`, `evaluator.c`, `experiment.c`, `dpo.c`, `lora.c`, `cli.c`, `checkpoint.c`, `m3_frontier_adapter.c`, `include/human/ml/m3_frontier_adapter.h` | `test_ml.c` |
 | **Research feeds**          | `src/feeds/research.c`, `file_ingest.c`, `gmail.c`, `imessage.c`, `twitter.c`                            | `test_research_feeds.c`  |
 | **Fact extraction**         | `src/memory/fact_extract.c`, `include/human/memory/fact_extract.h`                                       | `test_fact_extract.c`    |
 | **Hallucination guard**     | `src/memory/hallucination_guard.c`, `include/human/memory/hallucination_guard.h`                         | `test_hallucination_guard.c` |
@@ -284,7 +281,6 @@ Use this to find the right files for a given task without searching the full cod
 | **Trust calibration**       | `src/cognition/cognition_trust.c`, `include/human/cognition/trust.h`                                     | `test_trust_calibration.c` |
 | **Consistency eval**        | `src/eval/consistency.c`, `include/human/eval/consistency.h`                                             | `test_consistency.c`     |
 | **Humor framework**         | `src/persona/humor.c`, `include/human/persona/humor.h`                                                   | `test_humor_fw.c`        |
-| **Markdown persona loader** | `src/persona/markdown_loader.c`, `include/human/persona/markdown_loader.h`                               | `test_markdown_loader.c` |
 | **Self-improve (fidelity)** | `src/agent/self_improve.c`, `include/human/agent/self_improve.h`                                         | `test_self_improve.c`    |
 | **Task store**              | `src/agent/task_store.c`, `src/gateway/cp_tasks.c`, `include/human/agent/task_store.h`                   | `test_task_store.c`      |
 | **Vertex auth (ADC)**       | `src/core/vertex_auth.c`, `include/human/core/vertex_auth.h`                                             | `test_media_gen.c`       |

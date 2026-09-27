@@ -93,9 +93,8 @@ bool hu_evaluation_is_available(const hu_evaluation_t *e);
 void hu_evaluation_close(hu_evaluation_t *e);
 
 /* Report helpers. JSON shape is stable so CI and the baseline file agree. */
-hu_error_t hu_evaluation_report_to_json(hu_allocator_t *alloc,
-                                        const hu_evaluation_run_report_t *r, char **out_json,
-                                        size_t *out_len);
+hu_error_t hu_evaluation_report_to_json(hu_allocator_t *alloc, const hu_evaluation_run_report_t *r,
+                                        char **out_json, size_t *out_len);
 hu_error_t hu_evaluation_report_from_json(hu_allocator_t *alloc, const char *json, size_t json_len,
                                           hu_evaluation_run_report_t *out);
 void hu_evaluation_report_free(hu_allocator_t *alloc, hu_evaluation_run_report_t *r);
@@ -216,8 +215,6 @@ hu_error_t hu_evaluation_legacy_bridge(hu_allocator_t *alloc, hu_evaluation_t *o
  * reference strings. The agent is borrowed (not owned); caller must keep
  * it alive for the lifetime of the backend. Pass NULL to revert. */
 struct hu_agent;
-void hu_evaluation_frontier_compare_set_agent(hu_evaluation_t *backend,
-                                              struct hu_agent *agent);
 
 #ifdef __cplusplus
 }

@@ -21,10 +21,6 @@ extern "C" {
 hu_vector_store_t hu_vector_store_sqlite_vec_create(hu_allocator_t *alloc, struct sqlite3 *db,
                                                     size_t dim);
 
-/* Registers sqlite3_vec_init as an auto-extension for every connection opened
- * afterwards. Idempotent. Returns false if the extension could not register. */
-bool hu_sqlite_vec_register(void);
-
 #ifdef __cplusplus
 }
 #endif

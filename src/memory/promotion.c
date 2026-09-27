@@ -341,27 +341,3 @@ hu_error_t hu_promotion_run_emotions(hu_allocator_t *alloc, const hu_stm_buffer_
 
     return HU_OK;
 }
-
-hu_error_t hu_promotion_promote_tier(hu_memory_t *memory, const char *from_category,
-                                     size_t from_category_len, const char *to_category,
-                                     size_t to_category_len, size_t max_count) {
-    if (!memory || !from_category || !to_category)
-        return HU_ERR_INVALID_ARGUMENT;
-
-#ifdef HU_ENABLE_SQLITE
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_memories_repo_t repo;
-    hu_error_t cerr = hu_memories_repo_create(memory, &alloc, &repo);
-    if (cerr != HU_OK)
-        return cerr; /* HU_ERR_NOT_SUPPORTED for a non-sqlite backend */
-    hu_error_t err = repo.vtable->promote_tier(repo.ctx, from_category, from_category_len,
-                                               to_category, to_category_len, max_count);
-    repo.vtable->deinit(repo.ctx);
-    return err;
-#else
-    (void)from_category_len;
-    (void)to_category_len;
-    (void)max_count;
-    return HU_ERR_NOT_SUPPORTED;
-#endif
-}

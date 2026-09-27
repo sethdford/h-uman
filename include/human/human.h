@@ -43,6 +43,5 @@
 #endif
 #include "plugin.h"
 #include "security/policy_engine.h"
-#include "security/replay.h"
 
 #endif /* HU_HUMAN_H */

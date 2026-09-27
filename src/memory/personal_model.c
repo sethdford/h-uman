@@ -2802,6 +2802,21 @@ size_t hu_personal_model_apply_decay(hu_personal_model_t *model, int64_t now) {
         }
     }
 
+    /* SOTA-2026 init-09: expire pending (unpromoted) facts whose
+     * corroboration window has closed. Runs last, after the live
+     * facts/topics/goals sweep, so this tick's own promotions (if any
+     * ran earlier in the same turn) aren't double-counted here. Not
+     * folded into `pruned` — that counter's documented contract is
+     * "facts + topics + goals"; pending-queue expiry is a distinct
+     * quarantine-lane concept and gets its own log line instead. */
+    {
+        size_t expired = hu_personal_model_expire_pending_facts(model, now);
+        if (expired > 0) {
+            hu_log_info("personal_model", NULL, "decay: expired %zu pending fact(s) past TTL",
+                        expired);
+        }
+    }
+
     return pruned;
 }
 

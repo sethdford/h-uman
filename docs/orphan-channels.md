@@ -14,11 +14,19 @@ agents auditing "what's actually wired e2e" should start here.
 | Channel | LOC | What's missing | What it would take | Action |
 |---------|----:|----------------|--------------------|--------|
 | `mattermost.c` | ~700 | Config schema, bootstrap call, daemon-config slot. | Add `hu_mattermost_channel_config_t`, parser, bootstrap, daemon entry. Medium effort. | Experimental — defer until product wants it |
-| `maixcam.c` | ~370 | Config schema, bootstrap call, daemon-config slot. AIoT vision board. | Same as above. Niche; gated on hardware availability. | Experimental — defer |
 | `web.c` | ~280 | Config schema, bootstrap call, daemon-config slot. Browser-tab "channel". | Replaced by PWA channel for most use cases. | Experimental — likely subsumed by `pwa.c` |
 | `cli.c` | ~170 | Production runs `human agent` directly via `cmd_agent`, not through this channel. Used in tests. | Either wire into a `--channel cli` mode or remove the channel facade. | Test-only utility — keep, document |
 | `dispatch.c` | ~150 | Multiplex/router channel. Used in tests; production routes through `bootstrap.c` directly. | Could replace per-channel iteration in daemon if performance demands it. | Test-only utility — keep, document |
-| `webhook.c` | ~250 | Outbound webhook formatter. The gateway HTTP server uses webhook handlers directly; this channel is unused in production. | Decide: delete or wire as a generic outbound webhook channel. | Cosmetic — document, decide later |
+
+`maixcam.c` (184 lines) and `webhook.c` (276 lines) were DELETED in the
+2026-09-20 dead-code sweep (`e79b2a89e`), together with
+`include/human/channels/maixcam.h`, `include/human/channels/webhook.h` and
+`tests/test_webhook_channel.c`. Neither had a config schema, a bootstrap call
+or a daemon-config slot, so the linker never loaded either object — they
+could not serve a message. See `docs/plans/2026-09-20-dead-code-plan.md`
+Appendix A. `maixcam.c` was an AIoT vision-board adapter with no hardware
+behind it; `webhook.c` was an outbound webhook formatter, and the gateway's
+own handler (`src/gateway/webhook.c`) is what production actually uses.
 
 `twilio_media.c` was DELETED in FIX 5 — its `send()` was a no-op in production
 (silently dropped every outbound message) and it had no inbound hooks. Real

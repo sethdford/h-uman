@@ -269,6 +269,20 @@ static void test_heartbeat_tick_missing_file(void) {
     HU_ASSERT_EQ(result.outcome, HU_HEARTBEAT_SKIPPED_MISSING);
 }
 
+static void test_heartbeat_file_path_joins_workspace_and_filename(void) {
+    char buf[256];
+    int n = hu_heartbeat_file_path("/tmp/hu_test_ws", buf, sizeof(buf));
+    HU_ASSERT(n > 0);
+    HU_ASSERT_STR_EQ(buf, "/tmp/hu_test_ws/HEARTBEAT.md");
+}
+
+static void test_heartbeat_file_path_null_args_return_negative(void) {
+    char buf[8] = {0};
+    HU_ASSERT(hu_heartbeat_file_path(NULL, buf, sizeof(buf)) < 0);
+    HU_ASSERT(hu_heartbeat_file_path("/tmp", NULL, 8) < 0);
+    HU_ASSERT(hu_heartbeat_file_path("/tmp", buf, 0) < 0);
+}
+
 void run_infrastructure_tests(void) {
     HU_TEST_SUITE("Infrastructure (version, heartbeat, cost)");
     HU_RUN_TEST(test_version_string);
@@ -299,4 +313,6 @@ void run_infrastructure_tests(void) {
     HU_RUN_TEST(test_heartbeat_free_tasks_null_safe);
     HU_RUN_TEST(test_heartbeat_collect_tasks_missing_file);
     HU_RUN_TEST(test_heartbeat_tick_missing_file);
+    HU_RUN_TEST(test_heartbeat_file_path_joins_workspace_and_filename);
+    HU_RUN_TEST(test_heartbeat_file_path_null_args_return_negative);
 }

@@ -77,10 +77,6 @@ hu_retrieval_engine_t hu_retrieval_create_with_vector(hu_allocator_t *alloc, hu_
 
 void hu_retrieval_result_free(hu_allocator_t *alloc, hu_retrieval_result_t *r);
 
-hu_error_t hu_retrieval_index_entry(hu_retrieval_engine_t *engine, hu_allocator_t *alloc,
-                                    const char *key, size_t key_len, const char *content,
-                                    size_t content_len);
-
 void hu_retrieval_set_graph(hu_retrieval_engine_t *engine, hu_graph_t *graph);
 
 /* Internal retrieval strategies (used by engine) */
