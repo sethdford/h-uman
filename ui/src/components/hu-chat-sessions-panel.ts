@@ -32,6 +32,10 @@ export class ScChatSessionsPanel extends LitElement {
   @state() private _creatingProject = false;
   @state() private _newProjectName = "";
   @state() private _editingProjectId: string | null = null;
+  /** Roving tabindex: the one session row reachable by Tab. */
+  @state() private _rovingId: string | null = null;
+  /** After a keyboard delete, focus `next` once `deleted` has left `sessions`. */
+  private _pendingFocus: { deleted: string; next: string | null } | null = null;
 
   private get _filteredSessions(): ChatSession[] {
     let sessions = this.sessions;
@@ -519,6 +523,10 @@ export class ScChatSessionsPanel extends LitElement {
 
   private _onDelete(e: Event, id: string): void {
     e.stopPropagation();
+    this._dispatchDelete(id);
+  }
+
+  private _dispatchDelete(id: string): void {
     this.dispatchEvent(
       new CustomEvent("hu-session-delete", {
         bubbles: true,
@@ -557,26 +565,53 @@ export class ScChatSessionsPanel extends LitElement {
     return groups;
   }
 
-  /** Arrow keys move focus between sessions; Enter/Space are the buttons' own. */
+  /**
+   * Arrow/Home/End move real focus between sessions (roving tabindex), and
+   * Delete/Backspace delete the focused one. Enter/Space are the buttons' own.
+   */
   private _onListKeydown(e: KeyboardEvent): void {
-    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
     const buttons = Array.from(
       this.shadowRoot?.querySelectorAll<HTMLButtonElement>(".session-open") ?? [],
     );
     if (buttons.length === 0) return;
-    e.preventDefault();
     // Resolve the row from any control inside it (e.g. Delete), not just the open button.
-    const row = (this.shadowRoot?.activeElement as HTMLElement | null)?.closest(".session-item");
+    const row = (this.shadowRoot?.activeElement as HTMLElement | null)?.closest<HTMLElement>(
+      ".session-item",
+    );
     const current = row
       ? buttons.indexOf(row.querySelector<HTMLButtonElement>(".session-open") as HTMLButtonElement)
       : -1;
-    const next =
-      current < 0
-        ? 0
-        : e.key === "ArrowDown"
-          ? Math.min(current + 1, buttons.length - 1)
-          : Math.max(current - 1, 0);
+    if (e.key === "Delete" || e.key === "Backspace") {
+      const id = row?.dataset.sessionId;
+      if (!id) return;
+      e.preventDefault();
+      const neighbor = buttons[current + 1] ?? buttons[current - 1];
+      const next = neighbor?.closest<HTMLElement>(".session-item")?.dataset.sessionId ?? null;
+      this._pendingFocus = { deleted: id, next };
+      this._dispatchDelete(id);
+      return;
+    }
+    let next: number;
+    if (e.key === "ArrowDown") next = current < 0 ? 0 : Math.min(current + 1, buttons.length - 1);
+    else if (e.key === "ArrowUp") next = current < 0 ? 0 : Math.max(current - 1, 0);
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = buttons.length - 1;
+    else return;
+    e.preventDefault();
     buttons[next].focus();
+  }
+
+  protected override updated(): void {
+    const pending = this._pendingFocus;
+    if (!pending || this.sessions.some((s) => s.id === pending.deleted)) return;
+    this._pendingFocus = null;
+    if (!pending.next) return;
+    this._rovingId = pending.next;
+    this.shadowRoot
+      ?.querySelector<HTMLElement>(
+        `.session-item[data-session-id="${CSS.escape(pending.next)}"] .session-open`,
+      )
+      ?.focus();
   }
 
   private _startRename(e: Event, _s: ChatSession): void {
@@ -669,6 +704,10 @@ export class ScChatSessionsPanel extends LitElement {
 
   override render() {
     const filteredGroups = this._groupSessions(this._filteredSessions);
+    const shown = filteredGroups.flatMap((g) => g.sessions);
+    const tabId = shown.some((s) => s.id === this._rovingId)
+      ? this._rovingId
+      : (shown.find((s) => s.active)?.id ?? shown[0]?.id);
 
     return html`
       <div class="panel" role="navigation" aria-label="Chat sessions">
@@ -798,41 +837,52 @@ export class ScChatSessionsPanel extends LitElement {
                       .icon=${icons["chat-circle"] ?? icons["message-square"]}
                     ></hu-empty-state>
                   `
-              : filteredGroups.map((group) => {
+              : filteredGroups.map((group, gi) => {
+                  const labelId = `session-group-${gi}`;
                   return html`
-                    <div class="session-group" role="group" aria-label=${group.label}>
-                      <span class="group-label">${group.label}</span>
-                      ${group.sessions.map((s) => {
-                        return html`
-                          <div
-                            class="session-item ${s.active ? "active" : ""}"
-                            @click=${(e: Event) => this._onRowClick(e, s.id)}
-                          >
-                            <button
-                              type="button"
-                              class="session-open"
-                              aria-current=${s.active ? "true" : nothing}
+                    <div class="session-group">
+                      <span class="group-label" id=${labelId}>${group.label}</span>
+                      <div role="list" aria-labelledby=${labelId}>
+                        ${group.sessions.map((s) => {
+                          const tabindex = s.id === tabId ? "0" : "-1";
+                          return html`
+                            <div
+                              role="listitem"
+                              class="session-item ${s.active ? "active" : ""}"
+                              data-session-id=${s.id}
+                              @click=${(e: Event) => this._onRowClick(e, s.id)}
+                              @focusin=${() => {
+                                this._rovingId = s.id;
+                              }}
                             >
-                              <span
-                                class="session-title"
-                                @dblclick=${(e: Event) => this._startRename(e, s)}
-                                @blur=${(e: Event) => this._finishRename(e, s.id)}
-                                @keydown=${(e: KeyboardEvent) => this._renameKeydown(e, s.id)}
-                                >${this._renderProjectDot(s)}${s.title || "Untitled"}</span
+                              <button
+                                type="button"
+                                class="session-open"
+                                tabindex=${tabindex}
+                                aria-current=${s.active ? "true" : nothing}
                               >
-                              <span class="session-ts">${formatRelative(s.ts)}</span>
-                            </button>
-                            <button
-                              type="button"
-                              class="delete-btn"
-                              aria-label="Delete session"
-                              @click=${(e: Event) => this._onDelete(e, s.id)}
-                            >
-                              ${icons.x}
-                            </button>
-                          </div>
-                        `;
-                      })}
+                                <span
+                                  class="session-title"
+                                  @dblclick=${(e: Event) => this._startRename(e, s)}
+                                  @blur=${(e: Event) => this._finishRename(e, s.id)}
+                                  @keydown=${(e: KeyboardEvent) => this._renameKeydown(e, s.id)}
+                                  >${this._renderProjectDot(s)}${s.title || "Untitled"}</span
+                                >
+                                <span class="session-ts">${formatRelative(s.ts)}</span>
+                              </button>
+                              <button
+                                type="button"
+                                class="delete-btn"
+                                tabindex=${tabindex}
+                                aria-label="Delete session"
+                                @click=${(e: Event) => this._onDelete(e, s.id)}
+                              >
+                                ${icons.x}
+                              </button>
+                            </div>
+                          `;
+                        })}
+                      </div>
                     </div>
                   `;
                 })

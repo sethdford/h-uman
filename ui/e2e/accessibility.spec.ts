@@ -158,6 +158,63 @@ test.describe("Accessibility", () => {
     expect(focused).toBeTruthy();
   });
 
+  test("chat session list: Tab reaches it, arrows move, Enter selects, Delete removes", async ({
+    page,
+  }) => {
+    await page.goto("/?demo#chat");
+    await waitForViewReady(page, "hu-chat-view");
+    const panel = page.locator("hu-chat-sessions-panel");
+    const rows = panel.locator(".session-item");
+    await expect(rows.first()).toBeVisible({ timeout: POLL });
+    const before = await rows.count();
+    expect(before).toBeGreaterThan(2);
+    // Id of the row holding focus, read through both shadow roots.
+    const focusedRow = () =>
+      page.evaluate(() => {
+        let a: Element | null = document.activeElement;
+        while (a?.shadowRoot?.activeElement) a = a.shadowRoot.activeElement;
+        return (a as HTMLElement | null)?.closest<HTMLElement>(".session-item")?.dataset.sessionId;
+      });
+    const ids = await rows.evaluateAll((els) =>
+      els.map((e) => (e as HTMLElement).dataset.sessionId),
+    );
+
+    // The list is one Tab stop: search box, then a single session row.
+    await panel.locator(".search-input, input[aria-label='Search sessions']").first().focus();
+    await page.keyboard.press("Tab");
+    const first = await focusedRow();
+    expect(first).toBeTruthy();
+    const start = ids.indexOf(first);
+    // Tab again reaches that row's Delete, and once more leaves the list.
+    await page.keyboard.press("Tab");
+    expect(await focusedRow()).toBe(first);
+    await page.keyboard.press("Tab");
+    expect(await focusedRow()).toBeUndefined();
+    await panel.locator(".session-item .session-open[tabindex='0']").focus();
+
+    await page.keyboard.press("ArrowDown");
+    expect(await focusedRow()).toBe(ids[start + 1]);
+
+    // Enter selects: the chat switches to that session, which the row announces.
+    await page.keyboard.press("Enter");
+    await expect(panel.locator(".session-open[aria-current='true']")).toHaveCount(1);
+    await expect(rows.nth(start + 1).locator(".session-open")).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+
+    await rows
+      .nth(start + 1)
+      .locator(".session-open")
+      .focus();
+    await page.keyboard.press("Delete");
+    await expect(rows).toHaveCount(before - 1);
+    await expect(panel.locator(`.session-item[data-session-id="${ids[start + 1]}"]`)).toHaveCount(
+      0,
+    );
+    expect(await focusedRow()).toBe(ids[start + 2]);
+  });
+
   test("command palette is keyboard navigable", async ({ page }) => {
     await page.goto("/");
     // Use Meta+k on Mac, Control+k elsewhere (app accepts both)
