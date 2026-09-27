@@ -20,12 +20,8 @@ test.describe("Chat Gemini Flow", () => {
     await input.fill(prompt);
     await input.press("Enter");
 
-    await expect(chatView.getByText(prompt).first()).toBeVisible({ timeout: 10000 });
-
-    // Verify message thread is present (demo response ~600ms + render)
-    const messagesArea = chatView.locator(
-      "[role='log'], .messages, .chat-messages, hu-message-thread",
-    );
-    await expect(messagesArea.first()).toBeAttached({ timeout: 10000 });
+    // The sent message must land in the message thread, exactly once.
+    const thread = chatView.getByRole("log");
+    await expect(thread.getByText(prompt, { exact: true })).toBeVisible({ timeout: 10000 });
   });
 });
