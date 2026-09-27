@@ -1081,50 +1081,6 @@ hu_error_t hu_agent_build_persona_head(hu_agent_t *agent, const char *topic, siz
     return HU_OK;
 }
 
-/* Graph grounding load, shared by BOTH turn paths (see agent.h). Composes
- * QUERY-CONDITIONED graph context for the incoming message (entity-overlap
- * scored, 1-hop; empty when nothing matches — see hu_graph_ground_compose)
- * per the HU_GRAPH_GROUNDING gate: SHADOW logs size + relevance fingerprint
- * and drops; ON (live) injects only on ANALYTICAL/DEEP turns, mirroring the
- * RAG leg's live A/B verdict (2026-05-29: substantive +0.110, casual -0.078)
- * — casual/unknown-tier turns log and drop the loaded context. */
-void hu_agent_load_graph_grounding(hu_agent_t *agent, void *loader_v, const char *msg,
-                                   size_t msg_len, char **graph_ctx, size_t *graph_ctx_len) {
-    if (!agent || !loader_v || !graph_ctx || !graph_ctx_len)
-        return;
-    hu_memory_loader_t *loader = (hu_memory_loader_t *)loader_v;
-    hu_graph_grounding_mode_t graph_mode = hu_graph_grounding_mode();
-    if (graph_mode == HU_GRAPH_GROUNDING_OFF || !agent->memory_session_id ||
-        agent->memory_session_id_len == 0)
-        return;
-    size_t matched_entities = 0;
-    hu_graph_ground_compose(loader, agent->memory_session_id, agent->memory_session_id_len, msg,
-                            msg_len, 0, graph_ctx, graph_ctx_len, &matched_entities);
-    const char *drop_reason = NULL;
-    if (graph_mode == HU_GRAPH_GROUNDING_SHADOW) {
-        /* Shadow contract: size AND a relevance fingerprint (matched-entity
-         * count + content hash), so the pre-2026-07 failure signature (274
-         * events, 5 distinct sizes, constant content) is distinguishable
-         * from conversation-varying injection straight from the log. */
-        hu_log_info("graph_grounding", NULL,
-                    "shadow: %zu graph_context bytes matched=%zu fp=%08x (not injected)",
-                    *graph_ctx_len, matched_entities,
-                    (unsigned)hu_graph_ground_fingerprint(*graph_ctx, *graph_ctx_len));
-        drop_reason = "shadow";
-    } else if (graph_mode == HU_GRAPH_GROUNDING_ON && agent->turn_tier < (int)HU_TIER_ANALYTICAL) {
-        hu_log_info("graph_grounding", NULL,
-                    "live: %zu bytes skipped for casual register (tier=%d)", *graph_ctx_len,
-                    agent->turn_tier);
-        drop_reason = "casual";
-    }
-    if (drop_reason) {
-        if (*graph_ctx)
-            agent->alloc->free(agent->alloc->ctx, *graph_ctx, *graph_ctx_len + 1);
-        *graph_ctx = NULL;
-        *graph_ctx_len = 0;
-    }
-}
-
 /* Append the per-turn humanness directives — Theory-of-Mind, calibrated
  * self-uncertainty, intent-aware response-type — to the system prompt, and log
  * active gates once. Shared by BOTH hu_agent_turn (the non-streaming fallback)

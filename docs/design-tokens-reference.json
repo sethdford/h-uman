@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-27T13:41:51.452Z",
+  "generated": "2026-09-27T20:28:19.546Z",
   "groups": {
     "color.neutral": [
       {
@@ -1825,8 +1825,8 @@
       },
       {
         "name": "on-accent",
-        "value": "#ffffff",
-        "hex": "#ffffff"
+        "value": "#0c0a08",
+        "hex": "#0c0a08"
       },
       {
         "name": "accent-secondary",
@@ -2174,8 +2174,8 @@
       },
       {
         "name": "on-accent",
-        "value": "#ffffff",
-        "hex": "#ffffff"
+        "value": "#0c0a08",
+        "hex": "#0c0a08"
       },
       {
         "name": "accent-secondary",
@@ -2453,8 +2453,33 @@
       },
       {
         "name": "accent-text",
-        "value": "#3a6a24",
-        "hex": "#3a6a24"
+        "value": "#8DC63F",
+        "hex": "#8DC63F"
+      },
+      {
+        "name": "accent-secondary-text",
+        "value": "#fbbf24",
+        "hex": "#fbbf24"
+      },
+      {
+        "name": "accent-tertiary-text",
+        "value": "#9fb8d9",
+        "hex": "#9fb8d9"
+      },
+      {
+        "name": "link",
+        "value": "#8DC63F",
+        "hex": "#8DC63F"
+      },
+      {
+        "name": "link-hover",
+        "value": "#a3d46a",
+        "hex": "#a3d46a"
+      },
+      {
+        "name": "link-visited",
+        "value": "#8DC63F",
+        "hex": "#8DC63F"
       },
       {
         "name": "accent-hover",

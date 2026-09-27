@@ -314,6 +314,8 @@ export class ScApp extends LitElement {
     }
     .disconnect-banner {
       background: color-mix(in srgb, var(--hu-error) 85%, var(--hu-bg));
+      /* No single on-color clears 4.5:1 on red in both themes; the page bg does. */
+      color: var(--hu-bg);
     }
     .demo-fallback-banner {
       background: color-mix(in srgb, var(--hu-accent-secondary) 85%, var(--hu-bg));

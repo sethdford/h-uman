@@ -107,6 +107,11 @@ typedef enum {
 hu_voice_record_route_t hu_voice_record_route(hu_voice_delivery_mode_t mode, size_t message_len,
                                               const char *const *media, size_t media_count);
 
+/* HU_VOICE_DELIVERY_ONLY: comma-separated handles that may get a native
+ * recording (e.g. family). NULL/"" = every handle. Exact match, spaces around
+ * entries ignored, case-insensitive (emails). Others keep the attachment. */
+bool hu_voice_record_handle_allowed(const char *allow, const char *handle, size_t handle_len);
+
 /* ── Orchestrator ────────────────────────────────────────────────────────
  * Every real-world effect goes through this port; tests supply a fake. */
 typedef struct hu_voice_record_port {

@@ -426,6 +426,25 @@ describe("hu-input", () => {
     document.body.removeChild(el);
   });
 
+  it("omits aria-label and range attributes instead of rendering them empty", async () => {
+    const { ScInput } = await import("./hu-input.js");
+    const el = new ScInput();
+    el.type = "number";
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const input = el.shadowRoot?.querySelector("input") as HTMLInputElement;
+    // aria-label="" would give the input an empty name and hide the missing-label bug.
+    for (const attr of ["aria-label", "aria-describedby", "min", "max", "step"]) {
+      expect(input.hasAttribute(attr), attr).toBe(false);
+    }
+    el.setAttribute("aria-label", "Max tokens");
+    el.min = 0;
+    await el.updateComplete;
+    expect(input.getAttribute("aria-label")).toBe("Max tokens");
+    expect(input.getAttribute("min")).toBe("0");
+    document.body.removeChild(el);
+  });
+
   it("should fire hu-input event on input", async () => {
     const { ScInput } = await import("./hu-input.js");
     const el = new ScInput();
