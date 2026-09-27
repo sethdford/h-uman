@@ -42,4 +42,4 @@ npm run docs           # generate token reference docs
 
 ## Companion files (manual drift risk)
 
-- `docs/tokens-studio.json` — Tokens Studio / Figma-style export: **not** emitted by `build.ts`. After changing `color.*` references or token aliases in `*.tokens.json`, search-replace or re-export so `{color.human.*}` / `{color.blue.*}` / `{color.sky.*}` stay aligned with `base.tokens.json`. When extending charts, keep `base.color.viz-extended` and the top-level `data-viz.chart.categorical` block (resolved hexes 1–16) in sync with `base.tokens.json` + `data-viz.tokens.json`.
+- `docs/tokens-studio.json` — Tokens Studio / Figma-style export: **not** emitted by `build.ts`. Regenerate with `npm run sync:tokens-studio` (`sync-tokens-studio.ts` is the canonical generator; `figma-sync.ts --export` writes the same path in a different, incomplete layout — don't use it for this file). `check-drift.sh` fails when the committed file differs from the generator's output, so any `*.tokens.json` change needs both `npm run build` and `npm run sync:tokens-studio`.
