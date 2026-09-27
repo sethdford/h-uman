@@ -24,6 +24,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <sys/types.h>
 
 #define HU_VREC_LABEL_RECORD   "Record audio"
 #define HU_VREC_LABEL_STOP     "Stop"
@@ -142,5 +143,18 @@ typedef struct {
 hu_error_t hu_voice_record_send(const hu_voice_record_port_t *port,
                                 const hu_voice_record_request_t *req,
                                 hu_voice_record_result_t *out);
+
+/* ── macOS port (src/channels/imessage_voice_record_macos.c) ─────────────
+ * Apple production builds: CoreAudio + AudioQueue + AX + IOKit. Test and
+ * non-Apple builds: a stub whose preflight always blocks (HU_VREC_NO_AX) and
+ * whose members are all safe no-ops, so the symbol links everywhere. */
+const hu_voice_record_port_t *hu_voice_record_macos_port(void);
+
+/* chat.db helpers, defined in imessage.c (which owns the sqlite access) for
+ * Apple production builds only. -1 / false when unavailable. */
+int64_t hu_imessage_chatdb_max_rowid(void);
+pid_t hu_imessage_messages_pid(void); /* 0 when Messages is not running */
+bool hu_imessage_chatdb_audio_from_me_after(const char *handle, size_t handle_len,
+                                            int64_t after_rowid);
 
 #endif /* HU_CHANNELS_IMESSAGE_VOICE_RECORD_H */

@@ -294,6 +294,19 @@ static void test_vrec_send_restore_readback_failure_is_reported(void) {
     HU_ASSERT_FALSE(res.restored);
 }
 
+/* The test binary never touches audio/AX: the macOS port is a stub here that
+ * always blocks at preflight, and none of its members is NULL. */
+static void test_vrec_macos_port_blocks_under_test(void) {
+    const hu_voice_record_port_t *p = hu_voice_record_macos_port();
+    HU_ASSERT_NOT_NULL(p);
+    HU_ASSERT_NOT_NULL(p->set_input);
+    HU_ASSERT_NOT_NULL(p->audio_row_after);
+    hu_voice_record_request_t r = req_ok();
+    hu_voice_record_result_t res;
+    HU_ASSERT_EQ(hu_voice_record_send(p, &r, &res), HU_ERR_NOT_SUPPORTED);
+    HU_ASSERT_EQ(res.block, HU_VREC_NO_AX);
+}
+
 void run_imessage_voice_record_tests(void) {
     HU_TEST_SUITE("imessage voice record");
     HU_RUN_TEST(test_vrec_mode_parse_defaults_to_attachment);
@@ -310,4 +323,5 @@ void run_imessage_voice_record_tests(void) {
     HU_RUN_TEST(test_vrec_send_missing_send_button_cancels);
     HU_RUN_TEST(test_vrec_send_unverified_row_is_ok_not_resent);
     HU_RUN_TEST(test_vrec_send_restore_readback_failure_is_reported);
+    HU_RUN_TEST(test_vrec_macos_port_blocks_under_test);
 }

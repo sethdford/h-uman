@@ -468,6 +468,9 @@ list(APPEND CHANNEL_SOURCES src/channels/imessage_send_observer.c)
 # Native Messages voice delivery (W3): pure policy + orchestrator, no Apple
 # deps, so unconditional; imessage.c calls it from the production send path.
 list(APPEND CHANNEL_SOURCES src/channels/imessage_voice_record.c)
+# macOS port for it (CoreAudio/AudioQueue/AX/IOKit); a stub on test and
+# non-Apple builds, so unconditional.
+list(APPEND CHANNEL_SOURCES src/channels/imessage_voice_record_macos.c)
 # Tier 1 Phase 2 (iMessage action surface): pure reply-style classifier +
 # facts bridge (hu_imessage_action_*). Zero chat.db / Apple deps (only libc +
 # error.h/persona.h); core callers (src/daemon.c
@@ -2096,7 +2099,7 @@ if(UNIX AND NOT APPLE)
     target_link_libraries(human_core PUBLIC m dl)
 endif()
 if(APPLE)
-    target_link_libraries(human_core PRIVATE "-framework ApplicationServices" "-framework ImageIO" "-framework Accelerate" "-framework IOKit" "-framework CoreFoundation")
+    target_link_libraries(human_core PRIVATE "-framework ApplicationServices" "-framework ImageIO" "-framework Accelerate" "-framework IOKit" "-framework CoreFoundation" "-framework CoreAudio" "-framework AudioToolbox")
     # New CBLAS headers; avoids -Wdeprecated-declarations on cblas_sgemm (macOS 13.3+).
     target_compile_definitions(human_core PRIVATE ACCELERATE_NEW_LAPACK=1)
 endif()
