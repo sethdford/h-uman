@@ -29,13 +29,15 @@
 static bool is_emoji_codepoint(const unsigned char *p, size_t remain) {
     if (remain < 3)
         return false;
-    /* Common emoji ranges in UTF-8 (3-4 byte sequences) */
-    if (p[0] == 0xE2 && p[1] >= 0x80 && p[1] <= 0xBF)
-        return true; /* misc symbols */
-    if (p[0] == 0xE2 && p[1] == 0x9A && p[2] >= 0x80)
-        return true; /* ⚠⚡⚙ etc */
-    if (p[0] == 0xE2 && p[1] == 0x9C)
-        return true; /* ✓✗✨ etc */
+    /* Emoji blocks only. U+2000-206F (General Punctuation: curly quotes, the
+     * ellipsis, dashes) is text: treating all of E2 80..BF as emoji spoke
+     * "20th… just" as "20thjust" and "I’m" as "Im" (final review 2026-09-27). */
+    if (p[0] == 0xE2 && p[1] >= 0x98 && p[1] <= 0x9E)
+        return true; /* U+2600-27BF misc symbols, dingbats: ☀⚠⚡✓✨ */
+    if (p[0] == 0xE2 && (p[1] == 0x8C || p[1] == 0x8F))
+        return true; /* U+2300-233F, U+23C0-23FF: ⌚⌛⏰⏳ */
+    if (p[0] == 0xE2 && (p[1] == 0xAC || p[1] == 0xAD))
+        return true; /* U+2B00-2B7F: ⬆⬇⭐ */
     if (remain >= 4 && p[0] == 0xF0 && p[1] == 0x9F)
         return true; /* U+1F000..1FFFF — most emoji */
     return false;
@@ -83,6 +85,27 @@ size_t hu_transcript_strip_junk(const char *text, size_t text_len, char *out, si
             }
         }
 
+        /* Typographic punctuation to ASCII: spoken the same, and downstream
+         * normalization (contractions, pauses) matches the ASCII forms. */
+        if ((unsigned char)text[i] == 0xE2 && i + 2 < text_len &&
+            (unsigned char)text[i + 1] == 0x80) {
+            unsigned char c3 = (unsigned char)text[i + 2];
+            const char *ascii = c3 == 0xA6                   ? "..."
+                                : (c3 == 0x98 || c3 == 0x99) ? "'"
+                                : (c3 == 0x9C || c3 == 0x9D) ? "\""
+                                                             : NULL;
+            if (ascii) {
+                size_t al = strlen(ascii);
+                if (pos + al >= cap)
+                    break;
+                memcpy(out + pos, ascii, al);
+                pos += al;
+                i += 3;
+                prev_was_space = false;
+                continue;
+            }
+        }
+
         /* Emoji-as-icon characters */
         if ((unsigned char)text[i] >= 0xE0) {
             size_t remain = text_len - i;
@@ -104,8 +127,10 @@ size_t hu_transcript_strip_junk(const char *text, size_t text_len, char *out, si
                         break;
                     }
                 }
-                while (i < text_len && text[i] == ' ')
-                    i++;
+                /* "great ✨ day" → "great day", but "wow😍 nice" keeps its space. */
+                if (pos == 0 || out[pos - 1] == ' ')
+                    while (i < text_len && text[i] == ' ')
+                        i++;
                 continue;
             }
         }

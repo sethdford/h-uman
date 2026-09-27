@@ -905,6 +905,35 @@ static void test_prep_inline_emotion_tags_are_budgeted(void) {
     HU_ASSERT_TRUE(count_of(result.output, "<volume ratio=") <= 1);
 }
 
+/* Final review 2026-09-27: General Punctuation (U+2000-206F) is not emoji.
+ * Today's path spoke "20th… just" as "20thjust" and "I’m" as "Im". */
+static void test_strip_junk_keeps_punctuation_and_word_breaks(void) {
+    char out[128];
+    size_t n = hu_transcript_strip_junk("20th\xE2\x80\xA6 just", 13, out, sizeof(out));
+    out[n] = '\0';
+    HU_ASSERT_STR_EQ(out, "20th... just");
+    const char *q = "I\xE2\x80\x99m here, don\xE2\x80\x99t";
+    n = hu_transcript_strip_junk(q, strlen(q), out, sizeof(out));
+    out[n] = '\0';
+    HU_ASSERT_STR_EQ(out, "I'm here, don't");
+    const char *d = "wait\xE2\x80\x94really";
+    n = hu_transcript_strip_junk(d, strlen(d), out, sizeof(out));
+    out[n] = '\0';
+    HU_ASSERT_STR_EQ(out, "wait\xE2\x80\x94really");
+}
+
+static void test_strip_junk_still_drops_emoji_without_merging_words(void) {
+    char out[128];
+    const char *a = "great \xE2\x9C\xA8 day";
+    size_t n = hu_transcript_strip_junk(a, strlen(a), out, sizeof(out));
+    out[n] = '\0';
+    HU_ASSERT_STR_EQ(out, "great day");
+    const char *b = "wow\xF0\x9F\x98\x8D nice";
+    n = hu_transcript_strip_junk(b, strlen(b), out, sizeof(out));
+    out[n] = '\0';
+    HU_ASSERT_STR_EQ(out, "wow nice");
+}
+
 void run_transcript_prep_tests(void) {
     HU_TEST_SUITE("Transcript preprocessor");
 
@@ -992,4 +1021,6 @@ void run_transcript_prep_tests(void) {
     HU_RUN_TEST(test_break_limiter_null_safe);
 
     HU_RUN_TEST(test_prep_normalizes_numbers_in_pipeline);
+    HU_RUN_TEST(test_strip_junk_keeps_punctuation_and_word_breaks);
+    HU_RUN_TEST(test_strip_junk_still_drops_emoji_without_merging_words);
 }
