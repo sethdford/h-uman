@@ -173,6 +173,53 @@ describe("hu-combobox", () => {
     expect(input).toBeTruthy();
     el.remove();
   });
+
+  it("omits optional aria attributes instead of rendering them empty", async () => {
+    const el = document.createElement("hu-combobox") as ScCombobox;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const input = el.shadowRoot?.querySelector('[role="combobox"]') as HTMLInputElement;
+    // Empty IDREFs point at nothing and an empty aria-label hides a missing name.
+    for (const attr of [
+      "aria-controls",
+      "aria-activedescendant",
+      "aria-describedby",
+      "aria-label",
+    ]) {
+      expect(input.hasAttribute(attr), attr).toBe(false);
+    }
+    el.remove();
+  });
+
+  it("references the listbox and active option only while they are rendered", async () => {
+    const el = document.createElement("hu-combobox") as ScCombobox;
+    el.options = [{ value: "a", label: "Alpha" }];
+    el.setAttribute("aria-label", "Pick one");
+    el.error = "Required";
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const input = el.shadowRoot?.querySelector('[role="combobox"]') as HTMLInputElement;
+    input.dispatchEvent(new Event("focus"));
+    await el.updateComplete;
+    const idrefs = ["aria-controls", "aria-activedescendant", "aria-describedby"] as const;
+    for (const attr of idrefs) {
+      const id = input.getAttribute(attr);
+      expect(id, attr).toBeTruthy();
+      expect(el.shadowRoot?.getElementById(id as string), attr).toBeTruthy();
+    }
+    expect(input.getAttribute("aria-label")).toBe("Pick one");
+    expect(input.getAttribute("aria-expanded")).toBe("true");
+    // Open but nothing matches: the listbox is not rendered, so nothing may point at it
+    // and the combobox must not announce an expanded popup.
+    input.value = "zzz";
+    input.dispatchEvent(new Event("input"));
+    await el.updateComplete;
+    expect(el.shadowRoot?.querySelector('[role="listbox"]')).toBeNull();
+    expect(input.hasAttribute("aria-controls")).toBe(false);
+    expect(input.hasAttribute("aria-activedescendant")).toBe(false);
+    expect(input.getAttribute("aria-expanded")).toBe("false");
+    el.remove();
+  });
 });
 
 describe("hu-form-group", () => {

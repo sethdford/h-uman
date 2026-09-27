@@ -2523,6 +2523,9 @@ imsg_media:
         hu_voice_record_route_t vroute =
             hu_voice_record_route(hu_voice_delivery_mode_parse(getenv("HU_VOICE_DELIVERY")),
                                   message_len, media, media_count);
+        if (vroute != HU_VREC_ROUTE_ATTACHMENT &&
+            !hu_voice_record_handle_allowed(getenv("HU_VOICE_DELIVERY_ONLY"), tgt, tgt_len))
+            vroute = HU_VREC_ROUTE_ATTACHMENT; /* not on the native list: attachment as before */
         if (vroute == HU_VREC_ROUTE_SHADOW) {
             const hu_voice_record_port_t *vport = hu_voice_record_macos_port();
             hu_voice_record_request_t vreq;

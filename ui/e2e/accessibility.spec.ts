@@ -95,8 +95,6 @@ const KNOWN_VIOLATIONS: Record<string, Record<string, number>> = {
   // hu-model-selector combobox trigger has no accessible name.
   Overview: { "button-name": 1 },
   Chat: { "button-name": 1 },
-  // Number inputs rendered with aria-label="".
-  Config: { label: 2 },
 };
 
 const VIEWS = [

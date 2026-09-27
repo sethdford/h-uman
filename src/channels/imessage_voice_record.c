@@ -334,3 +334,24 @@ hu_error_t hu_voice_record_send_from_env(const char *handle, size_t handle_len,
                                      (uint32_t)time(NULL) ^ (uint32_t)getpid(), &req);
     return hu_voice_record_send(hu_voice_record_macos_port(), &req, out);
 }
+
+bool hu_voice_record_handle_allowed(const char *allow, const char *handle, size_t handle_len) {
+    if (!allow || !allow[0])
+        return true;
+    if (!handle || handle_len == 0)
+        return false;
+    for (const char *p = allow; *p;) {
+        while (*p == ' ' || *p == ',')
+            p++;
+        const char *e = p;
+        while (*e && *e != ',')
+            e++;
+        size_t n = (size_t)(e - p);
+        while (n > 0 && p[n - 1] == ' ')
+            n--;
+        if (n == handle_len && strncasecmp(p, handle, n) == 0)
+            return true;
+        p = e;
+    }
+    return false;
+}
