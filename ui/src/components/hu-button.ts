@@ -54,11 +54,14 @@ export class ScButton extends LitElement {
       outline-offset: var(--hu-focus-ring-offset);
     }
 
-    /* Primary — Human-style convex pillow with specular highlights */
+    /* Primary — Human-style convex pillow with specular highlights.
+       --hu-on-accent on --hu-accent is 1.9-3.5:1 under the gradient in both
+       themes. This pair holds 6.7:1 dark and 4.6:1 light across the text band
+       (30-70% of the height), where the light theme's white top veil is thinnest. */
     button.variant-primary {
-      background: var(--hu-accent);
+      background: var(--hu-accent-text);
       background-image: var(--hu-button-gradient-primary);
-      color: var(--hu-on-accent);
+      color: var(--hu-bg-surface);
       text-shadow: 0 1px 1px color-mix(in srgb, var(--hu-text) 20%, transparent);
       box-shadow:
         var(--hu-shadow-sm),
@@ -66,8 +69,10 @@ export class ScButton extends LitElement {
         inset 0 -1px 0 color-mix(in srgb, var(--hu-color-black) 15%, transparent);
     }
     button.variant-primary:hover:not(:disabled) {
-      background: var(--hu-accent-hover);
-      background-image: var(--hu-button-gradient-primary);
+      background: var(--hu-accent-text);
+      background-image:
+        linear-gradient(var(--hu-hover-overlay), var(--hu-hover-overlay)),
+        var(--hu-button-gradient-primary);
       transform: translateY(-1px);
       box-shadow:
         var(--hu-shadow-md),
@@ -81,6 +86,18 @@ export class ScButton extends LitElement {
         inset 0 1px 0 color-mix(in srgb, var(--hu-color-white) 20%, transparent),
         inset 0 -1px 0 color-mix(in srgb, var(--hu-color-black) 10%, transparent);
       transition-duration: var(--hu-duration-fast);
+    }
+
+    /* prefers-contrast: more forces a black surface but keeps --hu-accent-text
+       dark (3.3:1); its accent/on-accent pair is the one tuned for that mode. */
+    @media (prefers-contrast: more) {
+      button.variant-primary {
+        background-color: var(--hu-accent);
+        color: var(--hu-on-accent);
+      }
+      button.variant-primary:hover:not(:disabled) {
+        background-color: var(--hu-accent-hover);
+      }
     }
 
     /* Secondary — subtle gradient with inner depth */
