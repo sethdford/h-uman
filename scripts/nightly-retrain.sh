@@ -265,19 +265,66 @@ run_mlxtune_candidate_stage() {
     # Resolve the REAL output directory now that training has run — see the
     # comment on candidate_dir_prefix above. Newest match wins if more than
     # one somehow exists (there should be exactly zero or one).
+    # `.rejected-*` is the quarantine suffix this stage itself appends, and it
+    # sorts AFTER the plain directory name — so an un-filtered `sort | tail -1`
+    # would resurrect a previously-quarantined adapter. Reachable only on the
+    # failure path, which is exactly the path the salvage below travels.
     local candidate_dir
-    candidate_dir=$(ls -d "${candidate_dir_prefix}-"* 2>/dev/null | sort | tail -1)
+    candidate_dir=$(ls -d "${candidate_dir_prefix}-"* 2>/dev/null | grep -v '\.rejected-' | sort | tail -1)
+
+    # Facts about the run, needed by BOTH the salvage branch and the loss check.
+    local why train_log reached_iter="unknown" configured_iters="unknown" trainer_tail="unknown"
+    train_log=$(ls -t "$HOME/.human/logs/train-glm-${mlxtune_tag}"-*.log 2>/dev/null | head -1)
+    if [[ -n "$train_log" ]]; then
+        reached_iter=$(grep -a -oE 'Iter [0-9]+:' "$train_log" | tail -1 | tr -dc '0-9')
+        reached_iter="${reached_iter:-unknown}"
+        trainer_tail=$(grep -a -E '(Error|error|Traceback|RuntimeError|Killed)' "$train_log" | tail -1 | cut -c1-200)
+        trainer_tail="${trainer_tail:-unknown}"
+    fi
+    if [[ -n "$candidate_dir" && -f "$candidate_dir/adapter_config.json" ]]; then
+        configured_iters=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("iters","unknown"))' \
+            "$candidate_dir/adapter_config.json" 2>/dev/null || echo unknown)
+    fi
 
     if [[ "$train_rc" != "0" ]]; then
-        log "mlx-tune candidate stage: training FAILED rc=$train_rc — see $LOG"
-        return 0
+        # rc!=0 means one of two very different things — the same distinction the
+        # base-training path further down already makes (2026-09-06: it logged
+        # "NO adapter was produced" over a real 556 MB one). Here the stakes are
+        # a MEASUREMENT. On 2026-09-20 the first SFT candidate wrote its COMPLETE
+        # 2.2 GB adapter at iter 2000, then the trainer died writing an
+        # INTERMEDIATE checkpoint (ENOSPC; save_every=500 x 2.2 GB filled the
+        # disk). rc=1 discarded a real, learned adapter unscored, so the night
+        # produced no measurement at all — the one thing the stage exists for.
+        #
+        # Salvaging is safe ONLY because this stage never promotes. The adapter
+        # still has to clear adapter_is_real.py — which since 2026-09-20 rejects
+        # a half-written file, the exact artifact a trainer killed mid-write
+        # leaves behind — then the did-it-learn loss check, then the promotion
+        # gate. A crash with nothing usable on disk still takes the old path.
+        if [[ -n "$candidate_dir" && -d "$candidate_dir" ]] \
+           && why=$(python3 "$REPO/scripts/adapter_is_real.py" "$candidate_dir" 2>&1); then
+            log "mlx-tune candidate stage: trainer exited rc=$train_rc but left a COMPLETE adapter — $why"
+            log "mlx-tune candidate stage: salvaging $candidate_dir for SCORING only; reached iter ${reached_iter} of ${configured_iters}"
+            # Provenance: a salvaged adapter must never later be mistaken for a
+            # finished run. This file is the durable record beside the weights.
+            {
+                printf 'trainer_exit_rc=%s\n'   "$train_rc"
+                printf 'salvaged_at=%s\n'       "$(date '+%Y-%m-%dT%H:%M:%S')"
+                printf 'reached_iter=%s\n'      "$reached_iter"
+                printf 'configured_iters=%s\n'  "$configured_iters"
+                printf 'trainer_error=%s\n'     "$trainer_tail"
+                printf 'note=%s\n' "complete adapter from an INTERRUPTED run; scored, never auto-promoted"
+            } > "$candidate_dir/PARTIAL_RUN" 2>/dev/null || true
+        else
+            log "mlx-tune candidate stage: training FAILED rc=$train_rc and no complete adapter survives — see $LOG"
+            return 0
+        fi
     fi
     if [[ -z "$candidate_dir" || ! -d "$candidate_dir" ]]; then
         log "mlx-tune candidate stage: WARNING rc=0 but no adapter dir matching ${candidate_dir_prefix}-* — treating as failure"
         return 0
     fi
 
-    local why
     if why=$(python3 "$REPO/scripts/adapter_is_real.py" "$candidate_dir" 2>&1); then
         log "mlx-tune candidate stage: adapter real: $candidate_dir — $why"
         # Did it LEARN? A real adapter can still be a no-op: 2026-09-06..12 every
@@ -285,7 +332,6 @@ run_mlxtune_candidate_stage() {
         # at ln2) and the 7-minute scoring measured the raw base five times. Read
         # the trainer's own "Step N/M | Loss:" lines; refuse to score when the
         # last tenth is not below the first tenth by HU_RETRAIN_MIN_LOSS_DROP.
-        local train_log; train_log=$(ls -t "$HOME/.human/logs/train-glm-${mlxtune_tag}"-*.log 2>/dev/null | head -1)
         local loss_drop_min="${HU_RETRAIN_MIN_LOSS_DROP:-0.02}"
         if [[ -n "$train_log" ]]; then
             local loss_summary

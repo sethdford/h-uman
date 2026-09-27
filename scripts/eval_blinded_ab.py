@@ -77,7 +77,12 @@ USE_BASE_ARM = "--base-arm" in sys.argv
 # run (docs/research/2026-07-25-binoculars-discriminator.md). Measurement-side
 # only: never feeds the gate, never changes the exit code. ~12 min GPU.
 USE_BINOCULARS = "--binoculars" in sys.argv
-MAX_TRIALS = 50
+
+import blind_ab_gate as _gate  # noqa: E402  (before MAX_TRIALS, which it owns)
+
+# The gate module owns this: its verdict rule is only valid at a sample size
+# that can resolve the 5 pp decision boundary. See proxy_gate_decision.
+MAX_TRIALS = _gate.DEFAULT_MAX_TRIALS
 # Gemini judge runs concurrently in a thread pool while MLX generation (serial,
 # model_lock-bound) continues — see the main loop. Default kept modest to stay
 # gentle on the judge API; raise with --judge-workers=N.
@@ -94,7 +99,6 @@ for arg in sys.argv:
     elif arg.startswith("--seed="):
         SEED = int(arg.split("=")[1])
 
-import blind_ab_gate as _gate
 _GATE_PATH = os.environ.get("HU_BLIND_AB_GATE_PATH", _gate.GATE_PATH)
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "blind_ab"))
 from gen_classifier_trials import serving_provenance as _serving_provenance  # noqa: E402
@@ -139,10 +143,17 @@ def write_gate_verdict(gate_path, *, fool_rate, n_trials, n_real_pairs, baseline
                     f"serving {key} changed mid-run: {preflight_serving.get(key)!r} -> "
                     f"{serving.get(key)!r}; the trials did not all measure one configuration")
     mode, verdict, should_fail = _gate.proxy_gate_decision(
-        fool_rate=fool_rate, n_real_pairs=n_real_pairs, baseline=baseline)
+        fool_rate=fool_rate, n_real_pairs=n_real_pairs, baseline=baseline,
+        n_trials=n_trials)
+    # Record the interval beside the rate. The verdict is DERIVED from these
+    # bounds, so a reader who quotes fool_rate without them is quoting a number
+    # the gate itself did not act on.
+    ci_lo, ci_hi = _gate.fool_rate_ci(fool_rate, n_trials)
     _gate.write_proxy_half(gate_path, {
         "verdict": verdict, "mode": mode,
         "fool_rate": fool_rate if n_trials else None,
+        "fool_rate_ci": [round(ci_lo, 2), round(ci_hi, 2)] if n_trials else None,
+        "ci_method": "wilson95",
         "baseline_fool_rate": (baseline or {}).get("fool_rate"),
         "n_trials": n_trials, "n_real_pairs": n_real_pairs,
         "fail_under": _gate.DEFAULT_FAIL_UNDER,

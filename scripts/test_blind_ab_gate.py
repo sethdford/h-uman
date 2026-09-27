@@ -54,24 +54,178 @@ def test_proxy_decision_advisory_below_threshold():
 
 
 def test_proxy_decision_enforcing_pass():
+    # 50 % at the default n: powered (half-width 4.9 pp <= 5) and nothing
+    # indicts it.
     mode, verdict, fail = g.proxy_gate_decision(
-        fool_rate=50.0, n_real_pairs=40, baseline=None,
+        fool_rate=50.0, n_real_pairs=g.DEFAULT_MAX_TRIALS, baseline=None,
         fail_under=45.0, max_regression=5.0, enforce_min_pairs=30)
     assert mode == "ENFORCING" and verdict == "PASS" and fail is False
 
 
-def test_proxy_decision_enforcing_fail_under_floor():
+def test_a_perfect_model_can_actually_reach_pass():
+    """PASS must be REACHABLE at the sample size the nightly actually runs.
+
+    The first draft of the interval rule required ci_lo >= fail_under -- i.e.
+    PROVE the rate exceeds the floor. That makes PASS unreachable: a perfectly
+    indistinguishable model (true 50 %) has ci_lo 44.4 at n=300, so the gate
+    would have sat at ADVISORY forever and no capability gated on a blind_ab
+    PASS could ever unlock. The floor is a red line not to fall below, not a
+    target to clear.
+
+    This pins the reachability property itself, so a future tightening of the
+    rule cannot quietly make PASS impossible again.
+
+    n=300 is the discriminating case and is used on purpose: there a perfect
+    model's lower bound is 44.4, BELOW the floor, so the discarded
+    ci_lo >= fail_under rule would return ADVISORY while the evidence-of-harm
+    rule correctly returns PASS. (At the n=400 default the bound is 45.1 and
+    both rules agree, which is exactly why that n proves nothing here.)
+    """
+    lo, hi = g.fool_rate_ci(50.0, 300)
+    assert lo < 45.0, "precondition: a perfect model's lower bound dips below the floor"
+    assert (hi - lo) / 2 <= 6.0, "precondition: n=300 is not absurdly coarse"
+    _m, verdict, fail = g.proxy_gate_decision(
+        fool_rate=50.0, n_real_pairs=300, baseline=None, n_trials=300,
+        max_ci_half_width=6.0)
+    assert verdict == "PASS" and fail is False
+
+
+def test_underpowered_run_cannot_certify_a_pass():
+    """No evidence of harm is not evidence of no harm at a coarse resolution.
+
+    50 % at n=50 indicts nothing, but its half-width is 13.3 pp -- it cannot
+    separate the 45 % floor from the 50 % target, so PASS would be unearned.
+    """
+    lo, hi = g.fool_rate_ci(50.0, 50)
+    assert (hi - lo) / 2 > g.MAX_CI_HALF_WIDTH_PP
+    mode, verdict, fail = g.proxy_gate_decision(
+        fool_rate=50.0, n_real_pairs=50, baseline=None, n_trials=50)
+    assert mode == "ENFORCING" and verdict == "ADVISORY" and fail is False
+
+
+def test_evidence_of_harm_beats_low_power():
+    """A small sample cannot prove a model is good, but CAN prove one is bad.
+
+    20 % at n=50: half-width 11 pp (underpowered for PASS) but the whole
+    interval tops out at 32.6 %, far under the floor. The power gate must not
+    swallow a real indictment, so FAIL is checked first.
+    """
+    _lo, hi = g.fool_rate_ci(20.0, 50)
+    assert hi < 45.0
+    mode, verdict, fail = g.proxy_gate_decision(
+        fool_rate=20.0, n_real_pairs=50, baseline=None, n_trials=50)
+    assert mode == "ENFORCING" and verdict == "FAIL" and fail is True
+
+
+def test_proxy_decision_underpowered_sample_is_advisory_not_fail():
+    """40 % at n=40 is NOT evidence of a failure -- its CI is [26.3, 55.5].
+
+    Until 2026-09-20 this exact case asserted FAIL, and that assertion was the
+    bug: the old rule compared the point estimate to the floor with no regard
+    for n, so it failed a model whose interval comfortably contains the floor.
+    Simulated over 4000 draws, that rule failed a PERFECTLY indistinguishable
+    (true 50 %) model 24.8 % of the time at n=50. Live consequence: the nightly
+    read 42.0 % FAIL on 09-19 and 46.0 % PASS on 09-20 off the same adapter and
+    judge, and W16 sat red for 5 days.
+
+    ADVISORY is the honest verdict -- not enough evidence to decide -- and it
+    does not promote (compute_effective_verdict only promotes on PASS).
+    """
+    lo, hi = g.fool_rate_ci(40.0, 40)
+    assert lo < 45.0 < hi, "precondition: this sample cannot resolve the floor"
     mode, verdict, fail = g.proxy_gate_decision(
         fool_rate=40.0, n_real_pairs=40, baseline=None,
+        fail_under=45.0, max_regression=5.0, enforce_min_pairs=30)
+    # mode stays ENFORCING: the run is REAL, it just did not resolve the floor.
+    assert mode == "ENFORCING" and verdict == "ADVISORY" and fail is False
+
+
+def test_proxy_decision_enforcing_fail_when_ci_clears_the_floor():
+    """The gate still has teeth: a real regression at adequate n FAILs.
+
+    30 % at n=300 has CI [25.1, 35.4] -- entirely below the 45 % floor. This is
+    the case the CI rule must NOT go soft on, and the reason DEFAULT_MAX_TRIALS
+    rose to 300 alongside it: at n=50 the same true rate is caught only 56.9 %
+    of the time, at n=300 it is caught 100 %.
+    """
+    lo, hi = g.fool_rate_ci(30.0, 300)
+    assert hi < 45.0, "precondition: the whole interval is below the floor"
+    mode, verdict, fail = g.proxy_gate_decision(
+        fool_rate=30.0, n_real_pairs=300, baseline=None,
         fail_under=45.0, max_regression=5.0, enforce_min_pairs=30)
     assert mode == "ENFORCING" and verdict == "FAIL" and fail is True
 
 
 def test_proxy_decision_enforcing_fail_on_regression():
+    # 35 % against a 55 % baseline at n=300: CI upper 40.6 % is below the
+    # allowance line (55 - 5 = 50), so the drop is confidently past allowance.
+    mode, verdict, fail = g.proxy_gate_decision(
+        fool_rate=35.0, n_real_pairs=300, baseline={"fool_rate": 55.0},
+        fail_under=45.0, max_regression=5.0, enforce_min_pairs=30)
+    assert verdict == "FAIL" and fail is True
+
+
+def test_proxy_decision_regression_within_noise_is_not_a_regression():
+    """A 9-point drop at n=40 used to FAIL; its CI reaches 55.5 %.
+
+    Same defect as the floor comparison, on the baseline axis: subtracting two
+    point estimates and comparing to an allowance ignores that both are noisy.
+    """
     mode, verdict, fail = g.proxy_gate_decision(
         fool_rate=46.0, n_real_pairs=40, baseline={"fool_rate": 55.0},
         fail_under=45.0, max_regression=5.0, enforce_min_pairs=30)
-    assert verdict == "FAIL" and fail is True  # 55 - 46 = 9 > 5
+    assert mode == "ENFORCING" and verdict == "ADVISORY" and fail is False
+
+
+def test_inconclusive_verdict_still_counts_as_a_real_measurement():
+    """An ADVISORY *verdict* must not read as an absent *measurement*.
+
+    check_measurement_freshness.py counts the proxy tier only when
+    mode != ADVISORY, because dry runs write ADVISORY mode. When the interval
+    rule first landed it returned ADVISORY for BOTH axes on a straddle, which
+    would have made a real 300-trial run invisible to the freshness gate and
+    kept W16 red permanently -- the exact failure the rule exists to end.
+
+    The two axes are independent: mode = "was this real", verdict = "what did
+    it decide". This pins that separation.
+    """
+    import check_measurement_freshness as fresh
+    mode, verdict, fail = g.proxy_gate_decision(
+        fool_rate=46.0, n_real_pairs=300, baseline=None,
+        fail_under=45.0, max_regression=5.0, enforce_min_pairs=30)
+    assert (mode, verdict, fail) == ("ENFORCING", "ADVISORY", False)
+    ts, tier = fresh.freshest_real_measurement({
+        "proxy": {"mode": mode, "verdict": verdict,
+                  "timestamp": "2026-09-20T04:50:44"},
+        "human": {"n": 0},
+    })
+    assert tier == "proxy" and ts is not None, "inconclusive run must still be fresh"
+
+
+def test_wilson_and_ci_helpers():
+    # Point estimate is returned first and is exact; bounds bracket it.
+    p, lo, hi = g.wilson(23, 50)
+    assert abs(p - 0.46) < 1e-9 and lo < p < hi
+    # n == 0 constrains nothing -- must not read as a confident 0 %.
+    assert g.wilson(0, 0) == (0.0, 0.0, 0.0)
+    assert g.fool_rate_ci(0.0, 0) == (0.0, 100.0)
+    # More evidence -> strictly tighter interval at the same rate.
+    lo50, hi50 = g.fool_rate_ci(46.0, 50)
+    lo300, hi300 = g.fool_rate_ci(46.0, 300)
+    assert (hi300 - lo300) < (hi50 - lo50)
+
+
+def test_default_max_trials_can_resolve_the_decision_boundary():
+    """The verdict rule and the sample size are one change, not two.
+
+    proxy_gate_decision is only safe at an n whose interval is near the 5 pp
+    boundary it decides on; at n=50 the half-width is 13.3 pp and the gate goes
+    blind. This pins the coupling so a future "trim the nightly" cannot quietly
+    re-break the gate by lowering n alone.
+    """
+    lo, hi = g.fool_rate_ci(50.0, g.DEFAULT_MAX_TRIALS)
+    assert (hi - lo) / 2 <= g.MAX_CI_HALF_WIDTH_PP, \
+        "DEFAULT_MAX_TRIALS too small to certify a PASS at its own power gate"
 
 
 def test_merge_preserves_other_half():
@@ -183,8 +337,15 @@ def _run():
     sys.exit(1 if failed else 0)
 
 
-if __name__ == "__main__":
-    _run()
+# NOTE: the __main__ block MUST stay at the very END of this file. _run() reads
+# globals() at CALL time, so any test defined below the call is not yet bound
+# and is silently never collected. That was live until 2026-09-20: the block sat
+# here, mid-file, and the ten provenance / write_proxy_half tests below it never
+# ran once while the file printed a confident "10/13 passed". Those are exactly
+# the tests guarding ProvenanceRefusal -- the check that stops an unattributable
+# verdict from being written. A test runner that reports success for tests it
+# never executed is .claude/rules/reports-success-does-nothing.md in the test
+# harness itself. Add new tests anywhere above the block; never below it.
 
 
 # ---- serving provenance at verdict time ------------------------------------
@@ -283,3 +444,7 @@ def test_write_proxy_half_base_arm_records_no_adapter_without_refusing():
                        serving=_serving(None, 0), claims_adapter=False)
     proxy = json.load(open(path))["proxy"]
     assert proxy["claims_adapter"] is False and proxy["serving"]["adapter_bound"] is False
+
+
+if __name__ == "__main__":
+    _run()
