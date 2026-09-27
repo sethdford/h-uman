@@ -59,11 +59,6 @@ export class ScSkillCard extends LitElement {
       transform: translateY(var(--hu-physics-card-hover-translateY, -2px));
     }
 
-    .skill-card:has(.skill-open:focus-visible) {
-      outline: 2px solid var(--hu-accent);
-      outline-offset: 2px;
-      border-radius: var(--hu-radius-xl);
-    }
     /* The card's primary action. Pointer clicks anywhere on the card bubble to
        its handler; this button is the keyboard/AT entry point, so the switch and
        Install button are siblings rather than descendants of a role=button card. */
@@ -76,7 +71,19 @@ export class ScSkillCard extends LitElement {
       cursor: pointer;
     }
     .skill-open:focus-visible {
-      outline: none;
+      outline: 2px solid var(--hu-accent);
+      outline-offset: 2px;
+    }
+    /* Where :has() is supported, ring the whole card instead of the button. */
+    @supports selector(:has(*)) {
+      .skill-card:has(.skill-open:focus-visible) {
+        outline: 2px solid var(--hu-accent);
+        outline-offset: 2px;
+        border-radius: var(--hu-radius-xl);
+      }
+      .skill-open:focus-visible {
+        outline: none;
+      }
     }
 
     .skill-card-inner {

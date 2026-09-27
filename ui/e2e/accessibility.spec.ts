@@ -91,7 +91,7 @@ async function settlePage(page: Page, quietMs = 250, timeout = 5000): Promise<vo
  * entry here so the freed slack cannot hide the next regression.
  */
 const KNOWN_VIOLATIONS: Record<string, Record<string, number>> = {
-  // hu-segmented-control active segment contrast (see Channels).
+  // Active tag chip: --hu-bg text on --hu-accent is 2.23:1 (not the segmented control).
   Skills: { "color-contrast": 1 },
   // Number inputs rendered with aria-label="".
   Config: { label: 2 },
