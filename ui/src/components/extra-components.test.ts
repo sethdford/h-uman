@@ -173,6 +173,53 @@ describe("hu-combobox", () => {
     expect(input).toBeTruthy();
     el.remove();
   });
+
+  it("omits optional aria attributes instead of rendering them empty", async () => {
+    const el = document.createElement("hu-combobox") as ScCombobox;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const input = el.shadowRoot?.querySelector('[role="combobox"]') as HTMLInputElement;
+    // Empty IDREFs point at nothing and an empty aria-label hides a missing name.
+    for (const attr of [
+      "aria-controls",
+      "aria-activedescendant",
+      "aria-describedby",
+      "aria-label",
+    ]) {
+      expect(input.hasAttribute(attr), attr).toBe(false);
+    }
+    el.remove();
+  });
+
+  it("references the listbox and active option only while they are rendered", async () => {
+    const el = document.createElement("hu-combobox") as ScCombobox;
+    el.options = [{ value: "a", label: "Alpha" }];
+    el.setAttribute("aria-label", "Pick one");
+    el.error = "Required";
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const input = el.shadowRoot?.querySelector('[role="combobox"]') as HTMLInputElement;
+    input.dispatchEvent(new Event("focus"));
+    await el.updateComplete;
+    const idrefs = ["aria-controls", "aria-activedescendant", "aria-describedby"] as const;
+    for (const attr of idrefs) {
+      const id = input.getAttribute(attr);
+      expect(id, attr).toBeTruthy();
+      expect(el.shadowRoot?.getElementById(id as string), attr).toBeTruthy();
+    }
+    expect(input.getAttribute("aria-label")).toBe("Pick one");
+    expect(input.getAttribute("aria-expanded")).toBe("true");
+    // Open but nothing matches: the listbox is not rendered, so nothing may point at it
+    // and the combobox must not announce an expanded popup.
+    input.value = "zzz";
+    input.dispatchEvent(new Event("input"));
+    await el.updateComplete;
+    expect(el.shadowRoot?.querySelector('[role="listbox"]')).toBeNull();
+    expect(input.hasAttribute("aria-controls")).toBe(false);
+    expect(input.hasAttribute("aria-activedescendant")).toBe(false);
+    expect(input.getAttribute("aria-expanded")).toBe("false");
+    el.remove();
+  });
 });
 
 describe("hu-form-group", () => {
@@ -3107,6 +3154,45 @@ describe("hu-model-selector", () => {
     t?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await el.updateComplete;
     expect(t?.getAttribute("aria-expanded")).toBe("false");
+    el.remove();
+  });
+  it("trigger is named and points at the highlighted option", async () => {
+    const el = document.createElement("hu-model-selector") as HTMLElement & {
+      models: Array<{ id: string; name: string }>;
+      updateComplete: Promise<boolean>;
+    };
+    el.models = [
+      { id: "a", name: "A" },
+      { id: "b", name: "B" },
+    ];
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const t = el.shadowRoot?.querySelector("[role='combobox']") as HTMLElement;
+    expect(t.getAttribute("aria-label")).toBe("Model");
+    expect(t.hasAttribute("aria-activedescendant")).toBe(false);
+    // aria-controls resolves even while collapsed: the listbox is present, just hidden.
+    const closedList = el.shadowRoot?.getElementById(t.getAttribute("aria-controls") ?? "");
+    expect(closedList?.getAttribute("role")).toBe("listbox");
+    expect(closedList?.hidden).toBe(true);
+    const key = (k: string) =>
+      t.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true }));
+    key("ArrowDown");
+    await el.updateComplete;
+    key("ArrowDown");
+    await el.updateComplete;
+    const listbox = el.shadowRoot?.querySelector("[role='listbox']") as HTMLElement;
+    expect(t.getAttribute("aria-controls")).toBe(listbox.id);
+    const active = el.shadowRoot?.getElementById(t.getAttribute("aria-activedescendant") ?? "");
+    expect(active?.textContent).toContain("B");
+    let detail: { model: string } | null = null;
+    el.addEventListener("hu-model-change", ((e: CustomEvent) => {
+      detail = e.detail;
+    }) as EventListener);
+    // Enter must be cancelled, or the trigger's native click reopens the list.
+    expect(key("Enter")).toBe(false);
+    await el.updateComplete;
+    expect(detail).toEqual({ model: "b" });
+    expect(t.getAttribute("aria-expanded")).toBe("false");
     el.remove();
   });
 });

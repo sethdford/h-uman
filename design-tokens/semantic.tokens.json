@@ -117,7 +117,7 @@
       "$type": "color"
     },
     "on-accent": {
-      "$value": "#ffffff",
+      "$value": "{color.neutral.50}",
       "$type": "color"
     },
     "accent-secondary": {
@@ -452,7 +452,7 @@
       "$type": "color"
     },
     "on-accent": {
-      "$value": "#ffffff",
+      "$value": "{color.neutral.50}",
       "$type": "color"
     },
     "accent-secondary": {
@@ -465,7 +465,7 @@
       "$description": "WCAG AA: amber accent for text on light backgrounds"
     },
     "accent-secondary-hover": {
-      "$value": "{color.amber.light-600}",
+      "$value": "{color.amber.light-400}",
       "$type": "color"
     },
     "accent-secondary-subtle": {
@@ -477,7 +477,7 @@
       "$type": "color"
     },
     "on-accent-secondary": {
-      "$value": "#ffffff",
+      "$value": "{color.neutral.50}",
       "$type": "color"
     },
     "accent-tertiary": {
@@ -558,11 +558,11 @@
       "$type": "dimension"
     },
     "link": {
-      "$value": "{color.human.light-500}",
+      "$value": "{color.human.light-600}",
       "$type": "color"
     },
     "link-hover": {
-      "$value": "{color.human.light-600}",
+      "$value": "{color.human.900}",
       "$type": "color"
     },
     "link-active": {
@@ -711,8 +711,34 @@
       "$type": "color"
     },
     "accent-text": {
+      "$value": "{color.human.400}",
+      "$type": "color",
+      "$description": "AAA on every dark high-contrast surface: 10.3:1 on bg, 7.6:1 on bg-overlay"
+    },
+    "accent-secondary-text": {
+      "$value": "{color.amber.400}",
+      "$type": "color",
+      "$description": "12.6:1 on bg; clears AAA on every dark high-contrast surface"
+    },
+    "accent-tertiary-text": {
+      "$value": "{color.blue.300}",
+      "$type": "color",
+      "$description": "10.3:1 on bg; dark's blue.400 is 6.9:1, short of AAA"
+    },
+    "link": {
+      "$value": "{color.human.400}",
+      "$type": "color",
+      "$description": "10.3:1 on bg, 7.6:1 on bg-overlay"
+    },
+    "link-hover": {
       "$value": "{color.human.300}",
-      "$type": "color"
+      "$type": "color",
+      "$description": "12.2:1 on bg"
+    },
+    "link-visited": {
+      "$value": "{color.human.400}",
+      "$type": "color",
+      "$description": "Same as link; dark's human.600 is 6.1:1 on bg, short of AAA"
     },
     "accent-hover": {
       "$value": "#a3d46a",
@@ -772,24 +798,23 @@
     },
     "surface-container": {
       "$value": "{color.neutral.100}",
-      "$type": "color"
+      "$type": "color",
+      "$description": "Opaque so text on it has a measurable contrast; about what a 8% white veil gives over black"
     },
     "surface-container-high": {
       "$value": "{color.neutral.150}",
-      "$type": "color"
+      "$type": "color",
+      "$description": "Opaque; about what a 12% white veil gives over black"
     },
     "surface-container-highest": {
       "$value": "{color.neutral.200}",
-      "$type": "color"
-    },
-    "link-visited": {
-      "$value": "{color.human.200}",
       "$type": "color",
-      "$description": "Dark theme's human.600 visited link is 3.79:1 on the darkest container"
+      "$description": "Opaque, because modals, menus and the command palette paint it over page content"
     },
     "hover-overlay": {
       "$value": "rgba(255, 255, 255, 0.12)",
-      "$type": "color"
+      "$type": "color",
+      "$description": "Light veil for a black background; the dark theme's veil is too faint on #000"
     },
     "focus-ring": {
       "$value": "#ffffff",
@@ -866,6 +891,11 @@
     "accent-text": {
       "$value": "{color.human.900}",
       "$type": "color"
+    },
+    "accent-secondary-text": {
+      "$value": "{color.amber.900}",
+      "$type": "color",
+      "$description": "7.7:1 on surface-container-highest; the light theme's amber.700 is 4.3:1 on the high-contrast containers"
     },
     "accent-hover": {
       "$value": "{color.human.800}",
@@ -1036,9 +1066,9 @@
       "$value": {
         "fontFamily": "{fontFamily.sans}",
         "fontSize": "{fontSize.base}",
-        "fontWeight": "{fontWeight.regular}",
+        "fontWeight": "{fontWeight.normal}",
         "lineHeight": "{lineHeight.normal}",
-        "letterSpacing": "{letterSpacing.normal}"
+        "letterSpacing": "{letterSpacing.base}"
       },
       "$type": "typography"
     },
@@ -1048,7 +1078,7 @@
         "fontSize": "{fontSize.2xl}",
         "fontWeight": "{fontWeight.semibold}",
         "lineHeight": "{lineHeight.tight}",
-        "letterSpacing": "{letterSpacing.tight}"
+        "letterSpacing": "{letterSpacing.2xl}"
       },
       "$type": "typography"
     },
@@ -1056,9 +1086,9 @@
       "$value": {
         "fontFamily": "{fontFamily.sans}",
         "fontSize": "{fontSize.xs}",
-        "fontWeight": "{fontWeight.regular}",
+        "fontWeight": "{fontWeight.normal}",
         "lineHeight": "{lineHeight.normal}",
-        "letterSpacing": "{letterSpacing.wide}"
+        "letterSpacing": "{letterSpacing.xs}"
       },
       "$type": "typography"
     },
@@ -1066,7 +1096,7 @@
       "$value": {
         "fontFamily": "{fontFamily.mono}",
         "fontSize": "{fontSize.sm}",
-        "fontWeight": "{fontWeight.regular}",
+        "fontWeight": "{fontWeight.normal}",
         "lineHeight": "{lineHeight.relaxed}"
       },
       "$type": "typography"

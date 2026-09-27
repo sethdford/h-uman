@@ -908,6 +908,72 @@ static void test_rpc_update_check_returns_valid_structure(void) {
     teardown_proto(&ws, &proto);
 }
 
+/* Calls update.check directly with the given auto_update and request, and
+ * parses the reply. Under HU_IS_TEST the network leg returns the mock
+ * "99.99.99", so a "latest" field is the proof that a check actually ran. */
+static hu_json_value_t *call_update_check(hu_allocator_t *alloc, const char *auto_update,
+                                          const char *req) {
+    hu_app_context_t app;
+    hu_config_t cfg;
+    memset(&app, 0, sizeof(app));
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.auto_update = (char *)auto_update;
+    app.config = &cfg;
+    app.alloc = alloc;
+    hu_json_value_t *root = NULL;
+    if (req)
+        HU_ASSERT_EQ(hu_json_parse(alloc, req, strlen(req), &root), HU_OK);
+    char *out = NULL;
+    size_t out_len = 0;
+    HU_ASSERT_EQ(cp_admin_update_check(alloc, &app, NULL, NULL, root, &out, &out_len), HU_OK);
+    if (root)
+        hu_json_free(alloc, root);
+    HU_ASSERT_NOT_NULL(out);
+    hu_json_value_t *res = NULL;
+    HU_ASSERT_EQ(hu_json_parse(alloc, out, out_len, &res), HU_OK);
+    alloc->free(alloc->ctx, out, out_len + 1);
+    return res;
+}
+
+static void test_rpc_update_check_off_skips_network(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_json_value_t *res = call_update_check(&alloc, "off", NULL);
+    HU_ASSERT_TRUE(hu_json_get_bool(res, "disabled", false));
+    HU_ASSERT_FALSE(hu_json_get_bool(res, "available", true));
+    HU_ASSERT_NULL(hu_json_object_get(res, "latest"));
+    HU_ASSERT_NOT_NULL(hu_json_object_get(res, "current"));
+    hu_json_free(&alloc, res);
+}
+
+static void test_rpc_update_check_unset_config_skips_network(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *req = "{\"type\":\"req\",\"id\":\"u\",\"method\":\"update.check\","
+                      "\"params\":{}}";
+    hu_json_value_t *res = call_update_check(&alloc, NULL, req);
+    HU_ASSERT_TRUE(hu_json_get_bool(res, "disabled", false));
+    HU_ASSERT_NULL(hu_json_object_get(res, "latest"));
+    hu_json_free(&alloc, res);
+}
+
+static void test_rpc_update_check_off_force_checks(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *req = "{\"type\":\"req\",\"id\":\"u\",\"method\":\"update.check\","
+                      "\"params\":{\"force\":true}}";
+    hu_json_value_t *res = call_update_check(&alloc, "off", req);
+    HU_ASSERT_FALSE(hu_json_get_bool(res, "disabled", false));
+    HU_ASSERT_STR_EQ(hu_json_get_string(res, "latest"), "99.99.99");
+    HU_ASSERT_TRUE(hu_json_get_bool(res, "available", false));
+    hu_json_free(&alloc, res);
+}
+
+static void test_rpc_update_check_check_mode_checks(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_json_value_t *res = call_update_check(&alloc, "check", NULL);
+    HU_ASSERT_FALSE(hu_json_get_bool(res, "disabled", false));
+    HU_ASSERT_STR_EQ(hu_json_get_string(res, "latest"), "99.99.99");
+    hu_json_free(&alloc, res);
+}
+
 /* HU_IS_TEST: update.apply returns HU_OK, no real apply. */
 static void test_rpc_update_run_returns_valid_structure(void) {
     hu_allocator_t alloc = hu_system_allocator();
@@ -1805,6 +1871,10 @@ void run_gateway_extended_tests(void) {
     HU_RUN_TEST(test_rpc_exec_approval_no_crash);
     HU_RUN_TEST(test_rpc_usage_summary_no_crash);
     HU_RUN_TEST(test_rpc_update_check_returns_valid_structure);
+    HU_RUN_TEST(test_rpc_update_check_off_skips_network);
+    HU_RUN_TEST(test_rpc_update_check_unset_config_skips_network);
+    HU_RUN_TEST(test_rpc_update_check_off_force_checks);
+    HU_RUN_TEST(test_rpc_update_check_check_mode_checks);
     HU_RUN_TEST(test_rpc_update_run_returns_valid_structure);
     HU_RUN_TEST(test_rpc_nodes_list_returns_at_least_one_node);
     HU_RUN_TEST(test_rpc_agents_list_no_crash);

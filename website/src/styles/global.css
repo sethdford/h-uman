@@ -1,7 +1,10 @@
 @import "./_tokens.css";
+@import "./_quiet.css";
 @import "./_dynamic-color.css";
 @import "tailwindcss";
 @import "@fontsource-variable/geist-mono";
+@import "@fontsource-variable/newsreader/opsz.css";
+@import "@fontsource-variable/newsreader/opsz-italic.css";
 
 @theme {
   --font-sans: var(--hu-font);
@@ -18,6 +21,13 @@
   --breakpoint-md: 905px;
   --breakpoint-lg: 1240px;
   --breakpoint-xl: 1440px;
+}
+
+/* inline: the utility emits var(--hu-font-display, …) itself, so it resolves on the
+   element and picks up a [data-brand="quiet"] container's display face. In plain @theme
+   it would read --font-display, which is resolved once at :root. */
+@theme inline {
+  --font-display: var(--hu-font-display, var(--hu-font));
 }
 
 @font-face {

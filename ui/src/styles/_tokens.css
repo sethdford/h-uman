@@ -430,7 +430,7 @@
     radial-gradient(ellipse at 20% 50%, rgba(122, 182, 72, 0.06) 0%, transparent 50%),
     radial-gradient(ellipse at 80% 20%, rgba(74, 111, 165, 0.04) 0%, transparent 50%),
     radial-gradient(ellipse at 50% 80%, rgba(245, 158, 11, 0.03) 0%, transparent 50%);
-  --hu-on-accent: #ffffff;
+  --hu-on-accent: #0c0a08;
   --hu-on-accent-secondary: #0c0a08;
   --hu-on-accent-tertiary: #ffffff;
   --hu-pressed-overlay: rgba(255, 255, 255, 0.12);
@@ -697,7 +697,7 @@
     --hu-accent-hover: #5a9a30;
     --hu-accent-light: #e2f2c8;
     --hu-accent-secondary: #d97706;
-    --hu-accent-secondary-hover: #b45309;
+    --hu-accent-secondary-hover: #f59e0b;
     --hu-accent-secondary-strong: #f59e0b;
     --hu-accent-secondary-subtle: rgba(217, 119, 6, 0.1);
     --hu-accent-secondary-text: #b45309;
@@ -740,12 +740,12 @@
     --hu-hover-overlay: rgba(0, 0, 0, 0.06);
     --hu-info: #2563eb;
     --hu-info-dim: rgba(37, 99, 235, 0.1);
-    --hu-link: #5a9a30;
+    --hu-link: #3a6a24;
     --hu-link-active: #7ab648;
-    --hu-link-hover: #3a6a24;
+    --hu-link-hover: #264a17;
     --hu-link-visited: #3a6a24;
-    --hu-on-accent: #ffffff;
-    --hu-on-accent-secondary: #ffffff;
+    --hu-on-accent: #0c0a08;
+    --hu-on-accent-secondary: #0c0a08;
     --hu-on-accent-tertiary: #ffffff;
     --hu-pressed-overlay: rgba(0, 0, 0, 0.1);
     --hu-shadow-card: 0 1px 2px rgba(45, 36, 24, 0.04), 0 2px 8px rgba(45, 36, 24, 0.03);
@@ -850,7 +850,7 @@
     radial-gradient(ellipse at 20% 50%, rgba(122, 182, 72, 0.06) 0%, transparent 50%),
     radial-gradient(ellipse at 80% 20%, rgba(74, 111, 165, 0.04) 0%, transparent 50%),
     radial-gradient(ellipse at 50% 80%, rgba(245, 158, 11, 0.03) 0%, transparent 50%);
-  --hu-on-accent: #ffffff;
+  --hu-on-accent: #0c0a08;
   --hu-on-accent-secondary: #0c0a08;
   --hu-on-accent-tertiary: #ffffff;
   --hu-pressed-overlay: rgba(255, 255, 255, 0.12);
@@ -909,7 +909,7 @@
   --hu-accent-hover: #5a9a30;
   --hu-accent-light: #e2f2c8;
   --hu-accent-secondary: #d97706;
-  --hu-accent-secondary-hover: #b45309;
+  --hu-accent-secondary-hover: #f59e0b;
   --hu-accent-secondary-strong: #f59e0b;
   --hu-accent-secondary-subtle: rgba(217, 119, 6, 0.1);
   --hu-accent-secondary-text: #b45309;
@@ -952,12 +952,12 @@
   --hu-hover-overlay: rgba(0, 0, 0, 0.06);
   --hu-info: #2563eb;
   --hu-info-dim: rgba(37, 99, 235, 0.1);
-  --hu-link: #5a9a30;
+  --hu-link: #3a6a24;
   --hu-link-active: #7ab648;
-  --hu-link-hover: #3a6a24;
+  --hu-link-hover: #264a17;
   --hu-link-visited: #3a6a24;
-  --hu-on-accent: #ffffff;
-  --hu-on-accent-secondary: #ffffff;
+  --hu-on-accent: #0c0a08;
+  --hu-on-accent-secondary: #0c0a08;
   --hu-on-accent-tertiary: #ffffff;
   --hu-pressed-overlay: rgba(0, 0, 0, 0.1);
   --hu-shadow-card: 0 1px 2px rgba(45, 36, 24, 0.04), 0 2px 8px rgba(45, 36, 24, 0.03);
@@ -1002,9 +1002,11 @@
   :root:not([data-theme="light"]) {
     --hu-accent: #8dc63f;
     --hu-accent-hover: #a3d46a;
+    --hu-accent-secondary-text: #fbbf24;
     --hu-accent-strong: #7ab648;
     --hu-accent-subtle: rgba(122, 182, 72, 0.2);
-    --hu-accent-text: #a3d46a;
+    --hu-accent-tertiary-text: #9fb8d9;
+    --hu-accent-text: #8dc63f;
     --hu-bg: #000000;
     --hu-bg-elevated: #1e1a16;
     --hu-bg-inset: #000000;
@@ -1020,7 +1022,9 @@
     --hu-hover-overlay: rgba(255, 255, 255, 0.12);
     --hu-info: #60a5fa;
     --hu-info-dim: rgba(96, 165, 250, 0.2);
-    --hu-link-visited: #c5e59a;
+    --hu-link: #8dc63f;
+    --hu-link-hover: #a3d46a;
+    --hu-link-visited: #8dc63f;
     --hu-on-accent: #000000;
     --hu-success: #34d399;
     --hu-success-dim: rgba(52, 211, 153, 0.2);
@@ -1041,6 +1045,7 @@
   :root:not([data-theme="dark"]) {
     --hu-accent: #3a6a24;
     --hu-accent-hover: #366320;
+    --hu-accent-secondary-text: #78350f;
     --hu-accent-strong: #264a17;
     --hu-accent-subtle: rgba(58, 106, 36, 0.12);
     --hu-accent-text: #264a17;
@@ -1083,9 +1088,11 @@
   [data-theme="dark"] {
     --hu-accent: #8dc63f;
     --hu-accent-hover: #a3d46a;
+    --hu-accent-secondary-text: #fbbf24;
     --hu-accent-strong: #7ab648;
     --hu-accent-subtle: rgba(122, 182, 72, 0.2);
-    --hu-accent-text: #a3d46a;
+    --hu-accent-tertiary-text: #9fb8d9;
+    --hu-accent-text: #8dc63f;
     --hu-bg: #000000;
     --hu-bg-elevated: #1e1a16;
     --hu-bg-inset: #000000;
@@ -1101,7 +1108,9 @@
     --hu-hover-overlay: rgba(255, 255, 255, 0.12);
     --hu-info: #60a5fa;
     --hu-info-dim: rgba(96, 165, 250, 0.2);
-    --hu-link-visited: #c5e59a;
+    --hu-link: #8dc63f;
+    --hu-link-hover: #a3d46a;
+    --hu-link-visited: #8dc63f;
     --hu-on-accent: #000000;
     --hu-success: #34d399;
     --hu-success-dim: rgba(52, 211, 153, 0.2);
@@ -1122,6 +1131,7 @@
   [data-theme="light"] {
     --hu-accent: #3a6a24;
     --hu-accent-hover: #366320;
+    --hu-accent-secondary-text: #78350f;
     --hu-accent-strong: #264a17;
     --hu-accent-subtle: rgba(58, 106, 36, 0.12);
     --hu-accent-text: #264a17;

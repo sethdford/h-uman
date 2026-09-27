@@ -6,6 +6,7 @@
 #include "human/channels/imessage_caps.h"     /* native capability gate (T0.4) */
 #include "human/channels/imessage_reply.h"
 #include "human/channels/imessage_send_observer.h" /* send provenance */
+#include "human/channels/imessage_voice_record.h"  /* native Messages voice delivery */
 #include "human/context/conversation.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
@@ -2516,6 +2517,58 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
 
 #if !HU_IS_TEST
 imsg_media:
+    {
+        /* Native Messages voice delivery (W3). SHADOW: check whether a Messages
+         * recording could run right now and log it; the attachment still goes. */
+        hu_voice_record_route_t vroute =
+            hu_voice_record_route(hu_voice_delivery_mode_parse(getenv("HU_VOICE_DELIVERY")),
+                                  message_len, media, media_count);
+        if (vroute != HU_VREC_ROUTE_ATTACHMENT &&
+            !hu_voice_record_handle_allowed(getenv("HU_VOICE_DELIVERY_ONLY"), tgt, tgt_len))
+            vroute = HU_VREC_ROUTE_ATTACHMENT; /* not on the native list: attachment as before */
+        if (vroute == HU_VREC_ROUTE_SHADOW) {
+            const hu_voice_record_port_t *vport = hu_voice_record_macos_port();
+            hu_voice_record_request_t vreq;
+            hu_voice_record_request_from_env(tgt, tgt_len, media[0], 0, &vreq);
+            hu_voice_record_facts_t vfacts;
+            memset(&vfacts, 0, sizeof(vfacts));
+            if (vport->gather_facts(vport->ctx, vreq.real_mic, &vfacts) != HU_OK)
+                vfacts.ax_trusted = false;
+            vfacts.min_idle_sec = vreq.min_idle_sec;
+            hu_voice_record_block_t vblock = hu_voice_record_preflight(&vfacts);
+            hu_log_info("imessage", NULL, "voice delivery shadow: would_record=%d block=%s",
+                        vblock == HU_VREC_OK ? 1 : 0, hu_voice_record_block_name(vblock));
+        } else if (vroute == HU_VREC_ROUTE_RECORD) {
+            /* HU_VOICE_DELIVERY=messages as a default is gated on the W5 "real or
+             * clone?" measurement (spec 2026-09-26 W5): do not flip without it.
+             * Once Send is pressed the memo is out — never also send the file,
+             * even when chat.db is slow to confirm it. Any failure before Send
+             * falls through to the attachment below. */
+            hu_voice_record_result_t vres;
+            hu_error_t verr = hu_voice_record_send_from_env(tgt, tgt_len, media[0], &vres);
+            if (verr == HU_OK) {
+                if (!vres.restored)
+                    hu_log_error("imessage", NULL,
+                                 "voice record: default input NOT restored to the real mic");
+                hu_log_info("imessage", NULL,
+                            "voice delivered via Messages: verified=%d restored=%d",
+                            vres.verified ? 1 : 0, vres.restored ? 1 : 0);
+                imessage_report_sent(tgt, tgt_len, NULL, 0, HU_IMESSAGE_SENT_KIND_MEDIA,
+                                     vres.prior_max_rowid);
+                goto imsg_cleanup;
+            }
+            if (verr == HU_ERR_IO && !vres.restored)
+                hu_log_error("imessage", NULL,
+                             "voice record: default input NOT restored to the real mic");
+            if (vres.cancel_failed)
+                hu_log_error("imessage", NULL,
+                             "voice record: Cancel failed — a recording may be left in Messages");
+            hu_log_info("imessage", NULL,
+                        "voice record fell back to attachment: block=%s stage=%d reason=%s",
+                        hu_voice_record_block_name(vres.block), (int)vres.stage,
+                        vres.abort_reason ? vres.abort_reason : "-");
+        }
+    }
     /* Send media attachments (local file paths only) after text succeeds.
      * Prefer imsg send --file when available (faster, better error reporting);
      * fall back to AppleScript per-attachment on failure. */
@@ -3792,6 +3845,13 @@ static hu_error_t imessage_mark_read(void *ctx, const char *contact_id, size_t c
 #if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
 
 /* ── Messages.app PID lookup ────────────────────────────────────────── */
+static pid_t ax_messages_pid(void);
+
+/* Shared with the voice-record port (imessage_voice_record.h). */
+pid_t hu_imessage_messages_pid(void) {
+    return ax_messages_pid();
+}
+
 static pid_t ax_messages_pid(void) {
     int count = proc_listallpids(NULL, 0);
     if (count <= 0)
@@ -4663,6 +4723,57 @@ int64_t hu_imessage_ax_reply_newest_rowid(void) {
     return max_rowid;
 #else
     return 0;
+#endif
+}
+
+/* Native Messages voice delivery (W3): the confirmation that a recorded memo
+ * really went out — measured in chat.db, not inferred from the button press. */
+int64_t hu_imessage_chatdb_max_rowid(void) {
+#ifdef HU_ENABLE_SQLITE
+    int64_t r = hu_imessage_ax_reply_newest_rowid();
+    return r > 0 ? r : -1;
+#else
+    return -1;
+#endif
+}
+
+#ifdef HU_ENABLE_SQLITE
+/* The default chat.db (HU_CHATDB or ~/Library/Messages), opened read-only. */
+static bool imessage_open_default_chatdb(sqlite3 **db_out) {
+    char path[512];
+    int n = hu_paths_chatdb(path, sizeof(path));
+    return n >= 0 && (size_t)n < sizeof(path) && imessage_open_chatdb(path, db_out) == SQLITE_OK;
+}
+#endif
+
+bool hu_imessage_chatdb_audio_from_me_after(const char *handle, size_t handle_len,
+                                            int64_t after_rowid) {
+#ifdef HU_ENABLE_SQLITE
+    if (!handle || handle_len == 0 || after_rowid < 0)
+        return false;
+    sqlite3 *db = NULL;
+    if (!imessage_open_default_chatdb(&db))
+        return false;
+    bool found = false;
+    sqlite3_stmt *stmt = NULL;
+    static const char sql[] = "SELECT 1 FROM message m "
+                              "JOIN chat_message_join cj ON cj.message_id = m.ROWID "
+                              "JOIN chat c ON c.ROWID = cj.chat_id "
+                              "WHERE m.ROWID > ?1 AND m.is_from_me = 1 AND m.is_audio_message = 1 "
+                              "AND c.chat_identifier = ?2 LIMIT 1";
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_int64(stmt, 1, after_rowid);
+        sqlite3_bind_text(stmt, 2, handle, (int)handle_len, NULL);
+        found = sqlite3_step(stmt) == SQLITE_ROW;
+        sqlite3_finalize(stmt);
+    }
+    sqlite3_close(db);
+    return found;
+#else
+    (void)handle;
+    (void)handle_len;
+    (void)after_rowid;
+    return false;
 #endif
 }
 #endif

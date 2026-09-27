@@ -1068,6 +1068,7 @@ export class DemoGatewayClient extends EventTarget {
   #onBinary: ((data: ArrayBuffer) => void) | null = null;
   #glMode = false;
   #userHasSentMessage = false;
+  #inFlight = 0;
 
   private state = {
     sessions: makeSessions(),
@@ -1107,6 +1108,10 @@ export class DemoGatewayClient extends EventTarget {
 
   get status(): GatewayStatus {
     return this.#status;
+  }
+  /** Requests still inside their simulated latency. The a11y e2e scan waits for 0. */
+  get inFlight(): number {
+    return this.#inFlight;
   }
   get features(): ServerFeatures {
     return this.#features;
@@ -1439,7 +1444,10 @@ export class DemoGatewayClient extends EventTarget {
       }
 
       case "update.check":
-        return { available: false, current_version: "0.42.0" };
+        // Mirrors cp_admin_update_check: auto_update defaults to "off", so an
+        // unforced check never reaches GitHub; { force: true } does.
+        if (params?.force === true) return { current: "0.42.0", latest: "0.43.0", available: true };
+        return { current: "0.42.0", available: false, disabled: true };
       case "update.run":
         return { status: "up_to_date", current_version: "0.4.0" };
       case "push.register":
@@ -2683,8 +2691,13 @@ export class DemoGatewayClient extends EventTarget {
   }
 
   async request<T = unknown>(method: string, params?: Record<string, unknown>): Promise<T> {
-    await new Promise((r) => setTimeout(r, 80 + Math.random() * 200));
-    return this.#handleRequest(method, params) as T;
+    this.#inFlight++;
+    try {
+      await new Promise((r) => setTimeout(r, 80 + Math.random() * 200));
+      return this.#handleRequest(method, params) as T;
+    } finally {
+      this.#inFlight--;
+    }
   }
 
   abort(): Promise<{ aborted?: boolean }> {

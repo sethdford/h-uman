@@ -1021,16 +1021,17 @@ hu_error_t hu_feed_build_daily_digest(hu_allocator_t *alloc, sqlite3 *db, int64_
     *out_len = pos;
     return HU_OK;
 
-no_items: {
-    static const char empty[] = "(No recent items)";
-    char *fallback = (char *)alloc->alloc(alloc->ctx, sizeof(empty));
-    if (!fallback)
-        return HU_ERR_OUT_OF_MEMORY;
-    memcpy(fallback, empty, sizeof(empty));
-    *out = fallback;
-    *out_len = sizeof(empty) - 1;
-    return HU_OK;
-}
+no_items:
+    {
+        static const char empty[] = "(No recent items)";
+        char *fallback = (char *)alloc->alloc(alloc->ctx, sizeof(empty));
+        if (!fallback)
+            return HU_ERR_OUT_OF_MEMORY;
+        memcpy(fallback, empty, sizeof(empty));
+        *out = fallback;
+        *out_len = sizeof(empty) - 1;
+        return HU_OK;
+    }
 }
 
 hu_error_t hu_feed_processor_cleanup(hu_feed_processor_t *proc, uint32_t retention_days) {

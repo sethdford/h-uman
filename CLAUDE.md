@@ -1,6 +1,7 @@
 # h-uman — not quite human.
 
-C11 autonomous AI assistant runtime. ~2468 KB binary, <6 MB RAM, <30 ms startup.
+C11 autonomous AI assistant runtime. ~2694 KB binary, <9 MB idle RSS, <10 ms startup
+(release-size build, macOS arm64 — measured in `docs/perf/footprint.json`).
 Zero dependencies beyond libc (optional SQLite and libcurl).
 
 Read `AGENTS.md` for the full engineering protocol. This file is the quick reference.
@@ -8,12 +9,14 @@ Read `AGENTS.md` for the full engineering protocol. This file is the quick refer
 ## Product Thesis (summary)
 
 **The assistant that's actually yours** — a private, personal AI that runs on
-your hardware, learns who you are locally, and never sends your identity to a
-cloud. We don't compete on task execution, channel count, or benchmark scores
-(table stakes). The honest moats are: **persona as compiled architecture** (41 C
-modules, not markdown templates), **privacy by architecture** (local-first, not a
-settings toggle), an **on-device personalization pipeline**, and **HuLa IR**
-(typed, compiled tool orchestration).
+your hardware, stores who you are on your machine, and lets you choose which
+model sees it, including a local one. We don't compete on task execution,
+channel count, or benchmark scores (table stakes). The honest moats are:
+**persona as compiled architecture** (41 C modules, not markdown templates),
+**local storage by architecture** (SQLite, no sync; a cloud model does receive
+each reply's full context with no redaction — see `docs/PRODUCT.md` "Known privacy gaps"),
+an **on-device personalization pipeline**, and **HuLa IR** (typed, compiled tool
+orchestration).
 
 Full thesis, the red-teamed reality check, the M1–M6 strategic missions, and the
 competitive matrix live in **[`docs/PRODUCT.md`](docs/PRODUCT.md)** — kept out of
@@ -30,7 +33,7 @@ cmake --build --preset dev
 # Other presets: test (no ASan), release (MinSizeRel+LTO), fuzz (Clang), minimal
 cmake --list-presets               # show all available presets
 
-# Run tests (13,920+ tests, must be 0 failures, 0 ASan errors)
+# Run tests (14,046+ tests, must be 0 failures, 0 ASan errors)
 ./build/human_tests                          # full suite
 ./build/human_tests --suite=JSON             # run suites matching "JSON"
 ./build/human_tests --filter=config_parse    # run tests matching "config_parse"
@@ -113,7 +116,7 @@ Types: `feat fix refactor test docs chore perf ci build style`
 
 | Workflow                    | What it checks                                                                                                                                    |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ci.yml`                    | C build + 13,920+ tests (Linux + macOS), UI tsc + vitest + build, website build, clang-tidy, E2E, visual regression, axe accessibility, Lighthouse |
+| `ci.yml`                    | C build + 14,046+ tests (Linux + macOS), UI tsc + vitest + build, website build, clang-tidy, E2E, visual regression, axe accessibility, Lighthouse |
 | `native-apps-fleet.yml`     | Multi-simulator iOS XCUITest + multi-API Android instrumented tests + SOTA gate (apps path / schedule / dispatch) |
 | `.github/actions/ios-uitest` | Composite: XcodeGen + HumaniOS XCUITest (shared by `ci.yml` + fleet) |
 | `benchmark.yml`             | Performance regression (binary size, startup time, RSS)                                                                                           |
@@ -138,9 +141,9 @@ Extend via: `src/persona/` (persona.c, creator.c, analyzer.c, sampler.c, example
 
 | Path                              | What                                                                  |
 | --------------------------------- | --------------------------------------------------------------------- |
-| `src/`                            | All C source (~1,050 `.c` files, ~415K lines of C)                         |
+| `src/`                            | All C source (~1,050 `.c` files, ~417K lines of C)                         |
 | `include/human/`                  | Public headers                                                        |
-| `tests/`                          | 760+ test files, 13,920+ tests                                       |
+| `tests/`                          | 760+ test files, 14,046+ tests                                       |
 | `fuzz/`                           | 31 libFuzzer harnesses                                                |
 | `ui/`                             | LitElement web dashboard                                              |
 | `website/`                        | Astro marketing site                                                  |
@@ -184,7 +187,7 @@ All project standards live in `docs/standards/`. This is the single source of tr
 
 ## Design System (all platforms)
 
-- Typeface: **Avenir** (web: `var(--hu-font)`, never Google Fonts)
+- Typeface: **Avenir** for UI and body on all platforms (web: `var(--hu-font)`); **Newsreader** (self-hosted, OFL) for display/headline roles on the web Quiet Room layer (`var(--hu-font-display)`). Never load fonts from Google or any third-party host.
 - Icons: **Phosphor Regular** (web: `ui/src/icons.ts`)
 - Tokens: `--hu-*` CSS custom properties from `design-tokens/`
 - Never use raw hex colors, pixel spacing, or pixel radii in any UI code.

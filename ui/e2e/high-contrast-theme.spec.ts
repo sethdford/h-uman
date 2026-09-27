@@ -38,6 +38,8 @@ const FOREGROUNDS: Record<string, number> = {
   "text-tertiary": 7,
   "text-faint": 4.5,
   "accent-text": 4.5,
+  "accent-secondary-text": 4.5,
+  "accent-tertiary-text": 4.5,
   link: 4.5,
   "link-hover": 4.5,
   "link-active": 4.5,
@@ -91,17 +93,20 @@ async function render(page: Page, env: Env): Promise<Record<string, string>> {
   }));
   expect(media).toEqual({ more: true, light: env.scheme === "light" });
 
-  return page.evaluate((keys) => {
-    const probe = document.createElement("div");
-    document.body.append(probe);
-    const out: Record<string, string> = {};
-    for (const k of keys) {
-      probe.style.color = "";
-      probe.style.color = `var(--hu-${k})`;
-      out[k] = getComputedStyle(probe).color;
-    }
-    return out;
-  }, [...BACKGROUNDS, ...Object.keys(FOREGROUNDS)]);
+  return page.evaluate(
+    (keys) => {
+      const probe = document.createElement("div");
+      document.body.append(probe);
+      const out: Record<string, string> = {};
+      for (const k of keys) {
+        probe.style.color = "";
+        probe.style.color = `var(--hu-${k})`;
+        out[k] = getComputedStyle(probe).color;
+      }
+      return out;
+    },
+    [...BACKGROUNDS, ...Object.keys(FOREGROUNDS)],
+  );
 }
 
 // WCAG 2.x relative luminance of an opaque computed sRGB color. A translucent

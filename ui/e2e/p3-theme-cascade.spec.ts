@@ -40,8 +40,24 @@ interface Env {
   dataTheme?: "light" | "dark";
 }
 
+/**
+ * Tokens the contrast tests below read. Listed even when a P3 override also
+ * puts them in P3_KEYS, so no test depends on which tokens have P3 values.
+ */
+const EXTRA_KEYS = [
+  "bg",
+  "link-hover",
+  "on-accent",
+  "accent",
+  "accent-hover",
+  "on-accent-secondary",
+  "accent-secondary",
+  "accent-secondary-hover",
+  "accent-secondary-strong",
+];
+
 interface Rendered {
-  /** computed color of var(--hu-<key>) for every P3 key, plus "bg" */
+  /** computed color of var(--hu-<key>) for every P3 key, plus the EXTRA_KEYS below */
   tokens: Record<string, string>;
   /** computed color of each literal P3 source value, keyed by that value */
   literals: Record<string, string>;
@@ -74,7 +90,7 @@ async function render(page: Page, env: Env, gamut: "p3" | "srgb"): Promise<Rende
   });
 
   return page.evaluate(
-    ({ keys, literals }) => {
+    ({ keys, extra, literals }) => {
       const probe = document.createElement("div");
       document.body.append(probe);
       const resolve = (expr: string) => {
@@ -83,12 +99,12 @@ async function render(page: Page, env: Env, gamut: "p3" | "srgb"): Promise<Rende
         return getComputedStyle(probe).color;
       };
       const tokens: Record<string, string> = {};
-      for (const k of [...keys, "bg"]) tokens[k] = resolve(`var(--hu-${k})`);
+      for (const k of [...keys, ...extra]) tokens[k] = resolve(`var(--hu-${k})`);
       const lit: Record<string, string> = {};
       for (const v of literals) lit[v] = resolve(v);
       return { tokens, literals: lit };
     },
-    { keys: P3_KEYS, literals: Object.values(P3_SOURCE) },
+    { keys: P3_KEYS, extra: EXTRA_KEYS, literals: Object.values(P3_SOURCE) },
   );
 }
 
@@ -170,4 +186,45 @@ test.describe("P3 overrides follow the active theme", () => {
     expect(contrast(tokens["focus-ring"], tokens.bg)).toBeGreaterThanOrEqual(3);
     expect(contrast(tokens["accent-text"], tokens.bg)).toBeGreaterThanOrEqual(4.5);
   });
+
+  test("light theme on sRGB keeps link and link hover legible and distinct", async ({ page }) => {
+    const { tokens } = await render(page, { scheme: "light" }, "srgb");
+    // WCAG 1.4.3 text (4.5:1) for both link states on the page background.
+    expect(contrast(tokens.link, tokens.bg)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(tokens["link-hover"], tokens.bg)).toBeGreaterThanOrEqual(4.5);
+    // Hover must still read as a change, not the same color.
+    expect(tokens["link-hover"]).not.toBe(tokens.link);
+  });
+
+  for (const scheme of ["light", "dark"] as const) {
+    for (const gamut of ["srgb", "p3"] as const) {
+      test(`${scheme} theme on ${gamut} keeps on-accent text legible on accent fills`, async ({
+        page,
+      }) => {
+        const { tokens } = await render(page, { scheme }, gamut);
+        // WCAG 1.4.3 text (4.5:1): primary buttons and chips put on-accent over
+        // accent at rest and accent-hover under the pointer. White was 2.44:1.
+        expect(contrast(tokens["on-accent"], tokens.accent)).toBeGreaterThanOrEqual(4.5);
+        expect(contrast(tokens["on-accent"], tokens["accent-hover"])).toBeGreaterThanOrEqual(4.5);
+      });
+
+      test(`${scheme} theme on ${gamut} keeps on-accent-secondary text legible on amber fills`, async ({
+        page,
+      }) => {
+        const { tokens } = await render(page, { scheme }, gamut);
+        const on = tokens["on-accent-secondary"];
+        // WCAG 1.4.3 text (4.5:1) on every amber fill on-accent-secondary can sit
+        // over. Light used white: 3.19:1 on amber-600, 2.15:1 on amber-500.
+        for (const fill of [
+          "accent-secondary",
+          "accent-secondary-hover",
+          "accent-secondary-strong",
+        ]) {
+          expect(contrast(on, tokens[fill]), `${fill} ${tokens[fill]}`).toBeGreaterThanOrEqual(4.5);
+        }
+        // Hover must still read as a change, not the same color.
+        expect(tokens["accent-secondary-hover"]).not.toBe(tokens["accent-secondary"]);
+      });
+    }
+  }
 });

@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-27T00:58:46.813Z",
+  "generated": "2026-09-27T21:29:15.332Z",
   "groups": {
     "color.neutral": [
       {
@@ -1825,8 +1825,8 @@
       },
       {
         "name": "on-accent",
-        "value": "#ffffff",
-        "hex": "#ffffff"
+        "value": "#0c0a08",
+        "hex": "#0c0a08"
       },
       {
         "name": "accent-secondary",
@@ -2174,8 +2174,8 @@
       },
       {
         "name": "on-accent",
-        "value": "#ffffff",
-        "hex": "#ffffff"
+        "value": "#0c0a08",
+        "hex": "#0c0a08"
       },
       {
         "name": "accent-secondary",
@@ -2189,8 +2189,8 @@
       },
       {
         "name": "accent-secondary-hover",
-        "value": "#b45309",
-        "hex": "#b45309"
+        "value": "#f59e0b",
+        "hex": "#f59e0b"
       },
       {
         "name": "accent-secondary-subtle",
@@ -2203,8 +2203,8 @@
       },
       {
         "name": "on-accent-secondary",
-        "value": "#ffffff",
-        "hex": "#ffffff"
+        "value": "#0c0a08",
+        "hex": "#0c0a08"
       },
       {
         "name": "accent-tertiary",
@@ -2296,13 +2296,13 @@
       },
       {
         "name": "link",
-        "value": "#5A9A30",
-        "hex": "#5A9A30"
+        "value": "#3a6a24",
+        "hex": "#3a6a24"
       },
       {
         "name": "link-hover",
-        "value": "#3a6a24",
-        "hex": "#3a6a24"
+        "value": "#264A17",
+        "hex": "#264A17"
       },
       {
         "name": "link-active",
@@ -2453,8 +2453,33 @@
       },
       {
         "name": "accent-text",
+        "value": "#8DC63F",
+        "hex": "#8DC63F"
+      },
+      {
+        "name": "accent-secondary-text",
+        "value": "#fbbf24",
+        "hex": "#fbbf24"
+      },
+      {
+        "name": "accent-tertiary-text",
+        "value": "#9fb8d9",
+        "hex": "#9fb8d9"
+      },
+      {
+        "name": "link",
+        "value": "#8DC63F",
+        "hex": "#8DC63F"
+      },
+      {
+        "name": "link-hover",
         "value": "#a3d46a",
         "hex": "#a3d46a"
+      },
+      {
+        "name": "link-visited",
+        "value": "#8DC63F",
+        "hex": "#8DC63F"
       },
       {
         "name": "accent-hover",
@@ -2535,11 +2560,6 @@
         "name": "surface-container-highest",
         "value": "#28231e",
         "hex": "#28231e"
-      },
-      {
-        "name": "link-visited",
-        "value": "#c5e59a",
-        "hex": "#c5e59a"
       },
       {
         "name": "hover-overlay",
@@ -2634,6 +2654,11 @@
         "name": "accent-text",
         "value": "#264A17",
         "hex": "#264A17"
+      },
+      {
+        "name": "accent-secondary-text",
+        "value": "#78350f",
+        "hex": "#78350f"
       },
       {
         "name": "accent-hover",
