@@ -664,7 +664,7 @@
     }
   },
   "high-contrast": {
-    "$description": "High contrast mode for accessibility. Emitted as @media (prefers-contrast: more) :root after the light-scheme block, so this black palette wins in BOTH color schemes. Any text-colour token omitted here inherits the light theme's dark-on-light value on black: define it here.",
+    "$description": "High contrast mode for accessibility. Black in both colour schemes: define every text-colour token here, or it inherits a light-theme value on black.",
     "bg": {
       "$value": "{color.neutral.0}",
       "$type": "color"

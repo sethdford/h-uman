@@ -888,7 +888,9 @@ function generateCSS(
   lines.push("}");
   lines.push("");
 
-  // High-contrast theme
+  // High-contrast theme. Emitted after the light-scheme :root block at equal
+  // specificity, so this black palette wins in both color schemes; a text
+  // token it omits keeps the light theme's dark-on-light value on black.
   const highContrastKeys = Object.keys(tokens).filter((k) =>
     k.startsWith("high-contrast."),
   );
