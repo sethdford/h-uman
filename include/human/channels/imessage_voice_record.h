@@ -31,6 +31,10 @@
 #define HU_VREC_LABEL_SEND     "Send"
 #define HU_VREC_LABEL_CANCEL   "Cancel audio recording"
 #define HU_VREC_BLACKHOLE_NAME "BlackHole 2ch"
+/* Messages finalizes the recording after Stop; a Send pressed sooner is
+ * silently ignored (live test 2026-09-27). Distinct from the lead-in/tail
+ * ranges (<= 900 ms). */
+#define HU_VREC_SEND_SETTLE_MS 1000u
 
 typedef enum {
     HU_VOICE_DELIVERY_ATTACHMENT = 0,

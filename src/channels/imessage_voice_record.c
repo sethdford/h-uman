@@ -143,12 +143,27 @@ hu_error_t hu_voice_record_send(const hu_voice_record_port_t *p,
         goto restore;
     p->sleep_ms(p->ctx, tm.tail_ms);
     out->stage = HU_VREC_STAGE_STOP;
-    if (p->press(p->ctx, HU_VREC_LABEL_STOP) != HU_OK ||
-        !p->wait_label(p->ctx, HU_VREC_LABEL_SEND, 3000))
+    if (p->press(p->ctx, HU_VREC_LABEL_STOP) != HU_OK)
         goto restore;
-    if (p->press(p->ctx, HU_VREC_LABEL_SEND) != HU_OK)
+    /* Messages is still finalizing the recording right after Stop, and a Send
+     * pressed then is silently ignored (live test 2026-09-27). */
+    p->sleep_ms(p->ctx, HU_VREC_SEND_SETTLE_MS);
+    if (!p->wait_label(p->ctx, HU_VREC_LABEL_SEND, 3000))
         goto restore;
-    sent = true;
+    /* A press is not a send: the compose bar returning to "Record audio" is the
+     * UI's proof the memo left. One retry, then chat.db decides — pressing
+     * Cancel and falling back only when the memo is genuinely not there. */
+    for (int attempt = 0; attempt < 2 && !sent; attempt++) {
+        if (attempt > 0)
+            p->sleep_ms(p->ctx, HU_VREC_SEND_SETTLE_MS);
+        if (p->press(p->ctx, HU_VREC_LABEL_SEND) != HU_OK)
+            break;
+        sent = p->wait_label(p->ctx, HU_VREC_LABEL_RECORD, 3000);
+    }
+    if (!sent)
+        sent = p->audio_row_after(p->ctx, req->handle, req->handle_len, out->prior_max_rowid, 3000);
+    if (!sent)
+        goto restore;
     out->stage = HU_VREC_STAGE_SENT;
     rc = HU_OK;
 
