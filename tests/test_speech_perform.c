@@ -111,8 +111,10 @@ static void test_perform_scene_reaches_the_model(void) {
 static void test_perform_prompt_lists_the_whole_palette(void) {
     static char sys[16384];
     HU_ASSERT_TRUE(hu_speech_perform_system_prompt(sys, sizeof(sys)) > 0);
-    for (size_t i = 0; i < hu_direction_emotion_count(); i++)
-        HU_ASSERT_STR_CONTAINS(sys, hu_direction_emotion_at(i));
+    /* voiceai 2026-09-27: the palette is the calm allowlist, not all 58. */
+    for (size_t i = 0; i < hu_direction_calm_count(); i++)
+        HU_ASSERT_STR_CONTAINS(sys, hu_direction_calm_at(i));
+    HU_ASSERT_STR_NOT_CONTAINS(sys, "excited");
     HU_ASSERT_STR_CONTAINS(sys, "[laughter]");
     HU_ASSERT_STR_CONTAINS(sys, "spoken aloud");
     HU_ASSERT_STR_NOT_CONTAINS(sys, "Ferni");

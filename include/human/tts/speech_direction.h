@@ -37,7 +37,8 @@ typedef struct {
 typedef struct {
     float speed_min, speed_max, volume_min, volume_max;
     uint16_t break_max_ms;
-    uint8_t max_emotion_changes, max_laughs, max_speed_tags, max_volume_tags;
+    uint8_t max_breaks; /* Sonic paces from punctuation; extra breaks are dropped */
+    uint8_t max_laughs, max_speed_tags, max_volume_tags;
 } hu_direction_limits_t;
 
 typedef enum {
@@ -54,7 +55,11 @@ typedef enum {
 void hu_direction_default_limits(hu_direction_limits_t *out);
 bool hu_direction_emotion_valid(const char *s, size_t n);
 size_t hu_direction_emotion_count(void);
-const char *hu_direction_emotion_at(size_t i);
+/* voiceai 2026-09-27: only calm emotions reach Sonic ("excited" widened the
+ * clone's pitch range to 10.9 semitones vs 6.4 for "sympathetic"). */
+bool hu_direction_emotion_is_calm(const char *s, size_t n);
+size_t hu_direction_calm_count(void);
+const char *hu_direction_calm_at(size_t i);
 /* lim NULL = defaults. `out` is fully overwritten. */
 hu_direction_verdict_t hu_direction_parse(const char *line, size_t len,
                                           const hu_direction_limits_t *lim, hu_direction_t *out);

@@ -32,7 +32,7 @@ void hu_direction_default_limits(hu_direction_limits_t *o) {
     o->volume_min = 0.85f;
     o->volume_max = 1.15f;
     o->break_max_ms = 800;
-    o->max_emotion_changes = 3;
+    o->max_breaks = 2;
     o->max_laughs = 1;
     o->max_speed_tags = 1;
     o->max_volume_tags = 1;
@@ -47,10 +47,6 @@ bool hu_direction_emotion_valid(const char *s, size_t n) {
 
 size_t hu_direction_emotion_count(void) {
     return EMOTION_COUNT;
-}
-
-const char *hu_direction_emotion_at(size_t i) {
-    return i < EMOTION_COUNT ? k_emotions[i] : NULL;
 }
 
 const char *hu_direction_verdict_name(hu_direction_verdict_t v) {
@@ -156,8 +152,8 @@ static bool emoji_at(const char *line, size_t len, size_t i) {
 
 typedef struct {
     hu_direction_segment_t pend; /* tags waiting for their words */
-    char last_emotion[24];
-    unsigned emotions, laughs, speeds, volumes;
+    bool text_started, opening_set;
+    unsigned breaks, laughs, speeds, volumes;
 } dir_state_t;
 
 /* One tag at line[i] == '<'. Returns the index past '>', or 0 with *v set. */
@@ -187,11 +183,12 @@ static size_t read_tag(const char *line, size_t len, size_t i, const hu_directio
             *v = HU_DIRECTION_BAD_EMOTION;
             return 0;
         }
-        if (strcmp(val, st->last_emotion) != 0) {
-            if (st->last_emotion[0]) /* setting the opening emotion is not a change */
-                st->emotions++;
+        /* voiceai sparse markup: ONE calm emotion, at the very start. Any other
+         * valid emotion tag is dropped; its words are kept. */
+        if (hu_direction_emotion_is_calm(val, strlen(val)) && !st->text_started &&
+            !st->opening_set) {
             snprintf(st->pend.emotion, sizeof(st->pend.emotion), "%s", val);
-            snprintf(st->last_emotion, sizeof(st->last_emotion), "%s", val);
+            st->opening_set = true;
         }
     } else if (bn > 6 && strncmp(body, "speed ", 6) == 0 &&
                tag_attr(body, bn, "ratio", val, sizeof(val)) && parse_float(val, &f)) {
@@ -208,7 +205,10 @@ static size_t read_tag(const char *line, size_t len, size_t i, const hu_directio
             *v = HU_DIRECTION_BAD_TAG;
             return 0;
         }
-        st->pend.break_ms = ms > lim->break_max_ms ? lim->break_max_ms : ms;
+        if (st->breaks < lim->max_breaks) { /* past the cap: dropped, not rejected */
+            st->pend.break_ms = ms > lim->break_max_ms ? lim->break_max_ms : ms;
+            st->breaks++;
+        }
     } else {
         *v = HU_DIRECTION_BAD_TAG;
         return 0;
@@ -299,6 +299,7 @@ hu_direction_verdict_t hu_direction_parse(const char *line, size_t len,
             if (d->count == HU_DIRECTION_MAX_SEGMENTS)
                 return HU_DIRECTION_TOO_LONG;
             d->seg[d->count++] = st.pend;
+            st.text_started = true;
             memset(&st.pend, 0, sizeof(st.pend));
             pending = false;
         }
@@ -314,12 +315,8 @@ hu_direction_verdict_t hu_direction_parse(const char *line, size_t len,
     if (d->words_len == 0)
         return HU_DIRECTION_EMPTY;
     d->sentences = count_sentences(d->words, d->words_len);
-    size_t emotion_cap = (d->sentences + 1) / 2;
-    if (emotion_cap < 1)
-        emotion_cap = 1;
     if (st.laughs > lim->max_laughs || st.speeds > lim->max_speed_tags ||
-        st.volumes > lim->max_volume_tags || st.emotions > lim->max_emotion_changes ||
-        st.emotions > emotion_cap)
+        st.volumes > lim->max_volume_tags)
         return HU_DIRECTION_OVER_BUDGET;
     return HU_DIRECTION_OK;
 }
@@ -358,6 +355,15 @@ size_t hu_direction_render(const hu_direction_t *d, hu_laugh_style_t laugh, char
                   laugh == HU_LAUGH_TEXT ? "haha, <break time=\"150ms\"/>" : "[laughter] ", 0))
             return 0;
         if (g->emotion[0] && !emit(out, cap, &o, "<emotion value=\"%s\"/>", g->emotion, 0))
+            return 0;
+        /* voiceai 2026-09-27: speed/volume tags persist to the end of the memo
+         * (a whole reply played 24% quieter, 12% slower) — reset after the
+         * scoped segment. */
+        bool reset_speed = i > 0 && d->seg[i - 1].speed > 0.f && g->speed == 0.f;
+        bool reset_volume = i > 0 && d->seg[i - 1].volume > 0.f && g->volume == 0.f;
+        if (reset_speed && !emit(out, cap, &o, "%s", "<speed ratio=\"1.00\"/>", 0))
+            return 0;
+        if (reset_volume && !emit(out, cap, &o, "%s", "<volume ratio=\"1.00\"/>", 0))
             return 0;
         if (g->speed > 0.f && !emit(out, cap, &o, "<speed ratio=\"%.2f\"/>", NULL, g->speed))
             return 0;
@@ -398,4 +404,24 @@ size_t hu_direction_summary(const hu_direction_t *d, char *out, size_t cap) {
     if (w < 0 || (size_t)w >= cap - o)
         return 0;
     return o + (size_t)w;
+}
+
+/* voiceai continuation-tts.ts CALM_EMOTIONS (2026-09-27), plus neutral. */
+static const char *const k_calm[] = {"neutral",      "calm",        "content",      "curious",
+                                     "affectionate", "sympathetic", "contemplative"};
+#define CALM_COUNT (sizeof(k_calm) / sizeof(k_calm[0]))
+
+bool hu_direction_emotion_is_calm(const char *s, size_t n) {
+    for (size_t i = 0; s && i < CALM_COUNT; i++)
+        if (strlen(k_calm[i]) == n && strncasecmp(s, k_calm[i], n) == 0)
+            return true;
+    return false;
+}
+
+size_t hu_direction_calm_count(void) {
+    return CALM_COUNT;
+}
+
+const char *hu_direction_calm_at(size_t i) {
+    return i < CALM_COUNT ? k_calm[i] : NULL;
 }

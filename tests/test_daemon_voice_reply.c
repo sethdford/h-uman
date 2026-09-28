@@ -275,10 +275,10 @@ static bool run_direct_voice(const char *reply, const char *model_line, const ch
 static void test_voice_reply_speaks_the_directed_line(void) {
     g_voice_sends = 0;
     HU_ASSERT_TRUE(run_direct_voice("yeah sounds good",
-                                    "<emotion value=\"excited\"/>Yeah, sounds good!", "live"));
+                                    "<emotion value=\"affectionate\"/>Yeah, sounds good!", "live"));
     HU_ASSERT_EQ(g_voice_sends, 1);
     const char *t = hu_cartesia_test_last_transcript();
-    HU_ASSERT_STR_CONTAINS(t, "<emotion value=\"excited\"/>");
+    HU_ASSERT_STR_CONTAINS(t, "<emotion value=\"affectionate\"/>");
     HU_ASSERT_STR_CONTAINS(t, "Yeah, sounds good!");
 }
 
@@ -291,8 +291,8 @@ static void test_voice_reply_invalid_direction_speaks_plain_text(void) {
 static void test_voice_reply_direction_shadow_speaks_plain_text(void) {
     g_voice_sends = 0;
     g_rewrite_calls = 0;
-    HU_ASSERT_TRUE(run_direct_voice("yeah sounds good",
-                                    "<emotion value=\"excited\"/>Yeah, sounds good!", "shadow"));
+    HU_ASSERT_TRUE(run_direct_voice(
+        "yeah sounds good", "<emotion value=\"affectionate\"/>Yeah, sounds good!", "shadow"));
     HU_ASSERT_EQ(g_rewrite_calls, 1);
     HU_ASSERT_STR_EQ(hu_cartesia_test_last_transcript(), "yeah sounds good");
 }
@@ -324,7 +324,7 @@ static void test_voice_reply_directed_tags_only_for_sonic3(void) {
     g_voice_sends = 0;
     g_direct_tts_model = "sonic-english";
     HU_ASSERT_TRUE(run_direct_voice("yeah sounds good",
-                                    "<emotion value=\"excited\"/>Yeah, sounds good!", "live"));
+                                    "<emotion value=\"affectionate\"/>Yeah, sounds good!", "live"));
     g_direct_tts_model = NULL;
     const char *t = hu_cartesia_test_last_transcript();
     HU_ASSERT_STR_NOT_CONTAINS(t, "<emotion");

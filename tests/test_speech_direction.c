@@ -11,17 +11,19 @@ static hu_direction_verdict_t parse(const char *s, hu_direction_t *d) {
 
 static void test_direction_parses_a_valid_line(void) {
     static hu_direction_t d;
-    HU_ASSERT_EQ(parse("<emotion value=\"excited\"/>Wait, that's amazing! <break time=\"250ms\"/>"
-                       "<emotion value=\"proud\"/>I'm so proud of you.",
+    /* voiceai 2026-09-27 (sparse markup): one calm OPENING emotion; a later
+     * emotion tag is dropped, its words kept. */
+    HU_ASSERT_EQ(parse("<emotion value=\"affectionate\"/>Wait, that's amazing! "
+                       "<break time=\"250ms\"/><emotion value=\"proud\"/>I'm so proud of you.",
                        &d),
                  HU_DIRECTION_OK);
     HU_ASSERT_EQ(d.count, 2);
-    HU_ASSERT_STR_EQ(d.seg[0].emotion, "excited");
-    HU_ASSERT_STR_EQ(d.seg[1].emotion, "proud");
+    HU_ASSERT_STR_EQ(d.seg[0].emotion, "affectionate");
+    HU_ASSERT_STR_EQ(d.seg[1].emotion, "");
     HU_ASSERT_EQ(d.seg[1].break_ms, 250);
     HU_ASSERT_STR_EQ(d.words, "Wait, that's amazing! I'm so proud of you.");
     HU_ASSERT_EQ(d.sentences, 2);
-    HU_ASSERT_STR_EQ(hu_direction_first_emotion(&d), "excited");
+    HU_ASSERT_STR_EQ(hu_direction_first_emotion(&d), "affectionate");
 }
 
 static void test_direction_rejects_tags_outside_the_palette(void) {
@@ -59,10 +61,12 @@ static void test_direction_enforces_budgets(void) {
     static hu_direction_t d;
     HU_ASSERT_EQ(parse("[laughter] that's hilarious. [laughter] stop it.", &d),
                  HU_DIRECTION_OVER_BUDGET);
+    /* Emotion switches are no longer a budget: non-calm and mid-memo tags drop. */
     HU_ASSERT_EQ(parse("<emotion value=\"sad\"/>oh no. <emotion value=\"excited\"/>wait "
                        "<emotion value=\"calm\"/>what!",
                        &d),
-                 HU_DIRECTION_OVER_BUDGET); /* 2 changes in 2 sentences > max(1, 1) */
+                 HU_DIRECTION_OK);
+    HU_ASSERT_NULL(hu_direction_first_emotion(&d));
     HU_ASSERT_EQ(parse("<speed ratio=\"0.9\"/>slow. <speed ratio=\"1.05\"/>fast.", &d),
                  HU_DIRECTION_OVER_BUDGET);
     HU_ASSERT_EQ(parse("[laughter] that's hilarious, you're ridiculous.", &d), HU_DIRECTION_OK);
@@ -101,12 +105,11 @@ static void test_direction_render_normalizes_words_not_tags(void) {
 
 static void test_direction_render_reemits_only_parsed_tags(void) {
     static hu_direction_t d;
-    HU_ASSERT_EQ(
-        parse("<emotion value=\"Excited\"/>No way! <break time=\"400ms\"/>That's huge.", &d),
-        HU_DIRECTION_OK);
+    HU_ASSERT_EQ(parse("<emotion value=\"Calm\"/>No way! <break time=\"400ms\"/>That's huge.", &d),
+                 HU_DIRECTION_OK);
     char out[HU_DIRECTION_RENDER_CAP];
     hu_direction_render(&d, HU_LAUGH_CARTESIA, out, sizeof(out));
-    HU_ASSERT_STR_CONTAINS(out, "<emotion value=\"excited\"/>No way!");
+    HU_ASSERT_STR_CONTAINS(out, "<emotion value=\"calm\"/>No way!");
     HU_ASSERT_STR_CONTAINS(out, "<break time=\"400ms\"/>That's huge.");
 }
 
@@ -142,10 +145,8 @@ static void test_direction_decimals_are_not_sentence_ends(void) {
     static hu_direction_t d;
     HU_ASSERT_EQ(parse("it's 7.5 miles.", &d), HU_DIRECTION_OK);
     HU_ASSERT_EQ(d.sentences, 1);
-    HU_ASSERT_EQ(parse("<emotion value=\"sad\"/>it's 7.5 or <emotion value=\"calm\"/>8.5 "
-                       "<emotion value=\"excited\"/>miles.",
-                       &d),
-                 HU_DIRECTION_OVER_BUDGET); /* 2 changes in ONE sentence */
+    HU_ASSERT_EQ(parse("it's 7.5 or 8.5 miles. yes.", &d), HU_DIRECTION_OK);
+    HU_ASSERT_EQ(d.sentences, 2);
 }
 
 static void test_direction_render_fails_rather_than_truncates(void) {
@@ -161,13 +162,53 @@ static void test_direction_render_fails_rather_than_truncates(void) {
 
 static void test_direction_summary_names_emotions_and_tags(void) {
     static hu_direction_t d;
-    HU_ASSERT_EQ(parse("<emotion value=\"excited\"/>No way! <break time=\"300ms\"/>"
-                       "<emotion value=\"proud\"/><speed ratio=\"0.9\"/>So proud.",
+    HU_ASSERT_EQ(parse("<emotion value=\"affectionate\"/>No way! <break time=\"300ms\"/>"
+                       "<speed ratio=\"0.9\"/>So proud.",
                        &d),
                  HU_DIRECTION_OK);
     char s[160];
     HU_ASSERT_TRUE(hu_direction_summary(&d, s, sizeof(s)) > 0);
-    HU_ASSERT_STR_EQ(s, "emotions=excited,proud breaks=1 laughs=0 speed=1 volume=0");
+    HU_ASSERT_STR_EQ(s, "emotions=affectionate breaks=1 laughs=0 speed=1 volume=0");
+}
+
+/* voiceai 2026-09-27: "excited" widened the clone's pitch range to 10.9
+ * semitones (6.4 sympathetic); only calm emotions reach Sonic. */
+static void test_direction_keeps_only_calm_emotions(void) {
+    static hu_direction_t d;
+    HU_ASSERT_TRUE(hu_direction_emotion_is_calm("affectionate", 12));
+    HU_ASSERT_TRUE(hu_direction_emotion_is_calm("Neutral", 7));
+    HU_ASSERT_FALSE(hu_direction_emotion_is_calm("excited", 7));
+    HU_ASSERT_EQ(parse("<emotion value=\"excited\"/>No way!", &d), HU_DIRECTION_OK);
+    HU_ASSERT_NULL(hu_direction_first_emotion(&d));
+    HU_ASSERT_EQ(parse("<emotion value=\"curious\"/>wait what", &d), HU_DIRECTION_OK);
+    HU_ASSERT_STR_EQ(hu_direction_first_emotion(&d), "curious");
+    HU_ASSERT_EQ(parse("<emotion value=\"joyful\"/>hey", &d), HU_DIRECTION_BAD_EMOTION);
+}
+
+/* Sonic paces from punctuation; stacked breaks make it hallucinate. */
+static void test_direction_caps_pauses_at_two(void) {
+    static hu_direction_t d;
+    HU_ASSERT_EQ(parse("one. <break time=\"200ms\"/>two. <break time=\"200ms\"/>three. "
+                       "<break time=\"200ms\"/>four.",
+                       &d),
+                 HU_DIRECTION_OK);
+    size_t breaks = 0;
+    for (size_t i = 0; i < d.count; i++)
+        breaks += d.seg[i].break_ms ? 1u : 0u;
+    HU_ASSERT_EQ(breaks, 2);
+    HU_ASSERT_STR_EQ(d.words, "one. two. three. four.");
+}
+
+/* voiceai 2026-09-27: speed/volume tags persist — reset after the scoped part. */
+static void test_direction_render_resets_scoped_speed_and_volume(void) {
+    static hu_direction_t d;
+    HU_ASSERT_EQ(parse("<speed ratio=\"0.9\"/><volume ratio=\"0.9\"/>Slow part. "
+                       "<break time=\"300ms\"/>Normal part.",
+                       &d),
+                 HU_DIRECTION_OK);
+    char out[HU_DIRECTION_RENDER_CAP];
+    HU_ASSERT_TRUE(hu_direction_render(&d, HU_LAUGH_CARTESIA, out, sizeof(out)) > 0);
+    HU_ASSERT_STR_CONTAINS(out, "<speed ratio=\"1.00\"/><volume ratio=\"1.00\"/>Normal part.");
 }
 
 void run_speech_direction_tests(void) {
@@ -189,4 +230,7 @@ void run_speech_direction_tests(void) {
     HU_RUN_TEST(test_direction_decimals_are_not_sentence_ends);
     HU_RUN_TEST(test_direction_render_fails_rather_than_truncates);
     HU_RUN_TEST(test_direction_summary_names_emotions_and_tags);
+    HU_RUN_TEST(test_direction_keeps_only_calm_emotions);
+    HU_RUN_TEST(test_direction_caps_pauses_at_two);
+    HU_RUN_TEST(test_direction_render_resets_scoped_speed_and_volume);
 }

@@ -22,16 +22,17 @@ static const char k_cast[] =
     "- No asterisks, parentheses, emoji, stage directions (\"warmly\") or narrated actions "
     "(\"*laughs*\").\n\n"
     "DIRECTING YOUR DELIVERY\n"
-    "Direct your own voice with these tags, placed right before the words they affect:\n"
-    "  <emotion value=\"NAME\"/>  NAME is one of the emotions listed below\n"
+    "Direct your own voice sparingly; the voice already paces itself from your punctuation:\n"
+    "  <emotion value=\"NAME\"/>  ONE, at the very start only. NAME is one of the calm emotions "
+    "listed below\n"
     "  <speed ratio=\"0.85\"/> to <speed ratio=\"1.10\"/>  slower for weight, faster for "
     "excitement\n"
     "  <volume ratio=\"0.85\"/> to <volume ratio=\"1.15\"/>  softer for tender moments\n"
     "  <break time=\"300ms\"/>  a real pause, 100ms to 800ms\n"
     "  [laughter]  only when the moment is actually funny\n"
-    "Tags are for emphasis, not every sentence: at most one emotion change every two "
-    "sentences, one laugh, one speed change and one volume change. The emotion must match the "
-    "words; a tag that fights the words sounds fake.\n"
+    "Use at most two pauses, one laugh, one speed change and one volume change. Never change "
+    "emotion mid-memo. The emotion must match the words; a tag that fights the words sounds "
+    "fake.\n"
     "Emotions: ";
 
 /* Seth's voice, measured 2026-09-27 from six of his own unscripted MV7 memos
@@ -51,8 +52,8 @@ static const char k_voice[] =
     "\"All right\".\n"
     "- He says \"you know\" often: once or twice in a memo is him, more is too much.\n"
     "- He closes short: a warm send-off or a nudge (\"thanks, Mom\", \"keep going\").\n"
-    "- Usually content or affectionate; excited when something is genuinely good; "
-    "sympathetic when it's hard. Never dramatic.\n\n"
+    "- Usually content or affectionate; warm and a little quicker when something is genuinely "
+    "good; sympathetic when it's hard. Never dramatic.\n\n"
     "EXAMPLES\n"
     "Intent: love you mom, hope your week is going okay\n"
     "Line: <emotion value=\"affectionate\"/>Hey Mom. <break time=\"500ms\"/><speed "
@@ -79,9 +80,9 @@ size_t hu_speech_perform_system_prompt(char *out, size_t cap) {
     if (!out || cap == 0)
         return 0;
     size_t o = put(out, cap, 0, k_cast);
-    size_t ne = hu_direction_emotion_count();
+    size_t ne = hu_direction_calm_count();
     for (size_t i = 0; o < cap && i < ne; i++) {
-        o = put(out, cap, o, hu_direction_emotion_at(i));
+        o = put(out, cap, o, hu_direction_calm_at(i));
         o = put(out, cap, o, i + 1 < ne ? ", " : ".");
     }
     o = put(out, cap, o, k_voice);
