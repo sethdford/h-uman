@@ -281,14 +281,12 @@ hu_error_t hu_w14_scheduler_enqueue_training_data_extract(hu_w14_scheduler_t *s,
 
 /* W14 P0 #4 — runner registration helpers.
  *
- * The bridge cannot embed `hu_lora_runner_ctx_t` / `hu_kv_cache_manager_t` /
- * `hu_belief_reverify_ctx_t` directly without re-introducing the legacy
- * memory.h collision. Callers include the relevant runner headers
- * (lora_runner.h / kv_cache.h / belief_reverify_runner.h) and pass
+ * The bridge cannot embed `hu_lora_runner_ctx_t` / `hu_kv_cache_manager_t`
+ * directly without re-introducing the legacy memory.h collision. Callers
+ * include the relevant runner headers (lora_runner.h / kv_cache.h) and pass
  * already-constructed contexts in. NULL ctx is rejected. */
 struct hu_lora_runner_ctx;
 struct hu_kv_cache_manager;
-struct hu_belief_reverify_ctx;
 struct hu_training_data_runner_ctx;
 struct hu_lora_retrain_ctx;
 struct hu_scheduler;
@@ -297,8 +295,6 @@ hu_error_t hu_w14_scheduler_register_lora_runner(hu_w14_scheduler_t *s,
                                                  struct hu_lora_runner_ctx *ctx);
 hu_error_t hu_w14_scheduler_register_kv_prewarm_runner(hu_w14_scheduler_t *s,
                                                        struct hu_kv_cache_manager *mgr);
-hu_error_t hu_w14_scheduler_register_belief_reverify(hu_w14_scheduler_t *s,
-                                                     struct hu_belief_reverify_ctx *ctx);
 hu_error_t hu_w14_scheduler_register_training_data_runner(hu_w14_scheduler_t *s,
                                                           struct hu_training_data_runner_ctx *ctx);
 
