@@ -201,6 +201,34 @@ static void test_perform_prompt_carries_the_measured_voice(void) {
     HU_ASSERT_STR_NOT_CONTAINS(sys, "placeholder");
 }
 
+/* voiceai 2026-09-27 ("write for the ear"): runs of short sentences come out
+ * stop-pause-stop-pause; joined thoughts and varied length sound spoken
+ * (contractions 16 -> 28, words/sentence 6.2 -> 7.6 on Ferni). */
+static void test_perform_prompt_writes_for_the_ear(void) {
+    static char sys[16384];
+    HU_ASSERT_TRUE(hu_speech_perform_system_prompt(sys, sizeof(sys)) > 0);
+    HU_ASSERT_STR_CONTAINS(sys, "and, so, but, because");
+    HU_ASSERT_STR_NOT_CONTAINS(sys, "short sentences; fragments");
+}
+
+/* The model copies the examples before it obeys the rules, so the examples
+ * must be sparse too: no example line stacks two pauses. */
+static void test_perform_examples_hold_at_most_one_pause(void) {
+    static char sys[16384];
+    HU_ASSERT_TRUE(hu_speech_perform_system_prompt(sys, sizeof(sys)) > 0);
+    int lines = 0;
+    for (const char *p = strstr(sys, "\nLine: "); p; p = strstr(p + 1, "\nLine: ")) {
+        const char *end = strchr(p + 1, '\n');
+        int breaks = 0;
+        for (const char *b = strstr(p, "<break"); b && (!end || b < end);
+             b = strstr(b + 1, "<break"))
+            breaks++;
+        HU_ASSERT_TRUE(breaks <= 1);
+        lines++;
+    }
+    HU_ASSERT_TRUE(lines >= 4);
+}
+
 void run_speech_perform_tests(void) {
     HU_TEST_SUITE("speech perform (D1)");
     HU_RUN_TEST(test_perform_directed_line_is_ok);
@@ -217,4 +245,6 @@ void run_speech_perform_tests(void) {
     HU_RUN_TEST(test_perform_long_intent_still_reaches_the_model);
     HU_RUN_TEST(test_perform_allows_his_you_know);
     HU_RUN_TEST(test_perform_prompt_carries_the_measured_voice);
+    HU_RUN_TEST(test_perform_prompt_writes_for_the_ear);
+    HU_RUN_TEST(test_perform_examples_hold_at_most_one_pause);
 }
