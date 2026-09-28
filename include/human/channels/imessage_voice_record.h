@@ -48,6 +48,12 @@ hu_voice_delivery_mode_t hu_voice_delivery_mode_parse(const char *s);
 /* A voice-memo send: empty text and exactly one local audio file. */
 bool hu_voice_record_is_memo_send(size_t message_len, const char *const *media, size_t media_count);
 
+/* May this send go out as a file attachment? False only for a memo send when
+ * no_attachment_env is "1" (HU_VOICE_NO_ATTACHMENT): the memo was not recorded
+ * natively, and Seth never wants a .caf file in the thread — text goes instead. */
+bool hu_voice_record_may_attach(size_t message_len, const char *const *media, size_t media_count,
+                                const char *no_attachment_env);
+
 typedef struct {
     bool ax_trusted;
     bool messages_running;

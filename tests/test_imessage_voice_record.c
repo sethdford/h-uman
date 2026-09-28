@@ -606,8 +606,22 @@ static void test_vrec_send_from_env_blocks_under_test(void) {
     HU_ASSERT_EQ(res.block, HU_VREC_NO_AX);
 }
 
+/* Voice-first memos (spec 2026-09-28): "no no caf file". With
+ * HU_VOICE_NO_ATTACHMENT=1 a memo never goes out as a file attachment; the
+ * daemon sends text instead. Ordinary media is untouched. */
+static void test_vrec_memo_never_attaches_when_told(void) {
+    const char *caf[] = {"/tmp/memo.caf"};
+    const char *jpg[] = {"/tmp/photo.jpg"};
+    HU_ASSERT_TRUE(hu_voice_record_may_attach(0, caf, 1, NULL));
+    HU_ASSERT_TRUE(hu_voice_record_may_attach(0, caf, 1, "0"));
+    HU_ASSERT_FALSE(hu_voice_record_may_attach(0, caf, 1, "1"));
+    HU_ASSERT_TRUE(hu_voice_record_may_attach(0, jpg, 1, "1"));
+    HU_ASSERT_TRUE(hu_voice_record_may_attach(5, caf, 1, "1")); /* text + audio: not a memo */
+}
+
 void run_imessage_voice_record_tests(void) {
     HU_TEST_SUITE("imessage voice record");
+    HU_RUN_TEST(test_vrec_memo_never_attaches_when_told);
     HU_RUN_TEST(test_vrec_mode_parse_defaults_to_attachment);
     HU_RUN_TEST(test_vrec_handle_allowed_limits_native_delivery_to_the_list);
     HU_RUN_TEST(test_vrec_memo_send_requires_empty_text_and_one_audio);

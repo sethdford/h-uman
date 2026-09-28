@@ -2570,6 +2570,16 @@ imsg_media:
                         vres.abort_reason ? vres.abort_reason : "-");
         }
     }
+    /* Voice-first memos (spec 2026-09-28): a memo that was not recorded
+     * natively (blocked, failed before Send, or off the native list) never
+     * goes out as a .caf file when HU_VOICE_NO_ATTACHMENT=1. The error sends the
+     * daemon down its text path instead. */
+    if (!hu_voice_record_may_attach(message_len, media, media_count,
+                                    getenv("HU_VOICE_NO_ATTACHMENT"))) {
+        hu_log_info("imessage", NULL, "voice memo not sent as a file; text goes instead");
+        send_err = HU_ERR_IO_BUSY;
+        goto imsg_cleanup;
+    }
     /* Send media attachments (local file paths only) after text succeeds.
      * Prefer imsg send --file when available (faster, better error reporting);
      * fall back to AppleScript per-attachment on failure. */
