@@ -182,6 +182,23 @@ static void test_perform_long_intent_still_reaches_the_model(void) {
     HU_ASSERT_STR_NOT_CONTAINS(r->reason, "provider_error");
 }
 
+/* Calibration 2026-09-27: "you know" is Seth's signature (10x in 6 memos) —
+ * it carries no content, so it cannot fail the faithfulness check. */
+static void test_perform_allows_his_you_know(void) {
+    static perf_mock_t m = {.reply = "<emotion value=\"affectionate\"/>Love you too, you know."};
+    hu_perform_result_t *r = run(&m, "love you too");
+    HU_ASSERT_TRUE(r->ok);
+}
+
+/* The voice block is measured from his memos, not a placeholder. */
+static void test_perform_prompt_carries_the_measured_voice(void) {
+    static char sys[16384];
+    HU_ASSERT_TRUE(hu_speech_perform_system_prompt(sys, sizeof(sys)) > 0);
+    HU_ASSERT_STR_CONTAINS(sys, "you know");
+    HU_ASSERT_STR_CONTAINS(sys, "Hey Mom");
+    HU_ASSERT_STR_NOT_CONTAINS(sys, "placeholder");
+}
+
 void run_speech_perform_tests(void) {
     HU_TEST_SUITE("speech perform (D1)");
     HU_RUN_TEST(test_perform_directed_line_is_ok);
@@ -196,4 +213,6 @@ void run_speech_perform_tests(void) {
     HU_RUN_TEST(test_perform_fences_the_inbound_message);
     HU_RUN_TEST(test_perform_scene_keeps_the_latest_words);
     HU_RUN_TEST(test_perform_long_intent_still_reaches_the_model);
+    HU_RUN_TEST(test_perform_allows_his_you_know);
+    HU_RUN_TEST(test_perform_prompt_carries_the_measured_voice);
 }

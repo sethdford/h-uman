@@ -34,20 +34,34 @@ static const char k_cast[] =
     "words; a tag that fights the words sounds fake.\n"
     "Emotions: ";
 
-/* Placeholder voice DNA — replaced from Seth's calibration takes (spec
- * §Calibration). Deliberately generic: no invented catchphrases. */
+/* Seth's voice, measured 2026-09-27 from six of his own unscripted MV7 memos
+ * (warm, teasing, good news, consoling, logistics, story): articulation ~155
+ * wpm (129-169), 17-26% of an emotional memo is silence, pauses ~0.3 s inside
+ * a thought and ~0.6 s between thoughts (up to 1-2 s when heartfelt),
+ * logistics fast with no pauses, "you know" ~2x per memo, "Hey <name>" openers.
+ * Examples keep to the intent's content so they model a faithful line. */
 static const char k_voice[] =
-    "\n\nTHE SPEAKER'S VOICE\n"
-    "- Natural, unhurried pace. Usually content or affectionate; excited when something is "
-    "genuinely good; sympathetic when it's hard. Rarely dramatic.\n"
-    "- Reacts the way people do out loud (\"oh\", \"ha\", \"yeah\") only when it fits.\n\n"
+    "\n\nTHE SPEAKER'S VOICE (measured from his own voice memos)\n"
+    "- He talks at an easy clip and slows down when it matters. Tender memos to family have "
+    "real pauses: <break time=\"400ms\"/> to <break time=\"800ms\"/> between thoughts and "
+    "<speed ratio=\"0.9\"/>. Plans and quick updates come out fast with almost no pauses: "
+    "<speed ratio=\"1.05\"/>.\n"
+    "- Pauses are about 0.3 s inside a thought and about 0.6 s between thoughts.\n"
+    "- He opens with \"Hey\" and the person's name (\"Hey Mom\", \"Hey Mindy\"); for plans, "
+    "\"All right\".\n"
+    "- He says \"you know\" often: once or twice in a memo is him, more is too much.\n"
+    "- He closes short: a warm send-off or a nudge (\"thanks, Mom\", \"keep going\").\n"
+    "- Usually content or affectionate; excited when something is genuinely good; "
+    "sympathetic when it's hard. Never dramatic.\n\n"
     "EXAMPLES\n"
-    "Intent: that's amazing, so proud of you\n"
-    "Line: <emotion value=\"excited\"/>Wait, that's amazing! <break time=\"250ms\"/>"
-    "<emotion value=\"proud\"/>I'm so proud of you.\n"
-    "Intent: ugh I'm sorry, that sounds rough\n"
-    "Line: <emotion value=\"sympathetic\"/><speed ratio=\"0.92\"/>Oh, I'm sorry. That sounds "
-    "really rough.\n"
+    "Intent: love you mom, hope your week is going okay\n"
+    "Line: <emotion value=\"affectionate\"/>Hey Mom. <break time=\"500ms\"/><speed "
+    "ratio=\"0.9\"/>Love you, you know. <break time=\"600ms\"/>Hope your week is going okay.\n"
+    "Intent: so sorry about everything, keep going\n"
+    "Line: <emotion value=\"sympathetic\"/>Hey, so sorry about everything, you know. "
+    "<break time=\"700ms\"/>Keep going.\n"
+    "Intent: plan is lake saturday then pizza\n"
+    "Line: <speed ratio=\"1.05\"/>All right, plan is the lake Saturday, then pizza.\n"
     "Intent: haha you're ridiculous\n"
     "Line: [laughter] You're ridiculous.\n\n"
     "Output only the line.\n";
@@ -131,11 +145,13 @@ size_t hu_speech_perform_user_message(const hu_perform_scene_t *s, const char *i
 /* Words that carry no content of their own: a spoken line may add or drop
  * them freely. */
 static const char *const k_filler[] = {
-    "the",  "and", "but",  "for",  "you",    "your", "are",   "was",  "that", "this",  "with",
-    "have", "has", "just", "too",  "so",     "yeah", "yes",   "oh",   "ha",   "haha",  "wow",
-    "okay", "hey", "well", "wait", "really", "all",  "it's",  "its",  "i'm",  "im",    "can",
-    "will", "our", "out",  "get",  "got",    "not",  "don't", "dont", "cant", "can't", "one",
-    "what", "how", "who",  "here", "there",  "they", "them",  "then", "than", "been",  "be",
+    "the",  "and",  "but",   "for",  "you",  "your", "are",    "was",  "that",  "this",
+    "with", "have", "has",   "just", "too",  "so",   "yeah",   "yes",  "oh",    "ha",
+    "haha", "wow",  "okay",  "hey",  "well", "wait", "really", "all",  "it's",  "its",
+    "i'm",  "im",   "can",   "will", "our",  "out",  "get",    "got",  "not",   "don't",
+    "dont", "cant", "can't", "one",  "what", "how",  "who",    "here", "there", "they",
+    "them", "then", "than",  "been", "be",   "know", /* "you know" is Seth's verbal signature, not
+                                                        content (calibration) */
 };
 
 static bool is_filler(const char *w, size_t n) {
