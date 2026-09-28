@@ -181,7 +181,7 @@ export function applyBaseline(results: PairResult[], baseline: ContrastBaseline)
     if (r.ok) continue;
     const key = pairKey(r);
     failing.add(key);
-    if (!(key in baseline)) {
+    if (!Object.hasOwn(baseline, key)) {
       fresh.push(r);
       continue;
     }

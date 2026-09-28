@@ -47,6 +47,7 @@ function readBaseline(): ContrastBaseline {
   const valid =
     base !== null &&
     typeof base === "object" &&
+    !Array.isArray(base) &&
     Object.values(base).every((v) => v === null || typeof v === "number");
   if (!valid) throw new Error(`${BASELINE_FILE}: "base" must map pair keys to a ratio or null`);
   return base;
@@ -76,13 +77,18 @@ for (const r of verdict.fresh) {
 for (const g of gamut) console.error(`FAIL gamut ${g}`);
 
 const all = [...quiet, ...base];
+// No measurable pair at all still reports every failure above and exits 1;
+// only the "tightest" clause has nothing to name.
 const worst = all
   .filter((r) => r.ratio !== null)
-  .reduce((a, b) => (a.ratio! - a.need < b.ratio! - b.need ? a : b));
+  .reduce<PairResult | null>((a, b) => (a && a.ratio! - a.need < b.ratio! - b.need ? a : b), null);
+const tightest = worst
+  ? `tightest ${worst.mode} ${worst.fg} on ${worst.bg} ${worst.ratio!.toFixed(2)}:1 (need ${worst.need})`
+  : "no pair was measurable";
 const failed = quietFailed.length + verdict.fresh.length + verdict.fixed.length;
 console.log(
   `check-contrast: ${quiet.length} quiet + ${base.length} base pairs measured, ${failed} failed, ` +
     `${verdict.known.length} base pairs baselined, ${gamut.length} out of gamut; ` +
-    `tightest ${worst.mode} ${worst.fg} on ${worst.bg} ${worst.ratio!.toFixed(2)}:1 (need ${worst.need})`,
+    tightest,
 );
 process.exit(failed || gamut.length ? 1 : 0);
