@@ -12,24 +12,24 @@
 static void test_emotion_map_sad_incoming_returns_sympathetic(void) {
     const char *incoming = "I'm so sad today";
     const char *response = "I understand";
-    const char *r = hu_cartesia_emotion_from_context(
-        incoming, strlen(incoming), response, strlen(response), 14);
+    const char *r = hu_cartesia_emotion_from_context(incoming, strlen(incoming), response,
+                                                     strlen(response), 14);
     HU_ASSERT_STR_EQ(r, "sympathetic");
 }
 
 static void test_emotion_map_congrats_in_response_returns_excited(void) {
     const char *incoming = "I got the job!";
     const char *response = "Congrats! That's awesome news!";
-    const char *r = hu_cartesia_emotion_from_context(
-        incoming, strlen(incoming), response, strlen(response), 14);
+    const char *r = hu_cartesia_emotion_from_context(incoming, strlen(incoming), response,
+                                                     strlen(response), 14);
     HU_ASSERT_STR_EQ(r, "excited");
 }
 
 static void test_emotion_map_default_returns_content(void) {
     const char *incoming = "What's for dinner?";
     const char *response = "Pizza sounds good.";
-    const char *r = hu_cartesia_emotion_from_context(
-        incoming, strlen(incoming), response, strlen(response), 14);
+    const char *r = hu_cartesia_emotion_from_context(incoming, strlen(incoming), response,
+                                                     strlen(response), 14);
     HU_ASSERT_STR_EQ(r, "content");
 }
 
@@ -41,48 +41,50 @@ static void test_emotion_map_null_incoming_response_returns_content(void) {
 static void test_emotion_map_late_night_returns_calm(void) {
     const char *incoming = "Hey";
     const char *response = "Hi there";
-    const char *r = hu_cartesia_emotion_from_context(
-        incoming, strlen(incoming), response, strlen(response), 23);
+    const char *r = hu_cartesia_emotion_from_context(incoming, strlen(incoming), response,
+                                                     strlen(response), 23);
     HU_ASSERT_STR_EQ(r, "calm");
 }
 
 static void test_emotion_map_early_morning_returns_calm(void) {
     const char *incoming = "Can't sleep";
     const char *response = "I'm here";
-    const char *r = hu_cartesia_emotion_from_context(
-        incoming, strlen(incoming), response, strlen(response), 3);
+    const char *r =
+        hu_cartesia_emotion_from_context(incoming, strlen(incoming), response, strlen(response), 3);
     HU_ASSERT_STR_EQ(r, "calm");
 }
 
+/* "joking/comedic" is not a Cartesia emotion (voiceai hit the same bug class
+ * with "warm", 2026-09-27); playful maps to a valid, calm one. */
 static void test_emotion_map_playful_lol_returns_joking_comedic(void) {
     const char *incoming = "lol that was funny";
     const char *response = "Glad you liked it";
-    const char *r = hu_cartesia_emotion_from_context(
-        incoming, strlen(incoming), response, strlen(response), 14);
-    HU_ASSERT_STR_EQ(r, "joking/comedic");
+    const char *r = hu_cartesia_emotion_from_context(incoming, strlen(incoming), response,
+                                                     strlen(response), 14);
+    HU_ASSERT_STR_EQ(r, "content");
 }
 
 static void test_emotion_map_serious_death_returns_contemplative(void) {
     const char *incoming = "We had a funeral last week";
     const char *response = "I'm so sorry for your loss.";
-    const char *r = hu_cartesia_emotion_from_context(
-        incoming, strlen(incoming), response, strlen(response), 14);
+    const char *r = hu_cartesia_emotion_from_context(incoming, strlen(incoming), response,
+                                                     strlen(response), 14);
     HU_ASSERT_STR_EQ(r, "contemplative");
 }
 
 static void test_emotion_map_anxious_incoming_returns_calm(void) {
     const char *incoming = "I'm really anxious about the exam";
     const char *response = "You'll do great.";
-    const char *r = hu_cartesia_emotion_from_context(
-        incoming, strlen(incoming), response, strlen(response), 14);
+    const char *r = hu_cartesia_emotion_from_context(incoming, strlen(incoming), response,
+                                                     strlen(response), 14);
     HU_ASSERT_STR_EQ(r, "calm");
 }
 
 static void test_emotion_map_upset_incoming_returns_sympathetic(void) {
     const char *incoming = "I'm upset about what happened";
     const char *response = "I hear you.";
-    const char *r = hu_cartesia_emotion_from_context(
-        incoming, strlen(incoming), response, strlen(response), 14);
+    const char *r = hu_cartesia_emotion_from_context(incoming, strlen(incoming), response,
+                                                     strlen(response), 14);
     HU_ASSERT_STR_EQ(r, "sympathetic");
 }
 

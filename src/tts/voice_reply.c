@@ -1,5 +1,6 @@
 /* src/tts/voice_reply.c — see include/human/tts/voice_reply.h */
 #include "human/tts/voice_reply.h"
+#include "human/tts/speech_direction.h"
 
 #include "human/daemon/voice_facade.h"
 #include "human/persona.h"
@@ -92,8 +93,10 @@ hu_error_t hu_voice_reply_build_request_ex(const hu_persona_voice_config_t *voic
     out->transcript_len = n;
     out->sentence_count = prep.sentence_count;
 
+    /* Only calm emotions reach Sonic (voiceai 2026-09-27). */
+    const char *dom = prep.dominant_emotion ? prep.dominant_emotion : cfg.default_emotion;
     snprintf(out->emotion, sizeof(out->emotion), "%s",
-             prep.dominant_emotion ? prep.dominant_emotion : cfg.default_emotion);
+             dom && hu_direction_emotion_is_calm(dom, strlen(dom)) ? dom : "content");
     snprintf(out->model, sizeof(out->model), "%s",
              voice->model[0] ? voice->model : HU_VOICE_REPLY_DEFAULT_MODEL);
 

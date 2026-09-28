@@ -165,6 +165,19 @@ static void test_voice_reply_audio_to_temp_null_channel_still_writes(void) {
                  HU_ERR_INVALID_ARGUMENT);
 }
 
+/* voiceai 2026-09-27: the request-level emotion is calm too. */
+static void test_voice_reply_request_emotion_is_calm(void) {
+    hu_persona_voice_config_t v;
+    memset(&v, 0, sizeof(v));
+    snprintf(v.voice_id, sizeof(v.voice_id), "voice-test");
+    const char *r = "Congratulations, that is amazing news!";
+    hu_voice_reply_request_t req;
+    HU_ASSERT_EQ(hu_voice_reply_build_request(&v, r, strlen(r), "I got the job!", 14, 14, 1, &req),
+                 HU_OK);
+    HU_ASSERT_STR_NOT_CONTAINS(req.tts.emotion, "excited");
+    HU_ASSERT_NULL(strstr(req.transcript, "excited"));
+}
+
 static void test_voice_reply_directed_request_keeps_the_rendered_transcript(void) {
     hu_persona_voice_config_t v;
     memset(&v, 0, sizeof(v));
@@ -191,4 +204,5 @@ void run_voice_reply_tests(void) {
     HU_RUN_TEST(test_voice_reply_audio_to_temp_imessage_yields_caf);
     HU_RUN_TEST(test_voice_reply_audio_to_temp_null_channel_still_writes);
     HU_RUN_TEST(test_voice_reply_directed_request_keeps_the_rendered_transcript);
+    HU_RUN_TEST(test_voice_reply_request_emotion_is_calm);
 }

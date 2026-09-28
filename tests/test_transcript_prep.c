@@ -8,6 +8,8 @@
 #include "test_framework.h"
 #include <string.h>
 
+static int count_of(const char *hay, const char *needle);
+
 /* ── Sentence Segmenter Tests ─────────────────────────────────────────── */
 
 static void test_segment_simple_sentences(void) {
@@ -131,6 +133,8 @@ static void test_prep_single_sentence_no_breaks(void) {
     HU_ASSERT_NOT_NULL(result.dominant_emotion);
 }
 
+/* voiceai 2026-09-27: Sonic paces from punctuation and stacked breaks make it
+ * hallucinate — ordinary sentences get no break tag; one beat per memo at most. */
 static void test_prep_multi_sentence_has_breaks(void) {
     hu_prep_config_t cfg = {
         .base_speed = 0.95f,
@@ -139,11 +143,15 @@ static void test_prep_multi_sentence_has_breaks(void) {
         .seed = 42,
     };
     hu_prep_result_t result = {0};
-    const char *text = "I'm so sorry that happened. But you're going to crush it tomorrow.";
-    hu_error_t err = hu_transcript_prep(text, strlen(text), &cfg, &result);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_EQ(result.sentence_count, (size_t)2);
-    HU_ASSERT_TRUE(strstr(result.output, "<break time=") != NULL);
+    const char *text = "Sounds good. See you soon. Bring snacks. Text me when you leave.";
+    HU_ASSERT_EQ(hu_transcript_prep(text, strlen(text), &cfg, &result), HU_OK);
+    HU_ASSERT_EQ(result.sentence_count, (size_t)4);
+    HU_ASSERT_NULL(strstr(result.output, "<break time="));
+    const char *heavy = "I'm so sorry that happened. I know it hurts. I'm here. Call me later.";
+    cfg.incoming_msg = "my dog died today";
+    cfg.incoming_msg_len = 17;
+    HU_ASSERT_EQ(hu_transcript_prep(heavy, strlen(heavy), &cfg, &result), HU_OK);
+    HU_ASSERT_TRUE(count_of(result.output, "<break time=") <= 1);
 }
 
 static void test_prep_emotion_shift_produces_tags(void) {
@@ -159,7 +167,9 @@ static void test_prep_emotion_shift_produces_tags(void) {
     const char *text = "I understand how you feel. Congratulations on pushing through!";
     hu_error_t err = hu_transcript_prep(text, strlen(text), &cfg, &result);
     HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_TRUE(strstr(result.output, "<emotion value=") != NULL);
+    /* voiceai 2026-09-27: one calm opening emotion; no mid-memo switch to excited. */
+    HU_ASSERT_EQ(count_of(result.output, "<emotion value="), 1);
+    HU_ASSERT_NULL(strstr(result.output, "excited"));
 }
 
 static void test_prep_speed_variation_for_exclamation(void) {
@@ -514,16 +524,18 @@ static void test_smooth_consonants_ngths(void) {
     char out[256];
     const char *text = "The strengths of this approach.";
     size_t len = hu_transcript_smooth_consonants(text, strlen(text), out, sizeof(out), false);
-    HU_ASSERT_TRUE(len > 0);
-    HU_ASSERT_TRUE(strstr(out, "<break") != NULL);
+    /* voiceai 2026-09-27: no break tags inside words ("stacked breaks make it
+     * hallucinate"); the text passes through unchanged. */
+    HU_ASSERT_EQ(len, strlen(text));
+    HU_ASSERT_STR_EQ(out, text);
 }
 
 static void test_smooth_consonants_strip_mode(void) {
     char out[256];
     const char *text = "The strengths of this approach.";
     size_t len = hu_transcript_smooth_consonants(text, strlen(text), out, sizeof(out), true);
-    HU_ASSERT_TRUE(len > 0);
-    HU_ASSERT_TRUE(strstr(out, "<break") == NULL);
+    HU_ASSERT_EQ(len, strlen(text)); /* never splits a word ("streng ths") */
+    HU_ASSERT_STR_EQ(out, text);
 }
 
 static void test_smooth_consonants_no_change(void) {
@@ -592,11 +604,12 @@ static void test_thinking_pause_long_response(void) {
         .seed = 42,
     };
     hu_prep_result_t result = {0};
-    const char *text = "This is a fairly long response that should trigger "
+    const char *text = "This is a fairly long response that used to trigger "
                        "a thinking pause at the beginning of the output.";
     hu_error_t err = hu_transcript_prep(text, strlen(text), &cfg, &result);
     HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_TRUE(strstr(result.output, "<break time=") != NULL);
+    /* voiceai 2026-09-27: no opening "think" break — a memo starts on its words. */
+    HU_ASSERT_NULL(strstr(result.output, "<break time="));
 }
 
 static void test_thinking_pause_short_response_no_pause(void) {
@@ -901,8 +914,25 @@ static void test_prep_inline_emotion_tags_are_budgeted(void) {
                        "Haha that is hilarious. Wow that is awesome! I am sad about it. "
                        "Congrats again, amazing!";
     HU_ASSERT_EQ(hu_transcript_prep(text, strlen(text), &cfg, &result), HU_OK);
-    HU_ASSERT_TRUE(count_of(result.output, "<emotion value=") <= 2);
-    HU_ASSERT_TRUE(count_of(result.output, "<volume ratio=") <= 1);
+    HU_ASSERT_TRUE(count_of(result.output, "<emotion value=") <= 1);
+    HU_ASSERT_NULL(strstr(result.output, "excited"));
+    HU_ASSERT_EQ(count_of(result.output, "<volume ratio="), 0); /* request-level only */
+}
+
+/* voiceai 2026-09-27: inline volume tags persist to the end of a memo (a whole
+ * reply played 24% quieter) — volume is set once, at the request level. */
+static void test_prep_volume_is_reset_after_its_sentence(void) {
+    hu_prep_config_t cfg = {.incoming_msg = "my dog died today",
+                            .incoming_msg_len = 17,
+                            .base_speed = 0.95f,
+                            .pause_factor = 1.0f,
+                            .hour_local = 14,
+                            .seed = 5};
+    hu_prep_result_t result = {0};
+    const char *text = "Congrats, that is amazing! I'm so sorry about your dog though. "
+                       "Let's get dinner tomorrow and talk.";
+    HU_ASSERT_EQ(hu_transcript_prep(text, strlen(text), &cfg, &result), HU_OK);
+    HU_ASSERT_EQ(count_of(result.output, "<volume ratio="), 0);
 }
 
 /* Final review 2026-09-27: General Punctuation (U+2000-206F) is not emoji.
@@ -1022,5 +1052,6 @@ void run_transcript_prep_tests(void) {
 
     HU_RUN_TEST(test_prep_normalizes_numbers_in_pipeline);
     HU_RUN_TEST(test_strip_junk_keeps_punctuation_and_word_breaks);
+    HU_RUN_TEST(test_prep_volume_is_reset_after_its_sentence);
     HU_RUN_TEST(test_strip_junk_still_drops_emoji_without_merging_words);
 }

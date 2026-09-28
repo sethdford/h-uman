@@ -11,12 +11,13 @@
  *   - Emotion-derived volume
  */
 #include "human/tts/transcript_prep.h"
+#include "human/tts/speech_direction.h"
 #include "human/tts/speech_text.h"
 
 /* F1 restraint budgets (Ferni: "SSML is for emphasis, not every sentence"). */
 #define HU_PREP_LAUGH_PCT           18
-#define HU_PREP_MAX_EMOTION_TAGS    2
-#define HU_PREP_MAX_VOLUME_TAGS     1
+#define HU_PREP_MAX_EMOTION_TAGS    1
+#define HU_PREP_MAX_BEATS           1
 #define HU_PREP_MAX_SPEED_SENTENCES 1
 #include "human/core/string.h"
 #include "human/tts/emotion_map.h"
@@ -160,51 +161,21 @@ size_t hu_transcript_strip_junk(const char *text, size_t text_len, char *out, si
     return pos;
 }
 
-/* ── Consonant cluster smoothing ─────────────────────────────────────── */
+/* ── Consonant clusters ──────────────────────────────────────────────── */
 
-typedef struct {
-    const char *cluster;
-    size_t len;
-    const char *replacement;
-    const char *replacement_strip; /* fallback without SSML */
-} consonant_fix_t;
-
-static const consonant_fix_t CONSONANT_FIXES[] = {
-    {"ngths", 5, "ng<break time=\"50ms\"/>ths", "ng ths"},
-    {"sths", 4, "s<break time=\"50ms\"/>ths", "s ths"},
-    {"sts ", 4, "sts <break time=\"40ms\"/>", "sts "},
-    {"ctly", 4, "ct<break time=\"30ms\"/>ly", "ctly"},
-    {"mpts", 4, "mpts<break time=\"40ms\"/>", "mpts "},
-};
-#define CONSONANT_FIX_COUNT (sizeof(CONSONANT_FIXES) / sizeof(CONSONANT_FIXES[0]))
-
+/* Pass-through. It used to put 30-50 ms <break> tags inside words ("streng
+ * ths"); voiceai 2026-09-27: Sonic paces from the text and stacked breaks make
+ * it hallucinate, so words go to the voice whole. Kept so callers need no
+ * change. */
 size_t hu_transcript_smooth_consonants(const char *text, size_t text_len, char *out, size_t cap,
                                        bool strip_ssml) {
+    (void)strip_ssml;
     if (!text || text_len == 0 || !out || cap == 0)
         return 0;
-
-    size_t pos = 0;
-    for (size_t i = 0; i < text_len && pos < cap - 1; i++) {
-        bool matched = false;
-        for (size_t f = 0; f < CONSONANT_FIX_COUNT; f++) {
-            const consonant_fix_t *fix = &CONSONANT_FIXES[f];
-            if (i + fix->len <= text_len && memcmp(text + i, fix->cluster, fix->len) == 0) {
-                const char *rep = strip_ssml ? fix->replacement_strip : fix->replacement;
-                size_t rlen = strlen(rep);
-                if (pos + rlen < cap) {
-                    memcpy(out + pos, rep, rlen);
-                    pos += rlen;
-                    i += fix->len - 1;
-                    matched = true;
-                    break;
-                }
-            }
-        }
-        if (!matched)
-            out[pos++] = text[i];
-    }
-    out[pos] = '\0';
-    return pos;
+    size_t n = text_len < cap - 1 ? text_len : cap - 1;
+    memcpy(out, text, n);
+    out[n] = '\0';
+    return n;
 }
 
 /* ── Number-to-word tables ────────────────────────────────────────────── */
@@ -1118,17 +1089,10 @@ hu_error_t hu_transcript_prep(const char *transcript, size_t transcript_len,
         }
     }
 
-    /* Thinking-time opening pause (contextual: longer for complex content) */
-    if (!strip && src_len > 60) {
-        int think_ms = src_len > 200 ? 400 : 250;
-        think_ms = (int)(think_ms * pause_factor);
-        int n = snprintf(out + pos, cap - pos, "<break time=\"%dms\"/>", think_ms);
-        if (n > 0 && pos + (size_t)n < cap)
-            pos += (size_t)n;
-    }
+    /* No opening "think" break: a memo starts on its words (voiceai 2026-09-27). */
 
     bool speed_tag_open = false; /* a non-1.0 <speed> tag persists until reset */
-    int emotion_tags = 0, volume_tags = 0, speed_sentences = 0;
+    int emotion_tags = 0, speed_sentences = 0, beats = 0;
     bool laughed = false;
     for (size_t i = 0; i < result->sentence_count; i++) {
         hu_prep_sentence_t *s = &result->sentences[i];
@@ -1148,16 +1112,24 @@ hu_error_t hu_transcript_prep(const char *transcript, size_t transcript_len,
                 } else if (pos + 1 < cap) {
                     out[pos++] = ' ';
                 }
-            } else {
+            } else if (brk_ms >= 500 && beats < HU_PREP_MAX_BEATS) {
+                /* Sonic paces ordinary sentences from punctuation; only a heavy
+                 * moment earns one explicit beat (voiceai 2026-09-27). */
                 int n = snprintf(out + pos, cap - pos, "<break time=\"%dms\"/>", brk_ms);
-                if (n > 0 && pos + (size_t)n < cap)
+                if (n > 0 && pos + (size_t)n < cap) {
                     pos += (size_t)n;
+                    beats++;
+                }
+            } else if (pos + 1 < cap) {
+                out[pos++] = ' ';
             }
         }
 
         /* Emotion tag if different from previous (SSML mode only) */
-        if (!strip && s->emotion && emotion_tags < HU_PREP_MAX_EMOTION_TAGS &&
-            (i == 0 || strcmp(s->emotion, result->sentences[i - 1].emotion) != 0)) {
+        /* One calm OPENING emotion only (voiceai 2026-09-27: "excited" widened
+         * the clone's pitch range; mid-memo switches sound performed). */
+        if (!strip && i == 0 && s->emotion && emotion_tags < HU_PREP_MAX_EMOTION_TAGS &&
+            hu_direction_emotion_is_calm(s->emotion, strlen(s->emotion))) {
             int n = snprintf(out + pos, cap - pos, "<emotion value=\"%s\"/>", s->emotion);
             if (n > 0 && pos + (size_t)n < cap) {
                 pos += (size_t)n;
@@ -1182,19 +1154,8 @@ hu_error_t hu_transcript_prep(const char *transcript, size_t transcript_len,
             speed_tag_open = speed_tagged;
         }
 
-        /* Per-sentence volume (SSML mode only) */
-        if (!strip) {
-            float sv = hu_emotion_to_volume(s->emotion);
-            float vol_delta = sv - result->volume;
-            if ((vol_delta > 0.05f || vol_delta < -0.05f) &&
-                volume_tags < HU_PREP_MAX_VOLUME_TAGS) {
-                int n = snprintf(out + pos, cap - pos, "<volume ratio=\"%.2f\"/>", (double)sv);
-                if (n > 0 && pos + (size_t)n < cap) {
-                    pos += (size_t)n;
-                    volume_tags++;
-                }
-            }
-        }
+        /* No inline volume tags: they persist to the end of the memo (voiceai
+         * measured a whole reply 24% quieter). Volume is request-level. */
 
         /* Nonverbal before sentence (context-dependent) */
         if (config->nonverbals_enabled) {

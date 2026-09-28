@@ -17,15 +17,13 @@
 #define hu_strncasecmp strncasecmp
 #endif
 
-
-const char *hu_cartesia_emotion_from_context(
-    const char *incoming_msg, size_t msg_len,
-    const char *response, size_t resp_len,
-    uint8_t hour_local) {
+const char *hu_cartesia_emotion_from_context(const char *incoming_msg, size_t msg_len,
+                                             const char *response, size_t resp_len,
+                                             uint8_t hour_local) {
 
     /* Comforting: sad keywords in incoming → sympathetic */
     if (incoming_msg && msg_len > 0) {
-        static const char *sad[] = {"sad", "upset", "crying", "devastated", "heartbroken",
+        static const char *sad[] = {"sad",       "upset",     "crying", "devastated", "heartbroken",
                                     "depressed", "miserable", "lonely", "grief"};
         for (size_t i = 0; i < sizeof(sad) / sizeof(sad[0]); i++) {
             if (hu_str_contains_ci_cstr(incoming_msg, msg_len, sad[i]))
@@ -54,15 +52,15 @@ const char *hu_cartesia_emotion_from_context(
         if (text) {
             for (size_t i = 0; i < sizeof(playful) / sizeof(playful[0]); i++) {
                 if (hu_str_contains_ci_cstr(text, text_len, playful[i]))
-                    return "joking/comedic";
+                    return "content"; /* "joking/comedic" is not a Cartesia emotion */
             }
         }
     }
 
     /* Serious/heavy topic: "death", "funeral", "cancer" in incoming or response → contemplative */
     if ((incoming_msg && msg_len > 0) || (response && resp_len > 0)) {
-        static const char *serious[] = {"death", "funeral", "cancer", "terminal", "died",
-                                       "passed away"};
+        static const char *serious[] = {"death",    "funeral", "cancer",
+                                        "terminal", "died",    "passed away"};
         const char *text = incoming_msg ? incoming_msg : response;
         size_t text_len = incoming_msg ? msg_len : resp_len;
         if (text) {
@@ -87,10 +85,9 @@ const char *hu_cartesia_emotion_from_context(
 
 #else
 
-const char *hu_cartesia_emotion_from_context(
-    const char *incoming_msg, size_t msg_len,
-    const char *response, size_t resp_len,
-    uint8_t hour_local) {
+const char *hu_cartesia_emotion_from_context(const char *incoming_msg, size_t msg_len,
+                                             const char *response, size_t resp_len,
+                                             uint8_t hour_local) {
     (void)incoming_msg;
     (void)msg_len;
     (void)response;

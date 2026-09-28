@@ -77,7 +77,7 @@ static void test_cartesia_build_tts_body_wav_container_for_ogg_channels(void) {
     hu_json_value_t *of = hu_json_object_get(root, "output_format");
     HU_ASSERT_NOT_NULL(of);
     HU_ASSERT_STR_EQ(hu_json_get_string(of, "container"), "wav");
-    HU_ASSERT_STR_EQ(hu_json_get_string(root, "model_id"), "sonic-3-2026-01-12"); /* default */
+    HU_ASSERT_STR_EQ(hu_json_get_string(root, "model_id"), "sonic-3.6"); /* default */
     hu_json_free(&alloc, root);
     hu_json_buf_free(&jbuf);
 }
