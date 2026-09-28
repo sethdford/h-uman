@@ -282,6 +282,23 @@ static void test_voice_reply_speaks_the_directed_line(void) {
     HU_ASSERT_STR_CONTAINS(t, "Yeah, sounds good!");
 }
 
+/* voiceai opener gate, LIVE: the second memo in a row to the same person does
+ * not also open with a reaction word. (Unset, the gate is off — see the test
+ * above, which still hears "Yeah".) */
+static void test_voice_reply_opener_gate_strips_the_repeat(void) {
+    g_voice_sends = 0;
+    setenv("HU_VOICE_OPENER_GATE", "live", 1);
+    const char *line = "<emotion value=\"affectionate\"/>Yeah, sounds good!";
+    HU_ASSERT_TRUE(run_direct_voice("yeah sounds good", line, "live"));
+    HU_ASSERT_STR_CONTAINS(hu_cartesia_test_last_transcript(), "Yeah, sounds good!");
+    HU_ASSERT_TRUE(run_direct_voice("yeah sounds good", line, "live"));
+    unsetenv("HU_VOICE_OPENER_GATE");
+    const char *t = hu_cartesia_test_last_transcript();
+    HU_ASSERT_STR_CONTAINS(t, "<emotion value=\"affectionate\"/>Sounds good!");
+    HU_ASSERT_STR_NOT_CONTAINS(t, "Yeah");
+    HU_ASSERT_EQ(g_voice_sends, 2);
+}
+
 static void test_voice_reply_invalid_direction_speaks_plain_text(void) {
     g_voice_sends = 0;
     HU_ASSERT_TRUE(run_direct_voice("yeah sounds good", "<prosody>Yeah</prosody>", "live"));
@@ -438,6 +455,7 @@ void run_daemon_voice_reply_tests(void) {
     HU_RUN_TEST(test_voice_reply_with_link_goes_as_text);
     HU_RUN_TEST(test_voice_reply_rewrite_skipped_when_no_memo_can_go);
     HU_RUN_TEST(test_voice_reply_speaks_the_directed_line);
+    HU_RUN_TEST(test_voice_reply_opener_gate_strips_the_repeat);
     HU_RUN_TEST(test_voice_reply_invalid_direction_speaks_plain_text);
     HU_RUN_TEST(test_voice_reply_direction_shadow_speaks_plain_text);
     HU_RUN_TEST(test_voice_reply_directed_line_that_trips_moderation_is_not_spoken);

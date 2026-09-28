@@ -362,6 +362,7 @@ void run_imessage_voice_record_tests(void);
 void run_speech_text_tests(void);
 void run_speech_rewrite_tests(void);
 void run_speech_direction_tests(void);
+void run_opener_gate_tests(void);
 void run_speech_perform_tests(void);
 void run_imessage_custom_tapback_tests(void);
 void run_imessage_action_facts_tests(void);
@@ -1439,6 +1440,7 @@ int main(int argc, char **argv) {
     run_speech_text_tests();
     run_speech_rewrite_tests();
     run_speech_direction_tests();
+    run_opener_gate_tests();
     run_speech_perform_tests();
     run_imessage_custom_tapback_tests();
     run_imessage_action_facts_tests();

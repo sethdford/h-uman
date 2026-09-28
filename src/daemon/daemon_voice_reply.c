@@ -17,6 +17,7 @@
 #include "human/persona.h"
 #include "human/platform.h"
 #include "human/security/moderation.h"
+#include "human/tts/opener_gate.h"
 #include "human/tts/speech_direction.h"
 #include "human/tts/speech_perform.h"
 #include "human/tts/speech_rewrite.h"
@@ -68,6 +69,7 @@ static void daemon_voice_record_decision(hu_agent_t *agent, const char *batch_ke
 #endif /* HU_ENABLE_CARTESIA */
 
 #include <math.h>
+#include <pthread.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -194,6 +196,57 @@ static void voice_direct(hu_allocator_t *alloc, hu_agent_t *agent, const char *b
     alloc->free(alloc->ctx, r, sizeof(*r));
 }
 
+/* voiceai opener gate, per recipient, for the whole daemon's lifetime. */
+static hu_opener_gate_t g_opener_gate;
+static bool g_opener_gate_ready;
+static pthread_mutex_t g_opener_gate_mu = PTHREAD_MUTEX_INITIALIZER;
+
+/* Strip a leading reaction word from buf in place; false when there is none. */
+static bool strip_opener_in_place(hu_allocator_t *alloc, char *buf, size_t *len, size_t cap) {
+    char *tmp = alloc->alloc(alloc->ctx, cap);
+    if (!tmp)
+        return false;
+    size_t n = hu_opener_strip(buf, *len, tmp, cap);
+    if (n > 0) {
+        memcpy(buf, tmp, n + 1);
+        *len = n;
+    }
+    alloc->free(alloc->ctx, tmp, cap);
+    return n > 0;
+}
+
+/* Keep a reaction-word opener ("Oh,", "Ha,", "Yeah,") at most once every
+ * HU_OPENER_EVERY memos to the same person. HU_VOICE_OPENER_GATE: off
+ * (default) | shadow (log the decision) | live (strip). LIVE as a default is
+ * gated on Seth's ear test preferring gated memos — do not flip without it. */
+static void voice_gate_opener(hu_allocator_t *alloc, const char *batch_key, size_t key_len,
+                              hu_speech_result_t *sp, voice_final_t *vf) {
+    hu_speech_rewrite_mode_t m = hu_speech_rewrite_mode_parse(getenv("HU_VOICE_OPENER_GATE"));
+    if (m == HU_SPEECH_REWRITE_OFF)
+        return;
+    const char *said = vf->directed ? vf->words : sp->spoken;
+    size_t said_len = vf->directed ? vf->words_len : sp->spoken_len;
+    char probe[HU_DIRECTION_WORDS_CAP];
+    if (hu_opener_strip(said, said_len, probe, sizeof(probe)) == 0)
+        return;
+    pthread_mutex_lock(&g_opener_gate_mu);
+    if (!g_opener_gate_ready) {
+        hu_opener_gate_init(&g_opener_gate, HU_OPENER_EVERY);
+        g_opener_gate_ready = true;
+    }
+    bool keep = hu_opener_gate_keep(&g_opener_gate, batch_key, key_len);
+    pthread_mutex_unlock(&g_opener_gate_mu);
+    hu_log_info("voice_reply", NULL, "opener gate %s: %s",
+                m == HU_SPEECH_REWRITE_LIVE ? "live" : "shadow", keep ? "kept" : "stripped");
+    if (keep || m != HU_SPEECH_REWRITE_LIVE)
+        return;
+    (void)strip_opener_in_place(alloc, sp->spoken, &sp->spoken_len, sizeof(sp->spoken));
+    if (vf->directed) {
+        (void)strip_opener_in_place(alloc, vf->words, &vf->words_len, sizeof(vf->words));
+        (void)strip_opener_in_place(alloc, vf->rendered, &vf->rendered_len, sizeof(vf->rendered));
+    }
+}
+
 /* F1 S1 + S4 (and F2-voice direction) for a memo that is about to be
  * synthesized. The rewrite and the performance are LLM calls, so they run
  * here — once — rather than for every reply. */
@@ -223,6 +276,8 @@ static bool voice_spoken_final(hu_allocator_t *alloc, hu_agent_t *agent, const c
                         : -1;
         if (vf->state == 1 && dm != HU_SPEECH_REWRITE_OFF)
             voice_direct(alloc, agent, batch_key, key_len, combined, combined_len, sp, dm, vf);
+        if (vf->state == 1)
+            voice_gate_opener(alloc, batch_key, key_len, sp, vf);
     }
     return vf->state == 1;
 }
