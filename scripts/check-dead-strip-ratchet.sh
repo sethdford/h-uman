@@ -114,7 +114,7 @@ NEVER_LOADED_BASELINE=31   # auto-locked 2026-09-26 (was 32)
 #
 # Re-measured 2026-09-21 alongside NEVER_LOADED_BASELINE above, same config
 # change and same reason the auto-lock didn't fire.
-DEAD_UNREF_BASELINE=76   # auto-locked 2026-09-26 (was 79)
+DEAD_UNREF_BASELINE=75   # locked 2026-09-28 (was 76)
 
 cd "$_hu_root"
 
