@@ -87,6 +87,7 @@
 #include "human/daemon/send_budget.h"
 #include "human/daemon/send_provenance.h"
 #include "human/daemon/voice_facade.h"
+#include "human/daemon/voice_first.h"
 
 /* Channel helpers */
 #include "human/channels/channel_embed.h"
@@ -5392,6 +5393,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 
                 /* 4. Response constraints via channel vtable */
                 uint32_t max_chars = 0;
+                bool voice_first_memo = false; /* spec 2026-09-28 */
                 if (ch->channel->vtable->get_response_constraints) {
                     hu_channel_response_constraints_t constraints = {0};
                     if (ch->channel->vtable->get_response_constraints(ch->channel->ctx,
@@ -6412,6 +6414,16 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         convo_ctx = merged;
                         convo_ctx_len = new_len;
                     }
+                }
+
+                /* Voice-first memos: decide voice from what arrived and, LIVE for
+                 * family, have this turn write the memo. Never for a crisis turn. */
+                if (!inbound_crisis) {
+                    hu_daemon_voice_first_t vfirst;
+                    hu_daemon_voice_first_prepare(alloc, agent, batch_key, key_len, combined,
+                                                  combined_len, &convo_ctx, &convo_ctx_len,
+                                                  &max_chars, &vfirst);
+                    voice_first_memo = vfirst.memo;
                 }
 
                 /* Set agent per-turn context fields (prompt builder reads these) */
@@ -8684,6 +8696,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         .unshaped = unshaped,
                         .unshaped_len = unshaped_len,
                         .bth_hour = bth_hour,
+                        .voice_first = voice_first_memo,
                         .text_ready = (err == HU_OK),
                         .bus = &daemon_outbound_bus,
                         .bridge = &daemon_out_bus_bridge,

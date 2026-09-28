@@ -286,7 +286,7 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, hu_agent_t *agent, const hu_co
                            hu_service_channel_t *ch, const char *batch_key, size_t key_len,
                            const char *combined, size_t combined_len, const char *response,
                            size_t response_len, const char *unshaped, size_t unshaped_len,
-                           int bth_hour) {
+                           int bth_hour, bool voice_first) {
     /* F1: a memo says the reply as written, not the copy text shaping styled
      * for iMessage (typos, lowercase quirks, "haha " fillers). */
     if (unshaped && unshaped_len > 0) {
@@ -300,6 +300,7 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, hu_agent_t *agent, const hu_co
     (void)combined;
     (void)combined_len;
     (void)bth_hour;
+    (void)voice_first;
     /* SHIELD parity: the text path runs moderation/crisis, companion safety and
      * claim hedging inside `if (!sent_voice …)` in daemon.c, so a voice memo would
      * skip all three. Decline voice unless every gate is clear; the caller then
@@ -348,10 +349,17 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, hu_agent_t *agent, const hu_co
 #if defined(HU_ENABLE_CARTESIA)
         if (voice_channel_ok && agent->persona && agent->persona->voice.voice_id[0] &&
             agent->persona->voice_messages.enabled) {
-            const char *vreason = NULL;
-            hu_voice_decision_t vdec = hu_voice_decision_classify_ex(
-                response, response_len, combined, combined_len, &agent->persona->voice_messages,
-                true, bth_hour, (uint32_t)(time(NULL) ^ (uintptr_t)combined), &vreason);
+            const char *vreason = "voice_first";
+            /* Voice-first LIVE already decided from what arrived, and the turn
+             * wrote a memo; the post-hoc classifier would judge it as a text.
+             * The safety gates above still ran. */
+            hu_voice_decision_t vdec =
+                voice_first
+                    ? HU_VOICE_SEND_VOICE
+                    : hu_voice_decision_classify_ex(response, response_len, combined, combined_len,
+                                                    &agent->persona->voice_messages, true, bth_hour,
+                                                    (uint32_t)(time(NULL) ^ (uintptr_t)combined),
+                                                    &vreason);
             if (vdec == HU_VOICE_SEND_VOICE) {
                 const char *cartesia_key = hu_config_get_provider_key(config, "cartesia");
                 if (cartesia_key && cartesia_key[0] &&

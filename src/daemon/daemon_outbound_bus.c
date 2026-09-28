@@ -320,7 +320,7 @@ bool hu_daemon_deliver_final_reply(const hu_daemon_final_reply_t *r) {
 
     if (hu_daemon_voice_reply(r->alloc, r->agent, r->config, r->ch, r->batch_key, r->key_len,
                               r->combined, r->combined_len, r->response, r->response_len,
-                              r->unshaped, r->unshaped_len, r->bth_hour)) {
+                              r->unshaped, r->unshaped_len, r->bth_hour, r->voice_first)) {
         if (r->turn && r->turn->typing_started && vt->stop_typing)
             (void)vt->stop_typing(cctx, r->batch_key, r->key_len);
         return true;
