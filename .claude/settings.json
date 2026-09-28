@@ -31,10 +31,11 @@
       "Bash(size *)"
     ],
     "deny": [
-      "Bash(rm -rf /)*",
-      "Bash(git push --force)*",
-      "Bash(git push -f)*",
-      "Bash(git reset --hard)*",
+      "Bash(rm -rf /)",
+      "Bash(rm -rf ~*)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git reset --hard*)",
       "Bash(*ANTHROPIC_API_KEY*)",
       "Bash(*sk-ant-*)",
       "Bash(*SECRET_KEY*)",
