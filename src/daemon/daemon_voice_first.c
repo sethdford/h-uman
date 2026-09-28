@@ -88,9 +88,10 @@ static bool prepend_directive(hu_allocator_t *alloc, char **ctx, size_t *ctx_len
 }
 
 void hu_daemon_voice_first_prepare(hu_allocator_t *alloc, struct hu_agent *agent,
-                                   const char *batch_key, size_t key_len, const char *inbound,
-                                   size_t inbound_len, char **convo_ctx, size_t *convo_ctx_len,
-                                   uint32_t *max_chars, hu_daemon_voice_first_t *out) {
+                                   const char *batch_key, size_t key_len, bool is_group,
+                                   const char *inbound, size_t inbound_len, char **convo_ctx,
+                                   size_t *convo_ctx_len, uint32_t *max_chars,
+                                   hu_daemon_voice_first_t *out) {
     if (!out)
         return;
     memset(out, 0, sizeof(*out));
@@ -102,19 +103,23 @@ void hu_daemon_voice_first_prepare(hu_allocator_t *alloc, struct hu_agent *agent
     hu_gate_mode_t mode = hu_gate_mode_from_env("HU_VOICE_FIRST", HU_GATE_OFF);
     if (mode == HU_GATE_OFF || !alloc || !agent || !agent->persona)
         return;
+    /* A memo goes to the sender's handle, not the group (review C1). */
+    if (is_group) {
+        out->reason = "group";
+        return;
+    }
     char contact[128];
     size_t n = batch_key ? (key_len < sizeof(contact) - 1 ? key_len : sizeof(contact) - 1) : 0;
     memcpy(contact, batch_key ? batch_key : "", n);
     contact[n] = '\0';
 
-    const char *gap_env = getenv("HU_VOICE_MIN_GAP_SEC");
     hu_voice_intent_facts_t facts = {
         .inbound = inbound,
         .inbound_len = inbound ? inbound_len : 0,
         .cfg = &agent->persona->voice_messages,
         .has_voice_id = agent->persona->voice.voice_id[0] != '\0',
         .secs_since_last_memo = secs_since_last_memo(agent, contact),
-        .min_gap_sec = (gap_env && gap_env[0]) ? (uint32_t)strtoul(gap_env, NULL, 10) : 10800u,
+        .min_gap_sec = hu_voice_intent_parse_gap(getenv("HU_VOICE_MIN_GAP_SEC")),
     };
     out->decision = hu_voice_intent_decide(&facts, &out->reason);
 

@@ -3,6 +3,7 @@
 #include "human/util/typedstream.h"
 
 #include <ctype.h>
+#include <stdlib.h>
 
 static bool any_word(const char *s, size_t n, const char *const *words, size_t count) {
     for (size_t i = 0; i < count; i++)
@@ -11,26 +12,7 @@ static bool any_word(const char *s, size_t n, const char *const *words, size_t c
     return false;
 }
 
-/* Quick "where/when" questions answer faster as text; a memo that says
- * "seven" is worse than the text "7". */
-static bool is_logistics(const char *s, size_t n) {
-    static const char *const w[] = {"what time", "where", "when", "address"};
-    return any_word(s, n, w, sizeof(w) / sizeof(w[0]));
-}
-
-static bool is_heartfelt(const char *s, size_t n) {
-    static const char *const w[] = {"love",     "miss",     "proud",       "sorry",      "worried",
-                                    "sad",      "upset",    "crying",      "lonely",     "scared",
-                                    "grateful", "congrats", "heartbroken", "passed away"};
-    return any_word(s, n, w, sizeof(w) / sizeof(w[0]));
-}
-
-/* Ends with '?' and long enough to be more than "you coming?". */
-static bool is_real_question(const char *s, size_t n) {
-    while (n > 0 && isspace((unsigned char)s[n - 1]))
-        n--;
-    if (n == 0 || s[n - 1] != '?')
-        return false;
+static size_t count_words(const char *s, size_t n) {
     size_t words = 0;
     bool in_word = false;
     for (size_t i = 0; i < n; i++) {
@@ -39,7 +21,55 @@ static bool is_real_question(const char *s, size_t n) {
             words++;
         in_word = w;
     }
-    return words >= 8;
+    return words;
+}
+
+static bool ends_with_question(const char *s, size_t n) {
+    while (n > 0 && isspace((unsigned char)s[n - 1]))
+        n--;
+    return n > 0 && s[n - 1] == '?';
+}
+
+/* A short "what time / where / when" question answers faster as text; a memo
+ * that says "seven" is worse than the text "7". Only a short question counts:
+ * "I cried when I heard" is not logistics (review I4). */
+static bool is_logistics(const char *s, size_t n) {
+    static const char *const w[] = {"what time", "where", "when", "address"};
+    return ends_with_question(s, n) && count_words(s, n) <= 12 &&
+           any_word(s, n, w, sizeof(w) / sizeof(w[0]));
+}
+
+/* Phrases, not bare "love"/"sorry": "I'd love to" and "sorry running late"
+ * are everyday texts, not moments (review I4). */
+static bool is_heartfelt(const char *s, size_t n) {
+    static const char *const w[] = {
+        "love you",    "miss you",    "i miss",      "proud of",        "so proud", "so sorry",
+        "i'm sorry",   "im sorry",    "sorry about", "worried",         "scared",   "lonely",
+        "heartbroken", "passed away", "congrats",    "congratulations", "crying",   "cried",
+        "upset",       "sad",         "grateful"};
+    return any_word(s, n, w, sizeof(w) / sizeof(w[0]));
+}
+
+/* Ends with '?' and long enough to be more than "you coming?". */
+static bool is_real_question(const char *s, size_t n) {
+    return ends_with_question(s, n) && count_words(s, n) >= 8;
+}
+
+bool hu_voice_intent_memo_shaped(const char *text, size_t len) {
+    if (!text)
+        return false;
+    size_t words = count_words(text, len);
+    return words >= 12 && words <= 110;
+}
+
+uint32_t hu_voice_intent_parse_gap(const char *env) {
+    if (!env || !env[0])
+        return 10800u;
+    char *end = NULL;
+    long v = strtol(env, &end, 10);
+    if (!end || *end != '\0' || v < 0 || v > 7 * 86400)
+        return 10800u;
+    return (uint32_t)v;
 }
 
 #define DECIDE(d, why)           \
@@ -60,13 +90,13 @@ hu_voice_decision_t hu_voice_intent_decide(const hu_voice_intent_facts_t *f,
     /* Answering audio with audio is reciprocity, so spacing does not apply. */
     if (hu_text_has_audio_transcription(s, n))
         DECIDE(HU_VOICE_SEND_VOICE, "they_sent_audio");
-    if (is_logistics(s, n))
-        DECIDE(HU_VOICE_SEND_TEXT, "logistics");
     if (f->min_gap_sec > 0 && f->secs_since_last_memo >= 0 &&
         f->secs_since_last_memo < (int64_t)f->min_gap_sec)
         DECIDE(HU_VOICE_SEND_TEXT, "spacing");
     if (is_heartfelt(s, n))
         DECIDE(HU_VOICE_SEND_VOICE, "heartfelt");
+    if (is_logistics(s, n))
+        DECIDE(HU_VOICE_SEND_TEXT, "logistics");
     if (is_real_question(s, n))
         DECIDE(HU_VOICE_SEND_VOICE, "question_worth_talking");
     DECIDE(HU_VOICE_SEND_TEXT, "no_trigger");

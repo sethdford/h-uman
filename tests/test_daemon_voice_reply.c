@@ -241,6 +241,8 @@ static bool run_rewrite_voice(const char *reply, const char *rewrite) {
 /* Voice-first memos (spec 2026-09-28): the persona's Cartesia arm, where the
  * post-hoc classifier lives. A memo-length reply to a question is TEXT to the
  * classifier ("incoming_question"); decided VOICE up front, it goes. */
+static const char *g_persona_reply; /* NULL = the memo below */
+
 static bool run_persona_voice(bool voice_first) {
     hu_allocator_t alloc = hu_system_allocator();
     static hu_persona_t persona;
@@ -272,7 +274,9 @@ static bool run_persona_voice(bool voice_first) {
         "know the team already. It's scary, but you'd regret not trying, you know. Call me "
         "tonight and we can talk it through.";
     return hu_daemon_voice_reply(&alloc, &agent, &config, &ch, "+15550000001", 12, inbound,
-                                 strlen(inbound), memo, strlen(memo), NULL, 0, 14, voice_first);
+                                 strlen(inbound), g_persona_reply ? g_persona_reply : memo,
+                                 strlen(g_persona_reply ? g_persona_reply : memo), NULL, 0, 14,
+                                 voice_first);
 }
 
 static void test_voice_reply_voice_first_skips_the_text_classifier(void) {
@@ -282,6 +286,18 @@ static void test_voice_reply_voice_first_skips_the_text_classifier(void) {
     HU_ASSERT_TRUE(run_persona_voice(true));
     HU_ASSERT_EQ(g_voice_sends, 1);
     HU_ASSERT_STR_CONTAINS(hu_cartesia_test_last_transcript(), "Call me tonight");
+}
+
+/* Review C2: the pre-decision holds only for a memo the turn produced. A slim
+ * retry ("Sounds good, talk soon.") goes back to the classifier, which keeps
+ * it as text for a question. */
+static void test_voice_reply_voice_first_needs_a_memo(void) {
+    g_voice_sends = 0;
+    g_persona_reply = "Sounds good, talk soon.";
+    bool sent = run_persona_voice(true);
+    g_persona_reply = NULL;
+    HU_ASSERT_FALSE(sent);
+    HU_ASSERT_EQ(g_voice_sends, 0);
 }
 
 /* F2-voice direction (spec 2026-09-27): the model performs the line. */
@@ -502,6 +518,7 @@ void run_daemon_voice_reply_tests(void) {
     HU_RUN_TEST(test_voice_reply_rewrite_skipped_when_no_memo_can_go);
     HU_RUN_TEST(test_voice_reply_speaks_the_directed_line);
     HU_RUN_TEST(test_voice_reply_voice_first_skips_the_text_classifier);
+    HU_RUN_TEST(test_voice_reply_voice_first_needs_a_memo);
     HU_RUN_TEST(test_voice_reply_opener_gate_strips_the_repeat);
     HU_RUN_TEST(test_voice_reply_invalid_direction_speaks_plain_text);
     HU_RUN_TEST(test_voice_reply_direction_shadow_speaks_plain_text);

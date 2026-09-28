@@ -8,6 +8,7 @@
 #include "human/agent.h"
 #include "human/config.h"
 #include "human/context/voice_decision.h"
+#include "human/context/voice_intent.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/log.h"
@@ -354,7 +355,7 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, hu_agent_t *agent, const hu_co
              * wrote a memo; the post-hoc classifier would judge it as a text.
              * The safety gates above still ran. */
             hu_voice_decision_t vdec =
-                voice_first
+                (voice_first && hu_voice_intent_memo_shaped(response, response_len))
                     ? HU_VOICE_SEND_VOICE
                     : hu_voice_decision_classify_ex(response, response_len, combined, combined_len,
                                                     &agent->persona->voice_messages, true, bth_hour,

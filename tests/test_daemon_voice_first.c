@@ -16,6 +16,8 @@ typedef struct {
     hu_daemon_voice_first_t vf;
 } vf_run_t;
 
+static bool g_group;
+
 static void run(const char *mode, const char *allow, const char *inbound, vf_run_t *r) {
     hu_allocator_t alloc = hu_system_allocator();
     static hu_persona_t persona;
@@ -38,8 +40,8 @@ static void run(const char *mode, const char *allow, const char *inbound, vf_run
     r->ctx = alloc.alloc(alloc.ctx, r->ctx_len + 1);
     memcpy(r->ctx, base, r->ctx_len + 1);
     r->max_chars = 200;
-    hu_daemon_voice_first_prepare(&alloc, &agent, "+15550000001", 12, inbound, strlen(inbound),
-                                  &r->ctx, &r->ctx_len, &r->max_chars, &r->vf);
+    hu_daemon_voice_first_prepare(&alloc, &agent, "+15550000001", 12, g_group, inbound,
+                                  strlen(inbound), &r->ctx, &r->ctx_len, &r->max_chars, &r->vf);
     unsetenv("HU_VOICE_FIRST");
     unsetenv("HU_VOICE_DELIVERY_ONLY");
 }
@@ -101,9 +103,21 @@ static void test_voice_first_live_without_a_trigger_stays_text(void) {
     done(&r);
 }
 
+static void test_voice_first_stands_down_in_group_chats(void) {
+    vf_run_t r;
+    g_group = true;
+    run("live", "+15550000001", "I'm so proud of you", &r);
+    g_group = false;
+    HU_ASSERT_FALSE(r.vf.memo);
+    HU_ASSERT_STR_EQ(r.vf.reason, "group");
+    HU_ASSERT_EQ(r.max_chars, 200);
+    done(&r);
+}
+
 void run_daemon_voice_first_tests(void) {
     HU_TEST_SUITE("daemon voice-first memos");
     HU_RUN_TEST(test_voice_first_off_changes_nothing);
+    HU_RUN_TEST(test_voice_first_stands_down_in_group_chats);
     HU_RUN_TEST(test_voice_first_live_writes_a_memo_for_family);
     HU_RUN_TEST(test_voice_first_live_leaves_others_as_text);
     HU_RUN_TEST(test_voice_first_shadow_decides_but_writes_text);

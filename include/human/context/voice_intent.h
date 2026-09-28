@@ -25,6 +25,13 @@ typedef struct {
 /* Reason is one of "no_voice_id", "disabled", "they_sent_audio", "logistics",
  * "spacing", "heartfelt", "question_worth_talking", "no_trigger" (static,
  * never NULL when out_reason is non-NULL). */
+/* A memo the turn actually produced: 12-110 words (Seth's memos run 47-58;
+ * 110 words is ~42 s). A slim retry or canned fallback is not one. */
+bool hu_voice_intent_memo_shaped(const char *text, size_t len);
+
+/* HU_VOICE_MIN_GAP_SEC: a non-negative integer, else the 3 h default. */
+uint32_t hu_voice_intent_parse_gap(const char *env);
+
 hu_voice_decision_t hu_voice_intent_decide(const hu_voice_intent_facts_t *f,
                                            const char **out_reason);
 

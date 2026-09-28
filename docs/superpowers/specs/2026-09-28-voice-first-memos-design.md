@@ -76,13 +76,18 @@ out: HU_VOICE_SEND_VOICE | HU_VOICE_SEND_TEXT, reason
 
 | order | rule | result |
 |---|---|---|
+| 0 | group chat (a memo would go to the sender's handle, not the group) | TEXT `group` |
 | 1 | no voice id / voice_messages disabled | TEXT `no_voice_id` / `disabled` |
 | 2 | inbound carries `[Audio transcription: ` | VOICE `they_sent_audio` (spacing does not apply: answering audio with audio is reciprocity) |
-| 3 | inbound is logistics (what time / where / when / address, word-boundary) | TEXT `logistics` |
-| 4 | last memo to this contact < `HU_VOICE_MIN_GAP_SEC` (default 10800 = 3 h) | TEXT `spacing` |
-| 5 | inbound heartfelt (word-boundary: love, miss, proud, sorry, worried, sad, upset, crying, lonely, scared, grateful, congrats, heartbroken, passed away) | VOICE `heartfelt` |
+| 3 | last memo to this contact < `HU_VOICE_MIN_GAP_SEC` (default 10800 = 3 h; invalid values fall back to it) | TEXT `spacing` |
+| 4 | inbound heartfelt — phrases, not bare words: love you, miss you, I miss, proud of, so proud, so sorry, I'm sorry, sorry about, worried, scared, lonely, heartbroken, passed away, congrats, congratulations, crying, cried, upset, sad, grateful | VOICE `heartfelt` |
+| 5 | a short (≤ 12 words) question about what time / where / when / address | TEXT `logistics` |
 | 6 | inbound ends with `?` and is ≥ 8 words | VOICE `question_worth_talking` |
 | 7 | otherwise | TEXT `no_trigger` |
+
+Review 2026-09-28 changed the first draft: heartfelt used bare "love"/"sorry"
+("sorry running late" became a memo) and logistics ran first, so "I miss you,
+when are you home?" and "I cried when I heard" went as text.
 
 Word-boundary matching throughout (`substring-classifier-pitfalls`:
 "unloved"/"missed the bus" style overlaps are accepted risks of a keyword v1;
@@ -124,6 +129,17 @@ The memo directive (exact text in `src/daemon/daemon_voice_first.c`):
 
 The same anti-cheese rules go into the D1 performance prompt
 (`speech_perform.c` k_cast) so directed memos don't add them back.
+
+Things that would shrink a memo back to a text are off for memo turns
+(review C2/I1/I2): the G5 length-anomaly guard (via `agent->voice_memo_turn`;
+it rejected anything over 6x Seth's ~34-char texting average and logged the
+memo as a DPO negative), the quality retry ("tighten up significantly"), the
+Turing retry, best-of-N, and burst messaging. And a pre-decided memo is voiced
+only if the turn produced one (12-110 words); a slim retry or canned fallback
+goes back to the post-hoc classifier. A memo that ends up as text is logged
+(`voice_first: memo went as text`).
+
+A group reply is never voiced by the outbound bus, voice-first or not.
 
 Duration check in the post-hoc classifier becomes word-based (2.6 words/s,
 Seth's 155 wpm) instead of `chars / 5`.

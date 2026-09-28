@@ -45,8 +45,8 @@ static void test_voice_intent_answers_audio_with_audio_even_inside_the_gap(void)
 }
 
 static void test_voice_intent_keeps_logistics_as_text(void) {
-    HU_ASSERT_STR_EQ(decide("what time should I come over, I miss you guys", -1), "logistics");
-    HU_ASSERT_STR_EQ(decide("wherever you want is fine, I love that place", -1), "heartfelt");
+    HU_ASSERT_STR_EQ(decide("what time should I come over?", -1), "logistics");
+    HU_ASSERT_STR_EQ(decide("wherever you want is fine", -1), "no_trigger");
 }
 
 static void test_voice_intent_spaces_memos_to_one_person(void) {
@@ -67,6 +67,45 @@ static void test_voice_intent_talks_through_real_questions_only(void) {
     HU_ASSERT_STR_EQ(decide("you coming?", -1), "no_trigger");
 }
 
+/* Review C2: a pre-decided memo is voiced only if the turn produced a memo —
+ * a slim retry or a canned fallback goes back to the text classifier. */
+static void test_voice_intent_memo_shape(void) {
+    const char *slim = "Sounds good, talk soon.";
+    HU_ASSERT_FALSE(hu_voice_intent_memo_shaped(slim, strlen(slim)));
+    const char *memo = "Honestly I have been thinking about it all day, and I think you should "
+                       "go for it, it is scary but you would regret not trying.";
+    HU_ASSERT_TRUE(hu_voice_intent_memo_shaped(memo, strlen(memo)));
+    char rambling[1400] = "";
+    for (int i = 0; i < 115; i++)
+        strcat(rambling, i ? " word" : "word");
+    HU_ASSERT_FALSE(hu_voice_intent_memo_shaped(rambling, strlen(rambling)));
+}
+
+/* Review I4: everyday uses of the heartfelt words are not moments. */
+static void test_voice_intent_ignores_everyday_love_and_sorry(void) {
+    HU_ASSERT_STR_EQ(decide("sorry running late", -1), "no_trigger");
+    HU_ASSERT_STR_EQ(decide("I'd love to, count me in", -1), "no_trigger");
+    HU_ASSERT_STR_EQ(decide("love that place", -1), "no_trigger");
+    HU_ASSERT_STR_EQ(decide("love you so much", -1), "heartfelt");
+    HU_ASSERT_STR_EQ(decide("I'm so sorry about your dad", -1), "heartfelt");
+}
+
+/* Review I4: "when"/"where" in a real moment is not logistics. */
+static void test_voice_intent_logistics_is_a_short_question(void) {
+    HU_ASSERT_STR_EQ(decide("I miss you, when are you home?", -1), "heartfelt");
+    HU_ASSERT_STR_EQ(decide("I cried when I heard the news", -1), "heartfelt");
+    HU_ASSERT_STR_EQ(decide("where are you guys?", -1), "logistics");
+}
+
+static void test_voice_intent_gap_parse_rejects_nonsense(void) {
+    HU_ASSERT_EQ(hu_voice_intent_parse_gap(NULL), 10800u);
+    HU_ASSERT_EQ(hu_voice_intent_parse_gap(""), 10800u);
+    HU_ASSERT_EQ(hu_voice_intent_parse_gap("-1"), 10800u);
+    HU_ASSERT_EQ(hu_voice_intent_parse_gap("soon"), 10800u);
+    HU_ASSERT_EQ(hu_voice_intent_parse_gap("0"), 0u);
+    HU_ASSERT_EQ(hu_voice_intent_parse_gap("3600"), 3600u);
+}
+
 void run_voice_intent_tests(void) {
     HU_TEST_SUITE("voice intent (voice-first memos)");
     HU_RUN_TEST(test_voice_intent_needs_a_voice_and_the_feature);
@@ -75,4 +114,8 @@ void run_voice_intent_tests(void) {
     HU_RUN_TEST(test_voice_intent_spaces_memos_to_one_person);
     HU_RUN_TEST(test_voice_intent_heartfelt_is_whole_words);
     HU_RUN_TEST(test_voice_intent_talks_through_real_questions_only);
+    HU_RUN_TEST(test_voice_intent_memo_shape);
+    HU_RUN_TEST(test_voice_intent_ignores_everyday_love_and_sorry);
+    HU_RUN_TEST(test_voice_intent_logistics_is_a_short_question);
+    HU_RUN_TEST(test_voice_intent_gap_parse_rejects_nonsense);
 }
