@@ -85,7 +85,7 @@ gh api -X PUT repos/sethdford/h-uman/branches/main/protection \
   --input - <<'JSON'
 {
   "required_status_checks": {
-    "strict": true,
+    "strict": false,
     "checks": [
       {"context": "build-and-test (ubuntu-latest)"},
       {"context": "build-and-test (macos-latest)"},
@@ -131,6 +131,15 @@ row's args change, re-read the real names before editing protection:
 The `enforce_admins: false` and `required_pull_request_reviews: null`
 keep the gate functional for a solo developer while still preventing
 merges with red CI. Tighten when team grows.
+
+`strict: false` matches live protection (read 2026-09-27 with
+`gh api repos/sethdford/h-uman/branches/main/protection --jq .required_status_checks.strict`).
+A PR does not have to be up to date with `main` to merge: once its own
+required checks pass it can land even if `main` has moved. So "behind main"
+is never a merge blocker by itself. Update a branch when it has conflicts or
+needs a fix that landed on `main`, not just to catch up, because every update
+restarts CI. The cost is that the merged combination is first tested by
+`main`'s own run, not before merge.
 
 ## When a Tier-1 check is genuinely broken on main
 
