@@ -207,6 +207,14 @@ hu_error_t hu_voice_record_send(const hu_voice_record_port_t *p,
     facts.min_idle_sec = req->min_idle_sec;
     out->stage = HU_VREC_STAGE_PREFLIGHT;
     out->block = hu_voice_record_preflight(&facts);
+    /* A patient request (the owner's self-test) waits for the user to step
+     * away rather than falling back at once; nothing is touched meanwhile. */
+    while (out->block == HU_VREC_USER_ACTIVE && out->idle_waited_ms < req->idle_wait_ms) {
+        p->sleep_ms(p->ctx, HU_VREC_IDLE_POLL_MS);
+        out->idle_waited_ms += HU_VREC_IDLE_POLL_MS;
+        facts.user_idle_sec = p->idle_sec(p->ctx);
+        out->block = hu_voice_record_preflight(&facts);
+    }
     /* The wrong-recipient guard's reference: the name Messages itself shows for
      * the target. Without it the open chat cannot be confirmed — never record. */
     char expected[256] = {0};
@@ -331,6 +339,13 @@ void hu_voice_record_request_from_env(const char *handle, size_t handle_len, con
     const char *idle = getenv("HU_VOICE_MIN_IDLE_SEC");
     out->min_idle_sec = (idle && idle[0]) ? atof(idle) : 20.0;
     out->seed = seed;
+    /* handle_allowed treats an empty list as "everyone"; here it means no one. */
+    const char *patient = getenv("HU_VOICE_IDLE_WAIT_HANDLES");
+    if (patient && patient[0] && hu_voice_record_handle_allowed(patient, handle, handle_len)) {
+        const char *wait = getenv("HU_VOICE_IDLE_WAIT_SEC");
+        double sec = (wait && wait[0]) ? atof(wait) : 90.0;
+        out->idle_wait_ms = sec > 0.0 && sec < 600.0 ? (uint32_t)(sec * 1000.0) : 0;
+    }
 }
 
 hu_error_t hu_voice_record_send_from_env(const char *handle, size_t handle_len,

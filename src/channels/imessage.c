@@ -2581,8 +2581,8 @@ imsg_media:
                     hu_log_error("imessage", NULL,
                                  "voice record: default input NOT restored to the real mic");
                 hu_log_info("imessage", NULL,
-                            "voice delivered via Messages: verified=%d restored=%d",
-                            vres.verified ? 1 : 0, vres.restored ? 1 : 0);
+                            "voice delivered via Messages: verified=%d restored=%d waited_ms=%u",
+                            vres.verified ? 1 : 0, vres.restored ? 1 : 0, vres.idle_waited_ms);
                 imessage_report_sent(tgt, tgt_len, NULL, 0, HU_IMESSAGE_SENT_KIND_MEDIA,
                                      vres.prior_max_rowid);
                 goto imsg_cleanup;
@@ -2594,9 +2594,10 @@ imsg_media:
                 hu_log_error("imessage", NULL,
                              "voice record: Cancel failed — a recording may be left in Messages");
             hu_log_info("imessage", NULL,
-                        "voice record fell back to attachment: block=%s stage=%d reason=%s",
+                        "voice record fell back to attachment: block=%s stage=%d reason=%s "
+                        "waited_ms=%u",
                         hu_voice_record_block_name(vres.block), (int)vres.stage,
-                        vres.abort_reason ? vres.abort_reason : "-");
+                        vres.abort_reason ? vres.abort_reason : "-", vres.idle_waited_ms);
         }
     }
     /* Voice-first memos (spec 2026-09-28): a memo that was not recorded

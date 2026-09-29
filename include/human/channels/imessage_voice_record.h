@@ -35,6 +35,7 @@
  * silently ignored (live test 2026-09-27). Distinct from the lead-in/tail
  * ranges (<= 900 ms). */
 #define HU_VREC_SEND_SETTLE_MS 1000u
+#define HU_VREC_IDLE_POLL_MS   2000u /* a patient request re-checks idle this often */
 
 typedef enum {
     HU_VOICE_DELIVERY_ATTACHMENT = 0,
@@ -153,6 +154,9 @@ typedef struct {
     const char *real_mic; /* HU_VOICE_REAL_INPUT: the input to restore, always */
     double min_idle_sec;
     uint32_t seed;
+    /* > 0: when the user is active, poll up to this long for them to step away
+     * before giving up (HU_VOICE_IDLE_WAIT_HANDLES: the owner's self-tests). */
+    uint32_t idle_wait_ms;
 } hu_voice_record_request_t;
 
 typedef enum {
@@ -174,6 +178,7 @@ typedef struct {
     bool cancel_failed;            /* a recording may be left in the compose bar */
     const char *abort_reason;      /* static: wrong_chat, user_returned, send_unconfirmed, ... */
     int64_t prior_max_rowid;
+    uint32_t idle_waited_ms; /* time spent waiting for the user to step away */
 } hu_voice_record_result_t;
 
 /* HU_OK: the memo left (see out->verified; never re-send on !verified).
