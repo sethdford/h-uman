@@ -80,6 +80,7 @@
 #include "human/daemon/intelligence_facade.h"
 #include "human/daemon/memory_facade.h"
 #include "human/daemon/ml_facade.h"
+#include "human/daemon/name_catch.h"
 #include "human/daemon/persona_facade.h"
 #include "human/daemon/platform_facade.h"
 #include "human/daemon/promise_keeper.h"
@@ -8277,6 +8278,14 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                          batch_key, key_len, combined, combined_len,
                                                          response, response_len);
                 }
+#ifndef HU_IS_TEST
+                /* Name catcher (spec 2026-09-29 §4.2): each raw inbound text, never the reply. */
+                if (err == HU_OK && response && response_len > 0 && graph &&
+                    !msgs[batch_start].is_group)
+                    for (size_t b = batch_start; b <= batch_end; b++)
+                        hu_daemon_name_catch_tick(alloc, graph, batch_key, key_len, msgs[b].content,
+                                                  strlen(msgs[b].content));
+#endif
 
 #ifdef HU_ENABLE_SQLITE
                 /* Task 18: Extraction pipeline — post-turn storage */
