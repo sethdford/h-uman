@@ -22,7 +22,6 @@ void run_agent_modules_tests(void);
 void run_agent_definition_tests(void);
 void run_agent_git_tests(void);
 void run_agent_app_config_tests(void);
-void run_task_store_tests(void);
 void run_compaction_hierarchical_tests(void);
 void run_tot_recursive_tests(void);
 void run_agent_subsystems_tests(void);
@@ -69,7 +68,6 @@ void run_oauth_tests(void);
 void run_security_tests(void);
 void run_normalize_tests(void);
 void run_sensitivity_tests(void);
-void run_vault_aead_tests(void);
 void run_app_bundle_structure_tests(void);
 void run_pkg_builder_tests(void);
 void run_install_docs_tests(void);
@@ -330,7 +328,6 @@ void run_memory_engines_ext_tests(void);
 void run_memory_poisoning_tests(void);
 void run_runtime_tests(void);
 void run_runtime_bundle_tests(void);
-void run_channel_loop_tests(void);
 void run_util_modules_tests(void);
 void run_roadmap_tests(void);
 void run_new_features_tests(void);
@@ -533,7 +530,6 @@ void run_m3_frontier_mlx_dispatch_tests(void);
  * internal-#ifdef-wrap-with-stub-runner pattern so the runner symbol
  * resolves in both HU_ENABLE_SELF_MODEL=ON and =OFF builds. */
 void run_self_model_behavior_log_tests(void);
-void run_action_directives_tests(void);
 /* Spec 2026-05-19 self-model-scaffold — Phases B/C/D/E. Same gate
  * pattern as Phase A (stub runner under HU_ENABLE_SELF_MODEL=OFF). */
 void run_self_model_phase_bcde_tests(void);
@@ -781,7 +777,6 @@ void run_anti_sycophancy_tests(void);
 void run_mutual_tom_tests(void);
 void run_opinion_history_tests(void);
 void run_self_improve_loop_tests(void);
-void run_a2a_tests(void);
 void run_gvr_tests(void);
 void run_provider_degradation_tests(void);
 void run_apple_provider_tests(void);
@@ -911,7 +906,6 @@ void run_daemon_director_tests(void);
 void run_daemon_proactive_feed_scope_tests(void);
 #endif
 void run_daemon_trust_tests(void);
-void run_cp_tasks_tests(void);
 void run_cp_canvas_tests(void);
 void run_anticipatory_state_tests(void);
 void run_canvas_tool_tests(void);
@@ -1127,7 +1121,6 @@ int main(int argc, char **argv) {
     run_agent_definition_tests();
     run_agent_git_tests();
     run_agent_app_config_tests();
-    run_task_store_tests();
     run_compaction_hierarchical_tests();
     run_tot_recursive_tests();
     run_agent_subsystems_tests();
@@ -1174,7 +1167,6 @@ int main(int argc, char **argv) {
     run_security_tests();
     run_normalize_tests();
     run_sensitivity_tests();
-    run_vault_aead_tests();
     run_app_bundle_structure_tests();
     run_pkg_builder_tests();
     run_install_docs_tests();
@@ -1402,7 +1394,6 @@ int main(int argc, char **argv) {
     run_memory_poisoning_tests();
     run_runtime_tests();
     run_runtime_bundle_tests();
-    run_channel_loop_tests();
     run_util_modules_tests();
     run_roadmap_tests();
     run_new_features_tests();
@@ -1600,7 +1591,6 @@ int main(int argc, char **argv) {
     run_m3_frontier_mlx_dispatch_tests();
     /* Spec 2026-05-19 self-model-scaffold — runs in both flag variants. */
     run_self_model_behavior_log_tests();
-    run_action_directives_tests();
     run_self_model_phase_bcde_tests();
 #ifdef HU_ENABLE_LEARNING
     run_w16_evaluation_tests();
@@ -1827,7 +1817,6 @@ int main(int argc, char **argv) {
     run_mutual_tom_tests();
     run_opinion_history_tests();
     run_self_improve_loop_tests();
-    run_a2a_tests();
     run_gvr_tests();
     run_provider_degradation_tests();
     run_apple_provider_tests();
@@ -1960,7 +1949,6 @@ int main(int argc, char **argv) {
     run_daemon_proactive_feed_scope_tests();
 #endif
     run_daemon_trust_tests();
-    run_cp_tasks_tests();
     run_cp_canvas_tests();
     run_background_registry_tests();
     run_consistency_tests();

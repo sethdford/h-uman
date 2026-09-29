@@ -52,7 +52,6 @@
 #include "human/eval/eval_gate.h"
 #include "human/eval/leaderboard.h"
 #endif
-#include "human/agent/action_directives.h"
 #include "human/agent/prompt_budget.h"
 #include "human/agent/training_data_runner.h"
 #include "human/agent/training_runner_shared.h"
@@ -5837,54 +5836,6 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 alloc->free(alloc->ctx, tom_ctx, tom_ctx_len + 1);
                         }
                     }
-#ifdef HU_ENABLE_ACTION_LAYERS
-                    /* Spec 2026-05-24-action-layers: append drift + clarify
-                     * directives to convo_ctx when their conditions are met.
-                     * Both functions are no-ops when their source tables are
-                     * empty or thresholds unmet — costs ~2 SQLite SELECTs
-                     * per turn at the worst. */
-                    {
-                        struct sqlite3 *al_db = hu_sqlite_memory_get_db(agent->memory);
-                        char al_drift[HU_ACTION_DIRECTIVE_MAX_LEN];
-                        char al_clarify[HU_ACTION_DIRECTIVE_MAX_LEN];
-                        size_t al_drift_n =
-                            hu_action_directive_drift(al_db, al_drift, sizeof(al_drift));
-                        struct timespec al_ts;
-                        clock_gettime(CLOCK_REALTIME, &al_ts);
-                        int64_t al_now_ms =
-                            (int64_t)al_ts.tv_sec * 1000 + (int64_t)al_ts.tv_nsec / 1000000;
-                        size_t al_clarify_n = hu_action_directive_clarify(
-                            al_db, batch_key, key_len, batch_key, key_len, al_now_ms, al_clarify,
-                            sizeof(al_clarify));
-                        size_t al_total = al_drift_n + al_clarify_n;
-                        if (al_total > 0) {
-                            size_t new_total = convo_ctx_len + al_total + 4;
-                            char *new_buf = (char *)alloc->alloc(alloc->ctx, new_total);
-                            if (new_buf) {
-                                size_t off = 0;
-                                if (convo_ctx) {
-                                    memcpy(new_buf, convo_ctx, convo_ctx_len);
-                                    off = convo_ctx_len;
-                                    new_buf[off++] = '\n';
-                                }
-                                if (al_drift_n > 0) {
-                                    memcpy(new_buf + off, al_drift, al_drift_n);
-                                    off += al_drift_n;
-                                    new_buf[off++] = '\n';
-                                }
-                                if (al_clarify_n > 0) {
-                                    memcpy(new_buf + off, al_clarify, al_clarify_n);
-                                    off += al_clarify_n;
-                                }
-                                new_buf[off] = '\0';
-                                if (convo_ctx)
-                                    alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
-                                convo_ctx = new_buf;
-                                convo_ctx_len = off;
-                            }
-                        }
-                    }
-#endif
 #ifdef HU_ENABLE_SQLITE
                     if (unmet_exps)
                         hu_tom_persisted_expectations_free(alloc, unmet_exps, unmet_count);

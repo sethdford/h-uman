@@ -152,7 +152,6 @@ endif()
 # latency) into a ring buffer for later aggregation. Defaults OFF so it ships
 # behind a flag while we tune what's useful (per AC-SM-6 zero-cost-off).
 option(HU_ENABLE_SELF_MODEL "Build agent behavioral self-model (per-turn observation ring buffer)" OFF)
-option(HU_ENABLE_ACTION_LAYERS "Inject drift + TOM-clarification directives into per-turn prompts (Spec 2026-05-24)" OFF)
 option(HU_ENABLE_FEEDS "Build feed ingestion and research agent" OFF)
 option(HU_ENABLE_SOCIAL "Build social feed ingestion (Facebook, Instagram)" OFF)
 option(HU_ENABLE_EMBEDDED_MODEL "Enable embedded model provider (llama.cpp/llama-cli)" OFF)
@@ -584,7 +583,6 @@ set(HU_CORE_SOURCES
     src/util/json_util.c
     src/agent/bus.c
     src/agent/session.c
-    src/channels/channel_loop.c
     src/security/auth.c
     src/observability/heartbeat.c
     src/core/accel.c
@@ -705,7 +703,6 @@ set(HU_CORE_SOURCES
     src/security/arg_inspector.c
     src/security/pairing.c
     src/security/secrets.c
-    src/security/vault_aead.c
     src/security/audit.c
     src/security/delegation.c
     src/security/noop_sandbox.c
@@ -743,7 +740,6 @@ set(HU_CORE_SOURCES
     src/gateway/cp_mcp.c
     src/gateway/cp_security.c
     src/gateway/cp_canvas.c
-    src/gateway/cp_tasks.c
     src/gateway/mcp_context.c
     src/agent/prompt_cache.c
     src/agent/agent_comm.c
@@ -797,7 +793,6 @@ set(HU_CORE_SOURCES
     src/agent/team.c
     src/agent/mailbox.c
     src/agent/task_list.c
-    src/agent/task_store.c
     src/agent/profile.c
     src/agent/planner.c
     src/agent/plan_executor.c
@@ -1077,7 +1072,6 @@ set(HU_CORE_SOURCES
     # Per AC-SM-6 (zero-cost when OFF) the stub bodies are bare returns.
     src/agent/self_model.c
     src/memory/repos/self_model_repo_sqlite.c
-    src/agent/action_directives.c
     # US-7.5: nightly LoRA retrain runner (MLX-Gemma subprocess path).
     # Always compiled (no learner dependency) — sibling to lora_training_runner.c.
     src/ml/lora_retrain_runner.c
@@ -1389,7 +1383,6 @@ list(APPEND HU_CORE_SOURCES src/daemon/daemon_reflection_tick.c)
 
 # SOTA capabilities
 list(APPEND HU_CORE_SOURCES
-    src/agent/a2a.c
     src/eval/eval.c
     src/eval/shape.c
     src/eval/register.c
@@ -2184,9 +2177,6 @@ endif()
 if(HU_ENABLE_SELF_MODEL)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_SELF_MODEL=1)
 endif()
-if(HU_ENABLE_ACTION_LAYERS)
-    target_compile_definitions(human_core PRIVATE HU_ENABLE_ACTION_LAYERS=1)
-endif()
 if(HU_ENABLE_NEURAL_MEMORY)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_NEURAL_MEMORY=1)
 endif()
@@ -2805,9 +2795,6 @@ endif()
 if(HU_ENABLE_SELF_MODEL)
     target_compile_definitions(human PRIVATE HU_ENABLE_SELF_MODEL=1)
 endif()
-if(HU_ENABLE_ACTION_LAYERS)
-    target_compile_definitions(human PRIVATE HU_ENABLE_ACTION_LAYERS=1)
-endif()
 if(HU_ENABLE_CRON)
     target_compile_definitions(human PRIVATE HU_HAS_CRON=1)
 endif()
@@ -3177,9 +3164,6 @@ endif()
 if(HU_ENABLE_SELF_MODEL)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_SELF_MODEL=1)
 endif()
-if(HU_ENABLE_ACTION_LAYERS)
-    target_compile_definitions(human_core_test PRIVATE HU_ENABLE_ACTION_LAYERS=1)
-endif()
 if(HU_ENABLE_NEURAL_MEMORY)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_NEURAL_MEMORY=1)
 endif()
@@ -3360,7 +3344,7 @@ endif()
 set(HU_DEVLIB_SOURCES
     # Channel SDK surface. channel_manager.c is documented public API
     # (docs/api/channels.md, sdk/README.md, sdk/templates/channel/) — the
-    # daemon drives channels through channel_loop.c instead, but the SDK
+    # daemon drives each channel's poll itself, but the SDK
     # contract is pinned by tests/test_sdk_channel_template.c.
     src/channels/channel_manager.c
     # Fan-out helper over hu_channel_t. Was ALL_CHANNELS-gated in
@@ -3514,7 +3498,6 @@ set(HU_TEST_SOURCES
     tests/test_mcp_http_integration.c
     tests/test_self_improve.c
     tests/test_sycophancy_guard.c
-    tests/test_task_store.c
     tests/test_trust_calibration.c
     tests/test_vision_ocr.c
     tests/test_channel_embeds.c
@@ -3569,7 +3552,6 @@ set(HU_TEST_SOURCES
     tests/test_auth.c
     tests/test_security.c
     tests/test_sensitivity.c
-    tests/test_vault_aead.c
     tests/test_app_bundle_structure.c
     tests/test_pkg_builder.c
     tests/test_install_docs.c
@@ -3583,7 +3565,6 @@ set(HU_TEST_SOURCES
     tests/test_channel_format.c
     tests/test_channel_behavior_class.c
     tests/test_channel_rate_limit.c
-    tests/test_cp_tasks.c
     tests/test_cp_canvas.c
     tests/test_background_registry.c
     tests/test_anticipatory_state.c
@@ -3648,7 +3629,6 @@ set(HU_TEST_SOURCES
     tests/test_path_security.c
     tests/test_process_util.c
     tests/test_cron.c
-    tests/test_channel_loop.c
     tests/test_multimodal.c
     tests/test_multimodal_pipeline.c
     tests/test_multimodal_audio.c
@@ -3837,7 +3817,6 @@ tests/test_imessage_action_telemetry.c
     # so it links cleanly in both build variants per
     # `.claude/rules/test-source-gate-symmetry.md`.
     tests/test_self_model_behavior_log.c
-    tests/test_action_directives.c
     # Spec 2026-05-19 self-model-scaffold — Phases B/C/D/E. Same
     # internal-#ifdef-wrap-with-stub-runner pattern as Phase A above.
     tests/test_self_model_phase_bcde.c
@@ -4214,7 +4193,6 @@ list(APPEND HU_TEST_SOURCES
     tests/test_provider_degradation.c
     tests/test_apple_provider.c
     tests/test_escalate.c
-    tests/test_a2a.c
     tests/test_eval.c
     tests/test_turing_score.c
     tests/test_turing_adversarial.c
@@ -4582,9 +4560,6 @@ if(HU_ENABLE_LEARNING)
 endif()
 if(HU_ENABLE_SELF_MODEL)
     target_compile_definitions(human_tests PRIVATE HU_ENABLE_SELF_MODEL=1)
-endif()
-if(HU_ENABLE_ACTION_LAYERS)
-    target_compile_definitions(human_tests PRIVATE HU_ENABLE_ACTION_LAYERS=1)
 endif()
 # Phase 1 (RL SOTA) — propagate HU_ENABLE_LLAMACPP into the test build so
 # .c sources can gate stub-only assertions with #if !defined(HU_ENABLE_LLAMACPP).
