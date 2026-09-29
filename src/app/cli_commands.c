@@ -506,12 +506,46 @@ static void memory_search_print_and_free(hu_allocator_t *alloc, hu_retrieval_res
     hu_retrieval_result_free(alloc, res);
 }
 
-/* human memory ground <contact> <message> — run the production grounding
- * composer against the graph and report matched entities + context bytes.
- * This is the proof probe for the backfill: matched > 0 on a message about a
- * known fact means the graph can reach it. */
+bool hu_cli_parse_ground_args(int argc, char **argv, const char **contact_out, const char **msg_out,
+                              bool *full_out) {
+    *contact_out = NULL;
+    *msg_out = NULL;
+    *full_out = false;
+    if (!argv || argc < 5)
+        return false;
+    int i = 3;
+    if (argv[3] && strcmp(argv[3], "--full") == 0) {
+        *full_out = true;
+        i = 4;
+    }
+    if (argc < i + 2 || !argv[i] || !argv[i + 1] || !argv[i][0])
+        return false;
+    *contact_out = argv[i];
+    *msg_out = argv[i + 1];
+    return true;
+}
+
+void hu_cli_memory_ground_emit(FILE *out, bool full, size_t matched,
+                               const hu_graph_ground_turn_stats_t *stats, const char *ctx,
+                               size_t ctx_len) {
+    if (!out)
+        return;
+    if (full && stats)
+        fprintf(out, "matched=%zu bytes=%zu fallback=%d self=%d names=%zu\n",
+                stats->matched_entities, ctx_len, stats->via_fallback ? 1 : 0,
+                stats->via_self ? 1 : 0, stats->typed_names);
+    else
+        fprintf(out, "matched=%zu bytes=%zu\n", matched, ctx_len);
+    if (ctx && ctx_len)
+        fprintf(out, "%.*s\n", (int)ctx_len, ctx);
+}
+
+/* human memory ground [--full] <contact> <message> — the proof probe.
+ * Plain: lexical compose only (the 2026-09-01 backfill probe). --full: the
+ * live turn's composition (hu_graph_ground_compose_turn) under the SAME env
+ * gates, so scripts/eval_name_grounding.py measures the real path. */
 static hu_error_t memory_ground_probe(hu_allocator_t *alloc, hu_memory_t *mem, const char *contact,
-                                      const char *msg) {
+                                      const char *msg, bool full) {
     char graph_path[1024];
     int np = memory_graph_path(graph_path, sizeof(graph_path));
     hu_graph_t *g = NULL;
@@ -533,11 +567,16 @@ static hu_error_t memory_ground_probe(hu_allocator_t *alloc, hu_memory_t *mem, c
         hu_memory_loader_set_facade(&loader, facade);
         char *ctx = NULL;
         size_t ctx_len = 0, matched = 0;
-        err = hu_graph_ground_compose(&loader, contact, strlen(contact), msg, strlen(msg), 0, &ctx,
-                                      &ctx_len, &matched);
-        printf("matched=%zu bytes=%zu\n", matched, ctx_len);
-        if (ctx && ctx_len)
-            printf("%.*s\n", (int)ctx_len, ctx);
+        hu_graph_ground_turn_stats_t st;
+        memset(&st, 0, sizeof(st));
+        if (full)
+            err = hu_graph_ground_compose_turn(&loader, contact, strlen(contact), msg, strlen(msg),
+                                               hu_graph_ground_turn_flags_from_env(), &ctx,
+                                               &ctx_len, &st);
+        else
+            err = hu_graph_ground_compose(&loader, contact, strlen(contact), msg, strlen(msg), 0,
+                                          &ctx, &ctx_len, &matched);
+        hu_cli_memory_ground_emit(stdout, full, matched, &st, ctx, ctx_len);
         if (ctx)
             alloc->free(alloc->ctx, ctx, ctx_len + 1);
     }
@@ -590,12 +629,15 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
         return HU_OK;
     }
     const char *sub = argv[2];
+    const char *ground_contact = NULL, *ground_msg = NULL;
+    bool ground_full = false;
     if (strcmp(sub, "import-facts") == 0)
         return memory_import_facts(alloc, argc, argv); /* needs graph.db only, no config */
     if (strcmp(sub, "agent-facts-dry") == 0)
         return memory_agent_facts_dry(argc, argv); /* pure extraction, no graph/memory/config */
-    if (strcmp(sub, "ground") == 0 && argc < 5) {
-        fprintf(stderr, "Usage: human memory ground <contact> <message>\n");
+    if (strcmp(sub, "ground") == 0 &&
+        !hu_cli_parse_ground_args(argc, argv, &ground_contact, &ground_msg, &ground_full)) {
+        fprintf(stderr, "Usage: human memory ground [--full] <contact> <message>\n");
         return HU_ERR_INVALID_ARGUMENT;
     }
     if ((strcmp(sub, "search") == 0 || strcmp(sub, "get") == 0) && argc < 4) {
@@ -872,7 +914,7 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
             }
         }
     } else if (strcmp(sub, "ground") == 0) {
-        err = memory_ground_probe(alloc, &mem, argv[3], argv[4]);
+        err = memory_ground_probe(alloc, &mem, ground_contact, ground_msg, ground_full);
     } else if (strcmp(sub, "wiki") == 0) {
         /* Wave C thin LLM-wiki surface: personal-model facts/topics as markdown. */
         const char *contact = NULL;
