@@ -8715,7 +8715,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         int window = 120;
                         if (dcfg_ps && dcfg_ps->user_response_window_sec > 0)
                             window = dcfg_ps->user_response_window_sec;
-                        if (chn_name && ch->channel->vtable->human_active_recently &&
+                        /* Same exemption as the early check: a self-test's own sent
+                         * copy is the command, not Seth typing (2026-09-29 05:30). */
+                        if (!selftest_on && chn_name &&
+                            ch->channel->vtable->human_active_recently &&
                             ch->channel->vtable->human_active_recently(ch->channel->ctx, batch_key,
                                                                        key_len, window)) {
                             hu_log_info("human", agent ? agent->observer : NULL,
