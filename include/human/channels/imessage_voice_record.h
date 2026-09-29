@@ -178,7 +178,9 @@ typedef struct {
     bool cancel_failed;            /* a recording may be left in the compose bar */
     const char *abort_reason;      /* static: wrong_chat, user_returned, send_unconfirmed, ... */
     int64_t prior_max_rowid;
-    uint32_t idle_waited_ms; /* time spent waiting for the user to step away */
+    uint32_t idle_waited_ms;  /* time spent waiting for the user to step away */
+    double check_idle_sec;    /* last user-returned check: HID idle ... */
+    double check_elapsed_sec; /* ... against seconds since recording began */
 } hu_voice_record_result_t;
 
 /* HU_OK: the memo left (see out->verified; never re-send on !verified).

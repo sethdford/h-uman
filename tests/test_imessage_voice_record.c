@@ -513,6 +513,9 @@ static void test_vrec_user_returned_mid_clip_cancels(void) {
     HU_ASSERT_TRUE(strstr(f.trace, "press:Send") == NULL);
     HU_ASSERT_TRUE(strstr(f.trace, "press:Cancel audio recording") != NULL);
     HU_ASSERT_STR_EQ(res.abort_reason, "user_returned");
+    /* The numbers behind the call are kept, so a live miss explains itself. */
+    HU_ASSERT_TRUE(res.check_idle_sec > 0.19 && res.check_idle_sec < 0.21);
+    HU_ASSERT_TRUE(res.check_elapsed_sec >= 1.0);
 }
 
 static void test_vrec_operator_override_ignores_activity(void) {

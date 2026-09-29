@@ -2595,9 +2595,10 @@ imsg_media:
                              "voice record: Cancel failed — a recording may be left in Messages");
             hu_log_info("imessage", NULL,
                         "voice record fell back to attachment: block=%s stage=%d reason=%s "
-                        "waited_ms=%u",
+                        "waited_ms=%u idle=%.2fs elapsed=%.2fs",
                         hu_voice_record_block_name(vres.block), (int)vres.stage,
-                        vres.abort_reason ? vres.abort_reason : "-", vres.idle_waited_ms);
+                        vres.abort_reason ? vres.abort_reason : "-", vres.idle_waited_ms,
+                        vres.check_idle_sec, vres.check_elapsed_sec);
         }
     }
     /* Voice-first memos (spec 2026-09-28): a memo that was not recorded

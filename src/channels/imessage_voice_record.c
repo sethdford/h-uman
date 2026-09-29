@@ -170,12 +170,13 @@ static bool in_target_chat(const hu_voice_record_port_t *p, const char *expected
  * they type would land in the target's compose field. HU_VOICE_MIN_IDLE_SEC=0
  * is the operator's "I'm testing at the Mac" override. */
 static bool user_returned(const hu_voice_record_port_t *p, const hu_voice_record_request_t *req,
-                          uint64_t t0_ms) {
+                          uint64_t t0_ms, hu_voice_record_result_t *out) {
     if (req->min_idle_sec <= 0.0)
         return false;
     uint64_t now = p->now_ms(p->ctx);
-    double elapsed = now > t0_ms ? (double)(now - t0_ms) / 1000.0 : 0.0;
-    return p->idle_sec(p->ctx) < elapsed;
+    out->check_elapsed_sec = now > t0_ms ? (double)(now - t0_ms) / 1000.0 : 0.0;
+    out->check_idle_sec = p->idle_sec(p->ctx);
+    return out->check_idle_sec < out->check_elapsed_sec;
 }
 
 static bool input_is(const hu_voice_record_port_t *p, const char *want) {
@@ -263,7 +264,7 @@ hu_error_t hu_voice_record_send(const hu_voice_record_port_t *p,
     if (p->playback_run(p->ctx) != HU_OK)
         goto restore;
     p->sleep_ms(p->ctx, tm.tail_ms);
-    if (user_returned(p, req, t0)) {
+    if (user_returned(p, req, t0, out)) {
         out->abort_reason = "user_returned";
         goto restore;
     }
@@ -279,7 +280,7 @@ hu_error_t hu_voice_record_send(const hu_voice_record_port_t *p,
         out->abort_reason = "wrong_chat";
         goto restore;
     }
-    if (user_returned(p, req, t0)) {
+    if (user_returned(p, req, t0, out)) {
         out->abort_reason = "user_returned";
         goto restore;
     }
