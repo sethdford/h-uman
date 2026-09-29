@@ -357,90 +357,100 @@ export class ScDataTableV2 extends LitElement {
     const noResults = !isEmpty && totalFiltered === 0;
 
     return html`
-      ${this.searchable
-        ? html`
-            <div class="search-wrap">
-              <input
-                type="search"
-                placeholder="Search..."
-                .value=${this._search}
-                @input=${this._onSearchInput}
-                aria-label="Search table"
-              />
-            </div>
-          `
-        : null}
-      <div class="table-wrap">
-        ${this.columns.length > 0
+      ${
+        this.searchable
           ? html`
-              <table
-                class=${tableClass}
-                role="grid"
-                aria-rowcount=${this._sortedRows.length}
-                aria-colcount=${this.columns.length}
-              >
-                <thead>
-                  <tr role="row">
-                    ${this.columns.map(
-                      (col) => html`
-                        <th
-                          role="columnheader"
-                          scope="col"
-                          data-align=${col.align || "left"}
-                          style=${col.width ? `width: ${col.width}` : ""}
-                          class=${col.sortable ? "sortable" : ""}
-                          aria-sort=${col.sortable && this._sortKey === col.key
-                            ? this._sortDir === "asc"
-                              ? "ascending"
-                              : "descending"
-                            : undefined}
-                          @click=${() => this._onSort(col)}
+              <div class="search-wrap">
+                <input
+                  type="search"
+                  placeholder="Search..."
+                  .value=${this._search}
+                  @input=${this._onSearchInput}
+                  aria-label="Search table"
+                />
+              </div>
+            `
+          : null
+      }
+      <div class="table-wrap">
+        ${
+          this.columns.length > 0
+            ? html`
+                <table
+                  class=${tableClass}
+                  role="grid"
+                  aria-rowcount=${this._sortedRows.length}
+                  aria-colcount=${this.columns.length}
+                >
+                  <thead>
+                    <tr role="row">
+                      ${this.columns.map(
+                        (col) => html`
+                          <th
+                            role="columnheader"
+                            scope="col"
+                            data-align=${col.align || "left"}
+                            style=${col.width ? `width: ${col.width}` : ""}
+                            class=${col.sortable ? "sortable" : ""}
+                            aria-sort=${
+                              col.sortable && this._sortKey === col.key
+                                ? this._sortDir === "asc"
+                                  ? "ascending"
+                                  : "descending"
+                                : undefined
+                            }
+                            @click=${() => this._onSort(col)}
+                          >
+                            ${col.label}
+                            ${
+                              col.sortable
+                                ? html`
+                                    <span class="sort-indicator" aria-hidden="true">
+                                      ${
+                                        this._sortKey === col.key && this._sortDir === "asc"
+                                          ? "▲"
+                                          : this._sortKey === col.key && this._sortDir === "desc"
+                                            ? "▼"
+                                            : ""
+                                      }
+                                    </span>
+                                  `
+                                : null
+                            }
+                          </th>
+                        `,
+                      )}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${visibleRows.map(
+                      (row, i) => html`
+                        <tr
+                          role="row"
+                          class=${rowClass}
+                          tabindex="-1"
+                          @click=${() => this._onRowClick(row, i)}
+                          @keydown=${(e: KeyboardEvent) => this._onKeydown(e, i)}
                         >
-                          ${col.label}
-                          ${col.sortable
-                            ? html`
-                                <span class="sort-indicator" aria-hidden="true">
-                                  ${this._sortKey === col.key && this._sortDir === "asc"
-                                    ? "▲"
-                                    : this._sortKey === col.key && this._sortDir === "desc"
-                                      ? "▼"
-                                      : ""}
-                                </span>
-                              `
-                            : null}
-                        </th>
+                          ${this.columns.map(
+                            (col) => html`
+                              <td
+                                role="gridcell"
+                                data-align=${col.align || "left"}
+                                tabindex=${i === this._focusedRowIndex ? 0 : -1}
+                              >
+                                ${this._cellValue(row, col)}
+                              </td>
+                            `,
+                          )}
+                        </tr>
                       `,
                     )}
-                  </tr>
-                </thead>
-                <tbody>
-                  ${visibleRows.map(
-                    (row, i) => html`
-                      <tr
-                        role="row"
-                        class=${rowClass}
-                        tabindex="-1"
-                        @click=${() => this._onRowClick(row, i)}
-                        @keydown=${(e: KeyboardEvent) => this._onKeydown(e, i)}
-                      >
-                        ${this.columns.map(
-                          (col) => html`
-                            <td
-                              role="gridcell"
-                              data-align=${col.align || "left"}
-                              tabindex=${i === this._focusedRowIndex ? 0 : -1}
-                            >
-                              ${this._cellValue(row, col)}
-                            </td>
-                          `,
-                        )}
-                      </tr>
-                    `,
-                  )}
-                </tbody>
-              </table>
-            `
-          : null}
+                  </tbody>
+                </table>
+              `
+            : null
+        }
         <div class="cards" role="list">
           ${visibleRows.map(
             (row, i) => html`
@@ -466,23 +476,27 @@ export class ScDataTableV2 extends LitElement {
           )}
         </div>
       </div>
-      ${isEmpty
-        ? html`<div class="empty">No data</div>`
-        : noResults
-          ? html`<div class="empty">No results</div>`
-          : null}
-      ${this.paginated && totalFiltered > 0
-        ? html`
-            <div class="pagination-wrap">
-              <hu-pagination
-                .total=${totalFiltered}
-                .page=${this._page}
-                .pageSize=${this.pageSize}
-                @hu-page-change=${this._onPageChange}
-              ></hu-pagination>
-            </div>
-          `
-        : null}
+      ${
+        isEmpty
+          ? html`<div class="empty">No data</div>`
+          : noResults
+            ? html`<div class="empty">No results</div>`
+            : null
+      }
+      ${
+        this.paginated && totalFiltered > 0
+          ? html`
+              <div class="pagination-wrap">
+                <hu-pagination
+                  .total=${totalFiltered}
+                  .page=${this._page}
+                  .pageSize=${this.pageSize}
+                  @hu-page-change=${this._onPageChange}
+                ></hu-pagination>
+              </div>
+            `
+          : null
+      }
     `;
   }
 }

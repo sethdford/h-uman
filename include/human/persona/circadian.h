@@ -26,9 +26,6 @@ void hu_circadian_data_cleanup(hu_allocator_t *alloc);
  * overrides the generic guidance. Falls back to hu_circadian_build_prompt if no
  * matching routine block. */
 struct hu_daily_routine;
-hu_error_t hu_circadian_build_prompt_with_routine(hu_allocator_t *alloc, uint8_t hour,
-                                                  const struct hu_daily_routine *routine,
-                                                  char **out, size_t *out_len);
 
 /* Build circadian prompt with full persona awareness.
  * Blends phase guidance + persona time overlays + daily routine mood_modifier.

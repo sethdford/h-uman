@@ -20,7 +20,21 @@ typedef struct hu_file_read_ctx {
     const char *workspace_dir;
     size_t workspace_dir_len;
     hu_security_policy_t *policy;
+    uint32_t max_file_size; /* tools.max_file_size_bytes; 0 = HU_FILE_MAX_SIZE */
 } hu_file_read_ctx_t;
+
+bool hu_file_read_size_allowed(long size, uint32_t configured_max) {
+    if (size <= 0)
+        return false;
+    long limit = configured_max > 0 ? (long)configured_max : (long)HU_FILE_MAX_SIZE;
+    return size <= limit;
+}
+
+void hu_file_read_set_max_size(hu_tool_t *tool, uint32_t max_bytes) {
+    if (!tool || !tool->ctx)
+        return;
+    ((hu_file_read_ctx_t *)tool->ctx)->max_file_size = max_bytes;
+}
 
 static hu_error_t file_read_execute(void *ctx, hu_allocator_t *alloc, const hu_json_value_t *args,
                                     hu_tool_result_t *out) {
@@ -87,7 +101,7 @@ static hu_error_t file_read_execute(void *ctx, hu_allocator_t *alloc, const hu_j
     fseek(f, 0, SEEK_END);
     long sz = ftell(f);
     fseek(f, 0, SEEK_SET);
-    if (sz <= 0 || sz > HU_FILE_MAX_SIZE) {
+    if (!hu_file_read_size_allowed(sz, c->max_file_size)) {
         fclose(f);
         *out = hu_tool_result_fail("file too large or empty", 23);
         return HU_OK;

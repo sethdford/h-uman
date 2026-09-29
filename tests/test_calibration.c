@@ -1,5 +1,4 @@
 #include "human/calibration.h"
-#include "human/calibration/ab_compare.h"
 #include "human/core/string.h"
 #include "test_framework.h"
 #include <string.h>
@@ -52,22 +51,10 @@ static void test_calibration_hu_calibrate_mock_embeds_explicit_channel(void) {
     hu_str_free(&alloc, json);
 }
 
-static void test_ab_compare_prefers_shorter_reply_in_test_mode(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    bool twin = false;
-    double sa = 0.0, sb = 0.0;
-    HU_ASSERT_EQ(hu_calibrate_ab_compare(&alloc, NULL, NULL, 0, "hi", 2, "hello there", 11, &twin,
-                                         &sa, &sb),
-                 HU_OK);
-    HU_ASSERT_TRUE(twin);
-    HU_ASSERT_TRUE(sa > sb);
-}
-
 void run_calibration_tests(void) {
     HU_TEST_SUITE("calibration");
     HU_RUN_TEST(test_calibration_timing_mock_populates_buckets);
     HU_RUN_TEST(test_calibration_style_mock_populates_metrics);
     HU_RUN_TEST(test_calibration_hu_calibrate_mock_returns_persona_json);
     HU_RUN_TEST(test_calibration_hu_calibrate_mock_embeds_explicit_channel);
-    HU_RUN_TEST(test_ab_compare_prefers_shorter_reply_in_test_mode);
 }

@@ -8,7 +8,7 @@
 #include <string.h>
 
 #define HU_GUARD_RETRY_USER_MAX    4096
-#define HU_GUARD_RETRY_MODEL_CLOUD "gemini-3.1-flash-lite-preview"
+#define HU_GUARD_RETRY_MODEL_CLOUD "gemini-3.1-flash-lite"
 
 /* Match agent_turn last-mile: guard does not strip `<tool_call>` XML leaks. */
 static hu_error_t response_guard_retry_strip_text_tool_calls(hu_allocator_t *alloc, char **out,

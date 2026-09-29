@@ -3,6 +3,7 @@
  */
 
 #include "human/doctor_fix.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
 #include "human/skill_registry.h"
 #include <stdio.h>
@@ -91,10 +92,7 @@ static bool ensure_dir(const char *path) {
 }
 
 static bool get_human_dir(char *buf, size_t cap) {
-    const char *home = getenv("HOME");
-    if (!home || !home[0])
-        return false;
-    int n = snprintf(buf, cap, "%s/.human", home);
+    int n = hu_paths_state_dir(buf, cap);
     return n > 0 && (size_t)n < cap;
 }
 

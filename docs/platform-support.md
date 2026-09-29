@@ -35,7 +35,7 @@ features are available on each platform and what happens when a feature is disab
 
 | Flag                       | Default | Gated Features                                  | Non-enabled Behavior     |
 | -------------------------- | ------- | ----------------------------------------------- | ------------------------ |
-| `HU_ENABLE_PERSONA`        | ON      | Persona system (profiles, overlays, examples)    | Code paths omitted       |
+| `HU_ENABLE_PERSONA`        | ON      | Persona system (profiles, overlays, examples) — compiled unconditionally | `OFF` is a configure error (was silently ignored before 2026-09-20) |
 | `HU_ENABLE_SKILLS`         | OFF     | Skill registry, continuous learning              | stderr message + error   |
 | `HU_ENABLE_FEEDS`          | OFF     | Feed ingestion, research agent, social feeds     | Empty translation units  |
 | `HU_ENABLE_ML`             | OFF     | BPE, dataloader, experiment loop, agent trainer  | Code paths omitted       |

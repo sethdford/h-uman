@@ -3,6 +3,9 @@
 
 #include "config.h"
 #include "core/allocator.h"
+#include "memory/consolidation.h"
+#include <stdbool.h>
+#include <stdint.h>
 #include <time.h>
 
 /**
@@ -17,6 +20,72 @@
  */
 
 struct hu_agent;
+
+/** The consolidation settings the daemon uses for every hu_memory_consolidate
+ *  call it makes (periodic tick and topic-switch): behavior.decay_days /
+ *  behavior.dedup_threshold from config (30 / 0 when config is NULL), a fixed
+ *  0.5 decay factor and 5000-entry cap, and the agent's provider + model.
+ *  Unconditional (not cron/test gated) because the reactive prompt slice
+ *  links against it in every build variant. */
+hu_consolidation_config_t hu_daemon_consolidation_config(const hu_config_t *config,
+                                                         struct hu_agent *agent);
+
+struct hu_prompt_budget;
+struct hu_verifier_metrics;
+
+/** Minimum gap between two flushes of a once-per-minute heartbeat file
+ *  (prompt-budget snapshot, verifier metrics). The maintenance tick fires
+ *  once per wall-clock minute, so this must stay well below 60 000 ms: a
+ *  60 s gate evaluated on 60 s ticks skipped every tick whose monotonic gap
+ *  landed a few ms short, halving the effective cadence and letting
+ *  doctor's 120 s freshness check trip on a healthy daemon (2026-09-06). */
+#define HU_DAEMON_FLUSH_MIN_GAP_MS 30000
+
+/** Persist the prompt-budget snapshot when due. `*last_flush_ms` is the
+ *  caller-owned cadence state (0 = never flushed by this process) and is
+ *  advanced to `now_ms` on every attempted flush. Flushes on the very first
+ *  call, so a restarted daemon refreshes the on-disk file at its first
+ *  tick instead of letting the previous process's file age past doctor's
+ *  threshold, and then on every call at least HU_DAEMON_FLUSH_MIN_GAP_MS
+ *  after the previous flush. A failed save is logged once per process.
+ *  Returns true when a flush was attempted, false when it was not due or
+ *  `budget` is NULL. Unconditional (not cron/test gated) so the cadence
+ *  contract is unit-testable — the tick that calls it is compiled out
+ *  under HU_IS_TEST. */
+bool hu_daemon_prompt_budget_flush(struct hu_prompt_budget *budget, int64_t now_ms,
+                                   int64_t *last_flush_ms);
+
+/** Persist the W4 verifier counters to ~/.human/verifier_metrics.json when
+ *  due. Same cadence contract as hu_daemon_prompt_budget_flush: flush on the
+ *  first call, then on every call at least HU_DAEMON_FLUSH_MIN_GAP_MS after
+ *  the previous flush; `*last_flush_ms` is caller-owned state advanced on
+ *  every attempted flush. `snap` is copied before save() stamps
+ *  last_update_epoch, so the caller's struct is not mutated. A failed save
+ *  is logged once per process. Returns true when a flush was attempted. */
+bool hu_daemon_verifier_metrics_flush(const struct hu_verifier_metrics *snap, int64_t now_ms,
+                                      int64_t *last_flush_ms);
+
+/** Ensure the heartbeat tasks file (HEARTBEAT.md, under `workspace_dir`)
+ *  exists and tick it once `interval_ms` has elapsed since `*last_tick_ms`
+ *  (0 = never ticked; the first call always ticks, same first-call contract
+ *  as the two flush gates above). `enabled=false` or `interval_ms<=0` is a
+ *  no-op that creates no file — this is how an unconfigured/disabled
+ *  heartbeat (config->heartbeat.enabled == false) stays fully inert.
+ *
+ *  `now_ms` MUST be a monotonic clock (hu_time_get_current_ms) — it only
+ *  drives the elapsed-interval gate. `wall_ms` MUST be wall-clock
+ *  (hu_time_wall_ms) — on a due tick it is written as the file's mtime
+ *  (via utime), because hu_heartbeat_tick only reads HEARTBEAT.md and never
+ *  writes it, so without an explicit touch the mtime would stay pinned at
+ *  creation time forever and could never signal "still alive" the way the
+ *  verifier/scheduler heartbeat files already do for `human doctor`.
+ *
+ *  A failed ensure/tick is logged once per process (never asserted) and
+ *  `*last_tick_ms` still advances, matching the flush gates' failure
+ *  contract. Returns true when a tick was attempted this call. */
+bool hu_daemon_heartbeat_flush(hu_allocator_t *alloc, bool enabled, int64_t interval_ms,
+                               const char *workspace_dir, int64_t now_ms, int64_t wall_ms,
+                               int64_t *last_tick_ms);
 
 #if defined(HU_HAS_CRON) && !defined(HU_IS_TEST)
 
@@ -35,8 +104,7 @@ void hu_daemon_maintenance_tick(hu_allocator_t *alloc, struct hu_agent *agent,
  *  training-data extraction cadence, nightly LoRA retrain enqueue, the
  *  scheduler tick itself, post-tick status save, and personal-model idle
  *  decay. Moved verbatim from daemon.c hu_service_run. */
-void hu_daemon_learning_scheduler_tick(struct hu_agent *agent, const hu_config_t *config,
-                                       time_t t);
+void hu_daemon_learning_scheduler_tick(struct hu_agent *agent, const hu_config_t *config, time_t t);
 #endif /* HU_ENABLE_SQLITE */
 
 #endif /* HU_HAS_CRON && !HU_IS_TEST */

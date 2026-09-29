@@ -1,24 +1,33 @@
 #include "human/agent/arbitrator.h"
 #include "human/core/string.h"
+#include "human/core/tokens.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define CLAMP(x, lo, hi) (((x) < (lo)) ? (lo) : (((x) > (hi)) ? (hi) : (x)))
-#define DEFAULT_MAX_TOKENS 1500u
+#define CLAMP(x, lo, hi)       (((x) < (lo)) ? (lo) : (((x) > (hi)) ? (hi) : (x)))
+#define DEFAULT_MAX_TOKENS     1500u
 #define DEFAULT_MAX_DIRECTIVES 7u
 
-static double clamp01(double x) { return CLAMP(x, 0.0, 1.0); }
+static double clamp01(double x) {
+    return CLAMP(x, 0.0, 1.0);
+}
 
 size_t hu_directive_estimate_tokens(const char *content, size_t content_len) {
     (void)content;
-    return (content_len / 4) + 1;
+    /* Deliberately NOT hu_tokens_estimate_text: this floors and adds one, so it
+     * over-estimates by up to a token relative to the canonical round-up
+     * ((len+3)/4) — e.g. len==1 gives 2 here vs 1, and NULL gives 1 vs 0. That
+     * headroom biases directive selection toward fitting fewer directives in a
+     * budget, which is the safe direction here. Aligning it to the canonical
+     * would change which directives get selected, so it is a behavior change
+     * needing its own measurement, not a cleanup. Only the divisor is shared. */
+    return (content_len / HU_TOKENS_BYTES_PER_TOKEN) + 1;
 }
 
-double hu_directive_compute_priority(uint32_t category, double recency,
-                                    double emotional_weight,
-                                    double relationship_depth,
-                                    double conversation_phase, double novelty) {
+double hu_directive_compute_priority(uint32_t category, double recency, double emotional_weight,
+                                     double relationship_depth, double conversation_phase,
+                                     double novelty) {
     (void)category;
     recency = clamp01(recency);
     emotional_weight = clamp01(emotional_weight);
@@ -40,8 +49,7 @@ static bool source_matches(const hu_directive_t *d, const char *name) {
     return strncmp(d->source, name, d->source_len) == 0;
 }
 
-static size_t find_idx(const hu_directive_t *directives, size_t count,
-                       const char *source) {
+static size_t find_idx(const hu_directive_t *directives, size_t count, const char *source) {
     for (size_t i = 0; i < count; i++) {
         if (source_matches(&directives[i], source))
             return i;
@@ -49,10 +57,9 @@ static size_t find_idx(const hu_directive_t *directives, size_t count,
     return count; /* not found */
 }
 
-size_t hu_arbitrator_resolve_conflicts(hu_allocator_t *alloc,
-                                      hu_directive_t *directives, size_t count,
-                                      const hu_directive_conflict_t *conflict_table,
-                                      size_t conflict_count) {
+size_t hu_arbitrator_resolve_conflicts(hu_allocator_t *alloc, hu_directive_t *directives,
+                                       size_t count, const hu_directive_conflict_t *conflict_table,
+                                       size_t conflict_count) {
     for (size_t c = 0; c < conflict_count; c++) {
         const hu_directive_conflict_t *rule = &conflict_table[c];
         size_t ia = find_idx(directives, count, rule->source_a);
@@ -95,10 +102,8 @@ static int compare_priority_desc_qsort(const void *a, const void *b) {
     return 0;
 }
 
-hu_error_t hu_arbitrator_select(hu_allocator_t *alloc,
-                                const hu_directive_t *candidates,
-                                size_t candidate_count,
-                                const hu_arbitration_config_t *config,
+hu_error_t hu_arbitrator_select(hu_allocator_t *alloc, const hu_directive_t *candidates,
+                                size_t candidate_count, const hu_arbitration_config_t *config,
                                 hu_arbitration_result_t *result) {
     if (!alloc || !result)
         return HU_ERR_INVALID_ARGUMENT;
@@ -149,8 +154,7 @@ hu_error_t hu_arbitrator_select(hu_allocator_t *alloc,
 
     /* Greedy: add optional by priority until budget or max_directives */
     size_t *selected_indices =
-        (size_t *)alloc->alloc(alloc->ctx,
-                              (required_count + optional_count) * sizeof(size_t));
+        (size_t *)alloc->alloc(alloc->ctx, (required_count + optional_count) * sizeof(size_t));
     if (!selected_indices) {
         alloc->free(alloc->ctx, indices, optional_count * sizeof(size_t));
         return HU_ERR_OUT_OF_MEMORY;
@@ -186,15 +190,13 @@ hu_error_t hu_arbitrator_select(hu_allocator_t *alloc,
         const hu_directive_t *src = &candidates[selected_indices[i]];
         hu_directive_t *dst = &selected[i];
         memset(dst, 0, sizeof(*dst));
-        dst->content =
-            src->content && src->content_len > 0
-                ? hu_strndup(alloc, src->content, src->content_len)
-                : NULL;
+        dst->content = src->content && src->content_len > 0
+                           ? hu_strndup(alloc, src->content, src->content_len)
+                           : NULL;
         dst->content_len = src->content_len;
-        dst->source =
-            src->source && src->source_len > 0
-                ? hu_strndup(alloc, src->source, src->source_len)
-                : NULL;
+        dst->source = src->source && src->source_len > 0
+                          ? hu_strndup(alloc, src->source, src->source_len)
+                          : NULL;
         dst->source_len = src->source_len;
         dst->priority = src->priority;
         dst->token_cost = src->token_cost;
@@ -208,14 +210,13 @@ hu_error_t hu_arbitrator_select(hu_allocator_t *alloc,
             hu_arbitration_result_deinit(alloc, result);
             alloc->free(alloc->ctx, indices, optional_count * sizeof(size_t));
             alloc->free(alloc->ctx, selected_indices,
-                       (required_count + optional_count) * sizeof(size_t));
+                        (required_count + optional_count) * sizeof(size_t));
             return HU_ERR_OUT_OF_MEMORY;
         }
     }
 
     alloc->free(alloc->ctx, indices, optional_count * sizeof(size_t));
-    alloc->free(alloc->ctx, selected_indices,
-                (required_count + optional_count) * sizeof(size_t));
+    alloc->free(alloc->ctx, selected_indices, (required_count + optional_count) * sizeof(size_t));
 
     result->selected = selected;
     result->selected_count = selected_count;
@@ -240,15 +241,13 @@ void hu_directive_deinit(hu_allocator_t *alloc, hu_directive_t *d) {
     d->source_len = 0;
 }
 
-void hu_arbitration_result_deinit(hu_allocator_t *alloc,
-                                  hu_arbitration_result_t *result) {
+void hu_arbitration_result_deinit(hu_allocator_t *alloc, hu_arbitration_result_t *result) {
     if (!alloc || !result)
         return;
     for (size_t i = 0; i < result->selected_count; i++)
         hu_directive_deinit(alloc, &result->selected[i]);
     if (result->selected) {
-        alloc->free(alloc->ctx, result->selected,
-                    result->selected_count * sizeof(hu_directive_t));
+        alloc->free(alloc->ctx, result->selected, result->selected_count * sizeof(hu_directive_t));
         result->selected = NULL;
     }
     result->selected_count = 0;

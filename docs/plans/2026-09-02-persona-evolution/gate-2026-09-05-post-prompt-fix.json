@@ -1,0 +1,74 @@
+{
+  "event": "job",
+  "results": "docs/plans/2026-09-02-persona-evolution/results-2026-09-05.json",
+  "n_matched": 34,
+  "min_matched": 30,
+  "excluded_axes": [
+    "lowercase_start_rate"
+  ],
+  "axes": {
+    "length_chars": {
+      "human_delta": -3.0146137907883954,
+      "gen_pre": {
+        "mean": 54.11764705882353,
+        "ci_lo": 43.88235294117647,
+        "ci_hi": 65.52941176470588,
+        "n": 34
+      },
+      "gen_post": {
+        "mean": 33.705882352941174,
+        "ci_lo": 28.08823529411765,
+        "ci_hi": 39.970588235294116,
+        "n": 34
+      },
+      "gen_delta": -20.411764705882355,
+      "sign_match": true
+    },
+    "emoji_rate": {
+      "human_delta": 0.038678797559931005,
+      "gen_pre": {
+        "mean": 0.0,
+        "ci_lo": 0.0,
+        "ci_hi": 0.0,
+        "n": 34
+      },
+      "gen_post": {
+        "mean": 0.0,
+        "ci_lo": 0.0,
+        "ci_hi": 0.0,
+        "n": 34
+      },
+      "gen_delta": 0.0,
+      "sign_match": false
+    },
+    "warmth_hits_per_100_words": {
+      "human_delta": 0.4217332374570567,
+      "gen_pre": {
+        "mean": 2.2368024132730016,
+        "ci_lo": 0.7963800904977375,
+        "ci_hi": 3.9147812971342386,
+        "n": 34
+      },
+      "gen_post": {
+        "mean": 1.517379679144385,
+        "ci_lo": 0.29411764705882354,
+        "ci_hi": 3.2085561497326203,
+        "n": 34
+      },
+      "gen_delta": -0.7194227341286166,
+      "sign_match": false
+    }
+  },
+  "exclusion_reasons": {
+    "lowercase_start_rate": "device/autocapitalisation artefact: 0.00->0.26->0.02->0.36 week-to-week inside one store (spec \u00a73b point 2)"
+  },
+  "status": "FAIL",
+  "pre_gen": {
+    "path": "/Users/sethford/blind_ab_run/triples_glm_v5.json",
+    "n": 105
+  },
+  "post_gen": {
+    "path": "~/blind_ab_run/... (scratch: 36 trials generated 2026-09-05 on :8741 with the post-fix head via tools/dump_prompt_head)",
+    "n": 36
+  }
+}

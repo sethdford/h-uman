@@ -1,0 +1,598 @@
+{
+  "schema": "difficulty_route_shadow.v1",
+  "generated_at": "2026-09-06T08:30:45-0400",
+  "git_commit": "555cc30ada81f0157f6e736718dba7ababde9efb",
+  "gate": "HU_DIFFICULTY_ROUTE shadow->live (ANALYTICAL treatment for substantive CONVERSATIONAL turns)",
+  "verdict": "HOLD",
+  "reason": "composite_delta=0.1065 (tol=0.02), twin_delta=-0.0130",
+  "n_contexts": 25,
+  "n_paired": 24,
+  "on_device_fail_reasons": {
+    "24": "generation_failed_or_empty"
+  },
+  "cloud_fail_reasons": {},
+  "arms": {
+    "on_device": {
+      "server": "http://127.0.0.1:8741",
+      "model": "seth-glm-air"
+    },
+    "cloud_shadow": {
+      "model": "gemini-3.1-pro-preview",
+      "thinking_budget": 4096,
+      "max_output_tokens": 4608
+    }
+  },
+  "persona_head_chars": 4909,
+  "tolerance": 0.02,
+  "on_device": {
+    "n": 24,
+    "n_anti_ai": 24,
+    "n_ei": 24,
+    "n_reality": 24,
+    "composite": 0.8483796296296297,
+    "composite_weights": {
+      "anti_ai": 0.5555555555555556,
+      "judge": 0.4444444444444445
+    },
+    "anti_ai_mean": 0.99375,
+    "anti_ai_stderr": 0.006118406314828507,
+    "ei_mean": 3.6666666666666665,
+    "ei_histogram": {
+      "1": 0,
+      "2": 5,
+      "3": 5,
+      "4": 7,
+      "5": 7
+    },
+    "reality_mean": 5.0,
+    "reality_histogram": {
+      "1": 0,
+      "2": 0,
+      "3": 0,
+      "4": 0,
+      "5": 24
+    },
+    "twin": {
+      "twin_seth_vs_adapter": {
+        "mean": 0.655,
+        "ci95": [
+          0.527,
+          0.744
+        ],
+        "n": 200
+      },
+      "ceiling_seth_vs_seth": {
+        "mean": 0.726,
+        "ci95": [
+          0.615,
+          0.83
+        ],
+        "n": 200
+      },
+      "floor_seth_vs_other_humans": {
+        "mean": 0.64,
+        "ci95": [
+          0.471,
+          0.787
+        ],
+        "n": 200
+      },
+      "trials": 24
+    }
+  },
+  "cloud_shadow": {
+    "n": 24,
+    "n_anti_ai": 24,
+    "n_ei": 24,
+    "n_reality": 24,
+    "composite": 0.9548611111111112,
+    "composite_weights": {
+      "anti_ai": 0.5555555555555556,
+      "judge": 0.4444444444444445
+    },
+    "anti_ai_mean": 0.99375,
+    "anti_ai_stderr": 0.006118406314828507,
+    "ei_mean": 4.625,
+    "ei_histogram": {
+      "1": 0,
+      "2": 1,
+      "3": 2,
+      "4": 2,
+      "5": 19
+    },
+    "reality_mean": 5.0,
+    "reality_histogram": {
+      "1": 0,
+      "2": 0,
+      "3": 0,
+      "4": 0,
+      "5": 24
+    },
+    "twin": {
+      "twin_seth_vs_adapter": {
+        "mean": 0.642,
+        "ci95": [
+          0.54,
+          0.755
+        ],
+        "n": 200
+      },
+      "ceiling_seth_vs_seth": {
+        "mean": 0.726,
+        "ci95": [
+          0.615,
+          0.83
+        ],
+        "n": 200
+      },
+      "floor_seth_vs_other_humans": {
+        "mean": 0.64,
+        "ci95": [
+          0.471,
+          0.787
+        ],
+        "n": 200
+      },
+      "trials": 24
+    }
+  },
+  "context_rows": [
+    {
+      "id": 0,
+      "incoming_words": 19,
+      "seth_reply_chars": 43,
+      "on_device": {
+        "ei": 2,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 24,
+        "reply_words": 6
+      },
+      "cloud_shadow": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 45,
+        "reply_words": 10
+      }
+    },
+    {
+      "id": 1,
+      "incoming_words": 26,
+      "seth_reply_chars": 42,
+      "on_device": {
+        "ei": 3,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 48,
+        "reply_words": 11
+      },
+      "cloud_shadow": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 68,
+        "reply_words": 13
+      }
+    },
+    {
+      "id": 2,
+      "incoming_words": 20,
+      "seth_reply_chars": 13,
+      "on_device": {
+        "ei": 4,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 34,
+        "reply_words": 8
+      },
+      "cloud_shadow": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 70,
+        "reply_words": 11
+      }
+    },
+    {
+      "id": 3,
+      "incoming_words": 13,
+      "seth_reply_chars": 19,
+      "on_device": {
+        "ei": 2,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 21,
+        "reply_words": 5
+      },
+      "cloud_shadow": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 16,
+        "reply_words": 4
+      }
+    },
+    {
+      "id": 4,
+      "incoming_words": 18,
+      "seth_reply_chars": 39,
+      "on_device": {
+        "ei": 3,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 29,
+        "reply_words": 6
+      },
+      "cloud_shadow": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 67,
+        "reply_words": 16
+      }
+    },
+    {
+      "id": 5,
+      "incoming_words": 27,
+      "seth_reply_chars": 86,
+      "on_device": {
+        "ei": 4,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 32,
+        "reply_words": 5
+      },
+      "cloud_shadow": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 61,
+        "reply_words": 12
+      }
+    },
+    {
+      "id": 6,
+      "incoming_words": 96,
+      "seth_reply_chars": 97,
+      "on_device": {
+        "ei": 2,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 40,
+        "reply_words": 7
+      },
+      "cloud_shadow": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 0.85,
+        "reply_chars": 254,
+        "reply_words": 42
+      }
+    },
+    {
+      "id": 7,
+      "incoming_words": 24,
+      "seth_reply_chars": 24,
+      "on_device": {
+        "ei": 2,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 33,
+        "reply_words": 7
+      },
+      "cloud_shadow": {
+        "ei": 2,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 31,
+        "reply_words": 7
+      }
+    },
+    {
+      "id": 8,
+      "incoming_words": 19,
+      "seth_reply_chars": 60,
+      "on_device": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 49,
+        "reply_words": 10
+      },
+      "cloud_shadow": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 62,
+        "reply_words": 13
+      }
+    },
+    {
+      "id": 9,
+      "incoming_words": 30,
+      "seth_reply_chars": 209,
+      "on_device": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 59,
+        "reply_words": 12
+      },
+      "cloud_shadow": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 163,
+        "reply_words": 29
+      }
+    },
+    {
+      "id": 10,
+      "incoming_words": 78,
+      "seth_reply_chars": 15,
+      "on_device": {
+        "ei": 2,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 33,
+        "reply_words": 7
+      },
+      "cloud_shadow": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 118,
+        "reply_words": 27
+      }
+    },
+    {
+      "id": 11,
+      "incoming_words": 19,
+      "seth_reply_chars": 7,
+      "on_device": {
+        "ei": 3,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 22,
+        "reply_words": 4
+      },
+      "cloud_shadow": {
+        "ei": 3,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 41,
+        "reply_words": 9
+      }
+    },
+    {
+      "id": 12,
+      "incoming_words": 14,
+      "seth_reply_chars": 16,
+      "on_device": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 32,
+        "reply_words": 7
+      },
+      "cloud_shadow": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 41,
+        "reply_words": 8
+      }
+    },
+    {
+      "id": 13,
+      "incoming_words": 39,
+      "seth_reply_chars": 64,
+      "on_device": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 47,
+        "reply_words": 8
+      },
+      "cloud_shadow": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 59,
+        "reply_words": 11
+      }
+    },
+    {
+      "id": 14,
+      "incoming_words": 13,
+      "seth_reply_chars": 3,
+      "on_device": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 24,
+        "reply_words": 4
+      },
+      "cloud_shadow": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 31,
+        "reply_words": 6
+      }
+    },
+    {
+      "id": 15,
+      "incoming_words": 27,
+      "seth_reply_chars": 8,
+      "on_device": {
+        "ei": 4,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 30,
+        "reply_words": 7
+      },
+      "cloud_shadow": {
+        "ei": 4,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 46,
+        "reply_words": 10
+      }
+    },
+    {
+      "id": 16,
+      "incoming_words": 16,
+      "seth_reply_chars": 9,
+      "on_device": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 70,
+        "reply_words": 13
+      },
+      "cloud_shadow": {
+        "ei": 3,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 50,
+        "reply_words": 9
+      }
+    },
+    {
+      "id": 17,
+      "incoming_words": 22,
+      "seth_reply_chars": 9,
+      "on_device": {
+        "ei": 3,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 36,
+        "reply_words": 7
+      },
+      "cloud_shadow": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 74,
+        "reply_words": 15
+      }
+    },
+    {
+      "id": 18,
+      "incoming_words": 14,
+      "seth_reply_chars": 3,
+      "on_device": {
+        "ei": 3,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 27,
+        "reply_words": 4
+      },
+      "cloud_shadow": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 67,
+        "reply_words": 13
+      }
+    },
+    {
+      "id": 19,
+      "incoming_words": 28,
+      "seth_reply_chars": 50,
+      "on_device": {
+        "ei": 4,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 22,
+        "reply_words": 4
+      },
+      "cloud_shadow": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 100,
+        "reply_words": 19
+      }
+    },
+    {
+      "id": 20,
+      "incoming_words": 28,
+      "seth_reply_chars": 169,
+      "on_device": {
+        "ei": 4,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 69,
+        "reply_words": 13
+      },
+      "cloud_shadow": {
+        "ei": 4,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 91,
+        "reply_words": 14
+      }
+    },
+    {
+      "id": 21,
+      "incoming_words": 15,
+      "seth_reply_chars": 370,
+      "on_device": {
+        "ei": 4,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 32,
+        "reply_words": 7
+      },
+      "cloud_shadow": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 42,
+        "reply_words": 9
+      }
+    },
+    {
+      "id": 22,
+      "incoming_words": 22,
+      "seth_reply_chars": 71,
+      "on_device": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 31,
+        "reply_words": 6
+      },
+      "cloud_shadow": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 41,
+        "reply_words": 8
+      }
+    },
+    {
+      "id": 23,
+      "incoming_words": 31,
+      "seth_reply_chars": 17,
+      "on_device": {
+        "ei": 4,
+        "reality": 5,
+        "anti_ai": 0.85,
+        "reply_chars": 25,
+        "reply_words": 6
+      },
+      "cloud_shadow": {
+        "ei": 5,
+        "reality": 5,
+        "anti_ai": 1.0,
+        "reply_chars": 38,
+        "reply_words": 7
+      }
+    }
+  ],
+  "contexts_source": "/Users/sethford/.human/logs/eval-archive/ground_truth-backup-20260725-113527.jsonl"
+}

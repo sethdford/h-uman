@@ -28,7 +28,7 @@ export class ScFloatingMic extends LitElement {
       height: 3rem;
       border-radius: 50%;
       background: var(--hu-accent);
-      color: var(--hu-bg);
+      color: var(--hu-on-accent);
       border: none;
       cursor: pointer;
       display: flex;
@@ -51,10 +51,12 @@ export class ScFloatingMic extends LitElement {
     }
     .btn.listening {
       background: var(--hu-error);
+      color: var(--hu-bg);
       animation: hu-pulse-red var(--hu-duration-slow) var(--hu-ease-in-out, ease-in-out) infinite;
     }
     .btn.transcribing {
       background: var(--hu-accent-secondary);
+      color: var(--hu-on-accent-secondary);
       opacity: 0.8;
       cursor: wait;
     }
@@ -259,9 +261,7 @@ export class ScFloatingMic extends LitElement {
   ): HTMLTextAreaElement | HTMLInputElement | null {
     if (depth > 4) return null;
     const direct = root.querySelector("textarea, input") as
-      | HTMLTextAreaElement
-      | HTMLInputElement
-      | null;
+      HTMLTextAreaElement | HTMLInputElement | null;
     if (direct) return direct;
     const hosts = root.querySelectorAll("*");
     for (const el of hosts) {
@@ -312,21 +312,27 @@ export class ScFloatingMic extends LitElement {
     const btnClass = this.isListening ? "listening" : this.isTranscribing ? "transcribing" : "";
     return html`
       <div>
-        ${this.isListening || this.isTranscribing
-          ? html`<div class="overlay">${this.overlayText}</div>`
-          : ""}
+        ${
+          this.isListening || this.isTranscribing
+            ? html`<div class="overlay">${this.overlayText}</div>`
+            : ""
+        }
         <button
           class="btn ${btnClass}"
           ?disabled=${!this._recorder.isSupported || this.isTranscribing}
-          title=${this._recorder.isSupported
-            ? "Start voice input (Cmd+Shift+M)"
-            : "Audio recording not supported"}
+          title=${
+            this._recorder.isSupported
+              ? "Start voice input (Cmd+Shift+M)"
+              : "Audio recording not supported"
+          }
           @click=${this.toggleRecording}
-          aria-label=${this.isListening
-            ? "Stop recording"
-            : this.isTranscribing
-              ? "Transcribing audio"
-              : "Start voice input"}
+          aria-label=${
+            this.isListening
+              ? "Stop recording"
+              : this.isTranscribing
+                ? "Transcribing audio"
+                : "Start voice input"
+          }
           aria-busy=${this.isTranscribing}
         >
           ${icons.mic}

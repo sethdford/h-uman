@@ -1,6 +1,7 @@
 #include "human/providers/factory.h"
 #include "human/config.h"
 #include "human/core/allocator.h"
+#include "human/core/endpoints.h"
 #include "human/core/error.h"
 #include "human/core/string.h"
 #include "human/provider.h"
@@ -229,8 +230,8 @@ static const struct {
     {"sglang", "http://localhost:30000/v1"},
     {"osaurus", "http://localhost:1337/v1"},
     {"litellm", "http://localhost:4000"},
-    {"mlx_local", "http://127.0.0.1:8741/v1"},
-    {"mlx-local", "http://127.0.0.1:8741/v1"},
+    {"mlx_local", HU_MLX_DEFAULT_BASE_URL},
+    {"mlx-local", HU_MLX_DEFAULT_BASE_URL},
     /* Phase 3a.2 — "mlx-http" alias matches the Gemma throughput
      * program spec. Same target as mlx-local, but the name documents
      * intent (HTTP-talks-to-mlx-server, vs the "mlx" key which routes
@@ -238,8 +239,8 @@ static const struct {
      * between providers see "mlx" (subprocess one-shot, no streaming),
      * "mlx-http" (HTTP to mlx-server.py, streaming, warm model), and
      * "coreml" (native CoreML — different code path entirely). */
-    {"mlx-http", "http://127.0.0.1:8741/v1"},
-    {"mlx_http", "http://127.0.0.1:8741/v1"},
+    {"mlx-http", HU_MLX_DEFAULT_BASE_URL},
+    {"mlx_http", HU_MLX_DEFAULT_BASE_URL},
 };
 
 static const size_t hu_compat_providers_count =

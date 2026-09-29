@@ -28,11 +28,14 @@ export class ScChatSessionsPanel extends LitElement {
   @property({ type: Boolean, reflect: true }) open = false;
 
   @state() private _searchQuery = "";
-  @state() private _focusedIndex = -1;
   @state() private _activeProjectFilter: string | null = null;
   @state() private _creatingProject = false;
   @state() private _newProjectName = "";
   @state() private _editingProjectId: string | null = null;
+  /** Roving tabindex: the one session row reachable by Tab. */
+  @state() private _rovingId: string | null = null;
+  /** After a keyboard delete, focus `next` once `deleted` has left `sessions`. */
+  private _pendingFocus: { deleted: string; next: string | null } | null = null;
 
   private get _filteredSessions(): ChatSession[] {
     let sessions = this.sessions;
@@ -243,21 +246,39 @@ export class ScChatSessionsPanel extends LitElement {
         border-left-color: var(--hu-accent-subtle);
         background: var(--hu-surface-container-high);
       }
-      &.focused {
-        background: var(--hu-surface-container-high);
-      }
+    }
+
+    /* The row's primary action. Pointer clicks anywhere on the row bubble to
+       the row handler; this button is what keyboard and AT users reach, and it
+       keeps Delete a sibling rather than a descendant of an interactive row. */
+    .session-open {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: var(--hu-space-2xs);
+      padding: 0;
+      background: transparent;
+      border: none;
+      color: inherit;
+      font: inherit;
+      text-align: start;
+      cursor: pointer;
       &:focus-visible {
         outline: 2px solid var(--hu-accent);
         outline-offset: 2px;
       }
     }
 
-    .session-content {
-      flex: 1;
-      min-width: 0;
-      display: flex;
-      flex-direction: column;
-      gap: var(--hu-space-2xs);
+    /* Where :has() is supported, ring the whole row instead of the button. */
+    @supports selector(:has(*)) {
+      .session-item:has(.session-open:focus-visible) {
+        outline: 2px solid var(--hu-accent);
+        outline-offset: 2px;
+      }
+      .session-open:focus-visible {
+        outline: none;
+      }
     }
 
     .session-title {
@@ -292,7 +313,8 @@ export class ScChatSessionsPanel extends LitElement {
         background var(--hu-duration-fast) var(--hu-ease-out);
     }
 
-    .session-item:hover .delete-btn {
+    .session-item:hover .delete-btn,
+    .session-item:focus-within .delete-btn {
       opacity: 1;
     }
 
@@ -490,8 +512,21 @@ export class ScChatSessionsPanel extends LitElement {
     );
   }
 
+  private _onRowClick(e: Event, id: string): void {
+    // While the title is being renamed, clicks inside it, and the click Chromium
+    // synthesizes on the enclosing .session-open button when Space is typed, must
+    // not select the session.
+    const title = (e.currentTarget as HTMLElement).querySelector<HTMLElement>(".session-title");
+    if (title?.isContentEditable) return;
+    this._onSelect(id);
+  }
+
   private _onDelete(e: Event, id: string): void {
     e.stopPropagation();
+    this._dispatchDelete(id);
+  }
+
+  private _dispatchDelete(id: string): void {
     this.dispatchEvent(
       new CustomEvent("hu-session-delete", {
         bubbles: true,
@@ -530,21 +565,53 @@ export class ScChatSessionsPanel extends LitElement {
     return groups;
   }
 
+  /**
+   * Arrow/Home/End move real focus between sessions (roving tabindex), and
+   * Delete/Backspace delete the focused one. Enter/Space are the buttons' own.
+   */
   private _onListKeydown(e: KeyboardEvent): void {
-    const groups = this._groupSessions(this._filteredSessions);
-    const flatSessions = groups.flatMap((g) => g.sessions);
-    if (e.key === "ArrowDown") {
+    const buttons = Array.from(
+      this.shadowRoot?.querySelectorAll<HTMLButtonElement>(".session-open") ?? [],
+    );
+    if (buttons.length === 0) return;
+    // Resolve the row from any control inside it (e.g. Delete), not just the open button.
+    const row = (this.shadowRoot?.activeElement as HTMLElement | null)?.closest<HTMLElement>(
+      ".session-item",
+    );
+    const current = row
+      ? buttons.indexOf(row.querySelector<HTMLButtonElement>(".session-open") as HTMLButtonElement)
+      : -1;
+    if (e.key === "Delete" || e.key === "Backspace") {
+      const id = row?.dataset.sessionId;
+      if (!id) return;
       e.preventDefault();
-      this._focusedIndex = Math.min(this._focusedIndex + 1, flatSessions.length - 1);
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      this._focusedIndex = Math.max(this._focusedIndex - 1, 0);
-    } else if (e.key === "Enter" && this._focusedIndex >= 0 && flatSessions[this._focusedIndex]) {
-      e.preventDefault();
-      this._onSelect(flatSessions[this._focusedIndex].id);
-    } else if (e.key === "Escape") {
-      this._focusedIndex = -1;
+      const neighbor = buttons[current + 1] ?? buttons[current - 1];
+      const next = neighbor?.closest<HTMLElement>(".session-item")?.dataset.sessionId ?? null;
+      this._pendingFocus = { deleted: id, next };
+      this._dispatchDelete(id);
+      return;
     }
+    let next: number;
+    if (e.key === "ArrowDown") next = current < 0 ? 0 : Math.min(current + 1, buttons.length - 1);
+    else if (e.key === "ArrowUp") next = current < 0 ? 0 : Math.max(current - 1, 0);
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = buttons.length - 1;
+    else return;
+    e.preventDefault();
+    buttons[next].focus();
+  }
+
+  protected override updated(): void {
+    const pending = this._pendingFocus;
+    if (!pending || this.sessions.some((s) => s.id === pending.deleted)) return;
+    this._pendingFocus = null;
+    if (!pending.next) return;
+    this._rovingId = pending.next;
+    this.shadowRoot
+      ?.querySelector<HTMLElement>(
+        `.session-item[data-session-id="${CSS.escape(pending.next)}"] .session-open`,
+      )
+      ?.focus();
   }
 
   private _startRename(e: Event, _s: ChatSession): void {
@@ -571,19 +638,20 @@ export class ScChatSessionsPanel extends LitElement {
   }
 
   private _renameKeydown(e: KeyboardEvent, _id: string): void {
+    const el = e.currentTarget as HTMLElement;
+    if (el.isContentEditable) e.stopPropagation();
     if (e.key === "Enter") {
       e.preventDefault();
-      (e.target as HTMLElement).blur();
+      el.blur();
     }
     if (e.key === "Escape") {
-      (e.target as HTMLElement).contentEditable = "false";
+      el.contentEditable = "false";
       this.requestUpdate();
     }
   }
 
   private _toggleProjectFilter(projectId: string): void {
     this._activeProjectFilter = this._activeProjectFilter === projectId ? null : projectId;
-    this._focusedIndex = -1;
   }
 
   private _startCreateProject(): void {
@@ -636,12 +704,10 @@ export class ScChatSessionsPanel extends LitElement {
 
   override render() {
     const filteredGroups = this._groupSessions(this._filteredSessions);
-    let startIndex = 0;
-    const groupsWithIndices = filteredGroups.map((g) => {
-      const result = { ...g, startIndex };
-      startIndex += g.sessions.length;
-      return result;
-    });
+    const shown = filteredGroups.flatMap((g) => g.sessions);
+    const tabId = shown.some((s) => s.id === this._rovingId)
+      ? this._rovingId
+      : (shown.find((s) => s.active)?.id ?? shown[0]?.id);
 
     return html`
       <div class="panel" role="navigation" aria-label="Chat sessions">
@@ -659,79 +725,83 @@ export class ScChatSessionsPanel extends LitElement {
         <button type="button" class="new-chat-btn" @click=${this._onNewChat} aria-label="New chat">
           ${icons["file-text"]} New Chat
         </button>
-        ${this.projects.length > 0 || this._creatingProject
-          ? html`
-              <div class="projects-bar" role="toolbar" aria-label="Projects">
-                <button
-                  class="project-chip ${this._activeProjectFilter === null ? "active" : ""}"
-                  type="button"
-                  @click=${() => (this._activeProjectFilter = null)}
-                >
-                  All
-                </button>
-                ${this.projects.map(
-                  (p) => html`
-                    <button
-                      class="project-chip ${this._activeProjectFilter === p.id ? "active" : ""}"
-                      type="button"
-                      @click=${() => this._toggleProjectFilter(p.id)}
-                      title=${p.instructions ? `Instructions: ${p.instructions}` : p.name}
-                    >
-                      <span
-                        class="project-dot"
-                        style="background: ${this._getProjectColor(p)}"
-                      ></span>
-                      ${p.name} ${p.pinned ? icons["push-pin"] : nothing}
-                    </button>
-                  `,
-                )}
-                <button
-                  class="add-project-chip"
-                  type="button"
-                  @click=${this._startCreateProject}
-                  aria-label="Create project"
-                >
-                  ${icons.plus} Project
-                </button>
-              </div>
-            `
-          : html`
-              <div class="projects-bar">
-                <button
-                  class="add-project-chip"
-                  type="button"
-                  @click=${this._startCreateProject}
-                  aria-label="Create project"
-                >
-                  ${icons.plus} New Project
-                </button>
-              </div>
-            `}
-        ${this._creatingProject
-          ? html`
-              <div class="new-project-row">
-                <input
-                  class="new-project-input"
-                  type="text"
-                  placeholder="Project name..."
-                  .value=${this._newProjectName}
-                  @input=${(e: Event) =>
-                    (this._newProjectName = (e.target as HTMLInputElement).value)}
-                  @keydown=${this._onProjectKeydown}
-                  autofocus
-                />
-                <button
-                  class="new-project-confirm"
-                  type="button"
-                  ?disabled=${!this._newProjectName.trim()}
-                  @click=${this._confirmCreateProject}
-                  aria-label="Create"
-                >
-                  ${icons.check}
-                </button>
-              </div>
-            `
-          : nothing}
+        ${
+          this.projects.length > 0 || this._creatingProject
+            ? html`
+                <div class="projects-bar" role="toolbar" aria-label="Projects">
+                  <button
+                    class="project-chip ${this._activeProjectFilter === null ? "active" : ""}"
+                    type="button"
+                    @click=${() => (this._activeProjectFilter = null)}
+                  >
+                    All
+                  </button>
+                  ${this.projects.map(
+                    (p) => html`
+                      <button
+                        class="project-chip ${this._activeProjectFilter === p.id ? "active" : ""}"
+                        type="button"
+                        @click=${() => this._toggleProjectFilter(p.id)}
+                        title=${p.instructions ? `Instructions: ${p.instructions}` : p.name}
+                      >
+                        <span
+                          class="project-dot"
+                          style="background: ${this._getProjectColor(p)}"
+                        ></span>
+                        ${p.name} ${p.pinned ? icons["push-pin"] : nothing}
+                      </button>
+                    `,
+                  )}
+                  <button
+                    class="add-project-chip"
+                    type="button"
+                    @click=${this._startCreateProject}
+                    aria-label="Create project"
+                  >
+                    ${icons.plus} Project
+                  </button>
+                </div>
+              `
+            : html`
+                <div class="projects-bar">
+                  <button
+                    class="add-project-chip"
+                    type="button"
+                    @click=${this._startCreateProject}
+                    aria-label="Create project"
+                  >
+                    ${icons.plus} New Project
+                  </button>
+                </div>
+              `
+        }
+        ${
+          this._creatingProject
+            ? html`
+                <div class="new-project-row">
+                  <input
+                    class="new-project-input"
+                    type="text"
+                    placeholder="Project name..."
+                    .value=${this._newProjectName}
+                    @input=${(e: Event) =>
+                      (this._newProjectName = (e.target as HTMLInputElement).value)}
+                    @keydown=${this._onProjectKeydown}
+                    autofocus
+                  />
+                  <button
+                    class="new-project-confirm"
+                    type="button"
+                    ?disabled=${!this._newProjectName.trim()}
+                    @click=${this._confirmCreateProject}
+                    aria-label="Create"
+                  >
+                    ${icons.check}
+                  </button>
+                </div>
+              `
+            : nothing
+        }
         <div class="search-wrap">
           <input
             class="search-input"
@@ -740,81 +810,83 @@ export class ScChatSessionsPanel extends LitElement {
             .value=${this._searchQuery}
             @input=${(e: Event) => {
               this._searchQuery = (e.target as HTMLInputElement).value;
-              this._focusedIndex = -1;
             }}
             aria-label="Search sessions"
           />
         </div>
         <div
           class="session-list"
-          role=${filteredGroups.length > 0 ? "listbox" : "region"}
-          tabindex="0"
+          role="region"
           aria-label="Session list"
           @keydown=${this._onListKeydown}
         >
-          ${filteredGroups.length === 0
-            ? this.sessions.length === 0 && !this._searchQuery
-              ? html`
-                  <hu-empty-state
-                    heading="No conversations yet"
-                    description="Start a new chat to begin."
-                    .icon=${icons["chat-circle"] ?? icons["message-square"]}
-                  ></hu-empty-state>
-                `
-              : html`
-                  <hu-empty-state
-                    heading="No sessions"
-                    description="Start a new chat to begin a session."
-                    .icon=${icons["chat-circle"] ?? icons["message-square"]}
-                  ></hu-empty-state>
-                `
-            : groupsWithIndices.map((group) => {
-                return html`
-                  <div class="session-group" role="group" aria-label=${group.label}>
-                    <span class="group-label">${group.label}</span>
-                    ${group.sessions.map((s, si) => {
-                      const flatIndex = group.startIndex + si;
-                      const isFocused = flatIndex === this._focusedIndex;
-                      return html`
-                        <div
-                          class="session-item ${s.active ? "active" : ""} ${isFocused
-                            ? "focused"
-                            : ""}"
-                          role="option"
-                          tabindex="-1"
-                          aria-selected=${isFocused}
-                          @click=${() => this._onSelect(s.id)}
-                          @keydown=${(e: KeyboardEvent) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              this._onSelect(s.id);
-                            }
-                          }}
-                        >
-                          <div class="session-content">
-                            <span
-                              class="session-title"
-                              @dblclick=${(e: Event) => this._startRename(e, s)}
-                              @blur=${(e: Event) => this._finishRename(e, s.id)}
-                              @keydown=${(e: KeyboardEvent) => this._renameKeydown(e, s.id)}
-                              >${this._renderProjectDot(s)}${s.title || "Untitled"}</span
+          ${
+            filteredGroups.length === 0
+              ? this.sessions.length === 0 && !this._searchQuery
+                ? html`
+                    <hu-empty-state
+                      heading="No conversations yet"
+                      description="Start a new chat to begin."
+                      .icon=${icons["chat-circle"] ?? icons["message-square"]}
+                    ></hu-empty-state>
+                  `
+                : html`
+                    <hu-empty-state
+                      heading="No sessions"
+                      description="Start a new chat to begin a session."
+                      .icon=${icons["chat-circle"] ?? icons["message-square"]}
+                    ></hu-empty-state>
+                  `
+              : filteredGroups.map((group, gi) => {
+                  const labelId = `session-group-${gi}`;
+                  return html`
+                    <div class="session-group">
+                      <span class="group-label" id=${labelId}>${group.label}</span>
+                      <div role="list" aria-labelledby=${labelId}>
+                        ${group.sessions.map((s) => {
+                          const tabindex = s.id === tabId ? "0" : "-1";
+                          return html`
+                            <div
+                              role="listitem"
+                              class="session-item ${s.active ? "active" : ""}"
+                              data-session-id=${s.id}
+                              @click=${(e: Event) => this._onRowClick(e, s.id)}
+                              @focusin=${() => {
+                                this._rovingId = s.id;
+                              }}
                             >
-                            <span class="session-ts">${formatRelative(s.ts)}</span>
-                          </div>
-                          <button
-                            type="button"
-                            class="delete-btn"
-                            aria-label="Delete session"
-                            @click=${(e: Event) => this._onDelete(e, s.id)}
-                          >
-                            ${icons.x}
-                          </button>
-                        </div>
-                      `;
-                    })}
-                  </div>
-                `;
-              })}
+                              <button
+                                type="button"
+                                class="session-open"
+                                tabindex=${tabindex}
+                                aria-current=${s.active ? "true" : nothing}
+                              >
+                                <span
+                                  class="session-title"
+                                  @dblclick=${(e: Event) => this._startRename(e, s)}
+                                  @blur=${(e: Event) => this._finishRename(e, s.id)}
+                                  @keydown=${(e: KeyboardEvent) => this._renameKeydown(e, s.id)}
+                                  >${this._renderProjectDot(s)}${s.title || "Untitled"}</span
+                                >
+                                <span class="session-ts">${formatRelative(s.ts)}</span>
+                              </button>
+                              <button
+                                type="button"
+                                class="delete-btn"
+                                tabindex=${tabindex}
+                                aria-label="Delete session"
+                                @click=${(e: Event) => this._onDelete(e, s.id)}
+                              >
+                                ${icons.x}
+                              </button>
+                            </div>
+                          `;
+                        })}
+                      </div>
+                    </div>
+                  `;
+                })
+          }
         </div>
       </div>
     `;

@@ -24,58 +24,6 @@ static void test_cosine_similarity_opposite(void) {
     HU_ASSERT_FLOAT_EQ(sim, -1.0f, 0.001f);
 }
 
-static void test_chunker_basic_split(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    const char *text = "First sentence. Second sentence. Third sentence.";
-    size_t len = strlen(text);
-    hu_chunker_options_t opts = {.max_chunk_size = 20, .overlap = 0};
-
-    hu_text_chunk_t *chunks = NULL;
-    size_t count = 0;
-    hu_error_t err = hu_chunker_split(&alloc, text, len, &opts, &chunks, &count);
-
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_NOT_NULL(chunks);
-    HU_ASSERT_TRUE(count >= 2);
-
-    hu_chunker_free(&alloc, chunks, count);
-}
-
-static void test_chunker_overlap(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    const char *text = "One. Two. Three. Four. Five.";
-    size_t len = strlen(text);
-    hu_chunker_options_t opts = {.max_chunk_size = 15, .overlap = 5};
-
-    hu_text_chunk_t *chunks = NULL;
-    size_t count = 0;
-    hu_error_t err = hu_chunker_split(&alloc, text, len, &opts, &chunks, &count);
-
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_NOT_NULL(chunks);
-    HU_ASSERT_TRUE(count >= 1);
-
-    hu_chunker_free(&alloc, chunks, count);
-}
-
-static void test_chunker_short_text(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    const char *text = "Hi";
-    size_t len = 2;
-    hu_chunker_options_t opts = {.max_chunk_size = 512, .overlap = 0};
-
-    hu_text_chunk_t *chunks = NULL;
-    size_t count = 0;
-    hu_error_t err = hu_chunker_split(&alloc, text, len, &opts, &chunks, &count);
-
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_NOT_NULL(chunks);
-    HU_ASSERT_EQ(count, 1);
-    HU_ASSERT_EQ(chunks[0].text_len, 2);
-
-    hu_chunker_free(&alloc, chunks, count);
-}
-
 static void test_vector_store_insert_search(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_vector_store_t store = hu_vector_store_mem_create(&alloc);
@@ -149,30 +97,6 @@ static void test_cosine_similarity_zero_vector(void) {
     HU_ASSERT_TRUE(sim >= -0.001f && sim <= 0.001f);
 }
 
-static void test_chunker_empty_text(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_chunker_options_t opts = {.max_chunk_size = 100, .overlap = 0};
-    hu_text_chunk_t *chunks = NULL;
-    size_t count = 0;
-    hu_error_t err = hu_chunker_split(&alloc, "", 0, &opts, &chunks, &count);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_TRUE(count <= 1);
-    if (chunks)
-        hu_chunker_free(&alloc, chunks, count);
-}
-
-static void test_chunker_large_overlap(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    const char *text = "One. Two. Three.";
-    hu_chunker_options_t opts = {.max_chunk_size = 10, .overlap = 8};
-    hu_text_chunk_t *chunks = NULL;
-    size_t count = 0;
-    hu_error_t err = hu_chunker_split(&alloc, text, strlen(text), &opts, &chunks, &count);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_NOT_NULL(chunks);
-    hu_chunker_free(&alloc, chunks, count);
-}
-
 static void test_vector_store_count(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_vector_store_t store = hu_vector_store_mem_create(&alloc);
@@ -220,11 +144,6 @@ void run_vector_tests(void) {
     HU_RUN_TEST(test_cosine_similarity_unit_vector);
     HU_RUN_TEST(test_cosine_similarity_scaled_identical);
     HU_RUN_TEST(test_cosine_similarity_zero_vector);
-    HU_RUN_TEST(test_chunker_basic_split);
-    HU_RUN_TEST(test_chunker_overlap);
-    HU_RUN_TEST(test_chunker_short_text);
-    HU_RUN_TEST(test_chunker_empty_text);
-    HU_RUN_TEST(test_chunker_large_overlap);
     HU_RUN_TEST(test_vector_store_insert_search);
     HU_RUN_TEST(test_vector_store_remove);
     HU_RUN_TEST(test_vector_store_count);

@@ -1,0 +1,55 @@
+{
+  "timestamp": "2026-07-25",
+  "what": "Three-way synthetic blind-A/B: live v4-repair vs GLM-4.5-Air raw base vs GLM-4.5-Air + v5 adapter",
+  "protocol": {
+    "contexts": "160 paired real contexts (same set as the 2026-05-31 current-arm run), byte-faithful 3621B product prompt, temp 0.7",
+    "judge": "gemini-3.5-flash synthetic panel (scripts/blind_ab/simulate_raters.py, 6 workers)",
+    "caveat": "synthetic proxy only (~69% vs humans ~90.8%); human rating sheet is the gate"
+  },
+  "arms": {
+    "v4_repair_live": {
+      "base": "mlx-community/gemma-4-31b-it-8bit",
+      "adapter": "seth-lora-v4-repair-20260525-071921",
+      "detect_rate": 0.142,
+      "dist_from_half": 0.358,
+      "seth_voice": 3.86,
+      "seth_humanness": 4.27,
+      "len_ratio_vs_seth": 0.77,
+      "lol_count_of_160": 47
+    },
+    "glm_air_base": {
+      "base": "mlx-community/GLM-4.5-Air-4bit",
+      "adapter": null,
+      "detect_rate": 0.309,
+      "dist_from_half": 0.191,
+      "seth_voice": 4.94,
+      "seth_humanness": 5.52,
+      "len_ratio_vs_seth": 0.97,
+      "lol_count_of_160": 2,
+      "gen_wall_clock_s": 46
+    },
+    "glm_air_v5": {
+      "base": "mlx-community/GLM-4.5-Air-4bit",
+      "adapter": "seth-glm-air-v5-20260725-093742",
+      "detect_rate": 0.347,
+      "detect_stderr": 0.038,
+      "dist_from_half": 0.153,
+      "seth_voice": 5.16,
+      "seth_humanness": 5.71,
+      "len_ratio_vs_seth": 0.93,
+      "lol_count_of_160": 2
+    }
+  },
+  "training": {
+    "config": "~/.human/training-data/glm-v5-config.yaml",
+    "corpus": "data/imessage/voice_training_pairs.jsonl (decode-complete, 1266 pairs, 1202/64 split seed 42; gitignored — real messages)",
+    "recipe": "rank 8, scale 2.0 (verified in adapter_config.json), dropout 0.0, iters 500, lr 1e-5, batch 1, seq 2048, grad_checkpoint",
+    "val_loss": [7.084, 3.991, 3.332, 3.054, 3.102, 2.944],
+    "speed": "0.88 it/s, peak mem 62.9 GB (M4 Max 128GB, live :8741 co-resident)",
+    "base_capability_smoke": "PASS (persona / instruction-following / multi-turn)"
+  },
+  "reference_seth": { "lol_count_of_160": 2 },
+  "verdict": "Monotone improvement stack: base pivot is the dominant lever (0.358 -> 0.191), v5 adapter adds on top (-> 0.153, ~1 stderr from the 0.15 indistinguishability proxy bar). Register collapse (lol tell) eliminated at base level.",
+  "next_gate": "Human rating sheet deployed 2026-07-25 (12 items, ~/.human/blind_ab_human, drip live, ~12 days). Beat v4-repair's human detection 0.75. Promotion is a BASE switch (mlx_local provider config), not an m3_promote adapter hot-swap; depends on mlx-server venv repair.",
+  "artifacts_private": "~/blind_ab_run/{triples_glm_air,triples_glm_v5,sim_glm_air,sim_glm_v5}.json; adapter ~/.human/training-data/adapters/seth-glm-air-v5-20260725-093742"
+}

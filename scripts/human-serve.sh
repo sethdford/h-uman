@@ -28,8 +28,9 @@ GEMMA_RT_PATHS=(
     "$HOME/gemma-realtime/scripts/mlx-server.py"
 )
 
-# Prefer Python 3.13 venv (Python 3.14 has loky semaphore crash bug)
-VENV_PYTHON="$HOME/Documents/gemma-realtime-1/.venv313/bin/python3.13"
+# Prefer Python 3.12 venv (Python 3.14 has loky semaphore crash bug;
+# python@3.13 was uninstalled 2026-07-25, killing the old .venv313)
+VENV_PYTHON="$HOME/Documents/gemma-realtime-1/.venv312/bin/python3.12"
 if [[ -x "$VENV_PYTHON" ]]; then
     PYTHON="$VENV_PYTHON"
 else
@@ -101,7 +102,7 @@ is_running() {
             return 0
         fi
     fi
-    if lsof -ti:"$PORT" &>/dev/null; then
+    if lsof -ti:"$PORT" -sTCP:LISTEN &>/dev/null; then
         return 0
     fi
     return 1
@@ -192,26 +193,53 @@ except: pass
 
 do_stop() {
     read_config
+    # Collect EVERY process holding the server: the recorded PID plus anything
+    # bound to the port. The previous version killed only the PIDFILE pid and
+    # returned immediately — but `nohup $cmd &` records the wrapper pid (not the
+    # python child), so the real server orphaned and a duplicate kept the port,
+    # making the next `start` see "already running" and never restart cleanly.
+    local pids=""
     if [[ -f "$PIDFILE" ]]; then
-        local pid
-        pid=$(cat "$PIDFILE" 2>/dev/null)
-        if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-            echo "Stopping MLX server (PID $pid)..."
-            kill "$pid" 2>/dev/null
-            rm -f "$PIDFILE"
-            echo "Stopped."
-            return 0
-        fi
+        local fp
+        fp=$(cat "$PIDFILE" 2>/dev/null)
+        [[ -n "$fp" ]] && kill -0 "$fp" 2>/dev/null && pids="$fp"
     fi
-    local pids
-    pids=$(lsof -ti:"$PORT" 2>/dev/null || true)
-    if [[ -n "$pids" ]]; then
-        echo "Stopping processes on port $PORT..."
-        echo "$pids" | xargs kill 2>/dev/null
-        rm -f "$PIDFILE"
-        echo "Stopped."
-    else
+    # -sTCP:LISTEN is LOAD-BEARING. Without it `lsof -ti:$PORT` also returns
+    # every CLIENT holding an established connection to the port — including
+    # the h-uman daemon, which keeps one open while a request is in flight.
+    # `stop` then SIGTERMs the daemon along with the server. Observed
+    # 2026-07-26 during the GLM base flip: this printed 3 PIDs when only 1 was
+    # ever a listener, killed the daemon (pid 1496), and a scheduled message
+    # due at 04:21 never fired because nothing was alive to flush it (launchd
+    # KeepAlive resurrected the daemon ~10 min later). Intermittent by nature —
+    # it only bites when the daemon happens to be mid-request at stop time.
+    local port_pids
+    port_pids=$(lsof -ti:"$PORT" -sTCP:LISTEN 2>/dev/null || true)
+    pids=$(printf '%s\n%s\n' "$pids" "$port_pids" | grep -v '^$' | sort -u || true)
+    rm -f "$PIDFILE"
+    if [[ -z "$pids" ]]; then
         echo "MLX server not running."
+        return 0
+    fi
+    echo "Stopping MLX server (PIDs: $(echo "$pids" | tr '\n' ' '))..."
+    echo "$pids" | xargs kill 2>/dev/null || true
+    # WAIT for the port to actually free before returning, so a follow-up start
+    # finds a clean port. Escalate to SIGKILL if it doesn't die within 10s.
+    local waited=0
+    while lsof -ti:"$PORT" -sTCP:LISTEN &>/dev/null; do
+        if (( waited >= 10 )); then
+            echo "  still bound after ${waited}s — sending SIGKILL"
+            lsof -ti:"$PORT" -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
+            sleep 1
+            break
+        fi
+        sleep 1
+        ((waited++))
+    done
+    if lsof -ti:"$PORT" -sTCP:LISTEN &>/dev/null; then
+        echo "WARNING: port $PORT still bound after SIGKILL."
+    else
+        echo "Stopped."
     fi
 }
 
@@ -219,7 +247,7 @@ do_status() {
     read_config
     if is_running; then
         local pid
-        pid=$(lsof -ti:"$PORT" 2>/dev/null | head -1)
+        pid=$(lsof -ti:"$PORT" -sTCP:LISTEN 2>/dev/null | head -1)
         echo "MLX server running on port $PORT (PID: ${pid:-unknown})"
         echo "  Model:   $MODEL"
         if [[ -d "$ADAPTER" ]]; then
@@ -321,10 +349,41 @@ do_foreground() {
 
     # Belt-and-suspenders: if a stale instance is still listening (e.g.
     # from a manual `start`), refuse rather than fight for the port.
-    if lsof -ti:"$PORT" &>/dev/null; then
+    if lsof -ti:"$PORT" -sTCP:LISTEN &>/dev/null; then
         echo "ERROR: port $PORT already in use; refusing to exec"
         exit 1
     fi
+
+    # Memory-release barrier — added 2026-07-26 after the GLM OOM abort.
+    #
+    # The LISTEN check above clears the instant a dying server closes its
+    # socket, but a 57 GB GLM-4.5-Air process needs tens of seconds MORE to
+    # hand its Metal/mmap pages back to the kernel. Exec'ing a second 57 GB
+    # copy inside that window puts ~114 GB against this M4 Max's 107.5 GiB
+    # Metal max_recommended_working_set_size, and the new process's first
+    # command buffer aborts:
+    #   [METAL] Command buffer execution failed: Insufficient Memory
+    #   (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
+    #
+    # Never fired in 59 gemma-era starts: at 31 GB/copy two copies fit in
+    # 62 GB. GLM at 56 GB/copy is what made restart overlap fatal.
+    #
+    # NOTE: the same-day crash loop had a DIFFERENT cause — a concurrent
+    # `mlx_lm lora` training run, not a second server. That is guarded
+    # separately by scripts/training_loop.py's preflight. This barrier only
+    # covers server-vs-server overlap.
+    #
+    # Port-filtered on purpose: a spare eval server (:8743/:8747) is not a
+    # predecessor and must not gate the prod start. Capped at ~120s so a
+    # wedged predecessor degrades to "try anyway" rather than blocking
+    # launchd forever.
+    for _ in $(seq 1 60); do
+        pgrep -f "mlx-server\.py .*--port ${PORT}" >/dev/null 2>&1 || break
+        echo "  waiting for previous mlx-server on :${PORT} to release memory..."
+        sleep 2
+    done
+    # Page reclaim continues briefly after the process is reaped.
+    sleep 3
 
     # exec replaces this shell with the python process — same PID.
     # No backgrounding, no PIDFILE write, no parent to be reaped.

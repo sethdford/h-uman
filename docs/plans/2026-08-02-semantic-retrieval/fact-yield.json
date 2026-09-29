@@ -1,0 +1,444 @@
+{
+  "n_sampled": 50,
+  "n_parseable": 50,
+  "unparseable": 0,
+  "errors": 0,
+  "facts_total": 31,
+  "facts_per_message": 0.62,
+  "pct_messages_with_a_fact": 46.0,
+  "facts_in_vocab": 26,
+  "pct_facts_in_closed_vocab": 83.9,
+  "off_vocabulary_predicates": [
+    "has",
+    "plans",
+    "thinking_of",
+    "told",
+    "woke_up_at"
+  ],
+  "filters": [
+    "reactions excluded (associated_message_type != 0)",
+    "is_from_me=1 only",
+    "daemon-shaped proposals dropped (partial)"
+  ],
+  "known_limitation": "reactive daemon replies are not recorded anywhere and are NOT separable from Seth's own typing in chat.db",
+  "pool_size": 1277,
+  "projected_facts_over_pool": 792,
+  "endpoint": "http://127.0.0.1:8741/v1/chat/completions",
+  "min_len": 16,
+  "measures": "LLM fact-extractor yield on real historical messages; the daemon only invokes this path when the regex pass found nothing",
+  "rows": [
+    {
+      "msg": "I apologize for the mistake.",
+      "n_facts": 0,
+      "n_facts_in_vocab": 0,
+      "off_vocab": [],
+      "facts": []
+    },
+    {
+      "msg": "Betty Ford has 5k",
+      "n_facts": 0,
+      "n_facts_in_vocab": 0,
+      "off_vocab": [],
+      "facts": []
+    },
+    {
+      "msg": "https://music.apple.com/us/album/better-together/1440857781?i=1440857786&uo=4",
+      "n_facts": 0,
+      "n_facts_in_vocab": 0,
+      "off_vocab": [],
+      "facts": []
+    },
+    {
+      "msg": "I gotta create something or push the recruiter",
+      "n_facts": 2,
+      "n_facts_in_vocab": 2,
+      "off_vocab": [],
+      "facts": [
+        "planning=create something",
+        "planning=push the recruiter"
+      ]
+    },
+    {
+      "msg": "You can look a few",
+      "n_facts": 0,
+      "n_facts_in_vocab": 0,
+      "off_vocab": [],
+      "facts": []
+    },
+    {
+      "msg": "I definitely need some adventure soon",
+      "n_facts": 1,
+      "n_facts_in_vocab": 1,
+      "off_vocab": [],
+      "facts": [
+        "likes=adventure"
+      ]
+    },
+    {
+      "msg": "Good just told the apartment people you will stop by",
+      "n_facts": 1,
+      "n_facts_in_vocab": 0,
+      "off_vocab": [
+        "told"
+      ],
+      "facts": [
+        "told=apartment people you will stop by"
+      ]
+    },
+    {
+      "msg": "Uber scheduled I gotta git home",
+      "n_facts": 1,
+      "n_facts_in_vocab": 1,
+      "off_vocab": [],
+      "facts": [
+        "planning=going home"
+      ]
+    },
+    {
+      "msg": "yeah we're all good. Just get some rest",
+      "n_facts": 0,
+      "n_facts_in_vocab": 0,
+      "off_vocab": [],
+      "facts": []
+    },
+    {
+      "msg": "90 architects and nobody can tell me what they do",
+      "n_facts": 1,
+      "n_facts_in_vocab": 1,
+      "off_vocab": [],
+      "facts": [
+        "asking_about=what architects do"
+      ]
+    },
+    {
+      "msg": "Looks like we both are on the same page",
+      "n_facts": 0,
+      "n_facts_in_vocab": 0,
+      "off_vocab": [],
+      "facts": []
+    },
+    {
+      "msg": "This is the energy we need for today lol",
+      "n_facts": 0,
+      "n_facts_in_vocab": 0,
+      "off_vocab": [],
+      "facts": []
+    },
+    {
+      "msg": "final verify: stable dylib",
+      "n_facts": 0,
+      "n_facts_in_vocab": 0,
+      "off_vocab": [],
+      "facts": []
+    },
+    {
+      "msg": "And I am going to try",
+      "n_facts": 1,
+      "n_facts_in_vocab": 1,
+      "off_vocab": [],
+      "facts": [
+        "planning=trying something new"
+      ]
+    },
+    {
+      "msg": "It\u2019s all good\u2026 I\u2019ll figure it out",
+      "n_facts": 0,
+      "n_facts_in_vocab": 0,
+      "off_vocab": [],
+      "facts": []
+    },
+    {
+      "msg": "sorry just saw this",
+      "n_facts": 0,
+      "n_facts_in_vocab": 0,
+      "off_vocab": [],
+      "facts": []
+    },
+    {
+      "msg": "It\u2019s two weeks notice",
+      "n_facts": 0,
+      "n_facts_in_vocab": 0,
+      "off_vocab": [],
+      "facts": []
+    },
+    {
+      "msg": "Once it\u2019s done she applies and gets hired",
+      "n_facts": 0,
+      "n_facts_in_vocab": 0,
+      "off_vocab": [],
+      "facts": []
+    },
+    {
+      "msg": "Send me your resume Seth.ford@raymondjames.com",
+      "n_facts": 1,
+      "n_facts_in_vocab": 1,
+      "off_vocab": [],
+      "facts": [
+        "asking_about=resume"
+      ]
+    },
+    {
+      "msg": "I do have a list of things for ya to do when ya get here",
+      "n_facts": 0,
+      "n_facts_in_vocab": 0,
+      "off_vocab": [],
+      "facts": []
+    },
+    {
+      "msg": "I can give you all the bills but it\u2019s not fun or pretty I have no debt currently and will ",
+      "n_facts": 2,
+      "n_facts_in_vocab": 0,
+      "off_vocab": [
+        "has",
+        "plans"
+      ],
+      "facts": [
+        "has=no debt currently",
+        "plans=to put the brakes on before getting close to debt"
+      ]
+    },
+    {
+      "msg": "I thought it would be a quick turn around TBH",
+      "n_facts": 0,
+      "n_facts_in_vocab": 0,
+      "off_vocab": [],
+      "facts": []
+    },
+    {
+      "msg": "thanks for doing that.",
+      "n_facts": 0,
+      "n_facts_in_vocab": 0,
+      "off_vocab": [],
+      "facts": []
+    },
+    {
+      "msg": "I report to the guy that reports to the CIO same level as CTO",
+      "n_facts": 1,
+      "n_facts_in_vocab": 1,
+      "off_vocab": [],
+      "facts": [
+        "works_at=same level as CTO"
+      ]
+    },
+    {
+      "msg": "Jesus this has been a journey",
+      "n_facts": 0,
+      "n_facts_in_vocab": 0,
+      "off_vocab": [],
+      "facts": []
+    },
+    {
+      "msg": "Or you wanting to come visit",
+      "n_facts": 1,
+      "n_facts_in_vocab": 1,
+      "off_vocab": [],
+      "facts": [
+        "asking_about=coming to visit"
+      ]
+    },
+    {
+      "msg": "Just got home\u2026 nothing so far maybe code and chill",
+      "n_facts": 1,
+      "n_facts_in_vocab": 1,
+      "off_vocab": [],
+      "facts": [
+        "lives_in=home"
+      ]
+    },
+    {
+      "msg": "It\u2019s going to be ok\u2026 we can figure it all out right? Take care of each other",
+      "n_facts": 0,
+      "n_facts_in_vocab": 0,
+      "off_vocab": [],
+      "facts": []
+    },
+    {
+      "msg": "But bad ones\u2026 well IDK what you do",
+      "n_facts": 0,
+      "n_facts_in_vocab": 0,
+      "off_vocab": [],
+      "facts": []
+    },
+    {
+      "msg": "I am literally on the Gibson\u2019s street",
+      "n_facts": 1,
+      "n_facts_in_vocab": 1,
+      "off_vocab": [],
+      "facts": [
+        "lives_in=Gibson's street"
+      ]
+    },
+    {
+      "msg": "Day is going great\u2026 going to put together a job description for Ryann",
+      "n_facts": 1,
+      "n_facts_in_vocab": 1,
+      "off_vocab": [],
+      "facts": [
+        "planning=putting together a job description for Ryann"
+      ]
+    },
+    {
+      "msg": "Yeah they are fine",
+      "n_facts": 0,
+      "n_facts_in_vocab": 0,
+      "off_vocab": [],
+      "facts": []
+    },
+    {
+      "msg": "Hey there sunshine \ud83c\udf1e",
+      "n_facts": 0,
+      "n_facts_in_vocab": 0,
+      "off_vocab": [],
+      "facts": []
+    },
+    {
+      "msg": "What are you thought of apartment decorating. I am thinking of going full Crate and Barrel",
+      "n_facts": 2,
+      "n_facts_in_vocab": 1,
+      "off_vocab": [
+        "thinking_of"
+      ],
+      "facts": [
+        "asking_about=thought of apartment decorating",
+        "thinking_of=going full Crate and Barrel for apartment decorating"
+      ]
+    },
+    {
+      "msg": "bet you bought another mechanical keyboard this week didnt you",
+      "n_facts": 1,
+      "n_facts_in_vocab": 1,
+      "off_vocab": [],
+      "facts": [
+        "asking_about=bought mechanical keyboard this week"
+      ]
+    },
+    {
+      "msg": "Mindy told me she decorated her place for under 5k",
+      "n_facts": 1,
+      "n_facts_in_vocab": 1,
+      "off_vocab": [],
+      "facts": [
+        "knows=Mindy"
+      ]
+    },
+    {
+      "msg": "Yup that\u2019s the plan",
+      "n_facts": 0,
+      "n_facts_in_vocab": 0,
+      "off_vocab": [],
+      "facts": []
+    },
+    {
+      "msg": "I have to pay 11K for movers to Utah and another 10-20K to furnish this apartment",
+      "n_facts": 3,
+      "n_facts_in_vocab": 3,
+      "off_vocab": [],
+      "facts": [
+        "moving_to=Utah",
+        "planning=paying 11K for movers to Utah",
+        "planning=paying 10-20K to furnish apartment"
+      ]
+    },
+    {
+      "msg": "You only live life once so enjoy it while ya can and\u2026 age really is just a number",
+      "n_facts": 0,
+      "n_facts_in_vocab": 0,
+      "off_vocab": [],
+      "facts": []
+    },
+    {
+      "msg": "was it 12:53 or 2:14 they used it?\n\nthe time was 2:14 PM, while the other instance differe",
+      "n_facts": 0,
+      "n_facts_in_vocab": 0,
+      "off_vocab": [],
+      "facts": []
+    },
+    {
+      "msg": "you are valuable and deserve to be treated with respect",
+      "n_facts": 0,
+      "n_facts_in_vocab": 0,
+      "off_vocab": [],
+      "facts": []
+    },
+    {
+      "msg": "Facing the ocean \ud83c\udf0a",
+      "n_facts": 0,
+      "n_facts_in_vocab": 0,
+      "off_vocab": [],
+      "facts": []
+    },
+    {
+      "msg": "Well I\u2019d love to feel your body next to mine and whisper in your ear how beautiful and sex",
+      "n_facts": 2,
+      "n_facts_in_vocab": 2,
+      "off_vocab": [],
+      "facts": [
+        "likes=physical intimacy with recipient",
+        "likes=complimenting recipient's appearance"
+      ]
+    },
+    {
+      "msg": "nice! You make it back safe?",
+      "n_facts": 1,
+      "n_facts_in_vocab": 1,
+      "off_vocab": [],
+      "facts": [
+        "asking_about=safety of recipient"
+      ]
+    },
+    {
+      "msg": "can't wait to see it",
+      "n_facts": 0,
+      "n_facts_in_vocab": 0,
+      "off_vocab": [],
+      "facts": []
+    },
+    {
+      "msg": "Woke up at 5:00 enjoying the rain \ud83c\udf27\ufe0f",
+      "n_facts": 1,
+      "n_facts_in_vocab": 0,
+      "off_vocab": [
+        "woke_up_at"
+      ],
+      "facts": [
+        "woke_up_at=5:00"
+      ]
+    },
+    {
+      "msg": "still grinding with the business? Hope you're taking a breather, you wanna grab food soon",
+      "n_facts": 3,
+      "n_facts_in_vocab": 3,
+      "off_vocab": [],
+      "facts": [
+        "asking_about=business progress",
+        "asking_about=taking breaks",
+        "planning=grabbing food soon"
+      ]
+    },
+    {
+      "msg": "Thanks! \nIs your billing address your current address?",
+      "n_facts": 1,
+      "n_facts_in_vocab": 1,
+      "off_vocab": [],
+      "facts": [
+        "asking_about=billing address being current address"
+      ]
+    },
+    {
+      "msg": "Doesn\u2019t matter to me",
+      "n_facts": 0,
+      "n_facts_in_vocab": 0,
+      "off_vocab": [],
+      "facts": []
+    },
+    {
+      "msg": "PJs or sweatpants?",
+      "n_facts": 1,
+      "n_facts_in_vocab": 1,
+      "off_vocab": [],
+      "facts": [
+        "asking_about=preference between PJs and sweatpants"
+      ]
+    }
+  ]
+}

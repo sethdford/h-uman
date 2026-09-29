@@ -81,17 +81,22 @@ hu_error_t hu_persona_feedback_record(hu_allocator_t *alloc, const char *persona
         const char *c = feedback->corrected_response;
         size_t cl = feedback->corrected_response_len;
 #define FB_HAS(kw) (memmem(c, cl, kw, sizeof(kw) - 1) != NULL)
-        if (FB_HAS("listen") || FB_HAS("heard") || FB_HAS("validat"))
-            { cat = "listening"; cat_len = 9; }
-        else if (FB_HAS("sorry") || FB_HAS("repair") || FB_HAS("misunderst"))
-            { cat = "repair"; cat_len = 6; }
-        else if (FB_HAS("tone") || FB_HAS("formal") || FB_HAS("casual") ||
-                 FB_HAS("mirror"))
-            { cat = "mirroring"; cat_len = 9; }
-        else if (FB_HAS("conflict") || FB_HAS("pushback") || FB_HAS("boundar"))
-            { cat = "conflict"; cat_len = 8; }
-        else if (FB_HAS("emoji") || FB_HAS("short") || FB_HAS("long"))
-            { cat = "voice"; cat_len = 5; }
+        if (FB_HAS("listen") || FB_HAS("heard") || FB_HAS("validat")) {
+            cat = "listening";
+            cat_len = 9;
+        } else if (FB_HAS("sorry") || FB_HAS("repair") || FB_HAS("misunderst")) {
+            cat = "repair";
+            cat_len = 6;
+        } else if (FB_HAS("tone") || FB_HAS("formal") || FB_HAS("casual") || FB_HAS("mirror")) {
+            cat = "mirroring";
+            cat_len = 9;
+        } else if (FB_HAS("conflict") || FB_HAS("pushback") || FB_HAS("boundar")) {
+            cat = "conflict";
+            cat_len = 8;
+        } else if (FB_HAS("emoji") || FB_HAS("short") || FB_HAS("long")) {
+            cat = "voice";
+            cat_len = 5;
+        }
 #undef FB_HAS
     }
     hu_json_append_key_value(&buf, "category", 8, cat, cat_len);
@@ -172,14 +177,19 @@ hu_error_t hu_persona_feedback_apply(hu_allocator_t *alloc, const char *persona_
             continue;
         }
 
+        /* hu_json_get_string returns a BORROWED pointer into `root` (json.c
+         * returns v->data.string.ptr, not a copy). Freeing root here — as this
+         * loop used to — dangles all four locals for the rest of the body, and
+         * ASan caught the daemon reading them in production. The tree is now
+         * released at `next_line`, after the last use, so every exit path frees
+         * exactly once. Use `goto next_line`, never a bare `continue`. */
         const char *ch = hu_json_get_string(root, "channel");
         const char *orig = hu_json_get_string(root, "original");
         const char *corr = hu_json_get_string(root, "corrected");
         const char *ctx = hu_json_get_string(root, "context");
-        hu_json_free(alloc, root);
 
         if (!corr || !corr[0])
-            continue;
+            goto next_line;
 
         const char *channel = ch && ch[0] ? ch : "cli";
         size_t channel_len = strlen(channel);
@@ -204,14 +214,14 @@ hu_error_t hu_persona_feedback_apply(hu_allocator_t *alloc, const char *persona_
                 (bc + 1) * sizeof(hu_persona_example_bank_t));
             if (!new_banks) {
                 had_oom = true;
-                continue;
+                goto next_line;
             }
             persona.example_banks = new_banks;
             memset(&persona.example_banks[bc], 0, sizeof(hu_persona_example_bank_t));
             persona.example_banks[bc].channel = hu_strndup(alloc, channel, channel_len);
             if (!persona.example_banks[bc].channel) {
                 had_oom = true;
-                continue;
+                goto next_line;
             }
             persona.example_banks_count = bc + 1;
             bank = &persona.example_banks[bc];
@@ -224,7 +234,7 @@ hu_error_t hu_persona_feedback_apply(hu_allocator_t *alloc, const char *persona_
             (n + 1) * sizeof(hu_persona_example_t));
         if (!new_examples) {
             had_oom = true;
-            continue;
+            goto next_line;
         }
         bank->examples = new_examples;
         bank->examples[n].context = hu_strdup(alloc, context);
@@ -243,6 +253,12 @@ hu_error_t hu_persona_feedback_apply(hu_allocator_t *alloc, const char *persona_
                 alloc->free(alloc->ctx, bank->examples[n].response,
                             strlen(bank->examples[n].response) + 1);
         }
+
+    next_line:
+        /* Single release point for `root`. Every borrowed pointer above
+         * (ch/orig/corr/ctx, and `channel`/`context`/`incoming` derived from
+         * them) is dead past this line. */
+        hu_json_free(alloc, root);
     }
 
     fclose(f);

@@ -36,6 +36,7 @@ jobs:
       docs: ${{ steps.f.outputs.docs }}
       tokens: ${{ steps.f.outputs.tokens }}
       apps: ${{ steps.f.outputs.apps }}
+      core: ${{ steps.f.outputs.core }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
@@ -53,6 +54,19 @@ jobs:
               - 'design-tokens/**'
             apps:
               - 'apps/**'
+            # Inputs that can move the dead-strip ratchet's two counters: the
+            # sources it links, the CMake config that decides WHICH sources
+            # compile into human_core, and the gate itself. A docs-only PR
+            # cannot change A or B, and macOS runners are scarce (see
+            # build-macos below).
+            core:
+              - 'src/**'
+              - 'include/**'
+              - 'CMakeLists.txt'
+              - 'CMakePresets.json'
+              - 'scripts/check-dead-strip-ratchet.sh'
+              - 'scripts/lib/ratchet.sh'
+              - '.github/workflows/ci.yml'
 
   build-and-test:
     strategy:
@@ -79,6 +93,10 @@ jobs:
           enable-asan: "true"
           enable-curl: "true"
           enable-all-channels: "true"
+          # Mirror the dev preset's feature set so the ML / feeds / Cartesia /
+          # RL test surface (~370 registered tests) runs somewhere in CI. Before
+          # 2026-09-10 every job left HU_ENABLE_ML at its OFF default.
+          extra-cmake-flags: -DHU_ENABLE_ML=ON -DHU_ENABLE_FEEDS=ON -DHU_ENABLE_CARTESIA=ON -DHU_ENABLE_RL_FULL=ON
       - uses: ./.github/actions/run-tests
         with:
           asan-options: ${{ runner.os == 'Linux' && 'detect_leaks=0:detect_stack_use_after_return=0' || '' }}
@@ -105,7 +123,9 @@ jobs:
             echo "::error::Could not parse test count from human_tests output (expected 'N/M passed')"
             exit 1
           fi
-          BASELINE=9771
+          # 2026-09-10 review: the guard sat at 9,771 against ~11,300 (Linux) /
+          # ~12,100 (macOS) real counts, so >1,500 tests could vanish unseen.
+          BASELINE=11200
           if [ "$COUNT" -lt "$BASELINE" ]; then
             echo "::error::Test count regression: $COUNT < $BASELINE baseline"
             exit 1
@@ -135,6 +155,140 @@ jobs:
         # gates without being themselves gated. See
         # .claude/rules/test-source-gate-symmetry.md.
         run: bash scripts/check-test-source-gate-symmetry.sh
+      - name: Checker self-tests (fixtures)
+        # The pre-commit checkers above and in .githooks/pre-commit, plus the
+        # doc-fleet link checker, are guarded by fixture smoke tests: each
+        # points the checker at a known-bad and a known-good input and asserts
+        # the exact exit code. Without this step a regression in a checker (e.g. the
+        # platform-macro blind spot fixed in 38401cea4) stays green forever.
+        # Pure bash + python3, no build dependency.
+        run: |
+          set -euo pipefail
+          bash tests/fixtures/check-test-refs/run-smoke-test.sh
+          bash tests/fixtures/check-gate-symmetry/run-smoke-test.sh
+          bash tests/fixtures/check-markdown-links/run-smoke-test.sh
+          bash tests/fixtures/check-realpath-wrapper/run-smoke-test.sh
+          bash tests/fixtures/check-dead-strip-config/run-smoke-test.sh
+          bash tests/fixtures/pre-push-deletion/run-smoke-test.sh
+
+  # The dead-strip ratchet (.claude/rules/dead-strip-ratchet.md) had exactly one
+  # enforcement point before this job: .githooks/pre-push. That hook SKIPS in one
+  # line when a worktree has no configured `build/`, deliberately — an
+  # unmeasurable gate must never block a push
+  # (.claude/rules/no-number-without-a-measurement.md). Measured 2026-09-26, that
+  # skip was live in 9 of this repo's 19 worktrees, and a skipped gate is
+  # indistinguishable from a passing one, so the ratchet was bypassable simply by
+  # working in such a worktree. This job is the backstop the local hook cannot be:
+  # it always has a build, so it can always measure.
+  #
+  # macos-latest is not a preference. The gate parses macOS ld's link map
+  # (`# Object files:` / `# Dead Stripped Symbols:`); GNU ld's -Map is a different
+  # format, so on any non-Darwin host the script skips outright.
+  #
+  # WHY ITS OWN CONFIGURE INSTEAD OF REUSING AN EXISTING JOB'S BUILD: the
+  # baselines in scripts/check-dead-strip-ratchet.sh are configuration-specific —
+  # "A differently-configured tree compiles a different set of translation units,
+  # so pointing HU_BUILD_DIR at e.g. build-check measures a DIFFERENT universe and
+  # its numbers are not comparable to these constants." They were calibrated
+  # against the `dev` preset. Measured on d7306a191 by configuring both and diffing
+  # CMakeFiles/human_core.dir/link.txt, the closest existing candidate —
+  # build-and-test on macos-latest, the ASan job — compiles a human_core that
+  # differs from the dev preset by 48 translation units:
+  #   +29  ALL_CHANNELS modules the preset excludes (discord, signal, matrix,
+  #        webrtc{,_dtls,_ice,_srtp}, twilio, teams, line, irc, …). That job passes
+  #        enable-all-channels: "true"; the dev preset sets
+  #        HU_ENABLE_ALL_CHANNELS=OFF, the Task 11 flip that moved the member count
+  #        1,024 -> 991 and re-based these very constants.
+  #   -19  modules the preset compiles and that job does not (cron_*, skill_run,
+  #        skillforge, update, canvas, claude_code, composio, notebook, …), because
+  #        it never sets HU_ENABLE_CRON / HU_ENABLE_SKILLS / HU_ENABLE_UPDATE /
+  #        HU_ENABLE_TOOLS_ADVANCED.
+  # Counter A counts archive members with no live symbol, so those 29 unconfigured
+  # channel modules would land straight in it — confidently wrong counts, which is
+  # worse than skipping. Naming `--preset dev` rather than copying its flags also
+  # means this job follows the preset if it is ever retuned, instead of drifting
+  # away from the constants in silence.
+  #
+  # Since #473 this is load-bearing for correctness, not just for accuracy: the
+  # gate now compares $BUILD_DIR/CMakeCache.txt against the dev preset and
+  # RATCHET_SKIPs on any mismatch, even under HU_DEAD_STRIP_STRICT=1. Pointing
+  # this job at another job's build would therefore skip every run — and because
+  # this job treats a skip as a failure, it would be permanently red. Verified
+  # that `--preset dev -DCMAKE_C_COMPILER_LAUNCHER=ccache` passes that check:
+  # the launcher is not a preset variable, so it is not compared.
+  dead-strip-ratchet:
+    runs-on: macos-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.core == 'true' || github.event_name != 'pull_request' }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install dependencies
+        # Mirrors .github/actions/setup-build's macOS step. Not reusing that
+        # composite action on purpose: it builds its flag list from boolean
+        # inputs and has no preset path, which is the mismatch this job exists
+        # to avoid.
+        run: brew install sqlite3 libsodium ccache
+      - name: Cache ccache
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ccache
+          key: macOS-ccache-deadstrip-v1-${{ hashFiles('src/**', 'include/**') }}
+          restore-keys: |
+            macOS-ccache-deadstrip-v1-
+      - name: Configure (dev preset — the configuration the baselines were measured against)
+        # CMAKE_C_COMPILER_LAUNCHER is the ONLY flag added on top of the preset.
+        # A compiler launcher cannot change which translation units compile, so
+        # it cannot move either counter.
+        run: |
+          export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+          cmake --preset dev -DCMAKE_C_COMPILER_LAUNCHER=ccache
+      - name: Record the measured configuration
+        # Printed so a reader of a red run can confirm WHICH universe was
+        # measured without re-deriving it from the preset.
+        run: |
+          grep -E '^HU_(ENABLE|HAS)_[A-Z_]+:BOOL=' build/CMakeCache.txt | sort
+          echo "human_core translation units: $(tr ' ' '\n' < build/CMakeFiles/human_core.dir/link.txt | grep -c '\.o$')"
+      - name: Build human + human_tests
+        # Only the two targets the gate reads through: `human`, whose link line
+        # it replays with -dead_strip, and `human_tests`, whose objects supply
+        # the "is it pinned by a test" reference set for counter B.
+        run: cmake --build build --target human human_tests -j"$(sysctl -n hw.logicalcpu)"
+      - name: Dead-strip ratchet
+        shell: bash
+        # HU_DEAD_STRIP_STRICT=1 for the same reason .githooks/pre-push sets it:
+        # this is an enforcement point, and the stale-build demotion (print the
+        # counts, exit 0) is the wrong answer here. The build above is this
+        # commit's, so there is nothing to demote for.
+        #
+        # A SKIP IS A FAILURE HERE, and only here. Locally a skip is honest —
+        # there may be no build to measure. On this runner there always is one,
+        # so `RATCHET_SKIP` means the gate malfunctioned, and letting the job go
+        # green on it would rebuild the exact "silence == passed" hole this job
+        # was added to close.
+        #
+        # NO PIPELINE, deliberately. The first cut of this step piped the gate
+        # through `tee` and trusted `|| ok=0` to catch a non-zero exit. With no
+        # explicit `shell:` a run step is `bash -e {0}` — WITHOUT pipefail, so a
+        # pipeline reports `tee`'s status and the gate's exit 1 is discarded.
+        # Observed on 7b5a1f6d4: the gate printed
+        #   B = unreferenced dead symbols: 77 (ceiling 76)
+        #   FAIL: unreferenced dead symbols grew. Baseline: 76, current: 77
+        # and the job still went GREEN. `shell: bash` above now supplies
+        # pipefail, but redirecting to a file and capturing the status directly
+        # means this step does not depend on that default at all.
+        run: |
+          out="${RUNNER_TEMP:-/tmp}/dead-strip-ratchet.out"
+          ok=1
+          HU_DEAD_STRIP_STRICT=1 bash scripts/check-dead-strip-ratchet.sh >"$out" 2>&1 || ok=0
+          cat "$out"
+          if [ "$ok" = "0" ]; then
+            echo "::error::Dead code grew past the dead-strip ratchet. Delete the never-loaded objects / unreferenced dead symbols listed above, or give them a real caller on a live path — see .claude/rules/dead-strip-ratchet.md."
+            exit 1
+          fi
+          if grep -q '^RATCHET_SKIP:' "$out"; then
+            echo "::error::The dead-strip ratchet could not measure on a runner configured for it, so this run proves nothing. Fix the gate rather than ignoring it — see .claude/rules/dead-strip-ratchet.md."
+            exit 1
+          fi
 
   integration-tests:
     runs-on: ubuntu-latest
@@ -283,16 +437,33 @@ jobs:
           build-type: MinSizeRel
           enable-lto: "true"
           enable-all-channels: "true"
+          # sqlite-vec (af2c7d7da) adds ~300 KB; the size budget measures the
+          # binary without it, as the HU_ENABLE_SQLITE_VEC option documents.
+          # 2679 KB vs a 2600 KB budget with it on (2026-09-02).
+          extra-cmake-flags: "-DHU_ENABLE_SQLITE_VEC=OFF"
       - run: ls -lh build/human
-      - name: Enforce binary size budget (2600KB)
+      - name: Enforce binary size budget (2800KB)
+        # Budget history — raise only with a measurement, never to make a red
+        # run green:
+        #   2600 KB (2026-09-02): ~9% headroom, consumed by the 09-05..09-19
+        #     sprint (memory, persona, eval features). Crossed at bda8cb333
+        #     (#419): 2594 KB -> 2611 KB.
+        #   2800 KB (2026-09-20): re-baselined after a linker-map audit of the
+        #     2611 KB binary found nothing to trim — __text 1809 KB, __cstring
+        #     512 KB, largest const table 6 KB, -Oz + no-unwind-tables already
+        #     on, a full strip saves 128 B, -no_function_starts saves 11.7 KB.
+        #     The growth is product code. 2800 KB keeps ~7% headroom and stays
+        #     below the ~2900 KB point where the docs' "~2468 KB" claim would
+        #     trip the 15% drift gate below, so that gate remains the honest
+        #     upper bound on the marketing number.
         run: |
           SIZE=$(stat -f%z build/human)
-          BUDGET=2662400
+          BUDGET=2867200
           KB=$((SIZE / 1024))
           PCT=$((SIZE * 100 / BUDGET))
-          echo "::notice::Binary size: ${KB}KB (${PCT}% of 2600KB budget)"
+          echo "::notice::Binary size: ${KB}KB (${PCT}% of 2800KB budget)"
           if [ "$SIZE" -gt "$BUDGET" ]; then
-            echo "::error::Binary size ${KB}KB exceeds 2600KB budget"
+            echo "::error::Binary size ${KB}KB exceeds 2800KB budget"
             exit 1
           fi
       - name: Doc binary-size drift gate
@@ -318,7 +489,7 @@ jobs:
     if: ${{ needs.changes.outputs.apps == 'true' || github.event_name != 'pull_request' }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@v6
         with:
           java-version: "17"
           distribution: temurin
@@ -560,6 +731,11 @@ jobs:
           fi
       - name: Run scripts/check.sh
         run: HU_SKIP_FORMAT=1 scripts/check.sh
+      - name: File-size ratchet
+        # Same gate as .githooks/pre-commit. Enforced here because the hook is
+        # bypassable and a merge commit that stages src/daemon.c past the
+        # ceiling then blocks every other branch (PR #436, 2026-09-20).
+        run: bash scripts/check-file-size-ceiling.sh
 
   benchmark:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -670,6 +846,11 @@ jobs:
       - run: cd website && npm run format:check
       - run: cd website && npm run check
       - run: cd website && npm run build
+      - run: cd website && npm run check:fonts
+      - name: Quiet Room selectors and font-display survive the build
+        run: |
+          grep -q ':is(:root\[data-brand=quiet\]' website/dist/_astro/*.css
+          grep -q 'font-family:var(--hu-font-display' website/dist/_astro/*.css
       - run: test -d website/dist
 
   lighthouse:
@@ -722,6 +903,8 @@ jobs:
           cache: npm
           cache-dependency-path: design-tokens/package-lock.json
       - run: cd design-tokens && npm ci && npm run build -- --outdir /tmp/dt-check
+      - run: cd design-tokens && npm test
+      - run: cd design-tokens && npm run check:contrast
       - run: bash design-tokens/check-drift.sh
 
   nix:
@@ -782,6 +965,20 @@ jobs:
           if ! git diff --exit-code docs/icon-inventory.md docs/components.md 2>/dev/null; then
             echo "::warning::Generated docs are stale. Run 'cd ui && npm run docs' to update."
           fi
+          # docs/build-options.md is generated from CMakeLists.txt + CMakePresets.json
+          # and had drifted unnoticed since it was introduced. Unlike the two above
+          # this is a HARD failure: the table tells people which options a preset
+          # turns on, and a wrong answer there sends them to configure a build that
+          # does not exist.
+          #
+          # --check compares the regenerated table against the committed one and
+          # ignores ONLY the "as of commit <sha>" provenance line. That line cannot
+          # be self-consistent — a commit that edits CMakeLists.txt and regenerates
+          # the table in the same commit necessarily writes the previous sha — and
+          # it is also meaningless on the shallow clone actions/checkout makes by
+          # default. Gating on it would fail every legitimate build-option change.
+          # Needs python3 + git only, no build.
+          bash scripts/dev/build-options-table.sh --check
       - name: Doc fleet (index, drift, terminology, frontmatter, relative links)
         run: scripts/doc-fleet.sh
 
@@ -942,5 +1139,67 @@ jobs:
         run: |
           python3 scripts/test_blind_ab_gate.py
           python3 scripts/test_check_capability_gates.py
+      # US-1 (sprint-better-than-human-2026-09-05): hermetic, stdlib-only
+      # (no chat.db, no model, no ~/.human reads) merge-script tests, same
+      # convention as the sibling tests above.
+      - name: Preference-corpus merge tests (hermetic, stdlib-only)
+        run: python3 scripts/test_merge_seth_preference_sources.py
+      # Adapter promotion gates (scale / smoke / authorship / evidence). Hermetic:
+      # HOME is a temp dir and the MLX server is a local fake on 127.0.0.1:0.
+      - name: Adapter promotion gate tests (hermetic, stdlib-only)
+        run: python3 scripts/test_m3_promote.py
+      # Behavioral conversation-quality metric: synthetic chat.db/memory.db
+      # fixtures in a temp dir, no real messages.
+      - name: Conversation-quality metric tests (hermetic, stdlib-only)
+        run: python3 scripts/test_eval_conversation_quality.py
+      # Python twin of hu_hurt_signal_detect: phrase lists are read from
+      # src/daemon/daemon_hurt_handoff.c; cases mirror the C tests.
+      - name: Hurt-signal twin tests (hermetic, stdlib-only)
+        run: python3 scripts/test_hurt_signal.py
+      # On-policy preference-pair miner (2026-09-26): same fixtures; a pair is
+      # only minted when h-uman and Seth answered the same inbound message.
+      - name: On-policy pair miner tests (hermetic, stdlib-only)
+        run: python3 scripts/test_mine_onpolicy_pairs.py
+      # On-policy rejected-sample generator: fake human-daemon + fake model
+      # server on 127.0.0.1:0; asserts guards, env gates and the fidelity check.
+      - name: On-policy generator tests (hermetic, stdlib-only)
+        run: python3 scripts/test_gen_onpolicy_rejected.py
+      # Per-contact reply-length floor measurement (2026-09-26): same fixtures,
+      # asserts only Seth-authored texts are measured and n<min writes nothing.
+      - name: Contact reply-length measurement tests (hermetic, stdlib-only)
+        run: python3 scripts/test_measure_contact_reply_lengths.py
+      # Stale contact-profile checker (2026-09-26): pure per-contact checks plus
+      # a synthetic chat.db run; asserts reports carry no message text.
+      - name: Contact profile staleness tests (hermetic, stdlib-only)
+        run: python3 scripts/test_check_contact_profiles.py
+      # Depth upweighting (2026-09-24): hermetic, stdlib-only; the .sh runs
+      # the real block extracted from train-glm-adapter.sh on a scratch corpus.
+      - name: Training depth-upweight tests (hermetic, stdlib-only)
+        run: |
+          python3 scripts/test_upweight_depth_examples.py
+          bash scripts/test_train_upweight_block.sh
+      # Measurement-integrity pins for the fidelity nightly. Both are hermetic
+      # and stdlib-only (no mlx, no model, no ~/.human reads), so they belong on
+      # this job rather than a GPU host. They guard the class where the harness
+      # emits a well-formed verdict from a run in which no measurement happened
+      # — 15 such nights are in the archive (2026-07-12..07-27).
+      - name: Fidelity-nightly measurement-integrity pins
+        run: |
+          python3 scripts/test_fidelity_family_guard.py
+          python3 scripts/test_fidelity_differentiation.py
+      - name: Style-card measurement pins (hermetic, stdlib-only)
+        run: python3 scripts/test_measure_style_card.py
+      # Emotional-register axis: fake judge, temp sqlite, temp persona dir.
+      # Pins that every refusal path (no card, judge mismatch, n < min, judge
+      # down, parse failures) writes NOTHING, and the JSD/aggregate math.
+      - name: Emotion-register measurement pins (hermetic, stdlib-only)
+        run: python3 scripts/test_emotion_register.py
+      # Not stdlib-only: this suite is written against pytest fixtures
+      # (monkeypatch / tmp_path / capsys), so pytest is installed for it.
+      # Main went red on 2026-09-05 when it landed without this step.
+      - name: Install pytest for the persona-evolution suite
+        run: python3 -m pip install --quiet pytest
+      - name: Persona-evolution windowed re-derivation pins (hermetic, no chat.db)
+        run: python3 scripts/test_eval_persona_evolution.py
       - name: Enforce capability registry against blind_ab gate
         run: python3 scripts/check_capability_gates.py

@@ -19,7 +19,18 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 HUMAN_DIR="$HOME/.human"
 LOG_DIR="$HUMAN_DIR/logs"
 LOG_FILE="$LOG_DIR/daily-feeds-$(date +%Y%m%d).log"
-HUMAN_BIN="$PROJECT_DIR/build/human"
+# Prefer the INSTALLED daemon binary: it is the verified, deployed build.
+# $PROJECT_DIR/build/human is whatever a dev checkout last compiled — on
+# 2026-09-02 that was a dirty tree 46 commits behind origin/main, and this
+# job had been running it every 5 minutes. Override with HUMAN_BIN=... .
+HUMAN_BIN="${HUMAN_BIN:-}"
+if [ -z "$HUMAN_BIN" ]; then
+    if [ -x "$HOME/.local/bin/human-daemon" ]; then
+        HUMAN_BIN="$HOME/.local/bin/human-daemon"
+    else
+        HUMAN_BIN="$PROJECT_DIR/build/human"
+    fi
+fi
 
 mkdir -p "$LOG_DIR"
 

@@ -205,10 +205,6 @@ size_t hu_conversation_build_mirror_directive(const char *distinctive_words, siz
                                               uint32_t seed, float probability, char *buf,
                                               size_t cap);
 
-/* ── Delayed follow-up topic extraction (F8) ─────────────────────────────── */
-size_t hu_conversation_extract_followup_topic(const char *msg, size_t msg_len, char *topic_out,
-                                              size_t cap);
-
 /* ── Double-text decision (F9) ───────────────────────────────────────────── */
 bool hu_conversation_should_double_text(const char *last_response, size_t resp_len,
                                         const hu_channel_history_entry_t *entries, size_t count,
@@ -579,14 +575,18 @@ hu_group_response_t hu_conversation_classify_group(const char *msg, size_t msg_l
                                                    const hu_channel_history_entry_t *entries,
                                                    size_t count);
 
-/* ── Inline reply classifier (iMessage quoted text fallback) ───────────────── */
+/* ── Outbound parrot guard ─────────────────────────────────────────────────── */
 
-/* Decide whether to use quoted-text inline reply: "> {original}\n\n{response}".
- * Returns true when: multiple questions pending, conversation diverged topics,
- * or they referenced something from earlier ("you said", "earlier", "what about").
- * Returns false for single-topic conversations. */
-bool hu_conversation_should_inline_reply(const hu_channel_history_entry_t *entries, size_t count,
-                                         const char *last_msg, size_t last_msg_len);
+/* True when an outbound bubble is a verbatim prefix of the inbound message it
+ * answers — i.e. the reply would parrot the contact's own words back at them.
+ * A leading markdown quote marker ("> ") and trailing whitespace on the bubble
+ * are ignored; echoes shorter than 16 bytes ("lol", "same") are natural and
+ * never flagged. Replaces the F40 inline-quote fallback, which composed
+ * "> {inbound[0..80]}\n\n{reply}" — the markdown plaintext-ifier then stripped
+ * the quote marker and the splitter shipped the bare echo as its own bubble
+ * (2026-07-25 Dermot incident). */
+bool hu_conversation_reply_parrots_inbound(const char *bubble, size_t bubble_len,
+                                           const char *inbound, size_t inbound_len);
 
 /* ── Tapback-vs-text decision engine ─────────────────────────────────────── */
 
@@ -971,6 +971,13 @@ size_t hu_conversation_flush_scheduled_for(uint64_t now_ms, const char *channel_
 /* Persist scheduled messages to a JSON file. Load restores on startup. */
 hu_error_t hu_conversation_sched_save(const char *path, size_t path_len);
 hu_error_t hu_conversation_sched_load(const char *path, size_t path_len);
+
+/* Reload the scheduled-message queue from `path` only when the file's
+ * mtime/size fingerprint changed since the last load. Call once per delivery
+ * pass: it makes CLI `schedule add` visible to a RUNNING daemon (the
+ * once-per-process load left new entries invisible until restart). An absent
+ * file is not an error — memory stays authoritative. */
+hu_error_t hu_conversation_sched_reload_if_changed(const char *path, size_t path_len);
 
 #define HU_SCHED_MAX 16
 

@@ -11,13 +11,16 @@
 #include "human/cognition/metacognition.h"
 #include "human/config.h"
 #include "human/context_engine.h"
+#include "human/context_engine_rag.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 #include "human/data/loader.h"
 #include "human/hook.h"
 #include "human/memory.h"
 #include "human/memory/engines.h"
 #include "human/memory/factory.h"
 #include "human/memory/retrieval.h"
+#include "human/memory/semantic_recall.h"
 #include "human/memory/vector.h"
 #include "human/memory/vector/embedder_gemini_adapter.h"
 #include "human/memory/vector/embeddings_gemini.h"
@@ -151,6 +154,109 @@
 #endif
 
 #define HU_BOOTSTRAP_CHANNELS_MAX 20
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Configured-but-not-compiled channels
+ * (.claude/rules/silent-config-gated-subsystems.md)
+ *
+ * Every channel below is created inside `#if HU_HAS_<GATE>`. When the gate is
+ * off the whole block vanishes, so a configured `channels.<key>` is dropped
+ * without a word: the daemon starts clean, the channel never polls, and the
+ * only evidence is an absence of traffic. The dev and prod presets compile
+ * just iMessage/Slack/Telegram/WhatsApp/Email/Gmail/IMAP, so this is the
+ * normal case for the other twenty, not a corner case. The rule requires one
+ * operator-visible line naming what to change.
+ *
+ * `#if` reads an undefined gate as 0, but a C expression cannot — an
+ * undefined HU_HAS_X is a bare identifier and fails to compile. HU_BUILT_IN
+ * is the Linux IS_ENABLED() idiom: paste the gate onto a placeholder that
+ * exists only for the value 1, then take the second argument. The trailing
+ * padding argument keeps `...` non-empty under -Wpedantic.
+ * ────────────────────────────────────────────────────────────────────────── */
+#define HU_GATE_PLACEHOLDER_1             0,
+#define HU_GATE_SECOND(ignored, val, ...) val
+#define HU_GATE_TEST(arg1_or_junk)        HU_GATE_SECOND(arg1_or_junk 1, 0, 0)
+#define HU_GATE_PASTE(gate)               HU_GATE_TEST(HU_GATE_PLACEHOLDER_##gate)
+#define HU_BUILT_IN(gate)                 HU_GATE_PASTE(gate)
+
+typedef struct {
+    const char *key;          /* the channels.<key> block in config.json */
+    const char *cmake_option; /* the option that compiles the channel in */
+    int compiled;             /* 1 when this binary has the channel */
+} hu_channel_gate_t;
+
+static const hu_channel_gate_t hu_channel_gates[] = {
+    {"email", "HU_ENABLE_EMAIL", HU_BUILT_IN(HU_HAS_EMAIL)},
+    {"imap", "HU_ENABLE_IMAP", HU_BUILT_IN(HU_HAS_IMAP)},
+    {"imessage", "HU_HAS_IMESSAGE", HU_BUILT_IN(HU_HAS_IMESSAGE)},
+    {"gmail", "HU_ENABLE_GMAIL", HU_BUILT_IN(HU_HAS_GMAIL)},
+    {"pwa", "HU_ENABLE_PWA", HU_BUILT_IN(HU_HAS_PWA)},
+    {"telegram", "HU_ENABLE_TELEGRAM", HU_BUILT_IN(HU_HAS_TELEGRAM)},
+    {"discord", "HU_ENABLE_DISCORD", HU_BUILT_IN(HU_HAS_DISCORD)},
+    {"slack", "HU_ENABLE_SLACK", HU_BUILT_IN(HU_HAS_SLACK)},
+    {"signal", "HU_ENABLE_SIGNAL", HU_BUILT_IN(HU_HAS_SIGNAL)},
+    {"whatsapp", "HU_ENABLE_WHATSAPP", HU_BUILT_IN(HU_HAS_WHATSAPP)},
+    {"line", "HU_ENABLE_LINE", HU_BUILT_IN(HU_HAS_LINE)},
+    {"google_chat", "HU_ENABLE_GOOGLE_CHAT", HU_BUILT_IN(HU_HAS_GOOGLE_CHAT)},
+    {"facebook", "HU_ENABLE_FACEBOOK", HU_BUILT_IN(HU_HAS_FACEBOOK)},
+    {"instagram", "HU_ENABLE_INSTAGRAM", HU_BUILT_IN(HU_HAS_INSTAGRAM)},
+    {"twitter", "HU_ENABLE_TWITTER", HU_BUILT_IN(HU_HAS_TWITTER)},
+    {"tiktok", "HU_ENABLE_TIKTOK", HU_BUILT_IN(HU_HAS_TIKTOK)},
+    {"google_rcs", "HU_ENABLE_GOOGLE_RCS", HU_BUILT_IN(HU_HAS_GOOGLE_RCS)},
+    {"mqtt", "HU_ENABLE_MQTT", HU_BUILT_IN(HU_HAS_MQTT)},
+    {"matrix", "HU_ENABLE_MATRIX", HU_BUILT_IN(HU_HAS_MATRIX)},
+    {"irc", "HU_ENABLE_IRC", HU_BUILT_IN(HU_HAS_IRC)},
+    {"nostr", "HU_ENABLE_NOSTR", HU_BUILT_IN(HU_HAS_NOSTR)},
+    {"lark", "HU_ENABLE_LARK", HU_BUILT_IN(HU_HAS_LARK)},
+    {"dingtalk", "HU_ENABLE_DINGTALK", HU_BUILT_IN(HU_HAS_DINGTALK)},
+    {"teams", "HU_ENABLE_TEAMS", HU_BUILT_IN(HU_HAS_TEAMS)},
+    {"twilio", "HU_ENABLE_TWILIO", HU_BUILT_IN(HU_HAS_TWILIO)},
+    {"onebot", "HU_ENABLE_ONEBOT", HU_BUILT_IN(HU_HAS_ONEBOT)},
+    {"qq", "HU_ENABLE_QQ", HU_BUILT_IN(HU_HAS_QQ)},
+    /* Not created in the block below — web and mattermost listen through the
+     * gateway, voice through Sonata — but each is still dead in a binary
+     * built without its gate, which is all this table answers. Cross-checked
+     * against src/channels/channel_catalog.c, which cannot answer it itself:
+     * its entries sit inside the same gates, so an absent channel is absent
+     * from the catalog too. */
+    {"web", "HU_ENABLE_WEB", HU_BUILT_IN(HU_HAS_WEB)},
+    {"mattermost", "HU_ENABLE_MATTERMOST", HU_BUILT_IN(HU_HAS_MATTERMOST)},
+    {"voice", "HU_ENABLE_SONATA", HU_BUILT_IN(HU_HAS_SONATA)},
+};
+
+static const hu_channel_gate_t *hu_channel_gate_find(const char *key) {
+    if (!key)
+        return NULL;
+    for (size_t i = 0; i < sizeof(hu_channel_gates) / sizeof(hu_channel_gates[0]); i++) {
+        if (strcmp(hu_channel_gates[i].key, key) == 0)
+            return &hu_channel_gates[i];
+    }
+    /* Not a channel this build knows by name. Unknown keys belong to the
+     * config validator's unknown-key banner, not to this warning. */
+    return NULL;
+}
+
+bool hu_app_channel_missing_from_build(const char *key) {
+    const hu_channel_gate_t *gate = hu_channel_gate_find(key);
+    return gate != NULL && gate->compiled == 0;
+}
+
+size_t hu_app_warn_channels_missing_from_build(const hu_config_t *cfg, hu_observer_t *obs) {
+    if (!cfg)
+        return 0;
+    size_t warned = 0;
+    for (size_t i = 0; i < cfg->channels.channel_config_len; i++) {
+        const hu_channel_gate_t *gate = hu_channel_gate_find(cfg->channels.channel_config_keys[i]);
+        if (!gate || gate->compiled)
+            continue;
+        hu_log_warn("bootstrap", obs,
+                    "channels.%s is configured but this binary was built without the %s "
+                    "channel, so it will never start; rebuild with -D%s=ON to activate it",
+                    gate->key, gate->key, gate->cmake_option);
+        warned++;
+    }
+    return warned;
+}
 
 /* Channel destroy callback: (ch, alloc). Most channels ignore alloc. */
 typedef void (*hu_bootstrap_channel_destroy_fn)(hu_channel_t *ch, hu_allocator_t *alloc);
@@ -822,13 +928,10 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
         hu_error_t reg_err = hu_agent_registry_create(alloc, &bi->agent_registry);
         if (reg_err == HU_OK) {
             bi->agent_registry_ok = true;
-            const char *home = getenv("HOME");
-            if (home && home[0]) {
-                char agents_dir[512];
-                int n = snprintf(agents_dir, sizeof(agents_dir), "%s/.human/agents", home);
-                if (n > 0 && (size_t)n < sizeof(agents_dir))
-                    hu_agent_registry_discover(&bi->agent_registry, agents_dir);
-            }
+            char agents_dir[512];
+            int n = hu_paths_state(agents_dir, sizeof(agents_dir), "agents");
+            if (n > 0 && (size_t)n < sizeof(agents_dir))
+                hu_agent_registry_discover(&bi->agent_registry, agents_dir);
             ctx->agent_registry = &bi->agent_registry;
         }
     }
@@ -838,13 +941,10 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
         hu_error_t pwa_err = hu_pwa_driver_registry_init(&bi->pwa_driver_registry);
         if (pwa_err == HU_OK) {
             bi->pwa_driver_registry_ok = true;
-            const char *home = getenv("HOME");
-            if (home && home[0]) {
-                char pwa_dir[512];
-                int n = snprintf(pwa_dir, sizeof(pwa_dir), "%s/.human/pwa", home);
-                if (n > 0 && (size_t)n < sizeof(pwa_dir))
-                    hu_pwa_driver_registry_load_dir(alloc, &bi->pwa_driver_registry, pwa_dir);
-            }
+            char pwa_dir[512];
+            int n = hu_paths_state(pwa_dir, sizeof(pwa_dir), "pwa");
+            if (n > 0 && (size_t)n < sizeof(pwa_dir))
+                hu_pwa_driver_registry_load_dir(alloc, &bi->pwa_driver_registry, pwa_dir);
             hu_pwa_set_global_registry(&bi->pwa_driver_registry);
         }
     }
@@ -890,10 +990,47 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
         if (gem_provider.ctx) {
             bi->embedder = hu_embedder_gemini_adapter_create(alloc, gem_provider);
         }
+        /* Semantic recall (Phase 2): under HU_SEMANTIC_RECALL=shadow|live the
+         * real HTTP embedder + persistent sqlite-vec store replace the hash
+         * embedder + empty in-memory store, and the engine indexes writes.
+         * OFF (default) keeps the legacy pair: zero behaviour change. Gated on
+         * the Phase-1 harness re-run through this path before LIVE. */
+        if (hu_semantic_recall_mode() != HU_GATE_OFF) {
+            /* Attach straight into bi->embedder / bi->vector_store. The sqlite
+             * engine keeps the ADDRESSES it is handed
+             * (hu_sqlite_memory_set_semantic_index) and dereferences them on
+             * every indexed store, so they must outlive this block. From
+             * 2026-09-02 to 09-04 they were block-scoped temporaries copied
+             * into bi afterwards: the engine kept pointing at the dead stack
+             * slot and ASan aborted the daemon in semantic_index_row 21 times
+             * (one per restart, on the first indexed store). bi is heap-owned
+             * for the app's lifetime; these addresses stay valid. Pinned by
+             * test_bootstrap_semantic_index_points_at_app_lifetime_embedder. */
+            hu_embedder_t prev_emb = bi->embedder;
+            hu_vector_store_t prev_vs = bi->vector_store;
+            if (hu_semantic_recall_attach(alloc, &bi->memory, &bi->embedder, &bi->vector_store) ==
+                HU_OK) {
+                if (prev_emb.ctx && prev_emb.vtable && prev_emb.vtable->deinit)
+                    prev_emb.vtable->deinit(prev_emb.ctx, alloc);
+                if (prev_vs.ctx && prev_vs.vtable && prev_vs.vtable->deinit)
+                    prev_vs.vtable->deinit(prev_vs.ctx, alloc);
+                hu_log_info("bootstrap", NULL, "semantic recall %s: embedder=%s store=sqlite-vec",
+                            hu_semantic_recall_mode() == HU_GATE_LIVE ? "LIVE" : "SHADOW",
+                            hu_semantic_recall_embed_url());
+            } else {
+                /* attach clears/overwrites its outputs on failure — restore. */
+                bi->embedder = prev_emb;
+                bi->vector_store = prev_vs;
+                hu_log_warn("bootstrap", NULL,
+                            "semantic recall requested but could not attach (non-sqlite backend?)"
+                            " — staying on the legacy embedder");
+            }
+        }
         if (!bi->embedder.ctx) {
             bi->embedder = hu_embedder_local_create(alloc);
         }
-        bi->vector_store = hu_vector_store_mem_create(alloc);
+        if (!bi->vector_store.ctx)
+            bi->vector_store = hu_vector_store_mem_create(alloc);
         bi->retrieval_engine =
             hu_retrieval_create_with_vector(alloc, &bi->memory, &bi->embedder, &bi->vector_store);
         ctx->embedder = &bi->embedder;
@@ -1046,7 +1183,7 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
             bi->voice_cfg.openai_api_key || (bi->cfg.voice.mode && bi->cfg.voice.mode[0])) {
             hu_agent_set_voice_config(&bi->agent, &bi->voice_cfg);
         }
-        bi->agent.chain_of_thought = true;
+        bi->agent.chain_of_thought = bi->cfg.agent.chain_of_thought;
         bi->agent.agent_pool = bi->agent_pool;
         bi->agent.scheduler = (struct hu_cron_scheduler *)bi->cron;
         hu_agent_set_mailbox(&bi->agent, bi->mailbox);
@@ -1066,6 +1203,32 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
         if (!bi->cfg.agent.context_engine_type ||
             strcmp(bi->cfg.agent.context_engine_type, "legacy") == 0 ||
             bi->cfg.agent.context_engine_type[0] == '\0') {
+            hu_context_engine_t *ce =
+                (hu_context_engine_t *)alloc->alloc(alloc->ctx, sizeof(hu_context_engine_t));
+            if (ce && hu_context_engine_legacy_create(alloc, ce) == HU_OK)
+                bi->agent.infra.context_engine = (struct hu_context_engine *)ce;
+            else if (ce)
+                alloc->free(alloc->ctx, ce, sizeof(hu_context_engine_t));
+        } else if (strcmp(bi->cfg.agent.context_engine_type, "rag") == 0) {
+            /* SOTA: RAG context engine — recency window plus memory-backed
+             * retrieval of the user's latest message, injected into the
+             * assembled context alongside the recent-message window. */
+            hu_context_engine_t *ce =
+                (hu_context_engine_t *)alloc->alloc(alloc->ctx, sizeof(hu_context_engine_t));
+            hu_context_engine_rag_config_t rag_cfg = {0};
+            rag_cfg.memory = bi->memory.vtable ? &bi->memory : NULL;
+            rag_cfg.provider = bi->provider.vtable ? &bi->provider : NULL;
+            if (ce && hu_context_engine_rag_create(alloc, &rag_cfg, ce) == HU_OK)
+                bi->agent.infra.context_engine = (struct hu_context_engine *)ce;
+            else if (ce)
+                alloc->free(alloc->ctx, ce, sizeof(hu_context_engine_t));
+        } else {
+            /* Unknown engine name. A silently-NULL engine was the 2026-09-10
+             * review's most misleading finding: an unrecognized value parsed
+             * fine and did less than the default. Fall back loudly. */
+            hu_log_warn("bootstrap", NULL,
+                        "agent.context_engine='%s' is not recognized; using legacy engine",
+                        bi->cfg.agent.context_engine_type);
             hu_context_engine_t *ce =
                 (hu_context_engine_t *)alloc->alloc(alloc->ctx, sizeof(hu_context_engine_t));
             if (ce && hu_context_engine_legacy_create(alloc, ce) == HU_OK)
@@ -1186,6 +1349,10 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
         const hu_config_t *cfg = &bi->cfg;
         (void)cfg;
 
+        /* Before creating anything: name the channels this config asks for
+         * that this binary cannot start. */
+        (void)hu_app_warn_channels_missing_from_build(cfg, &bi->observer);
+
 #if HU_HAS_EMAIL
         if (cfg->channels.email.smtp_host && cfg->channels.email.from_address) {
             err = hu_email_create(
@@ -1230,6 +1397,11 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
                 if (cfg->channels.imessage.loopback_handle)
                     hu_imessage_set_loopback_handle(&bi->channel_slots[ch_count],
                                                     cfg->channels.imessage.loopback_handle);
+                if (cfg->channels.imessage.exclude_from_count > 0)
+                    hu_imessage_set_exclude_from(
+                        &bi->channel_slots[ch_count],
+                        (const char *const *)cfg->channels.imessage.exclude_from,
+                        cfg->channels.imessage.exclude_from_count);
                 bi->channels[ch_count].channel_ctx = bi->channel_slots[ch_count].ctx;
                 bi->channels[ch_count].channel = &bi->channel_slots[ch_count];
                 bi->channels[ch_count].poll_fn = hu_imessage_poll;
@@ -1284,6 +1456,25 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
         if (cfg->channels.pwa.apps_count > 0 && ch_count < HU_BOOTSTRAP_CHANNELS_MAX) {
             err = hu_pwa_channel_create(alloc, (const char *const *)cfg->channels.pwa.apps,
                                         cfg->channels.pwa.apps_count, &bi->channel_slots[ch_count]);
+            /* 2026-09-04: nothing else ever called this channel's start(), so
+             * hu_pwa_channel_poll returned on every tick (running=false) and
+             * ten configured apps produced zero inbound messages. A start that
+             * fails (no browser, no monitored tab) is logged and the channel
+             * is not registered — an unstarted poll fn is silent dead weight. */
+            if (err == HU_OK) {
+                hu_channel_t *pwa = &bi->channel_slots[ch_count];
+                hu_error_t start_err = pwa->vtable && pwa->vtable->start
+                                           ? pwa->vtable->start(pwa->ctx)
+                                           : HU_ERR_NOT_SUPPORTED;
+                if (start_err != HU_OK) {
+                    hu_log_warn("bootstrap", NULL,
+                                "pwa channel not started (%s) — %zu configured app(s) will not "
+                                "be polled; open the tabs and allow browser automation",
+                                hu_error_string(start_err), cfg->channels.pwa.apps_count);
+                    hu_pwa_channel_destroy(pwa);
+                    err = start_err;
+                }
+            }
             if (err == HU_OK) {
                 bi->channels[ch_count].channel_ctx = bi->channel_slots[ch_count].ctx;
                 bi->channels[ch_count].channel = &bi->channel_slots[ch_count];
@@ -1933,6 +2124,12 @@ void hu_app_teardown(hu_app_ctx_t *ctx) {
         fclose(bi->log_fp);
     if (bi->retrieval_engine.vtable && bi->retrieval_engine.vtable->deinit)
         bi->retrieval_engine.vtable->deinit(bi->retrieval_engine.ctx, alloc);
+    /* The sqlite engine borrows the pair below (attach hands it their
+     * addresses); drop the borrow before either side is freed so a store()
+     * racing teardown cannot dereference freed memory. No-op on non-sqlite. */
+#ifdef HU_ENABLE_SQLITE
+    hu_sqlite_memory_set_semantic_index(&bi->memory, NULL, NULL);
+#endif
     if (bi->vector_store.vtable && bi->vector_store.vtable->deinit)
         bi->vector_store.vtable->deinit(bi->vector_store.ctx, alloc);
     if (bi->embedder.vtable && bi->embedder.vtable->deinit)

@@ -17,14 +17,17 @@ extern "C" {
  * Reuses the same credential scheme as the Gmail channel.
  *
  * client_id, client_secret, refresh_token: Google OAuth2 credentials.
+ * quota_project (optional, may be NULL/0): GCP project sent as
+ *   x-goog-user-project. Mandatory when the OAuth client is gcloud's own
+ *   (ADC-style): without it every call is 403 "requires a quota project".
  * items/items_cap: output buffer for ingested feed items.
  * out_count: number of items written.
  */
-hu_error_t hu_gmail_feed_fetch(hu_allocator_t *alloc,
-    const char *client_id, size_t client_id_len,
-    const char *client_secret, size_t client_secret_len,
-    const char *refresh_token, size_t refresh_token_len,
-    hu_feed_ingest_item_t *items, size_t items_cap, size_t *out_count);
+hu_error_t hu_gmail_feed_fetch(hu_allocator_t *alloc, const char *client_id, size_t client_id_len,
+                               const char *client_secret, size_t client_secret_len,
+                               const char *refresh_token, size_t refresh_token_len,
+                               const char *quota_project, size_t quota_project_len,
+                               hu_feed_ingest_item_t *items, size_t items_cap, size_t *out_count);
 
 #endif /* HU_ENABLE_FEEDS */
 

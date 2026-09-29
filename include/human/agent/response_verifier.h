@@ -3,6 +3,7 @@
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/gate_mode.h"
 #include "human/memory/memory.h"
 #include <stdbool.h>
 #include <stddef.h>
@@ -36,21 +37,21 @@ typedef enum hu_verify_mode {
 } hu_verify_mode_t;
 
 typedef struct hu_provenance_receipt {
-    int64_t graph_relation_id;  /* source row in relations table; 0 = synthetic */
-    char source[64];            /* short label: "imessage", "user", "feed-web", ... */
-    int64_t observed_at_ms;     /* unix ms when the supporting fact was observed */
-    int64_t event_start_ms;     /* bitemporal: when the fact became true */
-    int64_t event_end_ms;       /* 0 = still true */
-    float confidence;           /* 0..1 */
-    char rendered[160];         /* human-readable receipt string */
+    int64_t graph_relation_id; /* source row in relations table; 0 = synthetic */
+    char source[64];           /* short label: "imessage", "user", "feed-web", ... */
+    int64_t observed_at_ms;    /* unix ms when the supporting fact was observed */
+    int64_t event_start_ms;    /* bitemporal: when the fact became true */
+    int64_t event_end_ms;      /* 0 = still true */
+    float confidence;          /* 0..1 */
+    char rendered[160];        /* human-readable receipt string */
 } hu_provenance_receipt_t;
 
 typedef struct hu_verifier_claim {
-    char text[256];             /* the claim text, truncated for the report */
-    float score;                /* combined verifier score; 1.0 = strongly supported */
-    bool supported;             /* true if score >= threshold */
+    char text[256];                  /* the claim text, truncated for the report */
+    float score;                     /* combined verifier score; 1.0 = strongly supported */
+    bool supported;                  /* true if score >= threshold */
     hu_provenance_receipt_t receipt; /* set when supported; rendered = "" otherwise */
-    char suggested_hedge[160];  /* set when !supported; e.g. "I'm not 100% sure but" */
+    char suggested_hedge[160];       /* set when !supported; e.g. "I'm not 100% sure but" */
 } hu_verifier_claim_t;
 
 typedef struct hu_verifier_config {
@@ -66,9 +67,9 @@ typedef struct hu_verifier_config {
  * callers that go through the v1 verifier directly (e.g. telemetry). */
 typedef enum hu_verifier_outcome {
     HU_VERIFY_RESULT_SUPPORTED = 0,
-    HU_VERIFY_RESULT_HEDGED    = 1,
+    HU_VERIFY_RESULT_HEDGED = 1,
     HU_VERIFY_RESULT_REWRITTEN = 2,
-    HU_VERIFY_RESULT_ABSTAIN   = 3,
+    HU_VERIFY_RESULT_ABSTAIN = 3,
 } hu_verifier_outcome_t;
 
 typedef struct hu_verifier_report {
@@ -76,13 +77,36 @@ typedef struct hu_verifier_report {
     size_t claims_extracted;
     size_t claims_supported;
     size_t claims_flagged;
-    bool draft_modified;        /* true when SOFT/STRICT made changes */
-    char modified_draft[2048];  /* populated when draft_modified is true */
-    char refusal_text[256];     /* populated when outcome == ABSTAIN */
+    bool draft_modified;       /* true when SOFT/STRICT made changes */
+    char modified_draft[2048]; /* populated when draft_modified is true */
+    char refusal_text[256];    /* populated when outcome == ABSTAIN */
     hu_verifier_claim_t claims[16];
 } hu_verifier_report_t;
 
 hu_verifier_config_t hu_verifier_default_config(void);
+
+/* ── Quality gate: verify-mode escalation (2026-07-25 Dermot audit) ─────────
+ * The claim verifier and the consistency-drift check both fired on the echo
+ * turns (3/3 claims flagged, drift 0.09) and neither could act: TELEMETRY
+ * never modifies the draft and the drift check only logs. This pure selector
+ * turns them into a HYBRID gate (score + independent signal, per
+ * classifier-score-plus-flag-gate.md): when HU_QUALITY_GATE=live and the
+ * turn's consistency drift falls below the drift threshold, the verifier's
+ * TELEMETRY default escalates to SOFT — its designed actuator, which hedges
+ * exactly the unsupported claims. No regeneration loop is introduced (the
+ * 2026-07 retry incidents are why).
+ *
+ * Rules, in order:
+ *   base != TELEMETRY          → base (an explicit operator HU_VERIFY_MODE
+ *                                 choice is never overridden)
+ *   gate != LIVE               → base (OFF and SHADOW never change behavior;
+ *                                 SHADOW's would-escalate logging is the
+ *                                 call site's job)
+ *   have_drift && drift_score < drift_threshold → HU_VERIFY_SOFT
+ *   otherwise                  → base */
+hu_verify_mode_t hu_response_verify_mode_for_turn(hu_verify_mode_t base,
+                                                  hu_gate_mode_t quality_gate_mode, bool have_drift,
+                                                  float drift_score, float drift_threshold);
 
 /* Run synchronous verification over a draft. The caller passes the draft text
  * plus a contact_id to scope queries. Returns HU_OK and fills out_report on
@@ -90,9 +114,10 @@ hu_verifier_config_t hu_verifier_default_config(void);
  *
  * `memory` is the W7 facade; pass NULL for graph-less telemetry (every claim
  * scores unsupported). */
-hu_error_t hu_response_verify(hu_allocator_t *alloc, hu_memory_facade_t *memory, const char *contact_id,
-                              size_t contact_id_len, const char *draft, size_t draft_len,
-                              const hu_verifier_config_t *cfg, hu_verifier_report_t *out_report);
+hu_error_t hu_response_verify(hu_allocator_t *alloc, hu_memory_facade_t *memory,
+                              const char *contact_id, size_t contact_id_len, const char *draft,
+                              size_t draft_len, const hu_verifier_config_t *cfg,
+                              hu_verifier_report_t *out_report);
 
 /* sprint-2c Story A — verify against both the W7 facade AND a loaded world
  * model. When `wm` is non-NULL the verifier also walks `wm->negatives` and
@@ -112,12 +137,12 @@ hu_error_t hu_response_verify(hu_allocator_t *alloc, hu_memory_facade_t *memory,
  * call. Forward-declared so callers that don't need this entry point don't
  * pay the world_model.h include cost. */
 struct hu_world_model;
-hu_error_t hu_response_verify_against_world_model(
-    hu_allocator_t *alloc, hu_memory_facade_t *memory,
-    const struct hu_world_model *wm,
-    const char *contact_id, size_t contact_id_len,
-    const char *draft, size_t draft_len,
-    const hu_verifier_config_t *cfg, hu_verifier_report_t *out_report);
+hu_error_t hu_response_verify_against_world_model(hu_allocator_t *alloc, hu_memory_facade_t *memory,
+                                                  const struct hu_world_model *wm,
+                                                  const char *contact_id, size_t contact_id_len,
+                                                  const char *draft, size_t draft_len,
+                                                  const hu_verifier_config_t *cfg,
+                                                  hu_verifier_report_t *out_report);
 
 /* sprint-2c Story A — scan one claim against `wm->negatives` and return the
  * strictest implied outcome (ABSTAIN > HEDGED > SUPPORTED).
@@ -140,8 +165,7 @@ hu_error_t hu_response_verify_against_world_model(
  *
  * Shared by `response_verifier.c` and `self_rag_atomic.c` so both backends
  * use the same matcher and source-tag mapping. */
-hu_verifier_outcome_t hu_negatives_scan_claim(const struct hu_world_model *wm,
-                                              const char *claim,
+hu_verifier_outcome_t hu_negatives_scan_claim(const struct hu_world_model *wm, const char *claim,
                                               char *out_refusal, size_t refusal_cap,
                                               char *out_hedge, size_t hedge_cap,
                                               bool *out_policy_hit);

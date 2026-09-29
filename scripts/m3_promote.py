@@ -32,6 +32,17 @@ Exit codes:
     0 — success (swap landed or rollback succeeded)
     2 — MLX server unreachable / bad input
     3 — confirmation required but not provided
+    4 — LoRA scale exceeds the 8.0 safety ceiling
+    5 — US-2 authorship promotion gate BLOCK, HOLD, or INCONCLUSIVE (pass
+        --skip-authorship-gate to override; the override is recorded in the
+        registry evidence string, never silent). HOLD ("within noise" --
+        the candidate's twin CI doesn't distinguish it from serving) is
+        treated exactly like BLOCK for the swap decision: never promote on
+        a measurement that can't tell improvement from noise.
+    6 — base-capability smoke gate BLOCK or INCONCLUSIVE: the adapter's own
+        scripts/blind_ab/adapter_smoke_test.py run found regressions, or no
+        smoke run exists for this exact adapter (pass --skip-smoke-gate to
+        override; recorded in the registry evidence string, never silent).
 """
 from __future__ import annotations
 
@@ -50,6 +61,17 @@ try:
     import adapter_registry
 except ImportError:
     adapter_registry = None
+
+# US-2: the per-cycle LUAR promotion gate. Lives in scripts/blind_ab/ next to
+# authorship_gap.py / casing_probe.py, which it mirrors. Imported, not
+# reimplemented (.claude/rules/test-references-production-symbol.md's
+# "don't reinvent" principle applies to production code too). Stdlib-only
+# module (json/argparse/sys/glob) -- safe to import unconditionally.
+sys.path.insert(0, str(Path(__file__).resolve().parent / "blind_ab"))
+try:
+    import authorship_promotion_gate
+except ImportError:
+    authorship_promotion_gate = None
 
 HUMAN_HOME = Path.home() / ".human"
 LINEAGE_PATH = HUMAN_HOME / "training-data" / "adapter_lineage.jsonl"
@@ -175,6 +197,56 @@ def _read_adapter_scale(adapter_path):
         return None
 
 
+SMOKE_GLOB = "v6-smoke-*.json"
+
+
+def _same_adapter(a: str | None, b: str) -> bool:
+    if not a:
+        return False
+    try:
+        return os.path.realpath(a) == os.path.realpath(b)
+    except OSError:
+        return a == b
+
+
+def _find_latest_smoke_json(adapter_path: str) -> Path | None:
+    """Newest v6-smoke-*.json under ~/.human/logs whose adapter_b (the
+    candidate side of adapter_smoke_test.py) is this adapter. Stamps are
+    YYYYMMDD-HHMMSS, so name order is time order. A smoke run for a
+    different adapter never vouches for this one."""
+    logs = HUMAN_HOME / "logs"
+    for p in sorted(logs.glob(SMOKE_GLOB), reverse=True):
+        try:
+            if _same_adapter(json.loads(p.read_text()).get("adapter_b"), adapter_path):
+                return p
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def smoke_verdict(smoke_json: Path | None) -> dict:
+    """PASS / BLOCK / INCONCLUSIVE from an adapter_smoke_test.py report.
+
+    Uses the smoke test's own definition (print_report: BLOCKED iff
+    report["regressions"] is non-empty) rather than re-deriving one. A
+    missing or malformed report is INCONCLUSIVE, never PASS
+    (.claude/rules/no-number-without-a-measurement.md)."""
+    if smoke_json is None:
+        return {"verdict": "INCONCLUSIVE", "reason": "no v6-smoke-*.json for this adapter"}
+    try:
+        report = json.loads(Path(smoke_json).read_text())["report"]
+        regressions = report["regressions"]
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        return {"verdict": "INCONCLUSIVE", "reason": f"unreadable smoke report {smoke_json}: {e}"}
+    if not isinstance(regressions, list):
+        return {"verdict": "INCONCLUSIVE", "reason": f"malformed regressions in {smoke_json}"}
+    if regressions:
+        ids = ",".join(str(r.get("id", "?")) for r in regressions if isinstance(r, dict))
+        return {"verdict": "BLOCK",
+                "reason": f"{len(regressions)} base-capability regression(s) [{ids}] in {smoke_json}"}
+    return {"verdict": "PASS", "reason": f"no regressions in {smoke_json}"}
+
+
 def cmd_promote(args):
     if not args.adapter:
         print("ERROR: --adapter required", file=sys.stderr)
@@ -203,6 +275,56 @@ def cmd_promote(args):
               file=sys.stderr)
         return 4
 
+    # Base-capability smoke gate. 2026-09-05: seth-glm-air-mlxtune-orpo-20260905
+    # was promoted although its own smoke run ended "BLOCKED — base-capability
+    # regression -- DO NOT PROMOTE" (2/4 reasoning prompts returned ''), and it
+    # served every iMessage reply for three weeks. The verdict printed by
+    # train-glm-adapter.sh was advice; this makes it a gate.
+    smoke = smoke_verdict(Path(args.smoke_json) if args.smoke_json
+                          else _find_latest_smoke_json(args.adapter))
+    if not args.skip_smoke_gate and smoke["verdict"] != "PASS":
+        print(f"ERROR: refusing to promote {args.adapter}: smoke gate {smoke['verdict']} "
+              f"({smoke['reason']}). Run scripts/blind_ab/adapter_smoke_test.py against it, "
+              f"or pass --skip-smoke-gate to override (recorded, not silent).",
+              file=sys.stderr)
+        return 6
+
+    # US-2: never promote an adapter whose measured authorship twin regressed
+    # against what is currently serving, fell below the measured floor, or
+    # whose twin CI doesn't distinguish it from noise (HOLD -- F1 fix,
+    # 2026-09-05: decide_promotion() is a noise-aware PASS/BLOCK/HOLD verdict,
+    # not a point-mean-only PASS/BLOCK). --skip-authorship-gate is the
+    # explicit, logged override for genuine emergencies (e.g. promoting a
+    # rollback target that predates this gate's own JSON). The verdict is
+    # always computed (best-effort) so an override can be RECORDED, not
+    # merely permitted -- see the evidence string below. A missing/malformed
+    # measurement is INCONCLUSIVE, which blocks exactly like BLOCK/HOLD does
+    # (.claude/rules/no-number-without-a-measurement.md: refuse loudly, never
+    # silently PASS on an absent number). Any verdict other than PASS
+    # (BLOCK, HOLD, or INCONCLUSIVE) refuses the swap below -- HOLD gets a
+    # distinct verdict string recorded, never silently folded into BLOCK.
+    gap_verdict = {"verdict": "INCONCLUSIVE", "reason": "authorship_promotion_gate module unavailable"}
+    if authorship_promotion_gate is not None:
+        gap_json = args.gap_json or authorship_promotion_gate._find_latest_score_json(args.adapter)
+        try:
+            if not gap_json:
+                raise SystemExit(
+                    f"INCONCLUSIVE: no candidate-authorship-*.json found for {args.adapter}; "
+                    "nothing to gate on")
+            gate_inputs = authorship_promotion_gate.load_gate_inputs_from_score_json(gap_json)
+            gap_verdict = authorship_promotion_gate.decide_promotion(
+                gate_inputs["candidate_twin"], gate_inputs["serving_twin"], gate_inputs["floor"],
+                gate_inputs["candidate_twin_ci95"])
+        except SystemExit as e:
+            gap_verdict = {"verdict": "INCONCLUSIVE", "reason": str(e)}
+
+    if not args.skip_authorship_gate and gap_verdict.get("verdict") != "PASS":
+        print(f"ERROR: refusing to promote {args.adapter}: authorship promotion gate "
+              f"{gap_verdict.get('verdict')} ({gap_verdict.get('reason')}). Pass "
+              f"--skip-authorship-gate to override (will be recorded as an override, "
+              f"not silently).", file=sys.stderr)
+        return 5
+
     mlx_url = args.mlx_url
 
     # Promotion requires recorded evidence (gate ref, eval score, A/B verdict).
@@ -217,6 +339,16 @@ def cmd_promote(args):
         return 2
     if not evidence:
         evidence = "(UNEVIDENCED OVERRIDE via --force-no-evidence)"
+
+    # US-2: an override is RECORDED, not merely permitted -- the registry
+    # (not just a terminal log a human may not have seen) must carry the
+    # fact that a regressed or unmeasured adapter was promoted anyway.
+    if args.skip_authorship_gate and gap_verdict.get("verdict") != "PASS":
+        evidence = (f"(authorship gate OVERRIDDEN: {gap_verdict.get('verdict')}/"
+                    f"{gap_verdict.get('reason')}) " + evidence)
+    if args.skip_smoke_gate and smoke["verdict"] != "PASS":
+        evidence = (f"(smoke gate OVERRIDDEN: {smoke['verdict']}/{smoke['reason']}) "
+                    + evidence)
 
     current = get_current_adapter(mlx_url)
     print(f"  Current adapter: {current or '(none)'}")
@@ -304,6 +436,19 @@ def main():
                            help="Promote without evidence (recorded as an unevidenced override)")
     p_promote.add_argument("--evidence", type=str, default=None,
                             help="Evidence/gate reference for promotion (e.g., 'blind-a-b-gate-pass')")
+    p_promote.add_argument("--gap-json", type=str, default=None,
+                            help="US-2: explicit score_candidate_offline.py output JSON to gate "
+                                 "on (default: newest ~/.human/logs/candidate-authorship-*.json "
+                                 "whose candidate_adapter matches --adapter)")
+    p_promote.add_argument("--skip-authorship-gate", action="store_true",
+                            help="US-2: override the LUAR promotion gate (BLOCK/INCONCLUSIVE). "
+                                 "Recorded in the registry evidence string, never silent.")
+    p_promote.add_argument("--smoke-json", type=str, default=None,
+                            help="Explicit adapter_smoke_test.py report to gate on (default: "
+                                 "newest ~/.human/logs/v6-smoke-*.json whose adapter_b is --adapter)")
+    p_promote.add_argument("--skip-smoke-gate", action="store_true",
+                            help="Override the base-capability smoke gate (BLOCK/INCONCLUSIVE). "
+                                 "Recorded in the registry evidence string, never silent.")
 
     p_rollback = sub.add_parser("rollback",
                                   help="Revert to the previous adapter from lineage")

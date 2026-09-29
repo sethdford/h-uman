@@ -1,4 +1,5 @@
 #include "human/memory/forgetting_curve.h"
+#include "human/memory/forgetting_repo.h"
 #include "test_framework.h"
 #include <math.h>
 #include <stdint.h>
@@ -45,13 +46,12 @@ static void forgetting_batch_decay_scores_decrease(void) {
     HU_ASSERT_NOT_NULL(db);
 
     /* Create episodes table with salience_score, impact_score, created_at */
-    const char *create =
-        "CREATE TABLE episodes ("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "summary TEXT,"
-        "impact_score REAL DEFAULT 0.5,"
-        "salience_score REAL NOT NULL,"
-        "created_at INTEGER NOT NULL)";
+    const char *create = "CREATE TABLE episodes ("
+                         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                         "summary TEXT,"
+                         "impact_score REAL DEFAULT 0.5,"
+                         "salience_score REAL NOT NULL,"
+                         "created_at INTEGER NOT NULL)";
     rc = sqlite3_exec(db, create, NULL, NULL, NULL);
     HU_ASSERT_EQ(rc, SQLITE_OK);
 
@@ -60,10 +60,11 @@ static void forgetting_batch_decay_scores_decrease(void) {
     int64_t day10 = now - 10 * 86400;
 
     sqlite3_stmt *ins = NULL;
-    rc = sqlite3_prepare_v2(db,
-                            "INSERT INTO episodes (summary, impact_score, salience_score, created_at) "
-                            "VALUES (?, ?, ?, ?)",
-                            -1, &ins, NULL);
+    rc = sqlite3_prepare_v2(
+        db,
+        "INSERT INTO episodes (summary, impact_score, salience_score, created_at) "
+        "VALUES (?, ?, ?, ?)",
+        -1, &ins, NULL);
     HU_ASSERT_EQ(rc, SQLITE_OK);
 
     sqlite3_bind_text(ins, 1, "ep1", 3, SQLITE_STATIC);
@@ -124,6 +125,51 @@ static void forgetting_batch_decay_scores_decrease(void) {
 
     sqlite3_close(db);
 }
+
+/* The repository half on its own (src/memory/repos/forgetting_repo_sqlite.c):
+ * min_salience is the WHERE floor, so a row already at or below it must not
+ * decay while one above it must. Pins the fourth argument the delegating
+ * hu_forgetting_apply_batch_decay() fixes at BATCH_DECAY_THRESHOLD. */
+static void forgetting_repo_batch_decay_respects_min_salience_floor(void) {
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_exec(db,
+                              "CREATE TABLE episodes (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                              "impact_score REAL DEFAULT 0.5, salience_score REAL NOT NULL, "
+                              "created_at INTEGER NOT NULL)",
+                              NULL, NULL, NULL),
+                 SQLITE_OK);
+    int64_t now = 100 * 86400;
+    HU_ASSERT_EQ(
+        sqlite3_exec(db,
+                     "INSERT INTO episodes (impact_score, salience_score, created_at) "
+                     "VALUES (0.5, 0.5, 100*86400 - 30*86400), (0.5, 0.2, 100*86400 - 30*86400)",
+                     NULL, NULL, NULL),
+        SQLITE_OK);
+
+    HU_ASSERT_EQ(hu_forgetting_repo_apply_batch_decay(NULL, now, 0.1, 0.3),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_forgetting_repo_apply_batch_decay(db, now, 0.1, 0.3), HU_OK);
+
+    sqlite3_stmt *sel = NULL;
+    HU_ASSERT_EQ(
+        sqlite3_prepare_v2(db, "SELECT salience_score FROM episodes ORDER BY id", -1, &sel, NULL),
+        SQLITE_OK);
+    double above = 0, below = 0;
+    HU_ASSERT_EQ(sqlite3_step(sel), SQLITE_ROW);
+    above = sqlite3_column_double(sel, 0);
+    HU_ASSERT_EQ(sqlite3_step(sel), SQLITE_ROW);
+    below = sqlite3_column_double(sel, 0);
+    sqlite3_finalize(sel);
+
+    HU_ASSERT_FLOAT_EQ(above, 0.025, 0.005); /* 0.5 * exp(-3): decayed */
+    HU_ASSERT_FLOAT_EQ(below, 0.2, 1e-9);    /* under the floor: untouched */
+
+    /* A missing table is a backend failure, not silent success. */
+    HU_ASSERT_EQ(sqlite3_exec(db, "DROP TABLE episodes", NULL, NULL, NULL), SQLITE_OK);
+    HU_ASSERT_EQ(hu_forgetting_repo_apply_batch_decay(db, now, 0.1, 0.3), HU_ERR_MEMORY_BACKEND);
+    sqlite3_close(db);
+}
 #endif
 
 void run_forgetting_curve_tests(void) {
@@ -134,5 +180,6 @@ void run_forgetting_curve_tests(void) {
     HU_RUN_TEST(forgetting_decayed_salience_zero_days_unchanged);
     HU_RUN_TEST(forgetting_decayed_salience_zero_initial_returns_zero);
     HU_RUN_TEST(forgetting_batch_decay_scores_decrease);
+    HU_RUN_TEST(forgetting_repo_batch_decay_respects_min_salience_floor);
 #endif
 }

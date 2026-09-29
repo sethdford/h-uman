@@ -11,6 +11,14 @@
  *   - Emotion-derived volume
  */
 #include "human/tts/transcript_prep.h"
+#include "human/tts/speech_direction.h"
+#include "human/tts/speech_text.h"
+
+/* F1 restraint budgets (Ferni: "SSML is for emphasis, not every sentence"). */
+#define HU_PREP_LAUGH_PCT           18
+#define HU_PREP_MAX_EMOTION_TAGS    1
+#define HU_PREP_MAX_BEATS           1
+#define HU_PREP_MAX_SPEED_SENTENCES 1
 #include "human/core/string.h"
 #include "human/tts/emotion_map.h"
 #include <stdbool.h>
@@ -22,16 +30,22 @@
 static bool is_emoji_codepoint(const unsigned char *p, size_t remain) {
     if (remain < 3)
         return false;
-    /* Common emoji ranges in UTF-8 (3-4 byte sequences) */
-    if (p[0] == 0xE2 && p[1] >= 0x80 && p[1] <= 0xBF)
-        return true; /* misc symbols */
-    if (p[0] == 0xE2 && p[1] == 0x9A && p[2] >= 0x80)
-        return true; /* ⚠⚡⚙ etc */
-    if (p[0] == 0xE2 && p[1] == 0x9C)
-        return true; /* ✓✗✨ etc */
+    /* Emoji blocks only. U+2000-206F (General Punctuation: curly quotes, the
+     * ellipsis, dashes) is text: treating all of E2 80..BF as emoji spoke
+     * "20th… just" as "20thjust" and "I’m" as "Im" (final review 2026-09-27). */
+    if (p[0] == 0xE2 && p[1] >= 0x98 && p[1] <= 0x9E)
+        return true; /* U+2600-27BF misc symbols, dingbats: ☀⚠⚡✓✨ */
+    if (p[0] == 0xE2 && (p[1] == 0x8C || p[1] == 0x8F))
+        return true; /* U+2300-233F, U+23C0-23FF: ⌚⌛⏰⏳ */
+    if (p[0] == 0xE2 && (p[1] == 0xAC || p[1] == 0xAD))
+        return true; /* U+2B00-2B7F: ⬆⬇⭐ */
     if (remain >= 4 && p[0] == 0xF0 && p[1] == 0x9F)
         return true; /* U+1F000..1FFFF — most emoji */
     return false;
+}
+
+bool hu_transcript_is_emoji(const char *p, size_t remain) {
+    return p && is_emoji_codepoint((const unsigned char *)p, remain);
 }
 
 size_t hu_transcript_strip_junk(const char *text, size_t text_len, char *out, size_t cap) {
@@ -76,6 +90,27 @@ size_t hu_transcript_strip_junk(const char *text, size_t text_len, char *out, si
             }
         }
 
+        /* Typographic punctuation to ASCII: spoken the same, and downstream
+         * normalization (contractions, pauses) matches the ASCII forms. */
+        if ((unsigned char)text[i] == 0xE2 && i + 2 < text_len &&
+            (unsigned char)text[i + 1] == 0x80) {
+            unsigned char c3 = (unsigned char)text[i + 2];
+            const char *ascii = c3 == 0xA6                   ? "..."
+                                : (c3 == 0x98 || c3 == 0x99) ? "'"
+                                : (c3 == 0x9C || c3 == 0x9D) ? "\""
+                                                             : NULL;
+            if (ascii) {
+                size_t al = strlen(ascii);
+                if (pos + al >= cap)
+                    break;
+                memcpy(out + pos, ascii, al);
+                pos += al;
+                i += 3;
+                prev_was_space = false;
+                continue;
+            }
+        }
+
         /* Emoji-as-icon characters */
         if ((unsigned char)text[i] >= 0xE0) {
             size_t remain = text_len - i;
@@ -97,8 +132,10 @@ size_t hu_transcript_strip_junk(const char *text, size_t text_len, char *out, si
                         break;
                     }
                 }
-                while (i < text_len && text[i] == ' ')
-                    i++;
+                /* "great ✨ day" → "great day", but "wow😍 nice" keeps its space. */
+                if (pos == 0 || out[pos - 1] == ' ')
+                    while (i < text_len && text[i] == ' ')
+                        i++;
                 continue;
             }
         }
@@ -124,51 +161,21 @@ size_t hu_transcript_strip_junk(const char *text, size_t text_len, char *out, si
     return pos;
 }
 
-/* ── Consonant cluster smoothing ─────────────────────────────────────── */
+/* ── Consonant clusters ──────────────────────────────────────────────── */
 
-typedef struct {
-    const char *cluster;
-    size_t len;
-    const char *replacement;
-    const char *replacement_strip; /* fallback without SSML */
-} consonant_fix_t;
-
-static const consonant_fix_t CONSONANT_FIXES[] = {
-    {"ngths", 5, "ng<break time=\"50ms\"/>ths", "ng ths"},
-    {"sths", 4, "s<break time=\"50ms\"/>ths", "s ths"},
-    {"sts ", 4, "sts <break time=\"40ms\"/>", "sts "},
-    {"ctly", 4, "ct<break time=\"30ms\"/>ly", "ctly"},
-    {"mpts", 4, "mpts<break time=\"40ms\"/>", "mpts "},
-};
-#define CONSONANT_FIX_COUNT (sizeof(CONSONANT_FIXES) / sizeof(CONSONANT_FIXES[0]))
-
+/* Pass-through. It used to put 30-50 ms <break> tags inside words ("streng
+ * ths"); voiceai 2026-09-27: Sonic paces from the text and stacked breaks make
+ * it hallucinate, so words go to the voice whole. Kept so callers need no
+ * change. */
 size_t hu_transcript_smooth_consonants(const char *text, size_t text_len, char *out, size_t cap,
                                        bool strip_ssml) {
+    (void)strip_ssml;
     if (!text || text_len == 0 || !out || cap == 0)
         return 0;
-
-    size_t pos = 0;
-    for (size_t i = 0; i < text_len && pos < cap - 1; i++) {
-        bool matched = false;
-        for (size_t f = 0; f < CONSONANT_FIX_COUNT; f++) {
-            const consonant_fix_t *fix = &CONSONANT_FIXES[f];
-            if (i + fix->len <= text_len && memcmp(text + i, fix->cluster, fix->len) == 0) {
-                const char *rep = strip_ssml ? fix->replacement_strip : fix->replacement;
-                size_t rlen = strlen(rep);
-                if (pos + rlen < cap) {
-                    memcpy(out + pos, rep, rlen);
-                    pos += rlen;
-                    i += fix->len - 1;
-                    matched = true;
-                    break;
-                }
-            }
-        }
-        if (!matched)
-            out[pos++] = text[i];
-    }
-    out[pos] = '\0';
-    return pos;
+    size_t n = text_len < cap - 1 ? text_len : cap - 1;
+    memcpy(out, text, n);
+    out[n] = '\0';
+    return n;
 }
 
 /* ── Number-to-word tables ────────────────────────────────────────────── */
@@ -743,18 +750,22 @@ static float speed_for_sentence(const char *sentence, size_t len, float base_spe
     }
 
     /* Emotional keywords: slower for weight */
-    if (hu_str_contains_ci_cstr(sentence, len, "feel") || hu_str_contains_ci_cstr(sentence, len, "love") ||
-        hu_str_contains_ci_cstr(sentence, len, "care") || hu_str_contains_ci_cstr(sentence, len, "heart") ||
+    if (hu_str_contains_ci_cstr(sentence, len, "feel") ||
+        hu_str_contains_ci_cstr(sentence, len, "love") ||
+        hu_str_contains_ci_cstr(sentence, len, "care") ||
+        hu_str_contains_ci_cstr(sentence, len, "heart") ||
         hu_str_contains_ci_cstr(sentence, len, "worry"))
         return base_speed * 0.90f;
 
     /* Important/emphasis words: slower, deliberate */
-    if (hu_str_contains_ci_cstr(sentence, len, "important") || hu_str_contains_ci_cstr(sentence, len, "crucial") ||
+    if (hu_str_contains_ci_cstr(sentence, len, "important") ||
+        hu_str_contains_ci_cstr(sentence, len, "crucial") ||
         hu_str_contains_ci_cstr(sentence, len, "remember"))
         return base_speed * 0.92f;
 
     /* Conclusions: slower, more weight */
-    if (hu_str_contains_ci_cstr(sentence, len, "so ") || hu_str_contains_ci_cstr(sentence, len, "therefore") ||
+    if (hu_str_contains_ci_cstr(sentence, len, "so ") ||
+        hu_str_contains_ci_cstr(sentence, len, "therefore") ||
         hu_str_contains_ci_cstr(sentence, len, "the point is"))
         return base_speed * 0.93f;
 
@@ -767,8 +778,10 @@ static float speed_for_sentence(const char *sentence, size_t len, float base_spe
         return base_speed * 0.92f;
 
     /* Lists/examples: slightly faster */
-    if (hu_str_contains_ci_cstr(sentence, len, "for example") || hu_str_contains_ci_cstr(sentence, len, "such as") ||
-        hu_str_contains_ci_cstr(sentence, len, "first") || hu_str_contains_ci_cstr(sentence, len, "second"))
+    if (hu_str_contains_ci_cstr(sentence, len, "for example") ||
+        hu_str_contains_ci_cstr(sentence, len, "such as") ||
+        hu_str_contains_ci_cstr(sentence, len, "first") ||
+        hu_str_contains_ci_cstr(sentence, len, "second"))
         return base_speed * 1.05f;
 
     /* Long compound sentences: slightly faster to stay natural */
@@ -826,17 +839,24 @@ static size_t inject_clause_breaks(const char *text, size_t len, float pause_fac
 
         if (text[i] == ',' || text[i] == ';' || text[i] == ':') {
             if (i + 1 < len && text[i + 1] == ' ') {
-                int ms = (text[i] == ',') ? (int)(150 * pause_factor) : (int)(200 * pause_factor);
-                /* Before conjunctions: slightly longer pause */
+                int ms = (int)(200 * pause_factor);
+                bool contrast = false;
                 if (i + 2 < len) {
                     const char *after = text + i + 2;
                     size_t remain = len - (i + 2);
-                    if ((remain >= 4 &&
-                         (memcmp(after, "but ", 4) == 0 || memcmp(after, "yet ", 4) == 0)) ||
-                        (remain >= 8 && memcmp(after, "however ", 8) == 0) ||
-                        (remain >= 9 && memcmp(after, "although ", 9) == 0))
+                    contrast = (remain >= 4 &&
+                                (memcmp(after, "but ", 4) == 0 || memcmp(after, "yet ", 4) == 0)) ||
+                               (remain >= 8 && memcmp(after, "however ", 8) == 0) ||
+                               (remain >= 9 && memcmp(after, "although ", 9) == 0) ||
+                               (remain >= 7 && memcmp(after, "though ", 7) == 0);
+                    if (contrast)
                         ms = (int)(250 * pause_factor);
                 }
+                /* F1 restraint (Ferni): pause on meaning, not punctuation. A
+                 * plain comma is spoken through; ';' / ':' and a comma before a
+                 * contrast word still breathe. */
+                if (text[i] == ',' && !contrast)
+                    continue;
                 if (strip_ssml) {
                     /* SSML-free mode: use punctuation spacing (already have comma) */
                 } else if (pos + 30 < cap) {
@@ -898,41 +918,27 @@ static const char *pick_discourse_marker(const char *sentence, size_t len, uint3
 
 /* ── Enhanced nonverbal injection ─────────────────────────────────────── */
 
+static bool is_heavy_emotion(const char *emotion) {
+    return emotion && (strcmp(emotion, "sympathetic") == 0 || strcmp(emotion, "sad") == 0 ||
+                       strcmp(emotion, "contemplative") == 0);
+}
+
+/* F1 restraint (Ferni contextual laughter): a real laugh only when the reply
+ * itself laughed (a laugh token in the sentence, or the cue carried from
+ * speech cleanup), at most once per memo, never on a heavy moment. Heavy
+ * moments may get a pause instead. Nothing is inserted at random. */
 static const char *pick_nonverbal(const char *sentence, size_t len, const char *emotion,
-                                  uint32_t seed) {
+                                  uint32_t seed, bool cue, bool already_laughed) {
     if (!sentence || len == 0)
         return NULL;
-
-    /* Higher probability for emotional content (25%), lower for neutral (10%) */
-    int threshold = 10;
-    if (emotion) {
-        if (strcmp(emotion, "sympathetic") == 0 || strcmp(emotion, "sad") == 0 ||
-            strcmp(emotion, "contemplative") == 0)
-            threshold = 20;
-        else if (strcmp(emotion, "excited") == 0 || strcmp(emotion, "joking/comedic") == 0)
-            threshold = 25;
-    }
-
-    if ((seed % 100) >= (uint32_t)threshold)
-        return NULL;
-
-    /* Context-appropriate nonverbal */
-    if (hu_str_contains_ci_cstr(sentence, len, "lol") || hu_str_contains_ci_cstr(sentence, len, "haha") ||
-        hu_str_contains_ci_cstr(sentence, len, "funny"))
+    bool heavy = is_heavy_emotion(emotion);
+    bool laughing = cue || hu_speech_has_laugh_token(sentence, len);
+    if (laughing && !already_laughed && !heavy && (seed % 100) < HU_PREP_LAUGH_PCT)
         return "[laughter] ";
-
-    if (emotion && (strcmp(emotion, "contemplative") == 0 || strcmp(emotion, "calm") == 0))
-        return "<break time=\"500ms\"/>";
-
-    if (emotion && strcmp(emotion, "sympathetic") == 0)
-        return "<break time=\"400ms\"/>";
-
-    uint32_t pick = seed % 3;
-    if (pick == 0)
-        return "[laughter] ";
-    if (pick == 1)
-        return "Hmm... ";
-    return "<break time=\"300ms\"/>";
+    if (heavy && (seed % 100) < 20)
+        return strcmp(emotion, "contemplative") == 0 ? "<break time=\"500ms\"/>"
+                                                     : "<break time=\"400ms\"/>";
+    return NULL;
 }
 
 /* ── Main preprocessor ───────────────────────────────────────────────── */
@@ -1013,6 +1019,7 @@ hu_error_t hu_transcript_prep(const char *transcript, size_t transcript_len,
         result->output_len = cp;
         result->dominant_emotion = config->default_emotion ? config->default_emotion : "content";
         result->volume = hu_emotion_to_volume(result->dominant_emotion);
+        result->base_speed = config->base_speed > 0.0f ? config->base_speed : 0.95f;
         return HU_OK;
     }
 
@@ -1025,6 +1032,7 @@ hu_error_t hu_transcript_prep(const char *transcript, size_t transcript_len,
         base_speed *= 0.92f;
         pause_factor *= 1.25f;
     }
+    result->base_speed = base_speed;
 
     /* Tag each sentence with emotion and speed */
     for (size_t i = 0; i < result->sentence_count; i++) {
@@ -1081,15 +1089,11 @@ hu_error_t hu_transcript_prep(const char *transcript, size_t transcript_len,
         }
     }
 
-    /* Thinking-time opening pause (contextual: longer for complex content) */
-    if (!strip && src_len > 60) {
-        int think_ms = src_len > 200 ? 400 : 250;
-        think_ms = (int)(think_ms * pause_factor);
-        int n = snprintf(out + pos, cap - pos, "<break time=\"%dms\"/>", think_ms);
-        if (n > 0 && pos + (size_t)n < cap)
-            pos += (size_t)n;
-    }
+    /* No opening "think" break: a memo starts on its words (voiceai 2026-09-27). */
 
+    bool speed_tag_open = false; /* a non-1.0 <speed> tag persists until reset */
+    int emotion_tags = 0, speed_sentences = 0, beats = 0;
+    bool laughed = false;
     for (size_t i = 0; i < result->sentence_count; i++) {
         hu_prep_sentence_t *s = &result->sentences[i];
 
@@ -1108,46 +1112,59 @@ hu_error_t hu_transcript_prep(const char *transcript, size_t transcript_len,
                 } else if (pos + 1 < cap) {
                     out[pos++] = ' ';
                 }
-            } else {
+            } else if (brk_ms >= 500 && beats < HU_PREP_MAX_BEATS) {
+                /* Sonic paces ordinary sentences from punctuation; only a heavy
+                 * moment earns one explicit beat (voiceai 2026-09-27). */
                 int n = snprintf(out + pos, cap - pos, "<break time=\"%dms\"/>", brk_ms);
-                if (n > 0 && pos + (size_t)n < cap)
+                if (n > 0 && pos + (size_t)n < cap) {
                     pos += (size_t)n;
+                    beats++;
+                }
+            } else if (pos + 1 < cap) {
+                out[pos++] = ' ';
             }
         }
 
         /* Emotion tag if different from previous (SSML mode only) */
-        if (!strip && s->emotion &&
-            (i == 0 || strcmp(s->emotion, result->sentences[i - 1].emotion) != 0)) {
+        /* One calm OPENING emotion only (voiceai 2026-09-27: "excited" widened
+         * the clone's pitch range; mid-memo switches sound performed). */
+        if (!strip && i == 0 && s->emotion && emotion_tags < HU_PREP_MAX_EMOTION_TAGS &&
+            hu_direction_emotion_is_calm(s->emotion, strlen(s->emotion))) {
             int n = snprintf(out + pos, cap - pos, "<emotion value=\"%s\"/>", s->emotion);
-            if (n > 0 && pos + (size_t)n < cap)
+            if (n > 0 && pos + (size_t)n < cap) {
                 pos += (size_t)n;
-        }
-
-        /* Speed tag if non-default (SSML mode only) */
-        float speed_delta = s->speed_ratio - base_speed;
-        if (!strip && (speed_delta > 0.03f || speed_delta < -0.03f)) {
-            int n =
-                snprintf(out + pos, cap - pos, "<speed ratio=\"%.2f\"/>", (double)s->speed_ratio);
-            if (n > 0 && pos + (size_t)n < cap)
-                pos += (size_t)n;
-        }
-
-        /* Per-sentence volume (SSML mode only) */
-        if (!strip) {
-            float sv = hu_emotion_to_volume(s->emotion);
-            float vol_delta = sv - result->volume;
-            if (vol_delta > 0.05f || vol_delta < -0.05f) {
-                int n = snprintf(out + pos, cap - pos, "<volume ratio=\"%.2f\"/>", (double)sv);
-                if (n > 0 && pos + (size_t)n < cap)
-                    pos += (size_t)n;
+                emotion_tags++;
             }
         }
+
+        /* Speed tag (SSML mode only). Cartesia applies <speed ratio> as a
+         * multiplier on generation_config.speed (= base_speed, see
+         * result->base_speed) and it persists until the next tag, so emit the
+         * RELATIVE factor and reset to 1.00 once a tagged sentence ends. */
+        float speed_delta = s->speed_ratio - base_speed;
+        bool speed_tagged = (speed_delta > 0.03f || speed_delta < -0.03f) &&
+                            speed_sentences < HU_PREP_MAX_SPEED_SENTENCES;
+        if (speed_tagged)
+            speed_sentences++;
+        if (!strip && (speed_tagged || speed_tag_open)) {
+            double rel = speed_tagged ? (double)(s->speed_ratio / base_speed) : 1.0;
+            int n = snprintf(out + pos, cap - pos, "<speed ratio=\"%.2f\"/>", rel);
+            if (n > 0 && pos + (size_t)n < cap)
+                pos += (size_t)n;
+            speed_tag_open = speed_tagged;
+        }
+
+        /* No inline volume tags: they persist to the end of the memo (voiceai
+         * measured a whole reply 24% quieter). Volume is request-level. */
 
         /* Nonverbal before sentence (context-dependent) */
         if (config->nonverbals_enabled) {
             const char *nv =
-                pick_nonverbal(s->text, s->len, s->emotion, config->seed ^ (uint32_t)(i * 97));
+                pick_nonverbal(s->text, s->len, s->emotion, config->seed ^ (uint32_t)(i * 97),
+                               config->laughter_cue, laughed);
             if (nv) {
+                if (nv[0] == '[')
+                    laughed = true;
                 if (strip) {
                     /* In strip mode, only emit text nonverbals, not SSML breaks */
                     if (nv[0] != '<') {

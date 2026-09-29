@@ -1,48 +1,90 @@
 #!/usr/bin/env bash
 # update-stats.sh — Sync all docs with actual repo metrics.
 # Patches: AGENTS.md, README.md, CONTRIBUTING.md, PROJECT_STATUS.md, human-skills/STUBS.md, CLAUDE.md
-# Usage: ./scripts/update-stats.sh [--apply] [--binary-size <KB>]
+# Usage: ./scripts/update-stats.sh [--apply] [--test-count <N>] [--binary-size <KB>] [--keep-binary-size]
 #   Without --apply: prints stats only (dry run).
 #   With --apply: patches all files in place.
+#   --test-count <N>: trust this count (from a suite the caller just ran)
+#       instead of executing a local test binary. N is the REGISTERED total,
+#       passed + skipped from the Results: line (skips vary by machine; the
+#       sum does not — see .githooks/pre-push). The pre-push hook passes
+#       the N it parsed from its own Results: line; without it the script
+#       re-ran whichever build*/human_tests sorted first — on 2026-09-03 a
+#       two-day-old build/ binary — and stamped a count the hook never
+#       verified (13,995 written, 14,125 measured). A count that was not
+#       measured in this run is exactly what
+#       .claude/rules/no-number-without-a-measurement.md forbids.
 #   --binary-size <KB>: trust this size instead of measuring a local binary.
+#   --keep-binary-size: measure nothing; leave the committed KB untouched.
+#       For callers that cannot vouch for any release binary's age (the hook
+#       builds Debug only; a 5-week-old build-release/ stamped ~2952 KB).
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
+USAGE="usage: update-stats.sh [--apply] [--test-count <N>] [--binary-size <KB>] [--keep-binary-size]"
 APPLY=false
+TEST_COUNT_OVERRIDE=""
 BINARY_KB_OVERRIDE=""
+KEEP_BINARY_SIZE=false
 while [ $# -gt 0 ]; do
     case "$1" in
         --apply) APPLY=true ;;
+        --test-count)
+            TEST_COUNT_OVERRIDE="${2:-}"
+            case "$TEST_COUNT_OVERRIDE" in
+                ''|*[!0-9]*) echo "error: --test-count requires a numeric value" >&2; exit 2 ;;
+            esac
+            shift ;;
         --binary-size)
             BINARY_KB_OVERRIDE="${2:-}"
             case "$BINARY_KB_OVERRIDE" in
                 ''|*[!0-9]*) echo "error: --binary-size requires a numeric KB value" >&2; exit 2 ;;
             esac
             shift ;;
-        *) echo "error: unknown argument '$1' (usage: update-stats.sh [--apply] [--binary-size <KB>])" >&2; exit 2 ;;
+        --keep-binary-size) KEEP_BINARY_SIZE=true ;;
+        *) echo "error: unknown argument '$1' ($USAGE)" >&2; exit 2 ;;
     esac
     shift
 done
 
+# --- tracked-file counters --------------------------------------------------
+# Every metric below reads git's INDEX, not the filesystem. src/data/data_*.c
+# are generated embedded-data blobs, gitignored (.gitignore:152) but present in
+# any checkout that has been built: counting them made the same commit measure
+# 2105 files / 446,620 LOC built vs 2093 / 433,125 clean. The stamped numbers
+# therefore depended on the machine, every push re-dirtied the docs, and
+# "~445K lines of C" was counting embedded training data as source.
+#
+# grep exits 1 on no match and these scripts run under `set -e` + pipefail, so
+# both helpers swallow that into a literal 0 / empty file list.
+count_tracked() {  # count_tracked <ere> <pathspec...>
+    _re="$1"; shift
+    git ls-files -- "$@" | { grep -cE "$_re" || true; }
+}
+loc_tracked() {  # loc_tracked <ere> <pathspec...>  — total lines, xargs-batch safe
+    _re="$1"; shift
+    git ls-files -- "$@" | { grep -E "$_re" || true; } | xargs cat 2>/dev/null | wc -l | tr -d ' '
+}
+
 # Count source + header files
-SRC_COUNT=$(find src include \( -name '*.c' -o -name '*.h' \) | wc -l | tr -d ' ')
+SRC_COUNT=$(count_tracked '\.(c|h)$' src include)
 
 # Count lines of C (round to nearest K)
 # MUST match scripts/repo-metrics.sh SRC_LOC (src/ only, no include/) — that is
 # what the metrics-drift gate checks "[0-9]+K lines of C" claims against.
-C_LINES_RAW=$(find src \( -name '*.c' -o -name '*.h' \) -exec cat {} + | wc -l | tr -d ' ')
+C_LINES_RAW=$(loc_tracked '\.(c|h)$' src)
 C_LINES_K=$(( (C_LINES_RAW + 500) / 1000 ))
 
 # Count test files
-TEST_FILES=$(find tests -name 'test_*.c' | wc -l | tr -d ' ')
+TEST_FILES=$(count_tracked '(^|/)test_[^/]*\.c$' tests)
 
 # Count test lines (round to nearest K)
-TEST_LINES_RAW=$(find tests \( -name '*.c' -o -name '*.h' \) -exec cat {} + | wc -l | tr -d ' ')
+TEST_LINES_RAW=$(loc_tracked '\.(c|h)$' tests)
 TEST_LINES_K=$(( (TEST_LINES_RAW + 500) / 1000 ))
 
 # Channel .c file count — for the "N channel implementations" repo-map line only.
-CHANNEL_COUNT=$(find src/channels -maxdepth 1 -name '*.c' ! -name 'factory.c' ! -name 'meta_common.c' | wc -l | tr -d ' ')
+CHANNEL_COUNT=$(git ls-files -- src/channels | { grep -E '^src/channels/[^/]+\.c$' || true; } | { grep -vcE '/(factory|meta_common)\.c$' || true; })
 # Canonical channel count = HU_CHANNEL_* enum entries in channel_catalog.h.
 # MUST match scripts/repo-metrics.sh — the source of truth the docs metrics-drift
 # gate (scripts/check-metrics-drift.sh) checks. Use this for every "N channels"
@@ -51,19 +93,40 @@ CHANNEL_COUNT=$(find src/channels -maxdepth 1 -name '*.c' ! -name 'factory.c' ! 
 CHANNEL_ENUM=$(grep -cE '^[[:space:]]+HU_CHANNEL_[A-Z_]+,' include/human/channel_catalog.h 2>/dev/null | tr -d ' ')
 
 # Count tools (exclude factory)
-TOOL_COUNT=$(find src/tools -maxdepth 1 -name '*.c' ! -name 'factory.c' | wc -l | tr -d ' ')
+TOOL_COUNT=$(git ls-files -- src/tools | { grep -E '^src/tools/[^/]+\.c$' || true; } | { grep -vcE '/factory\.c$' || true; })
 
-# Get test count from binary (try multiple build dirs)
+# Get test count: the caller's measurement if given, else re-run a binary.
+# build-check/ comes first — it is what the pre-push hook built from THIS tree
+# moments ago; build/ is a developer's dev build of whatever tree state it was
+# last configured against. Say which one ran, and how old it is, so a stale
+# count is at least visible in the hook output.
 TEST_COUNT="unknown"
-for test_bin in build/human_tests build2/human_tests build-check/human_tests build-release/human_tests; do
-    if [ -f "$test_bin" ]; then
-        TEST_COUNT=$("$test_bin" 2>/dev/null | grep 'Results:' | sed 's|.*: \([0-9]*\)/.*|\1|' || echo "unknown")
-        break
-    fi
-done
+if [ -n "$TEST_COUNT_OVERRIDE" ]; then
+    TEST_COUNT="$TEST_COUNT_OVERRIDE"
+    echo "Test count: ${TEST_COUNT} (from --test-count; no binary executed)"
+else
+    for test_bin in build-check/human_tests build/human_tests build2/human_tests build-release/human_tests; do
+        if [ -f "$test_bin" ]; then
+            bin_mtime=$(stat -f '%Sm' -t '%Y-%m-%d %H:%M' "$test_bin" 2>/dev/null \
+                || stat -c '%y' "$test_bin" 2>/dev/null | cut -c1-16 || echo "?")
+            echo "Test count: running ${test_bin} (mtime ${bin_mtime}) — pass --test-count to use a count you already measured"
+            # Registered total = passed + skipped, same parse as .githooks/pre-push.
+            results_line=$("$test_bin" 2>/dev/null | grep '^--- Results: ' | head -1 || true)
+            passed=$(printf '%s\n' "$results_line" | sed -n 's|^--- Results: \([0-9][0-9]*\)/.*|\1|p')
+            skipped=$(printf '%s\n' "$results_line" | sed -n 's|.*, \([0-9][0-9]*\) skipped.*|\1|p')
+            TEST_COUNT=$([ -n "$passed" ] && echo $((passed + ${skipped:-0})) || echo "unknown")
+            break
+        fi
+    done
+fi
 
 # Treat an empty extraction (binary ran but no Results: line) as unknown too
 [ -n "$TEST_COUNT" ] || TEST_COUNT="unknown"
+
+# Format the README stats-block counts with a thousands separator: that block
+# reads "Source files: 1,093", and the comma-less pattern this script used
+# never matched it, so the line sat at 1,093 while the tree grew past 2,000.
+SRC_COUNT_FMT=$(printf "%'d" "$SRC_COUNT" 2>/dev/null || echo "$SRC_COUNT")
 
 # Format test count with comma
 if [ "$TEST_COUNT" != "unknown" ]; then
@@ -79,16 +142,31 @@ fi
 # (commits 6b0f8926, 2edbdd74). When no release binary exists, keep the
 # committed value untouched (BINARY_KB stays "unknown" and every patch site
 # below skips). CI/release callers with no build dir can pass --binary-size.
+#
+# MinSizeRel alone is not enough: the "~NNNN KB" claims are gated
+# (check-metrics-drift.sh --binary, 15%) against the release-size job's build
+# in ci.yml, which passes LTO + all channels + sqlite-vec OFF. The `release`
+# preset is also MinSizeRel but turns sqlite-vec, ML, cartesia and more ON —
+# 3,275,488 B vs 2,758,976 B at b277f7de0 (docs/perf/footprint.json), 18.7%
+# over, so stamping it would turn release-size red. Require every flag that
+# job sets explicitly. Residual: flags it leaves at their defaults are not
+# checked, so a build with extras switched on can still pass; the gate is the
+# backstop for that.
 is_release_build_dir() {
     cache="$1/CMakeCache.txt"
     [ -f "$cache" ] || return 1
     grep -q '^CMAKE_BUILD_TYPE:[^=]*=MinSizeRel$' "$cache" || return 1
+    grep -q '^HU_ENABLE_LTO:[^=]*=ON$' "$cache" || return 1
+    grep -q '^HU_ENABLE_ALL_CHANNELS:[^=]*=ON$' "$cache" || return 1
+    grep -q '^HU_ENABLE_SQLITE_VEC:[^=]*=OFF$' "$cache" || return 1
     ! grep -q '^HU_ENABLE_ASAN:[^=]*=ON$' "$cache"
 }
 
 BINARY_KB="unknown"
 if [ -n "$BINARY_KB_OVERRIDE" ]; then
     BINARY_KB="$BINARY_KB_OVERRIDE"
+elif $KEEP_BINARY_SIZE; then
+    echo "Binary size: --keep-binary-size — keeping committed value"
 else
     SKIPPED_BIN=""
     for bin in build-size/human build2/human build-release/human build/human; do
@@ -102,7 +180,7 @@ else
         fi
     done
     if [ "$BINARY_KB" = "unknown" ] && [ -n "$SKIPPED_BIN" ]; then
-        echo "Binary size: skipping — ${SKIPPED_BIN} is not a MinSizeRel release build (Debug/ASan); keeping committed value. Use --binary-size <KB> to override."
+        echo "Binary size: skipping — ${SKIPPED_BIN} is not the release-size config (MinSizeRel + LTO + all channels + sqlite-vec OFF, no ASan); keeping committed value. Use --binary-size <KB> to override."
     fi
 fi
 
@@ -177,10 +255,12 @@ if [ "$TEST_COUNT" != "unknown" ]; then
         README.md && rm -f README.md.bak
 fi
 
-# "Tests:" stat line
+# "Tests:" stat line. Both this and the "^Tests: N" block pattern below accept
+# a trailing "+": the committed lines read "11,924+ passing" and "6374+", so
+# the strict patterns never matched and the two lines rotted from 2026-07 on.
 if [ "$TEST_COUNT" != "unknown" ]; then
     sed -i.bak -E \
-        "s/Tests:[[:space:]]+[0-9,]+ passing/Tests:         ${TEST_COUNT_FMT} passing/" \
+        "s/Tests:[[:space:]]+[0-9,]+\+? passing/Tests:         ${TEST_COUNT_FMT} passing/" \
         README.md && rm -f README.md.bak
 fi
 
@@ -217,7 +297,7 @@ sed -i.bak -E \
 
 # Stats block: "Source files:", "Lines of code:", "Test files:", "Tests:"
 sed -i.bak -E \
-    "s/^Source files: [0-9]+$/Source files: ${SRC_COUNT}/" \
+    "s/^Source files: [0-9,]+$/Source files: ${SRC_COUNT_FMT}/" \
     README.md && rm -f README.md.bak
 
 sed -i.bak -E \
@@ -230,7 +310,7 @@ sed -i.bak -E \
 
 if [ "$TEST_COUNT" != "unknown" ]; then
     sed -i.bak -E \
-        "s/^Tests: [0-9,]+$/Tests: ${TEST_COUNT_FMT}/" \
+        "s/^Tests: [0-9,]+\+?$/Tests: ${TEST_COUNT_FMT}/" \
         README.md && rm -f README.md.bak
 fi
 
@@ -246,6 +326,7 @@ fi
 echo "Patching PROJECT_STATUS.md..."
 
 if [ -f PROJECT_STATUS.md ]; then
+    ps_before=$(git hash-object PROJECT_STATUS.md)
     # Test files
     sed -i.bak -E \
         "s/Test files[[:space:]]+\| [0-9]+/Test files                     | ${TEST_FILES}/" \
@@ -280,10 +361,14 @@ if [ -f PROJECT_STATUS.md ]; then
         "s/All [0-9]+ Real \(with all feature flags\)/All ${TOOL_COUNT} Real (with all feature flags)/" \
         PROJECT_STATUS.md && rm -f PROJECT_STATUS.md.bak
 
-    # Update date
-    sed -i.bak -E \
-        "s/Last updated: [0-9]{4}-[0-9]{2}-[0-9]{2}/Last updated: $(date +%Y-%m-%d)/" \
-        PROJECT_STATUS.md && rm -f PROJECT_STATUS.md.bak
+    # Update date — only when a metric above actually moved. An unconditional
+    # stamp dirtied PROJECT_STATUS.md on every push that crossed a midnight
+    # even when no number changed, so the hook's output never converged.
+    if [ "$(git hash-object PROJECT_STATUS.md)" != "$ps_before" ]; then
+        sed -i.bak -E \
+            "s/Last updated: [0-9]{4}-[0-9]{2}-[0-9]{2}/Last updated: $(date +%Y-%m-%d)/" \
+            PROJECT_STATUS.md && rm -f PROJECT_STATUS.md.bak
+    fi
 fi
 
 echo "Patching human/STUBS.md..."

@@ -262,34 +262,36 @@ export class ScDropdown extends LitElement {
       >
         <slot></slot>
       </div>
-      ${this.open
-        ? html`<div class="menu open align-${this.align}" role="menu" aria-expanded=${this.open}>
-            ${this.items.map((item) => {
-              if (item.divider) {
-                return html`<hr class="divider" aria-hidden="true" />`;
-              }
-              itemIndex++;
-              const isFocused = itemIndex === this._focusedIndex;
-              const iconEl =
-                item.icon && icons[item.icon]
-                  ? html`<span class="item-icon">${icons[item.icon]}</span>`
-                  : null;
-              return html`
-                <button
-                  type="button"
-                  class="item"
-                  role="menuitem"
-                  ?disabled=${item.disabled}
-                  tabindex=${isFocused ? 0 : -1}
-                  @click=${() => !item.disabled && this._select(item.id)}
-                >
-                  ${iconEl}
-                  <span>${item.label}</span>
-                </button>
-              `;
-            })}
-          </div>`
-        : nothing}
+      ${
+        this.open
+          ? html`<div class="menu open align-${this.align}" role="menu" aria-expanded=${this.open}>
+              ${this.items.map((item) => {
+                if (item.divider) {
+                  return html`<hr class="divider" aria-hidden="true" />`;
+                }
+                itemIndex++;
+                const isFocused = itemIndex === this._focusedIndex;
+                const iconEl =
+                  item.icon && icons[item.icon]
+                    ? html`<span class="item-icon">${icons[item.icon]}</span>`
+                    : null;
+                return html`
+                  <button
+                    type="button"
+                    class="item"
+                    role="menuitem"
+                    ?disabled=${item.disabled}
+                    tabindex=${isFocused ? 0 : -1}
+                    @click=${() => !item.disabled && this._select(item.id)}
+                  >
+                    ${iconEl}
+                    <span>${item.label}</span>
+                  </button>
+                `;
+              })}
+            </div>`
+          : nothing
+      }
     `;
   }
 }

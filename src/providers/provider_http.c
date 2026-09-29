@@ -12,6 +12,15 @@ hu_error_t hu_provider_http_post_json(hu_allocator_t *alloc, const char *url,
                                       const char *auth_header, const char *extra_headers,
                                       const char *body, size_t body_len,
                                       hu_json_value_t **parsed_out) {
+    return hu_provider_http_post_json_opts(alloc, url, auth_header, extra_headers, body, body_len,
+                                           NULL, parsed_out);
+}
+
+hu_error_t hu_provider_http_post_json_opts(hu_allocator_t *alloc, const char *url,
+                                           const char *auth_header, const char *extra_headers,
+                                           const char *body, size_t body_len,
+                                           const hu_http_request_opts_t *opts,
+                                           hu_json_value_t **parsed_out) {
     if (!alloc || !url || !parsed_out)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -21,9 +30,10 @@ hu_error_t hu_provider_http_post_json(hu_allocator_t *alloc, const char *url,
     hu_error_t err;
 
     if (extra_headers && extra_headers[0]) {
-        err = hu_http_post_json_ex(alloc, url, auth_header, extra_headers, body, body_len, &hresp);
+        err = hu_http_post_json_opts(alloc, url, auth_header, extra_headers, body, body_len, opts,
+                                     &hresp);
     } else {
-        err = hu_http_post_json(alloc, url, auth_header, body, body_len, &hresp);
+        err = hu_http_post_json_opts(alloc, url, auth_header, NULL, body, body_len, opts, &hresp);
     }
 
     if (err != HU_OK)

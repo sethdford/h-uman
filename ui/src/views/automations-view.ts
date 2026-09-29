@@ -532,9 +532,11 @@ export class ScAutomationsView extends GatewayAwareLitElement {
         <hu-empty-state
           .icon=${icons.timer}
           heading=${this.activeTab === "agent" ? "No agent tasks" : "No shell jobs"}
-          description=${this.activeTab === "agent"
-            ? "Create an agent automation to run AI tasks on a schedule."
-            : "Create a shell job to run commands on a schedule."}
+          description=${
+            this.activeTab === "agent"
+              ? "Create an agent automation to run AI tasks on a schedule."
+              : "Create a shell job to run commands on a schedule."
+          }
         >
           <hu-button variant="primary" @click=${this._openNewAutomation}>
             New Automation
@@ -651,14 +653,16 @@ export class ScAutomationsView extends GatewayAwareLitElement {
       </hu-page-hero>
 
       ${this._renderStats()}
-      ${this.runChartData.labels.length > 0
-        ? html`
-            <hu-card class="run-chart-card">
-              <h3 class="run-chart-title">Run outcomes over time</h3>
-              <hu-chart type="line" .data=${this.runChartData} height=${200}></hu-chart>
-            </hu-card>
-          `
-        : nothing}
+      ${
+        this.runChartData.labels.length > 0
+          ? html`
+              <hu-card class="run-chart-card">
+                <h3 class="run-chart-title">Run outcomes over time</h3>
+                <hu-chart type="line" .data=${this.runChartData} height=${200}></hu-chart>
+              </hu-card>
+            `
+          : nothing
+      }
 
       <hu-tabs
         .tabs=${[
@@ -669,18 +673,20 @@ export class ScAutomationsView extends GatewayAwareLitElement {
         @tab-change=${(e: CustomEvent<string>) => (this.activeTab = e.detail)}
       ></hu-tabs>
 
-      ${this.error
-        ? html`<hu-empty-state .icon=${icons.warning} heading="Error" description=${this.error}>
-            <hu-button
-              variant="primary"
-              @click=${() => this.load()}
-              aria-label="Retry loading automations"
-              >Retry</hu-button
-            >
-          </hu-empty-state>`
-        : this.loading
-          ? this._renderSkeleton()
-          : this._renderJobList()}
+      ${
+        this.error
+          ? html`<hu-empty-state .icon=${icons.warning} heading="Error" description=${this.error}>
+              <hu-button
+                variant="primary"
+                @click=${() => this.load()}
+                aria-label="Retry loading automations"
+                >Retry</hu-button
+              >
+            </hu-empty-state>`
+          : this.loading
+            ? this._renderSkeleton()
+            : this._renderJobList()
+      }
       ${this._renderAgentModal()} ${this._renderShellModal()} ${this._renderDeleteModal()}
     `;
   }

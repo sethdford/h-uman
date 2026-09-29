@@ -127,7 +127,14 @@ option(HU_ENABLE_CRON "Build cron scheduler support" OFF)
 option(HU_ENABLE_PUSH "Build push notification support (FCM/APNS)" OFF)
 option(HU_ENABLE_UPDATE "Build update check/apply support" OFF)
 option(HU_ENABLE_SKILLS "Build skill acquisition and continuous learning" OFF)
-option(HU_ENABLE_PERSONA "Enable persona system" ON)
+option(HU_ENABLE_PERSONA "Persona system (compiled unconditionally; OFF is rejected)" ON)
+if(NOT HU_ENABLE_PERSONA)
+    # Until 2026-09-20 this option was accepted and silently ignored: the persona
+    # sources were compiled regardless and HU_HAS_PERSONA=1 was defined
+    # unconditionally. Fail loudly rather than pretend the toggle works.
+    message(FATAL_ERROR "HU_ENABLE_PERSONA=OFF is not supported: the persona system is compiled "
+                        "unconditionally. Drop the flag (see docs/platform-support.md).")
+endif()
 option(HU_ENABLE_AUTHENTIC "Build authentic existence features" OFF)
 option(HU_ENABLE_CARTESIA "Enable Cartesia TTS for voice messages" OFF)
 option(HU_ENABLE_ML "Build ML training subsystem (BPE tokenizer, dataloader, experiment loop)" OFF)
@@ -192,6 +199,13 @@ else()
 endif()
 option(HU_ENABLE_LIBSODIUM "Link libsodium for production-grade AEAD (XChaCha20-Poly1305) and KDF (Argon2id)" OFF)
 option(HU_ENABLE_COREML "Enable CoreML/MLX provider (macOS only)" OFF)
+# Two finished features that no build could turn on until 2026-09-12: the
+# macros were tested in src/ but defined by no option.
+option(HU_ENABLE_VISION_OCR "Apple Vision OCR bridge for the vision_ocr tool (macOS only)" OFF)
+option(HU_ENABLE_VOICE_VAD_TIMING "Randomised 200-500 ms filler-to-reply delay on voice channels" OFF)
+if(HU_ENABLE_VOICE_VAD_TIMING)
+    add_compile_definitions(HU_ENABLE_VOICE_VAD_TIMING=1)
+endif()
 if(APPLE)
     option(HU_ENABLE_APPLE_INTELLIGENCE "Enable Apple Intelligence provider (on-device)" ON)
 else()
@@ -231,7 +245,6 @@ option(HU_ENABLE_DINGTALK "Build DingTalk channel" OFF)
 option(HU_ENABLE_SIGNAL "Build Signal channel" OFF)
 option(HU_ENABLE_NOSTR "Build Nostr channel" OFF)
 option(HU_ENABLE_QQ "Build QQ channel" OFF)
-option(HU_ENABLE_MAIXCAM "Build MaixCam channel" OFF)
 option(HU_ENABLE_DISPATCH "Build Dispatch channel" OFF)
 option(HU_ENABLE_GMAIL "Build Gmail channel (read-only OAuth2)" OFF)
 option(HU_ENABLE_TEAMS "Build Microsoft Teams channel" OFF)
@@ -297,7 +310,6 @@ if(HU_ENABLE_ALL_CHANNELS)
     set(HU_ENABLE_SIGNAL ON)
     set(HU_ENABLE_NOSTR ON)
     set(HU_ENABLE_QQ ON)
-    set(HU_ENABLE_MAIXCAM ON)
     set(HU_ENABLE_DISPATCH ON)
     set(HU_ENABLE_GMAIL ON)
     set(HU_ENABLE_TEAMS ON)
@@ -354,7 +366,14 @@ endif()
 if(HU_ENABLE_WHATSAPP)
     list(APPEND CHANNEL_SOURCES src/channels/whatsapp.c)
 endif()
-if(HU_ENABLE_WHATSAPP OR HU_ENABLE_FACEBOOK OR HU_ENABLE_INSTAGRAM)
+if(HU_ENABLE_FACEBOOK OR HU_ENABLE_INSTAGRAM)
+    # meta_common.c's helpers (hu_meta_common_*) are called only from
+    # facebook.c and instagram.c — whatsapp.c never includes meta_common.h.
+    # It used to say "OR HU_ENABLE_WHATSAPP" too, which was harmless while
+    # HU_ENABLE_ALL_CHANNELS forced every channel on together, but became a
+    # never-loaded archive member once Task 11 (docs/plans/2026-09-20-
+    # dead-code-plan.md) made WhatsApp compile without Facebook/Instagram:
+    # the dead-strip ratchet caught it (scripts/check-dead-strip-ratchet.sh).
     list(APPEND CHANNEL_SOURCES src/channels/meta_common.c)
 endif()
 if(HU_ENABLE_FACEBOOK)
@@ -392,9 +411,10 @@ if(HU_ENABLE_IMAP)
 endif()
 if(HU_HAS_IMESSAGE)
     list(APPEND CHANNEL_SOURCES src/channels/imessage.c)
-    # E2: sticker send action surface. Wired via vtable. Genuine Apple deps
-    # (AX / sticker injection), so stays gated.
-    list(APPEND CHANNEL_SOURCES src/channels/imessage_sticker.c)
+    # E2: sticker send action surface. Task 12 moved it to human_devlib —
+    # nothing on the daemon's link path references hu_imessage_send_sticker
+    # (it is not in any channel vtable), so imessage_sticker.c.o was a
+    # never-loaded member of libhuman_core.a. Only tests call it.
     # Phase 6 of docs/plans/2026-05-18-imessage-sota.md: schema-version
     # probe + drift canary. Caches the chat.db PRAGMA table_info result;
     # logs unknown columns at startup so operators see Apple-added fields
@@ -422,6 +442,9 @@ list(APPEND CHANNEL_SOURCES src/channels/imessage_reactions.c)
 # T0.4 of docs/plans/2026-07-19-native-imessage: capability probe. Every
 # advanced (IMCore-bridge) verb gates on this; pure parse + fail-closed.
 list(APPEND CHANNEL_SOURCES src/channels/imessage_caps.c)
+# Pure replay guards: always built so their (unconditional) test links on Linux.
+list(APPEND CHANNEL_SOURCES src/channels/imessage_replay_guard.c)
+list(APPEND CHANNEL_SOURCES src/channels/imessage_bb_event.c)
 # Phase 1a of docs/plans/2026-05-18-imessage-sota.md: pure synthesis
 # primitives that render iMessage events into canonical English for
 # personal-model ingestion (hu_reaction_ingest_personal_model,
@@ -439,6 +462,15 @@ list(APPEND CHANNEL_SOURCES src/channels/contact_signature.c)
 # Threaded inline reply path (hu_imessage_reply + test stubs). External calls
 # only to unconditional symbols (hu_imessage_action_log_jsonl, log, time).
 list(APPEND CHANNEL_SOURCES src/channels/imessage_reply.c)
+# Send provenance observer: pure C, no Apple deps, so unconditional like
+# imessage_reply.c (the daemon records every delivered send through it).
+list(APPEND CHANNEL_SOURCES src/channels/imessage_send_observer.c)
+# Native Messages voice delivery (W3): pure policy + orchestrator, no Apple
+# deps, so unconditional; imessage.c calls it from the production send path.
+list(APPEND CHANNEL_SOURCES src/channels/imessage_voice_record.c)
+# macOS port for it (CoreAudio/AudioQueue/AX/IOKit); a stub on test and
+# non-Apple builds, so unconditional.
+list(APPEND CHANNEL_SOURCES src/channels/imessage_voice_record_macos.c)
 # Tier 1 Phase 2 (iMessage action surface): pure reply-style classifier +
 # facts bridge (hu_imessage_action_*). Zero chat.db / Apple deps (only libc +
 # error.h/persona.h); core callers (src/daemon.c
@@ -489,14 +521,12 @@ endif()
 if(HU_ENABLE_MQTT)
     list(APPEND CHANNEL_SOURCES src/channels/mqtt.c)
 endif()
-# signal, nostr, qq, maixcam, dispatch: only when all-channels build (saves ~60KB in default)
+# signal, nostr, qq, dispatch: only when all-channels build (saves ~60KB in default)
 if(HU_ENABLE_ALL_CHANNELS)
     list(APPEND CHANNEL_SOURCES
         src/channels/signal.c
         src/channels/nostr.c
         src/channels/qq.c
-        src/channels/maixcam.c
-        src/channels/dispatch.c
     )
     if(NOT HU_ENABLE_GMAIL)
         list(APPEND CHANNEL_SOURCES src/channels/gmail_base64.c src/channels/gmail.c)
@@ -514,6 +544,21 @@ if(HU_ENABLE_MEMORY_LRU_ENGINE)
     list(APPEND MEMORY_ENGINE_SOURCES src/memory/engines/memory_lru.c)
 endif()
 list(APPEND MEMORY_ENGINE_SOURCES src/memory/engines/sqlite.c)
+option(HU_ENABLE_SQLITE_VEC "Vendored sqlite-vec store for semantic recall (adds ~300 KB; release-size builds turn it off)" ON)
+if(HU_ENABLE_SQLITE AND HU_ENABLE_SQLITE_VEC)
+    # Vendored sqlite-vec (third_party, pure C, exact KNN) + the store over it.
+    # Third-party code is compiled warning-silent; it is not ours to lint.
+    # SQLITE_CORE = static linking: the extension calls the real sqlite3 API,
+    # and our store declares sqlite3_vec_init itself (no sqlite3ext.h shims).
+    list(APPEND MEMORY_ENGINE_SOURCES src/memory/engines/store_sqlite_vec.c
+         third_party/sqlite-vec/sqlite-vec.c)
+    set_source_files_properties(third_party/sqlite-vec/sqlite-vec.c PROPERTIES COMPILE_OPTIONS "-w;-D_GNU_SOURCE;-include;sys/types.h"
+                                COMPILE_DEFINITIONS "SQLITE_CORE=1")
+    add_compile_definitions(HU_ENABLE_SQLITE_VEC=1)
+elseif(HU_ENABLE_SQLITE)
+    # Store compiled as the NOT_SUPPORTED stub so semantic_recall attach refuses.
+    list(APPEND MEMORY_ENGINE_SOURCES src/memory/engines/store_sqlite_vec.c)
+endif()
 # postgres, redis, api: always built (mock in HU_IS_TEST; real when HU_ENABLE_*)
 list(APPEND MEMORY_ENGINE_SOURCES
     src/memory/engines/postgres.c
@@ -535,16 +580,12 @@ find_package(Threads QUIET)
 set(HU_CORE_SOURCES
     src/app/platform.c
     src/platform/calendar_macos.c
-    src/peripherals/terminal.c
     src/util/util.c
     src/util/json_util.c
     src/agent/bus.c
     src/agent/session.c
     src/channels/channel_loop.c
-    src/channels/channel_manager.c
     src/security/auth.c
-    src/security/identity.c
-    src/agent/state.c
     src/observability/heartbeat.c
     src/core/accel.c
     src/core/allocator.c
@@ -553,6 +594,8 @@ set(HU_CORE_SOURCES
     src/core/gate_mode.c
     src/core/arena.c
     src/core/string.c
+    src/core/tokens.c
+    src/core/paths.c
     src/core/io_secure.c
     src/core/file.c
     src/core/json.c
@@ -584,12 +627,14 @@ set(HU_CORE_SOURCES
     # `<|channel>thought` markers without buffering the full response.
     # See docs/plans/2026-05-26-m3-b4-mlx-local-sse/tasks.md::T4.
     src/util/harmony_filter.c
+    # 2026-09-04: one shared locator for JSON inside LLM replies (think
+    # blocks, code fences, prose) — replaces per-caller re-derivations.
+    src/util/llm_json.c
     src/core/http.c
     src/core/vertex_auth.c
     src/core/process_util.c
-    src/sse/sse_client.c
+    src/core/log.c
     src/websocket/websocket.c
-    src/security/net_security.c
     src/config/config.c
     src/config/config_schema.c
     src/config/config_merge.c
@@ -606,11 +651,21 @@ set(HU_CORE_SOURCES
     src/config/config_parse_behavior.c
     src/app/capabilities.c
     src/channels/channel_catalog.c
-    src/channels/channel_adapters.c
     src/doctor/doctor.c
     src/doctor/registry.c
     src/doctor/check_chatdb.c
     src/doctor/check_prompt_budget.c
+    src/doctor/check_ops_common.c
+    src/doctor/check_eval_freshness.c
+    src/doctor/check_serving_stability.c
+    src/doctor/check_log_hygiene.c
+    src/doctor/check_imessage_cursor.c
+    src/doctor/check_blind_ab_gate.c
+    src/doctor/check_contact_optout.c
+    src/doctor/check_persona_integrity.c
+    # Read-only chat.db cursor repo: self-guarded on HU_ENABLE_SQLITE (returns
+    # NOT_SUPPORTED without it) so the imessage_cursor doctor check always links.
+    src/memory/repos/chatdb_cursor_repo_sqlite.c
     src/doctor/check_provider.c
     src/doctor/check_local_voice.c
     src/doctor/check_outbound_stats.c
@@ -625,42 +680,31 @@ set(HU_CORE_SOURCES
     src/channels/channel_class.c
     src/channels/channel_monitor.c
     src/memory/evolved_opinions.c
-    src/observability/status.c
-    src/util/http_util.c
     src/mcp/mcp.c
     src/mcp/mcp_jsonrpc.c
     src/mcp/mcp_transport_stdio.c
     src/mcp/mcp_transport_sse.c
     src/mcp/mcp_transport_http.c
     src/multimodal.c
-    src/multimodal/calendar.c
-    src/multimodal/document.c
-    src/multimodal/image.c
     src/multimodal/audio.c
     src/multimodal/video.c
     src/multimodal/multimodal.c
-    src/memory/rag.c
-    src/agent/service.c
     src/skills/skill_registry.c
-    src/subagent.c
     src/core/privacy.c
     src/voice/voice.c
     src/voice/voice_config.c
     src/voice/local_stt.c
     src/voice/local_tts.c
-    src/util/portable_atomic.c
     src/agent/agent_routing.c
     src/observability/health.c
     src/security/security.c
     src/security/sycophancy_guard.c
-    src/security/mcp_audit.c
     src/security/policy.c
     src/security/causal_armor.c
     src/security/history_scorer.c
     src/security/arg_inspector.c
     src/security/pairing.c
     src/security/secrets.c
-    src/security/vault.c
     src/security/vault_aead.c
     src/security/audit.c
     src/security/delegation.c
@@ -670,20 +714,16 @@ set(HU_CORE_SOURCES
     src/security/exec_env.c
     src/security/adversarial.c
     src/security/sensitivity.c
-    src/security/sandbox.c
     src/security/skill_trust.c
     src/security/keystore.c
     src/security/audit_log.c
     src/observability/observability.c
     src/observability/log_observer.c
     src/observability/metrics_observer.c
-    src/observability/multi_observer.c
     src/observability/bth_metrics.c
     src/observability/otlp.c
     src/observability/background_registry.c
     src/observability/validator_telemetry.c
-    src/tunnel/none.c
-    src/tunnel/root.c
     src/gateway/gateway.c
     src/gateway/thread_pool.c
     src/gateway/openai_compat.c
@@ -716,29 +756,28 @@ set(HU_CORE_SOURCES
     src/persona/persona_fuse.c
     src/persona/relationship_tone.c
     src/persona/humor.c
-    src/persona/markdown_loader.c
     src/persona/somatic.c
     src/persona/taste.c
     src/persona/celebration.c
     src/persona/warm_response.c
     src/persona/narrative_self.c
+    src/persona/life_events.c
     # Sprint A.5 wiring: renders the personal model's reaction signature
     # (from calibrate) into a prompt-ready paragraph, ready to splice
     # into the agent's persona context.
     src/persona/social_insights.c
-    src/persona/sticker.c
     src/gateway/event_bridge.c
-    src/gateway/tenant.c
     src/runtime/native.c
     src/runtime/docker.c
     src/runtime/gce.c
     src/runtime/factory.c
     src/security/hook.c
     src/security/hook_pipeline.c
-    src/agent/action_preview.c
     src/agent/agent.c
     src/agent/agent_plan.c
     src/agent/agent_stream.c
+    src/agent/lean_head.c
+    src/agent/reply_prompt.c
     src/agent/agent_turn.c
     src/agent/best_of_n.c
     src/agent/humanness.c
@@ -776,7 +815,6 @@ set(HU_CORE_SOURCES
     src/agent/orchestrator.c
     src/agent/orchestrator_llm.c
     src/agent/swarm.c
-    src/agent/agent_profile.c
     src/agent/model_router.c
     src/agent/model_router_health.c
     src/agent/registry.c
@@ -799,7 +837,6 @@ set(HU_CORE_SOURCES
     src/agent/validators/channel_tags_validator.c
     src/agent/validators/ai_phrases_validator.c
     src/agent/validators/formal_structure_validator.c
-    src/agent/validators/cot_audit_validator.c
     src/agent/validators/persona_narrator_validator.c
     src/agent/validators/assistant_closer_validator.c
     src/agent/validators/role_consistency_validator.c
@@ -822,7 +859,6 @@ set(HU_CORE_SOURCES
     src/context/temporal_events.c
     src/context/vision.c
     src/context/intelligence.c
-    src/intelligence/skill_system.c
     src/intelligence/trust.c
     src/feeds/processor.c
     src/feeds/awareness.c
@@ -840,16 +876,13 @@ set(HU_CORE_SOURCES
     src/behavior/pressure.c
     src/behavior/behavior_trust.c
     src/behavior/trust_prompt.c
-    src/behavior/user_sim.c
     src/behavior/pressure_history.c
     src/behavior/tapback_band.c
-    src/behavior/user_sim_scenario.c
     src/context/repair.c
     src/calibration/timing_analyzer.c
     src/calibration/style_analyzer.c
     src/calibration/calibrate.c
     src/calibration/clone.c
-    src/calibration/ab_compare.c
     src/predictive/drafts.c
     src/agent/autoresponder.c
     src/research/contact_narrative.c
@@ -861,7 +894,6 @@ set(HU_CORE_SOURCES
     src/agent/token_budget.c
     src/agent/data_quality.c
     src/agent/mar.c
-    src/agent/prompt_optimizer.c
     src/agent/checkpoint.c
     src/agent/approval_gate.c
     src/agent/workflow_event.c
@@ -881,12 +913,11 @@ set(HU_CORE_SOURCES
     src/agent/inner_thoughts.c
     src/agent/weather_awareness.c
     src/agent/weather_fetch.c
-    src/agent/workspace_context.c
     src/agent/timing.c
     src/agent/governor.c
-    src/agent/activation_steering.c
     src/agent/arbitrator.c
     src/agent/salience.c
+    src/agent/hard_moment.c
     src/agent/intent.c
     src/agent/self_uncertainty.c
     src/agent/planning.c
@@ -914,7 +945,6 @@ set(HU_CORE_SOURCES
     src/agent/prosocial_routine.c
     src/security/permission.c
     src/mcp/mcp_manager.c
-    src/mcp/mcp_tool_wrapper.c
     src/agent/compaction_structured.c
     src/agent/session_persist.c
     src/agent/instruction_discover.c
@@ -924,7 +954,6 @@ set(HU_CORE_SOURCES
     src/providers/helpers.c
     src/providers/provider_http.c
     src/providers/sse.c
-    src/util/sse_parser.c
     src/providers/scrub.c
     src/providers/reliable.c
     src/providers/from_config.c
@@ -932,7 +961,6 @@ set(HU_CORE_SOURCES
     src/providers/ensemble.c
     src/providers/codex_cli.c
     src/providers/openai_codex.c
-    src/providers/runtime_bundle.c
     src/providers/openai.c
     src/providers/anthropic.c
     src/providers/gemini.c
@@ -944,7 +972,6 @@ set(HU_CORE_SOURCES
     src/providers/factory.c
     ${CHANNEL_SOURCES}
     ${MEMORY_ENGINE_SOURCES}
-    src/memory/engines/registry.c
     src/memory/factory.c
     src/memory/encrypted_store.c
     src/memory/util.c
@@ -984,6 +1011,11 @@ set(HU_CORE_SOURCES
     # Known remaining callers: src/agent/simulation/autodream.c (1 site),
     # src/daemon.c (9 sites). See docs/plans/2026-05-10-memory-v2-roadmap-overview.md.
     src/memory/graph.c
+    src/memory/graph_state.c
+    src/memory/wiki_page.c
+    src/memory/graph_ingest.c
+    src/memory/agent_facts.c
+    src/memory/semantic_recall.c
     src/memory/conflict_resolver.c
     src/memory/write_trust.c
     src/memory/cross_graph.c
@@ -1009,7 +1041,6 @@ set(HU_CORE_SOURCES
     src/agent/scheduler_status_json.c
     src/agent/simulation/counterfactual.c
     src/agent/autodream_runner.c
-    src/agent/case_based.c
     src/agent/response_verifier.c
     src/agent/response_guard.c
     src/agent/response_guard_dpo.c
@@ -1085,14 +1116,7 @@ set(HU_CORE_SOURCES
     src/agent/belief_reverify_runner.c
     src/persona/persona_deltas.c
     src/persona/delta_observer.c
-    src/memory/multimodal_index.c
     src/memory/lifecycle/cache.c
-    src/memory/lifecycle/hygiene.c
-    src/memory/lifecycle/snapshot.c
-    src/memory/lifecycle/summarizer.c
-    src/memory/lifecycle/diagnostics.c
-    src/memory/lifecycle/rollout.c
-    src/memory/lifecycle/migrate.c
     src/memory/retrieval/keyword.c
     src/memory/retrieval/namespace.c
     src/memory/retrieval/temporal.c
@@ -1102,16 +1126,10 @@ set(HU_CORE_SOURCES
     src/memory/retrieval/rrf.c
     src/memory/retrieval/entropy_gate.c
     src/memory/rerank.c
-    src/memory/retrieval/qmd.c
-    src/memory/retrieval/query_expansion.c
-    src/memory/retrieval/llm_reranker.c
     src/memory/retrieval/strategy_learner.c
     src/memory/retrieval/engine.c
-    src/memory/retrieval/multigraph.c
     src/memory/connections.c
     src/memory/knowledge.c
-    src/memory/cognitive.c
-    src/memory/deep_memory.c
     src/memory/rag_pipeline.c
     src/memory/compression.c
     src/visual/content.c
@@ -1205,30 +1223,25 @@ set(HU_CORE_SOURCES
     src/tools/media_image.c
     src/tools/media_video.c
     src/tools/media_gif.c
+    src/tools/media_vertex_common.c
     src/tools/factory.c
-    src/tools/canvas_render.c
     src/tools/canvas_store.c
     src/tools/canvas_persist.c
     src/tools/declarative.c
-    src/tools/mcp_resource_tools.c
-    src/tools/cron_session_tools.c
     src/mcp/mcp_server.c
     src/channels/thread_binding.c
     src/channels/format.c
     src/channels/behavior_class.c
     src/channels/rate_limit.c
     src/channels/channel_embed.c
-    src/channels/channel_http.c
-    src/channels/webhook.c
+    src/channels/channel_mock.c
     src/security/policy_engine.c
-    src/security/replay.c
     src/plugins/registry.c
     src/plugins/plugin_loader.c
     src/plugins/plugin_discovery.c
     src/skills/skill_scaffold.c
     src/context/context_engine.c
     src/context/context_engine_rag.c
-    src/mcp/mcp_registry.c
     src/onboard/onboard.c
     src/onboard/state.c
     src/onboard/dispatcher.c
@@ -1243,15 +1256,32 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_cron.c
     src/daemon/daemon_routing.c
     src/daemon/daemon_proactive.c
+    src/daemon/daemon_contact_optout.c
+    src/daemon/daemon_hurt_handoff.c
+    src/daemon/daemon_dated_followup.c
+    src/daemon/daemon_outbound_bus.c
+    src/daemon/daemon_send_provenance.c
+    src/daemon/daemon_reply_delay.c
     src/daemon/daemon_director.c
     src/daemon/reply_dedup.c
+    src/daemon/send_budget.c
+    src/daemon/reactive_gates.c
+    src/daemon/daemon_reactive_context.c
+    src/daemon/daemon_reactive_prompt.c
+    src/daemon/consecutive_limiter.c
     src/daemon/daemon_identity.c
+    src/daemon/daemon_identity_graph.c
+    src/daemon/daemon_config_reload.c
     src/daemon/daemon_peripheral_gov.c
     src/daemon/daemon_message_router.c
     src/daemon/daemon_proactive_policy.c
     src/daemon/daemon_follow_up_watcher.c
     src/daemon/daemon_followup_sched.c
+    src/daemon/daemon_voice_reply.c
+    src/daemon/daemon_rich_media.c
+    src/daemon/daemon_housekeeping.c
     src/daemon/daemon_promise_keeper.c
+    src/daemon/daemon_insight_overuse.c
     src/daemon/cron.c
     src/daemon/crontab.c
     src/gateway/webhook.c
@@ -1269,19 +1299,14 @@ set(HU_CORE_SOURCES
     src/agent/prompt_budget.c
     src/memory/vector/math.c
     src/memory/vector/cosine.c
-    src/memory/vector/chunker.c
     src/memory/vector/store_mem.c
     src/memory/vector/embedder_local.c
+    src/memory/vector/embedder_http.c
     src/memory/vector/embedder_gemini_adapter.c
     src/memory/vector/embeddings.c
     src/memory/vector/embeddings_gemini.c
     src/memory/vector/embeddings_ollama.c
     src/memory/vector/embeddings_voyage.c
-    src/memory/vector/provider_router.c
-    src/memory/vector/outbox.c
-    src/memory/vector/store.c
-    src/memory/vector/store_pgvector.c
-    src/memory/vector/store_qdrant.c
     src/memory/vector/vector_retrieval_remote.c
     src/memory/lifecycle/semantic_cache.c
 )
@@ -1391,7 +1416,6 @@ list(APPEND HU_CORE_SOURCES
     src/evaluation/evaluation_regression.c
     src/eval/turing_score.c
     src/eval/turing_adversarial.c
-    src/eval/longmemeval.c
     src/eval/eval_judge.c
     src/eval/eval_benchmarks.c
     src/mcp/mcp_resources.c
@@ -1429,24 +1453,17 @@ list(APPEND HU_CORE_SOURCES
     src/tools/visual_grounding.c
     src/tools/browser_use.c
     src/tools/gui_agent.c
-    src/tools/lsp.c
     src/tools/tool_search.c
-    src/voice/webrtc.c
-    src/voice/webrtc_ice.c
-    src/voice/webrtc_dtls.c
-    src/voice/webrtc_srtp.c
     src/voice/realtime.c
     src/voice/gemini_live.c
     src/voice/provider_factory.c
     src/voice/mlx_local.c
     src/voice/duplex.c
     src/voice/session.c
-    src/voice/opus.c
     src/voice/turn_signal.c
     src/voice/semantic_eot.c
     src/providers/embedded.c
     src/providers/llamacpp.c
-    src/providers/mlx.c
     src/providers/mlx_stream_utf8.c
     src/providers/llamacpp_sampling.c
     src/providers/llamacpp_kvcache.c
@@ -1457,6 +1474,24 @@ if(HU_ENABLE_COREML)
     list(APPEND HU_CORE_SOURCES src/providers/coreml.c)
 endif()
 
+# hu_webrtc_* is called only from src/channels/voice_channel.c (grep-verified),
+# which is itself gated `if(HU_ENABLE_VOICE)` above (~line 508) — these 4
+# files used to sit unconditionally in HU_CORE_SOURCES above, which was
+# harmless while HU_ENABLE_ALL_CHANNELS forced HU_ENABLE_VOICE on right
+# alongside them, but became 4 never-loaded archive members once Task 11
+# (docs/plans/2026-09-20-dead-code-plan.md) turned HU_ENABLE_VOICE off in
+# dev/prod without a live caller left to keep them reachable. The dead-strip
+# ratchet (scripts/check-dead-strip-ratchet.sh) caught it; tests/test_webrtc.c
+# calls these functions directly and unconditionally, so it needs the
+# mirrored HU_TEST_EXTRA_MODULES entry (not HU_TEST_EXTRA_CHANNELS — these
+# are helper modules, not a channel of their own) whenever HU_ENABLE_VOICE
+# is off.
+if(HU_ENABLE_VOICE)
+    list(APPEND HU_CORE_SOURCES
+        src/voice/webrtc.c src/voice/webrtc_ice.c
+        src/voice/webrtc_dtls.c src/voice/webrtc_srtp.c)
+endif()
+
 if(HU_ENABLE_APPLE_INTELLIGENCE)
     list(APPEND HU_CORE_SOURCES src/providers/apple.c)
 endif()
@@ -1465,6 +1500,9 @@ endif()
 # symbols unconditionally).  ~138 KB added to release binary.
 list(APPEND HU_CORE_SOURCES
     src/persona/persona.c
+    src/persona/card_file.c
+    src/persona/style_card.c
+    src/persona/emotion_card.c
     src/persona/pacing.c
     src/persona/render.c
     src/persona/terseness.c
@@ -1476,17 +1514,16 @@ list(APPEND HU_CORE_SOURCES
     src/persona/cli.c
     src/persona/feedback.c
     src/persona/eval.c
-    src/persona/eval_rubric.c
     src/persona/replay.c
     src/persona/circadian.c
     src/agent/follow_up.c
+    src/agent/followup_compose.c
     src/persona/temporal.c
     src/persona/relationship.c
     src/persona/auto_profile.c
     src/persona/auto_tune.c
     src/persona/voice_maturity.c
     src/persona/style_critique.c
-    src/persona/style_mirror.c
     src/persona/style_clone.c
     src/persona/training.c
     src/persona/life_sim.c
@@ -1513,18 +1550,24 @@ list(APPEND HU_CORE_SOURCES
     # when HU_ENABLE_LIBSODIUM=ON.
     #
     # The honest fix: only compile persona_crypt.c when libsodium is
-    # actually present. Callers (src/persona/persona_storage.c) already
-    # guard `hu_persona_crypt_*` calls with `#ifdef HU_HAS_LIBSODIUM`
-    # so no API break. When libsodium IS enabled and found, the layer
-    # is built; otherwise persona storage falls back to the PBKDF2 +
-    # ChaCha20+HMAC path documented at CMakeLists.txt:2102.
+    # actually present. Nothing under src/ calls `hu_persona_crypt_*` —
+    # `grep -rn 'hu_persona_{crypt_derive_key,save_encrypted,
+    # load_encrypted,migrate_to_encrypted,load_legacy,classify_bytes}'
+    # src include` returns only the declarations in
+    # include/human/persona/crypto.h — so there is no API break to guard
+    # against. The one consumer is tests/test_persona_encryption.c, which
+    # carries the SAME gate: it is appended to HU_TEST_SOURCES inside an
+    # `if(HU_LIBSODIUM_FOUND)` block in the gated test-sources section.
+    # (An earlier revision of this comment named a caller
+    # `src/persona/persona_storage.c`; no such file exists.) Task 12 moved
+    # the TU itself out of HU_CORE_SOURCES entirely — it now sits in
+    # human_devlib behind the same `if(HU_LIBSODIUM_FOUND)`.
     src/context/theory_of_mind.c
     src/context/self_awareness.c
     src/context/anticipatory.c
     src/context/protective.c
     src/cognition/humor.c
     src/context/social_graph.c
-    src/memory/degradation.c
     src/memory/opinions.c
     src/memory/life_chapters.c
 )
@@ -1589,6 +1632,13 @@ list(APPEND HU_CORE_SOURCES src/tts/cartesia.c)
 list(APPEND HU_CORE_SOURCES src/tts/cartesia_stream.c)
 list(APPEND HU_CORE_SOURCES src/tts/voice_clone.c)
 list(APPEND HU_CORE_SOURCES src/tts/transcript_prep.c)
+# F1 spoken memos: S2 cleanup + S3 drift guard (pure; called from the voice path)
+list(APPEND HU_CORE_SOURCES src/tts/speech_text.c)
+# F1 S1: rewrite-for-the-ear pass (HU_SPEECH_REWRITE, default off)
+list(APPEND HU_CORE_SOURCES src/tts/speech_rewrite.c)
+list(APPEND HU_CORE_SOURCES src/tts/speech_direction.c)
+list(APPEND HU_CORE_SOURCES src/tts/opener_gate.c)
+list(APPEND HU_CORE_SOURCES src/tts/speech_perform.c)
 
 # Cartesia full pipeline (requires libcurl for API calls)
 if(HU_ENABLE_CARTESIA)
@@ -1599,6 +1649,7 @@ if(HU_ENABLE_CARTESIA)
         src/tts/audio_pipeline.c
         src/context/voice_decision.c
         src/tts/emotion_map.c
+        src/tts/voice_reply.c
     )
     message(STATUS "Cartesia TTS: enabled")
 else()
@@ -1620,9 +1671,15 @@ if(HU_ENABLE_SQLITE)
         src/memory/repos/celebration_repo_sqlite.c
         src/memory/repos/emotional_residue_repo_sqlite.c
         src/memory/repos/feed_items_repo_sqlite.c
+        src/memory/repos/forgetting_repo_sqlite.c
         src/memory/repos/memories_repo_sqlite.c
+        src/memory/repos/contact_insights_repo_sqlite.c
         src/memory/repos/opinions_repo_sqlite.c
         src/memory/repos/life_chapter_repo_sqlite.c
+        src/memory/repos/proactive_decisions_repo_sqlite.c
+        src/memory/repos/outbound_sends_repo_sqlite.c
+        src/memory/repos/contact_optout_repo_sqlite.c
+        src/memory/repos/repo_util_sqlite.c
         src/memory/repos/social_graph_repo_sqlite.c
         src/memory/repos/self_awareness_repo_sqlite.c
         src/memory/sql_transaction.c
@@ -1632,8 +1689,6 @@ if(HU_ENABLE_SQLITE)
         src/memory/forgetting_curve.c
         src/memory/prospective.c
         src/memory/emotional_residue.c
-        src/memory/graph/memory_graph.c
-        src/feeds/oauth.c
         src/intelligence/skills.c
         src/intelligence/self_improve.c
         src/intelligence/value_learning.c
@@ -1672,8 +1727,8 @@ if(HU_ENABLE_SOCIAL)
     list(APPEND HU_CORE_SOURCES src/feeds/social.c)
 endif()
 if(HU_ENABLE_FEEDS)
-    list(APPEND HU_CORE_SOURCES src/feeds/apple.c src/feeds/google.c src/feeds/music.c
-        src/feeds/news.c src/feeds/email.c src/feeds/gmail.c src/feeds/imessage.c
+    list(APPEND HU_CORE_SOURCES
+        src/feeds/news.c src/feeds/gmail.c src/feeds/imessage.c
         src/feeds/twitter.c src/feeds/file_ingest.c src/feeds/research.c src/feeds/findings.c
         src/feeds/research_executor.c src/feeds/trends.c)
 endif()
@@ -1682,7 +1737,6 @@ endif()
 if(HU_ENABLE_SKILLS)
     list(APPEND HU_CORE_SOURCES
         src/skills/skillforge.c
-        src/skills/skills.c
         src/skills/skill_scaffold.c
         src/tools/skill_run.c
         src/intelligence/reflection.c
@@ -1734,7 +1788,6 @@ if(HU_ENABLE_ML)
         # They are subprocess + file I/O helpers with no learner dependency
         # and must link in HU_ENABLE_ML=OFF builds that still compile
         # lora_retrain_runner.c.
-        src/ml/agent_trainer.c
         src/ml/m3_contact_routes.c
         src/ml/m3_frontier_adapter.c
         src/ml/m3_id_map.c
@@ -1762,15 +1815,13 @@ if(HU_ENABLE_ML)
         # Sprint 8 US-8.1: DP-SGD with RDP accountant (verifiable privacy).
         # Pure-math privacy accounting + per-sample-clipped noisy SGD;
         # links inside HU_ENABLE_ML=ON alongside the other learners.
-        src/ml/dp_sgd.c
         # Track D D2.2: persona-fidelity compute primitives shared by
         # `human ml fidelity-status` (CLI) and `metrics.fidelity`
         # (gateway) so both surfaces produce identical numbers.
         src/ml/fidelity.c
-        # Spec 2026-05-19 M3 closure / AC-M3-5: fidelity-based A/B gate
-        # comparing candidate vs baseline adapter outputs on a held-out
-        # prompt set. Pure judging math; no inference, no HTTP.
-        src/ml/m3_ab_fidelity_gate.c
+        # (Spec 2026-05-19 M3 closure / AC-M3-5: m3_ab_fidelity_gate.c — the
+        # fidelity-based A/B gate — moved to human_devlib in Task 12. It is
+        # an offline judging tool with no daemon caller.)
         # Phase A1.2 SOTA roadmap: PII redactor + quality filter for the
         # continuous-learning training-data pipeline. Pure C, no SQLite.
         src/ml/training_data_quality.c
@@ -1936,6 +1987,7 @@ list(APPEND HU_CORE_SOURCES
     src/data/data_conversation_contractions_json.c
     src/data/data_conversation_conversation_intros_json.c
     src/data/data_conversation_crisis_keywords_json.c
+    src/data/data_conversation_commitment_keywords_json.c
     src/data/data_conversation_emotional_words_json.c
     src/data/data_conversation_engage_words_json.c
     src/data/data_conversation_filler_words_json.c
@@ -1948,6 +2000,7 @@ list(APPEND HU_CORE_SOURCES
     src/data/data_personas_default_json.c
     src/data/data_security_command_lists_json.c
     src/data/data_agent_commitment_patterns_json.c
+    src/data/data_daemon_courtesy_phrases_json.c
     src/data/data_agent_conversation_plan_words_json.c
     src/data/data_agent_input_guard_patterns_json.c
     src/data/data_agent_multistep_indicators_json.c
@@ -1990,6 +2043,24 @@ set(HU_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(${HU_ROOT}/include)
 include_directories(${HU_ROOT}/asm/generic)
 
+# --- Build provenance: stamp git HEAD into a generated header at BUILD time ---
+# src/app/version.c picks this up (via __has_include) and embeds an
+# "HU_BUILD_SHA=<sha>" literal that scripts/install-human-daemon.sh extracts
+# with `strings` to refuse installing a binary that is not a descendant of the
+# currently deployed one (the 2026-07-25 deploy-clobber class). Build-time, not
+# configure-time: sessions commit and rebuild incrementally without ever
+# reconfiguring, so a configure-time SHA would go stale immediately.
+set(HU_GIT_SHA_HEADER ${CMAKE_CURRENT_BINARY_DIR}/generated/hu_git_sha.h)
+file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/generated)
+add_custom_target(hu_git_sha_stamp
+    COMMAND ${CMAKE_COMMAND}
+            -DGIT_DIR=${HU_ROOT}
+            -DOUT=${HU_GIT_SHA_HEADER}
+            -P ${HU_ROOT}/cmake/GenGitSha.cmake
+    BYPRODUCTS ${HU_GIT_SHA_HEADER}
+    COMMENT "Stamping git SHA into hu_git_sha.h")
+include_directories(${CMAKE_CURRENT_BINARY_DIR}/generated)
+
 # Phase 5 Task 2 (RL SOTA) — bootstrap CI helper.  Gated behind
 # HU_ENABLE_RL_FULL so default release/dev builds pay zero binary cost.
 # Consumed by Task 5 hu_eval_gate_decide (LoRA promotion gate) and Task
@@ -2005,7 +2076,12 @@ if(HU_ENABLE_RL_FULL)
     list(APPEND HU_CORE_SOURCES src/eval/eval_judge_external.c)
     list(APPEND HU_CORE_SOURCES src/eval/leaderboard.c)
     list(APPEND HU_CORE_SOURCES src/eval/eval_gate.c)
-    list(APPEND HU_CORE_SOURCES src/eval/stock_baseline.c)
+    # stock_baseline.c moved to human_devlib (Task 12) — no daemon caller.
+    # external_judge_fixture.c STAYS: apple_fm_client.c and
+    # gemini_nano_client.c (both core TUs, right below) call
+    # hu_eval_judge_create_from_external_fixture under `#if HU_IS_TEST`,
+    # so it is a core dependency of the test library's own sources, not a
+    # standalone library module.
     list(APPEND HU_CORE_SOURCES src/eval/external_judge_fixture.c)
     list(APPEND HU_CORE_SOURCES src/eval/apple_fm_client.c)
     list(APPEND HU_CORE_SOURCES src/eval/gemini_nano_client.c)
@@ -2021,6 +2097,7 @@ list(REMOVE_DUPLICATES HU_CORE_SOURCES)
 
 # --- Core static library ---
 add_library(human_core STATIC ${HU_CORE_SOURCES} ${HU_CRYPTO_SOURCES} ${HU_ASM_SOURCES})
+add_dependencies(human_core hu_git_sha_stamp)
 target_include_directories(human_core PUBLIC ${HU_ROOT}/include)
 if(Threads_FOUND)
     target_link_libraries(human_core PUBLIC Threads::Threads)
@@ -2029,9 +2106,19 @@ if(UNIX AND NOT APPLE)
     target_link_libraries(human_core PUBLIC m dl)
 endif()
 if(APPLE)
-    target_link_libraries(human_core PRIVATE "-framework ApplicationServices" "-framework ImageIO" "-framework Accelerate" "-framework IOKit" "-framework CoreFoundation")
+    target_link_libraries(human_core PRIVATE "-framework ApplicationServices" "-framework ImageIO" "-framework Accelerate" "-framework IOKit" "-framework CoreFoundation" "-framework CoreAudio" "-framework AudioToolbox")
     # New CBLAS headers; avoids -Wdeprecated-declarations on cblas_sgemm (macOS 13.3+).
     target_compile_definitions(human_core PRIVATE ACCELERATE_NEW_LAPACK=1)
+endif()
+if(HU_ENABLE_VISION_OCR)
+    if(APPLE)
+        enable_language(OBJC)
+        target_sources(human_core PRIVATE src/tools/vision_ocr_apple.m)
+        target_compile_definitions(human_core PRIVATE HU_ENABLE_VISION_OCR=1)
+        target_link_libraries(human_core PRIVATE "-framework Vision" "-framework AppKit" "-framework Foundation")
+    else()
+        message(WARNING "HU_ENABLE_VISION_OCR=ON has no effect off macOS (Apple Vision framework)")
+    endif()
 endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_package(X11 QUIET)
@@ -2081,7 +2168,6 @@ endif()
 if(HU_ENABLE_FEEDS)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_FEEDS=1)
 endif()
-target_compile_definitions(human_core PUBLIC HU_HAS_PERSONA=1)
 if(HU_ENABLE_CARTESIA)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_CARTESIA=1)
 endif()
@@ -2113,108 +2199,114 @@ if(HU_ENABLE_MCP)
 endif()
 
 # --- Compile definitions for enabled channels (for conditional compilation in source) ---
+# Collected into ONE list and applied to BOTH human_core and the human
+# executable. human_core's PRIVATE defines never reach src/app/bootstrap.c,
+# so every channel that was only defined here compiled as `#if 0` in
+# bootstrap: Discord/Matrix/Signal/Teams/... could never start even with
+# HU_ENABLE_ALL_CHANNELS=ON and a configured token (found 2026-09-20).
+set(HU_CHANNEL_DEFINES "")
 if(HU_ENABLE_CLI)
-    target_compile_definitions(human_core PRIVATE HU_HAS_CLI=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_CLI=1)
 endif()
 if(HU_ENABLE_TELEGRAM)
-    target_compile_definitions(human_core PRIVATE HU_HAS_TELEGRAM=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_TELEGRAM=1)
 endif()
 if(HU_ENABLE_DISCORD)
-    target_compile_definitions(human_core PRIVATE HU_HAS_DISCORD=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_DISCORD=1)
 endif()
 if(HU_ENABLE_SLACK)
-    target_compile_definitions(human_core PRIVATE HU_HAS_SLACK=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_SLACK=1)
 endif()
 if(HU_ENABLE_WHATSAPP)
-    target_compile_definitions(human_core PRIVATE HU_HAS_WHATSAPP=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_WHATSAPP=1)
 endif()
 if(HU_ENABLE_FACEBOOK)
-    target_compile_definitions(human_core PRIVATE HU_HAS_FACEBOOK=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_FACEBOOK=1)
 endif()
 if(HU_ENABLE_INSTAGRAM)
-    target_compile_definitions(human_core PRIVATE HU_HAS_INSTAGRAM=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_INSTAGRAM=1)
 endif()
 if(HU_ENABLE_TWITTER)
-    target_compile_definitions(human_core PRIVATE HU_HAS_TWITTER=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_TWITTER=1)
 endif()
 if(HU_ENABLE_TIKTOK)
-    target_compile_definitions(human_core PRIVATE HU_HAS_TIKTOK=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_TIKTOK=1)
 endif()
 if(HU_ENABLE_MATRIX)
-    target_compile_definitions(human_core PRIVATE HU_HAS_MATRIX=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_MATRIX=1)
 endif()
 if(HU_ENABLE_IRC)
-    target_compile_definitions(human_core PRIVATE HU_HAS_IRC=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_IRC=1)
 endif()
 if(HU_ENABLE_LINE)
-    target_compile_definitions(human_core PRIVATE HU_HAS_LINE=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_LINE=1)
 endif()
 if(HU_ENABLE_LARK)
-    target_compile_definitions(human_core PRIVATE HU_HAS_LARK=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_LARK=1)
 endif()
 if(HU_ENABLE_WEB)
-    target_compile_definitions(human_core PRIVATE HU_HAS_WEB=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_WEB=1)
 endif()
 if(HU_ENABLE_EMAIL)
-    target_compile_definitions(human_core PRIVATE HU_HAS_EMAIL=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_EMAIL=1)
 endif()
 if(HU_ENABLE_IMAP)
-    target_compile_definitions(human_core PRIVATE HU_HAS_IMAP=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_IMAP=1)
 endif()
 if(HU_HAS_IMESSAGE)
-    target_compile_definitions(human_core PRIVATE HU_HAS_IMESSAGE=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_IMESSAGE=1)
     if(HU_IMESSAGE_TAPBACK_ENABLED)
-        target_compile_definitions(human_core PRIVATE HU_IMESSAGE_TAPBACK_ENABLED=1)
+        list(APPEND HU_CHANNEL_DEFINES HU_IMESSAGE_TAPBACK_ENABLED=1)
     endif()
 endif()
 if(HU_ENABLE_PWA)
-    target_compile_definitions(human_core PRIVATE HU_HAS_PWA=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_PWA=1)
 endif()
 if(HU_ENABLE_MATTERMOST)
-    target_compile_definitions(human_core PRIVATE HU_HAS_MATTERMOST=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_MATTERMOST=1)
 endif()
 if(HU_ENABLE_ONEBOT)
-    target_compile_definitions(human_core PRIVATE HU_HAS_ONEBOT=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_ONEBOT=1)
 endif()
 if(HU_ENABLE_DINGTALK)
-    target_compile_definitions(human_core PRIVATE HU_HAS_DINGTALK=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_DINGTALK=1)
 endif()
 if(HU_ENABLE_TEAMS)
-    target_compile_definitions(human_core PRIVATE HU_HAS_TEAMS=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_TEAMS=1)
 endif()
 if(HU_ENABLE_TWILIO)
-    target_compile_definitions(human_core PRIVATE HU_HAS_TWILIO=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_TWILIO=1)
 endif()
 if(HU_ENABLE_GOOGLE_CHAT)
-    target_compile_definitions(human_core PRIVATE HU_HAS_GOOGLE_CHAT=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_GOOGLE_CHAT=1)
 endif()
 if(HU_ENABLE_GOOGLE_RCS)
-    target_compile_definitions(human_core PRIVATE HU_HAS_GOOGLE_RCS=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_GOOGLE_RCS=1)
 endif()
 if(HU_ENABLE_SIGNAL)
-    target_compile_definitions(human_core PRIVATE HU_HAS_SIGNAL=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_SIGNAL=1)
 endif()
 if(HU_ENABLE_NOSTR)
-    target_compile_definitions(human_core PRIVATE HU_HAS_NOSTR=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_NOSTR=1)
 endif()
 if(HU_ENABLE_QQ)
-    target_compile_definitions(human_core PRIVATE HU_HAS_QQ=1)
-endif()
-if(HU_ENABLE_MAIXCAM)
-    target_compile_definitions(human_core PRIVATE HU_HAS_MAIXCAM=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_QQ=1)
 endif()
 if(HU_ENABLE_DISPATCH)
-    target_compile_definitions(human_core PRIVATE HU_HAS_DISPATCH=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_DISPATCH=1)
 endif()
 if(HU_ENABLE_GMAIL)
-    target_compile_definitions(human_core PRIVATE HU_HAS_GMAIL=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_GMAIL=1)
 endif()
 if(HU_ENABLE_VOICE)
     # Voice channel (realtime/webrtc); Sonata Rust FFI only when HU_ENABLE_SONATA.
-    target_compile_definitions(human_core PRIVATE HU_HAS_VOICE_CHANNEL=1 HU_ENABLE_VOICE=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_VOICE_CHANNEL=1 HU_ENABLE_VOICE=1)
 endif()
 if(HU_ENABLE_MQTT)
-    target_compile_definitions(human_core PRIVATE HU_HAS_MQTT=1)
+    list(APPEND HU_CHANNEL_DEFINES HU_HAS_MQTT=1)
+endif()
+if(HU_CHANNEL_DEFINES)
+    target_compile_definitions(human_core PRIVATE ${HU_CHANNEL_DEFINES})
 endif()
 
 # --- Compile definitions for memory engines ---
@@ -2479,14 +2571,14 @@ if(HU_ENABLE_LIBSODIUM)
             target_link_directories(human_core PUBLIC ${HU_LIBSODIUM_LIBRARY_DIRS})
         endif()
         target_compile_definitions(human_core PRIVATE HU_HAS_LIBSODIUM=1)
-        # Add persona_crypt.c here (rather than to HU_CORE_SOURCES) so
-        # it only compiles when libsodium is actually available. The TU
-        # has `#error if !defined(HU_HAS_LIBSODIUM)`, so including it
-        # unconditionally breaks every CI variant where the option is
-        # off (default OFF). The matching human_core_test wiring is in
-        # a parallel block AFTER add_library(human_core_test ...) — see
-        # search for "persona_crypt.c" in the test-library section.
-        target_sources(human_core PRIVATE src/persona/persona_crypt.c)
+        # persona_crypt.c used to be added to human_core here. Task 12
+        # moved it to human_devlib: the daemon never calls
+        # hu_persona_load_encrypted/_save_encrypted/_migrate_to_encrypted
+        # (persona.c reads plaintext cards), so the TU was a never-loaded
+        # member of libhuman_core.a and only tests/test_persona_encryption.c
+        # references it. The devlib block still gates it on
+        # HU_LIBSODIUM_FOUND for the same reason the gate lived here: the
+        # TU has `#error if !defined(HU_HAS_LIBSODIUM)`.
         message(STATUS "libsodium: enabled (XChaCha20-Poly1305 + Argon2id)")
     else()
         message(WARNING "HU_ENABLE_LIBSODIUM=ON but libsodium not found; falling back to PBKDF2 + ChaCha20+HMAC")
@@ -2702,8 +2794,17 @@ endif()
 if(HU_ENABLE_ML)
     target_compile_definitions(human PRIVATE HU_ENABLE_ML=1)
 endif()
-if(HU_HAS_IMESSAGE)
-    target_compile_definitions(human PRIVATE HU_HAS_IMESSAGE=1)
+if(HU_ENABLE_LEARNING)
+    # human_core's HU_ENABLE_LEARNING define is PRIVATE and does not reach
+    # this executable's own TUs: bootstrap.c compiled its #else branch,
+    # logged "learner subsystem not built (HU_ENABLE_LEARNING=OFF)" on a
+    # learning-ON build, and never opened the learner — dead W13 loop in
+    # every shipped daemon (found 2026-07-25).
+    target_compile_definitions(human PRIVATE HU_ENABLE_LEARNING=1)
+endif()
+# Same channel defines as human_core (see HU_CHANNEL_DEFINES above).
+if(HU_CHANNEL_DEFINES)
+    target_compile_definitions(human PRIVATE ${HU_CHANNEL_DEFINES})
 endif()
 if(HU_ENABLE_SELF_MODEL)
     target_compile_definitions(human PRIVATE HU_ENABLE_SELF_MODEL=1)
@@ -2719,33 +2820,6 @@ if(HU_ENABLE_PUSH)
 endif()
 if(HU_ENABLE_UPDATE)
     target_compile_definitions(human PRIVATE HU_HAS_UPDATE=1)
-endif()
-if(HU_ENABLE_EMAIL)
-    target_compile_definitions(human PRIVATE HU_HAS_EMAIL=1)
-endif()
-if(HU_HAS_IMESSAGE)
-    target_compile_definitions(human PRIVATE HU_HAS_IMESSAGE=1)
-    if(HU_IMESSAGE_TAPBACK_ENABLED)
-        target_compile_definitions(human PRIVATE HU_IMESSAGE_TAPBACK_ENABLED=1)
-    endif()
-endif()
-if(HU_ENABLE_PWA)
-    target_compile_definitions(human PRIVATE HU_HAS_PWA=1)
-endif()
-if(HU_ENABLE_IMAP)
-    target_compile_definitions(human PRIVATE HU_HAS_IMAP=1)
-endif()
-if(HU_ENABLE_TELEGRAM)
-    target_compile_definitions(human PRIVATE HU_HAS_TELEGRAM=1)
-endif()
-if(HU_ENABLE_SLACK)
-    target_compile_definitions(human PRIVATE HU_HAS_SLACK=1)
-endif()
-if(HU_ENABLE_WHATSAPP)
-    target_compile_definitions(human PRIVATE HU_HAS_WHATSAPP=1)
-endif()
-if(HU_ENABLE_GMAIL)
-    target_compile_definitions(human PRIVATE HU_HAS_GMAIL=1)
 endif()
 if(HU_ENABLE_FEEDS)
     target_compile_definitions(human PRIVATE HU_ENABLE_FEEDS=1)
@@ -2787,11 +2861,17 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "MinSizeRel"
         target_compile_options(human PRIVATE -fvisibility=hidden)
         target_compile_options(human_core PRIVATE -fvisibility=hidden)
     endif()
-    if(APPLE)
-        set_target_properties(human PROPERTIES LINK_FLAGS "-Wl,-dead_strip")
-    elseif(UNIX)
-        set_target_properties(human PROPERTIES LINK_FLAGS "-Wl,--gc-sections")
-    endif()
+endif()
+
+# Dead-strip the product binary in EVERY build type. The 2026-09-10 review
+# found 1,038 exported functions unreachable from main() shipping in the
+# deployed daemon because only Release builds stripped them, while prod is
+# built from the dev preset. human_core already compiles with
+# -ffunction-sections, so this is free.
+if(APPLE)
+    set_target_properties(human PROPERTIES LINK_FLAGS "-Wl,-dead_strip")
+elseif(UNIX)
+    set_target_properties(human PROPERTIES LINK_FLAGS "-Wl,--gc-sections")
 endif()
 
 # --- Strip MinSizeRel binary (macOS: -x to preserve local syms, Linux: full strip) ---
@@ -2818,8 +2898,24 @@ if(APPLE AND NOT CMAKE_CROSSCOMPILING)
 endif()
 
 # --- Test-mode core library (same sources, compiled with HU_IS_TEST=1) ---
-# When HU_ENABLE_ALL_CHANNELS=OFF, prod binary omits signal/nostr/qq/maixcam/dispatch,
+# When HU_ENABLE_ALL_CHANNELS=OFF, prod binary omits signal/nostr/qq/dispatch,
 # but tests need them — add to test lib only.
+#
+# The RULE (Task 11 fix round 1, docs/plans/2026-09-20-dead-code-plan.md):
+# the test library compiles every channel, full stop — every channel below
+# is present in human_core_test/human_tests EITHER via CHANNEL_SOURCES
+# (when the executable's HU_ENABLE_<channel> is ON) OR via this
+# HU_TEST_EXTRA_CHANNELS list (when it's OFF); the two conditions are always
+# complementary so exactly one path supplies the object. Because the object
+# is always present, the corresponding HU_HAS_<channel> compile definition
+# for the TEST targets (human_core_test / human_tests / human_channel_tests
+# — see their target_compile_definitions blocks below) is unconditional too,
+# independent of the executable's HU_ENABLE_<channel>. Getting the object
+# into the test library without ALSO defining HU_HAS_<channel> is why
+# ./build/human_tests silently dropped from ~13861 to 13648 tests under the
+# new dev preset: every `#if HU_HAS_<channel>`-gated test body compiled OUT
+# because HU_HAS_<channel> followed the (now narrower) executable option
+# set, not what the test library actually contained.
 set(HU_TEST_EXTRA_CHANNELS)
 if(NOT HU_ENABLE_ALL_CHANNELS)
     # Orphan channels referenced by tests/test_orphan_channel_audit.c.
@@ -2828,9 +2924,29 @@ if(NOT HU_ENABLE_ALL_CHANNELS)
     # with undefined references to hu_{mattermost,web}_{create,destroy}.
     list(APPEND HU_TEST_EXTRA_CHANNELS
         src/channels/signal.c src/channels/nostr.c src/channels/qq.c
-        src/channels/maixcam.c src/channels/dispatch.c
-        src/channels/gmail_base64.c src/channels/gmail.c
         src/channels/mattermost.c src/channels/web.c)
+    # Task 11: dev/prod presets now turn HU_ENABLE_ALL_CHANNELS off (they
+    # enable only the channels actually run in production), which exposed
+    # the same class of gap the comment above already describes for
+    # mattermost/web. A guard-aware scan of tests/ found only discord
+    # (tests/test_channel_overlay_apply.c, tests/test_discord_reactions.c —
+    # 20 refs) and matrix (tests/test_matrix_reactions.c — 11 refs) call
+    # hu_{discord,matrix}_* with NO `#if HU_HAS_*` guard at all, so those two
+    # would fail to LINK regardless of any define fix. irc/line/lark/onebot/
+    # dingtalk/teams/twilio/google_chat ARE already `#if HU_HAS_<channel>`
+    # guarded in test_channel.c/test_channel_all.c/synthetic/
+    # channel_registry.c — which is exactly why they silently compiled OUT
+    # (not failed to link) once HU_HAS_<channel> stopped being defined for
+    # the test targets. Keep all of them here regardless: once the defines
+    # below make those guarded bodies compile back IN, they need the same
+    # objects to link.
+    list(APPEND HU_TEST_EXTRA_CHANNELS
+        src/channels/discord.c src/channels/discord_reactions.c
+        src/channels/matrix.c src/channels/matrix_reactions.c
+        src/channels/irc.c src/channels/line.c src/channels/lark.c
+        src/channels/onebot.c src/channels/dingtalk.c
+        src/channels/teams.c src/channels/twilio.c
+        src/channels/google_chat.c)
 endif()
 if(NOT HU_ENABLE_MQTT)
     list(APPEND HU_TEST_EXTRA_CHANNELS src/channels/mqtt.c)
@@ -2838,7 +2954,10 @@ endif()
 if(NOT HU_ENABLE_FACEBOOK)
     list(APPEND HU_TEST_EXTRA_CHANNELS src/channels/facebook.c)
 endif()
-if(NOT HU_ENABLE_FACEBOOK AND NOT HU_ENABLE_INSTAGRAM AND NOT HU_ENABLE_WHATSAPP)
+if(NOT HU_ENABLE_FACEBOOK AND NOT HU_ENABLE_INSTAGRAM)
+    # Mirrors the CHANNEL_SOURCES gate above (Facebook/Instagram only, not
+    # WhatsApp — see the comment there); tests/test_meta_common.c still needs
+    # the object when neither of those two channels pulls it in.
     list(APPEND HU_TEST_EXTRA_CHANNELS src/channels/meta_common.c)
 endif()
 if(NOT HU_ENABLE_INSTAGRAM)
@@ -2856,8 +2975,35 @@ endif()
 if(NOT HU_ENABLE_SLACK)
     list(APPEND HU_TEST_EXTRA_CHANNELS src/channels/slack.c src/channels/slack_reactions.c)
 endif()
+if(NOT HU_ENABLE_IMAP)
+    # Same pattern as facebook/instagram/slack/twitter above. imap.c used to
+    # sit unconditionally in the `if(NOT HU_ENABLE_ALL_CHANNELS)` block, which
+    # double-listed it (once via CHANNEL_SOURCES, once here) for any preset
+    # that turns HU_ENABLE_IMAP on individually without HU_ENABLE_ALL_CHANNELS
+    # — e.g. the `integration` preset.
+    list(APPEND HU_TEST_EXTRA_CHANNELS src/channels/imap.c)
+endif()
+if(NOT HU_ENABLE_GMAIL)
+    # Same reasoning as HU_ENABLE_IMAP above. gmail_base64.c/gmail.c used to
+    # sit unconditionally in the `if(NOT HU_ENABLE_ALL_CHANNELS)` block too,
+    # which would double-list them now that Task 11 fix round 1 turns
+    # HU_ENABLE_GMAIL on directly in the dev/prod presets (still with
+    # HU_ENABLE_ALL_CHANNELS off).
+    list(APPEND HU_TEST_EXTRA_CHANNELS src/channels/gmail_base64.c src/channels/gmail.c)
+endif()
 # Tests always compile all optional modules so test suites don't break
 set(HU_TEST_EXTRA_MODULES)
+if(NOT HU_ENABLE_VOICE)
+    # hu_webrtc_* (src/voice/webrtc*.c) is called only from
+    # src/channels/voice_channel.c, itself gated `if(HU_ENABLE_VOICE)` in the
+    # CHANNEL_SOURCES block above (~line 508) — these are helper modules, not
+    # a channel of their own, so they belong here rather than in
+    # HU_TEST_EXTRA_CHANNELS above. tests/test_webrtc.c calls hu_webrtc_*
+    # unconditionally with no guard, so the objects must always be present.
+    list(APPEND HU_TEST_EXTRA_MODULES
+        src/voice/webrtc.c src/voice/webrtc_ice.c
+        src/voice/webrtc_dtls.c src/voice/webrtc_srtp.c)
+endif()
 if(NOT HU_ENABLE_PERIPHERALS)
     list(APPEND HU_TEST_EXTRA_MODULES
         src/peripherals/arduino.c src/peripherals/stm32.c src/peripherals/rpi.c
@@ -2904,7 +3050,6 @@ endif()
 if(NOT HU_ENABLE_SKILLS)
     list(APPEND HU_TEST_EXTRA_MODULES
         src/skills/skillforge.c
-        src/skills/skills.c
         src/tools/skill_run.c
         src/intelligence/skills.c
         src/intelligence/reflection.c
@@ -2917,8 +3062,8 @@ if(NOT HU_ENABLE_SOCIAL)
     list(APPEND HU_TEST_EXTRA_MODULES src/feeds/social.c)
 endif()
 if(NOT HU_ENABLE_FEEDS)
-    list(APPEND HU_TEST_EXTRA_MODULES src/feeds/apple.c src/feeds/google.c src/feeds/music.c
-        src/feeds/news.c src/feeds/email.c src/feeds/gmail.c src/feeds/imessage.c
+    list(APPEND HU_TEST_EXTRA_MODULES
+        src/feeds/news.c src/feeds/gmail.c src/feeds/imessage.c
         src/feeds/twitter.c src/feeds/file_ingest.c src/feeds/research.c src/feeds/findings.c
         src/feeds/research_executor.c src/feeds/trends.c)
 endif()
@@ -2941,7 +3086,7 @@ endif()
 if(NOT HU_ENABLE_CARTESIA)
     list(APPEND HU_TEST_EXTRA_MODULES
         src/tts/audio_pipeline.c
-        src/context/voice_decision.c src/tts/emotion_map.c)
+        src/context/voice_decision.c src/tts/emotion_map.c src/tts/voice_reply.c)
 endif()
 # Phase 7 modules (experience, forgetting, weakness) — tests need them when SQLite is OFF (minimal build)
 if(NOT HU_ENABLE_SQLITE)
@@ -2953,6 +3098,7 @@ if(NOT HU_ENABLE_SQLITE)
     )
 endif()
 add_library(human_core_test STATIC ${HU_CORE_SOURCES} ${HU_TEST_EXTRA_CHANNELS} ${HU_TEST_EXTRA_MODULES} ${HU_CRYPTO_SOURCES} ${HU_ASM_SOURCES})
+add_dependencies(human_core_test hu_git_sha_stamp)
 target_include_directories(human_core_test PUBLIC ${HU_ROOT}/include)
 target_include_directories(human_core_test PRIVATE ${HU_ROOT}/asm/generic)
 target_compile_definitions(human_core_test PRIVATE HU_IS_TEST=1)
@@ -2966,10 +3112,11 @@ target_compile_definitions(human_core_test PRIVATE HU_E2E_TMP_ROOT="${HU_ROOT}/t
 # human_core_test library) inherits the libsodium link directory and library
 # without needing to repeat the discovery dance.
 #
-# Also pulls in src/persona/persona_crypt.c — that source hard-#errors when
-# HU_HAS_LIBSODIUM is undefined, so it MUST be gated here and cannot live in
-# the unconditional HU_CORE_SOURCES list (see persona_crypt.c top comment +
-# Sprint-7 merge-regression that re-broke this once before).
+# persona_crypt.c used to be pulled in here too; Task 12 moved it to
+# human_devlib, which re-applies the same `if(HU_LIBSODIUM_FOUND)` gate —
+# that source hard-#errors when HU_HAS_LIBSODIUM is undefined, so it can
+# never live in an unconditional source list (see persona_crypt.c top
+# comment + the Sprint-7 merge-regression that re-broke this once before).
 #
 # NOTE: tests/test_persona_encryption.c is registered AFTER the
 # `set(HU_TEST_SOURCES ...)` at line ~2834 (which would otherwise discard
@@ -2977,7 +3124,6 @@ target_compile_definitions(human_core_test PRIVATE HU_E2E_TMP_ROOT="${HU_ROOT}/t
 # the gated test-sources section near line ~3440. Bugbot 8b687b9c caught
 # this set-after-append silent loss.
 if(HU_LIBSODIUM_FOUND)
-    target_sources(human_core_test PRIVATE src/persona/persona_crypt.c)
     target_include_directories(human_core_test PRIVATE ${HU_LIBSODIUM_INCLUDE_DIRS})
     target_link_libraries(human_core_test PUBLIC ${HU_LIBSODIUM_LIBRARIES})
     if(HU_LIBSODIUM_LIBRARY_DIRS)
@@ -3022,7 +3168,7 @@ if(HU_ENABLE_CARTESIA)
 endif()
 target_compile_definitions(human_core_test PRIVATE HU_ENABLE_PERSONA=1)
 # Tests always have all module groups available
-target_compile_definitions(human_core_test PRIVATE HU_HAS_PERIPHERALS=1 HU_HAS_TUNNELS=1 HU_HAS_RUNTIME_EXOTIC=1 HU_HAS_TOOLS_BROWSER=1 HU_HAS_TOOLS_ADVANCED=1 HU_HAS_OTEL=1 HU_HAS_CRON=1 HU_HAS_PUSH=1 HU_HAS_UPDATE=1 HU_HAS_SKILLS=1 HU_HAS_PERSONA=1)
+target_compile_definitions(human_core_test PRIVATE HU_HAS_PERIPHERALS=1 HU_HAS_TUNNELS=1 HU_HAS_RUNTIME_EXOTIC=1 HU_HAS_TOOLS_BROWSER=1 HU_HAS_TOOLS_ADVANCED=1 HU_HAS_OTEL=1 HU_HAS_CRON=1 HU_HAS_PUSH=1 HU_HAS_UPDATE=1 HU_HAS_SKILLS=1)
 if(HU_ENABLE_ML)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_ML=1)
 endif()
@@ -3054,35 +3200,17 @@ endif()
 if(HU_ENABLE_TELEGRAM)
     target_compile_definitions(human_core_test PRIVATE HU_HAS_TELEGRAM=1)
 endif()
-if(HU_ENABLE_DISCORD)
-    target_compile_definitions(human_core_test PRIVATE HU_HAS_DISCORD=1)
-endif()
 if(HU_ENABLE_SLACK)
     target_compile_definitions(human_core_test PRIVATE HU_HAS_SLACK=1)
 endif()
 if(HU_ENABLE_WHATSAPP)
     target_compile_definitions(human_core_test PRIVATE HU_HAS_WHATSAPP=1)
 endif()
-if(HU_ENABLE_MATRIX)
-    target_compile_definitions(human_core_test PRIVATE HU_HAS_MATRIX=1)
-endif()
-if(HU_ENABLE_IRC)
-    target_compile_definitions(human_core_test PRIVATE HU_HAS_IRC=1)
-endif()
-if(HU_ENABLE_LINE)
-    target_compile_definitions(human_core_test PRIVATE HU_HAS_LINE=1)
-endif()
-if(HU_ENABLE_LARK)
-    target_compile_definitions(human_core_test PRIVATE HU_HAS_LARK=1)
-endif()
 if(HU_ENABLE_WEB)
     target_compile_definitions(human_core_test PRIVATE HU_HAS_WEB=1)
 endif()
 if(HU_ENABLE_EMAIL)
     target_compile_definitions(human_core_test PRIVATE HU_HAS_EMAIL=1)
-endif()
-if(HU_ENABLE_IMAP)
-    target_compile_definitions(human_core_test PRIVATE HU_HAS_IMAP=1)
 endif()
 if(HU_HAS_IMESSAGE)
     target_compile_definitions(human_core_test PRIVATE HU_HAS_IMESSAGE=1)
@@ -3092,21 +3220,6 @@ if(HU_ENABLE_PWA)
 endif()
 if(HU_ENABLE_MATTERMOST)
     target_compile_definitions(human_core_test PRIVATE HU_HAS_MATTERMOST=1)
-endif()
-if(HU_ENABLE_ONEBOT)
-    target_compile_definitions(human_core_test PRIVATE HU_HAS_ONEBOT=1)
-endif()
-if(HU_ENABLE_DINGTALK)
-    target_compile_definitions(human_core_test PRIVATE HU_HAS_DINGTALK=1)
-endif()
-if(HU_ENABLE_TEAMS)
-    target_compile_definitions(human_core_test PRIVATE HU_HAS_TEAMS=1)
-endif()
-if(HU_ENABLE_TWILIO)
-    target_compile_definitions(human_core_test PRIVATE HU_HAS_TWILIO=1)
-endif()
-if(HU_ENABLE_GOOGLE_CHAT)
-    target_compile_definitions(human_core_test PRIVATE HU_HAS_GOOGLE_CHAT=1)
 endif()
 if(HU_ENABLE_GOOGLE_RCS)
     target_compile_definitions(human_core_test PRIVATE HU_HAS_GOOGLE_RCS=1)
@@ -3126,7 +3239,18 @@ endif()
 if(HU_ENABLE_VOICE)
     target_compile_definitions(human_core_test PRIVATE HU_HAS_VOICE_CHANNEL=1 HU_ENABLE_VOICE=1)
 endif()
-target_compile_definitions(human_core_test PRIVATE HU_HAS_SIGNAL=1 HU_HAS_NOSTR=1 HU_HAS_QQ=1 HU_HAS_MAIXCAM=1 HU_HAS_DISPATCH=1 HU_HAS_GMAIL=1 HU_HAS_MQTT=1 HU_HAS_THREAD_BINDING=1 HU_HAS_FACEBOOK=1 HU_HAS_INSTAGRAM=1 HU_HAS_TWITTER=1 HU_HAS_TIKTOK=1 HU_HAS_GOOGLE_RCS=1)
+target_compile_definitions(human_core_test PRIVATE HU_HAS_SIGNAL=1 HU_HAS_NOSTR=1 HU_HAS_QQ=1 HU_HAS_DISPATCH=1 HU_HAS_GMAIL=1 HU_HAS_MQTT=1 HU_HAS_THREAD_BINDING=1 HU_HAS_FACEBOOK=1 HU_HAS_INSTAGRAM=1 HU_HAS_TWITTER=1 HU_HAS_TIKTOK=1 HU_HAS_GOOGLE_RCS=1)
+# Task 11 fix round 1 (docs/plans/2026-09-20-dead-code-plan.md): these 11
+# channels' sources are ALWAYS present in the test library — either via
+# CHANNEL_SOURCES (HU_ENABLE_<channel> ON) or via the complementary
+# HU_TEST_EXTRA_CHANNELS entries above (HU_ENABLE_<channel> OFF) — so their
+# HU_HAS_<channel> defines must be unconditional too, matching the line
+# above for signal/nostr/qq/dispatch/gmail/mqtt/facebook/instagram/twitter/
+# tiktok/google_rcs. Previously these were gated on `if(HU_ENABLE_<channel>)`
+# alone, which is why tests/test_channel.c's `#if HU_HAS_<channel>` bodies
+# for irc/line/lark/imap/onebot/dingtalk/teams/twilio/google_chat compiled
+# out silently once the dev preset stopped enabling them individually.
+target_compile_definitions(human_core_test PRIVATE HU_HAS_DISCORD=1 HU_HAS_MATRIX=1 HU_HAS_IRC=1 HU_HAS_LINE=1 HU_HAS_LARK=1 HU_HAS_IMAP=1 HU_HAS_ONEBOT=1 HU_HAS_DINGTALK=1 HU_HAS_TEAMS=1 HU_HAS_TWILIO=1 HU_HAS_GOOGLE_CHAT=1)
 target_compile_definitions(human_core_test PRIVATE HU_HAS_NONE_ENGINE=1 HU_HAS_MARKDOWN_ENGINE=1)
 if(HU_ENABLE_MEMORY_LRU_ENGINE)
     target_compile_definitions(human_core_test PRIVATE HU_HAS_MEMORY_LRU_ENGINE=1)
@@ -3196,6 +3320,122 @@ if(HU_ENABLE_ASAN)
     target_link_options(human_core_test PRIVATE -fsanitize=address)
 endif()
 
+# --- Developer/SDK library (test + eval + SDK modules, never the daemon) ---
+#
+# Task 12 of docs/plans/2026-09-20-dead-code-plan.md. Each TU below was a
+# never-loaded member of libhuman_core.a: compiled, archived, and never
+# pulled into `human` by the linker, because the daemon has no call site for
+# any symbol it exports. They are not dead — every one of them is a library
+# for something OUTSIDE the daemon: the test suite, an offline eval/judging
+# tool, or the public channel SDK. Keeping them in human_core made the
+# dead-strip ratchet's count A (never-loaded archive members,
+# .claude/rules/dead-strip-ratchet.md) measure "library code the daemon
+# doesn't use" mixed in with "code nobody uses", which is the signal the
+# ratchet exists to isolate. Moving them here makes human_core daemon code
+# only, so A means one thing again.
+#
+# WHY IT IS COMPILED LIKE human_core_test (HU_IS_TEST=1, same defines):
+# every consumer of these symbols is a test-mode target — the whole
+# reference set is tests/*.c plus fuzz/fuzz_mcp_json_rpc.c, all of which
+# link human_core_test. Four of the TUs (dispatch.c, imessage_sticker.c,
+# persona_crypt.c, and the eval_rubric/user_sim family's callees) have
+# `#if HU_IS_TEST` branches whose test-mode form is what those tests
+# exercise today, because today they get their copy out of
+# libhuman_core_test.a. Compiling devlib with anything else would silently
+# change which branch the suite runs. The build settings are mirrored from
+# human_core_test through generator expressions rather than restated, so the
+# two can never drift and this block has no ordering requirement — see the
+# note on that mirror below.
+#
+# NOT moved here, and why (the rest of lists/keep-modules.txt):
+#   memory/engines/{postgres,redis}.c, providers/llamacpp_{decode,sampling}.c
+#       opt-in backends — real daemon code whenever their HU_ENABLE_* is on.
+#   asm/generic/chacha20.c
+#       the portable fallback for the aarch64/x86 assembly; arch-gated, and
+#       it IS the implementation on any host without the .S files.
+#   eval/external_judge_fixture.c
+#       a core TU dependency, not a library: apple_fm_client.c and
+#       gemini_nano_client.c call it under `#if HU_IS_TEST`.
+#   tools/vision_ocr.c
+#       its backend src/tools/vision_ocr_apple.m is production-only (added
+#       to human_core under HU_ENABLE_VISION_OCR, never to human_core_test),
+#       so the .m cannot follow the .c into a HU_IS_TEST library. Per the
+#       task brief, the .c stays where the .m is.
+set(HU_DEVLIB_SOURCES
+    # Channel SDK surface. channel_manager.c is documented public API
+    # (docs/api/channels.md, sdk/README.md, sdk/templates/channel/) — the
+    # daemon drives channels through channel_loop.c instead, but the SDK
+    # contract is pinned by tests/test_sdk_channel_template.c.
+    src/channels/channel_manager.c
+    # Fan-out helper over hu_channel_t. Was ALL_CHANNELS-gated in
+    # CHANNEL_SOURCES and duplicated into HU_TEST_EXTRA_CHANNELS when that
+    # was off; unconditional here, which is what the test library always
+    # wanted (tests/test_dispatch.c et al. are not preset-gated).
+    src/channels/dispatch.c
+    # Offline persona-eval scoring + scripted-user simulation. Driven by
+    # tests and the eval harness, never by the running agent.
+    src/persona/eval_rubric.c
+    src/behavior/user_sim.c
+    src/behavior/user_sim_scenario.c
+    # MCP tool-name encode/decode helpers. mcp_manager.c does its own
+    # naming; only tests and fuzz/fuzz_mcp_json_rpc.c call these.
+    src/mcp/mcp_tool_wrapper.c
+    # Unified identity/permission resolution — an SDK-shaped helper with no
+    # daemon call site (src/security/permission.c is the one the agent uses).
+    src/security/identity.c
+    # Provider bundle helper used by tests/test_runtime_bundle.c only.
+    src/providers/runtime_bundle.c
+)
+if(HU_HAS_IMESSAGE)
+    # E2 sticker send. Not in any channel vtable — tests only.
+    list(APPEND HU_DEVLIB_SOURCES src/channels/imessage_sticker.c)
+endif()
+if(HU_ENABLE_ML)
+    # Offline candidate-vs-baseline fidelity gate (pure judging math).
+    list(APPEND HU_DEVLIB_SOURCES src/ml/m3_ab_fidelity_gate.c)
+endif()
+if(HU_ENABLE_RL_FULL)
+    # Canned stock-model baseline for the eval leaderboard.
+    list(APPEND HU_DEVLIB_SOURCES src/eval/stock_baseline.c)
+endif()
+if(HU_LIBSODIUM_FOUND)
+    # Encrypted-persona at-rest format. Same gate it had in human_core:
+    # the TU #errors without HU_HAS_LIBSODIUM.
+    list(APPEND HU_DEVLIB_SOURCES src/persona/persona_crypt.c)
+endif()
+
+add_library(human_devlib STATIC ${HU_DEVLIB_SOURCES})
+add_dependencies(human_devlib hu_git_sha_stamp)
+# PUBLIC so devlib's consumers get human_core_test transitively AND get it
+# placed after devlib on the link line: devlib TUs reference core symbols,
+# never the reverse (external_judge_fixture.c, the one module core TUs do
+# call, deliberately stayed in core above).
+target_link_libraries(human_devlib PUBLIC human_core_test)
+# Mirror human_core_test's PRIVATE build settings so the two libraries can
+# never disagree about HU_IS_TEST, HU_HAS_<channel>, include paths or warning
+# flags. Restating them would be a second source of truth.
+#
+# These MUST be generator expressions, not get_target_property(). A
+# get_target_property() copy reads the property as it stands AT THIS LINE, and
+# eight more target_compile_definitions/include_directories(human_core_test
+# ...) calls run further down the file (HU_ENABLE_RL_FULL,
+# HU_EVAL_JUDGE_HAVE_{APPLE_FM,GEMINI_NANO}_IMPL, HU_GRPO_HAVE_{HUML,MLX}_IMPL,
+# ...). The first version of this block did exactly that and compiled devlib
+# with 60 defines against human_core_test's 65 — including compiling
+# stock_baseline.c, which is selected by `if(HU_ENABLE_RL_FULL)`, without
+# -DHU_ENABLE_RL_FULL=1. $<TARGET_PROPERTY:...> is evaluated at generate time,
+# after the whole file has run, so it cannot miss a later addition and this
+# block has no ordering requirement.
+target_compile_definitions(human_devlib PRIVATE
+    $<TARGET_PROPERTY:human_core_test,COMPILE_DEFINITIONS>)
+target_include_directories(human_devlib PRIVATE
+    $<TARGET_PROPERTY:human_core_test,INCLUDE_DIRECTORIES>)
+target_compile_options(human_devlib PRIVATE
+    $<TARGET_PROPERTY:human_core_test,COMPILE_OPTIONS>)
+if(HU_ENABLE_ASAN)
+    target_link_options(human_devlib PRIVATE -fsanitize=address)
+endif()
+
 # --- Tests ---
 option(HU_BUILD_TESTS "Build the test suite" ON)
 if(NOT HU_BUILD_TESTS)
@@ -3209,12 +3449,10 @@ set(HU_TEST_SOURCES
     tests/test_agent_git.c
     tests/test_agent_app_config.c
     tests/test_bg_registry.c
-    tests/test_canvas_render.c
     tests/test_canvas_e2e.c
     tests/test_canvas_persist.c
     tests/test_canvas_tool.c
     tests/test_consistency.c
-    tests/test_mlx_provider.c
     tests/test_mlx_stream_utf8.c
     tests/test_persona_fidelity.c
     tests/test_persona_fidelity_cross.c
@@ -3260,6 +3498,9 @@ set(HU_TEST_SOURCES
     tests/test_adapter_swap.c
     tests/test_lora_subprocess.c
     tests/test_persona_overlay_render.c
+    tests/test_style_card.c
+    tests/test_card_file.c
+    tests/test_emotion_card.c
     tests/test_terseness.c
     # test_channel_overlay_apply.c — moved to gated block (needs both
     # HU_HAS_IMESSAGE + HU_ENABLE_TELEGRAM since it calls
@@ -3276,7 +3517,6 @@ set(HU_TEST_SOURCES
     tests/test_filler_pctt.c
     tests/test_hallucination_guard.c
     tests/test_humor_fw.c
-    tests/test_markdown_loader.c
     tests/test_mcp_http_integration.c
     tests/test_self_improve.c
     tests/test_sycophancy_guard.c
@@ -3284,6 +3524,7 @@ set(HU_TEST_SOURCES
     tests/test_trust_calibration.c
     tests/test_vision_ocr.c
     tests/test_channel_embeds.c
+    tests/test_channel_mock.c
     tests/test_declarative_tools.c
     tests/test_skill_trust.c
     tests/test_agent_modules.c
@@ -3300,6 +3541,7 @@ set(HU_TEST_SOURCES
     tests/test_string_ci.c
     tests/test_rand.c
     tests/test_log_once.c
+    tests/test_log_format.c
     tests/test_vertex_adc.c
     tests/test_init_proposer.c
     tests/test_init_proposer_compose.c
@@ -3307,6 +3549,7 @@ set(HU_TEST_SOURCES
     tests/test_init_dpo_bridge.c
     tests/test_prompt_budget.c
     tests/test_prompt_budget_snapshot.c
+    tests/test_daemon_maintenance.c
     tests/test_silent_disable_compliance.c
     tests/test_io_secure.c
     tests/test_file_slurp.c
@@ -3316,7 +3559,6 @@ set(HU_TEST_SOURCES
     tests/test_contextual_bandit.c
     tests/test_humanization_bandit.c
     tests/test_memory.c
-    tests/test_mlx_load_adapter.c
     tests/test_m3_route_per_turn.c
     tests/test_m3_route_per_turn_call_sites.c
     tests/test_m3_swap_failure_observability.c
@@ -3333,7 +3575,6 @@ set(HU_TEST_SOURCES
     tests/test_auth.c
     tests/test_security.c
     tests/test_sensitivity.c
-    tests/test_vault.c
     tests/test_vault_aead.c
     tests/test_app_bundle_structure.c
     tests/test_pkg_builder.c
@@ -3341,14 +3582,13 @@ set(HU_TEST_SOURCES
     tests/test_sign_and_notarize.c
     tests/test_provider.c
     tests/test_provider_http.c
+    tests/test_gemini_vertex_auth.c
     tests/test_ensemble.c
     tests/test_api_key.c
     tests/test_channel.c
     tests/test_channel_format.c
     tests/test_channel_behavior_class.c
     tests/test_channel_rate_limit.c
-    tests/test_channel_http.c
-    tests/test_webhook_channel.c
     tests/test_cp_tasks.c
     tests/test_cp_canvas.c
     tests/test_vector_retrieval_remote.c
@@ -3377,9 +3617,23 @@ set(HU_TEST_SOURCES
     tests/test_daemon_lifecycle.c
     tests/test_daemon_routing.c
     tests/test_daemon_proactive.c
+    tests/test_daemon_proactive_decline.c
+    tests/test_daemon_proactive_reachability.c
+    tests/test_daemon_contact_optout.c
+    tests/test_daemon_hurt_handoff.c
+    tests/test_daemon_dated_followup.c
+    tests/test_daemon_outbound_bus.c
+    tests/test_reply_delay_model.c
     tests/test_daemon_promise_keeper.c
+    tests/test_daemon_insight_overuse.c
+    tests/test_daemon_config_reload.c
+    tests/test_daemon_identity_graph.c
     tests/test_daemon_reply_fallback.c
     tests/test_reply_dedup.c
+    tests/test_send_budget.c
+    tests/test_reactive_gates.c
+    tests/test_daemon_reactive_context.c
+    tests/test_consecutive_limiter.c
     tests/test_proactive_policy.c
     tests/test_daemon_director.c
     tests/test_daemon_trust.c
@@ -3395,21 +3649,15 @@ set(HU_TEST_SOURCES
     tests/test_memory_subsystems.c
     tests/test_memory_new.c
     tests/test_http.c
-    tests/test_sse.c
-    tests/test_sse_parser.c
     tests/test_streaming.c
     tests/test_websocket.c
     tests/test_ws_integration.c
-    tests/test_net_security.c
     tests/test_path_security.c
     tests/test_process_util.c
     tests/test_cron.c
-    tests/test_cron_session_tools.c
     tests/test_channel_loop.c
-    tests/test_rag.c
     tests/test_multimodal.c
     tests/test_multimodal_pipeline.c
-    tests/test_multimodal_memory.c
     tests/test_multimodal_audio.c
     tests/test_multimodal_video.c
     tests/test_voice_duplex.c
@@ -3426,6 +3674,7 @@ set(HU_TEST_SOURCES
     tests/test_mlx_local_voice.c
     tests/test_autonomy.c
     tests/test_retrieval.c
+    tests/test_reranker.c
     tests/test_retrieval_contact_isolation.c
     tests/test_prompt.c
     tests/test_prompt_trim.c
@@ -3442,6 +3691,10 @@ set(HU_TEST_SOURCES
     tests/test_bus.c
     tests/test_identity.c
     tests/test_channel_manager.c
+    # Task 12: pins the public channel SDK surface — compiles
+    # sdk/templates/channel/my_channel.h against include/human/channel_manager.h
+    # and runs the registration sequence the template's doc comment prescribes.
+    tests/test_sdk_channel_template.c
     tests/test_new_modules.c
     tests/test_provider_all.c
     tests/test_chat_response_diag.c
@@ -3456,6 +3709,9 @@ set(HU_TEST_SOURCES
     tests/test_imessage_private_protocol.c
     tests/test_imessage_private_client.c
     tests/test_imessage_chatdb_fixture.c
+    tests/test_imessage_replay_guard.c
+    tests/test_chatdb_cursor_repo_sqlite.c
+    tests/test_reliable_circuit.c
     tests/test_imessage_adversarial.c
     tests/test_imessage_non_allowlisted.c
     tests/test_imessage_rich_link.c
@@ -3466,11 +3722,14 @@ tests/test_imessage_action_telemetry.c
 tests/test_imessage_action_telemetry.c
     tests/test_imessage_reply_pacing.c
     tests/test_imessage_threaded_reply.c
+    tests/test_imessage_send_observer.c
+    tests/test_imessage_voice_record.c
     tests/test_imessage_custom_tapback.c
     tests/test_imessage_action_facts.c
     tests/test_imessage_dispatcher.c
     tests/test_imessage_sticker.c
     tests/test_follow_up.c
+    tests/test_followup_compose.c
     tests/test_follow_up_daemon_integration.c
     tests/test_daemon_aloop_smoke.c
     tests/test_config_extended.c
@@ -3482,6 +3741,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_security_extended.c
     tests/test_security_pipeline.c
     tests/test_core_extended.c
+    tests/test_paths.c
     tests/test_gateway_extended.c
     tests/test_gateway_voice.c
     tests/test_gateway_hula_traces.c
@@ -3491,10 +3751,17 @@ tests/test_imessage_action_telemetry.c
     tests/test_agent_security.c
     tests/test_skills.c
     tests/test_ported_modules.c
+    tests/test_capabilities.c
     tests/test_doctor_imessage_diagnose.c
     tests/test_doctor_registry.c
     tests/test_doctor_chatdb.c
     tests/test_doctor_prompt_budget.c
+    tests/test_check_persona_integrity.c
+    tests/test_check_eval_freshness.c
+    tests/test_check_serving_stability.c
+    tests/test_check_log_hygiene.c
+    tests/test_check_imessage_cursor.c
+    tests/test_check_blind_ab_gate.c
     tests/test_outbound_sanitize.c
     tests/test_daemon_follow_up_watcher.c
     tests/test_cli_ctl.c
@@ -3504,12 +3771,10 @@ tests/test_imessage_action_telemetry.c
     tests/test_doctor_exit_codes.c
     tests/test_doctor_json_output.c
     tests/test_onboard_step_provider.c
-    tests/test_subagent.c
     tests/test_mcp.c
     tests/test_mcp_jsonrpc.c
     tests/test_voice.c
     tests/test_local_voice.c
-    tests/test_vector_stores.c
     tests/test_cli.c
     tests/test_update.c
     tests/test_memory_engines_ext.c
@@ -3522,7 +3787,6 @@ tests/test_imessage_action_telemetry.c
     tests/test_ollama_integration.c
     tests/test_oauth.c
     tests/test_plugin.c
-    tests/test_tenant.c
     tests/test_agent_teams.c
     tests/test_delegation.c
     tests/test_diagnostic_commands.c
@@ -3530,8 +3794,6 @@ tests/test_imessage_action_telemetry.c
     tests/test_modules_coverage.c
     tests/test_coverage_new.c
     tests/test_context.c
-    tests/test_qmd.c
-    tests/test_terminal.c
     tests/test_tavily.c
     tests/test_awareness.c
     tests/test_intelligence.c
@@ -3559,7 +3821,19 @@ tests/test_imessage_action_telemetry.c
     tests/test_emotional_state.c
     tests/test_contact_style_overlay.c
     tests/test_graph.c
+    tests/test_graph_ingest.c
+    tests/test_agent_facts.c
+    tests/test_cli_memory_import.c
+    tests/test_cli_commands_memory_print.c
+    tests/test_store_sqlite_vec.c
+    tests/test_semantic_index.c
+    tests/test_hybrid_reconstructive.c
+    tests/test_semantic_recall.c
+    tests/test_semantic_recall_register.c
+    tests/test_embedder_http.c
     tests/test_w1_bitemporal.c
+    tests/test_graph_state.c
+    tests/test_wiki_page.c
     tests/test_w2_autodream.c
     tests/test_w3_multigraph.c
     tests/test_w4_verifier.c
@@ -3619,11 +3893,17 @@ tests/test_imessage_action_telemetry.c
     tests/test_multimodal_policy.c
     tests/test_persona_eval.c
     tests/test_persona_refresh.c
+    tests/test_persona_creator_preserve.c
     tests/test_persona_rag.c
     tests/test_agent.c
+    tests/test_lean_head.c
+    tests/test_reply_prompt.c
     tests/test_agent_turn_state.c
     tests/test_agent_turn_transport.c
+    tests/test_agent_llm_latency_wall_clock.c
     tests/test_agent_turn_request_overrides.c
+    tests/test_agent_max_tokens_resolve.c
+    tests/test_agent_stop_sequences.c
     tests/test_w6_e2e_adversarial.c
     tests/test_w7_memory_facade.c
     tests/test_w8_belief_layer.c
@@ -3672,24 +3952,18 @@ tests/test_imessage_action_telemetry.c
     tests/test_predictive_drafts.c
     tests/test_behavioral_clone.c
     tests/test_governor.c
-    tests/test_activation_steering.c
     tests/test_arbitrator.c
     tests/test_salience.c
+    tests/test_hard_moment.c
     tests/test_planning.c
     tests/test_rel_dynamics.c
-    tests/test_prospective.c
-    tests/test_prospective_memory.c
     tests/test_emotional_residue.c
     tests/test_consolidation_engine.c
     tests/test_conv_goals.c
     tests/test_knowledge.c
     tests/test_usage.c
-    tests/test_cognitive.c
-    tests/test_deep_memory.c
     tests/test_compression.c
     tests/test_proactive_ext.c
-    tests/test_degradation.c
-    tests/test_memory_degradation.c
     tests/test_self_awareness.c
     tests/test_superhuman.c
     tests/test_contact_graph.c
@@ -3716,14 +3990,13 @@ tests/test_imessage_action_telemetry.c
     tests/test_taste.c
     tests/test_somatic.c
     tests/test_narrative_self.c
+    tests/test_persona_life_events.c
     tests/test_attachment.c
     tests/test_intrinsic_drive.c
     tests/test_prosocial_routine.c
     tests/test_life_chapters.c
     tests/test_social_graph.c
-    tests/test_skill_system.c
     tests/test_feeds.c
-    tests/test_apple_feeds.c
     tests/test_social_feeds.c
     tests/test_feed_processor.c
     tests/test_feed_awareness.c
@@ -3739,8 +4012,8 @@ tests/test_imessage_action_telemetry.c
     tests/test_privacy_audit.c
     tests/test_collab_planning.c
     # ML-coupled tests (test_ml.c, test_ml_cli_actually_trains.c,
-    # test_ml_fidelity_judgment.c, test_dpo_judge_naming.c, test_dp_sgd.c,
-    # test_lora.c, test_training_data*.c, test_agent_trainer.c) are
+    # test_ml_fidelity_judgment.c, test_dpo_judge_naming.c,
+    # test_lora.c, test_training_data*.c) are
     # added below in the if(HU_ENABLE_ML) gate (CMakeLists.txt:3349+).
     # The sprint-7 main-merge re-introduced them here unconditionally,
     # regressing my round-10/12 fix. Re-applied: minimal-build /
@@ -3750,9 +4023,6 @@ tests/test_imessage_action_telemetry.c
     tests/test_otel_traces.c
     tests/test_mcp_transport.c
     tests/test_mcp_transport_sse.c
-    tests/test_mcp_audit.c
-    tests/test_multigraph.c
-    tests/test_memory_graph.c
     tests/test_experience.c
     tests/test_experience_engine.c
     tests/test_intelligence_wiring.c
@@ -3768,6 +4038,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_distiller.c
     tests/test_model_router.c
     tests/test_model_router_health.c
+    tests/test_cp_admin.c
     tests/test_humanness_context.c
     tests/test_plan_executor.c
     tests/test_planner_mcts_wiring.c
@@ -3783,24 +4054,29 @@ tests/test_imessage_action_telemetry.c
     tests/test_release_workflow.c
 )
 if(HU_ENABLE_FEEDS)
-    list(APPEND HU_TEST_SOURCES tests/test_google_feeds.c tests/test_music_feeds.c
+    list(APPEND HU_TEST_SOURCES
         tests/test_research_feeds.c tests/test_research_executor.c)
 endif()
-list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/test_relationship.c tests/test_replay.c tests/test_style_clone.c tests/test_life_sim.c tests/test_persona_mood.c tests/test_persona_feedback.c tests/test_persona_examples_style.c tests/test_persona_cli.c tests/test_voice_maturity.c tests/test_style_mirror.c tests/test_style_learner.c tests/test_temporal.c tests/test_inner_world.c tests/test_persona_eval.c tests/test_persona_filler_roundtrip.c tests/test_style_critique_patterns.c tests/test_style_self_critique.c tests/test_persona_sticker.c)
+list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/test_relationship.c tests/test_replay.c tests/test_style_clone.c tests/test_life_sim.c tests/test_persona_mood.c tests/test_persona_feedback.c tests/test_persona_examples_style.c tests/test_persona_cli.c tests/test_voice_maturity.c tests/test_style_learner.c tests/test_temporal.c tests/test_inner_world.c tests/test_persona_eval.c tests/test_persona_filler_roundtrip.c tests/test_style_critique_patterns.c tests/test_style_self_critique.c)
 # Moment Context Decision Layer (Task 0.2) — paired with src/persona/moment.c
 # and src/persona/moment_render.c above; unconditional per gate-symmetry rule.
 list(APPEND HU_TEST_SOURCES tests/test_moment_compose.c tests/test_moment_render.c)
 # Self-test for the flaky-test quarantine + auto-retry harness (unconditional).
 list(APPEND HU_TEST_SOURCES tests/test_flaky_harness.c)
-list(APPEND HU_TEST_SOURCES tests/test_behavior_policy.c tests/test_behavior_dialog_act.c tests/test_behavior_affect.c tests/test_behavior_change.c tests/test_behavior_safety.c tests/test_behavior_prosocial.c tests/test_win_detect.c tests/test_celebration.c tests/test_prosocial_moment.c tests/test_behavior_prompt.c tests/test_behavior_support_strategy.c tests/test_behavior_trust.c tests/test_behavior_corpora.c tests/test_user_sim.c tests/test_tom_scenario_b8.c tests/test_chronotype.c tests/test_behavior_pressure.c tests/test_behavior_trust_prompt.c tests/test_longmemeval.c tests/test_sycophancy_pack.c tests/test_user_sim_scenario.c tests/test_tapback_band.c)
+list(APPEND HU_TEST_SOURCES tests/test_behavior_policy.c tests/test_behavior_dialog_act.c tests/test_behavior_affect.c tests/test_behavior_change.c tests/test_behavior_safety.c tests/test_behavior_prosocial.c tests/test_win_detect.c tests/test_celebration.c tests/test_prosocial_moment.c tests/test_behavior_prompt.c tests/test_behavior_support_strategy.c tests/test_behavior_trust.c tests/test_behavior_corpora.c tests/test_user_sim.c tests/test_tom_scenario_b8.c tests/test_chronotype.c tests/test_behavior_pressure.c tests/test_behavior_trust_prompt.c tests/test_sycophancy_pack.c tests/test_user_sim_scenario.c tests/test_tapback_band.c)
 list(APPEND HU_TEST_SOURCES tests/test_cartesia.c)
 list(APPEND HU_TEST_SOURCES tests/test_cartesia_stream.c)
 list(APPEND HU_TEST_SOURCES tests/test_voice_clone.c)
 list(APPEND HU_TEST_SOURCES tests/test_transcript_prep.c)
+list(APPEND HU_TEST_SOURCES tests/test_speech_text.c)
+list(APPEND HU_TEST_SOURCES tests/test_speech_rewrite.c)
+list(APPEND HU_TEST_SOURCES tests/test_speech_direction.c)
+list(APPEND HU_TEST_SOURCES tests/test_opener_gate.c)
+list(APPEND HU_TEST_SOURCES tests/test_speech_perform.c)
 list(APPEND HU_TEST_SOURCES tests/test_send_voice_message.c)
 list(APPEND HU_TEST_SOURCES tests/test_voice_message_integration.c)
 if(HU_ENABLE_CARTESIA)
-    list(APPEND HU_TEST_SOURCES tests/test_audio_pipeline.c tests/test_voice_decision.c tests/test_emotion_map.c)
+    list(APPEND HU_TEST_SOURCES tests/test_audio_pipeline.c tests/test_voice_decision.c tests/test_emotion_map.c tests/test_voice_reply.c)
 endif()
 if(HU_ENABLE_AUTHENTIC)
     list(APPEND HU_TEST_SOURCES tests/test_cognitive_load.c tests/test_phase9_integration.c)
@@ -3821,11 +4097,11 @@ if(HU_ENABLE_CURL)
 endif()
 
 list(APPEND HU_TEST_SOURCES tests/test_memory_features.c)
-list(APPEND HU_TEST_SOURCES tests/test_agi_frontiers.c tests/test_world_model_graph.c tests/test_mcts_planner.c)
+list(APPEND HU_TEST_SOURCES tests/test_agi_frontiers.c tests/test_mcts_planner.c)
 list(APPEND HU_TEST_SOURCES tests/test_orchestrator.c)
 list(APPEND HU_TEST_SOURCES tests/test_swarm_execution.c tests/test_dynamic_decomposition.c)
-list(APPEND HU_TEST_SOURCES tests/test_agent_matching.c tests/test_agent_communication.c)
-list(APPEND HU_TEST_SOURCES tests/test_world_simulation.c tests/test_world_context.c)
+list(APPEND HU_TEST_SOURCES tests/test_agent_communication.c)
+list(APPEND HU_TEST_SOURCES tests/test_world_simulation.c)
 list(APPEND HU_TEST_SOURCES tests/test_agent_registry.c)
 list(APPEND HU_TEST_SOURCES tests/test_pwa.c)
 list(APPEND HU_TEST_SOURCES tests/test_integration.c)
@@ -3841,6 +4117,8 @@ list(APPEND HU_TEST_SOURCES tests/test_reaction_event.c)
 # (compile-time define) + HU_CHATDB env var (runtime path to a real chat.db).
 list(APPEND HU_TEST_SOURCES tests/test_imessage_reactions.c)
 list(APPEND HU_TEST_SOURCES tests/test_imessage_caps.c)
+list(APPEND HU_TEST_SOURCES tests/test_imessage_send_service.c)
+list(APPEND HU_TEST_SOURCES tests/test_imessage_bb_event.c)
 # Phase 1a of docs/plans/2026-05-18-imessage-sota.md: pure-synthesis tests
 # for src/channels/imessage_ingest.c. No chat.db / Apple deps; tests run
 # unconditionally and stay green on every build variant.
@@ -3859,6 +4137,7 @@ list(APPEND HU_TEST_SOURCES tests/test_imessage_schema.c)
 list(APPEND HU_TEST_SOURCES tests/test_typedstream.c)
 # M3 Bridge B Phase B4 T4: streaming-safe harmony filter tests.
 list(APPEND HU_TEST_SOURCES tests/test_harmony_filter.c)
+list(APPEND HU_TEST_SOURCES tests/test_llm_json.c)
 # Phase 5: per-balloon payload decoder tests. Pinned privacy contracts
 # (no money / no coordinates).
 list(APPEND HU_TEST_SOURCES tests/test_imessage_balloon_decode.c)
@@ -3919,11 +4198,17 @@ if(HU_ENABLE_SQLITE)
     list(APPEND HU_TEST_SOURCES tests/test_boundary_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_opinions_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_life_chapter_repo.c)
+    list(APPEND HU_TEST_SOURCES tests/test_proactive_decisions_repo.c)
+    list(APPEND HU_TEST_SOURCES tests/test_outbound_sends_repo.c)
+    list(APPEND HU_TEST_SOURCES tests/test_contact_optout_repo.c)
+    list(APPEND HU_TEST_SOURCES tests/test_repo_util_sqlite.c)
+    list(APPEND HU_TEST_SOURCES tests/test_proactive_send_circuit.c)
     list(APPEND HU_TEST_SOURCES tests/test_social_graph_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_self_awareness_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_celebration_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_feed_items_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_memories_repo.c)
+    list(APPEND HU_TEST_SOURCES tests/test_contact_insights_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_emotional_moments_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_emotional_residue_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_emotional_state_repo.c)
@@ -3953,14 +4238,12 @@ list(APPEND HU_TEST_SOURCES
     tests/test_otlp.c
     tests/test_mar.c
     tests/test_mem_policy.c
-    tests/test_prompt_optimizer.c
     tests/test_chaos.c
     tests/test_checkpoint.c
     tests/test_approval_gate.c
     tests/test_workflow_commands.c
     tests/test_scratchpad.c
     tests/test_mcp_resources.c
-    tests/test_mcp_resource_tools.c
     tests/test_context_engine.c
     tests/test_exec_env.c
     tests/test_channel_monitor.c
@@ -3978,6 +4261,12 @@ list(APPEND HU_TEST_SOURCES
     tests/test_eval_shape.c
     tests/test_register.c
     tests/test_relationship_tone.c
+    tests/test_persona_head_gate.c
+    tests/test_state_file.c
+    tests/test_daemon_followup_sched.c
+    tests/test_daemon_rich_media.c
+    tests/test_daemon_voice_reply.c
+    tests/test_prospective.c
     tests/test_eval_score.c
     tests/test_corrective_rag.c
     tests/test_adaptive_rag.c
@@ -4000,6 +4289,7 @@ list(APPEND HU_TEST_SOURCES
     # on the molora-daemon-wiring track; this de-registration unblocks the
     # configure step (the file no longer exists on disk).
     tests/test_contact_send_recency.c
+    tests/test_contact_send_recency_daemon.c
     # NOTE: 3 test files briefly registered during the PR #115 merge-
     # conflict resolution to satisfy linker refs from test_main.c are
     # de-registered here. All three were ghost-tests: present in
@@ -4029,7 +4319,6 @@ list(APPEND HU_TEST_SOURCES
     tests/test_visual_grounding.c
     tests/test_browser_use.c
     tests/test_gui_agent.c
-    tests/test_lsp.c
     tests/test_webrtc.c
     tests/test_embedded_provider.c
     tests/test_llamacpp_provider.c
@@ -4050,6 +4339,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_thread_pool.c
     tests/test_permission.c
     tests/test_shell_sandbox.c
+    tests/test_shell_env.c
     tests/test_mcp_manager.c
     tests/test_compaction_structured.c
     tests/test_session_persist.c
@@ -4072,7 +4362,6 @@ if(HU_ENABLE_ML)
         tests/test_mlx_admin.c
         tests/test_ml_cli_actually_trains.c
         tests/test_ml_fidelity_judgment.c
-        tests/test_dp_sgd.c
         tests/test_dpo_miner.c
         tests/test_dpo_judge_naming.c
         tests/test_rl_trainer.c
@@ -4100,8 +4389,7 @@ if(HU_ENABLE_ML)
         tests/test_training_data.c
         tests/test_training_data_extractor.c
         tests/test_training_data_quality.c
-        tests/test_dpo_extractor_integration.c
-        tests/test_agent_trainer.c)
+        tests/test_dpo_extractor_integration.c)
 endif()
 
 # test_channel_overlay_apply.c needs both iMessage AND Telegram symbols.
@@ -4161,11 +4449,21 @@ if(HU_ENABLE_RL_FULL)
     list(APPEND HU_TEST_SOURCES tests/test_e2e_rl_loop.c)
 endif()
 
-add_executable(human_tests ${HU_TEST_SOURCES} wasm/wasm_alloc.c src/app/bootstrap.c)
-target_link_libraries(human_tests human_core_test)
+add_executable(human_tests ${HU_TEST_SOURCES} wasm/wasm_alloc.c src/app/bootstrap.c
+    # Public channel-SDK template, compiled as a real consumer of
+    # include/human/channel_manager.h. tests/test_sdk_channel_template.c
+    # registers the channel it creates, so the SDK contract is executed,
+    # not just parsed.
+    sdk/templates/channel/my_channel.c)
+# human_devlib carries the test/eval/SDK modules that used to sit unused in
+# libhuman_core.a (see the human_devlib block above). It PUBLIC-links
+# human_core_test, so naming it here is enough to get both, in that order.
+target_link_libraries(human_tests human_core_test human_devlib)
 target_include_directories(human_tests PRIVATE ${HU_ROOT}/tests ${HU_ROOT}/tests/include
     ${HU_ROOT}/src/gateway
     ${HU_ROOT}/src/channels
+    # sdk/templates/channel/my_channel.c includes "my_channel.h" beside it.
+    ${HU_ROOT}/sdk/templates/channel
     # Phase 4 Task 3 (RL SOTA): tests/test_grpo_loss.c needs
     # src/ml/grpo_loss_priv.h (private header — NOT exported via
     # include/ to keep the public surface lean).  Same pattern used by
@@ -4176,8 +4474,7 @@ target_compile_definitions(human_tests PRIVATE "HU_EVAL_SUITES_DIR=\"${HU_ROOT}/
 # Phase D Task D-1 (CF-7 RL SOTA): same HU_ML_SCRIPTS_DIR for tests.
 target_compile_definitions(human_tests PRIVATE "HU_ML_SCRIPTS_DIR=\"${HU_ROOT}/scripts\"")
 target_compile_definitions(human_tests PRIVATE "HU_TEST_DATA_DIR=\"${HU_ROOT}/data\"")
-# HU_HAS_PERSONA always set for tests: test lib has persona (main or extra), struct layout must match
-target_compile_definitions(human_tests PRIVATE HU_IS_TEST=1 HU_GATEWAY_TEST_MODE=1 HU_HAS_NONE_ENGINE=1 HU_HAS_CRON=1 HU_HAS_PUSH=1 HU_HAS_UPDATE=1 HU_HAS_SKILLS=1 HU_HAS_PERSONA=1 HU_HAS_RUNTIME_EXOTIC=1)
+target_compile_definitions(human_tests PRIVATE HU_IS_TEST=1 HU_GATEWAY_TEST_MODE=1 HU_HAS_NONE_ENGINE=1 HU_HAS_CRON=1 HU_HAS_PUSH=1 HU_HAS_UPDATE=1 HU_HAS_SKILLS=1 HU_HAS_RUNTIME_EXOTIC=1)
 # Mirror HU_HAS_LIBSODIUM onto human_tests so tests/test_main.c's
 # `#ifdef HU_HAS_LIBSODIUM` call-site guard for run_persona_encryption_tests()
 # actually activates. Without this, the runner is registered (because
@@ -4221,44 +4518,11 @@ endif()
 if(HU_ENABLE_TELEGRAM)
     target_compile_definitions(human_tests PRIVATE HU_HAS_TELEGRAM=1)
 endif()
-if(HU_ENABLE_DISCORD)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_DISCORD=1)
-endif()
-if(HU_ENABLE_SLACK)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_SLACK=1)
-endif()
 if(HU_ENABLE_WHATSAPP)
     target_compile_definitions(human_tests PRIVATE HU_HAS_WHATSAPP=1)
 endif()
-if(HU_ENABLE_FACEBOOK)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_FACEBOOK=1)
-endif()
-if(HU_ENABLE_MATRIX)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_MATRIX=1)
-endif()
-if(HU_ENABLE_IRC)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_IRC=1)
-endif()
-if(HU_ENABLE_LINE)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_LINE=1)
-endif()
-if(HU_ENABLE_LARK)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_LARK=1)
-endif()
-if(HU_ENABLE_WEB)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_WEB=1)
-endif()
 if(HU_ENABLE_EMAIL)
     target_compile_definitions(human_tests PRIVATE HU_HAS_EMAIL=1)
-endif()
-if(HU_ENABLE_IMAP)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_IMAP=1)
-endif()
-if(HU_ENABLE_NOSTR)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_NOSTR=1)
-endif()
-if(HU_ENABLE_MQTT)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_MQTT=1)
 endif()
 if(HU_HAS_IMESSAGE)
     target_compile_definitions(human_tests PRIVATE HU_HAS_IMESSAGE=1)
@@ -4269,45 +4533,32 @@ endif()
 if(HU_ENABLE_PWA)
     target_compile_definitions(human_tests PRIVATE HU_HAS_PWA=1)
 endif()
-if(HU_ENABLE_MATTERMOST)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_MATTERMOST=1)
-endif()
-if(HU_ENABLE_ONEBOT)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_ONEBOT=1)
-endif()
-if(HU_ENABLE_DINGTALK)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_DINGTALK=1)
-endif()
-if(HU_ENABLE_TEAMS)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_TEAMS=1)
-endif()
-if(HU_ENABLE_TWILIO)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_TWILIO=1)
-endif()
-if(HU_ENABLE_GOOGLE_CHAT)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_GOOGLE_CHAT=1)
-endif()
-if(HU_ENABLE_GOOGLE_RCS)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_GOOGLE_RCS=1)
-endif()
-if(HU_ENABLE_INSTAGRAM)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_INSTAGRAM=1)
-endif()
-if(HU_ENABLE_TWITTER)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_TWITTER=1)
-endif()
-if(HU_ENABLE_TIKTOK)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_TIKTOK=1)
-endif()
-if(HU_ENABLE_GMAIL)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_GMAIL=1)
-endif()
-if(HU_ENABLE_DISPATCH)
-    target_compile_definitions(human_tests PRIVATE HU_HAS_DISPATCH=1)
-endif()
 if(HU_ENABLE_VOICE)
     target_compile_definitions(human_tests PRIVATE HU_ENABLE_VOICE=1 HU_HAS_VOICE_CHANNEL=1)
 endif()
+# Task 11 fix round 1 (docs/plans/2026-09-20-dead-code-plan.md): every one of
+# these channels' sources is ALWAYS present in the test library — either via
+# CHANNEL_SOURCES (its HU_ENABLE_<channel> is ON for the executable) or via
+# the complementary HU_TEST_EXTRA_CHANNELS entry above (OFF) — so its
+# HU_HAS_<channel> define must be unconditional too, mirroring
+# human_core_test's equivalent block. These used to be gated on
+# `if(HU_ENABLE_<channel>)` alone, which tracked the EXECUTABLE's option set
+# instead of what the TEST LIBRARY actually contains: harmless while
+# HU_ENABLE_ALL_CHANNELS forced every one of these ON for the dev preset too,
+# but the moment it stopped, every `#if HU_HAS_<channel>`-guarded test body
+# for these channels compiled OUT silently (not a link failure — a silently
+# shrinking test count, 13861 -> 13648). telegram/whatsapp/email/pwa/voice
+# above stay conditional: none of them has a complementary
+# HU_TEST_EXTRA_CHANNELS entry, so their object is genuinely absent from the
+# test library when their HU_ENABLE_<channel> is off, and defining HU_HAS_
+# unconditionally would fail to LINK, not just mis-count.
+target_compile_definitions(human_tests PRIVATE
+    HU_HAS_DISCORD=1 HU_HAS_MATRIX=1 HU_HAS_IRC=1 HU_HAS_LINE=1 HU_HAS_LARK=1
+    HU_HAS_ONEBOT=1 HU_HAS_DINGTALK=1 HU_HAS_TEAMS=1 HU_HAS_TWILIO=1
+    HU_HAS_GOOGLE_CHAT=1 HU_HAS_IMAP=1 HU_HAS_GMAIL=1
+    HU_HAS_NOSTR=1 HU_HAS_MQTT=1 HU_HAS_DISPATCH=1 HU_HAS_MATTERMOST=1
+    HU_HAS_WEB=1 HU_HAS_SLACK=1 HU_HAS_FACEBOOK=1 HU_HAS_INSTAGRAM=1
+    HU_HAS_TWITTER=1 HU_HAS_TIKTOK=1 HU_HAS_GOOGLE_RCS=1)
 if(HU_ENABLE_LUCID_ENGINE)
     target_compile_definitions(human_tests PRIVATE HU_HAS_LUCID_ENGINE=1)
 endif()
@@ -4588,7 +4839,11 @@ if(HU_ENABLE_CHANNEL_TESTS)
         tests/synthetic/synthetic_regression.c
         tests/synthetic/synthetic_utils.c)
     add_executable(human_channel_tests ${HU_CHANNEL_TEST_SOURCES})
-    target_link_libraries(human_channel_tests human_core_test)
+    # No channel_*.c source references a human_devlib symbol today, but this
+    # harness is a human_core_test consumer built from a file(GLOB), so it
+    # gets devlib for the same reason human_tests does — a new channel_*.c
+    # calling hu_dispatch_* or hu_channel_manager_* must not fail to link.
+    target_link_libraries(human_channel_tests human_core_test human_devlib)
     target_include_directories(human_channel_tests PRIVATE
         ${HU_ROOT}/include ${HU_ROOT}/src ${HU_ROOT}/tests/synthetic)
     target_compile_definitions(human_channel_tests PRIVATE
@@ -4621,8 +4876,8 @@ if(HU_ENABLE_CHANNEL_TESTS)
             HU_HAS_IMAP=1 HU_HAS_IMESSAGE=1 HU_HAS_MATTERMOST=1 HU_HAS_ONEBOT=1
             HU_HAS_DINGTALK=1 HU_HAS_TEAMS=1 HU_HAS_TWILIO=1 HU_HAS_GOOGLE_CHAT=1
             HU_HAS_GOOGLE_RCS=1 HU_HAS_SIGNAL=1 HU_HAS_NOSTR=1 HU_HAS_QQ=1
-            HU_HAS_MAIXCAM=1 HU_HAS_MQTT=1 HU_HAS_GMAIL=1 HU_HAS_CLI=1
-            HU_HAS_DISPATCH=1 HU_HAS_PERSONA=1 HU_HAS_TIKTOK=1)
+            HU_HAS_MQTT=1 HU_HAS_GMAIL=1 HU_HAS_CLI=1
+            HU_HAS_DISPATCH=1 HU_HAS_TIKTOK=1)
     else()
         if(HU_ENABLE_TELEGRAM)
             target_compile_definitions(human_channel_tests PRIVATE HU_HAS_TELEGRAM=1)
@@ -4642,7 +4897,7 @@ if(HU_ENABLE_CHANNEL_TESTS)
         if(HU_ENABLE_SIGNAL)
             target_compile_definitions(human_channel_tests PRIVATE HU_HAS_SIGNAL=1)
         endif()
-        target_compile_definitions(human_channel_tests PRIVATE HU_HAS_DISPATCH=1 HU_HAS_PERSONA=1)
+        target_compile_definitions(human_channel_tests PRIVATE HU_HAS_DISPATCH=1)
     endif()
 endif()
 
@@ -4770,7 +5025,7 @@ if(HU_ENABLE_FUZZ)
 
     add_executable(fuzz_persona_parse fuzz/fuzz_persona_parse.c)
     set_target_properties(fuzz_persona_parse PROPERTIES LINKER_LANGUAGE CXX)
-    target_compile_definitions(fuzz_persona_parse PRIVATE HU_IS_TEST=1 HU_HAS_PERSONA=1)
+    target_compile_definitions(fuzz_persona_parse PRIVATE HU_IS_TEST=1)
     target_compile_options(fuzz_persona_parse PRIVATE -Wall -Wextra -Wpedantic)
     target_link_libraries(fuzz_persona_parse PRIVATE human_core_test ${FUZZ_EXTRA_LIBS})
     target_compile_options(fuzz_persona_parse PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME})
@@ -4920,7 +5175,9 @@ if(HU_ENABLE_FUZZ)
     set_target_properties(fuzz_mcp_json_rpc PROPERTIES LINKER_LANGUAGE CXX)
     target_compile_definitions(fuzz_mcp_json_rpc PRIVATE HU_IS_TEST=1)
     target_compile_options(fuzz_mcp_json_rpc PRIVATE -Wall -Wextra -Wpedantic)
-    target_link_libraries(fuzz_mcp_json_rpc PRIVATE human_core_test ${FUZZ_EXTRA_LIBS})
+    # The only fuzz target that references a human_devlib symbol
+    # (hu_mcp_tool_parse_name / _build_name, from mcp_tool_wrapper.c).
+    target_link_libraries(fuzz_mcp_json_rpc PRIVATE human_core_test human_devlib ${FUZZ_EXTRA_LIBS})
     target_compile_options(fuzz_mcp_json_rpc PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME})
     target_link_options(fuzz_mcp_json_rpc PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME} ${FUZZ_EXTRA_LINK})
 

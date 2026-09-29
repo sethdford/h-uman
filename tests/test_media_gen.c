@@ -7,10 +7,12 @@
 #include "human/core/string.h"
 #include "human/core/vertex_auth.h"
 #include "human/tools/cache_ttl.h"
-#include "human/tools/media_image.h"
-#include "human/tools/media_video.h"
 #include "human/tools/media_gif.h"
+#include "human/tools/media_image.h"
+#include "human/tools/media_vertex_common.h"
+#include "human/tools/media_video.h"
 #include "test_framework.h"
+#include <stdlib.h>
 #include <string.h>
 
 /* ── vertex_auth tests ──────────────────────────────────────────────────── */
@@ -55,6 +57,18 @@ static void vertex_auth_get_bearer_small_buf_fails(void) {
     char buf[8];
     HU_ASSERT_EQ(hu_vertex_auth_get_bearer(&auth, buf, sizeof(buf)), HU_ERR_INVALID_ARGUMENT);
     hu_vertex_auth_free(&auth);
+}
+
+/* Pins the media-tool contract: callers pass auth_buf straight to
+ * hu_http_post_json as a C string, so a failed bearer lookup must leave an
+ * empty string, never an untouched (uninitialized) buffer. */
+static void vertex_auth_get_bearer_no_token_yields_empty_string(void) {
+    hu_vertex_auth_t auth;
+    memset(&auth, 0, sizeof(auth));
+    char buf[64];
+    memset(buf, 'x', sizeof(buf));
+    HU_ASSERT_EQ(hu_vertex_auth_get_bearer(&auth, buf, sizeof(buf)), HU_ERR_PROVIDER_AUTH);
+    HU_ASSERT_EQ(buf[0], '\0');
 }
 
 static void vertex_auth_null_args_rejected(void) {
@@ -459,8 +473,7 @@ static void media_agent_deinit_cleans_generated_media(void) {
     /* Simulate the cleanup loop from hu_agent_deinit */
     for (size_t gm = 0; gm < agent.generated_media_count && gm < 4; gm++) {
         if (agent.generated_media[gm]) {
-            alloc.free(alloc.ctx, agent.generated_media[gm],
-                       strlen(agent.generated_media[gm]) + 1);
+            alloc.free(alloc.ctx, agent.generated_media[gm], strlen(agent.generated_media[gm]) + 1);
             agent.generated_media[gm] = NULL;
         }
     }
@@ -468,7 +481,6 @@ static void media_agent_deinit_cleans_generated_media(void) {
     HU_ASSERT(agent.generated_media[0] == NULL);
     HU_ASSERT(agent.generated_media[1] == NULL);
 }
-
 
 /* Verify daemon merge pattern produces correct media array for channel send,
  * including both proactive and tool-generated media with correct ordering. */
@@ -541,8 +553,7 @@ static void media_daemon_full_pipeline_with_channel_send(void) {
 #ifdef HU_HAS_IMESSAGE
     hu_channel_t ch;
     hu_imessage_create(&alloc, "+15559876543", 12, NULL, 0, &ch);
-    hu_error_t err = ch.vtable->send(ch.ctx, "+15559876543", 12,
-                                     "Check these out!", 16,
+    hu_error_t err = ch.vtable->send(ch.ctx, "+15559876543", 12, "Check these out!", 16,
                                      all_send_media_ptr, all_send_media_cnt);
     HU_ASSERT_EQ(err, HU_OK);
     size_t msg_len = 0;
@@ -564,6 +575,255 @@ static void media_daemon_full_pipeline_with_channel_send(void) {
     agent.generated_media_count = 0;
 }
 
+/* ── media_vertex_common tests ──────────────────────────────────────────── */
+
+/* The resolver reads process env; snapshot the four keys it consults so a
+ * test can set exactly the chain it wants and put the caller's env back. */
+#define MVC_ENV_N 4
+static const char *const mvc_env_keys[MVC_ENV_N] = {"GOOGLE_CLOUD_PROJECT", "VERTEX_PROJECT",
+                                                    "GOOGLE_CLOUD_LOCATION", "HU_VEO_STORAGE_URI"};
+typedef struct {
+    char val[MVC_ENV_N][256];
+    bool set[MVC_ENV_N];
+} mvc_env_t;
+
+static void mvc_env_save(mvc_env_t *e) {
+    for (int i = 0; i < MVC_ENV_N; i++) {
+        const char *v = getenv(mvc_env_keys[i]);
+        e->set[i] = v != NULL;
+        snprintf(e->val[i], sizeof(e->val[i]), "%s", v ? v : "");
+        unsetenv(mvc_env_keys[i]);
+    }
+}
+
+static void mvc_env_restore(const mvc_env_t *e) {
+    for (int i = 0; i < MVC_ENV_N; i++) {
+        if (e->set[i])
+            setenv(mvc_env_keys[i], e->val[i], 1);
+        else
+            unsetenv(mvc_env_keys[i]);
+    }
+}
+
+static void media_vertex_open_mock_credentials_and_env_project(void) {
+    mvc_env_t env;
+    mvc_env_save(&env);
+    setenv("GOOGLE_CLOUD_PROJECT", "proj-a", 1);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_vertex_auth_t vauth;
+    const char *project = NULL, *region = NULL;
+    hu_tool_result_t out = {0};
+    HU_ASSERT(hu_media_vertex_open(&vauth, &alloc, &project, &region, &out));
+    HU_ASSERT_NOT_NULL(vauth.access_token);
+    HU_ASSERT_STR_EQ(project, "proj-a");
+    HU_ASSERT_STR_EQ(region, "us-central1");
+    hu_vertex_auth_free(&vauth);
+    mvc_env_restore(&env);
+}
+
+static void media_vertex_open_missing_project_releases_credentials(void) {
+    mvc_env_t env;
+    mvc_env_save(&env);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_vertex_auth_t vauth;
+    const char *project = NULL, *region = NULL;
+    hu_tool_result_t out = {0};
+    HU_ASSERT_FALSE(hu_media_vertex_open(&vauth, &alloc, &project, &region, &out));
+    HU_ASSERT_FALSE(out.success);
+    HU_ASSERT_STR_EQ(out.error_msg, "GOOGLE_CLOUD_PROJECT not set");
+    HU_ASSERT_NULL(vauth.access_token); /* released, not leaked, on the failure path */
+    mvc_env_restore(&env);
+}
+
+static void media_vertex_resolve_target_env_project_default_region(void) {
+    mvc_env_t env;
+    mvc_env_save(&env);
+    setenv("GOOGLE_CLOUD_PROJECT", "proj-a", 1);
+    const char *project = NULL, *region = NULL;
+    hu_tool_result_t out = {0};
+    HU_ASSERT(hu_media_vertex_resolve_target(&project, &region, &out));
+    HU_ASSERT_STR_EQ(project, "proj-a");
+    HU_ASSERT_STR_EQ(region, "us-central1");
+    mvc_env_restore(&env);
+}
+
+static void media_vertex_resolve_target_vertex_project_and_location_fallback(void) {
+    mvc_env_t env;
+    mvc_env_save(&env);
+    setenv("VERTEX_PROJECT", "proj-b", 1);
+    setenv("GOOGLE_CLOUD_LOCATION", "europe-west4", 1);
+    const char *project = NULL, *region = NULL;
+    hu_tool_result_t out = {0};
+    HU_ASSERT(hu_media_vertex_resolve_target(&project, &region, &out));
+    HU_ASSERT_STR_EQ(project, "proj-b");
+    HU_ASSERT_STR_EQ(region, "europe-west4");
+    mvc_env_restore(&env);
+}
+
+static void media_vertex_resolve_target_missing_project_fails(void) {
+    mvc_env_t env;
+    mvc_env_save(&env);
+    const char *project = NULL, *region = NULL;
+    hu_tool_result_t out = {0};
+    HU_ASSERT_FALSE(hu_media_vertex_resolve_target(&project, &region, &out));
+    HU_ASSERT_FALSE(out.success);
+    HU_ASSERT_STR_EQ(out.error_msg, "GOOGLE_CLOUD_PROJECT not set");
+    mvc_env_restore(&env);
+}
+
+static void media_vertex_resolve_target_prefers_agent_config(void) {
+    mvc_env_t env;
+    mvc_env_save(&env);
+    setenv("GOOGLE_CLOUD_PROJECT", "env-proj", 1);
+    setenv("GOOGLE_CLOUD_LOCATION", "env-region", 1);
+    hu_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    char cfg_project[] = "cfg-proj";
+    char cfg_region[] = "cfg-region";
+    cfg.media_gen.vertex_project = cfg_project;
+    cfg.media_gen.vertex_region = cfg_region;
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.config = &cfg;
+    hu_agent_set_current_for_tools(&agent);
+    const char *project = NULL, *region = NULL;
+    hu_tool_result_t out = {0};
+    bool ok = hu_media_vertex_resolve_target(&project, &region, &out);
+    hu_agent_clear_current_for_tools();
+    HU_ASSERT(ok);
+    HU_ASSERT_STR_EQ(project, "cfg-proj");
+    HU_ASSERT_STR_EQ(region, "cfg-region");
+    mvc_env_restore(&env);
+}
+
+/* The mock HTTP layer fills the response on every call, so a still-zeroed
+ * response proves the request was never issued. */
+static void media_vertex_post_json_without_token_skips_request(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_vertex_auth_t vauth;
+    memset(&vauth, 0, sizeof(vauth));
+    hu_http_response_t resp = {0};
+    HU_ASSERT_EQ(
+        hu_media_vertex_post_json(&vauth, &alloc, "https://example.invalid/x", "{}", 2, &resp),
+        HU_ERR_PROVIDER_AUTH);
+    HU_ASSERT_NULL(resp.body);
+    HU_ASSERT_EQ(resp.status_code, 0L);
+}
+
+static void media_vertex_post_json_with_token_issues_request(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_vertex_auth_t vauth;
+    memset(&vauth, 0, sizeof(vauth));
+    HU_ASSERT_EQ(hu_vertex_auth_load_adc(&vauth, &alloc), HU_OK);
+    hu_http_response_t resp = {0};
+    HU_ASSERT_EQ(
+        hu_media_vertex_post_json(&vauth, &alloc, "https://example.invalid/x", "{}", 2, &resp),
+        HU_OK);
+    HU_ASSERT_NOT_NULL(resp.body);
+    hu_http_response_free(&alloc, &resp);
+    hu_vertex_auth_free(&vauth);
+}
+
+static void media_vertex_get_without_token_skips_request(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_vertex_auth_t vauth;
+    memset(&vauth, 0, sizeof(vauth));
+    hu_http_response_t resp = {0};
+    HU_ASSERT_EQ(hu_media_vertex_get(&vauth, &alloc, "https://example.invalid/x", &resp),
+                 HU_ERR_PROVIDER_AUTH);
+    HU_ASSERT_NULL(resp.body);
+    HU_ASSERT_EQ(resp.status_code, 0L);
+}
+
+static void media_vertex_veo_storage_uri_defaults_to_project_bucket(void) {
+    mvc_env_t env;
+    mvc_env_save(&env);
+    char buf[256] = {0};
+    const char *uri = hu_media_vertex_veo_storage_uri("proj-a", buf, sizeof(buf));
+    HU_ASSERT_NOT_NULL(uri);
+    HU_ASSERT_STR_EQ(uri, "gs://proj-a-human-media/veo/");
+    mvc_env_restore(&env);
+}
+
+static void media_vertex_veo_storage_uri_env_overrides_default(void) {
+    mvc_env_t env;
+    mvc_env_save(&env);
+    setenv("HU_VEO_STORAGE_URI", "gs://custom-bucket/out/", 1);
+    char buf[256] = {0};
+    const char *uri = hu_media_vertex_veo_storage_uri("proj-a", buf, sizeof(buf));
+    HU_ASSERT_NOT_NULL(uri);
+    HU_ASSERT_STR_EQ(uri, "gs://custom-bucket/out/");
+    mvc_env_restore(&env);
+}
+
+static void media_vertex_result_from_path_owns_copies(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_tool_result_t out = {0};
+    char path[] = "/tmp/human_img_test.png";
+    HU_ASSERT_EQ(
+        hu_media_vertex_result_from_path(&alloc, "Generated image saved to %s", path, &out), HU_OK);
+    HU_ASSERT(out.success);
+    HU_ASSERT(out.output_owned);
+    HU_ASSERT(out.media_path_owned);
+    HU_ASSERT(out.media_path != path); /* an owned copy, not the caller's stack buffer */
+    HU_ASSERT_STR_EQ(out.media_path, "/tmp/human_img_test.png");
+    HU_ASSERT_EQ(out.media_path_len, strlen(path));
+    HU_ASSERT_STR_EQ(out.output, "Generated image saved to /tmp/human_img_test.png");
+    HU_ASSERT_EQ(out.output_len, strlen(out.output));
+    hu_tool_result_free(&alloc, &out);
+}
+
+/* The mock HTTP layer answers the submit with a body that carries no
+ * operation name, so the pipeline must stop there — before any poll sleep —
+ * with that specific failure. A helper that skipped the POST, or parsed the
+ * wrong field, would report something else. */
+static void media_vertex_veo_generate_stops_at_missing_operation_name(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    mvc_env_t env;
+    mvc_env_save(&env);
+    setenv("GOOGLE_CLOUD_PROJECT", "proj-a", 1);
+    hu_vertex_auth_t vauth;
+    const char *project = NULL, *region = NULL;
+    hu_tool_result_t out = {0};
+    HU_ASSERT(hu_media_vertex_open(&vauth, &alloc, &project, &region, &out));
+    hu_media_veo_request_t req = {
+        .model_id = "veo-3.1-lite-generate-001",
+        .prompt = "a dog dancing",
+        .aspect = "16:9",
+        .duration_secs = 4.0,
+        .file_tag = "gif",
+    };
+    char mp4_path[256] = {0};
+    hu_error_t err = hu_media_vertex_veo_generate(&alloc, &vauth, project, region, &req, mp4_path,
+                                                  sizeof(mp4_path), &out);
+    HU_ASSERT_NEQ(err, HU_OK);
+    HU_ASSERT_NEQ(err, HU_ERR_OUT_OF_MEMORY);
+    HU_ASSERT_FALSE(out.success);
+    HU_ASSERT_STR_EQ(out.error_msg, "no operation name in response");
+    HU_ASSERT_EQ(mp4_path[0], '\0');
+    mvc_env_restore(&env);
+}
+
+static void media_vertex_mock_result_builds_kind_path(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_tool_result_t out = {0};
+    HU_ASSERT_EQ(hu_media_vertex_mock_result(&alloc, "gif", "gif", "a dog dancing", &out), HU_OK);
+    HU_ASSERT(out.success);
+    HU_ASSERT(out.media_path_owned);
+    HU_ASSERT_STR_EQ(out.media_path, "/tmp/human_gif_mock_a dog dancing.gif");
+    HU_ASSERT_STR_EQ(out.output, out.media_path);
+    hu_tool_result_free(&alloc, &out);
+}
+
+static void media_vertex_mock_result_truncates_prompt(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_tool_result_t out = {0};
+    const char *prompt = "0123456789012345678901234567890123456789"; /* 40 chars */
+    HU_ASSERT_EQ(hu_media_vertex_mock_result(&alloc, "img", "png", prompt, &out), HU_OK);
+    HU_ASSERT_STR_EQ(out.media_path, "/tmp/human_img_mock_012345678901234567890123456789.png");
+    hu_tool_result_free(&alloc, &out);
+}
+
 /* ── registration ───────────────────────────────────────────────────────── */
 
 void run_media_gen_tests(void) {
@@ -573,8 +833,25 @@ void run_media_gen_tests(void) {
     HU_RUN_TEST(vertex_auth_ensure_token_mock);
     HU_RUN_TEST(vertex_auth_get_bearer_formats);
     HU_RUN_TEST(vertex_auth_get_bearer_small_buf_fails);
+    HU_RUN_TEST(vertex_auth_get_bearer_no_token_yields_empty_string);
     HU_RUN_TEST(vertex_auth_null_args_rejected);
     HU_RUN_TEST(vertex_auth_free_null_safe);
+
+    HU_RUN_TEST(media_vertex_open_mock_credentials_and_env_project);
+    HU_RUN_TEST(media_vertex_open_missing_project_releases_credentials);
+    HU_RUN_TEST(media_vertex_resolve_target_env_project_default_region);
+    HU_RUN_TEST(media_vertex_resolve_target_vertex_project_and_location_fallback);
+    HU_RUN_TEST(media_vertex_resolve_target_missing_project_fails);
+    HU_RUN_TEST(media_vertex_resolve_target_prefers_agent_config);
+    HU_RUN_TEST(media_vertex_post_json_without_token_skips_request);
+    HU_RUN_TEST(media_vertex_post_json_with_token_issues_request);
+    HU_RUN_TEST(media_vertex_get_without_token_skips_request);
+    HU_RUN_TEST(media_vertex_veo_storage_uri_defaults_to_project_bucket);
+    HU_RUN_TEST(media_vertex_veo_storage_uri_env_overrides_default);
+    HU_RUN_TEST(media_vertex_result_from_path_owns_copies);
+    HU_RUN_TEST(media_vertex_veo_generate_stops_at_missing_operation_name);
+    HU_RUN_TEST(media_vertex_mock_result_builds_kind_path);
+    HU_RUN_TEST(media_vertex_mock_result_truncates_prompt);
 
     HU_RUN_TEST(media_image_create_registers_name);
     HU_RUN_TEST(media_image_has_description);

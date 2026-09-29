@@ -3,6 +3,7 @@
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/http.h"
 #include "human/core/json.h"
 #include <stddef.h>
 
@@ -19,5 +20,14 @@ hu_error_t hu_provider_http_post_json(hu_allocator_t *alloc, const char *url,
                                       const char *auth_header, const char *extra_headers,
                                       const char *body, size_t body_len,
                                       hu_json_value_t **parsed_out);
+
+/* Same, with explicit transport caps (see hu_http_request_opts_t). opts may
+ * be NULL (= shared defaults). HU_ERR_TIMEOUT is returned unchanged so the
+ * reliable wrapper can route to a fallback provider. */
+hu_error_t hu_provider_http_post_json_opts(hu_allocator_t *alloc, const char *url,
+                                           const char *auth_header, const char *extra_headers,
+                                           const char *body, size_t body_len,
+                                           const hu_http_request_opts_t *opts,
+                                           hu_json_value_t **parsed_out);
 
 #endif /* HU_PROVIDER_HTTP_H */

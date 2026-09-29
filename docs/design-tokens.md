@@ -18,7 +18,7 @@ Auto-generated from W3C token files in `design-tokens/`.
 | `--hu-accent-hover` | #8DC63F | #5A9A30 |
 | `--hu-accent-light` | — | #e2f2c8 |
 | `--hu-accent-secondary` | #f59e0b | #d97706 |
-| `--hu-accent-secondary-hover` | #fbbf24 | #b45309 |
+| `--hu-accent-secondary-hover` | #fbbf24 | #f59e0b |
 | `--hu-accent-secondary-strong` | #fcd34d | #f59e0b |
 | `--hu-accent-secondary-subtle` | rgba(245, 158, 11, 0.14) | rgba(217, 119, 6, 0.10) |
 | `--hu-accent-secondary-text` | #fbbf24 | #b45309 |
@@ -48,12 +48,12 @@ Auto-generated from W3C token files in `design-tokens/`.
 | `--hu-hover-overlay` | rgba(255, 255, 255, 0.08) | rgba(0, 0, 0, 0.06) |
 | `--hu-info` | #3b82f6 | #2563eb |
 | `--hu-info-dim` | rgba(59, 130, 246, 0.15) | rgba(37, 99, 235, 0.1) |
-| `--hu-link` | #8DC63F | #5A9A30 |
+| `--hu-link` | #8DC63F | #3a6a24 |
 | `--hu-link-active` | #7AB648 | #7AB648 |
-| `--hu-link-hover` | #a3d46a | #3a6a24 |
+| `--hu-link-hover` | #a3d46a | #264A17 |
 | `--hu-link-visited` | #5A9A30 | #3a6a24 |
-| `--hu-on-accent` | #ffffff | #ffffff |
-| `--hu-on-accent-secondary` | #0c0a08 | #ffffff |
+| `--hu-on-accent` | #0c0a08 | #0c0a08 |
+| `--hu-on-accent-secondary` | #0c0a08 | #0c0a08 |
 | `--hu-on-accent-tertiary` | #ffffff | #ffffff |
 | `--hu-pressed-overlay` | rgba(255, 255, 255, 0.12) | rgba(0, 0, 0, 0.10) |
 | `--hu-success` | #10b981 | #008000 |
@@ -64,9 +64,10 @@ Auto-generated from W3C token files in `design-tokens/`.
 | `--hu-surface-container-highest` | #35302a | #e8e7e4 |
 | `--hu-surface-dim` | #080604 | #e5e4e1 |
 | `--hu-text` | #ddd8d3 | #2D2A26 |
-| `--hu-text-faint` | #56504a | #9A9490 |
+| `--hu-text-faint` | #56504a | #726C65 |
 | `--hu-text-muted` | #8a847e | #6B655E |
 | `--hu-text-secondary` | #9e9892 | #4A4540 |
+| `--hu-text-tertiary` | #8a847e | #6B655E |
 | `--hu-warning` | #eab308 | #ca8a04 |
 | `--hu-warning-dim` | rgba(234, 179, 8, 0.15) | rgba(202, 138, 4, 0.1) |
 
@@ -201,4 +202,4 @@ Auto-generated from W3C token files in `design-tokens/`.
 
 ---
 
-_Generated: 2026-04-11T15:58:37Z_
+_Generated: 2026-09-27T13:10:48Z_

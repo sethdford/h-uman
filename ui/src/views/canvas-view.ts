@@ -690,39 +690,41 @@ export class CanvasView extends GatewayAwareLitElement {
       <div class="layout ${selected ? "has-detail" : ""}">
         <div class="list-col">
           <h1>Live Canvas</h1>
-          ${!hasList
-            ? html`
-                <hu-empty-state
-                  .icon=${icons.image}
-                  heading="No active canvases"
-                  description="When the agent uses the canvas tool, visual surfaces appear here."
-                ></hu-empty-state>
-              `
-            : html`
-                <div class="list" role="list">
-                  ${this.canvases.map(
-                    (c) => html`
-                      <button
-                        type="button"
-                        class="row ${this.selectedId === c.id ? "selected" : ""}"
-                        role="listitem"
-                        @click=${() => {
-                          this.selectedId = c.id;
-                          this._viewMode = "preview";
-                        }}
-                      >
-                        <div>
-                          <div class="row-title">${c.title || c.id}</div>
-                          <div class="row-meta">
-                            ${c.format}${c.versionSeq > 0 ? ` · v${c.versionSeq}` : ""} ·
-                            ${c.content ? "has content" : "empty"}
+          ${
+            !hasList
+              ? html`
+                  <hu-empty-state
+                    .icon=${icons.image}
+                    heading="No active canvases"
+                    description="When the agent uses the canvas tool, visual surfaces appear here."
+                  ></hu-empty-state>
+                `
+              : html`
+                  <div class="list" role="list">
+                    ${this.canvases.map(
+                      (c) => html`
+                        <button
+                          type="button"
+                          class="row ${this.selectedId === c.id ? "selected" : ""}"
+                          role="listitem"
+                          @click=${() => {
+                            this.selectedId = c.id;
+                            this._viewMode = "preview";
+                          }}
+                        >
+                          <div>
+                            <div class="row-title">${c.title || c.id}</div>
+                            <div class="row-meta">
+                              ${c.format}${c.versionSeq > 0 ? ` · v${c.versionSeq}` : ""} ·
+                              ${c.content ? "has content" : "empty"}
+                            </div>
                           </div>
-                        </div>
-                      </button>
-                    `,
-                  )}
-                </div>
-              `}
+                        </button>
+                      `,
+                    )}
+                  </div>
+                `
+          }
         </div>
         ${selected ? this._renderDetail(selected) : nothing}
       </div>
@@ -826,33 +828,37 @@ export class CanvasView extends GatewayAwareLitElement {
                 Split
               </button>
             </div>
-            ${c.versionSeq > 0
-              ? html`
-                  <button
-                    class="version-info version-btn"
-                    @click=${() => this._loadVersions()}
-                    title="View version history"
-                  >
-                    v${c.versionSeq} ${icons.clock}
-                  </button>
-                  <hu-button variant="tonal" size="sm" @click=${() => this._onUndo()}>
-                    Undo
-                  </hu-button>
-                  <hu-button variant="tonal" size="sm" @click=${() => this._onRedo()}>
-                    Redo
-                  </hu-button>
-                `
-              : nothing}
+            ${
+              c.versionSeq > 0
+                ? html`
+                    <button
+                      class="version-info version-btn"
+                      @click=${() => this._loadVersions()}
+                      title="View version history"
+                    >
+                      v${c.versionSeq} ${icons.clock}
+                    </button>
+                    <hu-button variant="tonal" size="sm" @click=${() => this._onUndo()}>
+                      Undo
+                    </hu-button>
+                    <hu-button variant="tonal" size="sm" @click=${() => this._onRedo()}>
+                      Redo
+                    </hu-button>
+                  `
+                : nothing
+            }
           </div>
         </div>
         <div class="detail-body" style="position: relative;">
-          ${this._viewMode === "preview"
-            ? this._renderPreview(c)
-            : this._viewMode === "code"
-              ? this._renderEditor(c)
-              : html`
-                  <div class="split-body">${this._renderEditor(c)} ${this._renderPreview(c)}</div>
-                `}
+          ${
+            this._viewMode === "preview"
+              ? this._renderPreview(c)
+              : this._viewMode === "code"
+                ? this._renderEditor(c)
+                : html`
+                    <div class="split-body">${this._renderEditor(c)} ${this._renderPreview(c)}</div>
+                  `
+          }
           ${this._renderVersionPanel(c.versionSeq)}
         </div>
       </div>

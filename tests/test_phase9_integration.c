@@ -130,109 +130,6 @@ static void test_mundane_complaint_contextual(void) {
     HU_ASSERT_TRUE(strstr(p_evening, "home") != NULL || strstr(p_evening, "neighbors") != NULL ||
                    strstr(p_evening, "chore") != NULL);
 }
-
-static void test_spontaneous_narration_flow(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
-    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
-    HU_ASSERT_NOT_NULL(db);
-
-    int64_t now = (int64_t)time(NULL);
-    HU_ASSERT_EQ(hu_narration_event_record(db, "gym", "just finished a workout", 0.8f, now), HU_OK);
-
-    int64_t ids[4];
-    int n = hu_narration_events_unsent(db, 0.5f, ids, 4);
-    HU_ASSERT_EQ(n, 1);
-    HU_ASSERT_TRUE(ids[0] > 0);
-
-    HU_ASSERT_EQ(hu_narration_event_mark_shared(db, ids[0], "contact_a", now + 1), HU_OK);
-
-    n = hu_narration_events_unsent(db, 0.0f, ids, 4);
-    HU_ASSERT_EQ(n, 0);
-
-    mem.vtable->deinit(mem.ctx);
-}
-
-static void test_gossip_prompt_privacy(void) {
-    const char *p = hu_gossip_prompt("Alex", "saw them at the cafe");
-    HU_ASSERT_NOT_NULL(p);
-    HU_ASSERT_TRUE(strstr(p, "Never reveal private information") != NULL);
-}
-
-static void test_random_thought_cooldown(void) {
-    hu_random_thought_t out = {0};
-    /* 2/week cap: 0 and 1 succeed, 2 fails */
-    bool ok0 = hu_random_thought_generate(7, 2, 0, &out);
-    HU_ASSERT_TRUE(ok0);
-    bool ok1 = hu_random_thought_generate(7, 2, 1, &out);
-    HU_ASSERT_TRUE(ok1);
-    bool ok2 = hu_random_thought_generate(7, 2, 2, &out);
-    HU_ASSERT_FALSE(ok2);
-}
-
-static void test_resistance_never_emotional(void) {
-    hu_disengage_decision_t d = hu_should_disengage(0.1f, 0.1f, true, "casual");
-    HU_ASSERT_EQ(d.disengage_probability, 0.0f);
-}
-
-static void test_curiosity_deep_bond_only(void) {
-    hu_curiosity_candidate_t out = {0};
-    bool ok_casual = hu_existential_curiosity_check("casual", 22, 20, &out);
-    HU_ASSERT_FALSE(ok_casual);
-
-    bool ok_confidant = hu_existential_curiosity_check("confidant", 22, 15, &out);
-    HU_ASSERT_TRUE(ok_confidant);
-    HU_ASSERT_NOT_NULL(out.question);
-}
-
-static void test_contradiction_mood_driven(void) {
-    hu_contradiction_t c = {
-        .topic = "work",
-        .position_a = "love it",
-        .position_b = "hate it",
-        .expressed_a_count = 1,
-        .expressed_b_count = 1,
-    };
-    const char *pos_pos = hu_contradiction_select_position(&c, 0.7f, 0.8f);
-    HU_ASSERT_NOT_NULL(pos_pos);
-    HU_ASSERT_STR_EQ(pos_pos, "love it");
-
-    const char *pos_neg = hu_contradiction_select_position(&c, -0.6f, 0.8f);
-    HU_ASSERT_NOT_NULL(pos_neg);
-    HU_ASSERT_STR_EQ(pos_neg, "hate it");
-}
-
-static void test_running_thread_lifecycle(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
-    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
-    HU_ASSERT_NOT_NULL(db);
-
-    int64_t now = (int64_t)time(NULL);
-    HU_ASSERT_EQ(hu_thread_open(db, "contact_t", "project X", now), HU_OK);
-
-    char topics[4][128];
-    int n = hu_thread_list_open(db, "contact_t", topics, 4);
-    HU_ASSERT_EQ(n, 1);
-    HU_ASSERT_STR_EQ(topics[0], "project X");
-
-    sqlite3_stmt *stmt = NULL;
-    int rc = sqlite3_prepare_v2(db, "SELECT id FROM active_threads WHERE contact_id='contact_t' "
-                                    "AND topic='project X' ORDER BY id DESC LIMIT 1", -1,
-                               &stmt, NULL);
-    HU_ASSERT_EQ(rc, SQLITE_OK);
-    HU_ASSERT_EQ(sqlite3_step(stmt), SQLITE_ROW);
-    int64_t thread_id = sqlite3_column_int64(stmt, 0);
-    sqlite3_finalize(stmt);
-
-    HU_ASSERT_EQ(hu_thread_resolve(db, thread_id), HU_OK);
-
-    n = hu_thread_list_open(db, "contact_t", topics, 4);
-    HU_ASSERT_EQ(n, 0);
-
-    mem.vtable->deinit(mem.ctx);
-}
-
 static void test_bad_day_recovery_timing(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
@@ -250,41 +147,17 @@ static void test_bad_day_recovery_timing(void) {
 
     /* 4h later: eligible */
     int n_4h = hu_interaction_quality_needs_recovery(db, "contact_b", 0.5f, 2 * 3600, 24 * 3600,
-                                                    now + 4 * 3600);
+                                                     now + 4 * 3600);
     HU_ASSERT_EQ(n_4h, 1);
 
     HU_ASSERT_EQ(hu_interaction_quality_mark_recovered(db, "contact_b", now + 5 * 3600), HU_OK);
 
-    int n_after = hu_interaction_quality_needs_recovery(db, "contact_b", 0.5f, 2 * 3600,
-                                                         24 * 3600, now + 6 * 3600);
+    int n_after = hu_interaction_quality_needs_recovery(db, "contact_b", 0.5f, 2 * 3600, 24 * 3600,
+                                                        now + 6 * 3600);
     HU_ASSERT_EQ(n_after, 0);
 
     mem.vtable->deinit(mem.ctx);
 }
-
-static void test_proactive_ordering(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
-    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
-    HU_ASSERT_NOT_NULL(db);
-
-    int64_t now = (int64_t)time(NULL);
-    HU_ASSERT_EQ(hu_interaction_quality_record(db, "contact_p", 0.2f, 0.8f, "tired", now), HU_OK);
-    /* Thread updated 2h ago so it's in follow-up window (1h–24h) */
-    int64_t thread_ts = now - (2 * 3600);
-    HU_ASSERT_EQ(hu_thread_open(db, "contact_p", "follow up topic", thread_ts), HU_OK);
-
-    int recovery = hu_interaction_quality_needs_recovery(db, "contact_p", 0.5f, 0, 86400, now + 1);
-    int threads = hu_thread_needs_followup(db, "contact_p", 3600, 86400, now + 1);
-
-    HU_ASSERT_TRUE(recovery > 0);
-    HU_ASSERT_TRUE(threads > 0);
-    /* Recovery needs > 0 takes priority over thread needs */
-    HU_ASSERT_TRUE(recovery > 0);
-
-    mem.vtable->deinit(mem.ctx);
-}
-
 static void test_cognitive_plus_physical_combined(void) {
     hu_cognitive_load_config_t cog_config = {
         .peak_hour_start = 9,
@@ -317,26 +190,6 @@ static void test_cognitive_plus_physical_combined(void) {
     HU_ASSERT_NOT_NULL(cog_hint);
     HU_ASSERT_NOT_NULL(phys_hint);
 }
-
-static void test_medium_awareness_all_types(void) {
-    const char *typo = hu_medium_awareness_prompt(true, 0, 50, 300);
-    HU_ASSERT_NOT_NULL(typo);
-    HU_ASSERT_TRUE(strstr(typo, "autocorrect") != NULL);
-
-    const char *burst = hu_medium_awareness_prompt(false, 5, 50, 300);
-    HU_ASSERT_NOT_NULL(burst);
-    HU_ASSERT_TRUE(strstr(burst, "spam") != NULL || strstr(burst, "sorry") != NULL);
-
-    const char *wall = hu_medium_awareness_prompt(false, 0, 400, 300);
-    HU_ASSERT_NOT_NULL(wall);
-    HU_ASSERT_TRUE(strstr(wall, "novel") != NULL || strstr(wall, "tl;dr") != NULL);
-
-    /* Each produces different hint */
-    HU_ASSERT_TRUE(typo != burst);
-    HU_ASSERT_TRUE(typo != wall);
-    HU_ASSERT_TRUE(burst != wall);
-}
-
 #endif /* HU_ENABLE_AUTHENTIC */
 #endif /* HU_ENABLE_SQLITE */
 
@@ -348,17 +201,8 @@ void run_phase9_integration_tests(void) {
     HU_RUN_TEST(test_physical_state_affects_prompt);
     HU_RUN_TEST(test_error_injection_rate_statistical);
     HU_RUN_TEST(test_mundane_complaint_contextual);
-    HU_RUN_TEST(test_spontaneous_narration_flow);
-    HU_RUN_TEST(test_gossip_prompt_privacy);
-    HU_RUN_TEST(test_random_thought_cooldown);
-    HU_RUN_TEST(test_resistance_never_emotional);
-    HU_RUN_TEST(test_curiosity_deep_bond_only);
-    HU_RUN_TEST(test_contradiction_mood_driven);
-    HU_RUN_TEST(test_running_thread_lifecycle);
     HU_RUN_TEST(test_bad_day_recovery_timing);
-    HU_RUN_TEST(test_proactive_ordering);
     HU_RUN_TEST(test_cognitive_plus_physical_combined);
-    HU_RUN_TEST(test_medium_awareness_all_types);
 #endif
 #endif
 }

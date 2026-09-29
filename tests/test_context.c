@@ -129,6 +129,103 @@ static void test_context_format_respects_max_messages(void) {
     alloc.free(alloc.ctx, msgs, count * sizeof(hu_chat_message_t));
 }
 
+/* ── Multimodal request-body budget (2026-07-25 retry-amplification fix) ──────
+ *
+ * The estimator and drop helpers below only READ content-part length fields;
+ * they never dereference the base64 `data` pointer. That lets these tests
+ * simulate a multi-MB image with a 1-byte dummy buffer + a large data_len,
+ * pinning the 2KB-not-4MB contract without allocating megabytes. */
+
+static void test_estimate_bytes_counts_image_payload(void) {
+    hu_content_part_t part = {0};
+    part.tag = HU_CONTENT_PART_IMAGE_BASE64;
+    part.data.image_base64.data = "x";         /* not dereferenced by the estimator */
+    part.data.image_base64.data_len = 4300000; /* ~4.3 MB base64 image */
+    part.data.image_base64.media_type = "image/png";
+    part.data.image_base64.media_type_len = 9;
+
+    hu_chat_message_t m = {0};
+    m.role = HU_ROLE_USER;
+    m.content = "look at this";
+    m.content_len = 12;
+    m.content_parts = &part;
+    m.content_parts_count = 1;
+
+    size_t bytes = hu_chat_message_estimate_bytes(&m);
+    /* Pin the bug: the old content_len-only sum was ~12 bytes and let a 4.3 MB
+     * image slip past the budget. The estimate MUST reflect the image payload. */
+    HU_ASSERT_TRUE(bytes >= 4300000u);
+    HU_ASSERT_TRUE(bytes > m.content_len);
+    HU_ASSERT_EQ(hu_chat_message_estimate_bytes(NULL), 0u);
+}
+
+static void test_drop_oversized_parts_trims_image_keeps_text(void) {
+    /* [0] system (text only), [1] user carrying a 4.3 MB image. */
+    hu_content_part_t big = {0};
+    big.tag = HU_CONTENT_PART_IMAGE_BASE64;
+    big.data.image_base64.data = "x";
+    big.data.image_base64.data_len = 4300000;
+    big.data.image_base64.media_type = "image/png";
+    big.data.image_base64.media_type_len = 9;
+
+    hu_chat_message_t msgs[2] = {0};
+    msgs[0].role = HU_ROLE_SYSTEM;
+    msgs[0].content = "sys";
+    msgs[0].content_len = 3;
+    msgs[1].role = HU_ROLE_USER;
+    msgs[1].content = "hey";
+    msgs[1].content_len = 3;
+    msgs[1].content_parts = &big;
+    msgs[1].content_parts_count = 1;
+
+    const size_t cap = (size_t)2 << 20; /* 2 MiB per-message part cap */
+    size_t dropped = hu_chat_messages_drop_oversized_parts(msgs, 2, cap);
+    HU_ASSERT_EQ(dropped, 1u);
+    /* Image dropped from the copy... */
+    HU_ASSERT_NULL(msgs[1].content_parts);
+    HU_ASSERT_EQ(msgs[1].content_parts_count, 0u);
+    /* ...but the text (needed for the turn to make sense) is preserved. */
+    HU_ASSERT_EQ(msgs[1].content_len, 3u);
+    HU_ASSERT_EQ(msgs[1].content[0], 'h');
+    HU_ASSERT_EQ(msgs[0].content_len, 3u); /* system untouched */
+
+    /* Built request is now lean (2KB-not-4MB): sum of estimates well under cap. */
+    size_t total =
+        hu_chat_message_estimate_bytes(&msgs[0]) + hu_chat_message_estimate_bytes(&msgs[1]);
+    HU_ASSERT_TRUE(total < cap);
+
+    /* Retry contract: a transport-failure retry / fallback re-runs assembly.
+     * A second pass drops nothing and the body size does not grow. */
+    size_t dropped2 = hu_chat_messages_drop_oversized_parts(msgs, 2, cap);
+    HU_ASSERT_EQ(dropped2, 0u);
+    size_t total2 =
+        hu_chat_message_estimate_bytes(&msgs[0]) + hu_chat_message_estimate_bytes(&msgs[1]);
+    HU_ASSERT_EQ(total2, total);
+}
+
+static void test_drop_oversized_parts_keeps_small_image(void) {
+    /* A modest inline image (well under cap) survives — we only drop the
+     * pathological multi-MB payloads, not legitimate small attachments. */
+    hu_content_part_t small = {0};
+    small.tag = HU_CONTENT_PART_IMAGE_BASE64;
+    small.data.image_base64.data = "x";
+    small.data.image_base64.data_len = 50000; /* ~50 KB */
+    small.data.image_base64.media_type = "image/png";
+    small.data.image_base64.media_type_len = 9;
+
+    hu_chat_message_t m = {0};
+    m.role = HU_ROLE_USER;
+    m.content = "pic";
+    m.content_len = 3;
+    m.content_parts = &small;
+    m.content_parts_count = 1;
+
+    size_t dropped = hu_chat_messages_drop_oversized_parts(&m, 1, (size_t)2 << 20);
+    HU_ASSERT_EQ(dropped, 0u);
+    HU_ASSERT_NOT_NULL(m.content_parts);
+    HU_ASSERT_EQ(m.content_parts_count, 1u);
+}
+
 void run_context_tests(void) {
     HU_TEST_SUITE("Context");
     HU_RUN_TEST(test_context_default_prompt);
@@ -136,4 +233,7 @@ void run_context_tests(void) {
     HU_RUN_TEST(test_context_format_empty);
     HU_RUN_TEST(test_context_format_with_history);
     HU_RUN_TEST(test_context_format_respects_max_messages);
+    HU_RUN_TEST(test_estimate_bytes_counts_image_payload);
+    HU_RUN_TEST(test_drop_oversized_parts_trims_image_keeps_text);
+    HU_RUN_TEST(test_drop_oversized_parts_keeps_small_image);
 }

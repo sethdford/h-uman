@@ -630,6 +630,32 @@ hu_error_t hu_superhuman_delayed_followup_mark_sent(void *sqlite_ctx, int64_t id
     return (rc == SQLITE_DONE) ? HU_OK : HU_ERR_MEMORY_BACKEND;
 }
 
+hu_error_t hu_superhuman_delayed_followup_pending_exists(void *sqlite_ctx, const char *contact_id,
+                                                         size_t contact_id_len, const char *topic,
+                                                         size_t topic_len, bool *out_exists) {
+    if (!sqlite_ctx || !contact_id || contact_id_len == 0 || !topic || topic_len == 0 ||
+        !out_exists)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out_exists = false;
+    sqlite3 *db = get_db(sqlite_ctx);
+    if (!db)
+        return HU_ERR_NOT_SUPPORTED;
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db,
+                           "SELECT 1 FROM delayed_followups WHERE contact_id=? AND topic=? AND "
+                           "sent=0 LIMIT 1",
+                           -1, &stmt, NULL) != SQLITE_OK)
+        return HU_ERR_MEMORY_BACKEND;
+    sqlite3_bind_text(stmt, 1, contact_id, (int)contact_id_len, NULL);
+    sqlite3_bind_text(stmt, 2, topic, (int)topic_len, NULL);
+    int rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    if (rc != SQLITE_ROW && rc != SQLITE_DONE)
+        return HU_ERR_MEMORY_BACKEND;
+    *out_exists = (rc == SQLITE_ROW);
+    return HU_OK;
+}
+
 void hu_superhuman_delayed_followup_free(hu_allocator_t *alloc, hu_delayed_followup_t *arr,
                                          size_t count) {
     if (alloc && arr)
@@ -1811,6 +1837,19 @@ hu_error_t hu_superhuman_delayed_followup_list_due(void *sqlite_ctx, hu_allocato
 hu_error_t hu_superhuman_delayed_followup_mark_sent(void *sqlite_ctx, int64_t id) {
     (void)sqlite_ctx;
     (void)id;
+    return HU_ERR_NOT_SUPPORTED;
+}
+
+hu_error_t hu_superhuman_delayed_followup_pending_exists(void *sqlite_ctx, const char *contact_id,
+                                                         size_t contact_id_len, const char *topic,
+                                                         size_t topic_len, bool *out_exists) {
+    (void)sqlite_ctx;
+    (void)contact_id;
+    (void)contact_id_len;
+    (void)topic;
+    (void)topic_len;
+    if (out_exists)
+        *out_exists = false;
     return HU_ERR_NOT_SUPPORTED;
 }
 

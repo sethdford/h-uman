@@ -201,8 +201,106 @@ static void role_consistency_passes_legitimate_question_about_anything(void) {
     hu_output_validator_deinit(&v, &alloc);
 }
 
+/* 2026-09-06/07 generation-side gaps found by matching production_outcomes
+ * against chat.db: the model produced "Hello Seth," (to a stranger's "Who is
+ * this?") and a bare "How can I help you?"; neither was delivered, but both
+ * passed this chain. Pin the two new rules and their nearest legal shapes. */
+
+static void narrator_validate(const char *in, hu_validator_result_t *r) {
+    hu_allocator_t alloc = A();
+    hu_output_validator_t v;
+    HU_ASSERT_EQ(hu_validator_persona_narrator_create(&alloc, "Seth", 4, &v), HU_OK);
+    hu_validator_context_t vctx = {0};
+    vctx.persona_name = "Seth";
+    vctx.persona_name_len = 4;
+    memset(r, 0, sizeof(*r));
+    v.vtable->validate(v.ctx, &alloc, &vctx, in, strlen(in), r);
+    hu_output_validator_deinit(&v, &alloc);
+}
+
+static void persona_narrator_rejects_greeting_addressed_to_persona(void) {
+    hu_allocator_t alloc = A();
+    const char *leaks[] = {"Hello Seth,", "hi seth!", "  Hey, Seth.", "Hey Seth\nlong time"};
+    for (size_t i = 0; i < sizeof(leaks) / sizeof(leaks[0]); i++) {
+        hu_validator_result_t r;
+        narrator_validate(leaks[i], &r);
+        HU_ASSERT_EQ(r.decision, HU_VALIDATOR_REJECT);
+        HU_ASSERT(r.reason != NULL && strstr(r.reason, "greets") != NULL);
+        hu_validator_result_free(&alloc, &r);
+    }
+}
+
+static void persona_narrator_passes_self_introductions_and_other_names(void) {
+    hu_allocator_t alloc = A();
+    const char *legal[] = {"hey it's seth",  "Hey Seth here, checking in",
+                           "Hello Sethany,", "hey, just seth things",
+                           "hi! seth",       "Hello Sam,"};
+    for (size_t i = 0; i < sizeof(legal) / sizeof(legal[0]); i++) {
+        hu_validator_result_t r;
+        narrator_validate(legal[i], &r);
+        HU_ASSERT_EQ(r.decision, HU_VALIDATOR_PASS);
+        hu_validator_result_free(&alloc, &r);
+    }
+}
+
+static void role_consistency_validate(const char *in, hu_validator_result_t *r) {
+    hu_allocator_t alloc = A();
+    hu_output_validator_t v;
+    HU_ASSERT_EQ(hu_validator_role_consistency_create(&alloc, &v), HU_OK);
+    memset(r, 0, sizeof(*r));
+    v.vtable->validate(v.ctx, &alloc, NULL, in, strlen(in), r);
+    hu_output_validator_deinit(&v, &alloc);
+}
+
+static void role_consistency_rejects_bare_assistant_opener(void) {
+    hu_allocator_t alloc = A();
+    const char *leaks[] = {"How can I help you?", "how can i help", " What can I do for you?! ",
+                           "How may I assist you."};
+    for (size_t i = 0; i < sizeof(leaks) / sizeof(leaks[0]); i++) {
+        hu_validator_result_t r;
+        role_consistency_validate(leaks[i], &r);
+        HU_ASSERT_EQ(r.decision, HU_VALIDATOR_REJECT);
+        HU_ASSERT(r.reason != NULL && strstr(r.reason, "bare assistant opener") != NULL);
+        hu_validator_result_free(&alloc, &r);
+    }
+}
+
+static void role_consistency_passes_in_character_offers_of_help(void) {
+    hu_allocator_t alloc = A();
+    const char *legal[] = {"how can I help with the move?", "lmk how I can help",
+                           "what can I do for you tomorrow, drive?", "help?"};
+    for (size_t i = 0; i < sizeof(legal) / sizeof(legal[0]); i++) {
+        hu_validator_result_t r;
+        role_consistency_validate(legal[i], &r);
+        HU_ASSERT_EQ(r.decision, HU_VALIDATOR_PASS);
+        hu_validator_result_free(&alloc, &r);
+    }
+}
+
+static void default_chain_rejects_both_2026_09_leaks(void) {
+    hu_allocator_t alloc = A();
+    const char *leaks[] = {"Hello Seth,", "How can I help you?"};
+    for (size_t i = 0; i < 2; i++) {
+        hu_output_validator_chain_t *chain = NULL;
+        HU_ASSERT_EQ(hu_validators_build_default_outbound_chain(&alloc, "Seth", 4, &chain), HU_OK);
+        hu_chain_result_t cr;
+        memset(&cr, 0, sizeof(cr));
+        HU_ASSERT_EQ(
+            hu_output_validator_chain_execute(chain, &alloc, NULL, leaks[i], strlen(leaks[i]), &cr),
+            HU_OK);
+        HU_ASSERT_EQ(cr.final_decision, HU_VALIDATOR_REJECT);
+        hu_chain_result_free(&alloc, &cr);
+        hu_output_validator_chain_destroy(chain);
+    }
+}
+
 void run_validators_persona_safety_tests(void) {
     HU_TEST_SUITE("validators_persona_safety");
+    HU_RUN_TEST(persona_narrator_rejects_greeting_addressed_to_persona);
+    HU_RUN_TEST(persona_narrator_passes_self_introductions_and_other_names);
+    HU_RUN_TEST(role_consistency_rejects_bare_assistant_opener);
+    HU_RUN_TEST(role_consistency_passes_in_character_offers_of_help);
+    HU_RUN_TEST(default_chain_rejects_both_2026_09_leaks);
     HU_RUN_TEST(persona_narrator_rejects_jordan_leak_F1);
     HU_RUN_TEST(persona_narrator_passes_real_seth_reply);
     HU_RUN_TEST(persona_narrator_passes_when_persona_name_unknown);

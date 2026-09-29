@@ -110,10 +110,6 @@ struct hu_conversation_history_t *hu_moment_history_create(size_t count, const i
 /* Release a history created by hu_moment_history_create(). No-op on NULL. */
 void hu_moment_history_free(struct hu_conversation_history_t *h);
 
-/* Public composer — loads inputs from the agent, then calls the pure inner. */
-hu_error_t hu_moment_compose(const struct hu_agent_t *agent, const struct hu_contact_t *contact,
-                             const char *channel_id, int64_t now_s, hu_moment_t *out);
-
 /* Pure-predicate inner — no I/O, no globals, no clock reads. Tests use this. */
 hu_error_t hu_moment_compose_from_inputs(
     const struct hu_persona_t *persona, const struct hu_persona_overlay_t *overlay,

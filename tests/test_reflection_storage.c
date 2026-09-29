@@ -204,12 +204,38 @@ static void test_storage_last_completed_ms_returns_max_ok_only(void) {
     sqlite3_close(db);
 }
 
+/* 2026-09-04: the gate backs off from the last ATTEMPT. A store holding
+ * only failed runs must report their start time, and a later failure must
+ * win over an earlier success. Pre-fix, last_completed_ms alone returned 0
+ * here and the daemon retried every tick. */
+static void test_storage_last_attempt_ms_counts_failed_runs(void) {
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
+    HU_ASSERT_EQ((int)hu_reflection_storage_migrate(db), (int)HU_OK);
+
+    HU_ASSERT_EQ((int)hu_reflection_storage_last_attempt_ms(db), 0);
+
+    HU_ASSERT_EQ((int)hu_reflection_storage_insert_run(db, "r_ok", "mock", 1000, 3), (int)HU_OK);
+    HU_ASSERT_EQ((int)hu_reflection_storage_complete_run(db, "r_ok", "ok", 0, NULL, NULL, NULL, 0),
+                 (int)HU_OK);
+    HU_ASSERT_EQ((int)hu_reflection_storage_insert_run(db, "r_bad", "mock", 5000, 3), (int)HU_OK);
+    HU_ASSERT_EQ((int)hu_reflection_storage_complete_run(db, "r_bad", "schema_invalid", 0, NULL,
+                                                         NULL, "top-level: JSON parse failed", 0),
+                 (int)HU_OK);
+
+    HU_ASSERT_EQ((long long)hu_reflection_storage_last_attempt_ms(db), 5000LL);
+    /* The ok-only query is unchanged and still ignores the failure. */
+    HU_ASSERT_TRUE(hu_reflection_storage_last_completed_ms(db) != 5000);
+    sqlite3_close(db);
+}
+
 void run_reflection_storage_tests(void) {
     HU_TEST_SUITE("reflection_storage");
     HU_RUN_TEST(test_storage_migrate_creates_tables_and_indexes);
     HU_RUN_TEST(test_storage_upsert_bumps_observation_count_and_takes_max_confidence);
     HU_RUN_TEST(test_storage_upsert_drops_low_confidence);
     HU_RUN_TEST(test_storage_last_completed_ms_returns_max_ok_only);
+    HU_RUN_TEST(test_storage_last_attempt_ms_counts_failed_runs);
 }
 
 #else /* !HU_ENABLE_SQLITE — empty stub so the runner symbol still resolves */

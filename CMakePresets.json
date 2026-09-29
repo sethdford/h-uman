@@ -14,7 +14,14 @@
                 "CMAKE_BUILD_TYPE": "Debug",
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
                 "HU_ENABLE_ASAN": "ON",
-                "HU_ENABLE_ALL_CHANNELS": "ON",
+                "HU_ENABLE_ALL_CHANNELS": "OFF",
+                "HU_HAS_IMESSAGE": "ON",
+                "HU_ENABLE_SLACK": "ON",
+                "HU_ENABLE_TELEGRAM": "ON",
+                "HU_ENABLE_WHATSAPP": "ON",
+                "HU_ENABLE_EMAIL": "ON",
+                "HU_ENABLE_GMAIL": "ON",
+                "HU_ENABLE_IMAP": "ON",
                 "HU_ENABLE_SQLITE": "ON",
                 "HU_ENABLE_PERSONA": "ON",
                 "HU_ENABLE_SKILLS": "ON",
@@ -29,6 +36,17 @@
                 "HU_ENABLE_TOOLS_ADVANCED": "ON",
                 "HU_ENABLE_LIBSODIUM": "ON",
                 "HU_ENABLE_RL_FULL": "ON"
+            }
+        },
+        {
+            "name": "prod",
+            "displayName": "Production daemon (dev feature set, no ASan, RelWithDebInfo)",
+            "description": "What scripts/install-human-daemon.sh installs. Same feature set as `dev` so every doctor check and gate behaves identically; differs only in build type and no sanitizer. Until 2026-09-12 prod ran the `dev` binary (Debug + AddressSanitizer: 432 asan.log files, 1.15 GB RSS).",
+            "inherits": "dev",
+            "binaryDir": "${sourceDir}/build-prod",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "HU_ENABLE_ASAN": "OFF"
             }
         },
         {
@@ -103,7 +121,6 @@
                 "HU_ENABLE_SQLITE": "OFF",
                 "HU_ENABLE_CURL": "OFF",
                 "HU_ENABLE_TLS": "OFF",
-                "HU_ENABLE_PERSONA": "OFF",
                 "HU_ENABLE_SKILLS": "OFF",
                 "HU_ENABLE_ML": "OFF"
             }
@@ -155,6 +172,11 @@
         {
             "name": "dev",
             "configurePreset": "dev",
+            "jobs": 0
+        },
+        {
+            "name": "prod",
+            "configurePreset": "prod",
             "jobs": 0
         },
         {

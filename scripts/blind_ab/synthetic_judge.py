@@ -55,27 +55,43 @@ def call(api, endpoint, model, ctx, a, b, temp, timeout):
         r = json.load(urllib.request.urlopen(req, timeout=timeout))
         return r["content"][0]["text"]
     # default: OpenAI-compatible (local mlx-server, gemma — privacy-preserving)
+    # max_tokens must cover gemma's THINKING channel + the answer: stock
+    # mlx_lm server bills reasoning against the same budget, and at 160 the
+    # model burned it all reasoning — finish_reason=length with NO content
+    # key at all (2026-07-25, the thinking-budget gotcha, stock-server form).
     body = json.dumps({
         "model": model,
         "messages": [{"role": "system", "content": JUDGE_SYS},
                      {"role": "user", "content": prompt}],
-        "temperature": temp, "max_tokens": 160,
+        "temperature": temp, "max_tokens": 1024,
     }).encode()
     req = urllib.request.Request(endpoint, data=body,
                                  headers={"Content-Type": "application/json"})
     r = json.load(urllib.request.urlopen(req, timeout=timeout))
-    return r["choices"][0]["message"]["content"]
+    msg = r["choices"][0]["message"]
+    # Stock mlx_lm server splits thinking into message.reasoning and may omit
+    # "content" entirely on a length cut. Prefer the visible answer; fall back
+    # to scanning the reasoning (parse() anchors to the LAST JSON envelope, so
+    # the schema echo that always appears early in reasoning can't win).
+    return msg.get("content") or msg.get("reasoning") or ""
 
 
 def parse(txt):
-    m = re.search(r'\{.*\}', txt, re.S)
-    if m:
+    # Prefer the LAST valid JSON object carrying a "real" verdict: gemma's
+    # thinking channel ECHOES the answer schema ('{"real":"A"|"B",...}' — not
+    # valid JSON) before the actual verdict, so a first-match (or greedy-span)
+    # scan harvests the echo, not the answer. Same trap and same fix as the
+    # LLM fact extractor's prefer-LAST-envelope parse (2026-07-11).
+    for m in reversed(list(re.finditer(r'\{[^{}]*\}', txt, re.S))):
         try:
-            return json.loads(m.group(0))
+            j = json.loads(m.group(0))
         except Exception:
-            pass
-    mm = re.search(r'"?real"?\s*[:=]\s*"?([AB])', txt)
-    return {"real": mm.group(1)} if mm else None
+            continue
+        if isinstance(j, dict) and j.get("real") in ("A", "B"):
+            return j
+    # (?!"?\s*\|) rejects the schema echo's alternation form '"A"|"B"'.
+    matches = list(re.finditer(r'"?real"?\s*[:=]\s*"?([AB])(?!"?\s*\|)', txt))
+    return {"real": matches[-1].group(1)} if matches else None
 
 
 AXES = ["opinion", "memory", "reasoning", "lexical", "tone", "syntax"]

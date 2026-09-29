@@ -61,7 +61,11 @@ if [[ $# -gt 0 ]]; then
     EXPLICIT_FILES=true
 else
     # Default: all staged new/modified test files (pre-commit mode).
-    mapfile -t FILES < <(git diff --cached --name-only --diff-filter=AM -- 'tests/test_*.c' 2>/dev/null || true)
+    # read-loop instead of mapfile: macOS ships bash 3.2, which has no mapfile
+    # (the CI build-and-test (macos-latest) job runs this via the fixture smoke test).
+    FILES=()
+    while IFS= read -r _f; do FILES+=("$_f"); done \
+        < <(git diff --cached --name-only --diff-filter=AM -- 'tests/test_*.c' 2>/dev/null || true)
 fi
 
 if [[ ${#FILES[@]} -eq 0 ]]; then
@@ -101,7 +105,9 @@ find_production_module() {
         # tie-breaking. `sort` here means filesystem order can never affect the
         # result.
         local matches
-        mapfile -t matches < <(find src -name "${candidate}.c" -type f | sort)
+        matches=()
+        while IFS= read -r _m; do matches+=("$_m"); done \
+            < <(find src -name "${candidate}.c" -type f | sort)
 
         if [[ ${#matches[@]} -eq 1 ]]; then
             # Single candidate: fast path, no scoring needed.
@@ -207,7 +213,9 @@ for test_file in "${FILES[@]}"; do
     fi
 
     # Extract production symbols
-    mapfile -t symbols < <(extract_production_symbols "$prod_file")
+    symbols=()
+    while IFS= read -r _s; do symbols+=("$_s"); done \
+        < <(extract_production_symbols "$prod_file")
 
     if [[ ${#symbols[@]} -eq 0 ]]; then
         # Production file has no extractable hu_* symbols (e.g. static-only).  Pass.

@@ -1,6 +1,7 @@
 #include "human/agent/compaction.h"
 #include "human/agent/compaction_structured.h"
 #include "human/core/string.h"
+#include "human/core/tokens.h"
 #include "human/provider.h"
 #include <stdint.h>
 #include <stdio.h>
@@ -89,7 +90,11 @@ uint64_t hu_estimate_tokens(const hu_owned_message_t *history, size_t history_co
             total_chars += (uint64_t)m->content_len;
         }
     }
-    return (total_chars + 3 * (uint64_t)history_count) / 4 + multimodal_tokens;
+    /* Divides the SUM rather than per-message, so it deliberately does NOT use
+     * hu_tokens_estimate_text — that would change rounding and therefore move
+     * compaction thresholds. Only the divisor is shared. */
+    return (total_chars + 3 * (uint64_t)history_count) / HU_TOKENS_BYTES_PER_TOKEN +
+           multimodal_tokens;
 }
 
 bool hu_should_compact(const hu_owned_message_t *history, size_t history_count,
@@ -258,25 +263,27 @@ hu_error_t hu_compact_history(hu_allocator_t *alloc, hu_owned_message_t **histor
 
     /* Structured compaction path: generate XML summary with metadata */
     if (config->use_structured_summary) {
-        uint32_t keep = config->preserve_recent_count > 0
-            ? config->preserve_recent_count : config->keep_recent;
+        uint32_t keep =
+            config->preserve_recent_count > 0 ? config->preserve_recent_count : config->keep_recent;
 
         hu_compaction_summary_t meta;
         hu_error_t err = hu_compact_extract_metadata(alloc, *history, count, keep, &meta);
-        if (err != HU_OK) return err;
+        if (err != HU_OK)
+            return err;
 
         /* Determine range to summarize */
         bool sys = count > 0 && (*history)[0].role == HU_ROLE_SYSTEM;
         size_t s = sys ? 1 : 0;
         size_t non_sys = count - s;
-        if (keep > (uint32_t)non_sys) keep = (uint32_t)non_sys;
+        if (keep > (uint32_t)non_sys)
+            keep = (uint32_t)non_sys;
         size_t compact_end = s + (non_sys - keep);
 
         /* Build structured summary from messages being compacted */
         char *xml = NULL;
         size_t xml_len = 0;
-        err = hu_compact_build_structured_summary(alloc, *history + s, compact_end - s, &meta,
-                                                  &xml, &xml_len);
+        err = hu_compact_build_structured_summary(alloc, *history + s, compact_end - s, &meta, &xml,
+                                                  &xml_len);
         if (err != HU_OK) {
             hu_compaction_summary_free(alloc, &meta);
             return err;
@@ -312,8 +319,8 @@ hu_error_t hu_compact_history(hu_allocator_t *alloc, hu_owned_message_t **histor
 
         /* Inject continuation preamble if configured */
         if (config->inject_continuation_preamble) {
-            err = hu_compact_inject_continuation_preamble(
-                alloc, &meta, history, history_count, history_cap);
+            err = hu_compact_inject_continuation_preamble(alloc, &meta, history, history_count,
+                                                          history_cap);
         }
 
         hu_compaction_summary_free(alloc, &meta);
@@ -528,7 +535,8 @@ hu_error_t hu_compact_history_llm(hu_allocator_t *alloc, hu_owned_message_t **hi
     size_t llm_summary_len = 0;
     hu_error_t err = provider->vtable->chat_with_system(
         provider->ctx, alloc, sys_prompt, sizeof(sys_prompt) - 1, raw, strlen(raw),
-        hu_compaction_chat_model, HU_COMPACTION_CHAT_MODEL_LEN, 0.2, &llm_summary, &llm_summary_len);
+        hu_compaction_chat_model, HU_COMPACTION_CHAT_MODEL_LEN, 0.2, &llm_summary,
+        &llm_summary_len);
 
     alloc->free(alloc->ctx, raw, raw_alloc);
 
@@ -586,9 +594,9 @@ hu_error_t hu_compact_history_llm(hu_allocator_t *alloc, hu_owned_message_t **hi
 #if !(defined(HU_IS_TEST) && HU_IS_TEST)
 
 /* Rough char caps (~5 chars/word) for hierarchical summaries */
-#define HU_HIER_SESSION_MAX_CHARS  1400u
-#define HU_HIER_CHAPTER_MAX_CHARS  700u
-#define HU_HIER_OVERALL_MAX_CHARS  350u
+#define HU_HIER_SESSION_MAX_CHARS 1400u
+#define HU_HIER_CHAPTER_MAX_CHARS 700u
+#define HU_HIER_OVERALL_MAX_CHARS 350u
 
 static void hierarchical_truncate(char *s, size_t *len, size_t max_chars) {
     if (!s || !len || max_chars == 0)
@@ -679,10 +687,9 @@ static char *hier_build_user3(hu_allocator_t *alloc, const char *chapter, size_t
 #endif /* !(HU_IS_TEST) */
 
 hu_error_t hu_compact_hierarchical(hu_allocator_t *alloc, hu_provider_t *provider,
-                                   const char *model, size_t model_len,
-                                   const char *conversation, size_t conversation_len,
-                                   char **session_summary, size_t *session_len,
-                                   char **chapter_summary, size_t *chapter_len,
+                                   const char *model, size_t model_len, const char *conversation,
+                                   size_t conversation_len, char **session_summary,
+                                   size_t *session_len, char **chapter_summary, size_t *chapter_len,
                                    char **overall_summary, size_t *overall_len) {
     if (!alloc || !session_summary || !session_len || !chapter_summary || !chapter_len ||
         !overall_summary || !overall_len)
@@ -782,8 +789,8 @@ hu_error_t hu_compact_hierarchical(hu_allocator_t *alloc, hu_provider_t *provide
 
     char *chap = NULL;
     size_t chap_len = 0;
-    err = hierarchical_chat(provider, alloc, model, model_len, sys2, sizeof(sys2) - 1, user2, u2_len,
-                            &chap, &chap_len);
+    err = hierarchical_chat(provider, alloc, model, model_len, sys2, sizeof(sys2) - 1, user2,
+                            u2_len, &chap, &chap_len);
     alloc->free(alloc->ctx, user2, u2_len + 1);
     if (err != HU_OK || !chap || chap_len == 0) {
         alloc->free(alloc->ctx, sess, sess_len + 1);
@@ -807,8 +814,8 @@ hu_error_t hu_compact_hierarchical(hu_allocator_t *alloc, hu_provider_t *provide
 
     char *overall = NULL;
     size_t overall_l = 0;
-    err = hierarchical_chat(provider, alloc, model, model_len, sys3, sizeof(sys3) - 1, user3, u3_len,
-                            &overall, &overall_l);
+    err = hierarchical_chat(provider, alloc, model, model_len, sys3, sizeof(sys3) - 1, user3,
+                            u3_len, &overall, &overall_l);
     alloc->free(alloc->ctx, user3, u3_len + 1);
     if (err != HU_OK || !overall || overall_l == 0) {
         alloc->free(alloc->ctx, sess, sess_len + 1);
@@ -831,9 +838,8 @@ hu_error_t hu_compact_hierarchical(hu_allocator_t *alloc, hu_provider_t *provide
 
 /* ── Hierarchical Compaction ──────────────────────────────────────────── */
 
-static char *summarize_chunk_text(hu_allocator_t *alloc, hu_provider_t *provider,
-                                  const char *chunk, size_t chunk_len, uint32_t max_chars,
-                                  size_t *out_len) {
+static char *summarize_chunk_text(hu_allocator_t *alloc, hu_provider_t *provider, const char *chunk,
+                                  size_t chunk_len, uint32_t max_chars, size_t *out_len) {
     *out_len = 0;
     if (provider && provider->vtable && provider->vtable->chat_with_system) {
         static const char sys[] =
@@ -867,8 +873,8 @@ static char *summarize_chunk_text(hu_allocator_t *alloc, hu_provider_t *provider
 hu_error_t hu_compact_history_hierarchical(hu_allocator_t *alloc, hu_owned_message_t **history,
                                            size_t *history_count, size_t *history_cap,
                                            const hu_compaction_config_t *config,
-                                           hu_provider_t *provider,
-                                           uint32_t chunk_size, uint32_t max_depth) {
+                                           hu_provider_t *provider, uint32_t chunk_size,
+                                           uint32_t max_depth) {
     if (!alloc || !history || !*history || !history_count || !history_cap || !config)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -876,8 +882,10 @@ hu_error_t hu_compact_history_hierarchical(hu_allocator_t *alloc, hu_owned_messa
     if (!hu_should_compact(*history, cnt, config))
         return HU_OK;
 
-    if (chunk_size == 0) chunk_size = 10;
-    if (max_depth == 0) max_depth = 3;
+    if (chunk_size == 0)
+        chunk_size = 10;
+    if (max_depth == 0)
+        max_depth = 3;
 
     bool has_sys = cnt > 0 && (*history)[0].role == HU_ROLE_SYSTEM;
     size_t hstart = has_sys ? 1 : 0;
@@ -898,26 +906,30 @@ hu_error_t hu_compact_history_hierarchical(hu_allocator_t *alloc, hu_owned_messa
     char **ctexts = (char **)alloc->alloc(alloc->ctx, orig_chunks * sizeof(char *));
     size_t *clens = (size_t *)alloc->alloc(alloc->ctx, orig_chunks * sizeof(size_t));
     if (!ctexts || !clens) {
-        if (ctexts) alloc->free(alloc->ctx, ctexts, orig_chunks * sizeof(char *));
-        if (clens) alloc->free(alloc->ctx, clens, orig_chunks * sizeof(size_t));
+        if (ctexts)
+            alloc->free(alloc->ctx, ctexts, orig_chunks * sizeof(char *));
+        if (clens)
+            alloc->free(alloc->ctx, clens, orig_chunks * sizeof(size_t));
         return hu_compact_history_llm(alloc, history, history_count, history_cap, config, provider);
     }
     memset(ctexts, 0, orig_chunks * sizeof(char *));
     memset(clens, 0, orig_chunks * sizeof(size_t));
 
     uint32_t msrc = config->max_source_chars > 0 ? config->max_source_chars
-                                                  : HU_COMPACTION_DEFAULT_MAX_SOURCE_CHARS;
+                                                 : HU_COMPACTION_DEFAULT_MAX_SOURCE_CHARS;
     uint32_t msum = config->max_summary_chars > 0 ? config->max_summary_chars
-                                                   : HU_COMPACTION_DEFAULT_MAX_SUMMARY_CHARS;
+                                                  : HU_COMPACTION_DEFAULT_MAX_SUMMARY_CHARS;
 
     for (size_t ci = 0; ci < nchunks; ci++) {
         size_t cs = hstart + ci * chunk_size;
         size_t ce = cs + chunk_size;
-        if (ce > cend) ce = cend;
+        if (ce > cend)
+            ce = cend;
 
         size_t raw_alloc_sz = 0;
         char *raw = build_summary(alloc, *history, cs, ce, msrc, &raw_alloc_sz);
-        if (!raw) continue;
+        if (!raw)
+            continue;
 
         size_t slen = 0;
         uint32_t pcmax = msum / (uint32_t)nchunks + 200;
@@ -941,28 +953,43 @@ hu_error_t hu_compact_history_hierarchical(hu_allocator_t *alloc, hu_owned_messa
             size_t a = i * 2;
             size_t b = a + 1;
             if (b >= nchunks) {
-                if (a != i) { ctexts[i] = ctexts[a]; clens[i] = clens[a]; ctexts[a] = NULL; }
+                if (a != i) {
+                    ctexts[i] = ctexts[a];
+                    clens[i] = clens[a];
+                    ctexts[a] = NULL;
+                }
                 continue;
             }
             size_t comb_len = clens[a] + 1 + clens[b];
             char *comb = (char *)alloc->alloc(alloc->ctx, comb_len + 1);
             if (comb) {
-                if (ctexts[a]) memcpy(comb, ctexts[a], clens[a]);
+                if (ctexts[a])
+                    memcpy(comb, ctexts[a], clens[a]);
                 comb[clens[a]] = '\n';
-                if (ctexts[b]) memcpy(comb + clens[a] + 1, ctexts[b], clens[b]);
+                if (ctexts[b])
+                    memcpy(comb + clens[a] + 1, ctexts[b], clens[b]);
                 comb[comb_len] = '\0';
 
                 size_t ml = 0;
                 uint32_t pm = msum / (uint32_t)nc + 200;
                 char *m = summarize_chunk_text(alloc, provider, comb, comb_len, pm, &ml);
                 alloc->free(alloc->ctx, comb, comb_len + 1);
-                if (ctexts[a]) alloc->free(alloc->ctx, ctexts[a], clens[a] + 1);
-                if (ctexts[b]) alloc->free(alloc->ctx, ctexts[b], clens[b] + 1);
-                ctexts[a] = NULL; ctexts[b] = NULL;
-                ctexts[i] = m; clens[i] = ml;
+                if (ctexts[a])
+                    alloc->free(alloc->ctx, ctexts[a], clens[a] + 1);
+                if (ctexts[b])
+                    alloc->free(alloc->ctx, ctexts[b], clens[b] + 1);
+                ctexts[a] = NULL;
+                ctexts[b] = NULL;
+                ctexts[i] = m;
+                clens[i] = ml;
             } else {
-                if (a != i) { ctexts[i] = ctexts[a]; clens[i] = clens[a]; ctexts[a] = NULL; }
-                if (ctexts[b]) alloc->free(alloc->ctx, ctexts[b], clens[b] + 1);
+                if (a != i) {
+                    ctexts[i] = ctexts[a];
+                    clens[i] = clens[a];
+                    ctexts[a] = NULL;
+                }
+                if (ctexts[b])
+                    alloc->free(alloc->ctx, ctexts[b], clens[b] + 1);
                 ctexts[b] = NULL;
             }
         }
@@ -981,7 +1008,8 @@ hu_error_t hu_compact_history_hierarchical(hu_allocator_t *alloc, hu_owned_messa
     char *fc = (char *)alloc->alloc(alloc->ctx, pfx_len + ftotal + 1);
     if (!fc) {
         for (size_t i = 0; i < orig_chunks; i++)
-            if (ctexts[i]) alloc->free(alloc->ctx, ctexts[i], clens[i] + 1);
+            if (ctexts[i])
+                alloc->free(alloc->ctx, ctexts[i], clens[i] + 1);
         alloc->free(alloc->ctx, ctexts, orig_chunks * sizeof(char *));
         alloc->free(alloc->ctx, clens, orig_chunks * sizeof(size_t));
         return HU_ERR_OUT_OF_MEMORY;
@@ -999,7 +1027,8 @@ hu_error_t hu_compact_history_hierarchical(hu_allocator_t *alloc, hu_owned_messa
     fc[fp] = '\0';
 
     for (size_t i = 0; i < orig_chunks; i++)
-        if (ctexts[i]) alloc->free(alloc->ctx, ctexts[i], clens[i] + 1);
+        if (ctexts[i])
+            alloc->free(alloc->ctx, ctexts[i], clens[i] + 1);
     alloc->free(alloc->ctx, ctexts, orig_chunks * sizeof(char *));
     alloc->free(alloc->ctx, clens, orig_chunks * sizeof(size_t));
 

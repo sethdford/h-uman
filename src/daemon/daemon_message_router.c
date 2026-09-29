@@ -16,6 +16,7 @@
 #define _GNU_SOURCE
 #endif
 #include "human/agent.h"
+#include "human/agent/persona_eval.h"
 #include "human/agent/reaction_handler.h"
 #include "human/channel.h"
 #include "human/channel_loop.h"
@@ -28,9 +29,11 @@
 #include "human/config.h"
 #include "human/context/conversation.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 #include "human/core/time.h"
 #include "human/daemon.h"
 #include "human/daemon/message_router.h"
+#include "human/memory/agent_facts.h"
 #include "human/persona/pacing.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -66,11 +69,14 @@ void hu_daemon_log_send_effect(void *observer, const char *eff_ch, const char *t
 
 /* Dispatcher: route iMessage reply through predicate (Phase A) to choose
  * between threaded / flat / tapback based on reply style facts. */
-hu_error_t hu_daemon_dispatch_imessage_reply(
+hu_error_t hu_daemon_dispatch_imessage_reply_ex(
     struct hu_channel *ch, const struct hu_persona *persona, const struct hu_agent *agent,
     const struct hu_config *config, const char *target, size_t target_len,
     const char *parent_msg_guid, size_t parent_guid_len, const char *body, size_t body_len,
-    const struct hu_conversation_snapshot *snapshot, int64_t inferred_message_id_for_react) {
+    const struct hu_conversation_snapshot *snapshot, int64_t inferred_message_id_for_react,
+    bool *out_text_sent) {
+    if (out_text_sent)
+        *out_text_sent = false;
     if (!ch || !ch->vtable || !target || !body) {
         return HU_ERR_INVALID_ARGUMENT;
     }
@@ -87,7 +93,10 @@ hu_error_t hu_daemon_dispatch_imessage_reply(
                         "set true in config to enable threaded replies / tapback");
         }
         if (ch->vtable->send) {
-            return ch->vtable->send(ch->ctx, target, target_len, body, body_len, NULL, 0);
+            hu_error_t e = ch->vtable->send(ch->ctx, target, target_len, body, body_len, NULL, 0);
+            if (out_text_sent)
+                *out_text_sent = (e == HU_OK);
+            return e;
         }
         return HU_ERR_NOT_SUPPORTED;
     }
@@ -139,51 +148,20 @@ hu_error_t hu_daemon_dispatch_imessage_reply(
     hu_reply_style_t actual_style = style;
     switch (style) {
     case HU_REPLY_STYLE_THREADED: {
-        /* Native inline threading is unreachable via automation: there is no
-         * public API, and the private IMCore path needs SIP-off + dylib
-         * injection (broken on macOS 26 by XPC entitlement gating). When we
-         * intend to reference the parent, QUOTE it inline in the body — a
-         * working, honest substitute for a native thread. The quoted body is
-         * used for BOTH the (best-effort) reply attempt and the flat fallback,
-         * so the quote is present whether the AX reply flat-commits or we fall
-         * straight through. Falls back to the plain body if the parent text
-         * can't be looked up or no allocator is available — never a regression.
-         *
-         * BUT only quote when a human actually would. An `↩ "quote"` block on a
-         * reply to the message just received is the single most bot-like tell on
-         * the reply path; humans quote only when context is ambiguous. The
-         * should_quote_on_fallback predicate gates the quote on the same signals
-         * thread_logodds uses (parent not newest / stale / multiple pending Qs).
-         * Fresh-last-single context → no quote, send the natural plain body. */
+        /* NATIVE THREADING (2026-07-20). The old comment here claimed native
+         * inline threading was "unreachable via automation" and substituted an
+         * inline `↩ "quote"` prefix. That is no longer true and the substitute
+         * was itself the most bot-like tell on the reply path: with SIP off and
+         * the IMCore bridge live, `imsg send-rich --reply-to <guid>` sets
+         * databaseReplyToGUID and the reply genuinely nests (verified live:
+         * thread_originator_guid == parent guid). We now send the plain body
+         * and let the reply layer thread it for real — no fake quote, ever.
+         * If the bridge is down the reply layer falls through to a flat send,
+         * which is an honest plain message rather than a fabricated quote. */
         const char *send_body = body;
         size_t send_len = body_len;
-        char *quoted = NULL;
+        char *quoted = NULL; /* retained: freed unconditionally below */
         size_t quoted_cap = 0;
-#if defined(HU_HAS_IMESSAGE)
-        /* The parent-text lookup lives in imessage.c, which is compiled only on
-         * platforms where the iMessage channel exists (HU_HAS_IMESSAGE). Off
-         * that platform there is no iMessage channel to reply to, so the quote
-         * is simply skipped and the plain body is sent. */
-        bool want_quote = hu_imessage_reply_should_quote_on_fallback(&facts);
-        if (want_quote && agent && agent->alloc && parent_msg_guid && parent_guid_len > 0) {
-            char ptext[256];
-            size_t plen = 0;
-            if (hu_imessage_lookup_message_by_guid(agent->alloc, parent_msg_guid, parent_guid_len,
-                                                   ptext, sizeof(ptext), &plen) == HU_OK &&
-                plen > 0) {
-                quoted_cap = body_len + 128; /* snippet (≤~66B) + body + framing */
-                quoted = (char *)agent->alloc->alloc(agent->alloc->ctx, quoted_cap);
-                if (quoted) {
-                    size_t qn = hu_imessage_reply_format_quoted(ptext, plen, body, body_len, quoted,
-                                                                quoted_cap);
-                    if (qn > 0) {
-                        send_body = quoted;
-                        send_len = qn;
-                    }
-                }
-            }
-        }
-#endif /* HU_HAS_IMESSAGE */
         bool threaded_attempted = (ch->vtable->reply && parent_msg_guid && parent_guid_len > 0);
         if (threaded_attempted) {
             err = ch->vtable->reply(ch->ctx, target, target_len, parent_msg_guid, parent_guid_len,
@@ -284,6 +262,27 @@ hu_error_t hu_daemon_dispatch_imessage_reply(
         }
         break;
     }
+
+    /* Text reached the contact unless the dispatch ended as a bare tapback or
+     * failed. The reply loop records production_outcomes from this flag, so a
+     * tapback-only turn never lands in the table as a "sent reply" (the
+     * 2026-09-06 "Who is this?" turn recorded two texts, delivered neither). */
+    if (out_text_sent)
+        *out_text_sent = (err == HU_OK && actual_style != HU_REPLY_STYLE_TAPBACK);
+
+    /* Native read receipt (2026-07-21). Replying without marking the thread
+     * read leaves every inbound message permanently "unread" on the sender's
+     * side while answers keep arriving — an obvious tell. A human who replies
+     * has read it. Best-effort and caps-gated: a down bridge is a silent
+     * no-op and never affects the send outcome above. */
+    /* hu_imessage_mark_read is defined in src/channels/imessage.c, compiled
+     * only under HU_HAS_IMESSAGE — guard the call or every build without the
+     * channel (Linux CI, minimal) breaks at link time. */
+#ifdef HU_HAS_IMESSAGE
+    if (err == HU_OK && ch && ch->ctx && target && target_len > 0) {
+        (void)hu_imessage_mark_read(ch->ctx, target, target_len);
+    }
+#endif
 
     /* Pacing — finish (sleep if elapsed < persona.min_reply_delay_ms * 1.2). */
     if (persona) {
@@ -402,14 +401,18 @@ bool hu_daemon_cross_ctx_append_line(hu_allocator_t *alloc, char **buf, size_t *
 
 /* ── Reaction-lookup registration (one funnel for every reply route) ─────── */
 
-void hu_daemon_register_reply_for_reactions(const struct hu_config *config, struct hu_agent *agent,
+#if defined(HU_ENABLE_RL_FULL)
+/* The reaction-collection half: register the sent reply so a later tapback
+ * joins to it, and attach the message_ref to the production_outcomes row.
+ * Returns early when reaction collection is off — which is why anything that
+ * must run on EVERY sent reply (agent facts, below) lives in the caller, not
+ * here: in production reaction_collection.enabled is false, and the first
+ * C3 wiring sat after these returns and never ran. */
+static void register_reply_for_reactions_rl(const struct hu_config *config, struct hu_agent *agent,
                                             const char *ch_name, const char *thread,
                                             const char *prompt, const char *response,
                                             size_t response_len, char *msg_ref_out,
                                             size_t msg_ref_cap) {
-    if (msg_ref_out && msg_ref_cap > 0)
-        msg_ref_out[0] = '\0';
-#if defined(HU_ENABLE_RL_FULL)
     if (!ch_name || !thread || !response || response_len == 0)
         return;
     if (config && !config->reaction_collection.enabled)
@@ -428,11 +431,8 @@ void hu_daemon_register_reply_for_reactions(const struct hu_config *config, stru
         }
         if (!db) {
             static char home_db[512];
-            const char *hm = getenv("HOME");
-            if (hm && hm[0]) {
-                snprintf(home_db, sizeof(home_db), "%s/Library/Messages/chat.db", hm);
+            if (hu_paths_chatdb(home_db, sizeof(home_db)) > 0)
                 db = home_db;
-            }
         }
         if (db && hu_imessage_lookup_latest_sent_guid(db, thread, response, msg_ref,
                                                       sizeof(msg_ref)) != HU_OK)
@@ -441,20 +441,74 @@ void hu_daemon_register_reply_for_reactions(const struct hu_config *config, stru
     if (msg_ref[0] == '\0')
         snprintf(msg_ref, sizeof(msg_ref), "out-%lld", (long long)time(NULL));
 
+    /* Register under the SAME normalized thread key the tapback poller will
+     * emit. reaction_lookup is an exact-match join; before both sides
+     * normalized, registration stored "+1555" while the poller looked up
+     * "any;-;+1555" and nothing ever matched — zero imessage_tapback DPO
+     * pairs. Scoped to iMessage on purpose: the ';'-stripping rule describes
+     * chat.guid, and applying it to a channel that legitimately uses ';' in
+     * its thread ids would corrupt that channel's key. */
+    char thread_key[256];
+    snprintf(thread_key, sizeof(thread_key), "%s", thread);
+    if (strcmp(ch_name, "imessage") == 0) {
+        char norm[256];
+        if (hu_imessage_normalize_thread_key(thread, norm, sizeof(norm)) == HU_OK && norm[0])
+            snprintf(thread_key, sizeof(thread_key), "%s", norm);
+    }
+
     hu_reaction_handler_register_assistant_message_for_production(
-        ch_name, thread, msg_ref, prompt ? prompt : "", response,
+        ch_name, thread_key, msg_ref, prompt ? prompt : "", response,
         (agent && agent->sota.last_rejected_draft) ? agent->sota.last_rejected_draft : "");
+    /* Task 9: the reactive path recorded its production_outcomes row before
+     * the channel returned the sent message id; attach the ref now so the
+     * row joins to tapbacks and, later, to chat.db (daemon output becomes
+     * separable from the user's own typing). */
+    if (agent && agent->sota.sota_initialized && msg_ref[0] && strncmp(msg_ref, "out-", 4) != 0) {
+        hu_error_t ref_err =
+            hu_dpo_set_outbound_message_ref(&agent->sota.dpo_collector, ch_name, strlen(ch_name),
+                                            thread, strlen(thread), msg_ref, strlen(msg_ref));
+        if (ref_err != HU_OK && ref_err != HU_ERR_NOT_FOUND)
+            hu_log_warn("daemon", agent->observer, "message_ref attach failed: %s",
+                        hu_error_string(ref_err));
+    }
     if (msg_ref_out && msg_ref_cap > 0)
         snprintf(msg_ref_out, msg_ref_cap, "%s", msg_ref);
+}
+#endif /* HU_ENABLE_RL_FULL */
+
+void hu_daemon_register_reply_for_reactions(const struct hu_config *config, struct hu_agent *agent,
+                                            const char *ch_name, const char *thread,
+                                            const char *prompt, const char *response,
+                                            size_t response_len, char *msg_ref_out,
+                                            size_t msg_ref_cap) {
+    if (msg_ref_out && msg_ref_cap > 0)
+        msg_ref_out[0] = '\0';
+#if defined(HU_ENABLE_RL_FULL)
+    register_reply_for_reactions_rl(config, agent, ch_name, thread, prompt, response, response_len,
+                                    msg_ref_out, msg_ref_cap);
 #else
     (void)config;
-    (void)agent;
     (void)ch_name;
-    (void)thread;
     (void)prompt;
-    (void)response;
-    (void)response_len;
 #endif
+    /* Contract C3 — the daemon's own reply becomes a first-class fact with
+     * provenance ("agent:<msg_ref>") instead of vanishing once sent. Env
+     * gated OFF by default (hu_gate_mode_from_env inside), so this is a
+     * no-op unless HU_AGENT_FACTS=shadow|on. Runs in every build and
+     * regardless of reaction_collection.enabled: it depends only on the graph
+     * and the memory store. `thread` is the same contact key the
+     * deep-extract writer uses (daemon.c's batch_key), so agent facts land in
+     * the same graph bucket as user facts for that contact. */
+    if (agent && thread && thread[0] && response && response_len > 0) {
+        char ref[96];
+        if (msg_ref_out && msg_ref_out[0])
+            snprintf(ref, sizeof(ref), "%s", msg_ref_out);
+        else
+            snprintf(ref, sizeof(ref), "out-%lld", (long long)time(NULL));
+        (void)hu_agent_facts_record_reply(agent->verifier_graph, agent->memory, thread,
+                                          strlen(thread), response, response_len, ref,
+                                          (int64_t)time(NULL));
+    }
 }
 
 /* ── Roadmap #18: stale-tapback demotion (reply-style path) ──────────────── */
@@ -484,17 +538,69 @@ hu_reply_style_t hu_daemon_demote_stale_tapback_style(hu_reply_style_t style,
     return HU_REPLY_STYLE_FLAT; /* reaction dropped; the text still flows */
 }
 
-hu_error_t hu_daemon_dispatch_imessage_reply_msg(void *ch, const void *persona,
-                                                 const struct hu_agent *agent,
-                                                 const struct hu_config *config, const char *target,
-                                                 size_t target_len,
-                                                 const struct hu_channel_loop_msg *msg,
-                                                 const char *body, size_t body_len) {
+hu_error_t hu_daemon_dispatch_imessage_reply(
+    struct hu_channel *ch, const struct hu_persona *persona, const struct hu_agent *agent,
+    const struct hu_config *config, const char *target, size_t target_len,
+    const char *parent_msg_guid, size_t parent_guid_len, const char *body, size_t body_len,
+    const struct hu_conversation_snapshot *snapshot, int64_t inferred_message_id_for_react) {
+    return hu_daemon_dispatch_imessage_reply_ex(ch, persona, agent, config, target, target_len,
+                                                parent_msg_guid, parent_guid_len, body, body_len,
+                                                snapshot, inferred_message_id_for_react, NULL);
+}
+
+hu_error_t hu_daemon_dispatch_imessage_reply_msg_ex(
+    void *ch, const void *persona, const struct hu_agent *agent, const struct hu_config *config,
+    const char *target, size_t target_len, const struct hu_channel_loop_msg *msg, const char *body,
+    size_t body_len, bool *out_text_sent) {
     const hu_channel_loop_msg_t *m = (const hu_channel_loop_msg_t *)msg;
+    if (out_text_sent)
+        *out_text_sent = false;
+
+    /* Parrot guard: never ship a bubble that verbatim-echoes the inbound
+     * message it answers (2026-07-25 Dermot incident — the F40 quote fallback
+     * + markdown strip + splitter shipped the contact's own words back as a
+     * standalone bubble). Dropping the bubble is safe: sibling bubbles in a
+     * multi-fragment reply still flow, and a whole-reply parrot is exactly
+     * the send we must not make. */
+    if (m && m->content[0] && body && body_len > 0 &&
+        hu_conversation_reply_parrots_inbound(body, body_len, m->content, strlen(m->content))) {
+        hu_log_warn("human", agent ? agent->observer : NULL,
+                    "parrot guard: dropped bubble echoing the inbound (%.*s…)",
+                    (int)(body_len > 40 ? 40 : body_len), body);
+        return HU_OK;
+    }
+
     hu_conversation_snapshot_t snap = hu_daemon_snapshot_for_msg(m ? m->timestamp_sec : 0);
     const char *guid = (m && m->guid[0]) ? m->guid : NULL;
-    return hu_daemon_dispatch_imessage_reply(
+    return hu_daemon_dispatch_imessage_reply_ex(
         (struct hu_channel *)ch, (const struct hu_persona *)persona, agent, config, target,
         target_len, guid, guid ? strlen(guid) : 0, body, body_len,
-        (const struct hu_conversation_snapshot *)&snap, m ? (int64_t)m->message_id : 0);
+        (const struct hu_conversation_snapshot *)&snap, m ? (int64_t)m->message_id : 0,
+        out_text_sent);
+}
+
+/* ── production_outcomes: one row per DELIVERED reply ─────────────────────── */
+
+hu_error_t hu_daemon_record_delivered_reply(struct hu_agent *agent, const char *ch_name,
+                                            const char *target, size_t target_len,
+                                            const char *prompt, size_t prompt_len, const char *text,
+                                            size_t text_len) {
+    if (!agent || !agent->sota.sota_initialized)
+        return HU_OK; /* no collector (tests, SOTA off): nothing to record */
+    if (!ch_name || !ch_name[0] || !target || target_len == 0 || !text || text_len == 0)
+        return HU_OK;
+    if (!prompt || prompt_len == 0)
+        return HU_OK; /* the table's join needs a prompt; a media-only turn has none */
+    /* Sprint 46 R5.3 — P(Seth) from the in-process PersonaEval classifier;
+     * 0.5 when no model is loaded, stored as-is. */
+    double p_seth = hu_persona_eval_score(agent->persona_eval, text, text_len);
+    hu_error_t err = hu_dpo_record_outbound(&agent->sota.dpo_collector, ch_name, strlen(ch_name),
+                                            target, target_len, NULL, 0, /* ref attached later */
+                                            prompt, prompt_len, text, text_len, p_seth,
+                                            /* alternatives_json — L5 best-of-N not in prod */
+                                            NULL, 0);
+    if (err != HU_OK)
+        hu_log_warn("daemon", agent->observer, "production_outcomes record_outbound failed: %s",
+                    hu_error_string(err));
+    return err;
 }

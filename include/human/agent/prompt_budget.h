@@ -24,7 +24,7 @@
 /* Total number of named context fields the builder tracks. Indexed by
  * hu_prompt_field_t below. Keep in sync with the wrapper macro in
  * src/agent/prompt.c — increment this when adding a tracked field. */
-#define HU_PROMPT_FIELD_COUNT 29
+#define HU_PROMPT_FIELD_COUNT 31
 
 /* Stable field indices. Used by both the appender call sites and the
  * test harness; the names are exposed via hu_prompt_field_name(). */
@@ -58,6 +58,14 @@ typedef enum hu_prompt_field {
     HU_PROMPT_FIELD_VOICE_MATURITY_DIRECTIVE,
     HU_PROMPT_FIELD_GRAPH_CONTEXT,
     HU_PROMPT_FIELD_CONTINUITY_CONTEXT,
+    /* Immersive guard tail (RESPONSE LIMIT, texting shape rules, time,
+     * CRITICAL REMINDER / reinforcement). Reported so the positional cap can
+     * reserve it (hu_prompt_positional_cap_apply) — never trimmed. */
+    HU_PROMPT_FIELD_GUARD_TAIL,
+    /* Humanness directives (shared references, curiosity, absence) on the
+     * immersive path, HU_IMMERSIVE_HUMANNESS-gated. Appended after GUARD_TAIL
+     * so every existing index — and persisted snapshots — stay stable. */
+    HU_PROMPT_FIELD_HUMANNESS_CONTEXT,
 } hu_prompt_field_t;
 
 /* Per-field stats from ONE prompt-build call. The stats array passed to

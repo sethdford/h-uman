@@ -184,6 +184,49 @@ hu_lora_scale_class_t hu_lora_scale_classify(double scale) {
     return HU_LORA_SCALE_SAFE;
 }
 
+/* Length of `p` with trailing '/' stripped (never below 1 for "/"). */
+static size_t path_len_no_trailing_slash(const char *p) {
+    size_t n = strlen(p);
+    while (n > 1 && p[n - 1] == '/')
+        n--;
+    return n;
+}
+
+bool hu_mlx_admin_swap_needed(const char *current, const char *wanted) {
+    if (!wanted || !wanted[0])
+        return false; /* nothing to swap TO — a caller bug, not a POST */
+    if (!current || !current[0])
+        return true; /* server has no adapter applied */
+    size_t cl = path_len_no_trailing_slash(current);
+    size_t wl = path_len_no_trailing_slash(wanted);
+    return cl != wl || memcmp(current, wanted, cl) != 0;
+}
+
+hu_error_t hu_mlx_admin_ensure_adapter(hu_allocator_t *alloc, const char *base_url,
+                                       size_t base_url_len, const char *adapter_path,
+                                       size_t adapter_path_len, hu_mlx_admin_swap_result_t *result,
+                                       bool *already) {
+    if (already)
+        *already = false;
+    if (!alloc || !base_url || base_url_len == 0 || !adapter_path || adapter_path_len == 0 ||
+        !result)
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_mlx_admin_current_adapter_t cur = {0};
+    hu_error_t ce = hu_mlx_admin_current_adapter(alloc, base_url, base_url_len, &cur);
+    bool active = ce == HU_OK && cur.status_code == 200 &&
+                  !hu_mlx_admin_swap_needed(cur.adapter_path, adapter_path);
+    hu_mlx_admin_current_adapter_free(alloc, &cur);
+    if (active) {
+        memset(result, 0, sizeof(*result));
+        result->status_code = 200;
+        if (already)
+            *already = true;
+        return HU_OK;
+    }
+    return hu_mlx_admin_swap_adapter(alloc, base_url, base_url_len, adapter_path, adapter_path_len,
+                                     result);
+}
+
 hu_error_t hu_lora_adapter_config_scale(hu_allocator_t *alloc, const char *adapter_dir,
                                         size_t adapter_dir_len, double *out_scale) {
     if (!alloc || !adapter_dir || adapter_dir_len == 0 || !out_scale)

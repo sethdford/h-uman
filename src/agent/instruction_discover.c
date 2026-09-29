@@ -5,7 +5,9 @@
  * with per-file and total character limits, and merges in priority order.
  */
 #include "human/agent/instruction_discover.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
+#include "human/platform.h"
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>
@@ -33,20 +35,14 @@ hu_error_t hu_instruction_validate_path(hu_allocator_t *alloc, const char *path,
     if (!tmp)
         return HU_ERR_OUT_OF_MEMORY;
 
-    char resolved[PATH_MAX];
-    char *rp = realpath(tmp, resolved);
+    char *rp = hu_platform_realpath(alloc, tmp);
     alloc->free(alloc->ctx, tmp, path_len + 1);
 
     if (!rp)
         return HU_ERR_NOT_FOUND;
 
-    size_t rlen = strlen(resolved);
-    char *canon = hu_strndup(alloc, resolved, rlen);
-    if (!canon)
-        return HU_ERR_OUT_OF_MEMORY;
-
-    *out_canonical = canon;
-    *out_canonical_len = rlen;
+    *out_canonical = rp;
+    *out_canonical_len = strlen(rp);
     return HU_OK;
 }
 
@@ -173,8 +169,8 @@ hu_error_t hu_instruction_merge(hu_allocator_t *alloc, const hu_instruction_file
             break;
         }
 
-        int hdr_len = snprintf(buf + pos, total + 1 - pos, "# %s instructions (%s)\n",
-                               source_label, files[i].path);
+        int hdr_len = snprintf(buf + pos, total + 1 - pos, "# %s instructions (%s)\n", source_label,
+                               files[i].path);
         if (hdr_len > 0) {
             pos += (size_t)hdr_len;
             chars_used += (size_t)hdr_len;
@@ -226,8 +222,8 @@ hu_error_t hu_instruction_discovery_run(hu_allocator_t *alloc, const char *works
 
     /* Pre-allocate file array (max: 1 workspace + 10 walk + 1 user = 12) */
     size_t max_files = HU_INSTRUCTION_MAX_WALK_LEVELS + 2;
-    disc->files =
-        (hu_instruction_file_t *)alloc->alloc(alloc->ctx, sizeof(hu_instruction_file_t) * max_files);
+    disc->files = (hu_instruction_file_t *)alloc->alloc(alloc->ctx,
+                                                        sizeof(hu_instruction_file_t) * max_files);
     if (!disc->files) {
         alloc->free(alloc->ctx, disc, sizeof(*disc));
         return HU_ERR_OUT_OF_MEMORY;
@@ -275,10 +271,11 @@ hu_error_t hu_instruction_discovery_run(hu_allocator_t *alloc, const char *works
             current[workspace_dir_len] = '\0';
 
             /* Canonicalize starting directory */
-            char resolved_start[PATH_MAX];
-            if (realpath(current, resolved_start)) {
+            char *resolved_start = hu_platform_realpath(alloc, current);
+            if (resolved_start) {
                 strncpy(current, resolved_start, sizeof(current) - 1);
                 current[sizeof(current) - 1] = '\0';
+                alloc->free(alloc->ctx, resolved_start, strlen(resolved_start) + 1);
             }
 
             for (int level = 0; level < HU_INSTRUCTION_MAX_WALK_LEVELS; level++) {
@@ -314,28 +311,25 @@ hu_error_t hu_instruction_discovery_run(hu_allocator_t *alloc, const char *works
 
     /* 3. User-level: ~/.human/instructions.md */
     {
-        const char *home = getenv("HOME");
-        if (home && home[0]) {
-            char user_path[PATH_MAX];
-            int n = snprintf(user_path, sizeof(user_path), "%s/.human/instructions.md", home);
-            if (n > 0 && (size_t)n < sizeof(user_path)) {
-                char *canon = NULL;
-                size_t canon_len = 0;
-                err = hu_instruction_validate_path(alloc, user_path, (size_t)n, &canon, &canon_len);
-                if (err == HU_OK && canon) {
-                    struct stat st;
-                    if (stat(canon, &st) == 0 && S_ISREG(st.st_mode)) {
-                        if (!inode_visited(visited_inodes, visited_count, st.st_ino)) {
-                            hu_instruction_file_t file;
-                            err = hu_instruction_file_read(alloc, canon,
-                                                           HU_INSTRUCTION_SOURCE_USER_HOME, &file);
-                            if (err == HU_OK) {
-                                disc->files[disc->file_count++] = file;
-                            }
+        char user_path[PATH_MAX];
+        int n = hu_paths_state(user_path, sizeof(user_path), "instructions.md");
+        if (n > 0 && (size_t)n < sizeof(user_path)) {
+            char *canon = NULL;
+            size_t canon_len = 0;
+            err = hu_instruction_validate_path(alloc, user_path, (size_t)n, &canon, &canon_len);
+            if (err == HU_OK && canon) {
+                struct stat st;
+                if (stat(canon, &st) == 0 && S_ISREG(st.st_mode)) {
+                    if (!inode_visited(visited_inodes, visited_count, st.st_ino)) {
+                        hu_instruction_file_t file;
+                        err = hu_instruction_file_read(alloc, canon,
+                                                       HU_INSTRUCTION_SOURCE_USER_HOME, &file);
+                        if (err == HU_OK) {
+                            disc->files[disc->file_count++] = file;
                         }
                     }
-                    alloc->free(alloc->ctx, canon, canon_len + 1);
                 }
+                alloc->free(alloc->ctx, canon, canon_len + 1);
             }
         }
     }

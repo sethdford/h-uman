@@ -3,6 +3,7 @@
 #include "human/core/error.h"
 #include "human/update.h"
 #include "test_framework.h"
+#include "test_tmpdir.h"
 #include <string.h>
 
 /* ── hu_version_compare tests ───────────────────────────────────────── */
@@ -95,6 +96,68 @@ static void maybe_check_null_auto_update_returns_ok(void) {
     HU_ASSERT_EQ(hu_update_maybe_check(&alloc, &cfg), HU_OK);
 }
 
+/* ── auto_update="off" must never reach hu_update_apply ─────────────── */
+
+/* Pins the gate that the 2026-09-01 replay incident depended on: OFF is the
+ * only mode that returns before hu_update_apply, and hu_update_maybe_check
+ * derives its branch from this same function. Only the exact string "apply"
+ * may ever select APPLY. */
+static void update_mode_off_never_selects_apply(void) {
+    HU_ASSERT_EQ(hu_update_mode_from_config("off"), HU_UPDATE_MODE_OFF);
+    HU_ASSERT_EQ(hu_update_mode_from_config(NULL), HU_UPDATE_MODE_OFF);
+    HU_ASSERT_EQ(hu_update_mode_from_config(""), HU_UPDATE_MODE_OFF);
+    HU_ASSERT_EQ(hu_update_mode_from_config("apply"), HU_UPDATE_MODE_APPLY);
+    HU_ASSERT_EQ(hu_update_mode_from_config("check"), HU_UPDATE_MODE_CHECK);
+    /* exact match only: case variants and typos degrade to notify-only */
+    HU_ASSERT_EQ(hu_update_mode_from_config("Apply"), HU_UPDATE_MODE_CHECK);
+    HU_ASSERT_EQ(hu_update_mode_from_config("aply"), HU_UPDATE_MODE_CHECK);
+}
+
+/* ── hu_update_check_allowed: may an update check contact GitHub? ─────── */
+
+/* The gateway's update.check runs this before any network call. OFF (the
+ * default) may only reach the network when the user explicitly asked (force);
+ * CHECK and APPLY have already opted in. */
+static void update_check_allowed_off_without_force_denies(void) {
+    HU_ASSERT_FALSE(hu_update_check_allowed(HU_UPDATE_MODE_OFF, false));
+}
+
+static void update_check_allowed_off_with_force_allows(void) {
+    HU_ASSERT_TRUE(hu_update_check_allowed(HU_UPDATE_MODE_OFF, true));
+}
+
+static void update_check_allowed_check_mode_allows(void) {
+    HU_ASSERT_TRUE(hu_update_check_allowed(HU_UPDATE_MODE_CHECK, false));
+    HU_ASSERT_TRUE(hu_update_check_allowed(HU_UPDATE_MODE_CHECK, true));
+}
+
+static void update_check_allowed_apply_mode_allows(void) {
+    HU_ASSERT_TRUE(hu_update_check_allowed(HU_UPDATE_MODE_APPLY, false));
+    HU_ASSERT_TRUE(hu_update_check_allowed(HU_UPDATE_MODE_APPLY, true));
+}
+
+/* The default config (auto_update unset / "off") must not phone home. */
+static void update_check_allowed_default_config_denies(void) {
+    HU_ASSERT_FALSE(hu_update_check_allowed(hu_update_mode_from_config(NULL), false));
+    HU_ASSERT_FALSE(hu_update_check_allowed(hu_update_mode_from_config("off"), false));
+}
+
+/* Same contract driven from the on-disk shape of ~/.human/config.json. */
+static void config_auto_update_off_selects_off_mode(void) {
+    hu_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    hu_allocator_t alloc = hu_system_allocator();
+    cfg.allocator = alloc;
+
+    const char *json = "{\"auto_update\": \"off\"}";
+    HU_ASSERT_EQ(hu_config_parse_json(&cfg, json, strlen(json)), HU_OK);
+    HU_ASSERT_NOT_NULL(cfg.auto_update);
+    HU_ASSERT_EQ(hu_update_mode_from_config(cfg.auto_update), HU_UPDATE_MODE_OFF);
+
+    if (cfg.auto_update)
+        alloc.free(alloc.ctx, cfg.auto_update, strlen(cfg.auto_update) + 1);
+}
+
 /* ── config field parsing ───────────────────────────────────────────── */
 
 static void config_parse_auto_update_field(void) {
@@ -133,11 +196,14 @@ static void config_parse_auto_update_apply(void) {
 static void config_defaults_auto_update_off(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_config_t cfg;
-    setenv("HOME", "/tmp/human_update_test_noconfig", 1);
+    char home[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(home, sizeof(home), "human_update_test_noconfig"));
+    setenv("HOME", home, 1);
     hu_error_t err = hu_config_load(&alloc, &cfg);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(cfg.auto_update);
     HU_ASSERT_STR_EQ(cfg.auto_update, "off");
+    HU_ASSERT_EQ(hu_update_mode_from_config(cfg.auto_update), HU_UPDATE_MODE_OFF);
     HU_ASSERT_EQ(cfg.update_check_interval_hours, 24u);
     hu_config_deinit(&cfg);
 }
@@ -160,6 +226,13 @@ void run_update_tests(void) {
     HU_RUN_TEST(maybe_check_null_args_returns_error);
     HU_RUN_TEST(maybe_check_off_returns_ok);
     HU_RUN_TEST(maybe_check_null_auto_update_returns_ok);
+    HU_RUN_TEST(update_mode_off_never_selects_apply);
+    HU_RUN_TEST(config_auto_update_off_selects_off_mode);
+    HU_RUN_TEST(update_check_allowed_off_without_force_denies);
+    HU_RUN_TEST(update_check_allowed_off_with_force_allows);
+    HU_RUN_TEST(update_check_allowed_check_mode_allows);
+    HU_RUN_TEST(update_check_allowed_apply_mode_allows);
+    HU_RUN_TEST(update_check_allowed_default_config_denies);
     HU_RUN_TEST(config_parse_auto_update_field);
     HU_RUN_TEST(config_parse_auto_update_apply);
     HU_RUN_TEST(config_defaults_auto_update_off);

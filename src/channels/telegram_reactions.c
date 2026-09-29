@@ -19,10 +19,10 @@
  * Two symbols are exposed (no header — telegram.c uses an extern decl
  * at function scope, the test forward-declares directly):
  *
- *   1. hu_telegram_handle_reaction_update(body, body_len, alloc,
- *                                          bot_user_id)
+ *   1. hu_telegram_dispatch_reaction_from_update(up, bot_user_id)
  *      — invoked from telegram.c's update-dispatch loop BEFORE the
- *      message/channel_post branch. Returns 1 if the update was a
+ *      message/channel_post branch, on the ALREADY-PARSED update so
+ *      the body is not parsed twice. Returns 1 if the update was a
  *      `message_reaction` (caller should advance offset and skip the
  *      message branch), 0 if not. Internal errors silently absorbed.
  *
@@ -53,6 +53,7 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/json.h"
+#include "human/core/log.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -201,6 +202,17 @@ static void free_event_strings(hu_reaction_event_t *e) {
     memset(e, 0, sizeof(*e));
 }
 
+/* Hand normalized events to the reaction handler. A failure there is a lost
+ * DPO/reflection signal, so it is logged rather than dropped. */
+static void dispatch_reaction_events(hu_reaction_event_t *events, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        hu_error_t herr = hu_reaction_handler_handle_event(&events[i]);
+        if (herr != HU_OK)
+            hu_log_warn("telegram", NULL, "reaction not recorded (%d)", (int)herr);
+        free_event_strings(&events[i]);
+    }
+}
+
 /* Diff/filter/normalize one parsed message_reaction object.
  * `mr` must be the `message_reaction` JSON object (not the whole update).
  * Same return contract as parse_reaction_update below. */
@@ -289,8 +301,11 @@ static hu_error_t parse_message_reaction_object(const hu_json_value_t *mr, const
     return HU_OK;
 }
 
+#if HU_IS_TEST
 /* Wrapper that parses a whole update body and routes the
- * `message_reaction` subobject. Returns:
+ * `message_reaction` subobject. Test-only: the production path arrives
+ * with the update already parsed and calls
+ * hu_telegram_dispatch_reaction_from_update instead. Returns:
  *   HU_OK                  — parsed cleanly (out_n may be 0).
  *   HU_ERR_NOT_SUPPORTED   — no message_reaction field, or self-reaction.
  *   HU_ERR_INVALID_ARGUMENT — malformed JSON / missing required fields. */
@@ -313,6 +328,7 @@ static hu_error_t parse_reaction_update(const char *body, size_t body_len, hu_al
     hu_json_free(alloc, root);
     return err;
 }
+#endif /* HU_IS_TEST */
 
 /* Dispatch a parsed message_reaction object — telegram.c's update loop
  * already has the update parsed, so it can call this directly without
@@ -333,54 +349,7 @@ int hu_telegram_dispatch_reaction_from_update(const hu_json_value_t *up, const c
          * the update so caller skips its message branch. */
         return 1;
     }
-    for (size_t i = 0; i < n; i++) {
-        hu_reaction_handler_handle_event(&events[i]);
-        free_event_strings(&events[i]);
-    }
-    return 1;
-}
-
-int hu_telegram_handle_reaction_update(const char *body, size_t body_len, hu_allocator_t *alloc,
-                                       const char *bot_user_id) {
-    if (!body || body_len == 0 || !alloc)
-        return 0;
-
-    /* Quick pre-check so non-reaction updates don't burn JSON-parse cost.
-     * The parse_reaction_update call below will re-confirm and return
-     * HU_ERR_NOT_SUPPORTED if the key is absent for any reason. */
-    if (!memchr(body, '{', body_len) || !memmem(body, body_len, "message_reaction", 16)) {
-        return 0;
-    }
-
-    hu_reaction_event_t events[16];
-    size_t n = 0;
-    hu_error_t err = parse_reaction_update(body, body_len, alloc, bot_user_id, events, 16, &n);
-    if (err == HU_ERR_NOT_SUPPORTED) {
-        /* Either not a message_reaction update, or filtered (self). For
-         * "not a message_reaction" return 0 so the caller falls through
-         * to its normal message branch; for "self-reaction" return 1
-         * because the caller already advanced the update_id offset and
-         * we own the dispatch for this update. The two are indistinguish-
-         * able at this layer; safe default is to fall through (return 0)
-         * — telegram.c's message-branch will then no-op because there's
-         * no "message" field on a message_reaction update. */
-        return 0;
-    }
-    if (err != HU_OK) {
-        /* Malformed: silently absorb so a single bad update doesn't kill
-         * the polling loop, but tell the caller we owned this update so
-         * it doesn't double-process. */
-        return 1;
-    }
-
-    /* Dispatch each event to the reaction_handler. Return code is
-     * informational only — the handler resolves (channel, thread,
-     * msg_ref) → assistant message and writes a dpo_pairs row when the
-     * lookup hits and polarity is non-neutral. */
-    for (size_t i = 0; i < n; i++) {
-        hu_reaction_handler_handle_event(&events[i]);
-        free_event_strings(&events[i]);
-    }
+    dispatch_reaction_events(events, n);
     return 1;
 }
 

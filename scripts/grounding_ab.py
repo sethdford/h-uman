@@ -386,17 +386,25 @@ def main():
         else:
             gmode = "ENFORCING"
             gverdict = "PASS" if lo > 0.5 else "FAIL"
-        gate.write_proxy_half(gate.GATE_PATH, {
-            "measurement": "graphrag_grounding_marginal_ab",
-            "verdict": gverdict, "mode": gmode,
-            "on_win_rate": (p * 100 if d else None),
-            "ci_lo": (lo * 100 if d else None), "ci_hi": (hi * 100 if d else None),
-            "n_decisions": d, "n_pairs": len(pairs),
-            "ties": st["ties"], "contacts": contact_ids,
-            # keep fool_rate keys present-but-null so downstream readers that
-            # expect the schema don't KeyError; this proxy measures grounding.
-            "fool_rate": None, "n_real_pairs": d,
-        }, commit=eab._git_commit())
+        # The writer refuses an adapter-arm verdict it cannot attribute to a
+        # bound adapter on :8741 (gate.proxy_provenance_refusal); capture now.
+        serving = eab.gate_serving_provenance()
+        try:
+            gate.write_proxy_half(gate.GATE_PATH, {
+                "measurement": "graphrag_grounding_marginal_ab",
+                "verdict": gverdict, "mode": gmode,
+                "on_win_rate": (p * 100 if d else None),
+                "ci_lo": (lo * 100 if d else None), "ci_hi": (hi * 100 if d else None),
+                "n_decisions": d, "n_pairs": len(pairs),
+                "ties": st["ties"], "contacts": contact_ids,
+                # keep fool_rate keys present-but-null so downstream readers that
+                # expect the schema don't KeyError; this proxy measures grounding.
+                "fool_rate": None, "n_real_pairs": d,
+                "run_mode": "gateway", "judge_model": eab.EVAL_MODEL,
+            }, commit=eab._git_commit(), serving=serving, claims_adapter=True)
+        except gate.ProvenanceRefusal as e:
+            print(f"  REFUSING: {e}\n  GATE: NOT WRITTEN — {gate.GATE_PATH} left untouched.")
+            raise SystemExit(2)
         print(f"  GATE proxy half written -> {gate.GATE_PATH} ({gmode}/{gverdict})")
 
 

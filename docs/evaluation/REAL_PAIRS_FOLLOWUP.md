@@ -47,7 +47,10 @@ the verdict is ADVISORY, it passes today and blocks premature activation later.
    points vs the recorded baseline — makes the proxy run exit nonzero.
 4. Run ≥ 1 human cadence rating and emit the authoritative half:
    `python3 scripts/blind_ab/score.py <sheets...> --key <key.json> \
-    --emit-gate docs/evaluation/blind_ab_gate.json`
+    --rater human --emit-gate docs/evaluation/blind_ab_gate.json`
+   (`--rater human` is required and promotion-authoritative; machine-judged
+   sheets must use `--rater synthetic`, which records under a separate,
+   non-gating key. Without `--rater`, score.py writes no gate files.)
 
 ## Flipping a capability LIVE (the gated action)
 

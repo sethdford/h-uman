@@ -1,3 +1,8 @@
+---
+title: SOTA Wave A — Containment + Honesty Implementation Plan
+description: Containment envelope, Turing-auth boundary, and honesty pass for the SOTA wave-A slice.
+---
+
 # SOTA Wave A — Containment + Honesty Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

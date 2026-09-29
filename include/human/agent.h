@@ -707,9 +707,6 @@ void hu_agent_set_skillforge(hu_agent_t *agent, struct hu_skillforge *skillforge
 /* Optional: share session cost accounting with spawned workers (borrowed pointer). */
 void hu_agent_set_cost_tracker(hu_agent_t *agent, hu_cost_tracker_t *tracker);
 
-/* Optional: set shared task list for multi-agent collaboration. Caller owns task_list. */
-void hu_agent_set_task_list(hu_agent_t *agent, hu_task_list_t *task_list);
-
 /* Optional: set retrieval engine for semantic/hybrid recall. Caller owns engine lifecycle. */
 void hu_agent_set_retrieval_engine(hu_agent_t *agent, hu_retrieval_engine_t *engine);
 
@@ -869,6 +866,58 @@ void hu_agent_append_humanness_directives(hu_agent_t *agent, const char *contact
 void hu_agent_apply_relationship_tone(hu_agent_t *agent, char **persona_prompt,
                                       size_t *persona_prompt_len);
 
+/* Build the persona head (system-prompt opening) for the current channel,
+ * honoring HU_PERSONA_HEAD (off|shadow|live, default off):
+ *   off    — hu_persona_build_prompt (full immersive head), unchanged behavior
+ *   shadow — full head emitted; logs full-vs-compact head sizes against
+ *            HU_PROMPT_TRIM_BUDGET_BYTES so the swap can be sized from soak logs
+ *   live   — hu_persona_build_prompt_compact_immersive head (<= 8 KB); any
+ *            compact-build failure fails safe to the full head
+ * `topic`/`topic_len` feed the full build's topic-aware example selection
+ * (the compact form is topic-free). Must be called by BOTH hu_agent_turn and
+ * hu_agent_turn_stream_v2 — single-path wiring was dead in prod for
+ * HU_WARMTH_TONE_VOCAB (424ead87); same shared-helper shape as
+ * hu_agent_apply_relationship_tone. On success *out and *out_len own a
+ * freshly allocated head (caller frees len+1). */
+hu_error_t hu_agent_build_persona_head(hu_agent_t *agent, const char *topic, size_t topic_len,
+                                       char **out, size_t *out_len);
+
+/* The lean persona head the llm_decides (production iMessage) path sends:
+ * identity, output constraint, communication rules, core anchor, immersive
+ * reinforcement, anti-patterns, style rules, channel examples, optional RAG
+ * grounding (config rag_grounding_enabled + analytical tier; `msg` is the
+ * query) and the channel overlay line. Used by hu_agent_turn_stream_v2 and by
+ * offline prompt rendering, so both produce identical bytes. *out is NULL
+ * when the agent has no persona or the head is empty; otherwise the caller
+ * frees *out_len + 1 bytes. */
+hu_error_t hu_agent_build_lean_persona_head(hu_agent_t *agent, const char *msg, size_t msg_len,
+                                            char **out, size_t *out_len);
+
+/* Finish an assembled system prompt the way every turn path must: cap it to
+ * HU_PROMPT_TRIM_BUDGET_BYTES (keeping `guard_tail_reserved` bytes of the
+ * prompt.c guard tail) and make the persona's formality-aware ABSOLUTE RULES
+ * block — whose casual rule 2 is the MEASURED style card, emoji rate included
+ * — the final bytes the model reads. Idempotent; with no persona (or a block
+ * that fails to build) it is exactly the plain cap. Shared by the batch turn,
+ * the streaming turn and tools/dump_prompt_head, so what is measured is what
+ * is served. See hu_prompt_cap_with_tail for the ownership contract. */
+hu_error_t hu_agent_finalize_system_prompt(hu_agent_t *agent, char **prompt, size_t *prompt_len,
+                                           size_t guard_tail_reserved);
+
+/* Graph-grounding load, shared by BOTH turn paths (same shared-helper shape
+ * as hu_agent_build_persona_head). Composes QUERY-CONDITIONED graph context
+ * for the incoming message `msg` (entity-overlap scored, 1-hop walk; empty
+ * when nothing in the graph matches the conversation — replaces the static
+ * community-summary load whose injection was identical on every turn).
+ * Honors the HU_GRAPH_GROUNDING gate: SHADOW logs size + relevance
+ * fingerprint and drops; ON injects only on ANALYTICAL/DEEP turns (RAG leg's
+ * 2026-05-29 live A/B: substantive +0.110, casual -0.078) and logs+drops on
+ * casual/unknown tiers. loader_v is the turn's hu_memory_loader_t (void* to
+ * keep memory_loader.h out of this header). On return the graph_ctx outputs
+ * either own an allocated context (caller frees len+1) or are NULL/0. */
+void hu_agent_load_graph_grounding(hu_agent_t *agent, void *loader_v, const char *msg,
+                                   size_t msg_len, char **graph_ctx, size_t *graph_ctx_len);
+
 /* Build the per-turn humanness directive context — shared references, curiosity,
  * absence, evolved opinions, emotional residue, imperfect delivery — and run the
  * salience gate over those directives. Honors HU_SALIENCE (off|shadow|live;
@@ -962,17 +1011,13 @@ void hu_agent_clear_history(hu_agent_t *agent);
  * Caller must free the returned string. */
 char *hu_agent_handle_slash_command(hu_agent_t *agent, const char *message, size_t message_len);
 
-/* Estimate tokens for a string (rough: ~4 chars per token). */
-uint32_t hu_agent_estimate_tokens(const char *text, size_t len);
-
 /* Execute a structured plan (Tier 1.4 planner integration).
  * plan_json format: {"steps": [{"tool": "name", "args": {...}, "description": "..."}]}
  * Returns a summary of execution results. Caller must free summary_out. */
 hu_error_t hu_agent_execute_plan(hu_agent_t *agent, const char *plan_json, size_t plan_json_len,
                                  char **summary_out, size_t *summary_len_out);
 
-/* Switch persona mid-conversation. name=NULL or name_len=0 clears the persona.
- * Requires HU_ENABLE_PERSONA to be compiled in; returns HU_ERR_NOT_SUPPORTED otherwise. */
+/* Switch persona mid-conversation. name=NULL or name_len=0 clears the persona. */
 hu_error_t hu_agent_set_persona(hu_agent_t *agent, const char *name, size_t name_len);
 
 /* B8 — Set / clear an optional theory-of-mind scenario merged into the world

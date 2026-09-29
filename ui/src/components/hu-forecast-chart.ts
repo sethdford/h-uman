@@ -362,39 +362,46 @@ export class ScForecastChart extends LitElement {
           $${Math.round(this.projectedTotal)}
         </text>
 
-        ${hoverDay > 0
-          ? html`
-              <line
-                class="hover-line"
-                x1=${this._dayX(hoverDay)}
-                y1=${this.PT}
-                x2=${this._dayX(hoverDay)}
-                y2=${bottom}
-              />
-              <circle
-                class="hover-dot"
-                cx=${this._dayX(hoverDay)}
-                cy=${this._valY(this._hoverValue, niceMax)}
-                r="5"
-              />
-            `
-          : nothing}
+        ${
+          hoverDay > 0
+            ? html`
+                <line
+                  class="hover-line"
+                  x1=${this._dayX(hoverDay)}
+                  y1=${this.PT}
+                  x2=${this._dayX(hoverDay)}
+                  y2=${bottom}
+                />
+                <circle
+                  class="hover-dot"
+                  cx=${this._dayX(hoverDay)}
+                  cy=${this._valY(this._hoverValue, niceMax)}
+                  r="5"
+                />
+              `
+            : nothing
+        }
       </svg>
-      ${hoverDay > 0
-        ? html`
-            <div
-              class="tooltip"
-              style="left: ${this._tooltipX}px; top: ${this
-                ._tooltipY}px; transform: translateX(-50%)"
-            >
-              <div class="tooltip-date">${this._formatDay(hoverDay)}</div>
-              <div class="tooltip-value">$${this._hoverValue.toFixed(2)}</div>
-              ${this._hoverIsProjected
-                ? html`<div class="tooltip-projected">projected</div>`
-                : nothing}
-            </div>
-          `
-        : nothing}
+      ${
+        hoverDay > 0
+          ? html`
+              <div
+                class="tooltip"
+                style="left: ${this._tooltipX}px; top: ${
+                  this._tooltipY
+                }px; transform: translateX(-50%)"
+              >
+                <div class="tooltip-date">${this._formatDay(hoverDay)}</div>
+                <div class="tooltip-value">$${this._hoverValue.toFixed(2)}</div>
+                ${
+                  this._hoverIsProjected
+                    ? html`<div class="tooltip-projected">projected</div>`
+                    : nothing
+                }
+              </div>
+            `
+          : nothing
+      }
     `;
   }
 }

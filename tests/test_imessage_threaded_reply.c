@@ -572,6 +572,38 @@ static void quote_invalid_args_return_zero(void) {
     HU_ASSERT_EQ((int)hu_imessage_reply_format_quoted("p", 1, "", 0, out, sizeof(out)), 0);
 }
 
+/* ── Tier-0 bridge circuit breaker predicate ───────────────────────────────
+ * Truth table for hu_imessage_bridge_breaker_should_skip. 2026-07-25: a
+ * half-dead bridge cost two 30s timeouts per reply; the breaker must open
+ * after HU_IMESSAGE_BRIDGE_BREAKER_THRESHOLD consecutive failures and close
+ * again after the cooldown. */
+
+static void breaker_below_threshold_does_not_skip(void) {
+    HU_ASSERT_FALSE(hu_imessage_bridge_breaker_should_skip(0, 1000000, 999000));
+    HU_ASSERT_FALSE(hu_imessage_bridge_breaker_should_skip(1, 1000000, 999000));
+}
+
+static void breaker_at_threshold_within_cooldown_skips(void) {
+    HU_ASSERT_TRUE(hu_imessage_bridge_breaker_should_skip(HU_IMESSAGE_BRIDGE_BREAKER_THRESHOLD,
+                                                          1000000, 999000));
+    /* Anything past the threshold stays open too. */
+    HU_ASSERT_TRUE(hu_imessage_bridge_breaker_should_skip(5, 1000000, 999000));
+}
+
+static void breaker_reopens_after_cooldown(void) {
+    int64_t last = 1000000;
+    int64_t after = last + (int64_t)HU_IMESSAGE_BRIDGE_BREAKER_COOLDOWN_MS + 1;
+    HU_ASSERT_FALSE(
+        hu_imessage_bridge_breaker_should_skip(HU_IMESSAGE_BRIDGE_BREAKER_THRESHOLD, after, last));
+}
+
+static void breaker_no_prior_failure_does_not_skip(void) {
+    /* A failure COUNT with no recorded failure TIME must not latch the
+     * breaker open forever (last_failure_ms <= 0 = never failed). */
+    HU_ASSERT_FALSE(
+        hu_imessage_bridge_breaker_should_skip(HU_IMESSAGE_BRIDGE_BREAKER_THRESHOLD, 1000000, 0));
+}
+
 void run_imessage_threaded_reply_tests(void) {
     HU_TEST_SUITE("imessage_threaded_reply");
     HU_RUN_TEST(quote_empty_parent_returns_body_only);
@@ -600,4 +632,8 @@ void run_imessage_threaded_reply_tests(void) {
     HU_RUN_TEST(verified_threaded_reports_threaded_style);
     HU_RUN_TEST(unverified_threaded_reports_flat_style_no_double_send);
     HU_RUN_TEST(verified_flag_resets_per_call);
+    HU_RUN_TEST(breaker_below_threshold_does_not_skip);
+    HU_RUN_TEST(breaker_at_threshold_within_cooldown_skips);
+    HU_RUN_TEST(breaker_reopens_after_cooldown);
+    HU_RUN_TEST(breaker_no_prior_failure_does_not_skip);
 }

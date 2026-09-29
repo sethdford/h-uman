@@ -35,9 +35,9 @@ typedef struct hu_skill_audit_entry {
 /* Verify Ed25519 signature of manifest JSON against known publishers.
  * Under HU_IS_TEST: returns HU_OK if publisher name matches any trusted publisher. */
 hu_error_t hu_skill_trust_verify_signature(const hu_skill_trust_config_t *cfg,
-                                           const char *publisher_name,
-                                           const char *manifest_json, size_t manifest_json_len,
-                                           const char *signature_hex, size_t signature_hex_len);
+                                           const char *publisher_name, const char *manifest_json,
+                                           size_t manifest_json_len, const char *signature_hex,
+                                           size_t signature_hex_len);
 
 /* Inspect a shell command for dangerous patterns. Returns HU_OK if safe,
  * HU_ERR_SECURITY_COMMAND_NOT_ALLOWED if dangerous. */
@@ -49,17 +49,5 @@ const char *hu_skill_trust_get_policy(hu_skill_sandbox_tier_t tier);
 /* Record a skill execution to the audit trail.
  * Under HU_IS_TEST: no-op. Non-test: appends JSON line to ~/.human/skill_audit.log */
 hu_error_t hu_skill_trust_audit_record(hu_allocator_t *alloc, const hu_skill_audit_entry_t *entry);
-
-/* Load trusted publishers from ~/.human/trusted_publishers.json.
- * Under HU_IS_TEST: returns 0 publishers. Caller frees. */
-hu_error_t hu_skill_trust_load_publishers(hu_allocator_t *alloc,
-                                          hu_publisher_key_t **out, size_t *out_count);
-
-/* Free publisher keys array. */
-void hu_skill_trust_free_publishers(hu_allocator_t *alloc,
-                                    hu_publisher_key_t *publishers, size_t count);
-
-/* Free an audit entry's strings. */
-void hu_skill_audit_entry_deinit(hu_skill_audit_entry_t *e, hu_allocator_t *alloc);
 
 #endif

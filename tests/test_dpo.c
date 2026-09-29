@@ -141,6 +141,44 @@ static void dpo_get_best_examples_no_db_returns_empty(void) {
 }
 
 #ifdef HU_ENABLE_SQLITE
+/* Pins the 2026-07-25 restart-amnesia bug: pair_count started at 0 every
+ * process boot, so the pair-count training trigger (threshold 100) could
+ * only fire if 100 pairs accumulated within a single daemon uptime — with
+ * near-daily restarts the 558 banked pairs never trained. init_tables must
+ * hydrate the counter from persisted rows. */
+static void dpo_init_tables_hydrates_pair_count_from_db(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
+
+    hu_dpo_collector_t first;
+    HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, db, 100, &first), HU_OK);
+    HU_ASSERT_EQ(hu_dpo_init_tables(&first), HU_OK);
+    for (int i = 0; i < 3; i++) {
+        hu_preference_pair_t p = {0};
+        int n = snprintf(p.prompt, sizeof(p.prompt), "prompt %d", i);
+        p.prompt_len = (size_t)n;
+        memcpy(p.chosen, "good answer", 11);
+        p.chosen_len = 11;
+        memcpy(p.rejected, "bad answer", 10);
+        p.rejected_len = 10;
+        p.margin = 0.5;
+        HU_ASSERT_EQ(hu_dpo_record_pair(&first, &p), HU_OK);
+    }
+    HU_ASSERT_EQ(first.pair_count, (size_t)3);
+    hu_dpo_collector_deinit(&first);
+
+    /* Simulate a daemon restart: fresh collector, same database. */
+    hu_dpo_collector_t reborn;
+    HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, db, 100, &reborn), HU_OK);
+    HU_ASSERT_EQ(reborn.pair_count, (size_t)0); /* pre-hydration */
+    HU_ASSERT_EQ(hu_dpo_init_tables(&reborn), HU_OK);
+    HU_ASSERT_EQ(reborn.pair_count, (size_t)3); /* survived the restart */
+
+    hu_dpo_collector_deinit(&reborn);
+    sqlite3_close(db);
+}
+
 static void dpo_get_best_examples_sqlite_orders_by_margin(void) {
     hu_allocator_t alloc = hu_system_allocator();
     sqlite3 *db = NULL;
@@ -563,8 +601,9 @@ static void dpo_feedback_routes_to_signals_not_pairs(void) {
     HU_ASSERT_EQ((int)signals, 0);
 
     /* one positive + one negative reaction */
-    HU_ASSERT_EQ(hu_dpo_record_from_feedback(&col, "how was your day?", 17, "pretty good!", 12, true),
-                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_dpo_record_from_feedback(&col, "how was your day?", 17, "pretty good!", 12, true),
+        HU_OK);
     HU_ASSERT_EQ(hu_dpo_record_from_feedback(&col, "you there?", 10, "yeah one sec", 12, false),
                  HU_OK);
 
@@ -576,10 +615,9 @@ static void dpo_feedback_routes_to_signals_not_pairs(void) {
 
     /* the negative label persisted correctly (1 positive, 1 negative) */
     sqlite3_stmt *stmt = NULL;
-    HU_ASSERT_EQ(
-        sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM feedback_signals WHERE label = 0", -1, &stmt,
-                           NULL),
-        SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM feedback_signals WHERE label = 0", -1,
+                                    &stmt, NULL),
+                 SQLITE_OK);
     HU_ASSERT_EQ(sqlite3_step(stmt), SQLITE_ROW);
     HU_ASSERT_EQ(sqlite3_column_int(stmt, 0), 1);
     sqlite3_finalize(stmt);
@@ -854,6 +892,44 @@ static void dpo_export_paired_passes_through_two_sided(void) {
 #endif
 }
 
+/* Task 9 — reactive sends get their message_ref after the fact. */
+#ifdef HU_ENABLE_SQLITE
+static void test_set_outbound_message_ref_updates_newest_unref_row(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    sqlite3 *tdb = NULL;
+    HU_ASSERT_EQ(sqlite3_open(":memory:", &tdb), SQLITE_OK);
+    hu_dpo_collector_t col;
+    HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, tdb, 100, &col), HU_OK);
+    HU_ASSERT_EQ(hu_dpo_init_tables(&col), HU_OK);
+    HU_ASSERT_NOT_NULL(col.db);
+    HU_ASSERT_EQ(hu_dpo_record_outbound(&col, "imessage", 8, "+1555", 5, NULL, 0, "hi", 2, "yo", 2,
+                                        0.5, NULL, 0),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_dpo_record_outbound(&col, "imessage", 8, "+1555", 5, NULL, 0, "hi2", 3, "yo2",
+                                        3, 0.5, NULL, 0),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_dpo_set_outbound_message_ref(&col, "imessage", 8, "+1555", 5, "p:ABC", 5),
+                 HU_OK);
+    sqlite3_stmt *st = NULL;
+    HU_ASSERT_EQ(sqlite3_prepare_v2(col.db,
+                                    "SELECT message_ref FROM production_outcomes ORDER BY id", -1,
+                                    &st, NULL),
+                 SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_step(st), SQLITE_ROW);
+    HU_ASSERT_TRUE(sqlite3_column_text(st, 0) == NULL); /* older row untouched */
+    HU_ASSERT_EQ(sqlite3_step(st), SQLITE_ROW);
+    HU_ASSERT_STR_EQ((const char *)sqlite3_column_text(st, 0), "p:ABC"); /* newest got it */
+    sqlite3_finalize(st);
+    /* Second attach for the same target hits the older unref row; a third has none. */
+    HU_ASSERT_EQ(hu_dpo_set_outbound_message_ref(&col, "imessage", 8, "+1555", 5, "p:DEF", 5),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_dpo_set_outbound_message_ref(&col, "imessage", 8, "+1555", 5, "p:GHI", 5),
+                 HU_ERR_NOT_FOUND);
+    hu_dpo_collector_deinit(&col);
+    sqlite3_close(tdb);
+}
+#endif /* HU_ENABLE_SQLITE — sqlite3_stmt/SQLITE_* in the body; minimal-build has none */
+
 void run_dpo_tests(void) {
     HU_TEST_SUITE("DPO Preference");
     HU_RUN_TEST(judge_parse_extracts_number);
@@ -879,6 +955,7 @@ void run_dpo_tests(void) {
     HU_RUN_TEST(dpo_get_best_examples_invalid_args);
     HU_RUN_TEST(dpo_get_best_examples_no_db_returns_empty);
 #ifdef HU_ENABLE_SQLITE
+    HU_RUN_TEST(dpo_init_tables_hydrates_pair_count_from_db);
     HU_RUN_TEST(dpo_get_best_examples_sqlite_orders_by_margin);
     HU_RUN_TEST(dpo_max_pairs_ring_buffer);
     /* AGI Capability-1 production_outcomes tests */
@@ -904,4 +981,7 @@ void run_dpo_tests(void) {
     HU_RUN_TEST(dpo_export_paired_unequal_counts_drops_remainder);
     HU_RUN_TEST(dpo_export_paired_different_prompts_not_paired);
     HU_RUN_TEST(dpo_export_paired_passes_through_two_sided);
+#ifdef HU_ENABLE_SQLITE
+    HU_RUN_TEST(test_set_outbound_message_ref_updates_newest_unref_row);
+#endif
 }

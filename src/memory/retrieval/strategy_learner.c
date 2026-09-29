@@ -81,7 +81,7 @@ hu_query_category_t hu_strategy_classify_query(const char *query, size_t query_l
 }
 
 hu_error_t hu_strategy_learner_create(hu_allocator_t *alloc, sqlite3 *db,
-                                       hu_strategy_learner_t *out) {
+                                      hu_strategy_learner_t *out) {
     if (!alloc || !db || !out)
         return HU_ERR_INVALID_ARGUMENT;
     memset(out, 0, sizeof(*out));
@@ -112,10 +112,9 @@ hu_error_t hu_strategy_learner_init_tables(hu_strategy_learner_t *learner) {
     return HU_OK;
 }
 
-hu_error_t hu_strategy_learner_record(hu_strategy_learner_t *learner,
-                                       hu_query_category_t category,
-                                       hu_retrieval_strategy_t strategy,
-                                       bool success, int64_t now_ts) {
+hu_error_t hu_strategy_learner_record(hu_strategy_learner_t *learner, hu_query_category_t category,
+                                      hu_retrieval_strategy_t strategy, bool success,
+                                      int64_t now_ts) {
     if (!learner || !learner->db)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -139,7 +138,7 @@ hu_error_t hu_strategy_learner_record(hu_strategy_learner_t *learner,
 }
 
 hu_retrieval_strategy_t hu_strategy_learner_recommend(hu_strategy_learner_t *learner,
-                                                       hu_query_category_t category) {
+                                                      hu_query_category_t category) {
     if (!learner || !learner->db)
         return HU_RSTRAT_HYBRID;
 
@@ -162,54 +161,6 @@ hu_retrieval_strategy_t hu_strategy_learner_recommend(hu_strategy_learner_t *lea
     }
     sqlite3_finalize(stmt);
     return result;
-}
-
-hu_error_t hu_strategy_learner_get_stats(hu_strategy_learner_t *learner,
-                                          hu_query_category_t category,
-                                          hu_retrieval_strategy_t strategy,
-                                          hu_strategy_stats_t *out) {
-    if (!learner || !learner->db || !out)
-        return HU_ERR_INVALID_ARGUMENT;
-
-    memset(out, 0, sizeof(*out));
-    out->strategy = strategy;
-
-    const char *sql =
-        "SELECT COUNT(*), SUM(success) FROM strategy_outcomes WHERE category=? AND strategy=?";
-    sqlite3_stmt *stmt = NULL;
-    int rc = sqlite3_prepare_v2(learner->db, sql, -1, &stmt, NULL);
-    if (rc != SQLITE_OK)
-        return HU_ERR_MEMORY_BACKEND;
-
-    sqlite3_bind_int(stmt, 1, (int)category);
-    sqlite3_bind_int(stmt, 2, (int)strategy);
-    rc = sqlite3_step(stmt);
-    if (rc == SQLITE_ROW) {
-        out->attempts = (int32_t)sqlite3_column_int(stmt, 0);
-        out->successes = (int32_t)sqlite3_column_int(stmt, 1);
-        if (out->attempts > 0)
-            out->precision = (double)out->successes / (double)out->attempts;
-    }
-    sqlite3_finalize(stmt);
-    return HU_OK;
-}
-
-const char *hu_query_category_str(hu_query_category_t cat) {
-    static const char *names[] = {
-        "factual", "procedural", "personal", "temporal", "semantic", "exact",
-    };
-    if (cat < HU_QCAT_COUNT)
-        return names[cat];
-    return "unknown";
-}
-
-const char *hu_retrieval_strategy_str(hu_retrieval_strategy_t strat) {
-    static const char *names[] = {
-        "keyword", "vector", "hybrid", "temporal", "graph",
-    };
-    if (strat < HU_RSTRAT_COUNT)
-        return names[strat];
-    return "unknown";
 }
 
 #endif /* HU_ENABLE_SQLITE */

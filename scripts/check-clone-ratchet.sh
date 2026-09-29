@@ -10,6 +10,17 @@
 # occurrences, report number of windows appearing 2+ times.
 set -euo pipefail
 
+# Auto-lock any gain so it can never be spent again (scripts/ratchet-config.tsv).
+# Sourced defensively: this gate must keep working — and keep BLOCKING growth —
+# even in a tree where the helper is absent, so a missing helper degrades to
+# "no auto-lock" rather than to "commit refused".
+_hu_root="$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
+if [ -r "$_hu_root/scripts/lib/ratchet.sh" ]; then
+    . "$_hu_root/scripts/lib/ratchet.sh"
+else
+    ratchet_autolock() { :; }
+fi
+
 # Measured 2026-05-31 at the start of Phase 0 (11766); re-measured and
 # lowered 2026-07-12 after switching enumeration to git-tracked files —
 # untracked/ignored generated blobs (e.g. stale embed-data output under
@@ -21,14 +32,36 @@ set -euo pipefail
 # 2026-07-18: origin/main itself measured 11557 (baseline had gone stale);
 # the S2.1b carve merge lands at 11553 — a net -4 vs main with zero new
 # groups (verified by set-diffing merged-tree windows against origin/main).
-CLONE_BASELINE=11541   # locked 2026-07-19 on the MERGED tree: origin's reflection
-                       # PATTERN_QUERY_PREFIX dedup (11539) + the new imessage_caps
-                       # module (native capability gate, T0.4). That module landed at
-                       # +8 and was deduped to +2 across three passes (shared value-line
-                       # scanner, shared chat.db open, shared service query); the
-                       # residual 2 are the sqlite open/prepare shape this repo already
-                       # repeats thousands of times — removing them means a repo-wide
-                       # sqlite-helper refactor, not a change to this module.
+CLONE_BASELINE=10311   # auto-locked 2026-09-26 (was 10442)
+                       # Both sides conflicted here (branch 10447, main 11015), and
+                       # neither is right for the merged tree: this is its own
+                       # measurement, below both, so the merge tightens the ratchet.
+# prior: 10447         # auto-locked 2026-09-21 on the branch (was 10457)
+# prior: 11015         # main's value at the 2026-09-26 merge point
+# prior: 10854         # locked by hand 2026-09-20 (was 11021) after deleting
+                       # 37 abandoned modules. The autolock could not fire on
+                       # that commit: this gate runs from .githooks/pre-commit,
+                       # core.hooksPath resolves to the MAIN checkout, and the
+                       # hook there still gated on --diff-filter=ACM, so a
+                       # deletion-only commit matched nothing and skipped the
+                       # gate outright. That hook now uses ACMD (see the
+                       # clone-ratchet block in .githooks/pre-commit), which is
+                       # how the follow-up commit reached 10846 on its own.
+                       # scheduled.json persist folded into one helper each
+# prior: 11036         # auto-locked 2026-09-19 (was 11103)
+                       # earlier baselines); channel mock harness + clock + JSON-locator copies folded
+# prior: 11465         # 2026-09-03 on a1cc5d3eb: gating test-unused
+                       # helpers with their callers retired three windows
+# prior: 11468         # 2026-09-03 on 3fcbc142d (http.c header-line parser
+                       # dedup); before that the extras-dispatch preamble in
+                       # reliable_chat / reliable_chat_with_system collapsed
+                       # to one line each
+# prior: 11515         # locked 2026-07-19: hu_file_slurp adopted by five more read
+                       # sites (file_edit, pdf, image, meeting_transcribe, computer_use
+                       # PNG reader), retiring their hand-rolled fopen/fseek/ftell
+                       # preambles (was 11541 after origin's reflection
+                       # PATTERN_QUERY_PREFIX dedup + imessage_caps module, see git log
+                       # of this line for that history).
 WINDOW=6
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
@@ -61,6 +94,7 @@ trap "rm -f '$tmp_normalized'" EXIT
                 /^[[:space:]]*\/\// { next }              # C++ comments
                 /^[[:space:]]*\*/ { next }                # block comment lines
                 /^[[:space:]]*\/\*/ { next }              # block comment start
+                /^[[:space:]]*#include/ { next }          # include blocks are not clones (2026-09-12)
                 {
                     # Normalize: strip whitespace, collapse internal spaces
                     $0 = $0
@@ -116,12 +150,14 @@ END {
 
 echo "Scanning src/**/*.c for code duplication (window=$WINDOW)..."
 echo "Clone groups found: $clone_count (ceiling $CLONE_BASELINE)"
+ratchet_autolock CLONE_BASELINE "${clone_count}" "scripts/check-clone-ratchet.sh"
 
 if [ "$clone_count" -gt "$CLONE_BASELINE" ]; then
     echo "FAIL: new clone blocks detected. Baseline: $CLONE_BASELINE, current: $clone_count" >&2
     echo "      Run deduplication to lower the count, then update CLONE_BASELINE." >&2
     fail=1
 elif [ "$clone_count" -lt "$CLONE_BASELINE" ]; then
+    [ "${HU_RATCHET_LOCKED:-0}" = 1 ] || \
     echo "NOTE: clone count dropped to $clone_count — lower CLONE_BASELINE to lock the gain." >&2
 fi
 

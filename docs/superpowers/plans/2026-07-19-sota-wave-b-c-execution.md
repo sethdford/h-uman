@@ -1,3 +1,8 @@
+---
+title: SOTA Wave B+C Execution Plan
+description: Finish the Wave B measurement gates and the Wave C ship-path slices on top of Wave A.
+---
+
 # SOTA Wave B+C Execution Plan
 
 **Goal:** Finish measurement gates (B) and ship-path slices (C) on top of Wave A.

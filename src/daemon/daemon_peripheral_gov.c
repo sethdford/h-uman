@@ -4,6 +4,11 @@
  * move: the logic, the budget config, and the lazy-init behavior are unchanged
  * from the original daemon.c definitions. Compiled only in non-test builds,
  * matching the original `#ifndef HU_IS_TEST` guard. */
+
+/* ISO C requires a translation unit to contain at least one declaration;
+ * this keeps the test build's -Wempty-translation-unit quiet. */
+typedef int hu_daemon_peripheral_gov_tu_nonempty_t;
+
 #ifndef HU_IS_TEST
 
 #include "human/agent/governor.h"

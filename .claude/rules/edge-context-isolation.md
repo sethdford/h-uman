@@ -1,5 +1,10 @@
 # Edge-Context Isolation — Channels Depend on Contracts, Not Each Other
 
+> **Auto-locked since 2026-07-27.** The "lower the baseline by hand" step below is
+> now performed automatically by `ratchet_autolock` (`scripts/lib/ratchet.sh`) the
+> next time this gate runs, and a decay target derived from this counter's own
+> history is reported weekly. See `.claude/rules/ratchet-decay.md`.
+
 A concrete channel implementation may include the channel vtable contract and
 shared infra, but must not take on a **new** dependency on a *different*
 channel's header.
@@ -22,7 +27,11 @@ files (`imessage`, `imessage_reply`, `imessage_ingest`, `imessage_action`,
 
 Exempt from the count: a file including its own header, and the shared infra
 headers `format`, `dispatch`, `contact_signature`, `channel_embed`,
-`behavior_class`, `reaction_event`, `meta_common`.
+`behavior_class`, `reaction_event`, `meta_common`, `channel_mock`, plus the
+iMessage-family shared headers `imessage_caps`, `imessage_schema`,
+`imessage_bb_event`, `imessage_send_observer`, `imessage_voice_record` (small leaf headers that several
+imessage*.c files share instead of reaching into `imessage.h`). The script's
+`case` list is the source of truth; keep this sentence in step with it.
 
 ## Enforcement
 

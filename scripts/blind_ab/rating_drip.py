@@ -2,7 +2,7 @@
 """rating_drip — measurement-as-conversation for the blind A/B keystone.
 
 The 12-row rating sheet sat unrated for a month because it's homework. This
-drip serves it ONE question at a time to Seth's self-chat (sethford@me.com):
+drip serves it ONE question at a time to Seth's self-chat (his own number):
 
     which sounds more like you?
     <context>
@@ -45,8 +45,22 @@ ANSWER_KEY = os.path.join(SHEET_DIR, "answer_key.json")
 STATE = os.path.join(SHEET_DIR, "drip_state.json")
 CHAT_DB = os.path.join(HOME, "Library", "Messages", "chat.db")
 SCORE_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "score.py")
+# Repo-side gate JSON (human half) — same target the nightly's stage 3 refreshes.
+REPO_GATE = os.path.normpath(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "..",
+    "docs", "evaluation", "blind_ab_gate.json"))
 
-DEFAULT_TARGET = "sethford@me.com"  # Seth's self-chat (notes-to-self)
+# Seth's self-chat (notes-to-self), addressed by his own number. The previous
+# value, `sethford@me.com`, stopped being an alias on the iMessage account
+# around 2026-09-05; from then until 09-19 every question recorded
+# is_sent=0 error=22 in chat.db while `imsg send` exited 0, so the drip
+# re-asked into the void, skipped 4 rows as "unanswered", and reported 0/48.
+# The state file pins the live target; this default only seeds a fresh state.
+DEFAULT_TARGET = "+18012017497"
+# How long to wait for Messages to write the sent row before calling a send
+# unconfirmed. Observed latency is ~1-6 s; a miss here costs one duplicate
+# question next tick, a false "sent" costs the whole sheet.
+CONFIRM_WAIT_SECS = 10
 APPLE_EPOCH = 978307200  # 2001-01-01 in unix seconds
 SEND_HOUR_START = 9
 SEND_HOUR_END = 21  # exclusive
@@ -117,6 +131,69 @@ def parse_answer(text):
     return choice, int(m.group("conf")) if m.group("conf") else 3
 
 
+# ── batch mode ──────────────────────────────────────────────────────────
+# One question per message, gated on a reply, caps throughput at roughly one
+# row per (reply latency + up to one 2h tick): a 48-row sheet takes a week even
+# if every question is answered at once. Batching asks several rows in one
+# message and takes one reply.
+#
+# The safety boundary is unchanged in kind: whole-message anchored, exact shape.
+# A batch reply is EXACTLY n A/B letters, separated by nothing, spaces or commas.
+# Positional mapping means a wrong COUNT would assign answers to the wrong rows,
+# so any mismatch is refused, never guessed at.
+BATCH_SIZE = max(1, int(os.environ.get("HU_RATING_DRIP_BATCH", "5") or "5"))
+_BATCH_SEPARATORS = re.compile(r"[\s,]+")
+
+
+def parse_batch_answer(text, n):
+    """Exactly n A/B letters, in order. Returns ["A", "B", ...] or None.
+
+    Accepts "ABBAB", "a b b a b", "A, B, B, A, B". Rejects any other count, any
+    other character, and prose — which is what keeps an ordinary note-to-self
+    (or the drip reading its own long question back) from parsing as ratings."""
+    if not text or n < 1:
+        return None
+    stripped = text.strip()
+    # Generous for "A, B, B, A, B" (3 chars per answer) yet far below any prose
+    # that could carry n A/B letters by coincidence.
+    if len(stripped) > 3 * n:
+        return None
+    letters = _BATCH_SEPARATORS.sub("", stripped)
+    if len(letters) != n or any(ch not in "abAB" for ch in letters):
+        return None
+    return [ch.upper() for ch in letters]
+
+
+def compose_batch_question(rows, answered, total):
+    """Several rows in one self-chat message, numbered, with the exact reply
+    shape stated so a one-line reply is unambiguous."""
+    n = len(rows)
+    first, last = answered + 1, answered + n
+    example = ("ABBAB" * n)[:n]
+    parts = [
+        f"[h-uman rating {first}-{last}/{total}] which sounds more like you?",
+        f"reply with {n} letters in order, e.g. {example}",
+    ]
+    for i, row in enumerate(rows):
+        parts.append(
+            f"\n{i + 1}) them: {row['context']}\n"
+            f"   A) {row['option_A']}\n"
+            f"   B) {row['option_B']}"
+        )
+    return "\n".join(parts)
+
+
+def pending_ids(st):
+    """Row ids awaiting an answer. Migrates the legacy single `pending_row`
+    (the live state file carried one when batching shipped) into a batch of
+    one, so an in-flight question is never stranded by the schema change."""
+    rows = st.get("pending_rows") or []
+    if rows:
+        return list(rows)
+    single = st.get("pending_row")
+    return [single] if single else []
+
+
 def within_send_hours(hour):
     return SEND_HOUR_START <= hour < SEND_HOUR_END
 
@@ -182,7 +259,7 @@ def should_reask(now_unix, question_unix, asks):
         and asks < MAX_ASKS_PER_ROW
 
 
-def first_answer_after(rows_desc, since_unix, decoder=None):
+def first_answer_after(rows_desc, since_unix, decoder=None, parser=None):
     """Pure: rows_desc = [(text, attr_blob, apple_ns), ...] newest-first.
     Returns the EARLIEST A/B-shaped message after since_unix (first-reply
     semantics — a stray later "A" note-to-self must not override the actual
@@ -193,13 +270,13 @@ def first_answer_after(rows_desc, since_unix, decoder=None):
             break
         if not text and attr_blob and decoder:
             text = decoder(attr_blob)
-        parsed = parse_answer(text)
+        parsed = (parser or parse_answer)(text)
         if parsed:
             best = parsed  # keep overwriting: DESC order => last hit is earliest
     return best
 
 
-def harvest_answer(target, since_unix, db_path=CHAT_DB):
+def harvest_answer(target, since_unix, db_path=CHAT_DB, n=1):
     """Newest short A/B-shaped message in the target chat after since_unix.
     Self-chat means both directions are 'from me' — the strict parser is what
     separates the answer from the drip's own (long) question.
@@ -224,7 +301,13 @@ def harvest_answer(target, since_unix, db_path=CHAT_DB):
         from export_seth_triples import decode_attributed_body
     except ImportError:
         decode_attributed_body = None
-    return first_answer_after(rows, since_unix, decoder=decode_attributed_body)
+    if n <= 1:
+        # Unchanged contract: (choice, conf) or None. voice_ab.py calls this
+        # with the default n and depends on that tuple shape.
+        return first_answer_after(rows, since_unix, decoder=decode_attributed_body)
+    letters = first_answer_after(rows, since_unix, decoder=decode_attributed_body,
+                                 parser=lambda t: parse_batch_answer(t, n))
+    return [(c, 3) for c in letters] if letters else None
 
 
 # ── send ────────────────────────────────────────────────────────────────
@@ -244,10 +327,57 @@ def imsg_bin():
     return "imsg"
 
 
+def delivery_verdict(rows_desc, since_unix):
+    """Pure. rows_desc = [(is_sent, error, apple_ns), ...] — the from-me rows
+    in the target chat, newest first. Judges only rows written after
+    since_unix (this send); an older failed row is not this send's failure.
+
+    Returns ("delivered", 0) | ("failed", <chat.db error>) | ("pending", None).
+    error=22 is what Messages records for a recipient that is not registered
+    with iMessage — a dead alias looks exactly like `test@example.com`."""
+    for is_sent, error, apple_ns in rows_desc:
+        if apple_ts_to_unix(apple_ns) < since_unix:
+            break
+        if error:
+            return ("failed", int(error))
+        if is_sent:
+            return ("delivered", 0)
+    return ("pending", None)
+
+
+def confirm_delivery(target, since_unix, db_path=CHAT_DB, wait_secs=CONFIRM_WAIT_SECS):
+    """Read the artifact, not the exit code: poll chat.db for the row Messages
+    wrote for this send and return delivery_verdict() on it. Gives up as
+    ("pending", None) after wait_secs so a slow write costs at most one
+    duplicate question on the next tick, never a phantom "sent"."""
+    q = (
+        "SELECT m.is_sent, m.error, m.date FROM message m "
+        "JOIN chat_message_join cmj ON cmj.message_id = m.ROWID "
+        "JOIN chat c ON c.ROWID = cmj.chat_id "
+        "WHERE c.chat_identifier = ? AND m.is_from_me = 1 "
+        "ORDER BY m.date DESC LIMIT 5"
+    )
+    deadline = time.time() + wait_secs
+    while True:
+        try:
+            con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+            rows = con.execute(q, (target,)).fetchall()
+            con.close()
+        except sqlite3.Error:
+            rows = []
+        verdict = delivery_verdict(rows, since_unix)
+        if verdict[0] != "pending" or time.time() >= deadline:
+            return verdict
+        time.sleep(1)
+
+
 def send_question(target, text, dry_run=False):
     if dry_run or os.environ.get("HU_IS_TEST"):
         print(f"[dry-run] would send to {target}:\n{text}")
         return True
+    # One second of slack: Messages stamps the row at its own clock, and the
+    # verdict must not miss a row written a few ms before this timestamp.
+    sent_at = time.time() - 1.0
     try:
         r = subprocess.run([imsg_bin(), "send", "--to", target, "--text", text],
                            capture_output=True, text=True, timeout=30)
@@ -260,17 +390,86 @@ def send_question(target, text, dry_run=False):
     if r.returncode != 0:
         print(f"send failed: {r.stderr.strip()[:200]}", file=sys.stderr)
         return False
-    return True
+    # imsg exit 0 means Messages ACCEPTED the message, not that it left the
+    # machine. 2026-09-05 -> 09-19: 13 sends to a dead alias all exited 0 and
+    # all sat in chat.db as is_sent=0 error=22. Only the row is evidence.
+    verdict, err = confirm_delivery(target, sent_at)
+    if verdict == "delivered":
+        return True
+    if verdict == "failed":
+        hint = " (22 = recipient not registered with iMessage; check the account's aliases)" \
+            if err == 22 else ""
+        print(f"send NOT delivered to {target}: chat.db error={err}{hint} — "
+              "row left unsent, will retry next tick", file=sys.stderr)
+    else:
+        print(f"send unconfirmed: no from-me row for {target} in chat.db within "
+              f"{CONFIRM_WAIT_SECS}s — treating as not sent, will retry next tick",
+              file=sys.stderr)
+    return False
 
 
 # ── the tick ────────────────────────────────────────────────────────────
 
 
-def run_score():
-    r = subprocess.run([sys.executable, SCORE_PY, SHEET, ANSWER_KEY],
+def score_argv(st):
+    """argv for score.py. The sheet's arm provenance (which adapter generated
+    the AI replies) lives in drip_state.json as arm_adapter / arm_note, set
+    when the sheet is seeded; without it score.py writes a human verdict that
+    names no adapter and doctor's blind_ab_gate check cannot tie it to what
+    :8741 serves (the 2026-09-04 error: v5 rated, v6 served)."""
+    argv = [sys.executable, SCORE_PY, SHEET, "--key", ANSWER_KEY,
+            "--rater", "human", "--emit-gate", REPO_GATE]
+    if st.get("arm_adapter"):
+        argv += ["--arm-adapter", st["arm_adapter"]]
+        if st.get("arm_note"):
+            argv += ["--arm-note", st["arm_note"]]
+    return argv
+
+
+def run_score(st=None):
+    st = st if st is not None else load_state()  # tick's test double calls run_score()
+    r = subprocess.run(score_argv(st),
                        capture_output=True, text=True, timeout=60)
     print(r.stdout[-500:] if r.stdout else r.stderr[-300:])
-    return r.returncode == 0
+    # score.py exit semantics: 0 = PASS verdict, 1 = ran but verdict != PASS
+    # (still a successful scoring run), >=2 = usage error/crash.
+    return r.returncode in (0, 1)
+
+
+def _set_pending(st, ids, now):
+    st["pending_rows"] = list(ids)
+    # A batch of one keeps the legacy field so rating_ingest.py's single-row
+    # harvest (guarded on `pending_row`) behaves exactly as before; a larger
+    # batch clears it so that harvest leaves the batch to this module.
+    st["pending_row"] = ids[0] if len(ids) == 1 else None
+    st["question_unix"] = now
+
+
+def _clear_pending(st):
+    st["pending_rows"] = []
+    st["pending_row"] = None
+    st["question_unix"] = 0
+    st["asks"] = 1
+
+
+def _next_batch(rows, skipped, size):
+    """Up to `size` unanswered, non-skipped rows, in sheet order — the same
+    order next_unanswered() walks, so a batch of one is identical to before."""
+    skipped = skipped or []
+    out = [r for r in rows
+           if r.get("id") not in skipped and not (r.get("choice") or "").strip()]
+    return out[:size]
+
+
+def _compose(batch, answered, total):
+    # A batch of one keeps the original message byte-for-byte.
+    if len(batch) == 1:
+        return compose_question(batch[0], answered, total)
+    return compose_batch_question(batch, answered, total)
+
+
+def _label(ids):
+    return f"row {ids[0]}" if len(ids) == 1 else f"rows {ids[0]}..{ids[-1]} ({len(ids)})"
 
 
 def tick(dry_run=False, now=None):
@@ -279,25 +478,35 @@ def tick(dry_run=False, now=None):
     rows, _ = load_sheet()
     total = len(rows)
 
-    # 1) ingest a pending answer, if any
-    if st.get("pending_row") and st.get("question_unix"):
-        ans = harvest_answer(st["target"], st["question_unix"])
+    # 1) ingest a pending answer — one row, or a whole batch — if any
+    ids = pending_ids(st)
+    if ids and st.get("question_unix"):
+        ans = harvest_answer(st["target"], st["question_unix"], n=len(ids))
         if ans:
-            choice, conf = ans
-            if write_choice(SHEET, st["pending_row"], choice, conf):
-                print(f"ingested: row {st['pending_row']} = {choice} (conf {conf})")
-                st["answered"] += 1
-                st["pending_row"] = None
-                st["question_unix"] = 0
-                st["asks"] = 1
-                rows, _ = load_sheet()  # reload with the new answer
+            answers = [ans] if isinstance(ans, tuple) else list(ans)
+            # parse_batch_answer already refuses a count mismatch; this guard is
+            # the second wall, because positional mapping onto the wrong row
+            # would corrupt the only human-rated data the program has.
+            if len(answers) == len(ids):
+                for rid, (choice, conf) in zip(ids, answers):
+                    if write_choice(SHEET, rid, choice, conf):
+                        print(f"ingested: row {rid} = {choice} (conf {conf})")
+                        st["answered"] += 1
+                _clear_pending(st)
+                rows, _ = load_sheet()  # reload with the new answers
 
     # 2) complete? run the scorer -> writes ~/.human/blind_ab_gate.json
     if next_unanswered(rows, st.get("skipped")) is None:
         if not st.get("complete"):
             print(f"sheet complete ({total}/{total}) — running score.py -> gate verdict")
-            run_score()
-            st["complete"] = True
+            if run_score():
+                st["complete"] = True
+            else:
+                # Leave complete=False so the next tick retries scoring; a
+                # silently-unscored complete sheet blocks the human tier.
+                print("score.py FAILED — sheet is fully rated but the gate "
+                      "verdict was NOT emitted; will retry next tick",
+                      file=sys.stderr)
         save_state(st)
         return
 
@@ -306,40 +515,45 @@ def tick(dry_run=False, now=None):
     #    then its row is drip-skipped so one dead question can't stall the
     #    whole sheet.
     in_hours = within_send_hours(time.localtime(now).tm_hour)
-    if st.get("pending_row"):
+    ids = pending_ids(st)
+    if ids:
         asks = st.get("asks", 1)
         if should_reask(now, st.get("question_unix", 0), asks) and in_hours:
-            row = next((r for r in rows if r["id"] == st["pending_row"]), None)
-            if row:
+            by_id = {r["id"]: r for r in rows}
+            batch = [by_id[i] for i in ids if i in by_id]
+            if len(batch) != len(ids):
+                # The sheet changed under a pending batch, so a reply could no
+                # longer map positionally onto the right rows. Reset rather than
+                # risk writing a rating onto the wrong pair.
+                print(f"{_label(ids)} no longer all on the sheet — resetting")
+                _clear_pending(st)
+            else:
                 answered = sum(1 for r in rows if (r.get("choice") or "").strip())
-                if send_question(st["target"], compose_question(row, answered, total),
+                if send_question(st["target"], _compose(batch, answered, total),
                                  dry_run=dry_run):
                     st["asks"] = asks + 1
                     st["question_unix"] = now
-                    print(f"re-asked row {st['pending_row']} (ask {asks + 1}/{MAX_ASKS_PER_ROW})")
+                    print(f"re-asked {_label(ids)} (ask {asks + 1}/{MAX_ASKS_PER_ROW})")
         elif st.get("question_unix", 0) > 0 and \
                 (now - st["question_unix"]) >= REASK_AFTER_SECS and \
                 st.get("asks", 1) >= MAX_ASKS_PER_ROW:
-            skipped = st.setdefault("skipped", [])
-            skipped.append(st["pending_row"])
-            print(f"row {st['pending_row']} unanswered after {MAX_ASKS_PER_ROW} asks — skipping")
-            st["pending_row"] = None
-            st["question_unix"] = 0
-            st["asks"] = 1
+            st.setdefault("skipped", []).extend(ids)
+            print(f"{_label(ids)} unanswered after {MAX_ASKS_PER_ROW} asks — skipping")
+            _clear_pending(st)
         else:
-            print(f"waiting on answer for row {st['pending_row']} — not re-asking yet")
+            print(f"waiting on answer for {_label(ids)} — not re-asking yet")
     elif not in_hours:
         print("outside send hours (09-21 local) — skipping")
     else:
-        row = next_unanswered(rows, st.get("skipped"))
+        batch = _next_batch(rows, st.get("skipped"), BATCH_SIZE)
         answered = sum(1 for r in rows if (r.get("choice") or "").strip())
-        q = compose_question(row, answered, total)
-        if send_question(st["target"], q, dry_run=dry_run):
-            st["pending_row"] = row["id"]
-            st["question_unix"] = now
+        if batch and send_question(st["target"], _compose(batch, answered, total),
+                                   dry_run=dry_run):
+            new_ids = [r["id"] for r in batch]
+            _set_pending(st, new_ids, now)
             st["asks"] = 1
             st["sent"] += 1
-            print(f"sent question for row {row['id']} ({answered + 1}/{total})")
+            print(f"sent question for {_label(new_ids)} ({answered + 1}/{total})")
     save_state(st)
 
 
@@ -347,7 +561,7 @@ def status():
     st = load_state()
     rows, _ = load_sheet()
     answered = sum(1 for r in rows if (r.get("choice") or "").strip())
-    print(f"rated {answered}/{len(rows)} | pending: {st.get('pending_row')} | "
+    print(f"rated {answered}/{len(rows)} | pending: {pending_ids(st) or None} | "
           f"sent: {st.get('sent', 0)} | complete: {st.get('complete', False)}")
 
 

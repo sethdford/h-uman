@@ -140,27 +140,31 @@ export class HuPersonaSelector extends LitElement {
         <span>${label}</span>
         <span class="chevron">${icons.chevron}</span>
       </button>
-      ${this._open
-        ? html`
-            <div class="dropdown" role="listbox" aria-label="Persona styles">
-              ${this.personas.map(
-                (p, i) => html`
-                  <button
-                    class="option ${i === this._focusedIndex ? "focused" : ""}"
-                    role="option"
-                    aria-selected=${p.id === this.value}
-                    @click=${() => this._select(p.id)}
-                  >
-                    <span>${p.name}</span>
-                    ${p.description
-                      ? html`<span class="option-desc">${p.description}</span>`
-                      : nothing}
-                  </button>
-                `,
-              )}
-            </div>
-          `
-        : nothing}
+      ${
+        this._open
+          ? html`
+              <div class="dropdown" role="listbox" aria-label="Persona styles">
+                ${this.personas.map(
+                  (p, i) => html`
+                    <button
+                      class="option ${i === this._focusedIndex ? "focused" : ""}"
+                      role="option"
+                      aria-selected=${p.id === this.value}
+                      @click=${() => this._select(p.id)}
+                    >
+                      <span>${p.name}</span>
+                      ${
+                        p.description
+                          ? html`<span class="option-desc">${p.description}</span>`
+                          : nothing
+                      }
+                    </button>
+                  `,
+                )}
+              </div>
+            `
+          : nothing
+      }
     `;
   }
 

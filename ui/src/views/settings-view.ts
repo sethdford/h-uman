@@ -474,14 +474,16 @@ export class ScSettingsView extends LitElement {
       </nav>
 
       <div class="content" role="tabpanel" aria-label=${active.label}>
-        ${this._loading
-          ? html`<div class="loading">
-              <hu-skeleton variant="line" width="40%" height="1rem"></hu-skeleton>
-              <hu-skeleton variant="line" width="100%" height="2.5rem"></hu-skeleton>
-              <hu-skeleton variant="line" width="100%" height="2.5rem"></hu-skeleton>
-              <hu-skeleton variant="line" width="60%" height="2.5rem"></hu-skeleton>
-            </div>`
-          : this._renderSection(active)}
+        ${
+          this._loading
+            ? html`<div class="loading">
+                <hu-skeleton variant="line" width="40%" height="1rem"></hu-skeleton>
+                <hu-skeleton variant="line" width="100%" height="2.5rem"></hu-skeleton>
+                <hu-skeleton variant="line" width="100%" height="2.5rem"></hu-skeleton>
+                <hu-skeleton variant="line" width="60%" height="2.5rem"></hu-skeleton>
+              </div>`
+            : this._renderSection(active)
+        }
       </div>
     `;
   }

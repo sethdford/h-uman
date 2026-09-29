@@ -59,9 +59,31 @@ export class ScSkillCard extends LitElement {
       transform: translateY(var(--hu-physics-card-hover-translateY, -2px));
     }
 
-    .skill-card:focus-visible {
+    /* The card's primary action. Pointer clicks anywhere on the card bubble to
+       its handler; this button is the keyboard/AT entry point, so the switch and
+       Install button are siblings rather than descendants of a role=button card. */
+    .skill-open {
+      padding: 0;
+      background: transparent;
+      border: none;
+      font: inherit;
+      text-align: start;
+      cursor: pointer;
+    }
+    .skill-open:focus-visible {
       outline: 2px solid var(--hu-accent);
       outline-offset: 2px;
+    }
+    /* Where :has() is supported, ring the whole card instead of the button. */
+    @supports selector(:has(*)) {
+      .skill-card:has(.skill-open:focus-visible) {
+        outline: 2px solid var(--hu-accent);
+        outline-offset: 2px;
+        border-radius: var(--hu-radius-xl);
+      }
+      .skill-open:focus-visible {
+        outline: none;
+      }
     }
 
     .skill-card-inner {
@@ -171,56 +193,56 @@ export class ScSkillCard extends LitElement {
         : `View ${this.skill.name} in registry`;
 
     return html`
-      <hu-card
-        glass=${isInstalled}
-        class="skill-card"
-        tabindex="0"
-        role="button"
-        aria-label=${ariaLabel}
-        @click=${this._onCardClick}
-        @keydown=${(e: KeyboardEvent) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            this._onCardClick();
-          }
-        }}
-      >
+      <hu-card glass=${isInstalled} class="skill-card" @click=${this._onCardClick}>
         <div class="skill-card-inner">
           <div class="skill-header">
-            <span class="skill-name">${this.skill.name}</span>
-            ${isInstalled
-              ? html`<hu-badge variant=${inst.enabled ? "success" : "neutral"}
-                  >${inst.enabled ? "Enabled" : "Disabled"}</hu-badge
-                >`
-              : reg.version
-                ? html`<hu-badge variant="info">${reg.version}</hu-badge>`
-                : nothing}
+            <button type="button" class="skill-name skill-open" aria-label=${ariaLabel}>
+              ${this.skill.name}
+            </button>
+            ${
+              isInstalled
+                ? html`<hu-badge variant=${inst.enabled ? "success" : "neutral"}
+                    >${inst.enabled ? "Enabled" : "Disabled"}</hu-badge
+                  >`
+                : reg.version
+                  ? html`<hu-badge variant="info">${reg.version}</hu-badge>`
+                  : nothing
+            }
           </div>
           <div class="skill-desc">${this.skill.description ?? "No description"}</div>
-          ${!isInstalled && reg.author
-            ? html`<div class="registry-meta"><span>by ${reg.author}</span></div>`
-            : nothing}
+          ${
+            !isInstalled && reg.author
+              ? html`<div class="registry-meta"><span>by ${reg.author}</span></div>`
+              : nothing
+          }
           <div class="skill-footer">
             <div class="skill-tags">
-              ${this.variant === "registry"
-                ? parseTags(reg.tags).map((t) => html`<hu-badge variant="neutral">${t}</hu-badge>`)
-                : nothing}
+              ${
+                this.variant === "registry"
+                  ? parseTags(reg.tags).map(
+                      (t) => html`<hu-badge variant="neutral">${t}</hu-badge>`,
+                    )
+                  : nothing
+              }
             </div>
-            ${isInstalled
-              ? html`<hu-switch
-                  .checked=${inst.enabled}
-                  .label=${`Toggle ${this.skill.name}`}
-                  @hu-change=${this._onToggle}
-                ></hu-switch>`
-              : this.installed
-                ? html`<hu-badge variant="success">Installed</hu-badge>`
-                : html`<hu-button
-                    variant="primary"
-                    size="sm"
-                    ?disabled=${this.actionLoading}
-                    @click=${this._onInstall}
-                    >Install</hu-button
-                  >`}
+            ${
+              isInstalled
+                ? html`<hu-switch
+                    .checked=${inst.enabled}
+                    .label=${`Toggle ${this.skill.name}`}
+                    @hu-change=${this._onToggle}
+                    @click=${(e: Event) => e.stopPropagation()}
+                  ></hu-switch>`
+                : this.installed
+                  ? html`<hu-badge variant="success">Installed</hu-badge>`
+                  : html`<hu-button
+                      variant="primary"
+                      size="sm"
+                      ?disabled=${this.actionLoading}
+                      @click=${this._onInstall}
+                      >Install</hu-button
+                    >`
+            }
           </div>
         </div>
       </hu-card>

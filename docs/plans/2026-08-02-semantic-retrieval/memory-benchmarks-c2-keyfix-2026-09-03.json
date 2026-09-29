@@ -1,0 +1,62 @@
+{
+  "date": "2026-09-03",
+  "binary": "./build/human",
+  "protocol": {
+    "longmemeval": "session-level R@5 from top-10 turns",
+    "locomo": "turn-level R@10",
+    "hybrid": "harness-side RRF(k=60) of kw+sem lists (Python, no C hybrid path)",
+    "hybrid_cli": "human memory search --hybrid <q> -- Contract C2 reconstructive retrieval (scene-select -> neighbour expansion -> rerank -> time-bounded filter -> sufficiency check) measured through the C binary"
+  },
+  "longmemeval_s": {
+    "n": 30,
+    "kw": 0.867,
+    "sem": 1.0,
+    "hybrid": 0.967,
+    "hybrid_cli": 0.767,
+    "by_type": {
+      "knowledge-update": {
+        "kw": 1.0,
+        "sem": 1.0,
+        "hybrid": 1.0,
+        "hybrid_cli": 1.0,
+        "n": 5
+      },
+      "multi-session": {
+        "kw": 0.8,
+        "sem": 1.0,
+        "hybrid": 1.0,
+        "hybrid_cli": 0.8,
+        "n": 5
+      },
+      "single-session-assistant": {
+        "kw": 1.0,
+        "sem": 1.0,
+        "hybrid": 1.0,
+        "hybrid_cli": 0.6,
+        "n": 5
+      },
+      "single-session-preference": {
+        "kw": 0.6,
+        "sem": 1.0,
+        "hybrid": 1.0,
+        "hybrid_cli": 0.6,
+        "n": 5
+      },
+      "single-session-user": {
+        "kw": 1.0,
+        "sem": 1.0,
+        "hybrid": 1.0,
+        "hybrid_cli": 1.0,
+        "n": 5
+      },
+      "temporal-reasoning": {
+        "kw": 0.8,
+        "sem": 1.0,
+        "hybrid": 0.8,
+        "hybrid_cli": 0.6,
+        "n": 5
+      }
+    }
+  },
+  "longmemeval_skipped_embedder_crash": []
+}

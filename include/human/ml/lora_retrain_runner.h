@@ -53,6 +53,14 @@ typedef enum hu_lora_retrain_outcome {
     /* US-11.8 — dual fast/slow LoRA: EMA compat-check failed
      * (rank/target-modules/base-model mismatch). Preserve slow. */
     HU_LORA_RETRAIN_OUTCOME_EMA_SKIPPED,
+    /* 2026-09-02 — the pair-count probe ran but `finetune_script` is not
+     * configured, so no training was attempted. The daemon never sets it:
+     * training belongs to the launchd `ai.human.nightly-retrain` window,
+     * which stops mlx-server first (a second model loader alongside :8741
+     * exhausts memory). Before this the runner exec'd a relative
+     * "scripts/finetune-gemma.py" from the daemon's cwd and failed with -1
+     * every night, logged as `failed`. */
+    HU_LORA_RETRAIN_OUTCOME_SKIPPED_NO_TRAINER,
 } hu_lora_retrain_outcome_t;
 
 /* Subprocess result returned by the test/production exec hook. */
@@ -75,14 +83,25 @@ typedef hu_error_t (*hu_lora_retrain_subprocess_fn)(const char *const argv[],
 typedef void (*hu_lora_retrain_event_fn)(const char *event_name, const char *payload_json,
                                          void *user_data);
 
+/* Pure: which argv[0] the pair-count probe execs. Explicit ctx value wins;
+ * else the running executable's own path (`self_exe`, from
+ * hu_process_self_exe_path); else the bare "human" as a last resort.
+ * A bare "human" is PATH-resolved and on 2026-09-02 that was a May-17 CLI
+ * whose config schema made the probe unparseable — retrain silently dead. */
+const char *hu_lora_retrain_miner_argv0(const char *ctx_argv0, const char *self_exe);
+
 typedef struct hu_lora_retrain_ctx {
     struct hu_allocator *alloc; /* optional; system allocator if NULL */
 
     /* Subprocess command pieces — all NUL-terminated. NULL falls back to the
      * documented defaults; that's the normal production path. */
-    const char *miner_argv0;     /* default: "human" */
+    const char *miner_argv0;     /* default: the running executable (see
+                                    hu_lora_retrain_miner_argv0), last resort "human" */
     const char *miner_subcmd[3]; /* default: {"ml", "mine-corrections", NULL} */
-    const char *finetune_script; /* default: "scripts/finetune-gemma.py" */
+    const char *finetune_script; /* REQUIRED (absolute path) for the in-daemon
+                                    finetune step; NULL → the runner stops after
+                                    the probe with SKIPPED_NO_TRAINER. No relative
+                                    default: the daemon's cwd is not the repo. */
     const char *gate_script;     /* default: "scripts/check-lora-ab.sh" */
     const char *candidate_dir;   /* required: where the new adapter lands */
     const char *current_symlink; /* required: e.g. ~/.human/ml/seth-lora-current */

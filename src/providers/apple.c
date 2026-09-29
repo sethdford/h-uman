@@ -639,6 +639,9 @@ hu_error_t hu_apple_provider_create(hu_allocator_t *alloc, const hu_apple_config
     return HU_OK;
 }
 
+/* Only the live-probe branch of hu_apple_probe_available calls this; the
+ * HU_IS_TEST branch never touches the network, so the helper is gated with it. */
+#if !HU_IS_TEST
 static bool probe_url(hu_allocator_t *alloc, const char *base, size_t blen) {
     while (blen > 0 && base[blen - 1] == '/')
         blen--;
@@ -654,6 +657,7 @@ static bool probe_url(hu_allocator_t *alloc, const char *base, size_t blen) {
     hu_http_response_free(alloc, &hresp);
     return ok;
 }
+#endif /* !HU_IS_TEST */
 
 bool hu_apple_probe(hu_allocator_t *alloc, const char *base_url, size_t base_url_len) {
 #if HU_IS_TEST

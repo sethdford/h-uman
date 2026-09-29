@@ -158,19 +158,21 @@ export class HuWorkflowView extends GatewayAwareLitElement {
                   Created ${this._fmtTime(t.created_at)}<br />
                   Updated ${this._fmtTime(t.updated_at)}
                 </div>
-                ${t.status === "pending" || t.status === "running"
-                  ? html`
-                      <div class="task-actions">
-                        <hu-button
-                          size="sm"
-                          variant="outline"
-                          @click=${() => this._cancelTask(t.id)}
-                        >
-                          Cancel
-                        </hu-button>
-                      </div>
-                    `
-                  : nothing}
+                ${
+                  t.status === "pending" || t.status === "running"
+                    ? html`
+                        <div class="task-actions">
+                          <hu-button
+                            size="sm"
+                            variant="outline"
+                            @click=${() => this._cancelTask(t.id)}
+                          >
+                            Cancel
+                          </hu-button>
+                        </div>
+                      `
+                    : nothing
+                }
               </div>
             </hu-card>
           `,

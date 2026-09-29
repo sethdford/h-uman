@@ -2,9 +2,9 @@
  * F59 — Parallel Life Simulation.
  * Simulated daily routine from persona. Time blocks: activity, availability, mood_modifier.
  */
+#include "human/persona/life_sim.h"
 #include "human/core/allocator.h"
 #include "human/platform.h"
-#include "human/persona/life_sim.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -102,7 +102,8 @@ hu_life_sim_state_t hu_life_sim_get_current(const hu_daily_routine_t *routine, i
         if (effective_minutes >= start && effective_minutes < end) {
             const hu_routine_block_t *b = &blocks[i];
             out.activity = (b->activity[0] != '\0') ? b->activity : DEFAULT_ACTIVITY;
-            out.availability = (b->availability[0] != '\0') ? b->availability : DEFAULT_AVAILABILITY;
+            out.availability =
+                (b->availability[0] != '\0') ? b->availability : DEFAULT_AVAILABILITY;
             out.mood_modifier = (b->mood_modifier[0] != '\0') ? b->mood_modifier : DEFAULT_MOOD;
             out.availability_factor = availability_to_factor(b->availability);
             return out;
@@ -112,7 +113,7 @@ hu_life_sim_state_t hu_life_sim_get_current(const hu_daily_routine_t *routine, i
 }
 
 char *hu_life_sim_build_context(hu_allocator_t *alloc, const hu_life_sim_state_t *state,
-                                 size_t *out_len) {
+                                size_t *out_len) {
     if (!alloc || !state || !out_len)
         return NULL;
 
@@ -125,9 +126,8 @@ char *hu_life_sim_build_context(hu_allocator_t *alloc, const hu_life_sim_state_t
     if (!buf)
         return NULL;
 
-    int n = snprintf(buf, cap,
-                     "[LIFE CONTEXT: You just finished %s. Availability: %s. Mood: %s.]", act, av,
-                     mood);
+    int n = snprintf(buf, cap, "[LIFE CONTEXT: You just finished %s. Availability: %s. Mood: %s.]",
+                     act, av, mood);
     if (n <= 0 || (size_t)n >= cap) {
         alloc->free(alloc->ctx, buf, cap);
         return NULL;
@@ -141,4 +141,17 @@ char *hu_life_sim_build_context(hu_allocator_t *alloc, const hu_life_sim_state_t
     }
     *out_len = (size_t)n;
     return shrunk;
+}
+
+char *hu_life_sim_build_context_now(hu_allocator_t *alloc, const hu_daily_routine_t *routine,
+                                    size_t *out_len) {
+    if (!alloc || !routine || !out_len)
+        return NULL;
+    time_t now_ts = time(NULL);
+    struct tm tm_buf;
+    struct tm *lt = hu_platform_localtime_r(&now_ts, &tm_buf);
+    int dow = lt ? lt->tm_wday : 0;
+    uint32_t seed = (uint32_t)now_ts * 1103515245u + 12345u;
+    hu_life_sim_state_t ls_state = hu_life_sim_get_current(routine, (int64_t)now_ts, dow, seed);
+    return hu_life_sim_build_context(alloc, &ls_state, out_len);
 }

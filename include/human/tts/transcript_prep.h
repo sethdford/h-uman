@@ -20,6 +20,7 @@ typedef struct hu_prep_config {
     bool nonverbals_enabled;
     bool strip_ssml;
     bool thinking_sounds; /* prepend "hmm"/"well" for complex responses */
+    bool laughter_cue;    /* the reply laughed (lol/haha, removed by speech cleanup) */
     uint32_t seed;
     uint8_t hour_local;
 } hu_prep_config_t;
@@ -38,6 +39,8 @@ typedef struct hu_prep_result {
     size_t sentence_count;
     const char *dominant_emotion;
     float volume;
+    float base_speed; /* request-level speed after late-night adjustment; <speed> tags are relative
+                         to it */
 } hu_prep_result_t;
 
 /*
@@ -58,8 +61,8 @@ hu_error_t hu_transcript_prep(const char *transcript, size_t transcript_len,
  * and avoids splitting on decimal numbers or ellipsis.
  * Returns sentence count. Sentences point into the original text buffer.
  */
-size_t hu_transcript_segment(const char *text, size_t text_len,
-                             hu_prep_sentence_t *out, size_t max_sentences);
+size_t hu_transcript_segment(const char *text, size_t text_len, hu_prep_sentence_t *out,
+                             size_t max_sentences);
 
 /*
  * Map emotion enum to a volume multiplier.
@@ -73,6 +76,10 @@ float hu_emotion_to_volume(const char *emotion);
  * Writes cleaned result into `out` (max `cap` bytes). Returns output length.
  */
 size_t hu_transcript_strip_junk(const char *text, size_t text_len, char *out, size_t cap);
+
+/* True when `p` starts an emoji (the emoji blocks only — General Punctuation
+ * such as curly quotes and dashes is text). */
+bool hu_transcript_is_emoji(const char *p, size_t remain);
 
 /*
  * Smooth difficult consonant clusters for clearer TTS pronunciation.

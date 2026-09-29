@@ -8,7 +8,9 @@
 #include "human/agent/theory_of_mind.h"
 #include "human/config.h"
 #include "human/core/json.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
+#include "human/core/tokens.h"
 #include "human/data/loader.h"
 #include "human/moment.h"
 #include "human/persona/taste.h"
@@ -28,7 +30,6 @@
 #include "human/persona/persona_deltas.h"
 #include "human/persona/somatic.h"
 #include "human/persona/style_critique.h"
-#include "human/persona/style_mirror.h"
 #include "human/persona/voice_maturity.h"
 
 #include "human/agent/conv_goals.h"
@@ -980,8 +981,20 @@ void hu_agent_apply_relationship_tone(hu_agent_t *agent, char **persona_prompt,
         agent->persona, agent->memory_session_id, agent->memory_session_id_len);
     hu_gate_mode_t wt_mode = hu_gate_mode_from_env("HU_WARMTH_TONE_VOCAB", HU_GATE_OFF);
     const char *tone_note = hu_persona_relationship_tone_note(cp, wt_mode == HU_GATE_LIVE);
-    if (wt_mode == HU_GATE_SHADOW && !tone_note && hu_persona_relationship_tone_note(cp, true))
-        hu_log_info("warmth_tone", NULL, "shadow: would add warmth-vocab tone note");
+    if (wt_mode == HU_GATE_SHADOW && !tone_note) {
+        /* Log the would-act CONTENT, not just the fire — promotion needs a
+         * quality judgment (feature-gate-requires-measurement.md), and the
+         * shadow soak only proved fire-rate. Prefix stays verbatim for the
+         * existing telemetry grep. Notes are static single-line strings with
+         * a leading "\n\n[" — skip it so the log line stays grep-able. */
+        const char *would = hu_persona_relationship_tone_note(cp, true);
+        if (would) {
+            while (*would == '\n' || *would == ' ')
+                would++;
+            hu_log_info("warmth_tone", NULL, "shadow: would add warmth-vocab tone note: %.200s",
+                        would);
+        }
+    }
     if (tone_note) {
         /* at_append_owned_directive owns the realloc-append dance (and
          * frees its input), so dup the static note instead of keeping a
@@ -991,6 +1004,81 @@ void hu_agent_apply_relationship_tone(hu_agent_t *agent, char **persona_prompt,
         if (owned)
             at_append_owned_directive(agent, owned, tn_len, persona_prompt, persona_prompt_len);
     }
+}
+
+/* Persona head selection, shared by BOTH turn paths (see agent.h).
+ *
+ * HU_PERSONA_HEAD activation gated on the blind-A/B human rating sheet
+ * (scripts/blind_ab): do not flip to default-ON without a measurement showing
+ * the compact head is judged at least as human as the full head by real
+ * raters. Motivation (2026-07-22 soak): the full head's median 16,585 B alone
+ * exceeds HU_PROMPT_TRIM_BUDGET_BYTES, so HU_PROMPT_TRIM's middle-trim can
+ * never fit the prompt and the positional cap truncates the guard tail. */
+hu_error_t hu_agent_finalize_system_prompt(hu_agent_t *agent, char **prompt, size_t *prompt_len,
+                                           size_t guard_tail_reserved) {
+    if (!agent || !agent->alloc || !prompt || !*prompt || !prompt_len)
+        return HU_ERR_INVALID_ARGUMENT;
+    char rules[HU_PERSONA_RULES_BUF];
+    size_t rules_len = 0;
+    if (agent->persona) {
+        /* Formality-aware: professional contacts get the capitalized,
+         * punctuated register; everyone else the measured casual one. */
+        const hu_persona_overlay_t *ov = hu_persona_find_overlay(
+            agent->persona, agent->active_channel, agent->active_channel_len);
+        if (hu_persona_build_absolute_rules_fmt(agent->persona, ov ? ov->formality : NULL, rules,
+                                                sizeof(rules), &rules_len) != HU_OK)
+            rules_len = 0;
+    }
+    const size_t before = *prompt_len;
+    hu_error_t err =
+        hu_prompt_cap_with_tail(agent->alloc, prompt, prompt_len, HU_PROMPT_TRIM_BUDGET_BYTES,
+                                guard_tail_reserved, rules_len ? rules : NULL, rules_len);
+    /* Prompt-size budget guard. The budget is a latency/attention choice now,
+     * not a server cliff (see HU_PROMPT_TRIM_BUDGET_BYTES for the 2026-09-06
+     * re-measurement); it still fires on any turn whose assembled prompt
+     * exceeds it, and whatever it drops is context the model never sees.
+     * Log once per process. */
+    if (before > HU_PROMPT_TRIM_BUDGET_BYTES) {
+        static atomic_bool warned_prompt_budget = false;
+        hu_log_warn_once(&warned_prompt_budget, "agent", NULL,
+                         "system prompt truncated from %zu to %zu bytes (prompt budget cap; "
+                         "%zu-byte guard tail reserved, %zu-byte rules block appended last); "
+                         "some context dropped",
+                         before, *prompt_len, guard_tail_reserved, rules_len);
+    }
+    return err;
+}
+
+hu_error_t hu_agent_build_persona_head(hu_agent_t *agent, const char *topic, size_t topic_len,
+                                       char **out, size_t *out_len) {
+    if (!agent || !agent->alloc || !agent->persona || !out || !out_len)
+        return HU_ERR_INVALID_ARGUMENT;
+    const char *ch = agent->active_channel;
+    size_t ch_len = agent->active_channel_len;
+    hu_gate_mode_t mode = hu_gate_mode_from_env("HU_PERSONA_HEAD", HU_GATE_OFF);
+    if (mode == HU_GATE_LIVE) {
+        hu_error_t cerr = hu_persona_build_prompt_compact_immersive(agent->alloc, agent->persona,
+                                                                    ch, ch_len, out, out_len);
+        if (cerr == HU_OK)
+            return HU_OK;
+        /* fail-safe: any compact-build failure reverts to OFF behavior */
+    }
+    hu_error_t err = hu_persona_build_prompt(agent->alloc, agent->persona, ch, ch_len, topic,
+                                             topic_len, out, out_len);
+    if (err != HU_OK)
+        return err;
+    if (mode == HU_GATE_SHADOW) {
+        char *compact = NULL;
+        size_t compact_len = 0;
+        if (hu_persona_build_prompt_compact_immersive(agent->alloc, agent->persona, ch, ch_len,
+                                                      &compact, &compact_len) == HU_OK) {
+            hu_log_info("persona_head", agent->observer,
+                        "shadow: full_head=%zu compact_head=%zu budget=%d", *out_len, compact_len,
+                        HU_PROMPT_TRIM_BUDGET_BYTES);
+            agent->alloc->free(agent->alloc->ctx, compact, compact_len + 1);
+        }
+    }
+    return HU_OK;
 }
 
 /* Append the per-turn humanness directives — Theory-of-Mind, calibrated
@@ -2139,27 +2227,16 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         if (load_err != HU_OK)
             hu_log_error("agent_turn", NULL, "memory loader failed: %s", hu_error_string(load_err));
 
-        /* GraphRAG activation gated on Story D blind A/B measurement.
-         * Default is ON since 53b0958b; SHADOW logs metrics without injecting,
-         * OFF disables. NOTE: docs/evaluation/blind_ab_gate.json is still
-         * ADVISORY/ABSENT — the gating measurement has not recorded a pass, so
-         * the default-ON rests on the proxy, not a confirmed human blind A/B.
+        /* GraphRAG activation gated on a blind A/B measurement. Default is
+         * SHADOW since 2026-05-31 (the first A/B measured ON-win-rate 43.3%,
+         * below 50% — see hu_graph_grounding_mode). 2026-07-25: the read path
+         * became query-conditioned (hu_graph_ground_compose keys retrieval on
+         * the incoming msg, empty when nothing matches) but the gate stays
+         * SHADOW; do not flip to default-ON without a FRESH blind A/B showing
+         * the conversation-specific injection is judged superior by humans.
          * graph_ctx is protected-core in the prompt and is NOT subject to the
          * Self-RAG memory-relevance verdict below. */
-        hu_graph_grounding_mode_t graph_mode = hu_graph_grounding_mode();
-        if (graph_mode != HU_GRAPH_GROUNDING_OFF && agent->memory_session_id &&
-            agent->memory_session_id_len > 0) {
-            hu_graph_ground_load(&loader, agent->memory_session_id, agent->memory_session_id_len, 0,
-                                 &graph_ctx, &graph_ctx_len);
-            if (graph_mode == HU_GRAPH_GROUNDING_SHADOW) {
-                hu_log_info("graph_grounding", NULL,
-                            "shadow: %zu graph_context bytes (not injected)", graph_ctx_len);
-                if (graph_ctx)
-                    agent->alloc->free(agent->alloc->ctx, graph_ctx, graph_ctx_len + 1);
-                graph_ctx = NULL;
-                graph_ctx_len = 0;
-            }
-        }
+        hu_agent_load_graph_grounding(agent, &loader, msg, msg_len, &graph_ctx, &graph_ctx_len);
 
         /* Self-RAG: verify relevance of retrieved content */
         if (srag_assessment.decision == HU_SRAG_RETRIEVE_AND_VERIFY && memory_ctx &&
@@ -3025,10 +3102,10 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
     char *persona_prompt = NULL;
     size_t persona_prompt_len = 0;
     if (agent->persona) {
-        const char *ch = agent->active_channel;
-        size_t ch_len = agent->active_channel_len;
-        hu_error_t perr = hu_persona_build_prompt(agent->alloc, agent->persona, ch, ch_len, msg,
-                                                  msg_len, &persona_prompt, &persona_prompt_len);
+        /* HU_PERSONA_HEAD-gated head selection — shared helper, same as
+         * hu_agent_turn_stream_v2. */
+        hu_error_t perr =
+            hu_agent_build_persona_head(agent, msg, msg_len, &persona_prompt, &persona_prompt_len);
         if (perr != HU_OK) {
             if (pref_ctx)
                 agent->alloc->free(agent->alloc->ctx, pref_ctx, pref_ctx_len + 1);
@@ -4505,17 +4582,15 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
          * we land well inside the safe zone. Truncate at the last newline
          * within the budget for a clean cut. See
          * docs/plans/2026-05-19-sota-first-data.md finding 1. */
-        if (err == HU_OK && system_prompt && system_prompt_len > HU_PROMPT_TRIM_BUDGET_BYTES) {
-            size_t cut = hu_prompt_positional_cap_point(system_prompt, system_prompt_len,
-                                                        HU_PROMPT_TRIM_BUDGET_BYTES);
-            static atomic_bool warned_prompt_budget = false;
-            hu_log_warn_once(&warned_prompt_budget, "agent_turn", NULL,
-                             "system prompt truncated from %zu to %zu bytes "
-                             "(MLX backend cap); some context dropped",
-                             system_prompt_len, cut);
-            system_prompt[cut] = '\0';
-            system_prompt_len = cut;
-        }
+        /* Cap to budget keeping the guard tail (shape rules, CRITICAL
+         * REMINDER), then append the measured ABSOLUTE RULES block as the
+         * final bytes. Until 2026-09-05 the block reached only
+         * agent_stream's lean branch, so production (batch path, streaming
+         * off) never carried it. */
+        if (err == HU_OK && system_prompt)
+            (void)hu_agent_finalize_system_prompt(
+                agent, &system_prompt, &system_prompt_len,
+                prompt_field_stats[HU_PROMPT_FIELD_GUARD_TAIL].bytes_contributed);
         if (world_model_ctx) {
             agent->alloc->free(agent->alloc->ctx, world_model_ctx, world_model_ctx_len + 1);
             world_model_ctx = NULL;
@@ -5134,7 +5209,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
     req.prompt_cache_id = prompt_cache_id;
     req.prompt_cache_id_len = prompt_cache_id_len;
 
-    clock_t turn_start = clock();
+    uint64_t turn_start_ms = hu_agent_internal_monotonic_ms();
     uint64_t turn_tokens = 0;
     const char *prov_name = agent->provider.vtable->get_name
                                 ? agent->provider.vtable->get_name(agent->provider.ctx)
@@ -5498,6 +5573,44 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             msgs = all;
             msgs_count = total;
 
+            /* Oversized multimodal guard (2026-07-25 retry-amplification fix).
+             *
+             * iMessage attachments arrive as base64 image content parts up to
+             * HU_MULTIMODAL_MAX_IMAGE_SIZE (5 MiB -> ~6.7 MiB base64). Inlining
+             * one into the request body ballooned it to 4-6 MB, which the
+             * single-threaded local model chokes on; the agent then re-POSTs
+             * that same giant body on every transport retry AND cloud fallback,
+             * wedging the server (the observed doom loop). The A1b budget below
+             * only summed content_len and was blind to content_parts, so it
+             * never trimmed these. Drop any content-part payload heavier than
+             * the per-part cap BEFORE dispatch; the message text is preserved.
+             *
+             * SAFE: msgs content_parts alias persistent history (see
+             * hu_context_format_messages) — the helper only NULLs the turn-local
+             * copy's pointer, never freeing the aliased buffers. Runs on every
+             * loop iteration, so transport retries + fallback get the same lean
+             * request (idempotent -> the retry body never grows). */
+            {
+                size_t max_part_bytes = (size_t)2 << 20; /* 2 MiB default */
+                const char *cap_env = getenv("HU_TURN_MAX_INLINE_PART_BYTES");
+                if (cap_env && cap_env[0]) {
+                    char *cap_end = NULL;
+                    unsigned long cap_v = strtoul(cap_env, &cap_end, 10);
+                    if (cap_end != cap_env && cap_v >= 4096)
+                        max_part_bytes = (size_t)cap_v;
+                }
+                size_t parts_dropped =
+                    hu_chat_messages_drop_oversized_parts(msgs, msgs_count, max_part_bytes);
+                if (parts_dropped > 0) {
+                    static atomic_bool warned_oversized_parts = false;
+                    hu_log_warn_once(&warned_oversized_parts, "agent_turn", NULL,
+                                     "dropped oversized multimodal content part(s) from %zu "
+                                     "message(s) to prevent request-body amplification "
+                                     "(per-part cap %zu bytes)",
+                                     parts_dropped, max_part_bytes);
+                }
+            }
+
             /* A1b — message-history budget cap (2026-05-19).
              *
              * A1 capped the system_prompt at 16 KB, but the messages
@@ -5521,13 +5634,13 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 const size_t HISTORY_BUDGET = 20 * 1024;
                 size_t total_bytes = 0;
                 for (size_t i = 0; i < msgs_count; i++)
-                    total_bytes += msgs[i].content_len;
+                    total_bytes += hu_chat_message_estimate_bytes(&msgs[i]);
                 if (total_bytes > HISTORY_BUDGET) {
                     /* Drop oldest non-system, non-last messages first. */
                     size_t dropped = 0;
                     size_t drop_idx = 1; /* start after system */
                     while (total_bytes > HISTORY_BUDGET && drop_idx < msgs_count - 1) {
-                        total_bytes -= msgs[drop_idx].content_len;
+                        total_bytes -= hu_chat_message_estimate_bytes(&msgs[drop_idx]);
                         drop_idx++;
                         dropped++;
                     }
@@ -5665,7 +5778,6 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
          * Centralized so parity with agent_stream.c is enforced — see
          * tests/test_agent_turn_request_overrides.c. */
         hu_agent_internal_apply_turn_request_overrides(agent, &req);
-
         /* Planning mode: give the model more room to reason when the cognition
          * system detects a complex task, without overriding explicit CoT config. */
         if (cognition_budget.enable_planning && req.thinking_budget == 0)
@@ -5746,8 +5858,17 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 }
             }
         }
-
-        clock_t llm_start = clock();
+        hu_agent_internal_resolve_max_tokens(&req, turn_model, turn_model_len); /* Task 13 */
+        hu_agent_internal_resolve_stop_sequences(&req, prov_name, agent);       /* Task 14 */
+        /* Wall clock, NOT clock(). `clock()` returns process CPU time; a
+         * provider round trip is spent BLOCKED in poll()/recv() burning
+         * ~zero CPU, so CPU-clock timing reported a 150ms call as ~27ms
+         * (CI run 30232892253) and a multi-second cloud call as ~30ms.
+         * The value below is handed to hu_agent_m3_record_chat_outcome,
+         * where m3_outcome_driver.py drops anything under MIN_LATENCY_MS
+         * (50) as a cached/stub path — so CPU timing silently discarded
+         * every training outcome. */
+        uint64_t llm_start_ms = hu_agent_internal_monotonic_ms();
         hu_chat_response_t resp;
         memset(&resp, 0, sizeof(resp));
 
@@ -5889,7 +6010,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         }
 
         (void)degrade_strategy;
-        uint64_t llm_duration_ms = hu_agent_internal_clock_diff_ms(llm_start, clock());
+        uint64_t llm_duration_ms = hu_agent_internal_monotonic_ms() - llm_start_ms;
         if (llm_span)
             hu_otlp_span_end(llm_span, (err == HU_OK) ? 1 : 2);
 
@@ -5926,7 +6047,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             hu_agent_m3_stash_behavior_metrics(
                 agent, &(hu_agent_behavior_stash_t){
                            .response_length_chars = (uint32_t)resp.content_len,
-                           .response_length_tokens_est = (uint32_t)(resp.content_len / 4),
+                           .response_length_tokens_est =
+                               (uint32_t)hu_tokens_estimate_len(resp.content_len),
                            .response_latency_ms = (uint32_t)llm_duration_ms,
                        });
             hu_agent_m3_on_provider_success(agent);
@@ -6174,7 +6296,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 hu_agent_m3_stash_behavior_metrics(
                     agent, &(hu_agent_behavior_stash_t){
                                .response_length_chars = (uint32_t)gvr_stash_len,
-                               .response_length_tokens_est = (uint32_t)(gvr_stash_len / 4),
+                               .response_length_tokens_est =
+                                   (uint32_t)hu_tokens_estimate_len(gvr_stash_len),
                                .response_latency_ms = (uint32_t)gvr_latency_ms,
                            });
                 hu_agent_m3_on_provider_success(agent);
@@ -6343,7 +6466,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
 #endif
 
         if (resp.tool_calls_count == 0) {
-            uint64_t turn_duration_ms = hu_agent_internal_clock_diff_ms(turn_start, clock());
+            uint64_t turn_duration_ms = hu_agent_internal_monotonic_ms() - turn_start_ms;
             {
                 hu_observer_event_t ev = {.tag = HU_OBSERVER_EVENT_AGENT_END, .data = {{0}}};
                 ev.data.agent_end.duration_ms = turn_duration_ms;
@@ -6355,10 +6478,16 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 HU_OBS_SAFE_RECORD_EVENT(agent, &ev);
             }
             if (resp.content && resp.content_len > 0) {
-                /* ThinkPRM verifier: score response reasoning steps */
+                /* ThinkPRM verifier: score response reasoning steps.
+                 * Only run when the result can ACT — its sole consumer is the
+                 * reflection retry gate below. With reflection disabled (the
+                 * production default since 2026-07-13) or retries exhausted,
+                 * the verify call was pure pre-send latency on every reactive
+                 * turn (2026-07-25 Dermot latency audit). */
                 hu_prm_verify_result_t prm_verify = {0};
                 bool prm_verified = false;
                 if (agent->sota.sota_initialized && agent->sota.prm_config.enabled &&
+                    agent->reflection.enabled && reflection_retries_left > 0 &&
                     resp.content_len > 50) {
                     if (hu_prm_verify_reasoning(agent->alloc, &agent->sota.prm_config, resp.content,
                                                 resp.content_len, msg, msg_len,
@@ -6650,7 +6779,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                         hu_agent_m3_stash_behavior_metrics(
                             agent, &(hu_agent_behavior_stash_t){
                                        .response_length_chars = (uint32_t)cn_stash_len,
-                                       .response_length_tokens_est = (uint32_t)(cn_stash_len / 4),
+                                       .response_length_tokens_est =
+                                           (uint32_t)hu_tokens_estimate_len(cn_stash_len),
                                        .response_latency_ms = (uint32_t)const_latency_ms,
                                    });
                         hu_agent_m3_on_provider_success(agent);
@@ -6837,12 +6967,12 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                          * metacog regen length + latency. Other metric
                          * fields not computed here. */
                         hu_agent_m3_stash_behavior_metrics(
-                            agent,
-                            &(hu_agent_behavior_stash_t){
-                                .response_length_chars = (uint32_t)mc_resp.content_len,
-                                .response_length_tokens_est = (uint32_t)(mc_resp.content_len / 4),
-                                .response_latency_ms = (uint32_t)mc_latency_ms,
-                            });
+                            agent, &(hu_agent_behavior_stash_t){
+                                       .response_length_chars = (uint32_t)mc_resp.content_len,
+                                       .response_length_tokens_est =
+                                           (uint32_t)hu_tokens_estimate_len(mc_resp.content_len),
+                                       .response_latency_ms = (uint32_t)mc_latency_ms,
+                                   });
                         hu_agent_m3_on_provider_success(agent);
                         /* B1 redefined (2026-05-17 r3): metacog regen is a
                          * fresh provider chat call (same model, augmented
@@ -6998,7 +7128,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                         agent,
                                         &(hu_agent_behavior_stash_t){
                                             .response_length_chars = (uint32_t)retry_len,
-                                            .response_length_tokens_est = (uint32_t)(retry_len / 4),
+                                            .response_length_tokens_est =
+                                                (uint32_t)hu_tokens_estimate_len(retry_len),
                                             .response_latency_ms = (uint32_t)vc_retry_latency_ms,
                                         });
                                     hu_agent_m3_on_provider_success(agent);
@@ -7233,12 +7364,12 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                  * stash response_guard-retry length + latency.
                                  * Other metric fields not computed here. */
                                 hu_agent_m3_stash_behavior_metrics(
-                                    agent,
-                                    &(hu_agent_behavior_stash_t){
-                                        .response_length_chars = (uint32_t)retry_len,
-                                        .response_length_tokens_est = (uint32_t)(retry_len / 4),
-                                        .response_latency_ms = (uint32_t)ab_retry_latency_ms,
-                                    });
+                                    agent, &(hu_agent_behavior_stash_t){
+                                               .response_length_chars = (uint32_t)retry_len,
+                                               .response_length_tokens_est =
+                                                   (uint32_t)hu_tokens_estimate_len(retry_len),
+                                               .response_latency_ms = (uint32_t)ab_retry_latency_ms,
+                                           });
                                 hu_agent_m3_on_provider_success(agent);
                                 /* B1 r3 (2026-05-17): record outcome from the post-batch
                                  * response_guard retry path. turn_kind=2 (batch). */
@@ -7401,6 +7532,40 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                             vcfg.mode = HU_VERIFY_STRICT;
                         else if (strcmp(mode_env, "off") == 0)
                             vcfg.mode = HU_VERIFY_OFF;
+                    }
+                    /* Quality gate (HU_QUALITY_GATE, default off): make the two
+                     * signals that fired-but-couldn't-act on the 2026-07-25
+                     * Dermot echo turns (verifier flags + consistency drift)
+                     * actually gate. LIVE + bad drift escalates TELEMETRY→SOFT
+                     * so unsupported claims get hedged — the verifier's own
+                     * actuator, no regeneration loop. SHADOW logs would-act. */
+                    {
+                        hu_gate_mode_t qg = hu_gate_mode_from_env("HU_QUALITY_GATE", HU_GATE_OFF);
+                        if (qg != HU_GATE_OFF && *response_out && response_effective_len > 0 &&
+                            agent->conversation_context && agent->conversation_context_len > 20) {
+                            float qg_drift = 0.0f;
+                            bool have_drift =
+                                (hu_consistency_score_line(
+                                     agent->conversation_context, agent->conversation_context_len,
+                                     *response_out, response_effective_len, &qg_drift) == HU_OK);
+                            hu_verify_mode_t escalated = hu_response_verify_mode_for_turn(
+                                vcfg.mode, qg, have_drift, qg_drift,
+                                HU_CONSISTENCY_DRIFT_THRESHOLD);
+                            if (escalated != vcfg.mode) {
+                                hu_log_info("agent_turn", NULL,
+                                            "QUALITY_GATE live: drift %.2f < %.2f — verifier "
+                                            "TELEMETRY→SOFT (hedge unsupported claims)",
+                                            qg_drift, (double)HU_CONSISTENCY_DRIFT_THRESHOLD);
+                                vcfg.mode = escalated;
+                            } else if (qg == HU_GATE_SHADOW && have_drift &&
+                                       qg_drift < HU_CONSISTENCY_DRIFT_THRESHOLD &&
+                                       vcfg.mode == HU_VERIFY_TELEMETRY) {
+                                hu_log_info("agent_turn", NULL,
+                                            "QUALITY_GATE shadow: would escalate verifier to SOFT "
+                                            "(drift %.2f)",
+                                            qg_drift);
+                            }
+                        }
                     }
                     if (vcfg.mode != HU_VERIFY_OFF) {
                         const char *contact =
@@ -7821,25 +7986,31 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                                memory_ctx_len > 100 ? 0.8 : 0.4);
 
             /* Style learning: adaptive schedule — early sessions learn faster,
-             * then settle into a steady cadence. Also triggers on corrections. */
+             * then settle into a steady cadence.
+             *
+             * Gated on learning.persona_refresh_enabled (default false), the same
+             * switch as the daemon refresh tick. hu_persona_style_reanalyze saves
+             * through hu_persona_creator_write, which serializes only hu_persona_t
+             * fields; on 2026-09-06 06:01 this call rewrote the live persona
+             * without contacts / proactive / life_events / style_rules, killing
+             * every proactive path until a manual restore. Do not un-gate without
+             * a writer that preserves unknown keys (.claude/rules/persona.md). */
             {
-                bool should_reanalyze = false;
-                if (agent->persona_name && agent->persona_name_len > 0 && agent->memory) {
-                    if (agent->history_count <= 20 && agent->history_count % 10 == 0 &&
-                        agent->history_count > 0)
-                        should_reanalyze = true;
-                    else if (agent->history_count > 20 && agent->history_count <= 100 &&
-                             agent->history_count % 25 == 0)
-                        should_reanalyze = true;
-                    else if (agent->history_count > 100 && agent->history_count % 50 == 0)
-                        should_reanalyze = true;
-                }
+                bool pr_enabled = agent->config && agent->config->learning.persona_refresh_enabled;
+                bool should_reanalyze =
+                    agent->persona_name && agent->persona_name_len > 0 && agent->memory &&
+                    hu_persona_style_reanalyze_due(pr_enabled, agent->history_count);
                 if (should_reanalyze) {
                     const char *ch = agent->active_channel ? agent->active_channel : "cli";
                     size_t ch_len = agent->active_channel_len ? agent->active_channel_len : 3;
                     const char *cid = agent->memory_session_id ? agent->memory_session_id : "";
                     size_t cid_len =
                         agent->memory_session_id_len ? agent->memory_session_id_len : 0;
+                    hu_log_info("agent_turn", agent->observer,
+                                "persona style reanalyze: rewriting persona '%.*s' from history "
+                                "(history_count=%zu, learning.persona_refresh_enabled=true)",
+                                (int)agent->persona_name_len, agent->persona_name,
+                                agent->history_count);
                     (void)hu_persona_style_reanalyze(
                         agent->alloc, &agent->provider, agent->model_name, agent->model_name_len,
                         agent->memory, agent->persona_name, agent->persona_name_len, ch, ch_len,
@@ -8434,12 +8605,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
 
             /* Auto-save session after successful turn completion */
             if (agent->auto_save && agent->session_id[0] != '\0') {
-                const char *home = getenv("HOME");
                 char sdir[512];
-                if (home)
-                    snprintf(sdir, sizeof(sdir), "%s/.human/sessions", home);
-                else
-                    snprintf(sdir, sizeof(sdir), ".human/sessions");
+                hu_paths_state_or(sdir, sizeof(sdir), ".", "sessions");
                 hu_session_persist_save(agent->alloc, agent, sdir, NULL);
             }
 
@@ -9822,12 +9989,6 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                 break;
                         }
                         hu_dispatch_result_free(agent->alloc, &dispatch_result);
-
-                        /* Clean up dispatch_allowed array after result processing */
-                        if (dispatch_allowed)
-                            agent->alloc->free(agent->alloc->ctx, dispatch_allowed,
-                                               dispatch_count * sizeof(bool));
-                        dispatch_allowed = NULL;
                     } else {
                         /* Fallback: sequential if dispatcher fails */
                         for (size_t tc = 0; tc < tc_count; tc++) {
@@ -10098,6 +10259,17 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                             if (agent->cancel_requested)
                                 break;
                         }
+                    }
+                    /* Unconditional cleanup: dispatch_allowed must be freed on BOTH the
+                     * result-processing branch AND the sequential fallback. When policy
+                     * denies every call, nothing is dispatched, result_array stays NULL,
+                     * and the fallback branch runs — freeing only inside the result
+                     * branch leaked the array there (caught by LSan in the RL nightly
+                     * once the full suite ran under it again, 2026-07-25). */
+                    if (dispatch_allowed) {
+                        agent->alloc->free(agent->alloc->ctx, dispatch_allowed,
+                                           dispatch_count * sizeof(bool));
+                        dispatch_allowed = NULL;
                     }
                     /* Free TTL cache arrays — merged_results owns cached copies;
                      * dispatch_result.results ownership was transferred into merged_results

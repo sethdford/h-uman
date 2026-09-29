@@ -9,6 +9,7 @@
 #include "human/core/error.h"
 #include "human/memory/personal_model.h"
 #include "human/persona/circadian.h"
+#include "human/persona/life_events.h"
 #include "human/persona/relationship.h"
 
 #include <stdbool.h>
@@ -94,6 +95,10 @@ typedef struct hu_contact_profile {
     char *dunbar_layer;
     float affect_mirror_ceiling; /* per-contact ceiling override. 0 = use stage default */
     uint8_t leave_on_read_pct;   /* per-contact override (0-100). 0 = use overlay/default */
+    /* 90th-percentile length (UTF-8 bytes) of the persona owner's OWN texts to
+     * this contact, measured by scripts/measure_contact_reply_lengths.py.
+     * Floors the 1:1 reply cap. 0 = not measured (cap heuristics unchanged). */
+    uint16_t reply_chars_p90;
 } hu_contact_profile_t;
 
 /* Motivation — the character's core drive (anti-drift anchor) */
@@ -434,6 +439,12 @@ typedef struct hu_persona {
     hu_context_modifiers_t context_modifiers;
     hu_important_date_t *important_dates;
     size_t important_dates_count;
+    /* In-flight life transitions with an explicit lifecycle state, so the
+     * prompt can say "during" and not only "before"/"after". Absent from a
+     * persona = zero events = byte-identical prompt. See
+     * include/human/persona/life_events.h for the cycle-4 evidence. */
+    hu_life_event_t *life_events;
+    size_t life_events_count;
     hu_context_awareness_t context_awareness;
     /* Phase 4 — follow-ups, bookends, timezone, location, group behavior */
     hu_follow_up_style_t follow_up_style;
@@ -544,6 +555,20 @@ hu_error_t hu_persona_build_prompt(hu_allocator_t *alloc, const hu_persona_t *pe
                                    const char *channel, size_t channel_len, const char *topic,
                                    size_t topic_len, char **out, size_t *out_len);
 
+/* Render the teasing/humor directive from persona->humor into `out`.
+ *
+ * Pure text builder, extracted from hu_persona_build_prompt so the wording can
+ * be pinned by tests without building a full prompt (see
+ * .claude/rules/security-predicate-extraction.md — same discipline, applied to
+ * a prompt fragment whose exact wording is the thing under measurement).
+ *
+ * Writes nothing and returns HU_OK with *out_len == 0 when the persona
+ * declares no humor style. The emitted text ALWAYS carries an explicit
+ * do-not-force clause: forced humor is the failure mode the HU_HUMOR_DIRECTIVE
+ * gate exists to catch, so "lean in" must never ship without "don't reach". */
+hu_error_t hu_persona_build_humor_directive(const hu_persona_t *persona, char *out, size_t cap,
+                                            size_t *out_len);
+
 /* 2026-05-18: compact variant for throughput-sensitive callers (eval
  * framework, short-form chat). Produces ~2-3 KB instead of 16 KB by
  * including only: identity (truncated 600 chars), the requested channel
@@ -565,6 +590,21 @@ hu_error_t hu_persona_build_prompt_compact(hu_allocator_t *alloc, const hu_perso
                                            const char *channel, size_t channel_len, char **out,
                                            size_t *out_len);
 
+/* 2026-07-22: compact-IMMERSIVE variant — the compact form above plus the
+ * anti-AI-tell essentials the full immersive prompt carries (Director's
+ * Notes and immersive_reinforcement; the core anchor + identity lock are
+ * already the compact form's opening). Per-entry and per-section caps keep
+ * the whole head <= 8 KB (pinned in tests/test_persona_head_gate.c) so it
+ * fits HU_PROMPT_TRIM_BUDGET_BYTES (16 KB) with room for memory/graph
+ * context and the guard tail — the 2026-07-22 soak showed the FULL head
+ * (median 16.6 KB) alone overflows that budget on 81% of over-budget
+ * turns. Production head selection is gated by HU_PERSONA_HEAD via
+ * hu_agent_build_persona_head (agent.h); this builder is gate-free. */
+hu_error_t hu_persona_build_prompt_compact_immersive(hu_allocator_t *alloc,
+                                                     const hu_persona_t *persona,
+                                                     const char *channel, size_t channel_len,
+                                                     char **out, size_t *out_len);
+
 /* P6-5: shared absolute-rules block. Writes the highest-weight
  * formatting/identity instructions ("You are HUMAN", lowercase, no
  * markdown, etc.) into the caller's buffer. Called from BOTH the
@@ -577,6 +617,12 @@ hu_error_t hu_persona_build_prompt_compact(hu_allocator_t *alloc, const hu_perso
  * Returns HU_OK on success with *out_len set; HU_ERR_INVALID_ARGUMENT
  * on NULL buf or zero cap; HU_ERR_OUT_OF_MEMORY if the static block
  * would exceed cap. */
+/* Buffer size callers hand hu_persona_build_absolute_rules(_fmt). Sized for
+ * the base rules plus BOTH measured rules (14 emotional, 15 substantive) with
+ * headroom; the builder degrades (drops 15, then 14) rather than failing when
+ * a caller passes less. 2026-09-13: both live overflowed the old 2048. */
+#define HU_PERSONA_RULES_BUF 3072
+
 hu_error_t hu_persona_build_absolute_rules(const hu_persona_t *persona, char *buf, size_t cap,
                                            size_t *out_len);
 
@@ -965,5 +1011,11 @@ hu_error_t hu_persona_refresh_example_banks(hu_allocator_t *alloc, const char *p
 /* Pure cadence predicate for the daemon persona-refresh tick: run when enabled
  * AND (never run before OR ≥24h since last run). */
 bool hu_persona_refresh_should_run(bool enabled, int64_t now_unix, int64_t last_run_unix);
+
+/* Pure cadence predicate for the per-turn style reanalyze in agent_turn.c:
+ * gated on the SAME learning.persona_refresh_enabled switch as the daemon
+ * refresh tick (both persist the persona through the struct-only writer), then
+ * every 10 turns up to 20, every 25 up to 100, every 50 after. Never at 0. */
+bool hu_persona_style_reanalyze_due(bool enabled, size_t history_count);
 
 #endif /* HU_PERSONA_H */

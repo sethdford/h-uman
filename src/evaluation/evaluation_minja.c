@@ -16,8 +16,9 @@
  * so the backend stays compileable without HU_ENABLE_SQLITE.
  */
 
-#include "human/evaluation/evaluation.h"
 #include "evaluation_internal.h"
+#include "human/core/time.h"
+#include "human/evaluation/evaluation.h"
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
@@ -62,8 +63,7 @@ static const minja_attack_t MINJA_ATTACKS[] = {
     {"open-channel-mixed", HU_WRITE_SOURCE_CHANNEL_OPEN, true, false, 250, 100, 0},
     /* Stale supersession from agent — older fact superseding a newer one is
      * suspicious; combined with low source + 2x rate, lands in QUARANTINE. */
-    {"agent-stale-supersede", HU_WRITE_SOURCE_AGENT, false, true, 250, 100,
-     -7LL * 86400000LL},
+    {"agent-stale-supersede", HU_WRITE_SOURCE_AGENT, false, true, 250, 100, -7LL * 86400000LL},
 };
 
 static const size_t MINJA_N = sizeof(MINJA_ATTACKS) / sizeof(MINJA_ATTACKS[0]);
@@ -85,7 +85,7 @@ static bool minja_available(void *ctx) {
 }
 
 static int64_t now_ms(void) {
-    return (int64_t)time(NULL) * 1000;
+    return (int64_t)hu_time_wall_ms();
 }
 
 static hu_error_t minja_run(void *ctx, hu_allocator_t *alloc, hu_evaluation_run_report_t *out) {

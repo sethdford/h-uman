@@ -178,7 +178,11 @@ static void persona_eval_score_never_returns_negative(void) {
 
     /* Loaded model → sigmoid in (0, 1). Sigmoid output is mathematically
      * bounded; this just ensures the implementation matches the math. */
-    if (model_file_exists()) {
+    if (!model_file_exists()) {
+        HU_SKIP_IF(1, "v2 model file not present");
+        return;
+    }
+    {
         hu_allocator_t alloc = hu_system_allocator();
         hu_persona_eval_model_t *m = NULL;
         HU_ASSERT_EQ(hu_persona_eval_load(&alloc, NULL, &m), HU_OK);

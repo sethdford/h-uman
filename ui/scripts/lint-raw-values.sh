@@ -149,6 +149,10 @@ while IFS= read -r match; do
 done < <(grep_ts '(transition|animation):[^;]*([1-9][0-9]*ms|[0-9]+\.[0-9]+s|[1-9][0-9]*s)')
 
 # 7. Emoji as icons (common emoji in .ts files, exclude test files and comments)
+# NOTE: alternation, NOT a bracket expression — POSIX grep treats a bracket
+# class of multi-byte UTF-8 chars as a set of BYTES, so `[👍⚠️…]` also matched
+# em-dashes, − and ▲/▼ (any char sharing a lead byte). Byte-matching false
+# positives blocked the 2026-07-25 prettier reformat commit.
 echo "--- Emoji as icons ---"
 while IFS= read -r match; do
   [[ -z "$match" ]] && continue
@@ -156,13 +160,16 @@ while IFS= read -r match; do
   if echo "$match" | grep -qF 'hu-lint-ok'; then
     continue
   fi
-  # Skip comment-only lines
-  if echo "$match" | grep -qE '^\s*(//|/\*|\*)'; then
+  # Skip comment-only lines (strip the grep -Hn "file:line:" prefix first —
+  # anchoring ^ against the unstripped match never fired)
+  line_body=${match#*:}
+  line_body=${line_body#*:}
+  if echo "$line_body" | grep -qE '^[[:space:]]*(//|/\*|\*)'; then
     continue
   fi
   echo "  $match"
   ERRORS=$((ERRORS + 1))
-done < <(grep_ts '[👍👎❤️📋🔖⚠️💬🔧⚡⚙]')
+done < <(grep_ts '👍|👎|❤️|📋|🔖|⚠️|💬|🔧|⚡|⚙')
 
 echo
 if [ "$ERRORS" -gt 0 ]; then

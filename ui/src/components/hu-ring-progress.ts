@@ -197,26 +197,30 @@ export class HuRingProgress extends LitElement {
                 stroke-dasharray=${c}
                 stroke-dashoffset=${dashOff}
               />
-              ${showTip
-                ? html`
-                    <circle
-                      class="ring-tip"
-                      cx=${tx}
-                      cy=${ty}
-                      r=${Math.max(2.5, sw * 0.22)}
-                      fill=${color}
-                      filter=${`url(#${uid}-tipBlur)`}
-                      opacity="0.95"
-                      aria-hidden="true"
-                    />
-                  `
-                : nothing}
+              ${
+                showTip
+                  ? html`
+                      <circle
+                        class="ring-tip"
+                        cx=${tx}
+                        cy=${ty}
+                        r=${Math.max(2.5, sw * 0.22)}
+                        fill=${color}
+                        filter=${`url(#${uid}-tipBlur)`}
+                        opacity="0.95"
+                        aria-hidden="true"
+                      />
+                    `
+                  : nothing
+              }
             `;
           })}
         </svg>
-        ${labels.length
-          ? html`<div class="labels">${labels.map((l) => html`<span>${l}</span>`)}</div>`
-          : nothing}
+        ${
+          labels.length
+            ? html`<div class="labels">${labels.map((l) => html`<span>${l}</span>`)}</div>`
+            : nothing
+        }
       </div>
     `;
   }

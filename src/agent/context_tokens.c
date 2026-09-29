@@ -25,7 +25,7 @@ static const ctx_entry_t MODEL_WINDOWS[] = {
     {"gemini-3.1-pro-preview", 200000},
     {"gemini-3.5-flash", 200000},
     {"gemini-3-flash-preview", 200000},
-    {"gemini-3.1-flash-lite-preview", 200000},
+    {"gemini-3.1-flash-lite", 200000},
     {"deepseek-v3.2", 128000},
     {"deepseek-chat", 128000},
     {"deepseek-reasoner", 128000},

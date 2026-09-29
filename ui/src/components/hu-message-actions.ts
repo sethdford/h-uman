@@ -251,38 +251,40 @@ export class ScMessageActions extends LitElement {
       >
         ${this._copied ? icons.check : icons.copy}
       </button>
-      ${this.role === "user"
-        ? html`
-            <button
-              type="button"
-              class="action-btn"
-              aria-label="Edit"
-              title="Edit"
-              @click=${this._onEdit}
-            >
-              ${icons["pencil-simple"]}
-            </button>
-            <button
-              type="button"
-              class="action-btn"
-              aria-label="Retry"
-              title="Retry"
-              @click=${this._onRetry}
-            >
-              ${icons["arrow-clockwise"]}
-            </button>
-          `
-        : html`
-            <button
-              type="button"
-              class="action-btn"
-              aria-label="Regenerate"
-              title="Regenerate"
-              @click=${this._onRegenerate}
-            >
-              ${icons.refresh}
-            </button>
-          `}
+      ${
+        this.role === "user"
+          ? html`
+              <button
+                type="button"
+                class="action-btn"
+                aria-label="Edit"
+                title="Edit"
+                @click=${this._onEdit}
+              >
+                ${icons["pencil-simple"]}
+              </button>
+              <button
+                type="button"
+                class="action-btn"
+                aria-label="Retry"
+                title="Retry"
+                @click=${this._onRetry}
+              >
+                ${icons["arrow-clockwise"]}
+              </button>
+            `
+          : html`
+              <button
+                type="button"
+                class="action-btn"
+                aria-label="Regenerate"
+                title="Regenerate"
+                @click=${this._onRegenerate}
+              >
+                ${icons.refresh}
+              </button>
+            `
+      }
     `;
   }
 }

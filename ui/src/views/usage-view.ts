@@ -182,8 +182,7 @@ export class ScUsageView extends GatewayAwareLitElement {
     this.error = "";
     try {
       const res = (await gw.request<UsageSummary>("usage.summary", {})) as
-        | UsageSummary
-        | { result?: UsageSummary };
+        UsageSummary | { result?: UsageSummary };
       this.summary =
         (res && "result" in res && res.result) ||
         (res && "session_cost_usd" in res ? (res as UsageSummary) : {}) ||
@@ -373,9 +372,9 @@ export class ScUsageView extends GatewayAwareLitElement {
                   <div class="provider-bar-track">
                     <div
                       class="provider-bar-fill"
-                      style="width: ${(p.cost / maxCost) * 100}%; background: ${CHART_COLORS[
-                        i % CHART_COLORS.length
-                      ]}"
+                      style="width: ${(p.cost / maxCost) * 100}%; background: ${
+                        CHART_COLORS[i % CHART_COLORS.length]
+                      }"
                     ></div>
                   </div>
                   <span class="provider-cost">${this.formatCurrency(p.cost)}</span>
@@ -434,30 +433,34 @@ export class ScUsageView extends GatewayAwareLitElement {
         ></hu-stat-card>
       </hu-stats-row>
 
-      ${this.error
-        ? html`<hu-empty-state .icon=${icons.warning} heading="Error" description=${this.error}>
-            <hu-button
-              variant="primary"
-              @click=${() => this.load()}
-              aria-label="Retry loading usage"
-              >Retry</hu-button
-            >
-          </hu-empty-state>`
-        : nothing}
-      ${this.loading
-        ? this._renderSkeleton()
-        : isEmpty
-          ? html`
-              <hu-empty-state
-                .icon=${icons["bar-chart"]}
-                heading="No usage data"
-                description="Start a conversation or run a tool to generate usage metrics. Data will appear here once requests are made."
-              ></hu-empty-state>
-            `
-          : html`
-              ${this._renderTokenChart()} ${this._renderCostBreakdownChart()}
-              ${this._renderForecastChart()} ${this._renderProviders()}
-            `}
+      ${
+        this.error
+          ? html`<hu-empty-state .icon=${icons.warning} heading="Error" description=${this.error}>
+              <hu-button
+                variant="primary"
+                @click=${() => this.load()}
+                aria-label="Retry loading usage"
+                >Retry</hu-button
+              >
+            </hu-empty-state>`
+          : nothing
+      }
+      ${
+        this.loading
+          ? this._renderSkeleton()
+          : isEmpty
+            ? html`
+                <hu-empty-state
+                  .icon=${icons["bar-chart"]}
+                  heading="No usage data"
+                  description="Start a conversation or run a tool to generate usage metrics. Data will appear here once requests are made."
+                ></hu-empty-state>
+              `
+            : html`
+                ${this._renderTokenChart()} ${this._renderCostBreakdownChart()}
+                ${this._renderForecastChart()} ${this._renderProviders()}
+              `
+      }
     `;
   }
 }

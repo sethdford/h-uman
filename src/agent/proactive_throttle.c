@@ -30,18 +30,6 @@ void hu_proactive_throttle_init(hu_proactive_throttle_t *t, hu_allocator_t *allo
     t->weekly_cap = HU_THROTTLE_DEFAULT_WEEKLY_CAP;
 }
 
-void hu_proactive_throttle_reset(hu_proactive_throttle_t *t) {
-    if (!t)
-        return;
-    hu_allocator_t *alloc = t->alloc;
-    uint32_t daily = t->daily_cap;
-    uint32_t weekly = t->weekly_cap;
-    memset(t, 0, sizeof(*t));
-    t->alloc = alloc;
-    t->daily_cap = daily ? daily : HU_THROTTLE_DEFAULT_DAILY_CAP;
-    t->weekly_cap = weekly ? weekly : HU_THROTTLE_DEFAULT_WEEKLY_CAP;
-}
-
 /* ── Channel rate limiter ─────────────────────────────────────────────── */
 
 static uint64_t throttle_seq(hu_proactive_throttle_t *t) {

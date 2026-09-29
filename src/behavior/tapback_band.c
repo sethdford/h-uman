@@ -6,6 +6,7 @@
  * its SMS `Loved "..."` text rendering) is a tell. */
 
 #include "human/behavior/tapback_band.h"
+#include "human/core/paths.h"
 
 #include "human/core/json.h"
 
@@ -101,10 +102,9 @@ const char *hu_tapback_bands_default_path(char *buf, size_t cap) {
     (void)buf, (void)cap;
     return NULL; /* tests never touch the real home dir */
 #else
-    const char *home = getenv("HOME");
-    if (!home || !home[0] || !buf || cap == 0)
+    if (!buf || cap == 0)
         return NULL;
-    int n = snprintf(buf, cap, "%s/.human/tapback_bands.json", home);
+    int n = hu_paths_state(buf, cap, "tapback_bands.json");
     return (n > 0 && (size_t)n < cap) ? buf : NULL;
 #endif
 }

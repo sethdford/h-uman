@@ -12,6 +12,20 @@ static void test_version_string(void) {
     HU_ASSERT(strlen(v) > 0);
 }
 
+/* The installer's provenance guard greps binaries for "HU_BUILD_SHA=<sha>"
+ * and validates the sha as exactly 40 lowercase hex chars (or the "unknown"
+ * fallback for non-git build trees). Pin that contract here so a stamping
+ * regression fails the suite, not the next deploy. */
+static void test_build_sha_is_40_hex_or_unknown(void) {
+    const char *sha = hu_build_sha();
+    HU_ASSERT_NOT_NULL(sha);
+    if (strcmp(sha, "unknown") == 0)
+        return;
+    HU_ASSERT_EQ(strlen(sha), 40u);
+    for (const char *p = sha; *p; p++)
+        HU_ASSERT_TRUE((*p >= '0' && *p <= '9') || (*p >= 'a' && *p <= 'f'));
+}
+
 static void test_heartbeat_init_clamps_interval(void) {
     hu_heartbeat_engine_t e;
     hu_heartbeat_engine_init(&e, true, 2, "/tmp");
@@ -255,9 +269,24 @@ static void test_heartbeat_tick_missing_file(void) {
     HU_ASSERT_EQ(result.outcome, HU_HEARTBEAT_SKIPPED_MISSING);
 }
 
+static void test_heartbeat_file_path_joins_workspace_and_filename(void) {
+    char buf[256];
+    int n = hu_heartbeat_file_path("/tmp/hu_test_ws", buf, sizeof(buf));
+    HU_ASSERT(n > 0);
+    HU_ASSERT_STR_EQ(buf, "/tmp/hu_test_ws/HEARTBEAT.md");
+}
+
+static void test_heartbeat_file_path_null_args_return_negative(void) {
+    char buf[8] = {0};
+    HU_ASSERT(hu_heartbeat_file_path(NULL, buf, sizeof(buf)) < 0);
+    HU_ASSERT(hu_heartbeat_file_path("/tmp", NULL, 8) < 0);
+    HU_ASSERT(hu_heartbeat_file_path("/tmp", buf, 0) < 0);
+}
+
 void run_infrastructure_tests(void) {
     HU_TEST_SUITE("Infrastructure (version, heartbeat, cost)");
     HU_RUN_TEST(test_version_string);
+    HU_RUN_TEST(test_build_sha_is_40_hex_or_unknown);
     HU_RUN_TEST(test_heartbeat_init_clamps_interval);
     HU_RUN_TEST(test_heartbeat_init_preserves_valid_interval);
     HU_RUN_TEST(test_heartbeat_is_content_empty);
@@ -284,4 +313,6 @@ void run_infrastructure_tests(void) {
     HU_RUN_TEST(test_heartbeat_free_tasks_null_safe);
     HU_RUN_TEST(test_heartbeat_collect_tasks_missing_file);
     HU_RUN_TEST(test_heartbeat_tick_missing_file);
+    HU_RUN_TEST(test_heartbeat_file_path_joins_workspace_and_filename);
+    HU_RUN_TEST(test_heartbeat_file_path_null_args_return_negative);
 }

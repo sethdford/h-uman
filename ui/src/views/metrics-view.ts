@@ -270,8 +270,7 @@ export class ScMetricsView extends GatewayAwareLitElement {
     this.error = "";
     try {
       const res = (await gw.request<MetricsSnapshot>("metrics.snapshot", {})) as
-        | MetricsSnapshot
-        | { result?: MetricsSnapshot };
+        MetricsSnapshot | { result?: MetricsSnapshot };
       this.snapshot =
         (res && "result" in res && res.result) ||
         (res && "health" in res ? (res as MetricsSnapshot) : {}) ||
@@ -294,8 +293,7 @@ export class ScMetricsView extends GatewayAwareLitElement {
     this.guardRejectsError = "";
     try {
       const res = (await gw.request<GuardRejectStats>("metrics.guard_rejects", {})) as
-        | GuardRejectStats
-        | { result?: GuardRejectStats };
+        GuardRejectStats | { result?: GuardRejectStats };
       const data =
         (res && "result" in res && (res as { result?: GuardRejectStats }).result) ||
         (res && "semantic_leak" in res ? (res as GuardRejectStats) : null);
@@ -321,8 +319,7 @@ export class ScMetricsView extends GatewayAwareLitElement {
     this.directiveTelemetryError = "";
     try {
       const res = (await gw.request<DirectiveTelemetry>("metrics.directive_telemetry", {})) as
-        | DirectiveTelemetry
-        | { result?: DirectiveTelemetry };
+        DirectiveTelemetry | { result?: DirectiveTelemetry };
       const data =
         (res && "result" in res && (res as { result?: DirectiveTelemetry }).result) ||
         (res && "variants" in res ? (res as DirectiveTelemetry) : null);
@@ -343,8 +340,7 @@ export class ScMetricsView extends GatewayAwareLitElement {
     this.fidelityError = "";
     try {
       const res = (await gw.request<FidelityStatus>("metrics.fidelity", {})) as
-        | FidelityStatus
-        | { result?: FidelityStatus };
+        FidelityStatus | { result?: FidelityStatus };
       const data =
         (res && "result" in res && (res as { result?: FidelityStatus }).result) ||
         (res && "baseline" in res ? (res as FidelityStatus) : null);
@@ -399,11 +395,13 @@ export class ScMetricsView extends GatewayAwareLitElement {
                   <div class="metric-item">
                     <span class="metric-label">${item.label}</span>
                     <span class="metric-value"
-                      >${item.value != null
-                        ? typeof item.value === "number" && item.value >= 1000
-                          ? (item.value as number).toLocaleString()
-                          : String(item.value)
-                        : "—"}</span
+                      >${
+                        item.value != null
+                          ? typeof item.value === "number" && item.value >= 1000
+                            ? (item.value as number).toLocaleString()
+                            : String(item.value)
+                          : "—"
+                      }</span
                     >
                   </div>
                 `,
@@ -622,24 +620,28 @@ export class ScMetricsView extends GatewayAwareLitElement {
         ></hu-stat-card>
       </hu-stats-row>
 
-      ${this.error
-        ? html`<hu-empty-state .icon=${icons.warning} heading="Error" description=${this.error}>
-            <hu-button
-              variant="primary"
-              @click=${() => this.load()}
-              aria-label="Retry loading metrics"
-              >Retry</hu-button
-            >
-          </hu-empty-state>`
-        : nothing}
-      ${this.loading
-        ? this._renderSkeleton()
-        : html`
-            ${this._renderFidelity()} ${this._renderGuardRejects()}
-            ${this._renderDirectiveTelemetry()} ${this._renderIntelligenceStats()}
-            ${this._renderEvalCalibration()} ${this._renderHulaObservability()}
-            ${this._renderSystemHealth()} ${this._renderIntelligencePipeline()}
-          `}
+      ${
+        this.error
+          ? html`<hu-empty-state .icon=${icons.warning} heading="Error" description=${this.error}>
+              <hu-button
+                variant="primary"
+                @click=${() => this.load()}
+                aria-label="Retry loading metrics"
+                >Retry</hu-button
+              >
+            </hu-empty-state>`
+          : nothing
+      }
+      ${
+        this.loading
+          ? this._renderSkeleton()
+          : html`
+              ${this._renderFidelity()} ${this._renderGuardRejects()}
+              ${this._renderDirectiveTelemetry()} ${this._renderIntelligenceStats()}
+              ${this._renderEvalCalibration()} ${this._renderHulaObservability()}
+              ${this._renderSystemHealth()} ${this._renderIntelligencePipeline()}
+            `
+      }
     `;
   }
 

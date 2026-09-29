@@ -4,6 +4,7 @@
 #include "human/core/file.h"
 #include "human/core/io_secure.h"
 #include "human/core/json.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
 #include "human/data/loader.h"
 #include "human/filler_recency.h"
@@ -39,6 +40,8 @@ static uint32_t g_min_response_chars = 15;
 /* Configurable keyword/phrase lists — when NULL/0, DEFAULT_* fallbacks are used */
 static const char **s_crisis_keywords = NULL;
 static size_t s_crisis_keywords_len = 0;
+static const char **s_commitment_keywords = NULL;
+static size_t s_commitment_keywords_len = 0;
 static const char **s_personal_sharing_phrases = NULL;
 static size_t s_personal_sharing_phrases_len = 0;
 static const char **s_starters = NULL;
@@ -335,6 +338,25 @@ hu_error_t hu_conversation_data_init(hu_allocator_t *alloc) {
         }
     }
 
+    /* Load commitment keywords (detect_commitment vocabulary) */
+    {
+        char *json_data = NULL;
+        size_t json_len = 0;
+        hu_error_t err =
+            hu_data_load(alloc, "conversation/commitment_keywords.json", &json_data, &json_len);
+        if (err == HU_OK) {
+            hu_json_value_t *root = NULL;
+            err = hu_json_parse(alloc, json_data, json_len, &root);
+            if (err == HU_OK && root) {
+                load_string_array(root, "keywords", &s_commitment_keywords,
+                                  &s_commitment_keywords_len);
+                hu_json_free(alloc, root);
+            }
+            if (json_data)
+                alloc->free(alloc->ctx, json_data, json_len);
+        }
+    }
+
     /* Load personal sharing phrases */
     {
         char *json_data = NULL;
@@ -464,6 +486,12 @@ void hu_conversation_data_cleanup(void) {
         free_string_array(s_crisis_keywords, s_crisis_keywords_len);
         s_crisis_keywords = NULL;
         s_crisis_keywords_len = 0;
+    }
+
+    if (s_commitment_keywords) {
+        free_string_array(s_commitment_keywords, s_commitment_keywords_len);
+        s_commitment_keywords = NULL;
+        s_commitment_keywords_len = 0;
     }
 
     if (s_personal_sharing_phrases) {
@@ -1621,16 +1649,24 @@ hu_quality_score_t hu_conversation_evaluate_quality(const char *response, size_t
         if (n <= 0 || (size_t)n >= sizeof(score.guidance))
             score.guidance[0] = '\0';
     } else if (score.needs_revision && ratio < 0.2 && response_len > 50) {
-        snprintf(
-            score.guidance, sizeof(score.guidance),
-            "Your response was much shorter than their typical depth. Consider adding a bit more.");
+        /* A short reply to a long message is Seth's normal shape (style card
+         * mean 34 chars); only a reply that is short AND cut off mid-thought
+         * needs more. Say that, not "add more". */
+        snprintf(score.guidance, sizeof(score.guidance),
+                 "If your reply stopped mid-thought, finish the thought. Short is fine.");
     } else if (score.needs_revision && gross_structural) {
+        /* warmth < 5 only ever means assistant tells ("I'd be happy to",
+         * "feel free", "certainly", "as an AI"). "Show you care" was the
+         * instruction that became "I'm here for you" (2026-09-12); name the
+         * tell instead. */
         if (score.warmth < 5 && score.naturalness < 5) {
             snprintf(score.guidance, sizeof(score.guidance),
-                     "Your response felt distant and formal. Drop the formality, show you care.");
+                     "That read like a helper bot: drop the helper phrasing and the formatting, "
+                     "answer like a friend texting.");
         } else if (score.warmth < 5) {
             snprintf(score.guidance, sizeof(score.guidance),
-                     "Your response felt distant. Show you care.");
+                     "That read like a helper bot ('happy to help', 'feel free', 'certainly'). "
+                     "Answer like a friend texting.");
         } else if (score.naturalness < 5) {
             snprintf(score.guidance, sizeof(score.guidance),
                      "Your phrasing felt formal. Drop the formality.");
@@ -1714,13 +1750,24 @@ bool hu_conversation_detect_commitment(const char *msg, size_t msg_len, char *de
     description_out[0] = '\0';
     who_out[0] = '\0';
 
-    static const char *KEYWORDS[] = {"i'll",      "i will",     "i'm going to", "gonna",
-                                     "promise",   "let me",     "i'll call",    "i'll text",
-                                     "i'll send", "i'll check", "we should",    NULL};
+    /* Vocabulary is data: conversation/commitment_keywords.json (embedded,
+     * ~/.human/data override); this array is the fail-safe for load failure. */
+    static const char *const DEFAULT_COMMITMENT_KEYWORDS[] = {
+        "i'll",      "i will",    "i'm going to", "gonna",      "promise",  "let me",
+        "i'll call", "i'll text", "i'll send",    "i'll check", "we should"};
+    static const size_t DEFAULT_COMMITMENT_KEYWORDS_LEN =
+        sizeof(DEFAULT_COMMITMENT_KEYWORDS) / sizeof(DEFAULT_COMMITMENT_KEYWORDS[0]);
+    const char **keywords = s_commitment_keywords_len > 0
+                                ? (const char **)s_commitment_keywords
+                                : (const char **)DEFAULT_COMMITMENT_KEYWORDS;
+    size_t keywords_len =
+        s_commitment_keywords_len > 0 ? s_commitment_keywords_len : DEFAULT_COMMITMENT_KEYWORDS_LEN;
+
     bool found = false;
     size_t best_start = msg_len;
     size_t best_len = 0;
-    for (const char **kw = KEYWORDS; *kw; kw++) {
+    for (size_t k = 0; k < keywords_len; k++) {
+        const char *const *kw = &keywords[k];
         size_t nlen = strlen(*kw);
         if (nlen > msg_len)
             continue;
@@ -2747,11 +2794,6 @@ size_t hu_conversation_extract_topic(const char *msg, size_t msg_len, char *out,
     return extract_significant_topic(msg, msg_len, out, cap);
 }
 
-size_t hu_conversation_extract_followup_topic(const char *msg, size_t msg_len, char *topic_out,
-                                              size_t cap) {
-    return extract_significant_topic(msg, msg_len, topic_out, cap);
-}
-
 /* ── Double-text decision (F9) ──────────────────────────────────────────── */
 
 static const char *const DEFAULT_FAREWELL_PHRASES[] = {
@@ -3706,9 +3748,21 @@ int hu_conversation_max_response_chars(size_t incoming_len) {
     return result;
 }
 
-int hu_conversation_max_response_chars_relational(size_t incoming_len,
-                                                  const hu_contact_profile_t *contact,
-                                                  hu_relationship_stage_t session_stage) {
+/* Floor a 1:1 length cap at the owner's own measured reply length to this
+ * contact. The ratio heuristics scale with THEIR message, but a person's
+ * reply length does not: 2026-09-26 a contact who texts "Heyo" got a 15-char
+ * cap and the prompt said "Maximum 15 characters. Keep it tight.", producing
+ * one-word replies she read as anger. The owner's own p90 to her is the truth. */
+static uint32_t floor_at_measured_reply_len(uint32_t cap, const hu_contact_profile_t *contact) {
+    if (!contact || contact->reply_chars_p90 == 0 || cap >= contact->reply_chars_p90)
+        return cap;
+    return contact->reply_chars_p90 < g_max_response_chars ? contact->reply_chars_p90
+                                                           : g_max_response_chars;
+}
+
+static int max_response_chars_relational_default(size_t incoming_len,
+                                                 const hu_contact_profile_t *contact,
+                                                 hu_relationship_stage_t session_stage) {
     if (incoming_len == 0)
         return (int)g_min_response_chars;
     double mult = 2.0;
@@ -3760,8 +3814,15 @@ int hu_conversation_max_response_chars_relational(size_t incoming_len,
     return result;
 }
 
-uint32_t hu_conversation_brief_char_cap(bool is_group, const hu_contact_profile_t *contact,
-                                        hu_relationship_stage_t session_stage) {
+int hu_conversation_max_response_chars_relational(size_t incoming_len,
+                                                  const hu_contact_profile_t *contact,
+                                                  hu_relationship_stage_t session_stage) {
+    int base = max_response_chars_relational_default(incoming_len, contact, session_stage);
+    return (int)floor_at_measured_reply_len(base > 0 ? (uint32_t)base : 0u, contact);
+}
+
+static uint32_t brief_char_cap_default(bool is_group, const hu_contact_profile_t *contact,
+                                       hu_relationship_stage_t session_stage) {
     if (is_group)
         return 50u;
 
@@ -3806,6 +3867,12 @@ uint32_t hu_conversation_brief_char_cap(bool is_group, const hu_contact_profile_
     }
 
     return 96u;
+}
+
+uint32_t hu_conversation_brief_char_cap(bool is_group, const hu_contact_profile_t *contact,
+                                        hu_relationship_stage_t session_stage) {
+    uint32_t cap = brief_char_cap_default(is_group, contact, session_stage);
+    return is_group ? cap : floor_at_measured_reply_len(cap, contact);
 }
 
 /*
@@ -5632,86 +5699,32 @@ hu_group_response_t hu_conversation_classify_group(const char *msg, size_t msg_l
 
 /* ── Group chat @ mentions (F56) ───────────────────────────────────────── */
 
-size_t hu_conversation_build_group_member_directive(const char *const *members, size_t member_count,
-                                                    char *buf, size_t cap) {
-    if (!buf || cap == 0 || !members || member_count == 0)
-        return 0;
+/* ── Outbound parrot guard ──────────────────────────────────────────────── */
 
-    size_t pos = 0;
-    int n = snprintf(buf, cap, "[GROUP: Members present: ");
-    if (n <= 0 || (size_t)n >= cap)
-        return 0;
-    pos += (size_t)n;
-
-    bool added_any = false;
-    for (size_t i = 0; i < member_count && pos < cap; i++) {
-        const char *name = members[i];
-        if (!name || name[0] == '\0')
-            continue;
-        size_t name_len = strlen(name);
-        if (name_len > 64)
-            name_len = 64;
-        if (added_any) {
-            if (pos + 2 >= cap)
-                break;
-            memcpy(buf + pos, ", ", 2);
-            pos += 2;
-        }
-        if (pos + name_len >= cap)
-            break;
-        memcpy(buf + pos, name, name_len);
-        pos += name_len;
-        added_any = true;
-    }
-
-    if (!added_any)
-        return 0;
-
-    const char *suffix = ". You can address them by name.]";
-    size_t suffix_len = strlen(suffix);
-    if (pos + suffix_len >= cap)
-        return 0;
-    memcpy(buf + pos, suffix, suffix_len + 1);
-    return pos + suffix_len;
-}
-
-/* ── Inline reply classifier (iMessage quoted text fallback) ────────────── */
-
-bool hu_conversation_should_inline_reply(const hu_channel_history_entry_t *entries, size_t count,
-                                         const char *last_msg, size_t last_msg_len) {
-    if (!last_msg || last_msg_len == 0)
+bool hu_conversation_reply_parrots_inbound(const char *bubble, size_t bubble_len,
+                                           const char *inbound, size_t inbound_len) {
+    if (!bubble || !inbound || bubble_len == 0 || inbound_len == 0)
         return false;
 
-    /* Heuristic: "you said" / "earlier" / "what about" in their message → inline reply */
-    if (hu_str_contains_ci_cstr(last_msg, last_msg_len, "you said") ||
-        hu_str_contains_ci_cstr(last_msg, last_msg_len, "earlier") ||
-        hu_str_contains_ci_cstr(last_msg, last_msg_len, "what about") ||
-        hu_str_contains_ci_cstr(last_msg, last_msg_len, "that thing you") ||
-        hu_str_contains_ci_cstr(last_msg, last_msg_len, "the one you"))
-        return true;
-
-    /* Heuristic: multiple questions pending in recent history */
-    if (entries && count > 0) {
-        int question_count = 0;
-        size_t recent = count < 8 ? count : 8;
-        for (size_t i = count - recent; i < count; i++) {
-            if (entries[i].from_me)
-                continue;
-            const char *t = entries[i].text;
-            size_t tl = strlen(t);
-            for (size_t j = 0; j < tl; j++) {
-                if (t[j] == '?') {
-                    question_count++;
-                    break;
-                }
-            }
-        }
-        if (question_count > 1)
-            return true;
+    /* Ignore a leading markdown quote marker — the pre-strip F40 form. */
+    if (bubble_len >= 2 && bubble[0] == '>' && bubble[1] == ' ') {
+        bubble += 2;
+        bubble_len -= 2;
     }
 
-    /* Single-topic conversation: no inline reply */
-    return false;
+    /* Ignore trailing whitespace on the bubble. */
+    while (bubble_len > 0 && (bubble[bubble_len - 1] == ' ' || bubble[bubble_len - 1] == '\n' ||
+                              bubble[bubble_len - 1] == '\r' || bubble[bubble_len - 1] == '\t'))
+        bubble_len--;
+
+    /* Short echoes ("lol", "same") are natural human behavior, never flagged. */
+    if (bubble_len < 16)
+        return false;
+
+    if (bubble_len > inbound_len)
+        return false;
+
+    return memcmp(bubble, inbound, bubble_len) == 0;
 }
 
 /* ── Tapback-vs-text decision engine ────────────────────────────────────── */
@@ -8625,6 +8638,47 @@ hu_error_t hu_conversation_sched_save(const char *path, size_t path_len) {
     return HU_OK;
 }
 
+hu_error_t hu_conversation_sched_reload_if_changed(const char *path, size_t path_len) {
+    if (!path || path_len == 0 || path_len >= 512)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    /* Last-loaded fingerprint. A once-per-process load (the previous shape)
+     * made `human schedule add` invisible to a running daemon until its next
+     * restart (2026-07-27: a message scheduled at 10:33 sat unread by the
+     * 06:47 daemon all day). stat() per delivery pass is cheap; reload only
+     * when the file actually changed. Size is part of the fingerprint so a
+     * same-second rewrite (mtime granularity) is still detected. */
+    static char last_path[512];
+    static int64_t last_mtime = INT64_MIN;
+    static int64_t last_size = INT64_MIN;
+
+    char path_buf[512];
+    memcpy(path_buf, path, path_len);
+    path_buf[path_len] = '\0';
+
+    struct stat st;
+    if (stat(path_buf, &st) != 0) {
+        /* Absent file: either never written or removed by sched_save on an
+         * empty queue. Memory stays authoritative; remember the absence so a
+         * later re-appearance registers as a change. */
+        last_path[0] = '\0';
+        last_mtime = INT64_MIN;
+        last_size = INT64_MIN;
+        return HU_OK;
+    }
+    if (strcmp(last_path, path_buf) == 0 && (int64_t)st.st_mtime == last_mtime &&
+        (int64_t)st.st_size == last_size)
+        return HU_OK; /* unchanged since last load */
+
+    hu_error_t err = hu_conversation_sched_load(path, path_len);
+    if (err != HU_OK)
+        return err;
+    memcpy(last_path, path_buf, path_len + 1);
+    last_mtime = (int64_t)st.st_mtime;
+    last_size = (int64_t)st.st_size;
+    return HU_OK;
+}
+
 hu_error_t hu_conversation_sched_load(const char *path, size_t path_len) {
     if (!path || path_len == 0)
         return HU_ERR_INVALID_ARGUMENT;
@@ -8913,8 +8967,7 @@ size_t hu_conversation_contact_photo_path(const char *contact_id, size_t cid_len
                 int blob_len = sqlite3_column_bytes(blob_stmt, 0);
                 if (blob && blob_len > 0) {
                     char cache_dir[512];
-                    int cd = snprintf(cache_dir, sizeof(cache_dir),
-                                      "%s/.human/cache/contact-photos", home);
+                    int cd = hu_paths_state(cache_dir, sizeof(cache_dir), "cache/contact-photos");
                     if (cd > 0 && (size_t)cd < sizeof(cache_dir)) {
                         (void)mkdir(cache_dir, 0700);
                         n = snprintf(out_path, out_cap, "%s/%lld.jpg", cache_dir,

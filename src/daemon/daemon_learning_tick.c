@@ -31,10 +31,16 @@
 /* Per .claude/rules/silent-config-gated-subsystems.md: one operator-visible
  * line per process for inactive vs active, so "the bandit is silently not
  * learning" (sota off, bandit creation failed) is a discoverable fact in
- * the service log rather than a runtime mystery. */
+ * the service log rather than a runtime mystery.
+ *
+ * Gated with their only users (the SQLite tick below + the HU_IS_TEST
+ * reset): with both flags off the statics are unused and -Werror breaks
+ * the no-sqlite / cross-arm64 CI variants. */
+#if defined(HU_ENABLE_SQLITE) || defined(HU_IS_TEST)
 static atomic_bool g_outcome_warned_inactive = false;
 static atomic_bool g_outcome_warned_active = false;
 static int64_t g_outcome_last_tick = 0;
+#endif
 
 #define HU_PROACTIVE_OUTCOME_TICK_INTERVAL_S 60
 

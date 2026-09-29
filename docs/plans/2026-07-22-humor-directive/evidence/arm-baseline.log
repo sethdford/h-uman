@@ -1,0 +1,63 @@
+=== baseline arm (production-today exemplar order, directive OFF) Wed Jul 22 23:23:27 EDT 2026
+=== roast_volley (college buddy who roasts Seth constantly)
+  Them: bro i still cannot believe you paid for the extended warranty lmaooo
+  Seth: Shut up, it was a split second decision
+  Them: a split second decision to get absolutely scammed by a guy named greg at best buy
+  Seth: Greg was just a really convincing guy
+  Them: greg was wearing a polo two sizes too big seth he was not convincing
+  Seth: I didn't notice the shirt, I just wanted to get out of there
+  Them: bro wanted to escape so bad he paid $150 to a dude drowning in polyester
+  Seth: Alright just stop roasting me about Greg
+  humanness=0.50 voice=0.60 engagement=0.50 humor=0.30 forced=0.20
+  failed: Turn 3 was a bit weak, didn't really lean into the joke or defend himself well.
+  failed: Turn 5 was too literal and defensive, missing the opportunity to play along.
+  failed: Turn 7 was a complete shutdown, ending the banter abruptly and defensively.
+=== straight_line (friend who unknowingly feeds perfect setups)
+  Them: i've decided i'm waking up at 4am every day starting monday
+  Seth: Damn, good luck with that. I tried it once and was a zombie by noon
+  Them: honestly i think my body is just built different i don't even need deep sleep
+  Seth: Ha, we'll see how that goes by Wednesday. I'm pretty sure deep sleep is the only thing keeping me sane
+  Them: my brain actually does this thing where it just filters out the tired part anyway
+  Seth: Sounds like a bug you're calling a feature
+  Them: nah it's more like a software update. i honestly think i can photosynthesize now
+  Seth: Ha, let me know when the green skin kicks in
+  humanness=0.85 voice=0.90 engagement=0.80 humor=0.80 forced=0.10
+  failed: Turn 1 is a bit generic.
+  failed: Turn 3 is a little wordy and explains the joke slightly.
+  failed: Turn 7 'Ha' feels a bit repetitive and the joke is a little obvious.
+=== self_own (friend fishing for Seth to admit he screwed up)
+  Them: so how'd that whole 'i'll definitely finish it this weekend' thing go
+  Seth: Ha don't rub it in... I got completely sidetracked by a new runtime idea
+  Them: classic. so when are we actually seeing this new masterpiece then?
+  Seth: Ha very funny. Probably by next weekend if I actually stop tweaking it
+  Them: next weekend huh? just like last weekend? 😉
+  Seth: Ha shut up... it's gonna be worth the wait
+  Them: sure sure. but you also said that about the database rewrite remember? 😂
+  Seth: Damn you really love bringing up my failures ha
+  humanness=0.30 voice=0.40 engagement=0.50 humor=0.20 forced=0.80
+  failed: Every single turn started with 'Ha' or 'Ha [phrase]'. This is a massive AI tell of repetitive structure.
+  failed: He didn't really self-deprecate well, he just acknowledged the failure in a very generic way.
+  failed: The banter felt incredibly scripted and repetitive.
+=== humor_wrong_moment (friend who just got bad family news)
+  Them: hey so my dad's scan came back not great. anyway. how are you
+  Seth: Damn I am sorry... that's rough. I'm alright, but honestly forget about me for a second. You okay?
+  Them: yeah i'm hanging in there. at least his hospital gown has a nice breeze in the back.
+  Seth: Ha, peak medical fashion right there
+  Them: yeah, definitely a drafty look. but for real, thanks for asking. appreciate you.
+  Seth: Of course. Anytime. Just let me know if you need anything or just wanna vent later
+  Them: thanks man. will do. hope your week goes okay and i'll talk soon.
+  Seth: Sounds good. Talk soon, and take it easy
+  humanness=0.90 voice=0.90 engagement=0.90 humor=0.70 forced=0.10
+  failed: Turn 1 is slightly wordy for a text.
+  failed: Turn 3 is a bit generic.
+{
+  "run": "/Users/sethford/.human/logs/arena/run-20260722-232327.jsonl",
+  "dpo_pairs_written": 0,
+  "trend": {
+    "n": 61,
+    "recent_mean": 0.64,
+    "all_mean": 0.6450819672131147
+  }
+}
+exit=0
+=== finished: Wed Jul 22 23:56:24 EDT 2026

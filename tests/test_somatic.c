@@ -9,6 +9,7 @@
 #include "human/core/allocator.h"
 #include "human/persona/somatic.h"
 #include "test_framework.h"
+#include "test_tmpdir.h"
 
 #include <string.h>
 
@@ -107,7 +108,8 @@ static void somatic_build_context_emits_labels(void) {
  * falls out of hu_somatic_update(now_ts) on the next turn. */
 
 static void somatic_save_load_roundtrip(void) {
-    const char *path = "/tmp/hu_test_somatic_roundtrip.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_test_somatic_roundtrip.json"));
     remove(path);
     hu_somatic_state_t s;
     hu_somatic_init(&s);
@@ -145,7 +147,8 @@ static void somatic_load_missing_file_keeps_state(void) {
 }
 
 static void somatic_load_corrupt_file_keeps_state(void) {
-    const char *path = "/tmp/hu_test_somatic_corrupt.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_test_somatic_corrupt.json"));
     FILE *f = fopen(path, "w");
     HU_ASSERT_NOT_NULL(f);
     fputs("{not valid json!!", f);
@@ -161,7 +164,8 @@ static void somatic_load_corrupt_file_keeps_state(void) {
 static void somatic_load_clamps_out_of_range(void) {
     /* A hand-edited or corrupted-but-parseable file must not inject
      * out-of-range values into behavior gates. */
-    const char *path = "/tmp/hu_test_somatic_clamp.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_test_somatic_clamp.json"));
     FILE *f = fopen(path, "w");
     HU_ASSERT_NOT_NULL(f);
     fputs("{\"energy\": 9.5, \"social_battery\": -2.0, \"focus\": 0.5, \"arousal\": 0.5,"

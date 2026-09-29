@@ -12,6 +12,7 @@
  *   3. Save/load: "VHED" magic round-trips W and b byte-identically.
  */
 #include "test_framework.h"
+#include "test_tmpdir.h"
 
 #include "human/core/allocator.h"
 #include "human/ml/value_head.h"
@@ -63,8 +64,7 @@ static void test_value_head_backward_grad_check(void) {
     float dW[4] = {0};
     float dh[4] = {0};
     float db = 0.0f;
-    HU_ASSERT_EQ(hu_value_head_backward(&vh, h, /*dL_dscore=*/1.0, dW, &db, dh),
-                 HU_OK);
+    HU_ASSERT_EQ(hu_value_head_backward(&vh, h, /*dL_dscore=*/1.0, dW, &db, dh), HU_OK);
     for (int i = 0; i < 4; i++) {
         HU_ASSERT_TRUE(fabs((double)dW[i] - (double)h[i]) < 1e-5);
     }
@@ -102,7 +102,8 @@ static void test_value_head_save_load_round_trips(void) {
     vh1.W[3] = -0.1f;
     vh1.b = 0.3f;
 
-    const char *path = "/tmp/hu_vh_round_trip.vh";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_vh_round_trip.vh"));
     HU_ASSERT_EQ(hu_value_head_save(&vh1, path), HU_OK);
 
     hu_value_head_t vh2 = {0};

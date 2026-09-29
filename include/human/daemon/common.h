@@ -7,6 +7,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+/* Path buffer size shared by the daemon modules (was defined separately in
+ * daemon.c and daemon_lifecycle.c). */
+#define HU_MAX_PATH 1024
+
 /* Cross-bucket daemon state. These are process-lifetime singletons shared by
  * more than one daemon module after the Phase 2 split. Defined in daemon.c
  * (until Phase 2b gives them a proper owner); declared here so the extracted

@@ -106,9 +106,11 @@ describe("AudioPlaybackEngine performance characteristics", () => {
   it("IDLE_DISPOSE_MS is 60 seconds", async () => {
     // Validates the constant without importing the class (which needs AudioContext)
     const src = await import("./audio-playback.js");
-    const engine = new (src.AudioPlaybackEngine as unknown as {
-      new (sr: number): { sampleRate: number };
-    })(24000);
+    const engine = new (
+      src.AudioPlaybackEngine as unknown as {
+        new (sr: number): { sampleRate: number };
+      }
+    )(24000);
     expect(engine.sampleRate).toBe(24000);
   });
 

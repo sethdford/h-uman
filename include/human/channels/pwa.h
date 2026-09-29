@@ -9,9 +9,15 @@
 /* Create a PWA channel that monitors browser tabs for new messages.
  * apps: NULL-terminated array of app names to monitor (e.g. {"slack", "discord", NULL})
  * If apps is NULL, monitors all known PWA drivers with read_messages_js. */
-hu_error_t hu_pwa_channel_create(hu_allocator_t *alloc, const char *const *apps,
-                                 size_t app_count, hu_channel_t *out);
+hu_error_t hu_pwa_channel_create(hu_allocator_t *alloc, const char *const *apps, size_t app_count,
+                                 hu_channel_t *out);
 void hu_pwa_channel_destroy(hu_channel_t *ch);
+
+/* True once start() has run and a browser was detected — the two flags
+ * hu_pwa_channel_poll requires before it reads a single tab. The daemon's
+ * bootstrap never called start() before 2026-09-04, so every poll returned
+ * immediately; this is how a test proves the wiring. */
+bool hu_pwa_channel_is_running(const hu_channel_t *ch);
 
 /* Poll all monitored PWA tabs for new messages. */
 hu_error_t hu_pwa_channel_poll(void *channel_ctx, hu_allocator_t *alloc,

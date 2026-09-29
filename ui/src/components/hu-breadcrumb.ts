@@ -89,18 +89,20 @@ export class ScBreadcrumb extends LitElement {
             const isLast = i === this.items.length - 1;
             return html`
               <li class="item">
-                ${isLast
-                  ? html`<span class="current" aria-current="page">${item.label}</span>`
-                  : item.href
-                    ? html`
-                        <a
-                          class="link"
-                          href=${item.href}
-                          @click=${(e: Event) => this._onClick(e, item)}
-                          >${item.label}</a
-                        >
-                      `
-                    : html`<span class="current">${item.label}</span>`}
+                ${
+                  isLast
+                    ? html`<span class="current" aria-current="page">${item.label}</span>`
+                    : item.href
+                      ? html`
+                          <a
+                            class="link"
+                            href=${item.href}
+                            @click=${(e: Event) => this._onClick(e, item)}
+                            >${item.label}</a
+                          >
+                        `
+                      : html`<span class="current">${item.label}</span>`
+                }
               </li>
             `;
           })}

@@ -22,13 +22,94 @@
  * sender_handle into each event — the caller MUST free these. The
  * canonical free loop is pinned in tests/test_imessage_reactions.c. */
 
+#include "human/channels/imessage_reactions.h"
 #include "human/channels/reaction_event.h"
 #include "human/core/error.h"
+#include <ctype.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* ── Reaction-lookup join-key normalizers ────────────────────────────────────
+ *
+ * Contract + rationale live in human/channels/imessage_reactions.h. These are
+ * pure string predicates (no DB, no allocation) so the join-key contract is
+ * unit-testable without a chat.db fixture or a live daemon.
+ *
+ * These exist because the registration and lookup sides of reaction_lookup
+ * derived their keys from different sources and silently never joined —
+ * zero imessage_tapback DPO pairs from 2026-05-31 to 2026-07-19. */
+
+/* `src` may alias `out` (in-place normalization is explicitly supported —
+ * see the idempotency contract in the header), and the result is always a
+ * SUFFIX of the source, so the regions overlap. memmove, not memcpy. */
+static hu_error_t rxn_copy_out(const char *src, char *out, size_t cap) {
+    if (!out || cap == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (!src) {
+        out[0] = '\0';
+        return HU_OK;
+    }
+    size_t n = strlen(src);
+    if (n >= cap)
+        n = cap - 1;
+    memmove(out, src, n);
+    out[n] = '\0';
+    return HU_OK;
+}
+
+hu_error_t hu_imessage_strip_assoc_guid_prefix(const char *raw, char *out, size_t cap) {
+    if (!out || cap == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    /* Consume `raw` BEFORE writing `out` — they may be the same buffer, and
+     * a defensive out[0]='\0' here would destroy the input. */
+    if (!raw || !raw[0]) {
+        out[0] = '\0';
+        return HU_OK;
+    }
+
+    /* Match "p:<digits>/" exactly — one or more digits, then a slash. Anything
+     * else (including a bare GUID, or a GUID that merely contains a slash) is
+     * passed through untouched. */
+    const char *p = raw;
+    if (p[0] == 'p' && p[1] == ':') {
+        const char *d = p + 2;
+        while (isdigit((unsigned char)*d))
+            d++;
+        if (d > p + 2 && *d == '/')
+            return rxn_copy_out(d + 1, out, cap);
+    }
+    return rxn_copy_out(raw, out, cap);
+}
+
+hu_error_t hu_imessage_normalize_thread_key(const char *raw, char *out, size_t cap) {
+    if (!out || cap == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    /* Consume `raw` BEFORE writing `out` — see the aliasing note above. */
+    if (!raw || !raw[0]) {
+        out[0] = '\0';
+        return HU_OK;
+    }
+
+    /* Everything after the LAST ';' is the bare conversation id:
+     *   "any;-;+15551234567"      -> "+15551234567"   (DM, phone)
+     *   "any;-;seth@me.com"       -> "seth@me.com"    (DM, email)
+     *   "any;+;chat9755112348937" -> "chat9755112348937" (group)
+     *   "+15551234567"            -> "+15551234567"   (already bare)
+     *
+     * strrchr rather than counting two fields: robust to any prefix count or
+     * format Apple ships next, and trivially idempotent because a bare id
+     * contains no ';'.
+     *
+     * Consequence, deliberate: on older macOS emitting "SMS;-;X" and
+     * "iMessage;-;X", both reduce to X — one training key per human rather
+     * than one per transport. For DPO that is the intent (same person, same
+     * voice); this machine only emits the "any;" service anyway. */
+    const char *last = strrchr(raw, ';');
+    return rxn_copy_out(last ? last + 1 : raw, out, cap);
+}
 
 #if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__) && defined(HU_ENABLE_SQLITE)
 #include <sqlite3.h>
@@ -112,9 +193,21 @@ hu_error_t hu_imessage_poll_reactions(const char *db_path, int64_t since_unix,
         if (hu_reaction_normalize_imessage(code, &k, &p) != HU_OK)
             continue;
 
+        /* Normalize BOTH join-key fields before they leave this channel. The
+         * reaction_lookup store is an exact-match join against keys the daemon
+         * reply router registered; chat.db spells the same conversation
+         * ("any;-;+1555" vs "+1555") and the same message ("p:0/GUID" vs
+         * "GUID") differently, so un-normalized keys never match. */
+        char thread_key[256];
+        char msg_key[128];
+        (void)hu_imessage_normalize_thread_key(chat_guid ? (const char *)chat_guid : NULL,
+                                               thread_key, sizeof(thread_key));
+        (void)hu_imessage_strip_assoc_guid_prefix(guid ? (const char *)guid : NULL, msg_key,
+                                                  sizeof(msg_key));
+
         out[*out_n].channel_id = "imessage";
-        out[*out_n].target_thread_id = chat_guid ? strdup((const char *)chat_guid) : NULL;
-        out[*out_n].target_message_ref = guid ? strdup((const char *)guid) : NULL;
+        out[*out_n].target_thread_id = thread_key[0] ? strdup(thread_key) : NULL;
+        out[*out_n].target_message_ref = msg_key[0] ? strdup(msg_key) : NULL;
         out[*out_n].sender_handle = handle ? strdup((const char *)handle) : NULL;
         out[*out_n].kind = k;
         out[*out_n].polarity = p;
@@ -145,11 +238,22 @@ hu_error_t hu_imessage_lookup_latest_sent_guid(const char *db_path, const char *
             sqlite3_close(db);
         return HU_ERR_IO;
     }
+    /* `chat_guid` may arrive as a full chat.guid ("any;-;+1555") or as the
+     * bare handle ("+1555") — the daemon reply router carries the bare form.
+     * Match either: exact, or c.guid ending in ";" || <bare>. Suffix compare
+     * via substr (NOT LIKE) so a handle containing '_' or '%' can't act as a
+     * wildcard. Numbered params (?1/?2) let chat_guid bind once.
+     *
+     * Before this accepted the bare form, resolution ALWAYS missed and the
+     * caller fell back to a synthetic "out-<ts>" msg_ref, which could never
+     * match a real tapback GUID — zero imessage_tapback DPO pairs. */
     const char *sql = "SELECT m.guid FROM message m "
                       "JOIN chat_message_join cmj ON cmj.message_id = m.ROWID "
                       "JOIN chat c ON c.ROWID = cmj.chat_id "
-                      "WHERE c.guid = ? AND m.is_from_me = 1 "
-                      "  AND (? IS NULL OR m.text LIKE ? || '%') "
+                      "WHERE (c.guid = ?1 OR (length(c.guid) > length(?1) "
+                      "       AND substr(c.guid, length(c.guid) - length(?1)) = ';' || ?1)) "
+                      "  AND m.is_from_me = 1 "
+                      "  AND (?2 IS NULL OR m.text LIKE ?2 || '%') "
                       "ORDER BY m.date DESC LIMIT 1";
     sqlite3_stmt *stmt = NULL;
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
@@ -157,13 +261,10 @@ hu_error_t hu_imessage_lookup_latest_sent_guid(const char *db_path, const char *
         return HU_ERR_IO;
     }
     sqlite3_bind_text(stmt, 1, chat_guid, -1, SQLITE_STATIC);
-    if (text_prefix && text_prefix[0]) {
+    if (text_prefix && text_prefix[0])
         sqlite3_bind_text(stmt, 2, text_prefix, -1, SQLITE_STATIC);
-        sqlite3_bind_text(stmt, 3, text_prefix, -1, SQLITE_STATIC);
-    } else {
+    else
         sqlite3_bind_null(stmt, 2);
-        sqlite3_bind_null(stmt, 3);
-    }
     hu_error_t err = HU_ERR_NOT_FOUND;
     if (sqlite3_step(stmt) == SQLITE_ROW) {
         const unsigned char *g = sqlite3_column_text(stmt, 0);

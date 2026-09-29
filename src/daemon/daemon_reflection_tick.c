@@ -111,7 +111,8 @@ void hu_daemon_tick_reflection_loop(const hu_config_t *cfg, struct hu_agent *age
      * Future: route to a dedicated analytical-tier provider if cost
      * justifies (Gemini Flash for most ticks, Pro for a quarterly
      * deep-dive). For Phase 1 the agent's primary provider is fine. */
-    if (!agent->provider.vtable || !agent->provider.vtable->chat_with_system)
+    if (!agent->provider.vtable ||
+        (!agent->provider.vtable->chat && !agent->provider.vtable->chat_with_system))
         return;
 
     /* Production turn source: stream the most-recent slice of the
@@ -142,6 +143,8 @@ void hu_daemon_tick_reflection_loop(const hu_config_t *cfg, struct hu_agent *age
         .last_user_activity_ms = last_user_activity_ms,
         .now_ms = now_ms,
         .max_input_chars = 0, /* default 100K */
+        .model = agent->model_name,
+        .model_len = agent->model_name ? agent->model_name_len : 0,
     };
 
     hu_reflection_run_status_t status = HU_REFLECTION_RUN_GATED;
@@ -156,8 +159,9 @@ void hu_daemon_tick_reflection_loop(const hu_config_t *cfg, struct hu_agent *age
      * each iteration. */
     switch (status) {
     case HU_REFLECTION_RUN_OK:
-        hu_log_info("reflection.daemon", NULL, "reflection: iter returned %d turns, kept=%d dropped=%d",
-                    turns_yielded, kept, dropped);
+        hu_log_info("reflection.daemon", NULL,
+                    "reflection: iter returned %d turns, kept=%d dropped=%d", turns_yielded, kept,
+                    dropped);
         break;
     case HU_REFLECTION_RUN_NO_INPUT:
         /* The `messages` ledger is empty this tick — no conversations to

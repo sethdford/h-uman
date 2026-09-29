@@ -4,7 +4,25 @@
 # Aspirational target documented in .claude/rules/file-size-ceiling.md: 800 LOC.
 set -euo pipefail
 
-MAX_BASELINE=14191   # src/daemon.c, merged tree 2026-07-18: fallback-model helper retire (-3 on top of learning-tick carve). Lower as god-files are carved.
+# Auto-lock any gain so it can never be spent again (scripts/ratchet-config.tsv).
+# Sourced defensively: this gate must keep working — and keep BLOCKING growth —
+# even in a tree where the helper is absent, so a missing helper degrades to
+# "no auto-lock" rather than to "commit refused".
+_hu_root="$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
+if [ -r "$_hu_root/scripts/lib/ratchet.sh" ]; then
+    . "$_hu_root/scripts/lib/ratchet.sh"
+else
+    ratchet_autolock() { :; }
+fi
+
+MAX_BASELINE=10467   # auto-locked 2026-09-27 (was 10511)
+                     # main's #438 carved src/daemon.c to 10256 (10264 here with this
+                     # branch's changes), so the largest file is src/agent/agent_turn.c,
+                     # which the dead-code sweep had taken to 10511 against main's 10512.
+                     # Both conflicting sides (branch 10522, main 10512) sat above the
+                     # merged tree; this is its own measurement, so the merge tightens.
+                     # (was 10574 before the 09-20 carve, 14058 before the reactive
+                     # context/prompt carves.) Lower as god-files are carved.
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 
@@ -13,6 +31,7 @@ worst_loc=$(echo "$worst" | awk '{print $1}')
 worst_file=$(echo "$worst" | awk '{print $2}')
 
 echo "largest src/*.c: $worst_file = $worst_loc LOC (ceiling $MAX_BASELINE)"
+ratchet_autolock MAX_BASELINE "${worst_loc}" "scripts/check-file-size-ceiling.sh"
 
 fail=0
 
@@ -21,6 +40,7 @@ if [ -n "$worst_loc" ] && [ "$worst_loc" -gt "$MAX_BASELINE" ]; then
   find src -name '*.c' 2>/dev/null | xargs wc -l 2>/dev/null | awk -v b="$MAX_BASELINE" '$2!="total" && $1>b {print "  "$0}' >&2 || true
   fail=1
 elif [ -n "$worst_loc" ] && [ "$worst_loc" -lt "$MAX_BASELINE" ]; then
+  [ "${HU_RATCHET_LOCKED:-0}" = 1 ] || \
   echo "NOTE: largest file shrank to $worst_loc — lower MAX_BASELINE to lock the gain." >&2
 fi
 

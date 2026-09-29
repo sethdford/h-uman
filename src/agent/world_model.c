@@ -2241,24 +2241,6 @@ hu_error_t hu_world_model_load(hu_memory_facade_t *m, hu_allocator_t *alloc, con
     return hu_world_model_load_with_channel(m, alloc, contact_id, cid_len, NULL, 0, now_ms, out);
 }
 
-void hu_world_model_invalidate_channel(const char *contact_id, size_t cid_len, const char *channel,
-                                       size_t channel_len) {
-    if (!contact_id || cid_len == 0)
-        return;
-    if (!channel)
-        channel_len = 0;
-    WM_CACHE_LOCK();
-    if (s_cache) {
-        struct wm_cache_entry *entry =
-            cache_lookup_locked_(contact_id, cid_len, channel, channel_len);
-        if (entry && entry->wm) {
-            hu_world_model_free(entry->alloc, entry->wm);
-            entry->wm = NULL;
-        }
-    }
-    WM_CACHE_UNLOCK();
-}
-
 void hu_world_model_invalidate(const char *contact_id, size_t cid_len) {
     /* Global flush is spelled (NULL, 0) — see graph.c teardown and tests.
      * Do NOT treat ("", 0) as global: empty-string contact_id is a valid
@@ -2266,10 +2248,9 @@ void hu_world_model_invalidate(const char *contact_id, size_t cid_len) {
      * allocators would corrupt the cache.
      *
      * P2.4 — for a non-NULL contact_id, this invalidates ALL channels
-     * for that contact. Use hu_world_model_invalidate_channel for finer
-     * granularity. The wide invalidation is the right default because
-     * most writes (graph upsert, negative memory, residue) are not
-     * channel-scoped at the data layer. */
+     * for that contact. The wide invalidation is the right default
+     * because most writes (graph upsert, negative memory, residue) are
+     * not channel-scoped at the data layer. */
     WM_CACHE_LOCK();
     if (s_cache) {
         if (!contact_id && cid_len == 0) {

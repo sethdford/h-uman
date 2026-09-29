@@ -3,6 +3,7 @@
 
 #include "human/channel.h"
 #include "human/channel_loop.h"
+#include "human/channels/imessage_caps.h" /* verdict + evidence enums */
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include <stdbool.h>
@@ -25,6 +26,52 @@ void hu_imessage_set_use_imsg_cli(hu_channel_t *ch, bool use);
 /** Treat is_from_me=1 messages from this handle as incoming (self-test via same Apple ID). */
 void hu_imessage_set_loopback_handle(hu_channel_t *ch, const char *handle);
 
+/**
+ * Handles the assistant must never message, in either direction. Borrowed
+ * pointer (caller owns the array), matching hu_imessage_create's allow_from.
+ */
+void hu_imessage_set_exclude_from(hu_channel_t *ch, const char *const *exclude, size_t count);
+
+/**
+ * True when `handle` is on the exclusion list — a person who asked not to be
+ * texted by the assistant.
+ *
+ * Pure predicate (see `.claude/rules/security-predicate-extraction.md`): the
+ * enforcement sites sit inside the poll loop and the send path, but the
+ * decision is (handle, list) -> bool and is unit-tested without either.
+ *
+ * Matching is digit-suffix normalized and deliberately OVER-matches. This is
+ * the inverse of an allowlist's bias: when an allowlist fails to match it
+ * safely denies, but when an exclusion fails to match it SENDS — to the one
+ * person who must not be messaged. So "+1 (484) 678-4914", "+14846784914" and
+ * "14846784914" all match, and any doubt resolves toward excluding. Non-numeric
+ * handles (emails, Apple IDs) fall back to case-insensitive exact compare.
+ */
+bool hu_imessage_handle_excluded(const char *handle, const char *const *exclude, size_t count);
+
+/** Which service an outbound send is addressed to: "auto" (default),
+ * "imessage", or "sms". Read from HU_IMESSAGE_SEND_SERVICE; any other value
+ * falls back to "auto" rather than passing through, because the result is
+ * spliced directly into the imsg argv. Never NULL, never empty.
+ *
+ * "auto" is iMessage-first with the CLI's own SMS fallback for text-only phone
+ * sends, so contacts that HAVE iMessage are unaffected. It exists because
+ * hardcoding "imessage" opted out of that fallback and silently black-holed
+ * every send to a non-iMessage contact (measured 2026-09-22: 124 proactive
+ * check-ins to one RCS/Android number, 0 delivered). Set
+ * HU_IMESSAGE_SEND_SERVICE=imessage to restore the old iMessage-only behaviour. */
+const char *hu_imessage_send_service(void);
+
+/** AppleScript `service type = <token>` for a service string from
+ * hu_imessage_send_service(). "sms" -> "SMS", everything else -> "iMessage".
+ *
+ * "auto" degrades to iMessage deliberately: one `send` statement names exactly
+ * one service, and an iMessage send to a non-iMessage buddy is accepted and
+ * then never delivered rather than raising a catchable error, so there is no
+ * honest single-script fallback. Reaching a non-iMessage contact therefore
+ * depends on the imsg CLI path. NULL/unknown -> "iMessage". */
+const char *hu_imessage_applescript_service_type(const char *service);
+
 /** Returns true if default target (phone/email) is configured. */
 bool hu_imessage_is_configured(hu_channel_t *ch);
 
@@ -40,6 +87,20 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
 /** Maps hu_reaction_type_t to iMessage tapback name (love, like, dislike, etc.).
  * Returns NULL for HU_REACTION_NONE or unknown. */
 const char *hu_imessage_reaction_to_tapback_name(hu_reaction_type_t reaction);
+
+/* Map an emoji to the native tapback kind it corresponds to. Never returns
+ * HU_REACTION_NONE — an unmapped emoji falls back to THUMBS_UP, because a
+ * NONE would re-open the plain-text fallback that shipped emoji as MESSAGES
+ * (live 2026-07-20: "tapback emoji sent"=0 vs "flat fallback"=29). */
+hu_reaction_type_t hu_imessage_reaction_for_emoji(const char *emoji_utf8);
+
+/* Mark a contact's thread as read (native IMCore read receipt, `imsg read`).
+ * A human who replies has, by definition, read the thread — before this the
+ * daemon replied while leaving messages permanently "unread" on the sender's
+ * side, which is an obvious tell. Gated on HU_IMSG_VERB_READ_RECEIPT; a no-op
+ * returning HU_ERR_NOT_SUPPORTED when the bridge is down. Best-effort: never
+ * blocks or fails a send. */
+hu_error_t hu_imessage_mark_read(void *ctx, const char *target, size_t target_len);
 
 /** Build tapback context string for recent reactions on our messages from this contact.
  * Returns allocated string like "[REACTIONS on your recent messages: 2 hearts, 1 like]" or NULL.
@@ -169,6 +230,42 @@ size_t hu_imessage_extract_attributed_body(const unsigned char *blob, size_t blo
  * Returns milliseconds, clamped to [800, 6000]. */
 unsigned int hu_imessage_typing_duration(size_t msg_len, uint32_t seed);
 
+/* ── IMCore selector-conformance check ───────────────────────────────────────
+ * h-uman's native iMessage path binds a handful of PRIVATE IMCore selectors via
+ * the ObjC runtime. When Apple renames or re-signatures one on an OS bump, the
+ * bind silently returns nil or a hardcoded zero — see the 2026-07-21 typing
+ * phantom, where -[IMChat isCurrentlyTyping] and -[IMAccount loggedIn] had been
+ * removed on macOS 26 yet were still called, reporting 0 forever. A boot-time
+ * conformance pass turns that silent drift into one loud log line.
+ *
+ * Factored as a pure predicate + injected resolver so it is unit-testable
+ * without the ObjC runtime (which is compiled out under HU_IS_TEST). */
+typedef struct hu_imcore_selector_req {
+    const char *class_name; /* e.g. "IMChat" */
+    const char *selector;   /* e.g. "setLocalUserIsTyping:" */
+    bool is_class_method;   /* true for +class methods (e.g. "sharedInstance") */
+} hu_imcore_selector_req_t;
+
+/** The canonical table of IMCore selectors h-uman's iMessage path depends on.
+ * Sets *count to the entry count. Never returns NULL. */
+const hu_imcore_selector_req_t *hu_imessage_imcore_required_selectors(size_t *count);
+
+/** Resolver: does class_name respond to selector? is_class_method selects
+ * +class vs -instance lookup. ud is opaque caller data. Must be non-NULL. */
+typedef bool (*hu_imcore_selector_resolver_fn)(const char *class_name, const char *selector,
+                                               bool is_class_method, void *ud);
+/** Reporter: invoked once per selector that does NOT resolve. May be NULL. */
+typedef void (*hu_imcore_selector_missing_fn)(const char *class_name, const char *selector,
+                                              bool is_class_method, void *ud);
+
+/** Pure conformance pass: for each of the n reqs, call resolve(); for each that
+ * returns false, call on_missing() (when non-NULL). Returns the count of
+ * unresolved selectors (0 == fully conformant). Returns 0 if reqs or resolve is
+ * NULL. No ObjC dependency — the caller injects the resolver. */
+size_t hu_imessage_imcore_conformance(const hu_imcore_selector_req_t *reqs, size_t n,
+                                      hu_imcore_selector_resolver_fn resolve,
+                                      hu_imcore_selector_missing_fn on_missing, void *ud);
+
 /** Search Tenor for a GIF matching the query and download to a temp file.
  * Returns the local path to the downloaded GIF (caller owns, free with alloc).
  * Returns NULL on failure (no API key, network error, no results).
@@ -267,6 +364,39 @@ hu_error_t hu_imessage_detect_self_handle(hu_allocator_t *alloc, char *buf, size
 bool hu_imessage_should_courtesy_reply(bool allowlist_has_handle, bool dedup_already_replied,
                                        bool courtesy_replies_enabled,
                                        uint32_t aggregate_today_count);
+
+/* ── Replay guards (incident 2026-09-01) ─────────────────────────────────
+ *
+ * After a reboot the daemon resumed from a persisted rowid two weeks behind
+ * chat.db and replayed ~2,000 old inbound messages as if fresh. These three
+ * pure/testable helpers are the guards the poll path now applies. */
+
+/* Default caps; each can be overridden at runtime by the env var named in
+ * the comment (same convention as HU_IMESSAGE_LOOKBACK). */
+#define HU_IMESSAGE_MAX_REPLAY_ROWS_DEFAULT     50    /* HU_IMESSAGE_MAX_REPLAY */
+#define HU_IMESSAGE_MAX_INBOUND_AGE_SEC_DEFAULT 86400 /* HU_IMESSAGE_MAX_INBOUND_AGE_SEC */
+
+/* Replay guards (incident 2026-09-01): declared in imessage_replay_guard.h,
+ * compiled on every platform. */
+#include "human/channels/imessage_replay_guard.h"
+
+/* chat.db query: has a human-authored outbound (is_from_me=1, a real text
+ * bubble, not a tapback) landed in the same conversation AFTER `rowid`?
+ *
+ * Conversation is the chat with `chat_guid` when non-empty, else every
+ * message to `handle`. Outbound rows for which `is_ours(ctx, text, len)`
+ * returns true are the daemon's own sends and do NOT count — so a fresh
+ * process (empty echo ring) treats every later outbound as the human's,
+ * which is exactly right for a replay after restart.
+ *
+ * `sqlite_db` is a `sqlite3 *` (typed void* to keep sqlite out of this
+ * header). Returns false on NULL db or any query error (fail open: an
+ * unanswerable question must not suppress a live reply). Stub returns false
+ * when built without SQLite. */
+bool hu_imessage_user_replied_after(void *sqlite_db, const char *chat_guid, const char *handle,
+                                    int64_t rowid,
+                                    bool (*is_ours)(void *ctx, const char *text, size_t len),
+                                    void *ctx);
 
 /* Pure text builder: format a courtesy reply into a caller-provided buffer.
  *
@@ -499,6 +629,19 @@ hu_error_t hu_imessage_send_sticker(void *ctx, const char *target, size_t target
  * avoid resolving the wrong parent on a mid-token substring hit. Pure and
  * NULL-safe; defined unconditionally so it is unit-testable in every build. */
 bool hu_imessage_desc_prefix_match(const char *haystack, const char *prefix);
+
+/** T0.1 blue-guard predicate as one function (2026-09-20). What the iMessage
+ * send path asks before every send — "would this bubble be blue?" — exposed so
+ * the daemon's proactive reachability pre-filter can ask the SAME question
+ * before spending a proposer fire on a contact the send would HOLD anyway.
+ * ALLOW ⇒ proven iMessage-reachable (or HU_IMESSAGE_ALLOW_GREEN set); HOLD ⇒
+ * green or unproven. Out-params (optional) carry the evidence for log lines.
+ * Real chat.db + whois inference on macOS non-test builds; elsewhere a stub
+ * that HOLDs unless HU_IMESSAGE_ALLOW_GREEN is set. */
+hu_blue_verdict_t hu_imessage_blue_guard_verdict(hu_allocator_t *alloc, const char *handle,
+                                                 size_t handle_len, hu_whois_reach_t *live_out,
+                                                 hu_imessage_service_t *recent_out,
+                                                 hu_imessage_service_t *handle_out);
 
 #ifdef HU_IS_TEST
 /** Test-only: set a callback function pointer that will be invoked instead of imsg send.

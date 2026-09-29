@@ -145,9 +145,11 @@ export class ScTextarea extends LitElement {
 
     return html`
       <div class="wrapper">
-        ${this.label
-          ? html`<label class="label" for=${this._textareaId}>${this.label}</label>`
-          : null}
+        ${
+          this.label
+            ? html`<label class="label" for=${this._textareaId}>${this.label}</label>`
+            : null
+        }
         <div class="textarea-wrap">
           <textarea
             id=${this._textareaId}
@@ -157,9 +159,9 @@ export class ScTextarea extends LitElement {
             placeholder=${this.placeholder}
             ?disabled=${this.disabled}
             maxlength=${this.maxlength || undefined}
-            aria-label=${this.label
-              ? undefined
-              : this.ariaLabel || this.accessibleLabel || undefined}
+            aria-label=${
+              this.label ? undefined : this.ariaLabel || this.accessibleLabel || undefined
+            }
             aria-invalid=${this.error ? "true" : "false"}
             aria-describedby=${errorId ?? undefined}
             @input=${this._onInput}
@@ -168,17 +170,21 @@ export class ScTextarea extends LitElement {
         </div>
         <div class="footer">
           <span>
-            ${this.error
-              ? html`<span class="error-msg" id=${errorId} role="alert" aria-live="polite"
-                  >${this.error}</span
-                >`
-              : null}
+            ${
+              this.error
+                ? html`<span class="error-msg" id=${errorId} role="alert" aria-live="polite"
+                    >${this.error}</span
+                  >`
+                : null
+            }
           </span>
-          ${showCounter
-            ? html`<span class="counter" aria-live="polite"
-                >${currentLength}/${this.maxlength}</span
-              >`
-            : null}
+          ${
+            showCounter
+              ? html`<span class="counter" aria-live="polite"
+                  >${currentLength}/${this.maxlength}</span
+                >`
+              : null
+          }
         </div>
       </div>
     `;

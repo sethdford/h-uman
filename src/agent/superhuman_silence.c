@@ -1,19 +1,20 @@
 /*
  * Superhuman silence interpreter service — detects meaningful pauses.
  */
-#include "human/agent/superhuman.h"
 #include "human/agent/superhuman_silence.h"
+#include "human/agent/superhuman.h"
 #include "human/core/string.h"
+#include "human/core/time.h"
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
 static uint64_t now_ms(void) {
-    return (uint64_t)time(NULL) * 1000;
+    return (uint64_t)hu_time_wall_ms();
 }
 
 static hu_error_t silence_build_context(void *ctx, hu_allocator_t *alloc, char **out,
-                                         size_t *out_len) {
+                                        size_t *out_len) {
     hu_superhuman_silence_ctx_t *sctx = (hu_superhuman_silence_ctx_t *)ctx;
     if (!sctx || !alloc || !out || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
@@ -39,7 +40,7 @@ static hu_error_t silence_build_context(void *ctx, hu_allocator_t *alloc, char *
 }
 
 static hu_error_t silence_observe(void *ctx, hu_allocator_t *alloc, const char *text,
-                                   size_t text_len, const char *role, size_t role_len) {
+                                  size_t text_len, const char *role, size_t role_len) {
     hu_superhuman_silence_ctx_t *sctx = (hu_superhuman_silence_ctx_t *)ctx;
     if (!sctx)
         return HU_ERR_INVALID_ARGUMENT;
@@ -58,7 +59,7 @@ static hu_error_t silence_observe(void *ctx, hu_allocator_t *alloc, const char *
 }
 
 hu_error_t hu_superhuman_silence_service(hu_superhuman_silence_ctx_t *ctx,
-                                          hu_superhuman_service_t *out) {
+                                         hu_superhuman_service_t *out) {
     if (!ctx || !out)
         return HU_ERR_INVALID_ARGUMENT;
     out->name = "Silence Interpreter";

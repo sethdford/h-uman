@@ -1,0 +1,3 @@
+{"event":"started-typing","data":{"handle":"+15551234567","timestamp":1784510000.5,"chatGuid":"iMessage;-;+15551234567"},"kind":"bridge-event"}
+{"event":"stopped-typing","data":{"handle":"+15551234567","timestamp":1784510006.0999999,"chatGuid":"iMessage;-;+15551234567"},"kind":"bridge-event"}
+{"event":"aliases-removed","data":{"aliases":["+15559876543"],"aliasType":"phone"},"kind":"bridge-event"}

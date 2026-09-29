@@ -16,14 +16,6 @@ typedef struct hu_emotional_prediction {
     int64_t target_date;
 } hu_emotional_prediction_t;
 
-/* Predict emotional states from micro_moments, temporal patterns, and memories.
- * Stores predictions in emotional_predictions table.
- * Returns array of predictions; caller must free with hu_anticipatory_predictions_free.
- * Returns HU_ERR_NOT_SUPPORTED when HU_ENABLE_SQLITE is off. */
-hu_error_t hu_anticipatory_predict(hu_allocator_t *alloc, hu_memory_t *memory,
-                                   const char *contact_id, size_t contact_id_len, int64_t now_ts,
-                                   hu_emotional_prediction_t **out, size_t *out_count);
-
 /* Provider-aware variant: uses local model for emotion classification when available. */
 struct hu_provider;
 hu_error_t hu_anticipatory_predict_with_provider(hu_allocator_t *alloc, hu_memory_t *memory,
@@ -40,7 +32,7 @@ char *hu_anticipatory_build_directive(hu_allocator_t *alloc, const hu_emotional_
                                       size_t count, const char *contact_name, size_t name_len,
                                       size_t *out_len);
 
-/* Free predictions array allocated by hu_anticipatory_predict. */
+/* Free predictions array allocated by hu_anticipatory_predict_with_provider. */
 void hu_anticipatory_predictions_free(hu_allocator_t *alloc, hu_emotional_prediction_t *preds,
                                       size_t count);
 

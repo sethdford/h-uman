@@ -1,6 +1,7 @@
-#include "human/agent/dag.h"
 #include "human/agent/llm_compiler.h"
+#include "human/agent/dag.h"
 #include "human/core/string.h"
+#include "human/util/llm_json.h"
 #include <string.h>
 
 static const char LLM_COMPILER_PROMPT_PREFIX[] =
@@ -23,7 +24,8 @@ hu_error_t hu_llm_compiler_build_prompt(hu_allocator_t *alloc, const char *goal,
     *out_len = 0;
 
     size_t cap = sizeof(LLM_COMPILER_PROMPT_PREFIX) - 1 + (goal ? goal_len : 0) +
-                 sizeof(LLM_COMPILER_PROMPT_TOOLS) - 1 + sizeof(LLM_COMPILER_PROMPT_SUFFIX) - 1 + 64;
+                 sizeof(LLM_COMPILER_PROMPT_TOOLS) - 1 + sizeof(LLM_COMPILER_PROMPT_SUFFIX) - 1 +
+                 64;
     for (size_t i = 0; i < tool_count && tool_names && tool_names[i]; i++) {
         cap += strlen(tool_names[i]) + 2;
     }
@@ -66,43 +68,14 @@ hu_error_t hu_llm_compiler_build_prompt(hu_allocator_t *alloc, const char *goal,
     return HU_OK;
 }
 
+/* Shared locator (string-aware, strips <think> blocks and fences). The private
+ * brace-counter this replaced broke on a "}" inside a JSON string. */
 static void extract_json_from_response(const char *s, size_t len, const char **out_ptr,
                                        size_t *out_len) {
-    const char *p = s;
-    const char *end = s + len;
-
-    while (p + 3 <= end && memcmp(p, "```", 3) == 0) {
-        p += 3;
-        while (p < end && (*p == ' ' || *p == '\t'))
-            p++;
-        if (p + 4 <= end && (memcmp(p, "json", 4) == 0 || memcmp(p, "JSON", 4) == 0))
-            p += 4;
-        while (p < end && *p != '\n')
-            p++;
-        if (p < end)
-            p++;
-    }
-
-    const char *start = p;
-    while (p < end && *p != '{')
-        p++;
-    if (p >= end) {
+    if (!hu_llm_json_locate(s, len, out_ptr, out_len)) {
         *out_ptr = s;
         *out_len = len;
-        return;
     }
-    start = p;
-    int depth = 1;
-    p++;
-    while (p < end && depth > 0) {
-        if (*p == '{')
-            depth++;
-        else if (*p == '}')
-            depth--;
-        p++;
-    }
-    *out_ptr = start;
-    *out_len = (size_t)(p - start);
 }
 
 hu_error_t hu_llm_compiler_parse_plan(hu_allocator_t *alloc, const char *response,

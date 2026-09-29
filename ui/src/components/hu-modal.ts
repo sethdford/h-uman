@@ -264,9 +264,11 @@ export class ScModal extends LitElement {
           @click=${(e: MouseEvent) => e.stopPropagation()}
         >
           <header class="header">
-            ${this.heading
-              ? html`<h2 id="modal-heading" class="heading">${this.heading}</h2>`
-              : nothing}
+            ${
+              this.heading
+                ? html`<h2 id="modal-heading" class="heading">${this.heading}</h2>`
+                : nothing
+            }
             <button class="close-btn" aria-label="Close" @click=${this._close}>${icons.x}</button>
           </header>
           <div class="body">

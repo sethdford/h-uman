@@ -360,6 +360,111 @@ static void us93_chatdb_busy_log_is_one_shot_per_episode(void) {
     hu_imessage_us93_teardown();
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Part 6 — exclude_from: handles the assistant must never message
+ *
+ * Distinct from the allowlist above. A non-allowlisted sender GETS a courtesy
+ * reply; an EXCLUDED one must get absolute silence, because the exclusion
+ * exists for a real person who asked not to be texted by the assistant — an
+ * automated "you're not allowlisted" bounce would be the very harm the switch
+ * is meant to prevent.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+static void exclude_matches_exact_handle(void) {
+    const char *list[] = {"+15558675309"};
+    HU_ASSERT_TRUE(hu_imessage_handle_excluded("+15558675309", list, 1));
+}
+
+static void exclude_matches_across_handle_formatting(void) {
+    /* The failure that matters: an allowlist that misses safely denies, but an
+     * exclusion that misses SENDS to the one person who must not be messaged.
+     * Every real-world spelling of the same number must match. */
+    const char *list[] = {"+15558675309"};
+    HU_ASSERT_TRUE(hu_imessage_handle_excluded("15558675309", list, 1));
+    HU_ASSERT_TRUE(hu_imessage_handle_excluded("5558675309", list, 1));
+    HU_ASSERT_TRUE(hu_imessage_handle_excluded("+1 (555) 867-5309", list, 1));
+    HU_ASSERT_TRUE(hu_imessage_handle_excluded("555-867-5309", list, 1));
+}
+
+static void exclude_does_not_match_a_different_number(void) {
+    /* Over-matching must stop at genuinely different people. */
+    const char *list[] = {"+15558675309"};
+    HU_ASSERT_FALSE(hu_imessage_handle_excluded("+15551112222", list, 1));
+    HU_ASSERT_FALSE(hu_imessage_handle_excluded("+15558675300", list, 1));
+}
+
+static void exclude_matches_email_handle_case_insensitively(void) {
+    const char *list[] = {"Someone@Example.com"};
+    HU_ASSERT_TRUE(hu_imessage_handle_excluded("someone@example.com", list, 1));
+    HU_ASSERT_FALSE(hu_imessage_handle_excluded("other@example.com", list, 1));
+}
+
+static void exclude_empty_list_excludes_nobody(void) {
+    /* Default posture: with no exclusions configured nothing is blocked. */
+    const char *list[] = {"+15558675309"};
+    HU_ASSERT_FALSE(hu_imessage_handle_excluded("+15558675309", NULL, 0));
+    HU_ASSERT_FALSE(hu_imessage_handle_excluded("+15558675309", list, 0));
+    HU_ASSERT_FALSE(hu_imessage_handle_excluded(NULL, list, 1));
+    HU_ASSERT_FALSE(hu_imessage_handle_excluded("", list, 1));
+}
+
+static void exclude_short_digit_string_does_not_mass_exclude(void) {
+    /* A stray short entry must not silently blackhole every contact whose
+     * number happens to end in those digits. Both sides need a full tail. */
+    const char *list[] = {"5309"};
+    HU_ASSERT_FALSE(hu_imessage_handle_excluded("+15558675309", list, 1));
+}
+
+static void exclude_blocks_outbound_send(void) {
+    /* The contract that makes "never texts her" true for PROACTIVE messages,
+     * not just replies: imessage_send is the single outbound chokepoint. */
+    hu_imessage_us93_setup();
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    HU_ASSERT_EQ(hu_imessage_create(&alloc, "Jane", 4, NULL, 0, &ch), HU_OK);
+
+    static const char *const excl[] = {"+15558675309"};
+    hu_imessage_set_exclude_from(&ch, excl, 1);
+
+    /* Excluded target is refused outright... */
+    HU_ASSERT_EQ(ch.vtable->send(ch.ctx, "+15558675309", 12, "hey", 3, NULL, 0),
+                 HU_ERR_PERMISSION_DENIED);
+    /* ...including a differently-formatted spelling of the same number... */
+    HU_ASSERT_EQ(ch.vtable->send(ch.ctx, "+1 (555) 867-5309", 17, "hey", 3, NULL, 0),
+                 HU_ERR_PERMISSION_DENIED);
+    /* ...while everyone else still sends normally. */
+    HU_ASSERT_EQ(ch.vtable->send(ch.ctx, "+15551112222", 12, "hey", 3, NULL, 0), HU_OK);
+
+    hu_imessage_destroy(&ch);
+    hu_imessage_us93_teardown();
+}
+
+static void exclude_inbound_sends_no_courtesy_reply(void) {
+    /* The whole point: an excluded sender gets SILENCE, never the
+     * "you're not on the allowlist" bounce a non-allowlisted sender gets. */
+    hu_imessage_us93_setup();
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    HU_ASSERT_EQ(hu_imessage_create(&alloc, "Jane", 4, NULL, 0, &ch), HU_OK);
+
+    static const char *const excl[] = {"+15558675309"};
+    hu_imessage_set_exclude_from(&ch, excl, 1);
+
+    /* Drive the courtesy path directly for an EXCLUDED handle. Even here --
+     * the deepest point the poll loop could reach -- the outbound guard must
+     * keep the mirror empty. */
+    (void)hu_imessage_test_handle_non_allowlisted(&ch, "+15558675309", 1000000);
+    HU_ASSERT_EQ(hu_imessage_test_get_last_courtesy_message(&ch, NULL)[0], '\0');
+
+    /* Control: a non-excluded handle on the same channel still gets one, so
+     * the assertion above is proving exclusion and not a dead code path. */
+    (void)hu_imessage_test_handle_non_allowlisted(&ch, "+15551112222", 1000000);
+    HU_ASSERT_TRUE(hu_imessage_test_get_last_courtesy_message(&ch, NULL)[0] != '\0');
+
+    hu_imessage_destroy(&ch);
+    hu_imessage_us93_teardown();
+}
+
 void run_imessage_non_allowlisted_tests(void) {
     HU_TEST_SUITE("iMessage Non-Allowlisted Courtesy Reply (US-9.3)");
 
@@ -392,6 +497,16 @@ void run_imessage_non_allowlisted_tests(void) {
     /* Part 5: AC-9.3.3 chat.db BUSY warn */
     HU_RUN_TEST(us93_chatdb_busy_exhaustion_sets_one_shot_gate);
     HU_RUN_TEST(us93_chatdb_busy_log_is_one_shot_per_episode);
+
+    /* Part 6: exclude_from — never message these handles */
+    HU_RUN_TEST(exclude_matches_exact_handle);
+    HU_RUN_TEST(exclude_matches_across_handle_formatting);
+    HU_RUN_TEST(exclude_does_not_match_a_different_number);
+    HU_RUN_TEST(exclude_matches_email_handle_case_insensitively);
+    HU_RUN_TEST(exclude_empty_list_excludes_nobody);
+    HU_RUN_TEST(exclude_short_digit_string_does_not_mass_exclude);
+    HU_RUN_TEST(exclude_blocks_outbound_send);
+    HU_RUN_TEST(exclude_inbound_sends_no_courtesy_reply);
 }
 
 #else  /* !HU_IS_TEST */

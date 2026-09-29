@@ -53,6 +53,9 @@ static bool static_iter(void *vctx, hu_reflection_turn_t *out_turn) {
 typedef struct {
     const char *canned_response;
     int call_count;
+    /* Recorded by mock_chat (the full-request path). */
+    uint32_t seen_max_tokens;
+    char seen_model[64];
 } mock_provider_ctx_t;
 
 static char *dup_alloc(hu_allocator_t *alloc, const char *s, size_t n) {
@@ -102,6 +105,148 @@ static const hu_provider_vtable_t mock_vtable = {
     .get_name = mock_get_name,
     .deinit = mock_deinit,
 };
+
+/* Full-request double: records the budget and model the orchestrator sends
+ * and answers with the canned text as `content`. */
+static hu_error_t mock_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_request_t *request,
+                            const char *model, size_t model_len, double temp,
+                            hu_chat_response_t *out) {
+    (void)temp;
+    mock_provider_ctx_t *m = (mock_provider_ctx_t *)ctx;
+    m->call_count++;
+    m->seen_max_tokens = request->max_tokens;
+    size_t n = model_len < sizeof(m->seen_model) - 1 ? model_len : sizeof(m->seen_model) - 1;
+    memcpy(m->seen_model, model, n);
+    m->seen_model[n] = '\0';
+    memset(out, 0, sizeof(*out));
+    size_t rn = strlen(m->canned_response);
+    out->content = dup_alloc(alloc, m->canned_response, rn);
+    out->content_len = out->content ? rn : 0;
+    return out->content ? HU_OK : HU_ERR_OUT_OF_MEMORY;
+}
+
+static const hu_provider_vtable_t mock_chat_vtable = {
+    .chat = mock_chat,
+    .supports_native_tools = mock_supports_native_tools,
+    .get_name = mock_get_name,
+    .deinit = mock_deinit,
+};
+
+static const char *const k_fenced_pattern_reply =
+    "<think>they want strict JSON</think>\n```json\n{"
+    "  \"prose_summary\": \"Seth keeps mentioning the move.\","
+    "  \"patterns\": ["
+    "    {\"type\": \"topic_recurrence\", \"subject\": \"Seth\","
+    "     \"observation\": \"the move comes up most evenings\","
+    "     \"confidence\": 0.9,"
+    "     \"evidence_ids\": [\"t_e2e_002\"], \"channels\": [\"imessage\"]}"
+    "  ]"
+    "}\n```";
+
+/* 2026-09-04: the live server fences its JSON and truncates at its 256-token
+ * default. The orchestrator must (a) send a real output budget and the
+ * caller's model id through the full-request path, and (b) locate the
+ * payload inside think blocks and fences before parsing. Pre-fix this
+ * reply was rejected as schema_invalid. */
+static void test_e2e_full_request_carries_budget_model_and_strips_fences(void) {
+    hu_reflection_reset_warn_guards_for_test();
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
+    HU_ASSERT_EQ((int)hu_reflection_storage_migrate(db), (int)HU_OK);
+
+    hu_reflection_loop_config_t cfg = {.enabled = true,
+                                       .min_interval_hours = 12,
+                                       .idle_threshold_hours = 2,
+                                       .daily_floor_hours = 24,
+                                       .provider = "mlx_local"};
+    mock_provider_ctx_t mctx = {.canned_response = k_fenced_pattern_reply};
+    hu_provider_t prov = {.ctx = &mctx, .vtable = &mock_chat_vtable};
+    hu_allocator_t alloc = hu_system_allocator();
+    uint64_t now_ms = (uint64_t)time(NULL) * 1000ULL;
+    const hu_reflection_turn_t turns[] = {{.turn_id = "t_e2e_002",
+                                           .channel = "imessage",
+                                           .sender = "user",
+                                           .ts_ms = now_ms - 3600ULL * 1000ULL,
+                                           .content = "packing the kitchen tonight"}};
+    static_iter_ctx_t iter_ctx = {.turns = turns, .count = 1, .pos = 0};
+    hu_reflection_run_inputs_t inputs = {.db = db,
+                                         .cfg = &cfg,
+                                         .provider = &prov,
+                                         .alloc = &alloc,
+                                         .iter_fn = static_iter,
+                                         .iter_ctx = &iter_ctx,
+                                         .last_user_activity_ms = 0,
+                                         .now_ms = now_ms,
+                                         .max_input_chars = 0,
+                                         .model = "GLM-4.5-Air-4bit",
+                                         .model_len = strlen("GLM-4.5-Air-4bit")};
+    hu_reflection_run_status_t status = HU_REFLECTION_RUN_GATED;
+    int kept = 0, dropped = 0;
+    HU_ASSERT_EQ((int)hu_reflection_run(&inputs, /*force=*/true, &status, &kept, &dropped),
+                 (int)HU_OK);
+    HU_ASSERT_EQ((int)status, (int)HU_REFLECTION_RUN_OK);
+    HU_ASSERT_EQ(kept, 1);
+    HU_ASSERT_EQ(mctx.call_count, 1);
+    HU_ASSERT_EQ((int)mctx.seen_max_tokens, (int)HU_REFLECTION_MAX_OUTPUT_TOKENS);
+    HU_ASSERT_STR_EQ(mctx.seen_model, "GLM-4.5-Air-4bit");
+    sqlite3_close(db);
+}
+
+/* A run that fails to parse must back off for min_interval like a success.
+ * Pre-fix, last_completed_ms ignored failures, so the next non-forced tick
+ * ran again immediately (1,490 calls in 18 h on prod). */
+static void test_e2e_failed_run_backs_off_for_min_interval(void) {
+    hu_reflection_reset_warn_guards_for_test();
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
+    HU_ASSERT_EQ((int)hu_reflection_storage_migrate(db), (int)HU_OK);
+
+    hu_reflection_loop_config_t cfg = {.enabled = true,
+                                       .min_interval_hours = 6,
+                                       .idle_threshold_hours = 1,
+                                       .daily_floor_hours = 24,
+                                       .provider = "mock"};
+    mock_provider_ctx_t mctx = {.canned_response = "Sure! Here are the patterns I noticed:"};
+    hu_provider_t prov = {.ctx = &mctx, .vtable = &mock_vtable};
+    hu_allocator_t alloc = hu_system_allocator();
+    uint64_t now_ms = (uint64_t)time(NULL) * 1000ULL;
+    const hu_reflection_turn_t turns[] = {{.turn_id = "t_e2e_003",
+                                           .channel = "imessage",
+                                           .sender = "user",
+                                           .ts_ms = now_ms - 7200ULL * 1000ULL,
+                                           .content = "long day"}};
+    static_iter_ctx_t iter_ctx = {.turns = turns, .count = 1, .pos = 0};
+    hu_reflection_run_inputs_t inputs = {.db = db,
+                                         .cfg = &cfg,
+                                         .provider = &prov,
+                                         .alloc = &alloc,
+                                         .iter_fn = static_iter,
+                                         .iter_ctx = &iter_ctx,
+                                         .last_user_activity_ms = now_ms - 7200ULL * 1000ULL,
+                                         .now_ms = now_ms,
+                                         .max_input_chars = 0};
+    hu_reflection_run_status_t status = HU_REFLECTION_RUN_GATED;
+    int kept = 0, dropped = 0;
+    /* First tick: idle, no prior run → runs, and the reply has no JSON. */
+    HU_ASSERT_EQ((int)hu_reflection_run(&inputs, false, &status, &kept, &dropped), (int)HU_OK);
+    HU_ASSERT_EQ((int)status, (int)HU_REFLECTION_RUN_SCHEMA_INVALID);
+    HU_ASSERT_EQ(mctx.call_count, 1);
+
+    /* One minute later, still idle: must be GATED, not called again. */
+    iter_ctx.pos = 0;
+    inputs.now_ms = now_ms + 60ULL * 1000ULL;
+    HU_ASSERT_EQ((int)hu_reflection_run(&inputs, false, &status, &kept, &dropped), (int)HU_OK);
+    HU_ASSERT_EQ((int)status, (int)HU_REFLECTION_RUN_GATED);
+    HU_ASSERT_EQ(mctx.call_count, 1);
+
+    /* Past min_interval: eligible again. */
+    iter_ctx.pos = 0;
+    inputs.now_ms = now_ms + 7ULL * 3600ULL * 1000ULL;
+    inputs.last_user_activity_ms = inputs.now_ms - 7200ULL * 1000ULL;
+    HU_ASSERT_EQ((int)hu_reflection_run(&inputs, false, &status, &kept, &dropped), (int)HU_OK);
+    HU_ASSERT_EQ(mctx.call_count, 2);
+    sqlite3_close(db);
+}
 
 /* ── The end-to-end test ───────────────────────────────────────── */
 
@@ -287,6 +432,8 @@ static void test_t12_check_failure_rate_disabled_is_noop(void) {
 void run_reflection_e2e_tests(void) {
     HU_TEST_SUITE("reflection_e2e");
     HU_RUN_TEST(test_e2e_run_then_prompt_surfaces_new_pattern);
+    HU_RUN_TEST(test_e2e_full_request_carries_budget_model_and_strips_fences);
+    HU_RUN_TEST(test_e2e_failed_run_backs_off_for_min_interval);
     HU_RUN_TEST(test_e2e_config_json_flips_subsystem_on);
     HU_RUN_TEST(test_t12_count_helpers_distinguish_status);
     HU_RUN_TEST(test_t12_check_failure_rate_small_sample_silent);

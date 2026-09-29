@@ -502,11 +502,13 @@ export class ScMemoryView extends GatewayAwareLitElement {
       </hu-page-hero>
 
       <div class="layout">
-        ${this.loading
-          ? this._renderSkeleton()
-          : this.error
-            ? this._renderError()
-            : this._renderContent()}
+        ${
+          this.loading
+            ? this._renderSkeleton()
+            : this.error
+              ? this._renderError()
+              : this._renderContent()
+        }
       </div>
     `;
   }
@@ -564,9 +566,11 @@ export class ScMemoryView extends GatewayAwareLitElement {
         ></hu-stat-card>
       </hu-stats-row>
 
-      ${this.actionError
-        ? html`<div class="error-banner" role="alert">${this.actionError}</div>`
-        : nothing}
+      ${
+        this.actionError
+          ? html`<div class="error-banner" role="alert">${this.actionError}</div>`
+          : nothing
+      }
 
       <div class="controls-header">
         <span class="controls-count"
@@ -598,89 +602,95 @@ export class ScMemoryView extends GatewayAwareLitElement {
         ></hu-segmented-control>
       </div>
 
-      ${filtered.length === 0
-        ? html`<hu-empty-state
-            heading="No memories found"
-            description=${this.searchQuery || this.categoryFilter !== "all"
-              ? "Try adjusting your search or filter."
-              : "Memories will appear here as h-uman learns from conversations and ingested files."}
-            .icon=${icons.brain}
-          ></hu-empty-state>`
-        : html`
-            <div
-              class="memory-grid hu-scroll-reveal-stagger"
-              role="list"
-              aria-label="Memory entries"
-            >
-              ${filtered.map((entry) => this._renderEntry(entry))}
-            </div>
-          `}
-      ${this.graphEntities.length > 0
-        ? html`
-            <hu-section-header
-              heading="Knowledge Graph"
-              description="Entities and relations in the knowledge graph"
-            ></hu-section-header>
-            <hu-card>
-              <div class="graph-container" style="background: var(--hu-surface-container)">
-                <svg
-                  part="graph"
-                  viewBox="0 0 400 400"
-                  preserveAspectRatio="xMidYMid meet"
-                  aria-label="Knowledge graph visualization"
-                >
-                  ${this.graphRelations.map((rel: GraphRelation) => {
-                    const src = this.graphEntities.find((e: GraphEntity) => e.id === rel.source);
-                    const tgt = this.graphEntities.find((e: GraphEntity) => e.id === rel.target);
-                    if (
-                      !src ||
-                      !tgt ||
-                      src.x == null ||
-                      src.y == null ||
-                      tgt.x == null ||
-                      tgt.y == null
-                    )
-                      return nothing;
-                    return html`<line
-                      x1=${src.x}
-                      y1=${src.y}
-                      x2=${tgt.x}
-                      y2=${tgt.y}
-                      stroke="var(--hu-border)"
-                      stroke-width="1"
-                    />`;
-                  })}
-                  ${this.graphEntities.map((e: GraphEntity) => {
-                    const x = e.x ?? 200;
-                    const y = e.y ?? 200;
-                    const r = Math.max(10, Math.min(22, 10 + (e.recall_count ?? 0) * 2));
-                    return html`
-                      <g>
-                        <circle
-                          cx=${x}
-                          cy=${y}
-                          r=${r}
-                          fill="var(--hu-accent)"
-                          aria-label=${e.name}
-                        />
-                        <text
-                          x=${x}
-                          y=${y + r + 12}
-                          text-anchor="middle"
-                          fill="var(--hu-text-primary)"
-                          font-size="10"
-                          font-family="var(--hu-font)"
-                        >
-                          ${e.name.length > 14 ? e.name.slice(0, 12) + "…" : e.name}
-                        </text>
-                      </g>
-                    `;
-                  })}
-                </svg>
+      ${
+        filtered.length === 0
+          ? html`<hu-empty-state
+              heading="No memories found"
+              description=${
+                this.searchQuery || this.categoryFilter !== "all"
+                  ? "Try adjusting your search or filter."
+                  : "Memories will appear here as h-uman learns from conversations and ingested files."
+              }
+              .icon=${icons.brain}
+            ></hu-empty-state>`
+          : html`
+              <div
+                class="memory-grid hu-scroll-reveal-stagger"
+                role="list"
+                aria-label="Memory entries"
+              >
+                ${filtered.map((entry) => this._renderEntry(entry))}
               </div>
-            </hu-card>
-          `
-        : nothing}
+            `
+      }
+      ${
+        this.graphEntities.length > 0
+          ? html`
+              <hu-section-header
+                heading="Knowledge Graph"
+                description="Entities and relations in the knowledge graph"
+              ></hu-section-header>
+              <hu-card>
+                <div class="graph-container" style="background: var(--hu-surface-container)">
+                  <svg
+                    part="graph"
+                    viewBox="0 0 400 400"
+                    preserveAspectRatio="xMidYMid meet"
+                    aria-label="Knowledge graph visualization"
+                  >
+                    ${this.graphRelations.map((rel: GraphRelation) => {
+                      const src = this.graphEntities.find((e: GraphEntity) => e.id === rel.source);
+                      const tgt = this.graphEntities.find((e: GraphEntity) => e.id === rel.target);
+                      if (
+                        !src ||
+                        !tgt ||
+                        src.x == null ||
+                        src.y == null ||
+                        tgt.x == null ||
+                        tgt.y == null
+                      )
+                        return nothing;
+                      return html`<line
+                        x1=${src.x}
+                        y1=${src.y}
+                        x2=${tgt.x}
+                        y2=${tgt.y}
+                        stroke="var(--hu-border)"
+                        stroke-width="1"
+                      />`;
+                    })}
+                    ${this.graphEntities.map((e: GraphEntity) => {
+                      const x = e.x ?? 200;
+                      const y = e.y ?? 200;
+                      const r = Math.max(10, Math.min(22, 10 + (e.recall_count ?? 0) * 2));
+                      return html`
+                        <g>
+                          <circle
+                            cx=${x}
+                            cy=${y}
+                            r=${r}
+                            fill="var(--hu-accent)"
+                            aria-label=${e.name}
+                          />
+                          <text
+                            x=${x}
+                            y=${y + r + 12}
+                            text-anchor="middle"
+                            fill="var(--hu-text-primary)"
+                            font-size="10"
+                            font-family="var(--hu-font)"
+                          >
+                            ${e.name.length > 14 ? e.name.slice(0, 12) + "…" : e.name}
+                          </text>
+                        </g>
+                      `;
+                    })}
+                  </svg>
+                </div>
+              </hu-card>
+            `
+          : nothing
+      }
     `;
   }
 
@@ -701,12 +711,16 @@ export class ScMemoryView extends GatewayAwareLitElement {
           </div>
           <div class="meta">
             <hu-badge variant=${categoryVariant(entry.category)} label=${entry.category}></hu-badge>
-            ${entry.source
-              ? html`<span class="source">${sourceLabel(entry.source)}</span>`
-              : nothing}
-            ${entry.timestamp
-              ? html`<span class="timestamp">${formatTimestamp(entry.timestamp)}</span>`
-              : nothing}
+            ${
+              entry.source
+                ? html`<span class="source">${sourceLabel(entry.source)}</span>`
+                : nothing
+            }
+            ${
+              entry.timestamp
+                ? html`<span class="timestamp">${formatTimestamp(entry.timestamp)}</span>`
+                : nothing
+            }
           </div>
           <div class="key">${entry.key}</div>
         </div>

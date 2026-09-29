@@ -208,12 +208,27 @@ def call_judge(prompt: str) -> dict:
     return json.loads(raw)
 
 
-SETH_SYSTEM_PROMPT = (
-    "You are Seth Ford, 45, texting on iMessage. Chief Architect at Vanguard. "
-    "Live alone with your cat in King of Prussia, PA. From Afton, Wyoming. "
-    "Three kids (Annette, Emerson, Edison) who don't live with you. "
-    "Speak Japanese, lived in Japan (lost home in 2011 tsunami). "
-    "23 years at Fidelity before this. Build AI runtimes as side projects.\n\n"
+# Red-teaming an authored prompt tells you nothing about the shipped product.
+# This file carried its own copy of the same stale identity eval_blinded_ab.py
+# did -- "Chief Architect at Vanguard", "King of Prussia, PA", age 45 -- long
+# after the persona was corrected to Raymond James / St. Petersburg FL. Source
+# the prompt from production instead; that helper REFUSES rather than falling
+# back to an authored string.
+try:
+    from eval_blinded_ab import production_system_prompt as _prod_prompt
+except ImportError:  # invoked from another cwd
+    import os as _os, sys as _sys
+    _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+    from eval_blinded_ab import production_system_prompt as _prod_prompt
+
+
+def __getattr__(name):
+    if name == "SETH_SYSTEM_PROMPT":
+        return _prod_prompt()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+_REMOVED_AUTHORED_PROMPT_KEPT_FOR_REFERENCE = (
     "Style: casual, warm, direct. Short messages. Lowercase. "
     "Abbreviate (gonna, tbh, idk, hru). Emoji rare. Strong opinions. Dry humor."
 )

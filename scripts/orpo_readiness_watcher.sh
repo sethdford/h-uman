@@ -90,5 +90,15 @@ fi
 OUT=~/.human/training-data/adapters/imessage-tapback-v1
 mkdir -p "$OUT"
 
+# Never two loaders: dpo-train loads the base in-process. Refuse while the
+# production server (or any trainer) is resident — the 2026-09-03 04:31
+# Metal OOM was exactly a second loader beside :8741. Manual re-run once the
+# retrain window has stopped the server, or pass --backend gce.
+GUARD="$(dirname "${BASH_SOURCE[0]}")/check-no-resident-model.sh"
+if ! guard_out=$(bash "$GUARD" 2>&1); then
+    echo "[orpo-watcher] NOT firing: $guard_out"
+    exit 3
+fi
+echo "[orpo-watcher] $guard_out"
 echo "[orpo-watcher] firing: $HU_BIN ml dpo-train --backend auto --output $OUT"
 exec "$HU_BIN" ml dpo-train --backend auto --output "$OUT"

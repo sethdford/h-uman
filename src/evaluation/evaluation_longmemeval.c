@@ -14,9 +14,10 @@
  * deterministic without calling a provider.
  */
 
-#include "human/evaluation/evaluation.h"
 #include "evaluation_dataset_loader.h"
 #include "evaluation_internal.h"
+#include "human/core/time.h"
+#include "human/evaluation/evaluation.h"
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
@@ -117,7 +118,9 @@ typedef struct {
 
 /* ── helpers ────────────────────────────────────────────────────────────── */
 
-static int low(int c) { return (c >= 'A' && c <= 'Z') ? c + 32 : c; }
+static int low(int c) {
+    return (c >= 'A' && c <= 'Z') ? c + 32 : c;
+}
 
 static bool contains_word_ci(const char *hay, const char *word) {
     size_t wlen = strlen(word);
@@ -126,8 +129,7 @@ static bool contains_word_ci(const char *hay, const char *word) {
         return false;
     for (size_t i = 0; i + wlen <= hlen; i++) {
         bool prev_boundary = (i == 0) || !isalnum((unsigned char)hay[i - 1]);
-        bool next_boundary =
-            (i + wlen == hlen) || !isalnum((unsigned char)hay[i + wlen]);
+        bool next_boundary = (i + wlen == hlen) || !isalnum((unsigned char)hay[i + wlen]);
         if (!prev_boundary || !next_boundary)
             continue;
         size_t j = 0;
@@ -165,7 +167,7 @@ static bool lme_available(void *ctx) {
 }
 
 static int64_t now_ms(void) {
-    return (int64_t)time(NULL) * 1000;
+    return (int64_t)hu_time_wall_ms();
 }
 
 /* Materialise the working set from disk, falling back to the inline
@@ -175,8 +177,8 @@ static hu_error_t lme_ensure_working_set(lme_ctx_t *c, hu_allocator_t *alloc) {
         return HU_OK;
     hu_error_t err = hu_eval_lme_load(alloc, &c->owned);
     if (err == HU_OK && c->owned.count > 0) {
-        lme_view_t *view = (lme_view_t *)alloc->alloc(
-            alloc->ctx, c->owned.count * sizeof(lme_view_t));
+        lme_view_t *view =
+            (lme_view_t *)alloc->alloc(alloc->ctx, c->owned.count * sizeof(lme_view_t));
         if (!view) {
             hu_eval_lme_free(alloc, &c->owned);
             return HU_ERR_OUT_OF_MEMORY;
@@ -194,8 +196,7 @@ static hu_error_t lme_ensure_working_set(lme_ctx_t *c, hu_allocator_t *alloc) {
         return HU_OK;
     }
     /* Fall back to inline synthetic. */
-    lme_view_t *view = (lme_view_t *)alloc->alloc(
-        alloc->ctx, LME_N * sizeof(lme_view_t));
+    lme_view_t *view = (lme_view_t *)alloc->alloc(alloc->ctx, LME_N * sizeof(lme_view_t));
     if (!view)
         return HU_ERR_OUT_OF_MEMORY;
     for (size_t i = 0; i < LME_N; i++) {
@@ -246,8 +247,7 @@ static hu_error_t lme_run(void *ctx, hu_allocator_t *alloc, hu_evaluation_run_re
         }
         double score = in_cat == 0 ? 0.0 : (double)passed / (double)in_cat;
         char metric_name[64];
-        int n = snprintf(metric_name, sizeof(metric_name), "category_%s",
-                         LME_CATEGORIES[cat_idx]);
+        int n = snprintf(metric_name, sizeof(metric_name), "category_%s", LME_CATEGORIES[cat_idx]);
         if (n < 0 || (size_t)n >= sizeof(metric_name)) {
             hu_evaluation_report_free(alloc, out);
             return HU_ERR_INTERNAL;
@@ -264,8 +264,8 @@ static hu_error_t lme_run(void *ctx, hu_allocator_t *alloc, hu_evaluation_run_re
     out->prompts_passed = total_passed;
     out->prompts_failed = c->count - total_passed;
 
-    err = hu_evaluation_report_add_metric(alloc, out, "real_corpus",
-                                          c->loaded ? 1.0 : 0.0, c->count);
+    err =
+        hu_evaluation_report_add_metric(alloc, out, "real_corpus", c->loaded ? 1.0 : 0.0, c->count);
     if (err != HU_OK) {
         hu_evaluation_report_free(alloc, out);
         return err;

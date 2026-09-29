@@ -23,7 +23,6 @@ dpo.c              Direct Preference Optimization
 rl_trainer.c       RL trainer vtable dispatcher (US-7.10, Init #06 phase 1)
 rl_trainer_simpo.c SimPO loss head registered behind hu_rl_trainer_t
 lora.c             Low-Rank Adaptation fine-tuning
-agent_trainer.c    Agent-driven training orchestration
 checkpoint.c       Model checkpoint save/load
 cli.c              ML CLI subcommands
 ```

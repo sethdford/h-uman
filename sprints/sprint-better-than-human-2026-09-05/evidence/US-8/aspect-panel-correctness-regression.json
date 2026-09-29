@@ -1,0 +1,28 @@
+{
+  "ts": "20260905T211734Z",
+  "target": "Story US-8 (SHADOW-only difficulty routing, default OFF) of sprint sprint-better-than-human-2026-09-05. Time-boxed: read exactly two things, then answer. (1) `git -C /Users/sethford/Projects/h-uman/.claude/worktrees/sbth-us8 diff sprint-better-than-human-2026-09-05..sbth-us8 -- src/agent/model_router.c src/gateway/cp_admin.c` (2) `git -C /Users/sethford/Projects/h-uman/.claude/worktrees/sbth-us8 diff sprint-better-than-human-2026-09-05..sbth-us8 -- tests/test_model_router.c`. Do not build, do not run tests, do not read other files unless a specific question cannot be answered otherwise. Correctness question: does hu_model_route() return the same selection with HU_DIFFICULTY_ROUTE=shadow as with it unset, and does SHADOW add exactly one HU_ROUTE_SHADOW_DIFFICULTY entry only when the heuristic chose conversational and the predicate fires; is the 12-word boundary correct (<=12 casual)? Regression question: do BOTH readers of the route log (hu_route_log_tier_counts and the /admin/models/decisions loop in cp_admin.c) skip shadow rows, is 'total' the filtered count, and are pre-existing tests untouched? Rules: read-only; ABSOLUTE paths; never contact ports 8741/8743; no message text/phones/names in output. Emit VERDICT/CONFIDENCE/RATIONALE and your RESULT line within your first few turns.",
+  "aspects": [
+    {
+      "aspect": "correctness",
+      "verdict": "pass",
+      "confidence": 0.9,
+      "rationale": "In `src/agent/model_router.c:383-411` the shadow block runs only after `sel` is fully computed and the real row already recorded, never mutates `sel`, and appends exactly one `HU_ROUTE_SHADOW_DIFFICULTY` row only when `sel.tier == HU_TIER_CONVERSATIONAL` and the predicate fires; the predicate (`mode",
+      "elapsed_s": 31.18
+    },
+    {
+      "aspect": "regression",
+      "verdict": "pass",
+      "confidence": 0.9,
+      "rationale": "`hu_model_route()` computes and logs `sel` before the shadow block, which only reads `sel.tier` and records a separate `shadow_sel` into the global log, so the returned selection is byte-identical between OFF and SHADOW; the predicate uses `<= 12` words \u2192 not promoted (macro is 12), and exactly one ",
+      "elapsed_s": 44.47
+    }
+  ],
+  "aggregate": {
+    "verdict": "PASS",
+    "pass_weight": 1.8,
+    "fail_weight": 0,
+    "pass_share": 1.0,
+    "split": false
+  },
+  "cross_family_tiebreak": null
+}

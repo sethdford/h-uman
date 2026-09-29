@@ -127,24 +127,28 @@ export class ScAvatar extends LitElement {
           background: ${showImage ? "transparent" : initialsBg};
         "
       >
-        ${showImage
-          ? html`<img
-              src=${this.src}
-              alt=${this.name || "User avatar"}
-              @error=${this._onImageError}
-            />`
-          : html`<span>${initials}</span>`}
+        ${
+          showImage
+            ? html`<img
+                src=${this.src}
+                alt=${this.name || "User avatar"}
+                @error=${this._onImageError}
+              />`
+            : html`<span>${initials}</span>`
+        }
       </div>
-      ${this.status
-        ? html`
-            <div class="status-dot-wrap size-${this.size}" aria-hidden="true">
-              <hu-status-dot
-                status=${this.status}
-                size=${this.size === "lg" ? "md" : "sm"}
-              ></hu-status-dot>
-            </div>
-          `
-        : null}
+      ${
+        this.status
+          ? html`
+              <div class="status-dot-wrap size-${this.size}" aria-hidden="true">
+                <hu-status-dot
+                  status=${this.status}
+                  size=${this.size === "lg" ? "md" : "sm"}
+                ></hu-status-dot>
+              </div>
+            `
+          : null
+      }
     `;
   }
 }

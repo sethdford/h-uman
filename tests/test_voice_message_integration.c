@@ -19,7 +19,6 @@
 #include "human/config.h"
 #include "human/context/conversation.h"
 #include "human/core/allocator.h"
-#include "human/tts/transcript_prep.h"
 #include "human/core/error.h"
 #include "human/core/json.h"
 #include "human/persona.h"
@@ -27,6 +26,7 @@
 #include "human/tts/audio_pipeline.h"
 #include "human/tts/cartesia.h"
 #include "human/tts/emotion_map.h"
+#include "human/tts/transcript_prep.h"
 #include "human/voice/emotion_voice_map.h"
 #include "test_framework.h"
 #include <stdio.h>
@@ -76,12 +76,11 @@ static void test_full_pipeline_tool_to_audio_file(void) {
 
     /* 4. Daemon path: build voice transcript (copy to stack buffer, inject nonverbals) */
     char voice_transcript[4096];
-    size_t vt_len = pv_len < sizeof(voice_transcript) - 64 ? pv_len
-                                                           : sizeof(voice_transcript) - 64;
+    size_t vt_len = pv_len < sizeof(voice_transcript) - 64 ? pv_len : sizeof(voice_transcript) - 64;
     memcpy(voice_transcript, pv_transcript, vt_len);
     voice_transcript[vt_len] = '\0';
-    vt_len = hu_conversation_inject_nonverbals(voice_transcript, vt_len,
-                                               sizeof(voice_transcript), 42, true);
+    vt_len = hu_conversation_inject_nonverbals(voice_transcript, vt_len, sizeof(voice_transcript),
+                                               42, true);
     HU_ASSERT_TRUE(vt_len > 0);
 
     /* 5. Emotion: use override from tool (daemon uses pv_emotion if set) */
@@ -99,9 +98,8 @@ static void test_full_pipeline_tool_to_audio_file(void) {
     };
     unsigned char *audio_bytes = NULL;
     size_t audio_len = 0;
-    hu_error_t tts_err = hu_cartesia_tts_synthesize(
-        &alloc, "test-key", 8, voice_transcript, vt_len, &tts_cfg, "mp3",
-        &audio_bytes, &audio_len);
+    hu_error_t tts_err = hu_cartesia_tts_synthesize(&alloc, "test-key", 8, voice_transcript, vt_len,
+                                                    &tts_cfg, "mp3", &audio_bytes, &audio_len);
 
 #if HU_ENABLE_CARTESIA
     HU_ASSERT_EQ(tts_err, HU_OK);
@@ -112,8 +110,8 @@ static void test_full_pipeline_tool_to_audio_file(void) {
 
     /* 7. Audio pipeline: write to temp file */
     char audio_path[512];
-    hu_error_t pipe_err = hu_audio_tts_bytes_to_temp(
-        &alloc, audio_bytes, audio_len, "mp3", audio_path, sizeof(audio_path));
+    hu_error_t pipe_err = hu_audio_tts_bytes_to_temp(&alloc, audio_bytes, audio_len, "mp3",
+                                                     audio_path, sizeof(audio_path));
     HU_ASSERT_EQ(pipe_err, HU_OK);
     HU_ASSERT_TRUE(audio_path[0] != '\0');
 
@@ -181,8 +179,8 @@ static void test_pipeline_auto_emotion_from_context(void) {
     /* Simulate daemon: auto-detect emotion from response */
     const char *response = "Congratulations on the promotion!";
     size_t resp_len = strlen(response);
-    const char *emo_str = hu_cartesia_emotion_from_context(
-        "I got promoted!", 15, response, resp_len, 14);
+    const char *emo_str =
+        hu_cartesia_emotion_from_context("I got promoted!", 15, response, resp_len, 14);
 #ifdef HU_ENABLE_CARTESIA
     HU_ASSERT_STR_EQ(emo_str, "excited");
 #else
@@ -308,10 +306,9 @@ static void test_pipeline_with_preprocessor(void) {
     hu_agent_clear_pending_voice();
 
     /* Multi-sentence transcript with emotional range */
-    const char *json =
-        "{\"transcript\":\"I'm so sorry about what happened. "
-        "But honestly, you handled it with so much grace. "
-        "I'm really proud of you!\"}";
+    const char *json = "{\"transcript\":\"I'm so sorry about what happened. "
+                       "But honestly, you handled it with so much grace. "
+                       "I'm really proud of you!\"}";
     hu_json_value_t *parsed = NULL;
     hu_json_parse(&alloc, json, strlen(json), &parsed);
     hu_tool_result_t result = {0};
@@ -344,9 +341,11 @@ static void test_pipeline_with_preprocessor(void) {
     HU_ASSERT_NOT_NULL(prep.dominant_emotion);
     HU_ASSERT_TRUE(prep.volume > 0.0f && prep.volume <= 2.0f);
 
-    /* Verify SSML annotations are present */
-    HU_ASSERT_TRUE(strstr(prep.output, "<break time=") != NULL);
+    /* Sparse SSML (voiceai 2026-09-27): one calm opening emotion, and at most one
+     * explicit beat — Sonic paces ordinary sentences from punctuation. */
     HU_ASSERT_TRUE(strstr(prep.output, "<emotion value=") != NULL);
+    const char *b1 = strstr(prep.output, "<break time=");
+    HU_ASSERT_TRUE(b1 == NULL || strstr(b1 + 1, "<break time=") == NULL);
 
 #if HU_ENABLE_CARTESIA
     /* Feed preprocessed output to TTS */
@@ -360,9 +359,9 @@ static void test_pipeline_with_preprocessor(void) {
     };
     unsigned char *audio_bytes = NULL;
     size_t audio_len = 0;
-    hu_error_t tts_err = hu_cartesia_tts_synthesize(
-        &alloc, "test-key", 8, prep.output, prep.output_len, &tts_cfg, "mp3",
-        &audio_bytes, &audio_len);
+    hu_error_t tts_err =
+        hu_cartesia_tts_synthesize(&alloc, "test-key", 8, prep.output, prep.output_len, &tts_cfg,
+                                   "mp3", &audio_bytes, &audio_len);
     HU_ASSERT_EQ(tts_err, HU_OK);
     HU_ASSERT_NOT_NULL(audio_bytes);
     HU_ASSERT_EQ(audio_len, 400u);
@@ -384,10 +383,9 @@ static void test_pipeline_with_preprocessor_strip_ssml(void) {
     hu_agent_set_current_for_tools(&fake_agent);
     hu_agent_clear_pending_voice();
 
-    const char *json =
-        "{\"transcript\":\"I'm so sorry about what happened. "
-        "But honestly, you handled it with so much grace. "
-        "I'm really proud of you!\"}";
+    const char *json = "{\"transcript\":\"I'm so sorry about what happened. "
+                       "But honestly, you handled it with so much grace. "
+                       "I'm really proud of you!\"}";
     hu_json_value_t *parsed = NULL;
     hu_json_parse(&alloc, json, strlen(json), &parsed);
     hu_tool_result_t result = {0};
@@ -436,9 +434,9 @@ static void test_pipeline_with_preprocessor_strip_ssml(void) {
     };
     unsigned char *audio_bytes = NULL;
     size_t audio_len = 0;
-    hu_error_t tts_err = hu_cartesia_tts_synthesize(
-        &alloc, "test-key", 8, prep.output, prep.output_len, &tts_cfg, "mp3",
-        &audio_bytes, &audio_len);
+    hu_error_t tts_err =
+        hu_cartesia_tts_synthesize(&alloc, "test-key", 8, prep.output, prep.output_len, &tts_cfg,
+                                   "mp3", &audio_bytes, &audio_len);
     HU_ASSERT_EQ(tts_err, HU_OK);
     HU_ASSERT_NOT_NULL(audio_bytes);
     HU_ASSERT_EQ(audio_len, 400u);

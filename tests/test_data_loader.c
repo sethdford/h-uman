@@ -209,6 +209,8 @@ static void integration_all_data_files_load_successfully(void) {
         "conversation/conversation_intros.json",
         "conversation/time_gap_phrases.json",
         "conversation/crisis_keywords.json",
+        "conversation/commitment_keywords.json",
+        "daemon/courtesy_phrases.json",
         "memory/emotion_prefixes.json",
         "memory/emotion_adjectives.json",
         "memory/relationship_words.json",
@@ -474,9 +476,8 @@ static void test_data_loader_borrow_embedded_no_alloc(void) {
     hu_allocator_t alloc = hu_system_allocator();
     char *copy = NULL;
     size_t copy_len = 0;
-    HU_ASSERT_EQ(hu_data_load_embedded(&alloc, "prompts/safety_rules_compact.txt", &copy,
-                                       &copy_len),
-                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_data_load_embedded(&alloc, "prompts/safety_rules_compact.txt", &copy, &copy_len), HU_OK);
     HU_ASSERT_EQ(blen, copy_len);
     HU_ASSERT_TRUE(memcmp(bytes, copy, blen) == 0);
     alloc.free(alloc.ctx, copy, copy_len + 1);

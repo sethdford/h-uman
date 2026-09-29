@@ -1,7 +1,12 @@
 #include "human/channels/imessage_reply.h"
 #include "human/channels/imessage_action.h"
+#include "human/channels/imessage_caps.h"
+#include "human/channels/imessage_schema.h"
+#include "human/channels/imessage_send_observer.h"
+#include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/log.h"
+#include "human/core/process_util.h"
 #include "human/core/time.h"
 #include <stdio.h>
 #include <string.h>
@@ -136,7 +141,11 @@ bool hu_imessage_reply_verify_threaded(const char *target, size_t target_len, in
     if (g_test_verify) {
         return g_test_verify(target, target_len, since_rowid);
     }
-#if defined(__APPLE__) && defined(HU_IMESSAGE_TAPBACK_ENABLED) && !HU_IS_TEST
+/* chat.db read-back — NOT an AX operation. This was gated on
+ * HU_IMESSAGE_TAPBACK_ENABLED (OFF in every shipping build), so it returned
+ * false unconditionally and even a genuinely threaded bridge reply was
+ * recorded as "flat commit" (live 2026-07-20). */
+#if defined(__APPLE__) && !HU_IS_TEST
     return hu_imessage_ax_reply_verify_threaded(target, target_len, since_rowid);
 #else
     (void)target;
@@ -151,11 +160,29 @@ bool hu_imessage_reply_verify_threaded(const char *target, size_t target_len, in
  * verification best-effort — it matches any outbound row rather than over-
  * claiming). */
 int64_t hu_imessage_reply_newest_rowid(void) {
-#if defined(__APPLE__) && defined(HU_IMESSAGE_TAPBACK_ENABLED) && !HU_IS_TEST
+#if defined(__APPLE__) && !HU_IS_TEST
     return hu_imessage_ax_reply_newest_rowid();
 #else
     return 0;
 #endif
+}
+
+/* ── Tier-0 bridge circuit breaker ───────────────────────────────────────
+ * State lives here (one process, one bridge); the DECISION is the pure
+ * predicate below so the truth table is unit-testable without wall-clock
+ * or process state (tests/test_imessage_threaded_reply.c). */
+#if defined(__APPLE__) && !HU_IS_TEST && defined(HU_ENABLE_SQLITE)
+static unsigned g_bridge_consec_failures = 0;
+static int64_t g_bridge_last_failure_ms = 0;
+#endif
+
+bool hu_imessage_bridge_breaker_should_skip(unsigned consecutive_failures, int64_t now_ms,
+                                            int64_t last_failure_ms) {
+    if (consecutive_failures < HU_IMESSAGE_BRIDGE_BREAKER_THRESHOLD)
+        return false;
+    if (last_failure_ms <= 0)
+        return false; /* a count with no recorded time must never latch open */
+    return (now_ms - last_failure_ms) < (int64_t)HU_IMESSAGE_BRIDGE_BREAKER_COOLDOWN_MS;
 }
 
 /* One-shot guard for the Tier-3 degradation WARN: a busy reply path that
@@ -208,6 +235,29 @@ static void emit_telemetry(const char *tier_used, hu_reply_style_t style, int se
  * builds those symbols don't exist, so the tier-escalation logic below is
  * exercised purely through the g_test_tier1 / g_test_tier2 stubs. */
 
+/* Common tail for every reply tier: stamp which tier ran, read back from
+ * chat.db whether the send actually threaded, emit telemetry, return HU_OK.
+ * Extracted so the four tiers below share one epilogue instead of repeating
+ * the stamp/verify/telemetry sequence (clone-ratchet discipline). */
+static hu_error_t reply_tier_succeeded(const char *tier, const char *target, size_t target_len,
+                                       const char *body, size_t body_len, int64_t since_rowid,
+                                       int64_t ts_start_ms) {
+    snprintf(g_last_tier, sizeof(g_last_tier), "%s", tier);
+    g_last_verified_threaded = hu_imessage_reply_verify_threaded(target, target_len, since_rowid);
+    emit_telemetry(tier, g_last_verified_threaded ? HU_REPLY_STYLE_THREADED : HU_REPLY_STYLE_FLAT,
+                   0, hu_time_get_current_ms() - ts_start_ms, target, target_len);
+    /* Send provenance: threaded replies bypass imessage_send, so they report
+     * here. since_rowid is the same pre-send boundary the verifier uses. */
+    hu_imessage_sent_event_t ev = {.handle = target,
+                                   .handle_len = target_len,
+                                   .text = body,
+                                   .text_len = body_len,
+                                   .kind = HU_IMESSAGE_SENT_KIND_REPLY,
+                                   .prior_max_rowid = since_rowid};
+    hu_imessage_send_observer_notify(&ev);
+    return HU_OK;
+}
+
 hu_error_t hu_imessage_reply(void *ctx, const char *target, size_t target_len,
                              const char *parent_msg_guid, size_t parent_msg_guid_len,
                              const char *body, size_t body_len) {
@@ -225,6 +275,61 @@ hu_error_t hu_imessage_reply(void *ctx, const char *target, size_t target_len,
      * send, even if another message lands in the same wall-clock second. */
     int64_t ts_start_ms = hu_time_get_current_ms();
     int64_t since_rowid = hu_imessage_reply_newest_rowid();
+
+    /* Tier 0: IMCore bridge (docs/plans/2026-07-19-native-imessage).
+     * `imsg send-rich --reply-to <parent_guid>` sets databaseReplyToGUID on the
+     * outgoing message, which is the ONLY way to genuinely nest a reply — the
+     * AX tiers below thread to whatever is newest (Cmd-R) or need Accessibility
+     * puppetry, and synthetic input provably cannot set thread_originator_guid
+     * on macOS 26. Gated on the capability probe, so a machine without the
+     * bridge skips straight to the legacy tiers. Verified live 2026-07-19:
+     * reply landed with thread_originator_guid == parent guid. */
+    if (parent_msg_guid && parent_msg_guid_len > 0) {
+#if defined(__APPLE__) && !HU_IS_TEST && defined(HU_ENABLE_SQLITE)
+        hu_allocator_t sys_alloc = hu_system_allocator();
+        if (hu_imessage_bridge_breaker_should_skip(g_bridge_consec_failures, ts_start_ms,
+                                                   g_bridge_last_failure_ms)) {
+            /* Breaker open: a half-dead bridge burns its full kill deadline
+             * per attempt (2026-07-25: 2 x 30s per reply). Skip straight to
+             * the legacy tiers until the cooldown lapses. */
+        } else if (hu_imessage_caps_allows(hu_imessage_caps_cached(&sys_alloc),
+                                           HU_IMSG_VERB_REPLY_THREADED)) {
+            char chat_guid[160] = {0};
+            if (hu_imessage_reply_chat_guid_for_handle(target, target_len, chat_guid,
+                                                       sizeof(chat_guid))) {
+                char parent_z[128];
+                size_t pn = parent_msg_guid_len < sizeof(parent_z) - 1 ? parent_msg_guid_len
+                                                                       : sizeof(parent_z) - 1;
+                memcpy(parent_z, parent_msg_guid, pn);
+                parent_z[pn] = '\0';
+                char *body_z = (char *)sys_alloc.alloc(sys_alloc.ctx, body_len + 1);
+                if (body_z) {
+                    memcpy(body_z, body, body_len);
+                    body_z[body_len] = '\0';
+                    const char *sr_argv[] = {"imsg", "send-rich",  "--chat", chat_guid, "--text",
+                                             body_z, "--reply-to", parent_z, NULL};
+                    bool sr_ok =
+                        hu_imsg_run_ok(&sys_alloc, sr_argv, HU_IMESSAGE_BRIDGE_SEND_TIMEOUT_SEC);
+                    sys_alloc.free(sys_alloc.ctx, body_z, body_len + 1);
+                    if (sr_ok) {
+                        g_bridge_consec_failures = 0; /* success closes the breaker */
+                        return reply_tier_succeeded("bridge", target, target_len, body, body_len,
+                                                    since_rowid, ts_start_ms);
+                    }
+                    g_bridge_consec_failures++;
+                    g_bridge_last_failure_ms = ts_start_ms;
+                    hu_log_warn("imessage", NULL,
+                                "bridge threaded reply failed (%u consecutive%s); falling back "
+                                "to legacy tiers",
+                                g_bridge_consec_failures,
+                                g_bridge_consec_failures >= HU_IMESSAGE_BRIDGE_BREAKER_THRESHOLD
+                                    ? "; breaker OPEN, skipping bridge for cooldown"
+                                    : "");
+                }
+            }
+        }
+#endif
+    }
 
     /* Tier 1: Cmd-R via AX — maps to Messages' "Reply to Last Message…"
      * shortcut, which threads to whatever is NEWEST in the conversation, not
@@ -245,17 +350,8 @@ hu_error_t hu_imessage_reply(void *ctx, const char *target, size_t target_len,
         }
     }
     if (t1_ok) {
-        snprintf(g_last_tier, sizeof(g_last_tier), "cmdR");
-        /* The AX Cmd-R path may have committed a FLAT message even on a
-         * "true" return (IMCore is entitlement-locked on macOS 26+). Read
-         * back from chat.db to know whether it actually threaded. */
-        g_last_verified_threaded =
-            hu_imessage_reply_verify_threaded(target, target_len, since_rowid);
-        int64_t ts_end_ms = hu_time_get_current_ms();
-        emit_telemetry("cmdR",
-                       g_last_verified_threaded ? HU_REPLY_STYLE_THREADED : HU_REPLY_STYLE_FLAT, 0,
-                       ts_end_ms - ts_start_ms, target, target_len);
-        return HU_OK;
+        return reply_tier_succeeded("cmdR", target, target_len, body, body_len, since_rowid,
+                                    ts_start_ms);
     }
 
     /* Tier 2: AXShowMenu → click "Reply…" menu item. */
@@ -269,14 +365,8 @@ hu_error_t hu_imessage_reply(void *ctx, const char *target, size_t target_len,
 #endif
     }
     if (t2_ok) {
-        snprintf(g_last_tier, sizeof(g_last_tier), "ax_menu");
-        g_last_verified_threaded =
-            hu_imessage_reply_verify_threaded(target, target_len, since_rowid);
-        int64_t ts_end_ms = hu_time_get_current_ms();
-        emit_telemetry("ax_menu",
-                       g_last_verified_threaded ? HU_REPLY_STYLE_THREADED : HU_REPLY_STYLE_FLAT, 0,
-                       ts_end_ms - ts_start_ms, target, target_len);
-        return HU_OK;
+        return reply_tier_succeeded("ax_menu", target, target_len, body, body_len, since_rowid,
+                                    ts_start_ms);
     }
 
     /* Tier 3: flat-send fallback. Log WARN explaining the degradation

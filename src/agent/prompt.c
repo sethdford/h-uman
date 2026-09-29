@@ -4,6 +4,7 @@
 #include "human/agent/prompt.h"
 #include "human/agent/prompt_budget.h"
 #include "human/agent/prompt_trim.h"
+#include "human/core/gate_mode.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
 #include "human/core/string.h"
@@ -43,6 +44,49 @@ static const char *const k_verbalized_confidence_addendum =
     "The tag will be stripped before display. Be honest — over-claiming\n"
     "hurts trust.\n";
 static const size_t DEFAULT_TONE_HINTS_LEN[3] = {49, 66, 65};
+
+/* Director-style persona direction gate — off (default) / shadow / live, per
+ * .claude/rules/feature-gate-requires-measurement.md. This changes what gets
+ * SENT, so it ships OFF and is promoted only by the blind-A/B human tier
+ * (0/12 as of 2026-07-26), never by a green suite. */
+typedef enum {
+    HU_PERSONA_DIRECTION_OFF = 0,
+    HU_PERSONA_DIRECTION_SHADOW,
+    HU_PERSONA_DIRECTION_LIVE,
+} hu_persona_direction_mode_t;
+
+static hu_persona_direction_mode_t hu_persona_direction_mode(void) {
+    const char *v = getenv("HU_PERSONA_DIRECTION");
+    if (!v || !*v)
+        return HU_PERSONA_DIRECTION_OFF;
+    if (strcmp(v, "live") == 0)
+        return HU_PERSONA_DIRECTION_LIVE;
+    if (strcmp(v, "shadow") == 0)
+        return HU_PERSONA_DIRECTION_SHADOW;
+    return HU_PERSONA_DIRECTION_OFF;
+}
+
+/* The direction block itself. Exposed (non-static) so tests can assert the
+ * emitted prompt contains exactly this text rather than reimplementing it —
+ * see .claude/rules/test-references-production-symbol.md. */
+const char hu_persona_direction_text[] =
+    "## Direction for this scene\n"
+    "Play the person, not the assistant. You are mid-conversation with someone "
+    "you know — not answering a query.\n"
+    "- Objective: move the relationship one small step. Being useful is not the "
+    "goal.\n"
+    "- In your way: the pull to be complete, balanced and helpful. Resist it.\n"
+    "- Register: how you actually type on a phone — one-handed, half distracted, "
+    "mid-something-else.\n"
+    "- A reaction, a fragment, or a short nothing is a complete reply. Not every "
+    "message earns a full answer.\n"
+    "- Do NOT summarize what they said back at them. Do NOT offer a menu of "
+    "options. Do NOT close with a question you don't care about.\n"
+    "- If you have nothing to add, say something short and human rather than "
+    "manufacturing substance.\n"
+    "\n";
+
+const size_t hu_persona_direction_text_len = sizeof(hu_persona_direction_text) - 1;
 
 static hu_error_t hu_prompt_data_init(hu_allocator_t *alloc) {
     if (!alloc)
@@ -378,6 +422,9 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
             HU_TRIM_SLOT_RELATIONAL_EPISODE,
             HU_TRIM_SLOT_MOMENT,
             HU_TRIM_SLOT_PERSONAL_MODEL,
+            /* Last: a few hundred bytes of distilled "what to pick up on"
+             * (callbacks, curiosity, absence) outranks bulk middle context. */
+            HU_TRIM_SLOT_HUMANNESS,
             HU_TRIM_SLOT_COUNT,
         };
         hu_prompt_trim_span_t spans[HU_TRIM_SLOT_COUNT] = {{0, 0}};
@@ -413,11 +460,63 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
                 goto fail;
         }
 
+        /* Director-style direction, EARLY — same rationale as the compact
+         * safety block above: the 16 KB positional cap in agent_turn.c cuts the
+         * TAIL, so anything ahead of the trim spans is structurally safe.
+         *
+         * Why direction instead of more rules: the enumerated voice sections
+         * (## Expression Style, ## Creative Voice, ## Humor Guidance,
+         * ## Anti-Sycophancy) live on the NON-immersive path below and return
+         * early at the immersive `return HU_OK` — so the immersive persona,
+         * which is what production runs, never receives any of them. Rather
+         * than duplicate ~6 KB of rule prose into a prompt already 78% over
+         * budget (29129 B observed 2026-07-26, cut to 16340), this is the
+         * ~800-byte directorial equivalent: objective, obstacle, register, and
+         * negative direction. Placed ahead of the cap so it cannot be the thing
+         * that gets deleted.
+         *
+         * Gated OFF by default; SHADOW measures without changing the emitted
+         * prompt, matching the trim gate's contract. */
+        hu_persona_direction_mode_t dir_mode = hu_persona_direction_mode();
+        if (dir_mode == HU_PERSONA_DIRECTION_LIVE) {
+            err = append(alloc, &buf, &len, &cap, hu_persona_direction_text,
+                         hu_persona_direction_text_len);
+            if (err != HU_OK)
+                goto fail;
+        } else if (dir_mode == HU_PERSONA_DIRECTION_SHADOW) {
+            hu_log_info("persona_direction", NULL,
+                        "shadow: would prepend %zu B of direction ahead of the cap "
+                        "(prompt %zu B at this point); emitted prompt unchanged",
+                        hu_persona_direction_text_len, len);
+        }
+
+        /* Humanness directives (shared references, curiosity, absence) are
+         * built on the streaming path but were only appended on the
+         * NON-immersive path below — production, which is immersive, never
+         * saw them. HU_IMMERSIVE_HUMANNESS activation gated on the blind-A/B
+         * proxy gate (scripts/blind_ab_gate.py): do not flip to default-ON
+         * without a measurement showing replies with it read at least as much
+         * like Seth (.claude/rules/feature-gate-requires-measurement.md). */
+        const char *hum_text = NULL;
+        size_t hum_text_len = 0;
+        if (config->humanness_context && config->humanness_context_len > 0) {
+            hu_gate_mode_t hum_mode = hu_gate_mode_from_env("HU_IMMERSIVE_HUMANNESS", HU_GATE_OFF);
+            if (hum_mode == HU_GATE_LIVE) {
+                hum_text = config->humanness_context;
+                hum_text_len = config->humanness_context_len;
+            } else if (hum_mode == HU_GATE_SHADOW) {
+                hu_log_info("immersive_humanness", NULL,
+                            "shadow: would add %zu B of humanness directives: %.160s",
+                            config->humanness_context_len, config->humanness_context);
+            }
+        }
+
         /* Immersive middle sections, in prompt order. One row per section
          * collapses what were 12 copy-paste blocks (07-12 review): each row
          * appends optional header + text + optional trailer, records its
          * per-field byte stats, and (for trimmable sections) its span. */
         {
+            static const char k_hdr_humanness[] = "\n## In the moment\n";
             static const char k_hdr_exemplars[] =
                 "HOW YOU SOUND TO THIS PERSON (verbatim recent messages):\n";
             static const char k_hdr_stm[] = "\n\n### Session Context\n";
@@ -459,6 +558,8 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
                  HU_TRIM_SLOT_GRAPH},
                 {config->continuity_context, config->continuity_context_len, NULL, 0, k_sep1, 1,
                  HU_PROMPT_FIELD_CONTINUITY_CONTEXT, HU_TRIM_SLOT_CONTINUITY},
+                {hum_text, hum_text_len, k_hdr_humanness, sizeof(k_hdr_humanness) - 1, k_sep1, 1,
+                 HU_PROMPT_FIELD_HUMANNESS_CONTEXT, HU_TRIM_SLOT_HUMANNESS},
                 {config->contact_context, config->contact_context_len, NULL, 0, NULL, 0,
                  HU_PROMPT_FIELD_CONTACT_CONTEXT, -1},
                 {config->conversation_context, config->conversation_context_len, NULL, 0, NULL, 0,
@@ -491,6 +592,11 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
                 HU_PROMPT_TRACK_AFTER(sections[i].field);
             }
         }
+        /* Everything appended from here to the early return is the guard
+         * tail the positional cap must keep (hu_prompt_positional_cap_apply).
+         * Its LENGTH is unaffected by the span trim below, which only
+         * removes middle sections. */
+        size_t guard_tail_start = len;
         if (config->max_response_chars > 0) {
             char lbuf[192];
             int ln;
@@ -591,10 +697,25 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
          * delete the anti-AI-tell guard appended above. The positional cut
          * downstream remains the safety net when the spans can't cover the
          * overage. */
+        if (stats) {
+            stats[HU_PROMPT_FIELD_GUARD_TAIL].name =
+                hu_prompt_field_name(HU_PROMPT_FIELD_GUARD_TAIL);
+            stats[HU_PROMPT_FIELD_GUARD_TAIL].bytes_contributed +=
+                (len >= guard_tail_start) ? (len - guard_tail_start) : 0;
+        }
         if (trim_mode != HU_PROMPT_TRIM_OFF && len > HU_PROMPT_TRIM_BUDGET_BYTES) {
             size_t cuts[HU_TRIM_SLOT_COUNT] = {0};
-            size_t planned = hu_prompt_trim_plan(buf, len, HU_PROMPT_TRIM_BUDGET_BYTES, spans,
-                                                 HU_TRIM_SLOT_COUNT, cuts);
+            /* Floors (2026-07-25 Dermot audit): the un-floored trim deleted
+             * ALL recalled memory (4.7 KB) and all continuity on over-budget
+             * turns — the model replied knowing nothing it knew about the
+             * contact. Memory keeps its most-relevant 2 KB head; continuity
+             * (≤400 B by construction) is never cut. Other slots stay fully
+             * sacrificial; the positional cap remains the safety net. */
+            size_t floors[HU_TRIM_SLOT_COUNT] = {0};
+            floors[HU_TRIM_SLOT_CONTINUITY] = HU_TRIM_FLOOR_CONTINUITY_BYTES;
+            floors[HU_TRIM_SLOT_MEMORY] = HU_TRIM_FLOOR_MEMORY_BYTES;
+            size_t planned = hu_prompt_trim_plan_floors(buf, len, HU_PROMPT_TRIM_BUDGET_BYTES,
+                                                        spans, HU_TRIM_SLOT_COUNT, floors, cuts);
             size_t positional_cut = len - HU_PROMPT_TRIM_BUDGET_BYTES;
             if (trim_mode == HU_PROMPT_TRIM_SHADOW) {
                 /* The section lens names the NEXT trim-span candidates when the
@@ -602,28 +723,31 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
                  * shadow events had exemplars=0 graph=0 and memory alone was
                  * short on most). Sizes come straight from the config so no
                  * extra bookkeeping is paid on the happy path. */
-                hu_log_info("prompt_trim", NULL,
-                            "shadow: would trim %zu of %zu overage (cont=%zu exemplars=%zu "
-                            "graph=%zu memory=%zu wm=%zu rel=%zu moment=%zu pm=%zu); positional "
-                            "cut drops the tail %zu instead; persona=%zu total=%zu sections "
-                            "stm=%zu conv=%zu contact=%zu instr=%zu custom=%zu",
-                            planned, positional_cut, cuts[HU_TRIM_SLOT_CONTINUITY],
-                            cuts[HU_TRIM_SLOT_EXEMPLARS], cuts[HU_TRIM_SLOT_GRAPH],
-                            cuts[HU_TRIM_SLOT_MEMORY], cuts[HU_TRIM_SLOT_WORLD_MODEL],
-                            cuts[HU_TRIM_SLOT_RELATIONAL_EPISODE], cuts[HU_TRIM_SLOT_MOMENT],
-                            cuts[HU_TRIM_SLOT_PERSONAL_MODEL], positional_cut,
-                            config->persona_prompt_len, len, config->stm_context_len,
-                            config->conversation_context_len, config->contact_context_len,
-                            config->instruction_context_len, config->custom_instructions_len);
+                hu_log_info(
+                    "prompt_trim", NULL,
+                    "shadow: would trim %zu of %zu overage (cont=%zu exemplars=%zu "
+                    "graph=%zu memory=%zu wm=%zu rel=%zu moment=%zu pm=%zu hum=%zu); positional "
+                    "cut drops the tail %zu instead; persona=%zu total=%zu sections "
+                    "stm=%zu conv=%zu contact=%zu instr=%zu custom=%zu",
+                    planned, positional_cut, cuts[HU_TRIM_SLOT_CONTINUITY],
+                    cuts[HU_TRIM_SLOT_EXEMPLARS], cuts[HU_TRIM_SLOT_GRAPH],
+                    cuts[HU_TRIM_SLOT_MEMORY], cuts[HU_TRIM_SLOT_WORLD_MODEL],
+                    cuts[HU_TRIM_SLOT_RELATIONAL_EPISODE], cuts[HU_TRIM_SLOT_MOMENT],
+                    cuts[HU_TRIM_SLOT_PERSONAL_MODEL], cuts[HU_TRIM_SLOT_HUMANNESS], positional_cut,
+                    config->persona_prompt_len, len, config->stm_context_len,
+                    config->conversation_context_len, config->contact_context_len,
+                    config->instruction_context_len, config->custom_instructions_len);
             } else if (planned > 0) {
                 len = hu_prompt_trim_apply(buf, len, spans, HU_TRIM_SLOT_COUNT, cuts);
-                hu_log_info("prompt_trim", NULL,
-                            "live: trimmed %zu bytes (cont=%zu exemplars=%zu graph=%zu "
-                            "memory=%zu wm=%zu rel=%zu moment=%zu pm=%zu); prompt now %zu bytes",
-                            planned, cuts[HU_TRIM_SLOT_CONTINUITY], cuts[HU_TRIM_SLOT_EXEMPLARS],
-                            cuts[HU_TRIM_SLOT_GRAPH], cuts[HU_TRIM_SLOT_MEMORY],
-                            cuts[HU_TRIM_SLOT_WORLD_MODEL], cuts[HU_TRIM_SLOT_RELATIONAL_EPISODE],
-                            cuts[HU_TRIM_SLOT_MOMENT], cuts[HU_TRIM_SLOT_PERSONAL_MODEL], len);
+                hu_log_info(
+                    "prompt_trim", NULL,
+                    "live: trimmed %zu bytes (cont=%zu exemplars=%zu graph=%zu "
+                    "memory=%zu wm=%zu rel=%zu moment=%zu pm=%zu hum=%zu); prompt now %zu bytes",
+                    planned, cuts[HU_TRIM_SLOT_CONTINUITY], cuts[HU_TRIM_SLOT_EXEMPLARS],
+                    cuts[HU_TRIM_SLOT_GRAPH], cuts[HU_TRIM_SLOT_MEMORY],
+                    cuts[HU_TRIM_SLOT_WORLD_MODEL], cuts[HU_TRIM_SLOT_RELATIONAL_EPISODE],
+                    cuts[HU_TRIM_SLOT_MOMENT], cuts[HU_TRIM_SLOT_PERSONAL_MODEL],
+                    cuts[HU_TRIM_SLOT_HUMANNESS], len);
             }
         }
         *out = buf;

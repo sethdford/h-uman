@@ -2,12 +2,13 @@
  * Self-update: check GitHub releases, download and replace binary.
  * In HU_IS_TEST mode, returns mock data without network calls.
  */
-#include "human/core/log.h"
 #include "human/update.h"
 #include "human/config.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/json.h"
+#include "human/core/log.h"
+#include "human/core/paths.h"
 #include "human/core/process_util.h"
 #include "human/core/string.h"
 #include "human/crypto.h"
@@ -32,8 +33,8 @@
 #include <stdlib.h>
 #endif
 
-#define GITHUB_API_URL "https://api.github.com/repos/sethdford/h-uman/releases/latest"
-#define RELEASE_BASE   "https://github.com/sethdford/h-uman/releases/latest/download/"
+#define GITHUB_API_URL  "https://api.github.com/repos/sethdford/h-uman/releases/latest"
+#define RELEASE_BASE    "https://github.com/sethdford/h-uman/releases/latest/download/"
 #define LAST_CHECK_FILE ".last_update_check"
 
 typedef enum {
@@ -122,12 +123,9 @@ static char *get_exe_path(hu_allocator_t *alloc) {
     uint32_t size = (uint32_t)sizeof(buf);
     if (_NSGetExecutablePath(buf, &size) != 0)
         return NULL;
-    char *resolved = realpath(buf, NULL);
-    if (resolved) {
-        char *out = hu_strdup(alloc, resolved);
-        free(resolved);
-        return out;
-    }
+    char *resolved = hu_platform_realpath(alloc, buf);
+    if (resolved)
+        return resolved;
     return hu_strdup(alloc, buf);
 #else
     return NULL;
@@ -267,7 +265,7 @@ static hu_error_t verify_sha256(hu_allocator_t *alloc, const char *file_path, co
 
     if (strcmp(actual_hex, expected_hex) != 0) {
         hu_log_info("update", NULL, "SHA256 mismatch: expected %s, got %s", expected_hex,
-                actual_hex);
+                    actual_hex);
         return HU_ERR_INVALID_ARGUMENT;
     }
     return HU_OK;
@@ -447,22 +445,30 @@ hu_error_t hu_update_apply(void) {
 
 /* ── periodic auto-check ────────────────────────────────────────────── */
 
+hu_update_mode_t hu_update_mode_from_config(const char *auto_update) {
+    if (!auto_update || auto_update[0] == '\0' || strcmp(auto_update, "off") == 0)
+        return HU_UPDATE_MODE_OFF;
+    if (strcmp(auto_update, "apply") == 0)
+        return HU_UPDATE_MODE_APPLY;
+    return HU_UPDATE_MODE_CHECK;
+}
+
+bool hu_update_check_allowed(hu_update_mode_t mode, bool force) {
+    return force || mode != HU_UPDATE_MODE_OFF;
+}
+
 hu_error_t hu_update_maybe_check(hu_allocator_t *alloc, const hu_config_t *cfg) {
     if (!alloc || !cfg)
         return HU_ERR_INVALID_ARGUMENT;
 
-    if (!cfg->auto_update || strcmp(cfg->auto_update, "off") == 0)
+    if (hu_update_mode_from_config(cfg->auto_update) == HU_UPDATE_MODE_OFF)
         return HU_OK;
 
 #if HU_IS_TEST
     return HU_OK;
 #else
-    const char *home = getenv("HOME");
-    if (!home || !home[0])
-        return HU_OK;
-
     char ts_path[512];
-    int n = snprintf(ts_path, sizeof(ts_path), "%s/.human/%s", home, LAST_CHECK_FILE);
+    int n = hu_paths_state(ts_path, sizeof(ts_path), "%s", LAST_CHECK_FILE);
     if (n < 0 || (size_t)n >= sizeof(ts_path))
         return HU_OK;
 
@@ -508,7 +514,7 @@ hu_error_t hu_update_maybe_check(hu_allocator_t *alloc, const hu_config_t *cfg) 
     if (hu_version_compare(current, remote) >= 0)
         return HU_OK;
 
-    if (strcmp(cfg->auto_update, "apply") == 0) {
+    if (hu_update_mode_from_config(cfg->auto_update) == HU_UPDATE_MODE_APPLY) {
         printf("Update available: %s -> %s. Downloading...\n", current, latest);
         err = hu_update_apply();
         if (err != HU_OK)

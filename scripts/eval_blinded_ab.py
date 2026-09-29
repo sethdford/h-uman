@@ -16,6 +16,7 @@ import json
 import os
 import random
 import subprocess
+import tempfile
 import sys
 import time
 import urllib.parse
@@ -58,14 +59,30 @@ def _gemini_url():
     return (f"https://aiplatform.googleapis.com/v1/projects/{PROJECT_ID}/locations/global/"
             f"publishers/google/models/{EVAL_MODEL}:generateContent")
 
-GATEWAY_URL = os.environ.get("HU_GATEWAY_URL", "http://127.0.0.1:3002")
+# Resolved after gateway_url_from_config/_load_human_config are defined, so the
+# configured daemon port wins over the legacy hardcoded :3002.
+GATEWAY_URL = None
 MLX_URL = os.environ.get("MLX_URL", "http://127.0.0.1:8741/v1/chat/completions")
+MLX_TIMEOUT_S = 120
 USE_GATEWAY = "--gateway" in sys.argv
 USE_SYNTHETIC = "--synthetic" in sys.argv
 USE_MLX = "--mlx" in sys.argv
 USE_GATE = "--gate" in sys.argv
 GATE_DRY_RUN = "--gate-dry-run" in sys.argv
-MAX_TRIALS = 50
+# The gate measures the ADAPTER arm unless told otherwise. --base-arm says a
+# raw-base measurement is intended, so a server reporting no adapter is not a
+# refusal (it is still recorded as claims_adapter=false).
+USE_BASE_ARM = "--base-arm" in sys.argv
+# Advisory Binoculars AI-tell metric appended to the results JSON after the
+# run (docs/research/2026-07-25-binoculars-discriminator.md). Measurement-side
+# only: never feeds the gate, never changes the exit code. ~12 min GPU.
+USE_BINOCULARS = "--binoculars" in sys.argv
+
+import blind_ab_gate as _gate  # noqa: E402  (before MAX_TRIALS, which it owns)
+
+# The gate module owns this: its verdict rule is only valid at a sample size
+# that can resolve the 5 pp decision boundary. See proxy_gate_decision.
+MAX_TRIALS = _gate.DEFAULT_MAX_TRIALS
 # Gemini judge runs concurrently in a thread pool while MLX generation (serial,
 # model_lock-bound) continues — see the main loop. Default kept modest to stay
 # gentle on the judge API; raise with --judge-workers=N.
@@ -82,8 +99,69 @@ for arg in sys.argv:
     elif arg.startswith("--seed="):
         SEED = int(arg.split("=")[1])
 
-import blind_ab_gate as _gate
 _GATE_PATH = os.environ.get("HU_BLIND_AB_GATE_PATH", _gate.GATE_PATH)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "blind_ab"))
+from gen_classifier_trials import serving_provenance as _serving_provenance  # noqa: E402
+
+
+def gate_serving_provenance(mlx_url=None):
+    """What :8741 is ACTUALLY serving, asked now, plus a hash of the production
+    head. Same shape as gen_classifier_trials.serving_provenance (adapter_path,
+    tensors_loaded, adapter_bound, model, provenance_available, head_sha256).
+
+    Both --mlx and --gateway generate on :8741 underneath (the daemon calls
+    it), so the serving endpoint is the provenance source in either mode. The
+    head is built through the production path; when that path is unavailable
+    the hash is recorded as null with the reason — never the hash of "".
+    """
+    try:
+        head = production_system_prompt()
+        head_error = None
+    except SystemExit as e:
+        head, head_error = None, str(e)
+    prov = _serving_provenance(mlx_url or MLX_URL, head)
+    if head is None:
+        prov["head_sha256"] = None
+        prov["head_bytes"] = 0
+        prov["head_error"] = head_error
+    return prov
+
+
+def write_gate_verdict(gate_path, *, fool_rate, n_trials, n_real_pairs, baseline,
+                       serving, preflight_serving, claims_adapter, run_mode, commit):
+    """Decide the proxy verdict and write it with full provenance.
+
+    Raises blind_ab_gate.ProvenanceRefusal — gate file untouched — when the
+    serving provenance cannot vouch for the claimed arm, or when what was
+    served changed between pre-flight and verdict time (then the trials did
+    not all measure one configuration). Returns (mode, verdict, should_fail).
+    """
+    if claims_adapter and preflight_serving and serving:
+        for key in ("adapter_path", "tensors_loaded", "model"):
+            if preflight_serving.get(key) != serving.get(key):
+                raise _gate.ProvenanceRefusal(
+                    f"serving {key} changed mid-run: {preflight_serving.get(key)!r} -> "
+                    f"{serving.get(key)!r}; the trials did not all measure one configuration")
+    mode, verdict, should_fail = _gate.proxy_gate_decision(
+        fool_rate=fool_rate, n_real_pairs=n_real_pairs, baseline=baseline,
+        n_trials=n_trials)
+    # Record the interval beside the rate. The verdict is DERIVED from these
+    # bounds, so a reader who quotes fool_rate without them is quoting a number
+    # the gate itself did not act on.
+    ci_lo, ci_hi = _gate.fool_rate_ci(fool_rate, n_trials)
+    _gate.write_proxy_half(gate_path, {
+        "verdict": verdict, "mode": mode,
+        "fool_rate": fool_rate if n_trials else None,
+        "fool_rate_ci": [round(ci_lo, 2), round(ci_hi, 2)] if n_trials else None,
+        "ci_method": "wilson95",
+        "baseline_fool_rate": (baseline or {}).get("fool_rate"),
+        "n_trials": n_trials, "n_real_pairs": n_real_pairs,
+        "fail_under": _gate.DEFAULT_FAIL_UNDER,
+        "max_regression": _gate.DEFAULT_MAX_REGRESSION,
+        "run_mode": run_mode,
+        "judge_model": EVAL_MODEL,
+    }, commit=commit, serving=serving, claims_adapter=claims_adapter)
+    return mode, verdict, should_fail
 
 
 def _git_commit():
@@ -107,14 +185,100 @@ HU_BIN = "hu"
 GT_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "imessage", "ground_truth.jsonl")
 RESULTS_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "eval_blinded_ab.json")
 
-SETH_SYSTEM_PROMPT = (
-    "You are Seth Ford, 45, texting on iMessage. Chief Architect at Vanguard. "
-    "Live alone with your cat in King of Prussia, PA. From Afton, Wyoming. "
-    "Three kids (Annette, Emerson, Edison) who don't live with you. "
-    "Speak Japanese, lived in Japan (lost home in 2011 tsunami). "
-    "23 years at Fidelity before this. Build AI runtimes as side projects.\n\n"
-    "Style: casual, warm, direct. Short messages. Lowercase. "
-    "Abbreviate (gonna, tbh, idk, hru). Emoji rare. Strong opinions. Dry humor."
+# --------------------------------------------------------------------------
+# The system prompt comes from the PRODUCT, not from this file.
+#
+# This module used to carry its own hand-written prompt. Two things were wrong
+# with that, and both corrupted every number the gate ever produced:
+#
+#  1. STALE IDENTITY. It said "Chief Architect at Vanguard", "King of Prussia,
+#     PA" and "Seth Ford, 45" long after the persona was corrected to Raymond
+#     James / St. Petersburg FL. Cycle-4 item bab_013 asked "Are you officially
+#     50?" while this prompt insisted on 45. The gate was scoring a model that
+#     believed it lived in Pennsylvania against real replies from a man in
+#     Florida, and attributing the mismatch to "voice".
+#  2. WRONG SIZE AND SHAPE. 872 bytes of authored summary versus the 5029-byte
+#     compact per-contact head production actually builds.
+#
+# Measured 2026-08-02, same adapter and same prompt text, only the system
+# prompt differing:
+#     bare/authored -> "Hey! Not much, just hanging out here to help ... 😊"
+#     production head -> "Not much just figuring out life"
+# Opposite verdicts. A gate that certified 0.225 "indistinguishable" while the
+# principal said "nowhere near me" was measuring a configuration nobody ships.
+#
+# So: build the head through the production path. If that path is unavailable we
+# REFUSE rather than fall back to an authored string -- a number produced against
+# a different system is worse than no number
+# (.claude/rules/no-number-without-a-measurement.md).
+
+_DUMP_HEAD_CANDIDATES = (
+    os.environ.get("HU_DUMP_PROMPT_HEAD", ""),
+    os.path.expanduser("~/blind_ab_run/dump_prompt_head"),
+    os.path.join(os.path.dirname(__file__), "..", "build", "dump_prompt_head"),
+)
+
+
+def production_system_prompt(persona="seth", channel="imessage", contact="-", head_mode="live"):
+    """Return the system prompt PRODUCTION builds, via tools/dump_prompt_head.
+
+    Raises SystemExit if the production path cannot be reached. Callers must not
+    substitute an authored prompt -- that is the defect this function exists to
+    remove.
+    """
+    exe = next((p for p in _DUMP_HEAD_CANDIDATES if p and os.path.isfile(p) and os.access(p, os.X_OK)), None)
+    if not exe:
+        raise SystemExit(
+            "FATAL: dump_prompt_head not found, so the production system prompt cannot be "
+            "built. Set HU_DUMP_PROMPT_HEAD=/path/to/dump_prompt_head. Refusing to score "
+            "against an authored prompt -- that measures a system we do not ship."
+        )
+    env = dict(os.environ, HU_PERSONA_HEAD=head_mode)
+    try:
+        out = subprocess.run([exe, persona, channel, contact], capture_output=True,
+                             text=True, timeout=60, env=env)
+    except (OSError, subprocess.SubprocessError) as e:
+        raise SystemExit(f"FATAL: dump_prompt_head failed to run ({e}); refusing to score.")
+    head = (out.stdout or "").strip()
+    if out.returncode != 0 or len(head) < 500:
+        raise SystemExit(
+            f"FATAL: dump_prompt_head returned rc={out.returncode} and {len(head)} bytes "
+            f"(expected a multi-KB head). stderr: {(out.stderr or '')[:200]}. Refusing to "
+            f"score against a truncated or empty prompt."
+        )
+    return head
+
+
+def __getattr__(name):
+    """Lazy SETH_SYSTEM_PROMPT so importers (steering_ab.py) get the PRODUCTION
+    head without this module shelling out at import time."""
+    if name == "SETH_SYSTEM_PROMPT":
+        return production_system_prompt()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+_REMOVED_AUTHORED_PROMPT_KEPT_FOR_REFERENCE = (
+    # EVERY style claim below is MEASURED, not authored. Source: the 689 real
+    # replies in data/imessage/ground_truth.jsonl (2026-07-27, post decoder fix).
+    # Authored style rules here have twice been the largest AI tell in the
+    # corpus, because the model obeys them literally while Seth does not:
+    #   - "Abbreviate (gonna, tbh, idk, hru)" drove tbh to 59.6% of replies
+    #     against his real 0.29% — a ~200x amplification (removed in 10faedaee).
+    #   - "Lowercase." was wrong by ~10x: he starts lowercase only 8.9% of the
+    #     time, because his phone autocapitalizes. Corrected 2026-07-27.
+    # Re-measure before changing any number here; do not estimate.
+    "Style: casual, warm, direct. Very short: median 5 words, 44% under 20 characters. "
+    # 80.7% no terminal punctuation — per scripts/persona_style_card.py the
+    # strongest single discriminator in his voice, and omitted here until now.
+    "Most of his texts end with NO terminal punctuation at all (81%); only 4% end "
+    "in a period and 8% in a question mark. Do not end every message with '.' or '?'. "
+    "Normal capitalization (his phone autocapitalizes; only 9% of texts start lowercase). "
+    # Measured over 1,789 of Seth's own decoded iMessages (2026-07-26): tbh
+    # 0.34%, idk 0.56%, hru 0.17%, gonna 0.34%. Instructing the model to
+    # "abbreviate (gonna, tbh, idk, hru)" drove tbh to 71% of replies — a
+    # 213x amplification and the single clearest AI tell in the corpus.
+    "Emoji rare (5%). Strong opinions. Dry humor. "
+    "Do NOT use texting abbreviations (tbh, ngl, idk, hru, imo) \u2014 he almost never does."
 )
 
 SYNTHETIC_SCENARIOS = [
@@ -148,11 +312,31 @@ _BLINDED_AB_JUDGE_SCHEMA = {
 }
 
 
-def call_gemini(prompt, temperature=0.3, response_schema=None):
-    gen_cfg = {"temperature": temperature, "maxOutputTokens": 2048}
+# Judge thinking budget. gemini-3.x is thinking-enabled by default and shares
+# maxOutputTokens between the invisible thinking and the visible reply, so an
+# unset budget lets a hard judgment starve its own JSON body — the response is
+# truncated mid-string and json.loads raises "Unterminated string". On
+# 2026-07-27 that silently dropped 18/50 trials, and the loss is BIASED: the
+# judge thinks longest on the closest calls, so the surviving sample is
+# skewed toward easy ones. Budget it explicitly and leave the body room.
+JUDGE_THINKING_BUDGET = 1024
+JUDGE_MAX_OUTPUT_TOKENS = 4096
+
+
+def judge_gen_config(temperature, response_schema=None):
+    cfg = {
+        "temperature": temperature,
+        "maxOutputTokens": JUDGE_MAX_OUTPUT_TOKENS,
+        "thinkingConfig": {"thinkingBudget": JUDGE_THINKING_BUDGET},
+    }
     if response_schema is not None:
-        gen_cfg["responseMimeType"] = "application/json"
-        gen_cfg["responseSchema"] = response_schema
+        cfg["responseMimeType"] = "application/json"
+        cfg["responseSchema"] = response_schema
+    return cfg
+
+
+def call_gemini(prompt, temperature=0.3, response_schema=None):
+    gen_cfg = judge_gen_config(temperature, response_schema)
     payload = json.dumps({
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": gen_cfg,
@@ -169,22 +353,71 @@ def call_gemini(prompt, temperature=0.3, response_schema=None):
     return data["candidates"][0]["content"]["parts"][0]["text"]
 
 
-def get_ai_response(message):
+def harness_run_is_valid(total_valid, attempted):
+    """False when too few trials produced a valid judgment to call it a run.
+
+    Mirrors the long-standing `total < len(pairs) / 2` predicate; extracted so
+    the gate write can be gated on it BEFORE the artifact is touched.
+    """
+    if not attempted:
+        return True
+    return not (total_valid < attempted / 2)
+
+
+def run_mode(use_gateway, use_mlx):
+    """Which generator produced the replies — for the results JSON.
+
+    Precedence MUST mirror get_ai_response(): gateway, then mlx, then cli.
+    This was `"gateway" if USE_GATEWAY else "cli"`, which labelled every
+    --mlx run (i.e. every nightly run) as "cli". Downstream readers were
+    told the C pipeline generated replies that raw MLX generated.
+    """
+    if use_gateway:
+        return "gateway"
+    if use_mlx:
+        return "mlx"
+    return "cli"
+
+
+def build_mlx_messages(system_prompt, message, context_turns=None):
+    """Chat messages for the MLX path, including the thread.
+
+    Seth's turns are `assistant`, everyone else's are `user`. Omitting the
+    thread is not a neutral simplification: the real reply this is scored
+    against was written with the thread visible, so a context-free model
+    reply loses on "lack of conversational memory" — an asymmetry the
+    harness invented. See get_ai_response_cli's docstring; that fix landed
+    on the CLI path only while the nightly runs --mlx.
+
+    Malformed turns are skipped, not fatal: ground truth is machine-extracted
+    and one bad row must not abort a 45-trial run.
+    """
+    msgs = [{"role": "system", "content": system_prompt}]
+    for t in (context_turns or []):
+        if not isinstance(t, dict):
+            continue
+        text = (t.get("text") or "").strip()
+        if not text:
+            continue
+        role = "assistant" if t.get("from") == "seth" else "user"
+        msgs.append({"role": role, "content": text})
+    msgs.append({"role": "user", "content": message})
+    return msgs
+
+
+def get_ai_response(message, context_turns=None):
     if USE_GATEWAY:
-        return get_ai_response_gateway(message)
+        return get_ai_response_gateway(message, context_turns=context_turns)
     if USE_MLX:
-        return get_ai_response_mlx(message)
-    return get_ai_response_cli(message)
+        return get_ai_response_mlx(message, context_turns=context_turns)
+    return get_ai_response_cli(message, context_turns=context_turns)
 
 
-def get_ai_response_mlx(message):
+def get_ai_response_mlx(message, context_turns=None):
     """Get AI response from the local MLX server with Seth persona."""
     try:
         payload = json.dumps({
-            "messages": [
-                {"role": "system", "content": SETH_SYSTEM_PROMPT},
-                {"role": "user", "content": message},
-            ],
+            "messages": build_mlx_messages(SETH_SYSTEM_PROMPT, message, context_turns),
             "max_tokens": 200,
             "temperature": 0.7,
         }).encode()
@@ -196,8 +429,17 @@ def get_ai_response_mlx(message):
         # 2026-07-11 a 30s timeout abandoned 50/50 requests into the
         # single-threaded server's queue (each still generated, then
         # BrokenPipe'd) — degrading live serving for the drain duration.
-        resp = urllib.request.urlopen(req, timeout=120)
+        resp = urllib.request.urlopen(req, timeout=MLX_TIMEOUT_S)
         data = json.loads(resp.read())
+        # Record which model actually generated this, for the Binoculars
+        # precondition. Taken from the generation response rather than a
+        # separate GET /v1/models probe: this server is single-threaded, so a
+        # metadata request queues behind in-flight generation and times out on
+        # a busy box — which would silently disable the metric. This costs
+        # nothing and reports the true generator.
+        served = data.get("model")
+        if served:
+            _SERVED_MODEL_SEEN.add(str(served))
         choices = data.get("choices", [])
         if choices:
             return choices[0].get("message", {}).get("content", "(empty)")
@@ -206,11 +448,36 @@ def get_ai_response_mlx(message):
         return f"(error: {e})"
 
 
-def get_ai_response_cli(message):
+def get_ai_response_cli(message, context_turns=None):
+    """Generate via the real C pipeline.
+
+    context_turns (from ground truth) is seeded into agent->history via
+    --history-file. Omitting it makes this measurement meaningless: the human
+    reply being compared against was written with the thread visible, so a
+    context-free model reply loses on "lack of conversational memory" — an
+    asymmetry the harness invented, not a property of the model. Measured
+    2026-07-26: 0/9 fooled, with the judge citing exactly that. A/B on the same
+    prompt: without history "5pm works for me. Please confirm..."; with the
+    3-turn thread, "I'll be there at 7pm."
+    """
+    hist_path = None
     try:
         env = {**os.environ, "PATH": os.path.expanduser("~/bin") + ":" + os.environ.get("PATH", "")}
-        result = subprocess.run([HU_BIN, "agent", "-m", message],
-                                capture_output=True, text=True, timeout=30, env=env)
+        cmd = [HU_BIN, "agent", "-m", message]
+        if context_turns:
+            # A file, not argv: message bodies contain quotes/newlines/emoji.
+            fd, hist_path = tempfile.mkstemp(prefix="blindab-hist-", suffix=".jsonl")
+            with os.fdopen(fd, "w") as hf:
+                for t in context_turns:
+                    txt = (t or {}).get("text") or ""
+                    if not txt.strip():
+                        continue
+                    frm = "seth" if (t or {}).get("from") == "seth" else "them"
+                    hf.write(json.dumps({"from": frm, "text": txt}) + "\n")
+            cmd += ["--history-file", hist_path]
+        # 30s -> 180s: a 106B MoE on a serial queue routinely exceeds 30s, and a
+        # timeout here silently degrades the trial into "(error: ...)".
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180, env=env)
         import re
         output = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', result.stdout)
         output = re.sub(r'\x1b\[\?25[hl]', '', output)
@@ -218,13 +485,86 @@ def get_ai_response_cli(message):
         return " ".join(lines) if lines else "(empty)"
     except Exception as e:
         return f"(error: {e})"
+    finally:
+        if hist_path:
+            try:
+                os.unlink(hist_path)
+            except OSError:
+                pass
 
 
-def get_ai_response_gateway(message):
+def build_gateway_messages(message, context_turns=None):
+    """Chat messages for the gateway (product) path.
+
+    Deliberately NO system prompt. The gateway runs the real agent turn, which
+    builds the persona itself from ~/.human/personas + src/persona. Injecting a
+    harness-authored persona here would reintroduce the exact artifact class
+    this path exists to remove: every style claim the harness asserts becomes
+    an AI tell the moment it is wrong, and it has been wrong twice
+    ("Lowercase." ~10x, "Abbreviate (gonna, tbh, idk, hru)" ~200x on tbh).
+
+    hu_openai_compat_handle_chat_completions clears agent history and repopulates
+    it from this array, mapping every message but the trailing user turn into
+    history — so the thread arrives natively, no C-side change needed.
+    """
+    msgs = []
+    for t in (context_turns or []):
+        if not isinstance(t, dict):
+            continue
+        text = (t.get("text") or "").strip()
+        if not text:
+            continue
+        msgs.append({"role": "assistant" if t.get("from") == "seth" else "user",
+                     "content": text})
+    msgs.append({"role": "user", "content": message})
+    return msgs
+
+
+def gateway_url_from_config(config, env_url=None, default_port=3002):
+    """Resolve the gateway base URL from ~/.human/config.json.
+
+    The default was hardcoded to :3002 while the daemon binds the configured
+    port (3006 as of 2026-07-27), so --gateway failed connection-refused before
+    it generated anything.
+    """
+    if env_url:
+        return env_url
+    port = default_port
+    try:
+        cfg_port = (config or {}).get("gateway", {}).get("port")
+        if isinstance(cfg_port, int) and cfg_port > 0:
+            port = cfg_port
+    except AttributeError:
+        pass
+    return f"http://127.0.0.1:{port}"
+
+
+def _load_human_config():
+    try:
+        with open(os.path.expanduser("~/.human/config.json")) as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+GATEWAY_URL = gateway_url_from_config(_load_human_config(),
+                                      os.environ.get("HU_GATEWAY_URL"))
+
+# A gateway trial is a full agent turn: several :8741 generations, queued
+# behind live service-loop traffic on the same serial server. It must never
+# have a tighter deadline than the bare MLX completion (see MLX_TIMEOUT_S's
+# comment — an early timeout still generates server-side, then BrokenPipes,
+# degrading LIVE serving for the drain duration). At 60s a --gate run aborted
+# after 8/50 trials on MAX_CONSECUTIVE_FAILURES while single turns measured
+# ~21s idle.
+GATEWAY_TIMEOUT_S = 240
+
+
+def get_ai_response_gateway(message, context_turns=None):
     try:
         payload = json.dumps({
             "model": "default",
-            "messages": [{"role": "user", "content": message}],
+            "messages": build_gateway_messages(message, context_turns),
         }).encode()
         req = urllib.request.Request(
             f"{GATEWAY_URL}/v1/chat/completions",
@@ -232,7 +572,7 @@ def get_ai_response_gateway(message):
             headers={"Content-Type": "application/json"},
             method="POST"
         )
-        resp = urllib.request.urlopen(req, timeout=60)
+        resp = urllib.request.urlopen(req, timeout=GATEWAY_TIMEOUT_S)
         data = json.loads(resp.read())
         choices = data.get("choices", [])
         if choices:
@@ -293,6 +633,211 @@ def load_ground_truth():
     return pairs
 
 
+BINOCULARS_SCRIPT = os.path.join(
+    os.path.dirname(__file__), "blind_ab", "binoculars_score.py")
+
+
+# Model ids observed in this run's generation responses (populated by
+# get_ai_response_mlx). The Binoculars precondition reads this.
+_SERVED_MODEL_SEEN = set()
+
+
+def _model_family(model_id):
+    """Coarse family key for comparing a served model id to a detector base.
+
+    Compares the last path segment case-insensitively, so
+    'mlx-community/gemma-4-31b-it-8bit' and 'gemma-4-31b-it-8bit' match, while
+    'GLM-4.5-Air-4bit' does not. Deliberately coarse: the goal is to catch a
+    base FLIP (gemma -> GLM), not to police quantisation or revision drift,
+    which shift the scores far less than a different model family does.
+    """
+    if not model_id:
+        return None
+    return str(model_id).rstrip("/").split("/")[-1].strip().lower()
+
+
+def _served_model_id():
+    """Which model actually generated this run's replies. None if unobserved.
+
+    Read from the `model` field of the generation responses themselves (see
+    get_ai_response_mlx), NOT from a GET /v1/models probe. The MLX server is
+    single-threaded: a metadata request queues behind in-flight generation and
+    times out on a busy box, which would make the precondition fail spuriously
+    and silently disable the metric. Observed here on 2026-07-28 — curl got a
+    fast 200 while the box was idle, then the same request timed out once
+    another session started loading it.
+
+    If a run somehow saw more than one model (a mid-run serving flip), return
+    them joined so the precondition fails loudly rather than picking one.
+    """
+    if not _SERVED_MODEL_SEEN:
+        return None
+    if len(_SERVED_MODEL_SEEN) > 1:
+        return "+".join(sorted(_SERVED_MODEL_SEEN))
+    return next(iter(_SERVED_MODEL_SEEN))
+
+
+def _binoculars_precondition():
+    """(ok, detail) — is the detector's base the model that generated the text?
+
+    Returns ok=False with a human-readable reason when the served model and the
+    detector base disagree, or when the served model cannot be determined at
+    all (unknown is NOT assumed-fine: an unverifiable precondition is a failed
+    one). HU_BINOCULARS_ALLOW_BASE_MISMATCH=1 forces ok=True, loudly.
+    """
+    detector_base = os.environ.get("HU_BINOCULARS_BASE",
+                                   "mlx-community/gemma-4-31b-it-8bit")
+    override = os.environ.get("HU_BINOCULARS_ALLOW_BASE_MISMATCH") == "1"
+
+    # Only the --mlx path routes generation through the serving endpoint; the
+    # CLI/gateway paths go through the daemon, whose model this cannot observe.
+    if not USE_MLX:
+        return True, "not --mlx: generator not observable here"
+
+    served = _served_model_id()
+    if served is None:
+        if override:
+            return True, "served model unknown (override set)"
+        return False, ("no generation response reported a model id (all "
+                       "generations failed, or the server omits the field) — "
+                       "precondition unverifiable, so treated as failed")
+
+    if _model_family(served) == _model_family(detector_base):
+        return True, f"served={served} matches detector base"
+
+    msg = (f"served model '{served}' != detector base '{detector_base}' — the "
+           "Binoculars performer is not the generator, so the score would be "
+           "uncalibrated")
+    if override:
+        return True, msg + " (OVERRIDDEN)"
+    return False, msg
+
+
+def _merge_binoculars_summary(results_path, summary):
+    """Merge a summary under the 'binoculars' key. Never raises."""
+    try:
+        with open(results_path) as f:
+            doc = json.load(f)
+        doc["binoculars"] = summary
+        with open(results_path, "w") as f:
+            json.dump(doc, f, indent=2)
+    except Exception as e:
+        print(f"  BINOCULARS: could not merge summary: {e}")
+
+
+def _run_binoculars(results_path):
+    """Compute the Binoculars AI-tell summary for the just-written results file
+    and merge it under the "binoculars" key.
+
+    Direction/thresholds calibrated 2026-07-25 on the 07-24 corpus against the
+    seth-lora-v5 adapter (docs/research/2026-07-25-binoculars-discriminator.md).
+    The 5%-FPR threshold is adapter-version-specific — override with
+    HU_BINOCULARS_THR_FPR5 after an adapter promotion + recalibration.
+
+    Never raises, never touches the gate file: on any failure the summary is
+    {"error": ...} and the eval's outcome is unchanged.
+    """
+    started = time.time()
+    thr_fpr5 = float(os.environ.get("HU_BINOCULARS_THR_FPR5", "0.9643"))
+
+    # PRECONDITION: the detector's performer must BE the generator.
+    #
+    # Binoculars' dirA direction works because the performer half of the pair is
+    # the model that actually produced the text — that is what lets the
+    # cross-entropy denominator explain away the generator's own predictability.
+    # If serving flips to a different base, the pair no longer straddles the
+    # generator and the ratio measures nothing calibrated.
+    #
+    # This is not hypothetical. On 2026-07-28, :8741 was serving
+    # GLM-4.5-Air-4bit while the detector pair was still gemma. The run emitted
+    # per-message AUC 0.5998 (calibrated: 0.845) with mean_ai drifting 1.028 ->
+    # 1.245 toward mean_real. Read naively that says "output is now nearly
+    # indistinguishable"; it actually said "this detector cannot characterise
+    # this generator". A well-formed number where no valid measurement happened
+    # is exactly what .claude/rules/no-number-without-a-measurement.md forbids,
+    # so REFUSE rather than emit it.
+    ok, detail = _binoculars_precondition()
+    if not ok:
+        summary = {"skipped": detail, "elapsed_s": 0.0}
+        print(f"\n  BINOCULARS: SKIPPED — {detail}")
+        print("    Refusing to emit an uncalibrated AUC. Recalibrate the detector "
+              "against the SERVED base, or set HU_BINOCULARS_ALLOW_BASE_MISMATCH=1 "
+              "to override (the number will not be comparable to the baseline).")
+        _merge_binoculars_summary(results_path, summary)
+        return summary
+
+    try:
+        py = os.environ.get("HU_BINOCULARS_PYTHON",
+                            os.path.expanduser("~/.human/venv/bin/python"))
+        if not os.path.exists(py):
+            py = sys.executable
+        binoc_out = results_path + ".binoculars.tmp.json"
+        subprocess.run(
+            [py, BINOCULARS_SCRIPT, "--pairs", results_path,
+             "--windows", "5", "--out", binoc_out, "--quiet"],
+            check=True, timeout=2400,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        with open(binoc_out) as f:
+            binoc = json.load(f)
+        os.unlink(binoc_out)
+
+        rows = binoc.get("results", [])
+        real = [r["score_dirA"] for r in rows if r.get("label") == "real"]
+        ai = [r["score_dirA"] for r in rows if r.get("label") == "ai"]
+        scores = (binoc.get("analysis") or {}).get("scores") or {}
+        dira = scores.get("dirA (obs=base)") or {}
+        # DivEye (arXiv 2509.18880) surprisal-variability AUCs ride along;
+        # advisory like everything under this key. Absent on old scorers.
+        diveye = {name: (scores.get(f"diveye {name} (base)") or {}).get("auc_oriented")
+                  for name in ("std", "burst", "kurt")}
+        summary = {
+            "direction": "dirA (obs=base, performer=adapted)",
+            "adapter": binoc.get("adapter"),
+            "n_real": len(real), "n_ai": len(ai),
+            "auc_per_message": dira.get("auc_oriented"),
+            "auc_windowed_k5": (dira.get("windowed") or {}).get("k=5"),
+            "diveye_auc": diveye,
+            "mean_real": round(sum(real) / len(real), 4) if real else None,
+            "mean_ai": round(sum(ai) / len(ai), 4) if ai else None,
+            "fpr5_threshold": thr_fpr5,
+            "ai_frac_below_fpr5_thr":
+                round(sum(1 for s in ai if s < thr_fpr5) / len(ai), 4)
+                if ai else None,
+            "elapsed_s": round(time.time() - started, 1),
+            # Per-trial AI scores so binoculars_to_dpo.py can mine from this
+            # file alone — no second 12-minute scoring pass.
+            "ai_by_trial": {
+                str(r["trial"]): {"score": round(r["score_dirA"], 5),
+                                  "n_tokens": r["n_tokens"]}
+                for r in rows
+                if r.get("label") == "ai" and r.get("trial") is not None},
+        }
+    except Exception as e:  # advisory metric — swallow everything
+        summary = {"error": f"{type(e).__name__}: {e}",
+                   "elapsed_s": round(time.time() - started, 1)}
+
+    try:
+        with open(results_path) as f:
+            doc = json.load(f)
+        doc["binoculars"] = summary
+        with open(results_path, "w") as f:
+            json.dump(doc, f, indent=2)
+    except Exception as e:
+        print(f"  BINOCULARS: could not merge summary: {e}")
+        return summary
+
+    if "error" in summary:
+        print(f"\n  BINOCULARS: FAILED ({summary['error']}) — advisory only, run unaffected")
+    else:
+        print(f"\n  BINOCULARS (advisory AI-tell, {summary['elapsed_s']:.0f}s):")
+        print(f"    per-message AUC:  {summary['auc_per_message']}")
+        print(f"    windowed k=5 AUC: {summary['auc_windowed_k5']}  "
+              "(0.5 = statistically indistinguishable, the goal)")
+        print(f"    mean score real={summary['mean_real']} ai={summary['mean_ai']}")
+        print(f"    AI below {thr_fpr5} (5%-FPR flag): {summary['ai_frac_below_fpr5_thr']}")
+    return summary
+
+
 def main():
     # Short-circuit for --gate --gate-dry-run (no creds, no data needed)
     if USE_GATE and GATE_DRY_RUN:
@@ -301,13 +846,33 @@ def main():
             "baseline_fool_rate": None, "n_trials": 0, "n_real_pairs": 0,
             "fail_under": _gate.DEFAULT_FAIL_UNDER,
             "max_regression": _gate.DEFAULT_MAX_REGRESSION,
-        }, commit=_git_commit())
+            "note": "dry run: no measurement, no serving provenance captured",
+        }, commit=_git_commit(), serving=None, claims_adapter=False)
         print("GATE: ADVISORY (dry run / no data) — not blocking")
         sys.exit(0)
 
     if not API_KEY and not os.path.exists(os.path.expanduser("~/.config/gcloud/application_default_credentials.json")):
         print("ERROR: Set GEMINI_API_KEY or configure gcloud ADC")
         sys.exit(1)
+
+    # Pre-flight provenance: refuse BEFORE generating when :8741 cannot vouch
+    # for the arm this run claims. 2026-07-26 -> 09-04 the adapter bound zero
+    # tensors while /health said applied; every gate number in that window
+    # measured base+prompt. Refusing here costs one GET pair; refusing only at
+    # verdict time would first burn ~45 generations and judge calls.
+    claims_adapter = not USE_BASE_ARM
+    preflight_serving = None
+    if USE_GATE:
+        preflight_serving = gate_serving_provenance()
+        reason = _gate.proxy_provenance_refusal(preflight_serving, claims_adapter)
+        if reason:
+            print(f"\n  REFUSING: {reason}")
+            print(f"  GATE: NOT WRITTEN — {_GATE_PATH} left untouched; no generation attempted.")
+            sys.exit(2)
+        print(f"  Serving: adapter={preflight_serving.get('adapter_path') or 'none'} "
+              f"tensors_loaded={preflight_serving.get('tensors_loaded')} "
+              f"model={preflight_serving.get('model')} "
+              f"head_sha256={(preflight_serving.get('head_sha256') or 'null')[:12]}")
 
     pairs = load_ground_truth()
     if USE_SYNTHETIC:
@@ -366,7 +931,9 @@ def main():
             print(f"  Real Seth: \"{real_seth}\"")
             sys.stdout.flush()
 
-            ai_response = get_ai_response(incoming)  # serial — model_lock floor
+            # Feed the SAME thread the human had — see get_ai_response_cli.
+            ai_response = get_ai_response(
+                incoming, context_turns=pair.get('context_turns'))  # serial — model_lock floor
             print(f"  AI Seth:   \"{ai_response}\"")
 
             if ai_response.startswith("("):
@@ -462,41 +1029,63 @@ def main():
     with open(RESULTS_PATH, "w") as f:
         json.dump({
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-            "mode": "gateway" if USE_GATEWAY else "cli",
+            "mode": run_mode(USE_GATEWAY, USE_MLX),
             "total_trials": total,
             "human_detected": human_detected_correctly,
             "ai_fooled": ai_detected_correctly,
             "detection_rate": human_detected_correctly / total * 100 if total else 0,
             "fool_rate": ai_detected_correctly / total * 100 if total else 0,
+            "serving": preflight_serving,
+            "claims_adapter": claims_adapter,
             "trials": results,
         }, f, indent=2)
     print(f"\n  Full results saved to {RESULTS_PATH}")
+
+    # Advisory Binoculars metric: needs the results file on disk, and only a
+    # run that counts as a real measurement (same >=50%-valid bar the gate
+    # harness-fail check uses) is worth 12 min of GPU.
+    if USE_BINOCULARS and total > 0 and (not pairs or total >= len(pairs) / 2):
+        _run_binoculars(RESULTS_PATH)
 
     if USE_GATE:
         fool_rate = ai_detected_correctly / total * 100 if total else 0.0
         n_real_pairs = sum(1 for t in results if not t.get("is_synthetic"))
         baseline = _load_baseline()
-        mode, verdict, should_fail = _gate.proxy_gate_decision(
-            fool_rate=fool_rate, n_real_pairs=n_real_pairs, baseline=baseline)
-        _gate.write_proxy_half(_GATE_PATH, {
-            "verdict": verdict, "mode": mode,
-            "fool_rate": fool_rate if total else None,
-            "baseline_fool_rate": (baseline or {}).get("fool_rate"),
-            "n_trials": total, "n_real_pairs": n_real_pairs,
-            "fail_under": _gate.DEFAULT_FAIL_UNDER,
-            "max_regression": _gate.DEFAULT_MAX_REGRESSION,
-        }, commit=_git_commit())
+
+        # A run where fewer than half the attempted trials produced a valid
+        # judgment is a HARNESS failure, not a measurement — so it must not
+        # touch the gate at all. This check used to run AFTER write_proxy_half,
+        # which meant a broken run still clobbered the artifact: on 2026-07-27
+        # an 8/50 run and then a 0/50 run (daemon down, connection refused)
+        # replaced a genuine fool_rate=44.0% n=50 verdict with ADVISORY n=0.
+        # Refusing to emit is the point; refusing to DESTROY is the other half.
+        if not harness_run_is_valid(total, len(pairs)):
+            print(f"\n  HARNESS FAIL: only {total}/{len(pairs)} trials valid (<50%) — "
+                  "not a measurement; fix serving/judge and re-run.")
+            print(f"  GATE: NOT WRITTEN — {_GATE_PATH} left at its last real "
+                  "measurement rather than overwritten with this run.")
+            sys.exit(1)
+
+        # Verdict-time provenance: ask the server AGAIN and refuse if it no
+        # longer vouches for the arm, or if it differs from pre-flight.
+        serving = gate_serving_provenance()
+        try:
+            mode, verdict, should_fail = write_gate_verdict(
+                _GATE_PATH, fool_rate=fool_rate, n_trials=total, n_real_pairs=n_real_pairs,
+                baseline=baseline, serving=serving, preflight_serving=preflight_serving,
+                claims_adapter=claims_adapter, run_mode=run_mode(USE_GATEWAY, USE_MLX),
+                commit=_git_commit())
+        except _gate.ProvenanceRefusal as e:
+            print(f"\n  REFUSING: {e}")
+            print(f"  GATE: NOT WRITTEN — {_GATE_PATH} left at its last real measurement.")
+            sys.exit(2)
         banner = ("ADVISORY (n_real_pairs<%d) — not blocking" % _gate.ENFORCE_MIN_PAIRS
                   if mode == "ADVISORY" else "%s (fool_rate=%.0f%%)" % (verdict, fool_rate))
         print(f"\n  GATE: {banner}")
-        # A run where fewer than half the attempted trials produced a valid
-        # judgment is a HARNESS failure, not a measurement — exit non-zero so
-        # nightly logs record it as failed instead of a polite ADVISORY
-        # (2026-07-11: 0/50 valid exited 0 and read like a completed run).
-        if len(pairs) and total < len(pairs) / 2:
-            print(f"  HARNESS FAIL: only {total}/{len(pairs)} trials valid (<50%) — "
-                  "not a measurement; fix serving/judge and re-run.")
-            sys.exit(1)
+        # (The <50%-valid harness check now runs BEFORE the write above, so a
+        # broken run exits without touching the artifact. 2026-07-11: 0/50
+        # valid exited 0 and read like a completed run; 2026-07-27: it also
+        # destroyed the previous real measurement.)
         sys.exit(1 if should_fail else 0)
 
 

@@ -16,6 +16,7 @@
 #include "human/agent/tom_scenario.h"
 #include "human/agent/training_data_runner.h"
 #include "human/agent/world_model.h"
+#include "human/core/paths.h"
 #include "human/memory/belief.h"
 #include "human/memory/memory.h"
 #include "human/ml/lora_retrain_runner.h"
@@ -58,16 +59,8 @@ hu_memory_facade_t *hu_w7_facade_memory_handle(hu_w7_facade_t *facade) {
     return facade ? facade->m : NULL;
 }
 
-struct sqlite3 *hu_w7_facade_graph_db(hu_w7_facade_t *facade) {
-#ifdef HU_ENABLE_SQLITE
-    if (!facade || !facade->graph)
-        return NULL;
-    return hu_graph_sqlite_connection(facade->graph);
-#else
-    /* No SQLite backend → no graph DB to read community_summaries from. */
-    (void)facade;
-    return NULL;
-#endif
+struct hu_graph *hu_w7_facade_graph_handle(hu_w7_facade_t *facade) {
+    return facade ? facade->graph : NULL;
 }
 
 /* W15 — bridge callback: memory facade audit hook → SQLite audit log. */
@@ -1272,6 +1265,14 @@ hu_error_t hu_w14_scheduler_enqueue_lora_retrain_nightly(hu_w14_scheduler_t *s, 
                                                          int budget_ms) {
     if (!s || !s->s)
         return HU_ERR_INVALID_ARGUMENT;
+    /* One nightly retrain in the queue is the contract. The caller re-arms
+     * every 24 h but the job waits for idle + AC power, so without this
+     * check the rows stack up (576 pending on 2026-09-04) and every tick
+     * re-evaluates all of them. HU_OK here re-arms the caller's timer. */
+    size_t pending = 0;
+    if (hu_scheduler_pending_count_for_kind(s->s, HU_JOB_LORA_RETRAIN_NIGHTLY, &pending) == HU_OK &&
+        pending > 0)
+        return HU_OK;
     hu_job_spec_t job;
     memset(&job, 0, sizeof(job));
     job.kind = HU_JOB_LORA_RETRAIN_NIGHTLY;
@@ -1365,10 +1366,7 @@ hu_error_t hu_w14_scheduler_status(hu_w14_scheduler_t *s, size_t *out_jobs_pendi
 bool hu_w14_scheduler_status_path(char *out_path, size_t cap) {
     if (!out_path || cap == 0)
         return false;
-    const char *home = getenv("HOME");
-    if (!home || !*home)
-        return false;
-    int n = snprintf(out_path, cap, "%s/.human/scheduler.status", home);
+    int n = hu_paths_state(out_path, cap, "scheduler.status");
     return n > 0 && (size_t)n < cap;
 }
 

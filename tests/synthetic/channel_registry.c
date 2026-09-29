@@ -276,17 +276,6 @@ static void twitter_test_destroy(hu_channel_t *ch) {
 }
 #endif
 
-#if HU_HAS_MAIXCAM
-#include "human/channels/maixcam.h"
-
-static hu_error_t maixcam_test_create(hu_allocator_t *alloc, hu_channel_t *out) {
-    return hu_maixcam_create(alloc, "localhost", 9, 8080, out);
-}
-static void maixcam_test_destroy(hu_channel_t *ch) {
-    hu_maixcam_destroy(ch);
-}
-#endif
-
 #if HU_HAS_MATRIX
 #include "human/channels/matrix.h"
 
@@ -446,10 +435,6 @@ static const hu_channel_test_entry_t s_registry[] = {
 #if HU_HAS_TWITTER
     {"twitter", twitter_test_create, twitter_test_destroy, hu_twitter_test_inject_mock,
      hu_twitter_poll, hu_twitter_test_get_last_message},
-#endif
-#if HU_HAS_MAIXCAM
-    {"maixcam", maixcam_test_create, maixcam_test_destroy, hu_maixcam_test_inject_mock, NULL,
-     hu_maixcam_test_get_last_message},
 #endif
 #if HU_HAS_MATRIX
     {"matrix", matrix_test_create, matrix_test_destroy, hu_matrix_test_inject_mock, hu_matrix_poll,

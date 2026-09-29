@@ -22,6 +22,7 @@
  * dispatcher safety contract. */
 
 #include "human/core/allocator.h"
+#include "human/core/endpoints.h"
 #include "human/core/error.h"
 
 #include <stdbool.h>
@@ -55,7 +56,7 @@ void hu_mlx_admin_swap_result_free(hu_allocator_t *alloc, hu_mlx_admin_swap_resu
 /* POST {adapter_path: ...} to <base_url>/adapters/swap.
  *
  * `base_url` should point at the MLX server's v1 root (e.g.
- * "http://127.0.0.1:8741/v1"). The "/adapters/swap" suffix is appended
+ * HU_MLX_DEFAULT_BASE_URL). The "/adapters/swap" suffix is appended
  * by this function.
  *
  * `adapter_path` is the absolute (or ~-expandable, server-side) path
@@ -170,6 +171,24 @@ typedef enum {
 } hu_lora_scale_class_t;
 
 hu_lora_scale_class_t hu_lora_scale_classify(double scale);
+
+/* Pure: does the server need a swap to serve `wanted`? False only when
+ * `current` (the server's canonical path from GET /adapters/current) names
+ * the same adapter directory as `wanted`, ignoring trailing slashes. NULL
+ * or empty `current` means "no adapter applied" → true. A same-path POST is
+ * not free: the server invalidates its cross-turn prompt cache on every
+ * swap, so the daemon asks this before POSTing at boot (2026-09-04). */
+bool hu_mlx_admin_swap_needed(const char *current, const char *wanted);
+
+/* GET /adapters/current, then POST /adapters/swap only if the server does
+ * not already serve `adapter_path`. On the already-active path `result`
+ * reports status_code 200 with no request made and *already = true. Any
+ * failure to read the current adapter falls through to a plain swap, so
+ * this is never less capable than hu_mlx_admin_swap_adapter. */
+hu_error_t hu_mlx_admin_ensure_adapter(hu_allocator_t *alloc, const char *base_url,
+                                       size_t base_url_len, const char *adapter_path,
+                                       size_t adapter_path_len, hu_mlx_admin_swap_result_t *result,
+                                       bool *already);
 
 /* Read lora_parameters.scale (or top-level scale) from
  * <adapter_dir>/adapter_config.json. Returns HU_OK + *out_scale on

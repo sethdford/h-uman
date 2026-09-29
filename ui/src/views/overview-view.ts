@@ -30,12 +30,21 @@ interface HealthRes {
   uptime_secs?: number;
 }
 
+/** Reply of the gateway's `update.check`. `disabled` means auto_update is
+ * "off" and the gateway did not contact GitHub; only `{ force: true }` does. */
 interface UpdateInfo {
   available?: boolean;
+  disabled?: boolean;
+  current?: string;
+  latest?: string;
+  error?: string;
+  /** Legacy field names, still accepted from older gateways. */
   current_version?: string;
   latest_version?: string;
   url?: string;
 }
+
+const RELEASES_URL = "https://github.com/sethdford/h-uman/releases/latest";
 
 interface CapabilitiesRes {
   version?: string;
@@ -118,6 +127,25 @@ export class ScOverviewView extends GatewayAwareLitElement {
           &:hover {
             color: var(--hu-accent-tertiary-hover);
             text-decoration: underline;
+          }
+        }
+
+        & button.update-link {
+          background: none;
+          border: 0;
+          padding: 0;
+          font: inherit;
+          cursor: pointer;
+
+          &:focus-visible {
+            outline: var(--hu-focus-ring-width) solid var(--hu-accent);
+            outline-offset: 2px;
+          }
+
+          &:disabled {
+            cursor: default;
+            color: var(--hu-text-muted);
+            text-decoration: none;
           }
         }
       }
@@ -367,6 +395,9 @@ export class ScOverviewView extends GatewayAwareLitElement {
   @state() private loading = true;
   @state() private error = "";
   @state() private updateInfo: UpdateInfo = {};
+  /** Result of an explicit "Check now"; survives the 30 s auto-refresh. */
+  @state() private manualUpdate: UpdateInfo | null = null;
+  @state() private updateChecking = false;
   @state() private activityEvents: ActivityEvent[] = [];
   @state() private channelsExpanded = false;
   @state() private hulaAnalytics: {
@@ -543,10 +574,51 @@ export class ScOverviewView extends GatewayAwareLitElement {
     }
   }
 
+  /** User-initiated update check: the only path that reaches GitHub when
+   * auto_update is off. */
+  private async _checkForUpdates(): Promise<void> {
+    const gw = this.gateway;
+    if (!gw || this.updateChecking) return;
+    this.updateChecking = true;
+    try {
+      this.manualUpdate = await gw.request<UpdateInfo>("update.check", { force: true });
+    } catch {
+      this.manualUpdate = { error: "unreachable" };
+    } finally {
+      this.updateChecking = false;
+    }
+  }
+
+  private _renderUpdateStatus() {
+    const info = this.manualUpdate ?? this.updateInfo;
+    if (info.available) {
+      return html`<span>&middot;</span>
+        <a class="update-link" href=${info.url ?? RELEASES_URL} target="_blank" rel="noopener">
+          Update to ${info.latest ?? info.latest_version}
+        </a>`;
+    }
+    if (this.manualUpdate) {
+      return html`<span>&middot;</span>
+        <span>${this.manualUpdate.error ? "Couldn't check for updates" : "Up to date"}</span>`;
+    }
+    if (info.disabled) {
+      return html`<span>&middot;</span>
+        <span>Update checks are off</span>
+        <span>&middot;</span>
+        <button
+          class="update-link"
+          ?disabled=${this.updateChecking}
+          @click=${() => this._checkForUpdates()}
+        >
+          ${this.updateChecking ? "Checking…" : "Check now"}
+        </button>`;
+    }
+    return nothing;
+  }
+
   private _updateWelcome(): void {
     const welcome = this.shadowRoot?.querySelector("hu-welcome") as
-      | (HTMLElement & { markStep: (k: string) => void })
-      | null;
+      (HTMLElement & { markStep: (k: string) => void }) | null;
     if (!welcome) return;
     if (this.gateway?.status === "connected") welcome.markStep("connect");
     if (this.gatewayOperational) welcome.markStep("health");
@@ -617,16 +689,18 @@ export class ScOverviewView extends GatewayAwareLitElement {
   override render() {
     if (this.loading) return this._renderSkeleton();
     return html`
-      ${this.error
-        ? html`<hu-empty-state
-            .icon=${icons.warning}
-            heading="Connection Error"
-            description=${this.error}
-          >
-            <hu-button variant="primary" @click=${() => this.load()}> Retry </hu-button>
-          </hu-empty-state>`
-        : html`${this._renderHero()} ${this._renderMetrics()} ${this._renderQuickActions()}
-          ${this._renderDetails()}`}
+      ${
+        this.error
+          ? html`<hu-empty-state
+              .icon=${icons.warning}
+              heading="Connection Error"
+              description=${this.error}
+            >
+              <hu-button variant="primary" @click=${() => this.load()}> Retry </hu-button>
+            </hu-empty-state>`
+          : html`${this._renderHero()} ${this._renderMetrics()} ${this._renderQuickActions()}
+            ${this._renderDetails()}`
+      }
     `;
   }
 
@@ -650,9 +724,11 @@ export class ScOverviewView extends GatewayAwareLitElement {
         <hu-section-header heading="Overview" description="Your AI assistant at a glance">
           <div class="hero-actions">
             <hu-connection-pulse status=${this.connectionStatus}></hu-connection-pulse>
-            ${this.lastLoadedAt
-              ? html`<span class="staleness">${this.stalenessLabel}</span>`
-              : nothing}
+            ${
+              this.lastLoadedAt
+                ? html`<span class="staleness">${this.stalenessLabel}</span>`
+                : nothing
+            }
             <hu-button
               variant="ghost"
               size="sm"
@@ -670,17 +746,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
             <div class="hero-status">
               <div class="hero-meta">
                 <span>v${cap.version ?? "h-uman"}</span>
-                ${this.updateInfo.available
-                  ? html`<span>&middot;</span>
-                      <a
-                        class="update-link"
-                        href=${this.updateInfo.url ?? "#"}
-                        target="_blank"
-                        rel="noopener"
-                      >
-                        Update to ${this.updateInfo.latest_version}
-                      </a>`
-                  : nothing}
+                ${this._renderUpdateStatus()}
               </div>
             </div>
           </div>
@@ -823,51 +889,55 @@ export class ScOverviewView extends GatewayAwareLitElement {
 
           <hu-card hoverable accent tilt chromatic entrance surface="high" class="channels">
             <div class="section-label">Channels</div>
-            ${this.channels.length === 0
-              ? html`
-                  <hu-empty-state
-                    .icon=${icons.radio}
-                    heading="No channels yet"
-                    description="Connect Telegram, Discord, Slack, or any messaging platform."
-                  >
-                    <hu-button variant="primary" @click=${() => this._navigate("channels")}>
-                      Configure a Channel
-                    </hu-button>
-                  </hu-empty-state>
-                `
-              : html`
-                  <div class="channels-with-chart">
-                    <hu-chart
-                      type="doughnut"
-                      .data=${this._channelDoughnutData}
-                      height=${100}
-                    ></hu-chart>
-                    <div class="channels-inner">
-                      ${channelsToShow.map(
-                        (ch) => html`
-                          <div class="channel-item">
-                            <span class="channel-name">${ch.label ?? ch.key ?? "unnamed"}</span>
-                            <hu-badge variant=${ch.configured ? "success" : "neutral"} dot>
-                              ${ch.status ?? (ch.configured ? "Configured" : "\u2014")}
-                            </hu-badge>
-                          </div>
-                        `,
-                      )}
+            ${
+              this.channels.length === 0
+                ? html`
+                    <hu-empty-state
+                      .icon=${icons.radio}
+                      heading="No channels yet"
+                      description="Connect Telegram, Discord, Slack, or any messaging platform."
+                    >
+                      <hu-button variant="primary" @click=${() => this._navigate("channels")}>
+                        Configure a Channel
+                      </hu-button>
+                    </hu-empty-state>
+                  `
+                : html`
+                    <div class="channels-with-chart">
+                      <hu-chart
+                        type="doughnut"
+                        .data=${this._channelDoughnutData}
+                        height=${100}
+                      ></hu-chart>
+                      <div class="channels-inner">
+                        ${channelsToShow.map(
+                          (ch) => html`
+                            <div class="channel-item">
+                              <span class="channel-name">${ch.label ?? ch.key ?? "unnamed"}</span>
+                              <hu-badge variant=${ch.configured ? "success" : "neutral"} dot>
+                                ${ch.status ?? (ch.configured ? "Configured" : "\u2014")}
+                              </hu-badge>
+                            </div>
+                          `,
+                        )}
+                      </div>
+                      ${
+                        hasMoreChannels
+                          ? html`
+                              <button
+                                type="button"
+                                class="show-more-btn"
+                                @click=${() => (this.channelsExpanded = !this.channelsExpanded)}
+                                aria-expanded=${this.channelsExpanded}
+                              >
+                                ${this.channelsExpanded ? "Show less" : "Show more"}
+                              </button>
+                            `
+                          : nothing
+                      }
                     </div>
-                    ${hasMoreChannels
-                      ? html`
-                          <button
-                            type="button"
-                            class="show-more-btn"
-                            @click=${() => (this.channelsExpanded = !this.channelsExpanded)}
-                            aria-expanded=${this.channelsExpanded}
-                          >
-                            ${this.channelsExpanded ? "Show less" : "Show more"}
-                          </button>
-                        `
-                      : nothing}
-                  </div>
-                `}
+                  `
+            }
           </hu-card>
 
           <hu-card hoverable accent entrance surface="high" class="heatmap">

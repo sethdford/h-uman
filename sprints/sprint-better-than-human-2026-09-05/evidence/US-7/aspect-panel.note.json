@@ -1,0 +1,2 @@
+
+{"note":"regression aspect hit the subprocess timeout and carried weight 0; the four returning aspects all passed (pass_share 1.0). Critic round 2 = MERGE covered regression surface (argparse mutual exclusion, default full-range path unchanged)."}

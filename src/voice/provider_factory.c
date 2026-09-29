@@ -3,6 +3,7 @@
  * Centralizes API key lookup, model/voice defaults, and backend config construction.
  */
 #include "human/config.h"
+#include "human/core/endpoints.h"
 #include "human/core/privacy.h"
 #include "human/voice/gemini_live.h"
 #include "human/voice/mlx_local.h"
@@ -111,7 +112,7 @@ hu_error_t hu_voice_provider_create_from_config(hu_allocator_t *alloc, const hu_
 
     if (strcmp(mode, "mlx_local") == 0) {
         hu_voice_mlx_local_config_t mlc = {
-            .endpoint = "http://127.0.0.1:8741",
+            .endpoint = HU_MLX_DEFAULT_ORIGIN,
             .model = rt_model,
             .voice_id = rt_voice,
             .sample_rate = (extras && extras->sample_rate > 0) ? extras->sample_rate : 24000,
@@ -187,7 +188,7 @@ hu_error_t hu_voice_provider_create_from_extras(hu_allocator_t *alloc, const cha
 
     if (strcmp(mode, "mlx_local") == 0) {
         hu_voice_mlx_local_config_t mlc = {
-            .endpoint = "http://127.0.0.1:8741",
+            .endpoint = HU_MLX_DEFAULT_ORIGIN,
             .model = model,
             .system_prompt = extras->system_instruction,
             .voice_id = voice,

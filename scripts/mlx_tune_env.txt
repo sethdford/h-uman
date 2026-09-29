@@ -1,0 +1,160 @@
+# mlx-tune training venv (contract C6)
+#
+# Created:  2026-09-02
+# Location: ~/.human/venvs/mlxtune312
+# Python:   /opt/homebrew/opt/python@3.12/bin/python3.12 (3.12.13)
+#
+# Built as a NEW, SEPARATE venv from ~/.human/venvs/train312 (the mlx_lm /
+# mlx_lm_lora training venv used by scripts/train-glm-adapter.sh's existing
+# `mlx_lm` and `mlx_lm_lora` trainers). mlx and mlx-lm are pinned to the EXACT
+# versions already verified against the GLM-4.5-Air-4bit base in train312, so
+# a real training run (out of scope for this task) exercises the same
+# MLX/mlx_lm behavior the v5/v6/v6.1/v6.2 adapters were trained and served
+# against -- no new mlx/mlx_lm version drift introduced by adding mlx-tune.
+#
+# Build commands (reproducible):
+#   mkdir -p ~/.human/venvs
+#   /opt/homebrew/opt/python@3.12/bin/python3.12 -m venv ~/.human/venvs/mlxtune312
+#   ~/.human/venvs/mlxtune312/bin/pip install --upgrade pip
+#   ~/.human/venvs/mlxtune312/bin/pip install "mlx==0.32.0" "mlx-lm==0.31.3"
+#   ~/.human/venvs/mlxtune312/bin/pip install mlx-tune
+#
+# Versions pinned FROM train312 at build time (verified via `pip show mlx mlx-lm`
+# against ~/.human/venvs/train312 immediately before creating this venv):
+#   mlx       0.32.0   (train312 also had mlx-lm-lora 3.0.0, not needed here)
+#   mlx-lm    0.31.3
+#
+# Versions actually installed in mlxtune312 (verified via `pip show` after
+# install -- MUST match the two pins above exactly; mlx-tune's own
+# transitive deps -- mlx-audio, mlx-embeddings, mlx-vlm, transformers,
+# huggingface_hub, etc. -- were left unpinned and resolved by pip):
+#   mlx           0.32.0
+#   mlx-lm        0.31.3
+#   mlx-tune      0.6.0
+#   mlx-metal     0.32.0
+#   huggingface_hub 1.29.0
+#   PyYAML        6.0.3   (transitive; used by scripts/mlx_tune_train.py's
+#                          YAML config reader, matches mlx_lm's own -c parser)
+#   transformers  5.16.1
+#   safetensors   0.8.0
+#   numpy         2.5.2
+#
+# Full freeze, captured 2026-09-02 via:
+#   ~/.human/venvs/mlxtune312/bin/pip list --format=freeze
+#
+Jinja2==3.1.6
+MarkupSafe==3.0.3
+PyYAML==6.0.3
+Pygments==2.21.0
+aiohappyeyeballs==2.7.1
+aiohttp==3.14.3
+aiosignal==1.4.0
+annotated-doc==0.0.5
+annotated-types==0.8.0
+anyio==4.14.2
+attrs==26.1.0
+certifi==2026.7.22
+cffi==2.1.1
+charset-normalizer==3.5.1
+click==8.5.0
+datasets==3.6.0
+dill==0.3.8
+fastapi==0.141.1
+filelock==3.32.5
+frozenlist==1.8.0
+fsspec==2025.3.0
+h11==0.16.0
+hf-xet==1.6.0
+httpcore==1.0.9
+httpx==0.28.1
+huggingface_hub==1.29.0
+idna==3.19
+llguidance==1.8.0
+markdown-it-py==4.2.0
+mdurl==0.1.2
+miniaudio==1.71
+mlx-audio==0.5.1
+mlx-embeddings==0.1.0
+mlx-lm==0.31.3
+mlx-metal==0.32.0
+mlx-tune==0.6.0
+mlx-vlm==0.6.17
+mlx==0.32.0
+multidict==6.7.1
+multiprocess==0.70.16
+numpy==2.5.2
+opencv-python==5.0.0.93
+packaging==26.3
+pandas==3.0.5
+pillow==12.3.0
+pip==26.2.1
+propcache==0.5.2
+protobuf==7.36.1
+pyarrow==25.0.1
+pycparser==3.0
+pydantic==2.13.5
+pydantic_core==2.46.5
+python-dateutil==2.9.0.post0
+python-multipart==0.0.32
+regex==2026.9.3
+requests==2.34.2
+rich==15.0.0
+safetensors==0.8.0
+scipy==1.18.1
+sentencepiece==0.2.2
+shellingham==1.5.4
+six==1.17.0
+sounddevice==0.5.6
+starlette==1.6.0
+tokenizers==0.23.1
+tqdm==4.70.0
+transformers==5.16.1
+typer==0.27.2
+typing-inspection==0.4.4
+typing_extensions==4.16.0
+urllib3==2.7.0
+uvicorn==0.52.4
+websockets==17.1
+xxhash==4.0.1
+yarl==1.24.5
+
+# ---------------------------------------------------------------------------
+# Test-only addition (2026-09-02, after the freeze above was captured):
+#   pytest==9.1.1
+# Needed only to run scripts/test_mlx_tune_train.py; not used by
+# scripts/mlx_tune_train.py itself at runtime.
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Architecture-support finding (static, zero weight-loading -- see
+# scripts/mlx_tune_train.py::resolve_architecture_support and the dry-run
+# output recorded in docs/research/v6-orpo-execution-record-20260727.md):
+#
+# mlx-tune has NO explicit named "supported architectures" registry/allowlist
+# for text LLMs (grepped mlx_tune/*.py for SUPPORTED/ARCH_REGISTRY/registry/
+# ARCHITECTURES -- none exists for LLMs; only OCR/embeddings/audio submodules
+# have their own small per-feature allowlists, unrelated to GLM). Text-model
+# architecture support is inherited entirely from mlx_lm: mlx-tune loads via
+# `mlx_lm.load()` / `mlx_lm.utils._get_classes(config)`, which dispatches on
+# config.json's "model_type" to `mlx_lm.models.<model_type>` -- and applies
+# LoRA (incl. per-expert MoE LoRA) via dynamic introspection
+# (mlx_tune.model._resolve_target_modules scans live module types for
+# nn.Linear/nn.QuantizedLinear/SwitchLinear/QuantizedSwitchLinear), not a
+# name-keyed table.
+#
+# GLM-4.5-Air-4bit's config.json (cached locally,
+# ~/.cache/huggingface/hub/models--mlx-community--GLM-4.5-Air-4bit) reports
+# model_type=glm4_moe, architectures=[Glm4MoeForCausalLM]. mlx_lm 0.31.3 (the
+# exact pinned version here) ships mlx_lm/models/glm4_moe.py, confirmed
+# importable via `mlx_lm.utils._get_classes(config)` with ZERO weights loaded
+# (Model=mlx_lm.models.glm4_moe.Model, ModelArgs=mlx_lm.models.glm4_moe.ModelArgs).
+# That module's Glm4MoeMoE block builds `self.switch_mlp = SwitchGLU(...)`
+# (routed experts, gate/up/down all mlx_lm.models.switch_layers.SwitchLinear)
+# plus `self.shared_experts = MLP(...)` (dense) for layers >= first_k_dense_replace,
+# and plain dense MLP for the early layers -- exactly the mixed dense+MoE shape
+# mlx-tune's target-module resolver documents handling.
+#
+# CONCLUSION: glm4_moe IS supported end-to-end -- via mlx_lm's model_type
+# dispatch, not a name in an mlx-tune registry -- and mlx-tune's per-expert
+# LoRA targeting will correctly reach mlp.switch_mlp.{gate,up,down}_proj on
+# every MoE layer plus mlp.shared_experts.* and the dense early layers.

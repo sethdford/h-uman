@@ -163,28 +163,32 @@ export class ScCheckbox extends LitElement {
           @keydown=${this._onKeyDown}
         >
           <span
-            class="box ${this.checked ? "checked" : ""} ${this.indeterminate
-              ? "indeterminate"
-              : ""}"
+            class="box ${this.checked ? "checked" : ""} ${
+              this.indeterminate ? "indeterminate" : ""
+            }"
             aria-hidden="true"
           >
-            ${this.indeterminate
-              ? html`<span class="dash"></span>`
-              : this.checked
-                ? html`<span class="check"></span>`
-                : null}
+            ${
+              this.indeterminate
+                ? html`<span class="dash"></span>`
+                : this.checked
+                  ? html`<span class="check"></span>`
+                  : null
+            }
           </span>
           ${this.label ? html`<span class="label">${this.label}</span>` : null}
         </div>
-        ${this.error
-          ? html`<span
-              class="error-msg"
-              id=${`${this._checkboxId}-error`}
-              role="alert"
-              aria-live="polite"
-              >${this.error}</span
-            >`
-          : null}
+        ${
+          this.error
+            ? html`<span
+                class="error-msg"
+                id=${`${this._checkboxId}-error`}
+                role="alert"
+                aria-live="polite"
+                >${this.error}</span
+              >`
+            : null
+        }
       </div>
     `;
   }

@@ -110,8 +110,8 @@ static hu_error_t shell_escape_single_quoted(hu_allocator_t *alloc, const char *
     return HU_OK;
 }
 
-static hu_error_t buf_append(hu_allocator_t *alloc, char **buf, size_t *len, size_t *cap, const char *s,
-                             size_t slen) {
+static hu_error_t buf_append(hu_allocator_t *alloc, char **buf, size_t *len, size_t *cap,
+                             const char *s, size_t slen) {
     size_t need = *len + slen + 1;
     while (need > *cap) {
         size_t nc = *cap ? *cap * 2 : 128;
@@ -130,8 +130,8 @@ static hu_error_t buf_append(hu_allocator_t *alloc, char **buf, size_t *len, siz
 }
 
 static hu_error_t substitute_placeholders(hu_allocator_t *alloc, const char *tmpl,
-                                          const hu_json_value_t *args, int shell_escape_vals, char **out,
-                                          size_t *out_len) {
+                                          const hu_json_value_t *args, int shell_escape_vals,
+                                          char **out, size_t *out_len) {
     if (!tmpl) {
         char *e = hu_strdup(alloc, "");
         if (!e)
@@ -219,7 +219,9 @@ static hu_error_t substitute_placeholders(hu_allocator_t *alloc, const char *tmp
     return HU_OK;
 }
 
-/* Reject obvious injection transports in assembled commands. */
+/* Reject obvious injection transports in assembled commands. Only the
+ * non-test exec path calls this; keep the definition under the same gate. */
+#if !(defined(HU_IS_TEST) && HU_IS_TEST)
 static int decl_assembled_cmd_suspicious(const char *cmd) {
     if (!cmd)
         return 0;
@@ -229,6 +231,7 @@ static int decl_assembled_cmd_suspicious(const char *cmd) {
     }
     return 0;
 }
+#endif
 
 static int decl_template_text_suspicious(const char *tmpl) {
     if (!tmpl)
@@ -259,13 +262,13 @@ static hu_error_t copy_def(hu_allocator_t *alloc, const hu_declarative_tool_def_
                            hu_declarative_tool_def_t *dst) {
     memset(dst, 0, sizeof(*dst));
     dst->exec_type = src->exec_type;
-#define CP(f)                                                                                      \
-    do {                                                                                           \
-        if (src->f) {                                                                              \
-            dst->f = hu_strdup(alloc, src->f);                                                     \
-            if (!dst->f)                                                                           \
-                goto oom;                                                                          \
-        }                                                                                          \
+#define CP(f)                                  \
+    do {                                       \
+        if (src->f) {                          \
+            dst->f = hu_strdup(alloc, src->f); \
+            if (!dst->f)                       \
+                goto oom;                      \
+        }                                      \
     } while (0)
     CP(name);
     CP(description);
@@ -403,8 +406,7 @@ static hu_error_t decl_execute(void *ctx, hu_allocator_t *alloc, const hu_json_v
         {
             const char *argv[] = {"/bin/sh", "-c", cmdline, NULL};
             hu_run_result_t run = {0};
-            hu_error_t rr =
-                hu_process_run_with_timeout(alloc, argv, NULL, 1048576, 30, &run);
+            hu_error_t rr = hu_process_run_with_timeout(alloc, argv, NULL, 1048576, 30, &run);
             alloc->free(alloc->ctx, cmdline, cmd_len + 1);
             if (rr != HU_OK)
                 return rr;
@@ -622,8 +624,7 @@ hu_error_t hu_declarative_tools_discover(hu_allocator_t *alloc, const char *dir,
             continue;
 
         char path[4096];
-        int pn =
-            snprintf(path, sizeof path, "%s/%s", dir, name);
+        int pn = snprintf(path, sizeof path, "%s/%s", dir, name);
         if (pn < 0 || (size_t)pn >= sizeof(path))
             continue;
 

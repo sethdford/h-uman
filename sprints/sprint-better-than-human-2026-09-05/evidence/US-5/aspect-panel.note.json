@@ -1,0 +1,1 @@
+{"note":"regression aspect hit the subprocess timeout (weight 0); four returning aspects passed (pass_share 1.0). Regression surface covered by verifier r2 (full suite 14320/14320 on the story tree) and critic r2 (default-OFF path, harness default flags)."}

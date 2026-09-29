@@ -5,6 +5,31 @@
 #
 # Set HU_FULL_PREPUSH=1 to also run UI typecheck/tests and website build.
 
+# A deletion-only push carries no content, so there is nothing to build, test
+# or gate. Before this check the hook never read its stdin, so
+# `git push origin --delete <branch>` paid the full build and suite and could
+# be refused outright: on 2026-09-26 the dead-strip ratchet blocked the
+# deletion of an already-merged branch. The workaround was
+# `gh api -X DELETE .../git/refs/heads/<branch>`.
+#
+# stdin can only be read once, so the ref list is kept in PUSH_REFS for any
+# later step that needs it. Nothing below reads stdin today. A tty stdin means
+# the hook was run by hand, not by git; reading it would block, so skip it.
+# A push that mixes deletions with real refs, or an empty ref list, falls
+# through and runs everything.
+PUSH_REFS=""
+if [ ! -t 0 ]; then
+    PUSH_REFS=$(cat)
+fi
+push_refs_lib="$(dirname "$0")/lib/push-refs.sh"
+if [ -f "$push_refs_lib" ]; then
+    . "$push_refs_lib"
+    if printf '%s\n' "$PUSH_REFS" | prepush_deletion_only; then
+        echo "pre-push: deletion-only push; skipping build and content gates"
+        exit 0
+    fi
+fi
+
 JOBS=$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)
 BUILD_DIR="build-check"
 
@@ -12,31 +37,269 @@ if [ -f "CMakeLists.txt" ]; then
     echo "Running human tests..."
     mkdir -p "$BUILD_DIR"
     cd "$BUILD_DIR" || exit 1
-    if [ ! -f "CMakeCache.txt" ]; then
-        cmake .. -DCMAKE_BUILD_TYPE=Debug -DHU_ENABLE_ALL_CHANNELS=ON -DHU_ENABLE_CURL=ON 2>/dev/null
+    # Configure with the portable feature set.
+    #
+    # This used to pass only -DHU_ENABLE_ALL_CHANNELS -DHU_ENABLE_CURL, which
+    # left whole suites uncompiled: measured 12,617 tests versus 13,933 from a
+    # fully-configured build. That was a 1,316-test (9.4%) blind spot in the
+    # gate — those tests did not run before a push. It also fed
+    # update-stats.sh, which at the time re-ran the first available build/,
+    # build2/, build-check/ or build-release/ binary, so every push stamped an
+    # undercounted test total across AGENTS.md, README.md and friends, and the
+    # rewrite had to be discarded by hand. (The stamping side is fixed below:
+    # the sync now receives the count parsed from THIS run's Results: line.)
+    #
+    # The flags below are the ones that add test coverage without adding an
+    # external dependency: measured 13,827 tests, closing ~92% of that gap.
+    # Deliberately NOT enabled, to keep this hook runnable on any dev machine:
+    #   HU_ENABLE_ASAN               too slow for a local hook (CI-only, see header)
+    #   HU_ENABLE_LIBSODIUM          needs a system library
+    #   HU_ENABLE_INTEGRATION_TESTS  needs live services
+    #   HU_ENABLE_IMESSAGE, _APPLE_INTELLIGENCE, _EMBEDDED_MODEL, _CARTESIA
+    #                                platform- or asset-specific
+    # A residual delta against a dev-preset build is therefore expected, as is
+    # a delta whenever the local branch is behind main (different sources,
+    # different test count) — update-stats.sh reports whatever this tree
+    # builds, so treat its output as "this tree", not "the project".
+    #
+    # Ignore a DEVELOPER_DIR that points at a different toolchain than this
+    # cache was configured against. The cache records /usr/bin/cc, /usr/bin/ld
+    # (xcrun shims) and the Xcode SDK as sysroot; DEVELOPER_DIR redirects the
+    # shims, so `DEVELOPER_DIR=/Library/Developer/CommandLineTools git push`
+    # (a stale workaround for an Xcode-license prompt) linked with the CLT's
+    # ld-1267 against Xcode's SDK and failed on every .tbd stub ("unknown
+    # architecture arm64e.x1", "tapi error: malformed file"). Both 2026-09-20
+    # build failures were this; both passed on a retry without the variable.
+    if [ -n "${DEVELOPER_DIR:-}" ] && [ -f CMakeCache.txt ]; then
+        sysroot=$(sed -n 's/^CMAKE_OSX_SYSROOT:PATH=//p' CMakeCache.txt)
+        case "$sysroot" in
+            ""|"$DEVELOPER_DIR"/*) ;;
+            *)  echo "NOTE: ignoring DEVELOPER_DIR=$DEVELOPER_DIR for this build:"
+                echo "  $BUILD_DIR was configured against $sysroot"
+                unset DEVELOPER_DIR ;;
+        esac
     fi
-    cmake --build . -j"$JOBS" 2>&1 | tail -3
-    if [ $? -ne 0 ]; then
-        echo "Build failed. Fix before pushing."
+    # Configure unconditionally: the old `if [ ! -f CMakeCache.txt ]` guard
+    # meant an existing build-check kept its original flags forever, so a
+    # change here would never reach anyone who already had one. Re-running
+    # cmake with unchanged arguments is a cheap no-op.
+    cmake .. -DCMAKE_BUILD_TYPE=Debug \
+        -DHU_ENABLE_ALL_CHANNELS=ON \
+        -DHU_ENABLE_CURL=ON \
+        -DHU_ENABLE_SQLITE=ON \
+        -DHU_ENABLE_PERSONA=ON \
+        -DHU_ENABLE_SKILLS=ON \
+        -DHU_ENABLE_ML=ON \
+        -DHU_ENABLE_LEARNING=ON \
+        -DHU_ENABLE_RL_FULL=ON \
+        -DHU_ENABLE_FEEDS=ON \
+        -DHU_ENABLE_SYNTHETIC=ON \
+        -DHU_ENABLE_CHANNEL_TESTS=ON >/dev/null 2>&1 || {
+        echo "cmake configure failed. Fix before pushing."
+        exit 1
+    }
+    # Test the BUILD's exit status, not tail's. `cmake --build | tail -3;
+    # [ $? -ne 0 ]` tested tail (always 0), so a failed build fell through to
+    # running whatever build-check/human_tests already existed. On 2026-09-20
+    # a push compiled 566 library objects and no test objects, then ran the
+    # binary last linked on 09-13 and stamped 14,247 tests; the next push, from
+    # the SAME tree, built to completion and stamped 14,303.
+    # On failure, keep the log and surface the error-bearing lines: with -j
+    # the failing job's diagnostics are rarely in the last three lines (the
+    # 2026-09-20 16:22 failure showed only "make: *** [all] Error 2"), and a
+    # failure that passes on immediate retry can only be diagnosed from the
+    # log it left behind — this is what exposed the DEVELOPER_DIR mismatch
+    # guarded against above.
+    build_log=$(mktemp "${TMPDIR:-/tmp}/human_build.XXXXXX") || exit 1
+    cmake --build . -j"$JOBS" >"$build_log" 2>&1
+    build_rc=$?
+    tail -3 "$build_log"
+    if [ "$build_rc" -ne 0 ]; then
+        echo "Build failed. Fix before pushing. Error lines from the build log:"
+        grep -nE 'error|Error|\*\*\*|codesign|undefined|ld: ' "$build_log" | tail -20
+        echo "Full build log kept at: $build_log"
         exit 1
     fi
+    rm -f "$build_log"
     # Run from the repo root: a number of tests open fixtures by repo-relative
     # path (docs/, scripts/release/, .github/workflows/, Formula/). Running
     # ./human_tests from inside the build dir made those ~44 tests fail
     # spuriously (CWD couldn't resolve the relative paths).
     cd ..
-    "$BUILD_DIR/human_tests"
-    if [ $? -ne 0 ]; then
+    # Tee the run so its own "--- Results: P/P passed[, K skipped] ---" line
+    # can be parsed below. The count stamped is P + K: the tests this binary
+    # REGISTERED. HU_SKIP_IF removes a skipped test from the P/P denominator
+    # (hu__total--), and which tests skip depends on the machine (daemon
+    # bundle built or not, fixture present, HU_HAVE_MLX_LM, macOS), so P alone
+    # can move on an unchanged tree while P + K cannot (measured 14303 + 7 on
+    # two consecutive runs, 2026-09-20). Never count PASS lines instead:
+    # forking tests lose ~50 of them per run (14,256 lines for a 14,303
+    # counter). (POSIX sh has no pipefail, so the suite's exit status is
+    # written to a side file.)
+    results_log=$(mktemp "${TMPDIR:-/tmp}/human_tests.XXXXXX") || exit 1
+    { "$BUILD_DIR/human_tests"; echo $? > "$results_log.rc"; } | tee "$results_log"
+    tests_rc=$(cat "$results_log.rc" 2>/dev/null || echo 1)
+    results_line=$(grep '^--- Results: ' "$results_log" | head -1)
+    passed=$(printf '%s\n' "$results_line" | sed -n 's|^--- Results: \([0-9][0-9]*\)/[0-9][0-9]* passed.*|\1|p')
+    skipped=$(printf '%s\n' "$results_line" | sed -n 's|.*, \([0-9][0-9]*\) skipped.*|\1|p')
+    TEST_COUNT=""
+    [ -n "$passed" ] && TEST_COUNT=$((passed + ${skipped:-0}))
+    rm -f "$results_log" "$results_log.rc"
+    if [ "$tests_rc" -ne 0 ]; then
         echo "Tests failed. Fix before pushing."
         exit 1
     fi
 
+    # Dead-strip ratchet — THE ENFORCEMENT POINT. Never-loaded archive members
+    # (A) and dead-stripped _hu_ symbols no test references (B) may only shrink.
+    # Lives here rather than in pre-commit because it needs a built tree: it
+    # relinks `human` with -dead_strip and reads the link map (~1 s warm).
+    #
+    # It measures `build/` (the dev preset the baselines were taken against),
+    # NOT the build-check this hook just made: build-check configures a
+    # different feature set, so it compiles a different set of translation
+    # units and its counts are not comparable to the committed constants.
+    #
+    # That is why the incremental rebuild below is not optional. `build/` is
+    # whatever state the developer last left it in, and the gate demotes itself
+    # to advisory on a stale tree — so without this rebuild the gate would wave
+    # through most real pushes, measuring an older tree than the one being
+    # pushed. Rebuilding first makes the measured tree the pushed tree, which
+    # is what lets HU_DEAD_STRIP_STRICT=1 (no stale demotion) be honest.
+    # Incremental and warm: seconds when `build/` is current, and the developer
+    # was almost certainly building there anyway.
+    #
+    # No `build/` at all -> skip with one line, per the gate's own contract: an
+    # unmeasurable gate must never block a push.
+    if [ -x "scripts/check-dead-strip-ratchet.sh" ]; then
+        if [ -f "build/CMakeCache.txt" ]; then
+            # Pay for the rebuild only when build/ is actually behind. A no-op
+            # `cmake --build` still re-scans dependencies for ~1,000 objects and
+            # measured 46 s here; "nothing under src/ or include/ is newer than
+            # the linked artifacts" is the same test make itself would apply, so
+            # skipping it when that holds changes nothing but the clock.
+            # The \( ... \) around the -o are REQUIRED, not style. find's -o binds
+            # looser than the implicit -a, so `-name '*.[ch]' -o -name '*.m' -newer X
+            # -print -quit` parses as (.[ch]) OR (.m AND newer AND print), and because
+            # an explicit action suppresses find's default -print, a NEWER .c matches
+            # the first branch, short-circuits, and prints nothing. Verified: the
+            # unparenthesized form reports a freshly-touched src/NEWER.c as CLEAN.
+            # Adding .m without the parens would have broken the .c/.h detection the
+            # probe already did.
+            ds_stale=0
+            for ds_artifact in human human_tests; do
+                if [ ! -f "build/$ds_artifact" ]; then
+                    ds_stale=1
+                elif [ -n "$(find src include \( -name '*.[ch]' -o -name '*.m' \) -newer "build/$ds_artifact" -print -quit 2>/dev/null)" ]; then
+                    ds_stale=1
+                fi
+            done
+            ds_ready=1
+            if [ "$ds_stale" = "1" ]; then
+                echo "Refreshing build/ for the dead-strip ratchet..."
+                ds_log=$(mktemp "${TMPDIR:-/tmp}/human_deadstrip.XXXXXX") || exit 1
+                if cmake --build build --target human human_tests -j"$JOBS" >"$ds_log" 2>&1; then
+                    rm -f "$ds_log"
+                else
+                    # A build/ that cannot build is not evidence about this
+                    # push: build-check already proved the tree compiles and the
+                    # suite passes, so this is a broken dev dir, not a broken
+                    # change. Skipping is the gate's own contract for an
+                    # unmeasurable tree.
+                    ds_ready=0
+                    echo "NOTE: could not rebuild build/ — skipping the dead-strip ratchet."
+                    echo "  (build-check compiled and the suite passed, so this is build/'s"
+                    echo "   own state, not this change. Log: $ds_log)"
+                    echo "  NOT ENFORCED on this push — the dead-strip-ratchet job in CI is."
+                fi
+            fi
+            if [ "$ds_ready" = "1" ]; then
+                if ! HU_DEAD_STRIP_STRICT=1 bash scripts/check-dead-strip-ratchet.sh; then
+                    echo ""
+                    echo "Push blocked: dead code grew past the dead-strip ratchet."
+                    echo "Delete the never-loaded objects / unreferenced dead symbols listed above,"
+                    echo "or wire them — see .claude/rules/dead-strip-ratchet.md."
+                    exit 1
+                fi
+            fi
+        else
+            echo "No configured build/ — skipping the dead-strip ratchet."
+            echo "  Configure one to enable it; see .claude/rules/dead-strip-ratchet.md."
+            echo "  NOT ENFORCED on this push — the dead-strip-ratchet job in CI is."
+        fi
+    fi
+
+    # devlib flag mirror — fences the generator-expression fix from 45d98a4d6.
+    #
+    # Sits beside the dead-strip gate because it guards the same split: Task 12
+    # moved the daemon-never-links modules into human_devlib, and those modules
+    # are selected by the same HU_ENABLE_* options as the rest of the tree, so
+    # human_devlib must compile with human_core_test's exact flags. The first
+    # mirror used get_target_property() and silently captured 60 of 65 defines.
+    #
+    # Reads flags.make, which CMake writes at CONFIGURE time, so unlike the
+    # dead-strip ratchet it needs no fresh build and no rebuild step — and it
+    # skips with exit 0 whenever build/ or either target is absent.
+    if [ -x "scripts/check-devlib-flags.sh" ]; then
+        if ! bash scripts/check-devlib-flags.sh; then
+            echo ""
+            echo "Push blocked: human_devlib's compile flags diverged from human_core_test's."
+            echo "Mirror them with \$<TARGET_PROPERTY:human_core_test,...> generator expressions."
+            exit 1
+        fi
+    fi
+
     # Auto-sync stats across all docs (AGENTS.md, README.md, CONTRIBUTING.md, etc.)
+    # Only sync from a tree that actually contains all of origin/main.
+    #
+    # update-stats.sh stamps THIS tree's measurements into AGENTS.md,
+    # README.md, CONTRIBUTING.md, PROJECT_STATUS.md and CLAUDE.md. From a tree
+    # that is behind main those numbers are wrong by construction — it counts
+    # tests that main has since added — so the push dirtied five tracked docs
+    # with a value that had to be thrown away by hand. On 2026-07-26 that hit
+    # ten worktrees at once and was discarded six times in one session; the
+    # stamped count wandered 12,617 / 13,107 / 13,827 / 13,860 / 13,876 purely
+    # from which tree happened to push.
+    #
+    # When the tree IS current the sync is correct and still runs — that is
+    # the case that produced the accurate 13,860 -> docs update. So this
+    # narrows the sync to when it is right rather than disabling it.
+    #
+    # Skipping is always safe: stats are descriptive, and the next push from
+    # an up-to-date tree re-syncs them.
+    #
+    # The count passed is the one parsed from THIS run above. Before
+    # 2026-09-03 the sync re-ran whichever build*/human_tests sorted first —
+    # a two-day-old build/ dev binary of a different tree state — and stamped
+    # 13,995 while this hook had just measured 14,125 (third recorded
+    # writer-vs-checker disagreement; see the top of this file). Likewise the
+    # binary size: this hook only builds Debug, so it cannot vouch for any
+    # release binary's age (a five-week-old build-release/ stamped ~2952 KB
+    # the same day); --keep-binary-size leaves the committed value alone.
+    # Rule: .claude/rules/no-number-without-a-measurement.md.
+    #
+    # Run-to-run drift on an UNCHANGED tree (2026-09-20: 14,247 then 14,303
+    # from two pushes whose only diff was these five docs) had two causes,
+    # both fixed above: a masked build failure ran a week-old binary, and the
+    # passed-only numerator moved with environment-dependent skips. The sync
+    # stays on because a fresh binary's registered total is stable; if the
+    # docs still churn on a re-push, suspect the binary, not the tree.
     if [ -x "scripts/update-stats.sh" ]; then
-        echo "Syncing project stats..."
-        bash scripts/update-stats.sh --apply 2>/dev/null
-        if [ $? -ne 0 ]; then
-            echo "Warning: stats sync failed. Run 'scripts/update-stats.sh --apply' manually."
+        behind=$(git rev-list --count HEAD..origin/main 2>/dev/null || echo unknown)
+        if [ "$behind" = "0" ] && [ -z "$TEST_COUNT" ]; then
+            echo "WARN: could not parse a test count from this run's Results: line;"
+            echo "  skipping stats sync rather than stamping a count from a stale binary."
+        elif [ "$behind" = "0" ]; then
+            echo "Syncing project stats (${TEST_COUNT} registered tests = passed + skipped, measured by this run)..."
+            if ! bash scripts/update-stats.sh --apply --test-count "$TEST_COUNT" --keep-binary-size 2>/dev/null; then
+                echo "Warning: stats sync failed. Run 'scripts/update-stats.sh --apply --test-count ${TEST_COUNT} --keep-binary-size' manually."
+            fi
+        elif [ "$behind" = "unknown" ]; then
+            echo "Skipping stats sync (cannot compare against origin/main)."
+        else
+            echo "Skipping stats sync: $behind commit(s) behind origin/main — this"
+            echo "  tree's counts would not match main. Sync happens on a push from"
+            echo "  an up-to-date tree, or run scripts/update-stats.sh --apply."
         fi
     fi
 

@@ -7,8 +7,10 @@
 #include "human/agent/prompt_budget.h"
 #include "human/agent/response_guard.h"
 #include "human/bus.h"
+#include "human/capabilities.h"
 #include "human/channel_catalog.h"
 #include "human/config.h"
+#include "human/core/paths.h"
 #include "human/core/process_util.h"
 #include "human/core/string.h"
 #include "human/cost.h"
@@ -202,15 +204,8 @@ hu_error_t cp_admin_health(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_c
     size_t tool_count = app ? app->tools_count : 0;
     hu_json_object_set(alloc, obj, "tool_count", hu_json_number_new(alloc, (double)tool_count));
 
-    size_t ch_count = 0;
-    if (app && app->config) {
-        size_t total = 0;
-        const hu_channel_meta_t *catalog = hu_channel_catalog_all(&total);
-        for (size_t i = 0; i < total; i++) {
-            if (hu_channel_catalog_is_configured(app->config, catalog[i].id))
-                ch_count++;
-        }
-    }
+    size_t ch_count =
+        (app && app->config) ? hu_capabilities_channels_configured_count(app->config) : 0;
     hu_json_object_set(alloc, obj, "channel_count", hu_json_number_new(alloc, (double)ch_count));
 
     if (app && app->config) {
@@ -242,17 +237,8 @@ hu_error_t cp_admin_capabilities(hu_allocator_t *alloc, hu_app_context_t *app, h
     size_t tool_count = app ? app->tools_count : 0;
     hu_json_object_set(alloc, obj, "tools", hu_json_number_new(alloc, (double)tool_count));
 
-    size_t ch_count = 0;
-    if (app && app->config) {
-        size_t total = 0;
-        const hu_channel_meta_t *catalog = hu_channel_catalog_all(&total);
-        size_t configured = 0;
-        for (size_t i = 0; i < total; i++) {
-            if (hu_channel_catalog_is_configured(app->config, catalog[i].id))
-                configured++;
-        }
-        ch_count = configured;
-    }
+    size_t ch_count =
+        (app && app->config) ? hu_capabilities_channels_configured_count(app->config) : 0;
     hu_json_object_set(alloc, obj, "channels", hu_json_number_new(alloc, (double)ch_count));
 
     size_t prov_count = (app && app->config) ? app->config->providers_len : 0;
@@ -601,10 +587,14 @@ hu_error_t cp_admin_models_decisions(hu_allocator_t *alloc, hu_app_context_t *ap
     }
 
     size_t count = hu_route_log_count(log);
+    size_t real_decisions = 0;
     for (size_t i = 0; i < count; i++) {
         const hu_route_decision_t *d = hu_route_log_get(log, i);
         if (!d)
             continue;
+        if (d->source == HU_ROUTE_SHADOW_DIFFICULTY)
+            continue; /* hypothetical, never applied — US-8 */
+        real_decisions++;
         hu_json_value_t *entry = hu_json_object_new(alloc);
         if (!entry)
             continue;
@@ -619,7 +609,7 @@ hu_error_t cp_admin_models_decisions(hu_allocator_t *alloc, hu_app_context_t *ap
     }
 
     hu_json_object_set(alloc, obj, "decisions", arr);
-    hu_json_object_set(alloc, obj, "total", hu_json_number_new(alloc, (double)count));
+    hu_json_object_set(alloc, obj, "total", hu_json_number_new(alloc, (double)real_decisions));
 
     size_t tier_counts[4];
     hu_route_log_tier_counts(log, tier_counts);
@@ -1209,10 +1199,7 @@ static bool cp_fidelity_resolve_ab_status_path(char *buf, size_t cap) {
         memcpy(buf, override, n + 1);
         return true;
     }
-    const char *home = getenv("HOME");
-    if (!home || !home[0])
-        return false;
-    int written = snprintf(buf, cap, "%s/.human/last_fidelity_ab.json", home);
+    int written = hu_paths_state(buf, cap, "last_fidelity_ab.json");
     return written > 0 && (size_t)written < cap;
 }
 
@@ -2535,15 +2522,29 @@ hu_error_t cp_admin_skills_update(hu_allocator_t *alloc, hu_app_context_t *app, 
 hu_error_t cp_admin_update_check(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
                                  const hu_control_protocol_t *proto, const hu_json_value_t *root,
                                  char **out, size_t *out_len) {
-    (void)app;
     (void)conn;
     (void)proto;
-    (void)root;
     hu_json_value_t *obj = hu_json_object_new(alloc);
     if (!obj)
         return HU_ERR_OUT_OF_MEMORY;
     const char *current = hu_version_string();
     cp_json_set_str(alloc, obj, "current", current);
+
+    /* auto_update="off" (the default) must not contact GitHub just because a
+     * dashboard page loaded; only an explicit {"force":true} may. A missing
+     * config is treated as off. No "latest" is reported: nothing was checked. */
+    const hu_json_value_t *params = root ? hu_json_object_get(root, "params") : NULL;
+    bool force = params ? hu_json_get_bool(params, "force", false) : false;
+    hu_update_mode_t mode =
+        hu_update_mode_from_config((app && app->config) ? app->config->auto_update : NULL);
+    if (!hu_update_check_allowed(mode, force)) {
+        hu_json_object_set(alloc, obj, "available", hu_json_bool_new(alloc, false));
+        hu_json_object_set(alloc, obj, "disabled", hu_json_bool_new(alloc, true));
+        hu_error_t err = hu_json_stringify(alloc, obj, out, out_len);
+        hu_json_free(alloc, obj);
+        return err;
+    }
+
     char latest[64] = {0};
     hu_error_t check_err = hu_update_check(latest, sizeof(latest));
     if (check_err == HU_OK && latest[0]) {

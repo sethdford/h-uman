@@ -2,6 +2,7 @@
 #include "human/channels/imessage.h"
 #include "human/config.h"
 #include "human/core/io_secure.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
 #include "human/interactions.h"
 #include <stdio.h>
@@ -16,15 +17,11 @@
 #include <unistd.h>
 #endif
 
-#define HU_CONFIG_DIR  ".human"
 #define HU_CONFIG_FILE "config.json"
 #define HU_MAX_PATH    1024
 
 static char *get_config_path(char *buf, size_t buf_size) {
-    const char *home = getenv("HOME");
-    if (!home)
-        home = ".";
-    int n = snprintf(buf, buf_size, "%s/%s/%s", home, HU_CONFIG_DIR, HU_CONFIG_FILE);
+    int n = hu_paths_state_or(buf, buf_size, ".", "%s", HU_CONFIG_FILE);
     if (n <= 0 || (size_t)n >= buf_size)
         return NULL;
     return buf;
@@ -571,7 +568,7 @@ hu_error_t hu_onboard_run_with_args(hu_allocator_t *alloc, const char *cli_provi
             if (strcmp(provider, "anthropic") == 0)
                 default_model = "claude-sonnet-4-20250514";
             else if (strcmp(provider, "gemini") == 0)
-                default_model = "gemini-3.1-flash-lite-preview";
+                default_model = "gemini-3.1-flash-lite";
             else if (strcmp(provider, "ollama") == 0)
                 default_model = "llama3";
             else if (strcmp(provider, "mlx_local") == 0 || strcmp(provider, "mlx-local") == 0)
@@ -584,11 +581,8 @@ hu_error_t hu_onboard_run_with_args(hu_allocator_t *alloc, const char *cli_provi
         }
     }
 
-    const char *home = getenv("HOME");
-    if (!home)
-        home = ".";
     char config_dir[HU_MAX_PATH];
-    int n = snprintf(config_dir, sizeof(config_dir), "%s/%s", home, HU_CONFIG_DIR);
+    int n = hu_paths_state_dir_or(config_dir, sizeof(config_dir), ".");
     if (n <= 0 || (size_t)n >= sizeof(config_dir))
         return HU_ERR_IO;
 
@@ -603,7 +597,7 @@ hu_error_t hu_onboard_run_with_args(hu_allocator_t *alloc, const char *cli_provi
     if (n <= 0 || (size_t)n >= sizeof(config_path))
         return HU_ERR_IO;
 
-    char *ws_dir = hu_sprintf(alloc, "%s/%s/workspace", home, HU_CONFIG_DIR);
+    char *ws_dir = hu_sprintf(alloc, "%s/workspace", config_dir);
     if (!ws_dir)
         return HU_ERR_OUT_OF_MEMORY;
 
@@ -802,7 +796,7 @@ hu_error_t hu_onboard_run_with_args(hu_allocator_t *alloc, const char *cli_provi
 #ifndef HU_IS_TEST
     {
         char persona_dir[HU_MAX_PATH];
-        int pn = snprintf(persona_dir, sizeof(persona_dir), "%s/%s/personas", home, HU_CONFIG_DIR);
+        int pn = hu_paths_state_or(persona_dir, sizeof(persona_dir), ".", "personas");
         if (pn > 0 && (size_t)pn < sizeof(persona_dir)) {
 #ifdef _WIN32
             (void)_mkdir(persona_dir);

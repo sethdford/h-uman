@@ -29,8 +29,8 @@ hu_error_t hu_vertex_auth_load_adc(hu_vertex_auth_t *auth, hu_allocator_t *alloc
         if (pn < 0 || (size_t)pn >= sizeof(path))
             return HU_ERR_INVALID_ARGUMENT;
     } else {
-        int pn = snprintf(path, sizeof(path), "%s/.config/gcloud/application_default_credentials.json",
-                          home);
+        int pn = snprintf(path, sizeof(path),
+                          "%s/.config/gcloud/application_default_credentials.json", home);
         if (pn < 0 || (size_t)pn >= sizeof(path))
             return HU_ERR_INVALID_ARGUMENT;
     }
@@ -162,13 +162,19 @@ hu_error_t hu_vertex_auth_ensure_token(hu_vertex_auth_t *auth, hu_allocator_t *a
 }
 
 hu_error_t hu_vertex_auth_get_bearer(const hu_vertex_auth_t *auth, char *buf, size_t buf_cap) {
+    /* Callers hand buf straight to the HTTP layer as a C string; on every
+     * failure path it must be an empty string, never left uninitialized. */
+    if (buf && buf_cap > 0)
+        buf[0] = '\0';
     if (!auth || !buf || buf_cap < 16)
         return HU_ERR_INVALID_ARGUMENT;
     if (!auth->access_token || auth->access_token_len == 0)
         return HU_ERR_PROVIDER_AUTH;
     int n = snprintf(buf, buf_cap, "Bearer %.*s", (int)auth->access_token_len, auth->access_token);
-    if (n <= 0 || (size_t)n >= buf_cap)
+    if (n <= 0 || (size_t)n >= buf_cap) {
+        buf[0] = '\0';
         return HU_ERR_INVALID_ARGUMENT;
+    }
     return HU_OK;
 }
 

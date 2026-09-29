@@ -67,4 +67,11 @@ void hu_imessage_schema_reset_cache(void);
  *  silent-config-gated-subsystems.md rule. */
 void hu_imessage_schema_log_fingerprint(const hu_imessage_schema_caps_t *caps);
 
+/* Resolve a handle (phone/email) to the chat GUID owning its most recent
+ * message. The IMCore bridge verbs (`imsg send-rich --chat`, tapback, edit,
+ * unsend) address chats by GUID. Returns false when unavailable.
+ * macOS non-test builds only; a stub elsewhere. */
+bool hu_imessage_reply_chat_guid_for_handle(const char *handle, size_t handle_len, char *out,
+                                            size_t out_cap);
+
 #endif /* HU_CHANNELS_IMESSAGE_SCHEMA_H */

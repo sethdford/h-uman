@@ -49,19 +49,19 @@ struct hu_persona;
 typedef void (*hu_semantic_cache_clear_fn)(void *cache);
 
 typedef struct hu_lora_runner_ctx {
-    hu_learner_t *learner;          /* required */
-    struct hu_scheduler *scheduler; /* optional; enables follow-up KV warm */
-    hu_kv_cache_manager_t *kv_cache;/* optional; cleared on adapter swap */
-    void *semantic_cache;           /* optional; passed verbatim to clear_fn */
+    hu_learner_t *learner;           /* required */
+    struct hu_scheduler *scheduler;  /* optional; enables follow-up KV warm */
+    hu_kv_cache_manager_t *kv_cache; /* optional; cleared on adapter swap */
+    void *semantic_cache;            /* optional; passed verbatim to clear_fn */
     hu_semantic_cache_clear_fn semantic_cache_clear_fn;
-    hu_allocator_t *alloc;          /* optional; system allocator if NULL */
+    hu_allocator_t *alloc;               /* optional; system allocator if NULL */
     hu_learner_config_t config_template; /* must have adapter_output_path set */
 
     /* W13 adapter auto-load: when non-NULL, the runner calls
      * hu_provider_load_adapter on the active provider after a successful
      * train so the new adapter is hot-loaded without daemon restart. */
-    struct hu_provider *provider;   /* optional; NULL skips auto-load */
-    const char *adapter_id;         /* optional; label for the loaded adapter */
+    struct hu_provider *provider; /* optional; NULL skips auto-load */
+    const char *adapter_id;       /* optional; label for the loaded adapter */
 
     /* Phase 5 — promotion gate before hot-load (NULL skips). */
     struct hu_eval_gate *eval_gate;
@@ -93,6 +93,28 @@ typedef struct hu_lora_runner_ctx {
 
 hu_error_t hu_lora_training_runner(struct hu_memory_facade *m, const struct hu_job_spec *spec,
                                    int64_t budget_ms, void *user_data);
+
+/* Minimum seconds between training ATTEMPTS (not successes).
+ *
+ * 2026-07-26: eleven frontier-MLX dispatches fired in one day, six inside 28
+ * minutes (06:09-06:37), because the only trigger condition was a pair-count
+ * threshold crossing with nothing rate-limiting the retry. Each dispatch loads
+ * the 56 GB serving base for training, so the pile-up drove a 128 GB machine to
+ * 154 MB free and four reboots. training_loop.py now REFUSES such runs, but the
+ * daemon should not keep spawning subprocesses destined to refuse. */
+#define HU_LORA_RUNNER_ATTEMPT_COOLDOWN_SECONDS (6 * 60 * 60)
+
+/* True when `now` is inside the cooldown following `last_attempt`.
+ *
+ * Pure predicate over injected facts so the whole truth table is testable
+ * without a clock, a filesystem, or a 56 GB model
+ * (.claude/rules/security-predicate-extraction.md).
+ *
+ * last_attempt <= 0 means "never attempted" and is NEVER in cooldown, so a
+ * missing or unreadable stamp file fails OPEN (allows the attempt) rather than
+ * wedging training forever. A last_attempt in the future (clock moved
+ * backwards) is treated as in-cooldown — the conservative direction. */
+bool hu_lora_runner_attempt_cooldown_active(time_t last_attempt, time_t now, int cooldown_seconds);
 
 #ifdef HU_IS_TEST
 void hu_lora_runner_set_test_clock(time_t frozen);

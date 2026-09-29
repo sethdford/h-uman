@@ -4,6 +4,7 @@
 #include "human/core/io_secure.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
 #include "human/platform.h"
 #include "human/security.h"
@@ -21,7 +22,6 @@
 #endif
 #endif
 
-#define HU_AUTH_DIR      ".human"
 #define HU_AUTH_FILE     "auth.json"
 #define HU_AUTH_MAX_BODY 65536
 
@@ -69,17 +69,15 @@ bool hu_oauth_token_is_expired(const hu_oauth_token_t *t) {
 }
 
 static char *auth_file_path(hu_allocator_t *alloc) {
-    char *home = hu_platform_get_home_dir(alloc);
-    if (!home)
+    char tmp[1024];
+    int n = hu_paths_state(tmp, sizeof(tmp), "%s", HU_AUTH_FILE);
+    if (n < 0 || (size_t)n >= sizeof(tmp))
         return NULL;
-    size_t hlen = strlen(home), need = hlen + strlen(HU_AUTH_DIR) + strlen(HU_AUTH_FILE) + 4;
+    size_t need = (size_t)n + 1;
     char *path = alloc->alloc(alloc->ctx, need);
-    if (!path) {
-        alloc->free(alloc->ctx, home, hlen + 1);
+    if (!path)
         return NULL;
-    }
-    snprintf(path, need, "%s/%s/%s", home, HU_AUTH_DIR, HU_AUTH_FILE);
-    alloc->free(alloc->ctx, home, hlen + 1);
+    memcpy(path, tmp, need);
     return path;
 }
 
@@ -313,7 +311,7 @@ char *hu_auth_get_api_key(hu_allocator_t *alloc, const char *provider) {
         char *home = hu_platform_get_home_dir(alloc);
         if (home) {
             char config_dir[512];
-            snprintf(config_dir, sizeof(config_dir), "%s/.human", home);
+            hu_paths_state_dir(config_dir, sizeof(config_dir));
             alloc->free(alloc->ctx, home, strlen(home) + 1);
             hu_secret_store_t *store = hu_secret_store_create(alloc, config_dir, true);
             if (store) {

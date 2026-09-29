@@ -13,6 +13,7 @@
  * interchangeably with OpenAI Realtime and Gemini Live in the voice pipeline.
  */
 #include "human/core/allocator.h"
+#include "human/core/endpoints.h"
 #include "human/core/error.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
@@ -251,13 +252,13 @@ hu_error_t hu_voice_provider_mlx_local_create(hu_allocator_t *alloc,
     if (config) {
         s->config = *config;
         if (!s->config.endpoint || !s->config.endpoint[0])
-            s->config.endpoint = "http://127.0.0.1:8741";
+            s->config.endpoint = HU_MLX_DEFAULT_ORIGIN;
         if (s->config.max_tokens <= 0)
             s->config.max_tokens = 256;
         if (s->config.temperature <= 0.0f)
             s->config.temperature = 0.7f;
     } else {
-        s->config.endpoint = "http://127.0.0.1:8741";
+        s->config.endpoint = HU_MLX_DEFAULT_ORIGIN;
         s->config.max_tokens = 256;
         s->config.temperature = 0.7f;
     }

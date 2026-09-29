@@ -5,6 +5,7 @@
 #include "human/core/file.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
 #include "human/providers/api_key.h"
 #include <stdbool.h>
@@ -115,7 +116,7 @@ static void set_defaults(hu_config_t *cfg, hu_allocator_t *a) {
         set_defaults_rollback(cfg, a);
         return;
     }
-    cfg->default_model = hu_strdup(a, "gemini-3.1-flash-lite-preview");
+    cfg->default_model = hu_strdup(a, "gemini-3.1-flash-lite");
     if (!cfg->default_model) {
         set_defaults_rollback(cfg, a);
         return;
@@ -134,7 +135,7 @@ static void set_defaults(hu_config_t *cfg, hu_allocator_t *a) {
         }
         if (cfg->default_model)
             a->free(a->ctx, cfg->default_model, strlen(cfg->default_model) + 1);
-        const char *model = "gemini-3.1-flash-lite-preview";
+        const char *model = "gemini-3.1-flash-lite";
         if (strcmp(detected, "openai") == 0)
             model = "gpt-4o";
         else if (strcmp(detected, "anthropic") == 0)
@@ -157,8 +158,6 @@ static void set_defaults(hu_config_t *cfg, hu_allocator_t *a) {
         return;
     }
     cfg->memory_auto_save = true;
-    cfg->heartbeat_enabled = false;
-    cfg->heartbeat_interval_minutes = 30;
     cfg->gateway_host = hu_strdup(a, "127.0.0.1");
     if (!cfg->gateway_host) {
         set_defaults_rollback(cfg, a);
@@ -216,6 +215,7 @@ static void set_defaults(hu_config_t *cfg, hu_allocator_t *a) {
     cfg->agent.hula_enabled = true;
     cfg->agent.mcts_planner_enabled = false;
     cfg->agent.tree_of_thought = false;
+    cfg->agent.chain_of_thought = true;
     cfg->agent.constitutional_ai = false;
     cfg->agent.constitutional_style_rules_enabled = false; /* US-7.9: default off */
     cfg->agent.speculative_cache = false;
@@ -302,6 +302,10 @@ static void set_defaults(hu_config_t *cfg, hu_allocator_t *a) {
     cfg->memory.encrypt_at_rest = false;
     cfg->heartbeat.enabled = false;
     cfg->heartbeat.interval_minutes = 30;
+    /* Opt-in: the watcher polls chat.db for read-without-reply threads. The
+     * 300s interval matches the default documented in src/daemon.c. */
+    cfg->follow_up_watcher.enabled = false;
+    cfg->follow_up_watcher.interval_seconds = 300;
     cfg->channels.cli = true;
 #ifdef __APPLE__
     cfg->channels.imessage.action_surface_v2.enabled = true;
@@ -362,8 +366,6 @@ static void set_defaults(hu_config_t *cfg, hu_allocator_t *a) {
     cfg->security.sandbox_config.net_proxy.proxy_addr = NULL;
     cfg->security.sandbox_config.net_proxy.allowed_domains = NULL;
     cfg->security.sandbox_config.net_proxy.allowed_domains_len = 0;
-    cfg->security.resource_limits.max_file_size = 0;
-    cfg->security.resource_limits.max_read_size = 0;
     cfg->security.resource_limits.max_memory_mb = 0;
     cfg->security.audit.enabled = false;
     cfg->security.audit.log_path = NULL;
@@ -424,6 +426,13 @@ static void set_defaults(hu_config_t *cfg, hu_allocator_t *a) {
     cfg->behavior.decay_days = 30;
     cfg->behavior.dedup_threshold = 70;
     cfg->behavior.missed_msg_threshold_sec = 1800;
+    cfg->behavior.missed_msg_max_age_sec = 86400;
+    cfg->behavior.reply_budget_per_contact_hourly = 10;
+    cfg->behavior.reply_budget_global_hourly = 30;
+    cfg->behavior.max_consecutive_replies = 5;
+    cfg->behavior.consecutive_reset_minutes = 30;
+    cfg->behavior.missed_msg_ack_rate = 0.0029;
+    cfg->behavior.missed_msg_ack_cooldown_sec = 604800;
     cfg->behavior.callback_window = 300;
     cfg->behavior.pattern_threshold = 50;
     cfg->behavior.tapback_skip_pct = 20;
@@ -568,8 +577,6 @@ static void sync_flat_fields(hu_config_t *cfg) {
         cfg->memory_backend = cfg->memory.backend;
     cfg->memory_auto_save = cfg->memory.auto_save;
     cfg->consolidation_interval_hours = cfg->memory.consolidation_interval_hours;
-    cfg->heartbeat_enabled = cfg->heartbeat.enabled;
-    cfg->heartbeat_interval_minutes = cfg->heartbeat.interval_minutes;
     if (cfg->gateway.host)
         cfg->gateway_host = cfg->gateway.host;
     cfg->gateway_port = cfg->gateway.port;
@@ -591,10 +598,6 @@ static hu_error_t config_load_impl(hu_allocator_t *backing, hu_config_t *out,
     out->arena = arena;
     out->allocator = a;
 
-    const char *home = getenv("HOME");
-    if (!home)
-        home = ".";
-
     char global_path[HU_MAX_PATH];
     char workspace_dir[HU_MAX_PATH];
 
@@ -608,8 +611,7 @@ static hu_error_t config_load_impl(hu_allocator_t *backing, hu_config_t *out,
         workspace_dir[sizeof(workspace_dir) - 1] = '\0';
     } else {
         char path_buf[HU_MAX_PATH];
-        int n =
-            snprintf(path_buf, sizeof(path_buf), "%s/%s/%s", home, HU_CONFIG_DIR, HU_CONFIG_FILE);
+        int n = hu_paths_state_or(path_buf, sizeof(path_buf), ".", "%s", HU_CONFIG_FILE);
         if (n <= 0 || (size_t)n >= sizeof(path_buf)) {
             out->config_path = hu_strdup(&a, "");
             out->workspace_dir = hu_strdup(&a, ".");
@@ -622,8 +624,7 @@ static hu_error_t config_load_impl(hu_allocator_t *backing, hu_config_t *out,
         strncpy(global_path, path_buf, sizeof(global_path) - 1);
         global_path[sizeof(global_path) - 1] = '\0';
 
-        n = snprintf(path_buf, sizeof(path_buf), "%s/%s/%s", home, HU_CONFIG_DIR,
-                     HU_DEFAULT_WORKSPACE);
+        n = hu_paths_state_or(path_buf, sizeof(path_buf), ".", "%s", HU_DEFAULT_WORKSPACE);
         if (n > 0 && (size_t)n < sizeof(path_buf))
             strncpy(workspace_dir, path_buf, sizeof(workspace_dir) - 1);
         else
@@ -653,7 +654,7 @@ static hu_error_t config_load_impl(hu_allocator_t *backing, hu_config_t *out,
     /* Tighten config directory permissions if too permissive (default path only) */
     if (!path_override || !path_override[0]) {
         char dir_buf[HU_MAX_PATH];
-        int dn = snprintf(dir_buf, sizeof(dir_buf), "%s/%s", home, HU_CONFIG_DIR);
+        int dn = hu_paths_state_dir_or(dir_buf, sizeof(dir_buf), ".");
         if (dn > 0 && (size_t)dn < sizeof(dir_buf)) {
             struct stat dir_st;
             if (stat(dir_buf, &dir_st) == 0 && (dir_st.st_mode & 0077) != 0)
@@ -714,11 +715,6 @@ hu_error_t hu_config_load_from(hu_allocator_t *backing, const char *path, hu_con
     if (!path || !path[0])
         return hu_config_load(backing, out);
     return config_load_impl(backing, out, path);
-}
-
-const char *hu_config_env_get(const char *name) {
-    const char *v = getenv(name);
-    return (v && v[0]) ? v : NULL;
 }
 
 void hu_config_apply_env_str(hu_allocator_t *a, char **dst, const char *v) {

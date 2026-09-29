@@ -201,7 +201,7 @@ typedef struct hu_hula_exec {
     uint32_t budget_max_tool_calls; /* HU_HULA_CALL invocations; 0 = unlimited */
     uint64_t budget_run_start_ms;
     uint32_t budget_tool_calls_used;
-    struct hu_agent_registry *delegate_registry; /* optional; for delegate_agent_id */
+    struct hu_agent_registry *delegate_registry;          /* optional; for delegate_agent_id */
     struct hu_idempotency_registry *idempotency_registry; /* optional; for crash-proof replay */
     /* Optional agent for Wave A security envelope on CALL (borrowed). */
     struct hu_agent *security_agent;
@@ -265,9 +265,6 @@ hu_error_t hu_hula_exec_init_full(hu_hula_exec_t *exec, hu_allocator_t alloc,
 /* Optional: enable delegate opcode to use hu_agent_pool_spawn (non-test builds). */
 void hu_hula_exec_set_spawn(hu_hula_exec_t *exec, struct hu_agent_pool *pool,
                             struct hu_spawn_config *spawn_cfg);
-
-/* Optional: registry for delegate nodes with delegate_agent_id (spawn_named). */
-void hu_hula_exec_set_delegate_registry(hu_hula_exec_t *exec, struct hu_agent_registry *registry);
 
 /* Optional: idempotency registry for crash-proof tool execution (workflow replay). */
 void hu_hula_exec_set_idempotency_registry(hu_hula_exec_t *exec,

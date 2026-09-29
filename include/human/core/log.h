@@ -6,7 +6,9 @@
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /**
  * Structured logging that routes through hu_observer_t when available,
@@ -20,28 +22,48 @@
  * The observer pointer may be NULL (triggers fallback).
  */
 
-static inline void hu_log_impl_(const char *component, hu_observer_t *obs, const char *fmt, ...) {
-    char buf[512];
-    va_list ap;
-    va_start(ap, fmt);
-    (void)vsnprintf(buf, sizeof(buf), fmt, ap);
-    va_end(ap);
+/* Severity of a log line. The daemon's stderr is a launchd-appended file with
+ * no other structure; until 2026-09-02 every line was "[component] msg" with
+ * no time and no level, so a 530k-line log could not answer "when" or "how
+ * bad" (the 09-01 replay post-mortem had to be reconstructed from chat.db). */
+typedef enum hu_log_level {
+    HU_LOG_LEVEL_ERROR = 0,
+    HU_LOG_LEVEL_WARN = 1,
+    HU_LOG_LEVEL_INFO = 2,
+} hu_log_level_t;
 
-    if (obs && obs->vtable && obs->vtable->record_event) {
-        hu_observer_event_t ev;
-        memset(&ev, 0, sizeof(ev));
-        ev.tag = HU_OBSERVER_EVENT_ERR;
-        ev.data.err.component = component;
-        ev.data.err.message = buf;
-        obs->vtable->record_event(obs->ctx, &ev);
-    } else {
-        fprintf(stderr, "[%s] %s\n", component, buf);
-    }
-}
+/* The bodies live in src/core/log.c — ONE copy in the binary. They were
+ * `static inline` here at first (eb4b7b8e7), which instantiated the parser,
+ * threshold, formatter and emitter in every logging TU and cost 49 KB of
+ * MinSizeRel binary; LTO does not fold them. Keep this header body-free. */
 
-#define hu_log_error(component, obs_ptr, ...) hu_log_impl_((component), (obs_ptr), __VA_ARGS__)
-#define hu_log_warn(component, obs_ptr, ...)  hu_log_impl_((component), (obs_ptr), __VA_ARGS__)
-#define hu_log_info(component, obs_ptr, ...)  hu_log_impl_((component), (obs_ptr), __VA_ARGS__)
+/* Parse $HU_LOG_LEVEL ("error" | "warn" | "info"; anything else → info). */
+hu_log_level_t hu_log_level_parse(const char *s);
+
+/* Process-wide threshold, read from $HU_LOG_LEVEL once (first log call).
+ * Tests may reset it via hu_log_level_set_for_test(-1). */
+hu_log_level_t hu_log_level_threshold(void);
+void hu_log_level_set_for_test(int level_or_minus1);
+bool hu_log_level_enabled(hu_log_level_t level);
+
+/* Pure line formatter for the stderr fallback:
+ *   "2026-09-02T02:57:16 WARN  [imessage] msg\n"
+ * `now` is local time; a zero `now` writes "0000-00-00T00:00:00" (tests).
+ * Returns the number of bytes written (excluding NUL), truncated to cap. */
+int hu_log_format_line(char *out, size_t cap, hu_log_level_t level, const char *component,
+                       const char *msg, time_t now);
+
+void hu_log_vimpl_(hu_log_level_t level, const char *component, hu_observer_t *obs, const char *fmt,
+                   va_list ap);
+void hu_log_impl_(const char *component, hu_observer_t *obs, const char *fmt, ...);
+void hu_log_lvl_impl_(hu_log_level_t level, const char *component, hu_observer_t *obs,
+                      const char *fmt, ...);
+#define hu_log_error(component, obs_ptr, ...) \
+    hu_log_lvl_impl_(HU_LOG_LEVEL_ERROR, (component), (obs_ptr), __VA_ARGS__)
+#define hu_log_warn(component, obs_ptr, ...) \
+    hu_log_lvl_impl_(HU_LOG_LEVEL_WARN, (component), (obs_ptr), __VA_ARGS__)
+#define hu_log_info(component, obs_ptr, ...) \
+    hu_log_lvl_impl_(HU_LOG_LEVEL_INFO, (component), (obs_ptr), __VA_ARGS__)
 
 /**
  * Emit a log line at most once per process lifetime.

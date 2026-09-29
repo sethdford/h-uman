@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <!-- better-than-human criteria 3 + 4 get a DATED reading every night, even
+       when that reading is a refusal (October roadmap O2/O4). Runs after the
+       05:05 insight extractor and the 05:20 wiki compile. Both scripts are
+       read-only on chat.db / memory.db and write one JSON each under
+       ~/.human/logs/ (when-to-speak-<date>.json, prospective-memory-<date>.json).
+       `;` not `&&`: eval_when_to_speak exits 2 on REFUSE by contract and the
+       second reading must still be taken.
+       Install: cp scripts/launchd/ai.human.better-than-human-nightly.plist ~/Library/LaunchAgents/
+                launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.human.better-than-human-nightly.plist -->
+  <key>Label</key><string>ai.human.better-than-human-nightly</string>
+  <key>ProgramArguments</key><array>
+    <string>/bin/bash</string><string>-lc</string>
+    <string>cd $HOME/Projects/h-uman &amp;&amp; /opt/homebrew/bin/python3 scripts/eval_when_to_speak.py; /opt/homebrew/bin/python3 scripts/eval_prospective_memory.py</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict><key>Hour</key><integer>5</integer><key>Minute</key><integer>35</integer></dict>
+  <key>RunAtLoad</key><false/>
+  <key>StandardOutPath</key><string>/Users/sethford/.human/logs/better-than-human-nightly.log</string>
+  <key>StandardErrorPath</key><string>/Users/sethford/.human/logs/better-than-human-nightly-error.log</string>
+</dict></plist>

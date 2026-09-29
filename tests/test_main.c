@@ -33,6 +33,7 @@ void run_string_tests(void);
 void run_string_ci_tests(void);
 void run_rand_tests(void);
 void run_log_once_tests(void);
+void run_log_format_tests(void);
 void run_vertex_adc_tests(void);
 void run_init_proposer_tests(void);
 void run_init_proposer_compose_tests(void);
@@ -40,6 +41,7 @@ void run_init_outcome_tests(void);
 void run_init_dpo_bridge_tests(void);
 void run_prompt_budget_tests(void);
 void run_prompt_budget_snapshot_tests(void);
+void run_daemon_maintenance_tests(void);
 void run_config_gated_subsystems_tests(void);
 void run_silent_disable_compliance_tests(void);
 void run_io_secure_tests(void);
@@ -51,7 +53,6 @@ void run_contextual_bandit_tests(void);
 void run_humanization_bandit_tests(void);
 void run_memory_tests(void);
 void run_w7_render_null_safety_tests(void);
-void run_mlx_load_adapter_tests(void);
 void run_m3_route_per_turn_tests(void);
 void run_m3_route_per_turn_call_sites_tests(void);
 void run_m3_swap_failure_observability_tests(void);
@@ -68,7 +69,6 @@ void run_oauth_tests(void);
 void run_security_tests(void);
 void run_normalize_tests(void);
 void run_sensitivity_tests(void);
-void run_vault_tests(void);
 void run_vault_aead_tests(void);
 void run_app_bundle_structure_tests(void);
 void run_pkg_builder_tests(void);
@@ -76,6 +76,7 @@ void run_install_docs_tests(void);
 void run_sign_notarize_tests(void);
 void run_provider_tests(void);
 void run_provider_http_tests(void);
+void run_gemini_vertex_auth_tests(void);
 void run_ensemble_tests(void);
 void run_api_key_tests(void);
 void run_channel_tests(void);
@@ -83,15 +84,16 @@ void run_channel_class_tests(void);
 void run_channel_format_tests(void);
 void run_channel_behavior_class_tests(void);
 void run_channel_rate_limit_tests(void);
-void run_channel_http_tests(void);
-void run_webhook_channel_tests(void);
 void run_bg_registry_tests(void);
 void run_channel_embeds_tests(void);
+void run_channel_mock_tests(void);
 /* Phase 2 Task 10 (RL SOTA): hu_reaction_event_t + iMessage/Slack normalizers. */
 void run_reaction_event_tests(void);
 /* Phase 2 Task 11 (RL SOTA): hu_imessage_poll_reactions tapback inbound poll. */
 void run_imessage_reactions_tests(void);
 void run_imessage_caps_tests(void);
+void run_imessage_bb_event_tests(void);
+void run_imessage_emoji_reaction_tests(void);
 /* Phase 1a of docs/plans/2026-05-18-imessage-sota.md: pure synthesis primitives
  * that render iMessage events into canonical English for personal-model ingest. */
 void run_imessage_ingest_tests(void);
@@ -107,6 +109,7 @@ void run_imessage_schema_tests(void);
 void run_typedstream_tests(void);
 /* M3 B4 T4: streaming-safe harmony channel-marker filter. */
 void run_harmony_filter_tests(void);
+void run_llm_json_tests(void);
 /* Phase 5: per-balloon payload decoder tests + privacy contracts. */
 void run_imessage_balloon_decode_tests(void);
 /* Cross-channel reaction emit: WhatsApp + Matrix. */
@@ -171,10 +174,8 @@ void run_adversarial_detect_tests(void);
 void run_gateway_http_tests(void);
 void run_memory_full_tests(void);
 void run_tools_all_tests(void);
-void run_rag_tests(void);
 void run_multimodal_tests(void);
 void run_multimodal_pipeline_tests(void);
-void run_multimodal_memory_tests(void);
 void run_multimodal_audio_tests(void);
 void run_multimodal_video_tests(void);
 void run_voice_duplex_tests(void);
@@ -188,17 +189,16 @@ void run_voice_streaming_e2e_tests(void);
 void run_mlx_local_voice_tests(void);
 void run_autonomy_tests(void);
 void run_retrieval_tests(void);
+void run_reranker_tests(void);
 void run_retrieval_contact_isolation_tests(void);
 void run_vector_tests(void);
 void run_vector_full_tests(void);
 void run_infrastructure_tests(void);
 void run_memory_subsystems_tests(void);
 void run_http_tests(void);
-void run_sse_tests(void);
 void run_streaming_tests(void);
 void run_websocket_tests(void);
 void run_ws_integration_tests(void);
-void run_net_security_tests(void);
 void run_path_security_tests(void);
 void run_process_util_tests(void);
 void run_prompt_tests(void);
@@ -220,7 +220,6 @@ void run_persona_feedback_tests(void);
 void run_persona_examples_style_tests(void);
 void run_persona_filler_roundtrip_tests(void);
 void run_persona_cli_tests(void);
-void run_persona_sticker_tests(void);
 void run_voice_maturity_tests(void);
 void run_style_learner_tests(void);
 void run_persona_refresh_tests(void);
@@ -253,7 +252,6 @@ void run_tom_scenario_tests(void);
 void run_behavior_trust_prompt_tests(void);
 void run_behavior_pressure_tests(void);
 void run_sycophancy_pack_tests(void);
-void run_longmemeval_tests(void);
 void run_user_sim_scenario_tests(void);
 void run_chronotype_tests(void);
 void run_lifecycle_tests(void);
@@ -262,6 +260,7 @@ void run_session_tests(void);
 void run_bus_tests(void);
 void run_identity_tests(void);
 void run_channel_manager_tests(void);
+void run_sdk_channel_template_tests(void);
 void run_new_modules_tests(void);
 void run_provider_all_tests(void);
 void run_chat_response_diag_tests(void);
@@ -280,6 +279,7 @@ void run_json_extended_tests(void);
 void run_security_extended_tests(void);
 void run_security_pipeline_tests(void);
 void run_core_extended_tests(void);
+void run_paths_tests(void);
 void run_gateway_extended_tests(void);
 void run_gateway_auth_tests(void);
 void run_gateway_voice_tests(void);
@@ -293,6 +293,7 @@ void run_diagnostic_commands_tests(void);
 void run_skills_tests(void);
 void run_memory_new_tests(void);
 void run_ported_modules_tests(void);
+void run_capabilities_tests(void);
 void run_doctor_imessage_diagnose_tests(void);
 void run_doctor_registry_tests(void);
 void run_doctor_chatdb_tests(void);
@@ -301,31 +302,31 @@ void run_doctor_exit_codes_tests(void);
 void run_doctor_json_output_tests(void);
 void run_doctor_reaction_collection_wired_tests(void);
 void run_doctor_prompt_budget_tests(void);
+void run_doctor_eval_freshness_tests(void);
+void run_doctor_serving_stability_tests(void);
+void run_doctor_log_hygiene_tests(void);
+void run_doctor_imessage_cursor_tests(void);
+void run_doctor_blind_ab_gate_tests(void);
 void run_outbound_sanitize_tests(void);
 void run_daemon_follow_up_watcher_tests(void);
 void run_cli_ctl_tests(void);
 void run_doctor_local_voice_tests(void);
 void run_onboard_step_provider_tests(void);
 void run_cron_tests(void);
-void run_cron_session_tools_tests(void);
-void run_subagent_tests(void);
 void run_task_manager_tests(void);
 void run_task_tools_tests(void);
 void run_tool_ask_user_tests(void);
 void run_mcp_tests(void);
 void run_mcp_jsonrpc_tests(void);
 void run_mcp_manager_tests(void);
-void run_mcp_resource_tools_tests(void);
 void run_mcp_transport_tests(void);
 void run_mcp_transport_sse_tests(void);
 void run_mcp_http_integration_tests(void);
 void run_otel_trace_tests(void);
-void run_mcp_audit_tests(void);
 void run_voice_tests(void);
 void run_cli_tests(void);
 void run_diagnose_notary_tests(void);
 void run_update_tests(void);
-void run_vector_stores_tests(void);
 void run_memory_engines_ext_tests(void);
 void run_memory_poisoning_tests(void);
 void run_runtime_tests(void);
@@ -336,7 +337,6 @@ void run_roadmap_tests(void);
 void run_new_features_tests(void);
 void run_ollama_integration_tests(void);
 void run_plugin_tests(void);
-void run_tenant_tests(void);
 void run_gmail_tests(void);
 void run_imessage_extended_tests(void);
 void run_imessage_reply_style_tests(void);
@@ -344,6 +344,9 @@ void run_imessage_reply_fallback_quote_tests(void);
 void run_imessage_private_protocol_tests(void);
 void run_imessage_private_client_tests(void);
 void run_imessage_chatdb_fixture_tests(void);
+void run_imessage_replay_guard_tests(void);
+void run_chatdb_cursor_repo_sqlite_tests(void);
+void run_reliable_circuit_tests(void);
 void run_imessage_adversarial_tests(void);
 void run_imessage_non_allowlisted_tests(void);
 void run_imessage_rich_link_tests(void);
@@ -354,11 +357,21 @@ void run_follow_up_tests(void);
 void run_imessage_action_telemetry_tests(void);
 void run_imessage_reply_pacing_tests(void);
 void run_imessage_threaded_reply_tests(void);
+void run_imessage_send_observer_tests(void);
+void run_imessage_voice_record_tests(void);
+void run_speech_text_tests(void);
+void run_speech_rewrite_tests(void);
+void run_speech_direction_tests(void);
+void run_opener_gate_tests(void);
+void run_speech_perform_tests(void);
 void run_imessage_custom_tapback_tests(void);
 void run_imessage_action_facts_tests(void);
 void run_imessage_dispatcher_tests(void);
 void run_imessage_sticker_tests(void);
 void run_follow_up_tests(void);
+void run_followup_compose_tests(void);
+void run_persona_creator_preserve_tests(void);
+void run_check_persona_integrity_tests(void);
 void run_follow_up_daemon_integration_tests(void);
 void run_daemon_aloop_smoke_tests(void);
 void run_intelligence_tests(void);
@@ -373,8 +386,6 @@ void run_untested_modules_tests(void);
 void run_modules_coverage_tests(void);
 void run_coverage_new_tests(void);
 void run_context_tests(void);
-void run_qmd_tests(void);
-void run_terminal_tests(void);
 void run_tavily_tests(void);
 void run_awareness_tests(void);
 void run_entropy_gate_tests(void);
@@ -393,7 +404,19 @@ void run_emotional_moments_tests(void);
 void run_emotional_state_tests(void);
 void run_contact_style_overlay_tests(void);
 void run_graph_tests(void);
+void run_graph_ingest_tests(void);
+void run_agent_facts_tests(void);
+void run_cli_memory_import_tests(void);
+void run_cli_commands_memory_print_tests(void);
+void run_store_sqlite_vec_tests(void);
+void run_semantic_index_tests(void);
+void run_hybrid_reconstructive_tests(void);
+void run_semantic_recall_tests(void);
+void run_semantic_recall_register_tests(void);
+void run_embedder_http_tests(void);
 void run_w1_bitemporal_tests(void);
+void run_graph_state_tests(void);
+void run_wiki_page_tests(void);
 void run_w2_autodream_tests(void);
 void run_w3_multigraph_tests(void);
 void run_w4_verifier_tests(void);
@@ -431,10 +454,23 @@ void run_outbound_crosstalk_tests(void);
 void run_boundary_repo_tests(void);
 void run_opinions_repo_tests(void);
 void run_life_chapter_repo_tests(void);
+void run_proactive_decisions_repo_tests(void);
+void run_outbound_sends_repo_tests(void);
+void run_daemon_proactive_decline_tests(void);
+void run_daemon_proactive_reachability_tests(void);
+void run_daemon_contact_optout_tests(void);
+void run_daemon_hurt_handoff_tests(void);
+void run_daemon_dated_followup_tests(void);
+void run_contact_optout_repo_tests(void);
+void run_daemon_outbound_bus_tests(void);
+void run_repo_util_sqlite_tests(void);
+void run_proactive_send_circuit_tests(void);
+void run_imessage_send_service_tests(void);
 void run_social_graph_repo_tests(void);
 void run_self_awareness_repo_tests(void);
 void run_feed_items_repo_tests(void);
 void run_memories_repo_tests(void);
+void run_contact_insights_repo_tests(void);
 void run_emotional_moments_repo_tests(void);
 void run_emotional_residue_repo_tests(void);
 void run_emotional_state_repo_tests(void);
@@ -464,10 +500,15 @@ void run_doctor_outbound_stats_tests(void);
 void run_doctor_unified_dispatch_tests(void);
 void run_multimodal_policy_tests(void);
 void run_persona_eval_tests(void);
-void run_agent_tests(void);                        /* Sprint 46 R5.3 carryover */
+void run_agent_tests(void); /* Sprint 46 R5.3 carryover */
+void run_lean_head_tests(void);
+void run_reply_prompt_tests(void);
 void run_agent_turn_state_tests(void);             /* #26: per-turn state tracking */
 void run_agent_turn_transport_tests(void);         /* M4 follow-up: transport-error fast-fail */
+void run_agent_llm_latency_wall_clock_tests(void); /* M3 latency_ms measures wall clock */
 void run_agent_turn_request_overrides_tests(void); /* G11: per-turn override parity */
+void run_agent_max_tokens_resolve_tests(void);     /* Task 13: HU_MAX_TOKENS_RESOLVE gate parity */
+void run_agent_stop_sequences_resolve_tests(void); /* Task 14: HU_STOP_SEQUENCES gate parity */
 void run_w6_e2e_adversarial_tests(void);
 void run_w7_memory_facade_tests(void);
 void run_w8_belief_layer_tests(void);
@@ -534,33 +575,28 @@ void run_calibration_tests(void);
  * 2026-05-24 — they caused both suites to run twice. */
 void run_behavioral_clone_tests(void);
 void run_governor_tests(void);
-void run_activation_steering_tests(void);
 void run_model_router_tests(void);
 void run_model_router_health_tests(void);
+void run_cp_admin_tests(void);
 void run_humanness_context_tests(void);
 void run_turing_score_tests(void);
 void run_adversarial_turing_tests(void);
 void run_arbitrator_tests(void);
 void run_salience_tests(void);
+void run_hard_moment_tests(void);
 void run_planning_tests(void);
 void run_rel_dynamics_tests(void);
-void run_prospective_tests(void);
-void run_prospective_memory_tests(void);
 void run_emotional_residue_tests(void);
 void run_consolidation_engine_tests(void);
 void run_conv_goals_tests(void);
 void run_knowledge_tests(void);
 void run_usage_tests(void);
-void run_cognitive_tests(void);
 #ifdef HU_ENABLE_AUTHENTIC
 void run_cognitive_load_tests(void);
 void run_phase9_integration_tests(void);
 #endif
-void run_deep_memory_tests(void);
 void run_compression_tests(void);
 void run_proactive_ext_tests(void);
-void run_degradation_tests(void);
-void run_memory_degradation_tests(void);
 void run_self_awareness_tests(void);
 void run_superhuman_tests(void);
 void run_contact_graph_tests(void);
@@ -598,23 +634,20 @@ void run_belief_update_tests(void);
 void run_taste_tests(void);
 void run_somatic_tests(void);
 void run_narrative_self_tests(void);
+void run_persona_life_events_tests(void);
 void run_attachment_tests(void);
 void run_intrinsic_drive_tests(void);
 void run_prosocial_routine_tests(void);
 void run_life_chapters_tests(void);
 void run_social_graph_tests(void);
-void run_skill_system_tests(void);
 void run_feeds_tests(void);
 #ifdef HU_ENABLE_FEEDS
-void run_apple_feeds_tests(void);
 void run_news_health_email_tests(void);
 #endif
 #ifdef HU_ENABLE_SOCIAL
 void run_social_feeds_tests(void);
 #endif
 #ifdef HU_ENABLE_FEEDS
-void run_google_feeds_tests(void);
-void run_music_feeds_tests(void);
 void run_research_feeds_tests(void);
 void run_research_executor_tests(void);
 #endif
@@ -640,12 +673,9 @@ void run_agi_frontiers_tests(void);
 void run_orchestrator_tests(void);
 void run_swarm_execution_tests(void);
 void run_dynamic_decomposition_tests(void);
-void run_agent_matching_tests(void);
 void run_agent_communication_tests(void);
 void run_mcts_planner_tests(void);
-void run_world_model_graph_tests(void);
 void run_world_simulation_tests(void);
-void run_world_context_tests(void);
 void run_peripheral_ctrl_tests(void);
 void run_value_learning_tests(void);
 void run_goal_engine_tests(void);
@@ -670,6 +700,7 @@ void register_voice_clone_tests(void);
 void run_audio_pipeline_tests(void);
 void run_voice_decision_tests(void);
 void run_emotion_map_tests(void);
+void run_voice_reply_tests(void);
 #endif
 #ifdef HU_ENABLE_ML
 void run_ml_tests(void);
@@ -682,9 +713,7 @@ void run_fidelity_delta_tests(void);
  * architecture rework — files deleted, declarations removed. Sprint 12
  * FU-11.5.a will re-target against main's new framework. */
 void run_dpo_judge_naming_tests(void);
-void run_dp_sgd_tests(void);
 void run_lora_tests(void);
-void run_agent_trainer_tests(void);
 void run_training_data_tests(void);
 void run_training_data_extractor_tests(void);
 void run_training_data_quality_tests(void);
@@ -746,8 +775,6 @@ void run_reward_source_tests(void);
  * smokes (adapter file written; --kl-beta 0 disables KL via CLI). */
 void run_cli_grpo_tests(void);
 #endif
-void run_multigraph_tests(void);
-void run_memory_graph_tests(void);
 void run_experience_tests(void);
 void run_experience_engine_tests(void);
 void run_intelligence_wiring_tests(void);
@@ -767,7 +794,6 @@ void run_otlp_tests(void);
 void run_token_budget_tests(void);
 void run_mar_tests(void);
 void run_mem_policy_tests(void);
-void run_prompt_optimizer_tests(void);
 void run_chaos_tests(void);
 void run_checkpoint_tests(void);
 void run_scratchpad_tests(void);
@@ -780,6 +806,12 @@ void run_eval_history_tests(void);
 void run_eval_shape_tests(void);
 void run_register_tests(void);
 void run_relationship_tone_tests(void);
+void run_persona_head_gate_tests(void);
+void run_state_file_tests(void);
+void run_daemon_followup_sched_tests(void);
+void run_daemon_rich_media_tests(void);
+void run_daemon_voice_reply_tests(void);
+void run_prospective_tests(void);
 void run_eval_score_tests(void);
 void run_corrective_rag_tests(void);
 void run_adaptive_rag_tests(void);
@@ -805,7 +837,6 @@ void run_visual_grounding_tests(void);
 void run_browser_use_tests(void);
 void run_local_voice_tests(void);
 void run_gui_agent_tests(void);
-void run_lsp_tests(void);
 void run_webrtc_tests(void);
 void run_embedded_provider_tests(void);
 void run_llamacpp_provider_tests(void);
@@ -833,7 +864,6 @@ void run_planner_mcts_wiring_tests(void);
 void run_cdp_tests(void);
 void run_emotional_cognition_tests(void);
 void run_emotional_contagion_tests(void);
-void run_style_mirror_tests(void);
 void run_evolving_cognition_tests(void);
 void run_metacognition_tests(void);
 void run_humanness_frontiers_tests(void);
@@ -844,6 +874,7 @@ void run_sota_wiring_tests(void);
 void run_sota_live_wiring_tests(void);
 void hu_test_permission(void);
 void run_shell_sandbox_tests(void);
+void run_shell_env_tests(void);
 void test_session_persist(void);
 void run_adversarial_memory_safety_tests(void);
 void run_adversarial_injection_tests(void);
@@ -861,9 +892,17 @@ void run_daemon_shape_tests(void);
 void run_daemon_lifecycle_tests(void);
 void run_daemon_routing_tests(void);
 void run_daemon_proactive_tests(void);
+void run_reply_delay_model_tests(void);
 void run_daemon_promise_keeper_tests(void);
+void run_daemon_insight_overuse_tests(void);
+void run_daemon_config_reload_tests(void);
+void run_daemon_identity_graph_tests(void);
 void run_daemon_reply_fallback_tests(void);
 void run_reply_dedup_tests(void);
+void run_send_budget_tests(void);
+void run_reactive_gates_tests(void);
+void run_daemon_reactive_context_tests(void);
+void run_consecutive_limiter_tests(void);
 void run_proactive_policy_tests(void);
 void run_daemon_director_tests(void);
 /* Sprint 59 Phase C — test seeds feed_items via sqlite3 directly so the
@@ -881,11 +920,9 @@ void run_anticipatory_state_tests(void);
 void run_canvas_tool_tests(void);
 void run_canvas_e2e_tests(void);
 void run_canvas_persist_tests(void);
-void run_canvas_render_tests(void);
 void run_homebrew_formula_tests(void);
 void run_background_registry_tests(void);
 void run_consistency_tests(void);
-void run_mlx_provider_tests(void);
 void run_mlx_stream_utf8_tests(void);
 void run_persona_fidelity_tests(void);
 void run_persona_fidelity_judge_tests(void);
@@ -944,11 +981,24 @@ void run_persona_encryption_tests(void);
 #endif
 void run_persona_directive_channels_tests(void);
 void run_persona_overlay_render_tests(void);
+void run_style_card_tests(void);
+void run_card_file_tests(void);
+void run_emotion_card_tests(void);
 #if defined(HU_HAS_IMESSAGE) && defined(HU_HAS_TELEGRAM)
 void run_channel_overlay_apply_tests(void);
 #endif
 void run_filler_recency_tests(void);
 void run_contact_send_recency_tests(void);
+/* 2026-09-10 review: these six suites were compiled (or, for the last two,
+ * not even listed in CMake) but never called from main(). */
+void run_contact_send_recency_daemon_tests(void);
+#ifdef HU_ENABLE_ML
+void run_ml_scripts_dir_tests(void);
+#endif
+#ifdef HU_ENABLE_RL_FULL
+void run_daemon_reaction_poll_production_tests(void);
+void run_persona_rollout_tests(void);
+#endif
 #ifdef HU_ENABLE_ML
 void run_dpo_miner_tests(void);
 #endif
@@ -963,7 +1013,10 @@ void run_sprint3_hybrid_recall_tests(void);
  * Activated briefly during merge resolution; produced 11 failures in
  * minimal-build (8 from missing parsers + 3 from cross-test state
  * pollution on the dedup channel). Re-add when the underlying
- * features land. */
+ * features land.
+ * allow-uncalled-suite: run_config_identity_links_tests: parsers not implemented (PR #115)
+ * allow-uncalled-suite: run_memory_session_scoping_tests: feature not implemented (PR #115)
+ * allow-uncalled-suite: run_imessage_outbound_dedup_tests: cross-test state pollution (PR #115) */
 void run_filler_pctt_tests(void);
 void run_hallucination_guard_tests(void);
 void run_humor_fw_tests(void);
@@ -971,7 +1024,6 @@ void run_self_improve_tests(void);
 void run_sycophancy_guard_tests(void);
 void run_trust_calibration_tests(void);
 void run_vision_ocr_tests(void);
-void run_markdown_loader_tests(void);
 void run_structured_output_tests(void);
 #ifdef HU_ENABLE_RL_FULL
 extern void run_bootstrap_ci_tests(void);
@@ -1013,6 +1065,15 @@ int hu_llamacpp_sanity_gate_main(int argc, char **argv);
 #endif
 
 int main(int argc, char **argv) {
+    /* Line-buffer stdout even when piped (non-TTY stdout is fully buffered by
+     * default), so the per-suite progress and the final "Results:" line reach
+     * the pipe/log BEFORE any end-of-process LeakSanitizer abort discards the
+     * unflushed tail. Done here instead of wrapping the binary in `stdbuf`:
+     * stdbuf injects libstdbuf.so via LD_PRELOAD, which displaces the ASan
+     * runtime from the front of the initial library list and makes ASan-built
+     * binaries abort at startup on Linux (broke the RL nightly 05-31..07-25). */
+    setvbuf(stdout, NULL, _IOLBF, 0);
+
     if (argc >= 2 && strcmp(argv[1], "--sanity-gate") == 0) {
 #ifdef HU_ENABLE_LLAMACPP
         return hu_llamacpp_sanity_gate_main(argc, argv);
@@ -1082,6 +1143,7 @@ int main(int argc, char **argv) {
     run_string_ci_tests();
     run_rand_tests();
     run_log_once_tests();
+    run_log_format_tests();
     run_vertex_adc_tests();
     run_init_proposer_tests();
     run_init_proposer_compose_tests();
@@ -1089,6 +1151,7 @@ int main(int argc, char **argv) {
     run_init_dpo_bridge_tests();
     run_prompt_budget_tests();
     run_prompt_budget_snapshot_tests();
+    run_daemon_maintenance_tests();
     run_config_gated_subsystems_tests();
     run_silent_disable_compliance_tests();
     run_io_secure_tests();
@@ -1100,7 +1163,6 @@ int main(int argc, char **argv) {
     run_humanization_bandit_tests();
     run_memory_tests();
     run_w7_render_null_safety_tests();
-    run_mlx_load_adapter_tests();
     run_m3_route_per_turn_tests();
     run_m3_route_per_turn_call_sites_tests();
     run_m3_swap_failure_observability_tests();
@@ -1117,7 +1179,6 @@ int main(int argc, char **argv) {
     run_security_tests();
     run_normalize_tests();
     run_sensitivity_tests();
-    run_vault_tests();
     run_vault_aead_tests();
     run_app_bundle_structure_tests();
     run_pkg_builder_tests();
@@ -1125,6 +1186,7 @@ int main(int argc, char **argv) {
     run_sign_notarize_tests();
     run_provider_tests();
     run_provider_http_tests();
+    run_gemini_vertex_auth_tests();
     run_ensemble_tests();
     run_api_key_tests();
     run_channel_tests();
@@ -1132,13 +1194,14 @@ int main(int argc, char **argv) {
     run_channel_format_tests();
     run_channel_behavior_class_tests();
     run_channel_rate_limit_tests();
-    run_channel_http_tests();
-    run_webhook_channel_tests();
     run_bg_registry_tests();
     run_channel_embeds_tests();
+    run_channel_mock_tests();
     run_reaction_event_tests();
     run_imessage_reactions_tests();
     run_imessage_caps_tests();
+    run_imessage_bb_event_tests();
+    run_imessage_emoji_reaction_tests();
     run_imessage_ingest_tests();
     run_imessage_personal_model_e2e_tests();
     run_bplist_tests();
@@ -1146,6 +1209,7 @@ int main(int argc, char **argv) {
     run_imessage_schema_tests();
     run_typedstream_tests();
     run_harmony_filter_tests();
+    run_llm_json_tests();
     run_imessage_balloon_decode_tests();
     run_whatsapp_reactions_tests();
     run_matrix_reactions_tests();
@@ -1193,10 +1257,8 @@ int main(int argc, char **argv) {
     run_memory_full_tests();
     run_tools_all_tests();
     run_diagnose_notary_tests();
-    run_rag_tests();
     run_multimodal_tests();
     run_multimodal_pipeline_tests();
-    run_multimodal_memory_tests();
     run_multimodal_audio_tests();
     run_multimodal_video_tests();
     run_voice_duplex_tests();
@@ -1210,19 +1272,16 @@ int main(int argc, char **argv) {
     run_mlx_local_voice_tests();
     run_autonomy_tests();
     run_retrieval_tests();
+    run_reranker_tests();
     run_retrieval_contact_isolation_tests();
-    run_multigraph_tests();
-    run_memory_graph_tests();
     run_vector_tests();
     run_vector_full_tests();
     run_infrastructure_tests();
     run_memory_subsystems_tests();
     run_http_tests();
-    run_sse_tests();
     run_streaming_tests();
     run_websocket_tests();
     run_ws_integration_tests();
-    run_net_security_tests();
     run_path_security_tests();
     run_process_util_tests();
     run_prompt_tests();
@@ -1244,9 +1303,7 @@ int main(int argc, char **argv) {
     run_persona_examples_style_tests();
     run_persona_filler_roundtrip_tests();
     run_persona_cli_tests();
-    run_persona_sticker_tests();
     run_voice_maturity_tests();
-    run_style_mirror_tests();
     run_style_learner_tests();
     run_persona_refresh_tests();
     run_persona_rag_tests();
@@ -1278,7 +1335,6 @@ int main(int argc, char **argv) {
     run_behavior_trust_prompt_tests();
     run_behavior_pressure_tests();
     run_sycophancy_pack_tests();
-    run_longmemeval_tests();
     run_user_sim_scenario_tests();
     run_chronotype_tests();
     run_lifecycle_tests();
@@ -1287,6 +1343,7 @@ int main(int argc, char **argv) {
     run_bus_tests();
     run_identity_tests();
     run_channel_manager_tests();
+    run_sdk_channel_template_tests();
     run_new_modules_tests();
     run_provider_all_tests();
     run_chat_response_diag_tests();
@@ -1303,6 +1360,7 @@ int main(int argc, char **argv) {
     run_security_extended_tests();
     run_security_pipeline_tests();
     run_core_extended_tests();
+    run_paths_tests();
     run_gateway_extended_tests();
     run_gateway_auth_tests();
     run_gateway_voice_tests();
@@ -1316,6 +1374,7 @@ int main(int argc, char **argv) {
     run_skills_tests();
     run_memory_new_tests();
     run_ported_modules_tests();
+    run_capabilities_tests();
     run_doctor_imessage_diagnose_tests();
     run_doctor_registry_tests();
     run_doctor_chatdb_tests();
@@ -1324,25 +1383,25 @@ int main(int argc, char **argv) {
     run_doctor_json_output_tests();
     run_doctor_reaction_collection_wired_tests();
     run_doctor_prompt_budget_tests();
+    run_doctor_eval_freshness_tests();
+    run_doctor_serving_stability_tests();
+    run_doctor_log_hygiene_tests();
+    run_doctor_imessage_cursor_tests();
+    run_doctor_blind_ab_gate_tests();
     run_outbound_sanitize_tests();
     run_daemon_follow_up_watcher_tests();
     run_cli_ctl_tests();
     run_doctor_local_voice_tests();
     run_onboard_step_provider_tests();
     run_cron_tests();
-    run_cron_session_tools_tests();
-    run_subagent_tests();
     run_mcp_tests();
     run_mcp_jsonrpc_tests();
     run_mcp_manager_tests();
-    run_mcp_resource_tools_tests();
     run_mcp_transport_tests();
     run_mcp_transport_sse_tests();
     run_mcp_http_integration_tests();
     run_otel_trace_tests();
-    run_mcp_audit_tests();
     run_voice_tests();
-    run_vector_stores_tests();
     run_cli_tests();
     run_update_tests();
     run_memory_engines_ext_tests();
@@ -1355,7 +1414,6 @@ int main(int argc, char **argv) {
     run_new_features_tests();
     run_ollama_integration_tests();
     run_plugin_tests();
-    run_tenant_tests();
     run_gmail_tests();
     run_imessage_extended_tests();
     run_imessage_reply_style_tests();
@@ -1363,6 +1421,9 @@ int main(int argc, char **argv) {
     run_imessage_private_protocol_tests();
     run_imessage_private_client_tests();
     run_imessage_chatdb_fixture_tests();
+    run_imessage_replay_guard_tests();
+    run_chatdb_cursor_repo_sqlite_tests();
+    run_reliable_circuit_tests();
     run_imessage_adversarial_tests();
     run_imessage_non_allowlisted_tests();
     run_imessage_rich_link_tests();
@@ -1374,11 +1435,21 @@ int main(int argc, char **argv) {
     run_imessage_action_telemetry_tests();
     run_imessage_reply_pacing_tests();
     run_imessage_threaded_reply_tests();
+    run_imessage_send_observer_tests();
+    run_imessage_voice_record_tests();
+    run_speech_text_tests();
+    run_speech_rewrite_tests();
+    run_speech_direction_tests();
+    run_opener_gate_tests();
+    run_speech_perform_tests();
     run_imessage_custom_tapback_tests();
     run_imessage_action_facts_tests();
     run_imessage_dispatcher_tests();
     run_imessage_sticker_tests();
     run_follow_up_tests();
+    run_followup_compose_tests();
+    run_persona_creator_preserve_tests();
+    run_check_persona_integrity_tests();
     run_follow_up_daemon_integration_tests();
     run_daemon_aloop_smoke_tests();
     run_intelligence_tests();
@@ -1393,8 +1464,6 @@ int main(int argc, char **argv) {
     run_modules_coverage_tests();
     run_coverage_new_tests();
     run_context_tests();
-    run_qmd_tests();
-    run_terminal_tests();
     run_tavily_tests();
     run_awareness_tests();
     run_entropy_gate_tests();
@@ -1413,7 +1482,19 @@ int main(int argc, char **argv) {
     run_emotional_state_tests();
     run_contact_style_overlay_tests();
     run_graph_tests();
+    run_graph_ingest_tests();
+    run_agent_facts_tests();
+    run_cli_memory_import_tests();
+    run_cli_commands_memory_print_tests();
+    run_store_sqlite_vec_tests();
+    run_semantic_index_tests();
+    run_hybrid_reconstructive_tests();
+    run_semantic_recall_tests();
+    run_semantic_recall_register_tests();
+    run_embedder_http_tests();
     run_w1_bitemporal_tests();
+    run_graph_state_tests();
+    run_wiki_page_tests();
     run_w2_autodream_tests();
     run_w3_multigraph_tests();
     run_w4_verifier_tests();
@@ -1448,10 +1529,23 @@ int main(int argc, char **argv) {
     run_boundary_repo_tests();
     run_opinions_repo_tests();
     run_life_chapter_repo_tests();
+    run_proactive_decisions_repo_tests();
+    run_outbound_sends_repo_tests();
+    run_daemon_proactive_decline_tests();
+    run_daemon_proactive_reachability_tests();
+    run_daemon_contact_optout_tests();
+    run_daemon_hurt_handoff_tests();
+    run_daemon_dated_followup_tests();
+    run_contact_optout_repo_tests();
+    run_daemon_outbound_bus_tests();
+    run_repo_util_sqlite_tests();
+    run_proactive_send_circuit_tests();
+    run_imessage_send_service_tests();
     run_social_graph_repo_tests();
     run_self_awareness_repo_tests();
     run_feed_items_repo_tests();
     run_memories_repo_tests();
+    run_contact_insights_repo_tests();
     run_emotional_moments_repo_tests();
     run_emotional_residue_repo_tests();
     run_emotional_state_repo_tests();
@@ -1475,12 +1569,20 @@ int main(int argc, char **argv) {
     run_persona_eval_tests();
     /* Sprint 46 R5.3 carryover (audit FAIL fix) — agent integration tests */
     run_agent_tests();
+    run_lean_head_tests();
+    run_reply_prompt_tests();
     /* #26: per-turn state tracking unit tests (tool_count, hash, registers) */
     run_agent_turn_state_tests();
     /* M4 follow-up: transport-error fast-fail in agent_turn tool-loop */
     run_agent_turn_transport_tests();
+    /* M3 live-fire fix: provider latency_ms must span the blocking round trip */
+    run_agent_llm_latency_wall_clock_tests();
     /* G11: per-turn request override parity helper (G5 regression guard) */
     run_agent_turn_request_overrides_tests();
+    /* Task 13: HU_MAX_TOKENS_RESOLVE gate — per-model max_tokens wiring */
+    run_agent_max_tokens_resolve_tests();
+    /* Task 14: HU_STOP_SEQUENCES gate — per-provider stop_sequences wiring */
+    run_agent_stop_sequences_resolve_tests();
     run_w6_e2e_adversarial_tests();
     run_w7_memory_facade_tests();
     run_w8_belief_layer_tests();
@@ -1542,35 +1644,30 @@ int main(int argc, char **argv) {
      * called earlier (line ~881). Duplicates removed 2026-05-24. */
     run_behavioral_clone_tests();
     run_governor_tests();
-    run_activation_steering_tests();
     run_model_router_tests();
     run_model_router_health_tests();
+    run_cp_admin_tests();
     run_humanness_context_tests();
     run_turing_score_tests();
     run_adversarial_turing_tests();
     run_arbitrator_tests();
     run_salience_tests();
+    run_hard_moment_tests();
     run_planning_tests();
     run_rel_dynamics_tests();
 #ifdef HU_ENABLE_SQLITE
-    run_prospective_tests();
-    run_prospective_memory_tests();
     run_emotional_residue_tests();
     run_consolidation_engine_tests();
 #endif
     run_conv_goals_tests();
     run_knowledge_tests();
     run_usage_tests();
-    run_cognitive_tests();
 #ifdef HU_ENABLE_AUTHENTIC
     run_cognitive_load_tests();
     run_phase9_integration_tests();
 #endif
-    run_deep_memory_tests();
     run_compression_tests();
     run_proactive_ext_tests();
-    run_degradation_tests();
-    run_memory_degradation_tests();
     run_self_awareness_tests();
     run_superhuman_tests();
     run_contact_graph_tests();
@@ -1608,18 +1705,15 @@ int main(int argc, char **argv) {
     run_taste_tests();
     run_somatic_tests();
     run_narrative_self_tests();
+    run_persona_life_events_tests();
     run_attachment_tests();
     run_intrinsic_drive_tests();
     run_prosocial_routine_tests();
     run_life_chapters_tests();
     run_social_graph_tests();
-    run_skill_system_tests();
     run_feeds_tests();
 #ifdef HU_ENABLE_FEEDS
-    run_apple_feeds_tests();
     run_news_health_email_tests();
-    run_google_feeds_tests();
-    run_music_feeds_tests();
     run_research_feeds_tests();
     run_research_executor_tests();
 #endif
@@ -1648,12 +1742,9 @@ int main(int argc, char **argv) {
     run_orchestrator_tests();
     run_swarm_execution_tests();
     run_dynamic_decomposition_tests();
-    run_agent_matching_tests();
     run_agent_communication_tests();
     run_mcts_planner_tests();
-    run_world_model_graph_tests();
     run_world_simulation_tests();
-    run_world_context_tests();
     run_agent_registry_tests();
     run_pwa_tests();
     run_music_tests();
@@ -1672,6 +1763,7 @@ int main(int argc, char **argv) {
     run_audio_pipeline_tests();
     run_voice_decision_tests();
     run_emotion_map_tests();
+    run_voice_reply_tests();
 #endif
 #ifdef HU_ENABLE_ML
     run_ml_tests();
@@ -1684,9 +1776,7 @@ int main(int argc, char **argv) {
      * per-trainer factory pattern, orphaned by main's RL architecture
      * rework. See declaration block at ~line 441. */
     run_dpo_judge_naming_tests();
-    run_dp_sgd_tests();
     run_lora_tests();
-    run_agent_trainer_tests();
     run_training_data_tests();
     run_training_data_extractor_tests();
     run_training_data_quality_tests();
@@ -1755,7 +1845,6 @@ int main(int argc, char **argv) {
     run_token_budget_tests();
     run_mar_tests();
     run_mem_policy_tests();
-    run_prompt_optimizer_tests();
     run_chaos_tests();
     run_checkpoint_tests();
     run_scratchpad_tests();
@@ -1768,6 +1857,12 @@ int main(int argc, char **argv) {
     run_eval_shape_tests();
     run_register_tests();
     run_relationship_tone_tests();
+    run_persona_head_gate_tests();
+    run_state_file_tests();
+    run_daemon_followup_sched_tests();
+    run_daemon_rich_media_tests();
+    run_daemon_voice_reply_tests();
+    run_prospective_tests();
     run_eval_score_tests();
     run_corrective_rag_tests();
     run_adaptive_rag_tests();
@@ -1793,7 +1888,6 @@ int main(int argc, char **argv) {
     run_browser_use_tests();
     run_local_voice_tests();
     run_gui_agent_tests();
-    run_lsp_tests();
     run_webrtc_tests();
     run_embedded_provider_tests();
     run_llamacpp_provider_tests();
@@ -1831,6 +1925,7 @@ int main(int argc, char **argv) {
     run_sota_live_wiring_tests();
     hu_test_permission();
     run_shell_sandbox_tests();
+    run_shell_env_tests();
     run_hook_pipeline_tests();
     run_agent_dispatch_hooks_tests();
     test_session_persist();
@@ -1855,9 +1950,17 @@ int main(int argc, char **argv) {
     run_daemon_lifecycle_tests();
     run_daemon_routing_tests();
     run_daemon_proactive_tests();
+    run_reply_delay_model_tests();
     run_daemon_promise_keeper_tests();
+    run_daemon_insight_overuse_tests();
+    run_daemon_config_reload_tests();
+    run_daemon_identity_graph_tests();
     run_daemon_reply_fallback_tests();
     run_reply_dedup_tests();
+    run_send_budget_tests();
+    run_reactive_gates_tests();
+    run_daemon_reactive_context_tests();
+    run_consecutive_limiter_tests();
     run_proactive_policy_tests();
     run_daemon_director_tests();
 #ifdef HU_ENABLE_SQLITE
@@ -1869,7 +1972,6 @@ int main(int argc, char **argv) {
     run_vector_retrieval_remote_tests();
     run_background_registry_tests();
     run_consistency_tests();
-    run_mlx_provider_tests();
     run_mlx_stream_utf8_tests();
     run_persona_fidelity_tests();
     run_persona_fidelity_judge_tests();
@@ -1928,11 +2030,22 @@ int main(int argc, char **argv) {
 #endif
     run_persona_directive_channels_tests();
     run_persona_overlay_render_tests();
+    run_style_card_tests();
+    run_card_file_tests();
+    run_emotion_card_tests();
 #if defined(HU_HAS_IMESSAGE) && defined(HU_HAS_TELEGRAM)
     run_channel_overlay_apply_tests();
 #endif
     run_filler_recency_tests();
     run_contact_send_recency_tests();
+    run_contact_send_recency_daemon_tests();
+#ifdef HU_ENABLE_ML
+    run_ml_scripts_dir_tests();
+#endif
+#ifdef HU_ENABLE_RL_FULL
+    run_daemon_reaction_poll_production_tests();
+    run_persona_rollout_tests();
+#endif
 #ifdef HU_ENABLE_ML
     run_dpo_miner_tests();
 #endif
@@ -1947,13 +2060,11 @@ int main(int argc, char **argv) {
     run_sycophancy_guard_tests();
     run_trust_calibration_tests();
     run_vision_ocr_tests();
-    run_markdown_loader_tests();
     run_structured_output_tests();
     run_anticipatory_state_tests();
     run_canvas_tool_tests();
     run_canvas_e2e_tests();
     run_canvas_persist_tests();
-    run_canvas_render_tests();
     run_homebrew_formula_tests();
 #ifdef HU_ENABLE_RL_FULL
     /* Phase 5 Task 2 (RL SOTA): bootstrap CI suite — only linked when

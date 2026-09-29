@@ -212,11 +212,13 @@ export class HuFidelityTile extends LitElement {
     return html`
       <div class="header">
         <div class="title">Persona fidelity · ${persona}</div>
-        ${sourceLabel
-          ? html`<div class="source" aria-label="Fingerprint source: ${sourceLabel}">
-              ${sourceLabel}
-            </div>`
-          : nothing}
+        ${
+          sourceLabel
+            ? html`<div class="source" aria-label="Fingerprint source: ${sourceLabel}">
+                ${sourceLabel}
+              </div>`
+            : nothing
+        }
       </div>
     `;
   }
@@ -257,18 +259,22 @@ export class HuFidelityTile extends LitElement {
             ${ab.available ? formatSignedPercent(ab.delta) : "no run"}
           </span>
           <span class="lane-sub">
-            ${ab.available
-              ? html`${formatPercent(ab.before_mean)} → ${formatPercent(ab.after_mean)}`
-              : "run lora-runner twice to populate"}
+            ${
+              ab.available
+                ? html`${formatPercent(ab.before_mean)} → ${formatPercent(ab.after_mean)}`
+                : "run lora-runner twice to populate"
+            }
           </span>
         </div>
         <div class="lane">
           <span class="lane-label">Samples scored</span>
           <span class="lane-value">${baseline.scored}</span>
           <span class="lane-sub">
-            ${ab.available
-              ? html`A/B: ${ab.scored_before ?? 0} / ${ab.scored_after ?? 0}`
-              : "baseline only"}
+            ${
+              ab.available
+                ? html`A/B: ${ab.scored_before ?? 0} / ${ab.scored_after ?? 0}`
+                : "baseline only"
+            }
           </span>
         </div>
       </div>

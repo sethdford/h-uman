@@ -150,6 +150,22 @@ static void parse_imessage_channel(hu_allocator_t *a, hu_config_t *cfg,
         parse_string_array(a, &cfg->channels.imessage.allow_from,
                            &cfg->channels.imessage.allow_from_count, af);
     }
+    /* exclude_from: handles the assistant must never message. Parsed exactly
+     * like allow_from, but consulted first and enforced silently (no courtesy
+     * reply) — see hu_imessage_handle_excluded. */
+    hu_json_value_t *xf = hu_json_object_get(obj, "exclude_from");
+    if (xf && xf->type == HU_JSON_ARRAY) {
+        if (cfg->channels.imessage.exclude_from) {
+            for (size_t i = 0; i < cfg->channels.imessage.exclude_from_count; i++)
+                if (cfg->channels.imessage.exclude_from[i])
+                    a->free(a->ctx, cfg->channels.imessage.exclude_from[i],
+                            strlen(cfg->channels.imessage.exclude_from[i]) + 1);
+            a->free(a->ctx, cfg->channels.imessage.exclude_from,
+                    cfg->channels.imessage.exclude_from_count * sizeof(char *));
+        }
+        parse_string_array(a, &cfg->channels.imessage.exclude_from,
+                           &cfg->channels.imessage.exclude_from_count, xf);
+    }
     cfg->channels.imessage.poll_interval_sec =
         (int)hu_json_get_number(obj, "poll_interval_sec", 30.0);
     cfg->channels.imessage.user_response_window_sec =

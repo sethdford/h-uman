@@ -12,6 +12,9 @@ COPY include/ include/
 COPY asm/ asm/
 COPY vendor/ vendor/
 COPY cmake/ cmake/
+# sqlite-vec is compiled into human_core (CMakeLists.txt ~line 527) since
+# af2c7d7da; the Docker CI job failed "Cannot find source file" without it.
+COPY third_party/sqlite-vec/ third_party/sqlite-vec/
 # scripts/ is required at build time: the human_topology_check custom CMake
 # target invokes scripts/check-layer-topology.sh during `make`. Without it
 # the Alpine build fails with "bash: scripts/check-layer-topology.sh: No

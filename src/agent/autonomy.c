@@ -1,6 +1,7 @@
 #include "human/agent/autonomy.h"
 #include "human/core/log.h"
 #include "human/core/string.h"
+#include "human/core/time.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -9,7 +10,7 @@
 #endif
 
 static int64_t now_ms(void) {
-    return (int64_t)time(NULL) * 1000;
+    return (int64_t)hu_time_wall_ms();
 }
 
 static void sort_goals_by_priority(hu_autonomy_goal_t *goals, size_t count) {
@@ -38,7 +39,7 @@ hu_error_t hu_autonomy_init(hu_autonomy_state_t *state, size_t context_budget) {
 }
 
 hu_error_t hu_autonomy_add_goal(hu_autonomy_state_t *state, const char *desc, size_t desc_len,
-                                 double priority) {
+                                double priority) {
     if (!state || !desc)
         return HU_ERR_INVALID_ARGUMENT;
     if (state->goal_count >= HU_AUTONOMY_MAX_GOALS)
@@ -117,8 +118,8 @@ hu_error_t hu_autonomy_consolidate(hu_autonomy_state_t *state) {
     return HU_OK;
 }
 
-hu_error_t hu_autonomy_generate_intrinsic_goal(hu_autonomy_state_t *state,
-                                                size_t completed_count, size_t failed_count) {
+hu_error_t hu_autonomy_generate_intrinsic_goal(hu_autonomy_state_t *state, size_t completed_count,
+                                               size_t failed_count) {
     if (!state)
         return HU_ERR_INVALID_ARGUMENT;
     if (state->goal_count >= HU_AUTONOMY_MAX_GOALS)
@@ -134,8 +135,7 @@ hu_error_t hu_autonomy_generate_intrinsic_goal(hu_autonomy_state_t *state,
                      failed_count);
         priority = 0.9;
     } else if (completed_count > 5 && state->goal_count == 0) {
-        n = snprintf(desc, sizeof(desc),
-                     "Review %zu completed tasks for improvement patterns",
+        n = snprintf(desc, sizeof(desc), "Review %zu completed tasks for improvement patterns",
                      completed_count);
         priority = 0.4;
     } else if (state->goal_count == 0) {
@@ -213,8 +213,8 @@ hu_error_t hu_autonomy_seed_intrinsic_goal(struct hu_goal_engine *engine, const 
 #endif
 }
 
-hu_error_t hu_autonomy_externalize_state(const hu_autonomy_state_t *state,
-                                          char *buf, size_t buf_size, size_t *out_len) {
+hu_error_t hu_autonomy_externalize_state(const hu_autonomy_state_t *state, char *buf,
+                                         size_t buf_size, size_t *out_len) {
     if (!state || !buf || !out_len || buf_size < 32)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -228,12 +228,9 @@ hu_error_t hu_autonomy_externalize_state(const hu_autonomy_state_t *state,
         const hu_autonomy_goal_t *g = &state->goals[i];
         if (i > 0 && pos < buf_size - 1)
             buf[pos++] = ',';
-        pos = hu_buf_appendf(buf, buf_size, pos,
-                             "{\"d\":\"%.*s\",\"p\":%.2f,\"c\":%s}",
+        pos = hu_buf_appendf(buf, buf_size, pos, "{\"d\":\"%.*s\",\"p\":%.2f,\"c\":%s}",
                              (int)(g->description_len < 80 ? g->description_len : 80),
-                             g->description,
-                             g->priority,
-                             g->completed ? "true" : "false");
+                             g->description, g->priority, g->completed ? "true" : "false");
     }
 
     pos = hu_buf_appendf(buf, buf_size, pos, "]}");
@@ -241,8 +238,7 @@ hu_error_t hu_autonomy_externalize_state(const hu_autonomy_state_t *state,
     return HU_OK;
 }
 
-hu_error_t hu_autonomy_restore_state(hu_autonomy_state_t *state,
-                                      const char *buf, size_t buf_len) {
+hu_error_t hu_autonomy_restore_state(hu_autonomy_state_t *state, const char *buf, size_t buf_len) {
     if (!state || !buf || buf_len == 0)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -277,9 +273,11 @@ hu_error_t hu_autonomy_restore_state(hu_autonomy_state_t *state,
         const char *end = buf + buf_len;
         while (p < end && state->goal_count < HU_AUTONOMY_MAX_GOALS) {
             const char *obj = memchr(p, '{', (size_t)(end - p));
-            if (!obj) break;
+            if (!obj)
+                break;
             const char *obj_end = memchr(obj, '}', (size_t)(end - obj));
-            if (!obj_end) break;
+            if (!obj_end)
+                break;
 
             hu_autonomy_goal_t *g = &state->goals[state->goal_count];
             memset(g, 0, sizeof(*g));
@@ -309,7 +307,8 @@ hu_error_t hu_autonomy_restore_state(hu_autonomy_state_t *state,
             const char *cp = strstr(obj, "\"c\":");
             if (cp && cp < obj_end) {
                 cp += 4;
-                while (*cp == ' ') cp++;
+                while (*cp == ' ')
+                    cp++;
                 g->completed = (*cp == 't');
             }
 

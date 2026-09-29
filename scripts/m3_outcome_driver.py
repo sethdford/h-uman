@@ -18,7 +18,21 @@ Architecture sits between two existing pieces:
         ↓ POST /v1/adapters/swap
     MLX server hot-loads the new adapter (B2 Stream B, scripts/mlx-server.py)
 
+The EXPORT stage (poll + select + dedup + append) loads no model and
+spawns no trainer — it reads the gateway ring, or falls back to the
+durable production_outcomes table, and appends JSONL. It is therefore
+safe beside the resident :8741 server and must NOT be gated by
+scripts/check-no-resident-model.sh (that guard exists for in-process
+model loads). Only --run-loop trains, and it is refused with
+--export-only. Before 2026-09-05 the export had exactly one scheduled
+trigger — the weekly Sunday ai.human.m3-loop job — so a corpus feeding a
+NIGHTLY retrain refreshed at most weekly, and only when the box happened
+to be awake at 04:00. It last appended 2026-08-02.
+
 Usage:
+    python3 scripts/m3_outcome_driver.py --export-only    # export stage only
+    python3 scripts/m3_outcome_driver.py --export-only \
+        --out /tmp/preview.jsonl --state /tmp/preview-state.json  # dry preview
     python3 scripts/m3_outcome_driver.py                 # one poll pass
     python3 scripts/m3_outcome_driver.py --dry-run       # poll but don't write
     python3 scripts/m3_outcome_driver.py --since 0       # backfill from epoch
@@ -56,22 +70,24 @@ STATE_PATH = HUMAN_HOME / "m3_driver_state.json"
 OUTCOMES_JSONL = HUMAN_HOME / "training-data" / "m3-outcomes.jsonl"
 
 
-def load_state() -> dict:
+def load_state(state_path: Path = None) -> dict:
     """Watermark + seen-hash set. JSON file, safe to delete to force backfill."""
-    if not STATE_PATH.exists():
+    state_path = state_path or STATE_PATH
+    if not state_path.exists():
         return {"last_ts_ms": 0, "seen_prompt_hashes": []}
     try:
-        return json.loads(STATE_PATH.read_text())
+        return json.loads(state_path.read_text())
     except (json.JSONDecodeError, OSError):
         return {"last_ts_ms": 0, "seen_prompt_hashes": []}
 
 
-def save_state(state: dict) -> None:
-    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+def save_state(state: dict, state_path: Path = None) -> None:
+    state_path = state_path or STATE_PATH
+    state_path.parent.mkdir(parents=True, exist_ok=True)
     # Atomic write: tmp + rename (same pattern as personal_model.c save).
-    tmp = STATE_PATH.with_suffix(".tmp")
+    tmp = state_path.with_suffix(".tmp")
     tmp.write_text(json.dumps(state, indent=2))
-    tmp.replace(STATE_PATH)
+    tmp.replace(state_path)
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -97,9 +113,13 @@ def poll_outcomes(gateway: str, since_ms: int, turn_kind: int = 1,
               file=sys.stderr)
         sys.exit(2)
     except urllib.error.URLError as e:
+        # Unreachable ≠ empty: the gateway may be mid-restart (observed
+        # 2026-07-26: recovery run polled 3s into a daemon boot, before the
+        # gateway thread bound). Return None so main() can engage the
+        # DB fallback instead of dying — the durable store doesn't restart.
         print(f"[m3-driver] could not reach gateway {gateway}: {e.reason}",
               file=sys.stderr)
-        sys.exit(2)
+        return None
 
     if not body.strip():
         return []
@@ -108,6 +128,62 @@ def poll_outcomes(gateway: str, since_ms: int, turn_kind: int = 1,
         line = line.strip()
         if line:
             out.append(json.loads(line))
+    return out
+
+
+def load_db_fallback_outcomes(db_path: Path, since_ms: int) -> list[dict]:
+    """Synthesize ring-shaped outcome records from production_outcomes.
+
+    The gateway's outcome ring is in-memory and empties on every daemon
+    restart, but the pair-count training trigger fires right AFTER restart
+    (pair hydration runs at boot) — so the first dispatch always found an
+    empty ring and starved (first observed on the first-ever auto-dispatch,
+    2026-07-25). production_outcomes is the DURABLE record of the same
+    events, including the actual prompt/chosen text, so we can synthesize
+    records that flow through the existing selection + rehydration
+    unchanged: "ph"/"rh" are real FNV-1a-64 hashes of the stored text
+    (the same hashing training_loop applies to messages.content, verified
+    141/346 rows fully rehydratable on 2026-07-25).
+
+    Telemetry-only fields we cannot recover are filled with neutral
+    IN-RANGE values, marked by "src":"production_outcomes": these rows were
+    actually SENT, so guard=PASS by construction; latency is set mid-range
+    purely to pass the cached/outlier filters.
+    """
+    import sqlite3
+    from training_loop import fnv1a_64  # sibling script; import-safe (defs only)
+    if not db_path or not Path(db_path).exists():
+        return []
+    conn = sqlite3.connect(str(db_path))
+    conn.text_factory = bytes  # tolerate non-UTF8 rows, hash raw bytes
+    try:
+        rows = conn.execute(
+            "SELECT prompt, chosen, target, send_timestamp FROM production_outcomes "
+            "WHERE prompt IS NOT NULL AND chosen IS NOT NULL "
+            "AND send_timestamp * 1000 > ? ORDER BY send_timestamp ASC",
+            (since_ms,)).fetchall()
+    finally:
+        conn.close()
+    out: list[dict] = []
+    for prompt_b, chosen_b, target_b, ts in rows:
+        prompt = bytes(prompt_b) if prompt_b else b""
+        chosen = bytes(chosen_b) if chosen_b else b""
+        if not prompt or not chosen:
+            continue
+        out.append({
+            "t": int(ts) * 1000,
+            "ph": fnv1a_64(prompt),
+            "rh": fnv1a_64(chosen),
+            "ch": fnv1a_64(bytes(target_b)) if target_b else 0,
+            "pt": max(1, len(prompt) // 4),
+            "ct": max(1, len(chosen) // 4),
+            "l": 1000,            # neutral in-range; real latency not stored
+            "m": "db-fallback",
+            "a": 0,
+            "g": GUARD_PASS,      # sent messages passed the guard by construction
+            "k": 1,               # channel messages = stream turn kind
+            "src": "production_outcomes",
+        })
     return out
 
 
@@ -193,26 +269,61 @@ def select_training_outcomes(outcomes: list[dict]) -> list[dict]:
 OUTCOMES_ROTATE_BYTES = 8 * 1024 * 1024
 
 
-def rotate_outcomes_if_needed() -> bool:
+def rotate_outcomes_if_needed(out_path: Path = None) -> bool:
     """If the outcomes JSONL exceeds OUTCOMES_ROTATE_BYTES, archive it.
     Returns True if rotation happened. Errors are non-fatal — the
     driver MUST continue functioning even if rotation fails."""
-    if not OUTCOMES_JSONL.exists():
+    out_path = out_path or OUTCOMES_JSONL
+    if not out_path.exists():
         return False
-    if OUTCOMES_JSONL.stat().st_size < OUTCOMES_ROTATE_BYTES:
+    if out_path.stat().st_size < OUTCOMES_ROTATE_BYTES:
         return False
-    archive = OUTCOMES_JSONL.with_name(
-        f"{OUTCOMES_JSONL.name}.{int(time.time())}"
+    archive = out_path.with_name(
+        f"{out_path.name}.{int(time.time())}"
     )
     try:
-        OUTCOMES_JSONL.rename(archive)
+        out_path.rename(archive)
         return True
     except OSError:
         return False
 
 
+def load_seen_from_jsonl(out_path: Path) -> set[int]:
+    """Read the prompt hashes ALREADY present in the destination JSONL.
+
+    Idempotency does not get to depend on a sidecar state file. The
+    watermark in ~/.human/m3_driver_state.json can be stale, reset, or
+    absent (a --since 0 backfill sets it to 0 on purpose), and dedup that
+    consults ONLY that file will happily append rows the JSONL already
+    holds. Seeding the seen-set from the file we are about to append to
+    makes re-running the export a no-op against the file itself, which is
+    the property the caller actually needs.
+
+    Unreadable / malformed lines are skipped, never fatal: a corrupt tail
+    must not cause a duplicate-append storm.
+    """
+    seen: set[int] = set()
+    if not out_path.exists():
+        return seen
+    try:
+        with open(out_path, "r", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    ph = json.loads(line).get("ph")
+                except (json.JSONDecodeError, AttributeError):
+                    continue
+                if isinstance(ph, int):
+                    seen.add(ph)
+    except OSError:
+        return seen
+    return seen
+
+
 def dedup_and_append(selected: list[dict], seen_hashes: set[int],
-                     dry_run: bool) -> tuple[int, int]:
+                     dry_run: bool, out_path: Path = None) -> tuple[int, int]:
     """Skip outcomes whose prompt_hash we've already trained on. Append the
     rest as JSONL. Returns (appended_count, skipped_dup_count).
 
@@ -220,17 +331,18 @@ def dedup_and_append(selected: list[dict], seen_hashes: set[int],
     as ONE training sample (the latest wins implicitly; we keep the first
     one we see in the polling order, which is oldest-first).
     """
+    out_path = out_path or OUTCOMES_JSONL
     appended = 0
     skipped = 0
     if not dry_run:
-        OUTCOMES_JSONL.parent.mkdir(parents=True, exist_ok=True)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
         # D6: rotate BEFORE appending so the next write starts fresh.
         # Doesn't fire on the hot path — only when the JSONL has grown
         # past the rotation threshold.
-        if rotate_outcomes_if_needed():
+        if rotate_outcomes_if_needed(out_path):
             print(f"[m3-driver] rotated outcomes JSONL "
                   f"(was > {OUTCOMES_ROTATE_BYTES // 1024 // 1024} MB)")
-    with open(OUTCOMES_JSONL, "a") if not dry_run else _devnull() as f:
+    with open(out_path, "a") if not dry_run else _devnull() as f:
         for outcome in selected:
             ph = outcome.get("ph", 0)
             if ph in seen_hashes:
@@ -270,7 +382,7 @@ def jsonl_sample_count(path: Path) -> int:
     return n
 
 
-def run_training(samples: int, simulate: bool) -> Path:
+def run_training(samples: int, simulate: bool, source_jsonl: Path = None) -> Path:
     """Kick off a LoRA fine-tune. In --simulate-train mode, writes a tiny
     placeholder safetensors-shaped file in seconds so the loop is testable
     without GPU time. Real mode hands off to training_loop.py.
@@ -302,7 +414,7 @@ def run_training(samples: int, simulate: bool) -> Path:
     import subprocess
     script = Path(__file__).resolve().parent / "training_loop.py"
     cmd = [sys.executable, str(script),
-           "--source-jsonl", str(OUTCOMES_JSONL),
+           "--source-jsonl", str(source_jsonl or OUTCOMES_JSONL),
            "--adapter-out", str(out_path)]
     print(f"[m3-driver] launching real training: {' '.join(cmd)}")
     rc = subprocess.call(cmd)
@@ -367,25 +479,80 @@ def main() -> int:
                          "instead of running real LoRA training (for testing)")
     ap.add_argument("--mlx-url", default=MLX_SERVER_URL,
                     help="MLX server URL for /v1/adapters/swap (default %(default)s)")
+    ap.add_argument("--db-fallback", type=Path,
+                    default=Path.home() / ".human/memory.db",
+                    help="When the gateway ring returns 0 outcomes, synthesize "
+                         "outcome records from this DB's production_outcomes "
+                         "table instead (default %(default)s). The ring is "
+                         "IN-MEMORY and empties on every daemon restart, while "
+                         "the pair-count trigger fires right AFTER restart — "
+                         "without this fallback the first dispatch always "
+                         "starves (observed 2026-07-25, first-ever auto-"
+                         "dispatch). Records carry real FNV-1a hashes of the "
+                         "stored prompt/chosen text so training_loop's "
+                         "rehydration works unchanged.")
+    ap.add_argument("--no-db-fallback", action="store_true",
+                    help="Disable the production_outcomes fallback.")
+    ap.add_argument("--out", type=Path, default=OUTCOMES_JSONL,
+                    help="Destination JSONL for the exported outcomes "
+                         "(default %(default)s). Point this at a scratch "
+                         "path to preview what an export would add without "
+                         "touching the training corpus.")
+    ap.add_argument("--state", type=Path, default=STATE_PATH,
+                    help="Watermark/seen-hash state file (default %(default)s). "
+                         "Pair it with --out when previewing so the preview "
+                         "does not advance the real watermark and starve the "
+                         "subsequent real run.")
+    ap.add_argument("--export-only", action="store_true",
+                    help="EXPORT STAGE: poll + select + dedup + append, and "
+                         "nothing else. Loads no model and spawns no trainer, "
+                         "so it is safe to run beside a resident :8741 server "
+                         "(check-no-resident-model.sh does not and must not "
+                         "gate it). Mutually exclusive with --run-loop.")
     args = ap.parse_args()
 
-    state = load_state()
+    if args.export_only and args.run_loop:
+        print("[m3-driver] --export-only and --run-loop are mutually exclusive",
+              file=sys.stderr)
+        return 2
+
+    state = load_state(args.state)
     since_ms = args.since if args.since is not None else state["last_ts_ms"]
+    # Union of the sidecar state and the destination file. The file is the
+    # authority on what has already been written; the state file only adds
+    # hashes for rows that rotation has since archived out of it.
     seen_hashes: set[int] = set(state.get("seen_prompt_hashes", []))
+    seen_in_file = load_seen_from_jsonl(args.out)
+    seen_hashes |= seen_in_file
+    print(f"[m3-driver] dedup seed: {len(seen_in_file)} hash(es) already in "
+          f"{args.out}, {len(seen_hashes)} total with state")
 
     print(f"[m3-driver] polling {args.gateway} since_ms={since_ms} "
           f"turn_kind={args.turn_kind} dry_run={args.dry_run}")
     t0 = time.time()
     raw = poll_outcomes(args.gateway, since_ms, args.turn_kind, args.limit)
     poll_ms = int((time.time() - t0) * 1000)
-    print(f"[m3-driver] fetched {len(raw)} outcomes in {poll_ms}ms")
+    print(f"[m3-driver] fetched {len(raw) if raw else 0} outcomes in {poll_ms}ms")
+
+    unreachable = raw is None
+    if (not raw) and not args.no_db_fallback:
+        raw = load_db_fallback_outcomes(args.db_fallback, since_ms)
+        if raw:
+            why = "gateway unreachable" if unreachable else "ring empty"
+            print(f"[m3-driver] {why} — DB fallback yielded {len(raw)} "
+                  f"outcome(s) from production_outcomes ({args.db_fallback})")
 
     if not raw:
+        if unreachable:
+            print("[m3-driver] gateway unreachable and no fallback data — exit 2",
+                  file=sys.stderr)
+            return 2
         print("[m3-driver] no new outcomes — exit")
         return 0
 
     selected = select_training_outcomes(raw)
-    appended, skipped = dedup_and_append(selected, seen_hashes, args.dry_run)
+    appended, skipped = dedup_and_append(selected, seen_hashes, args.dry_run,
+                                         args.out)
 
     # Advance watermark to newest outcome's ts (raw is oldest-first per server).
     new_high = max(o.get("t", 0) for o in raw)
@@ -396,19 +563,21 @@ def main() -> int:
         # Cap the seen-hash list to avoid unbounded growth — last 100k is
         # plenty for dedup over the ring's 4096-record window.
         seen_list = list(seen_hashes)[-100_000:]
-        save_state({"last_ts_ms": new_high, "seen_prompt_hashes": seen_list})
-        print(f"[m3-driver] state saved → {STATE_PATH}")
-        print(f"[m3-driver] outcomes appended → {OUTCOMES_JSONL}")
+        save_state({"last_ts_ms": new_high, "seen_prompt_hashes": seen_list},
+                   args.state)
+        print(f"[m3-driver] state saved → {args.state}")
+        print(f"[m3-driver] outcomes appended → {args.out}")
 
     # ── Optional: close the loop ──────────────────────────────────────
     if args.run_loop and not args.dry_run:
-        total = jsonl_sample_count(OUTCOMES_JSONL)
+        total = jsonl_sample_count(args.out)
         print(f"[m3-driver] JSONL holds {total} samples (threshold={args.threshold})")
         if total < args.threshold:
             print("[m3-driver] below threshold — skip train + swap")
             return 0
         try:
-            adapter_path = run_training(total, simulate=args.simulate_train)
+            adapter_path = run_training(total, simulate=args.simulate_train,
+                                        source_jsonl=args.out)
         except Exception as e:
             print(f"[m3-driver] training failed: {e}", file=sys.stderr)
             return 3

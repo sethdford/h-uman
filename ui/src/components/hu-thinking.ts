@@ -149,29 +149,33 @@ export class ScThinking extends LitElement {
         @click=${this._toggle}
         @keydown=${this._onKeyDown}
       >
-        ${this.active
-          ? html`
-              <div class="header">
-                <span>Thinking</span>
-                <span class="dots"
-                  ><span class="dot"></span><span class="dot"></span><span class="dot"></span
-                ></span>
-              </div>
-            `
-          : this.expanded
+        ${
+          this.active
             ? html`
-                <div class="summary">Thought for ${this.duration.toFixed(1)}s</div>
-                ${this.steps.length > 0
-                  ? html`
-                      <ol class="steps">
-                        ${this.steps.map(
-                          (s, i) => html`<li class="step" data-num="${i + 1}. ">${s}</li>`,
-                        )}
-                      </ol>
-                    `
-                  : null}
+                <div class="header">
+                  <span>Thinking</span>
+                  <span class="dots"
+                    ><span class="dot"></span><span class="dot"></span><span class="dot"></span
+                  ></span>
+                </div>
               `
-            : html` <div class="summary">Thought for ${this.duration.toFixed(1)}s</div> `}
+            : this.expanded
+              ? html`
+                  <div class="summary">Thought for ${this.duration.toFixed(1)}s</div>
+                  ${
+                    this.steps.length > 0
+                      ? html`
+                          <ol class="steps">
+                            ${this.steps.map(
+                              (s, i) => html`<li class="step" data-num="${i + 1}. ">${s}</li>`,
+                            )}
+                          </ol>
+                        `
+                      : null
+                  }
+                `
+              : html` <div class="summary">Thought for ${this.duration.toFixed(1)}s</div> `
+        }
       </div>
     `;
   }

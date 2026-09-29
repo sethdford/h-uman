@@ -349,9 +349,9 @@ export class ScCommandPalette extends LitElement {
               aria-autocomplete="list"
               aria-expanded=${items.length > 0 ? "true" : "false"}
               aria-controls="hu-command-listbox"
-              aria-activedescendant=${items.length > 0
-                ? `hu-command-opt-${this.selectedIndex}`
-                : nothing}
+              aria-activedescendant=${
+                items.length > 0 ? `hu-command-opt-${this.selectedIndex}` : nothing
+              }
               placeholder="Search commands..."
               aria-label="Search commands"
               .value=${this.query}
@@ -362,32 +362,36 @@ export class ScCommandPalette extends LitElement {
             />
           </div>
           <div class="results" id="hu-command-listbox" role="listbox" aria-label="Commands">
-            ${items.length === 0
-              ? html`<div class="item" role="status" style="color: var(--hu-text-muted)">
-                  No results
-                </div>`
-              : items.map(
-                  (cmd, i) => html`
-                    <div
-                      id="hu-command-opt-${i}"
-                      class="item ${i === this.selectedIndex ? "selected" : ""}"
-                      role="option"
-                      aria-selected=${i === this.selectedIndex}
-                      tabindex=${i === this.selectedIndex ? 0 : -1}
-                      @click=${() => this._execute(cmd)}
-                      @mouseenter=${() => (this.selectedIndex = i)}
-                    >
-                      <span class="icon">${cmd.icon}</span>
-                      <span class="label">${highlightMatch(cmd.label, this.query)}</span>
-                      <div class="meta">
-                        <span class="badge">${sectionLabel(cmd.section)}</span>
-                        ${cmd.shortcut
-                          ? html`<span class="shortcut">${cmd.shortcut}</span>`
-                          : nothing}
+            ${
+              items.length === 0
+                ? html`<div class="item" role="status" style="color: var(--hu-text-muted)">
+                    No results
+                  </div>`
+                : items.map(
+                    (cmd, i) => html`
+                      <div
+                        id="hu-command-opt-${i}"
+                        class="item ${i === this.selectedIndex ? "selected" : ""}"
+                        role="option"
+                        aria-selected=${i === this.selectedIndex}
+                        tabindex=${i === this.selectedIndex ? 0 : -1}
+                        @click=${() => this._execute(cmd)}
+                        @mouseenter=${() => (this.selectedIndex = i)}
+                      >
+                        <span class="icon">${cmd.icon}</span>
+                        <span class="label">${highlightMatch(cmd.label, this.query)}</span>
+                        <div class="meta">
+                          <span class="badge">${sectionLabel(cmd.section)}</span>
+                          ${
+                            cmd.shortcut
+                              ? html`<span class="shortcut">${cmd.shortcut}</span>`
+                              : nothing
+                          }
+                        </div>
                       </div>
-                    </div>
-                  `,
-                )}
+                    `,
+                  )
+            }
           </div>
         </div>
       </div>

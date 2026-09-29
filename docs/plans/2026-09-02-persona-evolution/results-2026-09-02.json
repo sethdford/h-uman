@@ -1,0 +1,128 @@
+{
+  "_meta": {
+    "generated_by": "scripts/eval_persona_evolution.py --event both --full-range --start 2026-03-01 --end 2026-09-03",
+    "generated_on": "2026-09-02",
+    "run_exit_code": 1,
+    "run_stderr": "REFUSED: at least one window had n < min_n; wrote nothing to --out. See the 'events[*].reason' fields above.",
+    "note": "The script's own --out flag refused to write a file (exit 1, per the no-fabricated-numbers refusal contract) because both events' pre-event windows have n=0. This file is that refused run's stdout report, captured and annotated by hand as the deliverable results file -- it contains only counts, rates, and dates, exactly like the script's own output. The 'full_range_summary' section is a genuinely successful, gate-independent measurement (n=977) included for the persona-comparison writeup in spec.md; it is NOT a before/after comparison."
+  },
+  "db": "/Users/sethford/Library/Messages/chat.db",
+  "range": {
+    "start": "2026-03-01",
+    "end": "2026-09-03"
+  },
+  "window_days": 30,
+  "min_n": 100,
+  "total_outbound_messages_in_range": 977,
+  "events": {
+    "move": {
+      "label": "Move to St. Petersburg, FL",
+      "event_date": "2026-07-01",
+      "date_confidence": "LOW (not pinned to +/-7 days)",
+      "date_note": "'as of July 2026' is the only real-world anchor; 2026-07-01 is the first day consistent with that anchor, chosen as the best-supported single point estimate per the task's \u00b17-day rule (we could not do better than a ~1-month window).",
+      "date_citations": [
+        "~/.human/personas/seth.json:70 core.identity: 'Lives in a waterfront place in St. Petersburg (Tampa Bay area) ... before moving to Florida'",
+        "~/.human/personas/seth.json:47-50 core.life_events[0]: {description: 'moved to the waterfront place in st pete', state: 'completed', as_of: '2026-07-28'} (as_of is when the note was last confirmed true, not the move date)",
+        "~/.human/personas/seth.json.bak-fact-refresh2-20260726-045551 core.identity (timestamp 2026-07-26T04:55:51): 'Lives in St. Petersburg, Florida (Tampa Bay area) as of July 2026' -- earliest persona snapshot naming Florida at all",
+        "~/.human/personas/seth.json.bak-fact-refresh-20260726-044442 core.identity (timestamp 2026-07-26T04:44:42, 11 minutes earlier): no Florida / St. Petersburg mention -- the persona's own fact record still carried the pre-move description here"
+      ],
+      "pre_window": {
+        "start": "2026-06-01",
+        "end": "2026-07-01",
+        "n": 0
+      },
+      "post_window": {
+        "start": "2026-07-01",
+        "end": "2026-07-31",
+        "n": 0
+      },
+      "status": "INSUFFICIENT_DATA",
+      "reason": "pre_window n=0, post_window n=0; both must be >= min_n=100. Refusing to compute stats for this event per the no-fabricated-numbers contract."
+    },
+    "job": {
+      "label": "Employer change: Vanguard -> Raymond James",
+      "event_date": "2026-07-26",
+      "date_confidence": "LOW (not pinned to +/-7 days)",
+      "date_note": "'summer 2026' spans roughly June-August; 2026-07-26 is the date the persona's fact record flipped from 'in transition' to 'Raymond James', the single most concrete dated signal available, but it is a record-update date, not a confirmed first-day date.",
+      "date_citations": [
+        "~/.human/personas/seth.json:70 core.identity: '...Chief Architect at Raymond James in St. Petersburg, Florida (started summer 2026, after leaving Vanguard)'",
+        "~/.human/personas/seth.json:51-54 core.life_events[1]: {description: 'left vanguard for raymond james', state: 'completed', as_of: '2026-07-28'}",
+        "~/.human/personas/seth.json.bak-fact-refresh2-20260726-045551 core.identity (timestamp 2026-07-26T04:55:51): 'Recently left his role as Chief Architect at Vanguard (summer 2026) and is in transition to a new role' -- Raymond James not yet named",
+        "~/.human/personas/seth.json.bak.pre-typing-quirks-removal-20260726-081742 core.identity (timestamp 2026-07-26T08:17:42, ~3h20m later): identity already names 'Chief Architect at Raymond James'"
+      ],
+      "pre_window": {
+        "start": "2026-06-26",
+        "end": "2026-07-26",
+        "n": 0
+      },
+      "post_window": {
+        "start": "2026-07-26",
+        "end": "2026-08-25",
+        "n": 585
+      },
+      "status": "INSUFFICIENT_DATA",
+      "reason": "pre_window n=0, post_window n=585; both must be >= min_n=100. Refusing to compute stats for this event per the no-fabricated-numbers contract."
+    }
+  },
+  "full_range_summary": {
+    "n": 977,
+    "status": "OK",
+    "axes": {
+      "length_chars": {
+        "mean": 34.00921187308086,
+        "ci_lo": 31.512794268167863,
+        "ci_hi": 36.7093142272262,
+        "n": 977
+      },
+      "lowercase_start_rate": {
+        "mean": 0.0861878453038674,
+        "ci_lo": 0.06850828729281767,
+        "ci_hi": 0.10386740331491713,
+        "n": 905
+      },
+      "no_terminal_punct_rate": {
+        "mean": 0.8167860798362334,
+        "ci_lo": 0.7922210849539406,
+        "ci_hi": 0.8403275332650972,
+        "n": 977
+      },
+      "question_rate": {
+        "mean": 0.0992835209825998,
+        "ci_lo": 0.08085977482088025,
+        "ci_hi": 0.1187308085977482,
+        "n": 977
+      },
+      "exclamation_rate": {
+        "mean": 0.038894575230296824,
+        "ci_lo": 0.027635619242579325,
+        "ci_hi": 0.0511770726714432,
+        "n": 977
+      },
+      "emoji_rate": {
+        "mean": 0.12589559877175024,
+        "ci_lo": 0.10542476970317298,
+        "ci_hi": 0.14636642784032752,
+        "n": 977
+      },
+      "formality_contractions_per_100_words": {
+        "mean": 2.381590062587891,
+        "ci_lo": 1.8946087766554291,
+        "ci_hi": 2.884776822606445,
+        "n": 977
+      },
+      "formality_first_person_plural_per_100_words": {
+        "mean": 0.41396792676219496,
+        "ci_lo": 0.2682782928432877,
+        "ci_hi": 0.5844817641132892,
+        "n": 977
+      },
+      "warmth_hits_per_100_words": {
+        "mean": 1.2988116298990116,
+        "ci_lo": 0.9516467120302707,
+        "ci_hi": 1.7253206718107679,
+        "n": 977
+      }
+    }
+  },
+  "overall_status": "INSUFFICIENT_DATA"
+}

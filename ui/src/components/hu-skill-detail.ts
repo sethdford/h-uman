@@ -8,8 +8,7 @@ import "../components/hu-button.js";
 import "../components/hu-json-viewer.js";
 
 export type SelectedSkill =
-  | { source: "installed"; skill: InstalledSkill }
-  | { source: "registry"; skill: RegistrySkill };
+  { source: "installed"; skill: InstalledSkill } | { source: "registry"; skill: RegistrySkill };
 
 @customElement("hu-skill-detail")
 export class ScSkillDetail extends LitElement {
@@ -196,56 +195,70 @@ export class ScSkillDetail extends LitElement {
           </div>
           <div class="detail-desc">${desc}</div>
           <div class="detail-grid">
-            ${isInstalled
-              ? html`<span class="detail-label">Status</span>
-                  <span class="detail-value">${inst.enabled ? "Enabled" : "Disabled"}</span>`
-              : nothing}
-            ${"version" in skill && reg.version
-              ? html`<span class="detail-label">Version</span>
-                  <span class="detail-value">${reg.version}</span>`
-              : nothing}
-            ${"author" in skill && reg.author
-              ? html`<span class="detail-label">Author</span>
-                  <span class="detail-value">${reg.author}</span>`
-              : nothing}
-            ${"tags" in skill && reg.tags
-              ? html`<span class="detail-label">Tags</span>
-                  <span class="detail-value">${reg.tags}</span>`
-              : nothing}
-            ${"url" in skill && reg.url
-              ? html`<span class="detail-label">URL</span>
-                  <span class="detail-value">${reg.url}</span>`
-              : nothing}
+            ${
+              isInstalled
+                ? html`<span class="detail-label">Status</span>
+                    <span class="detail-value">${inst.enabled ? "Enabled" : "Disabled"}</span>`
+                : nothing
+            }
+            ${
+              "version" in skill && reg.version
+                ? html`<span class="detail-label">Version</span>
+                    <span class="detail-value">${reg.version}</span>`
+                : nothing
+            }
+            ${
+              "author" in skill && reg.author
+                ? html`<span class="detail-label">Author</span>
+                    <span class="detail-value">${reg.author}</span>`
+                : nothing
+            }
+            ${
+              "tags" in skill && reg.tags
+                ? html`<span class="detail-label">Tags</span>
+                    <span class="detail-value">${reg.tags}</span>`
+                : nothing
+            }
+            ${
+              "url" in skill && reg.url
+                ? html`<span class="detail-label">URL</span>
+                    <span class="detail-value">${reg.url}</span>`
+                : nothing
+            }
           </div>
-          ${isInstalled && inst.parameters
-            ? html`<div class="detail-params">
-                <div class="detail-params-title">Parameters</div>
-                ${this._renderParametersViewer(inst.parameters)}
-              </div>`
-            : nothing}
+          ${
+            isInstalled && inst.parameters
+              ? html`<div class="detail-params">
+                  <div class="detail-params-title">Parameters</div>
+                  ${this._renderParametersViewer(inst.parameters)}
+                </div>`
+              : nothing
+          }
           <div class="detail-actions">
-            ${isInstalled
-              ? html`
-                  <hu-button
-                    variant=${inst.enabled ? "secondary" : "primary"}
+            ${
+              isInstalled
+                ? html`
+                    <hu-button
+                      variant=${inst.enabled ? "secondary" : "primary"}
+                      ?loading=${this.actionLoading}
+                      @click=${this._onToggle}
+                      >${inst.enabled ? "Disable" : "Enable"}</hu-button
+                    >
+                    <hu-button
+                      variant="destructive"
+                      ?loading=${this.actionLoading}
+                      @click=${this._onUninstall}
+                      >Uninstall</hu-button
+                    >
+                  `
+                : html`<hu-button
+                    variant="primary"
                     ?loading=${this.actionLoading}
-                    @click=${this._onToggle}
-                    >${inst.enabled ? "Disable" : "Enable"}</hu-button
-                  >
-                  <hu-button
-                    variant="destructive"
-                    ?loading=${this.actionLoading}
-                    @click=${this._onUninstall}
-                    >Uninstall</hu-button
-                  >
-                `
-              : html`<hu-button
-                  variant="primary"
-                  ?loading=${this.actionLoading}
-                  ?disabled=${alreadyInstalled}
-                  @click=${this._onInstall}
-                  >${alreadyInstalled ? "Already Installed" : "Install"}</hu-button
-                >`}
+                    ?disabled=${alreadyInstalled}
+                    @click=${this._onInstall}
+                    >${alreadyInstalled ? "Already Installed" : "Install"}</hu-button
+                  >`
+            }
           </div>
         </div>
       </hu-sheet>

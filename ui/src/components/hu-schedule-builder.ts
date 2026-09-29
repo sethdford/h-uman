@@ -529,100 +529,109 @@ export class ScScheduleBuilder extends LitElement {
 
     return html`
       <div class="wrapper" role="group" aria-label="Schedule builder">
-        ${this.mode === "preset"
-          ? html`
-              <div class="nl-row">
-                <input
-                  type="text"
-                  class="nl-input"
-                  .value=${this._nlInput}
-                  placeholder="e.g. every weekday at 9am"
-                  aria-label="Describe your schedule"
-                  @input=${this._onNlInput}
-                />
-                ${this._nlInput.trim()
-                  ? this._nlResult
-                    ? html`<span class="nl-hint success" role="status"
-                        >${cronToHuman(this._nlResult)}</span
-                      >`
-                    : html`<span class="nl-hint unknown" role="status">Not recognized</span>`
-                  : nothing}
-              </div>
-              <div class="preset-grid" role="list">
-                ${PRESETS.map(
-                  (preset) => html`
-                    <div
-                      class="preset-card ${this._selectedPreset === preset.id ? "selected" : ""}"
-                      role="listitem"
-                      tabindex="0"
-                      @click=${() => this._selectPreset(preset)}
-                      @keydown=${(e: KeyboardEvent) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          this._selectPreset(preset);
+        ${
+          this.mode === "preset"
+            ? html`
+                <div class="nl-row">
+                  <input
+                    type="text"
+                    class="nl-input"
+                    .value=${this._nlInput}
+                    placeholder="e.g. every weekday at 9am"
+                    aria-label="Describe your schedule"
+                    @input=${this._onNlInput}
+                  />
+                  ${
+                    this._nlInput.trim()
+                      ? this._nlResult
+                        ? html`<span class="nl-hint success" role="status"
+                            >${cronToHuman(this._nlResult)}</span
+                          >`
+                        : html`<span class="nl-hint unknown" role="status">Not recognized</span>`
+                      : nothing
+                  }
+                </div>
+                <div class="preset-grid" role="list">
+                  ${PRESETS.map(
+                    (preset) => html`
+                      <div
+                        class="preset-card ${this._selectedPreset === preset.id ? "selected" : ""}"
+                        role="listitem"
+                        tabindex="0"
+                        @click=${() => this._selectPreset(preset)}
+                        @keydown=${(e: KeyboardEvent) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            this._selectPreset(preset);
+                          }
+                        }}
+                      >
+                        <span class="preset-label">${preset.label}</span>
+                        ${
+                          preset.needsHour && this._selectedPreset === preset.id
+                            ? html`
+                                <div class="preset-hour-row">
+                                  <label for="hour-${preset.id}">Time</label>
+                                  <select
+                                    id="hour-${preset.id}"
+                                    class="hour-select"
+                                    .value=${String(this._hour)}
+                                    @change=${this._onHourChange}
+                                    @click=${(e: Event) => e.stopPropagation()}
+                                    aria-label="Hour (0-23)"
+                                  >
+                                    ${hourOptions.map(
+                                      (opt) =>
+                                        html`<option value=${opt.value}>${opt.label}</option>`,
+                                    )}
+                                  </select>
+                                </div>
+                              `
+                            : nothing
                         }
-                      }}
-                    >
-                      <span class="preset-label">${preset.label}</span>
-                      ${preset.needsHour && this._selectedPreset === preset.id
-                        ? html`
-                            <div class="preset-hour-row">
-                              <label for="hour-${preset.id}">Time</label>
-                              <select
-                                id="hour-${preset.id}"
-                                class="hour-select"
-                                .value=${String(this._hour)}
-                                @change=${this._onHourChange}
-                                @click=${(e: Event) => e.stopPropagation()}
-                                aria-label="Hour (0-23)"
-                              >
-                                ${hourOptions.map(
-                                  (opt) => html`<option value=${opt.value}>${opt.label}</option>`,
-                                )}
-                              </select>
-                            </div>
-                          `
-                        : nothing}
-                    </div>
-                  `,
-                )}
-              </div>
-              <button
-                type="button"
-                class="mode-link"
-                @click=${this._switchToCustom}
-                aria-label="Switch to custom cron expression"
-              >
-                ${icons["pencil-simple"]} Custom
-              </button>
-            `
-          : html`
-              <div class="custom-row">
-                <input
-                  type="text"
-                  class="custom-input ${this._customError ? "invalid" : ""}"
-                  .value=${this._customInput}
-                  placeholder="0 8 * * *"
-                  aria-label="Cron expression"
-                  aria-invalid=${this._customError ? "true" : "false"}
-                  aria-describedby=${this._customError ? "custom-error" : undefined}
-                  @input=${this._onCustomInput}
-                />
-                ${this._customError
-                  ? html`<span class="custom-error" id="custom-error" role="alert"
-                      >${this._customError}</span
-                    >`
-                  : nothing}
+                      </div>
+                    `,
+                  )}
+                </div>
                 <button
                   type="button"
                   class="mode-link"
-                  @click=${this._switchToPreset}
-                  aria-label="Back to presets"
+                  @click=${this._switchToCustom}
+                  aria-label="Switch to custom cron expression"
                 >
-                  ${icons["arrow-left"]} Back to presets
+                  ${icons["pencil-simple"]} Custom
                 </button>
-              </div>
-            `}
+              `
+            : html`
+                <div class="custom-row">
+                  <input
+                    type="text"
+                    class="custom-input ${this._customError ? "invalid" : ""}"
+                    .value=${this._customInput}
+                    placeholder="0 8 * * *"
+                    aria-label="Cron expression"
+                    aria-invalid=${this._customError ? "true" : "false"}
+                    aria-describedby=${this._customError ? "custom-error" : undefined}
+                    @input=${this._onCustomInput}
+                  />
+                  ${
+                    this._customError
+                      ? html`<span class="custom-error" id="custom-error" role="alert"
+                          >${this._customError}</span
+                        >`
+                      : nothing
+                  }
+                  <button
+                    type="button"
+                    class="mode-link"
+                    @click=${this._switchToPreset}
+                    aria-label="Back to presets"
+                  >
+                    ${icons["arrow-left"]} Back to presets
+                  </button>
+                </div>
+              `
+        }
 
         <div class="footer">
           <code class="expr-display">${this.value || "—"}</code>

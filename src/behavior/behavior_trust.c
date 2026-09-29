@@ -5,13 +5,8 @@
 #include <string.h>
 
 static const char *const HU_TRUST_NAMES[HU_TRUST_COUNT] = {
-    "answer",
-    "cite_memory",
-    "disclose_uncertainty",
-    "push_back",
-    "abstain",
-    "refuse_to_agree",
-    "refer_out",
+    "answer",          "cite_memory", "disclose_uncertainty", "push_back", "abstain",
+    "refuse_to_agree", "refer_out",
 };
 
 const char *hu_trust_action_name(hu_trust_action_t a) {
@@ -48,8 +43,7 @@ hu_error_t hu_trust_calibrate(const hu_trust_input_t *in, hu_trust_decision_t *o
             float bumps = 0.5f + 0.1f * (float)in->user_pressure_count;
             out->firmness = bumps > 1.f ? 1.f : bumps;
             out->confidence = 0.95f;
-            trust_set_rationale(out,
-                                "tool output disagrees; refusing to agree under pressure");
+            trust_set_rationale(out, "tool output disagrees; refusing to agree under pressure");
             return HU_OK;
         }
         out->action = HU_TRUST_PUSH_BACK;
@@ -66,8 +60,7 @@ hu_error_t hu_trust_calibrate(const hu_trust_input_t *in, hu_trust_decision_t *o
             float bumps = 0.4f + 0.1f * (float)in->user_pressure_count;
             out->firmness = bumps > 1.f ? 1.f : bumps;
             out->confidence = 0.9f;
-            trust_set_rationale(
-                out, "memory disagrees and user is reasserting; do not collapse");
+            trust_set_rationale(out, "memory disagrees and user is reasserting; do not collapse");
             return HU_OK;
         }
         out->action = HU_TRUST_PUSH_BACK;
@@ -79,13 +72,11 @@ hu_error_t hu_trust_calibrate(const hu_trust_input_t *in, hu_trust_decision_t *o
 
     /* 3. No disagreement, but the user is invoking authority or applying
      *    emotional pressure. Calibrate, do not flatter. */
-    if ((in->user_invoked_authority || in->user_emotional_pressure) &&
-        in->trust_score >= 0.5f) {
+    if ((in->user_invoked_authority || in->user_emotional_pressure) && in->trust_score >= 0.5f) {
         out->action = HU_TRUST_DISCLOSE_UNCERTAINTY;
         out->firmness = 0.4f;
         out->confidence = 0.7f;
-        trust_set_rationale(out,
-                            "pressure without contradicting evidence; surface uncertainty");
+        trust_set_rationale(out, "pressure without contradicting evidence; surface uncertainty");
         return HU_OK;
     }
 
@@ -114,19 +105,4 @@ hu_error_t hu_trust_calibrate(const hu_trust_input_t *in, hu_trust_decision_t *o
     out->confidence = 0.7f;
     trust_set_rationale(out, "default answer with normal confidence");
     return HU_OK;
-}
-
-int hu_trust_directive_worth_emitting(const hu_trust_decision_t *d) {
-    if (!d) {
-        return 0;
-    }
-    switch (d->action) {
-    case HU_TRUST_REFUSE_TO_AGREE:
-    case HU_TRUST_ABSTAIN:
-        return 1;
-    case HU_TRUST_PUSH_BACK:
-        return d->firmness >= 0.5f ? 1 : 0;
-    default:
-        return 0;
-    }
 }

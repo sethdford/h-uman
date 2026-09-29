@@ -11,21 +11,27 @@ Reports, per the protocol:
   - PASS/FAIL vs the two criteria (detection <= 0.60 AND Wilson lower <= 0.55)
 
 Usage:
-    python3 score.py sheet_alice.csv sheet_bob.csv --key answer_key.json
+    python3 score.py sheet_alice.csv sheet_bob.csv --key answer_key.json --rater human
+    python3 score.py judged.csv --key answer_key.json --rater synthetic
+    python3 score.py sheet.csv --key answer_key.json   # score-only, no gate writes
     python3 score.py --selftest        # verify the math on synthetic data
+
+Gate writes are opt-in via --rater. "human" is promotion-authoritative
+(the C LoRA gate reads only the human key); "synthetic" records machine-
+judged runs under a separate key that never gates promotion. Without
+--rater nothing is written (2026-07-26: an unconditional write let a
+synthetic-judge run replace the genuine human verdict).
 """
-import argparse, csv, json, math, sys
+import argparse, csv, json, os, sys, time
 
-
-def wilson(k, n, z=1.96):
-    """95% Wilson score interval for a binomial proportion."""
-    if n == 0:
-        return (0.0, 0.0, 0.0)
-    p = k / n
-    d = 1 + z * z / n
-    centre = (p + z * z / (2 * n)) / d
-    half = (z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))) / d
-    return (p, max(0.0, centre - half), min(1.0, centre + half))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+# Both tiers must quantify uncertainty identically -- until 2026-09-20 this file
+# gated on a Wilson bound while the proxy tier compared a point estimate to a
+# fixed floor, and the proxy tier failed a perfectly indistinguishable model
+# 24.8 % of the time as a result. blind_ab_gate owns the gate's statistics now;
+# re-exported here because eval_seth_initiation_baseline.py does
+# `from score import wilson`.
+from blind_ab_gate import wilson  # noqa: E402,F401
 
 
 def likert_to_01(likert_val):
@@ -211,7 +217,42 @@ def selftest():
     assert "ci_lo" in agg, "Legacy 'ci_lo' field missing"
     assert "ci_hi" in agg, "Legacy 'ci_hi' field missing"
 
-    print("selftest OK: Likert conversion, axis aggregation, backward-compat verified")
+    # Provenance detection (2026-07-26 regression guard). A synthetic run must
+    # never be mistaken for human ratings — that mistake overwrote the human
+    # certification bar with an LLM-judge proxy.
+    assert detect_rater_kind([]) == "human", "empty sheet must not claim synthetic"
+    assert detect_rater_kind([{"id": "a", "choice": "A"}]) == "human", \
+        "unstamped rows are human-rated"
+    assert detect_rater_kind([{"id": "a", "choice": "A", "judge_api": "openai",
+                               "judge_model": "gemma-4-31b-it-8bit"}]) == "synthetic", \
+        "judge_api/judge_model stamp means an LLM judged this"
+    assert detect_rater_kind([{"id": "a", "choice": "A", "judge_model": "x"},
+                              {"id": "b", "choice": "B"}]) == "synthetic", \
+        "ANY stamped row makes the sheet synthetic (fail safe: never claim human)"
+
+    # The gate-key contract itself: synthetic verdicts must land somewhere the
+    # C promotion parser does not read. hu_lora_gate_verdict_parse() navigates
+    # "human" -> "verdict" (src/ml/lora_nightly.c), so "synthetic" is inert.
+    assert ("human" if detect_rater_kind([{"judge_model": "m"}]) == "human"
+            else "synthetic") == "synthetic", "synthetic must not map to the human key"
+
+    print("selftest OK: Likert conversion, axis aggregation, backward-compat, "
+          "rater-provenance detection verified")
+
+
+def detect_rater_kind(rows):
+    """Return "synthetic" if these rows were judged by a model, else "human".
+
+    synthetic_judge.py stamps judge_api + judge_model on EVERY row it writes
+    (so the reward wire can enforce the different-family-only gate). Sheets
+    filled in by real people have no such column. That stamp is therefore a
+    reliable provenance marker, and it means existing callers get the correct
+    behaviour with no flag changes.
+    """
+    if not rows:
+        return "human"
+    stamped = sum(1 for r in rows if (r.get("judge_api") or r.get("judge_model")))
+    return "synthetic" if stamped else "human"
 
 
 def main():
@@ -220,18 +261,56 @@ def main():
     ap.add_argument("--key")
     ap.add_argument("--json-out", help="Write JSON output to this file")
     ap.add_argument("--emit-gate", default=None,
-                    help="Write the human half of the blind_ab gate JSON to this path")
+                    help="Write this rater's half of the blind_ab gate JSON to "
+                         "this path (requires --rater)")
+    ap.add_argument("--arm-adapter", default=None,
+                    help="adapter (path or name) that generated the AI replies in this sheet; "
+                         "recorded as human.arm.adapter so the gate can be tied to what is served "
+                         "(doctor check blind_ab_gate refuses to vouch for an unrecorded arm)")
+    ap.add_argument("--arm-note", default=None,
+                    help="free-text provenance for the arm (prompt head, base model, sheet id)")
+    ap.add_argument("--rater", choices=("human", "synthetic"), default=None,
+                    help="Who produced the ratings. Gate files are written ONLY "
+                         "when this is given: 'human' writes the promotion-"
+                         "authoritative human half; 'synthetic' records under a "
+                         "separate non-authoritative key. Omit to score-and-print "
+                         "without touching any gate file. A sheet carrying the "
+                         "judge_api/judge_model stamps synthetic_judge.py writes "
+                         "refuses 'human' (provenance beats the claim).")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
     if a.selftest:
         selftest(); return
     if not a.sheets or not a.key:
         print("need sheets + --key (or --selftest)", file=sys.stderr); sys.exit(2)
+    if a.emit_gate and not a.rater:
+        print("--emit-gate requires --rater {human,synthetic}: refusing to "
+              "write gate evidence without knowing who rated the sheet "
+              "(2026-07-26: a synthetic run silently replaced the genuine "
+              "human verdict)", file=sys.stderr)
+        sys.exit(2)
     with open(a.key) as f:
         key = json.load(f)
     rows = load_sheets(a.sheets)
+    if a.rater == "human" and detect_rater_kind(rows) == "synthetic":
+        print("--rater human refused: these rows carry the judge_api/"
+              "judge_model stamps synthetic_judge.py writes — an LLM judged "
+              "this sheet. Provenance beats the claim (fail safe); re-run "
+              "with --rater synthetic, or strip the stamp columns if a "
+              "human genuinely re-rated it.", file=sys.stderr)
+        sys.exit(2)
     agg = score_rows(rows, key)
     axes = score_axes(rows)
+
+    # A sheet with ZERO scored items must never produce a verdict: detection
+    # 0.000 on n=0 satisfies every PASS criterion vacuously, and this script
+    # unconditionally writes the LoRA promotion gate below. On 2026-07-25 an
+    # unjudged sheet (judge outage) scored "PASS n=0" and clobbered
+    # ~/.human/blind_ab_gate.json — a promotion green-light from no evidence.
+    if agg["n"] == 0:
+        print("RESULT_blind_ab=INVALID (0 items scored — no choices matched the "
+              "key; refusing to emit any verdict or gate file)", file=sys.stderr)
+        sys.exit(3)
 
     # Backward-compatible output: keep legacy keys, add axes object
     agg["axes"] = axes
@@ -240,38 +319,102 @@ def main():
     if a.json_out:
         with open(a.json_out, 'w') as f:
             json.dump(agg, f, indent=2)
+
+    if not a.rater:
+        # Scoring-only invocation: gate writes are opt-in via --rater.
+        # (2026-07-26: an unconditional write here let a synthetic-judge run
+        # replace the genuine human verdict in ~/.human/blind_ab_gate.json.)
+        print("\nNo --rater given: no gate files written (scoring-only run).")
+        sys.exit(0 if verdict == "PASS" else 1)
+
+    half_fields = {
+        "detection": round(agg["detect"], 4),
+        "ci_lo": round(agg["ci_lo"], 4),
+        "ci_hi": round(agg["ci_hi"], 4),
+        "n": agg["n"],
+        "verdict": verdict,
+    }
+    if a.arm_adapter or a.arm_note:
+        half_fields["arm"] = {k: v for k, v in (("adapter", a.arm_adapter),
+                                                ("note", a.arm_note)) if v}
     if a.emit_gate:
-        import os
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
         import blind_ab_gate as _gate
-        _gate.write_human_half(a.emit_gate, {
-            "detection": round(agg["detect"], 4),
-            "ci_lo": round(agg["ci_lo"], 4),
-            "ci_hi": round(agg["ci_hi"], 4),
-            "n": agg["n"],
-            "verdict": verdict,
-        })
-        print(f"\nWrote human gate half ({verdict}) to {a.emit_gate}")
+        if a.rater == "human":
+            _gate.write_human_half(a.emit_gate, half_fields)
+        else:
+            _gate.write_synthetic_half(a.emit_gate, half_fields)
+        print(f"\nWrote {a.rater} gate half ({verdict}) to {a.emit_gate}")
 
-    # Write the LoRA gate verdict to ~/.human/blind_ab_gate.json.
-    # This verdict is consumed by hu_lora_gate_verdict_from_file() in the C code.
+    # Record the LoRA gate verdict in ~/.human/blind_ab_gate.json under this
+    # rater's key. hu_lora_gate_verdict_from_file() in the C code navigates
+    # specifically to "human" → "verdict" (src/ml/lora_nightly.c), so a
+    # synthetic record can never gate promotion.
     # Policy: detection <= 0.65 → PASS, >= 0.75 → FAIL, between → INCONCLUSIVE.
+    #
+    # PROVENANCE SEPARATION (2026-07-26). This block used to write the "human" key
+    # unconditionally and truncate the file while doing it. Scoring a SYNTHETIC
+    # sheet therefore overwrote the human certification bar with an LLM-judge
+    # proxy: a 160-item gemma-judged run replaced a real n=12 human verdict, so
+    # anything reading the gate would have believed 160 people rated it. Two rules
+    # now hold:
+    #   1. Only genuinely human-rated sheets may touch the "human" key. Synthetic
+    #      runs land under "synthetic", which the C parser does not read — a proxy
+    #      can no longer green-light a promotion.
+    #   2. The write MERGES into the existing file instead of replacing it, so
+    #      writing one half never destroys the other.
     lora_gate_verdict = compute_gate_verdict(agg["detect"])
     lora_gate_path = os.path.expanduser("~/.human/blind_ab_gate.json")
     try:
+        # Imported here as well as in the --emit-gate block above: this path
+        # runs unconditionally, so it cannot rely on that block having executed.
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+        import blind_ab_gate as _gate  # noqa: F811
         os.makedirs(os.path.dirname(lora_gate_path), exist_ok=True)
-        with open(lora_gate_path, 'w') as f:
-            gate_data = {
-                "human": {
-                    "verdict": lora_gate_verdict,
-                    "detection": round(agg["detect"], 4),
-                    "ci_lo": round(agg["ci_lo"], 4),
-                    "n": agg["n"],
-                    "timestamp": None,  # Operator may populate this
-                }
-            }
-            json.dump(gate_data, f, indent=2)
-        print(f"\nWrote LoRA gate verdict ({lora_gate_verdict}) to {lora_gate_path}")
+        # Read-modify-write: preserve every key we are not responsible for.
+        gate_data = {}
+        if os.path.exists(lora_gate_path):
+            try:
+                with open(lora_gate_path) as f:
+                    loaded = json.load(f)
+                if isinstance(loaded, dict):
+                    gate_data = loaded
+            except (ValueError, OSError):
+                pass  # corrupt/unreadable → start clean rather than fail the run
+        # Build the record through the SAME stamping path as --emit-gate.
+        #
+        # This block used to construct the dict inline, which silently omitted
+        # the `tool` stamp that write_human_half()/write_synthetic_half() add.
+        # The result: the promotion-authoritative record — the one the C LoRA
+        # gate reads — was the only gate half nobody could attribute. On
+        # 2026-07-27 that produced a live {verdict PASS, detection 0.225, n 40}
+        # with no `tool`, indistinguishable from an unsanctioned write, which
+        # is exactly what compute_effective_verdict now refuses to honour.
+        #
+        # Two constructors for one record is the duplication that caused this;
+        # there is now one.
+        half = {
+            "verdict": lora_gate_verdict,
+            "detection": round(agg["detect"], 4),
+            "ci_lo": round(agg["ci_lo"], 4),
+            "n": agg["n"],
+        }
+        if a.arm_adapter or a.arm_note:
+            half["arm"] = {k: v for k, v in (("adapter", a.arm_adapter),
+                                             ("note", a.arm_note)) if v}
+        if a.rater == "synthetic":
+            half["judge_model"] = next(
+                (r.get("judge_model") for r in rows if r.get("judge_model")), None)
+            _gate.write_synthetic_half(lora_gate_path, half)
+        else:
+            _gate.write_human_half(lora_gate_path, half)
+        gate_data = json.load(open(lora_gate_path))
+        print(f"\nWrote {a.rater} gate verdict ({lora_gate_verdict}) to {lora_gate_path}")
+        if a.rater == "synthetic":
+            kept = gate_data.get("human")
+            print("  (synthetic — the promotion-gating 'human' key was NOT touched"
+                  + (f"; it still reads detection={kept.get('detection')} n={kept.get('n')})"
+                     if isinstance(kept, dict) else "; no human verdict on file yet)"))
     except Exception as e:
         print(f"Warning: failed to write LoRA gate JSON to {lora_gate_path}: {e}", file=sys.stderr)
 

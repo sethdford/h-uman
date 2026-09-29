@@ -1,0 +1,47 @@
+{
+  "ts": "20260905T211501Z",
+  "target": "Story US-8 of sprint sprint-better-than-human-2026-09-05: difficulty-based model routing, SHADOW-only, env HU_DIFFICULTY_ROUTE off|shadow|live default off, LIVE fails closed. START by reading this ONE command's output and judge primarily from it: `git -C /Users/sethford/Projects/h-uman/.claude/worktrees/sbth-us8 diff sprint-better-than-human-2026-09-05..sbth-us8 -- src/agent/model_router.c include/human/agent/model_router.h src/gateway/cp_admin.c tests/test_model_router.c tests/test_cp_admin.c scripts/eval_difficulty_route_shadow.py` (if tests/test_cp_admin.c does not exist, `git -C <that worktree> diff --stat sprint-better-than-human-2026-09-05..sbth-us8 -- tests` lists the right file). Budget is limited: do NOT rebuild, do NOT run the full test suite; you MAY run `HU_IS_TEST=1 HU_SEMANTIC_EMBED_URL=http://127.0.0.1:1 /Users/sethford/Projects/h-uman/.claude/worktrees/sbth-us8/build/human_tests --filter=shadow` once (prebuilt binary). Contract: sprints/sprint-better-than-human-2026-09-05/stories.md US-8 in that worktree (read only the US-8 section). Prior gates: verifier r2 PASS (14314/14314, ASan 0), critic r2 MERGE after fixes. Judge from the diff: correctness (returned selection unchanged when SHADOW; exactly one extra HU_ROUTE_SHADOW_DIFFICULTY entry; predicate boundary at 12 vs 13 words); edge cases (NULL/empty message, env garbage \u2192 OFF, ring wrap with doubled writes); security/privacy (no message text in log entries or admin JSON); regressions (both route-log readers filter shadow rows: hu_route_log_tier_counts and the /admin/models/decisions loop; existing tests untouched); maintainability (gate comment names scripts/eval_difficulty_route_shadow.py and the >=20-pair PROMOTE criteria). Rules: read-only; ABSOLUTE paths; never contact ports 8741/8743; never open ~/.human/memory.db or chat.db; no message text/phones/names in output. Emit your VERDICT line even if you run low on budget.",
+  "aspects": [
+    {
+      "aspect": "correctness",
+      "verdict": "timeout",
+      "confidence": 0.0,
+      "rationale": "subprocess timeout"
+    },
+    {
+      "aspect": "edge-case",
+      "verdict": "pass",
+      "confidence": 0.9,
+      "rationale": "NULL/empty messages exit before the shadow block and the predicate re-guards them, unrecognized HU_DIFFICULTY_ROUTE values fail closed to OFF, a NULL cloud model is stored as an empty string, and the 100-slot ring wraps cleanly under two writes per turn. The one unhandled input is whitespace-only or",
+      "elapsed_s": 99.68
+    },
+    {
+      "aspect": "regression",
+      "verdict": "timeout",
+      "confidence": 0.0,
+      "rationale": "subprocess timeout"
+    },
+    {
+      "aspect": "security",
+      "verdict": "pass",
+      "confidence": 0.92,
+      "rationale": "No new security surface: the shadow ring entry and /admin/models/decisions JSON carry only tier/source/model/score/timestamp (no message text or PII), `hu_gate_mode_parse` treats unrecognized values as OFF so garbage cannot activate LIVE, and `scripts/eval_difficulty_route_shadow.py` is a placeholde",
+      "elapsed_s": 46.53
+    },
+    {
+      "aspect": "style",
+      "verdict": "pass",
+      "confidence": 0.8,
+      "rationale": "The C change is small, plainly written, correctly isolates the shadow decision from the served selection, filters shadow rows at both readers, and carries the required gate comment; a six-month reader will follow it. The deductions are duplicated ANALYTICAL constants, a test that mirrors the endpoin",
+      "elapsed_s": 116.7
+    }
+  ],
+  "aggregate": {
+    "verdict": "PASS",
+    "pass_weight": 2.62,
+    "fail_weight": 0,
+    "pass_share": 1.0,
+    "split": false
+  },
+  "cross_family_tiebreak": null
+}

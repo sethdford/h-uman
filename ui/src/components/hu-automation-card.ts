@@ -491,20 +491,24 @@ export class ScAutomationCard extends LitElement {
             </div>
 
             <div class="preview-block">
-              ${job.type === "agent"
-                ? html`<span>${job.command || "—"}</span>`
-                : html`<code>${job.command || "—"}</code>`}
+              ${
+                job.type === "agent"
+                  ? html`<span>${job.command || "—"}</span>`
+                  : html`<code>${job.command || "—"}</code>`
+              }
             </div>
 
             <div class="status-trio">
               <span class="status-item channel">${job.channel || "—"}</span>
               <span class="status-item next">Next: ${nextRunStr}</span>
               <span class="status-item last-status ${lastStatusClass}">
-                ${job.last_status === "completed"
-                  ? "completed"
-                  : job.last_status === "failed"
-                    ? "failed"
-                    : "—"}
+                ${
+                  job.last_status === "completed"
+                    ? "completed"
+                    : job.last_status === "failed"
+                      ? "failed"
+                      : "—"
+                }
               </span>
             </div>
 

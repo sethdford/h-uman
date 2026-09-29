@@ -1,0 +1,54 @@
+{
+  "timestamp": "2026-07-26T04:20:00-04:00",
+  "what": "PRODUCTION BASE FLIP — mlx_local switched from gemma-4-31b-it-8bit + seth-lora-v5 to GLM-4.5-Air-4bit + seth-glm-air-v5",
+  "authorized_by": "Seth, direct instruction in-session ('flip it now'), superseding the earlier 'flip after synthetic corroborates' sequencing",
+  "evidence": {
+    "human_gate": {
+      "verdict": "PASS",
+      "detection": 0.1667,
+      "ci": [0.047, 0.448],
+      "n": 12,
+      "note": "below chance — rater picked GLM-v5 replies as 'the real me' more often than his own texts; single self-rater, small n",
+      "gate_files": [
+        "docs/evaluation/blind_ab_gate.json",
+        "~/.human/blind_ab_gate.json"
+      ]
+    },
+    "synthetic_context": {
+      "source": "glm-air-v5-three-way-2026-07-25.json",
+      "dist_from_half_raw_base": 0.191,
+      "dist_from_half_with_adapter": 0.153,
+      "note": "adapter helps; 160-pair same-judge gemma-v5-vs-GLM-v5 comparison was still mid-flight at flip time (gemma arm 90/160)"
+    }
+  },
+  "config_delta": {
+    "mlx_local.model": ["mlx-community/gemma-4-31b-it-8bit", "mlx-community/GLM-4.5-Air-4bit"],
+    "mlx_local.adapter_path": ["seth-lora-v5-8bit-20260718-105251", "seth-glm-air-v5-20260725-093742"],
+    "personalization.lora_adapter_path": ["seth-lora-v5-8bit-20260718-105251", "seth-glm-air-v5-20260725-093742"],
+    "personalization.lora_adapter_id": ["seth-lora-v4-repair-20260525-071921", "seth-glm-air-v5-20260725-093742"],
+    "unchanged": ["prompt_cache_lcp=live (set by another session pre-flip)", "prompt_cache_slots=3", "kv_bits=8", "realtime=true", "port=8741"],
+    "backup": "~/.human/config.json.bak.pre-glm-flip-20260726-040748"
+  },
+  "prereq_fixes_required_by_this_flip": [
+    "mlx-server.py: _thinking_suppressed_value() — enable_thinking polarity is inverted on Gemma only. Unpatched, GLM opened every reply with a <think> block (106 tok @ 1.3 tok/s, reply never reached). Gemma behavior byte-identical.",
+    "personalization.lora_adapter_path MUST move too — daemon.c:2837 hot-swaps that adapter onto the live server via hu_mlx_admin_swap_adapter(127.0.0.1:8741). Flipping only mlx_local.* would have pushed the GEMMA adapter onto the GLM server minutes after restart."
+  ],
+  "verification": {
+    "rehearsal_port_8745": "PASS — mlx-server.py + prod env, 160 LoRA tensors applied (vs gemma adapter's 108), 0 thinking markers, 3-9s replies",
+    "production_8741": {
+      "models_endpoint": "GLM-4.5-Air-4bit",
+      "adapter_applied": "160 LoRA weight tensors from seth-glm-air-v5-20260725-093742",
+      "load_time_s": 54.0,
+      "listeners": 1,
+      "sample_replies": ["yeah should be what you need", "went well actually got some good feedback on the architecture"],
+      "thinking_leak": false,
+      "doctor": "13 ok, 2 n/a, 2 pre-existing errors (iMessage pairing, RL recorder compiled out); prompt_budget error was transient post-restart and self-recovered"
+    }
+  },
+  "known_degradations": [
+    "Persona steering vectors are gemma-shaped (60, 5376) vs GLM's 46 layers — probe fails, server runs unsteered. Non-blocking per the closed MoE/steering program (steering nulls blind), but 'steering on' is now a silent no-op.",
+    "mlx-server.py's thought-scrubber is gemma-format-specific and does not strip GLM <think> tags — the polarity fix is the only thing preventing leakage, so do not regress it.",
+    "config default_model / agent.model_router.{reflexive,conversational}_model still name gemma-4-31b-it-4bit. Cosmetic for local serving (mlx-server.py ignores the requested model id) but inconsistent."
+  ],
+  "rollback": "cp ~/.human/config.json.bak.pre-glm-flip-20260726-040748 ~/.human/config.json && launchctl kickstart -k gui/501/ai.human.mlx-server"
+}

@@ -482,20 +482,6 @@ static void compose_records_history_source_flag_when_history_nonempty(void) {
 
 /* ---- Public wrapper tests (Task 1.9) ---- */
 
-/* The wrapper is intentionally stubbed until Phase 3 Task 3.2 wires it to
- * the real agent/contact accessors. Pinning the stub behavior here ensures
- * the symbol links and that Phase 3 will replace this test with a real one. */
-static void compose_public_wrapper_returns_not_supported_until_phase3(void) {
-    hu_moment_t m = {0};
-    hu_error_t err = hu_moment_compose(NULL, NULL, "imessage", TS_8AM_UTC, &m);
-    HU_ASSERT_EQ(err, HU_ERR_NOT_SUPPORTED);
-}
-
-static void compose_public_wrapper_rejects_null_out(void) {
-    hu_error_t err = hu_moment_compose(NULL, NULL, "imessage", TS_8AM_UTC, NULL);
-    HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
-}
-
 /* ---- Downstream predicate tests (Task 1.10) ---- */
 
 static void should_defer_send_false_when_zero(void) {
@@ -626,8 +612,6 @@ void run_moment_compose_tests(void) {
     HU_RUN_TEST(compose_records_persona_source_flag_when_persona_provided);
     HU_RUN_TEST(compose_records_overlay_source_flag_when_overlay_provided);
     HU_RUN_TEST(compose_records_history_source_flag_when_history_nonempty);
-    HU_RUN_TEST(compose_public_wrapper_returns_not_supported_until_phase3);
-    HU_RUN_TEST(compose_public_wrapper_rejects_null_out);
     HU_RUN_TEST(should_defer_send_false_when_zero);
     HU_RUN_TEST(should_defer_send_true_when_positive);
     HU_RUN_TEST(should_defer_send_false_when_null);

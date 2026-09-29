@@ -21,7 +21,10 @@ TRAIN_TIMEOUT_SECS=2700   # 45 min hard cap on the window
 mkdir -p "$(dirname "$LOG")"
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG"; }
 
-[ -f "$PENDING" ] || exit 0   # nothing to do — the common case
+# Nothing to do is the common case, but it must be LOGGED: 20 silent days in
+# July 2026 made "no work" indistinguishable from "dead job" (the caretaker's
+# loop-liveness check flags a stale log — this heartbeat keeps it honest).
+[ -f "$PENDING" ] || { log "no pending KTO marker — nothing to do"; exit 0; }
 
 DATA=$(python3 -c "import json,sys;print(json.load(open('$PENDING'))['data'])" 2>/dev/null)
 SIGNALS=$(python3 -c "import json,sys;print(json.load(open('$PENDING'))['signals'])" 2>/dev/null)
@@ -35,7 +38,9 @@ if [ -z "$DATA" ] || [ ! -f "$DATA" ]; then
     fi
 
     log "Data file missing ($DATA) — attempting to generate via kto_export..."
-    python3 "$HOME/.human-worktrees/close-the-loops/scripts/kto_export.py" \
+    # Repo path, NOT a worktree: the original ~/.human-worktrees/close-the-loops
+    # path died with that worktree's cleanup (found dead 2026-07-25).
+    python3 "$HOME/Projects/h-uman/scripts/kto_export.py" \
         --db "$HOME/.human/memory.db" \
         --output "$DATA" \
         --min-threshold 50 \

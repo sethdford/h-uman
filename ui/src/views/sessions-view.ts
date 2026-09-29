@@ -122,6 +122,34 @@ export class ScSessionsView extends GatewayAwareLitElement {
         position: relative;
       }
 
+      /* The card's primary action: pointer clicks anywhere on the card bubble to
+         its handler, and this button is the keyboard/AT entry point, so Delete
+         stays a sibling instead of nesting inside a role=button card. */
+      .session-card-open {
+        padding: 0;
+        background: transparent;
+        border: none;
+        font: inherit;
+        text-align: start;
+        cursor: pointer;
+      }
+      .session-card-open:focus-visible {
+        outline: var(--hu-focus-ring-width) solid var(--hu-focus-ring);
+        outline-offset: var(--hu-focus-ring-offset);
+      }
+
+      /* Where :has() is supported, ring the whole card instead of the button. */
+      @supports selector(:has(*)) {
+        .session-card:has(.session-card-open:focus-visible) {
+          outline: var(--hu-focus-ring-width) solid var(--hu-focus-ring);
+          outline-offset: var(--hu-focus-ring-offset);
+          border-radius: var(--hu-radius-xl);
+        }
+        .session-card-open:focus-visible {
+          outline: none;
+        }
+      }
+
       .session-card-header {
         display: flex;
         align-items: flex-start;
@@ -407,19 +435,23 @@ export class ScSessionsView extends GatewayAwareLitElement {
     if (this.loading) return this._renderSkeleton();
     return html`
       ${this._renderHero()} ${this._renderStats()} ${this._renderSearch()}
-      ${this.error
-        ? html`<hu-empty-state
-            .icon=${icons.warning}
-            heading="Error"
-            description=${this.error}
-          ></hu-empty-state>`
-        : this._renderContent()}
+      ${
+        this.error
+          ? html`<hu-empty-state
+              .icon=${icons.warning}
+              heading="Error"
+              description=${this.error}
+            ></hu-empty-state>`
+          : this._renderContent()
+      }
       <hu-dialog
         ?open=${this._deleteTarget != null}
         title="Delete session"
-        message=${this._deleteTarget
-          ? `Are you sure you want to delete "${this.sessionTitle(this._deleteTarget)}"? This cannot be undone.`
-          : ""}
+        message=${
+          this._deleteTarget
+            ? `Are you sure you want to delete "${this.sessionTitle(this._deleteTarget)}"? This cannot be undone.`
+            : ""
+        }
         confirmLabel="Delete"
         variant="danger"
         @hu-confirm=${this._onDeleteConfirm}
@@ -494,9 +526,11 @@ export class ScSessionsView extends GatewayAwareLitElement {
         <hu-empty-state
           .icon=${icons["chat-circle"]}
           heading=${this.searchQuery ? "No matching sessions" : "No sessions yet"}
-          description=${this.searchQuery
-            ? "Try a different search term."
-            : "Start a conversation to create your first session."}
+          description=${
+            this.searchQuery
+              ? "Try a different search term."
+              : "Start a conversation to create your first session."
+          }
         ></hu-empty-state>
       `;
     }
@@ -510,13 +544,18 @@ export class ScSessionsView extends GatewayAwareLitElement {
                 <hu-card
                   class="session-card"
                   hoverable
-                  clickable
                   ?accent=${this.selectedSession?.key === s.key}
                   @click=${(e: Event) => void this._onSessionClick(s, e)}
                   role="listitem"
                 >
                   <div class="session-card-header">
-                    <span class="session-card-title">${this.sessionTitle(s)}</span>
+                    <button
+                      type="button"
+                      class="session-card-title session-card-open"
+                      aria-current=${this.selectedSession?.key === s.key ? "true" : nothing}
+                    >
+                      ${this.sessionTitle(s)}
+                    </button>
                     <div class="session-card-actions">
                       <hu-badge variant=${s.status === "archived" ? "neutral" : "success"}>
                         ${s.status === "archived" ? "Archived" : "Active"}
@@ -532,17 +571,21 @@ export class ScSessionsView extends GatewayAwareLitElement {
                       </hu-button>
                     </div>
                   </div>
-                  ${s.last_message
-                    ? html`<p class="session-card-preview">${s.last_message}</p>`
-                    : nothing}
+                  ${
+                    s.last_message
+                      ? html`<p class="session-card-preview">${s.last_message}</p>`
+                      : nothing
+                  }
                   <div class="session-card-meta">
                     <span>${this.sessionMessageCount(s)} messages</span>
                     <span>${formatRelative(this.sessionTimestamp(s))}</span>
-                    ${(s as Record<string, unknown>).hula_count
-                      ? html`<span class="session-hula-badge"
-                          >${icons.code} ${(s as Record<string, unknown>).hula_count} HuLa</span
-                        >`
-                      : nothing}
+                    ${
+                      (s as Record<string, unknown>).hula_count
+                        ? html`<span class="session-hula-badge"
+                            >${icons.code} ${(s as Record<string, unknown>).hula_count} HuLa</span
+                          >`
+                        : nothing
+                    }
                   </div>
                 </hu-card>
               `,
@@ -567,9 +610,11 @@ export class ScSessionsView extends GatewayAwareLitElement {
           <span>${this.sessionMessageCount(s)} messages</span>
           <span>${formatRelative(this.sessionTimestamp(s))}</span>
           <span>Status: ${s.status === "archived" ? "Archived" : "Active"}</span>
-          ${(s as Record<string, unknown>).hula_count
-            ? html`<span>HuLa Programs: ${(s as Record<string, unknown>).hula_count}</span>`
-            : nothing}
+          ${
+            (s as Record<string, unknown>).hula_count
+              ? html`<span>HuLa Programs: ${(s as Record<string, unknown>).hula_count}</span>`
+              : nothing
+          }
         </div>
         <div class="session-detail-actions">
           <hu-button

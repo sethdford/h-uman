@@ -131,9 +131,9 @@ export class ScJsonViewer extends LitElement {
           class="row row-primitive"
           role="treeitem"
           tabindex=${isFocused ? 0 : -1}
-          aria-label=${key !== null
-            ? `${String(key)}: ${JSON.stringify(val)}`
-            : JSON.stringify(val)}
+          aria-label=${
+            key !== null ? `${String(key)}: ${JSON.stringify(val)}` : JSON.stringify(val)
+          }
           data-path=${path}
           @mouseenter=${() => {
             this._hoveredPath = path;
@@ -151,25 +151,27 @@ export class ScJsonViewer extends LitElement {
           style="padding-left: calc(var(--hu-space-md) * ${depth})"
         >
           <span class="indent"></span>
-          ${key !== null
-            ? html`<span class="key">${JSON.stringify(String(key))}:</span> `
-            : nothing}
+          ${
+            key !== null ? html`<span class="key">${JSON.stringify(String(key))}:</span> ` : nothing
+          }
           ${this._renderPrimitive(val as string | number | boolean | null)}
-          ${isHovered
-            ? html`
-                <button
-                  type="button"
-                  class="copy-btn"
-                  aria-label="Copy"
-                  @click=${(e: Event) => {
-                    e.stopPropagation();
-                    this._copy(path, val);
-                  }}
-                >
-                  ${icons.copy}
-                </button>
-              `
-            : nothing}
+          ${
+            isHovered
+              ? html`
+                  <button
+                    type="button"
+                    class="copy-btn"
+                    aria-label="Copy"
+                    @click=${(e: Event) => {
+                      e.stopPropagation();
+                      this._copy(path, val);
+                    }}
+                  >
+                    ${icons.copy}
+                  </button>
+                `
+              : nothing
+          }
         </div>
       `;
     }
@@ -220,35 +222,41 @@ export class ScJsonViewer extends LitElement {
         <span class="bracket">${isArray(val) ? "[" : "{"}</span>
         ${expanded ? nothing : html`<span class="summary">${summary}</span>`}
         ${expanded ? nothing : html`<span class="bracket">${isArray(val) ? "]" : "}"}</span>`}
-        ${isHovered
-          ? html`
-              <button
-                type="button"
-                class="copy-btn"
-                aria-label="Copy"
-                @click=${(e: Event) => {
-                  e.stopPropagation();
-                  this._copy(path, val);
-                }}
-              >
-                ${icons.copy}
-              </button>
-            `
-          : nothing}
+        ${
+          isHovered
+            ? html`
+                <button
+                  type="button"
+                  class="copy-btn"
+                  aria-label="Copy"
+                  @click=${(e: Event) => {
+                    e.stopPropagation();
+                    this._copy(path, val);
+                  }}
+                >
+                  ${icons.copy}
+                </button>
+              `
+            : nothing
+        }
       </div>
-      ${expanded
-        ? html`
-            <div role="group" class="children">
-              ${isObject(val)
-                ? Object.entries(val).map(([k, v]) =>
-                    this._renderNode(`${path}.${k}`, k, v, depth + 1),
-                  )
-                : (val as JsonValue[]).map((v, i) =>
-                    this._renderNode(`${path}[${i}]`, String(i), v, depth + 1),
-                  )}
-            </div>
-          `
-        : nothing}
+      ${
+        expanded
+          ? html`
+              <div role="group" class="children">
+                ${
+                  isObject(val)
+                    ? Object.entries(val).map(([k, v]) =>
+                        this._renderNode(`${path}.${k}`, k, v, depth + 1),
+                      )
+                    : (val as JsonValue[]).map((v, i) =>
+                        this._renderNode(`${path}[${i}]`, String(i), v, depth + 1),
+                      )
+                }
+              </div>
+            `
+          : nothing
+      }
     `;
   }
 

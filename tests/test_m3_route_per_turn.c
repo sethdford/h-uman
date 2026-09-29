@@ -42,6 +42,7 @@
  */
 
 #include "test_framework.h"
+#include "test_tmpdir.h"
 
 #ifdef HU_ENABLE_ML
 
@@ -120,7 +121,8 @@ static void route_per_turn_empty_session_id_is_noop(void) {
     memset(&agent, 0, sizeof(agent));
     agent.alloc = &alloc;
     /* memory_session_id NULL; routes are present. */
-    const char *path = "/tmp/hu_m3_route_per_turn_empty_test.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_m3_route_per_turn_empty_test.json"));
     (void)unlink(path);
     HU_ASSERT_EQ(write_routes_file(path, 42, "/a/some.bin", NULL), 0);
     HU_ASSERT_EQ(hu_m3_contact_routes_create(&alloc, path, &agent.m3_contact_routes), HU_OK);
@@ -146,7 +148,8 @@ static void route_per_turn_matching_contact_attempts_swap(void) {
 
     /* Build a routes file keyed by the contact hash for this session id. */
     uint64_t contact_hash = hu_m3_outcome_hash_bytes(sid, strlen(sid));
-    const char *path = "/tmp/hu_m3_route_per_turn_matching_test.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_m3_route_per_turn_matching_test.json"));
     (void)unlink(path);
     HU_ASSERT_EQ(write_routes_file(path, contact_hash, "/a/bob-lora.bin", NULL), 0);
     HU_ASSERT_EQ(hu_m3_contact_routes_create(&alloc, path, &agent.m3_contact_routes), HU_OK);
@@ -179,7 +182,8 @@ static void route_per_turn_unknown_contact_no_default_is_noop(void) {
     agent.memory_session_id_len = strlen(sid);
 
     /* Routes file with a single entry that does NOT match carol's hash. */
-    const char *path = "/tmp/hu_m3_route_per_turn_unknown_test.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_m3_route_per_turn_unknown_test.json"));
     (void)unlink(path);
     HU_ASSERT_EQ(write_routes_file(path, 99999, "/a/someone-else.bin", NULL), 0);
     HU_ASSERT_EQ(hu_m3_contact_routes_create(&alloc, path, &agent.m3_contact_routes), HU_OK);
@@ -205,7 +209,8 @@ static void route_per_turn_unknown_contact_with_default_attempts_swap(void) {
     agent.memory_session_id_len = strlen(sid);
 
     /* Routes file with no specific match but a default_adapter set. */
-    const char *path = "/tmp/hu_m3_route_per_turn_default_test.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_m3_route_per_turn_default_test.json"));
     (void)unlink(path);
     HU_ASSERT_EQ(write_routes_file(path, 11111, "/a/specific.bin", "/a/default.bin"), 0);
     HU_ASSERT_EQ(hu_m3_contact_routes_create(&alloc, path, &agent.m3_contact_routes), HU_OK);
@@ -233,7 +238,8 @@ static void route_per_turn_skips_swap_when_already_loaded(void) {
     agent.memory_session_id_len = strlen(sid);
 
     uint64_t contact_hash = hu_m3_outcome_hash_bytes(sid, strlen(sid));
-    const char *path = "/tmp/hu_m3_route_per_turn_cached_test.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_m3_route_per_turn_cached_test.json"));
     (void)unlink(path);
     const char *target = "/a/eve-lora.bin";
     HU_ASSERT_EQ(write_routes_file(path, contact_hash, target, NULL), 0);

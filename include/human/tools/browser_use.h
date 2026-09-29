@@ -9,7 +9,4 @@
 hu_error_t hu_browser_use_create(hu_allocator_t *alloc, hu_tool_t *out);
 void hu_browser_use_destroy(hu_allocator_t *alloc, hu_tool_t *tool);
 
-void hu_browser_use_set_grounding(hu_tool_t *tool, hu_provider_t *provider, const char *model,
-                                  size_t model_len);
-
 #endif /* HU_TOOLS_BROWSER_USE_H */

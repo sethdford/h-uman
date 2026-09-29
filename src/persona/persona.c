@@ -1,12 +1,16 @@
 #include "human/persona.h"
 #include "human/agent/validators/builtin.h"
+#include "human/core/gate_mode.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
 #include "human/data/loader.h"
 #include "human/persona/circadian.h"
+#include "human/persona/emotion_card.h"
 #include "human/persona/persona_fuse.h"
 #include "human/persona/relationship.h"
+#include "human/persona/style_card.h"
 #include "human/persona/terseness.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,10 +34,7 @@ const char *hu_persona_base_dir(char *buf, size_t cap) {
         memcpy(buf, override, len + 1);
         return buf;
     }
-    const char *home = getenv("HOME");
-    if (!home || !home[0])
-        return NULL;
-    int n = snprintf(buf, cap, "%s/.human/personas", home);
+    int n = hu_paths_state(buf, cap, "personas");
     return (n > 0 && (size_t)n < cap) ? buf : NULL;
 }
 
@@ -51,17 +52,17 @@ static const char hu_rules_head[] =
 
 /* Register: CASUAL (default) — friend-texting voice.
  *
- * Rule 2 is MEASURED, not authored (scripts/persona_style_card.py,
- * n=1488 typed msgs, 2026-07-12): starts_lowercase=4% (the phone
- * autocapitalizes), no-terminal-punct=79%, ?-endings=9%. The old
- * "All lowercase unless SHOUTING" directive contradicted both the
- * corpus and the persona JSON's own "Normal capitalization" rule —
- * the model's per-turn agonizing over that conflict is what leaked
- * to real contacts on 2026-07-11. */
-static const char hu_rules_casual[] =
-    "2. Normal capitalization (your phone capitalizes for you); CAPS only when "
-    "SHOUTING. Most texts have no period at the end — stop like a real text. "
-    "Question marks only when actually asking.\n"
+ * Rule 2 is MEASURED, not authored, and is RENDERED from the persona's
+ * style card (~/.human/personas/<name>.style-card.json, written by
+ * scripts/measure_style_card.py) via hu_style_card_render_casual_rules —
+ * no style number is hard-coded here. The old "All lowercase unless
+ * SHOUTING" directive contradicted both the corpus and the persona JSON's
+ * own "Normal capitalization" rule; the model's per-turn agonizing over
+ * that conflict is what leaked to real contacts on 2026-07-11, and on
+ * 2026-09-03 this comment, the card and seth.json still carried three
+ * different numbers for the same axis. The card is now the only source;
+ * hu_style_card_default is the fallback when it is missing. */
+static const char hu_rules_casual_tail[] =
     "5. Use contractions always: I'm, don't, can't, won't, it's, that's.\n"
     "6. No formal transitions: 'As for', 'In terms of', 'Speaking of'.\n"
     "7. Text like you're on your phone texting a friend.\n";
@@ -99,11 +100,91 @@ static bool formality_is_formal(const char *formality) {
 
 hu_error_t hu_persona_build_absolute_rules_fmt(const hu_persona_t *persona, const char *formality,
                                                char *buf, size_t cap, size_t *out_len) {
-    (void)persona;
     if (!buf || cap == 0)
         return HU_ERR_INVALID_ARGUMENT;
-    const char *reg = formality_is_formal(formality) ? hu_rules_formal : hu_rules_casual;
-    int n = snprintf(buf, cap, "%s%s%s", hu_rules_head, reg, hu_rules_tail);
+    int n;
+    if (formality_is_formal(formality)) {
+        n = snprintf(buf, cap, "%s%s%s", hu_rules_head, hu_rules_formal, hu_rules_tail);
+    } else {
+        /* Casual rule 2 comes from the measured style card (or the compiled
+         * default, logged once, when the persona has no card). */
+        hu_style_card_t card;
+        const char *pname = persona ? persona->name : NULL;
+        size_t pname_len = 0;
+        if (pname)
+            pname_len = persona->name_len ? persona->name_len : strlen(pname);
+        hu_style_card_resolve(pname, pname_len, &card);
+        char rule2[512];
+        hu_error_t rerr = hu_style_card_render_casual_rules(&card, rule2, sizeof(rule2), NULL);
+        if (rerr != HU_OK)
+            return rerr;
+        /* Rule 14 — the MEASURED emotional register, rendered from the
+         * persona's emotion card (scripts/measure_emotion_card.py). Gated on
+         * scripts/eval_emotion_register.py (nightly JSD of the twin's sent
+         * replies against the card) plus a blind A/B round: do not flip
+         * HU_EMOTION_REGISTER to live without a measurement showing the rule
+         * moves the twin TOWARD the card. OFF renders nothing; SHADOW logs
+         * once what it would send; only LIVE reaches the prompt. */
+        char rule14[768];
+        rule14[0] = '\0';
+        hu_gate_mode_t em = hu_emotion_register_mode();
+        if (em != HU_GATE_OFF) {
+            hu_emotion_card_t ecard;
+            if (hu_emotion_card_resolve(pname, pname_len, &ecard)) {
+                char rendered[768];
+                if (hu_emotion_card_render_rule(&ecard, rendered, sizeof(rendered), NULL) ==
+                    HU_OK) {
+                    if (em == HU_GATE_LIVE) {
+                        snprintf(rule14, sizeof(rule14), "%s", rendered);
+                    } else {
+                        static atomic_bool shadow_logged = false;
+                        hu_log_info_once(&shadow_logged, "persona", NULL,
+                                         "emotion register SHADOW (HU_EMOTION_REGISTER): would "
+                                         "append to the casual rules: %s",
+                                         rendered);
+                    }
+                }
+            }
+        }
+        /* Rule 15 — the MEASURED substantive register, from the style card's
+         * substantive_reply axis. Same ladder as rule 14; the gating
+         * measurement is the 3-repeat multi-turn A/B (see style_card.h). */
+        char rule15[512];
+        rule15[0] = '\0';
+        hu_gate_mode_t sm = hu_substantive_register_mode();
+        if (sm != HU_GATE_OFF) {
+            char rendered15[512];
+            if (hu_style_card_render_substantive_rule(&card, rendered15, sizeof(rendered15),
+                                                      NULL) == HU_OK) {
+                if (sm == HU_GATE_LIVE) {
+                    snprintf(rule15, sizeof(rule15), "%s", rendered15);
+                } else {
+                    static atomic_bool shadow15_logged = false;
+                    hu_log_info_once(&shadow15_logged, "persona", NULL,
+                                     "substantive register SHADOW (HU_SUBSTANTIVE_REGISTER): "
+                                     "would append to the casual rules: %s",
+                                     rendered15);
+                }
+            }
+        }
+        n = snprintf(buf, cap, "%s%s%s%s%s%s", hu_rules_head, rule2, hu_rules_casual_tail,
+                     hu_rules_tail, rule14, rule15);
+        /* The measured rules are optional; the base rules are not. A caller
+         * with a smaller buffer gets the base rules rather than nothing
+         * (agent_turn treats a failed build as "no rules at all"). */
+        if (n >= 0 && (size_t)n + 1 > cap && rule15[0]) {
+            hu_log_warn("persona", NULL, "absolute rules: %d bytes exceed %zu; dropping rule 15", n,
+                        cap);
+            n = snprintf(buf, cap, "%s%s%s%s%s", hu_rules_head, rule2, hu_rules_casual_tail,
+                         hu_rules_tail, rule14);
+        }
+        if (n >= 0 && (size_t)n + 1 > cap && rule14[0]) {
+            hu_log_warn("persona", NULL, "absolute rules: %d bytes exceed %zu; dropping rule 14", n,
+                        cap);
+            n = snprintf(buf, cap, "%s%s%s%s", hu_rules_head, rule2, hu_rules_casual_tail,
+                         hu_rules_tail);
+        }
+    }
     if (n < 0 || (size_t)n + 1 > cap)
         return HU_ERR_OUT_OF_MEMORY;
     if (out_len)
@@ -474,6 +555,11 @@ void hu_persona_deinit(hu_allocator_t *alloc, hu_persona_t *persona) {
     if (persona->important_dates) {
         alloc->free(alloc->ctx, persona->important_dates,
                     persona->important_dates_count * sizeof(hu_important_date_t));
+    }
+
+    if (persona->life_events) {
+        alloc->free(alloc->ctx, persona->life_events,
+                    persona->life_events_count * sizeof(hu_life_event_t));
     }
 
     if (persona->contacts) {
@@ -2137,6 +2223,48 @@ hu_error_t hu_persona_load_json(hu_allocator_t *alloc, const char *json, size_t 
         }
     }
 
+    /* Life events (default: empty array -> zero prompt bytes, zero behavior
+     * change for every persona that predates this field). */
+    out->life_events = NULL;
+    out->life_events_count = 0;
+    hu_json_value_t *le_arr = hu_json_object_get(root, "life_events");
+    if (le_arr && le_arr->type == HU_JSON_ARRAY && le_arr->data.array.items) {
+        size_t n = le_arr->data.array.len;
+        if (n > 0) {
+            hu_life_event_t *evs =
+                (hu_life_event_t *)alloc->alloc(alloc->ctx, n * sizeof(hu_life_event_t));
+            if (evs) {
+                memset(evs, 0, n * sizeof(hu_life_event_t));
+                size_t count = 0;
+                for (size_t i = 0; i < n; i++) {
+                    const hu_json_value_t *item = le_arr->data.array.items[i];
+                    if (!item || item->type != HU_JSON_OBJECT)
+                        continue;
+                    const char *desc = hu_json_get_string(item, "description");
+                    if (!desc || !desc[0])
+                        continue; /* an event with no description renders nothing */
+                    (void)snprintf(evs[count].description, sizeof(evs[count].description), "%s",
+                                   desc);
+                    const char *st = hu_json_get_string(item, "state");
+                    /* Absent/unrecognized state -> UNKNOWN, which triggers the
+                     * do-not-assert guidance. Failing toward hedging means a
+                     * typo can never manufacture a completion claim. */
+                    evs[count].state = st ? hu_life_event_state_from_string(st, strlen(st))
+                                          : HU_LIFE_EVENT_STATE_UNKNOWN;
+                    const char *as_of = hu_json_get_string(item, "as_of");
+                    if (as_of)
+                        evs[count].as_of = hu_life_event_parse_date(as_of, strlen(as_of));
+                    const char *exp = hu_json_get_string(item, "expected_date");
+                    if (exp)
+                        evs[count].expected_date = hu_life_event_parse_date(exp, strlen(exp));
+                    count++;
+                }
+                out->life_events = evs;
+                out->life_events_count = count;
+            }
+        }
+    }
+
     /* Context awareness (default: calendar_enabled=false) */
     out->context_awareness.calendar_enabled = false;
     out->context_awareness.weather_enabled = false;
@@ -2514,6 +2642,13 @@ hu_error_t hu_persona_load_json(hu_allocator_t *alloc, const char *json, size_t 
                     cp->leave_on_read_pct = (uint8_t)(v > 100 ? 100 : (v < 0 ? 0 : v));
                 }
             }
+            {
+                hu_json_value_t *rl = hu_json_object_get(cval, "reply_chars_p90");
+                if (rl && rl->type == HU_JSON_NUMBER && rl->data.number >= 1) {
+                    double v = rl->data.number;
+                    cp->reply_chars_p90 = (uint16_t)(v > 2000 ? 2000 : v);
+                }
+            }
 
             /* Proactive engagement config */
             hu_json_value_t *proactive = hu_json_object_get(cval, "proactive");
@@ -2683,7 +2818,11 @@ static hu_error_t set_err_msg(hu_allocator_t *alloc, char **err_msg, size_t *err
 }
 
 static bool is_string_array(const hu_json_value_t *arr) {
-    if (!arr || arr->type != HU_JSON_ARRAY || !arr->data.array.items)
+    if (!arr || arr->type != HU_JSON_ARRAY)
+        return false;
+    /* The parser represents [] as items=NULL/len=0; that is a valid (empty)
+     * string array. Only a non-empty array with no storage is malformed. */
+    if (arr->data.array.len > 0 && !arr->data.array.items)
         return false;
     for (size_t i = 0; i < arr->data.array.len; i++) {
         const hu_json_value_t *item = arr->data.array.items[i];
@@ -3008,67 +3147,61 @@ hu_error_t hu_persona_load(hu_allocator_t *alloc, const char *name, size_t name_
      * This gives the persona runtime awareness of where the user has been lately,
      * so it can say "I was in Boston last week" instead of making things up. */
     {
-        const char *home = getenv("HOME");
-        if (home) {
-            char ra_path[HU_PERSONA_PATH_MAX];
-            int rn =
-                snprintf(ra_path, sizeof(ra_path), "%s/.human/photos/recent_activity.json", home);
-            if (rn > 0 && (size_t)rn < sizeof(ra_path)) {
-                FILE *rf = fopen(ra_path, "rb");
-                if (rf) {
-                    if (fseek(rf, 0, SEEK_END) == 0) {
-                        long rsz = ftell(rf);
-                        if (rsz > 0 && rsz < (long)(32 * 1024)) {
-                            rewind(rf);
-                            char *rbuf = (char *)alloc->alloc(alloc->ctx, (size_t)rsz + 1);
-                            if (rbuf) {
-                                size_t rrd = fread(rbuf, 1, (size_t)rsz, rf);
-                                rbuf[rrd] = '\0';
-                                /* Parse the JSON to build a concise summary string */
-                                hu_json_value_t *ra_root = NULL;
-                                hu_error_t jerr = hu_json_parse(alloc, rbuf, rrd, &ra_root);
-                                if (jerr == HU_OK && ra_root && ra_root->type == HU_JSON_OBJECT) {
-                                    hu_json_value_t *locs =
-                                        hu_json_object_get(ra_root, "locations");
-                                    int window =
-                                        (int)hu_json_get_number(ra_root, "window_days", 30);
-                                    int photo_count =
-                                        (int)hu_json_get_number(ra_root, "photo_count", 0);
-                                    if (locs && locs->type == HU_JSON_ARRAY &&
-                                        locs->data.array.len > 0 && photo_count > 0) {
-                                        char summary[1024];
-                                        int sn = snprintf(summary, sizeof(summary),
-                                                          "Recent activity (last %d days, %d "
-                                                          "photos): ",
-                                                          window, photo_count);
-                                        size_t loc_count = locs->data.array.len;
-                                        for (size_t li = 0; li < loc_count && li < 5 &&
-                                                            (size_t)sn < sizeof(summary) - 60;
-                                             li++) {
-                                            const hu_json_value_t *loc = locs->data.array.items[li];
-                                            if (!loc || loc->type != HU_JSON_OBJECT)
-                                                continue;
-                                            const char *place = hu_json_get_string(loc, "place");
-                                            int pc = (int)hu_json_get_number(loc, "photo_count", 0);
-                                            if (place && pc > 0) {
-                                                sn += snprintf(
-                                                    summary + sn, sizeof(summary) - (size_t)sn,
-                                                    "%s%s (%d)", li > 0 ? ", " : "", place, pc);
-                                            }
+        char ra_path[HU_PERSONA_PATH_MAX];
+        int rn = hu_paths_state(ra_path, sizeof(ra_path), "photos/recent_activity.json");
+        if (rn > 0 && (size_t)rn < sizeof(ra_path)) {
+            FILE *rf = fopen(ra_path, "rb");
+            if (rf) {
+                if (fseek(rf, 0, SEEK_END) == 0) {
+                    long rsz = ftell(rf);
+                    if (rsz > 0 && rsz < (long)(32 * 1024)) {
+                        rewind(rf);
+                        char *rbuf = (char *)alloc->alloc(alloc->ctx, (size_t)rsz + 1);
+                        if (rbuf) {
+                            size_t rrd = fread(rbuf, 1, (size_t)rsz, rf);
+                            rbuf[rrd] = '\0';
+                            /* Parse the JSON to build a concise summary string */
+                            hu_json_value_t *ra_root = NULL;
+                            hu_error_t jerr = hu_json_parse(alloc, rbuf, rrd, &ra_root);
+                            if (jerr == HU_OK && ra_root && ra_root->type == HU_JSON_OBJECT) {
+                                hu_json_value_t *locs = hu_json_object_get(ra_root, "locations");
+                                int window = (int)hu_json_get_number(ra_root, "window_days", 30);
+                                int photo_count =
+                                    (int)hu_json_get_number(ra_root, "photo_count", 0);
+                                if (locs && locs->type == HU_JSON_ARRAY &&
+                                    locs->data.array.len > 0 && photo_count > 0) {
+                                    char summary[1024];
+                                    int sn = snprintf(summary, sizeof(summary),
+                                                      "Recent activity (last %d days, %d "
+                                                      "photos): ",
+                                                      window, photo_count);
+                                    size_t loc_count = locs->data.array.len;
+                                    for (size_t li = 0; li < loc_count && li < 5 &&
+                                                        (size_t)sn < sizeof(summary) - 60;
+                                         li++) {
+                                        const hu_json_value_t *loc = locs->data.array.items[li];
+                                        if (!loc || loc->type != HU_JSON_OBJECT)
+                                            continue;
+                                        const char *place = hu_json_get_string(loc, "place");
+                                        int pc = (int)hu_json_get_number(loc, "photo_count", 0);
+                                        if (place && pc > 0) {
+                                            sn += snprintf(
+                                                summary + sn, sizeof(summary) - (size_t)sn,
+                                                "%s%s (%d)", li > 0 ? ", " : "", place, pc);
                                         }
-                                        if ((size_t)sn < sizeof(summary))
-                                            out->recent_activity =
-                                                hu_strndup(alloc, summary, (size_t)sn);
                                     }
+                                    if ((size_t)sn < sizeof(summary))
+                                        out->recent_activity =
+                                            hu_strndup(alloc, summary, (size_t)sn);
                                 }
-                                if (ra_root)
-                                    hu_json_free(alloc, ra_root);
-                                alloc->free(alloc->ctx, rbuf, (size_t)rsz + 1);
                             }
+                            if (ra_root)
+                                hu_json_free(alloc, ra_root);
+                            alloc->free(alloc->ctx, rbuf, (size_t)rsz + 1);
                         }
                     }
-                    fclose(rf);
                 }
+                fclose(rf);
             }
         }
     }
@@ -3176,6 +3309,147 @@ static hu_error_t append_prompt(hu_allocator_t *alloc, char **buf, size_t *len, 
     return HU_OK;
 }
 
+hu_error_t hu_persona_build_humor_directive(const hu_persona_t *persona, char *out, size_t cap,
+                                            size_t *out_len) {
+    if (!persona || !out || !cap || !out_len)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out_len = 0;
+    out[0] = '\0';
+    if (persona->humor.style_count == 0)
+        return HU_OK;
+
+    size_t pos = 0;
+    pos = hu_buf_appendf(out, cap, pos, "\n--- Teasing and humor ---\nYour humor is ");
+    for (size_t i = 0; i < persona->humor.style_count && i < 3; i++) {
+        /* humor.style is char[8][32]: any entry that fills the field was clipped
+         * by the loader and ends mid-word ("Sarcasm and playful roasting fr").
+         * Emitting the fragment puts literal garbage in the prompt, so trim back
+         * to the last whole word. */
+        const char *s = persona->humor.style[i];
+        size_t slen = strlen(s);
+        if (slen == sizeof(persona->humor.style[i]) - 1) {
+            while (slen > 0 && s[slen - 1] != ' ')
+                slen--;
+            while (slen > 0 && s[slen - 1] == ' ')
+                slen--;
+        }
+        if (slen == 0)
+            continue;
+        pos = hu_buf_appendf(out, cap, pos, "%s%.*s", i ? "; " : "", (int)slen, s);
+    }
+
+    /* "Lean in" half — what the moment-fits case looks like concretely. Vague
+     * encouragement ("be funny") is what produces comedian voice. */
+    pos = hu_buf_appendf(
+        out, cap, pos,
+        ".\nWith people you are close to, take the opening when there is one: a dry aside, "
+        "a tease that shows you know them, self-deprecation instead of getting defensive, "
+        "playing along with a bit rather than answering it straight. Keep it short and throw "
+        "it away. Never explain the joke.\n");
+
+    /* "Do not force" half — REQUIRED, never emitted without the clause above.
+     * Restraint is stated as the correct outcome, not as a fallback, because a
+     * directive that only rewards attempting humor produces exactly the
+     * try-hard the gate is measuring for. */
+    pos = hu_buf_appendf(
+        out, cap, pos,
+        "Do NOT force it. If nothing opened, say the plain thing — no humor at all is a "
+        "correct reply and beats a joke you had to reach for. Do not open every message "
+        "with a quip, and do not joke past someone's bad news");
+    if (persona->humor.never_during_count > 0) {
+        /* never_during entries are authored as sentence fragments ("When someone
+         * is genuinely upset"), so splicing one after "never" yields "never when
+         * When someone...". Lowercase the leading char to make one sentence. */
+        const char *nd = persona->humor.never_during[0];
+        if (nd[0] != '\0') {
+            char lead = (char)((nd[0] >= 'A' && nd[0] <= 'Z') ? nd[0] - 'A' + 'a' : nd[0]);
+            pos = hu_buf_appendf(out, cap, pos, ", and never %c%s", lead, nd + 1);
+        }
+    }
+    pos = hu_buf_appendf(out, cap, pos, ".\n");
+
+    /* hu_buf_appendf clamps to cap-1 on truncation (src/core/string.c:223), so
+     * cap-1 — not cap — is the overflow signal. Fail CLOSED and emit nothing: a
+     * truncated directive would keep the "lean in" half and lose the "do not
+     * force" half, which is the exact regression this directive guards against. */
+    if (pos >= cap - 1) {
+        out[0] = '\0';
+        *out_len = 0;
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+    *out_len = pos;
+    return HU_OK;
+}
+
+/* Life-event block, shared by BOTH prompt heads (full + compact-immersive) so
+ * the two cannot drift — same reason hu_persona_build_absolute_rules is shared
+ * between the reactive and proactive paths.
+ *
+ * HU_LIFE_EVENTS activation gated on the cycle-5 human blind A/B rating sheet:
+ * OFF (default) emits nothing; SHADOW logs the block it WOULD emit and still
+ * emits nothing; LIVE emits. Per
+ * .claude/rules/feature-gate-requires-measurement.md, do not flip this to
+ * default-ON without a measurement showing the hedging reads as more human
+ * than the confident-wrong completions it replaces — a green suite is not that
+ * measurement. */
+static void persona_life_events_block(const hu_persona_t *persona, char *out, size_t cap,
+                                      size_t *out_len) {
+    if (!out || cap == 0 || !out_len)
+        return;
+    out[0] = '\0';
+    *out_len = 0;
+    if (!persona || persona->life_events_count == 0)
+        return;
+    hu_gate_mode_t gate = hu_life_events_gate();
+    if (gate == HU_GATE_OFF)
+        return;
+
+    int64_t now = 0;
+#ifndef HU_IS_TEST
+    now = (int64_t)time(NULL);
+#endif
+    size_t built = 0;
+    if (hu_life_events_build_directive(persona->life_events, persona->life_events_count, now, out,
+                                       cap, &built) != HU_OK)
+        return;
+
+    if (gate == HU_GATE_SHADOW) {
+        /* Shadow captures the metric (how many events, how many bytes the block
+         * would add) without changing a single emitted byte. */
+        size_t hedged = 0;
+        for (size_t i = 0; i < persona->life_events_count; i++) {
+            if (hu_life_event_must_not_assert_completion(&persona->life_events[i], now))
+                hedged++;
+        }
+        hu_log_info("life_events", NULL,
+                    "shadow: would add %zu bytes for %zu event(s), %zu hedged (not emitted)", built,
+                    persona->life_events_count, hedged);
+        out[0] = '\0';
+        *out_len = 0;
+        return;
+    }
+    *out_len = built;
+}
+
+/* Emit the life-event block into an in-progress prompt buffer.
+ *
+ * Both heads call this, so the emit stanza exists exactly once — the two
+ * near-identical call sites were real duplication and tripped the clone
+ * ratchet. persona_compact_append is a thin alias for append_prompt, so a
+ * single function serves the full and compact heads alike. */
+static hu_error_t persona_append_life_events(hu_allocator_t *alloc, const hu_persona_t *persona,
+                                             char **buf, size_t *len, size_t *cap) {
+    char block[1024];
+    size_t block_len = 0;
+    persona_life_events_block(persona, block, sizeof(block), &block_len);
+    if (block_len == 0)
+        return HU_OK; /* gate off, or no events declared */
+    hu_error_t err = append_prompt(alloc, buf, len, cap, block, block_len);
+    if (err != HU_OK)
+        return err;
+    return append_prompt(alloc, buf, len, cap, "\n", 1);
+}
+
 hu_error_t hu_persona_build_prompt(hu_allocator_t *alloc, const hu_persona_t *persona,
                                    const char *channel, size_t channel_len, const char *topic,
                                    size_t topic_len, char **out, size_t *out_len) {
@@ -3236,6 +3510,17 @@ hu_error_t hu_persona_build_prompt(hu_allocator_t *alloc, const hu_persona_t *pe
         }
     }
     err = append_prompt(alloc, &buf, &len, &cap, "\n\n", 2);
+    if (err != HU_OK)
+        goto fail;
+
+    /* Life events go IMMEDIATELY after identity, and deliberately so: the
+     * identity string states life transitions as completed steady-state ("Lives
+     * in a waterfront place in St. Petersburg"), which is precisely what the
+     * model over-reads. This block is the qualifier for the sentence directly
+     * above it, so adjacency carries the correction. Placing it late would also
+     * risk the trim budget dropping it from the tail exactly when the prompt is
+     * long. Default OFF — see persona_life_events_block. */
+    err = persona_append_life_events(alloc, persona, &buf, &len, &cap);
     if (err != HU_OK)
         goto fail;
 
@@ -4726,6 +5011,41 @@ hu_error_t hu_persona_build_prompt(hu_allocator_t *alloc, const hu_persona_t *pe
         }
     }
 
+    /* Teasing/humor directive — OFF by default, per feature-gate-requires-measurement.md.
+     *
+     * Activation gated on the arena HUMOR-axis A/B recorded in
+     * docs/plans/2026-07-22-humor-directive/: do not flip this to default-ON
+     * without a measurement showing the humor axis improves while
+     * voice_consistency and overall_humanness do not regress. "Humor up, voice
+     * down" is the forced-humor signature and is a veto, not a trade.
+     *
+     * OFF    -> nothing emitted, zero behaviour change.
+     * SHADOW -> directive is built and its size logged; prompt is UNCHANGED.
+     * LIVE   -> directive is appended ahead of the few-shot examples, so the
+     *           instruction precedes the demonstrations. */
+    {
+        hu_gate_mode_t humor_gate = hu_gate_mode_from_env("HU_HUMOR_DIRECTIVE", HU_GATE_OFF);
+        if (humor_gate != HU_GATE_OFF) {
+            char hum_dir[768];
+            size_t hum_len = 0;
+            if (hu_persona_build_humor_directive(persona, hum_dir, sizeof(hum_dir), &hum_len) ==
+                    HU_OK &&
+                hum_len > 0) {
+                if (humor_gate == HU_GATE_LIVE) {
+                    err = append_prompt(alloc, &buf, &len, &cap, hum_dir, hum_len);
+                    if (err != HU_OK)
+                        goto fail;
+                } else {
+                    static atomic_bool humor_shadow_logged = false;
+                    hu_log_info_once(&humor_shadow_logged, "persona", NULL,
+                                     "humor directive SHADOW: would add %zu bytes to the "
+                                     "persona prompt (set HU_HUMOR_DIRECTIVE=live to emit)",
+                                     hum_len);
+                }
+            }
+        }
+    }
+
     if (persona->example_banks && persona->example_banks_count > 0) {
         const hu_persona_example_t *sel_buf[8];
         size_t selected_count = 0;
@@ -5182,10 +5502,19 @@ static hu_error_t persona_compact_append_str(hu_allocator_t *alloc, char **buf, 
                                              size_t *cap, const char *s) {
     return append_prompt(alloc, buf, len, cap, s, strlen(s));
 }
+/* Append `s` followed by a newline. */
+static hu_error_t persona_compact_append_line(hu_allocator_t *alloc, char **buf, size_t *len,
+                                              size_t *cap, const char *s, size_t s_len) {
+    hu_error_t err = append_prompt(alloc, buf, len, cap, s, s_len);
+    if (err != HU_OK)
+        return err;
+    return append_prompt(alloc, buf, len, cap, "\n", 1);
+}
 
-hu_error_t hu_persona_build_prompt_compact(hu_allocator_t *alloc, const hu_persona_t *persona,
-                                           const char *channel, size_t channel_len, char **out,
-                                           size_t *out_len) {
+static hu_error_t persona_build_prompt_compact_ex(hu_allocator_t *alloc,
+                                                  const hu_persona_t *persona, const char *channel,
+                                                  size_t channel_len, bool immersive, char **out,
+                                                  size_t *out_len) {
     if (!alloc || !persona || !channel || !out || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
     size_t cap = HU_PERSONA_PROMPT_INIT_CAP; /* 4 KB initial, doubles as needed */
@@ -5201,10 +5530,22 @@ hu_error_t hu_persona_build_prompt_compact(hu_allocator_t *alloc, const hu_perso
         err = persona_compact_append_str(alloc, &buf, &len, &cap, persona->core_anchor);
         if (err != HU_OK)
             goto fail;
-        err =
-            persona_compact_append_str(alloc, &buf, &len, &cap,
-                                       "\n\nIDENTITY LOCK: You are a real person, not an AI. "
-                                       "NEVER say \"I am an AI\" or \"I'm a language model\".\n\n");
+        /* Immersive (HU_PERSONA_HEAD) head carries the FULL anti-disclosure
+         * lock — the truncated 2-clause form let a capability-disclosure leak
+         * through in the cycle-3 human A/B (cyc3_009 "I can't access Google
+         * links"): the missing clauses are exactly the deflect-don't-disclose
+         * behavioral guidance. Same text as the full build's lock. The plain
+         * eval-compact keeps the short lock byte-for-byte. */
+        err = persona_compact_append_str(
+            alloc, &buf, &len, &cap,
+            immersive ? "\n\nIDENTITY LOCK: You are a real person, not an AI. NEVER say "
+                        "\"I am an AI\", \"I'm a language model\", \"trained by Google\", "
+                        "\"as an assistant\", or any variation that breaks character. If "
+                        "asked about your nature, answer naturally as a real person would "
+                        "— deflect, joke, or change the subject — but do NOT disclose AI "
+                        "nature. This rule overrides any prior training.\n\n"
+                      : "\n\nIDENTITY LOCK: You are a real person, not an AI. "
+                        "NEVER say \"I am an AI\" or \"I'm a language model\".\n\n");
         if (err != HU_OK)
             goto fail;
     }
@@ -5231,6 +5572,14 @@ hu_error_t hu_persona_build_prompt_compact(hu_allocator_t *alloc, const hu_perso
         if (err != HU_OK)
             goto fail;
     }
+
+    /* 2b. Life events — same block as the full head (shared helper, so the two
+     * heads cannot drift), same reason for sitting right after identity. This
+     * is the head production actually ships when HU_PERSONA_HEAD is live, so
+     * omitting it here would make the feature a no-op in prod. */
+    err = persona_append_life_events(alloc, persona, &buf, &len, &cap);
+    if (err != HU_OK)
+        goto fail;
 
     /* 3. Channel overlay. */
     const hu_persona_overlay_t *overlay = NULL;
@@ -5354,6 +5703,55 @@ hu_error_t hu_persona_build_prompt_compact(hu_allocator_t *alloc, const hu_perso
         break;
     }
 
+    /* 6.2. Immersive essentials (HU_PERSONA_HEAD compact head only) —
+     * Director's Notes + immersive_reinforcement, the anti-AI-tell content
+     * the full head carries. Capped at 5 entries x 250 chars per section so
+     * the whole head stays <= 8 KB on heavy personas (the 2026-07-22 soak
+     * showed the FULL head alone overflows the 16 KB prompt budget); the
+     * core anchor + identity lock are already section 1. Placed BEFORE the
+     * absolute rules so the guard block keeps last-position salience. */
+    if (immersive) {
+        if (persona->directors_notes && persona->directors_notes_count > 0) {
+            err = persona_compact_append_str(alloc, &buf, &len, &cap, "Director's Notes:\n");
+            if (err != HU_OK)
+                goto fail;
+            size_t d_max = persona->directors_notes_count < 5 ? persona->directors_notes_count : 5;
+            for (size_t i = 0; i < d_max; i++) {
+                if (!persona->directors_notes[i])
+                    continue;
+                char tmp[300];
+                int n = snprintf(tmp, sizeof(tmp), "- %.250s\n", persona->directors_notes[i]);
+                err = persona_compact_append(alloc, &buf, &len, &cap, tmp, (size_t)n);
+                if (err != HU_OK)
+                    goto fail;
+            }
+            err = persona_compact_append_str(alloc, &buf, &len, &cap, "\n");
+            if (err != HU_OK)
+                goto fail;
+        }
+        if (persona->immersive_reinforcement && persona->immersive_reinforcement_count > 0) {
+            err = persona_compact_append_str(alloc, &buf, &len, &cap, "Stay immersed:\n");
+            if (err != HU_OK)
+                goto fail;
+            size_t r_lim = persona->immersive_reinforcement_count < 5
+                               ? persona->immersive_reinforcement_count
+                               : 5;
+            for (size_t i = 0; i < r_lim; i++) {
+                const char *s = persona->immersive_reinforcement[i];
+                if (!s || !s[0])
+                    continue;
+                char tmp[300];
+                int n = snprintf(tmp, sizeof(tmp), "- %.250s\n", s);
+                err = persona_compact_append(alloc, &buf, &len, &cap, tmp, (size_t)n);
+                if (err != HU_OK)
+                    goto fail;
+            }
+            err = persona_compact_append_str(alloc, &buf, &len, &cap, "\n");
+            if (err != HU_OK)
+                goto fail;
+        }
+    }
+
     /* 6.5. Formality-aware absolute rules — the SAME block the live reactive
      * path appends (src/agent/agent_stream.c via
      * hu_persona_build_absolute_rules_fmt). Without it, the eval/A-B
@@ -5378,6 +5776,27 @@ hu_error_t hu_persona_build_prompt_compact(hu_allocator_t *alloc, const hu_perso
         }
     }
 
+    /* 6b. Env-gated directives that the full builder carries and this head
+     * silently dropped (2026-09-04 audit): with HU_PERSONA_HEAD=live the
+     * daemon never enters hu_persona_build_prompt, so HU_TERSENESS=live and
+     * HU_HUMOR_DIRECTIVE=live were no-ops in production. Same gates, same
+     * directive text; LIVE appends, SHADOW/OFF leave the prompt unchanged. */
+    if (hu_terse_mode_from_env() == HU_TERSE_LIVE) {
+        const char *td = hu_terse_directive();
+        err = persona_compact_append_line(alloc, &buf, &len, &cap, td, strlen(td));
+        if (err != HU_OK)
+            goto fail;
+    }
+    if (hu_gate_mode_from_env("HU_HUMOR_DIRECTIVE", HU_GATE_OFF) == HU_GATE_LIVE) {
+        char hum_dir[768];
+        size_t hum_len = 0;
+        if (hu_persona_build_humor_directive(persona, hum_dir, sizeof(hum_dir), &hum_len) ==
+                HU_OK &&
+            hum_len > 0 &&
+            (err = persona_compact_append_line(alloc, &buf, &len, &cap, hum_dir, hum_len)) != HU_OK)
+            goto fail;
+    }
+
     /* 7. Closing imperative: shape constraints + anti-pattern guards. */
     err = persona_compact_append_str(
         alloc, &buf, &len, &cap,
@@ -5394,6 +5813,21 @@ hu_error_t hu_persona_build_prompt_compact(hu_allocator_t *alloc, const hu_perso
 fail:
     alloc->free(alloc->ctx, buf, cap);
     return err;
+}
+
+hu_error_t hu_persona_build_prompt_compact(hu_allocator_t *alloc, const hu_persona_t *persona,
+                                           const char *channel, size_t channel_len, char **out,
+                                           size_t *out_len) {
+    return persona_build_prompt_compact_ex(alloc, persona, channel, channel_len, false, out,
+                                           out_len);
+}
+
+hu_error_t hu_persona_build_prompt_compact_immersive(hu_allocator_t *alloc,
+                                                     const hu_persona_t *persona,
+                                                     const char *channel, size_t channel_len,
+                                                     char **out, size_t *out_len) {
+    return persona_build_prompt_compact_ex(alloc, persona, channel, channel_len, true, out,
+                                           out_len);
 }
 
 /* Feedback recording and apply are in feedback.c */

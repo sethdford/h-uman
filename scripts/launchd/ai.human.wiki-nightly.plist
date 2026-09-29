@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <!-- better-than-human item 4: compile the per-contact wiki pages after the
+       05:05 insight/prospective extractor and before the 06:00 turn. Read-only
+       on memory.db; writes <state>/wiki/*.md only when every page lints.
+       Install: cp scripts/launchd/ai.human.wiki-nightly.plist ~/Library/LaunchAgents/
+                launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.human.wiki-nightly.plist -->
+  <key>Label</key><string>ai.human.wiki-nightly</string>
+  <key>ProgramArguments</key><array>
+    <string>/bin/bash</string><string>-lc</string>
+    <string>cd $HOME/Projects/h-uman &amp;&amp; /opt/homebrew/bin/python3 scripts/consolidate_wiki.py --write</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict><key>Hour</key><integer>5</integer><key>Minute</key><integer>20</integer></dict>
+  <key>RunAtLoad</key><false/>
+  <key>StandardOutPath</key><string>/Users/sethford/.human/logs/wiki-nightly.log</string>
+  <key>StandardErrorPath</key><string>/Users/sethford/.human/logs/wiki-nightly-error.log</string>
+</dict></plist>

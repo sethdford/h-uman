@@ -120,10 +120,15 @@ get_nanos() {
 parse_rss() {
     out="$1"
     rss=0
+    # `out` is the program's own output plus time(1)'s summary, which is
+    # always at the end. Only the tail is parsed, byte-wise (LC_ALL=C):
+    # macOS awk in a UTF-8 locale aborts with "towc: multibyte conversion
+    # failure" on a single invalid byte anywhere in 20k lines of program
+    # output, which took down the CI benchmark job on 2026-09-02.
     if [ "$TIME_RSS_UNIT" = "bytes" ]; then
-        rss=$(echo "$out" | awk '/maximum resident set size/ {gsub(/,/,""); print $1+0; exit}')
+        rss=$(printf '%s\n' "$out" | tail -n 40 | LC_ALL=C awk '/maximum resident set size/ {gsub(/,/,""); print $1+0; exit}')
     else
-        rss=$(echo "$out" | awk '/Maximum resident set size.*kbytes/ {for(i=1;i<=NF;i++) if($i ~ /^[0-9]+$/) {print $i*1024; exit}}')
+        rss=$(printf '%s\n' "$out" | tail -n 40 | LC_ALL=C awk '/Maximum resident set size.*kbytes/ {for(i=1;i<=NF;i++) if($i ~ /^[0-9]+$/) {print $i*1024; exit}}')
     fi
     echo "${rss:-0}"
 }
@@ -214,7 +219,7 @@ if [ -x "$TESTS_BIN" ]; then
     time_out=$("$TIME_CMD" $TIME_ARGS "$TESTS_BIN" 2>&1 || true)
     TESTS_RSS=$(parse_rss "$time_out")
     # Duration from time "real" line (last occurrence, time appends at end)
-    real_line=$(echo "$time_out" | grep ' real ' | tail -1)
+    real_line=$(printf '%s\n' "$time_out" | tail -n 40 | LC_ALL=C grep -a ' real ' | tail -1)
     if [ -n "$real_line" ]; then
         real_sec=$(echo "$real_line" | awk '{for(i=1;i<=NF;i++) if($i~/^[0-9]+\.?[0-9]*$/) {print $i; exit}}')
         if [ -n "$real_sec" ]; then

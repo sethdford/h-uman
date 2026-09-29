@@ -117,7 +117,7 @@
       "$type": "color"
     },
     "on-accent": {
-      "$value": "#ffffff",
+      "$value": "{color.neutral.50}",
       "$type": "color"
     },
     "accent-secondary": {
@@ -422,8 +422,9 @@
       "$description": "Tertiary text — same WCAG profile as text-muted"
     },
     "text-faint": {
-      "$value": "#9A9490",
-      "$type": "color"
+      "$value": "#726C65",
+      "$type": "color",
+      "$description": "Faint text — still WCAG AA 4.5:1 on warm light surfaces (4.75 on #F5F5F3). Was #9A9490 (2.7:1): axe failed the Overview hero subtitle and the Voice setup hint on 2026-09-05."
     },
     "accent": {
       "$value": "{color.human.500}",
@@ -451,7 +452,7 @@
       "$type": "color"
     },
     "on-accent": {
-      "$value": "#ffffff",
+      "$value": "{color.neutral.50}",
       "$type": "color"
     },
     "accent-secondary": {
@@ -464,7 +465,7 @@
       "$description": "WCAG AA: amber accent for text on light backgrounds"
     },
     "accent-secondary-hover": {
-      "$value": "{color.amber.light-600}",
+      "$value": "{color.amber.light-400}",
       "$type": "color"
     },
     "accent-secondary-subtle": {
@@ -476,7 +477,7 @@
       "$type": "color"
     },
     "on-accent-secondary": {
-      "$value": "#ffffff",
+      "$value": "{color.neutral.50}",
       "$type": "color"
     },
     "accent-tertiary": {
@@ -557,11 +558,11 @@
       "$type": "dimension"
     },
     "link": {
-      "$value": "{color.human.light-500}",
+      "$value": "{color.human.light-600}",
       "$type": "color"
     },
     "link-hover": {
-      "$value": "{color.human.light-600}",
+      "$value": "{color.human.900}",
       "$type": "color"
     },
     "link-active": {
@@ -663,7 +664,7 @@
     }
   },
   "high-contrast": {
-    "$description": "High contrast mode for accessibility",
+    "$description": "High contrast mode for accessibility. Black in both colour schemes: define every text-colour token here, or it inherits a light-theme value on black.",
     "bg": {
       "$value": "{color.neutral.0}",
       "$type": "color"
@@ -710,8 +711,34 @@
       "$type": "color"
     },
     "accent-text": {
-      "$value": "#3a6a24",
-      "$type": "color"
+      "$value": "{color.human.400}",
+      "$type": "color",
+      "$description": "WCAG AAA on the forced-black palette: 10.3:1 on bg, 9.2:1 on bg-surface, 7.6:1 on bg-overlay"
+    },
+    "accent-secondary-text": {
+      "$value": "{color.amber.400}",
+      "$type": "color",
+      "$description": "12.6:1 on bg. Without it the light scheme leaks amber.700 onto black (4.2:1)"
+    },
+    "accent-tertiary-text": {
+      "$value": "{color.blue.300}",
+      "$type": "color",
+      "$description": "10.3:1 on bg. Without it the light scheme leaks blue.700 onto black (2.4:1); dark's blue.400 is 6.9:1, short of AAA"
+    },
+    "link": {
+      "$value": "{color.human.400}",
+      "$type": "color",
+      "$description": "10.3:1 on bg. Without it the light scheme leaks human.light-600 onto black (3.3:1)"
+    },
+    "link-hover": {
+      "$value": "{color.human.300}",
+      "$type": "color",
+      "$description": "12.2:1 on bg. Without it the light scheme leaks human.900 onto black (2.1:1)"
+    },
+    "link-visited": {
+      "$value": "{color.human.400}",
+      "$type": "color",
+      "$description": "Same as link, as in the light theme; dark's human.600 is 6.1:1, short of AAA"
     },
     "accent-hover": {
       "$value": "#a3d46a",
@@ -780,6 +807,26 @@
     "focus-ring-offset": {
       "$value": "2px",
       "$type": "dimension"
+    },
+    "surface-container": {
+      "$value": "rgba(255, 255, 255, 0.08)",
+      "$type": "color",
+      "$description": "White veil over the black palette. Without it the light scheme leaks its near-white #f8f8f6 container under white text"
+    },
+    "surface-container-high": {
+      "$value": "rgba(255, 255, 255, 0.12)",
+      "$type": "color",
+      "$description": "White veil over the black palette. Without it the light scheme leaks #f0eeed under white text"
+    },
+    "surface-container-highest": {
+      "$value": "{color.neutral.200}",
+      "$type": "color",
+      "$description": "Opaque, because modals, menus and the command palette paint it over page content. Without it the light scheme leaks #e8e7e4 under white text"
+    },
+    "hover-overlay": {
+      "$value": "rgba(255, 255, 255, 0.12)",
+      "$type": "color",
+      "$description": "Light veil for a black background. Without it the light scheme leaks its black 6% veil, invisible on black"
     }
   },
   "composite": {
@@ -862,9 +909,9 @@
       "$value": {
         "fontFamily": "{fontFamily.sans}",
         "fontSize": "{fontSize.base}",
-        "fontWeight": "{fontWeight.regular}",
+        "fontWeight": "{fontWeight.normal}",
         "lineHeight": "{lineHeight.normal}",
-        "letterSpacing": "{letterSpacing.normal}"
+        "letterSpacing": "{letterSpacing.base}"
       },
       "$type": "typography"
     },
@@ -874,7 +921,7 @@
         "fontSize": "{fontSize.2xl}",
         "fontWeight": "{fontWeight.semibold}",
         "lineHeight": "{lineHeight.tight}",
-        "letterSpacing": "{letterSpacing.tight}"
+        "letterSpacing": "{letterSpacing.2xl}"
       },
       "$type": "typography"
     },
@@ -882,9 +929,9 @@
       "$value": {
         "fontFamily": "{fontFamily.sans}",
         "fontSize": "{fontSize.xs}",
-        "fontWeight": "{fontWeight.regular}",
+        "fontWeight": "{fontWeight.normal}",
         "lineHeight": "{lineHeight.normal}",
-        "letterSpacing": "{letterSpacing.wide}"
+        "letterSpacing": "{letterSpacing.xs}"
       },
       "$type": "typography"
     },
@@ -892,7 +939,7 @@
       "$value": {
         "fontFamily": "{fontFamily.mono}",
         "fontSize": "{fontSize.sm}",
-        "fontWeight": "{fontWeight.regular}",
+        "fontWeight": "{fontWeight.normal}",
         "lineHeight": "{lineHeight.relaxed}"
       },
       "$type": "typography"

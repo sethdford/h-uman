@@ -54,26 +54,6 @@ static void cleanup_test_config(void) {
 
 #ifdef HU_IS_TEST
 
-/* Mock stdout capture for verifying wizard prompts. */
-static char wizard_output[8192];
-static FILE *original_stdout;
-static FILE *capture_file;
-
-static void start_capturing_stdout(void) {
-    original_stdout = stdout;
-    capture_file = fopen("/dev/null", "w");
-    if (capture_file)
-        stdout = capture_file;
-}
-
-static void stop_capturing_stdout(void) {
-    if (capture_file) {
-        fclose(capture_file);
-        capture_file = NULL;
-    }
-    stdout = original_stdout;
-}
-
 /* AC-5.5: Config parses and validates per schema.
  *
  * This test constructs a config.json string manually (matching the structure

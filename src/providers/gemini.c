@@ -1,3 +1,4 @@
+#include "human/providers/gemini.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/http.h"
@@ -6,6 +7,7 @@
 #include "human/core/string.h"
 #include "human/provider.h"
 #include "human/providers/sse.h"
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,6 +34,21 @@ typedef struct hu_gemini_ctx {
     hu_allocator_t *alloc;
     time_t token_expires_at;
 } hu_gemini_ctx_t;
+
+/* Pure endpoint classifier — see the header for the auth contract. Kept free of
+ * any HU_IS_TEST guard so the request builder and the unit tests agree on the
+ * bearer-vs-`?key=` decision without a live network call. */
+bool hu_gemini_base_is_vertex(const char *base, size_t len) {
+    static const char needle[] = "aiplatform.googleapis.com";
+    const size_t nlen = sizeof(needle) - 1;
+    if (!base || len < nlen)
+        return false;
+    for (size_t i = 0; i + nlen <= len; i++) {
+        if (memcmp(base + i, needle, nlen) == 0)
+            return true;
+    }
+    return false;
+}
 
 #if !HU_IS_TEST
 static const char *gemini_effective_base(const hu_gemini_ctx_t *gc, size_t *out_len) {
@@ -842,6 +859,7 @@ static hu_error_t gemini_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_re
 
     size_t eff_base_len = 0;
     const char *eff_base = gemini_effective_base(gc, &eff_base_len);
+    bool is_vertex = hu_gemini_base_is_vertex(eff_base, eff_base_len);
 
     if (gc->oauth_token && gc->oauth_token_len > 0) {
         int na = snprintf(auth_buf, sizeof(auth_buf), "Bearer %.*s", (int)gc->oauth_token_len,
@@ -854,11 +872,7 @@ static hu_error_t gemini_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_re
             alloc->free(alloc->ctx, body, body_len);
             return HU_ERR_INVALID_ARGUMENT;
         }
-    } else {
-        if (!gc->api_key || gc->api_key_len == 0) {
-            alloc->free(alloc->ctx, body, body_len);
-            return HU_ERR_PROVIDER_AUTH;
-        }
+    } else if (!is_vertex && gc->api_key && gc->api_key_len > 0) {
         int n = snprintf(url_buf, sizeof(url_buf), "%.*s/%.*s:generateContent?key=%.*s",
                          (int)eff_base_len, eff_base, (int)model_len, model, (int)gc->api_key_len,
                          gc->api_key);
@@ -866,6 +880,11 @@ static hu_error_t gemini_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_re
             alloc->free(alloc->ctx, body, body_len);
             return HU_ERR_INVALID_ARGUMENT;
         }
+    } else {
+        /* Vertex needs a bearer token we don't have, or no credentials at all.
+         * Never append `?key=` to a Vertex URL — it always 401s. */
+        alloc->free(alloc->ctx, body, body_len);
+        return HU_ERR_PROVIDER_AUTH;
     }
 
     /* DEBUG (2026-05-25): when HU_GEMINI_DUMP_BODY env var is set, write the
@@ -1402,6 +1421,7 @@ static hu_error_t gemini_stream_chat(void *ctx, hu_allocator_t *alloc,
 
     size_t s_eff_base_len = 0;
     const char *s_eff_base = gemini_effective_base(gc, &s_eff_base_len);
+    bool s_is_vertex = hu_gemini_base_is_vertex(s_eff_base, s_eff_base_len);
 
     if (gc->oauth_token && gc->oauth_token_len > 0) {
         int na = snprintf(auth_buf, sizeof(auth_buf), "Bearer %.*s", (int)gc->oauth_token_len,
@@ -1410,10 +1430,15 @@ static hu_error_t gemini_stream_chat(void *ctx, hu_allocator_t *alloc,
             auth_header = auth_buf;
         snprintf(url_buf, sizeof(url_buf), "%.*s/%.*s:streamGenerateContent?alt=sse",
                  (int)s_eff_base_len, s_eff_base, (int)model_len, model);
-    } else {
+    } else if (!s_is_vertex && gc->api_key && gc->api_key_len > 0) {
         snprintf(url_buf, sizeof(url_buf), "%.*s/%.*s:streamGenerateContent?key=%.*s&alt=sse",
                  (int)s_eff_base_len, s_eff_base, (int)model_len, model, (int)gc->api_key_len,
                  gc->api_key);
+    } else {
+        /* Vertex needs a bearer token we don't have, or no credentials at all.
+         * Never append `?key=` to a Vertex URL — it always 401s. */
+        alloc->free(alloc->ctx, body, body_len);
+        return HU_ERR_PROVIDER_AUTH;
     }
 
     gemini_stream_ctx_t sctx = {
@@ -1524,7 +1549,14 @@ hu_error_t hu_gemini_create(hu_allocator_t *alloc, const char *api_key, size_t a
         gc->base_url_len = base_url_len;
     }
 
-    if (api_key && api_key_len > 0) {
+    /* Vertex AI (aiplatform.googleapis.com) authenticates ONLY via OAuth2
+     * bearer tokens from Application Default Credentials; it rejects `?key=`
+     * API keys with HTTP 401. An api_key configured against a Vertex base is a
+     * misconfiguration — ignore it for auth and use ADC instead. The `?key=`
+     * path is reserved for the generative-language endpoint. */
+    bool base_is_vertex = hu_gemini_base_is_vertex(base_url, base_url_len);
+
+    if (api_key && api_key_len > 0 && !base_is_vertex) {
         gc->api_key = hu_strndup(alloc, api_key, api_key_len);
         if (!gc->api_key) {
             if (gc->base_url)
@@ -1536,7 +1568,12 @@ hu_error_t hu_gemini_create(hu_allocator_t *alloc, const char *api_key, size_t a
     }
 #if !HU_IS_TEST
     else {
-        /* No API key — try Google Cloud ADC for Vertex AI */
+        if (api_key && api_key_len > 0 && base_is_vertex)
+            hu_log_warn("gemini", NULL,
+                        "ignoring configured api_key for Vertex AI endpoint "
+                        "(aiplatform.googleapis.com accepts only ADC OAuth2 tokens); "
+                        "authenticating via Application Default Credentials");
+        /* No usable API key — use Google Cloud ADC (Vertex AI). */
         gemini_load_adc(gc, alloc);
     }
 #endif

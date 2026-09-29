@@ -268,3 +268,108 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle status: active (default) / retired / rejected
+# ---------------------------------------------------------------------------
+
+
+def test_record_retirement_writes_status_fields():
+    """record_retirement() stamps a top-level status + reason + timestamp so an
+    enumerating reader can skip the entry without parsing free-text metrics."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        registry_path = Path(tmpdir) / "registry.json"
+        adapter_registry.record_training(
+            registry_path=registry_path, adapter_id="noop", metrics={"n_pairs": 1})
+
+        adapter_registry.record_retirement(
+            registry_path=registry_path, adapter_id="noop",
+            status="rejected", reason="lora_b 0/80 -- adapter == base",
+            timestamp="2026-09-05T12:00:00")
+
+        entry = json.loads(registry_path.read_text())["adapters"]["noop"]
+        assert entry["status"] == "rejected"
+        assert entry["retired_reason"] == "lora_b 0/80 -- adapter == base"
+        assert entry["retired_at"] == "2026-09-05T12:00:00"
+        # The training history is untouched -- retirement is additive metadata.
+        assert len(entry["training"]) == 1
+
+
+def test_record_retirement_rejects_unknown_status_and_unknown_adapter():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        registry_path = Path(tmpdir) / "registry.json"
+        adapter_registry.record_training(
+            registry_path=registry_path, adapter_id="a", metrics={})
+        try:
+            adapter_registry.record_retirement(
+                registry_path=registry_path, adapter_id="a", status="deleted", reason="x")
+            assert False, "expected ValueError for status=deleted"
+        except ValueError:
+            pass
+        try:
+            adapter_registry.record_retirement(
+                registry_path=registry_path, adapter_id="ghost", status="retired", reason="x")
+            assert False, "expected KeyError for an adapter not in the registry"
+        except KeyError:
+            pass
+        # Neither refusal created a phantom entry.
+        assert set(json.loads(registry_path.read_text())["adapters"]) == {"a"}
+
+
+def test_adapter_status_defaults_to_active_when_absent():
+    assert adapter_registry.adapter_status({"created": "x", "training": []}) == "active"
+    assert adapter_registry.adapter_status({"status": "retired"}) == "retired"
+    assert adapter_registry.is_active({"status": "rejected"}) is False
+    assert adapter_registry.is_active({}) is True
+
+
+def test_iter_adapters_skips_retired_and_rejected_by_default():
+    registry = {"adapters": {
+        "live": {"created": "x"},
+        "old": {"created": "x", "status": "retired"},
+        "noop": {"created": "x", "status": "rejected"},
+    }}
+    assert [k for k, _ in adapter_registry.iter_adapters(registry)] == ["live"]
+    assert sorted(k for k, _ in adapter_registry.iter_adapters(
+        registry, include_retired=True)) == ["live", "noop", "old"]
+
+
+def test_status_report_hides_retired_unless_asked():
+    """The status report is the one in-repo reader that enumerates the registry
+    (eval_fidelity_nightly / m3_promote only WRITE rows). It must not list a
+    retired adapter as if it were a candidate, but must say how many it hid."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        registry_path = Path(tmpdir) / "registry.json"
+        adapter_registry.record_training(
+            registry_path=registry_path, adapter_id="keep-me", metrics={})
+        adapter_registry.record_training(
+            registry_path=registry_path, adapter_id="dead-noop", metrics={})
+        adapter_registry.record_retirement(
+            registry_path=registry_path, adapter_id="dead-noop",
+            status="rejected", reason="all lora_b zero")
+
+        out = adapter_registry.status(registry_path=registry_path, live_adapter_id=None)
+        assert "Adapter: keep-me" in out
+        assert "Adapter: dead-noop" not in out
+        assert "1 retired/rejected adapter hidden" in out
+
+        out_all = adapter_registry.status(
+            registry_path=registry_path, live_adapter_id=None, include_retired=True)
+        assert "Adapter: dead-noop [REJECTED]" in out_all
+        assert "all lora_b zero" in out_all
+
+
+def test_status_report_still_warns_when_the_live_adapter_is_retired():
+    """Retiring the served adapter is refused by the writer, but if the registry
+    ever says the LIVE adapter is retired, hiding it would hide the problem."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        registry_path = Path(tmpdir) / "registry.json"
+        adapter_registry.record_training(
+            registry_path=registry_path, adapter_id="serving", metrics={})
+        adapter_registry.record_retirement(
+            registry_path=registry_path, adapter_id="serving",
+            status="retired", reason="superseded")
+        out = adapter_registry.status(registry_path=registry_path, live_adapter_id="serving")
+        assert "LIVE" in out and "retired" in out.lower()
+        assert "Adapter: serving" in out

@@ -325,9 +325,11 @@ export class ScWelcome extends LitElement {
                 </div>
                 <div class="step-title">${step.title}</div>
                 <div class="step-desc">${step.description}</div>
-                ${!step.done
-                  ? html`<hu-button variant="secondary" size="sm">Go</hu-button>`
-                  : nothing}
+                ${
+                  !step.done
+                    ? html`<hu-button variant="secondary" size="sm">Go</hu-button>`
+                    : nothing
+                }
                 <div class="step-progress ${step.done ? "done" : "pending"}"></div>
               </hu-card>
             `,

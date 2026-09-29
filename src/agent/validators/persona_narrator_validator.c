@@ -96,6 +96,44 @@ static bool has_third_person_name(const char *response, size_t response_len, con
     return false;
 }
 
+/* True when the reply opens by greeting the active persona by name —
+ * "Hello Seth,", "hi seth!", "Hey Seth." The twin IS the persona, so a
+ * greeting addressed to that name is the model writing the contact's turn
+ * (role inversion). 2026-09-06 the model produced exactly "Hello Seth," to a
+ * stranger's "Who is this?" (a tapback went out instead, but the chain let
+ * it through). "Hey Seth here" / "hey it's seth" stay legal: the name must
+ * be followed by punctuation, a newline or the end of the reply. */
+static bool greets_persona_by_name(const char *s, size_t len, const char *name_lc,
+                                   size_t name_len) {
+    static const char *const GREETINGS[] = {"hello", "hey", "hi", "dear"};
+    size_t i = 0;
+    while (i < len && (s[i] == ' ' || s[i] == '\n' || s[i] == '\r' || s[i] == '\t'))
+        i++;
+    size_t g = 0;
+    for (; g < sizeof(GREETINGS) / sizeof(GREETINGS[0]); g++) {
+        size_t glen = strlen(GREETINGS[g]);
+        if (ci_starts_with(s + i, len - i, GREETINGS[g], glen) &&
+            is_word_boundary_after(s, len, i + glen)) {
+            i += glen;
+            break;
+        }
+    }
+    if (g == sizeof(GREETINGS) / sizeof(GREETINGS[0]))
+        return false;
+    size_t sep = 0;
+    while (i < len && (s[i] == ' ' || s[i] == ',')) {
+        i++;
+        sep++;
+    }
+    if (sep == 0 || !ci_starts_with(s + i, len - i, name_lc, name_len))
+        return false;
+    i += name_len;
+    if (i >= len)
+        return true;
+    char c = s[i];
+    return c == ',' || c == '!' || c == '.' || c == '\n' || c == '\r';
+}
+
 /* --------------------------------------------------------------------------
  * Vtable implementation
  * -------------------------------------------------------------------------- */
@@ -137,19 +175,23 @@ static hu_error_t narrator_validate(void *ctx_ptr, hu_allocator_t *alloc,
     }
 
     bool cond_b = has_third_person_name(response, response_len, name_lc, name_len);
+    bool cond_c = !cond_b && greets_persona_by_name(response, response_len, name_lc, name_len);
 
     if (tmp_name)
         alloc->free(alloc->ctx, tmp_name, vctx->persona_name_len + 1);
 
-    if (!cond_b) {
+    if (!cond_b && !cond_c) {
         out->decision = HU_VALIDATOR_PASS;
         return HU_OK;
     }
 
-    /* Condition (b) matched — REJECT regardless of preamble. */
-    static const char REASON[] =
+    /* Condition (b) or (c) matched — REJECT regardless of preamble. */
+    static const char REASON_B[] =
         "persona-narrator pattern detected (third-person reference to active persona)";
-    size_t rlen = sizeof(REASON) - 1;
+    static const char REASON_C[] =
+        "persona-narrator: reply greets the active persona by name (role inversion)";
+    const char *REASON = cond_b ? REASON_B : REASON_C;
+    size_t rlen = strlen(REASON);
     char *reason = (char *)alloc->alloc(alloc->ctx, rlen + 1);
     if (!reason)
         return HU_ERR_OUT_OF_MEMORY;

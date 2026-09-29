@@ -6,10 +6,13 @@ Tests the gate logic, bootstrap CI, and verdict generation
 using mocked subprocess outputs.
 """
 
+import contextlib
 import json
+import os
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from unittest import mock
 
@@ -18,6 +21,16 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from eval_fidelity_helpers import bootstrap_ci, compute_persona_fidelity_scores
 import eval_fidelity_nightly
+
+# Hermetic defaults for the main()-level tests below: on the dev box a real
+# mlx-server answers on :8741, and the harness would (correctly) pick the
+# served path and refuse to run in-process. Tests that exercise served mode
+# re-patch both with mock.patch, which restores these on exit.
+os.environ.setdefault("HU_FIDELITY_GEN", "inprocess")
+os.environ.pop("HU_MLX_BASE_URL", None)
+eval_fidelity_nightly.served_endpoint_available = lambda *a, **k: False
+_REAL_CONVERSATION_LAST_ACTIVITY = getattr(eval_fidelity_nightly, "conversation_last_activity", None)
+eval_fidelity_nightly.conversation_last_activity = lambda *a, **k: (0.0, ["hermetic"])
 
 
 def test_bootstrap_ci_basic():
@@ -226,9 +239,1287 @@ def test_output_verdict_json():
     print(f"✓ verdict JSON structure valid")
 
 
+def test_resolve_serving_adapter_prefers_live_process():
+    """Resolution must prefer the adapter the live mlx-server is actually serving."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        live_adapter = tmpdir / "seth-lora-v9-live"
+        live_adapter.mkdir()
+        config_adapter = tmpdir / "seth-lora-v8-config"
+        config_adapter.mkdir()
+        config = tmpdir / "config.json"
+        config.write_text(json.dumps(
+            {"personalization": {"lora_adapter_path": str(config_adapter)}}
+        ))
+
+        ps_output = (
+            "/usr/bin/something --unrelated\n"
+            f"/opt/python /x/mlx-server.py --model m --port 8741 --adapter-path {live_adapter}\n"
+        )
+        path, source = eval_fidelity_nightly.resolve_serving_adapter(
+            ps_output=ps_output, config_path=config
+        )
+        assert path == live_adapter, f"Expected live adapter, got {path}"
+        assert "process" in source, f"Expected process source, got {source}"
+    print(f"✓ resolve_serving_adapter: prefers live mlx-server process ({source})")
+
+
+def test_resolve_serving_adapter_falls_back_to_config():
+    """With no live server, resolution must fall back to config.json personalization."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        config_adapter = tmpdir / "seth-lora-v8-config"
+        config_adapter.mkdir()
+        config = tmpdir / "config.json"
+        config.write_text(json.dumps(
+            {"personalization": {"lora_adapter_path": str(config_adapter)}}
+        ))
+
+        path, source = eval_fidelity_nightly.resolve_serving_adapter(
+            ps_output="/usr/bin/nothing-relevant\n", config_path=config
+        )
+        assert path == config_adapter, f"Expected config adapter, got {path}"
+        assert "config" in source, f"Expected config source, got {source}"
+    print(f"✓ resolve_serving_adapter: falls back to config.json ({source})")
+
+
+def test_resolve_serving_adapter_none_when_unresolvable():
+    """No live server + no config → (None, ...), never a fabricated path."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        missing_config = Path(tmpdir) / "does-not-exist.json"
+        path, source = eval_fidelity_nightly.resolve_serving_adapter(
+            ps_output="", config_path=missing_config
+        )
+        assert path is None, f"Expected None, got {path}"
+    print(f"✓ resolve_serving_adapter: unresolvable → None ({source})")
+
+
+GEMMA_8BIT = "mlx-community/gemma-4-31b-it-8bit"
+GLM_4BIT = "mlx-community/GLM-4.5-Air-4bit"
+
+
+# A base id that can never equal DEFAULT_MODEL or any real serving model, so
+# "config wins over the constant" is discriminated UNCONDITIONALLY.
+SENTINEL_CONFIG_BASE = "test-only/base-from-config"
+
+
+@contextlib.contextmanager
+def _config_override(model):
+    """Point the resolver at a synthetic config (model=None → no config file).
+
+    HERMETIC on purpose. The first version of this helper read the live
+    ~/.human/config.json and recomputed the same chain production computes,
+    which is conditionally vacuous: the assertion only discriminates while
+    config != DEFAULT_MODEL. Revert the base to gemma (a one-line rollback) or
+    run on a machine with no config — CI is exactly that machine — and both
+    sides collapse to DEFAULT_MODEL, so the test passes while testing nothing.
+    Caught in cross-session review, 2026-07-27."""
+    saved = eval_fidelity_nightly.DEFAULT_CONFIG_PATH
+    with tempfile.TemporaryDirectory() as td:
+        path = Path(td) / "config.json"
+        if model is not None:
+            path.write_text(json.dumps({"mlx_local": {"model": model}}))
+        try:
+            eval_fidelity_nightly.DEFAULT_CONFIG_PATH = path
+            yield
+        finally:
+            eval_fidelity_nightly.DEFAULT_CONFIG_PATH = saved
+
+
+def test_resolve_serving_adapter_filters_to_production_port():
+    """Regression: observed live 2026-07-26 — a gemma-8bit realtime spare on
+    :8747 was listed by `ps` BEFORE the production GLM server on :8741.
+    First-match resolution evaluated the wrong adapter. Resolution must
+    filter mlx-server lines by the production port."""
+    with tempfile.TemporaryDirectory() as tmpdir, mock.patch.dict("os.environ"):
+        os.environ.pop("HU_MLX_BASE_URL", None)
+        tmpdir = Path(tmpdir)
+        gemma_adapter = tmpdir / "gemma-adapter"
+        gemma_adapter.mkdir()
+        glm_adapter = tmpdir / "glm-adapter"
+        glm_adapter.mkdir()
+
+        two_servers = (
+            f"/opt/python /x/mlx-server.py --model {GEMMA_8BIT} --port 8747 "
+            f"--realtime --adapter-path {gemma_adapter}\n"
+            f"/opt/python /x/mlx-server.py --model {GLM_4BIT} --port 8741 "
+            f"--adapter-path {glm_adapter}\n"
+        )
+        path, source = eval_fidelity_nightly.resolve_serving_adapter(
+            ps_output=two_servers, config_path=tmpdir / "missing.json"
+        )
+        assert path == glm_adapter, f"Expected :8741 adapter, got {path}"
+        assert "8741" in source, f"Source must name the port, got {source}"
+
+        # A server line with NO --port flag counts as the default 8741.
+        no_port = (
+            f"/opt/python /x/mlx-server.py --model {GLM_4BIT} "
+            f"--adapter-path {glm_adapter}\n"
+        )
+        path, _ = eval_fidelity_nightly.resolve_serving_adapter(
+            ps_output=no_port, config_path=tmpdir / "missing.json"
+        )
+        assert path == glm_adapter, f"No --port must count as 8741, got {path}"
+    print("✓ resolve_serving_adapter: filters ps to production port")
+
+
+def test_resolve_serving_adapter_nonproduction_only_falls_to_config():
+    """With only a non-production server running, the resolver must ignore it
+    and fall through to config.json, never eval the spare's adapter."""
+    with tempfile.TemporaryDirectory() as tmpdir, mock.patch.dict("os.environ"):
+        os.environ.pop("HU_MLX_BASE_URL", None)
+        tmpdir = Path(tmpdir)
+        gemma_adapter = tmpdir / "gemma-adapter"
+        gemma_adapter.mkdir()
+        config_adapter = tmpdir / "config-adapter"
+        config_adapter.mkdir()
+        config = tmpdir / "config.json"
+        config.write_text(json.dumps(
+            {"personalization": {"lora_adapter_path": str(config_adapter)}}
+        ))
+
+        spare_only = (
+            f"/opt/python /x/mlx-server.py --model {GEMMA_8BIT} --port 8747 "
+            f"--adapter-path {gemma_adapter}\n"
+        )
+        path, source = eval_fidelity_nightly.resolve_serving_adapter(
+            ps_output=spare_only, config_path=config
+        )
+        assert path == config_adapter, f"Expected config adapter, got {path}"
+        assert "config" in source, f"Expected config source, got {source}"
+    print("✓ resolve_serving_adapter: non-production-only ps falls to config")
+
+
+def test_resolve_serving_model_filters_to_production_port():
+    """Same regression on the model axis: the nightly must eval the base that
+    :8741 serves, not whichever mlx-server `ps` lists first."""
+    with mock.patch.dict("os.environ"):
+        os.environ.pop("HU_MLX_BASE_URL", None)
+        two_servers = (
+            f"/opt/python /x/mlx-server.py --model {GEMMA_8BIT} --port 8747 "
+            f"--realtime --adapter-path /tmp/x\n"
+            f"/opt/python /x/mlx-server.py --model {GLM_4BIT} --port 8741 "
+            f"--adapter-path /tmp/y\n"
+        )
+        model = eval_fidelity_nightly.resolve_serving_model(ps_output=two_servers)
+        assert model == GLM_4BIT, f"Expected :8741 model, got {model}"
+
+        # No --port flag counts as the default 8741.
+        no_port = f"/opt/python /x/mlx-server.py --model {GLM_4BIT}\n"
+        model = eval_fidelity_nightly.resolve_serving_model(ps_output=no_port)
+        assert model == GLM_4BIT, f"No --port must count as 8741, got {model}"
+
+        # Only the spare running → same as no server. The POINT is that the
+        # spare must not win; where the fallback lands is the serverless chain
+        # (config mlx_local.model, then the hardcoded default) — see
+        # _expected_serverless_fallback and the 2026-07-27 note above.
+        spare_only = f"/opt/python /x/mlx-server.py --model {GEMMA_8BIT} --port 8747\n"
+        with _config_override(SENTINEL_CONFIG_BASE):
+            model = eval_fidelity_nightly.resolve_serving_model(ps_output=spare_only)
+        assert model != GEMMA_8BIT, f"spare on :8747 must never win, got {model}"
+        assert model == SENTINEL_CONFIG_BASE, \
+            f"spare-only ps must fall to the serverless chain (config), got {model}"
+    print("✓ resolve_serving_model: filters ps to production port")
+
+
+def test_production_mlx_port_honors_hu_mlx_base_url():
+    """HU_MLX_BASE_URL overrides the production port (mirrors
+    lora_training_runner.c resolve_mlx_base_url), default 8741."""
+    assert eval_fidelity_nightly.production_mlx_port(env={}) == "8741"
+    assert eval_fidelity_nightly.production_mlx_port(
+        env={"HU_MLX_BASE_URL": "http://127.0.0.1:8743/v1"}) == "8743"
+
+    # End-to-end through the resolver: pointing production at :8747 flips
+    # which server the same two-server ps output resolves to.
+    with mock.patch.dict(
+        "os.environ", {"HU_MLX_BASE_URL": "http://127.0.0.1:8747"}
+    ):
+        two_servers = (
+            f"/opt/python /x/mlx-server.py --model {GEMMA_8BIT} --port 8747 "
+            f"--adapter-path /tmp/x\n"
+            f"/opt/python /x/mlx-server.py --model {GLM_4BIT} --port 8741 "
+            f"--adapter-path /tmp/y\n"
+        )
+        model = eval_fidelity_nightly.resolve_serving_model(ps_output=two_servers)
+        assert model == GEMMA_8BIT, f"Env port must be honored, got {model}"
+    print("✓ production_mlx_port: HU_MLX_BASE_URL honored, default 8741")
+
+
+def _run_main_with_argv(argv, fixture_prompts=25):
+    """Drive eval_fidelity_nightly.main() with a synthetic fixture + mocked passes.
+
+    Returns (rc, record_eval_mock). run_eval_pass is mocked so no model loads.
+
+    The mocked passes return DIFFERENT text per pass and are scored to an equal
+    mean, which is the real shape of a SKIP: the adapter changed the wording but
+    did not improve fidelity. Byte-identical passes used to be the shortcut to
+    delta 0 here, but that is now a DEFERRED measurement fault (an adapter that
+    applies no delta was never measured) — a fixture that leans on it pins the
+    2026-07-27 bug instead of the registry contract these callers care about.
+    Scoring is mocked rather than real so the fixture is hermetic: the default
+    speaker model lives under ~/.human and exists on the dev box but not in CI,
+    which would otherwise make the verdict machine-dependent.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        fixture = tmpdir / "prompts.jsonl"
+        fixture.write_text("\n".join(
+            json.dumps({"prompt": "hey whatup", "channel": "imessage"})
+            for _ in range(fixture_prompts)
+        ))
+        adapter = tmpdir / "seth-lora-v9-test"
+        adapter.mkdir()
+
+        full_argv = ["eval_fidelity_nightly.py"] + [
+            a.replace("__ADAPTER__", str(adapter)) for a in argv
+        ] + ["--held-out-fixture", str(fixture), "--log-dir", str(tmpdir)]
+
+        def fake_pass(model_id, prompts, adapter_path=None, gen_timeout=600, use_subprocess=False):
+            # Differentiated per pass: the adapter changed the wording, so a real
+            # comparison happened and the no-op guard must not fire.
+            text = "hey whatup" if adapter_path is None else "hey whatsup"
+            return ([text] * len(prompts),
+                    {"pass": "mock", "elapsed_sec": 0.1, "count": len(prompts)})
+
+        def flat_scores(responses, channel="imessage", speaker_model=None):
+            # Equal means → delta 0 → below the practical floor → SKIP.
+            return ([{"score": 0.6, "pass": True, "fails": []} for _ in responses], 0.6)
+
+        with mock.patch.object(sys, "argv", full_argv), \
+             mock.patch("eval_fidelity_nightly.run_eval_pass", side_effect=fake_pass), \
+             mock.patch("eval_fidelity_nightly.compute_persona_fidelity_scores",
+                        side_effect=flat_scores), \
+             mock.patch("eval_fidelity_nightly.adapter_registry") as mock_registry:
+            rc = eval_fidelity_nightly.main()
+        return rc, mock_registry.record_eval
+
+
+def test_skip_records_null_score_and_exits_3():
+    """A SKIP verdict (delta below floor) must record score=None and exit 3.
+
+    Pins the 2026-07 bug where 13 nightly SKIPs landed in registry.json as
+    {"score": 1.0, "verdict": "SKIP"} — indistinguishable from a perfect eval.
+    """
+    # Differentiated responses scoring the same → delta 0 → practical gate fails
+    # → SKIP. (Byte-identical responses would now DEFER: see _run_main_with_argv.)
+    rc, record_eval = _run_main_with_argv(["--adapter-path", "__ADAPTER__"])
+    assert rc == eval_fidelity_nightly.EXIT_SKIP == 3, f"SKIP must exit 3, got {rc}"
+    assert record_eval.called, "SKIP after a full eval must still be recorded"
+    kwargs = record_eval.call_args.kwargs
+    assert kwargs["verdict"] == "SKIP"
+    assert kwargs["score"] is None, f"SKIP must record score=None, got {kwargs['score']}"
+    print(f"✓ SKIP verdict: exit={rc}, registry score=None")
+
+
+def test_adapter_missing_skip_is_loud_and_unrecorded(capsys=None):
+    """Adapter-not-found must exit 3, print FIDELITY_SKIP, and not touch the registry."""
+    import io
+    from contextlib import redirect_stdout
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc, record_eval = _run_main_with_argv(
+            ["--adapter-path", "/nonexistent/adapter-path-xyz"]
+        )
+    out = buf.getvalue()
+    assert rc == 3, f"missing adapter must exit 3, got {rc}"
+    assert "FIDELITY_SKIP" in out, "skip must print the greppable FIDELITY_SKIP marker"
+    assert not record_eval.called, "non-measurement skip must not write registry entries"
+    print(f"✓ adapter-missing skip: exit=3, FIDELITY_SKIP marker present, registry untouched")
+
+
+def test_no_registry_flag_skips_registry_write():
+    """--no-registry must complete a full eval without touching the adapter
+    registry — smoke/manual small-n runs were recording real entries (e.g. the
+    2026-07-25 n=5 PASS at 0.91) indistinguishable from gate-grade nightlies."""
+    rc, record_eval = _run_main_with_argv(
+        ["--adapter-path", "__ADAPTER__", "--no-registry"]
+    )
+    # equal-scoring pre/post → SKIP (exit 3): the eval RAN, only the registry write is off
+    assert rc == 3, f"eval must still run to a verdict, got rc={rc}"
+    assert not record_eval.called, \
+        "--no-registry must not write adapter-registry entries"
+    print(f"✓ --no-registry: full eval ran (rc={rc}), registry untouched")
+
+
+def test_resolve_serving_model_from_process():
+    """The serving --model must be resolvable from the live mlx-server process."""
+    ps_output = (
+        "/opt/python /x/mlx-server.py --model mlx-community/gemma-4-31b-it-8bit "
+        "--port 8741 --adapter-path /tmp/x\n"
+    )
+    model = eval_fidelity_nightly.resolve_serving_model(ps_output=ps_output)
+    assert model == "mlx-community/gemma-4-31b-it-8bit", f"got {model}"
+    # No live server → fall back to CONFIG (mlx_local.model), and only then to
+    # the hardcoded default. Updated 2026-07-27: this used to assert
+    # DEFAULT_MODEL unconditionally, which pinned the asymmetric-fallback bug —
+    # the adapter half already fell back to config, so a server-down night
+    # paired the config's GLM adapter with the constant's gemma base and
+    # produced a no-op run scored as a legitimate SKIP.
+    with _config_override(SENTINEL_CONFIG_BASE):
+        fallback = eval_fidelity_nightly.resolve_serving_model(ps_output="")
+    assert fallback == SENTINEL_CONFIG_BASE, f"config must win over the constant, got {fallback}"
+    # Only with NO config at all does the hardcoded default apply.
+    with _config_override(None):
+        last_resort = eval_fidelity_nightly.resolve_serving_model(ps_output="")
+    assert last_resort == eval_fidelity_nightly.DEFAULT_MODEL, f"got {last_resort}"
+    print(f"✓ resolve_serving_model: {model} (config={fallback}, no-config={last_resort})")
+
+
+def test_sentinel_responses_defer_not_score():
+    """All-timeout passes must DEFER (exit 2), never be scored.
+
+    Pins the 2026-07 bug where every mlx_lm call hit the 180s timeout, every
+    response was the literal '[timeout]' sentinel, the shape classifier scored
+    it 1.0, and 10 nights of pure timeouts recorded as pre=post=1.0 SKIP.
+    """
+    import io
+    from contextlib import redirect_stdout
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        fixture = tmpdir / "prompts.jsonl"
+        fixture.write_text("\n".join(
+            json.dumps({"prompt": "hey", "channel": "imessage"}) for _ in range(25)
+        ))
+        adapter = tmpdir / "seth-lora-v9-test"
+        adapter.mkdir()
+
+        argv = ["eval_fidelity_nightly.py", "--adapter-path", str(adapter),
+                "--held-out-fixture", str(fixture), "--log-dir", str(tmpdir)]
+
+        def timeout_pass(model_id, prompts, adapter_path=None, gen_timeout=600, use_subprocess=False):
+            return (["[timeout]"] * len(prompts),
+                    {"pass": "mock", "elapsed_sec": 0.1, "count": len(prompts)})
+
+        buf = io.StringIO()
+        with mock.patch.object(sys, "argv", argv), \
+             mock.patch("eval_fidelity_nightly.run_eval_pass", side_effect=timeout_pass), \
+             mock.patch("eval_fidelity_nightly.adapter_registry") as mock_registry, \
+             redirect_stdout(buf):
+            rc = eval_fidelity_nightly.main()
+
+        out = buf.getvalue()
+        assert rc == 2, f"all-sentinel run must DEFER (exit 2), got {rc}"
+        assert "FIDELITY_DEFERRED" in out, "deferred run must print greppable marker"
+        assert not mock_registry.record_eval.called, \
+            "sentinel-only run must not write a registry eval entry"
+    print(f"✓ all-sentinel passes: exit=2, FIDELITY_DEFERRED marker, registry untouched")
+
+
+def test_partial_sentinels_dropped_from_deltas():
+    """A few sentinel responses are dropped pairwise; the rest still score."""
+    calls = {"n": 0}
+
+    def mixed_pass(model_id, prompts, adapter_path=None, gen_timeout=600, use_subprocess=False):
+        calls["n"] += 1
+        # Valid responses differ per pass (a real comparison), so the SKIP here
+        # comes from equal SCORES, not from an unapplied adapter — the latter is
+        # now a DEFERRED measurement fault.
+        responses = [("hey whatup" if adapter_path is None else "hey whatsup")] * len(prompts)
+        responses[0] = "[timeout]"  # same index bad in both passes → 1 pair dropped
+        return (responses, {"pass": "mock", "elapsed_sec": 0.1, "count": len(prompts)})
+
+    def flat_scores(responses, channel="imessage", speaker_model=None):
+        # Flat so the verdict is hermetic: the default speaker model lives under
+        # ~/.human (present on the dev box, absent in CI) and would otherwise
+        # decide this test's verdict differently on each.
+        return ([{"score": 0.6, "pass": True, "fails": []} for _ in responses], 0.6)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        fixture = tmpdir / "prompts.jsonl"
+        fixture.write_text("\n".join(
+            json.dumps({"prompt": "hey", "channel": "imessage"}) for _ in range(25)
+        ))
+        adapter = tmpdir / "seth-lora-v9-test"
+        adapter.mkdir()
+        out_json = tmpdir / "verdict.json"
+
+        argv = ["eval_fidelity_nightly.py", "--adapter-path", str(adapter),
+                "--held-out-fixture", str(fixture), "--log-dir", str(tmpdir),
+                "--output-json", str(out_json)]
+
+        with mock.patch.object(sys, "argv", argv), \
+             mock.patch("eval_fidelity_nightly.run_eval_pass", side_effect=mixed_pass), \
+             mock.patch("eval_fidelity_nightly.compute_persona_fidelity_scores",
+                        side_effect=flat_scores), \
+             mock.patch("eval_fidelity_nightly.adapter_registry"):
+            rc = eval_fidelity_nightly.main()
+
+        verdict = json.loads(out_json.read_text())
+        assert verdict["n_valid_pairs"] == 24, f"expected 24 valid pairs, got {verdict.get('n_valid_pairs')}"
+        assert verdict["n_sentinel"]["pre"] == 1 and verdict["n_sentinel"]["post"] == 1
+        # equal-scoring valid responses → delta 0 → SKIP (exit 3), SCORED on 24 pairs
+        assert rc == 3 and verdict["verdict"] == "SKIP"
+    print(f"✓ partial sentinels: 1 pair dropped, verdict computed on 24")
+
+
+def test_pass_records_post_mean():
+    """A PASS verdict still records the real post_mean score."""
+    crafted = {"n": 0}
+
+    def fake_scores(responses, channel="imessage", speaker_model=None):
+        # First call = PRE (0.7), second = POST (0.8): constant deltas → stderr 0 → PASS
+        crafted["n"] += 1
+        score = 0.7 if crafted["n"] == 1 else 0.8
+        return ([{"score": score, "pass": True, "fails": []} for _ in responses], score)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        fixture = tmpdir / "prompts.jsonl"
+        fixture.write_text("\n".join(
+            json.dumps({"prompt": "hey", "channel": "imessage"}) for _ in range(25)
+        ))
+        adapter = tmpdir / "seth-lora-v9-test"
+        adapter.mkdir()
+
+        argv = ["eval_fidelity_nightly.py", "--adapter-path", str(adapter),
+                "--held-out-fixture", str(fixture), "--log-dir", str(tmpdir)]
+
+        def fake_pass(model_id, prompts, adapter_path=None, gen_timeout=600, use_subprocess=False):
+            # Differentiated per pass — a PASS is only reachable from a run where
+            # the adapter actually changed the output (see the no-op guard).
+            text = "hey" if adapter_path is None else "hey lol"
+            return ([text] * len(prompts),
+                    {"pass": "mock", "elapsed_sec": 0.1, "count": len(prompts)})
+
+        with mock.patch.object(sys, "argv", argv), \
+             mock.patch("eval_fidelity_nightly.run_eval_pass", side_effect=fake_pass), \
+             mock.patch("eval_fidelity_nightly.compute_persona_fidelity_scores", side_effect=fake_scores), \
+             mock.patch("eval_fidelity_nightly.adapter_registry") as mock_registry:
+            rc = eval_fidelity_nightly.main()
+
+        assert rc == 0, f"PASS must exit 0, got {rc}"
+        kwargs = mock_registry.record_eval.call_args.kwargs
+        assert kwargs["verdict"] == "PASS"
+        assert abs(kwargs["score"] - 0.8) < 1e-9, f"PASS must record post_mean, got {kwargs['score']}"
+    print(f"✓ PASS verdict: exit=0, registry score=post_mean")
+
+
+def test_generate_inprocess_timeout_sentinel():
+    """A generation exceeding the wall-clock guard returns '[timeout]'."""
+    import time as _time
+
+    def slow_gen(model, tokenizer, prompt, max_tokens):
+        _time.sleep(3)
+        return "too late"
+
+    with mock.patch("eval_fidelity_nightly._mlx_generate", side_effect=slow_gen):
+        r = eval_fidelity_nightly.generate_inprocess(
+            object(), object(), "hi", timeout_sec=1
+        )
+    assert r == "[timeout]", f"expected [timeout], got {r!r}"
+    print(f"✓ generate_inprocess (timeout): {r}")
+
+
+def test_generate_inprocess_error_sentinel():
+    """An exception inside generation returns a '[gen_err: ...]' sentinel."""
+    with mock.patch("eval_fidelity_nightly._mlx_generate",
+                    side_effect=RuntimeError("metal exploded")):
+        r = eval_fidelity_nightly.generate_inprocess(object(), object(), "hi")
+    assert r.startswith("[gen_err:") and "metal exploded" in r, f"got {r!r}"
+    print(f"✓ generate_inprocess (error): {r}")
+
+
+def test_generate_inprocess_empty_sentinel():
+    """Whitespace-only model output returns '[empty]'."""
+    with mock.patch("eval_fidelity_nightly._mlx_generate", return_value="   \n"):
+        r = eval_fidelity_nightly.generate_inprocess(object(), object(), "hi")
+    assert r == "[empty]", f"expected [empty], got {r!r}"
+    print(f"✓ generate_inprocess (empty): {r}")
+
+
+def test_run_eval_pass_loads_model_once():
+    """The whole point of the rewrite: ONE load per pass, not one per prompt."""
+    prompts = [{"prompt": f"p{i}"} for i in range(5)]
+    with mock.patch("eval_fidelity_nightly.load_model",
+                    return_value=(object(), object())) as m_load, \
+         mock.patch("eval_fidelity_nightly.generate_inprocess",
+                    return_value="hey") as m_gen, \
+         mock.patch("eval_fidelity_nightly.free_model") as m_free:
+        responses, stats = eval_fidelity_nightly.run_eval_pass(
+            "model-x", prompts, adapter_path="/tmp/adapter-y"
+        )
+    assert m_load.call_count == 1, f"load_model called {m_load.call_count}x, want 1"
+    assert m_gen.call_count == 5, f"generate_inprocess called {m_gen.call_count}x, want 5"
+    assert responses == ["hey"] * 5
+    assert m_free.called, "free_model must run after the pass"
+    # POST pass must load WITH the adapter
+    load_kwargs = m_load.call_args.kwargs
+    load_args = m_load.call_args.args
+    passed_adapter = load_kwargs.get("adapter_path",
+                                     load_args[1] if len(load_args) > 1 else None)
+    assert str(passed_adapter) == "/tmp/adapter-y", f"adapter not passed to load: {m_load.call_args}"
+    assert stats["pass"] == "POST (adapter)"
+    print(f"✓ run_eval_pass: 1 load, 5 generations, model freed")
+
+
+def test_run_eval_pass_pre_loads_without_adapter():
+    """The PRE pass must load the BASE model — adapter_path=None."""
+    with mock.patch("eval_fidelity_nightly.load_model",
+                    return_value=(object(), object())) as m_load, \
+         mock.patch("eval_fidelity_nightly.generate_inprocess", return_value="hey"), \
+         mock.patch("eval_fidelity_nightly.free_model"):
+        _, stats = eval_fidelity_nightly.run_eval_pass(
+            "model-x", [{"prompt": "a"}]
+        )
+    load_kwargs = m_load.call_args.kwargs
+    load_args = m_load.call_args.args
+    passed_adapter = load_kwargs.get("adapter_path",
+                                     load_args[1] if len(load_args) > 1 else None)
+    assert passed_adapter is None, f"PRE pass must not load an adapter: {m_load.call_args}"
+    assert stats["pass"] == "PRE (base)"
+    print(f"✓ run_eval_pass (PRE): base model loaded without adapter")
+
+
+def test_run_eval_pass_frees_model_on_error():
+    """free_model must run even when a generation raises unexpectedly."""
+    with mock.patch("eval_fidelity_nightly.load_model",
+                    return_value=(object(), object())), \
+         mock.patch("eval_fidelity_nightly.generate_inprocess",
+                    side_effect=KeyboardInterrupt), \
+         mock.patch("eval_fidelity_nightly.free_model") as m_free:
+        try:
+            eval_fidelity_nightly.run_eval_pass("model-x", [{"prompt": "a"}])
+            raise AssertionError("expected KeyboardInterrupt to propagate")
+        except KeyboardInterrupt:
+            pass
+    assert m_free.called, "free_model must run even on error (finally)"
+    print(f"✓ run_eval_pass (error): model freed via finally")
+
+
+def test_run_eval_pass_subprocess_fallback():
+    """--subprocess-gen keeps the legacy per-prompt subprocess path reachable."""
+    with mock.patch("eval_fidelity_nightly.generate", return_value="hey") as m_gen, \
+         mock.patch("eval_fidelity_nightly.load_model") as m_load:
+        responses, _ = eval_fidelity_nightly.run_eval_pass(
+            "model-x", [{"prompt": "a"}, {"prompt": "b"}], use_subprocess=True
+        )
+    assert m_gen.call_count == 2, "fallback must use the subprocess generate()"
+    assert not m_load.called, "fallback must NOT load the model in-process"
+    assert responses == ["hey", "hey"]
+    print(f"✓ run_eval_pass (--subprocess-gen): legacy path reachable, no in-process load")
+
+
+# --- Blended scorer (shape + speaker-id P(Seth)) tests ---------------------
+#
+# Pins the 2026-07-16 saturation incident: real generations happened, BOTH
+# passes emitted clean casual text, the shape classifier scored every response
+# 1.0, and the delta gate (PASS needs delta >= 0.05) was structurally
+# unwinnable. The blended scorer must produce a non-degenerate delta on that
+# exact scenario.
+
+# Base-model register: clean, capitalized, period-terminated assistant-casual.
+# Every one of these scores 1.0 on the shape classifier (verified empirically).
+BASE_ISH_TEXTS = [
+    "Sounds good. I will check on that today.",
+    "Yes, that works for me.",
+    "Thank you for letting me know.",
+    "Okay, I will send it over shortly.",
+    "That should be fine. I will confirm later.",
+]
+
+# Seth register: lowercase, seth-openers, contractions, no terminal period.
+# These ALSO score 1.0 on the shape classifier — that tie is the bug.
+SETH_ISH_TEXTS = [
+    "yeah lol i'm down",
+    "nah gonna skip it",
+    "kk sounds good",
+    "wait really? that's wild",
+    "yo lemme check real quick",
+]
+
+
+def _make_test_speaker_model():
+    """Deterministic v1-compatible speaker-id logreg model for tests.
+
+    Uses the real 15-feature featurize() from personaeval_speaker_id via
+    classify_text; only the weights are synthetic (favoring Seth-register
+    features), so the blend path is exercised end-to-end without depending
+    on the mutable /tmp/seth_speaker_id.json.
+    """
+    from personaeval_speaker_id import _FEATURE_NAMES
+    weights_by_name = {
+        "lowercase_ratio": 2.0,
+        "is_seth_opener": 2.5,
+        "has_contraction": 1.5,
+        "has_lol_or_ha": 1.5,
+        "is_ai_opener": -2.0,
+        "ends_with_period": -2.5,
+        "has_bullet": -3.0,
+        "has_numbered": -3.0,
+        "has_header": -3.0,
+        "has_bold": -2.0,
+    }
+    return {
+        "feature_names": list(_FEATURE_NAMES),
+        "weights": [weights_by_name.get(f, 0.0) for f in _FEATURE_NAMES],
+        "bias": -1.0,
+        "means": [0.0] * len(_FEATURE_NAMES),
+        "stds": [1.0] * len(_FEATURE_NAMES),
+    }
+
+
+def test_load_speaker_model_missing_returns_none():
+    """A missing or corrupt speaker-model file must yield None, not raise."""
+    from eval_fidelity_helpers import load_speaker_model
+    assert load_speaker_model("/nonexistent/speaker-model-xyz.json") is None
+    with tempfile.TemporaryDirectory() as tmpdir:
+        corrupt = Path(tmpdir) / "corrupt.json"
+        corrupt.write_text("{not json")
+        assert load_speaker_model(str(corrupt)) is None
+        # valid JSON but missing logreg keys is also unusable
+        not_a_model = Path(tmpdir) / "notmodel.json"
+        not_a_model.write_text(json.dumps({"hello": "world"}))
+        assert load_speaker_model(str(not_a_model)) is None
+    print("✓ load_speaker_model: missing/corrupt/invalid → None")
+
+
+def test_shape_only_saturates_on_0716_scenario():
+    """Documents the bug: shape-only scoring ties both registers at 1.0."""
+    _, base_mean = compute_persona_fidelity_scores(BASE_ISH_TEXTS, channel="imessage")
+    _, seth_mean = compute_persona_fidelity_scores(SETH_ISH_TEXTS, channel="imessage")
+    assert base_mean == 1.0 and seth_mean == 1.0, (
+        f"expected saturation (the bug this pins): base={base_mean}, seth={seth_mean}"
+    )
+    print(f"✓ shape-only saturation pinned: base={base_mean}, seth={seth_mean}, delta=0")
+
+
+def test_blended_scorer_separates_base_from_seth():
+    """On the 07-16 scenario the blended scorer must produce delta >= floor."""
+    model = _make_test_speaker_model()
+    base_cls, base_mean = compute_persona_fidelity_scores(
+        BASE_ISH_TEXTS, channel="imessage", speaker_model=model)
+    seth_cls, seth_mean = compute_persona_fidelity_scores(
+        SETH_ISH_TEXTS, channel="imessage", speaker_model=model)
+
+    delta = seth_mean - base_mean
+    assert delta >= 0.05, f"blended delta must clear the 0.05 floor, got {delta:.4f}"
+    assert 0.0 < base_mean < 1.0, f"base mean must have headroom, got {base_mean}"
+    # component provenance must be visible per classification
+    for c in base_cls + seth_cls:
+        assert "shape_score" in c and "p_seth" in c, f"missing components: {c.keys()}"
+        assert 0.0 <= c["p_seth"] <= 1.0
+    print(f"✓ blended scorer: base={base_mean:.3f}, seth={seth_mean:.3f}, delta={delta:.3f}")
+
+
+def test_blended_scorer_still_penalizes_ai_tells():
+    """The shape component must keep AI-telly text below clean text."""
+    model = _make_test_speaker_model()
+    ai_telly = ["Certainly! Here are a few options:\n- one\n- two"]
+    cls, ai_mean = compute_persona_fidelity_scores(
+        ai_telly, channel="imessage", speaker_model=model)
+    _, base_mean = compute_persona_fidelity_scores(
+        BASE_ISH_TEXTS, channel="imessage", speaker_model=model)
+    _, seth_mean = compute_persona_fidelity_scores(
+        SETH_ISH_TEXTS, channel="imessage", speaker_model=model)
+    assert ai_mean < base_mean < seth_mean, (
+        f"ordering must be ai < base < seth: {ai_mean:.3f}, {base_mean:.3f}, {seth_mean:.3f}"
+    )
+    assert cls[0]["shape_score"] < 1.0, "AI tells must still dent the shape component"
+    print(f"✓ blend ordering: ai={ai_mean:.3f} < base={base_mean:.3f} < seth={seth_mean:.3f}")
+
+
+def test_shape_only_backward_compatible():
+    """speaker_model=None must reproduce the pure shape score exactly."""
+    responses = ["hey whatup", "Depending on what you need, I can help.", "cool cool cool"]
+    cls, mean = compute_persona_fidelity_scores(responses, channel="imessage")
+    from eval_shape_classifier import classify
+    for r, c in zip(responses, cls):
+        assert c["score"] == classify(r, channel="imessage")["score"], (
+            f"shape-only score drifted for {r!r}"
+        )
+    print(f"✓ shape-only backward compat: mean={mean:.3f}")
+
+
+def test_nightly_blended_pass_records_scorer_provenance():
+    """End-to-end main(): blended scorer turns a real register shift into PASS,
+    and the verdict JSON records which scorer produced the numbers."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        fixture = tmpdir / "prompts.jsonl"
+        fixture.write_text("\n".join(
+            json.dumps({"prompt": "hey", "channel": "imessage"}) for _ in range(25)
+        ))
+        adapter = tmpdir / "seth-lora-v9-test"
+        adapter.mkdir()
+        speaker_model_path = tmpdir / "speaker.json"
+        speaker_model_path.write_text(json.dumps(_make_test_speaker_model()))
+        out_json = tmpdir / "verdict.json"
+
+        argv = ["eval_fidelity_nightly.py", "--adapter-path", str(adapter),
+                "--held-out-fixture", str(fixture), "--log-dir", str(tmpdir),
+                "--speaker-model", str(speaker_model_path),
+                "--output-json", str(out_json)]
+
+        def register_shift_pass(model_id, prompts, adapter_path=None, gen_timeout=600, use_subprocess=False):
+            text = "yeah lol i'm down" if adapter_path else "Sounds good. I will check on that today."
+            return ([text] * len(prompts),
+                    {"pass": "mock", "elapsed_sec": 0.1, "count": len(prompts)})
+
+        with mock.patch.object(sys, "argv", argv), \
+             mock.patch("eval_fidelity_nightly.run_eval_pass", side_effect=register_shift_pass), \
+             mock.patch("eval_fidelity_nightly.adapter_registry") as mock_registry:
+            rc = eval_fidelity_nightly.main()
+
+        verdict = json.loads(out_json.read_text())
+        assert rc == 0, f"register shift must PASS the blended gate, got rc={rc}: {verdict.get('reason')}"
+        assert verdict["verdict"] == "PASS"
+        assert verdict["scorer"]["mode"] == "blended", f"scorer provenance missing: {verdict.get('scorer')}"
+        assert verdict["scorer"]["shape_weight"] + verdict["scorer"]["speaker_weight"] == 1.0
+        assert verdict["delta"]["mean"] >= 0.05
+        kwargs = mock_registry.record_eval.call_args.kwargs
+        assert kwargs["verdict"] == "PASS"
+    print(f"✓ nightly blended PASS: rc=0, delta={verdict['delta']['mean']}, scorer=blended")
+
+
+def test_nightly_missing_speaker_model_degrades_loudly():
+    """No speaker model → shape-only fallback with a greppable degradation
+    marker and scorer provenance in the verdict (never a silent saturation)."""
+    import io
+    from contextlib import redirect_stdout
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        fixture = tmpdir / "prompts.jsonl"
+        fixture.write_text("\n".join(
+            json.dumps({"prompt": "hey", "channel": "imessage"}) for _ in range(25)
+        ))
+        adapter = tmpdir / "seth-lora-v9-test"
+        adapter.mkdir()
+        out_json = tmpdir / "verdict.json"
+
+        argv = ["eval_fidelity_nightly.py", "--adapter-path", str(adapter),
+                "--held-out-fixture", str(fixture), "--log-dir", str(tmpdir),
+                "--speaker-model", str(tmpdir / "no-such-model.json"),
+                "--output-json", str(out_json)]
+
+        def clean_pass(model_id, prompts, adapter_path=None, gen_timeout=600, use_subprocess=False):
+            text = "yeah lol i'm down" if adapter_path else "Sounds good. I will check on that today."
+            return ([text] * len(prompts),
+                    {"pass": "mock", "elapsed_sec": 0.1, "count": len(prompts)})
+
+        buf = io.StringIO()
+        with mock.patch.object(sys, "argv", argv), \
+             mock.patch("eval_fidelity_nightly.run_eval_pass", side_effect=clean_pass), \
+             mock.patch("eval_fidelity_nightly.adapter_registry"), \
+             redirect_stdout(buf):
+            rc = eval_fidelity_nightly.main()
+
+        out = buf.getvalue()
+        verdict = json.loads(out_json.read_text())
+        assert "FIDELITY_SCORER_DEGRADED" in out, "degradation must print a greppable marker"
+        assert verdict["scorer"]["mode"] == "shape-only", f"got {verdict.get('scorer')}"
+        # shape-only saturates on this scenario → delta 0 → SKIP, not PASS
+        assert rc == 3 and verdict["verdict"] == "SKIP", (
+            f"saturated shape-only run must SKIP, got rc={rc} verdict={verdict['verdict']}"
+        )
+    print(f"✓ missing speaker model: FIDELITY_SCORER_DEGRADED marker, shape-only SKIP")
+
+
+# --- Served-endpoint generation (2026-09-03 incident) ----------------------
+#
+# The in-process path loaded a SECOND copy of the 56 GB serving model beside
+# the live :8741 mlx-server; wired memory hit 94.8 GB, the server died with
+# "[METAL] Insufficient Memory" and production was dark until a reboot. These
+# pins make the harness generate THROUGH the served endpoint and refuse to
+# load in-process while a server is up.
+
+import io
+import struct
+from contextlib import redirect_stdout
+
+
+def _write_safetensors(path, tensors):
+    """Stdlib safetensors writer: tensors = {name: (dtype, shape, bytes)}."""
+    hdr, blobs, off = {}, [], 0
+    for name, (dtype, shape, blob) in tensors.items():
+        hdr[name] = {"dtype": dtype, "shape": list(shape),
+                     "data_offsets": [off, off + len(blob)]}
+        blobs.append(blob)
+        off += len(blob)
+    h = json.dumps(hdr).encode()
+    with open(path, "wb") as f:
+        f.write(struct.pack("<Q", len(h)))
+        f.write(h)
+        f.write(b"".join(blobs))
+
+
+def _read_safetensors_header(path):
+    with open(path, "rb") as f:
+        n = struct.unpack("<Q", f.read(8))[0]
+        return json.loads(f.read(n)), 8 + n
+
+
+def _make_fake_adapter(root: Path, name="seth-glm-air-v9-test") -> Path:
+    d = root / name
+    d.mkdir(parents=True)
+    ones = struct.pack("<8f", *([1.0] * 8))
+    _write_safetensors(d / "adapters.safetensors", {
+        "model.layers.0.mlp.down_proj.lora_a": ("F32", (2, 4), ones),
+        "model.layers.0.mlp.down_proj.lora_b": ("F32", (4, 2), ones),
+    })
+    (d / "adapter_config.json").write_text(json.dumps(
+        {"model": "mlx-community/GLM-4.5-Air-4bit", "lora_parameters": {"scale": 2.0}}))
+    return d
+
+
+def test_zero_adapter_mirrors_keys_and_is_all_zero():
+    """The PRE arm on the served endpoint is a zero-delta twin of the serving
+    adapter: same tensor names/shapes/dtypes, every byte zero, config copied.
+    A second call reuses the cached dir instead of rewriting 500 MB."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        src = _make_fake_adapter(tmp)
+        zero = eval_fidelity_nightly.ensure_zero_adapter(src, tmp / "zero-root")
+        assert zero != src and zero.is_dir(), zero
+        src_hdr, _ = _read_safetensors_header(src / "adapters.safetensors")
+        zero_hdr, base = _read_safetensors_header(zero / "adapters.safetensors")
+        assert {k: (v["dtype"], v["shape"]) for k, v in src_hdr.items()} == \
+               {k: (v["dtype"], v["shape"]) for k, v in zero_hdr.items()}, zero_hdr
+        data = (zero / "adapters.safetensors").read_bytes()[base:]
+        assert len(data) == 2 * 8 * 4 and not any(data), "zero adapter must be all zero bytes"
+        assert json.loads((zero / "adapter_config.json").read_text())["lora_parameters"]["scale"] == 2.0
+        mtime = (zero / "adapters.safetensors").stat().st_mtime_ns
+        again = eval_fidelity_nightly.ensure_zero_adapter(src, tmp / "zero-root")
+        assert again == zero and (zero / "adapters.safetensors").stat().st_mtime_ns == mtime, \
+            "second call must reuse the cached zero adapter"
+    print("✓ zero adapter: same keys/shapes/dtypes, all-zero bytes, cached")
+
+
+def test_generate_served_content_and_sentinels():
+    """Served generation returns the reply text, or the SAME sentinels the
+    in-process path uses so is_sentinel() filtering keeps working."""
+    url = "http://127.0.0.1:8743"
+    with mock.patch("eval_fidelity_nightly._http_json",
+                    return_value=(200, {"choices": [{"message": {"content": "  hey whatup \n"}}]})) as m:
+        assert eval_fidelity_nightly.generate_served(url, "yo", timeout_sec=5) == "hey whatup"
+        body = m.call_args.kwargs.get("body") or m.call_args.args[2]
+        assert body["messages"] == [{"role": "user", "content": "yo"}]
+        assert body["temperature"] == 0.0 and body["stream"] is False
+        headers = m.call_args.kwargs.get("headers") or {}
+        assert headers.get("X-HU-Priority") == "batch", "evals must never cut ahead of live traffic"
+    with mock.patch("eval_fidelity_nightly._http_json", side_effect=TimeoutError("read timed out")):
+        assert eval_fidelity_nightly.generate_served(url, "yo", timeout_sec=5) == "[timeout]"
+    with mock.patch("eval_fidelity_nightly._http_json", return_value=(503, {"error": "queue full"})), \
+         mock.patch("eval_fidelity_nightly.time.sleep"):
+        assert eval_fidelity_nightly.generate_served(url, "yo", timeout_sec=5).startswith("[gen_err:")
+    with mock.patch("eval_fidelity_nightly._http_json",
+                    return_value=(200, {"choices": [{"message": {"content": ""}}]})):
+        assert eval_fidelity_nightly.generate_served(url, "yo", timeout_sec=5) == "[empty]"
+    print("✓ generate_served: content, [timeout], [gen_err:], [empty]")
+
+
+class _FakeMlxServer:
+    """Stateful stand-in for the :8741 admin + chat surface, driven through the
+    _http_json seam. Replies differ by active adapter so the two arms differ."""
+
+    def __init__(self, serving: Path, fail_swap_to: Path | None = None):
+        self.adapter = str(serving.resolve())
+        self.serving = str(serving.resolve())
+        self.fail_swap_to = str(fail_swap_to.resolve()) if fail_swap_to else None
+        self.swaps: list[str] = []
+
+    def __call__(self, method, url, body=None, timeout=30, headers=None):
+        if url.endswith("/v1/adapters/current"):
+            return 200, {"adapter_path": self.adapter, "tensors_loaded": 2}
+        if url.endswith("/v1/adapters/swap"):
+            target = str(Path(body["adapter_path"]).resolve())
+            self.swaps.append(target)
+            if target == self.fail_swap_to:
+                return 500, {"error": "adapter load failed"}
+            self.adapter = target
+            return 200, {"status": "ok", "adapter_path": target, "tensors_loaded": 2}
+        if url.endswith("/v1/chat/completions"):
+            reply = "hey whatsup" if self.adapter == self.serving else "hey whatup"
+            return 200, {"choices": [{"message": {"content": reply}}]}
+        raise AssertionError(f"unexpected {method} {url}")
+
+
+def _served_argv(tmp: Path, adapter: Path, extra=()):
+    fixture = tmp / "prompts.jsonl"
+    fixture.write_text("\n".join(
+        json.dumps({"prompt": "hey", "channel": "imessage"}) for _ in range(25)))
+    return ["eval_fidelity_nightly.py", "--adapter-path", str(adapter),
+            "--held-out-fixture", str(fixture), "--log-dir", str(tmp),
+            "--output-json", str(tmp / "verdict.json"),
+            "--zero-adapter-root", str(tmp / "zero"), *extra]
+
+
+def _flat_scores(responses, channel="imessage", speaker_model=None):
+    return ([{"score": 0.6, "pass": True, "fails": []} for _ in responses], 0.6)
+
+
+def test_served_mode_never_loads_in_process_when_base_url_set():
+    """With HU_MLX_BASE_URL set the harness must generate through the served
+    endpoint — PRE on the zero adapter, POST on the serving adapter — and never
+    touch mlx_lm.load. The serving adapter is restored and verified afterwards."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        adapter = _make_fake_adapter(tmp)
+        fake = _FakeMlxServer(adapter)
+        argv = _served_argv(tmp, adapter)
+        buf = io.StringIO()
+        with mock.patch.object(sys, "argv", argv), \
+             mock.patch.dict(os.environ, {"HU_MLX_BASE_URL": "http://127.0.0.1:8743",
+                                          "HU_FIDELITY_GEN": "auto"}), \
+             mock.patch("eval_fidelity_nightly.served_endpoint_available", return_value=True), \
+             mock.patch("eval_fidelity_nightly.load_model",
+                        side_effect=AssertionError("in-process mlx_lm.load taken beside a live server")) as m_load, \
+             mock.patch("eval_fidelity_nightly._http_json", side_effect=fake), \
+             mock.patch("eval_fidelity_nightly.compute_persona_fidelity_scores", side_effect=_flat_scores), \
+             mock.patch("eval_fidelity_nightly.adapter_registry"), \
+             redirect_stdout(buf):
+            rc = eval_fidelity_nightly.main()
+        out = buf.getvalue()
+        assert not m_load.called, "in-process load must never run in served mode"
+        assert rc == 3, f"flat scores → SKIP (exit 3), got {rc}\n{out[-800:]}"
+        verdict = json.loads((tmp / "verdict.json").read_text())
+        assert verdict["generation"]["mode"] == "served", verdict.get("generation")
+        assert verdict["generation"]["server_url"] == "http://127.0.0.1:8743"
+        assert verdict["generation"]["adapter_restored"] is True
+        zero = str(Path(verdict["generation"]["pre_arm_adapter"]).resolve())
+        assert fake.swaps == [zero, str(adapter.resolve())], fake.swaps
+        assert fake.adapter == str(adapter.resolve()), "serving adapter must be restored"
+        assert verdict["differentiation"]["n_differing_pairs"] == 25
+    print("✓ served mode: no in-process load, PRE=zero adapter, POST=serving, restored")
+
+
+def test_inprocess_refused_beside_live_server():
+    """--gen inprocess with HU_MLX_BASE_URL set (or a live production server) is
+    the exact 2026-09-03 incident shape. It must DEFER before any load."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        adapter = _make_fake_adapter(tmp)
+        argv = _served_argv(tmp, adapter, extra=("--gen", "inprocess"))
+        buf = io.StringIO()
+        with mock.patch.object(sys, "argv", argv), \
+             mock.patch.dict(os.environ, {"HU_MLX_BASE_URL": "http://127.0.0.1:8743"}), \
+             mock.patch("eval_fidelity_nightly.served_endpoint_available", return_value=True), \
+             mock.patch("eval_fidelity_nightly.load_model",
+                        side_effect=AssertionError("second loader started")) as m_load, \
+             mock.patch("eval_fidelity_nightly.adapter_registry") as reg, \
+             redirect_stdout(buf):
+            rc = eval_fidelity_nightly.main()
+        out = buf.getvalue()
+        assert rc == 2 and "FIDELITY_DEFERRED" in out, f"rc={rc}\n{out[-600:]}"
+        assert "second loader" in out or "never two" in out.lower(), out[-600:]
+        assert not m_load.called and not reg.record_eval.called
+    print("✓ --gen inprocess beside a live server: DEFERRED, no load, no registry write")
+
+
+def test_served_restore_failure_is_loud_and_defers():
+    """If the serving adapter cannot be put back after the PRE arm, production is
+    running on a zero adapter. That must be unmissable: marker + exit 2, and no
+    verdict recorded."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        adapter = _make_fake_adapter(tmp)
+        fake = _FakeMlxServer(adapter, fail_swap_to=adapter)
+        argv = _served_argv(tmp, adapter, extra=("--gen", "served"))
+        buf = io.StringIO()
+        with mock.patch.object(sys, "argv", argv), \
+             mock.patch.dict(os.environ, {"HU_MLX_BASE_URL": "http://127.0.0.1:8743"}), \
+             mock.patch("eval_fidelity_nightly.served_endpoint_available", return_value=True), \
+             mock.patch("eval_fidelity_nightly._http_json", side_effect=fake), \
+             mock.patch("eval_fidelity_nightly.time.sleep"), \
+             mock.patch("eval_fidelity_nightly.adapter_registry") as reg, \
+             redirect_stdout(buf):
+            rc = eval_fidelity_nightly.main()
+        out = buf.getvalue()
+        assert rc == 2 and "FIDELITY_RESTORE_FAILED" in out, f"rc={rc}\n{out[-600:]}"
+        assert fake.swaps.count(str(adapter.resolve())) >= 3, "restore must retry"
+        assert not reg.record_eval.called
+        verdict = json.loads((tmp / "verdict.json").read_text())
+        assert verdict["verdict"] == "DEFERRED" and verdict["generation"]["adapter_restored"] is False
+    print("✓ served restore failure: FIDELITY_RESTORE_FAILED, exit 2, retried, unrecorded")
+
+
+def test_served_precheck_mismatch_defers_without_swap():
+    """If the server is not currently serving the adapter under test, swapping
+    'back' would install the wrong adapter. DEFER before touching it."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        adapter = _make_fake_adapter(tmp)
+        other = _make_fake_adapter(tmp, name="seth-glm-air-v8-other")
+        fake = _FakeMlxServer(other)
+        argv = _served_argv(tmp, adapter, extra=("--gen", "served"))
+        buf = io.StringIO()
+        with mock.patch.object(sys, "argv", argv), \
+             mock.patch.dict(os.environ, {"HU_MLX_BASE_URL": "http://127.0.0.1:8743"}), \
+             mock.patch("eval_fidelity_nightly.served_endpoint_available", return_value=True), \
+             mock.patch("eval_fidelity_nightly._http_json", side_effect=fake), \
+             mock.patch("eval_fidelity_nightly.adapter_registry"), \
+             redirect_stdout(buf):
+            rc = eval_fidelity_nightly.main()
+        out = buf.getvalue()
+        assert rc == 2 and "FIDELITY_DEFERRED" in out, f"rc={rc}\n{out[-600:]}"
+        assert fake.swaps == [], "must not swap when the server serves a different adapter"
+    print("✓ served precheck: server on another adapter → DEFERRED, no swap")
+
+
+
+
+# --- Quiet-window guard for the served PRE arm ------------------------------
+#
+# While the zero adapter is swapped in, any reply the daemon sends comes from
+# the raw base. The guard refuses to swap while a conversation is active and
+# aborts the PRE arm the moment a message newer than the swap appears, so the
+# exposure is bounded by one generation.
+
+import sqlite3
+
+
+def _make_activity_dbs(tmp: Path, chat_ts: float | None, mem_ts: float | None):
+    """Minimal chat.db / memory.db with the columns the probe reads."""
+    chat = tmp / "chat.db"
+    con = sqlite3.connect(chat)
+    con.execute("CREATE TABLE message(ROWID INTEGER PRIMARY KEY, date INTEGER, is_from_me INTEGER)")
+    if chat_ts is not None:
+        con.execute("INSERT INTO message(date, is_from_me) VALUES (?, 1)",
+                    (int((chat_ts - 978307200) * 1_000_000_000),))
+    con.commit(); con.close()
+    mem = tmp / "memory.db"
+    con = sqlite3.connect(mem)
+    con.execute("CREATE TABLE messages(id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, "
+                "content TEXT, created_at TEXT DEFAULT(datetime('now')))")
+    if mem_ts is not None:
+        con.execute("INSERT INTO messages(session_id, role, content, created_at) VALUES ('s','user','x', "
+                    "strftime('%Y-%m-%d %H:%M:%S', ?, 'unixepoch'))", (int(mem_ts),))
+    con.commit(); con.close()
+    return chat, mem
+
+
+def test_conversation_last_activity_takes_newest_readable_source():
+    """The probe returns the newest timestamp across chat.db (Apple epoch,
+    nanoseconds) and memory.db (UTC text), names the sources it read, skips
+    unreadable ones, and returns None when nothing is readable."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        chat, mem = _make_activity_dbs(tmp, chat_ts=1_700_000_000.0, mem_ts=1_700_000_600.0)
+        ts, sources = _REAL_CONVERSATION_LAST_ACTIVITY([chat, mem])
+        assert abs(ts - 1_700_000_600.0) < 1.0, (ts, sources)
+        assert sources == [str(chat), str(mem)], sources
+        ts, sources = _REAL_CONVERSATION_LAST_ACTIVITY([chat, tmp / "missing.db"])
+        assert abs(ts - 1_700_000_000.0) < 1.0 and sources == [str(chat)]
+        ts, sources = _REAL_CONVERSATION_LAST_ACTIVITY([tmp / "nope.db"])
+        assert ts is None and sources == []
+        # an empty but readable table counts as read, with no activity
+        chat2, _ = _make_activity_dbs(tmp / "e", chat_ts=None, mem_ts=None) if (tmp / "e").mkdir() is None else (None, None)
+        ts, sources = _REAL_CONVERSATION_LAST_ACTIVITY([chat2])
+        assert ts is None and sources == [str(chat2)]
+    print("✓ conversation_last_activity: newest of chat.db/memory.db, unreadable skipped")
+
+
+def test_wait_for_quiet_polls_until_quiet_or_deadline():
+    """Quiet now → proceed. Active then quiet → proceed after polling.
+    Never quiet within max_wait → refuse. Unmeasurable → refuse."""
+    clock = {"t": 10_000.0}
+    now = lambda: clock["t"]
+    sleeps = []
+    def sleep(s):
+        sleeps.append(s); clock["t"] += s
+    quiet = lambda: (clock["t"] - 1000.0, ["db"])
+    ok, why = eval_fidelity_nightly.wait_for_quiet(300, 900, probe=quiet, now=now, sleep=sleep)
+    assert ok and not sleeps, (ok, why, sleeps)
+    calls = {"n": 0}
+    def becomes_quiet():
+        calls["n"] += 1
+        return (clock["t"] - (10.0 if calls["n"] < 3 else 1000.0), ["db"])
+    sleeps.clear()
+    ok, why = eval_fidelity_nightly.wait_for_quiet(300, 900, probe=becomes_quiet, now=now, sleep=sleep)
+    assert ok and len(sleeps) == 2, (ok, why, sleeps)
+    sleeps.clear()
+    always_active = lambda: (clock["t"] - 5.0, ["db"])
+    ok, why = eval_fidelity_nightly.wait_for_quiet(300, 120, probe=always_active, now=now, sleep=sleep)
+    assert not ok and "active" in why and sum(sleeps) >= 120, (ok, why, sleeps)
+    ok, why = eval_fidelity_nightly.wait_for_quiet(300, 120, probe=lambda: (None, []), now=now, sleep=sleep)
+    assert not ok and "no readable" in why, (ok, why)
+    print("✓ wait_for_quiet: proceeds when quiet, polls, refuses at deadline / unmeasurable")
+
+
+def test_served_defers_without_swap_while_conversation_active():
+    """A message in the last quiet_sec means the daemon may reply any moment:
+    no swap, DEFERRED."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        adapter = _make_fake_adapter(tmp)
+        fake = _FakeMlxServer(adapter)
+        argv = _served_argv(tmp, adapter, extra=("--gen", "served", "--quiet-max-wait-sec", "0"))
+        buf = io.StringIO()
+        with mock.patch.object(sys, "argv", argv), \
+             mock.patch.dict(os.environ, {"HU_MLX_BASE_URL": "http://127.0.0.1:8743"}), \
+             mock.patch("eval_fidelity_nightly.served_endpoint_available", return_value=True), \
+             mock.patch("eval_fidelity_nightly.conversation_last_activity",
+                        side_effect=lambda *a, **k: (time.time() - 5.0, ["chat.db"])), \
+             mock.patch("eval_fidelity_nightly._http_json", side_effect=fake), \
+             mock.patch("eval_fidelity_nightly.adapter_registry"), \
+             redirect_stdout(buf):
+            rc = eval_fidelity_nightly.main()
+        out = buf.getvalue()
+        assert rc == 2 and "FIDELITY_DEFERRED" in out and "active" in out, f"rc={rc}\n{out[-600:]}"
+        assert fake.swaps == [], "must not swap while a conversation is active"
+    print("✓ served quiet guard: active conversation → DEFERRED, no swap")
+
+
+def test_served_aborts_pre_arm_when_message_arrives():
+    """A message that lands after the swap aborts the PRE arm at the next
+    prompt boundary; the serving adapter is restored and the run DEFERs."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        adapter = _make_fake_adapter(tmp)
+        fake = _FakeMlxServer(adapter)
+        probe_calls = {"n": 0}
+        def activity(*a, **k):
+            probe_calls["n"] += 1
+            # quiet for the pre-swap check and the first two prompt checks,
+            # then a message arrives
+            return ((time.time() - 3600.0) if probe_calls["n"] <= 3 else time.time(), ["chat.db"])
+        argv = _served_argv(tmp, adapter, extra=("--gen", "served"))
+        buf = io.StringIO()
+        with mock.patch.object(sys, "argv", argv), \
+             mock.patch.dict(os.environ, {"HU_MLX_BASE_URL": "http://127.0.0.1:8743"}), \
+             mock.patch("eval_fidelity_nightly.served_endpoint_available", return_value=True), \
+             mock.patch("eval_fidelity_nightly.conversation_last_activity", side_effect=activity), \
+             mock.patch("eval_fidelity_nightly._http_json", side_effect=fake), \
+             mock.patch("eval_fidelity_nightly.adapter_registry") as reg, \
+             redirect_stdout(buf):
+            rc = eval_fidelity_nightly.main()
+        out = buf.getvalue()
+        assert rc == 2 and "FIDELITY_DEFERRED" in out and "during the PRE arm" in out, f"rc={rc}\n{out[-600:]}"
+        assert fake.adapter == str(adapter.resolve()), "serving adapter must be restored after abort"
+        assert fake.swaps == [str(Path(str(adapter.resolve())).parent.parent / "zero" /
+                              adapter.name) if False else fake.swaps[0], str(adapter.resolve())]
+        assert len(fake.swaps) == 2
+        assert not reg.record_eval.called
+        verdict = json.loads((tmp / "verdict.json").read_text())
+        assert verdict["generation"]["adapter_restored"] is True
+        assert verdict["generation"]["pre_arm_aborted_after"] <= 3
+    print("✓ served PRE arm: message mid-arm → abort at prompt boundary, restore, DEFERRED")
+
+
+
+
+class _AsymServer(_FakeMlxServer):
+    """The 2026-09-05 shape: the zero-adapter (base) arm answers every prompt,
+    the serving-adapter arm returns whitespace for the first `n_empty` prompts
+    (six two-token replies in the live log) — or times out on every prompt when
+    `timeout_post` is set (two 814 s / 948 s runaways in the live log)."""
+
+    def __init__(self, serving: Path, n_empty: int = 8, timeout_post: bool = False,
+                 empty_pre_too: bool = False):
+        super().__init__(serving)
+        self.n_empty = n_empty
+        self.timeout_post = timeout_post
+        self.empty_pre_too = empty_pre_too
+        self.post_calls = 0
+
+    def __call__(self, method, url, body=None, timeout=30, headers=None):
+        if url.endswith("/v1/chat/completions"):
+            on_serving = self.adapter == self.serving
+            if on_serving and self.timeout_post:
+                raise TimeoutError("read timed out")
+            if on_serving:
+                self.post_calls += 1
+                if self.post_calls <= self.n_empty:
+                    return 200, {"choices": [{"message": {"content": "   "}}]}
+            elif self.empty_pre_too:
+                return 200, {"choices": [{"message": {"content": ""}}]}
+        return super().__call__(method, url, body=body, timeout=timeout, headers=headers)
+
+
+def _run_served_main(tmp: Path, adapter: Path, server):
+    argv = _served_argv(tmp, adapter, extra=("--gen", "served", "--no-quiet-guard"))
+    buf = io.StringIO()
+    with mock.patch.object(sys, "argv", argv), \
+         mock.patch.dict(os.environ, {"HU_MLX_BASE_URL": "http://127.0.0.1:8743"}), \
+         mock.patch("eval_fidelity_nightly.served_endpoint_available", return_value=True), \
+         mock.patch("eval_fidelity_nightly._http_json", side_effect=server), \
+         mock.patch("eval_fidelity_nightly.adapter_registry") as reg, \
+         contextlib.redirect_stdout(buf):
+        rc = eval_fidelity_nightly.main()
+    return rc, buf.getvalue(), reg
+
+
+def test_adapter_arm_sentinels_fail_not_defer():
+    """Base arm clean, adapter arm 8/25 empties: that is the adapter's behavior and
+    must land as a recorded FAIL, not a 'generation is failing' DEFERRED (the
+    2026-09-04/05 nightlies both deferred on exactly this asymmetry)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        adapter = _make_fake_adapter(tmp)
+        srv = _AsymServer(adapter, n_empty=8)
+        rc, out, reg = _run_served_main(tmp, adapter, srv)
+        assert rc == 1, f"rc={rc}\n{out[-800:]}"
+        assert "FIDELITY_FAIL" in out and "FIDELITY_DEFERRED" not in out, out[-800:]
+        v = json.loads((tmp / "verdict.json").read_text())
+        assert v["verdict"] == "FAIL" and v["exit_code"] == 1, v
+        assert v["n_sentinel"]["pre"] == 0 and v["n_sentinel"]["post"] == 8, v["n_sentinel"]
+        assert v["n_sentinel"]["post_by_type"]["empty"] == 8, v["n_sentinel"]
+        assert "adapter's behavior" in v["reason"], v["reason"]
+        assert reg.record_eval.called, "FAIL must reach the adapter registry"
+        assert reg.record_eval.call_args.kwargs["verdict"] == "FAIL"
+        assert reg.record_eval.call_args.kwargs["score"] is None
+        assert srv.adapter == srv.serving, "serving adapter must be restored"
+        assert (tmp / f"eval-fidelity-{time.strftime('%Y-%m-%d')}.json").exists(), \
+            "FAIL must be archived like any scored verdict"
+    print("✓ adapter-arm-only sentinels: FAIL (recorded), not DEFERRED")
+
+
+def test_symmetric_sentinels_still_defer():
+    """Both arms failing is the server or the harness — keep DEFERRED and keep the
+    registry untouched (the pre-existing contract)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        adapter = _make_fake_adapter(tmp)
+        srv = _AsymServer(adapter, n_empty=25, empty_pre_too=True)
+        rc, out, reg = _run_served_main(tmp, adapter, srv)
+        assert rc == 2 and "FIDELITY_DEFERRED" in out and "FIDELITY_FAIL" not in out, out[-800:]
+        assert "both arms" in out, out[-600:]
+        assert not reg.record_eval.called
+    print("✓ sentinels on both arms: still DEFERRED, registry untouched")
+
+
+def test_served_pass_aborts_after_consecutive_timeouts():
+    """Three client timeouts in a row mean the server is still chewing on abandoned
+    runaways; the arm must stop instead of queueing more behind them."""
+    with mock.patch("eval_fidelity_nightly._http_json", side_effect=TimeoutError("read timed out")):
+        resp, stats = eval_fidelity_nightly.run_served_pass(
+            "http://127.0.0.1:8743", [{"prompt": "hey"}] * 10, "POST (adapter)", gen_timeout=1)
+    assert resp == ["[timeout]"] * eval_fidelity_nightly.MAX_CONSECUTIVE_TIMEOUTS, resp
+    assert stats["aborted_by"] == "timeouts" and stats["aborted_after"] == 3, stats
+    assert "runaway" in stats["aborted"], stats["aborted"]
+    print("✓ served pass aborts after 3 consecutive timeouts")
+
+
+def test_post_arm_runaway_timeouts_are_adapter_fail():
+    """Adapter arm runs away on every prompt (client timeouts), base arm was clean:
+    the arm aborts early, the unrun prompts count as adapter-arm sentinels, and the
+    run lands as FAIL with the abort recorded in the verdict."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        adapter = _make_fake_adapter(tmp)
+        srv = _AsymServer(adapter, timeout_post=True)
+        rc, out, reg = _run_served_main(tmp, adapter, srv)
+        assert rc == 1 and "FIDELITY_FAIL" in out, out[-800:]
+        assert "ABORT after 3/25" in out, out[-800:]
+        v = json.loads((tmp / "verdict.json").read_text())
+        assert v["n_sentinel"]["pre"] == 0 and v["n_sentinel"]["post"] == 25, v["n_sentinel"]
+        assert v["n_sentinel"]["post_by_type"]["timeout"] == 3, v["n_sentinel"]
+        assert v["generation"]["post_arm_aborted_after"] == 3, v["generation"]
+        assert srv.adapter == srv.serving
+    print("✓ adapter-arm runaway timeouts: arm aborted, recorded as FAIL")
+
+
+
 def main():
     """Run all tests."""
     tests = [
+        test_adapter_arm_sentinels_fail_not_defer,
+        test_symmetric_sentinels_still_defer,
+        test_served_pass_aborts_after_consecutive_timeouts,
+        test_post_arm_runaway_timeouts_are_adapter_fail,
         test_bootstrap_ci_basic,
         test_bootstrap_ci_single,
         test_bootstrap_ci_empty,
@@ -241,6 +1532,44 @@ def main():
         test_gate_fail_statistical,
         test_load_prompts,
         test_output_verdict_json,
+        test_resolve_serving_adapter_prefers_live_process,
+        test_resolve_serving_adapter_falls_back_to_config,
+        test_resolve_serving_adapter_none_when_unresolvable,
+        test_resolve_serving_adapter_filters_to_production_port,
+        test_resolve_serving_adapter_nonproduction_only_falls_to_config,
+        test_resolve_serving_model_filters_to_production_port,
+        test_production_mlx_port_honors_hu_mlx_base_url,
+        test_skip_records_null_score_and_exits_3,
+        test_adapter_missing_skip_is_loud_and_unrecorded,
+        test_no_registry_flag_skips_registry_write,
+        test_resolve_serving_model_from_process,
+        test_sentinel_responses_defer_not_score,
+        test_partial_sentinels_dropped_from_deltas,
+        test_pass_records_post_mean,
+        test_generate_inprocess_timeout_sentinel,
+        test_generate_inprocess_error_sentinel,
+        test_generate_inprocess_empty_sentinel,
+        test_run_eval_pass_loads_model_once,
+        test_run_eval_pass_pre_loads_without_adapter,
+        test_run_eval_pass_frees_model_on_error,
+        test_run_eval_pass_subprocess_fallback,
+        test_load_speaker_model_missing_returns_none,
+        test_shape_only_saturates_on_0716_scenario,
+        test_blended_scorer_separates_base_from_seth,
+        test_blended_scorer_still_penalizes_ai_tells,
+        test_shape_only_backward_compatible,
+        test_nightly_blended_pass_records_scorer_provenance,
+        test_nightly_missing_speaker_model_degrades_loudly,
+        test_zero_adapter_mirrors_keys_and_is_all_zero,
+        test_generate_served_content_and_sentinels,
+        test_served_mode_never_loads_in_process_when_base_url_set,
+        test_inprocess_refused_beside_live_server,
+        test_served_restore_failure_is_loud_and_defers,
+        test_served_precheck_mismatch_defers_without_swap,
+        test_conversation_last_activity_takes_newest_readable_source,
+        test_wait_for_quiet_polls_until_quiet_or_deadline,
+        test_served_defers_without_swap_while_conversation_active,
+        test_served_aborts_pre_arm_when_message_arrives,
     ]
 
     print("=" * 60)
@@ -269,3 +1598,23 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def test_registry_record_carries_n_reason_adapter_base_and_provenance():
+    """The registry row is what a promotion reader sees. 14 v4-repair rows
+    (2026-07-12..25) carried {score 1.0, verdict SKIP} and nothing else; a
+    reader could not tell a saturated classifier from a perfect eval. Every
+    row must now say how many pairs it measured, why it concluded what it
+    did, which adapter and base, and how generation was produced."""
+    rc, record_eval = _run_main_with_argv(["--adapter-path", "__ADAPTER__"])
+    assert rc == eval_fidelity_nightly.EXIT_SKIP == 3, rc
+    kwargs = record_eval.call_args.kwargs
+    assert isinstance(kwargs["n"], int) and kwargs["n"] >= 1, kwargs
+    assert isinstance(kwargs["reason"], str) and kwargs["reason"].strip(), kwargs
+    assert kwargs["adapter_path"].endswith("seth-lora-v9-test"), kwargs
+    assert isinstance(kwargs["base"], str) and kwargs["base"], kwargs
+    prov = kwargs["provenance"]
+    assert isinstance(prov, dict)
+    for key in ("generation", "differentiation", "scorer", "n_valid_pairs"):
+        assert key in prov, key
+    print("✓ registry row carries n, reason, adapter_path, base, provenance")

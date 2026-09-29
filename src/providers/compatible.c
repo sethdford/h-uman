@@ -1,3 +1,4 @@
+#include "human/providers/compatible.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/json.h"
@@ -465,8 +466,11 @@ static hu_error_t compatible_chat(void *ctx, hu_allocator_t *alloc,
     /* Serialize against concurrent stream_chat and other compatible_chat
      * calls to avoid CURLE_COULDNT_CONNECT against single-threaded MLX
      * upstreams. See g_compatible_chat_lock declaration. */
+    hu_http_request_opts_t http_opts;
+    hu_compatible_request_opts_for_url(url_buf, (size_t)n, &http_opts);
     pthread_mutex_lock(&g_compatible_chat_lock);
-    err = hu_provider_http_post_json(alloc, url_buf, auth, NULL, body, body_len, &parsed);
+    err = hu_provider_http_post_json_opts(alloc, url_buf, auth, NULL, body, body_len, &http_opts,
+                                          &parsed);
     pthread_mutex_unlock(&g_compatible_chat_lock);
     alloc->free(alloc->ctx, body, body_len);
     if (err != HU_OK)
@@ -480,9 +484,11 @@ static hu_error_t compatible_chat(void *ctx, hu_allocator_t *alloc,
         if (msg && msg->type == HU_JSON_OBJECT) {
             const char *content = hu_json_get_string(msg, "content");
             if (content) {
-                size_t clen = strlen(content);
-                out->content = hu_strndup(alloc, content, clen);
-                out->content_len = out->content ? clen : 0;
+                /* Think scaffold / whole-reply fence stripped once here so every
+                 * consumer (persona turn, reflection, init proposer, JSON tools)
+                 * sees the reply, not the chat template's furniture. */
+                out->content =
+                    hu_helpers_dup_model_text(alloc, content, strlen(content), &out->content_len);
             }
             hu_json_value_t *tc_arr = hu_json_object_get(msg, "tool_calls");
             if (tc_arr && tc_arr->type == HU_JSON_ARRAY && tc_arr->data.array.len > 0) {
@@ -943,6 +949,17 @@ static bool compatible_supports_vision(void *ctx) {
     return true;
 }
 
+/* Task 10 (2026-09-01): the serving queue was 99.8% internal machinery. The
+ * mlx-server admits requests tagged `X-HU-Priority: live` ahead of batch
+ * work; the daemon process sets HU_LLM_PRIORITY=live in its launchd env, the
+ * judges/arena/proposer scripts do not. Unset = no header = batch. */
+__attribute__((unused)) static const char *compatible_priority_header(void) {
+    const char *p = getenv("HU_LLM_PRIORITY");
+    if (p && strcmp(p, "live") == 0)
+        return "X-HU-Priority: live\r\n";
+    return NULL;
+}
+
 static hu_error_t compatible_stream_chat(void *ctx, hu_allocator_t *alloc,
                                          const hu_chat_request_t *request, const char *model,
                                          size_t model_len, double temperature,
@@ -1124,8 +1141,8 @@ static hu_error_t compatible_stream_chat(void *ctx, hu_allocator_t *alloc,
      * held for the duration of the stream (covers SSE keep-alive); other
      * iMessages dispatched in parallel will wait their turn. */
     pthread_mutex_lock(&g_compatible_chat_lock);
-    err = hu_http_post_json_stream(alloc, url_buf, auth, NULL, body, body_len,
-                                   compatible_stream_write_cb, &sctx);
+    err = hu_http_post_json_stream(alloc, url_buf, auth, compatible_priority_header(), body,
+                                   body_len, compatible_stream_write_cb, &sctx);
     pthread_mutex_unlock(&g_compatible_chat_lock);
     hu_provider_sse_parser_deinit(&sctx.parser);
     alloc->free(alloc->ctx, body, body_len);
@@ -1307,6 +1324,32 @@ static const hu_provider_vtable_t compatible_vtable = {
     .supports_vision_for_model = NULL,
     .stream_chat = compatible_stream_chat,
 };
+
+static bool compatible_url_is_loopback(const char *url, size_t url_len) {
+    static const char *const prefixes[] = {"http://127.0.0.1", "http://localhost",
+                                           "https://127.0.0.1", "https://localhost"};
+    for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); i++) {
+        size_t plen = strlen(prefixes[i]);
+        if (url_len < plen || strncmp(url, prefixes[i], plen) != 0)
+            continue;
+        /* host must end here: "localhost" is not "localhost.example" */
+        char next = url_len > plen ? url[plen] : '\0';
+        if (next == '\0' || next == ':' || next == '/')
+            return true;
+    }
+    return false;
+}
+
+void hu_compatible_request_opts_for_url(const char *url, size_t url_len,
+                                        hu_http_request_opts_t *out) {
+    if (!out)
+        return;
+    memset(out, 0, sizeof(*out));
+    if (!url || url_len == 0)
+        return;
+    if (compatible_url_is_loopback(url, url_len))
+        out->timeout_secs = HU_COMPATIBLE_LOCAL_TIMEOUT_SECS;
+}
 
 hu_error_t hu_compatible_create(hu_allocator_t *alloc, const char *api_key, size_t api_key_len,
                                 const char *base_url, size_t base_url_len, hu_provider_t *out) {

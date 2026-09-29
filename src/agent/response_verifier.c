@@ -14,8 +14,8 @@
  * even with the negative's `reason` appended. */
 #define HU_NEG_REFUSAL_HARD   "I can't help with that — you've asked me not to discuss it."
 #define HU_NEG_REFUSAL_POLICY "I can't help with that — it would violate a safety policy."
-#define HU_NEG_HEDGE_SOFT     "I'm not confident enough to commit to that — let me double-check first."
-#define HU_NEG_HEDGE_CONFIRM  "I think we agreed not to bring this up — is that still right?"
+#define HU_NEG_HEDGE_SOFT "I'm not confident enough to commit to that — let me double-check first."
+#define HU_NEG_HEDGE_CONFIRM "I think we agreed not to bring this up — is that still right?"
 
 /* sprint-2c Story A — matcher constants.
  *
@@ -46,6 +46,18 @@ hu_verifier_config_t hu_verifier_default_config(void) {
     c.max_claims = 16;
     c.now_ms = 0;
     return c;
+}
+
+hu_verify_mode_t hu_response_verify_mode_for_turn(hu_verify_mode_t base,
+                                                  hu_gate_mode_t quality_gate_mode, bool have_drift,
+                                                  float drift_score, float drift_threshold) {
+    if (base != HU_VERIFY_TELEMETRY)
+        return base; /* explicit operator HU_VERIFY_MODE is never overridden */
+    if (quality_gate_mode != HU_GATE_LIVE)
+        return base; /* OFF/SHADOW never change behavior */
+    if (have_drift && drift_score < drift_threshold)
+        return HU_VERIFY_SOFT; /* drift + TELEMETRY → hedge unsupported claims */
+    return base;
 }
 
 /* Format a unix ms timestamp into a short "Mon 2026-05-09 14:22" label.
@@ -97,9 +109,11 @@ void hu_provenance_render(const hu_memory_relation_row_t *rel, char *buf, size_t
  * not a continuation of the prefix. */
 static bool rv_sentence_starts_with_ci(const char *s, size_t len, const char *prefix) {
     size_t i = 0;
-    while (i < len && isspace((unsigned char)s[i])) i++;
+    while (i < len && isspace((unsigned char)s[i]))
+        i++;
     size_t pl = strlen(prefix);
-    if (pl == 0 || len - i < pl) return false;
+    if (pl == 0 || len - i < pl)
+        return false;
     for (size_t j = 0; j < pl; j++) {
         if (tolower((unsigned char)s[i + j]) != tolower((unsigned char)prefix[j]))
             return false;
@@ -128,18 +142,15 @@ static bool rv_sentence_starts_with_ci(const char *s, size_t len, const char *pr
  * time keeps the abstain decision focused on actual propositions. */
 static bool rv_sentence_is_propositional_claim(const char *s, size_t len) {
     static const char *const k_skip[] = {
-        "I think",   "I believe", "I feel",   "I guess",     "I suppose",
-        "I assume",  "I hope",    "I imagine","I doubt",     "I wonder",
-        "I reckon",  "I bet",
-        "Maybe ",    "Perhaps ",  "Probably ","Possibly ",
-        "In my opinion","It seems","It feels","Apparently ","Supposedly ",
-        "Tell me",   "Show me",   "Give me",  "Help me",     "Let me",
-        "Please",    "Could you", "Can you",  "Would you",   "Will you",
-        "Shall we",  "Should I",  "Shall I",  "Do you",      "Are you",
-        "Make me",   "Create ",   "Write ",   "Generate ",   "Send ",
-        "Draft ",    "Brainstorm","Suggest ", "Recommend ",  "Explain ",
-        "Summarize", "Translate ","Rewrite ",
-        NULL,
+        "I think",    "I believe",   "I feel",      "I guess",   "I suppose",     "I assume",
+        "I hope",     "I imagine",   "I doubt",     "I wonder",  "I reckon",      "I bet",
+        "Maybe ",     "Perhaps ",    "Probably ",   "Possibly ", "In my opinion", "It seems",
+        "It feels",   "Apparently ", "Supposedly ", "Tell me",   "Show me",       "Give me",
+        "Help me",    "Let me",      "Please",      "Could you", "Can you",       "Would you",
+        "Will you",   "Shall we",    "Should I",    "Shall I",   "Do you",        "Are you",
+        "Make me",    "Create ",     "Write ",      "Generate ", "Send ",         "Draft ",
+        "Brainstorm", "Suggest ",    "Recommend ",  "Explain ",  "Summarize",     "Translate ",
+        "Rewrite ",   NULL,
     };
     for (size_t k = 0; k_skip[k]; k++) {
         if (rv_sentence_starts_with_ci(s, len, k_skip[k]))
@@ -207,10 +218,9 @@ static float verify_claim_against_facade(hu_memory_facade_t *memory, hu_allocato
                                          const char *contact_id, int cid_len, const char *claim,
                                          hu_provenance_receipt_t *out_receipt) {
     /* Tokenize claim into >= 4-char alpha tokens. Skip stopwords. */
-    static const char *const stop[] = {"is",   "was",   "were", "will", "the",  "and",
-                                        "this", "that",  "with", "have", "has",  "had",
-                                        "for",  "from",  "your", "you",  "they", "them",
-                                        "i'm",  "i've",  "i'll", "i'd",  NULL};
+    static const char *const stop[] = {
+        "is",  "was",  "were", "will", "the",  "and",  "this", "that", "with", "have", "has", "had",
+        "for", "from", "your", "you",  "they", "them", "i'm",  "i've", "i'll", "i'd",  NULL};
     char tokens[16][32] = {{0}};
     size_t nt = 0;
     size_t i = 0;
@@ -310,14 +320,12 @@ static float verify_claim_against_facade(hu_memory_facade_t *memory, hu_allocato
         /* best_prov is 80 bytes; out_receipt->source is 64. Width-bound
          * so GCC -Wformat-truncation=2 is quiet under -Werror. */
         snprintf(out_receipt->source, sizeof(out_receipt->source), "%.*s",
-                 (int)(sizeof(out_receipt->source) - 1),
-                 best_prov[0] ? best_prov : "memory");
+                 (int)(sizeof(out_receipt->source) - 1), best_prov[0] ? best_prov : "memory");
         out_receipt->observed_at_ms = best_es;
         char ts[32];
         render_timestamp(best_es, ts, sizeof(ts));
         /* Width-bound best_prov; ts is already 32 bytes which fits. */
-        snprintf(out_receipt->rendered, sizeof(out_receipt->rendered),
-                 "[from %.60s, %s]",
+        snprintf(out_receipt->rendered, sizeof(out_receipt->rendered), "[from %.60s, %s]",
                  best_prov[0] ? best_prov : "memory", ts);
     }
     return best_score;
@@ -330,10 +338,9 @@ static float verify_claim_against_facade(hu_memory_facade_t *memory, hu_allocato
  * written into `out`. Stopword list is intentionally minimal — the same
  * set the W4 facade-tokenizer already uses. */
 static size_t tokenize_negative(const char *text, size_t len, char out[][32], size_t cap) {
-    static const char *const stop[] = {"is",   "was",   "were", "will", "the",  "and",
-                                        "this", "that",  "with", "have", "has",  "had",
-                                        "for",  "from",  "your", "you",  "they", "them",
-                                        "i'm",  "i've",  "i'll", "i'd",  NULL};
+    static const char *const stop[] = {
+        "is",  "was",  "were", "will", "the",  "and",  "this", "that", "with", "have", "has", "had",
+        "for", "from", "your", "you",  "they", "them", "i'm",  "i've", "i'll", "i'd",  NULL};
     size_t n = 0;
     size_t i = 0;
     while (i < len && n < cap) {
@@ -416,10 +423,18 @@ static void render_negative_text(const hu_negative_memory_t *nm, char *out, size
         return;
     const char *base = "";
     switch (nm->source) {
-    case HU_NEGATIVE_SOURCE_USER_EXPLICIT:    base = HU_NEG_REFUSAL_HARD;   break;
-    case HU_NEGATIVE_SOURCE_SYSTEM_POLICY:    base = HU_NEG_REFUSAL_POLICY; break;
-    case HU_NEGATIVE_SOURCE_SELF_RAG_ABSTAIN: base = HU_NEG_HEDGE_SOFT;     break;
-    case HU_NEGATIVE_SOURCE_AUTO_EXTRACT:     base = HU_NEG_HEDGE_CONFIRM;  break;
+    case HU_NEGATIVE_SOURCE_USER_EXPLICIT:
+        base = HU_NEG_REFUSAL_HARD;
+        break;
+    case HU_NEGATIVE_SOURCE_SYSTEM_POLICY:
+        base = HU_NEG_REFUSAL_POLICY;
+        break;
+    case HU_NEGATIVE_SOURCE_SELF_RAG_ABSTAIN:
+        base = HU_NEG_HEDGE_SOFT;
+        break;
+    case HU_NEGATIVE_SOURCE_AUTO_EXTRACT:
+        base = HU_NEG_HEDGE_CONFIRM;
+        break;
     }
     if (nm->reason[0]) {
         /* Width-bound the reason so the printed string can never exceed cap. */
@@ -432,8 +447,7 @@ static void render_negative_text(const hu_negative_memory_t *nm, char *out, size
     }
 }
 
-hu_verifier_outcome_t hu_negatives_scan_claim(const struct hu_world_model *wm,
-                                              const char *claim,
+hu_verifier_outcome_t hu_negatives_scan_claim(const struct hu_world_model *wm, const char *claim,
                                               char *out_refusal, size_t refusal_cap,
                                               char *out_hedge, size_t hedge_cap,
                                               bool *out_policy_hit) {
@@ -470,19 +484,20 @@ hu_verifier_outcome_t hu_negatives_scan_claim(const struct hu_world_model *wm,
     return worst;
 }
 
-hu_error_t hu_response_verify(hu_allocator_t *alloc, hu_memory_facade_t *memory, const char *contact_id,
-                              size_t contact_id_len, const char *draft, size_t draft_len,
-                              const hu_verifier_config_t *cfg, hu_verifier_report_t *out_report) {
-    return hu_response_verify_against_world_model(alloc, memory, /*wm=*/NULL, contact_id,
-                                                  contact_id_len, draft, draft_len, cfg, out_report);
+hu_error_t hu_response_verify(hu_allocator_t *alloc, hu_memory_facade_t *memory,
+                              const char *contact_id, size_t contact_id_len, const char *draft,
+                              size_t draft_len, const hu_verifier_config_t *cfg,
+                              hu_verifier_report_t *out_report) {
+    return hu_response_verify_against_world_model(
+        alloc, memory, /*wm=*/NULL, contact_id, contact_id_len, draft, draft_len, cfg, out_report);
 }
 
-hu_error_t hu_response_verify_against_world_model(
-    hu_allocator_t *alloc, hu_memory_facade_t *memory,
-    const struct hu_world_model *wm,
-    const char *contact_id, size_t contact_id_len,
-    const char *draft, size_t draft_len,
-    const hu_verifier_config_t *cfg, hu_verifier_report_t *out_report) {
+hu_error_t hu_response_verify_against_world_model(hu_allocator_t *alloc, hu_memory_facade_t *memory,
+                                                  const struct hu_world_model *wm,
+                                                  const char *contact_id, size_t contact_id_len,
+                                                  const char *draft, size_t draft_len,
+                                                  const hu_verifier_config_t *cfg,
+                                                  hu_verifier_report_t *out_report) {
     if (!alloc || !draft || !cfg || !out_report)
         return HU_ERR_INVALID_ARGUMENT;
     memset(out_report, 0, sizeof(*out_report));
@@ -509,9 +524,9 @@ hu_error_t hu_response_verify_against_world_model(
         char neg_refusal0[256] = {0};
         char neg_hedge0[160] = {0};
         bool policy_hit0 = false;
-        hu_verifier_outcome_t o = hu_negatives_scan_claim(
-            wm, draft, neg_refusal0, sizeof(neg_refusal0),
-            neg_hedge0, sizeof(neg_hedge0), &policy_hit0);
+        hu_verifier_outcome_t o =
+            hu_negatives_scan_claim(wm, draft, neg_refusal0, sizeof(neg_refusal0), neg_hedge0,
+                                    sizeof(neg_hedge0), &policy_hit0);
         if (o == HU_VERIFY_RESULT_ABSTAIN) {
             out_report->outcome = HU_VERIFY_RESULT_ABSTAIN;
             snprintf(out_report->refusal_text, sizeof(out_report->refusal_text), "%s",
@@ -524,8 +539,8 @@ hu_error_t hu_response_verify_against_world_model(
         } else if (o == HU_VERIFY_RESULT_HEDGED) {
             out_report->outcome = HU_VERIFY_RESULT_HEDGED;
             if (cfg->mode == HU_VERIFY_SOFT) {
-                snprintf(out_report->modified_draft, sizeof(out_report->modified_draft),
-                         "%s %.*s.", neg_hedge0, (int)draft_len, draft);
+                snprintf(out_report->modified_draft, sizeof(out_report->modified_draft), "%s %.*s.",
+                         neg_hedge0, (int)draft_len, draft);
                 out_report->draft_modified = true;
             }
         }
@@ -544,18 +559,15 @@ hu_error_t hu_response_verify_against_world_model(
     if (wm) {
         for (size_t i = 0; i < n; i++) {
             hu_verifier_outcome_t o = hu_negatives_scan_claim(
-                wm, out_report->claims[i].text,
-                neg_refusal, sizeof(neg_refusal),
-                neg_hedge, sizeof(neg_hedge),
-                &policy_hit);
+                wm, out_report->claims[i].text, neg_refusal, sizeof(neg_refusal), neg_hedge,
+                sizeof(neg_hedge), &policy_hit);
             neg_outcome = outcome_stricter(neg_outcome, o);
             if (neg_outcome == HU_VERIFY_RESULT_ABSTAIN)
                 break;
         }
         if (neg_outcome == HU_VERIFY_RESULT_ABSTAIN) {
             out_report->outcome = HU_VERIFY_RESULT_ABSTAIN;
-            snprintf(out_report->refusal_text, sizeof(out_report->refusal_text), "%s",
-                     neg_refusal);
+            snprintf(out_report->refusal_text, sizeof(out_report->refusal_text), "%s", neg_refusal);
             out_report->claims_flagged = n;
             /* [policy] hits get a best-effort audit-log warning so security
              * tooling can grep for them. NULL observer = stdout fallback. */
@@ -584,17 +596,16 @@ hu_error_t hu_response_verify_against_world_model(
         if (neg_outcome == HU_VERIFY_RESULT_HEDGED) {
             out_report->outcome = HU_VERIFY_RESULT_HEDGED;
             if (cfg->mode == HU_VERIFY_SOFT) {
-                snprintf(out_report->modified_draft, sizeof(out_report->modified_draft),
-                         "%s %.*s.", neg_hedge, (int)draft_len, draft);
+                snprintf(out_report->modified_draft, sizeof(out_report->modified_draft), "%s %.*s.",
+                         neg_hedge, (int)draft_len, draft);
                 out_report->draft_modified = true;
             }
             return HU_OK;
         }
         if (cfg->abstain_threshold > 0.0f) {
             out_report->outcome = HU_VERIFY_RESULT_ABSTAIN;
-            hu_self_rag_render_refusal(HU_REFUSAL_LOW_CONFIDENCE,
-                                        out_report->refusal_text,
-                                        sizeof(out_report->refusal_text));
+            hu_self_rag_render_refusal(HU_REFUSAL_LOW_CONFIDENCE, out_report->refusal_text,
+                                       sizeof(out_report->refusal_text));
         }
         return HU_OK;
     }
@@ -613,8 +624,7 @@ hu_error_t hu_response_verify_against_world_model(
             out_report->claims_supported++;
         } else {
             out_report->claims_flagged++;
-            snprintf(c->suggested_hedge, sizeof(c->suggested_hedge),
-                     "I'm not 100%% sure but");
+            snprintf(c->suggested_hedge, sizeof(c->suggested_hedge), "I'm not 100%% sure but");
         }
 
         if (cfg->mode == HU_VERIFY_SOFT && !c->supported && rb_off < sizeof(rebuilt) - 256) {
@@ -624,8 +634,7 @@ hu_error_t hu_response_verify_against_world_model(
                 rb_off += (size_t)w;
                 any_modified = true;
             }
-        } else if (cfg->mode == HU_VERIFY_SOFT && c->supported &&
-                   rb_off < sizeof(rebuilt) - 256) {
+        } else if (cfg->mode == HU_VERIFY_SOFT && c->supported && rb_off < sizeof(rebuilt) - 256) {
             int w = snprintf(rebuilt + rb_off, sizeof(rebuilt) - rb_off, "%s%s %s.",
                              rb_off == 0 ? "" : " ", c->text,
                              c->receipt.rendered[0] ? c->receipt.rendered : "");
@@ -642,9 +651,8 @@ hu_error_t hu_response_verify_against_world_model(
         float flagged_ratio = n > 0 ? (float)out_report->claims_flagged / (float)n : 0.0f;
         if (n > 0 && flagged_ratio >= cfg->abstain_threshold) {
             out_report->outcome = HU_VERIFY_RESULT_ABSTAIN;
-            hu_self_rag_render_refusal(HU_REFUSAL_LOW_CONFIDENCE,
-                                        out_report->refusal_text,
-                                        sizeof(out_report->refusal_text));
+            hu_self_rag_render_refusal(HU_REFUSAL_LOW_CONFIDENCE, out_report->refusal_text,
+                                       sizeof(out_report->refusal_text));
             return HU_OK;
         }
     }
@@ -655,8 +663,8 @@ hu_error_t hu_response_verify_against_world_model(
      * "don't say this", not a missing-evidence signal. */
     if (neg_outcome == HU_VERIFY_RESULT_HEDGED) {
         if (cfg->mode == HU_VERIFY_SOFT) {
-            snprintf(out_report->modified_draft, sizeof(out_report->modified_draft),
-                     "%s %.*s.", neg_hedge, (int)draft_len, draft);
+            snprintf(out_report->modified_draft, sizeof(out_report->modified_draft), "%s %.*s.",
+                     neg_hedge, (int)draft_len, draft);
             out_report->draft_modified = true;
         }
         out_report->outcome = HU_VERIFY_RESULT_HEDGED;
@@ -683,8 +691,8 @@ hu_error_t hu_response_verify_against_world_model(
     if (neg_outcome == HU_VERIFY_RESULT_HEDGED) {
         out_report->outcome = HU_VERIFY_RESULT_HEDGED;
         if (cfg->mode == HU_VERIFY_SOFT) {
-            snprintf(out_report->modified_draft, sizeof(out_report->modified_draft),
-                     "%s %.*s.", neg_hedge, (int)draft_len, draft);
+            snprintf(out_report->modified_draft, sizeof(out_report->modified_draft), "%s %.*s.",
+                     neg_hedge, (int)draft_len, draft);
             out_report->draft_modified = true;
         }
     }

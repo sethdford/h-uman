@@ -67,4 +67,43 @@ static inline bool hu_test_mkdtemp(const char *prefix, char *out, size_t out_sz)
     return mkdtemp(out) != NULL;
 }
 
+/* Per-process unique temp directory: "<$TMPDIR>/hu_<tag>_<pid>_XXXXXX"
+ * ($TMPDIR falls back to /tmp). Use this instead of a fixed "/tmp/hu_foo"
+ * literal: two suites running concurrently (e.g. two sessions' pre-push
+ * hooks) would otherwise write and delete the SAME file underneath each
+ * other's assertions. Writes the created path into `buf`; returns true on
+ * success. Clean up with hu_test_rm_rf(buf). */
+static inline bool hu_test_tmpdir(char *buf, size_t cap, const char *tag) {
+    const char *base = getenv("TMPDIR");
+    if (!base || !*base)
+        base = "/tmp";
+    size_t blen = strlen(base);
+    while (blen > 1 && base[blen - 1] == '/')
+        blen--; /* $TMPDIR on macOS ends in "/" — avoid "T//hu_..." */
+    int n = snprintf(buf, cap, "%.*s/hu_%s_%ld_XXXXXX", (int)blen, base, tag ? tag : "test",
+                     (long)getpid());
+    if (n <= 0 || (size_t)n >= cap)
+        return false;
+    return mkdtemp(buf) != NULL;
+}
+
+/* Convenience for the common "one scratch FILE per test" shape: returns
+ * "<root>/<name>" in `buf`, where <root> is a per-process hu_test_tmpdir()
+ * created lazily (one per including translation unit) and removed
+ * recursively at exit. Tests keep their existing unlink()/remove() of the
+ * file; the root sweeps up anything they forget. Returns true on success. */
+static char hu_test__tmproot[512];
+static inline void hu_test__tmproot_cleanup(void) {
+    hu_test_rm_rf(hu_test__tmproot);
+}
+static inline bool hu_test_tmppath(char *buf, size_t cap, const char *name) {
+    if (!hu_test__tmproot[0]) {
+        if (!hu_test_tmpdir(hu_test__tmproot, sizeof(hu_test__tmproot), "tests"))
+            return false;
+        atexit(hu_test__tmproot_cleanup);
+    }
+    int n = snprintf(buf, cap, "%s/%s", hu_test__tmproot, name ? name : "scratch");
+    return n > 0 && (size_t)n < cap;
+}
+
 #endif /* HU_TEST_TMPDIR_H */

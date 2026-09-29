@@ -105,9 +105,13 @@ export class HuConnectionPulse extends LitElement {
         <div class="dot ${this.status === "disconnected" ? "" : "hu-ambient-breathe"}"></div>
         <div class="ring"></div>
       </div>
-      ${this.status !== "disconnected"
-        ? html`<span class="label">${this.status === "connected" ? "Live" : "Connecting..."}</span>`
-        : html`<span class="label">Offline</span>`}
+      ${
+        this.status !== "disconnected"
+          ? html`<span class="label"
+              >${this.status === "connected" ? "Live" : "Connecting..."}</span
+            >`
+          : html`<span class="label">Offline</span>`
+      }
     `;
   }
 }

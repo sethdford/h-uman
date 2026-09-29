@@ -23,6 +23,7 @@
 #include "human/bootstrap.h"
 #include "human/bus.h"
 #include "human/channel.h"
+#include "human/channels/imessage_voice_record.h"
 #include "human/channels/thread_binding.h"
 #include "human/cli_commands.h"
 #include "human/config.h"
@@ -30,10 +31,13 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 #include "human/cost.h"
 #include "human/cron.h"
 #include "human/crontab.h"
 #include "human/daemon.h"
+#include "human/daemon/config_reload.h"
+#include "human/daemon/send_budget.h"
 #include "human/doctor.h"
 #include "human/doctor/check.h"
 #include "human/doctor_fix.h"
@@ -63,12 +67,18 @@
 #include "human/session.h"
 #include "human/skill_registry.h"
 #include "human/skill_scaffold.h"
+#include "human/tts/speech_direction.h"
+#include "human/tts/speech_perform.h"
+#include "human/tts/speech_rewrite.h"
+#include "human/version.h"
 #ifdef HU_HAS_SKILLS
 #include "human/skillforge.h"
 #endif
 #include "human/persona.h"
 #ifdef HU_ENABLE_CARTESIA
+#include "human/tts/cartesia.h"
 #include "human/tts/voice_clone.h"
+#include "human/tts/voice_reply.h"
 #endif
 #ifdef HU_ENABLE_FEEDS
 #include "human/feeds/processor.h"
@@ -373,13 +383,14 @@ static hu_error_t cmd_paperclip(hu_allocator_t *alloc, int argc, char **argv) {
 
 static hu_error_t cmd_schedule(hu_allocator_t *alloc, int argc, char **argv) {
     (void)alloc;
+    /* Kept: the helper's failure below is silent; this guard owns the stderr diagnostic. */
     const char *home = getenv("HOME");
     if (!home) {
         fprintf(stderr, "HOME not set\n");
         return HU_ERR_INTERNAL;
     }
     char sched_path[512];
-    int sn = snprintf(sched_path, sizeof(sched_path), "%s/.human/scheduled.json", home);
+    int sn = hu_paths_state(sched_path, sizeof(sched_path), "scheduled.json");
     if (sn < 0 || (size_t)sn >= sizeof(sched_path))
         return HU_ERR_INTERNAL;
 
@@ -439,6 +450,11 @@ static hu_error_t cmd_schedule(hu_allocator_t *alloc, int argc, char **argv) {
         if (when_str[0] == '+') {
             char *end = NULL;
             long minutes = strtol(when_str + 1, &end, 10);
+            /* Accept the documented +Nm form: strtol stops at the 'm', and the
+             * bare *end=='\0' check rejected exactly what the usage string
+             * advertises (2026-07-27: "+2m" -> "Invalid delay: +2m (use +Nm)"). */
+            if (end && end[0] == 'm' && end[1] == '\0')
+                end++;
             if (!end || *end != '\0' || minutes <= 0 || minutes > 525600) {
                 fprintf(stderr, "Invalid delay: %s (use +Nm, 1-525600 minutes)\n", when_str);
                 if (lock_fd >= 0) {
@@ -473,13 +489,16 @@ static hu_error_t cmd_schedule(hu_allocator_t *alloc, int argc, char **argv) {
             }
             return err;
         }
-        hu_conversation_sched_save(sched_path, (size_t)sn);
-        printf("Scheduled message for %s at %" PRIu64 "ms\n", contact, deliver_ms);
+        err = hu_conversation_sched_save(sched_path, (size_t)sn);
+        if (err != HU_OK)
+            fprintf(stderr, "Failed to persist schedule to %s: error %d\n", sched_path, (int)err);
+        else
+            printf("Scheduled message for %s at %" PRIu64 "ms\n", contact, deliver_ms);
         if (lock_fd >= 0) {
             flock(lock_fd, LOCK_UN);
             close(lock_fd);
         }
-        return HU_OK;
+        return err;
     }
 
     if (argc >= 4 && strcmp(argv[2], "cancel") == 0) {
@@ -504,14 +523,18 @@ static hu_error_t cmd_schedule(hu_allocator_t *alloc, int argc, char **argv) {
             }
             return HU_ERR_INVALID_ARGUMENT;
         }
-        printf("Cancelled: \"%s\" to %s\n", slot->message, slot->contact_id);
         slot->active = false;
-        hu_conversation_sched_save(sched_path, (size_t)sn);
+        hu_error_t serr = hu_conversation_sched_save(sched_path, (size_t)sn);
+        if (serr != HU_OK)
+            fprintf(stderr, "Failed to persist cancellation to %s: error %d\n", sched_path,
+                    (int)serr);
+        else
+            printf("Cancelled: \"%s\" to %s\n", slot->message, slot->contact_id);
         if (lock_fd >= 0) {
             flock(lock_fd, LOCK_UN);
             close(lock_fd);
         }
-        return HU_OK;
+        return serr;
     }
 
     if (lock_fd >= 0) {
@@ -565,6 +588,8 @@ static const hu_command_t commands[] = {
     {"calibrate", "Analyze messaging patterns and calibrate persona", cmd_calibrate},
     {"drafts", "Generate predictive draft suggestions for a contact", cmd_drafts},
     {"narrate", "Generate a long-horizon narrative for a contact from chat.db", cmd_narrate},
+    {"reply-prompt", "Print the system prompt the daemon would send for a 1:1 reply (offline)",
+     cmd_reply_prompt},
     {"autoresponder", "Manage the DND autoresponder (digest of recent replies)", cmd_autoresponder},
     {"initiative", "Inspect init_proposer JSONL (log | status)", cmd_initiative},
     {"export-dpo", "Export collector dpo_pairs to JSONL for LoRA fine-tuning (M3)", cmd_export_dpo},
@@ -619,9 +644,13 @@ static void print_usage(FILE *out) {
 
 static hu_error_t cmd_version(hu_allocator_t *alloc, int argc, char **argv) {
     (void)alloc;
-    (void)argc;
-    (void)argv;
-    printf("%s v%s\n", HU_CODENAME, HU_VERSION);
+    /* `human version --sha` prints only the build commit — machine-readable
+     * for the install provenance guard (scripts/install-human-daemon.sh). */
+    if (argc > 2 && strcmp(argv[2], "--sha") == 0) {
+        printf("%s\n", hu_build_sha());
+        return HU_OK;
+    }
+    printf("%s v%s (%s)\n", HU_CODENAME, HU_VERSION, hu_build_sha());
     return HU_OK;
 }
 
@@ -1636,16 +1665,12 @@ static hu_error_t cmd_service_loop(hu_allocator_t *alloc, int argc, char **argv)
 
 #ifdef HU_ENABLE_SQLITE
         {
-            const char *home = getenv("HOME");
-            if (home) {
-                char graph_path[1024];
-                int np = snprintf(graph_path, sizeof(graph_path), "%s/.human/graph.db", home);
-                if (np > 0 && (size_t)np < sizeof(graph_path)) {
-                    hu_error_t graph_err = hu_graph_open(alloc, graph_path, (size_t)np, &svc_graph);
-                    if (graph_err != HU_OK)
-                        hu_log_error("main", NULL, "graph open failed: %s",
-                                     hu_error_string(graph_err));
-                }
+            char graph_path[1024];
+            int np = hu_paths_state(graph_path, sizeof(graph_path), "graph.db");
+            if (np > 0 && (size_t)np < sizeof(graph_path)) {
+                hu_error_t graph_err = hu_graph_open(alloc, graph_path, (size_t)np, &svc_graph);
+                if (graph_err != HU_OK)
+                    hu_log_error("main", NULL, "graph open failed: %s", hu_error_string(graph_err));
             }
         }
 #endif
@@ -1707,6 +1732,14 @@ static hu_error_t cmd_service_loop(hu_allocator_t *alloc, int argc, char **argv)
         hu_bus_subscribe(&svc_bus, svc_agent_on_message_locked, &svc_agent_bridge,
                          HU_BUS_MESSAGE_RECEIVED);
 
+        /* The bus handler above runs a full agent turn on the gateway thread
+         * under svc_agent_mutex. The service loop's SIGHUP reload mutates the
+         * same agent (it destroys and recreates the hook registry), so hand it
+         * the same mutex — otherwise a reload can free the registry out from
+         * under a turn in flight. Only registered on the gateway path; without
+         * a gateway the service loop is the agent's only thread. */
+        hu_daemon_config_reload_set_guard(&svc_agent_mutex);
+
         if (pthread_create(&gw_tid, NULL, svc_gateway_thread, &gw_tctx) == 0) {
             /* 2026-05-27 — was previously "gateway listening on..." which
              * fired here BEFORE the thread did bind/listen, misleading
@@ -1726,6 +1759,11 @@ static hu_error_t cmd_service_loop(hu_allocator_t *alloc, int argc, char **argv)
         app_ctx.cfg->behavior.consecutive_limit, app_ctx.cfg->behavior.participation_pct,
         app_ctx.cfg->behavior.max_response_chars, app_ctx.cfg->behavior.min_response_chars);
     hu_daemon_set_missed_msg_threshold(app_ctx.cfg->behavior.missed_msg_threshold_sec);
+    hu_daemon_set_missed_msg_max_age(app_ctx.cfg->behavior.missed_msg_max_age_sec);
+    hu_send_budget_configure(app_ctx.cfg->behavior.reply_budget_per_contact_hourly,
+                             app_ctx.cfg->behavior.reply_budget_global_hourly);
+    hu_daemon_set_missed_msg_ack_rate(app_ctx.cfg->behavior.missed_msg_ack_rate);
+    hu_daemon_set_missed_msg_ack_cooldown(app_ctx.cfg->behavior.missed_msg_ack_cooldown_sec);
 
     /* Initialize conversation data (load word lists from embedded JSON) */
     hu_conversation_data_init(alloc);
@@ -1734,19 +1772,16 @@ static hu_error_t cmd_service_loop(hu_allocator_t *alloc, int argc, char **argv)
      * written by scripts/mine_phrase_banks.py (monthly launchd job). Missing
      * file is the normal pre-mining state; only corruption is warned. */
     {
-        const char *home = getenv("HOME");
-        if (home && home[0]) {
-            char pb_path[512];
-            int n = snprintf(pb_path, sizeof(pb_path), "%s/.human/phrase_banks.json", home);
-            if (n > 0 && (size_t)n < sizeof(pb_path)) {
-                hu_error_t pb_err = hu_conversation_phrase_banks_load(alloc, pb_path, "imessage");
-                if (pb_err == HU_OK)
-                    hu_log_info("human", NULL, "phrase banks loaded from %s (imessage)", pb_path);
-                else if (pb_err != HU_ERR_NOT_FOUND)
-                    hu_log_warn("human", NULL,
-                                "phrase banks unreadable (err=%d) at %s — using defaults",
-                                (int)pb_err, pb_path);
-            }
+        char pb_path[512];
+        int n = hu_paths_state(pb_path, sizeof(pb_path), "phrase_banks.json");
+        if (n > 0 && (size_t)n < sizeof(pb_path)) {
+            hu_error_t pb_err = hu_conversation_phrase_banks_load(alloc, pb_path, "imessage");
+            if (pb_err == HU_OK)
+                hu_log_info("human", NULL, "phrase banks loaded from %s (imessage)", pb_path);
+            else if (pb_err != HU_ERR_NOT_FOUND)
+                hu_log_warn("human", NULL,
+                            "phrase banks unreadable (err=%d) at %s — using defaults", (int)pb_err,
+                            pb_path);
         }
     }
 
@@ -2073,12 +2108,13 @@ static hu_error_t cmd_agents(hu_allocator_t *alloc, int argc, char **argv) {
     const char *sub = (argc >= 3 && argv[2]) ? argv[2] : "list";
 
     char agents_dir[512];
+    /* Kept: the helper's failure below is silent; this guard owns the stderr diagnostic. */
     const char *home = getenv("HOME");
     if (!home || !home[0]) {
         fprintf(stderr, "HOME not set\n");
         return HU_ERR_INVALID_ARGUMENT;
     }
-    snprintf(agents_dir, sizeof(agents_dir), "%s/.human/agents", home);
+    hu_paths_state(agents_dir, sizeof(agents_dir), "agents");
 
     hu_agent_registry_t reg;
     hu_error_t err = hu_agent_registry_create(alloc, &reg);
@@ -2557,13 +2593,14 @@ static hu_error_t cmd_pwa(hu_allocator_t *alloc, int argc, char **argv) {
         fprintf(stderr, "PWA: browser automation unavailable in test build\n");
         return HU_OK;
 #else
+        /* Kept: the helper's failure below is silent; this guard owns the stderr diagnostic. */
         const char *home = getenv("HOME");
         if (!home) {
             fprintf(stderr, "PWA learn: HOME not set\n");
             return HU_ERR_IO;
         }
         char db_path[512];
-        int n = snprintf(db_path, sizeof(db_path), "%s/.human/memory.db", home);
+        int n = hu_paths_state(db_path, sizeof(db_path), "memory.db");
         if (n <= 0 || (size_t)n >= sizeof(db_path))
             return HU_ERR_IO;
         hu_memory_t mem = hu_sqlite_memory_create(alloc, db_path);
@@ -2599,7 +2636,6 @@ static hu_error_t cmd_pwa(hu_allocator_t *alloc, int argc, char **argv) {
 }
 
 static hu_error_t cmd_persona(hu_allocator_t *alloc, int argc, char **argv) {
-#ifdef HU_HAS_PERSONA
     hu_persona_cli_args_t args;
     hu_error_t err = hu_persona_cli_parse(argc, (const char **)argv, &args);
     if (err != HU_OK) {
@@ -2628,24 +2664,294 @@ static hu_error_t cmd_persona(hu_allocator_t *alloc, int argc, char **argv) {
         return err;
     }
     return hu_persona_cli_run(alloc, &args);
-#else
-    (void)alloc;
-    (void)argc;
-    (void)argv;
-    fprintf(stderr, "Persona support not compiled in (HU_ENABLE_PERSONA=OFF)\n");
-    return HU_ERR_NOT_SUPPORTED;
-#endif
 }
 
 #ifdef HU_ENABLE_CARTESIA
-static hu_error_t cmd_voice(hu_allocator_t *alloc, int argc, char **argv) {
-    if (argc < 3 || !argv[2]) {
-        fprintf(stderr,
-                "Usage: human voice <subcommand>\n\n"
-                "Subcommands:\n"
-                "  clone --file <path> [--name <name>] [--lang <code>] [--persona <name>]\n");
+/* `human voice preview` — synthesize one reply exactly the way the daemon
+ * does (same hu_voice_reply_build_request, same channel container) and write
+ * the file, without waiting for the daemon's voice roll. */
+/* Synthesize one request and write it to `out_path` (NULL/"" = temp file). */
+static hu_error_t preview_render(hu_allocator_t *alloc, const char *api_key, const char *channel,
+                                 hu_voice_reply_request_t *req, const char *out_path) {
+    unsigned char *bytes = NULL;
+    size_t len = 0;
+    hu_error_t err = hu_cartesia_tts_synthesize(alloc, api_key, strlen(api_key), req->transcript,
+                                                req->transcript_len, &req->tts,
+                                                hu_tts_format_for_channel(channel), &bytes, &len);
+    if (err != HU_OK || !bytes || len == 0) {
+        fprintf(stderr, "Error: Cartesia synthesis failed: %s\n", hu_error_string(err));
+        return err != HU_OK ? err : HU_ERR_IO;
+    }
+    char path[512];
+    err = hu_voice_reply_audio_to_temp(alloc, channel, bytes, len, path, sizeof(path));
+    hu_cartesia_tts_free_bytes(alloc, bytes, len);
+    if (err != HU_OK) {
+        fprintf(stderr, "Error: audio conversion failed: %s\n", hu_error_string(err));
+        return err;
+    }
+    if (out_path && out_path[0]) {
+        if (rename(path, out_path) != 0) {
+            fprintf(stderr, "Error: could not move %s to %s\n", path, out_path);
+            return HU_ERR_IO;
+        }
+        printf("wrote %s (%zu bytes of audio)\n", out_path, len);
+    } else {
+        printf("wrote %s (%zu bytes of audio; temp file, move it before the next run)\n", path,
+               len);
+    }
+    return HU_OK;
+}
+
+static hu_error_t cmd_voice_preview(hu_allocator_t *alloc, int argc, char **argv) {
+    const char *text = NULL, *incoming = NULL, *persona_name = NULL, *out_path = NULL;
+    const char *channel = "imessage";
+    const char *model_override = NULL;
+    const char *voice_override = NULL; /* the A/B "voice" arm (e.g. Ferni) */
+    const char *rewrite_arg = NULL;    /* F1 S1: off|shadow|live (default HU_SPEECH_REWRITE) */
+    bool direct = false;               /* F2-voice: the model performs the line */
+    const char *to_name = NULL, *relationship = NULL, *laugh_arg = NULL, *baseline_out = NULL;
+    float speed_override = 0.f;
+    bool raw = false; /* skip transcript prep: the A/B "prep off" arm */
+    for (int i = 3; i < argc; i++) {
+        if (!argv[i])
+            continue;
+        if (strcmp(argv[i], "--model") == 0 && i + 1 < argc)
+            model_override = argv[++i];
+        else if (strcmp(argv[i], "--voice") == 0 && i + 1 < argc)
+            voice_override = argv[++i];
+        else if (strcmp(argv[i], "--rewrite") == 0 && i + 1 < argc)
+            rewrite_arg = argv[++i];
+        else if (strcmp(argv[i], "--direct") == 0)
+            direct = true;
+        else if (strcmp(argv[i], "--to") == 0 && i + 1 < argc)
+            to_name = argv[++i];
+        else if (strcmp(argv[i], "--relationship") == 0 && i + 1 < argc)
+            relationship = argv[++i];
+        else if (strcmp(argv[i], "--laugh") == 0 && i + 1 < argc)
+            laugh_arg = argv[++i];
+        else if (strcmp(argv[i], "--baseline-out") == 0 && i + 1 < argc)
+            baseline_out = argv[++i];
+        else if (strcmp(argv[i], "--speed") == 0 && i + 1 < argc)
+            speed_override = (float)atof(argv[++i]);
+        else if (strcmp(argv[i], "--raw") == 0)
+            raw = true;
+        else if (strcmp(argv[i], "--text") == 0 && i + 1 < argc)
+            text = argv[++i];
+        else if (strcmp(argv[i], "--incoming") == 0 && i + 1 < argc)
+            incoming = argv[++i];
+        else if (strcmp(argv[i], "--persona") == 0 && i + 1 < argc)
+            persona_name = argv[++i];
+        else if (strcmp(argv[i], "--out") == 0 && i + 1 < argc)
+            out_path = argv[++i];
+        else if (strcmp(argv[i], "--channel") == 0 && i + 1 < argc)
+            channel = argv[++i];
+    }
+    if (!text || !text[0] || !persona_name || !persona_name[0]) {
+        fprintf(stderr, "Usage: human voice preview --text <reply> --persona <name> "
+                        "[--incoming <msg>] [--channel imessage] [--out <file>] "
+                        "[--model <id>] [--voice <id>] [--speed <0.6-1.5>] [--raw] "
+                        "[--rewrite off|shadow|live] [--direct [--to NAME] "
+                        "[--relationship REL] [--laugh text|cartesia] [--baseline-out PATH]]\n");
         return HU_ERR_INVALID_ARGUMENT;
     }
+
+    hu_config_t cfg;
+    hu_error_t err = hu_config_load(alloc, &cfg);
+    if (err != HU_OK) {
+        fprintf(stderr, "Error: config load failed: %s\n", hu_error_string(err));
+        return err;
+    }
+    const char *api_key = getenv("CARTESIA_API_KEY");
+    if (!api_key || api_key[0] == '\0')
+        api_key = hu_config_get_provider_key(&cfg, "cartesia");
+    if (!api_key || api_key[0] == '\0') {
+        fprintf(stderr, "Error: set CARTESIA_API_KEY or configure providers.cartesia.api_key\n");
+        return HU_ERR_PROVIDER_AUTH;
+    }
+
+    hu_persona_t persona;
+    err = hu_persona_load(alloc, persona_name, strlen(persona_name), &persona);
+    if (err != HU_OK) {
+        fprintf(stderr, "Error: persona '%s' load failed: %s\n", persona_name,
+                hu_error_string(err));
+        return err;
+    }
+    if (!persona.voice.voice_id[0]) {
+        fprintf(stderr,
+                "Error: persona '%s' has no voice.voice_id (run `human voice clone "
+                "--persona %s` first)\n",
+                persona_name, persona_name);
+        hu_persona_free(&persona);
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+
+    time_t now = time(NULL);
+    struct tm tmb;
+    localtime_r(&now, &tmb);
+    if (model_override && model_override[0])
+        snprintf(persona.voice.model, sizeof(persona.voice.model), "%s", model_override);
+    if (voice_override && voice_override[0])
+        snprintf(persona.voice.voice_id, sizeof(persona.voice.voice_id), "%s", voice_override);
+    if (speed_override > 0.f)
+        persona.voice.default_speed = speed_override;
+    hu_voice_reply_request_t req;
+    bool directed_ready = false;
+    if (raw) {
+        memset(&req, 0, sizeof(req));
+        size_t tl = strlen(text);
+        if (tl >= sizeof(req.transcript))
+            tl = sizeof(req.transcript) - 1;
+        memcpy(req.transcript, text, tl);
+        req.transcript[tl] = '\0';
+        req.transcript_len = tl;
+        req.sentence_count = 1;
+        snprintf(req.emotion, sizeof(req.emotion), "%s",
+                 persona.voice.default_emotion[0] ? persona.voice.default_emotion : "content");
+        snprintf(req.model, sizeof(req.model), "%s",
+                 persona.voice.model[0] ? persona.voice.model : HU_VOICE_REPLY_DEFAULT_MODEL);
+        req.tts.model_id = req.model;
+        req.tts.voice_id = persona.voice.voice_id;
+        req.tts.emotion = req.emotion;
+        req.tts.speed = persona.voice.default_speed > 0.f ? persona.voice.default_speed
+                                                          : HU_VOICE_REPLY_DEFAULT_SPEED;
+        req.tts.volume = 1.0f;
+        req.tts.nonverbals = persona.voice.nonverbals;
+        err = HU_OK;
+    } else {
+        /* The daemon's voice path: cleanup (S2), optional rewrite for the ear
+         * (S1, drift-guarded), then transcript prep with the laughter cue. */
+        hu_speech_rewrite_mode_t rw =
+            hu_speech_rewrite_mode_parse(rewrite_arg ? rewrite_arg : getenv("HU_SPEECH_REWRITE"));
+        hu_provider_t prov = {0};
+        bool have_prov = false;
+        if ((rw != HU_SPEECH_REWRITE_OFF || direct) && cfg.default_provider &&
+            cfg.default_provider[0])
+            have_prov =
+                hu_provider_create_from_config(alloc, &cfg, cfg.default_provider,
+                                               strlen(cfg.default_provider), &prov) == HU_OK;
+        const char *mdl = cfg.default_model ? cfg.default_model : "";
+        hu_speech_result_t sp;
+        (void)hu_speech_prepare(alloc, have_prov ? &prov : NULL, mdl, strlen(mdl), &persona, rw,
+                                text, strlen(text), incoming, incoming ? strlen(incoming) : 0, &sp);
+        printf("speech: rewrite=%s used=%d reason=%s\nspoken: %s\n",
+               rw == HU_SPEECH_REWRITE_LIVE ? "live"
+                                            : (rw == HU_SPEECH_REWRITE_SHADOW ? "shadow" : "off"),
+               sp.used_rewrite ? 1 : 0, sp.reason ? sp.reason : "-", sp.spoken);
+        if (sp.rewritten[0] && !sp.used_rewrite)
+            printf("rewrite (not spoken): %s\n", sp.rewritten);
+        if (sp.spoken_len == 0) {
+            fprintf(stderr, "Error: nothing speakable in --text\n");
+            if (have_prov && prov.vtable && prov.vtable->deinit)
+                prov.vtable->deinit(prov.ctx, alloc);
+            hu_persona_free(&persona);
+            return HU_ERR_INVALID_ARGUMENT;
+        }
+        if (direct) {
+            /* The ear test: the directed memo (--out) beside today's (--baseline-out). */
+            hu_perform_scene_t scene = {.speaker = persona.name,
+                                        .listener = to_name,
+                                        .relationship = relationship,
+                                        .hour_local = tmb.tm_hour,
+                                        .weekday = tmb.tm_wday,
+                                        .inbound = incoming,
+                                        .inbound_len = incoming ? strlen(incoming) : 0};
+            static hu_perform_result_t pr;
+            (void)hu_speech_perform(alloc, have_prov ? &prov : NULL, mdl, strlen(mdl), &scene,
+                                    sp.spoken, sp.spoken_len, &pr);
+            printf("direction: ok=%d reason=%s\nwords: %s\n", pr.ok ? 1 : 0, pr.reason,
+                   pr.dir.words);
+            if (baseline_out && baseline_out[0]) {
+                hu_voice_reply_request_t base;
+                if (hu_voice_reply_build_request_ex(&persona.voice, sp.spoken, sp.spoken_len,
+                                                    incoming, incoming ? strlen(incoming) : 0,
+                                                    tmb.tm_hour, (uint32_t)now, sp.laughter_cue,
+                                                    &base) == HU_OK)
+                    (void)preview_render(alloc, api_key, channel, &base, baseline_out);
+            }
+            if (pr.ok) {
+                static char rendered[HU_DIRECTION_RENDER_CAP];
+                size_t rn = hu_direction_render(&pr.dir, hu_laugh_style_parse(laugh_arg), rendered,
+                                                sizeof(rendered));
+                if (rn > 0 && hu_voice_reply_build_request_directed(
+                                  &persona.voice, rendered, rn, hu_direction_first_emotion(&pr.dir),
+                                  pr.dir.sentences, &req) == HU_OK)
+                    directed_ready = true;
+            }
+        }
+        if (have_prov && prov.vtable && prov.vtable->deinit)
+            prov.vtable->deinit(prov.ctx, alloc);
+        if (direct && !directed_ready) {
+            /* A baseline written as "directed" would contaminate the ear test. */
+            fprintf(stderr, "direction failed; no directed clip written to --out\n");
+            hu_persona_free(&persona);
+            return HU_ERR_PROVIDER_RESPONSE;
+        }
+        if (!directed_ready)
+            err = hu_voice_reply_build_request_ex(
+                &persona.voice, sp.spoken, sp.spoken_len, incoming, incoming ? strlen(incoming) : 0,
+                tmb.tm_hour, (uint32_t)now, sp.laughter_cue, &req);
+        else
+            err = HU_OK;
+    }
+    if (err != HU_OK) {
+        fprintf(stderr, "Error: transcript prep failed: %s\n", hu_error_string(err));
+        hu_persona_free(&persona);
+        return err;
+    }
+    printf("transcript (%zu sentences):\n%s\n\nmodel=%s emotion=%s speed=%.2f volume=%.2f "
+           "nonverbals=%s channel=%s\n",
+           req.sentence_count, req.transcript, req.tts.model_id, req.tts.emotion,
+           (double)req.tts.speed, (double)req.tts.volume, req.tts.nonverbals ? "on" : "off",
+           channel);
+
+    err = preview_render(alloc, api_key, channel, &req, out_path);
+    hu_persona_free(&persona);
+    return err;
+}
+
+/* Operator test path for native Messages voice delivery (W3): the same
+ * request + orchestrator the daemon's HU_VOICE_DELIVERY=messages branch uses.
+ * Exit 0 only when the memo is confirmed in chat.db AND the mic is restored. */
+static hu_error_t cmd_voice_record_send(int argc, char **argv) {
+    const char *to = NULL;
+    const char *file = NULL;
+    for (int i = 3; i < argc; i++) {
+        if (strcmp(argv[i], "--to") == 0 && i + 1 < argc)
+            to = argv[++i];
+        else if (strcmp(argv[i], "--file") == 0 && i + 1 < argc)
+            file = argv[++i];
+    }
+    if (!to || !to[0] || !file || file[0] != '/') {
+        fprintf(stderr, "Usage: human voice record-send --to <handle> --file </abs/audio>\n");
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+    hu_voice_record_result_t res;
+    hu_error_t err = hu_voice_record_send_from_env(to, strlen(to), file, &res);
+    printf("result=%s stage=%d block=%s reason=%s verified=%d restored=%d cancel_failed=%d\n",
+           err == HU_OK ? "sent" : (err == HU_ERR_NOT_SUPPORTED ? "blocked" : "failed"),
+           (int)res.stage, hu_voice_record_block_name(res.block),
+           res.abort_reason ? res.abort_reason : "-", res.verified ? 1 : 0, res.restored ? 1 : 0,
+           res.cancel_failed ? 1 : 0);
+    return (err == HU_OK && res.verified && res.restored) ? HU_OK : HU_ERR_IO;
+}
+
+static hu_error_t cmd_voice(hu_allocator_t *alloc, int argc, char **argv) {
+    if (argc < 3 || !argv[2]) {
+        fprintf(stderr, "Usage: human voice <subcommand>\n\n"
+                        "Subcommands:\n"
+                        "  clone --file <path> [--name <name>] [--lang <code>] [--persona <name>]\n"
+                        "  preview --text <reply> --persona <name> [--incoming <msg>]\n"
+                        "          [--channel imessage] [--out <file>] [--model <id>]\n"
+                        "          [--speed <0.6-1.5>] [--raw]\n"
+                        "  record-send --to <handle> --file <audio>   (Messages-recorded memo;\n"
+                        "          uses HU_VOICE_REAL_INPUT, HU_VOICE_MIN_IDLE_SEC)\n");
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+
+    if (strcmp(argv[2], "preview") == 0)
+        return cmd_voice_preview(alloc, argc, argv);
+    if (strcmp(argv[2], "record-send") == 0)
+        return cmd_voice_record_send(argc, argv);
 
     if (strcmp(argv[2], "clone") != 0) {
         fprintf(stderr, "Unknown voice subcommand: %s\n", argv[2]);
@@ -3056,15 +3362,12 @@ static hu_error_t cmd_gateway(hu_allocator_t *alloc, int argc, char **argv) {
     hu_graph_t *gw_graph = NULL;
 #ifdef HU_ENABLE_SQLITE
     {
-        const char *home = getenv("HOME");
-        if (home) {
-            char graph_path[1024];
-            int np = snprintf(graph_path, sizeof(graph_path), "%s/.human/graph.db", home);
-            if (np > 0 && (size_t)np < sizeof(graph_path)) {
-                hu_error_t graph_err = hu_graph_open(alloc, graph_path, (size_t)np, &gw_graph);
-                if (graph_err != HU_OK)
-                    hu_log_error("main", NULL, "graph open failed: %s", hu_error_string(graph_err));
-            }
+        char graph_path[1024];
+        int np = hu_paths_state(graph_path, sizeof(graph_path), "graph.db");
+        if (np > 0 && (size_t)np < sizeof(graph_path)) {
+            hu_error_t graph_err = hu_graph_open(alloc, graph_path, (size_t)np, &gw_graph);
+            if (graph_err != HU_OK)
+                hu_log_error("main", NULL, "graph open failed: %s", hu_error_string(graph_err));
         }
     }
 #endif
@@ -3236,16 +3539,18 @@ static void load_dotenv(const char *path) {
 
 int main(int argc, char *argv[]) {
     hu_allocator_t alloc = hu_system_allocator();
+#ifdef HU_ENABLE_SQLITE
+    /* Before ANY sqlite3_open: the daemon shares memory connections across
+     * threads (gateway workers + service loop). See hu_sqlite_process_serialize. */
+    (void)hu_sqlite_process_serialize();
+#endif
 
     /* Load .env files: project-local, ~/.human/.env */
     load_dotenv(".env");
     {
-        const char *home = getenv("HOME");
-        if (home) {
-            char envpath[512];
-            snprintf(envpath, sizeof(envpath), "%s/.human/.env", home);
+        char envpath[512];
+        if (hu_paths_state(envpath, sizeof(envpath), ".env") > 0)
             load_dotenv(envpath);
-        }
     }
 
 #if defined(__unix__) || defined(__APPLE__)

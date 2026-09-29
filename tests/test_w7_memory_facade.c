@@ -5,11 +5,11 @@
  * deterministic shapes, and refuses unsupported kinds. */
 
 #include "human/agent/anticipatory.h"
-#include "human/agent/case_based.h"
 #include "human/core/allocator.h"
 #include "human/memory/graph.h"
 #include "human/memory/memory.h"
 #include "test_framework.h"
+#include "test_tmpdir.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -20,7 +20,10 @@
 #ifdef HU_ENABLE_SQLITE
 
 static hu_allocator_t g_alloc;
-static hu_allocator_t *A(void) { g_alloc = hu_system_allocator(); return &g_alloc; }
+static hu_allocator_t *A(void) {
+    g_alloc = hu_system_allocator();
+    return &g_alloc;
+}
 
 static void open_facade(hu_graph_t **g, hu_memory_facade_t **m) {
     HU_ASSERT_EQ(hu_graph_open(A(), NULL, 0, g), HU_OK);
@@ -99,9 +102,8 @@ static void test_w7_invalid_args_rejected(void) {
 
 static int64_t insert_entity(hu_graph_t *g, const char *name) {
     int64_t id = 0;
-    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u1", 2, name, strlen(name), HU_ENTITY_PERSON,
-                                         NULL, &id),
-                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(g, "u1", 2, name, strlen(name), HU_ENTITY_PERSON, NULL, &id), HU_OK);
     return id;
 }
 
@@ -172,11 +174,9 @@ static void test_w7_relation_list_routes_to_v1(void) {
 
     int64_t alice = insert_entity(g, "Alice");
     int64_t acme = 0;
-    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u1", 2, "Acme", 4, HU_ENTITY_ORGANIZATION,
-                                         NULL, &acme),
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u1", 2, "Acme", 4, HU_ENTITY_ORGANIZATION, NULL, &acme),
                  HU_OK);
-    HU_ASSERT_EQ(hu_graph_upsert_relation(g, "u1", 2, alice, acme, HU_REL_WORKS_AT, 1.0f,
-                                           NULL, 0),
+    HU_ASSERT_EQ(hu_graph_upsert_relation(g, "u1", 2, alice, acme, HU_REL_WORKS_AT, 1.0f, NULL, 0),
                  HU_OK);
 
     hu_memory_query_t q;
@@ -214,12 +214,10 @@ static void test_w7_relation_window_query_routes(void) {
 
     int64_t alice = insert_entity(g, "Alice");
     int64_t acme = 0;
-    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u1", 2, "Acme", 4, HU_ENTITY_ORGANIZATION,
-                                         NULL, &acme),
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u1", 2, "Acme", 4, HU_ENTITY_ORGANIZATION, NULL, &acme),
                  HU_OK);
     HU_ASSERT_EQ(hu_graph_upsert_relation_ex(g, "u1", 2, alice, acme, HU_REL_WORKS_AT, 1.0f,
-                                              1735000000000LL, 0, 1.0f, NULL, 0,
-                                              "test", 4),
+                                             1735000000000LL, 0, 1.0f, NULL, 0, "test", 4),
                  HU_OK);
 
     hu_memory_query_t q;
@@ -229,7 +227,7 @@ static void test_w7_relation_window_query_routes(void) {
     q.contact_id = "u1";
     q.contact_id_len = 2;
     q.as.window.from_ts = 1734000000000LL;
-    q.as.window.to_ts   = 1736000000000LL;
+    q.as.window.to_ts = 1736000000000LL;
     q.as.window.limit = 16;
 
     hu_memory_record_t *out = NULL;
@@ -246,18 +244,24 @@ static void test_w7_relation_window_query_routes(void) {
 
 static int s_stub_read_calls = 0;
 static hu_error_t stub_read(void *ctx, const hu_memory_query_t *q, hu_allocator_t *alloc,
-                             hu_memory_record_t **out, size_t *out_count) {
-    (void)ctx; (void)q; (void)alloc;
+                            hu_memory_record_t **out, size_t *out_count) {
+    (void)ctx;
+    (void)q;
+    (void)alloc;
     s_stub_read_calls++;
     *out = NULL;
     *out_count = 0;
     return HU_OK;
 }
-static void stub_records_free(void *ctx, hu_allocator_t *alloc,
-                               hu_memory_record_t *r, size_t n) {
-    (void)ctx; (void)alloc; (void)r; (void)n;
+static void stub_records_free(void *ctx, hu_allocator_t *alloc, hu_memory_record_t *r, size_t n) {
+    (void)ctx;
+    (void)alloc;
+    (void)r;
+    (void)n;
 }
-static void stub_deinit(void *ctx) { (void)ctx; }
+static void stub_deinit(void *ctx) {
+    (void)ctx;
+}
 
 static void test_w7_register_backend_replaces_existing(void) {
     hu_graph_t *g = NULL;
@@ -369,9 +373,8 @@ static void test_w7_routes_replaced_on_register(void) {
 
 /* --- P2G: belief variance flows through the facade write path --- */
 
-static int64_t write_relation_with_provenance(hu_memory_facade_t *m, hu_graph_t *g,
-                                              int64_t src, int64_t tgt,
-                                              float confidence,
+static int64_t write_relation_with_provenance(hu_memory_facade_t *m, hu_graph_t *g, int64_t src,
+                                              int64_t tgt, float confidence,
                                               const char *provenance) {
     hu_graph_relation_t payload = {0};
     payload.source_id = src;
@@ -401,7 +404,8 @@ static int64_t write_relation_with_provenance(hu_memory_facade_t *m, hu_graph_t 
     for (size_t i = 0; i < n; i++) {
         if (rels[i].source_id == src && rels[i].target_id == tgt &&
             rels[i].type == HU_REL_WORKS_AT) {
-            if (rels[i].id > id) id = rels[i].id;
+            if (rels[i].id > id)
+                id = rels[i].id;
         }
     }
     hu_graph_relations_free(A(), rels, n);
@@ -425,23 +429,22 @@ static void test_w7_p2g_facade_write_seeds_variance_from_provenance(void) {
     int64_t alice = 0, bob = 0;
     HU_ASSERT_EQ(hu_graph_upsert_entity(g, "", 0, "Alice", 5, HU_ENTITY_PERSON, NULL, &alice),
                  HU_OK);
-    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "", 0, "Bob", 3, HU_ENTITY_PERSON, NULL, &bob),
-                 HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "", 0, "Bob", 3, HU_ENTITY_PERSON, NULL, &bob), HU_OK);
     int64_t acme = 0, globex = 0;
     HU_ASSERT_EQ(hu_graph_upsert_entity(g, "", 0, "Acme", 4, HU_ENTITY_ORGANIZATION, NULL, &acme),
                  HU_OK);
-    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "", 0, "Globex", 6, HU_ENTITY_ORGANIZATION, NULL,
-                                         &globex),
-                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(g, "", 0, "Globex", 6, HU_ENTITY_ORGANIZATION, NULL, &globex),
+        HU_OK);
 
     /* High-confidence direct user statement → low variance. */
-    int64_t id_user = write_relation_with_provenance(
-        m, g, alice, acme, 0.95f, "channel:imessage:user-text");
+    int64_t id_user =
+        write_relation_with_provenance(m, g, alice, acme, 0.95f, "channel:imessage:user-text");
 
     /* Heuristic-derived fact (different source, no peek collision)
      * → higher variance, mean preserved at observation value. */
-    int64_t id_heur = write_relation_with_provenance(
-        m, g, bob, globex, 0.70f, "autodream:released:pattern-001");
+    int64_t id_heur =
+        write_relation_with_provenance(m, g, bob, globex, 0.70f, "autodream:released:pattern-001");
 
     float mean_user = -1, var_user = -1;
     HU_ASSERT_EQ(hu_graph_get_relation_belief(g, id_user, &mean_user, &var_user), HU_OK);
@@ -469,8 +472,7 @@ static void test_w7_p2g_null_provenance_uses_default_variance(void) {
     int64_t alice = 0, acme = 0;
     HU_ASSERT_EQ(hu_graph_upsert_entity(g, "", 0, "Alice", 5, HU_ENTITY_PERSON, NULL, &alice),
                  HU_OK);
-    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "", 0, "Acme", 4, HU_ENTITY_ORGANIZATION, NULL,
-                                         &acme),
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "", 0, "Acme", 4, HU_ENTITY_ORGANIZATION, NULL, &acme),
                  HU_OK);
 
     int64_t id = write_relation_with_provenance(m, g, alice, acme, 1.0f, NULL);
@@ -497,8 +499,7 @@ static void test_w7_facade_relation_belief_get_set_matches_graph(void) {
     int64_t alice = 0, acme = 0;
     HU_ASSERT_EQ(hu_graph_upsert_entity(g, "", 0, "Alice", 5, HU_ENTITY_PERSON, NULL, &alice),
                  HU_OK);
-    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "", 0, "Acme", 4, HU_ENTITY_ORGANIZATION, NULL,
-                                         &acme),
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "", 0, "Acme", 4, HU_ENTITY_ORGANIZATION, NULL, &acme),
                  HU_OK);
     int64_t id = write_relation_with_provenance(m, g, alice, acme, 0.82f, "channel:test");
 
@@ -554,8 +555,8 @@ static void test_w7_add_temporal_event_is_visible_to_query(void) {
     /* Pre-condition: reader is empty before any write. */
     char *before = NULL;
     size_t before_len = 0;
-    HU_ASSERT_EQ(hu_memory_facade_query_temporal(m, A(), "u", 1, now, now + (int64_t)7 * 24 * 3600, 10,
-                                                 &before, &before_len),
+    HU_ASSERT_EQ(hu_memory_facade_query_temporal(m, A(), "u", 1, now, now + (int64_t)7 * 24 * 3600,
+                                                 10, &before, &before_len),
                  HU_OK);
     bool empty_before = (before == NULL) || (strstr(before, desc) == NULL);
     HU_ASSERT_TRUE(empty_before);
@@ -563,14 +564,14 @@ static void test_w7_add_temporal_event_is_visible_to_query(void) {
         A()->free(A()->ctx, before, before_len + 1);
 
     /* Write through the newly-wired path. */
-    HU_ASSERT_EQ(
-        hu_memory_facade_add_temporal_event(m, "u", 1, desc, strlen(desc), when, 0), HU_OK);
+    HU_ASSERT_EQ(hu_memory_facade_add_temporal_event(m, "u", 1, desc, strlen(desc), when, 0),
+                 HU_OK);
 
     /* Post-condition: the reader now surfaces the event. */
     char *after = NULL;
     size_t after_len = 0;
-    HU_ASSERT_EQ(hu_memory_facade_query_temporal(m, A(), "u", 1, now, now + (int64_t)7 * 24 * 3600, 10,
-                                                 &after, &after_len),
+    HU_ASSERT_EQ(hu_memory_facade_query_temporal(m, A(), "u", 1, now, now + (int64_t)7 * 24 * 3600,
+                                                 10, &after, &after_len),
                  HU_OK);
     HU_ASSERT_NOT_NULL(after);
     HU_ASSERT_TRUE(strstr(after, desc) != NULL);
@@ -588,30 +589,6 @@ static void test_w7_add_temporal_event_rejects_null_args(void) {
                  HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT_EQ(hu_memory_facade_add_temporal_event(m, "u", 1, NULL, 0, 1, 0),
                  HU_ERR_INVALID_ARGUMENT);
-    close_facade(g, m);
-}
-
-/* --- case rowid via hu_memory_facade_last_case_rowid (no raw graph sqlite in case_based.c) --- */
-
-static void test_w7_case_write_last_rowid_matches_hu_case_record_out_id(void) {
-    hu_graph_t *g = NULL;
-    hu_memory_facade_t *m = NULL;
-    open_facade(&g, &m);
-
-    HU_ASSERT_EQ(hu_memory_facade_last_case_rowid(m), 0);
-
-    int64_t id1 = 0;
-    HU_ASSERT_EQ(hu_case_record(m, "c", 1, "goal", 4, NULL, 0, NULL, 0, "ok", 2, 1000LL, &id1),
-                 HU_OK);
-    HU_ASSERT_TRUE(id1 > 0);
-    HU_ASSERT_EQ(hu_memory_facade_last_case_rowid(m), id1);
-
-    int64_t id2 = 0;
-    HU_ASSERT_EQ(
-        hu_case_record(m, "c", 1, "goal2", 5, NULL, 0, NULL, 0, "x", 1, 2000LL, &id2), HU_OK);
-    HU_ASSERT_TRUE(id2 > id1);
-    HU_ASSERT_EQ(hu_memory_facade_last_case_rowid(m), id2);
-
     close_facade(g, m);
 }
 
@@ -666,14 +643,13 @@ static void test_w7_export_json_creates_file(void) {
 
     int64_t alice = insert_entity(g, "Alice");
     int64_t acme = 0;
-    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u1", 2, "Acme", 4, HU_ENTITY_ORGANIZATION,
-                                         NULL, &acme),
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u1", 2, "Acme", 4, HU_ENTITY_ORGANIZATION, NULL, &acme),
                  HU_OK);
-    HU_ASSERT_EQ(hu_graph_upsert_relation(g, "u1", 2, alice, acme, HU_REL_WORKS_AT, 1.0f,
-                                           NULL, 0),
+    HU_ASSERT_EQ(hu_graph_upsert_relation(g, "u1", 2, alice, acme, HU_REL_WORKS_AT, 1.0f, NULL, 0),
                  HU_OK);
 
-    const char *path = "/tmp/hu_test_export.jsonl";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_test_export.jsonl"));
     HU_ASSERT_EQ(hu_memory_facade_export_json(m, A(), path), HU_OK);
 
     FILE *fp = fopen(path, "r");
@@ -697,14 +673,10 @@ static void test_w7_export_json_null_args_rejected(void) {
     hu_memory_facade_t *m = NULL;
     open_facade(&g, &m);
 
-    HU_ASSERT_EQ(hu_memory_facade_export_json(NULL, A(), "/tmp/x.jsonl"),
-                 HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_memory_facade_export_json(m, NULL, "/tmp/x.jsonl"),
-                 HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_memory_facade_export_json(m, A(), NULL),
-                 HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_memory_facade_export_json(m, A(), ""),
-                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_memory_facade_export_json(NULL, A(), "/tmp/x.jsonl"), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_memory_facade_export_json(m, NULL, "/tmp/x.jsonl"), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_memory_facade_export_json(m, A(), NULL), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_memory_facade_export_json(m, A(), ""), HU_ERR_INVALID_ARGUMENT);
 
     close_facade(g, m);
 }
@@ -725,7 +697,7 @@ static void test_w7_p3_neighbors_query_with_variant_tag_safe(void) {
     int64_t alice = insert_entity(g, "Alice");
     int64_t bob = insert_entity(g, "Bob");
     HU_ASSERT_EQ(hu_graph_upsert_relation_ex(g, "u1", 2, alice, bob, HU_REL_KNOWS, 1.0f,
-                                              1735000000000LL, 0, 1.0f, NULL, 0, "rel", 3),
+                                             1735000000000LL, 0, 1.0f, NULL, 0, "rel", 3),
                  HU_OK);
 
     /* Build a neighbors query that would have crashed without the variant
@@ -758,7 +730,7 @@ static void test_w7_p3_auto_variant_falls_back_to_neighbors_safely(void) {
     int64_t alice = insert_entity(g, "Alice");
     int64_t bob = insert_entity(g, "Bob");
     HU_ASSERT_EQ(hu_graph_upsert_relation_ex(g, "u1", 2, alice, bob, HU_REL_KNOWS, 1.0f,
-                                              1735000000000LL, 0, 1.0f, NULL, 0, "rel", 3),
+                                             1735000000000LL, 0, 1.0f, NULL, 0, "rel", 3),
                  HU_OK);
 
     hu_memory_query_t q;
@@ -1143,7 +1115,6 @@ void run_w7_memory_facade_tests(void) {
     HU_RUN_TEST(test_w7_anticipatory_analyze_memory_matches_graph);
     HU_RUN_TEST(test_w7_add_temporal_event_is_visible_to_query);
     HU_RUN_TEST(test_w7_add_temporal_event_rejects_null_args);
-    HU_RUN_TEST(test_w7_case_write_last_rowid_matches_hu_case_record_out_id);
     HU_RUN_TEST(test_w7_list_entities_returns_inserted_entity);
     HU_RUN_TEST(test_w7_list_entities_null_args_rejected);
     HU_RUN_TEST(test_w7_export_json_creates_file);

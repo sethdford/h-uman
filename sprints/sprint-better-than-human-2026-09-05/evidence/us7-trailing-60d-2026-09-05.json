@@ -1,0 +1,99 @@
+{
+  "db": "/Users/sethford/Library/Messages/chat.db",
+  "range": {
+    "start": "2026-07-07",
+    "end": "2026-09-05"
+  },
+  "window_days": 30,
+  "min_n": 100,
+  "min_covered_days": 20.0,
+  "primary_outbound_messages_in_range": 963,
+  "total_outbound_messages_in_range": 1932,
+  "events": {},
+  "sources": [
+    {
+      "path": "/Users/sethford/.human/logs/eval-archive/imessage-corpus-backup-20260725-113543/training_pairs.jsonl",
+      "rows": 1018,
+      "added": 1018,
+      "duplicates": 0
+    }
+  ],
+  "primary_rows_dropped_by_export_frame": 49,
+  "source_caveats": [
+    "export rows are Seth-authored via chat.db is_from_me=1 (scripts/extract_imessage_pairs.py); DPO/memory.db stores were rejected",
+    "export timestamps converted local->UTC before windowing and de-dup",
+    "chat.db rows filtered to the export's len>=2 floor",
+    "export omits Seth messages that open a conversation window with no prior context; that exclusion cannot be reproduced on the chat.db side"
+  ],
+  "trailing_window_summary": {
+    "requested_days": 60,
+    "window": {
+      "start": "2026-07-07",
+      "end": "2026-09-05"
+    },
+    "n": 1932,
+    "coverage": {
+      "first": "2026-07-07T20:24:18.404369",
+      "last": "2026-09-05T15:41:34.679494",
+      "covered_days": 59.8
+    },
+    "status": "OK",
+    "axes": {
+      "length_chars": {
+        "mean": 37.357660455486545,
+        "ci_lo": 35.43788819875776,
+        "ci_hi": 39.39958592132505,
+        "n": 1932
+      },
+      "lowercase_start_rate": {
+        "mean": 0.14135575407251708,
+        "ci_lo": 0.1255911718339464,
+        "ci_hi": 0.1576458223857068,
+        "n": 1903
+      },
+      "no_terminal_punct_rate": {
+        "mean": 0.7888198757763976,
+        "ci_lo": 0.770703933747412,
+        "ci_hi": 0.8074534161490683,
+        "n": 1932
+      },
+      "question_rate": {
+        "mean": 0.10041407867494824,
+        "ci_lo": 0.08747412008281573,
+        "ci_hi": 0.11335403726708075,
+        "n": 1932
+      },
+      "exclamation_rate": {
+        "mean": 0.045548654244306416,
+        "ci_lo": 0.03674948240165631,
+        "ci_hi": 0.05538302277432712,
+        "n": 1932
+      },
+      "emoji_rate": {
+        "mean": 0.060041407867494824,
+        "ci_lo": 0.049689440993788817,
+        "ci_hi": 0.07039337474120083,
+        "n": 1932
+      },
+      "formality_contractions_per_100_words": {
+        "mean": 2.4963422777846005,
+        "ci_lo": 2.178547957141908,
+        "ci_hi": 2.8123398064739624,
+        "n": 1932
+      },
+      "formality_first_person_plural_per_100_words": {
+        "mean": 0.4907390639880823,
+        "ci_lo": 0.37477863674623785,
+        "ci_hi": 0.6278262478314407,
+        "n": 1932
+      },
+      "warmth_hits_per_100_words": {
+        "mean": 1.1121620086824258,
+        "ci_lo": 0.8945045504735699,
+        "ci_hi": 1.365493718112671,
+        "n": 1932
+      }
+    }
+  },
+  "overall_status": "OK"
+}

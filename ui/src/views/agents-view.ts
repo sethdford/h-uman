@@ -284,12 +284,14 @@ export class ScAgentsView extends GatewayAwareLitElement {
   override render() {
     if (this.loading) return this._renderSkeleton();
     return html`
-      ${this.error
-        ? html`<hu-empty-state .icon=${icons.warning} heading="Error" description=${this.error}>
-            <hu-button variant="primary" @click=${() => this.load()}>Retry</hu-button>
-          </hu-empty-state>`
-        : html`${this._renderHero()} ${this._renderMetrics()} ${this._renderChart()}
-          ${this._renderSessions()} ${this._renderConfig()}`}
+      ${
+        this.error
+          ? html`<hu-empty-state .icon=${icons.warning} heading="Error" description=${this.error}>
+              <hu-button variant="primary" @click=${() => this.load()}>Retry</hu-button>
+            </hu-empty-state>`
+          : html`${this._renderHero()} ${this._renderMetrics()} ${this._renderChart()}
+            ${this._renderSessions()} ${this._renderConfig()}`
+      }
     `;
   }
 
@@ -336,15 +338,17 @@ export class ScAgentsView extends GatewayAwareLitElement {
         <div class="section-header">
           <span class="section-title">Sessions per day</span>
         </div>
-        ${chartData.labels.length === 0
-          ? html`<hu-empty-state
-              .icon=${icons["bar-chart"]}
-              heading="No chart data"
-              description="Session activity will appear here once conversations are created."
-            >
-              <hu-button variant="ghost" size="sm" @click=${() => this.load()}>Retry</hu-button>
-            </hu-empty-state>`
-          : html`<hu-chart type="bar" .data=${chartData} height=${200}></hu-chart>`}
+        ${
+          chartData.labels.length === 0
+            ? html`<hu-empty-state
+                .icon=${icons["bar-chart"]}
+                heading="No chart data"
+                description="Session activity will appear here once conversations are created."
+              >
+                <hu-button variant="ghost" size="sm" @click=${() => this.load()}>Retry</hu-button>
+              </hu-empty-state>`
+            : html`<hu-chart type="bar" .data=${chartData} height=${200}></hu-chart>`
+        }
       </hu-card>
     `;
   }
@@ -363,21 +367,23 @@ export class ScAgentsView extends GatewayAwareLitElement {
             + New Chat
           </hu-button>
         </div>
-        ${this.sessions.length === 0
-          ? html`
-              <hu-empty-state
-                .icon=${icons["chat-circle"]}
-                heading="No active sessions"
-                description="Start a conversation to see sessions here."
-              ></hu-empty-state>
-            `
-          : html`
-              <hu-data-table-v2
-                .columns=${this.columns}
-                .rows=${this.tableRows}
-                @hu-row-click=${this._onRowClick}
-              ></hu-data-table-v2>
-            `}
+        ${
+          this.sessions.length === 0
+            ? html`
+                <hu-empty-state
+                  .icon=${icons["chat-circle"]}
+                  heading="No active sessions"
+                  description="Start a conversation to see sessions here."
+                ></hu-empty-state>
+              `
+            : html`
+                <hu-data-table-v2
+                  .columns=${this.columns}
+                  .rows=${this.tableRows}
+                  @hu-row-click=${this._onRowClick}
+                ></hu-data-table-v2>
+              `
+        }
       </hu-card>
     `;
   }

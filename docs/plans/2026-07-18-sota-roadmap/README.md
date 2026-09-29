@@ -136,6 +136,27 @@ Every area below carries: **Now** (evidence) → **SOTA** (target) → **Plan**
   fidelity eval (`scripts/eval_fidelity_nightly.py`) before any swap.
 - **Gate**: fidelity ≥ v4's +27pp lift on the *matching* base; base-mismatch
   doctor check green forever.
+- **2026-09-03**: the nightly fidelity harness generates **through :8741**
+  (`eval_fidelity_nightly.py --gen served`, the default whenever a server
+  answers) instead of loading a second copy of the base in-process — that
+  second loader reached 94.8 GB wired on 09-03 04:31 and killed production
+  (`[METAL] Insufficient Memory`, `?E` zombie, reboot). The PRE arm swaps a
+  zero-delta twin of the serving adapter in via `POST /v1/adapters/swap`
+  (the serving build has no unload; all-zero LoRA A/B is the base exactly),
+  the serving adapter is restored and verified via `/v1/adapters/current`,
+  then POST runs on it. `nightly_eval.sh` picks the mode (served / in-process
+  only when :8741 is down and no trainer holds the weights), samples peak
+  wired memory + loader count during the step, and re-restores the adapter
+  if the harness reports `adapter_restored: false`. Caveat found while
+  wiring it: the serving build applies adapters with
+  `model.load_weights(strict=False)` and never injects LoRA layers, so
+  `lora_*` tensors are dropped silently — a served run that DEFERs with
+  "PRE and POST byte-identical" is reporting that the serving adapter is
+  inert, not that it failed to help. Exposure guard (2026-09-04): the swap
+  waits for a quiet window (no chat.db / memory.db message for 300 s, up to
+  15 min, else DEFERRED) and the PRE arm aborts at the next prompt boundary
+  if a message lands after the swap, so a base-model reply can leak into at
+  most one generation. `--no-quiet-guard` disables it for manual runs.
 
 ### 7. DPO flywheel (collection)
 - **Now**: restored 2026-07-18 — RL_FULL now in dev preset (recorder was

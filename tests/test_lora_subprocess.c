@@ -42,7 +42,13 @@ static void test_build_argv_happy_path_shape(void) {
     char buf[2048];
     size_t n = hu_lora_subprocess_build_argv(&cfg, argv, 24, buf, sizeof(buf));
     HU_ASSERT_TRUE(n > 0);
-    HU_ASSERT_STR_EQ(argv[0], "python3");
+    /* argv[0] is RESOLVED, not the literal "python3" (2026-07-26): PATH gave
+     * python@3.14, the interpreter human-serve.sh deliberately avoids. Assert
+     * the contract — argv[0] is whatever hu_lora_subprocess_python() resolves
+     * to, and it is never a 3.14 interpreter — rather than a literal, so the
+     * pin holds on a dev box with the venv AND in CI without it. */
+    HU_ASSERT_STR_EQ(argv[0], hu_lora_subprocess_python());
+    HU_ASSERT_TRUE(strstr(argv[0], "3.14") == NULL);
     HU_ASSERT_STR_EQ(argv[1], "-m");
     HU_ASSERT_STR_EQ(argv[2], "mlx_lm.lora");
     /* --model id must appear together */

@@ -1,0 +1,173 @@
+{
+  "timestamp": "2026-07-26T10:38:56",
+  "mode": "cli",
+  "total_trials": 9,
+  "human_detected": 9,
+  "ai_fooled": 0,
+  "detection_rate": 100.0,
+  "fool_rate": 0.0,
+  "trials": [
+    {
+      "i": 0,
+      "incoming": "one of my favs",
+      "real_seth": "wish wait no I could lol, save a spot for me next time",
+      "ai_response": "appreciate that. what's up?",
+      "human_was": "B",
+      "judge_choice": "B",
+      "judge_correct": true,
+      "confidence": 9,
+      "judgment": {
+        "choice": "B",
+        "confidence": 9,
+        "reasoning": "Response B contains a mid-thought self-correction and chaotic syntax typical of human texting, whereas A is a generic, slightly out-of-context response typical of an AI misinterpreting the prompt.",
+        "a_analysis": "Response A is grammatically standard but contextually generic. 'Appreciate that' suggests it misinterpreted 'one of my favs' as a personal compliment, a common AI comprehension error when lacking visual or prior conversational context.",
+        "b_analysis": "Response B features highly natural human texting quirks, including a messy mid-sentence correction ('wish wait no I could') and casual abbreviations ('lol'). The contextual assumption ('save a spot') implies a shared understanding of a place or event (like a restaurant or bar), which an AI would struggle to infer from the vague text 'one of my favs'."
+      },
+      "is_synthetic": false
+    },
+    {
+      "i": 1,
+      "incoming": "I called them and tried to follow up with them a few few days ago, but I\u2019ll try again",
+      "real_seth": "It will be resolved but it does seem financing is going to be challenging and not a huge cash buyer community",
+      "ai_response": "good move. keep at it",
+      "human_was": "A",
+      "judge_choice": "A",
+      "judge_correct": true,
+      "confidence": 9,
+      "judgment": {
+        "choice": "A",
+        "confidence": 9,
+        "reasoning": "Response A introduces specific, unprompted context (financing, cash buyers) that relies on shared background knowledge between the two people, which is a strong indicator of a real human conversation. Response B is generic and relies only on the provided text, typical of an AI lacking outside context.",
+        "a_analysis": "This response introduces specific real-world details ('financing', 'cash buyer community') that were not mentioned in the previous message. This demonstrates shared background knowledge and an ongoing narrative, which is a massive hallmark of genuine human-to-human texting.",
+        "b_analysis": "While the lowercase formatting and brevity successfully mimic human texting conventions, the content is highly generic. It relies solely on the immediate context of the prompt ('tried to follow up' -> 'good move. keep at it'), which is exactly how an AI responds when it lacks the broader context of a real-life situation."
+      },
+      "is_synthetic": false
+    },
+    {
+      "i": 2,
+      "incoming": "Yes ! What time are you thinking ? I\u2019m free anytime after 4 pm",
+      "real_seth": "5:00? I could drive there after work",
+      "ai_response": "I'm free after 4 too. How about 5?",
+      "human_was": "A",
+      "judge_choice": "A",
+      "judge_correct": true,
+      "confidence": 9,
+      "judgment": {
+        "choice": "A",
+        "confidence": 9,
+        "reasoning": "Response A introduces new, natural context ('after work', 'drive there') and uses casual texting conventions like omitting ending punctuation. Response B unnaturally repeats the premise ('free after 4 too') which is a common AI conversational filler.",
+        "a_analysis": "This response feels highly authentic. It uses a brief fragment ('5:00?') and provides a practical, real-world reason for the timing ('after work'). The lack of a period at the end of the sentence is also a very common human texting convention.",
+        "b_analysis": "This response feels generated. It unnecessarily repeats the constraint provided by the sender ('I'm free after 4 too'), which is a classic AI pattern of acknowledging and validating input before answering. It also uses perfect punctuation, which is slightly less common in quick texts."
+      },
+      "is_synthetic": false
+    },
+    {
+      "i": 3,
+      "incoming": "Wow I can\u2019t wait",
+      "real_seth": "Well you are the boss how do we start",
+      "ai_response": "excited for what?",
+      "human_was": "A",
+      "judge_choice": "A",
+      "judge_correct": true,
+      "confidence": 9,
+      "judgment": {
+        "choice": "A",
+        "confidence": 9,
+        "reasoning": "Response A relies on shared, unspoken context and uses natural, unpunctuated texting syntax. Response B is a generic request for context, typical of an AI responding to a vague prompt.",
+        "a_analysis": "This response introduces specific outside context ('you are the boss', 'how do we start') that implies an ongoing, real-world relationship. The lack of punctuation and run-on structure are highly typical of human texting.",
+        "b_analysis": "While the lowercase formatting mimics human texting, the content is completely generic. Asking 'excited for what?' is exactly how an AI would logically respond to a vague statement when it lacks conversational history or background context."
+      },
+      "is_synthetic": false
+    },
+    {
+      "i": 4,
+      "incoming": "Yeah definitely they are Safe Haven is the name I\u2019ll get their number for you",
+      "real_seth": "Also wire transfer instructions and date you need the wire sent",
+      "ai_response": "got it. safe haven sounds familiar but i can't place where from. what area are they in?",
+      "human_was": "A",
+      "judge_choice": "A",
+      "judge_correct": true,
+      "confidence": 9,
+      "judgment": {
+        "choice": "A",
+        "confidence": 9,
+        "reasoning": "Response A introduces highly specific, unprompted real-world context (wire transfers) that fits an ongoing transaction, whereas Response B relies on generic conversational filler and forced lowercase to simulate a casual tone.",
+        "a_analysis": "This response is highly specific and goal-oriented. The mention of 'wire transfer instructions' implies a real-world transaction (like real estate or escrow with a company named Safe Haven) that an AI would not hallucinate without a highly detailed prompt. It is brief, lacks terminal punctuation, and gets straight to the point, which perfectly matches human texting behavior.",
+        "b_analysis": "This response exhibits classic AI conversational tactics. It uses forced lowercase to artificially mimic human texting, relies on clich\u00e9 filler ('sounds familiar but i can\\'t place where from'), and ends with a generic follow-up question designed to keep the engagement going rather than addressing a specific real-world task."
+      },
+      "is_synthetic": false
+    },
+    {
+      "i": 8,
+      "incoming": "Okay I will follow up with them",
+      "real_seth": "Want to come stay the weekend?",
+      "ai_response": "Got it.",
+      "human_was": "A",
+      "judge_choice": "A",
+      "judge_correct": true,
+      "confidence": 9,
+      "judgment": {
+        "choice": "A",
+        "confidence": 9,
+        "reasoning": "Response A introduces spontaneous, out-of-context information (a weekend invitation), which is highly typical of real human texting where conversations flow into new topics. Response B is a safe, generic acknowledgment that an AI would default to when given only the immediate context.",
+        "a_analysis": "This response abruptly changes the subject and introduces outside context. Humans frequently do this in text conversations because they share an ongoing relationship and life outside the immediate message thread. An AI would not hallucinate a weekend invitation unless specifically prompted to do so.",
+        "b_analysis": "While 'Got it.' is a common human text, it is also the exact type of safe, logical, and context-bound acknowledgment an AI generates when asked to reply to a statement of action without any additional background information."
+      },
+      "is_synthetic": false
+    },
+    {
+      "i": 9,
+      "incoming": "Yess let\u2019s do it!",
+      "real_seth": "https://maps.app.goo.gl/TMRqr8LWBxMsVwot5?g_st=ic",
+      "ai_response": "Let's do what? I'm down whatever it is.",
+      "human_was": "A",
+      "judge_choice": "A",
+      "judge_correct": true,
+      "confidence": 9,
+      "judgment": {
+        "choice": "A",
+        "confidence": 9,
+        "reasoning": "Response A perfectly fits the context of finalizing a plan by sharing a location, whereas Response B exposes a lack of conversational memory, typical of an AI responding to a standalone prompt.",
+        "a_analysis": "Sending a raw Google Maps link (complete with the mobile tracking parameter '?g_st=ic') is highly authentic human texting behavior when agreeing to meet up. It relies on unspoken shared context.",
+        "b_analysis": "This response feels like an AI that was only fed the single message 'Yess let's do it!' without the preceding conversation. A real human would already know what 'it' refers to since they were just discussing it."
+      },
+      "is_synthetic": false
+    },
+    {
+      "i": 10,
+      "incoming": "You never said that was the deal",
+      "real_seth": "It\u2019s not the deal",
+      "ai_response": "I'm not sure what you're referring to. Could you please clarify which specific statement or situation you'd like me to address?",
+      "human_was": "A",
+      "judge_choice": "A",
+      "judge_correct": true,
+      "confidence": 10,
+      "judgment": {
+        "choice": "A",
+        "confidence": 10,
+        "reasoning": "Response A is brief, direct, and lacks a period at the end, which is typical of human texting. Response B is overly formal, polite, and sounds like a customer service bot.",
+        "a_analysis": "This response is short, direct, and conversational. It lacks a trailing period, which is a common texting convention for humans. It directly addresses the conflict without unnecessary filler.",
+        "b_analysis": "This response exhibits classic AI tells: it is overly formal, uses complete and grammatically perfect sentences, and asks for clarification in a highly robotic, customer-service-like manner ('which specific statement or situation you\\'d like me to address')."
+      },
+      "is_synthetic": false
+    },
+    {
+      "i": 11,
+      "incoming": "Hi Good Morning !!! Sent LinkedIn connect request.",
+      "real_seth": "I\u2019ll have some from RJ reach out",
+      "ai_response": "Morning! Good to connect. Thanks for reaching out.",
+      "human_was": "B",
+      "judge_choice": "B",
+      "judge_correct": true,
+      "confidence": 9,
+      "judgment": {
+        "choice": "B",
+        "confidence": 9,
+        "reasoning": "Response B contains a typo, lacks ending punctuation, and includes specific, unexplained context, which are strong indicators of a rushed human text. Response A is perfectly punctuated and generic, typical of AI.",
+        "a_analysis": "Perfectly punctuated, generic, and polite. It reads like a standard AI-generated professional response or an automated template.",
+        "b_analysis": "Contains a typo ('some' instead of 'someone'), lacks ending punctuation, and mentions a specific entity ('RJ') without context. This messy, highly contextual brevity is a classic hallmark of human texting."
+      },
+      "is_synthetic": false
+    }
+  ]
+}

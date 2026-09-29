@@ -372,6 +372,13 @@ static hu_error_t shape_classify_impl(const char *response, size_t response_len,
             out->fail_flags |= HU_SHAPE_FAIL_EXCESSIVE_EMOJI;
     }
 
+    /* Trailing '?' — measurement-only, see HU_SHAPE_FAIL_TRAILING_QUESTION.
+     * Carries no score penalty below and is absent from the persona gate mask,
+     * so setting it cannot block or regenerate a send. Ignores a bare "?" (that
+     * is a reaction, not the reflex being measured). */
+    if (trimmed_len > 1 && r[trimmed_len - 1] == '?')
+        out->fail_flags |= HU_SHAPE_FAIL_TRAILING_QUESTION;
+
     /* Score: start at 1.0, subtract per-fail penalty, clamp to [0, 1]
      * Mirrors the Python classifier — heavy violations -0.3, light -0.15. */
     double score = 1.0;
@@ -406,6 +413,11 @@ static hu_error_t shape_classify_impl(const char *response, size_t response_len,
         score -= 0.15;
     if (f & HU_SHAPE_FAIL_AI_SELF_DISCLOSURE)
         score -= 0.3; /* heavy: it's a hard persona-break */
+    /* HU_SHAPE_FAIL_TRAILING_QUESTION is INTENTIONALLY absent here. It is a
+     * measurement-only signal (see its definition in shape.h): giving it a
+     * penalty would let it drag `passed` false and regenerate real sends, which
+     * is the LIVE step and needs its own measurement first. Do not add one
+     * without that. */
     if (score < 0.0)
         score = 0.0;
     if (score > 1.0)

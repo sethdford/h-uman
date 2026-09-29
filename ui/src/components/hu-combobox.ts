@@ -1,5 +1,6 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
+import { ifDefined } from "lit/directives/if-defined.js";
 
 export type ComboboxOption = { value: string; label: string };
 
@@ -292,8 +293,9 @@ export class ScCombobox extends LitElement {
 
   override render() {
     const filtered = this._filteredOptions;
+    const listboxShown = this._open && filtered.length > 0;
     const activeId =
-      this._open && filtered.length > 0 && this._activeIndex >= 0
+      listboxShown && this._activeIndex >= 0
         ? `${this._listboxId}-opt-${this._activeIndex}`
         : undefined;
 
@@ -305,13 +307,13 @@ export class ScCombobox extends LitElement {
             id=${this._inputId}
             type="text"
             role="combobox"
-            aria-expanded=${this._open}
+            aria-expanded=${listboxShown}
             aria-autocomplete="list"
-            aria-controls=${this._open ? this._listboxId : undefined}
-            aria-activedescendant=${activeId ?? undefined}
+            aria-controls=${ifDefined(listboxShown ? this._listboxId : undefined)}
+            aria-activedescendant=${ifDefined(activeId)}
             aria-invalid=${this.error ? "true" : "false"}
-            aria-describedby=${this.error ? `${this._inputId}-error` : undefined}
-            aria-label=${this.label ? undefined : this.ariaLabel || undefined}
+            aria-describedby=${ifDefined(this.error ? `${this._inputId}-error` : undefined)}
+            aria-label=${ifDefined(this.label ? undefined : this.ariaLabel || undefined)}
             .value=${this._inputValue ?? this._displayValue}
             placeholder=${this.placeholder}
             ?disabled=${this.disabled}
@@ -321,40 +323,44 @@ export class ScCombobox extends LitElement {
             @blur=${this._onBlur}
             @keydown=${this._onKeyDown}
           />
-          ${this._open && filtered.length > 0
-            ? html`
-                <div
-                  id=${this._listboxId}
-                  class="dropdown"
-                  role="listbox"
-                  @mousedown=${(e: MouseEvent) => e.preventDefault()}
-                >
-                  ${filtered.map(
-                    (opt, i) => html`
-                      <div
-                        id=${`${this._listboxId}-opt-${i}`}
-                        class="option"
-                        role="option"
-                        aria-selected=${i === this._activeIndex}
-                        @click=${() => this._selectOption(opt)}
-                      >
-                        ${this._highlightLabel(opt.label)}
-                      </div>
-                    `,
-                  )}
-                </div>
-              `
-            : null}
+          ${
+            listboxShown
+              ? html`
+                  <div
+                    id=${this._listboxId}
+                    class="dropdown"
+                    role="listbox"
+                    @mousedown=${(e: MouseEvent) => e.preventDefault()}
+                  >
+                    ${filtered.map(
+                      (opt, i) => html`
+                        <div
+                          id=${`${this._listboxId}-opt-${i}`}
+                          class="option"
+                          role="option"
+                          aria-selected=${i === this._activeIndex}
+                          @click=${() => this._selectOption(opt)}
+                        >
+                          ${this._highlightLabel(opt.label)}
+                        </div>
+                      `,
+                    )}
+                  </div>
+                `
+              : null
+          }
         </div>
-        ${this.error
-          ? html`<span
-              class="error-msg"
-              id=${`${this._inputId}-error`}
-              role="alert"
-              aria-live="polite"
-              >${this.error}</span
-            >`
-          : null}
+        ${
+          this.error
+            ? html`<span
+                class="error-msg"
+                id=${`${this._inputId}-error`}
+                role="alert"
+                aria-live="polite"
+                >${this.error}</span
+              >`
+            : null
+        }
       </div>
     `;
   }

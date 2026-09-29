@@ -15,12 +15,10 @@
 
 #include "human/channel.h"
 #include "human/channels/dispatch.h"
-#include "human/channels/maixcam.h"
 #include "human/channels/mattermost.h"
 /* signal.h removed -- signal.c was graduated to production in FIX 14;
  * its production wires are tested in tests/test_signal_channel_wire.c. */
 #include "human/channels/web.h"
-#include "human/channels/webhook.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "test_framework.h"
@@ -44,17 +42,6 @@ static void orphan_mattermost_creates_and_names(void) {
     HU_ASSERT_NOT_NULL(ch.vtable->name);
     HU_ASSERT_TRUE(strcmp(ch.vtable->name(ch.ctx), "mattermost") == 0);
     hu_mattermost_destroy(&ch);
-}
-
-static void orphan_maixcam_creates_and_names(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_channel_t ch;
-    memset(&ch, 0, sizeof(ch));
-    HU_ASSERT_EQ(hu_maixcam_create(&alloc, "localhost", 9, 8080, &ch), HU_OK);
-    HU_ASSERT_NOT_NULL(ch.vtable);
-    HU_ASSERT_NOT_NULL(ch.vtable->name);
-    HU_ASSERT_TRUE(strcmp(ch.vtable->name(ch.ctx), "maixcam") == 0);
-    hu_maixcam_destroy(&ch);
 }
 
 static void orphan_web_creates_and_names(void) {
@@ -90,33 +77,10 @@ static void orphan_dispatch_creates_and_names(void) {
     hu_dispatch_destroy(&ch);
 }
 
-static void orphan_webhook_creates_and_names(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_webhook_channel_config_t cfg;
-    memset(&cfg, 0, sizeof(cfg));
-    cfg.name = (char *)"webhook-test";
-    cfg.callback_url = (char *)"http://localhost:9999/hook";
-    cfg.message_field = (char *)"message";
-    cfg.sender_field = (char *)"sender";
-    cfg.max_message_len = 4096;
-    hu_channel_t ch;
-    memset(&ch, 0, sizeof(ch));
-    HU_ASSERT_EQ(hu_webhook_channel_create(&alloc, &cfg, &ch), HU_OK);
-    HU_ASSERT_NOT_NULL(ch.vtable);
-    HU_ASSERT_NOT_NULL(ch.vtable->name);
-    /* The webhook facade reports its configured name; assert it matches the
-     * value we passed in (rather than a fixed string). This proves the
-     * channel facade is intact. */
-    HU_ASSERT_TRUE(strcmp(ch.vtable->name(ch.ctx), "webhook-test") == 0);
-    hu_webhook_channel_destroy(&ch, &alloc);
-}
-
 void run_orphan_channel_audit_tests(void) {
     HU_TEST_SUITE("OrphanChannelAudit");
     HU_RUN_TEST(orphan_mattermost_creates_and_names);
-    HU_RUN_TEST(orphan_maixcam_creates_and_names);
     HU_RUN_TEST(orphan_web_creates_and_names);
     HU_RUN_TEST(orphan_cli_creates_and_names);
     HU_RUN_TEST(orphan_dispatch_creates_and_names);
-    HU_RUN_TEST(orphan_webhook_creates_and_names);
 }

@@ -1,6 +1,5 @@
 #include "human/agent_routing.h"
 #include "human/bus.h"
-#include "human/capabilities.h"
 #include "human/config.h"
 #include "human/config_types.h"
 #include "human/context_tokens.h"
@@ -12,7 +11,6 @@
 #include "human/max_tokens.h"
 #include "human/migration.h"
 #include "human/onboard.h"
-#include "human/portable_atomic.h"
 #include "human/skillforge.h"
 #include "human/tool.h"
 #include "test_framework.h"
@@ -21,27 +19,6 @@
 static void test_config_types_constants(void) {
     HU_ASSERT_EQ(HU_DEFAULT_AGENT_TOKEN_LIMIT, 200000u);
     HU_ASSERT_EQ(HU_DEFAULT_MODEL_MAX_TOKENS, 8192u);
-}
-
-static void test_portable_atomic_u64(void) {
-    hu_atomic_u64_t *a = hu_atomic_u64_create(42);
-    HU_ASSERT_NOT_NULL(a);
-    HU_ASSERT_EQ(hu_atomic_u64_load(a), 42u);
-    hu_atomic_u64_store(a, 99);
-    HU_ASSERT_EQ(hu_atomic_u64_load(a), 99u);
-    uint64_t old = hu_atomic_u64_fetch_add(a, 5);
-    HU_ASSERT_EQ(old, 99u);
-    HU_ASSERT_EQ(hu_atomic_u64_load(a), 104u);
-    hu_atomic_u64_destroy(a);
-}
-
-static void test_portable_atomic_bool(void) {
-    hu_atomic_bool_t *b = hu_atomic_bool_create(0);
-    HU_ASSERT_NOT_NULL(b);
-    HU_ASSERT_FALSE(hu_atomic_bool_load(b));
-    hu_atomic_bool_store(b, 1);
-    HU_ASSERT_TRUE(hu_atomic_bool_load(b));
-    hu_atomic_bool_destroy(b);
 }
 
 static void test_context_tokens_resolve_override(void) {
@@ -1076,47 +1053,6 @@ static void test_max_tokens_empty_model_name(void) {
     HU_ASSERT_EQ(r, HU_DEFAULT_MODEL_MAX_TOKENS);
 }
 
-/* ─── Capabilities ────────────────────────────────────────────────────────── */
-static void test_capabilities_build_summary_text(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    char *out = NULL;
-    hu_error_t err = hu_capabilities_build_summary_text(&alloc, NULL, NULL, 0, &out);
-    if (err == HU_OK) {
-        HU_ASSERT_NOT_NULL(out);
-        HU_ASSERT(strlen(out) > 0);
-        alloc.free(alloc.ctx, out, strlen(out) + 1);
-    }
-}
-
-static void test_capabilities_build_manifest_json(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    char *out = NULL;
-    hu_error_t err = hu_capabilities_build_manifest_json(&alloc, NULL, NULL, 0, &out);
-    if (err == HU_OK) {
-        HU_ASSERT_NOT_NULL(out);
-        HU_ASSERT_TRUE(strstr(out, "version") != NULL);
-        alloc.free(alloc.ctx, out, strlen(out) + 1);
-    }
-}
-
-static void test_capabilities_build_prompt_section(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    char *out = NULL;
-    hu_error_t err = hu_capabilities_build_prompt_section(&alloc, NULL, NULL, 0, &out);
-    if (err == HU_OK) {
-        HU_ASSERT_NOT_NULL(out);
-        alloc.free(alloc.ctx, out, strlen(out) + 1);
-    }
-}
-
-static void test_capabilities_null_alloc_rejected(void) {
-    char *out = NULL;
-    hu_error_t e1 = hu_capabilities_build_summary_text(NULL, NULL, NULL, 0, &out);
-    hu_error_t e2 = hu_capabilities_build_manifest_json(NULL, NULL, NULL, 0, &out);
-    HU_ASSERT(e1 != HU_OK);
-    HU_ASSERT(e2 != HU_OK);
-}
-
 /* ─── Interactions (choices) ──────────────────────────────────────────────── */
 static void test_choices_prompt_returns_default_in_test_mode(void) {
     hu_choice_t choices[] = {
@@ -1713,8 +1649,6 @@ static void test_push_control_protocol_fcm_then_apns(void) {
 void run_new_modules_tests(void) {
     HU_TEST_SUITE("New Modules");
     HU_RUN_TEST(test_config_types_constants);
-    HU_RUN_TEST(test_portable_atomic_u64);
-    HU_RUN_TEST(test_portable_atomic_bool);
     HU_RUN_TEST(test_context_tokens_resolve_override);
     HU_RUN_TEST(test_context_tokens_lookup_known_model);
     HU_RUN_TEST(test_context_tokens_default_fallback);
@@ -1818,12 +1752,6 @@ void run_new_modules_tests(void) {
     HU_RUN_TEST(test_max_tokens_lookup_unknown);
     HU_RUN_TEST(test_max_tokens_resolve_override_nonzero);
     HU_RUN_TEST(test_max_tokens_empty_model_name);
-
-    /* Capabilities */
-    HU_RUN_TEST(test_capabilities_build_summary_text);
-    HU_RUN_TEST(test_capabilities_build_manifest_json);
-    HU_RUN_TEST(test_capabilities_build_prompt_section);
-    HU_RUN_TEST(test_capabilities_null_alloc_rejected);
 
     /* Interactions */
     HU_RUN_TEST(test_choices_prompt_returns_default_in_test_mode);

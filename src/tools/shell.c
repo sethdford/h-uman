@@ -3,12 +3,16 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/json.h"
+#include "human/core/log.h"
 #include "human/core/process_util.h"
 #include "human/core/string.h"
 #include "human/security.h"
+#include "human/security/exec_env.h"
 #include "human/security/sandbox.h"
 #include "human/security/skill_trust.h"
 #include "human/tool.h"
+#include "shell_internal.h"
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -60,6 +64,182 @@ bool hu_shell_must_deny_unsandboxed(const hu_security_policy_t *policy, bool app
         return false;
     return !(apply_applied || wrap_succeeded);
 }
+
+size_t hu_shell_build_child_env(char *const *in_env, size_t in_count, char **out_env,
+                                size_t out_cap) {
+    if (!out_env || out_cap == 0)
+        return 0;
+    if (!in_env || in_count == 0)
+        return 0;
+    size_t n = in_count < out_cap ? in_count : out_cap;
+    for (size_t i = 0; i < n; i++)
+        out_env[i] = in_env[i];
+    return hu_exec_env_sanitize(out_env, n);
+}
+
+size_t hu_shell_count_env(char *const *env, size_t cap, bool *truncated) {
+    if (truncated)
+        *truncated = false;
+    if (!env)
+        return 0;
+    size_t n = 0;
+    while (n < cap && env[n])
+        n++;
+    if (truncated && n == cap && env[n])
+        *truncated = true;
+    return n;
+}
+
+size_t hu_shell_collect_blocked_env(char *const *env, size_t cap, char **blocked_out,
+                                    size_t blocked_cap, bool *truncated) {
+    if (cap > HU_SHELL_MAX_ENV_VARS)
+        cap = HU_SHELL_MAX_ENV_VARS;
+    size_t env_count = hu_shell_count_env(env, cap, truncated);
+    if (env_count == 0 || !blocked_out || blocked_cap == 0)
+        return 0;
+
+    /* hu_shell_build_child_env copies into `sanitized` and filters that copy;
+     * `env` itself is never touched, so it can be scanned in place. */
+    char *sanitized[HU_SHELL_MAX_ENV_VARS];
+    size_t sanitized_count =
+        hu_shell_build_child_env(env, env_count, sanitized, HU_SHELL_MAX_ENV_VARS);
+
+    /* hu_exec_env_sanitize() is a stable, in-place filter: `sanitized` is
+     * exactly the subsequence of `env` that survived, in order, sharing the
+     * same string pointers. A two-pointer scan finds the removed ones. */
+    size_t sp = 0;
+    size_t blocked = 0;
+    for (size_t i = 0; i < env_count && blocked < blocked_cap; i++) {
+        if (sp < sanitized_count && sanitized[sp] == env[i]) {
+            sp++;
+            continue;
+        }
+        blocked_out[blocked++] = env[i];
+    }
+    return blocked;
+}
+
+#ifndef _WIN32
+/*
+ * Log once per process when the live environment is longer than
+ * HU_SHELL_MAX_ENV_VARS, because everything past the cap reaches the shell
+ * child unsanitized (see shell_internal.h). Called in the PARENT immediately
+ * before fork(), never in the child: the child dup2()s stderr onto the
+ * command's output pipe, so a log line emitted there would land in the tool
+ * result, and a once-guard flipped in a forked child never propagates back,
+ * so "once" would silently mean "once per command".
+ */
+__attribute__((unused)) static void hu_shell_warn_env_cap_once(void) {
+    extern char **environ;
+    bool truncated = false;
+    (void)hu_shell_count_env(environ, HU_SHELL_MAX_ENV_VARS, &truncated);
+    if (!truncated)
+        return;
+    static atomic_bool warned = false;
+    if (hu_log_once_check_(&warned)) {
+        hu_log_warn("shell", NULL,
+                    "process environment exceeds HU_SHELL_MAX_ENV_VARS=%d entries; entries "
+                    "past the cap are passed to shell children unsanitized",
+                    HU_SHELL_MAX_ENV_VARS);
+    }
+}
+
+/*
+ * Strip blocklisted env vars (LD_PRELOAD, MAVEN_OPTS, GLIBC_TUNABLES, etc. —
+ * see include/human/security/exec_env.h) from the CURRENT process's live
+ * environment. Call this in the fork child, before any exec, so a value the
+ * daemon inherited (or that leaked in via a misconfigured launcher) cannot
+ * reach the spawned shell. Explicit setenv() calls made afterward (PATH,
+ * proxy vars) are unaffected — they set names that are never blocklisted.
+ *
+ * `hu_shell_collect_blocked_env` (pure, unit-tested) decides which entries
+ * go; this function applies that decision to the live environment via
+ * unsetenv(), since execl() below execs with the process's actual environ
+ * rather than an explicit envp array. Collecting first and unsetting after
+ * matters: unsetenv can reorder or shrink `environ` out from under a scan.
+ *
+ * Under HU_IS_TEST the real fork/exec path (where this is called) is
+ * compiled out in favor of a stub, same as hu_hook_is_dangerous_env in
+ * src/security/hook.c — mark unused rather than adding a new test/prod
+ * conditional branch.
+ */
+__attribute__((unused)) static void hu_shell_sanitize_child_environ(void) {
+    extern char **environ;
+    char *blocked[HU_SHELL_MAX_ENV_VARS];
+    size_t blocked_count = hu_shell_collect_blocked_env(environ, HU_SHELL_MAX_ENV_VARS, blocked,
+                                                        HU_SHELL_MAX_ENV_VARS, NULL);
+    for (size_t i = 0; i < blocked_count; i++) {
+        const char *entry = blocked[i];
+        const char *eq = strchr(entry, '=');
+        size_t name_len = eq ? (size_t)(eq - entry) : strlen(entry);
+        char name_buf[256];
+        if (name_len > 0 && name_len < sizeof(name_buf)) {
+            memcpy(name_buf, entry, name_len);
+            name_buf[name_len] = '\0';
+            unsetenv(name_buf);
+        }
+    }
+}
+
+/*
+ * Open the child's stdout/stderr pipe and fork.
+ *
+ * Returns the pid (0 in the child) with fds[] open, or -1 after writing the
+ * failure into *out — on -1 the caller returns HU_OK immediately, having done
+ * nothing. The env-cap warning fires here because this is the last point that
+ * is still the PARENT: see hu_shell_warn_env_cap_once for why it cannot live
+ * in the child.
+ *
+ * shell_execute and shell_execute_streaming's fork preambles were identical
+ * to the character (pre-existing — the two functions are near-mirrors);
+ * factored out for the same reason hu_shell_prepare_child was, rather than
+ * adding the warn call to two copies. See .claude/rules/clone-ratchet.md.
+ */
+__attribute__((unused)) static pid_t hu_shell_pipe_and_fork(int fds[2], hu_tool_result_t *out) {
+    if (pipe(fds) != 0) {
+        *out = hu_tool_result_fail("pipe failed", 11);
+        return -1;
+    }
+
+    hu_shell_warn_env_cap_once();
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(fds[0]);
+        close(fds[1]);
+        *out = hu_tool_result_fail("fork failed", 11);
+        return -1;
+    }
+    return pid;
+}
+
+/*
+ * Prepare a freshly-forked shell child before exec: sanitize the inherited
+ * environment, then chdir into the configured workspace directory if one is
+ * set. Exits the child directly (never returns) on a chdir failure, matching
+ * the existing _exit(127) contract.
+ *
+ * Both shell_execute and shell_execute_streaming's fork children had this
+ * exact sequence duplicated inline (pre-existing — the two functions are
+ * near-mirrors of each other); factored out here rather than adding a third
+ * copy when wiring in the sanitize call, see .claude/rules/clone-ratchet.md.
+ */
+__attribute__((unused)) static void hu_shell_prepare_child(hu_allocator_t *alloc,
+                                                           const hu_shell_ctx_t *s) {
+    hu_shell_sanitize_child_environ();
+
+    if (s->workspace_dir && s->workspace_dir_len > 0) {
+        char *wd = (char *)alloc->alloc(alloc->ctx, s->workspace_dir_len + 1);
+        if (wd) {
+            memcpy(wd, s->workspace_dir, s->workspace_dir_len);
+            wd[s->workspace_dir_len] = '\0';
+            if (chdir(wd) != 0)
+                _exit(127);
+            alloc->free(alloc->ctx, wd, s->workspace_dir_len + 1);
+        }
+    }
+}
+#endif /* _WIN32 */
 
 /*
  * SECURITY WARNING: This tool passes commands directly to /bin/sh -c.
@@ -139,18 +319,9 @@ static hu_error_t shell_execute(void *ctx, hu_allocator_t *alloc, const hu_json_
     }
 
     int fds[2];
-    if (pipe(fds) != 0) {
-        *out = hu_tool_result_fail("pipe failed", 11);
+    pid_t pid = hu_shell_pipe_and_fork(fds, out);
+    if (pid < 0)
         return HU_OK;
-    }
-
-    pid_t pid = fork();
-    if (pid < 0) {
-        close(fds[0]);
-        close(fds[1]);
-        *out = hu_tool_result_fail("fork failed", 11);
-        return HU_OK;
-    }
 
     if (pid == 0) {
         close(fds[0]);
@@ -158,16 +329,7 @@ static hu_error_t shell_execute(void *ctx, hu_allocator_t *alloc, const hu_json_
         dup2(fds[1], STDERR_FILENO);
         close(fds[1]);
 
-        if (s->workspace_dir && s->workspace_dir_len > 0) {
-            char *wd = (char *)alloc->alloc(alloc->ctx, s->workspace_dir_len + 1);
-            if (wd) {
-                memcpy(wd, s->workspace_dir, s->workspace_dir_len);
-                wd[s->workspace_dir_len] = '\0';
-                if (chdir(wd) != 0)
-                    _exit(127);
-                alloc->free(alloc->ctx, wd, s->workspace_dir_len + 1);
-            }
-        }
+        hu_shell_prepare_child(alloc, s);
 
         setenv("PATH", "/usr/bin:/bin", 1);
 
@@ -409,34 +571,18 @@ shell_execute_streaming(void *ctx, hu_allocator_t *alloc, const hu_json_value_t 
     }
 
     int fds[2];
-    if (pipe(fds) != 0) {
-        *out = hu_tool_result_fail("pipe failed", 11);
+    pid_t pid = hu_shell_pipe_and_fork(fds, out);
+    if (pid < 0)
         return HU_OK;
-    }
-
-    pid_t pid = fork();
-    if (pid < 0) {
-        close(fds[0]);
-        close(fds[1]);
-        *out = hu_tool_result_fail("fork failed", 11);
-        return HU_OK;
-    }
 
     if (pid == 0) {
         close(fds[0]);
         dup2(fds[1], STDOUT_FILENO);
         dup2(fds[1], STDERR_FILENO);
         close(fds[1]);
-        if (s->workspace_dir && s->workspace_dir_len > 0) {
-            char *wd = (char *)alloc->alloc(alloc->ctx, s->workspace_dir_len + 1);
-            if (wd) {
-                memcpy(wd, s->workspace_dir, s->workspace_dir_len);
-                wd[s->workspace_dir_len] = '\0';
-                if (chdir(wd) != 0)
-                    _exit(127);
-                alloc->free(alloc->ctx, wd, s->workspace_dir_len + 1);
-            }
-        }
+
+        hu_shell_prepare_child(alloc, s);
+
         setenv("PATH", "/usr/bin:/bin", 1);
 
         if (s->policy && s->policy->net_proxy && s->policy->net_proxy->enabled) {

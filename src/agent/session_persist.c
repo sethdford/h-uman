@@ -2,6 +2,7 @@
 #include "human/agent.h"
 #include "human/core/io_secure.h"
 #include "human/core/json.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
 #include <dirent.h>
 #include <errno.h>
@@ -63,10 +64,9 @@ void hu_session_generate_id(char *buf, size_t buf_size) {
 /* ── Default Dir ────────────────────────────────────────────────────────── */
 
 char *hu_session_default_dir(hu_allocator_t *alloc) {
-    const char *home = getenv("HOME");
-    if (!home)
-        home = "/tmp";
-    return hu_sprintf(alloc, "%s/.human/sessions", home);
+    char dir[1024];
+    hu_paths_state_or(dir, sizeof(dir), "/tmp", "sessions"); /* prior default when HOME was unset */
+    return hu_sprintf(alloc, "%s", dir);
 }
 
 /* ── Serialize Messages to JSON ─────────────────────────────────────────── */

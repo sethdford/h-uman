@@ -93,6 +93,16 @@ typedef struct hu_reliability_config {
     size_t fallback_providers_len;
     hu_config_model_fallback_t *model_fallbacks;
     size_t model_fallbacks_len;
+    /* Circuit breaker on the primary provider (2026-09-03). After
+     * circuit_failure_threshold consecutive primary failures the primary is
+     * skipped for circuit_recovery_secs and requests go straight to the
+     * fallbacks. 0 (absent) → defaults 2 / 300; negative → disabled. Without
+     * it a dead-but-listening local server cost 3 × 300 s per turn before
+     * the cloud fallback was even tried. */
+    int circuit_failure_threshold;
+    int circuit_recovery_secs;
+    /* Empty-reply failover (2026-09-04): 0 (absent) or 1 → on, -1 → off. */
+    int empty_reply_failover;
 } hu_reliability_config_t;
 
 typedef struct hu_router_config {
@@ -191,6 +201,7 @@ typedef struct hu_agent_config {
     bool agent_comm_enabled;
     uint32_t best_of_n;        /* best-of-N candidates (0 or 1 = disabled, max 5) */
     char *context_engine_type; /* "legacy" (default) or "rag" */
+    bool chain_of_thought;     /* inject reasoning instructions into the prompt (default true) */
     /* Claude Code feature integration */
     uint8_t permission_level;       /* 0=ReadOnly, 1=WorkspaceWrite, 2=DangerFullAccess */
     bool session_auto_save;         /* auto-save session after each turn */
@@ -228,6 +239,10 @@ typedef struct hu_feeds_config {
     char *gmail_client_id;
     char *gmail_client_secret;
     char *gmail_refresh_token;
+    /* GCP project billed for Gmail API calls. Required when the OAuth client
+     * is gcloud's own (ADC-style credentials): Google answers 403 "requires a
+     * quota project" otherwise. Sent as x-goog-user-project. */
+    char *gmail_quota_project;
     char *twitter_bearer_token;
     char *interests;
     double relevance_threshold;
@@ -398,14 +413,23 @@ typedef struct hu_imessage_action_surface_v2_config {
  * ~/.claude/rules/feature-gate-requires-measurement.md). When unavailable or
  * OFF, the dispatcher falls back to the hardened Tier-1 reply path. */
 typedef struct hu_imessage_private_api_config {
-    bool enabled;                     /* master gate, default false */
-    hu_imessage_private_mode_t mode;  /* OFF (default) / SHADOW / LIVE */
+    bool enabled;                    /* master gate, default false */
+    hu_imessage_private_mode_t mode; /* OFF (default) / SHADOW / LIVE */
 } hu_imessage_private_api_config_t;
 
 typedef struct hu_imessage_channel_config {
     char *default_target;
     char **allow_from;
     size_t allow_from_count;
+    /* Handles the assistant must NEVER message, in either direction. Checked
+     * before allow_from, and unlike a non-allowlisted handle an excluded one is
+     * dropped SILENTLY — no courtesy reply. This is the "please leave this
+     * person alone" switch: a real human asked not to be texted by the AI, so
+     * an automated "you're not allowlisted" bounce would itself be the harm.
+     * Matching is digit-suffix normalized and deliberately over-matches
+     * (see hu_imessage_handle_excluded). */
+    char **exclude_from;
+    size_t exclude_from_count;
     int poll_interval_sec;
     int user_response_window_sec; /* DEPRECATED: use daemon.user_response_window_sec */
     char *response_mode;          /* DEPRECATED: use daemon.response_mode */
@@ -711,14 +735,6 @@ typedef struct hu_security_config {
     hu_audit_config_t audit;
 } hu_security_config_t;
 
-#define HU_TOOL_MODEL_OVERRIDES_MAX 16
-
-typedef struct hu_tool_model_override {
-    char *tool_name;
-    char *provider;
-    char *model;
-} hu_tool_model_override_t;
-
 typedef struct hu_tools_config {
     uint64_t shell_timeout_secs;
     uint32_t shell_max_output_bytes;
@@ -729,8 +745,6 @@ typedef struct hu_tools_config {
     size_t enabled_tools_len;
     char **disabled_tools;
     size_t disabled_tools_len;
-    hu_tool_model_override_t model_overrides[HU_TOOL_MODEL_OVERRIDES_MAX];
-    size_t model_overrides_len;
 } hu_tools_config_t;
 
 typedef struct hu_voice_settings {
@@ -799,8 +813,6 @@ typedef struct hu_config {
     char *memory_backend;
     bool memory_auto_save;
     uint32_t consolidation_interval_hours; /* 0 = disabled, default 24 */
-    bool heartbeat_enabled;
-    uint32_t heartbeat_interval_minutes;
     char *gateway_host;
     uint16_t gateway_port;
     bool workspace_only;
@@ -890,8 +902,6 @@ bool hu_config_get_provider_native_tools(const hu_config_t *cfg, const char *nam
 const char *hu_config_get_web_search_provider(const hu_config_t *cfg);
 size_t hu_config_get_channel_configured_count(const hu_config_t *cfg, const char *key);
 bool hu_config_get_provider_ws_streaming(const hu_config_t *cfg, const char *name);
-bool hu_config_get_tool_model_override(const hu_config_t *cfg, const char *tool_name,
-                                       const char **provider_out, const char **model_out);
 
 /** Returns channel-specific persona if configured, else NULL. Uses global persona as fallback. */
 const char *hu_config_persona_for_channel(const hu_config_t *cfg, const char *channel);

@@ -180,6 +180,24 @@ static void lora_scale_classify_truth_table(void) {
     HU_ASSERT_EQ((int)hu_lora_scale_classify(20.0), (int)HU_LORA_SCALE_REJECT);
 }
 
+/* 2026-09-04: the daemon must not re-POST the adapter the server already
+ * serves — each swap drops the server's cross-turn prompt cache. */
+static void swap_needed_truth_table(void) {
+    const char *v6 = "/Users/seth/.human/training-data/adapters/seth-glm-air-v6";
+    HU_ASSERT(!hu_mlx_admin_swap_needed(v6, v6));
+    HU_ASSERT(!hu_mlx_admin_swap_needed(
+        "/Users/seth/.human/training-data/adapters/seth-glm-air-v6/", v6));
+    HU_ASSERT(!hu_mlx_admin_swap_needed(
+        v6, "/Users/seth/.human/training-data/adapters/seth-glm-air-v6/"));
+    HU_ASSERT(
+        hu_mlx_admin_swap_needed(v6, "/Users/seth/.human/training-data/adapters/seth-glm-air-v7"));
+    HU_ASSERT(hu_mlx_admin_swap_needed(NULL, v6));
+    HU_ASSERT(hu_mlx_admin_swap_needed("", v6));
+    /* Nothing wanted is a caller bug, not a reason to POST. */
+    HU_ASSERT(!hu_mlx_admin_swap_needed(v6, NULL));
+    HU_ASSERT(!hu_mlx_admin_swap_needed(v6, ""));
+}
+
 static void seed_adapter_config(const char *dir, const char *json) {
     char path[1200];
     snprintf(path, sizeof(path), "%s/adapter_config.json", dir);
@@ -315,6 +333,7 @@ void run_mlx_admin_tests(void);
 void run_mlx_admin_tests(void) {
     HU_TEST_SUITE("MLXAdmin");
     HU_RUN_TEST(lora_scale_classify_truth_table);
+    HU_RUN_TEST(swap_needed_truth_table);
     HU_RUN_TEST(lora_scale_guard_refuses_over_scaled_adapter);
     HU_RUN_TEST(lora_scale_guard_refuses_over_scaled_adapter_by_file_path);
     HU_RUN_TEST(lora_scale_guard_refuses_over_scaled_adapter_missing_weights_file);

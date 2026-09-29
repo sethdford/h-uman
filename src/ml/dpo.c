@@ -138,6 +138,20 @@ hu_error_t hu_dpo_init_tables(hu_dpo_collector_t *collector) {
             sqlite3_free(err_msg);
         return HU_ERR_IO;
     }
+    /* Hydrate pair_count from persisted rows. Without this the counter
+     * restarts at 0 every process boot, so the pair-count training trigger
+     * (daemon_maintenance.c, threshold 100) could only fire if 100 pairs
+     * accumulated within a SINGLE daemon uptime — with near-daily restarts
+     * it never fired, and 558 banked pairs sat untrainable (2026-07-25). */
+    {
+        sqlite3_stmt *cnt = NULL;
+        if (sqlite3_prepare_v2(collector->db, "SELECT COUNT(*) FROM dpo_pairs", -1, &cnt, NULL) ==
+                SQLITE_OK &&
+            sqlite3_step(cnt) == SQLITE_ROW)
+            collector->pair_count = (size_t)sqlite3_column_int64(cnt, 0);
+        if (cnt)
+            sqlite3_finalize(cnt);
+    }
 #endif
     return HU_OK;
 }
@@ -423,6 +437,41 @@ hu_error_t hu_dpo_record_outbound(hu_dpo_collector_t *collector, const char *cha
     (void)alternatives_json_len;
 #endif
     return HU_OK;
+}
+
+hu_error_t hu_dpo_set_outbound_message_ref(hu_dpo_collector_t *collector, const char *channel,
+                                           size_t channel_len, const char *target,
+                                           size_t target_len, const char *message_ref,
+                                           size_t message_ref_len) {
+    if (!collector || !channel || channel_len == 0 || !target || target_len == 0 || !message_ref ||
+        message_ref_len == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+#ifndef HU_ENABLE_SQLITE
+    /* No store to attach the ref to. Say so rather than report success —
+     * a message_ref that was never written must not read as written. */
+    return HU_ERR_NOT_SUPPORTED;
+#else
+    if (!collector->db)
+        return HU_ERR_INVALID_ARGUMENT;
+    sqlite3_stmt *stmt = NULL;
+    int rc =
+        sqlite3_prepare_v2(collector->db,
+                           "UPDATE production_outcomes SET message_ref = ? WHERE id = ("
+                           "SELECT id FROM production_outcomes WHERE channel = ? AND target = ? "
+                           "AND (message_ref IS NULL OR message_ref = '') "
+                           "ORDER BY id DESC LIMIT 1)",
+                           -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+        return HU_ERR_IO;
+    sqlite3_bind_text(stmt, 1, message_ref, (int)message_ref_len, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, channel, (int)channel_len, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 3, target, (int)target_len, SQLITE_STATIC);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    if (rc != SQLITE_DONE)
+        return HU_ERR_IO;
+    return sqlite3_changes(collector->db) > 0 ? HU_OK : HU_ERR_NOT_FOUND;
+#endif
 }
 
 hu_error_t hu_dpo_record_outcome(hu_dpo_collector_t *collector, const char *channel,

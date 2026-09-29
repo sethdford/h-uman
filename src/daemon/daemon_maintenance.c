@@ -34,6 +34,9 @@
 #include "human/config.h"
 #include "human/core/error.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
+#include "human/core/time.h"
+#include "human/heartbeat.h"
 #include "human/intelligence/meta_learning.h"
 #include "human/intelligence/reflection.h"
 #include "human/intelligence/skills.h"
@@ -51,6 +54,111 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <time.h>
+#include <utime.h>
+
+hu_consolidation_config_t hu_daemon_consolidation_config(const hu_config_t *config,
+                                                         struct hu_agent *agent) {
+    hu_consolidation_config_t cfg = {
+        .decay_days = config ? config->behavior.decay_days : 30,
+        .decay_factor = 0.5,
+        .dedup_threshold = config ? config->behavior.dedup_threshold : 0,
+        .max_entries = 5000,
+        .provider = agent ? &agent->provider : NULL,
+        .model = agent ? agent->model_name : NULL,
+        .model_len = agent ? agent->model_name_len : 0,
+    };
+    return cfg;
+}
+
+/* Cadence gate shared by the once-per-minute heartbeat flushes. First call
+ * always flushes: the tick fires on service-loop entry, so a restarted
+ * daemon replaces the previous process's file immediately instead of
+ * letting it age through doctor's 120 s window. After that the gap is
+ * deliberately half the tick period — a gate equal to the period skips
+ * every tick whose monotonic delta lands a few ms short (the 2026-09-06
+ * alternate-minute skip). */
+static bool heartbeat_flush_due(int64_t now_ms, const int64_t *last_flush_ms) {
+    return *last_flush_ms == 0 || now_ms - *last_flush_ms >= HU_DAEMON_FLUSH_MIN_GAP_MS;
+}
+
+bool hu_daemon_prompt_budget_flush(hu_prompt_budget_t *budget, int64_t now_ms,
+                                   int64_t *last_flush_ms) {
+    if (!budget || !last_flush_ms || !heartbeat_flush_due(now_ms, last_flush_ms))
+        return false;
+    hu_error_t err = hu_prompt_budget_save_snapshot(budget);
+    if (err != HU_OK) {
+        static atomic_bool warned = false;
+        hu_log_warn_once(&warned, "human", NULL,
+                         "prompt_budget snapshot flush failed: %s — doctor will report "
+                         "~/.human/prompt_budget.snapshot.json stale until a flush succeeds",
+                         hu_error_string(err));
+    }
+    *last_flush_ms = now_ms;
+    return true;
+}
+
+bool hu_daemon_verifier_metrics_flush(const hu_verifier_metrics_t *snap, int64_t now_ms,
+                                      int64_t *last_flush_ms) {
+    if (!snap || !last_flush_ms || !heartbeat_flush_due(now_ms, last_flush_ms))
+        return false;
+    hu_verifier_metrics_t copy = *snap; /* save() stamps last_update_epoch */
+    hu_error_t err = hu_verifier_metrics_save(&copy);
+    if (err != HU_OK) {
+        static atomic_bool warned = false;
+        hu_log_warn_once(&warned, "human", NULL,
+                         "verifier metrics flush failed: %s — `human doctor verifier` will "
+                         "report ~/.human/verifier_metrics.json stale until a flush succeeds",
+                         hu_error_string(err));
+    }
+    *last_flush_ms = now_ms;
+    return true;
+}
+
+bool hu_daemon_heartbeat_flush(hu_allocator_t *alloc, bool enabled, int64_t interval_ms,
+                               const char *workspace_dir, int64_t now_ms, int64_t wall_ms,
+                               int64_t *last_tick_ms) {
+    if (!alloc || !workspace_dir || !last_tick_ms || !enabled || interval_ms <= 0)
+        return false;
+    if (*last_tick_ms != 0 && now_ms - *last_tick_ms < interval_ms)
+        return false;
+    hu_error_t err = hu_heartbeat_ensure_file(workspace_dir, alloc);
+    if (err != HU_OK) {
+        static atomic_bool warned_ensure = false;
+        hu_log_warn_once(&warned_ensure, "human", NULL,
+                         "heartbeat ensure_file failed: %s — HEARTBEAT.md will not exist "
+                         "under the state dir until a future tick succeeds",
+                         hu_error_string(err));
+        *last_tick_ms = now_ms;
+        return true;
+    }
+    hu_heartbeat_engine_t engine;
+    /* `enabled` and the interval are passed for completeness only:
+     * hu_heartbeat_tick reads engine->workspace_dir and nothing else, so the
+     * engine's clamped interval_minutes has no consumer. The `interval_ms`
+     * gate at the top of this function is what actually paces the tick. */
+    hu_heartbeat_engine_init(&engine, enabled, (uint32_t)(interval_ms / 60000), workspace_dir);
+    hu_heartbeat_result_t result = {0};
+    err = hu_heartbeat_tick(&engine, alloc, &result);
+    if (err != HU_OK) {
+        static atomic_bool warned_tick = false;
+        hu_log_warn_once(&warned_tick, "human", NULL, "heartbeat tick failed: %s",
+                         hu_error_string(err));
+    }
+    /* hu_heartbeat_tick only reads HEARTBEAT.md — it never writes — so
+     * without an explicit touch here the file's mtime would stay pinned at
+     * creation time forever and could never serve as a liveness signal the
+     * way the verifier/scheduler heartbeat files already do for `human
+     * doctor`. wall_ms (not now_ms) is used because this is a timestamp
+     * written to disk, not an elapsed-interval comparison. */
+    char path[1024];
+    if (hu_heartbeat_file_path(workspace_dir, path, sizeof(path)) > 0) {
+        struct utimbuf times = {.actime = (time_t)(wall_ms / 1000),
+                                .modtime = (time_t)(wall_ms / 1000)};
+        (void)utime(path, &times);
+    }
+    *last_tick_ms = now_ms;
+    return true;
+}
 
 #if defined(HU_HAS_CRON) && !defined(HU_IS_TEST)
 
@@ -62,7 +170,10 @@ void hu_daemon_maintenance_tick(hu_allocator_t *alloc, struct hu_agent *agent,
      * dashboard) can show the last known hallucination rate even
      * when the daemon is offline. 60s cadence is a heartbeat, not
      * a real-time stream; the file is small (~150B) and overwritten
-     * in place, so cost is negligible. Skipped under HU_IS_TEST
+     * in place, so cost is negligible. Flushes on the first tick
+     * and on every tick thereafter (gate in
+     * hu_daemon_verifier_metrics_flush, pinned by
+     * tests/test_daemon_maintenance.c). Skipped under HU_IS_TEST
      * because the test harness has its own ad-hoc HOME and the
      * shared metrics file would race across parallel tests. */
     if (agent) {
@@ -70,30 +181,40 @@ void hu_daemon_maintenance_tick(hu_allocator_t *alloc, struct hu_agent *agent,
         struct timespec ts_vf;
         clock_gettime(CLOCK_MONOTONIC, &ts_vf);
         int64_t now_vf_ms = (int64_t)ts_vf.tv_sec * 1000 + ts_vf.tv_nsec / 1000000;
-        if (last_verifier_flush_ms == 0)
-            last_verifier_flush_ms = now_vf_ms;
-        if (now_vf_ms - last_verifier_flush_ms >= 60000) {
-            hu_verifier_metrics_t snap = {
-                .total_runs = agent->verifier_runs,
-                .total_claims_extracted = agent->verifier_claims_total,
-                .total_claims_flagged = agent->verifier_claims_flagged,
-                .last_update_epoch = 0, /* set by save() */
-            };
-            (void)hu_verifier_metrics_save(&snap);
-            last_verifier_flush_ms = now_vf_ms;
-        }
+        hu_verifier_metrics_t snap = {
+            .total_runs = agent->verifier_runs,
+            .total_claims_extracted = agent->verifier_claims_total,
+            .total_claims_flagged = agent->verifier_claims_flagged,
+            .last_update_epoch = 0, /* set by save() */
+        };
+        (void)hu_daemon_verifier_metrics_flush(&snap, now_vf_ms, &last_verifier_flush_ms);
         /* prompt_budget snapshot flush — operator visibility for
-         * the B3 Phase 1 accumulator. Mirrors verifier's 60s
-         * cadence but uses the atomic Personal Model write
-         * discipline (verifier's own write is non-atomic — a
-         * documented weakness; we don't propagate it here).
+         * the B3 Phase 1 accumulator. Flushes on the first tick and
+         * on every tick thereafter (gate in hu_daemon_prompt_budget_flush,
+         * pinned by tests/test_daemon_maintenance.c) using the atomic
+         * Personal Model write discipline (verifier's own write is
+         * non-atomic — a documented weakness; we don't propagate it here).
          * See docs/plans/2026-05-25-doctor-prompt-budget-initiative/. */
         static int64_t last_pb_flush_ms = 0;
-        if (last_pb_flush_ms == 0)
-            last_pb_flush_ms = now_vf_ms;
-        if (agent->prompt_budget && now_vf_ms - last_pb_flush_ms >= 60000) {
-            (void)hu_prompt_budget_save_snapshot(agent->prompt_budget);
-            last_pb_flush_ms = now_vf_ms;
+        (void)hu_daemon_prompt_budget_flush(agent->prompt_budget, now_vf_ms, &last_pb_flush_ms);
+    }
+    /* Heartbeat engine — README-documented, previously inert: config parsed
+     * heartbeat.enabled/interval_minutes but nothing read them. Ensures
+     * HEARTBEAT.md exists under the state dir and ticks it (parses periodic
+     * tasks) once the configured interval elapses. Off by default
+     * (heartbeat.enabled == false), so an unconfigured daemon creates no
+     * file. Gate + mtime-touch logic lives in hu_daemon_heartbeat_flush
+     * (testable, pinned by tests/test_daemon_maintenance.c) so this stays a
+     * thin dispatch; independent of `agent` since the engine only needs the
+     * state dir. */
+    if (config && config->heartbeat.enabled) {
+        static int64_t last_heartbeat_tick_ms = 0;
+        char heartbeat_dir[1024];
+        if (hu_paths_state_mkdir(heartbeat_dir, sizeof(heartbeat_dir)) >= 0) {
+            (void)hu_daemon_heartbeat_flush(alloc, config->heartbeat.enabled,
+                                            (int64_t)config->heartbeat.interval_minutes * 60000,
+                                            heartbeat_dir, hu_time_get_current_ms(),
+                                            hu_time_wall_ms(), &last_heartbeat_tick_ms);
         }
     }
     /* Periodic memory consolidation */
@@ -106,15 +227,7 @@ void hu_daemon_maintenance_tick(hu_allocator_t *alloc, struct hu_agent *agent,
         if (last_consolidation_ms == 0)
             last_consolidation_ms = now_ms;
         if (now_ms - last_consolidation_ms >= interval_ms) {
-            hu_consolidation_config_t cons_cfg = {
-                .decay_days = config ? config->behavior.decay_days : 30,
-                .decay_factor = 0.5,
-                .dedup_threshold = config ? config->behavior.dedup_threshold : 0,
-                .max_entries = 5000,
-                .provider = &agent->provider,
-                .model = agent->model_name,
-                .model_len = agent->model_name_len,
-            };
+            hu_consolidation_config_t cons_cfg = hu_daemon_consolidation_config(config, agent);
             if (hu_memory_consolidate(alloc, agent->memory, &cons_cfg) == HU_OK) {
                 last_consolidation_ms = now_ms;
                 hu_log_info("human", agent ? agent->observer : NULL,
@@ -140,8 +253,7 @@ void hu_daemon_maintenance_tick(hu_allocator_t *alloc, struct hu_agent *agent,
                 !reflection_done_today && agent && agent->memory) {
                 sqlite3 *refl_db = hu_sqlite_memory_get_db(agent->memory);
                 if (refl_db) {
-                    hu_reflection_engine_t refl_engine = {.alloc = alloc,
-                                                          .db = refl_db};
+                    hu_reflection_engine_t refl_engine = {.alloc = alloc, .db = refl_db};
                     hu_reflection_daily(&refl_engine, (int64_t)t);
                     reflection_done_today = true;
                     if (agent->bth_metrics)
@@ -163,15 +275,12 @@ void hu_daemon_maintenance_tick(hu_allocator_t *alloc, struct hu_agent *agent,
                     /* Vtable-based memory decay + prune */
                     if (agent && agent->memory) {
                         hu_forgetting_stats_t decay_stats = {0};
-                        if (hu_memory_decay(alloc, agent->memory, 0.05, &decay_stats) ==
-                                HU_OK &&
+                        if (hu_memory_decay(alloc, agent->memory, 0.05, &decay_stats) == HU_OK &&
                             decay_stats.decayed > 0)
                             hu_log_info("human", agent ? agent->observer : NULL,
-                                        "memory decay: %zu decayed",
-                                        decay_stats.decayed);
+                                        "memory decay: %zu decayed", decay_stats.decayed);
                         hu_forgetting_stats_t prune_stats = {0};
-                        if (hu_memory_prune(alloc, agent->memory, 0.01, &prune_stats) ==
-                                HU_OK &&
+                        if (hu_memory_prune(alloc, agent->memory, 0.01, &prune_stats) == HU_OK &&
                             prune_stats.pruned > 0)
                             hu_log_info("human", agent ? agent->observer : NULL,
                                         "memory prune: %zu pruned", prune_stats.pruned);
@@ -188,8 +297,8 @@ void hu_daemon_maintenance_tick(hu_allocator_t *alloc, struct hu_agent *agent,
                     {
                         hu_skill_t *refreshed = NULL;
                         size_t ref_count = 0;
-                        if (hu_skill_load_active(alloc, refl_db, NULL, 0, &refreshed,
-                                                 &ref_count) == HU_OK &&
+                        if (hu_skill_load_active(alloc, refl_db, NULL, 0, &refreshed, &ref_count) ==
+                                HU_OK &&
                             refreshed)
                             hu_skill_free(alloc, refreshed, ref_count);
                     }
@@ -199,13 +308,11 @@ void hu_daemon_maintenance_tick(hu_allocator_t *alloc, struct hu_agent *agent,
                 reflection_done_today = false;
 
             /* Weekly: Sunday 3 AM */
-            if (lt_refl->tm_wday == 0 && lt_refl->tm_hour == 3 &&
-                lt_refl->tm_min == 0 && !reflection_done_week && agent &&
-                agent->memory) {
+            if (lt_refl->tm_wday == 0 && lt_refl->tm_hour == 3 && lt_refl->tm_min == 0 &&
+                !reflection_done_week && agent && agent->memory) {
                 sqlite3 *refl_db = hu_sqlite_memory_get_db(agent->memory);
                 if (refl_db) {
-                    hu_reflection_engine_t refl_engine = {.alloc = alloc,
-                                                          .db = refl_db};
+                    hu_reflection_engine_t refl_engine = {.alloc = alloc, .db = refl_db};
                     hu_reflection_weekly(&refl_engine, (int64_t)t);
                     reflection_done_week = true;
                     if (agent->bth_metrics)
@@ -216,13 +323,11 @@ void hu_daemon_maintenance_tick(hu_allocator_t *alloc, struct hu_agent *agent,
                 reflection_done_week = false;
 
             /* Monthly: 1st 3 AM */
-            if (lt_refl->tm_mday == 1 && lt_refl->tm_hour == 3 &&
-                lt_refl->tm_min == 0 && !reflection_done_month && agent &&
-                agent->memory) {
+            if (lt_refl->tm_mday == 1 && lt_refl->tm_hour == 3 && lt_refl->tm_min == 0 &&
+                !reflection_done_month && agent && agent->memory) {
                 sqlite3 *refl_db = hu_sqlite_memory_get_db(agent->memory);
                 if (refl_db) {
-                    hu_reflection_engine_t refl_engine = {.alloc = alloc,
-                                                          .db = refl_db};
+                    hu_reflection_engine_t refl_engine = {.alloc = alloc, .db = refl_db};
                     hu_reflection_extract_general_lessons(&refl_engine, (int64_t)t);
                     hu_meta_params_t meta_params = {0};
                     hu_meta_learning_optimize(refl_db, &meta_params);
@@ -255,8 +360,7 @@ void hu_daemon_learning_scheduler_tick(struct hu_agent *agent, const hu_config_t
      * often it's called. */
     if (agent && agent->w14_scheduler) {
         int64_t now_ms = (int64_t)t * 1000LL;
-        if (agent->scheduler_last_tick_ms == 0 ||
-            now_ms - agent->scheduler_last_tick_ms >= 60000) {
+        if (agent->scheduler_last_tick_ms == 0 || now_ms - agent->scheduler_last_tick_ms >= 60000) {
             /* W13 outcome-bridge drain — must run BEFORE the
              * scheduler tick so any newly-emitted signals are
              * visible to the same training pass that the tick
@@ -273,8 +377,7 @@ void hu_daemon_learning_scheduler_tick(struct hu_agent *agent, const hu_config_t
              * NULL check would prevent a crash. */
 #if defined(HU_ENABLE_LEARNING)
             if (agent->learner && agent->outcomes) {
-                hu_error_t be =
-                    hu_learner_bridge_emit_outcomes(agent->learner, agent->outcomes);
+                hu_error_t be = hu_learner_bridge_emit_outcomes(agent->learner, agent->outcomes);
                 if (be != HU_OK && be != HU_ERR_OUT_OF_MEMORY) {
                     /* OOM is the only expected failure (pending
                      * buffer full). Anything else is unexpected
@@ -296,8 +399,8 @@ void hu_daemon_learning_scheduler_tick(struct hu_agent *agent, const hu_config_t
                 size_t pending = hu_learner_pending_count(agent->learner);
                 if (pending >= 10) {
                     (void)hu_training_runner_enqueue_lora_persona(
-                        agent->w14_scheduler, now_ms, 300000,
-                        HU_TRAINING_TRIGGER_LEARNER_PENDING, agent->observer);
+                        agent->w14_scheduler, now_ms, 300000, HU_TRAINING_TRIGGER_LEARNER_PENDING,
+                        agent->observer);
                 }
             }
             /* Spec 2026-05-19 (Task 3) — DPO pair-count trigger.
@@ -308,21 +411,18 @@ void hu_daemon_learning_scheduler_tick(struct hu_agent *agent, const hu_config_t
              * emit one info-level line on first tick for both
              * the disabled (threshold==0) and enabled paths. */
             if (agent && agent->sota.dpo_collector.alloc) {
-                int threshold = config
-                                    ? config->learning.dpo_pair_training_threshold
-                                    : HU_LEARNING_DPO_PAIR_TRAINING_THRESHOLD_DEFAULT;
+                int threshold = config ? config->learning.dpo_pair_training_threshold
+                                       : HU_LEARNING_DPO_PAIR_TRAINING_THRESHOLD_DEFAULT;
                 static atomic_bool warned_pair_count_disabled = false;
                 static atomic_bool warned_pair_count_enabled = false;
                 if (threshold <= 0) {
-                    hu_log_info_once(
-                        &warned_pair_count_disabled, "daemon", agent->observer,
-                        "DPO pair-count training trigger disabled by config "
-                        "(learning.dpo_pair_training_threshold=0); set "
-                        "learning.dpo_pair_training_threshold to a positive integer "
-                        "in config.json to activate");
+                    hu_log_info_once(&warned_pair_count_disabled, "daemon", agent->observer,
+                                     "DPO pair-count training trigger disabled by config "
+                                     "(learning.dpo_pair_training_threshold=0); set "
+                                     "learning.dpo_pair_training_threshold to a positive integer "
+                                     "in config.json to activate");
                 } else {
-                    hu_log_info_once(&warned_pair_count_enabled, "daemon",
-                                     agent->observer,
+                    hu_log_info_once(&warned_pair_count_enabled, "daemon", agent->observer,
                                      "DPO pair-count training trigger active "
                                      "(learning.dpo_pair_training_threshold=%d)",
                                      threshold);
@@ -336,11 +436,10 @@ void hu_daemon_learning_scheduler_tick(struct hu_agent *agent, const hu_config_t
                     static atomic_bool warned_frontier_disabled = false;
                     static atomic_bool warned_frontier_enabled = false;
                     if (frontier_auto) {
-                        hu_log_info_once(
-                            &warned_frontier_enabled, "daemon", agent->observer,
-                            "M3 frontier-MLX auto-training ENABLED "
-                            "(learning.m3_frontier_auto_training=true) — pair-count "
-                            "trigger will dispatch with target=frontier_mlx");
+                        hu_log_info_once(&warned_frontier_enabled, "daemon", agent->observer,
+                                         "M3 frontier-MLX auto-training ENABLED "
+                                         "(learning.m3_frontier_auto_training=true) — pair-count "
+                                         "trigger will dispatch with target=frontier_mlx");
                     } else {
                         hu_log_info_once(
                             &warned_frontier_disabled, "daemon", agent->observer,
@@ -351,16 +450,26 @@ void hu_daemon_learning_scheduler_tick(struct hu_agent *agent, const hu_config_t
                             "activate the M3 closure path");
                     }
                     size_t pair_count = 0;
-                    if (hu_dpo_pair_count(&agent->sota.dpo_collector, &pair_count) ==
-                            HU_OK &&
-                        hu_training_runner_pair_count_should_fire(pair_count,
-                                                                  threshold)) {
-                        hu_training_target_model_t target =
-                            frontier_auto ? HU_TRAINING_TARGET_FRONTIER_MLX
-                                          : HU_TRAINING_TARGET_HUML_REFERENCE;
-                        (void)hu_training_runner_enqueue_lora_persona_target(
-                            agent->w14_scheduler, now_ms, 300000,
-                            HU_TRAINING_TRIGGER_PAIR_COUNT, target, agent->observer);
+                    if (hu_dpo_pair_count(&agent->sota.dpo_collector, &pair_count) == HU_OK &&
+                        hu_training_runner_pair_count_should_fire(pair_count, threshold)) {
+                        /* Refire cooldown: the counter is not consumed by a
+                         * training run (pairs stay banked), so once it crosses
+                         * the threshold should_fire is true on EVERY tick.
+                         * Before the 2026-07-25 hydration fix this was masked
+                         * by the counter resetting each restart; hydrated, an
+                         * uncapped trigger would enqueue a 31B training run
+                         * per maintenance tick. One dispatch per 24h. */
+                        static int64_t last_pair_count_fire_ms = 0;
+                        if (last_pair_count_fire_ms == 0 ||
+                            now_ms - last_pair_count_fire_ms >= 86400000LL) {
+                            last_pair_count_fire_ms = now_ms;
+                            hu_training_target_model_t target =
+                                frontier_auto ? HU_TRAINING_TARGET_FRONTIER_MLX
+                                              : HU_TRAINING_TARGET_HUML_REFERENCE;
+                            (void)hu_training_runner_enqueue_lora_persona_target(
+                                agent->w14_scheduler, now_ms, 300000,
+                                HU_TRAINING_TRIGGER_PAIR_COUNT, target, agent->observer);
+                        }
                     }
                 }
             }
@@ -373,8 +482,7 @@ void hu_daemon_learning_scheduler_tick(struct hu_agent *agent, const hu_config_t
              * examples have accumulated. */
             {
                 static int64_t last_td_extract_ms = 0;
-                bool td_due = (agent->scheduler_ticks % 100 == 0) ||
-                              (last_td_extract_ms == 0) ||
+                bool td_due = (agent->scheduler_ticks % 100 == 0) || (last_td_extract_ms == 0) ||
                               (now_ms - last_td_extract_ms >= 21600000LL);
                 if (td_due) {
                     hu_error_t tde = hu_w14_scheduler_enqueue_training_data_extract(
@@ -432,8 +540,7 @@ void hu_daemon_learning_scheduler_tick(struct hu_agent *agent, const hu_config_t
                 static int64_t last_pm_decay_secs = 0;
                 const int64_t now_secs = (int64_t)t;
                 if (hu_personal_model_idle_due(&last_pm_decay_secs, now_secs, 3600)) {
-                    size_t pruned =
-                        hu_personal_model_apply_decay(&agent->personal_model, now_secs);
+                    size_t pruned = hu_personal_model_apply_decay(&agent->personal_model, now_secs);
                     if (pruned > 0) {
                         hu_log_info("human", agent->observer,
                                     "personal model idle decay: pruned "
@@ -447,10 +554,8 @@ void hu_daemon_learning_scheduler_tick(struct hu_agent *agent, const hu_config_t
                         if (agent->auto_save &&
                             hu_personal_model_has_content(&agent->personal_model)) {
                             char pm_path[1024];
-                            if (hu_personal_model_resolve_default_path(
-                                    pm_path, sizeof(pm_path))) {
-                                (void)hu_personal_model_save(&agent->personal_model,
-                                                             pm_path);
+                            if (hu_personal_model_resolve_default_path(pm_path, sizeof(pm_path))) {
+                                (void)hu_personal_model_save(&agent->personal_model, pm_path);
                             }
                         }
                     }

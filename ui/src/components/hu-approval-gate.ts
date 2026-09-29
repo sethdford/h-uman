@@ -195,28 +195,30 @@ export class HuApprovalGate extends LitElement {
         </div>
 
         ${this.description ? html`<p class="description">${this.description}</p>` : ""}
-        ${isPending
-          ? html`
-              <div class="actions">
-                <button
-                  type="button"
-                  class="btn-approve"
-                  @click=${this._onApprove}
-                  aria-label="Approve this gate"
-                >
-                  Approve
-                </button>
-                <button
-                  type="button"
-                  class="btn-reject"
-                  @click=${this._onReject}
-                  aria-label="Reject this gate"
-                >
-                  Reject
-                </button>
-              </div>
-            `
-          : ""}
+        ${
+          isPending
+            ? html`
+                <div class="actions">
+                  <button
+                    type="button"
+                    class="btn-approve"
+                    @click=${this._onApprove}
+                    aria-label="Approve this gate"
+                  >
+                    Approve
+                  </button>
+                  <button
+                    type="button"
+                    class="btn-reject"
+                    @click=${this._onReject}
+                    aria-label="Reject this gate"
+                  >
+                    Reject
+                  </button>
+                </div>
+              `
+            : ""
+        }
       </div>
     `;
   }

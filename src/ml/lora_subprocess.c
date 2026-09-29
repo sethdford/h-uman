@@ -14,6 +14,32 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+const char *hu_lora_subprocess_python(void) {
+    /* Not cached: the resolution is two access() calls, and a static cache
+     * would make the argv builder's output depend on call order, which the
+     * argv tests would then have to know about. */
+    static char resolved[512];
+    const char *env = getenv("HU_MLX_PYTHON");
+    if (env && env[0] && access(env, X_OK) == 0) {
+        snprintf(resolved, sizeof(resolved), "%s", env);
+        return resolved;
+    }
+    const char *home = getenv("HOME");
+    if (home && home[0]) {
+        char cand[512];
+        int n = snprintf(cand, sizeof(cand),
+                         "%s/Documents/gemma-realtime-1/.venv312/bin/python3.12", home);
+        if (n > 0 && (size_t)n < sizeof(cand) && access(cand, X_OK) == 0) {
+            snprintf(resolved, sizeof(resolved), "%s", cand);
+            return resolved;
+        }
+    }
+    /* CI, Linux, or a machine without the venv: PATH resolution is the only
+     * option left, and is correct there. */
+    snprintf(resolved, sizeof(resolved), "python3");
+    return resolved;
+}
+
 /* ── default hyperparameters ────────────────────────────────────────── */
 /*
  * Defaults match the M3 runbook (docs/guides/m3-bridge-runbook.md):
@@ -142,15 +168,23 @@ size_t hu_lora_subprocess_build_argv(const hu_lora_subprocess_config_t *cfg, con
     snprintf(num_buf[2], sizeof(num_buf[2]), "%d", layers);
 
     /* Wire format:
-     *   python3 -m mlx_lm.lora --model <id> --train
+     *   <python> -m mlx_lm.lora --model <id> --train
      *     --data <jsonl> --batch-size N --iters N --num-layers N
      *     --adapter-path <dir>
      *
      * This mirrors the M3 runbook's canonical invocation. Older
      * mlx-lm versions use `mlx_lm.lora` as the entry point; newer
      * versions can be invoked as `mlx_lm.lora` directly if exposed
-     * on PATH. The `python3 -m` form is the most portable. */
-    if (!argv_push(argv_out, argv_cap, &idx, arg_buf, arg_buf_cap, &off, "python3"))
+     * on PATH. The `-m` form is the most portable.
+     *
+     * The interpreter is RESOLVED, not the bare string "python3"
+     * (2026-07-26): PATH resolved python3 to python@3.14 on this machine —
+     * the interpreter scripts/human-serve.sh deliberately avoids ("3.14 has
+     * loky semaphore crash bug; python@3.13 was uninstalled 2026-07-25").
+     * Serving and both training paths must share one interpreter and one set
+     * of mlx/mlx_lm pins. Mirrors training_loop.py::mlx_python(). */
+    if (!argv_push(argv_out, argv_cap, &idx, arg_buf, arg_buf_cap, &off,
+                   hu_lora_subprocess_python()))
         return 0;
     if (!argv_push(argv_out, argv_cap, &idx, arg_buf, arg_buf_cap, &off, "-m"))
         return 0;

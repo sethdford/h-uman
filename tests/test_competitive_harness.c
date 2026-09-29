@@ -1,15 +1,19 @@
-#include "test_framework.h"
+#include "human/core/allocator.h"
 #include "human/eval/competitive_harness.h"
 #include "human/eval/eval_judge_external.h"
-#include "human/core/allocator.h"
+#include "test_framework.h"
+#include "test_tmpdir.h"
 #include <stdio.h>
 #include <string.h>
 
 static void test_harness_renders_scorecard_with_unavailable_columns_honestly(void) {
     hu_allocator_t alloc = hu_system_allocator();
+    char out_md[512], out_json[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(out_md, sizeof(out_md), "scorecard.md"));
+    HU_ASSERT_TRUE(hu_test_tmppath(out_json, sizeof(out_json), "scorecard.json"));
     hu_competitive_harness_config_t cfg = {
-        .out_markdown = "/tmp/scorecard.md",
-        .out_json = "/tmp/scorecard.json",
+        .out_markdown = out_md,
+        .out_json = out_json,
         .min_available = 1,
     };
     hu_eval_judge_external_t stock = {0}, apple = {0};
@@ -21,15 +25,15 @@ static void test_harness_renders_scorecard_with_unavailable_columns_honestly(voi
     hu_competitive_harness_judge_slot_t judges[] = {
         {.column_name = "stock", .judge = stock, .available = true},
         {.column_name = "apple_fm", .judge = apple, .available = true},
-        {.column_name = "gemini_nano", .available = false,
+        {.column_name = "gemini_nano",
+         .available = false,
          .unavailable_reason = "unavailable (no chrome)"},
     };
     hu_competitive_harness_result_t res = {0};
-    HU_ASSERT_EQ(hu_competitive_harness_run_with_test_judges(&alloc, &cfg, judges, 3, &res),
-                 HU_OK);
+    HU_ASSERT_EQ(hu_competitive_harness_run_with_test_judges(&alloc, &cfg, judges, 3, &res), HU_OK);
 
     char buf[16384];
-    FILE *f = fopen("/tmp/scorecard.md", "r");
+    FILE *f = fopen(out_md, "r");
     HU_ASSERT_NOT_NULL(f);
     size_t r = fread(buf, 1, sizeof(buf) - 1, f);
     fclose(f);

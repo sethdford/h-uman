@@ -1,5 +1,10 @@
 # No-New-Root-Files Ratchet — Loose .c Files May Only Shrink
 
+> **Auto-locked since 2026-07-27.** The "lower the baseline by hand" step below is
+> now performed automatically by `ratchet_autolock` (`scripts/lib/ratchet.sh`) the
+> next time this gate runs, and a decay target derived from this counter's own
+> history is reported weekly. See `.claude/rules/ratchet-decay.md`.
+
 The count of `.c` files at `src/` root (not inside a bounded-context subdirectory)
 is frozen at a baseline and may only **decrease**.
 

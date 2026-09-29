@@ -356,18 +356,26 @@ void hu_reflection_check_failure_rate(struct sqlite3 *db, uint64_t now_ms, bool 
     }
 }
 
-uint64_t hu_reflection_storage_last_completed_ms(struct sqlite3 *db) {
+/* Run a single-column MAX(...) query; 0 when there is no row or no db. */
+static uint64_t query_max_ms(struct sqlite3 *db, const char *sql) {
     if (!db)
         return 0;
     sqlite3_stmt *st = NULL;
-    if (sqlite3_prepare_v2(db, "SELECT MAX(completed_at_ms) FROM reflection_runs WHERE status='ok'",
-                           -1, &st, NULL) != SQLITE_OK)
+    if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
         return 0;
     uint64_t out = 0;
     if (sqlite3_step(st) == SQLITE_ROW && sqlite3_column_type(st, 0) == SQLITE_INTEGER)
         out = (uint64_t)sqlite3_column_int64(st, 0);
     sqlite3_finalize(st);
     return out;
+}
+
+uint64_t hu_reflection_storage_last_completed_ms(struct sqlite3 *db) {
+    return query_max_ms(db, "SELECT MAX(completed_at_ms) FROM reflection_runs WHERE status='ok'");
+}
+
+uint64_t hu_reflection_storage_last_attempt_ms(struct sqlite3 *db) {
+    return query_max_ms(db, "SELECT MAX(started_at_ms) FROM reflection_runs");
 }
 
 /* ── Phase 2 quorum predicate (T11) ────────────────────────────── */
@@ -403,40 +411,4 @@ bool hu_reflection_pattern_has_quorum(struct sqlite3 *db, const char *pattern_id
     }
     sqlite3_finalize(st);
     return has;
-}
-
-/* Task 5: Temporal decay calculation for patterns.
- * Applies 90-day exponential half-life: confidence * 2^(-age_days/90) */
-double hu_reflection_pattern_effective_confidence(const hu_reflection_pattern_t *p,
-                                                  int64_t now_ms) {
-    if (!p)
-        return 0.0;
-    if (p->confidence <= 0.0)
-        return 0.0;
-    if (p->confidence > 1.0)
-        return 1.0;
-
-    /* Half-life: 90 days in milliseconds */
-    static const double HALF_LIFE_MS = 90.0 * 86400.0 * 1000.0;
-
-    /* Age in milliseconds; clamp to non-negative */
-    double age_ms = (double)(now_ms - (int64_t)p->last_observed_at_ms);
-    if (age_ms < 0.0)
-        age_ms = 0.0;
-
-    /* Number of half-lives; cap at 10 to avoid denormalization */
-    double half_lives = age_ms / HALF_LIFE_MS;
-    if (half_lives > 10.0)
-        half_lives = 10.0;
-
-    /* Decay: 0.5^half_lives */
-    double decay = pow(0.5, half_lives);
-    double effective = p->confidence * decay;
-
-    if (effective < 0.0)
-        effective = 0.0;
-    if (effective > 1.0)
-        effective = 1.0;
-
-    return effective;
 }

@@ -203,88 +203,106 @@ export class HuVoiceClone extends LitElement {
           for text-to-speech in your conversations.
         </p>
 
-        ${this._phase !== "done"
-          ? html`
-              <div class="form-row">
-                <div class="form-field">
-                  <label>Voice Name</label>
-                  <input
-                    type="text"
-                    placeholder="My Voice"
-                    .value=${this._voiceName}
-                    @input=${(e: InputEvent) => {
-                      this._voiceName = (e.target as HTMLInputElement).value;
-                    }}
-                  />
+        ${
+          this._phase !== "done"
+            ? html`
+                <div class="form-row">
+                  <div class="form-field">
+                    <label>Voice Name</label>
+                    <input
+                      type="text"
+                      placeholder="My Voice"
+                      .value=${this._voiceName}
+                      @input=${(e: InputEvent) => {
+                        this._voiceName = (e.target as HTMLInputElement).value;
+                      }}
+                    />
+                  </div>
+                  <div class="form-field">
+                    <label>Persona (optional)</label>
+                    <input
+                      type="text"
+                      placeholder="Leave blank to skip"
+                      .value=${this._persona}
+                      @input=${(e: InputEvent) => {
+                        this._persona = (e.target as HTMLInputElement).value;
+                      }}
+                    />
+                  </div>
                 </div>
-                <div class="form-field">
-                  <label>Persona (optional)</label>
-                  <input
-                    type="text"
-                    placeholder="Leave blank to skip"
-                    .value=${this._persona}
-                    @input=${(e: InputEvent) => {
-                      this._persona = (e.target as HTMLInputElement).value;
-                    }}
-                  />
+              `
+            : nothing
+        }
+        ${
+          this._phase === "recording"
+            ? html`
+                <div class="recording-indicator">
+                  <div class="recording-dot"></div>
+                  <span>Recording</span>
+                  <span class="recording-time"
+                    >${this._formatDuration(this._recordingDuration)}</span
+                  >
                 </div>
-              </div>
-            `
-          : nothing}
-        ${this._phase === "recording"
-          ? html`
-              <div class="recording-indicator">
-                <div class="recording-dot"></div>
-                <span>Recording</span>
-                <span class="recording-time">${this._formatDuration(this._recordingDuration)}</span>
-              </div>
-            `
-          : nothing}
-        ${this._phase === "done"
-          ? html`
-              <div class="result-card">
-                <span class="result-check">${icons.check}</span>
-                <div class="result-details">
-                  <span class="result-title">Voice cloned: ${this._voiceName || "My Voice"}</span>
-                  <span class="result-id">${this._voiceId}</span>
+              `
+            : nothing
+        }
+        ${
+          this._phase === "done"
+            ? html`
+                <div class="result-card">
+                  <span class="result-check">${icons.check}</span>
+                  <div class="result-details">
+                    <span class="result-title">Voice cloned: ${this._voiceName || "My Voice"}</span>
+                    <span class="result-id">${this._voiceId}</span>
+                  </div>
                 </div>
-              </div>
-            `
-          : nothing}
-        ${this._phase === "error"
-          ? html`<div class="error-msg">${this._error || "Clone failed"}</div>`
-          : nothing}
+              `
+            : nothing
+        }
+        ${
+          this._phase === "error"
+            ? html`<div class="error-msg">${this._error || "Clone failed"}</div>`
+            : nothing
+        }
 
         <div class="actions">
-          ${this._phase === "idle" || this._phase === "error"
-            ? html`
-                <hu-button
-                  variant="primary"
-                  @click=${this._startRecording}
-                  ?disabled=${!this._recorder.isSupported}
-                >
-                  Start Recording
-                </hu-button>
-              `
-            : nothing}
-          ${this._phase === "recording"
-            ? html`
-                <hu-button
-                  variant="primary"
-                  @click=${this._stopAndUpload}
-                  ?disabled=${this._recordingDuration < 3}
-                >
-                  Stop & Clone
-                </hu-button>
-                <hu-button variant="ghost" @click=${this._cancelRecording}>Cancel</hu-button>
-              `
-            : nothing}
-          ${this._phase === "uploading"
-            ? html` <hu-button variant="primary" disabled>Cloning…</hu-button> `
-            : nothing}
-          ${this._phase === "done"
-            ? html` <hu-button variant="ghost" @click=${this._reset}>Clone Another</hu-button> `
-            : nothing}
+          ${
+            this._phase === "idle" || this._phase === "error"
+              ? html`
+                  <hu-button
+                    variant="primary"
+                    @click=${this._startRecording}
+                    ?disabled=${!this._recorder.isSupported}
+                  >
+                    Start Recording
+                  </hu-button>
+                `
+              : nothing
+          }
+          ${
+            this._phase === "recording"
+              ? html`
+                  <hu-button
+                    variant="primary"
+                    @click=${this._stopAndUpload}
+                    ?disabled=${this._recordingDuration < 3}
+                  >
+                    Stop & Clone
+                  </hu-button>
+                  <hu-button variant="ghost" @click=${this._cancelRecording}>Cancel</hu-button>
+                `
+              : nothing
+          }
+          ${
+            this._phase === "uploading"
+              ? html` <hu-button variant="primary" disabled>Cloning…</hu-button> `
+              : nothing
+          }
+          ${
+            this._phase === "done"
+              ? html` <hu-button variant="ghost" @click=${this._reset}>Clone Another</hu-button> `
+              : nothing
+          }
         </div>
       </div>
     `;

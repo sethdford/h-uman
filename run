@@ -1,4 +1,0 @@
-cmake --build build
-build/human service stop
-build/human service start
-journalctl --user -u human -f

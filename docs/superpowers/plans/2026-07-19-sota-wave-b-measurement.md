@@ -1,3 +1,8 @@
+---
+title: SOTA Wave B — Measurement
+description: Measurement gates and exit criteria for the SOTA wave-B slice.
+---
+
 # SOTA Wave B — Measurement
 
 > Status: **implemented** on `feat/sota-waves-a-b-c` (2026-07-19).

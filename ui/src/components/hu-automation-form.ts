@@ -386,22 +386,24 @@ export class ScAutomationForm extends LitElement {
           </hu-button>
         </div>
       </div>
-      ${this.oneShot
-        ? html`
-            <div class="form-group">
-              <div class="run-once-message">Run immediately on save</div>
-            </div>
-          `
-        : html`
-            <div class="form-group">
-              <label>Schedule</label>
-              <hu-schedule-builder
-                .value=${this.schedule}
-                @hu-schedule-change=${(e: CustomEvent<{ value: string }>) =>
-                  (this.schedule = e.detail.value)}
-              ></hu-schedule-builder>
-            </div>
-          `}
+      ${
+        this.oneShot
+          ? html`
+              <div class="form-group">
+                <div class="run-once-message">Run immediately on save</div>
+              </div>
+            `
+          : html`
+              <div class="form-group">
+                <label>Schedule</label>
+                <hu-schedule-builder
+                  .value=${this.schedule}
+                  @hu-schedule-change=${(e: CustomEvent<{ value: string }>) =>
+                    (this.schedule = e.detail.value)}
+                ></hu-schedule-builder>
+              </div>
+            `
+      }
       <div class="form-group">
         <label for="agent-channel">Channel</label>
         <select
@@ -454,22 +456,24 @@ export class ScAutomationForm extends LitElement {
           </hu-button>
         </div>
       </div>
-      ${this.oneShot
-        ? html`
-            <div class="form-group">
-              <div class="run-once-message">Run immediately on save</div>
-            </div>
-          `
-        : html`
-            <div class="form-group">
-              <label>Schedule</label>
-              <hu-schedule-builder
-                .value=${this.schedule}
-                @hu-schedule-change=${(e: CustomEvent<{ value: string }>) =>
-                  (this.schedule = e.detail.value)}
-              ></hu-schedule-builder>
-            </div>
-          `}
+      ${
+        this.oneShot
+          ? html`
+              <div class="form-group">
+                <div class="run-once-message">Run immediately on save</div>
+              </div>
+            `
+          : html`
+              <div class="form-group">
+                <label>Schedule</label>
+                <hu-schedule-builder
+                  .value=${this.schedule}
+                  @hu-schedule-change=${(e: CustomEvent<{ value: string }>) =>
+                    (this.schedule = e.detail.value)}
+                ></hu-schedule-builder>
+              </div>
+            `
+      }
     `;
   }
 

@@ -5,6 +5,7 @@
 #include "human/persona.h"
 #include "human/platform/calendar.h"
 #include "test_framework.h"
+#include "test_tmpdir.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -571,6 +572,19 @@ static void quality_penalizes_service_language(void) {
     hu_quality_score_t score = hu_conversation_evaluate_quality(
         "Certainly! I'd be happy to help you with that.", 47, NULL, 0, 300);
     HU_ASSERT_TRUE(score.warmth < 5);
+}
+
+/* 2026-09-13: the retry guidance must name the tell, never ask for warmth or
+ * length — "show you care" became "I'm here for you" on a real turn, and
+ * "consider adding a bit more" fights the style card's 34-char mean. */
+static void quality_guidance_names_the_helper_tell_not_warmth(void) {
+    hu_quality_score_t score = hu_conversation_evaluate_quality(
+        "Certainly! I'd be happy to help you with that.", 47, NULL, 0, 300);
+    HU_ASSERT_TRUE(score.needs_revision);
+    HU_ASSERT_STR_CONTAINS(score.guidance, "helper bot");
+    HU_ASSERT_STR_CONTAINS(score.guidance, "friend");
+    HU_ASSERT_STR_NOT_CONTAINS(score.guidance, "care");
+    HU_ASSERT_STR_NOT_CONTAINS(score.guidance, "adding a bit more");
 }
 
 static void quality_good_casual_scores_high(void) {
@@ -1459,6 +1473,42 @@ static void brief_char_cap_redteam(void) {
     HU_ASSERT_EQ(hu_conversation_brief_char_cap(false, &cp, HU_REL_NEW), 185u);
     cp.prefers_short_texts = true;
     HU_ASSERT_EQ(hu_conversation_brief_char_cap(false, &cp, HU_REL_TRUSTED), 72u);
+}
+
+/* Reply-length floor (2026-09-26): a contact who texts "Heyo" must not cap
+ * Seth's reply at 15 chars when his own measured p90 to her is higher. */
+static void max_response_chars_relational_measured_floor_lifts_short_incoming(void) {
+    hu_contact_profile_t cp = {0};
+    HU_ASSERT_EQ(hu_conversation_max_response_chars_relational(4, &cp, HU_REL_NEW), 15);
+    cp.reply_chars_p90 = 38;
+    HU_ASSERT_EQ(hu_conversation_max_response_chars_relational(4, &cp, HU_REL_NEW), 38);
+    /* Short-texter flag no longer drags the cap below what Seth sends. */
+    cp.prefers_short_texts = true;
+    HU_ASSERT_EQ(hu_conversation_max_response_chars_relational(4, &cp, HU_REL_NEW), 38);
+}
+
+static void max_response_chars_relational_measured_floor_never_lowers_cap(void) {
+    hu_contact_profile_t cp = {0};
+    int base = hu_conversation_max_response_chars_relational(120, &cp, HU_REL_NEW);
+    cp.reply_chars_p90 = 38;
+    HU_ASSERT_TRUE(base > 38);
+    HU_ASSERT_EQ(hu_conversation_max_response_chars_relational(120, &cp, HU_REL_NEW), base);
+}
+
+static void max_response_chars_relational_measured_floor_clamped_to_max(void) {
+    hu_contact_profile_t cp = {0};
+    cp.reply_chars_p90 = 900;
+    HU_ASSERT_EQ(hu_conversation_max_response_chars_relational(4, &cp, HU_REL_NEW), 300);
+}
+
+static void brief_char_cap_measured_floor_dm_only(void) {
+    hu_contact_profile_t cp = {0};
+    cp.prefers_short_texts = true;
+    HU_ASSERT_EQ(hu_conversation_brief_char_cap(false, &cp, HU_REL_TRUSTED), 72u);
+    cp.reply_chars_p90 = 110;
+    HU_ASSERT_EQ(hu_conversation_brief_char_cap(false, &cp, HU_REL_TRUSTED), 110u);
+    /* Groups keep their tight cap: the measurement is from 1:1 texts. */
+    HU_ASSERT_EQ(hu_conversation_brief_char_cap(true, &cp, HU_REL_TRUSTED), 50u);
 }
 
 static void calibrate_for_contact_softens_ping_for_warm_dm(void) {
@@ -3052,7 +3102,8 @@ static void gif_cal_save_and_load_roundtrip(void) {
     hu_conversation_gif_cal_record_reaction("persist_test", 12);
     float rate_before = hu_conversation_gif_cal_hit_rate("persist_test", 12);
 
-    const char *path = "/tmp/hu_test_gif_cal.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_test_gif_cal.json"));
     hu_error_t err = hu_conversation_gif_cal_save(path, strlen(path));
     HU_ASSERT_EQ(err, HU_OK);
 
@@ -3214,7 +3265,8 @@ static void sched_save_and_load_roundtrip(void) {
     uint64_t now = (uint64_t)time(NULL) * 1000ULL;
     hu_conversation_schedule_message_on("persist_user", 12, "telegram", 8, "hi from persist", 15,
                                         now + 60000);
-    const char *path = "/tmp/hu_test_sched.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_test_sched.json"));
     hu_error_t err = hu_conversation_sched_save(path, strlen(path));
     HU_ASSERT_EQ(err, HU_OK);
 
@@ -3228,6 +3280,65 @@ static void sched_save_and_load_roundtrip(void) {
     HU_ASSERT_STR_EQ(contact, "persist_user");
     HU_ASSERT_STR_EQ(channel, "telegram");
     (void)unlink(path);
+}
+
+/* 2026-07-27 incident: the daemon loaded scheduled.json ONCE per process, so
+ * a `human schedule add` from a separate process (which rewrites the file)
+ * stayed invisible until the next daemon restart. The reload-if-changed
+ * contract: a file rewrite AFTER the initial load is picked up on the next
+ * delivery pass; an unchanged file is not re-read (no thrash); an absent
+ * file leaves memory authoritative. */
+static void sched_reload_if_changed_picks_up_external_add(void) {
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_test_sched_reload.json"));
+    (void)unlink(path);
+    uint64_t now = (uint64_t)time(NULL) * 1000ULL;
+
+    /* Initial state on disk: one entry (as if written at daemon start). */
+    hu_conversation_schedule_message_on("first_user", 10, "imessage", 8, "first msg", 9,
+                                        now - 1000);
+    HU_ASSERT_EQ(hu_conversation_sched_save(path, strlen(path)), HU_OK);
+    HU_ASSERT_EQ(hu_conversation_sched_reload_if_changed(path, strlen(path)), HU_OK);
+
+    /* Simulate the CLI: a separate process loads, adds, saves. Here: add a
+     * second entry in memory and rewrite the file (size changes, so the
+     * fingerprint registers even within the same mtime second). */
+    hu_conversation_schedule_message_on("late_added_user", 15, "imessage", 8,
+                                        "added after daemon start", 24, now - 500);
+    HU_ASSERT_EQ(hu_conversation_sched_save(path, strlen(path)), HU_OK);
+
+    /* Wipe memory (drain both) to prove the next pass re-reads the FILE. */
+    char contact[128], channel[32], msg[512];
+    while (hu_conversation_flush_scheduled_on(now, contact, sizeof(contact), channel,
+                                              sizeof(channel), msg, sizeof(msg)) > 0)
+        ;
+
+    /* The delivery-pass call: file changed since last load -> reload. */
+    HU_ASSERT_EQ(hu_conversation_sched_reload_if_changed(path, strlen(path)), HU_OK);
+    size_t len = hu_conversation_flush_scheduled_on(now, contact, sizeof(contact), channel,
+                                                    sizeof(channel), msg, sizeof(msg));
+    HU_ASSERT_TRUE(len > 0);
+    HU_ASSERT_STR_EQ(contact, "first_user");
+    len = hu_conversation_flush_scheduled_on(now, contact, sizeof(contact), channel,
+                                             sizeof(channel), msg, sizeof(msg));
+    HU_ASSERT_TRUE(len > 0);
+    HU_ASSERT_STR_EQ(contact, "late_added_user");
+
+    /* Unchanged file: reload must NOT resurrect the flushed entries. */
+    HU_ASSERT_EQ(hu_conversation_sched_reload_if_changed(path, strlen(path)), HU_OK);
+    len = hu_conversation_flush_scheduled_on(now, contact, sizeof(contact), channel,
+                                             sizeof(channel), msg, sizeof(msg));
+    HU_ASSERT_EQ(0, (int)len);
+
+    /* Absent file: memory stays authoritative, no error. */
+    (void)unlink(path);
+    hu_conversation_schedule_message_on("mem_only_user", 13, "imessage", 8, "in memory", 9,
+                                        now - 100);
+    HU_ASSERT_EQ(hu_conversation_sched_reload_if_changed(path, strlen(path)), HU_OK);
+    len = hu_conversation_flush_scheduled_on(now, contact, sizeof(contact), channel,
+                                             sizeof(channel), msg, sizeof(msg));
+    HU_ASSERT_TRUE(len > 0);
+    HU_ASSERT_STR_EQ(contact, "mem_only_user");
 }
 
 /* ── Split boundary edge case tests ──────────────────────────────────── */
@@ -3344,7 +3455,8 @@ static void split_for_cadence_null_inputs_return_zero(void) {
 
 static void gif_cal_save_escapes_quotes(void) {
     hu_conversation_gif_cal_record_send("test\"quoted", 11, "query", 5);
-    const char *path = "/tmp/hu_test_gif_cal_esc.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_test_gif_cal_esc.json"));
     hu_error_t err = hu_conversation_gif_cal_save(path, strlen(path));
     HU_ASSERT_EQ(err, HU_OK);
 
@@ -3364,7 +3476,8 @@ static void gif_cal_save_escapes_quotes(void) {
 /* ── sched_load \uXXXX unescaping ───────────────────────────────────── */
 
 static void sched_load_unescapes_unicode(void) {
-    const char *path = "/tmp/hu_test_sched_unicode.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_test_sched_unicode.json"));
     FILE *f = fopen(path, "w");
     HU_ASSERT_TRUE(f != NULL);
     fprintf(f, "{\"contact\":\"alice\",\"channel\":\"imessage\","
@@ -3386,7 +3499,8 @@ static void sched_load_unescapes_unicode(void) {
 }
 
 static void sched_load_unescapes_tab_and_cr(void) {
-    const char *path = "/tmp/hu_test_sched_tab.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_test_sched_tab.json"));
     FILE *f = fopen(path, "w");
     HU_ASSERT_TRUE(f != NULL);
     fprintf(f, "{\"contact\":\"bob\",\"channel\":\"\","
@@ -3778,55 +3892,64 @@ static void awareness_uses_persona_style_rules(void) {
     alloc.free(alloc.ctx, s, len + 1);
 }
 
-/* ── Inline reply classifier (F40) ────────────────────────────────────── */
+/* ── Parrot guard (replaces the F40 inline-quote fallback) ──────────────
+ * Pins the 2026-07-25 Dermot incident: F40 prepended "> "+inbound[0..80]
+ * +"\n\n" to the reply, the markdown plaintext-ifier stripped the "> "
+ * marker, and the splitter shipped the bare 80-char echo of the contact's
+ * OWN message as its own bubble. The predicate below is the structural
+ * defense: no outbound bubble may be a verbatim prefix of the inbound. */
 
-static void inline_reply_you_said_returns_true(void) {
-    hu_channel_history_entry_t entries[2] = {
-        make_entry(true, "let's meet at 5", "12:00"),
-        make_entry(false, "you said we'd meet at 5 - can we make it 6?", "12:01"),
-    };
-    bool r = hu_conversation_should_inline_reply(entries, 2,
-                                                 "you said we'd meet at 5 - can we make it 6?", 42);
+static void parrot_exact_80_prefix_returns_true(void) {
+    /* The literal Dermot shape: bubble = first 80 chars of a longer inbound. */
+    const char *inbound = "Did you end up going to any other WC games?! Get the boat yet?! "
+                          "Start an agentic cartel in Florida yet?!\n\nSo many questions!";
+    bool r = hu_conversation_reply_parrots_inbound(inbound, 80, inbound, strlen(inbound));
     HU_ASSERT_TRUE(r);
 }
 
-static void inline_reply_earlier_returns_true(void) {
-    hu_channel_history_entry_t entries[1] = {
-        make_entry(false, "earlier you mentioned pizza", "12:00")};
-    bool r = hu_conversation_should_inline_reply(entries, 1, "earlier you mentioned pizza", 26);
+static void parrot_whole_inbound_returns_true(void) {
+    const char *inbound = "I've been doing a bunch of stuff the last month actually";
+    bool r =
+        hu_conversation_reply_parrots_inbound(inbound, strlen(inbound), inbound, strlen(inbound));
     HU_ASSERT_TRUE(r);
 }
 
-static void inline_reply_what_about_returns_true(void) {
-    hu_channel_history_entry_t entries[1] = {make_entry(false, "what about the meeting?", "12:00")};
-    bool r = hu_conversation_should_inline_reply(entries, 1, "what about the meeting?", 21);
+static void parrot_with_quote_marker_returns_true(void) {
+    /* The pre-strip F40 form: "> " + inbound prefix must also be caught. */
+    const char *bubble = "> you said we'd meet at 5 - can we make it 6";
+    const char *inbound = "you said we'd meet at 5 - can we make it 6?";
+    bool r =
+        hu_conversation_reply_parrots_inbound(bubble, strlen(bubble), inbound, strlen(inbound));
     HU_ASSERT_TRUE(r);
 }
 
-static void inline_reply_multiple_questions_returns_true(void) {
-    hu_channel_history_entry_t entries[4] = {
-        make_entry(false, "when are we meeting?", "12:00"),
-        make_entry(true, "how about 3pm?", "12:01"),
-        make_entry(false, "where?", "12:02"),
-        make_entry(false, "and who's coming?", "12:03"),
-    };
-    bool r = hu_conversation_should_inline_reply(entries, 4, "and who's coming?", 16);
-    HU_ASSERT_TRUE(r);
-}
-
-static void inline_reply_single_topic_returns_false(void) {
-    hu_channel_history_entry_t entries[2] = {
-        make_entry(false, "hey how are you", "12:00"),
-        make_entry(true, "good you?", "12:01"),
-    };
-    bool r = hu_conversation_should_inline_reply(entries, 2, "doing well thanks", 16);
+static void parrot_short_natural_echo_returns_false(void) {
+    /* "lol" back at "lol that's hilarious" is a natural human echo, not a bug. */
+    bool r = hu_conversation_reply_parrots_inbound("lol", 3, "lol that's hilarious", 20);
     HU_ASSERT_FALSE(r);
 }
 
-static void inline_reply_null_last_msg_returns_false(void) {
-    hu_channel_history_entry_t entries[1] = {make_entry(false, "hello", "12:00")};
-    bool r = hu_conversation_should_inline_reply(entries, 1, NULL, 0);
+static void parrot_normal_reply_returns_false(void) {
+    const char *bubble = "didn't hit any other games. Still hunting for the boat";
+    const char *inbound = "Did you end up going to any other WC games?!";
+    bool r =
+        hu_conversation_reply_parrots_inbound(bubble, strlen(bubble), inbound, strlen(inbound));
     HU_ASSERT_FALSE(r);
+}
+
+static void parrot_null_inputs_return_false(void) {
+    HU_ASSERT_FALSE(hu_conversation_reply_parrots_inbound(NULL, 0, "hello there friend", 18));
+    HU_ASSERT_FALSE(hu_conversation_reply_parrots_inbound("hello there friend", 18, NULL, 0));
+}
+
+static void parrot_trailing_whitespace_still_true(void) {
+    /* A trailing newline on the bubble must not defeat the guard. */
+    const char *inbound = "Did you end up going to any other WC games?! Get the boat yet?!";
+    char bubble[80];
+    snprintf(bubble, sizeof(bubble), "%.40s\n", inbound);
+    bool r =
+        hu_conversation_reply_parrots_inbound(bubble, strlen(bubble), inbound, strlen(inbound));
+    HU_ASSERT_TRUE(r);
 }
 
 /* ── Active listening backchannels (F29) ───────────────────────────────── */
@@ -4557,7 +4680,8 @@ static void phrase_banks_missing_file_leaves_defaults(void) {
 
 /* Corrupt JSON must fail and leave the defaults in effect. */
 static void phrase_banks_corrupt_file_leaves_defaults(void) {
-    const char *path = "/tmp/hu_test_phrase_banks_corrupt.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_test_phrase_banks_corrupt.json"));
     write_phrase_banks_file(path, "{ this is not valid json !!");
     hu_allocator_t alloc = hu_system_allocator();
     hu_error_t err = hu_conversation_phrase_banks_load(&alloc, path, "imessage");
@@ -4572,7 +4696,8 @@ static void phrase_banks_corrupt_file_leaves_defaults(void) {
 
 /* A file without the requested channel key must fail and keep defaults. */
 static void phrase_banks_missing_channel_leaves_defaults(void) {
-    const char *path = "/tmp/hu_test_phrase_banks_wrong_channel.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_test_phrase_banks_wrong_channel.json"));
     write_phrase_banks_file(path,
                             "{\"slack\":{\"backchannels\":[{\"text\":\"frfr\",\"freq\":9}]}}");
     hu_allocator_t alloc = hu_system_allocator();
@@ -4589,7 +4714,8 @@ static void phrase_banks_missing_channel_leaves_defaults(void) {
 /* Loaded bank wins over DEFAULT_BACKCHANNEL_PHRASES: with a single-entry
  * bank, every seed must return the mined phrase, which is not a default. */
 static void phrase_banks_backchannel_uses_bank_not_default(void) {
-    const char *path = "/tmp/hu_test_phrase_banks_bc.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_test_phrase_banks_bc.json"));
     write_phrase_banks_file(path,
                             "{\"imessage\":{\"backchannels\":[{\"text\":\"frfr\",\"freq\":9}]}}");
     hu_allocator_t alloc = hu_system_allocator();
@@ -4609,7 +4735,8 @@ static void phrase_banks_backchannel_uses_bank_not_default(void) {
 
 /* Loaded filler bank wins over DEFAULT_FILLERS in the injector (LIVE mode). */
 static void phrase_banks_fillers_used_by_injector(void) {
-    const char *path = "/tmp/hu_test_phrase_banks_fillers.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_test_phrase_banks_fillers.json"));
     write_phrase_banks_file(path, "{\"imessage\":{\"fillers\":[{\"text\":\"zzz \",\"freq\":12}]}}");
     hu_allocator_t alloc = hu_system_allocator();
     hu_error_t err = hu_conversation_phrase_banks_load(&alloc, path, "imessage");
@@ -4641,7 +4768,8 @@ static void phrase_banks_farewells_suppress_double_text(void) {
     bool before = hu_conversation_should_double_text("peace out", 9, NULL, 0, 12, 7u, 1.0f);
     HU_ASSERT_TRUE(before);
 
-    const char *path = "/tmp/hu_test_phrase_banks_farewell.json";
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "hu_test_phrase_banks_farewell.json"));
     write_phrase_banks_file(path,
                             "{\"imessage\":{\"farewells\":[{\"text\":\"peace out\",\"freq\":7}]}}");
     hu_allocator_t alloc = hu_system_allocator();
@@ -4727,6 +4855,7 @@ void run_conversation_tests(void) {
     HU_RUN_TEST(quality_penalizes_exclamation_overuse);
     HU_RUN_TEST(quality_rewards_contractions);
     HU_RUN_TEST(quality_penalizes_service_language);
+    HU_RUN_TEST(quality_guidance_names_the_helper_tell_not_warmth);
     HU_RUN_TEST(quality_good_casual_scores_high);
 
     /* Awareness builder */
@@ -4891,6 +5020,10 @@ void run_conversation_tests(void) {
     HU_RUN_TEST(max_response_chars_relational_default_matches_plain);
     HU_RUN_TEST(max_response_chars_relational_trusted_higher);
     HU_RUN_TEST(brief_char_cap_redteam);
+    HU_RUN_TEST(max_response_chars_relational_measured_floor_lifts_short_incoming);
+    HU_RUN_TEST(max_response_chars_relational_measured_floor_never_lowers_cap);
+    HU_RUN_TEST(max_response_chars_relational_measured_floor_clamped_to_max);
+    HU_RUN_TEST(brief_char_cap_measured_floor_dm_only);
     HU_RUN_TEST(calibrate_for_contact_softens_ping_for_warm_dm);
     HU_RUN_TEST(calibrate_for_contact_group_uses_neutral_ratio);
     HU_RUN_TEST(quality_needs_revision_at_5x_ratio);
@@ -5075,12 +5208,13 @@ void run_conversation_tests(void) {
     HU_RUN_TEST(awareness_uses_persona_style_rules);
 
     /* Inline reply classifier (F40) */
-    HU_RUN_TEST(inline_reply_you_said_returns_true);
-    HU_RUN_TEST(inline_reply_earlier_returns_true);
-    HU_RUN_TEST(inline_reply_what_about_returns_true);
-    HU_RUN_TEST(inline_reply_multiple_questions_returns_true);
-    HU_RUN_TEST(inline_reply_single_topic_returns_false);
-    HU_RUN_TEST(inline_reply_null_last_msg_returns_false);
+    HU_RUN_TEST(parrot_exact_80_prefix_returns_true);
+    HU_RUN_TEST(parrot_whole_inbound_returns_true);
+    HU_RUN_TEST(parrot_with_quote_marker_returns_true);
+    HU_RUN_TEST(parrot_short_natural_echo_returns_false);
+    HU_RUN_TEST(parrot_normal_reply_returns_false);
+    HU_RUN_TEST(parrot_null_inputs_return_false);
+    HU_RUN_TEST(parrot_trailing_whitespace_still_true);
 
     /* Active listening backchannels (F29) */
     HU_RUN_TEST(backchannel_long_narrative_prob_one_returns_true);
@@ -5241,6 +5375,7 @@ void run_conversation_tests(void) {
 
     /* Schedule persistence */
     HU_RUN_TEST(sched_save_and_load_roundtrip);
+    HU_RUN_TEST(sched_reload_if_changed_picks_up_external_add);
 
     /* Split edge cases */
     HU_RUN_TEST(split_into_texts_exact_boundary);

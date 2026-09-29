@@ -13,10 +13,11 @@ typedef enum hu_cognitive_tier {
 } hu_cognitive_tier_t;
 
 typedef enum hu_route_source {
-    HU_ROUTE_HEURISTIC = 0, /* keyword/score-based fast path */
-    HU_ROUTE_JUDGE,         /* LLM-as-Judge classification */
-    HU_ROUTE_JUDGE_CACHED,  /* LLM judge result from cache */
-    HU_ROUTE_JUDGE_FALLBACK /* judge failed, fell back to heuristic */
+    HU_ROUTE_HEURISTIC = 0,    /* keyword/score-based fast path */
+    HU_ROUTE_JUDGE,            /* LLM-as-Judge classification */
+    HU_ROUTE_JUDGE_CACHED,     /* LLM judge result from cache */
+    HU_ROUTE_JUDGE_FALLBACK,   /* judge failed, fell back to heuristic */
+    HU_ROUTE_SHADOW_DIFFICULTY /* US-8: hypothetical decision, never applied */
 } hu_route_source_t;
 
 typedef struct hu_model_selection {
@@ -88,6 +89,18 @@ hu_model_router_config_t hu_model_router_default_config(void);
  * length to *out_len (may be NULL). Returns NULL only for a NULL cfg. */
 const char *hu_model_route_cloud_fallback(const hu_model_router_config_t *cfg,
                                           hu_cognitive_tier_t tier, size_t *out_len);
+
+/* US-8 SHADOW-only: would a difficulty classifier promote this CONVERSATIONAL turn
+ * to the ANALYTICAL treatment? Pure predicate, no side effects. Reuses this file's
+ * own word_count/needs_reasoning/emotional_weight helpers on an INDEPENDENT boundary
+ * from compute_heuristic_score's own thresholds, so this is not tautological with
+ * the tier heuristic that already placed the turn in CONVERSATIONAL. */
+#define HU_DIFFICULTY_ROUTE_SUBSTANTIVE_WORDS                                   \
+    12 /* boundary for substantive messages that can admit higher-tier routing. \
+        * Used by hu_model_route_shadow_would_promote_conversational() to gate  \
+        * shadow routing decisions. Do not change without coordinating with the \
+        * eval gate in feature-gate-requires-measurement.md */
+bool hu_model_route_shadow_would_promote_conversational(const char *msg, size_t msg_len);
 
 /* Check whether the on-device model is sufficient for a given tier.
  * Currently returns true only for REFLEXIVE (short acks, simple greetings).

@@ -80,7 +80,7 @@ hu_error_t hu_voice_play(hu_allocator_t *alloc, const void *audio_data, size_t a
  * Takes base64-encoded payload directly (no decode needed).
  * When mime_type begins with "video/", uses a video-description prompt instead of transcription.
  * config->api_key is used as the Gemini API key.
- * config->stt_model defaults to "gemini-3.1-flash-lite-preview" if NULL.
+ * config->stt_model defaults to "gemini-3.1-flash-lite" if NULL.
  * config->stt_endpoint defaults to Gemini API URL if NULL.
  */
 hu_error_t hu_voice_stt_gemini(hu_allocator_t *alloc, const hu_voice_config_t *config,

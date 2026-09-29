@@ -2,7 +2,7 @@
 """rating_ingest — harvest Seth's replies from chat.db and write into rating sheet.
 
 The rating_drip sends one blind-A/B question per day to Seth's self-chat
-(sethford@me.com). This script reads his replies and ingests them into the
+(his own number; see DEFAULT_TARGET). This script reads his replies and ingests them into the
 rating_sheet.csv.
 
 Ingest is idempotent: re-running never double-ingests (tracks ingested message
@@ -33,8 +33,13 @@ ANSWER_KEY = os.path.join(SHEET_DIR, "answer_key.json")
 STATE = os.path.join(SHEET_DIR, "drip_state.json")
 CHAT_DB = os.path.join(HOME, "Library", "Messages", "chat.db")
 SCORE_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "score.py")
+from rating_drip import REPO_GATE  # noqa: E402 — one gate path, owned by the drip
 
-DEFAULT_TARGET = "sethford@me.com"  # Seth's self-chat
+# Seth's self-chat, addressed by his own number. `sethford@me.com` stopped
+# being an alias on the account ~2026-09-05 and every send to it recorded
+# error=22 in chat.db while imsg exited 0 — keep this in sync with
+# rating_drip.DEFAULT_TARGET (pinned by test_rating_drip).
+DEFAULT_TARGET = "+18012017497"
 
 
 def load_sheet(path=None):
@@ -169,7 +174,8 @@ def run_score():
         return False
     try:
         r = subprocess.run(
-            [sys.executable, SCORE_PY, SHEET, ANSWER_KEY],
+            [sys.executable, SCORE_PY, SHEET, "--key", ANSWER_KEY,
+             "--rater", "human", "--emit-gate", REPO_GATE],
             capture_output=True,
             text=True,
             timeout=60,
@@ -177,7 +183,9 @@ def run_score():
         # Print last 500 chars of output for visibility
         if r.stdout:
             print(r.stdout[-500:])
-        if r.returncode != 0:
+        # score.py exit semantics: 0 = PASS verdict, 1 = ran but verdict
+        # != PASS (still a successful scoring run), >=2 = usage error/crash.
+        if r.returncode not in (0, 1):
             if r.stderr:
                 print(f"score.py failed: {r.stderr[-300:]}", file=sys.stderr)
             return False
@@ -236,8 +244,16 @@ def ingest(dry_run=False):
                 f"sheet complete ({answered}/{total}) — running score.py -> gate verdict"
             )
             if not dry_run:
-                run_score()
-                st["complete"] = True
+                if run_score():
+                    st["complete"] = True
+                else:
+                    # Leave complete=False so the next tick retries scoring;
+                    # a silently-unscored complete sheet blocks the human tier.
+                    print(
+                        "score.py FAILED — sheet is fully rated but the gate "
+                        "verdict was NOT emitted; will retry next tick",
+                        file=sys.stderr,
+                    )
         save_state(st)
         return
 

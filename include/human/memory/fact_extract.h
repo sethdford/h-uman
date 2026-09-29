@@ -102,4 +102,14 @@ size_t hu_fact_dedup(hu_fact_extract_result_t *result, const hu_heuristic_fact_t
 hu_error_t hu_fact_format_for_store(hu_allocator_t *alloc, const hu_heuristic_fact_t *fact,
                                     char **key, size_t *key_len, char **value, size_t *value_len);
 
+/*
+ * Render one fact as a single grep-able log-line fragment:
+ *   "{subject} {predicate} {object} (conf=0.80)"
+ * Control characters (LLM-extracted fields can carry embedded newlines/tabs)
+ * are replaced with spaces so the fragment never splits a log line. Output is
+ * truncated to cap-1 bytes and always NUL-terminated. Returns bytes written
+ * (excluding NUL); 0 on NULL fact/buf or cap == 0.
+ */
+size_t hu_heuristic_fact_log_summary(const hu_heuristic_fact_t *fact, char *buf, size_t cap);
+
 #endif

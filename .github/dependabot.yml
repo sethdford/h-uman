@@ -16,6 +16,12 @@ updates:
     groups:
       website-deps:
         patterns: ["*"]
+    ignore:
+      # @astrojs/check 0.9.x declares peer typescript "^5.0.0 || ^6.0.0"; the
+      # 2026-09 group bump to typescript 7.0.2 made `npm ci` fail on the peer
+      # conflict (#366). Let dependabot bump minors/patches; take TS majors by hand.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: /ui

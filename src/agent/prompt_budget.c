@@ -8,6 +8,7 @@
  * module just accumulates and decides. */
 
 #include "human/agent/prompt_budget.h"
+#include "human/core/paths.h"
 #include <ctype.h>
 #include <errno.h>
 #include <stdint.h>
@@ -67,6 +68,8 @@ static const char *const s_field_names[HU_PROMPT_FIELD_COUNT] = {
     [HU_PROMPT_FIELD_VOICE_MATURITY_DIRECTIVE] = "voice_maturity_directive",
     [HU_PROMPT_FIELD_GRAPH_CONTEXT] = "graph_context",
     [HU_PROMPT_FIELD_CONTINUITY_CONTEXT] = "continuity_context",
+    [HU_PROMPT_FIELD_GUARD_TAIL] = "guard_tail",
+    [HU_PROMPT_FIELD_HUMANNESS_CONTEXT] = "humanness_context",
 };
 
 const char *hu_prompt_field_name(hu_prompt_field_t field) {
@@ -203,10 +206,7 @@ size_t hu_prompt_budget_snapshot_path(char *out_buf, size_t out_cap) {
         return (n > 0 && (size_t)n < out_cap) ? (size_t)n : 0;
     }
 #endif
-    const char *home = getenv("HOME");
-    if (!home || !home[0])
-        return 0;
-    int n = snprintf(out_buf, out_cap, "%s/.human/prompt_budget.snapshot.json", home);
+    int n = hu_paths_state(out_buf, out_cap, "prompt_budget.snapshot.json");
     return (n > 0 && (size_t)n < out_cap) ? (size_t)n : 0;
 }
 

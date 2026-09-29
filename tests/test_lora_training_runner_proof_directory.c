@@ -7,6 +7,7 @@
 #include "human/ml/learner_bridge.h"
 #include "human/persona/persona_deltas.h"
 #include "test_framework.h"
+#include "test_tmpdir.h"
 #include <stdio.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -40,24 +41,22 @@ static void test_proof_directory_gate_decision_json_only_on_reject(void) {
     snprintf(ctx.config_template.adapter_output_path,
              sizeof(ctx.config_template.adapter_output_path), "%s", path);
 
-    setenv("HOME", "/tmp/test-home", 1);
+    /* A fresh per-process HOME: sibling tests (e.g.
+     * test_runner_promotes_measured_gate_scores) use the same clock and would
+     * otherwise leave manifest.json from a successful promotion under a shared
+     * proofs dir, and this test asserts manifest.json does NOT exist on the
+     * reject path. HOME stays swapped afterwards (pre-existing behavior); the
+     * directory is swept at process exit. */
+    char home[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(home, sizeof(home), "proof_home"));
+    (void)mkdir(home, 0755);
+    setenv("HOME", home, 1);
     hu_lora_runner_set_test_clock(1747042800);
-    (void)mkdir("/tmp/test-home", 0755);
-    (void)mkdir("/tmp/test-home/.human", 0755);
-    (void)mkdir("/tmp/test-home/.human/proofs", 0755);
-    /* Defensive cleanup of THIS test's proof dir — sibling tests in the
-     * suite (e.g. test_runner_promotes_measured_gate_scores) use the
-     * same HOME + clock and may leave manifest.json from a successful
-     * promotion; this test asserts manifest.json does NOT exist on the
-     * reject path, so leftover state from those siblings would make us
-     * fail spuriously. The adapter_id pattern matches what
-     * hu_format_adapter_id produces for ("dpo", step=0, clock=1747042800). */
-    {
-        char clean_cmd[512];
-        snprintf(clean_cmd, sizeof(clean_cmd),
-                 "rm -rf /tmp/test-home/.human/proofs/*-dpo-step-* 2>/dev/null");
-        (void)system(clean_cmd);
-    }
+    char human_dir[560], proofs_dir[600];
+    snprintf(human_dir, sizeof(human_dir), "%s/.human", home);
+    snprintf(proofs_dir, sizeof(proofs_dir), "%s/.human/proofs", home);
+    (void)mkdir(human_dir, 0755);
+    (void)mkdir(proofs_dir, 0755);
 
     hu_job_spec_t spec;
     memset(&spec, 0, sizeof(spec));
@@ -66,12 +65,12 @@ static void test_proof_directory_gate_decision_json_only_on_reject(void) {
     char adapter_id[128];
     HU_ASSERT_EQ(hu_format_adapter_id("dpo", 0, 1747042800, adapter_id, sizeof(adapter_id)), HU_OK);
     char proof_gate[512];
-    snprintf(proof_gate, sizeof(proof_gate), "/tmp/test-home/.human/proofs/%s/gate_decision.json",
+    snprintf(proof_gate, sizeof(proof_gate), "%s/.human/proofs/%s/gate_decision.json", home,
              adapter_id);
     HU_ASSERT_EQ(access(proof_gate, F_OK), 0);
     char proof_manifest[512];
-    snprintf(proof_manifest, sizeof(proof_manifest),
-             "/tmp/test-home/.human/proofs/%s/manifest.json", adapter_id);
+    snprintf(proof_manifest, sizeof(proof_manifest), "%s/.human/proofs/%s/manifest.json", home,
+             adapter_id);
     HU_ASSERT_EQ(access(proof_manifest, F_OK), -1);
 
     hu_learner_close(learner);

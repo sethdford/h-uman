@@ -28,6 +28,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -40,6 +42,241 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = REPO_ROOT / "scripts"
 
+# ── Training resource preflight (2026-07-26 crash-loop fix) ──────────────────
+#
+# Four reboots on 2026-07-26 (04:01, 05:02, 06:45, 14:38) traced to LoRA
+# training running CONCURRENTLY with the mlx-server holding the same base
+# resident. C3 flipped this loop to target the SERVING base, which is correct
+# for adapter validity, but made every run compete for the same ~56 GB. Eleven
+# runs fired that day, six inside 28 minutes (06:09-06:37), driving a 128 GB
+# machine to 154 MB free / 28 GB compressed / 13.2 GB swap. The trainer exiting
+# recovered 53 GB instantly, which is what pinned the cause.
+#
+# lora_training_runner.c has no cooldown, no lock, and no memory precondition —
+# its only trigger is a pair-count threshold crossing. These guards live HERE
+# because every path (daemon runner, m3_loop_cycle.sh, manual) funnels through
+# run_mlx_lora_training.
+LORA_LOCK_PATH = Path.home() / ".human" / "lora_training.lock"
+
+# Peak training residency as a multiple of the base's on-disk size: training
+# holds the weights PLUS optimizer state, gradients and activations. Measured
+# on GLM-4.5-Air-4bit (56 GB on disk): peak demand exceeded 70 GB while a
+# 57 GB server was resident on a 128 GB box.
+TRAIN_MEM_FACTOR = 1.25
+TRAIN_MEM_OVERHEAD_BYTES = 6 * 1024 ** 3
+
+# Empty default = no window restriction, so manual and CI runs are unaffected.
+# Set learning.training_window (config) or HU_TRAIN_WINDOW (env) to "02:00-05:00"
+# to confine automated retraining to hours when serving can be stopped.
+DEFAULT_TRAIN_WINDOW = ""
+
+
+def mlx_python(env: dict | None = None) -> str:
+    """Interpreter to run `-m mlx_lm` with — the pinned venv, not whatever
+    `python3` resolves to on PATH.
+
+    2026-07-26: the daemon spawns `python3 scripts/training_loop.py`, PATH
+    resolved that to python@3.14, and sys.executable therefore carried 3.14 into
+    the mlx_lm subprocess. scripts/human-serve.sh deliberately avoids 3.14
+    ("Python 3.14 has loky semaphore crash bug; python@3.13 was uninstalled
+    2026-07-25") and pins .venv312 — the training path silently did not.
+
+    Mirrors human-serve.sh's VENV_PYTHON choice so serving and training run the
+    same interpreter and the same mlx/mlx_lm pins. Falls back to sys.executable
+    when the venv is absent, so CI and non-mac checkouts still work.
+    """
+    env = os.environ if env is None else env
+    override = (env.get("HU_MLX_PYTHON") or "").strip()
+    if override and Path(override).exists():
+        return override
+    venv = Path.home() / "Documents" / "gemma-realtime-1" / ".venv312" / "bin" / "python3.12"
+    if venv.exists():
+        return str(venv)
+    return sys.executable
+
+
+def training_preflight_decision(need_bytes: int, available_bytes: int,
+                                now_minutes: int | None = None,
+                                window: tuple[int, int] | None = None,
+                                lock_held: bool = False,
+                                serving_conflict: bool = False) -> tuple[bool, str]:
+    """Pure predicate: may a LoRA training run start? Returns (ok, reason).
+
+    Takes FACTS, not the machine — no vm_stat, no clock, no filesystem — so the
+    whole truth table is unit-testable without a 56 GB model or a real lock
+    (.claude/rules/security-predicate-extraction.md). The impure fact-gathering
+    lives in training_preflight().
+    """
+    if lock_held:
+        return False, "another LoRA training run holds the lock (single-flight)"
+    # Checked BEFORE the memory heuristic on purpose: a just-restarted server's
+    # pages still count as reclaimable in vm_stat, so available_memory_bytes()
+    # reads optimistically high while the server is about to fault all 56 GB
+    # back in. Same-base co-residency is the exact crash condition, so assert it
+    # structurally rather than inferring it from a byte count.
+    if serving_conflict:
+        return False, ("the production mlx-server is already serving this base; two copies "
+                       "of the same multi-GB base cannot co-reside — stop serving for the "
+                       "training window or train off-peak")
+    if window is not None and now_minutes is not None:
+        start, end = window
+        inside = (start <= now_minutes < end) if start <= end \
+            else (now_minutes >= start or now_minutes < end)  # window crosses midnight
+        if not inside:
+            return False, (f"outside the training window "
+                           f"{start // 60:02d}:{start % 60:02d}-{end // 60:02d}:{end % 60:02d} "
+                           f"(now {now_minutes // 60:02d}:{now_minutes % 60:02d})")
+    if need_bytes > 0 and available_bytes < need_bytes:
+        return False, (f"insufficient memory: need ~{need_bytes / 1024 ** 3:.0f} GB, "
+                       f"only {available_bytes / 1024 ** 3:.0f} GB available "
+                       f"(is the serving model resident?)")
+    return True, "ok"
+
+
+def parse_train_window(spec: str) -> tuple[int, int] | None:
+    """"02:00-05:00" -> (120, 300) minutes-since-midnight. None when unset/invalid.
+
+    A window crossing midnight ("22:00-04:00") is represented as start > end and
+    handled by training_preflight_decision.
+    """
+    if not spec or "-" not in spec:
+        return None
+    try:
+        lo, hi = spec.split("-", 1)
+        lh, lm = (int(x) for x in lo.strip().split(":"))
+        hh, hm = (int(x) for x in hi.strip().split(":"))
+    except (ValueError, AttributeError):
+        return None
+    if not (0 <= lh < 24 and 0 <= hh < 24 and 0 <= lm < 60 and 0 <= hm < 60):
+        return None
+    start, end = lh * 60 + lm, hh * 60 + hm
+    return None if start == end else (start, end)
+
+
+def available_memory_bytes() -> int:
+    """Reclaimable memory: free + inactive + purgeable + speculative.
+
+    Deliberately NOT just "Pages free": macOS keeps free low by design, and
+    inactive/purgeable pages are reclaimable under pressure. Counting only free
+    would refuse every run on a healthy machine.
+    """
+    try:
+        out = subprocess.run(["vm_stat"], capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    page = 16384
+    m = re.search(r"page size of (\d+) bytes", out)
+    if m:
+        page = int(m.group(1))
+    total = 0
+    for label in ("Pages free", "Pages inactive", "Pages purgeable", "Pages speculative"):
+        m = re.search(rf"{label}:\s+(\d+)", out)
+        if m:
+            total += int(m.group(1))
+    return total * page
+
+
+def model_disk_bytes(model: str) -> int:
+    """On-disk size of the HuggingFace snapshot for `model`, or 0 if unknown.
+
+    0 means "can't estimate" and the memory check is skipped rather than
+    guessed — refusing on an unknown model would break local/test bases.
+    """
+    if not model:
+        return 0
+    repo = "models--" + model.replace("/", "--")
+    root = Path.home() / ".cache" / "huggingface" / "hub" / repo / "snapshots"
+    if not root.is_dir():
+        return 0
+    best = 0
+    for snap in root.iterdir():
+        size = 0
+        for f in snap.rglob("*"):
+            try:
+                if f.is_file():
+                    size += f.stat().st_size
+            except OSError:
+                continue
+        best = max(best, size)
+    return best
+
+
+def estimated_training_bytes(model: str) -> int:
+    """Peak memory a LoRA run on `model` is expected to need. 0 if unknown."""
+    disk = model_disk_bytes(model)
+    return 0 if disk == 0 else int(disk * TRAIN_MEM_FACTOR) + TRAIN_MEM_OVERHEAD_BYTES
+
+
+def training_window_spec(env: dict | None = None) -> str:
+    """Window from HU_TRAIN_WINDOW, else config learning.training_window, else ''."""
+    env = os.environ if env is None else env
+    spec = (env.get("HU_TRAIN_WINDOW") or "").strip()
+    if spec:
+        return spec
+    try:
+        cfg = json.loads((Path.home() / ".human" / "config.json").read_text())
+        return str(cfg.get("learning", {}).get("training_window", DEFAULT_TRAIN_WINDOW) or "")
+    except (OSError, ValueError):
+        return DEFAULT_TRAIN_WINDOW
+
+
+def serving_base_from_ps(ps_output: str | None = None, port: str | None = None) -> str | None:
+    """The --model of the PRODUCTION mlx-server, or None if it isn't running.
+
+    Reuses the port-filtered scanner so a spare eval server (:8743/:8747) is
+    never mistaken for production — the same footgun documented on
+    production_mlx_port(). Distinct from resolve_serving_base_model(), which
+    falls back to config when no server is up; here "no server" must read as
+    None so the conflict check stays honest.
+    """
+    if ps_output is None:
+        try:
+            ps_output = subprocess.run(["ps", "-eo", "command"], capture_output=True,
+                                       text=True, timeout=10).stdout
+        except (OSError, subprocess.SubprocessError):
+            return None
+    for tokens in _iter_production_mlx_server_tokens(ps_output, port or production_mlx_port()):
+        if "--model" in tokens:
+            try:
+                return tokens[tokens.index("--model") + 1]
+            except IndexError:
+                continue
+    return None
+
+
+def training_preflight(model: str) -> tuple[bool, str, object]:
+    """Gather facts, apply training_preflight_decision, hold the lock on success.
+
+    Returns (ok, reason, lock_handle). The caller MUST keep lock_handle alive for
+    the duration of training; dropping it releases the flock.
+    """
+    import fcntl
+    lock_handle = None
+    lock_held = False
+    try:
+        LORA_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+        lock_handle = open(LORA_LOCK_PATH, "w")
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        lock_held = True  # someone else holds it
+        if lock_handle:
+            lock_handle.close()
+        lock_handle = None
+
+    now = datetime.now()
+    ok, reason = training_preflight_decision(
+        need_bytes=estimated_training_bytes(model),
+        available_bytes=available_memory_bytes(),
+        now_minutes=now.hour * 60 + now.minute,
+        window=parse_train_window(training_window_spec()),
+        lock_held=lock_held,
+        serving_conflict=(serving_base_from_ps() == model and bool(model)),
+    )
+    if not ok and lock_handle:
+        lock_handle.close()
+        lock_handle = None
+    return ok, reason, lock_handle
+
 # Import the DPO quality gate module and adapter registry
 import dpo_results
 import adapter_registry
@@ -48,6 +285,22 @@ ADAPTER_BASE = Path.home() / ".human" / "training-data" / "adapters"
 ADAPTER_PATH = ADAPTER_BASE / "seth-lora"
 FINETUNE_DIR = Path.home() / ".human" / "training-data" / "finetune"
 HISTORY_PATH = REPO_ROOT / "data" / "training_history.json"
+
+# C3 serving-base resolution (2026-07-26). Production flipped to
+# GLM-4.5-Air-4bit on 2026-07-26; a hardcoded gemma base here meant every
+# auto-training run produced adapters that cannot load on the serving model.
+# The default remains gemma only as the last-resort fallback when neither a
+# live mlx-server nor config.json can be consulted.
+DEFAULT_BASE_MODEL = "mlx-community/gemma-4-31b-it-4bit"
+HUMAN_CONFIG_PATH = Path.home() / ".human" / "config.json"
+
+# Fewest resolved outcomes worth spending GPU on. Below this the 90/10
+# train/valid split in run_mlx_lora_training cannot produce a valid.jsonl, so
+# mlx_lm reports no Val loss, val_loss parses as None, and the regression gate
+# returns INCONCLUSIVE — a verdict known before the run starts. Raise this if
+# a 1-sample valid set turns out to be too thin to judge against (it is the
+# floor for "splittable", not a claim about statistical adequacy).
+MIN_TRAINABLE_OUTCOMES = 2
 
 
 def run_script(script: str, args: list[str] | None = None, check: bool = True) -> int:
@@ -403,6 +656,20 @@ FNV_PRIME_64 = 0x100000001b3
 FNV_64_MOD = 1 << 64
 
 
+def read_adapter_scale(adapter_dir: Path):
+    """Return lora_parameters.scale from an adapter's adapter_config.json,
+    or None if the file/key is missing or unreadable.
+
+    This is the machine-checked half of rules/lora-scale-default-or-die.md:
+    what mlx_lm RECORDS is the truth about the scale the adapter was trained
+    at, regardless of what any config requested."""
+    try:
+        cfg = json.loads((Path(adapter_dir) / "adapter_config.json").read_text())
+        return cfg.get("lora_parameters", {}).get("scale")
+    except (OSError, json.JSONDecodeError, AttributeError):
+        return None
+
+
 def fnv1a_64(data: bytes) -> int:
     """FNV-1a 64-bit hash of the given bytes. Mirrors the C
     implementation including the "0 → 1 sentinel" adjustment so the
@@ -460,6 +727,18 @@ def summarize_outcomes(outcomes: list[dict]) -> dict:
         "adapter_ids": adapter_ids,
         "guards": guards,
     }
+
+
+# --resolve-only is honoured inside train_from_outcomes, which has no args object.
+RESOLVE_ONLY = "--resolve-only" in sys.argv
+
+
+def training_outcome_rc(train_rc: int, adapter_exists: bool) -> int:
+    """Exit code for a training attempt. 0 only when the trainer succeeded AND an
+    adapter file exists. 3 = refused/failed (nothing to stage). Pure; tested."""
+    if train_rc == 0 and adapter_exists:
+        return 0
+    return 3
 
 
 def resolve_hashes_against_db(outcomes: list[dict], db_path: Path) -> tuple[list[dict], int]:
@@ -644,15 +923,300 @@ def write_sft_batch_jsonl(resolved: list[dict]) -> str:
     return str(tmp_batch)
 
 
+def production_mlx_port(env: dict | None = None) -> str:
+    """Port of the PRODUCTION mlx-server — the daemon's post-train hot-swap
+    target. Mirrors lora_training_runner.c resolve_mlx_base_url():
+    HU_MLX_BASE_URL env override, else 8741.
+
+    This filter matters: multiple mlx-servers run concurrently (observed
+    2026-07-26: gemma-8bit realtime on :8747 alongside production GLM on
+    :8741), and `ps` order is arbitrary — first-match would train against
+    whichever server happened to be listed first.
+    """
+    env = os.environ if env is None else env
+    url = env.get("HU_MLX_BASE_URL", "")
+    m = re.search(r"//[^/]*:(\d+)", url)
+    return m.group(1) if m else "8741"
+
+
+def _iter_production_mlx_server_tokens(ps_output: str, port: str):
+    """Yield shlex-token lists for mlx-server processes on `port` only.
+    A process with no --port flag is assumed to be on the default 8741."""
+    for line in ps_output.splitlines():
+        if "mlx-server" not in line:
+            continue
+        try:
+            tokens = shlex.split(line)
+        except ValueError:
+            continue
+        line_port = "8741"
+        if "--port" in tokens:
+            try:
+                line_port = tokens[tokens.index("--port") + 1]
+            except IndexError:
+                continue
+        if line_port == port:
+            yield tokens
+
+
+def resolve_serving_base_model(
+    ps_output: str | None = None,
+    config_path: Path = HUMAN_CONFIG_PATH,
+    override: str | None = None,
+) -> tuple[str, str]:
+    """Resolve the base model that is ACTUALLY serving, not a hardcoded name.
+
+    Pattern copied from scripts/eval_fidelity_nightly.py (f66863e15): an
+    adapter's delta is only meaningful against the base it was trained on.
+    Training gemma while :8741 serves GLM produces dead-weight adapters
+    (gemma-shaped LoRA cannot load on GLM).
+
+    Priority:
+      1. Explicit --model-id override — operator knows best.
+      2. The live mlx-server process's --model argument — ground truth for
+         what is serving right now.
+      3. config.json mlx_local.model — what will serve after next restart.
+      4. DEFAULT_BASE_MODEL as last resort.
+
+    Args:
+        ps_output: process listing to scan (injectable for tests);
+                   None = run `ps ax -o command` here
+        config_path: path to ~/.human/config.json (injectable for tests)
+        override: explicit model id from --model-id (wins outright)
+
+    Returns:
+        (model_id, source_description)
+    """
+    if override:
+        return override, "explicit --model-id"
+
+    if ps_output is None:
+        try:
+            ps_output = subprocess.run(
+                ["ps", "ax", "-o", "command"],
+                capture_output=True, text=True, timeout=10,
+            ).stdout
+        except Exception:
+            ps_output = ""
+
+    port = production_mlx_port()
+    for tokens in _iter_production_mlx_server_tokens(ps_output, port):
+        try:
+            candidate = tokens[tokens.index("--model") + 1]
+        except (ValueError, IndexError):
+            continue
+        if candidate:
+            return candidate, f"live mlx-server process --model (port {port})"
+
+    try:
+        config = json.loads(Path(config_path).read_text())
+        raw = config.get("mlx_local", {}).get("model")
+        if raw:
+            return raw, "config.json mlx_local.model"
+    except (OSError, json.JSONDecodeError):
+        pass
+
+    return DEFAULT_BASE_MODEL, "hardcoded default (no live server, no config)"
+
+
+def resolve_serving_adapter(
+    ps_output: str | None = None,
+    config_path: Path = HUMAN_CONFIG_PATH,
+) -> tuple[Path | None, str]:
+    """Resolve the adapter that is ACTUALLY serving (reference for lineage).
+
+    Same priority as eval_fidelity_nightly.resolve_serving_adapter: live
+    mlx-server --adapter-path first, then config.json
+    personalization.lora_adapter_path. Each candidate must exist on disk.
+
+    Returns (adapter_path, source_description); (None, reason) when
+    unresolvable.
+    """
+    if ps_output is None:
+        try:
+            ps_output = subprocess.run(
+                ["ps", "ax", "-o", "command"],
+                capture_output=True, text=True, timeout=10,
+            ).stdout
+        except Exception:
+            ps_output = ""
+
+    port = production_mlx_port()
+    for tokens in _iter_production_mlx_server_tokens(ps_output, port):
+        try:
+            candidate = Path(tokens[tokens.index("--adapter-path") + 1])
+        except (ValueError, IndexError):
+            continue
+        if candidate.exists():
+            return (candidate,
+                    f"live mlx-server process --adapter-path (port {port})")
+
+    try:
+        config = json.loads(Path(config_path).read_text())
+        raw = config.get("personalization", {}).get("lora_adapter_path")
+        if raw:
+            candidate = Path(raw).expanduser()
+            if candidate.exists():
+                return (candidate, "config.json personalization.lora_adapter_path")
+    except (OSError, json.JSONDecodeError):
+        pass
+
+    return (None, "no live mlx-server and no usable personalization.lora_adapter_path")
+
+
+def base_model_tag(model_id: str) -> str:
+    """Short tag identifying the base-model family, for adapter naming.
+
+    auto-<ts>-glm vs auto-<ts>-gemma lets the registry and promotion
+    tooling refuse cross-base swaps by inspecting the name alone. Model
+    ids are structural strings, so plain substring matching is safe here
+    (per ~/.claude/rules/substring-classifier-pitfalls.md scope).
+    """
+    low = model_id.lower()
+    if "glm" in low:
+        return "glm"
+    if "gemma" in low:
+        return "gemma"
+    tail = low.rsplit("/", 1)[-1]
+    tag = re.sub(r"[^a-z0-9]+", "-", tail).strip("-")
+    return tag[:24] or "unknown"
+
+
+def suffix_adapter_name(adapter_out: Path, tag: str) -> Path:
+    """Append -<tag> to the adapter directory name (idempotent)."""
+    if adapter_out.name.endswith(f"-{tag}"):
+        return adapter_out
+    return adapter_out.with_name(f"{adapter_out.name}-{tag}")
+
+
+def training_config_for_model(model: str, iters: int, scale: float) -> dict:
+    """Build the mlx_lm.lora YAML config for the given base model.
+
+    mlx_lm only honors the NESTED `lora_parameters` form. The old flat
+    lora_rank/lora_alpha/lora_scale keys were silently IGNORED, so scale
+    fell back to mlx_lm's catastrophic 20.0 default — the proven-e2e run
+    auto-manual-1785053731 trained at scale 20.0 and is dead weight
+    (renamed *-INVALID-scale20-gemma on disk). Per
+    ~/.claude/rules/lora-scale-default-or-die.md the scale must be pinned
+    here AND verified in adapter_config.json after every real run.
+    """
+    config = {
+        "model": model,
+        "train": True,
+        "fine_tune_type": "lora",
+        "lora_parameters": {"rank": 8, "scale": scale, "dropout": 0.0},
+        "num_layers": 8,
+        "batch_size": 1,
+        "iters": iters,
+        "learning_rate": 1e-5,
+        "steps_per_report": 50,
+        "max_seq_length": 2048,
+        "optimizer": "adamw",
+    }
+    if base_model_tag(model) == "glm":
+        # Mirror the proven GLM recipe (glm-v5-config.yaml, adapter
+        # seth-glm-air-v5-20260725-093742: val 7.08→2.94, 0.88 it/s,
+        # peak 62.9 GB): grad checkpointing keeps the 106B MoE inside
+        # memory, plain adam + fixed seed match the validated run.
+        config.update({
+            "grad_checkpoint": True,
+            "optimizer": "adam",
+            "steps_per_report": 10,
+            "seed": 42,
+        })
+    return config
+
+
+VAL_SET_MOD = 10
+VAL_SET_CAP = 64
+
+
+def frozen_val_path(source_jsonl) -> Path:
+    """The validation set is FROZEN beside the source corpus after the first run,
+    so val loss is comparable night to night. The 2026-09-06 content-keyed split
+    was stable only while no appended row hashed into the candidate set; with a
+    10% hit rate the id changed almost every night (5 ids in 6 nights) and the
+    regression gate never had two comparable records."""
+    return Path(str(source_jsonl) + ".valid-frozen.jsonl")
+
+
+def split_train_valid_frozen(lines, frozen_lines, min_present_frac=0.5, mod=VAL_SET_MOD,
+                             cap=VAL_SET_CAP):
+    """Hold out exactly the frozen rows that still exist in the corpus; everything
+    else trains. Returns (train, val, val_set_id, refrozen). If fewer than
+    min_present_frac of the frozen rows survive (corpus rebuilt), re-freeze from
+    the content-keyed split and flag it so the gate treats the night as FIRST_RUN."""
+    if frozen_lines:
+        present = set(lines)
+        val = [l for l in frozen_lines if l in present]  # noqa: E741
+        if len(val) >= max(1, int(len(frozen_lines) * min_present_frac)):
+            vset = set(val)
+            train = [l for l in lines if l not in vset]  # noqa: E741
+            if train:
+                import hashlib
+                vid = hashlib.sha256("\n".join(val).encode("utf-8")).hexdigest()[:12]
+                return train, val, vid, False
+    train, val, vid = split_train_valid(lines, mod=mod, cap=cap)
+    return train, val, vid, True
+
+
+def split_train_valid(lines, mod=VAL_SET_MOD, cap=VAL_SET_CAP):
+    """Deterministic, content-keyed train/valid split (the FIRST-run rule; later
+    runs reuse the frozen file — see split_train_valid_frozen).
+
+    The old positional split (every 10th line, capped) re-drew the validation
+    set whenever the corpus grew by a row, so val loss was not comparable
+    night to night: on 2026-09-06 a 239->257-pair corpus moved val loss
+    3.438->3.548 and the regression gate FAILed a run that may not have
+    regressed at all. Here a line is a validation candidate iff
+    sha256(line) % mod == 0; candidates are ordered by hash and capped, so an
+    existing corpus keeps its validation rows when rows are appended.
+    Returns (train_lines, valid_lines, val_set_id) where val_set_id is a
+    12-hex digest of the chosen rows (None when no validation set) — recorded
+    with the result so dpo_results.regression_verdict compares like with like.
+    """
+    import hashlib
+    keyed = []
+    for line in lines:
+        h = hashlib.sha256(line.encode("utf-8")).digest()
+        keyed.append((int.from_bytes(h[:8], "big"), line))
+    cands = sorted((k, l) for k, l in keyed if k % mod == 0)[:cap]  # noqa: E741
+    if not cands and len(keyed) >= 2:
+        # Tiny corpus with no hash hits: hold out the single smallest-hash row so
+        # mlx_lm still reports a Val loss (the gate judges on absent evidence
+        # otherwise) — still content-keyed, so still stable across re-runs.
+        cands = [min(keyed)]
+    val = [l for _, l in cands]  # noqa: E741
+    val_set = set(val)
+    train = [l for l in lines if l not in val_set]  # noqa: E741
+    if not train or not val:                 # 0 or 1 rows: don't starve training
+        return list(lines), [], None
+    vid = hashlib.sha256("\n".join(val).encode("utf-8")).hexdigest()[:12]
+    return train, val, vid
+
+
+def read_val_set_id(adapter_out: Path):
+    """val_set_id recorded beside the adapter by the split (None if absent)."""
+    try:
+        return json.loads((Path(adapter_out) / "val_set.json").read_text()).get("val_set_id")
+    except (OSError, ValueError):
+        return None
+
+
 def run_mlx_lora_training(resolved: list[dict], adapter_out: Path,
-                          iters: int = 500, scale: float = 2.0) -> Tuple[int, Optional[float], Optional[float]]:
+                          iters: int = 500, scale: float = 2.0,
+                          model: str | None = None) -> Tuple[int, Optional[float], Optional[float]]:
     """Run mlx_lm.lora training on the resolved outcomes.
 
     Args:
         resolved: list of {outcome, prompt_text, response_text} dicts
         adapter_out: output path for the adapter directory/file
         iters: number of training iterations (default 500, 10 for tests)
-        scale: LoRA scale multiplier (default 2.0, per mlx_lm default)
+        scale: LoRA scale multiplier (default 2.0 — mlx_lm's own default is
+               the catastrophic 20.0, see lora-scale-default-or-die.md)
+        model: HuggingFace base model id; None falls back to
+               DEFAULT_BASE_MODEL (callers should pass the SERVING base
+               from resolve_serving_base_model)
 
     Returns: tuple of (exit_code, train_loss, val_loss)
         exit_code: process exit code (0 = success)
@@ -671,6 +1235,39 @@ def run_mlx_lora_training(resolved: list[dict], adapter_out: Path,
         print(f"  No resolved outcomes to train on")
         return 0, None, None
 
+    # NOTE: callers that reach here have already passed the
+    # MIN_TRAINABLE_OUTCOMES guard in train_from_outcomes. This len == 0 check
+    # stays as a defensive floor for direct callers (tests import this
+    # function directly), but a refusal here CANNOT block the adapter swap —
+    # see the placement note on that guard for why it has to live upstream.
+
+    # Resource preflight — the 2026-07-26 crash-loop guard. Refusing here is a
+    # SUCCESS path (rc=0, no losses): a skipped retrain is a no-op, whereas
+    # thrashing the machine into a reboot loses the whole session. Set
+    # HU_TRAIN_SKIP_PREFLIGHT=1 to bypass (manual runs on a quiet machine).
+    _preflight_lock = None
+    if os.environ.get("HU_TRAIN_SKIP_PREFLIGHT", "").strip() not in ("1", "true", "yes"):
+        _model_for_check = model or DEFAULT_BASE_MODEL
+        _ok, _why, _preflight_lock = training_preflight(_model_for_check)
+        if not _ok:
+            print(f"  [preflight] REFUSING to train: {_why}")
+            print(f"  [preflight] model={_model_for_check}")
+            print(f"  [preflight] set HU_TRAIN_WINDOW / learning.training_window to allow a "
+                  f"nightly slot, or HU_TRAIN_SKIP_PREFLIGHT=1 to override")
+            return 3, None, None  # refusal is a FAILURE, never a 'trained nothing' success
+
+    try:
+        return _run_mlx_lora_training_inner(resolved, adapter_out, iters, scale, model)
+    finally:
+        if _preflight_lock is not None:
+            _preflight_lock.close()
+
+
+def _run_mlx_lora_training_inner(resolved: list[dict], adapter_out: Path,
+                                 iters: int, scale: float,
+                                 model: str | None) -> Tuple[int, Optional[float], Optional[float]]:
+    """Body of run_mlx_lora_training, split out so the preflight lock is held
+    across the whole run via try/finally rather than leaking on every return."""
     # Build SFT batch
     sft_batch = write_sft_batch_jsonl(resolved)
 
@@ -679,36 +1276,44 @@ def run_mlx_lora_training(resolved: list[dict], adapter_out: Path,
     tmpdir = tempfile.mkdtemp(prefix="mlx-lora-")
     print(f"  Using temp output dir: {tmpdir}")
 
-    # Create a temp directory with train.jsonl (mlx_lm expects dir structure)
+    # Create a temp directory with train.jsonl + valid.jsonl (mlx_lm expects
+    # dir structure). The valid split matters: without it mlx_lm reports no
+    # "Val loss" lines, val_loss parses as None, and the regression gate has
+    # nothing to judge (the 2026-07-26 recovery run shipped exactly that).
     train_data_dir = Path(tmpdir) / "data"
     train_data_dir.mkdir(parents=True)
-    shutil.copy(sft_batch, str(train_data_dir / "train.jsonl"))
+    _all_lines = Path(sft_batch).read_text().splitlines()
+    _frozen_path = frozen_val_path(os.environ.get("HU_TRAIN_SOURCE_JSONL") or sft_batch) \
+        if os.environ.get("HU_TRAIN_FROZEN_VAL", "1") == "1" else None
+    _frozen = []
+    if _frozen_path and _frozen_path.is_file():
+        _frozen = [l for l in _frozen_path.read_text().splitlines() if l.strip()]  # noqa: E741
+    _train, _val, _val_set_id, _refrozen = split_train_valid_frozen(_all_lines, _frozen)
+    if _frozen_path and (_refrozen or not _frozen) and _val:
+        _frozen_path.write_text("\n".join(_val) + "\n")
+        print(f"  validation set {'RE-' if _frozen else ''}frozen -> {_frozen_path} "
+              f"({len(_val)} rows); tonight is FIRST_RUN for val_set_id={_val_set_id}")
+    (train_data_dir / "train.jsonl").write_text("\n".join(_train) + "\n")
+    if _val:
+        (train_data_dir / "valid.jsonl").write_text("\n".join(_val) + "\n")
+    # Recorded beside the adapter so the result record + regression gate can
+    # tell which validation set this val_loss was measured on.
+    Path(adapter_out).mkdir(parents=True, exist_ok=True)
+    (Path(adapter_out) / "val_set.json").write_text(json.dumps({
+        "val_set_id": _val_set_id, "n_valid": len(_val), "n_train": len(_train),
+        "frozen": bool(_frozen) and not _refrozen, "frozen_path": str(_frozen_path) if _frozen_path else None,
+        "mod": VAL_SET_MOD, "cap": VAL_SET_CAP}) + "\n")
+    print(f"  validation split: {len(_val)} rows, val_set_id={_val_set_id} "
+          f"(content-hash; val loss is comparable only within one id)")
 
-    # Model and hyperparameters (per US-8 design)
-    model = "mlx-community/gemma-4-31b-it-4bit"
-    rank = 8
-    num_layers = 8  # Number of LoRA layers to train
-    batch_size = 1
-    learning_rate = 1e-5
-    max_seq_length = 2048
-
-    # Create YAML config file for mlx_lm
-    # mlx_lm requires rank and scale to be in a config file
-    config = {
-        "model": model,
-        "train": True,
-        "fine_tune_type": "lora",
-        "lora_rank": rank,
-        "lora_alpha": rank * 2,  # mlx_lm uses alpha instead of scale
-        "lora_scale": scale,  # Some versions support this; fallback is alpha
-        "num_layers": num_layers,
-        "batch_size": batch_size,
-        "iters": iters,
-        "learning_rate": learning_rate,
-        "steps_per_report": 50,
-        "max_seq_length": max_seq_length,
-        "optimizer": "adamw",
-    }
+    # Base model + hyperparameters. Model comes from the serving resolution
+    # (train_from_outcomes passes it); config keys use the nested
+    # lora_parameters form mlx_lm actually honors. The post-run
+    # read_adapter_scale() check below is the machine-verified other half of
+    # that contract — the config only REQUESTS a scale.
+    if model is None:
+        model = DEFAULT_BASE_MODEL
+    config = training_config_for_model(model, iters, scale)
 
     config_path = Path(tmpdir) / "config.yaml"
     with open(config_path, "w") as f:
@@ -728,17 +1333,29 @@ def run_mlx_lora_training(resolved: list[dict], adapter_out: Path,
     # Ensure adapter output directory exists
     adapter_out.mkdir(parents=True, exist_ok=True)
 
-    # Build mlx_lm.lora command
+    # Build mlx_lm.lora command. Scalar flags mirror the config values so
+    # the two can never diverge; lora_parameters/grad_checkpoint/optimizer
+    # ride in via -c (no stable CLI flags for the nested form).
+    # --save-every: mlx_lm defaults to 100, and on a 56 GB MoE base each
+    # checkpoint is ~556 MB — a 500-iter run left 5.4 GB of intermediates in one
+    # adapter dir (measured 2026-07-26 on auto-1785091280-glm). prune_old_adapters
+    # rotates whole DIRECTORIES but never the checkpoints inside one, so the
+    # intermediates were pure accumulation. These runs take ~4 minutes, so
+    # mid-run crash-recovery checkpoints buy almost nothing; save once at the
+    # end. Overridable for long runs where resumability does matter.
+    save_every = int(os.environ.get("HU_TRAIN_SAVE_EVERY") or max(1, iters))
+
     cmd = [
-        sys.executable, "-m", "mlx_lm", "lora",
+        mlx_python(), "-m", "mlx_lm", "lora",
         "--model", model,
-        "--data", str(train_data_dir),  # Directory with train.jsonl
+        "--data", str(train_data_dir),  # Directory with train.jsonl + valid.jsonl
         "--adapter-path", str(adapter_out),  # Output directory (mlx_lm writes adapters.safetensors + adapter_config.json here)
         "--iters", str(iters),
-        "--batch-size", str(batch_size),
-        "--learning-rate", f"{learning_rate:g}",
-        "--max-seq-length", str(max_seq_length),
-        "--steps-per-report", "50",
+        "--batch-size", str(config["batch_size"]),
+        "--learning-rate", f"{config['learning_rate']:g}",
+        "--max-seq-length", str(config["max_seq_length"]),
+        "--steps-per-report", str(config["steps_per_report"]),
+        "--save-every", str(save_every),
         "--train",
         "-c", str(config_path),
     ]
@@ -771,6 +1388,19 @@ def run_mlx_lora_training(resolved: list[dict], adapter_out: Path,
             return 1, train_loss, val_loss
 
         print(f"  mlx_lm lora training succeeded (train_loss={train_loss}, val_loss={val_loss})")
+
+        # Rule-as-code (lora-scale-default-or-die): the scale the adapter was
+        # ACTUALLY trained at is whatever mlx_lm wrote to adapter_config.json.
+        # If it drifted from what we requested (schema change, ignored key),
+        # the adapter is invalid — a scale-20 adapter destroyed production
+        # instruction-following for ~2 weeks in May 2026. Fail loudly here.
+        actual = read_adapter_scale(adapter_out)
+        if actual is None or abs(actual - scale) > 1e-6:
+            print(f"  ERROR: adapter trained at scale={actual}, requested {scale} "
+                  f"— config not honored by mlx_lm; adapter is INVALID "
+                  f"(see rules/lora-scale-default-or-die.md)", file=sys.stderr)
+            return 1, train_loss, val_loss
+
         return 0, train_loss, val_loss
 
     except FileNotFoundError:
@@ -831,8 +1461,17 @@ def write_dry_run_adapter(adapter_out: Path, summary: dict,
 
 
 def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
-                        db_path: Path, dry_run: bool) -> int:
+                        db_path: Path, dry_run: bool,
+                        model_id_override: str | None = None) -> int:
     """Phase C3 entry point. Returns process-style exit code (0 = OK)."""
+    # Resolve the SERVING base + adapter up front (2026-07-26): production
+    os.environ["HU_TRAIN_SOURCE_JSONL"] = str(source_jsonl)  # frozen val set lives beside the corpus
+    # flipped to GLM while this path hardcoded gemma, so every auto-trained
+    # adapter was un-loadable dead weight.
+    model, model_source = resolve_serving_base_model(override=model_id_override)
+    tag = base_model_tag(model)
+    serving_adapter, serving_adapter_source = resolve_serving_adapter()
+
     print(f"\n{'='*60}")
     print(f"  TRAIN FROM OUTCOMES (C3)")
     print(f"{'='*60}")
@@ -840,6 +1479,10 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
     print(f"  Adapter out:  {adapter_out}")
     print(f"  Conv DB:      {db_path}")
     print(f"  Dry run:      {dry_run}")
+    print(f"  Base model:   {model} (via {model_source})")
+    print(f"  Base tag:     {tag}")
+    print(f"  Serving adapter (reference): {serving_adapter} "
+          f"(via {serving_adapter_source})")
     print(f"{'='*60}")
 
     if not source_jsonl.exists():
@@ -865,6 +1508,15 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
     print(f"  Guard mix:    {summary['guards']}")
 
     resolved, skipped = resolve_hashes_against_db(outcomes, db_path)
+    if outcomes and not resolved:
+        print(f"REFUSING: 0/{len(outcomes)} outcomes resolved against the messages table "
+              f"({db_path}) — the store is missing the conversations these outcomes came from "
+              f"(2026-08-08: a quarantine had wiped it). Restore the store; do not train on nothing.",
+              file=sys.stderr)
+        sys.exit(3)
+    if RESOLVE_ONLY:
+        print(json.dumps({"outcomes": len(outcomes), "resolved": len(resolved), "unresolved": skipped}))
+        sys.exit(0)
     print(f"  Resolved:     {len(resolved)} prompt hashes against {db_path.name}")
     print(f"  Skipped:      {skipped} unresolved (conversation rotated out of DB?)")
 
@@ -878,6 +1530,9 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
             "adapter_path": str(adapter_out),
             "size_bytes": adapter_out.stat().st_size,
             "kind": "dry-run",
+            "model": model,
+            "model_source": model_source,
+            "base_tag": tag,
             "outcome_count": summary.get("count", 0),
             "resolved_count": len(resolved),
             "skipped_count": skipped,
@@ -886,20 +1541,56 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
         })
         return 0
 
-    # Phase C3 (2026-05-26) — real LoRA training via mlx_lm.lora.
-    # This path trains the frontier Gemma-4-31B model directly using MLX,
-    # producing a real rank-8 LoRA adapter (A/B rank-decomposition tensors).
-    # Per ~/.claude/rules/lora-scale-default-or-die.md, scale MUST be 2.0
-    # (the default). Over-scaling destroyed instruction-following catastrophically
-    # in v3 (scale=20.0); v4-repair at scale=2.0 fixed it.
+    # Refuse batches too small to train on, BEFORE spending any GPU. At
+    # len(resolved) == 1 the 90/10 split in run_mlx_lora_training degenerates:
+    # index 0 is the only index and 0 % 10 == 0, so the train side comes out
+    # empty and the tiny-batch fallback drops the val split entirely. mlx_lm
+    # then emits no "Val loss" line, val_loss parses as None, and the
+    # regression gate returns INCONCLUSIVE — an outcome fully determined
+    # before the run starts, bought with minutes-to-hours of GLM-4.5-Air GPU.
     #
-    # Hyperparameters:
-    #   - rank=8: compact, fast training (~30s on M2 Max for 32 samples)
-    #   - iters=500: converges on small persona datasets; per C3 plan
-    #   - batch-size=1: fits in memory on M1/M2; parallelism not needed
-    #   - max-seq-length=2048: matches persona example banks
-    #   - learning-rate=1e-5: conservative for frontier model
-    #   - scale=2.0: mlx_lm DEFAULT; overridable via HUMAN_LORA_SCALE env var
+    # Two placement constraints make this the only correct site:
+    #
+    #   1. It must be HERE, not in run_mlx_lora_training. That function's
+    #      caller below treats any non-zero rc as "training failed", writes a
+    #      ZERO-TENSOR dry-run adapter over adapters.safetensors, and returns
+    #      0 regardless — so a refusal down there is laundered into success.
+    #   2. It must return NON-ZERO. main() does sys.exit(train_from_outcomes(...)),
+    #      and lora_training_runner.c:407 POSTs /v1/adapters/swap on any
+    #      exit 0 with no check on adapter contents. Exiting 0 here would hot-
+    #      swap an empty adapter onto the live mlx-server, stripping the
+    #      persona weights off production. Non-zero makes the C dispatcher
+    #      bail with HU_ERR_IO before it reaches the swap.
+    if len(resolved) < MIN_TRAINABLE_OUTCOMES:
+        print(f"  REFUSED: {len(resolved)} resolved outcome(s) is below the "
+              f"{MIN_TRAINABLE_OUTCOMES}-outcome minimum for a train/valid split.")
+        print(f"  No adapter could be judged, so none was trained and no swap "
+              f"will be attempted. Exiting non-zero so the C dispatcher stops here.")
+        return 1
+
+    # Phase C3 — real LoRA training via mlx_lm.lora against the SERVING
+    # base model (resolved above), producing a real rank-8 LoRA adapter.
+    # Per ~/.claude/rules/lora-scale-default-or-die.md, scale MUST be 2.0
+    # explicitly — mlx_lm's own default is the catastrophic 20.0 that
+    # destroyed instruction-following in v3; v4-repair at scale=2.0 fixed it.
+    # Hyperparameters live in training_config_for_model (GLM recipe parity
+    # with the proven glm-v5-config.yaml when the resolved base is GLM).
+
+    # The adapter directory name carries the base tag (auto-<ts>-glm vs
+    # auto-<ts>-gemma) so registry/promotion tooling can refuse cross-base
+    # swaps. The C dispatcher (lora_training_runner.c) hot-swaps
+    # <requested_out>/adapters.safetensors after we exit, so when we rename
+    # we leave a symlink at the requested path pointing at the real dir.
+    requested_out = adapter_out
+    adapter_out = suffix_adapter_name(adapter_out, tag)
+    if adapter_out != requested_out:
+        print(f"  Adapter dir renamed for base tag: {adapter_out.name}")
+        try:
+            requested_out.parent.mkdir(parents=True, exist_ok=True)
+            if not requested_out.exists() and not requested_out.is_symlink():
+                os.symlink(adapter_out.name, requested_out)
+        except OSError as e:
+            print(f"  WARN: could not create compat symlink {requested_out}: {e}")
 
     # Check for test/dry-run modes where iters should be shorter
     iters = 10 if os.environ.get("HUMAN_LORA_TEST_ITERS") else 500
@@ -916,16 +1607,20 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
         except ValueError:
             print(f"  WARN: HUMAN_LORA_SCALE={scale_env} is not a valid float, using 2.0")
 
-    rc, train_loss, val_loss = run_mlx_lora_training(resolved, adapter_out, iters=iters, scale=scale)
+    rc, train_loss, val_loss = run_mlx_lora_training(resolved, adapter_out,
+                                                     iters=iters, scale=scale,
+                                                     model=model)
 
     # Check if training succeeded by looking for the safetensors file
     adapters_file = adapter_out / "adapters.safetensors"
-    if rc != 0 or not adapters_file.exists():
-        print(f"  mlx_lm.lora training failed (rc={rc}) or produced no adapter.")
-        print(f"  Falling back to empty-tensors safetensors.")
-        write_dry_run_adapter(adapters_file, summary, len(resolved), skipped)
-        # Still record the failed training attempt with whatever metrics we have
-        return 0
+    verdict = training_outcome_rc(rc, adapters_file.exists())
+    if verdict != 0:
+        # 2026-09-02: this path used to write an EMPTY-TENSORS safetensors and
+        # return 0. The nightly staged a 349-byte "adapter" as a success. A
+        # failed or refused run must leave NO adapter file and exit non-zero.
+        print(f"  FAILED: mlx_lm.lora training rc={rc}, adapter present={adapters_file.exists()} "
+              f"-> exiting {verdict}; no adapter written (no placeholder, ever).")
+        return verdict
 
     # Get the size of the safetensors file
     size = adapters_file.stat().st_size
@@ -937,7 +1632,11 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
         "adapter_path": str(adapter_out),
         "size_bytes": size,
         "kind": "mlx_lm.lora",
-        "model": "mlx-community/gemma-4-31b-it-4bit",
+        "model": model,
+        "model_source": model_source,
+        "base_tag": tag,
+        "serving_adapter_ref": str(serving_adapter) if serving_adapter else None,
+        "requested_adapter_out": str(requested_out),
         "rank": 8,
         "iters": iters,
         "scale": scale,
@@ -960,12 +1659,17 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
     results_file = Path.home() / ".human" / "logs" / "dpo-training-results.jsonl"
     n_pairs_by_source = {"outcomes": len(resolved)}
 
-    # Warn if val_loss parsing failed — regression gate cannot judge this run
+    # Warn if val_loss parsing failed — regression gate cannot judge this run.
+    # This is the early heads-up only; the run is BLOCKED further down, where
+    # val_loss=None routes to INCONCLUSIVE and returns non-zero. Do not turn
+    # that into a fallthrough: warning-then-proceed is how the toothless
+    # "PASS (val_loss=None)" verdict shipped on 2026-07-26.
     if val_loss is None:
         print(f"  [quality-gate] WARNING: val loss unparsed from training output "
               f"— regression gate cannot judge this run")
 
     # Append this run's results with the parsed loss metrics
+    val_set_id = read_val_set_id(adapter_out)
     dpo_results.append_result(
         results_file,
         datetime.now().isoformat(),
@@ -976,7 +1680,8 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
         alignment_score=None,
         lora_scale=scale,
         iters=iters,
-        git_commit=dpo_results.get_git_commit()
+        git_commit=dpo_results.get_git_commit(),
+        val_set_id=val_set_id,
     )
 
     # Record training result to adapter registry
@@ -990,16 +1695,38 @@ def train_from_outcomes(source_jsonl: Path, adapter_out: Path,
                 "val_loss": val_loss,
                 "lora_scale": scale,
                 "iters": iters,
+                "base_model": model,
+                "base_tag": tag,
             },
             timestamp=datetime.now().isoformat()
         )
     except Exception as e:
         print(f"  [WARNING] Failed to record training to registry: {e}", file=sys.stderr)
 
-    # Run regression verdict (checks if val_loss is worse than prior 4 weeks)
-    history = dpo_results.load_recent(results_file)
-    verdict = dpo_results.regression_verdict(history, {'val_loss': val_loss})
-    print(f"  [quality-gate] Regression verdict: {verdict} (val_loss={val_loss})")
+    # Run regression verdict (checks if val_loss is worse than prior 4 weeks).
+    # Absent evidence is NOT a pass: val_loss=None means the gate cannot judge,
+    # and "cannot judge" must block the swap, not wave it through — the
+    # toothless-gate shape from the 2026-07-11 fleet lessons resurfaced on
+    # 2026-07-26 ("Regression verdict: PASS (val_loss=None)").
+    # The current run's record was appended above; comparing against it made
+    # every night PASS with delta 0 (2026-09-07..12: six PASSes, zero real
+    # comparisons). Exclude it.
+    # (inline rather than dpo_results.history_excluding so the tests' stubbed
+    # dpo_results namespace keeps working; the helper is the tested contract)
+    history = [r for r in dpo_results.load_recent(results_file)
+               if r.get('adapter_id') != basename(str(adapter_out))]
+    if val_loss is None:
+        verdict = 'INCONCLUSIVE'
+    else:
+        verdict = dpo_results.regression_verdict(
+            history, {'val_loss': val_loss, 'val_set_id': val_set_id})
+    print(f"  [quality-gate] Regression verdict: {verdict} (val_loss={val_loss}, "
+          f"val_set_id={val_set_id})")
+
+    if verdict == 'INCONCLUSIVE':
+        print(f"  [quality-gate] INCONCLUSIVE: no validation loss to judge — "
+              f"adapter stays STAGED at {adapter_out}, swap blocked.")
+        return 1  # Exit non-zero — blocks adapter swap in C side
 
     if verdict == 'FAIL':
         print(f"  [quality-gate] FAIL: Training regression detected. "
@@ -1031,6 +1758,9 @@ def main():
     parser.add_argument("--no-dpo", action="store_true", help="Skip DPO training pass")
     parser.add_argument("--eval-only", action="store_true", help="Only run evaluation on current adapter")
     parser.add_argument("--dry-run", action="store_true", help="Simulate without actual training/eval")
+    parser.add_argument("--resolve-only", action="store_true",
+                        help="Read-only: resolve outcome hashes against the messages table, print the "
+                             "counts and exit (3 if nothing resolves). No training, no server restart.")
     # Phase C3 — JSONL-driven entry point. When --source-jsonl is set,
     # the full cycle pipeline is bypassed and we run train_from_outcomes
     # instead. The driver (scripts/m3_outcome_driver.py) is the primary
@@ -1044,6 +1774,11 @@ def main():
                         help="C3: directory where to write the produced LoRA adapter "
                              "(will contain adapters.safetensors + adapter_config.json). "
                              "Required when --source-jsonl is set.")
+    parser.add_argument("--model-id", type=str, default=None,
+                        help="C3: explicit HuggingFace base model id. "
+                             "Default: resolve the SERVING base dynamically "
+                             "(live mlx-server --model, then config.json "
+                             "mlx_local.model, then the gemma default).")
     parser.add_argument("--memory-db", type=Path,
                         default=Path.home() / ".human" / "memory.db",
                         help="C3: path to the conversations DB for hash "
@@ -1057,7 +1792,8 @@ def main():
                   file=sys.stderr)
             sys.exit(2)
         sys.exit(train_from_outcomes(args.source_jsonl, args.adapter_out,
-                                      args.memory_db, args.dry_run))
+                                      args.memory_db, args.dry_run,
+                                      model_id_override=args.model_id))
 
     print(f"\n{'#'*60}")
     print(f"  h-uman AUTOMATED TRAINING LOOP")

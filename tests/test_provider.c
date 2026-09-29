@@ -702,9 +702,8 @@ static void test_from_config_ensemble_creates_provider(void) {
  * reliable composite, and the wrap survives all the easy-to-get-wrong edges
  * (no fallbacks, composite default, same-name fallback, unknown fallback). */
 
-static hu_error_t failover_mock_chat(void *ctx, hu_allocator_t *alloc,
-                                     const hu_chat_request_t *req, const char *model,
-                                     size_t model_len, double temperature,
+static hu_error_t failover_mock_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_request_t *req,
+                                     const char *model, size_t model_len, double temperature,
                                      hu_chat_response_t *out) {
     (void)req;
     (void)temperature;
@@ -746,14 +745,78 @@ static hu_provider_vtable_t failover_mock_vtable = {
     .supports_native_tools = failover_mock_supports_native_tools,
 };
 
+/* ── HU_ERR_TIMEOUT on the primary must jump to the fallback provider ──
+ * (2026-09-03 half-open :8741 incident). A timeout means the upstream did
+ * not answer for the whole cap; re-POSTing the same body to the same wedged
+ * single-threaded server `provider_retries` more times multiplies the stall
+ * (3 × cap) before the cloud fallback is ever consulted. Rate-limits already
+ * break to extras; timeouts must too. */
+static hu_error_t timeout_mock_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_request_t *req,
+                                    const char *model, size_t model_len, double temperature,
+                                    hu_chat_response_t *out) {
+    (void)req;
+    (void)temperature;
+    (void)model;
+    (void)model_len;
+    (void)alloc;
+    int *calls = (int *)ctx;
+    (*calls)++;
+    memset(out, 0, sizeof(*out));
+    return HU_ERR_TIMEOUT;
+}
+
+static hu_provider_vtable_t timeout_mock_vtable = {
+    .chat = timeout_mock_chat,
+    .get_name = failover_mock_get_name,
+    .supports_native_tools = failover_mock_supports_native_tools,
+};
+
+static void test_failover_timeout_on_primary_skips_retries_and_uses_fallback(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    int prim_calls = 0;
+    int fb_state[3] = {0, 0, 1}; /* always succeed */
+    hu_provider_t primary = {.ctx = &prim_calls, .vtable = &timeout_mock_vtable};
+    hu_provider_t fb = {.ctx = fb_state, .vtable = &failover_mock_vtable};
+    hu_reliable_provider_entry_t extras[1] = {{.name = "fb-a", .name_len = 4, .provider = fb}};
+
+    hu_provider_t prov;
+    /* max_retries = 2 mirrors prod reliability.provider_retries */
+    HU_ASSERT_EQ(hu_reliable_create_ex(&alloc, primary, 2, 50, extras, 1, NULL, 0, &prov), HU_OK);
+
+    hu_chat_request_t req = {0};
+    hu_chat_response_t resp = {0};
+    HU_ASSERT_EQ(prov.vtable->chat(prov.ctx, &alloc, &req, "m", 1, 0.0, &resp), HU_OK);
+    HU_ASSERT_STR_EQ(resp.content, "fallback-A");
+    HU_ASSERT_EQ(prim_calls, 1); /* NOT 1 + max_retries */
+    HU_ASSERT_EQ(fb_state[0], 1);
+    hu_chat_response_free(&alloc, &resp);
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+
+static void test_failover_timeout_without_fallback_still_retries(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    int prim_calls = 0;
+    hu_provider_t primary = {.ctx = &prim_calls, .vtable = &timeout_mock_vtable};
+
+    hu_provider_t prov;
+    HU_ASSERT_EQ(hu_reliable_create_ex(&alloc, primary, 2, 50, NULL, 0, NULL, 0, &prov), HU_OK);
+
+    hu_chat_request_t req = {0};
+    hu_chat_response_t resp = {0};
+    HU_ASSERT_NEQ(prov.vtable->chat(prov.ctx, &alloc, &req, "m", 1, 0.0, &resp), HU_OK);
+    HU_ASSERT_EQ(prim_calls, 3); /* 1 + max_retries: no extras to break to */
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+
 static void test_failover_primary_succeeds_extras_unused(void) {
     hu_allocator_t alloc = hu_system_allocator();
     int prim_state[3] = {0, 0, 0}; /* never fail */
     int fb_state[3] = {0, 0, 1};
     hu_provider_t primary = {.ctx = prim_state, .vtable = &failover_mock_vtable};
     hu_provider_t fb = {.ctx = fb_state, .vtable = &failover_mock_vtable};
-    hu_reliable_provider_entry_t extras[1] = {
-        {.name = "fb-a", .name_len = 4, .provider = fb}};
+    hu_reliable_provider_entry_t extras[1] = {{.name = "fb-a", .name_len = 4, .provider = fb}};
 
     hu_provider_t prov;
     HU_ASSERT_EQ(hu_reliable_create_ex(&alloc, primary, 0, 50, extras, 1, NULL, 0, &prov), HU_OK);
@@ -771,12 +834,11 @@ static void test_failover_primary_succeeds_extras_unused(void) {
 
 static void test_failover_primary_fails_first_fallback_succeeds(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    int prim_state[3] = {0, 99, 0};   /* always fail */
-    int fb_state[3] = {0, 0, 1};       /* always succeed */
+    int prim_state[3] = {0, 99, 0}; /* always fail */
+    int fb_state[3] = {0, 0, 1};    /* always succeed */
     hu_provider_t primary = {.ctx = prim_state, .vtable = &failover_mock_vtable};
     hu_provider_t fb = {.ctx = fb_state, .vtable = &failover_mock_vtable};
-    hu_reliable_provider_entry_t extras[1] = {
-        {.name = "fb-a", .name_len = 4, .provider = fb}};
+    hu_reliable_provider_entry_t extras[1] = {{.name = "fb-a", .name_len = 4, .provider = fb}};
 
     hu_provider_t prov;
     HU_ASSERT_EQ(hu_reliable_create_ex(&alloc, primary, 0, 50, extras, 1, NULL, 0, &prov), HU_OK);
@@ -826,8 +888,7 @@ static void test_failover_all_fail_returns_error(void) {
     int fb_state[3] = {0, 99, 1};
     hu_provider_t primary = {.ctx = prim_state, .vtable = &failover_mock_vtable};
     hu_provider_t fb = {.ctx = fb_state, .vtable = &failover_mock_vtable};
-    hu_reliable_provider_entry_t extras[1] = {
-        {.name = "fb-a", .name_len = 4, .provider = fb}};
+    hu_reliable_provider_entry_t extras[1] = {{.name = "fb-a", .name_len = 4, .provider = fb}};
 
     hu_provider_t prov;
     HU_ASSERT_EQ(hu_reliable_create_ex(&alloc, primary, 0, 50, extras, 1, NULL, 0, &prov), HU_OK);
@@ -848,8 +909,7 @@ static void test_failover_primary_recovers_after_partial_failure(void) {
     int fb_state[3] = {0, 0, 1};
     hu_provider_t primary = {.ctx = prim_state, .vtable = &failover_mock_vtable};
     hu_provider_t fb = {.ctx = fb_state, .vtable = &failover_mock_vtable};
-    hu_reliable_provider_entry_t extras[1] = {
-        {.name = "fb-a", .name_len = 4, .provider = fb}};
+    hu_reliable_provider_entry_t extras[1] = {{.name = "fb-a", .name_len = 4, .provider = fb}};
 
     hu_provider_t prov;
     HU_ASSERT_EQ(hu_reliable_create_ex(&alloc, primary, 0, 50, extras, 1, NULL, 0, &prov), HU_OK);
@@ -904,10 +964,10 @@ static void free_failover_config(hu_allocator_t *backing, hu_arena_t *arena, hu_
 static void test_create_default_no_fallbacks_returns_unwrapped(void) {
     hu_allocator_t backing = hu_system_allocator();
     hu_arena_t *arena = NULL;
-    hu_config_t *cfg = make_failover_config(
-        &backing, &arena,
-        "{\"default_provider\":\"openai\","
-        "\"providers\":[{\"name\":\"openai\",\"api_key\":\"sk-test\"}]}");
+    hu_config_t *cfg =
+        make_failover_config(&backing, &arena,
+                             "{\"default_provider\":\"openai\","
+                             "\"providers\":[{\"name\":\"openai\",\"api_key\":\"sk-test\"}]}");
     HU_ASSERT_NOT_NULL(cfg);
     hu_provider_t out = {0};
     HU_ASSERT_EQ(hu_provider_create_default(&backing, cfg, &out), HU_OK);
@@ -922,13 +982,13 @@ static void test_create_default_no_fallbacks_returns_unwrapped(void) {
 static void test_create_default_with_fallbacks_wraps(void) {
     hu_allocator_t backing = hu_system_allocator();
     hu_arena_t *arena = NULL;
-    hu_config_t *cfg = make_failover_config(
-        &backing, &arena,
-        "{\"default_provider\":\"openai\","
-        "\"providers\":["
-        "{\"name\":\"openai\",\"api_key\":\"sk-test\"},"
-        "{\"name\":\"anthropic\",\"api_key\":\"sk-ant-test\"}],"
-        "\"reliability\":{\"fallback_providers\":[\"anthropic\"]}}");
+    hu_config_t *cfg =
+        make_failover_config(&backing, &arena,
+                             "{\"default_provider\":\"openai\","
+                             "\"providers\":["
+                             "{\"name\":\"openai\",\"api_key\":\"sk-test\"},"
+                             "{\"name\":\"anthropic\",\"api_key\":\"sk-ant-test\"}],"
+                             "\"reliability\":{\"fallback_providers\":[\"anthropic\"]}}");
     HU_ASSERT_NOT_NULL(cfg);
     hu_provider_t out = {0};
     HU_ASSERT_EQ(hu_provider_create_default(&backing, cfg, &out), HU_OK);
@@ -951,12 +1011,12 @@ static void test_create_default_composite_default_is_passthrough(void) {
     hu_allocator_t backing = hu_system_allocator();
     hu_arena_t *arena = NULL;
     /* default = "router" → should NOT auto-wrap even with fallbacks set. */
-    hu_config_t *cfg = make_failover_config(
-        &backing, &arena,
-        "{\"default_provider\":\"router\","
-        "\"providers\":[{\"name\":\"openai\",\"api_key\":\"sk-test\"}],"
-        "\"router\":{\"standard\":\"openai\"},"
-        "\"reliability\":{\"fallback_providers\":[\"anthropic\"]}}");
+    hu_config_t *cfg =
+        make_failover_config(&backing, &arena,
+                             "{\"default_provider\":\"router\","
+                             "\"providers\":[{\"name\":\"openai\",\"api_key\":\"sk-test\"}],"
+                             "\"router\":{\"standard\":\"openai\"},"
+                             "\"reliability\":{\"fallback_providers\":[\"anthropic\"]}}");
     HU_ASSERT_NOT_NULL(cfg);
     hu_provider_t out = {0};
     HU_ASSERT_EQ(hu_provider_create_default(&backing, cfg, &out), HU_OK);
@@ -972,11 +1032,11 @@ static void test_create_default_same_name_fallback_skipped(void) {
     hu_arena_t *arena = NULL;
     /* fallback list contains the default itself → must be skipped, leaving an
      * empty effective chain → returns base unwrapped. */
-    hu_config_t *cfg = make_failover_config(
-        &backing, &arena,
-        "{\"default_provider\":\"openai\","
-        "\"providers\":[{\"name\":\"openai\",\"api_key\":\"sk-test\"}],"
-        "\"reliability\":{\"fallback_providers\":[\"openai\"]}}");
+    hu_config_t *cfg =
+        make_failover_config(&backing, &arena,
+                             "{\"default_provider\":\"openai\","
+                             "\"providers\":[{\"name\":\"openai\",\"api_key\":\"sk-test\"}],"
+                             "\"reliability\":{\"fallback_providers\":[\"openai\"]}}");
     HU_ASSERT_NOT_NULL(cfg);
     hu_provider_t out = {0};
     HU_ASSERT_EQ(hu_provider_create_default(&backing, cfg, &out), HU_OK);
@@ -1093,6 +1153,84 @@ static void test_helpers_openai_choice_logprob_mean(void) {
     hu_json_free(&alloc, root);
 }
 
+/* ── Model-output scaffold stripper (2026-09-04) ──────────────────────
+ * The local server hands back the chat template's think scaffold and the
+ * model's markdown fence verbatim; JSON consumers choked (reflection: 2,415
+ * schema_invalid runs in two days) and "</think>"-only replies read as empty. */
+static void test_helpers_strip_scaffold_removes_think_block(void) {
+    char s[] = "<think>\nplanning...\n</think>\n\ngood call";
+    size_t len = strlen(s);
+    HU_ASSERT_TRUE(hu_helpers_strip_model_scaffold(s, &len));
+    HU_ASSERT_STR_EQ(s, "good call");
+    HU_ASSERT_EQ((int)len, 9);
+}
+
+static void test_helpers_strip_scaffold_removes_bare_close_tag(void) {
+    char s[] = "</think>\nok";
+    size_t len = strlen(s);
+    HU_ASSERT_TRUE(hu_helpers_strip_model_scaffold(s, &len));
+    HU_ASSERT_STR_EQ(s, "ok");
+    HU_ASSERT_EQ((int)len, 2);
+}
+
+static void test_helpers_strip_scaffold_think_only_becomes_empty(void) {
+    char s[] = "</think>";
+    size_t len = strlen(s);
+    HU_ASSERT_TRUE(hu_helpers_strip_model_scaffold(s, &len));
+    HU_ASSERT_EQ((int)len, 0);
+    HU_ASSERT_EQ((int)s[0], 0);
+    char t[] = "<think>never closed";
+    len = strlen(t);
+    HU_ASSERT_TRUE(hu_helpers_strip_model_scaffold(t, &len));
+    HU_ASSERT_EQ((int)len, 0);
+}
+
+static void test_helpers_strip_scaffold_unwraps_whole_reply_fence(void) {
+    char s[] = "```json\n{\n  \"a\": 1\n}\n```";
+    size_t len = strlen(s);
+    HU_ASSERT_TRUE(hu_helpers_strip_model_scaffold(s, &len));
+    HU_ASSERT_STR_EQ(s, "{\n  \"a\": 1\n}");
+    HU_ASSERT_EQ((int)len, (int)strlen("{\n  \"a\": 1\n}"));
+}
+
+static void test_helpers_strip_scaffold_think_then_fence(void) {
+    char s[] = "<think>x</think>\n```json\n{\"a\":1}\n```\n";
+    size_t len = strlen(s);
+    HU_ASSERT_TRUE(hu_helpers_strip_model_scaffold(s, &len));
+    HU_ASSERT_STR_EQ(s, "{\"a\":1}");
+}
+
+static void test_helpers_strip_scaffold_leaves_plain_text_alone(void) {
+    char s[] = "yeah lol";
+    size_t len = strlen(s);
+    HU_ASSERT_FALSE(hu_helpers_strip_model_scaffold(s, &len));
+    HU_ASSERT_STR_EQ(s, "yeah lol");
+    HU_ASSERT_EQ((int)len, 8);
+    /* An inline fence is content, not a wrapper. */
+    char t[] = "run ```make test``` first";
+    len = strlen(t);
+    HU_ASSERT_FALSE(hu_helpers_strip_model_scaffold(t, &len));
+    HU_ASSERT_STR_EQ(t, "run ```make test``` first");
+    HU_ASSERT_FALSE(hu_helpers_strip_model_scaffold(NULL, &len));
+}
+
+static void test_helpers_dup_model_text_returns_exact_stripped_copy(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    size_t n = 99;
+    char *c = hu_helpers_dup_model_text(&alloc, "</think>\nhey", 12, &n);
+    HU_ASSERT_NOT_NULL(c);
+    HU_ASSERT_STR_EQ(c, "hey");
+    HU_ASSERT_EQ((int)n, 3);
+    alloc.free(alloc.ctx, c, n + 1);
+    c = hu_helpers_dup_model_text(&alloc, "hey", 3, &n);
+    HU_ASSERT_NOT_NULL(c);
+    HU_ASSERT_STR_EQ(c, "hey");
+    HU_ASSERT_EQ((int)n, 3);
+    alloc.free(alloc.ctx, c, n + 1);
+    HU_ASSERT_NULL(hu_helpers_dup_model_text(&alloc, NULL, 0, &n));
+    HU_ASSERT_EQ((int)n, 0);
+}
+
 void run_provider_tests(void) {
     HU_TEST_SUITE("Provider");
     HU_RUN_TEST(test_openai_create_succeeds);
@@ -1131,6 +1269,8 @@ void run_provider_tests(void) {
     HU_RUN_TEST(test_failover_walks_chain_until_one_succeeds);
     HU_RUN_TEST(test_failover_all_fail_returns_error);
     HU_RUN_TEST(test_failover_primary_recovers_after_partial_failure);
+    HU_RUN_TEST(test_failover_timeout_on_primary_skips_retries_and_uses_fallback);
+    HU_RUN_TEST(test_failover_timeout_without_fallback_still_retries);
     HU_RUN_TEST(test_create_default_no_fallbacks_returns_unwrapped);
     HU_RUN_TEST(test_create_default_with_fallbacks_wraps);
     HU_RUN_TEST(test_create_default_composite_default_is_passthrough);
@@ -1155,4 +1295,11 @@ void run_provider_tests(void) {
     HU_RUN_TEST(test_helpers_extract_anthropic_content_empty_array_returns_null);
     HU_RUN_TEST(test_helpers_openai_choice_logprob_mean);
     HU_RUN_TEST(test_chat_response_free_null_safe);
+    HU_RUN_TEST(test_helpers_strip_scaffold_removes_think_block);
+    HU_RUN_TEST(test_helpers_strip_scaffold_removes_bare_close_tag);
+    HU_RUN_TEST(test_helpers_strip_scaffold_think_only_becomes_empty);
+    HU_RUN_TEST(test_helpers_strip_scaffold_unwraps_whole_reply_fence);
+    HU_RUN_TEST(test_helpers_strip_scaffold_think_then_fence);
+    HU_RUN_TEST(test_helpers_strip_scaffold_leaves_plain_text_alone);
+    HU_RUN_TEST(test_helpers_dup_model_text_returns_exact_stripped_copy);
 }

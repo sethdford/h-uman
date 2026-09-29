@@ -15,9 +15,9 @@
  *     `llama_load_model_from_file` is a -Werror=deprecated trap).
  *   - `llama_init_from_model` — context init (was
  *     `llama_new_context_with_model`).
- *   - `llama_decode` / `llama_sampler_*` — chat (still TODO; chat path is
- *     a NOT_SUPPORTED stub on purpose so the linked build compiles cleanly
- *     before the real tokenize/sample loop lands).
+ *   - `llama_decode` / `llama_sampler_*` — chat (real tokenize/decode/
+ *     detokenize loop below; only the unlinked #else arm returns
+ *     NOT_SUPPORTED).
  *   - `llama_adapter_lora_init` + `llama_set_adapters_lora` —
  *     chat-time LoRA merge. Removing the active adapter is done by
  *     calling `llama_set_adapters_lora(ctx, NULL, 0, NULL)` (the modern

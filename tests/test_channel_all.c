@@ -347,10 +347,14 @@ static void test_slack_react_rejects_invalid_args_in_test(void) {
     hu_channel_t ch;
     hu_slack_create(&alloc, "t", 1, &ch);
     HU_ASSERT_NOT_NULL(ch.vtable->react);
-    HU_ASSERT_EQ(ch.vtable->react(ch.ctx, "C0001", 5, 0LL, HU_REACTION_HEART), HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(ch.vtable->react(ch.ctx, "C0001", 5, 1LL, HU_REACTION_NONE), HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(ch.vtable->react(ch.ctx, "C0001", 5, 1LL, (hu_reaction_type_t)99), HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(ch.vtable->react(ch.ctx, NULL, 0, 1LL, HU_REACTION_HEART), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(ch.vtable->react(ch.ctx, "C0001", 5, 0LL, HU_REACTION_HEART),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(ch.vtable->react(ch.ctx, "C0001", 5, 1LL, HU_REACTION_NONE),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(ch.vtable->react(ch.ctx, "C0001", 5, 1LL, (hu_reaction_type_t)99),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(ch.vtable->react(ch.ctx, NULL, 0, 1LL, HU_REACTION_HEART),
+                 HU_ERR_INVALID_ARGUMENT);
     hu_slack_destroy(&ch);
 }
 #endif
@@ -397,7 +401,8 @@ static void test_slack_mock_full_group_sets_is_group(void) {
     opts.message_id = 1234567890;
     opts.timestamp_sec = 1700000000;
     opts.has_attachment = true;
-    hu_error_t err = hu_slack_test_inject_mock_full(&ch, "C0001ABCDEF", 11, "hello group", 11, &opts);
+    hu_error_t err =
+        hu_slack_test_inject_mock_full(&ch, "C0001ABCDEF", 11, "hello group", 11, &opts);
     HU_ASSERT_EQ(err, HU_OK);
     hu_channel_loop_msg_t msgs[4];
     memset(msgs, 0, sizeof(msgs));
@@ -1006,8 +1011,7 @@ static void test_matrix_react_ok_in_test(void) {
     hu_matrix_create(&alloc, "https://matrix.org", 17, "tok", 3, &ch);
     HU_ASSERT_NOT_NULL(ch.vtable->react);
     static const char tgt[] = "!room:matrix.org|$event:matrix.org";
-    hu_error_t err =
-        ch.vtable->react(ch.ctx, tgt, sizeof(tgt) - 1, 1LL, HU_REACTION_THUMBS_UP);
+    hu_error_t err = ch.vtable->react(ch.ctx, tgt, sizeof(tgt) - 1, 1LL, HU_REACTION_THUMBS_UP);
     HU_ASSERT_EQ(err, HU_OK);
     hu_matrix_destroy(&ch);
 }
@@ -1388,7 +1392,8 @@ static void test_imap_poll_returns_mock_message(void) {
         .imap_use_tls = true,
     };
     HU_ASSERT_EQ(hu_imap_create(&alloc, &cfg, &ch), HU_OK);
-    HU_ASSERT_EQ(hu_imap_test_push_mock(&ch, "alice@example.com", 17, "subject\n\nbody", 13), HU_OK);
+    HU_ASSERT_EQ(hu_imap_test_push_mock(&ch, "alice@example.com", 17, "subject\n\nbody", 13),
+                 HU_OK);
     hu_channel_loop_msg_t msgs[2];
     size_t count = 0;
     HU_ASSERT_EQ(hu_imap_poll(ch.ctx, &alloc, msgs, 2, &count), HU_OK);
@@ -1788,8 +1793,7 @@ static void test_signal_load_conversation_history_empty_in_test(void) {
 static void test_nostr_create(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_channel_t ch;
-    hu_error_t err =
-        hu_nostr_create(&alloc, "/tmp/nak", 8, "npub1abc", 8, NULL, 0, NULL, 0, &ch);
+    hu_error_t err = hu_nostr_create(&alloc, "/tmp/nak", 8, "npub1abc", 8, NULL, 0, NULL, 0, &ch);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(ch.ctx);
     HU_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "nostr");
@@ -1969,26 +1973,6 @@ static void test_qq_health_check(void) {
     hu_qq_create(&alloc, "app", 3, "t", 1, false, &ch);
     HU_ASSERT_TRUE(ch.vtable->health_check(ch.ctx));
     hu_qq_destroy(&ch);
-}
-#endif
-
-#if HU_HAS_MAIXCAM
-#include "human/channels/maixcam.h"
-static void test_maixcam_create(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_channel_t ch;
-    hu_error_t err = hu_maixcam_create(&alloc, "/dev/ttyUSB0", 12, 0, &ch);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "maixcam");
-    hu_maixcam_destroy(&ch);
-}
-
-static void test_maixcam_health_check(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_channel_t ch;
-    hu_maixcam_create(&alloc, "/dev/x", 6, 0, &ch);
-    HU_ASSERT_TRUE(ch.vtable->health_check(ch.ctx));
-    hu_maixcam_destroy(&ch);
 }
 #endif
 
@@ -2248,7 +2232,8 @@ static void test_telegram_mock_full_attachment_flag(void) {
     HU_ASSERT_EQ(hu_telegram_create(&alloc, "123:tok", 7, &ch), HU_OK);
 
     hu_telegram_test_msg_opts_t opts = {.has_attachment = true};
-    HU_ASSERT_EQ(hu_telegram_test_inject_mock_full(&ch, "user1", 5, "[IMAGE:url]", 11, &opts), HU_OK);
+    HU_ASSERT_EQ(hu_telegram_test_inject_mock_full(&ch, "user1", 5, "[IMAGE:url]", 11, &opts),
+                 HU_OK);
 
     hu_channel_loop_msg_t msgs[4];
     memset(msgs, 0, sizeof(msgs));
@@ -2811,8 +2796,8 @@ static void test_mattermost_load_conversation_history_empty_in_test(void) {
     HU_ASSERT_NOT_NULL(ch.vtable->load_conversation_history);
     hu_channel_history_entry_t *entries = NULL;
     size_t n = 99;
-    hu_error_t err = ch.vtable->load_conversation_history(ch.ctx, &alloc, "chan123", 7, 10, &entries,
-                                                          &n);
+    hu_error_t err =
+        ch.vtable->load_conversation_history(ch.ctx, &alloc, "chan123", 7, 10, &entries, &n);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_EQ(n, 0u);
     HU_ASSERT_NULL(entries);
@@ -2943,8 +2928,8 @@ static void test_teams_load_conversation_history_empty_in_test(void) {
     HU_ASSERT_NOT_NULL(ch.vtable->load_conversation_history);
     hu_channel_history_entry_t *entries = NULL;
     size_t n = 99;
-    hu_error_t err = ch.vtable->load_conversation_history(ch.ctx, &alloc, "channel-id", 10, 5,
-                                                          &entries, &n);
+    hu_error_t err =
+        ch.vtable->load_conversation_history(ch.ctx, &alloc, "channel-id", 10, 5, &entries, &n);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_EQ(n, 0u);
     HU_ASSERT_NULL(entries);
@@ -3153,10 +3138,6 @@ void run_channel_all_tests(void) {
     HU_RUN_TEST(test_qq_health_check);
     HU_RUN_TEST(test_qq_webhook_and_poll);
     HU_RUN_TEST(test_qq_poll_null_args);
-#endif
-#if HU_HAS_MAIXCAM
-    HU_RUN_TEST(test_maixcam_create);
-    HU_RUN_TEST(test_maixcam_health_check);
 #endif
 #if HU_HAS_DISPATCH
     HU_RUN_TEST(test_dispatch_create);

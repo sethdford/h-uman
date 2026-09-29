@@ -31,6 +31,7 @@
 #include "evaluation_internal.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/time.h"
 #include "human/eval.h"
 #include "human/evaluation/evaluation.h"
 
@@ -55,7 +56,9 @@ static bool legacy_bridge_available(void *ctx) {
     return true;
 }
 
-static int64_t legacy_bridge_now_ms(void) { return (int64_t)time(NULL) * 1000; }
+static int64_t legacy_bridge_now_ms(void) {
+    return (int64_t)hu_time_wall_ms();
+}
 
 /* Inline fixture: two tiny tasks. Mirrors the shape of an
  * eval_suites JSON entry (id, prompt, expected, category, difficulty,
@@ -102,8 +105,8 @@ static hu_error_t legacy_bridge_run_test_path(hu_allocator_t *alloc,
     out->prompts_passed = run.passed;
     out->prompts_failed = run.failed;
 
-    err = hu_evaluation_report_add_metric(alloc, out, "pass_rate", run.pass_rate,
-                                          run.results_count);
+    err =
+        hu_evaluation_report_add_metric(alloc, out, "pass_rate", run.pass_rate, run.results_count);
     hu_eval_run_free(alloc, &run);
     return err;
 }

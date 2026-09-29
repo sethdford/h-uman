@@ -3,6 +3,7 @@
 #include "human/daemon.h"
 #include "human/daemon_routing.h"
 #include "test_framework.h"
+#include <stdio.h>
 #include <string.h>
 
 /* ── hu_daemon_is_tapback_worthy ─────────────────────────────────────── */
@@ -68,6 +69,42 @@ static void test_video_delay_with_video(void) {
     HU_ASSERT(delay >= 2000 && delay <= 10000);
 }
 
+/* Task 8 — the filler bank is drawn at the measured rate with a per-contact
+ * cooldown. 21/57 sends carried a filler in Aug 2026; Seth's rate is 0.29%. */
+static void test_filler_gated_rate_zero_never_fires(void) {
+    hu_daemon_filler_reset_for_test();
+    hu_daemon_set_missed_msg_ack_rate(0.0);
+    for (uint32_t seed = 0; seed < 200; seed++)
+        HU_ASSERT_NULL(
+            hu_missed_message_acknowledgment_gated(3600, 14, 15, seed, "+1555", 5, 1000));
+}
+static void test_filler_gated_rate_one_fires_once_then_cooldown_blocks(void) {
+    hu_daemon_filler_reset_for_test();
+    hu_daemon_set_missed_msg_ack_rate(1.0);
+    hu_daemon_set_missed_msg_ack_cooldown(3600);
+    HU_ASSERT_NOT_NULL(hu_missed_message_acknowledgment_gated(3600, 14, 15, 7, "+1555", 5, 1000));
+    HU_ASSERT_NULL(hu_missed_message_acknowledgment_gated(3600, 14, 15, 8, "+1555", 5, 2000));
+    /* a different contact is not blocked by the first one's cooldown */
+    HU_ASSERT_NOT_NULL(hu_missed_message_acknowledgment_gated(3600, 14, 15, 9, "+1666", 5, 2000));
+    /* after the cooldown the first contact is eligible again */
+    HU_ASSERT_NOT_NULL(
+        hu_missed_message_acknowledgment_gated(3600, 14, 15, 10, "+1555", 5, 1000 + 3601));
+}
+static void test_filler_gated_measured_rate_over_10000_seeds(void) {
+    hu_daemon_filler_reset_for_test();
+    hu_daemon_set_missed_msg_ack_rate(0.0029);
+    hu_daemon_set_missed_msg_ack_cooldown(60);
+    int fired = 0;
+    for (uint32_t seed = 0; seed < 10000; seed++) {
+        char key[24];
+        snprintf(key, sizeof(key), "c%u", seed); /* distinct contacts: no cooldown effect */
+        if (hu_missed_message_acknowledgment_gated(3600, 14, 15, seed, key, strlen(key), 1000))
+            fired++;
+    }
+    HU_ASSERT_EQ(fired, 29); /* exactly rate * 10000 by construction */
+    hu_daemon_set_missed_msg_ack_rate(0.0029);
+}
+
 /* ── hu_missed_message_acknowledgment ────────────────────────────────── */
 
 static void test_missed_msg_short_delay_null(void) {
@@ -114,6 +151,44 @@ static void test_set_threshold_rejects_too_small(void) {
     /* 1900s still returns phrase with 1800s threshold */
     const char *phrase = hu_missed_message_acknowledgment(1900, 12, 12, 0);
     HU_ASSERT_NOT_NULL(phrase);
+}
+
+/* ── Upper bound (incident 2026-09-01: 16-day-old replayed messages got
+ *    "sorry just saw this"). Above the ceiling the ack must be silent. ── */
+
+static void test_missed_msg_sixteen_days_old_is_silent(void) {
+    hu_daemon_set_missed_msg_threshold(1800);
+    hu_daemon_set_missed_msg_max_age(86400);
+    HU_ASSERT_NULL(hu_missed_message_acknowledgment(16LL * 86400, 14, 14, 0));
+}
+
+static void test_missed_msg_default_ceiling_is_one_day(void) {
+    hu_daemon_set_missed_msg_threshold(1800);
+    hu_daemon_set_missed_msg_max_age(86400);
+    HU_ASSERT_NOT_NULL(hu_missed_message_acknowledgment(86400, 14, 14, 0));
+    HU_ASSERT_NULL(hu_missed_message_acknowledgment(86401, 14, 14, 0));
+}
+
+static void test_missed_msg_overnight_phrase_also_bounded(void) {
+    hu_daemon_set_missed_msg_threshold(1800);
+    hu_daemon_set_missed_msg_max_age(86400);
+    /* 2AM receive / 8AM now would normally be "just woke up"; 3 days old → silent. */
+    HU_ASSERT_NULL(hu_missed_message_acknowledgment(3LL * 86400, 2, 8, 0));
+}
+
+static void test_set_max_age_changes_behavior(void) {
+    hu_daemon_set_missed_msg_threshold(1800);
+    hu_daemon_set_missed_msg_max_age(3600);
+    HU_ASSERT_NULL(hu_missed_message_acknowledgment(7200, 14, 14, 0));
+    HU_ASSERT_NOT_NULL(hu_missed_message_acknowledgment(3000, 14, 14, 0));
+    hu_daemon_set_missed_msg_max_age(86400); /* restore default */
+}
+
+static void test_set_max_age_rejects_below_threshold(void) {
+    hu_daemon_set_missed_msg_threshold(1800);
+    hu_daemon_set_missed_msg_max_age(86400);
+    hu_daemon_set_missed_msg_max_age(600); /* below threshold: rejected */
+    HU_ASSERT_NOT_NULL(hu_missed_message_acknowledgment(7200, 14, 14, 0));
 }
 
 /* ── Integration: fully-populated loop_msg metadata ─────────────────── */
@@ -254,11 +329,19 @@ void run_daemon_routing_tests(void) {
 
     /* missed message */
     HU_RUN_TEST(test_missed_msg_short_delay_null);
+    HU_RUN_TEST(test_filler_gated_rate_zero_never_fires);
+    HU_RUN_TEST(test_filler_gated_rate_one_fires_once_then_cooldown_blocks);
+    HU_RUN_TEST(test_filler_gated_measured_rate_over_10000_seeds);
     HU_RUN_TEST(test_missed_msg_long_delay_returns_phrase);
     HU_RUN_TEST(test_missed_msg_overnight_woke_phrase);
     HU_RUN_TEST(test_missed_msg_deterministic);
     HU_RUN_TEST(test_set_threshold_changes_behavior);
     HU_RUN_TEST(test_set_threshold_rejects_too_small);
+    HU_RUN_TEST(test_missed_msg_sixteen_days_old_is_silent);
+    HU_RUN_TEST(test_missed_msg_default_ceiling_is_one_day);
+    HU_RUN_TEST(test_missed_msg_overnight_phrase_also_bounded);
+    HU_RUN_TEST(test_set_max_age_changes_behavior);
+    HU_RUN_TEST(test_set_max_age_rejects_below_threshold);
 
     /* integration: fully-populated metadata */
     HU_RUN_TEST(test_photo_delay_group_msg_with_attachment);

@@ -2,6 +2,7 @@
 #include "human/core/error.h"
 #include "human/core/process_util.h"
 #include "human/core/string.h"
+#include "human/platform.h"
 #include "human/platform/calendar.h"
 #include <limits.h>
 #include <stddef.h>
@@ -14,8 +15,8 @@
 #include <unistd.h>
 #endif
 
-hu_error_t hu_calendar_macos_get_events(hu_allocator_t *alloc, int hours_ahead,
-                                       char **events_json, size_t *events_len) {
+hu_error_t hu_calendar_macos_get_events(hu_allocator_t *alloc, int hours_ahead, char **events_json,
+                                        size_t *events_len) {
     if (!alloc || !events_json || !events_len)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -42,7 +43,7 @@ hu_error_t hu_calendar_macos_get_events(hu_allocator_t *alloc, int hours_ahead,
     const char *root = getenv("HU_PROJECT_ROOT");
     if (root && root[0]) {
         int n = snprintf(script_path, sizeof(script_path), "%s/scripts/calendar_query.applescript",
-                        root);
+                         root);
         if (n <= 0 || (size_t)n >= sizeof(script_path))
             root = NULL;
     }
@@ -50,7 +51,7 @@ hu_error_t hu_calendar_macos_get_events(hu_allocator_t *alloc, int hours_ahead,
         char exe_buf[4096];
         uint32_t size = (uint32_t)sizeof(exe_buf);
         if (_NSGetExecutablePath(exe_buf, &size) == 0) {
-            char *resolved = realpath(exe_buf, NULL);
+            char *resolved = hu_platform_realpath(alloc, exe_buf);
             const char *exe = resolved ? resolved : exe_buf;
             const char *build = strstr(exe, "/build");
             if (build && build > exe) {
@@ -63,14 +64,14 @@ hu_error_t hu_calendar_macos_get_events(hu_allocator_t *alloc, int hours_ahead,
                 }
             }
             if (resolved)
-                free(resolved);
+                alloc->free(alloc->ctx, resolved, strlen(resolved) + 1);
         }
     }
     if (script_path[0] == '\0') {
         char cwd[PATH_MAX];
         if (getcwd(cwd, sizeof(cwd))) {
             snprintf(script_path, sizeof(script_path), "%s/scripts/calendar_query.applescript",
-                    cwd);
+                     cwd);
         }
     }
     if (script_path[0] == '\0')

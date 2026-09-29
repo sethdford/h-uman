@@ -1,6 +1,7 @@
 # h-uman — not quite human.
 
-C11 autonomous AI assistant runtime. ~2468 KB binary, <6 MB RAM, <30 ms startup.
+C11 autonomous AI assistant runtime. ~2694 KB binary, <9 MB idle RSS, <10 ms startup
+(release-size build, macOS arm64 — measured in `docs/perf/footprint.json`).
 Zero dependencies beyond libc (optional SQLite and libcurl).
 
 Read `AGENTS.md` for the full engineering protocol. This file is the quick reference.
@@ -8,12 +9,14 @@ Read `AGENTS.md` for the full engineering protocol. This file is the quick refer
 ## Product Thesis (summary)
 
 **The assistant that's actually yours** — a private, personal AI that runs on
-your hardware, learns who you are locally, and never sends your identity to a
-cloud. We don't compete on task execution, channel count, or benchmark scores
-(table stakes). The honest moats are: **persona as compiled architecture** (41 C
-modules, not markdown templates), **privacy by architecture** (local-first, not a
-settings toggle), an **on-device personalization pipeline**, and **HuLa IR**
-(typed, compiled tool orchestration).
+your hardware, stores who you are on your machine, and lets you choose which
+model sees it, including a local one. We don't compete on task execution,
+channel count, or benchmark scores (table stakes). The honest moats are:
+**persona as compiled architecture** (41 C modules, not markdown templates),
+**local storage by architecture** (SQLite, no sync; a cloud model does receive
+each reply's full context with no redaction — see `docs/PRODUCT.md` "Known privacy gaps"),
+an **on-device personalization pipeline**, and **HuLa IR** (typed, compiled tool
+orchestration).
 
 Full thesis, the red-teamed reality check, the M1–M6 strategic missions, and the
 competitive matrix live in **[`docs/PRODUCT.md`](docs/PRODUCT.md)** — kept out of
@@ -30,7 +33,7 @@ cmake --build --preset dev
 # Other presets: test (no ASan), release (MinSizeRel+LTO), fuzz (Clang), minimal
 cmake --list-presets               # show all available presets
 
-# Run tests (13,801+ tests, must be 0 failures, 0 ASan errors)
+# Run tests (14,097+ tests, must be 0 failures, 0 ASan errors)
 ./build/human_tests                          # full suite
 ./build/human_tests --suite=JSON             # run suites matching "JSON"
 ./build/human_tests --filter=config_parse    # run tests matching "config_parse"
@@ -73,15 +76,17 @@ Vtable-driven and modular. Extend by implementing vtable structs + factory regis
 - Security: deny-by-default, HTTPS-only for outbound, never log secrets.
 - KISS/YAGNI: no speculative abstractions or config flags without a caller.
 - One concern per change. Don't mix feature + refactor + infra.
-- **AI Model Versions**: Never reference or use Gemini 2.0 or 2.5 models — they are deprecated. Always use Gemini 3.0+. Before writing any code that references a model version, do a web search AND probe the live Vertex AI endpoint (HTTP 200 from `:generateContent`) to verify availability. **Canonical lineup as of 2026-05-24 (empirically verified live on `johnb-2025/global`):**
-  - **`gemini-3.5-flash`** — GA, launched 2026-05-19. **New default** for conversational/coding. Near-Pro quality at Flash speed/cost ($1.50/$9.00 per Mtok). Beats `gemini-3.1-pro-preview` on coding at ~25% lower cost.
-  - **`gemini-3.1-pro-preview`** — Preview, launched 2026-02-19. Use for deep reasoning, analytical/deep tiers. $2/$12 per Mtok.
-  - **`gemini-3.1-flash-lite-preview`** — Preview. Cheapest tier; use for high-volume classification, reflexive tier.
+- **Session isolation**: do file-editing work in your own worktree (`EnterWorktree`), not the shared main checkout — concurrent sessions collide there (HEAD moves mid-operation, pushes race, you can publish another session's in-flight commits). Merge to `main` in one short window at the end. Read-only sessions don't need one. See `.claude/rules/session-worktree-isolation.md`.
+- **AI Model Versions**: Never reference or use Gemini 2.0 or 2.5 models — they are deprecated. Always use Gemini 3.0+. Before writing any code that references a model version, do a web search AND probe the live Vertex AI endpoint (HTTP 200 from `:generateContent`) to verify availability. **Canonical lineup as of 2026-07-25 (empirically re-verified live on `johnb-2025/global`):**
+  - **`gemini-3.1-pro-preview`** — verified 200 on 2026-07-25. Deep reasoning, analytical/deep tiers. $2/$12 per Mtok.
+  - **`gemini-3.1-flash-lite`** — verified 200 on 2026-07-25. Cheapest tier; use for high-volume classification, reflexive tier. Successor to the shut-down `-preview` ID.
   - **`gemini-3.1-pro-preview-customtools`** — Pro variant optimized for custom-tool prioritization (view_file, search_code).
+  - ❌ `gemini-3.1-flash-lite-preview` — SHUT DOWN (404 since ≤2026-07; caused 392 silent classify failures before the 2026-07-25 rename to `gemini-3.1-flash-lite`).
+  - **`gemini-3.8-flash`** — verified 200 on 2026-09-06 (braced probe, `thinkingBudget:0`, replied "ok"). Configured as `reliability.model_fallbacks` target and `initiative.propose_model` since 2026-09-06 (GLM-4.5-Air primary, this as backup). ❌ `gemini-3.8-flash-lite` — 404 on 2026-09-06; do not use.
+  - ⚠️ `gemini-3.5-flash` — **re-probed 200 on 2026-07-26** against this project's `global` endpoint, contradicting the 2026-07-25 note that recorded it as 404. It is currently reachable and is the configured `reliability.model_fallbacks` target. Cause of the earlier 404 unknown — either access changed back, or that probe hit the same shell trap described below. Treat as live; re-probe before relying on it.
+  - **Probe gotcha that manufactures fake 404s:** in zsh, `"$base/$model:generateContent"` applies a history-style modifier to `$model` — `gemini-3.1-pro-preview` expands to `1-pro-previewnerateContent`, so the URL names a model that does not exist and Vertex answers 404. This makes a live model look retired. Always brace the variable: `"$base/${model}:generateContent"`. Verified 2026-07-26: the braced form returns 200 for `gemini-3.5-flash`, `gemini-3.1-flash-lite`, and `gemini-3.1-pro-preview`; only `gemini-3.1-flash-lite-preview` genuinely 404s.
   - ❌ `gemini-3-pro-preview` — discontinued 2026-03-26, use `gemini-3.1-pro-preview`.
-  - ❌ `gemini-3-flash-preview` — superseded by `gemini-3.5-flash`; still alive but not recommended for new code.
-  - ❌ `gemini-3.1-flash-preview` (no such ID — only flash-lite for 3.1) and `gemini-3.5-pro` (3.5 is Flash-only).
-  All Gemini access uses Vertex AI with Application Default Credentials (ADC), not API keys.
+  All Gemini access uses Vertex AI with Application Default Credentials (ADC), not API keys — a `?key=` API-key call to Vertex returns 401 (150 such failures found in the 2026-07-25 log audit).
 - **Gemini 3.x thinking-token budget gotcha** (discovered 2026-05-24, root cause of reactive-iMessage empty-response bug): Gemini 3.x models default to thinking-enabled with a large invisible thinking budget. Output tokens from `maxOutputTokens` are SHARED between thinking and the visible reply. A short max_tokens (e.g. 80) can leave 0 tokens for the actual response → empty content + `finishReason: MAX_TOKENS` + `thoughtsTokenCount: 72`. **Always pass `generationConfig.thinkingConfig.thinkingBudget` explicitly** in Vertex requests — `0` to disable for reflexive/short replies, a real number (e.g. 1024) for analytical tiers. The h-uman model_router carries a `thinking` field per tier; that value MUST flow to `thinkingConfig.thinkingBudget` in the request body. Verified live: with `thinkingBudget=0`, `gemini-3.5-flash` replies "Yeah, just chilling at home, what's up?" in 12 tokens; without it, same prompt returns empty after burning 72 thinking tokens.
 - Use `--hu-surface-container*` for branded tonal surfaces, `--hu-bg-surface` for neutral.
 - Use neutral state overlays (`--hu-hover-overlay`, etc.) — white/black veils on dark/light; brand shows in rings and primaries.
@@ -111,7 +116,7 @@ Types: `feat fix refactor test docs chore perf ci build style`
 
 | Workflow                    | What it checks                                                                                                                                    |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ci.yml`                    | C build + 13,801+ tests (Linux + macOS), UI tsc + vitest + build, website build, clang-tidy, E2E, visual regression, axe accessibility, Lighthouse |
+| `ci.yml`                    | C build + 14,097+ tests (Linux + macOS), UI tsc + vitest + build, website build, clang-tidy, E2E, visual regression, axe accessibility, Lighthouse |
 | `native-apps-fleet.yml`     | Multi-simulator iOS XCUITest + multi-API Android instrumented tests + SOTA gate (apps path / schedule / dispatch) |
 | `.github/actions/ios-uitest` | Composite: XcodeGen + HumaniOS XCUITest (shared by `ci.yml` + fleet) |
 | `benchmark.yml`             | Performance regression (binary size, startup time, RSS)                                                                                           |
@@ -136,9 +141,9 @@ Extend via: `src/persona/` (persona.c, creator.c, analyzer.c, sampler.c, example
 
 | Path                              | What                                                                  |
 | --------------------------------- | --------------------------------------------------------------------- |
-| `src/`                            | All C source (~1,050 `.c` files, ~422K lines of C)                         |
+| `src/`                            | All C source (~1,050 `.c` files, ~418K lines of C)                         |
 | `include/human/`                  | Public headers                                                        |
-| `tests/`                          | 760+ test files, 13,801+ tests                                       |
+| `tests/`                          | 760+ test files, 14,097+ tests                                       |
 | `fuzz/`                           | 31 libFuzzer harnesses                                                |
 | `ui/`                             | LitElement web dashboard                                              |
 | `website/`                        | Astro marketing site                                                  |
@@ -182,7 +187,7 @@ All project standards live in `docs/standards/`. This is the single source of tr
 
 ## Design System (all platforms)
 
-- Typeface: **Avenir** (web: `var(--hu-font)`, never Google Fonts)
+- Typeface: **Avenir** for UI and body on all platforms (web: `var(--hu-font)`); **Newsreader** (self-hosted, OFL) for display/headline roles on the web Quiet Room layer (`var(--hu-font-display)`). Never load fonts from Google or any third-party host.
 - Icons: **Phosphor Regular** (web: `ui/src/icons.ts`)
 - Tokens: `--hu-*` CSS custom properties from `design-tokens/`
 - Never use raw hex colors, pixel spacing, or pixel radii in any UI code.

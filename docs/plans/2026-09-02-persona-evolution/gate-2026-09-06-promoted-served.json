@@ -1,0 +1,74 @@
+{
+  "event": "job",
+  "results": "docs/plans/2026-09-02-persona-evolution/results-2026-09-05.json",
+  "n_matched": 35,
+  "min_matched": 30,
+  "excluded_axes": [
+    "lowercase_start_rate"
+  ],
+  "axes": {
+    "length_chars": {
+      "human_delta": -3.0146137907883954,
+      "gen_pre": {
+        "mean": 55.114285714285714,
+        "ci_lo": 44.82857142857143,
+        "ci_hi": 66.0,
+        "n": 35
+      },
+      "gen_post": {
+        "mean": 55.857142857142854,
+        "ci_lo": 43.25714285714286,
+        "ci_hi": 69.4,
+        "n": 35
+      },
+      "gen_delta": 0.7428571428571402,
+      "sign_match": false
+    },
+    "emoji_rate": {
+      "human_delta": 0.038678797559931005,
+      "gen_pre": {
+        "mean": 0.0,
+        "ci_lo": 0.0,
+        "ci_hi": 0.0,
+        "n": 35
+      },
+      "gen_post": {
+        "mean": 0.17142857142857143,
+        "ci_lo": 0.05714285714285714,
+        "ci_hi": 0.2857142857142857,
+        "n": 35
+      },
+      "gen_delta": 0.17142857142857143,
+      "sign_match": true
+    },
+    "warmth_hits_per_100_words": {
+      "human_delta": 0.4217332374570567,
+      "gen_pre": {
+        "mean": 2.172893772893773,
+        "ci_lo": 0.7736263736263737,
+        "ci_hi": 3.816483516483517,
+        "n": 35
+      },
+      "gen_post": {
+        "mean": 4.077353429410042,
+        "ci_lo": 2.198467903907975,
+        "ci_hi": 6.301697712577854,
+        "n": 35
+      },
+      "gen_delta": 1.904459656516269,
+      "sign_match": true
+    }
+  },
+  "exclusion_reasons": {
+    "lowercase_start_rate": "device/autocapitalisation artefact: 0.00->0.26->0.02->0.36 week-to-week inside one store (spec \u00a73b point 2)"
+  },
+  "status": "FAIL",
+  "pre_gen": {
+    "path": "/Users/sethford/blind_ab_run/triples_glm_v5.json",
+    "n": 105
+  },
+  "post_gen": {
+    "path": "37 trials generated 2026-09-06 07:47 through :8741 with the production head, adapter seth-glm-air-mlxtune-orpo-20260905-0856-20260905-085655 promoted (160 tensors bound)",
+    "n": 37
+  }
+}

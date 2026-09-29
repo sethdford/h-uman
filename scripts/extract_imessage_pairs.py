@@ -10,10 +10,17 @@ Reads ~/Library/Messages/chat.db and produces:
 
 import json
 import os
-import re
 import sqlite3
 import sys
 from datetime import datetime
+
+# Shared typedstream decoder (scripts/blind_ab/imessage_text.py). This module
+# used to carry its own copy, which drifted: the fix in e80af898 landed only on
+# the classifier path and never reached here. See extract_text_from_attributed_body.
+sys.path.insert(
+    0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "blind_ab")
+)
+from imessage_text import decode_attributed_body
 
 DB_PATH = os.path.expanduser("~/Library/Messages/chat.db")
 OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "imessage")
@@ -25,6 +32,9 @@ MAX_GAP_SECONDS = 3600  # 1 hour
 
 # Minimum Seth reply length to be useful training data
 MIN_REPLY_LENGTH = 2
+# Preceding turns attached to each ground-truth pair as `context_turns`. 6 covers
+# the typical iMessage exchange depth without blowing the eval's prompt budget.
+GT_CONTEXT_TURNS = 6
 
 # Filter out system/verification messages
 SKIP_PATTERNS = [
@@ -53,29 +63,87 @@ def should_skip(text):
 
 
 def extract_text_from_attributed_body(blob):
-    """Decode text from an NSAttributedString (NSKeyedArchiver) blob.
+    """Decode text from an ``attributedBody`` typedstream blob.
 
-    Modern macOS stores iMessage text only in the attributedBody column as a
-    serialised NSAttributedString.  The text payload sits between the
-    ``NSString`` marker and a ``\\x86`` terminator.
+    Modern macOS stores iMessage bodies only in the ``attributedBody`` column,
+    as a NeXTSTEP *typedstream* (NSArchiver) archive — not an NSKeyedArchiver
+    plist. The NSString payload is laid out as::
+
+        "NSString" 01 94 84 01 2b <LEN> <utf-8 text bytes...>
+                                ^^     ^^^^^
+                                '+'    length prefix
+
+    ``<LEN>`` is a single byte, or ``0x81`` followed by a little-endian uint16
+    when the byte length is >= 128.
+
+    This delegates to the shared decoder rather than re-implementing the
+    format. The previous local implementation anchored on ``+`` and began
+    reading text at ``+ 1`` — the length byte itself — then searched for a
+    ``\\x86`` byte to find the end. That corrupted ~20% of extracted replies
+    two different ways:
+
+    1. The length byte was emitted as leading text whenever it was printable
+       (0x20-0x7E, i.e. byte lengths 32-126), producing rows like
+       ``",I don't know..."`` where ``0x2c`` == 44 == the message's own byte
+       length. Lengths under 0x20 were control characters that a downstream
+       ``re.sub`` stripped, so those rows decoded correctly by accident.
+    2. ``\\x86`` is a legal UTF-8 continuation byte (continuations span
+       0x80-0xBF), so messages containing a character encoded with 0x86 — any
+       "\\U0001f606" (f0 9f 98 86), or the "↩" (e2 86 a9) that opens every
+       reply-quote — were truncated mid-character and usually dropped.
+
+    Trusting the length prefix and slicing exactly fixes both. Regression
+    tests with real chat.db fixtures: scripts/test_extract_imessage_pairs.py.
     """
-    idx = blob.find(b"NSString")
-    if idx < 0:
-        return None
-    start = blob.find(b"+", idx)
-    if start < 0:
-        return None
-    start += 1
-    end = blob.find(b"\x86", start)
-    if end < 0:
-        end = start + 2000
-    raw = blob[start:end]
-    try:
-        text = raw.decode("utf-8", errors="ignore").strip()
-    except Exception:
-        return None
-    text = re.sub(r"^[\x00-\x1f]+", "", text)
-    return text if len(text) > 1 else None
+    return decode_attributed_body(blob)
+
+
+# --- Decode-failure tripwire ----------------------------------------------
+# The previous decoder silently returned None for 124 of 2982 attributedBody
+# rows (4.16%) and this script just `continue`d past them. Nothing counted or
+# reported it, so a real corpus regression stayed invisible for months. The
+# fixed decoder currently fails on 0 of 2982 rows.
+#
+# Fraction of attributedBody rows allowed to fail before the run is treated as
+# a corpus regression rather than normal attrition.
+DECODE_FAILURE_BUDGET = 0.01  # 1%
+
+
+def report_decode_failures(recovered, failed, out=sys.stdout):
+    """Report attributedBody decode outcomes and decide whether to fail the run.
+
+    Returns True if the run should be treated as healthy, False if the failure
+    rate indicates a corpus regression (e.g. a macOS typedstream format change
+    that the decoder no longer understands).
+
+    Policy: a small number of genuinely-undecodable rows is tolerable, so warn
+    on any failure but only fail the run above DECODE_FAILURE_BUDGET. That
+    keeps regeneration unblocked for one-off oddities while still catching a
+    format change, which would fail broadly rather than in ones and twos.
+    """
+    total = recovered + failed
+    if total == 0:
+        return True
+    rate = failed / total
+    print(
+        "  (%d recovered from attributedBody, %d failed to decode — %.2f%%)"
+        % (recovered, failed, 100 * rate),
+        file=out,
+    )
+    if rate > DECODE_FAILURE_BUDGET:
+        print(
+            "  REGRESSION: decode failure rate %.2f%% exceeds the %.0f%% budget"
+            % (100 * rate, 100 * DECODE_FAILURE_BUDGET),
+            file=out,
+        )
+        return False
+    if failed:
+        print(
+            "  WARNING: %d attributedBody rows failed to decode and were "
+            "dropped from the corpus" % failed,
+            file=out,
+        )
+    return True
 
 
 def extract_messages(db_path):
@@ -105,6 +173,7 @@ def extract_messages(db_path):
 
     messages = []
     ab_recovered = 0
+    ab_failed = 0
     for row in cursor.fetchall():
         rowid, is_from_me, text, date_ns, contact, chat_id, delivered, read, attr_body = row
 
@@ -114,6 +183,11 @@ def extract_messages(db_path):
             final_text = extract_text_from_attributed_body(attr_body)
             if final_text:
                 ab_recovered += 1
+            else:
+                # Counted rather than silently skipped — see the tripwire note
+                # above. A rising failure rate means the decoder no longer
+                # understands the archive format, not that texts got quieter.
+                ab_failed += 1
         else:
             continue
 
@@ -134,8 +208,15 @@ def extract_messages(db_path):
         })
 
     conn.close()
-    if ab_recovered:
-        print(f"  ({ab_recovered} messages recovered from attributedBody)")
+    if ab_recovered or ab_failed:
+        healthy = report_decode_failures(ab_recovered, ab_failed)
+        if not healthy:
+            raise SystemExit(
+                "attributedBody decode failure rate exceeded "
+                "DECODE_FAILURE_BUDGET (%.0f%%) — refusing to write a corpus "
+                "that silently lost messages. Investigate the archive format "
+                "before regenerating." % (100 * DECODE_FAILURE_BUDGET)
+            )
     return messages
 
 
@@ -197,6 +278,16 @@ def extract_ground_truth(windows):
     """
     Extract (incoming_message, seth_reply) pairs for evaluation.
     Only include cases where someone sends a message and Seth replies next.
+
+    Each pair carries `context_turns`: up to GT_CONTEXT_TURNS messages that
+    PRECEDED `incoming`, oldest first, as {"from": "them"|"seth", "text": ...}.
+
+    Without this the blind A/B is unwinnable by construction: the human's reply
+    was written with the thread in front of him, while the model saw one
+    isolated line, so the judge detects "lack of conversational memory" — an
+    asymmetry the harness created (measured 2026-07-26: 0/9 fooled, with the
+    judge citing exactly that). Anything consuming ground truth for generation
+    MUST feed context_turns to the model, or it is scoring the harness.
     """
     gt = []
     for window in windows:
@@ -206,9 +297,16 @@ def extract_ground_truth(windows):
             if not incoming["is_from_me"] and reply["is_from_me"]:
                 if len(reply["text"]) >= MIN_REPLY_LENGTH:
                     delay_s = reply["timestamp"] - incoming["timestamp"]
+                    lo = max(0, i - GT_CONTEXT_TURNS)
+                    context_turns = [
+                        {"from": "seth" if m["is_from_me"] else "them", "text": m["text"]}
+                        for m in window[lo:i]
+                        if m.get("text")
+                    ]
                     gt.append({
                         "incoming": incoming["text"],
                         "seth_reply": reply["text"],
+                        "context_turns": context_turns,
                         "delay_seconds": round(delay_s, 1),
                         "chat_id": incoming["chat_id"],
                         "timestamp": reply["datetime"],

@@ -220,17 +220,21 @@ export class ScNodesView extends GatewayAwareLitElement {
           style="--hu-stagger-delay: 0ms"
         ></hu-stat-card>
         <hu-stat-card
-          .value=${this.nodes.filter((n) =>
-            ["ok", "healthy", "connected", "online"].includes((n.status ?? "").toLowerCase()),
-          ).length}
+          .value=${
+            this.nodes.filter((n) =>
+              ["ok", "healthy", "connected", "online"].includes((n.status ?? "").toLowerCase()),
+            ).length
+          }
           label="Healthy"
           style="--hu-stagger-delay: 50ms"
         ></hu-stat-card>
       </hu-stats-row>
       <div class="header-actions">
-        ${this.lastLoadedAt
-          ? html`<span class="staleness">Last updated ${this.stalenessLabel}</span>`
-          : nothing}
+        ${
+          this.lastLoadedAt
+            ? html`<span class="staleness">Last updated ${this.stalenessLabel}</span>`
+            : nothing
+        }
         <hu-button
           size="sm"
           .loading=${this.loading}
@@ -240,70 +244,82 @@ export class ScNodesView extends GatewayAwareLitElement {
           Refresh
         </hu-button>
       </div>
-      ${this.error
-        ? html`<hu-empty-state .icon=${icons.warning} heading="Error" .description=${this.error}>
-            <hu-button variant="primary" @click=${() => this.load()}>Retry</hu-button>
-          </hu-empty-state>`
-        : nothing}
+      ${
+        this.error
+          ? html`<hu-empty-state .icon=${icons.warning} heading="Error" .description=${this.error}>
+              <hu-button variant="primary" @click=${() => this.load()}>Retry</hu-button>
+            </hu-empty-state>`
+          : nothing
+      }
       <div class="table-section hu-stagger-motion9" role="region" aria-label="Nodes table">
-        ${this.nodes.length === 0 && !this.loading
-          ? html`
-              <hu-empty-state
-                .icon=${icons.monitor}
-                heading="No nodes connected"
-                description="Connected devices and gateways will appear here."
-              ></hu-empty-state>
-            `
-          : this.nodes.length > 0
+        ${
+          this.nodes.length === 0 && !this.loading
             ? html`
-                <hu-data-table-v2
-                  .columns=${this.columns}
-                  .rows=${this.tableRows}
-                  @hu-row-click=${this._onRowClick}
-                ></hu-data-table-v2>
+                <hu-empty-state
+                  .icon=${icons.monitor}
+                  heading="No nodes connected"
+                  description="Connected devices and gateways will appear here."
+                ></hu-empty-state>
               `
-            : nothing}
+            : this.nodes.length > 0
+              ? html`
+                  <hu-data-table-v2
+                    .columns=${this.columns}
+                    .rows=${this.tableRows}
+                    @hu-row-click=${this._onRowClick}
+                  ></hu-data-table-v2>
+                `
+              : nothing
+        }
       </div>
       <hu-sheet ?open=${this._sheetNode != null} @close=${this._onSheetClose}>
-        ${this._sheetNode
-          ? html`
-              <div class="sheet-title">
-                ${this._sheetNode.hostname ?? this._sheetNode.id ?? "Node"}
-              </div>
-              <div class="sheet-detail-row">
-                <span class="sheet-detail-label">Status</span>
-                <span class="sheet-detail-value">${this._sheetNode.status ?? "-"}</span>
-              </div>
-              <div class="sheet-detail-row">
-                <span class="sheet-detail-label">Type</span>
-                <span class="sheet-detail-value">${this._sheetNode.type ?? "-"}</span>
-              </div>
-              <div class="sheet-detail-row">
-                <span class="sheet-detail-label">WebSocket connections</span>
-                <span class="sheet-detail-value">${this._sheetNode.ws_connections ?? 0}</span>
-              </div>
-              <div class="sheet-detail-row">
-                <span class="sheet-detail-label">Uptime</span>
-                <span class="sheet-detail-value">${formatUptime(this._sheetNode.uptime_secs)}</span>
-              </div>
-              ${this._sheetNode.hostname
-                ? html`
-                    <div class="sheet-detail-row">
-                      <span class="sheet-detail-label">Hostname</span>
-                      <span class="sheet-detail-value">${this._sheetNode.hostname}</span>
-                    </div>
-                  `
-                : nothing}
-              ${this._sheetNode.version
-                ? html`
-                    <div class="sheet-detail-row">
-                      <span class="sheet-detail-label">Version</span>
-                      <span class="sheet-detail-value">${this._sheetNode.version}</span>
-                    </div>
-                  `
-                : nothing}
-            `
-          : nothing}
+        ${
+          this._sheetNode
+            ? html`
+                <div class="sheet-title">
+                  ${this._sheetNode.hostname ?? this._sheetNode.id ?? "Node"}
+                </div>
+                <div class="sheet-detail-row">
+                  <span class="sheet-detail-label">Status</span>
+                  <span class="sheet-detail-value">${this._sheetNode.status ?? "-"}</span>
+                </div>
+                <div class="sheet-detail-row">
+                  <span class="sheet-detail-label">Type</span>
+                  <span class="sheet-detail-value">${this._sheetNode.type ?? "-"}</span>
+                </div>
+                <div class="sheet-detail-row">
+                  <span class="sheet-detail-label">WebSocket connections</span>
+                  <span class="sheet-detail-value">${this._sheetNode.ws_connections ?? 0}</span>
+                </div>
+                <div class="sheet-detail-row">
+                  <span class="sheet-detail-label">Uptime</span>
+                  <span class="sheet-detail-value"
+                    >${formatUptime(this._sheetNode.uptime_secs)}</span
+                  >
+                </div>
+                ${
+                  this._sheetNode.hostname
+                    ? html`
+                        <div class="sheet-detail-row">
+                          <span class="sheet-detail-label">Hostname</span>
+                          <span class="sheet-detail-value">${this._sheetNode.hostname}</span>
+                        </div>
+                      `
+                    : nothing
+                }
+                ${
+                  this._sheetNode.version
+                    ? html`
+                        <div class="sheet-detail-row">
+                          <span class="sheet-detail-label">Version</span>
+                          <span class="sheet-detail-value">${this._sheetNode.version}</span>
+                        </div>
+                      `
+                    : nothing
+                }
+              `
+            : nothing
+        }
       </hu-sheet>
     `;
   }

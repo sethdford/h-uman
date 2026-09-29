@@ -3,6 +3,7 @@
 #include "human/ml/cli.h"
 #include "human/agent/scheduler_status_json.h"
 #include "human/config.h"
+#include "human/core/paths.h"
 #ifdef HU_ENABLE_RL_FULL
 #include "human/eval/eval_gate.h"
 #endif
@@ -90,6 +91,7 @@ static const char *get_opt(const char **argv, int argc, int i, const char *opt) 
     return NULL;
 }
 
+#ifndef HU_IS_TEST
 /* Phase 0 helper — load a BPE tokenizer using the project convention
  * (data_dir/tokenizer.vocab → ~/.human/models/tokenizer.vocab → default
  * 256-byte byte-level BPE) and derive the token_bytes table for BPB.
@@ -113,24 +115,7 @@ static hu_error_t derive_token_bytes_for_data_dir(hu_allocator_t *alloc, const c
     if (err != HU_OK)
         return err;
 
-    char path[1024];
-    int loaded = 0;
-    if (data_dir && data_dir[0]) {
-        int n = snprintf(path, sizeof(path), "%s/tokenizer.vocab", data_dir);
-        if (n > 0 && (size_t)n < sizeof(path) && hu_bpe_tokenizer_load(tok, path) == HU_OK) {
-            loaded = 1;
-        }
-    }
-    if (!loaded) {
-        const char *home = getenv("HOME");
-        if (home && home[0]) {
-            int n = snprintf(path, sizeof(path), "%s/.human/models/tokenizer.vocab", home);
-            if (n > 0 && (size_t)n < sizeof(path))
-                (void)hu_bpe_tokenizer_load(tok, path);
-        }
-        /* On both failures, tok keeps its default 256-byte byte-level vocab
-         * — every token is one byte, BPB is well-defined. */
-    }
+    (void)hu_bpe_tokenizer_load_default(tok, data_dir); /* default byte vocab on a miss */
 
     int32_t *token_bytes = NULL;
     size_t count = 0;
@@ -145,6 +130,7 @@ static hu_error_t derive_token_bytes_for_data_dir(hu_allocator_t *alloc, const c
     *out_count = count;
     return HU_OK;
 }
+#endif /* !HU_IS_TEST */
 
 hu_error_t hu_ml_cli_train(hu_allocator_t *alloc, int argc, const char **argv) {
     (void)alloc;
@@ -413,11 +399,8 @@ hu_error_t hu_ml_cli_prepare(hu_allocator_t *alloc, int argc, const char **argv)
  * ~/.human/scheduler.status. Uses `hu_scheduler_status_parse_json` (same as
  * `human doctor scheduler`) so key order and whitespace never drift between tools. */
 static void print_scheduler_status_block(void) {
-    const char *home = getenv("HOME");
-    if (!home || !*home)
-        return;
     char path[512];
-    int n = snprintf(path, sizeof(path), "%s/.human/scheduler.status", home);
+    int n = hu_paths_state(path, sizeof(path), "scheduler.status");
     if (n <= 0 || (size_t)n >= sizeof(path))
         return;
     FILE *f = fopen(path, "r");
@@ -522,6 +505,7 @@ hu_error_t hu_ml_cli_mine_corrections(hu_allocator_t *alloc, int argc, const cha
      * from "user did not mention export". Without this, the default-
      * enable block below silently re-enables export after --no-export. */
     int export_disabled_explicitly = 0;
+    int count_only = 0; /* --count-only: read-only probe, prints {"pairs": N} */
     for (int i = 1; i < argc; i++) {
         const char *v = get_opt(argv, argc, i, "--db");
         if (v) {
@@ -544,6 +528,10 @@ hu_error_t hu_ml_cli_mine_corrections(hu_allocator_t *alloc, int argc, const cha
                 return HU_ERR_INVALID_ARGUMENT;
             }
             i++;
+            continue;
+        }
+        if (strcmp(argv[i], "--count-only") == 0) {
+            count_only = 1;
             continue;
         }
         if (strcmp(argv[i], "--no-export") == 0) {
@@ -572,6 +560,7 @@ hu_error_t hu_ml_cli_mine_corrections(hu_allocator_t *alloc, int argc, const cha
     (void)correction_window_sec;
     (void)want_export;
     (void)export_disabled_explicitly;
+    (void)count_only;
     printf("[mine-corrections] test mode: skipped\n");
     return HU_OK;
 #else
@@ -581,12 +570,13 @@ hu_error_t hu_ml_cli_mine_corrections(hu_allocator_t *alloc, int argc, const cha
      * Plain automatic storage is correct. */
     char default_db[512];
     if (!db_path) {
+        /* Kept: the guard owns the "HOME not set" diagnostic; the helper below fails silently. */
         const char *home = getenv("HOME");
         if (!home) {
             fprintf(stderr, "[mine-corrections] HOME not set and --db not provided\n");
             return HU_ERR_INVALID_ARGUMENT;
         }
-        int n = snprintf(default_db, sizeof(default_db), "%s/.human/memory.db", home);
+        int n = hu_paths_state(default_db, sizeof(default_db), "memory.db");
         if (n <= 0 || (size_t)n >= sizeof(default_db))
             return HU_ERR_INTERNAL;
         db_path = default_db;
@@ -621,7 +611,14 @@ hu_error_t hu_ml_cli_mine_corrections(hu_allocator_t *alloc, int argc, const cha
 
     hu_dpo_mine_stats_t stats;
     memset(&stats, 0, sizeof(stats));
+    opts.count_only = count_only;
     hu_error_t err = hu_dpo_mine_corrections(alloc, db, &opts, &stats);
+    if (count_only && err == HU_OK) {
+        /* The C nightly runner parses exactly this shape (retrain_parse_pairs). */
+        printf("{\"pairs\": %zu}\n", stats.triples_examined);
+        sqlite3_close(db);
+        return HU_OK;
+    }
     if (err != HU_OK) {
         fprintf(stderr, "[mine-corrections] miner failed: %d\n", err);
         sqlite3_close(db);
@@ -752,13 +749,8 @@ hu_error_t hu_ml_cli_prepare_conversations(hu_allocator_t *alloc, int argc, cons
          * pointer once the block exits (CodeRabbit 2026-05-17 finding). */
         char default_db[512] = {0};
         const char *db_path = memory_db ? memory_db : chat_db;
-        if (!db_path) {
-            const char *home = getenv("HOME");
-            if (home) {
-                snprintf(default_db, sizeof(default_db), "%s/.human/memory.db", home);
-                db_path = default_db;
-            }
-        }
+        if (!db_path && hu_paths_state(default_db, sizeof(default_db), "memory.db") > 0)
+            db_path = default_db;
         if (db_path) {
             size_t dpo_count = 0;
             hu_error_t dpo_err =
@@ -1149,10 +1141,8 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
              * default_adapter[512] into adapter_output_path[256] via "%s",
              * which GCC -Werror=format-truncation rejects. home/persona_name
              * are unbounded char* so GCC cannot prove truncation here. */
-            const char *home = getenv("HOME");
-            snprintf(lcfg.adapter_output_path, sizeof(lcfg.adapter_output_path),
-                     "%s/.human/training-data/adapters/lora-persona-%s", home ? home : ".",
-                     persona_name);
+            hu_paths_state_or(lcfg.adapter_output_path, sizeof(lcfg.adapter_output_path), ".",
+                              "training-data/adapters/lora-persona-%s", persona_name);
         }
 
         if (data_dir) {
@@ -2245,6 +2235,7 @@ hu_error_t hu_ml_cli_lora_ab(hu_allocator_t *alloc, int argc, const char **argv)
  * comparator counts empty responses as `skipped`, so a few provider
  * hiccups don't poison the mean. */
 
+#ifndef HU_IS_TEST
 /* Build a minimal "system" prompt from the persona's identity and
  * top traits, suitable for passing to a chat call. Returns 0 on
  * success (string written into `out`), non-zero when the persona
@@ -2279,6 +2270,7 @@ static size_t hu_ml_lora_runner_build_system_prompt(const hu_persona_t *persona,
     }
     return n;
 }
+#endif /* !HU_IS_TEST */
 
 /* Write a `["resp1", "resp2", ...]` JSON array to `path`. JSON
  * escaping uses `hu_json_string_new` + `hu_json_stringify` so the
@@ -2565,6 +2557,10 @@ hu_error_t hu_ml_cli_lora_runner(hu_allocator_t *alloc, int argc, const char **a
      * `response` field. Lets unit tests exercise the full
      * load → write → JSON round-trip without spinning up a
      * provider, which is unavailable in tests anyway. */
+    (void)provider_name;
+    (void)model;
+    (void)adapter_path;
+    (void)adapter_id;
     size_t produced = 0;
     for (size_t b = 0; b < persona.example_banks_count && produced < total_examples; b++) {
         const hu_persona_example_bank_t *bank = &persona.example_banks[b];
@@ -3307,18 +3303,12 @@ hu_error_t hu_ml_cli_train_from_reactions(hu_allocator_t *alloc, int argc, const
         if (env && env[0]) {
             db_path = env;
         } else {
-            const char *home = getenv("HOME");
-            if (!home)
-                home = ".";
-            snprintf(home_db, sizeof(home_db), "%s/.human/memory.db", home);
+            (void)hu_paths_state_or(home_db, sizeof(home_db), ".", "memory.db");
             db_path = home_db;
         }
     }
     if (!export_path) {
-        const char *home = getenv("HOME");
-        if (!home)
-            home = ".";
-        snprintf(home_export, sizeof(home_export), "%s/.human/dpo/reactions.jsonl", home);
+        (void)hu_paths_state_or(home_export, sizeof(home_export), ".", "dpo/reactions.jsonl");
         export_path = home_export;
         (void)hu_dpo_miner_ensure_parent_dir(export_path);
     }
@@ -3398,9 +3388,9 @@ hu_error_t hu_ml_cli_rl_train(hu_allocator_t *alloc, int argc, const char **argv
             printf("Usage: human ml rl-train --algorithm {dpo|simpo|orpo|grpo2} "
                    "[other flags...]\n"
                    "  --algorithm dpo    Delegate to existing DPO trainer\n"
-                   "  --algorithm simpo  Train via SimPO loss head (Init #06)\n"
-                   "  --algorithm orpo   Train via ORPO loss head (US-11.5)\n"
-                   "  --algorithm grpo2  (not yet implemented — exit 2)\n");
+                   "  --algorithm simpo  (not yet implemented — returns NOT_SUPPORTED)\n"
+                   "  --algorithm orpo   (not yet implemented — returns NOT_SUPPORTED)\n"
+                   "  --algorithm grpo2  (not yet implemented — returns NOT_SUPPORTED)\n");
             return HU_OK;
         }
         const char *v = get_opt(argv, argc, i, "--algorithm");

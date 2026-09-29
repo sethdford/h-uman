@@ -309,5 +309,310 @@ class TestBackwardCompatibility(unittest.TestCase):
         self.assertEqual(agg_no_axes["n"], agg_with_axes["n"])
 
 
+class TestRaterGateSeparation(unittest.TestCase):
+    """End-to-end pinning tests for the --rater gate-write separation.
+
+    Background (2026-07-26): a synthetic-judge run of score.py (n=160,
+    machine rater) overwrote the genuine cycle-3 human verdict (detection
+    0.500, n=12) in ~/.human/blind_ab_gate.json because main() wrote the
+    "human" key unconditionally. These tests pin the fix: gate writes are
+    opt-in via --rater, and synthetic runs must never touch the human key.
+    """
+
+    SCORE_PY = os.path.join(os.path.dirname(__file__), "score.py")
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        d = self.tmp.name
+        self.home = os.path.join(d, "home")
+        os.makedirs(os.path.join(self.home, ".human"))
+        self.home_gate = os.path.join(self.home, ".human", "blind_ab_gate.json")
+        self.repo_gate = os.path.join(d, "gate.json")
+        self.sheet = os.path.join(d, "sheet.csv")
+        self.key = os.path.join(d, "key.json")
+        self._write_fixture()
+
+    def _write_fixture(self):
+        import csv as _csv
+        import json as _json
+        with open(self.sheet, "w", newline="") as f:
+            w = _csv.writer(f)
+            w.writerow(["id", "choice", "confidence"])
+            for i in range(4):
+                w.writerow([str(i), "A" if i < 2 else "B", "4"])
+        with open(self.key, "w") as f:
+            _json.dump({str(i): "A" for i in range(4)}, f)
+
+    def _seed_human_verdict(self):
+        """Pre-populate a genuine human verdict in both gate files."""
+        import json as _json
+        genuine = {"verdict": "PASS", "detection": 0.5, "ci_lo": 0.2538,
+                   "n": 12, "timestamp": "2026-07-26T04:38:02"}
+        with open(self.home_gate, "w") as f:
+            _json.dump({"human": dict(genuine)}, f)
+        with open(self.repo_gate, "w") as f:
+            _json.dump({"schema_version": 1, "commit": None,
+                        "proxy": {"verdict": "ADVISORY", "mode": "ADVISORY"},
+                        "human": dict(genuine),
+                        "effective_verdict": "ADVISORY"}, f)
+        return genuine
+
+    def _run_score(self, *extra):
+        import subprocess
+        env = dict(os.environ, HOME=self.home)
+        return subprocess.run(
+            [sys.executable, self.SCORE_PY, self.sheet, "--key", self.key]
+            + list(extra),
+            capture_output=True, text=True, env=env, timeout=60)
+
+    def test_no_rater_writes_no_gate_files(self):
+        """Scoring-only invocation (no --rater) must print but write nothing."""
+        genuine = self._seed_human_verdict()
+        import json as _json
+        r = self._run_score()
+        self.assertIn(r.returncode, (0, 1), r.stderr)
+        self.assertIn("RESULT_blind_ab=", r.stdout)
+        with open(self.home_gate) as f:
+            data = _json.load(f)
+        self.assertEqual(data, {"human": genuine},
+                         "no-rater run must not touch the home gate file")
+
+    def test_emit_gate_without_rater_is_an_error(self):
+        """--emit-gate without --rater must fail loudly, not write silently."""
+        r = self._run_score("--emit-gate", self.repo_gate)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertFalse(os.path.exists(self.repo_gate))
+
+    def test_synthetic_does_not_touch_human_key(self):
+        """rater=synthetic must leave the human verdict byte-identical and
+        record its result under a separate 'synthetic' key."""
+        genuine = self._seed_human_verdict()
+        import json as _json
+        r = self._run_score("--rater", "synthetic",
+                            "--emit-gate", self.repo_gate)
+        self.assertIn(r.returncode, (0, 1), r.stderr)
+        # Home gate: human key unchanged, synthetic recorded separately.
+        with open(self.home_gate) as f:
+            home = _json.load(f)
+        self.assertEqual(home["human"], genuine,
+                         "synthetic run overwrote the human verdict")
+        self.assertIn("synthetic", home)
+        self.assertEqual(home["synthetic"]["n"], 4)
+        # Repo gate: human half unchanged, synthetic half present, and the
+        # effective verdict is still computed from proxy+human only.
+        with open(self.repo_gate) as f:
+            repo = _json.load(f)
+        self.assertEqual(repo["human"], genuine,
+                         "synthetic run overwrote the repo human half")
+        self.assertIn("synthetic", repo)
+        self.assertEqual(repo["synthetic"]["n"], 4)
+        self.assertEqual(repo["effective_verdict"], "ADVISORY")
+
+    def _write_stamped_fixture(self):
+        """Sheet whose rows carry the judge_api/judge_model provenance stamps
+        that synthetic_judge.py writes on every judged row."""
+        import csv as _csv
+        with open(self.sheet, "w", newline="") as f:
+            w = _csv.writer(f)
+            w.writerow(["id", "choice", "confidence", "judge_api", "judge_model"])
+            for i in range(4):
+                w.writerow([str(i), "A" if i < 2 else "B", "4",
+                            "openai", "gemma-4-31b-it-8bit"])
+
+    def test_stamped_sheet_vetoes_rater_human(self):
+        """A sheet stamped by synthetic_judge.py must refuse --rater human:
+        provenance beats the operator's claim (fail safe)."""
+        genuine = self._seed_human_verdict()
+        import json as _json
+        self._write_stamped_fixture()
+        r = self._run_score("--rater", "human", "--emit-gate", self.repo_gate)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        with open(self.home_gate) as f:
+            self.assertEqual(_json.load(f), {"human": genuine},
+                             "vetoed run must write nothing")
+
+    def test_stamped_sheet_as_synthetic_records_judge_model(self):
+        """--rater synthetic on a stamped sheet works and carries the
+        judge_model provenance into the synthetic gate record."""
+        import json as _json
+        self._write_stamped_fixture()
+        r = self._run_score("--rater", "synthetic")
+        self.assertIn(r.returncode, (0, 1), r.stderr)
+        with open(self.home_gate) as f:
+            home = _json.load(f)
+        self.assertEqual(home["synthetic"]["judge_model"], "gemma-4-31b-it-8bit")
+
+    def test_human_rater_writes_human_key_and_preserves_synthetic(self):
+        """rater=human keeps the original behavior and must not clobber a
+        previously-recorded synthetic key."""
+        import json as _json
+        with open(self.home_gate, "w") as f:
+            _json.dump({"synthetic": {"verdict": "PASS", "n": 160}}, f)
+        r = self._run_score("--rater", "human", "--emit-gate", self.repo_gate)
+        self.assertIn(r.returncode, (0, 1), r.stderr)
+        with open(self.home_gate) as f:
+            home = _json.load(f)
+        self.assertEqual(home["human"]["n"], 4)
+        self.assertIn(home["human"]["verdict"], ("PASS", "FAIL"))
+        self.assertEqual(home["synthetic"], {"verdict": "PASS", "n": 160},
+                         "human run clobbered the synthetic record")
+        with open(self.repo_gate) as f:
+            repo = _json.load(f)
+        self.assertEqual(repo["human"]["n"], 4)
+
+
+
+class TestPreferenceScoring(unittest.TestCase):
+    """Hermetic subprocess tests for score_preference.py (US-6,
+    sprints/sprint-better-than-human-2026-09-05/designs/US-6.md). Mirrors
+    TestRaterGateSeparation's pattern above, but score_preference.py has NO
+    gate-writing code path at all -- these tests confirm that absence, not
+    just a provenance split within one gate file.
+    """
+
+    SCORE_PREF_PY = os.path.join(os.path.dirname(__file__), "score_preference.py")
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        d = self.tmp.name
+        self.home = os.path.join(d, "home")
+        os.makedirs(os.path.join(self.home, ".human"))
+        self.home_gate = os.path.join(self.home, ".human", "blind_ab_gate.json")
+        self.sheet = os.path.join(d, "sheet.csv")
+        self.key = os.path.join(d, "key.json")
+        self.evidence_out = os.path.join(d, "evidence", "preference-results.json")
+
+    def _write_fixture(self, n, wins, mode_marker="preference", extra_cols=None):
+        """n rows total, first `wins` choices match the key (model preferred),
+        the rest do not."""
+        import csv as _csv
+        import json as _json
+        fieldnames = ["id", "choice", "confidence"] + list(extra_cols or ())
+        with open(self.sheet, "w", newline="") as f:
+            w = _csv.writer(f)
+            w.writerow(fieldnames)
+            for i in range(n):
+                row = [str(i), "A" if i < wins else "B", "4"]
+                row += ["x"] * len(extra_cols or ())
+                w.writerow(row)
+        key = {str(i): "A" for i in range(n)}
+        if mode_marker is not None:
+            key["_mode"] = mode_marker
+        with open(self.key, "w") as f:
+            _json.dump(key, f)
+
+    def _run(self, *extra):
+        import subprocess
+        env = dict(os.environ, HOME=self.home)
+        return subprocess.run(
+            [sys.executable, self.SCORE_PREF_PY, self.sheet, "--key", self.key]
+            + list(extra),
+            capture_output=True, text=True, env=env, timeout=60)
+
+    def test_n_below_min_refuses_and_writes_no_evidence(self):
+        """n=15 < the default --min-n 20 must refuse and write nothing."""
+        self._write_fixture(n=15, wins=10)
+        r = self._run("--rater", "human", "--evidence-out", self.evidence_out)
+        self.assertNotEqual(r.returncode, 0, r.stdout)
+        self.assertIn("RESULT_blind_ab_preference=INVALID", r.stderr)
+        self.assertFalse(os.path.exists(self.evidence_out))
+
+    def test_n_zero_refuses(self):
+        """No row's choice matches the key at all -> n=0, must refuse with
+        the explicit n=0 message (the 2026-07-25 vacuous-PASS incident
+        shape -- .claude/rules/no-number-without-a-measurement.md)."""
+        import csv as _csv
+        import json as _json
+        with open(self.sheet, "w", newline="") as f:
+            w = _csv.writer(f)
+            w.writerow(["id", "choice", "confidence"])
+            for i in range(20):
+                w.writerow([str(i), "", "4"])   # blank choice -> never counted
+        with open(self.key, "w") as f:
+            _json.dump({**{str(i): "A" for i in range(20)}, "_mode": "preference"}, f)
+        r = self._run("--rater", "human", "--evidence-out", self.evidence_out)
+        self.assertNotEqual(r.returncode, 0, r.stdout)
+        self.assertIn("n=0", r.stderr)
+        self.assertFalse(os.path.exists(self.evidence_out))
+
+    def test_rater_synthetic_scores_but_writes_no_evidence(self):
+        """A synthetic-rater run may still print a win rate (useful for a
+        dry run of the new framing) but must never write the committed
+        evidence artifact -- only --rater human does (AC-6.3)."""
+        self._write_fixture(n=20, wins=12)
+        r = self._run("--rater", "synthetic", "--evidence-out", self.evidence_out)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("RESULT_blind_ab_preference=SCORED", r.stdout)
+        self.assertFalse(os.path.exists(self.evidence_out))
+
+    def test_stamped_sheet_vetoes_rater_human(self):
+        """A sheet stamped by synthetic_judge.py (judge_api/judge_model
+        columns) must refuse --rater human -- reuses detect_rater_kind()
+        unmodified, same fixture shape as TestRaterGateSeparation above."""
+        self._write_fixture(n=20, wins=12, extra_cols=["judge_api", "judge_model"])
+        r = self._run("--rater", "human", "--evidence-out", self.evidence_out)
+        self.assertNotEqual(r.returncode, 0, r.stdout)
+        self.assertFalse(os.path.exists(self.evidence_out))
+
+    def test_key_missing_mode_marker_is_refused(self):
+        """A detection-mode key (no '_mode': 'preference') must be refused
+        outright -- scoring it here would silently report a meaningless
+        'win rate' over 'which side is really Seth'."""
+        self._write_fixture(n=20, wins=12, mode_marker=None)
+        r = self._run("--rater", "human", "--evidence-out", self.evidence_out)
+        self.assertNotEqual(r.returncode, 0, r.stdout)
+        self.assertIn("RESULT_blind_ab_preference=INVALID", r.stderr)
+        self.assertFalse(os.path.exists(self.evidence_out))
+
+    def test_wrong_mode_marker_is_refused(self):
+        """A key explicitly stamped '_mode': 'detection' (or anything other
+        than 'preference') is refused the same way as a missing marker."""
+        self._write_fixture(n=20, wins=12, mode_marker="detection")
+        r = self._run("--rater", "human", "--evidence-out", self.evidence_out)
+        self.assertNotEqual(r.returncode, 0, r.stdout)
+        self.assertFalse(os.path.exists(self.evidence_out))
+
+    def test_synthetic_15_of_20_yields_correct_win_rate_and_ci(self):
+        """A 15/20 sheet must yield EXACTLY wilson(15, 20) -- score_preference.py
+        must delegate, never reimplement, the interval math (AC-6.2)."""
+        from score import wilson
+        self._write_fixture(n=20, wins=15)
+        r = self._run()   # score-only, no --rater/--evidence-out
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        expected_p, expected_lo, expected_hi = wilson(15, 20)
+        self.assertIn(f"win_rate={expected_p:.3f}", r.stdout)
+        self.assertIn(f"ci=[{expected_lo:.3f},{expected_hi:.3f}]", r.stdout)
+        self.assertIn("n=20", r.stdout)
+
+    def test_human_run_writes_evidence_with_correct_schema(self):
+        """A qualifying human run (n>=20) writes exactly the AC-6.5 schema
+        and never touches ~/.human/blind_ab_gate.json (refusal condition #5
+        -- this measurement has no gate-writing code path at all)."""
+        import json as _json
+        from score import wilson
+        self._write_fixture(n=20, wins=13)
+        self.assertFalse(os.path.exists(self.home_gate))
+        r = self._run("--rater", "human", "--evidence-out", self.evidence_out)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue(os.path.exists(self.evidence_out))
+        with open(self.evidence_out) as f:
+            evidence = _json.load(f)
+        self.assertEqual(set(evidence.keys()),
+                         {"n", "win_rate", "ci_lo", "ci_hi", "rater", "date"})
+        self.assertEqual(evidence["n"], 20)
+        self.assertEqual(evidence["rater"], "human")
+        expected_p, expected_lo, expected_hi = wilson(13, 20)
+        self.assertAlmostEqual(evidence["win_rate"], round(expected_p, 4))
+        self.assertAlmostEqual(evidence["ci_lo"], round(expected_lo, 4))
+        self.assertAlmostEqual(evidence["ci_hi"], round(expected_hi, 4))
+        # Never touches the gate file, even implicitly via a shared import.
+        self.assertFalse(os.path.exists(self.home_gate),
+                         "score_preference.py must never create the blind_ab gate file")
+
+
 if __name__ == "__main__":
     unittest.main()

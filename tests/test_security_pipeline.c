@@ -1,6 +1,12 @@
+/* Cross-module suite: covers the agent undo stack (src/agent/undo.c) and the
+ * security audit logger (src/security/audit.c). The filename heuristic in
+ * scripts/check-test-references.sh resolves "security_pipeline" to
+ * src/security/security.c, which this file does not exercise.
+ *
+ * // @covers-none — heuristic picks src/security/security.c; see header above.
+ */
 #define HU_IS_TEST 1
 
-#include "human/agent/action_preview.h"
 #include "human/agent/undo.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
@@ -16,48 +22,6 @@
 #endif
 
 static hu_allocator_t sys;
-
-static void test_action_preview_shell_shows_command(void) {
-    hu_action_preview_t p;
-    memset(&p, 0, sizeof(p));
-    const char *args = "{\"command\":\"ls -la /tmp\"}";
-    hu_error_t err = hu_action_preview_generate(&sys, "shell", args, strlen(args), &p);
-    HU_ASSERT(err == HU_OK);
-    HU_ASSERT_NOT_NULL(p.description);
-    HU_ASSERT(strstr(p.description, "ls -la") != NULL);
-    HU_ASSERT(strstr(p.description, "Run:") != NULL);
-    hu_action_preview_free(&sys, &p);
-}
-
-static void test_action_preview_file_write_shows_path(void) {
-    hu_action_preview_t p;
-    memset(&p, 0, sizeof(p));
-    const char *args = "{\"path\":\"/home/user/notes.txt\"}";
-    hu_error_t err = hu_action_preview_generate(&sys, "file_write", args, strlen(args), &p);
-    HU_ASSERT(err == HU_OK);
-    HU_ASSERT_NOT_NULL(p.description);
-    HU_ASSERT(strstr(p.description, "/home/user/notes.txt") != NULL);
-    HU_ASSERT(strstr(p.description, "Write") != NULL);
-    hu_action_preview_free(&sys, &p);
-}
-
-static void test_action_preview_format_produces_readable_string(void) {
-    hu_action_preview_t p;
-    memset(&p, 0, sizeof(p));
-    const char *args = "{\"command\":\"echo hello\"}";
-    hu_error_t err = hu_action_preview_generate(&sys, "shell", args, strlen(args), &p);
-    HU_ASSERT(err == HU_OK);
-    char *formatted = NULL;
-    size_t len = 0;
-    err = hu_action_preview_format(&sys, &p, &formatted, &len);
-    HU_ASSERT(err == HU_OK);
-    HU_ASSERT_NOT_NULL(formatted);
-    HU_ASSERT(strstr(formatted, "[high]") != NULL);
-    HU_ASSERT(strstr(formatted, "shell") != NULL);
-    HU_ASSERT(strstr(formatted, "Run:") != NULL);
-    sys.free(sys.ctx, formatted, strlen(formatted) + 1);
-    hu_action_preview_free(&sys, &p);
-}
 
 static void test_undo_stack_push_pop_works(void) {
     hu_undo_stack_t *stack = hu_undo_stack_create(&sys, 10);
@@ -175,9 +139,6 @@ void run_security_pipeline_tests(void) {
 
     HU_TEST_SUITE("security_pipeline");
 
-    HU_RUN_TEST(test_action_preview_shell_shows_command);
-    HU_RUN_TEST(test_action_preview_file_write_shows_path);
-    HU_RUN_TEST(test_action_preview_format_produces_readable_string);
     HU_RUN_TEST(test_undo_stack_push_pop_works);
     HU_RUN_TEST(test_undo_stack_capacity_ring_buffer);
     HU_RUN_TEST(test_undo_execute_pops_in_test_mode);

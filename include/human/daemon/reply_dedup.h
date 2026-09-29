@@ -72,6 +72,22 @@ hu_error_t hu_reply_dedup_save(const hu_reply_dedup_t *r, const char *path, size
  * absent file as "empty store"). Malformed lines are skipped. */
 hu_error_t hu_reply_dedup_load(hu_reply_dedup_t *r, const char *path, size_t path_len);
 
+/* ── Daemon process-wide store glue (moved from daemon.c, 2026-07-19) ──
+ *
+ * A single file-scope store backed by ~/.human/reply_dedup.json, loaded
+ * lazily on first use. These are the daemon's ONLY entry points; the pure
+ * store functions above stay side-effect-free for tests. */
+
+/* Check the process-wide store: true iff `rowid` (or newer) was already
+ * replied to for `chat_id`. Loads the store from disk on first call. */
+bool hu_daemon_reply_dedup_already_replied(const char *chat_id, size_t chat_id_len, int64_t rowid);
+
+/* Record a successful reply to `rowid` for `chat_id` in the process-wide
+ * store and persist immediately, so a crash before the next poll-watermark
+ * save can't cause a duplicate on restart. Persist is best-effort (a failed
+ * save just means at-least-once on that edge). No-op on NULL/rowid<=0. */
+void hu_daemon_reply_dedup_mark(const char *chat_id, size_t chat_id_len, int64_t rowid);
+
 #ifdef __cplusplus
 }
 #endif

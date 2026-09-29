@@ -1,11 +1,53 @@
 #include "human/core/process_util.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/platform.h"
 #include "human/security.h"
 #include "human/security/sandbox.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#elif defined(__linux__)
+#include <unistd.h>
+#endif
+
+bool hu_process_self_exe_path(char *buf, size_t cap) {
+    if (!buf || cap < 2)
+        return false;
+    buf[0] = '\0';
+#if defined(__APPLE__)
+    char tmp[4096];
+    uint32_t size = (uint32_t)sizeof(tmp);
+    if (_NSGetExecutablePath(tmp, &size) != 0)
+        return false;
+    hu_allocator_t alloc = hu_system_allocator();
+    char *resolved = hu_platform_realpath(&alloc, tmp);
+    const char *src = resolved ? resolved : tmp;
+    size_t n = strlen(src);
+    bool ok = n > 0 && n < cap;
+    if (ok)
+        memcpy(buf, src, n + 1);
+    if (resolved)
+        alloc.free(alloc.ctx, resolved, strlen(resolved) + 1);
+    return ok;
+#elif defined(__linux__)
+    /* readlink() silently truncates; a result that fills the buffer is not a
+     * path we can trust. Reject it like the macOS arm does (n < cap). Found
+     * by test_self_exe_path_rejects_tiny_buffer the first time the RL test
+     * surface ran on Linux CI (2026-09-12). */
+    ssize_t n = readlink("/proc/self/exe", buf, cap - 1);
+    if (n <= 0 || (size_t)n >= cap - 1) {
+        buf[0] = '\0';
+        return false;
+    }
+    buf[n] = '\0';
+    return true;
+#else
+    return false;
+#endif
+}
 
 #ifdef HU_GATEWAY_POSIX
 #include <errno.h>
@@ -416,7 +458,8 @@ bool hu_ollama_api_tags_reachable(void) {
         close(fd);
         return false;
     }
-    static const char req[] = "GET /api/tags HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
+    static const char req[] =
+        "GET /api/tags HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
     if (send(fd, req, sizeof(req) - 1, 0) < 0) {
         close(fd);
         return false;

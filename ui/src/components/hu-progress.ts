@@ -95,13 +95,15 @@ export class ScProgress extends LitElement {
     const fillWidth = this.indeterminate ? undefined : `${this._clampedValue}%`;
 
     return html`
-      ${this.label
-        ? html`
-            <div class="label" id="progress-label">
-              ${this.label}${!this.indeterminate ? ` ${Math.round(this._clampedValue)}%` : ""}
-            </div>
-          `
-        : null}
+      ${
+        this.label
+          ? html`
+              <div class="label" id="progress-label">
+                ${this.label}${!this.indeterminate ? ` ${Math.round(this._clampedValue)}%` : ""}
+              </div>
+            `
+          : null
+      }
       <div
         class="track"
         role="progressbar"

@@ -1,6 +1,8 @@
 #include "human/calibration/clone.h"
+#include "calibration_chatdb.h"
 #include "human/core/io_secure.h"
 #include "human/core/json.h"
+#include "human/core/paths.h"
 #include "human/json_util.h"
 
 #include <ctype.h>
@@ -109,25 +111,7 @@ static time_t hu_clone_apple_ns_to_unix(int64_t apple_ns) {
 }
 
 static hu_error_t hu_clone_resolve_db_path(const char *db_path, char *out, size_t cap) {
-    if (db_path && db_path[0]) {
-        size_t len = strlen(db_path);
-        if (len + 1 > cap)
-            return HU_ERR_INVALID_ARGUMENT;
-        memcpy(out, db_path, len + 1);
-        return HU_OK;
-    }
-#if defined(__APPLE__) && defined(__MACH__)
-    const char *home = getenv("HOME");
-    if (!home || !home[0])
-        return HU_ERR_NOT_FOUND;
-    int n = snprintf(out, cap, "%s/Library/Messages/chat.db", home);
-    if (n < 0 || (size_t)n >= cap)
-        return HU_ERR_INVALID_ARGUMENT;
-    return HU_OK;
-#else
-    (void)out;
-    return HU_ERR_NOT_SUPPORTED;
-#endif
+    return hu_calibration_resolve_chatdb(db_path, out, cap);
 }
 
 static const char *hu_clone_trim_start(const char *s, size_t len, size_t *out_len) {
@@ -179,7 +163,7 @@ static void hu_clone_extract_closing(const char *text, char *out, size_t cap) {
     if (len < 3)
         return;
     while (len > 0 && (text[len - 1] == ' ' || text[len - 1] == '\t' || text[len - 1] == '\n' ||
-                      text[len - 1] == '\r'))
+                       text[len - 1] == '\r'))
         len--;
     if (len < 3)
         return;
@@ -384,12 +368,12 @@ static hu_error_t hu_clone_run_sql(hu_allocator_t *alloc, sqlite3 *db, const cha
                 struct tm tm_local;
                 memset(&tm_local, 0, sizeof(tm_local));
                 if (localtime_r(&tu, &tm_local) != NULL) {
-                    int32_t dk =
-                        (tm_local.tm_year + 1900) * 10000 + (tm_local.tm_mon + 1) * 100 + tm_local.tm_mday;
+                    int32_t dk = (tm_local.tm_year + 1900) * 10000 + (tm_local.tm_mon + 1) * 100 +
+                                 tm_local.tm_mday;
                     if (day_n >= day_cap) {
                         size_t nc = day_cap ? day_cap * 2 : 64;
-                        int32_t *p = (int32_t *)alloc->realloc(alloc->ctx, day_mark, day_cap * sizeof(int32_t),
-                                                             nc * sizeof(int32_t));
+                        int32_t *p = (int32_t *)alloc->realloc(
+                            alloc->ctx, day_mark, day_cap * sizeof(int32_t), nc * sizeof(int32_t));
                         if (!p) {
                             err = HU_ERR_OUT_OF_MEMORY;
                             goto clone_cleanup;
@@ -590,21 +574,19 @@ static hu_error_t hu_clone_analyze_db(hu_allocator_t *alloc, const char *db_path
         "WHERE m.item_type = 0 AND m.associated_message_type = 0 AND m.date > ?2 ";
 
     const char *tail_all = "ORDER BY cmj.chat_id ASC, m.date ASC LIMIT ?1";
-    const char *tail_filt =
-        "AND cmj.chat_id IN ("
-        "  SELECT chj.chat_id FROM chat_handle_join chj "
-        "  JOIN handle h2 ON chj.handle_id = h2.ROWID "
-        "  WHERE h2.id = ?2"
-        ") "
-        "ORDER BY cmj.chat_id ASC, m.date ASC LIMIT ?1";
+    const char *tail_filt = "AND cmj.chat_id IN ("
+                            "  SELECT chj.chat_id FROM chat_handle_join chj "
+                            "  JOIN handle h2 ON chj.handle_id = h2.ROWID "
+                            "  WHERE h2.id = ?2"
+                            ") "
+                            "ORDER BY cmj.chat_id ASC, m.date ASC LIMIT ?1";
 
-    const char *tail_filt_delta =
-        "AND cmj.chat_id IN ("
-        "  SELECT chj.chat_id FROM chat_handle_join chj "
-        "  JOIN handle h2 ON chj.handle_id = h2.ROWID "
-        "  WHERE h2.id = ?2"
-        ") AND m.date > ?3 "
-        "ORDER BY cmj.chat_id ASC, m.date ASC LIMIT ?1";
+    const char *tail_filt_delta = "AND cmj.chat_id IN ("
+                                  "  SELECT chj.chat_id FROM chat_handle_join chj "
+                                  "  JOIN handle h2 ON chj.handle_id = h2.ROWID "
+                                  "  WHERE h2.id = ?2"
+                                  ") AND m.date > ?3 "
+                                  "ORDER BY cmj.chat_id ASC, m.date ASC LIMIT ?1";
 
     char sqlbuf[2048];
     const char *use = NULL;
@@ -626,8 +608,8 @@ static hu_error_t hu_clone_analyze_db(hu_allocator_t *alloc, const char *db_path
         }
     }
 
-    hu_error_t err = hu_clone_run_sql(alloc, db, use, (int)HU_CLONE_MSG_LIMIT, contact_filter,
-                                      since_ns, out);
+    hu_error_t err =
+        hu_clone_run_sql(alloc, db, use, (int)HU_CLONE_MSG_LIMIT, contact_filter, since_ns, out);
     sqlite3_close(db);
     return err;
 }
@@ -864,8 +846,7 @@ hu_error_t hu_behavioral_clone_update_persona(hu_allocator_t *alloc,
     }
     {
         char tmp[64];
-        int n = snprintf(tmp, sizeof(tmp), "%.0f",
-                         (double)clone_data->read_to_response_median_sec);
+        int n = snprintf(tmp, sizeof(tmp), "%.0f", (double)clone_data->read_to_response_median_sec);
         if (n < 0 || (size_t)n >= sizeof(tmp)) {
             err = HU_ERR_INTERNAL;
             goto fail;

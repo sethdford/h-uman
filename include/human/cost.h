@@ -104,7 +104,7 @@ hu_budget_check_t hu_cost_check_budget(const hu_cost_tracker_t *t, double estima
 
 /* Record usage. Persists to JSONL if path set. job_id: 0 = interactive, >0 = automation/cron. */
 hu_error_t hu_cost_record_usage(hu_cost_tracker_t *t, const hu_cost_entry_t *usage,
-                               uint64_t job_id);
+                                uint64_t job_id);
 
 /* Session cost (in-memory). */
 double hu_cost_session_total(const hu_cost_tracker_t *t);
@@ -119,8 +119,5 @@ size_t hu_cost_request_count(const hu_cost_tracker_t *t);
 void hu_cost_get_summary(const hu_cost_tracker_t *t, int64_t at_secs, hu_cost_summary_t *out);
 
 hu_error_t hu_cost_load_history(hu_cost_tracker_t *t);
-
-hu_error_t hu_cost_get_usage_json(hu_allocator_t *alloc, const hu_cost_tracker_t *t,
-                                  int64_t at_secs, char **out_json);
 
 #endif /* HU_COST_H */

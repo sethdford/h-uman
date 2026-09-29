@@ -8,74 +8,127 @@
           "$type": "color"
         },
         "50": {
-          "$value": "#060b12",
+          "$value": "#0c0a08",
           "$type": "color"
         },
         "100": {
-          "$value": "#0b1219",
+          "$value": "#141210",
           "$type": "color"
         },
         "150": {
-          "$value": "#101a24",
+          "$value": "#1e1a16",
           "$type": "color"
         },
         "200": {
-          "$value": "#162230",
+          "$value": "#28231e",
           "$type": "color"
         },
         "250": {
-          "$value": "#1c2a3a",
+          "$value": "#332d26",
           "$type": "color"
         },
         "300": {
-          "$value": "#233345",
+          "$value": "#3e372f",
           "$type": "color"
         },
         "400": {
-          "$value": "#3d5468",
+          "$value": "#56504a",
           "$type": "color"
         },
         "500": {
-          "$value": "#5e7a94",
+          "$value": "#8a847e",
           "$type": "color"
         },
         "600": {
-          "$value": "#8aa0b8",
+          "$value": "#9e9892",
           "$type": "color"
         },
         "700": {
-          "$value": "#c0d0e0",
+          "$value": "#c8c2bc",
           "$type": "color"
         },
         "750": {
-          "$value": "#d8e4f0",
+          "$value": "#ddd8d3",
           "$type": "color"
         },
         "800": {
-          "$value": "#e6edf4",
+          "$value": "#ebe7e3",
           "$type": "color"
         },
         "825": {
-          "$value": "#ecf2f8",
+          "$value": "#f0ece9",
           "$type": "color"
         },
         "850": {
-          "$value": "#f0f5fa",
+          "$value": "#f4f1ee",
           "$type": "color"
         },
         "900": {
-          "$value": "#f7f9fc",
+          "$value": "#faf8f6",
           "$type": "color"
         },
         "925": {
-          "$value": "#fafcfe",
+          "$value": "#fcfbf9",
           "$type": "color"
         },
         "1000": {
           "$value": "#ffffff",
           "$type": "color"
         },
-        "$description": "Blue-tinted neutral scale — deep ocean to sandy shore"
+        "$description": "Warm charcoal scale — cinematic amber-tinted darks to cream whites. Warm neutral tones for premium feel, OKLCH hue ~55deg."
+      },
+      "tonal": {
+        "$description": "M3-style tonal surface primitives — warm neutrals tinted with human green for surface-container hierarchy",
+        "dark-container": {
+          "$value": "#1f1c19",
+          "$type": "color",
+          "$description": "warm neutral.150 + 4% human.500 — default card/panel surface"
+        },
+        "dark-container-high": {
+          "$value": "#2a2621",
+          "$type": "color",
+          "$description": "warm neutral.200 + 6% human.500 — elevated interactive surfaces"
+        },
+        "dark-container-highest": {
+          "$value": "#35302a",
+          "$type": "color",
+          "$description": "warm neutral.250 + 8% human.500 — highest emphasis surfaces, active states"
+        },
+        "dark-dim": {
+          "$value": "#080604",
+          "$type": "color",
+          "$description": "Recessed surface — darker than bg for inset/well areas"
+        },
+        "dark-bright": {
+          "$value": "#42392e",
+          "$type": "color",
+          "$description": "Prominent surface — lighter than elevated for hero/featured areas"
+        },
+        "light-container": {
+          "$value": "#f8f8f6",
+          "$type": "color",
+          "$description": "cool neutral + 6% human.100 — default card/panel surface"
+        },
+        "light-container-high": {
+          "$value": "#f0eeed",
+          "$type": "color",
+          "$description": "cool gray + 8% human.100 — elevated interactive surfaces"
+        },
+        "light-container-highest": {
+          "$value": "#e8e7e4",
+          "$type": "color",
+          "$description": "cool gray + 10% human.100 — highest emphasis surfaces"
+        },
+        "light-dim": {
+          "$value": "#e5e4e1",
+          "$type": "color",
+          "$description": "Recessed surface — cool light theme inset/well areas"
+        },
+        "light-bright": {
+          "$value": "#ffffff",
+          "$type": "color",
+          "$description": "Prominent surface — clean white brightest level for hero/featured areas"
+        }
       },
       "teal": {
         "50": {
@@ -137,6 +190,69 @@
         },
         "light-subtle": {
           "$value": "rgba(13, 148, 136, 0.10)",
+          "$type": "color"
+        }
+      },
+      "human": {
+        "50": {
+          "$value": "#f3fae8",
+          "$type": "color"
+        },
+        "100": {
+          "$value": "#e2f2c8",
+          "$type": "color"
+        },
+        "200": {
+          "$value": "#c5e59a",
+          "$type": "color"
+        },
+        "300": {
+          "$value": "#a3d46a",
+          "$type": "color"
+        },
+        "400": {
+          "$value": "#8DC63F",
+          "$type": "color"
+        },
+        "500": {
+          "$value": "#7AB648",
+          "$type": "color"
+        },
+        "600": {
+          "$value": "#5A9A30",
+          "$type": "color"
+        },
+        "700": {
+          "$value": "#3a6a24",
+          "$type": "color"
+        },
+        "800": {
+          "$value": "#366320",
+          "$type": "color"
+        },
+        "900": {
+          "$value": "#264A17",
+          "$type": "color"
+        },
+        "$description": "Primary accent — Human green",
+        "dark-subtle": {
+          "$value": "rgba(122, 182, 72, 0.14)",
+          "$type": "color"
+        },
+        "light-500": {
+          "$value": "#5A9A30",
+          "$type": "color"
+        },
+        "light-600": {
+          "$value": "#3a6a24",
+          "$type": "color"
+        },
+        "light-400": {
+          "$value": "#7AB648",
+          "$type": "color"
+        },
+        "light-subtle": {
+          "$value": "rgba(90, 154, 48, 0.10)",
           "$type": "color"
         }
       },
@@ -312,11 +428,12 @@
           "$type": "color"
         }
       },
-      "blue": {
+      "sky": {
         "500": {
           "$value": "#3b82f6",
           "$type": "color"
         },
+        "$description": "Bright UI blue for semantic info states (distinct from steel tertiary accent)",
         "dim": {
           "$value": "rgba(59, 130, 246, 0.15)",
           "$type": "color"
@@ -393,103 +510,110 @@
           "$type": "color"
         }
       },
-      "indigo": {
+      "blue": {
         "50": {
-          "$value": "#eef2ff",
+          "$value": "#eef3f9",
           "$type": "color"
         },
         "100": {
-          "$value": "#e0e7ff",
+          "$value": "#dce6f2",
           "$type": "color"
         },
         "200": {
-          "$value": "#c7d2fe",
+          "$value": "#c5d5e8",
           "$type": "color"
         },
         "300": {
-          "$value": "#a5b4fc",
+          "$value": "#9fb8d9",
           "$type": "color"
         },
         "400": {
-          "$value": "#818cf8",
+          "$value": "#7496c4",
           "$type": "color"
         },
         "500": {
-          "$value": "#6366f1",
+          "$value": "#4a6fa5",
           "$type": "color"
         },
         "600": {
-          "$value": "#4f46e5",
+          "$value": "#3d5d8c",
           "$type": "color"
         },
         "700": {
-          "$value": "#4338ca",
+          "$value": "#324a73",
           "$type": "color"
         },
         "800": {
-          "$value": "#3730a3",
+          "$value": "#2a3d5f",
           "$type": "color"
         },
         "900": {
-          "$value": "#312e81",
+          "$value": "#24354f",
           "$type": "color"
         },
-        "$description": "Depth accent — indigo for info states, data viz, and richness",
+        "$description": "Depth accent — institutional steel blue for info states, data viz, and richness (500 #4A6FA5)",
         "dark-subtle": {
-          "$value": "rgba(99, 102, 241, 0.14)",
+          "$value": "rgba(74, 111, 165, 0.14)",
           "$type": "color"
         },
         "light-500": {
-          "$value": "#4f46e5",
+          "$value": "#3d5d8c",
           "$type": "color"
         },
         "light-600": {
-          "$value": "#4338ca",
+          "$value": "#324a73",
           "$type": "color"
         },
         "light-400": {
-          "$value": "#6366f1",
+          "$value": "#4a6fa5",
           "$type": "color"
         },
         "light-subtle": {
-          "$value": "rgba(79, 70, 229, 0.10)",
+          "$value": "rgba(61, 93, 140, 0.10)",
           "$type": "color"
         }
       },
       "viz-extended": {
-        "$description": "Supplementary chart/illustration hues — sync with design-tokens/base.tokens.json color.viz-extended",
+        "$description": "Supplementary hues from Web Color reference (broad marketing palette) — charts, heatmaps, and illustration only; not UI chrome or semantic status",
         "forest": {
           "$value": "#00703C",
-          "$type": "color"
+          "$type": "color",
+          "$description": "Deep forest green"
         },
         "cyan": {
           "$value": "#009BDE",
-          "$type": "color"
+          "$type": "color",
+          "$description": "Bright cyan blue"
         },
         "violet": {
           "$value": "#9D61CC",
-          "$type": "color"
+          "$type": "color",
+          "$description": "Purple series accent"
         },
         "chartreuse": {
           "$value": "#C2CD23",
-          "$type": "color"
+          "$type": "color",
+          "$description": "Yellow-green chartreuse"
         },
         "gold": {
           "$value": "#F0D202",
-          "$type": "color"
+          "$type": "color",
+          "$description": "Strong yellow-gold"
         },
         "orange": {
           "$value": "#FF6800",
-          "$type": "color"
+          "$type": "color",
+          "$description": "Vivid orange"
         },
         "crimson": {
           "$value": "#CC0000",
           "$type": "color",
-          "$description": "Chart series only — not error UI"
+          "$description": "Strong red — chart series only (not error chrome)"
         },
         "azure": {
           "$value": "#2B89CB",
-          "$type": "color"
+          "$type": "color",
+          "$description": "Sky azure blue"
         }
       }
     },
@@ -629,31 +753,30 @@
   "data-viz": {
     "chart": {
       "categorical": {
-        "$description": "Resolved hex mirror of design-tokens/data-viz.tokens.json — import for Figma/Tokens Studio",
         "1": {
           "$value": "#7AB648",
           "$type": "color",
-          "$description": "Human green"
+          "$description": "Primary — Human green"
         },
         "2": {
           "$value": "#4a6fa5",
           "$type": "color",
-          "$description": "Steel blue"
+          "$description": "Secondary — Steel blue"
         },
         "3": {
           "$value": "#f59e0b",
           "$type": "color",
-          "$description": "Amber"
+          "$description": "Tertiary — Amber"
         },
         "4": {
           "$value": "#f97066",
           "$type": "color",
-          "$description": "Coral"
+          "$description": "Quaternary — Coral"
         },
         "5": {
           "$value": "#14b8a6",
           "$type": "color",
-          "$description": "Teal"
+          "$description": "Quinary — Teal"
         },
         "6": {
           "$value": "#9fb8d9",
@@ -673,49 +796,76 @@
         "9": {
           "$value": "#00703C",
           "$type": "color",
-          "$description": "Extended forest"
+          "$description": "Extended — deep forest (Web Color)"
         },
         "10": {
           "$value": "#009BDE",
           "$type": "color",
-          "$description": "Extended cyan"
+          "$description": "Extended — bright cyan"
         },
         "11": {
           "$value": "#9D61CC",
           "$type": "color",
-          "$description": "Extended violet"
+          "$description": "Extended — violet"
         },
         "12": {
           "$value": "#C2CD23",
           "$type": "color",
-          "$description": "Extended chartreuse"
+          "$description": "Extended — chartreuse"
         },
         "13": {
           "$value": "#F0D202",
           "$type": "color",
-          "$description": "Extended gold"
+          "$description": "Extended — gold yellow"
         },
         "14": {
           "$value": "#FF6800",
           "$type": "color",
-          "$description": "Extended orange"
+          "$description": "Extended — vivid orange"
         },
         "15": {
           "$value": "#CC0000",
           "$type": "color",
-          "$description": "Extended crimson (series)"
+          "$description": "Extended — crimson (series only)"
         },
         "16": {
           "$value": "#2B89CB",
           "$type": "color",
-          "$description": "Extended azure"
-        }
+          "$description": "Extended — azure blue"
+        },
+        "$description": "Ordered categorical series — 16 colors: core 1–8 plus Web Color–derived extended hues for dense multi-series charts"
       }
     }
   },
   "semantic": {
+    "$description": "Semantic tokens — warm charcoal theme (Quiet Mastery)",
+    "$extensions": {
+      "com.human.platform": "all",
+      "com.human.version": "0.5.0",
+      "human.colorSpace": "display-p3",
+      "human.p3Colors": {
+        "dark.accent": "color(display-p3 0.420 0.680 0.220)",
+        "dark.accent-text": "color(display-p3 0.490 0.740 0.180)",
+        "dark.accent-hover": "color(display-p3 0.490 0.740 0.180)",
+        "dark.accent-strong": "color(display-p3 0.570 0.800 0.330)",
+        "dark.accent-secondary": "color(display-p3 0.961 0.620 0.043)",
+        "dark.accent-tertiary": "color(display-p3 0.290 0.435 0.647)",
+        "dark.success": "color(display-p3 0.063 0.725 0.506)",
+        "dark.warning": "color(display-p3 0.918 0.702 0.031)",
+        "dark.error": "color(display-p3 0.976 0.439 0.400)",
+        "dark.info": "color(display-p3 0.231 0.510 0.965)",
+        "dark.focus-ring": "color(display-p3 0.420 0.680 0.220)",
+        "dark.link": "color(display-p3 0.490 0.740 0.180)",
+        "light.accent": "color(display-p3 0.420 0.680 0.220)",
+        "light.accent-text": "color(display-p3 0.240 0.480 0.130)",
+        "light.success": "color(display-p3 0.000 0.480 0.000)",
+        "light.warning": "color(display-p3 0.792 0.541 0.016)",
+        "light.error": "color(display-p3 0.760 0.000 0.000)",
+        "light.info": "color(display-p3 0.145 0.388 0.922)"
+      }
+    },
     "dark": {
-      "$description": "Dark theme — deep ocean",
+      "$description": "Dark theme — deep ocean midnight with Human green accents",
       "bg": {
         "$value": "{color.neutral.50}",
         "$type": "color"
@@ -736,13 +886,48 @@
         "$value": "{color.neutral.250}",
         "$type": "color"
       },
+      "surface-container": {
+        "$value": "{color.tonal.dark-container}",
+        "$type": "color",
+        "$description": "M3 tonal surface — primary-tinted card/panel background"
+      },
+      "surface-container-high": {
+        "$value": "{color.tonal.dark-container-high}",
+        "$type": "color",
+        "$description": "M3 tonal surface — elevated interactive surfaces"
+      },
+      "surface-container-highest": {
+        "$value": "{color.tonal.dark-container-highest}",
+        "$type": "color",
+        "$description": "M3 tonal surface — highest emphasis, active states"
+      },
+      "surface-dim": {
+        "$value": "{color.tonal.dark-dim}",
+        "$type": "color",
+        "$description": "Recessed surface below bg — wells, inset panels"
+      },
+      "surface-bright": {
+        "$value": "{color.tonal.dark-bright}",
+        "$type": "color",
+        "$description": "Prominent surface above elevated — hero sections, featured cards"
+      },
       "text": {
         "$value": "{color.neutral.750}",
         "$type": "color"
       },
+      "text-secondary": {
+        "$value": "{color.neutral.600}",
+        "$type": "color",
+        "$description": "Informational text — WCAG AA 4.5:1 on dark surfaces"
+      },
       "text-muted": {
         "$value": "{color.neutral.500}",
         "$type": "color"
+      },
+      "text-tertiary": {
+        "$value": "{color.neutral.500}",
+        "$type": "color",
+        "$description": "Tertiary text — same WCAG profile as text-muted; used by sidebar nav-group labels and other non-primary chrome"
       },
       "text-faint": {
         "$value": "{color.neutral.400}",
@@ -755,7 +940,7 @@
       "accent-text": {
         "$value": "{color.human.400}",
         "$type": "color",
-        "$description": "Accent color for text on dark backgrounds"
+        "$description": "Human green for text on dark backgrounds"
       },
       "accent-hover": {
         "$value": "{color.human.400}",
@@ -770,7 +955,7 @@
         "$type": "color"
       },
       "on-accent": {
-        "$value": "#060b12",
+        "$value": "{color.neutral.50}",
         "$type": "color"
       },
       "accent-secondary": {
@@ -795,7 +980,7 @@
         "$type": "color"
       },
       "on-accent-secondary": {
-        "$value": "#060b12",
+        "$value": "#0c0a08",
         "$type": "color"
       },
       "accent-tertiary": {
@@ -856,11 +1041,11 @@
         "$type": "color"
       },
       "info": {
-        "$value": "{color.blue.500}",
+        "$value": "{color.sky.500}",
         "$type": "color"
       },
       "info-dim": {
-        "$value": "{color.blue.dim}",
+        "$value": "{color.sky.dim}",
         "$type": "color"
       },
       "focus-ring": {
@@ -892,15 +1077,27 @@
         "$type": "color"
       },
       "hover-overlay": {
-        "$value": "rgba(255, 255, 255, 0.06)",
-        "$type": "color"
+        "$value": "rgba(255, 255, 255, 0.08)",
+        "$type": "color",
+        "$description": "Neutral hover veil on dark surfaces (warm white, not brand-tinted)"
       },
       "pressed-overlay": {
-        "$value": "rgba(255, 255, 255, 0.10)",
-        "$type": "color"
+        "$value": "rgba(255, 255, 255, 0.12)",
+        "$type": "color",
+        "$description": "Neutral pressed veil on dark surfaces"
+      },
+      "focus-overlay": {
+        "$value": "rgba(255, 255, 255, 0.12)",
+        "$type": "color",
+        "$description": "Neutral focus veil on dark surfaces (pair with --hu-focus-ring for brand)"
+      },
+      "dragged-overlay": {
+        "$value": "rgba(255, 255, 255, 0.16)",
+        "$type": "color",
+        "$description": "Neutral drag veil on dark surfaces"
       },
       "disabled-overlay": {
-        "$value": "rgba(255, 255, 255, 0.04)",
+        "$value": "rgba(252, 248, 242, 0.04)",
         "$type": "color"
       },
       "backdrop-overlay": {
@@ -908,111 +1105,184 @@
         "$type": "color"
       },
       "shadow-xs": {
-        "$value": "0 1px 2px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.06)",
-        "$type": "shadow"
+        "$value": "0 1px 2px rgba(12,8,4,0.50), inset 0 1px 0 rgba(255,252,248,0.05)",
+        "$type": "shadow",
+        "$description": "Warm charcoal shadow — amber-tinted darks"
       },
       "shadow-sm": {
-        "$value": "0 1px 3px rgba(0,0,0,0.35), 0 2px 8px rgba(0,8,20,0.3), inset 0 1px 0 rgba(255,255,255,0.06)",
+        "$value": "0 1px 3px rgba(12,8,4,0.45), 0 2px 8px rgba(12,8,4,0.30), inset 0 1px 0 rgba(255,252,248,0.05)",
         "$type": "shadow"
       },
       "shadow-md": {
-        "$value": "0 2px 4px rgba(0,0,0,0.3), 0 8px 24px rgba(0,8,20,0.35), inset 0 1px 0 rgba(255,255,255,0.05)",
+        "$value": "0 2px 4px rgba(12,8,4,0.40), 0 8px 24px rgba(12,8,4,0.35), inset 0 1px 0 rgba(255,252,248,0.04)",
         "$type": "shadow"
       },
       "shadow-lg": {
-        "$value": "0 4px 8px rgba(0,0,0,0.35), 0 16px 48px rgba(0,8,20,0.4), inset 0 1px 0 rgba(255,255,255,0.04)",
+        "$value": "0 4px 8px rgba(12,8,4,0.45), 0 16px 48px rgba(12,8,4,0.40), inset 0 1px 0 rgba(255,252,248,0.04)",
         "$type": "shadow"
       },
       "shadow-xl": {
-        "$value": "0 8px 16px rgba(0,0,0,0.4), 0 32px 72px rgba(0,8,20,0.45), inset 0 1px 0 rgba(255,255,255,0.04)",
+        "$value": "0 8px 16px rgba(12,8,4,0.50), 0 32px 72px rgba(12,8,4,0.50), inset 0 1px 0 rgba(255,252,248,0.03)",
         "$type": "shadow"
       },
       "shadow-card": {
-        "$value": "0 1px 3px rgba(0,0,0,0.25), 0 8px 24px rgba(0,8,20,0.25), inset 0 1px 0 rgba(255,255,255,0.06)",
+        "$value": "0 1px 3px rgba(12,8,4,0.35), 0 8px 24px rgba(12,8,4,0.25), inset 0 1px 0 rgba(255,252,248,0.05)",
         "$type": "shadow"
       },
       "shadow-glow-accent": {
         "$value": "0 0 0 1px var(--hu-accent-subtle), 0 4px 16px rgba(122,182,72,0.15)",
         "$type": "shadow"
       },
+      "shadow-glow-blue": {
+        "$value": "0 0 0 1px rgba(59,130,246,0.12), 0 4px 16px rgba(59,130,246,0.10)",
+        "$type": "shadow",
+        "$description": "Blue glow for chat focus/hover states"
+      },
+      "user-message-gradient": {
+        "$value": "linear-gradient(135deg, #1e40af, #2563eb)",
+        "$type": "string",
+        "$description": "Deep-to-vibrant blue gradient for user chat bubbles"
+      },
       "shadow-inset": {
         "$value": "inset 0 1px 2px rgba(0,0,0,0.06)",
         "$type": "shadow"
       },
       "surface-gradient": {
-        "$value": "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(0,0,0,0.15) 100%)",
-        "$type": "string"
+        "$value": "linear-gradient(180deg, rgba(252,248,242,0.04) 0%, rgba(12,8,4,0.12) 100%)",
+        "$type": "string",
+        "$description": "Warm cream-to-dark gradient — warm inset highlight"
       },
       "surface-glow": {
-        "$value": "radial-gradient(ellipse at 50% 0%, rgba(122,182,72,0.1) 0%, transparent 70%)",
-        "$type": "string"
+        "$value": "radial-gradient(ellipse at 50% 0%, rgba(122,182,72,0.08) 0%, transparent 70%)",
+        "$type": "string",
+        "$description": "Ambient Human green glow at the top of cards — creates atmospheric depth"
       },
       "button-gradient-primary": {
-        "$value": "linear-gradient(180deg, rgba(255,255,255,0.15) 0%, rgba(0,0,0,0.2) 100%)",
+        "$value": "linear-gradient(180deg, rgba(252,248,242,0.12) 0%, rgba(12,8,4,0.18) 100%)",
         "$type": "string"
       },
       "hero-gradient": {
-        "$value": "linear-gradient(135deg, rgba(122,182,72,0.14) 0%, rgba(90,154,48,0.08) 50%, transparent 100%)",
-        "$type": "string"
+        "$value": "linear-gradient(135deg, rgba(122,182,72,0.10) 0%, rgba(90,154,48,0.05) 40%, rgba(74,111,165,0.03) 80%, transparent 100%)",
+        "$type": "string",
+        "$description": "Atmospheric gradient — Human green to forest with a hint of deep steel blue"
+      },
+      "mesh-gradient": {
+        "$value": "radial-gradient(ellipse at 20% 50%, rgba(122,182,72,0.06) 0%, transparent 50%), radial-gradient(ellipse at 80% 20%, rgba(74,111,165,0.04) 0%, transparent 50%), radial-gradient(ellipse at 50% 80%, rgba(245,158,11,0.03) 0%, transparent 50%)",
+        "$type": "string",
+        "$description": "Multi-point mesh gradient — human green, steel blue, amber for cinematic depth"
+      },
+      "aurora-gradient": {
+        "$value": "conic-gradient(from 135deg at 50% 50%, rgba(122,182,72,0.08), rgba(74,111,165,0.06), rgba(245,158,11,0.04), rgba(122,182,72,0.08))",
+        "$type": "string",
+        "$description": "Slow-rotating aurora for hero sections — ambient color wash"
+      },
+      "shadow-colored-accent": {
+        "$value": "0 4px 16px rgba(122,182,72,0.12), 0 8px 32px rgba(122,182,72,0.08)",
+        "$type": "shadow",
+        "$description": "Human green tinted shadow for accent-heavy elements"
+      },
+      "shadow-colored-warm": {
+        "$value": "0 4px 16px rgba(200,160,80,0.10), 0 8px 32px rgba(200,160,80,0.06)",
+        "$type": "shadow",
+        "$description": "Warm amber tinted shadow for elevated surfaces"
       }
     },
     "light": {
-      "$description": "Light theme — sandy shore, clear sky, ocean spring day",
+      "$description": "Light theme — warm cream surfaces, human green accents, charcoal text",
       "bg": {
-        "$value": "{color.neutral.900}",
-        "$type": "color"
+        "$value": "#F5F5F3",
+        "$type": "color",
+        "$description": "Cool neutral base"
       },
       "bg-inset": {
-        "$value": "{color.neutral.800}",
+        "$value": "#EDEDEB",
         "$type": "color"
       },
       "bg-surface": {
-        "$value": "#ffffff",
-        "$type": "color"
+        "$value": "#FFFFFF",
+        "$type": "color",
+        "$description": "Clean white surface"
       },
       "bg-warm": {
-        "$value": "#fafcfe",
+        "$value": "#FAF8F6",
         "$type": "color"
       },
       "bg-elevated": {
-        "$value": "{color.neutral.850}",
+        "$value": "#FAFAF8",
         "$type": "color"
       },
       "bg-overlay": {
-        "$value": "{color.neutral.1000}",
+        "$value": "#FFFFFF",
         "$type": "color"
+      },
+      "surface-container": {
+        "$value": "{color.tonal.light-container}",
+        "$type": "color",
+        "$description": "M3 tonal surface — green-tinted card/panel background"
+      },
+      "surface-container-high": {
+        "$value": "{color.tonal.light-container-high}",
+        "$type": "color",
+        "$description": "M3 tonal surface — elevated interactive surfaces"
+      },
+      "surface-container-highest": {
+        "$value": "{color.tonal.light-container-highest}",
+        "$type": "color",
+        "$description": "M3 tonal surface — highest emphasis surfaces"
+      },
+      "surface-dim": {
+        "$value": "{color.tonal.light-dim}",
+        "$type": "color",
+        "$description": "Recessed surface — light theme wells/inset panels"
+      },
+      "surface-bright": {
+        "$value": "{color.tonal.light-bright}",
+        "$type": "color",
+        "$description": "Prominent surface — brightest level for hero/featured"
       },
       "text": {
-        "$value": "#0b1219",
-        "$type": "color"
+        "$value": "#2D2A26",
+        "$type": "color",
+        "$description": "Warm charcoal text"
+      },
+      "text-secondary": {
+        "$value": "#4A4540",
+        "$type": "color",
+        "$description": "Informational text — WCAG AA 4.5:1 on warm light surfaces"
       },
       "text-muted": {
-        "$value": "#3d5468",
+        "$value": "#6B655E",
         "$type": "color"
+      },
+      "text-tertiary": {
+        "$value": "#6B655E",
+        "$type": "color",
+        "$description": "Tertiary text — same WCAG profile as text-muted"
       },
       "text-faint": {
-        "$value": "{color.neutral.600}",
-        "$type": "color"
+        "$value": "#726C65",
+        "$type": "color",
+        "$description": "Faint text — still WCAG AA 4.5:1 on warm light surfaces (4.75 on #F5F5F3). Was #9A9490 (2.7:1): axe failed the Overview hero subtitle and the Voice setup hint on 2026-09-05."
       },
       "accent": {
-        "$value": "#14b8a6",
+        "$value": "{color.human.500}",
         "$type": "color"
       },
       "accent-text": {
-        "$value": "#0d9488",
+        "$value": "{color.human.700}",
         "$type": "color",
-        "$description": "WCAG AA: accent color for text on light backgrounds (4.5:1 contrast)"
+        "$description": "WCAG AA: Human dark green for text on light backgrounds (4.5:1 contrast)"
       },
       "accent-hover": {
-        "$value": "{color.human.light-600}",
+        "$value": "{color.human.600}",
         "$type": "color"
       },
       "accent-subtle": {
-        "$value": "{color.human.light-subtle}",
+        "$value": "rgba(122, 182, 72, 0.08)",
         "$type": "color"
       },
       "accent-light": {
-        "$value": "#99f6e4",
+        "$value": "{color.human.100}",
         "$type": "color"
       },
       "accent-strong": {
@@ -1020,7 +1290,7 @@
         "$type": "color"
       },
       "on-accent": {
-        "$value": "#ffffff",
+        "$value": "{color.neutral.50}",
         "$type": "color"
       },
       "accent-secondary": {
@@ -1033,7 +1303,7 @@
         "$description": "WCAG AA: amber accent for text on light backgrounds"
       },
       "accent-secondary-hover": {
-        "$value": "{color.amber.light-600}",
+        "$value": "{color.amber.light-400}",
         "$type": "color"
       },
       "accent-secondary-subtle": {
@@ -1045,7 +1315,7 @@
         "$type": "color"
       },
       "on-accent-secondary": {
-        "$value": "#ffffff",
+        "$value": "{color.neutral.50}",
         "$type": "color"
       },
       "accent-tertiary": {
@@ -1055,7 +1325,7 @@
       "accent-tertiary-text": {
         "$value": "{color.blue.700}",
         "$type": "color",
-        "$description": "WCAG AA: indigo accent for text on light backgrounds"
+        "$description": "WCAG AA: steel blue accent for text on light backgrounds"
       },
       "accent-tertiary-hover": {
         "$value": "{color.blue.light-600}",
@@ -1074,19 +1344,19 @@
         "$type": "color"
       },
       "border": {
-        "$value": "{color.neutral.700}",
+        "$value": "#DCDAD8",
         "$type": "color"
       },
       "border-subtle": {
-        "$value": "{color.neutral.850}",
+        "$value": "#E8E6E3",
         "$type": "color"
       },
       "success": {
-        "$value": "{color.seafoam.light-500}",
+        "$value": "#008000",
         "$type": "color"
       },
       "success-dim": {
-        "$value": "{color.seafoam.light-dim}",
+        "$value": "rgba(0, 128, 0, 0.08)",
         "$type": "color"
       },
       "warning": {
@@ -1098,19 +1368,19 @@
         "$type": "color"
       },
       "error": {
-        "$value": "{color.coral.light-500}",
+        "$value": "#CC0000",
         "$type": "color"
       },
       "error-dim": {
-        "$value": "{color.coral.light-subtle}",
+        "$value": "rgba(204, 0, 0, 0.08)",
         "$type": "color"
       },
       "info": {
-        "$value": "{color.blue.light-500}",
+        "$value": "{color.sky.light-500}",
         "$type": "color"
       },
       "info-dim": {
-        "$value": "{color.blue.light-dim}",
+        "$value": "{color.sky.light-dim}",
         "$type": "color"
       },
       "focus-ring": {
@@ -1126,11 +1396,11 @@
         "$type": "dimension"
       },
       "link": {
-        "$value": "{color.human.light-500}",
+        "$value": "{color.human.light-600}",
         "$type": "color"
       },
       "link-hover": {
-        "$value": "{color.human.light-600}",
+        "$value": "{color.human.900}",
         "$type": "color"
       },
       "link-active": {
@@ -1142,12 +1412,24 @@
         "$type": "color"
       },
       "hover-overlay": {
-        "$value": "rgba(0, 0, 0, 0.04)",
-        "$type": "color"
+        "$value": "rgba(0, 0, 0, 0.06)",
+        "$type": "color",
+        "$description": "Neutral hover veil on light surfaces"
       },
       "pressed-overlay": {
-        "$value": "rgba(0, 0, 0, 0.08)",
-        "$type": "color"
+        "$value": "rgba(0, 0, 0, 0.10)",
+        "$type": "color",
+        "$description": "Neutral pressed veil on light surfaces"
+      },
+      "focus-overlay": {
+        "$value": "rgba(0, 0, 0, 0.10)",
+        "$type": "color",
+        "$description": "Neutral focus veil on light surfaces (pair with --hu-focus-ring for brand)"
+      },
+      "dragged-overlay": {
+        "$value": "rgba(0, 0, 0, 0.14)",
+        "$type": "color",
+        "$description": "Neutral drag veil on light surfaces"
       },
       "disabled-overlay": {
         "$value": "rgba(0, 0, 0, 0.04)",
@@ -1158,40 +1440,51 @@
         "$type": "color"
       },
       "shadow-xs": {
-        "$value": "0 1px 2px rgba(0,30,60,0.08), inset 0 1px 0 rgba(255,255,255,0.5)",
+        "$value": "0 1px 2px rgba(45,36,24,0.08)",
         "$type": "shadow"
       },
       "shadow-sm": {
-        "$value": "0 1px 3px rgba(0,30,60,0.1), 0 2px 6px rgba(0,30,60,0.08), inset 0 1px 0 rgba(255,255,255,0.5)",
+        "$value": "0 1px 3px rgba(45,36,24,0.10), 0 2px 8px rgba(45,36,24,0.06)",
         "$type": "shadow"
       },
       "shadow-md": {
-        "$value": "0 2px 4px rgba(0,30,60,0.08), 0 8px 20px rgba(0,30,60,0.12), inset 0 1px 0 rgba(255,255,255,0.4)",
+        "$value": "0 2px 6px rgba(45,36,24,0.08), 0 8px 24px rgba(45,36,24,0.10), 0 16px 48px rgba(45,36,24,0.06)",
         "$type": "shadow"
       },
       "shadow-lg": {
-        "$value": "0 4px 8px rgba(0,30,60,0.08), 0 16px 40px rgba(0,30,60,0.14), inset 0 1px 0 rgba(255,255,255,0.3)",
+        "$value": "0 4px 12px rgba(45,36,24,0.10), 0 16px 44px rgba(45,36,24,0.12), 0 32px 80px rgba(45,36,24,0.08)",
         "$type": "shadow"
       },
       "shadow-xl": {
-        "$value": "0 8px 16px rgba(0,30,60,0.1), 0 32px 64px rgba(0,30,60,0.16), inset 0 1px 0 rgba(255,255,255,0.2)",
+        "$value": "0 8px 20px rgba(45,36,24,0.12), 0 32px 64px rgba(45,36,24,0.16), 0 48px 96px rgba(45,36,24,0.08)",
         "$type": "shadow"
       },
       "shadow-card": {
-        "$value": "0 1px 3px rgba(0,30,60,0.08), 0 6px 20px rgba(0,30,60,0.1), inset 0 1px 0 rgba(255,255,255,0.5)",
-        "$type": "shadow"
+        "$value": "0 1px 2px rgba(45,36,24,0.04), 0 2px 8px rgba(45,36,24,0.03)",
+        "$type": "shadow",
+        "$description": "Clean, warm card shadow — premium feel"
       },
       "shadow-glow-accent": {
         "$value": "0 0 0 1px rgba(90,154,48,0.12), 0 4px 16px rgba(90,154,48,0.15)",
+        "$type": "shadow",
+        "$description": "Human green glow for hover/focus states"
+      },
+      "shadow-glow-blue": {
+        "$value": "0 0 0 1px rgba(37,99,235,0.12), 0 4px 12px rgba(37,99,235,0.08)",
         "$type": "shadow"
+      },
+      "user-message-gradient": {
+        "$value": "linear-gradient(135deg, #2563eb, #3b82f6)",
+        "$type": "string"
       },
       "shadow-inset": {
         "$value": "inset 0 1px 2px rgba(0,0,0,0.04)",
         "$type": "shadow"
       },
       "surface-gradient": {
-        "$value": "linear-gradient(180deg, #ffffff 0%, #f9f9f9 100%)",
-        "$type": "string"
+        "$value": "linear-gradient(180deg, #FFFFFF 0%, #F5F5F3 100%)",
+        "$type": "string",
+        "$description": "Warm cream to cream-gray — subtle depth on warm clean cards"
       },
       "surface-glow": {
         "$value": "radial-gradient(ellipse at 50% 0%, rgba(122,182,72,0.06) 0%, transparent 70%)",
@@ -1199,15 +1492,17 @@
       },
       "button-gradient-primary": {
         "$value": "linear-gradient(180deg, rgba(255,255,255,0.25) 0%, rgba(0,0,0,0.15) 100%)",
-        "$type": "string"
+        "$type": "string",
+        "$description": "Convex pillow gradient — visible 3D depth on buttons"
       },
       "hero-gradient": {
         "$value": "linear-gradient(135deg, rgba(122,182,72,0.07) 0%, rgba(122,182,72,0.03) 50%, transparent 100%)",
-        "$type": "string"
+        "$type": "string",
+        "$description": "Human green gradient — single-hue, varying intensity for depth"
       }
     },
     "high-contrast": {
-      "$description": "High contrast mode for accessibility",
+      "$description": "High contrast mode for accessibility. Black in both colour schemes: define every text-colour token here, or it inherits a light-theme value on black.",
       "bg": {
         "$value": "{color.neutral.0}",
         "$type": "color"
@@ -1232,32 +1527,67 @@
         "$value": "{color.neutral.1000}",
         "$type": "color"
       },
+      "text-secondary": {
+        "$value": "{color.neutral.800}",
+        "$type": "color"
+      },
       "text-muted": {
         "$value": "{color.neutral.700}",
         "$type": "color"
+      },
+      "text-tertiary": {
+        "$value": "{color.neutral.700}",
+        "$type": "color",
+        "$description": "Tertiary text — same WCAG profile as text-muted (high-contrast theme)"
       },
       "text-faint": {
         "$value": "{color.neutral.600}",
         "$type": "color"
       },
       "accent": {
-        "$value": "#2dd4bf",
+        "$value": "#8DC63F",
         "$type": "color"
       },
       "accent-text": {
-        "$value": "#0f766e",
-        "$type": "color"
+        "$value": "{color.human.400}",
+        "$type": "color",
+        "$description": "WCAG AAA on the forced-black palette: 10.3:1 on bg, 9.2:1 on bg-surface, 7.6:1 on bg-overlay"
+      },
+      "accent-secondary-text": {
+        "$value": "{color.amber.400}",
+        "$type": "color",
+        "$description": "12.6:1 on bg. Without it the light scheme leaks amber.700 onto black (4.2:1)"
+      },
+      "accent-tertiary-text": {
+        "$value": "{color.blue.300}",
+        "$type": "color",
+        "$description": "10.3:1 on bg. Without it the light scheme leaks blue.700 onto black (2.4:1); dark's blue.400 is 6.9:1, short of AAA"
+      },
+      "link": {
+        "$value": "{color.human.400}",
+        "$type": "color",
+        "$description": "10.3:1 on bg. Without it the light scheme leaks human.light-600 onto black (3.3:1)"
+      },
+      "link-hover": {
+        "$value": "{color.human.300}",
+        "$type": "color",
+        "$description": "12.2:1 on bg. Without it the light scheme leaks human.900 onto black (2.1:1)"
+      },
+      "link-visited": {
+        "$value": "{color.human.400}",
+        "$type": "color",
+        "$description": "Same as link, as in the light theme; dark's human.600 is 6.1:1, short of AAA"
       },
       "accent-hover": {
-        "$value": "#5eead4",
+        "$value": "#a3d46a",
         "$type": "color"
       },
       "accent-subtle": {
-        "$value": "rgba(45, 212, 191, 0.2)",
+        "$value": "rgba(122, 182, 72, 0.2)",
         "$type": "color"
       },
       "accent-strong": {
-        "$value": "#14b8a6",
+        "$value": "#7AB648",
         "$type": "color"
       },
       "on-accent": {
@@ -1315,6 +1645,26 @@
       "focus-ring-offset": {
         "$value": "2px",
         "$type": "dimension"
+      },
+      "surface-container": {
+        "$value": "rgba(255, 255, 255, 0.08)",
+        "$type": "color",
+        "$description": "White veil over the black palette. Without it the light scheme leaks its near-white #f8f8f6 container under white text"
+      },
+      "surface-container-high": {
+        "$value": "rgba(255, 255, 255, 0.12)",
+        "$type": "color",
+        "$description": "White veil over the black palette. Without it the light scheme leaks #f0eeed under white text"
+      },
+      "surface-container-highest": {
+        "$value": "{color.neutral.200}",
+        "$type": "color",
+        "$description": "Opaque, because modals, menus and the command palette paint it over page content. Without it the light scheme leaks #e8e7e4 under white text"
+      },
+      "hover-overlay": {
+        "$value": "rgba(255, 255, 255, 0.12)",
+        "$type": "color",
+        "$description": "Light veil for a black background. Without it the light scheme leaks its black 6% veil, invisible on black"
       }
     },
     "composite": {
@@ -1397,9 +1747,9 @@
         "$value": {
           "fontFamily": "{fontFamily.sans}",
           "fontSize": "{fontSize.base}",
-          "fontWeight": "{fontWeight.regular}",
+          "fontWeight": "{fontWeight.normal}",
           "lineHeight": "{lineHeight.normal}",
-          "letterSpacing": "{letterSpacing.normal}"
+          "letterSpacing": "{letterSpacing.base}"
         },
         "$type": "typography"
       },
@@ -1409,7 +1759,7 @@
           "fontSize": "{fontSize.2xl}",
           "fontWeight": "{fontWeight.semibold}",
           "lineHeight": "{lineHeight.tight}",
-          "letterSpacing": "{letterSpacing.tight}"
+          "letterSpacing": "{letterSpacing.2xl}"
         },
         "$type": "typography"
       },
@@ -1417,9 +1767,9 @@
         "$value": {
           "fontFamily": "{fontFamily.sans}",
           "fontSize": "{fontSize.xs}",
-          "fontWeight": "{fontWeight.regular}",
+          "fontWeight": "{fontWeight.normal}",
           "lineHeight": "{lineHeight.normal}",
-          "letterSpacing": "{letterSpacing.wide}"
+          "letterSpacing": "{letterSpacing.xs}"
         },
         "$type": "typography"
       },
@@ -1427,7 +1777,7 @@
         "$value": {
           "fontFamily": "{fontFamily.mono}",
           "fontSize": "{fontSize.sm}",
-          "fontWeight": "{fontWeight.regular}",
+          "fontWeight": "{fontWeight.normal}",
           "lineHeight": "{lineHeight.relaxed}"
         },
         "$type": "typography"
@@ -1435,10 +1785,16 @@
     }
   },
   "typography": {
+    "$extensions": {
+      "com.human.platform": "all",
+      "com.human.version": "0.5.0"
+    },
+    "$description": "Typography tokens — font families, sizes, weights, line-heights, letter-spacing, and type roles",
     "fontFamily": {
       "sans": {
-        "$value": "'Avenir', 'Avenir Next', -apple-system, BlinkMacSystemFont, system-ui, sans-serif",
-        "$type": "fontFamily"
+        "$value": "'Avenir', 'Avenir Next', 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif",
+        "$type": "fontFamily",
+        "$description": "Avenir (macOS local), Inter (cross-platform web fallback with similar metrics), then system"
       },
       "mono": {
         "$value": "'Geist Mono', ui-monospace, 'SF Mono', monospace",
@@ -1446,45 +1802,50 @@
       }
     },
     "fontSize": {
-      "xs": {
+      "2xs": {
         "$value": "0.6875rem",
         "$type": "dimension",
-        "$description": "11px"
+        "$description": "11px — smallest readable size, used for badges and secondary metadata"
+      },
+      "xs": {
+        "$value": "0.75rem",
+        "$type": "dimension",
+        "$description": "12px — captions, timestamps"
       },
       "sm": {
-        "$value": "0.8125rem",
-        "$type": "dimension",
-        "$description": "13px"
-      },
-      "base": {
         "$value": "0.875rem",
         "$type": "dimension",
-        "$description": "14px"
+        "$description": "14px — secondary text, labels"
       },
-      "lg": {
+      "base": {
         "$value": "1rem",
         "$type": "dimension",
-        "$description": "16px"
+        "$description": "16px — body text (matches Claude, Apple, ChatGPT)"
+      },
+      "lg": {
+        "$value": "clamp(1.125rem, 1.5vw, 1.25rem)",
+        "$type": "dimension",
+        "$description": "Fluid 18-20px — large body, emphasized text"
       },
       "xl": {
-        "$value": "1.25rem",
+        "$value": "clamp(1.375rem, 2vw, 1.625rem)",
         "$type": "dimension",
-        "$description": "20px"
+        "$description": "Fluid 22-26px — section headers"
       },
       "2xl": {
-        "$value": "clamp(1.25rem, 3vw, 1.75rem)",
+        "$value": "clamp(1.5rem, 3vw, 2rem)",
         "$type": "dimension",
-        "$description": "Fluid 20-28px"
+        "$description": "Fluid 24-32px — page headers"
       },
       "3xl": {
-        "$value": "clamp(1.5rem, 4vw, 2.25rem)",
+        "$value": "clamp(1.75rem, 4vw, 2.5rem)",
         "$type": "dimension",
-        "$description": "Fluid 24-36px"
+        "$description": "Fluid 28-40px — display text"
       },
       "hero": {
         "$value": "clamp(2rem, 5vw, 3.5rem)",
         "$type": "dimension",
-        "$description": "Fluid 32-56px"
+        "$description": "Fluid 32-56px — hero headlines"
       }
     },
     "fontWeight": {
@@ -1543,6 +1904,10 @@
     },
     "letterSpacing": {
       "$description": "Optical size compensation — tighter tracking at larger sizes",
+      "2xs": {
+        "$value": "0.03em",
+        "$type": "dimension"
+      },
       "xs": {
         "$value": "0.02em",
         "$type": "dimension"
@@ -1847,6 +2212,11 @@
     }
   },
   "motion": {
+    "$extensions": {
+      "com.human.platform": "all",
+      "com.human.version": "0.5.0"
+    },
+    "$description": "Motion tokens — duration, easing, spring, choreography, and purpose-based transitions",
     "duration": {
       "instant": {
         "$value": "50ms",
@@ -1882,6 +2252,16 @@
         "$value": "700ms",
         "$type": "duration",
         "$description": "Hero/page transitions"
+      },
+      "ambient": {
+        "$value": "25s",
+        "$type": "duration",
+        "$description": "Ambient background animations (drift, gradient) — not UI interaction"
+      },
+      "ambient-slow": {
+        "$value": "30s",
+        "$type": "duration",
+        "$description": "Slower ambient background animations"
       }
     },
     "easing": {
@@ -1914,7 +2294,22 @@
       "emphasize": {
         "$value": "cubic-bezier(0.2, 0, 0, 1)",
         "$type": "cubicBezier",
-        "$description": "Dramatic deceleration for emphasis animations"
+        "$description": "Material 3 standard — dramatic deceleration without overshoot"
+      },
+      "emphasize-overshoot": {
+        "$value": "cubic-bezier(0.2, 0, 0, 1.2)",
+        "$type": "cubicBezier",
+        "$description": "Material 3 expressive — deceleration with spring overshoot for hero moments"
+      },
+      "spring": {
+        "$value": "cubic-bezier(0.34, 1.56, 0.64, 1)",
+        "$type": "cubicBezier",
+        "$description": "CSS cubic-bezier spring approximation — overshoot with quick settle for buttons, toggles, cards"
+      },
+      "spring-gentle": {
+        "$value": "cubic-bezier(0.22, 1.2, 0.36, 1)",
+        "$type": "cubicBezier",
+        "$description": "Gentle spring — subtle overshoot for modals, panels, hover states"
       }
     },
     "spring": {
@@ -1978,6 +2373,21 @@
           "$type": "number"
         },
         "$description": "Hero reveal, onboarding (~600ms settle)"
+      },
+      "interactive": {
+        "stiffness": {
+          "$value": 322,
+          "$type": "number"
+        },
+        "damping": {
+          "$value": 31,
+          "$type": "number"
+        },
+        "mass": {
+          "$value": 1,
+          "$type": "number"
+        },
+        "$description": "Interactive elements — buttons, toggles, list items (response 0.35, dampingFraction 0.86)"
       }
     },
     "purpose": {
@@ -2242,6 +2652,66 @@
         "$type": "cubicBezier",
         "$description": "New view enters with ease-out"
       }
+    },
+    "haptic": {
+      "$description": "Haptic feedback tokens mapped to micro-physics presets — native platforms only (iOS UIImpactFeedbackGenerator, Android HapticFeedbackType)",
+      "light": {
+        "$value": "light",
+        "$type": "string",
+        "$extensions": {
+          "com.human.ios": "UIImpactFeedbackGenerator.FeedbackStyle.light",
+          "com.human.android": "HapticFeedbackConstants.KEYBOARD_TAP",
+          "com.human.maps-to": "micro-physics.button-press"
+        },
+        "$description": "Light tap — button press, toggle, list item select"
+      },
+      "medium": {
+        "$value": "medium",
+        "$type": "string",
+        "$extensions": {
+          "com.human.ios": "UIImpactFeedbackGenerator.FeedbackStyle.medium",
+          "com.human.android": "HapticFeedbackConstants.CONTEXT_CLICK",
+          "com.human.maps-to": "micro-physics.card-hover"
+        },
+        "$description": "Medium impact — connection events, significant state changes"
+      },
+      "heavy": {
+        "$value": "heavy",
+        "$type": "string",
+        "$extensions": {
+          "com.human.ios": "UIImpactFeedbackGenerator.FeedbackStyle.heavy",
+          "com.human.android": "HapticFeedbackConstants.LONG_PRESS",
+          "com.human.maps-to": "micro-physics.modal-anticipate"
+        },
+        "$description": "Heavy impact — destructive actions, major transitions"
+      },
+      "success": {
+        "$value": "success",
+        "$type": "string",
+        "$extensions": {
+          "com.human.ios": "UINotificationFeedbackGenerator.FeedbackType.success",
+          "com.human.android": "HapticFeedbackConstants.CONFIRM"
+        },
+        "$description": "Success notification — task complete, connection established"
+      },
+      "warning": {
+        "$value": "warning",
+        "$type": "string",
+        "$extensions": {
+          "com.human.ios": "UINotificationFeedbackGenerator.FeedbackType.warning",
+          "com.human.android": "HapticFeedbackConstants.REJECT"
+        },
+        "$description": "Warning notification — failed action, connection lost"
+      },
+      "selection": {
+        "$value": "selection",
+        "$type": "string",
+        "$extensions": {
+          "com.human.ios": "UISelectionFeedbackGenerator",
+          "com.human.android": "HapticFeedbackConstants.CLOCK_TICK"
+        },
+        "$description": "Selection change — picker scroll, settings toggle, tab switch"
+      }
     }
   },
   "glass": {
@@ -2253,14 +2723,14 @@
           "$description": "Lightest frosted glass"
         },
         "saturate": {
-          "$value": "120%",
+          "$value": "105%",
           "$type": "string",
-          "$description": "Low saturation boost"
+          "$description": "Minimal saturation — keeps frost neutral, not brand-tinted"
         },
         "bg-opacity": {
-          "$value": 0.04,
+          "$value": 0.055,
           "$type": "number",
-          "$description": "Nearly transparent"
+          "$description": "Slightly milkier frost without heavy fill"
         },
         "border-opacity": {
           "$value": 0.05,
@@ -2273,9 +2743,9 @@
           "$description": "No inset highlight"
         },
         "tint-opacity": {
-          "$value": 0.02,
+          "$value": 0.008,
           "$type": "number",
-          "$description": "Minimal environment tint"
+          "$description": "Bare accent whisper on tinted glass"
         },
         "refraction-scale": {
           "$value": 0,
@@ -2291,14 +2761,14 @@
           "$description": "Standard frosted glass"
         },
         "saturate": {
-          "$value": "180%",
+          "$value": "128%",
           "$type": "string",
-          "$description": "Moderate saturation boost"
+          "$description": "Moderate frost — avoids heavy chroma from backdrop-filter"
         },
         "bg-opacity": {
-          "$value": 0.06,
+          "$value": 0.085,
           "$type": "number",
-          "$description": "Slightly visible"
+          "$description": "Slightly more white veil for readability"
         },
         "border-opacity": {
           "$value": 0.08,
@@ -2311,9 +2781,9 @@
           "$description": "Subtle top highlight"
         },
         "tint-opacity": {
-          "$value": 0.04,
+          "$value": 0.018,
           "$type": "number",
-          "$description": "Subtle environment tint"
+          "$description": "Light environment tint — mostly neutral frost"
         },
         "refraction-scale": {
           "$value": 2,
@@ -2329,14 +2799,14 @@
           "$description": "Heavy frosted glass with refraction"
         },
         "saturate": {
-          "$value": "200%",
+          "$value": "148%",
           "$type": "string",
-          "$description": "Strong saturation boost"
+          "$description": "Strong blur, restrained saturation for white-frost modals"
         },
         "bg-opacity": {
-          "$value": 0.08,
+          "$value": 0.11,
           "$type": "number",
-          "$description": "More visible"
+          "$description": "Milky overlay for prominent surfaces"
         },
         "border-opacity": {
           "$value": 0.12,
@@ -2349,9 +2819,9 @@
           "$description": "Strong top highlight"
         },
         "tint-opacity": {
-          "$value": 0.06,
+          "$value": 0.028,
           "$type": "number",
-          "$description": "Noticeable environment tint"
+          "$description": "Soft accent tint — still reads as frost first"
         },
         "refraction-scale": {
           "$value": 3,
@@ -2359,10 +2829,59 @@
           "$description": "Visible refraction distortion"
         },
         "$description": "Modals, sheets, hero elements, overlays — z.modal (1300)"
+      },
+      "chat": {
+        "$description": "Chat-specific glass — blue-tinted for sessions panel and message actions",
+        "blur": {
+          "$value": "24px",
+          "$type": "dimension"
+        },
+        "saturate": {
+          "$value": "125%",
+          "$type": "string"
+        },
+        "bg-opacity": {
+          "$value": 0.85,
+          "$type": "number",
+          "$description": "Higher opacity for readability"
+        },
+        "border-opacity": {
+          "$value": 0.08,
+          "$type": "number"
+        },
+        "actions-bg-opacity": {
+          "$value": 0.9,
+          "$type": "number",
+          "$description": "Message actions toolbar"
+        },
+        "actions-blur": {
+          "$value": "16px",
+          "$type": "dimension"
+        }
+      },
+      "border-color": {
+        "$value": "rgba(252, 248, 242, 0.08)",
+        "$type": "color",
+        "$description": "Default glass surface border color — warm cream tint, emitted as --hu-glass-border-color"
+      },
+      "chromatic-spread": {
+        "$value": "2px",
+        "$type": "dimension",
+        "$description": "Chromatic aberration spread for prismatic edge on prominent glass"
+      },
+      "chromatic-opacity": {
+        "$value": 0.15,
+        "$type": "number",
+        "$description": "Chromatic border gradient opacity"
       }
     }
   },
   "components": {
+    "$extensions": {
+      "com.human.platform": "all",
+      "com.human.version": "0.5.0"
+    },
+    "$description": "Component-level token overrides — radius, padding, typography, min sizes",
     "sidebar": {
       "width": {
         "$value": "240px",
@@ -2395,9 +2914,9 @@
         "$type": "number"
       },
       "min-height": {
-        "$value": "36px",
+        "$value": "44px",
         "$type": "dimension",
-        "$description": "Touch target minimum"
+        "$description": "Touch target minimum (WCAG 2.1 AA / Apple HIG 44pt)"
       }
     },
     "card": {
@@ -2478,8 +2997,9 @@
         "$type": "dimension"
       },
       "min-height": {
-        "$value": "40px",
-        "$type": "dimension"
+        "$value": "44px",
+        "$type": "dimension",
+        "$description": "Touch target minimum (WCAG 2.1 AA / Apple HIG 44pt)"
       }
     },
     "tooltip": {
@@ -2641,9 +3161,46 @@
         "$value": "24px",
         "$type": "dimension"
       }
+    },
+    "icon": {
+      "xs": {
+        "$value": "14px",
+        "$type": "dimension",
+        "$description": "Extra-small icon — inline text"
+      },
+      "sm": {
+        "$value": "16px",
+        "$type": "dimension",
+        "$description": "Small icon — buttons, list items"
+      },
+      "md": {
+        "$value": "20px",
+        "$type": "dimension",
+        "$description": "Medium icon — default"
+      },
+      "lg": {
+        "$value": "24px",
+        "$type": "dimension",
+        "$description": "Large icon — headers, emphasis"
+      },
+      "xl": {
+        "$value": "28px",
+        "$type": "dimension",
+        "$description": "Extra-large icon — feature cards"
+      },
+      "2xl": {
+        "$value": "36px",
+        "$type": "dimension",
+        "$description": "2x extra-large icon — heroes, empty states"
+      }
     }
   },
   "opacity": {
+    "$extensions": {
+      "com.human.platform": "all",
+      "com.human.version": "0.5.0"
+    },
+    "$description": "Opacity tokens — state layers, overlays, and disabled states",
     "opacity": {
       "disabled": {
         "$value": 0.38,
@@ -2688,6 +3245,11 @@
     }
   },
   "elevation": {
+    "$extensions": {
+      "com.human.platform": "all",
+      "com.human.version": "0.5.0"
+    },
+    "$description": "Elevation tokens — shadow definitions mapped to semantic levels",
     "elevation": {
       "0": {
         "$value": "none",
@@ -2749,31 +3311,31 @@
     }
   },
   "breakpoints": {
+    "$extensions": {
+      "com.human.platform": "all",
+      "com.human.version": "0.6.0"
+    },
+    "$description": "Responsive breakpoint tokens — canonical 4-tier system aligned with M3 window size classes. CSS @media cannot use custom properties; duplicate raw px and comment the token name.",
     "breakpoint": {
-      "sm": {
-        "$value": "640px",
+      "compact": {
+        "$value": "600px",
         "$type": "dimension",
-        "$description": "Small — mobile landscape"
+        "$description": "Compact — mobile: single column, bottom nav. @media (max-width: 599px)"
       },
-      "md": {
-        "$value": "768px",
+      "medium": {
+        "$value": "905px",
         "$type": "dimension",
-        "$description": "Medium — tablets"
+        "$description": "Medium — tablet: collapsed sidebar, 2-column layout. @media (min-width: 600px) and (max-width: 904px)"
       },
-      "lg": {
-        "$value": "1024px",
+      "expanded": {
+        "$value": "1240px",
         "$type": "dimension",
-        "$description": "Large — desktop"
+        "$description": "Expanded — desktop: full sidebar, multi-column content. @media (min-width: 905px)"
       },
-      "xl": {
-        "$value": "1280px",
+      "wide": {
+        "$value": "1440px",
         "$type": "dimension",
-        "$description": "Extra-large — wide desktop"
-      },
-      "2xl": {
-        "$value": "1536px",
-        "$type": "dimension",
-        "$description": "2x extra-large — ultrawide"
+        "$description": "Wide — ultrawide: detail panels, wider grids. @media (min-width: 1240px)"
       }
     }
   }

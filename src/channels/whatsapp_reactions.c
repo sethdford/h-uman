@@ -57,6 +57,7 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/json.h"
+#include "human/core/log.h"
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -195,7 +196,9 @@ static int whatsapp_dispatch_one(const hu_json_value_t *msg, const char *bot_use
      * as discord_reactions.c. */
     evt.emoji = (k == HU_REACTION_KIND_CUSTOM_EMOJI && emoji) ? strdup(emoji) : NULL;
 
-    hu_reaction_handler_handle_event(&evt);
+    hu_error_t herr = hu_reaction_handler_handle_event(&evt);
+    if (herr != HU_OK)
+        hu_log_warn("whatsapp", NULL, "reaction not recorded (%d)", (int)herr);
 
     free((void *)evt.target_thread_id);
     free((void *)evt.target_message_ref);

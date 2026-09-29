@@ -5,6 +5,7 @@
 #include "cp_internal.h"
 #include "human/bus.h"
 #include "human/config.h"
+#include "human/core/time.h"
 #include "human/gateway/voice_stream.h"
 #include "human/multimodal.h"
 #include "human/platform.h"
@@ -64,10 +65,7 @@ static hu_bus_t *s_bus;
 static vs_slot_t *s_active_tts_slot;
 
 static int64_t vs_now_ms(void) {
-    struct timespec ts;
-    if (clock_gettime(CLOCK_REALTIME, &ts) != 0)
-        return 0;
-    return (int64_t)ts.tv_sec * 1000 + (int64_t)ts.tv_nsec / 1000000;
+    return (int64_t)hu_time_wall_ms();
 }
 
 typedef struct {

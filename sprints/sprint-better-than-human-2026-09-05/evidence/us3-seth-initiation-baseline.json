@@ -1,0 +1,75 @@
+{
+  "story": "US-3",
+  "script": "scripts/eval_seth_initiation_baseline.py",
+  "invocation": "python3 scripts/eval_seth_initiation_baseline.py",
+  "source": "~/Library/Messages/chat.db, opened mode=ro&immutable=1 (zero writes)",
+  "privacy_note": "aggregates only -- no message text, phone numbers, handles, or names below or anywhere in the script's output",
+  "tapback_filter_note": "F1 fix (2026-09-05): rows with a non-zero associated_message_type (tapback reactions, e.g. 2000-2006 for heart/like/etc.) are excluded from both the reply side and the initiation side via load_dm_messages_excluding_tapbacks(). All numbers below are POST-fix; the pre-fix numbers are preserved verbatim under before_tapback_filter for the record.",
+  "primary_run": {
+    "generated_at": 1788640905,
+    "days": 90,
+    "gap_hours": 6.0,
+    "fir_window_hours": 24.0,
+    "date_range": { "first": "2026-08-07", "last": "2026-09-05" },
+    "n": 48,
+    "unanswered": 15,
+    "rate": 0.3125,
+    "wilson_ci": [0.1995, 0.4533],
+    "min_n": 30,
+    "refused": false
+  },
+  "sensitivity_table": {
+    "note": "each row is an independent invocation of the shipped script with --gap-hours (INITIATION_GAP_HOURS override) and --fir-window-hours varied; --min-n lowered to 1 for this table only, so every cell is shown even where it would fall below the production refusal floor of 30. Rate is not sensitive to fir_window_hours beyond ~24h (0 rows move at gap_hours>=6, post-filter); it IS sensitive to gap_hours, consistent with a larger silence-gap threshold selecting fewer, more genuinely cold openers. Re-measured 2026-09-05 with the tapback filter applied (Finding F1) -- n and unanswered both drop slightly vs before_tapback_filter below (tapback rows were ~3.8% of in-window DM rows), rate moves by <=0.02 in every cell.",
+    "columns": ["gap_hours", "fir_window_hours", "n", "unanswered", "rate", "wilson_ci_lo", "wilson_ci_hi", "clears_min_n_30"],
+    "rows": [
+      [3, 12, 59, 18, 0.305, 0.203, 0.431, true],
+      [3, 24, 59, 17, 0.288, 0.188, 0.414, true],
+      [3, 48, 59, 16, 0.271, 0.174, 0.396, true],
+      [6, 12, 48, 15, 0.312, 0.199, 0.453, true],
+      [6, 24, 48, 15, 0.312, 0.199, 0.453, true],
+      [6, 48, 48, 15, 0.312, 0.199, 0.453, true],
+      [12, 12, 40, 15, 0.375, 0.242, 0.530, true],
+      [12, 24, 40, 15, 0.375, 0.242, 0.530, true],
+      [12, 48, 40, 15, 0.375, 0.242, 0.530, true],
+      [24, 12, 31, 14, 0.452, 0.292, 0.622, true],
+      [24, 24, 31, 14, 0.452, 0.292, 0.622, true],
+      [24, 48, 31, 14, 0.452, 0.292, 0.622, true]
+    ],
+    "recommended_pair": { "gap_hours": 6, "fir_window_hours": 24, "reason": "gap_hours=6 mirrors eval_when_to_speak.py's --seth-already-engaged-hours default; fir_window_hours=24 is FIR_WINDOW_HOURS, the imported comparison window shared with eval_when_to_speak.py's own FIR (AC-3.1)." }
+  },
+  "before_tapback_filter": {
+    "note": "Pre-F1-fix numbers, kept verbatim for the record. These were measured against load_dm_messages() (no associated_message_type filter), which counted a subset of bare tapback reactions as replies on the reply side and as initiations on the initiation side.",
+    "primary_run": {
+      "generated_at": 1788640165,
+      "days": 90,
+      "gap_hours": 6.0,
+      "fir_window_hours": 24.0,
+      "date_range": { "first": "2026-08-07", "last": "2026-09-05" },
+      "n": 50,
+      "unanswered": 16,
+      "rate": 0.32,
+      "wilson_ci": [0.2076, 0.4581],
+      "min_n": 30,
+      "refused": false
+    },
+    "sensitivity_table_rows": {
+      "columns": ["gap_hours", "fir_window_hours", "n", "unanswered", "rate", "wilson_ci_lo", "wilson_ci_hi", "clears_min_n_30"],
+      "rows": [
+        [3, 12, 61, 21, 0.344, 0.237, 0.470, true],
+        [3, 24, 61, 18, 0.295, 0.196, 0.419, true],
+        [3, 48, 61, 17, 0.279, 0.182, 0.402, true],
+        [6, 12, 50, 17, 0.340, 0.224, 0.478, true],
+        [6, 24, 50, 16, 0.320, 0.208, 0.458, true],
+        [6, 48, 50, 16, 0.320, 0.208, 0.458, true],
+        [12, 12, 41, 16, 0.390, 0.257, 0.543, true],
+        [12, 24, 41, 16, 0.390, 0.257, 0.543, true],
+        [12, 48, 41, 16, 0.390, 0.257, 0.543, true],
+        [24, 12, 31, 14, 0.452, 0.292, 0.622, true],
+        [24, 24, 31, 14, 0.452, 0.292, 0.622, true],
+        [24, 48, 31, 14, 0.452, 0.292, 0.622, true]
+      ]
+    }
+  },
+  "retention_floor_note": "the available n above rolls forward roughly one day per day (chat.db's Keep-Messages retention window); a future run will not reproduce this exact date_range or n -- see design doc Finding 2. The refusal floor (n < 30, AC-3.3) is a real possible future outcome, not just a test fixture.",
+  "scope_note": "per designs/US-3.md's Scope note: AC-3.1-AC-3.6 define exactly one metric (the false-initiation / unanswered rate for Seth's own openers), reusing scripts/blind_ab/score.py's wilson() for the CI per AC-3.4's explicit 'do not reimplement' instruction. There is no separate Seth-side MIR/missed-response metric in this story's scope -- see the design doc for why that is a distinct, similarly-sized follow-up rather than an add-on here."
+}

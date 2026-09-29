@@ -1,6 +1,8 @@
 ---
 title: Audit: Silent Failures, Integration Gaps, and Unvalidated Paths
 ---
+> **SUPERSEDED (2026-09-10).** Historical snapshot. The 2026-09-10 full code review re-checked this document: most cited `file:line` locations have moved and several findings are fixed (e.g. the intelligence cycle runs from the daemon every 6 h at `src/daemon.c`). Do not act on this file without re-verifying against the current tree.
+
 # Audit: Silent Failures, Integration Gaps, and Unvalidated Paths
 
 **Date:** 2025-03-08  

@@ -1,8 +1,8 @@
 #include "human/agent/hula.h"
 #include "agent_internal.h"
+#include "human/agent/dag.h"
 #include "human/agent/idempotency.h"
 #include "human/agent/planner.h"
-#include "human/agent/dag.h"
 #include "human/agent/registry.h"
 #include "human/agent/spawn.h"
 #include "human/core/json.h"
@@ -246,108 +246,117 @@ static hu_error_t hula_substitute_json_strings(hu_hula_exec_t *exec, hu_json_val
 /* ── Name tables ────────────────────────────────────────────────────────── */
 
 static const char *const op_names[] = {
-    [HU_HULA_CALL]     = "call",
-    [HU_HULA_SEQ]      = "seq",
-    [HU_HULA_PAR]      = "par",
-    [HU_HULA_BRANCH]   = "branch",
-    [HU_HULA_LOOP]     = "loop",
-    [HU_HULA_DELEGATE]  = "delegate",
-    [HU_HULA_EMIT]     = "emit",
-    [HU_HULA_TRY]      = "try",
-    [HU_HULA_VERIFY]   = "verify",
+    [HU_HULA_CALL] = "call",     [HU_HULA_SEQ] = "seq",   [HU_HULA_PAR] = "par",
+    [HU_HULA_BRANCH] = "branch", [HU_HULA_LOOP] = "loop", [HU_HULA_DELEGATE] = "delegate",
+    [HU_HULA_EMIT] = "emit",     [HU_HULA_TRY] = "try",   [HU_HULA_VERIFY] = "verify",
 };
 
 static const char *const pred_names[] = {
-    [HU_HULA_PRED_SUCCESS]      = "success",
-    [HU_HULA_PRED_FAILURE]      = "failure",
-    [HU_HULA_PRED_CONTAINS]     = "contains",
-    [HU_HULA_PRED_NOT_CONTAINS] = "not_contains",
-    [HU_HULA_PRED_ALWAYS]       = "always",
+    [HU_HULA_PRED_SUCCESS] = "success",   [HU_HULA_PRED_FAILURE] = "failure",
+    [HU_HULA_PRED_CONTAINS] = "contains", [HU_HULA_PRED_NOT_CONTAINS] = "not_contains",
+    [HU_HULA_PRED_ALWAYS] = "always",
 };
 
 static const char *const status_names[] = {
-    [HU_HULA_PENDING] = "pending",
-    [HU_HULA_RUNNING] = "running",
-    [HU_HULA_DONE]    = "done",
-    [HU_HULA_FAILED]  = "failed",
-    [HU_HULA_SKIPPED] = "skipped",
-    [HU_HULA_CANCELLED] = "cancelled",
+    [HU_HULA_PENDING] = "pending", [HU_HULA_RUNNING] = "running", [HU_HULA_DONE] = "done",
+    [HU_HULA_FAILED] = "failed",   [HU_HULA_SKIPPED] = "skipped", [HU_HULA_CANCELLED] = "cancelled",
 };
 
 const char *hu_hula_op_name(hu_hula_op_t op) {
-    if ((unsigned)op < HU_HULA_OP_COUNT) return op_names[op];
+    if ((unsigned)op < HU_HULA_OP_COUNT)
+        return op_names[op];
     return "unknown";
 }
 
 const char *hu_hula_pred_name(hu_hula_pred_t pred) {
-    if ((unsigned)pred <= HU_HULA_PRED_ALWAYS) return pred_names[pred];
+    if ((unsigned)pred <= HU_HULA_PRED_ALWAYS)
+        return pred_names[pred];
     return "unknown";
 }
 
 const char *hu_hula_status_name(hu_hula_status_t status) {
-    if ((unsigned)status <= HU_HULA_CANCELLED) return status_names[status];
+    if ((unsigned)status <= HU_HULA_CANCELLED)
+        return status_names[status];
     return "unknown";
 }
 
 /* ── Lifecycle ──────────────────────────────────────────────────────────── */
 
-hu_error_t hu_hula_program_init(hu_hula_program_t *prog, hu_allocator_t alloc,
-                                const char *name, size_t name_len) {
-    if (!prog) return HU_ERR_INVALID_ARGUMENT;
+hu_error_t hu_hula_program_init(hu_hula_program_t *prog, hu_allocator_t alloc, const char *name,
+                                size_t name_len) {
+    if (!prog)
+        return HU_ERR_INVALID_ARGUMENT;
     memset(prog, 0, sizeof(*prog));
     prog->alloc = alloc;
     prog->version = HU_HULA_VERSION;
     if (name && name_len > 0) {
         prog->name = hu_strndup(&alloc, name, name_len);
-        if (!prog->name) return HU_ERR_OUT_OF_MEMORY;
+        if (!prog->name)
+            return HU_ERR_OUT_OF_MEMORY;
         prog->name_len = name_len;
     }
     return HU_OK;
 }
 
 static void hula_node_clear(hu_allocator_t *alloc, hu_hula_node_t *n) {
-    if (n->id)              hu_str_free(alloc, n->id);
-    if (n->tool_name)       hu_str_free(alloc, n->tool_name);
-    if (n->args_json)       hu_str_free(alloc, n->args_json);
-    if (n->match_str)       hu_str_free(alloc, n->match_str);
-    if (n->goal)            hu_str_free(alloc, n->goal);
-    if (n->delegate_model)  hu_str_free(alloc, n->delegate_model);
-    if (n->emit_key)        hu_str_free(alloc, n->emit_key);
-    if (n->emit_value)           hu_str_free(alloc, n->emit_value);
-    if (n->delegate_context)     hu_str_free(alloc, n->delegate_context);
-    if (n->delegate_result_key)  hu_str_free(alloc, n->delegate_result_key);
-    if (n->delegate_agent_id)    hu_str_free(alloc, n->delegate_agent_id);
-    if (n->verify_node_id)       hu_str_free(alloc, n->verify_node_id);
-    if (n->required_capability)   hu_str_free(alloc, n->required_capability);
-    if (n->description)        hu_str_free(alloc, n->description);
+    if (n->id)
+        hu_str_free(alloc, n->id);
+    if (n->tool_name)
+        hu_str_free(alloc, n->tool_name);
+    if (n->args_json)
+        hu_str_free(alloc, n->args_json);
+    if (n->match_str)
+        hu_str_free(alloc, n->match_str);
+    if (n->goal)
+        hu_str_free(alloc, n->goal);
+    if (n->delegate_model)
+        hu_str_free(alloc, n->delegate_model);
+    if (n->emit_key)
+        hu_str_free(alloc, n->emit_key);
+    if (n->emit_value)
+        hu_str_free(alloc, n->emit_value);
+    if (n->delegate_context)
+        hu_str_free(alloc, n->delegate_context);
+    if (n->delegate_result_key)
+        hu_str_free(alloc, n->delegate_result_key);
+    if (n->delegate_agent_id)
+        hu_str_free(alloc, n->delegate_agent_id);
+    if (n->verify_node_id)
+        hu_str_free(alloc, n->verify_node_id);
+    if (n->required_capability)
+        hu_str_free(alloc, n->required_capability);
+    if (n->description)
+        hu_str_free(alloc, n->description);
     memset(n, 0, sizeof(*n));
 }
 
 void hu_hula_program_deinit(hu_hula_program_t *prog) {
-    if (!prog) return;
+    if (!prog)
+        return;
     for (size_t i = 0; i < prog->node_count; i++)
         hula_node_clear(&prog->alloc, &prog->nodes[i]);
     if (prog->nodes)
-        prog->alloc.free(prog->alloc.ctx, prog->nodes,
-                         prog->node_cap * sizeof(hu_hula_node_t));
-    if (prog->name) hu_str_free(&prog->alloc, prog->name);
+        prog->alloc.free(prog->alloc.ctx, prog->nodes, prog->node_cap * sizeof(hu_hula_node_t));
+    if (prog->name)
+        hu_str_free(&prog->alloc, prog->name);
     memset(prog, 0, sizeof(*prog));
 }
 
 hu_hula_node_t *hu_hula_program_alloc_node(hu_hula_program_t *prog, hu_hula_op_t op,
-                                            const char *id) {
-    if (!prog || prog->node_count >= HU_HULA_MAX_NODES) return NULL;
+                                           const char *id) {
+    if (!prog || prog->node_count >= HU_HULA_MAX_NODES)
+        return NULL;
     if (prog->node_count >= prog->node_cap) {
         size_t new_cap = prog->node_cap ? prog->node_cap * 2 : 16;
-        if (new_cap > HU_HULA_MAX_NODES) new_cap = HU_HULA_MAX_NODES;
-        hu_hula_node_t *buf = prog->alloc.alloc(prog->alloc.ctx,
-                                                  new_cap * sizeof(hu_hula_node_t));
-        if (!buf) return NULL;
+        if (new_cap > HU_HULA_MAX_NODES)
+            new_cap = HU_HULA_MAX_NODES;
+        hu_hula_node_t *buf = prog->alloc.alloc(prog->alloc.ctx, new_cap * sizeof(hu_hula_node_t));
+        if (!buf)
+            return NULL;
         memset(buf, 0, new_cap * sizeof(hu_hula_node_t));
         if (prog->nodes) {
             memcpy(buf, prog->nodes, prog->node_count * sizeof(hu_hula_node_t));
-            prog->alloc.free(prog->alloc.ctx, prog->nodes,
-                             prog->node_cap * sizeof(hu_hula_node_t));
+            prog->alloc.free(prog->alloc.ctx, prog->nodes, prog->node_cap * sizeof(hu_hula_node_t));
         }
         /* Fix child pointers after realloc */
         ptrdiff_t delta = (char *)buf - (char *)prog->nodes;
@@ -369,7 +378,10 @@ hu_hula_node_t *hu_hula_program_alloc_node(hu_hula_program_t *prog, hu_hula_op_t
     n->op = op;
     if (id) {
         n->id = hu_strdup(&prog->alloc, id);
-        if (!n->id) { prog->node_count--; return NULL; }
+        if (!n->id) {
+            prog->node_count--;
+            return NULL;
+        }
     }
     return n;
 }
@@ -377,43 +389,50 @@ hu_hula_node_t *hu_hula_program_alloc_node(hu_hula_program_t *prog, hu_hula_op_t
 /* ── Parse JSON ─────────────────────────────────────────────────────────── */
 
 static hu_hula_op_t parse_op(const char *s) {
-    if (!s) return HU_HULA_CALL;
+    if (!s)
+        return HU_HULA_CALL;
     for (unsigned i = 0; i < HU_HULA_OP_COUNT; i++) {
-        if (strcmp(s, op_names[i]) == 0) return (hu_hula_op_t)i;
+        if (strcmp(s, op_names[i]) == 0)
+            return (hu_hula_op_t)i;
     }
     return HU_HULA_CALL;
 }
 
 static hu_hula_pred_t parse_pred(const char *s) {
-    if (!s) return HU_HULA_PRED_SUCCESS;
+    if (!s)
+        return HU_HULA_PRED_SUCCESS;
     for (unsigned i = 0; i <= HU_HULA_PRED_ALWAYS; i++) {
-        if (strcmp(s, pred_names[i]) == 0) return (hu_hula_pred_t)i;
+        if (strcmp(s, pred_names[i]) == 0)
+            return (hu_hula_pred_t)i;
     }
     return HU_HULA_PRED_SUCCESS;
 }
 
-static hu_hula_node_t *parse_node(hu_hula_program_t *prog, const hu_json_value_t *obj,
-                                   int depth);
+static hu_hula_node_t *parse_node(hu_hula_program_t *prog, const hu_json_value_t *obj, int depth);
 
 static void parse_children(hu_hula_program_t *prog, hu_hula_node_t *parent,
-                            const hu_json_value_t *arr, int depth) {
-    if (!arr || arr->type != HU_JSON_ARRAY) return;
-    for (size_t i = 0; i < arr->data.array.len && parent->children_count < HU_HULA_MAX_CHILDREN; i++) {
+                           const hu_json_value_t *arr, int depth) {
+    if (!arr || arr->type != HU_JSON_ARRAY)
+        return;
+    for (size_t i = 0; i < arr->data.array.len && parent->children_count < HU_HULA_MAX_CHILDREN;
+         i++) {
         hu_hula_node_t *child = parse_node(prog, arr->data.array.items[i], depth + 1);
-        if (child) parent->children[parent->children_count++] = child;
+        if (child)
+            parent->children[parent->children_count++] = child;
     }
 }
 
-static hu_hula_node_t *parse_node(hu_hula_program_t *prog, const hu_json_value_t *obj,
-                                   int depth) {
-    if (!obj || obj->type != HU_JSON_OBJECT || depth > HU_HULA_MAX_DEPTH) return NULL;
+static hu_hula_node_t *parse_node(hu_hula_program_t *prog, const hu_json_value_t *obj, int depth) {
+    if (!obj || obj->type != HU_JSON_OBJECT || depth > HU_HULA_MAX_DEPTH)
+        return NULL;
 
     const char *op_str = hu_json_get_string(obj, "op");
     const char *id_str = hu_json_get_string(obj, "id");
     hu_hula_op_t op = parse_op(op_str);
 
     hu_hula_node_t *n = hu_hula_program_alloc_node(prog, op, id_str);
-    if (!n) return NULL;
+    if (!n)
+        return NULL;
 
     const char *s;
     if ((s = hu_json_get_string(obj, "tool")))
@@ -487,11 +506,13 @@ static hu_hula_node_t *parse_node(hu_hula_program_t *prog, const hu_json_value_t
         hu_json_value_t *else_val = hu_json_object_get(obj, "else");
         if (then_val && n->children_count < HU_HULA_MAX_CHILDREN) {
             hu_hula_node_t *t = parse_node(prog, then_val, depth + 1);
-            if (t) n->children[n->children_count++] = t;
+            if (t)
+                n->children[n->children_count++] = t;
         }
         if (else_val && n->children_count < HU_HULA_MAX_CHILDREN) {
             hu_hula_node_t *e = parse_node(prog, else_val, depth + 1);
-            if (e) n->children[n->children_count++] = e;
+            if (e)
+                n->children[n->children_count++] = e;
         }
     }
 
@@ -500,7 +521,8 @@ static hu_hula_node_t *parse_node(hu_hula_program_t *prog, const hu_json_value_t
         hu_json_value_t *body = hu_json_object_get(obj, "body");
         if (body && n->children_count == 0 && n->children_count < HU_HULA_MAX_CHILDREN) {
             hu_hula_node_t *b = parse_node(prog, body, depth + 1);
-            if (b) n->children[n->children_count++] = b;
+            if (b)
+                n->children[n->children_count++] = b;
         }
     }
 
@@ -509,11 +531,13 @@ static hu_hula_node_t *parse_node(hu_hula_program_t *prog, const hu_json_value_t
         hu_json_value_t *catchv = hu_json_object_get(obj, "catch");
         if (body && n->children_count < HU_HULA_MAX_CHILDREN) {
             hu_hula_node_t *b = parse_node(prog, body, depth + 1);
-            if (b) n->children[n->children_count++] = b;
+            if (b)
+                n->children[n->children_count++] = b;
         }
         if (catchv && n->children_count < HU_HULA_MAX_CHILDREN) {
             hu_hula_node_t *c = parse_node(prog, catchv, depth + 1);
-            if (c) n->children[n->children_count++] = c;
+            if (c)
+                n->children[n->children_count++] = c;
         }
     }
 
@@ -522,11 +546,13 @@ static hu_hula_node_t *parse_node(hu_hula_program_t *prog, const hu_json_value_t
 
 hu_error_t hu_hula_parse_json(hu_allocator_t *alloc, const char *json, size_t json_len,
                               hu_hula_program_t *out) {
-    if (!alloc || !json || !out) return HU_ERR_INVALID_ARGUMENT;
+    if (!alloc || !json || !out)
+        return HU_ERR_INVALID_ARGUMENT;
 
     hu_json_value_t *root = NULL;
     hu_error_t err = hu_json_parse(alloc, json, json_len, &root);
-    if (err != HU_OK) return err;
+    if (err != HU_OK)
+        return err;
     if (root->type != HU_JSON_OBJECT) {
         hu_json_free(alloc, root);
         return HU_ERR_PARSE;
@@ -534,7 +560,10 @@ hu_error_t hu_hula_parse_json(hu_allocator_t *alloc, const char *json, size_t js
 
     const char *name = hu_json_get_string(root, "name");
     err = hu_hula_program_init(out, *alloc, name, name ? strlen(name) : 0);
-    if (err != HU_OK) { hu_json_free(alloc, root); return err; }
+    if (err != HU_OK) {
+        hu_json_free(alloc, root);
+        return err;
+    }
 
     out->version = (uint32_t)hu_json_get_number(root, "version", HU_HULA_VERSION);
 
@@ -563,158 +592,212 @@ static hu_error_t serialize_node(hu_json_buf_t *buf, const hu_hula_node_t *n, in
 
 static hu_error_t serialize_children(hu_json_buf_t *buf, const hu_hula_node_t *n, int depth) {
     hu_error_t err;
-    if ((err = hu_json_buf_append_raw(buf, "\"children\":[", 12)) != HU_OK) return err;
+    if ((err = hu_json_buf_append_raw(buf, "\"children\":[", 12)) != HU_OK)
+        return err;
     for (size_t i = 0; i < n->children_count; i++) {
-        if (i > 0) { if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK) return err; }
-        if ((err = serialize_node(buf, n->children[i], depth + 1)) != HU_OK) return err;
+        if (i > 0) {
+            if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK)
+                return err;
+        }
+        if ((err = serialize_node(buf, n->children[i], depth + 1)) != HU_OK)
+            return err;
     }
     return hu_json_buf_append_raw(buf, "]", 1);
 }
 
 static hu_error_t serialize_node(hu_json_buf_t *buf, const hu_hula_node_t *n, int depth) {
-    if (!n || depth > HU_HULA_MAX_DEPTH) return HU_ERR_INVALID_ARGUMENT;
+    if (!n || depth > HU_HULA_MAX_DEPTH)
+        return HU_ERR_INVALID_ARGUMENT;
     hu_error_t err;
-    if ((err = hu_json_buf_append_raw(buf, "{", 1)) != HU_OK) return err;
+    if ((err = hu_json_buf_append_raw(buf, "{", 1)) != HU_OK)
+        return err;
 
     if ((err = hu_json_append_key_value(buf, "op", 2, hu_hula_op_name(n->op),
-                                         strlen(hu_hula_op_name(n->op)))) != HU_OK) return err;
+                                        strlen(hu_hula_op_name(n->op)))) != HU_OK)
+        return err;
     if (n->id) {
-        if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK) return err;
-        if ((err = hu_json_append_key_value(buf, "id", 2, n->id, strlen(n->id))) != HU_OK) return err;
+        if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK)
+            return err;
+        if ((err = hu_json_append_key_value(buf, "id", 2, n->id, strlen(n->id))) != HU_OK)
+            return err;
     }
     if (n->tool_name) {
-        if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK) return err;
-        if ((err = hu_json_append_key_value(buf, "tool", 4, n->tool_name,
-                                             strlen(n->tool_name))) != HU_OK) return err;
+        if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK)
+            return err;
+        if ((err = hu_json_append_key_value(buf, "tool", 4, n->tool_name, strlen(n->tool_name))) !=
+            HU_OK)
+            return err;
     }
     if (n->args_json) {
-        if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK) return err;
-        if ((err = hu_json_append_key(buf, "args", 4)) != HU_OK) return err;
-        if ((err = hu_json_buf_append_raw(buf, n->args_json, strlen(n->args_json))) != HU_OK) return err;
+        if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK)
+            return err;
+        if ((err = hu_json_append_key(buf, "args", 4)) != HU_OK)
+            return err;
+        if ((err = hu_json_buf_append_raw(buf, n->args_json, strlen(n->args_json))) != HU_OK)
+            return err;
     }
     if (n->description) {
-        if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK) return err;
+        if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK)
+            return err;
         if ((err = hu_json_append_key_value(buf, "description", 11, n->description,
-                                             strlen(n->description))) != HU_OK) return err;
+                                            strlen(n->description))) != HU_OK)
+            return err;
     }
     if (n->goal) {
-        if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK) return err;
+        if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK)
+            return err;
         if ((err = hu_json_append_key_value(buf, "goal", 4, n->goal, n->goal_len)) != HU_OK)
             return err;
     }
     if (n->delegate_model) {
-        if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK) return err;
+        if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK)
+            return err;
         if ((err = hu_json_append_key_value(buf, "model", 5, n->delegate_model,
-                                             n->delegate_model_len)) != HU_OK) return err;
+                                            n->delegate_model_len)) != HU_OK)
+            return err;
     }
     if (n->emit_key) {
-        if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK) return err;
-        if ((err = hu_json_append_key_value(buf, "emit_key", 8, n->emit_key,
-                                             n->emit_key_len)) != HU_OK) return err;
+        if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK)
+            return err;
+        if ((err = hu_json_append_key_value(buf, "emit_key", 8, n->emit_key, n->emit_key_len)) !=
+            HU_OK)
+            return err;
     }
     if (n->emit_value) {
-        if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK) return err;
+        if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK)
+            return err;
         if ((err = hu_json_append_key_value(buf, "emit_value", 10, n->emit_value,
-                                             n->emit_value_len)) != HU_OK) return err;
+                                            n->emit_value_len)) != HU_OK)
+            return err;
     }
     if (n->op == HU_HULA_BRANCH || n->op == HU_HULA_LOOP) {
-        if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK) return err;
+        if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK)
+            return err;
         if ((err = hu_json_append_key_value(buf, "pred", 4, hu_hula_pred_name(n->pred),
-                                             strlen(hu_hula_pred_name(n->pred)))) != HU_OK)
+                                            strlen(hu_hula_pred_name(n->pred)))) != HU_OK)
             return err;
         if (n->match_str) {
-            if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK) return err;
-            if ((err = hu_json_append_key_value(buf, "match", 5, n->match_str,
-                                                 n->match_str_len)) != HU_OK) return err;
+            if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK)
+                return err;
+            if ((err = hu_json_append_key_value(buf, "match", 5, n->match_str, n->match_str_len)) !=
+                HU_OK)
+                return err;
         }
     }
     if (n->op == HU_HULA_LOOP && n->max_iter > 0) {
-        if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK) return err;
+        if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK)
+            return err;
         if ((err = hu_json_append_key_int(buf, "max_iter", 8, (long long)n->max_iter)) != HU_OK)
             return err;
     }
     if (n->timeout_ms > 0) {
-        if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK) return err;
-        if ((err = hu_json_append_key_int(buf, "timeout_ms", 10, (long long)n->timeout_ms)) != HU_OK)
+        if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK)
+            return err;
+        if ((err = hu_json_append_key_int(buf, "timeout_ms", 10, (long long)n->timeout_ms)) !=
+            HU_OK)
             return err;
     }
     if (n->retry_count > 0) {
-        if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK) return err;
-        if ((err = hu_json_append_key_int(buf, "retry_count", 11, (long long)n->retry_count)) != HU_OK)
+        if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK)
+            return err;
+        if ((err = hu_json_append_key_int(buf, "retry_count", 11, (long long)n->retry_count)) !=
+            HU_OK)
             return err;
     }
     if (n->retry_backoff_ms > 0) {
-        if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK) return err;
+        if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK)
+            return err;
         if ((err = hu_json_append_key_int(buf, "retry_backoff_ms", 16,
                                           (long long)n->retry_backoff_ms)) != HU_OK)
             return err;
     }
     if (n->delegate_context) {
-        if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK) return err;
+        if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK)
+            return err;
         if ((err = hu_json_append_key_value(buf, "context", 7, n->delegate_context,
-                                             n->delegate_context_len)) != HU_OK)
+                                            n->delegate_context_len)) != HU_OK)
             return err;
     }
     if (n->delegate_result_key) {
-        if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK) return err;
+        if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK)
+            return err;
         if ((err = hu_json_append_key_value(buf, "result_key", 10, n->delegate_result_key,
-                                             n->delegate_result_key_len)) != HU_OK)
+                                            n->delegate_result_key_len)) != HU_OK)
             return err;
     }
     if (n->delegate_agent_id) {
-        if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK) return err;
+        if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK)
+            return err;
         if ((err = hu_json_append_key_value(buf, "agent_id", 8, n->delegate_agent_id,
-                                             n->delegate_agent_id_len)) != HU_OK)
+                                            n->delegate_agent_id_len)) != HU_OK)
             return err;
     }
     if (n->required_capability) {
-        if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK) return err;
+        if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK)
+            return err;
         if ((err = hu_json_append_key_value(buf, "required_capability", 19, n->required_capability,
-                                             n->required_capability_len)) != HU_OK)
+                                            n->required_capability_len)) != HU_OK)
             return err;
     }
     if (n->op == HU_HULA_TRY) {
         if (n->children_count > 0) {
-            if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK) return err;
-            if ((err = hu_json_append_key(buf, "body", 4)) != HU_OK) return err;
-            if ((err = serialize_node(buf, n->children[0], depth + 1)) != HU_OK) return err;
+            if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK)
+                return err;
+            if ((err = hu_json_append_key(buf, "body", 4)) != HU_OK)
+                return err;
+            if ((err = serialize_node(buf, n->children[0], depth + 1)) != HU_OK)
+                return err;
         }
         if (n->children_count > 1) {
-            if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK) return err;
-            if ((err = hu_json_append_key(buf, "catch", 5)) != HU_OK) return err;
-            if ((err = serialize_node(buf, n->children[1], depth + 1)) != HU_OK) return err;
+            if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK)
+                return err;
+            if ((err = hu_json_append_key(buf, "catch", 5)) != HU_OK)
+                return err;
+            if ((err = serialize_node(buf, n->children[1], depth + 1)) != HU_OK)
+                return err;
         }
         return hu_json_buf_append_raw(buf, "}", 1);
     }
     if (n->children_count > 0) {
-        if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK) return err;
-        if ((err = serialize_children(buf, n, depth)) != HU_OK) return err;
+        if ((err = hu_json_buf_append_raw(buf, ",", 1)) != HU_OK)
+            return err;
+        if ((err = serialize_children(buf, n, depth)) != HU_OK)
+            return err;
     }
 
     return hu_json_buf_append_raw(buf, "}", 1);
 }
 
-hu_error_t hu_hula_to_json(hu_allocator_t *alloc, const hu_hula_program_t *prog,
-                           char **out, size_t *out_len) {
-    if (!alloc || !prog || !out || !out_len) return HU_ERR_INVALID_ARGUMENT;
+hu_error_t hu_hula_to_json(hu_allocator_t *alloc, const hu_hula_program_t *prog, char **out,
+                           size_t *out_len) {
+    if (!alloc || !prog || !out || !out_len)
+        return HU_ERR_INVALID_ARGUMENT;
 
     hu_json_buf_t buf;
     hu_error_t err = hu_json_buf_init(&buf, alloc);
-    if (err != HU_OK) return err;
+    if (err != HU_OK)
+        return err;
 
-    if ((err = hu_json_buf_append_raw(&buf, "{", 1)) != HU_OK) goto fail;
+    if ((err = hu_json_buf_append_raw(&buf, "{", 1)) != HU_OK)
+        goto fail;
     if (prog->name) {
-        if ((err = hu_json_append_key_value(&buf, "name", 4, prog->name,
-                                             prog->name_len)) != HU_OK) goto fail;
-        if ((err = hu_json_buf_append_raw(&buf, ",", 1)) != HU_OK) goto fail;
+        if ((err = hu_json_append_key_value(&buf, "name", 4, prog->name, prog->name_len)) != HU_OK)
+            goto fail;
+        if ((err = hu_json_buf_append_raw(&buf, ",", 1)) != HU_OK)
+            goto fail;
     }
-    if ((err = hu_json_append_key_int(&buf, "version", 7, prog->version)) != HU_OK) goto fail;
+    if ((err = hu_json_append_key_int(&buf, "version", 7, prog->version)) != HU_OK)
+        goto fail;
     if (prog->root) {
-        if ((err = hu_json_buf_append_raw(&buf, ",", 1)) != HU_OK) goto fail;
-        if ((err = hu_json_append_key(&buf, "root", 4)) != HU_OK) goto fail;
-        if ((err = serialize_node(&buf, prog->root, 0)) != HU_OK) goto fail;
+        if ((err = hu_json_buf_append_raw(&buf, ",", 1)) != HU_OK)
+            goto fail;
+        if ((err = hu_json_append_key(&buf, "root", 4)) != HU_OK)
+            goto fail;
+        if ((err = serialize_node(&buf, prog->root, 0)) != HU_OK)
+            goto fail;
     }
-    if ((err = hu_json_buf_append_raw(&buf, "}", 1)) != HU_OK) goto fail;
+    if ((err = hu_json_buf_append_raw(&buf, "}", 1)) != HU_OK)
+        goto fail;
 
     *out = buf.ptr;
     *out_len = buf.len;
@@ -727,9 +810,10 @@ fail:
 
 /* ── Validate ───────────────────────────────────────────────────────────── */
 
-static void add_diag(hu_hula_validation_t *v, hu_allocator_t *alloc,
-                      const hu_hula_node_t *node, const char *msg) {
-    if (v->diag_count >= HU_HULA_MAX_DIAGS) return;
+static void add_diag(hu_hula_validation_t *v, hu_allocator_t *alloc, const hu_hula_node_t *node,
+                     const char *msg) {
+    if (v->diag_count >= HU_HULA_MAX_DIAGS)
+        return;
     hu_hula_diag_t *d = &v->diags[v->diag_count++];
     d->message = hu_strdup(alloc, msg);
     d->message_len = msg ? strlen(msg) : 0;
@@ -738,13 +822,14 @@ static void add_diag(hu_hula_validation_t *v, hu_allocator_t *alloc,
 }
 
 static void validate_node(const hu_hula_node_t *n, hu_allocator_t *alloc,
-                           const char *const *tool_names, size_t tool_count,
-                           hu_hula_validation_t *v, int depth) {
+                          const char *const *tool_names, size_t tool_count, hu_hula_validation_t *v,
+                          int depth) {
     if (depth > HU_HULA_MAX_DEPTH) {
         add_diag(v, alloc, n, "exceeds max depth");
         return;
     }
-    if (!n->id) add_diag(v, alloc, n, "node missing id");
+    if (!n->id)
+        add_diag(v, alloc, n, "node missing id");
 
     switch (n->op) {
     case HU_HULA_CALL:
@@ -753,7 +838,10 @@ static void validate_node(const hu_hula_node_t *n, hu_allocator_t *alloc,
         else if (tool_names) {
             bool found = false;
             for (size_t i = 0; i < tool_count; i++) {
-                if (strcmp(tool_names[i], n->tool_name) == 0) { found = true; break; }
+                if (strcmp(tool_names[i], n->tool_name) == 0) {
+                    found = true;
+                    break;
+                }
             }
             if (!found) {
                 char msg[128];
@@ -805,7 +893,8 @@ static void validate_node(const hu_hula_node_t *n, hu_allocator_t *alloc,
 hu_error_t hu_hula_validate(const hu_hula_program_t *prog, hu_allocator_t *alloc,
                             const char *const *tool_names, size_t tool_count,
                             hu_hula_validation_t *out) {
-    if (!prog || !alloc || !out) return HU_ERR_INVALID_ARGUMENT;
+    if (!prog || !alloc || !out)
+        return HU_ERR_INVALID_ARGUMENT;
     memset(out, 0, sizeof(*out));
     out->valid = true;
 
@@ -819,7 +908,8 @@ hu_error_t hu_hula_validate(const hu_hula_program_t *prog, hu_allocator_t *alloc
 }
 
 void hu_hula_validation_deinit(hu_allocator_t *alloc, hu_hula_validation_t *v) {
-    if (!v) return;
+    if (!v)
+        return;
     for (size_t i = 0; i < v->diag_count; i++) {
         if (v->diags[i].message)
             hu_str_free(alloc, v->diags[i].message);
@@ -829,9 +919,10 @@ void hu_hula_validation_deinit(hu_allocator_t *alloc, hu_hula_validation_t *v) {
 
 /* ── Execute ────────────────────────────────────────────────────────────── */
 
-hu_error_t hu_hula_exec_init(hu_hula_exec_t *exec, hu_allocator_t alloc,
-                             hu_hula_program_t *prog, hu_tool_t *tools, size_t tools_count) {
-    if (!exec || !prog) return HU_ERR_INVALID_ARGUMENT;
+hu_error_t hu_hula_exec_init(hu_hula_exec_t *exec, hu_allocator_t alloc, hu_hula_program_t *prog,
+                             hu_tool_t *tools, size_t tools_count) {
+    if (!exec || !prog)
+        return HU_ERR_INVALID_ARGUMENT;
     memset(exec, 0, sizeof(*exec));
     exec->alloc = alloc;
     exec->program = prog;
@@ -840,7 +931,8 @@ hu_error_t hu_hula_exec_init(hu_hula_exec_t *exec, hu_allocator_t alloc,
     exec->results_count = prog->node_count;
     if (prog->node_count > 0) {
         exec->results = alloc.alloc(alloc.ctx, prog->node_count * sizeof(hu_hula_result_t));
-        if (!exec->results) return HU_ERR_OUT_OF_MEMORY;
+        if (!exec->results)
+            return HU_ERR_OUT_OF_MEMORY;
         memset(exec->results, 0, prog->node_count * sizeof(hu_hula_result_t));
     }
     return HU_OK;
@@ -850,7 +942,8 @@ hu_error_t hu_hula_exec_init_full(hu_hula_exec_t *exec, hu_allocator_t alloc,
                                   hu_hula_program_t *prog, hu_tool_t *tools, size_t tools_count,
                                   hu_security_policy_t *policy, hu_observer_t *observer) {
     hu_error_t err = hu_hula_exec_init(exec, alloc, prog, tools, tools_count);
-    if (err != HU_OK) return err;
+    if (err != HU_OK)
+        return err;
     exec->policy = policy;
     exec->observer = observer;
     exec->trace_log_cap = 64;
@@ -872,12 +965,6 @@ void hu_hula_exec_set_spawn(hu_hula_exec_t *exec, struct hu_agent_pool *pool,
         return;
     exec->pool = pool;
     exec->spawn_cfg = spawn_cfg;
-}
-
-void hu_hula_exec_set_delegate_registry(hu_hula_exec_t *exec, struct hu_agent_registry *registry) {
-    if (!exec)
-        return;
-    exec->delegate_registry = registry;
 }
 
 void hu_hula_exec_set_security_agent(hu_hula_exec_t *exec, struct hu_agent *agent) {
@@ -915,8 +1002,7 @@ void hu_hula_exec_set_budget(hu_hula_exec_t *exec, uint32_t max_depth, uint32_t 
     exec->budget_max_depth = max_depth;
     exec->budget_max_wall_ms = max_wall_ms;
     exec->budget_max_tool_calls = max_tool_calls;
-    exec->budget_enabled =
-        (max_depth > 0) || (max_wall_ms > 0) || (max_tool_calls > 0);
+    exec->budget_enabled = (max_depth > 0) || (max_wall_ms > 0) || (max_tool_calls > 0);
 }
 
 static size_t node_index(const hu_hula_program_t *prog, const hu_hula_node_t *n) {
@@ -925,14 +1011,16 @@ static size_t node_index(const hu_hula_program_t *prog, const hu_hula_node_t *n)
 
 static hu_hula_result_t *result_for(hu_hula_exec_t *exec, const hu_hula_node_t *n) {
     size_t idx = node_index(exec->program, n);
-    if (idx < exec->results_count) return &exec->results[idx];
+    if (idx < exec->results_count)
+        return &exec->results[idx];
     return NULL;
 }
 
 static hu_tool_t *find_tool(hu_tool_t *tools, size_t count, const char *name) {
     for (size_t i = 0; i < count; i++) {
         const char *tn = tools[i].vtable->name(tools[i].ctx);
-        if (tn && strcmp(tn, name) == 0) return &tools[i];
+        if (tn && strcmp(tn, name) == 0)
+            return &tools[i];
     }
     return NULL;
 }
@@ -1013,8 +1101,7 @@ static bool eval_pred(hu_hula_exec_t *exec, hu_hula_node_t *n, hu_hula_result_t 
     case HU_HULA_PRED_FAILURE:
         return last && last->status == HU_HULA_FAILED;
     case HU_HULA_PRED_CONTAINS:
-        return last && last->output && n->match_str &&
-               strstr(last->output, n->match_str) != NULL;
+        return last && last->output && n->match_str && strstr(last->output, n->match_str) != NULL;
     case HU_HULA_PRED_NOT_CONTAINS:
         return !last || !last->output || !n->match_str ||
                strstr(last->output, n->match_str) == NULL;
@@ -1028,16 +1115,19 @@ static bool eval_pred(hu_hula_exec_t *exec, hu_hula_node_t *n, hu_hula_result_t 
 static hu_hula_result_t *last_result(hu_hula_exec_t *exec) {
     for (size_t i = exec->program->node_count; i > 0; i--) {
         hu_hula_result_t *r = &exec->results[i - 1];
-        if (r->status == HU_HULA_DONE || r->status == HU_HULA_FAILED) return r;
+        if (r->status == HU_HULA_DONE || r->status == HU_HULA_FAILED)
+            return r;
     }
     return NULL;
 }
 
 static bool trace_ensure(hu_hula_exec_t *exec, size_t min_extra) {
     size_t need = exec->trace_log_len + min_extra + 1;
-    if (need <= exec->trace_log_cap) return true;
+    if (need <= exec->trace_log_cap)
+        return true;
     size_t new_cap = exec->trace_log_cap ? exec->trace_log_cap * 2 : 64;
-    while (new_cap < need) new_cap *= 2;
+    while (new_cap < need)
+        new_cap *= 2;
     hu_allocator_t *a = &exec->alloc;
     char *nb;
     if (a->realloc) {
@@ -1049,14 +1139,16 @@ static bool trace_ensure(hu_hula_exec_t *exec, size_t min_extra) {
             a->free(a->ctx, exec->trace_log, exec->trace_log_cap);
         }
     }
-    if (!nb) return false;
+    if (!nb)
+        return false;
     exec->trace_log = nb;
     exec->trace_log_cap = new_cap;
     return true;
 }
 
 static void trace_append(hu_hula_exec_t *exec, const hu_hula_node_t *n) {
-    if (!exec->trace_log || !n) return;
+    if (!exec->trace_log || !n)
+        return;
     const char *id = n->id ? n->id : "";
     const char *opn = hu_hula_op_name(n->op);
     hu_hula_result_t *r = result_for(exec, (hu_hula_node_t *)n);
@@ -1085,14 +1177,16 @@ static void trace_append(hu_hula_exec_t *exec, const hu_hula_node_t *n) {
                            id, opn, safe_tool, st, outlen);
         else
             npr = snprintf(exec->trace_log + exec->trace_log_len, room > 0 ? room : 0,
-                           "{\"id\":\"%s\",\"op\":\"%s\",\"status\":\"%s\",\"output_len\":%zu},", id,
-                           opn, st, outlen);
-        if (npr < 0) return;
+                           "{\"id\":\"%s\",\"op\":\"%s\",\"status\":\"%s\",\"output_len\":%zu},",
+                           id, opn, st, outlen);
+        if (npr < 0)
+            return;
         if (room > 0 && (size_t)npr < room) {
             exec->trace_log_len += (size_t)npr;
             return;
         }
-        if (!trace_ensure(exec, (size_t)npr + 1)) return;
+        if (!trace_ensure(exec, (size_t)npr + 1))
+            return;
     }
 }
 
@@ -1154,7 +1248,8 @@ static hu_error_t exec_call(hu_hula_exec_t *exec, hu_hula_node_t *n) {
     bool use_cached_result = false;
     hu_idempotency_entry_t cached_entry;
     if (exec->idempotency_registry) {
-        if (hu_idempotency_check(exec->idempotency_registry, n->tool_name, n->args_json ? n->args_json : "{}", &cached_entry)) {
+        if (hu_idempotency_check(exec->idempotency_registry, n->tool_name,
+                                 n->args_json ? n->args_json : "{}", &cached_entry)) {
             use_cached_result = true;
             /* Reconstruct tool result from cached entry */
             if (cached_entry.is_error) {
@@ -1231,11 +1326,10 @@ static hu_error_t exec_call(hu_hula_exec_t *exec, hu_hula_node_t *n) {
         /* Record result in idempotency registry for future replay */
         if (exec->idempotency_registry && err == HU_OK) {
             const char *result_to_cache = tr.success ? tr.output : tr.error_msg;
-            hu_error_t record_err = hu_idempotency_record(exec->idempotency_registry, &exec->alloc,
-                                                           n->tool_name,
-                                                           n->args_json ? n->args_json : "{}",
-                                                           result_to_cache ? result_to_cache : "{}",
-                                                           !tr.success);
+            hu_error_t record_err =
+                hu_idempotency_record(exec->idempotency_registry, &exec->alloc, n->tool_name,
+                                      n->args_json ? n->args_json : "{}",
+                                      result_to_cache ? result_to_cache : "{}", !tr.success);
             /* Log but don't fail the tool call if recording fails */
             (void)record_err;
         }
@@ -1407,12 +1501,10 @@ static hu_error_t exec_verify(hu_hula_exec_t *exec, hu_hula_node_t *n) {
         pass = (target->status == HU_HULA_FAILED);
         break;
     case HU_HULA_PRED_CONTAINS:
-        pass = target->output && n->match_str &&
-               strstr(target->output, n->match_str) != NULL;
+        pass = target->output && n->match_str && strstr(target->output, n->match_str) != NULL;
         break;
     case HU_HULA_PRED_NOT_CONTAINS:
-        pass = !target->output || !n->match_str ||
-               strstr(target->output, n->match_str) == NULL;
+        pass = !target->output || !n->match_str || strstr(target->output, n->match_str) == NULL;
         break;
     case HU_HULA_PRED_ALWAYS:
         pass = true;
@@ -1431,7 +1523,7 @@ static hu_error_t exec_verify(hu_hula_exec_t *exec, hu_hula_node_t *n) {
 
 #if (defined(__unix__) || defined(__APPLE__)) && !defined(HU_IS_TEST)
 static hu_error_t delegate_embed_children_json(hu_allocator_t *alloc, hu_hula_node_t *n,
-                                                char **out_json, size_t *out_len) {
+                                               char **out_json, size_t *out_len) {
     if (!alloc || !n || !out_json || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
     *out_json = NULL;
@@ -1468,11 +1560,10 @@ static hu_error_t delegate_embed_children_json(hu_allocator_t *alloc, hu_hula_no
             continue;
         hu_json_object_set(alloc, cn, "op", hu_json_string_new(alloc, "call", 4));
         if (c->id)
-            hu_json_object_set(alloc, cn, "id",
-                               hu_json_string_new(alloc, c->id, strlen(c->id)));
+            hu_json_object_set(alloc, cn, "id", hu_json_string_new(alloc, c->id, strlen(c->id)));
         if (c->tool_name)
-            hu_json_object_set(
-                alloc, cn, "tool", hu_json_string_new(alloc, c->tool_name, strlen(c->tool_name)));
+            hu_json_object_set(alloc, cn, "tool",
+                               hu_json_string_new(alloc, c->tool_name, strlen(c->tool_name)));
         hu_json_value_t *args = NULL;
         const char *as = c->args_json ? c->args_json : "{}";
         if (hu_json_parse(alloc, as, strlen(as), &args) == HU_OK && args)
@@ -1526,8 +1617,7 @@ static hu_error_t exec_delegate(hu_hula_exec_t *exec, hu_hula_node_t *n) {
         char *combined_sp = NULL;
         if (n->children_count > 0 &&
             delegate_embed_children_json(&exec->alloc, n, &embed, &embed_len) == HU_OK && embed) {
-            static const char pre[] =
-                "Execute this HuLa JSON program (nested plan):\n";
+            static const char pre[] = "Execute this HuLa JSON program (nested plan):\n";
             size_t old_len = cfg.system_prompt_len;
             const char *old = cfg.system_prompt;
             size_t tail = (old ? old_len : 0) + 3;
@@ -1591,8 +1681,8 @@ static hu_error_t exec_delegate(hu_hula_exec_t *exec, hu_hula_node_t *n) {
                 if (st == HU_AGENT_COMPLETED && result) {
                     set_result(exec, n, HU_HULA_DONE, result, strlen(result), NULL, 0);
                     if (n->delegate_result_key && n->delegate_result_key_len > 0)
-                        (void)hula_slot_set(exec, n->delegate_result_key, n->delegate_result_key_len,
-                                            result, strlen(result));
+                        (void)hula_slot_set(exec, n->delegate_result_key,
+                                            n->delegate_result_key_len, result, strlen(result));
                 } else {
                     set_result(exec, n, HU_HULA_FAILED, NULL, 0,
                                result ? result : "delegate failed", result ? strlen(result) : 15);
@@ -1609,7 +1699,8 @@ static hu_error_t exec_delegate(hu_hula_exec_t *exec, hu_hula_node_t *n) {
 #endif
 #if defined(_WIN32) && !defined(HU_IS_TEST)
     if (exec->pool && exec->spawn_cfg && n->goal && n->goal_len > 0) {
-        set_result(exec, n, HU_HULA_FAILED, NULL, 0, "delegate spawn not supported on this platform",
+        set_result(exec, n, HU_HULA_FAILED, NULL, 0,
+                   "delegate spawn not supported on this platform",
                    strlen("delegate spawn not supported on this platform"));
         return HU_OK;
     }
@@ -1627,13 +1718,18 @@ static hu_error_t exec_emit(hu_hula_exec_t *exec, hu_hula_node_t *n) {
         /* Simple substitution: find $id references */
         for (size_t i = 0; i < exec->program->node_count; i++) {
             hu_hula_node_t *ref = &exec->program->nodes[i];
-            if (!ref->id) continue;
+            if (!ref->id)
+                continue;
             char var[128];
             int vlen = snprintf(var, sizeof(var), "$%s", ref->id);
-            if (vlen <= 0) continue;
+            if (vlen <= 0)
+                continue;
             if (strstr(n->emit_value, var)) {
                 hu_hula_result_t *rr = result_for(exec, ref);
-                if (rr && rr->output) { val = rr->output; val_len = rr->output_len; }
+                if (rr && rr->output) {
+                    val = rr->output;
+                    val_len = rr->output_len;
+                }
                 break;
             }
         }
@@ -1852,13 +1948,11 @@ hu_error_t hu_hula_exec_run(hu_hula_exec_t *exec) {
     if (exec->observer) {
         hu_observer_event_t ev = {0};
         ev.tag = HU_OBSERVER_EVENT_HULA_PROGRAM_END;
-        const hu_hula_result_t *rr =
-            exec->program->root && exec->program->root->id
-                ? hu_hula_exec_result(exec, exec->program->root->id)
-                : NULL;
+        const hu_hula_result_t *rr = exec->program->root && exec->program->root->id
+                                         ? hu_hula_exec_result(exec, exec->program->root->id)
+                                         : NULL;
         bool ok = rr && rr->status == HU_HULA_DONE;
-        ev.data.hula_program_end.program_name =
-            exec->program->name ? exec->program->name : "";
+        ev.data.hula_program_end.program_name = exec->program->name ? exec->program->name : "";
         ev.data.hula_program_end.success = ok;
         uint64_t t1 = hula_wall_ms();
         ev.data.hula_program_end.total_ms = (t1 >= t_run0) ? (t1 - t_run0) : 0;
@@ -1869,7 +1963,8 @@ hu_error_t hu_hula_exec_run(hu_hula_exec_t *exec) {
 }
 
 const hu_hula_result_t *hu_hula_exec_result(const hu_hula_exec_t *exec, const char *node_id) {
-    if (!exec || !node_id) return NULL;
+    if (!exec || !node_id)
+        return NULL;
     for (size_t i = 0; i < exec->program->node_count; i++) {
         if (exec->program->nodes[i].id && strcmp(exec->program->nodes[i].id, node_id) == 0)
             return &exec->results[i];
@@ -1878,15 +1973,18 @@ const hu_hula_result_t *hu_hula_exec_result(const hu_hula_exec_t *exec, const ch
 }
 
 const char *hu_hula_exec_trace(const hu_hula_exec_t *exec, size_t *out_len) {
-    if (out_len) *out_len = 0;
-    if (!exec || !exec->trace_log) return NULL;
+    if (out_len)
+        *out_len = 0;
+    if (!exec || !exec->trace_log)
+        return NULL;
 
     hu_hula_exec_t *e = (hu_hula_exec_t *)exec;
     char *log = e->trace_log;
     size_t len = e->trace_log_len;
 
     if (len == 1 && log[0] == '[') {
-        if (e->trace_log_cap < 3) return NULL;
+        if (e->trace_log_cap < 3)
+            return NULL;
         log[1] = ']';
         log[2] = '\0';
         e->trace_log_len = 2;
@@ -1895,7 +1993,8 @@ const char *hu_hula_exec_trace(const hu_hula_exec_t *exec, size_t *out_len) {
         log[len - 1] = ']';
     }
 
-    if (out_len) *out_len = e->trace_log_len;
+    if (out_len)
+        *out_len = e->trace_log_len;
     return e->trace_log;
 }
 
@@ -2010,11 +2109,14 @@ void hu_hula_estimate_cost(const hu_hula_program_t *prog, hu_hula_cost_estimate_
 }
 
 void hu_hula_exec_deinit(hu_hula_exec_t *exec) {
-    if (!exec) return;
+    if (!exec)
+        return;
     for (size_t i = 0; i < exec->results_count; i++) {
         hu_hula_result_t *r = &exec->results[i];
-        if (r->output) exec->alloc.free(exec->alloc.ctx, r->output, r->output_len + 1);
-        if (r->error) exec->alloc.free(exec->alloc.ctx, r->error, r->error_len + 1);
+        if (r->output)
+            exec->alloc.free(exec->alloc.ctx, r->output, r->output_len + 1);
+        if (r->error)
+            exec->alloc.free(exec->alloc.ctx, r->error, r->error_len + 1);
     }
     if (exec->results)
         exec->alloc.free(exec->alloc.ctx, exec->results,
@@ -2038,18 +2140,22 @@ static hu_hula_node_t *hula_bridge_alloc_call(hu_hula_program_t *prog, const cha
                                               const char *tool_name, const char *args_json,
                                               const char *description) {
     hu_hula_node_t *n = hu_hula_program_alloc_node(prog, HU_HULA_CALL, id);
-    if (!n) return NULL;
+    if (!n)
+        return NULL;
     if (tool_name) {
         n->tool_name = hu_strdup(&prog->alloc, tool_name);
-        if (!n->tool_name) return NULL;
+        if (!n->tool_name)
+            return NULL;
     }
     if (args_json) {
         n->args_json = hu_strdup(&prog->alloc, args_json);
-        if (!n->args_json) return NULL;
+        if (!n->args_json)
+            return NULL;
     }
     if (description) {
         n->description = hu_strdup(&prog->alloc, description);
-        if (!n->description) return NULL;
+        if (!n->description)
+            return NULL;
     }
     return n;
 }
@@ -2058,16 +2164,20 @@ static bool plan_step_ready(const hu_plan_t *plan, size_t idx, const unsigned ch
     const hu_plan_step_t *st = &plan->steps[idx];
     for (size_t d = 0; d < st->depends_count; d++) {
         int di = st->depends_on[d];
-        if (di < 0 || (size_t)di >= plan->steps_count) return false;
-        if (!placed[(size_t)di]) return false;
+        if (di < 0 || (size_t)di >= plan->steps_count)
+            return false;
+        if (!placed[(size_t)di])
+            return false;
     }
     return true;
 }
 
 static int dag_index_by_id(const hu_dag_t *dag, const char *id) {
-    if (!id) return -1;
+    if (!id)
+        return -1;
     for (size_t i = 0; i < dag->node_count; i++) {
-        if (dag->nodes[i].id && strcmp(dag->nodes[i].id, id) == 0) return (int)i;
+        if (dag->nodes[i].id && strcmp(dag->nodes[i].id, id) == 0)
+            return (int)i;
     }
     return -1;
 }
@@ -2076,19 +2186,24 @@ static bool dag_node_ready(const hu_dag_t *dag, size_t idx, const unsigned char 
     const hu_dag_node_t *n = &dag->nodes[idx];
     for (size_t d = 0; d < n->dep_count; d++) {
         int di = dag_index_by_id(dag, n->deps[d]);
-        if (di < 0) return false;
-        if (!placed[(size_t)di]) return false;
+        if (di < 0)
+            return false;
+        if (!placed[(size_t)di])
+            return false;
     }
     return true;
 }
 
 hu_error_t hu_hula_from_plan(hu_allocator_t *alloc, const hu_plan_t *plan, const char *name,
                              size_t name_len, hu_hula_program_t *out) {
-    if (!alloc || !plan || !out) return HU_ERR_INVALID_ARGUMENT;
-    if (plan->steps_count > 0 && !plan->steps) return HU_ERR_INVALID_ARGUMENT;
+    if (!alloc || !plan || !out)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (plan->steps_count > 0 && !plan->steps)
+        return HU_ERR_INVALID_ARGUMENT;
 
     hu_error_t err = hu_hula_program_init(out, *alloc, name, name_len);
-    if (err != HU_OK) return err;
+    if (err != HU_OK)
+        return err;
 
     if (plan->steps_count == 0) {
         out->root = NULL;
@@ -2120,8 +2235,8 @@ hu_error_t hu_hula_from_plan(hu_allocator_t *alloc, const hu_plan_t *plan, const
             char sid[32];
             (void)snprintf(sid, sizeof(sid), "s%zu", i);
             const hu_plan_step_t *st = &plan->steps[i];
-            hu_hula_node_t *call = hula_bridge_alloc_call(out, sid, st->tool_name, st->args_json,
-                                                           st->description);
+            hu_hula_node_t *call =
+                hula_bridge_alloc_call(out, sid, st->tool_name, st->args_json, st->description);
             if (!call) {
                 hu_hula_program_deinit(out);
                 memset(out, 0, sizeof(*out));
@@ -2160,8 +2275,10 @@ hu_error_t hu_hula_from_plan(hu_allocator_t *alloc, const hu_plan_t *plan, const
     while (placed_count < plan->steps_count) {
         size_t wn = 0;
         for (size_t i = 0; i < plan->steps_count; i++) {
-            if (placed[i]) continue;
-            if (!plan_step_ready(plan, i, placed)) continue;
+            if (placed[i])
+                continue;
+            if (!plan_step_ready(plan, i, placed))
+                continue;
             wave_idx[wn++] = i;
         }
         if (wn == 0) {
@@ -2178,8 +2295,8 @@ hu_error_t hu_hula_from_plan(hu_allocator_t *alloc, const hu_plan_t *plan, const
             char sid[32];
             (void)snprintf(sid, sizeof(sid), "s%zu", si);
             const hu_plan_step_t *st = &plan->steps[si];
-            hu_hula_node_t *call = hula_bridge_alloc_call(out, sid, st->tool_name, st->args_json,
-                                                           st->description);
+            hu_hula_node_t *call =
+                hula_bridge_alloc_call(out, sid, st->tool_name, st->args_json, st->description);
             if (!call) {
                 err = HU_ERR_OUT_OF_MEMORY;
                 goto fail;
@@ -2203,8 +2320,8 @@ hu_error_t hu_hula_from_plan(hu_allocator_t *alloc, const hu_plan_t *plan, const
                 char sid[32];
                 (void)snprintf(sid, sizeof(sid), "s%zu", si);
                 const hu_plan_step_t *st = &plan->steps[si];
-                hu_hula_node_t *call = hula_bridge_alloc_call(out, sid, st->tool_name, st->args_json,
-                                                               st->description);
+                hu_hula_node_t *call =
+                    hula_bridge_alloc_call(out, sid, st->tool_name, st->args_json, st->description);
                 if (!call) {
                     err = HU_ERR_OUT_OF_MEMORY;
                     goto fail;
@@ -2220,7 +2337,8 @@ hu_error_t hu_hula_from_plan(hu_allocator_t *alloc, const hu_plan_t *plan, const
                 goto fail;
             }
             outer->children[outer->children_count++] = par;
-            for (size_t k = 0; k < wn; k++) placed[wave_idx[k]] = 1;
+            for (size_t k = 0; k < wn; k++)
+                placed[wave_idx[k]] = 1;
         }
 
         placed_count += wn;
@@ -2242,10 +2360,12 @@ fail:
 
 hu_error_t hu_hula_from_dag(hu_allocator_t *alloc, const hu_dag_t *dag, const char *name,
                             size_t name_len, hu_hula_program_t *out) {
-    if (!alloc || !dag || !out) return HU_ERR_INVALID_ARGUMENT;
+    if (!alloc || !dag || !out)
+        return HU_ERR_INVALID_ARGUMENT;
 
     hu_error_t err = hu_hula_program_init(out, *alloc, name, name_len);
-    if (err != HU_OK) return err;
+    if (err != HU_OK)
+        return err;
 
     if (dag->node_count == 0) {
         out->root = NULL;
@@ -2279,8 +2399,10 @@ hu_error_t hu_hula_from_dag(hu_allocator_t *alloc, const hu_dag_t *dag, const ch
     while (placed_count < dag->node_count) {
         size_t wn = 0;
         for (size_t i = 0; i < dag->node_count; i++) {
-            if (placed[i]) continue;
-            if (!dag_node_ready(dag, i, placed)) continue;
+            if (placed[i])
+                continue;
+            if (!dag_node_ready(dag, i, placed))
+                continue;
             wave_idx[wn++] = i;
         }
         if (wn == 0) {
@@ -2300,7 +2422,8 @@ hu_error_t hu_hula_from_dag(hu_allocator_t *alloc, const hu_dag_t *dag, const ch
                 (void)snprintf(nid, sizeof(nid), "%s", dn->id);
             else
                 (void)snprintf(nid, sizeof(nid), "n%zu", ni);
-            hu_hula_node_t *call = hula_bridge_alloc_call(out, nid, dn->tool_name, dn->args_json, NULL);
+            hu_hula_node_t *call =
+                hula_bridge_alloc_call(out, nid, dn->tool_name, dn->args_json, NULL);
             if (!call) {
                 err = HU_ERR_OUT_OF_MEMORY;
                 goto fail_dag;
@@ -2327,7 +2450,8 @@ hu_error_t hu_hula_from_dag(hu_allocator_t *alloc, const hu_dag_t *dag, const ch
                     (void)snprintf(nid, sizeof(nid), "%s", dn->id);
                 else
                     (void)snprintf(nid, sizeof(nid), "n%zu", ni);
-                hu_hula_node_t *call = hula_bridge_alloc_call(out, nid, dn->tool_name, dn->args_json, NULL);
+                hu_hula_node_t *call =
+                    hula_bridge_alloc_call(out, nid, dn->tool_name, dn->args_json, NULL);
                 if (!call) {
                     err = HU_ERR_OUT_OF_MEMORY;
                     goto fail_dag;
@@ -2343,7 +2467,8 @@ hu_error_t hu_hula_from_dag(hu_allocator_t *alloc, const hu_dag_t *dag, const ch
                 goto fail_dag;
             }
             outer->children[outer->children_count++] = par;
-            for (size_t k = 0; k < wn; k++) placed[wave_idx[k]] = 1;
+            for (size_t k = 0; k < wn; k++)
+                placed[wave_idx[k]] = 1;
         }
 
         placed_count += wn;

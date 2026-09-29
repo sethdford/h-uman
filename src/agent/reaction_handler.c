@@ -16,6 +16,7 @@
  * restart (R4 in the Phase-5 risk register). */
 #include "human/agent/reaction_handler.h"
 #include "human/channels/imessage_ingest.h"
+#include "human/core/paths.h"
 #include "human/memory/identity_resolver.h"
 #include "human/memory/personal_model.h"
 #include "human/ml/dpo.h"
@@ -65,7 +66,8 @@ static hu_dpo_collector_t *s_collector = NULL;
  * sink. When non-NULL, iMessage reactions on registered assistant messages
  * are also ingested into the personal model (separate from the DPO collector
  * which exists for training-data collection). Mirrors the set_collector
- * pattern: daemon sets at init via hu_daemon_reaction_wire_personal_model. */
+ * pattern: the daemon sets it at init via
+ * hu_reaction_handler_set_personal_model. */
 static hu_personal_model_t *s_personal_model = NULL;
 /* Sprint A.7: optional identity-graph wire. NULL == no canonicalization;
  * non-NULL == reactions are looked up via hu_identity_lookup before
@@ -203,10 +205,7 @@ static int rxn_db_open(void) {
         return 1;
 
     static char path_buf[1024];
-    const char *home = getenv("HOME");
-    if (!home || !*home)
-        home = "/tmp";
-    snprintf(path_buf, sizeof(path_buf), "%s/.human/reaction_lookup.db", home);
+    (void)hu_paths_state_or(path_buf, sizeof(path_buf), "/tmp", "reaction_lookup.db");
     return rxn_db_open_at(path_buf, &s_db);
 }
 

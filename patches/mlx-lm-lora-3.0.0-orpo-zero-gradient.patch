@@ -1,0 +1,50 @@
+--- /tmp/o.py	2026-08-02 19:18:39
++++ /Users/sethford/.human/venvs/train312/lib/python3.12/site-packages/mlx_lm_lora/trainer/orpo_trainer.py	2026-08-02 18:44:16
+@@ -260,14 +260,20 @@
+     state = [model.state, optimizer.state, mx.random.state]
+ 
+     def loss_wrapper(
+-        chosen_logps,
+-        chosen_logits_mean,
+-        rejected_logps,
+-        rejected_logits_mean,
++        chosen,
++        rejected,
+         chosen_masks,
+         rejected_masks,
+         preference_scores,
+     ):
++        # PATCHED: the forward pass MUST happen inside the function that
++        # nn.value_and_grad differentiates. Upstream computed logps OUTSIDE and
++        # passed the resulting arrays in, so loss_wrapper had no data path to the
++        # model parameters and EVERY gradient was structurally zero -- producing a
++        # no-op adapter (all lora_b == 0.0) from a run that exits 0. dpo_trainer.py
++        # gets this right by passing the raw token batches; ORPO now matches it.
++        chosen_logps, chosen_logits_mean = get_logps(model, chosen, chosen_masks)
++        rejected_logps, rejected_logits_mean = get_logps(model, rejected, rejected_masks)
+         return loss(
+             chosen_logps=chosen_logps,
+             chosen_logits_mean=chosen_logits_mean,
+@@ -285,19 +291,12 @@
+     def step(batch, prev_grad, do_update):
+         chosen, rejected, chosen_masks, rejected_masks, preference_scores = batch
+ 
+-        chosen_logps, chosen_logits_mean = get_logps(model, chosen, chosen_masks)
+-        rejected_logps, rejected_logits_mean = get_logps(
+-            model, rejected, rejected_masks
+-        )
+-
+         (lvalue, reward, toks, metrics), grad = loss_value_and_grad(
+-            chosen_logps,
+-            chosen_logits_mean,
+-            rejected_logps,
+-            rejected_logits_mean,
++            chosen,
++            rejected,
+             chosen_masks,
+             rejected_masks,
+-            preference_scores=preference_scores,
++            preference_scores,
+         )
+ 
+         if prev_grad is not None:

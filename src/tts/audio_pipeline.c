@@ -23,8 +23,14 @@ hu_error_t hu_audio_mp3_to_caf(hu_allocator_t *alloc, const unsigned char *mp3_b
         return HU_ERR_INVALID_ARGUMENT;
 
 #if defined(HU_IS_TEST) && HU_IS_TEST
-    /* Test path: write to fixed mock file, skip afconvert. */
-    static const char *mock_path = "/tmp/human-voice-test.mp3";
+    /* Test path: write a per-process mock file, skip afconvert. The pid keeps
+     * two concurrently running suites from writing/unlinking the same file
+     * underneath each other's assertions. */
+    char mock_path[256];
+    int nm =
+        snprintf(mock_path, sizeof(mock_path), "/tmp/human-voice-test-%ld.mp3", (long)getpid());
+    if (nm < 0 || (size_t)nm >= sizeof(mock_path))
+        return HU_ERR_IO;
     FILE *f = fopen(mock_path, "wb");
     if (!f)
         return HU_ERR_IO;
@@ -122,7 +128,9 @@ hu_error_t hu_audio_tts_bytes_to_temp(hu_allocator_t *alloc, const unsigned char
         return HU_ERR_INVALID_ARGUMENT;
 
 #if defined(HU_IS_TEST) && HU_IS_TEST
-    int n = snprintf(out_path, out_cap, "/tmp/human-tts-bytes-test.%s", file_ext_no_dot);
+    /* Per-process mock path — see hu_audio_mp3_to_caf. */
+    int n = snprintf(out_path, out_cap, "/tmp/human-tts-bytes-test-%ld.%s", (long)getpid(),
+                     file_ext_no_dot);
     if (n < 0 || (size_t)n >= out_cap)
         return HU_ERR_INVALID_ARGUMENT;
     FILE *f = fopen(out_path, "wb");

@@ -223,3 +223,19 @@ bool hu_persona_refresh_should_run(bool enabled, int64_t now_unix, int64_t last_
         return true; /* never run before */
     return (now_unix - last_run_unix) >= (int64_t)(24 * 3600);
 }
+
+bool hu_persona_style_reanalyze_due(bool enabled, size_t history_count) {
+    /* Same config switch as the daemon refresh tick: both paths mine example
+     * banks from history and persist through hu_persona_creator_write, which
+     * serializes only the fields hu_persona_t carries. Until that writer
+     * round-trips unknown keys, a default-on reanalyze can (and on 2026-09-06
+     * did) rewrite the live persona minus contacts / proactive / life_events /
+     * style_rules. Fail closed. */
+    if (!enabled || history_count == 0)
+        return false;
+    if (history_count <= 20)
+        return history_count % 10 == 0;
+    if (history_count <= 100)
+        return history_count % 25 == 0;
+    return history_count % 50 == 0;
+}

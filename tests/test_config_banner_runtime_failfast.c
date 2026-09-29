@@ -208,7 +208,9 @@ static void test_config_banner_no_unknown_keys_emits_no_banner(void) {
 
 static void assert_stub_warning_for_kind(const char *kind) {
     hu_config_t cfg = {0};
-    cfg.runtime.kind = kind;
+    char kind_buf[64]; /* runtime.kind is a mutable char* in hu_config_t */
+    snprintf(kind_buf, sizeof(kind_buf), "%s", kind);
+    cfg.runtime.kind = kind_buf;
     hu_runtime_t r;
     stderr_capture_t cap;
     HU_ASSERT_EQ(stderr_capture_begin(&cap), 0);

@@ -20,17 +20,20 @@ static void default_config_has_all_models(void) {
 }
 
 static void default_models_are_not_deprecated(void) {
-    /* CLAUDE.md "AI Model Versions": gemini-3-flash-preview is superseded by
-     * gemini-3.5-flash; gemini-3-pro-preview is discontinued. The router's
-     * default config must not hand out a deprecated model id. */
+    /* CLAUDE.md "AI Model Versions", re-verified 2026-07-25: the router's
+     * default config must hand out only live-probed IDs. gemini-3.5-flash
+     * 404s on this project's Vertex endpoint (despite the 2026-05-24 note)
+     * and gemini-3.1-flash-lite-preview was shut down upstream — the only
+     * verified conversational-quality cloud model is gemini-3.1-pro-preview. */
     cfg = hu_model_router_default_config();
-    HU_ASSERT_STR_EQ(cfg.conversational_model, "gemini-3.5-flash");
+    HU_ASSERT_STR_EQ(cfg.conversational_model, "gemini-3.1-pro-preview");
     HU_ASSERT_EQ(cfg.conversational_model_len, strlen(cfg.conversational_model));
-    HU_ASSERT_STR_EQ(cfg.analytical_model, "gemini-3.5-flash");
+    HU_ASSERT_STR_EQ(cfg.analytical_model, "gemini-3.1-pro-preview");
     HU_ASSERT_EQ(cfg.analytical_model_len, strlen(cfg.analytical_model));
-    HU_ASSERT(strstr(cfg.conversational_model, "gemini-3-flash-preview") == NULL);
-    HU_ASSERT(strstr(cfg.conversational_model, "gemini-3-pro-preview") == NULL);
-    HU_ASSERT(strstr(cfg.analytical_model, "gemini-3-flash-preview") == NULL);
+    HU_ASSERT_STR_EQ(cfg.reflexive_model, "gemini-3.1-flash-lite");
+    HU_ASSERT_EQ(cfg.reflexive_model_len, strlen(cfg.reflexive_model));
+    HU_ASSERT(strstr(cfg.conversational_model, "gemini-3.5-flash") == NULL);
+    HU_ASSERT(strstr(cfg.reflexive_model, "-preview") == NULL);
     /* deep tier stays on the canonical pro-preview id (not the discontinued one) */
     HU_ASSERT(strstr(cfg.deep_model, "gemini-3-pro-preview") == NULL);
 }
@@ -405,6 +408,166 @@ static void log_tier_counts_correct(void) {
     HU_ASSERT(counts[HU_TIER_DEEP] == 1);
 }
 
+/* ── US-8: Shadow routing tests ──────────────────────────────────────── */
+
+static void shadow_predicate_boundary_12_words(void) {
+    /* 12-word message with no reasoning/emotion markers should NOT trigger shadow promotion */
+    const char *msg12 = "one two three four five six seven eight nine ten eleven twelve";
+    HU_ASSERT(!hu_model_route_shadow_would_promote_conversational(msg12, strlen(msg12)));
+}
+
+static void shadow_predicate_13_words_with_reasoning(void) {
+    /* 13 words + reasoning marker should trigger shadow promotion */
+    const char *msg =
+        "one two three four five six seven eight nine ten eleven twelve thirteen should i";
+    HU_ASSERT(hu_model_route_shadow_would_promote_conversational(msg, strlen(msg)));
+}
+
+static void shadow_predicate_13_words_no_markers_no_promotion(void) {
+    /* 13 words but no reasoning or emotional markers should NOT promote */
+    const char *msg =
+        "one two three four five six seven eight nine ten eleven twelve thirteen hello";
+    HU_ASSERT(!hu_model_route_shadow_would_promote_conversational(msg, strlen(msg)));
+}
+
+static void shadow_predicate_with_emotional_weight(void) {
+    /* 13 words with emotional marker should trigger promotion */
+    const char *msg = "one two three four five six seven eight nine ten eleven twelve frustrated";
+    HU_ASSERT(hu_model_route_shadow_would_promote_conversational(msg, strlen(msg)));
+}
+
+static void shadow_off_by_default(void) {
+    /* With HU_DIFFICULTY_ROUTE unset (default OFF), no shadow entries are logged */
+    unsetenv("HU_DIFFICULTY_ROUTE");
+    hu_model_router_config_t cfg = hu_model_router_default_config();
+    /* Substantive CONVERSATIONAL message */
+    const char *msg = "what do you think should i go to the party tonight or stay home";
+    hu_model_selection_t sel = hu_model_route(&cfg, msg, strlen(msg), NULL, 0, 14, 0);
+
+    HU_ASSERT(sel.tier == HU_TIER_CONVERSATIONAL);
+    /* With default OFF, returns CONVERSATIONAL unchanged */
+}
+
+static void shadow_live_not_implemented_warns_once(void) {
+    /* Setting HU_DIFFICULTY_ROUTE=live should warn but not promote (LIVE is not implemented) */
+    setenv("HU_DIFFICULTY_ROUTE", "live", 1);
+
+    hu_model_router_config_t cfg = hu_model_router_default_config();
+    const char *msg = "what do you think should i go to the party tonight or stay home";
+    hu_model_selection_t sel1 = hu_model_route(&cfg, msg, strlen(msg), NULL, 0, 14, 0);
+
+    /* Still returns CONVERSATIONAL (LIVE is not implemented, fails closed to OFF) */
+    HU_ASSERT(sel1.tier == HU_TIER_CONVERSATIONAL);
+
+    unsetenv("HU_DIFFICULTY_ROUTE");
+}
+
+static void shadow_mode_selection_matches_off_mode_for_substantive_message(void) {
+    /* AC-8.7: substantive CONVERSATIONAL message (>12 words with reasoning marker)
+     * routes to the same tier+model in OFF and SHADOW modes; SHADOW additionally
+     * logs a hypothetical ANALYTICAL decision. Proves the shadow decision does not
+     * influence the real selection. */
+    hu_route_decision_log_t *log = hu_route_global_log();
+    hu_route_log_init(log);
+
+    hu_model_router_config_t cfg = hu_model_router_default_config();
+    /* Substantive CONVERSATIONAL message with reasoning marker */
+    const char *msg = "what do you think should i go to the party tonight or stay home";
+
+    /* Route in OFF mode (default) */
+    unsetenv("HU_DIFFICULTY_ROUTE");
+    hu_model_selection_t sel_off = hu_model_route(&cfg, msg, strlen(msg), NULL, 0, 14, 0);
+
+    HU_ASSERT_EQ(sel_off.tier, HU_TIER_CONVERSATIONAL); /* precondition for shadow test */
+
+    /* Count entries after OFF route */
+    size_t after_off = hu_route_log_count(log);
+
+    /* Route in SHADOW mode */
+    setenv("HU_DIFFICULTY_ROUTE", "shadow", 1);
+    hu_model_selection_t sel_shadow = hu_model_route(&cfg, msg, strlen(msg), NULL, 0, 14, 0);
+    unsetenv("HU_DIFFICULTY_ROUTE");
+
+    /* Selection must be identical */
+    HU_ASSERT_EQ(sel_off.tier, sel_shadow.tier);
+    HU_ASSERT_STR_EQ(sel_off.model, sel_shadow.model);
+
+    /* Count total entries after both routes */
+    size_t total_count = hu_route_log_count(log);
+
+    /* SHADOW mode should have added exactly one more entry (the shadow entry).
+     * OFF route: 1 real entry
+     * SHADOW route: 1 real entry + 1 shadow entry
+     * Total expected: 3 entries */
+    HU_ASSERT_EQ(total_count, after_off + 2);
+
+    /* Count shadow entries */
+    size_t shadow_count = 0;
+    for (size_t i = 0; i < total_count; i++) {
+        const hu_route_decision_t *d = hu_route_log_get(log, i);
+        if (d && d->source == HU_ROUTE_SHADOW_DIFFICULTY)
+            shadow_count++;
+    }
+    HU_ASSERT_EQ(shadow_count, (size_t)1);
+}
+
+static void tier_counts_excludes_shadow_entries(void) {
+    /* Shadow entries should NOT be counted in tier_distribution */
+    hu_route_decision_log_t log;
+    hu_route_log_init(&log);
+
+    hu_model_selection_t real_sel, shadow_sel;
+    memset(&real_sel, 0, sizeof(real_sel));
+    memset(&shadow_sel, 0, sizeof(shadow_sel));
+
+    real_sel.tier = HU_TIER_CONVERSATIONAL;
+    real_sel.source = HU_ROUTE_HEURISTIC;
+    real_sel.model = "cloud";
+    real_sel.model_len = 5;
+
+    shadow_sel.tier = HU_TIER_ANALYTICAL;
+    shadow_sel.source = HU_ROUTE_SHADOW_DIFFICULTY;
+    shadow_sel.model = "cloud";
+    shadow_sel.model_len = 5;
+
+    hu_route_log_record(&log, &real_sel, 0, 1);
+    hu_route_log_record(&log, &shadow_sel, 0, 2);
+
+    size_t counts[4];
+    hu_route_log_tier_counts(&log, counts);
+
+    /* Shadow entry (ANALYTICAL) should NOT be counted */
+    HU_ASSERT(counts[HU_TIER_ANALYTICAL] == 0);
+    HU_ASSERT(counts[HU_TIER_CONVERSATIONAL] == 1);
+}
+
+static void casual_message_never_shadow_logged(void) {
+    /* Messages <= 12 words should never trigger shadow logging, even with SHADOW=on.
+     * Heuristic tier is REFLEXIVE and ZERO shadow entries are added. */
+    hu_route_decision_log_t *log = hu_route_global_log();
+    hu_route_log_init(log);
+
+    setenv("HU_DIFFICULTY_ROUTE", "shadow", 1);
+    hu_model_router_config_t cfg = hu_model_router_default_config();
+    const char *msg = "hey how are you"; /* 4 words, casual */
+    hu_model_selection_t sel = hu_model_route(&cfg, msg, strlen(msg), NULL, 0, 14, 0);
+
+    HU_ASSERT(sel.tier == HU_TIER_REFLEXIVE);
+
+    /* Count entries in the log. Since the message is <=12 words, no shadow
+     * entry should have been added. */
+    size_t entries = hu_route_log_count(log);
+    size_t shadow_count = 0;
+    for (size_t i = 0; i < entries; i++) {
+        const hu_route_decision_t *d = hu_route_log_get(log, i);
+        if (d && d->source == HU_ROUTE_SHADOW_DIFFICULTY)
+            shadow_count++;
+    }
+    HU_ASSERT_EQ(shadow_count, (size_t)0);
+
+    unsetenv("HU_DIFFICULTY_ROUTE");
+}
+
 /* ── String conversion tests ──────────────────────────────────────────── */
 
 static void tier_str_all_values(void) {
@@ -419,6 +582,7 @@ static void source_str_all_values(void) {
     HU_ASSERT(strcmp(hu_route_source_str(HU_ROUTE_JUDGE), "judge") == 0);
     HU_ASSERT(strcmp(hu_route_source_str(HU_ROUTE_JUDGE_CACHED), "judge_cached") == 0);
     HU_ASSERT(strcmp(hu_route_source_str(HU_ROUTE_JUDGE_FALLBACK), "judge_fallback") == 0);
+    HU_ASSERT(strcmp(hu_route_source_str(HU_ROUTE_SHADOW_DIFFICULTY), "shadow_difficulty") == 0);
 }
 
 static void judge_system_prompt_not_null(void) {
@@ -502,8 +666,14 @@ static void route_with_judge_cache_hit_returns_cached(void) {
 }
 
 static void analytical_and_deep_use_different_models(void) {
+    /* 2026-07-25: analytical and deep DELIBERATELY share gemini-3.1-pro-preview
+     * — it is the only live-probed conversational-quality Vertex model on this
+     * project today (gemini-3.5-flash 404s). The tier ladder still has real
+     * rungs: reflexive (flash-lite) must stay distinct from deep, and the two
+     * heavyweight tiers differ by thinking budget at request time, not ID. */
     hu_model_router_config_t c = hu_model_router_default_config();
-    HU_ASSERT(strcmp(c.analytical_model, c.deep_model) != 0);
+    HU_ASSERT(strcmp(c.reflexive_model, c.deep_model) != 0);
+    HU_ASSERT_STR_EQ(c.analytical_model, c.deep_model);
 }
 
 static void very_long_message_scores_higher(void) {
@@ -786,6 +956,17 @@ void run_model_router_tests(void) {
     HU_RUN_TEST(log_record_and_get);
     HU_RUN_TEST(log_wraps_around);
     HU_RUN_TEST(log_tier_counts_correct);
+
+    /* US-8: Shadow routing */
+    HU_RUN_TEST(shadow_predicate_boundary_12_words);
+    HU_RUN_TEST(shadow_predicate_13_words_with_reasoning);
+    HU_RUN_TEST(shadow_predicate_13_words_no_markers_no_promotion);
+    HU_RUN_TEST(shadow_predicate_with_emotional_weight);
+    HU_RUN_TEST(shadow_off_by_default);
+    HU_RUN_TEST(shadow_live_not_implemented_warns_once);
+    HU_RUN_TEST(shadow_mode_selection_matches_off_mode_for_substantive_message);
+    HU_RUN_TEST(tier_counts_excludes_shadow_entries);
+    HU_RUN_TEST(casual_message_never_shadow_logged);
 
     /* String conversions */
     HU_RUN_TEST(tier_str_all_values);

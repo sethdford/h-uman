@@ -148,6 +148,13 @@ def regression_verdict(
     if new_val_loss is None:
         return 'PASS'
 
+    # A val loss is only comparable to history measured on the SAME validation
+    # set (training_loop.split_train_valid records val_set_id). Records without
+    # an id predate the content-keyed split; they are not comparable either.
+    vid = new_result.get('val_set_id')
+    if vid:
+        history = [r for r in history if r.get('val_set_id') == vid]
+
     # Degenerate signature (random baseline)?
     if is_degenerate_loss(new_val_loss):
         return 'FAIL'
@@ -166,6 +173,14 @@ def regression_verdict(
     return 'PASS'
 
 
+def history_excluding(results_file: Path, adapter_id: str, days_back: int = 28) -> List[Dict]:
+    """load_recent() minus the record of the run being judged. The gate appends
+    its own record before deciding, and 2026-09-07..12 it compared six nights
+    against themselves (delta 0 -> PASS every night, zero real comparisons)."""
+    return [r for r in load_recent(results_file, days_back=days_back)
+            if r.get('adapter_id') != adapter_id]
+
+
 def append_result(
     results_file: Path,
     timestamp: str,
@@ -176,7 +191,8 @@ def append_result(
     alignment_score: Optional[float],
     lora_scale: float,
     iters: int,
-    git_commit: str
+    git_commit: str,
+    val_set_id: Optional[str] = None,
 ) -> None:
     """
     Append one result record to the JSONL file.
@@ -195,6 +211,7 @@ def append_result(
         'lora_scale': lora_scale,
         'iters': iters,
         'git_commit': git_commit,
+        'val_set_id': val_set_id,
     }
 
     with open(results_file, 'a') as f:

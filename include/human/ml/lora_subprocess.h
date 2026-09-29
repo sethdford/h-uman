@@ -97,6 +97,19 @@ bool hu_lora_subprocess_preflight_ok(const hu_lora_subprocess_config_t *cfg);
  *     logged via hu_log_error before returning) */
 hu_error_t hu_lora_subprocess_train(hu_allocator_t *alloc, const hu_lora_subprocess_config_t *cfg);
 
+/* Interpreter used for `-m mlx_lm.lora`.
+ *
+ * Resolution order: $HU_MLX_PYTHON (if executable) → the pinned
+ * ~/Documents/gemma-realtime-1/.venv312/bin/python3.12 → "python3".
+ *
+ * Not the bare string "python3": PATH resolved that to python@3.14 on the dev
+ * machine 2026-07-26, the interpreter scripts/human-serve.sh deliberately
+ * avoids ("3.14 has loky semaphore crash bug"). Serving and both training
+ * paths must share one interpreter. Mirrors training_loop.py::mlx_python().
+ *
+ * Returns a pointer to static storage; valid until the next call. */
+const char *hu_lora_subprocess_python(void);
+
 /* Build the argv that hu_lora_subprocess_train would pass to
  * hu_process_run_with_timeout. Pure — no subprocess launched. Used by
  * tests to pin the wire format. Caller passes a fixed-capacity

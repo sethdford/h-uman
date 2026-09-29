@@ -496,3 +496,82 @@ size_t hu_imessage_extract_attributed_body(const unsigned char *blob, size_t blo
     }
     return 0;
 }
+
+/* Typedstream length prefix: one byte (< 0x80), 0x81 + u16 LE, or 0x82 + u32
+ * LE. Returns the header size, 0 when `at` is not a length. */
+static size_t read_ts_length(const unsigned char *b, size_t n, size_t at, size_t *len_out) {
+    if (at >= n)
+        return 0;
+    unsigned char c = b[at];
+    if (c > 0 && c < 0x80) {
+        *len_out = c;
+        return 1;
+    }
+    if (c == 0x81 && at + 3 <= n) {
+        *len_out = (size_t)b[at + 1] | ((size_t)b[at + 2] << 8);
+        return 3;
+    }
+    if (c == 0x82 && at + 5 <= n) {
+        *len_out = (size_t)b[at + 1] | ((size_t)b[at + 2] << 8) | ((size_t)b[at + 3] << 16) |
+                   ((size_t)b[at + 4] << 24);
+        return 5;
+    }
+    return 0;
+}
+
+/* Well-formed UTF-8 with no control bytes below TAB. */
+static bool utf8_text(const unsigned char *s, size_t n) {
+    for (size_t i = 0; i < n;) {
+        unsigned char c = s[i];
+        size_t extra = c < 0x80             ? 0
+                       : (c & 0xE0) == 0xC0 ? 1
+                       : (c & 0xF0) == 0xE0 ? 2
+                       : (c & 0xF8) == 0xF0 ? 3
+                                            : 9;
+        if (extra == 9 || (c < 0x09) || i + extra >= n + (extra ? 0 : 1))
+            return false;
+        for (size_t k = 1; k <= extra; k++)
+            if ((s[i + k] & 0xC0) != 0x80)
+                return false;
+        i += extra + 1;
+    }
+    return true;
+}
+
+size_t hu_imessage_extract_audio_transcription(const unsigned char *blob, size_t blob_len,
+                                               char *out, size_t cap) {
+    static const char key[] = "IMAudioTranscription";
+    if (!out || cap == 0)
+        return 0;
+    out[0] = '\0';
+    if (!blob || cap < 2)
+        return 0;
+    size_t k = find_substring(blob, blob_len, 0, key);
+    if (k == SIZE_MAX)
+        return 0;
+    size_t from = k + sizeof(key) - 1;
+    for (size_t o = from; o < from + 16 && o < blob_len; o++) {
+        size_t len = 0, h = read_ts_length(blob, blob_len, o, &len);
+        if (h == 0 || len == 0)
+            continue;
+        size_t s = o + h;
+        if (s + len >= blob_len || blob[s + len] != 0x86 || !utf8_text(blob + s, len))
+            continue; /* not a real length: the value must be text ending at the object marker */
+        size_t n = len < cap - 1 ? len : cap - 1;
+        while (n > 0 && n < len && (blob[s + n] & 0xC0) == 0x80)
+            n--; /* never split a UTF-8 character */
+        memcpy(out, blob + s, n);
+        out[n] = '\0';
+        return n;
+    }
+    return 0;
+}
+
+bool hu_text_has_audio_transcription(const char *s, size_t n) {
+    static const char tag[] = HU_AUDIO_TRANSCRIPTION_PREFIX;
+    size_t tl = sizeof(tag) - 1;
+    for (size_t i = 0; s && i + tl <= n; i++)
+        if (memcmp(s + i, tag, tl) == 0)
+            return true;
+    return false;
+}

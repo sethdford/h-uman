@@ -1,0 +1,123 @@
+{
+  "bench": "longmemeval_s",
+  "protocol": {
+    "limit": 30,
+    "seed": 3,
+    "metric": "session-level R@5 from top-10 turns",
+    "hybrid": "harness-side RRF(k=60) of kw+sem lists (Python, no C hybrid path) -- the plain-hybrid column",
+    "hybrid_cli": "human memory search --hybrid <q> -- Contract C2 reconstructive path as shipped (falls back to the C plain RRF+cross-encoder merge when insufficient)"
+  },
+  "before_2026-09-02": {
+    "source": "memory-benchmarks-c2.json",
+    "binary_key_bug": "present: fallback rows printed content in the key column",
+    "n": 30,
+    "kw": 0.867,
+    "sem": 1.0,
+    "hybrid": 1.0,
+    "hybrid_cli": 0.667,
+    "by_type": {
+      "knowledge-update": {
+        "kw": 1.0,
+        "sem": 1.0,
+        "hybrid": 1.0,
+        "hybrid_cli": 0.8,
+        "n": 5
+      },
+      "multi-session": {
+        "kw": 0.8,
+        "sem": 1.0,
+        "hybrid": 1.0,
+        "hybrid_cli": 0.8,
+        "n": 5
+      },
+      "single-session-assistant": {
+        "kw": 1.0,
+        "sem": 1.0,
+        "hybrid": 1.0,
+        "hybrid_cli": 0.4,
+        "n": 5
+      },
+      "single-session-preference": {
+        "kw": 0.6,
+        "sem": 1.0,
+        "hybrid": 1.0,
+        "hybrid_cli": 0.6,
+        "n": 5
+      },
+      "single-session-user": {
+        "kw": 1.0,
+        "sem": 1.0,
+        "hybrid": 1.0,
+        "hybrid_cli": 1.0,
+        "n": 5
+      },
+      "temporal-reasoning": {
+        "kw": 0.8,
+        "sem": 1.0,
+        "hybrid": 1.0,
+        "hybrid_cli": 0.4,
+        "n": 5
+      }
+    }
+  },
+  "after_2026-09-03": {
+    "source": "memory-benchmarks-c2-keyfix-2026-09-03.json",
+    "commit": "5b70af331",
+    "embedder": "http://127.0.0.1:8741 (same nomic modernbert model as :8749)",
+    "n": 30,
+    "kw": 0.867,
+    "sem": 1.0,
+    "hybrid": 0.967,
+    "hybrid_cli": 0.767,
+    "by_type": {
+      "knowledge-update": {
+        "kw": 1.0,
+        "sem": 1.0,
+        "hybrid": 1.0,
+        "hybrid_cli": 1.0,
+        "n": 5
+      },
+      "multi-session": {
+        "kw": 0.8,
+        "sem": 1.0,
+        "hybrid": 1.0,
+        "hybrid_cli": 0.8,
+        "n": 5
+      },
+      "single-session-assistant": {
+        "kw": 1.0,
+        "sem": 1.0,
+        "hybrid": 1.0,
+        "hybrid_cli": 0.6,
+        "n": 5
+      },
+      "single-session-preference": {
+        "kw": 0.6,
+        "sem": 1.0,
+        "hybrid": 1.0,
+        "hybrid_cli": 0.6,
+        "n": 5
+      },
+      "single-session-user": {
+        "kw": 1.0,
+        "sem": 1.0,
+        "hybrid": 1.0,
+        "hybrid_cli": 1.0,
+        "n": 5
+      },
+      "temporal-reasoning": {
+        "kw": 0.8,
+        "sem": 1.0,
+        "hybrid": 0.8,
+        "hybrid_cli": 0.6,
+        "n": 5
+      }
+    }
+  },
+  "delta_after_minus_before": {
+    "kw": 0.0,
+    "sem": 0.0,
+    "hybrid": -0.033,
+    "hybrid_cli": 0.1
+  }
+}

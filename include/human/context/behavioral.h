@@ -43,8 +43,6 @@ typedef struct hu_mirror_analysis {
     bool uses_emoji;         /* frequent emoji */
 } hu_mirror_analysis_t;
 
-hu_error_t hu_mirror_analyze(const char *const *messages, const size_t *msg_lens, size_t count,
-                             hu_mirror_analysis_t *out);
 hu_error_t hu_mirror_build_directive(hu_allocator_t *alloc, const hu_mirror_analysis_t *analysis,
                                      char **out, size_t *out_len);
 

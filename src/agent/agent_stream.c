@@ -9,6 +9,7 @@
 #include "human/agent/graph_grounding.h"
 #include "human/agent/growth_narrative.h"
 #include "human/agent/gvr.h"
+#include "human/agent/hard_moment.h"
 #include "human/agent/humanness.h"
 #include "human/agent/input_guard.h"
 #include "human/agent/memory_loader.h"
@@ -44,7 +45,9 @@
 #include "human/context_engine.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 #include "human/core/string.h"
+#include "human/core/tokens.h"
 #include "human/eval/consistency.h"
 #include "human/experience.h"
 #include "human/hook.h"
@@ -498,20 +501,7 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
         if (mem_err != HU_OK && mem_err != HU_ERR_NOT_SUPPORTED)
             hu_log_error("agent_stream_v2", NULL, "memory_loader_load failed: %s",
                          hu_error_string(mem_err));
-        hu_graph_grounding_mode_t graph_mode = hu_graph_grounding_mode();
-        if (graph_mode != HU_GRAPH_GROUNDING_OFF && agent->memory_session_id &&
-            agent->memory_session_id_len > 0) {
-            hu_graph_ground_load(&loader, agent->memory_session_id, agent->memory_session_id_len, 0,
-                                 &graph_ctx, &graph_ctx_len);
-            if (graph_mode == HU_GRAPH_GROUNDING_SHADOW) {
-                hu_log_info("graph_grounding", NULL,
-                            "shadow: %zu graph_context bytes (not injected)", graph_ctx_len);
-                if (graph_ctx)
-                    agent->alloc->free(agent->alloc->ctx, graph_ctx, graph_ctx_len + 1);
-                graph_ctx = NULL;
-                graph_ctx_len = 0;
-            }
-        }
+        hu_agent_load_graph_grounding(agent, &loader, msg, msg_len, &graph_ctx, &graph_ctx_len);
     }
 
     char *awareness_ctx = NULL;
@@ -528,199 +518,18 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
     size_t persona_prompt_len = 0;
     if (agent->persona) {
         if (agent->lean_prompt) {
-            /* Lean persona: identity + output constraint + core_anchor + reinforcement
-             * + anti_patterns + style_rules + channel overlay. */
-            char lp[16384];
-            size_t lpo = 0;
-            {
-                const hu_persona_t *pp = agent->persona;
-                if (pp->identity) {
-                    int n = snprintf(lp + lpo, sizeof(lp) - lpo, "You ARE this person: %s\n",
-                                     pp->identity);
-                    if (n > 0 && lpo + (size_t)n < sizeof(lp))
-                        lpo += (size_t)n;
-                }
-                if (pp->biography) {
-                    int n = snprintf(lp + lpo, sizeof(lp) - lpo, "%s\n", pp->biography);
-                    if (n > 0 && lpo + (size_t)n < sizeof(lp))
-                        lpo += (size_t)n;
-                }
-                static const char constraint[] =
-                    "Output ONLY what this person would actually type — nothing else. "
-                    "No reasoning, no parentheses, no meta-commentary, no analysis. "
-                    "Just the raw text message, exactly as it would appear on screen.\n";
-                int n = snprintf(lp + lpo, sizeof(lp) - lpo, "%s", constraint);
-                if (n > 0 && lpo + (size_t)n < sizeof(lp))
-                    lpo += (size_t)n;
-                for (size_t ri = 0; ri < pp->communication_rules_count && ri < 12; ri++) {
-                    if (pp->communication_rules[ri]) {
-                        n = snprintf(lp + lpo, sizeof(lp) - lpo, "- %s\n",
-                                     pp->communication_rules[ri]);
-                        if (n > 0 && lpo + (size_t)n < sizeof(lp))
-                            lpo += (size_t)n;
-                    }
-                }
-                n = snprintf(lp + lpo, sizeof(lp) - lpo, "\n");
-                if (n > 0 && lpo + (size_t)n < sizeof(lp))
-                    lpo += (size_t)n;
-            }
-            const hu_persona_t *p = agent->persona;
-            if (p->core_anchor) {
-                int n = snprintf(lp + lpo, sizeof(lp) - lpo, "%s\n\n", p->core_anchor);
-                if (n > 0 && lpo + (size_t)n < sizeof(lp))
-                    lpo += (size_t)n;
-            }
-            for (size_t i = 0; i < p->immersive_reinforcement_count && i < 10; i++) {
-                if (p->immersive_reinforcement[i]) {
-                    int n = snprintf(lp + lpo, sizeof(lp) - lpo, "- %s\n",
-                                     p->immersive_reinforcement[i]);
-                    if (n > 0 && lpo + (size_t)n < sizeof(lp))
-                        lpo += (size_t)n;
-                }
-            }
-            if (p->anti_patterns_count > 0) {
-                int n = snprintf(lp + lpo, sizeof(lp) - lpo, "\nNEVER do:\n");
-                if (n > 0 && lpo + (size_t)n < sizeof(lp))
-                    lpo += (size_t)n;
-                for (size_t i = 0; i < p->anti_patterns_count; i++) {
-                    if (p->anti_patterns[i]) {
-                        n = snprintf(lp + lpo, sizeof(lp) - lpo, "- %s\n", p->anti_patterns[i]);
-                        if (n > 0 && lpo + (size_t)n < sizeof(lp))
-                            lpo += (size_t)n;
-                    }
-                }
-            }
-            if (p->style_rules_count > 0) {
-                int n = snprintf(lp + lpo, sizeof(lp) - lpo, "\nStyle:\n");
-                if (n > 0 && lpo + (size_t)n < sizeof(lp))
-                    lpo += (size_t)n;
-                for (size_t i = 0; i < p->style_rules_count; i++) {
-                    if (p->style_rules[i]) {
-                        n = snprintf(lp + lpo, sizeof(lp) - lpo, "- %s\n", p->style_rules[i]);
-                        if (n > 0 && lpo + (size_t)n < sizeof(lp))
-                            lpo += (size_t)n;
-                    }
-                }
-            }
-            /* Add examples to prime the model on correct tone.
-             * hu_persona_select_examples writes up to N pointers into out[]
-             * (signature: const hu_persona_example_t **out). Previously this
-             * passed &exs of a single pointer (1×8 bytes) with capacity 5,
-             * which produced a stack-buffer-overflow caught by ASan and a
-             * misuse of exs[ei] as an object instead of a pointer below. */
-            {
-                const hu_persona_example_t *exs[5] = {NULL};
-                size_t ex_count = 0;
-                hu_persona_select_examples(p, agent->active_channel, agent->active_channel_len,
-                                           NULL, 0, exs, &ex_count, 5,
-                                           &agent->personal_model.style);
-                if (ex_count > 0) {
-                    int n = snprintf(lp + lpo, sizeof(lp) - lpo, "\nExamples of how you text:\n");
-                    if (n > 0 && lpo + (size_t)n < sizeof(lp))
-                        lpo += (size_t)n;
-                    for (size_t ei = 0; ei < ex_count; ei++) {
-                        if (exs[ei] && exs[ei]->incoming && exs[ei]->response) {
-                            n = snprintf(lp + lpo, sizeof(lp) - lpo, "them: %s\nyou: %s\n\n",
-                                         exs[ei]->incoming, exs[ei]->response);
-                            if (n > 0 && lpo + (size_t)n < sizeof(lp))
-                                lpo += (size_t)n;
-                        }
-                    }
-                }
-            }
-            /* RAG-over-own-messages voice grounding (default off): retrieve
-             * Seth's most-similar real past messages to THIS incoming message and
-             * inject them as dynamic few-shot grounding — the SOTA RAG leg next to
-             * the fine-tuned adapter + personal model.
-             *
-             * Register-conditional (live A/B 2026-05-29, rag-ab-live-verdict.json):
-             * RAG grounding HELPS the substantive register (+0.110) but slightly
-             * hurts casual (-0.078, richer context fights curt brevity). So gate it
-             * on ANALYTICAL/DEEP turns only; REFLEXIVE/CONVERSATIONAL and unknown
-             * tier (turn_tier < 0) skip it. */
-            if (agent->config && agent->config->agent.rag_grounding_enabled &&
-                agent->turn_tier >= (int)HU_TIER_ANALYTICAL) {
-                const char *home = getenv("HOME");
-                if (home && *home) {
-                    char qbuf[512];
-                    size_t qn = msg_len < sizeof(qbuf) - 1 ? msg_len : sizeof(qbuf) - 1;
-                    if (msg && qn > 0) {
-                        memcpy(qbuf, msg, qn);
-                        qbuf[qn] = '\0';
-                        char cpath[768];
-                        int pn =
-                            snprintf(cpath, sizeof(cpath), "%s/.human/voice_corpus.jsonl", home);
-                        if (pn > 0 && (size_t)pn < sizeof(cpath)) {
-                            char rag_buf[2048];
-                            size_t rn = hu_persona_rag_ground_from_file(
-                                qbuf, cpath, 3, rag_buf, sizeof(rag_buf), agent->alloc);
-                            if (rn > 0) {
-                                int n = snprintf(lp + lpo, sizeof(lp) - lpo, "\n%s", rag_buf);
-                                if (n > 0 && lpo + (size_t)n < sizeof(lp))
-                                    lpo += (size_t)n;
-                            }
-                        }
-                    }
-                }
-            }
-            const hu_persona_overlay_t *ov =
-                hu_persona_find_overlay(p, agent->active_channel, agent->active_channel_len);
-            if (ov) {
-                int n = snprintf(lp + lpo, sizeof(lp) - lpo, "\nChannel style:");
-                if (n > 0 && lpo + (size_t)n < sizeof(lp))
-                    lpo += (size_t)n;
-                if (ov->formality) {
-                    n = snprintf(lp + lpo, sizeof(lp) - lpo, " %s.", ov->formality);
-                    if (n > 0 && lpo + (size_t)n < sizeof(lp))
-                        lpo += (size_t)n;
-                }
-                if (ov->avg_length) {
-                    n = snprintf(lp + lpo, sizeof(lp) - lpo, " Length: %s.", ov->avg_length);
-                    if (n > 0 && lpo + (size_t)n < sizeof(lp))
-                        lpo += (size_t)n;
-                }
-                if (ov->emoji_usage) {
-                    n = snprintf(lp + lpo, sizeof(lp) - lpo, " Emoji: %s.", ov->emoji_usage);
-                    if (n > 0 && lpo + (size_t)n < sizeof(lp))
-                        lpo += (size_t)n;
-                }
-                for (size_t i = 0; i < ov->style_notes_count; i++) {
-                    if (ov->style_notes[i]) {
-                        n = snprintf(lp + lpo, sizeof(lp) - lpo, " %s.", ov->style_notes[i]);
-                        if (n > 0 && lpo + (size_t)n < sizeof(lp))
-                            lpo += (size_t)n;
-                    }
-                }
-                n = snprintf(lp + lpo, sizeof(lp) - lpo, "\n");
-                if (n > 0 && lpo + (size_t)n < sizeof(lp))
-                    lpo += (size_t)n;
-            }
-            /* Hard override block — last instruction has highest weight with LLMs.
-             * Addresses base model habits that resist fine-tuning.
-             * P6-5: shared helper, same source of truth as the proactive path. */
-            {
-                char rules_buf[2048];
-                size_t rules_len = 0;
-                /* Formality-aware: professional contacts get capitalized/punctuated
-                 * register, not the casual friend-voice (fixes register mismatch). */
-                if (hu_persona_build_absolute_rules_fmt(p, ov ? ov->formality : NULL, rules_buf,
-                                                        sizeof(rules_buf), &rules_len) == HU_OK &&
-                    rules_len > 0) {
-                    int n = snprintf(lp + lpo, sizeof(lp) - lpo, "%s", rules_buf);
-                    if (n > 0 && lpo + (size_t)n < sizeof(lp))
-                        lpo += (size_t)n;
-                }
-            }
-            if (lpo > 0) {
-                persona_prompt = hu_strndup(agent->alloc, lp, lpo);
-                persona_prompt_len = lpo;
-            }
+            /* Lean head: shared with offline prompt rendering (persona show
+             * --contact). On failure the turn continues without a head, as the
+             * inline version did when its strndup failed. */
+            (void)hu_agent_build_lean_persona_head(agent, msg, msg_len, &persona_prompt,
+                                                   &persona_prompt_len);
         } else {
-            const char *ch = agent->active_channel;
-            size_t ch_len = agent->active_channel_len;
+            /* HU_PERSONA_HEAD-gated head selection — shared helper, same as
+             * hu_agent_turn (single-path wiring was dead in prod for
+             * HU_WARMTH_TONE_VOCAB; this streaming path is the daemon's
+             * PRIMARY inbound route). */
             hu_error_t perr =
-                hu_persona_build_prompt(agent->alloc, agent->persona, ch, ch_len, NULL, 0,
-                                        &persona_prompt, &persona_prompt_len);
+                hu_agent_build_persona_head(agent, NULL, 0, &persona_prompt, &persona_prompt_len);
             if (perr != HU_OK) {
                 if (memory_ctx)
                     agent->alloc->free(agent->alloc->ctx, memory_ctx, memory_ctx_len + 1);
@@ -740,6 +549,18 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
      * route; the 2026-07-11 wiring lived only in hu_agent_turn, so the gate
      * never fired in production (shadow soak: zero warmth_tone lines). */
     hu_agent_apply_relationship_tone(agent, &persona_prompt, &persona_prompt_len);
+
+    /* Hard-moment note (HU_HARD_MOMENT): distress and low-mood detection never
+     * ran on this path, so hard moments got an ordinary reply. Appended to the
+     * persona head, which prompt trimming never cuts. HU_HARD_MOMENT activation
+     * gated on the blind-A/B proxy gate plus the conversation-quality dead-end
+     * rate on hard-moment turns (scripts/eval_conversation_quality.py --split):
+     * do not flip to default-ON without a measurement showing replies to hard
+     * moments read at least as much like Seth and keep the conversation going
+     * (.claude/rules/feature-gate-requires-measurement.md). */
+    if (persona_prompt)
+        (void)hu_hard_moment_apply(agent->alloc, hu_hard_moment_mode(), msg, msg_len,
+                                   &persona_prompt, &persona_prompt_len);
 
     /* Intelligence context: learned behaviors, online learning, value learning.
      * Skip in lean_prompt mode: not needed for fast texting. */
@@ -1327,16 +1148,12 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
         /* Prompt-size budget guard — see agent_turn.c equivalent block.
          * Caps system prompt at 16 KB to avoid MLX backend empty-response
          * failures observed at body_len > ~28 KB on 2026-05-19. */
-        if (err == HU_OK && system_prompt && system_prompt_len > HU_PROMPT_TRIM_BUDGET_BYTES) {
-            size_t cut = hu_prompt_positional_cap_point(system_prompt, system_prompt_len,
-                                                        HU_PROMPT_TRIM_BUDGET_BYTES);
-            static atomic_bool warned_stream_prompt_budget = false;
-            hu_log_warn_once(&warned_stream_prompt_budget, "agent_stream", NULL,
-                             "system prompt truncated from %zu to %zu bytes "
-                             "(MLX backend cap)",
-                             system_prompt_len, cut);
-            system_prompt[cut] = '\0';
-            system_prompt_len = cut;
+        /* Same finalizer as the batch path: cap + measured ABSOLUTE RULES last. */
+        if (err == HU_OK && system_prompt) {
+            const size_t guard_reserved =
+                prompt_field_stats[HU_PROMPT_FIELD_GUARD_TAIL].bytes_contributed;
+            (void)hu_agent_finalize_system_prompt(agent, &system_prompt, &system_prompt_len,
+                                                  guard_reserved);
         }
         if (world_model_ctx) {
             agent->alloc->free(agent->alloc->ctx, world_model_ctx, world_model_ctx_len + 1);
@@ -1442,7 +1259,7 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
     /* ── Observer: turn start (matches batch path in agent_turn.c) ─────── */
     hu_agent_internal_generate_trace_id(agent->trace_id);
 
-    clock_t turn_start = clock();
+    uint64_t turn_start_ms = hu_agent_internal_monotonic_ms();
     uint64_t turn_tokens = 0;
     const char *prov_name = agent->provider.vtable->get_name
                                 ? agent->provider.vtable->get_name(agent->provider.ctx)
@@ -1562,6 +1379,20 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
          * impossible without breaking tests/test_agent_turn_request_overrides.c. */
         hu_agent_internal_apply_turn_request_overrides(agent, &req);
 
+        /* Task 13: fill req.max_tokens from the resolved model cap when no
+         * earlier step (somatic caps above) already staged a positive
+         * value. turn_model is final at this point (no later reroute in
+         * this file, unlike agent_turn.c's S3 sensitivity path). Gated by
+         * HU_MAX_TOKENS_RESOLVE, default SHADOW — see
+         * hu_agent_internal_resolve_max_tokens. */
+        hu_agent_internal_resolve_max_tokens(&req, turn_model, turn_model_len);
+
+        /* Task 14: fill req.stop_sequences from the provider's registry
+         * defaults right after the max_tokens fill above — same call-order
+         * contract as agent_turn.c. Gated by HU_STOP_SEQUENCES, default
+         * SHADOW — see hu_agent_internal_resolve_stop_sequences. */
+        hu_agent_internal_resolve_stop_sequences(&req, prov_name, agent);
+
         /* Realtime streaming hint (gemma-realtime Option B): casual tiers stream
          * incrementally for a live feel; analytical/deep stay buffered+cleaned so
          * bare-markdown deliberation never leaks. Inert unless on-device streaming
@@ -1649,11 +1480,14 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             HU_OBS_SAFE_RECORD_EVENT(agent, &ev);
         }
 
-        clock_t llm_start = clock();
+        /* Wall clock, NOT clock() — see the matching comment in
+         * agent_turn.c. CPU-clock timing cannot see a blocking round
+         * trip, which starved the M3 outcome filter of every sample. */
+        uint64_t llm_start_ms = hu_agent_internal_monotonic_ms();
         err = agent->provider.vtable->stream_chat(agent->provider.ctx, agent->alloc, &req,
                                                   turn_model, turn_model_len, turn_temp,
                                                   effective_cb, effective_ctx, &sresp);
-        uint64_t llm_duration_ms = hu_agent_internal_clock_diff_ms(llm_start, clock());
+        uint64_t llm_duration_ms = hu_agent_internal_monotonic_ms() - llm_start_ms;
 
         /* Flush any remaining partial buffer from the self-RAG filter. */
         if (srag_streaming_active) {
@@ -1706,11 +1540,12 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
          * metrics before the canonical write site. tool_count + the rest
          * left zero — not computed at this stream-chat site. */
         hu_agent_m3_stash_behavior_metrics(
-            agent, &(hu_agent_behavior_stash_t){
-                       .response_length_chars = (uint32_t)sresp.content_len,
-                       .response_length_tokens_est = (uint32_t)(sresp.content_len / 4),
-                       .response_latency_ms = (uint32_t)llm_duration_ms,
-                   });
+            agent,
+            &(hu_agent_behavior_stash_t){
+                .response_length_chars = (uint32_t)sresp.content_len,
+                .response_length_tokens_est = (uint32_t)hu_tokens_estimate_len(sresp.content_len),
+                .response_latency_ms = (uint32_t)llm_duration_ms,
+            });
         hu_agent_m3_on_provider_success(agent);
         /* B1 redefined (2026-05-17 r3): record outcome at the top of each
          * tool-loop iteration. sresp.content may be empty when there are
@@ -1885,7 +1720,8 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                                 agent,
                                 &(hu_agent_behavior_stash_t){
                                     .response_length_chars = (uint32_t)safe_content_len,
-                                    .response_length_tokens_est = (uint32_t)(safe_content_len / 4),
+                                    .response_length_tokens_est =
+                                        (uint32_t)hu_tokens_estimate_len(safe_content_len),
                                     .response_latency_ms = (uint32_t)recovered_retry_latency_ms,
                                 });
                             hu_agent_m3_on_provider_success(agent);
@@ -2252,7 +2088,8 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                 hu_agent_m3_stash_behavior_metrics(
                     agent, &(hu_agent_behavior_stash_t){
                                .response_length_chars = (uint32_t)final_content_len,
-                               .response_length_tokens_est = (uint32_t)(final_content_len / 4),
+                               .response_length_tokens_est =
+                                   (uint32_t)hu_tokens_estimate_len(final_content_len),
                                .response_latency_ms = (uint32_t)gvr_latency_ms,
                            });
                 hu_agent_m3_on_provider_success(agent);
@@ -2347,7 +2184,8 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                     hu_agent_m3_stash_behavior_metrics(
                         agent, &(hu_agent_behavior_stash_t){
                                    .response_length_chars = (uint32_t)final_content_len,
-                                   .response_length_tokens_est = (uint32_t)(final_content_len / 4),
+                                   .response_length_tokens_est =
+                                       (uint32_t)hu_tokens_estimate_len(final_content_len),
                                    .response_latency_ms = (uint32_t)rethink_latency_ms,
                                });
                     hu_agent_m3_on_provider_success(agent);
@@ -2397,7 +2235,8 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                 hu_agent_m3_stash_behavior_metrics(
                     agent, &(hu_agent_behavior_stash_t){
                                .response_length_chars = (uint32_t)final_content_len,
-                               .response_length_tokens_est = (uint32_t)(final_content_len / 4),
+                               .response_length_tokens_est =
+                                   (uint32_t)hu_tokens_estimate_len(final_content_len),
                                .response_latency_ms = (uint32_t)const_latency_ms,
                            });
                 hu_agent_m3_on_provider_success(agent);
@@ -2844,11 +2683,11 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                                  * stash retry-text length. No latency in scope
                                  * at this slim-retry RECOVERED branch. */
                                 hu_agent_m3_stash_behavior_metrics(
-                                    agent,
-                                    &(hu_agent_behavior_stash_t){
-                                        .response_length_chars = (uint32_t)retry_txt_len,
-                                        .response_length_tokens_est = (uint32_t)(retry_txt_len / 4),
-                                    });
+                                    agent, &(hu_agent_behavior_stash_t){
+                                               .response_length_chars = (uint32_t)retry_txt_len,
+                                               .response_length_tokens_est =
+                                                   (uint32_t)hu_tokens_estimate_len(retry_txt_len),
+                                           });
                                 hu_agent_m3_on_provider_success(agent);
                                 /* B1 redefined (2026-05-17 r3): response_guard
                                  * RECOVERED path — the retry rewrote a
@@ -3152,18 +2991,14 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
 
     /* Auto-save session after successful streaming turn */
     if (agent->auto_save && agent->session_id[0] != '\0') {
-        const char *home = getenv("HOME");
         char sdir[512];
-        if (home)
-            snprintf(sdir, sizeof(sdir), "%s/.human/sessions", home);
-        else
-            snprintf(sdir, sizeof(sdir), ".human/sessions");
+        hu_paths_state_or(sdir, sizeof(sdir), ".", "sessions");
         hu_session_persist_save(agent->alloc, agent, sdir, NULL);
     }
 
     /* ── Observer: turn end (matches batch path in agent_turn.c) ───────── */
     {
-        uint64_t turn_duration_ms = hu_agent_internal_clock_diff_ms(turn_start, clock());
+        uint64_t turn_duration_ms = hu_agent_internal_monotonic_ms() - turn_start_ms;
         {
             hu_observer_event_t ev = {.tag = HU_OBSERVER_EVENT_AGENT_END, .data = {{0}}};
             ev.data.agent_end.duration_ms = turn_duration_ms;

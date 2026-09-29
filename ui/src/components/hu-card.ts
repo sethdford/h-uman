@@ -1,4 +1,4 @@
-import { LitElement, html, css } from "lit";
+import { LitElement, html, css, nothing } from "lit";
 import { customElement, property } from "lit/decorators.js";
 
 export type CardSurface = "default" | "high" | "highest";
@@ -542,22 +542,24 @@ export class ScCard extends LitElement {
       <div
         class=${classes}
         style="--hu-card-surface: ${surfaceToken}"
-        role=${this.clickable ? "button" : undefined}
-        tabindex=${this.clickable ? 0 : undefined}
-        aria-label=${this.clickable && this.ariaLabelAttr ? this.ariaLabelAttr : undefined}
+        role=${this.clickable ? "button" : nothing}
+        tabindex=${this.clickable ? 0 : nothing}
+        aria-label=${this.clickable && this.ariaLabelAttr ? this.ariaLabelAttr : nothing}
         @keydown=${this._onKeyDown}
         @pointerenter=${onTiltEnter}
         @pointermove=${onTiltMove}
         @pointerleave=${onTiltLeave}
       >
-        ${this.tilt
-          ? html`
-              <div class="tilt-inner">
-                <div class="tilt-light" aria-hidden="true"></div>
-                <slot></slot>
-              </div>
-            `
-          : html`<slot></slot>`}
+        ${
+          this.tilt
+            ? html`
+                <div class="tilt-inner">
+                  <div class="tilt-light" aria-hidden="true"></div>
+                  <slot></slot>
+                </div>
+              `
+            : html`<slot></slot>`
+        }
       </div>
     `;
   }

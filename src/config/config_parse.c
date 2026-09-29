@@ -2,7 +2,6 @@
 #include "human/config.h"
 #include "human/core/log.h"
 #include "human/core/string.h"
-#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -777,51 +776,6 @@ static hu_error_t parse_tools(hu_allocator_t *a, hu_config_t *cfg, const hu_json
         if (dis_err != HU_OK)
             return dis_err;
     }
-    hu_json_value_t *tmo = hu_json_object_get(obj, "tool_model_overrides");
-    if (tmo && tmo->type == HU_JSON_OBJECT && tmo->data.object.pairs) {
-        for (size_t i = 0; i < cfg->tools.model_overrides_len; i++) {
-            hu_tool_model_override_t *o = &cfg->tools.model_overrides[i];
-            if (o->tool_name) {
-                a->free(a->ctx, o->tool_name, strlen(o->tool_name) + 1);
-                o->tool_name = NULL;
-            }
-            if (o->provider) {
-                a->free(a->ctx, o->provider, strlen(o->provider) + 1);
-                o->provider = NULL;
-            }
-            if (o->model) {
-                a->free(a->ctx, o->model, strlen(o->model) + 1);
-                o->model = NULL;
-            }
-        }
-        cfg->tools.model_overrides_len = 0;
-        for (size_t i = 0; i < tmo->data.object.len &&
-                           cfg->tools.model_overrides_len < HU_TOOL_MODEL_OVERRIDES_MAX;
-             i++) {
-            hu_json_pair_t *p = &tmo->data.object.pairs[i];
-            if (!p->key || !p->value || p->value->type != HU_JSON_OBJECT)
-                continue;
-            const char *prov = hu_json_get_string(p->value, "provider");
-            const char *mod = hu_json_get_string(p->value, "model");
-            if (!prov || !prov[0] || !mod || !mod[0])
-                continue;
-            hu_tool_model_override_t *o =
-                &cfg->tools.model_overrides[cfg->tools.model_overrides_len];
-            o->tool_name = hu_strdup(a, p->key);
-            o->provider = hu_strdup(a, prov);
-            o->model = hu_strdup(a, mod);
-            if (o->tool_name && o->provider && o->model)
-                cfg->tools.model_overrides_len++;
-            else {
-                if (o->tool_name)
-                    a->free(a->ctx, o->tool_name, strlen(o->tool_name) + 1);
-                if (o->provider)
-                    a->free(a->ctx, o->provider, strlen(o->provider) + 1);
-                if (o->model)
-                    a->free(a->ctx, o->model, strlen(o->model) + 1);
-            }
-        }
-    }
     return HU_OK;
 }
 
@@ -1032,6 +986,27 @@ static hu_error_t parse_heartbeat(hu_allocator_t *a, hu_config_t *cfg, const hu_
     return HU_OK;
 }
 
+/* 2026-09-21: src/daemon.c gates the follow-up watcher tick on
+ * cfg->follow_up_watcher.enabled and tells operators to "set
+ * follow_up_watcher.enabled=true in config.json" when it is off — but nothing
+ * in src/config/ read the key, so the field was always false and the advice
+ * was unfollowable. Mirrors parse_heartbeat. */
+static hu_error_t parse_follow_up_watcher(hu_allocator_t *a, hu_config_t *cfg,
+                                          const hu_json_value_t *obj) {
+    (void)a;
+    if (!obj || obj->type != HU_JSON_OBJECT)
+        return HU_OK;
+    cfg->follow_up_watcher.enabled =
+        hu_json_get_bool(obj, "enabled", cfg->follow_up_watcher.enabled);
+    double iv =
+        hu_json_get_number(obj, "interval_seconds", cfg->follow_up_watcher.interval_seconds);
+    /* >= 1, not > 0: (int)0.5 is 0, and a stored 0 is a tight poll loop for
+     * any consumer that lacks the `> 0 ? v : 300` fallback today's two have. */
+    if (iv >= 1 && iv <= 86400)
+        cfg->follow_up_watcher.interval_seconds = (int)iv;
+    return HU_OK;
+}
+
 static hu_error_t parse_reliability(hu_allocator_t *a, hu_config_t *cfg,
                                     const hu_json_value_t *obj) {
     if (!obj || obj->type != HU_JSON_OBJECT)
@@ -1050,6 +1025,20 @@ static hu_error_t parse_reliability(hu_allocator_t *a, hu_config_t *cfg,
         hu_json_get_number(obj, "provider_backoff_ms", cfg->reliability.provider_backoff_ms);
     if (pbm >= 0)
         cfg->reliability.provider_backoff_ms = (uint64_t)pbm;
+    /* Circuit breaker: 0/absent = defaults, negative = disabled (see config.h). */
+    double cft = hu_json_get_number(obj, "circuit_failure_threshold",
+                                    cfg->reliability.circuit_failure_threshold);
+    if (cft >= -1 && cft <= 100)
+        cfg->reliability.circuit_failure_threshold = (int)cft;
+    double crs =
+        hu_json_get_number(obj, "circuit_recovery_secs", cfg->reliability.circuit_recovery_secs);
+    if (crs >= -1 && crs <= 86400)
+        cfg->reliability.circuit_recovery_secs = (int)crs;
+    /* Empty-reply failover: 0/absent = on (default), -1 = off, 1 = on. */
+    double erf =
+        hu_json_get_number(obj, "empty_reply_failover", cfg->reliability.empty_reply_failover);
+    if (erf >= -1 && erf <= 1)
+        cfg->reliability.empty_reply_failover = (int)erf;
     double cibs = hu_json_get_number(obj, "channel_initial_backoff_secs",
                                      cfg->reliability.channel_initial_backoff_secs);
     if (cibs >= 0)
@@ -1377,6 +1366,29 @@ static hu_error_t parse_feeds(hu_allocator_t *a, hu_config_t *cfg, const hu_json
             a->free(a->ctx, cfg->feeds.gmail_refresh_token,
                     strlen(cfg->feeds.gmail_refresh_token) + 1);
         cfg->feeds.gmail_refresh_token = hu_strdup(a, s);
+    }
+    s = hu_json_get_string(obj, "gmail_quota_project");
+    if (s) {
+        if (cfg->feeds.gmail_quota_project)
+            a->free(a->ctx, cfg->feeds.gmail_quota_project,
+                    strlen(cfg->feeds.gmail_quota_project) + 1);
+        cfg->feeds.gmail_quota_project = hu_strdup(a, s);
+    }
+    /* Nested form — "gmail": {client_id, client_secret, refresh_token,
+     * quota_project}. The live config carries both spellings (2026-09); the
+     * flat keys above win, the nested block only fills what is still unset.
+     * Before this the nested quota_project was silently ignored and every
+     * Gmail poll was a 403. */
+    const hu_json_value_t *gobj = hu_json_object_get(obj, "gmail");
+    if (gobj && gobj->type == HU_JSON_OBJECT) {
+        if (!cfg->feeds.gmail_client_id && (s = hu_json_get_string(gobj, "client_id")))
+            cfg->feeds.gmail_client_id = hu_strdup(a, s);
+        if (!cfg->feeds.gmail_client_secret && (s = hu_json_get_string(gobj, "client_secret")))
+            cfg->feeds.gmail_client_secret = hu_strdup(a, s);
+        if (!cfg->feeds.gmail_refresh_token && (s = hu_json_get_string(gobj, "refresh_token")))
+            cfg->feeds.gmail_refresh_token = hu_strdup(a, s);
+        if (!cfg->feeds.gmail_quota_project && (s = hu_json_get_string(gobj, "quota_project")))
+            cfg->feeds.gmail_quota_project = hu_strdup(a, s);
     }
     s = hu_json_get_string(obj, "twitter_bearer_token");
     if (s) {
@@ -1721,6 +1733,10 @@ hu_error_t hu_config_parse_json(hu_config_t *cfg, const char *content, size_t le
     if (heartbeat_obj)
         parse_heartbeat(a, cfg, heartbeat_obj);
 
+    hu_json_value_t *follow_up_watcher_obj = hu_json_object_get(root, "follow_up_watcher");
+    if (follow_up_watcher_obj)
+        parse_follow_up_watcher(a, cfg, follow_up_watcher_obj);
+
     hu_json_value_t *reliability_obj = hu_json_object_get(root, "reliability");
     if (reliability_obj) {
         hu_error_t rel_err = parse_reliability(a, cfg, reliability_obj);
@@ -1856,16 +1872,6 @@ hu_error_t hu_config_parse_json(hu_config_t *cfg, const char *content, size_t le
         }
         hu_json_value_t *res = hu_json_object_get(sec, "resources");
         if (res && res->type == HU_JSON_OBJECT) {
-            double mfs = hu_json_get_number(res, "max_file_size",
-                                            (double)cfg->security.resource_limits.max_file_size);
-            if (!isfinite(mfs) || mfs < 0.0 || mfs > 1e15)
-                mfs = 0.0; /* use default */
-            cfg->security.resource_limits.max_file_size = (uint64_t)mfs;
-            double mrs = hu_json_get_number(res, "max_read_size",
-                                            (double)cfg->security.resource_limits.max_read_size);
-            if (!isfinite(mrs) || mrs < 0.0 || mrs > 1e15)
-                mrs = 0.0; /* use default */
-            cfg->security.resource_limits.max_read_size = (uint64_t)mrs;
             double mmb = hu_json_get_number(res, "max_memory_mb",
                                             cfg->security.resource_limits.max_memory_mb);
             if (mmb >= 0 && mmb <= 1048576)

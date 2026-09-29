@@ -1,0 +1,1 @@
+{"note":"First full panel run ERRORED (all five panelists hit the $2.50 budget); rerun at $6.00/18 turns returned edge-case 0.90, security 0.92, style 0.80 PASS with correctness and regression timing out; a focused rerun of only correctness (0.90 PASS) and regression (0.90 PASS) is in aspect-panel-correctness-regression.json. Net: 5/5 aspects PASS, pass_share 1.0."}

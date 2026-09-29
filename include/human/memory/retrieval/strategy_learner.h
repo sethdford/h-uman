@@ -17,12 +17,12 @@
 #include <sqlite3.h>
 
 typedef enum hu_query_category {
-    HU_QCAT_FACTUAL = 0,     /* "what is X", "when did Y" */
-    HU_QCAT_PROCEDURAL,      /* "how to X", "steps for Y" */
-    HU_QCAT_PERSONAL,        /* "my preferences", "last time I" */
-    HU_QCAT_TEMPORAL,        /* "yesterday", "last week", time-based */
-    HU_QCAT_SEMANTIC,        /* abstract/conceptual queries */
-    HU_QCAT_EXACT,           /* specific names, IDs, code snippets */
+    HU_QCAT_FACTUAL = 0, /* "what is X", "when did Y" */
+    HU_QCAT_PROCEDURAL,  /* "how to X", "steps for Y" */
+    HU_QCAT_PERSONAL,    /* "my preferences", "last time I" */
+    HU_QCAT_TEMPORAL,    /* "yesterday", "last week", time-based */
+    HU_QCAT_SEMANTIC,    /* abstract/conceptual queries */
+    HU_QCAT_EXACT,       /* specific names, IDs, code snippets */
     HU_QCAT_COUNT
 } hu_query_category_t;
 
@@ -37,9 +37,9 @@ typedef enum hu_retrieval_strategy {
 
 typedef struct hu_strategy_stats {
     hu_retrieval_strategy_t strategy;
-    double precision;       /* running average precision */
-    int32_t attempts;       /* total attempts */
-    int32_t successes;      /* successful retrievals */
+    double precision;  /* running average precision */
+    int32_t attempts;  /* total attempts */
+    int32_t successes; /* successful retrievals */
 } hu_strategy_stats_t;
 
 typedef struct hu_strategy_learner {
@@ -48,7 +48,7 @@ typedef struct hu_strategy_learner {
 } hu_strategy_learner_t;
 
 hu_error_t hu_strategy_learner_create(hu_allocator_t *alloc, sqlite3 *db,
-                                       hu_strategy_learner_t *out);
+                                      hu_strategy_learner_t *out);
 void hu_strategy_learner_deinit(hu_strategy_learner_t *learner);
 hu_error_t hu_strategy_learner_init_tables(hu_strategy_learner_t *learner);
 
@@ -56,24 +56,14 @@ hu_error_t hu_strategy_learner_init_tables(hu_strategy_learner_t *learner);
 hu_query_category_t hu_strategy_classify_query(const char *query, size_t query_len);
 
 /* Record a retrieval outcome for learning. */
-hu_error_t hu_strategy_learner_record(hu_strategy_learner_t *learner,
-                                       hu_query_category_t category,
-                                       hu_retrieval_strategy_t strategy,
-                                       bool success, int64_t now_ts);
+hu_error_t hu_strategy_learner_record(hu_strategy_learner_t *learner, hu_query_category_t category,
+                                      hu_retrieval_strategy_t strategy, bool success,
+                                      int64_t now_ts);
 
 /* Get the best strategy for a query category based on learned data.
  * Falls back to HYBRID if no data. */
 hu_retrieval_strategy_t hu_strategy_learner_recommend(hu_strategy_learner_t *learner,
-                                                       hu_query_category_t category);
-
-/* Get stats for a category+strategy pair. */
-hu_error_t hu_strategy_learner_get_stats(hu_strategy_learner_t *learner,
-                                          hu_query_category_t category,
-                                          hu_retrieval_strategy_t strategy,
-                                          hu_strategy_stats_t *out);
-
-const char *hu_query_category_str(hu_query_category_t cat);
-const char *hu_retrieval_strategy_str(hu_retrieval_strategy_t strat);
+                                                      hu_query_category_t category);
 
 #endif /* HU_ENABLE_SQLITE */
 #endif

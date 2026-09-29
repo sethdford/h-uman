@@ -1,11 +1,12 @@
 #include "human/channels/teams.h"
 #include "human/channel.h"
 #include "human/channel_loop.h"
+#include "human/channels/channel_mock.h"
 #include "human/core/allocator.h"
-#include "human/core/string.h"
 #include "human/core/error.h"
 #include "human/core/http.h"
 #include "human/core/json.h"
+#include "human/core/string.h"
 #include <ctype.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -38,13 +39,7 @@ typedef struct hu_teams_ctx {
     size_t queue_tail;
     size_t queue_count;
 #if HU_IS_TEST
-    char last_message[4096];
-    size_t last_message_len;
-    struct {
-        char session_key[128];
-        char content[4096];
-    } mock_msgs[8];
-    size_t mock_count;
+    hu_channel_mock_t mock;
 #endif
 } hu_teams_ctx_t;
 
@@ -90,11 +85,7 @@ static hu_error_t teams_send(void *ctx, const char *target, size_t target_len, c
     if (!c->webhook_url || c->webhook_url_len == 0)
         return HU_ERR_CHANNEL_NOT_CONFIGURED;
     {
-        size_t len = message_len > 4095 ? 4095 : message_len;
-        if (message && len > 0)
-            memcpy(c->last_message, message, len);
-        c->last_message[len] = '\0';
-        c->last_message_len = len;
+        hu_channel_mock_record_send(&c->mock, message, message_len);
         return HU_OK;
     }
 #else
@@ -150,7 +141,8 @@ static bool teams_health_check(void *ctx) {
     return true;
 }
 
-static hu_error_t teams_get_response_constraints(void *ctx, hu_channel_response_constraints_t *out) {
+static hu_error_t teams_get_response_constraints(void *ctx,
+                                                 hu_channel_response_constraints_t *out) {
     (void)ctx;
     if (!out)
         return HU_ERR_INVALID_ARGUMENT;
@@ -204,8 +196,9 @@ static hu_error_t teams_start_typing(void *ctx, const char *recipient, size_t re
     if (!c->alloc)
         return HU_ERR_INVALID_ARGUMENT;
     char url_buf[2048];
-    int n = snprintf(url_buf, sizeof(url_buf), TEAMS_GRAPH_API_BASE "/chats/%.*s/sendTypingIndicator",
-                     (int)recipient_len, recipient);
+    int n =
+        snprintf(url_buf, sizeof(url_buf), TEAMS_GRAPH_API_BASE "/chats/%.*s/sendTypingIndicator",
+                 (int)recipient_len, recipient);
     if (n < 0 || (size_t)n >= sizeof(url_buf))
         return HU_ERR_INTERNAL;
     char auth_buf[512];
@@ -215,8 +208,7 @@ static hu_error_t teams_start_typing(void *ctx, const char *recipient, size_t re
         return HU_ERR_INTERNAL;
     static const char body[] = "{\"isTyping\":true}";
     hu_http_response_t resp = {0};
-    hu_error_t err =
-        hu_http_post_json(c->alloc, url_buf, auth_buf, body, sizeof(body) - 1, &resp);
+    hu_error_t err = hu_http_post_json(c->alloc, url_buf, auth_buf, body, sizeof(body) - 1, &resp);
     if (resp.owned && resp.body)
         hu_http_response_free(c->alloc, &resp);
     if (err != HU_OK)
@@ -242,8 +234,9 @@ static hu_error_t teams_stop_typing(void *ctx, const char *recipient, size_t rec
     if (!c->alloc)
         return HU_ERR_INVALID_ARGUMENT;
     char url_buf[2048];
-    int n = snprintf(url_buf, sizeof(url_buf), TEAMS_GRAPH_API_BASE "/chats/%.*s/sendTypingIndicator",
-                     (int)recipient_len, recipient);
+    int n =
+        snprintf(url_buf, sizeof(url_buf), TEAMS_GRAPH_API_BASE "/chats/%.*s/sendTypingIndicator",
+                 (int)recipient_len, recipient);
     if (n < 0 || (size_t)n >= sizeof(url_buf))
         return HU_ERR_INTERNAL;
     char auth_buf[512];
@@ -253,8 +246,7 @@ static hu_error_t teams_stop_typing(void *ctx, const char *recipient, size_t rec
         return HU_ERR_INTERNAL;
     static const char body[] = "{\"isTyping\":false}";
     hu_http_response_t resp = {0};
-    hu_error_t err =
-        hu_http_post_json(c->alloc, url_buf, auth_buf, body, sizeof(body) - 1, &resp);
+    hu_error_t err = hu_http_post_json(c->alloc, url_buf, auth_buf, body, sizeof(body) - 1, &resp);
     if (resp.owned && resp.body)
         hu_http_response_free(c->alloc, &resp);
     if (err != HU_OK)
@@ -606,14 +598,14 @@ hu_error_t hu_teams_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel_lo
         return HU_ERR_INVALID_ARGUMENT;
     *out_count = 0;
 #if HU_IS_TEST
-    if (c->mock_count > 0) {
-        size_t n = c->mock_count < max_msgs ? c->mock_count : max_msgs;
+    if (c->mock.count > 0) {
+        size_t n = c->mock.count < max_msgs ? c->mock.count : max_msgs;
         for (size_t i = 0; i < n; i++) {
-            memcpy(msgs[i].session_key, c->mock_msgs[i].session_key, 128);
-            memcpy(msgs[i].content, c->mock_msgs[i].content, 4096);
+            memcpy(msgs[i].session_key, c->mock.msgs[i].session_key, 128);
+            memcpy(msgs[i].content, c->mock.msgs[i].content, 4096);
         }
         *out_count = n;
-        c->mock_count = 0;
+        c->mock.count = 0;
         return HU_OK;
     }
 #endif
@@ -705,25 +697,14 @@ hu_error_t hu_teams_test_inject_mock(hu_channel_t *ch, const char *session_key,
     if (!ch || !ch->ctx)
         return HU_ERR_INVALID_ARGUMENT;
     hu_teams_ctx_t *c = (hu_teams_ctx_t *)ch->ctx;
-    if (c->mock_count >= 8)
-        return HU_ERR_OUT_OF_MEMORY;
-    size_t i = c->mock_count++;
-    size_t sk = session_key_len > 127 ? 127 : session_key_len;
-    size_t ct = content_len > 4095 ? 4095 : content_len;
-    if (session_key && sk > 0)
-        memcpy(c->mock_msgs[i].session_key, session_key, sk);
-    c->mock_msgs[i].session_key[sk] = '\0';
-    if (content && ct > 0)
-        memcpy(c->mock_msgs[i].content, content, ct);
-    c->mock_msgs[i].content[ct] = '\0';
-    return HU_OK;
+    return hu_channel_mock_inject(&c->mock, session_key, session_key_len, content, content_len);
 }
 const char *hu_teams_test_get_last_message(hu_channel_t *ch, size_t *out_len) {
     if (!ch || !ch->ctx)
         return NULL;
     hu_teams_ctx_t *c = (hu_teams_ctx_t *)ch->ctx;
     if (out_len)
-        *out_len = c->last_message_len;
-    return c->last_message;
+        *out_len = c->mock.last_message_len;
+    return c->mock.last_message;
 }
 #endif

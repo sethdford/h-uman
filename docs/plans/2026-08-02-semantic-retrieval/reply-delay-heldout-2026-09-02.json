@@ -1,0 +1,38 @@
+{
+  "generated_at": 1788348425,
+  "days": 90,
+  "max_delay_hours": 24.0,
+  "train_frac": 0.8,
+  "n_total": 1915,
+  "n_train": 1532,
+  "n_heldout": 383,
+  "split_ts_unix": 1787446202.2906723,
+  "heuristic_c_evaluated": false,
+  "heuristic_c_note": "src/daemon.c:9770-9781's persona reading-delay heuristic (base_sec*300ms + jitter, capped at 8000ms) models a different quantity at a different timescale (sub-8s typing pause, not the multi-second-to-hour notice-and-reply gap this model targets) and would not be a faithful comparison; see this script's docstring for the full reasoning.",
+  "model": {
+    "mae_seconds": 4533.207074864104,
+    "median_abs_log_error": 1.8505849194107673
+  },
+  "global_median_heuristic": {
+    "mae_seconds": 4377.812404943508,
+    "median_abs_log_error": 1.7690902863928435,
+    "predicted_value_seconds": 119.7362185716629
+  },
+  "bootstrap_95ci_model_minus_global": {
+    "abs_log_error": {
+      "mean_diff": 0.08785184512828151,
+      "ci_lo": -0.025154914229427172,
+      "ci_hi": 0.19387109078154957
+    },
+    "mae_seconds": {
+      "mean_diff": 155.39466992059513,
+      "ci_lo": 72.13145294295279,
+      "ci_hi": 248.68340334537447
+    },
+    "n_bootstrap": 2000
+  },
+  "caveats": [
+    "contact frequency terciles computed over the full (train+test) window, not train-only \u2014 affects bucket selection only, not the fitted quantile values themselves",
+    "point predictions use each resolved bucket's p50 (median), not a random sample from the quantile table (that sampling behavior is what the C production loader uses for natural variance; a point predictor is the correct comparison for accuracy metrics)"
+  ]
+}

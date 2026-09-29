@@ -586,8 +586,8 @@ static void test_tools_factory_create_all(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_tool_t *tools = NULL;
     size_t count = 0;
-    hu_error_t err =
-        hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &tools, &count);
+    hu_error_t err = hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL,
+                                             NULL, NULL, &tools, &count);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(tools);
     HU_ASSERT(count >= 28);
@@ -1889,8 +1889,8 @@ static void test_tool_send_message_exists(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_tool_t *tools = NULL;
     size_t count = 0;
-    hu_error_t err =
-        hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &tools, &count);
+    hu_error_t err = hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL,
+                                             NULL, NULL, &tools, &count);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(find_tool_by_name(tools, count, "send_message"));
     hu_tools_destroy_default(&alloc, tools, count);
@@ -1900,8 +1900,8 @@ static void test_tool_send_message_execute(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_tool_t *tools = NULL;
     size_t count = 0;
-    hu_error_t err =
-        hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &tools, &count);
+    hu_error_t err = hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL,
+                                             NULL, NULL, &tools, &count);
     HU_ASSERT_EQ(err, HU_OK);
     hu_tool_t *t = find_tool_by_name(tools, count, "send_message");
     HU_ASSERT_NOT_NULL(t);
@@ -1923,8 +1923,8 @@ static void test_tool_agent_query_exists(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_tool_t *tools = NULL;
     size_t count = 0;
-    hu_error_t err =
-        hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &tools, &count);
+    hu_error_t err = hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL,
+                                             NULL, NULL, &tools, &count);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(find_tool_by_name(tools, count, "agent_query"));
     hu_tools_destroy_default(&alloc, tools, count);
@@ -1934,8 +1934,8 @@ static void test_tool_agent_query_execute(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_tool_t *tools = NULL;
     size_t count = 0;
-    hu_error_t err =
-        hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &tools, &count);
+    hu_error_t err = hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL,
+                                             NULL, NULL, &tools, &count);
     HU_ASSERT_EQ(err, HU_OK);
     hu_tool_t *t = find_tool_by_name(tools, count, "agent_query");
     HU_ASSERT_NOT_NULL(t);
@@ -1957,8 +1957,8 @@ static void test_tool_agent_spawn_exists(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_tool_t *tools = NULL;
     size_t count = 0;
-    hu_error_t err =
-        hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &tools, &count);
+    hu_error_t err = hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL,
+                                             NULL, NULL, &tools, &count);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(find_tool_by_name(tools, count, "agent_spawn"));
     hu_tools_destroy_default(&alloc, tools, count);
@@ -1968,8 +1968,8 @@ static void test_tool_agent_spawn_execute(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_tool_t *tools = NULL;
     size_t count = 0;
-    hu_error_t err =
-        hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &tools, &count);
+    hu_error_t err = hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL,
+                                             NULL, NULL, &tools, &count);
     HU_ASSERT_EQ(err, HU_OK);
     hu_tool_t *t = find_tool_by_name(tools, count, "agent_spawn");
     HU_ASSERT_NOT_NULL(t);
@@ -1990,8 +1990,8 @@ static void test_tool_apply_patch_exists(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_tool_t *tools = NULL;
     size_t count = 0;
-    hu_error_t err =
-        hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &tools, &count);
+    hu_error_t err = hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL,
+                                             NULL, NULL, &tools, &count);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(find_tool_by_name(tools, count, "apply_patch"));
     hu_tools_destroy_default(&alloc, tools, count);
@@ -2001,8 +2001,8 @@ static void test_tool_apply_patch_execute(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_tool_t *tools = NULL;
     size_t count = 0;
-    hu_error_t err =
-        hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &tools, &count);
+    hu_error_t err = hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL,
+                                             NULL, NULL, &tools, &count);
     HU_ASSERT_EQ(err, HU_OK);
     hu_tool_t *t = find_tool_by_name(tools, count, "apply_patch");
     HU_ASSERT_NOT_NULL(t);
@@ -2026,8 +2026,8 @@ static void test_tool_database_exists(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_tool_t *tools = NULL;
     size_t count = 0;
-    hu_error_t err =
-        hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &tools, &count);
+    hu_error_t err = hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL,
+                                             NULL, NULL, &tools, &count);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(find_tool_by_name(tools, count, "database"));
     hu_tools_destroy_default(&alloc, tools, count);
@@ -2037,8 +2037,8 @@ static void test_tool_database_execute(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_tool_t *tools = NULL;
     size_t count = 0;
-    hu_error_t err =
-        hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &tools, &count);
+    hu_error_t err = hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL,
+                                             NULL, NULL, &tools, &count);
     HU_ASSERT_EQ(err, HU_OK);
     hu_tool_t *t = find_tool_by_name(tools, count, "database");
     HU_ASSERT_NOT_NULL(t);
@@ -2060,8 +2060,8 @@ static void test_tool_notebook_exists(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_tool_t *tools = NULL;
     size_t count = 0;
-    hu_error_t err =
-        hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &tools, &count);
+    hu_error_t err = hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL,
+                                             NULL, NULL, &tools, &count);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(find_tool_by_name(tools, count, "notebook"));
     hu_tools_destroy_default(&alloc, tools, count);
@@ -2071,8 +2071,8 @@ static void test_tool_notebook_execute(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_tool_t *tools = NULL;
     size_t count = 0;
-    hu_error_t err =
-        hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &tools, &count);
+    hu_error_t err = hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL,
+                                             NULL, NULL, &tools, &count);
     HU_ASSERT_EQ(err, HU_OK);
     hu_tool_t *t = find_tool_by_name(tools, count, "notebook");
     HU_ASSERT_NOT_NULL(t);
@@ -2093,8 +2093,8 @@ static void test_tool_canvas_exists(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_tool_t *tools = NULL;
     size_t count = 0;
-    hu_error_t err =
-        hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &tools, &count);
+    hu_error_t err = hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL,
+                                             NULL, NULL, &tools, &count);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(find_tool_by_name(tools, count, "canvas"));
     hu_tools_destroy_default(&alloc, tools, count);
@@ -2104,8 +2104,8 @@ static void test_tool_canvas_execute(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_tool_t *tools = NULL;
     size_t count = 0;
-    hu_error_t err =
-        hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &tools, &count);
+    hu_error_t err = hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL,
+                                             NULL, NULL, &tools, &count);
     HU_ASSERT_EQ(err, HU_OK);
     hu_tool_t *t = find_tool_by_name(tools, count, "canvas");
     HU_ASSERT_NOT_NULL(t);
@@ -2127,8 +2127,8 @@ static void test_tool_pdf_exists(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_tool_t *tools = NULL;
     size_t count = 0;
-    hu_error_t err =
-        hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &tools, &count);
+    hu_error_t err = hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL,
+                                             NULL, NULL, &tools, &count);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(find_tool_by_name(tools, count, "pdf"));
     hu_tools_destroy_default(&alloc, tools, count);
@@ -2138,8 +2138,8 @@ static void test_tool_pdf_execute(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_tool_t *tools = NULL;
     size_t count = 0;
-    hu_error_t err =
-        hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &tools, &count);
+    hu_error_t err = hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL,
+                                             NULL, NULL, &tools, &count);
     HU_ASSERT_EQ(err, HU_OK);
     hu_tool_t *t = find_tool_by_name(tools, count, "pdf");
     HU_ASSERT_NOT_NULL(t);
@@ -2160,8 +2160,8 @@ static void test_tool_diff_exists(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_tool_t *tools = NULL;
     size_t count = 0;
-    hu_error_t err =
-        hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &tools, &count);
+    hu_error_t err = hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL,
+                                             NULL, NULL, &tools, &count);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(find_tool_by_name(tools, count, "diff"));
     hu_tools_destroy_default(&alloc, tools, count);
@@ -2171,8 +2171,8 @@ static void test_tool_diff_execute(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_tool_t *tools = NULL;
     size_t count = 0;
-    hu_error_t err =
-        hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &tools, &count);
+    hu_error_t err = hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL,
+                                             NULL, NULL, &tools, &count);
     HU_ASSERT_EQ(err, HU_OK);
     hu_tool_t *t = find_tool_by_name(tools, count, "diff");
     HU_ASSERT_NOT_NULL(t);
@@ -2585,8 +2585,8 @@ static void test_tool_media_image_exists(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_tool_t *tools = NULL;
     size_t count = 0;
-    hu_error_t err =
-        hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &tools, &count);
+    hu_error_t err = hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL,
+                                             NULL, NULL, &tools, &count);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(find_tool_by_name(tools, count, "media_image"));
     hu_tools_destroy_default(&alloc, tools, count);
@@ -2596,8 +2596,8 @@ static void test_tool_media_video_exists(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_tool_t *tools = NULL;
     size_t count = 0;
-    hu_error_t err =
-        hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &tools, &count);
+    hu_error_t err = hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL,
+                                             NULL, NULL, &tools, &count);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(find_tool_by_name(tools, count, "media_video"));
     hu_tools_destroy_default(&alloc, tools, count);
@@ -2607,11 +2607,24 @@ static void test_tool_media_gif_exists(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_tool_t *tools = NULL;
     size_t count = 0;
-    hu_error_t err =
-        hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &tools, &count);
+    hu_error_t err = hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL,
+                                             NULL, NULL, &tools, &count);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(find_tool_by_name(tools, count, "media_gif"));
     hu_tools_destroy_default(&alloc, tools, count);
+}
+
+/* 2026-09-20: tools.max_file_size_bytes was parsed (default 10 MiB) while
+ * file_read enforced a private 1 MiB constant, so the config knob did
+ * nothing. The size predicate must honor the configured limit and keep the
+ * historical 1 MiB default when nothing is configured (0). */
+static void test_file_read_size_allowed_honors_configured_limit(void) {
+    HU_ASSERT_TRUE(hu_file_read_size_allowed(1024, 0));
+    HU_ASSERT_FALSE(hu_file_read_size_allowed(2L * 1024 * 1024, 0));
+    HU_ASSERT_TRUE(hu_file_read_size_allowed(2L * 1024 * 1024, 4u * 1024 * 1024));
+    HU_ASSERT_FALSE(hu_file_read_size_allowed(64, 32));
+    HU_ASSERT_FALSE(hu_file_read_size_allowed(0, 1024));
+    HU_ASSERT_FALSE(hu_file_read_size_allowed(-1, 1024));
 }
 
 void run_tools_all_tests(void) {
@@ -2897,4 +2910,7 @@ void run_tools_all_tests(void) {
     HU_RUN_TEST(test_tool_media_image_exists);
     HU_RUN_TEST(test_tool_media_video_exists);
     HU_RUN_TEST(test_tool_media_gif_exists);
+
+    HU_TEST_SUITE("Tools (all) - file_read size limit");
+    HU_RUN_TEST(test_file_read_size_allowed_honors_configured_limit);
 }

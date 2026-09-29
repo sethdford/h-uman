@@ -33,16 +33,16 @@ typedef struct hu_app_ctx {
     hu_provider_t *provider;
     hu_memory_t *memory;
     hu_agent_t *agent;
-    void *embedder;      /* hu_embedder_t * */
-    void *vector_store;  /* hu_vector_store_t * */
-    void *retrieval;     /* hu_retrieval_engine_t * */
-    void *session_store; /* hu_session_store_t * */
-    void *agent_pool;      /* hu_agent_pool_t * */
-    void *mailbox;         /* hu_mailbox_t * */
-    void *cron;            /* hu_cron_scheduler_t * */
-    void *agent_registry;  /* hu_agent_registry_t * */
-    void *skillforge;      /* hu_skillforge_t * */
-    void *pwa_learner;     /* hu_pwa_learner_t * */
+    void *embedder;       /* hu_embedder_t * */
+    void *vector_store;   /* hu_vector_store_t * */
+    void *retrieval;      /* hu_retrieval_engine_t * */
+    void *session_store;  /* hu_session_store_t * */
+    void *agent_pool;     /* hu_agent_pool_t * */
+    void *mailbox;        /* hu_mailbox_t * */
+    void *cron;           /* hu_cron_scheduler_t * */
+    void *agent_registry; /* hu_agent_registry_t * */
+    void *skillforge;     /* hu_skillforge_t * */
+    void *pwa_learner;    /* hu_pwa_learner_t * */
 
     /* When with_channels: service channels for polling */
     hu_service_channel_t *channels;
@@ -53,6 +53,17 @@ typedef struct hu_app_ctx {
     bool provider_ok;
     bool agent_ok;
 } hu_app_ctx_t;
+
+/* True when `key` names a channel this binary was NOT built with, i.e. a
+ * `channels.<key>` block the running binary will silently ignore. Unknown
+ * keys return false — the config validator owns unknown-key reporting.
+ * See .claude/rules/silent-config-gated-subsystems.md. */
+bool hu_app_channel_missing_from_build(const char *key);
+
+/* Emits one hu_log_warn per configured-but-not-compiled channel and returns
+ * how many were reported. Called by hu_app_bootstrap before channel setup;
+ * exposed so the contract is testable without a full bootstrap. */
+size_t hu_app_warn_channels_missing_from_build(const hu_config_t *cfg, hu_observer_t *obs);
 
 /* Initialize the full app context: load config, create provider, tools, security,
  * optionally channels and agent. config_path may be NULL (use default).

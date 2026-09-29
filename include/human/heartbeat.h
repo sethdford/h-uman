@@ -54,4 +54,10 @@ hu_error_t hu_heartbeat_ensure_file(const char *workspace_dir, hu_allocator_t *a
 /* Check if content is effectively empty (comments/headers only). */
 bool hu_heartbeat_is_empty_content(const char *content);
 
+/* Full path to the heartbeat tasks file under workspace_dir
+ * ("<workspace_dir>/HEARTBEAT.md"). Non-allocating; return value and
+ * truncation semantics match snprintf. Returns -1 for NULL/zero-cap
+ * arguments (buf untouched in that case). */
+int hu_heartbeat_file_path(const char *workspace_dir, char *buf, size_t cap);
+
 #endif /* HU_HEARTBEAT_H */

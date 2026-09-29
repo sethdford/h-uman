@@ -57,7 +57,7 @@ Contact A's information must **never** appear in conversation context built for 
 | Module                    | API                                                             | contact_id / session_id | Status |
 | ------------------------- | --------------------------------------------------------------- | ----------------------- | ------ |
 | `hu_theory_of_mind_*`     | `update_baseline`, `get_baseline`                               | `contact_id`            | ✅     |
-| `hu_anticipatory_predict` | Predict emotional states                                        | `contact_id`            | ✅     |
+| `hu_anticipatory_predict_with_provider` | Predict emotional states                      | `contact_id`            | ✅     |
 | `hu_self_awareness_*`     | `record_send`, `build_directive_from_memory`, `get_reciprocity` | `contact_id`            | ✅     |
 | `hu_social_graph_*`       | `store`, `get`, `build_directive`                               | `contact_id` in SQL     | ✅     |
 | `hu_protective_*`         | `memory_ok`, `is_boundary`, `add_boundary`                      | `contact_id`            | ✅     |

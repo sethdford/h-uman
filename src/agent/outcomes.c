@@ -1,16 +1,11 @@
 #include "human/agent/outcomes.h"
+#include "human/core/time.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
 
 static uint64_t outcome_now_ms(void) {
-#ifdef HU_IS_TEST
-    return 1000000;
-#else
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    return (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
-#endif
+    return (uint64_t)hu_time_wall_ms();
 }
 
 void hu_outcome_tracker_init(hu_outcome_tracker_t *tracker, bool auto_apply_feedback) {

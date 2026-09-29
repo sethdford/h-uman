@@ -11,6 +11,7 @@
 #include "human/core/allocator.h"
 #include "human/ml/mlx_admin.h"
 #include "test_framework.h"
+#include "test_tmpdir.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -73,7 +74,8 @@ static void test_health_probe_adapter_file_missing(void) {
 /* AC-3: adapter-present + server-healthy (test-mocked) → healthy=true */
 static void test_health_probe_adapter_present_server_healthy(void) {
     /* Create a fixture adapter file: use /tmp so it exists */
-    const char *adapter_path = "/tmp/test_adapter_health.lora";
+    char adapter_path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(adapter_path, sizeof(adapter_path), "test_adapter_health.lora"));
     FILE *f = fopen(adapter_path, "w");
     HU_ASSERT_NOT_NULL(f);
     fprintf(f, "mock adapter weights");
@@ -109,7 +111,9 @@ static void test_health_probe_adapter_present_server_healthy(void) {
 
 /* AC-3: adapter-present + server-unhealthy (test-mocked) → healthy=false */
 static void test_health_probe_adapter_present_server_unhealthy(void) {
-    const char *adapter_path = "/tmp/test_adapter_unhealthy.lora";
+    char adapter_path[512];
+    HU_ASSERT_TRUE(
+        hu_test_tmppath(adapter_path, sizeof(adapter_path), "test_adapter_unhealthy.lora"));
     FILE *f = fopen(adapter_path, "w");
     HU_ASSERT_NOT_NULL(f);
     fprintf(f, "mock adapter weights");
@@ -135,7 +139,8 @@ static void test_health_probe_adapter_present_server_unhealthy(void) {
 
 /* AC-3: mlx_url not configured → healthy=false even if adapter exists */
 static void test_health_probe_no_mlx_url_configured(void) {
-    const char *adapter_path = "/tmp/test_adapter_no_url.lora";
+    char adapter_path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(adapter_path, sizeof(adapter_path), "test_adapter_no_url.lora"));
     FILE *f = fopen(adapter_path, "w");
     HU_ASSERT_NOT_NULL(f);
     fprintf(f, "mock adapter weights");
@@ -163,7 +168,8 @@ static void test_health_probe_no_mlx_url_configured(void) {
 
 /* AC-3: adapter with zero size → healthy=false */
 static void test_health_probe_adapter_zero_size(void) {
-    const char *adapter_path = "/tmp/test_adapter_zero.lora";
+    char adapter_path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(adapter_path, sizeof(adapter_path), "test_adapter_zero.lora"));
     FILE *f = fopen(adapter_path, "w");
     HU_ASSERT_NOT_NULL(f);
     fclose(f); /* Create empty file */

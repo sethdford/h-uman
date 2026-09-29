@@ -164,15 +164,17 @@ export class ScTabs extends LitElement {
             </button>
           `,
         )}
-        ${this.value
-          ? html`
-              <div
-                class="indicator"
-                role="presentation"
-                style="left: ${this._indicatorLeft}px; width: ${this._indicatorWidth}px;"
-              ></div>
-            `
-          : null}
+        ${
+          this.value
+            ? html`
+                <div
+                  class="indicator"
+                  role="presentation"
+                  style="left: ${this._indicatorLeft}px; width: ${this._indicatorWidth}px;"
+                ></div>
+              `
+            : null
+        }
       </div>
       <slot name="panel"></slot>
     `;

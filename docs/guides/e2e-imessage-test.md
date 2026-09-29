@@ -145,7 +145,7 @@ For natural, human-like behavior in real conversations (not E2E testing), use `r
 
 | Feature | What happens | Requires |
 |---------|-------------|----------|
-| **`llm_decides: true`** | Fast Flash model classifies each message: text, tapback, or silence + natural delay. Overrides heuristic gating. | Configured provider (Gemini Flash recommended) |
+| **`llm_decides: true`** | Fast Flash model classifies each message: text, tapback, or silence + natural delay. Overrides the *heuristic* gates (response_mode, drop-off, tapback-skip, leave-on-read, constitutional critique). The *safety* gates always run regardless: consecutive-reply limiter, AI-tell retry, quality retry, and the reply budget (`behavior.reply_budget_*`). See `include/human/daemon/reactive_gates.h`. | Configured provider (Gemini Flash recommended) |
 | **`use_imsg_cli: true`** | Text via `imsg send`, attachments via `imsg send --file`, tapbacks via `imsg react`, event-driven polling via `imsg watch`, target validation via `imsg chats`. | `imsg` on `$PATH` |
 | **`voice_enabled: true`** | Agent occasionally sends voice notes via Cartesia TTS when context warrants it. | `CARTESIA_API_KEY`, persona with `voice.voice_id` |
 | **`response_mode: "normal"`** | Heuristic classifier output used as-is (selective downgrades without `?`, eager always responds). `llm_decides` overrides this per-message. | — |

@@ -4,12 +4,12 @@ typedef int hu_test_research_feeds_unused_;
 
 #include "human/core/allocator.h"
 #include "human/core/string.h"
+#include "human/feeds/file_ingest.h"
 #include "human/feeds/gmail.h"
 #include "human/feeds/imessage.h"
-#include "human/feeds/twitter.h"
-#include "human/feeds/file_ingest.h"
 #include "human/feeds/processor.h"
 #include "human/feeds/research.h"
+#include "human/feeds/twitter.h"
 #include "test_framework.h"
 #include <string.h>
 
@@ -19,9 +19,8 @@ static void gmail_feed_mock_returns_two_items(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_feed_ingest_item_t items[4];
     size_t count = 0;
-    hu_error_t err = hu_gmail_feed_fetch(&alloc,
-        "test-id", 7, "test-secret", 11, "test-token", 10,
-        items, 4, &count);
+    hu_error_t err = hu_gmail_feed_fetch(&alloc, "test-id", 7, "test-secret", 11, "test-token", 10,
+                                         NULL, 0, items, 4, &count);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_EQ(count, 2u);
     HU_ASSERT_STR_EQ(items[0].source, "gmail");
@@ -34,19 +33,27 @@ static void gmail_feed_mock_returns_two_items(void) {
 static void gmail_feed_null_items_returns_error(void) {
     hu_allocator_t alloc = hu_system_allocator();
     size_t count = 0;
-    hu_error_t err = hu_gmail_feed_fetch(&alloc,
-        "id", 2, "secret", 6, "token", 5,
-        NULL, 4, &count);
+    hu_error_t err =
+        hu_gmail_feed_fetch(&alloc, "id", 2, "secret", 6, "token", 5, NULL, 0, NULL, 4, &count);
     HU_ASSERT_NEQ(err, HU_OK);
+}
+
+static void gmail_feed_quota_project_is_accepted(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_feed_ingest_item_t items[4];
+    size_t count = 0;
+    hu_error_t err = hu_gmail_feed_fetch(&alloc, "test-id", 7, "test-secret", 11, "test-token", 10,
+                                         "test-project", 12, items, 4, &count);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(count, 2u);
 }
 
 static void gmail_feed_insufficient_cap_returns_error(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_feed_ingest_item_t items[1];
     size_t count = 0;
-    hu_error_t err = hu_gmail_feed_fetch(&alloc,
-        "id", 2, "secret", 6, "token", 5,
-        items, 1, &count);
+    hu_error_t err =
+        hu_gmail_feed_fetch(&alloc, "id", 2, "secret", 6, "token", 5, NULL, 0, items, 1, &count);
     HU_ASSERT_NEQ(err, HU_OK);
 }
 
@@ -94,8 +101,7 @@ static void twitter_feed_mock_returns_two_items(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_feed_ingest_item_t items[4];
     size_t count = 0;
-    hu_error_t err = hu_twitter_feed_fetch(&alloc,
-        "test-bearer", 11, items, 4, &count);
+    hu_error_t err = hu_twitter_feed_fetch(&alloc, "test-bearer", 11, items, 4, &count);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_EQ(count, 2u);
     HU_ASSERT_STR_EQ(items[0].source, "twitter");
@@ -108,8 +114,7 @@ static void twitter_feed_mock_returns_two_items(void) {
 static void twitter_feed_null_items_returns_error(void) {
     hu_allocator_t alloc = hu_system_allocator();
     size_t count = 0;
-    hu_error_t err = hu_twitter_feed_fetch(&alloc,
-        "test-bearer", 11, NULL, 4, &count);
+    hu_error_t err = hu_twitter_feed_fetch(&alloc, "test-bearer", 11, NULL, 4, &count);
     HU_ASSERT_NEQ(err, HU_OK);
 }
 
@@ -117,8 +122,7 @@ static void twitter_feed_insufficient_cap_returns_error(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_feed_ingest_item_t items[1];
     size_t count = 0;
-    hu_error_t err = hu_twitter_feed_fetch(&alloc,
-        "test-bearer", 11, items, 1, &count);
+    hu_error_t err = hu_twitter_feed_fetch(&alloc, "test-bearer", 11, items, 1, &count);
     HU_ASSERT_NEQ(err, HU_OK);
 }
 
@@ -226,9 +230,8 @@ static void build_action_prompt_with_finding(void) {
     const char *action = "Integrate into src/memory/embeddings.c";
     char *out = NULL;
     size_t out_len = 0;
-    hu_error_t err = hu_research_build_action_prompt(&alloc,
-        finding, strlen(finding), action, strlen(action),
-        &out, &out_len);
+    hu_error_t err = hu_research_build_action_prompt(&alloc, finding, strlen(finding), action,
+                                                     strlen(action), &out, &out_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(out);
     HU_ASSERT_TRUE(out_len > 0);
@@ -244,8 +247,8 @@ static void build_action_prompt_null_action(void) {
     const char *finding = "New provider available";
     char *out = NULL;
     size_t out_len = 0;
-    hu_error_t err = hu_research_build_action_prompt(&alloc,
-        finding, strlen(finding), NULL, 0, &out, &out_len);
+    hu_error_t err =
+        hu_research_build_action_prompt(&alloc, finding, strlen(finding), NULL, 0, &out, &out_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(out);
     HU_ASSERT_NOT_NULL(strstr(out, "Determine best action"));
@@ -293,6 +296,7 @@ void run_research_feeds_tests(void) {
     HU_RUN_TEST(gmail_feed_mock_returns_two_items);
     HU_RUN_TEST(gmail_feed_null_items_returns_error);
     HU_RUN_TEST(gmail_feed_insufficient_cap_returns_error);
+    HU_RUN_TEST(gmail_feed_quota_project_is_accepted);
 
     /* iMessage feed */
     HU_RUN_TEST(imessage_feed_mock_returns_two_items);

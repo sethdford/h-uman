@@ -22,7 +22,6 @@ hu_error_t hu_validator_response_guard_create(hu_allocator_t *alloc, hu_output_v
 hu_error_t hu_validator_channel_tags_create(hu_allocator_t *alloc, hu_output_validator_t *out);
 hu_error_t hu_validator_ai_phrases_create(hu_allocator_t *alloc, hu_output_validator_t *out);
 hu_error_t hu_validator_formal_structure_create(hu_allocator_t *alloc, hu_output_validator_t *out);
-hu_error_t hu_validator_cot_audit_create(hu_allocator_t *alloc, hu_output_validator_t *out);
 
 /* P3 validators — Jordan-channel leak prevention (2026-05-14).
  *
@@ -93,8 +92,10 @@ bool hu_identity_short_circuit_should_rewrite(const char *response, size_t respo
  *   8. persona_voice           (REJECT on hard AI-identity disclosure — 2026-05-17)
  *   9. persona_fidelity        (STUB; REJECT on low M3 fidelity score when wired)
  *
- * Note: cot_audit_validator is NOT wired in this default chain — it
- * operates on `reasoning_content`, not on the main reply content.
+ * Note: chain-of-thought auditing is NOT part of this default chain — it
+ * operates on `reasoning_content`, not on the main reply content, and is
+ * live via a direct `hu_cot_audit()` call in agent_turn.c (2026-09-21: the
+ * duplicate `cot_audit_validator` wrapper route was deleted as dead code).
  *
  * persona_voice runs AFTER all strippers so prefixable tells like
  * "As an AI, " get cleaned in place before this validator sees them; it
