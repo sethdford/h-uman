@@ -237,9 +237,9 @@ _Last updated: 2026-03-23. Comparison with OpenClaw v2026.3.22 (TypeScript/Node.
 | Dimension | human | OpenClaw |
 | --- | --- | --- |
 | **Language** | C11, zero dependencies beyond libc | TypeScript/Node.js |
-| **Binary size** | ~1696 KB | ~180 MB (node_modules) |
-| **Startup** | 4–27 ms | ~800 ms |
-| **Peak RSS** | ~5.7 MB | ~120 MB |
+| **Binary size** | <!-- fp:binary_kb -->~2760 KB<!-- /fp --> | ~180 MB (node_modules) |
+| **Startup** | <!-- fp:startup_range -->3–6 ms<!-- /fp --> | ~800 ms |
+| **Peak RSS** | <!-- fp:version_rss_mb -->6.9 MB<!-- /fp --> (`--version`), <!-- fp:idle_rss_mb -->8.6 MB<!-- /fp --> idle | ~120 MB |
 | **Extension model** | Vtable + factory (compile-time) + dlopen plugins (runtime) | npm packages + runtime hooks |
 
 ### Feature Comparison
@@ -271,7 +271,7 @@ _Last updated: 2026-03-23. Comparison with OpenClaw v2026.3.22 (TypeScript/Node.
 4. **Theory of Mind**: Statistical deviation detection + symbolic belief tracking
 5. **Local ML pipeline**: Full training loop (BPE → GPT → DPO → LoRA) with autonomous experiment runner
 6. **Anticipatory emotion**: Predicts emotional states from micro-moments for proactive interaction
-7. **Performance envelope**: ~2694 KB binary, 8.6 MB idle RSS, 4–9 ms startup (release-size build, macOS arm64, 2026-09-27 — `docs/perf/footprint.json`)
+7. **Performance envelope**: <!-- fp:binary_kb -->~2760 KB<!-- /fp --> binary, <!-- fp:idle_rss_mb -->8.6 MB<!-- /fp --> idle RSS, <!-- fp:startup_range -->3–6 ms<!-- /fp --> startup (release-size build, <!-- fp:measured_platform -->macOS arm64<!-- /fp -->, <!-- fp:measured_date -->2026-09-29<!-- /fp -->; `docs/perf/footprint.json`)
 8. **Hardware control**: Direct Arduino, STM32, RPi peripheral access via vtable interface
 
 ### Gaps Closed (March 2026)

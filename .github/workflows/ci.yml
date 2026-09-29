@@ -170,6 +170,7 @@ jobs:
           bash tests/fixtures/check-realpath-wrapper/run-smoke-test.sh
           bash tests/fixtures/check-dead-strip-config/run-smoke-test.sh
           bash tests/fixtures/pre-push-deletion/run-smoke-test.sh
+          python3 scripts/test_footprint.py
 
   # The dead-strip ratchet (.claude/rules/dead-strip-ratchet.md) had exactly one
   # enforcement point before this job: .githooks/pre-push. That hook SKIPS in one
@@ -426,10 +427,16 @@ jobs:
 
   release-size:
     runs-on: macos-latest
-    # Release-quality binary-size guard — not per-PR correctness, and a scarce
-    # macOS runner. Run on main/schedule/dispatch only; skipped on PRs (skip
-    # still satisfies the required check). Size regressions surface on merge.
+    # Footprint guard and the measurement behind every published footprint number.
+    # Not per-PR correctness, and a scarce macOS runner: main/schedule/dispatch only;
+    # skipped on PRs (a skip still satisfies the required check).
+    #
+    # Budgets live in docs/perf/footprint-budget.json (each with its history and the
+    # measurement that justified it); this job no longer hard-codes any number. See
+    # docs/standards/engineering/performance.md "CI Enforcement".
     if: ${{ github.event_name != 'pull_request' }}
+    outputs:
+      heal: ${{ steps.footprint.outputs.heal }}
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-build
@@ -437,43 +444,56 @@ jobs:
           build-type: MinSizeRel
           enable-lto: "true"
           enable-all-channels: "true"
-          # sqlite-vec (af2c7d7da) adds ~300 KB; the size budget measures the
-          # binary without it, as the HU_ENABLE_SQLITE_VEC option documents.
-          # 2679 KB vs a 2600 KB budget with it on (2026-09-02).
+          # The release-size configuration (footprint-budget.json "builds"): sqlite-vec
+          # adds ~300 KB and is measured separately as the release preset.
           extra-cmake-flags: "-DHU_ENABLE_SQLITE_VEC=OFF"
-      - run: ls -lh build/human
-      - name: Enforce binary size budget (2800KB)
-        # Budget history — raise only with a measurement, never to make a red
-        # run green:
-        #   2600 KB (2026-09-02): ~9% headroom, consumed by the 09-05..09-19
-        #     sprint (memory, persona, eval features). Crossed at bda8cb333
-        #     (#419): 2594 KB -> 2611 KB.
-        #   2800 KB (2026-09-20): re-baselined after a linker-map audit of the
-        #     2611 KB binary found nothing to trim — __text 1809 KB, __cstring
-        #     512 KB, largest const table 6 KB, -Oz + no-unwind-tables already
-        #     on, a full strip saves 128 B, -no_function_starts saves 11.7 KB.
-        #     The growth is product code. 2800 KB keeps ~7% headroom and stays
-        #     below the ~2900 KB point where the docs' "~2468 KB" claim would
-        #     trip the 15% drift gate below, so that gate remains the honest
-        #     upper bound on the marketing number.
-        run: |
-          SIZE=$(stat -f%z build/human)
-          BUDGET=2867200
-          KB=$((SIZE / 1024))
-          PCT=$((SIZE * 100 / BUDGET))
-          echo "::notice::Binary size: ${KB}KB (${PCT}% of 2800KB budget)"
-          if [ "$SIZE" -gt "$BUDGET" ]; then
-            echo "::error::Binary size ${KB}KB exceeds 2800KB budget"
-            exit 1
-          fi
-      - name: Doc binary-size drift gate
-        # Phase 5 self-healing: the build-free metrics-drift gate (doc-fleet +
-        # pre-push) cannot measure binary size, so the docs' "~NNNNN KB" claims
-        # drifted to a stale debug-build number (~23209 KB) while the real
-        # release binary is ~2468 KB — a 9x overstatement that undercut the
-        # "impossibly small" headline. This is the ONLY job with a MinSizeRel
-        # binary, so the binary-size claims are gated here (15% tolerance).
-        run: bash scripts/check-metrics-drift.sh --binary build/human
+      - name: Measure footprint
+        # Binary, __text, startup (20 warm runs), --version peak RSS and idle RSS of
+        # `human mcp`, with provenance. Exits non-zero rather than emit a number it
+        # did not measure (.claude/rules/no-number-without-a-measurement.md).
+        run: bash scripts/measure-build-footprint.sh release-size build --prebuilt | tee footprint-fresh.json
+      - name: Enforce budgets; check the published claims still hold
+        # Exit 1 on a budget breach. Sets heal=true when the measurement makes a
+        # published claim untrue (>5% off, or outside a stated bound or range), which
+        # triggers footprint-heal below. Noise inside those limits changes nothing.
+        id: footprint
+        run: python3 scripts/footprint.py evaluate footprint-fresh.json --report footprint-report.md --github-output "$GITHUB_OUTPUT" | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: footprint-fresh
+          path: |
+            footprint-fresh.json
+            footprint-report.md
+          if-no-files-found: warn
+
+  # Self-healing footprint docs. Runs only when release-size found a published claim
+  # its fresh measurement falsifies. Regenerates every claim from that measurement,
+  # force-pushes the result to footprint/refresh, opens (or updates) one PR and
+  # dispatches CI on it, or opens one issue with a compare link when Actions may not
+  # open PRs. Never runs after a budget breach (release-size fails first): a breach
+  # is fixed in code, not by rewriting the docs.
+  footprint-heal:
+    needs: release-size
+    if: ${{ needs.release-size.outputs.heal == 'true' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: write
+    concurrency:
+      group: footprint-heal
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: footprint-fresh
+      - name: Regenerate footprint claims and propose them
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/footprint-heal.sh footprint-fresh.json footprint-report.md
 
   # build-ios (HumanKit swift test + XCUITest) intentionally removed from CI:
   # the iOS app is not a current focus, and its XCUITest suite carries

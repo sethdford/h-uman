@@ -1,7 +1,7 @@
 # h-uman — not quite human.
 
-C11 autonomous AI assistant runtime. ~2694 KB binary, <9 MB idle RSS, <10 ms startup
-(release-size build, macOS arm64 — measured in `docs/perf/footprint.json`).
+C11 autonomous AI assistant runtime. <!-- fp:binary_kb -->~2760 KB<!-- /fp --> binary, <!-- fp:idle_rss_bound --><9 MB<!-- /fp --> idle RSS, <!-- fp:startup_bound --><6 ms<!-- /fp --> startup
+(release-size build, <!-- fp:measured_platform -->macOS arm64<!-- /fp -->; generated from `docs/perf/footprint.json` by `scripts/footprint.py`).
 Zero dependencies beyond libc (optional SQLite and libcurl).
 
 Read `AGENTS.md` for the full engineering protocol. This file is the quick reference.

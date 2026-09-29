@@ -2,6 +2,8 @@
 import "../styles/global.css";
 import Nav from "../components/Nav.astro";
 import AnimatedLogo from "../components/AnimatedLogo.astro";
+// Footprint numbers are generated from docs/perf/footprint.json by scripts/footprint.py.
+import fp from "../data/footprint.json";
 
 const rawBase = import.meta.env.BASE_URL;
 const base = rawBase.endsWith("/") ? rawBase : rawBase + "/";
@@ -1216,7 +1218,7 @@ const base = rawBase.endsWith("/") ? rawBase : rawBase + "/";
                     style="color: var(--hu-accent);">Good</span
                   >
                   <p style="color: var(--color-text);">
-                    "~1.7 MB binary. Zero deps. &lt;6 MB RSS."
+                    "{fp.text.binary_mb} binary. Zero deps. {fp.text.idle_rss_bound} RSS."
                   </p>
                 </div>
                 <div>

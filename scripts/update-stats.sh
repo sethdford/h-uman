@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # update-stats.sh — Sync all docs with actual repo metrics.
 # Patches: AGENTS.md, README.md, CONTRIBUTING.md, PROJECT_STATUS.md, human-skills/STUBS.md, CLAUDE.md
-# Usage: ./scripts/update-stats.sh [--apply] [--test-count <N>] [--binary-size <KB>] [--keep-binary-size]
+# Usage: ./scripts/update-stats.sh [--apply] [--test-count <N>]
 #   Without --apply: prints stats only (dry run).
 #   With --apply: patches all files in place.
 #   --test-count <N>: trust this count (from a suite the caller just ran)
@@ -14,19 +14,19 @@
 #       verified (13,995 written, 14,125 measured). A count that was not
 #       measured in this run is exactly what
 #       .claude/rules/no-number-without-a-measurement.md forbids.
-#   --binary-size <KB>: trust this size instead of measuring a local binary.
-#   --keep-binary-size: measure nothing; leave the committed KB untouched.
-#       For callers that cannot vouch for any release binary's age (the hook
-#       builds Debug only; a 5-week-old build-release/ stamped ~2952 KB).
+#
+# Binary size, RSS and startup are NOT synced here. Each has exactly one writer,
+# scripts/footprint.py, which renders them from a measurement with provenance
+# (docs/perf/footprint.json). This script used to rewrite every "~N KB" with a
+# regex from whatever release build it found, and stamped stale sizes three
+# times (~23209 KB twice from Debug builds, ~2952 KB from a 5-week-old one).
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
-USAGE="usage: update-stats.sh [--apply] [--test-count <N>] [--binary-size <KB>] [--keep-binary-size]"
+USAGE="usage: update-stats.sh [--apply] [--test-count <N>]"
 APPLY=false
 TEST_COUNT_OVERRIDE=""
-BINARY_KB_OVERRIDE=""
-KEEP_BINARY_SIZE=false
 while [ $# -gt 0 ]; do
     case "$1" in
         --apply) APPLY=true ;;
@@ -36,13 +36,8 @@ while [ $# -gt 0 ]; do
                 ''|*[!0-9]*) echo "error: --test-count requires a numeric value" >&2; exit 2 ;;
             esac
             shift ;;
-        --binary-size)
-            BINARY_KB_OVERRIDE="${2:-}"
-            case "$BINARY_KB_OVERRIDE" in
-                ''|*[!0-9]*) echo "error: --binary-size requires a numeric KB value" >&2; exit 2 ;;
-            esac
-            shift ;;
-        --keep-binary-size) KEEP_BINARY_SIZE=true ;;
+        --binary-size|--keep-binary-size)
+            echo "error: $1 was removed; binary size is owned by scripts/footprint.py" >&2; exit 2 ;;
         *) echo "error: unknown argument '$1' ($USAGE)" >&2; exit 2 ;;
     esac
     shift
@@ -136,65 +131,12 @@ else
     echo "WARN: no test binary found in build*/ — leaving test-count claims untouched" >&2
 fi
 
-# Get binary size — ONLY from a verifiable release build. The docs phrasings
-# claim "MinSizeRel+LTO"; a dev/ASan Debug binary is ~10x larger, and writing
-# its size into that claim is how the docs drifted to ~23209 KB twice
-# (commits 6b0f8926, 2edbdd74). When no release binary exists, keep the
-# committed value untouched (BINARY_KB stays "unknown" and every patch site
-# below skips). CI/release callers with no build dir can pass --binary-size.
-#
-# MinSizeRel alone is not enough: the "~NNNN KB" claims are gated
-# (check-metrics-drift.sh --binary, 15%) against the release-size job's build
-# in ci.yml, which passes LTO + all channels + sqlite-vec OFF. The `release`
-# preset is also MinSizeRel but turns sqlite-vec, ML, cartesia and more ON —
-# 3,275,488 B vs 2,758,976 B at b277f7de0 (docs/perf/footprint.json), 18.7%
-# over, so stamping it would turn release-size red. Require every flag that
-# job sets explicitly. Residual: flags it leaves at their defaults are not
-# checked, so a build with extras switched on can still pass; the gate is the
-# backstop for that.
-is_release_build_dir() {
-    cache="$1/CMakeCache.txt"
-    [ -f "$cache" ] || return 1
-    grep -q '^CMAKE_BUILD_TYPE:[^=]*=MinSizeRel$' "$cache" || return 1
-    grep -q '^HU_ENABLE_LTO:[^=]*=ON$' "$cache" || return 1
-    grep -q '^HU_ENABLE_ALL_CHANNELS:[^=]*=ON$' "$cache" || return 1
-    grep -q '^HU_ENABLE_SQLITE_VEC:[^=]*=OFF$' "$cache" || return 1
-    ! grep -q '^HU_ENABLE_ASAN:[^=]*=ON$' "$cache"
-}
-
-BINARY_KB="unknown"
-if [ -n "$BINARY_KB_OVERRIDE" ]; then
-    BINARY_KB="$BINARY_KB_OVERRIDE"
-elif $KEEP_BINARY_SIZE; then
-    echo "Binary size: --keep-binary-size — keeping committed value"
-else
-    SKIPPED_BIN=""
-    for bin in build-size/human build2/human build-release/human build/human; do
-        if [ -f "$bin" ]; then
-            if is_release_build_dir "$(dirname "$bin")"; then
-                BINARY_BYTES=$(stat -f%z "$bin" 2>/dev/null || stat -c%s "$bin" 2>/dev/null || echo 0)
-                BINARY_KB=$((BINARY_BYTES / 1024))
-                break
-            fi
-            [ -n "$SKIPPED_BIN" ] || SKIPPED_BIN="$bin"
-        fi
-    done
-    if [ "$BINARY_KB" = "unknown" ] && [ -n "$SKIPPED_BIN" ]; then
-        echo "Binary size: skipping — ${SKIPPED_BIN} is not the release-size config (MinSizeRel + LTO + all channels + sqlite-vec OFF, no ASan); keeping committed value. Use --binary-size <KB> to override."
-    fi
-fi
-
 echo "=== Human Stats ==="
 echo "Source + header files: ${SRC_COUNT}"
 echo "Lines of C:           ~${C_LINES_K}K (${C_LINES_RAW})"
 echo "Test files:           ${TEST_FILES}"
 echo "Lines of tests:       ~${TEST_LINES_K}K (${TEST_LINES_RAW})"
 echo "Tests:                ${TEST_COUNT_FMT}"
-if [ "$BINARY_KB" != "unknown" ]; then
-    echo "Binary size:          ~${BINARY_KB} KB"
-else
-    echo "Binary size:          unknown (keeping committed value)"
-fi
 echo "Channels (enum):      ${CHANNEL_ENUM}"
 echo "Channel .c files:     ${CHANNEL_COUNT}"
 echo "Tools:                ${TOOL_COUNT}"
@@ -232,13 +174,6 @@ sed -i.bak -E \
     "s|channels/[[:space:]]+[0-9]+ channel implementations|channels/             ${CHANNEL_COUNT} channel implementations|" \
     AGENTS.md && rm -f AGENTS.md.bak
 
-# Binary size — all ~NNN KB references
-if [ "$BINARY_KB" != "unknown" ]; then
-    sed -i.bak -E \
-        "s/~[0-9]+ KB/~${BINARY_KB} KB/g" \
-        AGENTS.md && rm -f AGENTS.md.bak
-fi
-
 # "All N+ tests" rule-of-thumb line
 if [ "$TEST_COUNT" != "unknown" ]; then
     sed -i.bak -E \
@@ -275,13 +210,6 @@ fi
 if [ "$TEST_COUNT" != "unknown" ]; then
     sed -i.bak -E \
         "s/# [0-9,]+ tests$/# ${TEST_COUNT_FMT} tests/" \
-        README.md && rm -f README.md.bak
-fi
-
-# Binary size — all ~NNN KB references
-if [ "$BINARY_KB" != "unknown" ]; then
-    sed -i.bak -E \
-        "s/~[0-9]+ KB/~${BINARY_KB} KB/g" \
         README.md && rm -f README.md.bak
 fi
 
@@ -339,13 +267,6 @@ if [ -f PROJECT_STATUS.md ]; then
             PROJECT_STATUS.md && rm -f PROJECT_STATUS.md.bak
     fi
 
-    # Binary size
-    if [ "$BINARY_KB" != "unknown" ]; then
-        sed -i.bak -E \
-            "s/Binary size \(MinSizeRel\+LTO\)[[:space:]]+\| \*\*~[0-9]+ KB\*\*/Binary size (MinSizeRel+LTO)   | **~${BINARY_KB} KB**/" \
-            PROJECT_STATUS.md && rm -f PROJECT_STATUS.md.bak
-    fi
-
     # Source files
     sed -i.bak -E \
         "s/Source files \(src\/ \+ include\/\)[[:space:]]*\| \*\*[0-9]+\*\*/Source files (src\/ + include\/) | **${SRC_COUNT}**/" \
@@ -374,19 +295,12 @@ fi
 echo "Patching human/STUBS.md..."
 
 if [ -f human/STUBS.md ]; then
-    # Test count in header blurb (backreference keeps the committed KB value
-    # when no release binary was measured; skipped entirely when the test
-    # count itself is unknown — never write "unknown" into docs)
+    # Test count in header blurb; skipped when the count itself is unknown —
+    # never write "unknown" into docs
     if [ "$TEST_COUNT" != "unknown" ]; then
-        if [ "$BINARY_KB" != "unknown" ]; then
-            sed -i.bak -E \
-                "s/[0-9,]+ tests, ~[0-9]+ KB binary/${TEST_COUNT_FMT} tests, ~${BINARY_KB} KB binary/" \
-                human/STUBS.md && rm -f human/STUBS.md.bak
-        else
-            sed -i.bak -E \
-                "s/[0-9,]+ tests, ~([0-9]+) KB binary/${TEST_COUNT_FMT} tests, ~\1 KB binary/" \
-                human/STUBS.md && rm -f human/STUBS.md.bak
-        fi
+        sed -i.bak -E \
+            "s/[0-9,]+ tests, ~([0-9]+) KB binary/${TEST_COUNT_FMT} tests, ~\1 KB binary/" \
+            human/STUBS.md && rm -f human/STUBS.md.bak
     fi
 
     # Tests passing table row
@@ -410,13 +324,6 @@ fi
 echo "Patching CLAUDE.md..."
 
 if [ -f CLAUDE.md ]; then
-    # Binary size in tagline
-    if [ "$BINARY_KB" != "unknown" ]; then
-        sed -i.bak -E \
-            "s/~[0-9]+ KB binary/~${BINARY_KB} KB binary/" \
-            CLAUDE.md && rm -f CLAUDE.md.bak
-    fi
-
     # Test count references
     if [ "$TEST_COUNT" != "unknown" ]; then
         sed -i.bak -E \

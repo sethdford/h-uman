@@ -374,6 +374,23 @@ if [ -n "$staged_mperson" ] && [ -x "scripts/check-modeled-person-layering.sh" ]
     fi
 fi
 
+# Footprint claims gate. Binary size, RSS and startup numbers are generated from
+# docs/perf/footprint.json by scripts/footprint.py; a hand-typed one goes stale the
+# day it is written (the docs said "~2468 KB, <6 MB RAM" for months after both
+# stopped being true). Fails on a stale marker/template line or an unmanaged
+# footprint number in a live doc. ~0.6 s; fires only when a file that can carry
+# a claim is staged. CI runs the same check in doc-fleet.
+staged_fp=$(git diff --cached --name-only --diff-filter=ACM -- '*.md' '*.mdc' '*.mdx' '*.astro' '*.html' \
+    '*.swift' '*.kt' 'src/*.c' 'src/**/*.c' 'docs/perf/*.json' || true)
+if [ -n "$staged_fp" ] && [ -f "scripts/footprint.py" ]; then
+    if ! python3 scripts/footprint.py check; then
+        echo ""
+        echo "Pre-commit blocked: footprint claims are stale or hand-typed."
+        echo "Run: python3 scripts/footprint.py sync   (and see docs/standards/engineering/performance.md)"
+        exit 1
+    fi
+fi
+
 # Docs frontmatter gate. Every docs/**/*.md (except docs/plans/, which the
 # check skips by default) must start with a line-1 `---` YAML frontmatter block.
 # Shifts the CI doc-fleet frontmatter failure left to commit time so new docs

@@ -71,9 +71,8 @@ Reviewers focus in this order. Higher priorities block merge; lower priorities c
 - No unnecessary allocations in hot paths
 - String operations use appropriate buffer sizes (no repeated `realloc` in loops)
 - Binary size impact considered for new features
-- Memory footprint considered: `human --version` peak RSS is 6.9 MB against the 8 MB hard limit in
-  [performance.md](../engineering/performance.md); idle RSS (`human mcp`) is 8.6 MB. Both measured
-  2026-09-27 on the release-size build, macOS arm64 ([footprint.json](../../perf/footprint.json))
+- Memory footprint considered: `human --version` peak RSS is <!-- fp:version_rss_mb -->6.9 MB<!-- /fp --> against a <!-- fp:budget_version_rss_mb -->8 MB<!-- /fp --> budget, and idle RSS (`human mcp`) is <!-- fp:idle_rss_mb -->8.6 MB<!-- /fp -->
+  (release-size build; [footprint.json](../../perf/footprint.json), budgets in [footprint-budget.json](../../perf/footprint-budget.json), CI-enforced)
 
 ---
 

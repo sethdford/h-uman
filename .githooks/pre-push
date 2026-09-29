@@ -272,10 +272,10 @@ if [ -f "CMakeLists.txt" ]; then
     # 2026-09-03 the sync re-ran whichever build*/human_tests sorted first —
     # a two-day-old build/ dev binary of a different tree state — and stamped
     # 13,995 while this hook had just measured 14,125 (third recorded
-    # writer-vs-checker disagreement; see the top of this file). Likewise the
-    # binary size: this hook only builds Debug, so it cannot vouch for any
-    # release binary's age (a five-week-old build-release/ stamped ~2952 KB
-    # the same day); --keep-binary-size leaves the committed value alone.
+    # writer-vs-checker disagreement; see the top of this file). Binary size,
+    # RSS and startup are not synced here at all: scripts/footprint.py owns
+    # them, rendered from a measurement CI re-takes on every main push (this
+    # hook only builds Debug and could never vouch for a release binary).
     # Rule: .claude/rules/no-number-without-a-measurement.md.
     #
     # Run-to-run drift on an UNCHANGED tree (2026-09-20: 14,247 then 14,303
@@ -291,8 +291,8 @@ if [ -f "CMakeLists.txt" ]; then
             echo "  skipping stats sync rather than stamping a count from a stale binary."
         elif [ "$behind" = "0" ]; then
             echo "Syncing project stats (${TEST_COUNT} registered tests = passed + skipped, measured by this run)..."
-            if ! bash scripts/update-stats.sh --apply --test-count "$TEST_COUNT" --keep-binary-size 2>/dev/null; then
-                echo "Warning: stats sync failed. Run 'scripts/update-stats.sh --apply --test-count ${TEST_COUNT} --keep-binary-size' manually."
+            if ! bash scripts/update-stats.sh --apply --test-count "$TEST_COUNT" 2>/dev/null; then
+                echo "Warning: stats sync failed. Run 'scripts/update-stats.sh --apply --test-count ${TEST_COUNT}' manually."
             fi
         elif [ "$behind" = "unknown" ]; then
             echo "Skipping stats sync (cannot compare against origin/main)."

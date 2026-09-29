@@ -25,27 +25,33 @@ Methodology for performance measurement, regression detection, and profiling acr
 
 ### 2.1 Metrics Tracked
 
-| Metric                | Baseline | Regression Threshold | Measurement                          |
-| --------------------- | -------- | -------------------- | ------------------------------------ |
-| Binary size (release) | ~1696 KB | +5% (85 KB)          | `ls -la build-release/human`         |
-| Text section          | 480 KB   | +10% (48 KB)         | `size build-release/human`           |
-| Cold start            | <30 ms   | +50% (45 ms)         | `/usr/bin/time -l ./human --version` |
-| Peak RSS              | ~5.7 MB  | +20% (1.14 MB)       | `/usr/bin/time -l ./human --version` |
+Generated from [`docs/perf/footprint.json`](../../perf/footprint.json) and
+[`docs/perf/footprint-budget.json`](../../perf/footprint-budget.json); see
+[performance.md](performance.md#hard-limits-the-identity-metrics).
+
+| Metric (release-size build) | Current | Hard budget | Measurement |
+| --- | --- | --- | --- |
+| Binary size | <!-- fp:binary_kb -->~2760 KB<!-- /fp --> | <!-- fp:budget_binary_kb -->2800 KB<!-- /fp --> | `stat` of `human` |
+| Text section | <!-- fp:text_kb -->1915 KB<!-- /fp --> | none (part of binary size) | `size -m human` |
+| Cold start | <!-- fp:startup_range -->3–6 ms<!-- /fp --> | <!-- fp:budget_startup_ms -->100 ms<!-- /fp --> median | 20 warm runs of `human --version` |
+| Peak RSS | <!-- fp:version_rss_mb -->6.9 MB<!-- /fp --> | <!-- fp:budget_version_rss_mb -->8 MB<!-- /fp --> | `/usr/bin/time -l human --version` |
+| Idle RSS | <!-- fp:idle_rss_mb -->8.6 MB<!-- /fp --> | none (tracked) | `ps` RSS of an idle `human mcp` |
 
 ### 2.2 CI Enforcement
 
-The `benchmark.yml` workflow measures these on every push to main:
+The `release-size` job in `.github/workflows/ci.yml` builds the release-size configuration on
+every push to `main` and measures it:
 
-```yaml
-- name: Measure binary size
-  run: |
-    size=$(stat -f%z build-release/human)
-    echo "binary_size=$size" >> $GITHUB_OUTPUT
-    if [ "$size" -gt "$((BASELINE * 105 / 100))" ]; then
-      echo "::error::Binary size regression: $size bytes (baseline: $BASELINE)"
-      exit 1
-    fi
+```bash
+scripts/measure-build-footprint.sh release-size build --prebuilt > footprint-fresh.json
+python3 scripts/footprint.py evaluate footprint-fresh.json   # exit 1 on a budget breach
 ```
+
+A budget breach fails the job. A measurement that makes a published number untrue (more than
+5% off, or outside a published bound or range) triggers the `footprint-heal` job, which
+regenerates every footprint claim from it and proposes the change on the `footprint/refresh`
+branch. `benchmark.yml` still reports size and startup for a different configuration (Linux,
+curl on) as a PR comment; it is not the budget.
 
 ### 2.3 Justified Growth
 
@@ -53,7 +59,7 @@ When a feature legitimately increases binary size:
 
 1. Measure the exact delta
 2. Document the justification in the commit message
-3. Update the baseline in `benchmark.yml`
+3. If it crosses a budget, raise that budget in `docs/perf/footprint-budget.json` with the measurement in its `why`
 4. Ensure the feature is compile-flag gated if >10 KB
 
 ## 3. Gateway Load Testing
