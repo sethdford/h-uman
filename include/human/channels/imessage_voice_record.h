@@ -201,6 +201,15 @@ hu_error_t hu_voice_record_send_from_env(const char *handle, size_t handle_len,
  * whose members are all safe no-ops, so the symbol links everywhere. */
 const hu_voice_record_port_t *hu_voice_record_macos_port(void);
 
+/* Seconds since the last keyboard/mouse input (IOKit HIDIdleTime); 0 on test
+ * and non-Apple builds, where it reads as "active". */
+double hu_voice_record_idle_seconds(void);
+
+/* Accessibility trust for this binary (AXIsProcessTrusted). Lost on every
+ * reinstall (new cdhash); native voice memos, AX typing and threaded-reply
+ * fallbacks all need it. True on test and non-Apple builds. */
+bool hu_voice_record_ax_trusted(void);
+
 /* chat.db helpers, defined in imessage.c (which owns the sqlite access) for
  * Apple production builds only. -1 / false when unavailable. */
 int64_t hu_imessage_chatdb_max_rowid(void);

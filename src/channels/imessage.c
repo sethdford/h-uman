@@ -1602,6 +1602,7 @@ static bool imsg_try_react(hu_imessage_ctx_t *c, int64_t message_id, hu_reaction
                 return true;
             }
             hu_log_info("imessage", NULL, "bridge tapback failed; falling back to imsg react");
+            hu_imessage_caps_note_bridge_failure(); /* re-probe soon (self-heal) */
         }
     }
 

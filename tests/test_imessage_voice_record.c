@@ -619,8 +619,16 @@ static void test_vrec_memo_never_attaches_when_told(void) {
     HU_ASSERT_TRUE(hu_voice_record_may_attach(5, caf, 1, "1")); /* text + audio: not a memo */
 }
 
+/* Self-healing (spec 2026-09-28): test/non-Apple builds read as "trusted" and
+ * "active" so nothing alarms or relaunches there; the macOS port reads IOKit/AX. */
+static void test_vrec_stub_host_facts_are_quiet(void) {
+    HU_ASSERT_TRUE(hu_voice_record_ax_trusted());
+    HU_ASSERT_TRUE(hu_voice_record_idle_seconds() == 0.0);
+}
+
 void run_imessage_voice_record_tests(void) {
     HU_TEST_SUITE("imessage voice record");
+    HU_RUN_TEST(test_vrec_stub_host_facts_are_quiet);
     HU_RUN_TEST(test_vrec_memo_never_attaches_when_told);
     HU_RUN_TEST(test_vrec_mode_parse_defaults_to_attachment);
     HU_RUN_TEST(test_vrec_handle_allowed_limits_native_delivery_to_the_list);

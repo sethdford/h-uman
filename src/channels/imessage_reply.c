@@ -317,6 +317,7 @@ hu_error_t hu_imessage_reply(void *ctx, const char *target, size_t target_len,
                                                     since_rowid, ts_start_ms);
                     }
                     g_bridge_consec_failures++;
+                    hu_imessage_caps_note_bridge_failure(); /* re-probe soon (self-heal) */
                     g_bridge_last_failure_ms = ts_start_ms;
                     hu_log_warn("imessage", NULL,
                                 "bridge threaded reply failed (%u consecutive%s); falling back "

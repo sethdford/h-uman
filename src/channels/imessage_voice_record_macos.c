@@ -629,6 +629,14 @@ const hu_voice_record_port_t *hu_voice_record_macos_port(void) {
     return &k_mac_port;
 }
 
+double hu_voice_record_idle_seconds(void) {
+    return hid_idle_sec();
+}
+
+bool hu_voice_record_ax_trusted(void) {
+    return AXIsProcessTrusted();
+}
+
 #else /* test or non-Apple: preflight always blocks; every member is safe */
 
 static hu_error_t stub_facts(void *c, const char *m, hu_voice_record_facts_t *o) {
@@ -727,6 +735,14 @@ static const hu_voice_record_port_t k_stub_port = {
 
 const hu_voice_record_port_t *hu_voice_record_macos_port(void) {
     return &k_stub_port;
+}
+
+double hu_voice_record_idle_seconds(void) {
+    return 0.0; /* unknown reads as "active": nothing waits on it here */
+}
+
+bool hu_voice_record_ax_trusted(void) {
+    return true; /* nothing to grant here; never alarm */
 }
 
 #endif

@@ -476,8 +476,35 @@ static void whois_probe_never_spawns_under_test(void) {
                  (int)HU_WHOIS_INDETERMINATE);
 }
 
+/* Self-healing (spec 2026-09-28): the caps view was probed once per process, so
+ * a bridge that came back (imsg launch) was never seen, and one that died was
+ * trusted until restart. */
+static void caps_reprobe_policy_heals_both_ways(void) {
+    HU_ASSERT_TRUE(hu_imessage_caps_should_reprobe(1000, -1, false, false)); /* never probed */
+    HU_ASSERT_FALSE(hu_imessage_caps_should_reprobe(1060, 1000, true, false));
+    HU_ASSERT_TRUE(hu_imessage_caps_should_reprobe(1600, 1000, true, false)); /* 10 min TTL */
+    HU_ASSERT_FALSE(hu_imessage_caps_should_reprobe(1060, 1000, false, false));
+    HU_ASSERT_TRUE(hu_imessage_caps_should_reprobe(1120, 1000, false, false)); /* down: 2 min */
+    HU_ASSERT_TRUE(hu_imessage_caps_should_reprobe(1030, 1000, true, true));   /* verb failed */
+    HU_ASSERT_FALSE(hu_imessage_caps_should_reprobe(1010, 1000, true, true));  /* but not a storm */
+}
+
+/* Repair = `imsg launch`, which restarts Messages.app: only when the bridge is
+ * down, SIP is off (else it cannot work), Seth has been idle 5 min, and at most
+ * once per 30 min. */
+static void caps_bridge_repair_never_interrupts_seth(void) {
+    HU_ASSERT_TRUE(hu_imessage_bridge_repair_due(false, false, 400.0, -1));
+    HU_ASSERT_FALSE(hu_imessage_bridge_repair_due(true, false, 400.0, -1));   /* bridge up */
+    HU_ASSERT_FALSE(hu_imessage_bridge_repair_due(false, true, 400.0, -1));   /* SIP on */
+    HU_ASSERT_FALSE(hu_imessage_bridge_repair_due(false, false, 120.0, -1));  /* he's typing */
+    HU_ASSERT_FALSE(hu_imessage_bridge_repair_due(false, false, 400.0, 600)); /* tried 10 min ago */
+    HU_ASSERT_TRUE(hu_imessage_bridge_repair_due(false, false, 400.0, 1900));
+}
+
 void run_imessage_caps_tests(void) {
     HU_TEST_SUITE("imessage_caps");
+    HU_RUN_TEST(caps_reprobe_policy_heals_both_ways);
+    HU_RUN_TEST(caps_bridge_repair_never_interrupts_seth);
     HU_RUN_TEST(whois_parse_reachable_says_reachable);
     HU_RUN_TEST(whois_parse_is_key_order_independent);
     HU_RUN_TEST(whois_parse_green_handles_are_not_reachable);

@@ -5,6 +5,7 @@
 #include "human/core/error.h"
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 /* iMessage capability probe (plan: docs/plans/2026-07-19-native-imessage).
  *
@@ -68,6 +69,21 @@ hu_error_t hu_imessage_caps_probe(hu_allocator_t *alloc, hu_imessage_caps_t *cap
  * native call site (send path, reply path, react path). Probes once on first
  * call and logs the result; never NULL. */
 const hu_imessage_caps_t *hu_imessage_caps_cached(hu_allocator_t *alloc);
+
+/* Self-healing (spec 2026-09-28-expressive-imessage). Pure policies:
+ * re-probe when never probed, every 10 min while the bridge is up, every
+ * 2 min while it is down, or >= 20 s after a bridge verb failed. */
+bool hu_imessage_caps_should_reprobe(int64_t now, int64_t probed_at, bool advanced,
+                                     bool verb_failed);
+
+/* `imsg launch` restarts Messages.app, so repair only when the bridge is down,
+ * SIP is off, the Mac has been idle >= 300 s, and the last attempt (-1 =
+ * never) was >= 1800 s ago. */
+bool hu_imessage_bridge_repair_due(bool advanced, bool sip_enabled, double idle_sec,
+                                   int64_t since_last_repair);
+
+/* A bridge verb (tapback, send-rich, typing) just failed: re-probe soon. */
+void hu_imessage_caps_note_bridge_failure(void);
 
 /* ── T0.1 blue guard ────────────────────────────────────────────────────
  * "Perfect and blue": the daemon must never emit a green bubble. Apple's own
