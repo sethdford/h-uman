@@ -47,3 +47,27 @@ def parse_evidence(tokens):
         if mt:
             t_idx.append(int(mt.group(1)))
     return t_idx, daemon
+
+
+def name_said(name, texts):
+    """Verbatim, case-insensitive, word-bounded: 'Al' is not in 'Also',
+    'Priya' is in "priya's"."""
+    name = (name or "").strip()
+    if not name:
+        return False
+    pat = re.compile(r"(?<![A-Za-z0-9])" + re.escape(name) + r"(?![A-Za-z0-9])", re.I)
+    return any(pat.search(t or "") for t in texts)
+
+
+def validate_note(note, cite_map):
+    t_idx, daemon = parse_evidence(note.get("evidence_tokens"))
+    if daemon:
+        return None, "daemon_evidence"
+    rows = [cite_map[i] for i in t_idx if i in cite_map]
+    if not rows:
+        return None, "no_evidence"
+    texts = [r[3] for r in rows]
+    for n in note.get("names") or []:
+        if not name_said(n.get("name"), texts):
+            return None, "name_not_said"
+    return {**note, "evidence_rows": rows}, "ok"

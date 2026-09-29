@@ -41,3 +41,29 @@ def test_parse_evidence_flags_daemon_citations():
     assert ce.parse_evidence(["t0", "1", "[t2]"]) == ([0, 1, 2], False)
     assert ce.parse_evidence(["t0", "d1"]) == ([0], True)
     assert ce.parse_evidence([]) == ([], False)
+
+
+def test_name_said_word_bounded_and_possessive():
+    assert ce.name_said("Priya", ["priya's surgery is tuesday"])
+    assert not ce.name_said("Al", ["Also, see you then"])
+    assert ce.name_said("St Petersburg", ["moving to st petersburg soon"])
+    assert not ce.name_said("Priya", ["[attachment]"])
+
+
+def _cite():
+    return {0: (11, 1, "them", "priya's surgery is tuesday"), 1: (12, 2, "me", "hope it goes well")}
+
+
+def test_validate_note_accepts_supported_named_note():
+    note = {"note": "Priya's surgery tuesday", "kind": "plan", "confidence": 0.9,
+            "evidence_tokens": ["t0"], "names": [{"name": "Priya", "type": "person"}]}
+    out, why = ce.validate_note(note, _cite())
+    assert why == "ok" and out["evidence_rows"] == [_cite()[0]]
+
+
+def test_validate_note_rejects_daemon_empty_and_invented_names():
+    base = {"note": "x", "kind": "fact", "confidence": 0.9, "names": []}
+    assert ce.validate_note({**base, "evidence_tokens": ["d0"]}, _cite())[1] == "daemon_evidence"
+    assert ce.validate_note({**base, "evidence_tokens": ["t9"]}, _cite())[1] == "no_evidence"
+    inv = {**base, "evidence_tokens": ["t0"], "names": [{"name": "Marcus", "type": "person"}]}
+    assert ce.validate_note(inv, _cite()) == (None, "name_not_said")
