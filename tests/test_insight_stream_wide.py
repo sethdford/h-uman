@@ -50,6 +50,10 @@ def _hermetic_memory_db(tmp_path, monkeypatch):
     mem_db = tmp_path / "suppressions.db"
     sqlite3.connect(mem_db).close()
     monkeypatch.setattr(ins, "MEMORY_DB", str(mem_db))
+    # run_wide also reads ~/.human/config.json (loopback handle) and writes
+    # ~/.human/curator_state.json: redirect both so no test touches them.
+    monkeypatch.setattr(ins, "HUMAN_CONFIG", str(tmp_path / "absent-config.json"), raising=False)
+    monkeypatch.setattr(ins, "CURATOR_STATE", str(tmp_path / "curator_state.json"))
 
 
 def test_wide_pass_writes_only_supported_named_notes(tmp_path, monkeypatch):
@@ -73,6 +77,7 @@ def test_wide_pass_writes_only_supported_named_notes(tmp_path, monkeypatch):
     assert man["eligible"] == 1 and man["notes_written"] == 1
     assert man["rejected_daemon_evidence"] == 1 and man["rejected_name_not_said"] == 1
     assert "Priya" not in json.dumps(man)  # counts only, never text
+    assert H not in json.dumps(man)  # ...and never a handle
 
 
 def test_wide_pass_dry_run_writes_nothing(tmp_path, monkeypatch):
@@ -244,18 +249,20 @@ def test_run_wide_refuses_before_any_write_when_no_eligible_contacts(tmp_path, m
     assert not manifest_dir.exists()
 
 
-def test_resolve_deadline_rolls_to_tomorrow_only_once_the_time_has_passed():
-    """Fix round 1 (b): resolve_deadline must pick TODAY's HH:MM if it is
-    still ahead of now, and tomorrow's only once that clock time is behind
-    now -- a run starting after the deadline's HH:MM must not immediately
-    stop before its first contact."""
+def test_resolve_deadline_today_closed_or_tomorrow():
+    """R12 I5 (overrides R10b): today's HH:MM while it is still ahead; if it
+    passed less than 12h ago the window is CLOSED (None) -- launchd runs a
+    missed 05:10 job on wake, and a 22h run would load :8741 all day; only
+    once it passed 12h+ ago does the run target tomorrow's HH:MM."""
     tz = dt.timezone(dt.timedelta(hours=-4))
     morning = dt.datetime(2026, 9, 28, 5, 10, tzinfo=tz)
     assert ins.resolve_deadline("07:30", morning) == (
         dt.datetime(2026, 9, 28, 7, 30, tzinfo=tz).astimezone(dt.timezone.utc))
-    late = dt.datetime(2026, 9, 28, 23, 0, tzinfo=tz)
-    assert ins.resolve_deadline("07:30", late) == (
-        dt.datetime(2026, 9, 29, 7, 30, tzinfo=tz).astimezone(dt.timezone.utc))
+    assert ins.resolve_deadline("07:30", dt.datetime(2026, 9, 28, 9, 0, tzinfo=tz)) is None
+    assert ins.resolve_deadline("07:30", dt.datetime(2026, 9, 28, 19, 29, tzinfo=tz)) is None
+    tomorrow = dt.datetime(2026, 9, 29, 7, 30, tzinfo=tz).astimezone(dt.timezone.utc)
+    assert ins.resolve_deadline("07:30", dt.datetime(2026, 9, 28, 19, 30, tzinfo=tz)) == tomorrow
+    assert ins.resolve_deadline("07:30", dt.datetime(2026, 9, 28, 23, 0, tzinfo=tz)) == tomorrow
 
 
 def test_run_wide_recovers_from_a_truncated_curator_state_file(tmp_path, monkeypatch):

@@ -141,7 +141,9 @@ def evidence_for(indices, rows):
     return sorted(set(ids)), newest
 
 
-def build_prompt(identity, name, relationship, turns, max_notes):
+def build_wide_prompt(identity, name, relationship, turns, max_notes):
+    """The curator's variant (spec §5): names keep their capitals, a structured
+    names field, [tN]-only evidence."""
     system = (
         f"You are Seth Ford. {identity}\n\n"
         f"You just reread your recent texts with {name}"
@@ -162,11 +164,34 @@ def build_prompt(identity, name, relationship, turns, max_notes):
     return system, user
 
 
-def call_model(url, model, system, user, timeout=300, temperature=0.3):
+def build_prompt(identity, name, relationship, turns, max_notes, wide=False):
+    # wide=False is the LIVE persona pass: its wording below is unchanged from
+    # what it was measured with and must stay so (pinned by a byte-equality test).
+    if wide:
+        return build_wide_prompt(identity, name, relationship, turns, max_notes)
+    system = (
+        f"You are Seth Ford. {identity}\n\n"
+        f"You just reread your recent texts with {name}"
+        f"{' (' + relationship + ')' if relationship else ''} and are jotting private notes to "
+        "yourself — the things YOU would actually remember and bring up next time: specific names, "
+        "places, plans with when, what they're dealing with, running jokes and inside references, "
+        "what they like and don't. Never generic traits (\"is friendly\"), never advice, never "
+        "anything not in the texts. Lowercase, like a note to yourself, present tense, each under "
+        "110 characters.\n\n"
+        f"Output ONLY a JSON array of at most {max_notes} objects: "
+        "{\"note\": str, \"kind\": \"fact\"|\"thread\"|\"plan\"|\"preference\"|\"inside_ref\", "
+        "\"confidence\": number 0-1, \"evidence\": [the [tN] numbers of the texts the note "
+        "comes from]}. No prose before or after."
+    )
+    user = "recent texts (oldest first):\n" + "\n".join(turns)
+    return system, user
+
+
+def call_model(url, model, system, user, timeout=300, temperature=0.3, max_tokens=700):
     req = {
         "model": model,
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-        "max_tokens": 700,
+        "max_tokens": max_tokens,
         "temperature": temperature,
         "chat_template_kwargs": {"enable_thinking": False},
     }
@@ -293,8 +318,9 @@ def verify_claims(a, system, context, claims, k):
     return agree
 
 
-def admit(items, agree, k, label="", text_key="note"):
-    """Attach agreement, scale confidence by agree/K, keep the majority; log the rest."""
+def admit(items, agree, k, label="", text_key="note", quiet=False):
+    """Attach agreement, scale confidence by agree/K, keep the majority; log the
+    rest unless quiet (the wide pass must never print note text or handles)."""
     need = (k // 2) + 1 if k > 1 else 1
     kept = []
     for it, ag in zip(items, agree):
@@ -302,7 +328,7 @@ def admit(items, agree, k, label="", text_key="note"):
         it["confidence"] = round(max(0.0, min(1.0, float(it.get("confidence", 0.7)) * ag / max(k, 1))), 3)
         if ag >= need:
             kept.append(it)
-        else:
+        elif not quiet:
             print(f"    {label}: rejected ({ag}/{k} verifications) {it.get(text_key)}")
     return kept
 
@@ -695,71 +721,183 @@ def order_by_last_run(handles, state):
 
 
 def write_manifest(manifest_dir, now, man):
+    """Counts only. Atomic (tmp + os.replace) so a killed run never leaves a
+    truncated manifest; a dry run is written as ...-dryrun.json so it can
+    never be read as a night's real numbers."""
     if not man.get("eligible"):
         print("refusing: 0 eligible contacts (no manifest written)", file=sys.stderr)
         return 2
     os.makedirs(manifest_dir, exist_ok=True)
-    path = os.path.join(manifest_dir, f"curator-manifest-{now.strftime('%Y%m%d')}.json")
-    json.dump(man, open(path, "w"), indent=1, sort_keys=True)
+    suffix = "-dryrun" if man.get("dry_run") else ""
+    path = os.path.join(manifest_dir, f"curator-manifest-{now.strftime('%Y%m%d')}{suffix}.json")
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(man, f, indent=1, sort_keys=True)
+    os.replace(tmp, path)
     return 0
 
 
+DEADLINE_ROLL_HOURS = 12
+
+
 def resolve_deadline(hhmm, now_local):
-    """Today's HH:MM (local) if that moment is still ahead of now_local,
-    else the same HH:MM tomorrow -- a run started after the deadline's
-    clock time must not immediately stop before its first contact.
-    Returns a tz-aware UTC datetime."""
+    """Today's HH:MM (local) while it is still ahead of now_local. If it
+    passed less than DEADLINE_ROLL_HOURS ago the window is closed -> None
+    (launchd runs a missed 05:10 job on wake; rolling that to tomorrow's
+    07:30 would load the live :8741 server for ~22h). If it passed 12h or
+    more ago, the same HH:MM tomorrow (an evening manual run). Returns a
+    tz-aware UTC datetime or None."""
     hh, mm = map(int, hhmm.split(":"))
     candidate = now_local.replace(hour=hh, minute=mm, second=0, microsecond=0)
-    if candidate <= now_local:
-        candidate += dt.timedelta(days=1)
-    return candidate.astimezone(dt.timezone.utc)
+    if candidate > now_local:
+        return candidate.astimezone(dt.timezone.utc)
+    if now_local - candidate < dt.timedelta(hours=DEADLINE_ROLL_HOURS):
+        return None
+    return (candidate + dt.timedelta(days=1)).astimezone(dt.timezone.utc)
 
 
 def load_curator_state():
-    """Missing file -> {} (first run). Unreadable/corrupt file -> warn to
-    stderr and proceed with {} rather than crash the curator on a bad
-    write (e.g. a truncated file from a killed prior run)."""
+    """Missing file -> {} (first run). Unreadable/corrupt/undecodable file ->
+    warn to stderr and proceed with {} rather than crash the curator on a bad
+    write (e.g. a truncated file from a killed prior run). Entries whose value
+    is not an int (last-run epoch ms) are dropped."""
     if not os.path.exists(CURATOR_STATE):
         return {}
     try:
-        data = json.load(open(CURATOR_STATE))
-    except (OSError, json.JSONDecodeError) as e:
-        print(f"warning: curator_state.json unreadable ({e}); starting from empty state",
-              file=sys.stderr)
+        with open(CURATOR_STATE) as f:
+            data = json.load(f)
+    except (OSError, ValueError) as e:  # ValueError covers JSON and Unicode decode errors
+        print(f"warning: curator_state.json unreadable ({type(e).__name__}); "
+              "starting from empty state", file=sys.stderr)
         return {}
     if not isinstance(data, dict):
         print("warning: curator_state.json is not a JSON object; starting from empty state",
               file=sys.stderr)
         return {}
-    return data
+    return {h: v for h, v in data.items() if type(v) is int}
 
 
 def save_curator_state(state):
     """Atomic write: json to a sibling .tmp file, then os.replace -- so a
     crash or kill mid-write never leaves CURATOR_STATE truncated."""
     tmp = CURATOR_STATE + ".tmp"
-    json.dump(state, open(tmp, "w"))
+    with open(tmp, "w") as f:
+        json.dump(state, f)
     os.replace(tmp, CURATOR_STATE)
 
 
-def wide_pass(db, a, identity, persona_ids, att, now, write, deadline=None, state=None):
+HUMAN_CONFIG = os.path.join(HOME, ".human/config.json")
+WIDE_MAX_TOKENS = 1500  # names + evidence per note need more room than the persona pass's 700
+NAMES_REJECTED_BLOCK = 0.20  # spec §6: > 20% of names failing "was it said?" blocks promotion
+WIDE_INT_COUNTERS = (
+    "eligible", "excluded_suppressed", "excluded_never", "skipped_min_turns", "curated",
+    "model_errors", "unreached_at_deadline", "stopped_at_deadline", "parse_failed",
+    "notes_kept", "notes_written", "rejected_no_evidence", "rejected_daemon_evidence",
+    "rejected_name_not_said", "rejected_verification", "names_proposed", "names_rejected",
+    "names_total", "notes_named")
+
+
+def _utc_now():
+    return dt.datetime.now(dt.timezone.utc)
+
+
+def _local_now():
+    return dt.datetime.now().astimezone()
+
+
+def _is_empty_array(text):
+    try:
+        return json.loads(text.strip()) == []
+    except ValueError:
+        return False
+
+
+def curate_contact(a, identity, h, rows):
+    """One contact's model work: generate, deterministic evidence/name
+    checks, then K-vote verification of the survivors only. Returns (kept
+    notes, per-contact counts). Raises on any model error; the caller merges
+    the counts only on success, so an errored contact leaves no partial
+    numbers. Prints nothing (no note text or handle may reach a log)."""
+    c = dict.fromkeys(WIDE_INT_COUNTERS, 0)
+    lines, cite = ce.number_rows(rows)
+    system, user = build_prompt(identity, h, "", lines, a.max_notes, wide=True)
+    raw = call_model(a.url, a.model, system, user, max_tokens=WIDE_MAX_TOKENS)
+    notes = parse_notes(raw, a.max_notes)
+    if raw.strip() and not notes and not _is_empty_array(raw):
+        c["parse_failed"] = 1
+    valid = []
+    for n in notes:
+        v, reason, checked, unsaid = ce.assess_note(n, cite)
+        c["names_proposed"] += len(checked)
+        c["names_rejected"] += len(unsaid)
+        if v is None:
+            c[f"rejected_{reason}"] += 1
+        else:
+            valid.append(v)
+    # The verifier sees only citable human rows: a [dN] daemon line could
+    # otherwise "support" a note the daemon itself confabulated.
+    context = "recent texts (oldest first):\n" + "\n".join(
+        ln for ln in lines if ln.startswith("[t"))
+    agree = verify_claims(a, VERIFY_SYSTEM.format(
+        identity=identity, name=h, rel="",
+        question="A note is supported only if a specific text states it."),
+        context, [v["note"] for v in valid], a.consistency_k)
+    kept = admit(valid, agree, a.consistency_k, quiet=True)
+    c["rejected_verification"] = len(valid) - len(kept)
+    c["notes_kept"] = len(kept)
+    c["names_total"] = sum(len(v["names"]) for v in kept)
+    c["notes_named"] = sum(1 for v in kept if v["names"])
+    return kept, c
+
+
+def write_wide_notes(db, h, kept, a, now_ms):
+    before = db.total_changes
+    db.executemany(
+        "INSERT OR IGNORE INTO contact_insights (contact_id, kind, insight, confidence,"
+        " as_of_ms, source, created_at_ms, evidence_ids) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [(h, v["kind"], v["note"], v["confidence"],
+          max(r[1] for r in v["evidence_rows"]),
+          WIDE_SOURCE_PREFIX + source_tag(a.consistency_k, v["agree"]), now_ms,
+          json.dumps([f"chat:{r[0]}" for r in v["evidence_rows"]])) for v in kept])
+    db.commit()
+    return db.total_changes - before
+
+
+def finish_manifest(man, t0):
+    man["elapsed_s"] = round(time.monotonic() - t0, 3)
+    rate = man["names_rejected"] / man["names_proposed"] if man["names_proposed"] else 0.0
+    man["names_rejected_rate"] = round(float(rate), 4)
+    man["promotion_blocked"] = rate > NAMES_REJECTED_BLOCK
+    return man
+
+
+def wide_pass(db, a, identity, persona_ids, att, now, write, deadline=None, state=None,
+              exclude=()):
     """Curate every eligible non-persona 1:1 contact from chat.db (spec §3-5).
-    Returns a counts-only manifest; never text."""
-    man = {k: 0 for k in ("eligible", "excluded_suppressed", "excluded_never", "curated",
-                          "notes_written", "rejected_no_evidence", "rejected_daemon_evidence",
-                          "rejected_name_not_said", "names_total", "notes_named",
-                          "stopped_at_deadline")}
+    Returns a counts-only manifest; never text or handles. Every eligible
+    contact lands in exactly one of excluded_suppressed, excluded_never,
+    skipped_min_turns, curated, model_errors, unreached_at_deadline. `state`
+    is updated only for curated contacts. `exclude`: loopback handle(s)."""
+    t0 = time.monotonic()
+    man = dict.fromkeys(WIDE_INT_COUNTERS, 0)
+    man["dry_run"] = not write
     suppressed = cp.load_suppressed(MEMORY_DB)  # module global so tests can redirect it
     never = cp.load_never(getattr(a, "never_path", cp.NEVER_PATH))
+    stale = cp.unmatched_never(never, att["timelines"])
+    if stale:
+        print(f"warning: {stale} curator_never entries match no chat.db handle",
+              file=sys.stderr)
     window_days = getattr(a, "window_days", cp.WINDOW_DAYS)
     cutoff = now - dt.timedelta(days=window_days)
-    handles = cp.eligible_handles(att["timelines"], persona_ids, now, window_days=window_days)
+    handles = cp.eligible_handles(att["timelines"], persona_ids, now, window_days=window_days,
+                                  exclude=exclude)
     man["eligible"] = len(handles)
     now_ms = int(now.timestamp() * 1000)
-    for h in order_by_last_run(handles, state if state is not None else {}):
-        if deadline is not None and dt.datetime.now(dt.timezone.utc) >= deadline:
+    ordered = order_by_last_run(handles, state if state is not None else {})
+    for i, h in enumerate(ordered):
+        if deadline is not None and _utc_now() >= deadline:
             man["stopped_at_deadline"] = 1
+            man["unreached_at_deadline"] = len(ordered) - i
             break
         why = cp.exclusion_reason(h, suppressed, never)
         if why:
@@ -767,47 +905,44 @@ def wide_pass(db, a, identity, persona_ids, att, now, write, deadline=None, stat
             continue
         rows = ce.chat_turn_rows(att["timelines"][h], att["labels"], a.turns, cutoff)
         if len(rows) < a.min_turns:
+            man["skipped_min_turns"] += 1
             continue
-        lines, cite = ce.number_rows(rows)
-        system, user = build_prompt(identity, h, "", lines, a.max_notes)
-        notes = parse_notes(call_model(a.url, a.model, system, user), a.max_notes)
-        agree = verify_claims(a, VERIFY_SYSTEM.format(
-            identity=identity, name=h, rel="",
-            question="A note is supported only if a specific text states it."),
-            user, [n["note"] for n in notes], a.consistency_k)
-        notes = admit(notes, agree, a.consistency_k, label=h)
-        kept = []
-        for n in notes:
-            v, reason = ce.validate_note(n, cite)
-            if v is None:
-                man[f"rejected_{reason}"] += 1
-                continue
-            man["names_total"] += len(v["names"])
-            man["notes_named"] += 1 if v["names"] else 0
-            kept.append(v)
+        try:
+            kept, counts = curate_contact(a, identity, h, rows)
+        except Exception:  # one contact's model failure must not abort the night
+            man["model_errors"] += 1
+            continue
+        for k, v in counts.items():
+            man[k] += v
         man["curated"] += 1
         if write and kept:
-            before = db.total_changes
-            db.executemany(
-                "INSERT OR IGNORE INTO contact_insights (contact_id, kind, insight, confidence,"
-                " as_of_ms, source, created_at_ms, evidence_ids) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                [(h, v["kind"], v["note"], v["confidence"],
-                  max(r[1] for r in v["evidence_rows"]),
-                  WIDE_SOURCE_PREFIX + source_tag(a.consistency_k, v["agree"]), now_ms,
-                  json.dumps([f"chat:{r[0]}" for r in v["evidence_rows"]])) for v in kept])
-            db.commit()
-            man["notes_written"] += db.total_changes - before
+            man["notes_written"] += write_wide_notes(db, h, kept, a, now_ms)
         if state is not None:
             state[h] = now_ms
-    return man
+    return finish_manifest(man, t0)
 
 
 def run_wide(a, db, identity, contacts, now_ms):
-    """The --population wide dispatch: chat.db/model/never refusals, opt-out
-    retirement, the curator pass, and the counts-only manifest. Any
-    sqlite3.Error while reading memory.db (suppressions or the pass itself)
-    refuses BEFORE any manifest or state file is written (R5, fail closed)."""
+    """The --population wide dispatch. Order of effects:
+    1. deadline window closed (--deadline passed < 12h ago) -> exit 0, no writes;
+    2. refusals, exit 2, before any write: chat.db unreadable, model server
+       down, malformed never-file or config.json, 0 eligible contacts;
+    3. load curator_state.json; read suppressions and retire their live
+       insights (--write); run the curator pass (rows written per contact,
+       --write) -- a sqlite3.Error from memory.db here refuses with exit 2
+       before the state file or manifest is written (R5, fail closed), though
+       rows already committed stay;
+    4. save curator_state.json (--write only), then write the counts-only
+       manifest (dry runs as ...-dryrun.json);
+    5. exit 3 if every contact the pass attempted hit a model error."""
     import eval_conversation_quality as cq
+    deadline = None
+    if a.deadline:
+        deadline = resolve_deadline(a.deadline, _local_now())
+        if deadline is None:
+            print(f"window closed: deadline {a.deadline} passed less than "
+                  f"{DEADLINE_ROLL_HOURS}h ago; nothing to do", file=sys.stderr)
+            return 0
     try:
         con = sqlite3.connect(f"file:{a.chat_db}?mode=ro", uri=True)
         con.execute("SELECT 1 FROM message LIMIT 1").fetchall()
@@ -823,6 +958,7 @@ def run_wide(a, db, identity, contacts, now_ms):
         return 2
     try:
         cp.load_never(a.never_path)
+        loopback = cp.load_loopback_handles(HUMAN_CONFIG)
     except (ValueError, json.JSONDecodeError) as e:
         print(f"refusing: {e}", file=sys.stderr)
         return 2
@@ -833,25 +969,40 @@ def run_wide(a, db, identity, contacts, now_ms):
     # a --write run with 0 eligible contacts still retires suppressed rows
     # and writes curator_state.json before write_manifest's own refusal,
     # leaving side effects behind a run that reports "refused".
-    if not cp.eligible_handles(att["timelines"], persona_ids, now, window_days=a.window_days):
+    if not cp.eligible_handles(att["timelines"], persona_ids, now, window_days=a.window_days,
+                               exclude=loopback):
         print("refusing: 0 eligible contacts (no manifest written)", file=sys.stderr)
         return 2
-    deadline = resolve_deadline(a.deadline, dt.datetime.now().astimezone()) if a.deadline else None
     state = load_curator_state()
     try:
         suppressed = cp.load_suppressed(MEMORY_DB)
         retired = retire_suppressed(db, suppressed, now_ms, a.write)
-        man = wide_pass(db, a, identity, persona_ids, att, now, a.write, deadline, state)
+        man = wide_pass(db, a, identity, persona_ids, att, now, a.write, deadline, state,
+                        exclude=loopback)
     except sqlite3.Error as e:
         print(f"refusing: memory.db unreadable ({e})", file=sys.stderr)
         return 2
     man["retired_suppressed"] = retired
     if a.write:
         save_curator_state(state)
-    return write_manifest(a.manifest_dir, now, man)
+    rc = write_manifest(a.manifest_dir, now, man)
+    if man["promotion_blocked"]:
+        print(f"promotion blocked: {man['names_rejected_rate']:.0%} of proposed names were "
+              "not said in their evidence (> 20%)", file=sys.stderr)
+    attempted = man["curated"] + man["model_errors"]
+    if attempted and man["model_errors"] == attempted:
+        print(f"every attempted contact ({attempted}) hit a model error; see the manifest",
+              file=sys.stderr)
+        return 3
+    return rc
 
 
-def main():
+WIDE_REFUSED_FLAGS = (("contact", "--contact"), ("prospective", "--prospective"),
+                      ("retire_superseded", "--retire-superseded"),
+                      ("prune_triggers", "--prune-triggers"))
+
+
+def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--prospective", action="store_true",
                     help="extract open intentions into prospective_memories instead of insights")
@@ -879,7 +1030,13 @@ def main():
     ap.add_argument("--deadline", help="HH:MM local; stop before the next contact after this")
     ap.add_argument("--manifest-dir", default=os.path.join(HOME, ".human/logs"))
     ap.add_argument("--never-path", default=os.path.join(HOME, ".human/curator_never.json"))
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
+    if a.population == "wide":
+        bad = [flag for attr, flag in WIDE_REFUSED_FLAGS if getattr(a, attr)]
+        if bad:
+            print(f"refusing: {', '.join(bad)} cannot be combined with --population wide "
+                  "(persona-pass options)", file=sys.stderr)
+            return 2
     if not a.url.startswith("http://127.0.0.1") and not a.url.startswith("http://localhost"):
         print("refusing: the extractor reads real conversations and only talks to a local model",
               file=sys.stderr)
