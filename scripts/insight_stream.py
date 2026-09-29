@@ -19,8 +19,10 @@ Default is a DRY RUN that prints the notes. --write inserts them.
 Usage:
   scripts/insight_stream.py [--contact +1555...] [--turns 80] [--write]
                             [--min-turns 20] [--max-notes 8] [--url URL] [--model M]
+  scripts/insight_stream.py --names [--names-days 2] [--deadline HH:MM] [--write]
 """
 import argparse
+import contextlib
 import datetime as dt
 import json
 import os
@@ -696,6 +698,7 @@ def supersede_pass(db, a, identity, contacts, targets, now_ms):
 
 import curator_evidence as ce  # noqa: E402  (scripts/ is on sys.path when run as a script)
 import curator_population as cp  # noqa: E402
+import curator_names as cn  # noqa: E402
 
 WIDE_SOURCE_PREFIX = "curator_wide:"
 CURATOR_STATE = os.path.join(HOME, ".human/curator_state.json")
@@ -720,7 +723,7 @@ def order_by_last_run(handles, state):
     return sorted(handles, key=lambda h: (state.get(h, 0), h))
 
 
-def write_manifest(manifest_dir, now, man):
+def write_manifest(manifest_dir, now, man, prefix="curator-manifest"):
     """Counts only. Atomic (tmp + os.replace) so a killed run never leaves a
     truncated manifest; a dry run is written as ...-dryrun.json so it can
     never be read as a night's real numbers."""
@@ -729,7 +732,7 @@ def write_manifest(manifest_dir, now, man):
         return 2
     os.makedirs(manifest_dir, exist_ok=True)
     suffix = "-dryrun" if man.get("dry_run") else ""
-    path = os.path.join(manifest_dir, f"curator-manifest-{now.strftime('%Y%m%d')}{suffix}.json")
+    path = os.path.join(manifest_dir, f"{prefix}-{now.strftime('%Y%m%d')}{suffix}.json")
     tmp = path + ".tmp"
     with open(tmp, "w") as f:
         json.dump(man, f, indent=1, sort_keys=True)
@@ -922,6 +925,30 @@ def wide_pass(db, a, identity, persona_ids, att, now, write, deadline=None, stat
     return finish_manifest(man, t0)
 
 
+def preflight(a):
+    """Refusals shared by the chat.db passes -> (exit code or None, loopback handles).
+    chat.db unreadable, model server down, or a malformed never-file/config.json."""
+    try:
+        con = sqlite3.connect(f"file:{a.chat_db}?mode=ro", uri=True)
+        con.execute("SELECT 1 FROM message LIMIT 1").fetchall()
+        con.close()
+    except sqlite3.Error as e:
+        print(f"refusing: chat.db unreadable ({e}); grant Full Disk Access to this "
+              "python for the launchd job", file=sys.stderr)
+        return 2, set()
+    try:
+        urllib.request.urlopen(a.url.rsplit("/v1/", 1)[0] + "/health", timeout=5)
+    except Exception as e:
+        print(f"refusing: model server down ({e})", file=sys.stderr)
+        return 2, set()
+    try:
+        cp.load_never(a.never_path)
+        return None, cp.load_loopback_handles(HUMAN_CONFIG)
+    except (ValueError, json.JSONDecodeError) as e:
+        print(f"refusing: {e}", file=sys.stderr)
+        return 2, set()
+
+
 def run_wide(a, db, identity, contacts, now_ms):
     """The --population wide dispatch. Order of effects:
     1. deadline window closed (--deadline passed < 12h ago) -> exit 0, no writes;
@@ -943,25 +970,9 @@ def run_wide(a, db, identity, contacts, now_ms):
             print(f"window closed: deadline {a.deadline} passed less than "
                   f"{DEADLINE_ROLL_HOURS}h ago; nothing to do", file=sys.stderr)
             return 0
-    try:
-        con = sqlite3.connect(f"file:{a.chat_db}?mode=ro", uri=True)
-        con.execute("SELECT 1 FROM message LIMIT 1").fetchall()
-        con.close()
-    except sqlite3.Error as e:
-        print(f"refusing: chat.db unreadable ({e}); grant Full Disk Access to this "
-              "python for the launchd job", file=sys.stderr)
-        return 2
-    try:
-        urllib.request.urlopen(a.url.rsplit("/v1/", 1)[0] + "/health", timeout=5)
-    except Exception as e:
-        print(f"refusing: model server down ({e})", file=sys.stderr)
-        return 2
-    try:
-        cp.load_never(a.never_path)
-        loopback = cp.load_loopback_handles(HUMAN_CONFIG)
-    except (ValueError, json.JSONDecodeError) as e:
-        print(f"refusing: {e}", file=sys.stderr)
-        return 2
+    rc, loopback = preflight(a)
+    if rc is not None:
+        return rc
     now = dt.datetime.now(dt.timezone.utc)
     att = cq.attribute(a.chat_db, MEMORY_DB, now - dt.timedelta(days=a.window_days))
     persona_ids = set(contacts)
@@ -997,6 +1008,159 @@ def run_wide(a, db, identity, contacts, now_ms):
     return rc
 
 
+# ---- nightly typed-name pass (spec 2026-09-29 named-entity-extraction §4.4) ----
+NAMES_COUNTERS = (
+    "eligible", "contacts", "excluded_suppressed", "excluded_never", "skipped_no_text",
+    "model_errors", "names_proposed", "names_kept", "names_rejected", "import_entities",
+    "import_failed", "unreached_at_deadline", "stopped_at_deadline")
+NAMES_DIR = os.path.join(HOME, ".human/names")
+GRAPH_DB = os.path.join(HOME, ".human/graph.db")
+HUMAN_BIN = os.path.join(HOME, ".local/bin/human-daemon")
+NAMES_MAX_TOKENS = 1200
+
+
+def names_eligible(att, now, names_days, window_days, exclude):
+    """The wide pass's enumeration WITHOUT its persona skip (persona contacts are the
+    ones the daemon replies to), narrowed to handles with any message, either
+    direction, in the last names_days."""
+    handles = cp.eligible_handles(att["timelines"], set(), now, window_days=window_days,
+                                  exclude=exclude)
+    cutoff = now - dt.timedelta(days=names_days)
+    return [h for h in handles if any(m["t"] >= cutoff for m in att["timelines"][h])]
+
+
+def names_contact(a, rows, display_name):
+    """One contact: one model call (thinking suppressed by call_model), deterministic
+    verification. -> (kept, proposed count, rejected count). Raises on a model error."""
+    lines, cite = ce.number_rows(rows)
+    system, user = cn.build_prompt(lines)
+    proposed = cn.parse_names(call_model(a.url, a.model, system, user,
+                                         max_tokens=NAMES_MAX_TOKENS))
+    kept, rejected = cn.verify_names(proposed, cite, cn.drop_names(display_name))
+    return kept, len(proposed), rejected
+
+
+def names_pass(a, contacts, att, now, deadline=None, exclude=()):
+    """-> (counts-only manifest, entity lines). Every eligible handle lands in exactly
+    one of excluded_suppressed, excluded_never, skipped_no_text, contacts,
+    model_errors, unreached_at_deadline. A model error is recorded by exception TYPE
+    name only (model_error_types): its message could quote a text or a handle."""
+    man = dict.fromkeys(NAMES_COUNTERS, 0)
+    man["by_type"] = dict.fromkeys(cn.TYPES, 0)
+    man["model_error_types"] = {}
+    man["dry_run"] = not a.write
+    suppressed = cp.load_suppressed(MEMORY_DB)
+    never = cp.load_never(getattr(a, "never_path", cp.NEVER_PATH))
+    handles = names_eligible(att, now, a.names_days, a.window_days, exclude)
+    man["eligible"] = len(handles)
+    cutoff = now - dt.timedelta(days=a.names_days)
+    lines = []
+    for i, h in enumerate(handles):
+        if deadline is not None and _utc_now() >= deadline:
+            man["stopped_at_deadline"] = 1
+            man["unreached_at_deadline"] = len(handles) - i
+            break
+        why = cp.exclusion_reason(h, suppressed, never)
+        if why:
+            man[f"excluded_{why}"] += 1
+            continue
+        rows = ce.chat_turn_rows(att["timelines"][h], att["labels"], a.turns, cutoff)
+        if not any(r[2] != "daemon" for r in rows):
+            man["skipped_no_text"] += 1
+            continue
+        try:
+            kept, proposed, rejected = names_contact(a, rows, (contacts.get(h) or {}).get("name"))
+        except Exception as e:  # one contact's model failure must not abort the night
+            man["model_errors"] += 1
+            kind = type(e).__name__
+            man["model_error_types"][kind] = man["model_error_types"].get(kind, 0) + 1
+            continue
+        man["contacts"] += 1
+        man["names_proposed"] += proposed
+        man["names_rejected"] += rejected
+        man["names_kept"] += len(kept)
+        for k in kept:
+            man["by_type"][k["type"]] += 1
+        lines.extend(cn.entity_lines(h, kept))
+    return man, lines
+
+
+def import_names(a, man, lines, now):
+    """Kept names -> a 0600 JSONL in --names-dir -> (--write only) the C importer.
+    A --write run deletes the JSONL once the importer returns (it holds handles and
+    names); a dry run keeps it as ...-dryrun.jsonl, its only inspectable output.
+    No kept names -> no file and no importer call (it would exit 1 on N+E == 0).
+    -> 2 if the import failed (non-zero exit, timeout, or no JSON counts), else 0."""
+    if not lines:
+        return 0
+    suffix = "" if a.write else "-dryrun"
+    path = cn.write_jsonl_private(
+        os.path.join(a.names_dir, f"names-{now.strftime('%Y%m%d')}{suffix}.jsonl"), lines)
+    if not a.write:
+        return 0
+    try:
+        entities, code = cn.run_import(a.human_bin, a.graph_db, path)
+    finally:
+        with contextlib.suppress(OSError):
+            os.unlink(path)
+    if code != 0 or entities is None:
+        man["import_failed"] = 1
+        print(f"import failed: `human memory import-facts` exited {code}"
+              f"{'' if entities is not None else ' without JSON counts'}; nothing written",
+              file=sys.stderr)
+        return 2
+    man["import_entities"] = entities
+    return 0
+
+
+def run_names(a, contacts):
+    """The --names dispatch. Order of effects:
+    1. deadline window closed -> exit 0, nothing written;
+    2. refusals, exit 2, nothing written: chat.db unreadable, model server down,
+       malformed never-file/config.json, --write without an executable
+       --human-bin, 0 eligible contacts, memory.db unreadable;
+    3. the pass; kept names -> a 0600 JSONL in --names-dir;
+    4. --write only: `human memory import-facts` (HU_GRAPH_DB=--graph-db), then the
+       JSONL is deleted;
+    5. counts-only manifest names-manifest-YYYYMMDD[-dryrun].json;
+    6. exit 3 if every attempted contact hit a model error; exit 2 if the import
+       failed (nothing written)."""
+    import eval_conversation_quality as cq
+    deadline = None
+    if a.deadline:
+        deadline = resolve_deadline(a.deadline, _local_now())
+        if deadline is None:
+            print(f"window closed: deadline {a.deadline} passed less than "
+                  f"{DEADLINE_ROLL_HOURS}h ago; nothing to do", file=sys.stderr)
+            return 0
+    rc, loopback = preflight(a)
+    if rc is not None:
+        return rc
+    if a.write and not (os.path.isfile(a.human_bin) and os.access(a.human_bin, os.X_OK)):
+        print(f"refusing: human binary not executable ({a.human_bin})", file=sys.stderr)
+        return 2
+    now = _utc_now()
+    att = cq.attribute(a.chat_db, MEMORY_DB, now - dt.timedelta(days=a.window_days))
+    if not names_eligible(att, now, a.names_days, a.window_days, loopback):
+        print("refusing: 0 eligible contacts (no manifest written)", file=sys.stderr)
+        return 2
+    t0 = time.monotonic()
+    try:
+        man, lines = names_pass(a, contacts, att, now, deadline, exclude=loopback)
+    except sqlite3.Error as e:
+        print(f"refusing: memory.db unreadable ({e})", file=sys.stderr)
+        return 2
+    rc = import_names(a, man, lines, now)
+    man["elapsed_s"] = round(time.monotonic() - t0, 3)
+    wrc = write_manifest(a.manifest_dir, now, man, prefix="names-manifest")
+    attempted = man["contacts"] + man["model_errors"]
+    if attempted and man["model_errors"] == attempted:
+        print(f"every attempted contact ({attempted}) hit a model error; see the manifest",
+              file=sys.stderr)
+        return 3
+    return rc or wrc
+
+
 WIDE_REFUSED_FLAGS = (("contact", "--contact"), ("prospective", "--prospective"),
                       ("retire_superseded", "--retire-superseded"),
                       ("prune_triggers", "--prune-triggers"))
@@ -1030,7 +1194,24 @@ def main(argv=None):
     ap.add_argument("--deadline", help="HH:MM local; stop before the next contact after this")
     ap.add_argument("--manifest-dir", default=os.path.join(HOME, ".human/logs"))
     ap.add_argument("--never-path", default=os.path.join(HOME, ".human/curator_never.json"))
+    ap.add_argument("--names", action="store_true",
+                    help="nightly typed-name pass: the local model lists the names in each "
+                         "eligible contact's last --names-days of texts, each verified against "
+                         "a cited text, imported into graph.db via `human memory import-facts` "
+                         "(--write); dry-run otherwise")
+    ap.add_argument("--names-days", type=int, default=2)
+    ap.add_argument("--names-dir", default=NAMES_DIR)
+    ap.add_argument("--graph-db", default=GRAPH_DB)
+    ap.add_argument("--human-bin", default=HUMAN_BIN)
     a = ap.parse_args(argv)
+    if a.names:
+        bad = [flag for attr, flag in WIDE_REFUSED_FLAGS if getattr(a, attr)]
+        if a.population == "wide":
+            bad.append("--population wide")
+        if bad:
+            print(f"refusing: {', '.join(bad)} cannot be combined with --names",
+                  file=sys.stderr)
+            return 2
     if a.population == "wide":
         bad = [flag for attr, flag in WIDE_REFUSED_FLAGS if getattr(a, attr)]
         if bad:
@@ -1043,6 +1224,8 @@ def main(argv=None):
         return 2
 
     identity, contacts = load_persona()
+    if a.names:
+        return run_names(a, contacts)
     db = sqlite3.connect(MEMORY_DB)
     db.executescript(SCHEMA)
     migrate(db)

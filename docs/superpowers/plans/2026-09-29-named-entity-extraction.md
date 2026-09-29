@@ -48,7 +48,7 @@ spec: docs/superpowers/specs/2026-09-29-named-entity-extraction-design.md
 ## Review Focus
 
 1. **Non-ASCII names in inbound texts** ("met José today", "Zoë's party"). The ASCII scanner must not emit a mangled fragment ("Jos", "Zo") as a new name. A reasonable person expects no candidate rather than a wrong one. Pinned in Task 3 by `test_extract_non_ascii_glued_token_is_not_a_candidate`.
-2. **Names texted in lowercase** ("priya's surgery"). The model often answers "priya" too, and a lowercase person row never matches the catcher's or the backfill's capitalized "Priya". Expected: person, place, org and event names are stored with capitalized words. Pinned in Task 7 by `test_verify_names_capitalizes_name_types`.
+2. **Names texted in lowercase** ("priya's surgery"). The model often answers "priya" too, and a lowercase person row never matches the catcher's or the backfill's capitalized "Priya". Expected: person, place, org and event names are stored with capitalized words. Pinned in Task 7 by `test_canonical_name_capitalizes_name_types`.
 3. **The same person as two rows** (legacy lowercase UNKNOWN "salim" plus typed "Salim"). Under LIVE the reply must not list them twice. Expected: only the typed row renders. Pinned in Task 5 by `test_names_live_renders_one_line_for_a_lowercase_duplicate`.
 4. **First message from a contact with an empty graph.** Expected: the catcher still records their new Capitalized names. Pinned in Task 3 by `test_first_message_from_empty_contact_records_names`.
 5. **Shouting and title-case texts** ("OMG SALIM IS HERE", "we said Happy New Year Everyone"). Expected: no candidates, because all-caps is not Capitalized and a 4-token run is not a name. Pinned in Task 3 by `test_extract_all_caps_and_long_title_runs_are_not_names`.
@@ -3264,7 +3264,7 @@ def test_verify_names_keeps_only_said_cited_names():
     assert rejected == 4
 
 
-def test_verify_names_capitalizes_name_types():
+def test_canonical_name_capitalizes_name_types():
     """Review Focus 2: texting-lowercase names land on the capitalized row."""
     assert cn.canonical_name("priya", "person") == "Priya"
     assert cn.canonical_name("st pete", "place") == "St Pete"
