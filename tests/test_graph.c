@@ -33,6 +33,7 @@ static void graph_retype_allowed_truth_table(void) {
     HU_ASSERT_FALSE(hu_graph_entity_retype_allowed(HU_ENTITY_TOPIC, HU_ENTITY_UNKNOWN));
     HU_ASSERT_FALSE(hu_graph_entity_retype_allowed(HU_ENTITY_EMOTION, HU_ENTITY_TOPIC));
     HU_ASSERT_FALSE(hu_graph_entity_retype_allowed(HU_ENTITY_EMOTION, HU_ENTITY_UNKNOWN));
+    HU_ASSERT_FALSE(hu_graph_entity_retype_allowed(HU_ENTITY_EMOTION, HU_ENTITY_EMOTION));
     /* out-of-range enum values fail closed */
     HU_ASSERT_FALSE(hu_graph_entity_retype_allowed((hu_entity_type_t)42, HU_ENTITY_PERSON));
     HU_ASSERT_FALSE(hu_graph_entity_retype_allowed(HU_ENTITY_UNKNOWN, (hu_entity_type_t)42));
@@ -220,6 +221,14 @@ static void graph_upsert_typed_no_touch_retypes_without_bumping_or_creating(void
                                               "names:migrate", 0.6f, HU_GRAPH_UPSERT_NO_TOUCH, &id),
                  HU_ERR_NOT_FOUND);
     HU_ASSERT_FALSE(typed_row(g, "c1", "Ghost").found);
+    /* retype-only with a disallowed retype leaves the row exactly as it was */
+    HU_ASSERT_EQ(hu_graph_upsert_entity_typed(g, "c1", 2, "Acme", 4, HU_ENTITY_TOPIC, "names:other",
+                                              0.9f, HU_GRAPH_UPSERT_NO_TOUCH, &id),
+                 HU_OK);
+    typed_row_t kept = typed_row(g, "c1", "Acme");
+    HU_ASSERT_EQ(kept.type, (int)HU_ENTITY_ORGANIZATION);
+    HU_ASSERT_EQ(kept.mention_count, before.mention_count);
+    HU_ASSERT_STR_EQ(kept.provenance, "names:migrate");
     hu_graph_close(g, &alloc);
 }
 
@@ -233,6 +242,9 @@ static void graph_upsert_typed_rejects_bad_args(void) {
         HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT_EQ(
         hu_graph_upsert_entity_typed(g, "c1", 2, "A", 0, HU_ENTITY_PERSON, NULL, 0.5f, 0, &id),
+        HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity_typed(g, "c1", 2, NULL, 1, HU_ENTITY_PERSON, NULL, 0.5f, 0, &id),
         HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT_EQ(
         hu_graph_upsert_entity_typed(g, "c1", 2, "A", 1, HU_ENTITY_PERSON, NULL, 0.5f, 0, NULL),
