@@ -48,11 +48,23 @@ jobs:
         # parent is the base tip it was merged onto — so HEAD^1..HEAD is exactly
         # what merging this PR changes. push-to-main keeps its workflow-level
         # paths filter, and schedule/dispatch always run the full fleet.
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
+          if [ "$EVENT" != "pull_request" ]; then
             echo "apps=true" >> "$GITHUB_OUTPUT"
             exit 0
+          fi
+          # Prove HEAD really is the PR merge commit before trusting HEAD^1 as
+          # the base tip. Checked out anywhere else, HEAD^1 would be the PR's
+          # previous commit, the diff would cover only the last commit, and a
+          # missed apps/** change would pass the required gate vacuously.
+          second=$(git rev-parse --verify -q 'HEAD^2' || true)
+          if [ "$second" != "$PR_HEAD" ]; then
+            echo "::error::HEAD is not the PR merge commit (HEAD^2='${second:-<none>}', pull_request.head.sha='$PR_HEAD'); cannot tell what this PR changes."
+            exit 1
           fi
           changed=$(git diff --name-only HEAD^1 HEAD)
           echo "$changed"
@@ -313,7 +325,9 @@ jobs:
       - macos-app-archive
     # Skipped (not failed) when no apps/** change: the fleet didn't run, so
     # there is nothing to summarize.
-    if: always() && needs.changes.outputs.apps == 'true'
+    # Also runs when `changes` itself failed, so that failure is named here
+    # rather than hidden behind a skip.
+    if: always() && (needs.changes.result != 'success' || needs.changes.outputs.apps == 'true')
     steps:
       - name: Summarize + enforce all-green
         env:
@@ -322,7 +336,12 @@ jobs:
           AND: ${{ needs.android-emulator-fleet.result }}
           MAC: ${{ needs.macos-app-build.result }}
           MAC_ARCHIVE: ${{ needs.macos-app-archive.result }}
+          CHANGES: ${{ needs.changes.result }}
         run: |
+          if [ "$CHANGES" != success ]; then
+            echo "::error::changes job did not succeed ($CHANGES); the fleet never ran, so there is nothing to certify."
+            exit 1
+          fi
           {
             echo "## Native fleet — SOTA / award-tier gate"
             echo ""
