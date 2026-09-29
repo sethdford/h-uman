@@ -7148,9 +7148,12 @@ size_t hu_conversation_strip_formal_structure(char *buf, size_t len) {
             }
         }
 
-        /* Replace em-dash (UTF-8: E2 80 94) with comma-space */
+        /* Replace em-dash (UTF-8: E2 80 94) with comma-space; the spaces on
+         * both sides of the dash go, or "same here — x" becomes "same here , x". */
         if (i + 2 < len && (unsigned char)buf[i] == 0xE2 && (unsigned char)buf[i + 1] == 0x80 &&
             (unsigned char)buf[i + 2] == 0x94) {
+            while (w > 0 && buf[w - 1] == ' ')
+                w--;
             buf[w++] = ',';
             buf[w++] = ' ';
             i += 3;

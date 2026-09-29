@@ -3719,9 +3719,14 @@ static void strip_formal_em_dash(void) {
     const char *input = "hello \xe2\x80\x94 world";
     strcpy(buf, input);
     size_t len = hu_conversation_strip_formal_structure(buf, strlen(buf));
-    HU_ASSERT(strstr(buf, ",") != NULL);
-    HU_ASSERT(len < strlen(input));
-    (void)len;
+    /* Exactly "hello, world": the space before the dash goes too. "a comma
+     * is present" let "hello , world" through, and 7 of 119 live replies
+     * went out like that ("same here , coffee's kickin in", 2026-09-29). */
+    HU_ASSERT_STR_EQ(buf, "hello, world");
+    HU_ASSERT_EQ(len, strlen("hello, world"));
+    strcpy(buf, "got it\xe2\x80\x94i'll sign");
+    len = hu_conversation_strip_formal_structure(buf, strlen(buf));
+    HU_ASSERT_STR_EQ(buf, "got it, i'll sign");
 }
 
 static void strip_formal_no_change(void) {
