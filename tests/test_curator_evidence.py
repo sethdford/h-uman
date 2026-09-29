@@ -114,7 +114,15 @@ def test_capitalized_tokens_said_in_any_case_pass():
     assert why == "ok" and out["evidence_rows"] == [cite[0]]
 
 
-def test_implicit_names_skip_first_word_and_I_and_strip_possessive():
+def test_an_undeclared_name_as_the_first_word_is_still_checked():
+    # The wide prompt asks for lowercase notes, so a capitalized first word is
+    # most likely a name; exempting it let "Dana visiting soon" through unsaid.
+    cite = {0: (11, 1, "them", "how are you doing, visiting soon?")}
+    note = {"note": "Dana visiting soon", "evidence_tokens": ["t0"], "names": []}
+    assert ce.validate_note(note, cite) == (None, "name_not_said")
+
+
+def test_implicit_names_skip_I_and_strip_possessive():
     cite = {0: (11, 1, "them", "lunch with priya's mom friday, you should call")}
     ok = [{"note": "Lunch with Priya's mom friday", "evidence_tokens": ["t0"], "names": []},
           {"note": "Priya’s mom said I should call", "evidence_tokens": ["t0"], "names": []}]

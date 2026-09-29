@@ -72,12 +72,13 @@ WORD_RE = re.compile(r"[^\W_]+(?:['’][^\W_]+)*")
 
 
 def implicit_names(text):
-    """Capitalized words after the first are names the model may not have
-    declared: the wide prompt asks for lowercase except proper nouns. A
-    trailing possessive ('s / ’s) is stripped; "I" and its contractions
-    (I'm, I'll) are not names. Unicode-aware (str.isupper, [^\\W_])."""
+    """Capitalized words are names the model may not have declared: the wide
+    prompt asks for lowercase except proper nouns, so the first word is
+    checked too (fails closed: a capitalized common word must then be said in
+    the cited text). A trailing possessive ('s / ’s) is stripped; "I" and its
+    contractions (I'm, I'll) are not names. Unicode-aware (str.isupper, [^\\W_])."""
     out = []
-    for tok in WORD_RE.findall(text or "")[1:]:
+    for tok in WORD_RE.findall(text or ""):
         tok = re.sub(r"['’]s$", "", tok, flags=re.I)
         if not tok[:1].isupper() or re.split(r"['’]", tok)[0] == "I":
             continue
