@@ -1976,6 +1976,7 @@ static struct {
     pthread_t thread;
     bool live;
     bool quit;
+    bool done;               /* the thread exited on its own (5-min cap) */
     bool on;                 /* the indicator is showing right now */
     uint64_t phase_start_ms; /* when the current on/off phase began */
     uint64_t shown_ms;       /* on-time of completed phases */
@@ -1997,10 +1998,15 @@ static bool imsg_bridge_up(hu_imessage_ctx_t *c) {
 
 static bool bridge_typing(const char *target, bool on) {
     hu_allocator_t alloc = hu_system_allocator();
-    const char *argv_on[] = {"imsg", "typing", "--to", target, NULL};
-    const char *argv_off[] = {"imsg", "typing", "--to", target, "--stop", "true", NULL};
+    /* A group is addressed by its chat identifier, a person by handle. */
+    const char *flag =
+        hu_voice_record_handle_ok(target, strlen(target)) ? "--to" : "--chat-identifier";
+    const char *argv_on[] = {"imsg", "typing", flag, target, NULL};
+    const char *argv_off[] = {"imsg", "typing", flag, target, "--stop", "true", NULL};
     hu_run_result_t rr = {0};
-    hu_error_t err = hu_process_run(&alloc, on ? argv_on : argv_off, NULL, 4096, &rr);
+    /* Bounded: pulse_stop joins the pulse thread from the daemon's thread. */
+    hu_error_t err =
+        hu_process_run_with_timeout(&alloc, on ? argv_on : argv_off, NULL, 4096, 5, &rr);
     bool ok = err == HU_OK && rr.success && rr.exit_code == 0;
     hu_run_result_free(&alloc, &rr);
     if (!ok)
@@ -2042,7 +2048,7 @@ static void *pulse_main(void *arg) {
         pthread_mutex_unlock(&s_pulse.mu);
         bool ok = bridge_typing(target, want_on);
         pthread_mutex_lock(&s_pulse.mu);
-        if (ok || !want_on) {
+        if (ok) {
             pulse_close_phase(now);
             if (s_pulse.on && !want_on)
                 s_pulse.pauses++;
@@ -2051,6 +2057,7 @@ static void *pulse_main(void *arg) {
         if (stop_for_good)
             break;
     }
+    s_pulse.done = true;
     pthread_mutex_unlock(&s_pulse.mu);
     return NULL;
 }
@@ -2100,6 +2107,7 @@ static bool pulse_start(const char *target, size_t target_len) {
     pthread_mutex_lock(&s_pulse.mu);
     memcpy(s_pulse.target, tgt, target_len + 1);
     s_pulse.quit = false;
+    s_pulse.done = false;
     s_pulse.on = true;
     s_pulse.shown_ms = 0;
     s_pulse.pauses = 0;
@@ -2113,7 +2121,7 @@ static bool pulse_start(const char *target, size_t target_len) {
 
 static bool pulse_is_for(const char *target, size_t target_len) {
     pthread_mutex_lock(&s_pulse.mu);
-    bool hit = s_pulse.live && strlen(s_pulse.target) == target_len &&
+    bool hit = s_pulse.live && !s_pulse.done && strlen(s_pulse.target) == target_len &&
                memcmp(s_pulse.target, target, target_len) == 0;
     pthread_mutex_unlock(&s_pulse.mu);
     return hit;
@@ -5294,6 +5302,12 @@ static hu_error_t imessage_stop_typing(void *ctx, const char *recipient, size_t 
         (void)pulse_stop(false);
         return HU_OK;
     }
+    /* Only the tier that started typing may stop it. The AX tier's stop
+     * empties the open chat's compose field, so reaching it after bridge
+     * typing (or a send that already ended the pulse) wiped whatever draft
+     * the owner was typing in Messages (critic, 2026-09-29). */
+    if (!atomic_load(&c->typing_active))
+        return HU_OK;
 
     /* Tier 1: IMCore */
     if (imcore_stop_typing(c, recipient, recipient_len)) {
