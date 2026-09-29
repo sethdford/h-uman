@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-27T20:28:19.546Z",
+  "generated": "2026-09-27T21:29:15.332Z",
   "groups": {
     "color.neutral": [
       {
@@ -2547,6 +2547,25 @@
         "value": "rgba(96, 165, 250, 0.2)"
       },
       {
+        "name": "surface-container",
+        "value": "#141210",
+        "hex": "#141210"
+      },
+      {
+        "name": "surface-container-high",
+        "value": "#1e1a16",
+        "hex": "#1e1a16"
+      },
+      {
+        "name": "surface-container-highest",
+        "value": "#28231e",
+        "hex": "#28231e"
+      },
+      {
+        "name": "hover-overlay",
+        "value": "rgba(255, 255, 255, 0.12)"
+      },
+      {
         "name": "focus-ring",
         "value": "#ffffff",
         "hex": "#ffffff"
@@ -2558,23 +2577,190 @@
       {
         "name": "focus-ring-offset",
         "value": "2px"
+      }
+    ],
+    "high-contrast-light": [
+      {
+        "name": "bg",
+        "value": "#ffffff",
+        "hex": "#ffffff"
+      },
+      {
+        "name": "bg-inset",
+        "value": "#f4f1ee",
+        "hex": "#f4f1ee"
+      },
+      {
+        "name": "bg-surface",
+        "value": "#ffffff",
+        "hex": "#ffffff"
+      },
+      {
+        "name": "bg-elevated",
+        "value": "#ffffff",
+        "hex": "#ffffff"
+      },
+      {
+        "name": "bg-overlay",
+        "value": "#ffffff",
+        "hex": "#ffffff"
       },
       {
         "name": "surface-container",
-        "value": "rgba(255, 255, 255, 0.08)"
+        "value": "#faf8f6",
+        "hex": "#faf8f6"
       },
       {
         "name": "surface-container-high",
-        "value": "rgba(255, 255, 255, 0.12)"
+        "value": "#f4f1ee",
+        "hex": "#f4f1ee"
       },
       {
         "name": "surface-container-highest",
+        "value": "#f0ece9",
+        "hex": "#f0ece9"
+      },
+      {
+        "name": "text",
+        "value": "#000000",
+        "hex": "#000000"
+      },
+      {
+        "name": "text-secondary",
         "value": "#28231e",
         "hex": "#28231e"
       },
       {
+        "name": "text-muted",
+        "value": "#3e372f",
+        "hex": "#3e372f"
+      },
+      {
+        "name": "text-tertiary",
+        "value": "#3e372f",
+        "hex": "#3e372f"
+      },
+      {
+        "name": "text-faint",
+        "value": "#56504a",
+        "hex": "#56504a"
+      },
+      {
+        "name": "accent",
+        "value": "#3a6a24",
+        "hex": "#3a6a24"
+      },
+      {
+        "name": "accent-text",
+        "value": "#264A17",
+        "hex": "#264A17"
+      },
+      {
+        "name": "accent-secondary-text",
+        "value": "#78350f",
+        "hex": "#78350f"
+      },
+      {
+        "name": "accent-hover",
+        "value": "#366320",
+        "hex": "#366320"
+      },
+      {
+        "name": "accent-subtle",
+        "value": "rgba(58, 106, 36, 0.12)"
+      },
+      {
+        "name": "accent-strong",
+        "value": "#264A17",
+        "hex": "#264A17"
+      },
+      {
+        "name": "on-accent",
+        "value": "#ffffff",
+        "hex": "#ffffff"
+      },
+      {
+        "name": "link",
+        "value": "#264A17",
+        "hex": "#264A17"
+      },
+      {
+        "name": "link-hover",
+        "value": "#366320",
+        "hex": "#366320"
+      },
+      {
+        "name": "link-active",
+        "value": "#3a6a24",
+        "hex": "#3a6a24"
+      },
+      {
+        "name": "link-visited",
+        "value": "#366320",
+        "hex": "#366320"
+      },
+      {
+        "name": "border",
+        "value": "#56504a",
+        "hex": "#56504a"
+      },
+      {
+        "name": "border-subtle",
+        "value": "#8a847e",
+        "hex": "#8a847e"
+      },
+      {
+        "name": "success",
+        "value": "#006b1f",
+        "hex": "#006b1f"
+      },
+      {
+        "name": "success-dim",
+        "value": "rgba(0, 107, 31, 0.12)"
+      },
+      {
+        "name": "warning",
+        "value": "#7a5200",
+        "hex": "#7a5200"
+      },
+      {
+        "name": "warning-dim",
+        "value": "rgba(122, 82, 0, 0.12)"
+      },
+      {
+        "name": "error",
+        "value": "#a30000",
+        "hex": "#a30000"
+      },
+      {
+        "name": "error-dim",
+        "value": "rgba(163, 0, 0, 0.12)"
+      },
+      {
+        "name": "info",
+        "value": "#1d4ed8",
+        "hex": "#1d4ed8"
+      },
+      {
+        "name": "info-dim",
+        "value": "rgba(29, 78, 216, 0.12)"
+      },
+      {
         "name": "hover-overlay",
-        "value": "rgba(255, 255, 255, 0.12)"
+        "value": "rgba(0, 0, 0, 0.08)"
+      },
+      {
+        "name": "focus-ring",
+        "value": "#000000",
+        "hex": "#000000"
+      },
+      {
+        "name": "focus-ring-width",
+        "value": "3px"
+      },
+      {
+        "name": "focus-ring-offset",
+        "value": "2px"
       }
     ],
     "composite": [
