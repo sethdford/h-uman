@@ -18,6 +18,7 @@
 
 #include <errno.h>
 #include <stdio.h>
+#include <stdlib.h> /* mkstemp: glibc declares it only here (macOS also has it in unistd.h) */
 
 #ifndef _WIN32
 #include <fcntl.h>
