@@ -349,6 +349,42 @@ size_t hu_imsg_chat_guid(char *out, size_t cap, const char *handle, size_t handl
     return 0;
 }
 
+static struct {
+    char target[128];
+    size_t target_len;
+    char effect[16];
+    int64_t at;
+} s_effect;
+static pthread_mutex_t s_effect_mu = PTHREAD_MUTEX_INITIALIZER;
+
+void hu_imsg_effect_set(const char *target, size_t target_len, const char *effect, int64_t now) {
+    if (!target || target_len == 0 || target_len >= sizeof(s_effect.target) || !effect ||
+        strlen(effect) >= sizeof(s_effect.effect))
+        return;
+    pthread_mutex_lock(&s_effect_mu);
+    memcpy(s_effect.target, target, target_len);
+    s_effect.target_len = target_len;
+    memcpy(s_effect.effect, effect, strlen(effect) + 1);
+    s_effect.at = now;
+    pthread_mutex_unlock(&s_effect_mu);
+}
+
+bool hu_imsg_effect_take(const char *target, size_t target_len, int64_t now, char *effect_out,
+                         size_t cap) {
+    bool hit = false;
+    pthread_mutex_lock(&s_effect_mu);
+    if (s_effect.effect[0] && target && s_effect.target_len == target_len &&
+        memcmp(s_effect.target, target, target_len) == 0 && now - s_effect.at <= 120 &&
+        effect_out && strlen(s_effect.effect) < cap) {
+        memcpy(effect_out, s_effect.effect, strlen(s_effect.effect) + 1);
+        hit = true;
+    }
+    if (hit || now - s_effect.at > 120)
+        s_effect.effect[0] = '\0'; /* one-shot; a stale mark never lingers */
+    pthread_mutex_unlock(&s_effect_mu);
+    return hit;
+}
+
 const hu_imessage_caps_t *hu_imessage_caps_cached(hu_allocator_t *alloc) {
     static hu_imessage_caps_t caps;
     static int64_t probed_at = -1, last_repair = -1;

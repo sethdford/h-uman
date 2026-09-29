@@ -526,8 +526,22 @@ static void caps_chat_guid_for_a_handle(void) {
     HU_ASSERT_EQ(hu_imsg_chat_guid(g, 8, "+15550101234", 12), 0u);
 }
 
+/* The effect executor: the daemon marks the next text to a person with an
+ * effect; the send path takes it once, and only for that person, within 2 min. */
+static void caps_effect_slot_is_one_shot_and_scoped(void) {
+    char e[16];
+    hu_imsg_effect_set("+15550000001", 12, "confetti", 1000);
+    HU_ASSERT_FALSE(hu_imsg_effect_take("+15550000002", 12, 1001, e, sizeof(e))); /* not theirs */
+    HU_ASSERT_TRUE(hu_imsg_effect_take("+15550000001", 12, 1001, e, sizeof(e)));
+    HU_ASSERT_STR_EQ(e, "confetti");
+    HU_ASSERT_FALSE(hu_imsg_effect_take("+15550000001", 12, 1002, e, sizeof(e))); /* once */
+    hu_imsg_effect_set("+15550000001", 12, "loud", 2000);
+    HU_ASSERT_FALSE(hu_imsg_effect_take("+15550000001", 12, 2200, e, sizeof(e))); /* stale */
+}
+
 void run_imessage_caps_tests(void) {
     HU_TEST_SUITE("imessage_caps");
+    HU_RUN_TEST(caps_effect_slot_is_one_shot_and_scoped);
     HU_RUN_TEST(caps_bare_url_is_exactly_one_link);
     HU_RUN_TEST(caps_chat_guid_for_a_handle);
     HU_RUN_TEST(caps_reprobe_policy_heals_both_ways);

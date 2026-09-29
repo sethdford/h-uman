@@ -96,7 +96,7 @@ static bool contact_listed(const char *key, size_t key_len) {
 }
 
 void hu_daemon_voice_first_prepare(hu_allocator_t *alloc, struct hu_agent *agent,
-                                   const char *batch_key, size_t key_len, bool is_group,
+                                   const char *batch_key, size_t key_len, bool is_group, bool force,
                                    const char *inbound, size_t inbound_len, char **convo_ctx,
                                    size_t *convo_ctx_len, uint32_t *max_chars,
                                    hu_daemon_voice_first_t *out) {
@@ -129,7 +129,12 @@ void hu_daemon_voice_first_prepare(hu_allocator_t *alloc, struct hu_agent *agent
         .secs_since_last_memo = secs_since_last_memo(agent, contact),
         .min_gap_sec = hu_voice_intent_parse_gap(getenv("HU_VOICE_MIN_GAP_SEC")),
     };
-    out->decision = hu_voice_intent_decide(&facts, &out->reason);
+    if (force && facts.has_voice_id && facts.cfg && facts.cfg->enabled) {
+        out->decision = HU_VOICE_SEND_VOICE; /* #voice from Seth's own number */
+        out->reason = "self_test";
+    } else {
+        out->decision = hu_voice_intent_decide(&facts, &out->reason);
+    }
 
     bool listed = contact_listed(contact, n);
     if (mode == HU_GATE_LIVE && out->decision == HU_VOICE_SEND_VOICE && listed && convo_ctx &&

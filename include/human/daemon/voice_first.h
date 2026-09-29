@@ -28,7 +28,7 @@ typedef struct {
 /* Decides, logs, and records the decision. When `out->memo`, prepends the memo
  * directive to *convo_ctx (reallocated with alloc) and sets *max_chars. */
 void hu_daemon_voice_first_prepare(hu_allocator_t *alloc, struct hu_agent *agent,
-                                   const char *batch_key, size_t key_len, bool is_group,
+                                   const char *batch_key, size_t key_len, bool is_group, bool force,
                                    const char *inbound, size_t inbound_len, char **convo_ctx,
                                    size_t *convo_ctx_len, uint32_t *max_chars,
                                    hu_daemon_voice_first_t *out);

@@ -60,4 +60,30 @@ const hu_director_result_t *hu_expressive_share_gate(const hu_director_result_t 
                                                      size_t inbound_len, bool is_group,
                                                      const char *key, size_t key_len, int64_t now);
 
+/* Self-test commands from Seth's own number: "#voice", "#share <song|video|short|
+ * saved> [words]", "#effect <id> [text]", "#tapback <love|like|laugh|emphasize|
+ * question|dislike>", "#gif [words]". Only at the start of the message.
+ * consumed = bytes of the command (and its space) to strip before the turn. */
+typedef struct {
+    hu_director_form_t form;
+    hu_share_kind_t share;
+    hu_reaction_type_t reaction;
+    char effect[16];
+    char query[96];
+    size_t consumed;
+} hu_selftest_t;
+
+bool hu_selftest_parse(const char *text, size_t len, hu_selftest_t *out);
+
+/* The command becomes the director's choice for the turn. */
+void hu_expressive_selftest_apply(const hu_selftest_t *t, hu_director_result_t *d);
+
+/* The director's effect, LIVE only, past hu_expressive_effect_allowed and a
+ * once-a-week-per-contact budget (remembered for this process). On true,
+ * effect_out holds the id to mark the reply with. */
+bool hu_expressive_effect_gate(const hu_director_result_t *d, bool valid, bool forms_live,
+                               const char *inbound, size_t inbound_len, bool is_group,
+                               const char *key, size_t key_len, int64_t now, char *effect_out,
+                               size_t cap);
+
 #endif

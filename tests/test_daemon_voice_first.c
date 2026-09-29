@@ -17,6 +17,7 @@ typedef struct {
 } vf_run_t;
 
 static bool g_group;
+static bool g_force;
 
 static void run(const char *mode, const char *allow, const char *inbound, vf_run_t *r) {
     hu_allocator_t alloc = hu_system_allocator();
@@ -40,7 +41,7 @@ static void run(const char *mode, const char *allow, const char *inbound, vf_run
     r->ctx = alloc.alloc(alloc.ctx, r->ctx_len + 1);
     memcpy(r->ctx, base, r->ctx_len + 1);
     r->max_chars = 200;
-    hu_daemon_voice_first_prepare(&alloc, &agent, "+15550000001", 12, g_group, inbound,
+    hu_daemon_voice_first_prepare(&alloc, &agent, "+15550000001", 12, g_group, g_force, inbound,
                                   strlen(inbound), &r->ctx, &r->ctx_len, &r->max_chars, &r->vf);
     unsetenv("HU_VOICE_FIRST");
     unsetenv("HU_VOICE_DELIVERY_ONLY");
@@ -135,9 +136,22 @@ static void test_voice_first_available_for_the_director(void) {
     unsetenv("HU_VOICE_DELIVERY_ONLY");
 }
 
+/* #voice from Seth's own number: a memo even without a trigger or inside the gap. */
+
+static void test_voice_first_forced_for_a_self_test(void) {
+    vf_run_t r;
+    g_force = true;
+    run("live", "+15550000001", "ok sounds good", &r); /* no trigger */
+    g_force = false;
+    HU_ASSERT_TRUE(r.vf.memo);
+    HU_ASSERT_STR_EQ(r.vf.reason, "self_test");
+    done(&r);
+}
+
 void run_daemon_voice_first_tests(void) {
     HU_TEST_SUITE("daemon voice-first memos");
     HU_RUN_TEST(test_voice_first_off_changes_nothing);
+    HU_RUN_TEST(test_voice_first_forced_for_a_self_test);
     HU_RUN_TEST(test_voice_first_available_for_the_director);
     HU_RUN_TEST(test_voice_first_stands_down_in_group_chats);
     HU_RUN_TEST(test_voice_first_live_writes_a_memo_for_family);

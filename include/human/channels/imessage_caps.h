@@ -93,6 +93,13 @@ bool hu_imsg_is_bare_url(const char *text, size_t len);
  * take --chat. 0 when the handle is not a plain handle or does not fit. */
 size_t hu_imsg_chat_guid(char *out, size_t cap, const char *handle, size_t handle_len);
 
+/* Effect executor: the next text to `target` goes out with this expressive
+ * effect (imsg send-rich --effect) if sent within 120 s. One slot; take is
+ * one-shot and scoped to the target. */
+void hu_imsg_effect_set(const char *target, size_t target_len, const char *effect, int64_t now);
+bool hu_imsg_effect_take(const char *target, size_t target_len, int64_t now, char *effect_out,
+                         size_t cap);
+
 /* ── T0.1 blue guard ────────────────────────────────────────────────────
  * "Perfect and blue": the daemon must never emit a green bubble. Apple's own
  * chat.db is the SIP-free source of truth — `handle.service` and

@@ -147,6 +147,80 @@ static void test_expressive_share_gate(void) {
         hu_expressive_share_gate(&d, true, true, hi, strlen(hi), false, "+15550000075", 12, 1000));
 }
 
+/* Self-test commands (Seth, 2026-09-29: "I do like testing things with myself
+ * ... we should make this more robust"): from his own number, a #command
+ * forces one behavior so he can validate it on his phone. */
+static bool st(const char *s, hu_selftest_t *t) {
+    return hu_selftest_parse(s, strlen(s), t);
+}
+
+static void test_selftest_commands(void) {
+    hu_selftest_t t;
+    HU_ASSERT_TRUE(st("#voice how was your day", &t));
+    HU_ASSERT_EQ((int)t.form, (int)HU_DIR_FORM_VOICE);
+    HU_ASSERT_EQ(t.consumed, 7u); /* "#voice " stripped before the turn */
+    HU_ASSERT_TRUE(st("#share short cat fail", &t));
+    HU_ASSERT_EQ((int)t.form, (int)HU_DIR_FORM_SHARE);
+    HU_ASSERT_EQ((int)t.share, (int)HU_SHARE_SHORT);
+    HU_ASSERT_STR_EQ(t.query, "cat fail");
+    HU_ASSERT_TRUE(st("#effect confetti we did it", &t));
+    HU_ASSERT_STR_EQ(t.effect, "confetti");
+    HU_ASSERT_EQ(t.consumed, strlen("#effect confetti "));
+    HU_ASSERT_TRUE(st("#tapback laugh", &t));
+    HU_ASSERT_EQ((int)t.form, (int)HU_DIR_FORM_TAPBACK);
+    HU_ASSERT_EQ((int)t.reaction, (int)HU_REACTION_HAHA);
+    HU_ASSERT_TRUE(st("#gif happy dance", &t));
+    HU_ASSERT_EQ((int)t.form, (int)HU_DIR_FORM_GIF);
+    HU_ASSERT_STR_EQ(t.query, "happy dance");
+    HU_ASSERT_FALSE(st("#effect explode hi", &t)); /* not an effect imsg knows */
+    HU_ASSERT_FALSE(st("#share podcast x", &t));
+    HU_ASSERT_FALSE(st("just #voice in the middle", &t));
+    HU_ASSERT_FALSE(st("#voiceover", &t));
+}
+
+/* A self-test command becomes the director's choice for that turn. */
+static void test_selftest_apply_overrides_the_director(void) {
+    hu_director_result_t d;
+    memset(&d, 0, sizeof(d));
+    hu_selftest_t t;
+    HU_ASSERT_TRUE(hu_selftest_parse("#tapback laugh", 14, &t));
+    hu_expressive_selftest_apply(&t, &d);
+    HU_ASSERT_EQ((int)d.action, (int)DIR_TAPBACK);
+    HU_ASSERT_EQ((int)d.reaction, (int)HU_REACTION_HAHA);
+    memset(&d, 0, sizeof(d));
+    HU_ASSERT_TRUE(hu_selftest_parse("#share song beach house", 23, &t));
+    hu_expressive_selftest_apply(&t, &d);
+    HU_ASSERT_EQ((int)d.form, (int)HU_DIR_FORM_SHARE);
+    HU_ASSERT_EQ((int)d.share, (int)HU_SHARE_SONG);
+    HU_ASSERT_STR_EQ(d.share_query, "beach house");
+    HU_ASSERT_EQ((int)d.action, (int)DIR_TEXT); /* the reply still goes */
+    memset(&d, 0, sizeof(d));
+    HU_ASSERT_TRUE(hu_selftest_parse("#effect lasers pew", 18, &t));
+    hu_expressive_selftest_apply(&t, &d);
+    HU_ASSERT_STR_EQ(d.effect, "lasers");
+}
+
+/* The director's effect, LIVE: allowed moments only, once a week per contact. */
+static void test_expressive_effect_gate(void) {
+    hu_director_result_t d;
+    memset(&d, 0, sizeof(d));
+    memcpy(d.effect, "confetti", 9);
+    const char *news = "I got the job!!";
+    char e[16];
+    HU_ASSERT_FALSE(hu_expressive_effect_gate(&d, true, false, news, strlen(news), false,
+                                              "+15550000081", 12, 1000, e, sizeof(e))); /* shadow */
+    HU_ASSERT_TRUE(hu_expressive_effect_gate(&d, true, true, news, strlen(news), false,
+                                             "+15550000081", 12, 1000, e, sizeof(e)));
+    HU_ASSERT_STR_EQ(e, "confetti");
+    HU_ASSERT_FALSE(hu_expressive_effect_gate(&d, true, true, news, strlen(news), false,
+                                              "+15550000081", 12, 90000, e, sizeof(e))); /* week */
+    HU_ASSERT_TRUE(hu_expressive_effect_gate(&d, true, true, news, strlen(news), false,
+                                             "+15550000081", 12, 1000 + 7 * 86400, e, sizeof(e)));
+    const char *grief = "Grandpa passed away";
+    HU_ASSERT_FALSE(hu_expressive_effect_gate(&d, true, true, grief, strlen(grief), false,
+                                              "+15550000082", 12, 1000, e, sizeof(e)));
+}
+
 void run_daemon_expressive_tests(void) {
     HU_TEST_SUITE("daemon expressive");
     HU_RUN_TEST(test_expressive_somber_moments);
@@ -158,4 +232,7 @@ void run_daemon_expressive_tests(void) {
     HU_RUN_TEST(test_expressive_share_medium);
     HU_RUN_TEST(test_expressive_share_should_go);
     HU_RUN_TEST(test_expressive_share_gate);
+    HU_RUN_TEST(test_selftest_commands);
+    HU_RUN_TEST(test_selftest_apply_overrides_the_director);
+    HU_RUN_TEST(test_expressive_effect_gate);
 }

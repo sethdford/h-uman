@@ -3228,6 +3228,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 
                 /* Director meta-behavior result — persists through batch scope */
                 hu_director_result_t director_result;
+                hu_selftest_t selftest; /* #command from Seth's own number */
+                memset(&selftest, 0, sizeof(selftest));
+                bool selftest_on = false;
                 memset(&director_result, 0, sizeof(director_result));
                 bool director_result_valid = false;
                 if (ch->channel->vtable->load_conversation_history) {
@@ -3673,6 +3676,23 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                       fcp ? fcp->relationship : NULL, fline,
                                                       sizeof(fline)) > 0)
                             hu_log_info("director", NULL, "forms shadow: %s", fline);
+                    }
+                    /* Self-test commands (Seth, 2026-09-29): from his own number, a
+                     * leading #voice / #share / #effect / #tapback / #gif forces that one
+                     * behavior so he can validate it on his phone; the command is stripped
+                     * and the rest is the message. */
+                    if (agent->persona && hu_share_is_owner(agent->persona, batch_key, key_len) &&
+                        hu_selftest_parse(combined, combined_len, &selftest)) {
+                        selftest_on = true;
+                        hu_expressive_selftest_apply(&selftest, &director_result);
+                        director_result_valid = true;
+                        size_t keep = combined_len - selftest.consumed;
+                        memmove(combined, combined + selftest.consumed, keep);
+                        combined[keep] = '\0';
+                        combined_len = keep;
+                        hu_log_info("director", NULL, "self-test: form=%s effect=%s",
+                                    hu_director_form_name(selftest.form),
+                                    selftest.effect[0] ? selftest.effect : "none");
                     }
                     if (trace_on && director_result_valid) {
                         hu_log_info("director_trace", NULL,
@@ -6468,8 +6488,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 if (!inbound_crisis) {
                     hu_daemon_voice_first_t vfirst;
                     hu_daemon_voice_first_prepare(
-                        alloc, agent, batch_key, key_len, msgs[batch_start].is_group, combined,
-                        combined_len, &convo_ctx, &convo_ctx_len, &max_chars, &vfirst);
+                        alloc, agent, batch_key, key_len, msgs[batch_start].is_group,
+                        selftest_on && selftest.form == HU_DIR_FORM_VOICE, combined, combined_len,
+                        &convo_ctx, &convo_ctx_len, &max_chars, &vfirst);
                     voice_first_memo = vfirst.memo;
                 }
 
@@ -8776,6 +8797,22 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         .bridge = &daemon_out_bus_bridge,
                         .turn = &turn_out_state,
                     };
+                    /* Effects (Phase 3): a #effect self-test, or the director's effect
+                     * LIVE past its guards, marks this reply's first bubble. */
+                    {
+                        char fx[16];
+                        int64_t fx_now = (int64_t)time(NULL);
+                        if (selftest_on && selftest.effect[0])
+                            hu_imsg_effect_set(send_target, send_target_len, selftest.effect,
+                                               fx_now);
+                        else if (hu_expressive_effect_gate(
+                                     &director_result, director_result_valid,
+                                     hu_gate_mode_from_env("HU_DIRECTOR_FORMS", HU_GATE_OFF) ==
+                                         HU_GATE_LIVE,
+                                     combined, combined_len, msgs[batch_start].is_group, batch_key,
+                                     key_len, fx_now, fx, sizeof(fx)))
+                            hu_imsg_effect_set(send_target, send_target_len, fx, fx_now);
+                    }
                     bool sent_voice = hu_daemon_deliver_final_reply(&final_reply);
                     if (voice_first_memo && !sent_voice)
                         hu_log_info("voice_first", agent ? agent->observer : NULL,
@@ -9751,9 +9788,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     uint32_t gif_seed =
                         (uint32_t)time(NULL) * 2654435761u + (uint32_t)(uintptr_t)combined;
                     uint64_t gif_now_ms = (uint64_t)time(NULL) * 1000ULL;
-                    if (hu_conversation_should_send_gif(combined, combined_len, history_entries,
-                                                        history_count, gif_seed, gif_prob) &&
-                        hu_conversation_gif_rate_allow(batch_key, key_len, gif_now_ms, 5, 600000)) {
+                    if ((selftest_on && selftest.form == HU_DIR_FORM_GIF) ||
+                        (hu_conversation_should_send_gif(combined, combined_len, history_entries,
+                                                         history_count, gif_seed, gif_prob) &&
+                         hu_conversation_gif_rate_allow(batch_key, key_len, gif_now_ms, 5,
+                                                        600000))) {
                         /* Klipy (Tenor's v2 contract; Tenor shut down 2026-06-30). */
                         const char *gif_key =
                             config ? hu_config_get_provider_key(config, "klipy") : NULL;
@@ -9859,11 +9898,15 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                 }
 
-                const hu_director_result_t *share_dir = hu_expressive_share_gate(
-                    &director_result, director_result_valid,
-                    hu_gate_mode_from_env("HU_DIRECTOR_FORMS", HU_GATE_OFF) == HU_GATE_LIVE,
-                    combined, combined_len, msgs[batch_start].is_group, batch_key, key_len,
-                    (int64_t)time(NULL));
+                const hu_director_result_t *share_dir =
+                    selftest_on && selftest.form == HU_DIR_FORM_SHARE
+                        ? &director_result
+                        : hu_expressive_share_gate(
+                              &director_result, director_result_valid,
+                              hu_gate_mode_from_env("HU_DIRECTOR_FORMS", HU_GATE_OFF) ==
+                                  HU_GATE_LIVE,
+                              combined, combined_len, msgs[batch_start].is_group, batch_key,
+                              key_len, (int64_t)time(NULL));
                 hu_daemon_rich_media_tick(alloc, agent, config, ch, batch_key, key_len, combined,
                                           combined_len, history_entries, history_count,
                                           gif_sent_this_turn, share_dir);

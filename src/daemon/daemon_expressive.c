@@ -1,6 +1,7 @@
 #include "human/core/string.h"
 #include "human/daemon/expressive.h"
 
+#include <ctype.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
@@ -130,40 +131,181 @@ bool hu_expressive_share_should_go(const hu_director_result_t *director, bool fo
     return !forms_live && dice_hit;
 }
 
+/* Last time a flourish of one kind went to a contact, for this process (a
+ * restart forgets: one extra at most). since_out = -1 when never. */
+static void budget_since(char kind, const char *key, size_t key_len, int64_t now,
+                         int64_t *since_out, size_t *slot_out);
+static void budget_mark(char kind, const char *key, size_t key_len, int64_t now, size_t slot);
+
+static struct {
+    char kind;
+    char key[64];
+    size_t len;
+    int64_t at;
+} s_budget[96];
+static pthread_mutex_t s_budget_mu = PTHREAD_MUTEX_INITIALIZER;
+
+static void budget_since(char kind, const char *key, size_t key_len, int64_t now,
+                         int64_t *since_out, size_t *slot_out) {
+    size_t slot = 0;
+    *since_out = -1;
+    for (size_t i = 0; i < sizeof(s_budget) / sizeof(s_budget[0]); i++) {
+        if (s_budget[i].kind == kind && s_budget[i].len == key_len &&
+            memcmp(s_budget[i].key, key, key_len) == 0) {
+            slot = i;
+            *since_out = now - s_budget[i].at;
+            break;
+        }
+        if (s_budget[i].at < s_budget[slot].at)
+            slot = i; /* oldest (or empty) slot, reused for a new pair */
+    }
+    *slot_out = slot;
+}
+
+static void budget_mark(char kind, const char *key, size_t key_len, int64_t now, size_t slot) {
+    s_budget[slot].kind = kind;
+    memcpy(s_budget[slot].key, key, key_len);
+    s_budget[slot].len = key_len;
+    s_budget[slot].at = now;
+}
+
 const hu_director_result_t *hu_expressive_share_gate(const hu_director_result_t *d, bool valid,
                                                      bool forms_live, const char *inbound,
                                                      size_t inbound_len, bool is_group,
                                                      const char *key, size_t key_len, int64_t now) {
-    /* Last share per contact, for this process (a restart forgets: one extra
-     * share at most). */
-    static struct {
-        char key[64];
-        size_t len;
-        int64_t at;
-    } last[64];
-    static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
     if (!valid || !forms_live || !d || d->form != HU_DIR_FORM_SHARE || d->share == HU_SHARE_NONE ||
-        !key || key_len == 0 || key_len >= sizeof(last[0].key))
+        !key || key_len == 0 || key_len >= sizeof(s_budget[0].key))
         return NULL;
-    pthread_mutex_lock(&mu);
-    size_t slot = 0;
-    int64_t since = -1;
-    for (size_t i = 0; i < sizeof(last) / sizeof(last[0]); i++) {
-        if (last[i].len == key_len && memcmp(last[i].key, key, key_len) == 0) {
-            slot = i;
-            since = now - last[i].at;
-            break;
-        }
-        if (last[i].at < last[slot].at)
-            slot = i; /* oldest (or empty) slot, reused for a new contact */
-    }
+    pthread_mutex_lock(&s_budget_mu);
+    int64_t since;
+    size_t slot;
+    budget_since('s', key, key_len, now, &since, &slot);
     bool ok =
         hu_expressive_share_allowed(hu_expressive_somber(inbound, inbound_len), is_group, since);
-    if (ok) {
-        memcpy(last[slot].key, key, key_len);
-        last[slot].len = key_len;
-        last[slot].at = now;
-    }
-    pthread_mutex_unlock(&mu);
+    if (ok)
+        budget_mark('s', key, key_len, now, slot);
+    pthread_mutex_unlock(&s_budget_mu);
     return ok ? d : NULL;
+}
+
+/* Next space-delimited word at text[*i..len) -> w (lowercased); advances *i past
+ * it and one following space. */
+static size_t next_word(const char *text, size_t len, size_t *i, char *w, size_t cap) {
+    size_t n = 0;
+    while (*i < len && text[*i] != ' ' && text[*i] != '\n') {
+        if (n + 1 < cap)
+            w[n++] = (char)tolower((unsigned char)text[*i]);
+        (*i)++;
+    }
+    w[n] = '\0';
+    if (*i < len && text[*i] == ' ')
+        (*i)++;
+    return n;
+}
+
+static int word_index(const char *w, const char *const *list, size_t count) {
+    for (size_t k = 0; k < count; k++)
+        if (strcmp(w, list[k]) == 0)
+            return (int)k;
+    return -1;
+}
+
+bool hu_selftest_parse(const char *text, size_t len, hu_selftest_t *out) {
+    static const char *const cmds[] = {"#voice", "#share", "#effect", "#tapback", "#gif"};
+    static const char *const kinds[] = {"song", "video", "short", "saved"};
+    static const hu_share_kind_t kind_vals[] = {HU_SHARE_SONG, HU_SHARE_VIDEO, HU_SHARE_SHORT,
+                                                HU_SHARE_SAVED};
+    static const char *const effects[] = {"impact",       "loud",     "gentle",
+                                          "invisibleink", "confetti", "lasers"};
+    static const char *const taps[] = {"love", "like", "laugh", "emphasize", "question", "dislike"};
+    static const hu_reaction_type_t tap_vals[] = {HU_REACTION_HEART,    HU_REACTION_THUMBS_UP,
+                                                  HU_REACTION_HAHA,     HU_REACTION_EMPHASIS,
+                                                  HU_REACTION_QUESTION, HU_REACTION_THUMBS_DOWN};
+    if (!out)
+        return false;
+    memset(out, 0, sizeof(*out));
+    if (!text || len == 0 || text[0] != '#')
+        return false;
+    size_t i = 0;
+    char w[24], arg[24];
+    next_word(text, len, &i, w, sizeof(w));
+    switch (word_index(w, cmds, sizeof(cmds) / sizeof(cmds[0]))) {
+    case 0:
+        out->form = HU_DIR_FORM_VOICE;
+        break;
+    case 1: {
+        int k = next_word(text, len, &i, arg, sizeof(arg))
+                    ? word_index(arg, kinds, sizeof(kinds) / sizeof(kinds[0]))
+                    : -1;
+        if (k < 0)
+            return false;
+        out->form = HU_DIR_FORM_SHARE;
+        out->share = kind_vals[k];
+        snprintf(out->query, sizeof(out->query), "%.*s", (int)(len - i), text + i);
+        break;
+    }
+    case 2:
+        if (!next_word(text, len, &i, arg, sizeof(arg)) ||
+            word_index(arg, effects, sizeof(effects) / sizeof(effects[0])) < 0)
+            return false;
+        out->form = HU_DIR_FORM_TEXT;
+        snprintf(out->effect, sizeof(out->effect), "%s", arg);
+        break;
+    case 3: {
+        int k = next_word(text, len, &i, arg, sizeof(arg))
+                    ? word_index(arg, taps, sizeof(taps) / sizeof(taps[0]))
+                    : -1;
+        if (k < 0)
+            return false;
+        out->form = HU_DIR_FORM_TAPBACK;
+        out->reaction = tap_vals[k];
+        break;
+    }
+    case 4:
+        out->form = HU_DIR_FORM_GIF;
+        snprintf(out->query, sizeof(out->query), "%.*s", (int)(len - i), text + i);
+        break;
+    default:
+        return false;
+    }
+    out->consumed = i;
+    return true;
+}
+
+void hu_expressive_selftest_apply(const hu_selftest_t *t, hu_director_result_t *d) {
+    if (!t || !d)
+        return;
+    d->form = t->form;
+    d->action = t->form == HU_DIR_FORM_TAPBACK ? DIR_TAPBACK : DIR_TEXT;
+    if (t->form == HU_DIR_FORM_TAPBACK)
+        d->reaction = t->reaction;
+    if (t->form == HU_DIR_FORM_SHARE) {
+        d->share = t->share;
+        snprintf(d->share_query, sizeof(d->share_query), "%s", t->query);
+    }
+    if (t->form == HU_DIR_FORM_GIF)
+        snprintf(d->gif_query, sizeof(d->gif_query), "%s", t->query);
+    if (t->effect[0])
+        snprintf(d->effect, sizeof(d->effect), "%s", t->effect);
+}
+
+bool hu_expressive_effect_gate(const hu_director_result_t *d, bool valid, bool forms_live,
+                               const char *inbound, size_t inbound_len, bool is_group,
+                               const char *key, size_t key_len, int64_t now, char *effect_out,
+                               size_t cap) {
+    if (!valid || !forms_live || !d || !d->effect[0] || !key || key_len == 0 ||
+        key_len >= sizeof(s_budget[0].key) || !effect_out || strlen(d->effect) >= cap)
+        return false;
+    pthread_mutex_lock(&s_budget_mu);
+    int64_t since;
+    size_t slot;
+    budget_since('e', key, key_len, now, &since, &slot);
+    bool ok = hu_expressive_effect_allowed(d->effect, hu_expressive_somber(inbound, inbound_len),
+                                           is_group, since);
+    if (ok) {
+        budget_mark('e', key, key_len, now, slot);
+        memcpy(effect_out, d->effect, strlen(d->effect) + 1);
+    }
+    pthread_mutex_unlock(&s_budget_mu);
+    return ok;
 }

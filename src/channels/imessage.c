@@ -2419,17 +2419,23 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
 
         imessage_simulate_typing(c, tgt, tgt_len, message_len);
 
-        /* Phase 5 (spec 2026-09-28): a bubble that is exactly one link goes
-         * through the bridge as a rich-link balloon; any failure falls through
-         * to the plain send below. */
-        if (c->use_imsg_cli && imsg_cli_available(c) && hu_imsg_is_bare_url(message, message_len) &&
+        /* Bridge sends (spec 2026-09-28): an effect the daemon marked for this
+         * reply (Phase 3), or a bubble that is exactly one link as a rich-link
+         * balloon (Phase 5). Any failure falls through to the plain send below. */
+        if (c->use_imsg_cli && imsg_cli_available(c) &&
             hu_imessage_caps_cached(c->alloc)->advanced) {
-            char guid[300];
-            if (hu_imsg_chat_guid(guid, sizeof(guid), tgt, tgt_len) > 0) {
-                const char *rich_argv[] = {"imsg",  "send-rich", "--chat", guid,
-                                           "--url", message,     NULL};
-                if (hu_imsg_run_ok(c->alloc, rich_argv, 20)) {
-                    hu_log_info("imessage", NULL, "rich link sent via bridge");
+            char fx[16], guid[300];
+            bool have_guid = hu_imsg_chat_guid(guid, sizeof(guid), tgt, tgt_len) > 0;
+            bool fx_marked =
+                have_guid && hu_imsg_effect_take(tgt, tgt_len, (int64_t)time(NULL), fx, sizeof(fx));
+            bool rich = have_guid && !fx_marked && hu_imsg_is_bare_url(message, message_len);
+            const char *fx_argv[] = {"imsg",  "send-rich", "--chat", guid, "--text",
+                                     message, "--effect",  fx,       NULL};
+            const char *url_argv[] = {"imsg", "send-rich", "--chat", guid, "--url", message, NULL};
+            if (fx_marked || rich) {
+                if (hu_imsg_run_ok(c->alloc, fx_marked ? fx_argv : url_argv, 20)) {
+                    hu_log_info("imessage", NULL, "sent via bridge: %s",
+                                fx_marked ? fx : "rich link");
                     imessage_text_sent(c, tgt, tgt_len, message, message_len, prov_prior);
                     goto imsg_media;
                 }
