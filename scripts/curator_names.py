@@ -9,7 +9,6 @@ become entity lines for `human memory import-facts`.
 import contextlib
 import json
 import os
-import re
 import subprocess
 import tempfile
 
@@ -33,21 +32,50 @@ SYSTEM = (
 )
 
 
-def build_prompt(lines):
-    return SYSTEM, "texts (oldest first):\n" + "\n".join(lines)
+def build_prompt(lines, other_names=()):
+    """other_names: the contact's own name(s). Named in the user message so the model
+    knows who "the person he is texting" is (local model only; verify_names drops
+    them again whatever the model answers)."""
+    head = ""
+    other = next((n.strip() for n in other_names or () if n and n.strip()), "")
+    if other:
+        head = f"The other person in this conversation is {other}; do not list them.\n"
+    return SYSTEM, head + "texts (oldest first):\n" + "\n".join(lines)
+
+
+def parse_answer(text):
+    """Model output -> the answer array, or None when there is none (a parse failure,
+    not "no names"). Takes the first '[' at which a JSON array holding an object
+    decodes and ignores whatever follows it, so trailing prose (even prose with its own
+    brackets) does not hide the answer. `[]` counts only as the FIRST bracket in the
+    text: later on it is an inner "evidence": [] surfacing from a truncated answer, as
+    a list with no object in it (["t0"]) always is."""
+    text = text or ""
+    dec = json.JSONDecoder()
+    i = text.find("[")
+    first = True
+    while i != -1:
+        try:
+            arr, _ = dec.raw_decode(text, i)
+        except ValueError:
+            arr = None
+        if isinstance(arr, list) and ((not arr and first)
+                                      or any(isinstance(o, dict) for o in arr)):
+            return arr
+        first = False
+        i = text.find("[", i + 1)
+    return None
 
 
 def parse_names(text):
-    """Model output -> [{"name", "type", "evidence_tokens"}]; malformed items dropped."""
-    m = re.search(r"\[[\s\S]*\]", text or "")
-    if not m:
-        return []
-    try:
-        arr = json.loads(m.group(0))
-    except ValueError:
-        return []
+    """Model output -> [{"name", "type", "evidence_tokens"}]; malformed items dropped.
+    [] for no answer too -- callers that must tell the two apart use parse_answer."""
+    return names_from_answer(parse_answer(text) or [])
+
+
+def names_from_answer(arr):
     out = []
-    for o in arr if isinstance(arr, list) else []:
+    for o in arr:
         if not isinstance(o, dict):
             continue
         name = str(o.get("name") or "").strip()
@@ -58,13 +86,17 @@ def parse_names(text):
     return out
 
 
-def drop_names(display_name):
-    """Lowercased names never written for this contact: Seth's and the contact's own."""
+def drop_names(display_names):
+    """Lowercased names never written for this contact: Seth's and the contact's own
+    (each full name and its first word). display_names: one name, several, or None."""
+    if isinstance(display_names, str):
+        display_names = [display_names]
     out = set(SELF_NAMES)
-    dn = (display_name or "").strip().lower()
-    if dn:
-        out.add(dn)
-        out.add(dn.split()[0])
+    for dn in display_names or ():
+        dn = (dn or "").strip().lower()
+        if dn:
+            out.add(dn)
+            out.add(dn.split()[0])
     return out
 
 
@@ -77,10 +109,24 @@ def canonical_name(name, ntype):
     return " ".join(w[:1].upper() + w[1:] if w[:1].islower() else w for w in name.split())
 
 
+MAX_TOPIC_LEN = 40
+MAX_TOPIC_WORDS = 4
+
+
+def _length_ok(name, ntype):
+    """Topics are short phrases ("the lake house"): a longer "topic" is a sentence the
+    contact typed, and would persist into their topic line (e.g. an instruction)."""
+    if ntype == "topic":
+        return 2 <= len(name) <= MAX_TOPIC_LEN and len(name.split()) <= MAX_TOPIC_WORDS
+    return 2 <= len(name) <= MAX_NAME_LEN
+
+
 def verify_names(proposed, cite, drop):
     """-> (kept [{"name", "type"}], rejected count). Kept only when the type is known,
-    the name is 2-60 chars and not dropped, it cites >= 1 [tN] row and no [dN] row, and
-    it is said in a cited row. One entry per canonical name (first wins)."""
+    the length fits the type (topics <= 4 words / 40 chars, others 2-60 chars), the
+    name is not dropped (compared case-insensitively as written AND canonicalized), it
+    cites >= 1 [tN] row and no [dN] row, and it is said in a cited row. One entry per
+    canonical name (first wins)."""
     kept, seen, rejected = [], set(), 0
     for p in proposed:
         name, ntype = p["name"], p["type"]
@@ -89,7 +135,8 @@ def verify_names(proposed, cite, drop):
             continue
         t_idx, daemon = ce.parse_evidence(p["evidence_tokens"])
         rows = [cite[i] for i in t_idx if i in cite]
-        ok = (ntype in TYPES and 2 <= len(name) <= MAX_NAME_LEN and name.lower() not in drop
+        dropped = name.lower() in drop or canon.lower() in drop
+        ok = (ntype in TYPES and _length_ok(name, ntype) and not dropped
               and not daemon and bool(rows) and ce.name_said(name, [r[3] for r in rows]))
         if not ok:
             rejected += 1

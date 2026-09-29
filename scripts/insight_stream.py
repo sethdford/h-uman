@@ -31,6 +31,7 @@ import re
 import sqlite3
 import sys
 import time
+import urllib.parse
 import urllib.request
 
 HOME = os.path.expanduser("~")
@@ -1011,12 +1012,45 @@ def run_wide(a, db, identity, contacts, now_ms):
 # ---- nightly typed-name pass (spec 2026-09-29 named-entity-extraction §4.4) ----
 NAMES_COUNTERS = (
     "eligible", "contacts", "excluded_suppressed", "excluded_never", "skipped_no_text",
-    "model_errors", "names_proposed", "names_kept", "names_rejected", "import_entities",
-    "import_failed", "unreached_at_deadline", "stopped_at_deadline")
+    "model_errors", "parse_failed", "names_proposed", "names_kept", "names_rejected",
+    "import_entities", "import_failed", "unreached_at_deadline", "stopped_at_deadline")
 NAMES_DIR = os.path.join(HOME, ".human/names")
 GRAPH_DB = os.path.join(HOME, ".human/graph.db")
 HUMAN_BIN = os.path.join(HOME, ".local/bin/human-daemon")
 NAMES_MAX_TOKENS = 1200
+NAMES_DAYS_RANGE = (1, 30)
+NAMES_DRYRUN_FILE = "names-dryrun.jsonl"
+
+
+def persona_names_by_handle(path=None):
+    """{handle: {"name": display name}} keyed by the persona's contact key AND its
+    "email" field -- the lookup order of C hu_persona_find_contact
+    (src/persona/persona.c), because iMessage handles are often Apple-ID emails. Every
+    named contact is included (unlike load_persona's skips): the map only feeds the
+    own-name drop, where more names is the safe direction."""
+    with open(path or PERSONA) as f:
+        p = json.load(f)
+    out = {}
+    for cid, c in ((p.get("contacts") or {}) if isinstance(p, dict) else {}).items():
+        if not isinstance(c, dict):
+            continue
+        name = (c.get("name") or "").strip()
+        if not name or name.lower().startswith("unknown"):
+            continue
+        out.setdefault(cid, {"name": name})
+        email = (c.get("email") or "").strip()
+        if email:
+            out.setdefault(email, {"name": name})
+    return out
+
+
+def rotate_by_day(handles, day):
+    """Deterministic per-day start offset (day.toordinal() mod N): a --deadline cut
+    drops a different tail each night instead of always the same sorted handles."""
+    if not handles:
+        return []
+    k = day.toordinal() % len(handles)
+    return handles[k:] + handles[:k]
 
 
 def names_eligible(att, now, names_days, window_days, exclude):
@@ -1029,29 +1063,35 @@ def names_eligible(att, now, names_days, window_days, exclude):
     return [h for h in handles if any(m["t"] >= cutoff for m in att["timelines"][h])]
 
 
-def names_contact(a, rows, display_name):
+def names_contact(a, rows, own_names):
     """One contact: one model call (thinking suppressed by call_model), deterministic
-    verification. -> (kept, proposed count, rejected count). Raises on a model error."""
+    verification. -> (kept, proposed count, rejected count), or None when the answer
+    holds no JSON array (a parse failure, not "no names"). Raises on a model error."""
     lines, cite = ce.number_rows(rows)
-    system, user = cn.build_prompt(lines)
-    proposed = cn.parse_names(call_model(a.url, a.model, system, user,
-                                         max_tokens=NAMES_MAX_TOKENS))
-    kept, rejected = cn.verify_names(proposed, cite, cn.drop_names(display_name))
+    system, user = cn.build_prompt(lines, own_names)
+    answer = cn.parse_answer(call_model(a.url, a.model, system, user,
+                                        max_tokens=NAMES_MAX_TOKENS))
+    if answer is None:
+        return None
+    proposed = cn.names_from_answer(answer)
+    kept, rejected = cn.verify_names(proposed, cite, cn.drop_names(own_names))
     return kept, len(proposed), rejected
 
 
 def names_pass(a, contacts, att, now, deadline=None, exclude=()):
     """-> (counts-only manifest, entity lines). Every eligible handle lands in exactly
     one of excluded_suppressed, excluded_never, skipped_no_text, contacts,
-    model_errors, unreached_at_deadline. A model error is recorded by exception TYPE
-    name only (model_error_types): its message could quote a text or a handle."""
+    model_errors, parse_failed, unreached_at_deadline. A model error is recorded by
+    exception TYPE name only (model_error_types): its message could quote a text or a
+    handle. Handles are visited in a per-day rotation (rotate_by_day)."""
     man = dict.fromkeys(NAMES_COUNTERS, 0)
     man["by_type"] = dict.fromkeys(cn.TYPES, 0)
     man["model_error_types"] = {}
     man["dry_run"] = not a.write
     suppressed = cp.load_suppressed(MEMORY_DB)
     never = cp.load_never(getattr(a, "never_path", cp.NEVER_PATH))
-    handles = names_eligible(att, now, a.names_days, a.window_days, exclude)
+    handles = rotate_by_day(names_eligible(att, now, a.names_days, a.window_days, exclude),
+                            now.date())
     man["eligible"] = len(handles)
     cutoff = now - dt.timedelta(days=a.names_days)
     lines = []
@@ -1068,13 +1108,18 @@ def names_pass(a, contacts, att, now, deadline=None, exclude=()):
         if not any(r[2] != "daemon" for r in rows):
             man["skipped_no_text"] += 1
             continue
+        own = [(contacts.get(h) or {}).get("name")]
         try:
-            kept, proposed, rejected = names_contact(a, rows, (contacts.get(h) or {}).get("name"))
+            result = names_contact(a, rows, [n for n in own if n])
         except Exception as e:  # one contact's model failure must not abort the night
             man["model_errors"] += 1
             kind = type(e).__name__
             man["model_error_types"][kind] = man["model_error_types"].get(kind, 0) + 1
             continue
+        if result is None:
+            man["parse_failed"] += 1
+            continue
+        kept, proposed, rejected = result
         man["contacts"] += 1
         man["names_proposed"] += proposed
         man["names_rejected"] += rejected
@@ -1087,18 +1132,20 @@ def names_pass(a, contacts, att, now, deadline=None, exclude=()):
 
 def import_names(a, man, lines, now):
     """Kept names -> a 0600 JSONL in --names-dir -> (--write only) the C importer.
-    A --write run deletes the JSONL once the importer returns (it holds handles and
-    names); a dry run keeps it as ...-dryrun.jsonl, its only inspectable output.
-    No kept names -> no file and no importer call (it would exit 1 on N+E == 0).
+    A --write run deletes its JSONL in a `finally`, whatever happens once it exists
+    (it holds handles and names). A dry run overwrites the single NAMES_DRYRUN_FILE,
+    its only inspectable output (empty when nothing was kept), so repeated dry runs
+    never accumulate an archive. --write with no kept names -> no file and no importer
+    call (it would exit 1 on N+E == 0).
     -> 2 if the import failed (non-zero exit, timeout, or no JSON counts), else 0."""
+    if not a.write:  # always rewritten, even empty, so it never shows an older run
+        cn.write_jsonl_private(os.path.join(a.names_dir, NAMES_DRYRUN_FILE), lines)
+        return 0
     if not lines:
         return 0
-    suffix = "" if a.write else "-dryrun"
-    path = cn.write_jsonl_private(
-        os.path.join(a.names_dir, f"names-{now.strftime('%Y%m%d')}{suffix}.jsonl"), lines)
-    if not a.write:
-        return 0
+    path = os.path.join(a.names_dir, f"names-{now.strftime('%Y%m%d')}.jsonl")
     try:
+        cn.write_jsonl_private(path, lines)
         entities, code = cn.run_import(a.human_bin, a.graph_db, path)
     finally:
         with contextlib.suppress(OSError):
@@ -1113,19 +1160,28 @@ def import_names(a, man, lines, now):
     return 0
 
 
+def names_days_ok(n):
+    return NAMES_DAYS_RANGE[0] <= n <= NAMES_DAYS_RANGE[1]
+
+
 def run_names(a, contacts):
     """The --names dispatch. Order of effects:
-    1. deadline window closed -> exit 0, nothing written;
-    2. refusals, exit 2, nothing written: chat.db unreadable, model server down,
+    1. --names-days outside 1-30 -> exit 2, nothing written;
+    2. deadline window closed -> exit 0, nothing written;
+    3. refusals, exit 2, nothing written: chat.db unreadable, model server down,
        malformed never-file/config.json, --write without an executable
        --human-bin, 0 eligible contacts, memory.db unreadable;
-    3. the pass; kept names -> a 0600 JSONL in --names-dir;
-    4. --write only: `human memory import-facts` (HU_GRAPH_DB=--graph-db), then the
-       JSONL is deleted;
-    5. counts-only manifest names-manifest-YYYYMMDD[-dryrun].json;
-    6. exit 3 if every attempted contact hit a model error; exit 2 if the import
-       failed (nothing written)."""
+    4. the pass; kept names -> a 0600 JSONL in --names-dir;
+    5. --write only: `human memory import-facts` (HU_GRAPH_DB=--graph-db), then the
+       JSONL is deleted; a dry run leaves NAMES_DRYRUN_FILE;
+    6. counts-only manifest names-manifest-YYYYMMDD[-dryrun].json;
+    7. exit 3 if every attempted contact failed (model error or parse failure);
+       exit 2 if the import failed (nothing written)."""
     import eval_conversation_quality as cq
+    if not names_days_ok(a.names_days):
+        print(f"refusing: --names-days must be {NAMES_DAYS_RANGE[0]}-{NAMES_DAYS_RANGE[1]} "
+              f"(got {a.names_days})", file=sys.stderr)
+        return 2
     deadline = None
     if a.deadline:
         deadline = resolve_deadline(a.deadline, _local_now())
@@ -1153,12 +1209,27 @@ def run_names(a, contacts):
     rc = import_names(a, man, lines, now)
     man["elapsed_s"] = round(time.monotonic() - t0, 3)
     wrc = write_manifest(a.manifest_dir, now, man, prefix="names-manifest")
-    attempted = man["contacts"] + man["model_errors"]
-    if attempted and man["model_errors"] == attempted:
-        print(f"every attempted contact ({attempted}) hit a model error; see the manifest",
+    failed = man["model_errors"] + man["parse_failed"]
+    attempted = man["contacts"] + failed
+    if attempted and failed == attempted:
+        print(f"every attempted contact ({attempted}) failed: {man['model_errors']} model "
+              f"error(s), {man['parse_failed']} unparseable answer(s); see the manifest",
               file=sys.stderr)
         return 3
     return rc or wrc
+
+
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def is_loopback_url(url):
+    """Parsed hostname, not a prefix: "http://127.0.0.1.evil.com" and
+    "http://127.0.0.1@evil.com" both start with the loopback address."""
+    try:
+        u = urllib.parse.urlsplit(url or "")
+        return u.scheme in ("http", "https") and (u.hostname or "") in LOOPBACK_HOSTS
+    except ValueError:
+        return False
 
 
 WIDE_REFUSED_FLAGS = (("contact", "--contact"), ("prospective", "--prospective"),
@@ -1198,8 +1269,11 @@ def main(argv=None):
                     help="nightly typed-name pass: the local model lists the names in each "
                          "eligible contact's last --names-days of texts, each verified against "
                          "a cited text, imported into graph.db via `human memory import-facts` "
-                         "(--write); dry-run otherwise")
-    ap.add_argument("--names-days", type=int, default=2)
+                         "(--write); dry-run otherwise. A dry run never imports and leaves "
+                         f"the kept names in <--names-dir>/{NAMES_DRYRUN_FILE} (0600, "
+                         "overwritten by each dry run)")
+    ap.add_argument("--names-days", type=int, default=2,
+                    help=f"days of texts to read, {NAMES_DAYS_RANGE[0]}-{NAMES_DAYS_RANGE[1]}")
     ap.add_argument("--names-dir", default=NAMES_DIR)
     ap.add_argument("--graph-db", default=GRAPH_DB)
     ap.add_argument("--human-bin", default=HUMAN_BIN)
@@ -1212,20 +1286,29 @@ def main(argv=None):
             print(f"refusing: {', '.join(bad)} cannot be combined with --names",
                   file=sys.stderr)
             return 2
+        if not names_days_ok(a.names_days):
+            print(f"refusing: --names-days must be {NAMES_DAYS_RANGE[0]}-"
+                  f"{NAMES_DAYS_RANGE[1]} (got {a.names_days})", file=sys.stderr)
+            return 2
     if a.population == "wide":
         bad = [flag for attr, flag in WIDE_REFUSED_FLAGS if getattr(a, attr)]
         if bad:
             print(f"refusing: {', '.join(bad)} cannot be combined with --population wide "
                   "(persona-pass options)", file=sys.stderr)
             return 2
-    if not a.url.startswith("http://127.0.0.1") and not a.url.startswith("http://localhost"):
+    if not is_loopback_url(a.url):
         print("refusing: the extractor reads real conversations and only talks to a local model",
               file=sys.stderr)
         return 2
 
-    identity, contacts = load_persona()
     if a.names:
-        return run_names(a, contacts)
+        try:
+            names_by_handle = persona_names_by_handle()
+        except (OSError, ValueError) as e:  # fail closed: the own-name drop needs it
+            print(f"refusing: persona unreadable ({type(e).__name__})", file=sys.stderr)
+            return 2
+        return run_names(a, names_by_handle)
+    identity, contacts = load_persona()
     db = sqlite3.connect(MEMORY_DB)
     db.executescript(SCHEMA)
     migrate(db)

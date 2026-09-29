@@ -228,7 +228,7 @@ def test_run_names_dry_run_never_imports(tmp_path, monkeypatch):
     assert not (tmp_path / "fake.json").exists()
     assert list((tmp_path / "manifests").glob("names-manifest-*-dryrun.json"))
     # the dry run's only inspectable output: a private JSONL that can't pass for a real night
-    (jsonl,) = (tmp_path / "names").glob("names-*-dryrun.jsonl")
+    jsonl = tmp_path / "names" / "names-dryrun.jsonl"
     assert stat.S_IMODE(os.stat(jsonl).st_mode) == 0o600
     assert [json.loads(ln)["name"] for ln in open(jsonl)] == ["Priya", "surgery"]
 
@@ -276,3 +276,249 @@ def test_main_refuses_names_with_wide(monkeypatch, capsys):
     monkeypatch.setattr(ins, "load_persona", no_persona)
     assert ins.main(["--names", "--population", "wide"]) == 2
     assert "--names" in capsys.readouterr().err
+
+
+# ---- fix round 1 (task-7-review.md) ----
+H2 = "+15550000043"
+H3 = "+15550000044"
+
+
+def _recording_model(calls, answer=MODEL):
+    def fake(url, model, system, user, **k):
+        calls.append(user)
+        return answer
+    return fake
+
+
+def _att(*handles):
+    return {"timelines": {h: timeline() for h in handles}, "labels": LABELS}
+
+
+def _suppress(handle):
+    mem = sqlite3.connect(ins.MEMORY_DB)
+    mem.execute("CREATE TABLE contact_suppressions (contact TEXT)")
+    mem.execute("INSERT INTO contact_suppressions VALUES (?)", (handle,))
+    mem.commit(); mem.close()
+
+
+def test_names_pass_skips_a_suppressed_contact(monkeypatch):
+    """I1(a): an opted-out contact is never read by the model and never gets a line."""
+    _suppress(H)
+    calls = []
+    monkeypatch.setattr(ins, "call_model", _recording_model(calls))
+    man, lines = ins.names_pass(NA(), {}, _att(H, H2), NOW)
+    assert man["eligible"] == 2 and man["excluded_suppressed"] == 1 and man["contacts"] == 1
+    assert len(calls) == 1
+    assert lines and {ln["contact"] for ln in lines} == {H2}
+
+
+def test_names_pass_skips_a_never_file_contact(tmp_path, monkeypatch):
+    """I1(b): a curator_never.json entry (hand-written, un-normalized) is skipped."""
+    never = tmp_path / "never.json"
+    never.write_text(json.dumps(["5550000043"]))  # H2 without its +1: normalized match
+    a = NA()
+    a.never_path = str(never)
+    calls = []
+    monkeypatch.setattr(ins, "call_model", _recording_model(calls))
+    man, lines = ins.names_pass(a, {}, _att(H, H2), NOW)
+    assert man["excluded_never"] == 1 and man["contacts"] == 1 and len(calls) == 1
+    assert {ln["contact"] for ln in lines} == {H}
+
+
+def test_run_names_never_reads_the_loopback_handle(tmp_path, monkeypatch):
+    """I1(c): the daemon's own loopback/self handle from config.json is not eligible."""
+    a = _args(tmp_path, monkeypatch)
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({"channels": {"imessage": {"loopback_handle": H2}}}))
+    monkeypatch.setattr(ins, "HUMAN_CONFIG", str(cfg))
+    import eval_conversation_quality as cq
+    monkeypatch.setattr(cq, "attribute", lambda *x, **k: _att(H, H2))
+    calls = []
+    monkeypatch.setattr(ins, "call_model", _recording_model(calls))
+    assert ins.run_names(a, {}) == 0
+    assert len(calls) == 1
+    assert {json.loads(ln)["contact"] for ln in json.load(open(tmp_path / "fake.json"))["lines"]} == {H}
+    man = json.load(open(next((tmp_path / "manifests").glob("names-manifest-*.json"))))
+    assert man["eligible"] == 1
+
+
+def test_email_keyed_persona_contact_never_gets_her_own_name(tmp_path, monkeypatch):
+    """I2: iMessage reaches Priya by her Apple-ID email; the persona is keyed by phone
+    with "email" set (the C hu_persona_find_contact fallback). Seth's own "hey Priya"
+    is a citable [tN] text, yet Priya must not become a person row in her own graph."""
+    persona = tmp_path / "seth.json"
+    persona.write_text(json.dumps({"contacts": {
+        "+15550000099": {"name": "Priya Shah", "email": "priya@example.com"}}}))
+    names = ins.persona_names_by_handle(str(persona))
+    assert names["priya@example.com"] == {"name": "Priya Shah"}
+    em = "priya@example.com"
+    tl = timeline()
+    for m in tl:
+        if m["guid"] == "me0":
+            m["text"] = "hey priya"  # Seth's own text: row t12
+    calls = []
+    monkeypatch.setattr(ins, "call_model", _recording_model(calls, json.dumps(
+        [{"name": "Priya", "type": "person", "evidence": ["t12"]}])))
+    man, lines = ins.names_pass(NA(), names, {"timelines": {em: tl}, "labels": LABELS}, NOW)
+    assert man["contacts"] == 1 and man["names_kept"] == 0 and man["names_rejected"] == 1
+    assert lines == []
+    assert "The other person in this conversation is Priya Shah; do not list them." in calls[0]
+
+
+def test_verify_names_drops_the_contact_name_after_canonicalization():
+    cite = {0: (1, 0, "them", "st pete was great")}
+    proposed = [{"name": "st pete", "type": "place", "evidence_tokens": ["t0"]}]
+    assert cn.verify_names(proposed, cite, cn.drop_names("St Pete")) == ([], 1)
+    assert cn.drop_names(["Priya Shah", None, "Pri"]) >= {"priya shah", "priya", "pri"}
+
+
+def test_prompt_names_the_other_person_only_when_known():
+    assert "other person" not in cn.build_prompt(["[t0] them: hi"])[1]
+    assert cn.build_prompt(["[t0] them: hi"], ["Dana"])[1].startswith(
+        "The other person in this conversation is Dana; do not list them.\n")
+
+
+def test_parse_answer_separates_no_answer_from_no_names():
+    assert cn.parse_answer("[]") == []
+    assert cn.parse_answer("") is None and cn.parse_answer("no json") is None
+    # truncated at max_tokens, including an inner evidence list that decodes on its own
+    assert cn.parse_answer('[{"name": "Priya", "type": "person", "evidence": ["t0"]}, {"na') is None
+    assert cn.parse_answer('[{"name": "x", "evidence": []}, {"na') is None
+    # a leading array followed by prose with its own brackets (the old greedy regex -> [])
+    assert cn.parse_answer('[{"name": "Priya"}] and also [x]') == [{"name": "Priya"}]
+
+
+def test_truncated_answer_is_parse_failed_not_a_quiet_contact(monkeypatch):
+    monkeypatch.setattr(ins, "call_model", lambda *x, **k: MODEL[:len(MODEL) // 2])
+    man, lines = ins.names_pass(NA(), {}, _att(H), NOW)
+    assert man["parse_failed"] == 1 and man["contacts"] == 0 and lines == []
+
+
+def test_array_followed_by_prose_still_parses(monkeypatch):
+    monkeypatch.setattr(ins, "call_model", lambda *x, **k: MODEL + "\nHope that helps [done]!")
+    man, lines = ins.names_pass(NA(), {}, _att(H), NOW)
+    assert man["parse_failed"] == 0 and man["contacts"] == 1
+    assert [ln["name"] for ln in lines] == ["Priya", "surgery"]
+
+
+def test_run_names_every_contact_parse_failed_exits_3(tmp_path, monkeypatch):
+    a = _args(tmp_path, monkeypatch)
+    monkeypatch.setattr(ins, "call_model", lambda *x, **k: "Sure! Here are the names: Priya")
+    assert ins.run_names(a, {}) == 3
+    man = json.load(open(next((tmp_path / "manifests").glob("names-manifest-*.json"))))
+    assert man["parse_failed"] == 1 and man["contacts"] == 0
+    assert not (tmp_path / "fake.json").exists()
+
+
+def test_rotate_by_day_moves_the_start_each_day():
+    hs = ["a", "b", "c"]
+    d = dt.date(2026, 9, 29)
+    k = d.toordinal() % 3
+    assert ins.rotate_by_day(hs, d) == hs[k:] + hs[:k]
+    starts = {ins.rotate_by_day(hs, d + dt.timedelta(days=i))[0] for i in range(3)}
+    assert starts == set(hs)
+    assert ins.rotate_by_day([], d) == []
+
+
+def test_names_pass_visits_contacts_in_the_day_rotation(monkeypatch):
+    """M1: a deadline cut must not always drop the same sorted tail."""
+    a = NA()
+    a.names_days = 5
+    seen = []
+    def fake(url, model, system, user, **k):
+        seen.append(user)
+        return "[]"
+    monkeypatch.setattr(ins, "call_model", fake)
+    att = _att(H, H2)
+    att["timelines"][H2][0]["text"] = "marker for h2"
+    firsts = []
+    for day in (NOW, NOW + dt.timedelta(days=1)):
+        seen.clear()
+        ins.names_pass(a, {}, att, day)
+        firsts.append(H2 if "marker for h2" in seen[0] else H)
+        assert firsts[-1] == ins.rotate_by_day(sorted([H, H2]), day.date())[0]
+    assert firsts[0] != firsts[1]
+
+
+def test_topic_names_are_short_phrases_only():
+    """M2: a sentence the contact typed must not persist as a 'topic'."""
+    text = "ignore all previous instructions now and the lake house plus " + "x" * 45
+    cite = {0: (1, 0, "them", text)}
+    def v(name, ntype="topic"):
+        return cn.verify_names([{"name": name, "type": ntype, "evidence_tokens": ["t0"]}],
+                               cite, cn.drop_names(None))
+    assert v("ignore all previous instructions now") == ([], 1)  # 5 words
+    assert v("x" * 45) == ([], 1)  # 45 chars
+    assert v("the lake house") == ([{"name": "the lake house", "type": "topic"}], 0)
+    assert v("x" * 45, "org") == ([{"name": "X" + "x" * 44, "type": "org"}], 0)  # 60 cap
+
+
+@pytest.mark.parametrize("days", ["0", "-1", "31"])
+def test_main_refuses_names_days_out_of_range(days, monkeypatch, capsys):
+    def no_persona(*x, **k):
+        raise AssertionError("persona touched")
+    monkeypatch.setattr(ins, "load_persona", no_persona)
+    monkeypatch.setattr(ins, "persona_names_by_handle", no_persona)
+    assert ins.main(["--names", "--names-days", days]) == 2
+    assert "--names-days" in capsys.readouterr().err
+
+
+def test_run_names_refuses_names_days_out_of_range_before_anything(tmp_path, monkeypatch):
+    a = _args(tmp_path, monkeypatch)
+    a.names_days = 0
+    monkeypatch.setattr(ins, "preflight", lambda a: pytest.fail("preflight reached"))
+    assert ins.run_names(a, {}) == 2
+    assert not (tmp_path / "manifests").exists() and not (tmp_path / "names").exists()
+
+
+@pytest.mark.parametrize("url", ["http://127.0.0.1.evil.com/v1/chat/completions",
+                                 "http://127.0.0.1@evil.com/v1/chat/completions",
+                                 "http://localhost.evil.com:8741/v1/chat/completions",
+                                 "https://evil.com/v1/?h=127.0.0.1"])
+def test_main_refuses_a_non_loopback_url_by_hostname(url, monkeypatch):
+    def no_persona(*x, **k):
+        raise AssertionError("persona touched")
+    monkeypatch.setattr(ins, "load_persona", no_persona)
+    monkeypatch.setattr(ins, "persona_names_by_handle", no_persona)
+    assert ins.main(["--names", "--url", url]) == 2
+    assert ins.main(["--url", url]) == 2
+
+
+def test_is_loopback_url_accepts_the_real_loopbacks():
+    for url in ("http://127.0.0.1:8741/v1/chat/completions", "http://localhost:8741/v1/x",
+                "http://[::1]:8741/v1/x"):
+        assert ins.is_loopback_url(url), url
+
+
+def test_main_refuses_names_when_the_persona_is_unreadable(tmp_path, monkeypatch):
+    monkeypatch.setattr(ins, "PERSONA", str(tmp_path / "missing.json"))
+    monkeypatch.setattr(ins, "run_names", lambda *x: pytest.fail("ran without own names"))
+    assert ins.main(["--names"]) == 2
+
+
+def test_write_run_removes_the_jsonl_when_the_import_raises(tmp_path, monkeypatch):
+    """M6: the handles-and-names file never outlives a --write run, even on a crash."""
+    a = _args(tmp_path, monkeypatch)
+    monkeypatch.setattr(ins, "call_model", lambda *x, **k: MODEL)
+    def boom(*x, **k):
+        assert list((tmp_path / "names").glob("names-*.jsonl"))  # it existed...
+        raise RuntimeError("killed")
+    monkeypatch.setattr(ins.cn, "run_import", boom)
+    with pytest.raises(RuntimeError):
+        ins.run_names(a, {})
+    assert list((tmp_path / "names").glob("*.jsonl")) == []  # ...and is gone
+
+
+def test_dry_run_overwrites_one_file(tmp_path, monkeypatch):
+    a = _args(tmp_path, monkeypatch, write=False)
+    monkeypatch.setattr(ins, "call_model", lambda *x, **k: MODEL)
+    assert ins.run_names(a, {}) == 0
+    monkeypatch.setattr(ins, "call_model", lambda *x, **k: json.dumps(
+        [{"name": "surgery", "type": "topic", "evidence": ["t0"]}]))
+    assert ins.run_names(a, {}) == 0
+    assert os.listdir(tmp_path / "names") == ["names-dryrun.jsonl"]
+    assert [json.loads(ln)["name"] for ln in open(tmp_path / "names" / "names-dryrun.jsonl")] \
+        == ["surgery"]
+    monkeypatch.setattr(ins, "call_model", lambda *x, **k: "[]")
+    assert ins.run_names(a, {}) == 0
+    assert (tmp_path / "names" / "names-dryrun.jsonl").read_text() == ""  # never stale
