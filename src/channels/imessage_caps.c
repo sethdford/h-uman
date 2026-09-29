@@ -621,3 +621,20 @@ hu_error_t hu_imessage_caps_probe(hu_allocator_t *alloc, hu_imessage_caps_t *cap
 #endif
     return HU_OK;
 }
+
+uint32_t hu_imsg_typing_phase_ms(uint32_t *seed, bool typing) {
+    uint32_t x = (seed && *seed) ? *seed : 0x9e3779b9u;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    if (seed)
+        *seed = x;
+    return typing ? 4000u + x % 8001u : 1500u + x % 2501u;
+}
+
+uint32_t hu_imsg_typing_catchup_ms(uint32_t typing_ms, uint64_t shown_ms) {
+    if (shown_ms >= typing_ms)
+        return 0;
+    uint64_t left = typing_ms - shown_ms;
+    return left > HU_IMSG_TYPING_CATCHUP_MAX_MS ? HU_IMSG_TYPING_CATCHUP_MAX_MS : (uint32_t)left;
+}
