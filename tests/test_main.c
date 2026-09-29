@@ -254,7 +254,6 @@ void run_behavior_pressure_tests(void);
 void run_sycophancy_pack_tests(void);
 void run_user_sim_scenario_tests(void);
 void run_chronotype_tests(void);
-void run_lifecycle_tests(void);
 void run_observer_tests(void);
 void run_session_tests(void);
 void run_bus_tests(void);
@@ -418,7 +417,6 @@ void run_w1_bitemporal_tests(void);
 void run_graph_state_tests(void);
 void run_wiki_page_tests(void);
 void run_w2_autodream_tests(void);
-void run_w3_multigraph_tests(void);
 void run_w4_verifier_tests(void);
 void run_w5_persona_deltas_tests(void);
 void run_persona_delta_observer_tests(void);
@@ -915,7 +913,6 @@ void run_daemon_proactive_feed_scope_tests(void);
 void run_daemon_trust_tests(void);
 void run_cp_tasks_tests(void);
 void run_cp_canvas_tests(void);
-void run_vector_retrieval_remote_tests(void);
 void run_anticipatory_state_tests(void);
 void run_canvas_tool_tests(void);
 void run_canvas_e2e_tests(void);
@@ -940,8 +937,6 @@ void run_personal_model_llm_extract_tests(void);
 void run_personal_model_atomic_save_tests(void);
 void run_personal_model_per_contact_tests(void);
 #ifdef HU_ENABLE_SQLITE
-void run_cross_channel_acl_tests(void);
-void run_cross_channel_pipeline_tests(void);
 void run_reflection_schema_tests(void);
 #endif
 void run_reflection_storage_tests(void);                 /* T2: stub when SQLite off */
@@ -1337,7 +1332,6 @@ int main(int argc, char **argv) {
     run_sycophancy_pack_tests();
     run_user_sim_scenario_tests();
     run_chronotype_tests();
-    run_lifecycle_tests();
     run_observer_tests();
     run_session_tests();
     run_bus_tests();
@@ -1496,7 +1490,6 @@ int main(int argc, char **argv) {
     run_graph_state_tests();
     run_wiki_page_tests();
     run_w2_autodream_tests();
-    run_w3_multigraph_tests();
     run_w4_verifier_tests();
     run_w5_persona_deltas_tests();
     run_persona_delta_observer_tests();
@@ -1969,7 +1962,6 @@ int main(int argc, char **argv) {
     run_daemon_trust_tests();
     run_cp_tasks_tests();
     run_cp_canvas_tests();
-    run_vector_retrieval_remote_tests();
     run_background_registry_tests();
     run_consistency_tests();
     run_mlx_stream_utf8_tests();
@@ -1989,8 +1981,6 @@ int main(int argc, char **argv) {
     run_personal_model_atomic_save_tests();
     run_personal_model_per_contact_tests();
 #ifdef HU_ENABLE_SQLITE
-    run_cross_channel_acl_tests();
-    run_cross_channel_pipeline_tests();
     run_reflection_schema_tests();
 #endif
     run_reflection_storage_tests();                 /* T2: stubbed-out when SQLite off */

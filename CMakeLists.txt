@@ -1018,8 +1018,6 @@ set(HU_CORE_SOURCES
     src/memory/semantic_recall.c
     src/memory/conflict_resolver.c
     src/memory/write_trust.c
-    src/memory/cross_graph.c
-    src/memory/cross_channel.c
     src/memory/erasure.c
     src/memory/neural_memory.c
     src/agent/self_rag.c
@@ -1116,7 +1114,6 @@ set(HU_CORE_SOURCES
     src/agent/belief_reverify_runner.c
     src/persona/persona_deltas.c
     src/persona/delta_observer.c
-    src/memory/lifecycle/cache.c
     src/memory/retrieval/keyword.c
     src/memory/retrieval/namespace.c
     src/memory/retrieval/temporal.c
@@ -1307,7 +1304,6 @@ set(HU_CORE_SOURCES
     src/memory/vector/embeddings_gemini.c
     src/memory/vector/embeddings_ollama.c
     src/memory/vector/embeddings_voyage.c
-    src/memory/vector/vector_retrieval_remote.c
     src/memory/lifecycle/semantic_cache.c
 )
 
@@ -3469,8 +3465,6 @@ set(HU_TEST_SOURCES
     # Cross-channel ACL trust-property tests. File uses internal-#ifdef-wrap-
     # with-stub-runner so it stays unconditional per
     # .claude/rules/test-source-gate-symmetry.md.
-    tests/test_cross_channel_acl.c
-    tests/test_cross_channel_pipeline.c
     # Reflection Loop schema/parse tests. File uses internal-#ifdef-wrap-
     # with-stub-runner so it stays unconditional per
     # .claude/rules/test-source-gate-symmetry.md.
@@ -3591,7 +3585,6 @@ set(HU_TEST_SOURCES
     tests/test_channel_rate_limit.c
     tests/test_cp_tasks.c
     tests/test_cp_canvas.c
-    tests/test_vector_retrieval_remote.c
     tests/test_background_registry.c
     tests/test_anticipatory_state.c
     tests/test_tool.c
@@ -3684,7 +3677,6 @@ set(HU_TEST_SOURCES
     tests/test_tool_search.c
     tests/test_vector.c
     tests/test_vector_full.c
-    tests/test_lifecycle.c
     tests/test_observer.c
     tests/test_bth_metrics.c
     tests/test_session.c
@@ -3835,7 +3827,6 @@ tests/test_imessage_action_telemetry.c
     tests/test_graph_state.c
     tests/test_wiki_page.c
     tests/test_w2_autodream.c
-    tests/test_w3_multigraph.c
     tests/test_w4_verifier.c
     tests/test_w5_persona_deltas.c
     tests/test_persona_delta_observer.c
