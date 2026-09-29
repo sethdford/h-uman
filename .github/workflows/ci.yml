@@ -1221,5 +1221,9 @@ jobs:
         run: python3 -m pip install --quiet pytest
       - name: Persona-evolution windowed re-derivation pins (hermetic, no chat.db)
         run: python3 scripts/test_eval_persona_evolution.py
+      # Nightly insight stream + sleep-time curator (tests/): fake model,
+      # temp sqlite, no chat.db. The 17 insight_stream tests had no CI step.
+      - name: Insight-stream + curator pins (hermetic, no chat.db, no model)
+        run: python3 -m pytest -q tests/test_insight_stream_*.py tests/test_curator_*.py
       - name: Enforce capability registry against blind_ab gate
         run: python3 scripts/check_capability_gates.py

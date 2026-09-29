@@ -2,6 +2,8 @@
  * The one place the contact_insights SQL and the raw sqlite3 handle live. */
 #include "human/memory/contact_insights_repo.h"
 
+#include "human/core/gate_mode.h"     /* hu_gate_mode_from_env */
+#include "human/core/log.h"           /* hu_log_info */
 #include "human/memory/graph_state.h" /* hu_graph_state_format_month */
 
 #include <stdio.h>
@@ -115,14 +117,20 @@ hu_error_t hu_contact_insights_render(hu_memory_t *mem, hu_allocator_t *alloc,
         return HU_OK;
     /* Missing table = nothing extracted yet, not an error. */
     sqlite3_stmt *st = NULL;
+    /* Curator-wide rows (source 'curator_wide:…') render only when
+     * HU_INSIGHT_WIDE=live. Activation gated on a blind A/B (specificity,
+     * detection non-inferior); default OFF. */
+    hu_gate_mode_t wide = hu_gate_mode_from_env("HU_INSIGHT_WIDE", HU_GATE_OFF);
     const char *sql = "SELECT insight, as_of_ms FROM contact_insights"
                       " WHERE contact_id = ?1 AND retired_at_ms = 0 AND confidence >= ?2"
+                      " AND (?4 OR source IS NULL OR source NOT LIKE 'curator_wide%')"
                       " ORDER BY as_of_ms DESC, id DESC LIMIT ?3";
     if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
         return HU_OK;
     sqlite3_bind_text(st, 1, contact_id, (int)contact_id_len, SQLITE_STATIC);
     sqlite3_bind_double(st, 2, min_confidence);
     sqlite3_bind_int64(st, 3, (sqlite3_int64)max_items);
+    sqlite3_bind_int(st, 4, wide == HU_GATE_LIVE ? 1 : 0);
 
     char *buf = (char *)alloc->alloc(alloc->ctx, max_bytes + 1);
     if (!buf) {
@@ -148,6 +156,21 @@ hu_error_t hu_contact_insights_render(hu_memory_t *mem, hu_allocator_t *alloc,
         len += (size_t)n;
     }
     sqlite3_finalize(st);
+    if (wide == HU_GATE_SHADOW) {
+        sqlite3_stmt *c = NULL;
+        if (sqlite3_prepare_v2(
+                db,
+                "SELECT COUNT(*) FROM contact_insights WHERE contact_id = ?1 AND"
+                " retired_at_ms = 0 AND confidence >= ?2 AND source LIKE 'curator_wide%'",
+                -1, &c, NULL) == SQLITE_OK) {
+            sqlite3_bind_text(c, 1, contact_id, (int)contact_id_len, SQLITE_STATIC);
+            sqlite3_bind_double(c, 2, min_confidence);
+            if (sqlite3_step(c) == SQLITE_ROW && sqlite3_column_int(c, 0) > 0)
+                hu_log_info("insight_wide", NULL, "shadow: %d rows (not rendered)",
+                            sqlite3_column_int(c, 0));
+            sqlite3_finalize(c);
+        }
+    }
     buf[len] = '\0';
     if (len == 0) {
         alloc->free(alloc->ctx, buf, max_bytes + 1);
