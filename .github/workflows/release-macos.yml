@@ -64,7 +64,10 @@ jobs:
           mkdir -p "build/Release/Human.app/Contents/_CodeSignature"
           cp build/human "build/Release/Human.app/Contents/MacOS/human"
           chmod 755 "build/Release/Human.app/Contents/MacOS/human"
-          # TODO: Copy Info.plist from US-C1.1 when available
+          bash scripts/release/write-info-plist.sh \
+            --app-path "build/Release/Human.app" \
+            --min-macos "$MACOS_DEPLOYMENT_TARGET"
+          bash scripts/release/verify-bundle.sh --app-path "build/Release/Human.app"
 
       - name: Build .pkg installer
         run: |

@@ -106,7 +106,7 @@ because it makes re-enabling safe even if subsequent fixes have bugs.
 | P3-4 | HIGH | `life_narration_events` ([authentic.c:726](../../../src/context/authentic.c)) | Add `source_contact_id`; filter unsent-events by target contact |
 | P3-5 | HIGH | `scheduler_jobs` ([scheduler.c:451-456](../../../src/agent/scheduler.c)) | Schema has contact_id but dispatch SELECT doesn't bind it; fix the WHERE clause |
 | P3-6 | HIGH | `prompt_patches` + `learning_signals` + `strategy_weights` ([self_improve.c:57](../../../src/intelligence/self_improve.c)) | Add contact_id OR mark global-by-design explicitly |
-| P3-7 | HIGH | `hula_tasks` ([task_store.c:35](../../../src/agent/task_store.c)) | Add contact_id + WHERE clause |
+| P3-7 | HIGH | `hula_tasks` (`task_store.c:35`, module deleted 2026-09-28 as never wired — see `docs/plans/2026-09-28-dead-code-decisions.md`) | Add contact_id + WHERE clause |
 | P3-8 | HIGH | world_model contact lookup ([world_model.c:1251](../../../src/agent/world_model.c)) | Remove case-insensitive display-name fallback; contact_id is the only allowed key |
 | P3-9 | MED | `ab_selections` ([ab_response.c:63](../../../src/agent/ab_response.c)) | Add contact_id |
 | P3-10 | HIGH | [daemon.c:1338](../../../src/daemon.c), [proactive.c:772](../../../src/agent/proactive.c) | Move contact_id from application-code filter to SQL WHERE clause (prefix-match risk) |

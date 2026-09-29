@@ -30,7 +30,6 @@
 #include "human/core/allocator.h"
 #include "human/evaluation/evaluation.h"
 #include "human/memory/belief.h"
-#include "human/memory/cross_graph.h"
 #include "human/memory/erasure.h"
 #include "human/memory/graph.h"
 #include "human/memory/hyperedge.h"

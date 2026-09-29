@@ -146,6 +146,13 @@ static const char *const hu_security_keys[] = {
 };
 static const size_t hu_security_keys_len = sizeof(hu_security_keys) / sizeof(hu_security_keys[0]);
 
+/* Only the keys parse_session reads. `identity_links` is deliberately absent:
+ * it has no parser, and cross-channel linking must wait for audience-bounded
+ * context (docs/plans/2026-09-28-dead-code-decisions.md F2), so a configured
+ * block is reported instead of silently ignored. */
+static const char *const hu_session_keys[] = {"idle_minutes", "dm_scope"};
+static const size_t hu_session_keys_len = sizeof(hu_session_keys) / sizeof(hu_session_keys[0]);
+
 /* Core provider names */
 static const char *const hu_known_providers[] = {
     "openai",     "anthropic",  "gemini",     "google",    "google-gemini", "ollama",
@@ -355,6 +362,10 @@ hu_error_t hu_config_validate_strict(const hu_config_t *cfg, const hu_json_value
         if (voice)
             check_unknown_nested_keys(voice, "voice", hu_voice_keys, hu_voice_keys_len, strict,
                                       &has_error);
+        hu_json_value_t *session = hu_json_object_get(root, "session");
+        if (session)
+            check_unknown_nested_keys(session, "session", hu_session_keys, hu_session_keys_len,
+                                      strict, &has_error);
     }
 
     /* Type checking */

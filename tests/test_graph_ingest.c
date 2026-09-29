@@ -156,7 +156,6 @@ static void test_seconds_now_is_stored_as_milliseconds(void) {
     unlink(path);
 }
 
-
 /* ── Name hygiene at the write path (2026-09-23) ──────────────────────
  *
  * Measured motivation: the grounding read ranks by mention_count with no type
@@ -166,8 +165,7 @@ static void test_seconds_now_is_stored_as_milliseconds(void) {
  * that REAL facts about the persona survive (resolved, not dropped), and that
  * matching is exact rather than substring. */
 
-static bool entity_exists(hu_graph_t *g, hu_allocator_t *alloc, const char *cid,
-                          const char *name) {
+static bool entity_exists(hu_graph_t *g, hu_allocator_t *alloc, const char *cid, const char *name) {
     hu_graph_entity_t ent;
     memset(&ent, 0, sizeof(ent));
     bool found = hu_graph_find_entity(g, cid, strlen(cid), name, strlen(name), &ent) == HU_OK;

@@ -1107,7 +1107,7 @@ static const hu_cli_config_schema_row_t hu_cli_config_schema_rows[] = {
     {"router", "object", "fast/standard/powerful provider routing"},
     {"ensemble", "object", "providers[], strategy"},
     {"diagnostics", "object", "logging, OpenTelemetry endpoints"},
-    {"session", "object", "dm_scope, idle_minutes, identity_links"},
+    {"session", "object", "dm_scope, idle_minutes"},
     {"peripherals", "object", "enabled, datasheet_dir"},
     {"hardware", "object", "serial, transport, probe_target"},
     {"browser", "object", "enabled"},

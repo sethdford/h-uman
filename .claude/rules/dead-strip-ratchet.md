@@ -63,7 +63,7 @@ relink `human` from `build/CMakeFiles/human.dir/link.txt` with
 
 ## Measurement details that are easy to get wrong
 
-Three of these were measured mistakes before the gate was correct:
+Four of these were measured mistakes before the gate was correct:
 
 1. **Attribute by SYMBOL NAME, never by archive-member basename.** The map
    lists members as `libhuman_core.a(dispatch.c.o)` — a basename. This tree has
@@ -80,6 +80,13 @@ Three of these were measured mistakes before the gate was correct:
    Under ASan every object defines `____asan_globals_registered` as a common
    symbol and the linker coalesces them into one map entry, so a by-name
    membership test marks all 981 members live and collapses A to 0.
+4. **Test objects of deleted sources must not count as references.** CMake
+   never removes the `.o` of a source that left the build, so after a test file
+   is deleted its stale object keeps "referencing" whatever it called, and B
+   undercounts locally while a clean CI build counts correctly. On 2026-09-28
+   deleting `tests/test_cross_channel_acl.c` left `hu_persona_load_defaults`
+   dead; local B read 73, CI read 74, and pre-commit auto-locked the wrong 73.
+   The gate now keeps a test object only if its `src/`/`tests/` source exists.
 
 **B counts symbols, not functions.** At the baseline (79, currently measuring
 76), B is a mix of whole function symbols and function-local statics

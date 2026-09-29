@@ -152,7 +152,6 @@ endif()
 # latency) into a ring buffer for later aggregation. Defaults OFF so it ships
 # behind a flag while we tune what's useful (per AC-SM-6 zero-cost-off).
 option(HU_ENABLE_SELF_MODEL "Build agent behavioral self-model (per-turn observation ring buffer)" OFF)
-option(HU_ENABLE_ACTION_LAYERS "Inject drift + TOM-clarification directives into per-turn prompts (Spec 2026-05-24)" OFF)
 option(HU_ENABLE_FEEDS "Build feed ingestion and research agent" OFF)
 option(HU_ENABLE_SOCIAL "Build social feed ingestion (Facebook, Instagram)" OFF)
 option(HU_ENABLE_EMBEDDED_MODEL "Enable embedded model provider (llama.cpp/llama-cli)" OFF)
@@ -584,7 +583,6 @@ set(HU_CORE_SOURCES
     src/util/json_util.c
     src/agent/bus.c
     src/agent/session.c
-    src/channels/channel_loop.c
     src/security/auth.c
     src/observability/heartbeat.c
     src/core/accel.c
@@ -674,7 +672,6 @@ set(HU_CORE_SOURCES
     src/doctor/check_reflection_loop.c
     src/doctor/exit_code.c
     src/doctor/json_output.c
-    src/doctor/ws_consumer.c
     src/doctor/doctor_fix.c
     src/humanness.c
     src/channels/channel_class.c
@@ -705,7 +702,6 @@ set(HU_CORE_SOURCES
     src/security/arg_inspector.c
     src/security/pairing.c
     src/security/secrets.c
-    src/security/vault_aead.c
     src/security/audit.c
     src/security/delegation.c
     src/security/noop_sandbox.c
@@ -743,7 +739,6 @@ set(HU_CORE_SOURCES
     src/gateway/cp_mcp.c
     src/gateway/cp_security.c
     src/gateway/cp_canvas.c
-    src/gateway/cp_tasks.c
     src/gateway/mcp_context.c
     src/agent/prompt_cache.c
     src/agent/agent_comm.c
@@ -797,7 +792,6 @@ set(HU_CORE_SOURCES
     src/agent/team.c
     src/agent/mailbox.c
     src/agent/task_list.c
-    src/agent/task_store.c
     src/agent/profile.c
     src/agent/planner.c
     src/agent/plan_executor.c
@@ -865,7 +859,6 @@ set(HU_CORE_SOURCES
     src/context/behavioral.c
     src/behavior/dialog_act.c
     src/behavior/affect.c
-    src/behavior/change.c
     src/behavior/safety.c
     src/behavior/prosocial.c
     src/behavior/win_detect.c
@@ -922,7 +915,6 @@ set(HU_CORE_SOURCES
     src/agent/self_uncertainty.c
     src/agent/planning.c
     src/agent/collab_planning.c
-    src/behavior/rel_dynamics.c
     src/context/rel_dynamics.c
     src/agent/conv_goals.c
     src/agent/superhuman.c
@@ -1018,8 +1010,6 @@ set(HU_CORE_SOURCES
     src/memory/semantic_recall.c
     src/memory/conflict_resolver.c
     src/memory/write_trust.c
-    src/memory/cross_graph.c
-    src/memory/cross_channel.c
     src/memory/erasure.c
     src/memory/neural_memory.c
     src/agent/self_rag.c
@@ -1079,7 +1069,6 @@ set(HU_CORE_SOURCES
     # Per AC-SM-6 (zero-cost when OFF) the stub bodies are bare returns.
     src/agent/self_model.c
     src/memory/repos/self_model_repo_sqlite.c
-    src/agent/action_directives.c
     # US-7.5: nightly LoRA retrain runner (MLX-Gemma subprocess path).
     # Always compiled (no learner dependency) — sibling to lora_training_runner.c.
     src/ml/lora_retrain_runner.c
@@ -1116,7 +1105,6 @@ set(HU_CORE_SOURCES
     src/agent/belief_reverify_runner.c
     src/persona/persona_deltas.c
     src/persona/delta_observer.c
-    src/memory/lifecycle/cache.c
     src/memory/retrieval/keyword.c
     src/memory/retrieval/namespace.c
     src/memory/retrieval/temporal.c
@@ -1243,10 +1231,6 @@ set(HU_CORE_SOURCES
     src/context/context_engine.c
     src/context/context_engine_rag.c
     src/onboard/onboard.c
-    src/onboard/state.c
-    src/onboard/dispatcher.c
-    src/onboard/step_welcome.c
-    src/onboard/step_provider.c
     src/interactions/choices.c
     src/daemon.c
     src/daemon/daemon_shape.c
@@ -1310,7 +1294,6 @@ set(HU_CORE_SOURCES
     src/memory/vector/embeddings_gemini.c
     src/memory/vector/embeddings_ollama.c
     src/memory/vector/embeddings_voyage.c
-    src/memory/vector/vector_retrieval_remote.c
     src/memory/lifecycle/semantic_cache.c
 )
 
@@ -1396,7 +1379,6 @@ list(APPEND HU_CORE_SOURCES src/daemon/daemon_reflection_tick.c)
 
 # SOTA capabilities
 list(APPEND HU_CORE_SOURCES
-    src/agent/a2a.c
     src/eval/eval.c
     src/eval/shape.c
     src/eval/register.c
@@ -2192,9 +2174,6 @@ endif()
 if(HU_ENABLE_SELF_MODEL)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_SELF_MODEL=1)
 endif()
-if(HU_ENABLE_ACTION_LAYERS)
-    target_compile_definitions(human_core PRIVATE HU_ENABLE_ACTION_LAYERS=1)
-endif()
 if(HU_ENABLE_NEURAL_MEMORY)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_NEURAL_MEMORY=1)
 endif()
@@ -2813,9 +2792,6 @@ endif()
 if(HU_ENABLE_SELF_MODEL)
     target_compile_definitions(human PRIVATE HU_ENABLE_SELF_MODEL=1)
 endif()
-if(HU_ENABLE_ACTION_LAYERS)
-    target_compile_definitions(human PRIVATE HU_ENABLE_ACTION_LAYERS=1)
-endif()
 if(HU_ENABLE_CRON)
     target_compile_definitions(human PRIVATE HU_HAS_CRON=1)
 endif()
@@ -3185,9 +3161,6 @@ endif()
 if(HU_ENABLE_SELF_MODEL)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_SELF_MODEL=1)
 endif()
-if(HU_ENABLE_ACTION_LAYERS)
-    target_compile_definitions(human_core_test PRIVATE HU_ENABLE_ACTION_LAYERS=1)
-endif()
 if(HU_ENABLE_NEURAL_MEMORY)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_NEURAL_MEMORY=1)
 endif()
@@ -3368,7 +3341,7 @@ endif()
 set(HU_DEVLIB_SOURCES
     # Channel SDK surface. channel_manager.c is documented public API
     # (docs/api/channels.md, sdk/README.md, sdk/templates/channel/) — the
-    # daemon drives channels through channel_loop.c instead, but the SDK
+    # daemon drives each channel's poll itself, but the SDK
     # contract is pinned by tests/test_sdk_channel_template.c.
     src/channels/channel_manager.c
     # Fan-out helper over hu_channel_t. Was ALL_CHANNELS-gated in
@@ -3473,8 +3446,6 @@ set(HU_TEST_SOURCES
     # Cross-channel ACL trust-property tests. File uses internal-#ifdef-wrap-
     # with-stub-runner so it stays unconditional per
     # .claude/rules/test-source-gate-symmetry.md.
-    tests/test_cross_channel_acl.c
-    tests/test_cross_channel_pipeline.c
     # Reflection Loop schema/parse tests. File uses internal-#ifdef-wrap-
     # with-stub-runner so it stays unconditional per
     # .claude/rules/test-source-gate-symmetry.md.
@@ -3524,7 +3495,6 @@ set(HU_TEST_SOURCES
     tests/test_mcp_http_integration.c
     tests/test_self_improve.c
     tests/test_sycophancy_guard.c
-    tests/test_task_store.c
     tests/test_trust_calibration.c
     tests/test_vision_ocr.c
     tests/test_channel_embeds.c
@@ -3579,7 +3549,6 @@ set(HU_TEST_SOURCES
     tests/test_auth.c
     tests/test_security.c
     tests/test_sensitivity.c
-    tests/test_vault_aead.c
     tests/test_app_bundle_structure.c
     tests/test_pkg_builder.c
     tests/test_install_docs.c
@@ -3593,9 +3562,7 @@ set(HU_TEST_SOURCES
     tests/test_channel_format.c
     tests/test_channel_behavior_class.c
     tests/test_channel_rate_limit.c
-    tests/test_cp_tasks.c
     tests/test_cp_canvas.c
-    tests/test_vector_retrieval_remote.c
     tests/test_background_registry.c
     tests/test_anticipatory_state.c
     tests/test_tool.c
@@ -3611,9 +3578,6 @@ set(HU_TEST_SOURCES
     tests/test_e2e_conversation.c
     tests/test_e2e_agent_loop.c
     tests/test_subsystems.c
-    tests/test_onboard_state.c
-    tests/test_onboard_dispatcher.c
-    tests/test_onboard_step1.c
     tests/test_onboard_nextstep.c
     tests/test_onboard_aloop.c
     tests/test_daemon_cron.c
@@ -3659,7 +3623,6 @@ set(HU_TEST_SOURCES
     tests/test_path_security.c
     tests/test_process_util.c
     tests/test_cron.c
-    tests/test_channel_loop.c
     tests/test_multimodal.c
     tests/test_multimodal_pipeline.c
     tests/test_multimodal_audio.c
@@ -3688,7 +3651,6 @@ set(HU_TEST_SOURCES
     tests/test_tool_search.c
     tests/test_vector.c
     tests/test_vector_full.c
-    tests/test_lifecycle.c
     tests/test_observer.c
     tests/test_bth_metrics.c
     tests/test_session.c
@@ -3774,7 +3736,6 @@ tests/test_imessage_action_telemetry.c
     tests/test_doctor_reaction_collection_wired.c
     tests/test_doctor_exit_codes.c
     tests/test_doctor_json_output.c
-    tests/test_onboard_step_provider.c
     tests/test_mcp.c
     tests/test_mcp_jsonrpc.c
     tests/test_voice.c
@@ -3839,7 +3800,6 @@ tests/test_imessage_action_telemetry.c
     tests/test_graph_state.c
     tests/test_wiki_page.c
     tests/test_w2_autodream.c
-    tests/test_w3_multigraph.c
     tests/test_w4_verifier.c
     tests/test_w5_persona_deltas.c
     tests/test_persona_delta_observer.c
@@ -3850,7 +3810,6 @@ tests/test_imessage_action_telemetry.c
     # so it links cleanly in both build variants per
     # `.claude/rules/test-source-gate-symmetry.md`.
     tests/test_self_model_behavior_log.c
-    tests/test_action_directives.c
     # Spec 2026-05-19 self-model-scaffold — Phases B/C/D/E. Same
     # internal-#ifdef-wrap-with-stub-runner pattern as Phase A above.
     tests/test_self_model_phase_bcde.c
@@ -3859,7 +3818,6 @@ tests/test_imessage_action_telemetry.c
     tests/test_daemon_housekeeping.c
     tests/test_orphan_channel_audit.c
     tests/test_verifier_metrics.c
-    tests/test_doctor_ws_consumer.c
     tests/test_output_validator.c
     tests/test_chain_failure_paths.c
     tests/test_agent_fail_path_regressions.c
@@ -3960,7 +3918,6 @@ tests/test_imessage_action_telemetry.c
     tests/test_salience.c
     tests/test_hard_moment.c
     tests/test_planning.c
-    tests/test_rel_dynamics.c
     tests/test_emotional_residue.c
     tests/test_consolidation_engine.c
     tests/test_conv_goals.c
@@ -4067,7 +4024,7 @@ list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/te
 list(APPEND HU_TEST_SOURCES tests/test_moment_compose.c tests/test_moment_render.c)
 # Self-test for the flaky-test quarantine + auto-retry harness (unconditional).
 list(APPEND HU_TEST_SOURCES tests/test_flaky_harness.c)
-list(APPEND HU_TEST_SOURCES tests/test_behavior_policy.c tests/test_behavior_dialog_act.c tests/test_behavior_affect.c tests/test_behavior_change.c tests/test_behavior_safety.c tests/test_behavior_prosocial.c tests/test_win_detect.c tests/test_celebration.c tests/test_prosocial_moment.c tests/test_behavior_prompt.c tests/test_behavior_support_strategy.c tests/test_behavior_trust.c tests/test_behavior_corpora.c tests/test_user_sim.c tests/test_tom_scenario_b8.c tests/test_chronotype.c tests/test_behavior_pressure.c tests/test_behavior_trust_prompt.c tests/test_sycophancy_pack.c tests/test_user_sim_scenario.c tests/test_tapback_band.c)
+list(APPEND HU_TEST_SOURCES tests/test_behavior_policy.c tests/test_behavior_dialog_act.c tests/test_behavior_affect.c tests/test_behavior_safety.c tests/test_behavior_prosocial.c tests/test_win_detect.c tests/test_celebration.c tests/test_prosocial_moment.c tests/test_behavior_prompt.c tests/test_behavior_support_strategy.c tests/test_behavior_trust.c tests/test_behavior_corpora.c tests/test_user_sim.c tests/test_tom_scenario_b8.c tests/test_chronotype.c tests/test_behavior_pressure.c tests/test_behavior_trust_prompt.c tests/test_sycophancy_pack.c tests/test_user_sim_scenario.c tests/test_tapback_band.c)
 list(APPEND HU_TEST_SOURCES tests/test_cartesia.c)
 list(APPEND HU_TEST_SOURCES tests/test_cartesia_stream.c)
 list(APPEND HU_TEST_SOURCES tests/test_voice_clone.c)
@@ -4228,7 +4185,6 @@ list(APPEND HU_TEST_SOURCES
     tests/test_provider_degradation.c
     tests/test_apple_provider.c
     tests/test_escalate.c
-    tests/test_a2a.c
     tests/test_eval.c
     tests/test_turing_score.c
     tests/test_turing_adversarial.c
@@ -4599,9 +4555,6 @@ if(HU_ENABLE_LEARNING)
 endif()
 if(HU_ENABLE_SELF_MODEL)
     target_compile_definitions(human_tests PRIVATE HU_ENABLE_SELF_MODEL=1)
-endif()
-if(HU_ENABLE_ACTION_LAYERS)
-    target_compile_definitions(human_tests PRIVATE HU_ENABLE_ACTION_LAYERS=1)
 endif()
 # Phase 1 (RL SOTA) — propagate HU_ENABLE_LLAMACPP into the test build so
 # .c sources can gate stub-only assertions with #if !defined(HU_ENABLE_LLAMACPP).

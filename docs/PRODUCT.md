@@ -82,4 +82,4 @@ Every mission below includes an honest difficulty assessment from code-level red
 | Tool orchestration | **HuLa IR** (compiled) | Prompt-chained | Prompt-chained | Prompt-chained |
 | Distribution | **None** (0 users) | **2B+ devices** | **Desktop + API** | **100K+ GitHub stars** |
 | Ecosystem | Small | **Google apps** | **Mac + tools** | **ClawHub** |
-| Runtime footprint | **~1750 KB / 6 MB** | Cloud | Cloud | ~180 MB / 120 MB |
+| Runtime footprint | **<!-- fp:binary_kb -->~2760 KB<!-- /fp --> / <!-- fp:idle_rss_mb -->8.6 MB<!-- /fp --> idle** | Cloud | Cloud | ~180 MB / 120 MB |

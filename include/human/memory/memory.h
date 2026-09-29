@@ -209,15 +209,6 @@ hu_error_t hu_memory_facade_read(hu_memory_facade_t *m, const hu_memory_query_t 
                                  size_t *out_count);
 hu_error_t hu_memory_facade_write(hu_memory_facade_t *m, const hu_memory_record_t *rec);
 
-hu_error_t hu_memory_facade_erase(hu_memory_facade_t *m, hu_memory_kind_t kind, int64_t id);
-
-/* Cross-backend purge by provenance substring. Distinct from the v1 helper
- * `hu_memory_erase_by_provenance(hu_graph_t*, ...)` in erasure.h: that walks
- * the graph only; this fans out across every registered backend whose
- * vtable implements `erase_by_provenance`. */
-hu_error_t hu_memory_facade_purge_by_provenance(hu_memory_facade_t *m, const char *substring,
-                                                size_t len);
-
 /* Free a record array previously returned by `hu_memory_facade_read`. Routes back to
  * the originating backend's `records_free`. Calling with `n == 0` is a no-op. */
 void hu_memory_facade_records_free(hu_memory_facade_t *m, hu_allocator_t *alloc,

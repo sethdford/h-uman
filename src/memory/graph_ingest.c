@@ -71,11 +71,10 @@ bool hu_graph_name_is_nonreferential(const char *name, size_t len) {
     if (!name || len == 0)
         return false;
     trim_name(&name, &len);
-    static const char *const NONREF[] = {"you",      "it",       "this",  "that",  "they",
-                                         "them",     "he",       "she",   "we",    "us",
-                                         "someone",  "somebody", "anyone", "everyone",
-                                         "thing",    "things",   "stuff", "something",
-                                         "anything", "nothing",  "one",   "others"};
+    static const char *const NONREF[] = {
+        "you",   "it",        "this",     "that",     "they",   "them",     "he",    "she",
+        "we",    "us",        "someone",  "somebody", "anyone", "everyone", "thing", "things",
+        "stuff", "something", "anything", "nothing",  "one",    "others"};
     for (size_t i = 0; i < sizeof(NONREF) / sizeof(NONREF[0]); i++)
         if (name_eq(name, len, NONREF[i]))
             return true;
