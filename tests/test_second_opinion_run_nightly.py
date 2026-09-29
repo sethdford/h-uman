@@ -1,9 +1,15 @@
-"""Runner contract (spec §5, §6): refuse and write nothing; counts-only manifest."""
+"""Runner contract (spec §5, §6): refuse and write nothing; counts-only manifest.
+
+Fix round 1 additions (task-8-review.md I1-I4 + minors): Vertex credential
+preflight (I1), per-job isolation with finish_run always running (I2), the
+judge job honouring --deadline (I3), and mutant-killing assertions for M1,
+M2, M3, M4, M7, M9 (I4)."""
 import contextlib
 import datetime as dt
 import fcntl
 import json
 import sqlite3
+import subprocess
 import sys
 from pathlib import Path
 
@@ -25,6 +31,18 @@ def mk_mem(p):
       INSERT INTO messages VALUES (1, '+1a', 'user', 'priya surgery is tuesday', '');
       INSERT INTO contact_insights (contact_id, insight, confidence, source, created_at_ms,
         evidence_ids) VALUES ('+1a', 'SECRET-NOTE priya surgery', 0.9, 'extractor:v1', 1, '[1]');
+    """)
+    m.commit()
+    m.close()
+
+
+def mk_mem_no_contact_insights(p):
+    """A memory.db missing the contact_insights table entirely (review probe P5):
+    audit_pass's SELECT raises sqlite3.OperationalError."""
+    m = sqlite3.connect(p)
+    m.executescript("""
+      CREATE TABLE messages (id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, content TEXT,
+                             created_at TEXT);
     """)
     m.commit()
     m.close()
@@ -76,6 +94,20 @@ def no_att(*a, **k):
     return {"timelines": {}, "labeled": {}}
 
 
+def make_ab_run_dir(tmp_path, with_triples=True):
+    """A blind-A/B run dir judge.latest_run_dir will accept (detection-mode key,
+    rating_sheet.csv + answer_key.json present). Without triples.json,
+    gold.weak_items raises FileNotFoundError (review probe P6)."""
+    run_dir = tmp_path / "ab" / "run1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "rating_sheet.csv").write_text("id,choice\n1,A\n")
+    (run_dir / "answer_key.json").write_text(json.dumps({"1": "A"}))
+    if with_triples:
+        (run_dir / "triples.json").write_text(json.dumps(
+            {"1": {"context": "hi", "seth_reply": "yo", "huuman_reply": "hey"}}))
+    return run_dir
+
+
 def test_happy_path_writes_counts_only_manifest(tmp_path):
     setup(tmp_path)
     rc = run_nightly.main(args(tmp_path), now_local=LOCAL_MORNING,
@@ -108,6 +140,8 @@ def test_server_that_never_comes_up_refuses(tmp_path):
     assert run_nightly.main(args(tmp_path), now_local=LOCAL_MORNING, serve=broken,
                             attribute=no_att) == 2
     assert not (tmp_path / "logs").exists()
+    # M1: open_store/start_run must not run before the server-health refusal.
+    assert not (tmp_path / "so.db").exists()
 
 
 def test_window_closed_writes_nothing(tmp_path):
@@ -125,6 +159,8 @@ def test_second_concurrent_run_does_nothing(tmp_path):
         rc = run_nightly.main(args(tmp_path), now_local=LOCAL_MORNING,
                               serve=serve_with(Fake([])), attribute=no_att)
     assert rc == 0 and not (tmp_path / "logs").exists()
+    # M1: a second run must never open the store either.
+    assert not (tmp_path / "so.db").exists()
 
 
 def test_every_item_failing_exits_3_and_keeps_the_manifest(tmp_path):
@@ -149,3 +185,212 @@ def test_auto_jobs_add_judge_and_report_on_sunday():
     assert run_nightly.resolve_jobs("auto", dt.date(2026, 10, 4)) == ["audit", "gold", "judge",
                                                                        "report"]
     assert run_nightly.resolve_jobs("audit,report", dt.date(2026, 9, 29)) == ["audit", "report"]
+
+
+# ---------------------------------------------------------------------------
+# Fix round 1: I1 — Vertex credential preflight
+# ---------------------------------------------------------------------------
+
+def test_vertex_missing_credentials_refuses_and_writes_nothing(tmp_path):
+    setup(tmp_path)
+
+    def bad_token():
+        raise be.BackendError("no ADC credentials")
+
+    rc = run_nightly.main(args(tmp_path, "--backend", "vertex"), now_local=LOCAL_MORNING,
+                          serve=serve_with(Fake([])), attribute=no_att, vertex_token=bad_token)
+    assert rc == 2
+    assert not (tmp_path / "logs").exists() and not (tmp_path / "so.db").exists()
+
+
+# ---------------------------------------------------------------------------
+# Fix round 1: I2 — every job isolated, finish_run always runs
+# ---------------------------------------------------------------------------
+
+def test_audit_job_isolated_other_jobs_still_run(tmp_path):
+    mk_mem_no_contact_insights(str(tmp_path / "mem.db"))
+    mk_chat(str(tmp_path / "chat.db"))
+    rc = run_nightly.main(args(tmp_path, "--jobs", "audit,gold"), now_local=LOCAL_MORNING,
+                          serve=serve_with(Fake([])), attribute=no_att)
+    assert rc == 0
+    man_path = tmp_path / "logs" / "second-opinion-20260929.json"
+    text = man_path.read_text()
+    man = json.loads(text)
+    assert man["audit"] == {"error": "OperationalError"}
+    assert "no such table" not in text
+    assert "gold" in man and "error" not in man["gold"]
+    row = sqlite3.connect(tmp_path / "so.db").execute(
+        "SELECT finished_at_ms FROM runs").fetchone()
+    assert row[0] is not None
+
+
+def test_gold_job_isolated_other_jobs_still_run(tmp_path):
+    setup(tmp_path)
+    make_ab_run_dir(tmp_path, with_triples=False)
+    rc = run_nightly.main(args(tmp_path, "--jobs", "audit,gold"), now_local=LOCAL_MORNING,
+                          serve=serve_with(Fake(["supported\nok"])), attribute=no_att)
+    assert rc == 0
+    man_path = tmp_path / "logs" / "second-opinion-20260929.json"
+    text = man_path.read_text()
+    man = json.loads(text)
+    assert man["gold"] == {"error": "FileNotFoundError"}
+    assert man["audit"]["audited"] == 1
+    row = sqlite3.connect(tmp_path / "so.db").execute(
+        "SELECT finished_at_ms FROM runs").fetchone()
+    assert row[0] is not None
+
+
+def test_gold_job_survives_attribution_failure(tmp_path):
+    """M2: the attribution try/except stays in place even now that the whole
+    gold job is also wrapped."""
+    setup(tmp_path)
+
+    def bad_attr(*a, **k):
+        raise RuntimeError("boom")
+
+    rc = run_nightly.main(args(tmp_path, "--jobs", "gold"), now_local=LOCAL_MORNING,
+                          serve=serve_with(Fake([])), attribute=bad_attr)
+    assert rc == 0
+    man = json.loads((tmp_path / "logs" / "second-opinion-20260929.json").read_text())
+    assert man["gold_attribution_error"] == 1
+    assert "gold" in man and "error" not in man["gold"]
+
+
+def test_judge_job_failure_is_isolated_and_type_only(tmp_path, monkeypatch):
+    """M3/M4: an exception from judge.judge_pass is caught, recorded as the
+    exception TYPE NAME only (never the message), and the run still exits
+    with a written manifest."""
+    setup(tmp_path)
+    make_ab_run_dir(tmp_path)
+
+    def boom(*a, **k):
+        raise RuntimeError("a secret message that must never leak into the manifest")
+
+    monkeypatch.setattr(run_nightly.judge, "judge_pass", boom)
+    rc = run_nightly.main(args(tmp_path, "--jobs", "judge"), now_local=LOCAL_MORNING,
+                          serve=serve_with(Fake([])), attribute=no_att)
+    assert rc == 3  # the only attempted job raised
+    text = (tmp_path / "logs" / "second-opinion-20260929.json").read_text()
+    man = json.loads(text)
+    assert man["judge"] == {"error": "RuntimeError"}
+    assert "secret message" not in text
+
+
+def test_runs_row_records_exit_code_and_finish_time(tmp_path):
+    """M9: finish_run must always run — the runs row is never left dangling."""
+    setup(tmp_path)
+    rc = run_nightly.main(args(tmp_path), now_local=LOCAL_MORNING,
+                          serve=serve_with(Fake(["supported\nok"])), attribute=no_att)
+    assert rc == 0
+    row = sqlite3.connect(tmp_path / "so.db").execute(
+        "SELECT exit_code, finished_at_ms FROM runs").fetchone()
+    assert row[0] == 0 and row[1] is not None
+
+
+def test_all_jobs_together(tmp_path):
+    setup(tmp_path)
+    rc = run_nightly.main(args(tmp_path, "--jobs", "audit,gold,judge"), now_local=LOCAL_MORNING,
+                          serve=serve_with(Fake(["supported\nok"])), attribute=no_att)
+    assert rc == 0
+    man = json.loads((tmp_path / "logs" / "second-opinion-20260929.json").read_text())
+    assert "audit" in man and "gold" in man and "judge" in man
+    assert man["judge"] == {"skipped": "no rating sheet"}
+
+
+# ---------------------------------------------------------------------------
+# Fix round 1: I3 — the judge job honours --deadline
+# ---------------------------------------------------------------------------
+
+def test_judge_skips_when_deadline_already_passed(tmp_path):
+    setup(tmp_path)
+    make_ab_run_dir(tmp_path)  # otherwise it skips as "no rating sheet" regardless
+    deadline = run_nightly.resolve_deadline("23:59", LOCAL_MORNING)
+    past_now = deadline + dt.timedelta(hours=1)
+    rc = run_nightly.main(args(tmp_path, "--jobs", "judge", "--deadline", "23:59"),
+                          now_local=LOCAL_MORNING, serve=serve_with(Fake([])), attribute=no_att,
+                          utcnow=lambda: past_now)
+    assert rc == 0
+    man = json.loads((tmp_path / "logs" / "second-opinion-20260929.json").read_text())
+    assert man["judge"] == {"skipped": "deadline_skipped"}
+
+
+def test_judge_timeout_expired_is_isolated_and_type_only(tmp_path, monkeypatch):
+    setup(tmp_path)
+    make_ab_run_dir(tmp_path)
+    captured = {}
+
+    def boom(*a, **k):
+        captured["timeout"] = k.get("timeout")
+        raise subprocess.TimeoutExpired(cmd=["synthetic_judge.py"], timeout=k.get("timeout"))
+
+    monkeypatch.setattr(run_nightly.judge, "judge_pass", boom)
+    rc = run_nightly.main(args(tmp_path, "--jobs", "judge", "--deadline", "23:59"),
+                          now_local=LOCAL_MORNING, serve=serve_with(Fake([])), attribute=no_att)
+    assert rc == 3
+    text = (tmp_path / "logs" / "second-opinion-20260929.json").read_text()
+    man = json.loads(text)
+    assert man["judge"] == {"error": "TimeoutExpired"}
+    assert "synthetic_judge.py" not in text
+    # the seconds remaining before --deadline were forwarded as the timeout
+    assert captured["timeout"] is not None and captured["timeout"] > 0
+
+
+def test_deadline_is_forwarded_to_audit_pass(tmp_path, monkeypatch):
+    """M7: the deadline must reach audit_pass, not be dropped."""
+    setup(tmp_path)
+    captured = {}
+
+    def fake_audit_pass(con, backend, mem, chat, limit, deadline):
+        captured["deadline"] = deadline
+        return {"sampled": 0, "attempted": 0, "audited": 0, "supported": 0, "unsupported": 0,
+                "unclear": 0, "unparseable": 0, "skipped_no_evidence": 0, "errors": 0,
+                "stopped_at_deadline": 0}
+
+    monkeypatch.setattr(run_nightly.audit, "audit_pass", fake_audit_pass)
+    rc = run_nightly.main(args(tmp_path, "--deadline", "23:59"), now_local=LOCAL_MORNING,
+                          serve=serve_with(Fake([])), attribute=no_att)
+    assert rc == 0
+    assert captured["deadline"] is not None
+
+
+# ---------------------------------------------------------------------------
+# Fix round 1: Minors — lock (no truncate/symlink follow), --jobs/--deadline
+# validation exits 2 and writes nothing, --dry-run skips the judge job.
+# ---------------------------------------------------------------------------
+
+def test_unknown_job_refuses_and_writes_nothing(tmp_path):
+    setup(tmp_path)
+    rc = run_nightly.main(args(tmp_path, "--jobs", "bogus"), now_local=LOCAL_MORNING,
+                          serve=serve_with(Fake([])), attribute=no_att)
+    assert rc == 2
+    assert not (tmp_path / "logs").exists() and not (tmp_path / "so.db").exists()
+
+
+def test_malformed_deadline_refuses_and_writes_nothing(tmp_path):
+    setup(tmp_path)
+    rc = run_nightly.main(args(tmp_path, "--deadline", "25:00"), now_local=LOCAL_MORNING,
+                          serve=serve_with(Fake([])), attribute=no_att)
+    assert rc == 2
+    assert not (tmp_path / "logs").exists() and not (tmp_path / "so.db").exists()
+
+
+def test_dry_run_skips_judge_job_entirely(tmp_path):
+    setup(tmp_path)
+    make_ab_run_dir(tmp_path)  # a real rating sheet a non-dry-run would pick up
+    rc = run_nightly.main(args(tmp_path, "--jobs", "judge", "--dry-run"),
+                          now_local=LOCAL_MORNING, serve=serve_with(Fake([])), attribute=no_att)
+    assert rc == 0
+    man = json.loads((tmp_path / "logs" / "second-opinion-20260929-dryrun.json").read_text())
+    assert man["judge"] == {"skipped": "dry_run"}
+    # nothing judge-shaped was written under reports-dir
+    assert not (tmp_path / "reports").exists()
+
+
+def test_lock_file_is_not_truncated(tmp_path):
+    """Minor 1: opening the lock must never zero out an existing file."""
+    setup(tmp_path)
+    lock_path = tmp_path / "lock"
+    lock_path.write_text("not-empty-marker")
+    run_nightly.main(args(tmp_path), now_local=LOCAL_MORNING,
+                     serve=serve_with(Fake(["supported\nok"])), attribute=no_att)
+    assert lock_path.read_text() == "not-empty-marker"

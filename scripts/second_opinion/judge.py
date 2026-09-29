@@ -73,7 +73,11 @@ def calibration(human, judged):
     return {"shared": len(pairs), "agreement": agree, "kappa": kappa}
 
 
-def judge_pass(backend, run_dir, out_dir, run=subprocess.run):
+def judge_pass(backend, run_dir, out_dir, run=subprocess.run, timeout=None):
+    """timeout (seconds, or None for no limit) is forwarded to every subprocess.run
+    call so the judge job honours the nightly runner's --deadline: a run that
+    outlives it raises subprocess.TimeoutExpired rather than keeping the local
+    server resident indefinitely."""
     if not hasattr(backend, "base_url"):
         return {"skipped": "backend"}
     os.makedirs(out_dir, exist_ok=True)
@@ -82,12 +86,12 @@ def judge_pass(backend, run_dir, out_dir, run=subprocess.run):
     r1 = run([sys.executable, os.path.join(BLIND_AB, "synthetic_judge.py"),
               os.path.join(run_dir, "rating_sheet.csv"), "--out", judged,
               "--endpoint", backend.base_url + "/v1/chat/completions", "--model", backend.model],
-             capture_output=True, text=True)
+             capture_output=True, text=True, timeout=timeout)
     if r1.returncode != 0:
         raise RuntimeError("synthetic_judge.py failed")
     r2 = run([sys.executable, os.path.join(BLIND_AB, "score.py"), judged,
               "--key", os.path.join(run_dir, "answer_key.json"), "--rater", "synthetic",
-              "--json-out", results], capture_output=True, text=True)
+              "--json-out", results], capture_output=True, text=True, timeout=timeout)
     if r2.returncode != 0:
         raise RuntimeError("score.py failed")
     return {"results": json.load(open(results)),
