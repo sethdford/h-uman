@@ -22,7 +22,6 @@ void run_agent_modules_tests(void);
 void run_agent_definition_tests(void);
 void run_agent_git_tests(void);
 void run_agent_app_config_tests(void);
-void run_task_store_tests(void);
 void run_compaction_hierarchical_tests(void);
 void run_tot_recursive_tests(void);
 void run_agent_subsystems_tests(void);
@@ -69,7 +68,6 @@ void run_oauth_tests(void);
 void run_security_tests(void);
 void run_normalize_tests(void);
 void run_sensitivity_tests(void);
-void run_vault_aead_tests(void);
 void run_app_bundle_structure_tests(void);
 void run_pkg_builder_tests(void);
 void run_install_docs_tests(void);
@@ -162,9 +160,6 @@ void run_e2e_tests(void);
 void run_e2e_conversation_tests(void);
 void run_e2e_agent_loop_tests(void);
 void run_subsystems_tests(void);
-void run_onboard_state_tests(void);
-void run_onboard_dispatcher_tests(void);
-void run_onboard_step1_tests(void);
 void run_onboard_nextstep_tests(void);
 void run_onboard_aloop_tests(void);
 void run_config_parse_tests(void);
@@ -233,7 +228,6 @@ void run_moment_render_tests(void);
 void run_behavior_policy_tests(void);
 void run_behavior_dialog_act_tests(void);
 void run_behavior_affect_tests(void);
-void run_behavior_change_tests(void);
 void run_behavior_safety_tests(void);
 void run_behavior_prosocial_tests(void);
 void run_win_detect_tests(void);
@@ -254,7 +248,6 @@ void run_behavior_pressure_tests(void);
 void run_sycophancy_pack_tests(void);
 void run_user_sim_scenario_tests(void);
 void run_chronotype_tests(void);
-void run_lifecycle_tests(void);
 void run_observer_tests(void);
 void run_session_tests(void);
 void run_bus_tests(void);
@@ -311,7 +304,6 @@ void run_outbound_sanitize_tests(void);
 void run_daemon_follow_up_watcher_tests(void);
 void run_cli_ctl_tests(void);
 void run_doctor_local_voice_tests(void);
-void run_onboard_step_provider_tests(void);
 void run_cron_tests(void);
 void run_task_manager_tests(void);
 void run_task_tools_tests(void);
@@ -331,7 +323,6 @@ void run_memory_engines_ext_tests(void);
 void run_memory_poisoning_tests(void);
 void run_runtime_tests(void);
 void run_runtime_bundle_tests(void);
-void run_channel_loop_tests(void);
 void run_util_modules_tests(void);
 void run_roadmap_tests(void);
 void run_new_features_tests(void);
@@ -419,7 +410,6 @@ void run_w1_bitemporal_tests(void);
 void run_graph_state_tests(void);
 void run_wiki_page_tests(void);
 void run_w2_autodream_tests(void);
-void run_w3_multigraph_tests(void);
 void run_w4_verifier_tests(void);
 void run_w5_persona_deltas_tests(void);
 void run_persona_delta_observer_tests(void);
@@ -428,7 +418,6 @@ void run_signal_channel_wire_tests(void);
 void run_daemon_housekeeping_tests(void);
 void run_orphan_channel_audit_tests(void);
 void run_verifier_metrics_tests(void);
-void run_doctor_ws_consumer_tests(void);
 void run_output_validator_tests(void);
 void run_chain_failure_paths_tests(void);
 void run_agent_fail_path_regressions_tests(void);
@@ -536,7 +525,6 @@ void run_m3_frontier_mlx_dispatch_tests(void);
  * internal-#ifdef-wrap-with-stub-runner pattern so the runner symbol
  * resolves in both HU_ENABLE_SELF_MODEL=ON and =OFF builds. */
 void run_self_model_behavior_log_tests(void);
-void run_action_directives_tests(void);
 /* Spec 2026-05-19 self-model-scaffold — Phases B/C/D/E. Same gate
  * pattern as Phase A (stub runner under HU_ENABLE_SELF_MODEL=OFF). */
 void run_self_model_phase_bcde_tests(void);
@@ -586,7 +574,6 @@ void run_arbitrator_tests(void);
 void run_salience_tests(void);
 void run_hard_moment_tests(void);
 void run_planning_tests(void);
-void run_rel_dynamics_tests(void);
 void run_emotional_residue_tests(void);
 void run_consolidation_engine_tests(void);
 void run_conv_goals_tests(void);
@@ -784,7 +771,6 @@ void run_anti_sycophancy_tests(void);
 void run_mutual_tom_tests(void);
 void run_opinion_history_tests(void);
 void run_self_improve_loop_tests(void);
-void run_a2a_tests(void);
 void run_gvr_tests(void);
 void run_provider_degradation_tests(void);
 void run_apple_provider_tests(void);
@@ -916,9 +902,7 @@ void run_daemon_director_tests(void);
 void run_daemon_proactive_feed_scope_tests(void);
 #endif
 void run_daemon_trust_tests(void);
-void run_cp_tasks_tests(void);
 void run_cp_canvas_tests(void);
-void run_vector_retrieval_remote_tests(void);
 void run_anticipatory_state_tests(void);
 void run_canvas_tool_tests(void);
 void run_canvas_e2e_tests(void);
@@ -943,8 +927,6 @@ void run_personal_model_llm_extract_tests(void);
 void run_personal_model_atomic_save_tests(void);
 void run_personal_model_per_contact_tests(void);
 #ifdef HU_ENABLE_SQLITE
-void run_cross_channel_acl_tests(void);
-void run_cross_channel_pipeline_tests(void);
 void run_reflection_schema_tests(void);
 #endif
 void run_reflection_storage_tests(void);                 /* T2: stub when SQLite off */
@@ -1135,7 +1117,6 @@ int main(int argc, char **argv) {
     run_agent_definition_tests();
     run_agent_git_tests();
     run_agent_app_config_tests();
-    run_task_store_tests();
     run_compaction_hierarchical_tests();
     run_tot_recursive_tests();
     run_agent_subsystems_tests();
@@ -1182,7 +1163,6 @@ int main(int argc, char **argv) {
     run_security_tests();
     run_normalize_tests();
     run_sensitivity_tests();
-    run_vault_aead_tests();
     run_app_bundle_structure_tests();
     run_pkg_builder_tests();
     run_install_docs_tests();
@@ -1247,9 +1227,6 @@ int main(int argc, char **argv) {
     run_e2e_conversation_tests();
     run_e2e_agent_loop_tests();
     run_subsystems_tests();
-    run_onboard_state_tests();
-    run_onboard_dispatcher_tests();
-    run_onboard_step1_tests();
     run_onboard_nextstep_tests();
     run_onboard_aloop_tests();
     run_config_parse_tests();
@@ -1319,7 +1296,6 @@ int main(int argc, char **argv) {
     run_behavior_policy_tests();
     run_behavior_dialog_act_tests();
     run_behavior_affect_tests();
-    run_behavior_change_tests();
     run_behavior_safety_tests();
     run_behavior_prosocial_tests();
     run_win_detect_tests();
@@ -1340,7 +1316,6 @@ int main(int argc, char **argv) {
     run_sycophancy_pack_tests();
     run_user_sim_scenario_tests();
     run_chronotype_tests();
-    run_lifecycle_tests();
     run_observer_tests();
     run_session_tests();
     run_bus_tests();
@@ -1395,7 +1370,6 @@ int main(int argc, char **argv) {
     run_daemon_follow_up_watcher_tests();
     run_cli_ctl_tests();
     run_doctor_local_voice_tests();
-    run_onboard_step_provider_tests();
     run_cron_tests();
     run_mcp_tests();
     run_mcp_jsonrpc_tests();
@@ -1411,7 +1385,6 @@ int main(int argc, char **argv) {
     run_memory_poisoning_tests();
     run_runtime_tests();
     run_runtime_bundle_tests();
-    run_channel_loop_tests();
     run_util_modules_tests();
     run_roadmap_tests();
     run_new_features_tests();
@@ -1500,7 +1473,6 @@ int main(int argc, char **argv) {
     run_graph_state_tests();
     run_wiki_page_tests();
     run_w2_autodream_tests();
-    run_w3_multigraph_tests();
     run_w4_verifier_tests();
     run_w5_persona_deltas_tests();
     run_persona_delta_observer_tests();
@@ -1509,7 +1481,6 @@ int main(int argc, char **argv) {
     run_daemon_housekeeping_tests();
     run_orphan_channel_audit_tests();
     run_verifier_metrics_tests();
-    run_doctor_ws_consumer_tests();
     run_output_validator_tests();
     run_chain_failure_paths_tests();
     run_agent_fail_path_regressions_tests();
@@ -1611,7 +1582,6 @@ int main(int argc, char **argv) {
     run_m3_frontier_mlx_dispatch_tests();
     /* Spec 2026-05-19 self-model-scaffold — runs in both flag variants. */
     run_self_model_behavior_log_tests();
-    run_action_directives_tests();
     run_self_model_phase_bcde_tests();
 #ifdef HU_ENABLE_LEARNING
     run_w16_evaluation_tests();
@@ -1658,7 +1628,6 @@ int main(int argc, char **argv) {
     run_salience_tests();
     run_hard_moment_tests();
     run_planning_tests();
-    run_rel_dynamics_tests();
 #ifdef HU_ENABLE_SQLITE
     run_emotional_residue_tests();
     run_consolidation_engine_tests();
@@ -1838,7 +1807,6 @@ int main(int argc, char **argv) {
     run_mutual_tom_tests();
     run_opinion_history_tests();
     run_self_improve_loop_tests();
-    run_a2a_tests();
     run_gvr_tests();
     run_provider_degradation_tests();
     run_apple_provider_tests();
@@ -1973,9 +1941,7 @@ int main(int argc, char **argv) {
     run_daemon_proactive_feed_scope_tests();
 #endif
     run_daemon_trust_tests();
-    run_cp_tasks_tests();
     run_cp_canvas_tests();
-    run_vector_retrieval_remote_tests();
     run_background_registry_tests();
     run_consistency_tests();
     run_mlx_stream_utf8_tests();
@@ -1995,8 +1961,6 @@ int main(int argc, char **argv) {
     run_personal_model_atomic_save_tests();
     run_personal_model_per_contact_tests();
 #ifdef HU_ENABLE_SQLITE
-    run_cross_channel_acl_tests();
-    run_cross_channel_pipeline_tests();
     run_reflection_schema_tests();
 #endif
     run_reflection_storage_tests();                 /* T2: stubbed-out when SQLite off */

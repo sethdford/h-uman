@@ -334,6 +334,15 @@ if [ -n "$staged_src_c" ] && [ -x "scripts/check-no-new-root-files.sh" ]; then
     fi
 fi
 
+if [ -n "$staged_src_c" ] && [ -x "scripts/check-agent-flat-ratchet.sh" ]; then
+    if ! bash scripts/check-agent-flat-ratchet.sh; then
+        echo ""
+        echo "Pre-commit blocked: a new .c file directly in src/agent/."
+        echo "Put it in a sub-package — see docs/plans/2026-05-29-ddd-bounded-contexts/phase-E4-repackaging.md."
+        exit 1
+    fi
+fi
+
 # Deletions count here. The clone ratchet re-scans the whole src/ tree rather
 # than the staged paths, so a commit that only REMOVES .c files still changes
 # the measurement — and, before 2026-09-20, silently skipped this gate and so

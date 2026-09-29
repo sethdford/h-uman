@@ -105,7 +105,7 @@ fi
 # owned by the live style governor hu_daemon_shape_text_inplace) dropped a
 # freshly-built measurement from 33 to 32. Auto-lock still does not fire for
 # the same reason as above — hand-locking again.
-NEVER_LOADED_BASELINE=31   # auto-locked 2026-09-26 (was 32)
+NEVER_LOADED_BASELINE=14   # auto-locked 2026-09-28 (was 21)
 # Composition at the baseline: 40 whole function symbols plus 59 function-local
 # statics (`_hu_fn.CONSTANT`, `_hu_fn.sql`), which the linker emits as separate
 # symbols of the function that owns them. Both are counted, per the plan's
@@ -114,7 +114,7 @@ NEVER_LOADED_BASELINE=31   # auto-locked 2026-09-26 (was 32)
 #
 # Re-measured 2026-09-21 alongside NEVER_LOADED_BASELINE above, same config
 # change and same reason the auto-lock didn't fire.
-DEAD_UNREF_BASELINE=76   # auto-locked 2026-09-26 (was 79)
+DEAD_UNREF_BASELINE=73   # auto-locked 2026-09-28 (was 75)
 
 cd "$_hu_root"
 
@@ -379,7 +379,19 @@ awk -F'\t' -v idxfile="$TMP/core_idx.txt" '
 # when a test object is recompiled — so cache it on the newest test .o mtime.
 TESTREFS=""
 find "$BUILD_DIR/CMakeFiles/human_tests.dir" "$BUILD_DIR/CMakeFiles/human_core_test.dir" \
-     -name '*.o' > "$TMP/testobjs.txt" 2>/dev/null || true
+     -name '*.o' > "$TMP/testobjs.all" 2>/dev/null || true
+# Drop objects whose source no longer exists. CMake never deletes the .o of a
+# removed source, so after a test is deleted its stale object still "references"
+# whatever it used, and those symbols vanish from B locally while CI (a clean
+# build) counts them. Measured 2026-09-28: deleting test_cross_channel_acl.c left
+# hu_persona_load_defaults dead-and-unreferenced; local B read 73, CI read 74,
+# and pre-commit had auto-locked the wrong 73.
+while IFS= read -r o; do
+    rel=${o#"$BUILD_DIR"/CMakeFiles/*.dir/}
+    src=${rel%.o}
+    case "$src" in src/* | tests/*) [ -f "$src" ] || continue ;; esac
+    printf '%s\n' "$o"
+done < "$TMP/testobjs.all" > "$TMP/testobjs.txt"
 if [ -s "$TMP/testobjs.txt" ]; then
     # max via awk, not `sort -rn | head -1`: under `set -o pipefail` head's early
     # exit SIGPIPEs sort as soon as its output outgrows the pipe buffer, and the

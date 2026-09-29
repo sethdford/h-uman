@@ -1108,9 +1108,7 @@ hu_error_t hu_w14_scheduler_open(hu_w7_facade_t *facade, hu_allocator_t *alloc,
     (void)hu_scheduler_register_runner(w->s, HU_JOB_AUTODREAM_COMMUNITY, hu_autodream_runner, NULL);
     (void)hu_scheduler_register_runner(w->s, HU_JOB_AUTODREAM_DECAY, hu_autodream_runner, NULL);
     /* Belief reverification: pure DB-side, no caller context needed,
-     * defaults are sane (30 day age, 64 rows/tick). Daemon overrides
-     * via hu_w14_scheduler_register_belief_reverify if it wants to
-     * pin a contact filter or surface counters. */
+     * defaults are sane (30 day age, 64 rows/tick). */
     (void)hu_scheduler_register_runner(w->s, HU_JOB_BELIEF_REVERIFICATION,
                                        hu_belief_reverify_runner, NULL);
     /* KV cache + LoRA training: stay as no-ops until the daemon binds
@@ -1143,14 +1141,6 @@ hu_error_t hu_w14_scheduler_register_kv_prewarm_runner(hu_w14_scheduler_t *s,
     if (e1 != HU_OK)
         return e1;
     return hu_scheduler_register_runner(s->s, HU_JOB_KV_CACHE_WARMING, hu_kv_prewarm_runner, mgr);
-}
-
-hu_error_t hu_w14_scheduler_register_belief_reverify(hu_w14_scheduler_t *s,
-                                                     hu_belief_reverify_ctx_t *ctx) {
-    if (!s || !s->s)
-        return HU_ERR_INVALID_ARGUMENT;
-    return hu_scheduler_register_runner(s->s, HU_JOB_BELIEF_REVERIFICATION,
-                                        hu_belief_reverify_runner, ctx);
 }
 
 /* Allow the LoRA training runner to fire its KV-warm follow-up through

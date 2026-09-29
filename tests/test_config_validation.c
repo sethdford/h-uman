@@ -69,6 +69,43 @@ static void test_config_validate_strict_wrong_type_returns_error_in_strict(void)
     hu_arena_destroy(arena);
 }
 
+/* session.identity_links is declared in hu_session_config_t but has no parser
+ * (see tests/test_main.c "allow-uncalled-suite: run_config_identity_links_tests").
+ * A configured block must be reported, not silently ignored. */
+static hu_error_t validate_session_json(const char *json, bool strict) {
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    cfg.arena = arena;
+    cfg.allocator = hu_arena_allocator(arena);
+    cfg.default_provider = "openai";
+    cfg.default_model = "gpt-4";
+    cfg.gateway.port = 3000;
+    hu_json_value_t *root = NULL;
+    HU_ASSERT_EQ(hu_json_parse(&cfg.allocator, json, strlen(json), &root), HU_OK);
+    hu_error_t verr = hu_config_validate_strict(&cfg, root, strict);
+    hu_json_free(&cfg.allocator, root);
+    hu_arena_destroy(arena);
+    return verr;
+}
+
+static void test_config_validate_strict_session_identity_links_rejected_in_strict(void) {
+    HU_ASSERT_EQ(validate_session_json("{\"session\":{\"identity_links\":[]}}", true),
+                 HU_ERR_CONFIG_INVALID);
+}
+
+static void test_config_validate_strict_session_identity_links_ignored_when_lenient(void) {
+    HU_ASSERT_EQ(validate_session_json("{\"session\":{\"identity_links\":[]}}", false), HU_OK);
+}
+
+static void test_config_validate_strict_session_known_keys_pass(void) {
+    HU_ASSERT_EQ(
+        validate_session_json("{\"session\":{\"dm_scope\":\"main\",\"idle_minutes\":30}}", true),
+        HU_OK);
+}
+
 static void test_config_validate_strict_invalid_url_https_required(void) {
     hu_config_t cfg = {0};
     cfg.default_provider = "openai";
@@ -267,6 +304,9 @@ void run_config_validation_tests(void) {
     HU_RUN_TEST(test_config_validate_strict_valid_passes);
     HU_RUN_TEST(test_config_validate_strict_unknown_key_warning);
     HU_RUN_TEST(test_config_validate_strict_wrong_type_returns_error_in_strict);
+    HU_RUN_TEST(test_config_validate_strict_session_identity_links_rejected_in_strict);
+    HU_RUN_TEST(test_config_validate_strict_session_identity_links_ignored_when_lenient);
+    HU_RUN_TEST(test_config_validate_strict_session_known_keys_pass);
     HU_RUN_TEST(test_config_validate_strict_invalid_url_https_required);
     HU_RUN_TEST(test_config_validate_strict_extreme_numeric_warning);
     HU_RUN_TEST(test_config_validate_strict_path_traversal_rejected);

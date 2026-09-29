@@ -21,7 +21,6 @@
 #include "human/agent/autodream.h"
 #include "human/agent/response_verifier.h"
 #include "human/core/allocator.h"
-#include "human/memory/cross_graph.h"
 #include "human/memory/erasure.h"
 #include "human/memory/graph.h"
 #include "human/memory/memory.h"
@@ -236,8 +235,8 @@ static void test_e2e_persona_evolver_resists_drift_attack(void) {
 }
 
 /* --- E2E scenario 6: targeted erasure cascades cleanly ---
- * Stack the entity into multiple surfaces (relations + cross_edges + case
- * records), erase, verify zero residue. */
+ * Stack the entity into multiple surfaces (relations + case records),
+ * erase, verify zero residue. */
 static void test_e2e_targeted_erasure_leaves_no_residue(void) {
     hu_graph_t *g = NULL;
     open_graph(&g);
@@ -246,8 +245,6 @@ static void test_e2e_targeted_erasure_leaves_no_residue(void) {
     hu_graph_upsert_entity(g, "u1", 2, "acme", 4, HU_ENTITY_ORGANIZATION, NULL, &acme);
     hu_graph_upsert_relation_ex(g, "u1", 2, alice, acme, HU_REL_WORKS_AT, 1.0f, 1735689600000LL, 0,
                                 1.0f, "ctx", 3, "imessage", 8);
-    hu_cross_edge_upsert(g, "u1", 2, "entity", alice, "episode", 100, "ABOUT", 1.0f,
-                         1735689600000LL, 0, 1.0f);
     hu_memory_facade_t *m = NULL;
     HU_ASSERT_EQ(hu_memory_facade_open(A(), g, &m), HU_OK);
     seed_case_record(g, alice);
@@ -256,7 +253,6 @@ static void test_e2e_targeted_erasure_leaves_no_residue(void) {
     HU_ASSERT_EQ(hu_memory_erase_entity(g, alice, &er), HU_OK);
     HU_ASSERT(er.entity_deleted);
     HU_ASSERT(er.relations_deleted >= 1);
-    HU_ASSERT(er.cross_edges_deleted >= 1);
     HU_ASSERT(er.case_records_deleted >= 1);
 
     /* Re-running erase reports NOT_FOUND. */

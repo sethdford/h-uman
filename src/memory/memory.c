@@ -389,42 +389,6 @@ hu_error_t hu_memory_facade_write(hu_memory_facade_t *m, const hu_memory_record_
     return e;
 }
 
-hu_error_t hu_memory_facade_erase(hu_memory_facade_t *m, hu_memory_kind_t kind, int64_t id) {
-    if (m == NULL)
-        return HU_ERR_INVALID_ARGUMENT;
-    struct hu_memory_facade_slot *s = slot_for(m, kind);
-    if (s == NULL || s->vt->erase == NULL)
-        return HU_ERR_NOT_SUPPORTED;
-    hu_error_t e = s->vt->erase(s->ctx, kind, id);
-    if (e == HU_OK && m->audit_fn)
-        m->audit_fn(m->audit_ctx, HU_MEMORY_AUDIT_ERASE, kind, id);
-    return e;
-}
-
-hu_error_t hu_memory_facade_purge_by_provenance(hu_memory_facade_t *m, const char *substring,
-                                                size_t len) {
-    if (m == NULL || substring == NULL || len == 0)
-        return HU_ERR_INVALID_ARGUMENT;
-    /* Fan out to every registered backend; first error wins, but we still
-     * call the rest so that erasure is best-effort across backends. The W4
-     * v1 helper hu_memory_erase_by_provenance does this for the graph; here
-     * we extend it to every backend that implements the hook. */
-    hu_error_t first_err = HU_OK;
-    bool any_attempted = false;
-    for (int i = 0; i < HU_MEM_KIND_MAX; i++) {
-        struct hu_memory_facade_slot *s = &m->slots[i];
-        if (s->vt == NULL || s->vt->erase_by_provenance == NULL)
-            continue;
-        any_attempted = true;
-        hu_error_t e = s->vt->erase_by_provenance(s->ctx, substring, len);
-        if (e != HU_OK && first_err == HU_OK)
-            first_err = e;
-    }
-    if (!any_attempted)
-        return HU_ERR_NOT_SUPPORTED;
-    return first_err;
-}
-
 void hu_memory_facade_records_free(hu_memory_facade_t *m, hu_allocator_t *alloc,
                                    hu_memory_record_t *r, size_t n) {
     if (m == NULL || r == NULL || n == 0)

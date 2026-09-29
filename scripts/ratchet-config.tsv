@@ -55,6 +55,7 @@ clone	scripts/check-clone-ratchet.sh	CLONE_BASELINE	none	auto	.claude/rules/clon
 file-size	scripts/check-file-size-ceiling.sh	MAX_BASELINE	800	auto	.claude/rules/file-size-ceiling.md	^largest src/
 sqlite-includers	scripts/check-sqlite-includer-ratchet.sh	BASELINE	0	auto	.claude/rules/sqlite-includer-ratchet.md	^sqlite3\.h includers
 root-files	scripts/check-no-new-root-files.sh	ROOT_BASELINE	0	auto	.claude/rules/no-new-root-files.md	^loose src/
+agent-flat	scripts/check-agent-flat-ratchet.sh	AGENT_FLAT_BASELINE	40	auto	docs/plans/2026-05-29-ddd-bounded-contexts/phase-E4-repackaging.md	^flat src/agent/
 agent-factory	scripts/check-agent-core-boundary.sh	FACTORY_BASELINE	0	auto	.claude/rules/agent-core-boundary.md	provider-factory includes:
 edge-cross-channel	scripts/check-edge-context-isolation.sh	BASELINE	6	off	.claude/rules/edge-context-isolation.md	cross-channel
 dead-strip-objects	scripts/check-dead-strip-ratchet.sh	NEVER_LOADED_BASELINE	0	auto	.claude/rules/dead-strip-ratchet.md	^A = never-loaded
