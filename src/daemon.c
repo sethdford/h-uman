@@ -88,6 +88,7 @@
 #include "human/daemon/reactive_turn.h"
 #include "human/daemon/send_budget.h"
 #include "human/daemon/send_provenance.h"
+#include "human/daemon/share_queue.h"
 #include "human/daemon/voice_facade.h"
 #include "human/daemon/voice_first.h"
 
@@ -1876,6 +1877,24 @@ static void service_signal_handler(int sig) {
 static unsigned g_empty_agent_response_streak;
 #endif
 
+#ifndef HU_IS_TEST /* capture, the director call and the send run only in production */
+/* Saved shares (spec 2026-09-28, Phase 5.4): <state>/share_queue.tsv. */
+static bool share_queue_path(char *buf, size_t cap) {
+    int n = hu_paths_state(buf, cap, "share_queue.tsv");
+    return n > 0 && (size_t)n < cap;
+}
+
+/* Is there a saved link waiting for this contact (tagged, or for anyone)? */
+static bool share_saved_waiting(const char *key, size_t key_len) {
+    char path[512], handle[128], url[512];
+    if (!key || key_len == 0 || key_len >= sizeof(handle) || !share_queue_path(path, sizeof(path)))
+        return false;
+    memcpy(handle, key, key_len);
+    handle[key_len] = '\0';
+    return hu_share_queue_next(path, handle, url, sizeof(url));
+}
+#endif
+
 hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                           hu_service_channel_t *channels, size_t channel_count, hu_agent_t *agent,
                           const hu_config_t *config) {
@@ -3636,7 +3655,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             situation, sizeof(situation),
                             hu_daemon_voice_first_available(agent, batch_key, key_len,
                                                             msgs[batch_start].is_group),
-                            hu_imessage_caps_cached(alloc)->advanced, msgs[batch_start].is_group);
+                            hu_imessage_caps_cached(alloc)->advanced, msgs[batch_start].is_group,
+                            share_saved_waiting(batch_key, key_len));
                     if (g_classify_provider_ok) {
                         director_result_valid = hu_daemon_director_call(
                             alloc, combined, combined_len, early_history, early_history_count,
@@ -6587,6 +6607,26 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 if (agent->memory && agent->memory->vtable) {
                     agent->memory->current_session_id = batch_key;
                     agent->memory->current_session_id_len = key_len;
+                }
+
+                /* Saved shares (Phase 5.4): Seth texting "save <link>" or "for <name>
+                 * <link>" from his own number files it for later and gets a short ack
+                 * instead of a reply. Anything else from him stays a test chat. */
+                {
+                    char sq_path[512], sq_ack[192];
+                    if (agent->persona && share_queue_path(sq_path, sizeof(sq_path)) &&
+                        hu_share_capture_handle(agent->persona, batch_key, key_len, combined,
+                                                combined_len, sq_path, (int64_t)time(NULL), sq_ack,
+                                                sizeof(sq_ack)) &&
+                        ch->channel->vtable->send) {
+                        hu_error_t sq_err = ch->channel->vtable->send(ch->channel->ctx, send_target,
+                                                                      send_target_len, sq_ack,
+                                                                      strlen(sq_ack), NULL, 0);
+                        /* The link is filed either way; only the ack can fail. */
+                        hu_log_info("daemon", NULL, "share saved: %s (ack %s)", sq_ack,
+                                    sq_err == HU_OK ? "sent" : "failed");
+                        goto skip_llm_this_batch;
+                    }
                 }
 
                 /* F29: Backchannel — send brief cue and skip LLM when narrative detected.
@@ -9819,14 +9859,20 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                 }
 
-                hu_daemon_rich_media_tick(
-                    alloc, agent, config, ch, batch_key, key_len, combined, combined_len,
-                    history_entries, history_count, gif_sent_this_turn,
-                    hu_expressive_share_gate(
-                        &director_result, director_result_valid,
-                        hu_gate_mode_from_env("HU_DIRECTOR_FORMS", HU_GATE_OFF) == HU_GATE_LIVE,
-                        combined, combined_len, msgs[batch_start].is_group, batch_key, key_len,
-                        (int64_t)time(NULL)));
+                const hu_director_result_t *share_dir = hu_expressive_share_gate(
+                    &director_result, director_result_valid,
+                    hu_gate_mode_from_env("HU_DIRECTOR_FORMS", HU_GATE_OFF) == HU_GATE_LIVE,
+                    combined, combined_len, msgs[batch_start].is_group, batch_key, key_len,
+                    (int64_t)time(NULL));
+                hu_daemon_rich_media_tick(alloc, agent, config, ch, batch_key, key_len, combined,
+                                          combined_len, history_entries, history_count,
+                                          gif_sent_this_turn, share_dir);
+                if (share_dir && share_dir->share == HU_SHARE_SAVED) {
+                    char sq_path[512];
+                    if (share_queue_path(sq_path, sizeof(sq_path)) &&
+                        hu_share_send_saved(ch->channel, send_target, send_target_len, sq_path))
+                        hu_log_info("daemon", NULL, "sent a saved share");
+                }
 
                 /* Proactive image generation: occasionally create and send an image */
                 if (combined_len > 0 && ch->channel->vtable->send && !gif_sent_this_turn &&

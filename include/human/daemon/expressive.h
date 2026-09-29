@@ -29,7 +29,7 @@ bool hu_expressive_gif_allowed(bool somber, bool is_group, const char *relations
 /* One line for the director: which forms are possible this turn. Returns the
  * length written, 0 if it did not fit. */
 size_t hu_expressive_situation(char *buf, size_t cap, bool voice_available, bool bridge_up,
-                               bool is_group);
+                               bool is_group, bool saved_link);
 
 /* One shadow log line: the director's form, and each flourish with the guards'
  * verdict ("effect=confetti(blocked)"). Length written, 0 if it did not fit. */

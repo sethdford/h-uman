@@ -42,13 +42,16 @@ static void test_expressive_gif_is_for_close_casual_contacts(void) {
 /* What the director is told is possible this turn. */
 static void test_expressive_situation_tells_the_director_what_is_possible(void) {
     char buf[256];
-    HU_ASSERT_TRUE(hu_expressive_situation(buf, sizeof(buf), true, true, false) > 0);
+    HU_ASSERT_TRUE(hu_expressive_situation(buf, sizeof(buf), true, true, false, true) > 0);
     HU_ASSERT_STR_CONTAINS(buf, "voice memo: available");
     HU_ASSERT_STR_CONTAINS(buf, "effects and threaded replies: available");
-    HU_ASSERT_TRUE(hu_expressive_situation(buf, sizeof(buf), false, false, true) > 0);
+    HU_ASSERT_TRUE(hu_expressive_situation(buf, sizeof(buf), false, false, true, false) > 0);
     HU_ASSERT_STR_CONTAINS(buf, "voice memo: not available");
     HU_ASSERT_STR_CONTAINS(buf, "effects and threaded replies: not available");
     HU_ASSERT_STR_CONTAINS(buf, "group chat");
+    HU_ASSERT_STR_NOT_CONTAINS(buf, "saved");
+    (void)hu_expressive_situation(buf, sizeof(buf), true, true, false, true);
+    HU_ASSERT_STR_CONTAINS(buf, "Seth saved a link for them"); /* share:saved is on the table */
 }
 
 /* The shadow line says what the director chose and what the guards would allow. */

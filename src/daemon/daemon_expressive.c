@@ -58,12 +58,13 @@ bool hu_expressive_gif_allowed(bool somber, bool is_group, const char *relations
 }
 
 size_t hu_expressive_situation(char *buf, size_t cap, bool voice_available, bool bridge_up,
-                               bool is_group) {
+                               bool is_group, bool saved_link) {
     if (!buf || cap == 0)
         return 0;
-    int n = snprintf(buf, cap, "This turn: voice memo: %s; effects and threaded replies: %s%s.",
+    int n = snprintf(buf, cap, "This turn: voice memo: %s; effects and threaded replies: %s%s%s.",
                      voice_available ? "available" : "not available",
-                     bridge_up ? "available" : "not available", is_group ? "; group chat" : "");
+                     bridge_up ? "available" : "not available", is_group ? "; group chat" : "",
+                     saved_link ? "; Seth saved a link for them (share:saved)" : "");
     return fitted(buf, cap, n);
 }
 
