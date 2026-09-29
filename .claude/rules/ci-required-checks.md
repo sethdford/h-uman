@@ -42,6 +42,7 @@ build matrix and core test surface across configurations:
 | `docker` | Container image build |
 | `build-android` | Android shared lib build |
 | `ui-e2e` | Dashboard Playwright suite incl. per-view axe scan (promoted 2026-09-27, see History) |
+| `iOS UI tests` | Gate job in `native-apps-fleet.yml`: passes only when every iOS simulator leg (XCUITest) passed, or when the `changes` job measured no `apps/**` change. Always reports, so it cannot strand unrelated PRs. Promoted early; see History. |
 
 ## Tier 2 — Advisory (must run, may fail)
 
@@ -108,7 +109,8 @@ gh api -X PUT repos/sethdford/h-uman/branches/main/protection \
       {"context": "completions"},
       {"context": "docker"},
       {"context": "build-android"},
-      {"context": "ui-e2e"}
+      {"context": "ui-e2e"},
+      {"context": "iOS UI tests"}
     ]
   },
   "enforce_admins": false,
@@ -176,3 +178,16 @@ Always document promotion/demotion in this file's history.
   verified against check runs on a3975fed5; every one succeeded in 7/7 recent
   main runs except `ui-e2e`, 6/7, the flake fixed by #494). Force pushes and
   deletion of `main` disabled the same day.
+- **2026-09-27: `iOS UI tests` promoted to Tier 1** by the user, *before* the
+  ≥50-clean-run bar. The iOS fleet had been quarantined (`continue-on-error`)
+  since June under #271. #485 found the cause: a real app bug where More →
+  Settings rendered blank because `LazyView`'s `onAppear` never fires on iOS
+  26. After the fix, every iOS leg passed at job level on PR runs and on the
+  merge to main (run 36315183931). Why the early promotion was safe: the
+  requirement is on a single always-reporting gate job, not on the matrix
+  checks. The workflow no longer path-filters `pull_request`; a `changes` job
+  does the filtering, so non-apps PRs get a passing gate in seconds instead of
+  hanging on "Expected". `continue-on-error` was removed so a failed leg
+  actually reaches the gate. iPad (`ipad-10`) is still excluded; the iOS 26
+  iPad tab-bar hang is unfixed. Demote under the usual rule (≥3
+  false-positive reds in a quarter).
