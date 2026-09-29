@@ -98,14 +98,49 @@ def test_unknown_entities_skips_names_with_line_breaks(tmp_path):
     assert "two\nlines" not in rt.unknown_entities(con)[C]
 
 
-def test_parse_types_accepts_only_exact_batch_names_and_known_types():
-    """Retype-only keys on contact_id + the stored spelling, so a case variant of a
-    stored name is ignored (and counted), never mapped."""
-    raw = ('[{"name":"salim","type":"person"},{"name":"Nobody","type":"person"},'
-           '{"name":"the lake house","type":"planet"},{"name":" Salim ","type":"Person"}]')
+def test_parse_types_maps_a_case_variant_to_the_stored_spelling():
+    """The model often recases a name; the answer maps back to the STORED spelling,
+    which is what retype-only keys on."""
+    raw = ('[{"name":"Salim","type":"person"},'
+           '{"name":" A Different Direction ","type":"Topic"}]')
+    stats = {}
+    assert rt.parse_types(raw, ["salim", "a different direction"], stats) == {
+        "salim": "person", "a different direction": "topic"}
+    assert stats == {}
+
+
+def test_parse_types_ignores_invented_names_and_unknown_types():
+    raw = ('[{"name":"Nobody","type":"person"},{"name":"the lake house","type":"planet"},'
+           '{"name":"salim","type":"person"}]')
     stats = {}
     assert rt.parse_types(raw, ["Salim", "the lake house"], stats) == {"Salim": "person"}
-    assert stats == {"ignored": 3}
+    assert stats == {"ignored": 2}
+
+
+def test_parse_types_case_only_collision_is_ambiguous():
+    """Stored "salim" and "Salim" in one batch: "SALIM" could be either row, so it is
+    skipped and counted, never guessed. An exact spelling is just as ambiguous once
+    matching ignores case, so it is skipped too."""
+    stats = {}
+    raw = '[{"name":"SALIM","type":"person"},{"name":"Salim","type":"place"}]'
+    assert rt.parse_types(raw, ["salim", "Salim", "Tampa"], stats) == {}
+    assert stats == {"ambiguous": 2}
+
+
+def test_write_emits_the_stored_spelling_for_a_recased_answer(env, monkeypatch, capsys):
+    tmp_path, g, argv = env
+    con = sqlite3.connect(g)
+    con.execute("UPDATE entities SET name = 'salim' WHERE name = 'Salim'")
+    con.commit()
+    con.close()
+    monkeypatch.setattr(rt, "call_model", lambda url, m, s, user, **k: json.dumps(
+        [{"name": "Salim", "type": "person"}] if "salim" in user.split("\n") else []))
+    assert rt.main(argv + ["--write"]) == 0
+    (log,) = fake_calls(tmp_path)
+    (line,) = [json.loads(ln) for ln in log["lines"]]
+    assert line["name"] == "salim" and line["type"] == "person" and line["retype_only"]
+    res = last_json(capsys)
+    assert res["answered"] == 1 and res["ambiguous"] == 0
 
 
 def test_parse_types_keeps_first_answer_for_a_name_and_counts_the_rest():
@@ -222,7 +257,7 @@ def test_write_backs_up_first_then_imports_retype_only_lines(env, monkeypatch, c
     assert "Salim" not in out and "Vanguard" not in out and C not in out  # counts only
     res = json.loads(out.strip().splitlines()[-1])
     assert res["applied"] == 3 and res["answered"] == 3 and res["unanswered"] == 0
-    assert res["ignored"] == 2 and res["parse_failed"] == 0 and res["model_errors"] == 0
+    assert res["ignored"] == 2 and res["ambiguous"] == 0 and res["parse_failed"] == 0 and res["model_errors"] == 0
     assert res["by_type"] == {"person": 1, "place": 0, "org": 1, "event": 0, "topic": 1}
 
 

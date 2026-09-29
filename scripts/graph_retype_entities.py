@@ -14,8 +14,10 @@ re-run only sees what is still UNKNOWN.
   --dry-run  counts only: no model, no backup, no import
   --write    lock probe -> backup -> classify -> import
 
-A model answer counts only when it names a line of its batch EXACTLY as stored
-(retype-only keys on contact_id + the stored spelling). stdout is counts only.
+A model answer's name is matched to its batch case-insensitively and written back
+in the STORED spelling (retype-only keys on contact_id + the stored name); a match
+on two stored names that differ only by case is ambiguous and skipped. stdout is
+counts only.
 
 Locked graph: the lock probe refuses (exit 2) when another connection holds the
 write lock for more than 1 s. After it, the importer waits up to 5 s per write
@@ -83,25 +85,32 @@ def batches(names, size=BATCH):
 
 
 def parse_types(text, batch, stats=None):
-    """Model answer -> {stored name: type}. An item counts only when its name is one
-    of THIS batch's names exactly as stored (surrounding whitespace aside) and its
-    type is one of the five; every other item is counted in stats["ignored"]. An
-    answer with no JSON array counts stats["parse_failed"] and yields {}."""
+    """Model answer -> {stored name: type}. An answer's name is matched to THIS
+    batch's names case-insensitively (surrounding whitespace aside) and mapped back
+    to the STORED spelling, because retype-only keys on contact_id + the stored name
+    and the model often changes a name's casing. Counted, never mapped:
+    stats["ambiguous"] when two stored names in the batch differ only by case and the
+    answer matches them; stats["ignored"] for a name not in the batch, an unknown
+    type, or a repeat answer for a stored name (the first wins). An answer with no
+    JSON array counts stats["parse_failed"] and yields {}."""
     stats = stats if stats is not None else {}
     arr = cn.parse_answer(text)
     if arr is None:
         stats["parse_failed"] = stats.get("parse_failed", 0) + 1
         return {}
-    wanted = set(batch)
+    by_lower = {}
+    for n in batch:
+        by_lower.setdefault(n.strip().lower(), []).append(n)
     out = {}
     for o in arr:
-        name = o.get("name") if isinstance(o, dict) else None
-        name = name if isinstance(name, str) else ""
-        if name not in wanted:
-            name = name.strip()
-        t = str(o.get("type") or "").strip().lower() if isinstance(o, dict) else ""
-        if name in wanted and t in cn.TYPES and name not in out:
-            out[name] = t
+        o = o if isinstance(o, dict) else {}
+        name = o.get("name") if isinstance(o.get("name"), str) else ""
+        stored = by_lower.get(name.strip().lower(), [])
+        t = str(o.get("type") or "").strip().lower()
+        if len(stored) > 1:
+            stats["ambiguous"] = stats.get("ambiguous", 0) + 1
+        elif stored and t in cn.TYPES and stored[0] not in out:
+            out[stored[0]] = t
         else:
             stats["ignored"] = stats.get("ignored", 0) + 1
     return out
@@ -232,7 +241,7 @@ def main(argv=None):
         counts["backup"] = backup(a.graph_db, a.backup_dir, now)
     except Exception as e:
         return refuse(f"backup failed ({type(e).__name__}: {e})")
-    lines, errors, stats = [], 0, {"ignored": 0, "parse_failed": 0}
+    lines, errors, stats = [], 0, {"ignored": 0, "ambiguous": 0, "parse_failed": 0}
     by_type = dict.fromkeys(cn.TYPES, 0)
     for cid, names in todo.items():
         for batch in batches(names):
@@ -248,7 +257,7 @@ def main(argv=None):
                                          retype_only=True))
     counts.update(answered=len(lines), unanswered=counts["unknown_entities"] - len(lines),
                   model_errors=errors, parse_failed=stats["parse_failed"],
-                  ignored=stats["ignored"], by_type=by_type, applied=0)
+                  ignored=stats["ignored"], ambiguous=stats["ambiguous"], by_type=by_type, applied=0)
     if errors + stats["parse_failed"] == counts["batches"]:
         print(json.dumps(counts, sort_keys=True))
         print("every batch failed (model error or unparseable); nothing imported",
