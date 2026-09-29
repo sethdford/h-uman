@@ -114,9 +114,31 @@ static void test_voice_first_stands_down_in_group_chats(void) {
     done(&r);
 }
 
+/* What the director is told: voice is on the table only where voice-first
+ * LIVE would actually send one (family list, not a group, a voice set up). */
+static void test_voice_first_available_for_the_director(void) {
+    static hu_persona_t persona;
+    memset(&persona, 0, sizeof(persona));
+    snprintf(persona.voice.voice_id, sizeof(persona.voice.voice_id), "test-voice");
+    persona.voice_messages.enabled = true;
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.persona = &persona;
+    setenv("HU_VOICE_DELIVERY_ONLY", "+15550000001", 1);
+    setenv("HU_VOICE_FIRST", "live", 1);
+    HU_ASSERT_TRUE(hu_daemon_voice_first_available(&agent, "+15550000001", 12, false));
+    HU_ASSERT_FALSE(hu_daemon_voice_first_available(&agent, "+15550000001", 12, true));
+    HU_ASSERT_FALSE(hu_daemon_voice_first_available(&agent, "+15550000002", 12, false));
+    setenv("HU_VOICE_FIRST", "shadow", 1);
+    HU_ASSERT_FALSE(hu_daemon_voice_first_available(&agent, "+15550000001", 12, false));
+    unsetenv("HU_VOICE_FIRST");
+    unsetenv("HU_VOICE_DELIVERY_ONLY");
+}
+
 void run_daemon_voice_first_tests(void) {
     HU_TEST_SUITE("daemon voice-first memos");
     HU_RUN_TEST(test_voice_first_off_changes_nothing);
+    HU_RUN_TEST(test_voice_first_available_for_the_director);
     HU_RUN_TEST(test_voice_first_stands_down_in_group_chats);
     HU_RUN_TEST(test_voice_first_live_writes_a_memo_for_family);
     HU_RUN_TEST(test_voice_first_live_leaves_others_as_text);

@@ -1279,6 +1279,7 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_followup_sched.c
     src/daemon/daemon_voice_reply.c
     src/daemon/daemon_voice_first.c
+    src/daemon/daemon_expressive.c
     src/daemon/daemon_rich_media.c
     src/daemon/daemon_housekeeping.c
     src/daemon/daemon_promise_keeper.c
@@ -4270,6 +4271,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_daemon_rich_media.c
     tests/test_daemon_voice_reply.c
     tests/test_daemon_voice_first.c
+    tests/test_daemon_expressive.c
     tests/test_prospective.c
     tests/test_eval_score.c
     tests/test_corrective_rag.c

@@ -66,12 +66,14 @@
 #include "human/ml/m3_frontier_adapter.h"
 #endif
 #include "human/agent/choreography.h"
+#include "human/channels/imessage_caps.h"
 #include "human/daemon/agent_facade.h"
 #include "human/daemon/config_reload.h"
 #include "human/daemon/consecutive_limiter.h"
 #include "human/daemon/context_facade.h"
 #include "human/daemon/dated_followup.h"
 #include "human/daemon/director.h"
+#include "human/daemon/expressive.h"
 #include "human/daemon/feeds_facade.h"
 #include "human/daemon/hurt_handoff.h"
 #include "human/daemon/identity_graph.h"
@@ -3586,7 +3588,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 if (llm_decides) {
                     director_result_valid =
                         hu_daemon_director_call(alloc, combined, combined_len, early_history,
-                                                early_history_count, &director_result);
+                                                early_history_count, NULL, &director_result);
                     if (early_history) {
                         alloc->free(alloc->ctx, early_history,
                                     early_history_count * sizeof(hu_channel_history_entry_t));
@@ -3622,10 +3624,35 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     combined_len > 240 ? "..." : "");
                     }
                     /* Call director early for meta-behavior (delay, tapback, silence) */
+                    /* Expressive forms (spec 2026-09-28): tell the director what is
+                     * possible this turn, then log its full choice and the guards'
+                     * verdict. HU_DIRECTOR_FORMS=off|shadow|live, default off; LIVE is
+                     * gated on a day of shadow choices Seth has read. */
+                    bool forms_on =
+                        hu_gate_mode_from_env("HU_DIRECTOR_FORMS", HU_GATE_OFF) != HU_GATE_OFF;
+                    char situation[160] = "";
+                    if (forms_on)
+                        (void)hu_expressive_situation(
+                            situation, sizeof(situation),
+                            hu_daemon_voice_first_available(agent, batch_key, key_len,
+                                                            msgs[batch_start].is_group),
+                            hu_imessage_caps_cached(alloc)->advanced, msgs[batch_start].is_group);
                     if (g_classify_provider_ok) {
-                        director_result_valid =
-                            hu_daemon_director_call(alloc, combined, combined_len, early_history,
-                                                    early_history_count, &director_result);
+                        director_result_valid = hu_daemon_director_call(
+                            alloc, combined, combined_len, early_history, early_history_count,
+                            situation, &director_result);
+                    }
+                    if (forms_on && director_result_valid) {
+                        const hu_contact_profile_t *fcp =
+                            agent->persona
+                                ? hu_persona_find_contact(agent->persona, batch_key, key_len)
+                                : NULL;
+                        char fline[256];
+                        if (hu_expressive_shadow_line(&director_result, combined, combined_len,
+                                                      msgs[batch_start].is_group,
+                                                      fcp ? fcp->relationship : NULL, fline,
+                                                      sizeof(fline)) > 0)
+                            hu_log_info("director", NULL, "forms shadow: %s", fline);
                     }
                     if (trace_on && director_result_valid) {
                         hu_log_info("director_trace", NULL,

@@ -27,7 +27,8 @@ static const char k_memo_directive[] =
     "Share news from your own life only if it is stated above; never invent plans, events, "
     "places, people or numbers. Keep it low-key and understated: no greeting-card lines "
     "(\"hope you have a wonderful day\"), no announcements, no hype, at most one "
-    "exclamation. This overrides the texting length rules.\n";
+    "exclamation. This overrides the texting length rules and any short length cue in the scene "
+    "direction.\n";
 
 #if defined(HU_ENABLE_SQLITE)
 static sqlite3 *memory_db(struct hu_agent *agent) {
@@ -87,6 +88,13 @@ static bool prepend_directive(hu_allocator_t *alloc, char **ctx, size_t *ctx_len
     return true;
 }
 
+/* LIVE writes memos only for the family list; an unset list means nobody,
+ * never everybody. */
+static bool contact_listed(const char *key, size_t key_len) {
+    const char *allow = getenv("HU_VOICE_DELIVERY_ONLY");
+    return key && allow && allow[0] && hu_voice_record_handle_allowed(allow, key, key_len);
+}
+
 void hu_daemon_voice_first_prepare(hu_allocator_t *alloc, struct hu_agent *agent,
                                    const char *batch_key, size_t key_len, bool is_group,
                                    const char *inbound, size_t inbound_len, char **convo_ctx,
@@ -123,10 +131,7 @@ void hu_daemon_voice_first_prepare(hu_allocator_t *alloc, struct hu_agent *agent
     };
     out->decision = hu_voice_intent_decide(&facts, &out->reason);
 
-    /* LIVE writes memos only for the family list; an unset list means nobody,
-     * never everybody. */
-    const char *allow = getenv("HU_VOICE_DELIVERY_ONLY");
-    bool listed = allow && allow[0] && hu_voice_record_handle_allowed(allow, contact, n);
+    bool listed = contact_listed(contact, n);
     if (mode == HU_GATE_LIVE && out->decision == HU_VOICE_SEND_VOICE && listed && convo_ctx &&
         convo_ctx_len && max_chars && prepend_directive(alloc, convo_ctx, convo_ctx_len)) {
         *max_chars = HU_VOICE_FIRST_MEMO_MAX_CHARS;
@@ -137,4 +142,14 @@ void hu_daemon_voice_first_prepare(hu_allocator_t *alloc, struct hu_agent *agent
                 out->decision == HU_VOICE_SEND_VOICE ? "voice" : "text", out->reason,
                 out->memo ? 1 : 0);
     record_decision(agent, contact, out);
+}
+
+bool hu_daemon_voice_first_available(struct hu_agent *agent, const char *batch_key, size_t key_len,
+                                     bool is_group) {
+    if (is_group || !agent || !agent->persona || !agent->persona->voice_messages.enabled ||
+        !agent->persona->voice.voice_id[0])
+        return false;
+    if (hu_gate_mode_from_env("HU_VOICE_FIRST", HU_GATE_OFF) != HU_GATE_LIVE)
+        return false;
+    return contact_listed(batch_key, key_len);
 }

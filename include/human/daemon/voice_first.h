@@ -33,4 +33,9 @@ void hu_daemon_voice_first_prepare(hu_allocator_t *alloc, struct hu_agent *agent
                                    size_t *convo_ctx_len, uint32_t *max_chars,
                                    hu_daemon_voice_first_t *out);
 
+/* Would voice-first LIVE send this contact a memo if the moment called for
+ * one? (LIVE, on the family list, not a group, a voice configured.) */
+bool hu_daemon_voice_first_available(struct hu_agent *agent, const char *batch_key, size_t key_len,
+                                     bool is_group);
+
 #endif
