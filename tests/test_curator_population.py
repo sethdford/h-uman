@@ -5,6 +5,8 @@ import sqlite3
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 import curator_population as cp  # noqa: E402
 
@@ -28,6 +30,11 @@ def test_window_edge_excludes_old_traffic():
     assert cp.eligible_handles(tl, set(), NOW) == []
 
 
+def test_window_day_30_is_inclusive():
+    tl = {"+15550000009": msgs(10, 5, days_ago=30)}
+    assert cp.eligible_handles(tl, set(), NOW) == ["+15550000009"]
+
+
 def test_short_codes_never_eligible_and_email_is():
     tl = {"72975": msgs(50, 50), "friend@example.com": msgs(12, 6)}
     assert cp.eligible_handles(tl, set(), NOW) == ["friend@example.com"]
@@ -43,6 +50,11 @@ def test_suppressed_table_missing_means_empty(tmp_path):
     db = tmp_path / "m.db"
     sqlite3.connect(db).close()
     assert cp.load_suppressed(str(db)) == set()
+
+
+def test_suppressed_unreadable_db_refuses(tmp_path):
+    with pytest.raises(sqlite3.Error):
+        cp.load_suppressed(str(tmp_path / "nope" / "m.db"))
 
 
 def test_suppressed_handles_are_loaded(tmp_path):

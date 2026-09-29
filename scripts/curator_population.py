@@ -4,6 +4,7 @@ Pure functions over eval_conversation_quality.attribute() timelines, so the
 selection is testable without chat.db or a model. The wide pass skips persona
 contacts: the existing persona pass already curates them from memory.db.
 """
+import contextlib
 import datetime as dt
 import json
 import os
@@ -36,12 +37,21 @@ def eligible_handles(timelines, persona_ids, now, window_days=WINDOW_DAYS,
 
 
 def load_suppressed(mem_db_path):
-    try:
-        con = sqlite3.connect(f"file:{mem_db_path}?mode=ro", uri=True)
-        rows = con.execute("SELECT contact FROM contact_suppressions").fetchall()
-        con.close()
-    except sqlite3.Error:
-        return set()  # table not created yet = nobody has opted out
+    """Load opted-out contacts from memory.db's contact_suppressions table.
+
+    Opt-outs are a hard privacy exclusion, so this fails closed: only the
+    narrow "table not created yet" case is treated as "nobody has opted
+    out". Every other sqlite3.Error (unreadable/locked/corrupt DB, a wrong
+    path, permission denied, etc.) is RE-RAISED so the caller refuses the
+    run rather than silently reading contacts who opted out.
+    """
+    with contextlib.closing(sqlite3.connect(f"file:{mem_db_path}?mode=ro", uri=True)) as con:
+        try:
+            rows = con.execute("SELECT contact FROM contact_suppressions").fetchall()
+        except sqlite3.OperationalError as e:
+            if "no such table" in str(e):
+                return set()  # table not created yet = nobody has opted out
+            raise
     return {r[0] for r in rows if r[0]}
 
 
