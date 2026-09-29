@@ -8281,7 +8281,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #ifndef HU_IS_TEST
                 /* Name catcher (spec 2026-09-29 §4.2): each raw inbound text, never the reply. */
                 if (err == HU_OK && response && response_len > 0 && graph &&
-                    !msgs[batch_start].is_group)
+                    hu_name_catch_eligible(&msgs[batch_start], config))
                     for (size_t b = batch_start; b <= batch_end; b++)
                         hu_daemon_name_catch_tick(alloc, graph, batch_key, key_len, msgs[b].content,
                                                   strlen(msgs[b].content));

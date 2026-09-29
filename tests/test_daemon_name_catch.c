@@ -1,6 +1,7 @@
 /* Per-turn name catcher wiring (spec 2026-09-29 §4.2): HU_NAME_CATCH gate,
  * pure write decision, graph effects per mode, and the daemon call site
  * feeding the contact's inbound text only. */
+#include "human/config.h"
 #include "human/core/allocator.h"
 #include "human/core/gate_mode.h"
 #include "human/daemon/name_catch.h"
@@ -36,6 +37,28 @@ static void test_name_catch_mode_defaults_off(void) {
     unsetenv("HU_NAME_CATCH");
 }
 
+/* M4 + group skip: the catcher never reads a group chat or Seth's own
+ * self-chat (the configured loopback handle). */
+static void test_eligible_skips_group_and_self_chat(void) {
+    static hu_config_t cfg; /* zeroed */
+    hu_channel_loop_msg_t m;
+    memset(&m, 0, sizeof(m));
+    snprintf(m.session_key, sizeof(m.session_key), "%s", "+15550001111");
+    HU_ASSERT_TRUE(hu_name_catch_eligible(&m, NULL));
+    HU_ASSERT_TRUE(hu_name_catch_eligible(&m, &cfg)); /* no self handle configured */
+    char self[] = "+15550009999";
+    cfg.channels.imessage.loopback_handle = self;
+    HU_ASSERT_TRUE(hu_name_catch_eligible(&m, &cfg));
+    snprintf(m.session_key, sizeof(m.session_key), "%s", self);
+    HU_ASSERT_FALSE(hu_name_catch_eligible(&m, &cfg)); /* Seth's own text */
+    snprintf(m.session_key, sizeof(m.session_key), "%s", "+15550001111");
+    m.is_group = true;
+    HU_ASSERT_FALSE(hu_name_catch_eligible(&m, &cfg));
+    HU_ASSERT_FALSE(hu_name_catch_eligible(&m, NULL));
+    HU_ASSERT_FALSE(hu_name_catch_eligible(NULL, &cfg));
+    cfg.channels.imessage.loopback_handle = NULL;
+}
+
 static void test_bad_args_are_rejected_and_counts_zeroed(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_name_catch_counts_t c = {9, 9, 9};
@@ -52,8 +75,10 @@ static void test_daemon_feeds_the_catcher_inbound_text_only(void) {
     FILE *f = fopen("src/daemon.c", "r");
     HU_ASSERT_NOT_NULL(f);
     char line[512], call[1024] = {0};
-    bool in_call = false;
+    bool in_call = false, gated = false;
     while (fgets(line, sizeof(line), f)) {
+        if (strstr(line, "hu_name_catch_eligible(&msgs[batch_start], config)") != NULL)
+            gated = true;
         if (!in_call && strstr(line, "hu_daemon_name_catch_tick(") != NULL)
             in_call = true;
         if (in_call) {
@@ -66,6 +91,7 @@ static void test_daemon_feeds_the_catcher_inbound_text_only(void) {
     HU_ASSERT_STR_CONTAINS(call, "msgs[b].content");
     HU_ASSERT_STR_NOT_CONTAINS(call, "response");
     HU_ASSERT_STR_NOT_CONTAINS(call, "combined");
+    HU_ASSERT_TRUE(gated); /* group chats and self-chat never reach the catcher */
 }
 
 #ifdef HU_ENABLE_SQLITE
@@ -133,6 +159,7 @@ static void test_live_bumps_known_and_inserts_new(void) {
     HU_ASSERT_EQ((long)c.fresh, 1L); /* Priya */
     HU_ASSERT_EQ((long)c.written, 3L);
     HU_ASSERT_EQ(nc_row(g, NC_CID, "Salim").mentions, 2);
+    HU_ASSERT_EQ(nc_row(g, NC_CID, "Salim").type, (int)HU_ENTITY_PERSON); /* bump never retypes */
     HU_ASSERT_EQ(nc_row(g, NC_CID, "tampa").mentions, 2);
     nc_row_t p = nc_row(g, NC_CID, "Priya");
     HU_ASSERT_TRUE(p.found);
@@ -198,6 +225,53 @@ static void test_first_message_from_empty_contact_records_names(void) {
     hu_graph_close(g, &alloc);
 }
 
+/* I3(c): a name the catcher recorded itself (UNKNOWN, names:turn) is KNOWN
+ * only in its own spelling until the nightly pass types it; then any casing. */
+static void test_unconfirmed_caught_name_matches_case_sensitively(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_graph_t *g = nc_graph(&alloc);
+    hu_name_catch_counts_t c;
+    const char *first = "dinner with Priya", *lower = "saw priya today";
+    HU_ASSERT_EQ(hu_daemon_name_catch(&alloc, g, HU_GATE_LIVE, NC_CID, strlen(NC_CID), first,
+                                      strlen(first), &c),
+                 HU_OK);
+    nc_row_t caught = nc_row(g, NC_CID, "Priya");
+    HU_ASSERT_STR_EQ(caught.provenance, "names:turn");
+    HU_ASSERT_EQ(hu_daemon_name_catch(&alloc, g, HU_GATE_LIVE, NC_CID, strlen(NC_CID), lower,
+                                      strlen(lower), &c),
+                 HU_OK);
+    HU_ASSERT_EQ((long)c.known, 0L);
+    HU_ASSERT_EQ(nc_row(g, NC_CID, "Priya").mentions, 1); /* "priya" did not bump it */
+    int64_t id = 0;
+    HU_ASSERT_EQ(hu_graph_upsert_entity_typed(g, NC_CID, strlen(NC_CID), "Priya", 5,
+                                              HU_ENTITY_PERSON, "names:nightly", 0.8f,
+                                              HU_GRAPH_UPSERT_NO_TOUCH, &id),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_daemon_name_catch(&alloc, g, HU_GATE_LIVE, NC_CID, strlen(NC_CID), lower,
+                                      strlen(lower), &c),
+                 HU_OK);
+    HU_ASSERT_EQ((long)c.known, 1L);
+    HU_ASSERT_EQ(nc_row(g, NC_CID, "Priya").mentions, 2);
+    hu_graph_close(g, &alloc);
+}
+
+/* M3 through the catcher: a Capitalized word matching a legacy TOPIC row is
+ * bumped but never relabelled names:turn (the retype to UNKNOWN is refused). */
+static void test_catcher_does_not_stamp_a_legacy_row(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_graph_t *g = nc_graph(&alloc);
+    hu_name_catch_counts_t c;
+    const char *text = "more Pickleball tonight";
+    HU_ASSERT_EQ(hu_daemon_name_catch(&alloc, g, HU_GATE_LIVE, NC_CID, strlen(NC_CID), text,
+                                      strlen(text), &c),
+                 HU_OK);
+    nc_row_t r = nc_row(g, NC_CID, "Pickleball");
+    HU_ASSERT_EQ(r.type, (int)HU_ENTITY_TOPIC);
+    HU_ASSERT_EQ(r.mentions, 2);
+    HU_ASSERT_STR_EQ(r.provenance, "");
+    hu_graph_close(g, &alloc);
+}
+
 static void test_tick_follows_the_env_gate(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_graph_t *g = nc_graph(&alloc);
@@ -217,6 +291,7 @@ void run_daemon_name_catch_tests(void) {
     HU_TEST_SUITE("daemon_name_catch");
     HU_RUN_TEST(test_name_catch_action_truth_table);
     HU_RUN_TEST(test_name_catch_mode_defaults_off);
+    HU_RUN_TEST(test_eligible_skips_group_and_self_chat);
     HU_RUN_TEST(test_bad_args_are_rejected_and_counts_zeroed);
     HU_RUN_TEST(test_daemon_feeds_the_catcher_inbound_text_only);
 #ifdef HU_ENABLE_SQLITE
@@ -225,6 +300,8 @@ void run_daemon_name_catch_tests(void) {
     HU_RUN_TEST(test_off_does_nothing);
     HU_RUN_TEST(test_topic_names_are_not_known);
     HU_RUN_TEST(test_first_message_from_empty_contact_records_names);
+    HU_RUN_TEST(test_unconfirmed_caught_name_matches_case_sensitively);
+    HU_RUN_TEST(test_catcher_does_not_stamp_a_legacy_row);
     HU_RUN_TEST(test_tick_follows_the_env_gate);
 #endif
 }

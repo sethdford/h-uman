@@ -1,6 +1,7 @@
 #ifndef HU_DAEMON_NAME_CATCH_H
 #define HU_DAEMON_NAME_CATCH_H
 
+#include "human/channel_loop.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/gate_mode.h"
@@ -30,6 +31,15 @@ typedef struct hu_name_catch_counts {
     size_t fresh;   /* CAPITALIZED (new) candidates seen */
     size_t written; /* graph writes that succeeded (LIVE only) */
 } hu_name_catch_counts_t;
+
+struct hu_config;
+
+/* Pure: may the catcher read this inbound message at all? Never a group chat
+ * (other people's names and chatter), and never Seth's own text: a message
+ * whose session is the configured self-chat handle
+ * (channels.imessage.loopback_handle, the only from-me rows the poll
+ * admits). `config` may be NULL. */
+bool hu_name_catch_eligible(const hu_channel_loop_msg_t *msg, const struct hu_config *config);
 
 /* HU_NAME_CATCH per hu_gate_mode_parse; unset -> OFF. */
 hu_gate_mode_t hu_name_catch_mode(void);

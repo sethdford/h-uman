@@ -1,5 +1,6 @@
 /* daemon_name_catch.c — per-turn name catcher wiring (spec 2026-09-29 §4.2).
  * See include/human/daemon/name_catch.h. Graph API only (no sqlite3.h). */
+#include "human/config.h"
 #include "human/core/log.h"
 #include "human/daemon/name_catch.h"
 
@@ -12,6 +13,13 @@ hu_gate_mode_t hu_name_catch_mode(void) {
      * prod); HU_GRAPH_NAMES only governs typed-name selection. Measured by
      * scripts/eval_name_grounding.py. */
     return hu_gate_mode_from_env("HU_NAME_CATCH", HU_GATE_OFF);
+}
+
+bool hu_name_catch_eligible(const hu_channel_loop_msg_t *msg, const struct hu_config *config) {
+    if (!msg || msg->is_group)
+        return false;
+    const char *self = config ? config->channels.imessage.loopback_handle : NULL;
+    return !(self && self[0] && strcmp(msg->session_key, self) == 0);
 }
 
 hu_name_catch_action_t hu_name_catch_action(hu_gate_mode_t mode, hu_name_kind_t kind) {
@@ -52,6 +60,10 @@ hu_error_t hu_daemon_name_catch(hu_allocator_t *alloc, hu_graph_t *g, hu_gate_mo
         if (hu_name_entity_is_nameable(ents[i].type, ents[i].name, ents[i].name_len)) {
             refs[n_refs].name = ents[i].name;
             refs[n_refs].len = ents[i].name_len;
+            /* A row this catcher made and nothing has typed yet matches only
+             * its own spelling, so "Going" never feeds on every "going". */
+            refs[n_refs].exact_case = ents[i].type == HU_ENTITY_UNKNOWN &&
+                                      strcmp(ents[i].provenance, HU_NAME_CATCH_PROVENANCE) == 0;
             n_refs++;
         }
     }

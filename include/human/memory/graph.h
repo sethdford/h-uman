@@ -41,6 +41,10 @@ typedef struct hu_graph_entity {
     int64_t last_seen;
     int32_t mention_count;
     char *metadata_json;
+    /* Who created or last retyped the row ("names:turn", "names:nightly", ...);
+     * truncated, "" when none. Filled by hu_graph_list_entities and
+     * hu_graph_find_entities_matching only. */
+    char provenance[32];
 } hu_graph_entity_t;
 
 typedef struct hu_graph_relation {
@@ -119,7 +123,8 @@ bool hu_graph_entity_retype_allowed(hu_entity_type_t old_type, hu_entity_type_t 
  * (clamped to [0,1], mirrored into confidence_mean). Existing row: bumps
  * last_seen and mention_count like hu_graph_upsert_entity (unless NO_TOUCH),
  * changes the type only when hu_graph_entity_retype_allowed allows it, and
- * writes `provenance` only when the row has none (first writer wins). */
+ * stamps `provenance` only when it actually changes the type: a plain bump or
+ * a refused retype leaves the row's provenance as it was. */
 hu_error_t hu_graph_upsert_entity_typed(hu_graph_t *g, const char *contact_id,
                                         size_t contact_id_len, const char *name, size_t name_len,
                                         hu_entity_type_t type, const char *provenance,

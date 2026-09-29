@@ -462,17 +462,18 @@ static int ge_typed_insert(sqlite3 *db, const char *cid, int cid_len, const char
     return rc;
 }
 
-/* Existing row: new type, provenance only when it has none, and (touch) the
- * same last_seen / mention_count bump as hu_graph_upsert_entity. */
+/* Existing row: new type, provenance only when `prov` is non-NULL (the caller
+ * passes it only for a real retype), and (touch) the same last_seen /
+ * mention_count bump as hu_graph_upsert_entity. */
 static int ge_typed_update(sqlite3 *db, int64_t id, hu_entity_type_t type, const char *prov,
                            size_t prov_len, bool touch, int64_t ts) {
     sqlite3_stmt *q = NULL;
-    int rc = sqlite3_prepare_v2(
-        db,
-        "UPDATE entities SET type = ?1, provenance = COALESCE(NULLIF(provenance, ''), ?2),"
-        " last_seen = CASE WHEN ?3 THEN ?4 ELSE last_seen END,"
-        " mention_count = mention_count + ?3 WHERE id = ?5",
-        -1, &q, NULL);
+    int rc =
+        sqlite3_prepare_v2(db,
+                           "UPDATE entities SET type = ?1, provenance = COALESCE(?2, provenance),"
+                           " last_seen = CASE WHEN ?3 THEN ?4 ELSE last_seen END,"
+                           " mention_count = mention_count + ?3 WHERE id = ?5",
+                           -1, &q, NULL);
     if (rc != SQLITE_OK)
         return rc;
     sqlite3_bind_int(q, 1, (int)type);
@@ -523,7 +524,9 @@ hu_error_t hu_graph_upsert_entity_typed(hu_graph_t *g, const char *contact_id,
     } else if (rc == SQLITE_ROW) {
         hu_entity_type_t next = hu_graph_entity_retype_allowed(old_type, type) ? type : old_type;
         invalidate = next != old_type;
-        rc = ge_typed_update(g->db, id, next, provenance, prov_len, touch, ts);
+        /* Stamp provenance only on a real retype: a plain bump or a refused
+         * retype must not relabel a legacy row as, say, names:turn. */
+        rc = ge_typed_update(g->db, id, next, provenance, invalidate ? prov_len : 0, touch, ts);
     }
     if (rc != SQLITE_DONE || hu_sql_txn_commit(&txn) != HU_OK) {
         hu_sql_txn_rollback(&txn);
@@ -1847,6 +1850,8 @@ static hu_error_t collect_entities(sqlite3_stmt *stmt, hu_allocator_t *alloc, si
         e->last_seen = sqlite3_column_int64(stmt, 4);
         e->mention_count = (int32_t)sqlite3_column_int(stmt, 5);
         e->metadata_json = NULL;
+        const char *prov = (const char *)sqlite3_column_text(stmt, 6);
+        snprintf(e->provenance, sizeof(e->provenance), "%s", prov ? prov : "");
         count++;
     }
     sqlite3_finalize(stmt);
@@ -1884,8 +1889,9 @@ hu_error_t hu_graph_list_entities(hu_graph_t *g, hu_allocator_t *alloc, const ch
     const char *cid = contact_id ? contact_id : "";
     int cid_len = contact_id ? (int)contact_id_len : 0;
 
-    const char *sql = "SELECT id, name, type, first_seen, last_seen, mention_count "
-                      "FROM entities WHERE contact_id = ? ORDER BY mention_count DESC LIMIT ?";
+    const char *sql = "SELECT id, name, type, first_seen, last_seen, mention_count,"
+                      " COALESCE(provenance, '') FROM entities WHERE contact_id = ?"
+                      " ORDER BY mention_count DESC LIMIT ?";
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(g->db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK)
@@ -1928,8 +1934,8 @@ hu_error_t hu_graph_find_entities_matching(hu_graph_t *g, hu_allocator_t *alloc,
         return HU_OK; /* nothing to match: empty result, not an error */
     char sql[1024];
     int n = snprintf(sql, sizeof(sql),
-                     "SELECT id, name, type, first_seen, last_seen, mention_count FROM entities "
-                     "WHERE contact_id = ? AND (");
+                     "SELECT id, name, type, first_seen, last_seen, mention_count,"
+                     " COALESCE(provenance, '') FROM entities WHERE contact_id = ? AND (");
     if (n <= 0 || (size_t)n >= sizeof(sql))
         return HU_ERR_INTERNAL;
     size_t pos = (size_t)n;

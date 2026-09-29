@@ -58,7 +58,7 @@ static void test_extract_stoplist_but_mom_and_dad_allowed(void) {
 }
 
 static void test_extract_known_names_word_boundary_and_lowercase(void) {
-    hu_name_ref_t known[] = {{"Al", 2}, {"tampa", 5}};
+    hu_name_ref_t known[] = {{"Al", 2, false}, {"tampa", 5, false}};
     hu_name_candidate_t c[8];
     HU_ASSERT_EQ((long)extract("Also that", known, 2, c, 8), 0L); /* "Al" is not in "Also" */
     HU_ASSERT_EQ((long)extract("saw al back in TAMPA", known, 2, c, 8), 2L);
@@ -67,7 +67,7 @@ static void test_extract_known_names_word_boundary_and_lowercase(void) {
 }
 
 static void test_extract_known_wins_over_capitalized_duplicate(void) {
-    hu_name_ref_t known[] = {{"Salim", 5}};
+    hu_name_ref_t known[] = {{"Salim", 5, false}};
     hu_name_candidate_t c[8];
     HU_ASSERT_EQ((long)extract("lunch with Salim", known, 1, c, 8), 1L);
     HU_ASSERT_TRUE(cand_is(&c[0], "Salim", HU_NAME_KNOWN));
@@ -96,6 +96,104 @@ static void test_extract_all_caps_and_long_title_runs_are_not_names(void) {
     HU_ASSERT_EQ((long)extract("at the NYC office", NULL, 0, c, 8), 0L);
 }
 
+/* I1: a candidate never ends in an apostrophe (closing quote, plural possessive). */
+static void test_extract_strips_trailing_apostrophe_and_possessive(void) {
+    hu_name_candidate_t c[8];
+    HU_ASSERT_EQ((long)extract("she said 'call Priya'", NULL, 0, c, 8), 1L);
+    HU_ASSERT_TRUE(cand_is(&c[0], "Priya", HU_NAME_CAPITALIZED));
+    HU_ASSERT_EQ((long)extract("that is Chris' car", NULL, 0, c, 8), 1L);
+    HU_ASSERT_TRUE(cand_is(&c[0], "Chris", HU_NAME_CAPITALIZED));
+    HU_ASSERT_EQ((long)extract("at Salim's place", NULL, 0, c, 8), 1L);
+    HU_ASSERT_TRUE(cand_is(&c[0], "Salim", HU_NAME_CAPITALIZED));
+}
+
+/* I2: U+2019 (iOS smart apostrophe) behaves like '; emoji and U+FFFC are
+ * boundaries, not letters, so a name touching them is still a candidate. */
+static void test_extract_curly_apostrophe_and_emoji_neighbours(void) {
+    hu_name_candidate_t c[8];
+    HU_ASSERT_EQ((long)extract("dinner at Priya\xe2\x80\x99s place", NULL, 0, c, 8), 1L);
+    HU_ASSERT_TRUE(cand_is(&c[0], "Priya", HU_NAME_CAPITALIZED));
+    HU_ASSERT_EQ((long)extract("that is Chris\xe2\x80\x99 car", NULL, 0, c, 8), 1L);
+    HU_ASSERT_TRUE(cand_is(&c[0], "Chris", HU_NAME_CAPITALIZED));
+    HU_ASSERT_EQ((long)extract("lunch with Priya\xf0\x9f\x98\x82 tonight", NULL, 0, c, 8), 1L);
+    HU_ASSERT_TRUE(cand_is(&c[0], "Priya", HU_NAME_CAPITALIZED));
+    HU_ASSERT_EQ((long)extract("photo from Salim\xef\xbf\xbc", NULL, 0, c, 8), 1L);
+    HU_ASSERT_TRUE(cand_is(&c[0], "Salim", HU_NAME_CAPITALIZED));
+    /* exactly like ': an inner apostrophe keeps the token whole either way */
+    HU_ASSERT_EQ((long)extract("met D'Angelo today", NULL, 0, c, 8), 0L);
+    HU_ASSERT_EQ((long)extract("met D\xe2\x80\x99"
+                               "Angelo today",
+                               NULL, 0, c, 8),
+                 0L);
+    hu_name_ref_t known[] = {{"Priya", 5, false}};
+    HU_ASSERT_EQ((long)extract("Priya\xe2\x80\x99s surgery went fine", known, 1, c, 8), 1L);
+    HU_ASSERT_TRUE(cand_is(&c[0], "Priya", HU_NAME_KNOWN));
+}
+
+/* I3(a): an emoji, U+FFFC or an ellipsis ends a sentence, so the word after
+ * it is autocapitalized, not a name. */
+static void test_extract_emoji_ellipsis_and_object_end_a_sentence(void) {
+    hu_name_candidate_t c[8];
+    HU_ASSERT_EQ((long)extract("lol \xf0\x9f\x98\x82 Salim is here", NULL, 0, c, 8), 0L);
+    HU_ASSERT_EQ((long)extract("that was fun\xe2\x80\xa6 Salim called", NULL, 0, c, 8), 0L);
+    HU_ASSERT_EQ((long)extract("look \xef\xbf\xbc Salim sent this", NULL, 0, c, 8), 0L);
+    /* a variation selector does not end a sentence by itself */
+    HU_ASSERT_EQ((long)extract("ok \xef\xb8\x8f with Salim", NULL, 0, c, 8), 1L);
+}
+
+/* I3(b): capitalized filler is not a name. */
+static void test_extract_filler_stoplist(void) {
+    hu_name_candidate_t c[8];
+    HU_ASSERT_EQ((long)extract("ok Im going, Love you", NULL, 0, c, 8), 0L);
+    HU_ASSERT_EQ((long)extract("omg, Happy Birthday!", NULL, 0, c, 8), 0L);
+    HU_ASSERT_EQ((long)extract("well Anyway call me Tomorrow", NULL, 0, c, 8), 0L);
+    HU_ASSERT_EQ((long)extract("lol Going to bed Just now", NULL, 0, c, 8), 0L);
+    HU_ASSERT_EQ((long)extract("ha Congrats and Welcome back Wow", NULL, 0, c, 8), 0L);
+    HU_ASSERT_EQ((long)extract("ok Ive Ill Id Also Maybe Sure Nice Cool Damn", NULL, 0, c, 8), 0L);
+    /* a greeting opening the message leaves the name after it */
+    HU_ASSERT_EQ((long)extract("Hey Salim, you around?", NULL, 0, c, 8), 1L);
+    HU_ASSERT_TRUE(cand_is(&c[0], "Salim", HU_NAME_CAPITALIZED));
+    /* a stopword inside a run voids it */
+    HU_ASSERT_EQ((long)extract("saw Salim And Priya", NULL, 0, c, 8), 0L);
+    /* a stopword next to a name leaves the name */
+    HU_ASSERT_EQ((long)extract("lol Thanks Priya", NULL, 0, c, 8), 1L);
+    HU_ASSERT_TRUE(cand_is(&c[0], "Priya", HU_NAME_CAPITALIZED));
+}
+
+/* I3(c): an exact_case ref (an unconfirmed names:turn row) matches only its
+ * own spelling; a normal ref matches any casing. */
+static void test_extract_exact_case_ref_ignores_other_casing(void) {
+    hu_name_candidate_t c[8];
+    hu_name_ref_t exact[] = {{"Priya", 5, true}};
+    HU_ASSERT_EQ((long)extract("saw priya today", exact, 1, c, 8), 0L);
+    HU_ASSERT_EQ((long)extract("saw PRIYA today", exact, 1, c, 8), 0L);
+    HU_ASSERT_EQ((long)extract("saw Priya today", exact, 1, c, 8), 1L);
+    HU_ASSERT_TRUE(cand_is(&c[0], "Priya", HU_NAME_KNOWN));
+    hu_name_ref_t loose[] = {{"Priya", 5, false}};
+    HU_ASSERT_EQ((long)extract("saw priya today", loose, 1, c, 8), 1L);
+    HU_ASSERT_TRUE(cand_is(&c[0], "Priya", HU_NAME_KNOWN));
+}
+
+/* M1: a non-ASCII letter is part of the word for KNOWN matching. */
+static void test_extract_known_does_not_match_inside_non_ascii_word(void) {
+    hu_name_candidate_t c[8];
+    hu_name_ref_t known[] = {{"Ren", 3, false}};
+    HU_ASSERT_EQ((long)extract("met Ren\xc3\xa9 today", known, 1, c, 8), 0L);
+    HU_ASSERT_EQ((long)extract("met \xc3\xa9Ren today", known, 1, c, 8), 0L);
+    HU_ASSERT_EQ((long)extract("met ren today", known, 1, c, 8), 1L);
+}
+
+/* M2: a hyphen joins two Capitalized parts into one name, not a lowercase one. */
+static void test_extract_hyphenated_capitalized_name_is_one_token(void) {
+    hu_name_candidate_t c[8];
+    HU_ASSERT_EQ((long)extract("met Mary-Kate today", NULL, 0, c, 8), 1L);
+    HU_ASSERT_TRUE(cand_is(&c[0], "Mary-Kate", HU_NAME_CAPITALIZED));
+    HU_ASSERT_EQ((long)extract("met Mary-kate today", NULL, 0, c, 8), 1L);
+    HU_ASSERT_TRUE(cand_is(&c[0], "Mary", HU_NAME_CAPITALIZED));
+    HU_ASSERT_EQ((long)extract("a well-Known band", NULL, 0, c, 8), 1L);
+    HU_ASSERT_TRUE(cand_is(&c[0], "Known", HU_NAME_CAPITALIZED));
+}
+
 void run_name_extract_tests(void) {
     HU_TEST_SUITE("name_extract");
     HU_RUN_TEST(test_nameable_truth_table);
@@ -107,4 +205,11 @@ void run_name_extract_tests(void) {
     HU_RUN_TEST(test_extract_respects_out_cap_and_null_inputs);
     HU_RUN_TEST(test_extract_non_ascii_glued_token_is_not_a_candidate);
     HU_RUN_TEST(test_extract_all_caps_and_long_title_runs_are_not_names);
+    HU_RUN_TEST(test_extract_strips_trailing_apostrophe_and_possessive);
+    HU_RUN_TEST(test_extract_curly_apostrophe_and_emoji_neighbours);
+    HU_RUN_TEST(test_extract_emoji_ellipsis_and_object_end_a_sentence);
+    HU_RUN_TEST(test_extract_filler_stoplist);
+    HU_RUN_TEST(test_extract_exact_case_ref_ignores_other_casing);
+    HU_RUN_TEST(test_extract_known_does_not_match_inside_non_ascii_word);
+    HU_RUN_TEST(test_extract_hyphenated_capitalized_name_is_one_token);
 }

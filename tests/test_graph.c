@@ -232,6 +232,70 @@ static void graph_upsert_typed_no_touch_retypes_without_bumping_or_creating(void
     hu_graph_close(g, &alloc);
 }
 
+/* M3: provenance is stamped on insert or on a real retype only. A plain bump
+ * (same type) or a refused retype leaves it as it was; a real retype
+ * overwrites it with the retyper's. */
+static void graph_upsert_typed_stamps_provenance_only_on_retype(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_graph_t *g = NULL;
+    HU_ASSERT_EQ(hu_graph_open(&alloc, "x", 1, &g), HU_OK);
+    int64_t id = 0;
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "c1", 2, "Salim", 5, HU_ENTITY_PERSON, NULL, &id),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity_typed(g, "c1", 2, "Salim", 5, HU_ENTITY_PERSON,
+                                              "names:nightly", 0.8f, 0, &id),
+                 HU_OK);
+    typed_row_t bump = typed_row(g, "c1", "Salim");
+    HU_ASSERT_EQ(bump.mention_count, 2);
+    HU_ASSERT_STR_EQ(bump.provenance, ""); /* same type: a bump, not a stamp */
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "c1", 2, "Pickleball", 10, HU_ENTITY_TOPIC, NULL, &id),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity_typed(g, "c1", 2, "Pickleball", 10, HU_ENTITY_UNKNOWN,
+                                              "names:turn", 0.3f, 0, &id),
+                 HU_OK);
+    typed_row_t refused = typed_row(g, "c1", "Pickleball");
+    HU_ASSERT_STR_EQ(refused.provenance, ""); /* refused retype */
+    HU_ASSERT_EQ(hu_graph_upsert_entity_typed(g, "c1", 2, "Priya", 5, HU_ENTITY_UNKNOWN,
+                                              "names:turn", 0.3f, 0, &id),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity_typed(g, "c1", 2, "Priya", 5, HU_ENTITY_PERSON,
+                                              "names:nightly", 0.8f, 0, &id),
+                 HU_OK);
+    typed_row_t re = typed_row(g, "c1", "Priya");
+    HU_ASSERT_EQ(re.type, (int)HU_ENTITY_PERSON);
+    HU_ASSERT_STR_EQ(re.provenance, "names:nightly"); /* real retype stamps */
+    hu_graph_close(g, &alloc);
+}
+
+/* The list query carries provenance so callers can tell unconfirmed rows. */
+static void graph_list_entities_carries_provenance(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_graph_t *g = NULL;
+    HU_ASSERT_EQ(hu_graph_open(&alloc, "x", 1, &g), HU_OK);
+    int64_t id = 0;
+    HU_ASSERT_EQ(hu_graph_upsert_entity_typed(g, "c1", 2, "Priya", 5, HU_ENTITY_UNKNOWN,
+                                              "names:turn", 0.3f, 0, &id),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "c1", 2, "Tampa", 5, HU_ENTITY_PLACE, NULL, &id), HU_OK);
+    hu_graph_entity_t *ents = NULL;
+    size_t n = 0;
+    HU_ASSERT_EQ(hu_graph_list_entities(g, &alloc, "c1", 2, 10, &ents, &n), HU_OK);
+    HU_ASSERT_EQ((long)n, 2L);
+    int seen = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (strcmp(ents[i].name, "Priya") == 0) {
+            HU_ASSERT_STR_EQ(ents[i].provenance, "names:turn");
+            seen++;
+        } else {
+            HU_ASSERT_STR_EQ(ents[i].provenance, "");
+            seen++;
+        }
+    }
+    HU_ASSERT_EQ(seen, 2);
+    hu_graph_entities_free(&alloc, ents, n);
+    hu_graph_close(g, &alloc);
+}
+
 static void graph_upsert_typed_rejects_bad_args(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_graph_t *g = NULL;
@@ -976,6 +1040,8 @@ void run_graph_tests(void) {
     HU_RUN_TEST(graph_upsert_typed_topic_upgrades_to_place);
     HU_RUN_TEST(graph_upsert_typed_leaves_emotion_alone);
     HU_RUN_TEST(graph_upsert_typed_no_touch_retypes_without_bumping_or_creating);
+    HU_RUN_TEST(graph_upsert_typed_stamps_provenance_only_on_retype);
+    HU_RUN_TEST(graph_list_entities_carries_provenance);
     HU_RUN_TEST(graph_upsert_typed_rejects_bad_args);
     HU_RUN_TEST(graph_open_valid_path_succeeds);
     HU_RUN_TEST(graph_open_null_alloc_returns_error);
