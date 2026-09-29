@@ -62,7 +62,8 @@ const hu_director_result_t *hu_expressive_share_gate(const hu_director_result_t 
 
 /* Self-test commands from Seth's own number: "#voice", "#share <song|video|short|
  * saved> [words]", "#effect <id> [text]", "#tapback <love|like|laugh|emphasize|
- * question|dislike>", "#gif [words]". Only at the start of the message.
+ * question|dislike>", "#gif [words]", "#text [words]" (a normal text reply).
+ * Only at the start of the message.
  * consumed = bytes of the command (and its space) to strip before the turn. */
 typedef struct {
     hu_director_form_t form;
