@@ -6459,6 +6459,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 agent->ab_history_count = history_count;
                 agent->max_response_chars = max_chars;
                 agent->voice_memo_turn = voice_first_memo;
+                /* Owner self-test: a clean slate — only the last few messages, so a
+                 * thread full of test traffic doesn't confuse the reply. */
+                agent->history_msg_cap = selftest_on ? 4 : 0;
 
                 /* T4 (AC-2): hoisted out of the routing block below so the post-turn
                  * local->cloud fallback (further down, outside the HU_IS_TEST guard)
@@ -8206,6 +8209,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 agent->turn_thinking_budget = 0;
                 agent->max_response_chars = 0;
                 agent->voice_memo_turn = false;
+                agent->history_msg_cap = 0;
                 agent->memory_session_id = NULL;
                 agent->memory_session_id_len = 0;
                 if (agent->memory && agent->memory->vtable) {

@@ -77,6 +77,12 @@ static inline uint64_t hu_agent_internal_monotonic_ms(void) {
 
 size_t hu_agent_internal_recent_assistant_avg_len(const hu_agent_t *agent, size_t max_n);
 
+/* Fit the request's messages ([0] = system, last = the current message): the
+ * per-turn history_msg_cap first, then the 20 KB byte budget (oldest first).
+ * Compacts msgs in place and returns the new count. */
+size_t hu_agent_internal_fit_history(const hu_agent_t *agent, hu_chat_message_t *msgs,
+                                     size_t msgs_count);
+
 /* Sprint 46 R5.3 (refactored for testability per audit FAIL):
  * Lazy-load the PersonaEval v2 classifier into agent->persona_eval.
  *

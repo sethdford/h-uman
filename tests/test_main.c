@@ -801,6 +801,7 @@ void run_daemon_voice_reply_tests(void);
 void run_daemon_voice_first_tests(void);
 void run_daemon_expressive_tests(void);
 void run_daemon_share_queue_tests(void);
+void run_agent_fit_history_tests(void);
 void run_prospective_tests(void);
 void run_eval_score_tests(void);
 void run_corrective_rag_tests(void);
@@ -1838,6 +1839,7 @@ int main(int argc, char **argv) {
     run_daemon_voice_first_tests();
     run_daemon_expressive_tests();
     run_daemon_share_queue_tests();
+    run_agent_fit_history_tests();
     run_prospective_tests();
     run_eval_score_tests();
     run_corrective_rag_tests();

@@ -603,6 +603,10 @@ struct hu_agent {
     /* Voice-first memos (spec 2026-09-28): this turn is written as a voice memo,
      * so text-length guards (G5 length anomaly) must not shrink it. */
     bool voice_memo_turn;
+    /* Per turn: keep only the last N prior history messages (0 = all). Owner
+     * self-tests set it so a thread full of test traffic does not confuse the
+     * reply (spec 2026-09-28, Phase 5). */
+    uint8_t history_msg_cap;
 
 #ifdef HU_ENABLE_SQLITE
     hu_meta_params_t meta_params;

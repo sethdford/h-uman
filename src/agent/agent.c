@@ -2984,3 +2984,46 @@ hu_error_t hu_agent_from_app_config(hu_agent_t *out, hu_allocator_t *alloc, hu_p
         0, /* custom_instructions not projected (used for CLI only) */
         app_cfg->persona, app_cfg->persona_len, &ctx_cfg);
 }
+
+/* Keep [0] (system) and msgs[drop_to .. count), sliding survivors forward. */
+static size_t fit_drop_front(hu_chat_message_t *msgs, size_t count, size_t drop_to) {
+    size_t kept_tail = count - drop_to;
+    for (size_t i = 0; i < kept_tail; i++)
+        msgs[1 + i] = msgs[drop_to + i];
+    return 1 + kept_tail;
+}
+
+size_t hu_agent_internal_fit_history(const hu_agent_t *agent, hu_chat_message_t *msgs,
+                                     size_t msgs_count) {
+    if (!msgs || msgs_count <= 2)
+        return msgs_count;
+    /* Owner self-test: only the last few prior messages (plus the current). */
+    if (agent && agent->history_msg_cap > 0 && msgs_count - 2 > agent->history_msg_cap)
+        msgs_count = fit_drop_front(msgs, msgs_count, msgs_count - 1 - agent->history_msg_cap);
+
+    /* A1b — message-history budget cap (2026-05-19). A1 capped the system
+     * prompt at 16 KB, but the messages array grows with the conversation;
+     * multi-turn test A4 saw turn 5 onward fail ("Server returned nothing") once
+     * system prompt + history crossed the MLX backend's effective request cap.
+     * Keep [0] (system) and the last message; drop the oldest history until the
+     * total is under 20 KB (~4 KB of history: 8-10 short iMessage turns). */
+    const size_t HISTORY_BUDGET = 20 * 1024;
+    size_t total_bytes = 0;
+    for (size_t i = 0; i < msgs_count; i++)
+        total_bytes += hu_chat_message_estimate_bytes(&msgs[i]);
+    if (total_bytes <= HISTORY_BUDGET)
+        return msgs_count;
+    size_t drop_idx = 1; /* start after system */
+    while (total_bytes > HISTORY_BUDGET && drop_idx < msgs_count - 1)
+        total_bytes -= hu_chat_message_estimate_bytes(&msgs[drop_idx++]);
+    size_t dropped = drop_idx - 1;
+    if (dropped == 0)
+        return msgs_count;
+    msgs_count = fit_drop_front(msgs, msgs_count, drop_idx);
+    static atomic_bool warned_history_budget = false;
+    hu_log_warn_once(&warned_history_budget, "agent_turn", NULL,
+                     "history truncated: dropped %zu oldest messages to fit %zu-byte budget "
+                     "(now %zu msgs, %zu bytes)",
+                     dropped, HISTORY_BUDGET, msgs_count, total_bytes);
+    return msgs_count;
+}

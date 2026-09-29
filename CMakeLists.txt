@@ -4230,6 +4230,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_daemon_voice_first.c
     tests/test_daemon_expressive.c
     tests/test_daemon_share_queue.c
+    tests/test_agent_fit_history.c
     tests/test_prospective.c
     tests/test_eval_score.c
     tests/test_corrective_rag.c
