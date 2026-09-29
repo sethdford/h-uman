@@ -4,6 +4,13 @@
  * See include/human/core/io_secure.h for the rationale and contract.
  */
 
+/* Before ANY include: glibc under -std=c11 hides mkstemp / fchmod / fsync /
+ * O_CLOEXEC unless POSIX 2008 is requested (macOS exposes them anyway, which
+ * is why only the Linux builds caught this). Same pattern as local_tts.c. */
+#ifndef _DEFAULT_SOURCE
+#define _DEFAULT_SOURCE
+#endif
+
 #include "human/core/io_secure.h"
 
 #include <stdbool.h>
