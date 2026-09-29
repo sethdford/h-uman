@@ -5,7 +5,9 @@ preflight (I1), per-job isolation with finish_run always running (I2), the
 judge job honouring --deadline (I3), and mutant-killing assertions for M1,
 M2, M3, M4, M7, M9 (I4)."""
 import contextlib
+import csv
 import datetime as dt
+import os
 import fcntl
 import json
 import sqlite3
@@ -14,9 +16,21 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+import pytest  # noqa: E402
+
 from second_opinion import backend as be, run_nightly  # noqa: E402
 
 LOCAL_MORNING = dt.datetime(2026, 9, 29, 7, 45).astimezone()   # a Tuesday
+
+
+@pytest.fixture(autouse=True)
+def _restore_umask():
+    """run_nightly.main sets os.umask(0o077) for the whole process (M1); keep
+    that from leaking into other test modules."""
+    old = os.umask(0o022)
+    os.umask(old)
+    yield
+    os.umask(old)
 
 
 def mk_mem(p):
@@ -224,9 +238,13 @@ def test_audit_job_isolated_other_jobs_still_run(tmp_path):
     assert row[0] is not None
 
 
-def test_gold_job_isolated_other_jobs_still_run(tmp_path):
+def test_gold_job_isolated_other_jobs_still_run(tmp_path, monkeypatch):
     setup(tmp_path)
-    make_ab_run_dir(tmp_path, with_triples=False)
+
+    def boom(*a, **k):
+        raise FileNotFoundError("a path that must never leak")
+
+    monkeypatch.setattr(run_nightly.gold, "gold_pass", boom)
     rc = run_nightly.main(args(tmp_path, "--jobs", "audit,gold"), now_local=LOCAL_MORNING,
                           serve=serve_with(Fake(["supported\nok"])), attribute=no_att)
     assert rc == 0
@@ -394,3 +412,109 @@ def test_lock_file_is_not_truncated(tmp_path):
     run_nightly.main(args(tmp_path), now_local=LOCAL_MORNING,
                      serve=serve_with(Fake(["supported\nok"])), attribute=no_att)
     assert lock_path.read_text() == "not-empty-marker"
+
+
+# ---------------------------------------------------------------------------
+# Final-review fix round: I1 (lane judged sheet reaches gold), I2/M11 (weekly
+# reports carry the backend), I4 (no triples.json keeps reference replies),
+# M1 (umask), M10 (read-only openers).
+# ---------------------------------------------------------------------------
+
+def daemon_reply_att(*a, **k):
+    t0 = dt.datetime(2026, 9, 28, 12, 0, tzinfo=dt.timezone.utc)
+    them = {"rowid": 1, "t": t0, "from_me": False, "text": "dinner?"}
+    bot = {"rowid": 2, "t": t0 + dt.timedelta(minutes=1), "from_me": True, "text": "sure"}
+    return {"timelines": {"+1a": [them, bot]}, "labeled": {"+1a": [(bot, "huuman")]}}
+
+
+def test_gold_without_triples_still_writes_reference_replies(tmp_path):
+    setup(tmp_path)
+    make_ab_run_dir(tmp_path, with_triples=False)
+    rc = run_nightly.main(args(tmp_path, "--jobs", "gold"), now_local=LOCAL_MORNING,
+                          serve=serve_with(Fake(["7pm works"])), attribute=daemon_reply_att)
+    assert rc == 0
+    man = json.loads((tmp_path / "logs" / "second-opinion-20260929.json").read_text())
+    assert "error" not in man["gold"]
+    assert man["gold"]["critiques_skipped_no_run"] == 1 and man["gold"]["references"] == 1
+    n = sqlite3.connect(tmp_path / "so.db").execute(
+        "SELECT COUNT(*) FROM reference_replies").fetchone()[0]
+    assert n == 1
+
+
+def test_gold_reads_synthetic_moments_only_from_the_lanes_judged_sheet(tmp_path):
+    setup(tmp_path)
+    run_dir = make_ab_run_dir(tmp_path, with_triples=False)
+    (run_dir / "triples.json").write_text(json.dumps(
+        [{"id": "1", "context": "hi", "seth_reply": "yo", "huuman_reply": "hey"}]))
+    cols = ["id", "choice", "judge_api", "judge_model"]
+    # a judged sheet inside the blind-A/B run dir (unknown judge) is ignored ...
+    with open(run_dir / "judged_prod.csv", "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=cols)
+        w.writeheader()
+        w.writerow({"id": "1", "choice": "A", "judge_api": "openai", "judge_model": "m"})
+    rc = run_nightly.main(args(tmp_path, "--jobs", "gold"), now_local=LOCAL_MORNING,
+                          serve=serve_with(Fake([])), attribute=no_att)
+    assert rc == 0
+    man = json.loads((tmp_path / "logs" / "second-opinion-20260929.json").read_text())
+    assert man["gold"]["attempted"] == 0
+    # ... while the same row in the lane's own judged.csv is used, labelled by model.
+    lane = tmp_path / "reports" / "judge-20260927"
+    lane.mkdir(parents=True)
+    (run_dir / "judged_prod.csv").rename(lane / "judged.csv")
+    ok = '{"gaps":["tone"],"missing":"m","severity":1}'
+    rc = run_nightly.main(args(tmp_path, "--jobs", "gold"), now_local=LOCAL_MORNING,
+                          serve=serve_with(Fake([ok])), attribute=no_att)
+    assert rc == 0
+    row = sqlite3.connect(tmp_path / "so.db").execute(
+        "SELECT item_id, weak_source FROM critiques").fetchone()
+    assert row == ("run1/1", "synthetic:m")
+
+
+def test_weekly_reports_are_scoped_to_the_runs_backend(tmp_path):
+    setup(tmp_path)
+    from second_opinion import store
+    s = store.open_store(str(tmp_path / "so.db"))
+    now = store.now_ms()
+    store.add_audit(s, 9, "wide", "unsupported", "", 0, "other@vertex", "audit-v2", now)
+    store.add_critique(s, "r/x", "human", ["tone"], "", 1, False, "other@vertex",
+                       "critique-v1", now)
+    s.close()
+    rc = run_nightly.main(args(tmp_path, "--jobs", "audit,report"), now_local=LOCAL_MORNING,
+                          serve=serve_with(Fake(["supported\nok"])), attribute=no_att)
+    assert rc == 0
+    rep = json.loads((tmp_path / "reports" / "audit-20260929.json").read_text())
+    assert rep["backends"] == ["fake@local"] and rep["wide"]["unsupported"] == 0
+    assert rep["all"]["supported"] == 1
+    gold_rep = json.loads((tmp_path / "reports" / "gold-20260929.json").read_text())
+    assert gold_rep["critiques"] == 0 and gold_rep["backends"] == []
+
+
+def test_files_created_during_a_run_are_owner_only(tmp_path):
+    # M1: plain open() inside main's flow (as a child process's judged.csv
+    # would be) gets 0600 because main sets umask 077.
+    setup(tmp_path)
+    probe = tmp_path / "probe.txt"
+
+    @contextlib.contextmanager
+    def serve(**kw):
+        with open(probe, "w") as f:
+            f.write("x")
+        yield Fake(["supported\nok"])
+
+    os.umask(0o022)
+    assert run_nightly.main(args(tmp_path), now_local=LOCAL_MORNING, serve=serve,
+                            attribute=no_att) == 0
+    assert (probe.stat().st_mode & 0o777) == 0o600
+
+
+@pytest.mark.parametrize("name,maker", [("memory.db", mk_mem), ("chat.db", mk_chat)])
+def test_lane_opener_is_read_only(tmp_path, name, maker):
+    # M10: nothing the lane opens through _ro can be written.
+    p = str(tmp_path / name)
+    maker(p)
+    con = run_nightly._ro(p)
+    with pytest.raises(sqlite3.OperationalError):
+        con.execute("CREATE TABLE x (a INTEGER)")
+    with pytest.raises(sqlite3.OperationalError):
+        con.execute("INSERT INTO message (text) VALUES ('x')" if name == "chat.db"
+                    else "INSERT INTO messages (content) VALUES ('x')")

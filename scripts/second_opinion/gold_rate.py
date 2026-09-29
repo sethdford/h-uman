@@ -3,6 +3,7 @@ then import Seth's y/n back into the store."""
 import argparse
 import csv
 import json
+import os
 import sys
 
 from . import store
@@ -58,13 +59,17 @@ def import_ratings(store_con, sheet_csv):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
+    default_sheet = os.path.join(store.default_dir(), "rate.csv")
     ap.add_argument("--store", default=store.DEFAULT_PATH)
-    ap.add_argument("--write", help="write unrated rows to this CSV")
-    ap.add_argument("--import", dest="imp", help="import a completed CSV")
+    ap.add_argument("--write", nargs="?", const=default_sheet,
+                    help=f"write unrated rows to this CSV (default {default_sheet})")
+    ap.add_argument("--import", dest="imp", nargs="?", const=default_sheet,
+                    help=f"import a completed CSV (default {default_sheet})")
     a = ap.parse_args(argv)
     con = store.open_store(a.store)
     if a.write:
-        print(f"{write_rating_sheet(con, a.write)} unrated reference replies written")
+        n = write_rating_sheet(con, store.prepare_output(a.write))
+        print(f"{n} unrated reference replies written to {a.write}")
     if a.imp:
         print(json.dumps(import_ratings(con, a.imp)))
     return 0

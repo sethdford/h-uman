@@ -59,7 +59,8 @@ class GemmaBackend:
         self.name = f"{model.rsplit('/', 1)[-1]}@local"
 
     def generate(self, system, user, max_tokens=400):
-        # Gemma chat templates have no system role: fold it into the user turn.
+        # Gemma 4's chat template does support a system role; the system prompt is
+        # folded into the user turn anyway, for simplicity and consistency.
         body = {"model": self.model, "max_tokens": max_tokens, "temperature": 0.0,
                 "messages": [{"role": "user", "content": f"{system}\n\n{user}"}]}
         d = self._post(self.base_url + "/v1/chat/completions", body, {}, self.timeout)

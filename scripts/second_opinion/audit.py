@@ -16,6 +16,7 @@ from . import stats, store  # noqa: E402
 
 PROMPT_VERSION = "audit-v1"
 VERDICTS = ("supported", "unsupported", "unclear")
+SOURCES = ("persona", "wide", "all")
 SYSTEM = ("You check whether a short memory note about a person is supported by the text "
           "messages it cites. On the first line answer with exactly one word: supported, "
           "unsupported, or unclear. supported = the messages state it. unsupported = the "
@@ -115,16 +116,37 @@ def audit_pass(store_con, backend, mem, chat, limit, deadline=None, now=None):
     return c
 
 
-def audit_report(store_con, since_ms=0):
+def audit_filter(backend=None, source="all", since_ms=0):
+    """(WHERE clause, args) selecting audits by provenance. backend=None means
+    every backend; source is "wide", "persona" or "all"."""
+    if source not in SOURCES:
+        raise ValueError(f"unknown source: {source!r}")
+    where, args = " WHERE created_at_ms >= ?", [since_ms]
+    if backend is not None:
+        where += " AND backend = ?"
+        args.append(backend)
+    if source != "all":
+        where += " AND source = ?"
+        args.append(source)
+    return where, args
+
+
+def audit_report(store_con, since_ms=0, backend=None):
+    """Verdict counts and disagreement rate per source. With `backend`, only
+    that backend's verdicts (the runner passes its own); the report always
+    names the backend(s) and prompt version(s) it covers, so a Gemini night
+    can never silently mix into Gemma's number."""
     out = {}
-    for src in ("persona", "wide", "all"):
-        q = "SELECT verdict, COUNT(*) FROM audits WHERE created_at_ms >= ?"
-        args = [since_ms]
-        if src != "all":
-            q += " AND source = ?"
-            args.append(src)
-        n = dict(store_con.execute(q + " GROUP BY verdict", args).fetchall())
+    for src in SOURCES:
+        where, args = audit_filter(backend, src, since_ms)
+        n = dict(store_con.execute("SELECT verdict, COUNT(*) FROM audits" + where
+                                   + " GROUP BY verdict", args).fetchall())
         sup, uns, unc = n.get("supported", 0), n.get("unsupported", 0), n.get("unclear", 0)
         out[src] = {"supported": sup, "unsupported": uns, "unclear": unc,
                     "disagreement": stats.rate(uns, sup + uns)}
+    where, args = audit_filter(backend, "all", since_ms)
+    out["backends"] = sorted(r[0] for r in store_con.execute(
+        "SELECT DISTINCT backend FROM audits" + where, args))
+    out["prompt_versions"] = sorted(r[0] for r in store_con.execute(
+        "SELECT DISTINCT prompt_version FROM audits" + where, args))
     return out

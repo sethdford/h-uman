@@ -57,6 +57,31 @@ CREATE TABLE IF NOT EXISTS runs (
 """
 
 
+def default_dir():
+    """Where human-facing sheets and exports go by default: private to Seth and
+    never inside the repo checkout. Resolved at call time (HOME may change)."""
+    return os.path.expanduser("~/.human/second_opinion")
+
+
+def ensure_private_dir(path):
+    """Create `path` 0700 (and tighten an existing one). Only ever called on the
+    lane's own default dir, never on a directory the operator passed in."""
+    os.makedirs(path, mode=0o700, exist_ok=True)
+    os.chmod(path, 0o700)
+    return path
+
+
+def prepare_output(path):
+    """Make the parent dir of an output file exist; if it is the lane's default
+    dir, make it 0700."""
+    parent = os.path.dirname(os.path.abspath(path))
+    if parent == os.path.abspath(default_dir()):
+        ensure_private_dir(parent)
+    else:
+        os.makedirs(parent, exist_ok=True)
+    return path
+
+
 def open_store(path=DEFAULT_PATH):
     if path != ":memory:":
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)

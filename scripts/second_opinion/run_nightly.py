@@ -95,6 +95,10 @@ def _default_utcnow():
 
 def main(argv=None, *, now_local=None, serve=be.serve_gemma, attribute=None,
          vertex_token=be._adc_token, utcnow=_default_utcnow):
+    # Everything this run (and its child processes: synthetic_judge.py writes
+    # judged.csv with message text) creates is owner-only, even under a
+    # --reports-dir outside ~/.human.
+    os.umask(0o077)
     try:
         a = _parse(argv)
     except SystemExit as e:
@@ -210,8 +214,11 @@ def _run_jobs(a, jobs, deadline, now_local, attribute, utcnow, con, backend, mem
                 att = None  # critiques still run; reference replies need attribution
                 man["gold_attribution_error"] = 1
             runs = [d for d in [judge.latest_run_dir(a.blind_ab_root)] if d]
+            # wide_live reads THIS process's env (the second-opinion plist), not
+            # the daemon's: set HU_INSIGHT_WIDE in both plists (README).
             man["gold"] = gold.gold_pass(con, backend, runs, att, mem, a.gold_limit, deadline,
-                                         wide_live=os.environ.get("HU_INSIGHT_WIDE") == "live")
+                                         wide_live=os.environ.get("HU_INSIGHT_WIDE") == "live",
+                                         judged_csv=judge.latest_lane_judged(a.reports_dir))
             item_attempted += man["gold"]["attempted"]
             item_errors += man["gold"]["errors"]
         except Exception as e:
@@ -255,13 +262,13 @@ def _run_jobs(a, jobs, deadline, now_local, attribute, utcnow, con, backend, mem
         report_errors = 0
         try:
             _atomic_json(os.path.join(a.reports_dir, f"audit-{stamp}.json"),
-                        audit.audit_report(con, week_ago))
+                        audit.audit_report(con, week_ago, backend=backend.name))
         except Exception as e:
             man.setdefault("report", {})["audit_error"] = type(e).__name__
             report_errors += 1
         try:
             _atomic_json(os.path.join(a.reports_dir, f"gold-{stamp}.json"),
-                        gold.gold_report(con, week_ago))
+                        gold.gold_report(con, week_ago, backend=backend.name))
         except Exception as e:
             man.setdefault("report", {})["gold_error"] = type(e).__name__
             report_errors += 1

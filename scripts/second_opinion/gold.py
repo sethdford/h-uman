@@ -25,35 +25,60 @@ REFERENCE_SYSTEM = (
     "or two short lines, no quotes.")
 
 
-def weak_items(run_dir):
-    key = json.load(open(os.path.join(run_dir, "answer_key.json")))
+def _run_usable(run_dir):
+    return (os.path.isfile(os.path.join(run_dir, "answer_key.json"))
+            and os.path.isfile(os.path.join(run_dir, "triples.json")))
+
+
+def weak_items(run_dir, judged_csv=None, judge_model=None):
+    """(item_id, weak_source, triple) for the moments h-uman was caught.
+
+    Human detections (confidence >= 4) come from the un-judged sheets in the
+    blind-A/B run dir. Synthetic detections come ONLY from `judged_csv` -- the
+    lane's own judge output -- and only from rows stamped with `judge_model`
+    (the current backend's model id); judged sheets inside the run dir are
+    ignored, because their judge may be the prod model family. weak_source is
+    "human" or "synthetic:<judge_model>". A run dir without answer_key.json or
+    triples.json yields [] (the operator hasn't copied triples in yet)."""
+    if not _run_usable(run_dir):
+        return []
+    with open(os.path.join(run_dir, "answer_key.json")) as f:
+        key = json.load(f)
     if isinstance(key, dict) and key.get("_mode") not in (None, "detection"):
         # A blind-A/B run made with --mode preference stamps "_mode":
         # "preference" and the key then means the MODEL's side, not the
         # human's answer — reading it as a detection key would silently
         # invert which items count as "weak moments".
         return []
-    triples = {t["id"]: t for t in json.load(open(os.path.join(run_dir, "triples.json")))}
+    with open(os.path.join(run_dir, "triples.json")) as f:
+        triples = {t["id"]: t for t in json.load(f)}
+
+    def caught(r):
+        iid, ch = r.get("id"), (r.get("choice") or "").strip().upper()
+        return ch in ("A", "B") and iid in key and iid in triples and ch == key[iid]
+
     human, synth = [], []
     for path in sorted(glob.glob(os.path.join(run_dir, "*.csv"))):
         with open(path, newline="") as f:
             rows = list(csv.DictReader(f))
-        judged = any(store.row_is_judged(r) for r in rows)
+        if any(store.row_is_judged(r) for r in rows):
+            continue  # never trust a judged sheet of unknown provenance
         for r in rows:
-            iid, ch = r.get("id"), (r.get("choice") or "").strip().upper()
-            if ch not in ("A", "B") or iid not in key or iid not in triples or ch != key[iid]:
-                continue
-            if judged:
-                synth.append(iid)
+            if not caught(r):
                 continue
             try:
                 conf = int(float(r.get("confidence") or 0))
             except ValueError:
                 conf = 0
             if conf >= 4:
-                human.append(iid)
+                human.append(r["id"])
+    if judged_csv and judge_model and os.path.isfile(judged_csv):
+        with open(judged_csv, newline="") as f:
+            for r in csv.DictReader(f):
+                if (r.get("judge_model") or "").strip() == judge_model and caught(r):
+                    synth.append(r["id"])
     out, seen = [], set()
-    for src, ids in (("human", human), ("synthetic", synth)):
+    for src, ids in (("human", human), ("synthetic:" + str(judge_model), synth)):
         for iid in ids:
             if iid not in seen:
                 seen.add(iid)
@@ -109,7 +134,11 @@ def _utcnow():
 
 
 def gold_pass(store_con, backend, run_dirs, att, mem, limit, deadline=None, now=None,
-              wide_live=False):
+              wide_live=False, judged_csv=None):
+    """`limit` applies separately to critiques and to reference replies, so a
+    night makes at most 2 x limit model calls. `judged_csv` is the lane's own
+    newest judged sheet (judge.latest_lane_judged), the only source of
+    synthetic weak moments."""
     now = now or _utcnow
     c = {k: 0 for k in ("critiques", "references", "unparseable", "errors", "attempted",
                         "stopped_at_deadline")}
@@ -120,8 +149,23 @@ def gold_pass(store_con, backend, run_dirs, att, mem, limit, deadline=None, now=
             return True
         return False
 
+    c["critiques_skipped_no_run"] = 0
+    if not run_dirs:
+        c["critiques_skipped_no_run"] = 1
     done = store.critiqued_items(store_con, backend.name)
-    todo = [w for d in run_dirs for w in weak_items(d) if w[0] not in done]
+    todo = []
+    for d in run_dirs:
+        if not _run_usable(d):
+            # No triples.json (or key) yet: skip the critique half for this run
+            # dir, but the reference-reply half below does not need one.
+            c["critiques_skipped_no_run"] += 1
+            continue
+        # Item ids like "c5-001" recur across re-exported run dirs, so the
+        # stored id is scoped by the run dir's name.
+        prefix = os.path.basename(os.path.normpath(d)) + "/"
+        for iid, src, t in weak_items(d, judged_csv, getattr(backend, "model", None)):
+            if prefix + iid not in done:
+                todo.append((prefix + iid, src, t))
     for iid, src, t in todo[:limit]:
         if out_of_time():
             return c
@@ -163,14 +207,22 @@ def gold_pass(store_con, backend, run_dirs, att, mem, limit, deadline=None, now=
     return c
 
 
-def gold_report(store_con, since_ms=0):
+def gold_report(store_con, since_ms=0, backend=None):
+    """Weekly gold summary. With `backend`, only that backend's rows; the
+    report always names the backend(s) it covers."""
+    where, args = " WHERE created_at_ms >= ?", [since_ms]
+    if backend is not None:
+        where += " AND backend = ?"
+        args.append(backend)
     gaps = collections.Counter()
     crit = unp = 0
-    for g, bad in store_con.execute("SELECT gaps, unparseable FROM critiques"
-                                    " WHERE created_at_ms >= ?", (since_ms,)):
+    for g, bad in store_con.execute("SELECT gaps, unparseable FROM critiques" + where, args):
         crit += 1
         unp += bad
         gaps.update(json.loads(g))
-    refs = store_con.execute("SELECT COUNT(*) FROM reference_replies WHERE created_at_ms >= ?",
-                             (since_ms,)).fetchone()[0]
-    return {"critiques": crit, "references": refs, "unparseable": unp, "gaps": dict(gaps)}
+    refs = store_con.execute("SELECT COUNT(*) FROM reference_replies" + where, args).fetchone()[0]
+    backends = sorted({r[0] for tbl in ("critiques", "reference_replies")
+                       for r in store_con.execute(f"SELECT DISTINCT backend FROM {tbl}" + where,
+                                                  args)})
+    return {"critiques": crit, "references": refs, "unparseable": unp, "gaps": dict(gaps),
+            "backends": backends}

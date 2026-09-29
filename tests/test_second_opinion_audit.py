@@ -117,3 +117,19 @@ def test_a_broken_database_read_is_unresolvable_not_a_crash():
     s = store.open_store(":memory:")
     counts = audit.audit_pass(s, Fake(["unsupported\nx"]), m, chat_db(), limit=10)
     assert counts["skipped_no_evidence"] == 3 and counts["audited"] == 1
+
+
+def test_audit_report_filters_to_one_backend_and_names_its_provenance():
+    # I2: a Vertex night must never mix into the Gemma number.
+    s = store.open_store(":memory:")
+    store.add_audit(s, 1, "wide", "unsupported", "", 0, "gemma@local", "audit-v1", 10)
+    store.add_audit(s, 2, "wide", "supported", "", 0, "gemma@local", "audit-v1", 10)
+    store.add_audit(s, 1, "wide", "supported", "", 0, "gem@vertex", "audit-v2", 10)
+    store.add_audit(s, 3, "wide", "supported", "", 0, "gem@vertex", "audit-v2", 10)
+    pooled = audit.audit_report(s)
+    assert pooled["wide"]["disagreement"]["rate"] == 0.25
+    assert pooled["backends"] == ["gem@vertex", "gemma@local"]
+    local = audit.audit_report(s, backend="gemma@local")
+    assert local["wide"]["disagreement"]["rate"] == 0.5
+    assert local["backends"] == ["gemma@local"] and local["prompt_versions"] == ["audit-v1"]
+    assert audit.audit_report(s, backend="nobody")["all"]["disagreement"] == stats.NOT_MEASURED

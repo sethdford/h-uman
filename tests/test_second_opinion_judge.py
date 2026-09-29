@@ -120,3 +120,58 @@ def test_judge_pass_skips_non_local_backends(tmp_path):
         name = "gemini-3.8-flash@vertex"
 
     assert judge.judge_pass(V(), str(tmp_path), str(tmp_path)) == {"skipped": "backend"}
+
+
+# ---------------------------------------------------------------------------
+# Final-review fix round: C1 — score.py exits 1 on any verdict other than PASS
+# (after writing results); that night must still produce the calibration.
+# ---------------------------------------------------------------------------
+
+def _scoring_run(score_rc, write_results=True):
+    class R:
+        def __init__(self, rc):
+            self.returncode = rc
+
+    def run(cmd, **kw):
+        if cmd[1].endswith("synthetic_judge.py"):
+            sheet(cmd[cmd.index("--out") + 1], ["A"] * 20 + ["B"] * 5, judged=True)
+            return R(0)
+        if write_results:
+            Path(cmd[cmd.index("--json-out") + 1]).write_text(
+                json.dumps({"verdict": "FAIL", "detection": 0.88}))
+        return R(score_rc)
+    return run
+
+
+def _run_dir_25(tmp_path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    sheet(run_dir / "rating_sheet.csv", [""] * 25)
+    (run_dir / "answer_key.json").write_text(json.dumps({f"x{i}": "A" for i in range(25)}))
+    sheet(run_dir / "rating_sheet_seth.csv", ["A"] * 20 + ["B"] * 5)
+    return run_dir
+
+
+def test_judge_pass_calibrates_when_score_verdict_is_not_pass(tmp_path):
+    run_dir = _run_dir_25(tmp_path)
+    r = judge.judge_pass(G(), str(run_dir), str(tmp_path / "out"), run=_scoring_run(1))
+    assert r["score_exit"] == 1 and r["results"]["verdict"] == "FAIL"
+    assert r["calibration"]["shared"] == 25 and r["calibration"]["agreement"] == 1.0
+    assert r["calibration"]["kappa"] == 1.0
+
+
+def test_judge_pass_treats_score_refusal_as_failure(tmp_path):
+    import pytest
+    run_dir = _run_dir_25(tmp_path)
+    for rc in (2, 3):
+        with pytest.raises(RuntimeError):
+            judge.judge_pass(G(), str(run_dir), str(tmp_path / f"out{rc}"),
+                             run=_scoring_run(rc))
+
+
+def test_judge_pass_needs_the_results_file_even_on_exit_1(tmp_path):
+    import pytest
+    run_dir = _run_dir_25(tmp_path)
+    with pytest.raises(RuntimeError):
+        judge.judge_pass(G(), str(run_dir), str(tmp_path / "out"),
+                         run=_scoring_run(1, write_results=False))

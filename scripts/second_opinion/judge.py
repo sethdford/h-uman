@@ -12,6 +12,7 @@ from . import stats, store
 
 SCRIPTS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BLIND_AB = os.path.join(SCRIPTS, "blind_ab")
+SCORED_EXIT_CODES = (0, 1)  # score.py: 0 = PASS, 1 = any other verdict; both wrote results
 
 
 def _key_is_detection_mode(key_path):
@@ -92,7 +93,27 @@ def judge_pass(backend, run_dir, out_dir, run=subprocess.run, timeout=None):
     r2 = run([sys.executable, os.path.join(BLIND_AB, "score.py"), judged,
               "--key", os.path.join(run_dir, "answer_key.json"), "--rater", "synthetic",
               "--json-out", results], capture_output=True, text=True, timeout=timeout)
-    if r2.returncode != 0:
+    # score.py exits 0 on PASS and 1 on any other verdict (INCONCLUSIVE/FAIL),
+    # AFTER writing --json-out and merging the synthetic gate half. Both mean
+    # "scored"; a stronger judge failing Seth's twin is the expected outcome and
+    # must still produce the calibration. 2/3 (refusal, n=0) and anything else
+    # are failures.
+    if r2.returncode not in SCORED_EXIT_CODES:
         raise RuntimeError("score.py failed")
-    return {"results": json.load(open(results)),
+    if not os.path.isfile(results):
+        raise RuntimeError("score.py wrote no results")
+    with open(results) as f:
+        scored = json.load(f)
+    return {"results": scored, "score_exit": r2.returncode,
             "calibration": calibration(human_choices(run_dir), _choices(judged))}
+
+
+def latest_lane_judged(reports_dir):
+    """The lane's own newest judged sheet (<reports_dir>/judge-YYYYMMDD/judged.csv,
+    written by judge_pass), or None. The gold job reads synthetic weak moments
+    ONLY from here -- never from judged sheets sitting in a blind-A/B run dir,
+    whose judge may be the prod model family."""
+    if not reports_dir or not os.path.isdir(reports_dir):
+        return None
+    found = sorted(glob.glob(os.path.join(reports_dir, "judge-*", "judged.csv")))
+    return found[-1] if found else None

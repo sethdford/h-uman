@@ -131,3 +131,46 @@ def test_import_ratings_rolls_back_everything_on_unexpected_error(tmp_path):
     s.commit()
     assert [r[0] for r in s.execute("SELECT rated FROM reference_replies ORDER BY id")] == \
         [None, None, None]
+
+
+# ---------------------------------------------------------------------------
+# Final-review fix round: I3 — human-facing CSVs default under
+# ~/.human/second_opinion/ (0700 dir, 0600 files), never the repo checkout.
+# ---------------------------------------------------------------------------
+
+def test_gold_rate_and_export_default_to_private_dir(tmp_path, monkeypatch):
+    import os
+    home, cwd = tmp_path / "home", tmp_path / "repo"
+    home.mkdir()
+    cwd.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.chdir(cwd)
+    so = str(tmp_path / "so.db")
+    s = store.open_store(so)
+    for i in range(2):
+        store.add_reference(s, "+1a", i, f"ctx {i}", f"reply {i}", "g@local", "reference-v1", 1)
+    s.close()
+    assert gold_rate.main(["--store", so, "--write"]) == 0
+    d = home / ".human" / "second_opinion"
+    sheet = d / "rate.csv"
+    assert (d.stat().st_mode & 0o777) == 0o700 and (sheet.stat().st_mode & 0o777) == 0o600
+    rows = list(csv.DictReader(open(sheet)))
+    assert len(rows) == 2
+    write_sheet(sheet, [{"id": rows[0]["id"], "context": "", "reply": "", "good": "y"},
+                        {"id": rows[1]["id"], "context": "", "reply": "", "good": "n"}])
+    assert gold_rate.main(["--store", so, "--import"]) == 0
+    assert gold_export.main(["--store", so]) == 0
+    out = d / "gold_export.csv"
+    assert (out.stat().st_mode & 0o777) == 0o600
+    assert len(list(csv.DictReader(open(out)))) == 1
+    assert os.listdir(cwd) == []          # nothing landed in the checkout
+
+
+def test_explicit_output_dir_is_not_chmodded(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    mine = tmp_path / "mine"
+    mine.mkdir(mode=0o755)
+    mine.chmod(0o755)
+    assert gold_export.main([str(mine / "x.csv"), "--store", str(tmp_path / "so.db")]) == 0
+    assert (mine.stat().st_mode & 0o777) == 0o755
+    assert ((mine / "x.csv").stat().st_mode & 0o777) == 0o600
