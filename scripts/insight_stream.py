@@ -672,21 +672,56 @@ import curator_evidence as ce  # noqa: E402  (scripts/ is on sys.path when run a
 import curator_population as cp  # noqa: E402
 
 WIDE_SOURCE_PREFIX = "curator_wide:"
+CURATOR_STATE = os.path.join(HOME, ".human/curator_state.json")
 
 
-def wide_pass(db, a, identity, persona_ids, att, now, write):
+def retire_suppressed(db, suppressed, now_ms, write):
+    """Opt-out takes effect on what is already known, not only on what is
+    learned next: every live row for a suppressed contact is retired."""
+    if not suppressed:
+        return 0
+    qs = ",".join("?" * len(suppressed))
+    n = db.execute(f"SELECT COUNT(*) FROM contact_insights WHERE retired_at_ms=0 AND"
+                   f" contact_id IN ({qs})", tuple(suppressed)).fetchone()[0]
+    if write and n:
+        db.execute(f"UPDATE contact_insights SET retired_at_ms=? WHERE retired_at_ms=0 AND"
+                   f" contact_id IN ({qs})", (now_ms, *suppressed))
+        db.commit()
+    return n
+
+
+def order_by_last_run(handles, state):
+    return sorted(handles, key=lambda h: (state.get(h, 0), h))
+
+
+def write_manifest(manifest_dir, now, man):
+    if not man.get("eligible"):
+        print("refusing: 0 eligible contacts (no manifest written)", file=sys.stderr)
+        return 2
+    os.makedirs(manifest_dir, exist_ok=True)
+    path = os.path.join(manifest_dir, f"curator-manifest-{now.strftime('%Y%m%d')}.json")
+    json.dump(man, open(path, "w"), indent=1, sort_keys=True)
+    return 0
+
+
+def wide_pass(db, a, identity, persona_ids, att, now, write, deadline=None, state=None):
     """Curate every eligible non-persona 1:1 contact from chat.db (spec §3-5).
     Returns a counts-only manifest; never text."""
     man = {k: 0 for k in ("eligible", "excluded_suppressed", "excluded_never", "curated",
                           "notes_written", "rejected_no_evidence", "rejected_daemon_evidence",
-                          "rejected_name_not_said", "names_total", "notes_named")}
+                          "rejected_name_not_said", "names_total", "notes_named",
+                          "stopped_at_deadline")}
     suppressed = cp.load_suppressed(MEMORY_DB)  # module global so tests can redirect it
     never = cp.load_never(getattr(a, "never_path", cp.NEVER_PATH))
-    cutoff = now - dt.timedelta(days=getattr(a, "window_days", cp.WINDOW_DAYS))
-    handles = cp.eligible_handles(att["timelines"], persona_ids, now)
+    window_days = getattr(a, "window_days", cp.WINDOW_DAYS)
+    cutoff = now - dt.timedelta(days=window_days)
+    handles = cp.eligible_handles(att["timelines"], persona_ids, now, window_days=window_days)
     man["eligible"] = len(handles)
     now_ms = int(now.timestamp() * 1000)
-    for h in handles:
+    for h in order_by_last_run(handles, state if state is not None else {}):
+        if deadline is not None and dt.datetime.now(dt.timezone.utc) >= deadline:
+            man["stopped_at_deadline"] = 1
+            break
         why = cp.exclusion_reason(h, suppressed, never)
         if why:
             man[f"excluded_{why}"] += 1
@@ -723,7 +758,55 @@ def wide_pass(db, a, identity, persona_ids, att, now, write):
                   json.dumps([f"chat:{r[0]}" for r in v["evidence_rows"]])) for v in kept])
             db.commit()
             man["notes_written"] += db.total_changes - before
+        if state is not None:
+            state[h] = now_ms
     return man
+
+
+def run_wide(a, db, identity, contacts, now_ms):
+    """The --population wide dispatch: chat.db/model/never refusals, opt-out
+    retirement, the curator pass, and the counts-only manifest. Any
+    sqlite3.Error while reading memory.db (suppressions or the pass itself)
+    refuses BEFORE any manifest or state file is written (R5, fail closed)."""
+    import eval_conversation_quality as cq
+    try:
+        con = sqlite3.connect(f"file:{a.chat_db}?mode=ro", uri=True)
+        con.execute("SELECT 1 FROM message LIMIT 1").fetchall()
+        con.close()
+    except sqlite3.Error as e:
+        print(f"refusing: chat.db unreadable ({e}); grant Full Disk Access to this "
+              "python for the launchd job", file=sys.stderr)
+        return 2
+    try:
+        urllib.request.urlopen(a.url.rsplit("/v1/", 1)[0] + "/health", timeout=5)
+    except Exception as e:
+        print(f"refusing: model server down ({e})", file=sys.stderr)
+        return 2
+    try:
+        cp.load_never(a.never_path)
+    except (ValueError, json.JSONDecodeError) as e:
+        print(f"refusing: {e}", file=sys.stderr)
+        return 2
+    now = dt.datetime.now(dt.timezone.utc)
+    att = cq.attribute(a.chat_db, MEMORY_DB, now - dt.timedelta(days=a.window_days))
+    deadline = None
+    if a.deadline:
+        hh, mm = map(int, a.deadline.split(":"))
+        local = dt.datetime.now().astimezone().replace(hour=hh, minute=mm, second=0,
+                                                       microsecond=0)
+        deadline = local.astimezone(dt.timezone.utc)
+    state = json.load(open(CURATOR_STATE)) if os.path.exists(CURATOR_STATE) else {}
+    try:
+        suppressed = cp.load_suppressed(MEMORY_DB)
+        retired = retire_suppressed(db, suppressed, now_ms, a.write)
+        man = wide_pass(db, a, identity, set(contacts), att, now, a.write, deadline, state)
+    except sqlite3.Error as e:
+        print(f"refusing: memory.db unreadable ({e})", file=sys.stderr)
+        return 2
+    man["retired_suppressed"] = retired
+    if a.write:
+        json.dump(state, open(CURATOR_STATE, "w"))
+    return write_manifest(a.manifest_dir, now, man)
 
 
 def main():
@@ -748,6 +831,12 @@ def main():
     ap.add_argument("--write", action="store_true")
     ap.add_argument("--url", default=DEFAULT_URL)
     ap.add_argument("--model", default=DEFAULT_MODEL)
+    ap.add_argument("--population", choices=["persona", "wide"], default="persona")
+    ap.add_argument("--chat-db", default=os.path.join(HOME, "Library/Messages/chat.db"))
+    ap.add_argument("--window-days", type=int, default=30)
+    ap.add_argument("--deadline", help="HH:MM local; stop before the next contact after this")
+    ap.add_argument("--manifest-dir", default=os.path.join(HOME, ".human/logs"))
+    ap.add_argument("--never-path", default=os.path.join(HOME, ".human/curator_never.json"))
     a = ap.parse_args()
     if not a.url.startswith("http://127.0.0.1") and not a.url.startswith("http://localhost"):
         print("refusing: the extractor reads real conversations and only talks to a local model",
@@ -760,6 +849,8 @@ def main():
     migrate(db)
     targets = [a.contact] if a.contact else list(contacts)
     now_ms = int(time.time() * 1000)
+    if a.population == "wide":
+        return run_wide(a, db, identity, contacts, now_ms)
     if a.prune_triggers:
         prune_pass(db, targets, a.write)
         return 0

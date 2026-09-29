@@ -82,3 +82,127 @@ def test_wide_pass_dry_run_writes_nothing(tmp_path, monkeypatch):
     monkeypatch.setattr(ins, "verify_claims", lambda a, s, u, claims, k: [])
     ins.wide_pass(db, A(), "id", set(), att, NOW, write=False)
     assert db.execute("SELECT COUNT(*) FROM contact_insights").fetchone()[0] == 0
+
+
+def test_suppressed_contact_rows_are_retired_whatever_the_source(tmp_path, monkeypatch):
+    db = sqlite3.connect(tmp_path / "m.db"); db.executescript(ins.SCHEMA); ins.migrate(db)
+    db.execute("INSERT INTO contact_insights (contact_id, kind, insight, confidence, as_of_ms,"
+               " source, created_at_ms) VALUES (?, 'fact', 'old note', 0.9, 1, 'extractor:v2', 1)",
+               (H,))
+    db.commit()
+    n = ins.retire_suppressed(db, {H}, now_ms=5, write=True)
+    assert n == 1
+    assert db.execute("SELECT retired_at_ms FROM contact_insights").fetchone()[0] == 5
+
+
+def test_deadline_stops_before_the_next_contact_and_order_prefers_stale(tmp_path, monkeypatch):
+    state = {"+1a": 300, "+1b": 100, "+1c": 200}
+    assert ins.order_by_last_run(["+1a", "+1b", "+1c", "+1d"], state) == ["+1d", "+1b", "+1c", "+1a"]
+    db = sqlite3.connect(tmp_path / "m.db"); db.executescript(ins.SCHEMA); ins.migrate(db)
+    att = {"timelines": {H: timeline()}, "labels": {f"me{i}": "seth" for i in range(6)}}
+    monkeypatch.setattr(ins, "call_model", lambda *a, **k: (_ for _ in ()).throw(AssertionError))
+    man = ins.wide_pass(db, A(), "id", set(), att, NOW, write=True,
+                        deadline=NOW - dt.timedelta(minutes=1), state={})
+    assert man["curated"] == 0 and man["stopped_at_deadline"] == 1
+
+
+def test_manifest_refuses_when_nothing_is_eligible(tmp_path):
+    # a dedicated subdir: tmp_path itself already holds the autouse fixture's
+    # hermetic suppressions.db, which would make the "wrote nothing" assertion
+    # below see a stray file that has nothing to do with write_manifest.
+    manifest_dir = tmp_path / "manifest"
+    assert ins.write_manifest(str(manifest_dir), NOW, {"eligible": 0}) == 2
+    assert not manifest_dir.exists()
+    assert ins.write_manifest(str(manifest_dir), NOW, {"eligible": 3, "notes_written": 1}) == 0
+    assert json.loads((manifest_dir / "curator-manifest-20260928.json").read_text())["eligible"] == 3
+
+
+def test_wide_pass_uses_the_same_window_for_eligibility_and_evidence(tmp_path, monkeypatch):
+    """R9a: cp.eligible_handles must see the same window_days used for the
+    evidence cutoff -- pin it by making the two windows disagree and
+    confirming the CLI's --window-days value (not the eligible_handles
+    default) is what decides eligibility."""
+    db = sqlite3.connect(tmp_path / "m.db"); db.executescript(ins.SCHEMA); ins.migrate(db)
+    seen = {}
+    real_eligible = ins.cp.eligible_handles
+
+    def spy(timelines, persona_ids, now, **kw):
+        seen["window_days"] = kw.get("window_days")
+        return real_eligible(timelines, persona_ids, now, **kw)
+    monkeypatch.setattr(ins.cp, "eligible_handles", spy)
+    att = {"timelines": {H: timeline()}, "labels": {f"me{i}": "seth" for i in range(6)}}
+    monkeypatch.setattr(ins, "call_model", lambda *a, **k: (_ for _ in ()).throw(AssertionError))
+    a = A(); a.window_days = 7
+    ins.wide_pass(db, a, "id", set(), att, NOW, write=False,
+                  deadline=NOW - dt.timedelta(minutes=1), state={})
+    assert seen["window_days"] == 7
+
+
+def test_run_wide_refuses_before_writing_when_memory_db_unreadable(tmp_path, monkeypatch):
+    """R5: fail closed. A sqlite3.Error reading memory.db (here, the
+    suppressions read inside run_wide) must refuse with exit 2 and write no
+    manifest and no state file -- before wide_pass or write_manifest ever
+    run. chat.db/model/never-file checks are monkeypatched so only the
+    memory.db failure is under test."""
+    db = sqlite3.connect(tmp_path / "m.db"); db.executescript(ins.SCHEMA); ins.migrate(db)
+    chat_db = tmp_path / "chat.db"
+    c = sqlite3.connect(chat_db)
+    c.execute("CREATE TABLE message (rowid INTEGER)")
+    c.commit(); c.close()
+    monkeypatch.setattr(ins.urllib.request, "urlopen", lambda *a, **k: None)
+    import eval_conversation_quality as cq
+    monkeypatch.setattr(cq, "attribute", lambda *a, **k: {
+        "timelines": {H: timeline()}, "labels": {f"me{i}": "seth" for i in range(6)}})
+    monkeypatch.setattr(ins.cp, "load_suppressed",
+                        lambda *a, **k: (_ for _ in ()).throw(sqlite3.OperationalError("locked")))
+    monkeypatch.setattr(ins, "call_model", lambda *a, **k: (_ for _ in ()).throw(AssertionError))
+    state_path = tmp_path / "curator_state.json"
+    monkeypatch.setattr(ins, "CURATOR_STATE", str(state_path))
+    manifest_dir = tmp_path / "manifests"
+    a = A()
+    a.chat_db = str(chat_db); a.window_days = 30; a.deadline = None
+    a.manifest_dir = str(manifest_dir); a.write = False
+    rc = ins.run_wide(a, db, "id", set(), 123)
+    assert rc == 2
+    assert not manifest_dir.exists()
+    assert not state_path.exists()
+
+
+def test_run_wide_excludes_suppressed_and_never_without_calling_model(tmp_path, monkeypatch):
+    """R9b end-to-end: one eligible contact opted out via contact_suppressions,
+    one eligible contact opted out via the --never-path file -> the manifest
+    reports both exclusions, curated == 0, and call_model is never invoked."""
+    db = sqlite3.connect(tmp_path / "m.db"); db.executescript(ins.SCHEMA); ins.migrate(db)
+    chat_db = tmp_path / "chat.db"
+    c = sqlite3.connect(chat_db)
+    c.execute("CREATE TABLE message (rowid INTEGER)")
+    c.commit(); c.close()
+    monkeypatch.setattr(ins.urllib.request, "urlopen", lambda *a, **k: None)
+    H2 = "+15550000099"
+    import eval_conversation_quality as cq
+    monkeypatch.setattr(cq, "attribute", lambda *a, **k: {
+        "timelines": {H: timeline(), H2: timeline()},
+        "labels": {f"me{i}": "seth" for i in range(6)}})
+    mem = sqlite3.connect(ins.MEMORY_DB)  # the hermetic tmp file from the autouse fixture
+    mem.execute("CREATE TABLE contact_suppressions (contact TEXT)")
+    mem.execute("INSERT INTO contact_suppressions VALUES (?)", (H,))
+    mem.commit(); mem.close()
+    never_path = tmp_path / "never.json"
+    never_path.write_text(json.dumps([H2]))
+    monkeypatch.setattr(ins, "call_model", lambda *a, **k: (_ for _ in ()).throw(AssertionError))
+    state_path = tmp_path / "curator_state.json"
+    monkeypatch.setattr(ins, "CURATOR_STATE", str(state_path))
+    manifest_dir = tmp_path / "manifests"
+    a = A()
+    a.chat_db = str(chat_db); a.window_days = 30; a.deadline = None
+    a.manifest_dir = str(manifest_dir); a.write = False; a.never_path = str(never_path)
+    rc = ins.run_wide(a, db, "id", set(), 123)
+    assert rc == 0
+    # run_wide uses the real wall clock for "now" (not the fixed NOW/H fixtures
+    # above), so find today's manifest rather than assuming its date stamp.
+    manifest_files = list(manifest_dir.glob("curator-manifest-*.json"))
+    assert len(manifest_files) == 1
+    man = json.loads(manifest_files[0].read_text())
+    assert man["excluded_suppressed"] == 1
+    assert man["excluded_never"] == 1
+    assert man["curated"] == 0
