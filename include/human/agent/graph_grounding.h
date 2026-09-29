@@ -112,4 +112,39 @@ typedef enum hu_graph_grounding_fallback_mode {
  * unknown -> OFF. */
 hu_graph_grounding_fallback_mode_t hu_graph_grounding_contact_fallback_mode(void);
 
+/* ── Turn composition (spec 2026-09-29 §4.6) ───────────────────────────────
+ * The lexical -> contact-fallback -> owner-facts composition that
+ * hu_agent_load_graph_grounding injects (before its tier gate), with no agent
+ * dependency, so `human memory ground --full` measures the real path. Gates
+ * arrive as a bitmask (hu_graph_ground_turn_flags_from_env) so tests need no
+ * setenv; SHADOW sub-gates are reported in stats and never injected, and the
+ * caller logs them. */
+#define HU_GG_TURN_FALLBACK_SHADOW 0x01u
+#define HU_GG_TURN_FALLBACK_LIVE   0x02u
+#define HU_GG_TURN_SELF_SHADOW     0x04u
+#define HU_GG_TURN_SELF_LIVE       0x08u
+
+typedef struct hu_graph_ground_turn_stats {
+    size_t matched_entities; /* lexical seeds of the contact block */
+    bool via_fallback;       /* the contact fallback supplied the block */
+    bool via_self;           /* an "About you:" owner block was appended */
+    bool fallback_shadow;    /* fallback composed in SHADOW (not injected) */
+    size_t fallback_shadow_bytes;
+    uint32_t fallback_shadow_fp;
+    bool self_shadow; /* owner facts composed in SHADOW (not injected) */
+    size_t self_shadow_bytes;
+    uint32_t self_shadow_fp;
+} hu_graph_ground_turn_stats_t;
+
+/* HU_GRAPH_GROUNDING_CONTACT_FALLBACK and HU_GRAPH_GROUNDING_SELF_FACTS ->
+ * HU_GG_TURN_* bits (unset/off/unknown -> no bit). */
+unsigned hu_graph_ground_turn_flags_from_env(void);
+
+/* Fail-open (always HU_OK). *out is NULL/0 when nothing composes; the caller
+ * frees it via loader->alloc (len + 1). `stats` may be NULL. */
+hu_error_t hu_graph_ground_compose_turn(hu_memory_loader_t *loader, const char *contact_id,
+                                        size_t contact_id_len, const char *msg, size_t msg_len,
+                                        unsigned turn_flags, char **out, size_t *out_len,
+                                        hu_graph_ground_turn_stats_t *stats);
+
 #endif /* HU_AGENT_GRAPH_GROUNDING_H */

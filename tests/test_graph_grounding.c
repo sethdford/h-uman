@@ -613,6 +613,178 @@ static void test_load_grounding_contact_fallback_gate(void) {
     gg_fixture_close(&fx);
 }
 
+/* ── compose_turn: the lexical -> fallback -> self composition shared by the
+ * live turn and `human memory ground --full` (spec 2026-09-29 §4.6) ────── */
+
+static void set_turn_env(const char *fallback, const char *self_facts) {
+    if (fallback)
+        setenv("HU_GRAPH_GROUNDING_CONTACT_FALLBACK", fallback, 1);
+    else
+        unsetenv("HU_GRAPH_GROUNDING_CONTACT_FALLBACK");
+    if (self_facts)
+        setenv("HU_GRAPH_GROUNDING_SELF_FACTS", self_facts, 1);
+    else
+        unsetenv("HU_GRAPH_GROUNDING_SELF_FACTS");
+}
+
+static void clear_turn_env(void) {
+    unsetenv("HU_GRAPH_GROUNDING_CONTACT_FALLBACK");
+    unsetenv("HU_GRAPH_GROUNDING_SELF_FACTS");
+    unsetenv("HU_GRAPH_NAMES");
+}
+
+/* The live loader's injected block on an ANALYTICAL turn with grounding ON. */
+static char *loader_ctx(gg_fixture_t *fx, const char *cid, const char *msg, size_t *len_out) {
+    hu_agent_t *agent = (hu_agent_t *)calloc(1, sizeof(hu_agent_t));
+    HU_ASSERT_NOT_NULL(agent);
+    agent->alloc = &fx->alloc;
+    agent->memory_session_id = cid;
+    agent->memory_session_id_len = strlen(cid);
+    agent->turn_tier = (int)HU_TIER_ANALYTICAL;
+    setenv("HU_GRAPH_GROUNDING", "on", 1);
+    char *ctx = NULL;
+    size_t ctx_len = 0;
+    hu_agent_load_graph_grounding(agent, &fx->loader, msg, strlen(msg), &ctx, &ctx_len);
+    unsetenv("HU_GRAPH_GROUNDING");
+    free(agent);
+    *len_out = ctx_len;
+    return ctx;
+}
+
+/* Today's bytes for a lexical hit plus an owner fact, OFF for every names
+ * gate. Any change to what the live turn injects must fail here. */
+static const char k_golden_lexical_self[] =
+    "- sailboat (topic)\n"
+    "  - sailboat related_to marina: docked at slip 14 since spring\n"
+    "\n"
+    "About you:\n"
+    "- tampa bay (place)\n";
+
+static void test_loader_golden_lexical_plus_self_facts(void) {
+    gg_fixture_t fx;
+    gg_fixture_open(&fx);
+    int64_t id = 0;
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(fx.graph, "self", 4, "tampa bay", 9, HU_ENTITY_PLACE, NULL, &id),
+        HU_OK);
+    set_turn_env(NULL, "live");
+    size_t len = 0;
+    char *ctx = loader_ctx(&fx, "alice", "hows the sailboat down in tampa bay", &len);
+    clear_turn_env();
+    HU_ASSERT_NOT_NULL(ctx);
+    HU_ASSERT_STR_EQ(ctx, k_golden_lexical_self);
+    HU_ASSERT_EQ((long)len, (long)strlen(k_golden_lexical_self));
+    fx.alloc.free(fx.alloc.ctx, ctx, len + 1);
+    gg_fixture_close(&fx);
+}
+
+static char *turn_ctx(gg_fixture_t *fx, const char *cid, const char *msg, size_t *len_out,
+                      hu_graph_ground_turn_stats_t *st) {
+    char *out = NULL;
+    size_t len = 0;
+    HU_ASSERT_EQ(hu_graph_ground_compose_turn(&fx->loader, cid, strlen(cid), msg, strlen(msg),
+                                              hu_graph_ground_turn_flags_from_env(), &out, &len,
+                                              st),
+                 HU_OK);
+    *len_out = len;
+    return out;
+}
+
+static void assert_loader_equals_turn(gg_fixture_t *fx, const char *cid, const char *msg) {
+    size_t a_len = 0, b_len = 0;
+    hu_graph_ground_turn_stats_t st;
+    char *a = loader_ctx(fx, cid, msg, &a_len);
+    char *b = turn_ctx(fx, cid, msg, &b_len, &st);
+    HU_ASSERT_EQ((long)a_len, (long)b_len);
+    if (a_len > 0)
+        HU_ASSERT_TRUE(memcmp(a, b, a_len) == 0);
+    if (a)
+        fx->alloc.free(fx->alloc.ctx, a, a_len + 1);
+    if (b)
+        fx->alloc.free(fx->alloc.ctx, b, b_len + 1);
+}
+
+/* Probe/live parity: what `ground --full` prints is what the turn injects
+ * (before the tier gate), for every sub-gate combination. */
+static void test_loader_live_output_equals_compose_turn(void) {
+    gg_fixture_t fx;
+    gg_fixture_open(&fx);
+    int64_t id = 0;
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(fx.graph, "self", 4, "tampa bay", 9, HU_ENTITY_PLACE, NULL, &id),
+        HU_OK);
+    const char *hit = "hows the sailboat coming along";
+    const char *miss = "wanna grab tacos tonight";
+    const char *both = "hows the sailboat down in tampa bay";
+    set_turn_env(NULL, NULL);
+    assert_loader_equals_turn(&fx, "alice", hit);
+    assert_loader_equals_turn(&fx, "alice", miss);
+    set_turn_env("live", NULL);
+    assert_loader_equals_turn(&fx, "alice", miss);
+    assert_loader_equals_turn(&fx, "alice", hit);
+    set_turn_env(NULL, "live");
+    assert_loader_equals_turn(&fx, "alice", both);
+    set_turn_env("shadow", "shadow");
+    assert_loader_equals_turn(&fx, "alice", miss);
+    assert_loader_equals_turn(&fx, "alice", both);
+    set_turn_env("live", "live");
+    assert_loader_equals_turn(&fx, "alice", miss);
+    assert_loader_equals_turn(&fx, "alice", both);
+    clear_turn_env();
+    gg_fixture_close(&fx);
+}
+
+static void test_compose_turn_golden_and_stats(void) {
+    gg_fixture_t fx;
+    gg_fixture_open(&fx);
+    int64_t id = 0;
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(fx.graph, "self", 4, "tampa bay", 9, HU_ENTITY_PLACE, NULL, &id),
+        HU_OK);
+    set_turn_env(NULL, "live");
+    size_t len = 0;
+    hu_graph_ground_turn_stats_t st;
+    char *out = turn_ctx(&fx, "alice", "hows the sailboat down in tampa bay", &len, &st);
+    clear_turn_env();
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_STR_EQ(out, k_golden_lexical_self);
+    HU_ASSERT_EQ((long)st.matched_entities, 1L);
+    HU_ASSERT_TRUE(st.via_self);
+    HU_ASSERT_FALSE(st.via_fallback);
+    fx.alloc.free(fx.alloc.ctx, out, len + 1);
+    gg_fixture_close(&fx);
+}
+
+static void test_compose_turn_reports_shadow_sub_gates_without_injecting(void) {
+    gg_fixture_t fx;
+    gg_fixture_open(&fx);
+    set_turn_env("shadow", "shadow");
+    size_t len = 99;
+    hu_graph_ground_turn_stats_t st;
+    char *out = turn_ctx(&fx, "alice", "wanna grab tacos tonight", &len, &st);
+    clear_turn_env();
+    HU_ASSERT_NULL(out);
+    HU_ASSERT_EQ((long)len, 0L);
+    HU_ASSERT_TRUE(st.fallback_shadow);
+    HU_ASSERT_TRUE(st.fallback_shadow_bytes > 0); /* alice has entities to fall back on */
+    HU_ASSERT_TRUE(st.fallback_shadow_fp != 0);
+    HU_ASSERT_TRUE(st.self_shadow);
+    HU_ASSERT_FALSE(st.via_fallback);
+    HU_ASSERT_FALSE(st.via_self);
+    gg_fixture_close(&fx);
+}
+
+static void test_compose_turn_null_loader_is_failopen(void) {
+    char *out = (char *)0x1;
+    size_t len = 99;
+    hu_graph_ground_turn_stats_t st;
+    HU_ASSERT_EQ(hu_graph_ground_compose_turn(NULL, "alice", 5, "hi", 2, 0, &out, &len, &st),
+                 HU_OK);
+    HU_ASSERT_NULL(out);
+    HU_ASSERT_EQ((long)len, 0L);
+    HU_ASSERT_EQ((long)st.matched_entities, 0L);
+}
+
 /* Fail-open: loader without a facade (no graph wired) -> empty, HU_OK. */
 static void test_compose_no_graph_is_failopen(void) {
     hu_allocator_t alloc = hu_system_allocator();
@@ -772,6 +944,22 @@ static void test_contact_fallback_mode_parse(void) {
     unsetenv("HU_GRAPH_GROUNDING_CONTACT_FALLBACK");
 }
 
+static void test_turn_flags_from_env(void) {
+    unsetenv("HU_GRAPH_GROUNDING_CONTACT_FALLBACK");
+    unsetenv("HU_GRAPH_GROUNDING_SELF_FACTS");
+    unsetenv("HU_GRAPH_NAMES");
+    HU_ASSERT_EQ((long)hu_graph_ground_turn_flags_from_env(), 0L);
+    setenv("HU_GRAPH_GROUNDING_CONTACT_FALLBACK", "live", 1);
+    setenv("HU_GRAPH_GROUNDING_SELF_FACTS", "shadow", 1);
+    HU_ASSERT_EQ((long)hu_graph_ground_turn_flags_from_env(),
+                 (long)(HU_GG_TURN_FALLBACK_LIVE | HU_GG_TURN_SELF_SHADOW));
+    setenv("HU_GRAPH_GROUNDING_CONTACT_FALLBACK", "garbage", 1);
+    setenv("HU_GRAPH_GROUNDING_SELF_FACTS", "on", 1);
+    HU_ASSERT_EQ((long)hu_graph_ground_turn_flags_from_env(), (long)HU_GG_TURN_SELF_LIVE);
+    unsetenv("HU_GRAPH_GROUNDING_CONTACT_FALLBACK");
+    unsetenv("HU_GRAPH_GROUNDING_SELF_FACTS");
+}
+
 #ifdef HU_ENABLE_SQLITE
 
 /* AC-1.1: Verify that autodream writes community_summaries after a runner invocation */
@@ -919,6 +1107,7 @@ void run_graph_grounding_tests(void) {
     HU_TEST_SUITE("GraphRAG grounding");
     HU_RUN_TEST(test_graph_grounding_mode_parse);
     HU_RUN_TEST(test_contact_fallback_mode_parse);
+    HU_RUN_TEST(test_turn_flags_from_env);
     HU_RUN_TEST(test_gate_comment_exists_at_agent_turn_1471);
     HU_RUN_TEST(test_srag_memory_miss_does_not_free_graph_ctx);
     HU_RUN_TEST(test_ground_match_count_respects_word_boundaries);
@@ -945,6 +1134,11 @@ void run_graph_grounding_tests(void) {
     HU_RUN_TEST(test_load_grounding_self_facts_gate);
     HU_RUN_TEST(test_self_facts_mode_defaults_off);
     HU_RUN_TEST(test_load_grounding_contact_fallback_gate);
+    HU_RUN_TEST(test_loader_golden_lexical_plus_self_facts);
+    HU_RUN_TEST(test_loader_live_output_equals_compose_turn);
+    HU_RUN_TEST(test_compose_turn_golden_and_stats);
+    HU_RUN_TEST(test_compose_turn_reports_shadow_sub_gates_without_injecting);
+    HU_RUN_TEST(test_compose_turn_null_loader_is_failopen);
     HU_RUN_TEST(test_compose_no_graph_is_failopen);
     HU_RUN_TEST(test_compose_renders_current_employer_with_predecessor);
     HU_RUN_TEST(test_compose_marks_superseded_employer_as_history);
