@@ -100,9 +100,17 @@ check "release build present: CLAUDE.md size untouched" "grep -q '^~2952 KB bina
 check "count still stamped" "grep -q '^Tests: 222$' '$T/README.md'"
 rm -rf "$T/build-size"
 
-# 6. The removed binary-size flags fail loudly instead of being silently ignored.
-out=$(run --keep-binary-size --apply); rc=$?
-check "--keep-binary-size is rejected" "[ $rc -eq 2 ] && [[ \"$out\" == *'footprint.py'* ]]"
+# 6. The obsolete binary-size flags are accepted and ignored, never honoured: an
+#    older pre-push hook (hooks come from the shared checkout, which lags main)
+#    still passes --keep-binary-size, and rejecting it failed that push's stats sync.
+write_docs
+out=$(run --test-count 222 --keep-binary-size --apply); rc=$?
+check "--keep-binary-size accepted"       "[ $rc -eq 0 ]"
+check "--keep-binary-size says obsolete"  "[[ \"$out\" == *'obsolete'* ]]"
+check "--keep-binary-size still stamps the count" "grep -q '^Tests: 222$' '$T/README.md'"
+write_docs
+out=$(run --test-count 222 --binary-size 4 --apply); rc=$?
+check "--binary-size accepted, value ignored" "[ $rc -eq 0 ] && grep -q '^~2952 KB$' '$T/README.md'"
 
 # 7. Generated, gitignored C is a BUILD ARTIFACT, not source. The counters read
 #    git's index, so a tree that has been built reports the same numbers as a

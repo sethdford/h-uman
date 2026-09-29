@@ -36,8 +36,14 @@ while [ $# -gt 0 ]; do
                 ''|*[!0-9]*) echo "error: --test-count requires a numeric value" >&2; exit 2 ;;
             esac
             shift ;;
-        --binary-size|--keep-binary-size)
-            echo "error: $1 was removed; binary size is owned by scripts/footprint.py" >&2; exit 2 ;;
+        # Obsolete: binary size is owned by scripts/footprint.py. Accepted and
+        # ignored, not rejected: every worktree runs .githooks from the SHARED
+        # checkout (core.hooksPath), which can lag main by days, so an older
+        # pre-push still passes --keep-binary-size to this newer script.
+        --keep-binary-size) echo "note: --keep-binary-size is obsolete (binary size: scripts/footprint.py); ignoring" >&2 ;;
+        --binary-size)
+            echo "note: --binary-size is obsolete (binary size: scripts/footprint.py); ignoring" >&2
+            shift ;;
         *) echo "error: unknown argument '$1' ($USAGE)" >&2; exit 2 ;;
     esac
     shift
