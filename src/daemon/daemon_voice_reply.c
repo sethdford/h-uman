@@ -14,6 +14,7 @@
 #include "human/core/log.h"
 #include "human/daemon.h"
 #include "human/daemon/voice_facade.h"
+#include "human/daemon/voice_first.h"
 #include "human/daemon_outbound_bus.h"
 #include "human/persona.h"
 #include "human/platform.h"
@@ -287,7 +288,7 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, hu_agent_t *agent, const hu_co
                            hu_service_channel_t *ch, const char *batch_key, size_t key_len,
                            const char *combined, size_t combined_len, const char *response,
                            size_t response_len, const char *unshaped, size_t unshaped_len,
-                           int bth_hour, bool voice_first) {
+                           int bth_hour, int voice_first) {
     /* F1: a memo says the reply as written, not the copy text shaping styled
      * for iMessage (typos, lowercase quirks, "haha " fillers). */
     if (unshaped && unshaped_len > 0) {
@@ -355,7 +356,8 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, hu_agent_t *agent, const hu_co
              * wrote a memo; the post-hoc classifier would judge it as a text.
              * The safety gates above still ran. */
             hu_voice_decision_t vdec =
-                (voice_first && hu_voice_intent_memo_shaped(response, response_len))
+                (voice_first == HU_VOICE_FIRST_FORCED ||
+                 (voice_first && hu_voice_intent_memo_shaped(response, response_len)))
                     ? HU_VOICE_SEND_VOICE
                     : hu_voice_decision_classify_ex(response, response_len, combined, combined_len,
                                                     &agent->persona->voice_messages, true, bth_hour,

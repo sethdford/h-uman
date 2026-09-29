@@ -97,7 +97,7 @@ typedef struct hu_daemon_final_reply {
     int bth_hour;
     /* Voice-first memos LIVE decided VOICE before the turn (spec 2026-09-28):
      * the reply is a memo, so the post-hoc text classifier does not judge it. */
-    bool voice_first;
+    uint8_t voice_first; /* 0, HU_VOICE_FIRST_MEMO or HU_VOICE_FIRST_FORCED */
     /* Group chat: voice would go to the sender's handle (batch_key), not the
      * group, so a group reply is never voiced (review C1, 2026-09-28). */
     bool is_group;

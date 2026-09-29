@@ -9,6 +9,7 @@
 #include "human/agent.h"
 #include "human/config.h"
 #include "human/daemon.h"
+#include "human/daemon/voice_first.h"
 #include "human/provider.h"
 #include "human/tts/cartesia.h"
 #include "test_framework.h"
@@ -246,7 +247,7 @@ static bool run_rewrite_voice(const char *reply, const char *rewrite) {
  * classifier ("incoming_question"); decided VOICE up front, it goes. */
 static const char *g_persona_reply; /* NULL = the memo below */
 
-static bool run_persona_voice(bool voice_first) {
+static bool run_persona_voice(int voice_first) {
     hu_allocator_t alloc = hu_system_allocator();
     static hu_persona_t persona;
     memset(&persona, 0, sizeof(persona));
@@ -294,6 +295,17 @@ static void test_voice_reply_voice_first_skips_the_text_classifier(void) {
 /* Review C2: the pre-decision holds only for a memo the turn produced. A slim
  * retry ("Sounds good, talk soon.") goes back to the classifier, which keeps
  * it as text for a question. */
+/* Owner #voice (live test 2026-09-29 06:09): "lol you really testing me
+ * tonight" is 11 words, under the memo floor; a forced self-test still speaks. */
+static void test_voice_reply_forced_self_test_speaks_a_short_reply(void) {
+    g_voice_sends = 0;
+    g_persona_reply = "lol you really testing me tonight, glitchy but getting there";
+    bool sent = run_persona_voice(HU_VOICE_FIRST_FORCED);
+    g_persona_reply = NULL;
+    HU_ASSERT_TRUE(sent);
+    HU_ASSERT_EQ(g_voice_sends, 1);
+}
+
 static void test_voice_reply_voice_first_needs_a_memo(void) {
     g_voice_sends = 0;
     g_persona_reply = "Sounds good, talk soon.";
@@ -525,6 +537,7 @@ void run_daemon_voice_reply_tests(void) {
 #if HU_ENABLE_CARTESIA
     HU_RUN_TEST(test_voice_reply_voice_first_skips_the_text_classifier);
     HU_RUN_TEST(test_voice_reply_voice_first_needs_a_memo);
+    HU_RUN_TEST(test_voice_reply_forced_self_test_speaks_a_short_reply);
 #endif
     HU_RUN_TEST(test_voice_reply_opener_gate_strips_the_repeat);
     HU_RUN_TEST(test_voice_reply_invalid_direction_speaks_plain_text);

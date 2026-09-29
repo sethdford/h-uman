@@ -100,7 +100,7 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, struct hu_agent *agent,
                            const char *batch_key, size_t key_len, const char *combined,
                            size_t combined_len, const char *response, size_t response_len,
                            const char *unshaped, size_t unshaped_len, int bth_hour,
-                           bool voice_first);
+                           int voice_first);
 
 /* F1: a copy of the reply taken BEFORE text shaping (typos, texting quirks,
  * "haha " fillers) — what a voice memo should say. NULL (and *out_len = 0)

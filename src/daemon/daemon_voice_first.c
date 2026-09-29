@@ -158,3 +158,16 @@ bool hu_daemon_voice_first_available(struct hu_agent *agent, const char *batch_k
         return false;
     return contact_listed(batch_key, key_len);
 }
+
+void hu_daemon_voice_first_direction(char *direction, size_t cap) {
+    static const char k_memo[] =
+        "Voice memo, a few connected thoughts (45-80 words), not a one-liner";
+    if (!direction || cap == 0)
+        return;
+    char objective[512];
+    snprintf(objective, sizeof(objective), "%s", direction);
+    if (objective[0])
+        snprintf(direction, cap, "%s: %s", k_memo, objective);
+    else
+        snprintf(direction, cap, "%s", k_memo);
+}

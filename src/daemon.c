@@ -7092,6 +7092,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                  * convo_ctx is built once above and never rebuilt between
                  * iterations, so arming per iteration appended a second "this
                  * message only" block. Contract: daemon/director.h. */
+                /* On a memo turn the director's texting length cue would win over
+                 * the memo directive (live #voice test, 2026-09-29 06:09). */
+                if (voice_first_memo && director_result_valid)
+                    hu_daemon_voice_first_direction(director_result.direction,
+                                                    sizeof(director_result.direction));
                 if (llm_decides && director_result_valid)
                     hu_daemon_director_arm_guard(alloc, agent, &director_result, &convo_ctx,
                                                  &convo_ctx_len);
@@ -8753,7 +8758,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         .unshaped = unshaped,
                         .unshaped_len = unshaped_len,
                         .bth_hour = bth_hour,
-                        .voice_first = voice_first_memo,
+                        .voice_first = !voice_first_memo ? 0
+                                       : (selftest_on && selftest.form == HU_DIR_FORM_VOICE)
+                                           ? HU_VOICE_FIRST_FORCED
+                                           : HU_VOICE_FIRST_MEMO,
                         .is_group = msgs[batch_start].is_group,
                         .text_ready = (err == HU_OK),
                         .bus = &daemon_outbound_bus,

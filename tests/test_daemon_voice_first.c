@@ -148,9 +148,24 @@ static void test_voice_first_forced_for_a_self_test(void) {
     done(&r);
 }
 
+/* The director's cue ("keep it light and brief") beat the memo directive in
+ * the live test (2026-09-29 06:09). On a memo turn the cue keeps its objective
+ * and gains an explicit memo length that comes first. */
+static void test_voice_first_rewrites_the_directors_cue(void) {
+    char d[512] = "Laugh it off, acknowledge the loop, keep it light and brief";
+    hu_daemon_voice_first_direction(d, sizeof(d));
+    HU_ASSERT_TRUE(strncmp(d, "Voice memo", 10) == 0);
+    HU_ASSERT_STR_CONTAINS(d, "a few connected thoughts");
+    HU_ASSERT_STR_CONTAINS(d, "Laugh it off");
+    char empty[512] = "";
+    hu_daemon_voice_first_direction(empty, sizeof(empty));
+    HU_ASSERT_STR_CONTAINS(empty, "a few connected thoughts");
+}
+
 void run_daemon_voice_first_tests(void) {
     HU_TEST_SUITE("daemon voice-first memos");
     HU_RUN_TEST(test_voice_first_off_changes_nothing);
+    HU_RUN_TEST(test_voice_first_rewrites_the_directors_cue);
     HU_RUN_TEST(test_voice_first_forced_for_a_self_test);
     HU_RUN_TEST(test_voice_first_available_for_the_director);
     HU_RUN_TEST(test_voice_first_stands_down_in_group_chats);

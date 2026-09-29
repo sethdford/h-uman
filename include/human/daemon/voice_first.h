@@ -38,4 +38,13 @@ void hu_daemon_voice_first_prepare(hu_allocator_t *alloc, struct hu_agent *agent
 bool hu_daemon_voice_first_available(struct hu_agent *agent, const char *batch_key, size_t key_len,
                                      bool is_group);
 
+/* hu_daemon_voice_reply's voice_first: 0 none, a memo turn, or an owner #voice
+ * self-test (spoken whatever its length). */
+#define HU_VOICE_FIRST_MEMO   1
+#define HU_VOICE_FIRST_FORCED 2
+
+/* On a memo turn, the director's cue (usually a texting length like "one line")
+ * becomes "Voice memo, ...: <its objective>" so the memo length wins. */
+void hu_daemon_voice_first_direction(char *direction, size_t cap);
+
 #endif
