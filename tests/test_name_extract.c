@@ -145,6 +145,10 @@ static void test_extract_emoji_ellipsis_and_object_end_a_sentence(void) {
 static void test_extract_filler_stoplist(void) {
     hu_name_candidate_t c[8];
     HU_ASSERT_EQ((long)extract("ok Im going, Love you", NULL, 0, c, 8), 0L);
+    /* the word after a stopword is not a name either (re-review N1) */
+    HU_ASSERT_EQ((long)extract("ok Love You", NULL, 0, c, 8), 0L);
+    HU_ASSERT_EQ((long)extract("wow Good Luck and Good Job", NULL, 0, c, 8), 0L);
+    HU_ASSERT_EQ((long)extract("tell Me and Us", NULL, 0, c, 8), 0L);
     HU_ASSERT_EQ((long)extract("omg, Happy Birthday!", NULL, 0, c, 8), 0L);
     HU_ASSERT_EQ((long)extract("well Anyway call me Tomorrow", NULL, 0, c, 8), 0L);
     HU_ASSERT_EQ((long)extract("lol Going to bed Just now", NULL, 0, c, 8), 0L);

@@ -28,17 +28,17 @@ bool hu_name_entity_is_nameable(hu_entity_type_t type, const char *name, size_t 
  * clause start. "Mom" and "Dad" are deliberately absent: they are how people
  * name their parents. Kept in strcmp order for the binary search below. */
 static const char *const k_ne_stop[] = {
-    "Also",    "And",      "Anyway",    "April",    "August",    "Birthday", "But",      "Congrats",
-    "Cool",    "Damn",     "December",  "February", "Friday",    "God",      "Going",    "Good",
-    "Great",   "Haha",     "Happy",     "Hello",    "Hey",       "Hi",       "I",        "I'd",
-    "I'll",    "I'm",      "I've",      "Id",       "Ill",       "Im",       "Ive",      "January",
-    "July",    "June",     "Just",      "Let",      "Lets",      "Lmao",     "Lmk",      "Lol",
-    "Love",    "March",    "May",       "Maybe",    "Merry",     "Monday",   "Morning",  "Nice",
-    "Night",   "No",       "Nope",      "November", "October",   "Oh",       "Ok",       "Okay",
-    "Omg",     "Omw",      "Please",    "Saturday", "September", "So",       "Sorry",    "Sunday",
-    "Sure",    "Thank",    "Thanks",    "The",      "Thursday",  "Today",    "Tomorrow", "Tonight",
-    "Tuesday", "Ty",       "Wednesday", "Welcome",  "Well",      "Wow",      "Yeah",     "Yep",
-    "Yes",     "Yesterday"};
+    "Also",   "And",      "Anyway",   "April",    "August", "Birthday",  "But",       "Congrats",
+    "Cool",   "Damn",     "December", "February", "Friday", "God",       "Going",     "Good",
+    "Great",  "Haha",     "Happy",    "Hello",    "Hey",    "Hi",        "I",         "I'd",
+    "I'll",   "I'm",      "I've",     "Id",       "Ill",    "Im",        "Ive",       "January",
+    "Job",    "July",     "June",     "Just",     "Let",    "Lets",      "Lmao",      "Lmk",
+    "Lol",    "Love",     "Luck",     "March",    "May",    "Maybe",     "Me",        "Merry",
+    "Monday", "Morning",  "Nice",     "Night",    "No",     "Nope",      "November",  "October",
+    "Oh",     "Ok",       "Okay",     "Omg",      "Omw",    "Please",    "Saturday",  "September",
+    "So",     "Sorry",    "Sunday",   "Sure",     "Thank",  "Thanks",    "The",       "Thursday",
+    "Today",  "Tomorrow", "Tonight",  "Tuesday",  "Ty",     "Us",        "Wednesday", "Welcome",
+    "Well",   "Wow",      "Yeah",     "Yep",      "Yes",    "Yesterday", "You"};
 
 static bool ne_is_stopword(const char *w, size_t len) {
     size_t lo = 0, hi = sizeof(k_ne_stop) / sizeof(k_ne_stop[0]);
