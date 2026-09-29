@@ -455,6 +455,51 @@ static void test_compose_ex_require_full_name_blocks_partial_hits(void) {
     gg_fixture_close(&fx);
 }
 
+/* Placeholder predicate: pronoun-like subjects the extractors write ("user",
+ * "you", "assistant") and the contact's own id / phone number are not
+ * referents, so the fallback must never spend a seed on them. Measured
+ * 2026-09-28: for 3 of 4 active contacts the fallback's #1 seed was one. */
+static void test_ground_is_placeholder_name(void) {
+    HU_ASSERT_TRUE(hu_graph_ground_is_placeholder_name("user", 4, "+15551234567", 12));
+    HU_ASSERT_TRUE(hu_graph_ground_is_placeholder_name("User", 4, "+15551234567", 12));
+    HU_ASSERT_TRUE(hu_graph_ground_is_placeholder_name("assistant", 9, "+15551234567", 12));
+    HU_ASSERT_TRUE(hu_graph_ground_is_placeholder_name("you", 3, "+15551234567", 12));
+    HU_ASSERT_TRUE(hu_graph_ground_is_placeholder_name("+15551234567", 12, "+15551234567", 12));
+    HU_ASSERT_TRUE(hu_graph_ground_is_placeholder_name("+1 (801) 555-0100", 17, "alice", 5));
+    HU_ASSERT_FALSE(hu_graph_ground_is_placeholder_name("Utah", 4, "+15551234567", 12));
+    HU_ASSERT_FALSE(hu_graph_ground_is_placeholder_name("user research", 13, "alice", 5));
+    HU_ASSERT_FALSE(hu_graph_ground_is_placeholder_name("youth soccer", 12, "alice", 5));
+    HU_ASSERT_FALSE(hu_graph_ground_is_placeholder_name("sailboat", 8, "alice", 5));
+}
+
+/* The fallback skips placeholders even when they are the contact's most-
+ * mentioned rows, and still seeds real entities. */
+static void test_compose_ex_fallback_skips_placeholders(void) {
+    gg_fixture_t fx;
+    gg_fixture_open(&fx);
+    int64_t id = 0;
+    for (int i = 0; i < 6; i++) { /* outrank every real alice entity */
+        HU_ASSERT_EQ(
+            hu_graph_upsert_entity(fx.graph, "alice", 5, "user", 4, HU_ENTITY_PERSON, NULL, &id),
+            HU_OK);
+        HU_ASSERT_EQ(
+            hu_graph_upsert_entity(fx.graph, "alice", 5, "alice", 5, HU_ENTITY_PERSON, NULL, &id),
+            HU_OK);
+    }
+    const char *msg = "wanna grab tacos tonight";
+    char *out = NULL;
+    size_t out_len = 0;
+    HU_ASSERT_EQ(hu_graph_ground_compose_ex(&fx.loader, "alice", 5, msg, strlen(msg), 0,
+                                            HU_GG_CONTACT_FALLBACK, &out, &out_len, NULL),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_TRUE(strstr(out, "- user") == NULL);
+    HU_ASSERT_TRUE(strstr(out, "- alice") == NULL);
+    HU_ASSERT_TRUE(strstr(out, "sailboat") != NULL || strstr(out, "guitar") != NULL);
+    fx.alloc.free(fx.alloc.ctx, out, out_len + 1);
+    gg_fixture_close(&fx);
+}
+
 /* The fallback honors the same output budget as lexical composition. */
 static void test_compose_ex_fallback_respects_budget(void) {
     gg_fixture_t fx;
@@ -880,6 +925,7 @@ void run_graph_grounding_tests(void) {
     HU_RUN_TEST(test_ground_name_word_count_skips_stopwords_and_short_words);
     HU_RUN_TEST(test_ground_score_zero_without_match_and_coverage_dominates);
     HU_RUN_TEST(test_ground_fingerprint_varies_with_content);
+    HU_RUN_TEST(test_ground_is_placeholder_name);
 #ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(test_compose_selects_relevant_entity_content);
     HU_RUN_TEST(test_compose_finds_low_mention_entity_beyond_candidate_cap);
@@ -894,6 +940,7 @@ void run_graph_grounding_tests(void) {
     HU_RUN_TEST(test_compose_ex_fallback_scoped_to_contact);
     HU_RUN_TEST(test_compose_ex_fallback_respects_budget);
     HU_RUN_TEST(test_compose_ex_fallback_skips_emotion_entities);
+    HU_RUN_TEST(test_compose_ex_fallback_skips_placeholders);
     HU_RUN_TEST(test_compose_ex_require_full_name_blocks_partial_hits);
     HU_RUN_TEST(test_load_grounding_self_facts_gate);
     HU_RUN_TEST(test_self_facts_mode_defaults_off);

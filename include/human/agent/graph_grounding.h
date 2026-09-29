@@ -4,6 +4,7 @@
 #include "human/agent/memory_loader.h"
 #include "human/core/error.h"
 #include "human/core/gate_mode.h"
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -74,6 +75,15 @@ hu_error_t hu_graph_ground_compose(hu_memory_loader_t *loader, const char *conta
  * A lexical hit is unaffected. *out_matched_entities stays 0 on the fallback
  * path so logs can tell the two apart. */
 #define HU_GG_CONTACT_FALLBACK 0x1u
+
+/* True when an entity name is not a referent and must never seed the
+ * fallback: a pronoun-like placeholder the extractors write as a subject
+ * ("user", "assistant", "you", "me", "i", "we", "they", "someone"; exact,
+ * case-insensitive, whole name only), the contact's own id, or a
+ * phone-number-shaped string. Measured 2026-09-28: for 3 of 4 active
+ * contacts the fallback's #1 seed by mention count was such a row. */
+bool hu_graph_ground_is_placeholder_name(const char *name, size_t name_len, const char *contact_id,
+                                         size_t contact_id_len);
 
 /* Seed an entity only when EVERY scoreable word of its name appears in the
  * message (coverage 1.0), not on a lone shared word. Used for the owner's
