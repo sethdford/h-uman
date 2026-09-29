@@ -162,24 +162,14 @@ hu_error_t hu_youtube_search_ex(hu_allocator_t *alloc, const char *api_key, cons
     }
     return err;
 }
-
-hu_error_t hu_youtube_search(hu_allocator_t *alloc, const char *api_key, const char *query,
-                             size_t query_len, hu_youtube_result_t *out) {
-    return hu_youtube_search_ex(alloc, api_key, query, query_len, false, out);
-}
 #else
 hu_error_t hu_youtube_search_ex(hu_allocator_t *alloc, const char *api_key, const char *query,
                                 size_t query_len, bool shorts, hu_youtube_result_t *out) {
-    (void)shorts;
-    return hu_youtube_search(alloc, api_key, query, query_len, out);
-}
-
-hu_error_t hu_youtube_search(hu_allocator_t *alloc, const char *api_key, const char *query,
-                             size_t query_len, hu_youtube_result_t *out) {
     (void)alloc;
     (void)api_key;
     (void)query;
     (void)query_len;
+    (void)shorts;
     (void)out;
     return HU_ERR_NOT_SUPPORTED;
 }

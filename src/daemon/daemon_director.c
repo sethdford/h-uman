@@ -66,7 +66,7 @@ hu_emotional_state_t hu_daemon_detect_emotion(hu_allocator_t *alloc, hu_agent_t 
 __attribute__((unused))
 #endif
 const char *hu_director_form_name(hu_director_form_t form) {
-    static const char *const names[] = {"text", "voice", "tapback", "gif", "silence"};
+    static const char *const names[] = {"text", "voice", "tapback", "gif", "silence", "share"};
     return (unsigned)form < sizeof(names) / sizeof(names[0]) ? names[form] : "text";
 }
 
@@ -106,6 +106,18 @@ static void parse_expressive_fields(const char *raw, size_t len, hu_director_res
     const char *gp = head_find(raw, head_len, "gif:");
     if (gp)
         head_value(gp + 4, head_end, out->gif_query, sizeof(out->gif_query));
+    const char *sp = head_find(raw, head_len, "share:");
+    if (sp) {
+        static const char *const kinds[] = {"", "song", "video", "short", "saved"};
+        char k[8];
+        head_value(sp + 6, head_end, k, sizeof(k));
+        for (size_t i = 1; i < sizeof(kinds) / sizeof(kinds[0]); i++)
+            if (strcmp(k, kinds[i]) == 0)
+                out->share = (hu_share_kind_t)i;
+    }
+    const char *qp = head_find(raw, head_len, "q:");
+    if (qp)
+        head_value(qp + 2, head_end, out->share_query, sizeof(out->share_query));
 }
 
 static const char k_director_system[] =
@@ -187,11 +199,17 @@ static const char k_director_forms[] =
     "spoiler, impact for a mic-drop line. Almost never. Never on sad news.\n"
     "- reply_to:true — thread your text onto their message when you're answering something "
     "older and newer messages came in between, or when it's a group chat.\n"
+    "- action:share|share:<song|video|short|saved>|q:<search words> — send something alongside "
+    "your text, the way people do: a song when they mention a band or need a lift, a video or a "
+    "short when something reminds you of one, or 'saved' when the 'This turn:' line says Seth "
+    "saved something for them. At most once a day per person; never on sad news.\n"
     "Examples:\n"
     "action:text|delay_s:4|effect:confetti|direction:Congratulate her big, one line\n"
     "action:voice|delay_s:40|direction:She sent a voice memo; talk back warmly, a few thoughts\n"
     "action:gif|gif:slow clap|direction:He nailed the joke, answer with a GIF\n"
-    "action:text|delay_s:6|reply_to:true|direction:Answer his earlier question, a few words";
+    "action:text|delay_s:6|reply_to:true|direction:Answer his earlier question, a few words\n"
+    "action:share|share:song|q:beach house space song|direction:She loves them, share it\n"
+    "action:share|share:short|q:cat knocks glass off table|direction:Make him laugh";
 
 size_t hu_daemon_director_system_prompt(char *buf, size_t cap) {
     if (!buf || cap == 0)
@@ -235,6 +253,8 @@ void hu_daemon_parse_director_result(const char *raw, size_t len, hu_director_re
         out->form = HU_DIR_FORM_SILENCE;
     } else if (strncmp(val, "voice", 5) == 0) {
         out->form = HU_DIR_FORM_VOICE; /* runs as text until voice-first owns it */
+    } else if (strncmp(val, "share", 5) == 0) {
+        out->form = HU_DIR_FORM_SHARE; /* the reply is still a text; the share rides along */
     } else if (strncmp(val, "gif", 3) == 0) {
         out->form = HU_DIR_FORM_GIF; /* runs as text until the GIF executor is LIVE */
     }

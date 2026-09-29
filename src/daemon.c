@@ -9819,9 +9819,14 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                 }
 
-                hu_daemon_rich_media_tick(alloc, agent, config, ch, batch_key, key_len, combined,
-                                          combined_len, history_entries, history_count,
-                                          gif_sent_this_turn);
+                hu_daemon_rich_media_tick(
+                    alloc, agent, config, ch, batch_key, key_len, combined, combined_len,
+                    history_entries, history_count, gif_sent_this_turn,
+                    hu_expressive_share_gate(
+                        &director_result, director_result_valid,
+                        hu_gate_mode_from_env("HU_DIRECTOR_FORMS", HU_GATE_OFF) == HU_GATE_LIVE,
+                        combined, combined_len, msgs[batch_start].is_group, batch_key, key_len,
+                        (int64_t)time(NULL)));
 
                 /* Proactive image generation: occasionally create and send an image */
                 if (combined_len > 0 && ch->channel->vtable->send && !gif_sent_this_turn &&

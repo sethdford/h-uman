@@ -50,7 +50,8 @@ static void test_rich_media_no_text_sends_nothing(void) {
     ch.channel = &channel;
 
     g_sends = 0;
-    hu_daemon_rich_media_tick(&alloc, &agent, NULL, &ch, "+15550000001", 12, "", 0, NULL, 0, false);
+    hu_daemon_rich_media_tick(&alloc, &agent, NULL, &ch, "+15550000001", 12, "", 0, NULL, 0, false,
+                              NULL);
     HU_ASSERT_EQ(g_sends, 0);
 }
 
@@ -72,7 +73,7 @@ static void test_rich_media_after_gif_sends_nothing(void) {
     static const char msg[] = "omg you have to hear this song it's been stuck in my head all day";
     g_sends = 0;
     hu_daemon_rich_media_tick(&alloc, &agent, NULL, &ch, "+15550000001", 12, msg, sizeof(msg) - 1,
-                              NULL, 0, /* gif_sent_this_turn */ true);
+                              NULL, 0, /* gif_sent_this_turn */ true, NULL);
     HU_ASSERT_EQ(g_sends, 0);
 }
 

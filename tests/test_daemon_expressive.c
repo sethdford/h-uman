@@ -68,6 +68,80 @@ static void test_expressive_shadow_line_carries_choice_and_verdict(void) {
     const char *news = "I got the job!!";
     (void)hu_expressive_shadow_line(&r, news, strlen(news), false, "sister", line, sizeof(line));
     HU_ASSERT_STR_CONTAINS(line, "effect=confetti(ok)");
+    r.form = HU_DIR_FORM_SHARE;
+    r.share = HU_SHARE_SHORT;
+    memcpy(r.share_query, "cat fail", 9);
+    (void)hu_expressive_shadow_line(&r, news, strlen(news), false, "sister", line, sizeof(line));
+    HU_ASSERT_STR_CONTAINS(line, "share=short(ok)");
+}
+
+/* Phase 5.1: at most one share a day per person, never somber, never groups. */
+static void test_expressive_share_budget(void) {
+    HU_ASSERT_TRUE(hu_expressive_share_allowed(false, false, -1));
+    HU_ASSERT_FALSE(hu_expressive_share_allowed(false, false, 3600));
+    HU_ASSERT_TRUE(hu_expressive_share_allowed(false, false, 90000));
+    HU_ASSERT_FALSE(hu_expressive_share_allowed(true, false, -1));
+    HU_ASSERT_FALSE(hu_expressive_share_allowed(false, true, -1));
+}
+
+static void test_expressive_share_medium(void) {
+    HU_ASSERT_EQ((int)hu_expressive_share_medium(HU_SHARE_SONG, false), (int)HU_INSPIRATION_MUSIC);
+    HU_ASSERT_EQ((int)hu_expressive_share_medium(HU_SHARE_VIDEO, true),
+                 (int)HU_INSPIRATION_YOUTUBE);
+    HU_ASSERT_EQ((int)hu_expressive_share_medium(HU_SHARE_SHORT, true),
+                 (int)HU_INSPIRATION_YOUTUBE);
+    HU_ASSERT_EQ((int)hu_expressive_share_medium(HU_SHARE_SHORT, false), (int)HU_INSPIRATION_NONE);
+    HU_ASSERT_EQ((int)hu_expressive_share_medium(HU_SHARE_SAVED, true), (int)HU_INSPIRATION_NONE);
+}
+
+/* One decider: a director share goes; with the director LIVE nothing else shares
+ * (the old 5% dice stop); otherwise today's dice. Saved links have their own path. */
+static void test_expressive_share_should_go(void) {
+    hu_director_result_t d;
+    memset(&d, 0, sizeof(d));
+    hu_share_kind_t k = HU_SHARE_NONE;
+    d.form = HU_DIR_FORM_SHARE;
+    d.share = HU_SHARE_SHORT;
+    HU_ASSERT_TRUE(hu_expressive_share_should_go(&d, true, false, &k));
+    HU_ASSERT_EQ((int)k, (int)HU_SHARE_SHORT);
+    HU_ASSERT_FALSE(hu_expressive_share_should_go(NULL, true, true, &k)); /* live: no dice */
+    HU_ASSERT_TRUE(hu_expressive_share_should_go(NULL, false, true, &k)); /* today's dice */
+    HU_ASSERT_EQ((int)k, (int)HU_SHARE_NONE);
+    HU_ASSERT_FALSE(hu_expressive_share_should_go(NULL, false, false, &k));
+    d.share = HU_SHARE_SAVED;
+    HU_ASSERT_FALSE(hu_expressive_share_should_go(&d, true, true, &k)); /* queue path */
+    d.form = HU_DIR_FORM_TEXT; /* a share kind without the share form is not a share */
+    d.share = HU_SHARE_SONG;
+    HU_ASSERT_FALSE(hu_expressive_share_should_go(&d, true, false, &k));
+}
+
+/* The one door a director share goes through: only LIVE (a SHADOW choice is
+ * logged, never sent), and only past the guards — not somber, not a group,
+ * once a day per contact. */
+static void test_expressive_share_gate(void) {
+    hu_director_result_t d;
+    memset(&d, 0, sizeof(d));
+    d.form = HU_DIR_FORM_SHARE;
+    d.share = HU_SHARE_SONG;
+    const char *hi = "have you heard the new Beach House album";
+    const char *grief = "Grandpa passed away this morning";
+    HU_ASSERT_NULL(hu_expressive_share_gate(&d, true, false, hi, strlen(hi), false, "+15550000071",
+                                            12, 1000)); /* shadow */
+    HU_ASSERT_TRUE(hu_expressive_share_gate(&d, true, true, hi, strlen(hi), false, "+15550000071",
+                                            12, 1000) == &d);
+    HU_ASSERT_NULL(hu_expressive_share_gate(&d, true, true, hi, strlen(hi), false, "+15550000071",
+                                            12, 5000)); /* same day */
+    HU_ASSERT_TRUE(hu_expressive_share_gate(&d, true, true, hi, strlen(hi), false, "+15550000071",
+                                            12, 1000 + 86400) == &d); /* next day */
+    HU_ASSERT_NULL(hu_expressive_share_gate(&d, true, true, grief, strlen(grief), false,
+                                            "+15550000072", 12, 1000));
+    HU_ASSERT_NULL(hu_expressive_share_gate(&d, true, true, hi, strlen(hi), true, "+15550000073",
+                                            12, 1000)); /* group */
+    HU_ASSERT_NULL(hu_expressive_share_gate(&d, false, true, hi, strlen(hi), false, "+15550000074",
+                                            12, 1000)); /* no valid director result */
+    d.form = HU_DIR_FORM_TEXT;
+    HU_ASSERT_NULL(
+        hu_expressive_share_gate(&d, true, true, hi, strlen(hi), false, "+15550000075", 12, 1000));
 }
 
 void run_daemon_expressive_tests(void) {
@@ -77,4 +151,8 @@ void run_daemon_expressive_tests(void) {
     HU_RUN_TEST(test_expressive_gif_is_for_close_casual_contacts);
     HU_RUN_TEST(test_expressive_situation_tells_the_director_what_is_possible);
     HU_RUN_TEST(test_expressive_shadow_line_carries_choice_and_verdict);
+    HU_RUN_TEST(test_expressive_share_budget);
+    HU_RUN_TEST(test_expressive_share_medium);
+    HU_RUN_TEST(test_expressive_share_should_go);
+    HU_RUN_TEST(test_expressive_share_gate);
 }

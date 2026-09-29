@@ -1,6 +1,7 @@
 #include "human/core/string.h"
 #include "human/daemon/expressive.h"
 
+#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -84,8 +85,84 @@ size_t hu_expressive_shadow_line(const hu_director_result_t *r, const char *inbo
         r->form == HU_DIR_FORM_GIF
             ? (hu_expressive_gif_allowed(somber, is_group, relationship, -1) ? "(ok)" : "(blocked)")
             : "";
-    int n = snprintf(buf, cap, "form=%s effect=%s%s gif=\"%s\"%s reply_to=%d somber=%d",
+    static const char *const share_names[] = {"none", "song", "video", "short", "saved"};
+    const char *share_name = (unsigned)r->share < 5 ? share_names[r->share] : "none";
+    const char *share_verdict =
+        r->share != HU_SHARE_NONE
+            ? (hu_expressive_share_allowed(somber, is_group, -1) ? "(ok)" : "(blocked)")
+            : "";
+    int n = snprintf(buf, cap,
+                     "form=%s effect=%s%s gif=\"%s\"%s reply_to=%d somber=%d share=%s%s q=\"%s\"",
                      hu_director_form_name(r->form), r->effect[0] ? r->effect : "none", eff_verdict,
-                     r->gif_query, gif_verdict, r->reply_to ? 1 : 0, somber ? 1 : 0);
+                     r->gif_query, gif_verdict, r->reply_to ? 1 : 0, somber ? 1 : 0, share_name,
+                     share_verdict, r->share_query);
     return fitted(buf, cap, n);
+}
+
+bool hu_expressive_share_allowed(bool somber, bool is_group, int64_t secs_since_last) {
+    return !somber && !is_group && (secs_since_last < 0 || secs_since_last >= 86400);
+}
+
+hu_inspiration_medium_t hu_expressive_share_medium(hu_share_kind_t kind, bool have_youtube_key) {
+    switch (kind) {
+    case HU_SHARE_SONG:
+        return HU_INSPIRATION_MUSIC;
+    case HU_SHARE_VIDEO:
+    case HU_SHARE_SHORT:
+        return have_youtube_key ? HU_INSPIRATION_YOUTUBE : HU_INSPIRATION_NONE;
+    default:
+        return HU_INSPIRATION_NONE; /* saved links go through the share queue */
+    }
+}
+
+bool hu_expressive_share_should_go(const hu_director_result_t *director, bool forms_live,
+                                   bool dice_hit, hu_share_kind_t *kind_out) {
+    if (kind_out)
+        *kind_out = HU_SHARE_NONE;
+    if (director && director->form == HU_DIR_FORM_SHARE && director->share != HU_SHARE_NONE) {
+        if (director->share == HU_SHARE_SAVED)
+            return false; /* the share queue sends saved links */
+        if (kind_out)
+            *kind_out = director->share;
+        return true;
+    }
+    return !forms_live && dice_hit;
+}
+
+const hu_director_result_t *hu_expressive_share_gate(const hu_director_result_t *d, bool valid,
+                                                     bool forms_live, const char *inbound,
+                                                     size_t inbound_len, bool is_group,
+                                                     const char *key, size_t key_len, int64_t now) {
+    /* Last share per contact, for this process (a restart forgets: one extra
+     * share at most). */
+    static struct {
+        char key[64];
+        size_t len;
+        int64_t at;
+    } last[64];
+    static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
+    if (!valid || !forms_live || !d || d->form != HU_DIR_FORM_SHARE || d->share == HU_SHARE_NONE ||
+        !key || key_len == 0 || key_len >= sizeof(last[0].key))
+        return NULL;
+    pthread_mutex_lock(&mu);
+    size_t slot = 0;
+    int64_t since = -1;
+    for (size_t i = 0; i < sizeof(last) / sizeof(last[0]); i++) {
+        if (last[i].len == key_len && memcmp(last[i].key, key, key_len) == 0) {
+            slot = i;
+            since = now - last[i].at;
+            break;
+        }
+        if (last[i].at < last[slot].at)
+            slot = i; /* oldest (or empty) slot, reused for a new contact */
+    }
+    bool ok =
+        hu_expressive_share_allowed(hu_expressive_somber(inbound, inbound_len), is_group, since);
+    if (ok) {
+        memcpy(last[slot].key, key, key_len);
+        last[slot].len = key_len;
+        last[slot].at = now;
+    }
+    pthread_mutex_unlock(&mu);
+    return ok ? d : NULL;
 }

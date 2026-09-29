@@ -86,11 +86,13 @@ const struct hu_channel_daemon_config *
 hu_daemon_active_daemon_config(const struct hu_config *config, const char *ch_name);
 
 /* Carved from hu_service_run (2026-09-12): see src/daemon/daemon_rich_media.c. */
+struct hu_director_result;
 void hu_daemon_rich_media_tick(hu_allocator_t *alloc, struct hu_agent *agent,
                                const struct hu_config *config, hu_service_channel_t *ch,
                                const char *batch_key, size_t key_len, const char *combined,
                                size_t combined_len, hu_channel_history_entry_t *history_entries,
-                               size_t history_count, bool gif_sent_this_turn);
+                               size_t history_count, bool gif_sent_this_turn,
+                               const struct hu_director_result *director);
 
 /* Carved from hu_service_run (2026-09-12): see src/daemon/daemon_voice_reply.c. */
 bool hu_daemon_voice_reply(hu_allocator_t *alloc, struct hu_agent *agent,

@@ -24,10 +24,19 @@ typedef enum {
     HU_DIR_FORM_TAPBACK,
     HU_DIR_FORM_GIF,
     HU_DIR_FORM_SILENCE,
+    HU_DIR_FORM_SHARE, /* a song, video, Short or saved link rides with the reply */
 } hu_director_form_t;
 
+typedef enum {
+    HU_SHARE_NONE = 0,
+    HU_SHARE_SONG,
+    HU_SHARE_VIDEO,
+    HU_SHARE_SHORT,
+    HU_SHARE_SAVED, /* one Seth saved for this person (Phase 5.4) */
+} hu_share_kind_t;
+
 /* Director result structure */
-typedef struct {
+typedef struct hu_director_result {
     hu_director_action_t action;
     uint32_t delay_s;
     hu_reaction_type_t reaction;
@@ -37,6 +46,8 @@ typedef struct {
     char effect[16];    /* "" or an imsg effect id (impact, loud, gentle, ...) */
     bool reply_to;      /* thread onto their message */
     char gif_query[64]; /* with form GIF */
+    hu_share_kind_t share;
+    char share_query[96]; /* with form SHARE: search words for the song/video */
 } hu_director_result_t;
 
 /* "text", "voice", "tapback", "gif", "silence". */

@@ -84,6 +84,23 @@ static void test_director_prompt_forms_block_follows_the_gate(void) {
     HU_ASSERT_STR_CONTAINS(buf, "effect:");
     HU_ASSERT_STR_CONTAINS(buf, "reply_to:true");
     HU_ASSERT_STR_CONTAINS(buf, "Never on sad news");
+    HU_ASSERT_STR_CONTAINS(buf, "action:share");
+}
+
+/* Phase 5.1: sharing is a director choice with a kind and search words; the
+ * reply still goes out as text, the share rides with it. */
+static void test_director_parse_share(void) {
+    hu_director_result_t r = parse("action:share|share:short|q:cat fail|direction:make her laugh");
+    HU_ASSERT_EQ((int)r.form, (int)HU_DIR_FORM_SHARE);
+    HU_ASSERT_EQ((int)r.action, (int)DIR_TEXT);
+    HU_ASSERT_EQ((int)r.share, (int)HU_SHARE_SHORT);
+    HU_ASSERT_STR_EQ(r.share_query, "cat fail");
+    hu_director_result_t s = parse("action:share|share:song|q:sade smooth operator|direction:x");
+    HU_ASSERT_EQ((int)s.share, (int)HU_SHARE_SONG);
+    hu_director_result_t v = parse("action:share|share:saved|direction:x");
+    HU_ASSERT_EQ((int)v.share, (int)HU_SHARE_SAVED);
+    hu_director_result_t n = parse("action:text|direction:share:song q:nope");
+    HU_ASSERT_EQ((int)n.share, (int)HU_SHARE_NONE);
 }
 
 void run_daemon_director_tests(void) {
@@ -95,4 +112,5 @@ void run_daemon_director_tests(void) {
     HU_RUN_TEST(test_director_parse_effect_and_thread);
     HU_RUN_TEST(test_director_parse_ignores_fields_inside_direction);
     HU_RUN_TEST(test_director_prompt_forms_block_follows_the_gate);
+    HU_RUN_TEST(test_director_parse_share);
 }

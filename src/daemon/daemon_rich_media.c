@@ -9,9 +9,11 @@
 #include "human/config.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/gate_mode.h"
 #include "human/core/log.h"
 #include "human/core/paths.h"
 #include "human/daemon.h"
+#include "human/daemon/expressive.h"
 #include "human/daemon_routing.h"
 #include "human/inspiration.h"
 #include "human/music.h"
@@ -32,7 +34,7 @@ void hu_daemon_rich_media_tick(hu_allocator_t *alloc, hu_agent_t *agent, const h
                                hu_service_channel_t *ch, const char *batch_key, size_t key_len,
                                const char *combined, size_t combined_len,
                                hu_channel_history_entry_t *history_entries, size_t history_count,
-                               bool gif_sent_this_turn) {
+                               bool gif_sent_this_turn, const hu_director_result_t *director) {
     /* Music teaser: share a song with 30s preview + artwork */
     if (combined_len > 0 && ch->channel->vtable->send && !gif_sent_this_turn) {
         float music_prob = 0.05f;
@@ -47,11 +49,20 @@ void hu_daemon_rich_media_tick(hu_allocator_t *alloc, hu_agent_t *agent, const h
             music_prob = 0.15f;
 
         uint32_t music_seed = (uint32_t)time(NULL) * 16807u + (uint32_t)(uintptr_t)combined;
-        if (hu_conversation_should_send_music(combined, combined_len, history_entries,
-                                              history_count, music_seed, music_prob)) {
-            const char *yt_key = config ? hu_config_get_provider_key(config, "youtube") : NULL;
-            hu_inspiration_medium_t medium =
-                hu_inspiration_pick_medium(combined, combined_len, yt_key && *yt_key);
+        /* Phase 5.1 (spec 2026-09-28): the director decides when to share; with it
+         * LIVE the old dice stop. Its kind fixes the medium, its words are a hint. */
+        bool forms_live = hu_gate_mode_from_env("HU_DIRECTOR_FORMS", HU_GATE_OFF) == HU_GATE_LIVE;
+        hu_share_kind_t forced = HU_SHARE_NONE;
+        bool dice_hit = !forms_live && !(director && director->form == HU_DIR_FORM_SHARE) &&
+                        hu_conversation_should_send_music(combined, combined_len, history_entries,
+                                                          history_count, music_seed, music_prob);
+        const char *yt_key = config ? hu_config_get_provider_key(config, "youtube") : NULL;
+        hu_inspiration_medium_t medium = HU_INSPIRATION_NONE;
+        if (hu_expressive_share_should_go(director, forms_live, dice_hit, &forced))
+            medium = forced != HU_SHARE_NONE
+                         ? hu_expressive_share_medium(forced, yt_key && *yt_key)
+                         : hu_inspiration_pick_medium(combined, combined_len, yt_key && *yt_key);
+        if (medium != HU_INSPIRATION_NONE) {
 
             /* Build taste-enriched prompt */
             char taste_snippet[256] = {0};
@@ -93,6 +104,15 @@ void hu_daemon_rich_media_tick(hu_allocator_t *alloc, hu_agent_t *agent, const h
                     mp_len += vlen;
                     music_prompt[mp_len] = '\0';
                 }
+            }
+
+            if (forced != HU_SHARE_NONE && director->share_query[0]) {
+                int hn = snprintf(music_prompt + mp_len, sizeof(music_prompt) - mp_len,
+                                  "\nShare something like: %s", director->share_query);
+                if (hn > 0 && mp_len + (size_t)hn < sizeof(music_prompt))
+                    mp_len += (size_t)hn;
+                else
+                    music_prompt[mp_len] = '\0';
             }
 
             if (mp_len > 0 && agent->provider.vtable && agent->provider.vtable->chat_with_system) {
@@ -320,8 +340,9 @@ void hu_daemon_rich_media_tick(hu_allocator_t *alloc, hu_agent_t *agent, const h
                                                          share_url, sizeof(share_url)) > 0;
                         } else if (medium == HU_INSPIRATION_YOUTUBE) {
                             hu_youtube_result_t yt = {0};
-                            if (hu_youtube_search(alloc, yt_key, search_query, strlen(search_query),
-                                                  &yt) == HU_OK &&
+                            if (hu_youtube_search_ex(alloc, yt_key, search_query,
+                                                     strlen(search_query), forced == HU_SHARE_SHORT,
+                                                     &yt) == HU_OK &&
                                 yt.watch_url) {
                                 int un = snprintf(share_url, sizeof(share_url), "%s", yt.watch_url);
                                 have_url = (un > 0 && (size_t)un < sizeof(share_url));
