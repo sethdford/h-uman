@@ -38,7 +38,7 @@ Before adding any dependency:
 ### Decision Checklist
 
 - [ ] No existing implementation covers this need
-- [ ] Binary size impact measured and acceptable (< 50 KB for C, < 100 KB for JS)
+- [ ] Binary size impact measured and acceptable (< 50 KB for C, < 100 KB for JS) <!-- fp:ignore: a per-change policy, not a measurement -->
 - [ ] License is MIT, BSD-2, BSD-3, ISC, Apache-2.0, or public domain
 - [ ] Transitive dependency count is acceptable (< 5 for npm packages)
 - [ ] Package has active maintenance (commit in last 6 months)

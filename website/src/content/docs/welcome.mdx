@@ -4,8 +4,9 @@ description: "not quite human. Documentation for human — an open-source AI ass
 ---
 
 import { Card, CardGrid } from "@astrojs/starlight/components";
+import fp from "../../data/footprint.json";
 
-**not quite human.** A minimal, dependency-light AI assistant runtime optimized for small binaries and low memory footprint. It supports 50+ AI providers, 38 messaging channels, and 83+ tools — all in a ~1.7 MB static binary.
+**not quite human.** A minimal, dependency-light AI assistant runtime optimized for small binaries and low memory footprint. It supports 50+ AI providers, 38 messaging channels, and 83+ tools — all in a {fp.text.binary_mb} static binary.
 
 <CardGrid stagger>
   <Card title="Installation" icon="pencil">

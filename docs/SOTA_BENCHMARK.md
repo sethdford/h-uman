@@ -89,7 +89,7 @@ This document benchmarks the `human` runtime against state-of-the-art AI agent p
 
 | Capability | SOTA Reference | human Status | Rating | Gap |
 |-----------|---------------|-------------|--------|-----|
-| **Binary footprint** | — | ~2694 KB release-size build, 3.3 MB `release` preset; 8.6–8.8 MB idle RSS; 4–9 ms startup (macOS arm64, 2026-09-27, `docs/perf/footprint.json`) | **SOTA** | Measured size/RSS leadership vs Node agent stacks. |
+| **Binary footprint** | — | <!-- fp:binary_kb -->~2760 KB<!-- /fp --> release-size build, <!-- fp:full_binary_mb -->3.3 MB<!-- /fp --> `release` preset; <!-- fp:idle_rss_mb -->8.6 MB<!-- /fp --> / <!-- fp:full_idle_rss_mb -->8.8 MB<!-- /fp --> idle RSS; <!-- fp:startup_range -->3–6 ms<!-- /fp --> startup (<!-- fp:measured_platform -->macOS arm64<!-- /fp -->, <!-- fp:measured_date -->2026-09-29<!-- /fp -->, `docs/perf/footprint.json`) | **SOTA** | Measured size/RSS leadership vs Node agent stacks. |
 | **Sandbox** | OpenHands (Docker) | Landlock + seccomp, Seatbelt, Docker, WASI | **COMPETITIVE** | Multiple backends; platform parity incomplete. |
 | **Security policy** | Anthropic Cowork containment | Deny-by-default, autonomy, pairing, HTTPS-only; Wave A unifies tool pre-execute gate | **COMPETITIVE** | Envelope parity across dispatcher/stream/DAG/HuLa is the bar; vault/SSRF follow-ups remain. |
 | **Eval framework** | SWE-bench, GAIA, LongMemEval | Suite runner + LLM-as-judge + regression gates | **COMPETITIVE** | Strong in-repo harness; external memory benches not yet gated. |
@@ -182,7 +182,7 @@ Test-mode scores reflect the system's deterministic mock behavior. Production sc
 3. **Typo simulation** with QWERTY adjacency modeling
 4. **Spaced-repetition forgetting curves** for memory
 5. **Constitutional principles** injected from persona config
-6. **~3 MB C11 binary** with 13,447+ tests — tiny vs Node agent stacks
+6. **<!-- fp:binary_mb -->~3 MB<!-- /fp --> C11 binary** with 13,447+ tests — tiny vs Node agent stacks
 7. **MCTS-driven planning** that can produce plans from tree search
 8. **Proactive cross-channel routing** to a contact's recent channel
 9. **Feed-driven outreach** with relationship-aware check-ins

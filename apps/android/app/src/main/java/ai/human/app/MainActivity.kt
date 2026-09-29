@@ -360,7 +360,8 @@ private fun OnboardingScreen(
     )
     val pages = listOf(
         Triple("Welcome to h-uman", "not quite human.", "Minimal footprint, maximum capability."),
-        Triple("Lightning Fast", "~3 MB binary, <9 MB RAM.", "<10 ms startup. Zero dependencies."),
+        // fp-template: Triple("Lightning Fast", "{{binary_mb}} binary, {{idle_rss_bound}} RAM.", "{{startup_bound}} startup. Zero dependencies."),
+        Triple("Lightning Fast", "~3 MB binary, <9 MB RAM.", "<6 ms startup. Zero dependencies."),
         Triple("34 Channels", "Telegram, Discord, Slack, and more.", "Connect your preferred messaging platform."),
     )
     val pagerState = rememberPagerState(pageCount = { pages.size })

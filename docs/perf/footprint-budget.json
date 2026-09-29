@@ -1,0 +1,33 @@
+{
+  "about": "Policy for h-uman's footprint: which build the published numbers describe, the hard budgets CI enforces, and when a fresh measurement should refresh the docs. Measurements live in footprint.json; scripts/footprint.py joins the two. Units: bytes, and SI megabytes (1 MB = 1,000,000 bytes) wherever a claim says MB.",
+  "primary_build": "release-size",
+  "full_build": "release-preset",
+  "builds": {
+    "release-size": "MinSizeRel + LTO, all channels, sqlite-vec OFF. The exact configuration of the release-size job in .github/workflows/ci.yml, so CI re-measures what the docs describe on every main push.",
+    "release-preset": "`cmake --preset release` (adds sqlite-vec, ML, embedded model, Cartesia, cron, feeds, update). What a user building the full release gets. Measured locally; CI does not build it."
+  },
+  "budgets": {
+    "binary_bytes": {
+      "build": "release-size",
+      "max": 2867200,
+      "since": "2026-09-20",
+      "why": "2800 KB. Raised from 2600 KB after a linker-map audit of the 2611 KB binary found nothing to trim (__text 1809 KB, __cstring 512 KB, -Oz and no-unwind-tables already on); the growth was product code. Previously hard-coded in the release-size job (PR #424). Raise only with a measurement, never to make a red run green."
+    },
+    "version_peak_rss_bytes": {
+      "build": "release-size",
+      "max": 8000000,
+      "since": "2026-03",
+      "why": "8 MB, the long-standing 'Max Allowed' peak RSS of `human --version` in docs/standards/engineering/performance.md. It was never enforced anywhere until this file."
+    },
+    "startup_ms_median": {
+      "build": "release-size",
+      "max": 100,
+      "since": "2026-03",
+      "why": "100 ms, the long-standing 'Max Allowed' cold start in docs/standards/engineering/performance.md. Checked on the median of 20 warm runs, because a single sample on a shared CI runner is noise."
+    }
+  },
+  "heal": {
+    "approx_tolerance": 0.05,
+    "why": "A published '~N' or 'X.Y MB' value is refreshed when it is more than 5% away from a fresh measurement. That is a third of the 15% drift tolerance the binary-size claims were gated at before this file existed, so the docs refresh well before any claim is badly off. Bounds ('<9 MB') and ranges ('4-6 ms') refresh the moment a fresh measurement falls outside them. Nothing refreshes for noise inside those limits, which is what keeps the heal loop from opening a PR on every commit."
+  }
+}

@@ -120,11 +120,11 @@ Each extension point is a struct of function pointers. Your plugin allocates con
 
 ## Performance Baseline
 
-| Metric             | Value (MinSizeRel+LTO, all flags) |
+| Metric             | Value (release-size build; generated from `docs/perf/footprint.json`) |
 | ------------------ | --------------------------------- |
-| Binary size        | ~1696 KB                          |
-| Cold start         | 4–27 ms avg                       |
-| Peak RSS           | ~5.7 MB                           |
+| Binary size        | <!-- fp:binary_kb -->~2760 KB<!-- /fp --> |
+| Cold start         | <!-- fp:startup_range -->3–6 ms<!-- /fp --> |
+| Peak RSS           | <!-- fp:version_rss_mb -->6.9 MB<!-- /fp --> (`--version`), <!-- fp:idle_rss_mb -->8.6 MB<!-- /fp --> idle |
 | Test suite (9,500+) | 700+ tests/sec                  |
 
 ## See Also

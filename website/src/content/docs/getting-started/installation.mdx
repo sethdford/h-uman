@@ -3,6 +3,8 @@ title: Installation
 description: Install Human on macOS, Linux, or Windows. Mac users get on-device AI with zero configuration.
 ---
 
+import fp from "../../../data/footprint.json";
+
 ## One-command install
 
 The fastest path — downloads the pre-built binary for your platform:
@@ -91,7 +93,7 @@ cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DHU_ENABLE_LTO=ON -DHU_ENABLE_ALL_CHANNE
 cmake --build .
 ```
 
-This produces a small binary (~1.7 MB with LTO) and enables all messaging channels (Telegram, Discord, Slack, etc.).
+This produces a small binary ({fp.text.binary_mb} with LTO) and enables all messaging channels (Telegram, Discord, Slack, etc.).
 
 ### Basic development build
 

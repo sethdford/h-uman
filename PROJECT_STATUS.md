@@ -1,6 +1,6 @@
 # Human — Project Status
 
-Last updated: 2026-09-27
+Last updated: 2026-09-28
 
 ## Summary
 
@@ -9,12 +9,12 @@ Last updated: 2026-09-27
 | Source files (src/ + include/) | **1,093**              |
 | Lines of C/H/ASM code          | **~418K**              |
 | Test files                     | ~308                   |
-| Tests passing                  | **14,097/14,097 (100%)** |
-| Binary size (MinSizeRel+LTO)   | **~2694 KB**           |
-| Idle RSS (`human mcp`)         | **8.6 MB**             |
+| Tests passing                  | **14,133/14,133 (100%)** |
+| Binary size (MinSizeRel+LTO)   | **<!-- fp:binary_kb -->~2760 KB<!-- /fp -->** |
+| Idle RSS (`human mcp`)         | **<!-- fp:idle_rss_mb -->8.6 MB<!-- /fp -->** |
 
 Binary size and RSS are the release-size build (LTO, all channels, sqlite-vec off), measured
-2026-09-27 on macOS arm64 — see [`docs/perf/footprint.json`](docs/perf/footprint.json).
+<!-- fp:measured_date -->2026-09-29<!-- /fp --> on <!-- fp:measured_platform -->macOS arm64<!-- /fp -->; generated from [`docs/perf/footprint.json`](docs/perf/footprint.json).
 
 ## Channels — Honest Status
 

@@ -321,7 +321,8 @@ apps/           iOS, macOS, Android native apps + shared HumanKit
 
 | Metric                | Measured       |
 | --------------------- | -------------- |
-| Binary size (release) | ~2512 KB       |
-| Cold start            | 4-27 ms        |
-| Peak RSS              | ~5.7 MB        |
+| Binary size (release-size build) | <!-- fp:binary_kb -->~2760 KB<!-- /fp --> |
+| Cold start (`--version`) | <!-- fp:startup_range -->3–6 ms<!-- /fp --> |
+| Peak RSS (`--version`) | <!-- fp:version_rss_mb -->6.9 MB<!-- /fp --> |
+| Idle RSS (`human mcp`) | <!-- fp:idle_rss_mb -->8.6 MB<!-- /fp --> |
 | Test throughput       | 700+ tests/sec |
