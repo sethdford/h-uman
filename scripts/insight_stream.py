@@ -704,6 +704,45 @@ def write_manifest(manifest_dir, now, man):
     return 0
 
 
+def resolve_deadline(hhmm, now_local):
+    """Today's HH:MM (local) if that moment is still ahead of now_local,
+    else the same HH:MM tomorrow -- a run started after the deadline's
+    clock time must not immediately stop before its first contact.
+    Returns a tz-aware UTC datetime."""
+    hh, mm = map(int, hhmm.split(":"))
+    candidate = now_local.replace(hour=hh, minute=mm, second=0, microsecond=0)
+    if candidate <= now_local:
+        candidate += dt.timedelta(days=1)
+    return candidate.astimezone(dt.timezone.utc)
+
+
+def load_curator_state():
+    """Missing file -> {} (first run). Unreadable/corrupt file -> warn to
+    stderr and proceed with {} rather than crash the curator on a bad
+    write (e.g. a truncated file from a killed prior run)."""
+    if not os.path.exists(CURATOR_STATE):
+        return {}
+    try:
+        data = json.load(open(CURATOR_STATE))
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"warning: curator_state.json unreadable ({e}); starting from empty state",
+              file=sys.stderr)
+        return {}
+    if not isinstance(data, dict):
+        print("warning: curator_state.json is not a JSON object; starting from empty state",
+              file=sys.stderr)
+        return {}
+    return data
+
+
+def save_curator_state(state):
+    """Atomic write: json to a sibling .tmp file, then os.replace -- so a
+    crash or kill mid-write never leaves CURATOR_STATE truncated."""
+    tmp = CURATOR_STATE + ".tmp"
+    json.dump(state, open(tmp, "w"))
+    os.replace(tmp, CURATOR_STATE)
+
+
 def wide_pass(db, a, identity, persona_ids, att, now, write, deadline=None, state=None):
     """Curate every eligible non-persona 1:1 contact from chat.db (spec §3-5).
     Returns a counts-only manifest; never text."""
@@ -789,23 +828,26 @@ def run_wide(a, db, identity, contacts, now_ms):
         return 2
     now = dt.datetime.now(dt.timezone.utc)
     att = cq.attribute(a.chat_db, MEMORY_DB, now - dt.timedelta(days=a.window_days))
-    deadline = None
-    if a.deadline:
-        hh, mm = map(int, a.deadline.split(":"))
-        local = dt.datetime.now().astimezone().replace(hour=hh, minute=mm, second=0,
-                                                       microsecond=0)
-        deadline = local.astimezone(dt.timezone.utc)
-    state = json.load(open(CURATOR_STATE)) if os.path.exists(CURATOR_STATE) else {}
+    persona_ids = set(contacts)
+    # Refuse BEFORE any write when there is nothing to curate -- otherwise
+    # a --write run with 0 eligible contacts still retires suppressed rows
+    # and writes curator_state.json before write_manifest's own refusal,
+    # leaving side effects behind a run that reports "refused".
+    if not cp.eligible_handles(att["timelines"], persona_ids, now, window_days=a.window_days):
+        print("refusing: 0 eligible contacts (no manifest written)", file=sys.stderr)
+        return 2
+    deadline = resolve_deadline(a.deadline, dt.datetime.now().astimezone()) if a.deadline else None
+    state = load_curator_state()
     try:
         suppressed = cp.load_suppressed(MEMORY_DB)
         retired = retire_suppressed(db, suppressed, now_ms, a.write)
-        man = wide_pass(db, a, identity, set(contacts), att, now, a.write, deadline, state)
+        man = wide_pass(db, a, identity, persona_ids, att, now, a.write, deadline, state)
     except sqlite3.Error as e:
         print(f"refusing: memory.db unreadable ({e})", file=sys.stderr)
         return 2
     man["retired_suppressed"] = retired
     if a.write:
-        json.dump(state, open(CURATOR_STATE, "w"))
+        save_curator_state(state)
     return write_manifest(a.manifest_dir, now, man)
 
 

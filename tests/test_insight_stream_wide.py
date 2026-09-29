@@ -206,3 +206,82 @@ def test_run_wide_excludes_suppressed_and_never_without_calling_model(tmp_path, 
     assert man["excluded_suppressed"] == 1
     assert man["excluded_never"] == 1
     assert man["curated"] == 0
+
+
+def test_run_wide_refuses_before_any_write_when_no_eligible_contacts(tmp_path, monkeypatch):
+    """Fix round 1 (a): with --write and 0 eligible contacts, run_wide must
+    refuse BEFORE retire_suppressed, wide_pass, the state write, or the
+    manifest -- not after. Set up a suppressed contact with a live
+    contact_insights row and empty chat.db timelines (0 eligible); assert
+    the row is untouched, no state file, no manifest."""
+    db = sqlite3.connect(tmp_path / "m.db"); db.executescript(ins.SCHEMA); ins.migrate(db)
+    db.execute("INSERT INTO contact_insights (contact_id, kind, insight, confidence, as_of_ms,"
+               " source, created_at_ms) VALUES (?, 'fact', 'old note', 0.9, 1, 'extractor:v2', 1)",
+               (H,))
+    db.commit()
+    chat_db = tmp_path / "chat.db"
+    c = sqlite3.connect(chat_db)
+    c.execute("CREATE TABLE message (rowid INTEGER)")
+    c.commit(); c.close()
+    monkeypatch.setattr(ins.urllib.request, "urlopen", lambda *a, **k: None)
+    import eval_conversation_quality as cq
+    monkeypatch.setattr(cq, "attribute", lambda *a, **k: {"timelines": {}, "labels": {}})
+    mem = sqlite3.connect(ins.MEMORY_DB)  # the hermetic tmp file from the autouse fixture
+    mem.execute("CREATE TABLE contact_suppressions (contact TEXT)")
+    mem.execute("INSERT INTO contact_suppressions VALUES (?)", (H,))
+    mem.commit(); mem.close()
+    monkeypatch.setattr(ins, "call_model", lambda *a, **k: (_ for _ in ()).throw(AssertionError))
+    state_path = tmp_path / "curator_state.json"
+    monkeypatch.setattr(ins, "CURATOR_STATE", str(state_path))
+    manifest_dir = tmp_path / "manifests"
+    a = A()
+    a.chat_db = str(chat_db); a.window_days = 30; a.deadline = None
+    a.manifest_dir = str(manifest_dir); a.write = True
+    rc = ins.run_wide(a, db, "id", set(), 999)
+    assert rc == 2
+    assert db.execute("SELECT retired_at_ms FROM contact_insights").fetchone()[0] == 0
+    assert not state_path.exists()
+    assert not manifest_dir.exists()
+
+
+def test_resolve_deadline_rolls_to_tomorrow_only_once_the_time_has_passed():
+    """Fix round 1 (b): resolve_deadline must pick TODAY's HH:MM if it is
+    still ahead of now, and tomorrow's only once that clock time is behind
+    now -- a run starting after the deadline's HH:MM must not immediately
+    stop before its first contact."""
+    tz = dt.timezone(dt.timedelta(hours=-4))
+    morning = dt.datetime(2026, 9, 28, 5, 10, tzinfo=tz)
+    assert ins.resolve_deadline("07:30", morning) == (
+        dt.datetime(2026, 9, 28, 7, 30, tzinfo=tz).astimezone(dt.timezone.utc))
+    late = dt.datetime(2026, 9, 28, 23, 0, tzinfo=tz)
+    assert ins.resolve_deadline("07:30", late) == (
+        dt.datetime(2026, 9, 29, 7, 30, tzinfo=tz).astimezone(dt.timezone.utc))
+
+
+def test_run_wide_recovers_from_a_truncated_curator_state_file(tmp_path, monkeypatch):
+    """Fix round 1 (c): a truncated/corrupt curator_state.json must not crash
+    the run -- load_curator_state warns and starts from {}, and the atomic
+    save (tmp + os.replace) leaves the file valid JSON afterward."""
+    db = sqlite3.connect(tmp_path / "m.db"); db.executescript(ins.SCHEMA); ins.migrate(db)
+    chat_db = tmp_path / "chat.db"
+    c = sqlite3.connect(chat_db)
+    c.execute("CREATE TABLE message (rowid INTEGER)")
+    c.commit(); c.close()
+    monkeypatch.setattr(ins.urllib.request, "urlopen", lambda *a, **k: None)
+    import eval_conversation_quality as cq
+    monkeypatch.setattr(cq, "attribute", lambda *a, **k: {
+        "timelines": {H: timeline()}, "labels": {f"me{i}": "seth" for i in range(6)}})
+    monkeypatch.setattr(ins, "call_model", lambda *a, **k: "[]")
+    monkeypatch.setattr(ins, "verify_claims", lambda a, s, u, claims, k: [])
+    state_path = tmp_path / "curator_state.json"
+    state_path.write_text('{"+1a": 3')  # truncated -- not valid JSON
+    monkeypatch.setattr(ins, "CURATOR_STATE", str(state_path))
+    manifest_dir = tmp_path / "manifests"
+    a = A()
+    a.chat_db = str(chat_db); a.window_days = 30; a.deadline = None
+    a.manifest_dir = str(manifest_dir); a.write = True
+    a.never_path = "/nonexistent/curator_never.json"
+    rc = ins.run_wide(a, db, "id", set(), 123)  # must not raise
+    assert rc == 0
+    state = json.loads(state_path.read_text())  # must be valid JSON afterward
+    assert isinstance(state, dict) and H in state and isinstance(state[H], int)
