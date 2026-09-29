@@ -148,12 +148,14 @@ def build_prompt(identity, name, relationship, turns, max_notes):
         "yourself — the things YOU would actually remember and bring up next time: specific names, "
         "places, plans with when, what they're dealing with, running jokes and inside references, "
         "what they like and don't. Never generic traits (\"is friendly\"), never advice, never "
-        "anything not in the texts. Lowercase, like a note to yourself, present tense, each under "
+        "anything not in the texts. Casual lowercase like a note to yourself, but keep names of "
+        "people, places and organizations capitalized as written; present tense, each under "
         "110 characters.\n\n"
         f"Output ONLY a JSON array of at most {max_notes} objects: "
         "{\"note\": str, \"kind\": \"fact\"|\"thread\"|\"plan\"|\"preference\"|\"inside_ref\", "
-        "\"confidence\": number 0-1, \"evidence\": [the [tN] numbers of the texts the note "
-        "comes from]}. No prose before or after."
+        "\"confidence\": number 0-1, \"evidence\": [the [tN] labels of the texts the note "
+        "comes from; never a [dN]], \"names\": [{\"name\": str, \"type\": \"person\"|\"place\"|"
+        "\"org\"|\"event\"} for every specific name in the note]}. No prose before or after."
     )
     user = "recent texts (oldest first):\n" + "\n".join(turns)
     return system, user
@@ -202,8 +204,18 @@ def parse_notes(text, max_notes):
             m2 = re.search(r"\d+", str(e))
             if m2:
                 ev.append(int(m2.group(0)))
+        raw_ev = o.get("evidence") if isinstance(o.get("evidence"), list) else []
+        names = []
+        for nm in (o.get("names") if isinstance(o.get("names"), list) else []):
+            if not isinstance(nm, dict):
+                continue
+            nname = str(nm.get("name") or "").strip()
+            ntype = str(nm.get("type") or "").strip().lower()
+            if nname and len(nname) <= 60 and ntype in {"person", "place", "org", "event"}:
+                names.append({"name": nname, "type": ntype})
         seen.add(note.lower())
-        notes.append({"note": note, "kind": kind, "confidence": conf, "evidence": ev})
+        notes.append({"note": note, "kind": kind, "confidence": conf, "evidence": ev,
+                      "evidence_tokens": [str(e) for e in raw_ev], "names": names})
         if len(notes) >= max_notes:
             break
     return notes
