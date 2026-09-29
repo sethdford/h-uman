@@ -44,6 +44,12 @@ else
     has_changes_in '^website/' && WEBSITE_CHANGED=1 || true
     has_changes_in '^apps/' && APPS_CHANGED=1 || true
     has_changes_in '^docs/|^human-skills/|^skill-registry/|\.md$|scripts/(check_markdown|check-docs|check-human-skills|doc-fleet)\.sh' && DOCS_CHANGED=1 || true
+    # Deleting ANY file can break a doc that links to it (CI's repo-wide
+    # relative-link check), so a deletion runs the doc fleet too.
+    { git diff --name-only --diff-filter=D HEAD 2>/dev/null; git diff --cached --name-only --diff-filter=D 2>/dev/null; } | grep -q . && DOCS_CHANGED=1 || true
+    # docs/build-options.md is generated from these two files and CI fails
+    # hard when it is stale (e.g. after removing an option()).
+    has_changes_in '^CMakeLists\.txt$|^CMakePresets\.json$' && OPTIONS_CHANGED=1 || true
 fi
 
 printf "\n=== Agent Pre-Flight Check ===\n"
@@ -183,6 +189,16 @@ if [ "${APPS_CHANGED:-0}" -eq 1 ]; then
     fi
     info "For XCUITest + emulator matrix see .github/workflows/native-apps-fleet.yml"
     info "Local: scripts/run-native-fleet-local.sh quick | full"
+    printf "\n"
+fi
+
+if [ "${OPTIONS_CHANGED:-0}" -eq 1 ] || [ "$FULL" -eq 1 ]; then
+    printf '%s\n' "--- Build options table ---"
+    if bash scripts/dev/build-options-table.sh --check; then
+        pass "docs/build-options.md current"
+    else
+        fail "docs/build-options.md stale (bash scripts/dev/build-options-table.sh --write)"
+    fi
     printf "\n"
 fi
 
