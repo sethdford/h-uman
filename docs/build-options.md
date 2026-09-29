@@ -98,7 +98,7 @@ The "Presets ON" column lists every `configurePresets` entry (after resolving `i
 | `HU_ENABLE_LANCEDB_ENGINE` | ON | dev, prod, test, release, fuzz, minimal, minimal-release, integration, dev-neural, rl_sota, release-reproducible | Build LanceDB memory engine |
 | `HU_ENABLE_REDIS_ENGINE` | OFF | *(none)* | Build Redis memory engine |
 | `HU_ENABLE_SONATA` | OFF | *(none)* | Enable native Sonata voice pipeline (Rust) |
-| `HU_ENABLE_SQLITE_VEC` | ON | dev, prod, test, release, fuzz, minimal, minimal-release, integration, dev-neural, rl_sota, release-reproducible | Vendored sqlite-vec store for semantic recall (adds ~300 KB; release-size builds turn it off) <!-- fp:ignore: a component delta, not the binary --> |
+| `HU_ENABLE_SQLITE_VEC` | ON | dev, prod, test, release, fuzz, minimal, minimal-release, integration, dev-neural, rl_sota, release-reproducible | Vendored sqlite-vec store for semantic recall (adds ~300 KB; release-size builds turn it off) |
 | `HU_ENABLE_TOPOLOGY_CHECK` | ON | dev, prod, test, release, fuzz, minimal, minimal-release, integration, dev-neural, rl_sota, release-reproducible | Enforce 7-layer architectural dependency direction (memory v2 P2E) |
 | `HU_ENABLE_FUZZ` | OFF | fuzz | Build fuzz harnesses (JSON, config, tool params, URL, HTTP) |
 | `HU_ENABLE_BENCH` | OFF | *(none)* | Build human_bench executable for core operation benchmarks |

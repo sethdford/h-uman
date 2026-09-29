@@ -2473,7 +2473,10 @@ const tools = [
               [
                 {
                   metric: "Binary Size",
-                  human: { val: fp.measured.binary_mb, label: fp.text.binary_mb },
+                  human: {
+                    val: fp.measured.binary_mb,
+                    label: fp.text.binary_mb,
+                  },
                   others: [
                     { name: "Claude Code", val: 200, label: "~200 MB" },
                     { name: "OpenAI Codex", val: 50, label: "~50 MB" },
@@ -2483,7 +2486,10 @@ const tools = [
                 },
                 {
                   metric: "RAM",
-                  human: { val: fp.measured.idle_rss_mb, label: `${fp.text.idle_rss_bound} idle` },
+                  human: {
+                    val: fp.measured.idle_rss_mb,
+                    label: `${fp.text.idle_rss_bound} idle`,
+                  },
                   others: [
                     { name: "Claude Code", val: 300, label: "~300 MB" },
                     { name: "OpenAI Codex", val: 100, label: "~100 MB" },

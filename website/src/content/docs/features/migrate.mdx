@@ -9,12 +9,12 @@ import fp from "../../../data/footprint.json";
 
 Human is a drop-in replacement for [OpenClaw](https://github.com/openclaw/openclaw) (TypeScript, Node.js). It preserves your memory, config structure, and channel integrations while dramatically reducing resource usage.
 
-| Dimension        | OpenClaw               | Human                          |
-| ---------------- | ---------------------- | ------------------------------ |
-| **Binary size**  | ~28 MB (npm dist)      | **{fp.text.binary_mb}** |
+| Dimension        | OpenClaw               | Human                                 |
+| ---------------- | ---------------------- | ------------------------------------- |
+| **Binary size**  | ~28 MB (npm dist)      | **{fp.text.binary_mb}**               |
 | **Memory**       | Node.js heap (100+ MB) | **{fp.text.idle_rss_bound}** idle RSS |
-| **Dependencies** | 1,200+ npm packages    | **0** — libc + optional SQLite |
-| **Secrets**      | Plain-text API keys    | ChaCha20-Poly1305 encrypted    |
+| **Dependencies** | 1,200+ npm packages    | **0** — libc + optional SQLite        |
+| **Secrets**      | Plain-text API keys    | ChaCha20-Poly1305 encrypted           |
 
 ### 1. Install Human
 
