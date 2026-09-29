@@ -3,20 +3,15 @@
     <title>Human</title>
     <background file="" alignment="topleft" scaling="none"/>
     <welcome language="en">Welcome to Human Installer</welcome>
-    <options customize="never" rootVolumeOnly="false" allow-external-scripts="true"/>
     <domains enable_localSystem="true"/>
-    <script>
+    <!-- CDATA so JavaScript comparisons never need XML escaping (an unescaped
+         "<" here once made every productbuild fail). APIs per Apple's Installer
+         JS: system.version is a dictionary (ProductVersion), and free space is
+         my.target.availableKilobytes, which exists only in volume-check. -->
+    <script><![CDATA[
         function check_system_requirements() {
-            var os_version = system.version;
-            var major = parseInt(os_version.split('.')[0]);
-            if (major < 10) {
-                my.result.title = "OS Too Old";
-                my.result.message = "macOS 10.15 (Catalina) or later is required";
-                my.result.type = "Fatal";
-                return false;
-            }
-            var minor = parseInt(os_version.split('.')[1]);
-            if (major == 10 &amp;&amp; minor &lt; 15) {
+            var version = system.version.ProductVersion;
+            if (system.compareVersions(version, '10.15') < 0) {
                 my.result.title = "OS Too Old";
                 my.result.message = "macOS 10.15 (Catalina) or later is required";
                 my.result.type = "Fatal";
@@ -25,9 +20,8 @@
             return true;
         }
         function check_disk_space() {
-            var disk_free = system.diskSpaceForVolume("/");
-            var required = 500 * 1024 * 1024;
-            if (disk_free &lt; required) {
+            var required_kb = 500 * 1024;
+            if (my.target.availableKilobytes < required_kb) {
                 my.result.title = "Not Enough Disk Space";
                 my.result.message = "At least 500 MB free space is required";
                 my.result.type = "Fatal";
@@ -35,9 +29,9 @@
             }
             return true;
         }
-    </script>
-    <installation-check script="check_system_requirements(); check_disk_space();"/>
-    <volume-check script="check_disk_space();"/>
+    ]]></script>
+    <installation-check script="check_system_requirements()"/>
+    <volume-check script="check_disk_space()"/>
     <pkg-ref id="com.h-uman.human.pkg" version="@VERSION@" installKBytes="0">com.h-uman.human.pkg</pkg-ref>
     <options customize="never" require-scripts="false"/>
     <choices-outline>

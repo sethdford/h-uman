@@ -68,6 +68,14 @@ if [[ ! -x "$APP_PATH/Contents/MacOS/human" ]]; then
     exit 1
 fi
 
+# pkgbuild only recognizes a directory as an app bundle when it has an
+# Info.plist; without one the component plist below comes back empty.
+if [[ ! -f "$APP_PATH/Contents/Info.plist" ]]; then
+    echo "ERROR: $APP_PATH has no Contents/Info.plist, so it is not a valid app bundle"
+    echo "       (write one with scripts/release/write-info-plist.sh)"
+    exit 1
+fi
+
 # Extract version from Info.plist if not provided
 if [[ -z "$VERSION" ]]; then
     VERSION=$(plutil -p "$APP_PATH/Contents/Info.plist" 2>/dev/null | grep "CFBundleVersion" | sed 's/.*=> //' | tr -d '"' || echo "0.0.0")
@@ -98,21 +106,34 @@ if [[ ! -x "$STAGE/Applications/Human.app/Contents/MacOS/human" ]]; then
     exit 1
 fi
 
-# Create component.plist for pkgbuild
+# Create component.plist for pkgbuild.
+#
+# pkgbuild requires a property list whose ROOT is an array of dictionaries,
+# one per bundle, with RootRelativeBundlePath relative to --root. A hand-written
+# bare <dict> ("Human.app", no array, no plist wrapper) fails with "Component
+# property list is not an array of dictionaries" — which is how every macOS
+# Release run on main failed. Let pkgbuild describe the staged bundle itself,
+# then set the policy keys on that entry.
 COMPONENT_PLIST=$(mktemp)
 trap "rm -rf '$STAGE' '$COMPONENT_PLIST'" EXIT
 
-cat > "$COMPONENT_PLIST" << 'EOF'
-<dict>
-  <key>BundleIsRelocatable</key><true/>
-  <key>BundleIsVersionChecked</key><false/>
-  <key>BundleOverwriteAction</key><string>update</string>
-  <key>RootRelativeBundlePath</key><string>Human.app</string>
-</dict>
-EOF
+pkgbuild --analyze --root "$STAGE" "$COMPONENT_PLIST" >/dev/null
+# Not relocatable: install to /Applications, never over a stray copy of the
+# app found elsewhere on disk (e.g. a build tree).
+plutil -replace 0.BundleIsRelocatable -bool NO "$COMPONENT_PLIST"
+plutil -replace 0.BundleIsVersionChecked -bool NO "$COMPONENT_PLIST"
+plutil -replace 0.BundleOverwriteAction -string update "$COMPONENT_PLIST"
+if [[ "$(plutil -extract 0.RootRelativeBundlePath raw "$COMPONENT_PLIST")" != "Applications/Human.app" ]]; then
+    echo "ERROR: pkgbuild --analyze did not find Applications/Human.app in the staging root"
+    exit 1
+fi
 
 # Build component package
-COMPONENT_PKG=$(mktemp -d)/component.pkg
+# Named after its identifier because distribution.xml.template's
+# <pkg-ref>com.h-uman.human.pkg</pkg-ref> resolves to a FILE of that name under
+# --package-path. As "component.pkg" productbuild found nothing to include and
+# still exited 0, writing a ~1 KB installer with an empty payload.
+COMPONENT_PKG=$(mktemp -d)/com.h-uman.human.pkg
 mkdir -p "$(dirname "$COMPONENT_PKG")"
 
 if [[ "$DRY_RUN" == 1 ]]; then
@@ -145,11 +166,13 @@ VERSION_ESC="${VERSION_ESC//\//\\/}"
 sed "s|@VERSION@|${VERSION_ESC}|g" \
     "$PROJECT_DIR/tests/fixtures/distribution.xml.template" > "$DIST_XML"
 
-# Validate distribution.xml syntax
-if [[ "$DRY_RUN" == 0 ]]; then
-    if ! productbuild --validate-only --distribution "$DIST_XML" --package-path "$(dirname "$COMPONENT_PKG")" 2>/dev/null; then
-        echo "WARNING: Distribution.xml validation failed (may still work)"
-    fi
+# Validate distribution.xml. productbuild has no --validate-only option (the
+# check that used to live here always "failed" and only warned), and a
+# malformed file is exactly what broke productbuild before, so fail hard.
+if ! xmllint --noout "$DIST_XML" 2>/dev/null; then
+    echo "ERROR: distribution.xml is not well-formed XML:"
+    xmllint --noout "$DIST_XML" 2>&1 | head -5
+    exit 1
 fi
 
 # Build final distribution package
@@ -159,7 +182,7 @@ if [[ "$DRY_RUN" == 1 ]]; then
     echo "               --package-path '$(dirname "$COMPONENT_PKG")' \\"
     echo "               '$OUTPUT'"
     echo "DRY RUN: Would verify: file '$OUTPUT' (should be xar archive)"
-    echo "DRY RUN: Would verify: size >= 8 MB"
+    echo "DRY RUN: Would verify: payload includes Applications/Human.app/Contents/MacOS/human"
     echo "DRY RUN: Success (dry run)"
     exit 0
 else
@@ -184,24 +207,22 @@ if [[ -z "$FILE_TYPE" ]]; then
     echo "WARNING: Output file does not appear to be a valid xar archive"
 fi
 
-# Check file size (should be at least 8 MB for binary inclusion)
-SIZE_BYTES=$(stat -f%z "$OUTPUT" 2>/dev/null || stat -c%s "$OUTPUT" 2>/dev/null)
-SIZE_MB=$((SIZE_BYTES / 1024 / 1024))
-
-echo "  Output size: $SIZE_MB MB ($SIZE_BYTES bytes)"
-
-if [[ "$SIZE_MB" -lt 8 ]]; then
-    echo "WARNING: Package size is less than expected 8 MB (may be normal for stripped binaries)"
+# Measure the artifact, not the exit code: productbuild exits 0 even when the
+# distribution references a package it cannot find, producing an installer
+# that installs nothing. Refuse unless the payload really carries the binary.
+if ! pkgutil --payload-files "$OUTPUT" 2>/dev/null | grep -qx './Applications/Human.app/Contents/MacOS/human'; then
+    echo "ERROR: $OUTPUT does not install Applications/Human.app/Contents/MacOS/human"
+    echo "       (payload: $(pkgutil --payload-files "$OUTPUT" 2>/dev/null | wc -l | tr -d ' ') entries)"
+    exit 1
 fi
+SIZE_BYTES=$(stat -f%z "$OUTPUT" 2>/dev/null || stat -c%s "$OUTPUT" 2>/dev/null)
+echo "  Output size: $((SIZE_BYTES / 1024)) KB; payload includes Human.app"
 
-# Verify signature (unsigned .pkg still has valid structure)
+# Unsigned is expected until the notarization story (US-C1.x) lands.
 if pkgutil --check-signature "$OUTPUT" >/dev/null 2>&1; then
-    echo "  Signature:  OK (valid but unsigned)"
-elif [[ "$SIZE_MB" -gt 5 ]]; then
-    # Large package, likely OK even if signature check fails on unsigned
-    echo "  Signature:  (unsigned, expected)"
+    echo "  Signature:  present"
 else
-    echo "WARNING: Package validation returned non-zero (may be unsigned)"
+    echo "  Signature:  none (unsigned build)"
 fi
 
 echo ""
