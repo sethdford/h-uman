@@ -68,15 +68,52 @@ def name_said(name, texts):
     return any(pat.search(t or "") for t in texts)
 
 
-def validate_note(note, cite_map):
+WORD_RE = re.compile(r"[^\W_]+(?:['’][^\W_]+)*")
+
+
+def implicit_names(text):
+    """Capitalized words after the first are names the model may not have
+    declared: the wide prompt asks for lowercase except proper nouns. A
+    trailing possessive ('s / ’s) is stripped; "I" and its contractions
+    (I'm, I'll) are not names. Unicode-aware (str.isupper, [^\\W_])."""
+    out = []
+    for tok in WORD_RE.findall(text or "")[1:]:
+        tok = re.sub(r"['’]s$", "", tok, flags=re.I)
+        if not tok[:1].isupper() or re.split(r"['’]", tok)[0] == "I":
+            continue
+        out.append(tok)
+    return out
+
+
+def names_to_check(note):
+    """Declared names plus implicit capitalized tokens, deduplicated
+    case-insensitively, declared spellings first."""
+    seen, out = set(), []
+    declared = [str(n.get("name") or "") for n in note.get("names") or []]
+    for name in declared + implicit_names(note.get("note")):
+        if name.strip() and name.lower() not in seen:
+            seen.add(name.lower())
+            out.append(name)
+    return out
+
+
+def assess_note(note, cite_map):
+    """-> (validated note | None, reason, names checked, names not said).
+    Names are only checked once the evidence itself is valid."""
     t_idx, daemon = parse_evidence(note.get("evidence_tokens"))
     if daemon:
-        return None, "daemon_evidence"
+        return None, "daemon_evidence", [], []
     rows = [cite_map[i] for i in t_idx if i in cite_map]
     if not rows:
-        return None, "no_evidence"
+        return None, "no_evidence", [], []
     texts = [r[3] for r in rows]
-    for n in note.get("names") or []:
-        if not name_said(n.get("name"), texts):
-            return None, "name_not_said"
-    return {**note, "evidence_rows": rows}, "ok"
+    checked = names_to_check(note)
+    unsaid = [n for n in checked if not name_said(n, texts)]
+    if unsaid:
+        return None, "name_not_said", checked, unsaid
+    return {**note, "evidence_rows": rows}, "ok", checked, []
+
+
+def validate_note(note, cite_map):
+    out, reason, _, _ = assess_note(note, cite_map)
+    return out, reason

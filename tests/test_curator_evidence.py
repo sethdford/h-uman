@@ -95,3 +95,39 @@ def test_name_said_unicode_word_boundaries():
     assert ce.name_said("José", ["josé's party"])
     assert ce.name_said("Priya", ["priya\U0001F389 surgery tuesday"])
     assert ce.name_said("Priya", ["priya’s surgery"])
+
+
+def test_undeclared_capitalized_name_must_be_said():
+    """R12 I2(b): a name the model left out of `names` is still a name. Every
+    capitalized token after the first word (not "I") must be said in the
+    cited texts, or the note is dropped -- otherwise an empty names list
+    bypasses the was-it-said check entirely."""
+    note = {"note": "Marcus visiting from Tampa", "evidence_tokens": ["t0"], "names": []}
+    cite = {0: (11, 1, "them", "how are you doing")}
+    assert ce.validate_note(note, cite) == (None, "name_not_said")
+
+
+def test_capitalized_tokens_said_in_any_case_pass():
+    note = {"note": "Priya surgery Tuesday", "evidence_tokens": ["t0"], "names": []}
+    cite = {0: (11, 1, "them", "priya's surgery is tuesday")}
+    out, why = ce.validate_note(note, cite)
+    assert why == "ok" and out["evidence_rows"] == [cite[0]]
+
+
+def test_implicit_names_skip_first_word_and_I_and_strip_possessive():
+    cite = {0: (11, 1, "them", "lunch with priya's mom friday, you should call")}
+    ok = [{"note": "Lunch with Priya's mom friday", "evidence_tokens": ["t0"], "names": []},
+          {"note": "Priya’s mom said I should call", "evidence_tokens": ["t0"], "names": []}]
+    for note in ok:
+        assert ce.validate_note(note, cite)[1] == "ok", note["note"]
+    bad = {"note": "dinner with Élodie", "evidence_tokens": ["t0"], "names": []}
+    assert ce.validate_note(bad, cite) == (None, "name_not_said")
+
+
+def test_assess_note_counts_checked_and_unsaid_names():
+    cite = {0: (11, 1, "them", "dana is visiting")}
+    note = {"note": "Dana visiting from Tampa", "evidence_tokens": ["t0"],
+            "names": [{"name": "Dana", "type": "person"}, {"name": "dana", "type": "person"}]}
+    out, why, checked, unsaid = ce.assess_note(note, cite)
+    assert out is None and why == "name_not_said"
+    assert sorted(n.lower() for n in checked) == ["dana", "tampa"] and unsaid == ["Tampa"]
