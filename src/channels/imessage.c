@@ -1979,6 +1979,8 @@ static struct {
     bool on;                 /* the indicator is showing right now */
     uint64_t phase_start_ms; /* when the current on/off phase began */
     uint64_t shown_ms;       /* on-time of completed phases */
+    uint64_t began_ms;       /* the pulse's start, for the end-of-pulse log */
+    unsigned pauses;         /* typing -> paused transitions */
     char target[128];
 } s_pulse = {.mu = PTHREAD_MUTEX_INITIALIZER, .cv = PTHREAD_COND_INITIALIZER};
 
@@ -2042,6 +2044,8 @@ static void *pulse_main(void *arg) {
         pthread_mutex_lock(&s_pulse.mu);
         if (ok || !want_on) {
             pulse_close_phase(now);
+            if (s_pulse.on && !want_on)
+                s_pulse.pauses++;
             s_pulse.on = want_on;
         }
         if (stop_for_good)
@@ -2067,11 +2071,15 @@ static uint64_t pulse_stop(bool leave_on) {
     pthread_mutex_lock(&s_pulse.mu);
     pulse_close_phase(pulse_now_ms());
     uint64_t shown = s_pulse.shown_ms;
+    uint64_t span = pulse_now_ms() - s_pulse.began_ms;
+    unsigned pauses = s_pulse.pauses;
     bool was_on = s_pulse.on;
     char target[sizeof(s_pulse.target)];
     memcpy(target, s_pulse.target, sizeof(target));
     s_pulse.live = false;
     pthread_mutex_unlock(&s_pulse.mu);
+    hu_log_info("imessage", NULL, "typing pulse: shown %llums of %llums, %u pause(s)",
+                (unsigned long long)shown, (unsigned long long)span, pauses);
     if (leave_on && !was_on)
         (void)bridge_typing(target, true);
     else if (!leave_on && was_on)
@@ -2094,7 +2102,9 @@ static bool pulse_start(const char *target, size_t target_len) {
     s_pulse.quit = false;
     s_pulse.on = true;
     s_pulse.shown_ms = 0;
+    s_pulse.pauses = 0;
     s_pulse.phase_start_ms = pulse_now_ms();
+    s_pulse.began_ms = s_pulse.phase_start_ms;
     s_pulse.live = pthread_create(&s_pulse.thread, NULL, pulse_main, NULL) == 0;
     bool live = s_pulse.live;
     pthread_mutex_unlock(&s_pulse.mu);
