@@ -68,3 +68,66 @@ def test_score_combines_disagreement_with_precision(tmp_path):
 def test_score_is_not_measured_until_every_row_is_labeled(tmp_path):
     sheet, key = write_labeled(tmp_path, [("unsupported", "n"), ("supported", "")])
     assert audit_score.score_check(sheet, key, disagreement_rate=0.2) == stats.NOT_MEASURED
+
+
+def test_score_labels_are_only_y_or_n_words(tmp_path):
+    # A fully-filled sheet with one non-y/n label ("not sure") is still unlabeled.
+    labels = ([("unsupported", "n")] * 14 + [("unsupported", "not sure")] +
+              [("unsupported", "y")] * 5 + [("supported", "y")] * 9 + [("supported", "n")] * 1)
+    sheet, key = write_labeled(tmp_path, labels)
+    assert audit_score.score_check(sheet, key, disagreement_rate=0.2) == stats.NOT_MEASURED
+
+
+def test_score_accepts_yes_no_words_case_insensitively(tmp_path):
+    labels = ([("unsupported", "No")] * 15 + [("unsupported", "YES")] * 5 +
+              [("supported", "Yes")] * 9 + [("supported", "no")] * 1)
+    sheet, key = write_labeled(tmp_path, labels)
+    r = audit_score.score_check(sheet, key, disagreement_rate=0.2)
+    assert r != stats.NOT_MEASURED
+    assert r["ppv"] == 0.75 and r["false_omission"] == 0.1 and r["n_labeled"] == 30
+
+
+def test_ci_interval_uses_bonferroni_for_joint_95_coverage(tmp_path):
+    labels = ([("unsupported", "n")] * 15 + [("unsupported", "y")] * 5 +
+              [("supported", "y")] * 9 + [("supported", "n")] * 1)
+    sheet, key = write_labeled(tmp_path, labels)
+    r = audit_score.score_check(sheet, key, disagreement_rate=0.2)
+    lo, hi = r["ci95"]
+    d = 0.2
+    p_lo95, p_hi95 = stats.wilson(15, 20, z=1.96)
+    f_lo95, f_hi95 = stats.wilson(1, 10, z=1.96)
+    lo95 = round(d * p_lo95 + (1 - d) * f_lo95, 4)
+    hi95 = round(d * p_hi95 + (1 - d) * f_hi95, 4)
+    assert (hi - lo) > (hi95 - lo95)
+    assert lo < r["estimated_wrong_accept_rate"] < hi
+
+
+def test_sheet_skips_deleted_or_unresolvable_notes_and_backfills(tmp_path):
+    m, s = dbs(40), store.open_store(":memory:")
+    out, key = tmp_path / "check.csv", tmp_path / "key.json"
+    for i in range(25):
+        store.add_audit(s, i, "persona", "unsupported", "", 0, "g", "audit-v1", 1)
+    for i in range(25, 40):
+        store.add_audit(s, i, "persona", "supported", "", 0, "g", "audit-v1", 1)
+    m.execute("DELETE FROM contact_insights WHERE id IN (0, 1, 2)")
+    m.commit()
+    assert audit_sheet.write_check_sheet(s, m, None, str(out), str(key)) == 0
+    rows = list(csv.DictReader(open(out)))
+    k = json.loads(key.read_text())
+    uns_rows = [k[r["row"]] for r in rows if k[r["row"]]["gemma"] == "unsupported"]
+    assert len(uns_rows) == 20
+    assert {v["insight_id"] for v in uns_rows}.isdisjoint({0, 1, 2})
+    assert all(r["note"] for r in rows)
+
+
+def test_sheet_refuses_when_resolvable_pool_too_small(tmp_path):
+    m, s = dbs(40), store.open_store(":memory:")
+    out, key = tmp_path / "check.csv", tmp_path / "key.json"
+    for i in range(21):
+        store.add_audit(s, i, "persona", "unsupported", "", 0, "g", "audit-v1", 1)
+    for i in range(25, 35):
+        store.add_audit(s, i, "persona", "supported", "", 0, "g", "audit-v1", 1)
+    m.execute("DELETE FROM contact_insights WHERE id IN (0, 1, 2)")
+    m.commit()
+    assert audit_sheet.write_check_sheet(s, m, None, str(out), str(key)) == 2
+    assert not out.exists() and not key.exists()

@@ -3,7 +3,6 @@ then import Seth's y/n back into the store."""
 import argparse
 import csv
 import json
-import os
 import sys
 
 from . import store
@@ -14,12 +13,11 @@ FIELDS = ["id", "context", "reply", "good"]
 def write_rating_sheet(store_con, out_csv):
     rows = store_con.execute("SELECT id, context, reply FROM reference_replies"
                              " WHERE rated IS NULL ORDER BY id").fetchall()
-    with open(out_csv, "w", newline="") as f:
+    with store.private_open(out_csv, newline="") as f:
         w = csv.DictWriter(f, fieldnames=FIELDS)
         w.writeheader()
         for rid, ctx, reply in rows:
             w.writerow({"id": rid, "context": ctx, "reply": reply, "good": ""})
-    os.chmod(out_csv, 0o600)
     return len(rows)
 
 

@@ -61,3 +61,23 @@ def test_runs_are_recorded():
     rid = store.start_run(con, "g", "audit,gold", 10)
     store.finish_run(con, rid, 0, '{"audit": {}}', 20)
     assert con.execute("SELECT exit_code, finished_at_ms FROM runs WHERE id=?", (rid,)).fetchone() == (0, 20)
+
+
+def test_private_open_creates_file_0600_before_writing(tmp_path):
+    p = tmp_path / "out.csv"
+    f = store.private_open(str(p))
+    try:
+        assert stat.S_IMODE(os.stat(p).st_mode) == 0o600
+    finally:
+        f.close()
+
+
+def test_private_open_tightens_a_preexisting_looser_file(tmp_path):
+    p = tmp_path / "out.csv"
+    p.write_text("stale")
+    os.chmod(p, 0o644)
+    assert stat.S_IMODE(os.stat(p).st_mode) == 0o644
+    with store.private_open(str(p)) as f:
+        f.write("fresh")
+    assert stat.S_IMODE(os.stat(p).st_mode) == 0o600
+    assert p.read_text() == "fresh"

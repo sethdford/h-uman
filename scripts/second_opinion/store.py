@@ -73,6 +73,16 @@ def now_ms():
     return int(time.time() * 1000)
 
 
+def private_open(path, mode="w", **kw):
+    """Create/truncate `path` and return it opened, guaranteed 0600 the moment it
+    exists — even when a pre-existing file at that path had a looser mode (O_CREAT's
+    mode argument is only applied when the file is newly created, so a stale 0644
+    file must be re-chmod'd explicitly)."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.fchmod(fd, 0o600)
+    return os.fdopen(fd, mode, **kw)
+
+
 def _insert(con, sql, args):
     cur = con.execute(sql, args)
     con.commit()
