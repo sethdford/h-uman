@@ -41,6 +41,37 @@ def test_sheet_refuses_until_enough_audits_then_hides_the_verdict(tmp_path):
     assert sum(1 for v in k.values() if v["gemma"] == "unsupported") == 20
 
 
+def test_write_check_sheet_escapes_formula_prefixed_notes_and_cited_messages(tmp_path):
+    m = sqlite3.connect(":memory:")
+    m.executescript("CREATE TABLE messages (id INTEGER PRIMARY KEY, session_id TEXT, role TEXT,"
+                    " content TEXT, created_at TEXT);"
+                    "CREATE TABLE contact_insights (id INTEGER PRIMARY KEY, contact_id TEXT,"
+                    " insight TEXT, evidence_ids TEXT, retired_at_ms INTEGER DEFAULT 0,"
+                    " created_at_ms INTEGER DEFAULT 0, source TEXT);")
+    for i in range(30):
+        text = "=cmd|'/bin/calc'!A0" if i == 0 else f"msg {i}"
+        m.execute("INSERT INTO messages VALUES (?, 'c', 'user', ?, '')", (i, text))
+        note = "=HYPERLINK(\"http://evil\")" if i == 0 else f"note {i}"
+        m.execute("INSERT INTO contact_insights (id, contact_id, insight, evidence_ids)"
+                  " VALUES (?, 'c', ?, ?)", (i, note, json.dumps([i])))
+    s = store.open_store(":memory:")
+    out, key = tmp_path / "check.csv", tmp_path / "key.json"
+    # Exactly n_unsupported (20) + n_supported (10) audited ids so the resolvable
+    # pool == the pick count and both id 0's rows are guaranteed to appear.
+    for i in range(20):
+        store.add_audit(s, i, "persona", "unsupported", "", 0, "g", "audit-v1", 1)
+    for i in range(20, 30):
+        store.add_audit(s, i, "persona", "supported", "", 0, "g", "audit-v1", 1)
+    assert audit_sheet.write_check_sheet(s, m, None, str(out), str(key)) == 0
+    rows = list(csv.DictReader(open(out)))
+    k = json.loads(key.read_text())
+    target = next(r for r in rows if k[r["row"]]["insight_id"] == 0)
+    assert target["note"] == "'=HYPERLINK(\"http://evil\")"
+    assert target["cited_messages"] == "'=cmd|'/bin/calc'!A0"
+    other = next(r for r in rows if k[r["row"]]["insight_id"] == 1)
+    assert other["note"] == "note 1"
+
+
 def write_labeled(tmp_path, labels):
     """labels: list of (gemma_verdict, human_says_supported 'y'|'n'|'')."""
     sheet, key = tmp_path / "c.csv", tmp_path / "k.json"

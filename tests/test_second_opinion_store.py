@@ -72,6 +72,37 @@ def test_private_open_creates_file_0600_before_writing(tmp_path):
         f.close()
 
 
+def test_parse_yes_no_accepts_y_yes_n_no_case_insensitively_trimmed():
+    assert store.parse_yes_no("y") is True
+    assert store.parse_yes_no("Yes") is True
+    assert store.parse_yes_no("  YES  ") is True
+    assert store.parse_yes_no("n") is False
+    assert store.parse_yes_no("No") is False
+    assert store.parse_yes_no("  no  ") is False
+
+
+def test_parse_yes_no_returns_none_for_anything_else():
+    assert store.parse_yes_no("") is None
+    assert store.parse_yes_no(None) is None
+    assert store.parse_yes_no("not sure") is None
+    assert store.parse_yes_no("maybe") is None
+    assert store.parse_yes_no("yep") is None
+
+
+def test_csv_safe_escapes_formula_prefixed_values():
+    assert store.csv_safe("=HYPERLINK(\"http://evil\", \"click\")") == \
+        "'=HYPERLINK(\"http://evil\", \"click\")"
+    assert store.csv_safe("+1+1") == "'+1+1"
+    assert store.csv_safe("-1+1") == "'-1+1"
+    assert store.csv_safe("@SUM(A1)") == "'@SUM(A1)"
+
+
+def test_csv_safe_leaves_normal_text_unchanged():
+    assert store.csv_safe("normal text") == "normal text"
+    assert store.csv_safe("") == ""
+    assert store.csv_safe("hello=world") == "hello=world"
+
+
 def test_private_open_tightens_a_preexisting_looser_file(tmp_path):
     p = tmp_path / "out.csv"
     p.write_text("stale")

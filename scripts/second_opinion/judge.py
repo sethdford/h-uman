@@ -8,10 +8,23 @@ import os
 import subprocess
 import sys
 
-from . import stats
+from . import stats, store
 
 SCRIPTS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BLIND_AB = os.path.join(SCRIPTS, "blind_ab")
+
+
+def _key_is_detection_mode(key_path):
+    """False for a missing/unparseable key, or a key stamped with a "_mode"
+    other than "detection" (e.g. a blind-A/B preference-mode run, whose key
+    means the MODEL's side rather than the human's answer)."""
+    try:
+        with open(key_path) as f:
+            key = json.load(f)
+    except (OSError, ValueError):
+        return False
+    mode = key.get("_mode") if isinstance(key, dict) else None
+    return mode is None or mode == "detection"
 
 
 def latest_run_dir(root):
@@ -19,7 +32,8 @@ def latest_run_dir(root):
         return None
     dirs = [d for d in glob.glob(os.path.join(root, "*"))
             if os.path.isfile(os.path.join(d, "rating_sheet.csv"))
-            and os.path.isfile(os.path.join(d, "answer_key.json"))]
+            and os.path.isfile(os.path.join(d, "answer_key.json"))
+            and _key_is_detection_mode(os.path.join(d, "answer_key.json"))]
     return max(dirs, key=os.path.getmtime) if dirs else None
 
 
@@ -35,7 +49,7 @@ def _choices(path):
 
 def _is_judged(path):
     with open(path, newline="") as f:
-        return any((r.get("judge_model") or "").strip() for r in csv.DictReader(f))
+        return any(store.row_is_judged(r) for r in csv.DictReader(f))
 
 
 def human_choices(run_dir):
@@ -49,10 +63,14 @@ def human_choices(run_dir):
 def calibration(human, judged):
     shared = sorted(set(human) & set(judged))
     pairs = [(human[i], judged[i]) for i in shared]
-    agree = round(sum(1 for a, b in pairs if a == b) / len(pairs), 4) if pairs else None
-    kappa = stats.cohen_kappa(pairs) if len(pairs) >= 20 else stats.NOT_MEASURED
-    return {"shared": len(pairs), "agreement": agree if pairs else stats.NOT_MEASURED,
-            "kappa": round(kappa, 4) if isinstance(kappa, float) else kappa}
+    if len(pairs) >= 20:
+        agree = round(sum(1 for a, b in pairs if a == b) / len(pairs), 4)
+        kappa = stats.cohen_kappa(pairs)
+        kappa = round(kappa, 4) if isinstance(kappa, float) else kappa
+    else:
+        agree = stats.NOT_MEASURED
+        kappa = stats.NOT_MEASURED
+    return {"shared": len(pairs), "agreement": agree, "kappa": kappa}
 
 
 def judge_pass(backend, run_dir, out_dir, run=subprocess.run):

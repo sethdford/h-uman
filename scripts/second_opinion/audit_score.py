@@ -18,28 +18,17 @@ from . import audit, stats, store
 BONFERRONI_Z = 2.2414
 
 
-def _label(raw):
-    """'y'/'yes'/'n'/'no', trimmed and case-insensitive, else None (unlabeled) —
-    a bare prefix match (e.g. "not sure" -> "n") is never accepted."""
-    s = (raw or "").strip().lower()
-    if s in ("y", "yes"):
-        return "y"
-    if s in ("n", "no"):
-        return "n"
-    return None
-
-
 def score_check(sheet_csv, key_json, disagreement_rate):
     key = json.load(open(key_json))
     rows = list(csv.DictReader(open(sheet_csv)))
-    labels = {r["row"]: _label(r.get("supported")) for r in rows}
+    labels = {r["row"]: store.parse_yes_no(r.get("supported")) for r in rows}
     if not rows or any(labels.get(k) is None for k in key):
         return stats.NOT_MEASURED
     u = [labels[k] for k, v in key.items() if v["gemma"] == "unsupported"]
     s = [labels[k] for k, v in key.items() if v["gemma"] == "supported"]
     if not u or not s:
         return stats.NOT_MEASURED
-    ppv_k, for_k = u.count("n"), s.count("n")
+    ppv_k, for_k = u.count(False), s.count(False)
     ppv, fo = ppv_k / len(u), for_k / len(s)
     d = disagreement_rate
     p_lo, p_hi = stats.wilson(ppv_k, len(u), z=BONFERRONI_Z)

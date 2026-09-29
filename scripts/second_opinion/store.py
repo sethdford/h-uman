@@ -73,6 +73,34 @@ def now_ms():
     return int(time.time() * 1000)
 
 
+def row_is_judged(row):
+    """True if a rating-sheet CSV row was stamped by a model judge rather than
+    a human — matches blind_ab/score.py's detect_rater_kind: synthetic_judge.py
+    stamps BOTH judge_api and judge_model on every row it writes, so either
+    being non-empty is a reliable provenance marker."""
+    return bool((row.get("judge_model") or "").strip() or (row.get("judge_api") or "").strip())
+
+
+def parse_yes_no(value):
+    """'y'/'yes'/'n'/'no', trimmed and case-insensitive, else None — a bare
+    prefix match (e.g. "not sure" -> "n") is never accepted."""
+    s = (value or "").strip().lower()
+    if s in ("y", "yes"):
+        return True
+    if s in ("n", "no"):
+        return False
+    return None
+
+
+def csv_safe(value):
+    """Prefix a leading =, +, -, or @ with an apostrophe so a spreadsheet never
+    interprets a free-text cell as a formula (CSV formula injection). Applies
+    only to sheets a human opens (audit_sheet, gold_rate rating sheets) — never
+    to a plain data export."""
+    s = "" if value is None else str(value)
+    return "'" + s if s[:1] in ("=", "+", "-", "@") else s
+
+
 def private_open(path, mode="w", **kw):
     """Create/truncate `path` and return it opened, guaranteed 0600 the moment it
     exists — even when a pre-existing file at that path had a looser mode (O_CREAT's

@@ -42,6 +42,33 @@ def test_weak_items_human_first_then_synthetic(tmp_path):
     assert items[0][2]["seth_reply"] == "seth 0"
 
 
+def test_weak_items_returns_empty_for_a_preference_mode_answer_key(tmp_path):
+    # A blind-A/B run made with make_rating_sheet.py --mode preference writes
+    # answer_key.json with a top-level "_mode": "preference" marker, and the
+    # key then means the MODEL's side — treating it as a detection key would
+    # silently invert which items are "weak moments".
+    d = run_dir(tmp_path)
+    key = json.loads((Path(d) / "answer_key.json").read_text())
+    key["_mode"] = "preference"
+    (Path(d) / "answer_key.json").write_text(json.dumps(key))
+    assert gold.weak_items(d) == []
+
+
+def test_weak_items_judged_check_matches_detect_rater_kind(tmp_path):
+    # A CSV stamped with judge_api but no judge_model must still count as
+    # judged (matches score.py's detect_rater_kind), so its correct-and-matching
+    # rows land in the "synthetic" bucket rather than being read as unrated
+    # human confidence (which would be None/0 and dropped).
+    d = run_dir(tmp_path)
+    cols = ["id", "context", "option_A", "option_B", "choice", "confidence", "judge_api"]
+    with open(Path(d) / "rating_sheet_api_judge.csv", "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=cols)
+        w.writeheader()
+        w.writerow({"id": "x1", "choice": "B", "judge_api": "openai"})
+    items = gold.weak_items(d)
+    assert ("x1", "synthetic") in [(i, s) for i, s, _ in items]
+
+
 def test_parse_critique_filters_gaps_and_never_guesses():
     ok = gold.parse_critique('ok {"gaps": ["tone", "bogus"], "missing": "the date", "severity": 7}')
     assert ok == (["tone"], "the date", 3, False)

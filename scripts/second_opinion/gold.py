@@ -27,12 +27,18 @@ REFERENCE_SYSTEM = (
 
 def weak_items(run_dir):
     key = json.load(open(os.path.join(run_dir, "answer_key.json")))
+    if isinstance(key, dict) and key.get("_mode") not in (None, "detection"):
+        # A blind-A/B run made with --mode preference stamps "_mode":
+        # "preference" and the key then means the MODEL's side, not the
+        # human's answer — reading it as a detection key would silently
+        # invert which items count as "weak moments".
+        return []
     triples = {t["id"]: t for t in json.load(open(os.path.join(run_dir, "triples.json")))}
     human, synth = [], []
     for path in sorted(glob.glob(os.path.join(run_dir, "*.csv"))):
         with open(path, newline="") as f:
             rows = list(csv.DictReader(f))
-        judged = any((r.get("judge_model") or "").strip() for r in rows)
+        judged = any(store.row_is_judged(r) for r in rows)
         for r in rows:
             iid, ch = r.get("id"), (r.get("choice") or "").strip().upper()
             if ch not in ("A", "B") or iid not in key or iid not in triples or ch != key[iid]:

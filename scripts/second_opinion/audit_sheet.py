@@ -51,8 +51,8 @@ def write_check_sheet(store_con, mem, chat, out_csv, key_json, n_unsupported=20,
     rng.shuffle(picks)
     rows, key = [], {}
     for n, (iid, note, texts, verdict) in enumerate(picks):
-        rows.append({"row": str(n), "note": note, "cited_messages": " | ".join(texts),
-                     "supported": ""})
+        rows.append({"row": str(n), "note": store.csv_safe(note),
+                     "cited_messages": store.csv_safe(" | ".join(texts)), "supported": ""})
         key[str(n)] = {"insight_id": iid, "gemma": verdict}
     os.makedirs(os.path.dirname(out_csv) or ".", exist_ok=True)
     os.makedirs(os.path.dirname(key_json) or ".", exist_ok=True)
