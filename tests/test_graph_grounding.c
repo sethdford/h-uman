@@ -68,6 +68,23 @@ static void test_ground_fingerprint_varies_with_content(void) {
 
 /* ── Query-conditioned composition (SQLite graph store) ─────────────────── */
 
+/* Placeholder predicate: pronoun-like subjects the extractors write ("user",
+ * "you", "assistant") and the contact's own id / phone number are not
+ * referents, so the fallback must never spend a seed on them. Measured
+ * 2026-09-28: for 3 of 4 active contacts the fallback's #1 seed was one. */
+static void test_ground_is_placeholder_name(void) {
+    HU_ASSERT_TRUE(hu_graph_ground_is_placeholder_name("user", 4, "+15551234567", 12));
+    HU_ASSERT_TRUE(hu_graph_ground_is_placeholder_name("User", 4, "+15551234567", 12));
+    HU_ASSERT_TRUE(hu_graph_ground_is_placeholder_name("assistant", 9, "+15551234567", 12));
+    HU_ASSERT_TRUE(hu_graph_ground_is_placeholder_name("you", 3, "+15551234567", 12));
+    HU_ASSERT_TRUE(hu_graph_ground_is_placeholder_name("+15551234567", 12, "+15551234567", 12));
+    HU_ASSERT_TRUE(hu_graph_ground_is_placeholder_name("+1 (801) 555-0100", 17, "alice", 5));
+    HU_ASSERT_FALSE(hu_graph_ground_is_placeholder_name("Utah", 4, "+15551234567", 12));
+    HU_ASSERT_FALSE(hu_graph_ground_is_placeholder_name("user research", 13, "alice", 5));
+    HU_ASSERT_FALSE(hu_graph_ground_is_placeholder_name("youth soccer", 12, "alice", 5));
+    HU_ASSERT_FALSE(hu_graph_ground_is_placeholder_name("sailboat", 8, "alice", 5));
+}
+
 #ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>
 
@@ -453,23 +470,6 @@ static void test_compose_ex_require_full_name_blocks_partial_hits(void) {
     HU_ASSERT_TRUE(strstr(out, "tampa bay") != NULL);
     fx.alloc.free(fx.alloc.ctx, out, out_len + 1);
     gg_fixture_close(&fx);
-}
-
-/* Placeholder predicate: pronoun-like subjects the extractors write ("user",
- * "you", "assistant") and the contact's own id / phone number are not
- * referents, so the fallback must never spend a seed on them. Measured
- * 2026-09-28: for 3 of 4 active contacts the fallback's #1 seed was one. */
-static void test_ground_is_placeholder_name(void) {
-    HU_ASSERT_TRUE(hu_graph_ground_is_placeholder_name("user", 4, "+15551234567", 12));
-    HU_ASSERT_TRUE(hu_graph_ground_is_placeholder_name("User", 4, "+15551234567", 12));
-    HU_ASSERT_TRUE(hu_graph_ground_is_placeholder_name("assistant", 9, "+15551234567", 12));
-    HU_ASSERT_TRUE(hu_graph_ground_is_placeholder_name("you", 3, "+15551234567", 12));
-    HU_ASSERT_TRUE(hu_graph_ground_is_placeholder_name("+15551234567", 12, "+15551234567", 12));
-    HU_ASSERT_TRUE(hu_graph_ground_is_placeholder_name("+1 (801) 555-0100", 17, "alice", 5));
-    HU_ASSERT_FALSE(hu_graph_ground_is_placeholder_name("Utah", 4, "+15551234567", 12));
-    HU_ASSERT_FALSE(hu_graph_ground_is_placeholder_name("user research", 13, "alice", 5));
-    HU_ASSERT_FALSE(hu_graph_ground_is_placeholder_name("youth soccer", 12, "alice", 5));
-    HU_ASSERT_FALSE(hu_graph_ground_is_placeholder_name("sailboat", 8, "alice", 5));
 }
 
 /* The fallback skips placeholders even when they are the contact's most-
