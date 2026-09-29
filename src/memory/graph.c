@@ -1902,6 +1902,28 @@ hu_error_t hu_graph_list_entities(hu_graph_t *g, hu_allocator_t *alloc, const ch
     return collect_entities(stmt, alloc, limit, out, out_count);
 }
 
+hu_error_t hu_graph_list_recent_entities_of_type(hu_graph_t *g, hu_allocator_t *alloc,
+                                                 const char *contact_id, size_t contact_id_len,
+                                                 hu_entity_type_t type, size_t limit,
+                                                 hu_graph_entity_t **out, size_t *out_count) {
+    if (!g || !g->db || !alloc || !out || !out_count || limit == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out = NULL;
+    *out_count = 0;
+    sqlite3_stmt *q = NULL;
+    if (sqlite3_prepare_v2(g->db,
+                           "SELECT id, name, type, first_seen, last_seen, mention_count,"
+                           " COALESCE(provenance, '') FROM entities WHERE contact_id = ?1"
+                           " AND type = ?2 ORDER BY last_seen DESC, id DESC LIMIT ?3",
+                           -1, &q, NULL) != SQLITE_OK)
+        return HU_ERR_IO;
+    sqlite3_bind_text(q, 1, contact_id ? contact_id : "", contact_id ? (int)contact_id_len : 0,
+                      SQLITE_STATIC);
+    sqlite3_bind_int(q, 2, (int)type);
+    sqlite3_bind_int64(q, 3, (int64_t)limit);
+    return collect_entities(q, alloc, limit, out, out_count); /* finalizes q */
+}
+
 hu_error_t hu_graph_find_entities_matching(hu_graph_t *g, hu_allocator_t *alloc,
                                            const char *contact_id, size_t contact_id_len,
                                            const char *msg, size_t msg_len, size_t limit,
@@ -2161,6 +2183,21 @@ hu_error_t hu_graph_list_entities(hu_graph_t *g, hu_allocator_t *alloc, const ch
     (void)limit;
     (void)out;
     (void)out_count;
+    return HU_ERR_NOT_SUPPORTED;
+}
+
+hu_error_t hu_graph_list_recent_entities_of_type(hu_graph_t *g, hu_allocator_t *alloc,
+                                                 const char *contact_id, size_t contact_id_len,
+                                                 hu_entity_type_t type, size_t limit,
+                                                 hu_graph_entity_t **out, size_t *out_count) {
+    (void)type;
+    (void)out_count;
+    (void)out;
+    (void)limit;
+    (void)contact_id_len;
+    (void)contact_id;
+    (void)alloc;
+    (void)g;
     return HU_ERR_NOT_SUPPORTED;
 }
 

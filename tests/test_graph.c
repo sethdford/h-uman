@@ -316,6 +316,43 @@ static void graph_upsert_typed_rejects_bad_args(void) {
     hu_graph_close(g, &alloc);
 }
 
+static void graph_list_recent_entities_of_type_orders_by_last_seen(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_graph_t *g = NULL;
+    HU_ASSERT_EQ(hu_graph_open(&alloc, "x", 1, &g), HU_OK);
+    int64_t id = 0;
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "c1", 2, "a", 1, HU_ENTITY_TOPIC, NULL, &id), HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "c1", 2, "b", 1, HU_ENTITY_TOPIC, NULL, &id), HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "c1", 2, "c", 1, HU_ENTITY_TOPIC, NULL, &id), HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "c1", 2, "p", 1, HU_ENTITY_PERSON, NULL, &id), HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "c2", 2, "z", 1, HU_ENTITY_TOPIC, NULL, &id), HU_OK);
+    HU_ASSERT_EQ(sqlite3_exec(hu_graph_sqlite_connection(g),
+                              "UPDATE entities SET last_seen = CASE name WHEN 'a' THEN 3000"
+                              " WHEN 'b' THEN 1000 WHEN 'c' THEN 2000 ELSE 9000 END",
+                              NULL, NULL, NULL),
+                 SQLITE_OK);
+    hu_graph_entity_t *out = NULL;
+    size_t n = 0;
+    /* The PERSON "p" and c2's TOPIC "z" are newest (9000) but must not appear. */
+    HU_ASSERT_EQ(
+        hu_graph_list_recent_entities_of_type(g, &alloc, "c1", 2, HU_ENTITY_TOPIC, 2, &out, &n),
+        HU_OK);
+    HU_ASSERT_EQ((long)n, 2L);
+    HU_ASSERT_STR_EQ(out[0].name, "a");
+    HU_ASSERT_STR_EQ(out[1].name, "c");
+    hu_graph_entities_free(&alloc, out, n);
+    HU_ASSERT_EQ(
+        hu_graph_list_recent_entities_of_type(g, &alloc, "c1", 2, HU_ENTITY_TOPIC, 0, &out, &n),
+        HU_ERR_INVALID_ARGUMENT);
+    /* No row of the type: empty, nothing to free. */
+    HU_ASSERT_EQ(
+        hu_graph_list_recent_entities_of_type(g, &alloc, "c1", 2, HU_ENTITY_EVENT, 3, &out, &n),
+        HU_OK);
+    HU_ASSERT_EQ((long)n, 0L);
+    HU_ASSERT_NULL(out);
+    hu_graph_close(g, &alloc);
+}
+
 static void graph_upsert_entity_insert_new_succeeds(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_graph_t *g = NULL;
@@ -1043,6 +1080,7 @@ void run_graph_tests(void) {
     HU_RUN_TEST(graph_upsert_typed_stamps_provenance_only_on_retype);
     HU_RUN_TEST(graph_list_entities_carries_provenance);
     HU_RUN_TEST(graph_upsert_typed_rejects_bad_args);
+    HU_RUN_TEST(graph_list_recent_entities_of_type_orders_by_last_seen);
     HU_RUN_TEST(graph_open_valid_path_succeeds);
     HU_RUN_TEST(graph_open_null_alloc_returns_error);
     HU_RUN_TEST(graph_open_null_out_returns_error);

@@ -905,6 +905,326 @@ static void test_build_context_hides_superseded_employer(void) {
     fx.alloc.free(fx.alloc.ctx, out, 2048 + 1);
     gg_fixture_close(&fx);
 }
+/* ── HU_GRAPH_NAMES (spec 2026-09-29 §4.6) ──────────────────────────────── */
+
+/* carol mixes typed names, a Capitalized UNKNOWN, a lowercase UNKNOWN phrase,
+ * two TOPICs and an EMOTION (the prod graph's shape, spec §1). */
+static void seed_carol_names(gg_fixture_t *fx) {
+    int64_t id = 0;
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(fx->graph, "carol", 5, "Salim", 5, HU_ENTITY_PERSON, NULL, &id),
+        HU_OK);
+    for (int i = 0; i < 5; i++)
+        HU_ASSERT_EQ(hu_graph_upsert_entity(fx->graph, "carol", 5, "Zed Corp", 8, HU_ENTITY_UNKNOWN,
+                                            NULL, &id),
+                     HU_OK);
+    for (int i = 0; i < 3; i++)
+        HU_ASSERT_EQ(hu_graph_upsert_entity(fx->graph, "carol", 5, "different direction", 19,
+                                            HU_ENTITY_UNKNOWN, NULL, &id),
+                     HU_OK);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(fx->graph, "carol", 5, "lake house", 10, HU_ENTITY_TOPIC, NULL, &id),
+        HU_OK);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(fx->graph, "carol", 5, "pickleball", 10, HU_ENTITY_TOPIC, NULL, &id),
+        HU_OK);
+    for (int i = 0; i < 2; i++)
+        HU_ASSERT_EQ(hu_graph_upsert_entity(fx->graph, "carol", 5, "heartbreak", 10,
+                                            HU_ENTITY_EMOTION, NULL, &id),
+                     HU_OK);
+}
+
+static char *compose_names(gg_fixture_t *fx, const char *cid, const char *msg, unsigned flags,
+                           size_t *len) {
+    char *out = NULL;
+    *len = 0;
+    HU_ASSERT_EQ(hu_graph_ground_compose_ex(&fx->loader, cid, strlen(cid), msg, strlen(msg), 0,
+                                            flags, &out, len, NULL),
+                 HU_OK);
+    return out;
+}
+
+static char *compose_carol(gg_fixture_t *fx, const char *msg, unsigned flags, size_t *len) {
+    return compose_names(fx, "carol", msg, flags, len);
+}
+
+/* Entity lines ("- " at line start); relation lines are indented. */
+static size_t count_entity_lines(const char *block) {
+    size_t n = 0;
+    for (const char *p = block; p && *p; p = strchr(p, '\n') ? strchr(p, '\n') + 1 : NULL)
+        if (p[0] == '-' && p[1] == ' ')
+            n++;
+    return n;
+}
+
+static void test_names_live_lexical_drops_topics_and_renders_topic_line(void) {
+    gg_fixture_t fx;
+    gg_fixture_open(&fx);
+    seed_carol_names(&fx);
+    const char *msg = "did salim like the lake house";
+    size_t off_len = 0, live_len = 0;
+    char *off = compose_carol(&fx, msg, 0, &off_len);
+    char *live = compose_carol(&fx, msg, HU_GG_NAMES, &live_len);
+    HU_ASSERT_NOT_NULL(off);
+    HU_ASSERT_STR_CONTAINS(off, "- lake house (topic)\n"); /* today: a topic seeds */
+    HU_ASSERT_STR_NOT_CONTAINS(off, "Been talking about: ");
+    HU_ASSERT_NOT_NULL(live);
+    HU_ASSERT_STR_CONTAINS(live, "- Salim (person)\n");
+    HU_ASSERT_STR_NOT_CONTAINS(live, "- lake house");
+    const char *topics = strstr(live, "Been talking about: ");
+    HU_ASSERT_NOT_NULL(topics);
+    HU_ASSERT_TRUE(topics > strstr(live, "- Salim (person)\n")); /* after the entity lines */
+    HU_ASSERT_STR_CONTAINS(topics, "lake house");
+    HU_ASSERT_STR_CONTAINS(topics, "pickleball");
+    HU_ASSERT_STR_NOT_CONTAINS(topics, "heartbreak"); /* EMOTION is not a topic */
+    HU_ASSERT_EQ((long)hu_graph_ground_count_typed_names(live, live_len), 1L);
+    fx.alloc.free(fx.alloc.ctx, off, off_len + 1);
+    fx.alloc.free(fx.alloc.ctx, live, live_len + 1);
+    gg_fixture_close(&fx);
+}
+
+/* The topic line is appended only to a non-empty block: a message naming only
+ * a TOPIC (or nothing) stays an empty injection under LIVE. */
+static void test_names_live_topic_line_never_stands_alone(void) {
+    gg_fixture_t fx;
+    gg_fixture_open(&fx);
+    seed_carol_names(&fx);
+    size_t len = 99;
+    char *off = compose_carol(&fx, "hows the lake house", 0, &len);
+    HU_ASSERT_NOT_NULL(off); /* OFF: the TOPIC seeds */
+    fx.alloc.free(fx.alloc.ctx, off, len + 1);
+    HU_ASSERT_NULL(compose_carol(&fx, "hows the lake house", HU_GG_NAMES, &len));
+    HU_ASSERT_EQ((long)len, 0L);
+    HU_ASSERT_NULL(compose_carol(&fx, "wanna grab tacos tonight", HU_GG_NAMES, &len));
+    HU_ASSERT_EQ((long)len, 0L);
+    gg_fixture_close(&fx);
+}
+
+static void test_names_live_fallback_prefers_typed_names(void) {
+    gg_fixture_t fx;
+    gg_fixture_open(&fx);
+    seed_carol_names(&fx);
+    const char *msg = "wanna grab tacos tonight";
+    size_t off_len = 0, live_len = 0;
+    char *off = compose_carol(&fx, msg, HU_GG_CONTACT_FALLBACK, &off_len);
+    char *live = compose_carol(&fx, msg, HU_GG_CONTACT_FALLBACK | HU_GG_NAMES, &live_len);
+    HU_ASSERT_NOT_NULL(off);
+    HU_ASSERT_STR_CONTAINS(off, "- Zed Corp\n");            /* most mentioned */
+    HU_ASSERT_STR_CONTAINS(off, "- different direction\n"); /* today: phrases seed */
+    HU_ASSERT_NOT_NULL(live);
+    HU_ASSERT_TRUE(strncmp(live, "- Salim (person)\n", 17) == 0); /* typed bonus: first */
+    HU_ASSERT_STR_CONTAINS(live, "- Zed Corp\n");                 /* Capitalized UNKNOWN */
+    HU_ASSERT_STR_NOT_CONTAINS(live, "different direction");
+    HU_ASSERT_STR_NOT_CONTAINS(live, "heartbreak");
+    HU_ASSERT_STR_NOT_CONTAINS(live, "- pickleball");
+    HU_ASSERT_EQ((long)count_entity_lines(live), 2L);
+    HU_ASSERT_STR_CONTAINS(live, "Been talking about: ");
+    fx.alloc.free(fx.alloc.ctx, off, off_len + 1);
+    fx.alloc.free(fx.alloc.ctx, live, live_len + 1);
+    gg_fixture_close(&fx);
+}
+
+/* Review Focus 3: a legacy lowercase UNKNOWN "salim" beside the typed "Salim"
+ * renders once under LIVE. */
+static void test_names_live_renders_one_line_for_a_lowercase_duplicate(void) {
+    gg_fixture_t fx;
+    gg_fixture_open(&fx);
+    int64_t id = 0;
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(fx.graph, "dana", 4, "salim", 5, HU_ENTITY_UNKNOWN, NULL, &id),
+        HU_OK);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(fx.graph, "dana", 4, "Salim", 5, HU_ENTITY_PERSON, NULL, &id),
+        HU_OK);
+    const char *msg = "did salim call";
+    size_t off_len = 0, live_len = 0;
+    char *off = compose_names(&fx, "dana", msg, 0, &off_len);
+    char *live = compose_names(&fx, "dana", msg, HU_GG_NAMES, &live_len);
+    HU_ASSERT_NOT_NULL(off);
+    HU_ASSERT_STR_CONTAINS(off, "- salim\n"); /* the fixture really has the duplicate */
+    HU_ASSERT_NOT_NULL(live);
+    HU_ASSERT_STR_CONTAINS(live, "- Salim (person)\n");
+    HU_ASSERT_STR_NOT_CONTAINS(live, "- salim\n");
+    fx.alloc.free(fx.alloc.ctx, off, off_len + 1);
+    fx.alloc.free(fx.alloc.ctx, live, live_len + 1);
+    gg_fixture_close(&fx);
+}
+
+/* Pre-flight 1.15: the lowercase legacy row RETYPED to PERSON (the migration's
+ * no-touch retype) is nameable too, so two PERSON rows name one person. LIVE
+ * renders exactly one entity line for them; OFF still shows both. */
+static void test_names_live_renders_one_line_for_two_person_spellings(void) {
+    gg_fixture_t fx;
+    gg_fixture_open(&fx);
+    int64_t id = 0;
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(fx.graph, "dana", 4, "salim", 5, HU_ENTITY_UNKNOWN, NULL, &id),
+        HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity_typed(fx.graph, "dana", 4, "salim", 5, HU_ENTITY_PERSON,
+                                              "names:migrate", 0.6f, HU_GRAPH_UPSERT_NO_TOUCH, &id),
+                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(fx.graph, "dana", 4, "Salim", 5, HU_ENTITY_PERSON, NULL, &id),
+        HU_OK);
+    const char *msg = "did salim call";
+    size_t off_len = 0, live_len = 0;
+    char *off = compose_names(&fx, "dana", msg, 0, &off_len);
+    char *live = compose_names(&fx, "dana", msg, HU_GG_NAMES, &live_len);
+    HU_ASSERT_NOT_NULL(off);
+    HU_ASSERT_STR_CONTAINS(off, "- salim (person)\n");
+    HU_ASSERT_STR_CONTAINS(off, "- Salim (person)\n");
+    HU_ASSERT_EQ((long)count_entity_lines(off), 2L);
+    HU_ASSERT_NOT_NULL(live);
+    HU_ASSERT_EQ((long)count_entity_lines(live), 1L);
+    HU_ASSERT_STR_CONTAINS(live, "- Salim (person)\n"); /* equal score: Capitalized kept */
+    HU_ASSERT_EQ((long)hu_graph_ground_count_typed_names(live, live_len), 1L);
+    fx.alloc.free(fx.alloc.ctx, off, off_len + 1);
+    fx.alloc.free(fx.alloc.ctx, live, live_len + 1);
+    gg_fixture_close(&fx);
+}
+
+static void test_names_shadow_injects_the_off_block_and_measures_live(void) {
+    gg_fixture_t fx;
+    gg_fixture_open(&fx);
+    seed_carol_names(&fx);
+    const char *msg = "did salim like the lake house";
+    char *off = NULL, *shadow = NULL, *live = NULL;
+    size_t off_len = 0, shadow_len = 0, live_len = 0;
+    hu_graph_ground_turn_stats_t st_off, st_shadow, st_live;
+    HU_ASSERT_EQ(hu_graph_ground_compose_turn(&fx.loader, "carol", 5, msg, strlen(msg), 0, &off,
+                                              &off_len, &st_off),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_graph_ground_compose_turn(&fx.loader, "carol", 5, msg, strlen(msg),
+                                              HU_GG_TURN_NAMES_SHADOW, &shadow, &shadow_len,
+                                              &st_shadow),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_graph_ground_compose_turn(&fx.loader, "carol", 5, msg, strlen(msg),
+                                              HU_GG_TURN_NAMES_LIVE, &live, &live_len, &st_live),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(off);
+    HU_ASSERT_NOT_NULL(shadow);
+    HU_ASSERT_NOT_NULL(live);
+    HU_ASSERT_EQ((long)shadow_len, (long)off_len);
+    HU_ASSERT_TRUE(memcmp(shadow, off, off_len) == 0);
+    HU_ASSERT_TRUE(live_len != off_len || memcmp(live, off, off_len) != 0); /* LIVE differs */
+    HU_ASSERT_TRUE(st_shadow.names_shadow);
+    HU_ASSERT_EQ((long)st_shadow.names_off_bytes, (long)off_len);
+    HU_ASSERT_EQ((long)st_shadow.names_live_bytes, (long)live_len);
+    HU_ASSERT_EQ((long)st_shadow.names_live_typed, 1L);
+    HU_ASSERT_FALSE(st_off.names_shadow);
+    HU_ASSERT_FALSE(st_live.names_shadow);
+    HU_ASSERT_EQ((long)st_live.typed_names, 1L);
+    fx.alloc.free(fx.alloc.ctx, off, off_len + 1);
+    fx.alloc.free(fx.alloc.ctx, shadow, shadow_len + 1);
+    fx.alloc.free(fx.alloc.ctx, live, live_len + 1);
+    gg_fixture_close(&fx);
+}
+
+/* OFF byte-identity (spec §2) through the real loader: an explicit
+ * HU_GRAPH_NAMES=off still yields Task 4's golden, and SHADOW injects the same. */
+static void test_names_off_and_shadow_leave_the_golden_unchanged(void) {
+    gg_fixture_t fx;
+    gg_fixture_open(&fx);
+    int64_t id = 0;
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(fx.graph, "self", 4, "tampa bay", 9, HU_ENTITY_PLACE, NULL, &id),
+        HU_OK);
+    const char *msg = "hows the sailboat down in tampa bay";
+    const char *modes[] = {"off", "shadow"};
+    for (size_t m = 0; m < 2; m++) {
+        set_turn_env(NULL, "live");
+        setenv("HU_GRAPH_NAMES", modes[m], 1);
+        size_t len = 0;
+        char *ctx = loader_ctx(&fx, "alice", msg, &len);
+        clear_turn_env();
+        HU_ASSERT_NOT_NULL(ctx);
+        HU_ASSERT_STR_EQ(ctx, k_golden_lexical_self);
+        fx.alloc.free(fx.alloc.ctx, ctx, len + 1);
+    }
+    gg_fixture_close(&fx);
+}
+
+/* OFF byte-identity for the fallback LIVE + self LIVE composition (Task 4
+ * review M1). The fallback's cluster order depends on the wall clock the
+ * scorer reads, so instead of a literal golden the expected block is rebuilt
+ * from the primitives Task 4's compose_turn used: the contact fallback, a
+ * blank line, "About you:", the owner's full-name facts. */
+static void test_names_off_and_shadow_keep_fallback_plus_self_bytes(void) {
+    gg_fixture_t fx;
+    gg_fixture_open(&fx);
+    seed_carol_names(&fx);
+    int64_t id = 0;
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(fx.graph, "self", 4, "tampa bay", 9, HU_ENTITY_PLACE, NULL, &id),
+        HU_OK);
+    const char *msg = "wanna grab tacos down in tampa bay";
+    size_t fb_len = 0, sf_len = 0;
+    char *fb = compose_carol(&fx, msg, HU_GG_CONTACT_FALLBACK, &fb_len);
+    char *sf = compose_names(&fx, "self", msg, HU_GG_REQUIRE_FULL_NAME, &sf_len);
+    HU_ASSERT_NOT_NULL(fb);
+    HU_ASSERT_NOT_NULL(sf);
+    char expected[2048];
+    int n = snprintf(expected, sizeof(expected), "%s\nAbout you:\n%s", fb, sf);
+    HU_ASSERT_TRUE(n > 0 && (size_t)n < sizeof(expected));
+    HU_ASSERT_STR_CONTAINS(expected, "- different direction\n"); /* fallback really ran */
+    HU_ASSERT_STR_CONTAINS(expected, "About you:\n- tampa bay (place)\n");
+    const char *modes[] = {NULL, "off", "shadow"};
+    for (size_t m = 0; m < 3; m++) {
+        set_turn_env("live", "live");
+        if (modes[m])
+            setenv("HU_GRAPH_NAMES", modes[m], 1);
+        size_t len = 0;
+        char *ctx = loader_ctx(&fx, "carol", msg, &len);
+        clear_turn_env();
+        HU_ASSERT_NOT_NULL(ctx);
+        HU_ASSERT_STR_EQ(ctx, expected);
+        HU_ASSERT_EQ((long)len, (long)strlen(expected));
+        fx.alloc.free(fx.alloc.ctx, ctx, len + 1);
+    }
+    /* SHADOW's typed-name count covers the contact block only: LIVE's block
+     * carries "Salim (person)" and the owner's "tampa bay (place)". */
+    hu_graph_ground_turn_stats_t st;
+    char *out = NULL;
+    size_t out_len = 0;
+    HU_ASSERT_EQ(hu_graph_ground_compose_turn(&fx.loader, "carol", 5, msg, strlen(msg),
+                                              HU_GG_TURN_FALLBACK_LIVE | HU_GG_TURN_SELF_LIVE |
+                                                  HU_GG_TURN_NAMES_LIVE,
+                                              &out, &out_len, &st),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_STR_CONTAINS(out, "- Salim (person)\n");
+    HU_ASSERT_STR_CONTAINS(out, "About you:\n- tampa bay (place)\n");
+    HU_ASSERT_EQ((long)hu_graph_ground_count_typed_names(out, out_len), 2L);
+    HU_ASSERT_EQ((long)st.typed_names, 1L);
+    fx.alloc.free(fx.alloc.ctx, out, out_len + 1);
+    HU_ASSERT_EQ(hu_graph_ground_compose_turn(&fx.loader, "carol", 5, msg, strlen(msg),
+                                              HU_GG_TURN_FALLBACK_LIVE | HU_GG_TURN_SELF_LIVE |
+                                                  HU_GG_TURN_NAMES_SHADOW,
+                                              &out, &out_len, &st),
+                 HU_OK);
+    HU_ASSERT_TRUE(st.names_shadow);
+    HU_ASSERT_EQ((long)st.names_live_typed, 1L);
+    fx.alloc.free(fx.alloc.ctx, out, out_len + 1);
+    fx.alloc.free(fx.alloc.ctx, fb, fb_len + 1);
+    fx.alloc.free(fx.alloc.ctx, sf, sf_len + 1);
+    gg_fixture_close(&fx);
+}
+
+static void test_names_live_reaches_the_loader(void) {
+    gg_fixture_t fx;
+    gg_fixture_open(&fx);
+    seed_carol_names(&fx);
+    set_turn_env("live", NULL);
+    setenv("HU_GRAPH_NAMES", "live", 1);
+    size_t len = 0;
+    char *ctx = loader_ctx(&fx, "carol", "wanna grab tacos tonight", &len);
+    clear_turn_env();
+    HU_ASSERT_NOT_NULL(ctx);
+    HU_ASSERT_TRUE(strncmp(ctx, "- Salim (person)\n", 17) == 0);
+    HU_ASSERT_STR_NOT_CONTAINS(ctx, "different direction");
+    fx.alloc.free(fx.alloc.ctx, ctx, len + 1);
+    gg_fixture_close(&fx);
+}
 #endif
 
 static void test_graph_grounding_mode_parse(void) {
@@ -958,6 +1278,41 @@ static void test_turn_flags_from_env(void) {
     HU_ASSERT_EQ((long)hu_graph_ground_turn_flags_from_env(), (long)HU_GG_TURN_SELF_LIVE);
     unsetenv("HU_GRAPH_GROUNDING_CONTACT_FALLBACK");
     unsetenv("HU_GRAPH_GROUNDING_SELF_FACTS");
+}
+
+static void test_count_typed_names(void) {
+    const char *b = "- Salim (person)\n"
+                    "  - Salim knows Priya (person)\n" /* a relation line, not an entity line */
+                    "- Zed Corp\n"
+                    "- sailboat (topic)\n"
+                    "- Tampa (place)\n"
+                    "- Acme (organization)\n"
+                    "- Coachella (event)\n"
+                    "Been talking about: a, b\n"
+                    "- (person)\n"; /* no name */
+    HU_ASSERT_EQ((long)hu_graph_ground_count_typed_names(b, strlen(b)), 4L);
+    HU_ASSERT_EQ((long)hu_graph_ground_count_typed_names(NULL, 0), 0L);
+    const char *tail = "- Salim (person)"; /* no trailing newline */
+    HU_ASSERT_EQ((long)hu_graph_ground_count_typed_names(tail, strlen(tail)), 1L);
+}
+
+static void test_graph_names_mode_defaults_off(void) {
+    unsetenv("HU_GRAPH_NAMES");
+    HU_ASSERT_EQ((int)hu_graph_names_mode(), (int)HU_GATE_OFF);
+    HU_ASSERT_EQ((long)(hu_graph_ground_turn_flags_from_env() &
+                        (HU_GG_TURN_NAMES_SHADOW | HU_GG_TURN_NAMES_LIVE)),
+                 0L);
+    setenv("HU_GRAPH_NAMES", "shadow", 1);
+    HU_ASSERT_EQ((int)hu_graph_names_mode(), (int)HU_GATE_SHADOW);
+    HU_ASSERT_EQ((long)(hu_graph_ground_turn_flags_from_env() & HU_GG_TURN_NAMES_SHADOW),
+                 (long)HU_GG_TURN_NAMES_SHADOW);
+    setenv("HU_GRAPH_NAMES", "live", 1);
+    HU_ASSERT_EQ((int)hu_graph_names_mode(), (int)HU_GATE_LIVE);
+    HU_ASSERT_EQ((long)(hu_graph_ground_turn_flags_from_env() & HU_GG_TURN_NAMES_LIVE),
+                 (long)HU_GG_TURN_NAMES_LIVE);
+    setenv("HU_GRAPH_NAMES", "garbage", 1);
+    HU_ASSERT_EQ((int)hu_graph_names_mode(), (int)HU_GATE_OFF);
+    unsetenv("HU_GRAPH_NAMES");
 }
 
 #ifdef HU_ENABLE_SQLITE
@@ -1108,6 +1463,8 @@ void run_graph_grounding_tests(void) {
     HU_RUN_TEST(test_graph_grounding_mode_parse);
     HU_RUN_TEST(test_contact_fallback_mode_parse);
     HU_RUN_TEST(test_turn_flags_from_env);
+    HU_RUN_TEST(test_count_typed_names);
+    HU_RUN_TEST(test_graph_names_mode_defaults_off);
     HU_RUN_TEST(test_gate_comment_exists_at_agent_turn_1471);
     HU_RUN_TEST(test_srag_memory_miss_does_not_free_graph_ctx);
     HU_RUN_TEST(test_ground_match_count_respects_word_boundaries);
@@ -1144,6 +1501,15 @@ void run_graph_grounding_tests(void) {
     HU_RUN_TEST(test_compose_marks_superseded_employer_as_history);
     HU_RUN_TEST(test_compose_from_person_seed_collapses_chain_to_head);
     HU_RUN_TEST(test_build_context_hides_superseded_employer);
+    HU_RUN_TEST(test_names_live_lexical_drops_topics_and_renders_topic_line);
+    HU_RUN_TEST(test_names_live_topic_line_never_stands_alone);
+    HU_RUN_TEST(test_names_live_fallback_prefers_typed_names);
+    HU_RUN_TEST(test_names_live_renders_one_line_for_a_lowercase_duplicate);
+    HU_RUN_TEST(test_names_live_renders_one_line_for_two_person_spellings);
+    HU_RUN_TEST(test_names_shadow_injects_the_off_block_and_measures_live);
+    HU_RUN_TEST(test_names_off_and_shadow_leave_the_golden_unchanged);
+    HU_RUN_TEST(test_names_off_and_shadow_keep_fallback_plus_self_bytes);
+    HU_RUN_TEST(test_names_live_reaches_the_loader);
     HU_RUN_TEST(test_autodream_tick_populates_community_summaries_for_contact);
 #endif
 }

@@ -250,6 +250,14 @@ hu_error_t hu_graph_list_entities(hu_graph_t *g, hu_allocator_t *alloc, const ch
                                   size_t contact_id_len, size_t limit, hu_graph_entity_t **out,
                                   size_t *out_count);
 
+/* The contact's `limit` most recent entities of `type` (last_seen DESC, id
+ * DESC). Used for grounding's "Been talking about:" topic line.
+ * HU_ERR_INVALID_ARGUMENT on limit == 0. Free with hu_graph_entities_free. */
+hu_error_t hu_graph_list_recent_entities_of_type(hu_graph_t *g, hu_allocator_t *alloc,
+                                                 const char *contact_id, size_t contact_id_len,
+                                                 hu_entity_type_t type, size_t limit,
+                                                 hu_graph_entity_t **out, size_t *out_count);
+
 /* Message-driven candidate lookup: entities of `contact_id` whose name
  * contains any word (>= 3 chars, case-insensitive) of `msg`. Complements
  * hu_graph_list_entities, which is popularity-ordered and capped — after the
