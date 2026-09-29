@@ -120,3 +120,33 @@ def test_serve_gemma_reports_early_exit():
         with be.serve_gemma(popen=lambda *a, **k: proc, health=lambda: next(states),
                             sleep=lambda s: None):
             pass
+
+
+def test_empty_or_null_content_is_an_error_not_an_answer():
+    for content in (None, "", "   \n"):
+        g = be.GemmaBackend(post=lambda *a, c=content: {"choices": [{"message": {"content": c}}]})
+        with pytest.raises(be.BackendError):
+            g.generate("s", "u")
+    for parts in ([], [{"text": ""}], [{"other": 1}]):
+        v = be.VertexBackend(allow=True, post=lambda *a, p=parts: {"candidates": [{"content": {"parts": p}}]},
+                             token=lambda: "t", notice=io.StringIO())
+        with pytest.raises(be.BackendError):
+            v.generate("s", "u")
+
+
+def test_transport_failures_are_backend_errors(monkeypatch):
+    import urllib.error
+
+    def boom(*a, **k):
+        raise urllib.error.URLError("refused")
+
+    monkeypatch.setattr(be.urllib.request, "urlopen", boom)
+    with pytest.raises(be.BackendError):
+        be._post_json("http://127.0.0.1:8743/v1/chat/completions", {}, {}, 1)
+
+
+def test_malformed_adc_file_is_a_backend_error(tmp_path):
+    p = tmp_path / "adc.json"
+    p.write_text('{"client_id": "x"}')
+    with pytest.raises(be.BackendError):
+        be._adc_token(str(p))

@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from contextlib import contextmanager
@@ -30,8 +31,20 @@ class BackendError(RuntimeError):
 def _post_json(url, body, headers, timeout):
     req = urllib.request.Request(url, data=json.dumps(body).encode(),
                                  headers={"Content-Type": "application/json", **headers})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read())
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read())
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        # No URL, headers or body in the message: headers can carry a bearer token.
+        raise BackendError(f"request failed: {type(e).__name__}") from e
+
+
+def _nonempty(text, who):
+    """An empty or missing reply is a failure, never an answer: callers count it
+    as an error instead of storing a verdict nobody gave."""
+    if not isinstance(text, str) or not text.strip():
+        raise BackendError(f"{who} returned no content")
+    return text
 
 
 class GemmaBackend:
@@ -51,23 +64,30 @@ class GemmaBackend:
                 "messages": [{"role": "user", "content": f"{system}\n\n{user}"}]}
         d = self._post(self.base_url + "/v1/chat/completions", body, {}, self.timeout)
         try:
-            return d["choices"][0]["message"]["content"] or ""
+            content = d["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as e:
             raise BackendError(f"unexpected Gemma response shape: {e}") from e
+        return _nonempty(content, "Gemma")
 
 
 def _adc_token(creds_path=ADC_PATH):
     if not os.path.exists(creds_path):
         raise BackendError("no ADC credentials; run `gcloud auth application-default login`")
-    with open(creds_path) as f:
-        creds = json.load(f)
-    payload = urllib.parse.urlencode({
-        "client_id": creds["client_id"], "client_secret": creds["client_secret"],
-        "refresh_token": creds["refresh_token"], "grant_type": "refresh_token"}).encode()
+    try:
+        with open(creds_path) as f:
+            creds = json.load(f)
+        payload = urllib.parse.urlencode({
+            "client_id": creds["client_id"], "client_secret": creds["client_secret"],
+            "refresh_token": creds["refresh_token"], "grant_type": "refresh_token"}).encode()
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        raise BackendError(f"unreadable ADC credentials ({type(e).__name__})") from e
     req = urllib.request.Request("https://oauth2.googleapis.com/token", data=payload,
                                  headers={"Content-Type": "application/x-www-form-urlencoded"})
-    with urllib.request.urlopen(req, timeout=10) as r:
-        return json.loads(r.read())["access_token"]
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.loads(r.read())["access_token"]
+    except (urllib.error.URLError, OSError, ValueError, KeyError) as e:
+        raise BackendError(f"ADC token refresh failed ({type(e).__name__})") from e
 
 
 class VertexBackend:
@@ -94,9 +114,10 @@ class VertexBackend:
                                      "thinkingConfig": {"thinkingBudget": self.thinking_budget}}}
         d = self._post(url, body, {"Authorization": f"Bearer {self._token()}"}, self.timeout)
         try:
-            return "".join(p.get("text", "") for p in d["candidates"][0]["content"]["parts"])
-        except (KeyError, IndexError, TypeError) as e:
+            text = "".join(p.get("text", "") for p in d["candidates"][0]["content"]["parts"])
+        except (KeyError, IndexError, TypeError, AttributeError) as e:
             raise BackendError(f"unexpected Vertex response shape: {e}") from e
+        return _nonempty(text, "Vertex")
 
 
 def _healthy(url):
