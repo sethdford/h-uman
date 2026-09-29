@@ -4153,7 +4153,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     int window = 120;
                     if (dcfg_hu && dcfg_hu->user_response_window_sec > 0)
                         window = dcfg_hu->user_response_window_sec;
-                    if (ch->channel->vtable->human_active_recently &&
+                    /* A self-test's own "sent by me" copy is the command, not Seth
+                     * replying by hand (live #voice test, 2026-09-29 05:22). */
+                    if (!selftest_on && ch->channel->vtable->human_active_recently &&
                         ch->channel->vtable->human_active_recently(ch->channel->ctx, batch_key,
                                                                    key_len, window)) {
                         hu_log_info("human", agent ? agent->observer : NULL,
