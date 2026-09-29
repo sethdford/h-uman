@@ -3,6 +3,7 @@
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -99,6 +100,30 @@ hu_error_t hu_graph_upsert_entity(hu_graph_t *g, const char *contact_id, size_t 
                                   const char *metadata_json, int64_t *out_id);
 hu_error_t hu_graph_find_entity(hu_graph_t *g, const char *contact_id, size_t contact_id_len,
                                 const char *name, size_t name_len, hu_graph_entity_t *out);
+
+/* Retype policy for typed upserts (spec 2026-09-29 §4.1). True iff an existing
+ * entity of `old_type` may become `new_type`:
+ *   old UNKNOWN -> any type but UNKNOWN;
+ *   old TOPIC   -> PERSON | PLACE | ORGANIZATION | EVENT;
+ *   anything else (a name type, EMOTION, out-of-range) -> never.
+ * A name type is never downgraded or swapped; EMOTION is never touched. */
+bool hu_graph_entity_retype_allowed(hu_entity_type_t old_type, hu_entity_type_t new_type);
+
+/* hu_graph_upsert_entity_typed flag: retype only. An existing row keeps its
+ * last_seen and mention_count (the one-time migration must not make every
+ * retyped entity look freshly mentioned) and a missing row is NOT created
+ * (HU_ERR_NOT_FOUND). */
+#define HU_GRAPH_UPSERT_NO_TOUCH 0x1u
+
+/* Typed upsert. Insert: sets type, provenance (NULL/"" -> none) and confidence
+ * (clamped to [0,1], mirrored into confidence_mean). Existing row: bumps
+ * last_seen and mention_count like hu_graph_upsert_entity (unless NO_TOUCH),
+ * changes the type only when hu_graph_entity_retype_allowed allows it, and
+ * writes `provenance` only when the row has none (first writer wins). */
+hu_error_t hu_graph_upsert_entity_typed(hu_graph_t *g, const char *contact_id,
+                                        size_t contact_id_len, const char *name, size_t name_len,
+                                        hu_entity_type_t type, const char *provenance,
+                                        float confidence, unsigned flags, int64_t *out_id);
 
 /* Relation operations */
 hu_error_t hu_graph_upsert_relation(hu_graph_t *g, const char *contact_id, size_t contact_id_len,
