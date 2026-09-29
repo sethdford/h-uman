@@ -125,45 +125,13 @@ static hu_json_value_t *ensure_and_walk(hu_allocator_t *alloc, hu_json_value_t *
     return cur;
 }
 
-/* Write content to path, optionally via atomic rename. */
+/* Write content to path atomically (0600: config files may hold api_keys).
+ * Shares hu_config_save's writer, so neither path can truncate config.json
+ * in place or report success for a write that did not land. */
 static hu_error_t write_config_file(hu_allocator_t *alloc, const char *path, const char *content,
                                     size_t content_len) {
-    size_t tmp_len = strlen(path) + 5;
-    char *tmp_path = (char *)alloc->alloc(alloc->ctx, tmp_len);
-    if (!tmp_path)
-        return HU_ERR_OUT_OF_MEMORY;
-    int tn = snprintf(tmp_path, tmp_len, "%s.tmp", path);
-    if (tn < 0 || (size_t)tn >= tmp_len) {
-        alloc->free(alloc->ctx, tmp_path, tmp_len);
-        return HU_ERR_INVALID_ARGUMENT;
-    }
-
-    /* Config files may contain provider api_keys (see config.json
-     * schema in src/config.c). Treat as secret — 0600. The mutator
-     * writes atomically via a .tmp + rename, both targets get the
-     * same mode. */
-    FILE *f = NULL;
-    if (hu_io_secure_open(tmp_path, HU_IO_PERM_SECRET, "wb", &f) != HU_OK || !f) {
-        alloc->free(alloc->ctx, tmp_path, tmp_len);
-        return HU_ERR_IO;
-    }
-    size_t n = fwrite(content, 1, content_len, f);
-    fclose(f);
-    if (n != content_len) {
-        (void)remove(tmp_path);
-        alloc->free(alloc->ctx, tmp_path, tmp_len);
-        return HU_ERR_IO;
-    }
-    if (rename(tmp_path, path) != 0) {
-        f = NULL;
-        if (hu_io_secure_open(path, HU_IO_PERM_SECRET, "wb", &f) == HU_OK && f) {
-            (void)fwrite(content, 1, content_len, f);
-            fclose(f);
-        }
-        (void)remove(tmp_path);
-    }
-    alloc->free(alloc->ctx, tmp_path, tmp_len);
-    return HU_OK;
+    (void)alloc;
+    return hu_io_secure_write_atomic(path, HU_IO_PERM_SECRET, content, content_len);
 }
 
 /* Read config file. Returns content (caller frees), or NULL/empty on missing. */

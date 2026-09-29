@@ -67,11 +67,31 @@ baseline, so this lands as its own PR with re-measured baselines. **F5.**
   `memory` and `voice`: `session.identity_links` is reported as an unknown
   key (an error under `HUMAN_STRICT_CONFIG`), and the CLI help no longer
   advertises it.
-- **F3: secret key storage.** Confirm where `secrets.c` keeps the AES key.
-  If it is on disk next to the ciphertext, adopt the migration plan's
-  Phase 3 (OS keychain) for the live path.
-- **F4: route config writes through `config_mutator`.**
-- **F5: ship-what-you-run presets** (above).
+- **F3: secret key storage. Confirmed 2026-09-29: the key IS next to the
+  ciphertext.** `hu_secret_store_create` sets the key path to
+  `<state dir>/.secret_key` (0600), the same directory as the auth file and
+  config it protects. That defeats the migration plan's own threat model row
+  "offline disk read by an attacker who copies ~/.human/". The OS keychain is
+  the right fix, but it is **not** a drop-in: macOS binds keychain item access
+  to the binary's code-signing identity, the daemon is re-signed on every
+  install, and a launchd agent cannot answer an access prompt. A drifted
+  identity would silently stop OAuth-token decryption in the process that
+  texts contacts. Ship it only with (a) a stable Developer ID designated
+  requirement verified on the installed daemon, (b) file fallback plus a loud
+  one-shot log if the keychain denies access, and (c) a migration that deletes
+  the file key only after a verified keychain read-back.
+- **F4: DONE 2026-09-29 (atomic config writes).** The real hazard was not
+  the missing mutator but the writer itself: `hu_config_save` truncated
+  `config.json` in place and ignored `fwrite`'s result, and the mutator's
+  "atomic" path fell back to an in-place write on `rename` failure while
+  returning `HU_OK`. Both now use `hu_io_secure_write_atomic` (unique temp
+  file, checked writes, `fsync`, `rename`, never in place). Routing callers'
+  field edits through the mutator's allowlist remains optional hygiene.
+- **F5: ship-what-you-run presets, deferred (re-evaluated 2026-09-29).**
+  The dead-strip ratchet's baselines are measured against the `dev` preset,
+  so changing it moves them for every open branch and worktree at once. The
+  benefit, faster local builds, does not justify that cost while E3/E4 work
+  is in flight. Revisit when no ratchet-sensitive branches are open.
 
 ## Evidence method
 

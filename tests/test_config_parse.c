@@ -11,6 +11,9 @@
 #include "test_framework.h"
 #include <stdio.h>
 #include <stdlib.h>
+#ifndef _WIN32
+#include <sys/stat.h>
+#endif
 #include <string.h>
 #include <unistd.h>
 
@@ -740,6 +743,54 @@ static void test_config_save_roundtrip_key_fields(void) {
     hu_arena_destroy(arena);
     hu_arena_destroy(arena2);
 }
+
+#ifndef _WIN32
+/* A failed save must leave the previous config.json byte-for-byte intact.
+ * The pre-2026-09-29 writer opened the file with "w" (truncate first) and
+ * ignored fwrite's result, so a failure mid-save left a truncated config
+ * that the daemon could not parse on its next start. A read-only directory
+ * forces the failure: the old writer still succeeded here, because the file
+ * itself stayed writable, and silently rewrote it in place. */
+static void test_config_save_failure_preserves_existing_file(void) {
+    HU_SKIP_IF(geteuid() == 0, "root bypasses directory permissions");
+    char dir[] = "/tmp/hu_cfg_atomic_XXXXXX";
+    HU_ASSERT_NOT_NULL(mkdtemp(dir));
+    char path[256];
+    snprintf(path, sizeof(path), "%s/config.json", dir);
+    FILE *seed = fopen(path, "w");
+    HU_ASSERT_NOT_NULL(seed);
+    fputs("{\"ORIGINAL\":true}", seed);
+    fclose(seed);
+
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    cfg.allocator = hu_arena_allocator(arena);
+    cfg.arena = arena;
+    const char *j = "{\"default_provider\":\"ollama\",\"default_model\":\"llama3\"}";
+    HU_ASSERT_EQ(hu_config_parse_json(&cfg, j, strlen(j)), HU_OK);
+    cfg.config_path = path;
+
+    HU_ASSERT_EQ(chmod(dir, 0500), 0);
+    hu_error_t err = hu_config_save(&cfg);
+    HU_ASSERT_EQ(chmod(dir, 0700), 0);
+    HU_ASSERT_NEQ(err, HU_OK);
+
+    FILE *f = fopen(path, "r");
+    HU_ASSERT_NOT_NULL(f);
+    char buf[64];
+    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    buf[n] = '\0';
+    HU_ASSERT_STR_EQ(buf, "{\"ORIGINAL\":true}");
+
+    unlink(path);
+    rmdir(dir);
+    hu_arena_destroy(arena);
+}
+#endif
 
 static void test_config_sandbox_save_roundtrip(void) {
     hu_allocator_t backing = hu_system_allocator();
@@ -1832,6 +1883,9 @@ void run_config_parse_tests(void) {
 
     HU_TEST_SUITE("Config sandbox roundtrip");
     HU_RUN_TEST(test_config_sandbox_save_roundtrip);
+#ifndef _WIN32
+    HU_RUN_TEST(test_config_save_failure_preserves_existing_file);
+#endif
 
     HU_TEST_SUITE("Behavior thresholds");
     HU_RUN_TEST(test_config_parse_behavior_thresholds);
