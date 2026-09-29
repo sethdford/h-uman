@@ -356,10 +356,18 @@ static size_t possessive_stem(const char *p, size_t n) {
     return n;
 }
 
+/* ...and "mothers" names the same thing as "Mother's" (final review #2). */
+static size_t word_stem(const char *p, size_t n) {
+    n = possessive_stem(p, n);
+    if (n > 3 && (p[n - 1] == 's' || p[n - 1] == 'S') && p[n - 2] != 's' && p[n - 2] != 'S')
+        n--;
+    return n;
+}
+
 static bool has_word_ci(const dword_t *w, size_t n, const char *p, size_t len) {
-    len = possessive_stem(p, len);
+    len = word_stem(p, len);
     for (size_t i = 0; i < n; i++)
-        if (possessive_stem(w[i].p, w[i].n) == len && strncasecmp(w[i].p, p, len) == 0)
+        if (word_stem(w[i].p, w[i].n) == len && strncasecmp(w[i].p, p, len) == 0)
             return true;
     return false;
 }
@@ -408,8 +416,18 @@ static size_t ascii_apostrophes(const char *in, size_t n, char *out, size_t cap)
     return o;
 }
 
+#define SPEECH_MAX_KNOWN_NAMES 16
+
 hu_speech_drift_t hu_speech_drift_check(const char *orig_in, size_t on, const char *rew_in,
                                         size_t rn) {
+    return hu_speech_drift_check_ex(orig_in, on, rew_in, rn, NULL);
+}
+
+hu_speech_drift_t hu_speech_drift_check_ex(const char *orig_in, size_t on, const char *rew_in,
+                                           size_t rn, const char *known_names) {
+    dword_t kw[SPEECH_MAX_KNOWN_NAMES];
+    size_t kc =
+        known_names ? words_of(known_names, strlen(known_names), kw, SPEECH_MAX_KNOWN_NAMES) : 0;
     char orig_buf[SPEECH_WORK_CAP], rew_buf[SPEECH_WORK_CAP];
     const char *orig = orig_in ? orig_buf : NULL;
     const char *rew = rew_in ? rew_buf : NULL;
@@ -428,7 +446,8 @@ hu_speech_drift_t hu_speech_drift_check(const char *orig_in, size_t on, const ch
 
     for (size_t i = 0; i < rc; i++) /* a new proper noun is a new fact */
         if (!rw[i].sentence_initial && isupper((unsigned char)rw[i].p[0]) &&
-            !is_first_person_i(rw[i].p, rw[i].n) && !has_word_ci(ow, oc, rw[i].p, rw[i].n))
+            !is_first_person_i(rw[i].p, rw[i].n) && !has_word_ci(ow, oc, rw[i].p, rw[i].n) &&
+            !has_word_ci(kw, kc, rw[i].p, rw[i].n))
             return HU_SPEECH_DRIFT_NEW_NAME;
 
     if (negation_count(ow, oc) != negation_count(rw, rc)) /* "can" -> "can't" */
@@ -439,7 +458,9 @@ hu_speech_drift_t hu_speech_drift_check(const char *orig_in, size_t on, const ch
     if (oq != rq)
         return HU_SPEECH_DRIFT_QUESTION;
 
-    if (oc > 0 && (rc * 10 < oc * 5 || rc * 10 > oc * 16))
+    /* A short line may grow by a few spoken words ("love you" -> "Love you
+     * too, Mindy."); final review #2. */
+    if (oc > 0 && (rc * 10 < oc * 5 || (rc * 10 > oc * 16 && rc > oc + 4)))
         return HU_SPEECH_DRIFT_LENGTH;
 
     if (rc > 0 && word_in(rw[0].p, rw[0].n, k_openers, sizeof(k_openers) / sizeof(k_openers[0])))

@@ -41,6 +41,7 @@ build matrix and core test surface across configurations:
 | `completions` | Shell completions regen |
 | `docker` | Container image build |
 | `build-android` | Android shared lib build |
+| `ui-e2e` | Dashboard Playwright suite incl. per-view axe scan (promoted 2026-09-27, see History) |
 | `iOS UI tests` | Gate job in `native-apps-fleet.yml`: passes only when every iOS simulator leg (XCUITest) passed, or when the `changes` job measured no `apps/**` change. Always reports, so it cannot strand unrelated PRs. Promoted early; see History. |
 
 ## Tier 2 — Advisory (must run, may fail)
@@ -50,7 +51,6 @@ gate. CI runs them on every PR but their failure does not block merge:
 
 | Workflow | Why advisory |
 |---|---|
-| `ui-e2e` | Vite WS proxy churn under cold start; live LLM tests skip on no-provider |
 | `visual-regression` | Snapshot drift on font rendering / pixel diff |
 | `lighthouse` | Performance scores fluctuate ±5% run-to-run |
 | `lighthouse-dashboard` | Same as above |
@@ -86,7 +86,7 @@ gh api -X PUT repos/sethdford/h-uman/branches/main/protection \
   --input - <<'JSON'
 {
   "required_status_checks": {
-    "strict": true,
+    "strict": false,
     "checks": [
       {"context": "build-and-test (ubuntu-latest)"},
       {"context": "build-and-test (macos-latest)"},
@@ -94,8 +94,8 @@ gh api -X PUT repos/sethdford/h-uman/branches/main/protection \
       {"context": "cross-arm64"},
       {"context": "feature-flags (no-sqlite, -DHU_ENABLE_SQLITE=OFF -DHU_ENABLE_ALL_CHANNELS=ON)"},
       {"context": "feature-flags (no-skills, -DHU_ENABLE_SQLITE=ON -DHU_ENABLE_ALL_CHANNELS=ON -DHU_ENABLE_SKILLS=OFF)"},
-      {"context": "feature-flags (kitchen-sink, -DHU_ENABLE_SQLITE=ON -DHU_ENABLE_ALL_CHANNELS=ON -DHU_ENABLE_PERSONA=ON -DHU_ENABLE_SKILLS=ON)"},
-      {"context": "feature-flags (llamacpp-on, -DHU_ENABLE_SQLITE=ON -DHU_ENABLE_ALL_CHANNELS=ON -DHU_ENABLE_LLAMACPP=ON)"},
+      {"context": "feature-flags (kitchen-sink, -DHU_ENABLE_SQLITE=ON -DHU_ENABLE_ALL_CHANNELS=ON -DHU_ENABLE_PERSON..."},
+      {"context": "feature-flags (llamacpp-on, -DHU_ENABLE_SQLITE=ON -DHU_ENABLE_ALL_CHANNELS=ON -DHU_ENABLE_LLAMACP..."},
       {"context": "integration-tests"},
       {"context": "static-analysis"},
       {"context": "local-check"},
@@ -109,6 +109,7 @@ gh api -X PUT repos/sethdford/h-uman/branches/main/protection \
       {"context": "completions"},
       {"context": "docker"},
       {"context": "build-android"},
+      {"context": "ui-e2e"},
       {"context": "iOS UI tests"}
     ]
   },
@@ -121,9 +122,26 @@ gh api -X PUT repos/sethdford/h-uman/branches/main/protection \
 JSON
 ```
 
+**Context names must match the check run byte for byte.** GitHub truncates
+check-run names to 100 characters with a trailing `...`, so the two long
+`feature-flags` matrix rows above end in a literal `...`. A full, untruncated
+name never matches, stays pending forever, and blocks every PR. When a matrix
+row's args change, re-read the real names before editing protection:
+`gh api "repos/sethdford/h-uman/commits/<sha>/check-runs?per_page=100" --paginate --jq '.check_runs[].name'`
+(use the head SHA of a *successful* main run; cancelled runs report nothing).
+
 The `enforce_admins: false` and `required_pull_request_reviews: null`
 keep the gate functional for a solo developer while still preventing
 merges with red CI. Tighten when team grows.
+
+`strict: false` matches live protection (read 2026-09-27 with
+`gh api repos/sethdford/h-uman/branches/main/protection --jq .required_status_checks.strict`).
+A PR does not have to be up to date with `main` to merge: once its own
+required checks pass it can land even if `main` has moved. So "behind main"
+is never a merge blocker by itself. Update a branch when it has conflicts or
+needs a fix that landed on `main`, not just to catch up, because every update
+restarts CI. The cost is that the merged combination is first tested by
+`main`'s own run, not before merge.
 
 ## When a Tier-1 check is genuinely broken on main
 
@@ -148,6 +166,18 @@ Always document promotion/demotion in this file's history.
 
 ## History
 
+- **2026-09-27: `ui-e2e` promoted Advisory → Required** (user decision, ahead
+  of the ≥50-PR bar). All 3 `ui-e2e` failures in the preceding 13 completed
+  `main` runs (36285820022, 36257002769, 36253284792) were the per-view axe
+  scan sampling text mid-fade (Chat ×3, Overview, Voice), not WS proxy churn.
+  PR #494 made that scan wait for data + animations and pinned the
+  remaining real violations in `KNOWN_VIOLATIONS`. Demote under the rule
+  above if it flakes again.
+- **2026-09-27: branch protection brought in line with Tier 1.** `main` had
+  only 5 required checks; it now requires all 22 Tier-1 contexts above (names
+  verified against check runs on a3975fed5; every one succeeded in 7/7 recent
+  main runs except `ui-e2e`, 6/7, the flake fixed by #494). Force pushes and
+  deletion of `main` disabled the same day.
 - **2026-09-27: `iOS UI tests` promoted to Tier 1** by the user, *before* the
   ≥50-clean-run bar. The iOS fleet had been quarantined (`continue-on-error`)
   since June under #271. #485 found the cause: a real app bug where More →

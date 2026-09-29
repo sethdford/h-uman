@@ -1,0 +1,236 @@
+/* D2: a directed line is spoken only if every tag is in Cartesia's palette,
+ * values are in range and the budgets hold. */
+#include "human/tts/speech_direction.h"
+#include "test_framework.h"
+
+#include <string.h>
+
+static hu_direction_verdict_t parse(const char *s, hu_direction_t *d) {
+    return hu_direction_parse(s, strlen(s), NULL, d);
+}
+
+static void test_direction_parses_a_valid_line(void) {
+    static hu_direction_t d;
+    /* voiceai 2026-09-27 (sparse markup): one calm OPENING emotion; a later
+     * emotion tag is dropped, its words kept. */
+    HU_ASSERT_EQ(parse("<emotion value=\"affectionate\"/>Wait, that's amazing! "
+                       "<break time=\"250ms\"/><emotion value=\"proud\"/>I'm so proud of you.",
+                       &d),
+                 HU_DIRECTION_OK);
+    HU_ASSERT_EQ(d.count, 2);
+    HU_ASSERT_STR_EQ(d.seg[0].emotion, "affectionate");
+    HU_ASSERT_STR_EQ(d.seg[1].emotion, "");
+    HU_ASSERT_EQ(d.seg[1].break_ms, 250);
+    HU_ASSERT_STR_EQ(d.words, "Wait, that's amazing! I'm so proud of you.");
+    HU_ASSERT_EQ(d.sentences, 2);
+    HU_ASSERT_STR_EQ(hu_direction_first_emotion(&d), "affectionate");
+}
+
+static void test_direction_rejects_tags_outside_the_palette(void) {
+    static hu_direction_t d;
+    HU_ASSERT_EQ(parse("<prosody rate=\"slow\">hey</prosody>", &d), HU_DIRECTION_BAD_TAG);
+    HU_ASSERT_EQ(parse("<emotion value=\"joyful\"/>hey there", &d), HU_DIRECTION_BAD_EMOTION);
+    HU_ASSERT_EQ(parse("<speed ratio=\"fast\"/>hey", &d), HU_DIRECTION_BAD_TAG);
+}
+
+static void test_direction_rejects_unclosed_tag(void) {
+    static hu_direction_t d;
+    HU_ASSERT_EQ(parse("<emotion value=\"sad\" hey there", &d), HU_DIRECTION_BAD_TAG);
+    HU_ASSERT_EQ(parse("hey the<break time=\"200ms\"re", &d), HU_DIRECTION_BAD_TAG);
+}
+
+static void test_direction_rejects_stage_directions_and_emoji(void) {
+    static hu_direction_t d;
+    HU_ASSERT_EQ(parse("*laughs* that's great", &d), HU_DIRECTION_STAGE_DIRECTION);
+    HU_ASSERT_EQ(parse("(sighs) fine", &d), HU_DIRECTION_STAGE_DIRECTION);
+    HU_ASSERT_EQ(parse("[pause] sure", &d), HU_DIRECTION_STAGE_DIRECTION);
+    HU_ASSERT_EQ(parse("love you \xF0\x9F\x98\x8D", &d), HU_DIRECTION_EMOJI);
+}
+
+static void test_direction_clamps_values(void) {
+    static hu_direction_t d;
+    HU_ASSERT_EQ(
+        parse("<speed ratio=\"2.0\"/><volume ratio=\"0.2\"/><break time=\"3s\"/>ok then", &d),
+        HU_DIRECTION_OK);
+    HU_ASSERT_TRUE(d.seg[0].speed > 1.09f && d.seg[0].speed < 1.11f);
+    HU_ASSERT_TRUE(d.seg[0].volume > 0.84f && d.seg[0].volume < 0.86f);
+    HU_ASSERT_EQ(d.seg[0].break_ms, 800);
+}
+
+static void test_direction_enforces_budgets(void) {
+    static hu_direction_t d;
+    HU_ASSERT_EQ(parse("[laughter] that's hilarious. [laughter] stop it.", &d),
+                 HU_DIRECTION_OVER_BUDGET);
+    /* Emotion switches are no longer a budget: non-calm and mid-memo tags drop. */
+    HU_ASSERT_EQ(parse("<emotion value=\"sad\"/>oh no. <emotion value=\"excited\"/>wait "
+                       "<emotion value=\"calm\"/>what!",
+                       &d),
+                 HU_DIRECTION_OK);
+    HU_ASSERT_NULL(hu_direction_first_emotion(&d));
+    HU_ASSERT_EQ(parse("<speed ratio=\"0.9\"/>slow. <speed ratio=\"1.05\"/>fast.", &d),
+                 HU_DIRECTION_OVER_BUDGET);
+    HU_ASSERT_EQ(parse("[laughter] that's hilarious, you're ridiculous.", &d), HU_DIRECTION_OK);
+}
+
+static void test_direction_empty_and_tags_only(void) {
+    static hu_direction_t d;
+    HU_ASSERT_EQ(parse("", &d), HU_DIRECTION_EMPTY);
+    HU_ASSERT_EQ(parse("<emotion value=\"calm\"/><break time=\"200ms\"/>", &d), HU_DIRECTION_EMPTY);
+}
+
+static void test_direction_emotion_list_is_cartesias(void) {
+    HU_ASSERT_EQ(hu_direction_emotion_count(), 58); /* docs list 58 names */
+    HU_ASSERT_TRUE(hu_direction_emotion_valid("affectionate", 12));
+    HU_ASSERT_TRUE(hu_direction_emotion_valid("Excited", 7));
+    HU_ASSERT_FALSE(hu_direction_emotion_valid("joyful", 6));
+    HU_ASSERT_FALSE(hu_direction_emotion_valid("sad", 2)); /* exact length, no prefixes */
+}
+
+static void test_direction_verdict_names_are_distinct(void) {
+    HU_ASSERT_STR_EQ(hu_direction_verdict_name(HU_DIRECTION_OK), "ok");
+    HU_ASSERT_STR_EQ(hu_direction_verdict_name(HU_DIRECTION_BAD_TAG), "bad_tag");
+    HU_ASSERT_STR_EQ(hu_direction_verdict_name(HU_DIRECTION_OVER_BUDGET), "over_budget");
+}
+
+static void test_direction_render_normalizes_words_not_tags(void) {
+    static hu_direction_t d;
+    HU_ASSERT_EQ(parse("<speed ratio=\"0.93\"/>See you at 7 tonight.", &d), HU_DIRECTION_OK);
+    char out[HU_DIRECTION_RENDER_CAP];
+    size_t n = hu_direction_render(&d, HU_LAUGH_CARTESIA, out, sizeof(out));
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_STR_CONTAINS(out, "<speed ratio=\"0.93\"/>");
+    HU_ASSERT_STR_CONTAINS(out, "seven");
+    HU_ASSERT_STR_NOT_CONTAINS(out, "point nine");
+}
+
+static void test_direction_render_reemits_only_parsed_tags(void) {
+    static hu_direction_t d;
+    HU_ASSERT_EQ(parse("<emotion value=\"Calm\"/>No way! <break time=\"400ms\"/>That's huge.", &d),
+                 HU_DIRECTION_OK);
+    char out[HU_DIRECTION_RENDER_CAP];
+    hu_direction_render(&d, HU_LAUGH_CARTESIA, out, sizeof(out));
+    HU_ASSERT_STR_CONTAINS(out, "<emotion value=\"calm\"/>No way!");
+    HU_ASSERT_STR_CONTAINS(out, "<break time=\"400ms\"/>That's huge.");
+}
+
+static void test_direction_render_laugh_styles(void) {
+    static hu_direction_t d;
+    HU_ASSERT_EQ(parse("[laughter] you're ridiculous.", &d), HU_DIRECTION_OK);
+    char out[HU_DIRECTION_RENDER_CAP];
+    hu_direction_render(&d, HU_LAUGH_CARTESIA, out, sizeof(out));
+    HU_ASSERT_STR_CONTAINS(out, "[laughter]");
+    hu_direction_render(&d, HU_LAUGH_TEXT, out, sizeof(out));
+    HU_ASSERT_STR_NOT_CONTAINS(out, "[laughter]");
+    HU_ASSERT_STR_CONTAINS(out, "haha");
+    HU_ASSERT_EQ(hu_laugh_style_parse("text"), HU_LAUGH_TEXT);
+    HU_ASSERT_EQ(hu_laugh_style_parse(NULL), HU_LAUGH_CARTESIA);
+}
+
+/* Deferred minors, fixed 2026-09-27. */
+static void test_direction_rejects_a_tag_inside_a_word(void) {
+    static hu_direction_t d;
+    HU_ASSERT_EQ(parse("hey the<break time=\"200ms\"/>re", &d), HU_DIRECTION_BAD_TAG);
+    HU_ASSERT_EQ(parse("ha[laughter]ha you", &d), HU_DIRECTION_BAD_TAG);
+    HU_ASSERT_EQ(parse("Love you too.<break time=\"200ms\"/>So proud.", &d), HU_DIRECTION_OK);
+}
+
+static void test_direction_rejects_symbol_emoji(void) {
+    static hu_direction_t d;
+    HU_ASSERT_EQ(parse("love you \xE2\x9D\xA4", &d), HU_DIRECTION_EMOJI);     /* U+2764 */
+    HU_ASSERT_EQ(parse("so good \xE2\x9C\xA8 yeah", &d), HU_DIRECTION_EMOJI); /* U+2728 */
+    HU_ASSERT_EQ(parse("wait\xE2\x80\x94really?", &d), HU_DIRECTION_OK);      /* em dash is text */
+}
+
+static void test_direction_decimals_are_not_sentence_ends(void) {
+    static hu_direction_t d;
+    HU_ASSERT_EQ(parse("it's 7.5 miles.", &d), HU_DIRECTION_OK);
+    HU_ASSERT_EQ(d.sentences, 1);
+    HU_ASSERT_EQ(parse("it's 7.5 or 8.5 miles. yes.", &d), HU_DIRECTION_OK);
+    HU_ASSERT_EQ(d.sentences, 2);
+}
+
+static void test_direction_render_fails_rather_than_truncates(void) {
+    static hu_direction_t d;
+    memset(&d, 0, sizeof(d));
+    d.count = 1;
+    for (size_t i = 0; i < 190; i++)
+        memcpy(d.seg[0].text + i * 3, "99 ", 3); /* "ninety-nine " x190 > the norm buffer */
+    d.seg[0].text_len = 570;
+    char out[HU_DIRECTION_RENDER_CAP];
+    HU_ASSERT_EQ(hu_direction_render(&d, HU_LAUGH_CARTESIA, out, sizeof(out)), 0);
+}
+
+static void test_direction_summary_names_emotions_and_tags(void) {
+    static hu_direction_t d;
+    HU_ASSERT_EQ(parse("<emotion value=\"affectionate\"/>No way! <break time=\"300ms\"/>"
+                       "<speed ratio=\"0.9\"/>So proud.",
+                       &d),
+                 HU_DIRECTION_OK);
+    char s[160];
+    HU_ASSERT_TRUE(hu_direction_summary(&d, s, sizeof(s)) > 0);
+    HU_ASSERT_STR_EQ(s, "emotions=affectionate breaks=1 laughs=0 speed=1 volume=0");
+}
+
+/* voiceai 2026-09-27: "excited" widened the clone's pitch range to 10.9
+ * semitones (6.4 sympathetic); only calm emotions reach Sonic. */
+static void test_direction_keeps_only_calm_emotions(void) {
+    static hu_direction_t d;
+    HU_ASSERT_TRUE(hu_direction_emotion_is_calm("affectionate", 12));
+    HU_ASSERT_TRUE(hu_direction_emotion_is_calm("Neutral", 7));
+    HU_ASSERT_FALSE(hu_direction_emotion_is_calm("excited", 7));
+    HU_ASSERT_EQ(parse("<emotion value=\"excited\"/>No way!", &d), HU_DIRECTION_OK);
+    HU_ASSERT_NULL(hu_direction_first_emotion(&d));
+    HU_ASSERT_EQ(parse("<emotion value=\"curious\"/>wait what", &d), HU_DIRECTION_OK);
+    HU_ASSERT_STR_EQ(hu_direction_first_emotion(&d), "curious");
+    HU_ASSERT_EQ(parse("<emotion value=\"joyful\"/>hey", &d), HU_DIRECTION_BAD_EMOTION);
+}
+
+/* Sonic paces from punctuation; stacked breaks make it hallucinate. */
+static void test_direction_caps_pauses_at_two(void) {
+    static hu_direction_t d;
+    HU_ASSERT_EQ(parse("one. <break time=\"200ms\"/>two. <break time=\"200ms\"/>three. "
+                       "<break time=\"200ms\"/>four.",
+                       &d),
+                 HU_DIRECTION_OK);
+    size_t breaks = 0;
+    for (size_t i = 0; i < d.count; i++)
+        breaks += d.seg[i].break_ms ? 1u : 0u;
+    HU_ASSERT_EQ(breaks, 2);
+    HU_ASSERT_STR_EQ(d.words, "one. two. three. four.");
+}
+
+/* voiceai 2026-09-27: speed/volume tags persist — reset after the scoped part. */
+static void test_direction_render_resets_scoped_speed_and_volume(void) {
+    static hu_direction_t d;
+    HU_ASSERT_EQ(parse("<speed ratio=\"0.9\"/><volume ratio=\"0.9\"/>Slow part. "
+                       "<break time=\"300ms\"/>Normal part.",
+                       &d),
+                 HU_DIRECTION_OK);
+    char out[HU_DIRECTION_RENDER_CAP];
+    HU_ASSERT_TRUE(hu_direction_render(&d, HU_LAUGH_CARTESIA, out, sizeof(out)) > 0);
+    HU_ASSERT_STR_CONTAINS(out, "<speed ratio=\"1.00\"/><volume ratio=\"1.00\"/>Normal part.");
+}
+
+void run_speech_direction_tests(void) {
+    HU_TEST_SUITE("speech direction (D2)");
+    HU_RUN_TEST(test_direction_parses_a_valid_line);
+    HU_RUN_TEST(test_direction_rejects_tags_outside_the_palette);
+    HU_RUN_TEST(test_direction_rejects_unclosed_tag);
+    HU_RUN_TEST(test_direction_rejects_stage_directions_and_emoji);
+    HU_RUN_TEST(test_direction_clamps_values);
+    HU_RUN_TEST(test_direction_enforces_budgets);
+    HU_RUN_TEST(test_direction_empty_and_tags_only);
+    HU_RUN_TEST(test_direction_emotion_list_is_cartesias);
+    HU_RUN_TEST(test_direction_verdict_names_are_distinct);
+    HU_RUN_TEST(test_direction_render_normalizes_words_not_tags);
+    HU_RUN_TEST(test_direction_render_reemits_only_parsed_tags);
+    HU_RUN_TEST(test_direction_render_laugh_styles);
+    HU_RUN_TEST(test_direction_rejects_a_tag_inside_a_word);
+    HU_RUN_TEST(test_direction_rejects_symbol_emoji);
+    HU_RUN_TEST(test_direction_decimals_are_not_sentence_ends);
+    HU_RUN_TEST(test_direction_render_fails_rather_than_truncates);
+    HU_RUN_TEST(test_direction_summary_names_emotions_and_tags);
+    HU_RUN_TEST(test_direction_keeps_only_calm_emotions);
+    HU_RUN_TEST(test_direction_caps_pauses_at_two);
+    HU_RUN_TEST(test_direction_render_resets_scoped_speed_and_volume);
+}

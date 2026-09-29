@@ -87,6 +87,7 @@
 #include "human/daemon/send_budget.h"
 #include "human/daemon/send_provenance.h"
 #include "human/daemon/voice_facade.h"
+#include "human/daemon/voice_first.h"
 
 /* Channel helpers */
 #include "human/channels/channel_embed.h"
@@ -401,6 +402,7 @@ bool gov_budget_inited = true;
 #include "human/channels/imessage_action_facts.h"
 #include "human/core/time.h"
 #include "human/persona/pacing.h"
+#include "human/util/typedstream.h"
 
 /* hu_daemon_dispatch_imessage_reply (iMessage reply-route dispatcher)
  * extracted to src/daemon/daemon_message_router.c — DDD Phase 2.5.
@@ -2909,6 +2911,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 ext && (strcmp(ext, ".mp4") == 0 || strcmp(ext, ".mov") == 0 ||
                                         strcmp(ext, ".webm") == 0);
 
+                            /* Final review #4: the poll already put iOS's transcript in
+                             * the text — never route that audio again (cloud STT would
+                             * upload the memo and append a second transcript). */
+                            if (is_audio && hu_text_has_audio_transcription(content_to_add, mlen))
+                                is_audio = false;
                             if (is_audio || is_video) {
                                 char *media_desc = NULL;
                                 size_t media_desc_len = 0;
@@ -5386,6 +5393,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 
                 /* 4. Response constraints via channel vtable */
                 uint32_t max_chars = 0;
+                bool voice_first_memo = false; /* spec 2026-09-28 */
                 if (ch->channel->vtable->get_response_constraints) {
                     hu_channel_response_constraints_t constraints = {0};
                     if (ch->channel->vtable->get_response_constraints(ch->channel->ctx,
@@ -6408,6 +6416,16 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                 }
 
+                /* Voice-first memos: decide voice from what arrived and, LIVE for
+                 * family, have this turn write the memo. Never for a crisis turn. */
+                if (!inbound_crisis) {
+                    hu_daemon_voice_first_t vfirst;
+                    hu_daemon_voice_first_prepare(
+                        alloc, agent, batch_key, key_len, msgs[batch_start].is_group, combined,
+                        combined_len, &convo_ctx, &convo_ctx_len, &max_chars, &vfirst);
+                    voice_first_memo = vfirst.memo;
+                }
+
                 /* Set agent per-turn context fields (prompt builder reads these) */
                 agent->contact_context = contact_ctx;
                 agent->contact_context_len = contact_ctx_len;
@@ -6416,6 +6434,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 agent->ab_history_entries = history_entries;
                 agent->ab_history_count = history_count;
                 agent->max_response_chars = max_chars;
+                agent->voice_memo_turn = voice_first_memo;
 
                 /* T4 (AC-2): hoisted out of the routing block below so the post-turn
                  * local->cloud fallback (further down, outside the HU_IS_TEST guard)
@@ -6782,7 +6801,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
             /* F45: Burst messaging — 3–4 rapid-fire thoughts for urgent/exciting context.
              * Skip in llm_decides mode — burst is an extra LLM call. */
 #ifndef HU_IS_TEST
-                if (!llm_decides) {
+                if (!llm_decides && !voice_first_memo) { /* a memo is one message */
                     float burst_prob = 0.03f;
                     if (agent && agent->persona)
                         burst_prob = agent->persona->humanization.burst_message_probability;
@@ -7272,7 +7291,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 
                     /* Best-of-N: generate additional candidates, score with Turing heuristic */
                     if (err == HU_OK && response && response_len > 0 && !retried && config &&
-                        config->agent.best_of_n >= 2 && !llm_decides) {
+                        config->agent.best_of_n >= 2 && !llm_decides && !voice_first_memo) {
                         uint32_t n_extra = config->agent.best_of_n - 1;
                         if (n_extra > 4)
                             n_extra = 4;
@@ -7433,7 +7452,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     /* Quality gate: check response for unnatural patterns.
                      * If needs_revision, retry once with hint.
                      * Skip retry in llm_decides mode (director handles quality). */
+                    /* A memo is long on purpose; the texting-length retry would shrink
+                     * it back to a text (review I1). */
                     if (err == HU_OK && response && response_len > 0 && history_entries &&
+                        !voice_first_memo &&
                         hu_reactive_gate_active(HU_REACTIVE_GATE_QUALITY_RETRY, llm_decides)) {
                         hu_quality_score_t qscore = hu_conversation_evaluate_quality(
                             response, response_len, history_entries, history_count, max_chars);
@@ -7495,7 +7517,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 
                     /* Turing score gate: retry if heuristic score is too low.
                      * Only fires once (shares retried flag with quality gate). */
-                    if (err == HU_OK && response && response_len > 0 && !retried && !llm_decides) {
+                    if (err == HU_OK && response && response_len > 0 && !retried && !llm_decides &&
+                        !voice_first_memo) {
                         hu_turing_score_t pre_tscore;
                         hu_error_t pre_ts_err = hu_turing_score_heuristic(
                             response, response_len, combined, combined_len, max_chars, &pre_tscore);
@@ -8138,6 +8161,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 agent->turn_temperature = 0.0;
                 agent->turn_thinking_budget = 0;
                 agent->max_response_chars = 0;
+                agent->voice_memo_turn = false;
                 agent->memory_session_id = NULL;
                 agent->memory_session_id_len = 0;
                 if (agent->memory && agent->memory->vtable) {
@@ -8678,12 +8702,17 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         .unshaped = unshaped,
                         .unshaped_len = unshaped_len,
                         .bth_hour = bth_hour,
+                        .voice_first = voice_first_memo,
+                        .is_group = msgs[batch_start].is_group,
                         .text_ready = (err == HU_OK),
                         .bus = &daemon_outbound_bus,
                         .bridge = &daemon_out_bus_bridge,
                         .turn = &turn_out_state,
                     };
                     bool sent_voice = hu_daemon_deliver_final_reply(&final_reply);
+                    if (voice_first_memo && !sent_voice)
+                        hu_log_info("voice_first", agent ? agent->observer : NULL,
+                                    "memo went as text (voice declined or not delivered)");
                     if (unshaped) {
                         alloc->free(alloc->ctx, unshaped, unshaped_len + 1);
                         unshaped = NULL;

@@ -489,6 +489,17 @@ static void test_deliver_final_voice_sent_skips_bus_text(void) {
     deliver_fini(&d);
 }
 
+/* Review C1 (2026-09-28): voice goes to batch_key, the SENDER's handle, while
+ * a group's text goes to the chat. A group reply is never voiced. */
+static void test_deliver_final_group_reply_is_never_voiced(void) {
+    deliver_fixture_t d;
+    deliver_init(&d, &mock_vt_plain, voice_config(), "yeah call whenever");
+    d.r.is_group = true;
+    HU_ASSERT_FALSE(hu_daemon_deliver_final_reply(&d.r));
+    HU_ASSERT_EQ((int)d.f.m.last_media_count, 0);
+    deliver_fini(&d);
+}
+
 /* Bus delivery used to stop the typing indicator; after a voice memo nothing
  * else would, so the delivery function stops it. */
 static void test_deliver_final_voice_on_streaming_channel_stops_typing(void) {
@@ -547,6 +558,7 @@ void run_daemon_outbound_bus_tests(void) {
     HU_RUN_TEST(test_outbound_final_flagged_long_discord_reply_defers);
     HU_RUN_TEST(test_deliver_final_without_voice_goes_out_as_text_via_bus);
     HU_RUN_TEST(test_deliver_final_voice_sent_skips_bus_text);
+    HU_RUN_TEST(test_deliver_final_group_reply_is_never_voiced);
     HU_RUN_TEST(test_deliver_final_voice_on_streaming_channel_stops_typing);
     HU_RUN_TEST(test_deliver_final_not_text_ready_publishes_nothing);
 }

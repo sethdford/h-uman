@@ -22,7 +22,7 @@
 The smallest fully autonomous AI assistant infrastructure — a static C binary that fits on any $5 board, boots in milliseconds, and requires nothing but libc.
 
 ```
-~2694 KB binary · <10 ms startup · 13,920+ tests · 97 providers · 31 channels · 87 tools · Pluggable everything
+~2694 KB binary · <10 ms startup · 14,097+ tests · 97 providers · 31 channels · 87 tools · Pluggable everything
 ```
 
 ### Features
@@ -82,7 +82,7 @@ Release-size build (MinSizeRel + LTO, all channels, sqlite-vec off):
 cmake --preset release (adds sqlite-vec, ML, embedded model, Cartesia, ...):
   Binary size:   3.3 MB (3,275,488 bytes)
   Idle RSS:      8.8 MB
-Tests:         13,920 passing, 0 ASan errors
+Tests:         14,097 passing, 0 ASan errors
 ```
 
 ### Why Switch from OpenClaw?
@@ -661,7 +661,7 @@ Build and tests require a C11 compiler and CMake 3.20+. One-time setup:
 mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Debug -DHU_ENABLE_ALL_CHANNELS=ON
 cmake --build .                            # Dev build
-./human_tests                             # 13,920+ tests
+./human_tests                             # 14,097+ tests
 cd ..
 ```
 
@@ -705,10 +705,10 @@ Channel CJM coverage (ingress parsing/filtering, session key routing, account pr
 ```
 
 Language: C11 + ASM (aarch64, x86_64)
-Source files: 1,955
-Lines of code: ~415K
-Test files: 863
-Tests: 13,920
+Source files: 1,970
+Lines of code: ~418K
+Test files: 869
+Tests: 14,097
 Binary: ~2694 KB (release-size build: MinSizeRel + LTO, all channels, sqlite-vec off)
 Idle RSS: 8.6 MB (human mcp)
 Startup: 4–9 ms (Apple Silicon)
@@ -742,7 +742,7 @@ config.c Config loading/merging (~/.human/config.json)
 ...
 
 include/human/ Public C headers
-tests/ 580+ test files, 13,920+ tests
+tests/ 580+ test files, 14,097+ tests
 asm/ Platform-specific assembly (aarch64, x86_64, generic C)
 
 ui/ Web UI (LitElement + Vite)

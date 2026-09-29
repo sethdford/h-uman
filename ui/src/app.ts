@@ -314,6 +314,8 @@ export class ScApp extends LitElement {
     }
     .disconnect-banner {
       background: color-mix(in srgb, var(--hu-error) 85%, var(--hu-bg));
+      /* No single on-color clears 4.5:1 on red in both themes; the page bg does. */
+      color: var(--hu-bg);
     }
     .demo-fallback-banner {
       background: color-mix(in srgb, var(--hu-accent-secondary) 85%, var(--hu-bg));
@@ -767,7 +769,9 @@ export class ScApp extends LitElement {
   private _onHashChange(): void {
     const hash = window.location.hash.replace("#", "");
     if (!hash) {
-      void this._ensureLoaded("chat");
+      void this._ensureLoaded("chat").then((err) => {
+        if (this.tab === "chat") this._viewError = err;
+      });
       return;
     }
     const [tabPart, ...rest] = hash.split(":");
@@ -784,12 +788,12 @@ export class ScApp extends LitElement {
   }
 
   private async _applyHashRoute(targetTab: TabId): Promise<void> {
-    await this._ensureLoaded(targetTab);
-    if (this._viewError) {
-      this.tab = targetTab;
+    const err = await this._ensureLoaded(targetTab);
+    if (err) {
+      this._performViewSwitch(targetTab, err);
       return;
     }
-    await this._switchView(targetTab);
+    await this._switchView(targetTab, null);
   }
 
   private _onGlobalKey(e: KeyboardEvent): void {
@@ -1004,21 +1008,25 @@ export class ScApp extends LitElement {
       });
   }
 
-  private async _ensureLoaded(tab: TabId): Promise<void> {
-    if (loadedViews.has(tab)) return;
+  /* Loads a view's chunk and returns the failure, if any. It never writes
+   * `_viewError`: that field belongs to the CURRENT tab, and background
+   * prefetches of other tabs call this too. A prefetch that resolved after the
+   * current view failed used to clear its error, leaving a blank view with no
+   * retry UI. Navigation commits the result via `_performViewSwitch`. */
+  private async _ensureLoaded(tab: TabId): Promise<Error | null> {
+    if (loadedViews.has(tab)) return null;
     try {
       await VIEW_IMPORTS[tab]();
       loadedViews.add(tab);
-      this._viewError = null;
+      return null;
     } catch (e) {
-      const err = e instanceof Error ? e : new Error(String(e));
-      this._viewError = err;
+      return e instanceof Error ? e : new Error(String(e));
     }
   }
 
   private _prefetchSilent(tab: TabId): void {
     if (loadedViews.has(tab)) return;
-    this._ensureLoaded(tab).catch(() => {});
+    void this._ensureLoaded(tab);
   }
 
   private _prefetchOnIdle(): void {
@@ -1043,15 +1051,18 @@ export class ScApp extends LitElement {
     if (idx < VALID_TABS.length - 1) this._prefetchSilent(VALID_TABS[idx + 1]!);
   }
 
-  private _performViewSwitch(newTab: TabId): void {
+  /* Tab and error change together so the boundary never shows one tab's
+   * error over another tab, even for a single frame. */
+  private _performViewSwitch(newTab: TabId, error: Error | null): void {
     this.tab = newTab;
+    this._viewError = error;
   }
 
-  private async _switchView(newTab: TabId): Promise<void> {
+  private async _switchView(newTab: TabId, error: Error | null): Promise<void> {
     if (document.startViewTransition && !this.prefersReducedMotion) {
       try {
         const transition = document.startViewTransition(() => {
-          this._performViewSwitch(newTab);
+          this._performViewSwitch(newTab, error);
           return this.updateComplete;
         });
         /* `transition.ready` also rejects with "Transition was skipped" when a
@@ -1063,21 +1074,21 @@ export class ScApp extends LitElement {
         transition.ready.catch(() => undefined);
         await transition.finished;
       } catch {
-        this._performViewSwitch(newTab);
+        this._performViewSwitch(newTab, error);
         await this.updateComplete;
       }
     } else {
-      this._performViewSwitch(newTab);
+      this._performViewSwitch(newTab, error);
       await this.updateComplete;
     }
   }
 
   private async _switchTab(tab: TabId): Promise<void> {
     if (this.tab === tab) return;
-    await this._ensureLoaded(tab);
+    const err = await this._ensureLoaded(tab);
     const hash = tab === "chat" ? `#chat:${this.chatSessionKey}` : `#${tab}`;
     window.history.replaceState(null, "", hash);
-    await this._switchView(tab);
+    await this._switchView(tab, err);
     this._prefetchAdjacent(tab);
   }
 

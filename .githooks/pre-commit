@@ -65,6 +65,23 @@ if [ -n "$staged_tokens" ]; then
   fi
 fi
 
+# Check WCAG contrast when token sources or the contrast gate/baseline change
+staged_contrast=$(git diff --cached --name-only --diff-filter=ACM -- 'design-tokens/*.tokens.json' 'design-tokens/contrast-*' 'design-tokens/check-contrast.ts')
+if [ -n "$staged_contrast" ]; then
+  if [ -x "design-tokens/node_modules/.bin/tsx" ]; then
+    echo "Checking design token contrast..."
+    contrast_out=$(cd design-tokens && npm run -s check:contrast 2>&1)
+    contrast_rc=$?
+    if [ $contrast_rc -ne 0 ]; then
+      echo "$contrast_out" | grep -v '^KNOWN'
+      echo "Contrast check failed. Fix the pair, or if you fixed a baselined pair, delete its line from design-tokens/contrast-baseline.json in this same commit."
+      exit 1
+    fi
+  else
+    echo "Skipping contrast check: run 'cd design-tokens && npm ci' to enable it locally (CI's design-tokens job enforces it)."
+  fi
+fi
+
 # Regenerate website assets when SVG sources or generate script change
 staged_assets=$(git diff --cached --name-only --diff-filter=ACM -- 'website/public/human.svg' 'website/public/og-image.svg' 'website/scripts/generate-assets.mjs')
 if [ -n "$staged_assets" ]; then

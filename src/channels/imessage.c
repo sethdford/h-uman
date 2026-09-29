@@ -17,6 +17,7 @@
 #include "human/core/string.h"
 #include "human/observability/validator_telemetry.h"
 #include "human/persona.h"
+#include "human/util/typedstream.h"
 #ifndef HU_CODENAME
 #define HU_CODENAME "human"
 #endif
@@ -2523,6 +2524,9 @@ imsg_media:
         hu_voice_record_route_t vroute =
             hu_voice_record_route(hu_voice_delivery_mode_parse(getenv("HU_VOICE_DELIVERY")),
                                   message_len, media, media_count);
+        if (vroute != HU_VREC_ROUTE_ATTACHMENT &&
+            !hu_voice_record_handle_allowed(getenv("HU_VOICE_DELIVERY_ONLY"), tgt, tgt_len))
+            vroute = HU_VREC_ROUTE_ATTACHMENT; /* not on the native list: attachment as before */
         if (vroute == HU_VREC_ROUTE_SHADOW) {
             const hu_voice_record_port_t *vport = hu_voice_record_macos_port();
             hu_voice_record_request_t vreq;
@@ -2565,6 +2569,16 @@ imsg_media:
                         hu_voice_record_block_name(vres.block), (int)vres.stage,
                         vres.abort_reason ? vres.abort_reason : "-");
         }
+    }
+    /* Voice-first memos (spec 2026-09-28): a memo that was not recorded
+     * natively (blocked, failed before Send, or off the native list) never
+     * goes out as a .caf file when HU_VOICE_NO_ATTACHMENT=1. The error sends the
+     * daemon down its text path instead. */
+    if (!hu_voice_record_may_attach(message_len, media, media_count,
+                                    getenv("HU_VOICE_NO_ATTACHMENT"))) {
+        hu_log_info("imessage", NULL, "voice memo not sent as a file; text goes instead");
+        send_err = HU_ERR_IO_BUSY;
+        goto imsg_cleanup;
     }
     /* Send media attachments (local file paths only) after text succeeds.
      * Prefer imsg send --file when available (faster, better error reporting);
@@ -5914,6 +5928,31 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
                     attr_blob, (size_t)attr_len, attr_text_buf, sizeof(attr_text_buf));
                 if (extracted > 0)
                     text = attr_text_buf;
+            }
+        }
+
+        /* A voice memo: Messages keeps iOS's transcript of it in attributedBody
+         * (IMAudioTranscription). Reply to what they said, not to "[Audio]" —
+         * 2026-09-27 the daemon answered Mindy's memo without hearing it. The
+         * log line measures whether a local STT fallback is ever needed. */
+        char audio_text_buf[4200];
+        if (has_audio) {
+            const unsigned char *ab = sqlite3_column_blob(stmt, 10);
+            int abl = sqlite3_column_bytes(stmt, 10);
+            const char pre[] = HU_AUDIO_TRANSCRIPTION_PREFIX;
+            size_t pl = sizeof(pre) - 1;
+            memcpy(audio_text_buf, pre, pl);
+            size_t tn =
+                (ab && abl > 0)
+                    ? hu_imessage_extract_audio_transcription(ab, (size_t)abl, audio_text_buf + pl,
+                                                              sizeof(audio_text_buf) - pl - 1)
+                    : 0;
+            hu_log_info("imessage", NULL, "inbound audio rowid=%lld transcript=%s",
+                        (long long)rowid, tn > 0 ? "ios" : "none");
+            if (tn > 0) {
+                audio_text_buf[pl + tn] = ']';
+                audio_text_buf[pl + tn + 1] = '\0';
+                text = audio_text_buf;
             }
         }
 

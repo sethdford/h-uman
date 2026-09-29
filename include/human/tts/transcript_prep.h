@@ -77,6 +77,10 @@ float hu_emotion_to_volume(const char *emotion);
  */
 size_t hu_transcript_strip_junk(const char *text, size_t text_len, char *out, size_t cap);
 
+/* True when `p` starts an emoji (the emoji blocks only — General Punctuation
+ * such as curly quotes and dashes is text). */
+bool hu_transcript_is_emoji(const char *p, size_t remain);
+
 /*
  * Smooth difficult consonant clusters for clearer TTS pronunciation.
  * Inserts micro-breaks or simplifies sequences like "sts", "thm", "ngths".

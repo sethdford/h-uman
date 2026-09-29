@@ -1,5 +1,6 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
+import { ifDefined } from "lit/directives/if-defined.js";
 
 type InputSize = "sm" | "md" | "lg";
 
@@ -151,12 +152,12 @@ export class ScInput extends LitElement {
             .value=${this.value}
             placeholder=${this.placeholder}
             ?disabled=${this.disabled}
-            min=${this.min ?? undefined}
-            max=${this.max ?? undefined}
-            step=${this.step ?? undefined}
+            min=${ifDefined(this.min)}
+            max=${ifDefined(this.max)}
+            step=${ifDefined(this.step)}
             aria-invalid=${this.error ? "true" : "false"}
-            aria-describedby=${errorId ?? undefined}
-            aria-label=${this.label ? undefined : this.ariaLabel || undefined}
+            aria-describedby=${ifDefined(errorId)}
+            aria-label=${ifDefined(this.label ? undefined : this.ariaLabel || undefined)}
             @input=${this._onInput}
             @change=${this._onChange}
           />

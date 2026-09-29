@@ -1,8 +1,11 @@
+#include "human/agent.h"
 #include "human/agent/autodream.h"
 #include "human/agent/graph_grounding.h"
+#include "human/agent/model_router.h"
 #include "human/agent/scheduler.h"
 #include "human/agent/world_model_bridge.h"
 #include "human/core/allocator.h"
+#include "human/core/gate_mode.h"
 #include "human/memory/graph.h"
 #include "test_framework.h"
 #include <stdbool.h>
@@ -296,6 +299,275 @@ static void test_compose_scopes_to_contact(void) {
     gg_fixture_close(&fx);
 }
 
+/* Contact-anchored fallback (2026-09-27): casual texts rarely NAME an entity,
+ * so lexical seeding returned nothing for 40/40 real moments. With the
+ * fallback flag, a lexical miss seeds from the contact's OWN top entities. */
+static void test_compose_ex_contact_fallback_fills_lexical_miss(void) {
+    gg_fixture_t fx;
+    gg_fixture_open(&fx);
+    const char *msg = "wanna grab tacos tonight"; /* names nothing in the graph */
+    char *out = NULL;
+    size_t out_len = 0, matched = 99;
+    HU_ASSERT_EQ(hu_graph_ground_compose_ex(&fx.loader, "alice", 5, msg, strlen(msg), 0,
+                                            HU_GG_CONTACT_FALLBACK, &out, &out_len, &matched),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_TRUE(out_len > 0);
+    HU_ASSERT_EQ((int)matched, 0); /* no LEXICAL match: the shadow log must see 0 */
+    HU_ASSERT_TRUE(strstr(out, "slip 14") != NULL || strstr(out, "fingerstyle") != NULL);
+    fx.alloc.free(fx.alloc.ctx, out, out_len + 1);
+    gg_fixture_close(&fx);
+}
+
+/* flags=0 keeps the pre-existing contract byte-for-byte: a lexical miss is empty. */
+static void test_compose_ex_without_flag_keeps_empty_on_miss(void) {
+    gg_fixture_t fx;
+    gg_fixture_open(&fx);
+    const char *msg = "wanna grab tacos tonight";
+    char *out = (char *)0x1;
+    size_t out_len = 99, matched = 99;
+    HU_ASSERT_EQ(hu_graph_ground_compose_ex(&fx.loader, "alice", 5, msg, strlen(msg), 0, 0, &out,
+                                            &out_len, &matched),
+                 HU_OK);
+    HU_ASSERT_TRUE(out == NULL);
+    HU_ASSERT_EQ((int)out_len, 0);
+    gg_fixture_close(&fx);
+}
+
+/* When the message DOES name an entity, the flag changes nothing: identical
+ * bytes and matched count to plain compose. */
+static void test_compose_ex_fallback_inert_on_lexical_hit(void) {
+    gg_fixture_t fx;
+    gg_fixture_open(&fx);
+    const char *msg = "hows the sailboat coming along";
+    char *a = NULL, *b = NULL;
+    size_t alen = 0, blen = 0, am = 0, bm = 0;
+    HU_ASSERT_EQ(
+        hu_graph_ground_compose(&fx.loader, "alice", 5, msg, strlen(msg), 0, &a, &alen, &am),
+        HU_OK);
+    HU_ASSERT_EQ(hu_graph_ground_compose_ex(&fx.loader, "alice", 5, msg, strlen(msg), 0,
+                                            HU_GG_CONTACT_FALLBACK, &b, &blen, &bm),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(a);
+    HU_ASSERT_NOT_NULL(b);
+    HU_ASSERT_EQ((int)alen, (int)blen);
+    HU_ASSERT_TRUE(memcmp(a, b, alen) == 0);
+    HU_ASSERT_EQ((int)am, (int)bm);
+    HU_ASSERT_TRUE(am > 0);
+    fx.alloc.free(fx.alloc.ctx, a, alen + 1);
+    fx.alloc.free(fx.alloc.ctx, b, blen + 1);
+    gg_fixture_close(&fx);
+}
+
+/* The fallback never crosses contacts: bob gets only bob's entities (never
+ * alice's relation text), and a contact with no entities gets nothing. */
+static void test_compose_ex_fallback_scoped_to_contact(void) {
+    gg_fixture_t fx;
+    gg_fixture_open(&fx);
+    const char *msg = "wanna grab tacos tonight";
+    char *out = NULL;
+    size_t out_len = 0, matched = 0;
+    HU_ASSERT_EQ(hu_graph_ground_compose_ex(&fx.loader, "bob", 3, msg, strlen(msg), 0,
+                                            HU_GG_CONTACT_FALLBACK, &out, &out_len, &matched),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(out); /* bob has one entity of his own */
+    HU_ASSERT_TRUE(strstr(out, "sailboat") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "slip 14") == NULL);
+    HU_ASSERT_TRUE(strstr(out, "fingerstyle") == NULL);
+    fx.alloc.free(fx.alloc.ctx, out, out_len + 1);
+
+    char *none = (char *)0x1;
+    size_t none_len = 99;
+    HU_ASSERT_EQ(hu_graph_ground_compose_ex(&fx.loader, "carol", 5, msg, strlen(msg), 0,
+                                            HU_GG_CONTACT_FALLBACK, &none, &none_len, NULL),
+                 HU_OK);
+    HU_ASSERT_TRUE(none == NULL);
+    HU_ASSERT_EQ((int)none_len, 0);
+    gg_fixture_close(&fx);
+}
+
+/* The fallback never volunteers an EMOTION entity, even the contact's most-
+ * mentioned one: surfacing "grief" on every unrelated casual text is the
+ * opposite of human. (A lexical hit on it, when the contact names it, is fine
+ * and unaffected.) Critic finding on af1d94b31. */
+static void test_compose_ex_fallback_skips_emotion_entities(void) {
+    gg_fixture_t fx;
+    gg_fixture_open(&fx);
+    int64_t id = 0;
+    for (int i = 0; i < 5; i++) /* 5 mentions: outranks every other alice entity */
+        HU_ASSERT_EQ(hu_graph_upsert_entity(fx.graph, "alice", 5, "heartbreak", 10,
+                                            HU_ENTITY_EMOTION, NULL, &id),
+                     HU_OK);
+    const char *msg = "wanna grab tacos tonight";
+    char *out = NULL;
+    size_t out_len = 0;
+    HU_ASSERT_EQ(hu_graph_ground_compose_ex(&fx.loader, "alice", 5, msg, strlen(msg), 0,
+                                            HU_GG_CONTACT_FALLBACK, &out, &out_len, NULL),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(out); /* other entities still seed */
+    HU_ASSERT_TRUE(strstr(out, "heartbreak") == NULL);
+    fx.alloc.free(fx.alloc.ctx, out, out_len + 1);
+
+    const char *named = "still thinking about the heartbreak";
+    HU_ASSERT_EQ(hu_graph_ground_compose(&fx.loader, "alice", 5, named, strlen(named), 0, &out,
+                                         &out_len, NULL),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(out); /* the lexical path still grounds on it when named */
+    HU_ASSERT_TRUE(strstr(out, "heartbreak") != NULL);
+    fx.alloc.free(fx.alloc.ctx, out, out_len + 1);
+    gg_fixture_close(&fx);
+}
+
+/* Owner ("self") facts are matched only when the message carries the entity's
+ * FULL name: a topic phrase like "different direction" must not seed on a lone
+ * shared word ("different"), while plain lexical matching would seed it. */
+static void test_compose_ex_require_full_name_blocks_partial_hits(void) {
+    gg_fixture_t fx;
+    gg_fixture_open(&fx);
+    int64_t id = 0;
+    HU_ASSERT_EQ(hu_graph_upsert_entity(fx.graph, "self", 4, "different direction", 19,
+                                        HU_ENTITY_TOPIC, NULL, &id),
+                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(fx.graph, "self", 4, "tampa bay", 9, HU_ENTITY_PLACE, NULL, &id),
+        HU_OK);
+    const char *partial = "i went a totally different way";
+    char *out = NULL;
+    size_t out_len = 0;
+    HU_ASSERT_EQ(hu_graph_ground_compose(&fx.loader, "self", 4, partial, strlen(partial), 0, &out,
+                                         &out_len, NULL),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(out); /* plain lexical seeds on the lone word... */
+    fx.alloc.free(fx.alloc.ctx, out, out_len + 1);
+    out = (char *)0x1;
+    HU_ASSERT_EQ(hu_graph_ground_compose_ex(&fx.loader, "self", 4, partial, strlen(partial), 0,
+                                            HU_GG_REQUIRE_FULL_NAME, &out, &out_len, NULL),
+                 HU_OK);
+    HU_ASSERT_TRUE(out == NULL); /* ...full-name mode does not */
+
+    const char *full = "hows the weather down in tampa bay";
+    HU_ASSERT_EQ(hu_graph_ground_compose_ex(&fx.loader, "self", 4, full, strlen(full), 0,
+                                            HU_GG_REQUIRE_FULL_NAME, &out, &out_len, NULL),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_TRUE(strstr(out, "tampa bay") != NULL);
+    fx.alloc.free(fx.alloc.ctx, out, out_len + 1);
+    gg_fixture_close(&fx);
+}
+
+/* The fallback honors the same output budget as lexical composition. */
+static void test_compose_ex_fallback_respects_budget(void) {
+    gg_fixture_t fx;
+    gg_fixture_open(&fx);
+    const char *msg = "wanna grab tacos tonight";
+    char *out = NULL;
+    size_t out_len = 0;
+    HU_ASSERT_EQ(hu_graph_ground_compose_ex(&fx.loader, "alice", 5, msg, strlen(msg), 40,
+                                            HU_GG_CONTACT_FALLBACK, &out, &out_len, NULL),
+                 HU_OK);
+    HU_ASSERT_TRUE(out_len <= 40);
+    if (out)
+        fx.alloc.free(fx.alloc.ctx, out, out_len + 1);
+    gg_fixture_close(&fx);
+}
+
+/* Caller contract for the fallback gate, exercised through the REAL live-path
+ * loader hu_agent_load_graph_grounding with grounding ON and a lexical miss:
+ *   fallback OFF    -> nothing (pre-existing behavior)
+ *   fallback SHADOW -> nothing injected (logged only)
+ *   fallback LIVE   -> injected on ANALYTICAL turns
+ *   fallback LIVE   -> still dropped on casual turns (the 2026-05-29 measured
+ *                      casual-register gate is NOT overridden). */
+static size_t load_grounding_len(gg_fixture_t *fx, const char *fb_mode, int tier) {
+    hu_agent_t *agent = (hu_agent_t *)calloc(1, sizeof(hu_agent_t));
+    HU_ASSERT_NOT_NULL(agent);
+    agent->alloc = &fx->alloc;
+    agent->memory_session_id = "alice";
+    agent->memory_session_id_len = 5;
+    agent->turn_tier = tier;
+    setenv("HU_GRAPH_GROUNDING", "on", 1);
+    if (fb_mode)
+        setenv("HU_GRAPH_GROUNDING_CONTACT_FALLBACK", fb_mode, 1);
+    else
+        unsetenv("HU_GRAPH_GROUNDING_CONTACT_FALLBACK");
+    const char *msg = "wanna grab tacos tonight";
+    char *ctx = NULL;
+    size_t ctx_len = 0;
+    hu_agent_load_graph_grounding(agent, &fx->loader, msg, strlen(msg), &ctx, &ctx_len);
+    if (ctx)
+        fx->alloc.free(fx->alloc.ctx, ctx, ctx_len + 1);
+    unsetenv("HU_GRAPH_GROUNDING");
+    unsetenv("HU_GRAPH_GROUNDING_CONTACT_FALLBACK");
+    free(agent);
+    return ctx_len;
+}
+
+/* Self-facts gate through the real loader: the contact ("alice") has no
+ * lexical hit and the contact fallback is OFF, but the message names one of
+ * the OWNER's facts. OFF/SHADOW inject nothing; LIVE injects it under an
+ * "About you:" label on analytical turns; casual turns still drop it. */
+static char *load_self_facts(gg_fixture_t *fx, const char *mode, int tier, size_t *len_out) {
+    int64_t id = 0;
+    (void)hu_graph_upsert_entity(fx->graph, "self", 4, "tampa bay", 9, HU_ENTITY_PLACE, NULL, &id);
+    hu_agent_t *agent = (hu_agent_t *)calloc(1, sizeof(hu_agent_t));
+    HU_ASSERT_NOT_NULL(agent);
+    agent->alloc = &fx->alloc;
+    agent->memory_session_id = "alice";
+    agent->memory_session_id_len = 5;
+    agent->turn_tier = tier;
+    setenv("HU_GRAPH_GROUNDING", "on", 1);
+    unsetenv("HU_GRAPH_GROUNDING_CONTACT_FALLBACK");
+    if (mode)
+        setenv("HU_GRAPH_GROUNDING_SELF_FACTS", mode, 1);
+    else
+        unsetenv("HU_GRAPH_GROUNDING_SELF_FACTS");
+    const char *msg = "hows the weather down in tampa bay";
+    char *ctx = NULL;
+    size_t ctx_len = 0;
+    hu_agent_load_graph_grounding(agent, &fx->loader, msg, strlen(msg), &ctx, &ctx_len);
+    unsetenv("HU_GRAPH_GROUNDING");
+    unsetenv("HU_GRAPH_GROUNDING_SELF_FACTS");
+    free(agent);
+    *len_out = ctx_len;
+    return ctx;
+}
+
+static void test_load_grounding_self_facts_gate(void) {
+    gg_fixture_t fx;
+    gg_fixture_open(&fx);
+    size_t len = 99;
+    HU_ASSERT_TRUE(load_self_facts(&fx, NULL, (int)HU_TIER_ANALYTICAL, &len) == NULL);
+    HU_ASSERT_TRUE(load_self_facts(&fx, "shadow", (int)HU_TIER_ANALYTICAL, &len) == NULL);
+    HU_ASSERT_TRUE(load_self_facts(&fx, "live", (int)HU_TIER_REFLEXIVE, &len) == NULL);
+    char *ctx = load_self_facts(&fx, "live", (int)HU_TIER_ANALYTICAL, &len);
+    HU_ASSERT_NOT_NULL(ctx);
+    HU_ASSERT_TRUE(strstr(ctx, "About you:") != NULL);
+    HU_ASSERT_TRUE(strstr(ctx, "tampa bay") != NULL);
+    HU_ASSERT_TRUE(strstr(ctx, "slip 14") == NULL); /* alice's facts only via her own path */
+    fx.alloc.free(fx.alloc.ctx, ctx, len + 1);
+    gg_fixture_close(&fx);
+}
+
+static void test_self_facts_mode_defaults_off(void) {
+    unsetenv("HU_GRAPH_GROUNDING_SELF_FACTS");
+    HU_ASSERT_EQ((int)hu_graph_grounding_self_facts_mode(), (int)HU_GATE_OFF);
+    setenv("HU_GRAPH_GROUNDING_SELF_FACTS", "shadow", 1);
+    HU_ASSERT_EQ((int)hu_graph_grounding_self_facts_mode(), (int)HU_GATE_SHADOW);
+    setenv("HU_GRAPH_GROUNDING_SELF_FACTS", "garbage", 1);
+    HU_ASSERT_EQ((int)hu_graph_grounding_self_facts_mode(), (int)HU_GATE_OFF);
+    unsetenv("HU_GRAPH_GROUNDING_SELF_FACTS");
+}
+
+static void test_load_grounding_contact_fallback_gate(void) {
+    gg_fixture_t fx;
+    gg_fixture_open(&fx);
+    HU_ASSERT_EQ((int)load_grounding_len(&fx, NULL, (int)HU_TIER_ANALYTICAL), 0);
+    HU_ASSERT_EQ((int)load_grounding_len(&fx, "shadow", (int)HU_TIER_ANALYTICAL), 0);
+    HU_ASSERT_TRUE(load_grounding_len(&fx, "live", (int)HU_TIER_ANALYTICAL) > 0);
+    HU_ASSERT_EQ((int)load_grounding_len(&fx, "live", (int)HU_TIER_REFLEXIVE), 0);
+    gg_fixture_close(&fx);
+}
+
 /* Fail-open: loader without a facade (no graph wired) -> empty, HU_OK. */
 static void test_compose_no_graph_is_failopen(void) {
     hu_allocator_t alloc = hu_system_allocator();
@@ -438,6 +710,21 @@ static void test_graph_grounding_mode_parse(void) {
     setenv("HU_GRAPH_GROUNDING", "garbage", 1);
     HU_ASSERT_EQ((int)hu_graph_grounding_mode(), (int)HU_GRAPH_GROUNDING_OFF);
     unsetenv("HU_GRAPH_GROUNDING");
+}
+
+/* The contact fallback ships OFF by default and fails safe to OFF on junk. */
+static void test_contact_fallback_mode_parse(void) {
+    unsetenv("HU_GRAPH_GROUNDING_CONTACT_FALLBACK");
+    HU_ASSERT_EQ((int)hu_graph_grounding_contact_fallback_mode(), (int)HU_GG_FALLBACK_OFF);
+    setenv("HU_GRAPH_GROUNDING_CONTACT_FALLBACK", "shadow", 1);
+    HU_ASSERT_EQ((int)hu_graph_grounding_contact_fallback_mode(), (int)HU_GG_FALLBACK_SHADOW);
+    setenv("HU_GRAPH_GROUNDING_CONTACT_FALLBACK", "live", 1);
+    HU_ASSERT_EQ((int)hu_graph_grounding_contact_fallback_mode(), (int)HU_GG_FALLBACK_LIVE);
+    setenv("HU_GRAPH_GROUNDING_CONTACT_FALLBACK", "off", 1);
+    HU_ASSERT_EQ((int)hu_graph_grounding_contact_fallback_mode(), (int)HU_GG_FALLBACK_OFF);
+    setenv("HU_GRAPH_GROUNDING_CONTACT_FALLBACK", "garbage", 1);
+    HU_ASSERT_EQ((int)hu_graph_grounding_contact_fallback_mode(), (int)HU_GG_FALLBACK_OFF);
+    unsetenv("HU_GRAPH_GROUNDING_CONTACT_FALLBACK");
 }
 
 #ifdef HU_ENABLE_SQLITE
@@ -586,6 +873,7 @@ static void test_srag_memory_miss_does_not_free_graph_ctx(void) {
 void run_graph_grounding_tests(void) {
     HU_TEST_SUITE("GraphRAG grounding");
     HU_RUN_TEST(test_graph_grounding_mode_parse);
+    HU_RUN_TEST(test_contact_fallback_mode_parse);
     HU_RUN_TEST(test_gate_comment_exists_at_agent_turn_1471);
     HU_RUN_TEST(test_srag_memory_miss_does_not_free_graph_ctx);
     HU_RUN_TEST(test_ground_match_count_respects_word_boundaries);
@@ -600,6 +888,16 @@ void run_graph_grounding_tests(void) {
     HU_RUN_TEST(test_compose_respects_budget_cap);
     HU_RUN_TEST(test_compose_varies_with_conversation);
     HU_RUN_TEST(test_compose_scopes_to_contact);
+    HU_RUN_TEST(test_compose_ex_contact_fallback_fills_lexical_miss);
+    HU_RUN_TEST(test_compose_ex_without_flag_keeps_empty_on_miss);
+    HU_RUN_TEST(test_compose_ex_fallback_inert_on_lexical_hit);
+    HU_RUN_TEST(test_compose_ex_fallback_scoped_to_contact);
+    HU_RUN_TEST(test_compose_ex_fallback_respects_budget);
+    HU_RUN_TEST(test_compose_ex_fallback_skips_emotion_entities);
+    HU_RUN_TEST(test_compose_ex_require_full_name_blocks_partial_hits);
+    HU_RUN_TEST(test_load_grounding_self_facts_gate);
+    HU_RUN_TEST(test_self_facts_mode_defaults_off);
+    HU_RUN_TEST(test_load_grounding_contact_fallback_gate);
     HU_RUN_TEST(test_compose_no_graph_is_failopen);
     HU_RUN_TEST(test_compose_renders_current_employer_with_predecessor);
     HU_RUN_TEST(test_compose_marks_superseded_employer_as_history);

@@ -3,6 +3,7 @@
 
 #include "human/agent/memory_loader.h"
 #include "human/core/error.h"
+#include "human/core/gate_mode.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -63,5 +64,42 @@ hu_error_t hu_graph_ground_compose(hu_memory_loader_t *loader, const char *conta
                                    size_t contact_id_len, const char *msg, size_t msg_len,
                                    size_t max_chars, char **out, size_t *out_len,
                                    size_t *out_matched_entities);
+
+/* ── Contact-anchored fallback (2026-09-27) ───────────────────────────────
+ * Lexical seeding needs the incoming message to NAME an entity; casual texts
+ * almost never do (0 of 40 real moments, 2026-09-27), so compose returned
+ * nothing even for contacts with a populated graph. With
+ * HU_GG_CONTACT_FALLBACK, a lexical miss seeds instead from the contact's own
+ * top entities (mention count + recency) and renders them the same way.
+ * A lexical hit is unaffected. *out_matched_entities stays 0 on the fallback
+ * path so logs can tell the two apart. */
+#define HU_GG_CONTACT_FALLBACK 0x1u
+
+/* Seed an entity only when EVERY scoreable word of its name appears in the
+ * message (coverage 1.0), not on a lone shared word. Used for the owner's
+ * ("self") facts, where topic phrases like "different direction" would
+ * otherwise match any message saying "different". */
+#define HU_GG_REQUIRE_FULL_NAME 0x2u
+
+/* Reads HU_GRAPH_GROUNDING_SELF_FACTS per hu_gate_mode_parse, unset -> OFF.
+ * Owner ("self") facts are matched by full name against the incoming
+ * message and, in LIVE, appended under an "About you:" label. */
+hu_gate_mode_t hu_graph_grounding_self_facts_mode(void);
+
+hu_error_t hu_graph_ground_compose_ex(hu_memory_loader_t *loader, const char *contact_id,
+                                      size_t contact_id_len, const char *msg, size_t msg_len,
+                                      size_t max_chars, unsigned flags, char **out, size_t *out_len,
+                                      size_t *out_matched_entities);
+
+typedef enum hu_graph_grounding_fallback_mode {
+    HU_GG_FALLBACK_OFF = 0,
+    HU_GG_FALLBACK_SHADOW,
+    HU_GG_FALLBACK_LIVE,
+} hu_graph_grounding_fallback_mode_t;
+
+/* Reads HU_GRAPH_GROUNDING_CONTACT_FALLBACK per hu_gate_mode_parse:
+ * unset -> OFF (default), "shadow" -> SHADOW, "on"/"live" -> LIVE,
+ * unknown -> OFF. */
+hu_graph_grounding_fallback_mode_t hu_graph_grounding_contact_fallback_mode(void);
 
 #endif /* HU_AGENT_GRAPH_GROUNDING_H */

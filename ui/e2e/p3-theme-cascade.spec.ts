@@ -47,6 +47,9 @@ interface Env {
 const EXTRA_KEYS = [
   "bg",
   "link-hover",
+  "on-accent",
+  "accent",
+  "accent-hover",
   "on-accent-secondary",
   "accent-secondary",
   "accent-secondary-hover",
@@ -195,6 +198,16 @@ test.describe("P3 overrides follow the active theme", () => {
 
   for (const scheme of ["light", "dark"] as const) {
     for (const gamut of ["srgb", "p3"] as const) {
+      test(`${scheme} theme on ${gamut} keeps on-accent text legible on accent fills`, async ({
+        page,
+      }) => {
+        const { tokens } = await render(page, { scheme }, gamut);
+        // WCAG 1.4.3 text (4.5:1): primary buttons and chips put on-accent over
+        // accent at rest and accent-hover under the pointer. White was 2.44:1.
+        expect(contrast(tokens["on-accent"], tokens.accent)).toBeGreaterThanOrEqual(4.5);
+        expect(contrast(tokens["on-accent"], tokens["accent-hover"])).toBeGreaterThanOrEqual(4.5);
+      });
+
       test(`${scheme} theme on ${gamut} keeps on-accent-secondary text legible on amber fills`, async ({
         page,
       }) => {

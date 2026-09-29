@@ -18,8 +18,9 @@
 static const char k_speak_it[] =
     "You turn a text message into what the same person would actually say out loud in a "
     "quick voice memo to someone they know.\n"
-    "- Say the same thing the way you'd say it out loud: contractions, short sentences; "
-    "fragments are fine.\n"
+    "- Say the same thing the way you'd say it out loud: always use contractions; join related "
+    "thoughts with and, so, but, because, and mix longer and shorter sentences (a run of short "
+    "sentences sounds stop, pause, stop); \"...\" only for trailing off, no em dashes.\n"
     "- A natural reaction word is fine when it fits (oh, wait, yeah, ha). Don't force one.\n"
     "- Never start with \"Well\", \"So\", \"Hmm\" or \"Um\". Never say \"good question\".\n"
     "- No emoji, asterisks, brackets, stage directions, or narrated actions or thinking.\n"

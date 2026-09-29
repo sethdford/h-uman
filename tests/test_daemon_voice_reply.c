@@ -55,7 +55,7 @@ static void test_voice_reply_without_config_sends_nothing_and_returns_false(void
     static const char reply[] = "yeah call whenever";
     g_voice_sends = 0;
     bool sent = hu_daemon_voice_reply(&alloc, &agent, NULL, &ch, "+15550000001", 12, "hey", 3,
-                                      reply, sizeof(reply) - 1, NULL, 0, 14);
+                                      reply, sizeof(reply) - 1, NULL, 0, 14, false);
     HU_ASSERT_FALSE(sent);
     HU_ASSERT_EQ(g_voice_sends, 0);
 }
@@ -149,7 +149,7 @@ static bool run_fallback_voice(const char *reply, const char *inbound) {
     ch.channel = &channel;
     return hu_daemon_voice_reply(&alloc, &agent, &config, &ch, "+15550000001", 12, inbound,
                                  strlen(inbound), reply, strlen(reply), g_unshaped,
-                                 g_unshaped ? strlen(g_unshaped) : 0, 14);
+                                 g_unshaped ? strlen(g_unshaped) : 0, 14, false);
 }
 
 /* F1 S2: the memo speaks the cleaned reply, not the texting shorthand. */
@@ -229,13 +229,199 @@ static bool run_rewrite_voice_on(const char *reply, const char *rewrite, bool vo
     ch.channel = &channel;
     setenv("HU_SPEECH_REWRITE", "live", 1);
     bool sent = hu_daemon_voice_reply(&alloc, &agent, &config, &ch, "+15550000001", 12, "hey", 3,
-                                      reply, strlen(reply), NULL, 0, 14);
+                                      reply, strlen(reply), NULL, 0, 14, false);
     unsetenv("HU_SPEECH_REWRITE");
     return sent;
 }
 
 static bool run_rewrite_voice(const char *reply, const char *rewrite) {
     return run_rewrite_voice_on(reply, rewrite, true, "cartesia");
+}
+
+/* The persona Cartesia arm exists only with HU_ENABLE_CARTESIA (the pre-push
+ * build has it off), so these tests are gated with it. */
+#if HU_ENABLE_CARTESIA
+/* Voice-first memos (spec 2026-09-28): the persona's Cartesia arm, where the
+ * post-hoc classifier lives. A memo-length reply to a question is TEXT to the
+ * classifier ("incoming_question"); decided VOICE up front, it goes. */
+static const char *g_persona_reply; /* NULL = the memo below */
+
+static bool run_persona_voice(bool voice_first) {
+    hu_allocator_t alloc = hu_system_allocator();
+    static hu_persona_t persona;
+    memset(&persona, 0, sizeof(persona));
+    snprintf(persona.voice.voice_id, sizeof(persona.voice.voice_id), "test-voice");
+    persona.voice_messages.enabled = true;
+    persona.voice_messages.max_duration_sec = 30;
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.persona = &persona;
+    static hu_config_t config;
+    memset(&config, 0, sizeof(config));
+    config.channels.default_daemon.voice_enabled = true;
+    config.api_key = "test-key";
+    hu_channel_vtable_t vt;
+    memset(&vt, 0, sizeof(vt));
+    vt.name = vr_name_generic;
+    vt.send = vr_send;
+    hu_channel_t channel;
+    memset(&channel, 0, sizeof(channel));
+    channel.vtable = &vt;
+    hu_service_channel_t ch;
+    memset(&ch, 0, sizeof(ch));
+    ch.channel = &channel;
+    const char *inbound = "do you think I should take the job in Denver or stay here?";
+    const char *memo =
+        "Honestly I have been thinking about it all day, and I think you should go for "
+        "it. You've talked about wanting something like this for a couple years now, and you "
+        "know the team already. It's scary, but you'd regret not trying, you know. Call me "
+        "tonight and we can talk it through.";
+    return hu_daemon_voice_reply(&alloc, &agent, &config, &ch, "+15550000001", 12, inbound,
+                                 strlen(inbound), g_persona_reply ? g_persona_reply : memo,
+                                 strlen(g_persona_reply ? g_persona_reply : memo), NULL, 0, 14,
+                                 voice_first);
+}
+
+static void test_voice_reply_voice_first_skips_the_text_classifier(void) {
+    g_voice_sends = 0;
+    HU_ASSERT_FALSE(run_persona_voice(false)); /* classifier: incoming_question */
+    HU_ASSERT_EQ(g_voice_sends, 0);
+    HU_ASSERT_TRUE(run_persona_voice(true));
+    HU_ASSERT_EQ(g_voice_sends, 1);
+    HU_ASSERT_STR_CONTAINS(hu_cartesia_test_last_transcript(), "Call me tonight");
+}
+
+/* Review C2: the pre-decision holds only for a memo the turn produced. A slim
+ * retry ("Sounds good, talk soon.") goes back to the classifier, which keeps
+ * it as text for a question. */
+static void test_voice_reply_voice_first_needs_a_memo(void) {
+    g_voice_sends = 0;
+    g_persona_reply = "Sounds good, talk soon.";
+    bool sent = run_persona_voice(true);
+    g_persona_reply = NULL;
+    HU_ASSERT_FALSE(sent);
+    HU_ASSERT_EQ(g_voice_sends, 0);
+}
+
+#endif /* HU_ENABLE_CARTESIA */
+
+/* F2-voice direction (spec 2026-09-27): the model performs the line. */
+static const char *g_direct_tts_model; /* NULL = the Cartesia default (sonic-3) */
+
+static bool run_direct_voice(const char *reply, const char *model_line, const char *mode) {
+    static hu_provider_vtable_t pvt;
+    memset(&pvt, 0, sizeof(pvt));
+    pvt.chat_with_system = rw_mock_chat;
+    g_rewrite_out = model_line;
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.provider.vtable = &pvt;
+    static hu_config_t config;
+    memset(&config, 0, sizeof(config));
+    config.channels.default_daemon.voice_enabled = true;
+    config.voice.tts_provider = "cartesia";
+    config.voice.tts_model = (char *)g_direct_tts_model; /* test-owned literal, never freed */
+    hu_channel_vtable_t vt;
+    memset(&vt, 0, sizeof(vt));
+    vt.name = vr_name_generic;
+    vt.send = vr_send;
+    hu_channel_t channel;
+    memset(&channel, 0, sizeof(channel));
+    channel.vtable = &vt;
+    hu_service_channel_t ch;
+    memset(&ch, 0, sizeof(ch));
+    ch.channel = &channel;
+    setenv("HU_SPEECH_DIRECTION", mode, 1);
+    bool sent = hu_daemon_voice_reply(&alloc, &agent, &config, &ch, "+15550000001", 12, "hey", 3,
+                                      reply, strlen(reply), NULL, 0, 14, false);
+    unsetenv("HU_SPEECH_DIRECTION");
+    return sent;
+}
+
+static void test_voice_reply_speaks_the_directed_line(void) {
+    g_voice_sends = 0;
+    HU_ASSERT_TRUE(run_direct_voice("yeah sounds good",
+                                    "<emotion value=\"affectionate\"/>Yeah, sounds good!", "live"));
+    HU_ASSERT_EQ(g_voice_sends, 1);
+    const char *t = hu_cartesia_test_last_transcript();
+    HU_ASSERT_STR_CONTAINS(t, "<emotion value=\"affectionate\"/>");
+    HU_ASSERT_STR_CONTAINS(t, "Yeah, sounds good!");
+}
+
+/* voiceai opener gate, LIVE: the second memo in a row to the same person does
+ * not also open with a reaction word. (Unset, the gate is off — see the test
+ * above, which still hears "Yeah".) */
+static void test_voice_reply_opener_gate_strips_the_repeat(void) {
+    g_voice_sends = 0;
+    setenv("HU_VOICE_OPENER_GATE", "live", 1);
+    const char *line = "<emotion value=\"affectionate\"/>Yeah, sounds good!";
+    HU_ASSERT_TRUE(run_direct_voice("yeah sounds good", line, "live"));
+    HU_ASSERT_STR_CONTAINS(hu_cartesia_test_last_transcript(), "Yeah, sounds good!");
+    HU_ASSERT_TRUE(run_direct_voice("yeah sounds good", line, "live"));
+    unsetenv("HU_VOICE_OPENER_GATE");
+    const char *t = hu_cartesia_test_last_transcript();
+    HU_ASSERT_STR_CONTAINS(t, "<emotion value=\"affectionate\"/>Sounds good!");
+    HU_ASSERT_STR_NOT_CONTAINS(t, "Yeah");
+    HU_ASSERT_EQ(g_voice_sends, 2);
+}
+
+static void test_voice_reply_invalid_direction_speaks_plain_text(void) {
+    g_voice_sends = 0;
+    HU_ASSERT_TRUE(run_direct_voice("yeah sounds good", "<prosody>Yeah</prosody>", "live"));
+    HU_ASSERT_STR_EQ(hu_cartesia_test_last_transcript(), "yeah sounds good");
+}
+
+static void test_voice_reply_direction_shadow_speaks_plain_text(void) {
+    g_voice_sends = 0;
+    g_rewrite_calls = 0;
+    HU_ASSERT_TRUE(run_direct_voice(
+        "yeah sounds good", "<emotion value=\"affectionate\"/>Yeah, sounds good!", "shadow"));
+    HU_ASSERT_EQ(g_rewrite_calls, 1);
+    HU_ASSERT_STR_EQ(hu_cartesia_test_last_transcript(), "yeah sounds good");
+}
+
+static void test_voice_reply_directed_line_that_trips_moderation_is_not_spoken(void) {
+    g_voice_sends = 0;
+    HU_ASSERT_TRUE(run_direct_voice("we watched that show with the kids",
+                                    "<emotion value=\"calm\"/>kill them with violence and murder",
+                                    "live"));
+    const char *t = hu_cartesia_test_last_transcript();
+    HU_ASSERT_STR_NOT_CONTAINS(t, "kill");
+    HU_ASSERT_STR_CONTAINS(t, "we watched that show with the kids");
+}
+
+/* Final review #6: SHADOW direction observes; it must not switch off the
+ * rewrite (its own measurement, or LIVE speech). */
+static void test_voice_reply_direction_shadow_keeps_the_rewrite(void) {
+    g_voice_sends = 0;
+    g_rewrite_calls = 0;
+    setenv("HU_SPEECH_REWRITE", "shadow", 1);
+    HU_ASSERT_TRUE(run_direct_voice("yeah sounds good", "Yeah, sounds good.", "shadow"));
+    unsetenv("HU_SPEECH_REWRITE");
+    HU_ASSERT_EQ(g_rewrite_calls, 2); /* the rewrite and the performance both ran */
+}
+
+/* Deferred minor, fixed 2026-09-27: tags go only to a model that reads them
+ * (Sonic-3 family); an older model would ignore or speak them. */
+static void test_voice_reply_directed_tags_only_for_sonic3(void) {
+    g_voice_sends = 0;
+    g_direct_tts_model = "sonic-english";
+    HU_ASSERT_TRUE(run_direct_voice("yeah sounds good",
+                                    "<emotion value=\"affectionate\"/>Yeah, sounds good!", "live"));
+    g_direct_tts_model = NULL;
+    const char *t = hu_cartesia_test_last_transcript();
+    HU_ASSERT_STR_NOT_CONTAINS(t, "<emotion");
+    HU_ASSERT_STR_CONTAINS(t, "Yeah, sounds good!");
+}
+
+static void test_voice_reply_direction_off_is_todays_path(void) {
+    g_voice_sends = 0;
+    g_rewrite_calls = 0;
+    HU_ASSERT_TRUE(
+        run_direct_voice("yeah sounds good", "<emotion value=\"excited\"/>Yeah!", "off"));
+    HU_ASSERT_EQ(g_rewrite_calls, 0);
+    HU_ASSERT_STR_EQ(hu_cartesia_test_last_transcript(), "yeah sounds good");
 }
 
 /* Final review #2: the rewrite is an LLM call; it runs only for a memo that
@@ -335,6 +521,18 @@ void run_daemon_voice_reply_tests(void) {
     HU_RUN_TEST(test_voice_reply_nothing_speakable_goes_as_text);
     HU_RUN_TEST(test_voice_reply_with_link_goes_as_text);
     HU_RUN_TEST(test_voice_reply_rewrite_skipped_when_no_memo_can_go);
+    HU_RUN_TEST(test_voice_reply_speaks_the_directed_line);
+#if HU_ENABLE_CARTESIA
+    HU_RUN_TEST(test_voice_reply_voice_first_skips_the_text_classifier);
+    HU_RUN_TEST(test_voice_reply_voice_first_needs_a_memo);
+#endif
+    HU_RUN_TEST(test_voice_reply_opener_gate_strips_the_repeat);
+    HU_RUN_TEST(test_voice_reply_invalid_direction_speaks_plain_text);
+    HU_RUN_TEST(test_voice_reply_direction_shadow_speaks_plain_text);
+    HU_RUN_TEST(test_voice_reply_directed_line_that_trips_moderation_is_not_spoken);
+    HU_RUN_TEST(test_voice_reply_direction_off_is_todays_path);
+    HU_RUN_TEST(test_voice_reply_direction_shadow_keeps_the_rewrite);
+    HU_RUN_TEST(test_voice_reply_directed_tags_only_for_sonic3);
     HU_RUN_TEST(test_voice_reply_speaks_unshaped_reply);
     HU_RUN_TEST(test_voice_capture_unshaped_only_when_voice_possible);
     HU_RUN_TEST(test_voice_reply_live_rewrite_is_spoken);

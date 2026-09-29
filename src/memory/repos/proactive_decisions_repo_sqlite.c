@@ -140,6 +140,31 @@ static bool proactive_scalar_i64(sqlite3 *db, const char *sql, const char *param
     return ok;
 }
 
+hu_error_t hu_proactive_decisions_repo_last_sent_ts(sqlite3 *db, const char *contact,
+                                                    const char *trigger, int64_t *out_ts) {
+    if (!db || !contact || !trigger || !out_ts)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out_ts = -1;
+    hu_error_t schema_err = hu_proactive_decisions_repo_ensure_schema(db);
+    if (schema_err != HU_OK)
+        return schema_err;
+    static const char *SQL = "SELECT MAX(ts) FROM proactive_decisions "
+                             "WHERE contact = ?1 AND trigger = ?2 AND sent = 1;";
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db, SQL, -1, &stmt, NULL) != SQLITE_OK)
+        return HU_ERR_MEMORY_STORE;
+    sqlite3_bind_text(stmt, 1, contact, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, trigger, -1, SQLITE_STATIC);
+    hu_error_t err = HU_ERR_MEMORY_STORE;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        err = HU_OK;
+        if (sqlite3_column_type(stmt, 0) != SQLITE_NULL)
+            *out_ts = sqlite3_column_int64(stmt, 0);
+    }
+    sqlite3_finalize(stmt);
+    return err;
+}
+
 hu_error_t hu_proactive_decisions_repo_consecutive_send_failures(sqlite3 *db, const char *contact,
                                                                  int64_t *out_n) {
     if (!db || !contact || !out_n)

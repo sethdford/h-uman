@@ -62,7 +62,7 @@ const hu_cartesia_tts_config_t *hu_cartesia_test_last_config(void) {
 
 #define CARTESIA_TTS_URL    "https://api.cartesia.ai/tts/bytes"
 #define CARTESIA_VERSION    "2026-03-01"
-#define DEFAULT_MODEL       "sonic-3-2026-01-12"
+#define DEFAULT_MODEL       "sonic-3.6"
 #define DEFAULT_EMOTION     "content"
 #define DEFAULT_SPEED       0.95f
 #define DEFAULT_VOLUME      1.0f

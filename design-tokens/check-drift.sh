@@ -95,19 +95,33 @@ if [ -f "$TMPDIR/design-tokens-reference.json" ] && [ -f "$REPO_ROOT/docs/design
   fi
 fi
 
-# Check Tokens Studio export (not emitted by build.ts; has its own generator)
-if ! npx tsx sync-tokens-studio.ts --out "$TMPDIR/tokens-studio.json" >/dev/null 2>&1; then
+# Check the two docs generators that build.ts does not run. A missing output is
+# drift, not a skip: a generator that silently wrote nothing must not pass.
+npx tsx generate-docs.ts --outdir "$TMPDIR" >/dev/null 2>&1 || {
+  echo "Error: generate-docs.ts failed"
+  exit 1
+}
+npx tsx sync-tokens-studio.ts --outdir "$TMPDIR" >/dev/null 2>&1 || {
   echo "Error: sync-tokens-studio.ts failed"
   exit 1
+}
+
+# Ignore the "_Generated: <timestamp>" footer, which changes on every run.
+if ! diff -I '^_Generated: ' "$TMPDIR/design-tokens.md" "$REPO_ROOT/docs/design-tokens.md" >/dev/null 2>&1; then
+  echo "DRIFT: docs/design-tokens.md differs from generated output (npm run docs)"
+  diff -I '^_Generated: ' "$TMPDIR/design-tokens.md" "$REPO_ROOT/docs/design-tokens.md" || true
+  DRIFT=1
 fi
+
 if ! diff -q "$TMPDIR/tokens-studio.json" "$REPO_ROOT/docs/tokens-studio.json" >/dev/null 2>&1; then
-  echo "DRIFT: docs/tokens-studio.json differs from generated output (run: cd design-tokens && npm run sync:tokens-studio)"
+  echo "DRIFT: docs/tokens-studio.json differs from generated output (npm run sync:tokens-studio)"
+  diff "$TMPDIR/tokens-studio.json" "$REPO_ROOT/docs/tokens-studio.json" | head -40 || true
   DRIFT=1
 fi
 
 if [ "$DRIFT" -eq 1 ]; then
   echo ""
-  echo "Token drift detected! Run 'cd design-tokens && npm run build && npm run sync:tokens-studio' to regenerate."
+  echo "Token drift detected! Run 'cd design-tokens && npm run build && npm run docs && npm run sync:tokens-studio' to regenerate."
   exit 1
 else
   echo "No token drift detected."

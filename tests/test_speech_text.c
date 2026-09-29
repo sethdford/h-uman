@@ -131,6 +131,17 @@ static void test_speech_drift_known_name_is_fine(void) {
     expect_drift("the airbnb option is great", "Yeah the Airbnb's great.", HU_SPEECH_DRIFT_OK);
 }
 
+/* Final review #2: plural and possessive forms name the same thing; known
+ * names (the scene's) are not new. */
+static void test_speech_drift_plural_possessive_and_known_names(void) {
+    expect_drift("its mothers day so your call", "It's Mother's Day, so your call.",
+                 HU_SPEECH_DRIFT_OK);
+    HU_ASSERT_EQ(hu_speech_drift_check_ex("love you", 8, "Love you too, Mindy.", 20, "Mindy Ford"),
+                 HU_SPEECH_DRIFT_OK);
+    HU_ASSERT_EQ(hu_speech_drift_check_ex("love you", 8, "Love you too, Mike.", 19, "Mindy Ford"),
+                 HU_SPEECH_DRIFT_NEW_NAME);
+}
+
 static void test_speech_drift_names_are_distinct(void) {
     HU_ASSERT_STR_EQ(hu_speech_drift_name(HU_SPEECH_DRIFT_OK), "ok");
     HU_ASSERT_STR_EQ(hu_speech_drift_name(HU_SPEECH_DRIFT_NEW_NUMBER), "new_number");
@@ -152,5 +163,6 @@ void run_speech_text_tests(void) {
     HU_RUN_TEST(test_speech_drift_rejects_negation_flip);
     HU_RUN_TEST(test_speech_drift_curly_apostrophe_is_an_apostrophe);
     HU_RUN_TEST(test_speech_drift_known_name_is_fine);
+    HU_RUN_TEST(test_speech_drift_plural_possessive_and_known_names);
     HU_RUN_TEST(test_speech_drift_names_are_distinct);
 }

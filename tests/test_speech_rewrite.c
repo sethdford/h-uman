@@ -184,8 +184,18 @@ static void test_speech_rewrite_shadow_line_is_json_without_inbound(void) {
     alloc.free(alloc.ctx, line, len + 1);
 }
 
+/* voiceai 2026-09-27 ("write for the ear"): joined thoughts, not a run of
+ * short sentences. */
+static void test_speech_rewrite_prompt_writes_for_the_ear(void) {
+    char sys[4096];
+    HU_ASSERT_TRUE(hu_speech_rewrite_system_prompt(NULL, sys, sizeof(sys)) > 0);
+    HU_ASSERT_STR_CONTAINS(sys, "and, so, but, because");
+    HU_ASSERT_STR_NOT_CONTAINS(sys, "short sentences; fragments");
+}
+
 void run_speech_rewrite_tests(void) {
     HU_TEST_SUITE("speech rewrite (F1 S1)");
+    HU_RUN_TEST(test_speech_rewrite_prompt_writes_for_the_ear);
     HU_RUN_TEST(test_speech_rewrite_mode_parse);
     HU_RUN_TEST(test_speech_rewrite_off_is_cleanup_only);
     HU_RUN_TEST(test_speech_rewrite_live_speaks_a_faithful_rewrite);

@@ -430,7 +430,7 @@
     radial-gradient(ellipse at 20% 50%, rgba(122, 182, 72, 0.06) 0%, transparent 50%),
     radial-gradient(ellipse at 80% 20%, rgba(74, 111, 165, 0.04) 0%, transparent 50%),
     radial-gradient(ellipse at 50% 80%, rgba(245, 158, 11, 0.03) 0%, transparent 50%);
-  --hu-on-accent: #ffffff;
+  --hu-on-accent: #0c0a08;
   --hu-on-accent-secondary: #0c0a08;
   --hu-on-accent-tertiary: #ffffff;
   --hu-pressed-overlay: rgba(255, 255, 255, 0.12);
@@ -744,7 +744,7 @@
     --hu-link-active: #7ab648;
     --hu-link-hover: #264a17;
     --hu-link-visited: #3a6a24;
-    --hu-on-accent: #ffffff;
+    --hu-on-accent: #0c0a08;
     --hu-on-accent-secondary: #0c0a08;
     --hu-on-accent-tertiary: #ffffff;
     --hu-pressed-overlay: rgba(0, 0, 0, 0.1);
@@ -850,7 +850,7 @@
     radial-gradient(ellipse at 20% 50%, rgba(122, 182, 72, 0.06) 0%, transparent 50%),
     radial-gradient(ellipse at 80% 20%, rgba(74, 111, 165, 0.04) 0%, transparent 50%),
     radial-gradient(ellipse at 50% 80%, rgba(245, 158, 11, 0.03) 0%, transparent 50%);
-  --hu-on-accent: #ffffff;
+  --hu-on-accent: #0c0a08;
   --hu-on-accent-secondary: #0c0a08;
   --hu-on-accent-tertiary: #ffffff;
   --hu-pressed-overlay: rgba(255, 255, 255, 0.12);
@@ -956,7 +956,7 @@
   --hu-link-active: #7ab648;
   --hu-link-hover: #264a17;
   --hu-link-visited: #3a6a24;
-  --hu-on-accent: #ffffff;
+  --hu-on-accent: #0c0a08;
   --hu-on-accent-secondary: #0c0a08;
   --hu-on-accent-tertiary: #ffffff;
   --hu-pressed-overlay: rgba(0, 0, 0, 0.1);
@@ -1002,9 +1002,11 @@
   :root {
     --hu-accent: #8dc63f;
     --hu-accent-hover: #a3d46a;
+    --hu-accent-secondary-text: #fbbf24;
     --hu-accent-strong: #7ab648;
     --hu-accent-subtle: rgba(122, 182, 72, 0.2);
-    --hu-accent-text: #3a6a24;
+    --hu-accent-tertiary-text: #9fb8d9;
+    --hu-accent-text: #8dc63f;
     --hu-bg: #000000;
     --hu-bg-elevated: #1e1a16;
     --hu-bg-inset: #000000;
@@ -1017,11 +1019,18 @@
     --hu-focus-ring: #ffffff;
     --hu-focus-ring-offset: 2px;
     --hu-focus-ring-width: 3px;
+    --hu-hover-overlay: rgba(255, 255, 255, 0.12);
     --hu-info: #60a5fa;
     --hu-info-dim: rgba(96, 165, 250, 0.2);
+    --hu-link: #8dc63f;
+    --hu-link-hover: #a3d46a;
+    --hu-link-visited: #8dc63f;
     --hu-on-accent: #000000;
     --hu-success: #34d399;
     --hu-success-dim: rgba(52, 211, 153, 0.2);
+    --hu-surface-container: rgba(255, 255, 255, 0.08);
+    --hu-surface-container-high: rgba(255, 255, 255, 0.12);
+    --hu-surface-container-highest: #28231e;
     --hu-text: #ffffff;
     --hu-text-faint: #9e9892;
     --hu-text-muted: #c8c2bc;
