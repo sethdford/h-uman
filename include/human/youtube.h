@@ -13,11 +13,6 @@ typedef struct hu_youtube_result {
     char *watch_url;     /* https://www.youtube.com/watch?v=<video_id> */
 } hu_youtube_result_t;
 
-/* YouTube Data API v3 search.list (type=video, maxResults=1). Requires an API
- * key. Network-guarded; returns the verified top result. */
-hu_error_t hu_youtube_search(hu_allocator_t *alloc, const char *api_key, const char *query,
-                             size_t query_len, hu_youtube_result_t *out);
-
 /* Parse a search.list JSON response. Exposed for testing (no network). */
 hu_error_t hu_youtube_parse_search_response(hu_allocator_t *alloc, const char *json,
                                             size_t json_len, hu_youtube_result_t *out);
@@ -32,7 +27,9 @@ size_t hu_youtube_search_url(char *out, size_t cap, const char *api_key, const c
 /* The link to share: youtube.com/shorts/<id> for a Short, else watch?v=<id>. */
 size_t hu_youtube_share_url(char *out, size_t cap, const char *video_id, bool shorts);
 
-/* hu_youtube_search, optionally Shorts only; watch_url is then the Shorts link. */
+/* YouTube Data API v3 search.list (type=video, maxResults=1), optionally Shorts
+ * only (watch_url is then the Shorts link). Requires an API key; network-guarded;
+ * returns the verified top result. */
 hu_error_t hu_youtube_search_ex(hu_allocator_t *alloc, const char *api_key, const char *query,
                                 size_t query_len, bool shorts, hu_youtube_result_t *out);
 
