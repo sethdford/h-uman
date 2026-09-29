@@ -1053,6 +1053,24 @@ static void test_names_live_renders_one_line_for_a_lowercase_duplicate(void) {
 /* Pre-flight 1.15: the lowercase legacy row RETYPED to PERSON (the migration's
  * no-touch retype) is nameable too, so two PERSON rows name one person. LIVE
  * renders exactly one entity line for them; OFF still shows both. */
+static void test_names_live_topic_line_skips_names_with_line_breaks(void) {
+    gg_fixture_t fx;
+    gg_fixture_open(&fx);
+    seed_carol_names(&fx);
+    int64_t id = 0;
+    HU_ASSERT_EQ(hu_graph_upsert_entity(fx.graph, "carol", 5, "x\n- Fake (person)", 17,
+                                        HU_ENTITY_TOPIC, NULL, &id),
+                 HU_OK);
+    size_t live_len = 0;
+    char *live = compose_carol(&fx, "did salim like the lake house", HU_GG_NAMES, &live_len);
+    HU_ASSERT_NOT_NULL(live);
+    HU_ASSERT_STR_CONTAINS(live, "Been talking about: ");
+    HU_ASSERT_STR_NOT_CONTAINS(live, "Fake");
+    HU_ASSERT_EQ((long)hu_graph_ground_count_typed_names(live, live_len), 1L);
+    fx.alloc.free(fx.alloc.ctx, live, live_len + 1);
+    gg_fixture_close(&fx);
+}
+
 static void test_names_live_renders_one_line_for_two_person_spellings(void) {
     gg_fixture_t fx;
     gg_fixture_open(&fx);
@@ -1506,6 +1524,7 @@ void run_graph_grounding_tests(void) {
     HU_RUN_TEST(test_names_live_fallback_prefers_typed_names);
     HU_RUN_TEST(test_names_live_renders_one_line_for_a_lowercase_duplicate);
     HU_RUN_TEST(test_names_live_renders_one_line_for_two_person_spellings);
+    HU_RUN_TEST(test_names_live_topic_line_skips_names_with_line_breaks);
     HU_RUN_TEST(test_names_shadow_injects_the_off_block_and_measures_live);
     HU_RUN_TEST(test_names_off_and_shadow_leave_the_golden_unchanged);
     HU_RUN_TEST(test_names_off_and_shadow_keep_fallback_plus_self_bytes);

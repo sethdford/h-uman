@@ -350,7 +350,11 @@ static void gg_append_topic_line(hu_graph_t *g, hu_allocator_t *alloc, const cha
     size_t start = *pos, written = 0;
     bool ok = tn > 0 && gg_append(buf, max_chars, pos, k_label, sizeof(k_label) - 1);
     for (size_t i = 0; ok && i < tn; i++) {
-        if (!topics[i].name || topics[i].name_len == 0)
+        /* one line per block: a stored name with a line break is skipped rather
+         * than allowed to fabricate an extra "- name" line */
+        if (!topics[i].name || topics[i].name_len == 0 ||
+            memchr(topics[i].name, '\n', topics[i].name_len) ||
+            memchr(topics[i].name, '\r', topics[i].name_len))
             continue;
         if (written > 0)
             ok = gg_append(buf, max_chars, pos, ", ", 2);
