@@ -95,6 +95,12 @@ typedef struct hu_daemon_final_reply {
     const char *unshaped; /* F1: the reply before text shaping; NULL = response */
     size_t unshaped_len;
     int bth_hour;
+    /* Voice-first memos LIVE decided VOICE before the turn (spec 2026-09-28):
+     * the reply is a memo, so the post-hoc text classifier does not judge it. */
+    bool voice_first;
+    /* Group chat: voice would go to the sender's handle (batch_key), not the
+     * group, so a group reply is never voiced (review C1, 2026-09-28). */
+    bool is_group;
     bool text_ready; /* the turn succeeded: the reply may be published as text */
     hu_bus_t *bus;
     hu_daemon_out_bus_bridge_t *bridge;

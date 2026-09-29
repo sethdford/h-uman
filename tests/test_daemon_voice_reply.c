@@ -55,7 +55,7 @@ static void test_voice_reply_without_config_sends_nothing_and_returns_false(void
     static const char reply[] = "yeah call whenever";
     g_voice_sends = 0;
     bool sent = hu_daemon_voice_reply(&alloc, &agent, NULL, &ch, "+15550000001", 12, "hey", 3,
-                                      reply, sizeof(reply) - 1, NULL, 0, 14);
+                                      reply, sizeof(reply) - 1, NULL, 0, 14, false);
     HU_ASSERT_FALSE(sent);
     HU_ASSERT_EQ(g_voice_sends, 0);
 }
@@ -149,7 +149,7 @@ static bool run_fallback_voice(const char *reply, const char *inbound) {
     ch.channel = &channel;
     return hu_daemon_voice_reply(&alloc, &agent, &config, &ch, "+15550000001", 12, inbound,
                                  strlen(inbound), reply, strlen(reply), g_unshaped,
-                                 g_unshaped ? strlen(g_unshaped) : 0, 14);
+                                 g_unshaped ? strlen(g_unshaped) : 0, 14, false);
 }
 
 /* F1 S2: the memo speaks the cleaned reply, not the texting shorthand. */
@@ -229,7 +229,7 @@ static bool run_rewrite_voice_on(const char *reply, const char *rewrite, bool vo
     ch.channel = &channel;
     setenv("HU_SPEECH_REWRITE", "live", 1);
     bool sent = hu_daemon_voice_reply(&alloc, &agent, &config, &ch, "+15550000001", 12, "hey", 3,
-                                      reply, strlen(reply), NULL, 0, 14);
+                                      reply, strlen(reply), NULL, 0, 14, false);
     unsetenv("HU_SPEECH_REWRITE");
     return sent;
 }
@@ -237,6 +237,73 @@ static bool run_rewrite_voice_on(const char *reply, const char *rewrite, bool vo
 static bool run_rewrite_voice(const char *reply, const char *rewrite) {
     return run_rewrite_voice_on(reply, rewrite, true, "cartesia");
 }
+
+/* The persona Cartesia arm exists only with HU_ENABLE_CARTESIA (the pre-push
+ * build has it off), so these tests are gated with it. */
+#if HU_ENABLE_CARTESIA
+/* Voice-first memos (spec 2026-09-28): the persona's Cartesia arm, where the
+ * post-hoc classifier lives. A memo-length reply to a question is TEXT to the
+ * classifier ("incoming_question"); decided VOICE up front, it goes. */
+static const char *g_persona_reply; /* NULL = the memo below */
+
+static bool run_persona_voice(bool voice_first) {
+    hu_allocator_t alloc = hu_system_allocator();
+    static hu_persona_t persona;
+    memset(&persona, 0, sizeof(persona));
+    snprintf(persona.voice.voice_id, sizeof(persona.voice.voice_id), "test-voice");
+    persona.voice_messages.enabled = true;
+    persona.voice_messages.max_duration_sec = 30;
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.persona = &persona;
+    static hu_config_t config;
+    memset(&config, 0, sizeof(config));
+    config.channels.default_daemon.voice_enabled = true;
+    config.api_key = "test-key";
+    hu_channel_vtable_t vt;
+    memset(&vt, 0, sizeof(vt));
+    vt.name = vr_name_generic;
+    vt.send = vr_send;
+    hu_channel_t channel;
+    memset(&channel, 0, sizeof(channel));
+    channel.vtable = &vt;
+    hu_service_channel_t ch;
+    memset(&ch, 0, sizeof(ch));
+    ch.channel = &channel;
+    const char *inbound = "do you think I should take the job in Denver or stay here?";
+    const char *memo =
+        "Honestly I have been thinking about it all day, and I think you should go for "
+        "it. You've talked about wanting something like this for a couple years now, and you "
+        "know the team already. It's scary, but you'd regret not trying, you know. Call me "
+        "tonight and we can talk it through.";
+    return hu_daemon_voice_reply(&alloc, &agent, &config, &ch, "+15550000001", 12, inbound,
+                                 strlen(inbound), g_persona_reply ? g_persona_reply : memo,
+                                 strlen(g_persona_reply ? g_persona_reply : memo), NULL, 0, 14,
+                                 voice_first);
+}
+
+static void test_voice_reply_voice_first_skips_the_text_classifier(void) {
+    g_voice_sends = 0;
+    HU_ASSERT_FALSE(run_persona_voice(false)); /* classifier: incoming_question */
+    HU_ASSERT_EQ(g_voice_sends, 0);
+    HU_ASSERT_TRUE(run_persona_voice(true));
+    HU_ASSERT_EQ(g_voice_sends, 1);
+    HU_ASSERT_STR_CONTAINS(hu_cartesia_test_last_transcript(), "Call me tonight");
+}
+
+/* Review C2: the pre-decision holds only for a memo the turn produced. A slim
+ * retry ("Sounds good, talk soon.") goes back to the classifier, which keeps
+ * it as text for a question. */
+static void test_voice_reply_voice_first_needs_a_memo(void) {
+    g_voice_sends = 0;
+    g_persona_reply = "Sounds good, talk soon.";
+    bool sent = run_persona_voice(true);
+    g_persona_reply = NULL;
+    HU_ASSERT_FALSE(sent);
+    HU_ASSERT_EQ(g_voice_sends, 0);
+}
+
+#endif /* HU_ENABLE_CARTESIA */
 
 /* F2-voice direction (spec 2026-09-27): the model performs the line. */
 static const char *g_direct_tts_model; /* NULL = the Cartesia default (sonic-3) */
@@ -267,7 +334,7 @@ static bool run_direct_voice(const char *reply, const char *model_line, const ch
     ch.channel = &channel;
     setenv("HU_SPEECH_DIRECTION", mode, 1);
     bool sent = hu_daemon_voice_reply(&alloc, &agent, &config, &ch, "+15550000001", 12, "hey", 3,
-                                      reply, strlen(reply), NULL, 0, 14);
+                                      reply, strlen(reply), NULL, 0, 14, false);
     unsetenv("HU_SPEECH_DIRECTION");
     return sent;
 }
@@ -455,6 +522,10 @@ void run_daemon_voice_reply_tests(void) {
     HU_RUN_TEST(test_voice_reply_with_link_goes_as_text);
     HU_RUN_TEST(test_voice_reply_rewrite_skipped_when_no_memo_can_go);
     HU_RUN_TEST(test_voice_reply_speaks_the_directed_line);
+#if HU_ENABLE_CARTESIA
+    HU_RUN_TEST(test_voice_reply_voice_first_skips_the_text_classifier);
+    HU_RUN_TEST(test_voice_reply_voice_first_needs_a_memo);
+#endif
     HU_RUN_TEST(test_voice_reply_opener_gate_strips_the_repeat);
     HU_RUN_TEST(test_voice_reply_invalid_direction_speaks_plain_text);
     HU_RUN_TEST(test_voice_reply_direction_shadow_speaks_plain_text);

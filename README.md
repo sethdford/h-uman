@@ -10,7 +10,7 @@
 
 <p align="center">
   <strong>Bring AI to every device on Earth.</strong><br>
-  <strong>~2694 KB binary. < 9 MB idle RAM. Boots in <10 ms. Runs on anything with a CPU.</strong>
+  <strong><!-- fp:binary_kb -->~2760 KB<!-- /fp --> binary. <!-- fp:idle_rss_bound --><9 MB<!-- /fp --> idle RAM. Boots in <!-- fp:startup_bound --><6 ms<!-- /fp -->. Runs on anything with a CPU.</strong>
 </p>
 
 <p align="center">
@@ -21,15 +21,13 @@
 
 The smallest fully autonomous AI assistant infrastructure — a static C binary that fits on any $5 board, boots in milliseconds, and requires nothing but libc.
 
-```
-~2694 KB binary · <10 ms startup · 13,912+ tests · 97 providers · 31 channels · 87 tools · Pluggable everything
-```
+**<!-- fp:binary_kb -->~2760 KB<!-- /fp --> binary · <!-- fp:startup_bound --><6 ms<!-- /fp --> startup · 14,133+ tests · 97 providers · 31 channels · 87 tools · Pluggable everything**
 
 ### Features
 
-- **Impossibly Small:** ~2694 KB static binary — no runtime, no VM, no framework overhead.
-- **Small Memory Footprint:** < 9 MB idle RSS (`human mcp`, no config). Runs comfortably on low-end ARM SBCs.
-- **Instant Startup:** 4–9 ms for `human --version` on Apple Silicon.
+- **Impossibly Small:** <!-- fp:binary_kb -->~2760 KB<!-- /fp --> static binary — no runtime, no VM, no framework overhead.
+- **Small Memory Footprint:** <!-- fp:idle_rss_bound --><9 MB<!-- /fp --> idle RSS (`human mcp`, no config). Runs comfortably on low-end ARM SBCs.
+- **Instant Startup:** <!-- fp:startup_range -->3–6 ms<!-- /fp --> for `human --version` on Apple Silicon.
 - **True Portability:** Single self-contained binary across ARM, x86, and RISC-V. Drop it anywhere, it just runs.
 - **Feature-Complete:** 97 providers (9 core + 88 compatible), 31 channels, 87 tools, hybrid vector+FTS5 memory, multi-layer sandbox, tunnels, hardware peripherals, MCP, subagents, streaming, voice — the full stack.
 - **Interactive TUI:** Full-screen terminal UI with split panes, markdown rendering, multi-session tabs (Ctrl+T), tool approval prompts, streaming output, and input history. Build with `-DHU_ENABLE_TUI=ON` and run with `--tui`.
@@ -64,26 +62,21 @@ Similar projects in the autonomous AI assistant space (data sourced from each pr
 |                   | [OpenClaw](https://github.com/openclaw/openclaw) | [NanoBot](https://github.com/HKUDS/nanobot) | [PicoClaw](https://github.com/sipeed/picoclaw) | [ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw) | **Human**         |
 | ----------------- | ------------------------------------------------ | ------------------------------------------- | ---------------------------------------------- | ----------------------------------------------------- | ----------------- |
 | **Language**      | TypeScript                                       | Python                                      | Go                                             | Rust                                                  | **C**             |
-| **RAM** ¹         | —                                                | —                                           | < 10 MB                                        | < 5 MB                                                | **< 9 MB** ²      |
-| **Binary Size** ¹ | ~28 MB (npm dist)                                | N/A (Python)                                | ~8 MB                                          | ~8.8 MB                                               | **~2694 KB** ²    |
+| **RAM** ¹         | —                                                | —                                           | < 10 MB                                        | < 5 MB                                                | **<!-- fp:idle_rss_bound --><9 MB<!-- /fp -->** ² |
+| **Binary Size** ¹ | ~28 MB (npm dist)                                | N/A (Python)                                | ~8 MB                                          | ~8.8 MB                                               | **<!-- fp:binary_kb -->~2760 KB<!-- /fp -->** ² |
 | **Runtime Deps**  | Node.js ≥22                                      | Python ≥3.11                                | None (static)                                  | None (static)                                         | **None (static)** |
 
 > ¹ RAM and binary size figures for other projects are self-reported from their respective READMEs.
 > ² Human's numbers are the release-size build (MinSizeRel + LTO, all channels, sqlite-vec off), measured with `scripts/measure-build-footprint.sh`; RAM is idle RSS of `human mcp`. Raw output with git rev and platform: [`docs/perf/footprint.json`](docs/perf/footprint.json).
 
-Human's measured numbers (macOS arm64, 2026-09-27, rev b277f7de0 — [`docs/perf/footprint.json`](docs/perf/footprint.json)):
+Human's measured numbers (<!-- fp:measured_platform -->macOS arm64<!-- /fp -->, <!-- fp:measured_date -->2026-09-29<!-- /fp -->, code at <!-- fp:measured_rev -->a0641b4dd<!-- /fp -->; generated from [`docs/perf/footprint.json`](docs/perf/footprint.json)):
 
-```
-Release-size build (MinSizeRel + LTO, all channels, sqlite-vec off):
-  Binary size:   ~2694 KB
-  Idle RSS:      8.6 MB (human mcp, isolated HOME, no config)
-  Peak RSS:      6.9 MB (human --version)
-  Startup:       4–9 ms (human --version, median of 10 warm runs)
-cmake --preset release (adds sqlite-vec, ML, embedded model, Cartesia, ...):
-  Binary size:   3.3 MB (3,275,488 bytes)
-  Idle RSS:      8.8 MB
-Tests:         13,912 passing, 0 ASan errors
-```
+| Build | Binary | Idle RSS (`human mcp`) | Peak RSS (`--version`) | Startup (`--version`) |
+| --- | --- | --- | --- | --- |
+| release-size: MinSizeRel + LTO, all channels, sqlite-vec off | <!-- fp:binary_kb -->~2760 KB<!-- /fp --> | <!-- fp:idle_rss_mb -->8.6 MB<!-- /fp --> | <!-- fp:version_rss_mb -->6.9 MB<!-- /fp --> | <!-- fp:startup_range -->3–6 ms<!-- /fp --> |
+| `cmake --preset release`: adds sqlite-vec, ML, embedded model, Cartesia, … | <!-- fp:full_binary_mb -->3.3 MB<!-- /fp --> (<!-- fp:full_binary_bytes -->3,327,168<!-- /fp --> bytes) | <!-- fp:full_idle_rss_mb -->8.8 MB<!-- /fp --> | | |
+
+Tests:         14,133 passing, 0 ASan errors
 
 ### Why Switch from OpenClaw?
 
@@ -661,7 +654,7 @@ Build and tests require a C11 compiler and CMake 3.20+. One-time setup:
 mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Debug -DHU_ENABLE_ALL_CHANNELS=ON
 cmake --build .                            # Dev build
-./human_tests                             # 13,912+ tests
+./human_tests                             # 14,133+ tests
 cd ..
 ```
 
@@ -680,7 +673,7 @@ cmake --preset integration && cmake --build --preset integration
 ./build-integration/human_integration_tests
 ```
 
-Release-size build (~2694 KB — the configuration CI checks the size claims against):
+Release-size build (<!-- fp:binary_kb -->~2760 KB<!-- /fp -->; the configuration CI re-measures on every main push):
 
 ```bash
 cmake -B build-size -DCMAKE_BUILD_TYPE=MinSizeRel -DHU_ENABLE_LTO=ON \
@@ -688,7 +681,7 @@ cmake -B build-size -DCMAKE_BUILD_TYPE=MinSizeRel -DHU_ENABLE_LTO=ON \
 cmake --build build-size
 ```
 
-Full-feature release (3.3 MB): `cmake --preset release && cmake --build --preset release`.
+Full-feature release (<!-- fp:full_binary_mb -->3.3 MB<!-- /fp -->): `cmake --preset release && cmake --build --preset release`.
 
 ### Channel Flow Coverage
 
@@ -705,16 +698,15 @@ Channel CJM coverage (ingress parsing/filtering, session key routing, account pr
 ```
 
 Language: C11 + ASM (aarch64, x86_64)
-Source files: 1,939
-Lines of code: ~411K
-Test files: 852
-Tests: 13,912
-Binary: ~2694 KB (release-size build: MinSizeRel + LTO, all channels, sqlite-vec off)
-Idle RSS: 8.6 MB (human mcp)
-Startup: 4–9 ms (Apple Silicon)
+Source files: 1,976
+Lines of code: ~418K
+Test files: 872
+Tests: 14,133
 Dependencies: libc + optional SQLite, libcurl
 
 ```
+
+Footprint (release-size build, <!-- fp:measured_platform -->macOS arm64<!-- /fp -->): <!-- fp:binary_kb -->~2760 KB<!-- /fp --> binary · <!-- fp:idle_rss_mb -->8.6 MB<!-- /fp --> idle RSS · <!-- fp:startup_range -->3–6 ms<!-- /fp --> startup. Source: [`docs/perf/footprint.json`](docs/perf/footprint.json).
 
 ### Source Layout
 
@@ -742,7 +734,7 @@ config.c Config loading/merging (~/.human/config.json)
 ...
 
 include/human/ Public C headers
-tests/ 580+ test files, 13,912+ tests
+tests/ 580+ test files, 14,133+ tests
 asm/ Platform-specific assembly (aarch64, x86_64, generic C)
 
 ui/ Web UI (LitElement + Vite)

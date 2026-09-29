@@ -37,7 +37,65 @@ void hu_style_card_default(hu_style_card_t *out) {
     out->emoji_rate = 0.126;
     out->n = 0;
     out->substantive_agreement_opener_rate = -1.0;
+    /* Entity casing: -1 = axis absent. A card without it leaves the
+     * governor's action D inert, which is the pre-2026-09-22 behaviour. */
+    out->entity_cap_rate = -1.0;
+    out->entity_token_count = 0;
     out->from_card = false;
+}
+
+/* Parse the optional entity_casing block:
+ *   "entity_casing": {"rate": 0.266, "n_mentions": 252,
+ *                     "tokens": [{"token":"vanguard","cap_rate":0.9,"n":10}, ...]}
+ * Malformed or absent leaves entity_cap_rate at -1 and the table empty —
+ * never fails the card, same contract as substantive_reply. Tokens are
+ * accepted only when lowercase-clean, short enough to store, and backed by
+ * >= HU_STYLE_CARD_ENTITY_MIN_MENTIONS mentions; the rest are dropped. */
+static void read_entity_casing(const hu_json_value_t *root, hu_style_card_t *card) {
+    const hu_json_value_t *ec = hu_json_object_get(root, "entity_casing");
+    if (!ec || ec->type != HU_JSON_OBJECT)
+        return;
+    double rate = hu_json_get_number(ec, "rate", -1.0);
+    if (!(rate >= 0.0 && rate <= 1.0))
+        return;
+    card->entity_cap_rate = rate;
+
+    const hu_json_value_t *toks = hu_json_object_get(ec, "tokens");
+    if (!toks || toks->type != HU_JSON_ARRAY)
+        return;
+    for (size_t i = 0; i < toks->data.array.len; i++) {
+        if (card->entity_token_count >= HU_STYLE_CARD_MAX_ENTITY_TOKENS)
+            break;
+        const hu_json_value_t *item = toks->data.array.items[i];
+        if (!item || item->type != HU_JSON_OBJECT)
+            continue;
+        const char *tok = hu_json_get_string(item, "token");
+        double cap = hu_json_get_number(item, "cap_rate", -1.0);
+        double n = hu_json_get_number(item, "n", 0.0);
+        if (!tok || !tok[0] || !(cap >= 0.0 && cap <= 1.0) ||
+            n < (double)HU_STYLE_CARD_ENTITY_MIN_MENTIONS)
+            continue;
+        size_t tl = strlen(tok);
+        if (tl == 0 || tl >= HU_STYLE_CARD_ENTITY_TOKEN_CAP)
+            continue;
+        /* Lowercase ASCII letters only: the governor matches against
+         * already-lowercased text, so a token carrying a capital or a space
+         * could never match and would silently do nothing. */
+        bool clean = true;
+        for (size_t c = 0; c < tl; c++) {
+            if (!((tok[c] >= 'a' && tok[c] <= 'z') || tok[c] == '\'')) {
+                clean = false;
+                break;
+            }
+        }
+        if (!clean)
+            continue;
+        hu_style_entity_token_t *slot = &card->entity_tokens[card->entity_token_count++];
+        memcpy(slot->token, tok, tl);
+        slot->token[tl] = '\0';
+        slot->cap_rate = cap;
+        slot->n = (unsigned)n;
+    }
 }
 
 /* Read axes.<name>.value; false when absent or outside [0, 1]. */
@@ -93,6 +151,7 @@ hu_error_t hu_style_card_parse(hu_allocator_t *alloc, const char *json, size_t l
                 card.substantive_agreement_opener_rate = (ag >= 0.0 && ag <= 1.0) ? ag : -1.0;
             }
         }
+        read_entity_casing(root, &card);
         card.from_card = true;
         *out = card;
         err = HU_OK;

@@ -156,8 +156,111 @@ static void test_seconds_now_is_stored_as_milliseconds(void) {
     unlink(path);
 }
 
+/* ── Name hygiene at the write path (2026-09-23) ──────────────────────
+ *
+ * Measured motivation: the grounding read ranks by mention_count with no type
+ * filter, and on the live graph the top candidates were "user" (527 mentions,
+ * 7 rows), two raw phone numbers, "work", "you", "home" — ahead of "Utah",
+ * "Zillow", "St Petersburg FL". These tests pin that the junk never enters,
+ * that REAL facts about the persona survive (resolved, not dropped), and that
+ * matching is exact rather than substring. */
+
+static bool entity_exists(hu_graph_t *g, hu_allocator_t *alloc, const char *cid, const char *name) {
+    hu_graph_entity_t ent;
+    memset(&ent, 0, sizeof(ent));
+    bool found = hu_graph_find_entity(g, cid, strlen(cid), name, strlen(name), &ent) == HU_OK;
+    if (found)
+        free_entity_strings(alloc, &ent);
+    return found;
+}
+
+static void test_self_placeholder_subject_resolves_to_the_contact_node(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    char path[128];
+    hu_graph_t *g = open_tmp_graph(&alloc, path, sizeof(path));
+    HU_ASSERT_NOT_NULL(g);
+    const char *cid = "+15551234567";
+
+    /* A real fact about the persona, written with the extractor's placeholder
+     * subject. It must be KEPT — dropping it would lose information. */
+    HU_ASSERT_EQ(hu_graph_ingest_fact(g, cid, strlen(cid), "user", "lives_in", "St Petersburg FL",
+                                      0.9f, 1778454858LL, "test"),
+                 HU_OK);
+
+    /* The junk node must not exist... */
+    HU_ASSERT_TRUE(!entity_exists(g, &alloc, cid, "user"));
+    /* ...and the fact must have attached to the contact's own PERSON node. */
+    HU_ASSERT_TRUE(entity_exists(g, &alloc, cid, cid));
+    /* The object is a real name and is kept as-is. */
+    HU_ASSERT_TRUE(entity_exists(g, &alloc, cid, "St Petersburg FL"));
+
+    hu_graph_close(g, &alloc);
+    unlink(path);
+}
+
+static void test_nonreferential_subject_or_object_is_rejected(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    char path[128];
+    hu_graph_t *g = open_tmp_graph(&alloc, path, sizeof(path));
+    HU_ASSERT_NOT_NULL(g);
+    const char *cid = "+15551234567";
+
+    /* ("user", "likes", "it") grounds nothing. */
+    HU_ASSERT_EQ(hu_graph_ingest_fact(g, cid, strlen(cid), "user", "likes", "it", 0.9f,
+                                      1778454858LL, "test"),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_TRUE(!entity_exists(g, &alloc, cid, "it"));
+
+    HU_ASSERT_EQ(hu_graph_ingest_fact(g, cid, strlen(cid), "you", "lives_in", "Utah", 0.9f,
+                                      1778454858LL, "test"),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_TRUE(!entity_exists(g, &alloc, cid, "you"));
+    /* The real name on the other end must not be created by a rejected fact. */
+    HU_ASSERT_TRUE(!entity_exists(g, &alloc, cid, "Utah"));
+
+    hu_graph_close(g, &alloc);
+    unlink(path);
+}
+
+static void test_real_names_are_untouched(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    char path[128];
+    hu_graph_t *g = open_tmp_graph(&alloc, path, sizeof(path));
+    HU_ASSERT_NOT_NULL(g);
+    const char *cid = "+15551234567";
+    HU_ASSERT_EQ(hu_graph_ingest_fact(g, cid, strlen(cid), "Annette", "works_at", "Vanguard", 0.9f,
+                                      1778454858LL, "test"),
+                 HU_OK);
+    HU_ASSERT_TRUE(entity_exists(g, &alloc, cid, "Annette"));
+    HU_ASSERT_TRUE(entity_exists(g, &alloc, cid, "Vanguard"));
+    hu_graph_close(g, &alloc);
+    unlink(path);
+}
+
+static void test_matching_is_exact_not_substring(void) {
+    /* substring-classifier-pitfalls: a short, high-frequency ban list is
+     * exactly where substring matching eats real names. "Ituri" contains
+     * "it"; "Userman" contains "user"; "Theyer" contains "they". */
+    HU_ASSERT_TRUE(!hu_graph_name_is_nonreferential("Ituri", 5));
+    HU_ASSERT_TRUE(!hu_graph_name_is_nonreferential("Theyer", 6));
+    HU_ASSERT_TRUE(!hu_graph_name_is_self_placeholder("Userman", 7));
+    HU_ASSERT_TRUE(!hu_graph_name_is_self_placeholder("Mike", 4));
+    /* ...but the bare words, in any case and with stray padding, do match. */
+    HU_ASSERT_TRUE(hu_graph_name_is_nonreferential("it", 2));
+    HU_ASSERT_TRUE(hu_graph_name_is_nonreferential("IT", 2));
+    HU_ASSERT_TRUE(hu_graph_name_is_self_placeholder("  User ", 7));
+    HU_ASSERT_TRUE(hu_graph_name_is_self_placeholder("me", 2));
+    /* Empty is neither. */
+    HU_ASSERT_TRUE(!hu_graph_name_is_self_placeholder("", 0));
+    HU_ASSERT_TRUE(!hu_graph_name_is_nonreferential(NULL, 0));
+}
+
 void run_graph_ingest_tests(void) {
     HU_TEST_SUITE("graph_ingest");
+    HU_RUN_TEST(test_self_placeholder_subject_resolves_to_the_contact_node);
+    HU_RUN_TEST(test_nonreferential_subject_or_object_is_rejected);
+    HU_RUN_TEST(test_real_names_are_untouched);
+    HU_RUN_TEST(test_matching_is_exact_not_substring);
     HU_RUN_TEST(test_seconds_now_is_stored_as_milliseconds);
     HU_RUN_TEST(test_changed_fact_supersedes_prior_edge);
     HU_RUN_TEST(test_same_fact_twice_is_one_edge);

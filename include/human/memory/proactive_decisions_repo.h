@@ -81,6 +81,11 @@ hu_error_t hu_proactive_decisions_repo_record(sqlite3 *db, int64_t ts, const cha
  * table has real rows). */
 hu_error_t hu_proactive_decisions_repo_count(sqlite3 *db, int64_t *out_count);
 
+/* Timestamp of the newest row for (contact, trigger) that was actually sent
+ * (sent = 1), or -1 when there is none. Voice-first memos use it for spacing. */
+hu_error_t hu_proactive_decisions_repo_last_sent_ts(sqlite3 *db, const char *contact,
+                                                    const char *trigger, int64_t *out_ts);
+
 /* How many proactive sends to `contact` have FAILED TO DELIVER since that
  * contact last actually received one (0 if it never failed, or if the most
  * recent outcome was a delivery). The proactive circuit breaker gates on this.

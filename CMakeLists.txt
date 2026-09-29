@@ -1262,6 +1262,8 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_follow_up_watcher.c
     src/daemon/daemon_followup_sched.c
     src/daemon/daemon_voice_reply.c
+    src/daemon/daemon_voice_first.c
+    src/daemon/daemon_expressive.c
     src/daemon/daemon_rich_media.c
     src/daemon/daemon_housekeeping.c
     src/daemon/daemon_promise_keeper.c
@@ -1620,6 +1622,7 @@ list(APPEND HU_CORE_SOURCES src/tts/speech_text.c)
 list(APPEND HU_CORE_SOURCES src/tts/speech_rewrite.c)
 list(APPEND HU_CORE_SOURCES src/tts/speech_direction.c)
 list(APPEND HU_CORE_SOURCES src/tts/opener_gate.c)
+list(APPEND HU_CORE_SOURCES src/context/voice_intent.c)
 list(APPEND HU_CORE_SOURCES src/tts/speech_perform.c)
 
 # Cartesia full pipeline (requires libcurl for API calls)
@@ -4029,6 +4032,7 @@ list(APPEND HU_TEST_SOURCES tests/test_speech_text.c)
 list(APPEND HU_TEST_SOURCES tests/test_speech_rewrite.c)
 list(APPEND HU_TEST_SOURCES tests/test_speech_direction.c)
 list(APPEND HU_TEST_SOURCES tests/test_opener_gate.c)
+list(APPEND HU_TEST_SOURCES tests/test_voice_intent.c)
 list(APPEND HU_TEST_SOURCES tests/test_speech_perform.c)
 list(APPEND HU_TEST_SOURCES tests/test_send_voice_message.c)
 list(APPEND HU_TEST_SOURCES tests/test_voice_message_integration.c)
@@ -4222,6 +4226,8 @@ list(APPEND HU_TEST_SOURCES
     tests/test_daemon_followup_sched.c
     tests/test_daemon_rich_media.c
     tests/test_daemon_voice_reply.c
+    tests/test_daemon_voice_first.c
+    tests/test_daemon_expressive.c
     tests/test_prospective.c
     tests/test_eval_score.c
     tests/test_corrective_rag.c

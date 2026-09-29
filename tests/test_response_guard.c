@@ -1916,6 +1916,24 @@ static void agent_recent_assistant_avg_len_empty_history_returns_zero(void) {
     HU_ASSERT_EQ(hu_agent_internal_recent_assistant_avg_len(&agent, 0), 0u);
 }
 
+/* Voice-first memos (review C2, 2026-09-28): a memo turn has no texting
+ * baseline, so G5 (both agent_turn.c and agent_stream.c) cannot shrink it. */
+static void agent_recent_assistant_avg_len_is_zero_on_a_memo_turn(void) {
+    char body[] = "hey what's up";
+    hu_owned_message_t msgs[1];
+    memset(msgs, 0, sizeof(msgs));
+    msgs[0].role = HU_ROLE_ASSISTANT;
+    msgs[0].content = body;
+    msgs[0].content_len = strlen(body);
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.history = msgs;
+    agent.history_count = 1;
+    HU_ASSERT_TRUE(hu_agent_internal_recent_assistant_avg_len(&agent, 5) > 0);
+    agent.voice_memo_turn = true;
+    HU_ASSERT_EQ(hu_agent_internal_recent_assistant_avg_len(&agent, 5), 0u);
+}
+
 static void agent_recent_assistant_avg_len_mixed_roles_skips_non_assistant(void) {
     char a1[] = "twelve bytes";       /* len=12 */
     char a2[] = "ten bytes!";         /* len=10 */
@@ -2765,6 +2783,7 @@ void run_response_guard_tests(void) {
      * call sites (agent_stream.c, agent_turn.c) to populate
      * `hu_guard_context_t.recent_avg_len` and enforce G5 at runtime. */
     HU_RUN_TEST(agent_recent_assistant_avg_len_empty_history_returns_zero);
+    HU_RUN_TEST(agent_recent_assistant_avg_len_is_zero_on_a_memo_turn);
     HU_RUN_TEST(agent_recent_assistant_avg_len_mixed_roles_skips_non_assistant);
     HU_RUN_TEST(agent_recent_assistant_avg_len_uses_most_recent_n);
 

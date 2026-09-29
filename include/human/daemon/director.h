@@ -15,6 +15,17 @@
 /* Director action type */
 typedef enum { DIR_TEXT = 0, DIR_TAPBACK, DIR_SILENCE } hu_director_action_t;
 
+/* The whole form the director chose (spec 2026-09-28-expressive-imessage).
+ * `action` stays the part today's executor carries out; voice and gif run as
+ * text until their executors go LIVE. */
+typedef enum {
+    HU_DIR_FORM_TEXT = 0,
+    HU_DIR_FORM_VOICE,
+    HU_DIR_FORM_TAPBACK,
+    HU_DIR_FORM_GIF,
+    HU_DIR_FORM_SILENCE,
+} hu_director_form_t;
+
 /* Director result structure */
 typedef struct {
     hu_director_action_t action;
@@ -22,7 +33,18 @@ typedef struct {
     hu_reaction_type_t reaction;
     bool burst;
     char direction[512];
+    hu_director_form_t form;
+    char effect[16];    /* "" or an imsg effect id (impact, loud, gentle, ...) */
+    bool reply_to;      /* thread onto their message */
+    char gif_query[64]; /* with form GIF */
 } hu_director_result_t;
+
+/* "text", "voice", "tapback", "gif", "silence". */
+const char *hu_director_form_name(hu_director_form_t form);
+
+/* The director's system prompt: today's rules, plus the forms block when
+ * HU_DIRECTOR_FORMS is shadow or live. Length written, 0 if it did not fit. */
+size_t hu_daemon_director_system_prompt(char *buf, size_t cap);
 
 /* Real-time emotion detection: test builds use heuristic-only (no LLM), production uses hybrid
  * routing via g_classify_provider when available. */
@@ -39,7 +61,7 @@ void hu_daemon_parse_director_result(const char *raw, size_t len, hu_director_re
  * Returns true if result is valid. Caller uses result to route behavior. */
 bool hu_daemon_director_call(hu_allocator_t *alloc, const char *combined, size_t combined_len,
                              const hu_channel_history_entry_t *entries, size_t entry_count,
-                             hu_director_result_t *result);
+                             const char *situation, hu_director_result_t *result);
 
 /* ── G6 director-echo guard wiring (Sprint 34/37/40, wired 2026-09-21) ──
  *

@@ -65,6 +65,23 @@ if [ -n "$staged_tokens" ]; then
   fi
 fi
 
+# Check WCAG contrast when token sources or the contrast gate/baseline change
+staged_contrast=$(git diff --cached --name-only --diff-filter=ACM -- 'design-tokens/*.tokens.json' 'design-tokens/contrast-*' 'design-tokens/check-contrast.ts')
+if [ -n "$staged_contrast" ]; then
+  if [ -x "design-tokens/node_modules/.bin/tsx" ]; then
+    echo "Checking design token contrast..."
+    contrast_out=$(cd design-tokens && npm run -s check:contrast 2>&1)
+    contrast_rc=$?
+    if [ $contrast_rc -ne 0 ]; then
+      echo "$contrast_out" | grep -v '^KNOWN'
+      echo "Contrast check failed. Fix the pair, or if you fixed a baselined pair, delete its line from design-tokens/contrast-baseline.json in this same commit."
+      exit 1
+    fi
+  else
+    echo "Skipping contrast check: run 'cd design-tokens && npm ci' to enable it locally (CI's design-tokens job enforces it)."
+  fi
+fi
+
 # Regenerate website assets when SVG sources or generate script change
 staged_assets=$(git diff --cached --name-only --diff-filter=ACM -- 'website/public/human.svg' 'website/public/og-image.svg' 'website/scripts/generate-assets.mjs')
 if [ -n "$staged_assets" ]; then
@@ -379,6 +396,23 @@ if [ -n "$staged_mperson" ] && [ -x "scripts/check-modeled-person-layering.sh" ]
         echo ""
         echo "Pre-commit blocked: Modeled-Person layering violation."
         echo "See .claude/rules/modeled-person-layering.md."
+        exit 1
+    fi
+fi
+
+# Footprint claims gate. Binary size, RSS and startup numbers are generated from
+# docs/perf/footprint.json by scripts/footprint.py; a hand-typed one goes stale the
+# day it is written (the docs said "~2468 KB, <6 MB RAM" for months after both
+# stopped being true). Fails on a stale marker/template line or an unmanaged
+# footprint number in a live doc. ~0.6 s; fires only when a file that can carry
+# a claim is staged. CI runs the same check in doc-fleet.
+staged_fp=$(git diff --cached --name-only --diff-filter=ACM -- '*.md' '*.mdc' '*.mdx' '*.astro' '*.html' \
+    '*.swift' '*.kt' 'src/*.c' 'src/**/*.c' 'docs/perf/*.json' || true)
+if [ -n "$staged_fp" ] && [ -f "scripts/footprint.py" ]; then
+    if ! python3 scripts/footprint.py check; then
+        echo ""
+        echo "Pre-commit blocked: footprint claims are stale or hand-typed."
+        echo "Run: python3 scripts/footprint.py sync   (and see docs/standards/engineering/performance.md)"
         exit 1
     fi
 fi

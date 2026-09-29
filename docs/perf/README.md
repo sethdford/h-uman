@@ -26,7 +26,7 @@ N5 (TPS), N6 (TTFT), and N7 (RSS) metrics defined in the SOTA roadmap.
 | Drift reports (E4) | `docs/perf/drift/<YYYY-WW>.json` (created weekly) |
 | Profile artifacts (B2.4) | `docs/perf/profile-2026-MM.md` |
 | Competitive bench (B6) | `docs/perf/competitive/` |
-| Binary / RSS / startup footprint | [`docs/perf/footprint.json`](footprint.json), written from [`scripts/measure-build-footprint.sh`](../../scripts/measure-build-footprint.sh) — source for every footprint number in README, CLAUDE.md, AGENTS.md |
+| Binary / RSS / startup footprint | [`footprint.json`](footprint.json) (measurements, from [`scripts/measure-build-footprint.sh`](../../scripts/measure-build-footprint.sh)) + [`footprint-budget.json`](footprint-budget.json) (budgets, refresh policy). [`scripts/footprint.py`](../../scripts/footprint.py) renders every footprint number in the repo from them; CI re-measures on each main push and opens a refresh when a claim stops being true |
 
 ## Bench design
 

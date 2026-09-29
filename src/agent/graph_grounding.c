@@ -179,6 +179,31 @@ uint32_t hu_graph_ground_fingerprint(const char *content, size_t len) {
     return h;
 }
 
+bool hu_graph_ground_is_placeholder_name(const char *name, size_t name_len, const char *contact_id,
+                                         size_t contact_id_len) {
+    static const char *const k_placeholders[] = {"user", "assistant", "you",  "me",     "i",
+                                                 "we",   "they",      "them", "someone"};
+    if (!name || name_len == 0)
+        return true;
+    for (size_t k = 0; k < sizeof(k_placeholders) / sizeof(k_placeholders[0]); k++) {
+        size_t pl = strlen(k_placeholders[k]);
+        if (name_len == pl && strncasecmp(name, k_placeholders[k], pl) == 0)
+            return true;
+    }
+    if (contact_id && contact_id_len == name_len && memcmp(name, contact_id, name_len) == 0)
+        return true;
+    /* Phone-number shaped: only digits and + ( ) - . space, with >= 7 digits. */
+    size_t digits = 0;
+    for (size_t k = 0; k < name_len; k++) {
+        unsigned char c = (unsigned char)name[k];
+        if (isdigit(c))
+            digits++;
+        else if (!strchr("+()-. ", c))
+            return false;
+    }
+    return digits >= 7;
+}
+
 /* ── Query-conditioned composition ──────────────────────────────────────── */
 
 #ifdef HU_ENABLE_SQLITE
@@ -357,7 +382,9 @@ hu_error_t hu_graph_ground_compose_ex(hu_memory_loader_t *loader, const char *co
              * every unrelated casual text. The lexical path still grounds
              * on one when the contact names it. */
             bool eligible = e->type != HU_ENTITY_EMOTION &&
-                            hu_graph_ground_name_word_count(e->name, e->name_len) > 0;
+                            hu_graph_ground_name_word_count(e->name, e->name_len) > 0 &&
+                            !hu_graph_ground_is_placeholder_name(e->name, e->name_len, contact_id,
+                                                                 contact_id_len);
             scores[i] = eligible
                             ? hu_graph_ground_score(1, 1, e->mention_count, e->last_seen, now_ms)
                             : 0.0;

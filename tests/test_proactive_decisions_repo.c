@@ -94,8 +94,34 @@ static void test_proactive_decisions_repo_ensure_schema_idempotent(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
+/* Voice-first spacing (spec 2026-09-28): the newest DELIVERED row for this
+ * contact and trigger; declines, other triggers and other contacts ignored. */
+static void test_proactive_decisions_repo_last_sent_ts(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_NOT_NULL(db);
+    int64_t ts = 0;
+    HU_ASSERT_EQ(hu_proactive_decisions_repo_last_sent_ts(db, "+15550000001", "voice_reply", &ts),
+                 HU_OK);
+    HU_ASSERT_EQ(ts, -1);
+    (void)hu_proactive_decisions_repo_record(db, 100, "+15550000001", "voice_reply",
+                                             HU_PROACTIVE_DECISION_SEND, "voice", 1, NULL);
+    (void)hu_proactive_decisions_repo_record(db, 200, "+15550000001", "voice_reply",
+                                             HU_PROACTIVE_DECISION_SEND, "voice", 0, NULL);
+    (void)hu_proactive_decisions_repo_record(db, 300, "+15550000001", "voice_first",
+                                             HU_PROACTIVE_DECISION_SEND, "heartfelt", 1, NULL);
+    (void)hu_proactive_decisions_repo_record(db, 400, "+15550000002", "voice_reply",
+                                             HU_PROACTIVE_DECISION_SEND, "voice", 1, NULL);
+    HU_ASSERT_EQ(hu_proactive_decisions_repo_last_sent_ts(db, "+15550000001", "voice_reply", &ts),
+                 HU_OK);
+    HU_ASSERT_EQ(ts, 100);
+    mem.vtable->deinit(mem.ctx);
+}
+
 void run_proactive_decisions_repo_tests(void) {
     HU_TEST_SUITE("proactive_decisions_repo");
+    HU_RUN_TEST(test_proactive_decisions_repo_last_sent_ts);
     HU_RUN_TEST(test_proactive_decisions_repo_record_and_count);
     HU_RUN_TEST(test_proactive_decisions_repo_rejects_invalid_decision);
     HU_RUN_TEST(test_proactive_decisions_repo_rejects_null_db);

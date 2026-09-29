@@ -155,12 +155,34 @@ static void test_voice_decision_where_returns_text(void) {
 static void test_voice_decision_max_duration_exceeded_returns_text(void) {
     hu_voice_messages_config_t cfg = config_enabled_frequent();
     cfg.max_duration_sec = 5;
-    /* 38 chars → est 7 sec > 5 → TEXT (checked before prefer_for boost) */
-    const char *response = "I'm so sorry you're going through this.";
+    /* 20 words at Seth's 2.6 words/s -> ~7.7 s > 5 -> TEXT (checked before the boost) */
+    const char *response = "I'm so sorry you're going through this, it has been such a hard "
+                           "few weeks and I keep thinking about you.";
     const char *incoming = "I'm really upset";
-    hu_voice_decision_t r =
-        hu_voice_decision_classify(response, 38, incoming, 15, &cfg, true, 23, 0);
+    const char *why = NULL;
+    hu_voice_decision_t r = hu_voice_decision_classify_ex(response, strlen(response), incoming, 15,
+                                                          &cfg, true, 23, 0, &why);
     HU_ASSERT_EQ(r, HU_VOICE_SEND_TEXT);
+    HU_ASSERT_STR_EQ(why, "too_long");
+}
+
+/* Voice-first memos: length is spoken time, so a 70-word memo (~27 s at 155
+ * wpm) fits a 30 s cap; "chars / 5" called that 80 s. */
+static void test_voice_decision_duration_counts_spoken_words(void) {
+    hu_voice_messages_config_t cfg = config_enabled_frequent();
+    char memo[512] = "";
+    for (int i = 0; i < 70; i++)
+        strcat(memo, i ? " really" : "really");
+    const char *why = NULL;
+    (void)hu_voice_decision_classify_ex(memo, strlen(memo), "I miss you", 10, &cfg, true, 14, 0,
+                                        &why);
+    HU_ASSERT_STR_NOT_CONTAINS(why, "too_long");
+    char longer[1024] = "";
+    for (int i = 0; i < 120; i++)
+        strcat(longer, i ? " really" : "really");
+    (void)hu_voice_decision_classify_ex(longer, strlen(longer), "I miss you", 10, &cfg, true, 14, 0,
+                                        &why);
+    HU_ASSERT_STR_EQ(why, "too_long");
 }
 
 void run_voice_decision_tests(void) {
@@ -176,6 +198,7 @@ void run_voice_decision_tests(void) {
     HU_RUN_TEST(test_voice_decision_logistics_returns_text);
     HU_RUN_TEST(test_voice_decision_where_returns_text);
     HU_RUN_TEST(test_voice_decision_max_duration_exceeded_returns_text);
+    HU_RUN_TEST(test_voice_decision_duration_counts_spoken_words);
 }
 
 #else

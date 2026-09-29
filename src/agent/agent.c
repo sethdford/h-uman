@@ -712,7 +712,9 @@ void hu_agent_internal_reset_contact_boundary_state(hu_agent_t *agent) {
 }
 
 size_t hu_agent_internal_recent_assistant_avg_len(const hu_agent_t *agent, size_t max_n) {
-    if (!agent || !agent->history || agent->history_count == 0 || max_n == 0)
+    /* A voice memo has no texting baseline: G5 must not shrink it (review C2). */
+    if (!agent || agent->voice_memo_turn || !agent->history || agent->history_count == 0 ||
+        max_n == 0)
         return 0;
 
     /* Collect assistant lengths oldest → newest among the last `max_n`

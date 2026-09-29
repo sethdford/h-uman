@@ -85,47 +85,32 @@ check "reports which binary was run"       "[[ \"$out\" == *'build-check/human_t
 check "reports the binary's mtime"         "[[ \"$out\" == *'mtime'* ]]"
 check "build/ binary was not run"          "[ ! -e '$T/build/human_tests.ran' ]"
 
-# 5. --keep-binary-size leaves the committed KB even when a genuine MinSizeRel
-#    binary exists — the hook cannot vouch for that binary's age, and a
-#    five-week-old release build is what stamped ~2952 KB on 2026-09-03.
+# 5. Binary size is never written here, even with a genuine release-size build
+#    present: scripts/footprint.py owns it (one writer per value). This script
+#    rewrote every "~N KB" with a regex and stamped stale sizes three times.
 write_docs
 rm -rf "$T/build" "$T/build-check"
 mkdir -p "$T/build-size"
-# The flags the release-size job in ci.yml passes (update-stats.sh requires all).
-RELEASE_SIZE_CACHE='CMAKE_BUILD_TYPE:STRING=MinSizeRel
-HU_ENABLE_ASAN:BOOL=OFF
-HU_ENABLE_LTO:BOOL=ON
-HU_ENABLE_ALL_CHANNELS:BOOL=ON
-HU_ENABLE_SQLITE_VEC:BOOL=OFF'
-printf '%s\n' "$RELEASE_SIZE_CACHE" > "$T/build-size/CMakeCache.txt"
+printf '%s\n' 'CMAKE_BUILD_TYPE:STRING=MinSizeRel' 'HU_ENABLE_ASAN:BOOL=OFF' 'HU_ENABLE_LTO:BOOL=ON' \
+    'HU_ENABLE_ALL_CHANNELS:BOOL=ON' 'HU_ENABLE_SQLITE_VEC:BOOL=OFF' > "$T/build-size/CMakeCache.txt"
 head -c 4096 /dev/zero > "$T/build-size/human"
-out=$(run --test-count 222 --keep-binary-size --apply)
-check "--keep-binary-size leaves README size"    "grep -q '^~2952 KB$' '$T/README.md'"
-check "--keep-binary-size leaves CLAUDE.md size" "grep -q '^~2952 KB binary' '$T/CLAUDE.md'"
-check "--keep-binary-size still stamps the count" "grep -q '^Tests: 222$' '$T/README.md'"
-# ...and without the flag the same release binary IS measured (4096 B = 4 KB).
-write_docs
 out=$(run --test-count 222 --apply)
-check "release binary measured without the flag" "grep -q '^~4 KB$' '$T/README.md'"
-
-# 6. A MinSizeRel build that is NOT the release-size config is not measured.
-#    The `release` preset leaves sqlite-vec ON; it measured 18.7% over the
-#    release-size build (docs/perf/footprint.json), past the 15% drift gate
-#    that job enforces, so stamping it would turn that job red.
-write_docs
+check "release build present: README size untouched"    "grep -q '^~2952 KB$' '$T/README.md'"
+check "release build present: CLAUDE.md size untouched" "grep -q '^~2952 KB binary' '$T/CLAUDE.md'"
+check "count still stamped" "grep -q '^Tests: 222$' '$T/README.md'"
 rm -rf "$T/build-size"
-mkdir -p "$T/build-release"
-printf '%s\n' "$RELEASE_SIZE_CACHE" | sed 's/SQLITE_VEC:BOOL=OFF/SQLITE_VEC:BOOL=ON/' > "$T/build-release/CMakeCache.txt"
-head -c 8192 /dev/zero > "$T/build-release/human"
-out=$(run --test-count 222 --apply)
-check "sqlite-vec-ON release build not stamped" "grep -q '^~2952 KB$' '$T/README.md'"
-check "sqlite-vec-ON release build reported skipped" "[[ \"$out\" == *'not the release-size config'* ]]"
-# ...and the same dir with sqlite-vec OFF is measured (8192 B = 8 KB).
+
+# 6. The obsolete binary-size flags are accepted and ignored, never honoured: an
+#    older pre-push hook (hooks come from the shared checkout, which lags main)
+#    still passes --keep-binary-size, and rejecting it failed that push's stats sync.
 write_docs
-printf '%s\n' "$RELEASE_SIZE_CACHE" > "$T/build-release/CMakeCache.txt"
-out=$(run --test-count 222 --apply)
-check "release-size config in build-release/ measured" "grep -q '^~8 KB$' '$T/README.md'"
-rm -rf "$T/build-release"
+out=$(run --test-count 222 --keep-binary-size --apply); rc=$?
+check "--keep-binary-size accepted"       "[ $rc -eq 0 ]"
+check "--keep-binary-size says obsolete"  "[[ \"$out\" == *'obsolete'* ]]"
+check "--keep-binary-size still stamps the count" "grep -q '^Tests: 222$' '$T/README.md'"
+write_docs
+out=$(run --test-count 222 --binary-size 4 --apply); rc=$?
+check "--binary-size accepted, value ignored" "[ $rc -eq 0 ] && grep -q '^~2952 KB$' '$T/README.md'"
 
 # 7. Generated, gitignored C is a BUILD ARTIFACT, not source. The counters read
 #    git's index, so a tree that has been built reports the same numbers as a

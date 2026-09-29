@@ -21,6 +21,66 @@
  * observation; corroboration lowers it on later upserts. */
 #define HU_GRAPH_INGEST_DEFAULT_VARIANCE 0.1f
 
+/* ── Name hygiene (see graph_ingest.h for the measurement that motivates it) ─
+ *
+ * Exact, case-insensitive, whole-name matches only — never substrings. A
+ * substring test would reject "Ituri" for containing "it" and "Userman" for
+ * "user"; the ban list is short and high-frequency, which is exactly the shape
+ * where substring matching silently eats real names. */
+static bool name_eq(const char *name, size_t len, const char *lit) {
+    size_t l = strlen(lit);
+    if (len != l)
+        return false;
+    for (size_t i = 0; i < len; i++) {
+        char c = name[i];
+        if (c >= 'A' && c <= 'Z')
+            c = (char)(c + 32);
+        if (c != lit[i])
+            return false;
+    }
+    return true;
+}
+
+/* Trim surrounding space and a possessive/punctuation tail before matching, so
+ * "  User " and "user:" classify the same as "user". */
+static void trim_name(const char **name, size_t *len) {
+    const char *s = *name;
+    size_t n = *len;
+    while (n > 0 && (s[0] == ' ' || s[0] == '\t')) {
+        s++;
+        n--;
+    }
+    while (n > 0 && (s[n - 1] == ' ' || s[n - 1] == '\t' || s[n - 1] == ':' || s[n - 1] == '.'))
+        n--;
+    *name = s;
+    *len = n;
+}
+
+bool hu_graph_name_is_self_placeholder(const char *name, size_t len) {
+    if (!name || len == 0)
+        return false;
+    trim_name(&name, &len);
+    static const char *const SELF[] = {"user", "me", "i", "self", "myself", "my"};
+    for (size_t i = 0; i < sizeof(SELF) / sizeof(SELF[0]); i++)
+        if (name_eq(name, len, SELF[i]))
+            return true;
+    return false;
+}
+
+bool hu_graph_name_is_nonreferential(const char *name, size_t len) {
+    if (!name || len == 0)
+        return false;
+    trim_name(&name, &len);
+    static const char *const NONREF[] = {
+        "you",   "it",        "this",     "that",     "they",   "them",     "he",    "she",
+        "we",    "us",        "someone",  "somebody", "anyone", "everyone", "thing", "things",
+        "stuff", "something", "anything", "nothing",  "one",    "others"};
+    for (size_t i = 0; i < sizeof(NONREF) / sizeof(NONREF[0]); i++)
+        if (name_eq(name, len, NONREF[i]))
+            return true;
+    return false;
+}
+
 hu_error_t hu_graph_ingest_fact(hu_graph_t *g, const char *contact_id, size_t contact_id_len,
                                 const char *subject, const char *predicate, const char *object,
                                 float confidence, int64_t now, const char *provenance) {
@@ -42,11 +102,30 @@ hu_error_t hu_graph_ingest_fact(hu_graph_t *g, const char *contact_id, size_t co
 
     size_t subj_len = strlen(subject);
     size_t obj_len = strlen(object);
+
+    /* A bare pronoun on either end grounds nothing — drop the fact rather than
+     * mint an entity that will outrank real names in the grounding read. */
+    if (hu_graph_name_is_nonreferential(subject, subj_len) ||
+        hu_graph_name_is_nonreferential(object, obj_len))
+        return HU_ERR_INVALID_ARGUMENT;
+
+    /* A self-placeholder subject means "the persona". Resolve it to the
+     * contact's own PERSON node instead of creating a "user" entity; the fact
+     * itself is real and is kept. The object is never resolved this way — an
+     * object of "me" is the counterparty speaking about themselves, which the
+     * contact node does not represent. */
+    hu_entity_type_t subj_type = HU_ENTITY_UNKNOWN;
+    if (hu_graph_name_is_self_placeholder(subject, subj_len)) {
+        subject = contact_id;
+        subj_len = contact_id_len;
+        subj_type = HU_ENTITY_PERSON;
+    }
+
     hu_relation_type_t type = hu_relation_type_from_string(predicate, strlen(predicate));
 
     int64_t src_id = 0, tgt_id = 0;
     hu_error_t err = hu_graph_upsert_entity(g, contact_id, contact_id_len, subject, subj_len,
-                                            HU_ENTITY_UNKNOWN, NULL, &src_id);
+                                            subj_type, NULL, &src_id);
     if (err != HU_OK)
         return err;
     err = hu_graph_upsert_entity(g, contact_id, contact_id_len, object, obj_len, HU_ENTITY_UNKNOWN,

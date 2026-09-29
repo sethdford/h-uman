@@ -65,12 +65,14 @@
 #include "human/ml/m3_frontier_adapter.h"
 #endif
 #include "human/agent/choreography.h"
+#include "human/channels/imessage_caps.h"
 #include "human/daemon/agent_facade.h"
 #include "human/daemon/config_reload.h"
 #include "human/daemon/consecutive_limiter.h"
 #include "human/daemon/context_facade.h"
 #include "human/daemon/dated_followup.h"
 #include "human/daemon/director.h"
+#include "human/daemon/expressive.h"
 #include "human/daemon/feeds_facade.h"
 #include "human/daemon/hurt_handoff.h"
 #include "human/daemon/identity_graph.h"
@@ -86,6 +88,7 @@
 #include "human/daemon/send_budget.h"
 #include "human/daemon/send_provenance.h"
 #include "human/daemon/voice_facade.h"
+#include "human/daemon/voice_first.h"
 
 /* Channel helpers */
 #include "human/channels/channel_embed.h"
@@ -3584,7 +3587,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 if (llm_decides) {
                     director_result_valid =
                         hu_daemon_director_call(alloc, combined, combined_len, early_history,
-                                                early_history_count, &director_result);
+                                                early_history_count, NULL, &director_result);
                     if (early_history) {
                         alloc->free(alloc->ctx, early_history,
                                     early_history_count * sizeof(hu_channel_history_entry_t));
@@ -3620,10 +3623,35 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     combined_len > 240 ? "..." : "");
                     }
                     /* Call director early for meta-behavior (delay, tapback, silence) */
+                    /* Expressive forms (spec 2026-09-28): tell the director what is
+                     * possible this turn, then log its full choice and the guards'
+                     * verdict. HU_DIRECTOR_FORMS=off|shadow|live, default off; LIVE is
+                     * gated on a day of shadow choices Seth has read. */
+                    bool forms_on =
+                        hu_gate_mode_from_env("HU_DIRECTOR_FORMS", HU_GATE_OFF) != HU_GATE_OFF;
+                    char situation[160] = "";
+                    if (forms_on)
+                        (void)hu_expressive_situation(
+                            situation, sizeof(situation),
+                            hu_daemon_voice_first_available(agent, batch_key, key_len,
+                                                            msgs[batch_start].is_group),
+                            hu_imessage_caps_cached(alloc)->advanced, msgs[batch_start].is_group);
                     if (g_classify_provider_ok) {
-                        director_result_valid =
-                            hu_daemon_director_call(alloc, combined, combined_len, early_history,
-                                                    early_history_count, &director_result);
+                        director_result_valid = hu_daemon_director_call(
+                            alloc, combined, combined_len, early_history, early_history_count,
+                            situation, &director_result);
+                    }
+                    if (forms_on && director_result_valid) {
+                        const hu_contact_profile_t *fcp =
+                            agent->persona
+                                ? hu_persona_find_contact(agent->persona, batch_key, key_len)
+                                : NULL;
+                        char fline[256];
+                        if (hu_expressive_shadow_line(&director_result, combined, combined_len,
+                                                      msgs[batch_start].is_group,
+                                                      fcp ? fcp->relationship : NULL, fline,
+                                                      sizeof(fline)) > 0)
+                            hu_log_info("director", NULL, "forms shadow: %s", fline);
                     }
                     if (trace_on && director_result_valid) {
                         hu_log_info("director_trace", NULL,
@@ -5391,6 +5419,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 
                 /* 4. Response constraints via channel vtable */
                 uint32_t max_chars = 0;
+                bool voice_first_memo = false; /* spec 2026-09-28 */
                 if (ch->channel->vtable->get_response_constraints) {
                     hu_channel_response_constraints_t constraints = {0};
                     if (ch->channel->vtable->get_response_constraints(ch->channel->ctx,
@@ -6365,6 +6394,16 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                 }
 
+                /* Voice-first memos: decide voice from what arrived and, LIVE for
+                 * family, have this turn write the memo. Never for a crisis turn. */
+                if (!inbound_crisis) {
+                    hu_daemon_voice_first_t vfirst;
+                    hu_daemon_voice_first_prepare(
+                        alloc, agent, batch_key, key_len, msgs[batch_start].is_group, combined,
+                        combined_len, &convo_ctx, &convo_ctx_len, &max_chars, &vfirst);
+                    voice_first_memo = vfirst.memo;
+                }
+
                 /* Set agent per-turn context fields (prompt builder reads these) */
                 agent->contact_context = contact_ctx;
                 agent->contact_context_len = contact_ctx_len;
@@ -6373,6 +6412,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 agent->ab_history_entries = history_entries;
                 agent->ab_history_count = history_count;
                 agent->max_response_chars = max_chars;
+                agent->voice_memo_turn = voice_first_memo;
 
                 /* T4 (AC-2): hoisted out of the routing block below so the post-turn
                  * local->cloud fallback (further down, outside the HU_IS_TEST guard)
@@ -6739,7 +6779,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
             /* F45: Burst messaging — 3–4 rapid-fire thoughts for urgent/exciting context.
              * Skip in llm_decides mode — burst is an extra LLM call. */
 #ifndef HU_IS_TEST
-                if (!llm_decides) {
+                if (!llm_decides && !voice_first_memo) { /* a memo is one message */
                     float burst_prob = 0.03f;
                     if (agent && agent->persona)
                         burst_prob = agent->persona->humanization.burst_message_probability;
@@ -7229,7 +7269,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 
                     /* Best-of-N: generate additional candidates, score with Turing heuristic */
                     if (err == HU_OK && response && response_len > 0 && !retried && config &&
-                        config->agent.best_of_n >= 2 && !llm_decides) {
+                        config->agent.best_of_n >= 2 && !llm_decides && !voice_first_memo) {
                         uint32_t n_extra = config->agent.best_of_n - 1;
                         if (n_extra > 4)
                             n_extra = 4;
@@ -7390,7 +7430,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     /* Quality gate: check response for unnatural patterns.
                      * If needs_revision, retry once with hint.
                      * Skip retry in llm_decides mode (director handles quality). */
+                    /* A memo is long on purpose; the texting-length retry would shrink
+                     * it back to a text (review I1). */
                     if (err == HU_OK && response && response_len > 0 && history_entries &&
+                        !voice_first_memo &&
                         hu_reactive_gate_active(HU_REACTIVE_GATE_QUALITY_RETRY, llm_decides)) {
                         hu_quality_score_t qscore = hu_conversation_evaluate_quality(
                             response, response_len, history_entries, history_count, max_chars);
@@ -7452,7 +7495,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 
                     /* Turing score gate: retry if heuristic score is too low.
                      * Only fires once (shares retried flag with quality gate). */
-                    if (err == HU_OK && response && response_len > 0 && !retried && !llm_decides) {
+                    if (err == HU_OK && response && response_len > 0 && !retried && !llm_decides &&
+                        !voice_first_memo) {
                         hu_turing_score_t pre_tscore;
                         hu_error_t pre_ts_err = hu_turing_score_heuristic(
                             response, response_len, combined, combined_len, max_chars, &pre_tscore);
@@ -8095,6 +8139,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 agent->turn_temperature = 0.0;
                 agent->turn_thinking_budget = 0;
                 agent->max_response_chars = 0;
+                agent->voice_memo_turn = false;
                 agent->memory_session_id = NULL;
                 agent->memory_session_id_len = 0;
                 if (agent->memory && agent->memory->vtable) {
@@ -8635,12 +8680,17 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         .unshaped = unshaped,
                         .unshaped_len = unshaped_len,
                         .bth_hour = bth_hour,
+                        .voice_first = voice_first_memo,
+                        .is_group = msgs[batch_start].is_group,
                         .text_ready = (err == HU_OK),
                         .bus = &daemon_outbound_bus,
                         .bridge = &daemon_out_bus_bridge,
                         .turn = &turn_out_state,
                     };
                     bool sent_voice = hu_daemon_deliver_final_reply(&final_reply);
+                    if (voice_first_memo && !sent_voice)
+                        hu_log_info("voice_first", agent ? agent->observer : NULL,
+                                    "memo went as text (voice declined or not delivered)");
                     if (unshaped) {
                         alloc->free(alloc->ctx, unshaped, unshaped_len + 1);
                         unshaped = NULL;

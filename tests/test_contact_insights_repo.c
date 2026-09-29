@@ -87,6 +87,39 @@ static void render_orders_newest_first_with_month_and_caps(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
+/* HU_INSIGHT_WIDE gates ONLY curator_wide rows; persona rows are unaffected. */
+static void curator_wide_rows_follow_the_insight_wide_gate(void) {
+    hu_allocator_t a = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&a, ":memory:");
+    HU_ASSERT_EQ(hu_contact_insights_add(&mem, k_contact, strlen(k_contact), "fact",
+                                         "persona note Initech", 0.9, 1767225600000LL,
+                                         "extractor:v2:k3:a3", NULL),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_contact_insights_add(&mem, k_contact, strlen(k_contact), "plan",
+                                         "wide note Priya surgery", 0.9, 1767225600001LL,
+                                         "curator_wide:extractor:v2:k3:a3", NULL),
+                 HU_OK);
+    const char *modes[] = {NULL, "shadow", "garbage", "live"};
+    const bool wide_seen[] = {false, false, false, true};
+    for (size_t i = 0; i < 4; i++) {
+        if (modes[i])
+            setenv("HU_INSIGHT_WIDE", modes[i], 1);
+        else
+            unsetenv("HU_INSIGHT_WIDE");
+        char *out = NULL;
+        size_t len = 0;
+        HU_ASSERT_EQ(hu_contact_insights_render(&mem, &a, k_contact, strlen(k_contact), 8, 900, 0.5,
+                                                &out, &len),
+                     HU_OK);
+        HU_ASSERT_NOT_NULL(out);
+        HU_ASSERT_NOT_NULL(strstr(out, "persona note Initech"));
+        HU_ASSERT_EQ(strstr(out, "Priya") != NULL, wide_seen[i]);
+        a.free(a.ctx, out, len + 1);
+    }
+    unsetenv("HU_INSIGHT_WIDE");
+    mem.vtable->deinit(mem.ctx);
+}
+
 static void retired_and_low_confidence_rows_are_not_rendered(void) {
     hu_allocator_t a = hu_system_allocator();
     hu_memory_t mem = hu_sqlite_memory_create(&a, ":memory:");
@@ -166,6 +199,7 @@ static void loader_block_follows_the_gate(void) {
 void run_contact_insights_repo_tests(void) {
     HU_TEST_SUITE("contact insights (insight stream)");
     HU_RUN_TEST(render_orders_newest_first_with_month_and_caps);
+    HU_RUN_TEST(curator_wide_rows_follow_the_insight_wide_gate);
     HU_RUN_TEST(retired_and_low_confidence_rows_are_not_rendered);
     HU_RUN_TEST(add_is_idempotent_for_the_same_note);
     HU_RUN_TEST(loader_block_follows_the_gate);

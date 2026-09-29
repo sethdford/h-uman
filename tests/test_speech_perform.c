@@ -229,6 +229,16 @@ static void test_perform_examples_hold_at_most_one_pause(void) {
     HU_ASSERT_TRUE(lines >= 4);
 }
 
+/* 2026-09-28 "it sounds a little cheesy ... not IT the clown": the performer
+ * must not add greeting-card lines, announcements or hype on top of the intent. */
+static void test_perform_prompt_keeps_it_understated(void) {
+    static char sys[16384];
+    HU_ASSERT_TRUE(hu_speech_perform_system_prompt(sys, sizeof(sys)) > 0);
+    HU_ASSERT_STR_CONTAINS(sys, "understated");
+    HU_ASSERT_STR_CONTAINS(sys, "wonderful day");
+    HU_ASSERT_STR_CONTAINS(sys, "at most one exclamation");
+}
+
 void run_speech_perform_tests(void) {
     HU_TEST_SUITE("speech perform (D1)");
     HU_RUN_TEST(test_perform_directed_line_is_ok);
@@ -247,4 +257,5 @@ void run_speech_perform_tests(void) {
     HU_RUN_TEST(test_perform_prompt_carries_the_measured_voice);
     HU_RUN_TEST(test_perform_prompt_writes_for_the_ear);
     HU_RUN_TEST(test_perform_examples_hold_at_most_one_pause);
+    HU_RUN_TEST(test_perform_prompt_keeps_it_understated);
 }

@@ -48,6 +48,12 @@ hu_voice_delivery_mode_t hu_voice_delivery_mode_parse(const char *s);
 /* A voice-memo send: empty text and exactly one local audio file. */
 bool hu_voice_record_is_memo_send(size_t message_len, const char *const *media, size_t media_count);
 
+/* May this send go out as a file attachment? False only for a memo send when
+ * no_attachment_env is "1" (HU_VOICE_NO_ATTACHMENT): the memo was not recorded
+ * natively, and Seth never wants a .caf file in the thread — text goes instead. */
+bool hu_voice_record_may_attach(size_t message_len, const char *const *media, size_t media_count,
+                                const char *no_attachment_env);
+
 typedef struct {
     bool ax_trusted;
     bool messages_running;
@@ -194,6 +200,15 @@ hu_error_t hu_voice_record_send_from_env(const char *handle, size_t handle_len,
  * non-Apple builds: a stub whose preflight always blocks (HU_VREC_NO_AX) and
  * whose members are all safe no-ops, so the symbol links everywhere. */
 const hu_voice_record_port_t *hu_voice_record_macos_port(void);
+
+/* Seconds since the last keyboard/mouse input (IOKit HIDIdleTime); 0 on test
+ * and non-Apple builds, where it reads as "active". */
+double hu_voice_record_idle_seconds(void);
+
+/* Accessibility trust for this binary (AXIsProcessTrusted). Lost on every
+ * reinstall (new cdhash); native voice memos, AX typing and threaded-reply
+ * fallbacks all need it. True on test and non-Apple builds. */
+bool hu_voice_record_ax_trusted(void);
 
 /* chat.db helpers, defined in imessage.c (which owns the sqlite access) for
  * Apple production builds only. -1 / false when unavailable. */

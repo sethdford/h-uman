@@ -102,6 +102,12 @@ void hu_voice_record_timing(uint32_t seed, hu_voice_record_timing_t *out) {
     out->tail_ms = 500u + x % 401u;
 }
 
+bool hu_voice_record_may_attach(size_t message_len, const char *const *media, size_t media_count,
+                                const char *no_attachment_env) {
+    bool refuse = no_attachment_env && strcmp(no_attachment_env, "1") == 0;
+    return !(refuse && hu_voice_record_is_memo_send(message_len, media, media_count));
+}
+
 hu_voice_record_route_t hu_voice_record_route(hu_voice_delivery_mode_t mode, size_t message_len,
                                               const char *const *media, size_t media_count) {
     if (mode == HU_VOICE_DELIVERY_ATTACHMENT ||
