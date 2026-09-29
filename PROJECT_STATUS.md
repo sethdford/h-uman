@@ -1,15 +1,15 @@
 # Human — Project Status
 
-Last updated: 2026-09-27
+Last updated: 2026-09-28
 
 ## Summary
 
 | Metric                         | Value                  |
 | ------------------------------ | ---------------------- |
 | Source files (src/ + include/) | **1,093**              |
-| Lines of C/H/ASM code          | **~418K**              |
+| Lines of C/H/ASM code          | **~411K**              |
 | Test files                     | ~308                   |
-| Tests passing                  | **14,097/14,097 (100%)** |
+| Tests passing                  | **13,912/13,912 (100%)** |
 | Binary size (MinSizeRel+LTO)   | **~2694 KB**           |
 | Idle RSS (`human mcp`)         | **8.6 MB**             |
 
