@@ -17,6 +17,22 @@ def test_store_file_is_private_and_schema_exists(tmp_path):
     assert {"audits", "critiques", "reference_replies", "runs"} <= tables
 
 
+def test_store_file_is_never_readable_by_others_even_while_opening(tmp_path, monkeypatch):
+    # The file holds message text: it must already be 0600 when SQLite opens it,
+    # not tightened afterwards (create-then-chmod leaves a 0644 window).
+    p = tmp_path / "so.db"
+    seen = []
+    real_connect = store.sqlite3.connect
+
+    def spy(path, *a, **k):
+        seen.append(stat.S_IMODE(os.stat(path).st_mode) if os.path.exists(path) else None)
+        return real_connect(path, *a, **k)
+
+    monkeypatch.setattr(store.sqlite3, "connect", spy)
+    store.open_store(str(p))
+    assert seen == [0o600]
+
+
 def test_audits_dedupe_per_backend_and_carry_provenance():
     con = store.open_store(":memory:")
     assert store.add_audit(con, 7, "wide", "supported", "ok", 0, "g@local", "audit-v1", 1) == 1

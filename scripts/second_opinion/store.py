@@ -60,10 +60,12 @@ CREATE TABLE IF NOT EXISTS runs (
 def open_store(path=DEFAULT_PATH):
     if path != ":memory:":
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        # Create the file 0600 BEFORE SQLite opens it: create-then-chmod leaves
+        # a window where a file holding message text is group/world readable.
+        os.close(os.open(path, os.O_CREAT | os.O_WRONLY, 0o600))
+        os.chmod(path, 0o600)  # an older file with a looser mode is tightened too
     con = sqlite3.connect(path)
     con.executescript(SCHEMA)
-    if path != ":memory:":
-        os.chmod(path, 0o600)
     return con
 
 

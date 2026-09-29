@@ -25,3 +25,4 @@ def test_cohen_kappa_chance_and_perfect():
     assert stats.cohen_kappa([]) is None
     assert stats.cohen_kappa([("A", "A"), ("B", "B")]) == 1.0
     assert abs(stats.cohen_kappa([("A", "A"), ("B", "B"), ("A", "B"), ("B", "A")])) < 1e-9
+    assert stats.cohen_kappa([("A", "A"), ("A", "A")]) == 1.0  # pe == 1: one shared label
