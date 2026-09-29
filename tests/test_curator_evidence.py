@@ -67,3 +67,31 @@ def test_validate_note_rejects_daemon_empty_and_invented_names():
     assert ce.validate_note({**base, "evidence_tokens": ["t9"]}, _cite())[1] == "no_evidence"
     inv = {**base, "evidence_tokens": ["t0"], "names": [{"name": "Marcus", "type": "person"}]}
     assert ce.validate_note(inv, _cite()) == (None, "name_not_said")
+
+
+def test_chat_turn_rows_n_zero_or_negative_returns_empty():
+    msgs = [m(1, "a", False, "hi")]
+    assert ce.chat_turn_rows(msgs, {}, 0, T0 - dt.timedelta(days=1)) == []
+    assert ce.chat_turn_rows(msgs, {}, -3, T0 - dt.timedelta(days=1)) == []
+
+
+def test_chat_turn_rows_sorts_oldest_first_regardless_of_input_order():
+    msgs = [m(3, "c", False, "t3", 3), m(1, "a", False, "t1", 1), m(2, "b", False, "t2", 2)]
+    rows = ce.chat_turn_rows(msgs, {}, 80, T0 - dt.timedelta(days=1))
+    assert [r[0] for r in rows] == [1, 2, 3]
+    rows2 = ce.chat_turn_rows(msgs, {}, 2, T0 - dt.timedelta(days=1))
+    assert [r[0] for r in rows2] == [2, 3]
+
+
+def test_chat_turn_rows_emoji_or_punctuation_only_is_attachment():
+    msgs = [m(1, "g1", False, "\U0001F389\U0001F389", 1), m(2, "g2", False, "ok \U0001F389", 2)]
+    rows = ce.chat_turn_rows(msgs, {}, 80, T0 - dt.timedelta(days=1))
+    assert rows[0][3] == "[attachment]"
+    assert rows[1][3] == "ok \U0001F389"
+
+
+def test_name_said_unicode_word_boundaries():
+    assert not ce.name_said("Al", ["caféAl fresco"])
+    assert ce.name_said("José", ["josé's party"])
+    assert ce.name_said("Priya", ["priya\U0001F389 surgery tuesday"])
+    assert ce.name_said("Priya", ["priya’s surgery"])

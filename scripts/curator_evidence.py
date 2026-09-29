@@ -9,15 +9,19 @@ import re
 
 
 def chat_turn_rows(msgs, labels, n, cutoff):
+    if n <= 0:
+        return []
     rows = []
-    for msg in msgs:
+    for msg in sorted(msgs, key=lambda m: m["t"]):
         if msg["t"] < cutoff:
             continue
         if msg["from_me"]:
             who = "me" if labels.get(msg["guid"]) == "seth" else "daemon"
         else:
             who = "them"
-        text = (msg.get("text") or "").strip().replace("\n", " ")[:300] or "[attachment]"
+        text = (msg.get("text") or "").strip().replace("\n", " ")[:300]
+        if not text or not re.search(r"\w", text):
+            text = "[attachment]"
         rows.append((int(msg["rowid"]), int(msg["t"].timestamp() * 1000), who, text))
     return rows[-n:]
 
@@ -40,6 +44,9 @@ def parse_evidence(tokens):
     t_idx, daemon = [], False
     for tok in tokens or []:
         s = str(tok).strip().strip("[]").lower()
+        # Any token starting with "d" is deliberately treated as a daemon
+        # citation: fails closed by dropping the note (see validate_note),
+        # rather than risking a daemon-confabulated detail read as evidence.
         if s.startswith("d"):
             daemon = True
             continue
@@ -51,11 +58,13 @@ def parse_evidence(tokens):
 
 def name_said(name, texts):
     """Verbatim, case-insensitive, word-bounded: 'Al' is not in 'Also',
-    'Priya' is in "priya's"."""
+    'Priya' is in "priya's". Boundaries are Unicode-aware (\\w, not
+    [A-Za-z0-9]) so accented names aren't falsely split out of (or into)
+    adjacent text, e.g. 'Al' must not match inside 'caféAl'."""
     name = (name or "").strip()
     if not name:
         return False
-    pat = re.compile(r"(?<![A-Za-z0-9])" + re.escape(name) + r"(?![A-Za-z0-9])", re.I)
+    pat = re.compile(r"(?<!\w)" + re.escape(name) + r"(?!\w)", re.I)
     return any(pat.search(t or "") for t in texts)
 
 
