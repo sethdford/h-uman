@@ -6,6 +6,8 @@ import {
   TEXT_ROLES,
   UI_ROLES,
   UnmeasurableColorError,
+  applyBaseline,
+  checkBaseContrast,
   checkQuietContrast,
   checkQuietGamut,
   contrastRatio,
@@ -93,4 +95,68 @@ test("gamut check names out-of-gamut web colors", () => {
     "quiet.light.warning = oklch(53% 0.120 65) is outside the sRGB gamut",
   ]);
   assert.deepEqual(checkQuietGamut({ "quiet.light.warning": "oklch(53% 0.105 65)" }), []);
+});
+
+/** The passing fixture re-keyed as base semantic tokens (`<mode>.<name>`). */
+function passingBase(): Record<string, string> {
+  const m: Record<string, string> = {};
+  for (const [k, v] of Object.entries(passingFixture())) m[k.replace(/^quiet\./, "")] = v;
+  return m;
+}
+
+test("base: a passing palette produces zero failures", () => {
+  assert.deepEqual(checkBaseContrast(passingBase()).filter((r) => !r.ok), []);
+});
+
+test("base: a role the base theme lacks is a failure, not a skip", () => {
+  const shared = passingBase();
+  delete shared["light.on-accent"];
+  const f = checkBaseContrast(shared).filter((r) => !r.ok);
+  assert.deepEqual(f.map((r) => [r.mode, r.fg, r.bg, r.reason]), [
+    ["light", "on-accent", "accent", "missing"],
+    ["light", "on-accent", "accent-hover", "missing"],
+  ]);
+});
+
+test("DISCRIMINATES: white on-accent over human.500 (the 2.4:1 regression) fails the base gate", () => {
+  const shared = passingBase();
+  shared["light.accent"] = "#7ab648";
+  shared["light.on-accent"] = "#ffffff";
+  const { fresh, known } = applyBaseline(checkBaseContrast(shared), {});
+  assert.deepEqual(known, []);
+  assert.deepEqual(fresh.map((r) => [r.mode, r.fg, r.bg]), [["light", "on-accent", "accent"]]);
+  near(fresh[0].ratio!, 2.4, 0.05);
+});
+
+test("baseline: a baselined failure at its recorded ratio is tolerated, not hidden", () => {
+  const shared = passingBase();
+  shared["dark.text-faint"] = "#5c5549";
+  const failures = checkBaseContrast(shared).filter((r) => !r.ok);
+  assert.ok(failures.length > 0 && failures.every((r) => r.fg === "text-faint"));
+  const baseline = Object.fromEntries(failures.map((r) => [`dark text-faint on ${r.bg}`, Math.round(r.ratio! * 100) / 100]));
+  const v = applyBaseline(checkBaseContrast(shared), baseline);
+  assert.deepEqual(v.fresh, []);
+  assert.equal(v.known.length, failures.length);
+  assert.deepEqual(v.fixed, []);
+});
+
+test("baseline: a NEW failure beside baselined ones fails the gate", () => {
+  const shared = passingBase();
+  shared["dark.text-faint"] = "#5c5549";
+  const baseline = Object.fromEntries(
+    checkBaseContrast(shared).filter((r) => !r.ok).map((r) => [`dark text-faint on ${r.bg}`, Math.round(r.ratio! * 100) / 100]),
+  );
+  shared["light.warning"] = "#ca8a04";
+  const { fresh } = applyBaseline(checkBaseContrast(shared), baseline);
+  assert.ok(fresh.length > 0);
+  for (const r of fresh) assert.deepEqual([r.mode, r.fg], ["light", "warning"]);
+});
+
+test("baseline: a baselined pair that gets worse fails; one that is fixed is reported", () => {
+  const shared = passingBase();
+  shared["dark.text-faint"] = "#3a352e";
+  const v = applyBaseline(checkBaseContrast(shared), { "dark text-faint on bg": 2.5, "light text on bg": 3 });
+  const worse = v.fresh.find((r) => r.bg === "bg");
+  assert.ok(worse && worse.ratio! < 2.5, "worse-than-recorded pair must be fresh");
+  assert.deepEqual(v.fixed, ["light text on bg"]);
 });

@@ -349,8 +349,162 @@ static void stage_live_capitalizes_a_lowercase_reply(void) {
     hu_style_governor_reset_casing_for_test();
 }
 
+/* ── Action D: entity casing (2026-09-22) ────────────────────────────
+ *
+ * The claim these pin: at MATCHED reply length the adapter names insider
+ * entities at the persona's rate (229 vs 252) but capitalizes them 3.1% vs
+ * 26.6%. Action D closes that WITHOUT overshooting, so the tests assert the
+ * allowlist property and the rate boundaries, not merely that it can
+ * capitalize something. */
+
+static const hu_style_entity_token_t ENT_ALWAYS[] = {
+    {"tampa", 1.0, 40},
+    {"bay", 1.0, 40},
+};
+static const hu_style_entity_token_t ENT_NEVER[] = {{"tampa", 0.0, 40}};
+static const hu_style_entity_token_t ENT_HALF[] = {{"tampa", 0.5, 40}, {"bay", 0.5, 40}};
+
+/* shape_full with action C disabled (pct 100) so only D can fire. */
+static void ent_shape(const char *in, const hu_style_entity_token_t *tab, unsigned count,
+                      unsigned casing_roll, char **out, size_t *out_len, unsigned *actions) {
+    test_alloc = hu_system_allocator();
+    *out = NULL;
+    *out_len = 0;
+    *actions = 0;
+    HU_ASSERT_EQ(hu_style_governor_shape_full(&test_alloc, in, strlen(in), 99u, casing_roll, 100u,
+                                              tab, count, out, out_len, actions),
+                 HU_OK);
+}
+
+static void shape_full_capitalizes_listed_entity_mid_sentence(void) {
+    char *out = NULL;
+    size_t n = 0;
+    unsigned acts = 0;
+    ent_shape("heading to tampa later", ENT_ALWAYS, 2, 7u, &out, &n, &acts);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_STR_EQ(out, "heading to Tampa later");
+    HU_ASSERT_TRUE((acts & HU_STYLE_GOV_ACTION_ENTITY_CAPITALIZED) != 0);
+    /* Length is never changed — apply_inplace depends on shrink-only. */
+    HU_ASSERT_EQ(n, strlen("heading to tampa later"));
+    test_alloc.free(test_alloc.ctx, out, n + 1);
+}
+
+static void shape_full_rate_zero_never_capitalizes(void) {
+    char *out = NULL;
+    size_t n = 0;
+    unsigned acts = 0;
+    /* cap_rate 0 must yield NO change at all, which also means the
+     * no-change contract still holds (*out == NULL). */
+    ent_shape("heading to tampa later", ENT_NEVER, 1, 7u, &out, &n, &acts);
+    HU_ASSERT_NULL(out);
+    HU_ASSERT_EQ(acts, 0u);
+}
+
+static void shape_full_ignores_tokens_not_on_the_allowlist(void) {
+    char *out = NULL;
+    size_t n = 0;
+    unsigned acts = 0;
+    /* "later" and "heading" are not in the table; nothing may be touched.
+     * This is the property that stops action D overshooting into words the
+     * persona writes lowercase. */
+    ent_shape("heading over later", ENT_ALWAYS, 2, 7u, &out, &n, &acts);
+    HU_ASSERT_NULL(out);
+    HU_ASSERT_EQ(acts, 0u);
+}
+
+static void shape_full_leaves_sentence_initial_entity_to_action_c(void) {
+    char *out = NULL;
+    size_t n = 0;
+    unsigned acts = 0;
+    /* "tampa" is the first word: action C owns sentence starts, and the
+     * measurement counts only mid-sentence capitals. */
+    ent_shape("tampa is nice", ENT_ALWAYS, 2, 7u, &out, &n, &acts);
+    HU_ASSERT_NULL(out);
+    HU_ASSERT_EQ(acts, 0u);
+
+    /* Same after a terminal '.' — a new sentence starts. */
+    ent_shape("went there. tampa is nice", ENT_ALWAYS, 2, 7u, &out, &n, &acts);
+    HU_ASSERT_NULL(out);
+}
+
+static void shape_full_keeps_a_multiword_name_coherent(void) {
+    /* Independent per-token rolls at 50% would produce "Tampa bay" about
+     * half the time. Adjacent entity words must share one decision, so the
+     * two initials always agree — whichever way the roll goes. */
+    for (unsigned roll = 0; roll < 100u; roll += 7u) {
+        char *out = NULL;
+        size_t n = 0;
+        unsigned acts = 0;
+        ent_shape("down by tampa bay today", ENT_HALF, 2, roll, &out, &n, &acts);
+        const char *s = out ? out : "down by tampa bay today";
+        const char *t = strstr(s, "ampa");
+        const char *b = strstr(s, "ay today");
+        HU_ASSERT_NOT_NULL(t);
+        HU_ASSERT_NOT_NULL(b);
+        bool t_cap = (t[-1] == 'T');
+        bool b_cap = (b[-1] == 'B');
+        HU_ASSERT_TRUE(t_cap == b_cap);
+        if (out)
+            test_alloc.free(test_alloc.ctx, out, n + 1);
+    }
+}
+
+static void shape_full_skips_urls_and_handles(void) {
+    char *out = NULL;
+    size_t n = 0;
+    unsigned acts = 0;
+    ent_shape("see http://tampa.example.com ok", ENT_ALWAYS, 2, 7u, &out, &n, &acts);
+    HU_ASSERT_NULL(out);
+    ent_shape("ask tampa@example.com ok", ENT_ALWAYS, 2, 7u, &out, &n, &acts);
+    HU_ASSERT_NULL(out);
+}
+
+static void shape_ex_behaviour_unchanged_by_the_shape_full_split(void) {
+    /* Regression guard for the delegate refactor: shape_ex must behave
+     * exactly as before, i.e. as shape_full with no entity table. */
+    char *a = NULL, *b = NULL;
+    size_t an = 0, bn = 0;
+    unsigned aa = 0, ba = 0;
+    const char *in = "heading to tampa later.";
+    test_alloc = hu_system_allocator();
+    HU_ASSERT_EQ(
+        hu_style_governor_shape_ex(&test_alloc, in, strlen(in), 0u, 50u, 100u, &a, &an, &aa),
+        HU_OK);
+    HU_ASSERT_EQ(hu_style_governor_shape_full(&test_alloc, in, strlen(in), 0u, 50u, 100u, NULL, 0,
+                                              &b, &bn, &ba),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(a);
+    HU_ASSERT_NOT_NULL(b);
+    HU_ASSERT_STR_EQ(a, b);
+    HU_ASSERT_EQ(aa, ba);
+    test_alloc.free(test_alloc.ctx, a, an + 1);
+    test_alloc.free(test_alloc.ctx, b, bn + 1);
+}
+
+static void entity_roll_is_deterministic_and_varies_by_message(void) {
+    unsigned r1 = hu_style_governor_entity_roll("tampa", 5, 10u, 3);
+    unsigned r2 = hu_style_governor_entity_roll("tampa", 5, 10u, 3);
+    HU_ASSERT_EQ(r1, r2); /* same inputs -> same roll */
+    HU_ASSERT_TRUE(r1 < 100u);
+    /* A different message (different casing roll) must be able to decide the
+     * same token differently — that is what breaks the 97/3 uniformity. */
+    unsigned differing = 0;
+    for (unsigned c = 0; c < 40u; c++)
+        if (hu_style_governor_entity_roll("tampa", 5, c, 3) != r1)
+            differing++;
+    HU_ASSERT_TRUE(differing > 20u);
+}
+
 void run_style_governor_tests(void) {
     HU_TEST_SUITE("style_governor");
+    HU_RUN_TEST(shape_full_capitalizes_listed_entity_mid_sentence);
+    HU_RUN_TEST(shape_full_rate_zero_never_capitalizes);
+    HU_RUN_TEST(shape_full_ignores_tokens_not_on_the_allowlist);
+    HU_RUN_TEST(shape_full_leaves_sentence_initial_entity_to_action_c);
+    HU_RUN_TEST(shape_full_keeps_a_multiword_name_coherent);
+    HU_RUN_TEST(shape_full_skips_urls_and_handles);
+    HU_RUN_TEST(shape_ex_behaviour_unchanged_by_the_shape_full_split);
+    HU_RUN_TEST(entity_roll_is_deterministic_and_varies_by_message);
     HU_RUN_TEST(apply_inplace_off_is_noop);
     HU_RUN_TEST(apply_inplace_shadow_is_noop);
     HU_RUN_TEST(apply_inplace_live_shapes_terminal_period);

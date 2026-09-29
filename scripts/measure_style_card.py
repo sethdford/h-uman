@@ -36,6 +36,7 @@ import argparse
 import datetime
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -124,6 +125,84 @@ def build_card(messages, persona: str, window_start: datetime.datetime,
     }
 
 
+# Entity-casing axis (2026-09-22). Feeds the style governor's action D. The
+# entity vocabulary is imported from specificity_score so the governor's
+# allowlist and the specificity GATE can never disagree on what an entity is
+# — same discipline as the axes above reusing eval_persona_evolution.
+ENTITY_MIN_MENTIONS = 3          # mirrors HU_STYLE_CARD_ENTITY_MIN_MENTIONS
+ENTITY_MAX_TOKENS = 64           # mirrors HU_STYLE_CARD_MAX_ENTITY_TOKENS
+ENTITY_TOKEN_MAX_LEN = 23        # mirrors HU_STYLE_CARD_ENTITY_TOKEN_CAP - 1
+
+
+def entity_casing_stats(texts, vocab):
+    """Share of MID-SENTENCE entity mentions the user writes capitalized.
+
+    Mid-sentence only, on purpose: a phone autocapitalizes sentence starts,
+    and action D never touches them, so counting them would teach the
+    governor a rate for a position it cannot act on. Returns the card block.
+    """
+    total = caps = 0
+    per_token = {}  # token -> [caps, total]
+    for text in texts:
+        s = (text or "").strip()
+        if not s:
+            continue
+        sentence_start = True
+        for raw in re.finditer(r"\S+", s):
+            word = raw.group(0)
+            core = word.strip("\"'(),;:.!?…-")
+            low = core.lower()
+            skip = (word.startswith(("http", "www.")) or "@" in word or "://" in word)
+            if core and not skip and not sentence_start and low in vocab:
+                is_cap = core[0].isupper() and not core.isupper()
+                total += 1
+                caps += 1 if is_cap else 0
+                slot = per_token.setdefault(low, [0, 0])
+                slot[0] += 1 if is_cap else 0
+                slot[1] += 1
+            if word.endswith((".", "!", "?")):
+                sentence_start = True
+            elif core:
+                sentence_start = False
+
+    tokens = []
+    for tok, (c, n) in per_token.items():
+        # Only tokens the user ACTUALLY capitalizes earn a table slot: the
+        # table is an allowlist, and a 0.0 rate would be inert anyway.
+        if n < ENTITY_MIN_MENTIONS or c == 0:
+            continue
+        if len(tok) > ENTITY_TOKEN_MAX_LEN or not re.fullmatch(r"[a-z']+", tok):
+            continue
+        tokens.append({"token": tok, "cap_rate": round(c / n, 4), "n": n})
+    # Highest-n first: the C side truncates at ENTITY_MAX_TOKENS, so the
+    # tokens carrying the most mentions must survive the cut.
+    tokens.sort(key=lambda t: (-t["n"], t["token"]))
+    return {
+        "rate": round(caps / total, 4) if total else 0.0,
+        "n_mentions": total,
+        "n_capitalized": caps,
+        "min_mentions": ENTITY_MIN_MENTIONS,
+        "max_tokens": ENTITY_MAX_TOKENS,
+        "position": "mid-sentence only (action D never touches sentence starts)",
+        "source": "scripts/specificity_score.py insider_vocab (persona contacts + graph entities)",
+        "tokens": tokens[:ENTITY_MAX_TOKENS],
+    }
+
+
+def attach_entity_casing(card: dict, texts) -> dict:
+    try:
+        from specificity_score import insider_vocab
+        vocab = {v for v in insider_vocab() if " " not in v}
+    except Exception as exc:  # pragma: no cover - vocab sources are optional
+        print(f"entity_casing: vocab unavailable ({exc}); axis omitted", file=sys.stderr)
+        return card
+    if not vocab:
+        print("entity_casing: empty vocab; axis omitted", file=sys.stderr)
+        return card
+    card["entity_casing"] = entity_casing_stats(texts, vocab)
+    return card
+
+
 def attach_substantive(card: dict, pairs, days: int) -> dict:
     stats = reply_stats(pairs)
     stats["days"] = days
@@ -173,6 +252,8 @@ def run(args, messages=None, substantive_pairs=None) -> int:
         substantive_pairs = fetch_reply_pairs(args.db, sdays, is_substantive)
     if substantive_pairs is not None:
         attach_substantive(card, substantive_pairs, sdays or DEFAULT_SUBSTANTIVE_DAYS)
+    # Entity-casing axis over the SAME window the axes above used.
+    attach_entity_casing(card, [t for ts, t in messages if start <= ts < end])
 
     print(json.dumps(card, indent=2))
     if args.dry_run:

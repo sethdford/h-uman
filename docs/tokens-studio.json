@@ -1502,7 +1502,7 @@
       }
     },
     "high-contrast": {
-      "$description": "High contrast mode for accessibility. Black in both colour schemes: define every text-colour token here, or it inherits a light-theme value on black.",
+      "$description": "High contrast mode, dark scheme (prefers-contrast: more). Layered over the dark theme; high-contrast-light is its light-scheme twin. Every text role measured >=7:1 (faint/status >=4.5:1) on every bg role.",
       "bg": {
         "$value": "{color.neutral.0}",
         "$type": "color"
@@ -1551,32 +1551,32 @@
       "accent-text": {
         "$value": "{color.human.400}",
         "$type": "color",
-        "$description": "WCAG AAA on the forced-black palette: 10.3:1 on bg, 9.2:1 on bg-surface, 7.6:1 on bg-overlay"
+        "$description": "AAA on every dark high-contrast surface: 10.3:1 on bg, 7.6:1 on bg-overlay"
       },
       "accent-secondary-text": {
         "$value": "{color.amber.400}",
         "$type": "color",
-        "$description": "12.6:1 on bg. Without it the light scheme leaks amber.700 onto black (4.2:1)"
+        "$description": "12.6:1 on bg; clears AAA on every dark high-contrast surface"
       },
       "accent-tertiary-text": {
         "$value": "{color.blue.300}",
         "$type": "color",
-        "$description": "10.3:1 on bg. Without it the light scheme leaks blue.700 onto black (2.4:1); dark's blue.400 is 6.9:1, short of AAA"
+        "$description": "10.3:1 on bg; dark's blue.400 is 6.9:1, short of AAA"
       },
       "link": {
         "$value": "{color.human.400}",
         "$type": "color",
-        "$description": "10.3:1 on bg. Without it the light scheme leaks human.light-600 onto black (3.3:1)"
+        "$description": "10.3:1 on bg, 7.6:1 on bg-overlay"
       },
       "link-hover": {
         "$value": "{color.human.300}",
         "$type": "color",
-        "$description": "12.2:1 on bg. Without it the light scheme leaks human.900 onto black (2.1:1)"
+        "$description": "12.2:1 on bg"
       },
       "link-visited": {
         "$value": "{color.human.400}",
         "$type": "color",
-        "$description": "Same as link, as in the light theme; dark's human.600 is 6.1:1, short of AAA"
+        "$description": "Same as link; dark's human.600 is 6.1:1 on bg, short of AAA"
       },
       "accent-hover": {
         "$value": "#a3d46a",
@@ -1634,6 +1634,26 @@
         "$value": "rgba(96, 165, 250, 0.2)",
         "$type": "color"
       },
+      "surface-container": {
+        "$value": "{color.neutral.100}",
+        "$type": "color",
+        "$description": "Opaque so text on it has a measurable contrast; about what a 8% white veil gives over black"
+      },
+      "surface-container-high": {
+        "$value": "{color.neutral.150}",
+        "$type": "color",
+        "$description": "Opaque; about what a 12% white veil gives over black"
+      },
+      "surface-container-highest": {
+        "$value": "{color.neutral.200}",
+        "$type": "color",
+        "$description": "Opaque, because modals, menus and the command palette paint it over page content"
+      },
+      "hover-overlay": {
+        "$value": "rgba(255, 255, 255, 0.12)",
+        "$type": "color",
+        "$description": "Light veil for a black background; the dark theme's veil is too faint on #000"
+      },
       "focus-ring": {
         "$value": "#ffffff",
         "$type": "color"
@@ -1645,26 +1665,163 @@
       "focus-ring-offset": {
         "$value": "2px",
         "$type": "dimension"
+      }
+    },
+    "high-contrast-light": {
+      "$description": "High contrast mode, light scheme (prefers-contrast: more). Layered over the light theme: near-black text on white surfaces. Every text role measured >=7:1 (faint/status >=4.5:1) on every bg role.",
+      "bg": {
+        "$value": "{color.neutral.1000}",
+        "$type": "color"
+      },
+      "bg-inset": {
+        "$value": "{color.neutral.850}",
+        "$type": "color"
+      },
+      "bg-surface": {
+        "$value": "{color.neutral.1000}",
+        "$type": "color"
+      },
+      "bg-elevated": {
+        "$value": "{color.neutral.1000}",
+        "$type": "color"
+      },
+      "bg-overlay": {
+        "$value": "{color.neutral.1000}",
+        "$type": "color"
       },
       "surface-container": {
-        "$value": "rgba(255, 255, 255, 0.08)",
-        "$type": "color",
-        "$description": "White veil over the black palette. Without it the light scheme leaks its near-white #f8f8f6 container under white text"
+        "$value": "{color.neutral.900}",
+        "$type": "color"
       },
       "surface-container-high": {
-        "$value": "rgba(255, 255, 255, 0.12)",
-        "$type": "color",
-        "$description": "White veil over the black palette. Without it the light scheme leaks #f0eeed under white text"
+        "$value": "{color.neutral.850}",
+        "$type": "color"
       },
       "surface-container-highest": {
+        "$value": "{color.neutral.825}",
+        "$type": "color"
+      },
+      "text": {
+        "$value": "{color.neutral.0}",
+        "$type": "color"
+      },
+      "text-secondary": {
         "$value": "{color.neutral.200}",
+        "$type": "color"
+      },
+      "text-muted": {
+        "$value": "{color.neutral.300}",
+        "$type": "color"
+      },
+      "text-tertiary": {
+        "$value": "{color.neutral.300}",
         "$type": "color",
-        "$description": "Opaque, because modals, menus and the command palette paint it over page content. Without it the light scheme leaks #e8e7e4 under white text"
+        "$description": "Tertiary text — same WCAG profile as text-muted (high-contrast theme)"
+      },
+      "text-faint": {
+        "$value": "{color.neutral.400}",
+        "$type": "color"
+      },
+      "accent": {
+        "$value": "{color.human.700}",
+        "$type": "color"
+      },
+      "accent-text": {
+        "$value": "{color.human.900}",
+        "$type": "color"
+      },
+      "accent-secondary-text": {
+        "$value": "{color.amber.900}",
+        "$type": "color",
+        "$description": "7.7:1 on surface-container-highest; the light theme's amber.700 is 4.3:1 on the high-contrast containers"
+      },
+      "accent-hover": {
+        "$value": "{color.human.800}",
+        "$type": "color"
+      },
+      "accent-subtle": {
+        "$value": "rgba(58, 106, 36, 0.12)",
+        "$type": "color"
+      },
+      "accent-strong": {
+        "$value": "{color.human.900}",
+        "$type": "color"
+      },
+      "on-accent": {
+        "$value": "{color.neutral.1000}",
+        "$type": "color"
+      },
+      "link": {
+        "$value": "{color.human.900}",
+        "$type": "color"
+      },
+      "link-hover": {
+        "$value": "{color.human.800}",
+        "$type": "color"
+      },
+      "link-active": {
+        "$value": "{color.human.700}",
+        "$type": "color"
+      },
+      "link-visited": {
+        "$value": "{color.human.800}",
+        "$type": "color"
+      },
+      "border": {
+        "$value": "{color.neutral.400}",
+        "$type": "color"
+      },
+      "border-subtle": {
+        "$value": "{color.neutral.500}",
+        "$type": "color"
+      },
+      "success": {
+        "$value": "#006b1f",
+        "$type": "color"
+      },
+      "success-dim": {
+        "$value": "rgba(0, 107, 31, 0.12)",
+        "$type": "color"
+      },
+      "warning": {
+        "$value": "#7a5200",
+        "$type": "color"
+      },
+      "warning-dim": {
+        "$value": "rgba(122, 82, 0, 0.12)",
+        "$type": "color"
+      },
+      "error": {
+        "$value": "#a30000",
+        "$type": "color"
+      },
+      "error-dim": {
+        "$value": "rgba(163, 0, 0, 0.12)",
+        "$type": "color"
+      },
+      "info": {
+        "$value": "#1d4ed8",
+        "$type": "color"
+      },
+      "info-dim": {
+        "$value": "rgba(29, 78, 216, 0.12)",
+        "$type": "color"
       },
       "hover-overlay": {
-        "$value": "rgba(255, 255, 255, 0.12)",
-        "$type": "color",
-        "$description": "Light veil for a black background. Without it the light scheme leaks its black 6% veil, invisible on black"
+        "$value": "rgba(0, 0, 0, 0.08)",
+        "$type": "color"
+      },
+      "focus-ring": {
+        "$value": "{color.neutral.0}",
+        "$type": "color"
+      },
+      "focus-ring-width": {
+        "$value": "3px",
+        "$type": "dimension"
+      },
+      "focus-ring-offset": {
+        "$value": "2px",
+        "$type": "dimension"
       }
     },
     "composite": {

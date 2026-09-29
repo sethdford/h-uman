@@ -13,7 +13,10 @@ const HIGH_CONTRAST_CSS = readFileSync(
   "utf-8",
 );
 const QUIET = JSON.parse(
-  readFileSync(fileURLToPath(new URL("../../design-tokens/quiet.tokens.json", import.meta.url)), "utf-8"),
+  readFileSync(
+    fileURLToPath(new URL("../../design-tokens/quiet.tokens.json", import.meta.url)),
+    "utf-8",
+  ),
 ).quiet;
 const LIGHT_BG: string = QUIET.light.bg.$value;
 const DARK_BG: string = QUIET.dark.bg.$value;
@@ -86,7 +89,9 @@ test.describe("Quiet Room cascade", () => {
   });
 
   test("html data-theme=dark reaches a bare quiet container", async ({ page }) => {
-    await load(page, 'data-theme="dark"', '<div id="q" data-brand="quiet"></div>', { scheme: "light" });
+    await load(page, 'data-theme="dark"', '<div id="q" data-brand="quiet"></div>', {
+      scheme: "light",
+    });
     expect(await prop(page, "#q", "--hu-bg")).toBe(norm(DARK_BG));
   });
 
@@ -94,14 +99,23 @@ test.describe("Quiet Room cascade", () => {
   // it does not need to discriminate QUIET_LIGHT_ANCESTOR — see the comment
   // on that constant in quiet-lib.ts for why it structurally can't, here.
   test("html data-theme=light reaches a bare quiet container", async ({ page }) => {
-    await load(page, 'data-theme="light"', '<div id="q" data-brand="quiet"></div>', { scheme: "dark" });
+    await load(page, 'data-theme="light"', '<div id="q" data-brand="quiet"></div>', {
+      scheme: "dark",
+    });
     expect(await prop(page, "#q", "--hu-bg")).toBe(norm(LIGHT_BG));
   });
 
-  test("an element's own data-theme beats an ancestor's (dark panel on a page toggled light)", async ({ page }) => {
-    await load(page, 'data-theme="light"', '<div id="d" data-brand="quiet" data-theme="dark"></div>', {
-      scheme: "light",
-    });
+  test("an element's own data-theme beats an ancestor's (dark panel on a page toggled light)", async ({
+    page,
+  }) => {
+    await load(
+      page,
+      'data-theme="light"',
+      '<div id="d" data-brand="quiet" data-theme="dark"></div>',
+      {
+        scheme: "light",
+      },
+    );
     expect(await prop(page, "#d", "--hu-bg")).toBe(norm(DARK_BG));
   });
 
@@ -138,21 +152,31 @@ test.describe("Quiet Room cascade", () => {
       page,
     }) => {
       await load(page, `data-brand="quiet" data-theme="${mode}"`, "", { scheme, p3: true });
-      const colors = Object.entries(QUIET[mode] as Record<string, { $value: string; $type?: string }>).filter(
-        ([, t]) => t.$type === "color",
-      );
-      expect(colors.length, "precondition: the quiet layer overrides colors in this mode").toBeGreaterThan(0);
+      const colors = Object.entries(
+        QUIET[mode] as Record<string, { $value: string; $type?: string }>,
+      ).filter(([, t]) => t.$type === "color");
+      expect(
+        colors.length,
+        "precondition: the quiet layer overrides colors in this mode",
+      ).toBeGreaterThan(0);
       for (const [name, t] of colors) {
         expect(await prop(page, "html", `--hu-${name}`), `--hu-${name}`).toBe(norm(t.$value));
       }
       for (const role of TEXT_ROLES) {
-        expect(await prop(page, "html", `--hu-${role}`), `--hu-${role}`).not.toMatch(/^color\(display-p3/);
+        expect(await prop(page, "html", `--hu-${role}`), `--hu-${role}`).not.toMatch(
+          /^color\(display-p3/,
+        );
       }
     });
   }
 
-  test("prefers-contrast: more wins over quiet colors; quiet type still applies", async ({ page }) => {
-    const hcBlock = TOKENS_CSS.match(/@media \(prefers-contrast: more\)\s*\{\s*:root\s*\{([^}]*)\}/);
+  test("prefers-contrast: more wins over quiet colors; quiet type still applies", async ({
+    page,
+  }) => {
+    // The light-scheme high-contrast block (this test emulates scheme: "light").
+    const hcBlock = TOKENS_CSS.match(
+      /@media \(prefers-contrast: more\) and \(prefers-color-scheme: light\)\s*\{\s*:root:not\(\[data-theme="dark"\]\)\s*\{([^}]*)\}/,
+    );
     const hcText = hcBlock?.[1].match(/--hu-text:\s*([^;]+);/)?.[1];
     expect(hcText, "precondition: the high-contrast block defines --hu-text").toBeTruthy();
     await load(page, 'data-brand="quiet"', "", { scheme: "light", contrastMore: true });
@@ -161,7 +185,7 @@ test.describe("Quiet Room cascade", () => {
   });
 
   // high-contrast.css loads after _tokens.css, so any colour it sets under
-  // prefers-contrast: more replaces the generated black palette. It used to set
+  // prefers-contrast: more replaces the generated high-contrast palette. It used to set
   // text-faint #6b7280 (4.3:1 on black) and, under data-theme=light, dark-on-light
   // text and borders (~2:1) while the background stayed black.
   for (const [scheme, attrs] of [
@@ -179,9 +203,19 @@ test.describe("Quiet Room cascade", () => {
       const generated = await page.evaluate(() => {
         const decls = new Map<string, string>();
         for (const rule of Array.from(document.styleSheets[0].cssRules)) {
-          if (!(rule instanceof CSSMediaRule) || rule.conditionText !== "(prefers-contrast: more)") continue;
+          if (!(rule instanceof CSSMediaRule)) continue;
+          // The palette is split by color scheme; count only blocks active here.
+          if (
+            !rule.conditionText.includes("prefers-contrast: more") ||
+            !matchMedia(rule.conditionText).matches
+          )
+            continue;
           for (const inner of Array.from(rule.cssRules)) {
-            if (!(inner instanceof CSSStyleRule) || !document.documentElement.matches(inner.selectorText)) continue;
+            if (
+              !(inner instanceof CSSStyleRule) ||
+              !document.documentElement.matches(inner.selectorText)
+            )
+              continue;
             for (let i = 0; i < inner.style.length; i++) {
               const name = inner.style[i];
               if (name.startsWith("--hu-")) decls.set(name, inner.style.getPropertyValue(name));
@@ -191,7 +225,10 @@ test.describe("Quiet Room cascade", () => {
         return [...decls];
       });
       const colors = generated.filter(([, v]) => !/px$/.test(v.trim()));
-      expect(colors.length, "precondition: the high-contrast block defines colours").toBeGreaterThan(20);
+      expect(
+        colors.length,
+        "precondition: the high-contrast block defines colours",
+      ).toBeGreaterThan(20);
       for (const [name, value] of colors) {
         expect(await prop(page, "html", name), name).toBe(norm(value));
       }
@@ -201,10 +238,24 @@ test.describe("Quiet Room cascade", () => {
   // Forced colors (Windows High Contrast) does not imply prefers-contrast: more.
   // high-contrast.css's :root forced-colors overrides score (0,1,0); unguarded
   // quiet colors at (0,2,0) would beat them.
-  test("forced-colors: active wins over quiet colors even without prefers-contrast: more", async ({ page }) => {
-    await load(page, 'data-brand="quiet"', "", { scheme: "light", forcedColors: true }, HIGH_CONTRAST_CSS);
-    expect(await page.evaluate(() => matchMedia("(forced-colors: active)").matches), "precondition").toBe(true);
-    expect(await page.evaluate(() => matchMedia("(prefers-contrast: more)").matches), "precondition").toBe(false);
+  test("forced-colors: active wins over quiet colors even without prefers-contrast: more", async ({
+    page,
+  }) => {
+    await load(
+      page,
+      'data-brand="quiet"',
+      "",
+      { scheme: "light", forcedColors: true },
+      HIGH_CONTRAST_CSS,
+    );
+    expect(
+      await page.evaluate(() => matchMedia("(forced-colors: active)").matches),
+      "precondition",
+    ).toBe(true);
+    expect(
+      await page.evaluate(() => matchMedia("(prefers-contrast: more)").matches),
+      "precondition",
+    ).toBe(false);
     expect(await prop(page, "html", "--hu-bg")).not.toBe(norm(LIGHT_BG));
     expect(await prop(page, "html", "--hu-bg")).toBe("Canvas");
   });

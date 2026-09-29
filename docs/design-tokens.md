@@ -202,4 +202,4 @@ Auto-generated from W3C token files in `design-tokens/`.
 
 ---
 
-_Generated: 2026-09-27T13:10:48Z_
+_Generated: 2026-09-27T21:28:38Z_
