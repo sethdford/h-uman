@@ -7490,13 +7490,12 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 agent->conversation_context = convo_ctx;
                                 agent->conversation_context_len = convo_ctx_len;
                             }
+                            /* Keep typing through the regeneration: a start
+                             * followed at once by a stop left the dots off for
+                             * the whole retry (~30 s, live 2026-09-29 06:51). */
                             if (ch->channel->vtable->start_typing)
                                 ch->channel->vtable->start_typing(ch->channel->ctx, batch_key,
                                                                   key_len);
-                            if (ch->channel->vtable->stop_typing) {
-                                ch->channel->vtable->stop_typing(ch->channel->ctx, batch_key,
-                                                                 key_len);
-                            }
                             continue;
                         }
                     }
@@ -7549,13 +7548,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     agent->conversation_context_len = convo_ctx_len;
                                 }
                             }
-                            if (ch->channel->vtable->start_typing)
+                            if (ch->channel->vtable->start_typing) /* typing through the retry */
                                 ch->channel->vtable->start_typing(ch->channel->ctx, batch_key,
                                                                   key_len);
-                            if (ch->channel->vtable->stop_typing) {
-                                ch->channel->vtable->stop_typing(ch->channel->ctx, batch_key,
-                                                                 key_len);
-                            }
                             continue;
                         } else if (qscore.needs_revision) {
                             hu_log_info("human", agent ? agent->observer : NULL,
