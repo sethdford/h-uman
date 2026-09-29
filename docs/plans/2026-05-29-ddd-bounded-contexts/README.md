@@ -48,6 +48,30 @@ Set by the program owner, 2026-05-31:
 
 ---
 
+## Re-measured 2026-09-28 (read this before the 2026-05-31 table below)
+
+The table below records the state when this program was written. Four months
+later, measured on `origin/main` plus the dead-code deletions of
+`docs/plans/2026-09-28-dead-code-decisions.md`:
+
+| Phase | Counter | 2026-05-31 | 2026-09-28 | Read |
+|---|---|---:|---:|---|
+| E1 | loose `src/*.c` | 101 | **3** | essentially done; `config_*.c` moved into `src/config/` (14 → 0 at root) |
+| E2 | `src/daemon.c` LOC | 14,723 | **10,243** | −30%, but no longer the largest file |
+| E2/E4 | largest `src/*.c` | `daemon.c` | **`agent/agent_turn.c` 10,467** | the god-file moved from the daemon to the turn loop |
+| E2/E4 | longest function | — | **`hu_agent_turn` 8,943 lines** | `MAX_FN_BASELINE`; target 300. This is now the largest single DDD liability |
+| E3 | `sqlite3.h` includers | 114 | **87** | auto-locked; 2 fell with the 2026-09-28 deletions |
+| E3 | files calling `get_db` directly | 41 | **38** | the repository migration is moving, slowly |
+| E4 | `FACTORY_BASELINE` | 4 | **4** | no progress |
+| E4 | flat `src/agent/*.c` | 157 | **162** | **regressed**; 3 subdirectories. The one counter here with no ratchet, and the one that grew |
+
+Implications for sequencing: E1 can close. The next highest-leverage E-phase
+work is carving `hu_agent_turn` (E4, with E2's carve technique), and putting a
+ratchet on flat `src/agent/*.c` so it stops growing while E4 runs. E3's
+provenance-exact erasure and audience-bounded context
+(`2026-09-28-dead-code-decisions.md` F1/F2) belong in the repository layer this
+phase builds.
+
 ## State reconciliation — v1 plan vs measured reality (2026-05-31)
 
 | v1 Phase | Intent | Measured 2026-05-31 | Status |
