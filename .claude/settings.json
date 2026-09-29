@@ -88,7 +88,7 @@
           },
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-destructive-bash.py\"",
+            "command": "payload=$(cat); top=$(git rev-parse --show-toplevel 2>/dev/null); g=\"\"; for d in \"${CLAUDE_PROJECT_DIR:-}\" \"$top\"; do if [ -n \"$d\" ] && [ -f \"$d/.claude/hooks/guard-destructive-bash.py\" ]; then g=\"$d/.claude/hooks/guard-destructive-bash.py\"; break; fi; done; if [ -n \"$g\" ]; then printf '%s' \"$payload\" | python3 \"$g\"; exit 0; fi; sid=$(printf '%s' \"$payload\" | jq -r '.session_id // empty' 2>/dev/null || true); m=\"${TMPDIR:-/tmp}/hu-hook-nopath-bashguard-${sid:-nosession}\"; if [ ! -e \"$m\" ]; then : > \"$m\" 2>/dev/null; echo \"DESTRUCTIVE-COMMAND GUARD DID NOT RUN: no .claude/hooks/guard-destructive-bash.py under CLAUDE_PROJECT_DIR=[${CLAUDE_PROJECT_DIR:-<unset>}] or git toplevel=[${top:-<none>}] (cwd $(pwd)). rm -rf / force-push / reset --hard parsing is OFF in this session; only the prefix deny rules apply -- relaunch Claude Code from a checkout root, or point CLAUDE_PROJECT_DIR at one.\" >&2; fi; exit 0",
             "timeout": 5
           }
         ]
@@ -99,7 +99,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "if [ -f build/human_tests ] && git diff --name-only HEAD 2>/dev/null | grep -qE '\\.(c|h)$'; then echo 'C files changed \u2014 verifying build...' >&2; cmake --build build -j$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4) 2>&1 | tail -5; if [ $? -ne 0 ]; then echo 'BUILD FAILED \u2014 fix before completing' >&2; exit 1; fi; fi; exit 0"
+            "command": "if [ -f build/human_tests ] && git diff --name-only HEAD 2>/dev/null | grep -qE '\\.(c|h)$'; then echo 'C files changed — verifying build...' >&2; cmake --build build -j$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4) 2>&1 | tail -5; if [ $? -ne 0 ]; then echo 'BUILD FAILED — fix before completing' >&2; exit 1; fi; fi; exit 0"
           }
         ]
       }
