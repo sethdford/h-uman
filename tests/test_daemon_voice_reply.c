@@ -238,6 +238,9 @@ static bool run_rewrite_voice(const char *reply, const char *rewrite) {
     return run_rewrite_voice_on(reply, rewrite, true, "cartesia");
 }
 
+/* The persona Cartesia arm exists only with HU_ENABLE_CARTESIA (the pre-push
+ * build has it off), so these tests are gated with it. */
+#if HU_ENABLE_CARTESIA
 /* Voice-first memos (spec 2026-09-28): the persona's Cartesia arm, where the
  * post-hoc classifier lives. A memo-length reply to a question is TEXT to the
  * classifier ("incoming_question"); decided VOICE up front, it goes. */
@@ -299,6 +302,8 @@ static void test_voice_reply_voice_first_needs_a_memo(void) {
     HU_ASSERT_FALSE(sent);
     HU_ASSERT_EQ(g_voice_sends, 0);
 }
+
+#endif /* HU_ENABLE_CARTESIA */
 
 /* F2-voice direction (spec 2026-09-27): the model performs the line. */
 static const char *g_direct_tts_model; /* NULL = the Cartesia default (sonic-3) */
@@ -517,8 +522,10 @@ void run_daemon_voice_reply_tests(void) {
     HU_RUN_TEST(test_voice_reply_with_link_goes_as_text);
     HU_RUN_TEST(test_voice_reply_rewrite_skipped_when_no_memo_can_go);
     HU_RUN_TEST(test_voice_reply_speaks_the_directed_line);
+#if HU_ENABLE_CARTESIA
     HU_RUN_TEST(test_voice_reply_voice_first_skips_the_text_classifier);
     HU_RUN_TEST(test_voice_reply_voice_first_needs_a_memo);
+#endif
     HU_RUN_TEST(test_voice_reply_opener_gate_strips_the_repeat);
     HU_RUN_TEST(test_voice_reply_invalid_direction_speaks_plain_text);
     HU_RUN_TEST(test_voice_reply_direction_shadow_speaks_plain_text);
