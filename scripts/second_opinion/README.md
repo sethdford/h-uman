@@ -20,7 +20,16 @@ runs the requested jobs against it, and always stops the model afterward:
   below).
 - **`gold`** (`gold.py`) — two things, both against real conversations:
   - Where Seth actually replied, a **critique** of h-uman's reply against
-    Seth's real one (`gaps`, `missing`, `severity`).
+    Seth's real one (`gaps`, `missing`, `severity`). The "weak moments"
+    critiqued are items Seth himself spotted with confidence ≥ 4 (from the
+    blind-A/B run dir's human sheets, `weak_source = "human"`) plus items the
+    **lane's own** judge caught — read only from the newest
+    `<reports-dir>/judge-YYYYMMDD/judged.csv`, only rows whose `judge_model` is
+    the current backend's model (`weak_source = "synthetic:<model>"`). Judged
+    sheets sitting in the blind-A/B run dir are ignored: their judge may be the
+    prod model family. A run dir with no `triples.json` skips critiques
+    (counted as `critiques_skipped_no_run`) but reference replies still run.
+    Critique ids are stored as `<run-dir name>/<item id>`.
   - Where h-uman replied and Seth did not, a **reference reply** in Seth's
     voice, stored **unrated**. Nothing is exported until a human rates it good
     (see `gold_rate.py` / `gold_export.py`).
@@ -62,12 +71,21 @@ see Promotion gates below.
   elapsed seconds, exit reason. It never contains message text, note text, or
   handles.
 - **Weekly reports** — `~/.human/logs/second-opinion-reports/audit-YYYYMMDD.json`
-  and `gold-YYYYMMDD.json` (written by the `report` job), plus, on a `judge`
+  and `gold-YYYYMMDD.json` (written by the `report` job; each covers only the
+  run's own backend and names it under `backends`), plus, on a `judge`
   run, `judge-YYYYMMDD/` (the judge's own `judged.csv` / `judge-results.json`,
   from `synthetic_judge.py` and `score.py`) and a `judge-YYYYMMDD.json`
   calibration summary. The summary is written whenever the judge job
-  completes; its agreement and kappa read `"not measured"` when fewer than 20
+  scores — `score.py` exits 0 on PASS and 1 on any other verdict, and both
+  count as scored; its agreement and kappa read `"not measured"` when fewer than 20
   human-rated items are available to compare against.
+
+- **Human-facing sheets and exports** — `~/.human/second_opinion/` by default
+  (`audit_check.csv` + `audit_check.key.json`, `rate.csv`, `gold_export.csv`);
+  the directory is created 0700 and every file 0600. They hold note text,
+  message context and contact handles, so keep them out of the repo checkout.
+- Every file the nightly run creates — including `judged.csv`, which a child
+  process writes — is owner-only: `run_nightly` sets `umask 077` first.
 
 ## Exit codes
 
@@ -107,7 +125,8 @@ the same time tomorrow, so an evening manual run still proceeds), `--dry-run` (c
 writes no DB rows — `judge` is always skipped under `--dry-run` because it
 would otherwise write message text to the reports dir and merge-write the gate
 file), `--backend {gemma,vertex}`, `--audit-limit N` (default 25),
-`--gold-limit N` (default 10), `--store PATH`, `--manifest-dir PATH`,
+`--gold-limit N` (default 10; applied separately to critiques and to
+reference replies, so a night makes at most 2 × N gold model calls), `--store PATH`, `--manifest-dir PATH`,
 `--reports-dir PATH`, `--mem-db PATH`, `--chat-db PATH`,
 `--blind-ab-root PATH` (default `~/blind_ab_run`, where the latest detection-
 mode rating sheet is found), `--judge-run-dir PATH` (override sheet
@@ -150,10 +169,24 @@ second concurrent run exits 0 immediately rather than racing the first).
    ```bash
    cd /Users/sethford/Projects/h-uman/scripts && /opt/homebrew/bin/python3 -m second_opinion.run_nightly --deadline 09:00
    ```
-   Back up any existing plist before installing. This runs from the shared
-   main checkout, like the curator.
+   Back up any existing plist before installing. Launchd notes:
+   - **Checkout.** The shared main checkout may be sitting on another
+     session's branch that doesn't have this package, which makes every night
+     fail with `ModuleNotFoundError`. Point the plist at a checkout that stays
+     on `main`.
+   - **Full Disk Access.** The launchd interpreter
+     (`/opt/homebrew/bin/python3`, a symlink into a versioned Cellar path)
+     needs Full Disk Access to read `chat.db`. Without it every night refuses
+     with exit 2 and writes nothing (fails safe). Re-grant after a Homebrew
+     Python upgrade changes the Cellar path.
+   - **`HU_INSIGHT_WIDE`.** Reference replies use the same notes the daemon
+     would render, and whether `curator_wide` notes are included is read
+     from **this** process's environment, not the daemon's. Set
+     `HU_INSIGHT_WIDE` in the second-opinion plist to the same value as the
+     daemon plist; if it is unset here, wide notes are treated as not live.
 4. **One-time 30-row human check**, after about 2 weeks of `audit` runs:
    ```bash
+   cd <repo>/scripts
    python3 -m second_opinion.audit_sheet   # writes audit_check.csv + audit_check.key.json
    #   -> Seth fills the "supported" column (y/n) in audit_check.csv
    python3 -m second_opinion.audit_score ~/.human/second_opinion/audit_check.csv \
@@ -161,10 +194,22 @@ second concurrent run exits 0 immediately rather than racing the first).
    ```
    `audit_sheet` refuses (exit 2, writes nothing) if there aren't yet 20
    resolvable `unsupported` and 10 resolvable `supported` audits to draw from.
+   Both commands default to `--backend gemma-4-31b-it-4bit@local --source wide`:
+   only local Gemma's verdicts on `curator_wide` notes, the population the
+   `HU_INSIGHT_WIDE` gate is about (`--source persona|all` are available). The
+   key file records backend, source and prompt versions, and `audit_score`
+   refuses a key drawn with a different backend or source. No insight appears
+   twice on one sheet. The reported interval treats Gemma's disagreement share
+   `d` as known (its own sampling error is not propagated), so the upper bound
+   is slightly optimistic.
 5. **Rate reference replies, then export only the good ones**:
    ```bash
-   python3 -m second_opinion.gold_rate --write rate.csv
-   #   -> Seth fills the "good" column (y/n) in rate.csv
-   python3 -m second_opinion.gold_rate --import rate.csv
-   python3 -m second_opinion.gold_export out.csv   # only rated-good rows; unrated/rejected never exported
+   cd <repo>/scripts
+   python3 -m second_opinion.gold_rate --write     # -> ~/.human/second_opinion/rate.csv
+   #   -> Seth fills the "good" column (y/n) in that file
+   python3 -m second_opinion.gold_rate --import    # reads ~/.human/second_opinion/rate.csv
+   python3 -m second_opinion.gold_export           # -> ~/.human/second_opinion/gold_export.csv
    ```
+   Only rated-good rows are exported; unrated/rejected rows never are. The
+   export holds contact handles — never point `--write`/`gold_export` at a path
+   inside the checkout.
