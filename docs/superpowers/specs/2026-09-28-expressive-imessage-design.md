@@ -115,3 +115,28 @@ Phase 1 fully. Phase 2 + the effect / threaded / tapback executors of Phase 3,
 shipped in SHADOW (director decides and logs; sends unchanged) so Seth can read
 a day of decisions before any of it goes LIVE. GIF waits on a Tenor key;
 stickers and Phase 4 are follow-ups.
+
+## Phase 5 — Sharing songs, videos, Shorts and saved links
+
+Approved by Seth 2026-09-29 ("Lets do 1-4").
+
+Today (measured): music shares (iTunes search → Apple Music link that iMessage
+unfurls into a card with a 30 s preview) and YouTube links go out on a ~5%
+dice roll; 3 music shares logged. TikTok has no public search API.
+
+1. **The director decides when to share.** New form:
+   `action:share|share:<song|video|short|saved>|q:<search words>`. Guards: never
+   on somber news, never in groups, at most one share per contact per day. LIVE
+   (HU_DIRECTOR_FORMS=live) routes the share to the existing rich-media sender
+   with the director's query, and the dice-roll share stops — one decider.
+2. **Links go through the bridge.** A message that is exactly one URL is sent
+   with `imsg send-rich --chat iMessage;-;<handle> --url <url>` when the bridge
+   is up (a guaranteed rich-link balloon), else the existing `imsg send`.
+3. **Shorts.** `share:short` searches YouTube with `videoDuration=short`.
+4. **Saved shares — "saw this and thought of you".** Seth texts a link to his
+   own number (a handle whose persona relationship is `test`), optionally with
+   "for <name>". The daemon stores it in `<state>/share_queue.jsonl`, never
+   replies to it, and the director's "This turn:" line mentions a saved link
+   for that contact (tagged first, else an untagged one). `share:saved` sends
+   it with one short line; a sent item leaves the queue. TikToks, Reels and
+   Shorts all work this way because Seth does the finding.
