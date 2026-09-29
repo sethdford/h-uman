@@ -6212,24 +6212,14 @@ static size_t gif_json_extract(const char *json, size_t json_len, const char *ke
     }
     return 0;
 }
-#endif /* HU_IS_TEST || HU_HTTP_CURL */
 
-#if HU_IS_TEST
-size_t hu_imessage_test_gif_json_extract(const char *json, size_t json_len, const char *key,
-                                         char *out, size_t cap) {
-    return gif_json_extract(json, json_len, key, out, cap);
-}
-#endif
-
-#if !HU_IS_TEST && defined(HU_HTTP_CURL)
-#include "human/core/http.h"
-#include "human/core/json.h"
-
-char *hu_imessage_fetch_gif(hu_allocator_t *alloc, const char *query, size_t query_len,
-                            const char *api_key, size_t api_key_len) {
-    if (!alloc || !query || query_len == 0 || !api_key || api_key_len == 0)
-        return NULL;
-
+size_t hu_imessage_gif_search_url(char *out, size_t cap, const char *query, size_t query_len,
+                                  const char *api_key, size_t api_key_len) {
+    if (!out || cap == 0)
+        return 0;
+    out[0] = '\0';
+    if (!query || query_len == 0 || !api_key || api_key_len == 0)
+        return 0;
     /* URL-encode the query: spaces to +, unreserved chars verbatim, rest %XX */
     char encoded[512];
     size_t eidx = 0;
@@ -6248,13 +6238,37 @@ char *hu_imessage_fetch_gif(hu_allocator_t *alloc, const char *query, size_t que
         }
     }
     encoded[eidx] = '\0';
+    /* Klipy keeps Tenor v2's request and response shape; Tenor itself was shut
+     * down by Google on 2026-06-30. */
+    int n =
+        snprintf(out, cap, "https://api.klipy.com/v2/search?q=%s&key=%.*s&limit=1&media_filter=gif",
+                 encoded, (int)api_key_len, api_key);
+    if (n < 0 || (size_t)n >= cap) {
+        out[0] = '\0';
+        return 0;
+    }
+    return (size_t)n;
+}
+#endif /* HU_IS_TEST || HU_HTTP_CURL */
 
-    char url[512];
-    int n = snprintf(url, sizeof(url),
-                     "https://tenor.googleapis.com/v2/search?q=%s&key=%.*s"
-                     "&client_key=human_app&limit=1&media_filter=gif",
-                     encoded, (int)api_key_len, api_key);
-    if (n < 0 || (size_t)n >= sizeof(url))
+#if HU_IS_TEST
+size_t hu_imessage_test_gif_json_extract(const char *json, size_t json_len, const char *key,
+                                         char *out, size_t cap) {
+    return gif_json_extract(json, json_len, key, out, cap);
+}
+#endif
+
+#if !HU_IS_TEST && defined(HU_HTTP_CURL)
+#include "human/core/http.h"
+#include "human/core/json.h"
+
+char *hu_imessage_fetch_gif(hu_allocator_t *alloc, const char *query, size_t query_len,
+                            const char *api_key, size_t api_key_len) {
+    if (!alloc || !query || query_len == 0 || !api_key || api_key_len == 0)
+        return NULL;
+
+    char url[768];
+    if (hu_imessage_gif_search_url(url, sizeof(url), query, query_len, api_key, api_key_len) == 0)
         return NULL;
 
     hu_http_response_t resp = {0};

@@ -9714,9 +9714,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     if (hu_conversation_should_send_gif(combined, combined_len, history_entries,
                                                         history_count, gif_seed, gif_prob) &&
                         hu_conversation_gif_rate_allow(batch_key, key_len, gif_now_ms, 5, 600000)) {
-                        const char *tenor_key =
-                            config ? hu_config_get_provider_key(config, "tenor") : NULL;
-                        if (tenor_key && tenor_key[0]) {
+                        /* Klipy (Tenor's v2 contract; Tenor shut down 2026-06-30). */
+                        const char *gif_key =
+                            config ? hu_config_get_provider_key(config, "klipy") : NULL;
+                        if (gif_key && gif_key[0]) {
                             char gif_style[128];
                             size_t gs_len = hu_conversation_build_gif_style_hint(
                                 contact_rel, contact_rel_len, gif_style, sizeof(gif_style));
@@ -9750,9 +9751,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                         &gif_query, &gif_query_len);
                                 }
                                 if (gif_query && gif_query_len > 0 && gif_query_len < 100) {
-                                    char *gif_path =
-                                        hu_imessage_fetch_gif(alloc, gif_query, gif_query_len,
-                                                              tenor_key, strlen(tenor_key));
+                                    char *gif_path = hu_imessage_fetch_gif(
+                                        alloc, gif_query, gif_query_len, gif_key, strlen(gif_key));
                                     if (gif_path) {
                                         usleep(2000000 + (gif_seed % 3000000));
                                         const char *media[] = {gif_path};

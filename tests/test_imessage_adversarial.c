@@ -303,6 +303,20 @@ static void imessage_fetch_gif_rejects_empty_query(void) {
     HU_ASSERT_NULL(hu_imessage_fetch_gif(&alloc, "", 0, "key", 3));
 }
 
+/* Google shut the Tenor API down on 2026-06-30 (no new keys since 2026-01-13);
+ * Klipy serves the same /v2/search contract. The search must go there, the
+ * query encoded, never to the dead Tenor host. */
+static void imessage_gif_search_url_targets_klipy(void) {
+    char url[512];
+    HU_ASSERT_TRUE(hu_imessage_gif_search_url(url, sizeof(url), S("slow clap"), S("test-key")) > 0);
+    HU_ASSERT_STR_CONTAINS(url, "https://api.klipy.com/v2/search?q=slow+clap");
+    HU_ASSERT_STR_CONTAINS(url, "key=test-key");
+    HU_ASSERT_STR_NOT_CONTAINS(url, "tenor");
+    HU_ASSERT_TRUE(hu_imessage_gif_search_url(url, sizeof(url), S("a&b=c"), S("k")) > 0);
+    HU_ASSERT_STR_CONTAINS(url, "q=a%26b%3Dc&");
+    HU_ASSERT_EQ(hu_imessage_gif_search_url(url, 16, S("slow clap"), S("test-key")), 0u);
+}
+
 static void imessage_gif_json_extract_finds_url_value(void) {
     char out[256];
     const char *j = "\"media_formats\":{\"gif\":{\"url\":\"https://c.example/g.gif\"}}";
@@ -2371,6 +2385,7 @@ void run_imessage_adversarial_tests(void) {
     HU_RUN_TEST(imessage_build_read_receipt_context_noop_under_test);
     HU_RUN_TEST(imessage_fetch_gif_stub_returns_null);
     HU_RUN_TEST(imessage_fetch_gif_rejects_empty_query);
+    HU_RUN_TEST(imessage_gif_search_url_targets_klipy);
     HU_RUN_TEST(imessage_gif_json_extract_finds_url_value);
     HU_RUN_TEST(imessage_gif_json_extract_returns_zero_when_key_missing);
     HU_RUN_TEST(imessage_gif_json_extract_truncates_to_out_cap);

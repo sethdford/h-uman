@@ -266,12 +266,18 @@ size_t hu_imessage_imcore_conformance(const hu_imcore_selector_req_t *reqs, size
                                       hu_imcore_selector_resolver_fn resolve,
                                       hu_imcore_selector_missing_fn on_missing, void *ud);
 
-/** Search Tenor for a GIF matching the query and download to a temp file.
+/** Search Klipy (the Tenor-compatible successor; Google shut the Tenor API down
+ * on 2026-06-30) for a GIF matching the query and download it to a temp file.
  * Returns the local path to the downloaded GIF (caller owns, free with alloc).
  * Returns NULL on failure (no API key, network error, no results).
- * Requires HU_ENABLE_CURL. api_key is the Tenor API v2 key. */
+ * Requires HU_ENABLE_CURL. api_key is a Klipy API key (providers.klipy). */
 char *hu_imessage_fetch_gif(hu_allocator_t *alloc, const char *query, size_t query_len,
                             const char *api_key, size_t api_key_len);
+
+/** The Klipy /v2/search URL for one GIF, query URL-encoded. Length written, 0
+ * if it did not fit. */
+size_t hu_imessage_gif_search_url(char *out, size_t cap, const char *query, size_t query_len,
+                                  const char *api_key, size_t api_key_len);
 
 /* ── FDA-aware circuit breaker + poll status ─────────────────────────────
  * The iMessage poller depends on sqlite read access to ~/Library/Messages/chat.db,
