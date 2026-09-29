@@ -80,6 +80,12 @@ size_t hu_agent_internal_recent_assistant_avg_len(const hu_agent_t *agent, size_
 /* Fit the request's messages ([0] = system, last = the current message): the
  * per-turn history_msg_cap first, then the 20 KB byte budget (oldest first).
  * Compacts msgs in place and returns the new count. */
+/* The provider the contact-recall planner may call: NULL (its local
+ * heuristic path) for a short casual message, which is not worth a 4 s
+ * planner call — the semantic-recall register gate already skips those. */
+hu_provider_t *hu_agent_internal_recall_provider(hu_agent_t *agent, const char *msg,
+                                                 size_t msg_len);
+
 size_t hu_agent_internal_fit_history(const hu_agent_t *agent, hu_chat_message_t *msgs,
                                      size_t msgs_count);
 
