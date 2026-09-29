@@ -3543,7 +3543,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     if (night_lt)
                         bth_hour = night_lt->tm_hour;
                 }
-                if (bth_hour >= 0) {
+                /* A #command from Seth's own number is answered at any hour. */
+                if (bth_hour >= 0 &&
+                    !hu_selftest_from_owner(agent ? agent->persona : NULL, batch_key, key_len,
+                                            combined, combined_len)) {
                     if (bth_hour >= 2 && bth_hour < 6) {
                         /* 2AM-6AM: very high SKIP chance (sleeping) */
                         uint32_t night_r = (uint32_t)time(NULL) * 1103515245u + 12345u;

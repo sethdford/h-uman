@@ -1,5 +1,6 @@
 #include "human/core/string.h"
 #include "human/daemon/expressive.h"
+#include "human/daemon/share_queue.h"
 
 #include <ctype.h>
 #include <pthread.h>
@@ -308,4 +309,10 @@ bool hu_expressive_effect_gate(const hu_director_result_t *d, bool valid, bool f
     }
     pthread_mutex_unlock(&s_budget_mu);
     return ok;
+}
+
+bool hu_selftest_from_owner(const struct hu_persona *p, const char *key, size_t key_len,
+                            const char *text, size_t len) {
+    hu_selftest_t t;
+    return p && hu_share_is_owner(p, key, key_len) && hu_selftest_parse(text, len, &t);
 }

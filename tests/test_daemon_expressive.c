@@ -2,6 +2,7 @@
  * 2026-09-28-expressive-imessage): the model proposes, C decides whether a
  * flourish is appropriate right now. */
 #include "human/daemon/expressive.h"
+#include "human/persona.h"
 #include "test_framework.h"
 
 #include <string.h>
@@ -221,6 +222,27 @@ static void test_expressive_effect_gate(void) {
                                               "+15550000082", 12, 1000, e, sizeof(e)));
 }
 
+/* A self-test from Seth's own number is answered at any hour (the 2-6 AM
+ * late-night skip ate the first live #voice test, 2026-09-29 05:10). */
+static void test_selftest_from_owner(void) {
+    static hu_contact_profile_t cs[2];
+    memset(cs, 0, sizeof(cs));
+    cs[0].contact_id = "+15550000009";
+    cs[0].relationship = "test";
+    cs[1].contact_id = "+15550000001";
+    cs[1].relationship = "sister";
+    hu_persona_t p;
+    memset(&p, 0, sizeof(p));
+    p.contacts = cs;
+    p.contacts_count = 2;
+    const char *cmd = "#voice hey";
+    HU_ASSERT_TRUE(hu_selftest_from_owner(&p, "+15550000009", 12, cmd, strlen(cmd)));
+    HU_ASSERT_FALSE(hu_selftest_from_owner(&p, "+15550000001", 12, cmd, strlen(cmd)));
+    const char *chat = "hey how are you";
+    HU_ASSERT_FALSE(hu_selftest_from_owner(&p, "+15550000009", 12, chat, strlen(chat)));
+    HU_ASSERT_FALSE(hu_selftest_from_owner(NULL, "+15550000009", 12, cmd, strlen(cmd)));
+}
+
 void run_daemon_expressive_tests(void) {
     HU_TEST_SUITE("daemon expressive");
     HU_RUN_TEST(test_expressive_somber_moments);
@@ -235,4 +257,5 @@ void run_daemon_expressive_tests(void) {
     HU_RUN_TEST(test_selftest_commands);
     HU_RUN_TEST(test_selftest_apply_overrides_the_director);
     HU_RUN_TEST(test_expressive_effect_gate);
+    HU_RUN_TEST(test_selftest_from_owner);
 }

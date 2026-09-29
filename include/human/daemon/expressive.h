@@ -78,6 +78,11 @@ bool hu_selftest_parse(const char *text, size_t len, hu_selftest_t *out);
 /* The command becomes the director's choice for the turn. */
 void hu_expressive_selftest_apply(const hu_selftest_t *t, hu_director_result_t *d);
 
+struct hu_persona;
+/* A #command from one of Seth's own numbers: answered at any hour. */
+bool hu_selftest_from_owner(const struct hu_persona *p, const char *key, size_t key_len,
+                            const char *text, size_t len);
+
 /* The director's effect, LIVE only, past hu_expressive_effect_allowed and a
  * once-a-week-per-contact budget (remembered for this process). On true,
  * effect_out holds the id to mark the reply with. */
