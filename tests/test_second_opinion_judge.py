@@ -175,3 +175,15 @@ def test_judge_pass_needs_the_results_file_even_on_exit_1(tmp_path):
     with pytest.raises(RuntimeError):
         judge.judge_pass(G(), str(run_dir), str(tmp_path / "out"),
                          run=_scoring_run(1, write_results=False))
+
+
+def test_judge_pass_stamps_the_run_dir_it_judged(tmp_path):
+    import hashlib
+    run_dir = _run_dir_25(tmp_path)
+    out = tmp_path / "out"
+    judge.judge_pass(G(), str(run_dir), str(out), run=_scoring_run(0))
+    src = out / "source.json"
+    assert (src.stat().st_mode & 0o777) == 0o600
+    want = hashlib.sha256((run_dir / "answer_key.json").read_bytes()).hexdigest()[:16]
+    assert json.loads(src.read_text()) == {"run_dir": "run", "answer_key_sha256": want}
+    assert judge.lane_sheet_matches(str(out / "judged.csv"), str(run_dir))

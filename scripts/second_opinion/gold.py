@@ -9,7 +9,7 @@ import json
 import os
 import re
 
-from . import store
+from . import judge, store
 
 CRITIQUE_VERSION = "critique-v1"
 REFERENCE_VERSION = "reference-v1"
@@ -37,8 +37,10 @@ def weak_items(run_dir, judged_csv=None, judge_model=None):
     blind-A/B run dir. Synthetic detections come ONLY from `judged_csv` -- the
     lane's own judge output -- and only from rows stamped with `judge_model`
     (the current backend's model id); judged sheets inside the run dir are
-    ignored, because their judge may be the prod model family. weak_source is
-    "human" or "synthetic:<judge_model>". A run dir without answer_key.json or
+    ignored, because their judge may be the prod model family. The lane sheet
+    is used only when its source.json records this run dir's basename and
+    answer-key hash (judge.lane_sheet_matches); otherwise synthetic detections
+    count as zero. weak_source is "human" or "synthetic:<judge_model>". A run dir without answer_key.json or
     triples.json yields [] (the operator hasn't copied triples in yet)."""
     if not _run_usable(run_dir):
         return []
@@ -72,7 +74,8 @@ def weak_items(run_dir, judged_csv=None, judge_model=None):
                 conf = 0
             if conf >= 4:
                 human.append(r["id"])
-    if judged_csv and judge_model and os.path.isfile(judged_csv):
+    if (judged_csv and judge_model and os.path.isfile(judged_csv)
+            and judge.lane_sheet_matches(judged_csv, run_dir)):
         with open(judged_csv, newline="") as f:
             for r in csv.DictReader(f):
                 if (r.get("judge_model") or "").strip() == judge_model and caught(r):
@@ -149,16 +152,18 @@ def gold_pass(store_con, backend, run_dirs, att, mem, limit, deadline=None, now=
             return True
         return False
 
-    c["critiques_skipped_no_run"] = 0
-    if not run_dirs:
-        c["critiques_skipped_no_run"] = 1
+    c["critiques_skipped_no_run_dir"] = 0 if run_dirs else 1
+    c["critiques_skipped_no_triples"] = 0
     done = store.critiqued_items(store_con, backend.name)
     todo = []
     for d in run_dirs:
-        if not _run_usable(d):
-            # No triples.json (or key) yet: skip the critique half for this run
-            # dir, but the reference-reply half below does not need one.
-            c["critiques_skipped_no_run"] += 1
+        # The reference-reply half below needs no run dir, so neither skip
+        # stops it.
+        if not os.path.isfile(os.path.join(d, "answer_key.json")):
+            c["critiques_skipped_no_run_dir"] += 1   # not a usable blind-A/B run dir
+            continue
+        if not os.path.isfile(os.path.join(d, "triples.json")):
+            c["critiques_skipped_no_triples"] += 1   # operator hasn't copied triples in
             continue
         # Item ids like "c5-001" recur across re-exported run dirs, so the
         # stored id is scoped by the run dir's name.

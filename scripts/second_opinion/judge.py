@@ -3,6 +3,7 @@ local Gemma, records with score.py --rater synthetic (never the human key),
 and measures agreement with Seth's own ratings on the same items."""
 import csv
 import glob
+import hashlib
 import json
 import os
 import subprocess
@@ -36,6 +37,36 @@ def latest_run_dir(root):
             and os.path.isfile(os.path.join(d, "answer_key.json"))
             and _key_is_detection_mode(os.path.join(d, "answer_key.json"))]
     return max(dirs, key=os.path.getmtime) if dirs else None
+
+
+SOURCE_FILE = "source.json"
+
+
+def run_stamp(run_dir):
+    """What a lane judged.csv was judged against: the blind-A/B run dir's
+    basename plus the first 16 hex chars of sha256(answer_key.json bytes).
+    None if the key can't be read."""
+    try:
+        with open(os.path.join(run_dir, "answer_key.json"), "rb") as f:
+            digest = hashlib.sha256(f.read()).hexdigest()[:16]
+    except OSError:
+        return None
+    return {"run_dir": os.path.basename(os.path.normpath(run_dir)), "answer_key_sha256": digest}
+
+
+def lane_sheet_matches(judged_csv, run_dir):
+    """True only if judged_csv's sibling source.json exists and records exactly
+    this run dir (basename AND answer-key hash). Missing, unreadable or
+    mismatched provenance means the sheet must not be used."""
+    try:
+        with open(os.path.join(os.path.dirname(judged_csv), SOURCE_FILE)) as f:
+            recorded = json.load(f)
+    except (OSError, ValueError):
+        return False
+    want = run_stamp(run_dir)
+    return (want is not None and isinstance(recorded, dict)
+            and recorded.get("run_dir") == want["run_dir"]
+            and recorded.get("answer_key_sha256") == want["answer_key_sha256"])
 
 
 def _choices(path):
@@ -90,6 +121,10 @@ def judge_pass(backend, run_dir, out_dir, run=subprocess.run, timeout=None):
              capture_output=True, text=True, timeout=timeout)
     if r1.returncode != 0:
         raise RuntimeError("synthetic_judge.py failed")
+    # Provenance for the gold job: it uses this judged.csv only for the run
+    # dir (and answer key) it was judged against.
+    with store.private_open(os.path.join(out_dir, SOURCE_FILE)) as f:
+        json.dump(run_stamp(run_dir), f)
     r2 = run([sys.executable, os.path.join(BLIND_AB, "score.py"), judged,
               "--key", os.path.join(run_dir, "answer_key.json"), "--rater", "synthetic",
               "--json-out", results], capture_output=True, text=True, timeout=timeout)

@@ -27,8 +27,14 @@ runs the requested jobs against it, and always stops the model afterward:
     `<reports-dir>/judge-YYYYMMDD/judged.csv`, only rows whose `judge_model` is
     the current backend's model (`weak_source = "synthetic:<model>"`). Judged
     sheets sitting in the blind-A/B run dir are ignored: their judge may be the
-    prod model family. A run dir with no `triples.json` skips critiques
-    (counted as `critiques_skipped_no_run`) but reference replies still run.
+    prod model family. The lane sheet is used only when the `source.json`
+    `judge_pass` writes beside it names this run dir's basename and the
+    sha256 (first 16 hex) of its `answer_key.json`; a missing or mismatched
+    `source.json` means no synthetic moments that night. The `judge` job runs
+    before `gold`, so on Sundays gold reads that same night's sheet. With no
+    usable run dir critiques are skipped (`critiques_skipped_no_run_dir`); a
+    run dir with no `triples.json` also skips them
+    (`critiques_skipped_no_triples`). Reference replies run either way.
     Critique ids are stored as `<run-dir name>/<item id>`.
   - Where h-uman replied and Seth did not, a **reference reply** in Seth's
     voice, stored **unrated**. Nothing is exported until a human rates it good

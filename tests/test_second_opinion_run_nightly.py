@@ -435,7 +435,8 @@ def test_gold_without_triples_still_writes_reference_replies(tmp_path):
     assert rc == 0
     man = json.loads((tmp_path / "logs" / "second-opinion-20260929.json").read_text())
     assert "error" not in man["gold"]
-    assert man["gold"]["critiques_skipped_no_run"] == 1 and man["gold"]["references"] == 1
+    assert man["gold"]["critiques_skipped_no_triples"] == 1 and man["gold"]["references"] == 1
+    assert man["gold"]["critiques_skipped_no_run_dir"] == 0
     n = sqlite3.connect(tmp_path / "so.db").execute(
         "SELECT COUNT(*) FROM reference_replies").fetchone()[0]
     assert n == 1
@@ -461,6 +462,7 @@ def test_gold_reads_synthetic_moments_only_from_the_lanes_judged_sheet(tmp_path)
     lane = tmp_path / "reports" / "judge-20260927"
     lane.mkdir(parents=True)
     (run_dir / "judged_prod.csv").rename(lane / "judged.csv")
+    (lane / "source.json").write_text(json.dumps(run_nightly.judge.run_stamp(str(run_dir))))
     ok = '{"gaps":["tone"],"missing":"m","severity":1}'
     rc = run_nightly.main(args(tmp_path, "--jobs", "gold"), now_local=LOCAL_MORNING,
                           serve=serve_with(Fake([ok])), attribute=no_att)
@@ -518,3 +520,27 @@ def test_lane_opener_is_read_only(tmp_path, name, maker):
     with pytest.raises(sqlite3.OperationalError):
         con.execute("INSERT INTO message (text) VALUES ('x')" if name == "chat.db"
                     else "INSERT INTO messages (content) VALUES ('x')")
+
+
+def test_judge_runs_before_gold_and_its_failure_does_not_stop_gold(tmp_path, monkeypatch):
+    setup(tmp_path)
+    make_ab_run_dir(tmp_path)
+    order = []
+
+    def fake_judge(*a, **k):
+        order.append("judge")
+        raise RuntimeError("judge broke")
+
+    def fake_gold(*a, **k):
+        order.append("gold")
+        return {"critiques": 0, "references": 0, "unparseable": 0, "errors": 0,
+                "attempted": 0, "stopped_at_deadline": 0}
+
+    monkeypatch.setattr(run_nightly.judge, "judge_pass", fake_judge)
+    monkeypatch.setattr(run_nightly.gold, "gold_pass", fake_gold)
+    rc = run_nightly.main(args(tmp_path, "--jobs", "gold,judge"), now_local=LOCAL_MORNING,
+                          serve=serve_with(Fake([])), attribute=no_att)
+    assert order == ["judge", "gold"]
+    man = json.loads((tmp_path / "logs" / "second-opinion-20260929.json").read_text())
+    assert man["judge"] == {"error": "RuntimeError"} and "error" not in man["gold"]
+    assert rc == 0

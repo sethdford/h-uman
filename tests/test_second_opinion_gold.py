@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
-from second_opinion import gold, store  # noqa: E402
+from second_opinion import gold, judge, store  # noqa: E402
 
 T0 = dt.datetime(2026, 9, 28, 12, 0, tzinfo=dt.timezone.utc)
 
@@ -43,10 +43,15 @@ def run_dir(tmp_path, name="run"):
     return str(d)
 
 
-def lane_judged(tmp_path, model=JUDGE_MODEL):
-    """The lane's own judge output: <reports>/judge-YYYYMMDD/judged.csv."""
-    return judged_sheet(tmp_path / "reports" / "judge-20260927" / "judged.csv",
+def lane_judged(tmp_path, model=JUDGE_MODEL, run="run", stamp=True):
+    """The lane's own judge output: <reports>/judge-YYYYMMDD/judged.csv, plus the
+    source.json judge_pass writes (the run dir it was judged against)."""
+    path = judged_sheet(tmp_path / "reports" / "judge-20260927" / "judged.csv",
                         [("x2", "A"), ("x3", "B"), ("x1", "A")], model)
+    if stamp:
+        (Path(path).parent / "source.json").write_text(
+            json.dumps(judge.run_stamp(str(tmp_path / run))))
+    return path
 
 
 def test_weak_items_human_first_then_lane_synthetic_with_model(tmp_path):
@@ -167,10 +172,12 @@ def test_gold_pass_writes_critiques_and_unrated_references_and_dedupes(tmp_path)
     a["labeled"]["+1a"] = a["labeled"]["+1a"][:2]
     outputs = ['{"gaps":["specific_detail"],"missing":"m","severity":2}',
                "not json", TimeoutError(), "7pm? i'm in", "hey!"]
-    jc = lane_judged(tmp_path)
-    c = gold.gold_pass(s, Fake(outputs), [run_dir(tmp_path)], a, mem(), limit=10, judged_csv=jc)
+    d = run_dir(tmp_path)
+    jc = lane_judged(tmp_path)                   # stamped against d, so it matches
+    c = gold.gold_pass(s, Fake(outputs), [d], a, mem(), limit=10, judged_csv=jc)
     assert c["critiques"] == 2 and c["unparseable"] == 1 and c["errors"] == 1
-    assert c["references"] == 2 and c["critiques_skipped_no_run"] == 0
+    assert c["references"] == 2
+    assert c["critiques_skipped_no_run_dir"] == 0 and c["critiques_skipped_no_triples"] == 0
     assert s.execute("SELECT COUNT(*) FROM reference_replies WHERE rated IS NULL").fetchone()[0] == 2
     stored = s.execute("SELECT item_id, weak_source FROM critiques ORDER BY id").fetchall()
     assert stored == [("run/x0", "human"), ("run/x2", "synthetic:" + JUDGE_MODEL)]
@@ -202,7 +209,8 @@ def test_gold_pass_without_triples_still_writes_reference_replies(tmp_path):
     a["labeled"]["+1a"] = a["labeled"]["+1a"][:2]
     c = gold.gold_pass(s, Fake(["7pm? i'm in", "hey!"]), [d], a, mem(), limit=10,
                        judged_csv=lane_judged(tmp_path))
-    assert c["critiques_skipped_no_run"] == 1 and c["critiques"] == 0
+    assert c["critiques_skipped_no_triples"] == 1 and c["critiques"] == 0
+    assert c["critiques_skipped_no_run_dir"] == 0
     assert c["references"] == 2
 
 
@@ -216,3 +224,50 @@ def test_gold_report_filters_and_names_backends():
     local = gold.gold_report(s, backend="g@local")
     assert local == {"critiques": 1, "references": 0, "unparseable": 0, "gaps": {"tone": 1},
                      "backends": ["g@local"]}
+
+
+# ---------------------------------------------------------------------------
+# Follow-up: a lane judged.csv is used only for the run dir it was judged on.
+# ---------------------------------------------------------------------------
+
+def _pairs(items):
+    return [(i, s) for i, s, _ in items]
+
+
+def test_lane_sheet_with_matching_source_is_used(tmp_path):
+    d = run_dir(tmp_path)
+    src = "synthetic:" + JUDGE_MODEL
+    assert _pairs(gold.weak_items(d, lane_judged(tmp_path), JUDGE_MODEL)) == [
+        ("x0", "human"), ("x2", src), ("x3", src)]
+
+
+def test_lane_sheet_for_another_run_dir_is_ignored(tmp_path):
+    d = run_dir(tmp_path)
+    run_dir(tmp_path, "other")                   # same key bytes, different name
+    jc = lane_judged(tmp_path, run="other")
+    assert _pairs(gold.weak_items(d, jc, JUDGE_MODEL)) == [("x0", "human")]
+
+
+def test_lane_sheet_for_same_name_but_different_key_is_ignored(tmp_path):
+    d = run_dir(tmp_path)
+    jc = lane_judged(tmp_path)                   # stamped with today's key hash
+    key = json.loads((Path(d) / "answer_key.json").read_text())
+    key["x3"] = "A"                              # the run was re-exported
+    (Path(d) / "answer_key.json").write_text(json.dumps(key))
+    assert _pairs(gold.weak_items(d, jc, JUDGE_MODEL)) == [("x0", "human")]
+
+
+def test_lane_sheet_without_source_json_is_ignored(tmp_path):
+    d = run_dir(tmp_path)
+    jc = lane_judged(tmp_path, stamp=False)
+    assert _pairs(gold.weak_items(d, jc, JUDGE_MODEL)) == [("x0", "human")]
+
+
+def test_gold_pass_counts_missing_run_dir_and_missing_key_as_no_run_dir(tmp_path):
+    s = store.open_store(":memory:")
+    c = gold.gold_pass(s, Fake([]), [], None, mem(), limit=10)
+    assert c["critiques_skipped_no_run_dir"] == 1 and c["critiques_skipped_no_triples"] == 0
+    d = run_dir(tmp_path)
+    (Path(d) / "answer_key.json").unlink()
+    c = gold.gold_pass(s, Fake([]), [d], None, mem(), limit=10)
+    assert c["critiques_skipped_no_run_dir"] == 1 and c["critiques_skipped_no_triples"] == 0

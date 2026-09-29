@@ -7,7 +7,9 @@ not every attempted job or item did; 2 refused (nothing written); 3 every
 attempted job raised, or every attempted item failed (manifest still
 written).
 
-Each job (audit, gold, judge, the two report writes) is isolated in its own
+Jobs run in the order audit, judge, gold, report (judge before gold so gold
+reads this run's lane judged.csv). Each job (audit, judge, gold, the two
+report writes) is isolated in its own
 try/except: an exception there is recorded as {"error": "<ExceptionType>"}
 (never the exception's message/args — those can carry note text or handles)
 under that job's manifest key, counted as a failed job, and the run continues
@@ -204,27 +206,9 @@ def _run_jobs(a, jobs, deadline, now_local, attribute, utcnow, con, backend, mem
             man["audit"] = {"error": type(e).__name__}
             jobs_failed += 1
 
-    if "gold" in jobs:
-        jobs_run += 1
-        try:
-            since = now_local - dt.timedelta(days=7)
-            try:
-                att = attribute(a.chat_db, a.mem_db, since)
-            except Exception:
-                att = None  # critiques still run; reference replies need attribution
-                man["gold_attribution_error"] = 1
-            runs = [d for d in [judge.latest_run_dir(a.blind_ab_root)] if d]
-            # wide_live reads THIS process's env (the second-opinion plist), not
-            # the daemon's: set HU_INSIGHT_WIDE in both plists (README).
-            man["gold"] = gold.gold_pass(con, backend, runs, att, mem, a.gold_limit, deadline,
-                                         wide_live=os.environ.get("HU_INSIGHT_WIDE") == "live",
-                                         judged_csv=judge.latest_lane_judged(a.reports_dir))
-            item_attempted += man["gold"]["attempted"]
-            item_errors += man["gold"]["errors"]
-        except Exception as e:
-            man["gold"] = {"error": type(e).__name__}
-            jobs_failed += 1
-
+    # judge runs BEFORE gold: gold reads the lane's newest judged.csv, and on a
+    # night that runs both it must see this run's sheet, not last week's. Each
+    # job stays isolated, so a judge failure never stops gold.
     if "judge" in jobs:
         attempted_now = False
         try:
@@ -253,6 +237,27 @@ def _run_jobs(a, jobs, deadline, now_local, attribute, utcnow, con, backend, mem
             man["judge"] = {"error": type(e).__name__}
             if not attempted_now:
                 jobs_run += 1
+            jobs_failed += 1
+
+    if "gold" in jobs:
+        jobs_run += 1
+        try:
+            since = now_local - dt.timedelta(days=7)
+            try:
+                att = attribute(a.chat_db, a.mem_db, since)
+            except Exception:
+                att = None  # critiques still run; reference replies need attribution
+                man["gold_attribution_error"] = 1
+            runs = [d for d in [judge.latest_run_dir(a.blind_ab_root)] if d]
+            # wide_live reads THIS process's env (the second-opinion plist), not
+            # the daemon's: set HU_INSIGHT_WIDE in both plists (README).
+            man["gold"] = gold.gold_pass(con, backend, runs, att, mem, a.gold_limit, deadline,
+                                         wide_live=os.environ.get("HU_INSIGHT_WIDE") == "live",
+                                         judged_csv=judge.latest_lane_judged(a.reports_dir))
+            item_attempted += man["gold"]["attempted"]
+            item_errors += man["gold"]["errors"]
+        except Exception as e:
+            man["gold"] = {"error": type(e).__name__}
             jobs_failed += 1
 
     if "report" in jobs and not a.dry_run:
