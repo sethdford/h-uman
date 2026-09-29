@@ -65,16 +65,18 @@ see Promotion gates below.
   and `gold-YYYYMMDD.json` (written by the `report` job), plus, on a `judge`
   run, `judge-YYYYMMDD/` (the judge's own `judged.csv` / `judge-results.json`,
   from `synthetic_judge.py` and `score.py`) and a `judge-YYYYMMDD.json`
-  calibration summary when a human-rated sheet was available to compare
-  against.
+  calibration summary. The summary is written whenever the judge job
+  completes; its agreement and kappa read `"not measured"` when fewer than 20
+  human-rated items are available to compare against.
 
 ## Exit codes
 
 - **0** — ok (including "another run holds the lock, did nothing" and "the
   scheduling window is closed").
 - **2** — refused; nothing written. Malformed `--deadline`/`--jobs`, an
-  unreadable `memory.db`/`chat.db`, a non-loopback Gemma URL, `--backend
-  vertex` without ADC credentials, or a lock file that can't be opened.
+  unreadable `memory.db`/`chat.db`, a Gemma server that never becomes
+  healthy or a busy `:8743`, `--backend vertex` without ADC credentials, or a
+  lock file that can't be opened.
 - **3** — every attempted job raised, or every attempted item across all jobs
   failed. The manifest is still written in this case — it is the evidence
   that the run happened and what went wrong.
@@ -99,8 +101,9 @@ see Promotion gates below.
 
 `--jobs` (default `auto`), `--deadline HH:MM` (24h local; stops the run
 between items once passed — see the curator's rule via `insight_stream.
-resolve_deadline`; if the deadline already passed by more than 12h the window
-is treated as closed and nothing runs), `--dry-run` (calls the model but
+resolve_deadline`: if the deadline passed less than 12h ago the window is
+treated as closed and nothing runs; if it passed 12h or more ago it rolls to
+the same time tomorrow, so an evening manual run still proceeds), `--dry-run` (calls the model but
 writes no DB rows — `judge` is always skipped under `--dry-run` because it
 would otherwise write message text to the reports dir and merge-write the gate
 file), `--backend {gemma,vertex}`, `--audit-limit N` (default 25),
