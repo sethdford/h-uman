@@ -75,6 +75,11 @@
           {
             "type": "command",
             "command": "cmd=$(jq -r '.tool_input.command // empty' 2>/dev/null); if echo \"$cmd\" | grep -qiE '(DROP\\s+(TABLE|DATABASE)|TRUNCATE\\s+TABLE|curl\\s.*\\|\\s*sh|curl\\s.*\\|\\s*bash|wget\\s.*\\|\\s*sh|chmod\\s+777|mkfs\\.|dd\\s+if=|:(){ :|:& };:)'; then echo 'BLOCKED: dangerous command pattern detected' >&2; exit 2; fi; exit 0"
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-destructive-bash.py\"",
+            "timeout": 5
           }
         ]
       }
