@@ -155,9 +155,9 @@ re-measured.
 
 ## 8. Testing
 
-Pytest in a new `scripts/test_insight_stream.py` (`insight_stream.py` has no
-tests today), following `scripts/test_gen_onpolicy_rejected.py`; the clock is
-injected.
+Pytest in `tests/`, alongside the existing `tests/test_insight_stream_admission.py`
+and `tests/test_insight_stream_keywords.py` (17 tests, not run in CI today;
+the plan adds a CI step). The clock is injected.
 
 - **Population:**
   - Threshold boundaries: 9/10 messages from the contact, 4/5 from Seth, 30-day edge.
