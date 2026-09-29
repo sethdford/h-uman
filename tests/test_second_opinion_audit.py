@@ -132,4 +132,8 @@ def test_audit_report_filters_to_one_backend_and_names_its_provenance():
     local = audit.audit_report(s, backend="gemma@local")
     assert local["wide"]["disagreement"]["rate"] == 0.5
     assert local["backends"] == ["gemma@local"] and local["prompt_versions"] == ["audit-v1"]
-    assert audit.audit_report(s, backend="nobody")["all"]["disagreement"] == stats.NOT_MEASURED
+    nobody = audit.audit_report(s, backend="nobody")
+    assert nobody["all"]["disagreement"] == stats.NOT_MEASURED
+    # An empty filtered report still says what it was filtered to.
+    assert nobody["backends"] == [] and nobody["backend_filter"] == "nobody"
+    assert pooled["backend_filter"] is None

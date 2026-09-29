@@ -115,6 +115,12 @@ def judge_pass(backend, run_dir, out_dir, run=subprocess.run, timeout=None):
     os.makedirs(out_dir, exist_ok=True)
     judged = os.path.join(out_dir, "judged.csv")
     results = os.path.join(out_dir, "judge-results.json")
+    # A same-day re-run reuses out_dir: clear the previous run's outputs first,
+    # so a child that crashes after exiting 0/1 can never leave an old
+    # judged.csv, results file, or source stamp to be read as this run's.
+    for stale in (judged, results, os.path.join(out_dir, SOURCE_FILE)):
+        if os.path.lexists(stale):
+            os.remove(stale)
     r1 = run([sys.executable, os.path.join(BLIND_AB, "synthetic_judge.py"),
               os.path.join(run_dir, "rating_sheet.csv"), "--out", judged,
               "--endpoint", backend.base_url + "/v1/chat/completions", "--model", backend.model],

@@ -111,14 +111,14 @@ def no_att(*a, **k):
 def make_ab_run_dir(tmp_path, with_triples=True):
     """A blind-A/B run dir judge.latest_run_dir will accept (detection-mode key,
     rating_sheet.csv + answer_key.json present). Without triples.json,
-    gold.weak_items raises FileNotFoundError (review probe P6)."""
+    gold.weak_items returns [] and the gold job counts the skip (review I4)."""
     run_dir = tmp_path / "ab" / "run1"
     run_dir.mkdir(parents=True)
     (run_dir / "rating_sheet.csv").write_text("id,choice\n1,A\n")
     (run_dir / "answer_key.json").write_text(json.dumps({"1": "A"}))
     if with_triples:
         (run_dir / "triples.json").write_text(json.dumps(
-            {"1": {"context": "hi", "seth_reply": "yo", "huuman_reply": "hey"}}))
+            [{"id": "1", "context": "hi", "seth_reply": "yo", "huuman_reply": "hey"}]))
     return run_dir
 
 
@@ -544,3 +544,27 @@ def test_judge_runs_before_gold_and_its_failure_does_not_stop_gold(tmp_path, mon
     man = json.loads((tmp_path / "logs" / "second-opinion-20260929.json").read_text())
     assert man["judge"] == {"error": "RuntimeError"} and "error" not in man["gold"]
     assert rc == 0
+
+
+def test_main_restores_the_callers_umask(tmp_path):
+    # main narrows the umask for its own run only; an in-process caller keeps
+    # its own setting on both a refusal and a completed run.
+    setup(tmp_path)
+    os.umask(0o022)
+    assert run_nightly.main(args(tmp_path) + ["--jobs", "bogus"],
+                            now_local=LOCAL_MORNING, attribute=no_att) == 2
+    cur = os.umask(0o022)
+    assert cur == 0o022
+    assert run_nightly.main(args(tmp_path), now_local=LOCAL_MORNING,
+                            serve=serve_with(Fake(["supported\nok"])), attribute=no_att) == 0
+    cur = os.umask(0o022)
+    assert cur == 0o022
+
+
+def test_atomic_json_is_owner_only_without_the_runs_umask(tmp_path):
+    # The runner's own JSON writes are private by construction (private_open),
+    # not only because main narrows the umask.
+    os.umask(0o022)
+    p = tmp_path / "m.json"
+    run_nightly._atomic_json(str(p), {"n": 1})
+    assert (p.stat().st_mode & 0o777) == 0o600 and json.loads(p.read_text()) == {"n": 1}

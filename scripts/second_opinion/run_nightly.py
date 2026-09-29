@@ -95,12 +95,20 @@ def _default_utcnow():
     return dt.datetime.now(dt.timezone.utc)
 
 
-def main(argv=None, *, now_local=None, serve=be.serve_gemma, attribute=None,
-         vertex_token=be._adc_token, utcnow=_default_utcnow):
+def main(argv=None, **kw):
     # Everything this run (and its child processes: synthetic_judge.py writes
     # judged.csv with message text) creates is owner-only, even under a
-    # --reports-dir outside ~/.human.
-    os.umask(0o077)
+    # --reports-dir outside ~/.human. Restored on return so an in-process
+    # caller (tests, a wrapper) does not inherit the narrowed umask.
+    old = os.umask(0o077)
+    try:
+        return _main(argv, **kw)
+    finally:
+        os.umask(old)
+
+
+def _main(argv=None, *, now_local=None, serve=be.serve_gemma, attribute=None,
+          vertex_token=be._adc_token, utcnow=_default_utcnow):
     try:
         a = _parse(argv)
     except SystemExit as e:

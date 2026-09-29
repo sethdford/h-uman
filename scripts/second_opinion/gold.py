@@ -230,4 +230,4 @@ def gold_report(store_con, since_ms=0, backend=None):
                        for r in store_con.execute(f"SELECT DISTINCT backend FROM {tbl}" + where,
                                                   args)})
     return {"critiques": crit, "references": refs, "unparseable": unp, "gaps": dict(gaps),
-            "backends": backends}
+            "backends": backends, "backend_filter": backend}

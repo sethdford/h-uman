@@ -16,13 +16,14 @@ JUDGE_MODEL = "mlx-community/gemma-4-31b-it-4bit"
 COLS = ["id", "context", "option_A", "option_B", "choice", "confidence"]
 
 
-def judged_sheet(path, rows, model=JUDGE_MODEL):
+def judged_sheet(path, rows, model=JUDGE_MODEL, confidence="3"):
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=COLS + ["judge_api", "judge_model"])
         w.writeheader()
         for iid, ch in rows:
-            w.writerow({"id": iid, "choice": ch, "judge_api": "openai", "judge_model": model})
+            w.writerow({"id": iid, "choice": ch, "confidence": confidence,
+                        "judge_api": "openai", "judge_model": model})
     return str(path)
 
 
@@ -65,9 +66,11 @@ def test_weak_items_human_first_then_lane_synthetic_with_model(tmp_path):
 def test_weak_items_ignore_judged_sheets_inside_the_blind_ab_run_dir(tmp_path):
     # I1: a judged sheet sitting in the run dir may come from the prod-family
     # judge; it must contribute nothing, even when its judge_model matches.
+    # confidence 5 so the rows WOULD pass the human >=4 bar if the sheet were
+    # mistaken for a human one: only the provenance check can exclude them.
     d = run_dir(tmp_path)
-    judged_sheet(Path(d) / "judged.csv", [("x2", "A"), ("x3", "B")])
-    judged_sheet(Path(d) / "rating_sheet_api_judge.csv", [("x1", "B")])
+    judged_sheet(Path(d) / "judged.csv", [("x2", "A"), ("x3", "B")], confidence="5")
+    judged_sheet(Path(d) / "rating_sheet_api_judge.csv", [("x1", "B")], confidence="5")
     assert [(i, s) for i, s, _ in gold.weak_items(d)] == [("x0", "human")]
     assert [(i, s) for i, s, _ in gold.weak_items(d, None, JUDGE_MODEL)] == [("x0", "human")]
 
@@ -223,7 +226,9 @@ def test_gold_report_filters_and_names_backends():
     assert both["backends"] == ["g@local", "gem@vertex"] and both["critiques"] == 2
     local = gold.gold_report(s, backend="g@local")
     assert local == {"critiques": 1, "references": 0, "unparseable": 0, "gaps": {"tone": 1},
-                     "backends": ["g@local"]}
+                     "backends": ["g@local"], "backend_filter": "g@local"}
+    empty = gold.gold_report(s, backend="nobody")
+    assert empty["backends"] == [] and empty["backend_filter"] == "nobody"
 
 
 # ---------------------------------------------------------------------------

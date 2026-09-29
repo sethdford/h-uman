@@ -149,4 +149,5 @@ def audit_report(store_con, since_ms=0, backend=None):
         "SELECT DISTINCT backend FROM audits" + where, args))
     out["prompt_versions"] = sorted(r[0] for r in store_con.execute(
         "SELECT DISTINCT prompt_version FROM audits" + where, args))
+    out["backend_filter"] = backend  # names the filter even when it matched no rows
     return out

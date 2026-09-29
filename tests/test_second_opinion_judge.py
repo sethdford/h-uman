@@ -187,3 +187,17 @@ def test_judge_pass_stamps_the_run_dir_it_judged(tmp_path):
     want = hashlib.sha256((run_dir / "answer_key.json").read_bytes()).hexdigest()[:16]
     assert json.loads(src.read_text()) == {"run_dir": "run", "answer_key_sha256": want}
     assert judge.lane_sheet_matches(str(out / "judged.csv"), str(run_dir))
+
+
+def test_judge_pass_never_reads_a_previous_runs_results(tmp_path):
+    # A same-day re-run reuses out_dir. If score.py exits 1 without writing
+    # results this time, the old judge-results.json must not be read as this
+    # run's: the pass fails instead.
+    import pytest
+    run_dir = _run_dir_25(tmp_path)
+    out = tmp_path / "out"
+    judge.judge_pass(G(), str(run_dir), str(out), run=_scoring_run(1))
+    assert (out / "judge-results.json").exists()
+    with pytest.raises(RuntimeError):
+        judge.judge_pass(G(), str(run_dir), str(out), run=_scoring_run(1, write_results=False))
+    assert not (out / "judge-results.json").exists()
