@@ -3871,6 +3871,12 @@ static hu_error_t imessage_mark_read(void *ctx, const char *contact_id, size_t c
     hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ctx;
     if (!c->alloc || !contact_id || contact_id_len == 0)
         return HU_ERR_INVALID_ARGUMENT;
+    /* The bridge's read receipt is the one that shows "Read" on the sender's
+     * side; the AppleScript below is the no-bridge fallback. Without this the
+     * daemon's "read, pause, then type" step marked nothing read, and the
+     * contact watched typing dots under a "Delivered" (2026-09-29). */
+    if (hu_imessage_mark_read(ctx, contact_id, contact_id_len) == HU_OK)
+        return HU_OK;
 
     if (contact_id_len > 4096)
         return HU_ERR_INVALID_ARGUMENT;
@@ -5226,6 +5232,9 @@ static hu_error_t imessage_start_typing(void *ctx, const char *recipient, size_t
      * the same chat keeps its rhythm instead of restarting. */
     if (pulse_is_for(recipient, recipient_len))
         return HU_OK;
+    /* Nobody types into a chat they have not opened: read it first. */
+    if (imsg_bridge_up(c))
+        (void)hu_imessage_mark_read(c, recipient, recipient_len);
     if (imsg_bridge_up(c) && pulse_start(recipient, recipient_len)) {
         hu_log_info("imessage", NULL, "typing started via bridge (rhythm)");
         return HU_OK;
