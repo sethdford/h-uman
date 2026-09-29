@@ -34,7 +34,7 @@ away if a measured need appears.
 | `behavior/change.c` | 163 | **DELETE** | Needs 11 inputs, and the turn can derive 1. Fabricating the rest would make its safety gates vacuous in code that texts real people. |
 | `behavior/rel_dynamics.c` | 333 | **DELETE** | An unused redesign. The live relationship prompt uses `context/rel_dynamics.c`. DDD placement is fixed by *moving the live file* into `behavior/` (a pure relocation, E1-style), never by switching the prompt to the unused API without a characterization test. |
 | `memory.c` `hu_memory_facade_{erase,purge_by_provenance}` | ~60 | **DELETE the facade functions; design F1** | Only one backend implements the hook (graph entities, `memory_v1_backend.c:364`). The `memories` table, embeddings and summaries are not reached, and matching is by **substring**, so purging `contact:ann` also purges `contact:anna`. Wiring this behind a "forget" command would be a false privacy claim. |
-| `agent_routing` `identity_links` session scoping | — | **Do not wire; make it observable (F2)** | Config is parsed; production never applies it. Linking people across channels merges audiences. See F2. |
+| `agent_routing` `identity_links` session scoping | — | **Do not wire; make it observable (F2)** | Declared in `hu_session_config_t` and advertised by `human config` help, but it has **no parser**: its test suite is deliberately unregistered ("parsers not implemented (PR #115)", `tests/test_main.c`). So a configured block was silently ignored. The session scoping it would feed is reachable only from tests. Linking people across channels merges audiences. See F2. |
 | `tts/transcript_prep.c` | 1246 | **KEEP** (changed since 2026-09-20) | Now wired from `tts/speech_direction.c` and `tts/voice_reply.c`; edited 2026-09-27. |
 | `config/config_mutator.c` | 625 | **KEEP; wire (F4)** | A safety layer: allowlisted config writes with backup. Both live write paths hand-roll it, and a bad write silently disables subsystems (`.claude/rules/silent-config-gated-subsystems.md`). This is a real safety gain, not "because it is built". |
 | `agent/app_config.c` | 56 | **KEEP** | It is the DDD E4 narrow config type; E4 migrates the 6 callers of the 25-parameter constructor. |
@@ -63,8 +63,10 @@ baseline, so this lands as its own PR with re-measured baselines. **F5.**
   **user-declared**, never inferred. This is Liu, *Authorization Before
   Context: A Model-Neutral Audience Boundary Against Cross-Audience Memory
   Leakage in Agentic Systems*, arXiv 2608.17148 (2026-08-17). Until this
-  exists, a configured `identity_links` block logs once at startup that it
-  is ignored, so the silence is visible.
+  exists, `session` gets the same nested-key validation as `gateway`,
+  `memory` and `voice`: `session.identity_links` is reported as an unknown
+  key (an error under `HUMAN_STRICT_CONFIG`), and the CLI help no longer
+  advertises it.
 - **F3: secret key storage.** Confirm where `secrets.c` keeps the AES key.
   If it is on disk next to the ciphertext, adopt the migration plan's
   Phase 3 (OS keychain) for the live path.
