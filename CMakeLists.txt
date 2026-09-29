@@ -672,7 +672,6 @@ set(HU_CORE_SOURCES
     src/doctor/check_reflection_loop.c
     src/doctor/exit_code.c
     src/doctor/json_output.c
-    src/doctor/ws_consumer.c
     src/doctor/doctor_fix.c
     src/humanness.c
     src/channels/channel_class.c
@@ -860,7 +859,6 @@ set(HU_CORE_SOURCES
     src/context/behavioral.c
     src/behavior/dialog_act.c
     src/behavior/affect.c
-    src/behavior/change.c
     src/behavior/safety.c
     src/behavior/prosocial.c
     src/behavior/win_detect.c
@@ -917,7 +915,6 @@ set(HU_CORE_SOURCES
     src/agent/self_uncertainty.c
     src/agent/planning.c
     src/agent/collab_planning.c
-    src/behavior/rel_dynamics.c
     src/context/rel_dynamics.c
     src/agent/conv_goals.c
     src/agent/superhuman.c
@@ -1234,10 +1231,6 @@ set(HU_CORE_SOURCES
     src/context/context_engine.c
     src/context/context_engine_rag.c
     src/onboard/onboard.c
-    src/onboard/state.c
-    src/onboard/dispatcher.c
-    src/onboard/step_welcome.c
-    src/onboard/step_provider.c
     src/interactions/choices.c
     src/daemon.c
     src/daemon/daemon_shape.c
@@ -3581,9 +3574,6 @@ set(HU_TEST_SOURCES
     tests/test_e2e_conversation.c
     tests/test_e2e_agent_loop.c
     tests/test_subsystems.c
-    tests/test_onboard_state.c
-    tests/test_onboard_dispatcher.c
-    tests/test_onboard_step1.c
     tests/test_onboard_nextstep.c
     tests/test_onboard_aloop.c
     tests/test_daemon_cron.c
@@ -3742,7 +3732,6 @@ tests/test_imessage_action_telemetry.c
     tests/test_doctor_reaction_collection_wired.c
     tests/test_doctor_exit_codes.c
     tests/test_doctor_json_output.c
-    tests/test_onboard_step_provider.c
     tests/test_mcp.c
     tests/test_mcp_jsonrpc.c
     tests/test_voice.c
@@ -3825,7 +3814,6 @@ tests/test_imessage_action_telemetry.c
     tests/test_daemon_housekeeping.c
     tests/test_orphan_channel_audit.c
     tests/test_verifier_metrics.c
-    tests/test_doctor_ws_consumer.c
     tests/test_output_validator.c
     tests/test_chain_failure_paths.c
     tests/test_agent_fail_path_regressions.c
@@ -3926,7 +3914,6 @@ tests/test_imessage_action_telemetry.c
     tests/test_salience.c
     tests/test_hard_moment.c
     tests/test_planning.c
-    tests/test_rel_dynamics.c
     tests/test_emotional_residue.c
     tests/test_consolidation_engine.c
     tests/test_conv_goals.c
@@ -4033,7 +4020,7 @@ list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/te
 list(APPEND HU_TEST_SOURCES tests/test_moment_compose.c tests/test_moment_render.c)
 # Self-test for the flaky-test quarantine + auto-retry harness (unconditional).
 list(APPEND HU_TEST_SOURCES tests/test_flaky_harness.c)
-list(APPEND HU_TEST_SOURCES tests/test_behavior_policy.c tests/test_behavior_dialog_act.c tests/test_behavior_affect.c tests/test_behavior_change.c tests/test_behavior_safety.c tests/test_behavior_prosocial.c tests/test_win_detect.c tests/test_celebration.c tests/test_prosocial_moment.c tests/test_behavior_prompt.c tests/test_behavior_support_strategy.c tests/test_behavior_trust.c tests/test_behavior_corpora.c tests/test_user_sim.c tests/test_tom_scenario_b8.c tests/test_chronotype.c tests/test_behavior_pressure.c tests/test_behavior_trust_prompt.c tests/test_sycophancy_pack.c tests/test_user_sim_scenario.c tests/test_tapback_band.c)
+list(APPEND HU_TEST_SOURCES tests/test_behavior_policy.c tests/test_behavior_dialog_act.c tests/test_behavior_affect.c tests/test_behavior_safety.c tests/test_behavior_prosocial.c tests/test_win_detect.c tests/test_celebration.c tests/test_prosocial_moment.c tests/test_behavior_prompt.c tests/test_behavior_support_strategy.c tests/test_behavior_trust.c tests/test_behavior_corpora.c tests/test_user_sim.c tests/test_tom_scenario_b8.c tests/test_chronotype.c tests/test_behavior_pressure.c tests/test_behavior_trust_prompt.c tests/test_sycophancy_pack.c tests/test_user_sim_scenario.c tests/test_tapback_band.c)
 list(APPEND HU_TEST_SOURCES tests/test_cartesia.c)
 list(APPEND HU_TEST_SOURCES tests/test_cartesia_stream.c)
 list(APPEND HU_TEST_SOURCES tests/test_voice_clone.c)
