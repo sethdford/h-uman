@@ -82,3 +82,52 @@ def test_exclusion_reason_order():
     assert cp.exclusion_reason("a", {"a"}, {"a"}) == "suppressed"
     assert cp.exclusion_reason("b", set(), {"b"}) == "never"
     assert cp.exclusion_reason("c", set(), set()) is None
+
+
+def test_only_e164_or_email_handles_are_eligible():
+    """R12 m1: spec §3 -- the handle is +E.164 or an email."""
+    tl = {"urn:biz:x": msgs(12, 6), "5551234": msgs(12, 6), "+15550000010": msgs(12, 6),
+          "a@b.co": msgs(12, 6), "+123456": msgs(12, 6)}
+    assert cp.eligible_handles(tl, set(), NOW) == ["+15550000010", "a@b.co"]
+
+
+def test_normalize_handle_phones_and_emails():
+    assert cp.normalize_handle("5550000042") == "+15550000042"
+    assert cp.normalize_handle("(555) 000-0042") == "+15550000042"
+    assert cp.normalize_handle("15550000042") == "+15550000042"
+    assert cp.normalize_handle("+44 20 7946 0958") == "+442079460958"
+    assert cp.normalize_handle("Friend@Example.COM") == "friend@example.com"
+
+
+def test_never_entries_match_normalized_handles(tmp_path):
+    """R12 I6: a never-file written by hand ("5550000042", mixed-case email)
+    must still exclude the chat.db handle it means."""
+    p = tmp_path / "never.json"
+    p.write_text(json.dumps(["5550000042", "Friend@Example.com"]))
+    never = cp.load_never(str(p))
+    assert cp.exclusion_reason("+15550000042", set(), never) == "never"
+    assert cp.exclusion_reason("friend@example.com", set(), never) == "never"
+    assert cp.exclusion_reason("+15550000043", set(), never) is None
+
+
+def test_unmatched_never_entries_are_counted():
+    assert cp.unmatched_never({"5550000042", "nobody@x.com"}, ["+15550000042", "a@b.co"]) == 1
+    assert cp.unmatched_never(set(), ["+15550000042"]) == 0
+
+
+def test_loopback_handles_are_excluded_from_eligibility():
+    """R12 I7: the daemon's own loopback handle is never a contact."""
+    tl = {"+15550000011": msgs(12, 6), "+15550000012": msgs(12, 6)}
+    assert cp.eligible_handles(tl, set(), NOW, exclude={"5550000011"}) == ["+15550000012"]
+
+
+def test_load_loopback_handles_str_list_missing(tmp_path):
+    cfg = tmp_path / "config.json"
+    assert cp.load_loopback_handles(str(cfg)) == set()
+    cfg.write_text(json.dumps({"channels": {"imessage": {"loopback_handle": "5550000011"}}}))
+    assert cp.load_loopback_handles(str(cfg)) == {"+15550000011"}
+    cfg.write_text(json.dumps({"channels": {"imessage": {"loopback_handle":
+                                                         ["+15550000011", "Me@X.com"]}}}))
+    assert cp.load_loopback_handles(str(cfg)) == {"+15550000011", "me@x.com"}
+    cfg.write_text(json.dumps({"channels": {"imessage": {}}}))
+    assert cp.load_loopback_handles(str(cfg)) == set()
