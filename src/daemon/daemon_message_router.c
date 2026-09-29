@@ -67,6 +67,18 @@ void hu_daemon_log_send_effect(void *observer, const char *eff_ch, const char *t
 #endif
 }
 
+/* The inbound message this daemon last reacted to. A reply split into
+ * bubbles is dispatched once per bubble, all answering the same message; the
+ * second bubble must not tap it again (live 2026-09-29 07:54). */
+static struct {
+    int64_t message_id;
+    int64_t at;
+} s_reacted;
+
+static bool reacted_to(int64_t message_id, int64_t now) {
+    return message_id > 0 && s_reacted.message_id == message_id && now - s_reacted.at < 600;
+}
+
 /* Dispatcher: route iMessage reply through predicate (Phase A) to choose
  * between threaded / flat / tapback based on reply style facts. */
 hu_error_t hu_daemon_dispatch_imessage_reply_ex(
@@ -134,6 +146,10 @@ hu_error_t hu_daemon_dispatch_imessage_reply_ex(
             style = demoted;
         }
     }
+
+    /* The text was decided upstream: never swallow it, never react twice. */
+    style = hu_imessage_reply_style_finalize(
+        style, reacted_to(inferred_message_id_for_react, (int64_t)time(NULL)));
 
     /* Pacing (C5) — start. */
     uint64_t pace_start = 0;
@@ -249,8 +265,11 @@ hu_error_t hu_daemon_dispatch_imessage_reply_ex(
         /* Both: tapback first (best-effort), then text. */
         if (ch->vtable->react_emoji) {
             const char *emoji = "❤️"; /* heart for emotional acknowledgment */
-            (void)ch->vtable->react_emoji(ch->ctx, target, target_len,
-                                          inferred_message_id_for_react, emoji, strlen(emoji));
+            if (ch->vtable->react_emoji(ch->ctx, target, target_len, inferred_message_id_for_react,
+                                        emoji, strlen(emoji)) == HU_OK) {
+                s_reacted.message_id = inferred_message_id_for_react;
+                s_reacted.at = (int64_t)time(NULL);
+            }
         }
         if (ch->vtable->send) {
             err = ch->vtable->send(ch->ctx, target, target_len, body, body_len, NULL, 0);

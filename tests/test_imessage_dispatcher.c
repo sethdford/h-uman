@@ -422,32 +422,62 @@ static void text_sent_true_when_feature_disabled_falls_back_to_flat(void) {
     HU_ASSERT_EQ(send_calls, 1);
 }
 
-/* A bare tapback is not text: the flag must be false exactly when the emoji
- * went out and no send() happened. Sweeps seeds the way
- * fresh_parent_still_reacts_tapback_sometimes does, and checks BOTH outcomes. */
-static void text_sent_false_on_bare_tapback_true_on_text(void) {
-    bool saw_tapback = false, saw_text = false;
-    for (int64_t mid = 1; mid <= 400 && !(saw_tapback && saw_text); mid++) {
+/* The reply text was decided upstream, so it always goes out — sometimes with
+ * a reaction first. This test used to accept a bare tapback (text dropped) as
+ * a valid outcome; that was the bug: live 2026-09-29 07:54 a split reply lost
+ * its first bubble to a bare tapback and its second bubble tapped the same
+ * message again. Sweeps seeds the way fresh_parent_still_reacts_tapback_sometimes
+ * does, and checks BOTH outcomes. */
+static void text_always_sent_sometimes_with_a_reaction(void) {
+    bool saw_reaction = false, saw_plain = false;
+    for (int64_t mid = 1; mid <= 400 && !(saw_reaction && saw_plain); mid++) {
         setup_mocks();
         mock_vtable.reply = NULL; /* no threaded slot: text goes out flat */
         hu_conversation_snapshot_t snap = {0};
         snap.conv_density_msgs_per_min = 20.0f;
         snap.parent_seconds_ago = 5;
-        bool sent = true;
+        bool sent = false;
         hu_error_t err = hu_daemon_dispatch_imessage_reply_ex(
             &mock_ch, &mock_persona, NULL, &mock_config, "+15555551212", 12, NULL, 0, "hi", 2,
             (const struct hu_conversation_snapshot *)&snap, mid, &sent);
         HU_ASSERT_EQ((int)err, (int)HU_OK);
-        if (react_emoji_calls > 0 && send_calls == 0) {
-            HU_ASSERT_FALSE(sent);
-            saw_tapback = true;
-        } else if (send_calls > 0) {
-            HU_ASSERT_TRUE(sent);
-            saw_text = true;
-        }
+        HU_ASSERT_TRUE(sent);
+        HU_ASSERT_EQ(send_calls, 1);
+        if (react_emoji_calls > 0)
+            saw_reaction = true;
+        else
+            saw_plain = true;
     }
-    HU_ASSERT_TRUE(saw_tapback);
-    HU_ASSERT_TRUE(saw_text);
+    HU_ASSERT_TRUE(saw_reaction);
+    HU_ASSERT_TRUE(saw_plain);
+}
+
+/* A second bubble answering the same inbound message never taps it again. */
+static void second_bubble_never_reacts_to_the_same_message_again(void) {
+    for (int64_t mid = 1000; mid <= 1400; mid++) {
+        setup_mocks();
+        mock_vtable.reply = NULL;
+        hu_conversation_snapshot_t snap = {0};
+        snap.conv_density_msgs_per_min = 20.0f;
+        snap.parent_seconds_ago = 5;
+        bool sent = false;
+        (void)hu_daemon_dispatch_imessage_reply_ex(
+            &mock_ch, &mock_persona, NULL, &mock_config, "+15555551212", 12, NULL, 0, "hi", 2,
+            (const struct hu_conversation_snapshot *)&snap, mid, &sent);
+        if (react_emoji_calls == 0)
+            continue;
+        for (int bubble = 0; bubble < 3; bubble++) {
+            setup_mocks();
+            mock_vtable.reply = NULL;
+            (void)hu_daemon_dispatch_imessage_reply_ex(
+                &mock_ch, &mock_persona, NULL, &mock_config, "+15555551212", 12, NULL, 0,
+                "and you?", 8, (const struct hu_conversation_snapshot *)&snap, mid, &sent);
+            HU_ASSERT_EQ(react_emoji_calls, 0);
+            HU_ASSERT_EQ(send_calls, 1);
+        }
+        return;
+    }
+    HU_ASSERT_TRUE(false); /* no seed reacted: the sweep proved nothing */
 }
 
 static void msg_ex_parrot_guard_reports_no_text_sent(void) {
@@ -719,7 +749,8 @@ void run_imessage_dispatcher_tests(void) {
     HU_RUN_TEST(flat_style_routes_to_send);
     HU_RUN_TEST(text_sent_true_on_flat_send_false_when_send_refuses);
     HU_RUN_TEST(text_sent_true_when_feature_disabled_falls_back_to_flat);
-    HU_RUN_TEST(text_sent_false_on_bare_tapback_true_on_text);
+    HU_RUN_TEST(text_always_sent_sometimes_with_a_reaction);
+    HU_RUN_TEST(second_bubble_never_reacts_to_the_same_message_again);
     HU_RUN_TEST(msg_ex_parrot_guard_reports_no_text_sent);
     HU_RUN_TEST(record_delivered_reply_noops_without_collector);
 #if defined(HU_ENABLE_SQLITE) && defined(HU_ENABLE_ML)

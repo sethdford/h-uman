@@ -50,6 +50,12 @@ hu_reply_style_scores_t hu_imessage_score_reply_style(const hu_reply_style_facts
 hu_reply_style_t hu_imessage_choose_reply_style(const hu_reply_style_facts_t *facts,
                                                 uint64_t rng_seed);
 
+/* The style a bubble is actually sent with. The reply text was already
+ * decided upstream, so a bare TAPBACK becomes TAPBACK_PLUS_FLAT (never drop
+ * it), and once this inbound message has a reaction (`already_reacted`) any
+ * tapback style becomes FLAT (one reaction per message). Pure. */
+hu_reply_style_t hu_imessage_reply_style_finalize(hu_reply_style_t chosen, bool already_reacted);
+
 /* Should the threaded-intent fallback carry an explicit inline `↩ "quote"`?
  * True only when a human would actually reference the parent — parent not the
  * newest inbound, stale parent (>180s), or >=2 pending questions. Fresh /
