@@ -640,6 +640,17 @@ hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv) {
         fprintf(stderr, "Usage: human memory ground [--full] <contact> <message>\n");
         return HU_ERR_INVALID_ARGUMENT;
     }
+    if (strcmp(sub, "ground") == 0) {
+        /* A probe of a missing graph must not create an empty one and report a
+         * well-formed zero (no-number-without-a-measurement): refuse first. */
+        char gp[1024];
+        struct stat gst;
+        int gn = memory_graph_path(gp, sizeof(gp));
+        if (gn <= 0 || (size_t)gn >= sizeof(gp) || stat(gp, &gst) != 0) {
+            fprintf(stderr, "ground: no graph at %s\n", gn > 0 ? gp : "(unresolved)");
+            return HU_ERR_NOT_FOUND;
+        }
+    }
     if ((strcmp(sub, "search") == 0 || strcmp(sub, "get") == 0) && argc < 4) {
         fprintf(stderr, "Usage: human memory %s <query>\n", sub);
         return HU_ERR_INVALID_ARGUMENT;

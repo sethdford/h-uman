@@ -85,6 +85,18 @@ static void test_import_facts_empty_file_is_not_success(void) {
     unsetenv("HU_GRAPH_DB");
 }
 
+static void test_ground_refuses_a_missing_graph_without_creating_it(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    char gpath[128];
+    snprintf(gpath, sizeof(gpath), "/tmp/hu_cli_ground_missing_%d.db", (int)getpid());
+    unlink(gpath);
+    setenv("HU_GRAPH_DB", gpath, 1);
+    char *argv[] = {"human", "memory", "ground", "--full", "+15550000001", "did Salim call", NULL};
+    HU_ASSERT_EQ(cmd_memory(&alloc, 6, argv), HU_ERR_NOT_FOUND);
+    HU_ASSERT_TRUE(access(gpath, F_OK) != 0); /* nothing was created */
+    unsetenv("HU_GRAPH_DB");
+}
+
 typedef struct ent_row {
     bool found;
     int type;
@@ -209,6 +221,7 @@ void run_cli_memory_import_tests(void) {
     HU_RUN_TEST(test_import_entity_lines_are_typed_and_counted);
     HU_RUN_TEST(test_import_retype_only_line_retypes_without_touching_or_creating);
     HU_RUN_TEST(test_import_entity_only_file_is_success_through_the_cli);
+    HU_RUN_TEST(test_ground_refuses_a_missing_graph_without_creating_it);
 }
 #else
 void run_cli_memory_import_tests(void) {
