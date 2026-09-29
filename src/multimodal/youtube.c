@@ -1,5 +1,6 @@
 #include "human/youtube.h"
 #include "human/core/json.h"
+#include "human/music.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -83,26 +84,55 @@ void hu_youtube_result_free(hu_allocator_t *alloc, hu_youtube_result_t *out) {
     memset(out, 0, sizeof(*out));
 }
 
+/* snprintf result as a length, or 0 with out emptied when it was cut off. */
+static size_t yt_fit(char *out, size_t cap, int n) {
+    if (n > 0 && (size_t)n < cap)
+        return (size_t)n;
+    out[0] = '\0';
+    return 0;
+}
+
+size_t hu_youtube_search_url(char *out, size_t cap, const char *api_key, const char *query,
+                             size_t query_len, bool shorts) {
+    if (!out || cap == 0)
+        return 0;
+    out[0] = '\0';
+    if (!api_key || !*api_key || !query || query_len == 0)
+        return 0;
+    char enc[512];
+    if (hu_music_url_encode_query(query, query_len, enc, sizeof(enc)) == 0)
+        return 0;
+    return yt_fit(out, cap,
+                  snprintf(out, cap,
+                           "https://www.googleapis.com/youtube/v3/search?part=snippet&type=video"
+                           "&maxResults=1%s&q=%s&key=%s",
+                           shorts ? "&videoDuration=short" : "", enc, api_key));
+}
+
+size_t hu_youtube_share_url(char *out, size_t cap, const char *video_id, bool shorts) {
+    if (!out || cap == 0)
+        return 0;
+    out[0] = '\0';
+    if (!video_id || !*video_id)
+        return 0;
+    return yt_fit(out, cap,
+                  snprintf(out, cap,
+                           shorts ? "https://www.youtube.com/shorts/%s"
+                                  : "https://www.youtube.com/watch?v=%s",
+                           video_id));
+}
+
 #if !defined(HU_IS_TEST) && defined(HU_HTTP_CURL)
 #include "human/core/http.h"
 #include "human/music.h"
 
-hu_error_t hu_youtube_search(hu_allocator_t *alloc, const char *api_key, const char *query,
-                             size_t query_len, hu_youtube_result_t *out) {
+hu_error_t hu_youtube_search_ex(hu_allocator_t *alloc, const char *api_key, const char *query,
+                                size_t query_len, bool shorts, hu_youtube_result_t *out) {
     if (!alloc || !api_key || !*api_key || !query || query_len == 0 || !out)
         return HU_ERR_INVALID_ARGUMENT;
 
-    char enc[512];
-    size_t e = hu_music_url_encode_query(query, query_len, enc, sizeof(enc));
-    if (e == 0)
-        return HU_ERR_INVALID_ARGUMENT;
-
     char url[1024];
-    int n = snprintf(url, sizeof(url),
-                     "https://www.googleapis.com/youtube/v3/search?part=snippet&type=video"
-                     "&maxResults=1&q=%s&key=%s",
-                     enc, api_key);
-    if (n < 0 || (size_t)n >= sizeof(url))
+    if (hu_youtube_search_url(url, sizeof(url), api_key, query, query_len, shorts) == 0)
         return HU_ERR_INVALID_ARGUMENT;
 
     hu_http_response_t resp = {0};
@@ -120,9 +150,30 @@ hu_error_t hu_youtube_search(hu_allocator_t *alloc, const char *api_key, const c
 
     err = hu_youtube_parse_search_response(alloc, resp.body, resp.body_len, out);
     hu_http_response_free(alloc, &resp);
+    if (err == HU_OK && shorts && out->video_id && out->watch_url) {
+        char su[128];
+        size_t sn = hu_youtube_share_url(su, sizeof(su), out->video_id, true);
+        char *dup = sn ? alloc->alloc(alloc->ctx, sn + 1) : NULL;
+        if (dup) {
+            memcpy(dup, su, sn + 1);
+            alloc->free(alloc->ctx, out->watch_url, strlen(out->watch_url) + 1);
+            out->watch_url = dup;
+        }
+    }
     return err;
 }
+
+hu_error_t hu_youtube_search(hu_allocator_t *alloc, const char *api_key, const char *query,
+                             size_t query_len, hu_youtube_result_t *out) {
+    return hu_youtube_search_ex(alloc, api_key, query, query_len, false, out);
+}
 #else
+hu_error_t hu_youtube_search_ex(hu_allocator_t *alloc, const char *api_key, const char *query,
+                                size_t query_len, bool shorts, hu_youtube_result_t *out) {
+    (void)shorts;
+    return hu_youtube_search(alloc, api_key, query, query_len, out);
+}
+
 hu_error_t hu_youtube_search(hu_allocator_t *alloc, const char *api_key, const char *query,
                              size_t query_len, hu_youtube_result_t *out) {
     (void)alloc;
