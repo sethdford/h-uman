@@ -85,6 +85,14 @@ bool hu_imessage_bridge_repair_due(bool advanced, bool sip_enabled, double idle_
 /* A bridge verb (tapback, send-rich, typing) just failed: re-probe soon. */
 void hu_imessage_caps_note_bridge_failure(void);
 
+/* Phase 5: true when the text is exactly one http(s) URL (surrounding
+ * whitespace allowed) — the bubble iMessage turns into a rich-link card. */
+bool hu_imsg_is_bare_url(const char *text, size_t len);
+
+/* "iMessage;-;<handle>" for a 1:1 phone/email handle, for bridge verbs that
+ * take --chat. 0 when the handle is not a plain handle or does not fit. */
+size_t hu_imsg_chat_guid(char *out, size_t cap, const char *handle, size_t handle_len);
+
 /* ── T0.1 blue guard ────────────────────────────────────────────────────
  * "Perfect and blue": the daemon must never emit a green bubble. Apple's own
  * chat.db is the SIP-free source of truth — `handle.service` and

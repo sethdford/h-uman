@@ -313,6 +313,42 @@ static void caps_check_accessibility(hu_allocator_t *alloc) {
 #endif
 }
 
+bool hu_imsg_is_bare_url(const char *text, size_t len) {
+    if (!text)
+        return false;
+    size_t a = 0, b = len;
+    while (a < b && (text[a] == ' ' || text[a] == '\n' || text[a] == '\t' || text[a] == '\r'))
+        a++;
+    while (b > a && (text[b - 1] == ' ' || text[b - 1] == '\n' || text[b - 1] == '\t' ||
+                     text[b - 1] == '\r'))
+        b--;
+    size_t scheme = (b - a > 8 && strncmp(text + a, "https://", 8) == 0)  ? 8
+                    : (b - a > 7 && strncmp(text + a, "http://", 7) == 0) ? 7
+                                                                          : 0;
+    if (scheme == 0)
+        return false;
+    for (size_t i = a + scheme; i < b; i++)
+        if (text[i] == ' ' || text[i] == '\n' || text[i] == '\t' || text[i] == '\r')
+            return false; /* a second word: this is a sentence, not a link */
+    return b - a > scheme;
+}
+
+size_t hu_imsg_chat_guid(char *out, size_t cap, const char *handle, size_t handle_len) {
+    if (!out || cap == 0)
+        return 0;
+    out[0] = '\0';
+    if (!handle || handle_len == 0)
+        return 0;
+    for (size_t i = 0; i < handle_len; i++)
+        if (handle[i] == ';' || handle[i] == ' ' || handle[i] == '/')
+            return 0; /* a chat id or anything else: not a plain 1:1 handle */
+    int n = snprintf(out, cap, "iMessage;-;%.*s", (int)handle_len, handle);
+    if (n > 0 && (size_t)n < cap)
+        return (size_t)n;
+    out[0] = '\0'; /* never hand back a truncated chat id */
+    return 0;
+}
+
 const hu_imessage_caps_t *hu_imessage_caps_cached(hu_allocator_t *alloc) {
     static hu_imessage_caps_t caps;
     static int64_t probed_at = -1, last_repair = -1;

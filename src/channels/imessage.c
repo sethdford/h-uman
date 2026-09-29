@@ -983,6 +983,13 @@ static void imessage_record_sent(hu_imessage_ctx_t *c, const char *msg, size_t m
     c->sent_ring_idx++;
 }
 
+/* A text went out: remember it (echo filter) and record its provenance. */
+static void imessage_text_sent(hu_imessage_ctx_t *c, const char *tgt, size_t tgt_len,
+                               const char *msg, size_t msg_len, int64_t prov_prior) {
+    imessage_record_sent(c, msg, msg_len);
+    imessage_report_sent(tgt, tgt_len, msg, msg_len, HU_IMESSAGE_SENT_KIND_TEXT, prov_prior);
+}
+
 #ifdef HU_ENABLE_SQLITE
 static bool imessage_was_sent_by_us(hu_imessage_ctx_t *c, const char *text, size_t text_len);
 
@@ -2412,6 +2419,23 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
 
         imessage_simulate_typing(c, tgt, tgt_len, message_len);
 
+        /* Phase 5 (spec 2026-09-28): a bubble that is exactly one link goes
+         * through the bridge as a rich-link balloon; any failure falls through
+         * to the plain send below. */
+        if (c->use_imsg_cli && imsg_cli_available(c) && hu_imsg_is_bare_url(message, message_len) &&
+            hu_imessage_caps_cached(c->alloc)->advanced) {
+            char guid[300];
+            if (hu_imsg_chat_guid(guid, sizeof(guid), tgt, tgt_len) > 0) {
+                const char *rich_argv[] = {"imsg",  "send-rich", "--chat", guid,
+                                           "--url", message,     NULL};
+                if (hu_imsg_run_ok(c->alloc, rich_argv, 20)) {
+                    hu_log_info("imessage", NULL, "rich link sent via bridge");
+                    imessage_text_sent(c, tgt, tgt_len, message, message_len, prov_prior);
+                    goto imsg_media;
+                }
+                hu_imessage_caps_note_bridge_failure();
+            }
+        }
         {
             if (c->use_imsg_cli && imsg_cli_available(c)) {
                 char tgt_buf[256];
@@ -2431,9 +2455,7 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
                     (imsg_err == HU_OK && imsg_result.success && imsg_result.exit_code == 0);
                 hu_run_result_free(c->alloc, &imsg_result);
                 if (imsg_ok) {
-                    imessage_record_sent(c, message, message_len);
-                    imessage_report_sent(tgt, tgt_len, message, message_len,
-                                         HU_IMESSAGE_SENT_KIND_TEXT, prov_prior);
+                    imessage_text_sent(c, tgt, tgt_len, message, message_len, prov_prior);
                     goto imsg_media;
                 }
                 if (getenv("HU_DEBUG"))

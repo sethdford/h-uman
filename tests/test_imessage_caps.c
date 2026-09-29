@@ -501,8 +501,35 @@ static void caps_bridge_repair_never_interrupts_seth(void) {
     HU_ASSERT_TRUE(hu_imessage_bridge_repair_due(false, false, 400.0, 1900));
 }
 
+/* Phase 5 (spec 2026-09-28): a bubble that is exactly one link goes through the
+ * bridge as a rich-link balloon; anything else stays a normal text. */
+static void caps_bare_url_is_exactly_one_link(void) {
+    const char *yt = "https://www.youtube.com/shorts/abc123";
+    HU_ASSERT_TRUE(hu_imsg_is_bare_url(yt, strlen(yt)));
+    const char *pad = "  https://music.apple.com/us/song/x/1 \n";
+    HU_ASSERT_TRUE(hu_imsg_is_bare_url(pad, strlen(pad)));
+    const char *said = "check this https://youtu.be/x";
+    HU_ASSERT_FALSE(hu_imsg_is_bare_url(said, strlen(said)));
+    const char *two = "https://a.example/x https://b.example/y";
+    HU_ASSERT_FALSE(hu_imsg_is_bare_url(two, strlen(two)));
+    HU_ASSERT_FALSE(hu_imsg_is_bare_url("http://", 7));
+    HU_ASSERT_FALSE(hu_imsg_is_bare_url("ftp://x.example/y", 17));
+}
+
+static void caps_chat_guid_for_a_handle(void) {
+    char g[128];
+    HU_ASSERT_TRUE(hu_imsg_chat_guid(g, sizeof(g), "+15550101234", 12) > 0);
+    HU_ASSERT_STR_EQ(g, "iMessage;-;+15550101234");
+    HU_ASSERT_TRUE(hu_imsg_chat_guid(g, sizeof(g), "a@example.com", 13) > 0);
+    HU_ASSERT_STR_EQ(g, "iMessage;-;a@example.com");
+    HU_ASSERT_EQ(hu_imsg_chat_guid(g, sizeof(g), "chat123;x", 9), 0u); /* not a handle */
+    HU_ASSERT_EQ(hu_imsg_chat_guid(g, 8, "+15550101234", 12), 0u);
+}
+
 void run_imessage_caps_tests(void) {
     HU_TEST_SUITE("imessage_caps");
+    HU_RUN_TEST(caps_bare_url_is_exactly_one_link);
+    HU_RUN_TEST(caps_chat_guid_for_a_handle);
     HU_RUN_TEST(caps_reprobe_policy_heals_both_ways);
     HU_RUN_TEST(caps_bridge_repair_never_interrupts_seth);
     HU_RUN_TEST(whois_parse_reachable_says_reachable);
