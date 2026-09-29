@@ -427,6 +427,22 @@ static void test_vrec_handle_ok_accepts_only_phone_or_email(void) {
     HU_ASSERT_FALSE(hu_voice_record_handle_ok("", 0));
 }
 
+/* Restoring the user's conversation (live 2026-09-29: "previous conversation
+ * not reselected"): the open chat's title is looked up in Messages by name, so
+ * the title is quoted into AppleScript. Quotes and backslashes are escaped;
+ * a control character refuses (a title never has one, a hostile one might). */
+static void test_vrec_applescript_quote_escapes_and_refuses(void) {
+    char out[64];
+    HU_ASSERT_TRUE(hu_voice_record_applescript_quote("Betty Ford", out, sizeof(out)));
+    HU_ASSERT_STR_EQ(out, "Betty Ford");
+    HU_ASSERT_TRUE(hu_voice_record_applescript_quote("Al \"Big\" O\\K", out, sizeof(out)));
+    HU_ASSERT_STR_EQ(out, "Al \\\"Big\\\" O\\\\K");
+    HU_ASSERT_FALSE(hu_voice_record_applescript_quote("a\nb", out, sizeof(out)));
+    HU_ASSERT_FALSE(hu_voice_record_applescript_quote("", out, sizeof(out)));
+    HU_ASSERT_FALSE(hu_voice_record_applescript_quote("toolong-toolong", out, 8));
+    HU_ASSERT_FALSE(hu_voice_record_applescript_quote(NULL, out, sizeof(out)));
+}
+
 static void test_vrec_title_matches_is_exact_but_case_and_space_tolerant(void) {
     HU_ASSERT_TRUE(hu_voice_record_title_matches("Seth Ford", "Seth Ford"));
     HU_ASSERT_TRUE(hu_voice_record_title_matches("  seth ford ", "Seth Ford"));
@@ -726,6 +742,7 @@ void run_imessage_voice_record_tests(void) {
     HU_RUN_TEST(test_vrec_send_ui_unconfirmed_but_in_chatdb_counts_as_sent);
     HU_RUN_TEST(test_vrec_handle_ok_accepts_only_phone_or_email);
     HU_RUN_TEST(test_vrec_title_matches_is_exact_but_case_and_space_tolerant);
+    HU_RUN_TEST(test_vrec_applescript_quote_escapes_and_refuses);
     HU_RUN_TEST(test_vrec_preflight_blocks_other_mic_and_busy_blackhole);
     HU_RUN_TEST(test_vrec_bad_handle_touches_nothing);
     HU_RUN_TEST(test_vrec_second_recording_touches_nothing);

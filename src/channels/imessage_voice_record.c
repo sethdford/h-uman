@@ -160,6 +160,31 @@ bool hu_voice_record_title_matches(const char *window_title, const char *expecte
     return wn > 0 && wn == xn && strncasecmp(wb, xb, wn) == 0;
 }
 
+bool hu_voice_record_applescript_quote(const char *in, char *out, size_t cap) {
+    if (!out || cap == 0)
+        return false;
+    out[0] = '\0';
+    if (!in || !in[0])
+        return false;
+    size_t n = 0;
+    for (const unsigned char *c = (const unsigned char *)in; *c; c++) {
+        if (*c < 0x20 || *c == 0x7f)
+            break;
+        bool esc = *c == '"' || *c == '\\';
+        if (n + (esc ? 2 : 1) >= cap)
+            break;
+        if (esc)
+            out[n++] = '\\';
+        out[n++] = (char)*c;
+        if (!c[1]) {
+            out[n] = '\0';
+            return true;
+        }
+    }
+    out[0] = '\0';
+    return false;
+}
+
 static bool in_target_chat(const hu_voice_record_port_t *p, const char *expected) {
     char title[256] = {0};
     return p->chat_title(p->ctx, title, sizeof(title)) == HU_OK &&

@@ -96,6 +96,10 @@ bool hu_voice_record_handle_ok(const char *handle, size_t handle_len);
  * Empty on either side never matches — the wrong-recipient check fails closed. */
 bool hu_voice_record_title_matches(const char *window_title, const char *expected_title);
 
+/* Quote `in` for an AppleScript string literal: escapes " and \. False (out
+ * empty) on NULL/empty input, any control character, or not fitting in cap. */
+bool hu_voice_record_applescript_quote(const char *in, char *out, size_t cap);
+
 /* Human-sized pauses around the clip: lead-in 350-700 ms, tail 500-900 ms. */
 typedef struct {
     uint32_t lead_in_ms;
