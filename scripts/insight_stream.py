@@ -21,6 +21,7 @@ Usage:
                             [--min-turns 20] [--max-notes 8] [--url URL] [--model M]
 """
 import argparse
+import datetime as dt
 import json
 import os
 import random
@@ -665,6 +666,64 @@ def supersede_pass(db, a, identity, contacts, targets, now_ms):
     print(f"supersede {'applied' if a.write else 'dry-run'}: {total_acc} retired, "
           f"{total_ref} refused")
     return {"retired": total_acc, "refused": total_ref}
+
+
+import curator_evidence as ce  # noqa: E402  (scripts/ is on sys.path when run as a script)
+import curator_population as cp  # noqa: E402
+
+WIDE_SOURCE_PREFIX = "curator_wide:"
+
+
+def wide_pass(db, a, identity, persona_ids, att, now, write):
+    """Curate every eligible non-persona 1:1 contact from chat.db (spec §3-5).
+    Returns a counts-only manifest; never text."""
+    man = {k: 0 for k in ("eligible", "excluded_suppressed", "excluded_never", "curated",
+                          "notes_written", "rejected_no_evidence", "rejected_daemon_evidence",
+                          "rejected_name_not_said", "names_total", "notes_named")}
+    suppressed = cp.load_suppressed(MEMORY_DB)  # module global so tests can redirect it
+    never = cp.load_never(getattr(a, "never_path", cp.NEVER_PATH))
+    cutoff = now - dt.timedelta(days=getattr(a, "window_days", cp.WINDOW_DAYS))
+    handles = cp.eligible_handles(att["timelines"], persona_ids, now)
+    man["eligible"] = len(handles)
+    now_ms = int(now.timestamp() * 1000)
+    for h in handles:
+        why = cp.exclusion_reason(h, suppressed, never)
+        if why:
+            man[f"excluded_{why}"] += 1
+            continue
+        rows = ce.chat_turn_rows(att["timelines"][h], att["labels"], a.turns, cutoff)
+        if len(rows) < a.min_turns:
+            continue
+        lines, cite = ce.number_rows(rows)
+        system, user = build_prompt(identity, h, "", lines, a.max_notes)
+        notes = parse_notes(call_model(a.url, a.model, system, user), a.max_notes)
+        agree = verify_claims(a, VERIFY_SYSTEM.format(
+            identity=identity, name=h, rel="",
+            question="A note is supported only if a specific text states it."),
+            user, [n["note"] for n in notes], a.consistency_k)
+        notes = admit(notes, agree, a.consistency_k, label=h)
+        kept = []
+        for n in notes:
+            v, reason = ce.validate_note(n, cite)
+            if v is None:
+                man[f"rejected_{reason}"] += 1
+                continue
+            man["names_total"] += len(v["names"])
+            man["notes_named"] += 1 if v["names"] else 0
+            kept.append(v)
+        man["curated"] += 1
+        if write and kept:
+            before = db.total_changes
+            db.executemany(
+                "INSERT OR IGNORE INTO contact_insights (contact_id, kind, insight, confidence,"
+                " as_of_ms, source, created_at_ms, evidence_ids) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                [(h, v["kind"], v["note"], v["confidence"],
+                  max(r[1] for r in v["evidence_rows"]),
+                  WIDE_SOURCE_PREFIX + source_tag(a.consistency_k, v["agree"]), now_ms,
+                  json.dumps([f"chat:{r[0]}" for r in v["evidence_rows"]])) for v in kept])
+            db.commit()
+            man["notes_written"] += db.total_changes - before
+    return man
 
 
 def main():
