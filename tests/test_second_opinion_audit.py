@@ -108,3 +108,12 @@ def test_audit_report_disagreement_by_source_and_not_measured():
     assert rep["wide"]["disagreement"]["rate"] == 0.5
     assert rep["persona"]["disagreement"]["rate"] == 0.0 and rep["persona"]["unclear"] == 1
     assert rep["all"]["disagreement"]["n"] == 3
+
+
+def test_a_broken_database_read_is_unresolvable_not_a_crash():
+    m = mem_db()
+    m.execute("DROP TABLE messages")          # schema drift / corrupt table mid-pass
+    assert audit.resolve_evidence("[1]", m, chat_db()) == []
+    s = store.open_store(":memory:")
+    counts = audit.audit_pass(s, Fake(["unsupported\nx"]), m, chat_db(), limit=10)
+    assert counts["skipped_no_evidence"] == 3 and counts["audited"] == 1

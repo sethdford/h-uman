@@ -5,6 +5,7 @@ import datetime as dt
 import json
 import os
 import re
+import sqlite3
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -52,7 +53,9 @@ def resolve_evidence(evidence_ids, mem, chat):
             if not t or not t.strip():
                 return []
             texts.append(t.strip().replace("\n", " ")[:300])
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, sqlite3.Error):
+        # A bad read counts as unresolvable evidence: one note must never
+        # abort the whole pass.
         return []
     return texts
 
