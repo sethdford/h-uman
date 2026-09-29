@@ -47,6 +47,30 @@ BLOCK = [
     "rm -rf /tmp/repo",
     "cd /tmp/repo/.. && rm -rf repo",
     "rm -rf $HOME/.human/memory.db",
+    # parser differentials (shell splits/expands where shlex did not)
+    "echo hi\ngit push --force",
+    "echo a#; git push --force",
+    "( rm -rf ~ )",
+    "{ rm -rf ~; }",
+    "! rm -rf ~",
+    "if true; then rm -rf ~; fi",
+    "for d in a; do rm -rf /; done",
+    "sudo -u root rm -rf /",
+    "env -u FOO rm -rf ~",
+    "nice -n 5 rm -rf /",
+    "timeout 10 rm -rf ~",
+    "rm -rf $(echo ~)",
+    "rm -rf `echo /`",
+    "rm -rf ${HOME:-/}",
+    "rm -rf $UNSET_VAR_FOR_GUARD_TEST",
+    "D=~; rm -rf $D",
+    "find . | xargs rm -rf",
+    "bash <<EOF\nrm -rf ~\nEOF",
+    "sh <<'X'\ngit push --force\nX",
+    "cat <<EOF > notes.txt\nhello\nEOF\ngit push -f",
+    "echo \"<<X\"\nrm -rf ~\nX",
+    "cat <<NEVERCLOSED\nrm -rf ~",
+    "bash -s <<EOF\ncd ~ && rm -rf .\nEOF",
 ]
 
 ALLOW = [
@@ -73,12 +97,20 @@ ALLOW = [
     "rm -rf /usr/local/tmp-build",
     "rm -rf /tmp/repo/build",
     "cd /tmp/repo && rm -rf build",
+    "echo hi # git push --force",
+    "B=/tmp/scratch; rm -rf $B",
+    "( cd /tmp && rm -rf scratch )",
+    "rm -rf \"$TMPDIR/foo\"",
+    # heredoc bodies fed to non-shells are data, not commands
+    "git commit -F - <<'EOF'\nfix: stop `; git push --force` and rm -rf ~\nEOF",
+    "cat <<-END\n\trm -rf /\n\tEND",
+    "python3 - <<'PY'\nprint('git reset --hard')\nPY",
 ]
 
 
 def decision(command: str):
     payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": REPO})
-    env = dict(os.environ, CLAUDE_PROJECT_DIR=REPO)
+    env = dict(os.environ, CLAUDE_PROJECT_DIR=REPO, TMPDIR="/tmp/claude-tmp")
     out = subprocess.run([sys.executable, HOOK], input=payload, capture_output=True, text=True, check=True,
                          env=env).stdout
     return json.loads(out)["hookSpecificOutput"]["permissionDecision"] if out.strip() else "allow"
