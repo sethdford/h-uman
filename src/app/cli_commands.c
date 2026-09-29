@@ -432,7 +432,8 @@ static int memory_graph_path(char *buf, size_t cap) {
 }
 
 /* human memory import-facts <jsonl> [--exclude pred1,pred2] — thin wrapper over
- * hu_graph_import_facts_jsonl against $HU_GRAPH_DB / ~/.human/graph.db. */
+ * hu_graph_import_facts_jsonl against $HU_GRAPH_DB / ~/.human/graph.db.
+ * Entity lines ({"kind":"entity",...}) are typed via hu_graph_upsert_entity_typed. */
 static hu_error_t memory_import_facts(hu_allocator_t *alloc, int argc, char **argv) {
     if (argc < 4) {
         fprintf(stderr, "Usage: human memory import-facts <facts.jsonl> [--exclude p1,p2]\n");
@@ -453,12 +454,12 @@ static hu_error_t memory_import_facts(hu_allocator_t *alloc, int argc, char **ar
                 hu_error_string(err));
         return err == HU_OK ? HU_ERR_INTERNAL : err;
     }
-    size_t imported = 0, skipped = 0;
-    err = hu_graph_import_facts_jsonl(alloc, g, argv[3], exclude, &imported, &skipped);
+    size_t imported = 0, entities = 0, skipped = 0;
+    err = hu_graph_import_facts_jsonl(alloc, g, argv[3], exclude, &imported, &entities, &skipped);
     hu_graph_close(g, alloc);
-    printf("{\"imported\": %zu, \"skipped\": %zu, \"graph\": \"%s\"}\n", imported, skipped,
-           graph_path);
-    if (err == HU_ERR_NOT_FOUND && imported == 0)
+    printf("{\"imported\": %zu, \"entities\": %zu, \"skipped\": %zu, \"graph\": \"%s\"}\n",
+           imported, entities, skipped, graph_path);
+    if (err == HU_ERR_NOT_FOUND && imported == 0 && entities == 0)
         fprintf(stderr, "import-facts: nothing imported from %s\n", argv[3]);
     return err;
 }

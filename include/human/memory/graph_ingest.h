@@ -68,16 +68,23 @@ hu_error_t hu_graph_ingest_fact(hu_graph_t *g, const char *contact_id, size_t co
                                 const char *subject, const char *predicate, const char *object,
                                 float confidence, int64_t now, const char *provenance);
 
-/* Import facts from a JSONL file (one object per line: contact, subject,
- * predicate, object, confidence, ts, source) into `g` via hu_graph_ingest_fact,
- * in ascending `ts` order so supersession is chronological. `exclude` is an
- * optional comma-separated predicate list to skip (e.g. "asking_about" —
- * a question is not a fact about the user). Counts are always written.
- * Returns HU_ERR_NOT_FOUND when the file is unreadable OR nothing was
- * imported: an empty import must never look like a finished one. */
+/* Import a JSONL file into `g`. Two line kinds:
+ *  - fact lines (no "kind"): {contact, subject, predicate, object, confidence,
+ *    ts, source} through hu_graph_ingest_fact, in ascending `ts` order so
+ *    supersession is chronological. `exclude` is an optional comma-separated
+ *    predicate list to skip (e.g. "asking_about").
+ *  - entity lines (spec 2026-09-29 §4.3): {"kind":"entity", contact, name,
+ *    type, source, confidence, retype_only} through
+ *    hu_graph_upsert_entity_typed. type is exactly person|place|org|event|topic
+ *    (case-insensitive); anything else, a missing contact/name, or a self
+ *    placeholder / non-referential name skips the line. retype_only=true maps
+ *    to HU_GRAPH_UPSERT_NO_TOUCH (the migration: no bump, never creates).
+ * Counts are always written. Returns HU_ERR_NOT_FOUND when the file is
+ * unreadable OR imported + entities == 0: an empty import must never look
+ * like a finished one. */
 hu_error_t hu_graph_import_facts_jsonl(hu_allocator_t *alloc, hu_graph_t *g, const char *path,
                                        const char *exclude, size_t *imported_out,
-                                       size_t *skipped_out);
+                                       size_t *entities_out, size_t *skipped_out);
 
 #ifdef __cplusplus
 }
