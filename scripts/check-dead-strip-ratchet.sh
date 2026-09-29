@@ -379,7 +379,19 @@ awk -F'\t' -v idxfile="$TMP/core_idx.txt" '
 # when a test object is recompiled — so cache it on the newest test .o mtime.
 TESTREFS=""
 find "$BUILD_DIR/CMakeFiles/human_tests.dir" "$BUILD_DIR/CMakeFiles/human_core_test.dir" \
-     -name '*.o' > "$TMP/testobjs.txt" 2>/dev/null || true
+     -name '*.o' > "$TMP/testobjs.all" 2>/dev/null || true
+# Drop objects whose source no longer exists. CMake never deletes the .o of a
+# removed source, so after a test is deleted its stale object still "references"
+# whatever it used, and those symbols vanish from B locally while CI (a clean
+# build) counts them. Measured 2026-09-28: deleting test_cross_channel_acl.c left
+# hu_persona_load_defaults dead-and-unreferenced; local B read 73, CI read 74,
+# and pre-commit had auto-locked the wrong 73.
+while IFS= read -r o; do
+    rel=${o#"$BUILD_DIR"/CMakeFiles/*.dir/}
+    src=${rel%.o}
+    case "$src" in src/* | tests/*) [ -f "$src" ] || continue ;; esac
+    printf '%s\n' "$o"
+done < "$TMP/testobjs.all" > "$TMP/testobjs.txt"
 if [ -s "$TMP/testobjs.txt" ]; then
     # max via awk, not `sort -rn | head -1`: under `set -o pipefail` head's early
     # exit SIGPIPEs sort as soon as its output outgrows the pipe buffer, and the
