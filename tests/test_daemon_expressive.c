@@ -181,6 +181,18 @@ static void test_unknown_event_catches_presupposed_outcomes(void) {
     HU_ASSERT_STR_EQ(t, "trip");
 }
 
+/* The loaded history already holds the message being answered (live
+ * 2026-09-30 05:30: the guard never fired because "dentist" was "known" from
+ * the question itself). The question does not establish its own event. */
+static void test_unknown_event_ignores_the_question_itself_in_history(void) {
+    char t[64];
+    HU_ASSERT_TRUE(
+        ue("how'd the dentist appointment go", "how'd the dentist appointment go", t, sizeof(t)));
+    HU_ASSERT_TRUE(ue("how'd the dentist appointment go", "#text how'd the dentist appointment go",
+                      t, sizeof(t)));
+    HU_ASSERT_STR_EQ(t, "dentist appointment");
+}
+
 static void test_unknown_event_passes_what_the_thread_established(void) {
     char t[64];
     HU_ASSERT_FALSE(
@@ -341,6 +353,7 @@ void run_daemon_expressive_tests(void) {
     HU_RUN_TEST(test_expressive_share_gate);
     HU_RUN_TEST(test_selftest_commands);
     HU_RUN_TEST(test_unknown_event_catches_presupposed_outcomes);
+    HU_RUN_TEST(test_unknown_event_ignores_the_question_itself_in_history);
     HU_RUN_TEST(test_unknown_event_passes_what_the_thread_established);
     HU_RUN_TEST(test_unknown_event_ignores_ordinary_questions);
     HU_RUN_TEST(test_unknown_event_direction_names_the_topic);
