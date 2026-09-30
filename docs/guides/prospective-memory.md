@@ -159,15 +159,19 @@ LIVE-only: the lazy-history note under item 1.
    Contacts with a due row load history and log exactly as before. Residual:
    in LIVE, a contact whose only due intention is memoized `not_now` (item 3)
    still loads history on each tick, though nothing is judged.
-2. **Closed (`21ff0738f`): the legacy mark-sent retires the v2 twin.** When
-   `hu_superhuman_delayed_followup_mark_sent` actually marks a row (the F31
-   send, or the legacy due list's send), `hu_prospective_repo_settle_followup_twin`
-   moves its open time twin -- the row keyed `followup:<id>`, or the open row
-   whose action is that follow-up's mirror text (e.g. the collapsed F20 row
-   keyed `commitment:<N>`) -- to `done` / outcome `used`, the state a
-   delivered-and-used intention ends in. Only `prospective_memories` is
-   written: the ledger is left as the legacy path wrote it, so OFF sending is
-   byte-identical (pinned against a twin-less database). No twin is a no-op.
+2. **Closed (`21ff0738f`, reworked in fix round 1): the legacy mark-sent
+   closes the v2 twin.** When `hu_superhuman_delayed_followup_mark_sent`
+   actually marks a row, `hu_prospective_repo_settle_followup_twin` moves its
+   *pending* time twin -- the row keyed `followup:<id>`, or the pending row
+   whose action is that follow-up's mirror text and whose due is within the
+   follow-up's due + grace (e.g. the collapsed F20 row keyed
+   `commitment:<N>`) -- to `done` with **no outcome**: the legacy path may
+   only have listed the follow-up in the proposer's context, so it makes no
+   claim that the reply used it. A twin already `surfaced` is left for
+   `hu_prospective_v2_after_delivery` to judge, and the send path now runs
+   that delivery hook before the legacy mark-sent calls. Only
+   `prospective_memories` is written, so OFF sending is byte-identical
+   (pinned against a twin-less database). No twin is a no-op.
 3. **Closed (`9ad82174f`): a `not_now` verdict is no longer re-judged every
    tick in LIVE.** An in-process memo keyed by (contact, action) and the
    local day (`hu_prospective_local_day_start`) skips the judge for an
@@ -176,20 +180,24 @@ LIVE-only: the lazy-history note under item 1.
    fixed at 128 direct-mapped slots; a colliding intention overwrites the slot,
    so the evicted one is judged once more that day. A restart forgets it.
    Parse failures and judge errors are not memoized. SHADOW does not use it.
-4. **Closed (`21ff0738f`): settling a collapsed row retires every ledger row
-   it stands for.** After retiring the keyed ledger row,
-   `hu_prospective_repo_sync_source` also retires the contact's still-open
-   ledger rows whose mirror text (`hu_prospective_mirror_action`: a dated
-   frame's topic, a contact's promise rephrased, else verbatim) normalizes to
-   the intention's action, compared in C. That covers a topic's
-   `(tomorrow)` and `(in 2 days)` frames, and identically-worded commitments,
-   which collapse the same way. Another topic, and another contact, are
-   untouched.
+4. **Closed (`21ff0738f`, reworked in fix round 1): settling a collapsed row
+   retires the ledger rows within its grace window.** After retiring the
+   keyed ledger row, `hu_prospective_repo_sync_source` also retires the
+   contact's still-open ledger rows whose mirror text
+   (`hu_prospective_mirror_action`: a dated frame's topic, a contact's promise
+   rephrased, else verbatim) normalizes to the intention's action, compared
+   in C -- but only rows due within the intention's `due_at` + grace (3
+   days). That covers a topic's `(tomorrow)` and `(in 2 days)` frames and an
+   F20 pair. A same-words promise dated beyond the window is a later promise:
+   it stays open, and the earliest such row gets its own fresh open time row
+   keyed by its own ledger id, with its own due. Another topic, and another
+   contact, are untouched.
 5. **Closed (`4b89ec964`): the backfill retires the ledger rows of expired
    imports** in the same transaction (a commitment to `expired`, a follow-up
    to `sent=1`), each by its own id -- also for an item found via
    `skipped_existing`, which repairs a database an earlier backfill wrote.
-   `ledger_retired` counts them; a dry run rolls them back. A re-run no longer
+   `ledger_retired` counts them; `ledger_unretired` counts expired imports
+   left pending because the contact was too long to hold (>= 256 bytes); a dry run rolls them back. A re-run no longer
    sees the retired rows, so its `commitments_seen` / `followups_seen` /
    `skipped_existing` are lower by them.
 
@@ -222,11 +230,12 @@ Output contract: a `candidates=… fire=… … bytes=… write_err=…` header,
 with `--full` one `item id=… verdict=…` line per judged intention and the
 directive text. `--deliver` prints `surfaced=… used=… ignored=… expired=…`.
 `human prospective backfill --db PATH [--write] [--now EPOCH]` runs the same
-backfill the wrapper script drives, emitting one JSON line whose last two
+backfill the wrapper script drives, emitting one JSON line whose last three
 fields are `skipped_unsafe` (a contact-owned promise the rephraser refused to
-mirror in third person is skipped, never written first-person) and
+mirror in third person is skipped, never written first-person),
 `ledger_retired` (ledger rows of expired imports retired in the same
-transaction).
+transaction) and `ledger_unretired` (expired imports whose ledger row could
+not be retired: contact too long).
 
 ## Known limits
 
