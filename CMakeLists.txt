@@ -971,6 +971,7 @@ set(HU_CORE_SOURCES
     src/providers/compatible.c
     src/providers/claude_cli.c
     src/providers/factory.c
+    src/providers/chat_oneshot.c
     ${CHANNEL_SOURCES}
     ${MEMORY_ENGINE_SOURCES}
     src/memory/factory.c
@@ -983,6 +984,7 @@ set(HU_CORE_SOURCES
     src/memory/emotional_moments.c
     src/memory/repos/emotional_moments_repo_sqlite.c
     src/memory/superhuman.c
+    src/memory/prospective_policy.c
     src/memory/contact_graph.c
     src/memory/identity_resolver.c
     src/memory/fast_capture.c
@@ -1252,6 +1254,8 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_contact_optout.c
     src/daemon/daemon_hurt_handoff.c
     src/daemon/daemon_dated_followup.c
+    src/daemon/daemon_prospective_time.c
+    src/daemon/daemon_prospective.c
     src/daemon/daemon_outbound_bus.c
     src/daemon/daemon_send_provenance.c
     src/daemon/daemon_reply_delay.c
@@ -1288,6 +1292,7 @@ set(HU_CORE_SOURCES
     src/app/version.c
     src/app/cli_commands.c
     src/app/cli_ctl.c
+    src/app/cli_prospective.c
     src/app/cli_help.c
     src/eval/cli_evaluation.c
     src/eval/commitment_sample.c
@@ -1679,6 +1684,7 @@ if(HU_ENABLE_SQLITE)
         src/memory/repos/proactive_decisions_repo_sqlite.c
         src/memory/repos/outbound_sends_repo_sqlite.c
         src/memory/repos/contact_optout_repo_sqlite.c
+        src/memory/repos/prospective_repo_sqlite.c
         src/memory/repos/reminder_repo_sqlite.c
         src/memory/repos/briefing_repo_sqlite.c
         src/memory/repos/person_dates_repo_sqlite.c
@@ -1691,6 +1697,7 @@ if(HU_ENABLE_SQLITE)
         src/memory/forgetting.c
         src/memory/forgetting_curve.c
         src/memory/prospective.c
+        src/memory/prospective_v2.c
         src/memory/emotional_residue.c
         src/intelligence/skills.c
         src/intelligence/self_improve.c
@@ -4271,6 +4278,13 @@ list(APPEND HU_TEST_SOURCES
     tests/test_commitment_sample.c
     tests/test_agent_fit_history.c
     tests/test_prospective.c
+    tests/test_prospective_repo_sqlite.c
+    tests/test_prospective_policy.c
+    tests/test_chat_oneshot.c
+    tests/test_daemon_prospective_time.c
+    tests/test_prospective_v2.c
+    tests/test_cli_prospective.c
+    tests/test_daemon_prospective.c
     tests/test_eval_score.c
     tests/test_corrective_rag.c
     tests/test_adaptive_rag.c

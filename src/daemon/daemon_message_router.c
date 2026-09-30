@@ -33,6 +33,7 @@
 #include "human/core/time.h"
 #include "human/daemon.h"
 #include "human/daemon/message_router.h"
+#include "human/daemon/prospective.h"
 #include "human/daemon/share_queue.h"
 #include "human/memory/agent_facts.h"
 #include "human/persona/pacing.h"
@@ -608,6 +609,12 @@ hu_error_t hu_daemon_record_delivered_reply(struct hu_agent *agent, const char *
                                             const char *target, size_t target_len,
                                             const char *prompt, size_t prompt_len, const char *text,
                                             size_t text_len) {
+#ifdef HU_ENABLE_SQLITE
+    /* Prospective v2 settles surfaced reminders against the text as DELIVERED
+     * (spec 2026-09-30 §4.3). Runs before the collector checks: it depends on
+     * HU_PROSPECTIVE, not on SOTA. */
+    hu_daemon_prospective_delivered(agent, target, target_len, text, text_len);
+#endif
     if (!agent || !agent->sota.sota_initialized)
         return HU_OK; /* no collector (tests, SOTA off): nothing to record */
     if (!ch_name || !ch_name[0] || !target || target_len == 0 || !text || text_len == 0)

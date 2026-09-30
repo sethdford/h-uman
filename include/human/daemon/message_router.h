@@ -127,7 +127,9 @@ hu_error_t hu_daemon_dispatch_imessage_reply_ex(
  * as delivered text. Call from the send funnel, BEFORE
  * hu_daemon_register_reply_for_reactions (which attaches the message_ref to
  * this row). HU_OK no-op when the agent has no collector, the text or prompt
- * is empty; the SQLite write error otherwise (logged). */
+ * is empty; the SQLite write error otherwise (logged). Also hands the
+ * delivered text to hu_daemon_prospective_delivered (a no-op unless
+ * HU_PROSPECTIVE is shadow/live). */
 hu_error_t hu_daemon_record_delivered_reply(struct hu_agent *agent, const char *ch_name,
                                             const char *target, size_t target_len,
                                             const char *prompt, size_t prompt_len, const char *text,

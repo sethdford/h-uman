@@ -322,6 +322,174 @@ static void superhuman_commitment_mark_followed_up(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
+static int64_t sh_count(hu_memory_t *mem, const char *sql) {
+    sqlite3 *db = hu_sqlite_memory_get_db(mem);
+    sqlite3_stmt *st = NULL;
+    HU_ASSERT_EQ(sqlite3_prepare_v2(db, sql, -1, &st, NULL), SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_step(st), SQLITE_ROW);
+    int64_t v = sqlite3_column_int64(st, 0);
+    sqlite3_finalize(st);
+    return v;
+}
+
+/* Prospective memory v2 §4.1: a dated commitment is also a time intention. */
+static void superhuman_dated_commitment_mirrors_a_time_intention(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+    HU_ASSERT_EQ(hu_superhuman_commitment_store(&mem, &alloc, "contact_a", 9, "call the dentist",
+                                                16, "me", 2, 5000),
+                 HU_OK);
+    HU_ASSERT_EQ(sh_count(&mem, "SELECT COUNT(*) FROM prospective_memories WHERE "
+                                "cue_kind='time' AND trigger_type='time' AND "
+                                "trigger_value='commitment:1' AND action='call the dentist' AND "
+                                "contact_id='contact_a' AND due_at=5000 AND expires_at=264200 AND "
+                                "status='pending' AND fired=0 AND source='promise_keeper'"),
+                 (int64_t)1);
+    /* an undated commitment is no time intention */
+    HU_ASSERT_EQ(
+        hu_superhuman_commitment_store(&mem, &alloc, "contact_a", 9, "grab coffee", 11, "me", 2, 0),
+        HU_OK);
+    HU_ASSERT_EQ(sh_count(&mem, "SELECT COUNT(*) FROM prospective_memories WHERE cue_kind='time'"),
+                 (int64_t)1);
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* The promise keeper stores a commitment AND schedules its follow-up for the
+ * same promise: one intention, one reminder. */
+static void superhuman_dated_commitment_and_its_followup_mirror_once(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+    HU_ASSERT_EQ(hu_superhuman_commitment_store(&mem, &alloc, "contact_a", 9, "call the dentist",
+                                                16, "me", 2, 5000),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, "contact_a", 9,
+                                                         "call the dentist", 16, 5000, "me", 2),
+                 HU_OK);
+    HU_ASSERT_EQ(sh_count(&mem, "SELECT COUNT(*) FROM prospective_memories WHERE cue_kind='time'"),
+                 (int64_t)1);
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, "contact_a", 9,
+                                                         "the job interview", 17, 7000, NULL, 0),
+                 HU_OK);
+    HU_ASSERT_EQ(sh_count(&mem, "SELECT COUNT(*) FROM prospective_memories WHERE "
+                                "cue_kind='time' AND trigger_value='followup:2' AND "
+                                "source='followup' AND due_at=7000"),
+                 (int64_t)1);
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* Controller ruling F4: the F20 keeper stores the CONTACT's own commitment
+ * (who="them"). Mirroring it verbatim would later quote the contact's words
+ * back as if the owner had promised it, so the time row's action is the
+ * third-person rephrasing, not the raw description. */
+static void superhuman_contact_commitment_mirrors_third_person(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+    HU_ASSERT_EQ(hu_superhuman_commitment_store(&mem, &alloc, "contact_b", 9,
+                                                "text you when I land", 20, "them", 4, 6000),
+                 HU_OK);
+    /* the ledger row is unchanged -- it stores the contact's own words */
+    HU_ASSERT_EQ(sh_count(&mem, "SELECT COUNT(*) FROM commitments WHERE "
+                                "description='text you when I land' AND who='them'"),
+                 (int64_t)1);
+    /* the mirrored time row carries the third-person rephrasing instead */
+    HU_ASSERT_EQ(sh_count(&mem,
+                          "SELECT COUNT(*) FROM prospective_memories WHERE cue_kind='time' AND "
+                          "trigger_value='commitment:1' AND "
+                          "action='ask if they still need to text you when they land' AND "
+                          "contact_id='contact_b' AND due_at=6000 AND source='promise_keeper'"),
+                 (int64_t)1);
+    /* never the contact's raw first-person words */
+    HU_ASSERT_EQ(sh_count(&mem, "SELECT COUNT(*) FROM prospective_memories WHERE cue_kind='time' "
+                                "AND action='text you when I land'"),
+                 (int64_t)0);
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* Controller ruling F4: when the rephrasing is not safe (here, the detected
+ * description is just the "to " prefix with nothing after it -- see
+ * hu_prospective_commitment_action's own test for this exact input), the
+ * mirror is skipped. The commitments ledger row is still written; only the
+ * time-cued mirror is missing. */
+static void superhuman_contact_commitment_unsafe_phrasing_skips_mirror(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+    HU_ASSERT_EQ(
+        hu_superhuman_commitment_store(&mem, &alloc, "contact_c", 9, "to ", 3, "them", 4, 8000),
+        HU_OK);
+    HU_ASSERT_EQ(sh_count(&mem, "SELECT COUNT(*) FROM commitments WHERE description='to '"),
+                 (int64_t)1);
+    HU_ASSERT_EQ(sh_count(&mem, "SELECT COUNT(*) FROM prospective_memories WHERE cue_kind='time'"),
+                 (int64_t)0);
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* Fix round 1 (F4 gap): the F20 pair -- store(who="them") then
+ * schedule(who="them") for the SAME contact commitment -- must collapse to
+ * ONE time row whose action is the third-person rephrasing, not two rows
+ * (one rephrased, one quoting the contact's raw words back as the owner's).
+ * Both calls carry the same contact/description/deadline the real F20 block
+ * in daemon.c passes to both hu_superhuman_commitment_store and
+ * hu_superhuman_delayed_followup_schedule. */
+static void superhuman_f20_pair_contact_owned_collapses_to_one_rephrased_row(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+    const char *desc = "text you when I land";
+    HU_ASSERT_EQ(hu_superhuman_commitment_store(&mem, &alloc, "contact_d", 9, desc, strlen(desc),
+                                                "them", 4, 9000),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, "contact_d", 9, desc,
+                                                         strlen(desc), 9000, "them", 4),
+                 HU_OK);
+    HU_ASSERT_EQ(sh_count(&mem, "SELECT COUNT(*) FROM prospective_memories WHERE cue_kind='time'"),
+                 (int64_t)1);
+    HU_ASSERT_EQ(sh_count(&mem,
+                          "SELECT COUNT(*) FROM prospective_memories WHERE cue_kind='time' AND "
+                          "action='ask if they still need to text you when they land' AND "
+                          "contact_id='contact_d' AND source='promise_keeper'"),
+                 (int64_t)1);
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* Fix round 1 (F4 gap), test (b): schedule(who="them") with phrasing that
+ * cannot be safely rephrased (the same "to " edge case as the store-side
+ * test) skips the mirror instead of quoting the contact verbatim. */
+static void superhuman_followup_contact_owned_unsafe_phrasing_skips_mirror(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, "contact_e", 9, "to ", 3,
+                                                         8500, "them", 4),
+                 HU_OK);
+    HU_ASSERT_EQ(sh_count(&mem, "SELECT COUNT(*) FROM delayed_followups WHERE topic='to '"),
+                 (int64_t)1);
+    HU_ASSERT_EQ(sh_count(&mem, "SELECT COUNT(*) FROM prospective_memories WHERE cue_kind='time'"),
+                 (int64_t)0);
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* Fix round 1 (F4 gap), test (c): schedule(NULL) still mirrors verbatim,
+ * exactly as before the who/who_len parameters were added -- the
+ * daemon_dated_followup.c caller has no ownership concept and passes NULL. */
+static void superhuman_followup_null_who_mirrors_verbatim(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+    const char *topic = "pick up the kids";
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, "contact_f", 9, topic,
+                                                         strlen(topic), 9500, NULL, 0),
+                 HU_OK);
+    HU_ASSERT_EQ(sh_count(&mem,
+                          "SELECT COUNT(*) FROM prospective_memories WHERE cue_kind='time' AND "
+                          "action='pick up the kids' AND source='followup'"),
+                 (int64_t)1);
+    mem.vtable->deinit(mem.ctx);
+}
+
 static void superhuman_temporal_record_and_quiet_hours(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
@@ -403,8 +571,9 @@ static void superhuman_delayed_followup_lifecycle(void) {
     HU_ASSERT_NOT_NULL(mem.ctx);
 
     int64_t past = 1000000;
-    HU_ASSERT_EQ(
-        hu_superhuman_delayed_followup_schedule(&mem, &alloc, "c", 1, "project X", 9, past), HU_OK);
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, "c", 1, "project X", 9, past,
+                                                         NULL, 0),
+                 HU_OK);
 
     hu_delayed_followup_t *list = NULL;
     size_t count = 0;
@@ -747,6 +916,13 @@ void run_superhuman_tests(void) {
     HU_RUN_TEST(superhuman_inside_joke_reference_updates);
     HU_RUN_TEST(superhuman_commitment_store_and_list_due);
     HU_RUN_TEST(superhuman_commitment_mark_followed_up);
+    HU_RUN_TEST(superhuman_dated_commitment_mirrors_a_time_intention);
+    HU_RUN_TEST(superhuman_dated_commitment_and_its_followup_mirror_once);
+    HU_RUN_TEST(superhuman_contact_commitment_mirrors_third_person);
+    HU_RUN_TEST(superhuman_contact_commitment_unsafe_phrasing_skips_mirror);
+    HU_RUN_TEST(superhuman_f20_pair_contact_owned_collapses_to_one_rephrased_row);
+    HU_RUN_TEST(superhuman_followup_contact_owned_unsafe_phrasing_skips_mirror);
+    HU_RUN_TEST(superhuman_followup_null_who_mirrors_verbatim);
     HU_RUN_TEST(superhuman_temporal_record_and_quiet_hours);
     HU_RUN_TEST(superhuman_temporal_quiet_hours_returns_sunday);
     HU_RUN_TEST(superhuman_delayed_followup_lifecycle);

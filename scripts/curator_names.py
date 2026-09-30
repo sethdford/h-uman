@@ -176,6 +176,28 @@ def write_jsonl_private(path, lines):
     return path
 
 
+def write_text_private(path, text):
+    """0600 from creation, atomic: the same O_EXCL mkstemp (0600, never follows a
+    planted symlink, never inherits an existing file's wider mode) + rename
+    pattern as write_jsonl_private, generalized to arbitrary text -- CSV,
+    Markdown, or a single JSON document -- so a caller that needs more than
+    JSONL does not clone the O_EXCL dance per format. `newline=""` on the open
+    so a caller that pre-formats CSV rows (csv.writer into a string) does not
+    get its line endings translated a second time."""
+    d = os.path.dirname(path) or "."
+    os.makedirs(d, mode=0o700, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".priv-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", newline="") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+    return path
+
+
 def parse_import_output(stdout):
     """`human memory import-facts` prints one JSON object -> its "entities", else None."""
     for line in reversed((stdout or "").splitlines()):
