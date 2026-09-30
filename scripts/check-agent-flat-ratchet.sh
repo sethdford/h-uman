@@ -22,7 +22,7 @@ else
 fi
 
 # Measured 2026-09-28
-AGENT_FLAT_BASELINE=162
+AGENT_FLAT_BASELINE=161   # auto-locked 2026-09-30 (was 162)
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 

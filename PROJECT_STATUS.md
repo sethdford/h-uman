@@ -9,7 +9,7 @@ Last updated: 2026-09-30
 | Source files (src/ + include/) | **1,093**              |
 | Lines of C/H/ASM code          | **~414K**              |
 | Test files                     | ~308                   |
-| Tests passing                  | **14,031/14,031 (100%)** |
+| Tests passing                  | **14,098/14,098 (100%)** |
 | Binary size (MinSizeRel+LTO)   | **<!-- fp:binary_kb -->~2760 KB<!-- /fp -->** |
 | Idle RSS (`human mcp`)         | **<!-- fp:idle_rss_mb -->8.6 MB<!-- /fp -->** |
 
@@ -57,7 +57,7 @@ Binary size and RSS are the release-size build (LTO, all channels, sqlite-vec of
 | -------- | ------------------------ |
 | Dispatch | Forwards to sub-channels |
 
-## Tools — All 96 Real (with all feature flags)
+## Tools — All 95 Real (with all feature flags)
 
 Every tool has a real implementation. In test mode (`HU_IS_TEST`), they return mock
 data to avoid side effects. Highlights:
