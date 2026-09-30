@@ -712,7 +712,19 @@ hu_error_t hu_superhuman_delayed_followup_mark_sent(void *sqlite_ctx, int64_t id
     sqlite3_bind_int64(stmt, 1, id);
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
-    return (rc == SQLITE_DONE) ? HU_OK : HU_ERR_MEMORY_BACKEND;
+    if (rc != SQLITE_DONE)
+        return HU_ERR_MEMORY_BACKEND;
+    /* Known gap 2: the legacy path delivered this follow-up, so its v2 time
+     * twin ("followup:<id>", or the collapsed F20 row it mirrors into) is
+     * done too -- or the time path could surface the same topic again. Only
+     * when this call actually marked it; best-effort like the mirror: the
+     * ledger row is the record, and the ledger is left exactly as the
+     * legacy path wrote it. */
+    if (sqlite3_changes(db) > 0 &&
+        hu_prospective_repo_settle_followup_twin(db, id, (int64_t)time(NULL), NULL) != HU_OK)
+        hu_log_warn("superhuman", NULL, "prospective time twin of followup:%lld not settled",
+                    (long long)id);
+    return HU_OK;
 }
 
 hu_error_t hu_superhuman_delayed_followup_pending_exists(void *sqlite_ctx, const char *contact_id,

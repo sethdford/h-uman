@@ -971,6 +971,139 @@ static void time_live_not_now_is_judged_once_a_day(void) {
     mem.vtable->deinit(mem.ctx);
     t_env_clear();
 }
+/* Known gap 4: two dated frames of one topic collapse into ONE open row
+ * keyed by the first. Settling it (a LIVE delivery that used the topic) must
+ * retire BOTH ledger rows -- the second frame's, not yet due, included --
+ * or a legacy reader resurfaces the topic later. The same contact's other
+ * topic and another contact's identical topic stay unsent. */
+static void time_settling_a_collapsed_topic_retires_every_frame(void) {
+    t_env_clear();
+    setenv("HU_PROSPECTIVE_TIME", "live", 1);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    tmock_t m = {0};
+    static hu_agent_t agent;
+    agent_with_mock(&agent, &alloc, &mem, &m);
+    const int64_t t0 = TNOW - 2 * TDAY;
+    static const struct {
+        const char *contact;
+        const char *topic;
+        int64_t send_at;
+    } k[] = {{TA, "the job interview", t0 + TDAY + 60},     /* (tomorrow): due at TNOW */
+             {TA, "the job interview", t0 + 2 * TDAY + 60}, /* (in 2 days): not yet */
+             {TA, "the dentist", t0 + 2 * TDAY + 60},
+             {TB, "the job interview", t0 + TDAY + 60}};
+    for (size_t i = 0; i < sizeof(k) / sizeof(k[0]); i++) {
+        char f[320];
+        size_t fl = t_frame(k[i].topic, k[i].send_at, t0, f, sizeof(f));
+        HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, k[i].contact, 12, f, fl,
+                                                             k[i].send_at, NULL, 0),
+                     HU_OK);
+    }
+    HU_ASSERT_EQ(t_count(&mem, "SELECT COUNT(*) FROM prospective_memories WHERE contact_id='" TA
+                               "' AND action='the job interview'"),
+                 (int64_t)1); /* the two frames collapsed */
+    char buf[640];
+    int64_t listed = -1;
+    HU_ASSERT_TRUE(hu_daemon_prospective_due_followups(&alloc, &agent, NULL, NULL, 0, TA, TNOW, buf,
+                                                       sizeof(buf), &listed) > 0);
+    HU_ASSERT_STR_EQ(buf, "- the job interview\n");
+    static const char sent[] = "hey how did the job interview go?";
+    hu_daemon_prospective_time_after_send(&agent, TA, sent, sizeof(sent) - 1, TNOW + 60);
+    HU_ASSERT_EQ(t_count(&mem, "SELECT COUNT(*) FROM prospective_memories WHERE contact_id='" TA
+                               "' AND status='done' AND outcome='used'"),
+                 (int64_t)1);
+    HU_ASSERT_EQ(t_count(&mem, "SELECT group_concat(id || ':' || sent) = '1:1,2:1,3:0,4:0' FROM "
+                               "(SELECT id, sent FROM delayed_followups ORDER BY id)"),
+                 (int64_t)1);
+    mem.vtable->deinit(mem.ctx);
+    t_env_clear();
+}
+
+/* One row of text from `sql` (or "(null)"). */
+static void t_text(hu_memory_t *mem, const char *sql, char *buf, size_t cap) {
+    sqlite3_stmt *st = NULL;
+    HU_ASSERT_EQ(sqlite3_prepare_v2(hu_sqlite_memory_get_db(mem), sql, -1, &st, NULL), SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_step(st), SQLITE_ROW);
+    const unsigned char *t = sqlite3_column_text(st, 0);
+    snprintf(buf, cap, "%s", t ? (const char *)t : "(null)");
+    sqlite3_finalize(st);
+}
+
+static void t_ledger(hu_memory_t *mem, char *buf, size_t cap) {
+    char c[512];
+    char f[512];
+    t_text(mem,
+           "SELECT group_concat(id||'|'||contact_id||'|'||description||'|'||status||'|'||"
+           "ifnull(followed_up_at,'-'), ';') FROM (SELECT * FROM commitments ORDER BY id)",
+           c, sizeof(c));
+    t_text(mem,
+           "SELECT group_concat(id||'|'||contact_id||'|'||topic||'|'||scheduled_at||'|'||sent, "
+           "';') FROM (SELECT * FROM delayed_followups ORDER BY id)",
+           f, sizeof(f));
+    snprintf(buf, cap, "%s\n%s", c, f);
+}
+
+/* Known gap 2, OFF side: settling the v2 twin on a legacy mark-sent changes
+ * nothing the legacy path reads or sends. Database A has the twin (settled
+ * by mark_sent), database B never had one (the pre-fix state as the legacy
+ * readers see it): the OFF tick's outputs and every ledger row are
+ * identical, before and after the send. */
+static void time_off_legacy_mark_sent_output_is_unchanged_by_the_twin_settle(void) {
+    t_env_clear();
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t ma = hu_sqlite_memory_create(&alloc, ":memory:");
+    hu_memory_t mb = hu_sqlite_memory_create(&alloc, ":memory:");
+    tmock_t m = {0};
+    static hu_agent_t agent_a;
+    static hu_agent_t agent_b;
+    agent_with_mock(&agent_a, &alloc, &ma, &m);
+    agent_with_mock(&agent_b, &alloc, &mb, &m);
+    t_seed_lease(&ma, &alloc, TNOW);
+    t_seed_lease(&mb, &alloc, TNOW);
+    HU_ASSERT_EQ(sqlite3_exec(hu_sqlite_memory_get_db(&mb), "DELETE FROM prospective_memories",
+                              NULL, NULL, NULL),
+                 SQLITE_OK);
+    static t_call_t a;
+    static t_call_t b;
+    for (int round = 0; round < 2; round++) {
+        memset(&a, 0, sizeof(a));
+        memset(&b, 0, sizeof(b));
+        a.alloc = b.alloc = &alloc;
+        a.agent = &agent_a;
+        b.agent = &agent_b;
+        a.now = b.now = TNOW + round * 3600;
+        t_tick(&a);
+        t_tick(&b);
+        HU_ASSERT_STR_EQ(a.out, b.out);
+        HU_ASSERT_EQ(a.listed, b.listed);
+        HU_ASSERT_STR_EQ(a.ctx ? a.ctx : "", b.ctx ? b.ctx : "");
+        HU_ASSERT_EQ(a.ids_n, b.ids_n);
+        char la[1200];
+        char lb[1200];
+        t_ledger(&ma, la, sizeof(la));
+        t_ledger(&mb, lb, sizeof(lb));
+        HU_ASSERT_STR_EQ(la, lb);
+        if (round == 0) {
+            HU_ASSERT_STR_EQ(a.out, "- call about the lease (due 3600s ago)\n");
+            HU_ASSERT_EQ(hu_superhuman_delayed_followup_mark_sent(&ma, a.listed), HU_OK);
+            HU_ASSERT_EQ(hu_superhuman_delayed_followup_mark_sent(&mb, b.listed), HU_OK);
+        } else {
+            HU_ASSERT_STR_EQ(a.out, ""); /* sent: gone from the legacy due list in both */
+        }
+        if (a.ctx)
+            alloc.free(alloc.ctx, a.ctx, a.ctx_len + 1);
+        if (b.ctx)
+            alloc.free(alloc.ctx, b.ctx, b.ctx_len + 1);
+    }
+    HU_ASSERT_EQ(m.calls, 0);
+    HU_ASSERT_EQ(t_count(&ma, "SELECT COUNT(*) FROM prospective_memories WHERE cue_kind='time' AND "
+                              "status='done' AND outcome='used'"),
+                 (int64_t)1); /* only the v2 twin moved */
+    ma.vtable->deinit(ma.ctx);
+    mb.vtable->deinit(mb.ctx);
+    t_env_clear();
+}
 #endif /* HU_ENABLE_SQLITE */
 
 void run_daemon_prospective_time_tests(void) {
@@ -995,5 +1128,7 @@ void run_daemon_prospective_time_tests(void) {
     HU_RUN_TEST(time_nothing_due_loads_no_history);
     HU_RUN_TEST(time_shadow_due_loads_history_once);
     HU_RUN_TEST(time_live_not_now_is_judged_once_a_day);
+    HU_RUN_TEST(time_settling_a_collapsed_topic_retires_every_frame);
+    HU_RUN_TEST(time_off_legacy_mark_sent_output_is_unchanged_by_the_twin_settle);
 #endif
 }
