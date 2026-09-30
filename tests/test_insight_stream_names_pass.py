@@ -546,3 +546,53 @@ def test_dry_run_overwrites_one_file(tmp_path, monkeypatch):
     monkeypatch.setattr(ins, "call_model", lambda *x, **k: "[]")
     assert ins.run_names(a, {}) == 0
     assert (tmp_path / "names" / "names-dryrun.jsonl").read_text() == ""  # never stale
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-30 prod finding: GLM (thinking suppressed) sometimes emits its end token
+# first, returning "" for 4 of 7 contacts. An empty answer is retried at other
+# temperatures; one that stays empty is counted apart from an unparseable one.
+# ---------------------------------------------------------------------------
+
+def _scripted(answers, seen):
+    it = iter(answers)
+
+    def model(*a, **k):
+        seen.append(k.get("temperature"))
+        return next(it)
+    return model
+
+
+def test_empty_answer_is_retried_until_one_parses(monkeypatch):
+    seen = []
+    monkeypatch.setattr(ins, "call_model", _scripted(["", "  ", MODEL], seen))
+    man, lines = ins.names_pass(NA(), {}, _att(H), NOW)
+    assert seen == list(ins.NAMES_EMPTY_RETRY_TEMPS)
+    assert man["contacts"] == 1 and man["empty_answer"] == 0 and man["parse_failed"] == 0
+    assert man["empty_retries"] == 2
+    assert [ln["name"] for ln in lines] == ["Priya", "surgery"]
+
+
+def test_answer_that_stays_empty_is_counted_apart_from_parse_failed(monkeypatch):
+    seen = []
+    monkeypatch.setattr(ins, "call_model", _scripted(["", "", ""], seen))
+    man, lines = ins.names_pass(NA(), {}, _att(H), NOW)
+    assert len(seen) == len(ins.NAMES_EMPTY_RETRY_TEMPS)
+    assert man["empty_answer"] == 1 and man["parse_failed"] == 0 and man["contacts"] == 0
+    assert lines == []
+
+
+def test_unparseable_nonempty_answer_is_not_retried(monkeypatch):
+    seen = []
+    monkeypatch.setattr(ins, "call_model", _scripted(["Sure! Priya", MODEL, MODEL], seen))
+    man, _ = ins.names_pass(NA(), {}, _att(H), NOW)
+    assert len(seen) == 1 and man["parse_failed"] == 1 and man["empty_answer"] == 0
+
+
+def test_run_names_every_contact_empty_exits_3(tmp_path, monkeypatch):
+    # an always-empty model must not read as a quiet night
+    a = _args(tmp_path, monkeypatch)
+    monkeypatch.setattr(ins, "call_model", lambda *x, **k: "")
+    assert ins.run_names(a, {}) == 3
+    man = json.load(open(next((tmp_path / "manifests").glob("names-manifest-*.json"))))
+    assert man["empty_answer"] == 1 and man["contacts"] == 0
