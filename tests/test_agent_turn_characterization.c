@@ -1214,11 +1214,136 @@ static void characterization_is_repeatable(void) {
     HU_ASSERT_EQ(ch_compare_runs("UTC", "UTC"), 0);
 }
 
+/* ── mutation checks (spec §6): the comparator must see each of these ───── */
+static const ch_case_t *ch_case_named(const char *name) {
+    for (size_t i = 0; i < CH_N_CASES; i++)
+        if (strcmp(k_cases[i].name, name) == 0)
+            return &k_cases[i];
+    return NULL;
+}
+
+static char *ch_mutate_byte_after(const char *log, const char *marker) {
+    char *m = strdup(log);
+    if (!m)
+        return NULL;
+    char *p = strstr(m, marker);
+    if (!p) {
+        free(m);
+        return NULL;
+    }
+    p += strlen(marker);
+    *p = (*p == 'X') ? 'Y' : 'X';
+    return m;
+}
+
+/* Swap the BODIES of the first two real chat() calls; the headers
+ * ("=== chat #<N>\n") stay where they are.
+ *
+ * F11 (controller ruling): locate the two calls by the CONTENT marker
+ * "=== chat #" — the literal call-site prefix, with NO ordinal baked in —
+ * rather than by "=== chat #1\n" / "=== chat #2\n". chat() and
+ * chat_with_system() share one call counter (trp_t.calls; see
+ * turn_recording_provider.c trp_chat / trp_chat_with_system, both do
+ * `t->calls++` before logging their own header), so a side call landing
+ * between the two chat() calls would make a hardcoded "#2" shift to "#3"
+ * and vanish from the log entirely. "=== chat #" cannot collide with a
+ * chat_with_system() header ("=== chat_with_system #...") because
+ * "chat_with_system" sits between "chat" and the space+"#" there — so
+ * this marker still finds exactly the two real chat() calls, in order,
+ * regardless of what ordinal each one is stamped with. */
+static char *ch_swap_request_bodies(const char *log) {
+    static const char kMark[] = "=== chat #";
+    const char *h1 = strstr(log, kMark);
+    if (!h1)
+        return NULL;
+    const char *h1_end = strchr(h1, '\n');
+    if (!h1_end)
+        return NULL;
+    const char *b1 = h1_end + 1;
+    const char *h2 = strstr(b1, kMark);
+    if (!h2)
+        return NULL;
+    const char *h2_end = strchr(h2, '\n');
+    if (!h2_end)
+        return NULL;
+    const char *b2 = h2_end + 1;
+    const char *e2 = strstr(b2, "\n=== ");
+    e2 = e2 ? e2 + 1 : log + strlen(log);
+    size_t pre = (size_t)(b1 - log), l1 = (size_t)(h2 - b1), hl = (size_t)(b2 - h2);
+    size_t l2 = (size_t)(e2 - b2), post = strlen(e2);
+    char *m = (char *)malloc(pre + l1 + hl + l2 + post + 1);
+    if (!m)
+        return NULL;
+    char *w = m;
+    memcpy(w, log, pre);
+    w += pre;
+    memcpy(w, b2, l2);
+    w += l2;
+    memcpy(w, h2, hl);
+    w += hl;
+    memcpy(w, b1, l1);
+    w += l1;
+    memcpy(w, e2, post);
+    w += post;
+    *w = '\0';
+    return m;
+}
+
+static char *ch_drop_line_containing(const char *log, const char *needle) {
+    const char *hit = strstr(log, needle);
+    if (!hit)
+        return NULL;
+    const char *start = hit;
+    while (start > log && start[-1] != '\n')
+        start--;
+    const char *end = strchr(hit, '\n');
+    end = end ? end + 1 : hit + strlen(hit);
+    size_t pre = (size_t)(start - log), post = strlen(end);
+    char *m = (char *)malloc(pre + post + 1);
+    if (!m)
+        return NULL;
+    memcpy(m, log, pre);
+    memcpy(m + pre, end, post + 1);
+    return m;
+}
+
+static void characterization_comparator_catches_each_mutation(void) {
+    const ch_case_t *c = ch_case_named("one_tool");
+    HU_ASSERT_NOT_NULL(c);
+    ch_out_t o;
+    HU_ASSERT_TRUE(ch_run(c, "UTC", &o));
+    char why[640];
+    HU_ASSERT_EQ(ch_first_diff(o.log, o.log, why, sizeof(why)), 0);
+
+    char *m = ch_mutate_byte_after(o.log, "\n  content="); /* (a) one prompt byte */
+    HU_ASSERT_NOT_NULL(m);
+    HU_ASSERT_NEQ(ch_first_diff(o.log, m, why, sizeof(why)), 0);
+    free(m);
+
+    m = ch_swap_request_bodies(o.log); /* (b) reordered requests */
+    HU_ASSERT_NOT_NULL(m);
+    HU_ASSERT_NEQ(ch_first_diff(o.log, m, why, sizeof(why)), 0);
+    free(m);
+
+    m = ch_mutate_byte_after(o.log, "\nresponse="); /* (c) final response */
+    HU_ASSERT_NOT_NULL(m);
+    HU_ASSERT_NEQ(ch_first_diff(o.log, m, why, sizeof(why)), 0);
+    free(m);
+
+    m = ch_drop_line_containing(o.log, "  tool_call[0] id=call_1"); /* (d) dropped tool call */
+    HU_ASSERT_NOT_NULL(m);
+    HU_ASSERT_NEQ(ch_first_diff(o.log, m, why, sizeof(why)), 0);
+    free(m);
+
+    free(o.log);
+}
+
 void run_agent_turn_characterization_tests(void) {
     HU_TEST_SUITE("AgentTurnCharacterization");
     HU_RUN_TEST(characterization_matches_goldens);
     HU_RUN_TEST(characterization_is_timezone_invariant);
     HU_RUN_TEST(characterization_is_repeatable);
+    HU_RUN_TEST(characterization_comparator_catches_each_mutation);
 }
 
 #else /* !HU_ENABLE_SQLITE */
