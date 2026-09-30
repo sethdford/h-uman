@@ -61,7 +61,12 @@ class GemmaBackend:
     def generate(self, system, user, max_tokens=400):
         # Gemma 4's chat template does support a system role; the system prompt is
         # folded into the user turn anyway, for simplicity and consistency.
+        # Thinking off: Gemma 4 reasons first by default, and on the audit's short
+        # budgets the reasoning used every token and left content empty (every audit
+        # errored in the 2026-09-30 smoke test). The judge, which runs through
+        # synthetic_judge.py, budgets for thinking instead (max_tokens 1024).
         body = {"model": self.model, "max_tokens": max_tokens, "temperature": 0.0,
+                "chat_template_kwargs": {"enable_thinking": False},
                 "messages": [{"role": "user", "content": f"{system}\n\n{user}"}]}
         d = self._post(self.base_url + "/v1/chat/completions", body, {}, self.timeout)
         try:

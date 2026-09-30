@@ -383,7 +383,11 @@ static bool write_shadow(const char *day, const char *text, size_t len) {
     int w = snprintf(path, sizeof(path), "%s/%s.txt", dir, day);
     if (w < 0 || (size_t)w >= sizeof(path))
         return false;
-    /* The briefing quotes private messages and calendar titles: owner-only. */
+    /* The briefing quotes private messages and calendar titles: owner-only.
+     * The directory comes from HU_STATE_DIR, so refuse traversal next to the
+     * open, as minja_guard.c does (CodeQL cpp/path-injection). */
+    if (strstr(path, "..") != NULL || strstr(path, "%2e") != NULL || strstr(path, "%2E") != NULL)
+        return false;
     FILE *f = NULL;
     if (hu_io_secure_open(path, HU_IO_PERM_SECRET, "w", &f) != HU_OK)
         return false;

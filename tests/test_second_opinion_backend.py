@@ -31,6 +31,20 @@ def test_gemma_folds_system_into_user_and_reads_content():
     assert seen["body"]["temperature"] == 0.0 and seen["body"]["max_tokens"] == 50
 
 
+def test_gemma_turns_thinking_off_so_short_budgets_still_answer():
+    # 2026-09-30 smoke test: Gemma 4 thinks by default; with the audit's 120-token
+    # budget the reasoning channel used every token (finish=length) and content was
+    # empty, so every audit errored. enable_thinking=false answers directly.
+    seen = {}
+
+    def post(url, body, headers, timeout):
+        seen.update(body=body)
+        return {"choices": [{"message": {"content": "unsupported"}}]}
+
+    be.GemmaBackend(post=post).generate("SYS", "USER", max_tokens=120)
+    assert seen["body"]["chat_template_kwargs"] == {"enable_thinking": False}
+
+
 def test_gemma_bad_response_shape_raises():
     g = be.GemmaBackend(post=lambda *a: {"error": "x"})
     with pytest.raises(be.BackendError):
