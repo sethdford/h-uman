@@ -2392,12 +2392,10 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 merged[pos] = '\0';
                 if (memory_ctx)
                     agent->alloc->free(agent->alloc->ctx, memory_ctx, memory_ctx_len + 1);
-                if (graph_ctx)
-                    agent->alloc->free(agent->alloc->ctx, graph_ctx, graph_ctx_len + 1);
+                /* graph_ctx is its own protected-core section; merging into
+                 * memory_ctx must not drop it (it did until 2026-09-30). */
                 memory_ctx = merged;
                 memory_ctx_len = pos;
-                graph_ctx = NULL;
-                graph_ctx_len = 0;
             }
             agent->alloc->free(agent->alloc->ctx, contact_text, contact_text_len + 1);
         }
@@ -3359,12 +3357,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                     memcpy(merged + core_len + 1, memory_ctx, memory_ctx_len);
                     merged[merged_len] = '\0';
                     agent->alloc->free(agent->alloc->ctx, memory_ctx, memory_ctx_len + 1);
-                    if (graph_ctx)
-                        agent->alloc->free(agent->alloc->ctx, graph_ctx, graph_ctx_len + 1);
-                    memory_ctx = merged;
+                    memory_ctx = merged; /* graph_ctx untouched: see the W12 merge */
                     memory_ctx_len = merged_len;
-                    graph_ctx = NULL;
-                    graph_ctx_len = 0;
                 }
             } else if (!memory_ctx) {
                 memory_ctx = hu_strndup(agent->alloc, core_buf, core_len);
@@ -4576,6 +4570,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             hu_prompt_budget_observe(agent->prompt_budget, prompt_field_stats,
                                      HU_PROMPT_FIELD_COUNT);
         }
+        (void)hu_graph_grounding_log_rendered(
+            graph_ctx_len, prompt_field_stats[HU_PROMPT_FIELD_GRAPH_CONTEXT].bytes_contributed);
         /* Prompt-size budget guard. MLX backends return empty responses
          * when the assembled prompt exceeds ~28 KB (observed 2026-05-19:
          * body_len=28291 → "Server returned nothing"). Cap at 16 KB so

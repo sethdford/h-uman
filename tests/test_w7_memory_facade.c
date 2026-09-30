@@ -721,6 +721,48 @@ static void test_w7_p3_neighbors_query_with_variant_tag_safe(void) {
     close_facade(g, m);
 }
 
+/* A NEIGHBORS read must carry each relation's own W8 confidence. The W11
+ * per-step filter (hu_planner_execute, kept_threshold 0.3) reads
+ * record.confidence, and every planner neighbors step sets verify_after; a
+ * hardcoded 1.0 let a 0.1-confidence edge through that filter while the
+ * WINDOW path for the same edge reported 0.1. */
+static void test_w7_neighbors_relation_records_carry_their_confidence(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade(&g, &m);
+
+    int64_t alice = insert_entity(g, "Alice");
+    int64_t bob = insert_entity(g, "Bob");
+    HU_ASSERT_EQ(hu_graph_upsert_relation_ex(g, "u1", 2, alice, bob, HU_REL_KNOWS, 1.0f,
+                                             1735000000000LL, 0, 0.1f, NULL, 0, "rel", 3),
+                 HU_OK);
+
+    hu_memory_query_t q;
+    memset(&q, 0, sizeof(q));
+    q.kind = HU_MEM_ENTITY;
+    q.variant = HU_MEMORY_QUERY_NEIGHBORS;
+    q.contact_id = "u1";
+    q.contact_id_len = 2;
+    q.as.neighbors.entity_id = alice;
+    q.as.neighbors.hops = 1;
+    q.as.neighbors.limit = 8;
+
+    hu_memory_record_t *out = NULL;
+    size_t n = 0;
+    HU_ASSERT_EQ(hu_memory_facade_read(m, &q, A(), &out, &n), HU_OK);
+    size_t relations = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (out[i].kind != HU_MEM_RELATION)
+            continue;
+        relations++;
+        HU_ASSERT_TRUE(out[i].confidence > 0.09f && out[i].confidence < 0.11f);
+    }
+    HU_ASSERT_EQ((int)relations, 1);
+
+    hu_memory_facade_records_free(m, A(), out, n);
+    close_facade(g, m);
+}
+
 static void test_w7_p3_auto_variant_falls_back_to_neighbors_safely(void) {
     /* AUTO with low-address-looking name pointer must NOT dereference. */
     hu_graph_t *g = NULL;
@@ -1121,6 +1163,7 @@ void run_w7_memory_facade_tests(void) {
     HU_RUN_TEST(test_w7_export_json_null_args_rejected);
     HU_RUN_TEST(test_w7_p3_neighbors_query_with_variant_tag_safe);
     HU_RUN_TEST(test_w7_p3_auto_variant_falls_back_to_neighbors_safely);
+    HU_RUN_TEST(test_w7_neighbors_relation_records_carry_their_confidence);
     HU_RUN_TEST(test_w7_replace_then_close_cleans_up);
     /* W7 Phase 1.4 — register / lifetime torture */
     HU_RUN_TEST(test_w7_p14_multi_replace_cycle_deinits_each_evictee_once);

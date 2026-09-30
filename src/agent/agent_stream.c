@@ -1133,6 +1133,8 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
         hu_prompt_field_stat_t prompt_field_stats[HU_PROMPT_FIELD_COUNT] = {0};
         err = hu_prompt_build_system(agent->alloc, &cfg, prompt_field_stats, agent->prompt_budget,
                                      &system_prompt, &system_prompt_len);
+        (void)hu_graph_grounding_log_rendered(
+            graph_ctx_len, prompt_field_stats[HU_PROMPT_FIELD_GRAPH_CONTEXT].bytes_contributed);
         if (err == HU_OK && agent->prompt_budget) {
             hu_prompt_budget_observe(agent->prompt_budget, prompt_field_stats,
                                      HU_PROMPT_FIELD_COUNT);
