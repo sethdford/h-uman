@@ -12,6 +12,7 @@
 #include "human/autoresponder.h"
 #include "human/config.h"
 #include "human/memory.h"
+#include "human/provider.h"
 #include "human/reflection.h"
 #include "test_framework.h"
 #include <stdlib.h>
@@ -37,7 +38,10 @@ static void make_enabled_cfg(hu_initiative_config_t *cfg) {
     cfg->enabled = true;
 }
 
-static void test_disabled_config_returns_skip_no_state_change(void) {
+/* Disabled must NOT return SKIP: SKIP means "every gate passed" and both
+ * wrappers proceed to the LLM on it, so the kill switch used to call the
+ * model on every daemon loop. */
+static void test_disabled_config_returns_disabled_no_state_change(void) {
     hu_init_proposer_reset_warn_guards_for_test();
     hu_initiative_config_t cfg;
     make_default_cfg(&cfg);
@@ -47,7 +51,7 @@ static void test_disabled_config_returns_skip_no_state_change(void) {
     HU_ASSERT_EQ(
         hu_init_proposer_tick(&cfg, NULL, 0, NULL, 0, 1779700000, &last_tick, &tick_id, &result),
         HU_OK);
-    HU_ASSERT_EQ((int)result, (int)HU_INIT_RESULT_SKIP);
+    HU_ASSERT_EQ((int)result, (int)HU_INIT_RESULT_DISABLED);
     /* Disabled path MUST NOT advance the watermark — operators rely on
      * last_tick being stale to detect a flipped-off subsystem. */
     HU_ASSERT_EQ(last_tick, (int64_t)0);
@@ -594,6 +598,46 @@ static void test_tick_with_provider_null_provider_behaves_like_t1_tick(void) {
     HU_ASSERT_EQ(last_tick, (int64_t)1779700000);
 }
 
+/* A disabled initiative with a live provider must stop at the governor.
+ * Before 2026-09-30 it returned SKIP ("all gates passed") and the wrapper
+ * went on to assemble context and call the model on every daemon loop. */
+static int disabled_llm_calls;
+static hu_error_t disabled_chat_with_system(void *ctx, hu_allocator_t *alloc, const char *sys,
+                                            size_t sys_len, const char *msg, size_t msg_len,
+                                            const char *model, size_t model_len, double temp,
+                                            char **out, size_t *out_len) {
+    (void)ctx, (void)alloc, (void)sys, (void)sys_len, (void)msg, (void)msg_len, (void)model;
+    (void)model_len, (void)temp, (void)out, (void)out_len;
+    disabled_llm_calls++;
+    return HU_ERR_NOT_SUPPORTED;
+}
+static const hu_provider_vtable_t disabled_vtable = {
+    .chat_with_system = disabled_chat_with_system,
+};
+
+static void test_tick_with_provider_disabled_never_reaches_the_llm(void) {
+    hu_init_proposer_reset_warn_guards_for_test();
+    hu_initiative_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.enabled = false;
+    cfg.tick_interval_sec = 1800;
+    hu_provider_t provider = {.ctx = NULL, .vtable = &disabled_vtable};
+    hu_allocator_t alloc = hu_system_allocator();
+    int64_t last_tick = 0;
+    uint64_t tick_id = 0;
+    hu_init_proposer_result_t result = HU_INIT_RESULT_FIRED;
+    hu_init_decision_t decision;
+    memset(&decision, 0, sizeof(decision));
+    disabled_llm_calls = 0;
+    HU_ASSERT_EQ(hu_init_proposer_tick_with_provider(&cfg, NULL, 0, NULL, NULL, &provider, &alloc,
+                                                     0, 1779700000, &last_tick, &tick_id, &result,
+                                                     &decision),
+                 HU_OK);
+    HU_ASSERT_EQ((int)result, (int)HU_INIT_RESULT_DISABLED);
+    HU_ASSERT_EQ(disabled_llm_calls, 0);
+    HU_ASSERT_EQ(tick_id, (uint64_t)0);
+}
+
 /* ── Sprint 41 follow-up #2 — single-source-of-truth arbiter ────────── */
 
 static void arbiter_skip_returns_skip_for_all_null_clear_args(void) {
@@ -732,7 +776,8 @@ void run_init_proposer_tests(void) {
     HU_RUN_TEST(arbiter_skip_returns_skip_for_all_null_clear_args);
     HU_RUN_TEST(arbiter_skip_returns_gated_recency_when_user_texted_recently);
     HU_RUN_TEST(arbiter_skip_returns_skip_when_user_texted_long_ago);
-    HU_RUN_TEST(test_disabled_config_returns_skip_no_state_change);
+    HU_RUN_TEST(test_disabled_config_returns_disabled_no_state_change);
+    HU_RUN_TEST(test_tick_with_provider_disabled_never_reaches_the_llm);
     HU_RUN_TEST(test_enabled_all_clear_returns_skip_advances_state);
     HU_RUN_TEST(test_interval_gate_blocks_back_to_back_ticks);
     HU_RUN_TEST(test_per_contact_recency_gates_when_seth_texted_recently);

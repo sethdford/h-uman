@@ -1164,9 +1164,7 @@ set(HU_CORE_SOURCES
     src/tools/memory_forget.c
     src/tools/bff_memory.c
     src/tools/doc_ingest.c
-    src/agent/task_manager.c
     src/tools/ask_user.c
-    src/tools/task_tools.c
     src/tools/webhook_tools.c
     src/tools/meeting_transcribe.c
     src/tools/message.c
@@ -3760,6 +3758,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_untested_modules.c
     tests/test_modules_coverage.c
     tests/test_coverage_new.c
+    tests/test_calendar_tool.c
     tests/test_context.c
     tests/test_tavily.c
     tests/test_awareness.c
@@ -4196,8 +4195,6 @@ list(APPEND HU_TEST_SOURCES
     tests/test_data_quality.c
     tests/test_tool_validation.c
     tests/test_tool_ask_user.c
-    tests/test_task_manager.c
-    tests/test_task_tools.c
     tests/test_otlp.c
     tests/test_mar.c
     tests/test_mem_policy.c

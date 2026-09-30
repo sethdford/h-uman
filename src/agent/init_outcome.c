@@ -65,6 +65,8 @@ static const char *verdict_to_string(hu_init_proposer_result_t v) {
         return "GATED_INTERVAL";
     case HU_INIT_RESULT_GUARD_REJECT:
         return "GUARD_REJECT";
+    case HU_INIT_RESULT_DISABLED:
+        return "DISABLED";
     default:
         return "UNKNOWN";
     }
