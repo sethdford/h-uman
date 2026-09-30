@@ -154,6 +154,37 @@ static void channel_media_only_send_reports_media_kind(void) {
     hu_imessage_send_observer_set(NULL, NULL);
 }
 
+/* A threaded reply is an outbound text like any other: on a self-chat (the
+ * owner's #text tests) every bubble the twin sends also arrives as an inbound
+ * row, and only the echo ring stops it being answered. 2026-09-30: the
+ * threaded path never recorded, so "hung out by the water" came back, got a
+ * reply ("peaceful"), which came back too - a loop on the owner's number. */
+static void channel_threaded_reply_is_remembered_as_our_echo(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    HU_ASSERT_EQ(hu_imessage_create(&alloc, "+15551234567", 12, NULL, 0, &ch), HU_OK);
+    hu_imessage_set_test_reply_stubs(tier1_ok, tier_fail, NULL);
+    HU_ASSERT_FALSE(hu_imessage_test_in_echo_ring(&ch, "hung out by the water", 21));
+    HU_ASSERT_EQ(ch.vtable->reply(ch.ctx, "+15551234567", 12, "PARENT-GUID", 11,
+                                  "hung out by the water", 21),
+                 HU_OK);
+    HU_ASSERT_TRUE(hu_imessage_test_in_echo_ring(&ch, "hung out by the water", 21));
+    hu_imessage_set_test_reply_stubs(NULL, NULL, NULL);
+    hu_imessage_destroy(&ch);
+}
+
+static void channel_failed_threaded_reply_is_not_an_echo(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    HU_ASSERT_EQ(hu_imessage_create(&alloc, "+15551234567", 12, NULL, 0, &ch), HU_OK);
+    hu_imessage_set_test_reply_stubs(tier_fail, tier_fail, flat_fail);
+    HU_ASSERT_TRUE(ch.vtable->reply(ch.ctx, "+15551234567", 12, "PARENT-GUID", 11, "peaceful", 8) !=
+                   HU_OK);
+    HU_ASSERT_FALSE(hu_imessage_test_in_echo_ring(&ch, "peaceful", 8));
+    hu_imessage_set_test_reply_stubs(NULL, NULL, NULL);
+    hu_imessage_destroy(&ch);
+}
+
 static void channel_rejected_send_reports_nothing(void) {
     reset();
     hu_allocator_t alloc = hu_system_allocator();
@@ -178,5 +209,7 @@ void run_imessage_send_observer_tests(void) {
     HU_RUN_TEST(channel_text_send_reports_final_text_once);
     HU_RUN_TEST(channel_media_only_send_reports_media_kind);
     HU_RUN_TEST(channel_rejected_send_reports_nothing);
+    HU_RUN_TEST(channel_threaded_reply_is_remembered_as_our_echo);
+    HU_RUN_TEST(channel_failed_threaded_reply_is_not_an_echo);
 #endif
 }
