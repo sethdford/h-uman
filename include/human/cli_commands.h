@@ -32,6 +32,15 @@ hu_error_t cmd_sandbox(hu_allocator_t *alloc, int argc, char **argv);
 hu_error_t cmd_eval(hu_allocator_t *alloc, int argc, char **argv);
 hu_error_t cmd_evaluation(hu_allocator_t *alloc, int argc, char **argv);
 hu_error_t cmd_init(hu_allocator_t *alloc, int argc, char **argv);
+/* What `human init` does about an existing config. Prompting when stdin is
+ * not a terminal would block scripts and CI forever, so that case refuses
+ * and names --force instead. */
+typedef enum hu_init_decision {
+    HU_INIT_PROCEED = 0, /* write the config */
+    HU_INIT_PROMPT,      /* ask "Overwrite? [y/N]" on the terminal */
+    HU_INIT_REFUSE,      /* leave it alone; tell the user about --force */
+} hu_init_decision_t;
+hu_init_decision_t hu_init_overwrite_decision(bool config_exists, bool force, bool stdin_is_tty);
 hu_error_t cmd_setup(hu_allocator_t *alloc, int argc, char **argv);
 /* `human initiative <log|status>` — read-only views of the JSONL written
  * by the init_proposer subsystem. Impl in src/agent/init_outcome.c. */
