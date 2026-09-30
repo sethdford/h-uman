@@ -3,6 +3,7 @@
  * then runs the same queries used by imessage.c to catch schema/column drift. */
 #if HU_HAS_IMESSAGE && defined(HU_ENABLE_SQLITE)
 #include "human/channels/imessage.h"
+#include "human/channels/imessage_chat_kind.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "test_framework.h"
@@ -41,7 +42,8 @@ static const char *schema_sql = "CREATE TABLE handle ("
                                 ");"
                                 "CREATE TABLE chat ("
                                 "  ROWID INTEGER PRIMARY KEY AUTOINCREMENT,"
-                                "  guid TEXT UNIQUE"
+                                "  guid TEXT UNIQUE,"
+                                "  style INTEGER"
                                 ");"
                                 "CREATE TABLE chat_message_join ("
                                 "  chat_id INTEGER,"
@@ -669,10 +671,9 @@ static void test_chatdb_latest_sent_rowid_query(void) {
     HU_ASSERT_NOT_NULL(db);
 
     /* Same SQL as hu_imessage_get_latest_sent_rowid */
-    const char *sql =
-        "SELECT MAX(m.ROWID) FROM message m "
-        "JOIN handle h ON m.handle_id = h.ROWID "
-        "WHERE m.is_from_me = 1 AND h.id = ?1";
+    const char *sql = "SELECT MAX(m.ROWID) FROM message m "
+                      "JOIN handle h ON m.handle_id = h.ROWID "
+                      "WHERE m.is_from_me = 1 AND h.id = ?1";
 
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
@@ -694,22 +695,21 @@ static void test_chatdb_voice_msg_has_attachment_flag(void) {
 
     /* Verify that the poll query sets has_audio=1 for voice.caf (ROWID 6),
      * which should cause has_attachment=true in production (has_image || has_audio). */
-    const char *sql =
-        "SELECT "
-        "  (SELECT COUNT(*) FROM message_attachment_join maj3 "
-        "   JOIN attachment a3 ON maj3.attachment_id = a3.ROWID "
-        "   WHERE maj3.message_id = m.ROWID AND a3.filename IS NOT NULL "
-        "   AND (LOWER(a3.filename) LIKE '%.caf' OR LOWER(a3.filename) LIKE '%.m4a' "
-        "     OR LOWER(a3.filename) LIKE '%.mp3' OR LOWER(a3.filename) LIKE '%.aac' "
-        "     OR LOWER(a3.filename) LIKE '%.opus')) > 0 AS has_audio, "
-        "  (SELECT COUNT(*) FROM message_attachment_join maj "
-        "   JOIN attachment a ON maj.attachment_id = a.ROWID "
-        "   WHERE maj.message_id = m.ROWID AND a.filename IS NOT NULL "
-        "   AND (LOWER(a.filename) LIKE '%.jpg' OR LOWER(a.filename) LIKE '%.jpeg' "
-        "     OR LOWER(a.filename) LIKE '%.png' OR LOWER(a.filename) LIKE '%.heic' "
-        "     OR LOWER(a.filename) LIKE '%.gif' OR LOWER(a.filename) LIKE '%.webp')) "
-        "   > 0 AS has_image "
-        "FROM message m WHERE m.ROWID = 6";
+    const char *sql = "SELECT "
+                      "  (SELECT COUNT(*) FROM message_attachment_join maj3 "
+                      "   JOIN attachment a3 ON maj3.attachment_id = a3.ROWID "
+                      "   WHERE maj3.message_id = m.ROWID AND a3.filename IS NOT NULL "
+                      "   AND (LOWER(a3.filename) LIKE '%.caf' OR LOWER(a3.filename) LIKE '%.m4a' "
+                      "     OR LOWER(a3.filename) LIKE '%.mp3' OR LOWER(a3.filename) LIKE '%.aac' "
+                      "     OR LOWER(a3.filename) LIKE '%.opus')) > 0 AS has_audio, "
+                      "  (SELECT COUNT(*) FROM message_attachment_join maj "
+                      "   JOIN attachment a ON maj.attachment_id = a.ROWID "
+                      "   WHERE maj.message_id = m.ROWID AND a.filename IS NOT NULL "
+                      "   AND (LOWER(a.filename) LIKE '%.jpg' OR LOWER(a.filename) LIKE '%.jpeg' "
+                      "     OR LOWER(a.filename) LIKE '%.png' OR LOWER(a.filename) LIKE '%.heic' "
+                      "     OR LOWER(a.filename) LIKE '%.gif' OR LOWER(a.filename) LIKE '%.webp')) "
+                      "   > 0 AS has_image "
+                      "FROM message m WHERE m.ROWID = 6";
 
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
@@ -739,7 +739,8 @@ static void test_chatdb_inline_reply_guid_lookup(void) {
         "  (SELECT ROWID FROM message WHERE guid = 'MSG-REPLY'));";
     char *err = NULL;
     sqlite3_exec(db, extra, NULL, NULL, &err);
-    if (err) sqlite3_free(err);
+    if (err)
+        sqlite3_free(err);
 
     /* Look up the original message text by GUID (same pattern as
      * hu_imessage_lookup_message_by_guid) */
@@ -814,7 +815,8 @@ static void test_chatdb_retracted_detection(void) {
         "  VALUES ('MSG-UNSEND', 'oops', 1, 700000013000000000, 0, 0, 700000013500000000);";
     char *err = NULL;
     sqlite3_exec(db, extra, NULL, NULL, &err);
-    if (err) sqlite3_free(err);
+    if (err)
+        sqlite3_free(err);
 
     const char *sql = "SELECT CASE WHEN date_retracted > 0 THEN 1 ELSE 0 END "
                       "FROM message WHERE guid = 'MSG-UNSEND'";
@@ -834,14 +836,14 @@ static void test_chatdb_edited_detection(void) {
     HU_ASSERT_NOT_NULL(db);
 
     /* Add an edited message */
-    const char *extra =
-        "INSERT INTO message (guid, text, handle_id, date, is_from_me,"
-        "  associated_message_type, date_edited)"
-        "  VALUES ('MSG-EDIT', 'corrected text', 1, 700000014000000000, 0, 0, "
-        "700000014500000000);";
+    const char *extra = "INSERT INTO message (guid, text, handle_id, date, is_from_me,"
+                        "  associated_message_type, date_edited)"
+                        "  VALUES ('MSG-EDIT', 'corrected text', 1, 700000014000000000, 0, 0, "
+                        "700000014500000000);";
     char *err = NULL;
     sqlite3_exec(db, extra, NULL, NULL, &err);
-    if (err) sqlite3_free(err);
+    if (err)
+        sqlite3_free(err);
 
     const char *sql = "SELECT CASE WHEN date_edited > 0 THEN 1 ELSE 0 END "
                       "FROM message WHERE guid = 'MSG-EDIT'";
@@ -860,10 +862,9 @@ static void test_chatdb_no_sent_rowid_for_unknown_handle(void) {
     sqlite3 *db = open_fixture();
     HU_ASSERT_NOT_NULL(db);
 
-    const char *sql =
-        "SELECT MAX(m.ROWID) FROM message m "
-        "JOIN handle h ON m.handle_id = h.ROWID "
-        "WHERE m.is_from_me = 1 AND h.id = ?1";
+    const char *sql = "SELECT MAX(m.ROWID) FROM message m "
+                      "JOIN handle h ON m.handle_id = h.ROWID "
+                      "WHERE m.is_from_me = 1 AND h.id = ?1";
 
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
@@ -883,39 +884,38 @@ static void test_chatdb_optimized_poll_exists_and_inline_retract(void) {
     HU_ASSERT_NOT_NULL(db);
 
     /* Insert a retracted message to verify inline CASE detection */
-    const char *extra =
-        "INSERT INTO message (guid, text, handle_id, date, is_from_me,"
-        "  associated_message_type, date_retracted)"
-        "  VALUES ('MSG-OPT-RETRACT', 'oops', 1, 700000020000000000, 0, 0,"
-        " 700000020500000000);"
-        "INSERT INTO chat_message_join (chat_id, message_id) "
-        "  VALUES (1, (SELECT ROWID FROM message WHERE guid='MSG-OPT-RETRACT'));";
+    const char *extra = "INSERT INTO message (guid, text, handle_id, date, is_from_me,"
+                        "  associated_message_type, date_retracted)"
+                        "  VALUES ('MSG-OPT-RETRACT', 'oops', 1, 700000020000000000, 0, 0,"
+                        " 700000020500000000);"
+                        "INSERT INTO chat_message_join (chat_id, message_id) "
+                        "  VALUES (1, (SELECT ROWID FROM message WHERE guid='MSG-OPT-RETRACT'));";
     char *err = NULL;
     sqlite3_exec(db, extra, NULL, NULL, &err);
-    if (err) sqlite3_free(err);
+    if (err)
+        sqlite3_free(err);
 
     /* Optimized poll SQL: EXISTS instead of COUNT, inline retract, chat_guid, unix_ts */
-    const char *sql =
-        "SELECT m.ROWID, m.guid, m.text, h.id, "
-        "  COALESCE("
-        "    (SELECT COUNT(DISTINCT chj2.handle_id) FROM chat_message_join cmj "
-        "     JOIN chat_handle_join chj2 ON chj2.chat_id = cmj.chat_id "
-        "     WHERE cmj.message_id = m.ROWID), 0) AS participant_count, "
-        "  EXISTS (SELECT 1 FROM message_attachment_join maj "
-        "   JOIN attachment a ON maj.attachment_id = a.ROWID "
-        "   WHERE maj.message_id = m.ROWID AND a.filename IS NOT NULL "
-        "   AND LOWER(a.filename) LIKE '%.jpg') AS has_image, "
-        "  CASE WHEN m.date_edited > 0 THEN 1 ELSE 0 END AS was_edited, "
-        "  CASE WHEN m.date_retracted > 0 THEN 1 ELSE 0 END AS was_retracted, "
-        "  m.date / 1000000000 + 978307200 AS unix_ts, "
-        "  (SELECT c.guid FROM chat_message_join cmj2 "
-        "   JOIN chat c ON cmj2.chat_id = c.ROWID "
-        "   WHERE cmj2.message_id = m.ROWID LIMIT 1) AS chat_guid "
-        "FROM message m "
-        "JOIN handle h ON m.handle_id = h.ROWID "
-        "WHERE m.is_from_me = 0 AND m.associated_message_type = 0 "
-        "AND m.ROWID > 0 "
-        "ORDER BY m.ROWID ASC LIMIT 20";
+    const char *sql = "SELECT m.ROWID, m.guid, m.text, h.id, "
+                      "  COALESCE("
+                      "    (SELECT COUNT(DISTINCT chj2.handle_id) FROM chat_message_join cmj "
+                      "     JOIN chat_handle_join chj2 ON chj2.chat_id = cmj.chat_id "
+                      "     WHERE cmj.message_id = m.ROWID), 0) AS participant_count, "
+                      "  EXISTS (SELECT 1 FROM message_attachment_join maj "
+                      "   JOIN attachment a ON maj.attachment_id = a.ROWID "
+                      "   WHERE maj.message_id = m.ROWID AND a.filename IS NOT NULL "
+                      "   AND LOWER(a.filename) LIKE '%.jpg') AS has_image, "
+                      "  CASE WHEN m.date_edited > 0 THEN 1 ELSE 0 END AS was_edited, "
+                      "  CASE WHEN m.date_retracted > 0 THEN 1 ELSE 0 END AS was_retracted, "
+                      "  m.date / 1000000000 + 978307200 AS unix_ts, "
+                      "  (SELECT c.guid FROM chat_message_join cmj2 "
+                      "   JOIN chat c ON cmj2.chat_id = c.ROWID "
+                      "   WHERE cmj2.message_id = m.ROWID LIMIT 1) AS chat_guid "
+                      "FROM message m "
+                      "JOIN handle h ON m.handle_id = h.ROWID "
+                      "WHERE m.is_from_me = 0 AND m.associated_message_type = 0 "
+                      "AND m.ROWID > 0 "
+                      "ORDER BY m.ROWID ASC LIMIT 20";
 
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
@@ -988,19 +988,19 @@ static void test_chatdb_group_chat_participant_count(void) {
         "  VALUES (2, (SELECT ROWID FROM message WHERE guid='MSG-GRP'));";
     char *err = NULL;
     sqlite3_exec(db, extra, NULL, NULL, &err);
-    if (err) sqlite3_free(err);
+    if (err)
+        sqlite3_free(err);
 
     /* Verify participant count = 3 and chat_guid populated */
-    const char *sql =
-        "SELECT "
-        "  COALESCE("
-        "    (SELECT COUNT(DISTINCT chj2.handle_id) FROM chat_message_join cmj "
-        "     JOIN chat_handle_join chj2 ON chj2.chat_id = cmj.chat_id "
-        "     WHERE cmj.message_id = m.ROWID), 0) AS participant_count, "
-        "  (SELECT c.guid FROM chat_message_join cmj2 "
-        "   JOIN chat c ON cmj2.chat_id = c.ROWID "
-        "   WHERE cmj2.message_id = m.ROWID LIMIT 1) AS chat_guid "
-        "FROM message m WHERE m.guid = 'MSG-GRP'";
+    const char *sql = "SELECT "
+                      "  COALESCE("
+                      "    (SELECT COUNT(DISTINCT chj2.handle_id) FROM chat_message_join cmj "
+                      "     JOIN chat_handle_join chj2 ON chj2.chat_id = cmj.chat_id "
+                      "     WHERE cmj.message_id = m.ROWID), 0) AS participant_count, "
+                      "  (SELECT c.guid FROM chat_message_join cmj2 "
+                      "   JOIN chat c ON cmj2.chat_id = c.ROWID "
+                      "   WHERE cmj2.message_id = m.ROWID LIMIT 1) AS chat_guid "
+                      "FROM message m WHERE m.guid = 'MSG-GRP'";
 
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
@@ -1015,6 +1015,120 @@ static void test_chatdb_group_chat_participant_count(void) {
 
     sqlite3_finalize(stmt);
     sqlite3_close(db);
+}
+
+/* chat_handle_join never lists the owner: a 1:1 has 1 handle, a 3-person
+ * group (owner + 2) has 2. Real chat.db (2026-09-30): all 2,286 style-45
+ * chats have exactly 1 handle; 104 style-43 groups have exactly 2. The old
+ * `participant_count > 2` test called every one of those 104 a DM. These run
+ * the production SQL fragments + classifier against a fixture chat.db. */
+static const char *chat_kind_seed =
+    "INSERT INTO handle (id) VALUES ('kind_a@test.com');" /* 3 */
+    "INSERT INTO handle (id) VALUES ('kind_b@test.com');" /* 4 */
+    "INSERT INTO handle (id) VALUES ('kind_c@test.com');" /* 5 */
+    /* chat 2: 1:1 with handle 3 */
+    "INSERT INTO chat (ROWID, guid, style) VALUES (2, 'iMessage;-;kind_a@test.com', 45);"
+    "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (2, 3);"
+    /* chat 3: 3-person group = owner + handles 3,4 */
+    "INSERT INTO chat (ROWID, guid, style) VALUES (3, 'iMessage;+;chat3person', 43);"
+    "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (3, 3);"
+    "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (3, 4);"
+    /* chat 4: 4-person group = owner + handles 3,4,5 */
+    "INSERT INTO chat (ROWID, guid, style) VALUES (4, 'iMessage;+;chat4person', 43);"
+    "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (4, 3);"
+    "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (4, 4);"
+    "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (4, 5);"
+    /* chat 5: style unknown (NULL), 2 handles -> fallback must say group */
+    "INSERT INTO chat (ROWID, guid, style) VALUES (5, 'iMessage;+;chatnostyle', NULL);"
+    "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (5, 4);"
+    "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (5, 5);"
+    "INSERT INTO message (ROWID, guid, text, handle_id, date) VALUES "
+    "  (102, 'KIND-DM', 'hi', 3, 700000040000000000),"
+    "  (103, 'KIND-G3', 'hi all', 3, 700000041000000000),"
+    "  (104, 'KIND-G4', 'hi all', 3, 700000042000000000),"
+    "  (105, 'KIND-NS', 'hi all', 4, 700000043000000000);"
+    "INSERT INTO chat_message_join (chat_id, message_id) VALUES "
+    "  (2, 102), (3, 103), (4, 104), (5, 105);";
+
+/* Returns 1 group, 0 not group, -1 on query failure. */
+static int chat_kind_is_group_for(sqlite3 *db, const char *msg_guid, int *out_handles) {
+    const char *sql =
+        "SELECT " HU_IMESSAGE_SQL_CHAT_STYLE_OF_MESSAGE ", " HU_IMESSAGE_SQL_HANDLE_COUNT_OF_MESSAGE
+        " FROM message m WHERE m.guid = ?1";
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
+        return -1;
+    sqlite3_bind_text(stmt, 1, msg_guid, -1, SQLITE_STATIC);
+    int result = -1;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        int style = sqlite3_column_type(stmt, 0) == SQLITE_NULL ? HU_IMESSAGE_CHAT_STYLE_UNKNOWN
+                                                                : sqlite3_column_int(stmt, 0);
+        int handles = sqlite3_column_int(stmt, 1);
+        if (out_handles)
+            *out_handles = handles;
+        result = hu_imessage_chat_is_group(style, handles) ? 1 : 0;
+    }
+    sqlite3_finalize(stmt);
+    return result;
+}
+
+static sqlite3 *open_chat_kind_fixture(void) {
+    sqlite3 *db = open_fixture();
+    if (!db)
+        return NULL;
+    char *err = NULL;
+    if (sqlite3_exec(db, chat_kind_seed, NULL, NULL, &err) != SQLITE_OK) {
+        sqlite3_free(err);
+        sqlite3_close(db);
+        return NULL;
+    }
+    return db;
+}
+
+static void test_chatdb_one_to_one_is_not_group(void) {
+    sqlite3 *db = open_chat_kind_fixture();
+    HU_ASSERT_NOT_NULL(db);
+    int handles = -1;
+    HU_ASSERT_EQ(chat_kind_is_group_for(db, "KIND-DM", &handles), 0);
+    HU_ASSERT_EQ(handles, 1);
+    sqlite3_close(db);
+}
+
+static void test_chatdb_three_person_group_is_group(void) {
+    sqlite3 *db = open_chat_kind_fixture();
+    HU_ASSERT_NOT_NULL(db);
+    int handles = -1;
+    HU_ASSERT_EQ(chat_kind_is_group_for(db, "KIND-G3", &handles), 1);
+    HU_ASSERT_EQ(handles, 2); /* owner excluded: 3 people, 2 handles */
+    sqlite3_close(db);
+}
+
+static void test_chatdb_four_person_group_is_group(void) {
+    sqlite3 *db = open_chat_kind_fixture();
+    HU_ASSERT_NOT_NULL(db);
+    int handles = -1;
+    HU_ASSERT_EQ(chat_kind_is_group_for(db, "KIND-G4", &handles), 1);
+    HU_ASSERT_EQ(handles, 3);
+    sqlite3_close(db);
+}
+
+static void test_chatdb_group_fallback_without_style(void) {
+    sqlite3 *db = open_chat_kind_fixture();
+    HU_ASSERT_NOT_NULL(db);
+    int handles = -1;
+    HU_ASSERT_EQ(chat_kind_is_group_for(db, "KIND-NS", &handles), 1);
+    HU_ASSERT_EQ(handles, 2);
+    sqlite3_close(db);
+}
+
+static void test_chat_kind_style_decides_over_handle_count(void) {
+    /* A known style wins even when the handle count would say otherwise. */
+    HU_ASSERT_FALSE(hu_imessage_chat_is_group(HU_IMESSAGE_CHAT_STYLE_DIRECT, 2));
+    HU_ASSERT_TRUE(hu_imessage_chat_is_group(HU_IMESSAGE_CHAT_STYLE_GROUP, 1));
+    /* Unknown style falls back to handle count (owner excluded). */
+    HU_ASSERT_FALSE(hu_imessage_chat_is_group(HU_IMESSAGE_CHAT_STYLE_UNKNOWN, 0));
+    HU_ASSERT_FALSE(hu_imessage_chat_is_group(HU_IMESSAGE_CHAT_STYLE_UNKNOWN, 1));
+    HU_ASSERT_TRUE(hu_imessage_chat_is_group(HU_IMESSAGE_CHAT_STYLE_UNKNOWN, 2));
 }
 
 void run_imessage_chatdb_fixture_tests(void) {
@@ -1044,6 +1158,11 @@ void run_imessage_chatdb_fixture_tests(void) {
     HU_RUN_TEST(test_chatdb_optimized_poll_exists_and_inline_retract);
     HU_RUN_TEST(test_chatdb_unix_timestamp_conversion);
     HU_RUN_TEST(test_chatdb_group_chat_participant_count);
+    HU_RUN_TEST(test_chatdb_one_to_one_is_not_group);
+    HU_RUN_TEST(test_chatdb_three_person_group_is_group);
+    HU_RUN_TEST(test_chatdb_four_person_group_is_group);
+    HU_RUN_TEST(test_chatdb_group_fallback_without_style);
+    HU_RUN_TEST(test_chat_kind_style_decides_over_handle_count);
 }
 #else
 void run_imessage_chatdb_fixture_tests(void) {

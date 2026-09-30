@@ -443,6 +443,9 @@ list(APPEND CHANNEL_SOURCES src/channels/imessage_reactions.c)
 list(APPEND CHANNEL_SOURCES src/channels/imessage_caps.c)
 # Pure replay guards: always built so their (unconditional) test links on Linux.
 list(APPEND CHANNEL_SOURCES src/channels/imessage_replay_guard.c)
+# Pure chat.db group classifier (chat.style, handle-count fallback). Always
+# built: the daemon observer, compiled on every platform, calls it.
+list(APPEND CHANNEL_SOURCES src/channels/imessage_chat_kind.c)
 list(APPEND CHANNEL_SOURCES src/channels/imessage_bb_event.c)
 # Phase 1a of docs/plans/2026-05-18-imessage-sota.md: pure synthesis
 # primitives that render iMessage events into canonical English for

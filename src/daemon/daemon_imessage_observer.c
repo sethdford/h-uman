@@ -14,6 +14,7 @@
 #include "human/core/paths.h"
 
 #include "human/channels/imessage_balloon_decode.h"
+#include "human/channels/imessage_chat_kind.h"
 #include "human/channels/imessage_ingest.h"
 #include "human/memory/personal_model.h"
 
@@ -76,6 +77,7 @@ typedef struct {
     bool has_group_title;
     bool has_balloon_bundle_id;
     bool has_date_edited;
+    bool has_chat_style; /* chat.style — authoritative group/1:1 marker */
 } schema_caps_t;
 
 static schema_caps_t s_caps = {0};
@@ -107,12 +109,18 @@ static void probe_schema_once(sqlite3 *db) {
             s_caps.has_date_edited = true;
     }
     sqlite3_finalize(st);
+    st = NULL;
+    if (sqlite3_prepare_v2(db, "SELECT style FROM chat LIMIT 0", -1, &st, NULL) == SQLITE_OK) {
+        s_caps.has_chat_style = true;
+        sqlite3_finalize(st);
+    }
     s_caps.probed = true;
 }
 
 /* Build a SELECT that includes only the columns the schema actually has.
  * Output positions are stable: text(0) handle(1) chat_guid(2) date(3) is_from_me(4)
- * balloon(5) payload(6) summary(7) group_action(8) group_title(9).
+ * balloon(5) payload(6) summary(7) group_action(8) group_title(9)
+ * handle_count(10) chat_style(11).
  * Missing columns return NULL via "NULL AS column" placeholders. */
 static const char *build_observer_sql(void) {
     static char sql[2048];
@@ -122,7 +130,7 @@ static const char *build_observer_sql(void) {
     snprintf(sql, sizeof(sql),
              "SELECT m.text, h.id, c.guid, m.date, m.is_from_me, "
              "       %s, %s, %s, %s, %s, "
-             "       (SELECT COUNT(*) FROM chat_handle_join WHERE chat_id = c.ROWID) "
+             "       (SELECT COUNT(*) FROM chat_handle_join WHERE chat_id = c.ROWID), %s "
              "FROM message m "
              "JOIN chat_message_join cmj ON cmj.message_id = m.ROWID "
              "JOIN chat c ON c.ROWID = cmj.chat_id "
@@ -134,7 +142,8 @@ static const char *build_observer_sql(void) {
              s_caps.has_payload_data ? "m.payload_data" : "NULL",
              s_caps.has_message_summary_info ? "m.message_summary_info" : "NULL",
              s_caps.has_group_action_type ? "m.group_action_type" : "NULL",
-             s_caps.has_group_title ? "m.group_title" : "NULL", HU_MAC_EPOCH_OFFSET);
+             s_caps.has_group_title ? "m.group_title" : "NULL",
+             s_caps.has_chat_style ? "c.style" : "NULL", HU_MAC_EPOCH_OFFSET);
     built = true;
     return sql;
 }
@@ -153,10 +162,14 @@ static int process_row(sqlite3_stmt *st, hu_personal_model_t *pm) {
     int summary_len = sqlite3_column_bytes(st, 7);
     int group_action = sqlite3_column_int(st, 8);
     const unsigned char *group_title = sqlite3_column_text(st, 9);
-    int participant_count = sqlite3_column_int(st, 10);
+    int handle_count = sqlite3_column_int(st, 10);
+    int chat_style = sqlite3_column_type(st, 11) == SQLITE_NULL ? HU_IMESSAGE_CHAT_STYLE_UNKNOWN
+                                                                : sqlite3_column_int(st, 11);
 
     int64_t ts_unix = (mac_ns / 1000000000) + HU_MAC_EPOCH_OFFSET;
-    bool in_group = participant_count > 2;
+    /* chat_handle_join excludes the owner, so a 3-person group has 2 handles;
+     * the old `> 2` test tagged its rows imessage_dm (FIRST_PARTY). */
+    bool in_group = hu_imessage_chat_is_group(chat_style, handle_count);
     const char *sender = handle ? (const char *)handle : NULL;
     int signaled = 0;
     (void)chat_guid;

@@ -386,6 +386,10 @@ bool hu_imessage_should_courtesy_reply(bool allowlist_has_handle, bool dedup_alr
  * compiled on every platform. */
 #include "human/channels/imessage_replay_guard.h"
 
+/* chat.db group classifier (chat.style, handle-count fallback): declared in
+ * imessage_chat_kind.h, compiled on every platform (the daemon observer uses it). */
+#include "human/channels/imessage_chat_kind.h"
+
 /* chat.db query: has a human-authored outbound (is_from_me=1, a real text
  * bubble, not a tapback) landed in the same conversation AFTER `rowid`?
  *
