@@ -833,9 +833,13 @@ static hu_error_t impl_store_ex(void *ctx, const char *key, size_t key_len, cons
     return HU_OK;
 }
 
-static hu_error_t impl_recall(void *ctx, hu_allocator_t *alloc, const char *query, size_t query_len,
-                              size_t limit, const char *session_id, size_t session_id_len,
-                              hu_memory_entry_t **out, size_t *out_count) {
+/* boosts: NULL, or a zeroed `limit`-sized array that receives, per returned
+ * row, the graph-rerank boost folded into that row's score (0 for rows the
+ * rerank did not touch). Keeps impl_recall's output unchanged either way. */
+static hu_error_t recall_ranked(void *ctx, hu_allocator_t *alloc, const char *query,
+                                size_t query_len, size_t limit, const char *session_id,
+                                size_t session_id_len, hu_memory_entry_t **out, size_t *out_count,
+                                double *boosts) {
     hu_sqlite_memory_t *self = (hu_sqlite_memory_t *)ctx;
     *out = NULL;
     *out_count = 0;
@@ -930,8 +934,12 @@ static hu_error_t impl_recall(void *ctx, hu_allocator_t *alloc, const char *quer
                         }
                         (void)hu_graph_index_rerank(&self->graph_index, query, query_len, rkeys,
                                                     rkl, scores, count);
-                        for (size_t ri = 0; ri < count; ri++)
+                        for (size_t ri = 0; ri < count; ri++) {
+                            if (boosts)
+                                boosts[ri] = scores[ri] -
+                                             (isnan(entries[ri].score) ? 0.5 : entries[ri].score);
                             entries[ri].score = scores[ri];
+                        }
                     }
                     if (rkeys)
                         alloc->free(alloc->ctx, (void *)rkeys, count * sizeof(const char *));
@@ -1114,8 +1122,11 @@ static hu_error_t impl_recall(void *ctx, hu_allocator_t *alloc, const char *quer
                             size_t wp = 0;
                             for (size_t ei = 0; ei < echunks_count; ei++) {
                                 if (echunks[ei].passed) {
-                                    if (wp != ei)
+                                    if (wp != ei) {
                                         entries[wp] = entries[ei];
+                                        if (boosts)
+                                            boosts[wp] = boosts[ei];
+                                    }
                                     wp++;
                                 } else {
                                     free_entry(alloc, &entries[ei]);
@@ -1191,6 +1202,51 @@ static hu_error_t impl_recall(void *ctx, hu_allocator_t *alloc, const char *quer
     *out = entries;
     *out_count = count;
     return HU_OK;
+}
+
+static hu_error_t impl_recall(void *ctx, hu_allocator_t *alloc, const char *query, size_t query_len,
+                              size_t limit, const char *session_id, size_t session_id_len,
+                              hu_memory_entry_t **out, size_t *out_count) {
+    return recall_ranked(ctx, alloc, query, query_len, limit, session_id, session_id_len, out,
+                         out_count, NULL);
+}
+
+hu_error_t hu_sqlite_memory_recall_with_boosts(hu_memory_t *mem, hu_allocator_t *alloc,
+                                               const char *query, size_t query_len, size_t limit,
+                                               const char *session_id, size_t session_id_len,
+                                               hu_memory_entry_t **out, size_t *out_count,
+                                               double **boosts_out) {
+    if (!out || !out_count || !boosts_out)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out = NULL;
+    *out_count = 0;
+    *boosts_out = NULL;
+    if (!alloc || !mem || !mem->ctx || !mem->vtable || mem->vtable->name != impl_name)
+        return HU_ERR_NOT_SUPPORTED;
+    if (limit == 0)
+        return HU_OK;
+    double *scratch = (double *)alloc->alloc(alloc->ctx, limit * sizeof(double));
+    if (!scratch)
+        return HU_ERR_OUT_OF_MEMORY;
+    memset(scratch, 0, limit * sizeof(double));
+    hu_error_t err = recall_ranked(mem->ctx, alloc, query, query_len, limit, session_id,
+                                   session_id_len, out, out_count, scratch);
+    if (err == HU_OK && *out_count > 0) {
+        double *b = (double *)alloc->alloc(alloc->ctx, *out_count * sizeof(double));
+        if (b) {
+            memcpy(b, scratch, *out_count * sizeof(double));
+            *boosts_out = b;
+        } else {
+            for (size_t i = 0; i < *out_count; i++)
+                hu_memory_entry_free_fields(alloc, &(*out)[i]);
+            alloc->free(alloc->ctx, *out, *out_count * sizeof(hu_memory_entry_t));
+            *out = NULL;
+            *out_count = 0;
+            err = HU_ERR_OUT_OF_MEMORY;
+        }
+    }
+    alloc->free(alloc->ctx, scratch, limit * sizeof(double));
+    return err;
 }
 
 static hu_error_t impl_get(void *ctx, hu_allocator_t *alloc, const char *key, size_t key_len,
