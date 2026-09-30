@@ -112,6 +112,12 @@ def _base_args(fake_server, contexts_file, out_path, extra=None):
         "--embed-url", fake_server,
         "--memory-db", "/dev/null",  # copy_memory_db is monkeypatched in most tests
         "--out", out_path,
+        # This whole suite was written against the Vertex/HU_GATE_FAKE=1 judge
+        # path (default flipped to --judge-backend local since). Pin vertex
+        # here so every existing call keeps exercising that path unchanged;
+        # `extra` can still override it (argparse: the LAST --judge-backend
+        # wins), which is how the local-judge suite drives it back to local.
+        "--judge-backend", "vertex",
     ]
     return args + (extra or [])
 
