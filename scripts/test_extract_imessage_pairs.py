@@ -52,6 +52,8 @@ sys.path.insert(0, os.path.dirname(__file__))
 from extract_imessage_pairs import (
     DECODE_FAILURE_BUDGET,
     extract_text_from_attributed_body,
+    extract_training_pairs,
+    mark_daemon_sends,
     report_decode_failures,
 )
 
@@ -371,6 +373,49 @@ class TestAllDecodersAgree(unittest.TestCase):
         self.assertIsNotNone(
             self._load("blind_ab/imessage_text.py", "decode_attributed_body")
         )
+
+
+def _msg(text, from_me, ts):
+    return {"text": text, "is_from_me": from_me, "timestamp": ts, "contact": "+15550000001",
+            "chat_id": "+15550000001", "rowid": ts, "datetime": ""}
+
+
+class TestDaemonSendsAreNotSeth(unittest.TestCase):
+    """chat.db marks the daemon's sends is_from_me too. 2026-09-30: 135 of
+    1,303 training pairs ended in daemon text ("<channel|>yum, save me a
+    piece!", "how can I help you with your question about AI?"), and the
+    nightly SFT set trained on 126 of them as Seth."""
+
+    RECORDS = [(1_000_000.0, "how can i help you with your question about ai")]
+
+    def test_a_from_me_row_matching_a_daemon_record_in_time_is_not_seth(self):
+        msgs = [_msg("How can I help you with your question about AI?", True, 1_000_100)]
+        mark_daemon_sends(msgs, self.RECORDS)
+        self.assertFalse(msgs[0]["is_seth"])
+
+    def test_the_same_words_far_from_any_daemon_record_stay_seth(self):
+        msgs = [_msg("How can I help you with your question about AI?", True, 2_000_000)]
+        mark_daemon_sends(msgs, self.RECORDS)
+        self.assertTrue(msgs[0]["is_seth"])
+
+    def test_short_generic_replies_are_never_matched(self):
+        msgs = [_msg("lol", True, 1_000_000)]
+        mark_daemon_sends(msgs, [(1_000_000.0, "lol yeah")])
+        self.assertTrue(msgs[0]["is_seth"])
+
+    def test_inbound_messages_are_never_seth(self):
+        msgs = [_msg("hey", False, 1_000_000)]
+        mark_daemon_sends(msgs, self.RECORDS)
+        self.assertFalse(msgs[0]["is_seth"])
+
+    def test_training_pairs_skip_a_daemon_reply_but_keep_seths(self):
+        window = [_msg("what's up", False, 999_000),
+                  _msg("How can I help you with your question about AI?", True, 1_000_100),
+                  _msg("nothing much", False, 1_000_200),
+                  _msg("cool, grabbing dinner in a bit", True, 1_000_300)]
+        mark_daemon_sends(window, self.RECORDS)
+        targets = [p["messages"][-1]["content"] for p in extract_training_pairs([window])]
+        self.assertEqual(targets, ["cool, grabbing dinner in a bit"])
 
 
 if __name__ == "__main__":
