@@ -160,9 +160,13 @@ static void failed_write_preserves_existing_file(void) {
     HU_ASSERT_EQ((size_t)write(seed, rich_config, strlen(rich_config)), strlen(rich_config));
     close(seed);
 
-    HU_ASSERT_EQ(chmod(dir, 0500), 0);
+    /* Permissions change through a descriptor, not by name (CodeQL toctou). */
+    int dfd = open(dir, O_RDONLY);
+    HU_ASSERT_TRUE(dfd >= 0);
+    HU_ASSERT_EQ(fchmod(dfd, 0500), 0);
     hu_error_t err = set_at(path, "security.autonomy_level", "2");
-    HU_ASSERT_EQ(chmod(dir, 0700), 0);
+    HU_ASSERT_EQ(fchmod(dfd, 0700), 0);
+    close(dfd);
     HU_ASSERT_NEQ(err, HU_OK);
 
     char *after = slurp(path);
@@ -177,9 +181,12 @@ static void mutate_refuses_an_unreadable_file(void) {
     HU_SKIP_IF(geteuid() == 0, "root reads mode-000 files");
     char path[512];
     scratch_config(path, sizeof(path), rich_config);
-    HU_ASSERT_EQ(chmod(path, 0000), 0);
+    int fd = open(path, O_RDONLY);
+    HU_ASSERT_TRUE(fd >= 0);
+    HU_ASSERT_EQ(fchmod(fd, 0000), 0);
     hu_error_t err = set_at(path, "security.autonomy_level", "2");
-    HU_ASSERT_EQ(chmod(path, 0600), 0);
+    HU_ASSERT_EQ(fchmod(fd, 0600), 0);
+    close(fd);
     HU_ASSERT_EQ(err, HU_ERR_IO);
     char *after = slurp(path);
     HU_ASSERT_STR_EQ(after, rich_config);

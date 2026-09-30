@@ -1045,7 +1045,7 @@ done:
 /* ── workspace ───────────────────────────────────────────────────────────── */
 /* Edits only the "workspace" key: re-serializing a loaded hu_config_t used to
  * drop every top-level key the serializer did not model. */
-static hu_error_t workspace_set(hu_allocator_t *alloc, const char *dir) {
+static hu_error_t workspace_set(hu_allocator_t *alloc, const char *cfg_path, const char *dir) {
     hu_json_value_t *v = hu_json_string_new(alloc, dir, strlen(dir));
     if (!v)
         return HU_ERR_OUT_OF_MEMORY;
@@ -1057,7 +1057,8 @@ static hu_error_t workspace_set(hu_allocator_t *alloc, const char *dir) {
         return err;
     hu_mutation_result_t res = {0};
     hu_mutation_options_t opts = {.apply = true};
-    err = hu_config_mutator_mutate(alloc, HU_MUTATION_SET, "workspace", value_json, opts, &res);
+    err = hu_config_mutator_mutate_at(alloc, cfg_path, HU_MUTATION_SET, "workspace", value_json,
+                                      opts, &res);
     alloc->free(alloc->ctx, value_json, value_len + 1);
     if (err != HU_OK) {
         fprintf(stderr, "Could not set workspace: %s\n", hu_error_string(err));
@@ -1080,13 +1081,20 @@ hu_error_t cmd_workspace(hu_allocator_t *alloc, int argc, char **argv) {
         return HU_OK;
     }
     if (strcmp(argv[2], "set") == 0) {
-        if (err == HU_OK)
-            hu_config_deinit(&cfg);
         if (argc < 4) {
+            if (err == HU_OK)
+                hu_config_deinit(&cfg);
             fprintf(stderr, "Usage: human workspace set <path>\n");
             return HU_ERR_INVALID_ARGUMENT;
         }
-        return workspace_set(alloc, argv[3]);
+        if (err != HU_OK) {
+            fprintf(stderr, "Could not load config: %s\n", hu_error_string(err));
+            return err;
+        }
+        /* Write the file the config was loaded from, not a re-derived path. */
+        err = workspace_set(alloc, cfg.config_path, argv[3]);
+        hu_config_deinit(&cfg);
+        return err;
     }
     if (err == HU_OK)
         hu_config_deinit(&cfg);

@@ -220,21 +220,6 @@ void hu_config_mutator_free_result(hu_allocator_t *alloc, hu_mutation_result_t *
     }
 }
 
-hu_error_t hu_config_mutator_default_path(hu_allocator_t *alloc, char **out_path) {
-    if (!alloc || !out_path)
-        return HU_ERR_INVALID_ARGUMENT;
-    /* Sized by the resolved path, not by $HOME: $HU_STATE_DIR can be longer. */
-    char buf[4096];
-    int n = hu_paths_state_or(buf, sizeof(buf), ".", "config.json");
-    if (n <= 0 || (size_t)n >= sizeof(buf))
-        return HU_ERR_INVALID_ARGUMENT;
-    char *p = hu_strdup(alloc, buf);
-    if (!p)
-        return HU_ERR_OUT_OF_MEMORY;
-    *out_path = p;
-    return HU_OK;
-}
-
 bool hu_config_mutator_path_requires_restart(const char *path) {
     if (!path)
         return false;
@@ -245,87 +230,6 @@ bool hu_config_mutator_path_requires_restart(const char *path) {
     if (strcmp(path, "memory.backend") == 0 || strcmp(path, "memory.profile") == 0)
         return true;
     return false;
-}
-
-hu_error_t hu_config_mutator_get_path_value_json(hu_allocator_t *alloc, const char *path,
-                                                 char **out_json) {
-    if (!alloc || !path || !path[0] || !out_json)
-        return HU_ERR_INVALID_ARGUMENT;
-    if (!is_allowed_path(path))
-        return HU_ERR_PERMISSION_DENIED;
-#if defined(HU_IS_TEST)
-    /* In test mode: return null for any path to avoid file I/O */
-    char *dup = hu_strdup(alloc, "null");
-    if (!dup)
-        return HU_ERR_OUT_OF_MEMORY;
-    *out_json = dup;
-    return HU_OK;
-#else
-    char *cfg_path = NULL;
-    hu_error_t err = hu_config_mutator_default_path(alloc, &cfg_path);
-    if (err != HU_OK)
-        return err;
-
-    char *content = NULL;
-    size_t content_len = 0;
-    bool existed = false;
-    err = read_config_file(alloc, cfg_path, &content, &content_len, &existed);
-    alloc->free(alloc->ctx, cfg_path, strlen(cfg_path) + 1);
-    if (err != HU_OK)
-        return err;
-
-    hu_json_value_t *root = NULL;
-    err = hu_json_parse(alloc, content, content_len, &root);
-    alloc->free(alloc->ctx, content, content_len + 1);
-    if (err != HU_OK)
-        return err;
-
-    if (root->type != HU_JSON_OBJECT) {
-        hu_json_free(alloc, root);
-        root = hu_json_object_new(alloc);
-        if (!root)
-            return HU_ERR_OUT_OF_MEMORY;
-    }
-
-    char **tokens = NULL;
-    size_t token_count = 0;
-    char *tok_buf = NULL;
-    size_t tok_buf_len = 0;
-    err = split_path(alloc, path, &tokens, &token_count, &tok_buf, &tok_buf_len);
-    if (err != HU_OK) {
-        hu_json_free(alloc, root);
-        return err;
-    }
-
-    hu_json_value_t *val = value_at_path(root, tokens, token_count);
-
-    char *json_str = NULL;
-    size_t json_len = 0;
-    if (val) {
-        err = hu_json_stringify(alloc, val, &json_str, &json_len);
-        if (err != HU_OK) {
-            alloc->free(alloc->ctx, tokens, token_count * sizeof(char *));
-            alloc->free(alloc->ctx, tok_buf, tok_buf_len);
-            hu_json_free(alloc, root);
-            return err;
-        }
-    } else {
-        json_str = hu_strdup(alloc, "null");
-        if (!json_str) {
-            alloc->free(alloc->ctx, tokens, token_count * sizeof(char *));
-            alloc->free(alloc->ctx, tok_buf, tok_buf_len);
-            hu_json_free(alloc, root);
-            return HU_ERR_OUT_OF_MEMORY;
-        }
-    }
-
-    alloc->free(alloc->ctx, tokens, token_count * sizeof(char *));
-    alloc->free(alloc->ctx, tok_buf, tok_buf_len);
-    hu_json_free(alloc, root);
-
-    *out_json = json_str;
-    return HU_OK;
-#endif
 }
 
 /* Trim `path`, check it against the allowlist, and require a value for SET.
@@ -605,39 +509,4 @@ hu_error_t hu_config_mutator_replace_at(hu_allocator_t *alloc, const char *cfg_p
     free_str(alloc, backup_path);
     /* Verbatim: the caller's document is what lands, byte for byte. */
     return write_config_file(alloc, cfg_path, raw, raw_len);
-}
-
-hu_error_t hu_config_mutator_mutate(hu_allocator_t *alloc, hu_mutation_action_t action,
-                                    const char *path, const char *value_raw,
-                                    hu_mutation_options_t options, hu_mutation_result_t *out) {
-    if (!alloc || !path || !out)
-        return HU_ERR_INVALID_ARGUMENT;
-#if defined(HU_IS_TEST)
-    /* The default path is the real ~/.human/config.json: tests use
-     * hu_config_mutator_mutate_at with a scratch file instead. */
-    char *trimmed = NULL;
-    hu_error_t err = prepare_path(alloc, action, path, value_raw, &trimmed);
-    if (err != HU_OK)
-        return err;
-    out->path = trimmed;
-    out->changed = true;
-    out->applied = options.apply;
-    out->requires_restart = hu_config_mutator_path_requires_restart(trimmed);
-    out->old_value_json = hu_strdup(alloc, "null");
-    out->new_value_json = value_raw ? hu_strdup(alloc, value_raw) : hu_strdup(alloc, "null");
-    out->backup_path = NULL;
-    if (!out->old_value_json || !out->new_value_json) {
-        hu_config_mutator_free_result(alloc, out);
-        return HU_ERR_OUT_OF_MEMORY;
-    }
-    return HU_OK;
-#else
-    char *cfg_path = NULL;
-    hu_error_t err = hu_config_mutator_default_path(alloc, &cfg_path);
-    if (err != HU_OK)
-        return err;
-    err = hu_config_mutator_mutate_at(alloc, cfg_path, action, path, value_raw, options, out);
-    free_str(alloc, cfg_path);
-    return err;
-#endif
 }
