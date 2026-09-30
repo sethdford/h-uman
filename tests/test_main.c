@@ -510,6 +510,7 @@ void run_turn_perceive_tests(void);               /* agent-turn carve: S2 percep
 void run_turn_entry_tests(void);                  /* agent-turn carve: S0 entry stage */
 void run_turn_silence_tests(void);                /* agent-turn carve: S8 silence stage */
 void run_turn_context_tests(void);                /* agent-turn carve: S4 context builders */
+void run_turn_tools_tests(void);                  /* agent-turn carve: S16 tool dispatch */
 void run_turn_sources_tests(void);                /* agent-turn carve: source-presence pins */
 void run_agent_llm_latency_wall_clock_tests(void); /* M3 latency_ms measures wall clock */
 void run_agent_turn_request_overrides_tests(void); /* G11: per-turn override parity */
@@ -1591,6 +1592,7 @@ int main(int argc, char **argv) {
     run_turn_entry_tests();
     run_turn_silence_tests();
     run_turn_context_tests();
+    run_turn_tools_tests();
     run_turn_sources_tests();
     /* M3 live-fire fix: provider latency_ms must span the blocking round trip */
     run_agent_llm_latency_wall_clock_tests();
