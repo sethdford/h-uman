@@ -145,9 +145,10 @@ Off is exactly the pre-v2 path.
 
 ## Before `HU_PROSPECTIVE_TIME=shadow` (rollout step 5) or `=live`: known controller gaps
 
-A checklist for the person promoting the time gate. Items 1 and 3 are
-closed (commit `9ad82174f`); items 2, 4 and 5 are documented gaps in the
-current code, still open:
+A checklist for the person promoting the time gate. All five items are
+closed: 1 and 3 in `9ad82174f`, 2 and 4 in `21ff0738f`, 5 in `4b89ec964`
+(review follow-ups pinned in `999592acb`). One residual stays open and is
+LIVE-only: the lazy-history note under item 1.
 
 1. **Closed (`9ad82174f`): the history load no longer happens every tick for
    contacts with nothing due.** `pm_time_v2`
@@ -158,10 +159,15 @@ current code, still open:
    Contacts with a due row load history and log exactly as before. Residual:
    in LIVE, a contact whose only due intention is memoized `not_now` (item 3)
    still loads history on each tick, though nothing is judged.
-2. **The legacy `hu_superhuman_delayed_followup_mark_sent` does not retire
-   the v2 twin.** A twinned follow-up (F31 legacy + its v2 mirror) can
-   surface once from each side. Retire the twin on legacy mark-sent, or gate
-   F31 for items that have a v2 twin.
+2. **Closed (`21ff0738f`): the legacy mark-sent retires the v2 twin.** When
+   `hu_superhuman_delayed_followup_mark_sent` actually marks a row (the F31
+   send, or the legacy due list's send), `hu_prospective_repo_settle_followup_twin`
+   moves its open time twin -- the row keyed `followup:<id>`, or the open row
+   whose action is that follow-up's mirror text (e.g. the collapsed F20 row
+   keyed `commitment:<N>`) -- to `done` / outcome `used`, the state a
+   delivered-and-used intention ends in. Only `prospective_memories` is
+   written: the ledger is left as the legacy path wrote it, so OFF sending is
+   byte-identical (pinned against a twin-less database). No twin is a no-op.
 3. **Closed (`9ad82174f`): a `not_now` verdict is no longer re-judged every
    tick in LIVE.** An in-process memo keyed by (contact, action) and the
    local day (`hu_prospective_local_day_start`) skips the judge for an
@@ -170,14 +176,22 @@ current code, still open:
    fixed at 128 direct-mapped slots; a colliding intention overwrites the slot,
    so the evicted one is judged once more that day. A restart forgets it.
    Parse failures and judge errors are not memoized. SHADOW does not use it.
-4. **When two frames of one topic collapse to one row, settling retires only
-   the first frame's ledger row.** Also retire the contact's unsent
-   follow-ups whose frame topic equals the action, so the second frame's row
-   does not resurface the same topic later.
-5. **Backfill rows imported as `expired` do not retire their ledger twins**
-   — `agent_turn.c` and `proactive.c` read commitments/follow-ups regardless
-   of the gate. Retire the ledger twin at backfill time and update the
-   backfill's second-run (idempotency) counts accordingly.
+4. **Closed (`21ff0738f`): settling a collapsed row retires every ledger row
+   it stands for.** After retiring the keyed ledger row,
+   `hu_prospective_repo_sync_source` also retires the contact's still-open
+   ledger rows whose mirror text (`hu_prospective_mirror_action`: a dated
+   frame's topic, a contact's promise rephrased, else verbatim) normalizes to
+   the intention's action, compared in C. That covers a topic's
+   `(tomorrow)` and `(in 2 days)` frames, and identically-worded commitments,
+   which collapse the same way. Another topic, and another contact, are
+   untouched.
+5. **Closed (`4b89ec964`): the backfill retires the ledger rows of expired
+   imports** in the same transaction (a commitment to `expired`, a follow-up
+   to `sent=1`), each by its own id -- also for an item found via
+   `skipped_existing`, which repairs a database an earlier backfill wrote.
+   `ledger_retired` counts them; a dry run rolls them back. A re-run no longer
+   sees the retired rows, so its `commitments_seen` / `followups_seen` /
+   `skipped_existing` are lower by them.
 
 Ruling F16 (applies before any promotion, not just this one): the nightly
 eval (`scripts/eval_prospective_memory.py`) must read v2's `status` /
