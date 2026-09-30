@@ -30,6 +30,18 @@ typedef struct hu_prospective_judge {
     void *ctx;
 } hu_prospective_judge_t;
 
+/* The caller's memo of intentions already judged `not_now` today (LIVE time
+ * pass). skip(ctx, action): true -> that intention is not judged this pass;
+ * it stays pending and is counted in memo_skipped, not in candidates, so it
+ * never uses up the per-pass judge cap. note_not_now(ctx, action) hears each
+ * fresh, successfully judged not_now (a parse failure or judge error is not
+ * remembered: it is re-judged next pass). */
+typedef struct hu_prospective_memo {
+    bool (*skip)(void *ctx, const char *action);
+    void (*note_not_now)(void *ctx, const char *action);
+    void *ctx;
+} hu_prospective_memo_t;
+
 typedef struct hu_prospective_turn {
     const char *contact; /* the contact key rows are stored under */
     size_t contact_len;
@@ -40,7 +52,8 @@ typedef struct hu_prospective_turn {
     bool is_group;
     bool is_self;
     int64_t now;
-    int64_t day_start; /* local midnight: the per-day cap's day */
+    int64_t day_start;                 /* local midnight: the per-day cap's day */
+    const hu_prospective_memo_t *memo; /* NULL: judge every eligible intention */
 } hu_prospective_turn_t;
 
 typedef struct hu_prospective_item_verdict {
@@ -52,9 +65,10 @@ typedef struct hu_prospective_item_verdict {
 typedef struct hu_prospective_counts {
     size_t candidates; /* eligible and judged (<= HU_PROSPECTIVE_JUDGE_CAP) */
     size_t fire, resolved, cancel, not_now, parse_fail, judge_err;
-    size_t expired;   /* past their window this pass */
-    size_t capped;    /* time cues over the per-day cap */
-    size_t write_err; /* FIRE, but the surfaced write failed or matched no row: not rendered */
+    size_t expired;      /* past their window this pass */
+    size_t capped;       /* time cues over the per-day cap */
+    size_t write_err;    /* FIRE, but the surfaced write failed or matched no row: not rendered */
+    size_t memo_skipped; /* eligible, but turn->memo said it was judged not_now today */
     hu_prospective_item_verdict_t items[HU_PROSPECTIVE_JUDGE_CAP];
     size_t item_count;
     char fire_actions[HU_PROSPECTIVE_RENDER_CAP][256]; /* would-fire actions (SHADOW uptake) */

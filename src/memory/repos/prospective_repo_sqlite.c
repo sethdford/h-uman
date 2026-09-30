@@ -240,6 +240,29 @@ hu_error_t hu_prospective_repo_transition(sqlite3 *db, const hu_prospective_item
     return HU_OK;
 }
 
+/* One COUNT over `sql`, whose parameters are ?1 cue kind, ?2 contact, ?3 a
+ * unix-seconds bound. The statement is finalized on every path. */
+static hu_error_t pm_count_for_contact(sqlite3 *db, const char *sql, hu_prospective_cue_kind_t kind,
+                                       const char *contact, size_t contact_len, int64_t t,
+                                       int64_t *out) {
+    if (out)
+        *out = 0;
+    const char *kind_s = hu_prospective_cue_kind_str(kind);
+    if (!db || !out || !kind_s || !contact || contact_len == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
+        return HU_ERR_MEMORY_BACKEND;
+    sqlite3_bind_text(st, 1, kind_s, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 2, contact, (int)contact_len, SQLITE_STATIC);
+    sqlite3_bind_int64(st, 3, t);
+    int rc = sqlite3_step(st);
+    if (rc == SQLITE_ROW)
+        *out = sqlite3_column_int64(st, 0);
+    sqlite3_finalize(st);
+    return rc == SQLITE_ROW ? HU_OK : HU_ERR_MEMORY_BACKEND;
+}
+
 /* Matching is by contact + text (COUNT(DISTINCT action)): by design,
  * identically-worded open items for one contact are treated as one promise,
  * so a keyword row and its time-cue twin (or two writers producing the same
@@ -247,25 +270,21 @@ hu_error_t hu_prospective_repo_transition(sqlite3 *db, const hu_prospective_item
 hu_error_t hu_prospective_repo_count_surfaced_since(sqlite3 *db, hu_prospective_cue_kind_t kind,
                                                     const char *contact, size_t contact_len,
                                                     int64_t since, int64_t *out) {
-    if (out)
-        *out = 0;
-    const char *kind_s = hu_prospective_cue_kind_str(kind);
-    if (!db || !out || !kind_s || !contact || contact_len == 0)
-        return HU_ERR_INVALID_ARGUMENT;
-    sqlite3_stmt *st = NULL;
-    if (sqlite3_prepare_v2(db,
-                           "SELECT COUNT(DISTINCT action) FROM prospective_memories WHERE "
-                           "cue_kind = ?1 AND contact_id = ?2 AND surfaced_at >= ?3",
-                           -1, &st, NULL) != SQLITE_OK)
-        return HU_ERR_MEMORY_BACKEND;
-    sqlite3_bind_text(st, 1, kind_s, -1, SQLITE_STATIC);
-    sqlite3_bind_text(st, 2, contact, (int)contact_len, SQLITE_STATIC);
-    sqlite3_bind_int64(st, 3, since);
-    int rc = sqlite3_step(st);
-    if (rc == SQLITE_ROW)
-        *out = sqlite3_column_int64(st, 0);
-    sqlite3_finalize(st);
-    return rc == SQLITE_ROW ? HU_OK : HU_ERR_MEMORY_BACKEND;
+    return pm_count_for_contact(db,
+                                "SELECT COUNT(DISTINCT action) FROM prospective_memories WHERE "
+                                "cue_kind = ?1 AND contact_id = ?2 AND surfaced_at >= ?3",
+                                kind, contact, contact_len, since, out);
+}
+
+/* Open means pending or surfaced: a v2 pass settles a surfaced row back to
+ * pending before it lists, so a surfaced row can come due in the same pass. */
+hu_error_t hu_prospective_repo_count_due(sqlite3 *db, const char *contact, size_t contact_len,
+                                         int64_t now, int64_t *out) {
+    return pm_count_for_contact(db,
+                                "SELECT COUNT(*) FROM prospective_memories WHERE cue_kind = ?1 "
+                                "AND contact_id = ?2 AND status IN ('pending', 'surfaced') "
+                                "AND due_at > 0 AND due_at <= ?3",
+                                HU_PM_CUE_TIME, contact, contact_len, now, out);
 }
 
 /* Trim + case-fold + collapse-internal-whitespace, for the F1 open-row

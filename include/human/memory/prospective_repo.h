@@ -72,6 +72,13 @@ hu_error_t hu_prospective_repo_count_surfaced_since(sqlite3 *db, hu_prospective_
                                                     const char *contact, size_t contact_len,
                                                     int64_t since, int64_t *out);
 
+/* Open (pending or surfaced) time rows for `contact` with 0 < due_at <= now:
+ * the cheap check the proactive tick runs before it loads chat history for a
+ * fire-time judge. 0 means a time pass for this contact has nothing to judge,
+ * expire or settle. */
+hu_error_t hu_prospective_repo_count_due(sqlite3 *db, const char *contact, size_t contact_len,
+                                         int64_t now, int64_t *out);
+
 /* Insert a cue_kind='time' row unless this intention is already present,
  * atomically, in one statement: trigger_type 'time', trigger_value =
  * source_key, expires_at = due_at + grace_s (so the legacy sweeps retire it

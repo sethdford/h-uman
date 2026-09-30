@@ -231,6 +231,10 @@ hu_error_t hu_prospective_v2_run(hu_allocator_t *alloc, sqlite3 *db, hu_prospect
             counts->capped++;
             continue;
         }
+        if (turn->memo && turn->memo->skip && turn->memo->skip(turn->memo->ctx, it->action)) {
+            counts->memo_skipped++; /* judged not_now earlier today: stays pending */
+            continue;
+        }
         if (counts->candidates >= HU_PROSPECTIVE_JUDGE_CAP)
             continue; /* bounded model calls per turn; the rest stay pending */
         counts->candidates++;
@@ -260,8 +264,11 @@ hu_error_t hu_prospective_v2_run(hu_allocator_t *alloc, sqlite3 *db, hu_prospect
                 counts->judge_err++;
             else if (v == HU_PM_VERDICT_PARSE_FAIL)
                 counts->parse_fail++;
-            else
+            else {
                 counts->not_now++;
+                if (turn->memo && turn->memo->note_not_now)
+                    turn->memo->note_not_now(turn->memo->ctx, it->action);
+            }
             break;
         }
     }
