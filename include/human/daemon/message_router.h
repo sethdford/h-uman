@@ -16,6 +16,7 @@ extern "C" {
 
 struct hu_config;
 struct hu_agent;
+struct hu_channel_loop_msg;
 
 /* Cross-channel context formatting helpers — DDD Phase 2.5 (follow-on slice),
  * extracted from daemon.c. These build the human-readable "cross-channel
@@ -131,6 +132,17 @@ hu_error_t hu_daemon_record_delivered_reply(struct hu_agent *agent, const char *
                                             const char *target, size_t target_len,
                                             const char *prompt, size_t prompt_len, const char *text,
                                             size_t text_len);
+
+/* Burst re-poll triage. The re-poll before a reply has already consumed every
+ * message in `burst` (the channel's read cursor moved past them), so a message
+ * from a sender other than `batch_key` must not be dropped: it is appended to
+ * msgs[*count..cap) for the tick's batch loop to reach after the current turn.
+ * Until 2026-09-30 those were silently discarded (Dermot twice on 09-24, while
+ * Lexi's turn was reading). Returns how many could not be kept (msgs full),
+ * each logged as a warning. */
+size_t hu_daemon_burst_carry(struct hu_channel_loop_msg *msgs, size_t *count, size_t cap,
+                             const struct hu_channel_loop_msg *burst, size_t burst_count,
+                             const char *batch_key);
 
 #ifdef __cplusplus
 }

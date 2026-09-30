@@ -607,6 +607,10 @@ struct hu_agent {
      * self-tests set it so a thread full of test traffic does not confuse the
      * reply (spec 2026-09-28, Phase 5). */
     uint8_t history_msg_cap;
+    /* Per turn: an owner self-test (#command from Seth's own number). Such a
+     * turn writes no memories (experiences, facts); set and cleared by the
+     * daemon around the turn (2026-09-30). */
+    bool self_test_turn;
 
 #ifdef HU_ENABLE_SQLITE
     hu_meta_params_t meta_params;
