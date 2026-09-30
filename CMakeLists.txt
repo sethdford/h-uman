@@ -3514,6 +3514,7 @@ set(HU_TEST_SOURCES
     tests/test_allocator.c
     tests/test_data_loader.c
     tests/test_idempotency.c
+    tests/test_preferences.c
     tests/test_idempotency_hula_integration.c
     tests/test_json.c
     tests/test_string.c

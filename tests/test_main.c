@@ -261,6 +261,7 @@ void run_provider_all_tests(void);
 void run_chat_response_diag_tests(void);
 void run_channel_all_tests(void);
 void run_idempotency_tests(void);
+void run_preferences_tests(void);
 void run_idempotency_hula_integration_tests(void);
 void run_meta_common_tests(void);
 void run_channel_integration_tests(void);
@@ -1122,6 +1123,7 @@ int main(int argc, char **argv) {
     run_allocator_tests();
     run_data_loader_tests();
     run_idempotency_tests();
+    run_preferences_tests();
     run_idempotency_hula_integration_tests();
     run_agent_modules_tests();
     run_agent_definition_tests();
