@@ -14,6 +14,9 @@
 #include "human/core/string.h"
 #include "human/memory/lifecycle/semantic_cache.h"
 #include "human/persona/delta_observer.h"
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
 
 hu_turn_step_t hu_turn_entry(hu_turn_ctx_t *turn_ctx) {
     if (!turn_ctx || !turn_ctx->in.agent || !turn_ctx->in.response_out)

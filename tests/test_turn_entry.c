@@ -22,6 +22,26 @@ static void turn_entry_rejects_a_null_context(void) {
     HU_ASSERT_EQ(st.err, HU_ERR_INVALID_ARGUMENT);
 }
 
+static void turn_entry_rejects_a_context_missing_agent_or_response_out(void) {
+    tf_fixture_t f;
+    HU_ASSERT_TRUE(tf_open(&f, NULL, 0, false, HU_AUTONOMY_AUTONOMOUS));
+    hu_turn_ctx_t *turn_ctx = hu_turn_ctx_new(&f.agent, "hi", 2, &f.resp, &f.resp_len);
+    HU_ASSERT_NOT_NULL(turn_ctx);
+    turn_ctx->in.agent = NULL;
+    hu_turn_step_t st = hu_turn_entry(turn_ctx);
+    HU_ASSERT_EQ(st.kind, HU_TURN_STEP_RETURN);
+    HU_ASSERT_EQ(st.err, HU_ERR_INVALID_ARGUMENT);
+    turn_ctx->in.agent = &f.agent;
+    turn_ctx->in.response_out = NULL;
+    st = hu_turn_entry(turn_ctx);
+    HU_ASSERT_EQ(st.kind, HU_TURN_STEP_RETURN);
+    HU_ASSERT_EQ(st.err, HU_ERR_INVALID_ARGUMENT);
+    turn_ctx->in.response_out = &f.resp;
+    HU_ASSERT_EQ(f.trp.calls, 0);
+    hu_turn_ctx_free(turn_ctx);
+    tf_close(&f);
+}
+
 static void turn_entry_slash_help_ends_the_turn_without_the_provider(void) {
     tf_fixture_t f;
     HU_ASSERT_TRUE(tf_open(&f, NULL, 0, false, HU_AUTONOMY_AUTONOMOUS));
@@ -30,6 +50,7 @@ static void turn_entry_slash_help_ends_the_turn_without_the_provider(void) {
     hu_turn_step_t st = hu_turn_entry(turn_ctx);
     HU_ASSERT_EQ(st.kind, HU_TURN_STEP_RETURN);
     HU_ASSERT_EQ(st.err, HU_OK);
+    HU_ASSERT_NULL(hu_agent_get_current_for_tools()); /* every exit clears it */
     HU_ASSERT_NOT_NULL(f.resp);
     HU_ASSERT_TRUE(strncmp(f.resp, "Commands:", 9) == 0);
     HU_ASSERT_EQ(f.resp_len, strlen(f.resp));
@@ -47,6 +68,7 @@ static void turn_entry_refuses_a_high_risk_injection(void) {
     hu_turn_step_t st = hu_turn_entry(turn_ctx);
     HU_ASSERT_EQ(st.kind, HU_TURN_STEP_RETURN);
     HU_ASSERT_EQ(st.err, HU_OK);
+    HU_ASSERT_NULL(hu_agent_get_current_for_tools()); /* every exit clears it */
     HU_ASSERT_STR_EQ(f.resp, "I can't process that request due to safety concerns.");
     HU_ASSERT_EQ(f.resp_len, 52);
     HU_ASSERT_EQ(f.trp.calls, 0);
@@ -71,6 +93,7 @@ static void turn_entry_semantic_cache_hit_returns_the_cached_answer(void) {
     hu_semantic_cache_destroy(&f.alloc, cache);
     HU_ASSERT_EQ(st.kind, HU_TURN_STEP_RETURN);
     HU_ASSERT_EQ(st.err, HU_OK);
+    HU_ASSERT_NULL(hu_agent_get_current_for_tools()); /* every exit clears it */
     HU_ASSERT_STR_EQ(f.resp, "cached answer");
     HU_ASSERT_EQ(f.resp_len, 13);
     HU_ASSERT_EQ(f.trp.calls, 0);
@@ -98,6 +121,7 @@ static void turn_entry_speculative_cache_hit_returns_a_copy_of_the_prediction(vo
     f.alloc.free(f.alloc.ctx, cache, sizeof(*cache));
     HU_ASSERT_EQ(st.kind, HU_TURN_STEP_RETURN);
     HU_ASSERT_EQ(st.err, HU_OK);
+    HU_ASSERT_NULL(hu_agent_get_current_for_tools()); /* every exit clears it */
     /* a copy: the cache (and its prediction) is already gone */
     HU_ASSERT_STR_EQ(f.resp, "it is noon");
     HU_ASSERT_EQ(f.resp_len, 10);
@@ -115,7 +139,10 @@ static void turn_entry_plain_message_continues_with_the_response_cleared(void) {
     hu_turn_ctx_t *turn_ctx = hu_turn_ctx_new(&f.agent, "hello there", 11, &resp, &resp_len);
     HU_ASSERT_NOT_NULL(turn_ctx);
     hu_turn_step_t st = hu_turn_entry(turn_ctx);
-    hu_agent_clear_current_for_tools(); /* CONTINUE leaves the current agent set for the turn */
+    /* CONTINUE leaves the current agent set for the rest of the turn */
+    hu_agent_t *current = hu_agent_get_current_for_tools();
+    hu_agent_clear_current_for_tools();
+    HU_ASSERT_TRUE(current == &f.agent);
     HU_ASSERT_EQ(st.kind, HU_TURN_STEP_CONTINUE);
     HU_ASSERT_NULL(resp);
     HU_ASSERT_EQ(resp_len, 0);
@@ -127,6 +154,7 @@ static void turn_entry_plain_message_continues_with_the_response_cleared(void) {
 void run_turn_entry_tests(void) {
     HU_TEST_SUITE("TurnEntry");
     HU_RUN_TEST(turn_entry_rejects_a_null_context);
+    HU_RUN_TEST(turn_entry_rejects_a_context_missing_agent_or_response_out);
     HU_RUN_TEST(turn_entry_slash_help_ends_the_turn_without_the_provider);
     HU_RUN_TEST(turn_entry_refuses_a_high_risk_injection);
     HU_RUN_TEST(turn_entry_semantic_cache_hit_returns_the_cached_answer);
