@@ -255,9 +255,21 @@ static void vision_describe_blocked_under_privacy(void) {
 
 /* ── Suite ──────────────────────────────────────────────────────────────── */
 
+/* iPhone screenshots run 4-6 MB; base64 makes them ~4/3 larger, and the POST
+ * cap (3 MiB) refused every one before it left (2026-09-30). The predicate
+ * says when a file must be shrunk first. */
+static void vision_downscale_when_the_encoded_body_would_not_fit(void) {
+    size_t cap = (size_t)3 << 20;
+    HU_ASSERT_TRUE(hu_vision_needs_downscale((size_t)4700000, cap));  /* IMG_3004.PNG */
+    HU_ASSERT_TRUE(hu_vision_needs_downscale((size_t)2400000, cap));  /* 3.2 MB as base64 */
+    HU_ASSERT_FALSE(hu_vision_needs_downscale((size_t)1200000, cap)); /* a typical HEIC */
+    HU_ASSERT_FALSE(hu_vision_needs_downscale((size_t)400000, cap));
+}
+
 void run_vision_tests(void) {
     HU_TEST_SUITE("vision");
     HU_RUN_TEST(vision_build_context_with_description);
+    HU_RUN_TEST(vision_downscale_when_the_encoded_body_would_not_fit);
     HU_RUN_TEST(vision_build_context_null_description);
     HU_RUN_TEST(vision_build_context_empty_description);
     HU_RUN_TEST(vision_build_context_null_returns_null);

@@ -2738,17 +2738,12 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 while (m < count && strcmp(msgs[m].session_key, batch_key) == 0) {
                     const char *content_to_add = msgs[m].content;
                     size_t mlen = strlen(content_to_add);
-                    /* 2026-05-24 ASan fix: hoist the attachment-augmentation
-                     * buffer to the same scope as content_to_add. Previously
-                     * each augmentation branch (has_audio/has_video via
-                     * vision, has_image via vision, has_video fallback)
-                     * declared its own char[4096] INSIDE the nested if-block;
-                     * those buffers went out of scope before the memcpy at
-                     * line ~4965 read from content_to_add, causing
-                     * stack-use-after-scope (the ASan abort that took down
-                     * service-loop PID 59064 on 2026-05-24). Hoisting to one
-                     * buffer at this scope matches content_to_add's
-                     * lifetime exactly. */
+                    /* 2026-05-24 ASan fix: one augmentation buffer at
+                     * content_to_add's scope. Each branch used to declare its
+                     * own char[4096] in a nested block, out of scope before
+                     * the memcpy below read content_to_add: the
+                     * stack-use-after-scope that took down service-loop PID
+                     * 59064. Hoisted here, its lifetime matches exactly. */
                     char augmented[4096];
 #ifndef HU_IS_TEST
                     /* Per-message attachment: images via vision; local audio/video via multimodal
@@ -2835,7 +2830,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 char *desc = NULL;
                                 size_t desc_len = 0;
                                 hu_error_t verr =
-                                    hu_vision_describe_image(alloc, &agent->provider, path, plen,
+                                    hu_daemon_describe_image(alloc, agent, config, path, plen,
                                                              model, model_len, &desc, &desc_len);
                                 hu_log_info("human", agent ? agent->observer : NULL,
                                             "vision: result=%s desc_len=%zu", hu_error_string(verr),
@@ -2882,6 +2877,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         }
                     }
 #endif
+                    /* A picture vision could not describe: say so, never a bare U+FFFC. */
+                    content_to_add =
+                        hu_daemon_unseen_photo(content_to_add, &mlen, augmented, sizeof(augmented));
                     if (mlen == 0) {
                         m++;
                         continue;
@@ -4857,9 +4855,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             const char *model = agent->model_name ? agent->model_name : "gpt-4o";
                             size_t model_len =
                                 agent->model_name_len > 0 ? agent->model_name_len : strlen(model);
-                            hu_error_t verr = hu_vision_describe_image(
-                                alloc, &agent->provider, img_path, strlen(img_path), model,
-                                model_len, &desc, &desc_len);
+                            hu_error_t verr = hu_daemon_describe_image(
+                                alloc, agent, config, img_path, strlen(img_path), model, model_len,
+                                &desc, &desc_len);
                             alloc->free(alloc->ctx, img_path, strlen(img_path) + 1);
                             if (verr == HU_OK && desc && desc_len > 0) {
                                 size_t vision_ctx_len = 0;

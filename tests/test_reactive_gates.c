@@ -90,6 +90,31 @@ static void test_ai_tell_service_desk_family_delivered_in_september(void) {
     HU_ASSERT_NULL(hu_reactive_response_ai_tell("I can help Saturday"));
 }
 
+/* The table missed its own family: every delivered assistant-voice bubble from
+ * 09-19..09-30 was a new wording of a listed construction. Constructions are
+ * matched now, not phrasings. */
+static void test_ai_tell_catches_the_delivered_leaks_by_construction(void) {
+    HU_ASSERT_NOT_NULL(hu_reactive_response_ai_tell("Yes, I am here to help.")); /* 09-24 */
+    HU_ASSERT_NOT_NULL(
+        hu_reactive_response_ai_tell("What do you need assistance with?")); /* 09-24 */
+    HU_ASSERT_NOT_NULL(
+        hu_reactive_response_ai_tell("Please let me know what information you need")); /* 09-27 */
+    HU_ASSERT_NOT_NULL(hu_reactive_response_ai_tell("can you provide a few more details?"));
+    HU_ASSERT_NOT_NULL(hu_reactive_response_ai_tell("happy to assist you"));
+}
+
+static void test_ai_tell_constructions_leave_seths_register_alone(void) {
+    HU_ASSERT_NULL(hu_reactive_response_ai_tell("let me know when you land"));
+    HU_ASSERT_NULL(hu_reactive_response_ai_tell("let me know if you need anything"));
+    HU_ASSERT_NULL(hu_reactive_response_ai_tell("I'm here if you need me"));
+    HU_ASSERT_NULL(hu_reactive_response_ai_tell("I'll grab the details from him tonight"));
+    HU_ASSERT_NULL(hu_reactive_response_ai_tell("they're helping with the move saturday"));
+    /* Real Seth text, the one false positive of the first draft (2,517 checked). */
+    HU_ASSERT_NULL(hu_reactive_response_ai_tell(
+        "Just call them up tell them your here to help Seth and schedule a time"));
+    HU_ASSERT_NOT_NULL(hu_reactive_response_ai_tell("I'm here to help"));
+}
+
 static void test_ai_tell_support_register_on_distress_detected(void) {
     /* 2026-09-12 15:18 retry that passed the old table. */
     HU_ASSERT_NOT_NULL(
@@ -192,6 +217,8 @@ void run_reactive_gates_tests(void) {
     HU_RUN_TEST(test_ai_tell_legacy_phrases_still_detected);
     HU_RUN_TEST(test_ai_tell_incident_phrases_detected);
     HU_RUN_TEST(test_ai_tell_support_register_on_distress_detected);
+    HU_RUN_TEST(test_ai_tell_catches_the_delivered_leaks_by_construction);
+    HU_RUN_TEST(test_ai_tell_constructions_leave_seths_register_alone);
     HU_RUN_TEST(test_ai_tell_retry_hint_describes_register_without_formulas);
     HU_RUN_TEST(test_ai_tell_is_case_insensitive_and_names_phrase);
     HU_RUN_TEST(test_ai_tell_does_not_flag_human_sorry);

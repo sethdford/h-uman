@@ -8,11 +8,13 @@ Reads ~/Library/Messages/chat.db and produces:
 3. timing_data.jsonl — response timing for timing distribution analysis
 """
 
+import bisect
 import json
 import os
+import re
 import sqlite3
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Shared typedstream decoder (scripts/blind_ab/imessage_text.py). This module
 # used to carry its own copy, which drifted: the fix in e80af898 landed only on
@@ -35,6 +37,14 @@ MIN_REPLY_LENGTH = 2
 # Preceding turns attached to each ground-truth pair as `context_turns`. 6 covers
 # the typical iMessage exchange depth without blowing the eval's prompt budget.
 GT_CONTEXT_TURNS = 6
+
+# The daemon's own sends are is_from_me in chat.db too. A from-me message is
+# the daemon's when its text (normalized, >= DAEMON_MIN_CHARS) is contained in a
+# text the daemon recorded within DAEMON_WINDOW_S of it. 2026-09-30: 135 of
+# 1,303 training pairs ended in daemon text and trained the model as Seth.
+MEMORY_DB = os.path.expanduser("~/.human/memory.db")
+DAEMON_WINDOW_S = 15 * 60
+DAEMON_MIN_CHARS = 12
 
 # Filter out system/verification messages
 SKIP_PATTERNS = [
@@ -220,6 +230,72 @@ def extract_messages(db_path):
     return messages
 
 
+def _norm(s):
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]+", " ", (s or "").lower())).strip()
+
+
+def _utc_epoch(s):
+    try:
+        return datetime.fromisoformat(str(s).replace("Z", "")).replace(
+            tzinfo=timezone.utc).timestamp()
+    except ValueError:
+        return None
+
+
+def load_daemon_records(db_path=MEMORY_DB):
+    """(epoch, normalized text) for every text the daemon is known to have
+    produced: memory.db messages (assistant), production_outcomes,
+    outbound_sends, experience outcomes. Missing db or table -> fewer records,
+    never an error: extraction must still run on a machine without a daemon."""
+    if not os.path.exists(db_path):
+        print(f"  (no {db_path}: daemon sends cannot be told apart from Seth's)")
+        return []
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    conn.text_factory = lambda b: b.decode("utf-8", "replace")
+    queries = [
+        ("SELECT content, created_at FROM messages WHERE role = 'assistant'", _utc_epoch),
+        ("SELECT chosen, send_timestamp FROM production_outcomes", lambda t: float(t) if t else None),
+        ("SELECT text, sent_at_ms FROM outbound_sends", lambda t: t / 1000.0 if t else None),
+    ]
+    records = []
+    for sql, to_epoch in queries:
+        try:
+            records += [(to_epoch(t), _norm(c)) for c, t in conn.execute(sql)]
+        except sqlite3.Error:
+            continue
+    try:
+        for c, t in conn.execute("SELECT content, created_at FROM memories WHERE key LIKE 'experience:%'"):
+            m = re.search(r"Outcome:\s*(.*?)\s*Score:", c or "", re.S)
+            if m:
+                records.append((_utc_epoch(t), _norm(m.group(1))))
+    except sqlite3.Error:
+        pass
+    conn.close()
+    return sorted((t, n) for t, n in records if t and n)
+
+
+def mark_daemon_sends(messages, records, window_s=DAEMON_WINDOW_S):
+    """Set msg["is_seth"]: from-me AND not a daemon send (see MEMORY_DB note).
+    Returns how many from-me messages were marked as the daemon's."""
+    times = [t for t, _ in records]
+    marked = 0
+    for m in messages:
+        m["is_seth"] = bool(m["is_from_me"])
+        n = _norm(m["text"])
+        if not m["is_seth"] or len(n) < DAEMON_MIN_CHARS:
+            continue
+        lo = bisect.bisect_left(times, m["timestamp"] - window_s)
+        hi = bisect.bisect_right(times, m["timestamp"] + window_s)
+        if any(n in records[i][1] for i in range(lo, hi)):
+            m["is_seth"] = False
+            marked += 1
+    return marked
+
+
+def _is_seth(m):
+    return m.get("is_seth", m["is_from_me"])
+
+
 def group_by_chat(messages):
     chats = {}
     for msg in messages:
@@ -253,7 +329,7 @@ def extract_training_pairs(windows):
     pairs = []
     for window in windows:
         for i, msg in enumerate(window):
-            if msg["is_from_me"] and len(msg["text"]) >= MIN_REPLY_LENGTH:
+            if _is_seth(msg) and len(msg["text"]) >= MIN_REPLY_LENGTH:
                 context_start = max(0, i - 5)
                 context = window[context_start:i]
                 if not context:
@@ -294,7 +370,7 @@ def extract_ground_truth(windows):
         for i in range(len(window) - 1):
             incoming = window[i]
             reply = window[i + 1]
-            if not incoming["is_from_me"] and reply["is_from_me"]:
+            if not incoming["is_from_me"] and _is_seth(reply):
                 if len(reply["text"]) >= MIN_REPLY_LENGTH:
                     delay_s = reply["timestamp"] - incoming["timestamp"]
                     lo = max(0, i - GT_CONTEXT_TURNS)
@@ -323,7 +399,7 @@ def extract_timing_data(windows):
         for i in range(len(window) - 1):
             incoming = window[i]
             reply = window[i + 1]
-            if not incoming["is_from_me"] and reply["is_from_me"]:
+            if not incoming["is_from_me"] and _is_seth(reply):
                 delay = reply["timestamp"] - incoming["timestamp"]
                 if 0 < delay < 86400:
                     timing.append({
@@ -351,7 +427,7 @@ def extract_voice_training_pairs(windows):
     pairs = []
     for window in windows:
         for i, msg in enumerate(window):
-            if not msg["is_from_me"] or len(msg["text"]) < MIN_REPLY_LENGTH:
+            if not _is_seth(msg) or len(msg["text"]) < MIN_REPLY_LENGTH:
                 continue
             if len(msg["text"]) > MAX_VOICE_REPLY_LENGTH:
                 continue
@@ -392,6 +468,8 @@ def main():
     print(f"Reading {DB_PATH}...")
     messages = extract_messages(DB_PATH)
     print(f"  {len(messages)} messages (after filtering)")
+    daemon = mark_daemon_sends(messages, load_daemon_records())
+    print(f"  {daemon} from-me messages were the daemon's; never used as Seth's reply")
 
     chats = group_by_chat(messages)
     print(f"  {len(chats)} conversations")
@@ -435,7 +513,7 @@ def main():
     print(f"  Timing data points: {len(timing)} -> {timing_path}")
 
     # Stats
-    seth_msgs = [m for m in messages if m["is_from_me"]]
+    seth_msgs = [m for m in messages if _is_seth(m)]
     other_msgs = [m for m in messages if not m["is_from_me"]]
     seth_lengths = [len(m["text"]) for m in seth_msgs]
     print(f"\n--- Stats ---")

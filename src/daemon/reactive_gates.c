@@ -3,6 +3,7 @@
 #include "human/core/string.h"
 
 #include <stddef.h>
+#include <string.h>
 
 bool hu_reactive_gate_is_safety(hu_reactive_gate_t gate) {
     /* Only the heuristic gates are enumerated: everything else, including an
@@ -113,6 +114,48 @@ hu_ai_tell_action_t hu_reactive_ai_tell_action(const char *ai_tell, bool retried
     return retried ? HU_AI_TELL_DROP : HU_AI_TELL_RETRY;
 }
 
+/* Service-desk CONSTRUCTIONS, not phrasings (2026-09-30): each delivered leak
+ * 09-19..09-30 was a new wording of a family the table already listed ("let
+ * me know what information you need" beside "let me know what you need").
+ * Word-boundary matches, so "assistant" or "helpful" never trip them. A
+ * request only counts with a service object in the same sentence: "let me
+ * know when you land" stays clean. Measured against Seth's own texts before
+ * adding. */
+static const char *ai_tell_construction(const char *r) {
+    /* No bare "I apologize": "I apologize for the mistake!" is real Seth text;
+     * the service forms of it are in the table above. */
+    /* "here to help" only in the first person: Seth wrote "tell them your here
+     * to help Seth" (1 hit in 2,517 of his texts). */
+    static const char *const always[] = {"assistance",
+                                         "assist you",
+                                         "am here to help",
+                                         "I'm here to help",
+                                         "I\xE2\x80\x99m here to help",
+                                         NULL};
+    static const char *const asks[] = {"let me know",       "please share",
+                                       "please provide",    "can you provide",
+                                       "could you provide", "please clarify",
+                                       "can you clarify",   "could you clarify",
+                                       "please specify",    NULL};
+    static const char *const objects[] = {"information", "details", "assistance", NULL};
+    for (size_t i = 0; always[i]; i++)
+        if (hu_str_contains_word_ci(r, always[i]))
+            return always[i];
+    for (const char *s = r; *s;) {
+        size_t n = strcspn(s, ".!?\n");
+        const char *ask = NULL;
+        for (size_t i = 0; asks[i] && !ask; i++)
+            if (hu_str_contains_word_ci_n(s, n, asks[i]))
+                ask = asks[i];
+        for (size_t i = 0; ask && objects[i]; i++)
+            if (hu_str_contains_word_ci_n(s, n, objects[i]))
+                return ask;
+        s += n;
+        s += strspn(s, ".!?\n");
+    }
+    return NULL;
+}
+
 const char *hu_reactive_response_ai_tell(const char *response) {
     if (!response || !response[0])
         return NULL;
@@ -120,7 +163,7 @@ const char *hu_reactive_response_ai_tell(const char *response) {
         if (hu_strcasestr(response, k_ai_tells[i]))
             return k_ai_tells[i];
     }
-    return NULL;
+    return ai_tell_construction(response);
 }
 
 bool hu_reactive_consecutive_limit_reached(uint32_t count, uint32_t cap) {
