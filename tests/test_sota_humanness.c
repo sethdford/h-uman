@@ -123,13 +123,15 @@ static void timing_model_sample_clamps_dow(void) {
 
 static void parse_verdict_rewrite_standalone(void) {
     int idx = -1;
-    hu_critique_verdict_t v = hu_constitutional_test_parse_verdict("REWRITE principle 2: too formal", 31, &idx);
+    hu_critique_verdict_t v =
+        hu_constitutional_test_parse_verdict("REWRITE principle 2: too formal", 31, &idx);
     HU_ASSERT_EQ((int)v, (int)HU_CRITIQUE_REWRITE);
 }
 
 static void parse_verdict_rewritten_not_rewrite(void) {
     int idx = -1;
-    hu_critique_verdict_t v = hu_constitutional_test_parse_verdict("REWRITTEN response below", 24, &idx);
+    hu_critique_verdict_t v =
+        hu_constitutional_test_parse_verdict("REWRITTEN response below", 24, &idx);
     HU_ASSERT(v != HU_CRITIQUE_REWRITE);
 }
 
@@ -145,7 +147,8 @@ static void parse_verdict_pass1_not_pass(void) {
 /* ─── parse_principle_index fallback ─── */
 
 static void principle_index_from_keyword(void) {
-    int idx = hu_constitutional_test_parse_principle_index("REWRITE principle 3: violates warmth", 35);
+    int idx =
+        hu_constitutional_test_parse_principle_index("REWRITE principle 3: violates warmth", 35);
     HU_ASSERT_EQ(idx, 3);
 }
 

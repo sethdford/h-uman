@@ -23,6 +23,13 @@ from second_opinion import backend as be, run_nightly  # noqa: E402
 LOCAL_MORNING = dt.datetime(2026, 9, 29, 7, 45).astimezone()   # a Tuesday
 
 
+def clock_at(local):
+    """utcnow for a run pinned to `local`. --deadline resolves against now_local
+    but is compared with utcnow(); injecting one clock and not the other made
+    these tests pass only while the real date was 2026-09-29."""
+    return lambda: local.astimezone(dt.timezone.utc)
+
+
 @pytest.fixture(autouse=True)
 def _restore_umask():
     """run_nightly.main sets os.umask(0o077) for the whole process (M1); keep
@@ -162,7 +169,7 @@ def test_window_closed_writes_nothing(tmp_path):
     setup(tmp_path)
     late = dt.datetime(2026, 9, 29, 9, 30).astimezone()
     rc = run_nightly.main(args(tmp_path, "--deadline", "09:00"), now_local=late,
-                          serve=serve_with(Fake([])), attribute=no_att)
+                          serve=serve_with(Fake([])), attribute=no_att, utcnow=clock_at(late))
     assert rc == 0 and not (tmp_path / "logs").exists() and not (tmp_path / "so.db").exists()
 
 
@@ -343,7 +350,8 @@ def test_judge_timeout_expired_is_isolated_and_type_only(tmp_path, monkeypatch):
 
     monkeypatch.setattr(run_nightly.judge, "judge_pass", boom)
     rc = run_nightly.main(args(tmp_path, "--jobs", "judge", "--deadline", "23:59"),
-                          now_local=LOCAL_MORNING, serve=serve_with(Fake([])), attribute=no_att)
+                          now_local=LOCAL_MORNING, serve=serve_with(Fake([])), attribute=no_att,
+                          utcnow=clock_at(LOCAL_MORNING))
     assert rc == 3
     text = (tmp_path / "logs" / "second-opinion-20260929.json").read_text()
     man = json.loads(text)
@@ -366,7 +374,8 @@ def test_deadline_is_forwarded_to_audit_pass(tmp_path, monkeypatch):
 
     monkeypatch.setattr(run_nightly.audit, "audit_pass", fake_audit_pass)
     rc = run_nightly.main(args(tmp_path, "--deadline", "23:59"), now_local=LOCAL_MORNING,
-                          serve=serve_with(Fake([])), attribute=no_att)
+                          serve=serve_with(Fake([])), attribute=no_att,
+                          utcnow=clock_at(LOCAL_MORNING))
     assert rc == 0
     assert captured["deadline"] is not None
 
