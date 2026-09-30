@@ -22,8 +22,8 @@
 
 /* Hand ratchets. Lower both to the values this suite prints in every stage
  * commit; never raise them. */
-#define TS_AGENT_TURN_C_MAX_LINES   9935
-#define TS_AGENT_TURN_RUN_MAX_LINES 8387
+#define TS_AGENT_TURN_C_MAX_LINES   9817
+#define TS_AGENT_TURN_RUN_MAX_LINES 8269
 
 static char *ts_read(const char *path) {
     FILE *f = fopen(path, "rb");

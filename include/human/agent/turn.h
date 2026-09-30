@@ -56,6 +56,27 @@ typedef struct hu_turn_ctx {
     } retrieval;
 } hu_turn_ctx_t;
 
+/* How a stage that can end the turn reports back (S0, S8). */
+typedef enum hu_turn_step_kind {
+    HU_TURN_STEP_CONTINUE = 0, /* fall through to the rest of the turn */
+    HU_TURN_STEP_RETURN = 1,   /* hu_agent_turn returns `err` now */
+} hu_turn_step_kind_t;
+
+typedef struct hu_turn_step {
+    hu_turn_step_kind_t kind;
+    hu_error_t err;
+} hu_turn_step_t;
+
+static inline hu_turn_step_t hu_turn_step_continue(void) {
+    hu_turn_step_t s = {HU_TURN_STEP_CONTINUE, HU_OK};
+    return s;
+}
+
+static inline hu_turn_step_t hu_turn_step_return(hu_error_t err) {
+    hu_turn_step_t s = {HU_TURN_STEP_RETURN, err};
+    return s;
+}
+
 /* NULL when agent, agent->alloc or the allocation is missing. Stores the
  * pointers only; touches neither *response_out nor *response_len_out. */
 hu_turn_ctx_t *hu_turn_ctx_new(hu_agent_t *agent, const char *msg, size_t msg_len,
@@ -75,5 +96,13 @@ hu_error_t hu_turn_retrieve(hu_turn_ctx_t *turn_ctx);
  * preference and outcome learning, tone and rhythm hints. Reads in.*; writes
  * perception.*. HU_ERR_INVALID_ARGUMENT on a NULL ctx, agent or msg. */
 hu_error_t hu_turn_perceive(hu_turn_ctx_t *turn_ctx);
+
+/* S0 entry (src/agent/turn/turn_entry.c): clears the out-params, per-turn
+ * resets, speculative + semantic response caches, mailbox, slash commands,
+ * input guard, persona-correction observation. RETURN when the inline block
+ * returned (a cache hit, a slash command, a guard verdict); CONTINUE
+ * otherwise. RETURN(HU_ERR_INVALID_ARGUMENT) on a NULL ctx, agent or
+ * response_out. */
+hu_turn_step_t hu_turn_entry(hu_turn_ctx_t *turn_ctx);
 
 #endif /* HU_AGENT_TURN_H */
