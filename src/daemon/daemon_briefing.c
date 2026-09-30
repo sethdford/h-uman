@@ -4,6 +4,7 @@
 #include "human/channel.h"
 #include "human/core/allocator.h"
 #include "human/core/gate_mode.h"
+#include "human/core/io_secure.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
 #include "human/core/paths.h"
@@ -377,8 +378,9 @@ static bool write_shadow(const char *day, const char *text, size_t len) {
     int w = snprintf(path, sizeof(path), "%s/%s.txt", dir, day);
     if (w < 0 || (size_t)w >= sizeof(path))
         return false;
-    FILE *f = fopen(path, "w");
-    if (!f)
+    /* The briefing quotes private messages and calendar titles: owner-only. */
+    FILE *f = NULL;
+    if (hu_io_secure_open(path, HU_IO_PERM_SECRET, "w", &f) != HU_OK)
         return false;
     bool ok = fwrite(text, 1, len, f) == len && fputc('\n', f) != EOF;
     return fclose(f) == 0 && ok;

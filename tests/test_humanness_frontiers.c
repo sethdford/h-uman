@@ -1,7 +1,7 @@
+#include "human/agent.h"
 #include "human/agent/choreography.h"
 #include "human/agent/frontier_persist.h"
 #include "human/agent/growth_narrative.h"
-#include "human/agent.h"
 #include "human/cognition/attachment.h"
 #include "human/cognition/novelty.h"
 #include "human/cognition/presence.h"
@@ -89,13 +89,51 @@ static void test_choreography_single_short(void) {
 
 static void test_choreography_paragraph_split(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    const char *msg =
-        "First paragraph is definitely long enough for the split path.\n\n"
-        "Second paragraph is also long enough to count as separate.";
+    const char *msg = "First paragraph is definitely long enough for the split path.\n\n"
+                      "Second paragraph is also long enough to count as separate.";
     hu_choreography_config_t c = hu_choreography_config_default();
     hu_message_plan_t plan = {0};
     HU_ASSERT_EQ(hu_choreography_plan(&alloc, msg, strlen(msg), &c, 10u, &plan), HU_OK);
     HU_ASSERT_TRUE(plan.segment_count > 1u);
+    hu_choreography_plan_free(&alloc, &plan);
+}
+
+/* Double-text splits land on a thought boundary. 2026-09-30 the midpoint
+ * split sent "nah too windy. just" | "hung out by the water". */
+static hu_message_plan_t choreo_double_text(hu_allocator_t *alloc, const char *msg) {
+    hu_choreography_config_t c = hu_choreography_config_default();
+    c.double_text_probability = 1.0f; /* force the double-text roll */
+    c.burst_probability = 0.0f;
+    hu_message_plan_t plan = {0};
+    HU_ASSERT_EQ(hu_choreography_plan(alloc, msg, strlen(msg), &c, 10u, &plan), HU_OK);
+    return plan;
+}
+
+static void test_choreography_double_text_splits_at_sentence_end(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_message_plan_t plan =
+        choreo_double_text(&alloc, "nah too windy. just hung out by the water");
+    HU_ASSERT_EQ(plan.segment_count, 2u);
+    HU_ASSERT_STR_EQ(plan.segments[0].text, "nah too windy.");
+    HU_ASSERT_STR_EQ(plan.segments[1].text, "just hung out by the water");
+    hu_choreography_plan_free(&alloc, &plan);
+}
+
+static void test_choreography_double_text_falls_back_to_a_comma(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_message_plan_t plan =
+        choreo_double_text(&alloc, "yeah we should totally do that, maybe next weekend or so");
+    HU_ASSERT_EQ(plan.segment_count, 2u);
+    HU_ASSERT_STR_EQ(plan.segments[0].text, "yeah we should totally do that,");
+    HU_ASSERT_STR_EQ(plan.segments[1].text, "maybe next weekend or so");
+    hu_choreography_plan_free(&alloc, &plan);
+}
+
+static void test_choreography_double_text_never_splits_mid_clause(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_message_plan_t plan =
+        choreo_double_text(&alloc, "just got back from the store with way too many snacks");
+    HU_ASSERT_EQ(plan.segment_count, 1u);
     hu_choreography_plan_free(&alloc, &plan);
 }
 
@@ -169,7 +207,8 @@ static void test_novelty_no_surprise_when_known(void) {
     hu_novelty_signal_t sig = {0};
     for (uint32_t i = 0; i < 10u; i++)
         HU_ASSERT_EQ(hu_novelty_evaluate(&alloc, &tr, "", 0, NULL, 0, NULL, 0, &sig), HU_OK);
-    HU_ASSERT_EQ(hu_novelty_evaluate(&alloc, &tr, msg, strlen(msg), known, 3, NULL, 0, &sig), HU_OK);
+    HU_ASSERT_EQ(hu_novelty_evaluate(&alloc, &tr, msg, strlen(msg), known, 3, NULL, 0, &sig),
+                 HU_OK);
     HU_ASSERT_TRUE(sig.novelty_score < 0.5f);
     HU_ASSERT_NULL(sig.surprise_prompt);
     hu_novelty_signal_free(&alloc, &sig);
@@ -455,9 +494,9 @@ static void test_growth_milestone(void) {
     hu_growth_narrative_init(&gn);
     /* HU_IS_TEST fixed "now" in growth_narrative.c is 2000000000; stay within one week. */
     uint64_t ts = 2000000000ull - 3600ull;
-    HU_ASSERT_EQ(hu_growth_narrative_add_milestone(&alloc, &gn, "user_a", "First real talk", ts,
-                                                   0.9f),
-                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_growth_narrative_add_milestone(&alloc, &gn, "user_a", "First real talk", ts, 0.9f),
+        HU_OK);
     HU_ASSERT_EQ(gn.milestone_count, 1u);
     char *out = NULL;
     size_t len = 0;
@@ -472,9 +511,9 @@ static void test_boundary_add(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_genuine_boundary_set_t set;
     hu_genuine_boundary_set_init(&set);
-    HU_ASSERT_EQ(hu_genuine_boundary_add(&alloc, &set, "politics", "no debates", "past burnout", 0.9f,
-                                       1ull),
-                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_genuine_boundary_add(&alloc, &set, "politics", "no debates", "past burnout", 0.9f, 1ull),
+        HU_OK);
     HU_ASSERT_EQ(set.count, 1u);
     hu_genuine_boundary_set_deinit(&alloc, &set);
 }
@@ -483,8 +522,8 @@ static void test_boundary_check_relevance(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_genuine_boundary_set_t set;
     hu_genuine_boundary_set_init(&set);
-    HU_ASSERT_EQ(hu_genuine_boundary_add(&alloc, &set, "work", "no overtime glorification", "values",
-                                       0.95f, 1ull),
+    HU_ASSERT_EQ(hu_genuine_boundary_add(&alloc, &set, "work", "no overtime glorification",
+                                         "values", 0.95f, 1ull),
                  HU_OK);
     const char *msg = "Let's discuss WORK stress today.";
     const hu_genuine_boundary_t *matched = NULL;
@@ -498,9 +537,9 @@ static void test_boundary_no_match(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_genuine_boundary_set_t set;
     hu_genuine_boundary_set_init(&set);
-    HU_ASSERT_EQ(hu_genuine_boundary_add(&alloc, &set, "politics", "step back", "history", 0.95f,
-                                         1ull),
-                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_genuine_boundary_add(&alloc, &set, "politics", "step back", "history", 0.95f, 1ull),
+        HU_OK);
     const char *msg = "Weather is nice for a walk.";
     const hu_genuine_boundary_t *matched = NULL;
     HU_ASSERT_EQ(hu_genuine_boundary_check_relevance(&set, msg, strlen(msg), &matched), HU_OK);
@@ -593,10 +632,11 @@ static void test_growth_milestone_on_secure_attachment(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_growth_narrative_t gn;
     hu_growth_narrative_init(&gn);
-    hu_growth_narrative_add_milestone(&alloc, &gn, "contact1",
-        "developed a secure communication pattern", (uint64_t)1000, 0.7f);
+    hu_growth_narrative_add_milestone(
+        &alloc, &gn, "contact1", "developed a secure communication pattern", (uint64_t)1000, 0.7f);
     HU_ASSERT_EQ(gn.milestone_count, 1u);
-    char *out = NULL; size_t len = 0;
+    char *out = NULL;
+    size_t len = 0;
     hu_growth_narrative_build_context(&alloc, &gn, "contact1", &out, &len);
     if (out) {
         HU_ASSERT_STR_CONTAINS(out, "secure");
@@ -619,7 +659,8 @@ static void test_frontier_cascade_somatic_to_micro(void) {
     HU_ASSERT_TRUE(mexp.target_length_factor < 1.0f);
     HU_ASSERT_TRUE(mexp.ellipsis_frequency > 0.0f);
 
-    char *out = NULL; size_t len = 0;
+    char *out = NULL;
+    size_t len = 0;
     hu_micro_expression_build_context(&alloc, &mexp, &out, &len);
     HU_ASSERT_NOT_NULL(out);
     HU_ASSERT_TRUE(len > 0);
@@ -643,13 +684,13 @@ static void test_choreography_energy_affects_delivery(void) {
 
     cfg.energy_level = 0.9f;
     hu_message_plan_t plan_high = {0};
-    hu_choreography_plan(&alloc, "haha that's hilarious\n\nanyway yeah I think so",
-                         45, &cfg, 42, &plan_high);
+    hu_choreography_plan(&alloc, "haha that's hilarious\n\nanyway yeah I think so", 45, &cfg, 42,
+                         &plan_high);
 
     cfg.energy_level = 0.2f;
     hu_message_plan_t plan_low = {0};
-    hu_choreography_plan(&alloc, "haha that's hilarious\n\nanyway yeah I think so",
-                         45, &cfg, 42, &plan_low);
+    hu_choreography_plan(&alloc, "haha that's hilarious\n\nanyway yeah I think so", 45, &cfg, 42,
+                         &plan_low);
 
     HU_ASSERT_TRUE(plan_high.segment_count >= plan_low.segment_count);
     hu_choreography_plan_free(&alloc, &plan_high);
@@ -667,12 +708,14 @@ static void test_boundary_relationship_stage(void) {
     hu_genuine_boundary_check_relevance(&bs, "what about ethics in relationships", 34, &matched);
     HU_ASSERT_NOT_NULL(matched);
 
-    char *deep_ctx = NULL; size_t deep_len = 0;
+    char *deep_ctx = NULL;
+    size_t deep_len = 0;
     hu_genuine_boundary_build_context(&alloc, matched, 3, &deep_ctx, &deep_len);
     HU_ASSERT_NOT_NULL(deep_ctx);
     HU_ASSERT_STR_CONTAINS(deep_ctx, "experience");
 
-    char *shallow_ctx = NULL; size_t shallow_len = 0;
+    char *shallow_ctx = NULL;
+    size_t shallow_len = 0;
     hu_genuine_boundary_build_context(&alloc, matched, 1, &shallow_ctx, &shallow_len);
     HU_ASSERT_NOT_NULL(shallow_ctx);
 
@@ -690,7 +733,8 @@ static void test_novelty_with_stm_topics(void) {
 
     const char *known[] = {"cooking", "music", "travel"};
     hu_novelty_signal_t sig1 = {0};
-    /* Satisfy default surprise cooldown before real turns (same pattern as test_novelty_surprise_on_novel) */
+    /* Satisfy default surprise cooldown before real turns (same pattern as
+     * test_novelty_surprise_on_novel) */
     for (uint32_t i = 0; i < 10u; i++)
         HU_ASSERT_EQ(hu_novelty_evaluate(&alloc, &nt, "", 0, NULL, 0, NULL, 0, &sig1), HU_OK);
     hu_novelty_evaluate(&alloc, &nt, "I love cooking pasta", 20, known, 3, known, 3, &sig1);
@@ -698,8 +742,8 @@ static void test_novelty_with_stm_topics(void) {
     hu_novelty_signal_free(&alloc, &sig1);
 
     hu_novelty_signal_t sig2 = {0};
-    HU_ASSERT_EQ(hu_novelty_evaluate(&alloc, &nt, "I started learning quantum physics", 34,
-                                     known, 3, known, 3, &sig2),
+    HU_ASSERT_EQ(hu_novelty_evaluate(&alloc, &nt, "I started learning quantum physics", 34, known,
+                                     3, known, 3, &sig2),
                  HU_OK);
     bool had_surprise_novel = (sig2.surprise_prompt != NULL);
     hu_novelty_signal_free(&alloc, &sig2);
@@ -715,8 +759,8 @@ static void test_novelty_seen_hash_persistence(void) {
 
     const char *known[] = {"cooking"};
     hu_novelty_signal_t sig = {0};
-    hu_novelty_evaluate(&alloc, &nt, "quantum entanglement discoveries", 33,
-                        known, 1, NULL, 0, &sig);
+    hu_novelty_evaluate(&alloc, &nt, "quantum entanglement discoveries", 33, known, 1, NULL, 0,
+                        &sig);
     hu_novelty_signal_free(&alloc, &sig);
     HU_ASSERT_TRUE(nt.seen_count > 0);
 
@@ -726,8 +770,8 @@ static void test_novelty_seen_hash_persistence(void) {
     nt2.seen_count = nt.seen_count;
 
     hu_novelty_signal_t sig2 = {0};
-    hu_novelty_evaluate(&alloc, &nt2, "quantum entanglement discoveries", 33,
-                        known, 1, NULL, 0, &sig2);
+    hu_novelty_evaluate(&alloc, &nt2, "quantum entanglement discoveries", 33, known, 1, NULL, 0,
+                        &sig2);
     HU_ASSERT_TRUE(sig2.novelty_score < 0.5f);
     hu_novelty_signal_free(&alloc, &sig2);
 }
@@ -843,7 +887,8 @@ static void test_episode_sqlite_roundtrip(void) {
 
     char create_sql[512];
     size_t create_len = 0;
-    hu_error_t err = hu_relational_episode_create_table_sql(create_sql, sizeof(create_sql), &create_len);
+    hu_error_t err =
+        hu_relational_episode_create_table_sql(create_sql, sizeof(create_sql), &create_len);
     HU_ASSERT_EQ(err, HU_OK);
     char *errmsg = NULL;
     sqlite3_exec(db, create_sql, NULL, NULL, &errmsg);
@@ -851,8 +896,8 @@ static void test_episode_sqlite_roundtrip(void) {
 
     hu_relational_episode_t ep;
     hu_relational_episode_init(&ep);
-    hu_relational_episode_set(&alloc, &ep, "alice", "talked about childhood",
-                              "warm and vulnerable", "trust is deepening", 0.85f, 0.7f, 1000);
+    hu_relational_episode_set(&alloc, &ep, "alice", "talked about childhood", "warm and vulnerable",
+                              "trust is deepening", 0.85f, 0.7f, 1000);
     hu_relational_episode_add_tag(&alloc, &ep, "personal");
 
     char insert_sql[2048];
@@ -864,8 +909,8 @@ static void test_episode_sqlite_roundtrip(void) {
 
     hu_relational_episode_t ep2;
     hu_relational_episode_init(&ep2);
-    hu_relational_episode_set(&alloc, &ep2, "alice", "shared a joke",
-                              "playful", "comfortable enough to be silly", 0.4f, 0.8f, 2000);
+    hu_relational_episode_set(&alloc, &ep2, "alice", "shared a joke", "playful",
+                              "comfortable enough to be silly", 0.4f, 0.8f, 2000);
     err = hu_relational_episode_insert_sql(&ep2, insert_sql, sizeof(insert_sql), &insert_len);
     HU_ASSERT_EQ(err, HU_OK);
     sqlite3_exec(db, insert_sql, NULL, NULL, &errmsg);
@@ -898,7 +943,8 @@ static void test_episode_sqlite_roundtrip(void) {
     HU_ASSERT_FLOAT_EQ(loaded[0].significance, 0.85f, 0.01f);
     HU_ASSERT_STR_CONTAINS(loaded[1].summary, "joke");
 
-    char *ctx = NULL; size_t ctx_len = 0;
+    char *ctx = NULL;
+    size_t ctx_len = 0;
     hu_relational_episode_build_context(&alloc, loaded, loaded_n, &ctx, &ctx_len);
     HU_ASSERT_NOT_NULL(ctx);
     HU_ASSERT_STR_CONTAINS(ctx, "RELATIONAL MEMORY");
@@ -927,11 +973,11 @@ static void test_growth_persist_roundtrip(void) {
     hu_growth_narrative_init(&state.growth);
     hu_genuine_boundary_set_init(&state.boundaries);
 
-    hu_growth_narrative_add_observation(&alloc, &state.growth,
-        "alice", "became more open about feelings",
-        "shared personal story unprompted", 0.8f, 1000);
-    hu_growth_narrative_add_milestone(&alloc, &state.growth,
-        "alice", "first time asking for emotional support", 2000, 0.9f);
+    hu_growth_narrative_add_observation(&alloc, &state.growth, "alice",
+                                        "became more open about feelings",
+                                        "shared personal story unprompted", 0.8f, 1000);
+    hu_growth_narrative_add_milestone(&alloc, &state.growth, "alice",
+                                      "first time asking for emotional support", 2000, 0.9f);
 
     hu_frontier_persist_ensure_table(db);
     hu_frontier_persist_save(&alloc, db, "alice", 5, &state);
@@ -1044,23 +1090,23 @@ static void test_multi_turn_frontier_evolution(void) {
     hu_presence_deinit(&alloc, &pres);
 
     /* Turn 4: rupture detected, then repair */
-    hu_rupture_signals_t rsig = {.tone_delta = 0.6f, .energy_drop = 0.5f,
-                                 .explicit_correction = true};
+    hu_rupture_signals_t rsig = {
+        .tone_delta = 0.6f, .energy_drop = 0.5f, .explicit_correction = true};
     hu_rupture_evaluate(&alloc, &fs.rupture, &rsig, "sorry about that", 16);
     HU_ASSERT_TRUE(fs.rupture.stage != HU_RUPTURE_NONE);
     hu_rupture_advance(&alloc, &fs.rupture, true);
 
     /* Turn 5: recovery, growth observation */
-    hu_growth_narrative_add_observation(&alloc, &fs.growth,
-        "test_user", "navigated conflict constructively",
-        "rupture detected and resolved", 0.7f, 5000);
+    hu_growth_narrative_add_observation(&alloc, &fs.growth, "test_user",
+                                        "navigated conflict constructively",
+                                        "rupture detected and resolved", 0.7f, 5000);
     HU_ASSERT_EQ((int)fs.growth.observation_count, 1);
 
     /* Micro expression reflects somatic state */
     hu_micro_expression_t mexp;
     hu_micro_expression_init(&mexp);
-    hu_micro_expression_compute(&mexp, fs.somatic.energy, fs.somatic.social_battery,
-                                0.5f, 0.6f, 0.5f);
+    hu_micro_expression_compute(&mexp, fs.somatic.energy, fs.somatic.social_battery, 0.5f, 0.6f,
+                                0.5f);
     HU_ASSERT_TRUE(mexp.target_length_factor > 0.0f);
     hu_micro_expression_deinit(&alloc, &mexp);
 
@@ -1157,6 +1203,9 @@ void run_humanness_frontiers_tests(void) {
     HU_RUN_TEST(test_choreography_single_short);
     HU_RUN_TEST(test_choreography_paragraph_split);
     HU_RUN_TEST(test_choreography_plan_free);
+    HU_RUN_TEST(test_choreography_double_text_splits_at_sentence_end);
+    HU_RUN_TEST(test_choreography_double_text_falls_back_to_a_comma);
+    HU_RUN_TEST(test_choreography_double_text_never_splits_mid_clause);
     HU_RUN_TEST(test_narrative_init_deinit);
     HU_RUN_TEST(test_narrative_add_theme);
     HU_RUN_TEST(test_narrative_theme_limit);

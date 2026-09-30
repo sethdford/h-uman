@@ -1767,7 +1767,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
     }
 
 #ifndef HU_IS_TEST
-    {
+    if (!agent->self_test_turn) { /* no facts from an owner self-test */
         /* SOTA-2026 init-09: stamp provenance derived from the active
          * channel so the trust gate + MINJA detector run in production. */
         hu_provenance_t _ingest_prov = hu_channel_trust_stamp(
@@ -3060,7 +3060,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             /* Experience: recall similar past experiences (semantic when available) */
             {
                 hu_experience_store_t exp_store;
-                if (hu_experience_store_init(agent->alloc, agent->memory, &exp_store) == HU_OK) {
+                if (hu_agent_internal_experience_init(agent, &exp_store) == HU_OK) {
 #ifdef HU_ENABLE_SQLITE
                     sqlite3 *exp_db = hu_sqlite_memory_get_db(agent->memory);
                     if (exp_db)
@@ -5281,7 +5281,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
 #ifdef HU_ENABLE_SQLITE
                 if (agent->memory) {
                     hu_experience_store_t sil_exp;
-                    if (hu_experience_store_init(agent->alloc, agent->memory, &sil_exp) == HU_OK) {
+                    if (hu_agent_internal_experience_init(agent, &sil_exp) == HU_OK) {
                         sqlite3 *sil_db = hu_sqlite_memory_get_db(agent->memory);
                         if (sil_db)
                             sil_exp.db = sil_db;
@@ -7743,7 +7743,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             /* Record this turn as experience for future recall (with SQLite persistence) */
             if (agent->memory) {
                 hu_experience_store_t exp_store;
-                if (hu_experience_store_init(agent->alloc, agent->memory, &exp_store) == HU_OK) {
+                if (hu_agent_internal_experience_init(agent, &exp_store) == HU_OK) {
                     sqlite3 *rec_db = hu_sqlite_memory_get_db(agent->memory);
                     if (rec_db)
                         exp_store.db = rec_db;
@@ -9827,8 +9827,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                 /* Fine-grained experience: per-tool recording */
                                 if (agent->memory) {
                                     hu_experience_store_t tool_exp;
-                                    if (hu_experience_store_init(agent->alloc, agent->memory,
-                                                                 &tool_exp) == HU_OK) {
+                                    if (hu_agent_internal_experience_init(agent, &tool_exp) ==
+                                        HU_OK) {
                                         tool_exp.db = ol_db;
                                         const char *out_text =
                                             result->success ? result->output : result->error_msg;

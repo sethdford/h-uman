@@ -1006,6 +1006,7 @@ set(HU_CORE_SOURCES
     src/memory/graph_state.c
     src/memory/wiki_page.c
     src/memory/graph_ingest.c
+    src/memory/name_extract.c
     src/memory/agent_facts.c
     src/memory/semantic_recall.c
     src/memory/conflict_resolver.c
@@ -1233,6 +1234,7 @@ set(HU_CORE_SOURCES
     src/daemon.c
     src/daemon/daemon_shape.c
     src/daemon/daemon_comfort_summary.c
+    src/daemon/daemon_name_catch.c
     src/daemon/daemon_maintenance.c
     src/daemon/daemon_lifecycle.c
     src/daemon/daemon_cron.c
@@ -3599,6 +3601,7 @@ set(HU_TEST_SOURCES
     tests/test_daemon_insight_overuse.c
     tests/test_daemon_config_reload.c
     tests/test_daemon_identity_graph.c
+    tests/test_daemon_name_catch.c
     tests/test_daemon_reply_fallback.c
     tests/test_reply_dedup.c
     tests/test_send_budget.c
@@ -3792,6 +3795,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_contact_style_overlay.c
     tests/test_graph.c
     tests/test_graph_ingest.c
+    tests/test_name_extract.c
     tests/test_agent_facts.c
     tests/test_cli_memory_import.c
     tests/test_cli_commands_memory_print.c
