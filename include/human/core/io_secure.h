@@ -89,6 +89,16 @@ hu_error_t hu_io_secure_write_atomic(const char *path, hu_io_perm_t perm, const 
                                      size_t len);
 
 /**
+ * Open `path` for reading ("rb") behind the same traversal guard as
+ * hu_io_secure_open. Distinguishes a missing file from an unreadable one so
+ * a caller that rewrites the file never mistakes "cannot read" for "empty".
+ *
+ * @return HU_OK; HU_ERR_INVALID_ARGUMENT (NULL or traversal path);
+ *         HU_ERR_NOT_FOUND (no such file); HU_ERR_IO (any other failure).
+ */
+hu_error_t hu_io_secure_open_read(const char *path, FILE **out);
+
+/**
  * Best-effort fsync of the directory containing `path`, so a rename into it
  * survives a crash (POSIX requires this for rename durability). Silently a
  * no-op on failure, on Windows, and for paths without a directory part.

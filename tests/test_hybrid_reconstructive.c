@@ -1043,11 +1043,143 @@ static void test_plain_hybrid_score_fusion_graph_row_ties_best_lexical_hit(void)
     fusion_fixture_close(&f, &alloc);
 }
 
+/* ---- no-vector keyword + graph merge (hu_hybrid_retrieve, !has_vector) ----
+ * The configuration of any caller that passes a graph but no embedder/vector
+ * store. The merge used to memcpy the entries out of both legs and then
+ * hu_retrieval_result_free() them, which frees each entry's key/content --
+ * so every returned string was already freed, and freeing the result freed
+ * them again. It also ignored `limit`. */
+
+static void no_vector_graph_open(hu_allocator_t *alloc, hu_memory_t *mem, hu_graph_t **g) {
+    *mem = hu_sqlite_memory_create(alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem->vtable);
+    HU_ASSERT_EQ(store_row(mem, "experience:short", "zebra migration", "s1"), HU_OK);
+    HU_ASSERT_EQ(store_row(mem, "experience:long",
+                           "zebra migration notes from a long field season on the plains", "s1"),
+                 HU_OK);
+    HU_ASSERT_EQ(store_row(mem, "insight:zebra", "a zebra stood by the migration route", "s1"),
+                 HU_OK);
+    HU_ASSERT_EQ(store_row(mem, "insight:coffee", "cold morning coffee on the porch", "s1"), HU_OK);
+    *g = NULL;
+    HU_ASSERT_EQ(hu_graph_open(alloc, "x", 1, g), HU_OK);
+    int64_t z = 0, m = 0;
+    HU_ASSERT_EQ(hu_graph_upsert_entity(*g, "", 0, "zebra", 5, HU_ENTITY_TOPIC, NULL, &z), HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(*g, "", 0, "migration", 9, HU_ENTITY_TOPIC, NULL, &m),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_relation(*g, "", 0, z, m, HU_REL_KNOWS, 1.0f, NULL, 0), HU_OK);
+}
+
+static void no_vector_graph_close(hu_allocator_t *alloc, hu_memory_t *mem, hu_graph_t *g) {
+    hu_graph_close(g, alloc);
+    mem->vtable->deinit(mem->ctx);
+}
+
+/* Every returned entry's key and content must be live memory. Pre-fix this
+ * is a heap-use-after-free under ASan on the first strlen(). */
+static void test_no_vector_graph_merge_entries_are_readable(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem;
+    hu_graph_t *g = NULL;
+    no_vector_graph_open(&alloc, &mem, &g);
+
+    hu_retrieval_options_t opts = {0};
+    opts.limit = 10;
+    hu_retrieval_result_t res = {0};
+    const char *q = "zebra migration";
+    HU_ASSERT_EQ(hu_hybrid_retrieve(&alloc, &mem, NULL, NULL, g, q, strlen(q), &opts, &res), HU_OK);
+    /* graph row + at least two keyword hits: the merge branch ran. */
+    HU_ASSERT_GT(res.count, 2u);
+    HU_ASSERT_NOT_NULL(res.scores);
+    for (size_t i = 0; i < res.count; i++) {
+        const hu_memory_entry_t *e = &res.entries[i];
+        HU_ASSERT_NOT_NULL(e->key);
+        HU_ASSERT_NOT_NULL(e->content);
+        HU_ASSERT_EQ(strlen(e->key), e->key_len);
+        HU_ASSERT_EQ(strlen(e->content), e->content_len);
+    }
+    HU_ASSERT_TRUE(result_has_key(&res, "graph"));
+    HU_ASSERT_TRUE(result_has_key(&res, "experience:short"));
+    HU_ASSERT_TRUE(result_has_content_word(&res, "zebra"));
+
+    hu_retrieval_result_free(&alloc, &res);
+    no_vector_graph_close(&alloc, &mem, g);
+}
+
+/* The merge is capped at opts.limit, and the graph row survives the cap: it
+ * leads, matching the vector path, which puts graph first in the keyword RRF
+ * list "so it gets rank 1". Keyword hits follow in their own order. */
+static void test_no_vector_graph_merge_respects_limit(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem;
+    hu_graph_t *g = NULL;
+    no_vector_graph_open(&alloc, &mem, &g);
+    const char *q = "zebra migration";
+
+    /* Uncapped reference: how many rows the two legs produce together. */
+    hu_retrieval_options_t opts = {0};
+    opts.limit = 10;
+    hu_retrieval_result_t all = {0};
+    HU_ASSERT_EQ(hu_hybrid_retrieve(&alloc, &mem, NULL, NULL, g, q, strlen(q), &opts, &all), HU_OK);
+    HU_ASSERT_GT(all.count, 2u); /* > the limit below, so the cap must bite */
+
+    opts.limit = 2;
+    hu_retrieval_result_t res = {0};
+    HU_ASSERT_EQ(hu_hybrid_retrieve(&alloc, &mem, NULL, NULL, g, q, strlen(q), &opts, &res), HU_OK);
+    HU_ASSERT_EQ(res.count, 2u);
+    HU_ASSERT_STR_EQ(res.entries[0].key, "graph");
+    HU_ASSERT_STR_EQ(res.entries[1].key, all.entries[1].key); /* best keyword hit */
+
+    opts.limit = 1;
+    hu_retrieval_result_t one = {0};
+    HU_ASSERT_EQ(hu_hybrid_retrieve(&alloc, &mem, NULL, NULL, g, q, strlen(q), &opts, &one), HU_OK);
+    HU_ASSERT_EQ(one.count, 1u);
+    HU_ASSERT_STR_EQ(one.entries[0].key, "graph");
+
+    hu_retrieval_result_free(&alloc, &all);
+    hu_retrieval_result_free(&alloc, &res);
+    hu_retrieval_result_free(&alloc, &one);
+    no_vector_graph_close(&alloc, &mem, g);
+}
+
+/* Every byte the merge allocates -- including the keyword entries the cap
+ * drops -- is released by hu_retrieval_result_free on the result. Uses a
+ * tracking allocator for the retrieve call only (the backend and graph keep
+ * the system allocator), so LSan-less platforms still check the leak. */
+static void test_no_vector_graph_merge_frees_everything(void) {
+    hu_allocator_t sys = hu_system_allocator();
+    hu_memory_t mem;
+    hu_graph_t *g = NULL;
+    no_vector_graph_open(&sys, &mem, &g);
+    const char *q = "zebra migration";
+
+    const size_t limits[] = {1, 2, 10};
+    for (size_t li = 0; li < sizeof(limits) / sizeof(limits[0]); li++) {
+        hu_tracking_allocator_t *ta = hu_tracking_allocator_create();
+        HU_ASSERT_NOT_NULL(ta);
+        hu_allocator_t alloc = hu_tracking_allocator_allocator(ta);
+        hu_retrieval_options_t opts = {0};
+        opts.limit = limits[li];
+        hu_retrieval_result_t res = {0};
+        HU_ASSERT_EQ(hu_hybrid_retrieve(&alloc, &mem, NULL, NULL, g, q, strlen(q), &opts, &res),
+                     HU_OK);
+        HU_ASSERT_TRUE(res.count > 0 && res.count <= limits[li]);
+        HU_ASSERT_TRUE(result_has_key(&res, "graph"));
+        HU_ASSERT_GT(hu_tracking_allocator_total_allocated(ta), 0u);
+        hu_retrieval_result_free(&alloc, &res);
+        HU_ASSERT_EQ(hu_tracking_allocator_leaks(ta), 0u);
+        hu_tracking_allocator_destroy(ta);
+    }
+    no_vector_graph_close(&sys, &mem, g);
+}
+
 void run_hybrid_reconstructive_tests(void) {
     HU_TEST_SUITE("hybrid_reconstructive");
     HU_RUN_TEST(test_sqlite_recall_with_boosts_matches_recall_and_reports_boost);
     HU_RUN_TEST(test_plain_hybrid_score_fusion_graph_boost_raises_boosted_row);
     HU_RUN_TEST(test_plain_hybrid_score_fusion_graph_row_ties_best_lexical_hit);
+    HU_RUN_TEST(test_no_vector_graph_merge_entries_are_readable);
+    HU_RUN_TEST(test_no_vector_graph_merge_respects_limit);
+    HU_RUN_TEST(test_no_vector_graph_merge_frees_everything);
     HU_RUN_TEST(test_plain_hybrid_fusion_gate_default_is_rrf_order);
     HU_RUN_TEST(test_plain_hybrid_score_fusion_alpha_extremes_reorder_the_merge);
     HU_RUN_TEST(test_plain_hybrid_without_reranking_keeps_semantic_only_hit);
