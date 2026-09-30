@@ -45,6 +45,9 @@ GT_CONTEXT_TURNS = 6
 MEMORY_DB = os.path.expanduser("~/.human/memory.db")
 DAEMON_WINDOW_S = 15 * 60
 DAEMON_MIN_CHARS = 12
+# Shorter texts ("Haha", "Lol") are too generic for containment; they count as
+# the daemon's only on an exact match within DAEMON_SHORT_WINDOW_S.
+DAEMON_SHORT_WINDOW_S = 120
 
 # Filter out system/verification messages
 SKIP_PATTERNS = [
@@ -274,19 +277,35 @@ def load_daemon_records(db_path=MEMORY_DB):
     return sorted((t, n) for t, n in records if t and n)
 
 
+def daemon_send_predicate(records, window_s=DAEMON_WINDOW_S):
+    """is_daemon(text, epoch) over sorted (epoch, normalized text) records: a
+    text of >= DAEMON_MIN_CHARS contained in a record within window_s, or a
+    shorter one equal to a record within DAEMON_SHORT_WINDOW_S."""
+    times = [t for t, _ in records]
+
+    def is_daemon(text, epoch):
+        n = _norm(text)
+        if not n:
+            return False
+        short = len(n) < DAEMON_MIN_CHARS
+        w = DAEMON_SHORT_WINDOW_S if short else window_s
+        lo = bisect.bisect_left(times, epoch - w)
+        hi = bisect.bisect_right(times, epoch + w)
+        if short:
+            return any(n == records[i][1] for i in range(lo, hi))
+        return any(n in records[i][1] for i in range(lo, hi))
+
+    return is_daemon
+
+
 def mark_daemon_sends(messages, records, window_s=DAEMON_WINDOW_S):
     """Set msg["is_seth"]: from-me AND not a daemon send (see MEMORY_DB note).
     Returns how many from-me messages were marked as the daemon's."""
-    times = [t for t, _ in records]
+    is_daemon = daemon_send_predicate(records, window_s)
     marked = 0
     for m in messages:
         m["is_seth"] = bool(m["is_from_me"])
-        n = _norm(m["text"])
-        if not m["is_seth"] or len(n) < DAEMON_MIN_CHARS:
-            continue
-        lo = bisect.bisect_left(times, m["timestamp"] - window_s)
-        hi = bisect.bisect_right(times, m["timestamp"] + window_s)
-        if any(n in records[i][1] for i in range(lo, hi)):
+        if m["is_seth"] and is_daemon(m["text"], m["timestamp"]):
             m["is_seth"] = False
             marked += 1
     return marked

@@ -308,6 +308,14 @@ def warmth_hits_per_100_words(text: str) -> float:
     return 100.0 * hits / len(words)
 
 
+_LAUGH_RE = re.compile(r"(?<![a-z])(lol|lmao|lmfao|ha(ha)+|he(he)+)(?![a-z])", re.I)
+
+
+def has_laugh(text: str) -> bool:
+    """lol/lmao/haha/hehe as a word ("lollipop" is not a laugh)."""
+    return bool(_LAUGH_RE.search(text or ""))
+
+
 def compute_features(text: str) -> dict:
     """The full per-message feature vector used by aggregate_window."""
     term = terminal_punctuation(text)
@@ -322,6 +330,7 @@ def compute_features(text: str) -> dict:
         "terminal_ellipsis": 1.0 if term == "ellipsis" else 0.0,
         "has_emoji": 1.0 if has_emoji(text) else 0.0,
         "has_dash": 1.0 if has_dash(text) else 0.0,
+        "has_laugh": 1.0 if has_laugh(text) else 0.0,
         "contractions_per_100_words": contractions_per_100_words(text),
         "first_person_plural_per_100_words": first_person_plural_per_100_words(text),
         "warmth_hits_per_100_words": warmth_hits_per_100_words(text),
@@ -341,6 +350,7 @@ AXES = [
     ("terminal_exclaim", "exclamation_rate"),
     ("has_emoji", "emoji_rate"),
     ("has_dash", "dash_rate"),
+    ("has_laugh", "laugh_rate"),
     ("contractions_per_100_words", "formality_contractions_per_100_words"),
     ("first_person_plural_per_100_words", "formality_first_person_plural_per_100_words"),
     ("warmth_hits_per_100_words", "warmth_hits_per_100_words"),
@@ -555,10 +565,13 @@ def _apple_ns_to_dt(ns: int) -> datetime.datetime:
     return APPLE_EPOCH + datetime.timedelta(seconds=ns / 1_000_000_000)
 
 
-def fetch_outbound_messages(db_path: str, start: datetime.datetime, end: datetime.datetime):
+def fetch_outbound_messages(db_path: str, start: datetime.datetime, end: datetime.datetime,
+                            exclude_handles=()):
     """Read-only fetch of Seth's own (is_from_me=1) typed texts in
-    [start, end). Tapback echoes are excluded. Returns list[(datetime,
-    str)]. Opens the DB read-only + immutable so this process can never
+    [start, end). Tapback echoes are excluded, and so are texts to any handle
+    in `exclude_handles` (the owner's own number: self-tests and notes are not
+    how he texts people). Returns list[(datetime, str)] with NAIVE UTC
+    datetimes. Opens the DB read-only + immutable so this process can never
     mutate chat.db, and closes it before returning."""
     import sqlite3
 
@@ -568,20 +581,24 @@ def fetch_outbound_messages(db_path: str, start: datetime.datetime, end: datetim
         lo, hi = _apple_ns_bounds(start, end)
         rows = con.execute(
             """
-            SELECT date, text, attributedBody, COALESCE(associated_message_type, 0)
-            FROM message
-            WHERE is_from_me = 1
-              AND date >= ? AND date < ?
-              AND (text IS NOT NULL OR attributedBody IS NOT NULL)
-            ORDER BY date
+            SELECT m.date, m.text, m.attributedBody,
+                   COALESCE(m.associated_message_type, 0), COALESCE(h.id, '')
+            FROM message m LEFT JOIN handle h ON h.ROWID = m.handle_id
+            WHERE m.is_from_me = 1
+              AND m.date >= ? AND m.date < ?
+              AND (m.text IS NOT NULL OR m.attributedBody IS NOT NULL)
+            ORDER BY m.date
             """,
             (lo, hi),
         ).fetchall()
     finally:
         con.close()
 
+    excluded = set(exclude_handles or ())
     out = []
-    for date_ns, text, blob, assoc in rows:
+    for date_ns, text, blob, assoc, handle in rows:
+        if handle in excluded:
+            continue
         if text is None or not text.strip():
             text = decode_attributed_body(blob) if blob is not None else None
         if not text:
