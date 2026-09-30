@@ -766,8 +766,148 @@ static void test_plain_hybrid_keyword_leg_ranks_by_backend_recall_not_word_fract
     mem.vtable->deinit(mem.ctx);
 }
 
+/* HU_HYBRID_FUSION wiring in the plain merge (the memory loader's call).
+ *
+ * Fixture (stub embedder = first-character class mod 3; the query "zebra
+ * migration" is class 2): the keyword leg is the two "experience:" rows --
+ * never embedded -- where "short" is nothing but the query and "long" pads
+ * it, so BM25 ranks short first. The semantic leg is the "insight:" rows:
+ * "herd" is class 2 (cosine 1.0), the fillers are classes 0/1 (cosine ~0.21,
+ * chosen so none starts with a class-2 letter). Four fillers keep the query
+ * terms rare enough (2 of 7 rows) for FTS5 to give them a positive IDF. */
+typedef struct fusion_fixture {
+    hu_memory_t mem;
+    hu_embedder_t emb;
+    hu_vector_store_t vs;
+} fusion_fixture_t;
+
+static void fusion_fixture_open(fusion_fixture_t *f, hu_allocator_t *alloc) {
+    f->mem = hu_sqlite_memory_create(alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(f->mem.vtable);
+    f->emb = (hu_embedder_t){.ctx = NULL, .vtable = &stub_vt};
+    f->vs = hu_vector_store_sqlite_vec_create(alloc, hu_sqlite_memory_get_db(&f->mem), 3);
+    HU_ASSERT_NOT_NULL(f->vs.ctx);
+    hu_sqlite_memory_set_semantic_index(&f->mem, &f->emb, &f->vs);
+    static const char *const rows[][2] = {
+        {"experience:short", "zebra migration"},
+        {"experience:long", "zebra migration notes from a long field season on the plains"},
+        {"insight:herd", "the herd crossed the river at dawn"},
+        {"insight:coffee", "cold morning coffee on the porch"},
+        {"insight:dinner", "dinner plans for friday night"},
+        {"insight:grocery", "grocery list for the weekend"},
+        {"insight:apple", "apple pie recipe from grandma"},
+    };
+    for (size_t i = 0; i < sizeof(rows) / sizeof(rows[0]); i++)
+        HU_ASSERT_EQ(store_row(&f->mem, rows[i][0], rows[i][1], "s1"), HU_OK);
+}
+
+static void fusion_fixture_close(fusion_fixture_t *f, hu_allocator_t *alloc) {
+    hu_sqlite_memory_set_semantic_index(&f->mem, NULL, NULL);
+    f->vs.vtable->deinit(f->vs.ctx, alloc);
+    f->mem.vtable->deinit(f->mem.ctx);
+}
+
+/* Run the plain hybrid call (limit 4) and copy out the result keys in order. */
+static size_t fusion_run(fusion_fixture_t *f, hu_allocator_t *alloc, char keys[][40],
+                         double *top_score) {
+    hu_retrieval_options_t opts = {0};
+    opts.limit = 4;
+    opts.reconstructive = false;
+    opts.use_reranking = false; /* the memory loader's setting */
+    hu_retrieval_result_t res = {0};
+    const char *q = "zebra migration";
+    HU_ASSERT_EQ(
+        hu_hybrid_retrieve(alloc, &f->mem, &f->emb, &f->vs, NULL, q, strlen(q), &opts, &res),
+        HU_OK);
+    HU_ASSERT_GT(res.count, 0u);
+    for (size_t i = 0; i < res.count; i++)
+        snprintf(keys[i], 40, "%s", res.entries[i].key ? res.entries[i].key : "");
+    *top_score = res.scores[0];
+    size_t n = res.count;
+    hu_retrieval_result_free(alloc, &res);
+    return n;
+}
+
+static size_t key_pos(char keys[][40], size_t n, const char *key) {
+    for (size_t i = 0; i < n; i++)
+        if (strcmp(keys[i], key) == 0)
+            return i;
+    return n;
+}
+
+/* Default (unset), explicit "rrf", and an unknown value must all produce the
+ * RRF merge exactly as it was before the gate existed: the same key order and
+ * RRF-scale scores. The engine's recall appends spreading-activation rows
+ * after its two FTS hits (measured on this fixture: short -1.97, long -1.24,
+ * then herd +0.77 and coffee +0.21), so herd is keyword rank 3 AND semantic
+ * rank 1 and RRF puts it first at 1/61 + 1/63. This test passed against the
+ * pre-gate code unchanged. */
+static void test_plain_hybrid_fusion_gate_default_is_rrf_order(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    fusion_fixture_t f;
+    fusion_fixture_open(&f, &alloc);
+    char unset_keys[4][40], rrf_keys[4][40], bogus_keys[4][40];
+    double s_unset = 0, s_rrf = 0, s_bogus = 0;
+
+    unsetenv("HU_HYBRID_FUSION");
+    size_t n_unset = fusion_run(&f, &alloc, unset_keys, &s_unset);
+    setenv("HU_HYBRID_FUSION", "rrf", 1);
+    size_t n_rrf = fusion_run(&f, &alloc, rrf_keys, &s_rrf);
+    setenv("HU_HYBRID_FUSION", "bogus", 1);
+    size_t n_bogus = fusion_run(&f, &alloc, bogus_keys, &s_bogus);
+    unsetenv("HU_HYBRID_FUSION");
+
+    HU_ASSERT_EQ(n_unset, 4u);
+    HU_ASSERT_EQ(n_rrf, n_unset);
+    HU_ASSERT_EQ(n_bogus, n_unset);
+    for (size_t i = 0; i < n_unset; i++) {
+        HU_ASSERT_STR_EQ(rrf_keys[i], unset_keys[i]);
+        HU_ASSERT_STR_EQ(bogus_keys[i], unset_keys[i]);
+    }
+    HU_ASSERT_STR_EQ(unset_keys[0], "insight:herd");
+    HU_ASSERT_STR_EQ(unset_keys[1], "experience:short");
+    HU_ASSERT_FLOAT_EQ(s_unset, 1.0 / 61.0 + 1.0 / 63.0, 1e-6);
+    HU_ASSERT_FLOAT_EQ(s_rrf, s_unset, 1e-9);
+    HU_ASSERT_FLOAT_EQ(s_bogus, s_unset, 1e-9);
+    fusion_fixture_close(&f, &alloc);
+}
+
+/* HU_HYBRID_FUSION=score reaches the merge: alpha=1 puts the best dense row
+ * first with fused score 1.0 (RRF puts the keyword row first at 1/61);
+ * alpha=0 puts the best BM25 row first with 1.0 -- "short", proving the
+ * lower-is-better bm25() was flipped before normalising (a sign slip would
+ * lead with "long"). */
+static void test_plain_hybrid_score_fusion_alpha_extremes_reorder_the_merge(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    fusion_fixture_t f;
+    fusion_fixture_open(&f, &alloc);
+    char keys[4][40];
+    double top = 0;
+
+    setenv("HU_HYBRID_FUSION", "score", 1);
+    setenv("HU_HYBRID_FUSION_ALPHA", "1", 1);
+    size_t n = fusion_run(&f, &alloc, keys, &top);
+    HU_ASSERT_EQ(n, 4u);
+    HU_ASSERT_STR_EQ(keys[0], "insight:herd");
+    HU_ASSERT_FLOAT_EQ(top, 1.0, 1e-6);
+
+    setenv("HU_HYBRID_FUSION_ALPHA", "0", 1);
+    n = fusion_run(&f, &alloc, keys, &top);
+    HU_ASSERT_EQ(n, 4u);
+    HU_ASSERT_STR_EQ(keys[0], "experience:short");
+    HU_ASSERT_FLOAT_EQ(top, 1.0, 1e-6);
+    HU_ASSERT_LT(key_pos(keys, n, "experience:short"), key_pos(keys, n, "experience:long"));
+    HU_ASSERT_LT(key_pos(keys, n, "experience:long"), n);
+
+    unsetenv("HU_HYBRID_FUSION");
+    unsetenv("HU_HYBRID_FUSION_ALPHA");
+    fusion_fixture_close(&f, &alloc);
+}
+
 void run_hybrid_reconstructive_tests(void) {
     HU_TEST_SUITE("hybrid_reconstructive");
+    HU_RUN_TEST(test_plain_hybrid_fusion_gate_default_is_rrf_order);
+    HU_RUN_TEST(test_plain_hybrid_score_fusion_alpha_extremes_reorder_the_merge);
     HU_RUN_TEST(test_plain_hybrid_without_reranking_keeps_semantic_only_hit);
     HU_RUN_TEST(test_plain_hybrid_keyword_leg_ranks_by_backend_recall_not_word_fraction);
     HU_RUN_TEST(test_scene_select_prefers_two_hit_session_over_one_hit);

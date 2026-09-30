@@ -295,6 +295,10 @@ static hu_error_t hybrid_reconstruct(hu_allocator_t *alloc, hu_memory_t *backend
 
     hu_memory_entry_t *pool = NULL;
     size_t pool_count = 0;
+    /* Stays on RRF under HU_HYBRID_FUSION=score: that gate covers only the
+     * plain merge in hu_hybrid_retrieve. Reconstruction's scene-select and
+     * sufficiency floor were tuned on RRF scores; moving them is its own
+     * measured change. */
     hu_error_t err = hu_rrf_merge(alloc, src_lists, src_lens, num_sources, (unsigned)HU_RRF_K,
                                   pool_cap, &pool, &pool_count);
     if (err != HU_OK || pool_count == 0)
@@ -717,6 +721,13 @@ static hu_error_t hybrid_reconstruct_commit(
  * fails or returns nothing, or the caller set min_score (recall has no
  * score threshold to honour, and the fraction is what min_score means).
  *
+ * lexical_scores (HU_HYBRID_FUSION=score, and only when a dense leg will be
+ * fused with this one): score fusion reads magnitudes, so the recall list
+ * carries the engine's own BM25 turned higher-is-better
+ * (hu_rerank_bm25_to_relevance) instead of 1/(rank+1). The fallback's
+ * matched-word fraction is already higher-is-better and is kept as-is, so
+ * either path hands the merge the same convention.
+ *
  * Reconstructive mode (Contract C2, CLI-only -- no daemon path sets it)
  * keeps the fraction leg: its scene-select stage and its ablation tests were
  * tuned against that leg's tied-score truncation (tests/test_hybrid_
@@ -725,7 +736,8 @@ static hu_error_t hybrid_reconstruct_commit(
  * change, not a side effect of fixing the production merge. */
 static hu_error_t hybrid_keyword_leg(hu_allocator_t *alloc, hu_memory_t *backend, const char *query,
                                      size_t query_len, const hu_retrieval_options_t *opts,
-                                     size_t limit, hu_retrieval_result_t *out) {
+                                     size_t limit, bool lexical_scores,
+                                     hu_retrieval_result_t *out) {
     out->entries = NULL;
     out->count = 0;
     out->scores = NULL;
@@ -746,10 +758,12 @@ static hu_error_t hybrid_keyword_leg(hu_allocator_t *alloc, hu_memory_t *backend
                 alloc->free(alloc->ctx, entries, count * sizeof(hu_memory_entry_t));
                 return HU_ERR_OUT_OF_MEMORY;
             }
-            for (size_t i = 0; i < count; i++) {
-                scores[i] = 1.0 / (double)(i + 1);
+            for (size_t i = 0; i < count; i++)
+                scores[i] = lexical_scores ? entries[i].score : 1.0 / (double)(i + 1);
+            if (lexical_scores)
+                hu_rerank_bm25_to_relevance(scores, count, scores);
+            for (size_t i = 0; i < count; i++)
                 entries[i].score = scores[i];
-            }
             out->entries = entries;
             out->count = count;
             out->scores = scores;
@@ -787,9 +801,18 @@ hu_error_t hu_hybrid_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, hu_em
     (void)graph;
 #endif
 
+    bool has_vector = embedder && embedder->vtable && vector_store && vector_store->vtable;
+
+    /* HU_HYBRID_FUSION=score activation gated on the leave-one-conversation-out
+     * alpha sweep (scripts/tune_fusion_alpha.py: Hit@1/R@5/R@10/NDCG@5 on
+     * LoCoMo-10 + LongMemEval-S vs the RRF column) AND the paired semantic-recall
+     * live gate. Default stays rrf until both are measured. Read once so the
+     * keyword leg's score convention and the merge below always agree. */
+    hu_hybrid_fusion_t fusion = has_vector ? hu_hybrid_fusion_mode() : HU_HYBRID_FUSION_RRF;
+
     hu_retrieval_result_t keyword_result = {0};
-    hu_error_t err =
-        hybrid_keyword_leg(alloc, backend, query, query_len, opts, limit, &keyword_result);
+    hu_error_t err = hybrid_keyword_leg(alloc, backend, query, query_len, opts, limit,
+                                        fusion == HU_HYBRID_FUSION_SCORE, &keyword_result);
     if (err != HU_OK)
         return err;
 
@@ -837,8 +860,6 @@ hu_error_t hu_hybrid_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, hu_em
 #else
     hu_retrieval_result_t *graph_result_ptr = NULL;
 #endif
-
-    bool has_vector = embedder && embedder->vtable && vector_store && vector_store->vtable;
 
     if (!has_vector) {
         /* Contract C2: attempt reconstruction with whatever is available
@@ -1050,8 +1071,23 @@ hu_error_t hu_hybrid_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, hu_em
 #endif
 
     size_t merged_count = 0;
-    err = hu_rerank_rrf(kw_sr, kw_total, sem_sr, sem_count, merged, max_merged, &merged_count,
-                        (float)HU_RRF_K);
+    if (fusion == HU_HYBRID_FUSION_SCORE) {
+        /* The graph row is a synthesized context blob with a constant 0.9, not
+         * a BM25 score; RRF ranks it first in this list, so tie it with the
+         * best lexical hit (normalised 1.0) rather than mixing scales. */
+        if (kw_fill > 0 && kw_fill < kw_total) {
+            float best = kw_sr[kw_fill].score;
+            for (size_t i = kw_fill + 1; i < kw_total; i++)
+                best = kw_sr[i].score > best ? kw_sr[i].score : best;
+            for (size_t g = 0; g < kw_fill; g++)
+                kw_sr[g].score = best;
+        }
+        err = hu_rerank_score_fusion(kw_sr, kw_total, sem_sr, sem_count, merged, max_merged,
+                                     &merged_count, hu_hybrid_fusion_alpha());
+    } else {
+        err = hu_rerank_rrf(kw_sr, kw_total, sem_sr, sem_count, merged, max_merged, &merged_count,
+                            (float)HU_RRF_K);
+    }
     hu_rerank_free_results(kw_sr, kw_total);
     hu_rerank_free_results(sem_sr, sem_count);
     alloc->free(alloc->ctx, kw_sr, kw_total * sizeof(hu_search_result_t));
