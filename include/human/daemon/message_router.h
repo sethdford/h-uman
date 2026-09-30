@@ -105,7 +105,7 @@ struct hu_channel_loop_msg;
 hu_error_t hu_daemon_dispatch_imessage_reply_msg_ex(
     void *ch, const void *persona, const struct hu_agent *agent, const struct hu_config *config,
     const char *target, size_t target_len, const struct hu_channel_loop_msg *msg, const char *body,
-    size_t body_len, bool *out_text_sent);
+    size_t body_len, bool *out_text_sent, bool text_required);
 struct hu_channel;
 struct hu_persona;
 struct hu_conversation_snapshot;
@@ -114,7 +114,7 @@ hu_error_t hu_daemon_dispatch_imessage_reply_ex(
     const struct hu_config *config, const char *target, size_t target_len,
     const char *parent_msg_guid, size_t parent_guid_len, const char *body, size_t body_len,
     const struct hu_conversation_snapshot *snapshot, int64_t inferred_message_id_for_react,
-    bool *out_text_sent);
+    bool *out_text_sent, bool text_required);
 
 /* Record one production_outcomes row for a reply that was actually DELIVERED,
  * with the text exactly as sent (after the shaping stages and the dispatch

@@ -67,6 +67,18 @@ void hu_daemon_log_send_effect(void *observer, const char *eff_ch, const char *t
 #endif
 }
 
+/* The inbound message this daemon last reacted to. A reply split into
+ * bubbles is dispatched once per bubble, all answering the same message; the
+ * second bubble must not tap it again (live 2026-09-29 07:54). */
+static struct {
+    int64_t message_id;
+    int64_t at;
+} s_reacted;
+
+static bool reacted_to(int64_t message_id, int64_t now) {
+    return message_id > 0 && s_reacted.message_id == message_id && now - s_reacted.at < 600;
+}
+
 /* Dispatcher: route iMessage reply through predicate (Phase A) to choose
  * between threaded / flat / tapback based on reply style facts. */
 hu_error_t hu_daemon_dispatch_imessage_reply_ex(
@@ -74,7 +86,7 @@ hu_error_t hu_daemon_dispatch_imessage_reply_ex(
     const struct hu_config *config, const char *target, size_t target_len,
     const char *parent_msg_guid, size_t parent_guid_len, const char *body, size_t body_len,
     const struct hu_conversation_snapshot *snapshot, int64_t inferred_message_id_for_react,
-    bool *out_text_sent) {
+    bool *out_text_sent, bool text_required) {
     if (out_text_sent)
         *out_text_sent = false;
     if (!ch || !ch->vtable || !target || !body) {
@@ -134,6 +146,11 @@ hu_error_t hu_daemon_dispatch_imessage_reply_ex(
             style = demoted;
         }
     }
+
+    /* The text was decided upstream: never swallow it, never react twice. */
+    hu_reply_style_t style_chosen = style;
+    style = hu_imessage_reply_style_finalize(
+        style, reacted_to(inferred_message_id_for_react, (int64_t)time(NULL)), text_required);
 
     /* Pacing (C5) — start. */
     uint64_t pace_start = 0;
@@ -248,9 +265,14 @@ hu_error_t hu_daemon_dispatch_imessage_reply_ex(
     case HU_REPLY_STYLE_TAPBACK_PLUS_FLAT:
         /* Both: tapback first (best-effort), then text. */
         if (ch->vtable->react_emoji) {
-            const char *emoji = "❤️"; /* heart for emotional acknowledgment */
-            (void)ch->vtable->react_emoji(ch->ctx, target, target_len,
-                                          inferred_message_id_for_react, emoji, strlen(emoji));
+            /* heart for emotional acknowledgment; a tapback upgraded to carry
+             * its bubble keeps the thumbs-up it was chosen as */
+            const char *emoji = style_chosen == HU_REPLY_STYLE_TAPBACK ? "👍" : "❤️";
+            if (ch->vtable->react_emoji(ch->ctx, target, target_len, inferred_message_id_for_react,
+                                        emoji, strlen(emoji)) == HU_OK) {
+                s_reacted.message_id = inferred_message_id_for_react;
+                s_reacted.at = (int64_t)time(NULL);
+            }
         }
         if (ch->vtable->send) {
             err = ch->vtable->send(ch->ctx, target, target_len, body, body_len, NULL, 0);
@@ -543,15 +565,15 @@ hu_error_t hu_daemon_dispatch_imessage_reply(
     const struct hu_config *config, const char *target, size_t target_len,
     const char *parent_msg_guid, size_t parent_guid_len, const char *body, size_t body_len,
     const struct hu_conversation_snapshot *snapshot, int64_t inferred_message_id_for_react) {
-    return hu_daemon_dispatch_imessage_reply_ex(ch, persona, agent, config, target, target_len,
-                                                parent_msg_guid, parent_guid_len, body, body_len,
-                                                snapshot, inferred_message_id_for_react, NULL);
+    return hu_daemon_dispatch_imessage_reply_ex(
+        ch, persona, agent, config, target, target_len, parent_msg_guid, parent_guid_len, body,
+        body_len, snapshot, inferred_message_id_for_react, NULL, false);
 }
 
 hu_error_t hu_daemon_dispatch_imessage_reply_msg_ex(
     void *ch, const void *persona, const struct hu_agent *agent, const struct hu_config *config,
     const char *target, size_t target_len, const struct hu_channel_loop_msg *msg, const char *body,
-    size_t body_len, bool *out_text_sent) {
+    size_t body_len, bool *out_text_sent, bool text_required) {
     const hu_channel_loop_msg_t *m = (const hu_channel_loop_msg_t *)msg;
     if (out_text_sent)
         *out_text_sent = false;
@@ -576,7 +598,7 @@ hu_error_t hu_daemon_dispatch_imessage_reply_msg_ex(
         (struct hu_channel *)ch, (const struct hu_persona *)persona, agent, config, target,
         target_len, guid, guid ? strlen(guid) : 0, body, body_len,
         (const struct hu_conversation_snapshot *)&snap, m ? (int64_t)m->message_id : 0,
-        out_text_sent);
+        out_text_sent, text_required);
 }
 
 /* ── production_outcomes: one row per DELIVERED reply ─────────────────────── */

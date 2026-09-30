@@ -507,8 +507,22 @@ static void test_constitutional_principle_idx_preserved(void) {
     hu_critique_result_free(&alloc, &result);
 }
 
+/* A reply in the persona's voice is not run through the constitutional
+ * critique at all. The generic constitution's "helpful" principle turned a
+ * contact's casual text into "How can I help you with the inflatable?"; the
+ * persona constitution's rewrite, given no conversation, produced "It looks
+ * like your message cut off before including the original response" and
+ * "Could you please share the text you would like me to revise?" (both sent,
+ * live 2026-09-29 20:26). Every observed rewrite was worse than the draft,
+ * and the call costs ~3 s on every reply. Assistant turns keep it. */
+static void test_constitutional_skips_persona_voice_turns(void) {
+    HU_ASSERT_FALSE(hu_constitutional_runs_for_turn(true));
+    HU_ASSERT_TRUE(hu_constitutional_runs_for_turn(false));
+}
+
 void run_agent_modules_tests(void) {
     HU_TEST_SUITE("agent_modules");
+    HU_RUN_TEST(test_constitutional_skips_persona_voice_turns);
 
     HU_RUN_TEST(test_outcomes_record_and_retrieve);
     HU_RUN_TEST(test_outcomes_detect_repeated_failure);

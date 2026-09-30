@@ -2328,7 +2328,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
              * provider I/O. With no provider it degrades to goal-conditioned
              * → heuristic, identical to the original `hu_w12_planner_recall`
              * call. */
-            hu_provider_t *provider = agent->provider.vtable ? &agent->provider : NULL;
+            hu_provider_t *provider = hu_agent_internal_recall_provider(agent, msg, msg_len);
             hu_error_t pe = hu_w12_planner_recall_with_provider(
                 agent->w7_facade, agent->alloc, provider,
                 /*model=*/NULL, /*model_len=*/0, agent->memory_session_id,
@@ -6709,10 +6709,10 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
 
                 /* Constitutional AI: critique response against principles */
 #ifndef HU_IS_TEST
-                if (agent->constitutional_enabled) {
+                if (agent->constitutional_enabled &&
+                    hu_constitutional_runs_for_turn(!!agent->persona)) {
                     hu_constitutional_config_t const_cfg = hu_constitutional_config_default();
-                    hu_critique_result_t critique;
-                    memset(&critique, 0, sizeof(critique));
+                    hu_critique_result_t critique = {0};
                     uint64_t const_t0_ms = hu_agent_internal_monotonic_ms();
                     if (hu_constitutional_critique(agent->alloc, &agent->provider,
                                                    agent->model_name, agent->model_name_len, msg,

@@ -6615,7 +6615,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                  * reply appears, matching how a human types "mhm" or "haha". */
                 if (use_backchannel && backchannel_len > 0 && ch->channel->vtable->send) {
                     if (ch->channel->vtable->start_typing) {
-                        ch->channel->vtable->start_typing(ch->channel->ctx, batch_key, key_len);
+                        ch->channel->vtable->start_typing(ch->channel->ctx, send_target,
+                                                          send_target_len);
                         unsigned int bc_delay_ms = 300 + (unsigned int)(rand() % 501);
                         struct timespec bc_ts = {.tv_sec = 0,
                                                  .tv_nsec = (long)bc_delay_ms * 1000000L};
@@ -6643,7 +6644,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 
                 /* Start typing indicator before LLM call */
                 if (ch->channel->vtable->start_typing) {
-                    ch->channel->vtable->start_typing(ch->channel->ctx, batch_key, key_len);
+                    ch->channel->vtable->start_typing(ch->channel->ctx, send_target,
+                                                      send_target_len);
                 }
                 turn_out_state.typing_started = (ch->channel->vtable->start_typing != NULL);
 
@@ -6876,13 +6878,15 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             }
                         }
                         if (ch->channel->vtable->start_typing)
-                            ch->channel->vtable->start_typing(ch->channel->ctx, batch_key, key_len);
+                            ch->channel->vtable->start_typing(ch->channel->ctx, send_target,
+                                                              send_target_len);
                         char *burst_response = NULL;
                         size_t burst_response_len = 0;
                         hu_error_t burst_err = hu_agent_turn(agent, combined, combined_len,
                                                              &burst_response, &burst_response_len);
                         if (ch->channel->vtable->stop_typing)
-                            ch->channel->vtable->stop_typing(ch->channel->ctx, batch_key, key_len);
+                            ch->channel->vtable->stop_typing(ch->channel->ctx, send_target,
+                                                             send_target_len);
                         if (burst_err == HU_OK && burst_response && burst_response_len > 0 &&
                             ch->channel->vtable->send) {
                             char burst_msgs[4][256];
@@ -7422,12 +7426,14 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #ifndef HU_IS_TEST
                     if (err != HU_OK) {
                         if (ch->channel->vtable->stop_typing) {
-                            ch->channel->vtable->stop_typing(ch->channel->ctx, batch_key, key_len);
+                            ch->channel->vtable->stop_typing(ch->channel->ctx, send_target,
+                                                             send_target_len);
                         }
                     }
                     if (err == HU_OK && (!response || response_len == 0)) {
                         if (ch->channel->vtable->stop_typing) {
-                            ch->channel->vtable->stop_typing(ch->channel->ctx, batch_key, key_len);
+                            ch->channel->vtable->stop_typing(ch->channel->ctx, send_target,
+                                                             send_target_len);
                         }
                     }
 
@@ -7495,8 +7501,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                              * followed at once by a stop left the dots off for
                              * the whole retry (~30 s, live 2026-09-29 06:51). */
                             if (ch->channel->vtable->start_typing)
-                                ch->channel->vtable->start_typing(ch->channel->ctx, batch_key,
-                                                                  key_len);
+                                ch->channel->vtable->start_typing(ch->channel->ctx, send_target,
+                                                                  send_target_len);
                             continue;
                         }
                     }
@@ -7550,8 +7556,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 }
                             }
                             if (ch->channel->vtable->start_typing) /* typing through the retry */
-                                ch->channel->vtable->start_typing(ch->channel->ctx, batch_key,
-                                                                  key_len);
+                                ch->channel->vtable->start_typing(ch->channel->ctx, send_target,
+                                                                  send_target_len);
                             continue;
                         } else if (qscore.needs_revision) {
                             hu_log_info("human", agent ? agent->observer : NULL,
@@ -7631,8 +7637,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 }
                             }
                             if (ch->channel->vtable->start_typing)
-                                ch->channel->vtable->start_typing(ch->channel->ctx, batch_key,
-                                                                  key_len);
+                                ch->channel->vtable->start_typing(ch->channel->ctx, send_target,
+                                                                  send_target_len);
                             continue;
                         }
                     }
@@ -7704,10 +7710,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                 agent->conversation_context_len = convo_ctx_len;
                                             }
                                         }
-                                        if (ch->channel->vtable->stop_typing) {
-                                            ch->channel->vtable->stop_typing(ch->channel->ctx,
-                                                                             batch_key, key_len);
-                                        }
+                                        if (ch->channel->vtable
+                                                ->start_typing) /* through the retry */
+                                            ch->channel->vtable->start_typing(
+                                                ch->channel->ctx, send_target, send_target_len);
                                         continue;
                                     }
                                 }
@@ -8194,7 +8200,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 
             skip_llm_this_batch:
                 if (turn_out_state.typing_started && ch->channel->vtable->stop_typing)
-                    ch->channel->vtable->stop_typing(ch->channel->ctx, batch_key, key_len);
+                    ch->channel->vtable->stop_typing(ch->channel->ctx, send_target,
+                                                     send_target_len);
                 /* Clear per-turn context and free */
 #ifndef HU_IS_TEST
                 agent->contact_context = NULL;
@@ -9136,8 +9143,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #ifndef HU_IS_TEST
                                     if (choreo_plan.segments[seg].show_typing_indicator &&
                                         ch->channel->vtable->start_typing)
-                                        ch->channel->vtable->start_typing(ch->channel->ctx,
-                                                                          batch_key, key_len);
+                                        ch->channel->vtable->start_typing(
+                                            ch->channel->ctx, send_target, send_target_len);
                                     usleep((useconds_t)(dms * 1000));
 #endif
                                 }
@@ -9159,7 +9166,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                         ch->channel, agent ? agent->persona : NULL, agent, config,
                                         send_target, send_target_len, &msgs[batch_start],
                                         choreo_plan.segments[seg].text,
-                                        choreo_plan.segments[seg].text_len, &seg_text_sent);
+                                        choreo_plan.segments[seg].text_len, &seg_text_sent,
+                                        choreo_plan.segment_count > 1);
                                 } else {
                                     seg_text_sent =
                                         ch->channel->vtable->send(
@@ -9275,9 +9283,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                     .enabled) {
                                                 (void)hu_daemon_dispatch_imessage_reply_msg_ex(
                                                     ch->channel, agent ? agent->persona : NULL,
-                                                    agent, config, batch_key, key_len,
+                                                    agent, config, send_target, send_target_len,
                                                     &msgs[batch_start], dt_chunks[dt], dt_len,
-                                                    &dt_text_sent);
+                                                    &dt_text_sent, true);
                                             } else {
                                                 dt_text_sent = ch->channel->vtable->send(
                                                                    ch->channel->ctx, batch_key,
@@ -9308,9 +9316,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                         config->channels.imessage.action_surface_v2.enabled) {
                                         (void)hu_daemon_dispatch_imessage_reply_msg_ex(
                                             ch->channel, agent ? agent->persona : NULL, agent,
-                                            config, batch_key, key_len, &msgs[batch_start],
-                                            fragments[f].text, fragments[f].text_len,
-                                            &frag_text_sent);
+                                            config, send_target, send_target_len,
+                                            &msgs[batch_start], fragments[f].text,
+                                            fragments[f].text_len, &frag_text_sent, true);
                                     } else {
                                         frag_text_sent =
                                             ch->channel->vtable->send(ch->channel->ctx, batch_key,
@@ -9397,7 +9405,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     (void)hu_daemon_dispatch_imessage_reply_msg_ex(
                                         ch->channel, agent ? agent->persona : NULL, agent, config,
                                         send_target, send_target_len, &msgs[batch_start], send_text,
-                                        send_text_len, &whole_text_sent);
+                                        send_text_len, &whole_text_sent, false);
                                 } else {
                                     whole_text_sent =
                                         ch->channel->vtable->send(
@@ -9948,7 +9956,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 if (unshaped) /* the pre-send abort jumps past its free */
                     alloc->free(alloc->ctx, unshaped, unshaped_len + 1);
                 if (ch && ch->channel && ch->channel->vtable && ch->channel->vtable->stop_typing) {
-                    ch->channel->vtable->stop_typing(ch->channel->ctx, batch_key, key_len);
+                    ch->channel->vtable->stop_typing(ch->channel->ctx, send_target,
+                                                     send_target_len);
                 }
 #endif
                 if (response) {

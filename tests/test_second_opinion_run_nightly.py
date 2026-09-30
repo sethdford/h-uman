@@ -21,6 +21,17 @@ import pytest  # noqa: E402
 from second_opinion import backend as be, run_nightly  # noqa: E402
 
 LOCAL_MORNING = dt.datetime(2026, 9, 29, 7, 45).astimezone()   # a Tuesday
+# The runner resolves --deadline from now_local but measures time left with
+# utcnow; a test that pins one must pin the other, or it fails on any other day.
+def LOCAL_UTCNOW():
+    return LOCAL_MORNING.astimezone(dt.timezone.utc)
+
+
+def clock_at(local):
+    """utcnow for a run pinned to `local`. --deadline resolves against now_local
+    but is compared with utcnow(); injecting one clock and not the other made
+    these tests pass only while the real date was 2026-09-29."""
+    return lambda: local.astimezone(dt.timezone.utc)
 
 
 @pytest.fixture(autouse=True)
@@ -125,7 +136,7 @@ def make_ab_run_dir(tmp_path, with_triples=True):
 def test_happy_path_writes_counts_only_manifest(tmp_path):
     setup(tmp_path)
     rc = run_nightly.main(args(tmp_path), now_local=LOCAL_MORNING,
-                          serve=serve_with(Fake(["supported\nok"])), attribute=no_att)
+                          serve=serve_with(Fake(["supported\nok"])), attribute=no_att, utcnow=LOCAL_UTCNOW)
     assert rc == 0
     man_path = tmp_path / "logs" / "second-opinion-20260929.json"
     text = man_path.read_text()
@@ -138,7 +149,7 @@ def test_happy_path_writes_counts_only_manifest(tmp_path):
 def test_unreadable_db_refuses_and_writes_nothing(tmp_path):
     mk_chat(str(tmp_path / "chat.db"))                     # no memory.db
     rc = run_nightly.main(args(tmp_path), now_local=LOCAL_MORNING,
-                          serve=serve_with(Fake([])), attribute=no_att)
+                          serve=serve_with(Fake([])), attribute=no_att, utcnow=LOCAL_UTCNOW)
     assert rc == 2
     assert not (tmp_path / "logs").exists() and not (tmp_path / "so.db").exists()
 
@@ -152,7 +163,7 @@ def test_server_that_never_comes_up_refuses(tmp_path):
         yield
 
     assert run_nightly.main(args(tmp_path), now_local=LOCAL_MORNING, serve=broken,
-                            attribute=no_att) == 2
+                            attribute=no_att, utcnow=LOCAL_UTCNOW) == 2
     assert not (tmp_path / "logs").exists()
     # M1: open_store/start_run must not run before the server-health refusal.
     assert not (tmp_path / "so.db").exists()
@@ -162,7 +173,7 @@ def test_window_closed_writes_nothing(tmp_path):
     setup(tmp_path)
     late = dt.datetime(2026, 9, 29, 9, 30).astimezone()
     rc = run_nightly.main(args(tmp_path, "--deadline", "09:00"), now_local=late,
-                          serve=serve_with(Fake([])), attribute=no_att)
+                          serve=serve_with(Fake([])), attribute=no_att, utcnow=clock_at(late))
     assert rc == 0 and not (tmp_path / "logs").exists() and not (tmp_path / "so.db").exists()
 
 
@@ -171,7 +182,7 @@ def test_second_concurrent_run_does_nothing(tmp_path):
     with open(tmp_path / "lock", "w") as held:
         fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
         rc = run_nightly.main(args(tmp_path), now_local=LOCAL_MORNING,
-                              serve=serve_with(Fake([])), attribute=no_att)
+                              serve=serve_with(Fake([])), attribute=no_att, utcnow=LOCAL_UTCNOW)
     assert rc == 0 and not (tmp_path / "logs").exists()
     # M1: a second run must never open the store either.
     assert not (tmp_path / "so.db").exists()
@@ -180,7 +191,7 @@ def test_second_concurrent_run_does_nothing(tmp_path):
 def test_every_item_failing_exits_3_and_keeps_the_manifest(tmp_path):
     setup(tmp_path)
     rc = run_nightly.main(args(tmp_path), now_local=LOCAL_MORNING,
-                          serve=serve_with(Fake([TimeoutError()])), attribute=no_att)
+                          serve=serve_with(Fake([TimeoutError()])), attribute=no_att, utcnow=LOCAL_UTCNOW)
     assert rc == 3
     man = json.loads((tmp_path / "logs" / "second-opinion-20260929.json").read_text())
     assert man["audit"]["errors"] == 1 and man["exit_reason"] == "every item failed"
@@ -189,7 +200,7 @@ def test_every_item_failing_exits_3_and_keeps_the_manifest(tmp_path):
 def test_dry_run_writes_no_rows_and_suffixes_manifest(tmp_path):
     setup(tmp_path)
     rc = run_nightly.main(args(tmp_path, "--dry-run"), now_local=LOCAL_MORNING,
-                          serve=serve_with(Fake(["supported"])), attribute=no_att)
+                          serve=serve_with(Fake(["supported"])), attribute=no_att, utcnow=LOCAL_UTCNOW)
     assert rc == 0 and not (tmp_path / "so.db").exists()
     assert (tmp_path / "logs" / "second-opinion-20260929-dryrun.json").exists()
 
@@ -212,7 +223,7 @@ def test_vertex_missing_credentials_refuses_and_writes_nothing(tmp_path):
         raise be.BackendError("no ADC credentials")
 
     rc = run_nightly.main(args(tmp_path, "--backend", "vertex"), now_local=LOCAL_MORNING,
-                          serve=serve_with(Fake([])), attribute=no_att, vertex_token=bad_token)
+                          serve=serve_with(Fake([])), attribute=no_att, vertex_token=bad_token, utcnow=LOCAL_UTCNOW)
     assert rc == 2
     assert not (tmp_path / "logs").exists() and not (tmp_path / "so.db").exists()
 
@@ -225,7 +236,7 @@ def test_audit_job_isolated_other_jobs_still_run(tmp_path):
     mk_mem_no_contact_insights(str(tmp_path / "mem.db"))
     mk_chat(str(tmp_path / "chat.db"))
     rc = run_nightly.main(args(tmp_path, "--jobs", "audit,gold"), now_local=LOCAL_MORNING,
-                          serve=serve_with(Fake([])), attribute=no_att)
+                          serve=serve_with(Fake([])), attribute=no_att, utcnow=LOCAL_UTCNOW)
     assert rc == 0
     man_path = tmp_path / "logs" / "second-opinion-20260929.json"
     text = man_path.read_text()
@@ -246,7 +257,7 @@ def test_gold_job_isolated_other_jobs_still_run(tmp_path, monkeypatch):
 
     monkeypatch.setattr(run_nightly.gold, "gold_pass", boom)
     rc = run_nightly.main(args(tmp_path, "--jobs", "audit,gold"), now_local=LOCAL_MORNING,
-                          serve=serve_with(Fake(["supported\nok"])), attribute=no_att)
+                          serve=serve_with(Fake(["supported\nok"])), attribute=no_att, utcnow=LOCAL_UTCNOW)
     assert rc == 0
     man_path = tmp_path / "logs" / "second-opinion-20260929.json"
     text = man_path.read_text()
@@ -267,7 +278,7 @@ def test_gold_job_survives_attribution_failure(tmp_path):
         raise RuntimeError("boom")
 
     rc = run_nightly.main(args(tmp_path, "--jobs", "gold"), now_local=LOCAL_MORNING,
-                          serve=serve_with(Fake([])), attribute=bad_attr)
+                          serve=serve_with(Fake([])), attribute=bad_attr, utcnow=LOCAL_UTCNOW)
     assert rc == 0
     man = json.loads((tmp_path / "logs" / "second-opinion-20260929.json").read_text())
     assert man["gold_attribution_error"] == 1
@@ -286,7 +297,7 @@ def test_judge_job_failure_is_isolated_and_type_only(tmp_path, monkeypatch):
 
     monkeypatch.setattr(run_nightly.judge, "judge_pass", boom)
     rc = run_nightly.main(args(tmp_path, "--jobs", "judge"), now_local=LOCAL_MORNING,
-                          serve=serve_with(Fake([])), attribute=no_att)
+                          serve=serve_with(Fake([])), attribute=no_att, utcnow=LOCAL_UTCNOW)
     assert rc == 3  # the only attempted job raised
     text = (tmp_path / "logs" / "second-opinion-20260929.json").read_text()
     man = json.loads(text)
@@ -298,7 +309,7 @@ def test_runs_row_records_exit_code_and_finish_time(tmp_path):
     """M9: finish_run must always run — the runs row is never left dangling."""
     setup(tmp_path)
     rc = run_nightly.main(args(tmp_path), now_local=LOCAL_MORNING,
-                          serve=serve_with(Fake(["supported\nok"])), attribute=no_att)
+                          serve=serve_with(Fake(["supported\nok"])), attribute=no_att, utcnow=LOCAL_UTCNOW)
     assert rc == 0
     row = sqlite3.connect(tmp_path / "so.db").execute(
         "SELECT exit_code, finished_at_ms FROM runs").fetchone()
@@ -308,7 +319,7 @@ def test_runs_row_records_exit_code_and_finish_time(tmp_path):
 def test_all_jobs_together(tmp_path):
     setup(tmp_path)
     rc = run_nightly.main(args(tmp_path, "--jobs", "audit,gold,judge"), now_local=LOCAL_MORNING,
-                          serve=serve_with(Fake(["supported\nok"])), attribute=no_att)
+                          serve=serve_with(Fake(["supported\nok"])), attribute=no_att, utcnow=LOCAL_UTCNOW)
     assert rc == 0
     man = json.loads((tmp_path / "logs" / "second-opinion-20260929.json").read_text())
     assert "audit" in man and "gold" in man and "judge" in man
@@ -343,7 +354,8 @@ def test_judge_timeout_expired_is_isolated_and_type_only(tmp_path, monkeypatch):
 
     monkeypatch.setattr(run_nightly.judge, "judge_pass", boom)
     rc = run_nightly.main(args(tmp_path, "--jobs", "judge", "--deadline", "23:59"),
-                          now_local=LOCAL_MORNING, serve=serve_with(Fake([])), attribute=no_att)
+                          now_local=LOCAL_MORNING, serve=serve_with(Fake([])), attribute=no_att,
+                          utcnow=clock_at(LOCAL_MORNING))
     assert rc == 3
     text = (tmp_path / "logs" / "second-opinion-20260929.json").read_text()
     man = json.loads(text)
@@ -366,7 +378,8 @@ def test_deadline_is_forwarded_to_audit_pass(tmp_path, monkeypatch):
 
     monkeypatch.setattr(run_nightly.audit, "audit_pass", fake_audit_pass)
     rc = run_nightly.main(args(tmp_path, "--deadline", "23:59"), now_local=LOCAL_MORNING,
-                          serve=serve_with(Fake([])), attribute=no_att)
+                          serve=serve_with(Fake([])), attribute=no_att,
+                          utcnow=clock_at(LOCAL_MORNING))
     assert rc == 0
     assert captured["deadline"] is not None
 
@@ -379,7 +392,7 @@ def test_deadline_is_forwarded_to_audit_pass(tmp_path, monkeypatch):
 def test_unknown_job_refuses_and_writes_nothing(tmp_path):
     setup(tmp_path)
     rc = run_nightly.main(args(tmp_path, "--jobs", "bogus"), now_local=LOCAL_MORNING,
-                          serve=serve_with(Fake([])), attribute=no_att)
+                          serve=serve_with(Fake([])), attribute=no_att, utcnow=LOCAL_UTCNOW)
     assert rc == 2
     assert not (tmp_path / "logs").exists() and not (tmp_path / "so.db").exists()
 
@@ -387,7 +400,7 @@ def test_unknown_job_refuses_and_writes_nothing(tmp_path):
 def test_malformed_deadline_refuses_and_writes_nothing(tmp_path):
     setup(tmp_path)
     rc = run_nightly.main(args(tmp_path, "--deadline", "25:00"), now_local=LOCAL_MORNING,
-                          serve=serve_with(Fake([])), attribute=no_att)
+                          serve=serve_with(Fake([])), attribute=no_att, utcnow=LOCAL_UTCNOW)
     assert rc == 2
     assert not (tmp_path / "logs").exists() and not (tmp_path / "so.db").exists()
 
@@ -396,7 +409,7 @@ def test_dry_run_skips_judge_job_entirely(tmp_path):
     setup(tmp_path)
     make_ab_run_dir(tmp_path)  # a real rating sheet a non-dry-run would pick up
     rc = run_nightly.main(args(tmp_path, "--jobs", "judge", "--dry-run"),
-                          now_local=LOCAL_MORNING, serve=serve_with(Fake([])), attribute=no_att)
+                          now_local=LOCAL_MORNING, serve=serve_with(Fake([])), attribute=no_att, utcnow=LOCAL_UTCNOW)
     assert rc == 0
     man = json.loads((tmp_path / "logs" / "second-opinion-20260929-dryrun.json").read_text())
     assert man["judge"] == {"skipped": "dry_run"}
@@ -410,7 +423,7 @@ def test_lock_file_is_not_truncated(tmp_path):
     lock_path = tmp_path / "lock"
     lock_path.write_text("not-empty-marker")
     run_nightly.main(args(tmp_path), now_local=LOCAL_MORNING,
-                     serve=serve_with(Fake(["supported\nok"])), attribute=no_att)
+                     serve=serve_with(Fake(["supported\nok"])), attribute=no_att, utcnow=LOCAL_UTCNOW)
     assert lock_path.read_text() == "not-empty-marker"
 
 
@@ -431,7 +444,7 @@ def test_gold_without_triples_still_writes_reference_replies(tmp_path):
     setup(tmp_path)
     make_ab_run_dir(tmp_path, with_triples=False)
     rc = run_nightly.main(args(tmp_path, "--jobs", "gold"), now_local=LOCAL_MORNING,
-                          serve=serve_with(Fake(["7pm works"])), attribute=daemon_reply_att)
+                          serve=serve_with(Fake(["7pm works"])), attribute=daemon_reply_att, utcnow=LOCAL_UTCNOW)
     assert rc == 0
     man = json.loads((tmp_path / "logs" / "second-opinion-20260929.json").read_text())
     assert "error" not in man["gold"]
@@ -454,7 +467,7 @@ def test_gold_reads_synthetic_moments_only_from_the_lanes_judged_sheet(tmp_path)
         w.writeheader()
         w.writerow({"id": "1", "choice": "A", "judge_api": "openai", "judge_model": "m"})
     rc = run_nightly.main(args(tmp_path, "--jobs", "gold"), now_local=LOCAL_MORNING,
-                          serve=serve_with(Fake([])), attribute=no_att)
+                          serve=serve_with(Fake([])), attribute=no_att, utcnow=LOCAL_UTCNOW)
     assert rc == 0
     man = json.loads((tmp_path / "logs" / "second-opinion-20260929.json").read_text())
     assert man["gold"]["attempted"] == 0
@@ -465,7 +478,7 @@ def test_gold_reads_synthetic_moments_only_from_the_lanes_judged_sheet(tmp_path)
     (lane / "source.json").write_text(json.dumps(run_nightly.judge.run_stamp(str(run_dir))))
     ok = '{"gaps":["tone"],"missing":"m","severity":1}'
     rc = run_nightly.main(args(tmp_path, "--jobs", "gold"), now_local=LOCAL_MORNING,
-                          serve=serve_with(Fake([ok])), attribute=no_att)
+                          serve=serve_with(Fake([ok])), attribute=no_att, utcnow=LOCAL_UTCNOW)
     assert rc == 0
     row = sqlite3.connect(tmp_path / "so.db").execute(
         "SELECT item_id, weak_source FROM critiques").fetchone()
@@ -482,7 +495,7 @@ def test_weekly_reports_are_scoped_to_the_runs_backend(tmp_path):
                        "critique-v1", now)
     s.close()
     rc = run_nightly.main(args(tmp_path, "--jobs", "audit,report"), now_local=LOCAL_MORNING,
-                          serve=serve_with(Fake(["supported\nok"])), attribute=no_att)
+                          serve=serve_with(Fake(["supported\nok"])), attribute=no_att, utcnow=LOCAL_UTCNOW)
     assert rc == 0
     rep = json.loads((tmp_path / "reports" / "audit-20260929.json").read_text())
     assert rep["backends"] == ["fake@local"] and rep["wide"]["unsupported"] == 0
@@ -505,7 +518,7 @@ def test_files_created_during_a_run_are_owner_only(tmp_path):
 
     os.umask(0o022)
     assert run_nightly.main(args(tmp_path), now_local=LOCAL_MORNING, serve=serve,
-                            attribute=no_att) == 0
+                            attribute=no_att, utcnow=LOCAL_UTCNOW) == 0
     assert (probe.stat().st_mode & 0o777) == 0o600
 
 
@@ -539,7 +552,7 @@ def test_judge_runs_before_gold_and_its_failure_does_not_stop_gold(tmp_path, mon
     monkeypatch.setattr(run_nightly.judge, "judge_pass", fake_judge)
     monkeypatch.setattr(run_nightly.gold, "gold_pass", fake_gold)
     rc = run_nightly.main(args(tmp_path, "--jobs", "gold,judge"), now_local=LOCAL_MORNING,
-                          serve=serve_with(Fake([])), attribute=no_att)
+                          serve=serve_with(Fake([])), attribute=no_att, utcnow=LOCAL_UTCNOW)
     assert order == ["judge", "gold"]
     man = json.loads((tmp_path / "logs" / "second-opinion-20260929.json").read_text())
     assert man["judge"] == {"error": "RuntimeError"} and "error" not in man["gold"]
@@ -552,11 +565,11 @@ def test_main_restores_the_callers_umask(tmp_path):
     setup(tmp_path)
     os.umask(0o022)
     assert run_nightly.main(args(tmp_path) + ["--jobs", "bogus"],
-                            now_local=LOCAL_MORNING, attribute=no_att) == 2
+                            now_local=LOCAL_MORNING, attribute=no_att, utcnow=LOCAL_UTCNOW) == 2
     cur = os.umask(0o022)
     assert cur == 0o022
     assert run_nightly.main(args(tmp_path), now_local=LOCAL_MORNING,
-                            serve=serve_with(Fake(["supported\nok"])), attribute=no_att) == 0
+                            serve=serve_with(Fake(["supported\nok"])), attribute=no_att, utcnow=LOCAL_UTCNOW) == 0
     cur = os.umask(0o022)
     assert cur == 0o022
 
