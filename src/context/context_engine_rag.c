@@ -28,8 +28,6 @@ typedef struct rag_ctx {
     size_t msg_count;
     size_t msg_cap;
 
-    char *rag_context;
-    size_t rag_context_len;
 } rag_ctx_t;
 
 static hu_error_t rag_bootstrap(void *ctx, hu_allocator_t *alloc) {
@@ -178,10 +176,9 @@ static hu_error_t rag_assemble(void *ctx, hu_allocator_t *alloc, const hu_contex
                     size_t budget_for_rag =
                         available > tokens_used ? (available - tokens_used) / 2 : 0;
                     if (rag_tokens <= budget_for_rag) {
-                        if (r->rag_context)
-                            alloc->free(alloc->ctx, r->rag_context, r->rag_context_len + 1);
-                        r->rag_context = recall_buf;
-                        r->rag_context_len = pos;
+                        /* Ownership passes to the caller: hu_assembled_context_free
+                         * releases injected_context. The engine must not keep a
+                         * copy of the pointer (it did, and deinit double-freed it). */
                         out->injected_context = recall_buf;
                         out->injected_context_len = pos;
                         tokens_used += rag_tokens;
@@ -190,13 +187,8 @@ static hu_error_t rag_assemble(void *ctx, hu_allocator_t *alloc, const hu_contex
                     }
                 }
                 /* Free entries (caller owns them per vtable contract) */
-                for (size_t ri = 0; ri < entry_count; ri++) {
-                    if (entries[ri].key)
-                        alloc->free(alloc->ctx, (void *)entries[ri].key, entries[ri].key_len + 1);
-                    if (entries[ri].content)
-                        alloc->free(alloc->ctx, (void *)entries[ri].content,
-                                    entries[ri].content_len + 1);
-                }
+                for (size_t ri = 0; ri < entry_count; ri++)
+                    hu_memory_entry_free_fields(alloc, &entries[ri]);
                 alloc->free(alloc->ctx, entries, entry_count * sizeof(hu_memory_entry_t));
             }
         }
@@ -278,8 +270,6 @@ static void rag_deinit(void *ctx, hu_allocator_t *alloc) {
     }
     if (r->messages)
         alloc->free(alloc->ctx, r->messages, r->msg_cap * sizeof(hu_context_message_t));
-    if (r->rag_context)
-        alloc->free(alloc->ctx, r->rag_context, r->rag_context_len + 1);
     if (r->model_name)
         alloc->free(alloc->ctx, r->model_name, r->model_name_len + 1);
     alloc->free(alloc->ctx, r, sizeof(rag_ctx_t));
