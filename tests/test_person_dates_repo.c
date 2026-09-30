@@ -4,6 +4,7 @@
  * no same-named source for the basename heuristic to find.
  */
 #ifdef HU_ENABLE_SQLITE
+#include "human/core/io_secure.h"
 #include "human/memory.h"
 #include "human/memory/person_dates_repo.h"
 #include "test_framework.h"
@@ -70,8 +71,8 @@ static void test_addressbook_birthdays_reads_every_source_and_counts_unreadable(
     /* A top-level database that is not SQLite: counted, not fatal. */
     char bad[256];
     snprintf(bad, sizeof(bad), "%s/AddressBook-v22.abcddb", dir);
-    FILE *f = fopen(bad, "w");
-    HU_ASSERT_NOT_NULL(f);
+    FILE *f = NULL;
+    HU_ASSERT_EQ(hu_io_secure_open(bad, HU_IO_PERM_SECRET, "w", &f), HU_OK);
     fputs("not a database, just bytes long enough to not be empty ......................", f);
     fclose(f);
 
