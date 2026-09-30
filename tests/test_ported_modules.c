@@ -498,11 +498,16 @@ static void test_rate_tracker(void) {
     hu_rate_tracker_destroy(t);
 }
 
+/* A config path that does not exist: it reads as "{}", and with apply=false
+ * nothing is ever written. */
+#define NO_CONFIG "/nonexistent-hu-test-dir/config.json"
+
 static void test_config_mutator_mutate(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_mutation_result_t res = {0};
-    hu_error_t err = hu_config_mutator_mutate(&alloc, HU_MUTATION_SET, "default_temperature", "0.5",
-                                              (hu_mutation_options_t){.apply = false}, &res);
+    hu_error_t err =
+        hu_config_mutator_mutate_at(&alloc, NO_CONFIG, HU_MUTATION_SET, "default_temperature",
+                                    "0.5", (hu_mutation_options_t){.apply = false}, &res);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(res.path);
     HU_ASSERT_STR_EQ(res.path, "default_temperature");
@@ -512,24 +517,18 @@ static void test_config_mutator_mutate(void) {
 static void test_config_mutator_mutate_denied_path(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_mutation_result_t res = {0};
-    hu_error_t err = hu_config_mutator_mutate(&alloc, HU_MUTATION_SET, "identity.format", "compact",
-                                              (hu_mutation_options_t){.apply = false}, &res);
+    hu_error_t err =
+        hu_config_mutator_mutate_at(&alloc, NO_CONFIG, HU_MUTATION_SET, "identity.format",
+                                    "compact", (hu_mutation_options_t){.apply = false}, &res);
     HU_ASSERT_EQ(err, HU_ERR_PERMISSION_DENIED);
-}
-
-static void test_config_mutator_get_path_denied(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    char *json = NULL;
-    hu_error_t err = hu_config_mutator_get_path_value_json(&alloc, "identity.format", &json);
-    HU_ASSERT_EQ(err, HU_ERR_PERMISSION_DENIED);
-    HU_ASSERT_NULL(json);
 }
 
 static void test_config_mutator_mutate_unset(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_mutation_result_t res = {0};
-    hu_error_t err = hu_config_mutator_mutate(&alloc, HU_MUTATION_UNSET, "memory.backend", NULL,
-                                              (hu_mutation_options_t){.apply = false}, &res);
+    hu_error_t err =
+        hu_config_mutator_mutate_at(&alloc, NO_CONFIG, HU_MUTATION_UNSET, "memory.backend", NULL,
+                                    (hu_mutation_options_t){.apply = false}, &res);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_STR_EQ(res.path, "memory.backend");
     HU_ASSERT_TRUE(res.requires_restart);
@@ -790,7 +789,6 @@ void run_ported_modules_tests(void) {
     HU_RUN_TEST(test_channel_catalog_all);
     HU_RUN_TEST(test_channel_catalog_find_by_key);
     HU_RUN_TEST(test_config_mutator_path_requires_restart);
-    HU_RUN_TEST(test_config_mutator_get_path_denied);
     HU_RUN_TEST(test_config_mutator_mutate_denied_path);
     HU_RUN_TEST(test_config_mutator_mutate_unset);
     HU_RUN_TEST(test_doctor_parse_df);

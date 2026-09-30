@@ -1,0 +1,343 @@
+{
+  "date": "2026-09-30",
+  "binary": "./build/human",
+  "seed": 3,
+  "limit": 60,
+  "alphas": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0
+  ],
+  "protocol": {
+    "arms": "kw = `memory search`; sem = `--semantic`; rrf = `--hybrid --plain` with HU_HYBRID_FUSION=rrf (production); alpha=A = the same call with HU_HYBRID_FUSION=score HU_HYBRID_FUSION_ALPHA=A (A = dense weight)",
+    "units": "LongMemEval-S: distinct sessions among returned turns; LoCoMo-10: distinct dia_ids among the top-10 turns",
+    "metrics": "hit@1; r@5/r@10 = any relevant unit in top k (eval_memory_benchmarks protocol); ndcg@5 binary relevance",
+    "loco": "alpha chosen on all other conversations by mean (hit@1, ndcg@5, r@5, r@10), ties -> nearest 0.5 then smaller; scored on the held-out conversation. LongMemEval: one conversation per question haystack"
+  },
+  "longmemeval_s": {
+    "n": 60,
+    "groups": 60,
+    "arms": {
+      "kw": {
+        "hit@1": 0.7833,
+        "r@5": 0.8833,
+        "r@10": 0.9,
+        "ndcg@5": 0.7989
+      },
+      "sem": {
+        "hit@1": 0.9167,
+        "r@5": 1.0,
+        "r@10": 1.0,
+        "ndcg@5": 0.955
+      },
+      "rrf": {
+        "hit@1": 0.8333,
+        "r@5": 1.0,
+        "r@10": 1.0,
+        "ndcg@5": 0.9069
+      },
+      "alpha=0.0": {
+        "hit@1": 0.7833,
+        "r@5": 0.9,
+        "r@10": 0.9833,
+        "ndcg@5": 0.8058
+      },
+      "alpha=0.1": {
+        "hit@1": 0.7833,
+        "r@5": 0.9167,
+        "r@10": 0.9833,
+        "ndcg@5": 0.8206
+      },
+      "alpha=0.2": {
+        "hit@1": 0.7833,
+        "r@5": 0.9333,
+        "r@10": 1.0,
+        "ndcg@5": 0.8319
+      },
+      "alpha=0.3": {
+        "hit@1": 0.7833,
+        "r@5": 0.9667,
+        "r@10": 1.0,
+        "ndcg@5": 0.8507
+      },
+      "alpha=0.4": {
+        "hit@1": 0.8167,
+        "r@5": 1.0,
+        "r@10": 1.0,
+        "ndcg@5": 0.8868
+      },
+      "alpha=0.5": {
+        "hit@1": 0.8167,
+        "r@5": 1.0,
+        "r@10": 1.0,
+        "ndcg@5": 0.9004
+      },
+      "alpha=0.6": {
+        "hit@1": 0.8833,
+        "r@5": 1.0,
+        "r@10": 1.0,
+        "ndcg@5": 0.9317
+      },
+      "alpha=0.7": {
+        "hit@1": 0.9167,
+        "r@5": 1.0,
+        "r@10": 1.0,
+        "ndcg@5": 0.9431
+      },
+      "alpha=0.8": {
+        "hit@1": 0.9167,
+        "r@5": 1.0,
+        "r@10": 1.0,
+        "ndcg@5": 0.9458
+      },
+      "alpha=0.9": {
+        "hit@1": 0.9167,
+        "r@5": 1.0,
+        "r@10": 1.0,
+        "ndcg@5": 0.9468
+      },
+      "alpha=1.0": {
+        "hit@1": 0.9167,
+        "r@5": 1.0,
+        "r@10": 1.0,
+        "ndcg@5": 0.9528
+      }
+    },
+    "loco": {
+      "folds": 60,
+      "n": 60,
+      "held_out": {
+        "hit@1": 0.9167,
+        "r@5": 1.0,
+        "r@10": 1.0,
+        "ndcg@5": 0.9528
+      },
+      "paired_vs_rrf": {
+        "hit@1": {
+          "win": 6,
+          "tie": 53,
+          "loss": 1
+        },
+        "r@5": {
+          "win": 0,
+          "tie": 60,
+          "loss": 0
+        },
+        "r@10": {
+          "win": 0,
+          "tie": 60,
+          "loss": 0
+        },
+        "ndcg@5": {
+          "win": 12,
+          "tie": 46,
+          "loss": 2
+        }
+      },
+      "selected_alpha_counts": {
+        "1.0": 60
+      },
+      "loco_selected_alpha": 1.0,
+      "in_sample_best_alpha_optimistic": 1.0,
+      "rrf_same_questions": {
+        "hit@1": 0.8333,
+        "r@5": 1.0,
+        "r@10": 1.0,
+        "ndcg@5": 0.9069
+      }
+    },
+    "skipped_incomplete_index": 0,
+    "questions_excluded_embed_error": 0
+  },
+  "locomo10": {
+    "n": 60,
+    "groups": 10,
+    "arms": {
+      "kw": {
+        "hit@1": 0.2833,
+        "r@5": 0.5333,
+        "r@10": 0.65,
+        "ndcg@5": 0.3977
+      },
+      "sem": {
+        "hit@1": 0.4667,
+        "r@5": 0.6833,
+        "r@10": 0.8333,
+        "ndcg@5": 0.5475
+      },
+      "rrf": {
+        "hit@1": 0.3833,
+        "r@5": 0.75,
+        "r@10": 0.85,
+        "ndcg@5": 0.5298
+      },
+      "alpha=0.0": {
+        "hit@1": 0.2833,
+        "r@5": 0.5333,
+        "r@10": 0.75,
+        "ndcg@5": 0.3977
+      },
+      "alpha=0.1": {
+        "hit@1": 0.2833,
+        "r@5": 0.6167,
+        "r@10": 0.7833,
+        "ndcg@5": 0.4294
+      },
+      "alpha=0.2": {
+        "hit@1": 0.2833,
+        "r@5": 0.6833,
+        "r@10": 0.8167,
+        "ndcg@5": 0.4539
+      },
+      "alpha=0.3": {
+        "hit@1": 0.3167,
+        "r@5": 0.7333,
+        "r@10": 0.8333,
+        "ndcg@5": 0.4971
+      },
+      "alpha=0.4": {
+        "hit@1": 0.3333,
+        "r@5": 0.7333,
+        "r@10": 0.85,
+        "ndcg@5": 0.5158
+      },
+      "alpha=0.5": {
+        "hit@1": 0.4167,
+        "r@5": 0.7333,
+        "r@10": 0.8667,
+        "ndcg@5": 0.5451
+      },
+      "alpha=0.6": {
+        "hit@1": 0.45,
+        "r@5": 0.7167,
+        "r@10": 0.9,
+        "ndcg@5": 0.5545
+      },
+      "alpha=0.7": {
+        "hit@1": 0.4667,
+        "r@5": 0.7167,
+        "r@10": 0.9,
+        "ndcg@5": 0.5647
+      },
+      "alpha=0.8": {
+        "hit@1": 0.4667,
+        "r@5": 0.7333,
+        "r@10": 0.8833,
+        "ndcg@5": 0.5701
+      },
+      "alpha=0.9": {
+        "hit@1": 0.4667,
+        "r@5": 0.7,
+        "r@10": 0.8667,
+        "ndcg@5": 0.5561
+      },
+      "alpha=1.0": {
+        "hit@1": 0.4667,
+        "r@5": 0.6833,
+        "r@10": 0.8667,
+        "ndcg@5": 0.5475
+      }
+    },
+    "loco": {
+      "folds": 10,
+      "n": 60,
+      "held_out": {
+        "hit@1": 0.45,
+        "r@5": 0.7167,
+        "r@10": 0.8667,
+        "ndcg@5": 0.5575
+      },
+      "paired_vs_rrf": {
+        "hit@1": {
+          "win": 6,
+          "tie": 52,
+          "loss": 2
+        },
+        "r@5": {
+          "win": 4,
+          "tie": 50,
+          "loss": 6
+        },
+        "r@10": {
+          "win": 3,
+          "tie": 55,
+          "loss": 2
+        },
+        "ndcg@5": {
+          "win": 17,
+          "tie": 34,
+          "loss": 9
+        }
+      },
+      "selected_alpha_counts": {
+        "0.7": 1,
+        "0.8": 8,
+        "0.9": 1
+      },
+      "loco_selected_alpha": 0.8,
+      "in_sample_best_alpha_optimistic": 0.8,
+      "rrf_same_questions": {
+        "hit@1": 0.3833,
+        "r@5": 0.75,
+        "r@10": 0.85,
+        "ndcg@5": 0.5298
+      }
+    },
+    "questions_excluded_embed_error": 0
+  },
+  "pooled": {
+    "n": 120,
+    "loco": {
+      "folds": 70,
+      "n": 120,
+      "held_out": {
+        "hit@1": 0.6833,
+        "r@5": 0.8667,
+        "r@10": 0.9333,
+        "ndcg@5": 0.7549
+      },
+      "paired_vs_rrf": {
+        "hit@1": {
+          "win": 12,
+          "tie": 105,
+          "loss": 3
+        },
+        "r@5": {
+          "win": 4,
+          "tie": 111,
+          "loss": 5
+        },
+        "r@10": {
+          "win": 3,
+          "tie": 115,
+          "loss": 2
+        },
+        "ndcg@5": {
+          "win": 28,
+          "tie": 82,
+          "loss": 10
+        }
+      },
+      "selected_alpha_counts": {
+        "0.8": 69,
+        "0.9": 1
+      },
+      "loco_selected_alpha": 0.8,
+      "in_sample_best_alpha_optimistic": 0.8,
+      "rrf_same_questions": {
+        "hit@1": 0.6083,
+        "r@5": 0.875,
+        "r@10": 0.925,
+        "ndcg@5": 0.7183
+      }
+    }
+  }
+}
