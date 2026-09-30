@@ -75,7 +75,14 @@ been promoted through the §3 bar (spec §4.4) — see the rollout below.
      `~/.human/backups/`, 0700 dir) and refuses (exit 2, database untouched)
      if the backup fails — then applies. A dated commitment or follow-up
      overdue by more than 14 days imports as `expired`; overdue by up to 14
-     days imports `pending`, re-anchored to the backfill time. Exit 2 means
+     days imports `pending`, re-anchored to the backfill time. An item found
+     expired also retires its own ledger row in the same transaction (a
+     commitment to `expired`, a follow-up to `sent=1`), because
+     `agent_turn.c` and `proactive.c` read the ledger whatever the gates
+     say; `ledger_retired` counts them (the dry run reports the exact number
+     a `--write` would retire). A re-run no longer sees those rows, so its
+     `commitments_seen` / `followups_seen` / `skipped_existing` are lower by
+     them. Exit 2 means
      refused (missing/unmigrated database, missing `human` binary, unusable
      manifest dir — checked before anything is written); exit 3 means the
      backfill itself ran (and, with `--write`, the database was written) but
@@ -201,9 +208,11 @@ Output contract: a `candidates=… fire=… … bytes=… write_err=…` header,
 with `--full` one `item id=… verdict=…` line per judged intention and the
 directive text. `--deliver` prints `surfaced=… used=… ignored=… expired=…`.
 `human prospective backfill --db PATH [--write] [--now EPOCH]` runs the same
-backfill the wrapper script drives, emitting one JSON line with
-`skipped_unsafe` as its last field (a contact-owned promise the rephraser
-refused to mirror in third person is skipped, never written first-person).
+backfill the wrapper script drives, emitting one JSON line whose last two
+fields are `skipped_unsafe` (a contact-owned promise the rephraser refused to
+mirror in third person is skipped, never written first-person) and
+`ledger_retired` (ledger rows of expired imports retired in the same
+transaction).
 
 ## Known limits
 

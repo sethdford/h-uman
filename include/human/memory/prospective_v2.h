@@ -119,6 +119,7 @@ typedef struct hu_prospective_backfill_counts {
     size_t reanchored;       /* overdue <= 14 days: due_at moved to `now` */
     size_t skipped_existing; /* a time row already stands for the intention */
     size_t skipped_unsafe;   /* contact-owned, not safely rephrasable (F4): no row */
+    size_t ledger_retired;   /* known gap 5: ledger rows of expired imports retired */
 } hu_prospective_backfill_counts_t;
 
 /* One-time mirror of the ledger into time rows (spec §4.1, rollout step 2):
@@ -133,7 +134,19 @@ typedef struct hu_prospective_backfill_counts {
  * as scheduled. Every seen row lands in exactly one of imported_pending,
  * imported_expired, skipped_existing, skipped_unsafe. One transaction:
  * `write=false` rolls it back, so a dry run's counts (dedupe included) are
- * exact. Idempotent, also at a later `now`. */
+ * exact. Idempotent, also at a later `now`.
+ *
+ * Known gap 5: a row the backfill finds expired (imported expired, or
+ * skipped_existing because its time row already stands) also retires its
+ * OWN ledger row by id in the same transaction -- a commitment to
+ * 'expired', a follow-up to sent=1 (hu_prospective_repo_retire_ledger_row)
+ * -- so agent_turn.c and proactive.c, which read the ledger whatever the
+ * gates say, never resurface it. By id only: another, still-live ledger row
+ * with the same text is not an expired import. The retires run after the
+ * walk (no UPDATE under the walk's open SELECT), so an F20 pair's follow-up
+ * is still visited and retired by its own id; ledger_retired counts the rows
+ * changed. A re-run no longer sees the retired rows at all, so its
+ * commitments_seen / followups_seen / skipped_existing drop by them. */
 hu_error_t hu_prospective_v2_backfill(hu_allocator_t *alloc, hu_memory_t *mem, int64_t now,
                                       bool write, hu_prospective_backfill_counts_t *out);
 

@@ -335,11 +335,57 @@ hu_error_t hu_prospective_v2_after_delivery(hu_allocator_t *alloc, sqlite3 *db,
     return HU_OK;
 }
 
+/* A ledger row the walk found expired, retired after the walk. */
+typedef struct pm_expired_row {
+    bool is_followup;
+    int64_t id;
+    char contact[256];
+} pm_expired_row_t;
+
 typedef struct pm_backfill {
+    hu_allocator_t *alloc;
     sqlite3 *db;
     int64_t now;
     hu_prospective_backfill_counts_t *out;
+    pm_expired_row_t *expired;
+    size_t expired_n, expired_cap;
 } pm_backfill_t;
+
+/* Remember an expired ledger row. A contact too long for the slot is left
+ * pending (fail toward the old behaviour, never a wrong-contact write). */
+static hu_error_t pm_backfill_defer(pm_backfill_t *b, const hu_prospective_ledger_row_t *r) {
+    if (r->contact_len >= sizeof(b->expired[0].contact))
+        return HU_OK;
+    if (b->expired_n == b->expired_cap) {
+        size_t nc = b->expired_cap ? b->expired_cap * 2 : 16;
+        pm_expired_row_t *nb = (pm_expired_row_t *)b->alloc->realloc(
+            b->alloc->ctx, b->expired, b->expired_cap * sizeof(*nb), nc * sizeof(*nb));
+        if (!nb)
+            return HU_ERR_OUT_OF_MEMORY;
+        b->expired = nb;
+        b->expired_cap = nc;
+    }
+    pm_expired_row_t *e = &b->expired[b->expired_n++];
+    e->is_followup = r->is_followup;
+    e->id = r->id;
+    memcpy(e->contact, r->contact, r->contact_len);
+    e->contact[r->contact_len] = '\0';
+    return HU_OK;
+}
+
+static hu_error_t pm_backfill_retire(pm_backfill_t *b) {
+    for (size_t i = 0; i < b->expired_n; i++) {
+        const pm_expired_row_t *e = &b->expired[i];
+        int ch = 0;
+        hu_error_t err =
+            hu_prospective_repo_retire_ledger_row(b->db, e->is_followup, e->id, e->contact,
+                                                  strlen(e->contact), HU_PM_EXPIRED, b->now, &ch);
+        if (err != HU_OK)
+            return err;
+        b->out->ledger_retired += (size_t)ch;
+    }
+    return HU_OK;
+}
 
 static hu_error_t pm_backfill_row(void *ctx, const hu_prospective_ledger_row_t *r) {
     pm_backfill_t *b = (pm_backfill_t *)ctx;
@@ -372,6 +418,8 @@ static hu_error_t pm_backfill_row(void *ctx, const hu_prospective_ledger_row_t *
                                         action, al, due, st, b->now, &inserted);
     if (e != HU_OK)
         return e;
+    if (st == HU_PM_EXPIRED && (e = pm_backfill_defer(b, r)) != HU_OK)
+        return e;
     if (!inserted)
         out->skipped_existing++;
     else if (st == HU_PM_EXPIRED)
@@ -398,8 +446,12 @@ hu_error_t hu_prospective_v2_backfill(hu_allocator_t *alloc, hu_memory_t *mem, i
     hu_error_t err = hu_sql_txn_begin(&txn, db);
     if (err != HU_OK)
         return err;
-    pm_backfill_t b = {.db = db, .now = now, .out = out};
+    pm_backfill_t b = {.alloc = alloc, .db = db, .now = now, .out = out};
     err = hu_prospective_repo_each_dated_ledger_row(db, pm_backfill_row, &b);
+    if (err == HU_OK)
+        err = pm_backfill_retire(&b);
+    if (b.expired)
+        alloc->free(alloc->ctx, b.expired, b.expired_cap * sizeof(*b.expired));
     if (err == HU_OK && write)
         err = hu_sql_txn_commit(&txn);
     hu_sql_txn_rollback(&txn); /* dry run, a failed walk, or a failed COMMIT; no-op after one */
