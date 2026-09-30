@@ -104,3 +104,9 @@ Built and gated OFF: `src/daemon/daemon_reminders.c`,
 Known limits, deliberately left for later: calendar dates ("Oct 12", "the
 12th") are not parsed — the reminder falls back to asking "when?"; the
 pending "when?" slot holds one task; recurring reminders are not supported.
+
+Not reused: the `prospective_tasks` table created in
+`src/memory/engines/sqlite.c` and its `hu_prospective_task_t` struct have no
+readers or writers anywhere (checked 2026-09-30), and lack the owner,
+channel and status columns delivery needs. They are left for a dead-code pass
+rather than removed in this feature change.
