@@ -18,15 +18,24 @@ which is which, then scores precision on the would-fires only.
          per (contact, action) intention (several trigger rows can share one;
          see prospective_shadow_report.intentions). Takes the most recent 30
          would-fires (verdict "fire") and up to 30 held items (verdict in
-         already_resolved/not_now/cancel), shuffles them with a seeded RNG
-         recorded in the answer key, and renumbers ids AFTER the shuffle
-         (q001..) so id order, id format, and context length leak nothing
-         about which class a row belongs to. Writes into --out-dir (0700):
+         already_resolved/not_now/cancel), redacts context/reminder text with
+         blind_ab's email/phone/contact-name scrub (name list resolved from the
+         local macOS AddressBook, never over the network), shuffles the rows
+         with a seeded RNG, and renumbers ids AFTER the shuffle (q001..) so id
+         order, id format, and context length leak nothing about which class
+         a row belongs to. Writes into --out-dir (0700):
            rating_sheet.csv  id, context (last 6 turns before the item's
                              timestamp, text only), reminder, answer (blank)
-           answer_key.json   {id: "fire" | "hold"} -- private; never opened
-                             while rating, never shipped inside the sheet
-           README.md         the question and the scoring command
+           answer_key.json   {id: "fire" | "hold"}, plus "_seed"/"_fire_count"/
+                             "_hold_count" metadata -- private; never opened
+                             while rating, never shipped inside the sheet. The
+                             seed and the per-class counts live ONLY here:
+                             either one alongside the rater-facing README
+                             would let a rater replay the Fisher-Yates shuffle
+                             and deanonymize every row (see the comment at the
+                             write site).
+           README.md         the question, the total row count, and the
+                             scoring command -- no seed, no fire/hold split
          Refuses (exit 2, writes nothing) when: --out-dir already exists, is
          a symlink, or resolves inside this git repo tree (so the sheet --
          real conversation lines -- can never be `git add`ed); the log or
@@ -57,7 +66,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "bli
 
 import curator_names as cn  # noqa: E402
 import prospective_shadow_report as psr  # noqa: E402
-from make_rating_sheet import redact  # noqa: E402 -- same email/phone/name scrub as the rest of blind_ab
+# Same email/phone/name scrub -- and the same local-AddressBook-only, no-network
+# resolver -- as the rest of blind_ab (make_rating_sheet.main calls both the same
+# way; see resolve_contact_name_tokens' own docstring for the hermetic escape hatch).
+from make_rating_sheet import redact, resolve_contact_name_tokens  # noqa: E402
 
 HOME = os.path.expanduser("~")
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -152,6 +164,12 @@ def build(a):
     if malformed:
         return refuse(f"{malformed} malformed shadow log line(s) in the window")
 
+    # Resolved once per build, at CLI-invocation time -- never from a test, per
+    # resolve_contact_name_tokens' own contract. Every redact() call below MUST
+    # receive it: omitting it is the privacy regression this dispatch fixed
+    # (a seeded "call John Smith back" surviving verbatim into the sheet).
+    name_tokens = resolve_contact_name_tokens()
+
     con = sqlite3.connect(f"file:{a.memory_db}?mode=ro", uri=True)
     try:
         meta = psr.intentions(con)
@@ -181,8 +199,9 @@ def build(a):
                 # raw handle through. redact() is the same email/phone/name scrub
                 # blind_ab's sheets use, applied here in case the contact's own
                 # number, email, or name appears INSIDE the conversation text itself.
-                sheet_rows.append({"id": rid, "context": redact(context(con, contact, ts)),
-                                   "reminder": redact(action), "answer": ""})
+                sheet_rows.append({"id": rid,
+                                   "context": redact(context(con, contact, ts), name_tokens),
+                                   "reminder": redact(action, name_tokens), "answer": ""})
                 key[rid] = label
     finally:
         con.close()
@@ -204,19 +223,30 @@ def build(a):
     w.writeheader()
     w.writerows(sheet_rows)
     cn.write_text_private(os.path.join(a.out_dir, "rating_sheet.csv"), buf.getvalue())
-    # answer_key.json is a pure {id: "fire"|"hold"} map -- scorers and raters treat it
-    # as exactly that shape. The shuffle seed is recorded in README.md instead (also
-    # private, also never shipped in the rating sheet itself) so the shuffle stays
-    # reproducible without adding a non-id/non-label value to this file.
+    # answer_key.json's non-underscore entries are a pure {id: "fire"|"hold"} map
+    # (score_sheet strips "_"-prefixed keys before reading it as that map).
+    #
+    # BLINDNESS: the shuffle seed and the per-class counts live ONLY here, never in
+    # README.md. The public build() code always lays fire rows before hold rows
+    # pre-shuffle (see the loop above), and Fisher-Yates' permutation is a pure
+    # function of (seed, length) -- random.Random(seed).shuffle(list(range(n))). A
+    # rater who has the seed AND the fire/hold split can replay that permutation and
+    # invert it to recover which pre-shuffle slot (fire-block or hold-block) every
+    # shuffled row came from, deanonymizing the whole sheet without ever opening this
+    # file. Keeping both facts out of every rater-facing artifact (README.md, the
+    # CSV itself) is the fix; this file is 0600 and the rater is told not to open it.
+    key_out = dict(key)
+    key_out["_seed"] = a.seed
+    key_out["_fire_count"] = len(fire)
+    key_out["_hold_count"] = len(hold)
     cn.write_text_private(os.path.join(a.out_dir, "answer_key.json"),
-                          json.dumps(key, indent=2, sort_keys=True))
+                          json.dumps(key_out, indent=2, sort_keys=True))
     readme = f"""# Prospective reminder spot check -- {a.since} to {a.until}
 
-{len(sheet_rows)} rows ({len(fire)} SHADOW would-fires, {len(hold)} held items --
-already_resolved/not_now/cancel -- mixed in blind). Each row is a real `context`
-(the last few turns before the reminder would have fired) and the candidate
-`reminder` text. Shuffled with seed {a.seed!r} (reproducible from the same log +
-memory.db window).
+{len(sheet_rows)} rows, shuffled. Each row is a real `context` (the last few
+turns before the reminder would have fired) and the candidate `reminder` text.
+The shuffle seed and the fire/hold split are recorded ONLY in answer_key.json
+(private) -- never here, and never derivable from this file.
 
 > {QUESTION}
 

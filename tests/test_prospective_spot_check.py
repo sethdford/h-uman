@@ -11,9 +11,22 @@ import stat
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import prospective_spot_check as psc  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_addressbook(monkeypatch):
+    """Never touch the real macOS AddressBook from a test (rule: hermetic tests
+    only). resolve_contact_name_tokens() (scripts/blind_ab/make_rating_sheet.py)
+    honors this env var itself and returns an empty token set without reading
+    the AddressBook. A test that needs a SPECIFIC name list instead monkeypatches
+    psc.resolve_contact_name_tokens directly (see
+    test_build_resolves_and_redacts_contact_names below)."""
+    monkeypatch.setenv("HU_BLIND_AB_SKIP_ADDRESSBOOK", "1")
 
 
 def make_db(tmp_path, n):
@@ -58,7 +71,11 @@ def test_build_mixes_fire_and_hold_blind(tmp_path):
     assert stat.S_IMODE(out.stat().st_mode) == 0o700
     rows = list(csv.DictReader(open(out / "rating_sheet.csv")))
     key = json.loads((out / "answer_key.json").read_text())
-    assert len(rows) == 60 and sorted(set(key.values())) == ["fire", "hold"]
+    # answer_key.json also carries private "_"-prefixed metadata (seed, per-class
+    # counts -- see test_readme_and_key_keep_seed_and_split_private below); only
+    # the non-underscore entries are the {id: "fire"|"hold"} map.
+    labels = {k: v for k, v in key.items() if not k.startswith("_")}
+    assert len(rows) == 60 and sorted(set(labels.values())) == ["fire", "hold"]
     assert set(rows[0]) == {"id", "context", "reminder", "answer"}
     assert "verdict" not in (out / "rating_sheet.csv").read_text()
     for f in ("rating_sheet.csv", "answer_key.json", "README.md"):
@@ -219,3 +236,109 @@ def test_score_precision_is_null_with_zero_fire_rated(tmp_path):
     assert res["precision"] is None
     assert res["pass"] is False
     assert psc.main(["score", "--out-dir", str(out)]) == 2
+
+
+# ---------------------------------------------------------------------------
+# Fix round 1: blindness (seed/split must never reach a rater-facing artifact)
+# and the name-token resolver (build() must call it and actually redact names).
+# ---------------------------------------------------------------------------
+
+def test_readme_and_key_keep_seed_and_split_private(tmp_path):
+    """CRITICAL fix: README.md must never carry the shuffle seed or the
+    fire/hold split -- a rater with both can replay Fisher-Yates
+    (random.Random(seed).shuffle(list(range(n)))) and invert it to recover
+    every row's pre-shuffle (fire-block vs hold-block) position, deanonymizing
+    the sheet without ever opening answer_key.json. Both facts must instead
+    live ONLY in the private, 0600 answer_key.json."""
+    seed = 918273  # distinctive: won't collide with any other number README prints
+    rc, out = build(tmp_path, 30, seed=seed)
+    assert rc == 0
+    readme_text = (out / "README.md").read_text()
+    assert str(seed) not in readme_text
+    # The old leaky phrasing named both class counts together in one sentence
+    # ("{fire} SHADOW would-fires, {hold} held items"); that sentence must be
+    # gone. (README legitimately still uses the words "fire"/"held" elsewhere,
+    # e.g. describing what the score command measures -- that is vocabulary,
+    # not this sheet's actual split, so it is not banned outright.)
+    assert "would-fires," not in readme_text
+    assert "held items" not in readme_text
+
+    key = json.loads((out / "answer_key.json").read_text())
+    assert key["_seed"] == seed
+    assert key["_fire_count"] == 30
+    assert key["_hold_count"] == 30
+
+
+def test_readme_seed_absence_defeats_permutation_reconstruction(tmp_path):
+    """Demonstrates the actual exploit the CRITICAL fix closes: given the seed
+    and the row count, an attacker can reconstruct the exact Fisher-Yates
+    permutation and therefore the pre-shuffle (fire-block/hold-block) index of
+    every shuffled row -- so the seed alone (with a public, fixed pre-shuffle
+    fire-then-hold order) is sufficient to deanonymize. Confirms this sheet's
+    README carries no usable seed for that reconstruction."""
+    import random as _random
+
+    seed = 42424242
+    rc, out = build(tmp_path, 30, seed=seed)
+    assert rc == 0
+    n = len(list(csv.DictReader(open(out / "rating_sheet.csv"))))
+
+    # The exploit: replay the exact permutation build() used.
+    order = list(range(n))
+    _random.Random(seed).shuffle(order)
+    assert len(order) == n  # the reconstruction is real and well-formed
+
+    # The defense: README (the only rater-facing artifact besides the CSV
+    # itself) never named this seed, so a rater cannot perform the replay above.
+    readme_text = (out / "README.md").read_text()
+    assert str(seed) not in readme_text
+
+
+def test_build_resolves_and_redacts_contact_names(tmp_path, monkeypatch):
+    """IMPORTANT fix: build() must resolve contact name tokens (the same way
+    scripts/blind_ab/make_rating_sheet.py does) and pass them to EVERY
+    redact() call, so a real name typed into a message body (not just a
+    phone number) is scrubbed before it reaches rating_sheet.csv."""
+    calls = []
+
+    def fake_resolver():
+        calls.append(1)
+        return {"John", "Smith"}
+
+    monkeypatch.setattr(psc, "resolve_contact_name_tokens", fake_resolver)
+
+    n = 30
+    db_path = tmp_path / "memory_names.db"
+    con = sqlite3.connect(db_path)
+    con.execute("CREATE TABLE prospective_memories(id INTEGER PRIMARY KEY, trigger_type TEXT, "
+                "trigger_value TEXT, action TEXT, contact_id TEXT, created_at INTEGER)")
+    con.execute("CREATE TABLE messages(id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, "
+                "content TEXT, created_at TEXT)")
+    for i in range(1, 2 * n + 1):
+        contact = f"+1555000{i:04d}"
+        content = "call John Smith back" if i == 1 else f"hello {i}"
+        con.execute("INSERT INTO prospective_memories VALUES(?, 'keyword', 'cue', ?, ?, 0)",
+                    (i, f"action {i}", contact))
+        con.execute("INSERT INTO messages(session_id,role,content,created_at) VALUES(?, 'user', "
+                    "?, '2026-10-01 00:00:00')", (contact, content))
+    con.commit()
+    con.close()
+
+    out = tmp_path / "sheet_names"
+    rc = psc.main(["build", "--log", make_log(tmp_path, n), "--memory-db", str(db_path),
+                   "--since", "2026-10-01", "--until", "2026-10-03",
+                   "--out-dir", str(out), "--seed", "9"])
+    assert rc == 0
+    assert calls, "resolve_contact_name_tokens was never invoked by build() -- " \
+                  "a regression back to a no-arg redact() call would show up here"
+
+    sheet_text = (out / "rating_sheet.csv").read_text()
+    readme_text = (out / "README.md").read_text()
+    key_text = (out / "answer_key.json").read_text()
+    for leaked in ("John", "Smith"):
+        assert leaked not in sheet_text
+        assert leaked not in readme_text
+        assert leaked not in key_text
+    # Proves the tokens actually reached redact() and transformed the text
+    # (not merely that "John Smith" never appeared some other way).
+    assert "[name]" in sheet_text
