@@ -172,10 +172,20 @@ static const char k_director_system[] =
     "'mention the cat', 'reference yesterday's meeting'. Allowed: 'short empathetic "
     "reaction, 5 words', 'busy, one-word reply', 'end it with a joke'. Recalling a REAL "
     "shared memory is the ACTOR's job from what it actually knows — never yours to "
-    "invent.\n\n"
+    "invent.\n"
+    "- When they ask how something in Seth's life went, whether he did something, or how "
+    "someone is doing (a meeting, a concert, a trip, a person's news) and the Recent thread "
+    "does not establish it, Seth has no answer on record. Never direct an outcome. Direct: "
+    "'don't say how it went, ask which one or say not sure yet, one line'.\n\n";
+
+/* Split from k_director_system: one literal would pass the 4095-byte ISO C
+ * limit (-Woverlength-strings). hu_daemon_director_system_prompt joins them. */
+static const char k_director_examples[] =
     "Examples:\n"
     "action:text|delay_s:3|direction:Just acknowledge the hard news, 5 words, don't fix it\n"
     "action:text|delay_s:2|direction:Greet back, match his energy, one line\n"
+    "action:text|delay_s:4|direction:don't say how it went, ask which meeting, one line "
+    "(they asked how a meeting went; nothing in the thread about it)\n"
     "action:tapback|reaction:heart (they sent a photo)\n"
     "action:tapback|reaction:haha (they said something funny)\n"
     "action:tapback|reaction:thumbs_up (simple acknowledgment)\n"
@@ -214,14 +224,16 @@ static const char k_director_forms[] =
 size_t hu_daemon_director_system_prompt(char *buf, size_t cap) {
     if (!buf || cap == 0)
         return 0;
-    size_t base = sizeof(k_director_system) - 1;
+    size_t rules = sizeof(k_director_system) - 1;
+    size_t base = rules + sizeof(k_director_examples) - 1;
     bool forms = hu_gate_mode_from_env("HU_DIRECTOR_FORMS", HU_GATE_OFF) != HU_GATE_OFF;
     size_t extra = forms ? sizeof(k_director_forms) - 1 : 0;
     if (base + extra + 1 > cap) {
         buf[0] = '\0';
         return 0;
     }
-    memcpy(buf, k_director_system, base);
+    memcpy(buf, k_director_system, rules);
+    memcpy(buf + rules, k_director_examples, sizeof(k_director_examples) - 1);
     if (extra)
         memcpy(buf + base, k_director_forms, extra);
     buf[base + extra] = '\0';
@@ -377,7 +389,8 @@ bool hu_daemon_director_call(hu_allocator_t *alloc, const char *combined, size_t
     }
 
     /* Heap, per call: the director can run for several contacts at once. */
-    size_t sys_cap = sizeof(k_director_system) + sizeof(k_director_forms);
+    size_t sys_cap =
+        sizeof(k_director_system) + sizeof(k_director_examples) + sizeof(k_director_forms);
     char *sys_prompt = alloc->alloc(alloc->ctx, sys_cap);
     if (!sys_prompt)
         return false;
