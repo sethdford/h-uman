@@ -11,6 +11,7 @@
 #include "human/memory/sql_transaction.h"
 #include <sqlite3.h>
 #include <stdarg.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -197,7 +198,8 @@ void hu_superhuman_inside_joke_free(hu_allocator_t *alloc, hu_inside_joke_t *arr
  * inserted. Best-effort — that ledger row is the record; a failed mirror is
  * logged and the time path misses this one item. A commitment and its paired
  * delayed follow-up collapse into one row (the upsert dedupes on contact +
- * action + due_at). */
+ * action, IGNORING due_at -- see prospective_repo.h's
+ * hu_prospective_repo_upsert_time contract). */
 static void pm_mirror_time(sqlite3 *db, const char *kind, const char *contact, size_t contact_len,
                            const char *text, size_t text_len, int64_t due_at,
                            hu_prospective_source_t source) {
@@ -226,8 +228,9 @@ static void pm_mirror_time(sqlite3 *db, const char *kind, const char *contact, s
  * When that rephrasing is not safe (returns 0), the mirror is skipped
  * entirely -- the ledger row stays the record, and the skip is logged with
  * a running count so the miss is visible, never silent (fail toward
- * silence, not toward misattribution). */
-static size_t s_commitment_mirror_skipped = 0;
+ * silence, not toward misattribution). Atomic: the daemon calls into this
+ * from multiple threads (M1 fix round), so a plain size_t++ would race. */
+static atomic_size_t s_commitment_mirror_skipped = 0;
 
 static bool pm_who_is_contact(const char *who, size_t who_len) {
     if (!who || who_len == 0)
@@ -250,11 +253,11 @@ static void pm_mirror_owned_time(sqlite3 *db, const char *kind, const char *cont
      * rephrase either -- skip it the same way a failed rewrite is skipped. */
     char text_z[512];
     if (text_len >= sizeof(text_z)) {
-        s_commitment_mirror_skipped++;
+        size_t skipped = atomic_fetch_add(&s_commitment_mirror_skipped, 1) + 1;
         hu_log_warn("superhuman", NULL,
                     "prospective time mirror skipped (%zu total): contact %s text too long to "
                     "rephrase safely",
-                    s_commitment_mirror_skipped, kind);
+                    skipped, kind);
         return;
     }
     memcpy(text_z, text, text_len);
@@ -264,11 +267,11 @@ static void pm_mirror_owned_time(sqlite3 *db, const char *kind, const char *cont
     size_t action_len =
         hu_prospective_commitment_action(text_z, true, action_buf, sizeof(action_buf));
     if (action_len == 0) {
-        s_commitment_mirror_skipped++;
+        size_t skipped = atomic_fetch_add(&s_commitment_mirror_skipped, 1) + 1;
         hu_log_warn("superhuman", NULL,
                     "prospective time mirror skipped (%zu total): contact %s could not be "
                     "rephrased safely",
-                    s_commitment_mirror_skipped, kind);
+                    skipped, kind);
         return;
     }
     pm_mirror_time(db, kind, contact, contact_len, action_buf, action_len, due_at, source);

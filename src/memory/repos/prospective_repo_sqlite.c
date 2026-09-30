@@ -401,21 +401,40 @@ hu_error_t hu_prospective_repo_upsert_time(sqlite3 *db, const char *contact, siz
     return HU_OK;
 }
 
-/* Matching is by contact + text (contact_id + description / contact_id +
- * topic, exact): by design, identically-worded open items for one contact
- * are treated as one promise, so this retires every ledger row that reads
- * as the same commitment for that contact, not a specific row id. Each
- * WHERE also requires the ledger's own "still open" state (status='pending'
- * / sent=0), so a second call for an already-settled row matches nothing
- * and is a no-op. */
-hu_error_t hu_prospective_repo_sync_source(sqlite3 *db, const hu_prospective_item_t *it,
-                                           hu_prospective_status_t to, int64_t now) {
-    const char *ledger = to == HU_PM_DONE       ? "followed_up"
-                         : to == HU_PM_CANCELED ? "canceled"
-                         : to == HU_PM_EXPIRED  ? "expired"
-                                                : NULL;
-    if (!db || !it || !it->contact_id[0] || !it->action[0] || !ledger)
-        return HU_ERR_INVALID_ARGUMENT;
+/* Fix round 2, I1: it->trigger_value is the source key pm_mirror_time
+ * (src/memory/superhuman.c) wrote when this row was inserted --
+ * "commitment:<rowid>" or "followup:<rowid>". Parse it and retire BY
+ * ROWID, not by matching it->action as literal ledger text: for a
+ * contact-owned commitment, hu_superhuman_commitment_store's mirror
+ * rephrases the contact's raw words through hu_prospective_commitment_
+ * action (e.g. "text you when I land" -> "ask if they still need to text
+ * you when they land") before they ever reach this row's `action` column,
+ * so `action` never equals the commitments/delayed_followups row's own
+ * first-person text. A text-match UPDATE then matches zero rows, the
+ * ledger row stays 'pending'/unsent forever, and
+ * hu_superhuman_commitment_list_due / hu_superhuman_delayed_followup_
+ * list_due keep resurfacing a promise that has already settled. Rows with
+ * no key, or a key this parser rejects (pre-mirror legacy rows), fall
+ * back to the original text match. */
+static bool pm_parse_source_key(const char *key, const char *prefix, int64_t *id_out) {
+    size_t plen = strlen(prefix);
+    if (strncmp(key, prefix, plen) != 0 || key[plen] != ':')
+        return false;
+    const char *digits = key + plen + 1;
+    if (!*digits)
+        return false;
+    int64_t v = 0;
+    for (const char *p = digits; *p; p++) {
+        if (!isdigit((unsigned char)*p))
+            return false;
+        v = v * 10 + (*p - '0');
+    }
+    *id_out = v;
+    return true;
+}
+
+static hu_error_t pm_sync_source_by_text(sqlite3 *db, const hu_prospective_item_t *it,
+                                         const char *ledger, int64_t now) {
     sqlite3_stmt *st = NULL;
     if (sqlite3_prepare_v2(db,
                            "UPDATE commitments SET status = ?1, followed_up_at = ?2 WHERE "
@@ -440,6 +459,99 @@ hu_error_t hu_prospective_repo_sync_source(sqlite3 *db, const hu_prospective_ite
     rc = sqlite3_step(st);
     sqlite3_finalize(st);
     return rc == SQLITE_DONE ? HU_OK : HU_ERR_MEMORY_BACKEND;
+}
+
+/* The F20 keeper writes the SAME raw description to both commitments and
+ * delayed_followups for a contact-owned commitment with a deadline (see
+ * superhuman.c's F20 block calling hu_superhuman_commitment_store then
+ * hu_superhuman_delayed_followup_schedule with the same desc_buf). The
+ * commitment's description column doesn't change under a status
+ * transition, so read it once (by id, before it's retired) and use it to
+ * find that twin, rather than trusting it->action (the rephrased mirror
+ * text) to match either ledger's raw column. */
+static hu_error_t pm_sync_source_by_commitment_id(sqlite3 *db, const char *contact_id,
+                                                  const char *ledger, int64_t now,
+                                                  int64_t commitment_id) {
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(db, "SELECT description FROM commitments WHERE id = ?1", -1, &st,
+                           NULL) != SQLITE_OK)
+        return HU_ERR_MEMORY_BACKEND;
+    sqlite3_bind_int64(st, 1, commitment_id);
+    int rc = sqlite3_step(st);
+    char desc[512];
+    desc[0] = '\0';
+    bool have_desc = false;
+    if (rc == SQLITE_ROW) {
+        const char *d = (const char *)sqlite3_column_text(st, 0);
+        size_t dlen = d ? (size_t)sqlite3_column_bytes(st, 0) : 0;
+        size_t n = dlen < sizeof(desc) - 1 ? dlen : sizeof(desc) - 1;
+        if (d && n > 0) {
+            memcpy(desc, d, n);
+            desc[n] = '\0';
+            have_desc = true;
+        }
+    } else if (rc != SQLITE_DONE) {
+        sqlite3_finalize(st);
+        return HU_ERR_MEMORY_BACKEND;
+    }
+    sqlite3_finalize(st);
+
+    st = NULL;
+    if (sqlite3_prepare_v2(db,
+                           "UPDATE commitments SET status = ?1, followed_up_at = ?2 WHERE id = "
+                           "?3 AND status = 'pending'",
+                           -1, &st, NULL) != SQLITE_OK)
+        return HU_ERR_MEMORY_BACKEND;
+    sqlite3_bind_text(st, 1, ledger, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(st, 2, now);
+    sqlite3_bind_int64(st, 3, commitment_id);
+    rc = sqlite3_step(st);
+    sqlite3_finalize(st);
+    if (rc != SQLITE_DONE)
+        return HU_ERR_MEMORY_BACKEND;
+
+    if (!have_desc)
+        return HU_OK; /* no such commitment row (or empty description): no twin to find */
+
+    st = NULL;
+    if (sqlite3_prepare_v2(db,
+                           "UPDATE delayed_followups SET sent = 1 WHERE contact_id = ?1 AND "
+                           "topic = ?2 AND sent = 0",
+                           -1, &st, NULL) != SQLITE_OK)
+        return HU_ERR_MEMORY_BACKEND;
+    sqlite3_bind_text(st, 1, contact_id, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 2, desc, -1, SQLITE_STATIC);
+    rc = sqlite3_step(st);
+    sqlite3_finalize(st);
+    return rc == SQLITE_DONE ? HU_OK : HU_ERR_MEMORY_BACKEND;
+}
+
+static hu_error_t pm_sync_source_by_followup_id(sqlite3 *db, int64_t followup_id) {
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(db, "UPDATE delayed_followups SET sent = 1 WHERE id = ?1 AND sent = 0",
+                           -1, &st, NULL) != SQLITE_OK)
+        return HU_ERR_MEMORY_BACKEND;
+    sqlite3_bind_int64(st, 1, followup_id);
+    int rc = sqlite3_step(st);
+    sqlite3_finalize(st);
+    return rc == SQLITE_DONE ? HU_OK : HU_ERR_MEMORY_BACKEND;
+}
+
+hu_error_t hu_prospective_repo_sync_source(sqlite3 *db, const hu_prospective_item_t *it,
+                                           hu_prospective_status_t to, int64_t now) {
+    const char *ledger = to == HU_PM_DONE       ? "followed_up"
+                         : to == HU_PM_CANCELED ? "canceled"
+                         : to == HU_PM_EXPIRED  ? "expired"
+                                                : NULL;
+    if (!db || !it || !it->contact_id[0] || !it->action[0] || !ledger)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    int64_t id = 0;
+    if (pm_parse_source_key(it->trigger_value, "commitment", &id))
+        return pm_sync_source_by_commitment_id(db, it->contact_id, ledger, now, id);
+    if (pm_parse_source_key(it->trigger_value, "followup", &id))
+        return pm_sync_source_by_followup_id(db, id);
+    return pm_sync_source_by_text(db, it, ledger, now);
 }
 
 #endif /* HU_ENABLE_SQLITE */

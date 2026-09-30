@@ -542,8 +542,9 @@ size_t hu_prospective_commitment_action(const char *summary, bool contact_commit
     size_t slen = strlen(summary);
     /* No named array here (dead-strip-ratchet.md): a function-local static
      * gets its own `_hu_commitment_action.k_leading`-shaped symbol, and
-     * this function has no production caller yet, so the whole thing
-     * would count as dead+unreferenced. Three inline checks, no symbol. */
+     * three inline checks over three short literals are simpler than a
+     * lookup table anyway. (Production caller: pm_mirror_owned_time in
+     * src/memory/superhuman.c, added by the prospective-memory-v2 F4 fix.) */
     if (pm_prefix_ci(summary, slen, "I'll ")) {
         summary += 5;
         slen -= 5;

@@ -14,6 +14,7 @@
 #include "human/memory.h"
 #include "human/memory/prospective_policy.h"
 #include "human/memory/prospective_repo.h"
+#include "human/memory/superhuman.h"
 #include <sqlite3.h>
 #include <stdio.h>
 #include <string.h>
@@ -552,6 +553,127 @@ static void repo_sync_source_second_call_is_a_no_op(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
+/* Fix round 2, I1: a who="them" F20 pair mirrors the CONTACT's raw
+ * description ("text you when I land") as a REPHRASED action ("ask if
+ * they still need to text you when they land") -- so it->action can never
+ * text-match either ledger row's own raw column. sync_source must retire
+ * both twins by the trigger_value key ("commitment:<id>") instead. */
+static void repo_sync_source_retires_by_commitment_id_for_them_pair(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    const char *desc = "text you when I land";
+    HU_ASSERT_EQ(hu_superhuman_commitment_store(&mem, &alloc, "+15550000009", 12, desc,
+                                                strlen(desc), "them", 4, 9000),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, "+15550000009", 12, desc,
+                                                         strlen(desc), 9000, "them", 4),
+                 HU_OK);
+    /* pre: both ledger rows are still open */
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM commitments WHERE status='pending'"), (int64_t)1);
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM delayed_followups WHERE sent=0"), (int64_t)1);
+    /* the F20 pair collapsed to ONE mirrored row (Task 3 dedupe + fix round 1) */
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE cue_kind='time'"),
+                 (int64_t)1);
+
+    hu_prospective_item_t it;
+    memset(&it, 0, sizeof(it));
+    it.cue_kind = HU_PM_CUE_TIME;
+    it.id = q_int(db, "SELECT id FROM prospective_memories WHERE cue_kind='time'");
+    q_text(db, "SELECT trigger_value FROM prospective_memories WHERE cue_kind='time'",
+           it.trigger_value, sizeof(it.trigger_value));
+    q_text(db, "SELECT action FROM prospective_memories WHERE cue_kind='time'", it.action,
+           sizeof(it.action));
+    snprintf(it.contact_id, sizeof(it.contact_id), "+15550000009");
+    HU_ASSERT_STR_EQ(it.trigger_value, "commitment:1");
+    /* the mirrored action is the rephrasing, never the ledger's raw text */
+    HU_ASSERT_STR_EQ(it.action, "ask if they still need to text you when they land");
+
+    HU_ASSERT_EQ(hu_prospective_repo_sync_source(db, &it, HU_PM_DONE, 9500), HU_OK);
+
+    /* post: BOTH twins retired, even though it.action never equals either
+     * ledger row's raw ("text you when I land") description/topic */
+    char s[64];
+    q_text(db, "SELECT status FROM commitments WHERE id=1", s, sizeof(s));
+    HU_ASSERT_STR_EQ(s, "followed_up");
+    HU_ASSERT_EQ(q_int(db, "SELECT sent FROM delayed_followups"), (int64_t)1);
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* Fix round 2, I1, test (2): a lone "followup:M" row (no paired
+ * commitment -- e.g. daemon_dated_followup.c's situation-frame path, who
+ * NULL) settles by retiring that delayed_followups row by id. */
+static void repo_sync_source_retires_lone_followup_by_id(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    const char *topic = "they mentioned surgery tomorrow";
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, "+15550000010", 12, topic,
+                                                         strlen(topic), 8000, NULL, 0),
+                 HU_OK);
+    /* pre: open */
+    HU_ASSERT_EQ(q_int(db, "SELECT sent FROM delayed_followups"), (int64_t)0);
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM commitments"), (int64_t)0);
+
+    hu_prospective_item_t it;
+    memset(&it, 0, sizeof(it));
+    it.cue_kind = HU_PM_CUE_TIME;
+    it.id = q_int(db, "SELECT id FROM prospective_memories WHERE cue_kind='time'");
+    q_text(db, "SELECT trigger_value FROM prospective_memories WHERE cue_kind='time'",
+           it.trigger_value, sizeof(it.trigger_value));
+    snprintf(it.action, sizeof(it.action), "%s", topic);
+    snprintf(it.contact_id, sizeof(it.contact_id), "+15550000010");
+    HU_ASSERT_STR_EQ(it.trigger_value, "followup:1");
+
+    HU_ASSERT_EQ(hu_prospective_repo_sync_source(db, &it, HU_PM_CANCELED, 8500), HU_OK);
+
+    /* post: retired by id; no commitments row ever existed to touch */
+    HU_ASSERT_EQ(q_int(db, "SELECT sent FROM delayed_followups"), (int64_t)1);
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM commitments"), (int64_t)0);
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* Fix round 2, I1, test (3): the owner/"me" path -- where the mirrored
+ * action IS the raw verbatim text -- still retires correctly through the
+ * NEW id-keyed path (not just through the old text-match fallback the
+ * two tests above already cover). */
+static void repo_sync_source_retires_by_commitment_id_for_owner_pair(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    const char *desc = "call the dentist";
+    HU_ASSERT_EQ(hu_superhuman_commitment_store(&mem, &alloc, "+15550000011", 12, desc,
+                                                strlen(desc), "me", 2, 9000),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, "+15550000011", 12, desc,
+                                                         strlen(desc), 9000, "me", 2),
+                 HU_OK);
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM commitments WHERE status='pending'"), (int64_t)1);
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM delayed_followups WHERE sent=0"), (int64_t)1);
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE cue_kind='time'"),
+                 (int64_t)1);
+
+    hu_prospective_item_t it;
+    memset(&it, 0, sizeof(it));
+    it.cue_kind = HU_PM_CUE_TIME;
+    it.id = q_int(db, "SELECT id FROM prospective_memories WHERE cue_kind='time'");
+    q_text(db, "SELECT trigger_value FROM prospective_memories WHERE cue_kind='time'",
+           it.trigger_value, sizeof(it.trigger_value));
+    q_text(db, "SELECT action FROM prospective_memories WHERE cue_kind='time'", it.action,
+           sizeof(it.action));
+    snprintf(it.contact_id, sizeof(it.contact_id), "+15550000011");
+    HU_ASSERT_STR_EQ(it.trigger_value, "commitment:1");
+    HU_ASSERT_STR_EQ(it.action, "call the dentist"); /* owner path: verbatim, unchanged */
+
+    HU_ASSERT_EQ(hu_prospective_repo_sync_source(db, &it, HU_PM_DONE, 9500), HU_OK);
+
+    char s[64];
+    q_text(db, "SELECT status FROM commitments WHERE id=1", s, sizeof(s));
+    HU_ASSERT_STR_EQ(s, "followed_up");
+    HU_ASSERT_EQ(q_int(db, "SELECT sent FROM delayed_followups"), (int64_t)1);
+    mem.vtable->deinit(mem.ctx);
+}
+
 void run_prospective_repo_sqlite_tests(void) {
     HU_TEST_SUITE("prospective repo");
     HU_RUN_TEST(ensure_schema_adds_typed_columns_and_maps_fired);
@@ -567,6 +689,9 @@ void run_prospective_repo_sqlite_tests(void) {
     HU_RUN_TEST(repo_upsert_time_dedupes_open_row_despite_whitespace_and_case);
     HU_RUN_TEST(repo_sync_source_retires_ledger_twins);
     HU_RUN_TEST(repo_sync_source_second_call_is_a_no_op);
+    HU_RUN_TEST(repo_sync_source_retires_by_commitment_id_for_them_pair);
+    HU_RUN_TEST(repo_sync_source_retires_lone_followup_by_id);
+    HU_RUN_TEST(repo_sync_source_retires_by_commitment_id_for_owner_pair);
 }
 
 #else
