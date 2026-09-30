@@ -123,6 +123,13 @@ static void commitment_command_samples_a_real_database_and_scores_it(void) {
     hu_superhuman_commitment_free(&alloc, rows, n);
     mem.vtable->deinit(mem.ctx);
 
+    /* An output path that climbs out of its directory is refused, not written. */
+    char sneaky[160];
+    snprintf(sneaky, sizeof(sneaky), "%s/../hu_commit_sneaky.tsv", dir);
+    char *bad_argv[] = {"human", "commitments", "sample", "--db", db, "--out", sneaky, NULL};
+    HU_ASSERT_EQ(cmd_commitments(&alloc, 7, bad_argv), HU_ERR_IO);
+    HU_ASSERT_EQ(access("/tmp/hu_commit_sneaky.tsv", F_OK), -1);
+
     char *argv[] = {"human", "commitments", "sample", "--db", db, "--out", sheet, NULL};
     HU_ASSERT_EQ(cmd_commitments(&alloc, 7, argv), HU_OK);
     struct stat st;

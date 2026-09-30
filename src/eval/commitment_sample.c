@@ -253,10 +253,17 @@ static hu_error_t sample(hu_allocator_t *alloc, int argc, char **argv) {
         have_persona = hu_persona_load(alloc, pname, strlen(pname), &persona) == HU_OK;
 
     if (err == HU_OK) {
-        /* The sheet quotes private messages: owner-only, and no traversal. */
+        /* The sheet quotes private messages: owner-only. The path comes from
+         * argv or HU_STATE_DIR, so refuse traversal here, next to the open,
+         * as minja_guard.c does (CodeQL cpp/path-injection). */
         FILE *f = NULL;
-        if (hu_io_secure_open(out_path, HU_IO_PERM_SECRET, "w", &f) != HU_OK)
+        if (strstr(out_path, "..") != NULL || strstr(out_path, "%2e") != NULL ||
+            strstr(out_path, "%2E") != NULL) {
+            fprintf(stderr, "commitments sample: refusing an output path containing '..'\n");
             f = NULL;
+        } else if (hu_io_secure_open(out_path, HU_IO_PERM_SECRET, "w", &f) != HU_OK) {
+            f = NULL;
+        }
         int w = f ? hu_commitment_sample_write(f, rows, count, have_persona ? &persona : NULL) : -1;
         if (!f || fclose(f) != 0 || w < 0) {
             fprintf(stderr, "commitments sample: cannot write %s\n", out_path);
