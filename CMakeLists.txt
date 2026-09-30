@@ -1280,6 +1280,7 @@ set(HU_CORE_SOURCES
     src/app/cli_ctl.c
     src/app/cli_help.c
     src/eval/cli_evaluation.c
+    src/eval/commitment_sample.c
     src/observability/cost.c
     src/observability/usage.c
     src/security/oauth.c
@@ -4236,6 +4237,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_daemon_voice_first.c
     tests/test_daemon_expressive.c
     tests/test_daemon_share_queue.c
+    tests/test_commitment_sample.c
     tests/test_agent_fit_history.c
     tests/test_prospective.c
     tests/test_eval_score.c
