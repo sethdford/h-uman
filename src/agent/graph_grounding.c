@@ -824,3 +824,16 @@ void hu_agent_load_graph_grounding(hu_agent_t *agent, void *loader_v, const char
         *graph_ctx_len = 0;
     }
 }
+
+bool hu_graph_grounding_log_rendered(size_t composed_len, size_t rendered_len) {
+    if (composed_len == 0)
+        return true;
+    if (rendered_len == 0) {
+        hu_log_warn("graph_grounding", NULL,
+                    "live: %zu composed bytes did NOT reach the prompt (0 rendered)", composed_len);
+        return false;
+    }
+    hu_log_info("graph_grounding", NULL, "live: rendered %zu prompt bytes for %zu composed",
+                rendered_len, composed_len);
+    return true;
+}

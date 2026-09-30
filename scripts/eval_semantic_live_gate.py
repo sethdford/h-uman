@@ -73,9 +73,16 @@ recall_bytes, ei, reality, anti_ai for each arm) plus per-arm EI/reality score
 histograms — no reply text, no incoming-message text; every number in the
 verdict is traceable to a specific context id.
 
-Stdlib only, except pytest for the sibling test file. No writes to
-~/.human/config.json, no service restarts, no writes to the live memory.db
-(a COPY is made under /tmp and used for search).
+Stdlib only, except pytest for the sibling test file (and reusing
+scripts/second_opinion/backend.GemmaBackend's stdlib-only HTTP client for the
+local judge). No writes to ~/.human/config.json, no service restarts, no
+writes to the live memory.db (a COPY is made under /tmp and used for search).
+
+The EI/reality judge backend (--judge-backend, default "local") is separate
+from the second-opinion-lane policy this mirrors: local Gemma 4 31B on
+127.0.0.1:8743 never leaves the Mac; Vertex Gemini is opt-in (--judge-backend
+vertex) and prints a stderr notice every time it is used, because it sends
+incoming-message text and generated replies to Google Cloud.
 """
 from __future__ import annotations
 
@@ -99,6 +106,11 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import humanness_compose as hc  # noqa: E402
 import eval_blinded_ab as eab  # noqa: E402  (production_system_prompt, ADC token helper)
+# The owner's standing policy (2026-09-29, second_opinion/backend.py): any job
+# that reads real message text defaults to the LOCAL Gemma judge; Vertex is
+# opt-in only, behind --judge-backend vertex, with a stderr notice on every
+# use. Reuse GemmaBackend's own HTTP client rather than re-implementing it.
+from second_opinion.backend import GemmaBackend, GEMMA_MODEL, GEMMA_PORT, GEMMA_PYTHON  # noqa: E402
 
 REPO_ROOT = HERE.parent
 
@@ -172,6 +184,19 @@ GRAPH_BOOST_LIMITATION = (
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_PROJECT_ID = os.environ.get("GOOGLE_CLOUD_PROJECT", "johnb-2025")
 GEMINI_MODEL = "gemini-3.1-pro-preview"
+
+# Local judge (default backend) — Gemma 4 31B served locally by mlx_lm.server,
+# same model/port/python as the second-opinion lane (scripts/second_opinion/
+# backend.py). Never leaves the Mac.
+LOCAL_JUDGE_BASE_URL = f"http://127.0.0.1:{GEMMA_PORT}"
+LOCAL_JUDGE_MODEL = GEMMA_MODEL
+# The exact command that starts the server (mirrors backend.py:serve_gemma's
+# own `cmd` list) — printed verbatim in the preflight-refusal message so an
+# operator can copy-paste it rather than go spelunking for the recipe.
+LOCAL_JUDGE_START_CMD = (
+    f"{GEMMA_PYTHON} -m mlx_lm.server --model {GEMMA_MODEL} --host 127.0.0.1 "
+    f"--port {GEMMA_PORT}"
+)
 
 # gemini-3.x shares maxOutputTokens between invisible thinking and the visible
 # reply (CLAUDE.md gotcha) — an unset budget can starve the JSON body. Mirrors
@@ -330,6 +355,96 @@ def preflight_judge():
         return r is not None
     except Exception:  # noqa: BLE001
         return False
+
+
+# --------------------------------------------------------------------------
+# Local judge (default backend) — Gemma 4 31B via GemmaBackend, no
+# responseSchema (mlx_lm.server doesn't offer one), so the prompt demands
+# strict JSON and the parse is defensive: first balanced {...} object in the
+# text, ints 1..5. Parse failure or an out-of-range value returns None —
+# NEVER a default/fabricated score (.claude/rules/no-number-without-a-measurement.md)
+# — which the caller already treats as "no judge score for this item" and
+# counts toward the existing --min-n refusal, same as a Vertex judge miss.
+# --------------------------------------------------------------------------
+_LOCAL_EI_SYSTEM = "You are an expert judge of interpersonal texting quality."
+
+_LOCAL_EI_PROMPT_TEMPLATE = """Incoming message: {incoming!r}
+Reply being scored: {reply!r}
+
+Score the REPLY on two dimensions, integers 1 (worst) to 5 (best):
+
+1. emotional_intelligence: does the reply respond to the FEELING behind the
+   incoming message, not only to its literal content? A reply that answers
+   the words but ignores an obvious emotional subtext (stress, excitement,
+   grief, affection) should score low even if factually correct.
+
+2. reality_awareness: does the reply keep hypothetical scenarios, other
+   people's facts, and the sender's own situation separate from the user's
+   own real life and facts? A reply with nothing hypothetical to confuse
+   should score 5 by default.
+
+Respond with ONLY a single strict JSON object and nothing else — no markdown
+fences, no reasoning, no prose before or after it:
+{{"emotional_intelligence": <int 1-5>, "reality_awareness": <int 1-5>}}
+"""
+
+
+def _first_json_object(text):
+    """Return the first balanced {...} substring in text, or None. Gemma has
+    no responseSchema, so the model can (and sometimes does) wrap the JSON in
+    a sentence or a code fence; this scans past any prefix rather than
+    assuming the response starts with '{'."""
+    start = text.find("{")
+    while start != -1:
+        depth = 0
+        for i in range(start, len(text)):
+            ch = text[i]
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start:i + 1]
+        start = text.find("{", start + 1)
+    return None
+
+
+def judge_ei_reality_local(incoming, reply, backend):
+    """Local-Gemma equivalent of judge_ei_reality(): returns {"ei": int,
+    "reality": int} or None on ANY failure (network, parse, out-of-range) —
+    same contract as the Vertex judge, so callers (run_arm's --min-n
+    accounting) don't need to know which backend produced the score."""
+    prompt = _LOCAL_EI_PROMPT_TEMPLATE.format(incoming=incoming, reply=reply)
+    try:
+        raw = backend.generate(_LOCAL_EI_SYSTEM, prompt, max_tokens=200)
+        blob = _first_json_object(raw)
+        if blob is None:
+            return None
+        data = json.loads(blob)
+        ei = int(data["emotional_intelligence"])
+        reality = int(data["reality_awareness"])
+        if not (1 <= ei <= 5 and 1 <= reality <= 5):
+            return None
+        return {"ei": ei, "reality": reality}
+    except Exception:  # noqa: BLE001 — one bad judgment must not kill the run
+        return None
+
+
+def _local_judge_healthy(base_url, timeout=10):
+    """GET {base_url}/v1/models — mlx_lm.server (see backend.py:serve_gemma,
+    which starts this same server) answers this and /health with HTTP 200
+    once the model is loaded. True only on a 200; any failure (connection
+    refused, DNS, timeout, non-200) is unhealthy — the caller reports the
+    actionable start command, not the raw exception."""
+    try:
+        with urllib.request.urlopen(base_url.rstrip("/") + "/v1/models", timeout=timeout) as r:
+            return r.status == 200
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def preflight_judge_local(base_url):
+    return _local_judge_healthy(base_url)
 
 
 # --------------------------------------------------------------------------
@@ -772,7 +887,13 @@ def run_arm(arm_name, contexts, system_prompt, args, memory_db_path, registers=N
             fail_reasons[i] = "empty_reply"
             log(f"  [warn][{arm_name}] empty reply for context {i}", file=sys.stderr, flush=True)
             continue
-        j = judge_ei_reality(ctx, reply)
+        # main() attaches the resolved backend call as args._judge_call so
+        # run_arm() doesn't need to know local vs vertex; direct callers of
+        # run_arm() (several unit tests build a bare Args() with no such
+        # attribute) fall back to judge_ei_reality unchanged, preserving
+        # their existing monkeypatch-judge_ei_reality behavior exactly.
+        judge_call = getattr(args, "_judge_call", None) or judge_ei_reality
+        j = judge_call(ctx, reply)
         anti_ai = score_single_reply_anti_ai(args.human_bin, reply, args.channel)
         results[i] = {
             "recall_bytes": recall_bytes,
@@ -1070,6 +1191,17 @@ def main(argv=None):
                          "is forced INCONCLUSIVE (see DEFAULT_MIN_DIFF_FRAC for why 0.05)")
     ap.add_argument("--dry-run", action="store_true",
                     help="parse arguments and initialize, but skip generation/scoring")
+    ap.add_argument("--judge-backend", choices=["local", "vertex"], default="local",
+                    help="EI/reality judge backend. 'local' (default): Gemma 4 31B served "
+                         "on this Mac (127.0.0.1) — never sends message text off the "
+                         "machine. 'vertex': Gemini via Vertex ADC — sends incoming "
+                         "messages and generated replies to Google Cloud; prints a stderr "
+                         "notice on every use. See .claude/rules/second-opinion-lane "
+                         "policy (2026-09-29): real-message jobs default to local.")
+    ap.add_argument("--judge-local-url", default=LOCAL_JUDGE_BASE_URL,
+                    help="base URL for the local Gemma judge server (must be loopback)")
+    ap.add_argument("--judge-local-model", default=LOCAL_JUDGE_MODEL,
+                    help="model name reported by the local judge server")
     args = ap.parse_args(argv)
     fusion_problem = validate_fusion_args(args.fusion, args.alpha, args.register_gate)
     if fusion_problem:
@@ -1085,9 +1217,34 @@ def main(argv=None):
     if not preflight_embedder(args.embed_url):
         return refuse(f"embedder unreachable at {args.embed_url}/v1/embeddings")
 
-    print("[2/6] judge preflight (Vertex ADC / gemini-3.1-pro-preview) ...", flush=True)
-    if not preflight_judge():
-        return refuse("Gemini judge unreachable (no ADC/API key, or the endpoint failed)")
+    # Judge backend selection: local (default) never sends message text off
+    # this Mac; vertex is opt-in and notices on stderr every time it's used
+    # (second-opinion-lane policy, 2026-09-29). Resolved here rather than at
+    # each judge_ei_reality*() call site so run_arm() (and its existing unit
+    # tests, which build a bare Args() with no _judge_call) stay unaware of
+    # which backend is active.
+    if args.judge_backend == "local":
+        print(f"[2/6] judge preflight (local Gemma @ {args.judge_local_url}) ...", flush=True)
+        if not preflight_judge_local(args.judge_local_url):
+            return refuse(
+                f"local Gemma judge unreachable at {args.judge_local_url}/v1/models. "
+                f"Start it with:\n    {LOCAL_JUDGE_START_CMD}\n"
+                f"(see scripts/second_opinion/backend.py:serve_gemma and "
+                f"scripts/second_opinion/README.md 'Operator steps'), then re-run — "
+                f"or pass --judge-backend vertex to use the cloud judge instead.")
+        local_backend = GemmaBackend(base_url=args.judge_local_url, model=args.judge_local_model)
+        args._judge_call = (
+            lambda incoming, reply: judge_ei_reality_local(incoming, reply, local_backend))
+        judge_backend_name, judge_model_name = "local", local_backend.model
+    else:
+        print(f"second-opinion: backend=vertex; message text (incoming messages and "
+              f"generated replies) will leave this Mac for judging (Google Cloud project "
+              f"{GEMINI_PROJECT_ID}, ADC)", file=sys.stderr)
+        print(f"[2/6] judge preflight (Vertex ADC / {GEMINI_MODEL}) ...", flush=True)
+        if not preflight_judge():
+            return refuse("Gemini judge unreachable (no ADC/API key, or the endpoint failed)")
+        args._judge_call = judge_ei_reality
+        judge_backend_name, judge_model_name = "vertex", GEMINI_MODEL
 
     print(f"[3/6] copying memory.db from {args.memory_db} ...", flush=True)
     tmp_root = args.tmp_dir or tempfile.mkdtemp(prefix="hu_semantic_gate_")
@@ -1268,6 +1425,10 @@ def main(argv=None):
         "server": args.server,
         "embed_url": args.embed_url,
         "top_k": args.top_k,
+        # Provenance: which judge produced ei/reality — a local-judged verdict
+        # must be distinguishable from a Vertex-judged one downstream.
+        "judge_backend": judge_backend_name,
+        "judge_model": judge_model_name,
         "judge_thinking_budget": JUDGE_THINKING_BUDGET,
         "tolerances": {
             "composite": args.composite_tolerance,
@@ -1286,7 +1447,8 @@ def main(argv=None):
     out_path.write_text(json.dumps(doc, indent=2) + "\n")
 
     print(json.dumps({k: v for k, v in doc.items() if k != "context_rows"}, indent=2))
-    print(f"\nSEMANTIC LIVE GATE VERDICT: {verdict}")
+    print(f"\njudge backend: {judge_backend_name} ({judge_model_name})")
+    print(f"SEMANTIC LIVE GATE VERDICT: {verdict}")
     for r in reasons:
         print(f"  - {r}")
     if args.fusion is not None:

@@ -1265,6 +1265,7 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_expressive.c
     src/daemon/daemon_share_queue.c
     src/daemon/daemon_reminders.c
+    src/daemon/daemon_briefing.c
     src/daemon/daemon_rich_media.c
     src/daemon/daemon_housekeeping.c
     src/daemon/daemon_promise_keeper.c
@@ -1668,6 +1669,7 @@ if(HU_ENABLE_SQLITE)
         src/memory/repos/outbound_sends_repo_sqlite.c
         src/memory/repos/contact_optout_repo_sqlite.c
         src/memory/repos/reminder_repo_sqlite.c
+        src/memory/repos/briefing_repo_sqlite.c
         src/memory/repos/repo_util_sqlite.c
         src/memory/repos/social_graph_repo_sqlite.c
         src/memory/repos/self_awareness_repo_sqlite.c
@@ -4242,6 +4244,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_daemon_expressive.c
     tests/test_daemon_share_queue.c
     tests/test_daemon_reminders.c
+    tests/test_daemon_briefing.c
     tests/test_commitment_sample.c
     tests/test_agent_fit_history.c
     tests/test_prospective.c

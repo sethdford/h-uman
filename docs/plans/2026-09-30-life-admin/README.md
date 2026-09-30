@@ -110,3 +110,52 @@ Not reused: the `prospective_tasks` table created in
 readers or writers anywhere (checked 2026-09-30), and lack the owner,
 channel and status columns delivery needs. They are left for a dead-code pass
 rather than removed in this feature change.
+
+## Slice 2 status (2026-09-30)
+
+Built and gated OFF: `src/daemon/daemon_briefing.c`,
+`src/memory/repos/briefing_repo_sqlite.c`, ticked from the service loop next
+to reminders.
+
+- One message: today's calendar (when `context_awareness.calendar_enabled`),
+  reminders due today, commitments due (yours and theirs, each quoting the
+  words that were said, overdue ones for 7 days only), important dates in the
+  next week, and weather (when `context_awareness.weather_enabled`, a
+  `location`, and `HU_WEATHER_API_KEY`). No calendar, reminder, commitment or
+  date means no message.
+- Sent at `HU_BRIEFING_HOUR` (default 8) local, until noon; later mornings are
+  skipped, not sent late. The day is claimed durably before sending and
+  released only when the send fails.
+- Shadow writes `<state dir>/briefings/<day>.txt`, which is what the owner
+  rates for the go-live measurement.
+- Temperature is shown in °F because the owner is in the US; a units setting
+  waits for an owner who needs one.
+
+Found for slice 5: `scripts/calendar_query.applescript` does not escape event
+names, so one title containing a quote makes the whole day's JSON unparseable
+(the briefing logs it and leaves the calendar out), and its start times are
+locale-dependent date strings; emitting hour/minute numbers would remove the
+guesswork.
+
+## Slice 5 status, first half (2026-09-30)
+
+Done in `src/platform/calendar_macos.c`:
+
+- The AppleScript is embedded in the binary and run as `osascript -e …`
+  lines, so the installed daemon no longer depends on a `scripts/` directory
+  it never had; `scripts/calendar_query.applescript` is gone.
+- Titles are JSON-escaped in the script (a quote, backslash or newline in a
+  title no longer invalidates the day), each event carries numeric `h`/`m`
+  (no locale-dependent date parsing), and all-day events in progress are
+  included and marked `allday`.
+- The query is bounded to 20 s, so a pending Calendar permission prompt
+  cannot stall the service loop, and a failure is logged once instead of
+  looking exactly like an empty calendar.
+
+Verified without touching the owner's calendar: `osacompile` compiles the
+exact embedded lines, the escape handler round-trips a hostile title through
+a real JSON parser under `osascript`, and all 38 lines appear verbatim in the
+built binary.
+
+Still open: calendar busy blocks deferring reminder/briefing delivery, and
+15-minute meeting prep. Both need the owner's real calendar to measure.

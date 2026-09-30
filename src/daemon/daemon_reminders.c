@@ -12,6 +12,7 @@
 #include "human/daemon.h"
 #include "human/daemon/reminders.h"
 #include "human/daemon/share_queue.h"
+#include "human/daemon_outbound_bus.h"
 #include "human/memory.h"
 #ifdef HU_ENABLE_SQLITE
 #include "human/memory/reminder_repo.h"
@@ -830,19 +831,6 @@ bool hu_reminders_handle_owner_message(struct hu_agent *agent, const char *owner
     }
 }
 
-static hu_service_channel_t *channel_named(hu_service_channel_t *channels, size_t count,
-                                           const char *name) {
-    for (size_t c = 0; c < count; c++) {
-        hu_channel_t *ch = channels[c].channel;
-        if (!ch || !ch->vtable || !ch->vtable->name || !ch->vtable->send)
-            continue;
-        const char *cn = ch->vtable->name(ch->ctx);
-        if (cn && strcmp(cn, name) == 0)
-            return &channels[c];
-    }
-    return NULL;
-}
-
 static bool is_owner(struct hu_agent *agent, const char *handle) {
     return agent->persona && hu_share_is_owner(agent->persona, handle, strlen(handle));
 }
@@ -882,7 +870,8 @@ static void tell_missed(struct hu_agent *agent, struct sqlite3 *db, hu_service_c
     }
     if (!first || told_n == 0)
         return;
-    hu_service_channel_t *sc = channel_named(channels, channel_count, first->channel);
+    hu_service_channel_t *sc =
+        hu_daemon_outbound_find_sender(channels, channel_count, first->channel);
     hu_error_t err = sc ? sc->channel->vtable->send(sc->channel->ctx, first->owner,
                                                     strlen(first->owner), msg, off, NULL, 0)
                         : HU_ERR_NOT_FOUND;
@@ -933,7 +922,8 @@ void hu_reminders_tick(struct hu_agent *agent, struct hu_service_channel *channe
                         (long long)r->id);
             continue;
         }
-        hu_service_channel_t *sc = channel_named(channels, channel_count, r->channel);
+        hu_service_channel_t *sc =
+            hu_daemon_outbound_find_sender(channels, channel_count, r->channel);
         char msg[HU_REMINDER_TEXT_MAX + 16];
         int w = snprintf(msg, sizeof(msg), "reminder: %s", r->what);
         hu_error_t err = HU_ERR_NOT_FOUND;
