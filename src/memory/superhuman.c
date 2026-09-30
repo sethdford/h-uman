@@ -4,8 +4,10 @@
 #include "human/context/conversation.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/log.h"
 #include "human/core/string.h"
 #include "human/memory.h"
+#include "human/memory/prospective_repo.h"
 #include "human/memory/sql_transaction.h"
 #include <sqlite3.h>
 #include <stdarg.h>
@@ -189,6 +191,80 @@ void hu_superhuman_inside_joke_free(hu_allocator_t *alloc, hu_inside_joke_t *arr
  * Commitments
  * ────────────────────────────────────────────────────────────────────────── */
 
+/* Prospective memory v2 (docs/superpowers/specs/2026-09-30-prospective-
+ * memory-v2-design.md §4.1): every dated intention is also a time-cued row in
+ * prospective_memories, keyed "<kind>:<rowid>" of the ledger row just
+ * inserted. Best-effort — that ledger row is the record; a failed mirror is
+ * logged and the time path misses this one item. A commitment and its paired
+ * delayed follow-up collapse into one row (the upsert dedupes on contact +
+ * action + due_at). */
+static void pm_mirror_time(sqlite3 *db, const char *kind, const char *contact, size_t contact_len,
+                           const char *text, size_t text_len, int64_t due_at,
+                           hu_prospective_source_t source) {
+    char key[64];
+    snprintf(key, sizeof(key), "%s:%lld", kind, (long long)sqlite3_last_insert_rowid(db));
+    if (hu_prospective_repo_upsert_time(db, contact, contact_len, text, text_len, due_at,
+                                        HU_PROSPECTIVE_TIME_GRACE_S, source, key, HU_PM_PENDING,
+                                        (int64_t)time(NULL), NULL) != HU_OK)
+        hu_log_warn("superhuman", NULL, "prospective time mirror failed for %s", key);
+}
+
+/* Controller ruling F4: the `commitments` row is either the CONTACT's own
+ * commitment ("I'll send the photos", who="them", stored by the F20 keeper
+ * in daemon.c) or the OWNER's ("who"="me", stored by the promise keeper).
+ * `who` is the call-site fact that tells them apart -- no new column or
+ * parameter needed. Mirroring a contact's commitment verbatim would later
+ * quote the contact's own words back as if the OWNER had promised it, so a
+ * contact-owned commitment is rephrased to third person via
+ * hu_prospective_commitment_action() before it is mirrored as a time row.
+ * When that rephrasing is not safe (returns 0), the mirror is skipped
+ * entirely -- the commitments row stays the record, and the skip is logged
+ * with a running count so the miss is visible, never silent (fail toward
+ * silence, not toward misattribution). */
+static size_t s_commitment_mirror_skipped = 0;
+
+static void pm_mirror_commitment_time(sqlite3 *db, const char *contact, size_t contact_len,
+                                      const char *description, size_t desc_len, const char *who,
+                                      size_t who_len, int64_t due_at) {
+    bool owner_owned = (who_len == 2 && strncmp(who, "me", 2) == 0);
+    if (owner_owned) {
+        pm_mirror_time(db, "commitment", contact, contact_len, description, desc_len, due_at,
+                       HU_PM_SOURCE_PROMISE_KEEPER);
+        return;
+    }
+
+    /* Contact-owned: rephrase via the pure predicate. It wants a
+     * NUL-terminated C string; description/desc_len are not guaranteed to
+     * be one, so copy into a bounded local first. Too-long input is not
+     * safe to rephrase either -- skip it the same way a failed rewrite is
+     * skipped. */
+    char desc_z[512];
+    if (desc_len >= sizeof(desc_z)) {
+        s_commitment_mirror_skipped++;
+        hu_log_warn("superhuman", NULL,
+                    "prospective time mirror skipped (%zu total): contact commitment too long "
+                    "to rephrase safely",
+                    s_commitment_mirror_skipped);
+        return;
+    }
+    memcpy(desc_z, description, desc_len);
+    desc_z[desc_len] = '\0';
+
+    char action_buf[600];
+    size_t action_len =
+        hu_prospective_commitment_action(desc_z, true, action_buf, sizeof(action_buf));
+    if (action_len == 0) {
+        s_commitment_mirror_skipped++;
+        hu_log_warn("superhuman", NULL,
+                    "prospective time mirror skipped (%zu total): contact commitment could not "
+                    "be rephrased safely",
+                    s_commitment_mirror_skipped);
+        return;
+    }
+    pm_mirror_time(db, "commitment", contact, contact_len, action_buf, action_len, due_at,
+                   HU_PM_SOURCE_PROMISE_KEEPER);
+}
+
 hu_error_t hu_superhuman_commitment_store(void *sqlite_ctx, hu_allocator_t *alloc,
                                           const char *contact_id, size_t contact_id_len,
                                           const char *description, size_t desc_len, const char *who,
@@ -220,7 +296,12 @@ hu_error_t hu_superhuman_commitment_store(void *sqlite_ctx, hu_allocator_t *allo
 
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
-    return (rc == SQLITE_DONE) ? HU_OK : HU_ERR_MEMORY_BACKEND;
+    if (rc != SQLITE_DONE)
+        return HU_ERR_MEMORY_BACKEND;
+    if (deadline > 0)
+        pm_mirror_commitment_time(db, contact_id, contact_id_len, description, desc_len, who,
+                                  who_len, deadline);
+    return HU_OK;
 }
 
 hu_error_t hu_superhuman_commitment_list_due(void *sqlite_ctx, hu_allocator_t *alloc,
@@ -528,7 +609,12 @@ hu_error_t hu_superhuman_delayed_followup_schedule(void *sqlite_ctx, hu_allocato
 
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
-    return (rc == SQLITE_DONE) ? HU_OK : HU_ERR_MEMORY_BACKEND;
+    if (rc != SQLITE_DONE)
+        return HU_ERR_MEMORY_BACKEND;
+    if (scheduled_at > 0)
+        pm_mirror_time(db, "followup", contact_id, contact_id_len, topic, topic_len, scheduled_at,
+                       HU_PM_SOURCE_FOLLOWUP);
+    return HU_OK;
 }
 
 hu_error_t hu_superhuman_delayed_followup_list_due(void *sqlite_ctx, hu_allocator_t *alloc,
