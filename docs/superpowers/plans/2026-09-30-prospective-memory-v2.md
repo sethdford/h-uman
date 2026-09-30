@@ -6088,8 +6088,15 @@ hu_error_t hu_prospective_v2_backfill(hu_allocator_t *alloc, hu_memory_t *mem, i
     }
     for (size_t i = 0; err == HU_OK && i < fn; i++) {
         out->followups_seen++;
-        err = pm_backfill_one(db, "followup", fs[i].id, fs[i].contact_id, fs[i].topic,
-                              fs[i].scheduled_at, HU_PM_SOURCE_FOLLOWUP, now, out);
+        /* Task 9 fix round 1: a dated-moment situation frame imports as its
+         * topic, exactly as the live mirror (pm_mirror_owned_time) stores it,
+         * so backfilled and live rows dedupe and settle the same way. */
+        char topic[512];
+        size_t tl = hu_prospective_frame_topic(fs[i].topic, strlen(fs[i].topic), topic,
+                                               sizeof(topic));
+        err = pm_backfill_one(db, "followup", fs[i].id, fs[i].contact_id,
+                              tl > 0 ? topic : fs[i].topic, fs[i].scheduled_at,
+                              HU_PM_SOURCE_FOLLOWUP, now, out);
     }
     if (txn.active) {
         if (err == HU_OK && write)

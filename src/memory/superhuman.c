@@ -7,6 +7,7 @@
 #include "human/core/log.h"
 #include "human/core/string.h"
 #include "human/memory.h"
+#include "human/memory/prospective_policy.h"
 #include "human/memory/prospective_repo.h"
 #include "human/memory/sql_transaction.h"
 #include <sqlite3.h>
@@ -243,7 +244,15 @@ static void pm_mirror_owned_time(sqlite3 *db, const char *kind, const char *cont
                                  int64_t due_at, const char *who, size_t who_len,
                                  hu_prospective_source_t source) {
     if (!pm_who_is_contact(who, who_len)) {
-        pm_mirror_time(db, kind, contact, contact_len, text, text_len, due_at, source);
+        /* A dated-moment situation frame mirrors as its topic: the frame's
+         * relative day is stale once due and its wrapper words defeat the
+         * done-after-evidence match. The ledger row keeps the frame. */
+        char topic[512];
+        size_t tl = strcmp(kind, "followup") == 0
+                        ? hu_prospective_frame_topic(text, text_len, topic, sizeof(topic))
+                        : 0;
+        pm_mirror_time(db, kind, contact, contact_len, tl > 0 ? topic : text,
+                       tl > 0 ? tl : text_len, due_at, source);
         return;
     }
 

@@ -356,6 +356,43 @@ static const char *pm_due_action(const char *a, char *tmp, size_t cap) {
     return a;
 }
 
+/* Parsed from the end, since a topic may itself hold parentheses:
+ * "<d>.<d>" <- "); confidence " <- <when> <- " (" <- <topic> <- prefix. */
+size_t hu_prospective_frame_topic(const char *frame, size_t len, char *out, size_t cap) {
+    static const char pre[] = "they mentioned ";
+    static const char mid[] = "); confidence ";
+    const size_t pl = sizeof(pre) - 1;
+    const size_t ml = sizeof(mid) - 1;
+    if (out && cap > 0)
+        out[0] = '\0';
+    if (!frame || !out || cap == 0 || len <= pl || memcmp(frame, pre, pl) != 0)
+        return 0;
+    size_t e = len;
+    while (e > 0 && isdigit((unsigned char)frame[e - 1]))
+        e--;
+    if (e == len || e == 0 || frame[--e] != '.')
+        return 0; /* no fractional digits, or no '.' before them */
+    size_t dot = e;
+    while (e > 0 && isdigit((unsigned char)frame[e - 1]))
+        e--;
+    if (e == dot || e < pl + ml || memcmp(frame + e - ml, mid, ml) != 0)
+        return 0;
+    size_t close = e - ml; /* the ')' ending <when> */
+    size_t open = close;   /* one past the '(' starting it */
+    while (open > pl && frame[open - 1] != '(')
+        open--;
+    size_t wl = close - open;
+    if (open <= pl + 2 || frame[open - 1] != '(' || frame[open - 2] != ' ' || wl == 0 ||
+        pm_rel_time_len(frame + open, wl) != wl)
+        return 0;
+    size_t tl = open - 2 - pl;
+    if (tl >= cap)
+        return 0;
+    memcpy(out, frame + pl, tl);
+    out[tl] = '\0';
+    return tl;
+}
+
 static size_t pm_render_due_list(const char *const *actions, size_t n, char *buf, size_t cap,
                                  size_t *out_len) {
     size_t pos = 0;

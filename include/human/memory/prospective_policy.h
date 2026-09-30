@@ -167,6 +167,19 @@ size_t hu_prospective_render(hu_prospective_render_style_t style, const char *co
 size_t hu_prospective_commitment_action(const char *summary, bool contact_committed, char *buf,
                                         size_t cap);
 
+/* ── Dated-moment frames (fix round 1 of task 9) ──────────────────────
+ * The dated-moment path queues hu_contextual_proactive_situation_frame's
+ * line, "they mentioned <topic> (<when>); confidence <d.dd>", as the
+ * delayed follow-up's topic. Its relative <when> is stale once due, and its
+ * wrapper words defeat the done-after-evidence key terms, so the time
+ * mirror stores just <topic>. Accepts EXACTLY that shape (<when> a
+ * relative-time phrase: today / tomorrow / yesterday / in N days / N days
+ * ago are what the frame writes) and writes the
+ * topic NUL-terminated into out[cap], returning its length; returns 0 (out
+ * "") for anything else or when it does not fit — the caller then mirrors
+ * the text verbatim. Reads at most `len` bytes of `frame`. */
+size_t hu_prospective_frame_topic(const char *frame, size_t len, char *out, size_t cap);
+
 /* ── Judge prompt ────────────────────────────────────────────────────── */
 const char *hu_prospective_judge_system(size_t *len);
 /* The user turn: the last lines of `history` (at most 4000 bytes, cut at a

@@ -43,7 +43,9 @@ static hu_gate_mode_t pm_time_mode(void) {
 
 /* SHADOW runs on every proactive tick but judges a contact once per local
  * day, so its would-send numbers are per day, not per tick (LIVE needs no
- * such slot: the store's surfaced_at is its per-day cap). A hash collision
+ * such slot: the store's surfaced_at is its per-day cap). The slot is taken
+ * only by a pass that judged something, so a contact that ticks before its
+ * item is due is judged when it comes due, as LIVE would. A hash collision
  * only skips a SHADOW pass, never changes what is sent. */
 #define PM_TIME_SHADOW_SLOTS 64
 static struct {
@@ -51,18 +53,17 @@ static struct {
     int64_t day;
 } s_pm_time_seen[PM_TIME_SHADOW_SLOTS];
 
-static bool pm_time_first_today(const char *contact, int64_t day) {
+/* The contact's slot; *seen: already judged on `day`. */
+static size_t pm_time_slot(const char *contact, int64_t day, uint64_t *hash, bool *seen) {
     uint64_t h = 1469598103934665603ULL;
     for (const char *p = contact; *p; p++) {
         h ^= (uint64_t)(unsigned char)*p;
         h *= 1099511628211ULL;
     }
     size_t slot = (size_t)(h % PM_TIME_SHADOW_SLOTS);
-    if (s_pm_time_seen[slot].hash == h && s_pm_time_seen[slot].day == day)
-        return false;
-    s_pm_time_seen[slot].hash = h;
-    s_pm_time_seen[slot].day = day;
-    return true;
+    *hash = h;
+    *seen = s_pm_time_seen[slot].hash == h && s_pm_time_seen[slot].day == day;
+    return slot;
 }
 
 /* The send channel's recent history as "me: …" / "them: …" lines: the
@@ -94,7 +95,10 @@ static size_t pm_time_v2(hu_allocator_t *alloc, struct hu_agent *agent, struct h
                          bool live, char *buf, size_t cap) {
     sqlite3 *db = hu_sqlite_memory_get_db(agent->memory);
     int64_t day = hu_prospective_local_day_start(now);
-    if (!db || (!live && !pm_time_first_today(contact_id, day)))
+    uint64_t hash = 0;
+    bool seen = false;
+    size_t slot = pm_time_slot(contact_id, day, &hash, &seen);
+    if (!db || (!live && seen))
         return 0;
     char hist[6144];
     size_t clen = strlen(contact_id);
@@ -117,6 +121,10 @@ static size_t pm_time_v2(hu_allocator_t *alloc, struct hu_agent *agent, struct h
     hu_error_t err = hu_prospective_v2_run(alloc, db, HU_PM_CUE_TIME, &turn, &judge, live, &c,
                                            live ? &d : NULL, live ? &dl : NULL);
     hu_daemon_prospective_log_counts(live ? "time live" : "time shadow", &c); /* on error too */
+    if (!live && c.candidates > 0) {
+        s_pm_time_seen[slot].hash = hash;
+        s_pm_time_seen[slot].day = day;
+    }
     size_t n = 0;
     if (err == HU_OK && d && dl > 0 && dl < cap) {
         memcpy(buf, d, dl + 1);

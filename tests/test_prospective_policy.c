@@ -435,6 +435,45 @@ static void render_due_list_drops_a_stale_relative_day(void) {
                           "tonight]");
 }
 
+/* The dated-moment frame is parsed back to its topic, and nothing else is. */
+static void frame_topic_accepts_exactly_the_situation_frame(void) {
+    char out[128];
+    static const char f1[] = "they mentioned the job interview (tomorrow); confidence 0.80";
+    HU_ASSERT_EQ(hu_prospective_frame_topic(f1, sizeof(f1) - 1, out, sizeof(out)), (size_t)17);
+    HU_ASSERT_STR_EQ(out, "the job interview");
+    static const char f2[] = "they mentioned mom's surgery (in 3 days); confidence 1.00";
+    HU_ASSERT_EQ(hu_prospective_frame_topic(f2, sizeof(f2) - 1, out, sizeof(out)), (size_t)13);
+    HU_ASSERT_STR_EQ(out, "mom's surgery");
+    static const char f3[] = "they mentioned the (big) move (2 days ago); confidence 0.55";
+    HU_ASSERT_EQ(hu_prospective_frame_topic(f3, sizeof(f3) - 1, out, sizeof(out)), (size_t)14);
+    HU_ASSERT_STR_EQ(out, "the (big) move");
+    static const char *const bad[] = {
+        "call about the lease",                                    /* not a frame */
+        "they mentioned the job interview (tomorrow)",             /* no confidence tail */
+        "they mentioned the job interview (tomorrow); confidence", /* no number */
+        "they mentioned the job interview (tomorrow); confidence 0.8x",
+        "they mentioned the job interview (soon); confidence 0.80", /* not a relative day */
+        "they mentioned  (today); confidence 0.80",                 /* empty topic */
+        "they mentioned (today); confidence 0.80",
+        "she mentioned the job interview (tomorrow); confidence 0.80",
+        "they mentioned the job interview tomorrow; confidence 0.80",
+        "",
+    };
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+        strcpy(out, "stale");
+        HU_ASSERT_EQ(hu_prospective_frame_topic(bad[i], strlen(bad[i]), out, sizeof(out)),
+                     (size_t)0);
+        HU_ASSERT_STR_EQ(out, "");
+    }
+    /* len bounds the read: the same frame cut before its tail is rejected */
+    HU_ASSERT_EQ(hu_prospective_frame_topic(f1, sizeof(f1) - 6, out, sizeof(out)), (size_t)0);
+    /* does not fit: 0, never a truncated topic */
+    char tiny[8];
+    HU_ASSERT_EQ(hu_prospective_frame_topic(f1, sizeof(f1) - 1, tiny, sizeof(tiny)), (size_t)0);
+    HU_ASSERT_STR_EQ(tiny, "");
+    HU_ASSERT_EQ(hu_prospective_frame_topic(NULL, 5, out, sizeof(out)), (size_t)0);
+}
+
 void run_prospective_policy_tests(void) {
     HU_TEST_SUITE("prospective policy");
     HU_RUN_TEST(policy_column_spellings_round_trip);
@@ -449,6 +488,7 @@ void run_prospective_policy_tests(void) {
     HU_RUN_TEST(after_delivery_status_table);
     HU_RUN_TEST(render_styles_are_exact);
     HU_RUN_TEST(render_due_list_drops_a_stale_relative_day);
+    HU_RUN_TEST(frame_topic_accepts_exactly_the_situation_frame);
     HU_RUN_TEST(commitment_action_flips_contact_promises_into_a_question);
     HU_RUN_TEST(judge_prompt_carries_history_intention_and_cue);
     HU_RUN_TEST(judge_user_keeps_tail_when_only_newline_is_trailing);

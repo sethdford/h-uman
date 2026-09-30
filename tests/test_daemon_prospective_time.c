@@ -106,8 +106,10 @@ static void due_followups_lists_one_line_for_this_contact(void) {
 }
 
 /* ── HU_PROSPECTIVE_TIME (task 9) ─────────────────────────────────────── */
+#include "human/agent/contextual_proactive.h"
 #include "human/core/log.h"
 #include "human/daemon/prospective.h"
+#include "human/memory/prospective_policy.h"
 #include <sqlite3.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -504,9 +506,10 @@ static void time_live_renders_a_contact_promise_in_third_person(void) {
     t_env_clear();
 }
 
-/* Parked M4 from task 8: a follow-up frame was queued with its relative day
- * baked in ("(tomorrow)"); by the time it is due that word is stale, so the
- * due line drops it. The stored action is unchanged. */
+/* Parked M4 from task 8: an action queued with its relative day baked in
+ * ("(in 3 days)") is stale by the time it is due, so the due line drops it.
+ * The stored action is unchanged. (Dated-moment frames no longer carry one
+ * into the store at all: see time_mirror_stores_a_situation_frames_topic.) */
 static void time_live_drops_a_stale_relative_day(void) {
     t_env_clear();
     setenv("HU_PROSPECTIVE_TIME", "live", 1);
@@ -515,18 +518,123 @@ static void time_live_drops_a_stale_relative_day(void) {
     tmock_t m = {0};
     static hu_agent_t agent;
     agent_with_mock(&agent, &alloc, &mem, &m);
-    static const char frame[] = "they mentioned the job interview (tomorrow); confidence 0.80";
-    HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, TA, 12, frame,
-                                                         sizeof(frame) - 1, TNOW - 3600, NULL, 0),
+    static const char topic[] = "ask how the move went (in 3 days)";
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, TA, 12, topic,
+                                                         sizeof(topic) - 1, TNOW - 3600, NULL, 0),
                  HU_OK);
     char buf[640];
     int64_t listed = -1;
     HU_ASSERT_TRUE(hu_daemon_prospective_due_followups(&alloc, &agent, NULL, NULL, 0, TA, TNOW, buf,
                                                        sizeof(buf), &listed) > 0);
-    HU_ASSERT_STR_EQ(buf, "- they mentioned the job interview; confidence 0.80\n");
+    HU_ASSERT_STR_EQ(buf, "- ask how the move went\n");
     HU_ASSERT_EQ(t_count(&mem, "SELECT COUNT(*) FROM prospective_memories WHERE action="
+                               "'ask how the move went (in 3 days)'"),
+                 (int64_t)1);
+    mem.vtable->deinit(mem.ctx);
+    t_env_clear();
+}
+
+/* Build the frame exactly as the dated-moment path does, so a format change
+ * there fails here instead of silently mirroring the wrapper again. */
+static size_t t_frame(const char *topic, int64_t send_at, int64_t now, char *out, size_t cap) {
+    hu_contextual_proactive_decision_t d;
+    memset(&d, 0, sizeof(d));
+    snprintf(d.topic, sizeof(d.topic), "%s", topic);
+    d.send_at_ms = send_at * 1000;
+    d.confidence = 0.8;
+    size_t n = hu_contextual_proactive_situation_frame(&d, now, out, cap);
+    HU_ASSERT_TRUE(n > 0);
+    return n;
+}
+
+/* Fix round 1 (i): the time mirror of a dated-moment frame is its topic —
+ * no stale "(tomorrow)", no "confidence 0.80" — while the ledger row keeps
+ * the frame, so the OFF output is unchanged. */
+static void time_mirror_stores_a_situation_frames_topic(void) {
+    t_env_clear();
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    char frame[320];
+    size_t fl = t_frame("the job interview", TNOW + TDAY + 60, TNOW, frame, sizeof(frame));
+    HU_ASSERT_STR_EQ(frame, "they mentioned the job interview (tomorrow); confidence 0.80");
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, TA, 12, frame, fl,
+                                                         TNOW + TDAY + 60, NULL, 0),
+                 HU_OK);
+    HU_ASSERT_EQ(t_count(&mem, "SELECT COUNT(*) FROM prospective_memories WHERE cue_kind='time' "
+                               "AND action='the job interview'"),
+                 (int64_t)1);
+    HU_ASSERT_EQ(t_count(&mem, "SELECT COUNT(*) FROM prospective_memories"), (int64_t)1);
+    HU_ASSERT_EQ(t_count(&mem, "SELECT COUNT(*) FROM delayed_followups WHERE topic="
                                "'they mentioned the job interview (tomorrow); confidence 0.80'"),
                  (int64_t)1);
+    /* OFF: the legacy line still quotes the ledger's frame, byte for byte */
+    static hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.memory = &mem;
+    char buf[640];
+    int64_t listed = -1;
+    HU_ASSERT_TRUE(hu_daemon_prospective_due_followups(&alloc, &agent, NULL, NULL, 0, TA,
+                                                       TNOW + TDAY + 120, buf, sizeof(buf),
+                                                       &listed) > 0);
+    HU_ASSERT_STR_EQ(buf, "- they mentioned the job interview (tomorrow); confidence 0.80 "
+                          "(due 60s ago)\n");
+    mem.vtable->deinit(mem.ctx);
+    t_env_clear();
+}
+
+/* Two detections of the same moment on different days carry different
+ * relative words; their topics are equal, so they are ONE open intention. */
+static void time_mirror_collapses_frames_of_the_same_topic(void) {
+    t_env_clear();
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    char f1[320];
+    char f2[320];
+    size_t l1 = t_frame("the job interview", TNOW + TDAY + 60, TNOW, f1, sizeof(f1));
+    size_t l2 = t_frame("the job interview", TNOW + 2 * TDAY + 60, TNOW, f2, sizeof(f2));
+    HU_ASSERT_STR_CONTAINS(f1, "(tomorrow)");
+    HU_ASSERT_STR_CONTAINS(f2, "(in 2 days)");
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, TA, 12, f1, l1,
+                                                         TNOW + TDAY + 60, NULL, 0),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, TA, 12, f2, l2,
+                                                         TNOW + 2 * TDAY + 60, NULL, 0),
+                 HU_OK);
+    HU_ASSERT_EQ(t_count(&mem, "SELECT COUNT(*) FROM delayed_followups"), (int64_t)2);
+    HU_ASSERT_EQ(t_count(&mem, "SELECT COUNT(*) FROM prospective_memories WHERE cue_kind='time' "
+                               "AND status IN ('pending','surfaced')"),
+                 (int64_t)1);
+    mem.vtable->deinit(mem.ctx);
+    t_env_clear();
+}
+
+/* The rowid-keyed twin retire (task 8 round 3) still finds the ledger row
+ * of a topic-mirrored frame: a delivered reply about the topic marks the
+ * intention done and the delayed follow-up sent. */
+static void time_topic_mirrored_frame_retires_its_ledger_row(void) {
+    t_env_clear();
+    setenv("HU_PROSPECTIVE_TIME", "live", 1);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    tmock_t m = {0};
+    static hu_agent_t agent;
+    agent_with_mock(&agent, &alloc, &mem, &m);
+    char frame[320];
+    size_t fl = t_frame("the job interview", TNOW - 3600, TNOW - 2 * TDAY, frame, sizeof(frame));
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, TA, 12, frame, fl,
+                                                         TNOW - 3600, NULL, 0),
+                 HU_OK);
+    char buf[640];
+    int64_t listed = -1;
+    HU_ASSERT_TRUE(hu_daemon_prospective_due_followups(&alloc, &agent, NULL, NULL, 0, TA, TNOW, buf,
+                                                       sizeof(buf), &listed) > 0);
+    HU_ASSERT_STR_EQ(buf, "- the job interview\n");
+    static const char sent[] = "hey how did the job interview go?";
+    hu_daemon_prospective_time_after_send(&agent, TA, sent, sizeof(sent) - 1, TNOW + 60);
+    HU_ASSERT_EQ(t_count(&mem, "SELECT COUNT(*) FROM prospective_memories WHERE status='done' "
+                               "AND outcome='used'"),
+                 (int64_t)1);
+    HU_ASSERT_EQ(t_count(&mem, "SELECT COUNT(*) FROM delayed_followups WHERE sent=1"), (int64_t)1);
     mem.vtable->deinit(mem.ctx);
     t_env_clear();
 }
@@ -654,6 +762,41 @@ static void time_shadow_keeps_legacy_output_and_store(void) {
     mb.vtable->deinit(mb.ctx);
     t_env_clear();
 }
+/* Fix round 1 (ii): SHADOW takes a contact's daily slot only when the pass
+ * had something to judge. An item due at 15:00 whose contact first ticks at
+ * 09:00 is judged at the 15:30 tick, as LIVE would — not a day late. */
+static void time_shadow_slot_waits_for_something_due(void) {
+    t_env_clear();
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    tmock_t m = {0};
+    static hu_agent_t agent;
+    agent_with_mock(&agent, &alloc, &mem, &m);
+    /* a day no other test uses: the slot table is process-wide */
+    const int64_t day = hu_prospective_local_day_start(TNOW + 20 * TDAY);
+    HU_ASSERT_EQ(hu_superhuman_commitment_store(&mem, &alloc, TA, 12, "call about the lease", 20,
+                                                "me", 2, day + 15 * 3600),
+                 HU_OK);
+    setenv("HU_PROSPECTIVE_TIME", "shadow", 1);
+    static t_shadow_t sh;
+    memset(&sh, 0, sizeof(sh));
+    sh.alloc = &alloc;
+    sh.agent = &agent;
+    sh.now = day + 9 * 3600; /* 09:00: nothing due yet */
+    static char log[8192];
+    t_capture(t_shadow_due, &sh, log, sizeof(log));
+    HU_ASSERT_EQ(m.calls, 0);
+    HU_ASSERT_NULL(strstr(log, "prospective time shadow:"));
+    sh.now = day + 15 * 3600 + 1800; /* 15:30 the same day */
+    t_capture(t_shadow_due, &sh, log, sizeof(log));
+    HU_ASSERT_EQ(m.calls, 1);
+    HU_ASSERT_STR_CONTAINS(log, "prospective time shadow: candidates=1 fire=1 ");
+    sh.now = day + 16 * 3600; /* judged once today: the slot is now taken */
+    t_capture(t_shadow_due, &sh, log, sizeof(log));
+    HU_ASSERT_EQ(m.calls, 1);
+    mem.vtable->deinit(mem.ctx);
+    t_env_clear();
+}
 #endif /* HU_ENABLE_SQLITE */
 
 void run_daemon_prospective_time_tests(void) {
@@ -671,5 +814,9 @@ void run_daemon_prospective_time_tests(void) {
     HU_RUN_TEST(time_live_drops_a_stale_relative_day);
     HU_RUN_TEST(time_live_judges_with_the_channel_history);
     HU_RUN_TEST(time_shadow_keeps_legacy_output_and_store);
+    HU_RUN_TEST(time_mirror_stores_a_situation_frames_topic);
+    HU_RUN_TEST(time_mirror_collapses_frames_of_the_same_topic);
+    HU_RUN_TEST(time_topic_mirrored_frame_retires_its_ledger_row);
+    HU_RUN_TEST(time_shadow_slot_waits_for_something_due);
 #endif
 }
