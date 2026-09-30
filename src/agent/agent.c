@@ -27,6 +27,7 @@
 #include "human/max_tokens.h"
 #include "human/memory/consolidation.h"
 #include "human/memory/promotion.h"
+#include "human/memory/semantic_recall.h"
 #include "human/memory/tiers.h"
 #include "human/webhook.h"
 #ifdef HU_ENABLE_SQLITE
@@ -3026,4 +3027,11 @@ size_t hu_agent_internal_fit_history(const hu_agent_t *agent, hu_chat_message_t 
                      "(now %zu msgs, %zu bytes)",
                      dropped, HISTORY_BUDGET, msgs_count, total_bytes);
     return msgs_count;
+}
+
+hu_provider_t *hu_agent_internal_recall_provider(hu_agent_t *agent, const char *msg,
+                                                 size_t msg_len) {
+    if (!agent || !agent->provider.vtable || !hu_semantic_recall_register_admits(msg, msg_len))
+        return NULL;
+    return &agent->provider;
 }

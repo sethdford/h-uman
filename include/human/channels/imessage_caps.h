@@ -100,6 +100,17 @@ void hu_imsg_effect_set(const char *target, size_t target_len, const char *effec
 bool hu_imsg_effect_take(const char *target, size_t target_len, int64_t now, char *effect_out,
                          size_t cap);
 
+/* ── Typing rhythm (2026-09-29) ─────────────────────────────────────────
+ * The dots come and go like a person composing: typing 4-12 s, paused
+ * 1.5-4 s. `seed` is advanced (xorshift32; 0 is replaced). */
+uint32_t hu_imsg_typing_phase_ms(uint32_t *seed, bool typing);
+
+/* Before a send: how much longer to show typing so the total reaches
+ * `typing_ms` (the text's plausible typing time) when `shown_ms` already
+ * showed. 0 when enough; never above HU_IMSG_TYPING_CATCHUP_MAX_MS. */
+#define HU_IMSG_TYPING_CATCHUP_MAX_MS 6000u
+uint32_t hu_imsg_typing_catchup_ms(uint32_t typing_ms, uint64_t shown_ms);
+
 /* ── T0.1 blue guard ────────────────────────────────────────────────────
  * "Perfect and blue": the daemon must never emit a green bubble. Apple's own
  * chat.db is the SIP-free source of truth — `handle.service` and

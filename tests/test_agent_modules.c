@@ -507,7 +507,26 @@ static void test_constitutional_principle_idx_preserved(void) {
     hu_critique_result_free(&alloc, &result);
 }
 
+/* A turn that speaks AS the persona is critiqued by the persona constitution,
+ * never the generic one: its "helpful — directly address what the user
+ * needs" principle rewrote a contact's casual text into "How can I help you
+ * with the inflatable?" (live 2026-09-29 06:51). */
+static void test_constitutional_persona_turn_never_gets_helpful(void) {
+    hu_constitutional_config_t p = hu_constitutional_config_for_turn(true);
+    HU_ASSERT_TRUE(p.enabled);
+    bool has_identity_lock = false;
+    for (size_t i = 0; i < p.principle_count; i++) {
+        HU_ASSERT_TRUE(strcmp(p.principles[i].name, "helpful") != 0);
+        if (strcmp(p.principles[i].name, "identity_lock") == 0)
+            has_identity_lock = true;
+    }
+    HU_ASSERT_TRUE(has_identity_lock);
+    hu_constitutional_config_t g = hu_constitutional_config_for_turn(false);
+    HU_ASSERT_STR_EQ(g.principles[0].name, "helpful"); /* assistant turns keep it */
+}
+
 void run_agent_modules_tests(void) {
+    HU_RUN_TEST(test_constitutional_persona_turn_never_gets_helpful);
     HU_TEST_SUITE("agent_modules");
 
     HU_RUN_TEST(test_outcomes_record_and_retrieve);

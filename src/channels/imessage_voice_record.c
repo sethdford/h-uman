@@ -160,6 +160,31 @@ bool hu_voice_record_title_matches(const char *window_title, const char *expecte
     return wn > 0 && wn == xn && strncasecmp(wb, xb, wn) == 0;
 }
 
+bool hu_voice_record_applescript_quote(const char *in, char *out, size_t cap) {
+    if (!out || cap == 0)
+        return false;
+    out[0] = '\0';
+    if (!in || !in[0])
+        return false;
+    size_t n = 0;
+    for (const unsigned char *c = (const unsigned char *)in; *c; c++) {
+        if (*c < 0x20 || *c == 0x7f)
+            break;
+        bool esc = *c == '"' || *c == '\\';
+        if (n + (esc ? 2 : 1) >= cap)
+            break;
+        if (esc)
+            out[n++] = '\\';
+        out[n++] = (char)*c;
+        if (!c[1]) {
+            out[n] = '\0';
+            return true;
+        }
+    }
+    out[0] = '\0';
+    return false;
+}
+
 static bool in_target_chat(const hu_voice_record_port_t *p, const char *expected) {
     char title[256] = {0};
     return p->chat_title(p->ctx, title, sizeof(title)) == HU_OK &&
@@ -170,12 +195,13 @@ static bool in_target_chat(const hu_voice_record_port_t *p, const char *expected
  * they type would land in the target's compose field. HU_VOICE_MIN_IDLE_SEC=0
  * is the operator's "I'm testing at the Mac" override. */
 static bool user_returned(const hu_voice_record_port_t *p, const hu_voice_record_request_t *req,
-                          uint64_t t0_ms) {
+                          uint64_t t0_ms, hu_voice_record_result_t *out) {
     if (req->min_idle_sec <= 0.0)
         return false;
     uint64_t now = p->now_ms(p->ctx);
-    double elapsed = now > t0_ms ? (double)(now - t0_ms) / 1000.0 : 0.0;
-    return p->idle_sec(p->ctx) < elapsed;
+    out->check_elapsed_sec = now > t0_ms ? (double)(now - t0_ms) / 1000.0 : 0.0;
+    out->check_idle_sec = p->idle_sec(p->ctx);
+    return out->check_idle_sec < out->check_elapsed_sec;
 }
 
 static bool input_is(const hu_voice_record_port_t *p, const char *want) {
@@ -207,6 +233,14 @@ hu_error_t hu_voice_record_send(const hu_voice_record_port_t *p,
     facts.min_idle_sec = req->min_idle_sec;
     out->stage = HU_VREC_STAGE_PREFLIGHT;
     out->block = hu_voice_record_preflight(&facts);
+    /* A patient request (the owner's self-test) waits for the user to step
+     * away rather than falling back at once; nothing is touched meanwhile. */
+    while (out->block == HU_VREC_USER_ACTIVE && out->idle_waited_ms < req->idle_wait_ms) {
+        p->sleep_ms(p->ctx, HU_VREC_IDLE_POLL_MS);
+        out->idle_waited_ms += HU_VREC_IDLE_POLL_MS;
+        facts.user_idle_sec = p->idle_sec(p->ctx);
+        out->block = hu_voice_record_preflight(&facts);
+    }
     /* The wrong-recipient guard's reference: the name Messages itself shows for
      * the target. Without it the open chat cannot be confirmed — never record. */
     char expected[256] = {0};
@@ -255,7 +289,7 @@ hu_error_t hu_voice_record_send(const hu_voice_record_port_t *p,
     if (p->playback_run(p->ctx) != HU_OK)
         goto restore;
     p->sleep_ms(p->ctx, tm.tail_ms);
-    if (user_returned(p, req, t0)) {
+    if (user_returned(p, req, t0, out)) {
         out->abort_reason = "user_returned";
         goto restore;
     }
@@ -271,7 +305,7 @@ hu_error_t hu_voice_record_send(const hu_voice_record_port_t *p,
         out->abort_reason = "wrong_chat";
         goto restore;
     }
-    if (user_returned(p, req, t0)) {
+    if (user_returned(p, req, t0, out)) {
         out->abort_reason = "user_returned";
         goto restore;
     }
@@ -331,6 +365,13 @@ void hu_voice_record_request_from_env(const char *handle, size_t handle_len, con
     const char *idle = getenv("HU_VOICE_MIN_IDLE_SEC");
     out->min_idle_sec = (idle && idle[0]) ? atof(idle) : 20.0;
     out->seed = seed;
+    /* handle_allowed treats an empty list as "everyone"; here it means no one. */
+    const char *patient = getenv("HU_VOICE_IDLE_WAIT_HANDLES");
+    if (patient && patient[0] && hu_voice_record_handle_allowed(patient, handle, handle_len)) {
+        const char *wait = getenv("HU_VOICE_IDLE_WAIT_SEC");
+        double sec = (wait && wait[0]) ? atof(wait) : 90.0;
+        out->idle_wait_ms = sec > 0.0 && sec < 600.0 ? (uint32_t)(sec * 1000.0) : 0;
+    }
 }
 
 hu_error_t hu_voice_record_send_from_env(const char *handle, size_t handle_len,

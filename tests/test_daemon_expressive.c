@@ -173,6 +173,12 @@ static void test_selftest_commands(void) {
     HU_ASSERT_TRUE(st("#gif happy dance", &t));
     HU_ASSERT_EQ((int)t.form, (int)HU_DIR_FORM_GIF);
     HU_ASSERT_STR_EQ(t.query, "happy dance");
+    /* #text: a normal text reply (typing rhythm, pacing) on demand. */
+    HU_ASSERT_TRUE(st("#text what did you do this morning", &t));
+    HU_ASSERT_EQ((int)t.form, (int)HU_DIR_FORM_TEXT);
+    HU_ASSERT_EQ(t.consumed, strlen("#text "));
+    HU_ASSERT_STR_EQ(t.effect, "");
+    HU_ASSERT_FALSE(st("#texting", &t));
     HU_ASSERT_FALSE(st("#effect explode hi", &t)); /* not an effect imsg knows */
     HU_ASSERT_FALSE(st("#share podcast x", &t));
     HU_ASSERT_FALSE(st("just #voice in the middle", &t));

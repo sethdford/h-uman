@@ -280,6 +280,51 @@ static void set_frontmost(pid_t pid) {
     CFRelease(app);
 }
 
+static hu_error_t mac_open_chat(void *ctx, const char *handle, size_t handle_len);
+
+/* Runs one AppleScript line; its stdout (trailing newlines dropped) into buf. */
+static hu_error_t osascript_line(const char *script, char *buf, size_t cap) {
+    buf[0] = '\0';
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *argv[] = {"osascript", "-e", script, NULL};
+    hu_run_result_t rr = {0};
+    hu_error_t e = hu_process_run_with_timeout(&alloc, argv, NULL, 4096, 5, &rr);
+    bool ok = e == HU_OK && rr.success && rr.exit_code == 0 && rr.stdout_buf && rr.stdout_len;
+    if (ok) {
+        size_t len = rr.stdout_len;
+        while (len > 0 && (rr.stdout_buf[len - 1] == '\n' || rr.stdout_buf[len - 1] == '\r'))
+            len--;
+        ok = len > 0 && len < cap;
+        if (ok) {
+            memcpy(buf, rr.stdout_buf, len);
+            buf[len] = '\0';
+        }
+    }
+    hu_run_result_free(&alloc, &rr);
+    return ok ? HU_OK : HU_ERR_NOT_FOUND;
+}
+
+/* Messages' name -> handle for a 1:1 chat title (the reverse of
+ * mac_expected_title), then the same imessage:// open the recorder uses.
+ * Sidebar rows cannot be used: AXPress on one toggles its selection. */
+static hu_error_t reopen_by_title(const char *title) {
+    char quoted[256];
+    if (!hu_voice_record_applescript_quote(title, quoted, sizeof(quoted)))
+        return HU_ERR_INVALID_ARGUMENT;
+    char script[384];
+    int n = snprintf(script, sizeof(script),
+                     "tell application \"Messages\" to get handle of first participant whose "
+                     "name is \"%s\"",
+                     quoted);
+    if (n <= 0 || (size_t)n >= sizeof(script))
+        return HU_ERR_INVALID_ARGUMENT;
+    char handle[128];
+    if (osascript_line(script, handle, sizeof(handle)) != HU_OK ||
+        !hu_voice_record_handle_ok(handle, strlen(handle)))
+        return HU_ERR_NOT_FOUND;
+    return mac_open_chat(NULL, handle, strlen(handle));
+}
+
 static hu_error_t mac_remember_ui(void *ctx) {
     vrec_mac_ctx_t *m = (vrec_mac_ctx_t *)ctx;
     m->front_pid = 0;
@@ -311,13 +356,14 @@ static hu_error_t mac_remember_ui(void *ctx) {
 
 static void mac_restore_ui(void *ctx) {
     vrec_mac_ctx_t *m = (vrec_mac_ctx_t *)ctx;
-    /* Best effort: reselect the conversation the user had open when its
-     * sidebar entry is an AX button with that title (pinned chats are). */
+    /* Best effort: reselect the conversation the user had open — by its
+     * participant's handle (any 1:1 chat), else a pinned chat's button. */
     bool is_control = strcmp(m->win_title, HU_VREC_LABEL_RECORD) == 0 ||
                       strcmp(m->win_title, HU_VREC_LABEL_STOP) == 0 ||
                       strcmp(m->win_title, HU_VREC_LABEL_SEND) == 0 ||
                       strcmp(m->win_title, HU_VREC_LABEL_CANCEL) == 0;
-    if (m->win_title[0] && !is_control && mac_press(ctx, m->win_title) != HU_OK)
+    if (m->win_title[0] && !is_control && reopen_by_title(m->win_title) != HU_OK &&
+        mac_press(ctx, m->win_title) != HU_OK)
         hu_log_info("imessage", NULL, "voice record: previous conversation not reselected");
     if (m->front_pid > 0)
         set_frontmost(m->front_pid);
@@ -554,23 +600,7 @@ static hu_error_t mac_expected_title(void *ctx, const char *handle, size_t handl
                      (int)handle_len, handle);
     if (n <= 0 || (size_t)n >= sizeof(script))
         return HU_ERR_INVALID_ARGUMENT;
-    hu_allocator_t alloc = hu_system_allocator();
-    const char *argv[] = {"osascript", "-e", script, NULL};
-    hu_run_result_t rr = {0};
-    hu_error_t e = hu_process_run_with_timeout(&alloc, argv, NULL, 4096, 5, &rr);
-    bool ok = e == HU_OK && rr.success && rr.exit_code == 0 && rr.stdout_buf && rr.stdout_len;
-    if (ok) {
-        size_t len = rr.stdout_len;
-        while (len > 0 && (rr.stdout_buf[len - 1] == '\n' || rr.stdout_buf[len - 1] == '\r'))
-            len--;
-        ok = len > 0 && len < cap;
-        if (ok) {
-            memcpy(buf, rr.stdout_buf, len);
-            buf[len] = '\0';
-        }
-    }
-    hu_run_result_free(&alloc, &rr);
-    return ok ? HU_OK : HU_ERR_NOT_FOUND;
+    return osascript_line(script, buf, cap);
 }
 
 static double mac_idle_sec(void *ctx) {

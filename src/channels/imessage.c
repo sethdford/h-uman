@@ -23,6 +23,7 @@
 #endif
 #include <errno.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -1956,155 +1957,203 @@ size_t hu_imessage_imcore_conformance(const hu_imcore_selector_req_t *reqs, size
 
 #if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
 /*
- * Typing indicator with chat ID caching and group chat support.
- * Caches target to skip expensive chat iteration on repeat sends.
- * Skipped when the daemon already called start_typing (typing_active).
+ * Typing rhythm over the IMCore bridge (2026-09-29). A person composing does
+ * not show one unbroken indicator for two minutes: they type, stop to think,
+ * and type again. start_typing starts a pulse that alternates the bridge's
+ * typing indicator (hu_imsg_typing_phase_ms) until stop_typing or a send.
+ * Before a send the indicator is topped up to the text's plausible typing
+ * time (hu_imsg_typing_catchup_ms). No keystrokes and no window changes: the
+ * old simulator activated Messages and sent ".", Cmd-A, Delete as real key
+ * events, which land in whatever app has focus if activation loses a race.
+ * One conversation types at a time (the daemon runs one turn at a time), so
+ * the pulse is file-static.
+ */
+#define HU_IMSG_TYPING_PULSE_MAX_MS (5ull * 60ull * 1000ull) /* a turn that goes silent */
+
+static struct {
+    pthread_mutex_t mu;
+    pthread_cond_t cv;
+    pthread_t thread;
+    bool live;
+    bool quit;
+    bool done;               /* the thread exited on its own (5-min cap) */
+    bool on;                 /* the indicator is showing right now */
+    uint64_t phase_start_ms; /* when the current on/off phase began */
+    uint64_t shown_ms;       /* on-time of completed phases */
+    uint64_t began_ms;       /* the pulse's start, for the end-of-pulse log */
+    unsigned pauses;         /* typing -> paused transitions */
+    char target[128];
+} s_pulse = {.mu = PTHREAD_MUTEX_INITIALIZER, .cv = PTHREAD_COND_INITIALIZER};
+
+static uint64_t pulse_now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u;
+}
+
+static bool imsg_bridge_up(hu_imessage_ctx_t *c) {
+    return c && c->use_imsg_cli && imsg_cli_available(c) &&
+           hu_imessage_caps_cached(c->alloc)->advanced;
+}
+
+static bool bridge_typing(const char *target, bool on) {
+    hu_allocator_t alloc = hu_system_allocator();
+    /* A group is addressed by its chat identifier, a person by handle. */
+    const char *flag =
+        hu_voice_record_handle_ok(target, strlen(target)) ? "--to" : "--chat-identifier";
+    const char *argv_on[] = {"imsg", "typing", flag, target, NULL};
+    const char *argv_off[] = {"imsg", "typing", flag, target, "--stop", "true", NULL};
+    hu_run_result_t rr = {0};
+    /* Bounded: pulse_stop joins the pulse thread from the daemon's thread. */
+    hu_error_t err =
+        hu_process_run_with_timeout(&alloc, on ? argv_on : argv_off, NULL, 4096, 5, &rr);
+    bool ok = err == HU_OK && rr.success && rr.exit_code == 0;
+    hu_run_result_free(&alloc, &rr);
+    if (!ok)
+        hu_imessage_caps_note_bridge_failure();
+    return ok;
+}
+
+/* Called with s_pulse.mu held: close the current phase at `now`. */
+static void pulse_close_phase(uint64_t now) {
+    if (s_pulse.on && now > s_pulse.phase_start_ms)
+        s_pulse.shown_ms += now - s_pulse.phase_start_ms;
+    s_pulse.phase_start_ms = now;
+}
+
+static void *pulse_main(void *arg) {
+    (void)arg;
+    uint32_t seed = (uint32_t)pulse_now_ms() ^ (uint32_t)getpid();
+    uint64_t began = pulse_now_ms();
+    pthread_mutex_lock(&s_pulse.mu);
+    while (!s_pulse.quit) {
+        uint32_t phase = hu_imsg_typing_phase_ms(&seed, s_pulse.on);
+        struct timespec until;
+        clock_gettime(CLOCK_REALTIME, &until);
+        until.tv_sec += phase / 1000u;
+        until.tv_nsec += (long)(phase % 1000u) * 1000000L;
+        if (until.tv_nsec >= 1000000000L) {
+            until.tv_sec++;
+            until.tv_nsec -= 1000000000L;
+        }
+        while (!s_pulse.quit &&
+               pthread_cond_timedwait(&s_pulse.cv, &s_pulse.mu, &until) != ETIMEDOUT) {}
+        if (s_pulse.quit)
+            break;
+        uint64_t now = pulse_now_ms();
+        bool stop_for_good = now - began > HU_IMSG_TYPING_PULSE_MAX_MS;
+        bool want_on = !s_pulse.on && !stop_for_good;
+        char target[sizeof(s_pulse.target)];
+        memcpy(target, s_pulse.target, sizeof(target));
+        pthread_mutex_unlock(&s_pulse.mu);
+        bool ok = bridge_typing(target, want_on);
+        pthread_mutex_lock(&s_pulse.mu);
+        if (ok) {
+            pulse_close_phase(now);
+            if (s_pulse.on && !want_on)
+                s_pulse.pauses++;
+            s_pulse.on = want_on;
+        }
+        if (stop_for_good)
+            break;
+    }
+    s_pulse.done = true;
+    pthread_mutex_unlock(&s_pulse.mu);
+    return NULL;
+}
+
+/* Ends the pulse; returns the milliseconds the indicator was shown. With
+ * `leave_on` the indicator stays up (a send follows and clears it). */
+static uint64_t pulse_stop(bool leave_on) {
+    pthread_mutex_lock(&s_pulse.mu);
+    if (!s_pulse.live) {
+        pthread_mutex_unlock(&s_pulse.mu);
+        return 0;
+    }
+    s_pulse.quit = true;
+    pthread_cond_broadcast(&s_pulse.cv);
+    pthread_t th = s_pulse.thread;
+    pthread_mutex_unlock(&s_pulse.mu);
+    pthread_join(th, NULL);
+    pthread_mutex_lock(&s_pulse.mu);
+    pulse_close_phase(pulse_now_ms());
+    uint64_t shown = s_pulse.shown_ms;
+    uint64_t span = pulse_now_ms() - s_pulse.began_ms;
+    unsigned pauses = s_pulse.pauses;
+    bool was_on = s_pulse.on;
+    char target[sizeof(s_pulse.target)];
+    memcpy(target, s_pulse.target, sizeof(target));
+    s_pulse.live = false;
+    pthread_mutex_unlock(&s_pulse.mu);
+    hu_log_info("imessage", NULL, "typing pulse: shown %llums of %llums, %u pause(s)",
+                (unsigned long long)shown, (unsigned long long)span, pauses);
+    if (leave_on && !was_on)
+        (void)bridge_typing(target, true);
+    else if (!leave_on && was_on)
+        (void)bridge_typing(target, false);
+    return shown;
+}
+
+/* Starts the pulse for `target` with the indicator already showing. */
+static bool pulse_start(const char *target, size_t target_len) {
+    if (target_len == 0 || target_len >= sizeof(s_pulse.target))
+        return false;
+    (void)pulse_stop(false); /* a previous conversation's pulse, if any */
+    char tgt[sizeof(s_pulse.target)];
+    memcpy(tgt, target, target_len);
+    tgt[target_len] = '\0';
+    if (!bridge_typing(tgt, true))
+        return false;
+    pthread_mutex_lock(&s_pulse.mu);
+    memcpy(s_pulse.target, tgt, target_len + 1);
+    s_pulse.quit = false;
+    s_pulse.done = false;
+    s_pulse.on = true;
+    s_pulse.shown_ms = 0;
+    s_pulse.pauses = 0;
+    s_pulse.phase_start_ms = pulse_now_ms();
+    s_pulse.began_ms = s_pulse.phase_start_ms;
+    s_pulse.live = pthread_create(&s_pulse.thread, NULL, pulse_main, NULL) == 0;
+    bool live = s_pulse.live;
+    pthread_mutex_unlock(&s_pulse.mu);
+    return live;
+}
+
+static bool pulse_is_for(const char *target, size_t target_len) {
+    pthread_mutex_lock(&s_pulse.mu);
+    bool hit = s_pulse.live && !s_pulse.done && strlen(s_pulse.target) == target_len &&
+               memcmp(s_pulse.target, target, target_len) == 0;
+    pthread_mutex_unlock(&s_pulse.mu);
+    return hit;
+}
+
+/*
+ * Right before a text goes out: the indicator should have been up about as
+ * long as the text takes to type. When the pulse ran through the reply's
+ * generation that is usually already true (no wait); a follow-up bubble or a
+ * proactive message gets its own short burst of typing first.
  */
 static void imessage_simulate_typing(hu_imessage_ctx_t *c, const char *tgt, size_t tgt_len,
                                      size_t message_len) {
-    if (!c || atomic_load(&c->typing_active))
+    if (!c || !tgt || tgt_len == 0 || tgt_len >= sizeof(s_pulse.target))
         return;
-
-    unsigned int delay_ms =
+    uint32_t typing_ms =
         hu_imessage_typing_duration(message_len, (uint32_t)time(NULL) ^ (uint32_t)message_len);
-
-    size_t tgt_esc_cap = tgt_len * 2 + 1;
-    if (tgt_esc_cap > 4096)
-        return;
-
-    char tgt_esc[4096];
-    escape_for_applescript(tgt_esc, sizeof(tgt_esc), tgt, tgt_len);
-
-    if (delay_ms <= 3000) {
-        bool same_target = (c->typing_last_target_len == tgt_len && tgt_len > 0 &&
-                            memcmp(c->typing_last_target, tgt, tgt_len) == 0);
-        if (tgt_len > 0 && tgt_len < sizeof(c->typing_last_target)) {
-            memcpy(c->typing_last_target, tgt, tgt_len);
-            c->typing_last_target[tgt_len] = '\0';
-            c->typing_last_target_len = tgt_len;
-        }
-
-        char typing_script[1024];
-        int ts_n;
-        if (same_target) {
-            ts_n = snprintf(typing_script, sizeof(typing_script),
-                            "tell application \"Messages\" to activate\n"
-                            "delay 0.2\n"
-                            "tell application \"System Events\" to tell process \"Messages\"\n"
-                            "  keystroke \".\"\n"
-                            "  delay %.1f\n"
-                            "  keystroke \"a\" using command down\n"
-                            "  key code 51\n"
-                            "end tell",
-                            (float)delay_ms / 1000.0f);
-        } else {
-            ts_n = snprintf(typing_script, sizeof(typing_script),
-                            "tell application \"Messages\"\n"
-                            "  activate\n"
-                            "  set targetHandle to \"%s\"\n"
-                            "  set targetChat to missing value\n"
-                            "  repeat with c in every chat\n"
-                            "    try\n"
-                            "      repeat with p in participants of c\n"
-                            "        if handle of p is targetHandle then\n"
-                            "          set targetChat to c\n"
-                            "          exit repeat\n"
-                            "        end if\n"
-                            "      end repeat\n"
-                            "    end try\n"
-                            "    if targetChat is not missing value then exit repeat\n"
-                            "  end repeat\n"
-                            "end tell\n"
-                            "delay 0.3\n"
-                            "tell application \"System Events\" to tell process \"Messages\"\n"
-                            "  keystroke \".\"\n"
-                            "  delay %.1f\n"
-                            "  keystroke \"a\" using command down\n"
-                            "  key code 51\n"
-                            "end tell",
-                            tgt_esc, (float)delay_ms / 1000.0f);
-        }
-        if (ts_n > 0 && (size_t)ts_n < sizeof(typing_script)) {
-            const char *ts_argv[] = {"osascript", "-e", typing_script, NULL};
-            hu_run_result_t ts_result = {0};
-            hu_error_t ts_err = hu_process_run(c->alloc, ts_argv, NULL, 65536, &ts_result);
-            hu_run_result_free(c->alloc, &ts_result);
-            if (ts_err != HU_OK && getenv("HU_DEBUG"))
-                hu_log_error("imessage", NULL, "typing indicator failed (accessibility?)");
-        }
+    uint64_t shown = 0;
+    if (pulse_is_for(tgt, tgt_len)) {
+        shown = pulse_stop(true);
+    } else if (atomic_load(&c->typing_active)) {
+        return; /* another tier (AX/IMCore) is showing the indicator */
     } else {
-        /* Longer messages: re-trigger typing indicator every ~2.5s so the
-         * bubble stays visible for the entire simulated composing period. */
-        bool same_target = (c->typing_last_target_len == tgt_len && tgt_len > 0 &&
-                            memcmp(c->typing_last_target, tgt, tgt_len) == 0);
-        if (tgt_len > 0 && tgt_len < sizeof(c->typing_last_target)) {
-            memcpy(c->typing_last_target, tgt, tgt_len);
-            c->typing_last_target[tgt_len] = '\0';
-            c->typing_last_target_len = tgt_len;
-        }
-
-        unsigned int remaining = delay_ms;
-        while (remaining > 0) {
-            unsigned int chunk = remaining > 2500 ? 2500 : remaining;
-            char typing_script[1024];
-            int ts_n;
-            if (same_target) {
-                ts_n = snprintf(typing_script, sizeof(typing_script),
-                                "tell application \"Messages\" to activate\n"
-                                "delay 0.2\n"
-                                "tell application \"System Events\" to tell process "
-                                "\"Messages\"\n"
-                                "  keystroke \".\"\n"
-                                "  delay %.1f\n"
-                                "  keystroke \"a\" using command down\n"
-                                "  key code 51\n"
-                                "end tell",
-                                (float)chunk / 1000.0f);
-            } else {
-                ts_n = snprintf(typing_script, sizeof(typing_script),
-                                "tell application \"Messages\"\n"
-                                "  activate\n"
-                                "  set targetHandle to \"%s\"\n"
-                                "  set targetChat to missing value\n"
-                                "  repeat with c in every chat\n"
-                                "    try\n"
-                                "      repeat with p in participants of c\n"
-                                "        if handle of p is targetHandle then\n"
-                                "          set targetChat to c\n"
-                                "          exit repeat\n"
-                                "        end if\n"
-                                "      end repeat\n"
-                                "    end try\n"
-                                "    if targetChat is not missing value then exit repeat\n"
-                                "  end repeat\n"
-                                "end tell\n"
-                                "delay 0.3\n"
-                                "tell application \"System Events\" to tell process "
-                                "\"Messages\"\n"
-                                "  keystroke \".\"\n"
-                                "  delay %.1f\n"
-                                "  keystroke \"a\" using command down\n"
-                                "  key code 51\n"
-                                "end tell",
-                                tgt_esc, (float)chunk / 1000.0f);
-                same_target = true;
-            }
-            if (ts_n > 0 && (size_t)ts_n < sizeof(typing_script)) {
-                const char *ts_argv[] = {"osascript", "-e", typing_script, NULL};
-                hu_run_result_t ts_result = {0};
-                hu_error_t ts_err = hu_process_run(c->alloc, ts_argv, NULL, 65536, &ts_result);
-                hu_run_result_free(c->alloc, &ts_result);
-                if (ts_err != HU_OK) {
-                    usleep((unsigned int)(remaining) * 1000);
-                    break;
-                }
-            } else {
-                usleep((unsigned int)(remaining) * 1000);
-                break;
-            }
-            remaining -= chunk;
-        }
+        char t[sizeof(s_pulse.target)];
+        memcpy(t, tgt, tgt_len);
+        t[tgt_len] = '\0';
+        if (!imsg_bridge_up(c) || !bridge_typing(t, true))
+            return; /* no bridge: send without an indicator, never with keystrokes */
     }
+    uint32_t wait_ms = hu_imsg_typing_catchup_ms(typing_ms, shown);
+    if (wait_ms > 0)
+        usleep(wait_ms * 1000u);
 }
 #endif
 
@@ -2581,8 +2630,8 @@ imsg_media:
                     hu_log_error("imessage", NULL,
                                  "voice record: default input NOT restored to the real mic");
                 hu_log_info("imessage", NULL,
-                            "voice delivered via Messages: verified=%d restored=%d",
-                            vres.verified ? 1 : 0, vres.restored ? 1 : 0);
+                            "voice delivered via Messages: verified=%d restored=%d waited_ms=%u",
+                            vres.verified ? 1 : 0, vres.restored ? 1 : 0, vres.idle_waited_ms);
                 imessage_report_sent(tgt, tgt_len, NULL, 0, HU_IMESSAGE_SENT_KIND_MEDIA,
                                      vres.prior_max_rowid);
                 goto imsg_cleanup;
@@ -2594,9 +2643,11 @@ imsg_media:
                 hu_log_error("imessage", NULL,
                              "voice record: Cancel failed — a recording may be left in Messages");
             hu_log_info("imessage", NULL,
-                        "voice record fell back to attachment: block=%s stage=%d reason=%s",
+                        "voice record fell back to attachment: block=%s stage=%d reason=%s "
+                        "waited_ms=%u idle=%.2fs elapsed=%.2fs",
                         hu_voice_record_block_name(vres.block), (int)vres.stage,
-                        vres.abort_reason ? vres.abort_reason : "-");
+                        vres.abort_reason ? vres.abort_reason : "-", vres.idle_waited_ms,
+                        vres.check_idle_sec, vres.check_elapsed_sec);
         }
     }
     /* Voice-first memos (spec 2026-09-28): a memo that was not recorded
@@ -3828,6 +3879,12 @@ static hu_error_t imessage_mark_read(void *ctx, const char *contact_id, size_t c
     hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ctx;
     if (!c->alloc || !contact_id || contact_id_len == 0)
         return HU_ERR_INVALID_ARGUMENT;
+    /* The bridge's read receipt is the one that shows "Read" on the sender's
+     * side; the AppleScript below is the no-bridge fallback. Without this the
+     * daemon's "read, pause, then type" step marked nothing read, and the
+     * contact watched typing dots under a "Delivered" (2026-09-29). */
+    if (hu_imessage_mark_read(ctx, contact_id, contact_id_len) == HU_OK)
+        return HU_OK;
 
     if (contact_id_len > 4096)
         return HU_ERR_INVALID_ARGUMENT;
@@ -5152,11 +5209,10 @@ hu_error_t hu_imessage_react_emoji_with_fallback(void *ctx, const char *target, 
     return HU_ERR_NOT_SUPPORTED;
 }
 
-/* ── Typing indicators: three-tier fallback ──────────────────────────
+/* ── Typing indicators ────────────────────────────────────────────────
+ * Tier 0: the IMCore bridge (imsg typing), pulsed typing/paused — no UI
  * Tier 1: IMCore private framework (direct API, no UI, macOS 14-15)
- * Tier 2: AX compose field injection (bypasses keystroke block, macOS 14+)
- * Tier 3: AppleScript keystroke via System Events (last resort)
- * Requires Accessibility permission for tiers 2+3. */
+ * Tier 2: AX compose field injection (opens the chat; needs Accessibility) */
 static hu_error_t imessage_start_typing(void *ctx, const char *recipient, size_t recipient_len) {
 #if HU_IS_TEST
     (void)ctx;
@@ -5179,6 +5235,19 @@ static hu_error_t imessage_start_typing(void *ctx, const char *recipient, size_t
         c->typing_last_target_len = recipient_len;
     }
 
+    /* Tier 0: the IMCore bridge, pulsed like a person composing. No UI. The
+     * daemon calls start_typing more than once a turn; a running pulse for
+     * the same chat keeps its rhythm instead of restarting. */
+    if (pulse_is_for(recipient, recipient_len))
+        return HU_OK;
+    /* Nobody types into a chat they have not opened: read it first. */
+    if (imsg_bridge_up(c))
+        (void)hu_imessage_mark_read(c, recipient, recipient_len);
+    if (imsg_bridge_up(c) && pulse_start(recipient, recipient_len)) {
+        hu_log_info("imessage", NULL, "typing started via bridge (rhythm)");
+        return HU_OK;
+    }
+
     /* Tier 1: IMCore — direct API, no UI activation needed. */
     imcore_init(c);
     if (imcore_start_typing(c, recipient, recipient_len)) {
@@ -5194,24 +5263,6 @@ static hu_error_t imessage_start_typing(void *ctx, const char *recipient, size_t
         hu_log_info("imessage", NULL, "typing started via AX compose field");
         atomic_store(&c->typing_active, true);
         return HU_OK;
-    }
-
-    /* Tier 3: imsg typing CLI or AppleScript keystroke (legacy). */
-    if (c->use_imsg_cli && imsg_cli_available(c)) {
-        char tgt_buf[256];
-        size_t tb = recipient_len < sizeof(tgt_buf) - 1 ? recipient_len : sizeof(tgt_buf) - 1;
-        memcpy(tgt_buf, recipient, tb);
-        tgt_buf[tb] = '\0';
-        const char *argv[] = {"imsg", "typing", "--to", tgt_buf, "--duration", "5s", NULL};
-        hu_run_result_t result = {0};
-        hu_error_t err = hu_process_run(c->alloc, argv, NULL, 4096, &result);
-        bool ok = (err == HU_OK && result.exit_code == 0);
-        hu_run_result_free(c->alloc, &result);
-        if (ok) {
-            hu_log_info("imessage", NULL, "typing started via imsg CLI");
-            atomic_store(&c->typing_active, true);
-            return HU_OK;
-        }
     }
 
     /* Rate-limit to one log per daemon lifetime — typing indicator is
@@ -5245,6 +5296,18 @@ static hu_error_t imessage_stop_typing(void *ctx, const char *recipient, size_t 
     hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ctx;
     if (!c || !c->alloc)
         return HU_ERR_INVALID_ARGUMENT;
+
+    /* Tier 0: the bridge pulse. */
+    if (recipient && pulse_is_for(recipient, recipient_len)) {
+        (void)pulse_stop(false);
+        return HU_OK;
+    }
+    /* Only the tier that started typing may stop it. The AX tier's stop
+     * empties the open chat's compose field, so reaching it after bridge
+     * typing (or a send that already ended the pulse) wiped whatever draft
+     * the owner was typing in Messages (critic, 2026-09-29). */
+    if (!atomic_load(&c->typing_active))
+        return HU_OK;
 
     /* Tier 1: IMCore */
     if (imcore_stop_typing(c, recipient, recipient_len)) {

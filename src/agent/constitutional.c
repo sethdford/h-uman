@@ -330,6 +330,11 @@ hu_error_t hu_constitutional_critique(hu_allocator_t *alloc, hu_provider_t *prov
                 result->revised_response = hu_strndup(alloc, rw_resp.content, rw_resp.content_len);
                 if (result->revised_response)
                     result->revised_response_len = strlen(result->revised_response);
+                /* A rewrite replaces what was said: never silently. */
+                bool known = principle_idx >= 0 && (size_t)principle_idx < config->principle_count;
+                hu_log_info("constitutional", NULL, "rewrite (principle %s): %zu -> %zu chars",
+                            known ? config->principles[principle_idx].name : "?", response_len,
+                            result->revised_response_len);
             }
             hu_chat_response_free(alloc, &rw_resp);
         }
@@ -382,3 +387,7 @@ int hu_constitutional_test_parse_principle_index(const char *resp, size_t resp_l
     return parse_principle_index(resp, resp_len);
 }
 #endif
+
+hu_constitutional_config_t hu_constitutional_config_for_turn(bool persona_voice) {
+    return persona_voice ? hu_constitutional_config_persona() : hu_constitutional_config_default();
+}

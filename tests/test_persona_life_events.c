@@ -144,6 +144,25 @@ static void life_event_open_ended_keeps_declared_state(void) {
                  (int)HU_LIFE_EVENT_STATE_IN_PROGRESS);
 }
 
+/* Seth, 2026-09-29: "vague unless known". An open-ended event nobody has
+ * re-confirmed in 30 days is no longer known to be current: seth.json's
+ * "helping ryan relocate" (in_progress, as of 2026-07-18) was still answered
+ * as this weekend's plan in late September. */
+static void life_event_open_ended_goes_unknown_after_30_days(void) {
+    hu_life_event_t ev = make_move_event(HU_LIFE_EVENT_STATE_IN_PROGRESS, "2026-07-18", NULL);
+    HU_ASSERT_EQ(
+        (int)hu_life_event_effective_state(&ev, hu_life_event_parse_date("2026-08-10", 10)),
+        (int)HU_LIFE_EVENT_STATE_IN_PROGRESS); /* 23 days: still current */
+    HU_ASSERT_EQ(
+        (int)hu_life_event_effective_state(&ev, hu_life_event_parse_date("2026-09-29", 10)),
+        (int)HU_LIFE_EVENT_STATE_UNKNOWN);
+    /* A confirmed resolution never goes stale. */
+    hu_life_event_t done = make_move_event(HU_LIFE_EVENT_STATE_COMPLETED, "2026-07-18", NULL);
+    HU_ASSERT_EQ(
+        (int)hu_life_event_effective_state(&done, hu_life_event_parse_date("2026-09-29", 10)),
+        (int)HU_LIFE_EVENT_STATE_COMPLETED);
+}
+
 /* ── The directive (THE HEADLINE CONTRACT) ────────────────────────────── */
 
 /* Given an event whose date has passed with no confirmed completion, the built
@@ -199,6 +218,33 @@ static void directive_for_completed_event_omits_the_guard(void) {
      * unresolved it would be a rule with no referent, spending head budget and
      * inviting the model to hedge facts it should state plainly. */
     HU_ASSERT_TRUE(strstr(out, "Never upgrade") == NULL);
+}
+
+/* The stale event says when it was last heard, so the model can say "last i
+ * heard..." instead of presenting July as today. */
+static void directive_for_stale_event_says_when_it_was_last_heard(void) {
+    hu_life_event_t ev = make_move_event(HU_LIFE_EVENT_STATE_IN_PROGRESS, "2026-07-18", NULL);
+    char out[1024];
+    size_t out_len = 0;
+    HU_ASSERT_EQ(hu_life_events_build_directive(&ev, 1, hu_life_event_parse_date("2026-09-29", 10),
+                                                out, sizeof(out), &out_len),
+                 HU_OK);
+    HU_ASSERT_TRUE(strstr(out, STATUS_UNKNOWN) != NULL);
+    HU_ASSERT_TRUE(strstr(out, "last heard 2026-07-18") != NULL);
+}
+
+/* Whatever the events say, anything about the day that is NOT listed is
+ * unknown: keep it vague or ask, never invent it. The rule rides with the
+ * block even when every event is settled. */
+static void directive_says_the_rest_of_the_day_is_unknown(void) {
+    hu_life_event_t ev = make_move_event(HU_LIFE_EVENT_STATE_COMPLETED, AS_OF_STR, EXPECTED_STR);
+    char out[1024];
+    size_t out_len = 0;
+    HU_ASSERT_EQ(hu_life_events_build_directive(&ev, 1, hu_life_event_parse_date(NOW_STR, 10), out,
+                                                sizeof(out), &out_len),
+                 HU_OK);
+    HU_ASSERT_TRUE(strstr(out, "Anything not listed here") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "keep it vague") != NULL);
 }
 
 /* Mixed set: the guard attaches per-event, not to the whole block. */
@@ -348,9 +394,38 @@ static void persona_prompt_life_events_gate_off_then_live(void) {
     HU_ASSERT_TRUE(guidance_live);
 }
 
+/* Production runs HU_PERSONA_HEAD=live, whose head is the compact immersive
+ * builder; the gate test above only covered the full head. The block must be
+ * in the head the reply actually gets (2026-09-29: "how's ryan settling in"
+ * got "he's doing alright", a status no event records). */
+static void immersive_head_carries_the_life_events_block(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t p;
+    memset(&p, 0, sizeof(p));
+    HU_ASSERT_EQ(hu_persona_load_json(&alloc, persona_with_events_json,
+                                      strlen(persona_with_events_json), &p),
+                 HU_OK);
+    setenv("HU_LIFE_EVENTS", "live", 1);
+    char *prompt = NULL;
+    size_t prompt_len = 0;
+    HU_ASSERT_EQ(
+        hu_persona_build_prompt_compact_immersive(&alloc, &p, "imessage", 8, &prompt, &prompt_len),
+        HU_OK);
+    HU_ASSERT_NOT_NULL(prompt);
+    HU_ASSERT_TRUE(strstr(prompt, "moving to the new place") != NULL);
+    HU_ASSERT_TRUE(strstr(prompt, GUIDANCE_MARKER) != NULL);
+    alloc.free(alloc.ctx, prompt, prompt_len + 1);
+    unsetenv("HU_LIFE_EVENTS");
+    hu_persona_deinit(&alloc, &p);
+}
+
 void run_persona_life_events_tests(void);
 void run_persona_life_events_tests(void) {
     HU_TEST_SUITE("persona_life_events");
+    HU_RUN_TEST(immersive_head_carries_the_life_events_block);
+    HU_RUN_TEST(life_event_open_ended_goes_unknown_after_30_days);
+    HU_RUN_TEST(directive_for_stale_event_says_when_it_was_last_heard);
+    HU_RUN_TEST(directive_says_the_rest_of_the_day_is_unknown);
     HU_RUN_TEST(life_event_state_parse_is_exact_not_substring);
     HU_RUN_TEST(life_event_parse_date_is_deterministic);
     HU_RUN_TEST(life_event_passed_date_unconfirmed_is_unknown_not_completed);

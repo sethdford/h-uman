@@ -539,7 +539,36 @@ static void caps_effect_slot_is_one_shot_and_scoped(void) {
     HU_ASSERT_FALSE(hu_imsg_effect_take("+15550000001", 12, 2200, e, sizeof(e))); /* stale */
 }
 
+/* Typing rhythm (2026-09-29, Seth: "typing... stopping... thinking and then
+ * typing again"). Phases alternate: typing 4-12 s, paused 1.5-4 s. */
+static void test_imsg_typing_phases_stay_in_human_ranges(void) {
+    uint32_t seed = 7;
+    uint32_t tmin = UINT32_MAX, tmax = 0, pmin = UINT32_MAX, pmax = 0;
+    for (int i = 0; i < 500; i++) {
+        uint32_t t = hu_imsg_typing_phase_ms(&seed, true);
+        uint32_t p = hu_imsg_typing_phase_ms(&seed, false);
+        tmin = t < tmin ? t : tmin;
+        tmax = t > tmax ? t : tmax;
+        pmin = p < pmin ? p : pmin;
+        pmax = p > pmax ? p : pmax;
+    }
+    HU_ASSERT_TRUE(tmin >= 4000 && tmax <= 12000);
+    HU_ASSERT_TRUE(pmin >= 1500 && pmax <= 4000);
+    HU_ASSERT_TRUE(tmax - tmin > 4000); /* varied, not a fixed beat */
+    HU_ASSERT_TRUE(pmax - pmin > 1000);
+}
+
+/* Before a send: top typing up to what the text takes; never wait long. */
+static void test_imsg_typing_catchup_tops_up_and_is_bounded(void) {
+    HU_ASSERT_EQ(hu_imsg_typing_catchup_ms(3000, 0), 3000u);
+    HU_ASSERT_EQ(hu_imsg_typing_catchup_ms(3000, 1000), 2000u);
+    HU_ASSERT_EQ(hu_imsg_typing_catchup_ms(3000, 45000), 0u); /* typed all along */
+    HU_ASSERT_EQ(hu_imsg_typing_catchup_ms(60000, 0), HU_IMSG_TYPING_CATCHUP_MAX_MS);
+}
+
 void run_imessage_caps_tests(void) {
+    HU_RUN_TEST(test_imsg_typing_phases_stay_in_human_ranges);
+    HU_RUN_TEST(test_imsg_typing_catchup_tops_up_and_is_bounded);
     HU_TEST_SUITE("imessage_caps");
     HU_RUN_TEST(caps_effect_slot_is_one_shot_and_scoped);
     HU_RUN_TEST(caps_bare_url_is_exactly_one_link);

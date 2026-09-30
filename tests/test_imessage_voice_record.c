@@ -137,6 +137,8 @@ typedef struct {
     double idle;                  /* seconds since last user input, during the run */
     uint64_t clock_ms;
     bool lock_busy;
+    bool idle_grows; /* the user steps away: every sleep adds to idle */
+    uint32_t slept_ms;
 } fake_port_t;
 
 static void fp_log(fake_port_t *f, const char *s) {
@@ -214,6 +216,10 @@ static void fp_dispose(void *c) {
     fp_log(c, "dispose");
 }
 static void fp_sleep(void *c, uint32_t ms) {
+    fake_port_t *f = c;
+    f->slept_ms += ms;
+    if (f->idle_grows)
+        f->idle += ms / 1000.0;
     if (ms == HU_VREC_SEND_SETTLE_MS)
         fp_log(c, "settle");
 }
@@ -283,7 +289,7 @@ static fake_port_t fake_ok(void) {
 }
 
 static hu_voice_record_request_t req_ok(void) {
-    hu_voice_record_request_t r = {"+15550000001", 12, "/tmp/a.caf", "Shure MV7", 20.0, 7};
+    hu_voice_record_request_t r = {"+15550000001", 12, "/tmp/a.caf", "Shure MV7", 20.0, 7, 0};
     return r;
 }
 
@@ -421,6 +427,22 @@ static void test_vrec_handle_ok_accepts_only_phone_or_email(void) {
     HU_ASSERT_FALSE(hu_voice_record_handle_ok("", 0));
 }
 
+/* Restoring the user's conversation (live 2026-09-29: "previous conversation
+ * not reselected"): the open chat's title is looked up in Messages by name, so
+ * the title is quoted into AppleScript. Quotes and backslashes are escaped;
+ * a control character refuses (a title never has one, a hostile one might). */
+static void test_vrec_applescript_quote_escapes_and_refuses(void) {
+    char out[64];
+    HU_ASSERT_TRUE(hu_voice_record_applescript_quote("Betty Ford", out, sizeof(out)));
+    HU_ASSERT_STR_EQ(out, "Betty Ford");
+    HU_ASSERT_TRUE(hu_voice_record_applescript_quote("Al \"Big\" O\\K", out, sizeof(out)));
+    HU_ASSERT_STR_EQ(out, "Al \\\"Big\\\" O\\\\K");
+    HU_ASSERT_FALSE(hu_voice_record_applescript_quote("a\nb", out, sizeof(out)));
+    HU_ASSERT_FALSE(hu_voice_record_applescript_quote("", out, sizeof(out)));
+    HU_ASSERT_FALSE(hu_voice_record_applescript_quote("toolong-toolong", out, 8));
+    HU_ASSERT_FALSE(hu_voice_record_applescript_quote(NULL, out, sizeof(out)));
+}
+
 static void test_vrec_title_matches_is_exact_but_case_and_space_tolerant(void) {
     HU_ASSERT_TRUE(hu_voice_record_title_matches("Seth Ford", "Seth Ford"));
     HU_ASSERT_TRUE(hu_voice_record_title_matches("  seth ford ", "Seth Ford"));
@@ -507,6 +529,9 @@ static void test_vrec_user_returned_mid_clip_cancels(void) {
     HU_ASSERT_TRUE(strstr(f.trace, "press:Send") == NULL);
     HU_ASSERT_TRUE(strstr(f.trace, "press:Cancel audio recording") != NULL);
     HU_ASSERT_STR_EQ(res.abort_reason, "user_returned");
+    /* The numbers behind the call are kept, so a live miss explains itself. */
+    HU_ASSERT_TRUE(res.check_idle_sec > 0.19 && res.check_idle_sec < 0.21);
+    HU_ASSERT_TRUE(res.check_elapsed_sec >= 1.0);
 }
 
 static void test_vrec_operator_override_ignores_activity(void) {
@@ -565,6 +590,73 @@ static void test_vrec_macos_port_blocks_under_test(void) {
     hu_voice_record_result_t res;
     HU_ASSERT_EQ(hu_voice_record_send(p, &r, &res), HU_ERR_NOT_SUPPORTED);
     HU_ASSERT_EQ(res.block, HU_VREC_NO_AX);
+}
+
+/* Owner self-test (live #voice, 2026-09-29 06:18): Seth was at the Mac, the
+ * memo fell back to text at once. A patient request waits for him to step
+ * away, then records. */
+static void test_vrec_patient_request_waits_for_idle_then_records(void) {
+    fake_port_t f = fake_ok();
+    f.facts.user_idle_sec = 3.0;
+    f.idle = 3.0;
+    f.idle_grows = true;
+    hu_voice_record_port_t p = fake_port(&f);
+    hu_voice_record_request_t r = req_ok();
+    r.idle_wait_ms = 90000;
+    hu_voice_record_result_t res;
+    HU_ASSERT_EQ(hu_voice_record_send(&p, &r, &res), HU_OK);
+    HU_ASSERT_EQ(res.block, HU_VREC_OK);
+    HU_ASSERT_TRUE(res.idle_waited_ms >= 17000);
+    HU_ASSERT_TRUE(strstr(f.trace, "press:Send") != NULL);
+}
+
+/* Everyone else: an active user still blocks at once, touching nothing. */
+static void test_vrec_impatient_request_blocks_at_once(void) {
+    fake_port_t f = fake_ok();
+    f.facts.user_idle_sec = 3.0;
+    f.idle = 3.0;
+    f.idle_grows = true;
+    hu_voice_record_port_t p = fake_port(&f);
+    hu_voice_record_request_t r = req_ok();
+    hu_voice_record_result_t res;
+    HU_ASSERT_EQ(hu_voice_record_send(&p, &r, &res), HU_ERR_NOT_SUPPORTED);
+    HU_ASSERT_EQ(res.block, HU_VREC_USER_ACTIVE);
+    HU_ASSERT_EQ(f.slept_ms, 0u);
+    HU_ASSERT_TRUE(strstr(f.trace, "open") == NULL);
+}
+
+/* The wait is bounded: a user who never steps away gets the fallback. */
+static void test_vrec_patient_wait_gives_up_at_its_bound(void) {
+    fake_port_t f = fake_ok();
+    f.facts.user_idle_sec = 3.0;
+    f.idle = 3.0;
+    hu_voice_record_port_t p = fake_port(&f);
+    hu_voice_record_request_t r = req_ok();
+    r.idle_wait_ms = 30000;
+    hu_voice_record_result_t res;
+    HU_ASSERT_EQ(hu_voice_record_send(&p, &r, &res), HU_ERR_NOT_SUPPORTED);
+    HU_ASSERT_EQ(res.block, HU_VREC_USER_ACTIVE);
+    HU_ASSERT_TRUE(f.slept_ms >= 30000 && f.slept_ms <= 32000 /* a bounded number of polls */);
+    HU_ASSERT_TRUE(strstr(f.trace, "open") == NULL);
+}
+
+/* Only the handles on HU_VOICE_IDLE_WAIT_HANDLES wait (Seth's own). */
+static void test_vrec_request_from_env_waits_only_for_listed_handles(void) {
+    const char *old = getenv("HU_VOICE_IDLE_WAIT_HANDLES");
+    char saved[256] = {0};
+    if (old)
+        snprintf(saved, sizeof(saved), "%s", old);
+    setenv("HU_VOICE_IDLE_WAIT_HANDLES", "+15550000001,me@example.com", 1);
+    hu_voice_record_request_t r;
+    hu_voice_record_request_from_env("+15550000001", 12, "/tmp/a.caf", 9, &r);
+    HU_ASSERT_EQ(r.idle_wait_ms, 90000u);
+    hu_voice_record_request_from_env("+15550000002", 12, "/tmp/a.caf", 9, &r);
+    HU_ASSERT_EQ(r.idle_wait_ms, 0u);
+    unsetenv("HU_VOICE_IDLE_WAIT_HANDLES");
+    hu_voice_record_request_from_env("+15550000001", 12, "/tmp/a.caf", 9, &r);
+    HU_ASSERT_EQ(r.idle_wait_ms, 0u);
+    if (old)
+        setenv("HU_VOICE_IDLE_WAIT_HANDLES", saved, 1);
 }
 
 /* The request the daemon and the CLI both build from the environment. */
@@ -650,6 +742,7 @@ void run_imessage_voice_record_tests(void) {
     HU_RUN_TEST(test_vrec_send_ui_unconfirmed_but_in_chatdb_counts_as_sent);
     HU_RUN_TEST(test_vrec_handle_ok_accepts_only_phone_or_email);
     HU_RUN_TEST(test_vrec_title_matches_is_exact_but_case_and_space_tolerant);
+    HU_RUN_TEST(test_vrec_applescript_quote_escapes_and_refuses);
     HU_RUN_TEST(test_vrec_preflight_blocks_other_mic_and_busy_blackhole);
     HU_RUN_TEST(test_vrec_bad_handle_touches_nothing);
     HU_RUN_TEST(test_vrec_second_recording_touches_nothing);
@@ -664,4 +757,8 @@ void run_imessage_voice_record_tests(void) {
     HU_RUN_TEST(test_vrec_macos_port_blocks_under_test);
     HU_RUN_TEST(test_vrec_request_from_env_reads_mic_and_idle);
     HU_RUN_TEST(test_vrec_send_from_env_blocks_under_test);
+    HU_RUN_TEST(test_vrec_patient_request_waits_for_idle_then_records);
+    HU_RUN_TEST(test_vrec_impatient_request_blocks_at_once);
+    HU_RUN_TEST(test_vrec_patient_wait_gives_up_at_its_bound);
+    HU_RUN_TEST(test_vrec_request_from_env_waits_only_for_listed_handles);
 }

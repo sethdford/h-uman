@@ -212,7 +212,7 @@ static int word_index(const char *w, const char *const *list, size_t count) {
 }
 
 bool hu_selftest_parse(const char *text, size_t len, hu_selftest_t *out) {
-    static const char *const cmds[] = {"#voice", "#share", "#effect", "#tapback", "#gif"};
+    static const char *const cmds[] = {"#voice", "#share", "#effect", "#tapback", "#gif", "#text"};
     static const char *const kinds[] = {"song", "video", "short", "saved"};
     static const hu_share_kind_t kind_vals[] = {HU_SHARE_SONG, HU_SHARE_VIDEO, HU_SHARE_SHORT,
                                                 HU_SHARE_SAVED};
@@ -265,6 +265,9 @@ bool hu_selftest_parse(const char *text, size_t len, hu_selftest_t *out) {
     case 4:
         out->form = HU_DIR_FORM_GIF;
         snprintf(out->query, sizeof(out->query), "%.*s", (int)(len - i), text + i);
+        break;
+    case 5: /* a normal text reply: typing rhythm and pacing, on demand */
+        out->form = HU_DIR_FORM_TEXT;
         break;
     default:
         return false;
