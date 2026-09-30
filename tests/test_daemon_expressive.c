@@ -148,6 +148,97 @@ static void test_expressive_share_gate(void) {
         hu_expressive_share_gate(&d, true, true, hi, strlen(hi), false, "+15550000075", 12, 1000));
 }
 
+/* Unknown-event guard (Seth, 2026-09-30): a question that presupposes an
+ * event in Seth's life, when the thread doesn't mention it, gets an invented
+ * outcome from the model ("how'd the big meeting go" -> "went better than
+ * expected actually") even with prompt rules. A code check catches it. */
+static bool ue(const char *msg, const char *hist0, char *topic, size_t cap) {
+    hu_channel_history_entry_t h[2];
+    memset(h, 0, sizeof(h));
+    size_t n = 0;
+    if (hist0) {
+        snprintf(h[0].text, sizeof(h[0].text), "%s", hist0);
+        n = 1;
+    }
+    return hu_expressive_unknown_event(msg, strlen(msg), h, n, topic, cap);
+}
+
+static void test_unknown_event_catches_presupposed_outcomes(void) {
+    char t[64];
+    HU_ASSERT_TRUE(ue("how'd the big meeting go", NULL, t, sizeof(t)));
+    HU_ASSERT_STR_EQ(t, "big meeting");
+    HU_ASSERT_TRUE(ue("How did the interview go?", NULL, t, sizeof(t)));
+    HU_ASSERT_STR_EQ(t, "interview");
+    HU_ASSERT_TRUE(ue("did you ever go to that concert", NULL, t, sizeof(t)));
+    HU_ASSERT_STR_EQ(t, "concert");
+    HU_ASSERT_TRUE(ue("did you make it to the game?", NULL, t, sizeof(t)));
+    HU_ASSERT_STR_EQ(t, "game");
+    HU_ASSERT_TRUE(ue("how's ryan settling into the new place", NULL, t, sizeof(t)));
+    HU_ASSERT_STR_EQ(t, "ryan");
+    HU_ASSERT_TRUE(ue("how\xe2\x80\x99"
+                      "d the trip go",
+                      NULL, t, sizeof(t))); /* curly quote */
+    HU_ASSERT_STR_EQ(t, "trip");
+}
+
+/* The loaded history already holds the message being answered (live
+ * 2026-09-30 05:30: the guard never fired because "dentist" was "known" from
+ * the question itself). The question does not establish its own event. */
+static void test_unknown_event_ignores_the_question_itself_in_history(void) {
+    char t[64];
+    HU_ASSERT_TRUE(
+        ue("how'd the dentist appointment go", "how'd the dentist appointment go", t, sizeof(t)));
+    HU_ASSERT_TRUE(ue("how'd the dentist appointment go", "#text how'd the dentist appointment go",
+                      t, sizeof(t)));
+    HU_ASSERT_STR_EQ(t, "dentist appointment");
+}
+
+static void test_unknown_event_passes_what_the_thread_established(void) {
+    char t[64];
+    HU_ASSERT_FALSE(
+        ue("how'd the big meeting go", "big meeting with the board at 10 tomorrow", t, sizeof(t)));
+    HU_ASSERT_FALSE(
+        ue("did you go to that concert", "grabbed tickets for the concert friday", t, sizeof(t)));
+}
+
+/* Ordinary questions are not events; a pronoun points back into the thread. */
+static void test_unknown_event_ignores_ordinary_questions(void) {
+    char t[64];
+    HU_ASSERT_FALSE(ue("how was your day", NULL, t, sizeof(t)));
+    HU_ASSERT_FALSE(ue("how'd your weekend go", NULL, t, sizeof(t)));
+    HU_ASSERT_FALSE(ue("how'd it go", NULL, t, sizeof(t)));
+    HU_ASSERT_FALSE(ue("how's the weather", NULL, t, sizeof(t)));
+    HU_ASSERT_FALSE(ue("how are you", NULL, t, sizeof(t)));
+    HU_ASSERT_FALSE(ue("did you eat yet", NULL, t, sizeof(t)));
+    HU_ASSERT_FALSE(ue("", NULL, t, sizeof(t)));
+}
+
+/* The gate contract: off (default) and shadow leave the director's direction
+ * untouched; live replaces it. Each half alone could pass vacuously. */
+static void test_unknown_event_guard_follows_its_gate(void) {
+    const char *q = "how'd the big meeting go";
+    hu_director_result_t d;
+    memset(&d, 0, sizeof(d));
+    snprintf(d.direction, sizeof(d.direction), "mention it was a long one");
+    unsetenv("HU_UNKNOWN_EVENT_GUARD");
+    hu_expressive_unknown_event_guard(&d, q, strlen(q), NULL, 0);
+    HU_ASSERT_STR_EQ(d.direction, "mention it was a long one");
+    setenv("HU_UNKNOWN_EVENT_GUARD", "shadow", 1);
+    hu_expressive_unknown_event_guard(&d, q, strlen(q), NULL, 0);
+    HU_ASSERT_STR_EQ(d.direction, "mention it was a long one");
+    setenv("HU_UNKNOWN_EVENT_GUARD", "live", 1);
+    hu_expressive_unknown_event_guard(&d, q, strlen(q), NULL, 0);
+    unsetenv("HU_UNKNOWN_EVENT_GUARD");
+    HU_ASSERT_STR_CONTAINS(d.direction, "don't say how the big meeting went");
+}
+
+static void test_unknown_event_direction_names_the_topic(void) {
+    char d[256];
+    hu_expressive_unknown_event_direction("big meeting", d, sizeof(d));
+    HU_ASSERT_STR_CONTAINS(d, "don't say how");
+    HU_ASSERT_STR_CONTAINS(d, "big meeting");
+}
+
 /* Self-test commands (Seth, 2026-09-29: "I do like testing things with myself
  * ... we should make this more robust"): from his own number, a #command
  * forces one behavior so he can validate it on his phone. */
@@ -261,6 +352,12 @@ void run_daemon_expressive_tests(void) {
     HU_RUN_TEST(test_expressive_share_should_go);
     HU_RUN_TEST(test_expressive_share_gate);
     HU_RUN_TEST(test_selftest_commands);
+    HU_RUN_TEST(test_unknown_event_catches_presupposed_outcomes);
+    HU_RUN_TEST(test_unknown_event_ignores_the_question_itself_in_history);
+    HU_RUN_TEST(test_unknown_event_passes_what_the_thread_established);
+    HU_RUN_TEST(test_unknown_event_ignores_ordinary_questions);
+    HU_RUN_TEST(test_unknown_event_direction_names_the_topic);
+    HU_RUN_TEST(test_unknown_event_guard_follows_its_gate);
     HU_RUN_TEST(test_selftest_apply_overrides_the_director);
     HU_RUN_TEST(test_expressive_effect_gate);
     HU_RUN_TEST(test_selftest_from_owner);

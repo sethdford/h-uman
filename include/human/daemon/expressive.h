@@ -6,6 +6,7 @@
  * scene director proposes an effect, a GIF, a threaded reply; these decide
  * whether it is appropriate right now. Pure: facts in, verdict out. */
 
+#include "human/channel.h"
 #include "human/daemon/director.h"
 #include "human/inspiration.h"
 
@@ -91,5 +92,27 @@ bool hu_expressive_effect_gate(const hu_director_result_t *d, bool valid, bool f
                                const char *inbound, size_t inbound_len, bool is_group,
                                const char *key, size_t key_len, int64_t now, char *effect_out,
                                size_t cap);
+
+/* Unknown-event guard (2026-09-30). True when `msg` asks how an event in
+ * Seth's life went, whether he went to one, or how someone is doing ("how'd
+ * the big meeting go", "did you ever go to that concert", "how's ryan
+ * settling in") and no recent `history` entry mentions it; `topic` gets the
+ * event ("big meeting"). Generic time periods ("your day", "the weekend") and
+ * pronouns ("how'd it go") are not events. Pure. */
+bool hu_expressive_unknown_event(const char *msg, size_t msg_len,
+                                 const hu_channel_history_entry_t *history, size_t history_count,
+                                 char *topic, size_t topic_cap);
+
+/* The director direction that replaces an invented outcome: don't say how it
+ * went, ask which one or say not sure yet. */
+void hu_expressive_unknown_event_direction(const char *topic, char *out, size_t cap);
+
+/* The daemon's call: under HU_UNKNOWN_EVENT_GUARD=off|shadow|live (default
+ * off), log a hit and, when live, replace `d`'s direction. The gate is the
+ * measurement contract: live only after the same-question probe shows the
+ * invented outcomes gone and known events still answered. */
+void hu_expressive_unknown_event_guard(hu_director_result_t *d, const char *msg, size_t msg_len,
+                                       const hu_channel_history_entry_t *history,
+                                       size_t history_count);
 
 #endif

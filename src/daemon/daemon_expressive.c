@@ -1,3 +1,5 @@
+#include "human/core/gate_mode.h"
+#include "human/core/log.h"
 #include "human/core/string.h"
 #include "human/daemon/expressive.h"
 #include "human/daemon/share_queue.h"
@@ -6,6 +8,7 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 
 /* snprintf result -> length written, or 0 (and an empty buffer) if cut off. */
 static size_t fitted(char *buf, size_t cap, int n) {
@@ -318,4 +321,190 @@ bool hu_selftest_from_owner(const struct hu_persona *p, const char *key, size_t 
                             const char *text, size_t len) {
     hu_selftest_t t;
     return p && hu_share_is_owner(p, key, key_len) && hu_selftest_parse(text, len, &t);
+}
+
+/* ── Unknown-event guard ─────────────────────────────────────────────── */
+
+#define UE_MAX_WORDS 48
+#define UE_WORD      24
+
+static bool ue_in(const char *w, const char *const *set) {
+    for (size_t i = 0; set[i]; i++)
+        if (strcmp(w, set[i]) == 0)
+            return true;
+    return false;
+}
+
+/* Lowercased words of `s`; a sentence break (?.!,;) is the word "|". Curly
+ * apostrophes become '; other non-ASCII bytes separate words. */
+static size_t ue_words(const char *s, size_t len, char out[][UE_WORD], size_t cap) {
+    size_t n = 0, wl = 0;
+    for (size_t i = 0; i <= len && n < cap; i++) {
+        unsigned char c = i < len ? (unsigned char)s[i] : ' ';
+        if (c == 0xE2 && i + 2 < len && (unsigned char)s[i + 1] == 0x80 &&
+            ((unsigned char)s[i + 2] == 0x98 || (unsigned char)s[i + 2] == 0x99)) {
+            c = '\'';
+            i += 2;
+        }
+        bool part = isalnum(c) || c == '\'';
+        if (part && wl + 1 < UE_WORD) {
+            out[n][wl++] = (char)tolower(c);
+            continue;
+        }
+        if (part)
+            continue; /* over-long word: truncate */
+        if (wl > 0) {
+            out[n][wl] = '\0';
+            n++;
+            wl = 0;
+        }
+        if ((c == '?' || c == '.' || c == '!' || c == ',' || c == ';') && n < cap &&
+            (n == 0 || strcmp(out[n - 1], "|") != 0)) {
+            memcpy(out[n], "|", 2);
+            n++;
+        }
+    }
+    return n;
+}
+
+/* Does any history entry contain `w` at the start of a word? */
+/* Is history entry `t` the message being answered? The loaded history holds
+ * it (live 2026-09-30: "dentist" was "known" from the question itself), and a
+ * question does not establish its own event. */
+static bool ue_is_the_question(const char *t, const char *q) {
+    return t[0] && q[0] && (hu_strcasestr(t, q) != NULL || hu_strcasestr(q, t) != NULL);
+}
+
+static bool ue_mentioned(const char *w, const hu_channel_history_entry_t *h, size_t n,
+                         const char *q) {
+    size_t wl = strlen(w);
+    for (size_t e = 0; e < n; e++) {
+        const char *t = h[e].text;
+        if (ue_is_the_question(t, q))
+            continue;
+        for (size_t i = 0; t[i]; i++) {
+            if (i > 0 && isalnum((unsigned char)t[i - 1]))
+                continue;
+            if (strncasecmp(t + i, w, wl) == 0)
+                return true;
+        }
+    }
+    return false;
+}
+
+bool hu_expressive_unknown_event(const char *msg, size_t msg_len,
+                                 const hu_channel_history_entry_t *history, size_t history_count,
+                                 char *topic, size_t topic_cap) {
+    static const char *const k_det[] = {"the", "that", "this", "your", "ur",    "those", "these",
+                                        "a",   "an",   "his",  "her",  "their", NULL};
+    static const char *const k_stop[] = {
+        "|",       "go",      "going", "goes", "turn", "turned", "went",      "doing", "settling",
+        "holding", "getting", "into",  "in",   "with", "last",   "yesterday", "today", "tonight",
+        "earlier", "so",      "at",    "and",  "then", "for",    NULL};
+    static const char *const k_vague[] = {
+        "it",      "that",    "this",     "things",  "everything", "stuff", "them",
+        "he",      "she",     "they",     "you",     "day",        "days",  "week",
+        "weekend", "morning", "night",    "evening", "afternoon",  "life",  "work",
+        "sleep",   "weather", "everyone", "all",     NULL};
+    if (topic && topic_cap)
+        topic[0] = '\0';
+    if (!msg || msg_len == 0)
+        return false;
+    char w[UE_MAX_WORDS][UE_WORD];
+    size_t n = ue_words(msg, msg_len, w, UE_MAX_WORDS);
+    char q[512]; /* the question, NUL-terminated, for the is-this-it check */
+    size_t ql = msg_len < sizeof(q) - 1 ? msg_len : sizeof(q) - 1;
+    memcpy(q, msg, ql);
+    q[ql] = '\0';
+
+    for (size_t i = 0; i < n; i++) {
+        size_t p = 0;           /* first word of the event phrase */
+        bool need_verb = false; /* "how's X doing": the event ends at a state verb */
+        if (strcmp(w[i], "how'd") == 0)
+            p = i + 1;
+        else if (strcmp(w[i], "how") == 0 && i + 1 < n &&
+                 (strcmp(w[i + 1], "did") == 0 || strcmp(w[i + 1], "was") == 0))
+            p = i + 2;
+        else if (strcmp(w[i], "how's") == 0 ||
+                 (strcmp(w[i], "how") == 0 && i + 1 < n && strcmp(w[i + 1], "is") == 0)) {
+            p = strcmp(w[i], "how's") == 0 ? i + 1 : i + 2;
+            need_verb = true;
+        } else if (strcmp(w[i], "did") == 0 && i + 1 < n && strcmp(w[i + 1], "you") == 0) {
+            size_t j = i + 2;
+            while (j < n && (strcmp(w[j], "ever") == 0 || strcmp(w[j], "end") == 0 ||
+                             strcmp(w[j], "up") == 0 || strcmp(w[j], "actually") == 0 ||
+                             strcmp(w[j], "even") == 0))
+                j++;
+            if (j < n && (strcmp(w[j], "go") == 0 || strcmp(w[j], "going") == 0 ||
+                          strcmp(w[j], "make") == 0)) {
+                j++;
+                if (j < n && strcmp(w[j], "it") == 0)
+                    j++;
+                if (j < n && strcmp(w[j], "to") == 0)
+                    p = j + 1;
+            }
+        }
+        if (p == 0 || p >= n)
+            continue;
+        while (p < n && ue_in(w[p], k_det))
+            p++;
+        size_t e = p;
+        while (e < n && e - p < 4 && !ue_in(w[e], k_stop))
+            e++;
+        if (e == p)
+            continue;
+        if (need_verb &&
+            (e >= n || !(strcmp(w[e], "doing") == 0 || strcmp(w[e], "settling") == 0 ||
+                         strcmp(w[e], "holding") == 0 || strcmp(w[e], "getting") == 0)))
+            continue;
+        /* An event needs a real word; pronouns and time periods point
+         * elsewhere ("how'd it go", "how was your day"). */
+        bool eventful = false;
+        for (size_t k = p; k < e; k++)
+            if (strlen(w[k]) >= 3 && !ue_in(w[k], k_vague))
+                eventful = true;
+        if (!eventful)
+            continue;
+        /* Known when the thread already mentions any content word of it. */
+        bool known = false;
+        for (size_t k = p; k < e && !known; k++)
+            if (strlen(w[k]) >= 4 && !ue_in(w[k], k_vague))
+                known = ue_mentioned(w[k], history, history_count, q);
+        if (known)
+            return false;
+        if (topic && topic_cap) {
+            size_t pos = 0;
+            for (size_t k = p; k < e; k++) {
+                int wr = snprintf(topic + pos, topic_cap - pos, "%s%s", k > p ? " " : "", w[k]);
+                if (wr < 0 || (size_t)wr >= topic_cap - pos)
+                    break;
+                pos += (size_t)wr;
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
+void hu_expressive_unknown_event_direction(const char *topic, char *out, size_t cap) {
+    if (!out || cap == 0)
+        return;
+    snprintf(out, cap,
+             "don't say how the %s went or turned out, you don't know; ask which one they mean "
+             "or say you haven't heard yet, one line",
+             topic && topic[0] ? topic : "thing");
+}
+
+void hu_expressive_unknown_event_guard(hu_director_result_t *d, const char *msg, size_t msg_len,
+                                       const hu_channel_history_entry_t *history,
+                                       size_t history_count) {
+    hu_gate_mode_t g = hu_gate_mode_from_env("HU_UNKNOWN_EVENT_GUARD", HU_GATE_OFF);
+    char topic[64];
+    if (!d || g == HU_GATE_OFF ||
+        !hu_expressive_unknown_event(msg, msg_len, history, history_count, topic, sizeof(topic)))
+        return;
+    hu_log_info("director", NULL, "unknown-event %s: topic=\"%s\" direction was \"%.80s\"",
+                g == HU_GATE_LIVE ? "live" : "shadow", topic, d->direction);
+    if (g == HU_GATE_LIVE)
+        hu_expressive_unknown_event_direction(topic, d->direction, sizeof(d->direction));
 }
