@@ -9,6 +9,7 @@
 #include "human/provider.h"
 #include "test_framework.h"
 #include "turn_recording_provider.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -166,6 +167,44 @@ static void trp_scrub_keeps_non_time_text(void) {
     free(s);
 }
 
+/* The per-contact "[Temporal context]" line (src/context/contact_style_overlay.c)
+ * picks one of 5 literal sentences by local hour bucket — a real TZ leak, not
+ * a date/time shape. All 5 must scrub to the same fixed token so a UTC vs
+ * UTC+14 characterization run compares equal regardless of local hour. */
+static void trp_scrub_masks_temporal_mood_sentences(void) {
+    static const char *const moods[] = {
+        "It's very late/early — you shouldn't be up. Brief and sleepy.",
+        "It's early morning — you're probably just waking up. Terse and groggy.",
+        "It's during work hours — you might be busy. Keep it professional-ish.",
+        "It's evening — you're relaxed, more chatty.",
+        "It's late night — you're winding down. Reflective.",
+    };
+    for (size_t i = 0; i < sizeof(moods) / sizeof(moods[0]); i++) {
+        char in[160];
+        (void)snprintf(in, sizeof(in), "[Temporal context] %s\n", moods[i]);
+        size_t n = 0;
+        char *s = trp_scrub(in, strlen(in), &n);
+        HU_ASSERT_NOT_NULL(s);
+        HU_ASSERT_STR_EQ(s, "[Temporal context] <TEMPORAL_MOOD>\n");
+        HU_ASSERT_EQ(n, strlen(s));
+        free(s);
+    }
+}
+
+/* src/agent/commitment.c generate_commitment_id() stamps
+ * "commit-<time(NULL)>-<process-wide static counter>". The counter makes
+ * the id non-repeatable across runs even with the epoch masked; scrub the
+ * whole shape to one fixed token. */
+static void trp_scrub_masks_commitment_ids(void) {
+    const char *in = "commitment:commit-1790000000-0 and commit-1790000000-17 end";
+    size_t n = 0;
+    char *s = trp_scrub(in, strlen(in), &n);
+    HU_ASSERT_NOT_NULL(s);
+    HU_ASSERT_STR_EQ(s, "commitment:<COMMIT_ID> and <COMMIT_ID> end");
+    HU_ASSERT_EQ(n, strlen(s));
+    free(s);
+}
+
 void run_turn_recording_provider_tests(void) {
     HU_TEST_SUITE("TurnRecordingProvider");
     HU_RUN_TEST(trp_records_roles_contents_and_tools);
@@ -175,5 +214,7 @@ void run_turn_recording_provider_tests(void) {
     HU_RUN_TEST(trp_scripted_error_is_returned_with_an_empty_response);
     HU_RUN_TEST(trp_chat_with_system_is_recorded);
     HU_RUN_TEST(trp_scrub_masks_time_shaped_tokens);
+    HU_RUN_TEST(trp_scrub_masks_temporal_mood_sentences);
+    HU_RUN_TEST(trp_scrub_masks_commitment_ids);
     HU_RUN_TEST(trp_scrub_keeps_non_time_text);
 }

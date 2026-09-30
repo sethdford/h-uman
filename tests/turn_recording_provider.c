@@ -146,12 +146,22 @@ static void trp_log_request(trp_t *t, const hu_chat_request_t *req, const char *
     trp_log_fmt(t, "messages=%zu\n", req->messages ? req->messages_count : 0);
     for (size_t i = 0; req->messages && i < req->messages_count; i++) {
         const hu_chat_message_t *m = &req->messages[i];
+        /* hu_chat_message_t.tool_calls is documented (include/human/provider.h)
+         * as "optional, for assistant messages" / "0 if tool_calls is NULL" —
+         * i.e. the field is only meaningful on HU_ROLE_ASSISTANT messages.
+         * Some ad-hoc non-assistant message builders (e.g. the synthesized
+         * system-prompt message in hu_agent_turn) allocate the struct without
+         * zeroing and never set tool_calls/tool_calls_count, so reading them
+         * on a non-assistant message is an uninitialized-memory read (ASan
+         * SEGV; non-deterministic run to run). Treat non-assistant messages
+         * as having no tool calls, matching every real provider's contract. */
+        bool has_tool_calls = m->role == HU_ROLE_ASSISTANT && m->tool_calls != NULL;
+        size_t tool_calls_n = has_tool_calls ? m->tool_calls_count : 0;
         trp_log_fmt(t, "msg[%zu] role=%s", i, trp_role(m->role));
         trp_log_opt(t, "name", m->name, m->name_len);
         trp_log_opt(t, "tool_call_id", m->tool_call_id, m->tool_call_id_len);
         trp_log_fmt(t, " parts=%zu tool_calls=%zu\n  content=",
-                    m->content_parts ? m->content_parts_count : 0,
-                    m->tool_calls ? m->tool_calls_count : 0);
+                    m->content_parts ? m->content_parts_count : 0, tool_calls_n);
         trp_log_escaped(t, m->content ? m->content : "", m->content ? m->content_len : 0);
         trp_log_raw(t, "\n", 1);
         for (size_t j = 0; m->content_parts && j < m->content_parts_count; j++) {
@@ -163,7 +173,7 @@ static void trp_log_request(trp_t *t, const hu_chat_request_t *req, const char *
             }
             trp_log_raw(t, "\n", 1);
         }
-        for (size_t j = 0; m->tool_calls && j < m->tool_calls_count; j++) {
+        for (size_t j = 0; j < tool_calls_n; j++) {
             const hu_tool_call_t *tc = &m->tool_calls[j];
             trp_log_fmt(t, "  tool_call[%zu] id=", j);
             trp_log_escaped(t, tc->id, tc->id ? tc->id_len : 0);
@@ -311,6 +321,29 @@ static const char *const k_trp_mon[] = {
 static const char *const k_trp_tod[] = {"morning", "afternoon", "evening", "night",
                                         "tonight", "midnight",  "noon"};
 
+/* F2 follow-up (characterization TZ-invariance failure, 2026-09-30): the
+ * per-contact "[Temporal context]" line (src/context/contact_style_overlay.c
+ * hu_temporal_mood_build) picks one of 5 fixed sentences by local hour
+ * bucket — a real TZ-dependent leak that is not a date/time SHAPE the digit-
+ * and word-table scanners below recognize (it is whole literal sentences).
+ * Mask them as a distinct shape so a UTC vs UTC+14 run compares equal. */
+static const char *const k_trp_temporal_moods[] = {
+    "It's very late/early — you shouldn't be up. Brief and sleepy.",
+    "It's early morning — you're probably just waking up. Terse and groggy.",
+    "It's during work hours — you might be busy. Keep it professional-ish.",
+    "It's evening — you're relaxed, more chatty.",
+    "It's late night — you're winding down. Reflective."};
+
+/* Length of a temporal-mood sentence starting at s[i], 0 if none match. */
+static size_t trp_temporal_mood(const char *s, size_t i, size_t n) {
+    for (size_t m = 0; m < sizeof(k_trp_temporal_moods) / sizeof(k_trp_temporal_moods[0]); m++) {
+        size_t l = strlen(k_trp_temporal_moods[m]);
+        if (i + l <= n && memcmp(s + i, k_trp_temporal_moods[m], l) == 0)
+            return l;
+    }
+    return 0;
+}
+
 static bool trp_alnum(char c) {
     return isalnum((unsigned char)c) != 0;
 }
@@ -353,6 +386,33 @@ static size_t trp_clock(const char *s, size_t i, size_t n) {
     return j - i;
 }
 
+/* src/agent/commitment.c generate_commitment_id() stamps every commitment
+ * memory key "commit-<time(NULL)>-<static counter>". The epoch half is
+ * already masked by the generic 9-13-digit EPOCH rule below, but the
+ * trailing counter is a process-wide `static size_t` that increments on
+ * every commitment created in this process, not reset between ch_run()
+ * calls or by ch_env_enter/leave — so two runs in the same process (or two
+ * processes with a different call history) see different suffixes even
+ * with identical inputs. Mask the whole "commit-<digits>-<digits>" shape. */
+static size_t trp_commit_id(const char *s, size_t i, size_t n) {
+    static const char kPrefix[] = "commit-";
+    size_t pl = sizeof(kPrefix) - 1;
+    if (i + pl > n || memcmp(s + i, kPrefix, pl) != 0)
+        return 0;
+    size_t j = i + pl;
+    size_t d1 = trp_digits(s, j, n);
+    if (d1 == 0 || j + d1 >= n || s[j + d1] != '-')
+        return 0;
+    j += d1 + 1;
+    size_t d2 = trp_digits(s, j, n);
+    if (d2 == 0)
+        return 0;
+    j += d2;
+    if (j < n && trp_alnum(s[j]))
+        return 0; /* right boundary */
+    return j - i;
+}
+
 char *trp_scrub(const char *in, size_t n, size_t *out_len) {
     trp_t b;
     trp_init(&b, NULL, 0, NULL);
@@ -362,6 +422,24 @@ char *trp_scrub(const char *in, size_t n, size_t *out_len) {
         char c = in[i];
         bool left_ok = boundary || i == 0 || !trp_alnum(in[i - 1]);
         boundary = false;
+        if (left_ok && c == 'I') {
+            size_t ml = trp_temporal_mood(in, i, n);
+            if (ml > 0) {
+                trp_log_raw(&b, "<TEMPORAL_MOOD>", 15);
+                i += ml;
+                boundary = true;
+                continue;
+            }
+        }
+        if (left_ok && c == 'c') {
+            size_t cl = trp_commit_id(in, i, n);
+            if (cl > 0) {
+                trp_log_raw(&b, "<COMMIT_ID>", 11);
+                i += cl;
+                boundary = true;
+                continue;
+            }
+        }
         if (c == '\\' && i + 1 < n) { /* escape sequence written by trp_log_escaped */
             size_t el = (in[i + 1] == 'x') ? 4 : 2;
             if (i + el > n)
