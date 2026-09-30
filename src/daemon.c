@@ -67,6 +67,7 @@
 #include "human/agent/choreography.h"
 #include "human/channels/imessage_caps.h"
 #include "human/daemon/agent_facade.h"
+#include "human/daemon/briefing.h"
 #include "human/daemon/config_reload.h"
 #include "human/daemon/consecutive_limiter.h"
 #include "human/daemon/context_facade.h"
@@ -10118,8 +10119,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
         /* Owner reminders (life-admin slice 1): deliver any that are due.
          * Gated by HU_REMINDERS (off by default); paces itself to one pass
          * per 20 s and logs once when it is not live. */
-        if (agent)
+        if (agent) {
             hu_reminders_tick(agent, channels, channel_count, (int64_t)time(NULL));
+            /* Morning briefing (slice 2): HU_BRIEFING, off by default. */
+            hu_briefing_tick(agent, channels, channel_count, (int64_t)time(NULL));
+        }
 
         /* Sprint A.6 wire — periodic social tick: exercises the three
          * Tier-2 library-only scanners (gap / drift / signatures) and

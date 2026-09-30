@@ -55,6 +55,10 @@ void hu_daemon_outbound_bus_set_message(hu_bus_event_t *bev, const char *data, s
 hu_service_channel_t *hu_daemon_outbound_find_channel(hu_service_channel_t *channels, size_t count,
                                                       const char *name);
 
+/* The same, but only a channel that can send (vtable->send non-NULL). */
+hu_service_channel_t *hu_daemon_outbound_find_sender(hu_service_channel_t *channels, size_t count,
+                                                     const char *name);
+
 /* hu_agent_stream_event_cb: ctx is a hu_daemon_stream_ctx_t. Publishes one bus
  * event per stream event (TEXT → MESSAGE_CHUNK after the outbound validator
  * chain when ctx->alloc is set; THINKING → THINKING_CHUNK; TOOL_* → TOOL_CALL /

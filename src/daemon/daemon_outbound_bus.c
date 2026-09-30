@@ -70,6 +70,12 @@ hu_service_channel_t *hu_daemon_outbound_find_channel(hu_service_channel_t *chan
     }
     return NULL;
 }
+hu_service_channel_t *hu_daemon_outbound_find_sender(hu_service_channel_t *channels, size_t count,
+                                                     const char *name) {
+    hu_service_channel_t *sc = hu_daemon_outbound_find_channel(channels, count, name);
+    return sc && sc->channel->vtable->send ? sc : NULL;
+}
+
 /* Rich stream event callback: maps agent stream events to bus (matches gateway pattern). */
 void hu_daemon_outbound_stream_event_cb(const hu_agent_stream_event_t *event, void *ctx) {
     hu_daemon_stream_ctx_t *sc = (hu_daemon_stream_ctx_t *)ctx;
