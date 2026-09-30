@@ -28,7 +28,13 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 GOLDEN_BASELINE=945c04c8560f80ff5656651d2067dbafa26bd2c0
 
 step "intent-to-add new src/agent/turn/*.c and *.h files (clone ratchet only scans tracked files)"
-git add -N src/agent/turn/*.c src/agent/turn/*.h 2>/dev/null || true
+# One file at a time: a single `git add -N a/*.c a/*.h` fails outright when
+# either glob matches nothing (S3 adds no .h under src/agent/turn/), which the
+# old `|| true` hid, so the clone ratchet silently skipped every stage file.
+for f in src/agent/turn/*.c src/agent/turn/*.h; do
+    [ -e "$f" ] || continue
+    git add -N "$f" || fail "git add -N $f"
+done
 echo "ok"
 
 step "goldens untouched since they were recorded (pinned $GOLDEN_BASELINE)"
