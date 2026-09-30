@@ -1,5 +1,6 @@
 /* src/eval/commitment_sample.c — contract in include/human/eval/commitment_sample.h */
 #include "human/eval/commitment_sample.h"
+#include "human/core/io_secure.h"
 #include "human/core/paths.h"
 #include "human/memory.h"
 #include "human/persona.h"
@@ -252,7 +253,10 @@ static hu_error_t sample(hu_allocator_t *alloc, int argc, char **argv) {
         have_persona = hu_persona_load(alloc, pname, strlen(pname), &persona) == HU_OK;
 
     if (err == HU_OK) {
-        FILE *f = fopen(out_path, "w");
+        /* The sheet quotes private messages: owner-only, and no traversal. */
+        FILE *f = NULL;
+        if (hu_io_secure_open(out_path, HU_IO_PERM_SECRET, "w", &f) != HU_OK)
+            f = NULL;
         int w = f ? hu_commitment_sample_write(f, rows, count, have_persona ? &persona : NULL) : -1;
         if (!f || fclose(f) != 0 || w < 0) {
             fprintf(stderr, "commitments sample: cannot write %s\n", out_path);

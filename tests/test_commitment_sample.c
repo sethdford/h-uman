@@ -1,6 +1,7 @@
 /* Commitment-detection precision sheet (src/eval/commitment_sample.c):
  * the sheet the owner labels, the score read back from it, and the
  * `human commitments` command end to end against a real memory database. */
+#include "human/core/io_secure.h"
 #include "human/eval/commitment_sample.h"
 #include "human/memory.h"
 #include "human/memory/superhuman.h"
@@ -10,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -123,6 +125,9 @@ static void commitment_command_samples_a_real_database_and_scores_it(void) {
 
     char *argv[] = {"human", "commitments", "sample", "--db", db, "--out", sheet, NULL};
     HU_ASSERT_EQ(cmd_commitments(&alloc, 7, argv), HU_OK);
+    struct stat st;
+    HU_ASSERT_EQ(stat(sheet, &st), 0);
+    HU_ASSERT_EQ(st.st_mode & 0777, 0600); /* it quotes private messages */
     FILE *f = fopen(sheet, "r");
     HU_ASSERT_NOT_NULL(f);
     char buf[2048];
@@ -141,8 +146,8 @@ static void commitment_command_samples_a_real_database_and_scores_it(void) {
         labelled[o++] = buf[i];
     }
     labelled[o] = '\0';
-    f = fopen(sheet, "w");
-    HU_ASSERT_NOT_NULL(f);
+    f = NULL;
+    HU_ASSERT_EQ(hu_io_secure_open(sheet, HU_IO_PERM_SECRET, "w", &f), HU_OK);
     fputs(labelled, f);
     fclose(f);
     hu_commitment_score_t s;
