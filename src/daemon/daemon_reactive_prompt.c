@@ -29,6 +29,7 @@
 #include "human/daemon/intelligence_facade.h"
 #include "human/daemon/memory_facade.h"
 #include "human/daemon/persona_facade.h"
+#include "human/daemon/prospective.h"
 #include "human/daemon_maintenance.h"
 #include "human/humanness.h"
 #include "human/memory/opinion_challenge.h"
@@ -541,13 +542,14 @@ void hu_daemon_reactive_prompt_build(hu_allocator_t *alloc, hu_agent_t *agent,
             if (db) {
                 int64_t now_ts = (int64_t)time(NULL);
 
-                /* 9. Prospective memory — cued intentions, rendered once. The
-                 * builder lives in src/memory/prospective.c so the llm_decides
-                 * path below and the tests share it. */
+                /* 9. Prospective memory — cued intentions. HU_PROSPECTIVE picks
+                 * the legacy builder (off/shadow) or the v2 fire-time check
+                 * (live); src/daemon/daemon_prospective.c. */
                 if (combined_len > 0) {
                     size_t pd_len = 0;
-                    char *pd = hu_prospective_directive_build(alloc, db, combined, combined_len,
-                                                              batch_key, key_len, now_ts, &pd_len);
+                    char *pd = hu_daemon_prospective_reactive(alloc, agent, db, batch_key, key_len,
+                                                              combined, combined_len, ctx_entries,
+                                                              ctx_count, rt->is_group, &pd_len);
                     if (pd)
                         PHASE6_APPEND(pd, pd_len);
                 }
@@ -1227,8 +1229,9 @@ void hu_daemon_reactive_prompt_build(hu_allocator_t *alloc, hu_agent_t *agent,
         sqlite3 *pdb = hu_sqlite_memory_get_db(agent->memory);
         if (pdb) {
             size_t pd_len = 0;
-            char *pd = hu_prospective_directive_build(alloc, pdb, combined, combined_len, batch_key,
-                                                      key_len, (int64_t)time(NULL), &pd_len);
+            char *pd = hu_daemon_prospective_reactive(alloc, agent, pdb, batch_key, key_len,
+                                                      combined, combined_len, ctx_entries,
+                                                      ctx_count, rt->is_group, &pd_len);
             if (pd && pd_len > 0) {
                 if (convo_ctx && convo_ctx_len > 0) {
                     size_t total = pd_len + convo_ctx_len + 2;

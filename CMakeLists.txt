@@ -1246,6 +1246,7 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_hurt_handoff.c
     src/daemon/daemon_dated_followup.c
     src/daemon/daemon_prospective_time.c
+    src/daemon/daemon_prospective.c
     src/daemon/daemon_outbound_bus.c
     src/daemon/daemon_send_provenance.c
     src/daemon/daemon_reply_delay.c
@@ -4252,6 +4253,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_daemon_prospective_time.c
     tests/test_prospective_v2.c
     tests/test_cli_prospective.c
+    tests/test_daemon_prospective.c
     tests/test_eval_score.c
     tests/test_corrective_rag.c
     tests/test_adaptive_rag.c

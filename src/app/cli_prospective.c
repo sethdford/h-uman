@@ -92,12 +92,16 @@ bool hu_cli_prospective_parse(int argc, char **argv, hu_cli_prospective_args_t *
 
 #ifdef HU_ENABLE_SQLITE
 
+#include "human/config.h"
+#include "human/daemon/prospective.h"
+#include "human/providers/factory.h"
+
 static void pm_emit_counts(FILE *out, const hu_prospective_counts_t *c, size_t bytes) {
     fprintf(out,
             "candidates=%zu fire=%zu resolved=%zu cancel=%zu not_now=%zu parse_fail=%zu "
-            "judge_err=%zu expired=%zu capped=%zu bytes=%zu\n",
+            "judge_err=%zu expired=%zu capped=%zu bytes=%zu write_err=%zu\n",
             c->candidates, c->fire, c->resolved, c->cancel, c->not_now, c->parse_fail, c->judge_err,
-            c->expired, c->capped, bytes);
+            c->expired, c->capped, bytes, c->write_err);
 }
 
 static hu_error_t pm_run_deliver(hu_allocator_t *alloc, sqlite3 *db,
@@ -268,12 +272,34 @@ hu_error_t cmd_prospective(hu_allocator_t *alloc, int argc, char **argv) {
     char word[24];
     snprintf(word, sizeof(word), "%s", a.judge);
     hu_prospective_judge_t judge = {.fn = pm_const_judge, .ctx = word};
-    hu_error_t err;
-    if (strcmp(a.judge, "model") == 0) {
-        fprintf(stderr, "prospective: --judge model needs the provider adapter (Task 7)\n");
-        err = HU_ERR_NOT_SUPPORTED;
-    } else {
+    /* --judge model: the configured provider and default model (GLM on :8741
+     * in prod), through the same thinking-off adapter the daemon uses. */
+    bool use_model = strcmp(a.judge, "model") == 0;
+    hu_config_t cfg;
+    hu_provider_t prov;
+    hu_daemon_prospective_judge_ctx_t jc;
+    memset(&cfg, 0, sizeof(cfg));
+    memset(&prov, 0, sizeof(prov));
+    memset(&jc, 0, sizeof(jc));
+    hu_error_t err = HU_OK;
+    if (use_model) {
+        err = hu_config_load(alloc, &cfg);
+        if (err == HU_OK && (err = hu_provider_create_default(alloc, &cfg, &prov)) != HU_OK)
+            hu_config_deinit(&cfg);
+        if (err == HU_OK) {
+            jc.provider = &prov;
+            jc.model = cfg.default_model;
+            jc.model_len = cfg.default_model ? strlen(cfg.default_model) : 0;
+            judge.fn = hu_daemon_prospective_provider_judge;
+            judge.ctx = &jc;
+        }
+    }
+    if (err == HU_OK)
         err = hu_cli_prospective_run(alloc, &mem, &a, hist, hist_len, &judge, stdout);
+    if (use_model && prov.vtable) {
+        if (prov.vtable->deinit)
+            prov.vtable->deinit(prov.ctx, alloc);
+        hu_config_deinit(&cfg);
     }
     if (err != HU_OK)
         fprintf(stderr, "prospective: %s\n", hu_error_string(err));

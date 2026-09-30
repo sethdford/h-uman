@@ -49,6 +49,7 @@ typedef struct hu_reactive_turn_ctx {
     const char *combined; /* the batched inbound text */
     size_t combined_len;
     bool llm_decides; /* channels.<ch>.daemon.llm_decides */
+    bool is_group;    /* group thread: prospective reminders never fire here */
 
     /* ── Loop-lifetime state the slices read/write in place ───────────── */
     hu_daemon_comfort_pending_t *comfort_pending;  /* HU_COMFORT_PENDING_MAX slots */

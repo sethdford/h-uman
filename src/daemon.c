@@ -4033,6 +4033,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 rt.combined = combined;
                 rt.combined_len = combined_len;
                 rt.llm_decides = llm_decides;
+                rt.is_group = msgs[batch_start].is_group;
                 rt.comfort_pending = comfort_pending;
                 rt.proactive_ctx = &g_proactive_ctx;
                 hu_daemon_reactive_context_load(alloc, agent, config, channels, channel_count, &rt);
