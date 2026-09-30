@@ -163,6 +163,7 @@ void run_subsystems_tests(void);
 void run_onboard_nextstep_tests(void);
 void run_onboard_aloop_tests(void);
 void run_config_parse_tests(void);
+void run_config_mutator_writes_tests(void);
 void run_config_migrate_tests(void);
 void run_adversarial_tests(void);
 void run_adversarial_detect_tests(void);
@@ -1237,6 +1238,7 @@ int main(int argc, char **argv) {
     run_onboard_nextstep_tests();
     run_onboard_aloop_tests();
     run_config_parse_tests();
+    run_config_mutator_writes_tests();
     run_config_migrate_tests();
     run_adversarial_tests();
     run_adversarial_detect_tests();

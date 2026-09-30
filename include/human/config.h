@@ -890,10 +890,12 @@ hu_error_t hu_config_parse_json(hu_config_t *cfg, const char *content, size_t le
  * call this first to get the same defaults real users see. */
 void hu_config_apply_defaults(hu_config_t *cfg, hu_allocator_t *a);
 void hu_config_apply_env_overrides(hu_config_t *cfg);
-hu_error_t hu_config_save(const hu_config_t *cfg);
 hu_error_t hu_config_validate(const hu_config_t *cfg);
 hu_error_t hu_config_validate_strict(const hu_config_t *cfg, const hu_json_value_t *root,
                                      bool strict);
+/* The document half of hu_config_validate_strict: unknown keys and value
+ * types in `root` only, no judgment of the config it would produce. */
+hu_error_t hu_config_validate_document(const hu_json_value_t *root, bool strict);
 const char *hu_config_get_provider_key(const hu_config_t *cfg, const char *name);
 const char *hu_config_default_provider_key(const hu_config_t *cfg);
 bool hu_config_provider_requires_api_key(const char *provider);

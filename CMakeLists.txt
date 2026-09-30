@@ -637,7 +637,6 @@ set(HU_CORE_SOURCES
     src/config/config_schema.c
     src/config/config_merge.c
     src/config/config_migrate.c
-    src/config/config_serialize.c
     src/config/config_getters.c
     src/config/config_validate.c
     src/config/config_types.c
@@ -3610,6 +3609,7 @@ set(HU_TEST_SOURCES
     tests/test_daemon_director.c
     tests/test_daemon_trust.c
     tests/test_config_parse.c
+    tests/test_config_mutator_writes.c
     tests/test_config_migrate.c
     tests/test_adversarial.c
     tests/test_adversarial_detect.c

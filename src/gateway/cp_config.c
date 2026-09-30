@@ -2,6 +2,7 @@
 #include "cp_internal.h"
 #include "human/channel_catalog.h"
 #include "human/config.h"
+#include "human/config_mutator.h"
 #include <string.h>
 
 hu_error_t cp_config_get(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
@@ -124,34 +125,97 @@ hu_error_t cp_config_schema(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_
     return err;
 }
 
+/* Write one config.set / config.apply request to disk and to the live config.
+ *
+ * params is either {"key": "a.b", "value": <json>} (what the dashboard sends)
+ * or {"raw": "<whole config document>"}. Both go through the config mutator:
+ * a key edit changes only that key, a raw document is written verbatim, and
+ * neither can drop keys the way re-serializing hu_config_t did. *saved is true
+ * only when the file holds the requested state; *why names the refusal. */
+static void config_write(hu_allocator_t *alloc, hu_app_context_t *app, const hu_json_value_t *root,
+                         bool *saved, const char **why) {
+    *saved = false;
+    *why = "missing params";
+    hu_json_value_t *params = root ? hu_json_object_get(root, "params") : NULL;
+    if (!params || !app || !app->config)
+        return;
+
+    /* No guessing: a config that was not loaded from a file (tests, embedders)
+     * has no file to write, and the default path would be the user's real one. */
+    const char *cfg_path = app->config->config_path;
+    if (!cfg_path || !cfg_path[0]) {
+        *why = "config was not loaded from a file";
+        return;
+    }
+
+    char *patch = NULL;
+    size_t patch_len = 0;
+    hu_error_t err = HU_ERR_INVALID_ARGUMENT;
+    const char *raw = hu_json_get_string(params, "raw");
+    const char *key = hu_json_get_string(params, "key");
+    hu_json_value_t *value = hu_json_object_get(params, "value");
+    if (raw) {
+        err = hu_config_mutator_replace_at(alloc, cfg_path, raw, strlen(raw));
+        if (err == HU_OK)
+            (void)hu_config_parse_json(app->config, raw, strlen(raw));
+    } else if (key && value) {
+        char *value_json = NULL;
+        size_t value_len = 0;
+        err = hu_json_stringify(alloc, value, &value_json, &value_len);
+        hu_mutation_result_t res = {0};
+        if (err == HU_OK) {
+            hu_mutation_options_t opts = {.apply = true};
+            err = hu_config_mutator_mutate_at(alloc, cfg_path, HU_MUTATION_SET, key, value_json,
+                                              opts, &res);
+            alloc->free(alloc->ctx, value_json, value_len + 1);
+        }
+        if (err == HU_OK) {
+            if (hu_config_mutator_build_patch(alloc, res.path, res.new_value_json, &patch,
+                                              &patch_len) == HU_OK)
+                (void)hu_config_parse_json(app->config, patch, patch_len);
+            hu_config_mutator_free_result(alloc, &res);
+        }
+    }
+    if (patch)
+        alloc->free(alloc->ctx, patch, patch_len + 1);
+
+    if (err == HU_OK) {
+        *saved = true;
+        *why = NULL;
+        hu_config_set_reload_requested(); /* the daemon's agent re-reads the file */
+    } else if (err == HU_ERR_PERMISSION_DENIED) {
+        *why = "this setting cannot be changed from the control protocol";
+    } else if (err == HU_ERR_INVALID_ARGUMENT) {
+        *why = (raw || (key && value)) ? "rejected by config validation" : "missing params";
+    } else {
+        *why = hu_error_string(err);
+    }
+}
+
+static hu_error_t config_write_response(hu_allocator_t *alloc, bool saved, const char *why,
+                                        bool with_applied, char **out, size_t *out_len) {
+    hu_json_value_t *obj = hu_json_object_new(alloc);
+    if (!obj)
+        return HU_ERR_OUT_OF_MEMORY;
+    if (with_applied)
+        hu_json_object_set(alloc, obj, "applied", hu_json_bool_new(alloc, saved));
+    hu_json_object_set(alloc, obj, "saved", hu_json_bool_new(alloc, saved));
+    if (why)
+        hu_json_object_set(alloc, obj, "error", hu_json_string_new(alloc, why, strlen(why)));
+    hu_error_t err = hu_json_stringify(alloc, obj, out, out_len);
+    hu_json_free(alloc, obj);
+    return err;
+}
+
 hu_error_t cp_config_set(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
                          const hu_control_protocol_t *proto, const hu_json_value_t *root,
                          char **out, size_t *out_len) {
     (void)conn;
     (void)proto;
     bool saved = false;
-
-    if (root && app && app->config) {
-        hu_json_value_t *params = hu_json_object_get(root, "params");
-        if (params) {
-            const char *raw = hu_json_get_string(params, "raw");
-            if (raw) {
-                hu_error_t parse_err = hu_config_parse_json(app->config, raw, strlen(raw));
-                if (parse_err == HU_OK) {
-                    hu_error_t save_err = hu_config_save(app->config);
-                    saved = (save_err == HU_OK);
-                }
-            }
-        }
-    }
-
-    hu_json_value_t *obj = hu_json_object_new(alloc);
-    if (!obj)
-        return HU_ERR_OUT_OF_MEMORY;
-    hu_json_object_set(alloc, obj, "saved", hu_json_bool_new(alloc, saved));
-    hu_error_t err = hu_json_stringify(alloc, obj, out, out_len);
-    hu_json_free(alloc, obj);
-    return err;
+    const char *why = NULL;
+    config_write(alloc, app, root, &saved, &why);
+    return config_write_response(alloc, saved, why, false, out, out_len);
 }
 
 hu_error_t cp_config_apply(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
@@ -159,30 +223,8 @@ hu_error_t cp_config_apply(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_c
                            char **out, size_t *out_len) {
     (void)conn;
     (void)proto;
-    bool applied = false;
     bool saved = false;
-
-    if (root && app && app->config) {
-        hu_json_value_t *params = hu_json_object_get(root, "params");
-        if (params) {
-            const char *raw = hu_json_get_string(params, "raw");
-            if (raw) {
-                hu_error_t parse_err = hu_config_parse_json(app->config, raw, strlen(raw));
-                if (parse_err == HU_OK) {
-                    applied = true;
-                    hu_error_t save_err = hu_config_save(app->config);
-                    saved = (save_err == HU_OK);
-                }
-            }
-        }
-    }
-
-    hu_json_value_t *obj = hu_json_object_new(alloc);
-    if (!obj)
-        return HU_ERR_OUT_OF_MEMORY;
-    hu_json_object_set(alloc, obj, "applied", hu_json_bool_new(alloc, applied));
-    hu_json_object_set(alloc, obj, "saved", hu_json_bool_new(alloc, saved));
-    hu_error_t err = hu_json_stringify(alloc, obj, out, out_len);
-    hu_json_free(alloc, obj);
-    return err;
+    const char *why = NULL;
+    config_write(alloc, app, root, &saved, &why);
+    return config_write_response(alloc, saved, why, true, out, out_len);
 }
