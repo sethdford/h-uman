@@ -42,6 +42,7 @@
 #include "human/doctor.h"
 #include "human/doctor/check.h"
 #include "human/doctor_fix.h"
+#include "human/eval/commitment_sample.h"
 #include "human/gateway.h"
 #include "human/gateway/control_protocol.h"
 #include "human/health.h"
@@ -617,6 +618,8 @@ static const hu_command_t commands[] = {
     {"config", "Configuration reference (schema)", cmd_config, HU_CLI_HELP_BARE},
     {"schedule", "Manage scheduled messages (list, add, cancel)", cmd_schedule,
      HU_CLI_HELP_SUMMARY},
+    {"commitments", "Sample detected commitments for labelling; score precision", cmd_commitments,
+     HU_CLI_HELP_SELF},
     {"capabilities", "Show available capabilities", cmd_capabilities, HU_CLI_HELP_SUMMARY},
     {"models", "List available models", cmd_models, HU_CLI_HELP_SUMMARY},
     {"auth", "Authentication management", cmd_auth, HU_CLI_HELP_BARE},

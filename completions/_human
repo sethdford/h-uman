@@ -51,6 +51,7 @@ _human() {
                 persona:Persona management
                 research:Run research agent
                 schedule:Manage scheduled messages
+                commitments:Sample and score detected commitments
                 voice:Voice cloning and TTS
                 plugins:Plugin management
                 pwa:PWA browser automation
