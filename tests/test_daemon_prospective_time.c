@@ -69,13 +69,13 @@ static void due_followups_lists_one_line_for_this_contact(void) {
     memset(&agent, 0, sizeof(agent));
     agent.memory = &mem;
     HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, "+15550000002", 12,
-                                                         "their trip", 10, 500),
+                                                         "their trip", 10, 500, NULL, 0),
                  HU_OK);
     HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, "+15550000001", 12,
-                                                         "the job interview", 17, 1000),
+                                                         "the job interview", 17, 1000, NULL, 0),
                  HU_OK);
     HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, "+15550000001", 12,
-                                                         "the move", 8, 2000),
+                                                         "the move", 8, 2000, NULL, 0),
                  HU_OK);
     char buf[640];
     int64_t listed = -1;

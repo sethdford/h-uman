@@ -3946,7 +3946,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         if (deadline > 0) {
                             (void)hu_superhuman_delayed_followup_schedule(
                                 agent->memory, alloc, batch_key, key_len, desc_buf,
-                                (size_t)strlen(desc_buf), deadline);
+                                (size_t)strlen(desc_buf), deadline, who_buf, strlen(who_buf));
                         }
                     }
                     /* F24: Growth celebration — detect positive outcomes, store for later reference

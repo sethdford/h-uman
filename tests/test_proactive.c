@@ -990,7 +990,7 @@ static void proactive_callbacks_returns_delayed_followup(void) {
     static const char TOPIC[] = "that dinner thing";
     int64_t past = 1000000;
     HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, CONTACT, sizeof(CONTACT) - 1,
-                                                         TOPIC, sizeof(TOPIC) - 1, past),
+                                                         TOPIC, sizeof(TOPIC) - 1, past, NULL, 0),
                  HU_OK);
 
     char msg[512];
@@ -1035,7 +1035,7 @@ static void proactive_callbacks_ex_exposes_followup_id_and_supports_retry(void) 
     static const char TOPIC[] = "loan paperwork";
     int64_t past = 1000000;
     HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, CONTACT, sizeof(CONTACT) - 1,
-                                                         TOPIC, sizeof(TOPIC) - 1, past),
+                                                         TOPIC, sizeof(TOPIC) - 1, past, NULL, 0),
                  HU_OK);
 
     /* First retrieval — id is exposed. */
@@ -1078,7 +1078,7 @@ static void proactive_callbacks_wrapper_ignores_id(void) {
     HU_ASSERT_NOT_NULL(mem.ctx);
     static const char CONTACT[] = "contact_wrap";
     HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, CONTACT, sizeof(CONTACT) - 1,
-                                                         "t", 1, 1000000),
+                                                         "t", 1, 1000000, NULL, 0),
                  HU_OK);
     char msg[256];
     HU_ASSERT_TRUE(hu_proactive_check_callbacks(&alloc, &mem, CONTACT, sizeof(CONTACT) - 1, 0, msg,

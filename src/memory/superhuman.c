@@ -209,60 +209,69 @@ static void pm_mirror_time(sqlite3 *db, const char *kind, const char *contact, s
         hu_log_warn("superhuman", NULL, "prospective time mirror failed for %s", key);
 }
 
-/* Controller ruling F4: the `commitments` row is either the CONTACT's own
- * commitment ("I'll send the photos", who="them", stored by the F20 keeper
- * in daemon.c) or the OWNER's ("who"="me", stored by the promise keeper).
- * `who` is the call-site fact that tells them apart -- no new column or
- * parameter needed. Mirroring a contact's commitment verbatim would later
- * quote the contact's own words back as if the OWNER had promised it, so a
- * contact-owned commitment is rephrased to third person via
- * hu_prospective_commitment_action() before it is mirrored as a time row.
+/* Controller ruling F4: a dated intention is either the CONTACT's own
+ * ("I'll send the photos", who="them" -- the F20 keeper in daemon.c stores
+ * these, and its paired delayed_followup_schedule call for the SAME
+ * commitment carries the same who) or the OWNER's (who NULL or "me" -- the
+ * promise keeper and the unrelated daemon_dated_followup.c situation-frame
+ * path, which has no ownership concept at all). `who` is the call-site fact
+ * that tells them apart; both hu_superhuman_commitment_store and
+ * hu_superhuman_delayed_followup_schedule route through this one helper so
+ * the F20 pair decides ownership identically and their mirrors land on the
+ * SAME rephrased text -- which is what lets the Task 3 upsert collapse them
+ * into ONE row instead of two (one rephrased, one quoting the contact's
+ * first-person words back as the owner's). Mirroring a contact's commitment
+ * verbatim would do exactly that misattribution, so a contact-owned mirror
+ * is rephrased to third person via hu_prospective_commitment_action() first.
  * When that rephrasing is not safe (returns 0), the mirror is skipped
- * entirely -- the commitments row stays the record, and the skip is logged
- * with a running count so the miss is visible, never silent (fail toward
+ * entirely -- the ledger row stays the record, and the skip is logged with
+ * a running count so the miss is visible, never silent (fail toward
  * silence, not toward misattribution). */
 static size_t s_commitment_mirror_skipped = 0;
 
-static void pm_mirror_commitment_time(sqlite3 *db, const char *contact, size_t contact_len,
-                                      const char *description, size_t desc_len, const char *who,
-                                      size_t who_len, int64_t due_at) {
-    bool owner_owned = (who_len == 2 && strncmp(who, "me", 2) == 0);
-    if (owner_owned) {
-        pm_mirror_time(db, "commitment", contact, contact_len, description, desc_len, due_at,
-                       HU_PM_SOURCE_PROMISE_KEEPER);
+static bool pm_who_is_contact(const char *who, size_t who_len) {
+    if (!who || who_len == 0)
+        return false; /* no signal -- owner-equivalent */
+    return !(who_len == 2 && strncmp(who, "me", 2) == 0);
+}
+
+static void pm_mirror_owned_time(sqlite3 *db, const char *kind, const char *contact,
+                                 size_t contact_len, const char *text, size_t text_len,
+                                 int64_t due_at, const char *who, size_t who_len,
+                                 hu_prospective_source_t source) {
+    if (!pm_who_is_contact(who, who_len)) {
+        pm_mirror_time(db, kind, contact, contact_len, text, text_len, due_at, source);
         return;
     }
 
     /* Contact-owned: rephrase via the pure predicate. It wants a
-     * NUL-terminated C string; description/desc_len are not guaranteed to
-     * be one, so copy into a bounded local first. Too-long input is not
-     * safe to rephrase either -- skip it the same way a failed rewrite is
-     * skipped. */
-    char desc_z[512];
-    if (desc_len >= sizeof(desc_z)) {
+     * NUL-terminated C string; text/text_len is not guaranteed to be one,
+     * so copy into a bounded local first. Too-long input is not safe to
+     * rephrase either -- skip it the same way a failed rewrite is skipped. */
+    char text_z[512];
+    if (text_len >= sizeof(text_z)) {
         s_commitment_mirror_skipped++;
         hu_log_warn("superhuman", NULL,
-                    "prospective time mirror skipped (%zu total): contact commitment too long "
-                    "to rephrase safely",
-                    s_commitment_mirror_skipped);
+                    "prospective time mirror skipped (%zu total): contact %s text too long to "
+                    "rephrase safely",
+                    s_commitment_mirror_skipped, kind);
         return;
     }
-    memcpy(desc_z, description, desc_len);
-    desc_z[desc_len] = '\0';
+    memcpy(text_z, text, text_len);
+    text_z[text_len] = '\0';
 
     char action_buf[600];
     size_t action_len =
-        hu_prospective_commitment_action(desc_z, true, action_buf, sizeof(action_buf));
+        hu_prospective_commitment_action(text_z, true, action_buf, sizeof(action_buf));
     if (action_len == 0) {
         s_commitment_mirror_skipped++;
         hu_log_warn("superhuman", NULL,
-                    "prospective time mirror skipped (%zu total): contact commitment could not "
-                    "be rephrased safely",
-                    s_commitment_mirror_skipped);
+                    "prospective time mirror skipped (%zu total): contact %s could not be "
+                    "rephrased safely",
+                    s_commitment_mirror_skipped, kind);
         return;
     }
-    pm_mirror_time(db, "commitment", contact, contact_len, action_buf, action_len, due_at,
-                   HU_PM_SOURCE_PROMISE_KEEPER);
+    pm_mirror_time(db, kind, contact, contact_len, action_buf, action_len, due_at, source);
 }
 
 hu_error_t hu_superhuman_commitment_store(void *sqlite_ctx, hu_allocator_t *alloc,
@@ -299,8 +308,8 @@ hu_error_t hu_superhuman_commitment_store(void *sqlite_ctx, hu_allocator_t *allo
     if (rc != SQLITE_DONE)
         return HU_ERR_MEMORY_BACKEND;
     if (deadline > 0)
-        pm_mirror_commitment_time(db, contact_id, contact_id_len, description, desc_len, who,
-                                  who_len, deadline);
+        pm_mirror_owned_time(db, "commitment", contact_id, contact_id_len, description, desc_len,
+                             deadline, who, who_len, HU_PM_SOURCE_PROMISE_KEEPER);
     return HU_OK;
 }
 
@@ -587,7 +596,8 @@ hu_error_t hu_superhuman_temporal_get_quiet_hours(void *sqlite_ctx, hu_allocator
 hu_error_t hu_superhuman_delayed_followup_schedule(void *sqlite_ctx, hu_allocator_t *alloc,
                                                    const char *contact_id, size_t contact_id_len,
                                                    const char *topic, size_t topic_len,
-                                                   int64_t scheduled_at) {
+                                                   int64_t scheduled_at, const char *who,
+                                                   size_t who_len) {
     (void)alloc;
     if (!sqlite_ctx || !contact_id || contact_id_len == 0 || !topic || topic_len == 0)
         return HU_ERR_INVALID_ARGUMENT;
@@ -612,8 +622,8 @@ hu_error_t hu_superhuman_delayed_followup_schedule(void *sqlite_ctx, hu_allocato
     if (rc != SQLITE_DONE)
         return HU_ERR_MEMORY_BACKEND;
     if (scheduled_at > 0)
-        pm_mirror_time(db, "followup", contact_id, contact_id_len, topic, topic_len, scheduled_at,
-                       HU_PM_SOURCE_FOLLOWUP);
+        pm_mirror_owned_time(db, "followup", contact_id, contact_id_len, topic, topic_len,
+                             scheduled_at, who, who_len, HU_PM_SOURCE_FOLLOWUP);
     return HU_OK;
 }
 
@@ -1894,7 +1904,8 @@ hu_error_t hu_superhuman_temporal_get_quiet_hours(void *sqlite_ctx, hu_allocator
 hu_error_t hu_superhuman_delayed_followup_schedule(void *sqlite_ctx, hu_allocator_t *alloc,
                                                    const char *contact_id, size_t contact_id_len,
                                                    const char *topic, size_t topic_len,
-                                                   int64_t scheduled_at) {
+                                                   int64_t scheduled_at, const char *who_arg,
+                                                   size_t who_arg_len) {
     (void)sqlite_ctx;
     (void)alloc;
     (void)contact_id;
@@ -1902,6 +1913,8 @@ hu_error_t hu_superhuman_delayed_followup_schedule(void *sqlite_ctx, hu_allocato
     (void)topic;
     (void)topic_len;
     (void)scheduled_at;
+    (void)who_arg;
+    (void)who_arg_len;
     return HU_ERR_NOT_SUPPORTED;
 }
 

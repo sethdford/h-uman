@@ -212,8 +212,9 @@ hu_error_t hu_daemon_promise_keeper_scan_outbound(void *memory, hu_allocator_t *
     if (stored_out)
         *stored_out = true;
     if (deadline > 0) {
-        hu_error_t schedule_err = hu_superhuman_delayed_followup_schedule(
-            memory, alloc, contact_id, contact_id_len, desc, strlen(desc), deadline);
+        hu_error_t schedule_err =
+            hu_superhuman_delayed_followup_schedule(memory, alloc, contact_id, contact_id_len, desc,
+                                                    strlen(desc), deadline, who, strlen(who));
         if (schedule_err != HU_OK)
             hu_log_warn("human", observer,
                         "[promise-keeper] delayed_followup_schedule failed (%d) for %.*s",
