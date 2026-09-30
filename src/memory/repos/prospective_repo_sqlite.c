@@ -181,6 +181,23 @@ void hu_prospective_repo_free(hu_allocator_t *alloc, hu_prospective_item_t *item
         alloc->free(alloc->ctx, items, count * sizeof(hu_prospective_item_t));
 }
 
+/* The `status IN ('pending', 'surfaced')` guard is a read-then-write on the
+ * open-row set, not a compare-and-set against a version the caller observed —
+ * it assumes a single writer per contact (the daemon loop). A second
+ * concurrent transition on the same contact could still move an intention
+ * the caller thought was untouched.
+ *
+ * `hu_prospective_status_to_fired` maps both PENDING and SURFACED to
+ * fired=0 (only DONE/CANCELED/EXPIRED get 1/2/3). That is what keeps this
+ * UPDATE from fighting `trg_prospective_fired_status`: the trigger fires
+ * AFTER UPDATE OF fired and rewrites status from NEW.fired, but since a
+ * SURFACED write leaves fired at 0 the trigger's own fired=0 branch maps
+ * back to 'pending' — a no-op against the status this statement just set,
+ * because fired did not actually change (0 -> 0 trips WHEN NEW.fired IS NOT
+ * OLD.fired only when it truly changes). Changing either mapping (e.g.
+ * giving SURFACED its own fired code) reintroduces the fight: the trigger
+ * would then overwrite this statement's 'surfaced' back to whatever its
+ * CASE maps that new fired value to. */
 static const char k_pm_transition[] =
     "UPDATE prospective_memories SET status = ?1, fired = ?2, attempts = ?3, "
     "outcome = COALESCE(?4, outcome), "
@@ -222,6 +239,10 @@ hu_error_t hu_prospective_repo_transition(sqlite3 *db, const hu_prospective_item
     return HU_OK;
 }
 
+/* Matching is by contact + text (COUNT(DISTINCT action)): by design,
+ * identically-worded open items for one contact are treated as one promise,
+ * so a keyword row and its time-cue twin (or two writers producing the same
+ * wording) count once, not twice. */
 hu_error_t hu_prospective_repo_count_surfaced_since(sqlite3 *db, hu_prospective_cue_kind_t kind,
                                                     const char *contact, size_t contact_len,
                                                     int64_t since, int64_t *out) {
@@ -275,21 +296,42 @@ static void pm_normalize_action(const char *action, size_t len, char *out, size_
     out[oi] = '\0';
 }
 
-/* F1: the OPEN-row branch matches contact + normalized action, IGNORING
- * due_at, and only against rows still pending/surfaced — a settled
- * (done/canceled/expired) row never blocks a fresh intention. The stored
- * `action` is normalized the same way (trim, lowercase, tabs/newlines to
- * space, then two collapse passes) so a backfill re-run that re-anchors
- * due_at with a fresh source key still dedupes against the open row. */
-static const char k_pm_upsert_time[] =
+/* Exact source-key match, any status: the same backfill/source event must
+ * never be recorded twice, even if the earlier row already settled. */
+static const char k_pm_key_exists[] =
+    "SELECT 1 FROM prospective_memories WHERE cue_kind = 'time' AND trigger_value = ?1 LIMIT 1";
+
+/* Candidate OPEN rows (pending/surfaced only — a settled row never blocks a
+ * fresh intention) for this contact. Fix round 1 (I1): earlier this repo
+ * asked SQLite to normalize the stored `action` inline
+ * (LOWER/TRIM + two REPLACE('  ',' ') passes) and compare it to a
+ * C-normalized parameter. That SQL-side approximation only collapses a
+ * whitespace run by roughly half per REPLACE pass (SQLite's REPLACE does
+ * one left-to-right, non-overlapping scan), so a run of 5+ characters left
+ * a residual double space and the two sides never matched — NOT EXISTS was
+ * always true and a duplicate open intention got inserted, exactly what F1
+ * exists to prevent. There is no number of REPLACE passes that is provably
+ * enough for an unbounded run. The fix: never normalize in SQL. Fetch every
+ * OPEN row's *raw* action for this contact and run the SAME C function
+ * (`pm_normalize_action`) on each candidate that already normalizes the
+ * input, then compare in C. One normalizer, two call sites, no drift. */
+static const char k_pm_open_candidates[] =
+    "SELECT action FROM prospective_memories WHERE cue_kind = 'time' AND contact_id = ?1 "
+    "AND status IN ('pending', 'surfaced')";
+
+static const char k_pm_insert_time[] =
     "INSERT INTO prospective_memories(trigger_type, trigger_value, action, contact_id, "
     "expires_at, fired, created_at, cue_kind, due_at, status, source) "
-    "SELECT 'time', ?1, ?2, ?3, ?4, ?5, ?6, 'time', ?7, ?8, ?9 "
-    "WHERE NOT EXISTS (SELECT 1 FROM prospective_memories WHERE cue_kind = 'time' AND "
-    "(trigger_value = ?1 OR (contact_id = ?3 AND status IN ('pending', 'surfaced') AND "
-    "REPLACE(REPLACE(REPLACE(REPLACE(LOWER(TRIM(action)), CHAR(9), ' '), CHAR(10), ' '), "
-    "'  ', ' '), '  ', ' ') = ?10)))";
+    "VALUES('time', ?1, ?2, ?3, ?4, ?5, ?6, 'time', ?7, ?8, ?9)";
 
+/* F1: "already present" for a cue_kind='time' upsert means either the exact
+ * source key (k_pm_key_exists, any status) or — for a row still OPEN
+ * (pending/surfaced) — the same contact + the same action once both are
+ * trimmed, case-folded and internal-whitespace-collapsed, IGNORING due_at:
+ * a backfill re-run that re-anchors due_at (a fresh source key, a later
+ * due_at) must not create a second intention for the same still-open
+ * promise. See k_pm_open_candidates above for why that comparison is done
+ * in C, never in SQL. */
 hu_error_t hu_prospective_repo_upsert_time(sqlite3 *db, const char *contact, size_t contact_len,
                                            const char *action, size_t action_len, int64_t due_at,
                                            int64_t grace_s, hu_prospective_source_t source,
@@ -304,8 +346,42 @@ hu_error_t hu_prospective_repo_upsert_time(sqlite3 *db, const char *contact, siz
         return HU_ERR_INVALID_ARGUMENT;
     char norm[512];
     pm_normalize_action(action, action_len, norm, sizeof(norm));
+
     sqlite3_stmt *st = NULL;
-    if (sqlite3_prepare_v2(db, k_pm_upsert_time, -1, &st, NULL) != SQLITE_OK)
+    if (sqlite3_prepare_v2(db, k_pm_key_exists, -1, &st, NULL) != SQLITE_OK)
+        return HU_ERR_MEMORY_BACKEND;
+    sqlite3_bind_text(st, 1, source_key, -1, SQLITE_STATIC);
+    int rc = sqlite3_step(st);
+    bool dedupe_hit = rc == SQLITE_ROW;
+    sqlite3_finalize(st);
+    if (rc != SQLITE_ROW && rc != SQLITE_DONE)
+        return HU_ERR_MEMORY_BACKEND;
+
+    if (!dedupe_hit) {
+        st = NULL;
+        if (sqlite3_prepare_v2(db, k_pm_open_candidates, -1, &st, NULL) != SQLITE_OK)
+            return HU_ERR_MEMORY_BACKEND;
+        sqlite3_bind_text(st, 1, contact, (int)contact_len, SQLITE_STATIC);
+        char cand_norm[512];
+        while ((rc = sqlite3_step(st)) == SQLITE_ROW) {
+            const unsigned char *cand = sqlite3_column_text(st, 0);
+            size_t cand_len = cand ? (size_t)sqlite3_column_bytes(st, 0) : 0;
+            pm_normalize_action((const char *)cand, cand_len, cand_norm, sizeof(cand_norm));
+            if (strcmp(cand_norm, norm) == 0) {
+                dedupe_hit = true;
+                break;
+            }
+        }
+        sqlite3_finalize(st);
+        if (rc != SQLITE_ROW && rc != SQLITE_DONE)
+            return HU_ERR_MEMORY_BACKEND;
+    }
+
+    if (dedupe_hit)
+        return HU_OK; /* *inserted already false */
+
+    st = NULL;
+    if (sqlite3_prepare_v2(db, k_pm_insert_time, -1, &st, NULL) != SQLITE_OK)
         return HU_ERR_MEMORY_BACKEND;
     sqlite3_bind_text(st, 1, source_key, -1, SQLITE_STATIC);
     sqlite3_bind_text(st, 2, action, (int)action_len, SQLITE_STATIC);
@@ -316,16 +392,22 @@ hu_error_t hu_prospective_repo_upsert_time(sqlite3 *db, const char *contact, siz
     sqlite3_bind_int64(st, 7, due_at);
     sqlite3_bind_text(st, 8, status_s, -1, SQLITE_STATIC);
     sqlite3_bind_text(st, 9, source_s, -1, SQLITE_STATIC);
-    sqlite3_bind_text(st, 10, norm, -1, SQLITE_STATIC);
-    int rc = sqlite3_step(st);
+    rc = sqlite3_step(st);
     sqlite3_finalize(st);
     if (rc != SQLITE_DONE)
         return HU_ERR_MEMORY_BACKEND;
     if (inserted)
-        *inserted = sqlite3_changes(db) > 0;
+        *inserted = true;
     return HU_OK;
 }
 
+/* Matching is by contact + text (contact_id + description / contact_id +
+ * topic, exact): by design, identically-worded open items for one contact
+ * are treated as one promise, so this retires every ledger row that reads
+ * as the same commitment for that contact, not a specific row id. Each
+ * WHERE also requires the ledger's own "still open" state (status='pending'
+ * / sent=0), so a second call for an already-settled row matches nothing
+ * and is a no-op. */
 hu_error_t hu_prospective_repo_sync_source(sqlite3 *db, const hu_prospective_item_t *it,
                                            hu_prospective_status_t to, int64_t now) {
     const char *ledger = to == HU_PM_DONE       ? "followed_up"

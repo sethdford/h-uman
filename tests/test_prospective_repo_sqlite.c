@@ -413,6 +413,77 @@ static void repo_upsert_time_dedupes_open_row_ignoring_due_at_reanchor(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
+/* Seeds a raw cue_kind='time' row with whatever noisy `action` text the
+ * caller wants (bound, never interpolated), so a whitespace-run or casing
+ * variant can be planted verbatim without SQL-escaping it by hand. */
+static void seed_time_row_raw(sqlite3 *db, const char *key, const char *action, const char *contact,
+                              int64_t due_at, int64_t created) {
+    sqlite3_stmt *st = NULL;
+    HU_ASSERT_EQ(sqlite3_prepare_v2(db,
+                                    "INSERT INTO prospective_memories(trigger_type,trigger_value,"
+                                    "action,contact_id,expires_at,fired,created_at,cue_kind,due_at,"
+                                    "status,source) VALUES('time',?1,?2,?3,?4,0,?5,'time',?4,"
+                                    "'pending','promise_keeper')",
+                                    -1, &st, NULL),
+                 SQLITE_OK);
+    sqlite3_bind_text(st, 1, key, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 2, action, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 3, contact, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(st, 4, due_at);
+    sqlite3_bind_int64(st, 5, created);
+    HU_ASSERT_EQ(sqlite3_step(st), SQLITE_DONE);
+    sqlite3_finalize(st);
+}
+
+/* Fix round 1, I1 (controller ruling): the F1 open-row dedupe used to
+ * compare a SQL-side normalization (LOWER/TRIM + two REPLACE('  ',' ')
+ * passes) against the C-side `pm_normalize_action`. SQLite's REPLACE does
+ * one left-to-right, NON-overlapping scan, so each pass roughly halves a
+ * whitespace run rather than collapsing it outright — a stored action with
+ * 5+ consecutive whitespace characters left a residual double space that
+ * never matched the single-spaced C-normalized parameter, so NOT EXISTS
+ * was always true and a duplicate open intention got inserted. That is
+ * exactly the bug F1 exists to prevent. The fix moves ALL normalization
+ * into C (`pm_normalize_action`, applied to both the input and every
+ * fetched candidate), so it must dedupe correctly regardless of run
+ * length, whitespace kind, or case. */
+static void repo_upsert_time_dedupes_open_row_despite_whitespace_and_case(void) {
+    struct {
+        const char *stored_action;   /* seeded raw: noisy whitespace/case */
+        const char *incoming_action; /* what the caller passes, clean */
+    } cases[] = {
+        {"renew"
+         "     " /* 5 spaces */
+         "the passport",
+         "renew the passport"},
+        {"renew"
+         "         " /* 9 spaces */
+         "the passport",
+         "renew the passport"},
+        {"renew"
+         " \t\n \t " /* mixed space/tab/newline */
+         "the passport",
+         "renew the passport"},
+        {"RENEW THE PASSPORT", "renew the passport"}, /* case only */
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        hu_allocator_t alloc = hu_system_allocator();
+        hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+        sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+        seed_time_row_raw(db, "commitment:seed", cases[i].stored_action, "+15550000001", 1000, 5);
+        bool ins = true;
+        HU_ASSERT_EQ(hu_prospective_repo_upsert_time(
+                         db, "+15550000001", strlen("+15550000001"), cases[i].incoming_action,
+                         strlen(cases[i].incoming_action), 9000, 100, HU_PM_SOURCE_PROMISE_KEEPER,
+                         "commitment:reanchor", HU_PM_PENDING, 500, &ins),
+                     HU_OK);
+        HU_ASSERT_FALSE(ins);
+        HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE cue_kind='time'"),
+                     (int64_t)1);
+        mem.vtable->deinit(mem.ctx);
+    }
+}
+
 static void repo_sync_source_retires_ledger_twins(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
@@ -446,6 +517,41 @@ static void repo_sync_source_retires_ledger_twins(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
+/* Minor (fix round 1): both WHERE clauses in sync_source require the
+ * ledger row's own "still open" state (commitments.status='pending' /
+ * delayed_followups.sent=0), so once the first call retires a row a
+ * second call for the same intention matches nothing and changes nothing —
+ * it must not re-stamp followed_up_at with the new `now`. */
+static void repo_sync_source_second_call_is_a_no_op(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_EQ(
+        sqlite3_exec(db,
+                     "INSERT INTO commitments(contact_id,description,who,deadline,status,"
+                     "created_at) VALUES('+15550000001','call about the lease','me',5000,"
+                     "'pending',1);"
+                     "INSERT INTO delayed_followups(contact_id,topic,scheduled_at,sent) VALUES"
+                     "('+15550000001','call about the lease',5000,0)",
+                     NULL, NULL, NULL),
+        SQLITE_OK);
+    hu_prospective_item_t it;
+    memset(&it, 0, sizeof(it));
+    it.cue_kind = HU_PM_CUE_TIME;
+    snprintf(it.action, sizeof(it.action), "call about the lease");
+    snprintf(it.contact_id, sizeof(it.contact_id), "+15550000001");
+    HU_ASSERT_EQ(hu_prospective_repo_sync_source(db, &it, HU_PM_DONE, 6000), HU_OK);
+    char s[64];
+    q_text(db, "SELECT status || '/' || followed_up_at FROM commitments", s, sizeof(s));
+    HU_ASSERT_STR_EQ(s, "followed_up/6000");
+    HU_ASSERT_EQ(q_int(db, "SELECT sent FROM delayed_followups"), (int64_t)1);
+    HU_ASSERT_EQ(hu_prospective_repo_sync_source(db, &it, HU_PM_DONE, 9999), HU_OK);
+    q_text(db, "SELECT status || '/' || followed_up_at FROM commitments", s, sizeof(s));
+    HU_ASSERT_STR_EQ(s, "followed_up/6000"); /* unchanged — not re-stamped to 9999 */
+    HU_ASSERT_EQ(q_int(db, "SELECT sent FROM delayed_followups"), (int64_t)1);
+    mem.vtable->deinit(mem.ctx);
+}
+
 void run_prospective_repo_sqlite_tests(void) {
     HU_TEST_SUITE("prospective repo");
     HU_RUN_TEST(ensure_schema_adds_typed_columns_and_maps_fired);
@@ -458,7 +564,9 @@ void run_prospective_repo_sqlite_tests(void) {
     HU_RUN_TEST(repo_count_surfaced_since_counts_intentions);
     HU_RUN_TEST(repo_upsert_time_is_idempotent_by_key_and_by_intention);
     HU_RUN_TEST(repo_upsert_time_dedupes_open_row_ignoring_due_at_reanchor);
+    HU_RUN_TEST(repo_upsert_time_dedupes_open_row_despite_whitespace_and_case);
     HU_RUN_TEST(repo_sync_source_retires_ledger_twins);
+    HU_RUN_TEST(repo_sync_source_second_call_is_a_no_op);
 }
 
 #else
