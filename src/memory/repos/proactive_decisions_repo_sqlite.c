@@ -12,6 +12,7 @@
 
 #include "human/memory/repo_util.h"
 #include <stdbool.h>
+#include <stdio.h>
 #include <string.h>
 
 static bool proactive_decision_is_valid(const char *decision) {
@@ -239,3 +240,32 @@ bool hu_proactive_send_circuit_is_open(sqlite3 *db, const char *contact, int64_t
 }
 
 #endif /* HU_ENABLE_SQLITE */
+
+hu_error_t hu_proactive_decisions_repo_recent_sent_refs(sqlite3 *db, const char *contact,
+                                                        int64_t since,
+                                                        char out[][HU_PROACTIVE_REF_MAX],
+                                                        size_t cap, size_t *out_n) {
+    if (!db || !contact || !out || !out_n)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out_n = 0;
+    hu_error_t schema_err = hu_proactive_decisions_repo_ensure_schema(db);
+    if (schema_err != HU_OK)
+        return schema_err;
+    static const char *SQL = "SELECT message_ref FROM proactive_decisions "
+                             "WHERE contact = ?1 AND trigger = 'proactive_send' AND sent = 1 "
+                             "AND ts >= ?2 AND message_ref IS NOT NULL ORDER BY ts DESC LIMIT ?3;";
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db, SQL, -1, &stmt, NULL) != SQLITE_OK)
+        return HU_ERR_MEMORY_STORE;
+    sqlite3_bind_text(stmt, 1, contact, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(stmt, 2, since);
+    sqlite3_bind_int64(stmt, 3, (sqlite3_int64)cap);
+    int rc;
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW && *out_n < cap) {
+        const unsigned char *t = sqlite3_column_text(stmt, 0);
+        snprintf(out[*out_n], HU_PROACTIVE_REF_MAX, "%s", t ? (const char *)t : "");
+        (*out_n)++;
+    }
+    sqlite3_finalize(stmt);
+    return rc == SQLITE_DONE || rc == SQLITE_ROW ? HU_OK : HU_ERR_MEMORY_STORE;
+}
