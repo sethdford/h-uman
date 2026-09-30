@@ -86,6 +86,7 @@
 #include "human/daemon/promise_keeper.h"
 #include "human/daemon/reactive_gates.h"
 #include "human/daemon/reactive_turn.h"
+#include "human/daemon/reminders.h"
 #include "human/daemon/send_budget.h"
 #include "human/daemon/send_provenance.h"
 #include "human/daemon/share_queue.h"
@@ -6509,6 +6510,28 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                 }
 
+                /* Owner reminders (life-admin slice 1): "remind me to … at 5",
+                 * "reminders", "done", "snooze" from the owner's own number in a
+                 * DM are answered here with a one-line ack. Everything else, and
+                 * everything while HU_REMINDERS is not live, falls through. */
+                if (send_target == batch_key && ch->channel->vtable->send) {
+                    char rm_reply[1024];
+                    const char *rm_ch = ch->channel->vtable->name
+                                            ? ch->channel->vtable->name(ch->channel->ctx)
+                                            : "";
+                    if (hu_reminders_handle_owner_message(
+                            agent, batch_key, key_len, rm_ch, combined, combined_len,
+                            (int64_t)time(NULL), rm_reply, sizeof(rm_reply)) &&
+                        rm_reply[0]) {
+                        hu_error_t rm_err = ch->channel->vtable->send(ch->channel->ctx, send_target,
+                                                                      send_target_len, rm_reply,
+                                                                      strlen(rm_reply), NULL, 0);
+                        hu_log_info("reminders", agent->observer, "owner command handled (ack %s)",
+                                    rm_err == HU_OK ? "sent" : "failed");
+                        goto skip_llm_this_batch;
+                    }
+                }
+
                 /* F29: Backchannel — send brief cue and skip LLM when narrative detected.
                  * Flash typing briefly so the recipient sees "..." before the short
                  * reply appears, matching how a human types "mhm" or "haha". */
@@ -10091,6 +10114,12 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                  "follow_up_watcher.enabled=true in config.json to activate");
             }
         }
+
+        /* Owner reminders (life-admin slice 1): deliver any that are due.
+         * Gated by HU_REMINDERS (off by default); paces itself to one pass
+         * per 20 s and logs once when it is not live. */
+        if (agent)
+            hu_reminders_tick(agent, channels, channel_count, (int64_t)time(NULL));
 
         /* Sprint A.6 wire — periodic social tick: exercises the three
          * Tier-2 library-only scanners (gap / drift / signatures) and
