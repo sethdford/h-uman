@@ -6709,9 +6709,9 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
 
                 /* Constitutional AI: critique response against principles */
 #ifndef HU_IS_TEST
-                if (agent->constitutional_enabled) {
-                    hu_constitutional_config_t const_cfg =
-                        hu_constitutional_config_for_turn(!!agent->persona);
+                if (agent->constitutional_enabled &&
+                    hu_constitutional_runs_for_turn(!!agent->persona)) {
+                    hu_constitutional_config_t const_cfg = hu_constitutional_config_default();
                     hu_critique_result_t critique = {0};
                     uint64_t const_t0_ms = hu_agent_internal_monotonic_ms();
                     if (hu_constitutional_critique(agent->alloc, &agent->provider,

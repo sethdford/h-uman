@@ -388,6 +388,6 @@ int hu_constitutional_test_parse_principle_index(const char *resp, size_t resp_l
 }
 #endif
 
-hu_constitutional_config_t hu_constitutional_config_for_turn(bool persona_voice) {
-    return persona_voice ? hu_constitutional_config_persona() : hu_constitutional_config_default();
+bool hu_constitutional_runs_for_turn(bool persona_voice) {
+    return !persona_voice;
 }
