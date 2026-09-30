@@ -8,6 +8,7 @@
 
 #ifdef HU_ENABLE_SQLITE
 
+#include "human/core/log.h"
 #include "human/core/string.h"
 #include "human/memory/sql_transaction.h"
 #include <string.h>
@@ -25,19 +26,21 @@ static void pm_mark_handled(const hu_prospective_item_t *items, size_t n, bool *
 }
 
 /* Retire an intention; a time intention also retires its ledger twins, but
- * only when the primary transition actually changed a row. `changed` (may
- * be NULL) receives hu_prospective_repo_transition's row count, and the
- * transition's own hu_error_t is returned so a real backend failure is
- * never silently swallowed. */
+ * only when the primary transition actually changed a row -- one unit
+ * (hu_prospective_repo_settle, fix round 2): a failed ledger sync rolls the
+ * transition back too, is logged, and is returned, never swallowed.
+ * `changed` (may be NULL) receives the transition's row count (0 when rolled
+ * back). */
 static hu_error_t pm_retire(sqlite3 *db, const hu_prospective_item_t *it,
                             hu_prospective_status_t to, hu_prospective_outcome_t outcome,
                             int attempts, int64_t now, int *changed) {
     int ch = 0;
-    hu_error_t err = hu_prospective_repo_transition(db, it, to, outcome, attempts, now, &ch);
+    hu_error_t err = hu_prospective_repo_settle(db, it, to, outcome, attempts, now, &ch);
     if (changed)
         *changed = ch;
-    if (err == HU_OK && ch > 0 && it->cue_kind == HU_PM_CUE_TIME && to != HU_PM_PENDING)
-        (void)hu_prospective_repo_sync_source(db, it, to, now);
+    if (err != HU_OK) /* the whole unit rolled back; ids and codes only, never text */
+        hu_log_warn("prospective", NULL, "prospective settle of intention %lld (-> %s) failed: %s",
+                    (long long)it->id, hu_prospective_status_str(to), hu_error_string(err));
     return err;
 }
 

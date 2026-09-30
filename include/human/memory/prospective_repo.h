@@ -155,6 +155,16 @@ hu_error_t hu_prospective_repo_each_dated_ledger_row(sqlite3 *db, hu_prospective
 hu_error_t hu_prospective_repo_sync_source(sqlite3 *db, const hu_prospective_item_t *it,
                                            hu_prospective_status_t to, int64_t now);
 
+/* Fix round 2: settle an intention as ONE unit (a SAVEPOINT, so it nests in
+ * an open transaction): hu_prospective_repo_transition, then -- for a time
+ * intention whose transition changed a row and whose `to` is terminal --
+ * hu_prospective_repo_sync_source (ledger retire, bounded sweep, survivor
+ * re-mirror). Any failure rolls the whole unit back and is returned;
+ * *changed (may be NULL) is then 0. */
+hu_error_t hu_prospective_repo_settle(sqlite3 *db, const hu_prospective_item_t *it,
+                                      hu_prospective_status_t to, hu_prospective_outcome_t outcome,
+                                      int attempts, int64_t now, int *changed);
+
 /* Retire ONE ledger row by its own id, scoped to `contact`, with the same
  * mapping hu_prospective_repo_sync_source uses: a pending commitment gets
  * status 'followed_up' / 'canceled' / 'expired' (DONE / CANCELED / EXPIRED)
@@ -168,16 +178,21 @@ hu_error_t hu_prospective_repo_retire_ledger_row(sqlite3 *db, bool is_followup, 
 
 /* Known gap 2: the legacy path marked delayed follow-up `followup_id` sent
  * (hu_superhuman_delayed_followup_mark_sent -- after an F31 send, or after
- * a send whose proposer context merely LISTED it). Its PENDING time twin --
- * the row keyed "followup:<id>", or the pending row of the same contact
- * whose action is this follow-up's mirror text (hu_prospective_mirror_action,
- * compared normalized, as the upsert dedupes) and which is not dated beyond
- * the follow-up's due + HU_PROSPECTIVE_TIME_GRACE_S, e.g. the collapsed F20
- * row keyed "commitment:<N>" -- moves to DONE with NO outcome: the legacy
- * path claims no evidence the reply used it. A SURFACED twin is left alone:
- * hu_prospective_v2_after_delivery judges it. Only prospective_memories is
- * written, so what the legacy path sends is unchanged. No twin is HU_OK
- * with nothing written. *changed (may be NULL) is the number of rows moved. */
+ * a send whose proposer context merely LISTED it). Its time twin moves to
+ * DONE with NO outcome (the legacy path claims no evidence the reply used
+ * it). The twin is a PENDING row of the follow-up's contact that v2 never
+ * surfaced (attempts 0, no surfaced_at: v2 owns every row it has surfaced,
+ * retries included) and is either keyed -- "followup:<id>", or the F20 key
+ * "commitment:<N>" of the same contact's commitment with description ==
+ * topic and deadline == scheduled_at, unbounded like every rowid path, so a
+ * backfill re-anchored row is still found -- or, for a dated follow-up,
+ * has an action equal to the follow-up's mirror text (normalized) and a due
+ * <= the follow-up's due + HU_PROSPECTIVE_TIME_GRACE_S. The settle is the
+ * same unit a v2 settle is (SAVEPOINT): the bounded sweep re-mirrors a
+ * later-dated same-action ledger row as its own open time row; the ledger
+ * itself is left as the legacy path wrote it, so what it sends is
+ * unchanged. Idempotent; no twin is HU_OK with nothing written. *changed
+ * (may be NULL) is the number of rows moved. */
 hu_error_t hu_prospective_repo_settle_followup_twin(sqlite3 *db, int64_t followup_id, int64_t now,
                                                     int *changed);
 

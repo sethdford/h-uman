@@ -1032,6 +1032,162 @@ static void repo_legacy_mark_sent_leaves_a_later_dated_same_action_row_open(void
     mem.vtable->deinit(mem.ctx);
 }
 
+/* Fix round 2, I2 (probe P2): the legacy settle runs the same bounded
+ * sweep + survivor re-mirror as a v2 settle. Two "call mom" F20 pairs 14
+ * days apart collapse into commitment:1; marking the first follow-up sent
+ * closes commitment:1 AND gives the second pair a fresh open row keyed by
+ * its own id with its own due. The ledger is the legacy path's: only the
+ * row it marked moved (OFF stays byte-identical). */
+static void repo_legacy_mark_sent_remirrors_a_later_sibling(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    for (int i = 0; i < 2; i++) {
+        int64_t due = PM_T0 + i * 14 * PM_D;
+        HU_ASSERT_EQ(hu_superhuman_commitment_store(&mem, &alloc, "+15550000038", 12, "call mom", 8,
+                                                    "me", 2, due),
+                     HU_OK);
+        HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, "+15550000038", 12,
+                                                             "call mom", 8, due, "me", 2),
+                     HU_OK);
+    }
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories"), (int64_t)1);
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_mark_sent(&mem, 1), HU_OK);
+    char s[64];
+    q_text(db, "SELECT status FROM prospective_memories WHERE trigger_value='commitment:1'", s,
+           sizeof(s));
+    HU_ASSERT_STR_EQ(s, "done");
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE "
+                           "trigger_value='commitment:2' AND status='pending' AND "
+                           "due_at=1791209600"),
+                 (int64_t)1);
+    q_text(db,
+           "SELECT (SELECT group_concat(status) FROM (SELECT status FROM commitments ORDER BY id))"
+           " || '/' || (SELECT group_concat(sent) FROM (SELECT sent FROM delayed_followups ORDER "
+           "BY id))",
+           s, sizeof(s));
+    HU_ASSERT_STR_EQ(s, "pending,pending/1,0");
+    /* idempotent: the ledger row is already sent, nothing moves again */
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_mark_sent(&mem, 1), HU_OK);
+    int changed = -1;
+    HU_ASSERT_EQ(hu_prospective_repo_settle_followup_twin(db, 1, PM_T0, &changed), HU_OK);
+    HU_ASSERT_EQ(changed, 0);
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE status='pending'"),
+                 (int64_t)1);
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* Fix round 2, minor P3: after_delivery judged the surfaced row IGNORED and
+ * put it back to pending for its retry (attempts 1). A later legacy
+ * mark-sent must not close it: v2 owns every row it has ever surfaced. */
+static void repo_legacy_mark_sent_skips_a_twin_v2_ever_surfaced(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    const char *desc = "call the dentist";
+    HU_ASSERT_EQ(hu_superhuman_commitment_store(&mem, &alloc, "+15550000039", 12, desc,
+                                                strlen(desc), "me", 2, PM_T0),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, "+15550000039", 12, desc,
+                                                         strlen(desc), PM_T0, "me", 2),
+                 HU_OK);
+    hu_prospective_item_t it;
+    open_item(&alloc, db, "+15550000039", desc, &it);
+    HU_ASSERT_EQ(hu_prospective_repo_transition(db, &it, HU_PM_SURFACED, HU_PM_OUTCOME_NONE, 0,
+                                                PM_T0 + 60, NULL),
+                 HU_OK);
+    static const char reply[] = "sounds good";
+    HU_ASSERT_EQ(hu_prospective_v2_after_delivery(&alloc, db, HU_PM_CUE_TIME, "+15550000039", 12,
+                                                  reply, sizeof(reply) - 1, PM_T0 + 120, NULL),
+                 HU_OK);
+    char s[64];
+    q_text(db, "SELECT status || '/' || attempts FROM prospective_memories", s, sizeof(s));
+    HU_ASSERT_STR_EQ(s, "pending/1"); /* ignored: back for its retry */
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_mark_sent(&mem, 1), HU_OK);
+    q_text(db, "SELECT status || '/' || attempts FROM prospective_memories", s, sizeof(s));
+    HU_ASSERT_STR_EQ(s, "pending/1"); /* the retry survives the legacy send */
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* Fix round 2, minor (undated): an undated ledger row (deadline 0) is out
+ * of every bound -- never swept by text -- and a follow-up with no
+ * scheduled_at gets key/F20-key matching only, never the action match. */
+static void repo_undated_rows_are_out_of_bound(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_EQ(
+        hu_superhuman_commitment_store(&mem, &alloc, "+15550000040", 12, "call mom", 8, "me", 2, 0),
+        HU_OK); /* #1: undated, never mirrored */
+    HU_ASSERT_EQ(hu_superhuman_commitment_store(&mem, &alloc, "+15550000040", 12, "call mom", 8,
+                                                "me", 2, PM_T0),
+                 HU_OK); /* #2: keys the row */
+    HU_ASSERT_EQ(sqlite3_exec(db,
+                              "INSERT INTO delayed_followups(contact_id,topic,scheduled_at,sent) "
+                              "VALUES('+15550000040','call mom',0,0)",
+                              NULL, NULL, NULL),
+                 SQLITE_OK);
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_mark_sent(&mem, 1), HU_OK);
+    char s[64];
+    q_text(db, "SELECT status FROM prospective_memories WHERE trigger_value='commitment:2'", s,
+           sizeof(s));
+    HU_ASSERT_STR_EQ(s, "pending"); /* an undated follow-up proves nothing by its words */
+    hu_prospective_item_t it;
+    open_item(&alloc, db, "+15550000040", "call mom", &it);
+    settle(db, &it, HU_PM_DONE, PM_T0 + 60);
+    q_text(db, "SELECT group_concat(status) FROM (SELECT status FROM commitments ORDER BY id)", s,
+           sizeof(s));
+    HU_ASSERT_STR_EQ(s, "pending,followed_up"); /* the undated #1 is not swept */
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* Fix round 2, minor (atomicity): settle + ledger sync + re-mirror are one
+ * unit. A ledger write that fails (a test-only trigger) rolls the whole
+ * unit back -- the intention stays open, nothing half-applied -- and the
+ * error is returned, not swallowed. */
+static void repo_settle_is_one_unit(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_EQ(hu_superhuman_commitment_store(&mem, &alloc, "+15550000041", 12,
+                                                "renew the passport", 18, "me", 2, PM_T0),
+                 HU_OK);
+    HU_ASSERT_EQ(sqlite3_exec(db,
+                              "CREATE TRIGGER t_boom BEFORE UPDATE ON commitments BEGIN "
+                              "SELECT RAISE(ABORT, 'injected'); END;",
+                              NULL, NULL, NULL),
+                 SQLITE_OK);
+    hu_prospective_item_t it;
+    open_item(&alloc, db, "+15550000041", "renew the passport", &it);
+    int changed = -1;
+    HU_ASSERT_NEQ(
+        hu_prospective_repo_settle(db, &it, HU_PM_DONE, HU_PM_OUTCOME_NONE, 0, PM_T0, &changed),
+        HU_OK);
+    HU_ASSERT_EQ(changed, 0);
+    char s[64];
+    q_text(db, "SELECT status || '/' || fired FROM prospective_memories", s, sizeof(s));
+    HU_ASSERT_STR_EQ(s, "pending/0"); /* rolled back with the failed sync */
+    HU_ASSERT_TRUE(sqlite3_get_autocommit(db) != 0);
+    /* through the v2 delivery path: the error propagates, the row stays */
+    HU_ASSERT_EQ(hu_prospective_repo_transition(db, &it, HU_PM_SURFACED, HU_PM_OUTCOME_NONE, 0,
+                                                PM_T0 + 60, NULL),
+                 HU_OK);
+    static const char reply[] = "did you renew the passport?";
+    HU_ASSERT_NEQ(hu_prospective_v2_after_delivery(&alloc, db, HU_PM_CUE_TIME, "+15550000041", 12,
+                                                   reply, sizeof(reply) - 1, PM_T0 + 120, NULL),
+                  HU_OK);
+    q_text(db, "SELECT status FROM prospective_memories", s, sizeof(s));
+    HU_ASSERT_STR_EQ(s, "surfaced");
+    HU_ASSERT_EQ(sqlite3_exec(db, "DROP TRIGGER t_boom", NULL, NULL, NULL), SQLITE_OK);
+    HU_ASSERT_EQ(
+        hu_prospective_repo_settle(db, &it, HU_PM_DONE, HU_PM_OUTCOME_NONE, 0, PM_T0, &changed),
+        HU_OK);
+    HU_ASSERT_EQ(changed, 1);
+    q_text(db, "SELECT status FROM commitments", s, sizeof(s));
+    HU_ASSERT_STR_EQ(s, "followed_up");
+    mem.vtable->deinit(mem.ctx);
+}
+
 void run_prospective_repo_sqlite_tests(void) {
     HU_TEST_SUITE("prospective repo");
     HU_RUN_TEST(ensure_schema_adds_typed_columns_and_maps_fired);
@@ -1058,6 +1214,10 @@ void run_prospective_repo_sqlite_tests(void) {
     HU_RUN_TEST(repo_sync_source_f20_twin_retire_is_bounded);
     HU_RUN_TEST(repo_legacy_mark_sent_skips_a_surfaced_twin);
     HU_RUN_TEST(repo_legacy_mark_sent_leaves_a_later_dated_same_action_row_open);
+    HU_RUN_TEST(repo_legacy_mark_sent_remirrors_a_later_sibling);
+    HU_RUN_TEST(repo_legacy_mark_sent_skips_a_twin_v2_ever_surfaced);
+    HU_RUN_TEST(repo_undated_rows_are_out_of_bound);
+    HU_RUN_TEST(repo_settle_is_one_unit);
 }
 
 #else

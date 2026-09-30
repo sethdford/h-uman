@@ -1148,6 +1148,35 @@ static void v2_backfill_counts_an_unretirable_long_contact(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
+/* Fix round 2, I1 (probe P1): the backfill re-anchors a 5-day-overdue F20
+ * row keyed commitment:1 to due=now, beyond the follow-up's due + grace, so
+ * neither the follow-up key nor the bounded action match finds it. The F20
+ * key does (the commitment of the same contact with description == topic
+ * and deadline == scheduled_at): the legacy mark-sent settles it. */
+static void v2_backfill_reanchored_f20_twin_settles_on_legacy_mark_sent(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    char sql[512];
+    snprintf(sql, sizeof(sql),
+             "INSERT INTO commitments(contact_id,description,who,deadline,status,created_at) "
+             "VALUES('" C1 "','call mom','me',%lld,'pending',1);"
+             "INSERT INTO delayed_followups(contact_id,topic,scheduled_at,sent) VALUES"
+             "('" C1 "','call mom',%lld,0)",
+             (long long)(NOW - 5 * 86400), (long long)(NOW - 5 * 86400));
+    HU_ASSERT_EQ(sqlite3_exec(db, sql, NULL, NULL, NULL), SQLITE_OK);
+    hu_prospective_backfill_counts_t b;
+    HU_ASSERT_EQ(hu_prospective_v2_backfill(&alloc, &mem, NOW, true, &b), HU_OK);
+    HU_ASSERT_EQ(q_int(db, "SELECT due_at FROM prospective_memories WHERE "
+                           "trigger_value='commitment:1' AND status='pending'"),
+                 NOW); /* re-anchored */
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_mark_sent(&mem, 1), HU_OK);
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE "
+                           "trigger_value='commitment:1' AND status='done' AND outcome IS NULL"),
+                 (int64_t)1);
+    mem.vtable->deinit(mem.ctx);
+}
+
 /* The boundary is "more than 14 days": exactly 14 days overdue re-anchors. */
 static void v2_backfill_fourteen_day_boundary(void) {
     hu_allocator_t alloc = hu_system_allocator();
@@ -1243,6 +1272,7 @@ void run_prospective_v2_tests(void) {
     HU_RUN_TEST(v2_backfill_contact_promises_rerun_later_and_retire_by_id);
     HU_RUN_TEST(v2_backfill_expired_import_retires_its_ledger_twins);
     HU_RUN_TEST(v2_backfill_counts_an_unretirable_long_contact);
+    HU_RUN_TEST(v2_backfill_reanchored_f20_twin_settles_on_legacy_mark_sent);
     HU_RUN_TEST(v2_backfill_fourteen_day_boundary);
     HU_RUN_TEST(v2_backfill_failure_midway_writes_nothing_and_zeroes_counts);
 }

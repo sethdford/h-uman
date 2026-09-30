@@ -337,7 +337,8 @@ static const char k_pm_key_exists[] =
  * (`pm_normalize_action`) on each candidate that already normalizes the
  * input, then compare in C. One normalizer, two call sites, no drift. */
 static const char k_pm_open_candidates[] =
-    "SELECT action, trigger_value, attempts, due_at, status FROM prospective_memories WHERE "
+    "SELECT action, trigger_value, attempts, due_at, status, surfaced_at FROM "
+    "prospective_memories WHERE "
     "cue_kind = 'time' AND contact_id = ?1 AND status IN ('pending', 'surfaced')";
 
 static const char k_pm_insert_time[] =
@@ -579,7 +580,8 @@ static bool pm_parse_source_key(const char *key, const char *prefix, int64_t *id
 /* Unsent follow-ups of a contact with this exact topic, due within the
  * bound (?3). Shared by the text path and the F20 twin retire. */
 static const char k_pm_retire_topic[] = "UPDATE delayed_followups SET sent = 1 WHERE contact_id = "
-                                        "?1 AND topic = ?2 AND sent = 0 AND scheduled_at <= ?3";
+                                        "?1 AND topic = ?2 AND sent = 0 AND scheduled_at > 0 AND "
+                                        "scheduled_at <= ?3";
 
 static hu_error_t pm_sync_source_by_text(sqlite3 *db, const hu_prospective_item_t *it,
                                          const char *ledger, int64_t now) {
@@ -587,7 +589,7 @@ static hu_error_t pm_sync_source_by_text(sqlite3 *db, const hu_prospective_item_
     if (sqlite3_prepare_v2(db,
                            "UPDATE commitments SET status = ?1, followed_up_at = ?2 WHERE "
                            "contact_id = ?3 AND description = ?4 AND status = 'pending' AND "
-                           "deadline <= ?5",
+                           "deadline > 0 AND deadline <= ?5",
                            -1, &st, NULL) != SQLITE_OK)
         return HU_ERR_MEMORY_BACKEND;
     sqlite3_bind_text(st, 1, ledger, -1, SQLITE_STATIC);
@@ -734,8 +736,10 @@ static void pm_note_survivor(pm_survivor_t *sv, bool is_followup, int64_t id, in
     sv->action[sv->action_len] = '\0';
 }
 
-/* Same-action open ledger rows of `contact`: those due <= `bound` into
- * ids (at most `cap`), the rest into the survivor. */
+/* Same-action open ledger rows of `contact`: those dated 0 < due <= `bound`
+ * into ids (at most `cap`; ids NULL: none collected, the whole table read),
+ * those dated beyond into the survivor. An undated row (fix round 2) is in
+ * neither: its words alone never tie it to a dated intention. */
 static hu_error_t pm_sweep_collect(sqlite3 *db, bool is_followup, const char *contact,
                                    const char *norm, int64_t bound, int64_t *ids, size_t cap,
                                    size_t *n, pm_survivor_t *sv) {
@@ -748,7 +752,7 @@ static hu_error_t pm_sweep_collect(sqlite3 *db, bool is_followup, const char *co
     char buf[HU_PROSPECTIVE_MIRROR_CAP];
     char cand[512];
     int rc = SQLITE_DONE;
-    while (*n < cap && (rc = sqlite3_step(st)) == SQLITE_ROW) {
+    while ((!ids || *n < cap) && (rc = sqlite3_step(st)) == SQLITE_ROW) {
         const char *text = (const char *)sqlite3_column_text(st, 1);
         size_t tl = text ? (size_t)sqlite3_column_bytes(st, 1) : 0;
         const char *who = (const char *)sqlite3_column_text(st, 2);
@@ -760,10 +764,10 @@ static hu_error_t pm_sweep_collect(sqlite3 *db, bool is_followup, const char *co
             !pm_mirror_of(is_followup, text, tl, who, wl, buf, &a, &al, cand, sizeof(cand)) ||
             strcmp(cand, norm) != 0)
             continue;
-        if (due <= bound)
-            ids[(*n)++] = sqlite3_column_int64(st, 0);
-        else if (due > 0)
+        if (due > bound)
             pm_note_survivor(sv, is_followup, sqlite3_column_int64(st, 0), due, a, al);
+        else if (due > 0 && ids)
+            ids[(*n)++] = sqlite3_column_int64(st, 0);
     }
     sqlite3_finalize(st);
     return rc == SQLITE_ROW || rc == SQLITE_DONE ? HU_OK : HU_ERR_MEMORY_BACKEND;
@@ -775,9 +779,10 @@ static hu_error_t pm_sweep_collect(sqlite3 *db, bool is_followup, const char *co
  * mirror, on the same connection, now that the collapsed row is terminal
  * (pm_retire's transition ran first). A later sibling of THAT one still
  * collapses into it (F1), as it did before. No due_at: no bound can be
- * drawn, so nothing is swept. */
+ * drawn, so nothing is swept. `retire` false (the legacy settle, fix round
+ * 2): the ledger is the legacy path's, so only the survivor is re-mirrored. */
 static hu_error_t pm_sweep_ledger(sqlite3 *db, const hu_prospective_item_t *it,
-                                  hu_prospective_status_t to, int64_t now) {
+                                  hu_prospective_status_t to, int64_t now, bool retire) {
     if (it->due_at <= 0)
         return HU_OK;
     char norm[512];
@@ -792,7 +797,7 @@ static hu_error_t pm_sweep_ledger(sqlite3 *db, const hu_prospective_item_t *it,
         do {
             int64_t ids[PM_SWEEP_BATCH];
             hu_error_t e = pm_sweep_collect(db, fu, it->contact_id, norm, pm_due_bound(it->due_at),
-                                            ids, PM_SWEEP_BATCH, &n, &sv);
+                                            retire ? ids : NULL, PM_SWEEP_BATCH, &n, &sv);
             moved = 0;
             for (size_t k = 0; e == HU_OK && k < n; k++) {
                 int ch = 0;
@@ -827,15 +832,84 @@ hu_error_t hu_prospective_repo_sync_source(sqlite3 *db, const hu_prospective_ite
                                                     strlen(it->contact_id), to, now, NULL);
     else
         err = pm_sync_source_by_text(db, it, ledger, now);
-    return err == HU_OK ? pm_sweep_ledger(db, it, to, now) : err;
+    return err == HU_OK ? pm_sweep_ledger(db, it, to, now, true) : err;
 }
 
-/* Known gap 2 helpers. The follow-up's contact (into it->contact_id), its
- * mirror text normalized into `norm`, its due (into it->due_at) and its
- * source key; false: no such row, a contact too long for the item, or a
- * skipped mirror (no twin). */
-static bool pm_followup_twin_of(sqlite3 *db, int64_t followup_id, hu_prospective_item_t *it,
-                                char *norm, size_t cap, hu_error_t *err) {
+/* Fix round 2 (atomicity): the transition, the ledger sync / sweep and the
+ * survivor re-mirror are one unit. A SAVEPOINT, not BEGIN, so the unit nests
+ * inside a transaction a caller may already hold (the backfill's). */
+static hu_error_t pm_unit(sqlite3 *db, const hu_prospective_item_t *it, hu_prospective_status_t to,
+                          hu_prospective_outcome_t outcome, int attempts, int64_t now, bool legacy,
+                          int *changed) {
+    *changed = 0;
+    if (sqlite3_exec(db, "SAVEPOINT pm_settle", NULL, NULL, NULL) != SQLITE_OK)
+        return HU_ERR_MEMORY_BACKEND;
+    int ch = 0;
+    hu_error_t err = hu_prospective_repo_transition(db, it, to, outcome, attempts, now, &ch);
+    if (err == HU_OK && ch > 0 && it->cue_kind == HU_PM_CUE_TIME && pm_ledger_status(to))
+        err = legacy ? pm_sweep_ledger(db, it, to, now, false)
+                     : hu_prospective_repo_sync_source(db, it, to, now);
+    if (err != HU_OK) {
+        (void)sqlite3_exec(db, "ROLLBACK TO pm_settle; RELEASE pm_settle", NULL, NULL, NULL);
+        return err;
+    }
+    if (sqlite3_exec(db, "RELEASE pm_settle", NULL, NULL, NULL) != SQLITE_OK) {
+        (void)sqlite3_exec(db, "ROLLBACK TO pm_settle; RELEASE pm_settle", NULL, NULL, NULL);
+        return HU_ERR_MEMORY_BACKEND;
+    }
+    *changed = ch;
+    return HU_OK;
+}
+
+hu_error_t hu_prospective_repo_settle(sqlite3 *db, const hu_prospective_item_t *it,
+                                      hu_prospective_status_t to, hu_prospective_outcome_t outcome,
+                                      int attempts, int64_t now, int *changed) {
+    int ch = 0;
+    if (changed)
+        *changed = 0;
+    if (!db || !it)
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_error_t err = pm_unit(db, it, to, outcome, attempts, now, false, &ch);
+    if (changed)
+        *changed = ch;
+    return err;
+}
+
+/* Known gap 2: what identifies a legacy follow-up's time twin. */
+#define PM_F20_MAX 8
+typedef struct pm_twin_q {
+    hu_prospective_item_t it; /* contact_id, trigger_value = "followup:<id>" */
+    char norm[512];           /* the follow-up's mirror text, normalized */
+    int64_t fu_due;           /* its scheduled_at */
+    int64_t f20[PM_F20_MAX];  /* fix round 2, I1: its F20 commitments */
+    size_t f20_n;
+} pm_twin_q_t;
+
+/* I1: the F20 keeper and the promise keeper write ONE desc_buf and ONE
+ * deadline to both ledgers, so the follow-up's paired commitment is the
+ * same contact's commitment with description == topic and deadline ==
+ * scheduled_at. Its "commitment:<id>" key names the twin whatever the time
+ * row's due became (the backfill re-anchors an overdue one to `now`). */
+static hu_error_t pm_twin_f20(sqlite3 *db, pm_twin_q_t *q, const char *topic) {
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(db,
+                           "SELECT id FROM commitments WHERE contact_id = ?1 AND description = ?2 "
+                           "AND deadline = ?3 ORDER BY id",
+                           -1, &st, NULL) != SQLITE_OK)
+        return HU_ERR_MEMORY_BACKEND;
+    sqlite3_bind_text(st, 1, q->it.contact_id, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 2, topic, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(st, 3, q->fu_due);
+    int rc = SQLITE_DONE;
+    while (q->f20_n < PM_F20_MAX && (rc = sqlite3_step(st)) == SQLITE_ROW)
+        q->f20[q->f20_n++] = sqlite3_column_int64(st, 0);
+    sqlite3_finalize(st);
+    return rc == SQLITE_ROW || rc == SQLITE_DONE ? HU_OK : HU_ERR_MEMORY_BACKEND;
+}
+
+/* The follow-up's contact, mirror text, due, key and F20 commitments; false:
+ * no such row, a contact or topic too long, or a skipped mirror (no twin). */
+static bool pm_followup_twin_of(sqlite3 *db, int64_t followup_id, pm_twin_q_t *q, hu_error_t *err) {
     *err = HU_OK;
     sqlite3_stmt *st = NULL;
     if (sqlite3_prepare_v2(db,
@@ -848,6 +922,7 @@ static bool pm_followup_twin_of(sqlite3 *db, int64_t followup_id, hu_prospective
     sqlite3_bind_int64(st, 1, followup_id);
     int rc = sqlite3_step(st);
     bool ok = false;
+    char topic[512];
     if (rc == SQLITE_ROW) {
         const char *c = (const char *)sqlite3_column_text(st, 0);
         size_t cl = c ? (size_t)sqlite3_column_bytes(st, 0) : 0;
@@ -858,61 +933,81 @@ static bool pm_followup_twin_of(sqlite3 *db, int64_t followup_id, hu_prospective
         char buf[HU_PROSPECTIVE_MIRROR_CAP];
         const char *a = NULL;
         size_t al = 0;
-        ok = cl > 0 && cl < sizeof(it->contact_id) && tl > 0 &&
-             pm_mirror_of(true, t, tl, w, wl, buf, &a, &al, norm, cap);
-        if (ok)
-            pm_col_copy(st, 0, it->contact_id, sizeof(it->contact_id));
-        it->due_at = sqlite3_column_int64(st, 3);
+        ok = cl > 0 && cl < sizeof(q->it.contact_id) && tl > 0 && tl < sizeof(topic) &&
+             pm_mirror_of(true, t, tl, w, wl, buf, &a, &al, q->norm, sizeof(q->norm));
+        if (ok) {
+            pm_col_copy(st, 0, q->it.contact_id, sizeof(q->it.contact_id));
+            pm_col_copy(st, 1, topic, sizeof(topic));
+        }
+        q->fu_due = sqlite3_column_int64(st, 3);
     } else if (rc != SQLITE_DONE) {
         *err = HU_ERR_MEMORY_BACKEND;
     }
     sqlite3_finalize(st);
-    snprintf(it->trigger_value, sizeof(it->trigger_value), "followup:%lld", (long long)followup_id);
+    snprintf(q->it.trigger_value, sizeof(q->it.trigger_value), "followup:%lld",
+             (long long)followup_id);
+    if (ok && (*err = pm_twin_f20(db, q, topic)) != HU_OK)
+        ok = false;
     return ok;
 }
 
-/* The first PENDING time row of it->contact_id that is the twin: keyed by
- * it->trigger_value, or -- fix round 1, C2 -- with an action normalizing to
- * `norm` AND not dated beyond the follow-up's grace window (row due <=
- * follow-up due + grace), so a later same-words promise is never closed. A
- * SURFACED twin is skipped (C1): after_delivery owns it, and only it can
- * say whether the reply used the action. Copies the row's stored action and
- * attempts into `it`. */
-static bool pm_find_open_twin(sqlite3 *db, hu_prospective_item_t *it, const char *norm,
-                              hu_error_t *err) {
+static bool pm_twin_keyed(const pm_twin_q_t *q, const char *key) {
+    if (!key)
+        return false;
+    if (strcmp(key, q->it.trigger_value) == 0)
+        return true;
+    int64_t id = 0;
+    if (!pm_parse_source_key(key, "commitment", &id))
+        return false;
+    for (size_t i = 0; i < q->f20_n; i++)
+        if (q->f20[i] == id)
+            return true;
+    return false;
+}
+
+/* The first twin row of q->it.contact_id: PENDING and never surfaced by
+ * v2 (fix round 2, P3: attempts 0, no surfaced_at -- v2 owns a row it has
+ * ever surfaced, retries included), and either keyed (the follow-up's own
+ * key, or I1's F20 commitment key: unbounded, like every rowid path) or --
+ * C2 -- with an action normalizing to the follow-up's mirror text AND not
+ * dated beyond the follow-up's due + grace. An undated follow-up gets the
+ * key matches only. Copies the row's action, attempts and due into q->it. */
+static bool pm_find_open_twin(sqlite3 *db, pm_twin_q_t *q, hu_error_t *err) {
     *err = HU_OK;
     sqlite3_stmt *st = NULL;
     if (sqlite3_prepare_v2(db, k_pm_open_candidates, -1, &st, NULL) != SQLITE_OK) {
         *err = HU_ERR_MEMORY_BACKEND;
         return false;
     }
-    sqlite3_bind_text(st, 1, it->contact_id, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 1, q->it.contact_id, -1, SQLITE_STATIC);
     char cand[512];
     bool found = false;
     int rc = SQLITE_DONE;
     while (!found && (rc = sqlite3_step(st)) == SQLITE_ROW) {
         const char *a = (const char *)sqlite3_column_text(st, 0);
-        const char *key = (const char *)sqlite3_column_text(st, 1);
-        pm_normalize_action(a ? a : "", a ? (size_t)sqlite3_column_bytes(st, 0) : 0, cand,
-                            sizeof(cand));
         const char *status = (const char *)sqlite3_column_text(st, 4);
-        bool keyed = key && strcmp(key, it->trigger_value) == 0;
-        bool dated_in = sqlite3_column_int64(st, 3) <= pm_due_bound(it->due_at);
-        found = status && strcmp(status, "pending") == 0 &&
-                (keyed || (dated_in && strcmp(cand, norm) == 0));
+        if (!a || !status || strcmp(status, "pending") != 0 || sqlite3_column_int(st, 2) > 0 ||
+            sqlite3_column_int64(st, 5) > 0)
+            continue;
+        pm_normalize_action(a, (size_t)sqlite3_column_bytes(st, 0), cand, sizeof(cand));
+        int64_t due = sqlite3_column_int64(st, 3);
+        bool dated_in = q->fu_due > 0 && due <= q->fu_due + HU_PROSPECTIVE_TIME_GRACE_S;
+        found = pm_twin_keyed(q, (const char *)sqlite3_column_text(st, 1)) ||
+                (dated_in && strcmp(cand, q->norm) == 0);
         if (found) {
-            pm_col_copy(st, 0, it->action, sizeof(it->action));
-            it->attempts = sqlite3_column_int(st, 2);
+            pm_col_copy(st, 0, q->it.action, sizeof(q->it.action));
+            q->it.attempts = sqlite3_column_int(st, 2);
+            q->it.due_at = due;
         }
     }
     if (!found && rc != SQLITE_DONE)
         *err = HU_ERR_MEMORY_BACKEND;
     sqlite3_finalize(st);
-    return found && it->action[0];
+    return found && q->it.action[0];
 }
 
-/* Bounded: F1 keeps one open row per (contact, normalized action); the key
- * and the action may still name two rows (a keyed row re-worded later). */
+/* Bounded: F1 keeps one open row per (contact, normalized action); the keys
+ * and the action may still name more than one row. */
 #define PM_TWIN_PASSES 4
 
 hu_error_t hu_prospective_repo_settle_followup_twin(sqlite3 *db, int64_t followup_id, int64_t now,
@@ -921,22 +1016,21 @@ hu_error_t hu_prospective_repo_settle_followup_twin(sqlite3 *db, int64_t followu
         *changed = 0;
     if (!db || followup_id <= 0)
         return HU_ERR_INVALID_ARGUMENT;
-    hu_prospective_item_t it;
-    memset(&it, 0, sizeof(it));
-    it.cue_kind = HU_PM_CUE_TIME;
-    char norm[512];
+    pm_twin_q_t q;
+    memset(&q, 0, sizeof(q));
+    q.it.cue_kind = HU_PM_CUE_TIME;
     hu_error_t err = HU_OK;
-    if (!pm_followup_twin_of(db, followup_id, &it, norm, sizeof(norm), &err))
+    if (!pm_followup_twin_of(db, followup_id, &q, &err))
         return err;
     for (int pass = 0; pass < PM_TWIN_PASSES; pass++) {
-        if (!pm_find_open_twin(db, &it, norm, &err))
+        if (!pm_find_open_twin(db, &q, &err))
             return err;
-        int ch = 0;
         /* DONE, no outcome: the legacy path may only have LISTED the
-         * follow-up in the proposer's context, so there is no evidence the
-         * reply used it (fix round 1, C1). */
-        err = hu_prospective_repo_transition(db, &it, HU_PM_DONE, HU_PM_OUTCOME_NONE, it.attempts,
-                                             now, &ch);
+         * follow-up, so there is no evidence the reply used it (C1). The
+         * same unit as a v2 settle (I2): the bounded sweep re-mirrors a
+         * later-dated sibling; the ledger itself stays the legacy path's. */
+        int ch = 0;
+        err = pm_unit(db, &q.it, HU_PM_DONE, HU_PM_OUTCOME_NONE, q.it.attempts, now, true, &ch);
         if (err != HU_OK || ch == 0)
             return err;
         if (changed)
