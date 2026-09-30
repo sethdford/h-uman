@@ -21,6 +21,7 @@
 #include "human/memory.h"
 #include "human/memory/proactive_decisions_repo.h" /* C5 Part A: decision log */
 #include "human/provider.h"
+#include "human/providers/chat_oneshot.h"
 #include "human/reflection.h" /* T8: pull unsurfaced patterns into bundle */
 #include <ctype.h>
 #include <stdatomic.h>
@@ -663,60 +664,12 @@ static hu_error_t init_proposer_call_llm(hu_allocator_t *alloc, struct hu_provid
                                          const char *sys_prompt, const char *user_msg,
                                          const char *model, char **out_response,
                                          size_t *out_response_len) {
-    *out_response = NULL;
-    *out_response_len = 0;
-
-    /* Prefer the structured chat() vtable. Some test mocks only set
-     * chat_with_system(); fall back so we don't break those callers. */
-    if (provider->vtable && provider->vtable->chat) {
-        hu_chat_message_t msgs[2];
-        memset(msgs, 0, sizeof(msgs));
-        msgs[0].role = HU_ROLE_SYSTEM;
-        msgs[0].content = sys_prompt;
-        msgs[0].content_len = strlen(sys_prompt);
-        msgs[1].role = HU_ROLE_USER;
-        msgs[1].content = user_msg;
-        msgs[1].content_len = strlen(user_msg);
-
-        hu_chat_request_t req;
-        memset(&req, 0, sizeof(req));
-        req.messages = msgs;
-        req.messages_count = 2;
-        req.model = model;
-        req.model_len = strlen(model);
-        req.temperature = 0.2;
-        req.max_tokens = 512;    /* compact JSON; not a long-form generation */
-        req.thinking_budget = 0; /* deterministic classifier — no thinking */
-        req.response_format = "json_object";
-        req.response_format_len = strlen("json_object");
-
-        hu_chat_response_t resp;
-        memset(&resp, 0, sizeof(resp));
-        hu_error_t err =
-            provider->vtable->chat(provider->ctx, alloc, &req, model, strlen(model), 0.2, &resp);
-        if (err == HU_OK && resp.content && resp.content_len > 0) {
-            char *buf = (char *)alloc->alloc(alloc->ctx, resp.content_len + 1);
-            if (buf) {
-                memcpy(buf, resp.content, resp.content_len);
-                buf[resp.content_len] = '\0';
-                *out_response = buf;
-                *out_response_len = resp.content_len;
-            } else {
-                err = HU_ERR_OUT_OF_MEMORY;
-            }
-        }
-        hu_chat_response_free(alloc, &resp);
-        return err;
-    }
-
-    /* Fallback path for providers/mocks without structured chat(). The
-     * truncation risk above DOES apply here, but it's the only path
-     * available — better to attempt than to hard-fail. */
-    if (!provider->vtable || !provider->vtable->chat_with_system)
-        return HU_ERR_NOT_SUPPORTED;
-    return provider->vtable->chat_with_system(provider->ctx, alloc, sys_prompt, strlen(sys_prompt),
-                                              user_msg, strlen(user_msg), model, strlen(model), 0.2,
-                                              out_response, out_response_len);
+    /* max_tokens 512, thinking_budget 0, json_object: see the comment above. */
+    const hu_chat_oneshot_opts_t opts = {
+        .temperature = 0.2, .max_tokens = 512, .json_object = true};
+    return hu_provider_chat_oneshot(alloc, provider, model, strlen(model), sys_prompt,
+                                    strlen(sys_prompt), user_msg, strlen(user_msg), &opts,
+                                    out_response, out_response_len);
 }
 #endif /* !HU_IS_TEST */
 

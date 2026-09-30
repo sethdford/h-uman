@@ -592,6 +592,8 @@ static const hu_command_t commands[] = {
     {"sandbox", "Show sandbox status and backends", cmd_sandbox, HU_CLI_HELP_SUMMARY},
     {"migrate", "Migrate memory backends", cmd_migrate, HU_CLI_HELP_SUMMARY},
     {"memory", "Memory operations", cmd_memory, HU_CLI_HELP_BARE},
+    {"prospective", "Prospective memory v2 probe and backfill (needs --db)", cmd_prospective,
+     HU_CLI_HELP_BARE},
     {"persona", "Create and manage persona profiles", cmd_persona, HU_CLI_HELP_SELF},
 #ifdef HU_ENABLE_CARTESIA
     {"voice", "Voice cloning and TTS management", cmd_voice, HU_CLI_HELP_BARE},

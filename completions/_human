@@ -54,6 +54,7 @@ _human() {
                 commitments:Sample and score detected commitments
                 voice:Voice cloning and TTS
                 plugins:Plugin management
+                prospective:Prospective memory v2 probe, init and backfill (needs --db)
                 pwa:PWA browser automation
                 sandbox:Sandbox management
                 eval:Run evaluation harness
@@ -164,6 +165,13 @@ _human() {
                 update)
                     _describe 'update option' '(
                         --check:Check only, do not update
+                    )'
+                    ;;
+                prospective)
+                    _describe 'prospective subcommand' '(
+                        probe:Run the fire-time check on a memory db
+                        init:Create or migrate the prospective tables
+                        backfill:One-time import of dated ledger items
                     )'
                     ;;
                 persona)
