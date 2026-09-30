@@ -149,6 +149,35 @@ def test_sample_moments_excludes_the_loopback_handle_normalized():
     assert m == [("+15550000002", "c")]
 
 
+def test_sample_moments_skips_texts_argv_cannot_carry_and_refills():
+    """M3: a NUL (or a lone surrogate) can't be one argv element. The moment is skipped
+    before the per-contact cap, so the next eligible one takes its place."""
+    assert eg.argv_safe("plain") and not eg.argv_safe("a\x00b") and not eg.argv_safe("\ud800")
+    per = {"+15550000001": [msg(1, "nul\x00here"), msg(2, "lone \ud800"), msg(3, "a"),
+                            msg(4, "b"), msg(5, "c")]}
+    assert eg.sample_moments(per, NOW, n=3, per_contact_cap=3) == [
+        ("+15550000001", "a"), ("+15550000001", "b"), ("+15550000001", "c")]
+
+
+def test_a_nul_text_is_skipped_end_to_end_and_the_run_still_reaches_40(tmp_path, monkeypatch):
+    per = corpus()
+    per["+15550000000"].insert(0, msg(0.01, "did salim\x00 call"))  # the newest moment
+    argv = setup(tmp_path, monkeypatch, per)
+    assert eg.main(argv) == 0
+    assert result_of(tmp_path)["n"] == 40
+    assert len(open(tmp_path / "fake.log").read().split()) == 80
+
+
+def test_probe_backstop_refuses_cleanly_on_a_nul(tmp_path, monkeypatch):
+    """Should a NUL ever reach probe (sampler bypassed), subprocess's ValueError is a
+    failed probe -> exit 2, nothing written, copy deleted; never a traceback."""
+    argv = setup(tmp_path, monkeypatch, corpus())
+    real = eg.sample_moments
+    monkeypatch.setattr(eg, "sample_moments", lambda *a, **k: [
+        (h, t + "\x00") if i == 0 else (h, t) for i, (h, t) in enumerate(real(*a, **k))])
+    assert_refused_and_clean(tmp_path, eg.main(argv))
+
+
 def test_sample_moments_is_deterministic_on_ties():
     a = {"+15550000002": [msg(1, "z"), msg(1, "y")], "+15550000001": [msg(1, "x")]}
     b = dict(reversed(list(a.items())))

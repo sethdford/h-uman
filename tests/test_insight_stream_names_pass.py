@@ -243,6 +243,30 @@ def test_run_names_import_failure_exits_2(tmp_path, monkeypatch):
     assert not os.path.exists(json.load(open(tmp_path / "fake.json"))["argv"][2])
 
 
+def test_run_names_import_of_nothing_says_nothing_written(tmp_path, monkeypatch, capsys):
+    a = _args(tmp_path, monkeypatch)
+    monkeypatch.setenv("FAKE_RC", "1")
+    monkeypatch.setenv("FAKE_ENTITIES", "0")
+    monkeypatch.setattr(ins, "call_model", lambda *x, **k: MODEL)
+    assert ins.run_names(a, {}) == 2
+    err = capsys.readouterr().err
+    assert "nothing written" in err and "partially" not in err
+
+
+def test_run_names_import_timeout_never_claims_nothing_written(tmp_path, monkeypatch, capsys):
+    """M2: run_import returns (None, -1) after killing a child that commits per row, so
+    the graph may hold some of the names: never say "nothing written"."""
+    a = _args(tmp_path, monkeypatch)
+    monkeypatch.setattr(ins, "call_model", lambda *x, **k: MODEL)
+    monkeypatch.setattr(ins.cn, "run_import", lambda *x, **k: (None, -1))
+    assert ins.run_names(a, {}) == 2
+    err = capsys.readouterr().err
+    assert "nothing written" not in err and "may be partially updated" in err
+    man = json.load(open(next((tmp_path / "manifests").glob("names-manifest-*.json"))))
+    assert man["import_failed"] == 1
+    assert list((tmp_path / "names").glob("*.jsonl")) == []
+
+
 def test_run_names_unparseable_import_output_is_a_failure(tmp_path, monkeypatch):
     a = _args(tmp_path, monkeypatch)
     a.human_bin = str(tmp_path / "garbage")  # exits 0 but prints no JSON counts

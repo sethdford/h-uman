@@ -256,8 +256,10 @@ def test_write_backs_up_after_the_model_phase_and_right_before_the_import(env, m
     real_backup, real_import = rt.backup, rt.cn.run_import
     monkeypatch.setattr(rt, "backup", lambda *a: order.append("backup") or real_backup(*a))
     monkeypatch.setattr(rt, "call_model", lambda *a, **k: order.append("model") or answer(*a, **k))
+    modes = []
     monkeypatch.setattr(rt.cn, "run_import", lambda b, gdb, *a, **k: order.append(
-        "import" if gdb == str(g) else "probe") or real_import(b, gdb, *a, **k))
+        "import" if gdb == str(g) else "probe") or (gdb == str(g) and modes.append(
+            stat.S_IMODE(os.stat(a[0]).st_mode))) or real_import(b, gdb, *a, **k))
     before = digest(g)
     assert rt.main(argv + ["--write"]) == 0
     assert order == ["probe", "model", "model", "backup", "import"]
@@ -268,8 +270,8 @@ def test_write_backs_up_after_the_model_phase_and_right_before_the_import(env, m
     assert ro.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     (log,) = fake_calls(tmp_path)
     assert log["argv"][:2] == ["memory", "import-facts"] and log["graph"] == str(g)
-    jsonl = log["argv"][2]
-    assert stat.S_IMODE(os.stat(jsonl).st_mode) == 0o600
+    assert modes == [0o600]  # private while it exists (deleted after the import)
+    assert not os.path.exists(log["argv"][2])
     lines = [json.loads(ln) for ln in log["lines"]]
     assert {(ln["contact"], ln["name"], ln["type"]) for ln in lines} == {
         (C, "Salim", "person"), (C, "the lake house", "topic"), ("self", "Vanguard", "org")}
@@ -406,6 +408,35 @@ def test_import_timeout_never_claims_unchanged(env, monkeypatch, capsys):
     assert "unchanged" not in err and "partially retyped" in err
     assert str(bk) in err and f"rm -f {g}-wal {g}-shm" in err
     assert err.index(f"rm -f {g}-wal") < err.index(f"cp {bk} {g}")  # wal gone before copy
+
+
+def test_write_deletes_its_jsonl_after_the_import(env, monkeypatch):
+    """M1: the retype JSONL holds contact handles and names; it is read by the importer
+    and then removed, like the nightly --names file."""
+    tmp_path, _, argv = env
+    monkeypatch.setattr(rt, "call_model", answer)
+    assert rt.main(argv + ["--write"]) == 0
+    (call,) = fake_calls(tmp_path)
+    assert call["lines"]  # the importer did read a non-empty file...
+    assert list((tmp_path / "work").glob("retype-*.jsonl")) == []  # ...and it is gone
+
+
+def test_write_deletes_its_jsonl_when_the_import_raises(env, monkeypatch):
+    tmp_path, g, argv = env
+    real_import = rt.cn.run_import
+    seen = []
+
+    def boom(b, gdb, path, *a, **k):
+        if gdb != str(g):
+            return real_import(b, gdb, path, *a, **k)  # the capability probe
+        seen.append(os.path.exists(path))
+        raise RuntimeError("killed")
+    monkeypatch.setattr(rt.cn, "run_import", boom)
+    monkeypatch.setattr(rt, "call_model", answer)
+    with pytest.raises(RuntimeError):
+        rt.main(argv + ["--write"])
+    assert seen == [True]
+    assert list((tmp_path / "work").glob("retype-*.jsonl")) == []
 
 
 def test_restore_steps_are_complete_and_ordered():

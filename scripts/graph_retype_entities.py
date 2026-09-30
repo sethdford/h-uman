@@ -308,9 +308,15 @@ def main(argv=None):
         counts["backup"] = backup(a.graph_db, a.backup_dir, now)
     except Exception as e:
         return refuse(f"backup failed ({type(e).__name__}: {e})")
-    path = cn.write_jsonl_private(
-        os.path.join(a.work_dir, f"retype-{now.strftime('%Y%m%d-%H%M%S')}.jsonl"), lines)
-    imported, code = cn.run_import(a.human_bin, a.graph_db, path)
+    # The JSONL holds contact handles and names: it never outlives the import, even
+    # when the import raises (same contract as the nightly --names pass).
+    path = os.path.join(a.work_dir, f"retype-{now.strftime('%Y%m%d-%H%M%S')}.jsonl")
+    try:
+        cn.write_jsonl_private(path, lines)
+        imported, code = cn.run_import(a.human_bin, a.graph_db, path)
+    finally:
+        with contextlib.suppress(OSError):
+            os.unlink(path)
     if code != 0 and imported == 0:
         done()  # the CLI ran and exits non-zero only when nothing was imported
         return refuse("`human memory import-facts` imported nothing")

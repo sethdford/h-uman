@@ -98,10 +98,26 @@ def load_inbound(chat_db, since):
     return cq._load_messages(chat_db, since)
 
 
+def argv_safe(text):
+    """Can `text` travel as one argv element? Not with a NUL (C strings end there, and
+    subprocess raises ValueError), nor with a lone surrogate the filesystem encoding
+    can't carry."""
+    if "\x00" in text:
+        return False
+    try:
+        os.fsencode(text)
+    except UnicodeError:
+        return False
+    return True
+
+
 def sample_moments(per_contact, now, n=TARGET_N, days=14, per_contact_cap=8, exclude=()):
     """[(handle, text)] newest first: inbound, non-reaction, non-empty texts from valid
     1:1 handles within `days`, at most `per_contact_cap` per handle, at most `n`.
     `exclude` (the daemon's loopback/self handle) matches after normalization.
+    A text argv can't carry (argv_safe) is skipped BEFORE the cap, so the next eligible
+    moment takes its place: the sample still reaches `n` when enough exist, and the
+    daemon never grounds such a text as one C string anyway.
     Ties break on (handle, text), so the order is deterministic."""
     cutoff = now - dt.timedelta(days=days)
     excluded = cp.normalize_all(exclude)
@@ -111,7 +127,8 @@ def sample_moments(per_contact, now, n=TARGET_N, days=14, per_contact_cap=8, exc
             continue
         mine = [(m["t"], (m.get("text") or "").strip()) for m in msgs
                 if not m["from_me"] and m["t"] >= cutoff
-                and (m.get("atype") or 0) not in REACTIONS and (m.get("text") or "").strip()]
+                and (m.get("atype") or 0) not in REACTIONS and (m.get("text") or "").strip()
+                and argv_safe((m.get("text") or "").strip())]
         mine.sort(key=lambda x: (-x[0].timestamp(), x[1]))
         pool.extend((t, h, text) for t, text in mine[:per_contact_cap])
     pool.sort(key=lambda x: (-x[0].timestamp(), x[1], x[2]))
@@ -154,8 +171,8 @@ def probe(human_bin, graph_copy, mode, contact, text, gates, scratch, timeout=60
     try:
         r = subprocess.run([human_bin, "memory", "ground", "--full", contact, text], env=env,
                            capture_output=True, timeout=timeout)
-    except (OSError, subprocess.TimeoutExpired):
-        return None
+    except (OSError, ValueError, subprocess.TimeoutExpired):  # ValueError: a NUL in argv
+        return None  # (sample_moments skips those; this is the backstop -> clean refusal)
     if r.returncode != 0:
         return None
     got = parse_probe(r.stdout.decode("utf-8", "surrogateescape"))

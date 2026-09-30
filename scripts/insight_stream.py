@@ -1137,7 +1137,9 @@ def import_names(a, man, lines, now):
     its only inspectable output (empty when nothing was kept), so repeated dry runs
     never accumulate an archive. --write with no kept names -> no file and no importer
     call (it would exit 1 on N+E == 0).
-    -> 2 if the import failed (non-zero exit, timeout, or no JSON counts), else 0."""
+    -> 2 if the import failed (non-zero exit, timeout, or no JSON counts), else 0. Only a
+    non-zero exit that reports 0 imported says "nothing written"; a timeout or missing
+    counts says the graph may be partially updated."""
     if not a.write:  # always rewritten, even empty, so it never shows an older run
         cn.write_jsonl_private(os.path.join(a.names_dir, NAMES_DRYRUN_FILE), lines)
         return 0
@@ -1152,8 +1154,13 @@ def import_names(a, man, lines, now):
             os.unlink(path)
     if code != 0 or entities is None:
         man["import_failed"] = 1
+        if code != 0 and entities == 0:  # the CLI ran and exits non-zero only on 0 imported
+            outcome = "nothing written"
+        else:  # timeout (-1: the child was killed after per-row commits), crash, or no
+            # readable counts: never claim the graph is unchanged
+            outcome = "did not finish or reported no counts; graph.db may be partially updated"
         print(f"import failed: `human memory import-facts` exited {code}"
-              f"{'' if entities is not None else ' without JSON counts'}; nothing written",
+              f"{'' if entities is not None else ' without JSON counts'}; {outcome}",
               file=sys.stderr)
         return 2
     man["import_entities"] = entities
@@ -1176,7 +1183,8 @@ def run_names(a, contacts):
        JSONL is deleted; a dry run leaves NAMES_DRYRUN_FILE;
     6. counts-only manifest names-manifest-YYYYMMDD[-dryrun].json;
     7. exit 3 if every attempted contact failed (model error or parse failure);
-       exit 2 if the import failed (nothing written)."""
+       exit 2 if the import failed (after a timeout or missing counts the graph may be
+       partially updated)."""
     import eval_conversation_quality as cq
     if not names_days_ok(a.names_days):
         print(f"refusing: --names-days must be {NAMES_DAYS_RANGE[0]}-{NAMES_DAYS_RANGE[1]} "
