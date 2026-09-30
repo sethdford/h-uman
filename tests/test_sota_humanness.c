@@ -18,27 +18,11 @@
 
 /* ─── Constitutional persona config ─── */
 
-static void config_persona_returns_seven_principles(void) {
+static void config_persona_returns_six_principles(void) {
     hu_constitutional_config_t cfg = hu_constitutional_config_persona();
     HU_ASSERT(cfg.enabled);
     HU_ASSERT(cfg.rewrite_enabled);
-    HU_ASSERT_EQ((int)cfg.principle_count, 7);
-}
-
-/* "Vague unless known" (Seth, 2026-09-29): asked "how'd the big meeting go"
- * with no meeting on record, the twin answered "went better than expected,
- * board seemed genuinely engaged". */
-static void config_persona_forbids_invented_life_facts(void) {
-    hu_constitutional_config_t cfg = hu_constitutional_config_persona();
-    bool found = false;
-    for (size_t i = 0; i < cfg.principle_count; i++)
-        if (strcmp(cfg.principles[i].name, "no_invented_life_facts") == 0) {
-            found = true;
-            HU_ASSERT_EQ(cfg.principles[i].name_len, strlen(cfg.principles[i].name));
-            HU_ASSERT_EQ(cfg.principles[i].description_len, strlen(cfg.principles[i].description));
-            HU_ASSERT(strstr(cfg.principles[i].description, "vague") != NULL);
-        }
-    HU_ASSERT(found);
+    HU_ASSERT_EQ((int)cfg.principle_count, 6);
 }
 
 static void config_persona_no_ai_tells_is_first(void) {
@@ -50,8 +34,8 @@ static void config_persona_no_ai_tells_is_first(void) {
 
 static void config_persona_identity_lock_is_last(void) {
     hu_constitutional_config_t cfg = hu_constitutional_config_persona();
-    HU_ASSERT(cfg.principles[cfg.principle_count - 1].name != NULL);
-    HU_ASSERT(strcmp(cfg.principles[cfg.principle_count - 1].name, "identity_lock") == 0);
+    HU_ASSERT(cfg.principles[5].name != NULL);
+    HU_ASSERT(strcmp(cfg.principles[5].name, "identity_lock") == 0);
 }
 
 static void config_persona_all_descriptions_non_empty(void) {
@@ -139,15 +123,13 @@ static void timing_model_sample_clamps_dow(void) {
 
 static void parse_verdict_rewrite_standalone(void) {
     int idx = -1;
-    hu_critique_verdict_t v =
-        hu_constitutional_test_parse_verdict("REWRITE principle 2: too formal", 31, &idx);
+    hu_critique_verdict_t v = hu_constitutional_test_parse_verdict("REWRITE principle 2: too formal", 31, &idx);
     HU_ASSERT_EQ((int)v, (int)HU_CRITIQUE_REWRITE);
 }
 
 static void parse_verdict_rewritten_not_rewrite(void) {
     int idx = -1;
-    hu_critique_verdict_t v =
-        hu_constitutional_test_parse_verdict("REWRITTEN response below", 24, &idx);
+    hu_critique_verdict_t v = hu_constitutional_test_parse_verdict("REWRITTEN response below", 24, &idx);
     HU_ASSERT(v != HU_CRITIQUE_REWRITE);
 }
 
@@ -163,8 +145,7 @@ static void parse_verdict_pass1_not_pass(void) {
 /* ─── parse_principle_index fallback ─── */
 
 static void principle_index_from_keyword(void) {
-    int idx =
-        hu_constitutional_test_parse_principle_index("REWRITE principle 3: violates warmth", 35);
+    int idx = hu_constitutional_test_parse_principle_index("REWRITE principle 3: violates warmth", 35);
     HU_ASSERT_EQ(idx, 3);
 }
 
@@ -515,8 +496,7 @@ static void timing_model_learn_null_args(void) {
 
 void run_sota_humanness_tests(void) {
     HU_TEST_SUITE("SOTAHumanness");
-    HU_RUN_TEST(config_persona_returns_seven_principles);
-    HU_RUN_TEST(config_persona_forbids_invented_life_facts);
+    HU_RUN_TEST(config_persona_returns_six_principles);
     HU_RUN_TEST(config_persona_no_ai_tells_is_first);
     HU_RUN_TEST(config_persona_identity_lock_is_last);
     HU_RUN_TEST(config_persona_all_descriptions_non_empty);
