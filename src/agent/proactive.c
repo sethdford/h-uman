@@ -706,6 +706,11 @@ bool hu_proactive_check_important_dates(const hu_persona_t *persona, const char 
         const hu_important_date_t *d = &persona->important_dates[i];
         if (strcmp(d->date, expect) != 0)
             continue;
+        /* A persona birthday or anniversary names no person, so it cannot be
+         * any one contact's: injecting it into every check-in that day would
+         * wish everyone "happy birthday min!". Holidays apply to everyone. */
+        if (strcmp(d->type, "birthday") == 0 || strcmp(d->type, "anniversary") == 0)
+            continue;
         size_t msg_len = strnlen(d->message, sizeof(d->message) - 1);
         if (msg_len == 0)
             continue;

@@ -637,7 +637,6 @@ set(HU_CORE_SOURCES
     src/config/config_schema.c
     src/config/config_merge.c
     src/config/config_migrate.c
-    src/config/config_serialize.c
     src/config/config_getters.c
     src/config/config_validate.c
     src/config/config_types.c
@@ -1280,6 +1279,7 @@ set(HU_CORE_SOURCES
     src/app/cli_ctl.c
     src/app/cli_help.c
     src/eval/cli_evaluation.c
+    src/eval/commitment_sample.c
     src/observability/cost.c
     src/observability/usage.c
     src/security/oauth.c
@@ -3612,6 +3612,7 @@ set(HU_TEST_SOURCES
     tests/test_daemon_director.c
     tests/test_daemon_trust.c
     tests/test_config_parse.c
+    tests/test_config_mutator_writes.c
     tests/test_config_migrate.c
     tests/test_adversarial.c
     tests/test_adversarial_detect.c
@@ -3648,6 +3649,7 @@ set(HU_TEST_SOURCES
     tests/test_autonomy.c
     tests/test_retrieval.c
     tests/test_reranker.c
+    tests/test_score_fusion.c
     tests/test_retrieval_contact_isolation.c
     tests/test_prompt.c
     tests/test_prompt_trim.c
@@ -4240,6 +4242,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_daemon_share_queue.c
     tests/test_daemon_reminders.c
     tests/test_daemon_briefing.c
+    tests/test_commitment_sample.c
     tests/test_agent_fit_history.c
     tests/test_prospective.c
     tests/test_eval_score.c

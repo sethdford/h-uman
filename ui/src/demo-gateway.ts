@@ -1605,11 +1605,11 @@ export class DemoGatewayClient extends EventTarget {
         return { schema: CONFIG_SCHEMA };
       case "config.set": {
         if (params) deepMerge(this.state.config, params);
-        return { ok: true };
+        return { ok: true, saved: true };
       }
       case "config.apply": {
         if (params) deepMerge(this.state.config, params);
-        return { ok: true, applied: true };
+        return { ok: true, applied: true, saved: true };
       }
 
       case "tools.catalog":
