@@ -962,6 +962,7 @@ set(HU_CORE_SOURCES
     src/providers/compatible.c
     src/providers/claude_cli.c
     src/providers/factory.c
+    src/providers/chat_oneshot.c
     ${CHANNEL_SOURCES}
     ${MEMORY_ENGINE_SOURCES}
     src/memory/factory.c
@@ -4244,6 +4245,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_prospective.c
     tests/test_prospective_repo_sqlite.c
     tests/test_prospective_policy.c
+    tests/test_chat_oneshot.c
     tests/test_eval_score.c
     tests/test_corrective_rag.c
     tests/test_adaptive_rag.c

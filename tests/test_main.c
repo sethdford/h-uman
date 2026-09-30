@@ -810,6 +810,7 @@ void run_agent_fit_history_tests(void);
 void run_prospective_tests(void);
 void run_prospective_repo_sqlite_tests(void);
 void run_prospective_policy_tests(void);
+void run_chat_oneshot_tests(void);
 void run_eval_score_tests(void);
 void run_corrective_rag_tests(void);
 void run_adaptive_rag_tests(void);
@@ -1857,6 +1858,7 @@ int main(int argc, char **argv) {
     run_prospective_tests();
     run_prospective_repo_sqlite_tests();
     run_prospective_policy_tests();
+    run_chat_oneshot_tests();
     run_eval_score_tests();
     run_corrective_rag_tests();
     run_adaptive_rag_tests();
