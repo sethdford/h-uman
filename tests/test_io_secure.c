@@ -230,8 +230,44 @@ static void io_secure_atomic_rejects_bad_arguments(void) {
                  HU_ERR_INVALID_ARGUMENT);
 }
 
+static void io_secure_open_read_reports_missing_as_not_found(void) {
+    FILE *f = (FILE *)1;
+    HU_ASSERT_EQ(hu_io_secure_open_read("/tmp/hu-io-secure-definitely-missing.json", &f),
+                 HU_ERR_NOT_FOUND);
+    HU_ASSERT_NULL(f);
+}
+
+static void io_secure_open_read_rejects_traversal(void) {
+    FILE *f = NULL;
+    HU_ASSERT_EQ(hu_io_secure_open_read("/tmp/../etc/hosts", &f), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_NULL(f);
+}
+
+#ifndef _WIN32
+static void io_secure_open_read_opens_an_existing_file(void) {
+    char path[] = "/tmp/hu-io-read-XXXXXX";
+    int fd = mkstemp(path);
+    HU_ASSERT_TRUE(fd >= 0);
+    HU_ASSERT_EQ(write(fd, "{}", 2), 2);
+    close(fd);
+    FILE *f = NULL;
+    HU_ASSERT_EQ(hu_io_secure_open_read(path, &f), HU_OK);
+    HU_ASSERT_NOT_NULL(f);
+    char buf[8] = {0};
+    HU_ASSERT_EQ(fread(buf, 1, sizeof(buf) - 1, f), 2u);
+    HU_ASSERT_STR_EQ(buf, "{}");
+    fclose(f);
+    unlink(path);
+}
+#endif
+
 void run_io_secure_tests(void) {
     HU_TEST_SUITE("Core IO secure");
+    HU_RUN_TEST(io_secure_open_read_reports_missing_as_not_found);
+    HU_RUN_TEST(io_secure_open_read_rejects_traversal);
+#ifndef _WIN32
+    HU_RUN_TEST(io_secure_open_read_opens_an_existing_file);
+#endif
     HU_RUN_TEST(io_secure_rejects_null_path);
     HU_RUN_TEST(io_secure_rejects_null_mode);
     HU_RUN_TEST(io_secure_rejects_null_out);

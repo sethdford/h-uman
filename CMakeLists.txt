@@ -443,6 +443,9 @@ list(APPEND CHANNEL_SOURCES src/channels/imessage_reactions.c)
 list(APPEND CHANNEL_SOURCES src/channels/imessage_caps.c)
 # Pure replay guards: always built so their (unconditional) test links on Linux.
 list(APPEND CHANNEL_SOURCES src/channels/imessage_replay_guard.c)
+# Pure chat.db group classifier (chat.style, handle-count fallback). Always
+# built: the daemon observer, compiled on every platform, calls it.
+list(APPEND CHANNEL_SOURCES src/channels/imessage_chat_kind.c)
 list(APPEND CHANNEL_SOURCES src/channels/imessage_bb_event.c)
 # Phase 1a of docs/plans/2026-05-18-imessage-sota.md: pure synthesis
 # primitives that render iMessage events into canonical English for
@@ -637,7 +640,6 @@ set(HU_CORE_SOURCES
     src/config/config_schema.c
     src/config/config_merge.c
     src/config/config_migrate.c
-    src/config/config_serialize.c
     src/config/config_getters.c
     src/config/config_validate.c
     src/config/config_types.c
@@ -774,6 +776,12 @@ set(HU_CORE_SOURCES
     src/agent/lean_head.c
     src/agent/reply_prompt.c
     src/agent/agent_turn.c
+    src/agent/turn/turn_ctx.c
+    src/agent/turn/turn_retrieve.c
+    src/agent/turn/turn_perceive.c
+    src/agent/turn/turn_entry.c
+    src/agent/turn/turn_silence.c
+    src/agent/turn/turn_context.c
     src/agent/best_of_n.c
     src/agent/humanness.c
     src/agent/context.c
@@ -1270,6 +1278,8 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_expressive.c
     src/daemon/daemon_share_queue.c
     src/daemon/daemon_reminders.c
+    src/daemon/daemon_briefing.c
+    src/daemon/daemon_person_dates.c
     src/daemon/daemon_rich_media.c
     src/daemon/daemon_housekeeping.c
     src/daemon/daemon_promise_keeper.c
@@ -1284,6 +1294,7 @@ set(HU_CORE_SOURCES
     src/app/cli_prospective.c
     src/app/cli_help.c
     src/eval/cli_evaluation.c
+    src/eval/commitment_sample.c
     src/observability/cost.c
     src/observability/usage.c
     src/security/oauth.c
@@ -1674,6 +1685,8 @@ if(HU_ENABLE_SQLITE)
         src/memory/repos/contact_optout_repo_sqlite.c
         src/memory/repos/prospective_repo_sqlite.c
         src/memory/repos/reminder_repo_sqlite.c
+        src/memory/repos/briefing_repo_sqlite.c
+        src/memory/repos/person_dates_repo_sqlite.c
         src/memory/repos/repo_util_sqlite.c
         src/memory/repos/social_graph_repo_sqlite.c
         src/memory/repos/self_awareness_repo_sqlite.c
@@ -3519,6 +3532,7 @@ set(HU_TEST_SOURCES
     tests/test_allocator.c
     tests/test_data_loader.c
     tests/test_idempotency.c
+    tests/test_preferences.c
     tests/test_idempotency_hula_integration.c
     tests/test_json.c
     tests/test_string.c
@@ -3617,6 +3631,7 @@ set(HU_TEST_SOURCES
     tests/test_daemon_director.c
     tests/test_daemon_trust.c
     tests/test_config_parse.c
+    tests/test_config_mutator_writes.c
     tests/test_config_migrate.c
     tests/test_adversarial.c
     tests/test_adversarial_detect.c
@@ -3877,6 +3892,16 @@ tests/test_imessage_action_telemetry.c
     tests/test_reply_prompt.c
     tests/test_agent_turn_state.c
     tests/test_agent_turn_transport.c
+    tests/turn_recording_provider.c
+    tests/test_turn_recording_provider.c
+    tests/test_agent_turn_characterization.c
+    tests/test_turn_ctx.c
+    tests/test_turn_retrieve.c
+    tests/test_turn_perceive.c
+    tests/test_turn_entry.c
+    tests/test_turn_silence.c
+    tests/test_turn_context.c
+    tests/test_turn_sources.c
     tests/test_agent_llm_latency_wall_clock.c
     tests/test_agent_turn_request_overrides.c
     tests/test_agent_max_tokens_resolve.c
@@ -4179,6 +4204,7 @@ if(HU_ENABLE_SQLITE)
     list(APPEND HU_TEST_SOURCES tests/test_outbound_sends_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_contact_optout_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_reminder_repo.c)
+    list(APPEND HU_TEST_SOURCES tests/test_person_dates_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_repo_util_sqlite.c)
     list(APPEND HU_TEST_SOURCES tests/test_proactive_send_circuit.c)
     list(APPEND HU_TEST_SOURCES tests/test_social_graph_repo.c)
@@ -4245,6 +4271,9 @@ list(APPEND HU_TEST_SOURCES
     tests/test_daemon_expressive.c
     tests/test_daemon_share_queue.c
     tests/test_daemon_reminders.c
+    tests/test_daemon_briefing.c
+    tests/test_daemon_person_dates.c
+    tests/test_commitment_sample.c
     tests/test_agent_fit_history.c
     tests/test_prospective.c
     tests/test_prospective_repo_sqlite.c
@@ -4461,6 +4490,13 @@ target_compile_definitions(human_tests PRIVATE "HU_EVAL_SUITES_DIR=\"${HU_ROOT}/
 # Phase D Task D-1 (CF-7 RL SOTA): same HU_ML_SCRIPTS_DIR for tests.
 target_compile_definitions(human_tests PRIVATE "HU_ML_SCRIPTS_DIR=\"${HU_ROOT}/scripts\"")
 target_compile_definitions(human_tests PRIVATE "HU_TEST_DATA_DIR=\"${HU_ROOT}/data\"")
+# Fix round 1 / I3 (agent-turn carve characterization): ctest and any CI
+# runner invoke human_tests with cwd=build/, not the repo root, so a
+# relative "tests/fixtures/..." path silently resolves to nothing and
+# characterization_matches_goldens SKIPs (passes) instead of running.
+# Absolute path, test-target-only (never added to the `human` binary).
+target_compile_definitions(human_tests PRIVATE
+    "HU_AGENT_TURN_GOLDEN_DIR=\"${HU_ROOT}/tests/fixtures/agent_turn_golden\"")
 target_compile_definitions(human_tests PRIVATE HU_IS_TEST=1 HU_GATEWAY_TEST_MODE=1 HU_HAS_NONE_ENGINE=1 HU_HAS_CRON=1 HU_HAS_PUSH=1 HU_HAS_UPDATE=1 HU_HAS_SKILLS=1 HU_HAS_RUNTIME_EXOTIC=1)
 # Mirror HU_HAS_LIBSODIUM onto human_tests so tests/test_main.c's
 # `#ifdef HU_HAS_LIBSODIUM` call-site guard for run_persona_encryption_tests()

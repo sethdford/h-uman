@@ -283,29 +283,26 @@ hu_error_t hu_superhuman_commitment_store(void *sqlite_ctx, hu_allocator_t *allo
     return HU_OK;
 }
 
-hu_error_t hu_superhuman_commitment_list_due(void *sqlite_ctx, hu_allocator_t *alloc,
-                                             int64_t now_ts, size_t limit,
-                                             hu_superhuman_commitment_t **out, size_t *out_count) {
-    if (!sqlite_ctx || !alloc || !out || !out_count)
+/* Rows of `sql` (which binds ?1 = ts, ?2 = limit and selects the eight
+ * commitment columns in struct order), allocated into *out. */
+static hu_error_t list_commitments(void *sqlite_ctx, hu_allocator_t *alloc, const char *sql,
+                                   int64_t ts, size_t limit, hu_superhuman_commitment_t **rows_out,
+                                   size_t *count_out) {
+    if (!sqlite_ctx || !alloc || !rows_out || !count_out)
         return HU_ERR_INVALID_ARGUMENT;
-    *out = NULL;
-    *out_count = 0;
+    *rows_out = NULL;
+    *count_out = 0;
 
     sqlite3 *db = get_db(sqlite_ctx);
     if (!db)
         return HU_ERR_NOT_SUPPORTED;
 
     sqlite3_stmt *stmt = NULL;
-    int rc = sqlite3_prepare_v2(
-        db,
-        "SELECT id,contact_id,description,who,deadline,status,created_at,followed_up_at "
-        "FROM commitments WHERE status='pending' AND deadline IS NOT NULL AND deadline<=? "
-        "ORDER BY deadline LIMIT ?",
-        -1, &stmt, NULL);
+    int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK)
         return HU_ERR_MEMORY_BACKEND;
 
-    sqlite3_bind_int64(stmt, 1, now_ts);
+    sqlite3_bind_int64(stmt, 1, ts);
     sqlite3_bind_int64(stmt, 2, (int64_t)(limit > 0 ? limit : 100));
 
     size_t cap = 16;
@@ -357,8 +354,8 @@ hu_error_t hu_superhuman_commitment_list_due(void *sqlite_ctx, hu_allocator_t *a
     if (step_rc != SQLITE_DONE) {
         if (arr)
             alloc->free(alloc->ctx, arr, cap * sizeof(hu_superhuman_commitment_t));
-        *out = NULL;
-        *out_count = 0;
+        *rows_out = NULL;
+        *count_out = 0;
         return HU_ERR_MEMORY_BACKEND;
     }
 
@@ -366,9 +363,31 @@ hu_error_t hu_superhuman_commitment_list_due(void *sqlite_ctx, hu_allocator_t *a
         alloc->free(alloc->ctx, arr, cap * sizeof(hu_superhuman_commitment_t));
         arr = NULL;
     }
-    *out = arr;
-    *out_count = count;
+    *rows_out = arr;
+    *count_out = count;
     return HU_OK;
+}
+
+hu_error_t hu_superhuman_commitment_list_due(void *sqlite_ctx, hu_allocator_t *alloc,
+                                             int64_t now_ts, size_t limit,
+                                             hu_superhuman_commitment_t **out, size_t *out_count) {
+    return list_commitments(
+        sqlite_ctx, alloc,
+        "SELECT id,contact_id,description,who,deadline,status,created_at,followed_up_at "
+        "FROM commitments WHERE status='pending' AND deadline IS NOT NULL AND deadline<=? "
+        "ORDER BY deadline LIMIT ?",
+        now_ts, limit, out, out_count);
+}
+
+hu_error_t hu_superhuman_commitment_list_recent(void *sqlite_ctx, hu_allocator_t *alloc,
+                                                int64_t since_ts, size_t limit,
+                                                hu_superhuman_commitment_t **out,
+                                                size_t *out_count) {
+    return list_commitments(
+        sqlite_ctx, alloc,
+        "SELECT id,contact_id,description,who,deadline,status,created_at,followed_up_at "
+        "FROM commitments WHERE created_at>=? ORDER BY created_at DESC, id DESC LIMIT ?",
+        since_ts, limit, out, out_count);
 }
 
 hu_error_t hu_superhuman_commitment_mark_followed_up(void *sqlite_ctx, int64_t id) {
@@ -1805,6 +1824,18 @@ hu_error_t hu_superhuman_commitment_list_due(void *sqlite_ctx, hu_allocator_t *a
     (void)limit;
     (void)out;
     (void)out_count;
+    return HU_ERR_NOT_SUPPORTED;
+}
+
+hu_error_t hu_superhuman_commitment_list_recent(void *sqlite_ctx, hu_allocator_t *alloc,
+                                                int64_t since_ts, size_t limit,
+                                                hu_superhuman_commitment_t **out,
+                                                size_t *out_count) {
+    (void)sqlite_ctx, (void)alloc, (void)since_ts, (void)limit;
+    if (out)
+        *out = NULL;
+    if (out_count)
+        *out_count = 0;
     return HU_ERR_NOT_SUPPORTED;
 }
 

@@ -173,11 +173,7 @@ static hu_error_t update_one(sqlite3 *db, const char *sql, const char *text1, in
         sqlite3_bind_int64(stmt, 1, int1);
     sqlite3_bind_int64(stmt, 2, now);
     sqlite3_bind_int64(stmt, 3, id);
-    int rc = sqlite3_step(stmt);
-    sqlite3_finalize(stmt);
-    if (rc != SQLITE_DONE)
-        return HU_ERR_MEMORY_STORE;
-    return sqlite3_changes(db) == 1 ? HU_OK : HU_ERR_NOT_FOUND;
+    return hu_repo_step_update_one(db, stmt);
 }
 
 hu_error_t hu_reminder_repo_mark(sqlite3 *db, int64_t id, const char *status, int64_t now) {

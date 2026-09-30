@@ -178,6 +178,22 @@ static void test_find_channel_matches_vtable_name(void) {
     HU_ASSERT_NULL(hu_daemon_outbound_find_channel(NULL, 3, "slack"));
 }
 
+static void test_find_sender_skips_a_channel_that_cannot_send(void) {
+    static const hu_channel_vtable_t read_only = {.name = mock_name}; /* e.g. Gmail ingest */
+    mock_chan_t a = {.name = "gmail"}, b = {.name = "imessage"};
+    hu_channel_t ca = {.ctx = &a, .vtable = &read_only};
+    hu_channel_t cb = {.ctx = &b, .vtable = &mock_vt_plain};
+    hu_service_channel_t chans[2];
+    memset(chans, 0, sizeof(chans));
+    chans[0].channel = &ca;
+    chans[1].channel = &cb;
+    /* find_channel finds it; find_sender refuses it because it cannot send. */
+    HU_ASSERT_TRUE(hu_daemon_outbound_find_channel(chans, 2, "gmail") == &chans[0]);
+    HU_ASSERT_NULL(hu_daemon_outbound_find_sender(chans, 2, "gmail"));
+    HU_ASSERT_TRUE(hu_daemon_outbound_find_sender(chans, 2, "imessage") == &chans[1]);
+    HU_ASSERT_NULL(hu_daemon_outbound_find_sender(chans, 2, "slack"));
+}
+
 /* ── stream_event_cb ──────────────────────────────────────────────────── */
 
 static void test_stream_event_maps_thinking_and_tools_to_bus(void) {
@@ -545,6 +561,7 @@ void run_daemon_outbound_bus_tests(void) {
     HU_RUN_TEST(test_utf8_truncate_backs_off_to_character_boundary);
     HU_RUN_TEST(test_bus_set_message_clamps_on_utf8_boundary);
     HU_RUN_TEST(test_find_channel_matches_vtable_name);
+    HU_RUN_TEST(test_find_sender_skips_a_channel_that_cannot_send);
     HU_RUN_TEST(test_stream_event_maps_thinking_and_tools_to_bus);
     HU_RUN_TEST(test_stream_event_text_without_alloc_strips_tags_and_publishes);
     HU_RUN_TEST(test_outbound_final_uses_send_and_flags_delivery);

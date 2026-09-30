@@ -448,4 +448,10 @@ void hu_agent_internal_post_hook_fire(hu_agent_t *agent, const char *tool_name,
 #define HU_OPINION_FRICTION_COUNT 2
 #endif
 
+/* Newest-first, de-duplicated HU_ROLE_TOOL names from agent->history (Story F.2).
+ * Shared by the S3 retrieval stage (src/agent/turn/turn_retrieve.c) and the
+ * persona-context build in agent_turn.c. Returns the number written. */
+size_t hu_agent_internal_collect_recent_tool_names(const hu_agent_t *agent, const char **out_names,
+                                                   size_t out_cap);
+
 #endif /* HU_AGENT_INTERNAL_H */

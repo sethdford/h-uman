@@ -173,4 +173,12 @@ hu_error_t hu_graph_ground_compose_turn(hu_memory_loader_t *loader, const char *
                                         unsigned turn_flags, char **out, size_t *out_len,
                                         hu_graph_ground_turn_stats_t *stats);
 
+/* Post-build half of the "live: injected" log: called by both turn paths
+ * right after hu_prompt_build_system with the graph_ctx length the turn still
+ * holds and the bytes the builder actually rendered for the graph section
+ * (prompt field stats). Logs INFO when rendered, WARN when composed bytes
+ * never reached the prompt, nothing when there was nothing to render.
+ * Returns false only for that drop, so the contract is testable. */
+bool hu_graph_grounding_log_rendered(size_t composed_len, size_t rendered_len);
+
 #endif /* HU_AGENT_GRAPH_GROUNDING_H */

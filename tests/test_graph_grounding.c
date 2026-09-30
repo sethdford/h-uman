@@ -1426,9 +1426,11 @@ static void test_autodream_tick_populates_community_summaries_for_contact(void) 
 
 /* AC-1.3: Compliance test that the gate comment exists in source. Checks the
  * comment is PRESENT (not at a hardcoded line — that pinned line 1471 and broke
- * whenever code was inserted above it; presence is the real contract). */
+ * whenever code was inserted above it; presence is the real contract). The
+ * grounding call and its gate comment moved verbatim to the S3 retrieval stage
+ * in the 2026-09-30 hu_agent_turn carve. */
 static void test_gate_comment_exists_at_agent_turn_1471(void) {
-    FILE *f = fopen("src/agent/agent_turn.c", "r");
+    FILE *f = fopen("src/agent/turn/turn_retrieve.c", "r");
     HU_ASSERT_NOT_NULL(f);
 
     char buf[512];
@@ -1453,12 +1455,15 @@ static void test_gate_comment_exists_at_agent_turn_1471(void) {
  * judged irrelevant. Pins the decoupling: between the "Self-RAG: verify
  * relevance" comment and the "behavior_memory_ctx_nonempty" line that follows
  * the block, no graph_ctx free may appear. (Source-presence style, like the
- * gate-comment test above — fails on the pre-fix code that freed graph_ctx.) */
+ * gate-comment test above — fails on the pre-fix code that freed graph_ctx.)
+ * The block lives in the S3 retrieval stage since the 2026-09-30 carve; the
+ * scan must find it, or a move would turn this into a vacuous pass. */
 static void test_srag_memory_miss_does_not_free_graph_ctx(void) {
-    FILE *f = fopen("src/agent/agent_turn.c", "r");
+    FILE *f = fopen("src/agent/turn/turn_retrieve.c", "r");
     HU_ASSERT_NOT_NULL(f);
     char buf[512];
     bool in_block = false;
+    bool block_closed = false;
     bool freed_graph_in_block = false;
     while (fgets(buf, sizeof(buf), f)) {
         if (!in_block) {
@@ -1467,17 +1472,206 @@ static void test_srag_memory_miss_does_not_free_graph_ctx(void) {
             continue;
         }
         /* The statement immediately following the Self-RAG block. */
-        if (strstr(buf, "behavior_memory_ctx_nonempty") != NULL)
+        if (strstr(buf, "behavior_memory_ctx_nonempty") != NULL) {
+            block_closed = true;
             break;
+        }
         if (strstr(buf, "graph_ctx") != NULL && strstr(buf, "free") != NULL)
             freed_graph_in_block = true;
     }
     fclose(f);
+    HU_ASSERT_TRUE(in_block);
+    HU_ASSERT_TRUE(block_closed);
     HU_ASSERT_FALSE(freed_graph_in_block);
+}
+
+#ifdef HU_ENABLE_SQLITE
+/* ── End to end: does LIVE grounding reach the provider request? ─────────
+ * Drives the REAL hu_agent_turn with a recording provider. Everything above
+ * proves the loader composes the right bytes; this proves those bytes are
+ * what the model is sent. 2026-09-30: they were not — the W12 contact merge
+ * and the memory-tier core merge both freed graph_ctx after hu_agent_load_
+ * graph_grounding had logged "live: injected", so the section never reached
+ * the prompt builder on any turn that also carried memory. */
+#include "human/memory.h"
+#include "human/provider.h"
+
+typedef struct gg_rec {
+    char *sys;
+    size_t sys_len;
+    size_t calls;
+    hu_allocator_t *alloc;
+} gg_rec_t;
+
+static hu_error_t gg_rec_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_request_t *req,
+                              const char *model, size_t model_len, double temperature,
+                              hu_chat_response_t *out) {
+    (void)model;
+    (void)model_len;
+    (void)temperature;
+    gg_rec_t *rec = (gg_rec_t *)ctx;
+    memset(out, 0, sizeof(*out));
+    for (size_t i = 0; req && i < req->messages_count && !rec->sys; i++) {
+        const hu_chat_message_t *m = &req->messages[i];
+        if (m->role != HU_ROLE_SYSTEM || !m->content)
+            continue;
+        rec->sys = (char *)rec->alloc->alloc(rec->alloc->ctx, m->content_len + 1);
+        if (rec->sys) {
+            memcpy(rec->sys, m->content, m->content_len);
+            rec->sys[m->content_len] = '\0';
+            rec->sys_len = m->content_len;
+        }
+    }
+    rec->calls++;
+    static const char k_body[] = "ok sounds good";
+    char *buf = (char *)alloc->alloc(alloc->ctx, sizeof(k_body));
+    if (!buf)
+        return HU_ERR_OUT_OF_MEMORY;
+    memcpy(buf, k_body, sizeof(k_body));
+    out->content = buf;
+    out->content_len = sizeof(k_body) - 1;
+    return HU_OK;
+}
+
+static const char *gg_rec_name(void *ctx) {
+    (void)ctx;
+    return "gg_rec";
+}
+
+static hu_provider_vtable_t gg_rec_vtable = {.chat = gg_rec_chat, .get_name = gg_rec_name};
+
+/* What hu_agent_load_graph_grounding composes for alice + this message
+ * (golden above: lexical hit, every sub-gate OFF). */
+static const char k_turn_msg[] = "hows the sailboat coming along";
+static const char k_turn_grounding[] =
+    "- sailboat (topic)\n"
+    "  - sailboat related_to marina: docked at slip 14 since spring\n";
+
+typedef struct gg_turn_opts {
+    const char *grounding; /* HU_GRAPH_GROUNDING value, NULL = unset */
+    bool core_tier;        /* leave sota initialized, so the memory-tier core merge runs */
+} gg_turn_opts_t;
+
+/* Runs one real turn for contact "alice" on an ANALYTICAL turn and returns
+ * the system prompt the provider received (caller frees sys_len + 1). */
+static char *gg_run_turn(const gg_turn_opts_t *o, size_t *sys_len) {
+    hu_allocator_t alloc = hu_system_allocator();
+    gg_rec_t rec = {.alloc = &alloc};
+    hu_provider_t prov = {.ctx = &rec, .vtable = &gg_rec_vtable};
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+    hu_graph_t *graph = NULL;
+    HU_ASSERT_EQ(hu_graph_open(&alloc, ":memory:", strlen(":memory:"), &graph), HU_OK);
+    seed_alice_graph(graph);
+    hu_w7_facade_t *facade = NULL;
+    HU_ASSERT_EQ(hu_w7_facade_open(graph, &alloc, &facade), HU_OK);
+    /* Flat memory the message recalls, so memory_ctx is non-empty on its own. */
+    static const char k_note[] = "alice finally repainted the sailboat hull blue";
+    HU_ASSERT_EQ(mem.vtable->store(mem.ctx, "contact:alice:hull", 18, k_note, sizeof(k_note) - 1,
+                                   NULL, "alice", 5),
+                 HU_OK);
+
+    hu_agent_t *agent = (hu_agent_t *)calloc(1, sizeof(*agent));
+    HU_ASSERT_NOT_NULL(agent);
+    HU_ASSERT_EQ(hu_agent_from_config(agent, &alloc, prov, NULL, 0, &mem, NULL, NULL, NULL,
+                                      "gg-model", 8, "gg_rec", 6, 0.7, ".", 1, 1, 50, false, 0,
+                                      NULL, 0, NULL, 0, NULL),
+                 HU_OK);
+    agent->w7_facade = facade;
+    agent->memory_session_id = "alice";
+    agent->memory_session_id_len = 5;
+    agent->turn_tier = (int)HU_TIER_ANALYTICAL;
+    bool sota_was = agent->sota.sota_initialized;
+    if (!o->core_tier)
+        agent->sota.sota_initialized = false;
+
+    unsetenv("HU_GRAPH_GROUNDING_CONTACT_FALLBACK");
+    unsetenv("HU_GRAPH_GROUNDING_SELF_FACTS");
+    unsetenv("HU_GRAPH_NAMES");
+    if (o->grounding)
+        setenv("HU_GRAPH_GROUNDING", o->grounding, 1);
+    else
+        unsetenv("HU_GRAPH_GROUNDING");
+    char *resp = NULL;
+    size_t resp_len = 0;
+    hu_error_t err = hu_agent_turn(agent, k_turn_msg, sizeof(k_turn_msg) - 1, &resp, &resp_len);
+    unsetenv("HU_GRAPH_GROUNDING");
+    HU_ASSERT_EQ((int)err, (int)HU_OK);
+    HU_ASSERT_TRUE(rec.calls >= 1);
+    if (resp)
+        alloc.free(alloc.ctx, resp, resp_len + 1);
+
+    agent->sota.sota_initialized = sota_was;
+    hu_agent_deinit(agent);
+    free(agent); /* hu_agent_deinit closed the facade it was handed */
+    hu_graph_close(graph, &alloc);
+    mem.vtable->deinit(mem.ctx);
+    *sys_len = rec.sys_len;
+    return rec.sys;
+}
+
+/* The grounding section as the prompt builder renders it: the header, then
+ * (after at most the separator newlines) the composed grounding text. A
+ * header alone, or the text appearing elsewhere (e.g. inside flat memory),
+ * does not count. */
+static bool gg_prompt_has_grounding(const char *sys) {
+    static const char k_hdr[] = "## Relationship Context\n";
+    for (const char *h = sys ? strstr(sys, k_hdr) : NULL; h; h = strstr(h + 1, k_hdr)) {
+        if (h > sys && h[-1] == '#')
+            continue; /* "### Relationship Context" is persona/relationship.c's */
+        const char *p = h + sizeof(k_hdr) - 1;
+        while (*p == '\n')
+            p++;
+        if (strncmp(p, k_turn_grounding, sizeof(k_turn_grounding) - 1) == 0)
+            return true;
+    }
+    return false;
+}
+
+static void gg_assert_turn_grounding(gg_turn_opts_t o, bool expect) {
+    size_t len = 0;
+    char *sys = gg_run_turn(&o, &len);
+    HU_ASSERT_NOT_NULL(sys);
+    HU_ASSERT_EQ(gg_prompt_has_grounding(sys), expect);
+    hu_allocator_t alloc = hu_system_allocator();
+    alloc.free(alloc.ctx, sys, len + 1);
+}
+
+/* LIVE grounding on an analytical turn must reach the provider. The same
+ * facade that grounding composes from also feeds the W12 contact recall, so a
+ * contact with graph content ALWAYS carries contact text into memory_ctx; and
+ * the core-tier merge always has at least its "[Core Memory]" header. Both
+ * merges therefore run on every grounded turn in production. */
+static void test_turn_live_grounding_reaches_provider(void) {
+    gg_assert_turn_grounding((gg_turn_opts_t){"on", true}, true);
+}
+
+/* Same turn with the core-tier merge switched off: isolates the W12 contact
+ * merge, which runs before it. */
+static void test_turn_live_grounding_survives_contact_merge(void) {
+    gg_assert_turn_grounding((gg_turn_opts_t){"on", false}, true);
+}
+
+/* Gate symmetry: OFF and SHADOW must never put the section in the prompt. */
+static void test_turn_grounding_off_and_shadow_stay_out_of_prompt(void) {
+    gg_assert_turn_grounding((gg_turn_opts_t){"off", true}, false);
+    gg_assert_turn_grounding((gg_turn_opts_t){"shadow", true}, false);
+    gg_assert_turn_grounding((gg_turn_opts_t){NULL, true}, false);
+    gg_assert_turn_grounding((gg_turn_opts_t){"off", false}, false);
+}
+#endif
+
+/* The post-build log's contract: a drop (composed bytes, none rendered) is the
+ * only false; nothing-to-render and a real render are both fine. */
+static void test_log_rendered_flags_only_a_drop(void) {
+    HU_ASSERT_TRUE(hu_graph_grounding_log_rendered(0, 0));
+    HU_ASSERT_TRUE(hu_graph_grounding_log_rendered(82, 109));
+    HU_ASSERT_FALSE(hu_graph_grounding_log_rendered(82, 0));
 }
 
 void run_graph_grounding_tests(void) {
     HU_TEST_SUITE("GraphRAG grounding");
+    HU_RUN_TEST(test_log_rendered_flags_only_a_drop);
     HU_RUN_TEST(test_graph_grounding_mode_parse);
     HU_RUN_TEST(test_contact_fallback_mode_parse);
     HU_RUN_TEST(test_turn_flags_from_env);
@@ -1530,5 +1724,8 @@ void run_graph_grounding_tests(void) {
     HU_RUN_TEST(test_names_off_and_shadow_keep_fallback_plus_self_bytes);
     HU_RUN_TEST(test_names_live_reaches_the_loader);
     HU_RUN_TEST(test_autodream_tick_populates_community_summaries_for_contact);
+    HU_RUN_TEST(test_turn_grounding_off_and_shadow_stay_out_of_prompt);
+    HU_RUN_TEST(test_turn_live_grounding_survives_contact_merge);
+    HU_RUN_TEST(test_turn_live_grounding_reaches_provider);
 #endif
 }

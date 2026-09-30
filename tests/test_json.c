@@ -2,6 +2,7 @@
 #include "human/core/error.h"
 #include "human/core/json.h"
 #include "test_framework.h"
+#include <stdlib.h>
 #include <string.h>
 
 static void test_json_parse_null(void) {
@@ -251,8 +252,30 @@ static void test_json_unicode_escape(void) {
     hu_json_free(&alloc, val);
 }
 
+/* Floats render at the shortest precision that round-trips: a rewritten
+ * config keeps 0.85 as 0.85, and a value that needs 17 digits still gets them. */
+static void stringify_number(double d, const char *expected) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_json_value_t *v = hu_json_number_new(&alloc, d);
+    char *out = NULL;
+    size_t out_len = 0;
+    HU_ASSERT_EQ(hu_json_stringify(&alloc, v, &out, &out_len), HU_OK);
+    HU_ASSERT_STR_EQ(out, expected);
+    HU_ASSERT_TRUE(strtod(out, NULL) == d);
+    alloc.free(alloc.ctx, out, out_len + 1);
+    hu_json_free(&alloc, v);
+}
+
+static void test_json_stringify_float_is_shortest_roundtrip(void) {
+    stringify_number(0.85, "0.85");
+    stringify_number(0.7, "0.7");
+    stringify_number(0.1 + 0.2, "0.30000000000000004");
+    stringify_number(-2.5e-7, "-2.5e-07");
+}
+
 void run_json_tests(void) {
     HU_TEST_SUITE("json");
+    HU_RUN_TEST(test_json_stringify_float_is_shortest_roundtrip);
     HU_RUN_TEST(test_json_parse_null);
     HU_RUN_TEST(test_json_parse_bool);
     HU_RUN_TEST(test_json_parse_number);

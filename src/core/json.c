@@ -786,8 +786,17 @@ static hu_error_t stringify_value(hu_allocator_t *alloc, const hu_json_value_t *
         double d = val->data.number;
         if (d == (double)(long long)d && fabs(d) < 1e15)
             n = snprintf(nbuf, sizeof(nbuf), "%lld", (long long)d);
-        else
-            n = snprintf(nbuf, sizeof(nbuf), "%.17g", d);
+        else {
+            /* Shortest precision that parses back to the same double: 0.85
+             * stays "0.85" instead of "0.84999999999999998", so rewriting a
+             * config file does not churn every float the user wrote. */
+            n = -1;
+            for (int prec = 15; prec <= 17; prec++) {
+                n = snprintf(nbuf, sizeof(nbuf), "%.*g", prec, d);
+                if (n < 0 || (size_t)n >= sizeof(nbuf) || strtod(nbuf, NULL) == d)
+                    break;
+            }
+        }
         if (n < 0 || (size_t)n >= sizeof(nbuf))
             return HU_ERR_INTERNAL;
         return buf_append(alloc, buf, len, cap, nbuf, (size_t)n);

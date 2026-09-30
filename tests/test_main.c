@@ -163,6 +163,7 @@ void run_subsystems_tests(void);
 void run_onboard_nextstep_tests(void);
 void run_onboard_aloop_tests(void);
 void run_config_parse_tests(void);
+void run_config_mutator_writes_tests(void);
 void run_config_migrate_tests(void);
 void run_adversarial_tests(void);
 void run_adversarial_detect_tests(void);
@@ -260,6 +261,7 @@ void run_provider_all_tests(void);
 void run_chat_response_diag_tests(void);
 void run_channel_all_tests(void);
 void run_idempotency_tests(void);
+void run_preferences_tests(void);
 void run_idempotency_hula_integration_tests(void);
 void run_meta_common_tests(void);
 void run_channel_integration_tests(void);
@@ -456,6 +458,7 @@ void run_daemon_hurt_handoff_tests(void);
 void run_daemon_dated_followup_tests(void);
 void run_contact_optout_repo_tests(void);
 void run_reminder_repo_tests(void);
+void run_person_dates_repo_tests(void);
 void run_daemon_outbound_bus_tests(void);
 void run_repo_util_sqlite_tests(void);
 void run_proactive_send_circuit_tests(void);
@@ -497,8 +500,17 @@ void run_persona_eval_tests(void);
 void run_agent_tests(void); /* Sprint 46 R5.3 carryover */
 void run_lean_head_tests(void);
 void run_reply_prompt_tests(void);
-void run_agent_turn_state_tests(void);             /* #26: per-turn state tracking */
-void run_agent_turn_transport_tests(void);         /* M4 follow-up: transport-error fast-fail */
+void run_agent_turn_state_tests(void);            /* #26: per-turn state tracking */
+void run_agent_turn_transport_tests(void);        /* M4 follow-up: transport-error fast-fail */
+void run_turn_recording_provider_tests(void);     /* agent-turn carve: recording provider */
+void run_agent_turn_characterization_tests(void); /* agent-turn carve: golden corpus */
+void run_turn_ctx_tests(void);                    /* agent-turn carve: per-turn context + wrapper */
+void run_turn_retrieve_tests(void);               /* agent-turn carve: S3 retrieval stage */
+void run_turn_perceive_tests(void);               /* agent-turn carve: S2 perception stage */
+void run_turn_entry_tests(void);                  /* agent-turn carve: S0 entry stage */
+void run_turn_silence_tests(void);                /* agent-turn carve: S8 silence stage */
+void run_turn_context_tests(void);                /* agent-turn carve: S4 context builders */
+void run_turn_sources_tests(void);                /* agent-turn carve: source-presence pins */
 void run_agent_llm_latency_wall_clock_tests(void); /* M3 latency_ms measures wall clock */
 void run_agent_turn_request_overrides_tests(void); /* G11: per-turn override parity */
 void run_agent_max_tokens_resolve_tests(void);     /* Task 13: HU_MAX_TOKENS_RESOLVE gate parity */
@@ -806,6 +818,9 @@ void run_daemon_voice_first_tests(void);
 void run_daemon_expressive_tests(void);
 void run_daemon_share_queue_tests(void);
 void run_daemon_reminders_tests(void);
+void run_daemon_briefing_tests(void);
+void run_daemon_person_dates_tests(void);
+void run_commitment_sample_tests(void);
 void run_agent_fit_history_tests(void);
 void run_prospective_tests(void);
 void run_prospective_repo_sqlite_tests(void);
@@ -1126,6 +1141,7 @@ int main(int argc, char **argv) {
     run_allocator_tests();
     run_data_loader_tests();
     run_idempotency_tests();
+    run_preferences_tests();
     run_idempotency_hula_integration_tests();
     run_agent_modules_tests();
     run_agent_definition_tests();
@@ -1244,6 +1260,7 @@ int main(int argc, char **argv) {
     run_onboard_nextstep_tests();
     run_onboard_aloop_tests();
     run_config_parse_tests();
+    run_config_mutator_writes_tests();
     run_config_migrate_tests();
     run_adversarial_tests();
     run_adversarial_detect_tests();
@@ -1532,6 +1549,7 @@ int main(int argc, char **argv) {
     run_daemon_dated_followup_tests();
     run_contact_optout_repo_tests();
     run_reminder_repo_tests();
+    run_person_dates_repo_tests();
     run_daemon_outbound_bus_tests();
     run_repo_util_sqlite_tests();
     run_proactive_send_circuit_tests();
@@ -1570,6 +1588,17 @@ int main(int argc, char **argv) {
     run_agent_turn_state_tests();
     /* M4 follow-up: transport-error fast-fail in agent_turn tool-loop */
     run_agent_turn_transport_tests();
+    /* agent-turn carve: recording provider + scrubber behind the golden corpus */
+    run_turn_recording_provider_tests();
+    /* agent-turn carve: golden characterization of hu_agent_turn (PR 0) */
+    run_agent_turn_characterization_tests();
+    run_turn_ctx_tests();
+    run_turn_retrieve_tests();
+    run_turn_perceive_tests();
+    run_turn_entry_tests();
+    run_turn_silence_tests();
+    run_turn_context_tests();
+    run_turn_sources_tests();
     /* M3 live-fire fix: provider latency_ms must span the blocking round trip */
     run_agent_llm_latency_wall_clock_tests();
     /* G11: per-turn request override parity helper (G5 regression guard) */
@@ -1858,6 +1887,9 @@ int main(int argc, char **argv) {
     run_daemon_expressive_tests();
     run_daemon_share_queue_tests();
     run_daemon_reminders_tests();
+    run_daemon_briefing_tests();
+    run_daemon_person_dates_tests();
+    run_commitment_sample_tests();
     run_agent_fit_history_tests();
     run_prospective_tests();
     run_prospective_repo_sqlite_tests();

@@ -57,8 +57,24 @@ hu_error_t hu_config_load(hu_allocator_t *backing, hu_config_t *out);
 void hu_config_deinit(hu_config_t *cfg);
 hu_error_t hu_config_parse_json(hu_config_t *cfg, const char *content, size_t len);
 void hu_config_apply_env_overrides(hu_config_t *cfg);
-hu_error_t hu_config_save(const hu_config_t *cfg);
 hu_error_t hu_config_validate(const hu_config_t *cfg);
+```
+
+## Writing Config
+
+There is no "save an `hu_config_t`" call. Re-serializing the struct dropped
+every key the serializer did not model, so all writes to `config.json` go
+through `include/human/config_mutator.h`, which edits the parsed file:
+
+```c
+/* Set or unset one allowlisted path; the patch must pass strict validation. */
+hu_error_t hu_config_mutator_mutate_at(hu_allocator_t *alloc, const char *cfg_path,
+                                       hu_mutation_action_t action, const char *path,
+                                       const char *value_raw, hu_mutation_options_t options,
+                                       hu_mutation_result_t *out);
+/* Replace the whole file verbatim after strict validation (old file -> .bak). */
+hu_error_t hu_config_mutator_replace_at(hu_allocator_t *alloc, const char *cfg_path,
+                                        const char *raw, size_t raw_len);
 ```
 
 ## Provider Lookup

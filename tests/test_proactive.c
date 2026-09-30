@@ -718,12 +718,37 @@ static void proactive_reminder_no_trigger_without_interests(void) {
     hu_proactive_result_deinit(&result, &alloc);
 }
 
-static void proactive_important_dates_match_returns_true_and_message(void) {
-    hu_important_date_t dates[1];
-    memset(&dates[0], 0, sizeof(dates[0]));
+/* This test used to assert that a persona birthday ("happy birthday!")
+ * matched for contact "min", which is the leak it now guards against: the
+ * daemon asks once per contact, so every contact's check-in that day got the
+ * birthday line. A persona date that names no person is not a contact's. */
+static void proactive_important_dates_personless_birthday_is_no_contacts(void) {
+    hu_important_date_t dates[2];
+    memset(dates, 0, sizeof(dates));
     (void)snprintf(dates[0].date, sizeof(dates[0].date), "07-15");
     (void)snprintf(dates[0].type, sizeof(dates[0].type), "birthday");
-    (void)snprintf(dates[0].message, sizeof(dates[0].message), "happy birthday!");
+    (void)snprintf(dates[0].message, sizeof(dates[0].message), "happy birthday min!");
+    (void)snprintf(dates[1].date, sizeof(dates[1].date), "07-15");
+    (void)snprintf(dates[1].type, sizeof(dates[1].type), "anniversary");
+    (void)snprintf(dates[1].message, sizeof(dates[1].message), "happy anniversary!");
+
+    hu_persona_t persona = {0};
+    persona.important_dates = dates;
+    persona.important_dates_count = 2;
+
+    char msg_out[256] = "";
+    HU_ASSERT_FALSE(hu_proactive_check_important_dates(&persona, "min", 3, 7, 15, msg_out,
+                                                       sizeof(msg_out), NULL, 0));
+    HU_ASSERT_FALSE(hu_proactive_check_important_dates(&persona, "dana", 4, 7, 15, msg_out,
+                                                       sizeof(msg_out), NULL, 0));
+}
+
+static void proactive_important_dates_holiday_matches_any_contact(void) {
+    hu_important_date_t dates[1];
+    memset(&dates[0], 0, sizeof(dates[0]));
+    (void)snprintf(dates[0].date, sizeof(dates[0].date), "12-25");
+    (void)snprintf(dates[0].type, sizeof(dates[0].type), "holiday");
+    (void)snprintf(dates[0].message, sizeof(dates[0].message), "merry christmas!");
 
     hu_persona_t persona = {0};
     persona.important_dates = dates;
@@ -731,11 +756,11 @@ static void proactive_important_dates_match_returns_true_and_message(void) {
 
     char msg_out[256];
     char type_out[32];
-    bool ok = hu_proactive_check_important_dates(&persona, "min", 3, 7, 15, msg_out,
+    bool ok = hu_proactive_check_important_dates(&persona, "min", 3, 12, 25, msg_out,
                                                  sizeof(msg_out), type_out, sizeof(type_out));
     HU_ASSERT_TRUE(ok);
-    HU_ASSERT_STR_EQ(msg_out, "happy birthday!");
-    HU_ASSERT_STR_EQ(type_out, "birthday");
+    HU_ASSERT_STR_EQ(msg_out, "merry christmas!");
+    HU_ASSERT_STR_EQ(type_out, "holiday");
 }
 
 static void proactive_important_dates_no_match_returns_false(void) {
@@ -1412,7 +1437,8 @@ void run_proactive_tests(void) {
     HU_RUN_TEST(proactive_replay_key_two_contacts_produce_different_keys);
     HU_RUN_TEST(proactive_replay_key_rejects_null_or_empty);
     HU_RUN_TEST(proactive_replay_key_rejects_too_small_buffer);
-    HU_RUN_TEST(proactive_important_dates_match_returns_true_and_message);
+    HU_RUN_TEST(proactive_important_dates_personless_birthday_is_no_contacts);
+    HU_RUN_TEST(proactive_important_dates_holiday_matches_any_contact);
     HU_RUN_TEST(proactive_important_dates_no_match_returns_false);
     HU_RUN_TEST(proactive_important_dates_empty_returns_false);
 #ifdef HU_ENABLE_SQLITE

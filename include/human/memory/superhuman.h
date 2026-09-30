@@ -65,6 +65,12 @@ hu_error_t hu_superhuman_commitment_store(void *sqlite_ctx, hu_allocator_t *allo
 hu_error_t hu_superhuman_commitment_list_due(void *sqlite_ctx, hu_allocator_t *alloc,
                                              int64_t now_ts, size_t limit,
                                              hu_superhuman_commitment_t **out, size_t *out_count);
+/* Every commitment recorded at or after since_ts, any status, newest first.
+ * Feeds the precision sample (`human commitments sample`). */
+hu_error_t hu_superhuman_commitment_list_recent(void *sqlite_ctx, hu_allocator_t *alloc,
+                                                int64_t since_ts, size_t limit,
+                                                hu_superhuman_commitment_t **out,
+                                                size_t *out_count);
 hu_error_t hu_superhuman_commitment_mark_followed_up(void *sqlite_ctx, int64_t id);
 void hu_superhuman_commitment_free(hu_allocator_t *alloc, hu_superhuman_commitment_t *arr,
                                    size_t count);

@@ -908,25 +908,41 @@ hu_error_t hu_hybrid_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, hu_em
         }
 #ifdef HU_ENABLE_SQLITE
         if (graph_result.count > 0) {
-            /* Merge keyword + graph */
-            size_t kw_count = keyword_result.count;
-            size_t gr_count = graph_result.count;
-            size_t total = kw_count + gr_count;
+            /* Merge graph + keyword, capped at `limit`. Graph leads, as in the
+             * vector path's RRF list below ("graph first so it gets rank 1"),
+             * so the cap drops the keyword tail rather than the graph row.
+             *
+             * Entries are MOVED, not copied: struct copy, then zero the source
+             * slot, so hu_retrieval_result_free() on each leg releases only its
+             * arrays plus whatever the cap left behind. Copying and then
+             * freeing both legs (the previous code) freed every returned
+             * key/content -- the caller read freed memory and freed it again.
+             *
+             * No key dedupe: the graph leg is one synthesized context row
+             * keyed "graph", not a stored memory, so it cannot repeat a
+             * keyword hit (RRF's key merge in the vector path has nothing to
+             * collapse here either). */
+            size_t total = graph_result.count + keyword_result.count;
+            if (total > limit)
+                total = limit;
             hu_memory_entry_t *merged =
                 (hu_memory_entry_t *)alloc->alloc(alloc->ctx, total * sizeof(hu_memory_entry_t));
             double *scores = (double *)alloc->alloc(alloc->ctx, total * sizeof(double));
             if (merged && scores) {
-                if (kw_count > 0) {
-                    memcpy(merged, keyword_result.entries, kw_count * sizeof(hu_memory_entry_t));
-                    memcpy(scores, keyword_result.scores, kw_count * sizeof(double));
+                hu_retrieval_result_t *legs[2] = {&graph_result, &keyword_result};
+                size_t n = 0;
+                for (size_t l = 0; l < 2; l++) {
+                    hu_retrieval_result_t *leg = legs[l];
+                    for (size_t i = 0; i < leg->count && n < total; i++, n++) {
+                        merged[n] = leg->entries[i];
+                        scores[n] = leg->scores ? leg->scores[i] : leg->entries[i].score;
+                        memset(&leg->entries[i], 0, sizeof(leg->entries[i]));
+                    }
                 }
-                memcpy(merged + kw_count, graph_result.entries,
-                       gr_count * sizeof(hu_memory_entry_t));
-                memcpy(scores + kw_count, graph_result.scores, gr_count * sizeof(double));
                 hu_retrieval_result_free(alloc, &keyword_result);
                 hu_retrieval_result_free(alloc, &graph_result);
                 out->entries = merged;
-                out->count = total;
+                out->count = n; /* == total: the legs hold at least `total` rows */
                 out->scores = scores;
                 return hu_retrieval_filter_by_namespace(alloc, out, opts);
             }
@@ -935,6 +951,8 @@ hu_error_t hu_hybrid_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, hu_em
             if (scores)
                 alloc->free(alloc->ctx, scores, total * sizeof(double));
         }
+        /* OOM above (or no graph row): return the keyword leg alone. */
+        hu_retrieval_result_free(alloc, &graph_result);
 #endif
         *out = keyword_result;
         return hu_retrieval_filter_by_namespace(alloc, out, opts);
