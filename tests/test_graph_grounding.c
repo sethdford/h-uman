@@ -1426,9 +1426,11 @@ static void test_autodream_tick_populates_community_summaries_for_contact(void) 
 
 /* AC-1.3: Compliance test that the gate comment exists in source. Checks the
  * comment is PRESENT (not at a hardcoded line — that pinned line 1471 and broke
- * whenever code was inserted above it; presence is the real contract). */
+ * whenever code was inserted above it; presence is the real contract). The
+ * grounding call and its gate comment moved verbatim to the S3 retrieval stage
+ * in the 2026-09-30 hu_agent_turn carve. */
 static void test_gate_comment_exists_at_agent_turn_1471(void) {
-    FILE *f = fopen("src/agent/agent_turn.c", "r");
+    FILE *f = fopen("src/agent/turn/turn_retrieve.c", "r");
     HU_ASSERT_NOT_NULL(f);
 
     char buf[512];
@@ -1453,12 +1455,15 @@ static void test_gate_comment_exists_at_agent_turn_1471(void) {
  * judged irrelevant. Pins the decoupling: between the "Self-RAG: verify
  * relevance" comment and the "behavior_memory_ctx_nonempty" line that follows
  * the block, no graph_ctx free may appear. (Source-presence style, like the
- * gate-comment test above — fails on the pre-fix code that freed graph_ctx.) */
+ * gate-comment test above — fails on the pre-fix code that freed graph_ctx.)
+ * The block lives in the S3 retrieval stage since the 2026-09-30 carve; the
+ * scan must find it, or a move would turn this into a vacuous pass. */
 static void test_srag_memory_miss_does_not_free_graph_ctx(void) {
-    FILE *f = fopen("src/agent/agent_turn.c", "r");
+    FILE *f = fopen("src/agent/turn/turn_retrieve.c", "r");
     HU_ASSERT_NOT_NULL(f);
     char buf[512];
     bool in_block = false;
+    bool block_closed = false;
     bool freed_graph_in_block = false;
     while (fgets(buf, sizeof(buf), f)) {
         if (!in_block) {
@@ -1467,12 +1472,16 @@ static void test_srag_memory_miss_does_not_free_graph_ctx(void) {
             continue;
         }
         /* The statement immediately following the Self-RAG block. */
-        if (strstr(buf, "behavior_memory_ctx_nonempty") != NULL)
+        if (strstr(buf, "behavior_memory_ctx_nonempty") != NULL) {
+            block_closed = true;
             break;
+        }
         if (strstr(buf, "graph_ctx") != NULL && strstr(buf, "free") != NULL)
             freed_graph_in_block = true;
     }
     fclose(f);
+    HU_ASSERT_TRUE(in_block);
+    HU_ASSERT_TRUE(block_closed);
     HU_ASSERT_FALSE(freed_graph_in_block);
 }
 
