@@ -24,6 +24,7 @@
 
 #include "human/core/error.h"
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 /* Valid `decision` values. Storage is TEXT (for easy ad-hoc SQL from
@@ -35,6 +36,11 @@
 #define HU_PROACTIVE_DECISION_SEND    "send"
 #define HU_PROACTIVE_DECISION_DECLINE "decline"
 #define HU_PROACTIVE_DECISION_DEFER   "defer"
+
+/* Size of one recent-send reference. Outside the SQLite guard: the repeat
+ * check that consumes these (hu_init_proposer_repeats_recent) is built
+ * without SQLite too, and its tests failed to compile in the minimal build. */
+#define HU_PROACTIVE_REF_MAX 160
 
 #ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>
@@ -80,6 +86,15 @@ hu_error_t hu_proactive_decisions_repo_record(sqlite3 *db, int64_t ts, const cha
  * (Part B falls back to production_outcomes/proactive_sends until this
  * table has real rows). */
 hu_error_t hu_proactive_decisions_repo_count(sqlite3 *db, int64_t *out_count);
+
+/* The message_ref of each DELIVERED "proactive_send" row for `contact` with
+ * ts >= `since`, newest first, at most `cap` (each NUL-terminated,
+ * truncated to HU_PROACTIVE_REF_MAX - 1 bytes). For the repeat guard: never
+ * ask the same person the same thing twice in two weeks. */
+hu_error_t hu_proactive_decisions_repo_recent_sent_refs(sqlite3 *db, const char *contact,
+                                                        int64_t since,
+                                                        char out[][HU_PROACTIVE_REF_MAX],
+                                                        size_t cap, size_t *out_n);
 
 /* Timestamp of the newest row for (contact, trigger) that was actually sent
  * (sent = 1), or -1 when there is none. Voice-first memos use it for spacing. */
