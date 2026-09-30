@@ -34,7 +34,7 @@ if "--write" in args and not os.listdir(os.environ["FAKE_BACKUP_DIR"]):
 print(json.dumps({"commitments_seen": 3, "followups_seen": 1, "imported_pending": 2,
                   "imported_expired": 1, "reanchored": 1, "skipped_existing": 1,
                   "written": "--write" in args, "skipped_unsafe": 0,
-                  "ledger_retired": 1}))
+                  "ledger_retired": 1, "ledger_unretired": 0}))
 """
 
 

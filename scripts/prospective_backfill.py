@@ -54,11 +54,13 @@ import curator_names as cn  # noqa: E402
 
 HOME = os.path.expanduser("~")
 # The CLI's JSON line; skipped_unsafe (contact promises that cannot be
-# rephrased safely, controller ruling F4) and ledger_retired (ledger rows of
-# expired imports retired in the same transaction, known gap 5) are appended
-# after "written".
+# rephrased safely, controller ruling F4), ledger_retired (ledger rows of
+# expired imports retired in the same transaction, known gap 5) and
+# ledger_unretired (expired imports whose contact was too long to retire) are
+# appended after "written".
 KEYS = ("commitments_seen", "followups_seen", "imported_pending", "imported_expired",
-        "reanchored", "skipped_existing", "written", "skipped_unsafe", "ledger_retired")
+        "reanchored", "skipped_existing", "written", "skipped_unsafe", "ledger_retired",
+        "ledger_unretired")
 EXIT_REFUSED = 2
 EXIT_NO_MANIFEST = 3
 REQUIRED_COLUMNS = {"cue_kind", "due_at", "status", "surfaced_at", "attempts", "outcome",

@@ -160,7 +160,7 @@ static void cli_prospective_run_prints_the_probe_contract(void) {
     HU_ASSERT_STR_EQ(buf, "{\"commitments_seen\": 0, \"followups_seen\": 0, "
                           "\"imported_pending\": 0, \"imported_expired\": 0, \"reanchored\": 0, "
                           "\"skipped_existing\": 0, \"written\": false, \"skipped_unsafe\": 0, "
-                          "\"ledger_retired\": 0}\n");
+                          "\"ledger_retired\": 0, \"ledger_unretired\": 0}\n");
 
     HU_ASSERT_EQ(sqlite3_exec(db,
                               "INSERT INTO commitments(contact_id,description,who,deadline,status,"
@@ -180,7 +180,7 @@ static void cli_prospective_run_prints_the_probe_contract(void) {
     HU_ASSERT_STR_EQ(buf, "{\"commitments_seen\": 2, \"followups_seen\": 0, "
                           "\"imported_pending\": 1, \"imported_expired\": 0, \"reanchored\": 0, "
                           "\"skipped_existing\": 0, \"written\": true, \"skipped_unsafe\": 1, "
-                          "\"ledger_retired\": 0}\n");
+                          "\"ledger_retired\": 0, \"ledger_unretired\": 0}\n");
     mem.vtable->deinit(mem.ctx);
 }
 

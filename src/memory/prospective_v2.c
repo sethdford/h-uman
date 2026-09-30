@@ -352,10 +352,13 @@ typedef struct pm_backfill {
 } pm_backfill_t;
 
 /* Remember an expired ledger row. A contact too long for the slot is left
- * pending (fail toward the old behaviour, never a wrong-contact write). */
+ * pending (fail toward the old behaviour, never a wrong-contact write) and
+ * counted in ledger_unretired, so the miss is never silent. */
 static hu_error_t pm_backfill_defer(pm_backfill_t *b, const hu_prospective_ledger_row_t *r) {
-    if (r->contact_len >= sizeof(b->expired[0].contact))
+    if (r->contact_len >= sizeof(b->expired[0].contact)) {
+        b->out->ledger_unretired++;
         return HU_OK;
+    }
     if (b->expired_n == b->expired_cap) {
         size_t nc = b->expired_cap ? b->expired_cap * 2 : 16;
         pm_expired_row_t *nb = (pm_expired_row_t *)b->alloc->realloc(

@@ -120,6 +120,7 @@ typedef struct hu_prospective_backfill_counts {
     size_t skipped_existing; /* a time row already stands for the intention */
     size_t skipped_unsafe;   /* contact-owned, not safely rephrasable (F4): no row */
     size_t ledger_retired;   /* known gap 5: ledger rows of expired imports retired */
+    size_t ledger_unretired; /* expired imports whose contact is too long to retire */
 } hu_prospective_backfill_counts_t;
 
 /* One-time mirror of the ledger into time rows (spec §4.1, rollout step 2):
@@ -145,7 +146,8 @@ typedef struct hu_prospective_backfill_counts {
  * with the same text is not an expired import. The retires run after the
  * walk (no UPDATE under the walk's open SELECT), so an F20 pair's follow-up
  * is still visited and retired by its own id; ledger_retired counts the rows
- * changed. A re-run no longer sees the retired rows at all, so its
+ * changed; ledger_unretired counts expired imports left pending because
+ * the contact is too long to hold. A re-run no longer sees the retired rows at all, so its
  * commitments_seen / followups_seen / skipped_existing drop by them. */
 hu_error_t hu_prospective_v2_backfill(hu_allocator_t *alloc, hu_memory_t *mem, int64_t now,
                                       bool write, hu_prospective_backfill_counts_t *out);

@@ -122,7 +122,8 @@ static hu_error_t pm_run_deliver(hu_allocator_t *alloc, sqlite3 *db,
     return HU_OK;
 }
 
-/* One JSON line; skipped_unsafe and then ledger_retired (known gap 5) were
+/* One JSON line; skipped_unsafe, then ledger_retired and ledger_unretired
+ * (known gap 5) were
  * added after the plan's contract, so they are appended LAST (after
  * "written") to keep every earlier key in place. */
 static hu_error_t pm_run_backfill(hu_allocator_t *alloc, hu_memory_t *mem,
@@ -134,10 +135,11 @@ static hu_error_t pm_run_backfill(hu_allocator_t *alloc, hu_memory_t *mem,
     fprintf(out,
             "{\"commitments_seen\": %zu, \"followups_seen\": %zu, \"imported_pending\": %zu, "
             "\"imported_expired\": %zu, \"reanchored\": %zu, \"skipped_existing\": %zu, "
-            "\"written\": %s, \"skipped_unsafe\": %zu, \"ledger_retired\": %zu}\n",
+            "\"written\": %s, \"skipped_unsafe\": %zu, \"ledger_retired\": %zu, "
+            "\"ledger_unretired\": %zu}\n",
             b.commitments_seen, b.followups_seen, b.imported_pending, b.imported_expired,
             b.reanchored, b.skipped_existing, a->write ? "true" : "false", b.skipped_unsafe,
-            b.ledger_retired);
+            b.ledger_retired, b.ledger_unretired);
     return HU_OK;
 }
 

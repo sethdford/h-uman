@@ -1123,6 +1123,31 @@ static void v2_backfill_expired_import_retires_its_ledger_twins(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
+/* Fix round 1 minor: an expired import whose contact is too long for the
+ * deferred-retire slot is not retired -- and is counted, never silent. */
+static void v2_backfill_counts_an_unretirable_long_contact(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    char contact[301];
+    memset(contact, '7', 300);
+    contact[0] = '+';
+    contact[300] = '\0';
+    char sql[1024];
+    snprintf(sql, sizeof(sql),
+             "INSERT INTO commitments(contact_id,description,who,deadline,status,created_at) "
+             "VALUES('%s','renew the passport','me',%lld,'pending',1)",
+             contact, (long long)(NOW - 20 * 86400));
+    HU_ASSERT_EQ(sqlite3_exec(db, sql, NULL, NULL, NULL), SQLITE_OK);
+    hu_prospective_backfill_counts_t b;
+    HU_ASSERT_EQ(hu_prospective_v2_backfill(&alloc, &mem, NOW, true, &b), HU_OK);
+    HU_ASSERT_EQ(b.imported_expired, (size_t)1);
+    HU_ASSERT_EQ(b.ledger_retired, (size_t)0);
+    HU_ASSERT_EQ(b.ledger_unretired, (size_t)1);
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM commitments WHERE status='pending'"), (int64_t)1);
+    mem.vtable->deinit(mem.ctx);
+}
+
 /* The boundary is "more than 14 days": exactly 14 days overdue re-anchors. */
 static void v2_backfill_fourteen_day_boundary(void) {
     hu_allocator_t alloc = hu_system_allocator();
@@ -1217,6 +1242,7 @@ void run_prospective_v2_tests(void) {
     HU_RUN_TEST(v2_backfill_rows_are_identical_to_the_live_mirror);
     HU_RUN_TEST(v2_backfill_contact_promises_rerun_later_and_retire_by_id);
     HU_RUN_TEST(v2_backfill_expired_import_retires_its_ledger_twins);
+    HU_RUN_TEST(v2_backfill_counts_an_unretirable_long_contact);
     HU_RUN_TEST(v2_backfill_fourteen_day_boundary);
     HU_RUN_TEST(v2_backfill_failure_midway_writes_nothing_and_zeroes_counts);
 }
