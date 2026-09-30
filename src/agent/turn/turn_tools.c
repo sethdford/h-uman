@@ -254,6 +254,70 @@ static void *dag_parallel_worker(void *arg) {
 }
 #endif
 
+/* CausalArmor (HIGH-risk tools) then the interaction-history scorer (MEDIUM
+ * and up) on a successful tool result; either one replaces *result with a
+ * failure. One copy for the dispatcher path and the sequential fallback,
+ * which carried identical inline blocks before the carve (clone ratchet). */
+static void turn_tools_causal_and_history_guard(hu_agent_t *agent, const hu_tool_call_t *call,
+                                                const char *tn, size_t tn_len,
+                                                hu_tool_result_t *result) {
+    if (result->success && hu_tool_risk_level(tn[0] ? tn : "unknown") >= HU_RISK_HIGH) {
+        hu_causal_armor_config_t ca_cfg;
+        hu_causal_armor_config_default(&ca_cfg);
+        hu_causal_segment_t ca_segs[8];
+        size_t ca_seg_count = 0;
+        for (size_t hi = agent->history_count; hi > 0 && ca_seg_count < 8; hi--) {
+            const hu_owned_message_t *he = &agent->history[hi - 1];
+            if (he->content && he->content_len > 0) {
+                ca_segs[ca_seg_count].content = he->content;
+                ca_segs[ca_seg_count].content_len = he->content_len;
+                ca_segs[ca_seg_count].is_trusted = (he->role == HU_ROLE_USER);
+                ca_seg_count++;
+            }
+        }
+        if (ca_seg_count > 0) {
+            const char *args_str = call->arguments ? call->arguments : "";
+            size_t argl = call->arguments ? call->arguments_len : strlen(args_str);
+            hu_causal_armor_result_t ca_result;
+            if (hu_causal_armor_evaluate(&ca_cfg, ca_segs, ca_seg_count, tn, tn_len, args_str, argl,
+                                         &ca_result) == HU_OK &&
+                !ca_result.is_safe) {
+                static const char ca_msg[] = "blocked: untrusted content dominates tool decision";
+                hu_tool_result_free(agent->alloc, result);
+                *result = hu_tool_result_fail(ca_msg, sizeof(ca_msg) - 1);
+            }
+        }
+    }
+
+    /* Interaction-history safety scorer (post-CausalArmor) */
+    if (result->success && hu_tool_risk_level(tn[0] ? tn : "unknown") >= HU_RISK_MEDIUM) {
+        hu_tool_history_entry_t thist[16];
+        size_t thc = 0;
+        for (size_t hi = 0; hi < agent->history_count && thc < 16; hi++) {
+            const hu_owned_message_t *m = &agent->history[hi];
+            if (m->role != HU_ROLE_TOOL || !m->name || m->name_len == 0)
+                continue;
+            thist[thc].tool_name = m->name;
+            thist[thc].name_len = m->name_len;
+            thist[thc].succeeded =
+                !(m->content && m->content_len >= 6 && memcmp(m->content, "denied", 6) == 0);
+            thist[thc].risk_level = (uint32_t)hu_tool_risk_level(m->name);
+            thc++;
+        }
+        if (thc > 0) {
+            hu_history_score_result_t hs;
+            if (hu_history_scorer_evaluate(thist, thc, tn, tn_len,
+                                           (uint32_t)hu_tool_risk_level(tn[0] ? tn : "unknown"),
+                                           &hs) == HU_OK &&
+                hs.is_suspicious) {
+                static const char hs_msg[] = "blocked: suspicious tool-call history pattern";
+                hu_tool_result_free(agent->alloc, result);
+                *result = hu_tool_result_fail(hs_msg, sizeof(hs_msg) - 1);
+            }
+        }
+    }
+}
+
 hu_error_t hu_turn_tools(hu_turn_ctx_t *turn_ctx) {
     if (!turn_ctx || !turn_ctx->in.agent)
         return HU_ERR_INVALID_ARGUMENT;
@@ -1094,69 +1158,7 @@ hu_error_t hu_turn_tools(hu_turn_ctx_t *turn_ctx) {
                             }
                         }
 
-                        /* CausalArmor: check causal attribution for high-risk tools */
-                        if (result->success &&
-                            hu_tool_risk_level(tn_buf[0] ? tn_buf : "unknown") >= HU_RISK_HIGH) {
-                            hu_causal_armor_config_t ca_cfg;
-                            hu_causal_armor_config_default(&ca_cfg);
-                            hu_causal_segment_t ca_segs[8];
-                            size_t ca_seg_count = 0;
-                            for (size_t hi = agent->history_count; hi > 0 && ca_seg_count < 8;
-                                 hi--) {
-                                const hu_owned_message_t *he = &agent->history[hi - 1];
-                                if (he->content && he->content_len > 0) {
-                                    ca_segs[ca_seg_count].content = he->content;
-                                    ca_segs[ca_seg_count].content_len = he->content_len;
-                                    ca_segs[ca_seg_count].is_trusted = (he->role == HU_ROLE_USER);
-                                    ca_seg_count++;
-                                }
-                            }
-                            if (ca_seg_count > 0) {
-                                size_t argl =
-                                    call->arguments ? call->arguments_len : strlen(args_str);
-                                hu_causal_armor_result_t ca_result;
-                                if (hu_causal_armor_evaluate(&ca_cfg, ca_segs, ca_seg_count, tn_buf,
-                                                             tn, args_str, argl,
-                                                             &ca_result) == HU_OK &&
-                                    !ca_result.is_safe) {
-                                    static const char ca_msg[] =
-                                        "blocked: untrusted content dominates tool decision";
-                                    hu_tool_result_free(agent->alloc, result);
-                                    *result = hu_tool_result_fail(ca_msg, sizeof(ca_msg) - 1);
-                                }
-                            }
-                        }
-
-                        /* Interaction-history safety scorer (post-CausalArmor) */
-                        if (result->success &&
-                            hu_tool_risk_level(tn_buf[0] ? tn_buf : "unknown") >= HU_RISK_MEDIUM) {
-                            hu_tool_history_entry_t thist[16];
-                            size_t thc = 0;
-                            for (size_t hi = 0; hi < agent->history_count && thc < 16; hi++) {
-                                const hu_owned_message_t *m = &agent->history[hi];
-                                if (m->role != HU_ROLE_TOOL || !m->name || m->name_len == 0)
-                                    continue;
-                                thist[thc].tool_name = m->name;
-                                thist[thc].name_len = m->name_len;
-                                thist[thc].succeeded = !(m->content && m->content_len >= 6 &&
-                                                         memcmp(m->content, "denied", 6) == 0);
-                                thist[thc].risk_level = (uint32_t)hu_tool_risk_level(m->name);
-                                thc++;
-                            }
-                            if (thc > 0) {
-                                hu_history_score_result_t hs;
-                                if (hu_history_scorer_evaluate(thist, thc, tn_buf, tn,
-                                                               (uint32_t)hu_tool_risk_level(
-                                                                   tn_buf[0] ? tn_buf : "unknown"),
-                                                               &hs) == HU_OK &&
-                                    hs.is_suspicious) {
-                                    static const char hs_msg[] =
-                                        "blocked: suspicious tool-call history pattern";
-                                    hu_tool_result_free(agent->alloc, result);
-                                    *result = hu_tool_result_fail(hs_msg, sizeof(hs_msg) - 1);
-                                }
-                            }
-                        }
+                        turn_tools_causal_and_history_guard(agent, call, tn_buf, tn, result);
 
                         /* Autonomy: SUPERVISED forces approval; ASSISTED for medium/high risk
                          */
@@ -1534,70 +1536,8 @@ hu_error_t hu_turn_tools(hu_turn_ctx_t *turn_ctx) {
                             }
                         }
 
-                        /* CausalArmor on sequential path (mirrors parallel path) */
-                        if (result.success &&
-                            hu_tool_risk_level(pol_tn[0] ? pol_tn : "unknown") >= HU_RISK_HIGH) {
-                            hu_causal_armor_config_t ca_cfg;
-                            hu_causal_armor_config_default(&ca_cfg);
-                            hu_causal_segment_t ca_segs[8];
-                            size_t ca_seg_count = 0;
-                            for (size_t hi = agent->history_count; hi > 0 && ca_seg_count < 8;
-                                 hi--) {
-                                const hu_owned_message_t *he = &agent->history[hi - 1];
-                                if (he->content && he->content_len > 0) {
-                                    ca_segs[ca_seg_count].content = he->content;
-                                    ca_segs[ca_seg_count].content_len = he->content_len;
-                                    ca_segs[ca_seg_count].is_trusted = (he->role == HU_ROLE_USER);
-                                    ca_seg_count++;
-                                }
-                            }
-                            if (ca_seg_count > 0) {
-                                const char *args_str = call->arguments ? call->arguments : "";
-                                size_t argl =
-                                    call->arguments ? call->arguments_len : strlen(args_str);
-                                hu_causal_armor_result_t ca_result;
-                                if (hu_causal_armor_evaluate(&ca_cfg, ca_segs, ca_seg_count, pol_tn,
-                                                             pol_tn_len, args_str, argl,
-                                                             &ca_result) == HU_OK &&
-                                    !ca_result.is_safe) {
-                                    static const char ca_msg[] =
-                                        "blocked: untrusted content dominates tool decision";
-                                    hu_tool_result_free(agent->alloc, &result);
-                                    result = hu_tool_result_fail(ca_msg, sizeof(ca_msg) - 1);
-                                }
-                            }
-                        }
-
-                        /* History scorer on sequential path (mirrors parallel path) */
-                        if (result.success &&
-                            hu_tool_risk_level(pol_tn[0] ? pol_tn : "unknown") >= HU_RISK_MEDIUM) {
-                            hu_tool_history_entry_t thist[16];
-                            size_t thc = 0;
-                            for (size_t hi = 0; hi < agent->history_count && thc < 16; hi++) {
-                                const hu_owned_message_t *m = &agent->history[hi];
-                                if (m->role != HU_ROLE_TOOL || !m->name || m->name_len == 0)
-                                    continue;
-                                thist[thc].tool_name = m->name;
-                                thist[thc].name_len = m->name_len;
-                                thist[thc].succeeded = !(m->content && m->content_len >= 6 &&
-                                                         memcmp(m->content, "denied", 6) == 0);
-                                thist[thc].risk_level = (uint32_t)hu_tool_risk_level(m->name);
-                                thc++;
-                            }
-                            if (thc > 0) {
-                                hu_history_score_result_t hs;
-                                if (hu_history_scorer_evaluate(thist, thc, pol_tn, pol_tn_len,
-                                                               (uint32_t)hu_tool_risk_level(
-                                                                   pol_tn[0] ? pol_tn : "unknown"),
-                                                               &hs) == HU_OK &&
-                                    hs.is_suspicious) {
-                                    static const char hs_msg[] =
-                                        "blocked: suspicious tool-call history pattern";
-                                    hu_tool_result_free(agent->alloc, &result);
-                                    result = hu_tool_result_fail(hs_msg, sizeof(hs_msg) - 1);
-                                }
-                            }
-                        }
+                        turn_tools_causal_and_history_guard(agent, call, pol_tn, pol_tn_len,
+                                                            &result);
 
                         if (result.needs_approval && !agent->approval_cb) {
                             hu_tool_result_free(agent->alloc, &result);
