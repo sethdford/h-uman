@@ -395,6 +395,46 @@ static void local_day_start_is_a_stable_midnight(void) {
     HU_ASSERT_EQ(hu_prospective_local_day_start(d), d);
 }
 
+/* Task 8 M4, rendered in task 9: a relative day baked in at queue time is
+ * stale once the item is due, so a DUE_LIST line drops ONE leading, trailing
+ * or parenthesized relative-time phrase. Words that merely start the same,
+ * a phrase mid-sentence, and an action that is nothing but the phrase are
+ * left alone. SOFT and LEGACY are untouched. */
+static void render_due_list_drops_a_stale_relative_day(void) {
+    static const char *const cases[][2] = {
+        {"they mentioned the job interview (tomorrow); confidence 0.80",
+         "- they mentioned the job interview; confidence 0.80\n"},
+        {"they mentioned the trip (5 days ago); confidence 0.70",
+         "- they mentioned the trip; confidence 0.70\n"},
+        {"they mentioned the move (in 3 days)", "- they mentioned the move\n"},
+        {"call mom tonight", "- call mom\n"},
+        {"Tomorrow, call about the lease", "- call about the lease\n"},
+        {"send the photos in 3 days", "- send the photos\n"},
+        {"book the cabin this weekend", "- book the cabin\n"},
+        {"return the drill next week", "- return the drill\n"},
+        {"ask about today's game", "- ask about today's game\n"},
+        {"get tomorrowland tickets", "- get tomorrowland tickets\n"},
+        {"call tomorrow about the lease", "- call tomorrow about the lease\n"},
+        {"tonight", "- tonight\n"},
+        {"ask how it went (today", "- ask how it went (today\n"},
+    };
+    char buf[512];
+    size_t len = 0;
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        const char *acts[] = {cases[i][0]};
+        HU_ASSERT_EQ(
+            hu_prospective_render(HU_PM_RENDER_DUE_LIST, acts, NULL, 1, buf, sizeof(buf), &len),
+            (size_t)1);
+        HU_ASSERT_STR_EQ(buf, cases[i][1]);
+        HU_ASSERT_EQ(len, strlen(buf));
+    }
+    const char *soft[] = {"call mom tonight"};
+    HU_ASSERT_EQ(hu_prospective_render(HU_PM_RENDER_SOFT, soft, NULL, 1, buf, sizeof(buf), &len),
+                 (size_t)1);
+    HU_ASSERT_STR_EQ(buf, "[PROSPECTIVE MEMORY: If it fits naturally, you could bring up: call mom "
+                          "tonight]");
+}
+
 void run_prospective_policy_tests(void) {
     HU_TEST_SUITE("prospective policy");
     HU_RUN_TEST(policy_column_spellings_round_trip);
@@ -408,6 +448,7 @@ void run_prospective_policy_tests(void) {
     HU_RUN_TEST(reply_uses_action_needs_half_the_key_terms);
     HU_RUN_TEST(after_delivery_status_table);
     HU_RUN_TEST(render_styles_are_exact);
+    HU_RUN_TEST(render_due_list_drops_a_stale_relative_day);
     HU_RUN_TEST(commitment_action_flips_contact_promises_into_a_question);
     HU_RUN_TEST(judge_prompt_carries_history_intention_and_cue);
     HU_RUN_TEST(judge_user_keeps_tail_when_only_newline_is_trailing);

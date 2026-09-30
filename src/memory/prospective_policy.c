@@ -303,12 +303,67 @@ static const char k_pm_legacy_prefix[] = "[PROSPECTIVE MEMORY: Remember to: ";
 static const char k_pm_soft_prefix[] =
     "[PROSPECTIVE MEMORY: If it fits naturally, you could bring up: ";
 
+static bool pm_prefix_ci(const char *s, size_t len, const char *prefix);
+
+/* Length of a relative-time phrase at s[0..n) ("today", "tonight",
+ * "tomorrow", "yesterday", "this weekend", "next week", "in N days",
+ * "N days ago") ending at a word boundary, else 0. */
+static size_t pm_rel_time_len(const char *s, size_t n) {
+    size_t l = 0;
+    size_t d = pm_prefix_ci(s, n, "in ") ? 3 : 0;
+    size_t i = d;
+    while (i < n && isdigit((unsigned char)s[i]))
+        i++;
+    if (i > d && d == 3 && pm_prefix_ci(s + i, n - i, " days"))
+        l = i + 5;
+    else if (i > 0 && d == 0 && pm_prefix_ci(s + i, n - i, " days ago"))
+        l = i + 9;
+    for (const char *w = "this weekend\0next week\0yesterday\0tomorrow\0tonight\0today\0";
+         l == 0 && *w; w += strlen(w) + 1)
+        if (pm_prefix_ci(s, n, w))
+            l = strlen(w);
+    return l > 0 && (l == n || !(isalnum((unsigned char)s[l]) || s[l] == '\'')) ? l : 0;
+}
+
+/* Task 8 M4: a follow-up queued with its relative day baked in ("they
+ * mentioned X (tomorrow)", "call mom tonight") is stale once due. Returns `a`
+ * with ONE parenthesized, leading or trailing relative phrase cut (into tmp),
+ * or `a` itself when there is none or nothing else would be left. */
+static const char *pm_due_action(const char *a, char *tmp, size_t cap) {
+    size_t n = strlen(a);
+    for (size_t i = 0; i < n; i++) {
+        char before = i > 0 ? a[i - 1] : ' ';
+        size_t l = before == ' ' || before == '(' ? pm_rel_time_len(a + i, n - i) : 0;
+        size_t s = i;
+        size_t e = i + l;
+        if (l > 0 && before == '(' && e < n && a[e] == ')') {
+            s = i - 1; /* "(tomorrow)" */
+            e++;
+        } else if (l > 0 && i == 0 && e < n && (a[e] == ' ' || a[e] == ',')) {
+            while (e < n && (a[e] == ' ' || a[e] == ','))
+                e++; /* "Tomorrow, call …" */
+        } else if (l == 0 || i == 0 || before != ' ' || e != n) {
+            continue; /* not a trailing "… tonight" either */
+        }
+        while (s > 0 && (a[s - 1] == ' ' || a[s - 1] == ','))
+            s--;
+        if ((s == 0 && e == n) || n - (e - s) >= cap)
+            return a;
+        memcpy(tmp, a, s);
+        memcpy(tmp + s, a + e, n - e + 1);
+        return tmp;
+    }
+    return a;
+}
+
 static size_t pm_render_due_list(const char *const *actions, size_t n, char *buf, size_t cap,
                                  size_t *out_len) {
     size_t pos = 0;
     size_t rendered = 0;
+    char tmp[512];
     for (size_t i = 0; i < n && i < HU_PROSPECTIVE_RENDER_CAP; i++) {
-        int w = snprintf(buf + pos, cap - pos, "- %s\n", actions[i]);
+        int w =
+            snprintf(buf + pos, cap - pos, "- %s\n", pm_due_action(actions[i], tmp, sizeof(tmp)));
         if (w <= 0 || pos + (size_t)w >= cap)
             break;
         pos += (size_t)w;

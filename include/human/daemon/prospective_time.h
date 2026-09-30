@@ -31,4 +31,28 @@ size_t hu_daemon_prospective_due_followups(hu_allocator_t *alloc, struct hu_agen
                                            size_t target_len, const char *contact_id, int64_t now,
                                            char *buf, size_t cap, int64_t *listed_id);
 
+/* HU_PROSPECTIVE_TIME=off|shadow|live (default off) selects what the two
+ * producers above return:
+ *   off    — the legacy producers, unchanged;
+ *   shadow — the legacy producers, plus one read-only v2 time pass per contact
+ *            per local day, logged as "prospective time shadow: …" (counts,
+ *            then one "item: id=… verdict=…" line per judged intention, so a
+ *            report can dedupe per intention across passes);
+ *   live   — commitment_ctx returns nothing (commitments are mirrored into the
+ *            typed store) and due_followups returns the v2 per-contact due set
+ *            ("- <action>\n", at most one per contact per day, a stale
+ *            relative day dropped from the line), leaving *listed_id
+ *            untouched so the legacy mark-sent does not fire.
+ * The first call logs one banner line for the gate state (OFF included).
+ * HU_PROSPECTIVE_TIME stays in shadow until HU_PROSPECTIVE has passed its
+ * promotion (spec §4.4) and then needs its own 7-day SHADOW read (§6 step 5). */
+
+/* After a proactive message to `contact_id` was delivered (live only; off and
+ * shadow do nothing): settle THIS contact's surfaced time intention against
+ * the sent text — done when it carries the action (its commitment /
+ * follow-up ledger rows retire with it), otherwise an attempt. Another
+ * contact's rows are never read or settled. */
+void hu_daemon_prospective_time_after_send(struct hu_agent *agent, const char *contact_id,
+                                           const char *text, size_t text_len, int64_t now);
+
 #endif /* HU_DAEMON_PROSPECTIVE_TIME_H */
