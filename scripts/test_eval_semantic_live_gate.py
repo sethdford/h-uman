@@ -986,18 +986,38 @@ def test_hybrid_search_runs_the_plain_hybrid_cli_with_the_arm_env(monkeypatch, t
     class P:
         returncode = 0
         stdout = "  [1] k1 (0.500): a memory\n"
+        stderr = ""
 
     def fake_run(argv, **kw):
         seen["argv"], seen["env"] = argv, kw["env"]
         return P()
     monkeypatch.setattr(G.subprocess, "run", fake_run)
-    out = G.hybrid_search(str(human), "/tmp/m.db", "http://e", "q?", 5,
-                          G.fusion_env_for_arm("live", "score", 0.3))
+    out, semantic_unavailable = G.hybrid_search(str(human), "/tmp/m.db", "http://e", "q?", 5,
+                                                G.fusion_env_for_arm("live", "score", 0.3))
     assert out == ["a memory"]
+    assert semantic_unavailable is False
     assert seen["argv"][1:] == ["memory", "search", "--hybrid", "--plain", "q?"]
     assert seen["env"]["HU_HYBRID_FUSION"] == "score"
     assert seen["env"]["HU_HYBRID_FUSION_ALPHA"] == "0.30"
     assert seen["env"]["HU_MEMORY_SQLITE_PATH"] == "/tmp/m.db"
+
+
+def test_hybrid_search_detects_semantic_unavailable_marker_in_stderr(monkeypatch, tmp_path):
+    """The CLI's keyword-only fallback returns 0 with well-formed results —
+    hybrid_search() must still surface it via stderr, not returncode."""
+    human = tmp_path / "human"
+    human.write_text("")
+
+    class P:
+        returncode = 0
+        stdout = "  [1] k1 (0.500): a keyword-only memory\n"
+        stderr = "search --hybrid: semantic index unavailable, using keyword only\n"
+
+    monkeypatch.setattr(G.subprocess, "run", lambda *a, **k: P())
+    out, semantic_unavailable = G.hybrid_search(str(human), "/tmp/m.db", "http://e", "q?", 5,
+                                                G.fusion_env_for_arm("live", "score", 0.3))
+    assert out == ["a keyword-only memory"]  # the CLI still "succeeds"
+    assert semantic_unavailable is True      # but the call must be treated as invalid
 
 
 def test_main_fusion_pair_routes_both_arms_through_hybrid_search(monkeypatch, fake_server,
@@ -1011,7 +1031,11 @@ def test_main_fusion_pair_routes_both_arms_through_hybrid_search(monkeypatch, fa
 
     def fake_hybrid(human_bin, memory_db, embed_url, query, k, fusion_env, timeout=90):
         modes.append(fusion_env["HU_HYBRID_FUSION"])
-        return ["a memory about " + query[:10]]
+        # Distinct-per-arm content so contexts_differing_fraction sees a real
+        # difference (an identical-across-arms fake would trip the new
+        # --min-diff-frac floor and force INCONCLUSIVE regardless of what
+        # this test is actually asserting).
+        return ["a memory about " + query[:10] + " via " + fusion_env["HU_HYBRID_FUSION"]], False
     monkeypatch.setattr(G, "hybrid_search", fake_hybrid)
     out = str(tmp_path / "gate.json")
     rc = G.main(_base_args(fake_server, contexts_file, out, extra=["--fusion", "score",
@@ -1025,6 +1049,8 @@ def test_main_fusion_pair_routes_both_arms_through_hybrid_search(monkeypatch, fa
     assert modes.count("rrf") == 32 and modes.count("score") == 32
     assert doc["recall_coverage"] == 1.0
     assert doc["gate"].startswith("HU_HYBRID_FUSION rrf->score")
+    assert doc["contexts_differing"] == doc["contexts_total"] == 32
+    assert doc["limitations"] == [G.GRAPH_BOOST_LIMITATION]
 
 
 def test_main_fusion_score_without_alpha_refuses_and_writes_nothing(monkeypatch, fake_server,
