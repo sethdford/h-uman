@@ -23,8 +23,9 @@ one moves forward only on a measurement.
 | `shadow` | Reads each contact's raw inbound text (1:1 only, never the generated reply, no model) and logs `name_catch shadow: known=N new=M (not written)`. |
 | `live` | A known name bumps its entity. A new Capitalized name becomes an UNKNOWN entity with provenance `names:turn`, confidence 0.3. |
 
-It writes the graph but does not change what is sent, so it can go `live`
-first.
+It writes the graph but does not change what is sent. It goes `live` only
+after the baseline harness run (rollout step 5), so the baseline sees none of
+its writes.
 
 ## Gate 2: `HU_GRAPH_NAMES` (grounding, daemon plist)
 
@@ -34,8 +35,9 @@ first.
 | `shadow` | Composes both ways, logs `names shadow: off=… live=… bytes names=… (not injected)`, and injects the `off` block. |
 | `live` | Seeds only typed names (person, place, organization, event) and Capitalized UNKNOWN names, gives typed names a +0.5 bonus, and moves topics to one `Been talking about:` line. |
 
-`live` changes the messages sent as Seth. It needs the harness result below
-**and** Seth's go-ahead (a blind A/B, or an explicit override).
+`live` changes the messages sent as Seth. It is flipped only when a harness run
+with `--baseline` reports `flip_gate_met: true` (rollout step 6), and with Seth's
+go-ahead.
 
 ## Gate 3: the nightly `--names` step
 
@@ -91,7 +93,8 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.human.service-loop.pl
 ## Measurement: `eval_name_grounding.py`
 
 ```bash
-python3 scripts/eval_name_grounding.py
+python3 scripts/eval_name_grounding.py                                   # baseline run
+python3 scripts/eval_name_grounding.py --baseline <baseline result json> # the flip run
 ```
 
 The harness samples the last 40 inbound 1:1 texts from the last 14 days, at most
@@ -108,27 +111,69 @@ codes and the daemon's loopback handle (`channels.imessage.loopback_handle` in
 - The other gates default to prod (`HU_GRAPH_GROUNDING`,
   `HU_GRAPH_GROUNDING_CONTACT_FALLBACK` and `HU_GRAPH_GROUNDING_SELF_FACTS` all
   `live`) and are recorded in the output under `gates`. Change them with
-  `--grounding`, `--fallback` and `--self-facts`.
+  `--grounding`, `--fallback` and `--self-facts`; a non-prod run never flips.
 - Each text is passed as one argv element (no shell). It is never written to
   the output, stdout or stderr.
 - A block counts as a typed-name block when the probe header's `names=` is
   above 0. `names=` counts only the contact's block. The owner's
   `About you:` block never counts, because an owner fact is not the contact's
   name.
+- It counts what grounding **composes**, before the reply-tier gate. Prod
+  injects grounding only on some turns, so "15 of 40 blocks name someone" is
+  not "15 of 40 replies saw a name".
 
 The output is `~/.human/logs/name-grounding-<UTC YYYYmmdd-HHMMSS>.json` (0600).
-It holds counts only: `n`, `days`, `per_contact_cap`, `gates`, and per mode
-`nonempty_blocks`, `typed_name_blocks`, `distinct_typed_names`, `bytes_total`.
-It also holds `target_n` (40), `target_live_typed_name_blocks` (15) and
-`live_gate_met`.
+It holds counts and clause names only:
 
-**The LIVE gate:** `live_gate_met` is true only when `n` is exactly 40 and
-`modes.live.typed_name_blocks >= 15`. A run with another `--n` never meets it.
+- `n`, `days`, `per_contact_cap`, `gates`;
+- per mode: `nonempty_blocks`, `typed_name_blocks`, `distinct_typed_names`,
+  `bytes_total`;
+- `paired`: each moment's `off` block compared with its own `live` block
+  (`typed_gained`, `typed_lost`, `lexical_lost`, `both_typed`, `neither_typed`,
+  plus the diagnostics `nonempty_lost` and `changed_blocks`);
+- `baseline`: the `--baseline` run's `live` and `off` `typed_name_blocks`, or
+  `null`;
+- `flip_clauses`, `flip_blockers` (the failed clause names) and `flip_gate_met`.
+
+### Why the flip is paired, not `live >= 15`
+
+`live typed_name_blocks >= 15` alone does not measure `HU_GRAPH_NAMES`. The
+`off` renderer prints the same type suffixes, and with the contact fallback
+live, a contact whose top entity is typed fills every lexical miss in **both**
+modes. So once the writers have typed names, `off` rises with `live`. Worse,
+`live` can swap a match on what the text is about (a topic, "the boat trip")
+for an unrelated name, and that still counts as a typed-name block. The flip
+therefore compares each moment with itself:
+
+| Paired count | Moment |
+|---|---|
+| `typed_gained` | `off` names nobody, `live` names someone |
+| `typed_lost` | `off` names someone, `live` names nobody (a bug; 0 by design) |
+| `lexical_lost` | `off` matched the text lexically (`matched>0`), `live` did not |
+
+### The flip gate
+
+`flip_gate_met` is true only when **every** clause holds:
+
+| Clause | Holds when |
+|---|---|
+| `prod_parameters` | `n` 40, `days` 14, `per_contact_cap` 8 |
+| `prod_gates` | all three grounding gates `live` |
+| `live_typed_target_met` | `modes.live.typed_name_blocks >= 15` (spec §2) |
+| `no_typed_lost` | `paired.typed_lost == 0` |
+| `no_lexical_lost` | `paired.lexical_lost == 0` |
+| `typed_gained` | `paired.typed_gained >= 1` |
+| `rises_from_baseline` | `live` rises from the measured baseline: `modes.live.typed_name_blocks` > the `--baseline` run's (spec §2); false without `--baseline` |
+
+`--baseline` must be an earlier result from the same `n`, `days`,
+`per_contact_cap` and `gates`. An unreadable or non-comparable baseline is a
+refusal.
 
 **Refusals.** The harness exits 2 and writes nothing when:
 
 - the human binary is missing or not executable;
 - chat.db or config.json cannot be read;
+- the `--baseline` file cannot be read or was produced under other parameters;
 - fewer than 40 moments exist;
 - the graph copy fails or has no `entities` table;
 - any probe exits non-zero, times out, or prints output that breaks the
@@ -141,19 +186,26 @@ A partial run is not a measurement, so it never writes a result.
 as `live`. It does **not** show that `off` is byte-identical to the code before
 this change. That is proven by the C golden tests in
 `tests/test_graph_grounding.c` (`test_compose_turn_golden_and_stats`,
-`test_names_off_and_shadow_leave_the_golden_unchanged`). The harness also does
-not compare its `off` column to an earlier run, because the graph changes
-between runs.
+`test_names_off_and_shadow_leave_the_golden_unchanged`). The baseline's `off`
+count is recorded for context only; the graph changes between the runs, so the
+two `off` columns are not expected to match.
 
 ## Rollout (spec §6)
 
-1. Build-prod, run `scripts/install-human-daemon.sh`, then
-   `scripts/verify-deploy.sh <commit>`.
-2. Plist: `HU_NAME_CATCH=live`, `HU_GRAPH_NAMES=shadow`.
-3. Baseline: run `eval_name_grounding.py` before any new write.
-4. Migration `--write`, then one manual `insight_stream.py --names --write`.
-5. Re-run the harness. It must report `live_gate_met: true`.
-6. Append `&& /opt/homebrew/bin/python3 scripts/insight_stream.py --names --deadline 07:30 --write`
-   to `ai.human.insight-nightly`. Back up the plist first, then bootout and
-   bootstrap it.
-7. Set `HU_GRAPH_NAMES=live` only with the harness result and Seth's go-ahead.
+1. Deploy: build-prod, `scripts/install-human-daemon.sh`, then
+   `scripts/verify-deploy.sh <commit>`, with `HU_NAME_CATCH=off` and
+   `HU_GRAPH_NAMES=shadow` in the plist.
+2. Baseline: run `eval_name_grounding.py` before any new write. Keep the result
+   file path.
+3. Migration: `graph_retype_entities.py --write` (it takes the backup first).
+4. One manual `insight_stream.py --names --write` pass.
+5. Plist: set `HU_NAME_CATCH=live`.
+6. Re-run the harness with `--baseline <step 2 result>`. Set
+   `HU_GRAPH_NAMES=live` only if it reports `flip_gate_met: true`. If the only
+   blocker is `no_lexical_lost`, stay in `shadow` and report the paired counts
+   to Seth: relevance against names is his call, not a threshold's. Any other
+   blocker: stay in `shadow`.
+7. Append `; /opt/homebrew/bin/python3 scripts/insight_stream.py --names --deadline 07:30 --write`
+   to the `ai.human.insight-nightly` chain. Use `;`, not `&&`, so a failed or
+   refused earlier step does not silently skip `--names`. Back up the plist
+   first, then bootout and bootstrap it.

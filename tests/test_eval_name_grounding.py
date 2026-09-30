@@ -24,7 +24,10 @@ REAL_BIN = ROOT / "build" / "human"
 
 # FAKE_MODE shapes the answer: fail (exit 1), plain (the non---full header), mismatch
 # (header names= disagrees with the block), owner (a contact name plus an "About you:"
-# block naming Seth's own place), none ("Memory backend: none", exit 0).
+# block naming Seth's own place), none ("Memory backend: none", exit 0), typedlost (OFF
+# names Salim, LIVE names nobody), lexlost (OFF grounds non-salim texts on a matched
+# topic that LIVE drops), both (OFF and LIVE both name Salim). Default: only LIVE names
+# Salim, on the texts that mention salim.
 FAKE_GROUND = """#!{py}
 import os, sys
 assert sys.argv[1:4] == ["memory", "ground", "--full"], sys.argv
@@ -32,24 +35,29 @@ assert len(sys.argv) == 6, sys.argv  # the text is ONE argv element
 with open(os.environ["FAKE_LOG"], "a") as f:
     f.write(os.environ["HU_GRAPH_DB"] + "\\n")
 mode = os.environ.get("FAKE_MODE", "")
+live = os.environ["HU_GRAPH_NAMES"] == "live"
+salim = "salim" in sys.argv[5].lower()
 if mode == "fail":
     sys.exit(1)
 if mode == "none":
     print("Memory backend: none (not configured)")
     sys.exit(0)
-hit = os.environ["HU_GRAPH_NAMES"] == "live" and "salim" in sys.argv[5].lower()
 if mode == "plain":
     print("matched=0 bytes=0")
-elif mode == "owner" and hit:
-    block = "- Salim (person)\\nAbout you:\\n- St. Petersburg (place)\\n"
-    print(f"matched=1 bytes={{len(block)}} fallback=0 self=1 names=1")
+    sys.exit(0)
+block, matched, names, self_ = "", 0, 0, 0
+if salim and (live != (mode == "typedlost") or mode == "both"):
+    block, matched, names = "- Salim (person)\\n", 1, 1
+    if mode == "owner":
+        block += "About you:\\n- St. Petersburg (place)\\n"
+        self_ = 1
+    if mode == "mismatch":
+        names = 2
+elif mode == "lexlost" and not salim and not live:
+    block, matched = "- the boat trip (topic)\\n", 1
+print(f"matched={{matched}} bytes={{len(block)}} fallback=0 self={{self_}} names={{names}}")
+if block:
     print(block)
-elif hit:
-    names = 2 if mode == "mismatch" else 1
-    print(f"matched=1 bytes=17 fallback=0 self=0 names={{names}}")
-    print("- Salim (person)\\n")
-else:
-    print("matched=0 bytes=0 fallback=0 self=0 names=0")
 """
 
 
@@ -151,9 +159,12 @@ def test_sample_moments_is_deterministic_on_ties():
 def test_typed_names_and_parse_probe():
     b = "- Salim (person)\n  - Salim knows Bob (person)\n- sailboat (topic)\n- Acme (organization)\n"
     assert eg.typed_names(b) == ["Salim", "Acme"]
-    assert eg.parse_probe("matched=1 bytes=17 fallback=0 self=0 names=1\n- Salim (person)\n\n") == (
-        17, 1, "- Salim (person)\n\n")
-    assert eg.parse_probe("matched=0 bytes=0 fallback=1 self=0 names=0\n") == (0, 0, "")
+    p = eg.parse_probe("matched=1 bytes=17 fallback=0 self=0 names=1\n- Salim (person)\n\n")
+    assert (p.bytes, p.names, p.matched, p.fallback, p.block) == (
+        17, 1, 1, 0, "- Salim (person)\n\n")
+    p = eg.parse_probe("matched=0 bytes=17 fallback=1 self=0 names=1\n- Maria (person)\n\n")
+    assert (p.matched, p.fallback, p.names) == (0, 1, 1)  # a fallback block: no lexical seed
+    assert eg.parse_probe("matched=0 bytes=0 fallback=1 self=0 names=0\n") == (0, 0, 0, 1, "")
     assert eg.parse_probe("error: nope") is None
     assert eg.parse_probe("matched=0 bytes=0\n") is None                       # plain header
     assert eg.parse_probe("Memory backend: none (not configured)\n") is None
@@ -170,11 +181,62 @@ def test_typed_names_stop_at_the_owner_block():
     assert eg.typed_names("- A B (person)\n") == ["A B"]
 
 
+def P(nbytes, names, block="", matched=0, fallback=0):
+    return eg.Probe(nbytes, names, matched, fallback, block)
+
+
 def test_summarize_counts_typed_blocks_from_the_header():
-    res = [(17, 1, "- Salim (person)\n\n"), (40, 0, "- sailboat (topic)\n\n"),
-           (0, 0, ""), (17, 1, "- salim (person)\n\n")]
+    res = [P(17, 1, "- Salim (person)\n\n"), P(40, 0, "- sailboat (topic)\n\n"),
+           P(0, 0), P(17, 1, "- salim (person)\n\n")]
     assert eg.summarize(res) == {"nonempty_blocks": 3, "typed_name_blocks": 2,
                                  "distinct_typed_names": 1, "bytes_total": 74}
+
+
+def test_summarize_paired_compares_each_moment_off_vs_live():
+    """C1: typed_gained / typed_lost / lexical_lost are per moment, off[i] vs live[i]."""
+    off = [P(0, 0), P(17, 1, "a", matched=1), P(9, 0, "t", matched=1), P(17, 1, "a"), P(0, 0)]
+    live = [P(17, 1, "a"), P(0, 0), P(17, 1, "a", fallback=1), P(17, 1, "a"), P(0, 0)]
+    assert eg.summarize_paired(off, live) == {
+        "typed_gained": 2,     # moment 0, and moment 2 (which also lost its lexical match)
+        "typed_lost": 1,       # moment 1
+        "lexical_lost": 2,     # moments 1 and 2: off matched, live did not
+        "both_typed": 1,       # moment 3
+        "neither_typed": 1,    # moment 4
+        "nonempty_lost": 1,    # moment 1
+        "changed_blocks": 3}   # moments 0, 1, 2
+    with pytest.raises(ValueError):
+        eg.summarize_paired(off, live[:-1])  # unpaired results are never scored
+
+
+def _modes(live):
+    return {"live": {"typed_name_blocks": live}, "off": {"typed_name_blocks": 0}}
+
+
+CLEAN = {"typed_gained": 20, "typed_lost": 0, "lexical_lost": 0}
+
+
+def test_flip_clauses_each_one_can_block():
+    """C1/I1/ruling 2: every clause is necessary; a baseline is required to flip."""
+    base = {"live_typed_name_blocks": 10, "off_typed_name_blocks": 0}
+    ok = eg.flip_clauses(40, 14, 8, dict(eg.PROD_GATES), _modes(20), CLEAN, base)
+    assert all(ok.values()) and tuple(ok) == eg.FLIP_CLAUSES
+    cases = {
+        "prod_parameters": [dict(n=39), dict(days=15), dict(per_contact=40)],
+        "prod_gates": [dict(gates={**eg.PROD_GATES, "HU_GRAPH_GROUNDING_SELF_FACTS": "off"})],
+        "live_typed_target_met": [dict(modes=_modes(14))],
+        "no_typed_lost": [dict(paired={**CLEAN, "typed_lost": 1})],
+        "no_lexical_lost": [dict(paired={**CLEAN, "lexical_lost": 1})],
+        "typed_gained": [dict(paired={**CLEAN, "typed_gained": 0})],
+        "rises_from_baseline": [dict(baseline=None),
+                                dict(baseline={**base, "live_typed_name_blocks": 20})],
+    }
+    for clause, variants in cases.items():
+        for v in variants:
+            args = dict(n=40, days=14, per_contact=8, gates=dict(eg.PROD_GATES),
+                        modes=_modes(20), paired=CLEAN, baseline=base, **{})
+            args.update(v)
+            got = eg.flip_clauses(**args)
+            assert [c for c in eg.FLIP_CLAUSES if not got[c]] == [clause], (clause, v)
 
 
 # ── end to end on a fake binary ──────────────────────────────────────────────
@@ -192,7 +254,13 @@ def test_end_to_end_counts_only_on_a_private_copy(tmp_path, monkeypatch, capsys)
     assert r["gates"] == {"HU_GRAPH_GROUNDING": "live",
                           "HU_GRAPH_GROUNDING_CONTACT_FALLBACK": "live",
                           "HU_GRAPH_GROUNDING_SELF_FACTS": "live"}
-    assert r["target_live_typed_name_blocks"] == 15 and r["live_gate_met"] is True
+    assert r["target_live_typed_name_blocks"] == 15 and "live_gate_met" not in r
+    assert r["paired"] == {"typed_gained": 20, "typed_lost": 0, "lexical_lost": 0,
+                           "both_typed": 0, "neither_typed": 20, "nonempty_lost": 0,
+                           "changed_blocks": 20}
+    # every clause holds except the baseline one: no --baseline, no flip
+    assert r["flip_blockers"] == ["rises_from_baseline"] and r["flip_gate_met"] is False
+    assert r["baseline"] is None
     out = capsys.readouterr()
     for text in (json.dumps(r).lower(), out.out.lower(), out.err.lower()):
         assert "salim" not in text and "5550000" not in text  # counts only
@@ -224,7 +292,8 @@ def test_gate_not_met_below_target_or_off_n(tmp_path, monkeypatch):
     argv = setup(tmp_path, monkeypatch, few_hits)
     assert eg.main(argv) == 0
     r = result_of(tmp_path)
-    assert r["modes"]["live"]["typed_name_blocks"] == 5 and r["live_gate_met"] is False
+    assert r["modes"]["live"]["typed_name_blocks"] == 5 and r["flip_gate_met"] is False
+    assert "live_typed_target_met" in r["flip_blockers"]
 
 
 def test_gate_never_met_when_n_is_not_40(tmp_path, monkeypatch):
@@ -232,7 +301,89 @@ def test_gate_never_met_when_n_is_not_40(tmp_path, monkeypatch):
     assert eg.main(argv + ["--n", "30"]) == 0
     r = result_of(tmp_path)
     assert r["n"] == 30 and r["modes"]["live"]["typed_name_blocks"] >= 15
-    assert r["live_gate_met"] is False
+    assert r["flip_gate_met"] is False and "prod_parameters" in r["flip_blockers"]
+
+
+def write_baseline(tmp_path, live=10, off=0, **over):
+    b = {"n": 40, "days": 14, "per_contact_cap": 8, "gates": dict(eg.PROD_GATES),
+         "modes": {"live": {"typed_name_blocks": live}, "off": {"typed_name_blocks": off}}}
+    b.update(over)
+    path = tmp_path / "baseline.json"
+    path.write_text(json.dumps(b))
+    return ["--baseline", str(path)]
+
+
+def test_flip_gate_met_with_a_lower_baseline(tmp_path, monkeypatch):
+    argv = setup(tmp_path, monkeypatch, corpus())
+    assert eg.main(argv + write_baseline(tmp_path, live=10, off=3)) == 0
+    r = result_of(tmp_path)
+    assert r["baseline"] == {"live_typed_name_blocks": 10, "off_typed_name_blocks": 3}
+    assert r["flip_blockers"] == [] and r["flip_gate_met"] is True
+    assert all(r["flip_clauses"].values())
+
+
+def test_flip_blocked_when_live_does_not_rise_from_baseline(tmp_path, monkeypatch):
+    argv = setup(tmp_path, monkeypatch, corpus())
+    assert eg.main(argv + write_baseline(tmp_path, live=20)) == 0
+    r = result_of(tmp_path)
+    assert r["flip_blockers"] == ["rises_from_baseline"] and r["flip_gate_met"] is False
+
+
+def test_per_contact_40_run_never_flips(tmp_path, monkeypatch):
+    """I1: a non-prod sampling run reports flip_gate_met false, parameter clause named."""
+    argv = setup(tmp_path, monkeypatch, corpus())
+    assert eg.main(argv + ["--per-contact", "40"]) == 0
+    r = result_of(tmp_path)
+    assert r["flip_gate_met"] is False and "prod_parameters" in r["flip_blockers"]
+    assert r["modes"]["live"]["typed_name_blocks"] >= 15  # the old ≥15-only gate would pass
+
+
+def test_non_prod_gates_never_flip(tmp_path, monkeypatch):
+    argv = setup(tmp_path, monkeypatch, corpus())
+    assert eg.main(argv + ["--fallback", "off"]) == 0
+    r = result_of(tmp_path)
+    assert r["flip_gate_met"] is False and "prod_gates" in r["flip_blockers"]
+
+
+@pytest.mark.parametrize("mode,blocker,count", [
+    ("typedlost", "no_typed_lost", ("typed_lost", 20)),
+    ("lexlost", "no_lexical_lost", ("lexical_lost", 20)),
+    ("both", "typed_gained", ("both_typed", 20)),
+])
+def test_paired_regressions_block_the_flip(tmp_path, monkeypatch, mode, blocker, count):
+    """C1: live >= 15/40 alone would pass (both/lexlost) -- the paired clauses block."""
+    argv = setup(tmp_path, monkeypatch, corpus())
+    monkeypatch.setenv("FAKE_MODE", mode)
+    assert eg.main(argv + write_baseline(tmp_path, live=0)) == 0
+    r = result_of(tmp_path)
+    assert r["paired"][count[0]] == count[1]
+    assert r["flip_gate_met"] is False and blocker in r["flip_blockers"]
+    if mode == "lexlost":  # relevance traded for names is the ONLY blocker here
+        assert r["flip_blockers"] == ["no_lexical_lost"]
+        assert r["modes"]["live"]["typed_name_blocks"] == 20
+
+
+@pytest.mark.parametrize("bad", ["missing", "not-json", "not-a-result", "per_contact_cap",
+                                 "days", "n", "gates", "count-not-int"])
+def test_refuses_an_unusable_baseline(tmp_path, monkeypatch, bad):
+    """Ruling 2: an unreadable or non-comparable baseline is a refusal, before any probe."""
+    argv = setup(tmp_path, monkeypatch, corpus())
+    if bad == "missing":
+        extra = ["--baseline", str(tmp_path / "nope.json")]
+    elif bad == "not-json":
+        (tmp_path / "b.json").write_text("{nope")
+        extra = ["--baseline", str(tmp_path / "b.json")]
+    elif bad == "not-a-result":
+        (tmp_path / "b.json").write_text("[1, 2]")
+        extra = ["--baseline", str(tmp_path / "b.json")]
+    elif bad == "count-not-int":
+        extra = write_baseline(tmp_path, live=True)
+    else:
+        other = {"per_contact_cap": 40, "days": 30, "n": 30,
+                 "gates": {**eg.PROD_GATES, "HU_GRAPH_GROUNDING_CONTACT_FALLBACK": "off"}}
+        extra = write_baseline(tmp_path, **{bad: other[bad]})
+    assert_refused_and_clean(tmp_path, eg.main(argv + extra))
+    assert not (tmp_path / "fake.log").exists()  # refused before any probe ran
 
 
 def test_loopback_handle_from_config_is_not_sampled(tmp_path, monkeypatch):
