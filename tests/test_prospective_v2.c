@@ -586,7 +586,8 @@ static void v2_surface_write_failure_is_not_rendered_and_stays_pending(void) {
     HU_ASSERT_EQ(hu_prospective_v2_run(&alloc, db, HU_PM_CUE_KEYWORD, &t, &j, true, &c, &d, &dl),
                  HU_OK);
     HU_ASSERT_EQ(c.fire, (size_t)1);      /* the judge did say fire */
-    HU_ASSERT_EQ(c.judge_err, (size_t)1); /* but the surfaced write failed: counted, not silent */
+    HU_ASSERT_EQ(c.write_err, (size_t)1); /* but the surfaced write failed: counted, not silent */
+    HU_ASSERT_EQ(c.judge_err, (size_t)0); /* the judge itself answered fine (task 7 ruling 1) */
     HU_ASSERT_NULL(d);                    /* not rendered */
     HU_ASSERT_EQ(dl, (size_t)0);
     HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE action LIKE "

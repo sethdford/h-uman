@@ -87,9 +87,9 @@ static void pm_count_verdict(hu_prospective_counts_t *c, const hu_prospective_it
  * only the ones whose write actually changed a row. An item whose write
  * failed (a real backend error) or matched no row (deleted/already moved
  * between list and here) is NOT rendered — it stays pending and is
- * retried on a later turn — and is counted judge_err (the counts struct
- * has no dedicated slot for "surfaced write failed"; see task-6 fix
- * round 1). Returns HU_OK with *directive NULL when nothing rendered. */
+ * retried on a later turn — and is counted write_err (the judge itself
+ * answered; judge_err is only for a failed judge call). Returns HU_OK with
+ * *directive NULL when nothing rendered. */
 static hu_error_t pm_surface(hu_allocator_t *alloc, sqlite3 *db, hu_prospective_cue_kind_t kind,
                              const hu_prospective_item_t *const *fire, size_t fire_n, int64_t now,
                              hu_prospective_counts_t *counts, char **directive,
@@ -102,7 +102,7 @@ static hu_error_t pm_surface(hu_allocator_t *alloc, sqlite3 *db, hu_prospective_
         hu_error_t terr = hu_prospective_repo_transition(
             db, fire[k], HU_PM_SURFACED, HU_PM_OUTCOME_NONE, fire[k]->attempts, now, &changed);
         if (terr != HU_OK || changed <= 0) {
-            counts->judge_err++;
+            counts->write_err++;
             continue;
         }
         acts[ok_n] = fire[k]->action;

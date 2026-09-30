@@ -51,8 +51,9 @@ typedef struct hu_prospective_item_verdict {
 typedef struct hu_prospective_counts {
     size_t candidates; /* eligible and judged (<= HU_PROSPECTIVE_JUDGE_CAP) */
     size_t fire, resolved, cancel, not_now, parse_fail, judge_err;
-    size_t expired; /* past their window this pass */
-    size_t capped;  /* time cues over the per-day cap */
+    size_t expired;   /* past their window this pass */
+    size_t capped;    /* time cues over the per-day cap */
+    size_t write_err; /* FIRE, but the surfaced write failed or matched no row: not rendered */
     hu_prospective_item_verdict_t items[HU_PROSPECTIVE_JUDGE_CAP];
     size_t item_count;
     char fire_actions[HU_PROSPECTIVE_RENDER_CAP][256]; /* would-fire actions (SHADOW uptake) */
