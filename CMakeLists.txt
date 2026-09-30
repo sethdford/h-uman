@@ -974,6 +974,7 @@ set(HU_CORE_SOURCES
     src/memory/emotional_moments.c
     src/memory/repos/emotional_moments_repo_sqlite.c
     src/memory/superhuman.c
+    src/memory/prospective_policy.c
     src/memory/contact_graph.c
     src/memory/identity_resolver.c
     src/memory/fast_capture.c
@@ -4242,6 +4243,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_agent_fit_history.c
     tests/test_prospective.c
     tests/test_prospective_repo_sqlite.c
+    tests/test_prospective_policy.c
     tests/test_eval_score.c
     tests/test_corrective_rag.c
     tests/test_adaptive_rag.c

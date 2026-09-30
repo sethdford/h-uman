@@ -281,6 +281,34 @@ static void expire_sweep_retires_only_past_due_open_rows(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
+/* Byte-for-byte pin of the pre-v2 directive: HU_PROSPECTIVE=off must stay
+ * identical (spec 2026-09-30 §4.4). Four intentions cued at once, newest
+ * first; the fourth is over the render cap and stays open. */
+static void directive_build_legacy_bytes_are_pinned(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_NOT_NULL(db);
+    int64_t now = (int64_t)time(NULL);
+    seed_at(db, "keyword", "alpha", "ask about alpha", "+15550000001", 0, 0, now - 10);
+    seed_at(db, "keyword", "beta", "ask about beta", "+15550000001", 0, 0, now - 20);
+    seed_at(db, "keyword", "gamma", "ask about gamma", "+15550000001", 0, 0, now - 30);
+    seed_at(db, "keyword", "delta", "ask about delta", "+15550000001", 0, 0, now - 40);
+    static const char msg[] = "alpha beta gamma delta";
+    static const char expected[] =
+        "[PROSPECTIVE MEMORY: Remember to: ask about alpha (triggered by: alpha) | ask about "
+        "beta (triggered by: beta) | ask about gamma (triggered by: gamma)]";
+    size_t len = 0;
+    char *d = hu_prospective_directive_build(&alloc, db, msg, sizeof(msg) - 1, "+15550000001", 12,
+                                             now, &len);
+    HU_ASSERT_NOT_NULL(d);
+    HU_ASSERT_STR_EQ(d, expected);
+    HU_ASSERT_EQ(len, sizeof(expected) - 1);
+    alloc.free(alloc.ctx, d, len + 1);
+    HU_ASSERT_EQ(count_open_for(db, "+15550000001"), (int64_t)1); /* delta */
+    mem.vtable->deinit(mem.ctx);
+}
+
 void run_prospective_tests(void) {
     HU_TEST_SUITE("prospective memory triggers");
     HU_RUN_TEST(check_triggers_matches_case_folded_phrase_for_contact);
@@ -291,6 +319,7 @@ void run_prospective_tests(void) {
     HU_RUN_TEST(directive_build_renders_cued_intentions_and_retires_them);
     HU_RUN_TEST(directive_build_returns_null_when_nothing_is_cued);
     HU_RUN_TEST(expire_sweep_retires_only_past_due_open_rows);
+    HU_RUN_TEST(directive_build_legacy_bytes_are_pinned);
 }
 
 #else
