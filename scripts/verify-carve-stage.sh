@@ -24,20 +24,24 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 
 [ -f build/CMakeCache.txt ] || fail "no build/ — run: cmake --preset dev"
 
-merge_base="$(git merge-base HEAD origin/main)"
+# Commit that recorded the characterization goldens (PR 0, fix round 1).
+GOLDEN_BASELINE=129acacdbff48791842a36cd6d47c4e702d31885
 
 step "intent-to-add new src/agent/turn/*.c and *.h files (clone ratchet only scans tracked files)"
 git add -N src/agent/turn/*.c src/agent/turn/*.h 2>/dev/null || true
 echo "ok"
 
-step "goldens untouched vs merge-base with origin/main"
-# --diff-filter=MD: Tasks 1-4 ADDED this fixture directory on this branch, so
-# it does not exist at merge-base at all (PR #562 is not yet merged) — a
-# plain diff would report every golden as "changed" forever. What this gate
-# must catch is a LATER stage-move commit modifying or deleting an
-# already-established golden, so it filters to Modified/Deleted only.
-changed="$(git diff --name-only --diff-filter=MD "$merge_base" -- tests/fixtures/agent_turn_golden)"
-[ -z "$changed" ] || fail "golden fixtures changed since merge-base (a stage commit may not regenerate them): $changed"
+step "goldens untouched since they were recorded (pinned $GOLDEN_BASELINE)"
+# The goldens are the byte-identity oracle for every stage move, so they are
+# compared against the commit that RECORDED them, not against a moving
+# merge-base: while PR 0 is unmerged they do not exist on origin/main at all,
+# which turns any merge-base diff into an Added-only list that can never flag a
+# re-recorded golden. Any A/M/D after the pin is a violation. Re-pin only in a
+# commit whose message explains why the goldens had to change.
+git cat-file -e "$GOLDEN_BASELINE^{commit}" 2>/dev/null \
+    || fail "GOLDEN_BASELINE $GOLDEN_BASELINE is not a commit in this repo"
+changed="$(git diff --name-status "$GOLDEN_BASELINE" -- tests/fixtures/agent_turn_golden)"
+[ -z "$changed" ] || fail "golden fixtures changed since $GOLDEN_BASELINE (a stage commit may not regenerate them): $changed"
 echo "ok"
 
 step "dev build: human + human_tests"
@@ -58,7 +62,7 @@ step "characterization goldens"
 # If build/ is not the configuration the goldens were made for and the test
 # is SKIPped instead of run, this exact PASS line is absent either way, so
 # one check covers both failure shapes.
-grep -q 'PASS  characterization_matches_goldens' "$logs/char.log" \
+grep -qE '^  PASS  characterization_matches_goldens$' "$logs/char.log" \
     || { cat "$logs/char.log"; fail "characterization_matches_goldens did not report PASS"; }
 grep '^--- Results:' "$logs/char.log"
 
@@ -96,12 +100,15 @@ turn_files="$(ls src/agent/turn/*.c 2>/dev/null || true)"
 # shellcheck disable=SC2086
 sh scripts/check-function-length-ceiling.sh src/agent/agent_turn.c src/daemon.c $turn_files 2>&1 | tail -4
 bash scripts/check-file-size-ceiling.sh 2>&1 | tail -2
-bash scripts/check-clone-ratchet.sh 2>&1 | grep -E 'Clone groups found|FAIL|NOTE' || true
+rc=0; bash scripts/check-clone-ratchet.sh > "$logs/clone.log" 2>&1 || rc=$?
+grep -E 'Clone groups found|FAIL|NOTE' "$logs/clone.log" || true
+[ "$rc" -eq 0 ] || fail "clone ratchet (exit $rc)"
 bash scripts/check-sqlite-includer-ratchet.sh 2>&1 | tail -2
 bash scripts/check-agent-flat-ratchet.sh 2>&1 | tail -2
 bash scripts/check-agent-core-boundary.sh 2>&1 | tail -3
-HU_DEAD_STRIP_STRICT=1 bash scripts/check-dead-strip-ratchet.sh 2>&1 \
-    | grep -E '^A = |^B = |RATCHET_SKIP|FAIL' || true
+rc=0; HU_DEAD_STRIP_STRICT=1 bash scripts/check-dead-strip-ratchet.sh > "$logs/deadstrip.log" 2>&1 || rc=$?
+grep -E '^A = |^B = |RATCHET_SKIP|FAIL' "$logs/deadstrip.log" || true
+[ "$rc" -eq 0 ] || fail "dead-strip ratchet (exit $rc)"
 bash scripts/check-test-source-gate-symmetry.sh 2>&1 | tail -2
 bash tests/fixtures/check-agent-flat/run-smoke-test.sh
 
