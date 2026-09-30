@@ -3876,6 +3876,9 @@ tests/test_imessage_action_telemetry.c
     tests/test_reply_prompt.c
     tests/test_agent_turn_state.c
     tests/test_agent_turn_transport.c
+    tests/turn_recording_provider.c
+    tests/test_turn_recording_provider.c
+    tests/test_agent_turn_characterization.c
     tests/test_agent_llm_latency_wall_clock.c
     tests/test_agent_turn_request_overrides.c
     tests/test_agent_max_tokens_resolve.c
@@ -4457,6 +4460,13 @@ target_compile_definitions(human_tests PRIVATE "HU_EVAL_SUITES_DIR=\"${HU_ROOT}/
 # Phase D Task D-1 (CF-7 RL SOTA): same HU_ML_SCRIPTS_DIR for tests.
 target_compile_definitions(human_tests PRIVATE "HU_ML_SCRIPTS_DIR=\"${HU_ROOT}/scripts\"")
 target_compile_definitions(human_tests PRIVATE "HU_TEST_DATA_DIR=\"${HU_ROOT}/data\"")
+# Fix round 1 / I3 (agent-turn carve characterization): ctest and any CI
+# runner invoke human_tests with cwd=build/, not the repo root, so a
+# relative "tests/fixtures/..." path silently resolves to nothing and
+# characterization_matches_goldens SKIPs (passes) instead of running.
+# Absolute path, test-target-only (never added to the `human` binary).
+target_compile_definitions(human_tests PRIVATE
+    "HU_AGENT_TURN_GOLDEN_DIR=\"${HU_ROOT}/tests/fixtures/agent_turn_golden\"")
 target_compile_definitions(human_tests PRIVATE HU_IS_TEST=1 HU_GATEWAY_TEST_MODE=1 HU_HAS_NONE_ENGINE=1 HU_HAS_CRON=1 HU_HAS_PUSH=1 HU_HAS_UPDATE=1 HU_HAS_SKILLS=1 HU_HAS_RUNTIME_EXOTIC=1)
 # Mirror HU_HAS_LIBSODIUM onto human_tests so tests/test_main.c's
 # `#ifdef HU_HAS_LIBSODIUM` call-site guard for run_persona_encryption_tests()
