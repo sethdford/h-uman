@@ -2,7 +2,7 @@
 === chat #1
 model=char-model temperature=0.300
 req.model=char-model req.temperature=0.700 max_tokens=0 timeout_secs=0 thinking_budget=0 logprobs=0 stream_strip=0 budget_usd=0.0000
-opts: reasoning_effort=- response_format=- response_schema=- prompt_cache_id=<PROMPT_CACHE_ID>
+opts: reasoning_effort=- response_format=- response_schema=- prompt_cache_id=<PCID:=sys>
 steering=0 formality=0.000 verbosity=0.000 warmth=0.000 humor=0.000
 stop_sequences=0
 tools=2
@@ -21,7 +21,7 @@ reply=step0 err=0
 === chat #2
 model=char-model temperature=0.300
 req.model=char-model req.temperature=0.700 max_tokens=0 timeout_secs=0 thinking_budget=0 logprobs=0 stream_strip=0 budget_usd=0.0000
-opts: reasoning_effort=- response_format=- response_schema=- prompt_cache_id=<PROMPT_CACHE_ID>
+opts: reasoning_effort=- response_format=- response_schema=- prompt_cache_id=<PCID:=sys>
 steering=0 formality=0.000 verbosity=0.000 warmth=0.000 humor=0.000
 stop_sequences=0
 tools=2
@@ -45,7 +45,7 @@ reply=step1 err=0
 === chat #3
 model=char-model temperature=0.700
 req.model=char-model req.temperature=0.700 max_tokens=0 timeout_secs=0 thinking_budget=0 logprobs=0 stream_strip=0 budget_usd=0.0000
-opts: reasoning_effort=- response_format=- response_schema=- prompt_cache_id=<PROMPT_CACHE_ID>
+opts: reasoning_effort=- response_format=- response_schema=- prompt_cache_id=<PCID:=sys>
 steering=0 formality=0.000 verbosity=0.000 warmth=0.000 humor=0.000
 stop_sequences=0
 tools=2
@@ -74,7 +74,7 @@ reply=step2 err=0
 === chat #4
 model=char-model temperature=0.700
 req.model=char-model req.temperature=0.700 max_tokens=0 timeout_secs=0 thinking_budget=0 logprobs=0 stream_strip=0 budget_usd=0.0000
-opts: reasoning_effort=- response_format=- response_schema=- prompt_cache_id=<PROMPT_CACHE_ID>
+opts: reasoning_effort=- response_format=- response_schema=- prompt_cache_id=<PCID:=sys>
 steering=0 formality=0.000 verbosity=0.000 warmth=0.000 humor=0.000
 stop_sequences=0
 tools=2

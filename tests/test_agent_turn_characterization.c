@@ -20,10 +20,13 @@
  * restored after; HU_STATE_DIR, HOME and the workspace dir are an empty scratch
  * dir; TZ is pinned; the monotonic clock is pinned; the mkdtemp workspace path
  * printed into the system prompt ("Workspace: <dir>") is replaced with the
- * fixed token <WORKSPACE>, and the prompt_cache_id hash derived from content
- * that embeds that path (src/agent/agent_turn.c) is replaced with
- * <PROMPT_CACHE_ID>, both before trp_scrub() runs (so two runs in two
- * different temp dirs produce identical bytes); and the resulting log is
+ * fixed token <WORKSPACE> before trp_scrub() runs (so two runs in two
+ * different temp dirs produce identical bytes); prompt_cache_id (a hash of
+ * that same workspace-path-embedding content) is verified, not masked — the
+ * recording provider recomputes hu_prompt_cache_hash(msg[0].content) itself
+ * and logs a constant marker on a match, the raw id on any mismatch (fix
+ * round 1 / M1) — so a real drift in what gets hashed fails loudly instead
+ * of being silently swallowed; and the resulting log is
  * passed through trp_scrub(). characterization_is_timezone_invariant (UTC vs
  * UTC+14) and characterization_is_repeatable prove no clock byte escapes.
  *
@@ -54,7 +57,18 @@
 #include <string.h>
 #include <time.h>
 
-#define CH_GOLDEN_DIR     "tests/fixtures/agent_turn_golden"
+/* Fix round 1 / I3: HU_AGENT_TURN_GOLDEN_DIR (CMakeLists.txt, human_tests
+ * target only) carries the absolute repo path, because ctest and CI invoke
+ * human_tests with cwd=build/ — a relative path here would silently SKIP
+ * (and PASS) every run that isn't launched by hand from the repo root. Fall
+ * back to the historical relative path only when the macro is somehow
+ * undefined (e.g. a hand-rolled non-CMake build), so the suite still runs
+ * for someone invoking the binary from the repo root directly. */
+#ifdef HU_AGENT_TURN_GOLDEN_DIR
+#define CH_GOLDEN_DIR HU_AGENT_TURN_GOLDEN_DIR
+#else
+#define CH_GOLDEN_DIR "tests/fixtures/agent_turn_golden"
+#endif
 #define CH_PINNED_MONO_MS 1767261600000LL /* 2026-01-01T10:00:00Z */
 
 /* ── build fingerprint ─────────────────────────────────────────────────── */
@@ -274,16 +288,16 @@ static void ch_env_leave(ch_env_t *e) {
     tzset();
 }
 
-/* ── F2: mask the per-run mkdtemp workspace path before trp_scrub() ─────
- * The system prompt embeds "Workspace: <dir>" where <dir> is the mkdtemp'd
- * scratch dir from ch_env_enter — a different literal path on every run.
- * Replace every occurrence of e->dir in the raw log with the fixed token
- * <WORKSPACE> BEFORE trp_scrub() runs, so two runs in two different temp
- * dirs produce byte-identical logs (proven by characterization_is_repeatable
- * and, transitively, characterization_is_timezone_invariant). */
-static char *ch_mask_workspace(const char *log, size_t log_len, const char *dir, size_t *out_len) {
-    size_t dir_len = strlen(dir);
-    if (dir_len == 0) {
+/* Fix round 1 / M3: shared grow-and-copy literal-replace helper. Replaces
+ * every occurrence of `needle` (length `needle_len`, 0 = no-op passthrough)
+ * in `log` with `tok`, returning a malloc'd NUL-terminated buffer (caller
+ * frees) or NULL on allocation failure. Both `needle` and `tok` are
+ * fixed-length caller-owned strings — this never sizes to the WORST case,
+ * it grows on demand, same as trp_scrub's own buffer. */
+static char *ch_replace_literal(const char *log, size_t log_len, const char *needle,
+                                size_t needle_len, const char *tok, size_t tok_len,
+                                size_t *out_len) {
+    if (needle_len == 0) {
         char *copy = (char *)malloc(log_len + 1);
         if (!copy)
             return NULL;
@@ -293,112 +307,58 @@ static char *ch_mask_workspace(const char *log, size_t log_len, const char *dir,
             *out_len = log_len;
         return copy;
     }
+    size_t cap = log_len + 1;
+    char *out = (char *)malloc(cap);
+    if (!out)
+        return NULL;
+    size_t n = 0;
+    size_t i = 0;
+    while (i < log_len) {
+        if (i + needle_len <= log_len && memcmp(log + i, needle, needle_len) == 0) {
+            if (n + tok_len + 1 > cap) {
+                cap = (n + tok_len + 1) * 2;
+                char *g = (char *)realloc(out, cap);
+                if (!g) {
+                    free(out);
+                    return NULL;
+                }
+                out = g;
+            }
+            memcpy(out + n, tok, tok_len);
+            n += tok_len;
+            i += needle_len;
+            continue;
+        }
+        if (n + 2 > cap) {
+            cap *= 2;
+            char *g = (char *)realloc(out, cap);
+            if (!g) {
+                free(out);
+                return NULL;
+            }
+            out = g;
+        }
+        out[n++] = log[i++];
+    }
+    out[n] = '\0';
+    if (out_len)
+        *out_len = n;
+    return out;
+}
+
+/* F2: mask the per-run mkdtemp workspace path before trp_scrub() runs. The
+ * system prompt embeds "Workspace: <dir>" where <dir> is the mkdtemp'd
+ * scratch dir from ch_env_enter — a different literal path on every run.
+ * Replace every occurrence of e->dir in the raw log with the fixed token
+ * <WORKSPACE>, so two runs in two different temp dirs produce byte-identical
+ * logs (proven by characterization_is_repeatable and, transitively,
+ * characterization_is_timezone_invariant). Note: the derived
+ * prompt_cache_id hash no longer needs a masking pass of its own — see
+ * trp_log_prompt_cache_id in turn_recording_provider.c (fix round 1, M1),
+ * which recomputes and compares it against msg[0].content instead. */
+static char *ch_mask_workspace(const char *log, size_t log_len, const char *dir, size_t *out_len) {
     static const char *const kTok = "<WORKSPACE>";
-    size_t tok_len = strlen(kTok);
-    size_t cap = log_len + 1;
-    char *out = (char *)malloc(cap);
-    if (!out)
-        return NULL;
-    size_t n = 0;
-    size_t i = 0;
-    while (i < log_len) {
-        if (i + dir_len <= log_len && memcmp(log + i, dir, dir_len) == 0) {
-            if (n + tok_len + 1 > cap) {
-                cap = (n + tok_len + 1) * 2;
-                char *g = (char *)realloc(out, cap);
-                if (!g) {
-                    free(out);
-                    return NULL;
-                }
-                out = g;
-            }
-            memcpy(out + n, kTok, tok_len);
-            n += tok_len;
-            i += dir_len;
-            continue;
-        }
-        if (n + 2 > cap) {
-            cap *= 2;
-            char *g = (char *)realloc(out, cap);
-            if (!g) {
-                free(out);
-                return NULL;
-            }
-            out = g;
-        }
-        out[n++] = log[i++];
-    }
-    out[n] = '\0';
-    if (out_len)
-        *out_len = n;
-    return out;
-}
-
-/* prompt_cache_id is "hu_" + 16 lowercase hex digits (src/agent/agent_turn.c,
- * "hu_%016llx" of hu_prompt_cache_hash(system_prompt, ...)). system_prompt
- * embeds "Workspace: <dir>" (src/agent/prompt.c), so the hash — and this ID —
- * differs on every run purely because <dir> differs, even after
- * ch_mask_workspace() has normalized the literal path text elsewhere in the
- * log (a hash of content is not itself a textual occurrence of that content).
- * Proven by characterization_is_repeatable: two UTC runs differ ONLY on this
- * field, so the variance is 100% workspace-path entropy, not a real leak.
- * Mask the ID itself, in the harness, the same way ch_mask_workspace masks
- * the path it is derived from. */
-static bool ch_is_hex16(const char *s, size_t n) {
-    if (n < 16)
-        return false;
-    for (size_t i = 0; i < 16; i++) {
-        char c = s[i];
-        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')))
-            return false;
-    }
-    return true;
-}
-
-static char *ch_mask_prompt_cache_id(const char *log, size_t log_len, size_t *out_len) {
-    static const char *const kNeedle = "prompt_cache_id=hu_";
-    static const char *const kTok = "prompt_cache_id=<PROMPT_CACHE_ID>";
-    size_t needle_len = strlen(kNeedle);
-    size_t tok_len = strlen(kTok);
-    size_t cap = log_len + 1;
-    char *out = (char *)malloc(cap);
-    if (!out)
-        return NULL;
-    size_t n = 0;
-    size_t i = 0;
-    while (i < log_len) {
-        if (i + needle_len <= log_len && memcmp(log + i, kNeedle, needle_len) == 0 &&
-            ch_is_hex16(log + i + needle_len, log_len - (i + needle_len))) {
-            size_t consumed = needle_len + 16;
-            if (n + tok_len + 1 > cap) {
-                cap = (n + tok_len + 1) * 2;
-                char *g = (char *)realloc(out, cap);
-                if (!g) {
-                    free(out);
-                    return NULL;
-                }
-                out = g;
-            }
-            memcpy(out + n, kTok, tok_len);
-            n += tok_len;
-            i += consumed;
-            continue;
-        }
-        if (n + 2 > cap) {
-            cap *= 2;
-            char *g = (char *)realloc(out, cap);
-            if (!g) {
-                free(out);
-                return NULL;
-            }
-            out = g;
-        }
-        out[n++] = log[i++];
-    }
-    out[n] = '\0';
-    if (out_len)
-        *out_len = n;
-    return out;
+    return ch_replace_literal(log, log_len, dir, strlen(dir), kTok, strlen(kTok), out_len);
 }
 
 /* ── tools: a READ_ONLY name (executes) and a HIGH-risk name (CausalArmor path) ── */
@@ -445,14 +405,40 @@ static const ch_mem_seed_t k_ch_memories[] = {
      * 0 matches and the section is silently omitted (verified on unmodified
      * code: a plain "alice_dog" key never appears in that section). */
     {"contact:alice:alice_dog", "alice's dog is named biscuit", "alice"},
+    /* fix round 1 / I2(b): retrievable (shares the token "yesterday" with
+     * srag_verify_rejects' / srag_no_verify_control's message) but
+     * near-zero word-overlap with the query overall, so
+     * hu_srag_verify_relevance (src/memory/self_rag.c, threshold 0.2)
+     * rejects it while a plain v1 recall (SRAG off) still returns it. */
+    {"unrelated_note", "yesterday it rained hard, otherwise a quiet day", NULL},
 };
 
+/* Fix round 1 / I1: entities and the relation are seeded with LOW confidence
+ * (0.2, below W11's 0.3 kept_threshold in src/agent/retrieval_planner.c
+ * verifier_filter_records) via the _typed/_ex upserts, not the plain
+ * upserts (which default confidence to 1.0 — always kept). This is
+ * necessary because hu_agent_load_graph_grounding's own composed
+ * graph_ctx (src/agent/graph_grounding.c hu_graph_ground_compose_ex) is
+ * UNCONDITIONALLY discarded whenever W12's goal-conditioned planner
+ * recall (src/agent/agent_turn.c ~2320) produces non-empty contact_text —
+ * and on unmodified code, under HU_IS_TEST, the planner backend
+ * (hu_planner_goal_conditioned) seeds PageRank from EVERY entity in the
+ * world model regardless of the message (collect_pagerank_seeds), so it
+ * always finds something whenever any entity exists for the contact.
+ * Confidence < kept_threshold makes W11's verifier_filter_records drop
+ * those records (verified_count == 0), so contact_text stays empty and
+ * the W12 merge that frees graph_ctx never fires — letting
+ * hu_agent_load_graph_grounding's OWN injection (which does not consult
+ * confidence at all) reach the prompt. Confirmed empirically: grounding_on
+ * and grounding_off produced BYTE-IDENTICAL goldens before this fix. */
 static void ch_seed_graph(hu_graph_t *g) {
     int64_t boat = 0, marina = 0;
-    (void)hu_graph_upsert_entity(g, "alice", 5, "sailboat", 8, HU_ENTITY_TOPIC, NULL, &boat);
-    (void)hu_graph_upsert_entity(g, "alice", 5, "marina", 6, HU_ENTITY_PLACE, NULL, &marina);
-    (void)hu_graph_upsert_relation(g, "alice", 5, boat, marina, HU_REL_RELATED_TO, 1.0f,
-                                   "docked at slip 14 since spring", 30);
+    (void)hu_graph_upsert_entity_typed(g, "alice", 5, "sailboat", 8, HU_ENTITY_TOPIC, NULL, 0.2f, 0,
+                                       &boat);
+    (void)hu_graph_upsert_entity_typed(g, "alice", 5, "marina", 6, HU_ENTITY_PLACE, NULL, 0.2f, 0,
+                                       &marina);
+    (void)hu_graph_upsert_relation_ex(g, "alice", 5, boat, marina, HU_REL_RELATED_TO, 1.0f, 0, 0,
+                                      0.2f, "docked at slip 14 since spring", 30, NULL, 0);
 }
 
 static const char k_ch_long_msg[] =
@@ -538,7 +524,13 @@ typedef struct ch_case {
     bool memory;           /* sqlite :memory: seeded with k_ch_memories */
     bool graph;            /* w7 facade over a seeded graph; ANALYTICAL tier */
     const char *grounding; /* HU_GRAPH_GROUNDING, NULL = unset */
-    bool srag;             /* force sota.srag_config.enabled */
+    bool srag;             /* force sota.srag_config.enabled = true (a no-op: default
+                            * is already true — hu_srag_config_default,
+                            * src/memory/self_rag.c) — kept for existing cases'
+                            * documentation value, superseded by srag_off below. */
+    bool srag_off;         /* force sota.srag_config.enabled = false (fix round 1, I2c):
+                            * the only way to actually disable Self-RAG from this
+                            * harness, since the default is already enabled. */
     const char *session;
     bool response_cache; /* semantic cache pre-seeded msg -> "cached answer" */
     /* branch probes: prove the case reaches the code it names */
@@ -631,23 +623,54 @@ static const ch_case_t k_cases[] = {
      .memory = true,
      .srag = true,
      .probe_contains = "teal"},
-    /* msg deliberately avoids "favorite color" / "teal": on unmodified code
-     * those words also surface fav_color via the UNRELATED intelligence
-     * "### [EXPERIENCE]:" keyword-recall path (src/intelligence/experience.c
-     * hu_experience_recall_similar, wired at src/agent/agent_turn.c ~2925 —
-     * a plain FTS-style memory recall keyed on the message text, independent
-     * of SRAG's creative/personal classification), so "teal" always leaked
-     * regardless of what SRAG itself decided. This message has no lexical
-     * overlap with the fav_color memory, so the probe isolates SRAG's own
-     * creative-skip decision. */
+    /* fix round 1 / I2(a): message DOES overlap the seeded memory
+     * ("favorite color") — the point is to prove SRAG's OWN creative-skip
+     * classification (hu_srag_should_retrieve, src/memory/self_rag.c: any
+     * query starting "write "/"generate "/"brainstorm "/"imagine "/
+     * "create a "/"compose " -> HU_SRAG_NO_RETRIEVAL) is what suppresses
+     * it, not lexical avoidance. Probing bare "teal" is the wrong
+     * assertion: an UNRELATED subsystem (src/intelligence/experience.c
+     * hu_experience_recall_similar, wired at agent_turn.c ~2925, a plain
+     * FTS-style keyword recall independent of SRAG) also surfaces
+     * "favorite color: teal" via its own "### [EXPERIENCE]:" section
+     * whenever the message overlaps it lexically, regardless of SRAG's
+     * decision. hu_memory_loader_load's OWN "### Memory: fav_color"
+     * render (src/agent/memory_loader.c) is SRAG-specific: srag_skip_
+     * retrieval short-circuits the entire loader call
+     * (src/agent/agent_turn.c ~2198), so THIS exact label can never
+     * appear when skipped — the correct, SRAG-only signal. */
     {.name = "srag_creative_skips",
-     .msg = "write a short poem about the ocean at sunset",
+     .msg = "write a short poem about my favorite color",
      .script = k_s_text,
      .script_count = 1,
      .autonomy = CH_AUTO,
      .memory = true,
      .srag = true,
-     .probe_absent = "teal"},
+     .probe_absent = "### Memory: fav_color"},
+    /* fix round 1 / I2(b)+(c): "yesterday" classifies RETRIEVE_AND_VERIFY
+     * (hu_srag_should_retrieve's temporal-marker check). The seeded
+     * "unrelated_note" memory shares only the token "yesterday" with this
+     * 6-word query, giving hu_srag_verify_relevance a relevance score of
+     * 1/6 ≈ 0.167 — below its 0.2 accept threshold — so SRAG (default ON,
+     * hu_srag_config_default) drops it. srag_no_verify_control below is
+     * the SAME message and memory with SRAG explicitly OFF (srag_off):
+     * with no verify step at all, the v1 recall's match survives into
+     * the prompt. The two goldens must differ by exactly this label. */
+    {.name = "srag_verify_rejects",
+     .msg = "what actually happened around here yesterday",
+     .script = k_s_text,
+     .script_count = 1,
+     .autonomy = CH_AUTO,
+     .memory = true,
+     .probe_absent = "### Memory: unrelated_note"},
+    {.name = "srag_no_verify_control",
+     .msg = "what actually happened around here yesterday",
+     .script = k_s_text,
+     .script_count = 1,
+     .autonomy = CH_AUTO,
+     .memory = true,
+     .srag_off = true,
+     .probe_contains = "### Memory: unrelated_note"},
     {.name = "srag_temporal_verifies",
      .msg = "what did we talk about yesterday",
      .script = k_s_text,
@@ -663,8 +686,62 @@ static const ch_case_t k_cases[] = {
      .memory = true,
      .session = "alice",
      .probe_contains = "[About this contact]"},
+    /* BLOCKED (fix round 1, I1) — full evidence trail, do not re-attempt
+     * via fixture tuning without re-reading this first.
+     *
+     * grounding_on and grounding_off are PROVABLY byte-identical on
+     * unmodified code, and this is not fixable from the test harness
+     * alone. hu_agent_load_graph_grounding (src/agent/graph_grounding.c)
+     * DOES compose real content here (confirmed via the "live: injected
+     * N bytes tier=2 lexical=2 ..." log line — non-zero, no drop_reason),
+     * but that content can never survive to the final prompt, because
+     * `graph_ctx` is unconditionally freed by the very first later merge
+     * that finds `memory_ctx` non-empty — and `memory_ctx` is PROVABLY
+     * always non-empty whenever agent->w7_facade is set (a precondition
+     * grounding itself also requires, so there is no fixture that keeps
+     * grounding able to inject while making this false):
+     *
+     *   1. src/agent/memory_loader.c hu_memory_loader_load(), the `else
+     *      if (loader->facade)` branch (~line 404): when the agent has no
+     *      retrieval_engine (true for every case here), this branch calls
+     *      the NO-PROVIDER hu_w12_planner_recall() UNCONDITIONALLY whenever
+     *      loader->facade is set. With no provider, select_planner_backend
+     *      (world_model_bridge.c) always selects "goal-conditioned"
+     *      (gc_plan, retrieval_planner.c), which seeds PageRank from EVERY
+     *      entity in the world model with no message-relevance filter.
+     *   2. gc_plan's neighbor-expansion steps read via the NEIGHBORS query
+     *      variant, and src/memory/memory_v1_backend.c hardcodes
+     *      `recs[i].confidence = 1.0f` for BOTH entity AND relation
+     *      records on that variant (lines ~128/204/256) — a dead
+     *      verification path: W11's confidence filter (kept_threshold=0.3,
+     *      src/agent/retrieval_planner.c verifier_filter_records) can
+     *      never drop anything read this way, however low the graph's
+     *      real confidence is set. So step 1's planner call ALWAYS
+     *      succeeds and returns non-empty text whenever the contact has
+     *      any entity — memory_ctx can never end up NULL.
+     *   3. Once memory_ctx is non-empty, TWO separate later merges in
+     *      agent_turn.c (the W12 "[About this contact]" merge at ~2374,
+     *      and the "Memory Tiers" core-prompt merge at ~3362, gated only
+     *      on agent->sota.sota_initialized which hu_agent_from_config
+     *      always sets true) each unconditionally free graph_ctx the
+     *      moment memory_ctx (or contact_text) is non-empty — regardless
+     *      of HU_GRAPH_GROUNDING's value.
+     *
+     * None of steps 1-3 are HU_IS_TEST-only code, so this may also be
+     * dead in production, not just under test — flagged for a follow-up
+     * task; not fixed here per this task's "no src/ changes" scope.
+     * A longer message (>12 words) and low relation/entity confidence
+     * (see ch_seed_graph) are kept below as partial, verified-correct
+     * hardening: they close off the SEPARATE, provider-driven W12 path
+     * agent_turn.c's own block would otherwise take (confirmed: with
+     * this fixture, "[About this contact]" no longer appears in either
+     * golden), even though the memory_loader.c path above still wins.
+     * The probe therefore asserts today's true, unremarkable behavior —
+     * NOT the intended discriminating behavior — until a production fix
+     * lands. */
     {.name = "grounding_on",
-     .msg = "hows the sailboat coming along",
+     .msg = "hows the sailboat coming along, have you had a chance to get "
+            "down to the marina lately",
      .script = k_s_text,
      .script_count = 1,
      .autonomy = CH_AUTO,
@@ -674,13 +751,16 @@ static const ch_case_t k_cases[] = {
      .session = "alice",
      .probe_contains = "docked at slip 14"},
     {.name = "grounding_off",
-     .msg = "hows the sailboat coming along",
+     .msg = "hows the sailboat coming along, have you had a chance to get "
+            "down to the marina lately",
      .script = k_s_text,
      .script_count = 1,
      .autonomy = CH_AUTO,
      .memory = true,
      .graph = true,
      .grounding = "off",
+     .probe_contains = "docked at slip 14",
+     .probe_absent = "sailboat related_to marina: docked at slip 14",
      .session = "alice"},
     /* S8 silence */
     /* probe text is "I'm here." with a capital I — matches the literal in
@@ -724,18 +804,37 @@ static const ch_case_t k_cases[] = {
      .script_count = CH_N(k_s_one_tool),
      .autonomy = HU_AUTONOMY_LOCKED,
      .probe_contains = "Action blocked: agent is in locked mod"},
+    /* Fix round 1 / M5: "nonexistent_tool" is vacuous — it's the literal
+     * tool name our OWN script requests, so it appears in every golden's
+     * echoed tool_call REQUEST regardless of whether the "not found"
+     * handling ever runs. hu_agent_internal_find_tool's actual failure
+     * path (src/agent/agent_turn.c ~9986) stores the literal 14-byte
+     * result "tool not found" as that tool-result's content, which only
+     * exists in the log if the not-found branch really executed. */
     {.name = "unknown_tool",
      .msg = "use the missing tool",
      .script = k_s_unknown_tool,
      .script_count = CH_N(k_s_unknown_tool),
      .autonomy = CH_AUTO,
-     .probe_contains = "nonexistent_tool"},
+     .probe_contains = "content=tool not found"},
+    /* Fix round 1 / M5: "name=shell" is vacuous too — it's just tool[1] in
+     * the SPEC listing of every request that carries the tools array,
+     * present regardless of whether "shell" is ever dispatched. Probe the
+     * tool-result CONTENT instead ("exit 0", from ch_tool_execute's ctx==
+     * "shell" branch) — that only appears once the call actually executes.
+     * This does not yet prove CausalArmor's block path specifically
+     * (src/agent/agent_turn.c ~9584): in this scripted turn CausalArmor's
+     * only causal segment is the user's own trusted message, so
+     * ca_result.is_safe is true and nothing is blocked — reaching that
+     * code is unobservable without a message-history flake designed to
+     * make CausalArmor itself flag "untrusted content dominates", which
+     * is out of scope for a harness-only fix round. */
     {.name = "high_risk_tool",
      .msg = "run ls for me",
      .script = k_s_high_risk,
      .script_count = CH_N(k_s_high_risk),
      .autonomy = CH_AUTO,
-     .probe_contains = "name=shell"},
+     .probe_contains = "content=exit 0"},
     {.name = "iteration_exhaustion",
      .msg = "keep listing",
      .script = k_s_exhaust,
@@ -847,6 +946,8 @@ static bool ch_run(const ch_case_t *c, const char *tz, ch_out_t *out) {
         }
         if (c->srag)
             agent.sota.srag_config.enabled = true;
+        if (c->srag_off)
+            agent.sota.srag_config.enabled = false;
         if (facade) {
             agent.w7_facade = facade;
             agent.verifier_graph = graph;
@@ -881,20 +982,16 @@ static bool ch_run(const ch_case_t *c, const char *tz, ch_out_t *out) {
     if (have_mem && mem.vtable->deinit)
         mem.vtable->deinit(mem.ctx);
     if (ok && !trp.oom) {
-        /* F2: mask the per-run mkdtemp workspace path, and the prompt-cache-id
-         * hash derived from content that embeds it, BEFORE trp_scrub(), so
+        /* F2: mask the per-run mkdtemp workspace path BEFORE trp_scrub(), so
          * the same case run twice in two different temp dirs produces
-         * identical bytes. */
+         * identical bytes. (The prompt_cache_id hash derived from content
+         * that embeds it no longer needs a separate masking pass — see
+         * trp_log_prompt_cache_id, fix round 1 / M1.) */
         size_t masked_len = 0;
         char *masked = ch_mask_workspace(trp.log, trp.log_len, env.dir, &masked_len);
         if (masked) {
-            size_t masked2_len = 0;
-            char *masked2 = ch_mask_prompt_cache_id(masked, masked_len, &masked2_len);
+            out->log = trp_scrub(masked, masked_len, &out->log_len);
             free(masked);
-            if (masked2) {
-                out->log = trp_scrub(masked2, masked2_len, &out->log_len);
-                free(masked2);
-            }
         }
     }
     trp_deinit(&trp);
@@ -903,6 +1000,23 @@ static bool ch_run(const ch_case_t *c, const char *tz, ch_out_t *out) {
 }
 
 /* ── comparison ────────────────────────────────────────────────────────── */
+/* Fix round 1 / M2: the system prompt is one ~7 KB line (no embedded
+ * newlines until the message-history section), so a fixed 200-char PREFIX
+ * of that line looks byte-identical for both sides even when the real
+ * difference sits thousands of bytes in — every prior investigation of a
+ * grounding/SRAG mismatch had to be re-run through a throwaway debug dump
+ * to find the actual differing bytes. Report the BYTE COLUMN of the first
+ * mismatch within the line, plus a +/-80-byte window centered on it from
+ * BOTH sides, so the diff is visible in the failure message itself. */
+#define CH_DIFF_WINDOW 80
+static void ch_diff_window(char *out, size_t out_cap, const char *line, size_t line_len,
+                           size_t col) {
+    size_t start = col > CH_DIFF_WINDOW ? col - CH_DIFF_WINDOW : 0;
+    size_t stop = col + CH_DIFF_WINDOW > line_len ? line_len : col + CH_DIFF_WINDOW;
+    size_t n = stop - start;
+    (void)snprintf(out, out_cap, "%.*s", (int)n, line + start);
+}
+
 /* 1-based number of the first line that differs, 0 when a == b. */
 static size_t ch_first_diff(const char *a, const char *b, char *why, size_t why_cap) {
     size_t line = 1;
@@ -912,9 +1026,21 @@ static size_t ch_first_diff(const char *a, const char *b, char *why, size_t why_
         size_t la = ea ? (size_t)(ea - a) : strlen(a);
         size_t lb = eb ? (size_t)(eb - b) : strlen(b);
         if (la != lb || memcmp(a, b, la) != 0 || (!ea) != (!eb)) {
-            if (why)
-                (void)snprintf(why, why_cap, "line %zu\n      golden: %.*s\n      actual: %.*s",
-                               line, (int)(la > 200 ? 200 : la), a, (int)(lb > 200 ? 200 : lb), b);
+            if (why) {
+                size_t common = la < lb ? la : lb;
+                size_t col = 0;
+                while (col < common && a[col] == b[col])
+                    col++;
+                char win_a[2 * CH_DIFF_WINDOW + 8];
+                char win_b[2 * CH_DIFF_WINDOW + 8];
+                ch_diff_window(win_a, sizeof(win_a), a, la, col);
+                ch_diff_window(win_b, sizeof(win_b), b, lb, col);
+                (void)snprintf(why, why_cap,
+                               "line %zu byte-column %zu (line lengths %zu vs %zu)\n"
+                               "      golden: ...%s...\n"
+                               "      actual: ...%s...",
+                               line, col, la, lb, win_a, win_b);
+            }
             return line;
         }
         if (!ea)
@@ -989,15 +1115,34 @@ static void characterization_matches_goldens(void) {
     const char *w = getenv("HU_AGENT_TURN_GOLDEN_WRITE");
     bool write = w && strcmp(w, "1") == 0;
     if (!write) {
-        char *g = ch_read_file(CH_GOLDEN_DIR "/plain_reply.golden");
-        HU_SKIP_IF(!g, "no goldens: run from the repo root (generate on UNMODIFIED code with "
-                       "HU_AGENT_TURN_GOLDEN_WRITE=1)");
-        char want[320];
-        (void)snprintf(want, sizeof(want), "# fingerprint: %s\n", fp);
-        bool same = strncmp(g, want, strlen(want)) == 0;
+        /* Fix round 1 / I3: read the fingerprint from the FIRST golden that
+         * actually exists, not always "plain_reply.golden" specifically —
+         * a single accidentally-deleted fixture must not SKIP (and pass)
+         * the whole suite. Only a directory with ZERO readable goldens is
+         * a genuine "not set up" SKIP; any missing file once we have a
+         * fingerprint to compare against is a per-case FAIL below. */
+        char *g = NULL;
+        char golden_fp[256];
+        golden_fp[0] = '\0';
+        for (size_t gi = 0; gi < CH_N_CASES && !g; gi++) {
+            char probe_path[300];
+            (void)snprintf(probe_path, sizeof(probe_path), CH_GOLDEN_DIR "/%s.golden",
+                           k_cases[gi].name);
+            g = ch_read_file(probe_path);
+        }
+        HU_SKIP_IF(!g, "no goldens under " CH_GOLDEN_DIR
+                       " (generate on UNMODIFIED code with HU_AGENT_TURN_GOLDEN_WRITE=1)");
+        const char *nl = strchr(g, '\n');
+        if (nl)
+            (void)snprintf(golden_fp, sizeof(golden_fp), "%.*s", (int)(nl - g), g);
         free(g);
+        char want[320];
+        (void)snprintf(want, sizeof(want), "# fingerprint: %s", fp);
+        bool same = strcmp(golden_fp, want) == 0;
         (void)snprintf(skip_reason, sizeof(skip_reason),
-                       "goldens are for another build configuration (this build: %s)", fp);
+                       "goldens are for another build configuration (golden: %s; this build: "
+                       "fingerprint: %s)",
+                       golden_fp, fp);
         HU_SKIP_IF(!same, skip_reason);
     }
     size_t failures = 0;

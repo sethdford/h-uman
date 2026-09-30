@@ -1,9 +1,11 @@
 /* tests/turn_recording_provider.c — see turn_recording_provider.h. */
 #include "turn_recording_provider.h"
+#include "human/agent/prompt_cache.h"
 #include "human/core/allocator.h"
 #include "human/core/string.h"
 #include <ctype.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -86,6 +88,38 @@ static void trp_log_opt(trp_t *t, const char *label, const char *s, size_t n) {
         trp_log_raw(t, "-", 1);
 }
 
+/* Fix round 1 / M1: prompt_cache_id is hu_prompt_cache_hash(system_prompt)
+ * (src/agent/agent_turn.c ~5049), formatted "hu_%016llx" — and the system
+ * prompt IS msg[0].content on this harness (the request builder always
+ * puts it first). Recompute the SAME hash from msg[0].content with the
+ * real production function and compare, instead of blanket-masking the
+ * id: a match logs a constant marker (deterministic across the differing
+ * mkdtemp workspace path baked into the system prompt, so goldens still
+ * compare byte-for-byte); a MISMATCH — or no req->messages[0] to compute
+ * from — logs the raw id verbatim, so any real drift between the two
+ * (e.g. a future change to what agent_turn.c hashes) fails the golden
+ * comparison loudly instead of being silently swallowed by a mask. */
+static void trp_log_prompt_cache_id(trp_t *t, const hu_chat_request_t *req) {
+    trp_log_raw(t, " prompt_cache_id=", 17);
+    if (!req->prompt_cache_id) {
+        trp_log_raw(t, "-", 1);
+        return;
+    }
+    const hu_chat_message_t *sys =
+        (req->messages && req->messages_count > 0) ? &req->messages[0] : NULL;
+    if (sys && sys->content) {
+        uint64_t want = hu_prompt_cache_hash(sys->content, sys->content_len);
+        char want_buf[24];
+        int wl = snprintf(want_buf, sizeof(want_buf), "hu_%016llx", (unsigned long long)want);
+        if (wl > 0 && (size_t)wl == req->prompt_cache_id_len &&
+            memcmp(want_buf, req->prompt_cache_id, req->prompt_cache_id_len) == 0) {
+            trp_log_raw(t, "<PCID:=sys>", 11);
+            return;
+        }
+    }
+    trp_log_escaped(t, req->prompt_cache_id, req->prompt_cache_id_len);
+}
+
 static const char *trp_role(hu_role_t r) {
     switch (r) {
     case HU_ROLE_SYSTEM:
@@ -121,7 +155,7 @@ static void trp_log_request(trp_t *t, const hu_chat_request_t *req, const char *
     trp_log_opt(t, "reasoning_effort", req->reasoning_effort, req->reasoning_effort_len);
     trp_log_opt(t, "response_format", req->response_format, req->response_format_len);
     trp_log_opt(t, "response_schema", req->response_schema, req->response_schema_len);
-    trp_log_opt(t, "prompt_cache_id", req->prompt_cache_id, req->prompt_cache_id_len);
+    trp_log_prompt_cache_id(t, req);
     trp_log_fmt(t, "\nsteering=%d formality=%.3f verbosity=%.3f warmth=%.3f humor=%.3f\n",
                 req->steering_present ? 1 : 0, req->steer_formality, req->steer_verbosity,
                 req->steer_warmth, req->steer_humor);
