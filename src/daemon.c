@@ -3980,6 +3980,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     hu_channel_loop_msg_t burst[16];
                     size_t burst_count = 0;
                     ch->poll_fn(ch->channel_ctx, alloc, burst, 16, &burst_count);
+                    (void)hu_daemon_burst_carry(msgs, &count, 16, burst, burst_count, batch_key);
                     for (size_t bi = 0; bi < burst_count; bi++) {
                         if (strcmp(burst[bi].session_key, batch_key) != 0)
                             continue;

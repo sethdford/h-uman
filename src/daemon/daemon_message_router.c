@@ -631,3 +631,23 @@ hu_error_t hu_daemon_record_delivered_reply(struct hu_agent *agent, const char *
                     hu_error_string(err));
     return err;
 }
+
+size_t hu_daemon_burst_carry(hu_channel_loop_msg_t *msgs, size_t *count, size_t cap,
+                             const hu_channel_loop_msg_t *burst, size_t burst_count,
+                             const char *batch_key) {
+    if (!msgs || !count || !burst || !batch_key)
+        return 0;
+    size_t lost = 0;
+    for (size_t i = 0; i < burst_count; i++) {
+        if (strcmp(burst[i].session_key, batch_key) == 0 || !burst[i].content[0])
+            continue; /* the batch's own follow-up is merged by the caller */
+        if (*count < cap) {
+            msgs[(*count)++] = burst[i];
+            continue;
+        }
+        lost++;
+        hu_log_warn("human", NULL, "burst re-poll: no room to keep a message from %.20s — dropped",
+                    burst[i].session_key);
+    }
+    return lost;
+}
