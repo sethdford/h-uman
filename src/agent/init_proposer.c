@@ -149,6 +149,8 @@ static const char *init_proposer_reason_for_result(hu_init_proposer_result_t r) 
         return "llm_negative";
     case HU_INIT_RESULT_GUARD_REJECT:
         return "guard_reject";
+    case HU_INIT_RESULT_DISABLED:
+        return "disabled";
     case HU_INIT_RESULT_SKIP:
         return "no_provider_or_skip";
     case HU_INIT_RESULT_FIRED:
@@ -222,7 +224,7 @@ hu_error_t hu_init_proposer_tick(const struct hu_initiative_config *cfg,
                          "initiative subsystem disabled by config "
                          "(cfg->initiative.enabled=false); set initiative.enabled=true "
                          "in config.json to activate");
-        *out_result = HU_INIT_RESULT_SKIP;
+        *out_result = HU_INIT_RESULT_DISABLED;
         return HU_OK;
     }
 

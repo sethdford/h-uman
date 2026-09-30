@@ -6,6 +6,7 @@
 #include "human/providers/factory.h"
 
 #include <string.h>
+#include <strings.h>
 
 #define HU_GUARD_RETRY_USER_MAX    4096
 #define HU_GUARD_RETRY_MODEL_CLOUD "gemini-3.1-flash-lite"
@@ -102,7 +103,11 @@ static hu_error_t dispatch_slim_chat(hu_allocator_t *alloc, hu_observer_t *obs, 
     req.messages = msgs;
     req.messages_count = 2;
     req.temperature = 0.2;
-    req.max_tokens = 128;
+    /* Headroom, not a length target (the prompt sets the length): Gemini 3.x
+     * thinks even at thinkingBudget 0 (87-128 thought tokens measured
+     * 2026-09-30) and the thoughts share this cap. At 128, 1 of 3 probes
+     * stopped mid-sentence; at 512, 0 of 3. */
+    req.max_tokens = 512;
     req.model = model;
     req.model_len = model_len;
     req.reasoning_effort = NULL;
@@ -125,6 +130,17 @@ static hu_error_t dispatch_slim_chat(hu_allocator_t *alloc, hu_observer_t *obs, 
                         hu_error_string(err));
         hu_chat_response_free(alloc, &resp);
         return err;
+    }
+    /* A reply the cap cut off is a fragment ("Wait, did we actually lock"
+     * reached a chat, 2026-09-30): fail, so the caller tries the next provider. */
+    if (resp.finish_reason && (strcasecmp(resp.finish_reason, "MAX_TOKENS") == 0 ||
+                               strcasecmp(resp.finish_reason, "length") == 0)) {
+        if (obs)
+            hu_log_warn("response_guard_retry", obs,
+                        "slim retry cut off by its token cap (finish=%s) — not sending it",
+                        resp.finish_reason);
+        hu_chat_response_free(alloc, &resp);
+        return HU_ERR_PROVIDER_RESPONSE;
     }
 
     char *guard_out = NULL;

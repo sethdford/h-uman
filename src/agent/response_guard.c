@@ -35,11 +35,13 @@
 #include "human/core/string.h"
 #include "human/observer.h"
 
+#include <ctype.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include <strings.h>
 
 /* Calibrated thresholds — tuned against the production failure (200x `\" `,
  * 100x `a`) and against legitimate human-shaped text ("yessss!!", "lol",
@@ -533,6 +535,30 @@ static bool hu_guard_has_length_anomaly(const hu_guard_context_t *ctx, size_t re
 /* Helper — slide a 30-char window over `src[0..src_len)` and return
  * true if any window appears verbatim (case-insensitively) in
  * `s[0..len)`. Skips when src is NULL/short or response is short. */
+/* Where the payload after a content verb ("admit X", "tell her X") ends: the
+ * end of its clause. The reply is SUPPOSED to say X, so a window inside X is
+ * not an echo (2026-09-30: "admit he hasn't really thought about it yet" made
+ * "haven't really thought about it yet" a REJECT). `ask` is not a content verb:
+ * "ask one clarifying question" is instruction language. Known gap: X leaked
+ * in the director's own third-person voice ("he hasn't...") also passes. */
+static size_t hu_guard_director_payload_end(const char *src, size_t src_len, size_t i) {
+    static const char *const verbs[] = {
+        "admit ",        "say ",          "mention ",       "tell her ", "tell him ", "tell them ",
+        "let her know ", "let him know ", "let them know ", "confess ",  NULL};
+    if (i > 0 && isalpha((unsigned char)src[i - 1]))
+        return i;
+    for (size_t v = 0; verbs[v]; v++) {
+        size_t vl = strlen(verbs[v]);
+        if (i + vl > src_len || strncasecmp(src + i, verbs[v], vl) != 0)
+            continue;
+        size_t e = i + vl;
+        while (e < src_len && !strchr(",;.!?\n", src[e]))
+            e++;
+        return e;
+    }
+    return i;
+}
+
 static bool hu_guard_director_window_matches(const char *src, size_t src_len, const char *s,
                                              size_t len) {
     if (!src || src_len < (size_t)HU_GUARD_DIRECTOR_ECHO_MIN_MATCH)
@@ -540,7 +566,15 @@ static bool hu_guard_director_window_matches(const char *src, size_t src_len, co
     if (len < (size_t)HU_GUARD_DIRECTOR_ECHO_MIN_MATCH)
         return false;
     size_t window = (size_t)HU_GUARD_DIRECTOR_ECHO_MIN_MATCH;
+    size_t payload_from = 0, payload_to = 0; /* [from, to): skip windows touching it */
     for (size_t i = 0; i + window <= src_len; i++) {
+        size_t end = hu_guard_director_payload_end(src, src_len, i);
+        if (end > i) {
+            payload_from = i;
+            payload_to = end;
+        }
+        if (i + window > payload_from && i < payload_to)
+            continue;
         if (hu_str_contains_ci(s, len, src + i, window))
             return true;
     }
