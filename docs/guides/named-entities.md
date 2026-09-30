@@ -23,9 +23,12 @@ one moves forward only on a measurement.
 | `shadow` | Reads each contact's raw inbound text (1:1 only, never the generated reply, no model) and logs `name_catch shadow: known=N new=M (not written)`. |
 | `live` | A known name bumps its entity. A new Capitalized name becomes an UNKNOWN entity with provenance `names:turn`, confidence 0.3. |
 
-It writes the graph but does not change what is sent. It goes `live` only
-after the baseline harness run (rollout step 5), so the baseline sees none of
-its writes.
+**`live` changes what is sent.** Its new rows and mention bumps reach replies
+immediately, through lexical grounding and the contact fallback (the fallback
+is `live` in prod), whatever `HU_GRAPH_NAMES` says. `HU_GRAPH_NAMES` governs only
+how typed names are selected. `shadow` writes nothing. The catcher goes `live`
+only after the baseline harness run (rollout step 5), so the baseline sees none
+of its writes.
 
 ## Gate 2: `HU_GRAPH_NAMES` (grounding, daemon plist)
 
@@ -42,8 +45,13 @@ go-ahead.
 ## Gate 3: the nightly `--names` step
 
 ```bash
-python3 scripts/insight_stream.py --names --deadline 07:30 --write
+python3 scripts/insight_stream.py --names --write                  # by hand, any time
+python3 scripts/insight_stream.py --names --deadline 07:30 --write # the nightly form
 ```
+
+`--deadline 07:30` is for the overnight chain. Run by hand after 07:30, that
+form exits 0 and does nothing ("window closed"), so drop `--deadline` for a
+manual pass.
 
 For every eligible 1:1 contact with texts in the last `--names-days` (default
 2), the local model lists the names in their texts. A name is kept only if a
@@ -53,8 +61,15 @@ nothing is imported, and the kept names stay in the 0600 dry-run file under
 `~/.human/names/`. The counts-only manifest is
 `~/.human/logs/names-manifest-YYYYMMDD[-dryrun].json`.
 
-The step is off until it is appended to the `ai.human.insight-nightly` chain
-(rollout step 6).
+**A `--write` pass changes what is sent.** Imported names reach replies through
+lexical and contact-fallback grounding as soon as they are written (the
+fallback is `live` in prod), whatever `HU_GRAPH_NAMES` says, and a retyped row
+renders with its type suffix (`- Priya (person)`) in grounding. If an import
+times out, the pass says the graph may be partially updated: the importer
+commits row by row, so a killed import can leave some names written.
+
+The step is off until it is added to the `ai.human.insight-nightly` chain
+(rollout step 7), where it runs **before** the wide pass.
 
 ## One-time migration
 
@@ -66,7 +81,14 @@ python3 scripts/graph_retype_entities.py --write     # probe -> classify -> lock
 The local model types each contact's UNKNOWN names in batches of 40. The
 answers are written as retype-only lines (`names:migrate`, 0.6) that never
 create a row, never bump recency, and never downgrade a name type. Unanswered
-names stay UNKNOWN, and a re-run only sees what is still UNKNOWN.
+names stay UNKNOWN, and a re-run only sees what is still UNKNOWN. The
+handles-and-names JSONL it feeds the importer (`--work-dir`, 0600) is deleted
+right after the import, also when the import fails.
+
+**The migration changes what is sent.** Retyping adds type suffixes to
+grounding lines (`- Salim (person)`, `- the lake house (topic)`), and those
+lines reach replies immediately through lexical and contact-fallback grounding
+(the fallback is `live` in prod), even with `HU_GRAPH_NAMES=off`.
 
 `--write` refuses (exit 2) when:
 
@@ -113,7 +135,8 @@ codes and the daemon's loopback handle (`channels.imessage.loopback_handle` in
   `live`) and are recorded in the output under `gates`. Change them with
   `--grounding`, `--fallback` and `--self-facts`; a non-prod run never flips.
 - Each text is passed as one argv element (no shell). It is never written to
-  the output, stdout or stderr.
+  the output, stdout or stderr. A text argv cannot carry (a NUL byte, or a
+  lone surrogate) is skipped, and the next eligible moment takes its place.
 - A block counts as a typed-name block when the probe header's `names=` is
   above 0. `names=` counts only the contact's block. The owner's
   `About you:` block never counts, because an owner fact is not the contact's
@@ -190,22 +213,53 @@ this change. That is proven by the C golden tests in
 count is recorded for context only; the graph changes between the runs, so the
 two `off` columns are not expected to match.
 
+## Applying a plist env change
+
+launchd reads `EnvironmentVariables` only when the job is bootstrapped;
+`launchctl kickstart -k` restarts the process with the **old** environment.
+After editing `~/Library/LaunchAgents/ai.human.service-loop.plist`, reload it:
+
+```bash
+launchctl bootout gui/$(id -u)/ai.human.service-loop
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.human.service-loop.plist
+```
+
+Then confirm the one-shot line in `~/.human/logs/service-loop.log`:
+`name_catch active: HU_NAME_CATCH=live` (or `… disabled …` when it is off).
+
+`scripts/install-human-daemon.sh` also works: it regenerates the plist from its
+template, but it snapshots every operator-set env var first and re-applies it,
+then does the same bootout and bootstrap. Only `HOME`, `PATH`, `HU_DEBUG` and
+`ASAN_OPTIONS` are reset to the template's values, so the gates here survive a
+reinstall. Use the two commands above for an env-only change: they leave the
+installed binary alone.
+
 ## Rollout (spec §6)
 
 1. Deploy: build-prod, `scripts/install-human-daemon.sh`, then
    `scripts/verify-deploy.sh <commit>`, with `HU_NAME_CATCH=off` and
-   `HU_GRAPH_NAMES=shadow` in the plist.
+   `HU_GRAPH_NAMES=shadow` in the plist (reload per the section above).
 2. Baseline: run `eval_name_grounding.py` before any new write. Keep the result
    file path.
 3. Migration: `graph_retype_entities.py --write` (it takes the backup first).
-4. One manual `insight_stream.py --names --write` pass.
-5. Plist: set `HU_NAME_CATCH=live`.
+   From here on, replies see the retyped rows (see the migration section).
+4. One manual `insight_stream.py --names --write` pass (no `--deadline`).
+5. Plist: set `HU_NAME_CATCH=live`, then reload (bootout + bootstrap) and check
+   for the `name_catch active: HU_NAME_CATCH=live` log line.
 6. Re-run the harness with `--baseline <step 2 result>`. Set
    `HU_GRAPH_NAMES=live` only if it reports `flip_gate_met: true`. If the only
    blocker is `no_lexical_lost`, stay in `shadow` and report the paired counts
    to Seth: relevance against names is his call, not a threshold's. Any other
    blocker: stay in `shadow`.
-7. Append `; /opt/homebrew/bin/python3 scripts/insight_stream.py --names --deadline 07:30 --write`
-   to the `ai.human.insight-nightly` chain. Use `;`, not `&&`, so a failed or
-   refused earlier step does not silently skip `--names`. Back up the plist
-   first, then bootout and bootstrap it.
+7. Add `/opt/homebrew/bin/python3 scripts/insight_stream.py --names --deadline 07:30 --write`
+   to the `ai.human.insight-nightly` chain **before** the wide pass, joined
+   with `;` on both sides:
+   `… --retire-superseded …; <python3> scripts/insight_stream.py --names --deadline 07:30 --write; <python3> scripts/insight_stream.py --population wide …`.
+   The wide pass checks its deadline only between contacts, so whenever it has
+   contacts left it ends at or after 07:30, and a step placed after it would
+   find the window closed and exit 0 without running. `--names` is cheap (one call per contact active in the last
+   2 days), so running it first costs the wide pass little. With `;`, a
+   `--names` refusal never blocks the wide pass, and a failed earlier step
+   never skips `--names`. Back up the plist first, then bootout and bootstrap
+   it. The next morning, check that `~/.human/logs/names-manifest-YYYYMMDD.json`
+   exists.

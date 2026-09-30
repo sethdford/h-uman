@@ -6,6 +6,16 @@ date: 2026-09-29
 
 # Named-entity extraction — per-turn catcher + nightly typed pass
 
+> **Amended 2026-09-30** to match what ships (rulings in the SDD ledger,
+> `.superpowers/sdd/2026-09-29-named-entity-extraction/progress.md`). The success
+> gate in §2 is now the paired flip gate of §4.7 and the operator guide; §4.4's
+> nightly step runs **before** the wide pass; §6 is the reordered rollout. The
+> catcher, the migration and a `--write` nightly pass all change what is sent as
+> soon as they write: their rows reach replies through lexical and
+> contact-fallback grounding (fallback is LIVE in prod) whatever `HU_GRAPH_NAMES`
+> says. `HU_GRAPH_NAMES` governs only typed-name selection. Operator detail:
+> `docs/guides/named-entities.md`.
+
 ## 1. Problem (measured 2026-09-29, prod graph.db, read-only counts)
 
 Replies are generic where Seth is specific because the graph never learns the
@@ -34,7 +44,11 @@ talk about, typed and fresh, so grounding can name them.
 - **E2E recall (primary):** on 40 recent real inbound 1:1 moments, the number
   whose grounding block contains ≥1 typed name rises from the measured
   baseline (re-measured by the new harness before any write) to **≥15/40**
-  under `HU_GRAPH_NAMES=live`.
+  under `HU_GRAPH_NAMES=live`. *Amended:* the flip needs the harness's paired
+  `flip_gate_met` (prod parameters and gates, live ≥15/40, `typed_lost == 0`,
+  `lexical_lost == 0`, `typed_gained ≥ 1`, live > the `--baseline` run's live),
+  because OFF renders the same type suffixes and the live fallback fills misses
+  in both modes, so "live ≥15 with OFF unchanged" cannot isolate the reader.
 - **Safety:** with `HU_GRAPH_NAMES=off` the grounding output is byte-identical
   to today for identical graph contents (pinned by test).
 - **No daytime GPU load:** the per-turn catcher uses no model.
@@ -118,8 +132,14 @@ Entity lines go through `hu_graph_upsert_entity_typed`. The CLI prints
 - Manifest: counts only (`contacts`, `names_kept`, `names_rejected`,
   `by_type`, `import_entities`, `model_errors`); exit codes match the wide
   pass (2 refused/nothing written, non-zero when every contact errored).
-- Scheduled by appending `--names --deadline 07:30 --write` to the existing
-  `ai.human.insight-nightly` chain.
+- Scheduled in the existing `ai.human.insight-nightly` chain as
+  `--names --deadline 07:30 --write`, **before** the wide pass and joined with
+  `;` on both sides. The wide pass checks its deadline only between contacts,
+  so it ends at or after 07:30 whenever contacts remain; a step after it would
+  find the window closed. With `;`, a `--names` refusal never blocks the wide
+  pass, and the wide pass's use of the deadline never starves `--names`.
+- A `--write` import that times out (the importer commits per row) reports that
+  the graph may be partially updated, never "nothing written".
 
 ### 4.5 One-time migration (`scripts/graph_retype_entities.py`)
 
@@ -170,17 +190,24 @@ with <40 moments available. Output `~/.human/logs/name-grounding-<ts>.json`.
 - The migration aborts before writing if the backup fails; restore is
   `cp <backup> ~/.human/graph.db` with the daemon stopped.
 
-## 6. Rollout (after merge)
+## 6. Rollout (after merge; amended 2026-09-30)
 
 1. Build-prod + `scripts/install-human-daemon.sh`; `scripts/verify-deploy.sh`.
-2. Plist: `HU_NAME_CATCH=live`, `HU_GRAPH_NAMES=shadow`.
-3. Baseline: `eval_name_grounding.py` before any new write.
-4. Migration `--write` (backup), then one manual `--names --write` pass.
-5. Re-run the harness; the `live` column must reach ≥15/40 with OFF unchanged.
-6. Append `--names` to the nightly plist chain.
-7. Flipping `HU_GRAPH_NAMES=live` changes messages sent as Seth — requires the
-   harness result and Seth's go-ahead (blind A/B per the gate rule, or an
-   explicit override as on 2026-09-27).
+   Plist: `HU_NAME_CATCH=off`, `HU_GRAPH_NAMES=shadow` (catcher OFF at deploy).
+   Env changes take effect only after bootout + bootstrap of the service.
+2. Baseline: `eval_name_grounding.py` before any new write; keep the result.
+3. Migration `graph_retype_entities.py --write` (verified backup first).
+4. One manual `insight_stream.py --names --write` pass (no `--deadline`).
+5. Plist: `HU_NAME_CATCH=live`; reload; confirm the one-shot
+   `name_catch active` log line.
+6. Re-run the harness with `--baseline <step 2 result>`. Flip
+   `HU_GRAPH_NAMES=live` iff it reports `flip_gate_met: true` (and with Seth's
+   go-ahead: it changes messages sent as Seth). If the only blocker is
+   `no_lexical_lost`, stay SHADOW and report the paired counts to Seth
+   (relevance against names is his call). Any other blocker: stay SHADOW.
+7. Add `--names --deadline 07:30 --write` to the nightly chain before the wide
+   pass, joined with `;` (§4.4); check the next morning's
+   `names-manifest-YYYYMMDD.json`.
 
 ## 7. Testing
 
