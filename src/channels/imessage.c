@@ -2505,12 +2505,25 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
                 const char *imsg_service = hu_imessage_send_service();
                 const char *imsg_argv[] = {"imsg",  "send",      "--to",       tgt_buf, "--text",
                                            message, "--service", imsg_service, NULL};
+                int64_t land_prior = hu_imessage_get_latest_sent_rowid(tgt, tgt_len);
                 hu_run_result_t imsg_result = {0};
                 hu_error_t imsg_err =
                     hu_process_run_with_timeout(c->alloc, imsg_argv, NULL, 65536, 15, &imsg_result);
                 bool imsg_ok =
                     (imsg_err == HU_OK && imsg_result.success && imsg_result.exit_code == 0);
                 hu_run_result_free(c->alloc, &imsg_result);
+                if (!imsg_ok) {
+                    /* A failure report is not proof nothing went out: a timed-out
+                     * imsg had delivered, and the fallback sent it twice (Mindy,
+                     * 2026-09-27). Give chat.db a moment, then look. */
+                    usleep(2000000);
+                    imsg_ok = hu_imessage_send_landed(
+                        land_prior, hu_imessage_get_latest_sent_rowid(tgt, tgt_len));
+                    if (imsg_ok)
+                        hu_log_warn("imessage", NULL,
+                                    "imsg reported failure but the text is in chat.db — not "
+                                    "re-sending");
+                }
                 if (imsg_ok) {
                     imessage_text_sent(c, tgt, tgt_len, message, message_len, prov_prior);
                     goto imsg_media;

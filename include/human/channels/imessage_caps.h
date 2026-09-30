@@ -111,6 +111,13 @@ uint32_t hu_imsg_typing_phase_ms(uint32_t *seed, bool typing);
 #define HU_IMSG_TYPING_CATCHUP_MAX_MS 6000u
 uint32_t hu_imsg_typing_catchup_ms(uint32_t typing_ms, uint64_t shown_ms);
 
+/* After `imsg send` reported failure: did the text land anyway? True when a
+ * newer is_from_me row exists for the handle than before the send (both from
+ * hu_imessage_get_latest_sent_rowid). A lookup error (-1) is "unknown" and
+ * false, so the caller falls back as before. The AppleScript fallback re-sent
+ * a message imsg had already delivered (Mindy got it twice, 2026-09-27). */
+bool hu_imessage_send_landed(int64_t prior_rowid, int64_t now_rowid);
+
 /* ── T0.1 blue guard ────────────────────────────────────────────────────
  * "Perfect and blue": the daemon must never emit a green bubble. Apple's own
  * chat.db is the SIP-free source of truth — `handle.service` and

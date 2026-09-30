@@ -61,7 +61,11 @@ typedef struct hu_style_card {
     double question_rate;          /* ends with '?' */
     double exclamation_rate;       /* ends with '!' */
     double emoji_rate;             /* contains >= 1 emoji */
-    unsigned n;                    /* messages measured (0 for the default) */
+    /* Contains lol/lmao/haha/hehe (word-bounded). Optional: -1 when the card
+     * predates the axis, and nothing about laughter renders then. Added
+     * 2026-09-30: the twin laughed in 14% of its texts over a week, Seth 3%. */
+    double laugh_rate;
+    unsigned n; /* messages measured (0 for the default) */
     /* Judge-free pair axis (scripts/reply_pairs.py): how the persona answers
      * a LONG or question-bearing inbound. substantive_n == 0 when the card
      * predates the axis; nothing renders below HU_STYLE_CARD_SUBSTANTIVE_MIN_N. */

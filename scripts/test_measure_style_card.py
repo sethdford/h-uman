@@ -52,6 +52,41 @@ def synthetic_corpus(n=400):
     return out
 
 
+class LaughAxisAndDaemonSends(unittest.TestCase):
+    """2026-09-30: the twin laughed in 14% of its texts over a week, Seth in
+    3%, and the card had no axis for it. And the card was measured from every
+    is_from_me row, so the twin's own sends (~12%) were measured as Seth."""
+
+    def test_laugh_rate_counts_word_bounded_laughs(self):
+        msgs = []
+        for i in range(400):
+            text = "Yeah ok sounds good"
+            if i % 25 == 0:
+                text = "lol yeah ok"            # 4%
+            elif i % 25 == 1:
+                text = "grabbing a lollipop"    # not a laugh
+            msgs.append((T0 + datetime.timedelta(minutes=i), text))
+        card = msc.build_card(msgs, persona="test", window_start=T0 - datetime.timedelta(days=1),
+                              window_end=T0 + datetime.timedelta(days=1), min_n=300,
+                              n_resamples=200)
+        self.assertIn("laugh_rate", msc.CARD_AXES)
+        self.assertAlmostEqual(card["axes"]["laugh_rate"]["value"], 0.04, places=9)
+
+    def test_daemon_sends_are_not_measured_as_seth(self):
+        # fetch_outbound_messages yields NAIVE UTC datetimes (Apple epoch);
+        # daemon records are true epochs. Reading the naive value as local
+        # time put every message hours off, and the first live run excluded 0
+        # of 1,500. The records here are built the way the real ones are.
+        t = T0.replace(tzinfo=datetime.timezone.utc).timestamp()
+        msgs = [(T0, "how can I help you with your question about AI?"),
+                (T0 + datetime.timedelta(seconds=30), "Haha"),
+                (T0 + datetime.timedelta(minutes=1), "grabbing dinner, back in a bit")]
+        records = [(t + 5, "how can i help you with your question about ai"),
+                   (t + 31, "haha")]
+        kept = [text for _, text in msc.drop_daemon_sends(msgs, records)]
+        self.assertEqual(kept, ["grabbing dinner, back in a bit"])
+
+
 class BuildCard(unittest.TestCase):
     def test_axes_match_known_synthetic_rates(self):
         msgs = synthetic_corpus(400)

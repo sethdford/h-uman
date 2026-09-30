@@ -638,3 +638,7 @@ uint32_t hu_imsg_typing_catchup_ms(uint32_t typing_ms, uint64_t shown_ms) {
     uint64_t left = typing_ms - shown_ms;
     return left > HU_IMSG_TYPING_CATCHUP_MAX_MS ? HU_IMSG_TYPING_CATCHUP_MAX_MS : (uint32_t)left;
 }
+
+bool hu_imessage_send_landed(int64_t prior_rowid, int64_t now_rowid) {
+    return prior_rowid >= 0 && now_rowid > prior_rowid;
+}

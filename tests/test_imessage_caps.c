@@ -566,9 +566,20 @@ static void test_imsg_typing_catchup_tops_up_and_is_bounded(void) {
     HU_ASSERT_EQ(hu_imsg_typing_catchup_ms(60000, 0), HU_IMSG_TYPING_CATCHUP_MAX_MS);
 }
 
+/* 2026-09-27: imsg reported failure after delivering; the AppleScript
+ * fallback sent the same text again. Only a clearly newer sent row counts. */
+static void test_imessage_send_landed_needs_a_newer_sent_row(void) {
+    HU_ASSERT_TRUE(hu_imessage_send_landed(73356, 73358));
+    HU_ASSERT_TRUE(hu_imessage_send_landed(0, 12)); /* first message to them */
+    HU_ASSERT_FALSE(hu_imessage_send_landed(73356, 73356));
+    HU_ASSERT_FALSE(hu_imessage_send_landed(-1, 73358)); /* lookup failed before */
+    HU_ASSERT_FALSE(hu_imessage_send_landed(73356, -1)); /* lookup failed after */
+}
+
 void run_imessage_caps_tests(void) {
     HU_RUN_TEST(test_imsg_typing_phases_stay_in_human_ranges);
     HU_RUN_TEST(test_imsg_typing_catchup_tops_up_and_is_bounded);
+    HU_RUN_TEST(test_imessage_send_landed_needs_a_newer_sent_row);
     HU_TEST_SUITE("imessage_caps");
     HU_RUN_TEST(caps_effect_slot_is_one_shot_and_scoped);
     HU_RUN_TEST(caps_bare_url_is_exactly_one_link);

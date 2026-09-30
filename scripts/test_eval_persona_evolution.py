@@ -842,3 +842,37 @@ def test_has_dash_em_and_en():
     assert epe.has_dash("smart – figure it out") is True
     assert epe.has_dash("St Pete - 100 Central Ave") is False
     assert epe.has_dash("") is False
+
+
+# ---------------------------------------------------------------------------
+# fetch_outbound_messages: exclude the owner's own handles (2026-09-30).
+# Texts to Seth's own number are self-tests and notes (178 in 60 days, 57%
+# lowercase starts vs 10% to other people) and were measured as his style.
+# Uses a tiny temp SQLite file, never the real chat.db.
+# ---------------------------------------------------------------------------
+
+def _tiny_chatdb(path, rows):
+    import sqlite3
+    con = sqlite3.connect(path)
+    con.execute("CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT)")
+    con.execute("CREATE TABLE message (ROWID INTEGER PRIMARY KEY, handle_id INTEGER, "
+                "is_from_me INTEGER, date INTEGER, text TEXT, attributedBody BLOB, "
+                "associated_message_type INTEGER)")
+    con.executemany("INSERT INTO handle VALUES (?, ?)", [(1, "+15550000001"), (2, "+15550000002")])
+    con.executemany("INSERT INTO message (handle_id, is_from_me, date, text, "
+                    "associated_message_type) VALUES (?, 1, ?, ?, 0)", rows)
+    con.commit()
+    con.close()
+
+
+def test_fetch_outbound_can_exclude_the_owners_own_handles(tmp_path):
+    ns = int((datetime.datetime(2026, 9, 1, 12) - epe.APPLE_EPOCH).total_seconds() * 1e9)
+    db = str(tmp_path / "chat.db")
+    _tiny_chatdb(db, [(1, ns, "#text did you ever sort out the garage door"),
+                      (2, ns + 1, "Sounds good, see you then")])
+    start, end = datetime.datetime(2026, 8, 1), datetime.datetime(2026, 10, 1)
+    both = [t for _, t in epe.fetch_outbound_messages(db, start, end)]
+    assert len(both) == 2
+    kept = [t for _, t in epe.fetch_outbound_messages(db, start, end,
+                                                       exclude_handles={"+15550000001"})]
+    assert kept == ["Sounds good, see you then"]

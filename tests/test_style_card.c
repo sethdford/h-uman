@@ -171,6 +171,31 @@ static void render_casual_rules_states_card_numbers(void) {
     HU_ASSERT_STR_NOT_CONTAINS(buf, "All lowercase");
 }
 
+/* Laugh axis (2026-09-30): the twin said lol/haha in 14% of its texts over a
+ * week, Seth in 3%, mostly as a reflex "Lol" opener. A card without the axis
+ * renders nothing about it (no invented number). */
+static void render_laugh_rate_only_when_measured(void) {
+    test_alloc = hu_system_allocator();
+    hu_style_card_t c;
+    HU_ASSERT_EQ(hu_style_card_parse(&test_alloc, card_json, strlen(card_json), &c), HU_OK);
+    HU_ASSERT_TRUE(c.laugh_rate < 0.0);
+    char buf[1024];
+    size_t len = 0;
+    HU_ASSERT_EQ(hu_style_card_render_casual_rules(&c, buf, sizeof(buf), &len), HU_OK);
+    HU_ASSERT_STR_NOT_CONTAINS(buf, "lol");
+
+    static const char laugh_json[] =
+        "{\"schema\":\"style-card/v2\",\"n\":900,\"axes\":{"
+        "\"lowercase_start_rate\":{\"value\":0.05},\"no_terminal_punct_rate\":{\"value\":0.8},"
+        "\"question_rate\":{\"value\":0.1},\"exclamation_rate\":{\"value\":0.04},"
+        "\"emoji_rate\":{\"value\":0.1},\"laugh_rate\":{\"value\":0.03}}}";
+    HU_ASSERT_EQ(hu_style_card_parse(&test_alloc, laugh_json, strlen(laugh_json), &c), HU_OK);
+    HU_ASSERT_TRUE(c.laugh_rate > 0.029 && c.laugh_rate < 0.031);
+    HU_ASSERT_EQ(hu_style_card_render_casual_rules(&c, buf, sizeof(buf), &len), HU_OK);
+    HU_ASSERT_STR_CONTAINS(buf, "\"lol\"/\"haha\" about 1 in 33 texts");
+    HU_ASSERT_STR_CONTAINS(buf, "never as a reflex opener");
+}
+
 static void render_rejects_small_buffer(void) {
     hu_style_card_t c;
     hu_style_card_default(&c);
@@ -399,6 +424,7 @@ void run_style_card_tests(void) {
     HU_RUN_TEST(load_missing_card_returns_not_found_and_default);
     HU_RUN_TEST(load_reads_card_from_persona_dir);
     HU_RUN_TEST(render_casual_rules_states_card_numbers);
+    HU_RUN_TEST(render_laugh_rate_only_when_measured);
     HU_RUN_TEST(render_rejects_small_buffer);
     HU_RUN_TEST(render_near_zero_rate_says_almost_never);
     HU_RUN_TEST(absolute_rules_prefer_card_over_compiled_default);

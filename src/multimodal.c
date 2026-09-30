@@ -123,9 +123,8 @@ hu_error_t hu_multimodal_decode_base64(hu_allocator_t *alloc, const char *b64, s
             alloc->free(alloc->ctx, out, out_cap ? out_cap : 1);
             return HU_ERR_INVALID_ARGUMENT;
         }
-        uint32_t triple =
-            ((uint32_t)(uint8_t)v0 << 18) | ((uint32_t)(uint8_t)v1 << 12) |
-            ((uint32_t)(uint8_t)v2 << 6) | (uint32_t)(uint8_t)v3;
+        uint32_t triple = ((uint32_t)(uint8_t)v0 << 18) | ((uint32_t)(uint8_t)v1 << 12) |
+                          ((uint32_t)(uint8_t)v2 << 6) | (uint32_t)(uint8_t)v3;
         out[o++] = (unsigned char)(triple >> 16);
         out[o++] = (unsigned char)((triple >> 8) & 0xFF);
         out[o++] = (unsigned char)(triple & 0xFF);
@@ -138,8 +137,7 @@ hu_error_t hu_multimodal_decode_base64(hu_allocator_t *alloc, const char *b64, s
             alloc->free(alloc->ctx, out, out_cap ? out_cap : 1);
             return HU_ERR_INVALID_ARGUMENT;
         }
-        out[o++] =
-            (unsigned char)(((uint32_t)(uint8_t)v0 << 2) | ((uint32_t)(uint8_t)v1 >> 4));
+        out[o++] = (unsigned char)(((uint32_t)(uint8_t)v0 << 2) | ((uint32_t)(uint8_t)v1 >> 4));
     } else if (body % 4 == 3) {
         int8_t v0 = b64_value((unsigned char)b64[i]);
         int8_t v1 = b64_value((unsigned char)b64[i + 1]);
@@ -148,10 +146,8 @@ hu_error_t hu_multimodal_decode_base64(hu_allocator_t *alloc, const char *b64, s
             alloc->free(alloc->ctx, out, out_cap ? out_cap : 1);
             return HU_ERR_INVALID_ARGUMENT;
         }
-        out[o++] =
-            (unsigned char)(((uint32_t)(uint8_t)v0 << 2) | ((uint32_t)(uint8_t)v1 >> 4));
-        out[o++] =
-            (unsigned char)(((uint32_t)(uint8_t)v1 << 4) | ((uint32_t)(uint8_t)v2 >> 2));
+        out[o++] = (unsigned char)(((uint32_t)(uint8_t)v0 << 2) | ((uint32_t)(uint8_t)v1 >> 4));
+        out[o++] = (unsigned char)(((uint32_t)(uint8_t)v1 << 4) | ((uint32_t)(uint8_t)v2 >> 2));
     }
 
     *out_bytes = out;
@@ -209,6 +205,17 @@ const char *hu_multimodal_detect_mime(const void *header, size_t header_len) {
         return "image/webp";
     if (header_len >= 2 && h[0] == 'B' && h[1] == 'M')
         return "image/bmp";
+    /* ISO BMFF: "ftyp" at 4, major brand at 8. Only the HEIC/HEIF brands are
+     * images; m4a/mp4/mov share the box and must not match. iPhone photos are
+     * HEIC, and as octet-stream every one failed vision (2026-09-30). */
+    if (header_len >= 12 && memcmp(h + 4, "ftyp", 4) == 0) {
+        static const char *const heic[] = {"heic", "heix", "heim", "heis", "hevc", "hevx", NULL};
+        for (size_t i = 0; heic[i]; i++)
+            if (memcmp(h + 8, heic[i], 4) == 0)
+                return "image/heic";
+        if (memcmp(h + 8, "mif1", 4) == 0 || memcmp(h + 8, "msf1", 4) == 0)
+            return "image/heif";
+    }
     return "application/octet-stream";
 }
 

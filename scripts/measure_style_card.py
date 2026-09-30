@@ -70,8 +70,34 @@ CARD_AXES = (
     "exclamation_rate",
     "emoji_rate",
     "dash_rate",
+    "laugh_rate",
     "length_chars",
 )
+
+
+def owner_handles(persona: str):
+    """The owner's own handles (persona contacts with relationship "test"):
+    texts to them are self-tests and notes, not how the owner texts people
+    (178 in 60 days, 57% lowercase starts against 10% to others, 2026-09-30)."""
+    path = os.path.expanduser(f"~/.human/personas/{persona}.json")
+    try:
+        contacts = json.load(open(path)).get("contacts") or {}
+    except (OSError, ValueError):
+        return set()
+    return {h for h, c in contacts.items() if isinstance(c, dict) and c.get("relationship") == "test"}
+
+
+def drop_daemon_sends(messages, records):
+    """[(datetime, text)] minus the daemon's own sends. chat.db marks those
+    is_from_me too; until 2026-09-30 the card measured them as Seth (~12% of
+    from-me rows), so the twin's habits leaked back into its own style rules."""
+    from extract_imessage_pairs import daemon_send_predicate
+    is_daemon = daemon_send_predicate(records)
+
+    def epoch(ts):  # fetch_outbound_messages yields NAIVE UTC (Apple epoch)
+        return (ts if ts.tzinfo else ts.replace(tzinfo=datetime.timezone.utc)).timestamp()
+
+    return [(ts, t) for ts, t in messages if not is_daemon(t, epoch(ts))]
 
 
 class InsufficientData(Exception):
@@ -238,7 +264,12 @@ def run(args, messages=None, substantive_pairs=None) -> int:
            if args.end else datetime.datetime.now())
     start = end - datetime.timedelta(days=args.days)
     if messages is None:
-        messages = fetch_outbound_messages(args.db, start, end)
+        messages = fetch_outbound_messages(args.db, start, end,
+                                           exclude_handles=owner_handles(args.persona))
+        from extract_imessage_pairs import load_daemon_records
+        before = len(messages)
+        messages = drop_daemon_sends(messages, load_daemon_records())
+        sys.stderr.write(f"excluded {before - len(messages)} daemon sends of {before}\n")
     try:
         card = build_card(messages, args.persona, start, end, min_n=args.min_n,
                           n_resamples=args.n_resamples, seed=args.seed)

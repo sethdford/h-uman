@@ -37,6 +37,7 @@ void hu_style_card_default(hu_style_card_t *out) {
     out->emoji_rate = 0.126;
     out->n = 0;
     out->substantive_agreement_opener_rate = -1.0;
+    out->laugh_rate = -1.0; /* optional axis: absent renders nothing */
     /* Entity casing: -1 = axis absent. A card without it leaves the
      * governor's action D inert, which is the pre-2026-09-22 behaviour. */
     out->entity_cap_rate = -1.0;
@@ -152,6 +153,9 @@ hu_error_t hu_style_card_parse(hu_allocator_t *alloc, const char *json, size_t l
             }
         }
         read_entity_casing(root, &card);
+        /* Optional: cards measured before 2026-09-30 have no laugh axis. */
+        if (!read_axis(axes, "laugh_rate", &card.laugh_rate))
+            card.laugh_rate = -1.0;
         card.from_card = true;
         *out = card;
         err = HU_OK;
@@ -263,13 +267,21 @@ hu_error_t hu_style_card_render_casual_rules(const hu_style_card_t *card, char *
     fmt_rate(card->question_rate, question, sizeof(question));
     fmt_rate(card->emoji_rate, emoji, sizeof(emoji));
     fmt_rate(card->exclamation_rate, exclaim, sizeof(exclaim));
+    /* Laugh tokens, when measured: the twin opened with a reflex "Lol" in 14%
+     * of its texts over a week against Seth's 3% (2026-09-30). */
+    char laugh[96] = "";
+    if (card->laugh_rate >= 0.0) {
+        char lr[40];
+        fmt_rate(card->laugh_rate, lr, sizeof(lr));
+        snprintf(laugh, sizeof(laugh), " \"lol\"/\"haha\" %s, never as a reflex opener.", lr);
+    }
     int n = snprintf(buf, cap,
                      "2. Normal capitalization (your phone capitalizes for you; a lowercase "
                      "start is %s); CAPS only when SHOUTING. About %d%% of your texts have "
                      "no period at the end — stop like a real text. Question marks only "
-                     "when actually asking (%s). Emoji %s, exclamation points %s.\n",
+                     "when actually asking (%s). Emoji %s, exclamation points %s.%s\n",
                      lower, (int)lround(card->no_terminal_punct_rate * 100.0), question, emoji,
-                     exclaim);
+                     exclaim, laugh);
     if (n < 0 || (size_t)n + 1 > cap)
         return HU_ERR_OUT_OF_MEMORY;
     if (out_len)

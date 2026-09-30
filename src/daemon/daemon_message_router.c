@@ -28,6 +28,7 @@
 #include "human/channels/imessage_reply.h"
 #include "human/config.h"
 #include "human/context/conversation.h"
+#include "human/context/vision.h"
 #include "human/core/log.h"
 #include "human/core/paths.h"
 #include "human/core/time.h"
@@ -37,6 +38,7 @@
 #include "human/daemon/share_queue.h"
 #include "human/memory/agent_facts.h"
 #include "human/persona/pacing.h"
+#include "human/providers/factory.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -657,4 +659,85 @@ size_t hu_daemon_burst_carry(hu_channel_loop_msg_t *msgs, size_t *count, size_t 
                     burst[i].session_key);
     }
     return lost;
+}
+
+bool hu_daemon_vision_route(const hu_config_t *cfg, const char *model, size_t model_len,
+                            const char **provider_out, const char **model_out) {
+    if (!cfg || !model || !provider_out || !model_out)
+        return false;
+    const hu_reliability_config_t *r = &cfg->reliability;
+    if (r->fallback_providers_len == 0 || !r->fallback_providers || !r->fallback_providers[0])
+        return false;
+    for (size_t i = 0; i < r->model_fallbacks_len; i++) {
+        const hu_config_model_fallback_t *mf = &r->model_fallbacks[i];
+        if (!mf->model || strlen(mf->model) != model_len || memcmp(mf->model, model, model_len))
+            continue;
+        if (mf->fallback_models_len == 0 || !mf->fallback_models[0])
+            return false;
+        *provider_out = r->fallback_providers[0];
+        *model_out = mf->fallback_models[0];
+        return true;
+    }
+    return false;
+}
+
+hu_error_t hu_daemon_describe_image(hu_allocator_t *alloc, hu_agent_t *agent,
+                                    const hu_config_t *cfg, const char *path, size_t path_len,
+                                    const char *model, size_t model_len, char **desc_out,
+                                    size_t *desc_len) {
+    if (!alloc || !agent)
+        return HU_ERR_INVALID_ARGUMENT;
+    const char *vp = NULL, *vm = NULL;
+    if (hu_daemon_vision_route(cfg, model, model_len, &vp, &vm)) {
+        hu_provider_t prov = {0};
+        if (hu_provider_create_from_config(alloc, cfg, vp, strlen(vp), &prov) == HU_OK &&
+            prov.vtable) {
+            hu_error_t err = hu_vision_describe_image(alloc, &prov, path, path_len, vm, strlen(vm),
+                                                      desc_out, desc_len);
+            if (prov.vtable->deinit)
+                prov.vtable->deinit(prov.ctx, alloc);
+            return err;
+        }
+        hu_log_warn("human", agent->observer,
+                    "vision: could not create '%s' — describing via the agent's provider", vp);
+    }
+    return hu_vision_describe_image(alloc, &agent->provider, path, path_len, model, model_len,
+                                    desc_out, desc_len);
+}
+
+const char *hu_daemon_unseen_photo(const char *text, size_t *len, char *buf, size_t cap) {
+    static const char obj[] = "\xEF\xBF\xBC"; /* U+FFFC, the attachment placeholder */
+    static const char note[] =
+        "[They sent a picture that didn't load on your phone \xE2\x80\x94 you can't see it]";
+    if (!text || !len || !buf || cap == 0 || text == buf)
+        return text;
+    size_t n = *len, o = 0;
+    bool had = false;
+    for (size_t i = 0; i < n; i++) {
+        if (i + 3 <= n && memcmp(text + i, obj, 3) == 0) {
+            had = true;
+            i += 2;
+            continue;
+        }
+        if (o + 1 >= cap)
+            return text;
+        buf[o++] = text[i];
+    }
+    if (!had)
+        return text;
+    while (o > 0 && (buf[o - 1] == ' ' || buf[o - 1] == '\n'))
+        o--;
+    size_t lead = 0;
+    while (lead < o && (buf[lead] == ' ' || buf[lead] == '\n'))
+        lead++;
+    memmove(buf, buf + lead, o - lead);
+    o -= lead;
+    size_t need = o + (o ? 1 : 0) + sizeof(note) - 1;
+    if (need + 1 > cap)
+        return text;
+    if (o)
+        buf[o++] = '\n';
+    memcpy(buf + o, note, sizeof(note));
+    *len = o + sizeof(note) - 1;
+    return buf;
 }

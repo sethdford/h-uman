@@ -25,24 +25,26 @@ hu_inspiration_medium_t hu_inspiration_pick_medium(const char *incoming, size_t 
     return HU_INSPIRATION_MUSIC;
 }
 
+/* "The user's own voice" read as the contact's: Lexi got "yeah u def my sugar
+ * daddy" (2026-09-29). Each prompt names the sides: you texting them. */
 const char *hu_inspiration_system_prompt(hu_inspiration_medium_t medium) {
     switch (medium) {
     case HU_INSPIRATION_YOUTUBE:
         return "Suggest ONE YouTube search that fits the conversation. Return exactly:\n"
                "SEARCH QUERY | your brief casual message\n"
-               "The message is a natural text in the user's own voice - not a recommendation. "
-               "Under 80 chars. No quotes, no URLs.";
+               "The message is you texting them, in your own voice - never a line from their "
+               "side of the chat, not a recommendation. Under 80 chars. No quotes, no URLs.";
     case HU_INSPIRATION_TIKTOK:
         return "Suggest ONE TikTok hashtag keyword that fits the conversation. Return exactly:\n"
                "HASHTAG KEYWORD | your brief casual message\n"
-               "Keyword is 1-2 words, no '#'. Message is a natural text in the user's own "
-               "voice. Under 80 chars. No quotes, no URLs.";
+               "Keyword is 1-2 words, no '#'. The message is you texting them, in your own "
+               "voice - never a line from their side. Under 80 chars. No quotes, no URLs.";
     case HU_INSPIRATION_MUSIC:
     default:
         return "Suggest ONE song that fits the conversation mood. Return exactly:\n"
                "ARTIST - TITLE | your brief casual message\n"
-               "The message is a natural text in the user's own voice - not a recommendation. "
-               "Under 80 chars. No quotes, no URLs.";
+               "The message is you texting them, in your own voice - never a line from their "
+               "side of the chat, not a recommendation. Under 80 chars. No quotes, no URLs.";
     }
 }
 
