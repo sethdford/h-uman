@@ -7504,8 +7504,21 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                                                 batch_thread_safe = false;
                                         }
                                     }
-                                    if (batch_thread_safe) {
-                                        dag_parallel_work_t works[HU_DAG_MAX_BATCH_SIZE];
+                                    /* The worker contexts live on the heap, not in this
+                                     * loop-scoped frame: ASan on Darwin arm64
+                                     * false-positives a loop-scoped struct handed to
+                                     * pthread_create (.claude/rules/
+                                     * asan-pthread-stack-aliasing-darwin.md). If the
+                                     * allocation fails the batch takes the sequential
+                                     * path below. */
+                                    dag_parallel_work_t *works =
+                                        batch_thread_safe
+                                            ? (dag_parallel_work_t *)agent->alloc->alloc(
+                                                  agent->alloc->ctx,
+                                                  HU_DAG_MAX_BATCH_SIZE *
+                                                      sizeof(dag_parallel_work_t))
+                                            : NULL;
+                                    if (works) {
                                         pthread_t tids[HU_DAG_MAX_BATCH_SIZE];
                                         bool thread_started[HU_DAG_MAX_BATCH_SIZE];
                                         memset(thread_started, 0, sizeof(thread_started));
@@ -7527,6 +7540,9 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                                             if (batch.nodes[bi]->status == HU_DAG_DONE)
                                                 dag_executed = true;
                                         }
+                                        agent->alloc->free(agent->alloc->ctx, works,
+                                                           HU_DAG_MAX_BATCH_SIZE *
+                                                               sizeof(dag_parallel_work_t));
                                         continue;
                                     }
 #endif

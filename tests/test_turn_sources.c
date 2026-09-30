@@ -21,9 +21,13 @@
 #include <string.h>
 
 /* Hand ratchets. Lower both to the values this suite prints in every stage
- * commit; never raise them. */
-#define TS_AGENT_TURN_C_MAX_LINES   9084
-#define TS_AGENT_TURN_RUN_MAX_LINES 7536
+ * commit; never raise them — except for Task 11's DAG-worker heap-alloc fix
+ * (asan-pthread-stack-aliasing-darwin.md), the carve's one deliberate
+ * behaviour change: it adds code to agent_turn.c in place (no stage file to
+ * carry the growth), so this is the one commit where the ceiling moves up to
+ * match, by exactly the lines the fix adds. */
+#define TS_AGENT_TURN_C_MAX_LINES   9100
+#define TS_AGENT_TURN_RUN_MAX_LINES 7552
 
 static char *ts_read(const char *path) {
     FILE *f = fopen(path, "rb");
@@ -189,10 +193,25 @@ static void turn_context_keeps_both_not_test_hour_blocks(void) {
     HU_ASSERT_EQ(in_turn, 0);
 }
 
+/* spec §3 item 6 / .claude/rules/asan-pthread-stack-aliasing-darwin.md: the
+ * cross-thread DAG worker contexts must not live in the loop-scoped frame. */
+static void dag_batch_workers_live_on_the_heap(void) {
+    char *src = ts_read("src/agent/agent_turn.c");
+    HU_SKIP_IF(!src, "run from the repo root");
+    size_t stack_arrays = ts_count(src, "dag_parallel_work_t works[");
+    size_t heap_blocks = ts_count_not_test(src, "dag_parallel_work_t *works =");
+    size_t sizes = ts_count(src, "sizeof(dag_parallel_work_t)");
+    free(src);
+    HU_ASSERT_EQ(stack_arrays, 0);
+    HU_ASSERT_EQ(heap_blocks, 1);
+    HU_ASSERT_EQ(sizes, 2); /* the alloc and the free */
+}
+
 void run_turn_sources_tests(void) {
     HU_TEST_SUITE("TurnSources");
     HU_RUN_TEST(turn_stage_files_never_include_sqlite3_or_the_provider_factory);
     HU_RUN_TEST(turn_retrieve_w12_merge_leaves_graph_ctx_alive);
     HU_RUN_TEST(turn_context_keeps_both_not_test_hour_blocks);
     HU_RUN_TEST(agent_turn_body_and_file_only_shrink);
+    HU_RUN_TEST(dag_batch_workers_live_on_the_heap);
 }
