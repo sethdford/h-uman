@@ -164,7 +164,7 @@ hu_prospective_verdict_t hu_prospective_parse_verdict(const char *raw, size_t le
         return HU_PM_VERDICT_PARSE_FAIL;
     const char *p = raw;
     const char *end = raw + len;
-    for (const char *q = raw; q + 8 <= end; q++) /* a leaked thinking block is not the answer */
+    for (const char *q = raw; end - q >= 8; q++) /* a leaked thinking block is not the answer */
         if (memcmp(q, "</think>", 8) == 0)
             p = q + 8;
     while (p < end && !isalpha((unsigned char)*p))
@@ -213,11 +213,14 @@ hu_prospective_action_t hu_prospective_decide(bool judge_ok, hu_prospective_verd
 /* Words that never identify WHAT an intention is about. Only >= 4-char words
  * matter (shorter ones are skipped before this list is consulted). */
 static const char *const k_pm_stop[] = {
-    "about",  "again", "also",  "back",  "bring", "check",    "could",  "does",  "done",   "follow",
-    "forget", "from",  "going", "gonna", "have",  "into",     "just",   "know",  "later",  "maybe",
-    "more",   "much",  "need",  "next",  "over",  "remember", "remind", "send",  "should", "some",
-    "still",  "sure",  "tell",  "that",  "their", "them",     "then",   "there", "they",   "thing",
-    "this",   "time",  "want",  "what",  "when",  "will",     "with",   "would", "your",
+    "about",   "after", "again",   "also",  "back",  "been",   "before",   "bring",    "call",
+    "check",   "could", "does",    "done",  "email", "follow", "forget",   "from",     "going",
+    "gonna",   "have",  "here",    "into",  "just",  "know",   "later",    "maybe",    "more",
+    "morning", "much",  "need",    "next",  "night", "over",   "remember", "remind",   "send",
+    "should",  "some",  "still",   "sure",  "tell",  "text",   "that",     "their",    "them",
+    "then",    "there", "they",    "thing", "this",  "time",   "today",    "tomorrow", "tonight",
+    "want",    "week",  "weekend", "were",  "what",  "when",   "where",    "which",    "will",
+    "with",    "would", "your",
 };
 
 static bool pm_is_stop(const char *w) {
@@ -359,10 +362,168 @@ size_t hu_prospective_render(hu_prospective_render_style_t style, const char *co
     return rendered;
 }
 
-/* F4 (controller ruling, spec §4.1 source=promise_keeper): a commitment the
- * CONTACT made must read as a question about them, never first person as
- * if Seth owed the follow-through. Only the frame changes; no tense/pronoun
- * rewrite of `summary` is attempted (see header contract). */
+/* F4 continued (fix round 1, I1): summaries are text AFTER "I'll "/
+ * "I promise "/"remind me "/"my goal is " etc. (src/agent/commitment.c:
+ * 25-30,87) — commitment.c strips only the ONE pattern it matched, so a
+ * summary can still start with a second pattern's leftover ("I'll be
+ * there" when "I promise " was the match) or carry mid-clause first-person
+ * pronouns ("text you when I land"). Both must be neutralized before the
+ * "ask if they..." frame is safe to use. */
+
+static bool pm_prefix_ci(const char *s, size_t len, const char *prefix) {
+    size_t pl = strlen(prefix);
+    if (len < pl)
+        return false;
+    for (size_t i = 0; i < pl; i++)
+        if (tolower((unsigned char)s[i]) != tolower((unsigned char)prefix[i]))
+            return false;
+    return true;
+}
+
+static bool pm_boundary_before(const char *s, size_t i) {
+    return i == 0 || !isalnum((unsigned char)s[i - 1]);
+}
+
+static bool pm_boundary_after(const char *s, size_t len, size_t i) {
+    return i >= len || !isalnum((unsigned char)s[i]);
+}
+
+/* Case-insensitive whole-word match of `tok` at s[i..); false if it runs
+ * past `len` or the next byte continues an alnum run. */
+static bool pm_word_at_ci(const char *s, size_t len, size_t i, const char *tok) {
+    size_t tl = strlen(tok);
+    if (i + tl > len)
+        return false;
+    for (size_t k = 0; k < tl; k++)
+        if (tolower((unsigned char)s[i + k]) != tolower((unsigned char)tok[k]))
+            return false;
+    return pm_boundary_after(s, len, i + tl);
+}
+
+/* 1 byte for a straight apostrophe, 3 for the curly U+2019 UTF-8 sequence,
+ * 0 if s[i] is neither. */
+static size_t pm_apostrophe_len(const char *s, size_t len, size_t i) {
+    if (i < len && s[i] == '\'')
+        return 1;
+    if (i + 3 <= len && (unsigned char)s[i] == 0xE2 && (unsigned char)s[i + 1] == 0x80 &&
+        (unsigned char)s[i + 2] == 0x99)
+        return 3;
+    return 0;
+}
+
+/* Appends `word` (length `wl`) to out[oi..), advances *i by `consume`; false
+ * (out untouched past *oi) if it wouldn't fit. Collapses the repeated
+ * bounds-check-then-memcpy shape shared by every pronoun swap below. */
+static bool pm_emit(char *out, size_t out_cap, size_t *oi, const char *word, size_t wl, size_t *i,
+                    size_t consume) {
+    if (*oi + wl >= out_cap)
+        return false;
+    memcpy(out + *oi, word, wl);
+    *oi += wl;
+    *i += consume;
+    return true;
+}
+
+#define PM_EMIT(word, consume) pm_emit(out, out_cap, &oi, word, sizeof(word) - 1, &i, (consume))
+
+/* {word, replacement} table for the plain-possessive/objective swaps —
+ * "I"/"I'm"/"I'll"/"I've"/"I'd" are handled separately in pm_third_person
+ * (they hinge on the apostrophe, not a plain word match). Looping this
+ * table, rather than one if-block per word, is what keeps the four swaps
+ * from reading as four copies of the same six lines (clone-ratchet.md). */
+static const struct {
+    const char *word;
+    const char *repl;
+} k_pm_swaps[] = {
+    {"myself", "themselves"},
+    {"mine", "theirs"},
+    {"my", "their"},
+    {"me", "them"},
+};
+
+/* Tries every entry of k_pm_swaps at s[i..). Returns the number of input
+ * bytes consumed on a match (>0), 0 for no match, -1 if `out` is full. */
+static int pm_apply_pronoun_swap(const char *s, size_t len, size_t i, char *out, size_t out_cap,
+                                 size_t *oi) {
+    for (size_t k = 0; k < PM_COUNT(k_pm_swaps); k++) {
+        if (!pm_word_at_ci(s, len, i, k_pm_swaps[k].word))
+            continue;
+        size_t wl = strlen(k_pm_swaps[k].word);
+        size_t rl = strlen(k_pm_swaps[k].repl);
+        size_t dummy_i = i;
+        if (!pm_emit(out, out_cap, oi, k_pm_swaps[k].repl, rl, &dummy_i, wl))
+            return -1;
+        return (int)wl;
+    }
+    return 0;
+}
+
+/* Rewrites first-person pronouns to third-person, whole-word and
+ * case-insensitive: I->they, me->them, my->their, mine->theirs,
+ * myself->themselves, I'm->they're, I've->they've, I'll->they'll,
+ * I'd->they'd (bare "I" already catches the 'll/'ve/'d forms via the
+ * apostrophe boundary, so only "I'm" needs special-casing — "am" has no
+ * third-person-plural contraction of its own). Returns false (leaving
+ * *out_len untouched) when nothing survives, or a whole-word first-person
+ * token is still present afterward — a safety net that fails toward
+ * silence rather than risk a leaked pronoun. */
+static bool pm_third_person(const char *s, size_t len, char *out, size_t out_cap, size_t *out_len) {
+    size_t oi = 0;
+    for (size_t i = 0; i < len;) {
+        if (!pm_boundary_before(s, i)) {
+            if (!pm_emit(out, out_cap, &oi, s + i, 1, &i, 1))
+                return false;
+            continue;
+        }
+        if (s[i] == 'I' || s[i] == 'i') {
+            size_t ap = pm_apostrophe_len(s, len, i + 1);
+            if (ap && i + 1 + ap < len && (s[i + 1 + ap] == 'm' || s[i + 1 + ap] == 'M') &&
+                pm_boundary_after(s, len, i + 2 + ap)) {
+                if (!PM_EMIT("they're", 2 + ap))
+                    return false;
+                continue;
+            }
+            if (pm_boundary_after(s, len, i + 1)) { /* bare "I" (also catches I'll/I've/I'd) */
+                if (!PM_EMIT("they", 1))
+                    return false;
+                continue;
+            }
+        }
+        int consumed = pm_apply_pronoun_swap(s, len, i, out, out_cap, &oi);
+        if (consumed < 0)
+            return false;
+        if (consumed > 0) {
+            i += (size_t)consumed;
+            continue;
+        }
+        if (!pm_emit(out, out_cap, &oi, s + i, 1, &i, 1))
+            return false;
+    }
+    if (oi == 0)
+        return false;
+    out[oi] = '\0';
+    if (hu_str_contains_word_ci_n(out, oi, "i") || hu_str_contains_word_ci_n(out, oi, "me") ||
+        hu_str_contains_word_ci_n(out, oi, "my") || hu_str_contains_word_ci_n(out, oi, "mine") ||
+        hu_str_contains_word_ci_n(out, oi, "myself"))
+        return false;
+    *out_len = oi;
+    return true;
+}
+
+#undef PM_EMIT
+
+/* hu_buf_appendf clamps to cap-1 on truncation: treat that as "did not
+ * fit" and refuse the partial write, rather than ever returning a
+ * half-composed action. Shared so the check exists once, not once per
+ * hu_prospective_commitment_action return path (clone-ratchet.md). */
+static size_t pm_finish_or_empty(char *buf, size_t cap, size_t n) {
+    if (n >= cap - 1) {
+        buf[0] = '\0';
+        return 0;
+    }
+    return n;
+}
+
 size_t hu_prospective_commitment_action(const char *summary, bool contact_committed, char *buf,
                                         size_t cap) {
     if (!buf || cap == 0)
@@ -370,14 +531,32 @@ size_t hu_prospective_commitment_action(const char *summary, bool contact_commit
     buf[0] = '\0';
     if (!summary || !summary[0])
         return 0;
-    size_t n = contact_committed
-                   ? hu_buf_appendf(buf, cap, 0, "ask if they still need to %s", summary)
-                   : hu_buf_appendf(buf, cap, 0, "%s", summary);
-    if (n >= cap - 1) { /* hu_buf_appendf clamps to cap-1 on truncation */
-        buf[0] = '\0';
-        return 0;
+    if (!contact_committed)
+        return pm_finish_or_empty(buf, cap, hu_buf_appendf(buf, cap, 0, "%s", summary));
+    size_t slen = strlen(summary);
+    /* No named array here (dead-strip-ratchet.md): a function-local static
+     * gets its own `_hu_commitment_action.k_leading`-shaped symbol, and
+     * this function has no production caller yet, so the whole thing
+     * would count as dead+unreferenced. Three inline checks, no symbol. */
+    if (pm_prefix_ci(summary, slen, "I'll ")) {
+        summary += 5;
+        slen -= 5;
+    } else if (pm_prefix_ci(summary, slen, "I will ")) {
+        summary += 7;
+        slen -= 7;
+    } else if (pm_prefix_ci(summary, slen, "to ")) {
+        summary += 3;
+        slen -= 3;
     }
-    return n;
+    if (slen == 0)
+        return 0;
+    char rewritten[512];
+    size_t rlen = 0;
+    if (!pm_third_person(summary, slen, rewritten, sizeof(rewritten), &rlen))
+        return 0;
+    return pm_finish_or_empty(
+        buf, cap,
+        hu_buf_appendf(buf, cap, 0, "ask if they still need to %.*s", (int)rlen, rewritten));
 }
 
 static const char k_pm_judge_system[] =
@@ -408,9 +587,14 @@ size_t hu_prospective_judge_user(char *buf, size_t cap, const char *history, siz
     const char *h = history ? history : "";
     size_t hl = history ? history_len : 0;
     if (hl > 4000) { /* keep the most recent lines, starting at a line */
-        const char *start = h + hl - 4000;
-        const char *nl = memchr(start, '\n', (size_t)(h + hl - start));
-        size_t skip = nl ? (size_t)(nl + 1 - h) : hl - 4000;
+        const char *win_end = h + hl;
+        const char *start = win_end - 4000;
+        const char *nl = memchr(start, '\n', (size_t)(win_end - start));
+        /* M1 (fix round 1): a newline with nothing after it (the only
+         * newline in the window is the trailing byte) is not a usable line
+         * boundary — trimming there throws the whole tail away. Keep the
+         * raw tail instead of reporting "(none)". */
+        size_t skip = (nl && nl + 1 < win_end) ? (size_t)(nl + 1 - h) : hl - 4000;
         h += skip;
         hl -= skip;
     }

@@ -6,6 +6,7 @@
  * .claude/rules/security-predicate-extraction.md. */
 #include "test_framework.h"
 
+#include "human/core/string.h"
 #include "human/memory/prospective_policy.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -211,6 +212,12 @@ static void reply_uses_action_needs_half_the_key_terms(void) {
     HU_ASSERT_FALSE(hu_prospective_reply_uses_action("ask about the caf\xc3\xa9",
                                                      "how was the caf\xc3\xa9", 17));
     HU_ASSERT_FALSE(hu_prospective_reply_uses_action("send the lasagna recipe", NULL, 0));
+    /* I2 (fix round 1): "text"/"tomorrow" are intention-verb/time filler,
+     * not evidence of WHAT the intention is about — without them in the
+     * stoplist, "ok i'll text you tomorrow" hit 2 of [text, tomorrow,
+     * dentist] and marked the item DONE though the dentist never came up. */
+    static const char *dentist_act = "text her tomorrow about the dentist";
+    HU_ASSERT_FALSE(hu_prospective_reply_uses_action(dentist_act, "ok i'll text you tomorrow", 25));
 }
 
 static void after_delivery_status_table(void) {
@@ -258,12 +265,15 @@ static void render_styles_are_exact(void) {
                  (size_t)0);
 }
 
-/* F4 (controller ruling on task-2-brief.md, spec §4.1 source=promise_keeper):
- * a commitment the CONTACT made (hu_commitment_t.owner == "user") must
- * render as a question about THEM, never first person as if Seth owed the
- * follow-through. This test fails against the brief's render() alone,
- * which has no owner-aware branch — hu_prospective_commitment_action is
- * the minimal addition that gives the policy module a way to express it. */
+/* F4 fix round 1, I1 (controller ruling on task-2-brief.md, spec §4.1
+ * source=promise_keeper): a commitment the CONTACT made
+ * (hu_commitment_t.owner == "user") must render as a question about THEM,
+ * never first person as if Seth owed the follow-through. Real summaries
+ * come from text AFTER "I'll "/"I promise "/"remind me "/"my goal is "
+ * (src/agent/commitment.c:25-30,87), so they routinely still carry a
+ * leaked pattern prefix ("I'll ", "to ") and/or first-person pronouns
+ * mid-clause — both must be neutralized, or the item renders nothing
+ * rather than leak Seth's voice as the contact's. */
 static void commitment_action_flips_contact_promises_into_a_question(void) {
     char buf[128];
     /* Seth's own commitment passes through unchanged (first person is
@@ -272,13 +282,42 @@ static void commitment_action_flips_contact_promises_into_a_question(void) {
         hu_prospective_commitment_action("send the lasagna recipe", false, buf, sizeof(buf)),
         strlen("send the lasagna recipe"));
     HU_ASSERT_STR_EQ(buf, "send the lasagna recipe");
-    /* The contact's own promise must NOT render as Seth's task. */
-    HU_ASSERT_EQ(
-        hu_prospective_commitment_action("send the lasagna recipe", true, buf, sizeof(buf)),
-        strlen("ask if they still need to send the lasagna recipe"));
-    HU_ASSERT_STR_EQ(buf, "ask if they still need to send the lasagna recipe");
-    HU_ASSERT_STR_CONTAINS(buf, "ask if they");
-    HU_ASSERT_NULL(strstr(buf, "I "));
+
+    /* "I'll text you when I land" -> summary "text you when I land"
+     * (promise pattern "I'll " already stripped by commitment.c). Bare
+     * mid-clause "I" must flip to "they". */
+    HU_ASSERT_EQ(hu_prospective_commitment_action("text you when I land", true, buf, sizeof(buf)),
+                 strlen("ask if they still need to text you when they land"));
+    HU_ASSERT_STR_EQ(buf, "ask if they still need to text you when they land");
+
+    /* "I promise I'll be there" -> summary "I'll be there" (only "I
+     * promise " is stripped by commitment.c's pattern match, so the
+     * summary itself still starts with the leaked "I'll " fragment). */
+    HU_ASSERT_EQ(hu_prospective_commitment_action("I'll be there", true, buf, sizeof(buf)),
+                 strlen("ask if they still need to be there"));
+    HU_ASSERT_STR_EQ(buf, "ask if they still need to be there");
+
+    /* "remind me to call my mom" -> summary "to call my mom" (the
+     * reminder pattern "remind me " leaves the "to" behind). */
+    HU_ASSERT_EQ(hu_prospective_commitment_action("to call my mom", true, buf, sizeof(buf)),
+                 strlen("ask if they still need to call their mom"));
+    HU_ASSERT_STR_EQ(buf, "ask if they still need to call their mom");
+
+    /* None of the three renders leaks a first-person pronoun. */
+    HU_ASSERT_FALSE(hu_str_contains_word_ci(buf, "i"));
+    HU_ASSERT_FALSE(hu_str_contains_word_ci(buf, "me"));
+    HU_ASSERT_FALSE(hu_str_contains_word_ci(buf, "my"));
+
+    /* Pronoun-free input needs no rewrite, just the question frame. */
+    HU_ASSERT_EQ(hu_prospective_commitment_action("book the flight", true, buf, sizeof(buf)),
+                 strlen("ask if they still need to book the flight"));
+    HU_ASSERT_STR_EQ(buf, "ask if they still need to book the flight");
+
+    /* A summary that is nothing but the leaked pattern (empty after the
+     * leading strip) renders nothing rather than an empty-looking claim. */
+    HU_ASSERT_EQ(hu_prospective_commitment_action("to ", true, buf, sizeof(buf)), (size_t)0);
+    HU_ASSERT_STR_EQ(buf, "");
+
     /* NULL/empty summary and a too-small buffer never fabricate text. */
     HU_ASSERT_EQ(hu_prospective_commitment_action(NULL, true, buf, sizeof(buf)), (size_t)0);
     HU_ASSERT_STR_EQ(buf, "");
@@ -328,6 +367,26 @@ static void judge_prompt_carries_history_intention_and_cue(void) {
                  (size_t)0); /* does not fit: nothing half-written is used */
 }
 
+/* M1 (fix round 1): when the only '\n' in the last 4000 bytes of history is
+ * the trailing byte (nothing after it to keep), trimming "at the line start"
+ * throws the whole tail away and reports "(none)" — as if there were no
+ * conversation at all, when there are up to 4499 bytes of it right before
+ * that newline. The fix keeps the raw tail instead of trimming to empty. */
+static void judge_user_keeps_tail_when_only_newline_is_trailing(void) {
+    char *longh = (char *)malloc(4500);
+    HU_ASSERT_NOT_NULL(longh);
+    memset(longh, 'x', 4499);
+    memcpy(longh + 4400, "MARKER_TAIL", 11); /* well inside the last 4000 bytes */
+    longh[4499] = '\n';                      /* the ONLY newline, at the very end */
+    char big[8192];
+    size_t n = hu_prospective_judge_user(big, sizeof(big), longh, 4500, "act", "cue",
+                                         HU_PM_CUE_KEYWORD, 0);
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_NULL(strstr(big, "(none)"));
+    HU_ASSERT_NOT_NULL(strstr(big, "MARKER_TAIL"));
+    free(longh);
+}
+
 static void local_day_start_is_a_stable_midnight(void) {
     int64_t now = 1790000000;
     int64_t d = hu_prospective_local_day_start(now);
@@ -351,5 +410,6 @@ void run_prospective_policy_tests(void) {
     HU_RUN_TEST(render_styles_are_exact);
     HU_RUN_TEST(commitment_action_flips_contact_promises_into_a_question);
     HU_RUN_TEST(judge_prompt_carries_history_intention_and_cue);
+    HU_RUN_TEST(judge_user_keeps_tail_when_only_newline_is_trailing);
     HU_RUN_TEST(local_day_start_is_a_stable_midnight);
 }
