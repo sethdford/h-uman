@@ -4,10 +4,13 @@
  * traffic does not confuse the reply; everyone else keeps the byte budget. */
 #include "human/agent.h"
 #include "human/context.h"
+#include "human/experience.h"
+#include "human/memory.h"
 #include "test_framework.h"
 
 #include <string.h>
 
+hu_error_t hu_agent_internal_experience_init(hu_agent_t *agent, hu_experience_store_t *store);
 size_t hu_agent_internal_fit_history(const hu_agent_t *agent, hu_chat_message_t *msgs,
                                      size_t msgs_count);
 
@@ -64,7 +67,32 @@ static void test_fit_history_byte_budget_drops_oldest(void) {
     HU_ASSERT_TRUE(total <= 20 * 1024);
 }
 
+#ifdef HU_ENABLE_SQLITE
+/* A self-test turn from the owner's own number writes no experience rows:
+ * 21 of them ("how'd the big meeting go -> went better than expected
+ * actually", a garbage rewrite as "Ryan's doing well.") were recalled into
+ * real conversations' context (2026-09-30). */
+static void experience_writes_refuse_on_a_self_test_turn(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.alloc = &alloc;
+    agent.memory = &mem;
+    hu_experience_store_t st;
+    agent.self_test_turn = true;
+    HU_ASSERT_EQ(hu_agent_internal_experience_init(&agent, &st), HU_ERR_NOT_SUPPORTED);
+    agent.self_test_turn = false;
+    HU_ASSERT_EQ(hu_agent_internal_experience_init(&agent, &st), HU_OK);
+    hu_experience_store_deinit(&st);
+    mem.vtable->deinit(mem.ctx);
+}
+#endif
+
 void run_agent_fit_history_tests(void) {
+#ifdef HU_ENABLE_SQLITE
+    HU_RUN_TEST(experience_writes_refuse_on_a_self_test_turn);
+#endif
     HU_TEST_SUITE("agent fit history");
     HU_RUN_TEST(test_fit_history_self_test_keeps_the_last_few);
     HU_RUN_TEST(test_fit_history_uncapped_keeps_everything_under_budget);

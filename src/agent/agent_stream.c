@@ -1967,7 +1967,7 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                 /* Experience record: per-tool */
                 {
                     hu_experience_store_t tool_exp;
-                    if (hu_experience_store_init(agent->alloc, agent->memory, &tool_exp) == HU_OK) {
+                    if (hu_agent_internal_experience_init(agent, &tool_exp) == HU_OK) {
                         tool_exp.db = ol_db;
                         const char *out_text = result.success ? result.output : result.error_msg;
                         size_t out_len = result.success ? result.output_len : result.error_msg_len;
@@ -2921,7 +2921,7 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
     /* Experience recording for this streaming turn */
     if (!agent->proactive_turn && agent->memory) {
         hu_experience_store_t exp_store;
-        if (hu_experience_store_init(agent->alloc, agent->memory, &exp_store) == HU_OK) {
+        if (hu_agent_internal_experience_init(agent, &exp_store) == HU_OK) {
             sqlite3 *rec_db = hu_sqlite_memory_get_db(agent->memory);
             if (rec_db)
                 exp_store.db = rec_db;
