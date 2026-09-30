@@ -72,7 +72,7 @@ but never filled. The parts worth copying are designs, not code:
 | # | Slice | Gate | Measurement to go live |
 |---|---|---|---|
 | 0 | Fix the four bugs above | none (bug fixes) | tests pin each bug |
-| 1 | **Reminders**: "remind me to X at/on/in …" from the owner chat; durable store (memory repo), claim/missed semantics, delivery to the owner chat, "done"/"snooze" replies | `HU_REMINDERS` OFF → SHADOW → LIVE | owner-visible shadow log for a week: every due reminder would have fired once, none duplicated, none stale |
+| 1 | **Reminders**: "remind me to X at/on/in …" from the owner chat; durable store (memory repo), claim/missed semantics, delivery to the owner chat, "done"/"snooze" replies | `HU_REMINDERS` OFF → SHADOW → LIVE | a week of shadow log on the owner's real messages with no ordinary chat misread as a command. Shadow stores nothing, so exactly-once delivery is pinned by tests, not measured here |
 | 2 | **Morning briefing** to the owner: today's calendar, due reminders, commitments due, dates in the next 7 days, weather — one message, skipped when empty | `HU_BRIEFING` | owner rates a week of shadow briefings |
 | 3 | **Commitments, both directions**, surfaced to the owner with their source | reuse `HU_PROMISE_KEEPER` | precision on a labelled sample of detected commitments |
 | 4 | **Important dates → drafted message** for the owner to approve (never auto-sent) | `HU_DATE_NUDGES` | owner approval rate of drafts |
@@ -81,3 +81,26 @@ but never filled. The parts worth copying are designs, not code:
 Contact-facing reach-outs keep their existing gate; if and when they are
 enabled, adopt Ferni's backoff (1/2/4/7 days, stop after 3 unanswered) in the
 governor, measured by the blind A/B, not by tests.
+
+## Slice 1 status (2026-09-30)
+
+Built and gated OFF: `src/daemon/daemon_reminders.c`,
+`src/memory/repos/reminder_repo_sqlite.c`, hooked into the owner-DM path of
+`src/daemon.c` next to saved shares, with a tick in the service loop.
+
+- Phrasings: "remind me to X at 5pm / in 20m / tomorrow / on friday / tonight",
+  time first ("remind me tomorrow at 9 to X"), "remind me to X" then a bare
+  time as the next message, "reminders", "done", "snooze [30m]",
+  "remind me again in 20 min", "remind me later".
+- A time phrase is accepted only as a whole run of time words at the start or
+  end, so time words inside the task stay in the task.
+- "at 7" with no am/pm means the next 7 today; on another day 1–6 means
+  afternoon, 7–11 morning.
+- Delivery is claim-based (at most once per claim, a crash mid-send retried
+  after 10 minutes), only ever to the owner (re-checked at send), and a
+  reminder more than 2 hours late is mentioned once in a single "missed
+  these" message rather than sent as if on time.
+
+Known limits, deliberately left for later: calendar dates ("Oct 12", "the
+12th") are not parsed — the reminder falls back to asking "when?"; the
+pending "when?" slot holds one task; recurring reminders are not supported.
