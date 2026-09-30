@@ -139,7 +139,12 @@ static hu_error_t write_config_file(hu_allocator_t *alloc, const char *path, con
 /* Read config file. Returns content (caller frees), or NULL/empty on missing. */
 static hu_error_t read_config_file(hu_allocator_t *alloc, const char *path, char **out_content,
                                    size_t *out_len, bool *existed) {
-    FILE *f = fopen(path, "rb");
+    /* Only a MISSING file reads as "{}": treating an unreadable one the same
+     * way would let the next write replace the user's config with one key. */
+    FILE *f = NULL;
+    hu_error_t oerr = hu_io_secure_open_read(path, &f);
+    if (oerr != HU_OK && oerr != HU_ERR_NOT_FOUND)
+        return oerr;
     if (!f) {
         *existed = false;
         char *empty = (char *)alloc->alloc(alloc->ctx, 4);

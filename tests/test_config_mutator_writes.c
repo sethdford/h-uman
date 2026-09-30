@@ -19,6 +19,7 @@
 #include "human/gateway/control_protocol.h"
 #include "test_framework.h"
 
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -36,8 +37,7 @@ static const char *rich_config = "{\"initiative\":{\"enabled\":true,\"threshold\
                                  "\"gateway\":{\"port\":3000}}";
 
 static void scratch_config(char *path, size_t cap, const char *content) {
-    const char *tmp = getenv("TMPDIR");
-    snprintf(path, cap, "%s/hu-cfg-writes-XXXXXX", tmp && tmp[0] ? tmp : "/tmp");
+    snprintf(path, cap, "/tmp/hu-cfg-writes-XXXXXX");
     int fd = mkstemp(path);
     HU_ASSERT_TRUE(fd >= 0);
     if (content) {
@@ -155,10 +155,10 @@ static void failed_write_preserves_existing_file(void) {
     HU_ASSERT_NOT_NULL(mkdtemp(dir));
     char path[256];
     snprintf(path, sizeof(path), "%s/config.json", dir);
-    FILE *seed = fopen(path, "w");
-    HU_ASSERT_NOT_NULL(seed);
-    fputs(rich_config, seed);
-    fclose(seed);
+    int seed = open(path, O_CREAT | O_EXCL | O_WRONLY, 0600);
+    HU_ASSERT_TRUE(seed >= 0);
+    HU_ASSERT_EQ((size_t)write(seed, rich_config, strlen(rich_config)), strlen(rich_config));
+    close(seed);
 
     HU_ASSERT_EQ(chmod(dir, 0500), 0);
     hu_error_t err = set_at(path, "security.autonomy_level", "2");
@@ -170,6 +170,21 @@ static void failed_write_preserves_existing_file(void) {
     free(after);
     unlink(path);
     rmdir(dir);
+}
+/* An unreadable config must be refused, not treated as missing: reading it
+ * as "{}" would make the write replace the user's file with one key. */
+static void mutate_refuses_an_unreadable_file(void) {
+    HU_SKIP_IF(geteuid() == 0, "root reads mode-000 files");
+    char path[512];
+    scratch_config(path, sizeof(path), rich_config);
+    HU_ASSERT_EQ(chmod(path, 0000), 0);
+    hu_error_t err = set_at(path, "security.autonomy_level", "2");
+    HU_ASSERT_EQ(chmod(path, 0600), 0);
+    HU_ASSERT_EQ(err, HU_ERR_IO);
+    char *after = slurp(path);
+    HU_ASSERT_STR_EQ(after, rich_config);
+    free(after);
+    remove_scratch(path);
 }
 #endif
 
@@ -314,6 +329,7 @@ void run_config_mutator_writes_tests(void) {
     HU_RUN_TEST(mutate_unchanged_value_writes_nothing);
 #ifndef _WIN32
     HU_RUN_TEST(failed_write_preserves_existing_file);
+    HU_RUN_TEST(mutate_refuses_an_unreadable_file);
 #endif
     HU_RUN_TEST(replace_writes_the_document_verbatim);
     HU_RUN_TEST(replace_refuses_an_invalid_document);
