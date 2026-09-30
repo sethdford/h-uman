@@ -221,8 +221,17 @@ After editing `~/Library/LaunchAgents/ai.human.service-loop.plist`, reload it:
 
 ```bash
 launchctl bootout gui/$(id -u)/ai.human.service-loop
+# wait until the job is really unloaded — bootstrapping while it is still exiting
+# fails ("Try re-running the command as root") and leaves the service DOWN
+while launchctl list | grep -q 'ai.human.service-loop'; do sleep 1; done
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.human.service-loop.plist
+launchctl list | grep ai.human.service-loop    # MUST print a pid; if not, bootstrap again
 ```
+
+Do not use `human-daemon doctor imessage` to confirm the reload: right after a
+stop it can still report "poll: fresh" from the stopped process's last timestamp.
+On 2026-09-30 a reload without the wait above left the service unloaded for about
+a minute while doctor looked healthy. `launchctl list` (a pid) is the check.
 
 Then confirm the one-shot line in `~/.human/logs/service-loop.log`:
 `name_catch active: HU_NAME_CATCH=live` (or `… disabled …` when it is off).
