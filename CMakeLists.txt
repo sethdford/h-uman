@@ -1280,6 +1280,7 @@ set(HU_CORE_SOURCES
     src/app/version.c
     src/app/cli_commands.c
     src/app/cli_ctl.c
+    src/app/cli_prospective.c
     src/app/cli_help.c
     src/eval/cli_evaluation.c
     src/observability/cost.c
@@ -1681,6 +1682,7 @@ if(HU_ENABLE_SQLITE)
         src/memory/forgetting.c
         src/memory/forgetting_curve.c
         src/memory/prospective.c
+        src/memory/prospective_v2.c
         src/memory/emotional_residue.c
         src/intelligence/skills.c
         src/intelligence/self_improve.c
@@ -4248,6 +4250,8 @@ list(APPEND HU_TEST_SOURCES
     tests/test_prospective_policy.c
     tests/test_chat_oneshot.c
     tests/test_daemon_prospective_time.c
+    tests/test_prospective_v2.c
+    tests/test_cli_prospective.c
     tests/test_eval_score.c
     tests/test_corrective_rag.c
     tests/test_adaptive_rag.c

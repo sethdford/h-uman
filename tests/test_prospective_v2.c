@@ -1,0 +1,536 @@
+/* tests/test_prospective_v2.c
+ *
+ * hu_prospective_v2_run / _after_delivery (src/memory/prospective_v2.c): the
+ * PIS-style pass over the typed store with a SCRIPTED judge (spec
+ * docs/superpowers/specs/2026-09-30-prospective-memory-v2-design.md §4.2-4.3,
+ * §4.5). Pins: a cued intention is decided once and surfaced with the soft
+ * directive; already_resolved / cancel settle it and it never refires;
+ * not_now, parse failures and model errors stay silent and pending; SHADOW
+ * writes and renders nothing; group and self-chat are never judged; at most
+ * three Decide calls per turn; time cues fire within their grace window, one
+ * per contact per day; done only after a delivered reply carries the action;
+ * an undelivered surfacing counts as an attempt. */
+#include "test_framework.h"
+
+#ifdef HU_ENABLE_SQLITE
+
+#include "human/core/allocator.h"
+#include "human/memory.h"
+#include "human/memory/prospective_v2.h"
+#include <sqlite3.h>
+#include <stdio.h>
+#include <string.h>
+
+#define C1  "+15550000001"
+#define NOW ((int64_t)1790000000)
+
+typedef struct script {
+    const char *const *replies;
+    size_t n;
+    size_t calls;
+    hu_error_t err;
+    char last_user[4096];
+} script_t;
+
+static hu_error_t scripted_judge(void *ctx, hu_allocator_t *alloc, const char *system,
+                                 size_t system_len, const char *user, size_t user_len, char **out,
+                                 size_t *out_len) {
+    script_t *s = (script_t *)ctx;
+    (void)system;
+    (void)system_len;
+    size_t cl = user_len < sizeof(s->last_user) - 1 ? user_len : sizeof(s->last_user) - 1;
+    memcpy(s->last_user, user, cl);
+    s->last_user[cl] = '\0';
+    s->calls++;
+    if (s->err != HU_OK)
+        return s->err;
+    const char *r = s->calls <= s->n ? s->replies[s->calls - 1] : "not_now";
+    size_t rl = strlen(r);
+    char *b = (char *)alloc->alloc(alloc->ctx, rl + 1);
+    memcpy(b, r, rl + 1);
+    *out = b;
+    *out_len = rl;
+    return HU_OK;
+}
+
+static hu_prospective_judge_t judge_of(script_t *s, const char *const *replies, size_t n) {
+    memset(s, 0, sizeof(*s));
+    s->replies = replies;
+    s->n = n;
+    hu_prospective_judge_t j = {.fn = scripted_judge, .ctx = s};
+    return j;
+}
+
+static void seed_kw_exp(sqlite3 *db, const char *cue, const char *action, int64_t created,
+                        int64_t expires) {
+    char sql[512];
+    snprintf(sql, sizeof(sql),
+             "INSERT INTO prospective_memories(trigger_type,trigger_value,action,contact_id,"
+             "expires_at,fired,created_at) VALUES('keyword','%s','%s','" C1 "',%lld,0,%lld)",
+             cue, action, (long long)expires, (long long)created);
+    HU_ASSERT_EQ(sqlite3_exec(db, sql, NULL, NULL, NULL), SQLITE_OK);
+}
+
+static void seed_kw(sqlite3 *db, const char *cue, const char *action) {
+    seed_kw_exp(db, cue, action, NOW - 86400, 0);
+}
+
+static void seed_time(sqlite3 *db, const char *action, int64_t due, const char *key) {
+    HU_ASSERT_EQ(hu_prospective_repo_upsert_time(
+                     db, C1, strlen(C1), action, strlen(action), due, HU_PROSPECTIVE_TIME_GRACE_S,
+                     HU_PM_SOURCE_PROMISE_KEEPER, key, HU_PM_PENDING, NOW - 86400, NULL),
+                 HU_OK);
+}
+
+static int64_t q_int(sqlite3 *db, const char *sql) {
+    sqlite3_stmt *st = NULL;
+    HU_ASSERT_EQ(sqlite3_prepare_v2(db, sql, -1, &st, NULL), SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_step(st), SQLITE_ROW);
+    int64_t v = sqlite3_column_int64(st, 0);
+    sqlite3_finalize(st);
+    return v;
+}
+
+static hu_prospective_turn_t turn_for(const char *inbound, int64_t now) {
+    hu_prospective_turn_t t;
+    memset(&t, 0, sizeof(t));
+    t.contact = C1;
+    t.contact_len = strlen(C1);
+    t.inbound = inbound;
+    t.inbound_len = inbound ? strlen(inbound) : 0;
+    t.history = "them: going to that new taco place friday\nme: nice let me know\n";
+    t.history_len = strlen(t.history);
+    t.now = now;
+    t.day_start = now - 3600;
+    return t;
+}
+
+static void v2_clean_positive_surfaces_a_soft_directive(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    seed_kw(db, "taco place", "ask how the new taco place was");
+    seed_kw(db, "tacos", "ask how the new taco place was");
+    static const char *const r[] = {"fire"};
+    script_t s;
+    hu_prospective_judge_t j = judge_of(&s, r, 1);
+    hu_prospective_turn_t t = turn_for("ok the taco place was packed", NOW);
+    hu_prospective_counts_t c;
+    char *d = NULL;
+    size_t dl = 0;
+    HU_ASSERT_EQ(hu_prospective_v2_run(&alloc, db, HU_PM_CUE_KEYWORD, &t, &j, true, &c, &d, &dl),
+                 HU_OK);
+    HU_ASSERT_EQ(s.calls, (size_t)1); /* one intention, one Decide call */
+    HU_ASSERT_EQ(c.candidates, (size_t)1);
+    HU_ASSERT_EQ(c.fire, (size_t)1);
+    HU_ASSERT_STR_EQ(d, "[PROSPECTIVE MEMORY: If it fits naturally, you could bring up: ask how "
+                        "the new taco place was]");
+    HU_ASSERT_EQ(dl, strlen(d));
+    alloc.free(alloc.ctx, d, dl + 1);
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE status='surfaced' "
+                           "AND fired=0 AND surfaced_at=1790000000"),
+                 (int64_t)2); /* both keyword rows of the intention */
+    HU_ASSERT_EQ(c.item_count, (size_t)1);
+    HU_ASSERT_EQ(c.items[0].verdict, HU_PM_VERDICT_FIRE);
+    HU_ASSERT_TRUE(c.items[0].judge_ok);
+    HU_ASSERT_EQ(c.fire_action_count, (size_t)1);
+    HU_ASSERT_STR_EQ(c.fire_actions[0], "ask how the new taco place was");
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void v2_already_resolved_is_done_and_never_refires(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    seed_kw(db, "taco place", "ask how the new taco place was");
+    static const char *const r[] = {"already_resolved"};
+    script_t s;
+    hu_prospective_judge_t j = judge_of(&s, r, 1);
+    hu_prospective_turn_t t = turn_for("taco place was great btw", NOW);
+    hu_prospective_counts_t c;
+    char *d = NULL;
+    size_t dl = 0;
+    HU_ASSERT_EQ(hu_prospective_v2_run(&alloc, db, HU_PM_CUE_KEYWORD, &t, &j, true, &c, &d, &dl),
+                 HU_OK);
+    HU_ASSERT_NULL(d);
+    HU_ASSERT_EQ(c.resolved, (size_t)1);
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE status='done' AND "
+                           "fired=1 AND outcome='suppressed'"),
+                 (int64_t)1);
+    /* the same cue later: nothing is judged again (TriggerBench "always remind") */
+    HU_ASSERT_EQ(hu_prospective_v2_run(&alloc, db, HU_PM_CUE_KEYWORD, &t, &j, true, &c, &d, &dl),
+                 HU_OK);
+    HU_ASSERT_EQ(s.calls, (size_t)1);
+    HU_ASSERT_EQ(c.candidates, (size_t)0);
+    HU_ASSERT_NULL(d);
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void v2_cancel_retires_the_intention(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    seed_kw(db, "taco place", "ask how the new taco place was");
+    static const char *const r[] = {"cancel"};
+    script_t s;
+    hu_prospective_judge_t j = judge_of(&s, r, 1);
+    hu_prospective_turn_t t = turn_for("the taco place closed down, forget it", NOW);
+    hu_prospective_counts_t c;
+    char *d = NULL;
+    size_t dl = 0;
+    HU_ASSERT_EQ(hu_prospective_v2_run(&alloc, db, HU_PM_CUE_KEYWORD, &t, &j, true, &c, &d, &dl),
+                 HU_OK);
+    HU_ASSERT_NULL(d);
+    HU_ASSERT_EQ(c.cancel, (size_t)1);
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE status='canceled' "
+                           "AND fired=2"),
+                 (int64_t)1);
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void v2_not_now_parse_fail_and_judge_error_stay_pending_and_silent(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    seed_kw_exp(db, "alpha", "ask about alpha", NOW - 20, 0);
+    seed_kw_exp(db, "beta", "ask about beta", NOW - 30, 0);
+    static const char *const r[] = {"not_now", "lol yeah def"};
+    script_t s;
+    hu_prospective_judge_t j = judge_of(&s, r, 2);
+    hu_prospective_turn_t t = turn_for("alpha and beta", NOW);
+    hu_prospective_counts_t c;
+    char *d = NULL;
+    size_t dl = 0;
+    HU_ASSERT_EQ(hu_prospective_v2_run(&alloc, db, HU_PM_CUE_KEYWORD, &t, &j, true, &c, &d, &dl),
+                 HU_OK);
+    HU_ASSERT_NULL(d);
+    HU_ASSERT_EQ(c.not_now, (size_t)1);
+    HU_ASSERT_EQ(c.parse_fail, (size_t)1);
+    s.err = HU_ERR_PROVIDER_RESPONSE; /* the model is down */
+    HU_ASSERT_EQ(hu_prospective_v2_run(&alloc, db, HU_PM_CUE_KEYWORD, &t, &j, true, &c, &d, &dl),
+                 HU_OK);
+    HU_ASSERT_NULL(d);
+    HU_ASSERT_EQ(c.judge_err, (size_t)2);
+    HU_ASSERT_EQ(c.items[0].judge_ok, false);
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE status='pending' AND "
+                           "fired=0 AND surfaced_at IS NULL"),
+                 (int64_t)2);
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void v2_shadow_judges_but_writes_and_renders_nothing(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    seed_kw(db, "taco place", "ask how the new taco place was");
+    seed_kw_exp(db, "stale", "an expired one", NOW - 90000, NOW - 5);
+    static const char *const r[] = {"fire"};
+    script_t s;
+    hu_prospective_judge_t j = judge_of(&s, r, 1);
+    hu_prospective_turn_t t = turn_for("taco place tonight?", NOW);
+    hu_prospective_counts_t c;
+    char *d = NULL;
+    size_t dl = 0;
+    HU_ASSERT_EQ(hu_prospective_v2_run(&alloc, db, HU_PM_CUE_KEYWORD, &t, &j, false, &c, &d, &dl),
+                 HU_OK);
+    HU_ASSERT_EQ(s.calls, (size_t)1);
+    HU_ASSERT_EQ(c.fire, (size_t)1);
+    HU_ASSERT_EQ(c.expired, (size_t)1); /* counted, not written */
+    HU_ASSERT_STR_EQ(c.fire_actions[0], "ask how the new taco place was");
+    HU_ASSERT_NULL(d);
+    HU_ASSERT_EQ(dl, (size_t)0);
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE status='pending' AND "
+                           "fired=0 AND surfaced_at IS NULL"),
+                 (int64_t)2);
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void v2_group_and_self_chat_are_never_judged(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    seed_kw(db, "taco place", "ask how the new taco place was");
+    seed_kw_exp(db, "stale", "an expired one", NOW - 90000, NOW - 5);
+    static const char *const r[] = {"fire"};
+    script_t s;
+    hu_prospective_judge_t j = judge_of(&s, r, 1);
+    hu_prospective_counts_t c;
+    char *d = NULL;
+    size_t dl = 0;
+    hu_prospective_turn_t t = turn_for("taco place and stale", NOW);
+    t.is_group = true;
+    HU_ASSERT_EQ(hu_prospective_v2_run(&alloc, db, HU_PM_CUE_KEYWORD, &t, &j, true, &c, &d, &dl),
+                 HU_OK);
+    HU_ASSERT_EQ(s.calls, (size_t)0);
+    HU_ASSERT_EQ(c.candidates + c.expired, (size_t)0);
+    t.is_group = false;
+    t.is_self = true;
+    HU_ASSERT_EQ(hu_prospective_v2_run(&alloc, db, HU_PM_CUE_KEYWORD, &t, &j, true, &c, &d, &dl),
+                 HU_OK);
+    HU_ASSERT_EQ(s.calls, (size_t)0);
+    HU_ASSERT_NULL(d);
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE status='pending'"),
+                 (int64_t)2); /* nothing written, not even the expiry */
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void v2_judges_at_most_three_intentions_per_turn(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    seed_kw_exp(db, "alpha", "ask about alpha", NOW - 10, 0);
+    seed_kw_exp(db, "beta", "ask about beta", NOW - 20, 0);
+    seed_kw_exp(db, "gamma", "ask about gamma", NOW - 30, 0);
+    seed_kw_exp(db, "delta", "ask about delta", NOW - 40, 0);
+    seed_kw_exp(db, "epsilon", "ask about epsilon", NOW - 50, 0);
+    static const char *const r[] = {"fire", "fire", "fire", "fire", "fire"};
+    script_t s;
+    hu_prospective_judge_t j = judge_of(&s, r, 5);
+    hu_prospective_turn_t t = turn_for("alpha beta gamma delta epsilon", NOW);
+    hu_prospective_counts_t c;
+    char *d = NULL;
+    size_t dl = 0;
+    HU_ASSERT_EQ(hu_prospective_v2_run(&alloc, db, HU_PM_CUE_KEYWORD, &t, &j, true, &c, &d, &dl),
+                 HU_OK);
+    HU_ASSERT_EQ(s.calls, (size_t)3);
+    HU_ASSERT_EQ(c.candidates, (size_t)3);
+    HU_ASSERT_EQ(c.fire, (size_t)3);
+    HU_ASSERT_STR_CONTAINS(d, "ask about alpha | ask about beta | ask about gamma]");
+    alloc.free(alloc.ctx, d, dl + 1);
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE status='surfaced'"),
+                 (int64_t)3);
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE status='pending'"),
+                 (int64_t)2);
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void v2_time_due_item_renders_due_list_and_caps_one_per_day(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    seed_time(db, "call about the lease", NOW - 3600, "commitment:1");
+    seed_time(db, "return the drill", NOW - 1800, "followup:2");
+    seed_time(db, "not due yet", NOW + 3600, "followup:3");
+    static const char *const r[] = {"fire", "fire"};
+    script_t s;
+    hu_prospective_judge_t j = judge_of(&s, r, 2);
+    hu_prospective_turn_t t = turn_for(NULL, NOW);
+    hu_prospective_counts_t c;
+    char *d = NULL;
+    size_t dl = 0;
+    HU_ASSERT_EQ(hu_prospective_v2_run(&alloc, db, HU_PM_CUE_TIME, &t, &j, true, &c, &d, &dl),
+                 HU_OK);
+    HU_ASSERT_EQ(s.calls, (size_t)1);
+    HU_ASSERT_STR_EQ(d, "- call about the lease\n"); /* oldest due first */
+    HU_ASSERT_EQ(c.capped, (size_t)1);
+    alloc.free(alloc.ctx, d, dl + 1);
+    /* later the same day, nothing delivered: still capped — one per contact per day */
+    HU_ASSERT_EQ(hu_prospective_v2_run(&alloc, db, HU_PM_CUE_TIME, &t, &j, true, &c, &d, &dl),
+                 HU_OK);
+    HU_ASSERT_EQ(s.calls, (size_t)1);
+    HU_ASSERT_NULL(d);
+    HU_ASSERT_EQ(c.capped, (size_t)2);
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void v2_time_past_grace_expires_without_judging(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_EQ(sqlite3_exec(db,
+                              "INSERT INTO commitments(contact_id,description,who,deadline,status,"
+                              "created_at) VALUES('" C1 "','call about the lease','me',1,"
+                              "'pending',1)",
+                              NULL, NULL, NULL),
+                 SQLITE_OK);
+    seed_time(db, "call about the lease", NOW - 4 * 86400, "commitment:1");
+    static const char *const r[] = {"fire"};
+    script_t s;
+    hu_prospective_judge_t j = judge_of(&s, r, 1);
+    hu_prospective_turn_t t = turn_for(NULL, NOW);
+    hu_prospective_counts_t c;
+    char *d = NULL;
+    size_t dl = 0;
+    HU_ASSERT_EQ(hu_prospective_v2_run(&alloc, db, HU_PM_CUE_TIME, &t, &j, true, &c, &d, &dl),
+                 HU_OK);
+    HU_ASSERT_EQ(s.calls, (size_t)0);
+    HU_ASSERT_EQ(c.expired, (size_t)1);
+    HU_ASSERT_NULL(d);
+    HU_ASSERT_EQ(q_int(db, "SELECT fired FROM prospective_memories WHERE cue_kind='time'"),
+                 (int64_t)3);
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM commitments WHERE status='expired'"), (int64_t)1);
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void v2_after_delivery_used_is_done_ignored_retries_then_expires(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    seed_kw(db, "taco place", "ask how the new taco place was");
+    seed_kw(db, "lasagna", "send the lasagna recipe");
+    static const char *const r[] = {"fire", "fire", "fire"};
+    script_t s;
+    hu_prospective_judge_t j = judge_of(&s, r, 3);
+    hu_prospective_counts_t c;
+    hu_prospective_delivery_counts_t dc;
+    char *d = NULL;
+    size_t dl = 0;
+    hu_prospective_turn_t t = turn_for("taco place, then lasagna night", NOW);
+    HU_ASSERT_EQ(hu_prospective_v2_run(&alloc, db, HU_PM_CUE_KEYWORD, &t, &j, true, &c, &d, &dl),
+                 HU_OK);
+    alloc.free(alloc.ctx, d, dl + 1);
+    static const char reply[] = "wait how was the taco place??";
+    HU_ASSERT_EQ(hu_prospective_v2_after_delivery(&alloc, db, HU_PM_CUE_KEYWORD, C1, strlen(C1),
+                                                  reply, sizeof(reply) - 1, NOW + 60, &dc),
+                 HU_OK);
+    HU_ASSERT_EQ(dc.surfaced, (size_t)2);
+    HU_ASSERT_EQ(dc.used, (size_t)1);
+    HU_ASSERT_EQ(dc.ignored, (size_t)1);
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE action LIKE 'ask how%' "
+                           "AND status='done' AND fired=1 AND outcome='used'"),
+                 (int64_t)1);
+    HU_ASSERT_EQ(q_int(db, "SELECT attempts FROM prospective_memories WHERE action LIKE 'send%' "
+                           "AND status='pending' AND outcome='ignored'"),
+                 (int64_t)1);
+    /* surfaced a second time and still not carried: expired, never a third time */
+    hu_prospective_turn_t t2 = turn_for("lasagna tonight?", NOW + 3600);
+    HU_ASSERT_EQ(hu_prospective_v2_run(&alloc, db, HU_PM_CUE_KEYWORD, &t2, &j, true, &c, &d, &dl),
+                 HU_OK);
+    HU_ASSERT_EQ(c.fire, (size_t)1);
+    alloc.free(alloc.ctx, d, dl + 1);
+    static const char reply2[] = "sounds good";
+    HU_ASSERT_EQ(hu_prospective_v2_after_delivery(&alloc, db, HU_PM_CUE_KEYWORD, C1, strlen(C1),
+                                                  reply2, sizeof(reply2) - 1, NOW + 3660, &dc),
+                 HU_OK);
+    HU_ASSERT_EQ(dc.expired, (size_t)1);
+    HU_ASSERT_EQ(q_int(db, "SELECT fired FROM prospective_memories WHERE action LIKE 'send%'"),
+                 (int64_t)3);
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void v2_undelivered_surfacing_is_reclaimed_as_an_attempt(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    seed_kw(db, "taco place", "ask how the new taco place was");
+    static const char *const r[] = {"fire"};
+    script_t s;
+    hu_prospective_judge_t j = judge_of(&s, r, 1);
+    hu_prospective_counts_t c;
+    char *d = NULL;
+    size_t dl = 0;
+    hu_prospective_turn_t t = turn_for("taco place?", NOW);
+    HU_ASSERT_EQ(hu_prospective_v2_run(&alloc, db, HU_PM_CUE_KEYWORD, &t, &j, true, &c, &d, &dl),
+                 HU_OK);
+    alloc.free(alloc.ctx, d, dl + 1);
+    /* the reply went out as a voice memo: no delivered-text hook ran */
+    hu_prospective_turn_t t2 = turn_for("how are you", NOW + 600);
+    HU_ASSERT_EQ(hu_prospective_v2_run(&alloc, db, HU_PM_CUE_KEYWORD, &t2, &j, true, &c, &d, &dl),
+                 HU_OK);
+    HU_ASSERT_NULL(d);
+    HU_ASSERT_EQ(s.calls, (size_t)1);
+    HU_ASSERT_EQ(q_int(db, "SELECT attempts FROM prospective_memories WHERE status='pending' AND "
+                           "outcome='ignored'"),
+                 (int64_t)1);
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void v2_time_done_retires_ledger_twins(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_EQ(sqlite3_exec(db,
+                              "INSERT INTO commitments(contact_id,description,who,deadline,status,"
+                              "created_at) VALUES('" C1 "','call about the lease','me',1,"
+                              "'pending',1);INSERT INTO delayed_followups(contact_id,topic,"
+                              "scheduled_at,sent) VALUES('" C1 "','call about the lease',1,0)",
+                              NULL, NULL, NULL),
+                 SQLITE_OK);
+    seed_time(db, "call about the lease", NOW - 3600, "commitment:1");
+    static const char *const r[] = {"fire"};
+    script_t s;
+    hu_prospective_judge_t j = judge_of(&s, r, 1);
+    hu_prospective_counts_t c;
+    hu_prospective_delivery_counts_t dc;
+    char *d = NULL;
+    size_t dl = 0;
+    hu_prospective_turn_t t = turn_for(NULL, NOW);
+    HU_ASSERT_EQ(hu_prospective_v2_run(&alloc, db, HU_PM_CUE_TIME, &t, &j, true, &c, &d, &dl),
+                 HU_OK);
+    alloc.free(alloc.ctx, d, dl + 1);
+    static const char sent[] = "hey did you ever call about the lease?";
+    HU_ASSERT_EQ(hu_prospective_v2_after_delivery(&alloc, db, HU_PM_CUE_TIME, C1, strlen(C1), sent,
+                                                  sizeof(sent) - 1, NOW + 60, &dc),
+                 HU_OK);
+    HU_ASSERT_EQ(dc.used, (size_t)1);
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM commitments WHERE status='followed_up'"),
+                 (int64_t)1);
+    HU_ASSERT_EQ(q_int(db, "SELECT sent FROM delayed_followups"), (int64_t)1);
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void v2_judge_sees_history_intention_and_cue(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    seed_kw(db, "taco place", "ask how the new taco place was");
+    static const char *const r[] = {"not_now"};
+    script_t s;
+    hu_prospective_judge_t j = judge_of(&s, r, 1);
+    hu_prospective_counts_t c;
+    hu_prospective_turn_t t = turn_for("the taco place!!", NOW);
+    HU_ASSERT_EQ(hu_prospective_v2_run(&alloc, db, HU_PM_CUE_KEYWORD, &t, &j, true, &c, NULL, NULL),
+                 HU_OK);
+    HU_ASSERT_STR_CONTAINS(s.last_user, "them: going to that new taco place friday");
+    HU_ASSERT_STR_CONTAINS(s.last_user, "intention: ask how the new taco place was");
+    HU_ASSERT_STR_CONTAINS(s.last_user, "cue: they just mentioned \"taco place\"");
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void v2_rejects_invalid_arguments(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    hu_prospective_counts_t c;
+    hu_prospective_turn_t t = turn_for("x", NOW);
+    HU_ASSERT_EQ(
+        hu_prospective_v2_run(&alloc, NULL, HU_PM_CUE_KEYWORD, &t, NULL, true, &c, NULL, NULL),
+        HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(
+        hu_prospective_v2_run(&alloc, db, HU_PM_CUE_AFTER_EVENT, &t, NULL, true, &c, NULL, NULL),
+        HU_ERR_INVALID_ARGUMENT);
+    t.contact_len = 0;
+    HU_ASSERT_EQ(
+        hu_prospective_v2_run(&alloc, db, HU_PM_CUE_KEYWORD, &t, NULL, true, &c, NULL, NULL),
+        HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(
+        hu_prospective_v2_after_delivery(&alloc, db, HU_PM_CUE_KEYWORD, NULL, 0, "x", 1, NOW, NULL),
+        HU_ERR_INVALID_ARGUMENT);
+    mem.vtable->deinit(mem.ctx);
+}
+
+void run_prospective_v2_tests(void) {
+    HU_TEST_SUITE("prospective v2");
+    HU_RUN_TEST(v2_clean_positive_surfaces_a_soft_directive);
+    HU_RUN_TEST(v2_already_resolved_is_done_and_never_refires);
+    HU_RUN_TEST(v2_cancel_retires_the_intention);
+    HU_RUN_TEST(v2_not_now_parse_fail_and_judge_error_stay_pending_and_silent);
+    HU_RUN_TEST(v2_shadow_judges_but_writes_and_renders_nothing);
+    HU_RUN_TEST(v2_group_and_self_chat_are_never_judged);
+    HU_RUN_TEST(v2_judges_at_most_three_intentions_per_turn);
+    HU_RUN_TEST(v2_time_due_item_renders_due_list_and_caps_one_per_day);
+    HU_RUN_TEST(v2_time_past_grace_expires_without_judging);
+    HU_RUN_TEST(v2_after_delivery_used_is_done_ignored_retries_then_expires);
+    HU_RUN_TEST(v2_undelivered_surfacing_is_reclaimed_as_an_attempt);
+    HU_RUN_TEST(v2_time_done_retires_ledger_twins);
+    HU_RUN_TEST(v2_judge_sees_history_intention_and_cue);
+    HU_RUN_TEST(v2_rejects_invalid_arguments);
+}
+
+#else
+
+void run_prospective_v2_tests(void) {
+    (void)0;
+}
+
+#endif /* HU_ENABLE_SQLITE */

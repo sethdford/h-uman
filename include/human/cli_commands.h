@@ -10,6 +10,8 @@
 hu_error_t cmd_channel(hu_allocator_t *alloc, int argc, char **argv);
 hu_error_t cmd_hardware(hu_allocator_t *alloc, int argc, char **argv);
 hu_error_t cmd_memory(hu_allocator_t *alloc, int argc, char **argv);
+/* human prospective init|probe|backfill (src/app/cli_prospective.c). */
+hu_error_t cmd_prospective(hu_allocator_t *alloc, int argc, char **argv);
 /* Emits the `human memory search --semantic|--hybrid` result lines to `out`:
  *   "  [<rank>] <key> (<score>): <content>"   (content truncated to 2000 bytes)
  * One line per entry; scripts/eval_memory_benchmarks.py parses <key> out of
