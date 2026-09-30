@@ -9,6 +9,7 @@
 #include "human/core/paths.h"
 #include "human/daemon.h"
 #include "human/daemon/briefing.h"
+#include "human/daemon/person_dates.h"
 #include "human/daemon_outbound_bus.h"
 #include "human/memory.h"
 #include "human/memory/superhuman.h"
@@ -354,6 +355,10 @@ static void gather(struct hu_agent *agent, sqlite3 *db, const char *owner, int64
             d->days_away = ann[i].days_away;
         }
     }
+
+    /* Dates that belong to a person: owner-given and Contacts (slice 4). */
+    in->dates_n += hu_person_dates_upcoming(agent, now, 7, &in->dates[in->dates_n],
+                                            HU_BRIEFING_MAX_ITEMS - in->dates_n);
 
     if (p && p->context_awareness.weather_enabled && p->location[0]) {
         hu_weather_context_t w;
