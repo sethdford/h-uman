@@ -75,7 +75,14 @@ been promoted through the §3 bar (spec §4.4) — see the rollout below.
      `~/.human/backups/`, 0700 dir) and refuses (exit 2, database untouched)
      if the backup fails — then applies. A dated commitment or follow-up
      overdue by more than 14 days imports as `expired`; overdue by up to 14
-     days imports `pending`, re-anchored to the backfill time. Exit 2 means
+     days imports `pending`, re-anchored to the backfill time. An item found
+     expired also retires its own ledger row in the same transaction (a
+     commitment to `expired`, a follow-up to `sent=1`), because
+     `agent_turn.c` and `proactive.c` read the ledger whatever the gates
+     say; `ledger_retired` counts them (the dry run reports the exact number
+     a `--write` would retire). A re-run no longer sees those rows, so its
+     `commitments_seen` / `followups_seen` / `skipped_existing` are lower by
+     them. Exit 2 means
      refused (missing/unmigrated database, missing `human` binary, unusable
      manifest dir — checked before anything is written); exit 3 means the
      backfill itself ran (and, with `--write`, the database was written) but
@@ -138,35 +145,79 @@ Off is exactly the pre-v2 path.
 
 ## Before `HU_PROSPECTIVE_TIME=shadow` (rollout step 5) or `=live`: known controller gaps
 
-These are documented gaps in the current code, not yet closed, and are a
-checklist for the person promoting the time gate — not code this plan ships:
+A checklist for the person promoting the time gate. All five items are
+closed: 1 and 3 in `9ad82174f`, 2 and 4 in `21ff0738f`, 5 in `4b89ec964`
+(review follow-ups pinned in `999592acb`). One residual stays open and is
+LIVE-only: the lazy-history note under item 1.
 
-1. **The history load happens every tick in SHADOW too, not only LIVE, for
-   contacts with nothing due.** `pm_time_v2` (`src/daemon/daemon_prospective_time.c`)
-   calls `pm_time_history` unconditionally before checking `candidates > 0`
-   — the day slot that dedupes a SHADOW contact to one pass per local day is
-   only taken `if (!live && c.candidates > 0)`, so a contact with no due row
-   that tick is re-judged (and its history reloaded) on every proactive
-   tick, not once a day. Load history lazily, after a cheap pending-due
-   count, instead of unconditionally on every tick. Address this **before
-   step 5 (`HU_PROSPECTIVE_TIME=shadow`)**, not only before live — the
-   7-day SHADOW read this gap precedes is itself affected by the per-tick
-   reload, not just the later LIVE promotion.
-2. **The legacy `hu_superhuman_delayed_followup_mark_sent` does not retire
-   the v2 twin.** A twinned follow-up (F31 legacy + its v2 mirror) can
-   surface once from each side. Retire the twin on legacy mark-sent, or gate
-   F31 for items that have a v2 twin.
-3. **A `not_now` verdict is re-judged every tick in LIVE.** Add a
-   per-contact-per-day memo so the same intention is not re-sent to the
-   judge on every proactive tick of the same day.
-4. **When two frames of one topic collapse to one row, settling retires only
-   the first frame's ledger row.** Also retire the contact's unsent
-   follow-ups whose frame topic equals the action, so the second frame's row
-   does not resurface the same topic later.
-5. **Backfill rows imported as `expired` do not retire their ledger twins**
-   — `agent_turn.c` and `proactive.c` read commitments/follow-ups regardless
-   of the gate. Retire the ledger twin at backfill time and update the
-   backfill's second-run (idempotency) counts accordingly.
+1. **Closed (`9ad82174f`): the history load no longer happens every tick for
+   contacts with nothing due.** `pm_time_v2`
+   (`src/daemon/daemon_prospective_time.c`) now runs
+   `hu_prospective_repo_count_due` (open time rows with `0 < due_at <= now`)
+   first and skips the whole pass, chat.db history read included, when it is
+   0 — in SHADOW and LIVE. A failed count falls through to the full pass.
+   Contacts with a due row load history and log exactly as before. Residual:
+   in LIVE, a contact whose only due intention is memoized `not_now` (item 3)
+   still loads history on each tick, though nothing is judged.
+2. **Closed (`21ff0738f`, reworked in fix rounds 1 and 2): the legacy
+   mark-sent closes the v2 twin.** When `hu_superhuman_delayed_followup_mark_sent`
+   actually marks a row, `hu_prospective_repo_settle_followup_twin` moves its
+   time twin to `done` with **no outcome** -- the legacy path may only have
+   listed the follow-up in the proposer's context, so it makes no claim that
+   the reply used it. The twin is a pending row v2 has never surfaced (a row
+   v2 surfaced, retries included, stays v2's to judge) that is keyed
+   `followup:<id>`, or keyed `commitment:<N>` for the follow-up's F20
+   commitment (same contact, description == topic, deadline ==
+   scheduled_at -- found even after the backfill re-anchored its due), or,
+   for a dated follow-up, whose action is the follow-up's mirror text and
+   whose due is within the follow-up's due + grace. It is settled as one
+   unit with the bounded sweep, so a later-dated same-words promise gets its
+   own open time row. Only `prospective_memories` is written, so OFF sending
+   is byte-identical (pinned against a twin-less database); the send path
+   runs the v2 delivery hook before the legacy mark-sent calls.
+3. **Closed (`9ad82174f`): a `not_now` verdict is no longer re-judged every
+   tick in LIVE.** An in-process memo keyed by (contact, action) and the
+   local day (`hu_prospective_local_day_start`) skips the judge for an
+   intention already answered `not_now` today; it stays pending, is counted in
+   `memo_skipped`, and does not use up the per-pass judge cap. The table is
+   fixed at 128 direct-mapped slots; a colliding intention overwrites the slot,
+   so the evicted one is judged once more that day. A restart forgets it.
+   Parse failures and judge errors are not memoized. SHADOW does not use it.
+4. **Closed (`21ff0738f`, reworked in fix round 1): settling a collapsed row
+   retires the ledger rows within its grace window.** After retiring the keyed
+   ledger row, `hu_prospective_repo_sync_source` also retires the contact's
+   still-open ledger rows whose mirror text (`hu_prospective_mirror_action`: a
+   dated frame's topic, a contact's promise rephrased, else verbatim)
+   normalizes to the intention's action, compared in C -- but only dated rows
+   due within the intention's `due_at` + grace (3 days); an undated row is
+   never swept by its words. That covers a topic's `(tomorrow)` and `(in 2
+   days)` frames and an F20 pair. A same-words promise dated beyond the window
+   is a later promise: it stays open, and the earliest such row gets its own
+   fresh open time row keyed by its own ledger id, with its own due. Another
+   topic, and another contact, are untouched.
+5. **Closed (`4b89ec964`): the backfill retires the ledger rows of expired
+   imports** in the same transaction (a commitment to `expired`, a follow-up
+   to `sent=1`), each by its own id -- also for an item found via
+   `skipped_existing`, which repairs a database an earlier backfill wrote.
+   `ledger_retired` counts them; `ledger_unretired` counts expired imports
+   left pending because the contact was too long to hold (>= 256 bytes); a dry run rolls them back. A re-run no longer
+   sees the retired rows, so its `commitments_seen` / `followups_seen` /
+   `skipped_existing` are lower by them.
+
+Still open before `=live` (found by the final review of the fix rounds; OFF and
+SHADOW are unaffected):
+
+6. **A legacy settle can close the survivor it just re-mirrored.** When three
+   same-action F20 pairs sit within a few days of each other, `mark_sent` on
+   the middle follow-up re-mirrors the latest one and then, on the loop's
+   second pass, action-matches it inside the follow-up's own date window and
+   closes it (done / no outcome) while its ledger rows stay pending. v2 then
+   never surfaces that promise; only the legacy F31 path might. Fix: after
+   the first pass, match by key only, or skip rows this call re-mirrored.
+7. **The legacy F31 path is still ungated in LIVE.** Because the legacy settle
+   (correctly) leaves any twin v2 has ever surfaced to v2, an F31 send of a
+   follow-up that v2 has pending for retry does not close it, and v2 can raise
+   the same topic again. Gate F31 off in LIVE for items that have a v2 twin.
 
 Ruling F16 (applies before any promotion, not just this one): the nightly
 eval (`scripts/eval_prospective_memory.py`) must read v2's `status` /
@@ -197,9 +248,12 @@ Output contract: a `candidates=… fire=… … bytes=… write_err=…` header,
 with `--full` one `item id=… verdict=…` line per judged intention and the
 directive text. `--deliver` prints `surfaced=… used=… ignored=… expired=…`.
 `human prospective backfill --db PATH [--write] [--now EPOCH]` runs the same
-backfill the wrapper script drives, emitting one JSON line with
-`skipped_unsafe` as its last field (a contact-owned promise the rephraser
-refused to mirror in third person is skipped, never written first-person).
+backfill the wrapper script drives, emitting one JSON line whose last three
+fields are `skipped_unsafe` (a contact-owned promise the rephraser refused to
+mirror in third person is skipped, never written first-person),
+`ledger_retired` (ledger rows of expired imports retired in the same
+transaction) and `ledger_unretired` (expired imports whose ledger row could
+not be retired: contact too long).
 
 ## Known limits
 

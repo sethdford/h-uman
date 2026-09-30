@@ -30,6 +30,18 @@ typedef struct hu_prospective_judge {
     void *ctx;
 } hu_prospective_judge_t;
 
+/* The caller's memo of intentions already judged `not_now` today (LIVE time
+ * pass). skip(ctx, action): true -> that intention is not judged this pass;
+ * it stays pending and is counted in memo_skipped, not in candidates, so it
+ * never uses up the per-pass judge cap. note_not_now(ctx, action) hears each
+ * fresh, successfully judged not_now (a parse failure or judge error is not
+ * remembered: it is re-judged next pass). */
+typedef struct hu_prospective_memo {
+    bool (*skip)(void *ctx, const char *action);
+    void (*note_not_now)(void *ctx, const char *action);
+    void *ctx;
+} hu_prospective_memo_t;
+
 typedef struct hu_prospective_turn {
     const char *contact; /* the contact key rows are stored under */
     size_t contact_len;
@@ -40,7 +52,8 @@ typedef struct hu_prospective_turn {
     bool is_group;
     bool is_self;
     int64_t now;
-    int64_t day_start; /* local midnight: the per-day cap's day */
+    int64_t day_start;                 /* local midnight: the per-day cap's day */
+    const hu_prospective_memo_t *memo; /* NULL: judge every eligible intention */
 } hu_prospective_turn_t;
 
 typedef struct hu_prospective_item_verdict {
@@ -52,9 +65,10 @@ typedef struct hu_prospective_item_verdict {
 typedef struct hu_prospective_counts {
     size_t candidates; /* eligible and judged (<= HU_PROSPECTIVE_JUDGE_CAP) */
     size_t fire, resolved, cancel, not_now, parse_fail, judge_err;
-    size_t expired;   /* past their window this pass */
-    size_t capped;    /* time cues over the per-day cap */
-    size_t write_err; /* FIRE, but the surfaced write failed or matched no row: not rendered */
+    size_t expired;      /* past their window this pass */
+    size_t capped;       /* time cues over the per-day cap */
+    size_t write_err;    /* FIRE, but the surfaced write failed or matched no row: not rendered */
+    size_t memo_skipped; /* eligible, but turn->memo said it was judged not_now today */
     hu_prospective_item_verdict_t items[HU_PROSPECTIVE_JUDGE_CAP];
     size_t item_count;
     char fire_actions[HU_PROSPECTIVE_RENDER_CAP][256]; /* would-fire actions (SHADOW uptake) */
@@ -105,6 +119,8 @@ typedef struct hu_prospective_backfill_counts {
     size_t reanchored;       /* overdue <= 14 days: due_at moved to `now` */
     size_t skipped_existing; /* a time row already stands for the intention */
     size_t skipped_unsafe;   /* contact-owned, not safely rephrasable (F4): no row */
+    size_t ledger_retired;   /* known gap 5: ledger rows of expired imports retired */
+    size_t ledger_unretired; /* expired imports whose contact is too long to retire */
 } hu_prospective_backfill_counts_t;
 
 /* One-time mirror of the ledger into time rows (spec §4.1, rollout step 2):
@@ -119,7 +135,20 @@ typedef struct hu_prospective_backfill_counts {
  * as scheduled. Every seen row lands in exactly one of imported_pending,
  * imported_expired, skipped_existing, skipped_unsafe. One transaction:
  * `write=false` rolls it back, so a dry run's counts (dedupe included) are
- * exact. Idempotent, also at a later `now`. */
+ * exact. Idempotent, also at a later `now`.
+ *
+ * Known gap 5: a row the backfill finds expired (imported expired, or
+ * skipped_existing because its time row already stands) also retires its
+ * OWN ledger row by id in the same transaction -- a commitment to
+ * 'expired', a follow-up to sent=1 (hu_prospective_repo_retire_ledger_row)
+ * -- so agent_turn.c and proactive.c, which read the ledger whatever the
+ * gates say, never resurface it. By id only: another, still-live ledger row
+ * with the same text is not an expired import. The retires run after the
+ * walk (no UPDATE under the walk's open SELECT), so an F20 pair's follow-up
+ * is still visited and retired by its own id; ledger_retired counts the rows
+ * changed; ledger_unretired counts expired imports left pending because
+ * the contact is too long to hold. A re-run no longer sees the retired rows at all, so its
+ * commitments_seen / followups_seen / skipped_existing drop by them. */
 hu_error_t hu_prospective_v2_backfill(hu_allocator_t *alloc, hu_memory_t *mem, int64_t now,
                                       bool write, hu_prospective_backfill_counts_t *out);
 

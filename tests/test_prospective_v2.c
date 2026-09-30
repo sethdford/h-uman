@@ -864,11 +864,18 @@ static void v2_backfill_imports_expires_reanchors_and_dedupes(void) {
     HU_ASSERT_EQ(b.reanchored, (size_t)1);
     HU_ASSERT_EQ(b.skipped_existing, (size_t)1); /* the lease follow-up is the same intention */
     HU_ASSERT_EQ(b.skipped_unsafe, (size_t)0);
+    HU_ASSERT_EQ(b.ledger_retired, (size_t)1); /* 'old promise', the expired import */
     HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE cue_kind='time'"),
                  (int64_t)0); /* dry run rolled back */
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM commitments WHERE status='pending'"),
+                 (int64_t)4); /* ... the ledger retire too */
 
     HU_ASSERT_EQ(hu_prospective_v2_backfill(&alloc, &mem, NOW, true, &b), HU_OK);
     HU_ASSERT_EQ(b.imported_pending + b.imported_expired, (size_t)3);
+    HU_ASSERT_EQ(b.ledger_retired, (size_t)1);
+    HU_ASSERT_EQ(q_int(db, "SELECT status='expired' AND followed_up_at=1790000000 FROM "
+                           "commitments WHERE description='old promise'"),
+                 (int64_t)1);
     HU_ASSERT_EQ(q_int(db, "SELECT due_at FROM prospective_memories WHERE "
                            "action='call about the lease'"),
                  NOW); /* re-anchored: one grace window from the backfill */
@@ -882,7 +889,12 @@ static void v2_backfill_imports_expires_reanchors_and_dedupes(void) {
 
     HU_ASSERT_EQ(hu_prospective_v2_backfill(&alloc, &mem, NOW, true, &b), HU_OK);
     HU_ASSERT_EQ(b.imported_pending + b.imported_expired, (size_t)0); /* idempotent */
-    HU_ASSERT_EQ(b.skipped_existing, (size_t)4);
+    /* Known gap 5: the retired 'old promise' is no longer a pending ledger
+     * row, so the re-run does not see it at all (was 3 seen / 4 skipped). */
+    HU_ASSERT_EQ(b.commitments_seen, (size_t)2);
+    HU_ASSERT_EQ(b.followups_seen, (size_t)1);
+    HU_ASSERT_EQ(b.skipped_existing, (size_t)3);
+    HU_ASSERT_EQ(b.ledger_retired, (size_t)0);
     HU_ASSERT_EQ(hu_prospective_v2_backfill(&alloc, NULL, NOW, true, &b), HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT_EQ(hu_prospective_v2_backfill(&alloc, &mem, 0, true, &b), HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT_EQ(hu_prospective_v2_backfill(&alloc, &mem, NOW, true, NULL),
@@ -1037,6 +1049,134 @@ static void v2_backfill_contact_promises_rerun_later_and_retire_by_id(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
+/* Known gap 5: an item imported `expired` also retires its ledger rows in
+ * the same transaction -- agent_turn.c and proactive.c read the ledger
+ * whatever the gates say. A 20-day-overdue commitment and its F20 follow-up
+ * both end retired; a 5-day-overdue pair is re-anchored pending and its
+ * ledger stays pending; another contact's expired item retires only its
+ * own row. A dry run changes nothing. A database a pre-fix backfill already
+ * wrote (expired time row, ledger still pending) is repaired on re-run via
+ * skipped_existing. */
+static void v2_backfill_expired_import_retires_its_ledger_twins(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    char sql[1024];
+    snprintf(sql, sizeof(sql),
+             "INSERT INTO commitments(contact_id,description,who,deadline,status,created_at) "
+             "VALUES('" C1 "','renew the passport','me',%lld,'pending',1),"
+             "('" C1 "','book the vet','me',%lld,'pending',1),"
+             "('" C2 "','fix the fence','me',%lld,'pending',1);"
+             "INSERT INTO delayed_followups(contact_id,topic,scheduled_at,sent) VALUES"
+             "('" C1 "','renew the passport',%lld,0),('" C1 "','book the vet',%lld,0)",
+             (long long)(NOW - 20 * 86400), (long long)(NOW - 5 * 86400),
+             (long long)(NOW - 30 * 86400), (long long)(NOW - 20 * 86400),
+             (long long)(NOW - 5 * 86400));
+    HU_ASSERT_EQ(sqlite3_exec(db, sql, NULL, NULL, NULL), SQLITE_OK);
+    static const char k_ledger[] =
+        "SELECT (SELECT group_concat(status) FROM (SELECT status FROM commitments ORDER BY id)) "
+        "|| '/' || (SELECT group_concat(sent) FROM (SELECT sent FROM delayed_followups ORDER BY "
+        "id))";
+    char led[128];
+    q_text(db, k_ledger, led, sizeof(led));
+    HU_ASSERT_STR_EQ(led, "pending,pending,pending/0,0");
+
+    hu_prospective_backfill_counts_t b;
+    HU_ASSERT_EQ(hu_prospective_v2_backfill(&alloc, &mem, NOW, false, &b), HU_OK);
+    HU_ASSERT_EQ(b.imported_expired,
+                 (size_t)3); /* passport x2 (an expired row blocks none), fence */
+    HU_ASSERT_EQ(b.ledger_retired, (size_t)3);
+    q_text(db, k_ledger, led, sizeof(led));
+    HU_ASSERT_STR_EQ(led, "pending,pending,pending/0,0"); /* dry run: rolled back */
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories"), (int64_t)0);
+
+    HU_ASSERT_EQ(hu_prospective_v2_backfill(&alloc, &mem, NOW, true, &b), HU_OK);
+    HU_ASSERT_EQ(b.ledger_retired, (size_t)3);
+    q_text(db, k_ledger, led, sizeof(led));
+    HU_ASSERT_STR_EQ(led, "expired,pending,expired/1,0");
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE "
+                           "action='renew the passport' AND status<>'expired'"),
+                 (int64_t)0);
+    HU_ASSERT_EQ(q_int(db, "SELECT status='pending' AND due_at=1790000000 FROM "
+                           "prospective_memories WHERE action='book the vet'"),
+                 (int64_t)1); /* 5 days overdue: re-anchored, its ledger untouched */
+
+    /* re-run: the retired rows are no longer seen; nothing else changes */
+    HU_ASSERT_EQ(hu_prospective_v2_backfill(&alloc, &mem, NOW, true, &b), HU_OK);
+    HU_ASSERT_EQ(b.commitments_seen, (size_t)1);
+    HU_ASSERT_EQ(b.followups_seen, (size_t)1);
+    HU_ASSERT_EQ(b.skipped_existing, (size_t)2);
+    HU_ASSERT_EQ(b.imported_pending + b.imported_expired + b.ledger_retired, (size_t)0);
+
+    /* the pre-fix state: expired time row written, ledger left pending */
+    HU_ASSERT_EQ(sqlite3_exec(db,
+                              "UPDATE commitments SET status='pending', followed_up_at=NULL "
+                              "WHERE description='renew the passport'",
+                              NULL, NULL, NULL),
+                 SQLITE_OK);
+    HU_ASSERT_EQ(hu_prospective_v2_backfill(&alloc, &mem, NOW, true, &b), HU_OK);
+    HU_ASSERT_EQ(b.skipped_existing, (size_t)3);
+    HU_ASSERT_EQ(b.imported_expired, (size_t)0);
+    HU_ASSERT_EQ(b.ledger_retired, (size_t)1);
+    q_text(db, k_ledger, led, sizeof(led));
+    HU_ASSERT_STR_EQ(led, "expired,pending,expired/1,0");
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* Fix round 1 minor: an expired import whose contact is too long for the
+ * deferred-retire slot is not retired -- and is counted, never silent. */
+static void v2_backfill_counts_an_unretirable_long_contact(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    char contact[301];
+    memset(contact, '7', 300);
+    contact[0] = '+';
+    contact[300] = '\0';
+    char sql[1024];
+    snprintf(sql, sizeof(sql),
+             "INSERT INTO commitments(contact_id,description,who,deadline,status,created_at) "
+             "VALUES('%s','renew the passport','me',%lld,'pending',1)",
+             contact, (long long)(NOW - 20 * 86400));
+    HU_ASSERT_EQ(sqlite3_exec(db, sql, NULL, NULL, NULL), SQLITE_OK);
+    hu_prospective_backfill_counts_t b;
+    HU_ASSERT_EQ(hu_prospective_v2_backfill(&alloc, &mem, NOW, true, &b), HU_OK);
+    HU_ASSERT_EQ(b.imported_expired, (size_t)1);
+    HU_ASSERT_EQ(b.ledger_retired, (size_t)0);
+    HU_ASSERT_EQ(b.ledger_unretired, (size_t)1);
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM commitments WHERE status='pending'"), (int64_t)1);
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* Fix round 2, I1 (probe P1): the backfill re-anchors a 5-day-overdue F20
+ * row keyed commitment:1 to due=now, beyond the follow-up's due + grace, so
+ * neither the follow-up key nor the bounded action match finds it. The F20
+ * key does (the commitment of the same contact with description == topic
+ * and deadline == scheduled_at): the legacy mark-sent settles it. */
+static void v2_backfill_reanchored_f20_twin_settles_on_legacy_mark_sent(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    char sql[512];
+    snprintf(sql, sizeof(sql),
+             "INSERT INTO commitments(contact_id,description,who,deadline,status,created_at) "
+             "VALUES('" C1 "','call mom','me',%lld,'pending',1);"
+             "INSERT INTO delayed_followups(contact_id,topic,scheduled_at,sent) VALUES"
+             "('" C1 "','call mom',%lld,0)",
+             (long long)(NOW - 5 * 86400), (long long)(NOW - 5 * 86400));
+    HU_ASSERT_EQ(sqlite3_exec(db, sql, NULL, NULL, NULL), SQLITE_OK);
+    hu_prospective_backfill_counts_t b;
+    HU_ASSERT_EQ(hu_prospective_v2_backfill(&alloc, &mem, NOW, true, &b), HU_OK);
+    HU_ASSERT_EQ(q_int(db, "SELECT due_at FROM prospective_memories WHERE "
+                           "trigger_value='commitment:1' AND status='pending'"),
+                 NOW); /* re-anchored */
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_mark_sent(&mem, 1), HU_OK);
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE "
+                           "trigger_value='commitment:1' AND status='done' AND outcome IS NULL"),
+                 (int64_t)1);
+    mem.vtable->deinit(mem.ctx);
+}
+
 /* The boundary is "more than 14 days": exactly 14 days overdue re-anchors. */
 static void v2_backfill_fourteen_day_boundary(void) {
     hu_allocator_t alloc = hu_system_allocator();
@@ -1130,6 +1270,9 @@ void run_prospective_v2_tests(void) {
     HU_RUN_TEST(v2_backfill_imports_expires_reanchors_and_dedupes);
     HU_RUN_TEST(v2_backfill_rows_are_identical_to_the_live_mirror);
     HU_RUN_TEST(v2_backfill_contact_promises_rerun_later_and_retire_by_id);
+    HU_RUN_TEST(v2_backfill_expired_import_retires_its_ledger_twins);
+    HU_RUN_TEST(v2_backfill_counts_an_unretirable_long_contact);
+    HU_RUN_TEST(v2_backfill_reanchored_f20_twin_settles_on_legacy_mark_sent);
     HU_RUN_TEST(v2_backfill_fourteen_day_boundary);
     HU_RUN_TEST(v2_backfill_failure_midway_writes_nothing_and_zeroes_counts);
 }
