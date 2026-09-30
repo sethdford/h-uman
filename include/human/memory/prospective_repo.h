@@ -72,6 +72,13 @@ hu_error_t hu_prospective_repo_count_surfaced_since(sqlite3 *db, hu_prospective_
                                                     const char *contact, size_t contact_len,
                                                     int64_t since, int64_t *out);
 
+/* Open (pending or surfaced) time rows for `contact` with 0 < due_at <= now:
+ * the cheap check the proactive tick runs before it loads chat history for a
+ * fire-time judge. 0 means a time pass for this contact has nothing to judge,
+ * expire or settle. */
+hu_error_t hu_prospective_repo_count_due(sqlite3 *db, const char *contact, size_t contact_len,
+                                         int64_t now, int64_t *out);
+
 /* Insert a cue_kind='time' row unless this intention is already present,
  * atomically, in one statement: trigger_type 'time', trigger_value =
  * source_key, expires_at = due_at + grace_s (so the legacy sweeps retire it
@@ -131,12 +138,63 @@ hu_error_t hu_prospective_repo_each_dated_ledger_row(sqlite3 *db, hu_prospective
                                                      void *ctx);
 
 /* A settled time intention (DONE / CANCELED / EXPIRED) retires its ledger
- * twins so the legacy readers never resurface it: pending commitments with
- * the same contact + description get status 'followed_up' / 'canceled' /
- * 'expired' and followed_up_at = now; unsent delayed_followups with the same
- * contact + topic get sent=1. */
+ * twins so the legacy readers never resurface it: pending commitments get
+ * status 'followed_up' / 'canceled' / 'expired' and followed_up_at = now;
+ * unsent delayed_followups get sent=1. The row named by the intention's
+ * source key is retired by id (with its F20 twin: same contact, topic ==
+ * description). Then (known gap 4) the contact's other still-open ledger
+ * rows whose mirror text (hu_prospective_mirror_action: a dated frame's
+ * topic, a contact's promise rephrased, else verbatim) normalizes to the
+ * intention's action -- the rows the upsert collapsed into it -- are
+ * retired too, compared in C. Every by-text/by-topic retire is bounded to
+ * rows due <= it->due_at + HU_PROSPECTIVE_TIME_GRACE_S (fix round 1): a
+ * same-words promise dated beyond that is a later promise. The earliest
+ * such survivor is re-mirrored as a fresh open time row keyed by its own
+ * ledger id, with its own due -- call this only once the intention is
+ * terminal, as pm_retire does. */
 hu_error_t hu_prospective_repo_sync_source(sqlite3 *db, const hu_prospective_item_t *it,
                                            hu_prospective_status_t to, int64_t now);
+
+/* Fix round 2: settle an intention as ONE unit (a SAVEPOINT, so it nests in
+ * an open transaction): hu_prospective_repo_transition, then -- for a time
+ * intention whose transition changed a row and whose `to` is terminal --
+ * hu_prospective_repo_sync_source (ledger retire, bounded sweep, survivor
+ * re-mirror). Any failure rolls the whole unit back and is returned;
+ * *changed (may be NULL) is then 0. */
+hu_error_t hu_prospective_repo_settle(sqlite3 *db, const hu_prospective_item_t *it,
+                                      hu_prospective_status_t to, hu_prospective_outcome_t outcome,
+                                      int attempts, int64_t now, int *changed);
+
+/* Retire ONE ledger row by its own id, scoped to `contact`, with the same
+ * mapping hu_prospective_repo_sync_source uses: a pending commitment gets
+ * status 'followed_up' / 'canceled' / 'expired' (DONE / CANCELED / EXPIRED)
+ * and followed_up_at = now; an unsent delayed follow-up gets sent=1. A row
+ * already retired, of another contact, or missing is left alone. *changed
+ * (may be NULL) is the number of rows updated (0 or 1). */
+hu_error_t hu_prospective_repo_retire_ledger_row(sqlite3 *db, bool is_followup, int64_t id,
+                                                 const char *contact, size_t contact_len,
+                                                 hu_prospective_status_t to, int64_t now,
+                                                 int *changed);
+
+/* Known gap 2: the legacy path marked delayed follow-up `followup_id` sent
+ * (hu_superhuman_delayed_followup_mark_sent -- after an F31 send, or after
+ * a send whose proposer context merely LISTED it). Its time twin moves to
+ * DONE with NO outcome (the legacy path claims no evidence the reply used
+ * it). The twin is a PENDING row of the follow-up's contact that v2 never
+ * surfaced (attempts 0, no surfaced_at: v2 owns every row it has surfaced,
+ * retries included) and is either keyed -- "followup:<id>", or the F20 key
+ * "commitment:<N>" of the same contact's commitment with description ==
+ * topic and deadline == scheduled_at, unbounded like every rowid path, so a
+ * backfill re-anchored row is still found -- or, for a dated follow-up,
+ * has an action equal to the follow-up's mirror text (normalized) and a due
+ * <= the follow-up's due + HU_PROSPECTIVE_TIME_GRACE_S. The settle is the
+ * same unit a v2 settle is (SAVEPOINT): the bounded sweep re-mirrors a
+ * later-dated same-action ledger row as its own open time row; the ledger
+ * itself is left as the legacy path wrote it, so what it sends is
+ * unchanged. Idempotent; no twin is HU_OK with nothing written. *changed
+ * (may be NULL) is the number of rows moved. */
+hu_error_t hu_prospective_repo_settle_followup_twin(sqlite3 *db, int64_t followup_id, int64_t now,
+                                                    int *changed);
 
 #endif /* HU_ENABLE_SQLITE */
 #endif /* HU_MEMORY_PROSPECTIVE_REPO_H */

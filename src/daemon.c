@@ -1567,6 +1567,8 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                             (void)hu_superhuman_inside_joke_reference(agent->memory,
                                                                       joke_id_to_reference);
 #ifdef HU_ENABLE_SQLITE
+                        hu_daemon_prospective_time_after_send(agent, cp->contact_id, response,
+                                                              response_len, (int64_t)now);
                         for (size_t mi = 0; mi < commitment_ids_count; mi++)
                             (void)hu_superhuman_commitment_mark_followed_up(agent->memory,
                                                                             commitment_ids[mi]);
@@ -1580,8 +1582,6 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                             due_followup_id_listed != delayed_followup_id_to_mark && agent->memory)
                             (void)hu_superhuman_delayed_followup_mark_sent(agent->memory,
                                                                            due_followup_id_listed);
-                        hu_daemon_prospective_time_after_send(agent, cp->contact_id, response,
-                                                              response_len, (int64_t)now);
 #endif
                     }
                 }

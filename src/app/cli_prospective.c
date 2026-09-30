@@ -122,8 +122,10 @@ static hu_error_t pm_run_deliver(hu_allocator_t *alloc, sqlite3 *db,
     return HU_OK;
 }
 
-/* One JSON line; skipped_unsafe was added after the plan's contract, so it
- * is appended LAST (after "written") to keep every earlier key in place. */
+/* One JSON line; skipped_unsafe, then ledger_retired and ledger_unretired
+ * (known gap 5) were
+ * added after the plan's contract, so they are appended LAST (after
+ * "written") to keep every earlier key in place. */
 static hu_error_t pm_run_backfill(hu_allocator_t *alloc, hu_memory_t *mem,
                                   const hu_cli_prospective_args_t *a, int64_t now, FILE *out) {
     hu_prospective_backfill_counts_t b;
@@ -133,9 +135,11 @@ static hu_error_t pm_run_backfill(hu_allocator_t *alloc, hu_memory_t *mem,
     fprintf(out,
             "{\"commitments_seen\": %zu, \"followups_seen\": %zu, \"imported_pending\": %zu, "
             "\"imported_expired\": %zu, \"reanchored\": %zu, \"skipped_existing\": %zu, "
-            "\"written\": %s, \"skipped_unsafe\": %zu}\n",
+            "\"written\": %s, \"skipped_unsafe\": %zu, \"ledger_retired\": %zu, "
+            "\"ledger_unretired\": %zu}\n",
             b.commitments_seen, b.followups_seen, b.imported_pending, b.imported_expired,
-            b.reanchored, b.skipped_existing, a->write ? "true" : "false", b.skipped_unsafe);
+            b.reanchored, b.skipped_existing, a->write ? "true" : "false", b.skipped_unsafe,
+            b.ledger_retired, b.ledger_unretired);
     return HU_OK;
 }
 

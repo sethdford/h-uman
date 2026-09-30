@@ -33,7 +33,8 @@ if "--write" in args and not os.listdir(os.environ["FAKE_BACKUP_DIR"]):
     sys.exit(4)  # a write before the backup exists is exactly what must never happen
 print(json.dumps({"commitments_seen": 3, "followups_seen": 1, "imported_pending": 2,
                   "imported_expired": 1, "reanchored": 1, "skipped_existing": 1,
-                  "written": "--write" in args, "skipped_unsafe": 0}))
+                  "written": "--write" in args, "skipped_unsafe": 0,
+                  "ledger_retired": 1, "ledger_unretired": 0}))
 """
 
 

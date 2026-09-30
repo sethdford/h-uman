@@ -121,8 +121,20 @@ static void due_followups_lists_one_line_for_this_contact(void) {
 
 typedef struct tmock {
     int calls;
-    int saw_history; /* a judge request carried the channel's history line */
+    int saw_history;   /* a judge request carried the channel's history line */
+    const char *reply; /* the judge's answer; NULL = "fire" */
+    int lease_calls;   /* requests that judged "call about the lease" */
+    int drill_calls;   /* requests that judged "return the drill" */
+    hu_error_t fail;   /* non-HU_OK: the provider call fails (a judge error) */
 } tmock_t;
+
+static bool t_req_has(const hu_chat_request_t *req, const char *needle) {
+    for (size_t i = 0; req && i < req->messages_count; i++)
+        if (req->messages[i].content &&
+            memmem(req->messages[i].content, req->messages[i].content_len, needle, strlen(needle)))
+            return true;
+    return false;
+}
 
 static hu_error_t tmock_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_request_t *req,
                              const char *model, size_t model_len, double temperature,
@@ -132,16 +144,18 @@ static hu_error_t tmock_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_req
     (void)temperature;
     tmock_t *m = (tmock_t *)ctx;
     m->calls++;
-    for (size_t i = 0; req && i < req->messages_count; i++)
-        if (req->messages[i].content &&
-            memmem(req->messages[i].content, req->messages[i].content_len,
-                   "them: we signed the lease", 25))
-            m->saw_history++;
+    m->saw_history += t_req_has(req, "them: we signed the lease");
+    m->lease_calls += t_req_has(req, "call about the lease");
+    m->drill_calls += t_req_has(req, "return the drill");
     memset(out, 0, sizeof(*out));
-    char *c = (char *)alloc->alloc(alloc->ctx, 5);
-    memcpy(c, "fire", 5);
+    if (m->fail != HU_OK)
+        return m->fail;
+    const char *r = m->reply ? m->reply : "fire";
+    size_t rl = strlen(r);
+    char *c = (char *)alloc->alloc(alloc->ctx, rl + 1);
+    memcpy(c, r, rl + 1);
     out->content = c;
-    out->content_len = 4;
+    out->content_len = rl;
     return HU_OK;
 }
 
@@ -797,6 +811,395 @@ static void time_shadow_slot_waits_for_something_due(void) {
     mem.vtable->deinit(mem.ctx);
     t_env_clear();
 }
+
+/* Known gap 1: a counting history loader, the channel seam pm_time_history
+ * already reads through. */
+static hu_error_t t_history_counted(void *ctx, hu_allocator_t *alloc, const char *contact_id,
+                                    size_t contact_id_len, size_t limit,
+                                    hu_channel_history_entry_t **out, size_t *out_count) {
+    (*(int *)ctx)++;
+    return t_history(NULL, alloc, contact_id, contact_id_len, limit, out, out_count);
+}
+
+static hu_channel_vtable_t s_counted_cvt;
+
+static hu_channel_t t_counted_channel(int *loads) {
+    memset(&s_counted_cvt, 0, sizeof(s_counted_cvt));
+    s_counted_cvt.load_conversation_history = t_history_counted;
+    hu_channel_t ch = {.ctx = loads, .vtable = &s_counted_cvt};
+    return ch;
+}
+
+/* A contact with nothing due -- only a future row, and another contact's due
+ * backlog -- costs no chat history read on any tick, in SHADOW or LIVE: the
+ * pending-due count comes first. */
+static void time_nothing_due_loads_no_history(void) {
+    t_env_clear();
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    tmock_t m = {0};
+    static hu_agent_t agent;
+    agent_with_mock(&agent, &alloc, &mem, &m);
+    /* days no other test uses: the SHADOW slot table is process-wide */
+    const int64_t day = hu_prospective_local_day_start(TNOW + 50 * TDAY);
+    HU_ASSERT_EQ(hu_superhuman_commitment_store(&mem, &alloc, TA, 12, "call about the lease", 20,
+                                                "me", 2, day + 20 * 3600),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_superhuman_commitment_store(&mem, &alloc, TB, 12, "return the drill", 16, "me",
+                                                2, day + 3600),
+                 HU_OK);
+    int loads = 0;
+    hu_channel_t ch = t_counted_channel(&loads);
+    char buf[640];
+    int64_t listed = -1;
+    static const char *const modes[] = {"shadow", "live"};
+    for (size_t i = 0; i < 2; i++) {
+        setenv("HU_PROSPECTIVE_TIME", modes[i], 1);
+        for (int tick = 0; tick < 3; tick++) /* 09:00, 09:30, 10:00: TA has nothing due */
+            (void)hu_daemon_prospective_due_followups(&alloc, &agent, &ch, TA, 12, TA,
+                                                      day + 9 * 3600 + tick * 1800, buf,
+                                                      sizeof(buf), &listed);
+    }
+    HU_ASSERT_EQ(loads, 0);
+    HU_ASSERT_EQ(m.calls, 0);
+    /* the positive control: once TA's row is due, LIVE reads the history */
+    (void)hu_daemon_prospective_due_followups(&alloc, &agent, &ch, TA, 12, TA, day + 21 * 3600, buf,
+                                              sizeof(buf), &listed);
+    HU_ASSERT_EQ(loads, 1);
+    HU_ASSERT_EQ(m.calls, 1);
+    HU_ASSERT_EQ(m.saw_history, 1);
+    mem.vtable->deinit(mem.ctx);
+    t_env_clear();
+}
+
+typedef struct t_shadow_ch {
+    t_shadow_t s;
+    hu_channel_t *ch;
+} t_shadow_ch_t;
+
+static void t_shadow_due_ch(void *p) {
+    t_shadow_ch_t *c = (t_shadow_ch_t *)p;
+    c->s.listed = -1;
+    c->s.n =
+        hu_daemon_prospective_due_followups(c->s.alloc, c->s.agent, c->ch, TA, 12, TA, c->s.now,
+                                            c->s.out, sizeof(c->s.out), &c->s.listed);
+}
+
+/* With a row due, SHADOW still loads the history once and logs exactly the
+ * counts it logged before the pending-due check existed. */
+static void time_shadow_due_loads_history_once(void) {
+    t_env_clear();
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    tmock_t m = {0};
+    static hu_agent_t agent;
+    agent_with_mock(&agent, &alloc, &mem, &m);
+    const int64_t now = TNOW + 51 * TDAY + 3600; /* a day no other test uses */
+    t_seed_lease(&mem, &alloc, now);
+    int loads = 0;
+    hu_channel_t ch = t_counted_channel(&loads);
+    static t_shadow_ch_t sc;
+    memset(&sc, 0, sizeof(sc));
+    sc.s.alloc = &alloc;
+    sc.s.agent = &agent;
+    sc.s.now = now;
+    sc.ch = &ch;
+    setenv("HU_PROSPECTIVE_TIME", "shadow", 1);
+    static char log[8192];
+    t_capture(t_shadow_due_ch, &sc, log, sizeof(log));
+    HU_ASSERT_EQ(loads, 1);
+    HU_ASSERT_EQ(m.calls, 1);
+    HU_ASSERT_EQ(m.saw_history, 1);
+    HU_ASSERT_STR_CONTAINS(log, "prospective time shadow: candidates=1 fire=1 resolved=0 "
+                                "cancel=0 not_now=0 parse_fail=0 judge_err=0 expired=0 "
+                                "capped=0 write_err=0\n");
+    HU_ASSERT_STR_EQ(sc.s.out, "- call about the lease (due 3600s ago)\n"); /* legacy output */
+    sc.s.now = now + 1800; /* the same day: slot taken, no second read */
+    t_capture(t_shadow_due_ch, &sc, log, sizeof(log));
+    HU_ASSERT_EQ(loads, 1);
+    HU_ASSERT_EQ(m.calls, 1);
+    mem.vtable->deinit(mem.ctx);
+    t_env_clear();
+}
+
+/* Known gap 3: LIVE remembers a not_now for the rest of the local day. The
+ * same intention is judged once per day; the next day it is judged again; a
+ * different intention of the same contact the same day still is. */
+static void time_live_not_now_is_judged_once_a_day(void) {
+    t_env_clear();
+    setenv("HU_PROSPECTIVE_TIME", "live", 1);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    tmock_t m = {0};
+    m.reply = "not_now";
+    static hu_agent_t agent;
+    agent_with_mock(&agent, &alloc, &mem, &m);
+    /* days no other test uses: the memo is process-wide */
+    const int64_t day = hu_prospective_local_day_start(TNOW + 40 * TDAY);
+    HU_ASSERT_EQ(hu_superhuman_commitment_store(&mem, &alloc, TA, 12, "call about the lease", 20,
+                                                "me", 2, day + 8 * 3600),
+                 HU_OK);
+    char buf[640];
+    int64_t listed = -1;
+    HU_ASSERT_EQ(hu_daemon_prospective_due_followups(&alloc, &agent, NULL, NULL, 0, TA,
+                                                     day + 9 * 3600, buf, sizeof(buf), &listed),
+                 (size_t)0);
+    HU_ASSERT_EQ(m.lease_calls, 1);
+    HU_ASSERT_EQ(hu_daemon_prospective_due_followups(&alloc, &agent, NULL, NULL, 0, TA,
+                                                     day + 10 * 3600, buf, sizeof(buf), &listed),
+                 (size_t)0);
+    HU_ASSERT_EQ(m.lease_calls, 1); /* the second tick of the day: not re-judged */
+    HU_ASSERT_EQ(m.calls, 1);
+    /* a different intention of the same contact, the same day, is judged */
+    HU_ASSERT_EQ(hu_superhuman_commitment_store(&mem, &alloc, TA, 12, "return the drill", 16, "me",
+                                                2, day + 10 * 3600),
+                 HU_OK);
+    (void)hu_daemon_prospective_due_followups(&alloc, &agent, NULL, NULL, 0, TA, day + 11 * 3600,
+                                              buf, sizeof(buf), &listed);
+    HU_ASSERT_EQ(m.drill_calls, 1);
+    HU_ASSERT_EQ(m.lease_calls, 1);
+    HU_ASSERT_EQ(m.calls, 2);
+    /* still pending: a not_now leaves the intention for another day */
+    HU_ASSERT_EQ(t_count(&mem, "SELECT COUNT(*) FROM prospective_memories WHERE cue_kind='time' "
+                               "AND status='pending' AND surfaced_at IS NULL"),
+                 (int64_t)2);
+    /* the next local day: both are judged again, once each */
+    (void)hu_daemon_prospective_due_followups(&alloc, &agent, NULL, NULL, 0, TA,
+                                              day + TDAY + 9 * 3600, buf, sizeof(buf), &listed);
+    HU_ASSERT_EQ(m.lease_calls, 2);
+    HU_ASSERT_EQ(m.drill_calls, 2);
+    (void)hu_daemon_prospective_due_followups(&alloc, &agent, NULL, NULL, 0, TA,
+                                              day + TDAY + 10 * 3600, buf, sizeof(buf), &listed);
+    HU_ASSERT_EQ(m.calls, 4);
+    mem.vtable->deinit(mem.ctx);
+    t_env_clear();
+}
+/* Review round 1, minor (a): only a real not_now is memoized. A verdict
+ * that does not parse, and a judge (provider) error, leave the intention to
+ * be judged again on the very next tick of the same day -- the memo must
+ * never turn a failure into a day of silence. Control: not_now then is. */
+static void time_live_judge_error_and_parse_fail_are_not_memoized(void) {
+    t_env_clear();
+    setenv("HU_PROSPECTIVE_TIME", "live", 1);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    tmock_t m = {0};
+    m.reply = "maybe later?";
+    static hu_agent_t agent;
+    agent_with_mock(&agent, &alloc, &mem, &m);
+    /* a day no other test uses: the memo is process-wide */
+    const int64_t day = hu_prospective_local_day_start(TNOW + 42 * TDAY);
+    HU_ASSERT_EQ(hu_superhuman_commitment_store(&mem, &alloc, TA, 12, "call about the lease", 20,
+                                                "me", 2, day + 8 * 3600),
+                 HU_OK);
+    char buf[640];
+    int64_t listed = -1;
+    for (int h = 9; h <= 10; h++) /* parse failures */
+        HU_ASSERT_EQ(hu_daemon_prospective_due_followups(&alloc, &agent, NULL, NULL, 0, TA,
+                                                         day + h * 3600, buf, sizeof(buf), &listed),
+                     (size_t)0);
+    HU_ASSERT_EQ(m.lease_calls, 2);
+    m.reply = NULL;
+    m.fail = HU_ERR_PROVIDER_UNAVAILABLE;
+    for (int h = 11; h <= 12; h++) /* judge errors */
+        (void)hu_daemon_prospective_due_followups(&alloc, &agent, NULL, NULL, 0, TA, day + h * 3600,
+                                                  buf, sizeof(buf), &listed);
+    HU_ASSERT_EQ(m.lease_calls, 4);
+    HU_ASSERT_EQ(t_count(&mem, "SELECT COUNT(*) FROM prospective_memories WHERE cue_kind='time' "
+                               "AND status='pending' AND surfaced_at IS NULL"),
+                 (int64_t)1);
+    m.fail = HU_OK; /* control: a real not_now IS memoized for the rest of the day */
+    m.reply = "not_now";
+    for (int h = 13; h <= 14; h++)
+        (void)hu_daemon_prospective_due_followups(&alloc, &agent, NULL, NULL, 0, TA, day + h * 3600,
+                                                  buf, sizeof(buf), &listed);
+    HU_ASSERT_EQ(m.lease_calls, 5);
+    mem.vtable->deinit(mem.ctx);
+    t_env_clear();
+}
+
+/* Denies the count() SQL function: a hermetic way to make
+ * hu_prospective_repo_count_due fail without a production seam. */
+static int t_deny_count(void *ud, int action, const char *a1, const char *a2, const char *a3,
+                        const char *a4) {
+    (void)ud;
+    (void)a1;
+    (void)a3;
+    (void)a4;
+    return action == SQLITE_FUNCTION && a2 && strcmp(a2, "count") == 0 ? SQLITE_DENY : SQLITE_OK;
+}
+
+/* Review round 1, minor (b): a failing due count cannot prove "nothing
+ * due", so the tick falls through to the full pass (history read and all)
+ * instead of skipping. Control: with the count working, the same not-yet-due
+ * contact reads no history. */
+static void time_failed_due_count_falls_through_to_the_full_pass(void) {
+    t_env_clear();
+    setenv("HU_PROSPECTIVE_TIME", "live", 1);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    tmock_t m = {0};
+    static hu_agent_t agent;
+    agent_with_mock(&agent, &alloc, &mem, &m);
+    const int64_t day = hu_prospective_local_day_start(TNOW + 43 * TDAY);
+    HU_ASSERT_EQ(hu_superhuman_commitment_store(&mem, &alloc, TA, 12, "call about the lease", 20,
+                                                "me", 2, day + 20 * 3600),
+                 HU_OK); /* due tonight: nothing due at 09:00 */
+    int loads = 0;
+    hu_channel_t ch = t_counted_channel(&loads);
+    char buf[640];
+    int64_t listed = -1;
+    (void)hu_daemon_prospective_due_followups(&alloc, &agent, &ch, TA, 12, TA, day + 9 * 3600, buf,
+                                              sizeof(buf), &listed);
+    HU_ASSERT_EQ(loads, 0); /* the count works: skipped whole */
+    HU_ASSERT_EQ(sqlite3_set_authorizer(db, t_deny_count, NULL), SQLITE_OK);
+    int64_t due = -1;
+    HU_ASSERT_NEQ(hu_prospective_repo_count_due(db, TA, 12, day + 9 * 3600, &due), HU_OK);
+    (void)hu_daemon_prospective_due_followups(&alloc, &agent, &ch, TA, 12, TA,
+                                              day + 9 * 3600 + 1800, buf, sizeof(buf), &listed);
+    HU_ASSERT_EQ(sqlite3_set_authorizer(db, NULL, NULL), SQLITE_OK);
+    HU_ASSERT_EQ(loads, 1);   /* the count failed: the full pass ran */
+    HU_ASSERT_EQ(m.calls, 0); /* and, nothing being due, judged nothing */
+    mem.vtable->deinit(mem.ctx);
+    t_env_clear();
+}
+
+/* Known gap 4: two dated frames of one topic collapse into ONE open row
+ * keyed by the first. Settling it (a LIVE delivery that used the topic) must
+ * retire BOTH ledger rows -- the second frame's, not yet due, included --
+ * or a legacy reader resurfaces the topic later. The same contact's other
+ * topic and another contact's identical topic stay unsent. */
+static void time_settling_a_collapsed_topic_retires_every_frame(void) {
+    t_env_clear();
+    setenv("HU_PROSPECTIVE_TIME", "live", 1);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    tmock_t m = {0};
+    static hu_agent_t agent;
+    agent_with_mock(&agent, &alloc, &mem, &m);
+    const int64_t t0 = TNOW - 2 * TDAY;
+    static const struct {
+        const char *contact;
+        const char *topic;
+        int64_t send_at;
+    } k[] = {{TA, "the job interview", t0 + TDAY + 60},     /* (tomorrow): due at TNOW */
+             {TA, "the job interview", t0 + 2 * TDAY + 60}, /* (in 2 days): not yet */
+             {TA, "the dentist", t0 + 2 * TDAY + 60},
+             {TB, "the job interview", t0 + TDAY + 60}};
+    for (size_t i = 0; i < sizeof(k) / sizeof(k[0]); i++) {
+        char f[320];
+        size_t fl = t_frame(k[i].topic, k[i].send_at, t0, f, sizeof(f));
+        HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, k[i].contact, 12, f, fl,
+                                                             k[i].send_at, NULL, 0),
+                     HU_OK);
+    }
+    HU_ASSERT_EQ(t_count(&mem, "SELECT COUNT(*) FROM prospective_memories WHERE contact_id='" TA
+                               "' AND action='the job interview'"),
+                 (int64_t)1); /* the two frames collapsed */
+    char buf[640];
+    int64_t listed = -1;
+    HU_ASSERT_TRUE(hu_daemon_prospective_due_followups(&alloc, &agent, NULL, NULL, 0, TA, TNOW, buf,
+                                                       sizeof(buf), &listed) > 0);
+    HU_ASSERT_STR_EQ(buf, "- the job interview\n");
+    static const char sent[] = "hey how did the job interview go?";
+    hu_daemon_prospective_time_after_send(&agent, TA, sent, sizeof(sent) - 1, TNOW + 60);
+    HU_ASSERT_EQ(t_count(&mem, "SELECT COUNT(*) FROM prospective_memories WHERE contact_id='" TA
+                               "' AND status='done' AND outcome='used'"),
+                 (int64_t)1);
+    HU_ASSERT_EQ(t_count(&mem, "SELECT group_concat(id || ':' || sent) = '1:1,2:1,3:0,4:0' FROM "
+                               "(SELECT id, sent FROM delayed_followups ORDER BY id)"),
+                 (int64_t)1);
+    mem.vtable->deinit(mem.ctx);
+    t_env_clear();
+}
+
+/* One row of text from `sql` (or "(null)"). */
+static void t_text(hu_memory_t *mem, const char *sql, char *buf, size_t cap) {
+    sqlite3_stmt *st = NULL;
+    HU_ASSERT_EQ(sqlite3_prepare_v2(hu_sqlite_memory_get_db(mem), sql, -1, &st, NULL), SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_step(st), SQLITE_ROW);
+    const unsigned char *t = sqlite3_column_text(st, 0);
+    snprintf(buf, cap, "%s", t ? (const char *)t : "(null)");
+    sqlite3_finalize(st);
+}
+
+static void t_ledger(hu_memory_t *mem, char *buf, size_t cap) {
+    char c[512];
+    char f[512];
+    t_text(mem,
+           "SELECT group_concat(id||'|'||contact_id||'|'||description||'|'||status||'|'||"
+           "ifnull(followed_up_at,'-'), ';') FROM (SELECT * FROM commitments ORDER BY id)",
+           c, sizeof(c));
+    t_text(mem,
+           "SELECT group_concat(id||'|'||contact_id||'|'||topic||'|'||scheduled_at||'|'||sent, "
+           "';') FROM (SELECT * FROM delayed_followups ORDER BY id)",
+           f, sizeof(f));
+    snprintf(buf, cap, "%s\n%s", c, f);
+}
+
+/* Known gap 2, OFF side: settling the v2 twin on a legacy mark-sent changes
+ * nothing the legacy path reads or sends. Database A has the twin (settled
+ * by mark_sent), database B never had one (the pre-fix state as the legacy
+ * readers see it): the OFF tick's outputs and every ledger row are
+ * identical, before and after the send. */
+static void time_off_legacy_mark_sent_output_is_unchanged_by_the_twin_settle(void) {
+    t_env_clear();
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t ma = hu_sqlite_memory_create(&alloc, ":memory:");
+    hu_memory_t mb = hu_sqlite_memory_create(&alloc, ":memory:");
+    tmock_t m = {0};
+    static hu_agent_t agent_a;
+    static hu_agent_t agent_b;
+    agent_with_mock(&agent_a, &alloc, &ma, &m);
+    agent_with_mock(&agent_b, &alloc, &mb, &m);
+    t_seed_lease(&ma, &alloc, TNOW);
+    t_seed_lease(&mb, &alloc, TNOW);
+    HU_ASSERT_EQ(sqlite3_exec(hu_sqlite_memory_get_db(&mb), "DELETE FROM prospective_memories",
+                              NULL, NULL, NULL),
+                 SQLITE_OK);
+    static t_call_t a;
+    static t_call_t b;
+    for (int round = 0; round < 2; round++) {
+        memset(&a, 0, sizeof(a));
+        memset(&b, 0, sizeof(b));
+        a.alloc = b.alloc = &alloc;
+        a.agent = &agent_a;
+        b.agent = &agent_b;
+        a.now = b.now = TNOW + round * 3600;
+        t_tick(&a);
+        t_tick(&b);
+        HU_ASSERT_STR_EQ(a.out, b.out);
+        HU_ASSERT_EQ(a.listed, b.listed);
+        HU_ASSERT_STR_EQ(a.ctx ? a.ctx : "", b.ctx ? b.ctx : "");
+        HU_ASSERT_EQ(a.ids_n, b.ids_n);
+        char la[1200];
+        char lb[1200];
+        t_ledger(&ma, la, sizeof(la));
+        t_ledger(&mb, lb, sizeof(lb));
+        HU_ASSERT_STR_EQ(la, lb);
+        if (round == 0) {
+            HU_ASSERT_STR_EQ(a.out, "- call about the lease (due 3600s ago)\n");
+            HU_ASSERT_EQ(hu_superhuman_delayed_followup_mark_sent(&ma, a.listed), HU_OK);
+            HU_ASSERT_EQ(hu_superhuman_delayed_followup_mark_sent(&mb, b.listed), HU_OK);
+        } else {
+            HU_ASSERT_STR_EQ(a.out, ""); /* sent: gone from the legacy due list in both */
+        }
+        if (a.ctx)
+            alloc.free(alloc.ctx, a.ctx, a.ctx_len + 1);
+        if (b.ctx)
+            alloc.free(alloc.ctx, b.ctx, b.ctx_len + 1);
+    }
+    HU_ASSERT_EQ(m.calls, 0);
+    /* only the v2 twin moved, and the listed-only send claims no evidence:
+     * DONE with no outcome (fix round 1, C1) */
+    HU_ASSERT_EQ(t_count(&ma, "SELECT COUNT(*) FROM prospective_memories WHERE cue_kind='time' AND "
+                              "status='done' AND outcome IS NULL"),
+                 (int64_t)1);
+    ma.vtable->deinit(ma.ctx);
+    mb.vtable->deinit(mb.ctx);
+    t_env_clear();
+}
 #endif /* HU_ENABLE_SQLITE */
 
 void run_daemon_prospective_time_tests(void) {
@@ -818,5 +1221,12 @@ void run_daemon_prospective_time_tests(void) {
     HU_RUN_TEST(time_mirror_collapses_frames_of_the_same_topic);
     HU_RUN_TEST(time_topic_mirrored_frame_retires_its_ledger_row);
     HU_RUN_TEST(time_shadow_slot_waits_for_something_due);
+    HU_RUN_TEST(time_nothing_due_loads_no_history);
+    HU_RUN_TEST(time_shadow_due_loads_history_once);
+    HU_RUN_TEST(time_live_not_now_is_judged_once_a_day);
+    HU_RUN_TEST(time_live_judge_error_and_parse_fail_are_not_memoized);
+    HU_RUN_TEST(time_failed_due_count_falls_through_to_the_full_pass);
+    HU_RUN_TEST(time_settling_a_collapsed_topic_retires_every_frame);
+    HU_RUN_TEST(time_off_legacy_mark_sent_output_is_unchanged_by_the_twin_settle);
 #endif
 }

@@ -53,17 +53,78 @@ static struct {
     int64_t day;
 } s_pm_time_seen[PM_TIME_SHADOW_SLOTS];
 
-/* The contact's slot; *seen: already judged on `day`. */
-static size_t pm_time_slot(const char *contact, int64_t day, uint64_t *hash, bool *seen) {
-    uint64_t h = 1469598103934665603ULL;
-    for (const char *p = contact; *p; p++) {
+/* FNV-1a over `s`, continuing from `h`. */
+static uint64_t pm_time_fnv(uint64_t h, const char *s) {
+    for (const char *p = s; *p; p++) {
         h ^= (uint64_t)(unsigned char)*p;
         h *= 1099511628211ULL;
     }
+    return h;
+}
+#define PM_TIME_FNV_BASIS 1469598103934665603ULL
+
+/* The contact's slot; *seen: already judged on `day`. */
+static size_t pm_time_slot(const char *contact, int64_t day, uint64_t *hash, bool *seen) {
+    uint64_t h = pm_time_fnv(PM_TIME_FNV_BASIS, contact);
     size_t slot = (size_t)(h % PM_TIME_SHADOW_SLOTS);
     *hash = h;
     *seen = s_pm_time_seen[slot].hash == h && s_pm_time_seen[slot].day == day;
     return slot;
+}
+
+/* LIVE's not_now memo (known gap 3): an intention the judge answered
+ * `not_now` is not re-sent to it on every proactive tick of the same local
+ * day, only on the next day's first tick that reaches it. Keyed by
+ * (contact, action) -- the intention, as hu_prospective_repo_transition moves
+ * it -- and the local day (hu_prospective_local_day_start, seconds).
+ * Bounded: a fixed, direct-mapped table. Eviction is overwrite: a second
+ * intention hashing to a taken slot replaces it, so the evicted one is judged
+ * once more today (the pre-memo behaviour). A skip needs the full 64-bit
+ * hash to match, so it never suppresses the wrong intention, barring a
+ * 64-bit hash collision (which would hold that one intention back until the
+ * next local day, never send anything). An entry from an
+ * earlier day is dead on read. In-process like the SHADOW slots above: a
+ * restart forgets it, costing one extra judge call per intention. SHADOW
+ * never uses it (it is once per contact per day already). The proactive tick
+ * is single-threaded, as for s_pm_time_seen. */
+#define PM_TIME_MEMO_SLOTS 128
+static struct {
+    uint64_t hash;
+    int64_t day;
+} s_pm_time_not_now[PM_TIME_MEMO_SLOTS];
+
+typedef struct pm_time_memo_ctx {
+    const char *contact;
+    int64_t day;
+} pm_time_memo_ctx_t;
+
+static uint64_t pm_time_memo_hash(const pm_time_memo_ctx_t *m, const char *action) {
+    return pm_time_fnv(pm_time_fnv(pm_time_fnv(PM_TIME_FNV_BASIS, m->contact), "\x1f"), action);
+}
+
+static bool pm_time_memo_skip(void *ctx, const char *action) {
+    const pm_time_memo_ctx_t *m = (const pm_time_memo_ctx_t *)ctx;
+    uint64_t h = pm_time_memo_hash(m, action);
+    size_t slot = (size_t)(h % PM_TIME_MEMO_SLOTS);
+    return s_pm_time_not_now[slot].hash == h && s_pm_time_not_now[slot].day == m->day;
+}
+
+static void pm_time_memo_note(void *ctx, const char *action) {
+    const pm_time_memo_ctx_t *m = (const pm_time_memo_ctx_t *)ctx;
+    uint64_t h = pm_time_memo_hash(m, action);
+    size_t slot = (size_t)(h % PM_TIME_MEMO_SLOTS);
+    s_pm_time_not_now[slot].hash = h;
+    s_pm_time_not_now[slot].day = m->day;
+}
+
+/* Known gap 1: the chat history is loaded only for a contact with an open
+ * time row already due. Nothing due means the pass would judge, expire and
+ * settle nothing (and log nothing), so it is skipped whole -- no chat.db read
+ * on every tick. A failed count cannot prove that, so it falls through to
+ * the full pass, as before. */
+static bool pm_time_nothing_due(sqlite3 *db, const char *contact_id, size_t clen, int64_t now) {
+    int64_t due = 0;
+    return hu_prospective_repo_count_due(db, contact_id, clen, now, &due) == HU_OK && due == 0;
 }
 
 /* The send channel's recent history as "me: …" / "them: …" lines: the
@@ -98,10 +159,13 @@ static size_t pm_time_v2(hu_allocator_t *alloc, struct hu_agent *agent, struct h
     uint64_t hash = 0;
     bool seen = false;
     size_t slot = pm_time_slot(contact_id, day, &hash, &seen);
-    if (!db || (!live && seen))
+    size_t clen = strlen(contact_id);
+    if (!db || (!live && seen) || pm_time_nothing_due(db, contact_id, clen, now))
         return 0;
     char hist[6144];
-    size_t clen = strlen(contact_id);
+    pm_time_memo_ctx_t mc = {.contact = contact_id, .day = day};
+    hu_prospective_memo_t memo = {
+        .skip = pm_time_memo_skip, .note_not_now = pm_time_memo_note, .ctx = &mc};
     hu_prospective_turn_t turn = {
         .contact = contact_id,
         .contact_len = clen,
@@ -110,6 +174,7 @@ static size_t pm_time_v2(hu_allocator_t *alloc, struct hu_agent *agent, struct h
         .is_self = hu_share_is_owner(agent->persona, contact_id, clen),
         .now = now,
         .day_start = day,
+        .memo = live ? &memo : NULL,
     };
     hu_daemon_prospective_judge_ctx_t jc = {.provider = &agent->provider,
                                             .model = agent->model_name,

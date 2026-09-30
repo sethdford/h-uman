@@ -8,6 +8,7 @@
 
 #ifdef HU_ENABLE_SQLITE
 
+#include "human/core/log.h"
 #include "human/core/string.h"
 #include "human/memory/sql_transaction.h"
 #include <string.h>
@@ -25,19 +26,21 @@ static void pm_mark_handled(const hu_prospective_item_t *items, size_t n, bool *
 }
 
 /* Retire an intention; a time intention also retires its ledger twins, but
- * only when the primary transition actually changed a row. `changed` (may
- * be NULL) receives hu_prospective_repo_transition's row count, and the
- * transition's own hu_error_t is returned so a real backend failure is
- * never silently swallowed. */
+ * only when the primary transition actually changed a row -- one unit
+ * (hu_prospective_repo_settle, fix round 2): a failed ledger sync rolls the
+ * transition back too, is logged, and is returned, never swallowed.
+ * `changed` (may be NULL) receives the transition's row count (0 when rolled
+ * back). */
 static hu_error_t pm_retire(sqlite3 *db, const hu_prospective_item_t *it,
                             hu_prospective_status_t to, hu_prospective_outcome_t outcome,
                             int attempts, int64_t now, int *changed) {
     int ch = 0;
-    hu_error_t err = hu_prospective_repo_transition(db, it, to, outcome, attempts, now, &ch);
+    hu_error_t err = hu_prospective_repo_settle(db, it, to, outcome, attempts, now, &ch);
     if (changed)
         *changed = ch;
-    if (err == HU_OK && ch > 0 && it->cue_kind == HU_PM_CUE_TIME && to != HU_PM_PENDING)
-        (void)hu_prospective_repo_sync_source(db, it, to, now);
+    if (err != HU_OK) /* the whole unit rolled back; ids and codes only, never text */
+        hu_log_warn("prospective", NULL, "prospective settle of intention %lld (-> %s) failed: %s",
+                    (long long)it->id, hu_prospective_status_str(to), hu_error_string(err));
     return err;
 }
 
@@ -231,6 +234,10 @@ hu_error_t hu_prospective_v2_run(hu_allocator_t *alloc, sqlite3 *db, hu_prospect
             counts->capped++;
             continue;
         }
+        if (turn->memo && turn->memo->skip && turn->memo->skip(turn->memo->ctx, it->action)) {
+            counts->memo_skipped++; /* judged not_now earlier today: stays pending */
+            continue;
+        }
         if (counts->candidates >= HU_PROSPECTIVE_JUDGE_CAP)
             continue; /* bounded model calls per turn; the rest stay pending */
         counts->candidates++;
@@ -260,8 +267,11 @@ hu_error_t hu_prospective_v2_run(hu_allocator_t *alloc, sqlite3 *db, hu_prospect
                 counts->judge_err++;
             else if (v == HU_PM_VERDICT_PARSE_FAIL)
                 counts->parse_fail++;
-            else
+            else {
                 counts->not_now++;
+                if (turn->memo && turn->memo->note_not_now)
+                    turn->memo->note_not_now(turn->memo->ctx, it->action);
+            }
             break;
         }
     }
@@ -328,11 +338,60 @@ hu_error_t hu_prospective_v2_after_delivery(hu_allocator_t *alloc, sqlite3 *db,
     return HU_OK;
 }
 
+/* A ledger row the walk found expired, retired after the walk. */
+typedef struct pm_expired_row {
+    bool is_followup;
+    int64_t id;
+    char contact[256];
+} pm_expired_row_t;
+
 typedef struct pm_backfill {
+    hu_allocator_t *alloc;
     sqlite3 *db;
     int64_t now;
     hu_prospective_backfill_counts_t *out;
+    pm_expired_row_t *expired;
+    size_t expired_n, expired_cap;
 } pm_backfill_t;
+
+/* Remember an expired ledger row. A contact too long for the slot is left
+ * pending (fail toward the old behaviour, never a wrong-contact write) and
+ * counted in ledger_unretired, so the miss is never silent. */
+static hu_error_t pm_backfill_defer(pm_backfill_t *b, const hu_prospective_ledger_row_t *r) {
+    if (r->contact_len >= sizeof(b->expired[0].contact)) {
+        b->out->ledger_unretired++;
+        return HU_OK;
+    }
+    if (b->expired_n == b->expired_cap) {
+        size_t nc = b->expired_cap ? b->expired_cap * 2 : 16;
+        pm_expired_row_t *nb = (pm_expired_row_t *)b->alloc->realloc(
+            b->alloc->ctx, b->expired, b->expired_cap * sizeof(*nb), nc * sizeof(*nb));
+        if (!nb)
+            return HU_ERR_OUT_OF_MEMORY;
+        b->expired = nb;
+        b->expired_cap = nc;
+    }
+    pm_expired_row_t *e = &b->expired[b->expired_n++];
+    e->is_followup = r->is_followup;
+    e->id = r->id;
+    memcpy(e->contact, r->contact, r->contact_len);
+    e->contact[r->contact_len] = '\0';
+    return HU_OK;
+}
+
+static hu_error_t pm_backfill_retire(pm_backfill_t *b) {
+    for (size_t i = 0; i < b->expired_n; i++) {
+        const pm_expired_row_t *e = &b->expired[i];
+        int ch = 0;
+        hu_error_t err =
+            hu_prospective_repo_retire_ledger_row(b->db, e->is_followup, e->id, e->contact,
+                                                  strlen(e->contact), HU_PM_EXPIRED, b->now, &ch);
+        if (err != HU_OK)
+            return err;
+        b->out->ledger_retired += (size_t)ch;
+    }
+    return HU_OK;
+}
 
 static hu_error_t pm_backfill_row(void *ctx, const hu_prospective_ledger_row_t *r) {
     pm_backfill_t *b = (pm_backfill_t *)ctx;
@@ -365,6 +424,8 @@ static hu_error_t pm_backfill_row(void *ctx, const hu_prospective_ledger_row_t *
                                         action, al, due, st, b->now, &inserted);
     if (e != HU_OK)
         return e;
+    if (st == HU_PM_EXPIRED && (e = pm_backfill_defer(b, r)) != HU_OK)
+        return e;
     if (!inserted)
         out->skipped_existing++;
     else if (st == HU_PM_EXPIRED)
@@ -391,8 +452,12 @@ hu_error_t hu_prospective_v2_backfill(hu_allocator_t *alloc, hu_memory_t *mem, i
     hu_error_t err = hu_sql_txn_begin(&txn, db);
     if (err != HU_OK)
         return err;
-    pm_backfill_t b = {.db = db, .now = now, .out = out};
+    pm_backfill_t b = {.alloc = alloc, .db = db, .now = now, .out = out};
     err = hu_prospective_repo_each_dated_ledger_row(db, pm_backfill_row, &b);
+    if (err == HU_OK)
+        err = pm_backfill_retire(&b);
+    if (b.expired)
+        alloc->free(alloc->ctx, b.expired, b.expired_cap * sizeof(*b.expired));
     if (err == HU_OK && write)
         err = hu_sql_txn_commit(&txn);
     hu_sql_txn_rollback(&txn); /* dry run, a failed walk, or a failed COMMIT; no-op after one */
