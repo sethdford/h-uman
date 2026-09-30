@@ -413,4 +413,10 @@ size_t hu_init_proposer_build_propose_user_message_ex(const hu_proactive_compose
  * callers pass `(int)guard_outcome`. */
 hu_init_proposer_result_t hu_init_proposer_evaluate_guard_outcome(int guard_outcome);
 
+/* Repeat guard (2026-09-30): true when `draft` asks about the same thing as
+ * one of `recent` (this contact's check-ins from the last two weeks) —
+ * shared content words, not shared wording. Pure. */
+bool hu_init_proposer_repeats_recent(const char *draft, size_t draft_len, const char (*recent)[160],
+                                     size_t recent_count);
+
 #endif /* HU_AGENT_INIT_PROPOSER_H */

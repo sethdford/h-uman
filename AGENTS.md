@@ -29,7 +29,7 @@ Key extension points:
 - `src/persona/` — persona system (profile loading, prompt builder, example selection)
 - `src/ml/` — on-device ML training (BPE, GPT, DPO, LoRA, feed predictor) — `HU_ENABLE_ML`
 
-Current scale: **1949 source + header files, ~413K lines of C, ~291K lines of tests, 14,021 tests, 30 channels**.
+Current scale: **1945 source + header files, ~413K lines of C, ~291K lines of tests, 14,023 tests, 30 channels**.
 
 Performance baseline (<!-- fp:measured_platform -->macOS arm64<!-- /fp -->, release-size build, code at <!-- fp:measured_rev -->a0641b4dd<!-- /fp -->, <!-- fp:measured_date -->2026-09-29<!-- /fp -->). Generated from `docs/perf/footprint.json`; budgets from `docs/perf/footprint-budget.json`, enforced by CI on every main push:
 
@@ -77,7 +77,7 @@ These codebase realities should drive every design decision:
    - All code compiles with `-Wall -Wextra -Wpedantic -Werror`.
    - Use `HU_IS_TEST` guards to bypass side effects (spawning, opening URLs, real hardware I/O).
 
-5. **All 14,021+ tests must pass at zero ASan errors**
+5. **All 14,023+ tests must pass at zero ASan errors**
    - The test suite uses AddressSanitizer for leak and overflow detection.
    - Every allocation must be freed (`free()` or cleanup function).
    - Use `HU_IS_TEST` mock paths in tests — no network, no process spawning.
@@ -98,7 +98,7 @@ src/
   agent/                agent loop, context, planner, compaction, dispatcher
   channels/             65 channel implementations (cli, telegram, discord, slack, ...)
   providers/            50+ AI provider implementations (9 core + 41 compatible services)
-  tools/                96 tool implementations
+  tools/                95 tool implementations
   memory/               SQLite + markdown + LRU + LanceDB + Lucid backends, embeddings, vector search, connections, consolidation, multimodal ingest
   security/             policy, pairing, secrets, sandbox backends (landlock, firejail, bwrap)
   runtime/              runtime adapters (native, docker, wasm, cloudflare)

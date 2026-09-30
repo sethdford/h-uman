@@ -22,6 +22,7 @@
 #include "human/memory/proactive_decisions_repo.h" /* C5 Part A: decision log */
 #include "human/provider.h"
 #include "human/reflection.h" /* T8: pull unsurfaced patterns into bundle */
+#include <ctype.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -53,6 +54,35 @@ void hu_init_proposer_reset_warn_guards_for_test(void) {
  * (HU_IS_TEST) skip the write entirely so unit tests never touch a real
  * db path by accident; tests exercise the repo directly instead (see
  * tests/test_proactive_decisions_repo.c). */
+/* Did this contact already get a check-in on the same topic in the last 14
+ * days? Reads the delivered proactive_send rows (message_ref prefixes). */
+#if !HU_IS_TEST /* its only caller, the LLM tick, is compiled out under test */
+static bool init_proposer_repeats_recent_send(const struct hu_agent *agent, const char *contact,
+                                              const char *draft, size_t draft_len,
+                                              int64_t now_unix) {
+#if defined(HU_ENABLE_SQLITE)
+    if (!agent || !agent->memory || !contact || !contact[0])
+        return false;
+    struct sqlite3 *db = hu_sqlite_memory_get_db(agent->memory);
+    if (!db)
+        return false;
+    char recent[8][HU_PROACTIVE_REF_MAX];
+    size_t n = 0;
+    if (hu_proactive_decisions_repo_recent_sent_refs(db, contact, now_unix - (int64_t)14 * 86400,
+                                                     recent, 8, &n) != HU_OK)
+        return false;
+    return hu_init_proposer_repeats_recent(draft, draft_len, (const char (*)[160])recent, n);
+#else
+    (void)agent;
+    (void)contact;
+    (void)draft;
+    (void)draft_len;
+    (void)now_unix;
+    return false;
+#endif
+}
+#endif
+
 static void init_proposer_record_decision(const struct hu_agent *agent, const char *contact,
                                           const char *trigger, const char *decision,
                                           const char *reason, const char *message_ref,
@@ -1005,6 +1035,7 @@ size_t hu_init_proposer_build_propose_user_message_ex(const hu_proactive_compose
         {"feeds", inputs->feeds_context, inputs->feeds_context_len, false},
         {"due_followups", inputs->due_followups_context, inputs->due_followups_context_len, false},
     };
+    bool memory_rendered = false;
     for (size_t i = 0; i < sizeof(fields) / sizeof(fields[0]); i++) {
         if (!fields[i].body || fields[i].body_len == 0)
             continue;
@@ -1028,6 +1059,20 @@ size_t hu_init_proposer_build_propose_user_message_ex(const hu_proactive_compose
         size_t copy = fields[i].body_len < avail ? fields[i].body_len : avail;
         memcpy(out + pos, fields[i].body, copy);
         pos += copy;
+        if (strcmp(fields[i].label, "memory") == 0)
+            memory_rendered = true;
+    }
+
+    /* Whose news (2026-09-30): memory says "The user is navigating a recent
+     * relocation to Florida" (Seth's move) and the proposer asked his sister
+     * and mother how THEIR Florida move was going, six times in eight days. */
+    if (memory_rendered && pos + 1 < out_cap) {
+        int n = snprintf(out + pos, out_cap - pos,
+                         "\n\n--- whose news ---\nMemory lines about \"the user\" describe "
+                         "Seth's own life (his move, job, trips). Never ask the contact about "
+                         "Seth's news as if it were theirs.");
+        if (n > 0 && (size_t)n < out_cap - pos)
+            pos += (size_t)n;
     }
 
     /* Final question — same wording as the bundle-based path. */
@@ -1254,6 +1299,19 @@ hu_error_t hu_init_proposer_tick_with_provider_ex(
         }
     }
 
+    /* Repeat guard (2026-09-30): Mindy got "how are things settling in down
+     * there" on 09-21, 09-23, 09-26 and "how's the Florida transition going?"
+     * on 09-27. A check-in on the topic of one sent in the last 14 days is
+     * rejected, however it is worded; the next tick may find something new. */
+    if (verdict == HU_INIT_RESULT_FIRED && decision.draft_len > 0 &&
+        init_proposer_repeats_recent_send(agent, contact_buf, decision.draft, decision.draft_len,
+                                          now_unix)) {
+        verdict = HU_INIT_RESULT_GUARD_REJECT;
+        hu_log_info("init_proposer", NULL,
+                    "FIRED draft rejected: repeats a check-in from the last 14 days (%.60s)",
+                    decision.draft);
+    }
+
     hu_log_info("init_proposer", NULL,
                 "LLM verdict (ex, channel=%.*s): should_propose=%d confidence=%.3f "
                 "draft_len=%zu result=%d user_msg_bytes=%zu reason=%.*s",
@@ -1283,4 +1341,65 @@ hu_error_t hu_init_proposer_tick_with_provider_ex(
                                   msg_ref_buf[0] ? msg_ref_buf : NULL, now_unix);
     return HU_OK;
 #endif
+}
+
+/* Content words of a check-in: lowercased letters, apostrophes dropped,
+ * 4+ letters, minus greetings and filler that every check-in shares. */
+#define REPEAT_MAX_WORDS 24
+static size_t repeat_words(const char *s, size_t len, char out[][24]) {
+    static const char *const k_filler[] = {
+        "hows",  "whats",   "have",     "been",     "going", "doing", "things", "hope", "youre",
+        "your",  "morning", "evening",  "there",    "down",  "with",  "that",   "this", "just",
+        "okay",  "good",    "along",    "coming",   "like",  "about", "still",  "into", "over",
+        "here",  "today",   "week",     "thinking", "some",  "much",  "really", "well", "last",
+        "night", "doing",   "anything", "hear",     "from",  "been",  "what",   "when", NULL};
+    size_t n = 0, wl = 0;
+    char w[24];
+    for (size_t i = 0; i <= len && n < REPEAT_MAX_WORDS; i++) {
+        char c = i < len ? s[i] : ' ';
+        if (isalpha((unsigned char)c)) {
+            if (wl + 1 < sizeof(w))
+                w[wl++] = (char)tolower((unsigned char)c);
+            continue;
+        }
+        if (c == '\'' || (unsigned char)c >= 0x80)
+            continue; /* "how's" -> "hows"; curly quotes are multi-byte */
+        if (wl >= 4) {
+            w[wl] = '\0';
+            bool filler = false;
+            for (size_t k = 0; k_filler[k] && !filler; k++)
+                filler = strcmp(w, k_filler[k]) == 0;
+            if (!filler)
+                memcpy(out[n++], w, wl + 1);
+        }
+        wl = 0;
+    }
+    return n;
+}
+
+bool hu_init_proposer_repeats_recent(const char *draft, size_t draft_len, const char (*recent)[160],
+                                     size_t recent_count) {
+    if (!draft || draft_len == 0 || !recent)
+        return false;
+    char a[REPEAT_MAX_WORDS][24];
+    size_t na = repeat_words(draft, draft_len, a);
+    if (na == 0)
+        return false;
+    for (size_t r = 0; r < recent_count; r++) {
+        char b[REPEAT_MAX_WORDS][24];
+        size_t nb = repeat_words(recent[r], strnlen(recent[r], 160), b);
+        if (nb == 0)
+            continue;
+        size_t shared = 0;
+        for (size_t i = 0; i < na; i++)
+            for (size_t j = 0; j < nb; j++)
+                if (strcmp(a[i], b[j]) == 0) {
+                    shared++;
+                    break;
+                }
+        size_t smaller = na < nb ? na : nb;
+        if (shared > 0 && shared * 2 >= smaller)
+            return true;
+    }
+    return false;
 }

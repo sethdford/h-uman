@@ -12,6 +12,7 @@
 #include "human/autoresponder.h"
 #include "human/config.h"
 #include "human/memory.h"
+#include "human/memory/proactive_decisions_repo.h"
 #include "human/provider.h"
 #include "human/reflection.h"
 #include "test_framework.h"
@@ -696,6 +697,31 @@ static void test_assemble_context_no_persona_leaves_field_empty(void) {
     HU_ASSERT_EQ((int)bundle.bytes[HU_INIT_FIELD_PERSONA], 0);
 }
 
+/* Repeat guard (2026-09-30): the proposer texted Mindy "how are things
+ * settling in down there" on 09-21, 09-23, 09-26 and "how's the Florida
+ * transition going?" on 09-27. A check-in on the same topic as one sent in the
+ * last two weeks is a repeat, however it is worded. */
+static void test_init_proposer_repeat_catches_rewordings(void) {
+    char recent[3][HU_PROACTIVE_REF_MAX] = {"Hey how are things settling in down in Florida",
+                                            "Morning Mindy, how are things settling in down there",
+                                            "How is the Florida house settling in coming along"};
+    const char *d1 = "Hey how's the Florida transition going?";
+    const char *d2 = "Morning! Hope you're settling in okay down there";
+    const char *d3 = "How is the florida settling in going";
+    HU_ASSERT_TRUE(hu_init_proposer_repeats_recent(d1, strlen(d1), recent, 3));
+    HU_ASSERT_TRUE(hu_init_proposer_repeats_recent(d2, strlen(d2), recent, 3));
+    HU_ASSERT_TRUE(hu_init_proposer_repeats_recent(d3, strlen(d3), recent, 3));
+}
+
+static void test_init_proposer_repeat_allows_a_new_topic(void) {
+    char recent[1][HU_PROACTIVE_REF_MAX] = {"Hey how are things settling in down in Florida"};
+    const char *d = "Did you catch the Jazz game last night?";
+    HU_ASSERT_FALSE(hu_init_proposer_repeats_recent(d, strlen(d), recent, 1));
+    const char *hi = "Hey, thinking of you";
+    HU_ASSERT_FALSE(hu_init_proposer_repeats_recent(hi, strlen(hi), recent, 1));
+    HU_ASSERT_FALSE(hu_init_proposer_repeats_recent(d, strlen(d), NULL, 0));
+}
+
 void run_init_proposer_tests(void);
 /* Truth table tests for quiet-hours gate. Per
  * .claude/rules/security-predicate-extraction.md and
@@ -773,6 +799,8 @@ static void test_quiet_gate_inside_dnd_window_returns_gated_quiet(void) {
 
 void run_init_proposer_tests(void) {
     HU_TEST_SUITE("init_proposer");
+    HU_RUN_TEST(test_init_proposer_repeat_catches_rewordings);
+    HU_RUN_TEST(test_init_proposer_repeat_allows_a_new_topic);
     HU_RUN_TEST(arbiter_skip_returns_skip_for_all_null_clear_args);
     HU_RUN_TEST(arbiter_skip_returns_gated_recency_when_user_texted_recently);
     HU_RUN_TEST(arbiter_skip_returns_skip_when_user_texted_long_ago);
