@@ -19,6 +19,7 @@
 #include "human/memory/prospective_v2.h"
 #include <sqlite3.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define C1  "+15550000001"
@@ -677,6 +678,158 @@ static void v2_judge_ok_with_null_or_empty_output_is_parse_fail(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
+/* --- task 7 review, fix round 1 --- */
+
+/* A keyword row whose action is `len` bytes: "<head>" followed by 'y'. */
+static void seed_kw_long(sqlite3 *db, const char *cue, const char *head, size_t len) {
+    char action[600];
+    size_t hl = strlen(head);
+    HU_ASSERT_TRUE(len < sizeof(action) && hl < len);
+    memcpy(action, head, hl);
+    memset(action + hl, 'y', len - hl);
+    action[len] = '\0';
+    sqlite3_stmt *st = NULL;
+    HU_ASSERT_EQ(sqlite3_prepare_v2(db,
+                                    "INSERT INTO prospective_memories(trigger_type,trigger_value,"
+                                    "action,contact_id,expires_at,fired,created_at) "
+                                    "VALUES('keyword',?1,?2,'" C1 "',0,0,?3)",
+                                    -1, &st, NULL),
+                 SQLITE_OK);
+    sqlite3_bind_text(st, 1, cue, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 2, action, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(st, 3, NOW - 86400);
+    HU_ASSERT_EQ(sqlite3_step(st), SQLITE_DONE);
+    sqlite3_finalize(st);
+}
+
+static void q_text(sqlite3 *db, const char *sql, char *buf, size_t cap) {
+    sqlite3_stmt *st = NULL;
+    buf[0] = '\0';
+    HU_ASSERT_EQ(sqlite3_prepare_v2(db, sql, -1, &st, NULL), SQLITE_OK);
+    if (sqlite3_step(st) == SQLITE_ROW && sqlite3_column_text(st, 0))
+        snprintf(buf, cap, "%s", (const char *)sqlite3_column_text(st, 0));
+    sqlite3_finalize(st);
+}
+
+/* Two fired ~500-byte actions do not both fit the 1024-byte directive. Only
+ * the one actually rendered is marked surfaced; the other stays pending with
+ * its attempts untouched, so the undelivered-attempt settle cannot charge it
+ * an attempt for a reminder that was never shown. */
+static void v2_surfaces_only_the_items_the_directive_rendered(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    seed_kw_long(db, "alpha", "ask about alpha ", 500);
+    seed_kw_long(db, "beta", "ask about beta ", 500);
+    static const char *const r[] = {"fire", "fire"};
+    script_t s;
+    hu_prospective_judge_t j = judge_of(&s, r, 2);
+    hu_prospective_turn_t t = turn_for("alpha and beta", NOW);
+    hu_prospective_counts_t c;
+    char *d = NULL;
+    size_t dl = 0;
+    HU_ASSERT_EQ(hu_prospective_v2_run(&alloc, db, HU_PM_CUE_KEYWORD, &t, &j, true, &c, &d, &dl),
+                 HU_OK);
+    HU_ASSERT_EQ(c.fire, (size_t)2);
+    HU_ASSERT_EQ(c.write_err, (size_t)0);
+    HU_ASSERT_NOT_NULL(d);
+    HU_ASSERT_EQ(dl, strlen(d));
+    HU_ASSERT_NULL(strstr(d, " | ")); /* one item, no dangling separator */
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE status='surfaced'"),
+                 (int64_t)1);
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE status='pending' AND "
+                           "attempts=0 AND surfaced_at IS NULL"),
+                 (int64_t)1);
+    char shown[600];
+    char hidden[600];
+    q_text(db, "SELECT action FROM prospective_memories WHERE status='surfaced'", shown,
+           sizeof(shown));
+    q_text(db, "SELECT action FROM prospective_memories WHERE status='pending'", hidden,
+           sizeof(hidden));
+    HU_ASSERT_NOT_NULL(strstr(d, shown));
+    HU_ASSERT_NULL(strstr(d, hidden));
+    alloc.free(alloc.ctx, d, dl + 1);
+    /* the reply never came: only the shown one is charged an attempt */
+    HU_ASSERT_EQ(hu_prospective_v2_after_delivery(&alloc, db, HU_PM_CUE_KEYWORD, C1, strlen(C1),
+                                                  NULL, 0, NOW + 60, NULL),
+                 HU_OK);
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE attempts=1"),
+                 (int64_t)1);
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE attempts=0 AND "
+                           "surfaced_at IS NULL"),
+                 (int64_t)1);
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* An allocator that fails its Nth allocation (0 = never) and counts calls. */
+typedef struct failing_alloc {
+    size_t calls;
+    size_t fail_at;
+} failing_alloc_t;
+
+static void *fa_alloc(void *ctx, size_t size) {
+    failing_alloc_t *f = (failing_alloc_t *)ctx;
+    f->calls++;
+    if (f->fail_at && f->calls == f->fail_at)
+        return NULL;
+    return malloc(size);
+}
+
+static void *fa_realloc(void *ctx, void *ptr, size_t old_size, size_t new_size) {
+    (void)ctx;
+    (void)old_size;
+    return realloc(ptr, new_size);
+}
+
+static void fa_free(void *ctx, void *ptr, size_t size) {
+    (void)ctx;
+    (void)size;
+    free(ptr);
+}
+
+/* The directive allocation is the pass's last allocation. When it fails,
+ * nothing may be left surfaced: every row stays pending, never shown. */
+static void v2_directive_alloc_failure_leaves_every_row_pending(void) {
+    hu_allocator_t sys = hu_system_allocator();
+    static const char *const r[] = {"fire"};
+    /* 1. count the allocations of a successful pass */
+    failing_alloc_t f = {0, 0};
+    hu_allocator_t fa = {.ctx = &f, .alloc = fa_alloc, .realloc = fa_realloc, .free = fa_free};
+    hu_memory_t m1 = hu_sqlite_memory_create(&sys, ":memory:");
+    sqlite3 *db1 = hu_sqlite_memory_get_db(&m1);
+    seed_kw(db1, "taco place", "ask how the new taco place was");
+    script_t s;
+    hu_prospective_judge_t j = judge_of(&s, r, 1);
+    hu_prospective_turn_t t = turn_for("the taco place!!", NOW);
+    hu_prospective_counts_t c;
+    char *d = NULL;
+    size_t dl = 0;
+    HU_ASSERT_EQ(hu_prospective_v2_run(&fa, db1, HU_PM_CUE_KEYWORD, &t, &j, true, &c, &d, &dl),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(d);
+    fa.free(fa.ctx, d, dl + 1);
+    size_t total = f.calls;
+    HU_ASSERT_TRUE(total > 0);
+    m1.vtable->deinit(m1.ctx);
+    /* 2. the same pass with its last allocation failing */
+    f.calls = 0;
+    f.fail_at = total;
+    hu_memory_t m2 = hu_sqlite_memory_create(&sys, ":memory:");
+    sqlite3 *db2 = hu_sqlite_memory_get_db(&m2);
+    seed_kw(db2, "taco place", "ask how the new taco place was");
+    j = judge_of(&s, r, 1);
+    d = NULL;
+    dl = 7;
+    HU_ASSERT_EQ(hu_prospective_v2_run(&fa, db2, HU_PM_CUE_KEYWORD, &t, &j, true, &c, &d, &dl),
+                 HU_ERR_OUT_OF_MEMORY);
+    HU_ASSERT_NULL(d);
+    HU_ASSERT_EQ(dl, (size_t)0);
+    HU_ASSERT_EQ(q_int(db2, "SELECT COUNT(*) FROM prospective_memories WHERE status='pending' AND "
+                            "fired=0 AND attempts=0 AND surfaced_at IS NULL"),
+                 (int64_t)1);
+    m2.vtable->deinit(m2.ctx);
+}
+
 void run_prospective_v2_tests(void) {
     HU_TEST_SUITE("prospective v2");
     HU_RUN_TEST(v2_clean_positive_surfaces_a_soft_directive);
@@ -697,6 +850,8 @@ void run_prospective_v2_tests(void) {
     HU_RUN_TEST(v2_surface_write_failure_is_not_rendered_and_stays_pending);
     HU_RUN_TEST(v2_after_delivery_write_failure_is_not_counted_and_propagates_error);
     HU_RUN_TEST(v2_judge_ok_with_null_or_empty_output_is_parse_fail);
+    HU_RUN_TEST(v2_surfaces_only_the_items_the_directive_rendered);
+    HU_RUN_TEST(v2_directive_alloc_failure_leaves_every_row_pending);
 }
 
 #else

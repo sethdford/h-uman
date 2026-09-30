@@ -75,6 +75,10 @@ typedef struct hu_prospective_delivery_counts {
  *      canceled (outcome 'suppressed'), FIRE -> surfaced if rendered;
  *   4. apply: render the fired ones (SOFT for keyword, DUE_LIST for time)
  *      into *directive (heap, free with *directive_len + 1; NULL if none).
+ *      Only an intention that is in the text is marked surfaced, and only
+ *      one whose surfaced write succeeded is in the text; a fired one that
+ *      did not fit the directive stays pending, attempts untouched. With
+ *      `directive` NULL nothing is shown, so nothing is surfaced.
  * A settled time intention also retires its ledger twins. Every decision is
  * counted in *counts. `apply=false` performs 2–3 read-only. */
 hu_error_t hu_prospective_v2_run(hu_allocator_t *alloc, sqlite3 *db, hu_prospective_cue_kind_t kind,

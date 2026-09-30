@@ -101,11 +101,11 @@ static void pm_owner_settle_foreign(hu_allocator_t *alloc, sqlite3 *db,
     pm_owner_clear();
 }
 
-static void pm_owner_claim(const sqlite3 *db, const hu_prospective_turn_t *turn,
-                           const hu_prospective_counts_t *c) {
-    /* surfaced this pass = fire_action_count attempted minus write failures */
-    if (c->fire_action_count <= c->write_err ||
-        turn->contact_len >= sizeof(s_pm_live_owner.contact))
+/* Called only for a pass that returned a directive: v2 surfaces exactly the
+ * intentions in the text (write before show), so a directive means this
+ * contact now has a surfaced set, and no directive means it has none. */
+static void pm_owner_claim(const sqlite3 *db, const hu_prospective_turn_t *turn) {
+    if (turn->contact_len >= sizeof(s_pm_live_owner.contact))
         return;
     s_pm_live_owner.db = db;
     memcpy(s_pm_live_owner.contact, turn->contact, turn->contact_len);
@@ -161,24 +161,29 @@ char *hu_daemon_prospective_directive(hu_allocator_t *alloc, sqlite3 *db, hu_gat
         *out_len = 0;
     if (!alloc || !db || !turn || !out_len || !turn->contact || turn->contact_len == 0)
         return NULL;
-    hu_prospective_counts_t c;
+    hu_prospective_counts_t c = {0}; /* read below even when v2_run fails early */
     if (mode == HU_GATE_LIVE) {
         pm_owner_settle_foreign(alloc, db, turn);
         char *d = NULL;
         size_t dl = 0;
         hu_error_t err =
             hu_prospective_v2_run(alloc, db, HU_PM_CUE_KEYWORD, turn, judge, true, &c, &d, &dl);
-        pm_owner_claim(db, turn, &c); /* even on error: a surfaced row needs an owner */
+        hu_daemon_prospective_log_counts("live", &c); /* on error too: it judged */
         if (err != HU_OK)
-            return NULL; /* fail toward silence: no directive, nothing retired */
-        hu_daemon_prospective_log_counts("live", &c);
+            return NULL; /* fail toward silence: nothing shown, nothing surfaced */
+        if (d)
+            pm_owner_claim(db, turn);
         *out_len = dl;
         return d;
     }
-    if (mode == HU_GATE_SHADOW && hu_prospective_v2_run(alloc, db, HU_PM_CUE_KEYWORD, turn, judge,
-                                                        false, &c, NULL, NULL) == HU_OK) {
-        hu_daemon_prospective_log_counts("shadow", &c);
-        pm_shadow_remember(turn, &c);
+    if (mode == HU_GATE_SHADOW) {
+        if (hu_prospective_v2_run(alloc, db, HU_PM_CUE_KEYWORD, turn, judge, false, &c, NULL,
+                                  NULL) == HU_OK) {
+            hu_daemon_prospective_log_counts("shadow", &c);
+            pm_shadow_remember(turn, &c);
+        } else {
+            s_pm_shadow.n = 0; /* never credit a later delivery to an earlier turn */
+        }
     }
     /* OFF and SHADOW: today's directive, unchanged (fire on match, fired=1). */
     return hu_prospective_directive_build(alloc, db, turn->inbound, turn->inbound_len,

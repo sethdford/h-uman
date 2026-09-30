@@ -616,6 +616,141 @@ static void log_counts_line_ends_with_write_err(void) {
     const char *first = strstr(buf, "prospective shadow:");
     HU_ASSERT_NULL(strstr(first + 1, "prospective shadow:"));
 }
+/* --- task 7 review, fix round 1 --- */
+
+/* Run `fn(arg)` with INFO logging captured from stderr into buf. */
+static void capture_stderr(void (*fn)(void *), void *arg, char *buf, size_t cap) {
+    FILE *tmp = tmpfile();
+    HU_ASSERT_NOT_NULL(tmp);
+    fflush(stderr);
+    int saved = dup(fileno(stderr));
+    HU_ASSERT_TRUE(saved >= 0);
+    HU_ASSERT_TRUE(dup2(fileno(tmp), fileno(stderr)) >= 0);
+    hu_log_level_set_for_test((int)HU_LOG_LEVEL_INFO);
+    fn(arg);
+    fflush(stderr);
+    dup2(saved, fileno(stderr));
+    close(saved);
+    hu_log_level_set_for_test(-1);
+    rewind(tmp);
+    size_t n = fread(buf, 1, cap - 1, tmp);
+    buf[n] = '\0';
+    fclose(tmp);
+}
+
+typedef struct deliver_args {
+    hu_allocator_t *alloc;
+    sqlite3 *db;
+} deliver_args_t;
+
+static void deliver_alpha_shadow(void *p) {
+    deliver_args_t *a = (deliver_args_t *)p;
+    hu_daemon_prospective_on_delivered(a->alloc, a->db, HU_GATE_SHADOW, C1, strlen(C1),
+                                       "so how was alpha", 16, NOW + 60);
+}
+
+/* A SHADOW pass that fails must clear the uptake slot: otherwise the next
+ * delivery logs uptake for an EARLIER turn's would-fires. */
+static void shadow_failed_pass_clears_the_uptake_slot(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t ma = hu_sqlite_memory_create(&alloc, ":memory:");
+    hu_memory_t mb = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *a = hu_sqlite_memory_get_db(&ma);
+    sqlite3 *b = hu_sqlite_memory_get_db(&mb);
+    seed_kw(a, "alpha", "ask about alpha");
+    HU_ASSERT_EQ(sqlite3_exec(b, "DROP TABLE prospective_memories", NULL, NULL, NULL), SQLITE_OK);
+    fixed_t f = {.reply = "fire"};
+    hu_prospective_judge_t j = {.fn = fixed_judge, .ctx = &f};
+    deliver_args_t da = {.alloc = &alloc, .db = a};
+    char out[2048];
+    /* control: a SHADOW would-fire, then a delivery, logs uptake */
+    hu_prospective_turn_t t = turn_for("alpha!");
+    size_t len = 0;
+    char *d = hu_daemon_prospective_directive(&alloc, a, HU_GATE_SHADOW, &t, &j, &len);
+    if (d)
+        alloc.free(alloc.ctx, d, len + 1);
+    capture_stderr(deliver_alpha_shadow, &da, out, sizeof(out));
+    HU_ASSERT_STR_CONTAINS(out, "prospective shadow uptake: would_fire=1 used=1");
+    /* a would-fire, then a SHADOW pass that fails (no table), then delivery */
+    seed_kw(a, "alpha", "ask about alpha"); /* the legacy path fired the first row */
+    d = hu_daemon_prospective_directive(&alloc, a, HU_GATE_SHADOW, &t, &j, &len);
+    if (d)
+        alloc.free(alloc.ctx, d, len + 1);
+    t = turn_for("anything");
+    HU_ASSERT_NULL(hu_daemon_prospective_directive(&alloc, b, HU_GATE_SHADOW, &t, &j, &len));
+    capture_stderr(deliver_alpha_shadow, &da, out, sizeof(out));
+    HU_ASSERT_NULL(strstr(out, "shadow uptake"));
+    ma.vtable->deinit(ma.ctx);
+    mb.vtable->deinit(mb.ctx);
+}
+
+/* Fails every allocation of exactly `size` bytes; otherwise the system heap. */
+typedef struct size_fail {
+    size_t size;
+    int failed;
+} size_fail_t;
+
+static void *sf_alloc(void *ctx, size_t size) {
+    size_fail_t *f = (size_fail_t *)ctx;
+    if (size == f->size) {
+        f->failed++;
+        return NULL;
+    }
+    return malloc(size);
+}
+
+static void *sf_realloc(void *ctx, void *ptr, size_t old_size, size_t new_size) {
+    (void)ctx;
+    (void)old_size;
+    return realloc(ptr, new_size);
+}
+
+static void sf_free(void *ctx, void *ptr, size_t size) {
+    (void)ctx;
+    (void)size;
+    free(ptr);
+}
+
+typedef struct live_args {
+    hu_allocator_t *alloc;
+    sqlite3 *db;
+    const hu_prospective_judge_t *judge;
+    char *d;
+} live_args_t;
+
+static void live_alpha(void *p) {
+    live_args_t *a = (live_args_t *)p;
+    hu_prospective_turn_t t = turn_for("alpha!");
+    size_t len = 0;
+    a->d = hu_daemon_prospective_directive(a->alloc, a->db, HU_GATE_LIVE, &t, a->judge, &len);
+}
+
+/* LIVE: when the pass fails after judging (here the directive allocation),
+ * the counts are still logged and nothing is left surfaced. */
+static void live_failed_pass_still_logs_counts_and_surfaces_nothing(void) {
+    hu_allocator_t sys = hu_system_allocator();
+    hu_memory_t m = hu_sqlite_memory_create(&sys, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&m);
+    seed_kw(db, "alpha", "ask about alpha");
+    static const char want[] =
+        "[PROSPECTIVE MEMORY: If it fits naturally, you could bring up: ask about alpha]";
+    size_fail_t sf = {.size = sizeof(want), .failed = 0};
+    hu_allocator_t fa = {.ctx = &sf, .alloc = sf_alloc, .realloc = sf_realloc, .free = sf_free};
+    fixed_t f = {.reply = "fire"};
+    hu_prospective_judge_t j = {.fn = fixed_judge, .ctx = &f};
+    live_args_t la = {.alloc = &fa, .db = db, .judge = &j, .d = NULL};
+    char out[2048];
+    capture_stderr(live_alpha, &la, out, sizeof(out));
+    HU_ASSERT_NULL(la.d);
+    HU_ASSERT_EQ(sf.failed, 1);
+    HU_ASSERT_STR_CONTAINS(out, "prospective live: candidates=1 fire=1 resolved=0 cancel=0 "
+                                "not_now=0 parse_fail=0 judge_err=0 expired=0 capped=0 "
+                                "write_err=0\n");
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE status='pending' AND "
+                           "fired=0 AND attempts=0 AND surfaced_at IS NULL"),
+                 (int64_t)1);
+    m.vtable->deinit(m.ctx);
+}
 #endif /* HU_ENABLE_SQLITE */
 
 void run_daemon_prospective_tests(void) {
@@ -634,5 +769,7 @@ void run_daemon_prospective_tests(void) {
     HU_RUN_TEST(reactive_off_twin_db_matches_the_pre_change_call);
     HU_RUN_TEST(reactive_live_self_chat_is_never_judged);
     HU_RUN_TEST(log_counts_line_ends_with_write_err);
+    HU_RUN_TEST(shadow_failed_pass_clears_the_uptake_slot);
+    HU_RUN_TEST(live_failed_pass_still_logs_counts_and_surfaces_nothing);
 #endif
 }

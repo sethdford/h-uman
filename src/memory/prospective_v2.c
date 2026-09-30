@@ -83,21 +83,47 @@ static void pm_count_verdict(hu_prospective_counts_t *c, const hu_prospective_it
     }
 }
 
-/* Persist the fired intentions to `surfaced` BEFORE rendering, and render
- * only the ones whose write actually changed a row. An item whose write
- * failed (a real backend error) or matched no row (deleted/already moved
- * between list and here) is NOT rendered — it stays pending and is
- * retried on a later turn — and is counted write_err (the judge itself
- * answered; judge_err is only for a failed judge call). Returns HU_OK with
- * *directive NULL when nothing rendered. */
+/* Surface exactly what the directive shows (task 7 review, fix round 1):
+ *   1. render the fired intentions. hu_prospective_render keeps a PREFIX of
+ *      them, and two long actions can overflow the 1024-byte buffer, so
+ *      `shown` may be fewer than fire_n; the rest are never touched and stay
+ *      pending with their attempts intact;
+ *   2. allocate the directive BEFORE any write, so an allocation failure
+ *      leaves every row pending (nothing surfaced, nothing shown);
+ *   3. write-before-show: mark each shown intention surfaced and keep in the
+ *      text only those whose write changed a row. A failed or no-op write
+ *      (counted write_err) is dropped from the text and stays pending;
+ *   4. when a write failed, re-render the survivors (a subset of a prefix
+ *      that fit, so it fits) and shrink the buffer to their exact size. If
+ *      that shrink fails, the survivors are put back to pending (attempts
+ *      unchanged; surfaced_at keeps the stamp just written, which only the
+ *      time cue's per-day cap reads) and HU_ERR_OUT_OF_MEMORY is returned.
+ * With `directive` NULL nothing is shown, so nothing is surfaced. */
 static hu_error_t pm_surface(hu_allocator_t *alloc, sqlite3 *db, hu_prospective_cue_kind_t kind,
                              const hu_prospective_item_t *const *fire, size_t fire_n, int64_t now,
                              hu_prospective_counts_t *counts, char **directive,
                              size_t *directive_len) {
+    if (!directive || fire_n == 0)
+        return HU_OK;
+    const hu_prospective_render_style_t style =
+        kind == HU_PM_CUE_TIME ? HU_PM_RENDER_DUE_LIST : HU_PM_RENDER_SOFT;
     const char *acts[HU_PROSPECTIVE_RENDER_CAP];
     const char *cues[HU_PROSPECTIVE_RENDER_CAP];
-    size_t ok_n = 0;
     for (size_t k = 0; k < fire_n; k++) {
+        acts[k] = fire[k]->action;
+        cues[k] = fire[k]->trigger_value;
+    }
+    char buf[1024];
+    size_t blen = 0;
+    size_t shown = hu_prospective_render(style, acts, cues, fire_n, buf, sizeof(buf), &blen);
+    if (shown == 0)
+        return HU_OK;
+    char *d = (char *)alloc->alloc(alloc->ctx, blen + 1);
+    if (!d)
+        return HU_ERR_OUT_OF_MEMORY; /* before any write: every row stays pending */
+    const hu_prospective_item_t *ok[HU_PROSPECTIVE_RENDER_CAP];
+    size_t ok_n = 0;
+    for (size_t k = 0; k < shown; k++) {
         int changed = 0;
         hu_error_t terr = hu_prospective_repo_transition(
             db, fire[k], HU_PM_SURFACED, HU_PM_OUTCOME_NONE, fire[k]->attempts, now, &changed);
@@ -107,24 +133,31 @@ static hu_error_t pm_surface(hu_allocator_t *alloc, sqlite3 *db, hu_prospective_
         }
         acts[ok_n] = fire[k]->action;
         cues[ok_n] = fire[k]->trigger_value;
-        ok_n++;
+        ok[ok_n++] = fire[k];
     }
-    if (ok_n == 0 || !directive)
+    if (ok_n == 0) {
+        alloc->free(alloc->ctx, d, blen + 1);
         return HU_OK;
-    char buf[1024];
-    size_t blen = 0;
-    size_t r =
-        hu_prospective_render(kind == HU_PM_CUE_TIME ? HU_PM_RENDER_DUE_LIST : HU_PM_RENDER_SOFT,
-                              acts, cues, ok_n, buf, sizeof(buf), &blen);
-    if (r == 0)
-        return HU_OK;
-    char *d = (char *)alloc->alloc(alloc->ctx, blen + 1);
-    if (!d)
-        return HU_ERR_OUT_OF_MEMORY; /* nothing surfaced: they stay pending */
-    memcpy(d, buf, blen + 1);
+    }
+    size_t dlen = blen;
+    if (ok_n < shown) {
+        size_t sub = 0;
+        size_t r = hu_prospective_render(style, acts, cues, ok_n, buf, sizeof(buf), &sub);
+        char *nd = r == ok_n ? (char *)alloc->realloc(alloc->ctx, d, blen + 1, sub + 1) : NULL;
+        if (!nd) {
+            alloc->free(alloc->ctx, d, blen + 1);
+            for (size_t k = 0; k < ok_n; k++)
+                (void)hu_prospective_repo_transition(db, ok[k], HU_PM_PENDING, HU_PM_OUTCOME_NONE,
+                                                     ok[k]->attempts, now, NULL);
+            return HU_ERR_OUT_OF_MEMORY;
+        }
+        d = nd;
+        dlen = sub;
+    }
+    memcpy(d, buf, dlen + 1);
     *directive = d;
     if (directive_len)
-        *directive_len = blen;
+        *directive_len = dlen;
     return HU_OK;
 }
 

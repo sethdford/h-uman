@@ -347,8 +347,14 @@ size_t hu_prospective_render(hu_prospective_render_style_t style, const char *co
         int w = style == HU_PM_RENDER_LEGACY
                     ? snprintf(buf + pos, cap - pos, "%s (triggered by: %s)", actions[i], cues[i])
                     : snprintf(buf + pos, cap - pos, "%s", actions[i]);
-        if (w <= 0 || pos + (size_t)w >= cap)
+        if (w <= 0 || pos + (size_t)w >= cap) {
+            /* SOFT drops the separator it just wrote for an item that did not
+             * fit. LEGACY keeps the pre-v2 bytes (a dangling " | "), because
+             * HU_PROSPECTIVE=off must stay byte-identical. */
+            if (i > 0 && style != HU_PM_RENDER_LEGACY)
+                pos -= 3;
             break;
+        }
         pos += (size_t)w;
         rendered++;
     }
