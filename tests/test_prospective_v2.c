@@ -1064,6 +1064,47 @@ static void v2_backfill_fourteen_day_boundary(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
+/* Fix round 1, M3: a failure partway through the walk -- the second of three
+ * upserts aborts (a test-only trigger; no production seam) after the first
+ * already inserted -- rolls the WHOLE run back: zero time rows, zeroed
+ * counts, the error surfaced, and no transaction left open (a clean re-run
+ * after the fault is gone imports all three). */
+static void v2_backfill_failure_midway_writes_nothing_and_zeroes_counts(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    char sql[1024];
+    snprintf(sql, sizeof(sql),
+             "INSERT INTO commitments(contact_id,description,who,deadline,status,created_at) "
+             "VALUES('" C1 "','first thing','me',%lld,'pending',1),"
+             "('" C1 "','boom','me',%lld,'pending',1),"
+             "('" C1 "','third thing','me',%lld,'pending',1);"
+             "CREATE TRIGGER t_boom BEFORE INSERT ON prospective_memories "
+             "WHEN NEW.action = 'boom' BEGIN SELECT RAISE(ABORT, 'injected'); END;",
+             (long long)(NOW + 86400), (long long)(NOW + 2 * 86400), (long long)(NOW + 3 * 86400));
+    HU_ASSERT_EQ(sqlite3_exec(db, sql, NULL, NULL, NULL), SQLITE_OK);
+
+    hu_prospective_backfill_counts_t zero;
+    memset(&zero, 0, sizeof(zero));
+    for (int write = 1; write >= 0; write--) {
+        hu_prospective_backfill_counts_t b;
+        memset(&b, 0xAB, sizeof(b));
+        HU_ASSERT_NEQ(hu_prospective_v2_backfill(&alloc, &mem, NOW, write != 0, &b), HU_OK);
+        HU_ASSERT_EQ(memcmp(&b, &zero, sizeof(b)), 0);
+        HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE cue_kind='time'"),
+                     (int64_t)0); /* 'first thing' was inserted, then rolled back */
+        HU_ASSERT_TRUE(sqlite3_get_autocommit(db) != 0); /* no transaction left open */
+    }
+
+    HU_ASSERT_EQ(sqlite3_exec(db, "DROP TRIGGER t_boom", NULL, NULL, NULL), SQLITE_OK);
+    hu_prospective_backfill_counts_t b;
+    HU_ASSERT_EQ(hu_prospective_v2_backfill(&alloc, &mem, NOW, true, &b), HU_OK);
+    HU_ASSERT_EQ(b.imported_pending, (size_t)3);
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE cue_kind='time'"),
+                 (int64_t)3);
+    mem.vtable->deinit(mem.ctx);
+}
+
 void run_prospective_v2_tests(void) {
     HU_TEST_SUITE("prospective v2");
     HU_RUN_TEST(v2_clean_positive_surfaces_a_soft_directive);
@@ -1090,6 +1131,7 @@ void run_prospective_v2_tests(void) {
     HU_RUN_TEST(v2_backfill_rows_are_identical_to_the_live_mirror);
     HU_RUN_TEST(v2_backfill_contact_promises_rerun_later_and_retire_by_id);
     HU_RUN_TEST(v2_backfill_fourteen_day_boundary);
+    HU_RUN_TEST(v2_backfill_failure_midway_writes_nothing_and_zeroes_counts);
 }
 
 #else

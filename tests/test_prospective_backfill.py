@@ -74,6 +74,11 @@ def setup(tmp_path, monkeypatch, migrated=True):
     return argv, backups, logs
 
 
+def no_manifest(logs):
+    # The manifest dir is created (empty, 0700) before the backup/backfill.
+    return not logs.exists() or os.listdir(logs) == []
+
+
 def calls(tmp_path):
     p = tmp_path / "calls.log"
     return p.read_text().splitlines() if p.exists() else []
@@ -129,14 +134,14 @@ def test_refuses_when_the_backup_cannot_be_made(tmp_path, monkeypatch):
     backups.symlink_to(real)  # a planted symlink is never followed
     assert pb.main(argv + ["--write"]) == 2
     assert calls(tmp_path) == []  # the backfill never ran
-    assert not logs.exists() and os.listdir(real) == []
+    assert no_manifest(logs) and os.listdir(real) == []
 
 
 def test_refuses_when_the_backfill_fails(tmp_path, monkeypatch):
     argv, _, logs = setup(tmp_path, monkeypatch)
     monkeypatch.setenv("FAKE_FAIL", "1")
     assert pb.main(argv) == 2
-    assert not logs.exists()
+    assert no_manifest(logs)
 
 
 def test_refuses_without_a_binary(tmp_path, monkeypatch):
@@ -144,6 +149,68 @@ def test_refuses_without_a_binary(tmp_path, monkeypatch):
     argv[argv.index("--human-bin") + 1] = str(tmp_path / "missing")
     assert pb.main(argv) == 2
     assert not logs.exists()
+
+
+def test_refuses_an_unwritable_manifest_dir_before_touching_anything(tmp_path, monkeypatch):
+    """Fix round 1, M1: the manifest dir is checked BEFORE the backup and the
+    backfill, so an unwritable one is a clean refusal (exit 2), not a
+    traceback after the database was already written."""
+    argv, backups, logs = setup(tmp_path, monkeypatch)
+    logs.mkdir(mode=0o500)
+    try:
+        assert pb.main(argv + ["--write"]) == 2
+    finally:
+        logs.chmod(0o700)
+    assert calls(tmp_path) == []  # the backfill never ran
+    assert not backups.exists()  # nor did the backup
+    assert os.listdir(logs) == []
+
+
+def test_refuses_a_symlinked_manifest_dir(tmp_path, monkeypatch):
+    argv, backups, logs = setup(tmp_path, monkeypatch)
+    real = tmp_path / "elsewhere"
+    real.mkdir()
+    logs.symlink_to(real)
+    assert pb.main(argv + ["--write"]) == 2
+    assert calls(tmp_path) == [] and not backups.exists() and os.listdir(real) == []
+
+
+def test_creates_a_missing_manifest_dir_private(tmp_path, monkeypatch):
+    argv, _, logs = setup(tmp_path, monkeypatch)
+    assert pb.main(argv) == 0
+    assert stat.S_IMODE(logs.stat().st_mode) == 0o700
+
+
+def test_manifest_failure_after_a_write_prints_counts_and_exits_3(tmp_path, monkeypatch,
+                                                                  capsys):
+    """Fix round 1, M1 second line of defence: the database WAS written, so
+    the counts must not be lost -- they go to stdout and the exit code says
+    'done, but no manifest' (3), never a traceback."""
+    argv, backups, logs = setup(tmp_path, monkeypatch)
+
+    def boom(path, lines):
+        raise PermissionError(13, "denied", path)
+
+    monkeypatch.setattr(pb.cn, "write_jsonl_private", boom)
+    assert pb.main(argv + ["--write"]) == pb.EXIT_NO_MANIFEST == 3
+    out, err = capsys.readouterr()
+    counts = json.loads(out.strip().splitlines()[0])
+    assert counts["written"] is True and counts["imported_pending"] == 2
+    assert "manifest" in err and str(next(backups.iterdir())) in err
+
+
+def test_refusal_after_a_backup_names_the_kept_backup(tmp_path, monkeypatch, capsys):
+    """Fix round 1, M2: when the backfill fails after the backup was taken,
+    the refusal says the database is untouched and where the backup is --
+    never a bare 'nothing written' while a backup file sits on disk."""
+    argv, backups, logs = setup(tmp_path, monkeypatch)
+    monkeypatch.setenv("FAKE_FAIL", "1")
+    assert pb.main(argv + ["--write"]) == 2
+    [bak] = list(backups.iterdir())
+    err = capsys.readouterr().err
+    assert "database untouched" in err and str(bak) in err
+    assert "nothing written" not in err
+    assert no_manifest(logs)
 
 
 def test_manifest_carries_counts_only(tmp_path, monkeypatch):

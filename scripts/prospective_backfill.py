@@ -9,9 +9,11 @@ The mirroring rules (the live writers' text via hu_prospective_mirror_action,
 live in C, in hu_prospective_v2_backfill, which runs through
 `human prospective backfill`. This wrapper owns the operational safety:
 
-  * refuses (exit 2, writes nothing) when memory.db is missing, the table is
-    not migrated (deploy a build with the v2 migration and let the daemon open
-    the database once), or the human binary is missing;
+  * refuses (exit 2, database untouched) when memory.db is missing, the table
+    is not migrated (deploy a build with the v2 migration and let the daemon
+    open the database once), the human binary is missing, or the manifest dir
+    is not a writable, non-symlink directory -- all checked before anything is
+    written;
   * --write first backs memory.db up with the SQLite online backup API to
     ~/.human/backups/memory.db.bak-prospective-<ts> (0600, dir 0700), and
     refuses if the backup fails;
@@ -21,6 +23,13 @@ live in C, in hu_prospective_v2_backfill, which runs through
 
 The default is a dry run: the C side rolls its transaction back, so the counts
 are exact and the database is unchanged.
+
+Exit codes:
+  0  done; manifest written
+  2  refused; the database is untouched (a refusal after the --write backup
+     names the kept backup file)
+  3  the backfill ran (with --write, the database WAS written) but the
+     manifest could not be written; the counts JSON line is on stdout
 """
 import argparse
 import datetime as dt
@@ -29,6 +38,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -39,13 +49,32 @@ HOME = os.path.expanduser("~")
 # rephrased safely, controller ruling F4) is appended after "written".
 KEYS = ("commitments_seen", "followups_seen", "imported_pending", "imported_expired",
         "reanchored", "skipped_existing", "written", "skipped_unsafe")
+EXIT_REFUSED = 2
+EXIT_NO_MANIFEST = 3
 REQUIRED_COLUMNS = {"cue_kind", "due_at", "status", "surfaced_at", "attempts", "outcome",
                     "source"}
 
 
-def refuse(msg):
-    print(f"refusing: {msg}; nothing written", file=sys.stderr)
-    return 2
+def refuse(msg, backup_path=None):
+    tail = (f"database untouched; backup kept at {backup_path}" if backup_path
+            else "nothing written")
+    print(f"refusing: {msg}; {tail}", file=sys.stderr)
+    return EXIT_REFUSED
+
+
+def prepare_manifest_dir(d):
+    """The manifest dir must be usable BEFORE the backup and the backfill run,
+    so a bad one is a refusal rather than a failure after the database was
+    written. Created 0700 when missing; never a symlink; proven writable by
+    creating and removing a probe file. Raises OSError otherwise."""
+    if os.path.islink(d):
+        raise OSError(f"manifest dir is a symlink ({d})")
+    os.makedirs(d, mode=0o700, exist_ok=True)
+    if not os.path.isdir(d):
+        raise NotADirectoryError(d)
+    fd, probe = tempfile.mkstemp(dir=d, prefix=".prospective-probe-")
+    os.close(fd)
+    os.unlink(probe)
 
 
 def migrated(db_path):
@@ -129,6 +158,10 @@ def main(argv=None):
                           "migration and let the daemon open the database once")
     except sqlite3.Error as e:
         return refuse(f"cannot read the database ({e.__class__.__name__})")
+    try:
+        prepare_manifest_dir(a.manifest_dir)
+    except OSError as e:
+        return refuse(f"manifest dir unusable ({e.__class__.__name__}: {a.manifest_dir})")
     backup_path = None
     if a.write:
         try:
@@ -138,12 +171,22 @@ def main(argv=None):
     try:
         counts = run_backfill(a.human_bin, a.db, a.write, now)
     except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as e:
-        return refuse(f"backfill failed ({e})")
+        return refuse(f"backfill failed ({e})", backup_path)
     payload = {"schema_version": 1, "measured_at": stamp,
                "mode": "write" if a.write else "dry_run",
                "backup_written": backup_path is not None, "counts": counts}
-    path = cn.write_jsonl_private(
-        os.path.join(a.manifest_dir, f"prospective-backfill-{stamp}.json"), [payload])
+    try:
+        path = cn.write_jsonl_private(
+            os.path.join(a.manifest_dir, f"prospective-backfill-{stamp}.json"), [payload])
+    except OSError as e:
+        # Second line of defence: the dir was checked, but the write still
+        # failed. The backfill already ran, so keep its counts.
+        print(json.dumps(counts))
+        done = (f"database WAS written (backup at {backup_path})" if a.write
+                else "dry run, database untouched")
+        print(f"manifest not written ({e.__class__.__name__}); {done}; counts are on stdout",
+              file=sys.stderr)
+        return EXIT_NO_MANIFEST
     print(json.dumps(counts))
     print(f"wrote {path}")
     return 0
