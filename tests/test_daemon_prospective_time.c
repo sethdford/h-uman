@@ -125,6 +125,7 @@ typedef struct tmock {
     const char *reply; /* the judge's answer; NULL = "fire" */
     int lease_calls;   /* requests that judged "call about the lease" */
     int drill_calls;   /* requests that judged "return the drill" */
+    hu_error_t fail;   /* non-HU_OK: the provider call fails (a judge error) */
 } tmock_t;
 
 static bool t_req_has(const hu_chat_request_t *req, const char *needle) {
@@ -147,6 +148,8 @@ static hu_error_t tmock_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_req
     m->lease_calls += t_req_has(req, "call about the lease");
     m->drill_calls += t_req_has(req, "return the drill");
     memset(out, 0, sizeof(*out));
+    if (m->fail != HU_OK)
+        return m->fail;
     const char *r = m->reply ? m->reply : "fire";
     size_t rl = strlen(r);
     char *c = (char *)alloc->alloc(alloc->ctx, rl + 1);
@@ -971,6 +974,97 @@ static void time_live_not_now_is_judged_once_a_day(void) {
     mem.vtable->deinit(mem.ctx);
     t_env_clear();
 }
+/* Review round 1, minor (a): only a real not_now is memoized. A verdict
+ * that does not parse, and a judge (provider) error, leave the intention to
+ * be judged again on the very next tick of the same day -- the memo must
+ * never turn a failure into a day of silence. Control: not_now then is. */
+static void time_live_judge_error_and_parse_fail_are_not_memoized(void) {
+    t_env_clear();
+    setenv("HU_PROSPECTIVE_TIME", "live", 1);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    tmock_t m = {0};
+    m.reply = "maybe later?";
+    static hu_agent_t agent;
+    agent_with_mock(&agent, &alloc, &mem, &m);
+    /* a day no other test uses: the memo is process-wide */
+    const int64_t day = hu_prospective_local_day_start(TNOW + 42 * TDAY);
+    HU_ASSERT_EQ(hu_superhuman_commitment_store(&mem, &alloc, TA, 12, "call about the lease", 20,
+                                                "me", 2, day + 8 * 3600),
+                 HU_OK);
+    char buf[640];
+    int64_t listed = -1;
+    for (int h = 9; h <= 10; h++) /* parse failures */
+        HU_ASSERT_EQ(hu_daemon_prospective_due_followups(&alloc, &agent, NULL, NULL, 0, TA,
+                                                         day + h * 3600, buf, sizeof(buf), &listed),
+                     (size_t)0);
+    HU_ASSERT_EQ(m.lease_calls, 2);
+    m.reply = NULL;
+    m.fail = HU_ERR_PROVIDER_UNAVAILABLE;
+    for (int h = 11; h <= 12; h++) /* judge errors */
+        (void)hu_daemon_prospective_due_followups(&alloc, &agent, NULL, NULL, 0, TA, day + h * 3600,
+                                                  buf, sizeof(buf), &listed);
+    HU_ASSERT_EQ(m.lease_calls, 4);
+    HU_ASSERT_EQ(t_count(&mem, "SELECT COUNT(*) FROM prospective_memories WHERE cue_kind='time' "
+                               "AND status='pending' AND surfaced_at IS NULL"),
+                 (int64_t)1);
+    m.fail = HU_OK; /* control: a real not_now IS memoized for the rest of the day */
+    m.reply = "not_now";
+    for (int h = 13; h <= 14; h++)
+        (void)hu_daemon_prospective_due_followups(&alloc, &agent, NULL, NULL, 0, TA, day + h * 3600,
+                                                  buf, sizeof(buf), &listed);
+    HU_ASSERT_EQ(m.lease_calls, 5);
+    mem.vtable->deinit(mem.ctx);
+    t_env_clear();
+}
+
+/* Denies the count() SQL function: a hermetic way to make
+ * hu_prospective_repo_count_due fail without a production seam. */
+static int t_deny_count(void *ud, int action, const char *a1, const char *a2, const char *a3,
+                        const char *a4) {
+    (void)ud;
+    (void)a1;
+    (void)a3;
+    (void)a4;
+    return action == SQLITE_FUNCTION && a2 && strcmp(a2, "count") == 0 ? SQLITE_DENY : SQLITE_OK;
+}
+
+/* Review round 1, minor (b): a failing due count cannot prove "nothing
+ * due", so the tick falls through to the full pass (history read and all)
+ * instead of skipping. Control: with the count working, the same not-yet-due
+ * contact reads no history. */
+static void time_failed_due_count_falls_through_to_the_full_pass(void) {
+    t_env_clear();
+    setenv("HU_PROSPECTIVE_TIME", "live", 1);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    tmock_t m = {0};
+    static hu_agent_t agent;
+    agent_with_mock(&agent, &alloc, &mem, &m);
+    const int64_t day = hu_prospective_local_day_start(TNOW + 43 * TDAY);
+    HU_ASSERT_EQ(hu_superhuman_commitment_store(&mem, &alloc, TA, 12, "call about the lease", 20,
+                                                "me", 2, day + 20 * 3600),
+                 HU_OK); /* due tonight: nothing due at 09:00 */
+    int loads = 0;
+    hu_channel_t ch = t_counted_channel(&loads);
+    char buf[640];
+    int64_t listed = -1;
+    (void)hu_daemon_prospective_due_followups(&alloc, &agent, &ch, TA, 12, TA, day + 9 * 3600, buf,
+                                              sizeof(buf), &listed);
+    HU_ASSERT_EQ(loads, 0); /* the count works: skipped whole */
+    HU_ASSERT_EQ(sqlite3_set_authorizer(db, t_deny_count, NULL), SQLITE_OK);
+    int64_t due = -1;
+    HU_ASSERT_NEQ(hu_prospective_repo_count_due(db, TA, 12, day + 9 * 3600, &due), HU_OK);
+    (void)hu_daemon_prospective_due_followups(&alloc, &agent, &ch, TA, 12, TA,
+                                              day + 9 * 3600 + 1800, buf, sizeof(buf), &listed);
+    HU_ASSERT_EQ(sqlite3_set_authorizer(db, NULL, NULL), SQLITE_OK);
+    HU_ASSERT_EQ(loads, 1);   /* the count failed: the full pass ran */
+    HU_ASSERT_EQ(m.calls, 0); /* and, nothing being due, judged nothing */
+    mem.vtable->deinit(mem.ctx);
+    t_env_clear();
+}
+
 /* Known gap 4: two dated frames of one topic collapse into ONE open row
  * keyed by the first. Settling it (a LIVE delivery that used the topic) must
  * retire BOTH ledger rows -- the second frame's, not yet due, included --
@@ -1128,6 +1222,8 @@ void run_daemon_prospective_time_tests(void) {
     HU_RUN_TEST(time_nothing_due_loads_no_history);
     HU_RUN_TEST(time_shadow_due_loads_history_once);
     HU_RUN_TEST(time_live_not_now_is_judged_once_a_day);
+    HU_RUN_TEST(time_live_judge_error_and_parse_fail_are_not_memoized);
+    HU_RUN_TEST(time_failed_due_count_falls_through_to_the_full_pass);
     HU_RUN_TEST(time_settling_a_collapsed_topic_retires_every_frame);
     HU_RUN_TEST(time_off_legacy_mark_sent_output_is_unchanged_by_the_twin_settle);
 #endif

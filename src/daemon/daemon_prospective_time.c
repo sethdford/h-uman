@@ -79,8 +79,10 @@ static size_t pm_time_slot(const char *contact, int64_t day, uint64_t *hash, boo
  * it -- and the local day (hu_prospective_local_day_start, seconds).
  * Bounded: a fixed, direct-mapped table. Eviction is overwrite: a second
  * intention hashing to a taken slot replaces it, so the evicted one is judged
- * once more today (the pre-memo behaviour, never a skipped judgement for the
- * wrong intention -- the full 64-bit hash must match). An entry from an
+ * once more today (the pre-memo behaviour). A skip needs the full 64-bit
+ * hash to match, so it never suppresses the wrong intention, barring a
+ * 64-bit hash collision (which would hold that one intention back until the
+ * next local day, never send anything). An entry from an
  * earlier day is dead on read. In-process like the SHADOW slots above: a
  * restart forgets it, costing one extra judge call per intention. SHADOW
  * never uses it (it is once per contact per day already). The proactive tick
