@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 #if !HU_IS_TEST && defined(HU_ENABLE_SQLITE)
 #include <sqlite3.h>
@@ -298,6 +299,15 @@ static const char *kExportDpoUsage =
     "Writes one JSON object per line, suitable for `mlx_lm.lora --data`.\n"
     "See docs/guides/m3-bridge-runbook.md for the end-to-end fine-tune flow.\n";
 
+/* A missing database used to surface as "export failed: I/O error", which
+ * names neither the file nor the fix. */
+static hu_error_t export_require_db(const char *cmd, const char *db_path) {
+    if (access(db_path, R_OK) == 0)
+        return HU_OK;
+    fprintf(stderr, "%s: no database at %s. Pass --db <path> to read another one.\n", cmd, db_path);
+    return HU_ERR_NOT_FOUND;
+}
+
 hu_error_t cmd_export_dpo(hu_allocator_t *alloc, int argc, char **argv) {
     if (!alloc)
         return HU_ERR_INVALID_ARGUMENT;
@@ -340,6 +350,10 @@ hu_error_t cmd_export_dpo(hu_allocator_t *alloc, int argc, char **argv) {
     int64_t since_unix = 0;
     if (since_days > 0)
         since_unix = (int64_t)time(NULL) - ((int64_t)since_days * 86400);
+
+    hu_error_t db_err = export_require_db("export-dpo", db_path);
+    if (db_err != HU_OK)
+        return db_err;
 
     size_t count = 0;
     hu_error_t err = hu_lora_export_dpo_pairs(alloc, db_path, out_path, since_unix, &count);
@@ -410,6 +424,10 @@ hu_error_t cmd_export_kto(hu_allocator_t *alloc, int argc, char **argv) {
     int64_t since_unix = 0;
     if (since_days > 0)
         since_unix = (int64_t)time(NULL) - ((int64_t)since_days * 86400);
+
+    hu_error_t db_err = export_require_db("export-kto", db_path);
+    if (db_err != HU_OK)
+        return db_err;
 
     size_t count = 0;
     hu_error_t err = hu_lora_export_kto_signals(alloc, db_path, out_path, since_unix, &count);

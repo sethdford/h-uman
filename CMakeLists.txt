@@ -1276,6 +1276,7 @@ set(HU_CORE_SOURCES
     src/app/version.c
     src/app/cli_commands.c
     src/app/cli_ctl.c
+    src/app/cli_help.c
     src/eval/cli_evaluation.c
     src/observability/cost.c
     src/observability/usage.c
@@ -3731,6 +3732,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_outbound_sanitize.c
     tests/test_daemon_follow_up_watcher.c
     tests/test_cli_ctl.c
+    tests/test_cli_help.c
     tests/test_doctor_check_provider.c
     tests/test_doctor_local_voice.c
     tests/test_doctor_reaction_collection_wired.c

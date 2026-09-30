@@ -204,12 +204,18 @@ static const char HU_INIT_DEFAULT_PERSONA_REMOVED[] =
 #endif /* HU_IS_TEST */
 
 /* ── init ────────────────────────────────────────────────────────────────── */
+hu_init_decision_t hu_init_overwrite_decision(bool config_exists, bool force, bool stdin_is_tty) {
+    if (!config_exists || force)
+        return HU_INIT_PROCEED;
+    return stdin_is_tty ? HU_INIT_PROMPT : HU_INIT_REFUSE;
+}
+
 hu_error_t cmd_init(hu_allocator_t *alloc, int argc, char **argv) {
     (void)alloc;
-    (void)argc;
-    (void)argv;
 
 #ifdef HU_IS_TEST
+    (void)argc;
+    (void)argv;
     /* In test mode: skip filesystem and stdin, succeed immediately. */
     return HU_OK;
 #else
@@ -218,8 +224,22 @@ hu_error_t cmd_init(hu_allocator_t *alloc, int argc, char **argv) {
     if (n <= 0 || (size_t)n >= sizeof(config_path))
         return HU_ERR_INVALID_ARGUMENT;
 
-    if (access(config_path, F_OK) == 0) {
-        printf("Config already exists. Overwrite? [y/N] ");
+    bool force = false;
+    for (int i = 2; i < argc; i++) {
+        if (argv[i] && strcmp(argv[i], "--force") == 0)
+            force = true;
+    }
+
+    switch (hu_init_overwrite_decision(access(config_path, F_OK) == 0, force,
+                                       isatty(STDIN_FILENO) != 0)) {
+    case HU_INIT_PROCEED:
+        break;
+    case HU_INIT_REFUSE:
+        fprintf(stderr, "Config already exists at %s. Re-run with --force to overwrite.\n",
+                config_path);
+        return HU_ERR_CANCELLED;
+    case HU_INIT_PROMPT: {
+        printf("Config already exists at %s. Overwrite? [y/N] ", config_path);
         fflush(stdout);
         int c = getchar();
         if (c != 'y' && c != 'Y') {
@@ -228,6 +248,8 @@ hu_error_t cmd_init(hu_allocator_t *alloc, int argc, char **argv) {
         }
         while (c != '\n' && c != EOF)
             c = getchar();
+        break;
+    }
     }
 
     char dir_path[HU_INIT_MAX_PATH];
