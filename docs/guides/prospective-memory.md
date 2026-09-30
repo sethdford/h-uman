@@ -138,27 +138,31 @@ Off is exactly the pre-v2 path.
 
 ## Before `HU_PROSPECTIVE_TIME=shadow` (rollout step 5) or `=live`: known controller gaps
 
-These are documented gaps in the current code, not yet closed, and are a
-checklist for the person promoting the time gate — not code this plan ships:
+A checklist for the person promoting the time gate. Items 1 and 3 are
+closed (commit `9ad82174f`); items 2, 4 and 5 are documented gaps in the
+current code, still open:
 
-1. **The history load happens every tick in SHADOW too, not only LIVE, for
-   contacts with nothing due.** `pm_time_v2` (`src/daemon/daemon_prospective_time.c`)
-   calls `pm_time_history` unconditionally before checking `candidates > 0`
-   — the day slot that dedupes a SHADOW contact to one pass per local day is
-   only taken `if (!live && c.candidates > 0)`, so a contact with no due row
-   that tick is re-judged (and its history reloaded) on every proactive
-   tick, not once a day. Load history lazily, after a cheap pending-due
-   count, instead of unconditionally on every tick. Address this **before
-   step 5 (`HU_PROSPECTIVE_TIME=shadow`)**, not only before live — the
-   7-day SHADOW read this gap precedes is itself affected by the per-tick
-   reload, not just the later LIVE promotion.
+1. **Closed (`9ad82174f`): the history load no longer happens every tick for
+   contacts with nothing due.** `pm_time_v2`
+   (`src/daemon/daemon_prospective_time.c`) now runs
+   `hu_prospective_repo_count_due` (open time rows with `0 < due_at <= now`)
+   first and skips the whole pass, chat.db history read included, when it is
+   0 — in SHADOW and LIVE. A failed count falls through to the full pass.
+   Contacts with a due row load history and log exactly as before. Residual:
+   in LIVE, a contact whose only due intention is memoized `not_now` (item 3)
+   still loads history on each tick, though nothing is judged.
 2. **The legacy `hu_superhuman_delayed_followup_mark_sent` does not retire
    the v2 twin.** A twinned follow-up (F31 legacy + its v2 mirror) can
    surface once from each side. Retire the twin on legacy mark-sent, or gate
    F31 for items that have a v2 twin.
-3. **A `not_now` verdict is re-judged every tick in LIVE.** Add a
-   per-contact-per-day memo so the same intention is not re-sent to the
-   judge on every proactive tick of the same day.
+3. **Closed (`9ad82174f`): a `not_now` verdict is no longer re-judged every
+   tick in LIVE.** An in-process memo keyed by (contact, action) and the
+   local day (`hu_prospective_local_day_start`) skips the judge for an
+   intention already answered `not_now` today; it stays pending, is counted in
+   `memo_skipped`, and does not use up the per-pass judge cap. The table is
+   fixed at 128 direct-mapped slots; a colliding intention overwrites the slot,
+   so the evicted one is judged once more that day. A restart forgets it.
+   Parse failures and judge errors are not memoized. SHADOW does not use it.
 4. **When two frames of one topic collapse to one row, settling retires only
    the first frame's ledger row.** Also retire the contact's unsent
    follow-ups whose frame topic equals the action, so the second frame's row
