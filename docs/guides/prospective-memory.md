@@ -159,19 +159,22 @@ LIVE-only: the lazy-history note under item 1.
    Contacts with a due row load history and log exactly as before. Residual:
    in LIVE, a contact whose only due intention is memoized `not_now` (item 3)
    still loads history on each tick, though nothing is judged.
-2. **Closed (`21ff0738f`, reworked in fix round 1): the legacy mark-sent
-   closes the v2 twin.** When `hu_superhuman_delayed_followup_mark_sent`
+2. **Closed (`21ff0738f`, reworked in fix rounds 1 and 2): the legacy
+   mark-sent closes the v2 twin.** When `hu_superhuman_delayed_followup_mark_sent`
    actually marks a row, `hu_prospective_repo_settle_followup_twin` moves its
-   *pending* time twin -- the row keyed `followup:<id>`, or the pending row
-   whose action is that follow-up's mirror text and whose due is within the
-   follow-up's due + grace (e.g. the collapsed F20 row keyed
-   `commitment:<N>`) -- to `done` with **no outcome**: the legacy path may
-   only have listed the follow-up in the proposer's context, so it makes no
-   claim that the reply used it. A twin already `surfaced` is left for
-   `hu_prospective_v2_after_delivery` to judge, and the send path now runs
-   that delivery hook before the legacy mark-sent calls. Only
-   `prospective_memories` is written, so OFF sending is byte-identical
-   (pinned against a twin-less database). No twin is a no-op.
+   time twin to `done` with **no outcome** -- the legacy path may only have
+   listed the follow-up in the proposer's context, so it makes no claim that
+   the reply used it. The twin is a pending row v2 has never surfaced (a row
+   v2 surfaced, retries included, stays v2's to judge) that is keyed
+   `followup:<id>`, or keyed `commitment:<N>` for the follow-up's F20
+   commitment (same contact, description == topic, deadline ==
+   scheduled_at -- found even after the backfill re-anchored its due), or,
+   for a dated follow-up, whose action is the follow-up's mirror text and
+   whose due is within the follow-up's due + grace. It is settled as one
+   unit with the bounded sweep, so a later-dated same-words promise gets its
+   own open time row. Only `prospective_memories` is written, so OFF sending
+   is byte-identical (pinned against a twin-less database); the send path
+   runs the v2 delivery hook before the legacy mark-sent calls.
 3. **Closed (`9ad82174f`): a `not_now` verdict is no longer re-judged every
    tick in LIVE.** An in-process memo keyed by (contact, action) and the
    local day (`hu_prospective_local_day_start`) skips the judge for an
@@ -181,17 +184,17 @@ LIVE-only: the lazy-history note under item 1.
    so the evicted one is judged once more that day. A restart forgets it.
    Parse failures and judge errors are not memoized. SHADOW does not use it.
 4. **Closed (`21ff0738f`, reworked in fix round 1): settling a collapsed row
-   retires the ledger rows within its grace window.** After retiring the
-   keyed ledger row, `hu_prospective_repo_sync_source` also retires the
-   contact's still-open ledger rows whose mirror text
-   (`hu_prospective_mirror_action`: a dated frame's topic, a contact's promise
-   rephrased, else verbatim) normalizes to the intention's action, compared
-   in C -- but only rows due within the intention's `due_at` + grace (3
-   days). That covers a topic's `(tomorrow)` and `(in 2 days)` frames and an
-   F20 pair. A same-words promise dated beyond the window is a later promise:
-   it stays open, and the earliest such row gets its own fresh open time row
-   keyed by its own ledger id, with its own due. Another topic, and another
-   contact, are untouched.
+   retires the ledger rows within its grace window.** After retiring the keyed
+   ledger row, `hu_prospective_repo_sync_source` also retires the contact's
+   still-open ledger rows whose mirror text (`hu_prospective_mirror_action`: a
+   dated frame's topic, a contact's promise rephrased, else verbatim)
+   normalizes to the intention's action, compared in C -- but only dated rows
+   due within the intention's `due_at` + grace (3 days); an undated row is
+   never swept by its words. That covers a topic's `(tomorrow)` and `(in 2
+   days)` frames and an F20 pair. A same-words promise dated beyond the window
+   is a later promise: it stays open, and the earliest such row gets its own
+   fresh open time row keyed by its own ledger id, with its own due. Another
+   topic, and another contact, are untouched.
 5. **Closed (`4b89ec964`): the backfill retires the ledger rows of expired
    imports** in the same transaction (a commitment to `expired`, a follow-up
    to `sent=1`), each by its own id -- also for an item found via
