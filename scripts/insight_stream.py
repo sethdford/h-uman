@@ -1012,8 +1012,14 @@ def run_wide(a, db, identity, contacts, now_ms):
 # ---- nightly typed-name pass (spec 2026-09-29 named-entity-extraction §4.4) ----
 NAMES_COUNTERS = (
     "eligible", "contacts", "excluded_suppressed", "excluded_never", "skipped_no_text",
-    "model_errors", "parse_failed", "names_proposed", "names_kept", "names_rejected",
-    "import_entities", "import_failed", "unreached_at_deadline", "stopped_at_deadline")
+    "model_errors", "parse_failed", "empty_answer", "empty_retries", "names_proposed",
+    "names_kept", "names_rejected", "import_entities", "import_failed",
+    "unreached_at_deadline", "stopped_at_deadline")
+# GLM with thinking suppressed sometimes emits its end token first and returns ""
+# (2026-09-30: 4 of 7 contacts). Retrying at other temperatures recovered 2 of those
+# 4, reproducibly; the other 2 stayed empty. The first entry is the normal call.
+NAMES_EMPTY_RETRY_TEMPS = (0.3, 0.0, 0.7)
+NAMES_EMPTY = "empty"
 NAMES_DIR = os.path.join(HOME, ".human/names")
 GRAPH_DB = os.path.join(HOME, ".human/graph.db")
 HUMAN_BIN = os.path.join(HOME, ".local/bin/human-daemon")
@@ -1064,24 +1070,34 @@ def names_eligible(att, now, names_days, window_days, exclude):
 
 
 def names_contact(a, rows, own_names):
-    """One contact: one model call (thinking suppressed by call_model), deterministic
-    verification. -> (kept, proposed count, rejected count), or None when the answer
+    """One contact: one model call (thinking suppressed by call_model), retried at the
+    other NAMES_EMPTY_RETRY_TEMPS only when the answer is empty, then deterministic
+    verification. -> (result, retries): result is (kept, proposed count, rejected
+    count); NAMES_EMPTY when every attempt was empty; or None when a non-empty answer
     holds no JSON array (a parse failure, not "no names"). Raises on a model error."""
     lines, cite = ce.number_rows(rows)
     system, user = cn.build_prompt(lines, own_names)
-    answer = cn.parse_answer(call_model(a.url, a.model, system, user,
-                                        max_tokens=NAMES_MAX_TOKENS))
+    raw, retries = "", 0
+    for i, temp in enumerate(NAMES_EMPTY_RETRY_TEMPS):
+        raw = call_model(a.url, a.model, system, user, temperature=temp,
+                         max_tokens=NAMES_MAX_TOKENS)
+        if raw.strip():
+            break
+        retries = min(i + 1, len(NAMES_EMPTY_RETRY_TEMPS) - 1)
+    if not raw.strip():
+        return NAMES_EMPTY, retries
+    answer = cn.parse_answer(raw)
     if answer is None:
-        return None
+        return None, retries
     proposed = cn.names_from_answer(answer)
     kept, rejected = cn.verify_names(proposed, cite, cn.drop_names(own_names))
-    return kept, len(proposed), rejected
+    return (kept, len(proposed), rejected), retries
 
 
 def names_pass(a, contacts, att, now, deadline=None, exclude=()):
     """-> (counts-only manifest, entity lines). Every eligible handle lands in exactly
     one of excluded_suppressed, excluded_never, skipped_no_text, contacts,
-    model_errors, parse_failed, unreached_at_deadline. A model error is recorded by
+    model_errors, parse_failed, empty_answer, unreached_at_deadline. A model error is recorded by
     exception TYPE name only (model_error_types): its message could quote a text or a
     handle. Handles are visited in a per-day rotation (rotate_by_day)."""
     man = dict.fromkeys(NAMES_COUNTERS, 0)
@@ -1115,6 +1131,11 @@ def names_pass(a, contacts, att, now, deadline=None, exclude=()):
             man["model_errors"] += 1
             kind = type(e).__name__
             man["model_error_types"][kind] = man["model_error_types"].get(kind, 0) + 1
+            continue
+        result, retries = result
+        man["empty_retries"] += retries
+        if result == NAMES_EMPTY:
+            man["empty_answer"] += 1
             continue
         if result is None:
             man["parse_failed"] += 1
@@ -1217,11 +1238,12 @@ def run_names(a, contacts):
     rc = import_names(a, man, lines, now)
     man["elapsed_s"] = round(time.monotonic() - t0, 3)
     wrc = write_manifest(a.manifest_dir, now, man, prefix="names-manifest")
-    failed = man["model_errors"] + man["parse_failed"]
+    failed = man["model_errors"] + man["parse_failed"] + man["empty_answer"]
     attempted = man["contacts"] + failed
     if attempted and failed == attempted:
         print(f"every attempted contact ({attempted}) failed: {man['model_errors']} model "
-              f"error(s), {man['parse_failed']} unparseable answer(s); see the manifest",
+              f"error(s), {man['parse_failed']} unparseable answer(s), "
+              f"{man['empty_answer']} empty answer(s); see the manifest",
               file=sys.stderr)
         return 3
     return rc or wrc
