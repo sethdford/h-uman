@@ -14,6 +14,47 @@
 #endif
 #endif
 
+/* Prompt, JSON framing and the rest of the request around the base64 image. */
+#define HU_VISION_REQUEST_HEADROOM ((size_t)64 << 10)
+
+#if !(defined(HU_IS_TEST) && HU_IS_TEST) && defined(__APPLE__)
+#include "human/core/http.h"
+#include "human/core/log.h"
+#include "human/core/process_util.h"
+#include <stdlib.h>
+#include <unistd.h>
+
+/* Downscale `in` to a JPEG (longest side 2048, quality 80) in a temp file
+ * named into out[cap]. False (out empty) when sips fails: the caller reads the
+ * original, which the POST cap then refuses and the daemon reports as a
+ * picture that didn't load. */
+static bool vision_shrink(hu_allocator_t *alloc, const char *in, char *out, size_t cap) {
+    const char *tmp = getenv("TMPDIR");
+    int n = snprintf(out, cap, "%s/hu-vision-XXXXXX.jpg", (tmp && tmp[0]) ? tmp : "/tmp");
+    if (n <= 0 || (size_t)n >= cap) {
+        out[0] = '\0';
+        return false;
+    }
+    int fd = mkstemps(out, 4);
+    if (fd < 0) {
+        out[0] = '\0';
+        return false;
+    }
+    close(fd);
+    const char *argv[] = {"/usr/bin/sips", "-Z", "2048", "-s",    "format", "jpeg", "-s",
+                          "formatOptions", "80", in,     "--out", out,      NULL};
+    hu_run_result_t r = {0};
+    hu_error_t e = hu_process_run_with_timeout(alloc, argv, NULL, 4096, 20, &r);
+    bool ok = e == HU_OK && r.success && r.exit_code == 0;
+    hu_run_result_free(alloc, &r);
+    if (!ok) {
+        unlink(out);
+        out[0] = '\0';
+    }
+    return ok;
+}
+#endif
+
 hu_error_t hu_vision_read_image(hu_allocator_t *alloc, const char *path, size_t path_len,
                                 char **base64_out, size_t *base64_len, char **media_type_out,
                                 size_t *media_type_len) {
@@ -65,10 +106,34 @@ hu_error_t hu_vision_read_image(hu_allocator_t *alloc, const char *path, size_t 
         return HU_ERR_NOT_FOUND;
     if (!S_ISREG(st.st_mode))
         return HU_ERR_INVALID_ARGUMENT;
-    if ((size_t)st.st_size > HU_MULTIMODAL_MAX_IMAGE_SIZE)
-        return HU_ERR_INVALID_ARGUMENT;
 
-    FILE *f = fopen(path_buf, "rb");
+    const char *read_path = path_buf;
+#if defined(__APPLE__)
+    char small[1024] = {0};
+    if (hu_vision_needs_downscale((size_t)st.st_size, hu_http_max_provider_body_bytes()) &&
+        vision_shrink(alloc, path_buf, small, sizeof(small))) {
+        struct stat sst;
+        if (stat(small, &sst) == 0) {
+            hu_log_info("vision", NULL, "downscaled %lld-byte image to %lld bytes",
+                        (long long)st.st_size, (long long)sst.st_size);
+            st = sst;
+            read_path = small;
+        }
+    }
+#endif
+    if ((size_t)st.st_size > HU_MULTIMODAL_MAX_IMAGE_SIZE) {
+#if defined(__APPLE__)
+        if (small[0])
+            unlink(small);
+#endif
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+
+    FILE *f = fopen(read_path, "rb");
+#if defined(__APPLE__)
+    if (small[0])
+        unlink(small); /* the open handle keeps it readable */
+#endif
     if (!f)
         return HU_ERR_IO;
 
@@ -264,4 +329,9 @@ char *hu_vision_build_context(hu_allocator_t *alloc, const char *description,
     if (out_len)
         *out_len = total;
     return buf;
+}
+
+bool hu_vision_needs_downscale(size_t file_bytes, size_t body_cap) {
+    size_t encoded = (file_bytes + 2) / 3 * 4;
+    return encoded + HU_VISION_REQUEST_HEADROOM > body_cap;
 }
