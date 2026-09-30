@@ -90,7 +90,7 @@ def test_summary_shape_is_metrics_only_and_json_serialisable():
     assert list(s["arms"]) == ["kw", "sem", "rrf"] + [tfa.alpha_arm(a) for a in tfa.ALPHAS]
     for arm in s["arms"].values():
         assert set(arm) == set(tfa.METRIC_NAMES)
-    assert set(s["loco"]) == {"folds", "n", "held_out", "selected_alpha_counts",
+    assert set(s["loco"]) == {"folds", "n", "held_out", "paired_vs_rrf", "selected_alpha_counts",
                               "loco_selected_alpha", "in_sample_best_alpha_optimistic",
                               "rrf_same_questions"}
     text = json.dumps(s)
@@ -138,3 +138,65 @@ def test_locomo_convs_sample_is_deterministic_and_keeps_run_order(tmp_path):
     assert [[q["question"] for q in qa] for _, _, qa in a] == [[q["question"] for q in qa] for _, _, qa in b]
     assert all(len(qa) == 2 and all(q["evidence"] for q in qa) for _, _, qa in a)
     assert a[0][1] == [("D1:0", "session_1", "a: hi")]
+
+
+def test_paired_vs_rrf_counts_wins_ties_losses_per_question():
+    # alpha arms score 1.0 on group A and 0.0 on group B; rrf is 0.5 everywhere,
+    # except one A question where rrf also scores 1.0 (a tie).
+    a1, a2, b1 = rec("A", lambda a: 1.0), rec("A", lambda a: 1.0), rec("B", lambda a: 0.0)
+    a2["arms"]["rrf"] = {m: 1.0 for m in tfa.METRIC_NAMES}
+    out = tfa.loco([a1, a2, b1])
+    assert out["paired_vs_rrf"]["hit@1"] == {"win": 1, "tie": 1, "loss": 1}
+    assert sum(out["paired_vs_rrf"]["ndcg@5"].values()) == out["n"] == 3
+
+
+def _fake_locomo(monkeypatch, fail_questions):
+    convs = [(0, [("D1:0", "s", "x")], [{"question": f"q{i}", "evidence": ["D1:0"]}
+                                         for i in range(10)])]
+    monkeypatch.setattr(tfa.emb, "locomo_convs", lambda limit, seed: convs)
+    monkeypatch.setattr(tfa.emb, "build_db", lambda binp, dbp, rows: len(rows))
+    calls = []
+
+    def fake_run_search(binp, dbp, args, env_extra=None):
+        q = args[-1]
+        hybrid = "--hybrid" in args
+        calls.append((q, hybrid, (env_extra or {}).get("HU_HYBRID_FUSION")))
+        # the failing question's embedder dies on its alpha=0.3 hybrid call only
+        failed = hybrid and q in fail_questions and \
+            (env_extra or {}).get("HU_HYBRID_FUSION_ALPHA") == "0.30"
+        return (["D1:0"], not failed)
+    monkeypatch.setattr(tfa, "run_search", fake_run_search)
+    return calls
+
+
+def test_embed_error_question_is_excluded_from_every_arm_and_counted(monkeypatch):
+    _fake_locomo(monkeypatch, {"q3"})
+    records, excluded = tfa.run_locomo("bin", 10, 3, "/tmp/unused")
+    assert excluded == 1
+    assert len(records) == 9  # q3 is in no arm -- not scored as zeros in alpha=0.3
+    for r in records:
+        assert r["arms"][tfa.alpha_arm(0.3)]["hit@1"] == 1.0
+        assert r["arms"]["rrf"]["hit@1"] == 1.0
+
+
+def test_embed_errors_over_ten_percent_refuse_with_exit_2(monkeypatch):
+    _fake_locomo(monkeypatch, {"q1", "q2"})  # 2/10 = 20%
+    with pytest.raises(SystemExit) as e:
+        tfa.run_locomo("bin", 10, 3, "/tmp/unused")
+    assert e.value.code == 2
+
+
+def test_run_search_flags_a_keyword_only_fallback_as_a_dense_failure(monkeypatch):
+    class P:
+        def __init__(self, rc, out, err):
+            self.returncode, self.stdout, self.stderr = rc, out, err
+    results = iter([
+        P(0, b"  [1] D1:3 (0.500): x\n", b""),
+        P(0, b"  [1] D1:3 (0.500): x\n",
+          b"search --hybrid: semantic index unavailable, using keyword only\n"),
+        P(1, b"", b"search --hybrid: network error\n"),
+    ])
+    monkeypatch.setattr(tfa.subprocess, "run", lambda *a, **k: next(results))
+    assert tfa.run_search("bin", "db", ["search", "q"]) == (["D1:3"], True)
+    assert tfa.run_search("bin", "db", ["search", "--hybrid", "--plain", "q"])[1] is False
+    assert tfa.run_search("bin", "db", ["search", "--hybrid", "--plain", "q"])[1] is False

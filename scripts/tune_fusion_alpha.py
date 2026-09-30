@@ -30,11 +30,17 @@ Writes counts and metric means only -- no question or memory text.
 Refuses (non-zero exit, nothing written) when a dataset file is missing, the embedder is
 down, fewer than --min-q questions were scored, or the semantic leg came back empty
 on more than 10% of questions (a dying embedder must not look like alpha=0 winning).
+A question on which ANY embedding-dependent call failed (non-zero exit, a
+`search --hybrid:`/`--semantic:` error, or "semantic index unavailable", where
+--hybrid silently degrades to keyword-only) is dropped from EVERY arm and counted
+as `questions_excluded_embed_error`; above 10% the sweep exits 2 without selecting
+an alpha. `loco.paired_vs_rrf` gives per-question win/tie/loss of the held-out
+score arm against rrf on the same questions.
 
 The controller runs this against the live embedding server; tests cover the pure
 parts (scripts/test_tune_fusion_alpha.py).
 """
-import argparse, collections, json, math, os, sys, time, urllib.request
+import argparse, collections, json, math, os, subprocess, sys, time, urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import eval_memory_benchmarks as emb  # noqa: E402
@@ -44,6 +50,11 @@ METRIC_NAMES = ("hit@1", "r@5", "r@10", "ndcg@5")
 OBJECTIVE = ("hit@1", "ndcg@5", "r@5", "r@10")
 REFERENCE_ARMS = ("kw", "sem", "rrf")
 MAX_EMPTY_SEM_FRAC = 0.10
+MAX_EXCLUDED_FRAC = 0.10
+# stderr of a `human memory search` call whose dense leg did not run: the
+# retrieve failed (embedder error) or no semantic index could be attached, in
+# which case --hybrid silently falls back to keyword-only output.
+EMBED_FAILURE_MARKERS = ("search --hybrid:", "search --semantic:", "semantic index unavailable")
 
 
 def alpha_arm(a):
@@ -94,6 +105,20 @@ def select_alpha(records, candidates=ALPHAS):
     return max(candidates, key=key)
 
 
+def paired_counts(pairs):
+    """Per metric, how many questions the held-out score arm beat / tied / lost
+    to the production rrf arm ON THE SAME QUESTION -- the paired view the
+    means alone hide (a few points of Hit@1 at n~100 is inside the noise)."""
+    out = {}
+    for m in METRIC_NAMES:
+        c = {"win": 0, "tie": 0, "loss": 0}
+        for p in pairs:
+            d = p["arms"]["held_out"][m] - p["arms"]["rrf"][m]
+            c["win" if d > 1e-12 else "loss" if d < -1e-12 else "tie"] += 1
+        out[m] = c
+    return out
+
+
 def loco(records):
     """Leave-one-group-out alpha selection; each record needs 'group' and 'arms'."""
     groups = sorted({r["group"] for r in records})
@@ -106,13 +131,15 @@ def loco(records):
         chosen[a] += 1
         for r in records:
             if r["group"] == g:
-                held_out.append({"group": g, "arms": {"held_out": r["arms"][alpha_arm(a)]}})
+                held_out.append({"group": g, "arms": {"held_out": r["arms"][alpha_arm(a)],
+                                                      "rrf": r["arms"]["rrf"]}})
     top = max(chosen.values())
     tied = [a for a, c in chosen.items() if c == top]
     return {
         "folds": len(groups),
         "n": len(held_out),
         "held_out": mean_metrics(held_out, "held_out"),
+        "paired_vs_rrf": paired_counts(held_out),
         "selected_alpha_counts": {f"{a:.1f}": chosen[a] for a in sorted(chosen)},
         "loco_selected_alpha": select_alpha(records, tied) if len(tied) > 1 else tied[0],
         "in_sample_best_alpha_optimistic": select_alpha(records),
@@ -127,16 +154,30 @@ def summarize(records):
             "loco": loco(records)}
 
 
+def run_search(binp, dbp, args, env_extra=None):
+    """(ranked keys, dense_leg_ran) for one `human memory search` call."""
+    env = {**os.environ, "HU_MEMORY_SQLITE_PATH": dbp, **(env_extra or {})}
+    p = subprocess.run([binp, "memory", *args], capture_output=True, env=env, timeout=600)
+    err = p.stderr.decode("utf-8", "replace")
+    ok = p.returncode == 0 and not any(m in err for m in EMBED_FAILURE_MARKERS)
+    return emb.parse_keys(p.stdout.decode("utf-8", "replace")), ok
+
+
 def search_arms(binp, dbp, question):
-    """Ranked keys per arm for one question."""
+    """(ranked keys per arm, embed_failed) for one question. embed_failed is
+    True when ANY embedding-dependent call (semantic or hybrid) failed: that
+    question then scores in NO arm, never as zeros in one of them."""
     env = emb.embed_env()
-    keys = {"kw": emb.parse_keys(emb.sh(binp, dbp, ["search", question])),
-            "sem": emb.parse_keys(emb.sh(binp, dbp, ["search", "--semantic", question], env))}
+    keys = {"kw": run_search(binp, dbp, ["search", question])[0]}
+    keys["sem"], ok = run_search(binp, dbp, ["search", "--semantic", question], env)
+    failed = not ok
     plain = ["search", "--hybrid", "--plain", question]
-    keys["rrf"] = emb.parse_keys(emb.sh(binp, dbp, plain, {**env, **emb.plain_env("rrf")}))
+    keys["rrf"], ok = run_search(binp, dbp, plain, {**env, **emb.plain_env("rrf")})
+    failed |= not ok
     for a in ALPHAS:
-        keys[alpha_arm(a)] = emb.parse_keys(emb.sh(binp, dbp, plain, {**env, **emb.plain_env("score", a)}))
-    return keys
+        keys[alpha_arm(a)], ok = run_search(binp, dbp, plain, {**env, **emb.plain_env("score", a)})
+        failed |= not ok
+    return keys, failed
 
 
 def record(group, keys, units, gold):
@@ -144,8 +185,17 @@ def record(group, keys, units, gold):
             "arms": {arm: metrics(units(k), gold) for arm, k in keys.items()}}
 
 
+def check_excluded(excluded, attempted, label):
+    """Refuse (exit 2, nothing written) when too many questions lost an arm to
+    embedder errors: the survivors are no longer the sampled benchmark."""
+    if attempted and excluded > MAX_EXCLUDED_FRAC * attempted:
+        print(f"REFUSING: {excluded}/{attempted} {label} questions excluded for embedder errors "
+              f"(> {MAX_EXCLUDED_FRAC:.0%}); no alpha selected, nothing written", file=sys.stderr)
+        sys.exit(2)
+
+
 def run_longmemeval(binp, limit, seed, tmp):
-    out, skipped = [], 0
+    out, skipped, excluded = [], 0, 0
     qs = emb.lme_questions(limit, seed)
     for n, (q, rows) in enumerate(qs, 1):
         dbp = os.path.join(tmp, "lme.db")
@@ -153,26 +203,35 @@ def run_longmemeval(binp, limit, seed, tmp):
             skipped += 1
             print(f"  lme [{n}/{len(qs)}] skipped (index incomplete)", flush=True)
             continue
-        keys = search_arms(binp, dbp, q["question"])
+        keys, failed = search_arms(binp, dbp, q["question"])
+        if failed:
+            excluded += 1
+            print(f"  lme [{n}/{len(qs)}] excluded (embedder error)", flush=True)
+            continue
         out.append(record("lme:" + q["question_id"], keys, lme_units, {str(s) for s in q["answer_session_ids"]}))
         print(f"  lme [{n}/{len(qs)}] done", flush=True)
     if skipped > max(2, len(qs) // 10):
         sys.exit(f"REFUSING: {skipped} LongMemEval questions skipped for incomplete indexes")
-    return out, skipped
+    check_excluded(excluded, len(out) + excluded, "LongMemEval")
+    return out, skipped, excluded
 
 
 def run_locomo(binp, limit, seed, tmp):
-    out = []
+    out, excluded = [], 0
     for ci, rows, qa in emb.locomo_convs(limit, seed):
         dbp = os.path.join(tmp, f"locomo{ci}.db")
         idx = emb.build_db(binp, dbp, rows)
         if idx < len(rows) * 0.9:
             sys.exit(f"REFUSING: conv{ci} indexed {idx}/{len(rows)}")
         for q in qa:
-            keys = search_arms(binp, dbp, q["question"])
+            keys, failed = search_arms(binp, dbp, q["question"])
+            if failed:
+                excluded += 1
+                continue
             out.append(record(f"locomo:{ci}", keys, locomo_units, set(q["evidence"])))
         print(f"  locomo conv {ci}: {len(qa)} questions", flush=True)
-    return out
+    check_excluded(excluded, len(out) + excluded, "LoCoMo")
+    return out, excluded
 
 
 def check_semantic_alive(records, label):
@@ -214,16 +273,17 @@ def main(argv=None):
                        "LongMemEval: one conversation per question haystack"}}
     records = []
     if a.bench in ("longmemeval", "both"):
-        r, skipped = run_longmemeval(a.bin, a.limit, a.seed, tmp)
+        r, skipped, excluded = run_longmemeval(a.bin, a.limit, a.seed, tmp)
         if len(r) < a.min_q: sys.exit(f"REFUSING: {len(r)} LongMemEval questions < {a.min_q}")
         check_semantic_alive(r, "LongMemEval")
-        out["longmemeval_s"] = summarize(r) | {"skipped_incomplete_index": skipped}
+        out["longmemeval_s"] = summarize(r) | {"skipped_incomplete_index": skipped,
+                                               "questions_excluded_embed_error": excluded}
         records += r
     if a.bench in ("locomo", "both"):
-        r = run_locomo(a.bin, a.limit, a.seed, tmp)
+        r, excluded = run_locomo(a.bin, a.limit, a.seed, tmp)
         if len(r) < a.min_q: sys.exit(f"REFUSING: {len(r)} LoCoMo questions < {a.min_q}")
         check_semantic_alive(r, "LoCoMo")
-        out["locomo10"] = summarize(r)
+        out["locomo10"] = summarize(r) | {"questions_excluded_embed_error": excluded}
         records += r
     if a.bench == "both":
         out["pooled"] = {"n": len(records), "loco": loco(records)}
