@@ -25,6 +25,7 @@
 #include "human/memory/adaptive_rag.h"
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 struct hu_tool_cache;
 
@@ -57,7 +58,7 @@ typedef struct hu_turn_ctx {
         hu_rag_strategy_t rag_strategy_used;
     } retrieval;
     struct {
-        const char *plan_ctx; /* borrowed from the turn body (input) */
+        const char *plan_ctx; /* borrowed from the turn body (input to S4 and S17) */
         size_t plan_ctx_len;
         char *stm_ctx; /* owned */
         size_t stm_ctx_len;
@@ -81,6 +82,8 @@ typedef struct hu_turn_ctx {
     struct {
         struct hu_tool_cache *turn_cache; /* borrowed; owned by the turn body */
         size_t turn_tool_results_count;   /* in/out: accumulates across iterations */
+        uint32_t iter;                    /* S17 input: the current tool iteration (1-based) */
+        uint64_t turn_tokens;             /* S17 input: tokens this turn has used so far */
     } loop;
 } hu_turn_ctx_t;
 
@@ -155,5 +158,20 @@ hu_error_t hu_turn_context(hu_turn_ctx_t *turn_ctx);
  * Reads in.*, loop.turn_cache; advances loop.turn_tool_results_count.
  * HU_ERR_INVALID_ARGUMENT on a NULL ctx or agent, else HU_OK. */
 hu_error_t hu_turn_tools(hu_turn_ctx_t *turn_ctx);
+
+/* S17 iteration tail (src/agent/turn/turn_tail.c): after one iteration's tool
+ * results — replan when a plan is in progress and >= 2 recent tool results
+ * failed, mid-turn memory retrieval against the last tool result (plus the
+ * user's goal from iteration 2), scratchpad turn metadata, periodic
+ * checkpoint. Reads in.*, context.plan_ctx (presence only), loop.iter,
+ * loop.turn_tokens, loop.turn_tool_results_count; writes only through
+ * in.agent. HU_ERR_INVALID_ARGUMENT on a NULL ctx, agent or msg, else HU_OK. */
+hu_error_t hu_turn_tail(hu_turn_ctx_t *turn_ctx);
+
+/* S18 tool-iterations-exhausted exit (src/agent/turn/turn_tail.c): records the
+ * TOOL_ITERATIONS_EXHAUSTED and ERR observer events. The exit's frees and its
+ * HU_ERR_TIMEOUT return stay in the turn body (plan gap G7).
+ * HU_ERR_INVALID_ARGUMENT on a NULL ctx or agent, else HU_OK. */
+hu_error_t hu_turn_exhausted(hu_turn_ctx_t *turn_ctx);
 
 #endif /* HU_AGENT_TURN_H */
