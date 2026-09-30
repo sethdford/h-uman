@@ -84,6 +84,7 @@
 #include "human/daemon/persona_facade.h"
 #include "human/daemon/platform_facade.h"
 #include "human/daemon/promise_keeper.h"
+#include "human/daemon/prospective_time.h"
 #include "human/daemon/reactive_gates.h"
 #include "human/daemon/reactive_turn.h"
 #include "human/daemon/reminders.h"
@@ -1063,45 +1064,16 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                 break;
 
 #ifdef HU_ENABLE_SQLITE
-            /* F20: Commitment follow-up — add due commitments for this contact */
+            /* F20: Commitment follow-up — this contact's due commitments
+             * (src/daemon/daemon_prospective_time.c). */
             char *commitment_ctx = NULL;
             size_t commitment_ctx_len = 0;
             int64_t commitment_ids[3];
             size_t commitment_ids_count = 0;
-            if (agent && agent->memory && cp->contact_id) {
-                hu_superhuman_commitment_t *due = NULL;
-                size_t due_count = 0;
-                if (hu_superhuman_commitment_list_due(agent->memory, alloc, (int64_t)now, 3, &due,
-                                                      &due_count) == HU_OK &&
-                    due && due_count > 0) {
-                    size_t cid_len = strlen(cp->contact_id);
-                    char ctx_buf[1024];
-                    size_t ctx_pos = 0;
-                    for (size_t di = 0; di < due_count && ctx_pos < sizeof(ctx_buf) - 200; di++) {
-                        if (cid_len != strlen(due[di].contact_id) ||
-                            memcmp(due[di].contact_id, cp->contact_id, cid_len) != 0)
-                            continue;
-                        int n = snprintf(ctx_buf + ctx_pos, sizeof(ctx_buf) - ctx_pos,
-                                         "COMMITMENT FOLLOW-UP: %s was due. Ask if it happened: "
-                                         "'hey did you ever %s?'\n",
-                                         due[di].description, due[di].description);
-                        if (n > 0 && ctx_pos + (size_t)n < sizeof(ctx_buf)) {
-                            ctx_pos += (size_t)n;
-                            if (commitment_ids_count < 3)
-                                commitment_ids[commitment_ids_count++] = due[di].id;
-                        }
-                    }
-                    if (ctx_pos > 0) {
-                        commitment_ctx = (char *)alloc->alloc(alloc->ctx, ctx_pos + 1);
-                        if (commitment_ctx) {
-                            memcpy(commitment_ctx, ctx_buf, ctx_pos);
-                            commitment_ctx[ctx_pos] = '\0';
-                            commitment_ctx_len = ctx_pos;
-                        }
-                    }
-                    hu_superhuman_commitment_free(alloc, due, due_count);
-                }
-            }
+            if (agent && agent->memory && cp->contact_id)
+                hu_daemon_prospective_commitment_ctx(alloc, agent, cp->contact_id, (int64_t)now,
+                                                     &commitment_ctx, &commitment_ctx_len,
+                                                     commitment_ids, &commitment_ids_count);
 #endif
 
             /* F53: Birthday/holiday awareness — important_dates from persona */
@@ -1509,43 +1481,18 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                     inputs.situation_context_len = prompt_len;
                     inputs.content_is_safe = hu_daemon_callback_content_is_safe;
 
-                    /* Producer for the due_followups field: surface THIS
-                     * contact's due delayed follow-ups (scheduled when a
-                     * commitment with a deadline was stored) as a labeled
-                     * context section, so the proposer has a CONCRETE
-                     * trigger to fire on instead of generic pondering.
-                     * Items are listed (not marked sent) — mark-sent stays
-                     * tied to an actual send (the F31 path at the send
-                     * site), so an unsent item correctly reappears. */
+                    /* Producer for the due_followups field: this contact's due
+                     * delayed follow-up as a labeled section, so the proposer has
+                     * a concrete trigger. Listed, not marked sent — mark-sent
+                     * stays tied to an actual send (the F31 path at the send
+                     * site). src/daemon/daemon_prospective_time.c. */
                     char due_fu_buf[640];
-                    due_fu_buf[0] = '\0';
-                    if (agent->memory) {
-                        hu_delayed_followup_t *due_arr = NULL;
-                        size_t due_n = 0;
-                        if (hu_superhuman_delayed_followup_list_due(
-                                agent->memory, alloc, (int64_t)now, &due_arr, &due_n) == HU_OK &&
-                            due_arr && due_n > 0) {
-                            size_t pos = 0;
-                            size_t listed = 0;
-                            for (size_t fi = 0; fi < due_n && listed < 1; fi++) {
-                                if (strcmp(due_arr[fi].contact_id, cp->contact_id) != 0)
-                                    continue;
-                                due_followup_id_listed = due_arr[fi].id;
-                                int w =
-                                    snprintf(due_fu_buf + pos, sizeof(due_fu_buf) - pos,
-                                             "- %s (due %llds ago)\n", due_arr[fi].topic,
-                                             (long long)((int64_t)now - due_arr[fi].scheduled_at));
-                                if (w <= 0 || (size_t)w >= sizeof(due_fu_buf) - pos)
-                                    break;
-                                pos += (size_t)w;
-                                listed++;
-                            }
-                            if (pos > 0) {
-                                inputs.due_followups_context = due_fu_buf;
-                                inputs.due_followups_context_len = pos;
-                            }
-                            hu_superhuman_delayed_followup_free(alloc, due_arr, due_n);
-                        }
+                    size_t due_fu_len = hu_daemon_prospective_due_followups(
+                        alloc, agent, channels[c].channel, target_part, target_len, cp->contact_id,
+                        (int64_t)now, due_fu_buf, sizeof(due_fu_buf), &due_followup_id_listed);
+                    if (due_fu_len > 0) {
+                        inputs.due_followups_context = due_fu_buf;
+                        inputs.due_followups_context_len = due_fu_len;
                     }
 
                     int64_t unified_last_tick = 0;
