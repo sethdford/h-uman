@@ -6,6 +6,7 @@
  * hu_daemon_message_router, so the basename heuristic alone would miss it. */
 #include "human/agent.h"
 #include "human/channel.h"
+#include "human/channel_loop.h"
 #include "human/channels/imessage.h"
 #include "human/channels/imessage_action.h"
 #include "human/channels/imessage_action_facts.h"
@@ -540,6 +541,40 @@ static int count_rows(sqlite3 *db) {
     return n;
 }
 
+/* Self-test traffic is not training data (2026-09-30: 43 production_outcomes
+ * rows from the owner's own number, several of them garbage rewrites, sat in
+ * the table the evals read). Handles the persona marks relationship "test"
+ * are never recorded; everyone else still is. */
+static void record_delivered_reply_skips_the_owners_test_handles(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
+    hu_dpo_collector_t col = {0};
+    HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, db, 64, &col), HU_OK);
+    HU_ASSERT_EQ(hu_dpo_init_tables(&col), HU_OK);
+    static const char pj[] = "{\"name\":\"Seth\",\"contacts\":{\"+15550000099\":{\"name\":"
+                             "\"Seth\",\"relationship\":\"test\"}}}";
+    hu_persona_t persona;
+    memset(&persona, 0, sizeof(persona));
+    HU_ASSERT_EQ(hu_persona_load_json(&alloc, pj, strlen(pj), &persona), HU_OK);
+    static hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.sota.dpo_collector = col;
+    agent.sota.sota_initialized = true;
+    agent.persona = &persona;
+    HU_ASSERT_EQ(hu_daemon_record_delivered_reply(&agent, "imessage", "+15550000099", 12, "q", 1,
+                                                  "went better than expected actually", 34),
+                 HU_OK);
+    HU_ASSERT_EQ(count_rows(db), 0);
+    HU_ASSERT_EQ(hu_daemon_record_delivered_reply(&agent, "imessage", "+15555551212", 12, "q", 1,
+                                                  "sounds good", 11),
+                 HU_OK);
+    HU_ASSERT_EQ(count_rows(db), 1);
+    hu_persona_deinit(&alloc, &persona);
+    hu_dpo_collector_deinit(&col);
+    sqlite3_close(db);
+}
+
 static void record_delivered_reply_stores_the_text_as_sent(void) {
     hu_allocator_t alloc = hu_system_allocator();
     sqlite3 *db = NULL;
@@ -758,6 +793,46 @@ static void fresh_parent_still_reacts_tapback_sometimes(void) {
     HU_ASSERT(tapback_hit);
 }
 
+/* The burst re-poll before a reply consumes everything new on the channel.
+ * 2026-09-30: a message from another sender that landed during the reading
+ * delay (Dermot during Lexi's turn, twice on 09-24) was read and discarded;
+ * it must be carried into the tick's batch list instead. */
+static void burst_carry_keeps_other_senders_for_this_tick(void) {
+    static hu_channel_loop_msg_t msgs[4], burst[3];
+    memset(msgs, 0, sizeof(msgs));
+    memset(burst, 0, sizeof(burst));
+    size_t count = 1;
+    strcpy(msgs[0].session_key, "+15550000001");
+    strcpy(msgs[0].content, "heyy");
+    strcpy(burst[0].session_key, "+15550000001"); /* the batch's own follow-up */
+    strcpy(burst[0].content, "what are you up to");
+    strcpy(burst[1].session_key, "+15550000002");
+    strcpy(burst[1].content, "did you see the game");
+    burst[1].message_id = 42;
+    strcpy(burst[2].session_key, "+15550000003"); /* empty content: nothing to answer */
+    size_t lost = hu_daemon_burst_carry(msgs, &count, 4, burst, 3, "+15550000001");
+    HU_ASSERT_EQ(lost, 0u);
+    HU_ASSERT_EQ(count, 2u);
+    HU_ASSERT_STR_EQ(msgs[1].session_key, "+15550000002");
+    HU_ASSERT_STR_EQ(msgs[1].content, "did you see the game");
+    HU_ASSERT_EQ(msgs[1].message_id, 42);
+}
+
+static void burst_carry_reports_what_it_cannot_keep(void) {
+    static hu_channel_loop_msg_t msgs[2], burst[2];
+    memset(msgs, 0, sizeof(msgs));
+    memset(burst, 0, sizeof(burst));
+    size_t count = 1;
+    strcpy(msgs[0].session_key, "+15550000001");
+    strcpy(burst[0].session_key, "+15550000002");
+    strcpy(burst[0].content, "one");
+    strcpy(burst[1].session_key, "+15550000003");
+    strcpy(burst[1].content, "two");
+    HU_ASSERT_EQ(hu_daemon_burst_carry(msgs, &count, 2, burst, 2, "+15550000001"), 1u);
+    HU_ASSERT_EQ(count, 2u);
+    HU_ASSERT_STR_EQ(msgs[1].content, "one");
+}
+
 void run_imessage_dispatcher_tests(void) {
     HU_TEST_SUITE("imessage_dispatcher");
     HU_RUN_TEST(invalid_args_short_circuit);
@@ -776,8 +851,11 @@ void run_imessage_dispatcher_tests(void) {
     HU_RUN_TEST(single_reply_may_still_be_a_bare_tapback);
     HU_RUN_TEST(msg_ex_parrot_guard_reports_no_text_sent);
     HU_RUN_TEST(record_delivered_reply_noops_without_collector);
+    HU_RUN_TEST(burst_carry_keeps_other_senders_for_this_tick);
+    HU_RUN_TEST(burst_carry_reports_what_it_cannot_keep);
 #if defined(HU_ENABLE_SQLITE) && defined(HU_ENABLE_ML)
     HU_RUN_TEST(record_delivered_reply_stores_the_text_as_sent);
+    HU_RUN_TEST(record_delivered_reply_skips_the_owners_test_handles);
 #endif
     HU_RUN_TEST(demote_stale_tapback_style_truth_table);
     HU_RUN_TEST(snapshot_age_sec_handles_unknown_and_future);

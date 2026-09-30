@@ -86,6 +86,12 @@ size_t hu_agent_internal_recent_assistant_avg_len(const hu_agent_t *agent, size_
 hu_provider_t *hu_agent_internal_recall_provider(hu_agent_t *agent, const char *msg,
                                                  size_t msg_len);
 
+/* Open the experience store for this turn's writes. Refuses
+ * (HU_ERR_NOT_SUPPORTED) with no memory or on an owner self-test turn, so
+ * test traffic never becomes an experience other contacts recall. */
+struct hu_experience_store;
+hu_error_t hu_agent_internal_experience_init(hu_agent_t *agent, struct hu_experience_store *store);
+
 size_t hu_agent_internal_fit_history(const hu_agent_t *agent, hu_chat_message_t *msgs,
                                      size_t msgs_count);
 

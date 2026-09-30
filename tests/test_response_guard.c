@@ -1015,6 +1015,41 @@ static void guard_ex_rejects_director_echo(void) {
     HU_ASSERT(report.detected_director_echo);
 }
 
+/* G6 scope: content the director told the reply to say is not an echo.
+ * 2026-09-30 "admit he hasn't really thought about it yet" made the reply
+ * "honestly haven't really thought about it yet..." a REJECT, and the retry
+ * sent a fragment. The instruction words around it still count. */
+static const char G6_ADMIT_DIRECTOR[] = "Keep it light and non-committal, admit he hasn't really "
+                                        "thought about it yet, a few connected thoughts";
+
+static bool g6_flags(const char *director, const char *reply) {
+    hu_allocator_t alloc = A();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_guard_outcome_t outcome = HU_GUARD_OK;
+    hu_guard_report_t report;
+    memset(&report, 0, sizeof(report));
+    hu_guard_context_t ctx = {0};
+    ctx.director_text = director;
+    ctx.director_len = strlen(director);
+    (void)hu_response_guard_check_ex(&alloc, reply, strlen(reply), &ctx, &out, &out_len, &outcome,
+                                     &report);
+    if (outcome == HU_GUARD_REWROTE && out) /* only a rewrite hands back an allocation */
+        alloc.free(alloc.ctx, out, out_len + 1);
+    return report.detected_director_echo;
+}
+
+static void guard_g6_passes_content_the_director_asked_for(void) {
+    HU_ASSERT(!g6_flags(G6_ADMIT_DIRECTOR, "honestly haven't really thought about it yet. usually "
+                                           "just the kids and me, maybe some friends"));
+    HU_ASSERT(!g6_flags("be brief and warm, tell her you're running about ten minutes late",
+                        "hey running about ten minutes late, sorry!"));
+}
+
+static void guard_g6_still_catches_instruction_words_beside_content(void) {
+    HU_ASSERT(g6_flags(G6_ADMIT_DIRECTOR, "keep it light and non-committal lol"));
+}
+
 /* G5 negative — recent_avg_len=0 (no history) disables the check.
  * A long response should pass through. */
 static void guard_ex_passes_long_response_when_no_avg(void) {
@@ -2774,6 +2809,8 @@ void run_response_guard_tests(void) {
     HU_RUN_TEST(guard_g5_does_not_fire_below_absolute_floor);
     HU_RUN_TEST(guard_ex_rejects_length_anomaly);
     HU_RUN_TEST(guard_ex_rejects_director_echo);
+    HU_RUN_TEST(guard_g6_passes_content_the_director_asked_for);
+    HU_RUN_TEST(guard_g6_still_catches_instruction_words_beside_content);
     HU_RUN_TEST(guard_ex_passes_long_response_when_no_avg);
     HU_RUN_TEST(guard_ex_passes_legit_5x_response);
     HU_RUN_TEST(guard_ex_passes_short_director_text);
