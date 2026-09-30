@@ -60,7 +60,7 @@ static void test_score_fusion_reads_magnitudes_where_rrf_reads_ranks(void) {
 static void test_bm25_best_hit_normalises_to_one(void) {
     const double engine[3] = {-3.2, -1.1, -0.4};
     double rel[3] = {0};
-    hu_rerank_bm25_to_relevance(engine, 3, rel);
+    hu_rerank_bm25_to_relevance(engine, NULL, 3, rel);
     HU_ASSERT_FLOAT_EQ(rel[0], 3.2, 1e-9);
     HU_ASSERT_FLOAT_EQ(rel[1], 1.1, 1e-9);
     HU_ASSERT_FLOAT_EQ(rel[2], 0.4, 1e-9);
@@ -84,7 +84,7 @@ static void test_bm25_best_hit_normalises_to_one(void) {
 static void test_bm25_relevance_never_rises_along_recall_order(void) {
     const double engine[4] = {-2.0, 0.3, -1.5, NAN};
     double rel[4] = {0};
-    hu_rerank_bm25_to_relevance(engine, 4, rel);
+    hu_rerank_bm25_to_relevance(engine, NULL, 4, rel);
     HU_ASSERT_FLOAT_EQ(rel[0], 2.0, 1e-9);
     HU_ASSERT_FLOAT_EQ(rel[1], -0.3, 1e-9);
     HU_ASSERT_FLOAT_EQ(rel[2], -0.3, 1e-9); /* 1.5 clamped to the row above */
@@ -92,9 +92,55 @@ static void test_bm25_relevance_never_rises_along_recall_order(void) {
 
     const double like_only[2] = {NAN, NAN};
     double rel2[2] = {7.0, 7.0};
-    hu_rerank_bm25_to_relevance(like_only, 2, rel2);
+    hu_rerank_bm25_to_relevance(like_only, NULL, 2, rel2);
     HU_ASSERT_FLOAT_EQ(rel2[0], 0.0, 1e-12);
     HU_ASSERT_FLOAT_EQ(rel2[1], 0.0, 1e-12);
+}
+
+/* The engine adds its graph-rerank boost to bm25() (lower-is-better), so the
+ * boost reached the conversion as a penalty: with +0.2 on the best row,
+ * 5.00/4.90/4.85/3.00 came out 4.80/4.80/4.80/3.00 -- the clamp flattened the
+ * rows below it to the penalised value. Passing the boost apart takes it out
+ * before negating and adds it back after: 5.20/4.90/4.85/3.00. */
+static void test_bm25_boost_keeps_its_direction_and_is_not_flattened(void) {
+    const double engine[4] = {-5.0 + 0.2, -4.9, -4.85, -3.0};
+    const double boosts[4] = {0.2, 0.0, 0.0, 0.0};
+    double rel[4] = {0};
+    hu_rerank_bm25_to_relevance(engine, boosts, 4, rel);
+    HU_ASSERT_FLOAT_EQ(rel[0], 5.2, 1e-9);
+    HU_ASSERT_FLOAT_EQ(rel[1], 4.9, 1e-9);
+    HU_ASSERT_FLOAT_EQ(rel[2], 4.85, 1e-9);
+    HU_ASSERT_FLOAT_EQ(rel[3], 3.0, 1e-9);
+
+    double blind[4] = {0}; /* the defect, pinned: no boosts -> penalty + flattening */
+    hu_rerank_bm25_to_relevance(engine, NULL, 4, blind);
+    HU_ASSERT_FLOAT_EQ(blind[0], 4.8, 1e-9);
+    HU_ASSERT_FLOAT_EQ(blind[1], 4.8, 1e-9);
+    HU_ASSERT_FLOAT_EQ(blind[2], 4.8, 1e-9);
+}
+
+/* A boosted row ranks at or above its unboosted self: the second row, boosted
+ * by 0.2 past the first, leads the lexical order; unboosted it is second.
+ * Rows the engine appended after (positive score, no boost) stay below. */
+static void test_bm25_boosted_row_ranks_at_or_above_its_unboosted_self(void) {
+    const double engine[4] = {-5.0, -4.9 + 0.2, -4.85, 0.3};
+    const double boosts[4] = {0.0, 0.2, 0.0, 0.0};
+    const double unboosted[4] = {-5.0, -4.9, -4.85, 0.3};
+    double rel[4] = {0}, base[4] = {0};
+    hu_rerank_bm25_to_relevance(engine, boosts, 4, rel);
+    hu_rerank_bm25_to_relevance(unboosted, NULL, 4, base);
+    HU_ASSERT_FLOAT_EQ(rel[1], 5.1, 1e-9);
+    HU_ASSERT_GT(rel[1], base[1]);
+    HU_ASSERT_FLOAT_EQ(rel[3], -0.3, 1e-9);
+
+    hu_search_result_t kw[4] = {row("r0", (float)rel[0]), row("r1", (float)rel[1]),
+                                row("r2", (float)rel[2]), row("app", (float)rel[3])};
+    hu_search_result_t out[4];
+    size_t n = fuse(kw, 4, NULL, 0, 0.0f, out, 4);
+    HU_ASSERT_EQ(n, 4u);
+    HU_ASSERT_STR_EQ(out[0].content, "r1");
+    HU_ASSERT_STR_EQ(out[3].content, "app");
+    hu_rerank_free_results(out, n);
 }
 
 /* A row present in only one leg scores 0 for the other. A (kw best, dense
@@ -281,6 +327,8 @@ void run_score_fusion_tests(void) {
     HU_RUN_TEST(test_score_fusion_reads_magnitudes_where_rrf_reads_ranks);
     HU_RUN_TEST(test_bm25_best_hit_normalises_to_one);
     HU_RUN_TEST(test_bm25_relevance_never_rises_along_recall_order);
+    HU_RUN_TEST(test_bm25_boost_keeps_its_direction_and_is_not_flattened);
+    HU_RUN_TEST(test_bm25_boosted_row_ranks_at_or_above_its_unboosted_self);
     HU_RUN_TEST(test_score_fusion_single_leg_rows_score_zero_for_missing_leg);
     HU_RUN_TEST(test_score_fusion_dedupes_by_content_and_carries_key);
     HU_RUN_TEST(test_score_fusion_alpha_extremes_are_the_single_leg_orders);

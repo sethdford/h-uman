@@ -52,12 +52,18 @@ hu_error_t hu_rerank_score_fusion(hu_search_result_t *keyword_results, size_t ke
 
 /* Convert a backend recall list's engine scores (SQLite FTS5 bm25(): negative,
  * lower is better) into higher-is-better lexical relevance, in recall order.
- * out[i] = -engine_scores[i], clamped so it never exceeds out[i-1]: rows the
- * engine appended after its FTS hits (spreading activation, hierarchy
- * members, whose scores are positive) or nudged with a graph boost can never
- * outrank a row the engine placed above them. A NaN score (the LIKE fallback
- * has no score column) ties with the row above it; a leading NaN is 0. */
-void hu_rerank_bm25_to_relevance(const double *engine_scores, size_t count, double *out);
+ * boosts (nullable) is what the engine ADDED to each score (its graph rerank:
+ * a positive "this row is better" nudge that, added to a lower-is-better
+ * bm25, reads as a penalty). The boost is taken out before negating and added
+ * back after: base[i] = -(engine_scores[i] - boosts[i]), clamped so it never
+ * exceeds base[i-1], then out[i] = base[i] + boosts[i]. The clamp keeps rows
+ * the engine appended after its FTS hits (spreading activation, hierarchy
+ * members: positive scores, no boost) from outranking a row above them; a
+ * boost on an FTS row lifts it and is never flattened by the clamp. A
+ * non-finite score (the LIKE fallback) ties with the row above; a leading one
+ * is 0. out may alias engine_scores. */
+void hu_rerank_bm25_to_relevance(const double *engine_scores, const double *boosts, size_t count,
+                                 double *out);
 
 /* HU_HYBRID_FUSION=rrf|score picks the plain hybrid merge (default rrf; unset
  * or empty -> rrf; anything else -> rrf with a one-shot warning naming the

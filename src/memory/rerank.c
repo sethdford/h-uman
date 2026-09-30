@@ -355,15 +355,20 @@ hu_error_t hu_rerank_score_fusion(hu_search_result_t *keyword_results, size_t ke
     return err;
 }
 
-void hu_rerank_bm25_to_relevance(const double *engine_scores, size_t count, double *out) {
+void hu_rerank_bm25_to_relevance(const double *engine_scores, const double *boosts, size_t count,
+                                 double *out) {
     if (!engine_scores || !out)
         return;
+    double prev_base = 0.0;
     for (size_t i = 0; i < count; i++) {
         /* Read before write: out may alias engine_scores. */
-        double v = isfinite(engine_scores[i]) ? -engine_scores[i] : (i > 0 ? out[i - 1] : 0.0);
-        if (i > 0 && v > out[i - 1])
-            v = out[i - 1];
-        out[i] = v;
+        double b = (boosts && isfinite(boosts[i])) ? boosts[i] : 0.0;
+        double base =
+            isfinite(engine_scores[i]) ? -(engine_scores[i] - b) : (i > 0 ? prev_base : 0.0);
+        if (i > 0 && base > prev_base)
+            base = prev_base;
+        prev_base = base;
+        out[i] = base + b;
     }
 }
 

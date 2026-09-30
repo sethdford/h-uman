@@ -9,6 +9,7 @@
 #include "human/cli_commands.h"
 #include "human/core/allocator.h"
 #include "human/memory.h"
+#include "human/memory/graph.h"
 #include "human/memory/retrieval.h"
 #include "human/memory/vector.h"
 #include "human/memory/vector/store_sqlite_vec.h"
@@ -904,8 +905,149 @@ static void test_plain_hybrid_score_fusion_alpha_extremes_reorder_the_merge(void
     fusion_fixture_close(&f, &alloc);
 }
 
+/* The engine's graph rerank adds a boost (temporal: newest node +0.05;
+ * entity edges: +0.03 each, cap 0.15) to bm25(), which is lower-is-better,
+ * so in score mode the boost used to read as a PENALTY -- and the monotone
+ * clamp then dragged every row below it down to the same value. Fixture:
+ * "plain" and "boosted" carry the same query terms at the same length (equal
+ * bm25); four earlier "Alice" rows give "boosted" four entity edges, and it
+ * is the newest node, so its boost is 0.05 + 4*0.03 = 0.17. "plain" has no
+ * shared entity and a successor, so its boost is 0. */
+static void boost_fixture_open(fusion_fixture_t *f, hu_allocator_t *alloc) {
+    f->mem = hu_sqlite_memory_create(alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(f->mem.vtable);
+    f->emb = (hu_embedder_t){.ctx = NULL, .vtable = &stub_vt};
+    f->vs = hu_vector_store_sqlite_vec_create(alloc, hu_sqlite_memory_get_db(&f->mem), 3);
+    HU_ASSERT_NOT_NULL(f->vs.ctx);
+    hu_sqlite_memory_set_semantic_index(&f->mem, &f->emb, &f->vs);
+    static const char *const rows[][2] = {
+        {"experience:a1", "lunch with Alice downtown"},
+        {"experience:a2", "coffee with Alice again"},
+        {"experience:a3", "movie night with Alice"},
+        {"experience:a4", "a long walk with Alice"},
+        {"experience:plain", "zebra migration seen by Bob"},
+        {"experience:boosted", "zebra migration seen by Alice"},
+    };
+    for (size_t i = 0; i < sizeof(rows) / sizeof(rows[0]); i++)
+        HU_ASSERT_EQ(store_row(&f->mem, rows[i][0], rows[i][1], "s1"), HU_OK);
+}
+
+static size_t index_of_key(const hu_memory_entry_t *e, size_t n, const char *key) {
+    for (size_t i = 0; i < n; i++)
+        if (e[i].key && strcmp(e[i].key, key) == 0)
+            return i;
+    return n;
+}
+
+/* The boost-reporting recall returns exactly the vtable recall's rows, order
+ * and scores, plus the boost the engine folded into each score. */
+static void test_sqlite_recall_with_boosts_matches_recall_and_reports_boost(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    fusion_fixture_t f;
+    boost_fixture_open(&f, &alloc);
+    const char *q = "zebra migration";
+    hu_memory_entry_t *a = NULL, *b = NULL;
+    size_t na = 0, nb = 0;
+    double *boosts = NULL;
+    HU_ASSERT_EQ(f.mem.vtable->recall(f.mem.ctx, &alloc, q, strlen(q), 10, NULL, 0, &a, &na),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_sqlite_memory_recall_with_boosts(&f.mem, &alloc, q, strlen(q), 10, NULL, 0, &b,
+                                                     &nb, &boosts),
+                 HU_OK);
+    HU_ASSERT_EQ(nb, na);
+    HU_ASSERT_NOT_NULL(boosts);
+    for (size_t i = 0; i < na; i++) {
+        HU_ASSERT_STR_EQ(b[i].key, a[i].key);
+        HU_ASSERT_FLOAT_EQ(b[i].score, a[i].score, 1e-12);
+    }
+    size_t ip = index_of_key(b, nb, "experience:plain");
+    size_t ib = index_of_key(b, nb, "experience:boosted");
+    HU_ASSERT_LT(ip, nb);
+    HU_ASSERT_LT(ib, nb);
+    HU_ASSERT_LT(ip, ib); /* equal bm25: recall keeps insertion order */
+    HU_ASSERT_FLOAT_EQ(boosts[ip], 0.0, 1e-12);
+    HU_ASSERT_FLOAT_EQ(boosts[ib], 0.17, 1e-9);
+    /* raw bm25 = score - boost is equal for the two rows */
+    HU_ASSERT_FLOAT_EQ(b[ib].score - boosts[ib], b[ip].score - boosts[ip], 1e-9);
+    for (size_t i = 0; i < na; i++) {
+        hu_memory_entry_free_fields(&alloc, &a[i]);
+        hu_memory_entry_free_fields(&alloc, &b[i]);
+    }
+    alloc.free(alloc.ctx, a, na * sizeof(*a));
+    alloc.free(alloc.ctx, b, nb * sizeof(*b));
+    alloc.free(alloc.ctx, boosts, nb * sizeof(double));
+    HU_ASSERT_EQ(hu_sqlite_memory_recall_with_boosts(NULL, &alloc, q, strlen(q), 10, NULL, 0, &b,
+                                                     &nb, &boosts),
+                 HU_ERR_NOT_SUPPORTED);
+    fusion_fixture_close(&f, &alloc);
+}
+
+/* Score mode, alpha=0 (lexical only): the boosted row outranks its
+ * equal-bm25 twin that recall lists first, with fused score 1.0. Under the
+ * boost-as-penalty conversion it ranked below it. RRF keeps recall order. */
+static void test_plain_hybrid_score_fusion_graph_boost_raises_boosted_row(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    fusion_fixture_t f;
+    boost_fixture_open(&f, &alloc);
+    char keys[4][40];
+    double top = 0;
+
+    unsetenv("HU_HYBRID_FUSION");
+    size_t n = fusion_run(&f, &alloc, keys, &top);
+    HU_ASSERT_LT(key_pos(keys, n, "experience:plain"), key_pos(keys, n, "experience:boosted"));
+
+    setenv("HU_HYBRID_FUSION", "score", 1);
+    setenv("HU_HYBRID_FUSION_ALPHA", "0", 1);
+    n = fusion_run(&f, &alloc, keys, &top);
+    HU_ASSERT_STR_EQ(keys[0], "experience:boosted");
+    HU_ASSERT_FLOAT_EQ(top, 1.0, 1e-6);
+    HU_ASSERT_LT(key_pos(keys, n, "experience:boosted"), key_pos(keys, n, "experience:plain"));
+    unsetenv("HU_HYBRID_FUSION");
+    unsetenv("HU_HYBRID_FUSION_ALPHA");
+    fusion_fixture_close(&f, &alloc);
+}
+
+/* The graph context row carries a constant 0.9, not a BM25 value. In score
+ * mode it is tied with the best lexical hit (normalised 1.0) instead of being
+ * min-max'd on the BM25 scale; as keyword rank 1 it then wins the RRF
+ * tie-break at alpha=0. */
+static void test_plain_hybrid_score_fusion_graph_row_ties_best_lexical_hit(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    fusion_fixture_t f;
+    fusion_fixture_open(&f, &alloc);
+    hu_graph_t *g = NULL;
+    HU_ASSERT_EQ(hu_graph_open(&alloc, "x", 1, &g), HU_OK);
+    int64_t z = 0, m = 0;
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "", 0, "zebra", 5, HU_ENTITY_TOPIC, NULL, &z), HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "", 0, "migration", 9, HU_ENTITY_TOPIC, NULL, &m),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_relation(g, "", 0, z, m, HU_REL_KNOWS, 1.0f, NULL, 0), HU_OK);
+
+    setenv("HU_HYBRID_FUSION", "score", 1);
+    setenv("HU_HYBRID_FUSION_ALPHA", "0", 1);
+    hu_retrieval_options_t opts = {0};
+    opts.limit = 4;
+    hu_retrieval_result_t res = {0};
+    const char *q = "zebra migration";
+    HU_ASSERT_EQ(hu_hybrid_retrieve(&alloc, &f.mem, &f.emb, &f.vs, g, q, strlen(q), &opts, &res),
+                 HU_OK);
+    unsetenv("HU_HYBRID_FUSION");
+    unsetenv("HU_HYBRID_FUSION_ALPHA");
+    HU_ASSERT_GT(res.count, 1u);
+    HU_ASSERT_STR_EQ(res.entries[0].key, "graph");
+    HU_ASSERT_FLOAT_EQ(res.scores[0], 1.0, 1e-6);
+    HU_ASSERT_STR_EQ(res.entries[1].key, "experience:short");
+    HU_ASSERT_FLOAT_EQ(res.scores[1], 1.0, 1e-6);
+    hu_retrieval_result_free(&alloc, &res);
+    hu_graph_close(g, &alloc);
+    fusion_fixture_close(&f, &alloc);
+}
+
 void run_hybrid_reconstructive_tests(void) {
     HU_TEST_SUITE("hybrid_reconstructive");
+    HU_RUN_TEST(test_sqlite_recall_with_boosts_matches_recall_and_reports_boost);
+    HU_RUN_TEST(test_plain_hybrid_score_fusion_graph_boost_raises_boosted_row);
+    HU_RUN_TEST(test_plain_hybrid_score_fusion_graph_row_ties_best_lexical_hit);
     HU_RUN_TEST(test_plain_hybrid_fusion_gate_default_is_rrf_order);
     HU_RUN_TEST(test_plain_hybrid_score_fusion_alpha_extremes_reorder_the_merge);
     HU_RUN_TEST(test_plain_hybrid_without_reranking_keeps_semantic_only_hit);
