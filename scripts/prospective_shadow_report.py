@@ -39,12 +39,18 @@ the SHADOW gate over [--since, --until):
                             reported as its own count instead.
   time_*                    the same shape for time cues (time_would_fire_per_day,
                             time_resolved_rate, time_miss_rate, time_judge_failure_rate,
-                            time_duplicate_rate=null). time_miss_rate keeps the
-                            due-in-window denominator from the design brief
-                            (time cues have no inbound-text "cue" concept, so
-                            the F6 pending-at-start correction does not apply
-                            the same way -- documented in `notes`); misses are
-                            due intentions with no "time shadow item" line.
+                            time_duplicate_rate=null). time_miss_rate extends
+                            ruling F6 to time cues: the denominator is time-cue
+                            intentions pending at the window start (same
+                            created_at<since / status='pending' proxy used for
+                            keyword, exact under SHADOW since apply=false never
+                            writes status) whose due_at < --until -- i.e. due
+                            within the window OR already overdue before it. An
+                            intention overdue before --since and still pending
+                            counts: it would have been missed under a
+                            due-in-window-only denominator. The numerator is
+                            that same pending set minus the ones that produced
+                            a "time shadow item" line in the window.
 
 A rate whose denominator is 0 is `null`. Exit 0 on success, writing
 ~/.human/logs/prospective-shadow-<until>.json (0600, via the shared private
@@ -54,7 +60,9 @@ writer scripts/curator_names.py write_jsonl_private -- ruling F15). Exit 2
   - memory.db is missing or not migrated to the v2 columns, or
   - any log line matching the "prospective ... shadow ..." prefix fails to
     parse as one of the three known shapes (counts / item / uptake) with its
-    required fields. Policy choice, documented here because it is not
+    required fields present AND every count/id value a non-negative int
+    (e.g. "candidates=1x2" refuses; it never reaches int() uncaught). Policy
+    choice, documented here because it is not
     obvious: ANY malformed shadow line refuses the whole report, rather than
     skipping it or tolerating a count under some threshold. A malformed line
     most often means the log format drifted out from under this parser, and
@@ -92,6 +100,14 @@ KV = re.compile(r"(\w+)=(\S+)")
 
 COUNT_FIELDS = ("candidates", "fire", "resolved", "cancel", "not_now", "parse_fail",
                 "judge_err", "expired", "capped")  # write_err is optional (older logs)
+
+
+def _nonneg_int(s):
+    """True iff `s` parses as a non-negative integer (ASCII digits only --
+    rejects "1x2", "-1", "", None). Every count field and id on a shadow log
+    line must satisfy this before build() ever calls int() on it -- a log
+    line is data from a running daemon, not a trusted internal value."""
+    return isinstance(s, str) and s.isdigit()
 
 
 def refuse(msg):
@@ -137,16 +153,24 @@ def read_log(path, since, until):
                 if not all(k in kv for k in COUNT_FIELDS):
                     malformed += 1
                     continue
+                # Every count field -- and write_err, if present -- must be a
+                # non-negative int. "candidates=1x2" must refuse, never raise
+                # an uncaught ValueError deep in build()'s int(kv[f]).
+                if (not all(_nonneg_int(kv[f]) for f in COUNT_FIELDS) or
+                        ("write_err" in kv and not _nonneg_int(kv["write_err"]))):
+                    malformed += 1
+                    continue
                 rows.append({"ts": ts, "time": is_time, "kind": "counts", "kv": kv})
             elif im:
                 is_time, kv = bool(im.group(1)), dict(KV.findall(im.group(2)))
-                if "id" not in kv or "verdict" not in kv or not kv["id"].isdigit():
+                if "id" not in kv or "verdict" not in kv or not _nonneg_int(kv["id"]):
                     malformed += 1
                     continue
                 rows.append({"ts": ts, "time": is_time, "kind": "item", "kv": kv})
             elif um:
                 kv = dict(KV.findall(um.group(1)))
-                if "would_fire" not in kv or "used" not in kv:
+                if ("would_fire" not in kv or "used" not in kv or
+                        not _nonneg_int(kv["would_fire"]) or not _nonneg_int(kv["used"])):
                     malformed += 1
                     continue
                 rows.append({"ts": ts, "time": False, "kind": "uptake", "kv": kv})
@@ -192,12 +216,17 @@ def pending_at_start(con, cue_kind, since):
         "WHERE cue_kind = ? AND status = 'pending' AND created_at < ?", (cue_kind, since))}
 
 
-def due_in_window(con, since, until):
-    """Time cues due in [since, until) -- the design brief's own denominator
-    for time misses; kept as-is (see module docstring)."""
+def time_pending_at_start(con, since, until):
+    """Ruling F6 extended to time cues: rows cue_kind='time', created before
+    --since, still 'pending' now (same proxy as pending_at_start -- exact
+    under SHADOW, since apply=false never writes status), AND due_at <
+    --until -- due within the window OR already overdue before it opened. An
+    intention overdue before --since and still pending must count as a miss
+    candidate; a due-in-window-only denominator would drop it."""
     return {(c, a) for c, a in con.execute(
         "SELECT DISTINCT contact_id, action FROM prospective_memories "
-        "WHERE cue_kind='time' AND due_at >= ? AND due_at < ?", (since, until))}
+        "WHERE cue_kind='time' AND status='pending' AND created_at < ? AND due_at < ?",
+        (since, until))}
 
 
 def build(rows, con, since, until):
@@ -247,15 +276,15 @@ def build(rows, con, since, until):
 
     cued = cued_intentions(con, since, until)
     kw_pending_start = pending_at_start(con, "keyword", since)
-    time_due = due_in_window(con, since, until)
+    time_pending_start = time_pending_at_start(con, since, until)
 
     c["cued_intentions"] = len(cued)
     c["fire_intentions"] = len(fired(kw_fire_id_days))
     c["pending_at_start_intentions"] = len(kw_pending_start)
     c["missed_intentions"] = len(kw_pending_start - reached(kw_item_ids))
-    c["time_due_intentions"] = len(time_due)
+    c["time_due_intentions"] = len(time_pending_start)  # pending-at-start AND due<until (F6)
     c["time_fire_intentions"] = len(fired(time_fire_id_days))
-    c["time_missed_intentions"] = len(time_due - reached(time_item_ids))
+    c["time_missed_intentions"] = len(time_pending_start - reached(time_item_ids))
     c["malformed_items"] = malformed_items
     return c
 
@@ -284,8 +313,8 @@ NOTES = {
     "duplicate_rate": "not_measurable_in_shadow",
     "time_duplicate_rate": "not_measurable_in_shadow",
     "miss_rate_denominator": "pending_at_window_start (ruling F6)",
-    "time_miss_rate_denominator": "due_in_window (design brief; F6 does not apply the same "
-                                  "way to time cues, which have no inbound-text cue concept)",
+    "time_miss_rate_denominator": "pending_at_window_start_and_due_before_until "
+                                  "(ruling F6 extended to time cues)",
     "judge_failure_rate_excludes": "write_err (reported separately as a count)",
 }
 

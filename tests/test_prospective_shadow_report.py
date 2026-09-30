@@ -296,3 +296,61 @@ def test_rates_with_empty_denominators_are_null():
     assert r["time_resolved_rate"] is None
     assert r["time_miss_rate"] is None
     assert r["time_judge_failure_rate"] is None
+
+
+# ---------------------------------------------------------------------------
+# Fix round 1, (1): time_miss_rate's denominator is time-cue intentions
+# PENDING AT THE WINDOW START (created before --since, still pending) whose
+# due_at < --until -- due within the window OR already overdue before it
+# opened. id=10 is overdue two days before the window and never produces a
+# time item line: under the superseded due-in-window-only denominator it
+# would be invisible (0 misses / 1 due = 0.0); under the fix it is the one
+# genuine miss (1 missed / 2 pending-at-start-and-due-before-until = 0.5).
+# ---------------------------------------------------------------------------
+
+LOG_TIME_OVERDUE = """\
+2026-10-01T12:00:05 INFO  [prospective] prospective time shadow: candidates=1 fire=1 resolved=0 cancel=0 not_now=0 parse_fail=0 judge_err=0 expired=0 capped=0 write_err=0
+2026-10-01T12:00:05 INFO  [prospective] prospective time shadow item: id=11 verdict=fire
+"""
+
+
+def test_time_miss_rate_counts_overdue_before_window(tmp_path):
+    con, path = new_db(tmp_path)
+    # Overdue before the window even opened, still pending, never judged.
+    add_memory(con, 10, "call the vet", cue_kind="time",
+               created_at=SINCE_EPOCH - 200000, due_at=SINCE_EPOCH - 172800)
+    # Due inside the window, judged (fire).
+    add_memory(con, 11, "confirm reservation", cue_kind="time",
+               created_at=SINCE_EPOCH - 86400, due_at=SINCE_EPOCH + 3600)
+    con.commit()
+    con.close()
+
+    rc, out = run(tmp_path, LOG_TIME_OVERDUE, path)
+    assert rc == 0
+    body, _ = read_payload(out)
+    c, r = body["counts"], body["rates"]
+
+    assert c["time_due_intentions"] == 2             # both pending-at-start AND due<until
+    assert c["time_missed_intentions"] == 1          # only "call the vet" (id=10) never judged
+    assert r["time_miss_rate"] == 0.5                # 1/2, NOT 0/1 (due-in-window-only denominator)
+
+
+# ---------------------------------------------------------------------------
+# Fix round 1, (2): read_log's malformed-line gate validates VALUES too, not
+# just field presence. "candidates=1x2" must refuse (exit 2, nothing
+# written), never reach an uncaught ValueError in build()'s int(kv[f]).
+# ---------------------------------------------------------------------------
+
+LOG_BAD_VALUE = """\
+2026-10-01T12:00:05 INFO  [prospective] prospective shadow: candidates=1x2 fire=1 resolved=0 cancel=0 not_now=0 parse_fail=0 judge_err=0 expired=0 capped=0 write_err=0
+"""
+
+
+def test_malformed_count_value_refuses_and_writes_nothing(tmp_path):
+    con, path = new_db(tmp_path)
+    con.commit()
+    con.close()
+
+    rc, out = run(tmp_path, LOG_BAD_VALUE, path)
+    assert rc == 2
+    assert not out.exists()
