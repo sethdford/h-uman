@@ -1191,9 +1191,11 @@ static void time_off_legacy_mark_sent_output_is_unchanged_by_the_twin_settle(voi
             alloc.free(alloc.ctx, b.ctx, b.ctx_len + 1);
     }
     HU_ASSERT_EQ(m.calls, 0);
+    /* only the v2 twin moved, and the listed-only send claims no evidence:
+     * DONE with no outcome (fix round 1, C1) */
     HU_ASSERT_EQ(t_count(&ma, "SELECT COUNT(*) FROM prospective_memories WHERE cue_kind='time' AND "
-                              "status='done' AND outcome='used'"),
-                 (int64_t)1); /* only the v2 twin moved */
+                              "status='done' AND outcome IS NULL"),
+                 (int64_t)1);
     ma.vtable->deinit(ma.ctx);
     mb.vtable->deinit(mb.ctx);
     t_env_clear();

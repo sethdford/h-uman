@@ -138,16 +138,20 @@ hu_error_t hu_prospective_repo_each_dated_ledger_row(sqlite3 *db, hu_prospective
                                                      void *ctx);
 
 /* A settled time intention (DONE / CANCELED / EXPIRED) retires its ledger
- * twins so the legacy readers never resurface it: pending commitments with
- * the same contact + description get status 'followed_up' / 'canceled' /
- * 'expired' and followed_up_at = now; unsent delayed_followups with the same
- * contact + topic get sent=1. The row named by the intention's source key is
- * retired by id; then (known gap 4) every other still-open ledger row of the
- * same contact whose mirror text (hu_prospective_mirror_action: a dated
- * frame's topic, a contact's promise rephrased, else verbatim) normalizes to
- * the intention's action is retired too -- the rows the upsert collapsed
- * into this one intention, e.g. a topic's "(tomorrow)" and "(in 2 days)"
- * frames. Compared in C, never with SQL LIKE. */
+ * twins so the legacy readers never resurface it: pending commitments get
+ * status 'followed_up' / 'canceled' / 'expired' and followed_up_at = now;
+ * unsent delayed_followups get sent=1. The row named by the intention's
+ * source key is retired by id (with its F20 twin: same contact, topic ==
+ * description). Then (known gap 4) the contact's other still-open ledger
+ * rows whose mirror text (hu_prospective_mirror_action: a dated frame's
+ * topic, a contact's promise rephrased, else verbatim) normalizes to the
+ * intention's action -- the rows the upsert collapsed into it -- are
+ * retired too, compared in C. Every by-text/by-topic retire is bounded to
+ * rows due <= it->due_at + HU_PROSPECTIVE_TIME_GRACE_S (fix round 1): a
+ * same-words promise dated beyond that is a later promise. The earliest
+ * such survivor is re-mirrored as a fresh open time row keyed by its own
+ * ledger id, with its own due -- call this only once the intention is
+ * terminal, as pm_retire does. */
 hu_error_t hu_prospective_repo_sync_source(sqlite3 *db, const hu_prospective_item_t *it,
                                            hu_prospective_status_t to, int64_t now);
 
@@ -162,16 +166,18 @@ hu_error_t hu_prospective_repo_retire_ledger_row(sqlite3 *db, bool is_followup, 
                                                  hu_prospective_status_t to, int64_t now,
                                                  int *changed);
 
-/* Known gap 2: the legacy path delivered delayed follow-up `followup_id`
- * (hu_superhuman_delayed_followup_mark_sent). Its OPEN time twin -- the row
- * keyed "followup:<id>", or the open row of the same contact whose action is
- * this follow-up's mirror text (hu_prospective_mirror_action, compared
- * normalized, as the upsert dedupes), e.g. the collapsed F20 row keyed
- * "commitment:<N>" -- moves to DONE with outcome USED, the state a delivered
- * and used intention ends in. Only prospective_memories is written: the
- * ledger itself is the legacy path's, so what it sends is unchanged. No
- * twin (no row, a skipped mirror, already settled) is HU_OK with nothing
- * written. *changed (may be NULL) is the number of rows moved. */
+/* Known gap 2: the legacy path marked delayed follow-up `followup_id` sent
+ * (hu_superhuman_delayed_followup_mark_sent -- after an F31 send, or after
+ * a send whose proposer context merely LISTED it). Its PENDING time twin --
+ * the row keyed "followup:<id>", or the pending row of the same contact
+ * whose action is this follow-up's mirror text (hu_prospective_mirror_action,
+ * compared normalized, as the upsert dedupes) and which is not dated beyond
+ * the follow-up's due + HU_PROSPECTIVE_TIME_GRACE_S, e.g. the collapsed F20
+ * row keyed "commitment:<N>" -- moves to DONE with NO outcome: the legacy
+ * path claims no evidence the reply used it. A SURFACED twin is left alone:
+ * hu_prospective_v2_after_delivery judges it. Only prospective_memories is
+ * written, so what the legacy path sends is unchanged. No twin is HU_OK
+ * with nothing written. *changed (may be NULL) is the number of rows moved. */
 hu_error_t hu_prospective_repo_settle_followup_twin(sqlite3 *db, int64_t followup_id, int64_t now,
                                                     int *changed);
 

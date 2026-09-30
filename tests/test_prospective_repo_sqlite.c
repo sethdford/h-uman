@@ -14,6 +14,7 @@
 #include "human/memory.h"
 #include "human/memory/prospective_policy.h"
 #include "human/memory/prospective_repo.h"
+#include "human/memory/prospective_v2.h"
 #include "human/memory/superhuman.h"
 #include <sqlite3.h>
 #include <stdio.h>
@@ -784,10 +785,10 @@ static void repo_legacy_mark_sent_settles_the_v2_twin(void) {
     HU_ASSERT_EQ(hu_superhuman_delayed_followup_mark_sent(&mem, 1), HU_OK);
 
     q_text(db,
-           "SELECT status || '/' || fired || '/' || outcome FROM prospective_memories WHERE "
-           "trigger_value='commitment:1'",
+           "SELECT status || '/' || fired || '/' || ifnull(outcome, 'none') FROM "
+           "prospective_memories WHERE trigger_value='commitment:1'",
            s, sizeof(s));
-    HU_ASSERT_STR_EQ(s, "done/1/used");
+    HU_ASSERT_STR_EQ(s, "done/1/none"); /* no evidence claim: the legacy path's send */
     q_text(db, "SELECT status FROM prospective_memories WHERE contact_id='+15550000031'", s,
            sizeof(s));
     HU_ASSERT_STR_EQ(s, "pending"); /* the other contact's identical topic */
@@ -804,10 +805,10 @@ static void repo_legacy_mark_sent_settles_the_v2_twin(void) {
     /* a lone keyed twin ("followup:3") settles by its key */
     HU_ASSERT_EQ(hu_superhuman_delayed_followup_mark_sent(&mem, 3), HU_OK);
     q_text(db,
-           "SELECT status || '/' || outcome FROM prospective_memories WHERE "
+           "SELECT status || '/' || ifnull(outcome, 'none') FROM prospective_memories WHERE "
            "trigger_value='followup:3'",
            s, sizeof(s));
-    HU_ASSERT_STR_EQ(s, "done/used");
+    HU_ASSERT_STR_EQ(s, "done/none");
     q_text(db, "SELECT status FROM prospective_memories WHERE contact_id='+15550000031'", s,
            sizeof(s));
     HU_ASSERT_STR_EQ(s, "pending");
@@ -837,39 +838,197 @@ static void repo_legacy_mark_sent_without_a_twin_is_a_no_op(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
-/* Known gap 4, commitment side of the same shape: two owner commitments
- * with the same words (different deadlines) collapse into ONE open row;
- * settling it retires both, while the same contact's other promise and
- * another contact's identical one stay pending. */
-static void repo_sync_source_retires_every_collapsed_ledger_row(void) {
+#define PM_T0 ((int64_t)1790000000)
+#define PM_D  ((int64_t)86400)
+
+/* The open time row of `contact` with `action`, as the v2 pass lists it. */
+static void open_item(hu_allocator_t *alloc, sqlite3 *db, const char *contact, const char *action,
+                      hu_prospective_item_t *out) {
+    hu_prospective_item_t *items = NULL;
+    size_t n = 0;
+    HU_ASSERT_EQ(hu_prospective_repo_list(alloc, db, HU_PM_CUE_TIME, HU_PM_PENDING, contact,
+                                          strlen(contact), &items, &n),
+                 HU_OK);
+    bool found = false;
+    for (size_t i = 0; i < n && !found; i++)
+        if (strcmp(items[i].action, action) == 0) {
+            *out = items[i];
+            found = true;
+        }
+    hu_prospective_repo_free(alloc, items, n);
+    HU_ASSERT_TRUE(found);
+}
+
+/* pm_retire's order: the intention goes terminal, then its ledger follows. */
+static void settle(sqlite3 *db, const hu_prospective_item_t *it, hu_prospective_status_t to,
+                   int64_t now) {
+    int ch = 0;
+    HU_ASSERT_EQ(
+        hu_prospective_repo_transition(db, it, to, HU_PM_OUTCOME_NONE, it->attempts, now, &ch),
+        HU_OK);
+    HU_ASSERT_TRUE(ch > 0);
+    HU_ASSERT_EQ(hu_prospective_repo_sync_source(db, it, to, now), HU_OK);
+}
+
+/* Fix round 1, CRITICAL A: the gap-4 sweep retires only the collapsed rows
+ * due within the intention's grace window (due <= due_at + grace). A
+ * same-words sibling dated beyond it is a later promise F1 merely folded in
+ * while the first was open: it survives, and gets its OWN fresh open time
+ * row keyed by its own ledger id with its own due -- for DONE, CANCELED and
+ * EXPIRED alike. The same contact's other promise and another contact's
+ * identical one are untouched. */
+static void repo_sweep_is_bounded_by_grace_and_remirrors_the_survivor(void) {
+    static const struct {
+        hu_prospective_status_t to;
+        const char *ledger;
+    } k[] = {{HU_PM_DONE, "followed_up"}, {HU_PM_CANCELED, "canceled"}, {HU_PM_EXPIRED, "expired"}};
+    for (size_t t = 0; t < sizeof(k) / sizeof(k[0]); t++) {
+        hu_allocator_t alloc = hu_system_allocator();
+        hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+        sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+        static const struct {
+            const char *contact;
+            const char *desc;
+            int64_t due;
+        } c[] = {{"+15550000033", "call the dentist", PM_T0},             /* #1: keys the row */
+                 {"+15550000033", "call  The Dentist", PM_T0 + PM_D},     /* #2: within grace */
+                 {"+15550000033", "call the dentist", PM_T0 + 11 * PM_D}, /* #3: beyond */
+                 {"+15550000033", "return the drill", PM_T0},
+                 {"+15550000034", "call the dentist", PM_T0}};
+        for (size_t i = 0; i < sizeof(c) / sizeof(c[0]); i++)
+            HU_ASSERT_EQ(hu_superhuman_commitment_store(&mem, &alloc, c[i].contact, 12, c[i].desc,
+                                                        strlen(c[i].desc), "me", 2, c[i].due),
+                         HU_OK);
+        HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE contact_id="
+                               "'+15550000033'"),
+                     (int64_t)2); /* dentist x3 collapsed into commitment:1, + drill */
+        hu_prospective_item_t it;
+        open_item(&alloc, db, "+15550000033", "call the dentist", &it);
+        HU_ASSERT_STR_EQ(it.trigger_value, "commitment:1");
+        settle(db, &it, k[t].to, PM_T0 + 3600);
+
+        char want[160];
+        snprintf(want, sizeof(want), "1:%s,2:%s,3:pending,4:pending,5:pending", k[t].ledger,
+                 k[t].ledger);
+        char got[160];
+        q_text(db,
+               "SELECT group_concat(id || ':' || status) FROM "
+               "(SELECT id, status FROM commitments ORDER BY id)",
+               got, sizeof(got));
+        HU_ASSERT_STR_EQ(got, want);
+        /* the survivor is represented again: its own key, its own due */
+        char row[160];
+        q_text(db,
+               "SELECT action || '|' || status || '|' || due_at FROM prospective_memories WHERE "
+               "trigger_value='commitment:3'",
+               row, sizeof(row));
+        HU_ASSERT_STR_EQ(row, "call the dentist|pending|1790950400");
+        HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE contact_id="
+                               "'+15550000033' AND status IN ('pending','surfaced')"),
+                     (int64_t)2); /* the survivor's row + drill: one per intention */
+        mem.vtable->deinit(mem.ctx);
+    }
+}
+
+/* Same bound on the F20 twin retire by description: two F20 pairs with the
+ * same words, the second due two weeks later, collapse into commitment:1.
+ * Settling it retires the first pair only; the second pair's commitment AND
+ * follow-up stay open, and the second pair is re-mirrored under its own id. */
+static void repo_sync_source_f20_twin_retire_is_bounded(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
     sqlite3 *db = hu_sqlite_memory_get_db(&mem);
-    static const char *const d[] = {"call the dentist", "call  The Dentist", "call the dentist",
-                                    "return the drill"};
-    static const char *const c[] = {"+15550000033", "+15550000033", "+15550000034", "+15550000033"};
-    for (int i = 0; i < 4; i++)
-        HU_ASSERT_EQ(hu_superhuman_commitment_store(&mem, &alloc, c[i], 12, d[i], strlen(d[i]),
-                                                    "me", 2, 9000 + i * 86400),
+    const char *desc = "call mom";
+    for (int i = 0; i < 2; i++) {
+        int64_t due = PM_T0 + i * 14 * PM_D;
+        HU_ASSERT_EQ(hu_superhuman_commitment_store(&mem, &alloc, "+15550000035", 12, desc,
+                                                    strlen(desc), "me", 2, due),
                      HU_OK);
-    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE contact_id="
-                           "'+15550000033'"),
-                 (int64_t)2); /* dentist x2 collapsed + drill */
+        HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, "+15550000035", 12, desc,
+                                                             strlen(desc), due, "me", 2),
+                     HU_OK);
+    }
     hu_prospective_item_t it;
-    memset(&it, 0, sizeof(it));
-    it.cue_kind = HU_PM_CUE_TIME;
-    q_text(db,
-           "SELECT trigger_value FROM prospective_memories WHERE contact_id='+15550000033' AND "
-           "action='call the dentist'",
-           it.trigger_value, sizeof(it.trigger_value));
+    open_item(&alloc, db, "+15550000035", "call mom", &it);
     HU_ASSERT_STR_EQ(it.trigger_value, "commitment:1");
-    snprintf(it.action, sizeof(it.action), "call the dentist");
-    snprintf(it.contact_id, sizeof(it.contact_id), "+15550000033");
-    HU_ASSERT_EQ(hu_prospective_repo_sync_source(db, &it, HU_PM_CANCELED, 9500), HU_OK);
-    HU_ASSERT_EQ(q_int(db, "SELECT group_concat(id || ':' || status) = "
-                           "'1:canceled,2:canceled,3:pending,4:pending' FROM "
-                           "(SELECT id, status FROM commitments ORDER BY id)"),
+    settle(db, &it, HU_PM_DONE, PM_T0 + 3600);
+    char got[128];
+    q_text(db,
+           "SELECT (SELECT group_concat(status) FROM (SELECT status FROM commitments ORDER BY id))"
+           " || '/' || (SELECT group_concat(sent) FROM (SELECT sent FROM delayed_followups ORDER "
+           "BY id))",
+           got, sizeof(got));
+    HU_ASSERT_STR_EQ(got, "followed_up,pending/1,0");
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE "
+                           "trigger_value='commitment:2' AND status='pending' AND "
+                           "due_at=1791209600"),
                  (int64_t)1);
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* Fix round 1, IMPORTANT C1: a twin v2 already SURFACED belongs to
+ * after_delivery -- only it can say whether the reply used the action. The
+ * legacy mark-sent leaves it surfaced; the delivery that follows judges it
+ * (here: used -> done/used on evidence). */
+static void repo_legacy_mark_sent_skips_a_surfaced_twin(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    const char *desc = "call the dentist";
+    HU_ASSERT_EQ(hu_superhuman_commitment_store(&mem, &alloc, "+15550000036", 12, desc,
+                                                strlen(desc), "me", 2, PM_T0),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, "+15550000036", 12, desc,
+                                                         strlen(desc), PM_T0, "me", 2),
+                 HU_OK);
+    hu_prospective_item_t it;
+    open_item(&alloc, db, "+15550000036", desc, &it);
+    HU_ASSERT_EQ(hu_prospective_repo_transition(db, &it, HU_PM_SURFACED, HU_PM_OUTCOME_NONE, 0,
+                                                PM_T0 + 60, NULL),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_mark_sent(&mem, 1), HU_OK);
+    char s[64];
+    q_text(db, "SELECT status || '/' || ifnull(outcome, 'none') FROM prospective_memories", s,
+           sizeof(s));
+    HU_ASSERT_STR_EQ(s, "surfaced/none"); /* untouched by the legacy path */
+    static const char reply[] = "did you ever call the dentist?";
+    hu_prospective_delivery_counts_t dc;
+    HU_ASSERT_EQ(hu_prospective_v2_after_delivery(&alloc, db, HU_PM_CUE_TIME, "+15550000036", 12,
+                                                  reply, sizeof(reply) - 1, PM_T0 + 120, &dc),
+                 HU_OK);
+    HU_ASSERT_EQ(dc.used, (size_t)1);
+    q_text(db, "SELECT status || '/' || ifnull(outcome, 'none') FROM prospective_memories", s,
+           sizeof(s));
+    HU_ASSERT_STR_EQ(s, "done/used"); /* judged by after_delivery, on evidence */
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* Fix round 1, IMPORTANT C2: the action-match fallback is due-bounded like
+ * the sweep. A never-mirrored follow-up "call mom" due T is marked sent;
+ * the open "call mom" row due T+10d is a LATER promise and stays open. A
+ * follow-up due within grace of that row does close it (control). */
+static void repo_legacy_mark_sent_leaves_a_later_dated_same_action_row_open(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    char sql[256];
+    snprintf(sql, sizeof(sql),
+             "INSERT INTO delayed_followups(contact_id,topic,scheduled_at,sent) VALUES"
+             "('+15550000037','call mom',%lld,0),('+15550000037','call mom',%lld,0)",
+             (long long)PM_T0, (long long)(PM_T0 + 9 * PM_D));
+    HU_ASSERT_EQ(sqlite3_exec(db, sql, NULL, NULL, NULL), SQLITE_OK); /* pre-mirror rows */
+    HU_ASSERT_EQ(hu_superhuman_commitment_store(&mem, &alloc, "+15550000037", 12, "call mom", 8,
+                                                "me", 2, PM_T0 + 10 * PM_D),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_mark_sent(&mem, 1), HU_OK);
+    char s[32];
+    q_text(db, "SELECT status FROM prospective_memories WHERE trigger_value='commitment:1'", s,
+           sizeof(s));
+    HU_ASSERT_STR_EQ(s, "pending"); /* due T+10d > T + grace: not this follow-up's twin */
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_mark_sent(&mem, 2), HU_OK);
+    q_text(db, "SELECT status FROM prospective_memories WHERE trigger_value='commitment:1'", s,
+           sizeof(s));
+    HU_ASSERT_STR_EQ(s, "done"); /* due T+10d <= T+9d + grace */
     mem.vtable->deinit(mem.ctx);
 }
 
@@ -895,7 +1054,10 @@ void run_prospective_repo_sqlite_tests(void) {
     HU_RUN_TEST(repo_sync_source_followup_id_is_contact_scoped);
     HU_RUN_TEST(repo_legacy_mark_sent_settles_the_v2_twin);
     HU_RUN_TEST(repo_legacy_mark_sent_without_a_twin_is_a_no_op);
-    HU_RUN_TEST(repo_sync_source_retires_every_collapsed_ledger_row);
+    HU_RUN_TEST(repo_sweep_is_bounded_by_grace_and_remirrors_the_survivor);
+    HU_RUN_TEST(repo_sync_source_f20_twin_retire_is_bounded);
+    HU_RUN_TEST(repo_legacy_mark_sent_skips_a_surfaced_twin);
+    HU_RUN_TEST(repo_legacy_mark_sent_leaves_a_later_dated_same_action_row_open);
 }
 
 #else
