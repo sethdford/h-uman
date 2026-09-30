@@ -365,11 +365,7 @@ export class ScSecurityView extends GatewayAwareLitElement {
   /* The gateway answers config.set with {saved, error}; a request that
    * resolves is not a saved setting. Throw so each caller's catch reports the
    * server's reason instead of a success toast for a write that never landed. */
-  private async _setConfig(
-    gw: GatewayClient,
-    key: string,
-    value: unknown,
-  ): Promise<void> {
+  private async _setConfig(gw: GatewayClient, key: string, value: unknown): Promise<void> {
     const res = await gw.request<{ saved?: boolean; error?: string }>("config.set", {
       key,
       value,
