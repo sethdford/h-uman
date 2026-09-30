@@ -8131,11 +8131,13 @@ size_t hu_conversation_build_music_prompt(const char *incoming, size_t incoming_
         return 0;
 
     size_t clip = incoming_len > 200 ? 200 : incoming_len;
+    /* Whose message is whose, said outright: "recent message context" let the
+     * model write the caption as the contact ("yeah u def my sugar daddy" to
+     * Lexi, 2026-09-29). */
     int n = snprintf(out, out_cap,
-                     "Based on this conversation, suggest ONE song that fits the mood. "
-                     "Return ONLY in this format: ARTIST - TITLE | brief casual message\n"
-                     "The casual message should feel like a natural text — not a recommendation.\n"
-                     "Recent message context: \"%.*s\"",
+                     "Pick ONE song for this moment. Reply ONLY: ARTIST - TITLE | caption\n"
+                     "Their last text to you: \"%.*s\"\n"
+                     "The caption is you texting them, your voice - never a line in theirs.",
                      (int)clip, incoming);
     return (n > 0 && (size_t)n < out_cap) ? (size_t)n : 0;
 }
