@@ -686,59 +686,15 @@ static const ch_case_t k_cases[] = {
      .memory = true,
      .session = "alice",
      .probe_contains = "[About this contact]"},
-    /* BLOCKED (fix round 1, I1) — full evidence trail, do not re-attempt
-     * via fixture tuning without re-reading this first.
-     *
-     * grounding_on and grounding_off are PROVABLY byte-identical on
-     * unmodified code, and this is not fixable from the test harness
-     * alone. hu_agent_load_graph_grounding (src/agent/graph_grounding.c)
-     * DOES compose real content here (confirmed via the "live: injected
-     * N bytes tier=2 lexical=2 ..." log line — non-zero, no drop_reason),
-     * but that content can never survive to the final prompt, because
-     * `graph_ctx` is unconditionally freed by the very first later merge
-     * that finds `memory_ctx` non-empty — and `memory_ctx` is PROVABLY
-     * always non-empty whenever agent->w7_facade is set (a precondition
-     * grounding itself also requires, so there is no fixture that keeps
-     * grounding able to inject while making this false):
-     *
-     *   1. src/agent/memory_loader.c hu_memory_loader_load(), the `else
-     *      if (loader->facade)` branch (~line 404): when the agent has no
-     *      retrieval_engine (true for every case here), this branch calls
-     *      the NO-PROVIDER hu_w12_planner_recall() UNCONDITIONALLY whenever
-     *      loader->facade is set. With no provider, select_planner_backend
-     *      (world_model_bridge.c) always selects "goal-conditioned"
-     *      (gc_plan, retrieval_planner.c), which seeds PageRank from EVERY
-     *      entity in the world model with no message-relevance filter.
-     *   2. gc_plan's neighbor-expansion steps read via the NEIGHBORS query
-     *      variant, and src/memory/memory_v1_backend.c hardcodes
-     *      `recs[i].confidence = 1.0f` for BOTH entity AND relation
-     *      records on that variant (lines ~128/204/256) — a dead
-     *      verification path: W11's confidence filter (kept_threshold=0.3,
-     *      src/agent/retrieval_planner.c verifier_filter_records) can
-     *      never drop anything read this way, however low the graph's
-     *      real confidence is set. So step 1's planner call ALWAYS
-     *      succeeds and returns non-empty text whenever the contact has
-     *      any entity — memory_ctx can never end up NULL.
-     *   3. Once memory_ctx is non-empty, TWO separate later merges in
-     *      agent_turn.c (the W12 "[About this contact]" merge at ~2374,
-     *      and the "Memory Tiers" core-prompt merge at ~3362, gated only
-     *      on agent->sota.sota_initialized which hu_agent_from_config
-     *      always sets true) each unconditionally free graph_ctx the
-     *      moment memory_ctx (or contact_text) is non-empty — regardless
-     *      of HU_GRAPH_GROUNDING's value.
-     *
-     * None of steps 1-3 are HU_IS_TEST-only code, so this may also be
-     * dead in production, not just under test — flagged for a follow-up
-     * task; not fixed here per this task's "no src/ changes" scope.
-     * A longer message (>12 words) and low relation/entity confidence
-     * (see ch_seed_graph) are kept below as partial, verified-correct
-     * hardening: they close off the SEPARATE, provider-driven W12 path
-     * agent_turn.c's own block would otherwise take (confirmed: with
-     * this fixture, "[About this contact]" no longer appears in either
-     * golden), even though the memory_loader.c path above still wins.
-     * The probe therefore asserts today's true, unremarkable behavior —
-     * NOT the intended discriminating behavior — until a production fix
-     * lands. */
+    /* Graph grounding on/off (spec §4.1). Before #561 (913a3f7e3) these two
+     * goldens were byte-identical: two memory merges in hu_agent_turn freed
+     * graph_ctx without merging it, so LIVE grounding never reached the
+     * prompt in production either. #561 fixed that, and fixed NEIGHBORS
+     * reads reporting confidence 1.0 (so W11's 0.3 filter now drops the
+     * fixture's low-confidence relation). The probes now discriminate on
+     * the grounding composer's own line format ("<a> related_to <b>: <note>");
+     * the "## Relationship Context" heading is NOT specific — the
+     * relationship-stage section uses the same heading. */
     {.name = "grounding_on",
      .msg = "hows the sailboat coming along, have you had a chance to get "
             "down to the marina lately",
@@ -749,7 +705,7 @@ static const ch_case_t k_cases[] = {
      .graph = true,
      .grounding = "on",
      .session = "alice",
-     .probe_contains = "docked at slip 14"},
+     .probe_contains = "sailboat related_to marina: docked at slip 14"},
     {.name = "grounding_off",
      .msg = "hows the sailboat coming along, have you had a chance to get "
             "down to the marina lately",
@@ -759,7 +715,6 @@ static const ch_case_t k_cases[] = {
      .memory = true,
      .graph = true,
      .grounding = "off",
-     .probe_contains = "docked at slip 14",
      .probe_absent = "sailboat related_to marina: docked at slip 14",
      .session = "alice"},
     /* S8 silence */
