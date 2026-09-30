@@ -342,3 +342,13 @@ def test_build_resolves_and_redacts_contact_names(tmp_path, monkeypatch):
     # Proves the tokens actually reached redact() and transformed the text
     # (not merely that "John Smith" never appeared some other way).
     assert "[name]" in sheet_text
+
+
+def test_build_without_seed_still_records_a_reproducible_seed(tmp_path):
+    out = tmp_path / "sheet"
+    rc = psc.main(["build", "--log", make_log(tmp_path, 30), "--memory-db", make_db(tmp_path, 30),
+                   "--since", "2026-10-01", "--until", "2026-10-03", "--out-dir", str(out)])
+    assert rc == 0
+    key = json.loads((out / "answer_key.json").read_text())
+    assert isinstance(key["_seed"], int)  # never None: the shuffle must be replayable from the key
+    assert str(key["_seed"]) not in (out / "README.md").read_text()

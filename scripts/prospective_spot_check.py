@@ -56,6 +56,7 @@ import csv
 import json
 import os
 import random
+import secrets
 import sqlite3
 import sys
 from datetime import datetime, timezone
@@ -206,6 +207,8 @@ def build(a):
     finally:
         con.close()
 
+    if a.seed is None:  # still replayable: the drawn seed is recorded in the private key
+        a.seed = secrets.randbits(63)
     rng = random.Random(a.seed)
     rng.shuffle(sheet_rows)
     renumbered_key = {}
