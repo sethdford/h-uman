@@ -55,15 +55,18 @@ THRESHOLDS = {"set_f1_min": 0.80, "silent_false_alarm_max": 0.05, "cross_day_mis
 MINIMUMS = {"positive_expectations": 20, "silent_steps": 20, "cross_day_expectations": 10}
 
 #
-# NOTE: no trailing `$` — the real `probe --full` header carries a
-# `write_err=N` field after `bytes=N` that this fixed set of ten groups does
-# not need (measured against build/human, HU_STATE_DIR in a temp HOME:
-# "candidates=1 fire=1 ... bytes=94 write_err=0"). `re.match` only anchors
-# the start, so the extra trailing field is accepted, not required; the
-# fixture `human` in tests/test_pm_bench_local.py (which omits it) still
-# matches the same pattern.
+# NOTE: no trailing `$` on the 10 required groups — the real `probe --full`
+# header carries a `write_err=N` field after `bytes=N` (measured against
+# build/human, HU_STATE_DIR in a temp HOME: "candidates=1 fire=1 ... bytes=94
+# write_err=0"). write_err is captured as an 11th, OPTIONAL group: a step
+# whose write failed did not complete its measurement (the surfaced text
+# never made it out), so it must not be scored as either a correct silence
+# or a fire (fix round 1, controller ruling). The fixture `human` in
+# tests/test_pm_bench_local.py omits the field entirely; the trailing `?`
+# keeps that fixture's output matching the same pattern with write_err=0.
 HEADER = re.compile(r"^candidates=(\d+) fire=(\d+) resolved=(\d+) cancel=(\d+) not_now=(\d+) "
-                    r"parse_fail=(\d+) judge_err=(\d+) expired=(\d+) capped=(\d+) bytes=(\d+)")
+                    r"parse_fail=(\d+) judge_err=(\d+) expired=(\d+) capped=(\d+) bytes=(\d+)"
+                    r"(?: write_err=(\d+))?")
 HEADER_KEYS = ("candidates", "fire", "resolved", "cancel", "not_now", "parse_fail", "judge_err",
                "expired", "capped", "bytes")
 ITEM = re.compile(r"^item id=(\d+) "
@@ -320,7 +323,10 @@ def parse_full(out):
     m = HEADER.match(lines[0]) if lines else None
     if not m:
         raise ProbeError("probe header does not match the --full contract")
-    h = dict(zip(HEADER_KEYS, (int(g) for g in m.groups())))
+    groups = m.groups()
+    h = dict(zip(HEADER_KEYS, (int(g) for g in groups[:len(HEADER_KEYS)])))
+    write_err_group = groups[len(HEADER_KEYS)]
+    h["write_err"] = int(write_err_group) if write_err_group is not None else 0
     items = [(int(im.group(1)), im.group(2)) for im in map(ITEM.match, lines[1:]) if im]
     if len(items) != h["candidates"] or sum(1 for _, v in items if v == "fire") != h["fire"]:
         raise ProbeError("probe items disagree with its header")
@@ -349,7 +355,7 @@ def run_scenario(a, scn, scratch, idx):
     con = sqlite3.connect(db)
     by_action = {}
     results = []
-    judge = {"candidates": 0, "parse_fail": 0, "judge_err": 0}
+    judge = {"candidates": 0, "parse_fail": 0, "judge_err": 0, "write_err": 0}
     try:
         for it in scn["intentions"]:
             seed(con, it)
@@ -372,6 +378,13 @@ def run_scenario(a, scn, scratch, idx):
             h, items = parse_full(probe(a, args))
             for key in judge:
                 judge[key] += h[key]
+            if h["write_err"] > 0:
+                # F1R1 (no-number-without-a-measurement): the surfaced write
+                # failed, so this step's fire/silence was never actually
+                # observed. Counted above toward the judge failure budget
+                # (main()'s jfr); excluded here from scoring so it cannot be
+                # read as a correct silence or a correct fire.
+                continue
             pred = set()
             for item_id, verdict in items:
                 row = con.execute("SELECT action FROM prospective_memories WHERE id=?",
@@ -418,7 +431,7 @@ def main(argv=None):
         return refuse(str(e))
     scratch = tempfile.mkdtemp(prefix="pm-bench-")
     results = []
-    judge = {"candidates": 0, "parse_fail": 0, "judge_err": 0}
+    judge = {"candidates": 0, "parse_fail": 0, "judge_err": 0, "write_err": 0}
     try:
         for i, scn in enumerate(scenarios):
             r, j = run_scenario(a, scn, scratch, i)
@@ -431,7 +444,10 @@ def main(argv=None):
         shutil.rmtree(scratch, ignore_errors=True)
     if judge["candidates"] == 0:
         return refuse("no intention was ever judged")
-    jfr = (judge["parse_fail"] + judge["judge_err"]) / judge["candidates"]
+    # write_err joins parse_fail/judge_err in the same failure budget (fix
+    # round 1): a step whose surfaced write failed measured the plumbing, not
+    # the policy, same as a judge parse failure or a judge error.
+    jfr = (judge["parse_fail"] + judge["judge_err"] + judge["write_err"]) / judge["candidates"]
     if jfr > THRESHOLDS["judge_failure_max"]:
         print(f"INCONCLUSIVE: judge failures {jfr:.2f} > {THRESHOLDS['judge_failure_max']}; "
               "nothing written", file=sys.stderr)

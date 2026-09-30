@@ -66,6 +66,73 @@ def fake_bin(tmp_path, monkeypatch, mode):
     return str(b)
 
 
+# Fix round 1: a step whose header reports write_err>0 did not complete its
+# measurement (the surfaced write failed), so it must be excluded from
+# scoring and counted toward the same failure budget as parse_fail/judge_err.
+# This fixture always verdicts "fire" (mode irrelevant here) and additionally
+# reports write_err=1 on exactly the 1-based full-header call indices named
+# in FAKE_WRITE_ERR_AT, tracked via a counter file so behavior is
+# deterministic across the whole 56-scenario/112-step run.
+FAKE_WRITE_ERR = r'''#!/usr/bin/env python3
+import os, sqlite3, sys
+a = sys.argv[2:]          # argv[1] == "prospective"
+def arg(k):
+    return a[a.index(k) + 1] if k in a else None
+db = arg("--db")
+if a[0] == "init":
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE IF NOT EXISTS prospective_memories(id INTEGER PRIMARY KEY "
+                "AUTOINCREMENT, trigger_type TEXT, trigger_value TEXT, action TEXT, contact_id "
+                "TEXT, expires_at INTEGER, fired INTEGER DEFAULT 0, created_at INTEGER, cue_kind "
+                "TEXT DEFAULT 'keyword', due_at INTEGER, status TEXT DEFAULT 'pending', "
+                "surfaced_at INTEGER, attempts INTEGER DEFAULT 0, outcome TEXT, source TEXT "
+                "DEFAULT 'extractor')")
+    con.commit()
+    print("ok")
+    sys.exit(0)
+if "--deliver" in a:
+    print("surfaced=0 used=0 ignored=0 expired=0")
+    sys.exit(0)
+con = sqlite3.connect(db)
+now = int(arg("--now"))
+if "--tick" in a:
+    ids = [r[0] for r in con.execute("SELECT id FROM prospective_memories WHERE cue_kind='time' "
+                                     "AND status='pending' AND due_at<=?", (now,))]
+else:
+    text = arg("--inbound").lower()
+    ids = [i for i, cue in con.execute("SELECT id, trigger_value FROM prospective_memories "
+                                       "WHERE cue_kind='keyword' AND status='pending'")
+           if cue.lower() in text]
+ids = ids[:3]
+counter_path = os.environ["FAKE_WRITE_ERR_COUNTER"]
+trigger_at = {int(x) for x in os.environ["FAKE_WRITE_ERR_AT"].split(",") if x}
+try:
+    with open(counter_path) as f:
+        n = int(f.read().strip() or "0")
+except FileNotFoundError:
+    n = 0
+n += 1
+with open(counter_path, "w") as f:
+    f.write(str(n))
+write_err = 1 if n in trigger_at else 0
+print(f"candidates={len(ids)} fire={len(ids)} resolved=0 cancel=0 not_now=0 parse_fail=0 "
+      f"judge_err=0 expired=0 capped=0 bytes=0 write_err={write_err}")
+for i in ids:
+    print(f"item id={i} verdict=fire")
+'''
+
+
+def fake_bin_write_err(tmp_path, monkeypatch, trigger_at):
+    """trigger_at: iterable of 1-based full-header call indices (in the fixed
+    scenario order build_scenarios() produces) that should report write_err=1."""
+    b = tmp_path / "human"
+    b.write_text(FAKE_WRITE_ERR)
+    b.chmod(0o755)
+    monkeypatch.setenv("FAKE_WRITE_ERR_AT", ",".join(str(x) for x in trigger_at))
+    monkeypatch.setenv("FAKE_WRITE_ERR_COUNTER", str(tmp_path / "write-err-counter"))
+    return str(b)
+
+
 def test_committed_scenarios_meet_minimums_and_never_cross_cue():
     scenarios = pb.build_scenarios()
     counts = pb.validate(scenarios)
@@ -139,3 +206,41 @@ def test_missing_binary_refuses(tmp_path):
     out = tmp_path / "logs"
     assert pb.main(["--human-bin", str(tmp_path / "nope"), "--out-dir", str(out)]) == 2
     assert not out.exists()
+
+
+# Fix round 1: write_err joins the judge failure budget. The committed scenario
+# set makes exactly 112 full-header probe calls (every "inbound"/"tick" step
+# across 56 scenarios); --judge fire reports candidates=fire on every one of
+# them, so judge["candidates"] totals 112 regardless of write_err.
+
+
+def test_write_err_over_budget_is_inconclusive_and_writes_nothing(tmp_path, monkeypatch):
+    # 16 of 112 calls (multiples of 7) report write_err=1: 16/112 ~= 0.143 > the
+    # 10% judge-failure threshold, so the run must be inconclusive, same as a
+    # run whose judge mostly parse_fail'd or judge_err'd.
+    out = tmp_path / "logs"
+    trigger_at = range(7, 113, 7)
+    rc = pb.main(["--human-bin", fake_bin_write_err(tmp_path, monkeypatch, trigger_at),
+                  "--judge", "fire", "--out-dir", str(out)])
+    assert rc == 3
+    assert not out.exists()
+
+
+def test_write_err_under_budget_excludes_steps_from_scoring_denominators(tmp_path, monkeypatch):
+    # Only call #1 (clean-taco's first inbound step: tags=[], expect=["taco"]) reports
+    # write_err=1: 1/112 ~= 0.0089, well under the 10% budget, so the run proceeds to
+    # scoring with that one step excluded. It carries no silent/cross_day/update tag,
+    # so those three denominators must be exactly unchanged; only the total step count
+    # and the write_err total move.
+    out = tmp_path / "logs"
+    rc = pb.main(["--human-bin", fake_bin_write_err(tmp_path, monkeypatch, [1]),
+                  "--judge", "fire", "--out-dir", str(out)])
+    assert rc in (0, 1)
+    [report] = list(out.iterdir())
+    body = json.loads(report.read_text())
+    counts = body["counts"]
+    assert counts["write_err"] == 1
+    assert counts["steps"] == 111          # 112 judged steps minus the 1 excluded
+    assert counts["silent_steps"] == 48    # unaffected: excluded step isn't tagged silent
+    assert counts["cross_day_expectations"] == 16   # unaffected: not tagged cross_day
+    assert counts["update_steps"] == 16              # unaffected: not tagged update
