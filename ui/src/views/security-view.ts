@@ -2,6 +2,7 @@ import { html, css, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { staggerMotion9Styles } from "../styles/scroll-entrance.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
+import type { GatewayClient } from "../gateway.js";
 import { icons } from "../icons.js";
 import { ScToast } from "../components/hu-toast.js";
 import "../components/hu-page-hero.js";
@@ -361,15 +362,27 @@ export class ScSecurityView extends GatewayAwareLitElement {
     `;
   }
 
+  /* The gateway answers config.set with {saved, error}; a request that
+   * resolves is not a saved setting. Throw so each caller's catch reports the
+   * server's reason instead of a success toast for a write that never landed. */
+  private async _setConfig(
+    gw: GatewayClient,
+    key: string,
+    value: unknown,
+  ): Promise<void> {
+    const res = await gw.request<{ saved?: boolean; error?: string }>("config.set", {
+      key,
+      value,
+    });
+    if (!res?.saved) throw new Error(res?.error ?? "Setting was not saved");
+  }
+
   private async _onAutonomyChange(e: CustomEvent<{ value: string }>): Promise<void> {
     const level = parseInt(e.detail.value, 10);
     const gw = this.gateway;
     if (!gw) return;
     try {
-      await gw.request("config.set", {
-        key: "security.autonomy_level",
-        value: level,
-      });
+      await this._setConfig(gw, "security.autonomy_level", level);
       if (this.config) {
         this.config = { ...this.config, autonomy_level: level };
       }
@@ -387,10 +400,7 @@ export class ScSecurityView extends GatewayAwareLitElement {
     if (!gw) return;
     const enabled = e.detail.checked;
     try {
-      await gw.request("config.set", {
-        key: "security.sandbox_config.enabled",
-        value: enabled,
-      });
+      await this._setConfig(gw, "security.sandbox_config.enabled", enabled);
       if (this.config?.sandbox_config) {
         this.config = {
           ...this.config,
@@ -417,10 +427,7 @@ export class ScSecurityView extends GatewayAwareLitElement {
     const enabled = e.detail.checked;
     const netProxy = this.config?.sandbox_config?.net_proxy ?? {};
     try {
-      await gw.request("config.set", {
-        key: "security.sandbox_config.net_proxy.enabled",
-        value: enabled,
-      });
+      await this._setConfig(gw, "security.sandbox_config.net_proxy.enabled", enabled);
       if (this.config?.sandbox_config) {
         this.config = {
           ...this.config,
@@ -571,10 +578,7 @@ export class ScSecurityView extends GatewayAwareLitElement {
     const gw = this.gateway;
     if (!gw) return;
     try {
-      await gw.request("config.set", {
-        key: "gateway.require_pairing",
-        value: false,
-      });
+      await this._setConfig(gw, "gateway.require_pairing", false);
       if (this.rawConfig?.gateway && typeof this.rawConfig.gateway === "object") {
         this.rawConfig = {
           ...this.rawConfig,

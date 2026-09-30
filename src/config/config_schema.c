@@ -1,36 +1,6 @@
 #include "config_internal.h"
 #include <string.h>
 
-const char *hu_config_sandbox_backend_to_string(hu_sandbox_backend_t b) {
-    switch (b) {
-    case HU_SANDBOX_AUTO:
-        return "auto";
-    case HU_SANDBOX_NONE:
-        return "none";
-    case HU_SANDBOX_LANDLOCK:
-        return "landlock";
-    case HU_SANDBOX_FIREJAIL:
-        return "firejail";
-    case HU_SANDBOX_BUBBLEWRAP:
-        return "bubblewrap";
-    case HU_SANDBOX_DOCKER:
-        return "docker";
-    case HU_SANDBOX_SEATBELT:
-        return "seatbelt";
-    case HU_SANDBOX_SECCOMP:
-        return "seccomp";
-    case HU_SANDBOX_LANDLOCK_SECCOMP:
-        return "landlock_seccomp";
-    case HU_SANDBOX_WASI:
-        return "wasi";
-    case HU_SANDBOX_FIRECRACKER:
-        return "firecracker";
-    case HU_SANDBOX_APPCONTAINER:
-        return "appcontainer";
-    }
-    return "auto";
-}
-
 hu_sandbox_backend_t hu_config_parse_sandbox_backend(const char *s) {
     if (!s)
         return HU_SANDBOX_AUTO;

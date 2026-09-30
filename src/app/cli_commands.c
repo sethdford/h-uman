@@ -12,6 +12,7 @@
 #include "human/capabilities.h"
 #include "human/cli_eval_w16_internal.h"
 #include "human/config.h"
+#include "human/config_mutator.h"
 #include "human/core/error.h"
 #include "human/core/io_secure.h"
 #include "human/core/json.h"
@@ -1042,6 +1043,31 @@ done:
 }
 
 /* ── workspace ───────────────────────────────────────────────────────────── */
+/* Edits only the "workspace" key: re-serializing a loaded hu_config_t used to
+ * drop every top-level key the serializer did not model. */
+static hu_error_t workspace_set(hu_allocator_t *alloc, const char *dir) {
+    hu_json_value_t *v = hu_json_string_new(alloc, dir, strlen(dir));
+    if (!v)
+        return HU_ERR_OUT_OF_MEMORY;
+    char *value_json = NULL;
+    size_t value_len = 0;
+    hu_error_t err = hu_json_stringify(alloc, v, &value_json, &value_len);
+    hu_json_free(alloc, v);
+    if (err != HU_OK)
+        return err;
+    hu_mutation_result_t res = {0};
+    hu_mutation_options_t opts = {.apply = true};
+    err = hu_config_mutator_mutate(alloc, HU_MUTATION_SET, "workspace", value_json, opts, &res);
+    alloc->free(alloc->ctx, value_json, value_len + 1);
+    if (err != HU_OK) {
+        fprintf(stderr, "Could not set workspace: %s\n", hu_error_string(err));
+        return err;
+    }
+    printf("Workspace set to: %s\n", dir);
+    hu_config_mutator_free_result(alloc, &res);
+    return HU_OK;
+}
+
 hu_error_t cmd_workspace(hu_allocator_t *alloc, int argc, char **argv) {
     hu_config_t cfg;
     hu_error_t err = hu_config_load(alloc, &cfg);
@@ -1054,34 +1080,13 @@ hu_error_t cmd_workspace(hu_allocator_t *alloc, int argc, char **argv) {
         return HU_OK;
     }
     if (strcmp(argv[2], "set") == 0) {
+        if (err == HU_OK)
+            hu_config_deinit(&cfg);
         if (argc < 4) {
             fprintf(stderr, "Usage: human workspace set <path>\n");
-            if (err == HU_OK)
-                hu_config_deinit(&cfg);
             return HU_ERR_INVALID_ARGUMENT;
         }
-        if (err == HU_OK) {
-            char json_buf[1024];
-            size_t jp = 0;
-            jp = hu_buf_appendf(json_buf, sizeof(json_buf), jp, "{\"workspace\":\"");
-            const char *s = argv[3];
-            for (; *s && jp + 4 < sizeof(json_buf); s++) {
-                if (*s == '"' || *s == '\\')
-                    json_buf[jp++] = '\\';
-                json_buf[jp++] = *s;
-            }
-            jp = hu_buf_appendf(json_buf, sizeof(json_buf), jp, "\"}");
-            hu_error_t pe = hu_config_parse_json(&cfg, json_buf, jp);
-            if (pe == HU_OK) {
-                hu_error_t se = hu_config_save(&cfg);
-                if (se == HU_OK)
-                    printf("Workspace set to: %s\n", argv[3]);
-                else
-                    hu_log_error("config", NULL, "Failed to save config: %s", hu_error_string(se));
-            }
-            hu_config_deinit(&cfg);
-        }
-        return HU_OK;
+        return workspace_set(alloc, argv[3]);
     }
     if (err == HU_OK)
         hu_config_deinit(&cfg);

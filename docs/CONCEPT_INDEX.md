@@ -19,7 +19,7 @@ Use this to find the right files for a given task without searching the full cod
 | **Config parsing**            | `src/config/config_parse.c`, `config_parse_agent.c`, `config_parse_channels.c`, `config_parse_providers.c`, `config_parse_behavior.c` | `test_config_parse.c`, `test_config_extended.c` |
 | **Config validation**         | `src/config/config_validate.c`, `src/config/config_schema.c`                                                                                 | `test_config_validation.c`                      |
 | **Config merge / migrate**    | `src/config/config_merge.c`, `src/config/config_migrate.c`                                                                                   | `test_config_migrate.c`                         |
-| **Config getters**            | `src/config/config_getters.c`, `src/config/config_serialize.c`                                                                               | `test_config_getters.c`                         |
+| **Config getters**            | `src/config/config_getters.c`, `src/config/config_mutator.c`                                                                                 | `test_config_getters.c`                         |
 | **Config schema generation**  | `src/config/config_schema.c`, `include/human/config_schema.h`                                         | `test_config_schema.c`, `test_config_validation.c` |
 
 ## Agent
