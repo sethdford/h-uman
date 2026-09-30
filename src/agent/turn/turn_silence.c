@@ -3,7 +3,7 @@
  * (docs/superpowers/plans/2026-09-30-agent-turn-carve-phase1.md). The only
  * edit: the early-return tail (free 13 turn-body buffers, clear the current
  * agent, return HU_OK) became `return hu_turn_step_return(HU_OK);` — those
- * buffers are hu_agent_turn locals, so the frees and the clear stay at its
+ * buffers are agent_turn_run locals, so the frees and the clear stay at its
  * call site. Carries one borrowed SQLite handle (hu_sqlite_memory_get_db) for
  * the experience record; the type comes through human/memory.h, never a
  * direct <sqlite3.h> include (plan gap G2). */

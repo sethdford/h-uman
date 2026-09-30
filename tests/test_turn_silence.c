@@ -1,6 +1,7 @@
 /* tests/test_turn_silence.c — contract tests for hu_turn_silence
  * (src/agent/turn/turn_silence.c, S8 of the hu_agent_turn carve). */
 #include "human/agent/turn.h"
+#include "human/humanness.h"
 #include "test_framework.h"
 #include "turn_test_fixture.h"
 #include <string.h>
@@ -45,9 +46,28 @@ static void turn_silence_grief_answers_with_presence(void) {
     tf_close(&f);
 }
 
+/* A request phrase with no '?' counts as asking: without the phrase scan this
+ * grief message would get the presence-only reply instead of a full turn. */
+static void turn_silence_request_phrase_without_a_question_takes_the_full_path(void) {
+    const char *msg = "my dad died, please help";
+    HU_ASSERT_EQ(hu_emotional_weight_classify(msg, strlen(msg)), HU_WEIGHT_GRIEF);
+    HU_ASSERT_NULL(memchr(msg, '?', strlen(msg)));
+    tf_fixture_t f;
+    HU_ASSERT_TRUE(tf_open(&f, NULL, 0, false, HU_AUTONOMY_AUTONOMOUS));
+    hu_turn_ctx_t *turn_ctx = hu_turn_ctx_new(&f.agent, msg, strlen(msg), &f.resp, &f.resp_len);
+    HU_ASSERT_NOT_NULL(turn_ctx);
+    hu_turn_step_t st = hu_turn_silence(turn_ctx);
+    HU_ASSERT_EQ(st.kind, HU_TURN_STEP_CONTINUE);
+    HU_ASSERT_NULL(f.resp);
+    HU_ASSERT_EQ(f.resp_len, 0);
+    hu_turn_ctx_free(turn_ctx);
+    tf_close(&f);
+}
+
 void run_turn_silence_tests(void) {
     HU_TEST_SUITE("TurnSilence");
     HU_RUN_TEST(turn_silence_rejects_a_null_context);
     HU_RUN_TEST(turn_silence_question_takes_the_full_response_path);
     HU_RUN_TEST(turn_silence_grief_answers_with_presence);
+    HU_RUN_TEST(turn_silence_request_phrase_without_a_question_takes_the_full_path);
 }
