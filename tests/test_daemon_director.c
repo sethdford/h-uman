@@ -103,8 +103,22 @@ static void test_director_parse_share(void) {
     HU_ASSERT_EQ((int)n.share, (int)HU_SHARE_NONE);
 }
 
+/* "Vague unless known" (Seth, 2026-09-29): asked "how'd the big meeting go"
+ * and "did you ever go to that concert" with nothing on record, the twin
+ * answered "went better than expected actually" and "nah missed it". The
+ * director's direction is the per-turn instruction the reply model follows,
+ * so the rule lives there, on every prompt (forms gate off or on). */
+static void test_director_prompt_never_directs_an_unknown_outcome(void) {
+    static char buf[16384];
+    unsetenv("HU_DIRECTOR_FORMS");
+    (void)hu_daemon_director_system_prompt(buf, sizeof(buf));
+    HU_ASSERT_STR_CONTAINS(buf, "Never direct an outcome");
+    HU_ASSERT_STR_CONTAINS(buf, "don't say how it went");
+}
+
 void run_daemon_director_tests(void) {
     HU_TEST_SUITE("daemon_director");
+    HU_RUN_TEST(test_director_prompt_never_directs_an_unknown_outcome);
     HU_RUN_TEST(classify_comfort_response_type_returns_space_for_greeting);
     HU_RUN_TEST(classify_comfort_response_type_returns_empathy_for_apology);
     HU_RUN_TEST(test_director_parse_keeps_todays_fields);
