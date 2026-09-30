@@ -37,13 +37,7 @@ hu_error_t hu_briefing_repo_claim(sqlite3 *db, const char *day, int64_t now, con
     sqlite3_bind_text(stmt, 1, day, -1, SQLITE_STATIC);
     sqlite3_bind_int64(stmt, 2, now);
     sqlite3_bind_text(stmt, 3, mode, -1, SQLITE_STATIC);
-    int rc = sqlite3_step(stmt);
-    sqlite3_finalize(stmt);
-    if (rc == SQLITE_DONE) {
-        *claimed = true;
-        return HU_OK;
-    }
-    return (rc & 0xff) == SQLITE_CONSTRAINT ? HU_OK : HU_ERR_MEMORY_STORE;
+    return hu_repo_step_insert(stmt, claimed); /* the day's key refuses a second claim */
 }
 
 hu_error_t hu_briefing_repo_release(sqlite3 *db, const char *day) {

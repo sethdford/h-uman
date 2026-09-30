@@ -159,3 +159,61 @@ built binary.
 
 Still open: calendar busy blocks deferring reminder/briefing delivery, and
 15-minute meeting prep. Both need the owner's real calendar to measure.
+
+## Slice 3 status (2026-09-30) — measurement, in its own PR
+
+`human commitments sample|score` (`src/eval/commitment_sample.c`) turns the
+precision measurement into a routine: sample recent detections to a TSV,
+label y/n, score per direction and for the dated rows the briefing shows.
+Run on a snapshot of the owner's database, the first rows sampled looked
+like false positives, and 147 of 169 detections have no deadline (so they
+never reach the briefing). The 22 dated ones are what to label before
+`HU_BRIEFING` goes live.
+
+## Slice 4 status, first half (2026-09-30) — dates that belong to a person
+
+Measured before building: the owner's live persona has **no**
+`important_dates`, and only 1 of its 13 phone contacts has a birthday in
+macOS Contacts. Drafting birthday messages from that would fire about once a
+year, so the first half gives dates a home instead:
+
+- The owner can say it: "mom's birthday is march 3", "remember Mindy's
+  anniversary is 6/12", "our anniversary is june 12". The person is resolved
+  with the same ambiguity-refusing matcher as saved shares; an unknown name
+  gets "who's zelda?" rather than a guess.
+- Contacts birthdays are read read-only from every AddressBook database and
+  matched by the last 10 phone digits (Contacts stores birthdays at noon GMT,
+  verified on all 41 of the owner's, so the UTC date is the day). An
+  unreadable database is logged once as a permissions problem, never as "no
+  birthdays".
+- An owner-given date wins over Contacts for the same person. Both reach the
+  briefing by name: "- Tuesday: Betty's birthday".
+- Gate: `HU_DATES` (off by default). Nothing here messages anyone but the
+  owner.
+
+Also found: `hu_proactive_check_important_dates` ignores its contact
+argument, so a persona birthday line would be injected into every contact's
+check-in that day. It only runs when proactive check-ins are enabled (off by
+default); the second half of this slice replaces it with person dates.
+
+## Slice 4 status, second half (2026-09-30) — drafts the owner approves
+
+Gate `HU_DATE_NUDGES` (off by default). Live, between 9am and 8pm, the owner
+gets one question at a time about a person date that is today:
+
+    today is Betty's birthday. want me to text Betty: "happy birthday mom!"?
+    reply send, skip, or send: your own words
+
+- Only "send", "send it", "skip" and "send: <words>" answer it, and only while
+  a question is open; "yes"/"no" never do, because they are ordinary words.
+- The question is recorded only after it reached the owner, so "send" can
+  never approve a draft the owner did not see (a test fails the question's
+  delivery and checks exactly that).
+- Approved text goes through the outbound sanitizer on the contact's channel;
+  if it cannot be sent the owner is told, rather than left believing it went.
+- Drafts address parents as mom/dad and everyone else by first name. They are
+  deterministic on purpose: an owner-approved message should be exactly what
+  the owner approved.
+
+The measurement to go live is the plan's: the owner's approval rate of drafts
+(sent + edited vs skipped), readable from `date_drafts`.

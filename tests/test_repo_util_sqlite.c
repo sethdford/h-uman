@@ -77,8 +77,47 @@ static void test_repo_exec_ddl_rejects_bad_args(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
+static void test_repo_step_insert_tells_new_from_already_there(void) {
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
+    HU_ASSERT_EQ(hu_repo_exec_ddl(db, "CREATE TABLE t (k TEXT PRIMARY KEY);"), HU_OK);
+    sqlite3_stmt *st = NULL;
+    bool inserted = false;
+    HU_ASSERT_EQ(sqlite3_prepare_v2(db, "INSERT INTO t VALUES ('a');", -1, &st, NULL), SQLITE_OK);
+    HU_ASSERT_EQ(hu_repo_step_insert(st, &inserted), HU_OK);
+    HU_ASSERT_TRUE(inserted);
+    HU_ASSERT_EQ(sqlite3_prepare_v2(db, "INSERT INTO t VALUES ('a');", -1, &st, NULL), SQLITE_OK);
+    HU_ASSERT_EQ(hu_repo_step_insert(st, &inserted), HU_OK); /* duplicate: an answer */
+    HU_ASSERT_FALSE(inserted);
+    /* A failure that is not a constraint is an error. */
+    HU_ASSERT_EQ(
+        sqlite3_prepare_v2(db, "INSERT INTO t SELECT abs(-9223372036854775807-1);", -1, &st, NULL),
+        SQLITE_OK);
+    HU_ASSERT_EQ(hu_repo_step_insert(st, &inserted), HU_ERR_MEMORY_STORE);
+    HU_ASSERT_EQ(hu_repo_step_insert(NULL, &inserted), HU_ERR_INVALID_ARGUMENT);
+    sqlite3_close(db);
+}
+
+static void test_repo_step_update_one_distinguishes_no_row(void) {
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
+    HU_ASSERT_EQ(hu_repo_exec_ddl(db, "CREATE TABLE t (k TEXT, v INTEGER);"
+                                      "INSERT INTO t VALUES ('a', 1);"),
+                 HU_OK);
+    sqlite3_stmt *st = NULL;
+    HU_ASSERT_EQ(sqlite3_prepare_v2(db, "UPDATE t SET v=2 WHERE k='a';", -1, &st, NULL), SQLITE_OK);
+    HU_ASSERT_EQ(hu_repo_step_update_one(db, st), HU_OK);
+    HU_ASSERT_EQ(sqlite3_prepare_v2(db, "UPDATE t SET v=3 WHERE k='zz';", -1, &st, NULL),
+                 SQLITE_OK);
+    HU_ASSERT_EQ(hu_repo_step_update_one(db, st), HU_ERR_NOT_FOUND);
+    HU_ASSERT_EQ(hu_repo_step_update_one(NULL, NULL), HU_ERR_INVALID_ARGUMENT);
+    sqlite3_close(db);
+}
+
 void run_repo_util_sqlite_tests(void) {
     HU_RUN_TEST(test_repo_exec_ddl_creates_the_table);
+    HU_RUN_TEST(test_repo_step_insert_tells_new_from_already_there);
+    HU_RUN_TEST(test_repo_step_update_one_distinguishes_no_row);
     HU_RUN_TEST(test_repo_exec_ddl_reports_bad_sql_and_leaves_schema_alone);
     HU_RUN_TEST(test_repo_exec_ddl_rejects_bad_args);
 }

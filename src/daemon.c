@@ -82,6 +82,7 @@
 #include "human/daemon/memory_facade.h"
 #include "human/daemon/ml_facade.h"
 #include "human/daemon/name_catch.h"
+#include "human/daemon/person_dates.h"
 #include "human/daemon/persona_facade.h"
 #include "human/daemon/platform_facade.h"
 #include "human/daemon/promise_keeper.h"
@@ -6512,17 +6513,23 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 }
 
                 /* Owner reminders (life-admin slice 1): "remind me to … at 5",
-                 * "reminders", "done", "snooze" from the owner's own number in a
-                 * DM are answered here with a one-line ack. Everything else, and
-                 * everything while HU_REMINDERS is not live, falls through. */
+                 * "reminders", "done", "snooze" and dates ("mom's birthday is
+                 * march 3", slice 4) from the owner's own number in a DM are
+                 * answered here with a one-line ack. Everything else, and
+                 * everything while HU_REMINDERS / HU_DATES are not live, falls
+                 * through. */
                 if (send_target == batch_key && ch->channel->vtable->send) {
                     char rm_reply[1024];
                     const char *rm_ch = ch->channel->vtable->name
                                             ? ch->channel->vtable->name(ch->channel->ctx)
                                             : "";
-                    if (hu_reminders_handle_owner_message(
-                            agent, batch_key, key_len, rm_ch, combined, combined_len,
-                            (int64_t)time(NULL), rm_reply, sizeof(rm_reply)) &&
+                    int64_t rm_now = (int64_t)time(NULL);
+                    if ((hu_reminders_handle_owner_message(agent, batch_key, key_len, rm_ch,
+                                                           combined, combined_len, rm_now, rm_reply,
+                                                           sizeof(rm_reply)) ||
+                         hu_person_dates_handle_owner_message(agent, batch_key, key_len, combined,
+                                                              combined_len, rm_now, rm_reply,
+                                                              sizeof(rm_reply))) &&
                         rm_reply[0]) {
                         hu_error_t rm_err = ch->channel->vtable->send(ch->channel->ctx, send_target,
                                                                       send_target_len, rm_reply,
@@ -10123,6 +10130,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
             hu_reminders_tick(agent, channels, channel_count, (int64_t)time(NULL));
             /* Morning briefing (slice 2): HU_BRIEFING, off by default. */
             hu_briefing_tick(agent, channels, channel_count, (int64_t)time(NULL));
+            /* Date drafts (slice 4): HU_DATE_NUDGES, off by default. */
+            hu_date_nudges_tick(agent, channels, channel_count, (int64_t)time(NULL));
         }
 
         /* Sprint A.6 wire — periodic social tick: exercises the three
