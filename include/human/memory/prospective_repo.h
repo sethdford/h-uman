@@ -16,7 +16,12 @@
  * Free functions over a borrowed `sqlite3 *db` from hu_sqlite_memory_get_db();
  * domain callers never include sqlite3.h (sqlite-includer ratchet).
  */
+#include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/memory/prospective_policy.h"
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 #ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>
@@ -26,6 +31,73 @@
  * idx_prospective_status and the fired -> status trigger. HU_ERR_NOT_FOUND
  * when the table does not exist (the sqlite engine creates it first). */
 hu_error_t hu_prospective_repo_ensure_schema(sqlite3 *db);
+
+typedef struct hu_prospective_item {
+    int64_t id;
+    hu_prospective_cue_kind_t cue_kind;
+    hu_prospective_status_t status;
+    char trigger_value[256]; /* keyword cue; "commitment:<id>" / "followup:<id>" for time rows */
+    char action[512];
+    char contact_id[128]; /* "" when the row has no contact */
+    int64_t due_at;       /* 0 = none */
+    int64_t expires_at;   /* 0 = never */
+    int64_t created_at;
+    int64_t surfaced_at; /* 0 = never surfaced */
+    int attempts;
+} hu_prospective_item_t;
+
+/* Rows of `kind` in `status` for `contact`. Keyword reads keep the legacy
+ * scope: the contact's rows plus rows with no contact, trigger_type
+ * 'keyword' only, newest first. Time reads are the contact's rows, oldest
+ * due first. *out holds exactly *out_count items (free with
+ * hu_prospective_repo_free), NULL when none. */
+hu_error_t hu_prospective_repo_list(hu_allocator_t *alloc, sqlite3 *db,
+                                    hu_prospective_cue_kind_t kind, hu_prospective_status_t status,
+                                    const char *contact, size_t contact_len,
+                                    hu_prospective_item_t **out, size_t *out_count);
+void hu_prospective_repo_free(hu_allocator_t *alloc, hu_prospective_item_t *items, size_t count);
+
+/* Move the INTENTION — every row with the item's action, contact and cue
+ * kind that is still pending or surfaced — to `to`: status and the matching
+ * legacy fired value in one UPDATE, `attempts`, `outcome` (NONE leaves it),
+ * and surfaced_at = now when `to` is SURFACED. *changed (may be NULL) is the
+ * number of rows updated. */
+hu_error_t hu_prospective_repo_transition(sqlite3 *db, const hu_prospective_item_t *it,
+                                          hu_prospective_status_t to,
+                                          hu_prospective_outcome_t outcome, int attempts,
+                                          int64_t now, int *changed);
+
+/* Distinct intentions of `kind` for `contact` with surfaced_at >= since. */
+hu_error_t hu_prospective_repo_count_surfaced_since(sqlite3 *db, hu_prospective_cue_kind_t kind,
+                                                    const char *contact, size_t contact_len,
+                                                    int64_t since, int64_t *out);
+
+/* Insert a cue_kind='time' row unless this intention is already present,
+ * atomically, in one statement: trigger_type 'time', trigger_value =
+ * source_key, expires_at = due_at + grace_s (so the legacy sweeps retire it
+ * too), status and fired from `status`, created_at = now. "Already present"
+ * means either the same source key, OR — for a row still OPEN (status
+ * pending or surfaced) — the same contact + the same action once both are
+ * trimmed, case-folded and internal whitespace collapsed, IGNORING due_at:
+ * a backfill re-run that re-anchors due_at (a fresh source key, a later
+ * due_at) must not create a second intention for the same still-open
+ * promise. A row that has already settled (done / canceled / expired) does
+ * NOT block a fresh intention for the same contact + action. *inserted may
+ * be NULL. HU_ERR_INVALID_ARGUMENT for an empty contact/action/key or
+ * due_at <= 0. */
+hu_error_t hu_prospective_repo_upsert_time(sqlite3 *db, const char *contact, size_t contact_len,
+                                           const char *action, size_t action_len, int64_t due_at,
+                                           int64_t grace_s, hu_prospective_source_t source,
+                                           const char *source_key, hu_prospective_status_t status,
+                                           int64_t now, bool *inserted);
+
+/* A settled time intention (DONE / CANCELED / EXPIRED) retires its ledger
+ * twins so the legacy readers never resurface it: pending commitments with
+ * the same contact + description get status 'followed_up' / 'canceled' /
+ * 'expired' and followed_up_at = now; unsent delayed_followups with the same
+ * contact + topic get sent=1. */
+hu_error_t hu_prospective_repo_sync_source(sqlite3 *db, const hu_prospective_item_t *it,
+                                           hu_prospective_status_t to, int64_t now);
 
 #endif /* HU_ENABLE_SQLITE */
 #endif /* HU_MEMORY_PROSPECTIVE_REPO_H */
