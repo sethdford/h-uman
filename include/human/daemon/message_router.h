@@ -146,6 +146,28 @@ size_t hu_daemon_burst_carry(struct hu_channel_loop_msg *msgs, size_t *count, si
                              const struct hu_channel_loop_msg *burst, size_t burst_count,
                              const char *batch_key);
 
+/* Where an inbound photo gets described. When the config declares a cloud
+ * substitute for `model` (reliability.model_fallbacks, i.e. the primary is a
+ * local model the cloud doesn't know), vision goes straight to the first
+ * fallback provider with that substitute: the local primary is text-only, and
+ * its 422s on every photo opened the primary's circuit breaker (2026-09-30).
+ * Returns false (use the agent's own provider) when nothing is declared. */
+bool hu_daemon_vision_route(const struct hu_config *cfg, const char *model, size_t model_len,
+                            const char **provider_out, const char **model_out);
+
+/* Inbound text whose U+FFFC attachment vision could not describe (it is not
+ * `buf`, where a description is written): the placeholder is replaced by a
+ * note that a picture came and did not load, kept after any text, written to
+ * buf. Anything else is returned unchanged. *len is updated. */
+const char *hu_daemon_unseen_photo(const char *text, size_t *len, char *buf, size_t cap);
+
+/* hu_vision_describe_image on the provider hu_daemon_vision_route picks, else
+ * on agent->provider with `model`. */
+hu_error_t hu_daemon_describe_image(hu_allocator_t *alloc, struct hu_agent *agent,
+                                    const struct hu_config *cfg, const char *path, size_t path_len,
+                                    const char *model, size_t model_len, char **desc_out,
+                                    size_t *desc_len);
+
 #ifdef __cplusplus
 }
 #endif

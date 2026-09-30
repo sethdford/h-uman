@@ -818,6 +818,65 @@ static void burst_carry_keeps_other_senders_for_this_tick(void) {
     HU_ASSERT_EQ(msgs[1].message_id, 42);
 }
 
+/* Vision never goes to a text-only local primary. 2026-09-30: every photo hit
+ * :8741 (422, "no vision processor") first; those failures opened the primary's
+ * circuit breaker (23 of 25 opens followed a vision call), so the next 5 min of
+ * real replies came from the cloud fallback instead of the persona model. */
+static void vision_route_uses_the_declared_cloud_fallback(void) {
+    char *fb_models[] = {"gemini-3.8-flash"};
+    hu_config_model_fallback_t mf = {
+        .model = "GLM-4.5-Air-4bit", .fallback_models = fb_models, .fallback_models_len = 1};
+    char *fb_providers[] = {"gemini"};
+    hu_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.reliability.primary_provider = "mlx_local";
+    cfg.reliability.fallback_providers = fb_providers;
+    cfg.reliability.fallback_providers_len = 1;
+    cfg.reliability.model_fallbacks = &mf;
+    cfg.reliability.model_fallbacks_len = 1;
+    const char *prov = NULL, *model = NULL;
+    HU_ASSERT_TRUE(hu_daemon_vision_route(&cfg, "GLM-4.5-Air-4bit", 16, &prov, &model));
+    HU_ASSERT_STR_EQ(prov, "gemini");
+    HU_ASSERT_STR_EQ(model, "gemini-3.8-flash");
+    /* No declared mapping for the model: keep the agent's own provider. */
+    HU_ASSERT_FALSE(hu_daemon_vision_route(&cfg, "gpt-4o", 6, &prov, &model));
+    cfg.reliability.fallback_providers_len = 0;
+    HU_ASSERT_FALSE(hu_daemon_vision_route(&cfg, "GLM-4.5-Air-4bit", 16, &prov, &model));
+    HU_ASSERT_FALSE(hu_daemon_vision_route(NULL, "GLM-4.5-Air-4bit", 16, &prov, &model));
+}
+
+/* A photo vision could not describe must not reach the model as a bare U+FFFC:
+ * alone it drew "Please let me know what information you need" (Mindy
+ * 09-27); with text it drew "looks cozy!" about a photo never seen (09-30). */
+static void unseen_photo_alone_becomes_a_note(void) {
+    char buf[256];
+    size_t len = 3;
+    const char *out = hu_daemon_unseen_photo("\xEF\xBF\xBC", &len, buf, sizeof(buf));
+    HU_ASSERT_STR_EQ(out, "[They sent a picture that didn't load on your phone \xE2\x80\x94 you "
+                          "can't see it]");
+    HU_ASSERT_EQ(len, strlen(out));
+}
+
+static void unseen_photo_with_text_keeps_the_text(void) {
+    char buf[256];
+    const char *in = "\xEF\xBF\xBCMy new little office at kiln";
+    size_t len = strlen(in);
+    const char *out = hu_daemon_unseen_photo(in, &len, buf, sizeof(buf));
+    HU_ASSERT_STR_EQ(out, "My new little office at kiln\n[They sent a picture that didn't load "
+                          "on your phone \xE2\x80\x94 you can't see it]");
+}
+
+static void unseen_photo_leaves_described_and_plain_text_alone(void) {
+    char buf[256];
+    size_t len = 5;
+    HU_ASSERT_STR_EQ(hu_daemon_unseen_photo("hello", &len, buf, sizeof(buf)), "hello");
+    /* Already rewritten into buf by vision: returned as is. */
+    strcpy(buf, "\xEF\xBF\xBC\n[They sent a photo: a dog]");
+    len = strlen(buf);
+    HU_ASSERT_TRUE(hu_daemon_unseen_photo(buf, &len, buf, sizeof(buf)) == buf);
+    HU_ASSERT_EQ(len, strlen("\xEF\xBF\xBC\n[They sent a photo: a dog]"));
+}
+
 static void burst_carry_reports_what_it_cannot_keep(void) {
     static hu_channel_loop_msg_t msgs[2], burst[2];
     memset(msgs, 0, sizeof(msgs));
@@ -853,6 +912,10 @@ void run_imessage_dispatcher_tests(void) {
     HU_RUN_TEST(record_delivered_reply_noops_without_collector);
     HU_RUN_TEST(burst_carry_keeps_other_senders_for_this_tick);
     HU_RUN_TEST(burst_carry_reports_what_it_cannot_keep);
+    HU_RUN_TEST(vision_route_uses_the_declared_cloud_fallback);
+    HU_RUN_TEST(unseen_photo_alone_becomes_a_note);
+    HU_RUN_TEST(unseen_photo_with_text_keeps_the_text);
+    HU_RUN_TEST(unseen_photo_leaves_described_and_plain_text_alone);
 #if defined(HU_ENABLE_SQLITE) && defined(HU_ENABLE_ML)
     HU_RUN_TEST(record_delivered_reply_stores_the_text_as_sent);
     HU_RUN_TEST(record_delivered_reply_skips_the_owners_test_handles);
