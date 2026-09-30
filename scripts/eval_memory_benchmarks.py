@@ -11,6 +11,12 @@ Two distinct "hybrid" columns are measured, on purpose:
   hybrid_cli  : `human memory search --hybrid <q>` — Contract C2's reconstructive
                 path (scene-select -> neighbour expansion -> rerank -> time-bounded
                 filter -> sufficiency check), measured through the actual C binary.
+  hybrid_plain: `human memory search --hybrid --plain <q>` — the daemon memory loader's
+                call. `--fusion score --alpha A` runs it under HU_HYBRID_FUSION=score
+                (score-level fusion, dense weight A); the default pins
+                HU_HYBRID_FUSION=rrf so an inherited env var cannot move the column.
+                scripts/tune_fusion_alpha.py sweeps A with leave-one-conversation-out
+                selection over the same sampled questions (lme_questions/locomo_convs).
 
   LongMemEval-S : session-level R@5 — answer_session_ids vs the first 5 distinct sessions
                   among the top-10 retrieved turns (the benchmark's own recall protocol).
@@ -39,6 +45,18 @@ def rrf(*lists, k=60):
             sc[key] += 1.0 / (k + r)
     return [key for key, _ in sorted(sc.items(), key=lambda kv: -kv[1])]
 
+def plain_env(fusion="rrf", alpha=None):
+    """Env for the hybrid_plain column: the fusion gate, always explicit."""
+    env = {"HU_HYBRID_FUSION": fusion}
+    if fusion == "score":
+        if alpha is None or not (0.0 <= alpha <= 1.0):
+            raise ValueError(f"--alpha must be in [0,1] for --fusion score, got {alpha!r}")
+        env["HU_HYBRID_FUSION_ALPHA"] = f"{alpha:.2f}"
+    return env
+
+def embed_env():
+    return {"HU_SEMANTIC_EMBED_URL": os.environ.get("HU_SEMANTIC_EMBED_URL", "http://127.0.0.1:8749")}
+
 def build_db(binp, dbp, rows):
     """rows: list of (key, session_id, content)."""
     for s in ("", "-wal", "-shm"):
@@ -59,38 +77,52 @@ def build_db(binp, dbp, rows):
     m = re.search(r'"index_size": (\d+)', out)
     return int(m.group(1)) if m else 0
 
-def longmemeval(binp, limit, seed, tmp):
-    path = os.path.join(DATA, "longmemeval_s.json")
+def lme_questions(limit, seed, data_dir=None):
+    """The sampled LongMemEval-S questions in run order, as (question, rows)."""
+    path = os.path.join(data_dir or DATA, "longmemeval_s.json")
     if not os.path.exists(path): sys.exit(f"REFUSING: {path} missing")
     data = json.load(open(path))
     rng = random.Random(seed); rng.shuffle(data)
     by_type = collections.defaultdict(list)
     for q in data: by_type[q["question_type"]].append(q)
     per = max(1, limit // len(by_type)); qs = [q for t in sorted(by_type) for q in by_type[t][:per]]
-    res = []; skipped = []
-    for n, q in enumerate(qs, 1):
+    out = []
+    for q in qs:
         rows = []
         for sid, sess in zip(q["haystack_session_ids"], q["haystack_sessions"]):
             for k, turn in enumerate(sess):
                 rows.append((f"s{sid}:t{k}", str(sid), f"{turn['role']}: {turn['content']}"))
+        out.append((q, rows))
+    return out
+
+def build_db_retry(binp, dbp, rows):
+    """build_db, retried once after 10 s when under 90% of rows got indexed.
+    The 8-bit embedder has died on specific rows (deterministic); the pause gives
+    its supervisor time to restart it. Returns the final indexed count."""
+    idx = build_db(binp, dbp, rows)
+    if idx < len(rows) * 0.9:
+        time.sleep(10)
+        idx = build_db(binp, dbp, rows)
+    return idx
+
+def longmemeval(binp, limit, seed, tmp, hybrid_plain_env=None):
+    qs = lme_questions(limit, seed)
+    res = []; skipped = []
+    for n, (q, rows) in enumerate(qs, 1):
         dbp = os.path.join(tmp, "lme.db")
         print(f"  [{n}/{len(qs)}] building {q['question_id']} ({len(rows)} rows)", flush=True)
-        idx = build_db(binp, dbp, rows)
+        idx = build_db_retry(binp, dbp, rows)
         if idx < len(rows) * 0.9:
-            # The 8-bit embedder has died on specific rows (deterministic). Give the
-            # supervisor time to restart it, retry once, then SKIP and COUNT the
-            # question rather than abort the run; too many skips refuses at the end.
-            time.sleep(10)
-            idx = build_db(binp, dbp, rows)
-            if idx < len(rows) * 0.9:
-                skipped.append({"question_id": q["question_id"], "type": q["question_type"], "indexed": idx, "rows": len(rows)})
-                print(f"  [{n}/{len(qs)}] SKIPPED {q['question_id']}: indexed {idx}/{len(rows)}", flush=True)
-                continue
-        env = {"HU_SEMANTIC_EMBED_URL": os.environ.get("HU_SEMANTIC_EMBED_URL", "http://127.0.0.1:8749")}
+            # SKIP and COUNT the question rather than abort the run; too many skips
+            # refuses at the end.
+            skipped.append({"question_id": q["question_id"], "type": q["question_type"], "indexed": idx, "rows": len(rows)})
+            print(f"  [{n}/{len(qs)}] SKIPPED {q['question_id']}: indexed {idx}/{len(rows)}", flush=True)
+            continue
+        env = embed_env()
         kw = parse_keys(sh(binp, dbp, ["search", q["question"]]))
         sem = parse_keys(sh(binp, dbp, ["search", "--semantic", q["question"]], env))
         hyb_cli = parse_keys(sh(binp, dbp, ["search", "--hybrid", q["question"]], env))
-        hyb_plain = parse_keys(sh(binp, dbp, ["search", "--hybrid", "--plain", q["question"]], env))
+        hyb_plain = parse_keys(sh(binp, dbp, ["search", "--hybrid", "--plain", q["question"]], {**env, **(hybrid_plain_env or plain_env())}))
         ans = set(str(s) for s in q["answer_session_ids"])
         def sess_r5(keys):
             seen = []
@@ -106,27 +138,35 @@ def longmemeval(binp, limit, seed, tmp):
     longmemeval.skipped = skipped
     return res
 
-def locomo(binp, limit, seed, tmp):
-    path = os.path.join(DATA, "locomo10.json")
+def locomo_convs(limit, seed, data_dir=None):
+    """The LoCoMo-10 conversations in run order, as (index, rows, sampled_qa). One
+    rng is shared across conversations, so the sample depends on this order."""
+    path = os.path.join(data_dir or DATA, "locomo10.json")
     if not os.path.exists(path): sys.exit(f"REFUSING: {path} missing")
-    data = json.load(open(path)); res = []; rng = random.Random(seed)
+    data = json.load(open(path)); rng = random.Random(seed); out = []
     for ci, conv in enumerate(data):
         rows = []
         c = conv["conversation"]
         for skey in sorted(k for k in c if re.fullmatch(r"session_\d+", k)):
             for turn in c[skey]:
                 rows.append((turn["dia_id"], skey, f"{turn['speaker']}: {turn.get('text','')}"))
+        qa = [q for q in conv["qa"] if q.get("evidence")]
+        rng.shuffle(qa); qa = qa[:max(1, limit // len(data))]
+        out.append((ci, rows, qa))
+    return out
+
+def locomo(binp, limit, seed, tmp, hybrid_plain_env=None):
+    res = []
+    for ci, rows, qa in locomo_convs(limit, seed):
         dbp = os.path.join(tmp, f"locomo{ci}.db")
         idx = build_db(binp, dbp, rows)
         if idx < len(rows) * 0.9: sys.exit(f"REFUSING: conv{ci} indexed {idx}/{len(rows)}")
-        qa = [q for q in conv["qa"] if q.get("evidence")]
-        rng.shuffle(qa); qa = qa[:max(1, limit // len(data))]
         for q in qa:
-            env = {"HU_SEMANTIC_EMBED_URL": os.environ.get("HU_SEMANTIC_EMBED_URL", "http://127.0.0.1:8749")}
+            env = embed_env()
             kw = parse_keys(sh(binp, dbp, ["search", q["question"]]))[:10]
             sem = parse_keys(sh(binp, dbp, ["search", "--semantic", q["question"]], env))[:10]
             hyb_cli = parse_keys(sh(binp, dbp, ["search", "--hybrid", q["question"]], env))[:10]
-            hyb_plain = parse_keys(sh(binp, dbp, ["search", "--hybrid", "--plain", q["question"]], env))[:10]
+            hyb_plain = parse_keys(sh(binp, dbp, ["search", "--hybrid", "--plain", q["question"]], {**env, **(hybrid_plain_env or plain_env())}))[:10]
             ev = set(q["evidence"])
             r = {"category": q.get("category"), "kw": int(bool(ev & set(kw))), "sem": int(bool(ev & set(sem))),
                  "hybrid": int(bool(ev & set(rrf(kw, sem)[:10]))), "hybrid_cli": int(bool(ev & set(hyb_cli))),
@@ -154,7 +194,13 @@ def main():
     ap.add_argument("--min-q", type=int, default=30)
     ap.add_argument("--seed", type=int, default=3)
     ap.add_argument("--out", default="docs/plans/2026-08-02-semantic-retrieval/memory-benchmarks-%s.json" % time.strftime("%Y-%m-%d"))
+    ap.add_argument("--fusion", choices=["rrf", "score"], default="rrf",
+                    help="HU_HYBRID_FUSION for the hybrid_plain column (default rrf, production)")
+    ap.add_argument("--alpha", type=float, default=None,
+                    help="HU_HYBRID_FUSION_ALPHA (dense weight in [0,1]); required with --fusion score")
     a = ap.parse_args()
+    try: hp_env = plain_env(a.fusion, a.alpha)
+    except ValueError as e: sys.exit(f"REFUSING: {e}")
     try: urllib.request.urlopen(os.environ.get("HU_SEMANTIC_EMBED_URL", "http://127.0.0.1:8749") + "/health", timeout=5)
     except Exception as e: sys.exit(f"REFUSING: embedder down ({e}); nothing written")
     tmp = "/tmp/hu_membench"; os.makedirs(tmp, exist_ok=True)
@@ -165,13 +211,15 @@ def main():
                       "(scene-select -> neighbour expansion -> rerank -> time-bounded filter -> "
                       "sufficiency check) measured through the C binary -- CLI-only mode, no daemon path sets reconstructive",
         "hybrid_plain": "human memory search --hybrid --plain <q> -- the daemon memory loader's call "
-                        "(reconstructive=false: RRF merge -> term-overlap rerank -> cut to limit); this is production"}}
+                        "(reconstructive=false: RRF merge -> cut to limit; the term-overlap rerank runs only "
+                        "with use_reranking, which the loader leaves off); this is production",
+        "hybrid_plain_fusion": hp_env}}
     if a.bench in ("longmemeval", "both"):
-        r = longmemeval(a.bin, a.limit, a.seed, tmp)
+        r = longmemeval(a.bin, a.limit, a.seed, tmp, hp_env)
         if len(r) < a.min_q: sys.exit(f"REFUSING: {len(r)} LongMemEval questions < {a.min_q}")
         out["longmemeval_s"] = summarize(r, "type"); out["longmemeval_skipped_embedder_crash"] = getattr(longmemeval, "skipped", [])
     if a.bench in ("locomo", "both"):
-        r = locomo(a.bin, a.limit, a.seed, tmp)
+        r = locomo(a.bin, a.limit, a.seed, tmp, hp_env)
         if len(r) < a.min_q: sys.exit(f"REFUSING: {len(r)} LoCoMo questions < {a.min_q}")
         out["locomo10"] = summarize(r, "category")
     json.dump(out, open(a.out, "w"), indent=2); print(json.dumps({k: v for k, v in out.items() if k not in ("protocol",)}, indent=1)); print("wrote", a.out)

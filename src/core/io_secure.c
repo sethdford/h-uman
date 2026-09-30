@@ -56,6 +56,19 @@ static int posix_mode_for(hu_io_perm_t perm) {
 }
 #endif
 
+hu_error_t hu_io_secure_open_read(const char *path, FILE **out) {
+    if (!out)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out = NULL;
+    if (path_has_traversal(path))
+        return HU_ERR_INVALID_ARGUMENT;
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return errno == ENOENT ? HU_ERR_NOT_FOUND : HU_ERR_IO;
+    *out = f;
+    return HU_OK;
+}
+
 hu_error_t hu_io_secure_open(const char *path, hu_io_perm_t perm, const char *mode, FILE **out) {
     if (!out)
         return HU_ERR_INVALID_ARGUMENT;

@@ -332,44 +332,44 @@ static void check_memory_backend_build(const hu_config_t *cfg, bool strict, bool
         *has_error = true;
 }
 
-hu_error_t hu_config_validate_strict(const hu_config_t *cfg, const hu_json_value_t *root,
-                                     bool strict) {
-    if (!cfg)
-        return HU_ERR_INVALID_ARGUMENT;
-    bool has_error = false;
-
+/* Checks that read only the JSON document: unknown keys and value types.
+ * Separate from the whole-config checks below so a single-key write can be
+ * validated on its own (config_mutator.c) without inheriting judgments about
+ * unrelated defaults — e.g. a default memory backend a build compiled out. */
+static hu_error_t validate_document(const hu_json_value_t *root, bool strict, bool *has_error) {
+    if (!root)
+        return HU_OK;
     /* Unknown key detection */
-    if (root)
-        check_unknown_top_keys(root, strict, &has_error);
-    if (root) {
+    check_unknown_top_keys(root, strict, has_error);
+    {
         hu_json_value_t *gw = hu_json_object_get(root, "gateway");
         if (gw)
             check_unknown_nested_keys(gw, "gateway", hu_gateway_keys, hu_gateway_keys_len, strict,
-                                      &has_error);
+                                      has_error);
         hu_json_value_t *mem = hu_json_object_get(root, "memory");
         if (mem)
             check_unknown_nested_keys(mem, "memory", hu_memory_keys, hu_memory_keys_len, strict,
-                                      &has_error);
+                                      has_error);
         hu_json_value_t *sec = hu_json_object_get(root, "security");
         if (sec)
             check_unknown_nested_keys(sec, "security", hu_security_keys, hu_security_keys_len,
-                                      strict, &has_error);
+                                      strict, has_error);
         hu_json_value_t *ens = hu_json_object_get(root, "ensemble");
         if (ens)
             check_unknown_nested_keys(ens, "ensemble", hu_ensemble_keys, hu_ensemble_keys_len,
-                                      strict, &has_error);
+                                      strict, has_error);
         hu_json_value_t *voice = hu_json_object_get(root, "voice");
         if (voice)
             check_unknown_nested_keys(voice, "voice", hu_voice_keys, hu_voice_keys_len, strict,
-                                      &has_error);
+                                      has_error);
         hu_json_value_t *session = hu_json_object_get(root, "session");
         if (session)
             check_unknown_nested_keys(session, "session", hu_session_keys, hu_session_keys_len,
-                                      strict, &has_error);
+                                      strict, has_error);
     }
 
     /* Type checking */
-    if (root) {
+    {
         hu_error_t err;
         err = check_type(root, "default_provider", HU_JSON_STRING, "default_provider", strict);
         if (err != HU_OK)
@@ -387,6 +387,27 @@ hu_error_t hu_config_validate_strict(const hu_config_t *cfg, const hu_json_value
                 return err;
         }
     }
+
+    return HU_OK;
+}
+
+hu_error_t hu_config_validate_document(const hu_json_value_t *root, bool strict) {
+    bool has_error = false;
+    hu_error_t err = validate_document(root, strict, &has_error);
+    if (err != HU_OK)
+        return err;
+    return has_error ? HU_ERR_CONFIG_INVALID : HU_OK;
+}
+
+hu_error_t hu_config_validate_strict(const hu_config_t *cfg, const hu_json_value_t *root,
+                                     bool strict) {
+    if (!cfg)
+        return HU_ERR_INVALID_ARGUMENT;
+    bool has_error = false;
+
+    hu_error_t doc_err = validate_document(root, strict, &has_error);
+    if (doc_err != HU_OK)
+        return doc_err;
 
     /* Value validation */
     if (cfg->default_model && !cfg->default_model[0]) {
