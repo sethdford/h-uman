@@ -81,6 +81,7 @@
 #include "human/daemon/intelligence_facade.h"
 #include "human/daemon/memory_facade.h"
 #include "human/daemon/ml_facade.h"
+#include "human/daemon/name_catch.h"
 #include "human/daemon/persona_facade.h"
 #include "human/daemon/platform_facade.h"
 #include "human/daemon/promise_keeper.h"
@@ -3874,6 +3875,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     hu_channel_loop_msg_t burst[16];
                     size_t burst_count = 0;
                     ch->poll_fn(ch->channel_ctx, alloc, burst, 16, &burst_count);
+                    (void)hu_daemon_burst_carry(msgs, &count, 16, burst, burst_count, batch_key);
                     for (size_t bi = 0; bi < burst_count; bi++) {
                         if (strcmp(burst[bi].session_key, batch_key) != 0)
                             continue;
@@ -6361,6 +6363,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 /* Owner self-test: a clean slate — only the last few messages, so a
                  * thread full of test traffic doesn't confuse the reply. */
                 agent->history_msg_cap = selftest_on ? 4 : 0;
+                agent->self_test_turn = selftest_on; /* no memories from test traffic */
 
                 /* T4 (AC-2): hoisted out of the routing block below so the post-turn
                  * local->cloud fallback (further down, outside the HU_IS_TEST guard)
@@ -8138,6 +8141,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 agent->max_response_chars = 0;
                 agent->voice_memo_turn = false;
                 agent->history_msg_cap = 0;
+                agent->self_test_turn = false;
                 agent->memory_session_id = NULL;
                 agent->memory_session_id_len = 0;
                 if (agent->memory && agent->memory->vtable) {
@@ -8205,7 +8209,6 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                          batch_key, key_len, combined, combined_len,
                                                          response, response_len);
                 }
-
 #ifdef HU_ENABLE_SQLITE
                 /* Task 18: Extraction pipeline — post-turn storage */
                 if (err == HU_OK && response && response_len > 0 && agent->memory) {
@@ -8369,6 +8372,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #endif
 
 #ifndef HU_IS_TEST
+                if (err == HU_OK && response && response_len > 0 && graph) /* names, §4.2 */
+                    hu_daemon_name_catch_batch(alloc, graph, msgs, batch_start, batch_end, config);
                 /* F27: If we responded to negative emotion, set pending to record engagement
                  * when we get their next reply.
                  * Skip in llm_decides: avoids post-response emotion LLM call. */

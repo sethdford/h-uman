@@ -24,6 +24,7 @@
 #include "human/core/log.h"
 #include "human/core/paths.h"
 #include "human/core/tokens.h"
+#include "human/experience.h"
 #include "human/max_tokens.h"
 #include "human/memory/consolidation.h"
 #include "human/memory/promotion.h"
@@ -3034,4 +3035,10 @@ hu_provider_t *hu_agent_internal_recall_provider(hu_agent_t *agent, const char *
     if (!agent || !agent->provider.vtable || !hu_semantic_recall_register_admits(msg, msg_len))
         return NULL;
     return &agent->provider;
+}
+
+hu_error_t hu_agent_internal_experience_init(hu_agent_t *agent, struct hu_experience_store *store) {
+    if (!agent || !agent->memory || !store || agent->self_test_turn)
+        return HU_ERR_NOT_SUPPORTED;
+    return hu_experience_store_init(agent->alloc, agent->memory, store);
 }
