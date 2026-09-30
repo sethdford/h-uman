@@ -303,6 +303,7 @@ void run_doctor_blind_ab_gate_tests(void);
 void run_outbound_sanitize_tests(void);
 void run_daemon_follow_up_watcher_tests(void);
 void run_cli_ctl_tests(void);
+void run_cli_help_tests(void);
 void run_doctor_local_voice_tests(void);
 void run_cron_tests(void);
 void run_task_manager_tests(void);
@@ -1371,6 +1372,7 @@ int main(int argc, char **argv) {
     run_outbound_sanitize_tests();
     run_daemon_follow_up_watcher_tests();
     run_cli_ctl_tests();
+    run_cli_help_tests();
     run_doctor_local_voice_tests();
     run_cron_tests();
     run_mcp_tests();

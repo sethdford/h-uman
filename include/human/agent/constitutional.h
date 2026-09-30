@@ -65,8 +65,9 @@ int hu_constitutional_test_parse_principle_index(const char *resp, size_t resp_l
 
 hu_constitutional_config_t hu_constitutional_config_persona(void);
 
-/* The constitution for a reply turn: the persona's when the reply speaks as
- * the persona, the default (helpful/harmless/honest) otherwise. */
-hu_constitutional_config_t hu_constitutional_config_for_turn(bool persona_voice);
+/* Whether a reply turn is critiqued at all: not when it speaks in the
+ * persona's voice (the rewrite has no conversation to work from and made
+ * every observed reply worse, 2026-09-29); yes for assistant turns. */
+bool hu_constitutional_runs_for_turn(bool persona_voice);
 
 #endif

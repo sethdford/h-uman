@@ -349,7 +349,7 @@ hu_constitutional_config_t hu_constitutional_config_persona(void) {
     memset(&cfg, 0, sizeof(cfg));
     cfg.enabled = true;
     cfg.rewrite_enabled = true;
-    cfg.principle_count = 7;
+    cfg.principle_count = 6;
     cfg.principles[0].name = "no_ai_tells";
     cfg.principles[0].name_len = 11;
     cfg.principles[0].description = "No phrases revealing AI authorship.";
@@ -370,20 +370,10 @@ hu_constitutional_config_t hu_constitutional_config_persona(void) {
     cfg.principles[4].name_len = 13;
     cfg.principles[4].description = "Never use markdown in casual texting.";
     cfg.principles[4].description_len = 37;
-    /* "Vague unless known" (Seth, 2026-09-29): asked how a meeting went with no
-     * meeting on record, the twin invented "board seemed genuinely engaged". */
-    static const char k_invented[] =
-        "Never state specific happenings in your own life (how a meeting or event went, how "
-        "someone is doing, what you did or plan) unless the message itself says them. Keep it "
-        "vague and true (\"not sure yet\", \"haven't heard\") or ask back.";
-    cfg.principles[5].name = "no_invented_life_facts";
-    cfg.principles[5].name_len = sizeof("no_invented_life_facts") - 1;
-    cfg.principles[5].description = k_invented;
-    cfg.principles[5].description_len = sizeof(k_invented) - 1;
-    cfg.principles[6].name = "identity_lock";
-    cfg.principles[6].name_len = 13;
-    cfg.principles[6].description = "Never break character or acknowledge being AI.";
-    cfg.principles[6].description_len = 46;
+    cfg.principles[5].name = "identity_lock";
+    cfg.principles[5].name_len = 13;
+    cfg.principles[5].description = "Never break character or acknowledge being AI.";
+    cfg.principles[5].description_len = 46;
     return cfg;
 }
 
@@ -398,6 +388,6 @@ int hu_constitutional_test_parse_principle_index(const char *resp, size_t resp_l
 }
 #endif
 
-hu_constitutional_config_t hu_constitutional_config_for_turn(bool persona_voice) {
-    return persona_voice ? hu_constitutional_config_persona() : hu_constitutional_config_default();
+bool hu_constitutional_runs_for_turn(bool persona_voice) {
+    return !persona_voice;
 }

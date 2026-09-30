@@ -26,6 +26,7 @@
 #include "human/channels/imessage_voice_record.h"
 #include "human/channels/thread_binding.h"
 #include "human/cli_commands.h"
+#include "human/cli_help.h"
 #include "human/config.h"
 #include "human/context/conversation.h"
 #include "human/core/allocator.h"
@@ -185,6 +186,11 @@ typedef struct hu_command {
     const char *name;
     const char *description;
     hu_error_t (*handler)(hu_allocator_t *alloc, int argc, char **argv);
+    /* How `--help` is answered. -Wmissing-field-initializers makes every
+     * entry choose. SUMMARY never calls the handler; SELF (handler parses
+     * --help itself) and BARE (handler prints usage when run bare) are for
+     * commands verified by scripts/check-cli-help-safety.sh. */
+    hu_cli_help_style_t help;
 } hu_command_t;
 
 static hu_error_t cmd_agent(hu_allocator_t *alloc, int argc, char **argv);
@@ -550,73 +556,87 @@ static hu_error_t cmd_schedule(hu_allocator_t *alloc, int argc, char **argv) {
     return HU_ERR_INVALID_ARGUMENT;
 }
 
-static const hu_command_t commands[] = {
-    {"agent", "Start interactive agent (--demo: use local Ollama)", cmd_agent},
-    {"init", "Initialize config file", cmd_init},
-    {"setup", "Local / on-device model setup", cmd_setup},
-    {"gateway", "Start webhook gateway server", cmd_gateway},
-    {"mcp", "Run as MCP server (stdin/stdout JSON-RPC)", cmd_mcp},
-    {"service", "Run as background service (daemonize)", cmd_service},
-    {"service-loop", "Run service loop in foreground", cmd_service_loop},
-    {"status", "Show runtime status", cmd_status},
-    {"onboard", "Interactive setup wizard", cmd_onboard},
-    {"doctor", "Run system diagnostics", cmd_doctor},
-    {"ctl", "Runtime kill-switch inspector (guard status/disable-g9/enable-g9/list-channels)",
-     cmd_ctl},
-    {"inference-status", "Show effective inference throughput config (KV quant, FA, draft model)",
-     cmd_inference_status},
-#ifdef HU_HAS_CRON
-    {"cron", "Manage scheduled tasks", cmd_cron},
+/* Without HU_HAS_SKILLS, cmd_skills is a stub that only reports "not built",
+ * so --help gets the summary instead of the stub's error. */
+#ifdef HU_HAS_SKILLS
+#define HU_SKILLS_HELP HU_CLI_HELP_SELF
+#else
+#define HU_SKILLS_HELP HU_CLI_HELP_SUMMARY
 #endif
-    {"channel", "Channel management", cmd_channel},
-    {"skills", "Skill discovery and integration", cmd_skills},
-    {"plugins", "Plugin management", cmd_plugins},
-    {"agents", "Manage named agent definitions", cmd_agents},
-    {"pwa", "Drive installed PWA web apps", cmd_pwa},
-    {"hardware", "Hardware peripheral management", cmd_hardware},
-    {"sandbox", "Show sandbox status and backends", cmd_sandbox},
-    {"migrate", "Migrate memory backends", cmd_migrate},
-    {"memory", "Memory operations", cmd_memory},
-    {"persona", "Create and manage persona profiles", cmd_persona},
+
+static const hu_command_t commands[] = {
+    {"agent", "Start interactive agent (--demo: use local Ollama)", cmd_agent, HU_CLI_HELP_SUMMARY},
+    {"init", "Initialize config file", cmd_init, HU_CLI_HELP_SUMMARY},
+    {"setup", "Local / on-device model setup", cmd_setup, HU_CLI_HELP_SELF},
+    {"gateway", "Start webhook gateway server", cmd_gateway, HU_CLI_HELP_SUMMARY},
+    {"mcp", "Run as MCP server (stdin/stdout JSON-RPC)", cmd_mcp, HU_CLI_HELP_SUMMARY},
+    {"service", "Run as background service (daemonize)", cmd_service, HU_CLI_HELP_SUMMARY},
+    {"service-loop", "Run service loop in foreground", cmd_service_loop, HU_CLI_HELP_SUMMARY},
+    {"status", "Show runtime status", cmd_status, HU_CLI_HELP_SUMMARY},
+    {"onboard", "Interactive setup wizard", cmd_onboard, HU_CLI_HELP_SUMMARY},
+    {"doctor", "Run system diagnostics", cmd_doctor, HU_CLI_HELP_SUMMARY},
+    {"ctl", "Runtime kill-switch inspector (guard status/disable-g9/enable-g9/list-channels)",
+     cmd_ctl, HU_CLI_HELP_SELF},
+    {"inference-status", "Show effective inference throughput config (KV quant, FA, draft model)",
+     cmd_inference_status, HU_CLI_HELP_SUMMARY},
+#ifdef HU_HAS_CRON
+    {"cron", "Manage scheduled tasks", cmd_cron, HU_CLI_HELP_SELF},
+#endif
+    {"channel", "Channel management", cmd_channel, HU_CLI_HELP_SUMMARY},
+    {"skills", "Skill discovery and integration", cmd_skills, HU_SKILLS_HELP},
+    {"plugins", "Plugin management", cmd_plugins, HU_CLI_HELP_SELF},
+    {"agents", "Manage named agent definitions", cmd_agents, HU_CLI_HELP_SELF},
+    {"pwa", "Drive installed PWA web apps", cmd_pwa, HU_CLI_HELP_SELF},
+    {"hardware", "Hardware peripheral management", cmd_hardware, HU_CLI_HELP_SUMMARY},
+    {"sandbox", "Show sandbox status and backends", cmd_sandbox, HU_CLI_HELP_SUMMARY},
+    {"migrate", "Migrate memory backends", cmd_migrate, HU_CLI_HELP_SUMMARY},
+    {"memory", "Memory operations", cmd_memory, HU_CLI_HELP_BARE},
+    {"persona", "Create and manage persona profiles", cmd_persona, HU_CLI_HELP_SELF},
 #ifdef HU_ENABLE_CARTESIA
-    {"voice", "Voice cloning and TTS management", cmd_voice},
+    {"voice", "Voice cloning and TTS management", cmd_voice, HU_CLI_HELP_BARE},
 #endif
 #if defined(HU_ENABLE_FEEDS) && defined(HU_ENABLE_SQLITE)
-    {"feed", "Feed monitoring and ingestion", cmd_feed},
+    {"feed", "Feed monitoring and ingestion", cmd_feed, HU_CLI_HELP_BARE},
 #endif
-    {"research", "Run research agent", cmd_research},
-    {"calibrate", "Analyze messaging patterns and calibrate persona", cmd_calibrate},
-    {"drafts", "Generate predictive draft suggestions for a contact", cmd_drafts},
-    {"narrate", "Generate a long-horizon narrative for a contact from chat.db", cmd_narrate},
+    {"research", "Run research agent", cmd_research, HU_CLI_HELP_SUMMARY},
+    {"calibrate", "Analyze messaging patterns and calibrate persona", cmd_calibrate,
+     HU_CLI_HELP_BARE},
+    {"drafts", "Generate predictive draft suggestions for a contact", cmd_drafts, HU_CLI_HELP_SELF},
+    {"narrate", "Generate a long-horizon narrative for a contact from chat.db", cmd_narrate,
+     HU_CLI_HELP_SELF},
     {"reply-prompt", "Print the system prompt the daemon would send for a 1:1 reply (offline)",
-     cmd_reply_prompt},
-    {"autoresponder", "Manage the DND autoresponder (digest of recent replies)", cmd_autoresponder},
-    {"initiative", "Inspect init_proposer JSONL (log | status)", cmd_initiative},
-    {"export-dpo", "Export collector dpo_pairs to JSONL for LoRA fine-tuning (M3)", cmd_export_dpo},
+     cmd_reply_prompt, HU_CLI_HELP_SELF},
+    {"autoresponder", "Manage the DND autoresponder (digest of recent replies)", cmd_autoresponder,
+     HU_CLI_HELP_SELF},
+    {"initiative", "Inspect init_proposer JSONL (log | status)", cmd_initiative, HU_CLI_HELP_BARE},
+    {"export-dpo", "Export collector dpo_pairs to JSONL for LoRA fine-tuning (M3)", cmd_export_dpo,
+     HU_CLI_HELP_SELF},
     {"export-kto", "Export single-sided reaction signals to KTO JSONL (continual learning)",
-     cmd_export_kto},
-    {"workspace", "Workspace management", cmd_workspace},
-    {"config", "Configuration reference (schema)", cmd_config},
-    {"schedule", "Manage scheduled messages (list, add, cancel)", cmd_schedule},
-    {"capabilities", "Show available capabilities", cmd_capabilities},
-    {"models", "List available models", cmd_models},
-    {"auth", "Authentication management", cmd_auth},
-    {"eval", "Run eval suites and compare runs", cmd_eval},
+     cmd_export_kto, HU_CLI_HELP_SELF},
+    {"workspace", "Workspace management", cmd_workspace, HU_CLI_HELP_SUMMARY},
+    {"config", "Configuration reference (schema)", cmd_config, HU_CLI_HELP_BARE},
+    {"schedule", "Manage scheduled messages (list, add, cancel)", cmd_schedule,
+     HU_CLI_HELP_SUMMARY},
+    {"capabilities", "Show available capabilities", cmd_capabilities, HU_CLI_HELP_SUMMARY},
+    {"models", "List available models", cmd_models, HU_CLI_HELP_SUMMARY},
+    {"auth", "Authentication management", cmd_auth, HU_CLI_HELP_BARE},
+    {"eval", "Run eval suites and compare runs", cmd_eval, HU_CLI_HELP_SELF},
     {"evaluation", "W16 continuous benchmarks (locomo/longmem/dmr/minja/mab/frontier)",
-     cmd_evaluation},
-    {"hula", "HuLa program engine (parse, compile, execute, trace, replay)", cmd_hula},
-    {"update", "Check for updates", cmd_update},
+     cmd_evaluation, HU_CLI_HELP_SELF},
+    {"hula", "HuLa program engine (parse, compile, execute, trace, replay)", cmd_hula,
+     HU_CLI_HELP_BARE},
+    {"update", "Check for updates", cmd_update, HU_CLI_HELP_SUMMARY},
 #ifdef HU_ENABLE_CURL
-    {"paperclip", "Paperclip agent integration", cmd_paperclip},
+    {"paperclip", "Paperclip agent integration", cmd_paperclip, HU_CLI_HELP_SELF},
 #endif
 #ifdef HU_ENABLE_ML
-    {"ml", "Machine learning training and experiments", cmd_ml},
+    {"ml", "Machine learning training and experiments", cmd_ml, HU_CLI_HELP_SELF},
 #endif
 #ifdef HU_ENABLE_RL_FULL
-    {"demo", "Reproducible end-to-end demonstrations (RL closed loop)", cmd_demo},
+    {"demo", "Reproducible end-to-end demonstrations (RL closed loop)", cmd_demo, HU_CLI_HELP_SELF},
 #endif
-    {"version", "Show version information", cmd_version},
-    {"help", "Show help information", cmd_help},
+    {"version", "Show version information", cmd_version, HU_CLI_HELP_SUMMARY},
+    {"help", "Show help information", cmd_help, HU_CLI_HELP_SUMMARY},
 };
 
 #define COMMANDS_COUNT (sizeof(commands) / sizeof(commands[0]))
@@ -640,6 +660,7 @@ static void print_usage(FILE *out) {
     }
     fprintf(out, "  %-14s %s\n", "version", "Show version information");
     fprintf(out, "  %-14s %s\n", "help", "Show help information");
+    fprintf(out, "\nRun 'human help <command>' or 'human <command> --help' for details.\n");
 }
 
 static hu_error_t cmd_version(hu_allocator_t *alloc, int argc, char **argv) {
@@ -1291,8 +1312,7 @@ static hu_error_t cmd_cron(hu_allocator_t *alloc, int argc, char **argv) {
     }
 
     alloc->free(alloc->ctx, path, path_len + 1);
-    fprintf(stderr, "[%s] cron: use 'list', 'add', 'add-digest', 'add-learn', or 'remove'\n",
-            HU_CODENAME);
+    fprintf(stderr, "Usage: human cron <list|add|add-digest|add-learn|remove>\n");
     fprintf(stderr, "  human cron list\n");
     fprintf(stderr, "  human cron add <schedule> <command>\n");
     fprintf(stderr,
@@ -2015,8 +2035,7 @@ static hu_error_t cmd_skills(hu_allocator_t *alloc, int argc, char **argv) {
     }
 
     fprintf(stderr,
-            "[%s] skills: use list, search, install, info, init, uninstall, update, or publish\n",
-            HU_CODENAME);
+            "Usage: human skills <list|search|install|info|init|uninstall|update|publish>\n");
     fprintf(stderr, "  human skills list\n");
     fprintf(stderr, "  human skills search <query>\n");
     fprintf(stderr, "  human skills install <name-or-path>\n");
@@ -2095,7 +2114,7 @@ static hu_error_t cmd_plugins(hu_allocator_t *alloc, int argc, char **argv) {
         return n > 0 ? HU_OK : HU_ERR_NOT_FOUND;
     }
 
-    fprintf(stderr, "[%s] plugins: use list, scan, or dir\n", HU_CODENAME);
+    fprintf(stderr, "Usage: human plugins <list|scan|dir>\n");
     fprintf(stderr, "  human plugins list             — list installed plugins\n");
     fprintf(stderr, "  human plugins scan [directory]  — scan directory for plugins\n");
     fprintf(stderr, "  human plugins dir              — show plugin directory\n");
@@ -3490,6 +3509,28 @@ static int run_command(hu_allocator_t *alloc, int argc, char **argv, hu_command_
     return 1;
 }
 
+/* Answer `human <cmd> --help`. SELF and BARE handlers print usage and often
+ * return an error for it; the user asked for help and got it, so exit 0. */
+static int run_command_help(hu_allocator_t *alloc, int argc, char **argv, hu_command_t const *cmd) {
+    switch (cmd->help) {
+    case HU_CLI_HELP_SELF:
+        /* Several handlers only recognize --help; `-h` must reach them as it. */
+        for (int i = 2; i < argc && argv[i] && strcmp(argv[i], "--") != 0; i++) {
+            if (strcmp(argv[i], "-h") == 0)
+                argv[i] = "--help";
+        }
+        (void)cmd->handler(alloc, argc, argv);
+        return 0;
+    case HU_CLI_HELP_BARE:
+        (void)cmd->handler(alloc, 2, argv);
+        return 0;
+    case HU_CLI_HELP_SUMMARY:
+    default:
+        hu_cli_print_summary(stdout, cmd->name, cmd->description);
+        return 0;
+    }
+}
+
 static void handle_sighup(int sig) {
     (void)sig;
     hu_config_set_reload_requested();
@@ -3578,6 +3619,21 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    /* Help is answered here, before the first-run notice, the update check
+     * and the handler, so asking about a command can never run it. */
+    if (strcmp(cmd_name, "help") == 0 && argc >= 3 && argv[2] && argv[2][0] != '-') {
+        hu_command_t const *target = find_command(argv[2]);
+        if (!target) {
+            fprintf(stderr, "Unknown command: %s\n", argv[2]);
+            fprintf(stderr, "Run 'human help' for usage.\n");
+            return 1;
+        }
+        char *help_argv[] = {argv[0], argv[2], "--help", NULL};
+        return run_command_help(&alloc, 3, help_argv, target);
+    }
+    if (hu_cli_help_requested(argc, argv))
+        return run_command_help(&alloc, argc, argv, cmd);
+
 #ifndef HU_IS_TEST
     if (hu_onboard_check_first_run() && strcmp(cmd_name, "onboard") != 0 &&
         strcmp(cmd_name, "init") != 0 && strcmp(cmd_name, "help") != 0 &&
@@ -3588,8 +3644,10 @@ int main(int argc, char *argv[]) {
 #endif
 
 #if defined(HU_HAS_UPDATE) && !HU_IS_TEST
+    /* init/onboard create the config, so loading it first only logs errors. */
     if (strcmp(cmd_name, "update") != 0 && strcmp(cmd_name, "version") != 0 &&
-        strcmp(cmd_name, "help") != 0) {
+        strcmp(cmd_name, "help") != 0 && strcmp(cmd_name, "init") != 0 &&
+        strcmp(cmd_name, "onboard") != 0) {
         hu_config_t update_cfg;
         if (hu_config_load(&alloc, &update_cfg) == HU_OK) {
             hu_update_maybe_check(&alloc, &update_cfg);

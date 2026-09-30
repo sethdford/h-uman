@@ -13,6 +13,8 @@
  *   9. export_dpo_pairs: NOT_SUPPORTED in test builds (no SQLite path)
  */
 
+#include "human/cli_commands.h"
+#include "human/core/allocator.h"
 #include "human/ml/lora_export.h"
 
 #include "test_framework.h"
@@ -167,6 +169,26 @@ static void test_kto_export_returns_not_supported_in_test_build(void) {
     HU_ASSERT_EQ((int)err, (int)HU_ERR_NOT_SUPPORTED);
 }
 
+/* A missing --db must be reported as NOT_FOUND naming the path, not as the
+ * generic "export failed: I/O error" the CLI used to print. */
+static void test_export_dpo_cli_missing_db_is_not_found(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    char *argv[] = {"human", "export-dpo",
+                    "--db",  "/nonexistent/hu-test/dpo_pairs.db",
+                    "--out", "/nonexistent/hu-test/out.jsonl",
+                    NULL};
+    HU_ASSERT_EQ(cmd_export_dpo(&alloc, 6, argv), HU_ERR_NOT_FOUND);
+}
+
+static void test_export_kto_cli_missing_db_is_not_found(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    char *argv[] = {"human", "export-kto",
+                    "--db",  "/nonexistent/hu-test/memory.db",
+                    "--out", "/nonexistent/hu-test/out.jsonl",
+                    NULL};
+    HU_ASSERT_EQ(cmd_export_kto(&alloc, 6, argv), HU_ERR_NOT_FOUND);
+}
+
 void run_lora_export_tests(void) {
     HU_TEST_SUITE("lora_export");
     HU_RUN_TEST(test_json_escape_plain_ascii_passthrough);
@@ -183,4 +205,6 @@ void run_lora_export_tests(void) {
     HU_RUN_TEST(test_render_kto_drops_unusable);
     HU_RUN_TEST(test_render_kto_escapes_fields);
     HU_RUN_TEST(test_kto_export_returns_not_supported_in_test_build);
+    HU_RUN_TEST(test_export_dpo_cli_missing_db_is_not_found);
+    HU_RUN_TEST(test_export_kto_cli_missing_db_is_not_found);
 }

@@ -17,6 +17,7 @@ Runs local validation steps:
   2. cmake configure (Debug, all channels) in build-check/
   3. cmake build
   4. run human_tests
+  4b. every `human <cmd> --help` prints usage without running the command
   5. corpus attributedBody decode regression tests (stdlib python, no chat.db)
 
 Exit 0 if all pass, 1 otherwise.
@@ -116,6 +117,24 @@ if [ -x "$BUILD_DIR/human_tests" ]; then
     fi
 else
     warn "  human_tests: binary not found"
+    FAIL=$((FAIL + 1))
+fi
+
+# 4b. `human <cmd> --help` must describe a command, never run it.
+info "Step 4b: CLI --help safety (every command, sandboxed)..."
+if [ -x "$BUILD_DIR/human" ]; then
+    set +e
+    bash scripts/check-cli-help-safety.sh "$BUILD_DIR/human"
+    HELP_RC=$?
+    set -e
+    if [ "$HELP_RC" -eq 0 ]; then
+        PASS=$((PASS + 1))
+    else
+        warn "  cli help safety: fail (rc=$HELP_RC)"
+        FAIL=$((FAIL + 1))
+    fi
+else
+    warn "  cli help safety: $BUILD_DIR/human not found"
     FAIL=$((FAIL + 1))
 fi
 
