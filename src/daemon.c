@@ -80,6 +80,7 @@
 #include "human/daemon/intelligence_facade.h"
 #include "human/daemon/memory_facade.h"
 #include "human/daemon/ml_facade.h"
+#include "human/daemon/name_catch.h"
 #include "human/daemon/persona_facade.h"
 #include "human/daemon/platform_facade.h"
 #include "human/daemon/promise_keeper.h"
@@ -8288,7 +8289,6 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                          batch_key, key_len, combined, combined_len,
                                                          response, response_len);
                 }
-
 #ifdef HU_ENABLE_SQLITE
                 /* Task 18: Extraction pipeline — post-turn storage */
                 if (err == HU_OK && response && response_len > 0 && agent->memory) {
@@ -8452,6 +8452,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #endif
 
 #ifndef HU_IS_TEST
+                if (err == HU_OK && response && response_len > 0 && graph) /* names, §4.2 */
+                    hu_daemon_name_catch_batch(alloc, graph, msgs, batch_start, batch_end, config);
                 /* F27: If we responded to negative emotion, set pending to record engagement
                  * when we get their next reply.
                  * Skip in llm_decides: avoids post-response emotion LLM call. */
