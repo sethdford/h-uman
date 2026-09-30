@@ -54,7 +54,7 @@ Phase 1 (this spec) is done when:
    unmodified code.
 2. Stages **S3, S2, S0, S8, S4, S16** (§3) are extracted, each proven
    byte-identical by that harness.
-3. `hu_agent_turn` ≤ **5,900** lines and `agent_turn.c` ≤ **7,500** lines,
+3. `hu_agent_turn` ≤ **6,050** lines and `agent_turn.c` ≤ **7,500** lines,
    both locked by the existing ratchets.
 4. A new ratchet caps flat `src/agent/*.c` at its current count (§4.5).
 5. Full suite green, ASan clean, every ratchet at or below its baseline.
@@ -236,3 +236,10 @@ unifying it changes behaviour.
 
 Estimated size: PR 0 ~800 lines (harness + corpus); stage PRs 150–1,600 lines
 moved each; about 8 PRs for phase 1.
+
+> **Amendment 2026-09-30 (§2.3 criterion 3):** the phase-1 target moved from
+> 5,900 to 6,050 lines after the plan's dry run measured the required
+> hand-back glue: the six stages remove ~2,850 lines but their result
+> plumbing adds back ~150 (recomputed 6,045 by the pre-flight scan). S17–S18
+> are the first extractions of phase 2. `agent_turn.c` ≤ 7,500 is unchanged
+> (projected ~7,380).
