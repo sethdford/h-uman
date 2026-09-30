@@ -608,7 +608,7 @@ typedef struct dag_parallel_work {
  * since tools typically do I/O). */
 static pthread_mutex_t g_dag_parallel_prep_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-static void agent_turn_hula_append_histories(hu_agent_t *agent, const hu_hula_program_t *prog,
+void hu_agent_internal_hula_append_histories(hu_agent_t *agent, const hu_hula_program_t *prog,
                                              const hu_hula_exec_t *exec) {
     if (!agent || !prog || !exec)
         return;
@@ -658,7 +658,7 @@ static void agent_turn_hula_append_histories(hu_agent_t *agent, const hu_hula_pr
 static void hula_compiler_agent_done(void *ctx, const hu_hula_program_t *prog,
                                      const hu_hula_exec_t *exec) {
     hu_agent_t *agent = ctx;
-    agent_turn_hula_append_histories(agent, prog, exec);
+    hu_agent_internal_hula_append_histories(agent, prog, exec);
     hu_bth_metrics_record_hula_tool_turn(agent->bth_metrics);
 }
 
@@ -851,7 +851,7 @@ static void *dag_parallel_worker(void *arg) {
 }
 #endif
 
-static bool message_looks_multistep_for_orchestrator(const char *m, size_t mlen) {
+bool hu_agent_internal_message_looks_multistep(const char *m, size_t mlen) {
     if (!m || mlen < 48)
         return false;
     for (size_t ni = 0; s_multistep_needles[ni]; ni++) {
@@ -870,7 +870,7 @@ static bool message_looks_multistep_for_orchestrator(const char *m, size_t mlen)
 #ifndef HU_IS_TEST
 /* Zero + inherit parent fields into *tpl (for hu_hula_compiler_chat_compile_execute or set_spawn).
  */
-static void agent_turn_hula_fill_spawn_tpl(hu_agent_t *agent, hu_spawn_config_t *tpl) {
+void hu_agent_internal_hula_fill_spawn_tpl(hu_agent_t *agent, hu_spawn_config_t *tpl) {
     if (!tpl)
         return;
     memset(tpl, 0, sizeof(*tpl));
@@ -880,11 +880,11 @@ static void agent_turn_hula_fill_spawn_tpl(hu_agent_t *agent, hu_spawn_config_t 
 
 /* *tpl must be caller stack storage valid until hu_hula_exec_run returns (exec stores its address).
  */
-static void agent_turn_hula_exec_bind_spawn(hu_agent_t *agent, hu_hula_exec_t *exec,
+void hu_agent_internal_hula_exec_bind_spawn(hu_agent_t *agent, hu_hula_exec_t *exec,
                                             hu_spawn_config_t *tpl) {
     if (!agent || !exec || !tpl || !agent->agent_pool)
         return;
-    agent_turn_hula_fill_spawn_tpl(agent, tpl);
+    hu_agent_internal_hula_fill_spawn_tpl(agent, tpl);
     hu_hula_exec_set_spawn(exec, agent->agent_pool, tpl);
 }
 #endif
@@ -4992,7 +4992,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                     hu_hula_exec_init_full(&hx, *agent->alloc, &hprog, agent->tools,
                                            agent->tools_count, agent->policy, agent->observer);
                 if (hxe == HU_OK) {
-                    agent_turn_hula_exec_bind_spawn(agent, &hx, &hula_spawn_tpl);
+                    hu_agent_internal_hula_exec_bind_spawn(agent, &hx, &hula_spawn_tpl);
                     hu_hula_exec_set_security_agent(&hx, agent);
                     if (agent->infra.idempotency_registry) {
                         hu_hula_exec_set_idempotency_registry(&hx,
@@ -5045,7 +5045,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                     }
                     if (stripped)
                         agent->alloc->free(agent->alloc->ctx, stripped, slen + 1);
-                    agent_turn_hula_append_histories(agent, &hprog, &hx);
+                    hu_agent_internal_hula_append_histories(agent, &hprog, &hx);
                     hu_bth_metrics_record_hula_tool_turn(agent->bth_metrics);
                     hu_hula_exec_deinit(&hx);
                     hu_hula_program_deinit(&hprog);
@@ -7426,7 +7426,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                 if (agent->hula_enabled && tc_count >= 3 && agent->provider.vtable &&
                     agent->provider.vtable->chat) {
                     hu_spawn_config_t hula_spawn_tpl;
-                    agent_turn_hula_fill_spawn_tpl(agent, &hula_spawn_tpl);
+                    hu_agent_internal_hula_fill_spawn_tpl(agent, &hula_spawn_tpl);
                     bool hula_compiler_ok = false;
                     (void)hu_hula_compiler_chat_compile_execute(
                         agent->alloc, msg, msg_len, agent->tools, agent->tools_count, agent->policy,
@@ -7674,7 +7674,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                  * merge prefers the longest agreeing sub-agent output. */
                 if (agent->multi_agent_enabled && agent->agent_registry &&
                     (tc_count >= 2 ||
-                     (tc_count >= 1 && message_looks_multistep_for_orchestrator(msg, msg_len)))) {
+                     (tc_count >= 1 && hu_agent_internal_message_looks_multistep(msg, msg_len)))) {
                     hu_orchestrator_t orch;
                     if (hu_orchestrator_create(agent->alloc, &orch) == HU_OK) {
                         hu_orchestrator_load_from_registry(&orch, agent->agent_registry);
@@ -7683,7 +7683,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                             if (agent->provider.vtable &&
                                 agent->provider.vtable->chat_with_system &&
                                 (tc_count >= 2 ||
-                                 message_looks_multistep_for_orchestrator(msg, msg_len))) {
+                                 hu_agent_internal_message_looks_multistep(msg, msg_len))) {
                                 hu_decomposition_t decomp;
                                 memset(&decomp, 0, sizeof(decomp));
                                 hu_error_t derr = hu_orchestrator_decompose_goal(
@@ -7941,8 +7941,8 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                                                               agent->tools, agent->tools_count,
                                                               hula_policy, hula_obs);
                                 if (herr == HU_OK) {
-                                    agent_turn_hula_exec_bind_spawn(agent, &hula_exec,
-                                                                    &hula_spawn_tpl);
+                                    hu_agent_internal_hula_exec_bind_spawn(agent, &hula_exec,
+                                                                           &hula_spawn_tpl);
                                     hu_hula_exec_set_security_agent(&hula_exec, agent);
                                     herr = hu_hula_exec_run(&hula_exec);
                                     if (herr == HU_OK) {
@@ -7978,8 +7978,8 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                                             hu_str_free(agent->alloc, ir_audit);
                                         used_hula = true;
                                         hu_bth_metrics_record_hula_tool_turn(agent->bth_metrics);
-                                        agent_turn_hula_append_histories(agent, &hula_prog,
-                                                                         &hula_exec);
+                                        hu_agent_internal_hula_append_histories(agent, &hula_prog,
+                                                                                &hula_exec);
                                     }
                                     hu_hula_exec_deinit(&hula_exec);
                                 }
