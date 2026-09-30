@@ -18,6 +18,7 @@
 #include "human/memory/encrypted_store.h"
 #include "human/memory/entropy_gate.h"
 #include "human/memory/graph_index.h"
+#include "human/memory/prospective_repo.h"
 #include "human/memory/semantic_recall.h"
 #include "human/memory/sql_common.h"
 #include "human/memory/vector.h"
@@ -1839,6 +1840,11 @@ hu_memory_t hu_sqlite_memory_create(hu_allocator_t *alloc, const char *db_path) 
         if (e)
             sqlite3_free(e);
     }
+
+    /* Prospective memory v2 (docs/superpowers/specs/2026-09-30-prospective-
+     * memory-v2-design.md §4.1): additive typed columns + fired -> status. */
+    if (hu_prospective_repo_ensure_schema(db) != HU_OK)
+        hu_log_warn("memory.sqlite", NULL, "prospective_memories v2 migration failed");
 
     hu_sqlite_memory_t *self =
         (hu_sqlite_memory_t *)alloc->alloc(alloc->ctx, sizeof(hu_sqlite_memory_t));

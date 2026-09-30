@@ -1667,6 +1667,7 @@ if(HU_ENABLE_SQLITE)
         src/memory/repos/proactive_decisions_repo_sqlite.c
         src/memory/repos/outbound_sends_repo_sqlite.c
         src/memory/repos/contact_optout_repo_sqlite.c
+        src/memory/repos/prospective_repo_sqlite.c
         src/memory/repos/reminder_repo_sqlite.c
         src/memory/repos/repo_util_sqlite.c
         src/memory/repos/social_graph_repo_sqlite.c
@@ -4240,6 +4241,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_daemon_reminders.c
     tests/test_agent_fit_history.c
     tests/test_prospective.c
+    tests/test_prospective_repo_sqlite.c
     tests/test_eval_score.c
     tests/test_corrective_rag.c
     tests/test_adaptive_rag.c
