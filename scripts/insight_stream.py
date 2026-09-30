@@ -570,12 +570,20 @@ def prospective_pass(db, a, identity, contacts, targets, now_ms):
         # Retire past-due rows (fired=3) so "live" counts what can still fire, and
         # report fired=1 — the only number that proves the read side runs. Until
         # 2026-09-20 this line counted writes while the daemon never read them.
+        #
+        # trigger_type='keyword' on both queries below (fix round M2): this
+        # curator only ever WRITES keyword rows, but without the filter its
+        # expire-UPDATE and "N live" count also matched cue_kind='time' rows
+        # mirrored into the same table by prospective v2. With both v2 gates
+        # OFF (HU_PROSPECTIVE/HU_PROSPECTIVE_TIME unset), that set fired=3 on
+        # still-pending time rows and folded them into this curator's printed
+        # count -- v2 owns time-row expiry, not this keyword-only pass.
         expired = db.execute(
-            "UPDATE prospective_memories SET fired=3 WHERE fired=0 AND expires_at > 0 AND "
-            "expires_at <= strftime('%s','now')").rowcount
+            "UPDATE prospective_memories SET fired=3 WHERE trigger_type='keyword' AND "
+            "fired=0 AND expires_at > 0 AND expires_at <= strftime('%s','now')").rowcount
         db.commit()
-        live = db.execute("SELECT COUNT(*) FROM prospective_memories WHERE fired=0 AND "
-                          "expires_at > strftime('%s','now')").fetchone()[0]
+        live = db.execute("SELECT COUNT(*) FROM prospective_memories WHERE trigger_type='keyword' "
+                          "AND fired=0 AND expires_at > strftime('%s','now')").fetchone()[0]
         fired = db.execute("SELECT COUNT(*) FROM prospective_memories WHERE fired=1").fetchone()[0]
         print(f"prospective done: {total} new triggers, {live} live, {expired} expired, "
               f"{fired} fired all-time")

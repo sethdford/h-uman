@@ -199,17 +199,41 @@ def test_manifest_failure_after_a_write_prints_counts_and_exits_3(tmp_path, monk
     assert "manifest" in err and str(next(backups.iterdir())) in err
 
 
-def test_refusal_after_a_backup_names_the_kept_backup(tmp_path, monkeypatch, capsys):
-    """Fix round 1, M2: when the backfill fails after the backup was taken,
-    the refusal says the database is untouched and where the backup is --
-    never a bare 'nothing written' while a backup file sits on disk."""
+def test_refusal_after_a_write_attempt_names_the_backup_state_unknown(tmp_path, monkeypatch,
+                                                                       capsys):
+    """Fix round 2, M4: when the backfill subprocess was invoked WITH --write
+    (its backup already taken) and then failed, the refusal must NOT claim
+    the database is "untouched" -- a contract-mismatch error, a timeout, or a
+    kill between the subprocess's COMMIT and this wrapper noticing cannot be
+    told apart from a partial write. It must say the state is unknown and
+    name the backup to restore from. "untouched" wording is reserved for
+    refusals that happen before the backfill subprocess ever runs (or a dry
+    run, which never commits)."""
     argv, backups, logs = setup(tmp_path, monkeypatch)
     monkeypatch.setenv("FAKE_FAIL", "1")
     assert pb.main(argv + ["--write"]) == 2
     [bak] = list(backups.iterdir())
     err = capsys.readouterr().err
-    assert "database untouched" in err and str(bak) in err
+    assert "UNKNOWN" in err and str(bak) in err
+    assert "database untouched" not in err
     assert "nothing written" not in err
+    assert no_manifest(logs)
+
+
+def test_refusal_before_the_backfill_runs_still_says_untouched(tmp_path, monkeypatch, capsys):
+    """The dual of the test above: a refusal that happens BEFORE the backfill
+    subprocess is ever invoked (a backup failure, here) still gets the plain
+    "untouched" wording -- the database genuinely was never touched, and
+    write_attempted must be False for this call site."""
+    argv, backups, logs = setup(tmp_path, monkeypatch)
+    real = tmp_path / "elsewhere"
+    real.mkdir()
+    backups.symlink_to(real)  # backup() raises before run_backfill is ever called
+    assert pb.main(argv + ["--write"]) == 2
+    err = capsys.readouterr().err
+    assert "nothing written" in err
+    assert "UNKNOWN" not in err and "database untouched" not in err
+    assert calls(tmp_path) == []  # the backfill subprocess never ran
     assert no_manifest(logs)
 
 

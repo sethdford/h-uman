@@ -87,6 +87,31 @@ def test_build_refuses_below_thirty_would_fires(tmp_path):
     assert rc == 2 and not out.exists()
 
 
+# ---------------------------------------------------------------------------
+# Fix round I1 (prospective_shadow_report.PREFIX, reused here via psr.read_log):
+# a daemon-restart gate-banner line (hu_prospective_gate_banner,
+# src/memory/prospective_policy.c) names "shadow" in its text just like the
+# fire/not_now item lines make_log() writes. Before the PREFIX fix, the
+# banner was mis-treated as a shadow-shaped candidate, failed every known
+# shape, and refused the build ("N malformed shadow log line(s) in the
+# window") on any window that happened to contain a daemon restart.
+# ---------------------------------------------------------------------------
+
+def test_build_ignores_gate_banner_line_in_log(tmp_path):
+    log_path = make_log(tmp_path, 30)
+    with open(log_path, "a") as f:
+        f.write("2026-10-02T12:00:11 INFO  [prospective] prospective SHADOW "
+                "(HU_PROSPECTIVE=shadow): legacy directive unchanged; Filter+Decide "
+                "counts logged\n")
+    out = tmp_path / "sheet"
+    rc = psc.main(["build", "--log", log_path, "--memory-db", make_db(tmp_path, 30),
+                   "--since", "2026-10-01", "--until", "2026-10-03", "--out-dir", str(out),
+                   "--seed", "7"])
+    assert rc == 0
+    rows = list(csv.DictReader(open(out / "rating_sheet.csv")))
+    assert len(rows) == 60
+
+
 def test_score_precision_and_refusal(tmp_path):
     rc, out = build(tmp_path, 30)
     key = json.loads((out / "answer_key.json").read_text())

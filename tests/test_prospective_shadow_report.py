@@ -5,6 +5,7 @@ A synthetic service log and a synthetic memory.db in tmp_path. Nothing reads
 ~/.human, no model, no network, no ports.
 """
 import json
+import re
 import sqlite3
 import stat
 import sys
@@ -17,6 +18,27 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import pytest  # noqa: E402
 
 import prospective_shadow_report as psr  # noqa: E402
+
+PROSPECTIVE_POLICY_C = (
+    Path(__file__).resolve().parent.parent / "src" / "memory" / "prospective_policy.c")
+
+
+def gate_banner_literals():
+    """Read the six hu_prospective_gate_banner() return-string literals
+    straight out of the C source (src/memory/prospective_policy.c), rather
+    than hardcoding a copy here, so a future banner edit is covered by this
+    test too. Each `return "..." "...";` may span several adjacent C string
+    literals (compiler-concatenated); this joins them the same way the
+    compiler would."""
+    src = PROSPECTIVE_POLICY_C.read_text()
+    m = re.search(r"hu_prospective_gate_banner\([^\n]*\)\s*\{\n(?:.*\n)*?^\}\n", src, re.M)
+    assert m, "hu_prospective_gate_banner() not found in prospective_policy.c"
+    body = m.group(0)
+    banners = []
+    for ret in re.findall(r'return\s+((?:"(?:[^"\\]|\\.)*"\s*)+);', body):
+        banners.append("".join(re.findall(r'"((?:[^"\\]|\\.)*)"', ret)))
+    assert len(banners) == 6, f"expected 6 gate-banner literals, got {len(banners)}: {banners}"
+    return banners
 
 C1 = "+15550000001"
 SINCE = "2026-10-01"
@@ -238,6 +260,34 @@ def test_malformed_line_refuses_and_writes_nothing(tmp_path):
     rc, out = run(tmp_path, LOG_MALFORMED, path)
     assert rc == 2
     assert not out.exists()
+
+
+# ---------------------------------------------------------------------------
+# Fix round I1: a daemon-restart gate banner (hu_prospective_gate_banner,
+# src/memory/prospective_policy.c) must NOT be treated as a shadow-shaped
+# candidate line. All four of the SHADOW/OFF banners name "shadow" somewhere
+# in their text -- before the fix, PREFIX's loose ".*shadow.*" matched them,
+# they then failed every COUNTS/ITEM/UPTAKE shape check, and the "shadow-
+# shaped but not one of the three known lines" branch counted each one
+# MALFORMED -- refusing the WHOLE report (exit 2) on any window that
+# happened to contain a daemon restart. Read the six literal banner strings
+# straight out of the C source (gate_banner_literals(), above) so a future
+# banner edit is covered by this test too, not just today's wording.
+# ---------------------------------------------------------------------------
+
+def test_gate_banners_are_not_shadow_candidates_and_do_not_refuse(tmp_path):
+    for i, banner in enumerate(gate_banner_literals()):
+        case_dir = tmp_path / f"case{i}"
+        case_dir.mkdir()
+        log = LOG_HAPPY + f"2026-10-02T12:00:11 INFO  [prospective] {banner}\n"
+        rc, out = run(case_dir, log, make_happy_db(case_dir))
+        assert rc == 0, f"banner line refused the report: {banner!r}"
+        body, _ = read_payload(out)
+        # Counts/rates unchanged from the happy path (test_report_counts_and_
+        # rates_dedupe_across_days) -- the banner line must be inert, not
+        # silently folded into any count.
+        c = body["counts"]
+        assert c["candidates"] == 3 and c["fire"] == 2 and c["resolved"] == 1
 
 
 # ---------------------------------------------------------------------------

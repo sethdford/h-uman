@@ -24,7 +24,7 @@
 
 set -eu
 
-MAX_FN_BASELINE=8558    # hu_service_run, src/daemon.c — merged-tree measurement 2026-09-30 (main 8557 after #555; prospective-v2 F20 who_buf adds 1)
+MAX_FN_BASELINE=8558    # hu_service_run, src/daemon.c — merged-tree measurement 2026-09-30 (main 8557 after #555; prospective-v2 adds 1: `rt.is_group = msgs[batch_start].is_group;` at src/daemon.c:4040, needed by LIVE's never-fire-in-a-group filter)
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"

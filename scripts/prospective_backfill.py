@@ -26,8 +26,16 @@ are exact and the database is unchanged.
 
 Exit codes:
   0  done; manifest written
-  2  refused; the database is untouched (a refusal after the --write backup
-     names the kept backup file)
+  2  refused. Every refusal BEFORE the backfill subprocess is invoked (missing
+     binary/database, unmigrated schema, unusable manifest dir, a failed
+     --write backup) leaves the database untouched. A refusal AFTER a
+     --write attempt's backfill subprocess was invoked and then failed
+     (contract mismatch, timeout, killed between its COMMIT and this
+     wrapper noticing) is different: that failure cannot be told apart from
+     a partial commit, so the message says the database state is UNKNOWN
+     and names the backup to restore from -- it never claims "untouched".
+     A dry-run backfill failure is still "nothing written": the C side
+     never commits without --write.
   3  the backfill ran (with --write, the database WAS written) but the
      manifest could not be written; the counts JSON line is on stdout
 """
@@ -55,9 +63,24 @@ REQUIRED_COLUMNS = {"cue_kind", "due_at", "status", "surfaced_at", "attempts", "
                     "source"}
 
 
-def refuse(msg, backup_path=None):
-    tail = (f"database untouched; backup kept at {backup_path}" if backup_path
-            else "nothing written")
+def refuse(msg, backup_path=None, write_attempted=False):
+    """write_attempted=True means the backfill subprocess was already invoked
+    WITH --write (its backup, if any, is in backup_path) when it failed. At
+    that point a contract-mismatch error, a timeout, or the process being
+    killed between its COMMIT and this wrapper noticing are indistinguishable
+    from each other -- the database may already carry the write. Never call
+    that "untouched"; say the state is unknown and point at the backup to
+    restore from. Every other refusal happens before the backfill subprocess
+    runs at all (or, for a dry run, the C side never commits without
+    --write), so "untouched" / "nothing written" is exact."""
+    if write_attempted:
+        tail = (f"database state is UNKNOWN after the --write attempt; restore from the "
+                 f"backup at {backup_path} if you need a known-good database" if backup_path
+                 else "database state is UNKNOWN after the --write attempt (no backup exists "
+                      "to restore from)")
+    else:
+        tail = (f"database untouched; backup kept at {backup_path}" if backup_path
+                else "nothing written")
     print(f"refusing: {msg}; {tail}", file=sys.stderr)
     return EXIT_REFUSED
 
@@ -171,7 +194,7 @@ def main(argv=None):
     try:
         counts = run_backfill(a.human_bin, a.db, a.write, now)
     except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as e:
-        return refuse(f"backfill failed ({e})", backup_path)
+        return refuse(f"backfill failed ({e})", backup_path, write_attempted=a.write)
     payload = {"schema_version": 1, "measured_at": stamp,
                "mode": "write" if a.write else "dry_run",
                "backup_written": backup_path is not None, "counts": counts}

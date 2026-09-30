@@ -88,11 +88,27 @@ import eval_prospective_memory as epm  # noqa: E402
 
 HOME = os.path.expanduser("~")
 
-# The loose "is this even a shadow-tagged prospective line" prefix. Deliberately
-# does not validate the timestamp's digit shapes -- an unparseable timestamp on
-# an otherwise shadow-shaped line is exactly the kind of drift this report must
-# not silently swallow (see MALFORMED handling in read_log).
-PREFIX = re.compile(r"^(\S+)\s+\S+\s+\[prospective\]\s+(prospective .*shadow.*)$")
+# The "is this a shadow-tagged prospective line" prefix, anchored to exactly
+# the shapes COUNTS/ITEM/UPTAKE below accept: "prospective [time ]shadow[
+# item| uptake]: ". Fix round (I1): a looser ".*shadow.*" prefix also matched
+# the gate BANNER lines emitted once per process by hu_prospective_gate_banner
+# (src/memory/prospective_policy.c) -- both SHADOW banners and both OFF
+# banners name "shadow" in their text ("... HU_PROSPECTIVE_TIME=shadow ...",
+# "set HU_PROSPECTIVE=shadow|live ..."). Those banners would then fail every
+# COUNTS/ITEM/UPTAKE shape check and get counted MALFORMED, refusing the
+# report on every window that contains a daemon restart. Anchoring the prefix
+# to the literal "shadow"/"shadow item"/"shadow uptake" tag (immediately after
+# "prospective " or "prospective time ") excludes the banners -- their text
+# never has "shadow" in that position -- while a genuine shadow-shaped line
+# that fails COUNTS/ITEM/UPTAKE's OWN shape check still falls through to the
+# "shadow-shaped but not one of the three known lines" malformed branch below.
+# Deliberately does not validate the timestamp's digit shapes -- an
+# unparseable timestamp on an otherwise shadow-shaped line is exactly the kind
+# of drift this report must not silently swallow (see MALFORMED handling in
+# read_log).
+PREFIX = re.compile(
+    r"^(\S+)\s+\S+\s+\[prospective\]\s+"
+    r"(prospective (?:time )?shadow(?: item| uptake)?: .*)$")
 COUNTS = re.compile(r"^prospective (time )?shadow: (.+)$")
 ITEM = re.compile(r"^prospective (time )?shadow item: (.+)$")
 UPTAKE = re.compile(r"^prospective shadow uptake: (.+)$")

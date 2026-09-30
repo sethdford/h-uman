@@ -136,14 +136,22 @@ plist via `scripts/install-human-daemon.sh` — never `cp` over the running
 binary or hand-edit the plist — then verify with `scripts/verify-deploy.sh`.
 Off is exactly the pre-v2 path.
 
-## Before `HU_PROSPECTIVE_TIME=live`: known controller gaps
+## Before `HU_PROSPECTIVE_TIME=shadow` (rollout step 5) or `=live`: known controller gaps
 
 These are documented gaps in the current code, not yet closed, and are a
 checklist for the person promoting the time gate — not code this plan ships:
 
-1. **LIVE loads 20 history lines per contact per tick before knowing any
-   time row is due.** Load lazily, after a cheap pending-due count, instead
-   of unconditionally on every tick.
+1. **The history load happens every tick in SHADOW too, not only LIVE, for
+   contacts with nothing due.** `pm_time_v2` (`src/daemon/daemon_prospective_time.c`)
+   calls `pm_time_history` unconditionally before checking `candidates > 0`
+   — the day slot that dedupes a SHADOW contact to one pass per local day is
+   only taken `if (!live && c.candidates > 0)`, so a contact with no due row
+   that tick is re-judged (and its history reloaded) on every proactive
+   tick, not once a day. Load history lazily, after a cheap pending-due
+   count, instead of unconditionally on every tick. Address this **before
+   step 5 (`HU_PROSPECTIVE_TIME=shadow`)**, not only before live — the
+   7-day SHADOW read this gap precedes is itself affected by the per-tick
+   reload, not just the later LIVE promotion.
 2. **The legacy `hu_superhuman_delayed_followup_mark_sent` does not retire
    the v2 twin.** A twinned follow-up (F31 legacy + its v2 mirror) can
    surface once from each side. Retire the twin on legacy mark-sent, or gate
