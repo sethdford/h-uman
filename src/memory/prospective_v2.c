@@ -23,12 +23,21 @@ static void pm_mark_handled(const hu_prospective_item_t *items, size_t n, bool *
             handled[k] = true;
 }
 
-/* Retire an intention; a time intention also retires its ledger twins. */
-static void pm_retire(sqlite3 *db, const hu_prospective_item_t *it, hu_prospective_status_t to,
-                      hu_prospective_outcome_t outcome, int attempts, int64_t now) {
-    (void)hu_prospective_repo_transition(db, it, to, outcome, attempts, now, NULL);
-    if (it->cue_kind == HU_PM_CUE_TIME && to != HU_PM_PENDING)
+/* Retire an intention; a time intention also retires its ledger twins, but
+ * only when the primary transition actually changed a row. `changed` (may
+ * be NULL) receives hu_prospective_repo_transition's row count, and the
+ * transition's own hu_error_t is returned so a real backend failure is
+ * never silently swallowed. */
+static hu_error_t pm_retire(sqlite3 *db, const hu_prospective_item_t *it,
+                            hu_prospective_status_t to, hu_prospective_outcome_t outcome,
+                            int attempts, int64_t now, int *changed) {
+    int ch = 0;
+    hu_error_t err = hu_prospective_repo_transition(db, it, to, outcome, attempts, now, &ch);
+    if (changed)
+        *changed = ch;
+    if (err == HU_OK && ch > 0 && it->cue_kind == HU_PM_CUE_TIME && to != HU_PM_PENDING)
         (void)hu_prospective_repo_sync_source(db, it, to, now);
+    return err;
 }
 
 static hu_prospective_verdict_t pm_judge(hu_allocator_t *alloc, const hu_prospective_judge_t *judge,
@@ -74,31 +83,45 @@ static void pm_count_verdict(hu_prospective_counts_t *c, const hu_prospective_it
     }
 }
 
-/* Render the fired intentions and, only for what reached the prompt, mark
- * them surfaced. Returns HU_OK with *directive NULL when nothing rendered. */
+/* Persist the fired intentions to `surfaced` BEFORE rendering, and render
+ * only the ones whose write actually changed a row. An item whose write
+ * failed (a real backend error) or matched no row (deleted/already moved
+ * between list and here) is NOT rendered — it stays pending and is
+ * retried on a later turn — and is counted judge_err (the counts struct
+ * has no dedicated slot for "surfaced write failed"; see task-6 fix
+ * round 1). Returns HU_OK with *directive NULL when nothing rendered. */
 static hu_error_t pm_surface(hu_allocator_t *alloc, sqlite3 *db, hu_prospective_cue_kind_t kind,
                              const hu_prospective_item_t *const *fire, size_t fire_n, int64_t now,
-                             char **directive, size_t *directive_len) {
+                             hu_prospective_counts_t *counts, char **directive,
+                             size_t *directive_len) {
     const char *acts[HU_PROSPECTIVE_RENDER_CAP];
     const char *cues[HU_PROSPECTIVE_RENDER_CAP];
+    size_t ok_n = 0;
     for (size_t k = 0; k < fire_n; k++) {
-        acts[k] = fire[k]->action;
-        cues[k] = fire[k]->trigger_value;
+        int changed = 0;
+        hu_error_t terr = hu_prospective_repo_transition(
+            db, fire[k], HU_PM_SURFACED, HU_PM_OUTCOME_NONE, fire[k]->attempts, now, &changed);
+        if (terr != HU_OK || changed <= 0) {
+            counts->judge_err++;
+            continue;
+        }
+        acts[ok_n] = fire[k]->action;
+        cues[ok_n] = fire[k]->trigger_value;
+        ok_n++;
     }
+    if (ok_n == 0 || !directive)
+        return HU_OK;
     char buf[1024];
     size_t blen = 0;
     size_t r =
         hu_prospective_render(kind == HU_PM_CUE_TIME ? HU_PM_RENDER_DUE_LIST : HU_PM_RENDER_SOFT,
-                              acts, cues, fire_n, buf, sizeof(buf), &blen);
-    if (r == 0 || !directive)
+                              acts, cues, ok_n, buf, sizeof(buf), &blen);
+    if (r == 0)
         return HU_OK;
     char *d = (char *)alloc->alloc(alloc->ctx, blen + 1);
     if (!d)
         return HU_ERR_OUT_OF_MEMORY; /* nothing surfaced: they stay pending */
     memcpy(d, buf, blen + 1);
-    for (size_t k = 0; k < r; k++)
-        (void)hu_prospective_repo_transition(db, fire[k], HU_PM_SURFACED, HU_PM_OUTCOME_NONE,
-                                             fire[k]->attempts, now, NULL);
     *directive = d;
     if (directive_len)
         *directive_len = blen;
@@ -166,7 +189,8 @@ hu_error_t hu_prospective_v2_run(hu_allocator_t *alloc, sqlite3 *db, hu_prospect
         if (fr == HU_PM_FILTER_EXPIRE) {
             counts->expired++;
             if (apply)
-                pm_retire(db, it, HU_PM_EXPIRED, HU_PM_OUTCOME_NONE, it->attempts, turn->now);
+                (void)pm_retire(db, it, HU_PM_EXPIRED, HU_PM_OUTCOME_NONE, it->attempts, turn->now,
+                                NULL);
             continue;
         }
         if (fr == HU_PM_FILTER_CAPPED) {
@@ -188,13 +212,14 @@ hu_error_t hu_prospective_v2_run(hu_allocator_t *alloc, sqlite3 *db, hu_prospect
         case HU_PM_ACT_MARK_DONE:
             counts->resolved++;
             if (apply)
-                pm_retire(db, it, HU_PM_DONE, HU_PM_OUTCOME_SUPPRESSED, it->attempts, turn->now);
+                (void)pm_retire(db, it, HU_PM_DONE, HU_PM_OUTCOME_SUPPRESSED, it->attempts,
+                                turn->now, NULL);
             break;
         case HU_PM_ACT_MARK_CANCELED:
             counts->cancel++;
             if (apply)
-                pm_retire(db, it, HU_PM_CANCELED, HU_PM_OUTCOME_SUPPRESSED, it->attempts,
-                          turn->now);
+                (void)pm_retire(db, it, HU_PM_CANCELED, HU_PM_OUTCOME_SUPPRESSED, it->attempts,
+                                turn->now, NULL);
             break;
         default:
             if (!ok)
@@ -215,7 +240,8 @@ hu_error_t hu_prospective_v2_run(hu_allocator_t *alloc, sqlite3 *db, hu_prospect
     }
     counts->fire_action_count = fire_n;
     if (apply && fire_n > 0)
-        err = pm_surface(alloc, db, kind, fire, fire_n, turn->now, directive, directive_len);
+        err =
+            pm_surface(alloc, db, kind, fire, fire_n, turn->now, counts, directive, directive_len);
     alloc->free(alloc->ctx, handled, n * sizeof(bool));
     hu_prospective_repo_free(alloc, items, n);
     return err;
@@ -245,8 +271,15 @@ hu_error_t hu_prospective_v2_after_delivery(hu_allocator_t *alloc, sqlite3 *db,
         bool used = hu_prospective_reply_uses_action(it->action, reply, reply_len);
         hu_prospective_status_t to =
             hu_prospective_after_delivery_status(used, it->attempts, HU_PROSPECTIVE_MAX_ATTEMPTS);
-        pm_retire(db, it, to, used ? HU_PM_OUTCOME_USED : HU_PM_OUTCOME_IGNORED,
-                  used ? it->attempts : it->attempts + 1, now);
+        int changed = 0;
+        hu_error_t terr = pm_retire(db, it, to, used ? HU_PM_OUTCOME_USED : HU_PM_OUTCOME_IGNORED,
+                                    used ? it->attempts : it->attempts + 1, now, &changed);
+        if (terr != HU_OK) { /* a real backend error: propagate it, don't fabricate counts */
+            hu_prospective_repo_free(alloc, items, n);
+            return terr;
+        }
+        if (changed <= 0)
+            continue; /* matched no row: nothing to count */
         if (out) {
             out->surfaced++;
             if (used)

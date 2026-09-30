@@ -60,11 +60,19 @@ static void cli_prospective_parse_refuses_unsafe_or_ambiguous_input(void) {
     HU_ASSERT_FALSE(hu_cli_prospective_parse(5, unknown, &a));
     char *dangling[] = {"human", "prospective", "probe", "--db"};
     HU_ASSERT_FALSE(hu_cli_prospective_parse(4, dangling, &a));
+    /* fix round 1 minor: strtoll overflow must be rejected, not silently
+     * clamped to LLONG_MAX with errno left dangling. */
+    char *overflow_now[] = {
+        "human",     "prospective", "probe",  "--db",  "d",
+        "--contact", "c",           "--tick", "--now", "999999999999999999999999999999999999"};
+    HU_ASSERT_FALSE(hu_cli_prospective_parse(10, overflow_now, &a));
 }
 
 #ifdef HU_ENABLE_SQLITE
 #include "human/memory.h"
 #include <sqlite3.h>
+#include <stdlib.h>
+#include <unistd.h>
 
 static void read_all(FILE *f, char *buf, size_t cap) {
     rewind(f);
@@ -143,6 +151,52 @@ static void cli_prospective_run_prints_the_probe_contract(void) {
     HU_ASSERT_STR_EQ(buf, "ok\n");
     mem.vtable->deinit(mem.ctx);
 }
+
+/* fix round 1 minor: --history keeps the LAST cap-1 bytes of the file
+ * (most-recent turns), not the first — pm_read_file used to fread() from
+ * the start, silently discarding the tail of any history file over
+ * PM_HISTORY_CAP. */
+static void cli_prospective_read_tail_keeps_the_tail_not_the_head(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    char tmpl[] = "/tmp/hu_pm_tail_testXXXXXX";
+    int tfd = mkstemp(tmpl);
+    HU_ASSERT(tfd >= 0);
+    FILE *wf = fdopen(tfd, "wb");
+    HU_ASSERT_NOT_NULL(wf);
+    for (int i = 0; i < 17000; i++)
+        HU_ASSERT_EQ(fputc('A', wf), 'A');
+    static const char marker[] = "TAIL_MARKER_XYZ\n";
+    HU_ASSERT_EQ(fwrite(marker, 1, sizeof(marker) - 1, wf), sizeof(marker) - 1);
+    fclose(wf);
+
+    size_t len = 0;
+    char *buf = hu_cli_prospective_read_tail(&alloc, tmpl, 16384, &len);
+    unlink(tmpl);
+    HU_ASSERT_NOT_NULL(buf);
+    HU_ASSERT_TRUE(len <= (size_t)16383);
+    HU_ASSERT_TRUE(strstr(buf, "TAIL_MARKER_XYZ") != NULL); /* the tail survived */
+    HU_ASSERT_TRUE(strstr(buf, "AAAA") != NULL);            /* still mostly filler */
+    alloc.free(alloc.ctx, buf, 16384);
+
+    /* a file at or under cap is read whole, unaffected by the tail logic */
+    char tmpl2[] = "/tmp/hu_pm_tail_test2XXXXXX";
+    int tfd2 = mkstemp(tmpl2);
+    HU_ASSERT(tfd2 >= 0);
+    FILE *wf2 = fdopen(tfd2, "wb");
+    HU_ASSERT_NOT_NULL(wf2);
+    static const char short_body[] = "them: hi\nme: hey\n";
+    HU_ASSERT_EQ(fwrite(short_body, 1, sizeof(short_body) - 1, wf2), sizeof(short_body) - 1);
+    fclose(wf2);
+    size_t len2 = 0;
+    char *buf2 = hu_cli_prospective_read_tail(&alloc, tmpl2, 16384, &len2);
+    unlink(tmpl2);
+    HU_ASSERT_NOT_NULL(buf2);
+    HU_ASSERT_STR_EQ(buf2, short_body);
+    HU_ASSERT_EQ(len2, sizeof(short_body) - 1);
+    alloc.free(alloc.ctx, buf2, 16384);
+
+    HU_ASSERT_NULL(hu_cli_prospective_read_tail(&alloc, "/no/such/path", 16384, &len2));
+}
 #endif /* HU_ENABLE_SQLITE */
 
 void run_cli_prospective_tests(void) {
@@ -151,5 +205,6 @@ void run_cli_prospective_tests(void) {
     HU_RUN_TEST(cli_prospective_parse_refuses_unsafe_or_ambiguous_input);
 #ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(cli_prospective_run_prints_the_probe_contract);
+    HU_RUN_TEST(cli_prospective_read_tail_keeps_the_tail_not_the_head);
 #endif
 }

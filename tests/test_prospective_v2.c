@@ -509,6 +509,173 @@ static void v2_rejects_invalid_arguments(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
+/* --- fix round 1 (review of task-6): I1 --- */
+
+/* I1: the only pre-existing apply=false test used fire + expire, so removing
+ * the apply guard on the resolved write, the canceled write, or the reclaim
+ * step would go unnoticed for the 7 days SHADOW runs against the real DB.
+ * This test seeds an already_resolved verdict, a cancel verdict, AND a
+ * pre-existing surfaced row (attempts=0) in one SHADOW pass and asserts none
+ * of the three writes happened. */
+static void v2_shadow_never_writes_resolved_cancel_or_reclaim(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    seed_kw(db, "taco place", "ask how the new taco place was"); /* inserted first: lower id */
+    seed_kw(db, "lasagna", "send the lasagna recipe");           /* inserted second: higher id */
+    seed_kw(db, "sushi", "ask about the sushi place");
+    HU_ASSERT_EQ(sqlite3_exec(db,
+                              "UPDATE prospective_memories SET status='surfaced', fired=0, "
+                              "surfaced_at=1789999000 WHERE trigger_value='sushi'",
+                              NULL, NULL, NULL),
+                 SQLITE_OK);
+    /* hu_prospective_repo_list orders keyword rows newest-first (created_at
+     * DESC, id DESC): with equal created_at, lasagna (inserted second, higher
+     * id) is judged before taco. */
+    static const char *const r[] = {"cancel", "already_resolved"};
+    script_t s;
+    hu_prospective_judge_t j = judge_of(&s, r, 2);
+    hu_prospective_turn_t t = turn_for("taco place and lasagna talk, plus sushi later", NOW);
+    hu_prospective_counts_t c;
+    char *d = NULL;
+    size_t dl = 0;
+    HU_ASSERT_EQ(hu_prospective_v2_run(&alloc, db, HU_PM_CUE_KEYWORD, &t, &j, false, &c, &d, &dl),
+                 HU_OK);
+    HU_ASSERT_EQ(c.resolved, (size_t)1);
+    HU_ASSERT_EQ(c.cancel, (size_t)1);
+    HU_ASSERT_NULL(d);
+    /* the resolved item (taco): still pending, fired=0, outcome untouched */
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE trigger_value='taco "
+                           "place' AND status='pending' AND fired=0 AND outcome IS NULL"),
+                 (int64_t)1);
+    /* the canceled item (lasagna): still pending too */
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE trigger_value="
+                           "'lasagna' AND status='pending' AND fired=0 AND outcome IS NULL"),
+                 (int64_t)1);
+    /* the earlier-surfaced item (sushi): SHADOW's reclaim step must not touch it */
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE trigger_value="
+                           "'sushi' AND status='surfaced' AND attempts=0 AND outcome IS NULL"),
+                 (int64_t)1);
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* --- fix round 1: I2 --- */
+
+/* I2a: pm_surface must write the surfaced transition FIRST and only render
+ * items whose write actually changed a row. A trigger that RAISEs on the
+ * UPDATE simulates a real backend failure: the item must not be rendered
+ * and must stay pending (untouched) for a later retry. */
+static void v2_surface_write_failure_is_not_rendered_and_stays_pending(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    seed_kw(db, "widget", "FAILWRITE ask about the widget");
+    HU_ASSERT_EQ(sqlite3_exec(db,
+                              "CREATE TRIGGER pm_fail_write BEFORE UPDATE ON prospective_memories "
+                              "WHEN OLD.action LIKE 'FAILWRITE%' BEGIN SELECT RAISE(ABORT, "
+                              "'simulated write failure'); END",
+                              NULL, NULL, NULL),
+                 SQLITE_OK);
+    static const char *const r[] = {"fire"};
+    script_t s;
+    hu_prospective_judge_t j = judge_of(&s, r, 1);
+    hu_prospective_turn_t t = turn_for("the widget again", NOW);
+    hu_prospective_counts_t c;
+    char *d = NULL;
+    size_t dl = 0;
+    HU_ASSERT_EQ(hu_prospective_v2_run(&alloc, db, HU_PM_CUE_KEYWORD, &t, &j, true, &c, &d, &dl),
+                 HU_OK);
+    HU_ASSERT_EQ(c.fire, (size_t)1);      /* the judge did say fire */
+    HU_ASSERT_EQ(c.judge_err, (size_t)1); /* but the surfaced write failed: counted, not silent */
+    HU_ASSERT_NULL(d);                    /* not rendered */
+    HU_ASSERT_EQ(dl, (size_t)0);
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE action LIKE "
+                           "'FAILWRITE%' AND status='pending' AND fired=0 AND attempts=0"),
+                 (int64_t)1); /* untouched: the aborted UPDATE changed nothing */
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* I2b: after_delivery must count an outcome only when its transition
+ * actually changed a row, and must propagate a real backend error instead
+ * of returning HU_OK with fabricated counts. */
+static void v2_after_delivery_write_failure_is_not_counted_and_propagates_error(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    seed_kw(db, "gadget", "FAILWRITE ask about the gadget");
+    HU_ASSERT_EQ(sqlite3_exec(db,
+                              "UPDATE prospective_memories SET status='surfaced', fired=0, "
+                              "surfaced_at=1789999000 WHERE action LIKE 'FAILWRITE%'",
+                              NULL, NULL, NULL),
+                 SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_exec(db,
+                              "CREATE TRIGGER pm_fail_write BEFORE UPDATE ON prospective_memories "
+                              "WHEN OLD.action LIKE 'FAILWRITE%' BEGIN SELECT RAISE(ABORT, "
+                              "'simulated write failure'); END",
+                              NULL, NULL, NULL),
+                 SQLITE_OK);
+    hu_prospective_delivery_counts_t dc;
+    static const char reply[] = "how's the gadget going";
+    hu_error_t err = hu_prospective_v2_after_delivery(&alloc, db, HU_PM_CUE_KEYWORD, C1, strlen(C1),
+                                                      reply, sizeof(reply) - 1, NOW, &dc);
+    HU_ASSERT_TRUE(err != HU_OK); /* a real SQLite error, not a swallowed HU_OK */
+    HU_ASSERT_EQ(dc.surfaced, (size_t)0);
+    HU_ASSERT_EQ(dc.used, (size_t)0);
+    HU_ASSERT_EQ(dc.ignored, (size_t)0);
+    HU_ASSERT_EQ(dc.expired, (size_t)0);
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE action LIKE "
+                           "'FAILWRITE%' AND status='surfaced' AND attempts=0"),
+                 (int64_t)1); /* untouched */
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* --- fix round 1: minor --- a judge that returns HU_OK with a NULL or
+ * empty answer must fail toward silence (parse_fail), never fire. */
+static hu_error_t null_output_judge(void *ctx, hu_allocator_t *alloc, const char *system,
+                                    size_t system_len, const char *user, size_t user_len,
+                                    char **out, size_t *out_len) {
+    (void)ctx;
+    (void)alloc;
+    (void)system;
+    (void)system_len;
+    (void)user;
+    (void)user_len;
+    *out = NULL;
+    *out_len = 0;
+    return HU_OK;
+}
+
+static void v2_judge_ok_with_null_or_empty_output_is_parse_fail(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    seed_kw(db, "kite", "ask about the kite");
+    hu_prospective_judge_t jn = {.fn = null_output_judge, .ctx = NULL};
+    hu_prospective_turn_t t = turn_for("flying the kite", NOW);
+    hu_prospective_counts_t c;
+    char *d = NULL;
+    size_t dl = 0;
+    HU_ASSERT_EQ(hu_prospective_v2_run(&alloc, db, HU_PM_CUE_KEYWORD, &t, &jn, true, &c, &d, &dl),
+                 HU_OK);
+    HU_ASSERT_NULL(d);
+    HU_ASSERT_EQ(c.parse_fail, (size_t)1);
+    HU_ASSERT_EQ(c.fire, (size_t)0);
+    HU_ASSERT_TRUE(c.items[0].judge_ok); /* the judge call itself succeeded */
+    HU_ASSERT_EQ(c.items[0].verdict, HU_PM_VERDICT_PARSE_FAIL);
+
+    seed_kw(db, "balloon", "ask about the balloon");
+    static const char *const empty_r[] = {""};
+    script_t s;
+    hu_prospective_judge_t je = judge_of(&s, empty_r, 1);
+    hu_prospective_turn_t t2 = turn_for("flying the balloon", NOW);
+    HU_ASSERT_EQ(hu_prospective_v2_run(&alloc, db, HU_PM_CUE_KEYWORD, &t2, &je, true, &c, &d, &dl),
+                 HU_OK);
+    HU_ASSERT_NULL(d);
+    HU_ASSERT_EQ(c.parse_fail, (size_t)1);
+    HU_ASSERT_EQ(c.fire, (size_t)0);
+    mem.vtable->deinit(mem.ctx);
+}
+
 void run_prospective_v2_tests(void) {
     HU_TEST_SUITE("prospective v2");
     HU_RUN_TEST(v2_clean_positive_surfaces_a_soft_directive);
@@ -525,6 +692,10 @@ void run_prospective_v2_tests(void) {
     HU_RUN_TEST(v2_time_done_retires_ledger_twins);
     HU_RUN_TEST(v2_judge_sees_history_intention_and_cue);
     HU_RUN_TEST(v2_rejects_invalid_arguments);
+    HU_RUN_TEST(v2_shadow_never_writes_resolved_cancel_or_reclaim);
+    HU_RUN_TEST(v2_surface_write_failure_is_not_rendered_and_stays_pending);
+    HU_RUN_TEST(v2_after_delivery_write_failure_is_not_counted_and_propagates_error);
+    HU_RUN_TEST(v2_judge_ok_with_null_or_empty_output_is_parse_fail);
 }
 
 #else

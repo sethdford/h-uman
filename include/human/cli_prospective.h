@@ -44,6 +44,14 @@ hu_error_t hu_cli_prospective_run(hu_allocator_t *alloc, hu_memory_t *mem,
                                   const hu_cli_prospective_args_t *a, const char *history,
                                   size_t history_len, const hu_prospective_judge_t *judge,
                                   FILE *out);
+/* Reads the LAST up to `cap - 1` bytes of the file at `path` into a buffer
+ * of `cap` bytes allocated from `alloc`, NUL-terminated. `--history` wants
+ * the most-recent turns, not the earliest ones, so a file over `cap` is
+ * read from its tail, never its head. NULL on any I/O error or bad
+ * argument (`*len` set to 0). Exposed (not just used internally by
+ * cmd_prospective) so this tail-vs-head contract has a direct test. */
+char *hu_cli_prospective_read_tail(hu_allocator_t *alloc, const char *path, size_t cap,
+                                   size_t *len);
 #endif
 
 #endif /* HU_CLI_PROSPECTIVE_H */

@@ -16,6 +16,7 @@
 
 #include "human/cli_commands.h"
 #include "human/memory/prospective_policy.h"
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -65,8 +66,9 @@ bool hu_cli_prospective_parse(int argc, char **argv, hu_cli_prospective_args_t *
             out->judge = argv[++i];
         } else if (strcmp(k, "--now") == 0) {
             char *end = NULL;
+            errno = 0;
             out->now = strtoll(v, &end, 10);
-            if (!end || *end || out->now <= 0)
+            if (!end || *end || out->now <= 0 || errno == ERANGE)
                 return false;
             i++;
         } else if (strcmp(k, "--inbound") == 0 || strcmp(k, "--deliver") == 0) {
@@ -189,20 +191,45 @@ static hu_error_t pm_const_judge(void *ctx, hu_allocator_t *alloc, const char *s
     return HU_OK;
 }
 
-static char *pm_read_file(hu_allocator_t *alloc, const char *path, size_t *len) {
-    *len = 0;
+char *hu_cli_prospective_read_tail(hu_allocator_t *alloc, const char *path, size_t cap,
+                                   size_t *len) {
+    if (len)
+        *len = 0;
+    if (!alloc || !path || cap < 2)
+        return NULL;
     FILE *f = fopen(path, "rb");
     if (!f)
         return NULL;
-    char *buf = (char *)alloc->alloc(alloc->ctx, PM_HISTORY_CAP);
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        return NULL;
+    }
+    long size = ftell(f);
+    if (size < 0) {
+        fclose(f);
+        return NULL;
+    }
+    size_t cap_body = cap - 1;
+    long offset = 0;
+    size_t want = (size_t)size;
+    if (want > cap_body) { /* keep the TAIL: the most recent turns matter, not the oldest */
+        offset = size - (long)cap_body;
+        want = cap_body;
+    }
+    if (fseek(f, offset, SEEK_SET) != 0) {
+        fclose(f);
+        return NULL;
+    }
+    char *buf = (char *)alloc->alloc(alloc->ctx, cap);
     if (!buf) {
         fclose(f);
         return NULL;
     }
-    size_t n = fread(buf, 1, PM_HISTORY_CAP - 1, f);
+    size_t n = fread(buf, 1, want, f);
     fclose(f);
     buf[n] = '\0';
-    *len = n;
+    if (len)
+        *len = n;
     return buf;
 }
 
@@ -225,7 +252,7 @@ hu_error_t cmd_prospective(hu_allocator_t *alloc, int argc, char **argv) {
     size_t hist_len = 0;
     char *hist = NULL;
     if (a.history_path) {
-        hist = pm_read_file(alloc, a.history_path, &hist_len);
+        hist = hu_cli_prospective_read_tail(alloc, a.history_path, PM_HISTORY_CAP, &hist_len);
         if (!hist) {
             fprintf(stderr, "prospective: cannot read %s\n", a.history_path);
             return HU_ERR_IO;
