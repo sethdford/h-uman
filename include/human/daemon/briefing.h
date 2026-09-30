@@ -26,8 +26,9 @@
 
 typedef struct hu_briefing_event {
     char name[128];
-    int hour; /* 0..23 local; -1 when the start time could not be read */
+    int hour; /* 0..23 local; -1 for all-day events or an unreadable time */
     int minute;
+    bool all_day;
 } hu_briefing_event_t;
 
 typedef struct hu_briefing_commitment {
@@ -62,10 +63,11 @@ typedef struct hu_briefing_inputs {
  * sending or it would not fit in `cap`. */
 size_t hu_briefing_compose(const hu_briefing_inputs_t *in, int64_t now, char *out, size_t cap);
 
-/* Parse the calendar helper's JSON array ([{"name":…,"start":…}]) into
- * events. `start` is an AppleScript date string; the clock time is read from
- * its "H:MM[:SS] AM|PM" or "HH:MM[:SS]" part, else hour = -1. Returns false
- * (and *out_n = 0) when the JSON does not parse. */
+/* Parse the calendar helper's JSON array into events, all-day ones first,
+ * then by start time. Times come from the numeric "h"/"m" fields; output
+ * without them falls back to the "H:MM[:SS] AM|PM" or "HH:MM[:SS]" part of
+ * the "start" date string, else hour = -1. Returns false (and *out_n = 0)
+ * when the JSON does not parse. */
 bool hu_briefing_parse_calendar(const char *json, size_t len, hu_briefing_event_t *out, size_t cap,
                                 size_t *out_n, size_t *out_more);
 
