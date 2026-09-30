@@ -24,8 +24,8 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 
 [ -f build/CMakeCache.txt ] || fail "no build/ — run: cmake --preset dev"
 
-# Commit that recorded the characterization goldens (PR 0, fix round 1).
-GOLDEN_BASELINE=129acacdbff48791842a36cd6d47c4e702d31885
+# Commit that recorded the characterization goldens (re-pinned after #561 re-recorded grounding_on/off).
+GOLDEN_BASELINE=945c04c8560f80ff5656651d2067dbafa26bd2c0
 
 step "intent-to-add new src/agent/turn/*.c and *.h files (clone ratchet only scans tracked files)"
 git add -N src/agent/turn/*.c src/agent/turn/*.h 2>/dev/null || true
