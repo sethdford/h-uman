@@ -21,14 +21,21 @@ import graph_retype_entities as rt  # noqa: E402
 C = "+15550000042"
 REAL_BIN = ROOT / "build" / "human"
 
+# A fake `human`: logs every import-facts call. Calls against FAKE_REAL_GRAPH are the
+# migration's import; any other HU_GRAPH_DB is the capability probe's throwaway graph.
+# FAKE_ENTITIES / FAKE_RC shape the real import's answer, FAKE_PROBE_ENTITIES the probe's.
 FAKE_BIN = """#!{py}
 import json, os, sys
 lines = open(sys.argv[3]).read().splitlines()
+graph = os.environ.get("HU_GRAPH_DB")
+real = graph == os.environ.get("FAKE_REAL_GRAPH")
 with open(os.environ["FAKE_LOG"], "a") as f:
-    f.write(json.dumps({{"argv": sys.argv[1:], "graph": os.environ.get("HU_GRAPH_DB"),
+    f.write(json.dumps({{"argv": sys.argv[1:], "graph": graph, "real": real,
                         "lines": lines}}) + "\\n")
-print(json.dumps({{"imported": 0, "entities": len(lines), "skipped": 0, "graph": "x"}}))
-sys.exit(int(os.environ.get("FAKE_RC", "0")))
+key = "FAKE_ENTITIES" if real else "FAKE_PROBE_ENTITIES"
+n = int(os.environ.get(key, len(lines)))
+print(json.dumps({{"imported": 0, "entities": n, "skipped": len(lines) - n, "graph": graph}}))
+sys.exit(int(os.environ.get("FAKE_RC", "0")) if real else (0 if n else 1))
 """
 
 
@@ -49,9 +56,18 @@ def digest(path):
     return hashlib.sha256(open(path, "rb").read()).hexdigest()
 
 
-def fake_calls(tmp_path):
+def all_calls(tmp_path):
     p = tmp_path / "fake.json"
     return [json.loads(ln) for ln in p.read_text().splitlines()] if p.exists() else []
+
+
+def fake_calls(tmp_path):
+    """Importer calls against the real graph (the probe's throwaway graph excluded)."""
+    return [c for c in all_calls(tmp_path) if c["real"]]
+
+
+def probe_calls(tmp_path):
+    return [c for c in all_calls(tmp_path) if not c["real"]]
 
 
 @pytest.fixture
@@ -62,6 +78,7 @@ def env(tmp_path, monkeypatch):
     fake.write_text(FAKE_BIN.format(py=sys.executable))
     fake.chmod(0o755)
     monkeypatch.setenv("FAKE_LOG", str(tmp_path / "fake.json"))
+    monkeypatch.setenv("FAKE_REAL_GRAPH", str(g))
     monkeypatch.setattr(rt.urllib.request, "urlopen", lambda *a, **k: None)
     argv = ["--graph-db", str(g), "--backup-dir", str(tmp_path / "backups"),
             "--work-dir", str(tmp_path / "work"), "--human-bin", str(fake)]
@@ -230,15 +247,20 @@ def test_dry_run_counts_only(env, monkeypatch, capsys):
     assert fake_calls(tmp_path) == [] and digest(g) == before
 
 
-def test_write_backs_up_first_then_imports_retype_only_lines(env, monkeypatch, capsys):
+def test_write_backs_up_after_the_model_phase_and_right_before_the_import(env, monkeypatch,
+                                                                          capsys):
+    """The verified backup is the last step before the only write, so a restore loses
+    seconds of daemon writes, not the whole model phase."""
     tmp_path, g, argv = env
     order = []
-    real_backup = rt.backup
+    real_backup, real_import = rt.backup, rt.cn.run_import
     monkeypatch.setattr(rt, "backup", lambda *a: order.append("backup") or real_backup(*a))
     monkeypatch.setattr(rt, "call_model", lambda *a, **k: order.append("model") or answer(*a, **k))
+    monkeypatch.setattr(rt.cn, "run_import", lambda b, gdb, *a, **k: order.append(
+        "import" if gdb == str(g) else "probe") or real_import(b, gdb, *a, **k))
     before = digest(g)
     assert rt.main(argv + ["--write"]) == 0
-    assert order[0] == "backup" and "model" in order
+    assert order == ["probe", "model", "model", "backup", "import"]
     assert digest(g) == before  # Python never writes graph.db
     bk = list((tmp_path / "backups").glob("graph.db.bak-retype-*"))
     assert len(bk) == 1 and stat.S_IMODE(os.stat(bk[0]).st_mode) == 0o600
@@ -253,10 +275,14 @@ def test_write_backs_up_first_then_imports_retype_only_lines(env, monkeypatch, c
         (C, "Salim", "person"), (C, "the lake house", "topic"), ("self", "Vanguard", "org")}
     assert all(ln["retype_only"] is True and ln["source"] == "names:migrate"
                and ln["kind"] == "entity" and ln["confidence"] == 0.6 for ln in lines)
-    out = capsys.readouterr().out
+    cap = capsys.readouterr()
+    out = cap.out
     assert "Salim" not in out and "Vanguard" not in out and C not in out  # counts only
     res = json.loads(out.strip().splitlines()[-1])
-    assert res["applied"] == 3 and res["answered"] == 3 and res["unanswered"] == 0
+    assert "applied" not in res
+    assert res["import_entities"] == 3 and res["answered"] == 3 and res["unanswered"] == 0
+    assert res["unknown_after"] == 3  # the fake importer retyped nothing: the re-read says so
+    assert f"cp {bk[0]} {g}" in cap.err and "launchctl bootout" in cap.err
     assert res["ignored"] == 2 and res["ambiguous"] == 0 and res["parse_failed"] == 0 and res["model_errors"] == 0
     assert res["by_type"] == {"person": 1, "place": 0, "org": 1, "event": 0, "topic": 1}
 
@@ -273,8 +299,9 @@ def test_rerun_with_nothing_unknown_touches_nothing(env, monkeypatch, capsys):
     monkeypatch.setattr(rt, "call_model", lambda *a, **k: pytest.fail("model called"))
     before = digest(g)
     assert rt.main(argv + ["--write"]) == 0
-    assert last_json(capsys)["applied"] == 0
-    assert fake_calls(tmp_path) == [] and not (tmp_path / "backups").exists()
+    res = last_json(capsys)
+    assert res["import_entities"] == 0 and res["unknown_after"] == 0
+    assert all_calls(tmp_path) == [] and not (tmp_path / "backups").exists()
     assert digest(g) == before
 
 
@@ -296,28 +323,48 @@ def test_every_batch_unparseable_exits_3(env, monkeypatch):
     assert fake_calls(tmp_path) == []
 
 
-def test_backup_failure_refuses_before_any_model_call(env, monkeypatch):
+def test_backup_failure_refuses_before_any_importer_call(env, monkeypatch, capsys):
     tmp_path, g, argv = env
     def broken(*a):
         raise OSError("disk full")
     monkeypatch.setattr(rt, "backup", broken)
-    monkeypatch.setattr(rt, "call_model", lambda *a, **k: pytest.fail("model called"))
+    monkeypatch.setattr(rt, "call_model", answer)
     before = digest(g)
     assert rt.main(argv + ["--write"]) == 2
     assert fake_calls(tmp_path) == [] and digest(g) == before
+    assert not (tmp_path / "work").exists()  # no JSONL either
+    assert "backup failed" in capsys.readouterr().err
 
 
-def test_locked_graph_refuses(env, monkeypatch):
+def test_locked_graph_refuses_before_the_backup_and_the_import(env, monkeypatch):
     tmp_path, g, argv = env
     holder = sqlite3.connect(g)
     holder.execute("BEGIN IMMEDIATE")  # the daemon mid-write
-    monkeypatch.setattr(rt, "call_model", lambda *a, **k: pytest.fail("model called"))
+    monkeypatch.setattr(rt, "call_model", answer)
     try:
         assert rt.main(argv + ["--write"]) == 2
     finally:
         holder.rollback()
         holder.close()
-    assert not (tmp_path / "backups").exists()  # refused before the backup
+    assert not (tmp_path / "backups").exists()
+    assert fake_calls(tmp_path) == []
+
+
+def test_binary_that_cannot_import_entity_lines_refuses_before_the_model(env, monkeypatch,
+                                                                         capsys):
+    """A pre-branch importer skips entity lines (entities 0). The probe catches it on a
+    throwaway graph before the model phase: no model call, no backup, no real import."""
+    tmp_path, g, argv = env
+    monkeypatch.setenv("FAKE_PROBE_ENTITIES", "0")
+    monkeypatch.setattr(rt, "call_model", lambda *a, **k: pytest.fail("model called"))
+    before = digest(g)
+    assert rt.main(argv + ["--write"]) == 2
+    assert "cannot import entity lines" in capsys.readouterr().err
+    (probe,) = probe_calls(tmp_path)
+    assert probe["graph"] != str(g) and not os.path.exists(probe["graph"])  # thrown away
+    assert json.loads(probe["lines"][0])["kind"] == "entity"
+    assert fake_calls(tmp_path) == [] and not (tmp_path / "backups").exists()
+    assert digest(g) == before
 
 
 def test_missing_graph_refuses_and_is_not_created(env):
@@ -336,11 +383,42 @@ def test_every_batch_errored_exits_3_and_imports_nothing(env, monkeypatch):
     assert fake_calls(tmp_path) == []
 
 
-def test_import_failure_exits_2(env, monkeypatch):
+def test_import_of_nothing_exits_2_and_says_unchanged(env, monkeypatch, capsys):
     _, _, argv = env
+    monkeypatch.setenv("FAKE_ENTITIES", "0")
     monkeypatch.setenv("FAKE_RC", "1")
     monkeypatch.setattr(rt, "call_model", answer)
     assert rt.main(argv + ["--write"]) == 2
+    assert "graph.db unchanged" in capsys.readouterr().err
+
+
+def test_import_timeout_never_claims_unchanged(env, monkeypatch, capsys):
+    """run_import returns (None, -1) on its timeout, after killing a child that may have
+    committed some per-row retypes: say so, and point at the backup and the restore."""
+    tmp_path, g, argv = env
+    real_import = rt.cn.run_import
+    monkeypatch.setattr(rt.cn, "run_import", lambda b, gdb, *a, **k:
+                        (None, -1) if gdb == str(g) else real_import(b, gdb, *a, **k))
+    monkeypatch.setattr(rt, "call_model", answer)
+    assert rt.main(argv + ["--write"]) == 2
+    err = capsys.readouterr().err
+    (bk,) = (tmp_path / "backups").glob("graph.db.bak-retype-*")
+    assert "unchanged" not in err and "partially retyped" in err
+    assert str(bk) in err and f"rm -f {g}-wal {g}-shm" in err
+    assert err.index(f"rm -f {g}-wal") < err.index(f"cp {bk} {g}")  # wal gone before copy
+
+
+def test_restore_steps_are_complete_and_ordered():
+    s = rt.restore_steps("/h/.human/graph.db", "/b/graph.db.bak-retype-x")
+    steps = ["discards EVERY daemon write", "launchctl bootout gui/$(id -u)/ai.human.service-loop",
+             "lsof /h/.human/graph.db", "rm -f /h/.human/graph.db-wal /h/.human/graph.db-shm",
+             "cp /b/graph.db.bak-retype-x /h/.human/graph.db && chmod 600 /h/.human/graph.db",
+             "launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.human.service-loop.plist"]
+    pos = [s.index(x) for x in steps]
+    assert pos == sorted(pos)
+    for x in ("launchctl bootout", "lsof", "graph.db-wal", "chmod 600", "launchctl bootstrap",
+              "discards EVERY daemon write"):
+        assert x in rt.__doc__
 
 
 @pytest.mark.parametrize("url", ["https://example.com/v1/chat/completions",

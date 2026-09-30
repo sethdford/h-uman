@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """One-time retype of UNKNOWN graph entities (spec 2026-09-29 named-entity-extraction §4.5).
 
-Backs graph.db up with the SQLite online backup API (0600, verified read-only by
-integrity_check and an equal entity count) BEFORE anything can change it, asks
-the LOCAL model to type each contact's UNKNOWN names in batches of 40, and
-writes the answers through `human memory import-facts` as retype-only entity
-lines (source names:migrate). Python never writes graph.db. Nothing is deleted
+Asks the LOCAL model to type each contact's UNKNOWN names in batches of 40, then
+backs graph.db up with the SQLite online backup API (0600, verified read-only by
+integrity_check and an equal entity count) right BEFORE the only write, and writes
+the answers through `human memory import-facts` as retype-only entity lines
+(source names:migrate). Backing up after the model phase keeps the window of
+daemon writes a restore would discard to seconds, not the model phase's minutes. Python never writes graph.db. Nothing is deleted
 and nothing is created: an unanswered name stays UNKNOWN, a name that vanished
 since the read is skipped by the importer, and the importer's retype policy
 never downgrades a row that got a name type in the meantime. Idempotent: a
 re-run only sees what is still UNKNOWN.
 
   --dry-run  counts only: no model, no backup, no import
-  --write    lock probe -> backup -> classify -> import
+  --write    importer capability probe (throwaway temp graph) -> classify ->
+             lock probe -> verified backup -> import
 
 A model answer's name is matched to its batch case-insensitively and written back
 in the STORED spelling (retype-only keys on contact_id + the stored name); a match
@@ -24,8 +26,16 @@ write lock for more than 1 s. After it, the importer waits up to 5 s per write
 (busy_timeout); a write that still cannot get the lock is skipped and stays
 UNKNOWN, so a re-run picks it up.
 
-Restore: stop the daemon, then `cp <backup> ~/.human/graph.db` and remove any
-~/.human/graph.db-wal / -shm left beside it.
+Deploy first: `--human-bin` must import entity lines (this branch's importer).
+Before the model phase the script imports one probe line into a throwaway temp
+graph and refuses (exit 2) unless the binary reports entities >= 1.
+
+Restore -- discards EVERY daemon write made to graph.db after the backup was taken:
+  launchctl bootout gui/$(id -u)/ai.human.service-loop   # KeepAlive restarts a kill
+  lsof ~/.human/graph.db                                 # must print nothing
+  rm -f ~/.human/graph.db-wal ~/.human/graph.db-shm      # before the copy
+  cp <backup> ~/.human/graph.db && chmod 600 ~/.human/graph.db
+  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.human.service-loop.plist
 """
 import argparse
 import contextlib
@@ -35,6 +45,7 @@ import os
 import re
 import sqlite3
 import sys
+import tempfile
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -50,6 +61,9 @@ DEFAULT_URL = "http://127.0.0.1:8741/v1/chat/completions"
 DEFAULT_MODEL = "GLM-4.5-Air-4bit"
 PHONE_RE = re.compile(r"[+()\-. \d]{7,}")
 LOCK_WAIT_S = 1.0
+SERVICE = "ai.human.service-loop"
+PROBE_LINE = {"kind": "entity", "contact": "probe", "name": "Probe", "type": "topic",
+              "source": "names:probe", "confidence": 0.5}
 
 SYSTEM = (
     "Each line below is a name or phrase from Seth Ford's texts with one person. Type "
@@ -186,6 +200,26 @@ def refuse(msg):
     return 2
 
 
+def restore_steps(graph_db, backup_path):
+    g = graph_db
+    return (f"Restore (discards EVERY daemon write made to {g} after the backup was taken):\n"
+            f"  launchctl bootout gui/$(id -u)/{SERVICE}\n"
+            f"  lsof {g}    # must print nothing\n"
+            f"  rm -f {g}-wal {g}-shm\n"
+            f"  cp {backup_path} {g} && chmod 600 {g}\n"
+            f"  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/{SERVICE}.plist")
+
+
+def import_capable(human_bin):
+    """True when `human_bin` imports an entity line: one probe line into a throwaway
+    temp graph (HU_GRAPH_DB points there; the real graph is never named). A binary
+    that predates entity lines skips it and reports entities 0."""
+    with tempfile.TemporaryDirectory(prefix="retype-probe-") as d:
+        path = cn.write_jsonl_private(os.path.join(d, "probe.jsonl"), [PROBE_LINE])
+        n, code = cn.run_import(human_bin, os.path.join(d, "probe.db"), path, timeout=60)
+    return code == 0 and n is not None and n >= 1
+
+
 def count_unknown(path):
     try:
         con = _ro(path)
@@ -224,23 +258,23 @@ def main(argv=None):
     if a.dry_run:
         print(json.dumps(counts, sort_keys=True))
         return 0
+
+    def done(rc=0):
+        counts["unknown_after"] = count_unknown(a.graph_db)  # the authoritative figure
+        print(json.dumps(counts, sort_keys=True))
+        return rc
+
+    counts["import_entities"] = 0
     if not todo:
-        print(json.dumps({**counts, "applied": 0}, sort_keys=True))
-        return 0
+        return done()
     if not os.access(a.human_bin, os.X_OK):
         return refuse(f"human binary not executable ({a.human_bin})")
+    if not import_capable(a.human_bin):
+        return refuse("human binary cannot import entity lines -- deploy the new build first")
     try:
         urllib.request.urlopen(a.url.rsplit("/v1/", 1)[0] + "/health", timeout=5)
     except Exception as e:
         return refuse(f"model server down ({type(e).__name__})")
-    locked = lock_probe(a.graph_db)
-    if locked:
-        return refuse(f"graph.db is locked ({locked}); retry when the daemon is idle")
-    now = dt.datetime.now()
-    try:
-        counts["backup"] = backup(a.graph_db, a.backup_dir, now)
-    except Exception as e:
-        return refuse(f"backup failed ({type(e).__name__}: {e})")
     lines, errors, stats = [], 0, {"ignored": 0, "ambiguous": 0, "parse_failed": 0}
     by_type = dict.fromkeys(cn.TYPES, 0)
     for cid, names in todo.items():
@@ -257,26 +291,43 @@ def main(argv=None):
                                          retype_only=True))
     counts.update(answered=len(lines), unanswered=counts["unknown_entities"] - len(lines),
                   model_errors=errors, parse_failed=stats["parse_failed"],
-                  ignored=stats["ignored"], ambiguous=stats["ambiguous"], by_type=by_type, applied=0)
+                  ignored=stats["ignored"], ambiguous=stats["ambiguous"], by_type=by_type)
     if errors + stats["parse_failed"] == counts["batches"]:
-        print(json.dumps(counts, sort_keys=True))
         print("every batch failed (model error or unparseable); nothing imported",
               file=sys.stderr)
-        return 3
-    if lines:
-        path = cn.write_jsonl_private(
-            os.path.join(a.work_dir, f"retype-{now.strftime('%Y%m%d-%H%M%S')}.jsonl"), lines)
-        applied, code = cn.run_import(a.human_bin, a.graph_db, path)
-        if code != 0 or applied is None:
-            print(json.dumps(counts, sort_keys=True))
-            return refuse("`human memory import-facts` failed")
-        # The importer counts every matched row, retyped or not; the re-read says
-        # how many UNKNOWN rows are left.
-        counts["applied"] = applied
-        counts["unknown_after"] = count_unknown(a.graph_db)
-    print(json.dumps(counts, sort_keys=True))
-    return 0
-
+        return done(3)
+    if not lines:
+        return done()
+    # The only write follows. Lock probe and verified backup sit right before it, so
+    # a restore loses seconds of daemon writes rather than the whole model phase.
+    locked = lock_probe(a.graph_db)
+    if locked:
+        return refuse(f"graph.db is locked ({locked}); retry when the daemon is idle")
+    now = dt.datetime.now()
+    try:
+        counts["backup"] = backup(a.graph_db, a.backup_dir, now)
+    except Exception as e:
+        return refuse(f"backup failed ({type(e).__name__}: {e})")
+    path = cn.write_jsonl_private(
+        os.path.join(a.work_dir, f"retype-{now.strftime('%Y%m%d-%H%M%S')}.jsonl"), lines)
+    imported, code = cn.run_import(a.human_bin, a.graph_db, path)
+    if code != 0 and imported == 0:
+        done()  # the CLI ran and exits non-zero only when nothing was imported
+        return refuse("`human memory import-facts` imported nothing")
+    if code != 0 or imported is None:
+        # Timeout (the child was killed after committing some per-row writes) or
+        # unreadable output: never claim the graph is unchanged.
+        done()
+        print("`human memory import-facts` did not finish; graph.db may be partially "
+              f"retyped. Re-run (idempotent) or restore the backup {counts['backup']}.\n"
+              + restore_steps(a.graph_db, counts["backup"]), file=sys.stderr)
+        return 2
+    # import_entities counts every matched row, retyped or refused by the no-downgrade
+    # policy; unknown_after (re-read) is what is actually left UNKNOWN.
+    counts["import_entities"] = imported
+    print(f"done. backup: {counts['backup']}\n" + restore_steps(a.graph_db, counts["backup"]),
+          file=sys.stderr)
+    return done()
 
 if __name__ == "__main__":
     sys.exit(main())
