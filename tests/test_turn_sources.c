@@ -26,8 +26,8 @@
  * behaviour change: it adds code to agent_turn.c in place (no stage file to
  * carry the growth), so this is the one commit where the ceiling moves up to
  * match, by exactly the lines the fix adds. */
-#define TS_AGENT_TURN_C_MAX_LINES   9100
-#define TS_AGENT_TURN_RUN_MAX_LINES 7552
+#define TS_AGENT_TURN_C_MAX_LINES   7381
+#define TS_AGENT_TURN_RUN_MAX_LINES 6042
 
 static char *ts_read(const char *path) {
     FILE *f = fopen(path, "rb");
@@ -196,7 +196,7 @@ static void turn_context_keeps_both_not_test_hour_blocks(void) {
 /* spec §3 item 6 / .claude/rules/asan-pthread-stack-aliasing-darwin.md: the
  * cross-thread DAG worker contexts must not live in the loop-scoped frame. */
 static void dag_batch_workers_live_on_the_heap(void) {
-    char *src = ts_read("src/agent/agent_turn.c");
+    char *src = ts_read("src/agent/turn/turn_tools.c");
     HU_SKIP_IF(!src, "run from the repo root");
     size_t stack_arrays = ts_count(src, "dag_parallel_work_t works[");
     size_t heap_blocks = ts_count_not_test(src, "dag_parallel_work_t *works =");
@@ -207,6 +207,35 @@ static void dag_batch_workers_live_on_the_heap(void) {
     HU_ASSERT_EQ(sizes, 2); /* the alloc and the free */
 }
 
+/* S16's daemon-only regions landed in turn_tools.c exactly once, still
+ * guarded, and left agent_turn.c. */
+static void turn_tools_keeps_its_not_test_regions(void) {
+    static const char *const needles[] = {
+        "/* HuLa compiler: LLM emits full HuLa JSON (preferred over DAG when enabled). */",
+        "bool batch_thread_safe = (batch.count > 1);",
+        "if (!used_llm_compiler && !used_hula_ir && agent->hula_enabled && tc_count >= 1) {",
+        "static void *dag_parallel_worker(void *arg) {",
+        "static void hula_compiler_agent_done(void *ctx, const hu_hula_program_t *prog,",
+    };
+    char *stage = ts_read("src/agent/turn/turn_tools.c");
+    char *turn = ts_read("src/agent/agent_turn.c");
+    HU_SKIP_IF(!stage || !turn, "run from the repo root");
+    size_t bad = 0;
+    for (size_t i = 0; i < sizeof(needles) / sizeof(needles[0]); i++) {
+        size_t in_stage = ts_count_not_test(stage, needles[i]);
+        size_t in_turn = ts_count(turn, needles[i]);
+        if (in_stage != 1 || in_turn != 0) {
+            printf(
+                "    \"%s\": %zu in turn_tools.c (want 1, guarded), %zu in agent_turn.c (want 0)\n",
+                needles[i], in_stage, in_turn);
+            bad++;
+        }
+    }
+    free(stage);
+    free(turn);
+    HU_ASSERT_EQ(bad, 0);
+}
+
 void run_turn_sources_tests(void) {
     HU_TEST_SUITE("TurnSources");
     HU_RUN_TEST(turn_stage_files_never_include_sqlite3_or_the_provider_factory);
@@ -214,4 +243,5 @@ void run_turn_sources_tests(void) {
     HU_RUN_TEST(turn_context_keeps_both_not_test_hour_blocks);
     HU_RUN_TEST(agent_turn_body_and_file_only_shrink);
     HU_RUN_TEST(dag_batch_workers_live_on_the_heap);
+    HU_RUN_TEST(turn_tools_keeps_its_not_test_regions);
 }

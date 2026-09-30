@@ -26,6 +26,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+struct hu_tool_cache;
+
 typedef struct hu_turn_ctx {
     hu_allocator_t *alloc; /* agent->alloc at creation; owns this struct */
     struct {
@@ -76,6 +78,10 @@ typedef struct hu_turn_ctx {
         char *intelligence_ctx; /* owned */
         size_t intelligence_ctx_len;
     } context;
+    struct {
+        struct hu_tool_cache *turn_cache; /* borrowed; owned by the turn body */
+        size_t turn_tool_results_count;   /* in/out: accumulates across iterations */
+    } loop;
 } hu_turn_ctx_t;
 
 /* How a stage that can end the turn reports back (S0, S8). */
@@ -140,5 +146,14 @@ hu_turn_step_t hu_turn_silence(hu_turn_ctx_t *turn_ctx);
  * Reads in.*, context.plan_ctx; writes the nine owned context.* strings.
  * HU_ERR_INVALID_ARGUMENT on a NULL ctx or agent. */
 hu_error_t hu_turn_context(hu_turn_ctx_t *turn_ctx);
+
+/* S16 tool dispatch (src/agent/turn/turn_tools.c): runs the tool calls of the
+ * newest assistant message in agent->history — LOCKED short-circuit, HuLa
+ * compiler / LLMCompiler DAG and native HuLa IR (daemon builds), multi-agent
+ * orchestrator, dispatcher with world-model ordering and TTL cache, per-tool
+ * guards and learning, sequential fallback — appending one tool result each.
+ * Reads in.*, loop.turn_cache; advances loop.turn_tool_results_count.
+ * HU_ERR_INVALID_ARGUMENT on a NULL ctx or agent, else HU_OK. */
+hu_error_t hu_turn_tools(hu_turn_ctx_t *turn_ctx);
 
 #endif /* HU_AGENT_TURN_H */

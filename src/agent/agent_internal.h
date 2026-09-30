@@ -454,4 +454,26 @@ void hu_agent_internal_post_hook_fire(hu_agent_t *agent, const char *tool_name,
 size_t hu_agent_internal_collect_recent_tool_names(const hu_agent_t *agent, const char **out_names,
                                                    size_t out_cap);
 
+/* Shared by the S16 tool-dispatch stage (src/agent/turn/turn_tools.c) and the
+ * rest of the turn in agent_turn.c; defined in agent_turn.c. */
+#if (defined(__unix__) || defined(__APPLE__)) && !defined(HU_IS_TEST)
+struct hu_hula_program;
+struct hu_hula_exec;
+/* One HU_ROLE_TOOL history entry per CALL / DELEGATE / EMIT node of a finished
+ * HuLa run. */
+void hu_agent_internal_hula_append_histories(hu_agent_t *agent, const struct hu_hula_program *prog,
+                                             const struct hu_hula_exec *exec);
+#endif
+#ifndef HU_IS_TEST
+struct hu_spawn_config;
+/* Zero + inherit the parent's fields into *tpl (HuLa compiler / exec spawn). */
+void hu_agent_internal_hula_fill_spawn_tpl(hu_agent_t *agent, struct hu_spawn_config *tpl);
+/* *tpl must stay valid until hu_hula_exec_run returns (exec keeps its address). */
+void hu_agent_internal_hula_exec_bind_spawn(hu_agent_t *agent, struct hu_hula_exec *exec,
+                                            struct hu_spawn_config *tpl);
+#endif
+/* True when a message of 48+ bytes contains one of the loaded multi-step
+ * needles; gates the multi-agent orchestrator in S16. */
+bool hu_agent_internal_message_looks_multistep(const char *m, size_t mlen);
+
 #endif /* HU_AGENT_INTERNAL_H */
