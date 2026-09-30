@@ -120,8 +120,54 @@ DEFAULT_COMPOSITE_TOLERANCE = 0.02
 DEFAULT_EI_TOLERANCE = 0.15     # on the 1-5 judge scale
 DEFAULT_REALITY_TOLERANCE = 0.15
 DEFAULT_MIN_RECALL_COVERAGE = 0.5
+# Below this fraction of PAIRED --fusion contexts whose retrieved context
+# (memories block) differs between arms, the run is forced INCONCLUSIVE — see
+# decide_verdict() and contexts_differing_fraction(). 0.05 is deliberately
+# low: a genuinely-applied fusion merge (rrf vs score) reorders or drops
+# overlapping candidates on nearly every multi-hit query, so a real treatment
+# clears 5% by a wide margin. A run at or near 0.0 is not a weak effect, it is
+# the "identical values to full precision" / treatment-never-applied tell
+# (.claude/rules/no-number-without-a-measurement.md) — the textbook shape is
+# both arms silently falling back to keyword-only (see
+# SEMANTIC_UNAVAILABLE_MARKER) and therefore producing byte-identical
+# contexts regardless of which fusion mode was requested.
+DEFAULT_MIN_DIFF_FRAC = 0.05
 REGISTER_MAX_CASUAL_WORDS = 12  # mirrors semantic_recall.h; keep in sync
 PRIORITY_HEADER = {"X-HU-Priority": "batch"}
+
+# The EXACT stderr text `human memory search --hybrid` prints when it could
+# not attach the semantic index and fell back to keyword-only retrieval
+# (src/app/cli_commands.c, the `search --hybrid` branch: `fprintf(stderr,
+# "search --hybrid: semantic index unavailable, using keyword only\n")`).
+# hybrid_search() greps THIS marker in the CLI child's stderr, not the
+# returncode: the fallback still returns 0 and can still produce non-empty
+# (keyword-only) results, so a returncode/empty-result check alone cannot see
+# it — that gap is exactly what let a fusion pair PASS while both arms
+# silently ran the same keyword-only path (see run_arm()). If the wording at
+# that call site ever changes, this constant must change with it.
+SEMANTIC_UNAVAILABLE_MARKER = "semantic index unavailable"
+
+# hu_hybrid_retrieve's graph-boost / typed-seeding path (spreading-activation
+# and graph-rerank-boost rows, merged in as an extra retrieval source) is
+# fed by an in-memory hu_graph_t that only a long-lived daemon process
+# populates via store(); every query this gate issues runs in a fresh,
+# short-lived `human memory search --hybrid` CLI child, which always passes
+# graph=NULL (src/app/cli_commands.c: `hu_hybrid_retrieve(..., NULL, hq,
+# ...)`; see the comment at src/memory/retrieval/hybrid.c documenting the
+# same gap for the offline alpha sweep). A PROMOTE/HOLD from this gate is
+# therefore silent on the graph-boost interaction — not a bug in the gate,
+# a limitation of measuring the CLI path instead of a live daemon. Recorded
+# in the output JSON (`limitations`) and the printed summary rather than
+# building a daemon harness to close it.
+GRAPH_BOOST_LIMITATION = (
+    "graph-boost / typed-seeding recall (spreading-activation + graph-rerank-boost rows) is "
+    "NOT measured by this gate: hu_hybrid_retrieve's `graph` argument is hard-NULL from "
+    "`human memory search --hybrid` (src/app/cli_commands.c) because the in-memory graph "
+    "index is populated only by store() inside a long-lived daemon process, and every query "
+    "here runs in a fresh, short-lived CLI child process (see the comment in "
+    "src/memory/retrieval/hybrid.c documenting the same gap for the offline alpha sweep). A "
+    "PROMOTE/HOLD verdict says nothing about the graph-boost interaction."
+)
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_PROJECT_ID = os.environ.get("GOOGLE_CLOUD_PROJECT", "johnb-2025")
@@ -412,10 +458,15 @@ def _parse_semantic_results(stdout):
 
 
 def _cli_search(human_bin, memory_db, embed_url, search_args, k, extra_env=None, timeout=90):
-    """Run `human memory search <search_args>` against the db COPY; None on any
-    infra failure (binary missing, timeout, non-zero exit)."""
+    """Run `human memory search <search_args>` against the db COPY. Returns
+    (results_or_None, stderr_text): results is None on any infra failure
+    (binary missing, timeout, non-zero exit); stderr_text is always the raw
+    captured stderr (possibly "") so callers can detect a keyword-only
+    fallback the CLI reports via stderr even on an otherwise-successful
+    (returncode 0, well-formed results) call — see
+    SEMANTIC_UNAVAILABLE_MARKER and hybrid_search()."""
     if not human_bin or not os.path.isfile(human_bin):
-        return None
+        return None, ""
     env = dict(os.environ)
     env["HU_MEMORY_SQLITE_PATH"] = memory_db
     env["HU_SEMANTIC_EMBED_URL"] = embed_url
@@ -428,10 +479,10 @@ def _cli_search(human_bin, memory_db, embed_url, search_args, k, extra_env=None,
                               capture_output=True, encoding="utf-8", errors="replace",
                               timeout=timeout, env=env)
     except (subprocess.TimeoutExpired, OSError):
-        return None
+        return None, ""
     if proc.returncode != 0:
-        return None
-    return _parse_semantic_results(proc.stdout)[:k]
+        return None, (proc.stderr or "")
+    return _parse_semantic_results(proc.stdout)[:k], (proc.stderr or "")
 
 
 def semantic_search(human_bin, memory_db, embed_url, query, k, timeout=90):
@@ -439,15 +490,22 @@ def semantic_search(human_bin, memory_db, embed_url, query, k, timeout=90):
     None on infra failure (binary missing, timeout, non-zero exit) — callers
     must treat None as "could not measure LIVE for this context", not as
     "no memories", or the LIVE arm would silently degrade toward SHADOW."""
-    return _cli_search(human_bin, memory_db, embed_url, ["--semantic", query], k, None, timeout)
+    results, _stderr = _cli_search(human_bin, memory_db, embed_url, ["--semantic", query], k,
+                                   None, timeout)
+    return results
 
 
 def hybrid_search(human_bin, memory_db, embed_url, query, k, fusion_env, timeout=90):
     """The daemon memory loader's call (`memory search --hybrid --plain`) under
-    `fusion_env` (see fusion_env_for_arm). Same None-on-failure contract as
-    semantic_search."""
-    return _cli_search(human_bin, memory_db, embed_url, ["--hybrid", "--plain", query], k,
-                       fusion_env, timeout)
+    `fusion_env` (see fusion_env_for_arm). Returns (results_or_None,
+    semantic_unavailable): semantic_unavailable is True iff the CLI's stderr
+    carried SEMANTIC_UNAVAILABLE_MARKER, meaning this call silently ran
+    keyword-only regardless of returncode/results — callers (run_arm) MUST
+    treat that as an invalidated call for the --fusion pair, not a success,
+    or a fusion A/B degrades to an unnoticed A/A on the keyword path."""
+    results, stderr = _cli_search(human_bin, memory_db, embed_url, ["--hybrid", "--plain", query],
+                                  k, fusion_env, timeout)
+    return results, (SEMANTIC_UNAVAILABLE_MARKER in stderr)
 
 
 def fusion_env_for_arm(arm_name, fusion, alpha):
@@ -658,6 +716,8 @@ def run_arm(arm_name, contexts, system_prompt, args, memory_db_path, registers=N
         recall_bytes = 0
         recall_dropped = 0
         recall_suppressed_bytes = 0
+        semantic_unavailable_here = False
+        context_hash = None
         if recall_mode != "none":
             casual = registers is not None and registers.get(i) == "casual"
             # AC-5.3: register gate SHADOW -> log but do NOT suppress
@@ -666,9 +726,13 @@ def run_arm(arm_name, contexts, system_prompt, args, memory_db_path, registers=N
                     f"(words<={REGISTER_MAX_CASUAL_WORDS})", flush=True)
             fusion = getattr(args, "fusion", None)
             if fusion is not None:
-                snippets = hybrid_search(args.human_bin, memory_db_path, args.embed_url, ctx,
-                                         args.top_k,
-                                         fusion_env_for_arm(arm_name, fusion, args.alpha))
+                snippets, semantic_unavailable_here = hybrid_search(
+                    args.human_bin, memory_db_path, args.embed_url, ctx, args.top_k,
+                    fusion_env_for_arm(arm_name, fusion, args.alpha))
+                if semantic_unavailable_here:
+                    log(f"  [warn][{arm_name}] {i}: {SEMANTIC_UNAVAILABLE_MARKER!r} in CLI "
+                        f"stderr — this call ran keyword-only, invalidating the --fusion "
+                        f"comparison for this context", file=sys.stderr, flush=True)
             else:
                 snippets = semantic_search(args.human_bin, memory_db_path, args.embed_url,
                                            ctx, args.top_k)
@@ -679,6 +743,13 @@ def run_arm(arm_name, contexts, system_prompt, args, memory_db_path, registers=N
                     f"{i}: {ctx[:50]!r}", file=sys.stderr, flush=True)
                 continue
             block, recall_dropped = build_memories_block(snippets)
+            # The actual retrieved context injected into the prompt (or lack of
+            # one), hashed rather than stored verbatim to keep the "no reply
+            # text, no incoming-message text" discipline the output JSON already
+            # follows — see contexts_differing_fraction(), which compares this
+            # across arms to catch a fusion A/B that retrieved the same thing
+            # for both arms (the treatment-never-applied tell).
+            context_hash = hashlib.sha256((block or "").encode("utf-8")).hexdigest()
             if block:
                 if recall_mode == "admitted" and casual:
                     # AC-5.1: register gate LIVE + casual -> block withheld; its size is
@@ -710,6 +781,8 @@ def run_arm(arm_name, contexts, system_prompt, args, memory_db_path, registers=N
             "ei": (j["ei"] if j else None),
             "reality": (j["reality"] if j else None),
             "anti_ai": anti_ai,
+            "semantic_unavailable": semantic_unavailable_here,
+            "context_hash": context_hash,
         }
         log(f"  [{arm_name}] {i+1}/{len(contexts)}  {reply[:60]!r}", flush=True)
     return results, fail_reasons
@@ -723,6 +796,30 @@ def paired_ids(shadow_results, live_results):
     produced a scored reply. Comparing arm-wide means computed over DIFFERENT
     context sets is not a measurement of LIVE vs SHADOW."""
     return sorted(set(shadow_results) & set(live_results))
+
+
+def semantic_unavailable_ids(results):
+    """ids (within one arm's run_arm() output) whose CLI call reported
+    SEMANTIC_UNAVAILABLE_MARKER — this call ran keyword-only despite
+    returncode 0 and well-formed results, so it must not be trusted as a
+    measurement of the requested --fusion mode."""
+    return sorted(i for i, r in results.items() if r.get("semantic_unavailable"))
+
+
+def contexts_differing_fraction(shadow_results, live_results, ids):
+    """Fraction of PAIRED ids (--fusion pair only) whose retrieved context —
+    the memories block actually injected into the prompt, compared by hash
+    (see run_arm's context_hash) — differs between arms. A run where the
+    fusion mode changed almost nothing that was retrieved measured the
+    A/A noise floor, not the fusion mode under test; see DEFAULT_MIN_DIFF_FRAC
+    and decide_verdict()."""
+    if not ids:
+        return 0, 0, 0.0
+    differing = sum(1 for i in ids
+                    if shadow_results.get(i, {}).get("context_hash") !=
+                       live_results.get(i, {}).get("context_hash"))
+    total = len(ids)
+    return differing, total, differing / total
 
 
 def _mean(vals):
@@ -843,16 +940,28 @@ def decide_verdict(shadow, live, recall_coverage,
                    composite_tolerance=DEFAULT_COMPOSITE_TOLERANCE,
                    ei_tolerance=DEFAULT_EI_TOLERANCE,
                    reality_tolerance=DEFAULT_REALITY_TOLERANCE,
-                   min_recall_coverage=DEFAULT_MIN_RECALL_COVERAGE):
+                   min_recall_coverage=DEFAULT_MIN_RECALL_COVERAGE,
+                   diff_frac=None, min_diff_frac=DEFAULT_MIN_DIFF_FRAC):
     """PROMOTE only if (a) recall coverage was high enough that this run
-    actually exercised LIVE's difference from SHADOW, and (b) LIVE does not
-    regress SHADOW on composite, EI, or reality-awareness (each within a
-    small noise tolerance). Pure function: no I/O, unit-tested directly."""
+    actually exercised LIVE's difference from SHADOW, (a2) for a --fusion
+    pair, the retrieved context actually differed between arms often enough
+    (diff_frac; pass None to skip this check — the non-fusion pairs have no
+    equivalent signal), and (b) LIVE does not regress SHADOW on composite,
+    EI, or reality-awareness (each within a small noise tolerance). Pure
+    function: no I/O, unit-tested directly."""
     if recall_coverage < min_recall_coverage:
         return "INCONCLUSIVE", [
             f"recall coverage {recall_coverage:.3f} < min {min_recall_coverage:.3f} — semantic "
             f"search returned nothing for most paired contexts, so LIVE's prompt barely "
             f"differed from SHADOW's; this run does not test what it claims to test"]
+
+    if diff_frac is not None and diff_frac < min_diff_frac:
+        return "INCONCLUSIVE", [
+            f"contexts_differing fraction {diff_frac:.3f} < --min-diff-frac {min_diff_frac:.3f} "
+            f"— the requested fusion mode barely changed what was retrieved versus the rrf "
+            f"baseline for most paired contexts; comparing replies would measure noise, not "
+            f"the fusion mode under test (see SEMANTIC_UNAVAILABLE_MARKER — a common cause is "
+            f"both arms silently falling back to keyword-only)"]
 
     reasons = []
     ok = True
@@ -955,6 +1064,10 @@ def main(argv=None):
                          "`rrf` gives an A/A noise run")
     ap.add_argument("--alpha", type=float, default=None,
                     help="HU_HYBRID_FUSION_ALPHA for the LIVE arm (required with --fusion score)")
+    ap.add_argument("--min-diff-frac", type=float, default=DEFAULT_MIN_DIFF_FRAC,
+                    help="--fusion pair only: minimum fraction of paired contexts whose "
+                         "retrieved context must differ between arms; below this the verdict "
+                         "is forced INCONCLUSIVE (see DEFAULT_MIN_DIFF_FRAC for why 0.05)")
     ap.add_argument("--dry-run", action="store_true",
                     help="parse arguments and initialize, but skip generation/scoring")
     args = ap.parse_args(argv)
@@ -1019,6 +1132,23 @@ def main(argv=None):
     live_results, live_fail = run_arm("live", contexts, system_prompt, args, memory_db_path,
                                       registers=registers)
 
+    # A --fusion arm that silently fell back to keyword-only is not a
+    # successful measurement of the requested mode, even though its CLI call
+    # returned 0 and produced well-formed results (see hybrid_search() /
+    # SEMANTIC_UNAVAILABLE_MARKER). Refuse outright rather than let those
+    # calls count toward the pairing below — a fusion A/B where both arms
+    # ran keyword-only PASSES vacuously otherwise (identical contexts read
+    # as "no regression", not "nothing was measured").
+    shadow_unavailable = semantic_unavailable_ids(shadow_results)
+    live_unavailable = semantic_unavailable_ids(live_results)
+    if shadow_unavailable or live_unavailable:
+        return refuse(
+            f"semantic index reported unavailable ({SEMANTIC_UNAVAILABLE_MARKER!r}) during a "
+            f"--fusion run: shadow contexts={shadow_unavailable} live contexts="
+            f"{live_unavailable} — a fusion A/B measured on a keyword-only fallback tests the "
+            f"CLI's degraded path, not the requested fusion mode; fix the embedder/vector-store "
+            f"attach and rerun")
+
     ids = paired_ids(shadow_results, live_results)
     shadow_only = sorted(set(shadow_results) - set(live_results))
     live_only = sorted(set(live_results) - set(shadow_results))
@@ -1052,9 +1182,20 @@ def main(argv=None):
         coverage = register_gate_coverage(shadow_results, ids, registers)
     else:
         coverage = recall_coverage_of(live_results, ids)
+
+    # --fusion pair only: how often did the requested merge mode actually
+    # change what was retrieved, versus the rrf baseline? diff_frac stays
+    # None for the non-fusion pairs (decide_verdict skips the check then).
+    if args.fusion is not None:
+        contexts_differing, contexts_total, diff_frac = contexts_differing_fraction(
+            shadow_results, live_results, ids)
+    else:
+        contexts_differing, contexts_total, diff_frac = None, None, None
+
     verdict, reasons = decide_verdict(shadow_summary, live_summary, coverage,
                                       args.composite_tolerance, args.ei_tolerance,
-                                      args.reality_tolerance, args.min_recall_coverage)
+                                      args.reality_tolerance, args.min_recall_coverage,
+                                      diff_frac=diff_frac, min_diff_frac=args.min_diff_frac)
 
     # AC-5.4: if register_gate is LIVE, verify that casual contexts have zero recall_bytes
     # in the LIVE arm (suppression must actually have happened, per reports-success-does-nothing.md)
@@ -1118,6 +1259,11 @@ def main(argv=None):
         "live_fail_reasons": live_fail,
         "recall_coverage": coverage,
         "min_recall_coverage": args.min_recall_coverage,
+        "contexts_differing": contexts_differing,
+        "contexts_total": contexts_total,
+        "contexts_differing_frac": diff_frac,
+        "min_diff_frac": args.min_diff_frac if args.fusion is not None else None,
+        "limitations": [GRAPH_BOOST_LIMITATION],
         "contexts_source": os.path.expanduser(args.contexts),
         "server": args.server,
         "embed_url": args.embed_url,
@@ -1143,6 +1289,12 @@ def main(argv=None):
     print(f"\nSEMANTIC LIVE GATE VERDICT: {verdict}")
     for r in reasons:
         print(f"  - {r}")
+    if args.fusion is not None:
+        print(f"contexts_differing/contexts_total: {contexts_differing}/{contexts_total} "
+             f"({diff_frac:.3f}, floor {args.min_diff_frac:.3f})")
+    print("LIMITATIONS:")
+    for lim in doc["limitations"]:
+        print(f"  - {lim}")
     print(f"Written: {out_path}")
     return 0 if verdict == "PROMOTE" else 1
 
