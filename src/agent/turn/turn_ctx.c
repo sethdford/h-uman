@@ -33,5 +33,8 @@ void hu_turn_ctx_free(hu_turn_ctx_t *turn_ctx) {
     hu_allocator_t *alloc = turn_ctx->alloc;
     turn_ctx_release(alloc, &turn_ctx->retrieval.memory_ctx, &turn_ctx->retrieval.memory_ctx_len);
     turn_ctx_release(alloc, &turn_ctx->retrieval.graph_ctx, &turn_ctx->retrieval.graph_ctx_len);
+    turn_ctx_release(alloc, &turn_ctx->perception.acp_context,
+                     &turn_ctx->perception.acp_context_len);
+    turn_ctx_release(alloc, &turn_ctx->perception.pref_ctx, &turn_ctx->perception.pref_ctx_len);
     alloc->free(alloc->ctx, turn_ctx, sizeof(*turn_ctx));
 }

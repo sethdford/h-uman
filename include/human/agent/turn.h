@@ -37,6 +37,12 @@ typedef struct hu_turn_ctx {
     } in;
     struct {
         hu_cognition_budget_t cognition_budget; /* retrieval budget: S2 output, S3 input */
+        char *acp_context;                      /* owned: pending inter-agent messages */
+        size_t acp_context_len;
+        const char *tone_hint; /* static storage (rhythm literals / tone table) */
+        size_t tone_hint_len;
+        char *pref_ctx; /* owned: stored user preferences */
+        size_t pref_ctx_len;
     } perception;
     struct {
         char *memory_ctx; /* owned */
@@ -63,5 +69,11 @@ void hu_turn_ctx_free(hu_turn_ctx_t *turn_ctx);
  * pick, W12 contact-recall merge. Reads in.*, perception.cognition_budget;
  * writes retrieval.*. HU_ERR_INVALID_ARGUMENT on a NULL ctx or agent. */
 hu_error_t hu_turn_retrieve(hu_turn_ctx_t *turn_ctx);
+
+/* S2 perception (src/agent/turn/turn_perceive.c): ACP inbox, cognition budget +
+ * dual-process dispatch, fast capture / STM / pattern radar, commitments,
+ * preference and outcome learning, tone and rhythm hints. Reads in.*; writes
+ * perception.*. HU_ERR_INVALID_ARGUMENT on a NULL ctx, agent or msg. */
+hu_error_t hu_turn_perceive(hu_turn_ctx_t *turn_ctx);
 
 #endif /* HU_AGENT_TURN_H */

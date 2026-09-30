@@ -61,6 +61,10 @@ static void turn_ctx_free_releases_still_owned_outputs(void) {
     turn_ctx->retrieval.memory_ctx_len = 3;
     turn_ctx->retrieval.graph_ctx = hu_strndup(&alloc, "graph", 5);
     turn_ctx->retrieval.graph_ctx_len = 5;
+    turn_ctx->perception.acp_context = hu_strndup(&alloc, "acp", 3);
+    turn_ctx->perception.acp_context_len = 3;
+    turn_ctx->perception.pref_ctx = hu_strndup(&alloc, "pref", 4);
+    turn_ctx->perception.pref_ctx_len = 4;
     HU_ASSERT_GT(hu_tracking_allocator_leaks(ta), 0); /* precondition: live allocations */
     hu_turn_ctx_free(turn_ctx);
     HU_ASSERT_EQ(hu_tracking_allocator_leaks(ta), 0);

@@ -24,7 +24,7 @@
 
 set -eu
 
-MAX_FN_BASELINE=8684    # agent_turn_run, src/agent/agent_turn.c — lowered by the 2026-09-30 carve (S3)
+MAX_FN_BASELINE=8549    # hu_service_run, src/daemon.c — lowered by the 2026-09-30 carve (S2); agent_turn_run (8387) is no longer the longest (plan gap G3)
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
