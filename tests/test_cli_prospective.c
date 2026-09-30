@@ -149,6 +149,36 @@ static void cli_prospective_run_prints_the_probe_contract(void) {
     read_all(f, buf, sizeof(buf));
     fclose(f);
     HU_ASSERT_STR_EQ(buf, "ok\n");
+
+    char *bf[] = {"human", "prospective", "backfill", "--db", ":memory:", "--now", "1790000000"};
+    HU_ASSERT_TRUE(hu_cli_prospective_parse(7, bf, &a));
+    HU_ASSERT_EQ(a.op, HU_CLI_PM_BACKFILL);
+    f = tmpfile();
+    HU_ASSERT_EQ(hu_cli_prospective_run(&alloc, &mem, &a, NULL, 0, &j, f), HU_OK);
+    read_all(f, buf, sizeof(buf));
+    fclose(f);
+    HU_ASSERT_STR_EQ(buf, "{\"commitments_seen\": 0, \"followups_seen\": 0, "
+                          "\"imported_pending\": 0, \"imported_expired\": 0, \"reanchored\": 0, "
+                          "\"skipped_existing\": 0, \"written\": false, \"skipped_unsafe\": 0}\n");
+
+    HU_ASSERT_EQ(sqlite3_exec(db,
+                              "INSERT INTO commitments(contact_id,description,who,deadline,status,"
+                              "created_at) VALUES('+15550000001','call about the lease','me',"
+                              "1790086400,'pending',1),('+15550000001','to ','them',1790086400,"
+                              "'pending',1)",
+                              NULL, NULL, NULL),
+                 SQLITE_OK);
+    char *bw[] = {"human",    "prospective", "backfill", "--db",
+                  ":memory:", "--write",     "--now",    "1790000000"};
+    HU_ASSERT_TRUE(hu_cli_prospective_parse(8, bw, &a));
+    HU_ASSERT_TRUE(a.write);
+    f = tmpfile();
+    HU_ASSERT_EQ(hu_cli_prospective_run(&alloc, &mem, &a, NULL, 0, &j, f), HU_OK);
+    read_all(f, buf, sizeof(buf));
+    fclose(f);
+    HU_ASSERT_STR_EQ(buf, "{\"commitments_seen\": 2, \"followups_seen\": 0, "
+                          "\"imported_pending\": 1, \"imported_expired\": 0, \"reanchored\": 0, "
+                          "\"skipped_existing\": 0, \"written\": true, \"skipped_unsafe\": 1}\n");
     mem.vtable->deinit(mem.ctx);
 }
 

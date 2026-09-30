@@ -675,7 +675,7 @@ static void repo_sync_source_retires_by_commitment_id_for_owner_pair(void) {
 }
 
 /* Fix round 3 (defense in depth): trigger_value's rowid is only ever
- * minted by pm_mirror_time for the row it keys, so this never happens
+ * minted by hu_prospective_repo_mirror_time for the row it keys, so this never happens
  * through the real writers -- but nothing in this function's contract
  * verifies that, and a hand-built or corrupted key would otherwise let
  * contact A's intention retire contact B's commitment. The scoped lookup

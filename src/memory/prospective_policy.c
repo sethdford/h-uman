@@ -635,8 +635,8 @@ size_t hu_prospective_commitment_action(const char *summary, bool contact_commit
     /* No named array here (dead-strip-ratchet.md): a function-local static
      * gets its own `_hu_commitment_action.k_leading`-shaped symbol, and
      * three inline checks over three short literals are simpler than a
-     * lookup table anyway. (Production caller: pm_mirror_owned_time in
-     * src/memory/superhuman.c, added by the prospective-memory-v2 F4 fix.) */
+     * lookup table anyway. (Production caller: hu_prospective_mirror_action
+     * below, shared by src/memory/superhuman.c and the backfill.) */
     if (pm_prefix_ci(summary, slen, "I'll ")) {
         summary += 5;
         slen -= 5;
@@ -656,6 +656,53 @@ size_t hu_prospective_commitment_action(const char *summary, bool contact_commit
     return pm_finish_or_empty(
         buf, cap,
         hu_buf_appendf(buf, cap, 0, "ask if they still need to %.*s", (int)rlen, rewritten));
+}
+
+/* Ownership signal (ruling F4): no `who`, "" or "me" is the owner; anything
+ * else is the contact. */
+static bool pm_who_is_contact(const char *who, size_t who_len) {
+    if (!who || who_len == 0)
+        return false;
+    return !(who_len == 2 && strncmp(who, "me", 2) == 0);
+}
+
+/* A dated-moment frame's topic is at most this long (the frame itself is
+ * built in a 320-byte buffer); the live mirror has always used it. */
+#define PM_MIRROR_TOPIC_CAP 512
+
+hu_prospective_mirror_t hu_prospective_mirror_action(bool is_followup, const char *text,
+                                                     size_t text_len, const char *who,
+                                                     size_t who_len, char *buf, size_t cap,
+                                                     const char **action, size_t *action_len) {
+    *action = NULL;
+    *action_len = 0;
+    if (!pm_who_is_contact(who, who_len)) {
+        /* A dated-moment situation frame mirrors as its topic: the frame's
+         * relative day is stale once due and its wrapper words defeat the
+         * done-after-evidence match. The ledger row keeps the frame. */
+        size_t tl =
+            is_followup
+                ? hu_prospective_frame_topic(text, text_len, buf,
+                                             cap < PM_MIRROR_TOPIC_CAP ? cap : PM_MIRROR_TOPIC_CAP)
+                : 0;
+        *action = tl > 0 ? buf : text;
+        *action_len = tl > 0 ? tl : text_len;
+        return tl > 0 ? HU_PM_MIRROR_TOPIC : HU_PM_MIRROR_VERBATIM;
+    }
+    /* Contact-owned: the rephraser wants a NUL-terminated string and
+     * text/text_len is not guaranteed to be one, so copy into a bounded
+     * local first. Too-long input is not safe to rephrase either. */
+    char text_z[512];
+    if (text_len >= sizeof(text_z))
+        return HU_PM_MIRROR_SKIP_TOO_LONG;
+    memcpy(text_z, text, text_len);
+    text_z[text_len] = '\0';
+    size_t al = hu_prospective_commitment_action(text_z, true, buf, cap);
+    if (al == 0)
+        return HU_PM_MIRROR_SKIP_UNSAFE;
+    *action = buf;
+    *action_len = al;
+    return HU_PM_MIRROR_REPHRASED;
 }
 
 static const char k_pm_judge_system[] =

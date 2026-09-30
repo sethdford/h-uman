@@ -17,10 +17,12 @@
 #include "human/core/allocator.h"
 #include "human/memory.h"
 #include "human/memory/prospective_v2.h"
+#include "human/memory/superhuman.h"
 #include <sqlite3.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #define C1  "+15550000001"
 #define NOW ((int64_t)1790000000)
@@ -830,6 +832,238 @@ static void v2_directive_alloc_failure_leaves_every_row_pending(void) {
     m2.vtable->deinit(m2.ctx);
 }
 
+/* ── Task 10: the one-time backfill ──────────────────────────────────── */
+
+#define C2 "+15550000002"
+
+static void v2_backfill_imports_expires_reanchors_and_dedupes(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    /* Raw ledger rows (the Task 8 writers would already mirror them). */
+    char sql[1024];
+    snprintf(sql, sizeof(sql),
+             "INSERT INTO commitments(contact_id,description,who,deadline,status,created_at) "
+             "VALUES('" C1 "','call about the lease','me',%lld,'pending',1),"
+             "('" C1 "','old promise','me',%lld,'pending',1),"
+             "('" C1 "','future thing','me',%lld,'pending',1),"
+             "('" C1 "','undated','me',0,'pending',1),"
+             "('" C1 "','already done','me',%lld,'followed_up',1);"
+             "INSERT INTO delayed_followups(contact_id,topic,scheduled_at,sent) VALUES"
+             "('" C1 "','call about the lease',%lld,0),('" C1 "','sent one',%lld,1)",
+             (long long)(NOW - 2 * 86400), (long long)(NOW - 20 * 86400), (long long)(NOW + 86400),
+             (long long)(NOW - 86400), (long long)(NOW - 2 * 86400), (long long)(NOW - 86400));
+    HU_ASSERT_EQ(sqlite3_exec(db, sql, NULL, NULL, NULL), SQLITE_OK);
+
+    hu_prospective_backfill_counts_t b;
+    HU_ASSERT_EQ(hu_prospective_v2_backfill(&alloc, &mem, NOW, false, &b), HU_OK);
+    HU_ASSERT_EQ(b.commitments_seen, (size_t)3); /* dated + pending only */
+    HU_ASSERT_EQ(b.followups_seen, (size_t)1);   /* unsent only */
+    HU_ASSERT_EQ(b.imported_pending, (size_t)2);
+    HU_ASSERT_EQ(b.imported_expired, (size_t)1);
+    HU_ASSERT_EQ(b.reanchored, (size_t)1);
+    HU_ASSERT_EQ(b.skipped_existing, (size_t)1); /* the lease follow-up is the same intention */
+    HU_ASSERT_EQ(b.skipped_unsafe, (size_t)0);
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE cue_kind='time'"),
+                 (int64_t)0); /* dry run rolled back */
+
+    HU_ASSERT_EQ(hu_prospective_v2_backfill(&alloc, &mem, NOW, true, &b), HU_OK);
+    HU_ASSERT_EQ(b.imported_pending + b.imported_expired, (size_t)3);
+    HU_ASSERT_EQ(q_int(db, "SELECT due_at FROM prospective_memories WHERE "
+                           "action='call about the lease'"),
+                 NOW); /* re-anchored: one grace window from the backfill */
+    HU_ASSERT_EQ(q_int(db, "SELECT fired FROM prospective_memories WHERE action='old promise'"),
+                 (int64_t)3);
+    HU_ASSERT_EQ(q_int(db, "SELECT due_at FROM prospective_memories WHERE action='future thing'"),
+                 NOW + 86400);
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE "
+                           "trigger_value='commitment:1' AND source='promise_keeper'"),
+                 (int64_t)1); /* keyed by the ledger row's own id */
+
+    HU_ASSERT_EQ(hu_prospective_v2_backfill(&alloc, &mem, NOW, true, &b), HU_OK);
+    HU_ASSERT_EQ(b.imported_pending + b.imported_expired, (size_t)0); /* idempotent */
+    HU_ASSERT_EQ(b.skipped_existing, (size_t)4);
+    HU_ASSERT_EQ(hu_prospective_v2_backfill(&alloc, NULL, NOW, true, &b), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_prospective_v2_backfill(&alloc, &mem, 0, true, &b), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_prospective_v2_backfill(&alloc, &mem, NOW, true, NULL),
+                 HU_ERR_INVALID_ARGUMENT);
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* Every time row, one line each, in key order: what "identical" compares. */
+static void time_rows_snapshot(sqlite3 *db, char *out, size_t cap) {
+    sqlite3_stmt *st = NULL;
+    HU_ASSERT_EQ(sqlite3_prepare_v2(
+                     db,
+                     "SELECT trigger_type||'|'||trigger_value||'|'||action||'|'||contact_id||'|'||"
+                     "source||'|'||status||'|'||fired||'|'||due_at||'|'||expires_at "
+                     "FROM prospective_memories WHERE cue_kind='time' ORDER BY trigger_value",
+                     -1, &st, NULL),
+                 SQLITE_OK);
+    size_t n = 0;
+    out[0] = '\0';
+    while (sqlite3_step(st) == SQLITE_ROW)
+        n += (size_t)snprintf(out + n, n < cap ? cap - n : 0, "%s\n",
+                              (const char *)sqlite3_column_text(st, 0));
+    sqlite3_finalize(st);
+    HU_ASSERT_TRUE(n < cap);
+}
+
+/* Ruling 1: the backfill writes the SAME rows the live writers write for the
+ * same ledger items -- owner verbatim, a contact's promise rephrased (and its
+ * paired follow-up collapsed into it), an unsafe contact promise skipped, a
+ * dated-moment frame as its topic. Mirror live, snapshot, drop the mirrors,
+ * backfill at the same clock, snapshot again: byte-equal. */
+static void v2_backfill_rows_are_identical_to_the_live_mirror(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    int64_t now = (int64_t)time(NULL);
+    static const char lease[] = "call about the lease";
+    static const char land[] = "text you when I land";
+    static const char frame[] =
+        "they mentioned the dentist appointment (tomorrow); confidence 0.80";
+    static const char kids[] = "pick up the kids";
+    size_t c1 = strlen(C1);
+    size_t c2 = strlen(C2);
+    HU_ASSERT_EQ(hu_superhuman_commitment_store(&mem, &alloc, C1, c1, lease, sizeof(lease) - 1,
+                                                "me", 2, now + 2 * 86400),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(
+                     &mem, &alloc, C1, c1, lease, sizeof(lease) - 1, now + 2 * 86400, "me", 2),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_superhuman_commitment_store(&mem, &alloc, C2, c2, land, sizeof(land) - 1,
+                                                "them", 4, now + 3 * 86400),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(
+                     &mem, &alloc, C2, c2, land, sizeof(land) - 1, now + 3 * 86400, "them", 4),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, C1, c1, frame,
+                                                         sizeof(frame) - 1, now + 86400, NULL, 0),
+                 HU_OK);
+    HU_ASSERT_EQ(
+        hu_superhuman_commitment_store(&mem, &alloc, C2, c2, "to ", 3, "them", 4, now + 4 * 86400),
+        HU_OK);
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(
+                     &mem, &alloc, C1, c1, kids, sizeof(kids) - 1, now + 5 * 86400, NULL, 0),
+                 HU_OK);
+    char live[4096];
+    time_rows_snapshot(db, live, sizeof(live));
+    HU_ASSERT_STR_CONTAINS(live, "|ask if they still need to text you when they land|");
+    HU_ASSERT_STR_CONTAINS(live, "|the dentist appointment|");
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE cue_kind='time'"),
+                 (int64_t)4);
+
+    HU_ASSERT_EQ(sqlite3_exec(db, "DELETE FROM prospective_memories WHERE cue_kind='time'", NULL,
+                              NULL, NULL),
+                 SQLITE_OK);
+    hu_prospective_backfill_counts_t b;
+    HU_ASSERT_EQ(hu_prospective_v2_backfill(&alloc, &mem, now, true, &b), HU_OK);
+    HU_ASSERT_EQ(b.commitments_seen, (size_t)3);
+    HU_ASSERT_EQ(b.followups_seen, (size_t)4);
+    HU_ASSERT_EQ(b.imported_pending, (size_t)4);
+    HU_ASSERT_EQ(b.skipped_existing, (size_t)2); /* both paired follow-ups */
+    HU_ASSERT_EQ(b.skipped_unsafe, (size_t)1);   /* "to " */
+    HU_ASSERT_EQ(b.commitments_seen + b.followups_seen,
+                 b.imported_pending + b.imported_expired + b.skipped_existing + b.skipped_unsafe);
+    char back[4096];
+    time_rows_snapshot(db, back, sizeof(back));
+    HU_ASSERT_STR_EQ(back, live);
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* F4 + F1 + the rowid-keyed retire, on rows only the backfill wrote: a
+ * contact's overdue promise is re-anchored in third person (never quoted
+ * first person), its paired follow-up collapses into it, a re-run at a LATER
+ * clock adds nothing, and settling the backfilled row retires its own ledger
+ * row and twin by id. */
+static void v2_backfill_contact_promises_rerun_later_and_retire_by_id(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    char sql[1024];
+    snprintf(sql, sizeof(sql),
+             "INSERT INTO commitments(contact_id,description,who,deadline,status,created_at) "
+             "VALUES('" C2 "','text you when I land','them',%lld,'pending',1),"
+             "('" C2 "','to ','them',%lld,'pending',1);"
+             "INSERT INTO delayed_followups(contact_id,topic,scheduled_at,sent) VALUES"
+             "('" C2 "','text you when I land',%lld,0),"
+             "('" C1 "','they mentioned the dentist appointment (tomorrow); confidence 0.80',"
+             "%lld,0)",
+             (long long)(NOW - 2 * 86400), (long long)(NOW + 86400), (long long)(NOW - 2 * 86400),
+             (long long)(NOW + 86400));
+    HU_ASSERT_EQ(sqlite3_exec(db, sql, NULL, NULL, NULL), SQLITE_OK);
+
+    hu_prospective_backfill_counts_t b;
+    HU_ASSERT_EQ(hu_prospective_v2_backfill(&alloc, &mem, NOW, true, &b), HU_OK);
+    HU_ASSERT_EQ(b.commitments_seen, (size_t)2);
+    HU_ASSERT_EQ(b.followups_seen, (size_t)2);
+    HU_ASSERT_EQ(b.imported_pending, (size_t)2);
+    HU_ASSERT_EQ(b.reanchored, (size_t)1);
+    HU_ASSERT_EQ(b.skipped_existing, (size_t)1);
+    HU_ASSERT_EQ(b.skipped_unsafe, (size_t)1);
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE "
+                           "action LIKE '%when I land%' OR action='to '"),
+                 (int64_t)0); /* never the contact's words as the owner's */
+    HU_ASSERT_EQ(q_int(db, "SELECT due_at FROM prospective_memories WHERE "
+                           "trigger_value='commitment:1' AND "
+                           "action='ask if they still need to text you when they land'"),
+                 NOW);
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE "
+                           "trigger_value='followup:2' AND action='the dentist appointment' AND "
+                           "source='followup'"),
+                 (int64_t)1);
+
+    HU_ASSERT_EQ(hu_prospective_v2_backfill(&alloc, &mem, NOW + 5 * 86400, false, &b), HU_OK);
+    HU_ASSERT_EQ(b.imported_pending + b.imported_expired, (size_t)0);
+    HU_ASSERT_EQ(b.skipped_existing, (size_t)3);
+    HU_ASSERT_EQ(hu_prospective_v2_backfill(&alloc, &mem, NOW + 5 * 86400, true, &b), HU_OK);
+    HU_ASSERT_EQ(b.imported_pending + b.imported_expired, (size_t)0); /* F1: later clock */
+    HU_ASSERT_EQ(b.skipped_existing, (size_t)3);
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE cue_kind='time'"),
+                 (int64_t)2);
+
+    hu_prospective_item_t *items = NULL;
+    size_t n = 0;
+    HU_ASSERT_EQ(hu_prospective_repo_list(&alloc, db, HU_PM_CUE_TIME, HU_PM_PENDING, C2, strlen(C2),
+                                          &items, &n),
+                 HU_OK);
+    HU_ASSERT_EQ(n, (size_t)1);
+    HU_ASSERT_EQ(hu_prospective_repo_sync_source(db, &items[0], HU_PM_DONE, NOW), HU_OK);
+    hu_prospective_repo_free(&alloc, items, n);
+    HU_ASSERT_EQ(q_int(db, "SELECT status='followed_up' FROM commitments WHERE id=1"), (int64_t)1);
+    HU_ASSERT_EQ(q_int(db, "SELECT sent FROM delayed_followups WHERE id=1"), (int64_t)1);
+    HU_ASSERT_EQ(q_int(db, "SELECT sent FROM delayed_followups WHERE id=2"), (int64_t)0);
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* The boundary is "more than 14 days": exactly 14 days overdue re-anchors. */
+static void v2_backfill_fourteen_day_boundary(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    char sql[512];
+    snprintf(sql, sizeof(sql),
+             "INSERT INTO commitments(contact_id,description,who,deadline,status,created_at) "
+             "VALUES('" C1 "','at the edge','me',%lld,'pending',1),"
+             "('" C1 "','just past','me',%lld,'pending',1)",
+             (long long)(NOW - HU_PROSPECTIVE_BACKFILL_EXPIRE_S),
+             (long long)(NOW - HU_PROSPECTIVE_BACKFILL_EXPIRE_S - 1));
+    HU_ASSERT_EQ(sqlite3_exec(db, sql, NULL, NULL, NULL), SQLITE_OK);
+    hu_prospective_backfill_counts_t b;
+    HU_ASSERT_EQ(hu_prospective_v2_backfill(&alloc, &mem, NOW, true, &b), HU_OK);
+    HU_ASSERT_EQ(b.imported_pending, (size_t)1);
+    HU_ASSERT_EQ(b.imported_expired, (size_t)1);
+    HU_ASSERT_EQ(q_int(db, "SELECT status='pending' AND due_at="
+                           "1790000000"
+                           " FROM prospective_memories WHERE action='at the edge'"),
+                 (int64_t)1);
+    HU_ASSERT_EQ(q_int(db, "SELECT status='expired' FROM prospective_memories WHERE "
+                           "action='just past'"),
+                 (int64_t)1);
+    mem.vtable->deinit(mem.ctx);
+}
+
 void run_prospective_v2_tests(void) {
     HU_TEST_SUITE("prospective v2");
     HU_RUN_TEST(v2_clean_positive_surfaces_a_soft_directive);
@@ -852,6 +1086,10 @@ void run_prospective_v2_tests(void) {
     HU_RUN_TEST(v2_judge_ok_with_null_or_empty_output_is_parse_fail);
     HU_RUN_TEST(v2_surfaces_only_the_items_the_directive_rendered);
     HU_RUN_TEST(v2_directive_alloc_failure_leaves_every_row_pending);
+    HU_RUN_TEST(v2_backfill_imports_expires_reanchors_and_dedupes);
+    HU_RUN_TEST(v2_backfill_rows_are_identical_to_the_live_mirror);
+    HU_RUN_TEST(v2_backfill_contact_promises_rerun_later_and_retire_by_id);
+    HU_RUN_TEST(v2_backfill_fourteen_day_boundary);
 }
 
 #else

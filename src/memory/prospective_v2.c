@@ -9,6 +9,7 @@
 #ifdef HU_ENABLE_SQLITE
 
 #include "human/core/string.h"
+#include "human/memory/sql_transaction.h"
 #include <string.h>
 
 #define PM_USER_CAP 6144
@@ -325,6 +326,79 @@ hu_error_t hu_prospective_v2_after_delivery(hu_allocator_t *alloc, sqlite3 *db,
     }
     hu_prospective_repo_free(alloc, items, n);
     return HU_OK;
+}
+
+typedef struct pm_backfill {
+    sqlite3 *db;
+    int64_t now;
+    hu_prospective_backfill_counts_t *out;
+} pm_backfill_t;
+
+static hu_error_t pm_backfill_row(void *ctx, const hu_prospective_ledger_row_t *r) {
+    pm_backfill_t *b = (pm_backfill_t *)ctx;
+    hu_prospective_backfill_counts_t *out = b->out;
+    if (r->is_followup)
+        out->followups_seen++;
+    else
+        out->commitments_seen++;
+    char buf[HU_PROSPECTIVE_MIRROR_CAP];
+    const char *action = NULL;
+    size_t al = 0;
+    hu_prospective_mirror_t m = hu_prospective_mirror_action(
+        r->is_followup, r->text, r->text_len, r->who, r->who_len, buf, sizeof(buf), &action, &al);
+    if (m == HU_PM_MIRROR_SKIP_TOO_LONG || m == HU_PM_MIRROR_SKIP_UNSAFE) {
+        out->skipped_unsafe++;
+        return HU_OK;
+    }
+    int64_t due = r->due_at;
+    hu_prospective_status_t st = HU_PM_PENDING;
+    bool reanchored = false;
+    if (b->now - due > HU_PROSPECTIVE_BACKFILL_EXPIRE_S) {
+        st = HU_PM_EXPIRED;
+    } else if (due < b->now) {
+        due = b->now;
+        reanchored = true;
+    }
+    bool inserted = false;
+    hu_error_t e =
+        hu_prospective_repo_mirror_time(b->db, r->is_followup, r->id, r->contact, r->contact_len,
+                                        action, al, due, st, b->now, &inserted);
+    if (e != HU_OK)
+        return e;
+    if (!inserted)
+        out->skipped_existing++;
+    else if (st == HU_PM_EXPIRED)
+        out->imported_expired++;
+    else {
+        out->imported_pending++;
+        if (reanchored)
+            out->reanchored++;
+    }
+    return HU_OK;
+}
+
+hu_error_t hu_prospective_v2_backfill(hu_allocator_t *alloc, hu_memory_t *mem, int64_t now,
+                                      bool write, hu_prospective_backfill_counts_t *out) {
+    if (out)
+        memset(out, 0, sizeof(*out));
+    if (!alloc || !mem || !out || now <= 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    sqlite3 *db = hu_sqlite_memory_get_db(mem);
+    if (!db)
+        return HU_ERR_NOT_SUPPORTED;
+    hu_sql_txn_t txn;
+    memset(&txn, 0, sizeof(txn));
+    hu_error_t err = hu_sql_txn_begin(&txn, db);
+    if (err != HU_OK)
+        return err;
+    pm_backfill_t b = {.db = db, .now = now, .out = out};
+    err = hu_prospective_repo_each_dated_ledger_row(db, pm_backfill_row, &b);
+    if (err == HU_OK && write)
+        err = hu_sql_txn_commit(&txn);
+    hu_sql_txn_rollback(&txn); /* dry run, a failed walk, or a failed COMMIT; no-op after one */
+    if (err != HU_OK)          /* nothing was written: counts would describe a rolled-back run */
+        memset(out, 0, sizeof(*out));
+    return err;
 }
 
 #endif /* HU_ENABLE_SQLITE */

@@ -180,6 +180,35 @@ size_t hu_prospective_commitment_action(const char *summary, bool contact_commit
  * the text verbatim. Reads at most `len` bytes of `frame`. */
 size_t hu_prospective_frame_topic(const char *frame, size_t len, char *out, size_t cap);
 
+/* ── Ledger -> time-row mirror text (controller rulings F1/F4) ─────────
+ * The ONE decision of what action text a dated ledger row (a commitment or
+ * a delayed follow-up) mirrors as, shared by the live writers
+ * (src/memory/superhuman.c) and the one-time backfill
+ * (hu_prospective_v2_backfill) so both produce identical rows:
+ *   - owner-owned (`who` NULL, "" or "me"): a follow-up that is a
+ *     dated-moment frame mirrors as its topic (hu_prospective_frame_topic);
+ *     anything else mirrors verbatim;
+ *   - contact-owned (any other `who`): rephrased to third person through
+ *     hu_prospective_commitment_action, or SKIPPED when that is not safe —
+ *     never a first-person row for a contact's promise.
+ * `buf` must hold HU_PROSPECTIVE_MIRROR_CAP bytes. On a VERBATIM / TOPIC /
+ * REPHRASED result *action (pointing at `text` or `buf`) and *action_len
+ * are the text to store; on a SKIP they are NULL / 0. */
+#define HU_PROSPECTIVE_MIRROR_CAP 600
+
+typedef enum hu_prospective_mirror {
+    HU_PM_MIRROR_VERBATIM = 0,
+    HU_PM_MIRROR_TOPIC,         /* a dated-moment frame's topic, in buf */
+    HU_PM_MIRROR_REPHRASED,     /* a contact's promise in third person, in buf */
+    HU_PM_MIRROR_SKIP_TOO_LONG, /* contact-owned text too long to rephrase safely */
+    HU_PM_MIRROR_SKIP_UNSAFE,   /* contact-owned text the rephraser refused */
+} hu_prospective_mirror_t;
+
+hu_prospective_mirror_t hu_prospective_mirror_action(bool is_followup, const char *text,
+                                                     size_t text_len, const char *who,
+                                                     size_t who_len, char *buf, size_t cap,
+                                                     const char **action, size_t *action_len);
+
 /* ── Judge prompt ────────────────────────────────────────────────────── */
 const char *hu_prospective_judge_system(size_t *len);
 /* The user turn: the last lines of `history` (at most 4000 bytes, cut at a

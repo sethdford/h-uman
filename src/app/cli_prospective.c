@@ -122,6 +122,23 @@ static hu_error_t pm_run_deliver(hu_allocator_t *alloc, sqlite3 *db,
     return HU_OK;
 }
 
+/* One JSON line; skipped_unsafe was added after the plan's contract, so it
+ * is appended LAST (after "written") to keep every earlier key in place. */
+static hu_error_t pm_run_backfill(hu_allocator_t *alloc, hu_memory_t *mem,
+                                  const hu_cli_prospective_args_t *a, int64_t now, FILE *out) {
+    hu_prospective_backfill_counts_t b;
+    hu_error_t e = hu_prospective_v2_backfill(alloc, mem, now, a->write, &b);
+    if (e != HU_OK)
+        return e;
+    fprintf(out,
+            "{\"commitments_seen\": %zu, \"followups_seen\": %zu, \"imported_pending\": %zu, "
+            "\"imported_expired\": %zu, \"reanchored\": %zu, \"skipped_existing\": %zu, "
+            "\"written\": %s, \"skipped_unsafe\": %zu}\n",
+            b.commitments_seen, b.followups_seen, b.imported_pending, b.imported_expired,
+            b.reanchored, b.skipped_existing, a->write ? "true" : "false", b.skipped_unsafe);
+    return HU_OK;
+}
+
 hu_error_t hu_cli_prospective_run(hu_allocator_t *alloc, hu_memory_t *mem,
                                   const hu_cli_prospective_args_t *a, const char *history,
                                   size_t history_len, const hu_prospective_judge_t *judge,
@@ -136,6 +153,8 @@ hu_error_t hu_cli_prospective_run(hu_allocator_t *alloc, hu_memory_t *mem,
         return HU_OK;
     }
     int64_t now = a->now > 0 ? (int64_t)a->now : (int64_t)time(NULL);
+    if (a->op == HU_CLI_PM_BACKFILL)
+        return pm_run_backfill(alloc, mem, a, now, out);
     if (a->op == HU_CLI_PM_DELIVER)
         return pm_run_deliver(alloc, db, a, now, out);
     if (a->op != HU_CLI_PM_INBOUND && a->op != HU_CLI_PM_TICK)

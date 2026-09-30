@@ -10,6 +10,7 @@
  */
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/memory.h"
 #include "human/memory/prospective_policy.h"
 #include "human/memory/prospective_repo.h"
 #include <stdbool.h>
@@ -96,6 +97,31 @@ hu_error_t hu_prospective_v2_after_delivery(hu_allocator_t *alloc, sqlite3 *db,
                                             hu_prospective_cue_kind_t kind, const char *contact,
                                             size_t contact_len, const char *reply, size_t reply_len,
                                             int64_t now, hu_prospective_delivery_counts_t *out);
+
+typedef struct hu_prospective_backfill_counts {
+    size_t commitments_seen; /* pending, deadline > 0 */
+    size_t followups_seen;   /* unsent, scheduled_at > 0 */
+    size_t imported_pending, imported_expired;
+    size_t reanchored;       /* overdue <= 14 days: due_at moved to `now` */
+    size_t skipped_existing; /* a time row already stands for the intention */
+    size_t skipped_unsafe;   /* contact-owned, not safely rephrasable (F4): no row */
+} hu_prospective_backfill_counts_t;
+
+/* One-time mirror of the ledger into time rows (spec §4.1, rollout step 2):
+ * every row hu_prospective_repo_each_dated_ledger_row visits, mirrored
+ * EXACTLY as the live writers mirror it -- the text from
+ * hu_prospective_mirror_action (a contact's promise rephrased or skipped, a
+ * dated-moment frame as its topic), the key "<kind>:<ledger id>" through
+ * hu_prospective_repo_mirror_time -- so re-runs and live rows dedupe with it
+ * and a settled row retires its own ledger row by id. Overdue by more than
+ * HU_PROSPECTIVE_BACKFILL_EXPIRE_S -> imported expired; overdue by up to
+ * that -> imported pending with due_at = now (one grace window); future ->
+ * as scheduled. Every seen row lands in exactly one of imported_pending,
+ * imported_expired, skipped_existing, skipped_unsafe. One transaction:
+ * `write=false` rolls it back, so a dry run's counts (dedupe included) are
+ * exact. Idempotent, also at a later `now`. */
+hu_error_t hu_prospective_v2_backfill(hu_allocator_t *alloc, hu_memory_t *mem, int64_t now,
+                                      bool write, hu_prospective_backfill_counts_t *out);
 
 #endif /* HU_ENABLE_SQLITE */
 #endif /* HU_MEMORY_PROSPECTIVE_V2_H */

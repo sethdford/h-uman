@@ -12,6 +12,7 @@
 #include "human/memory/repo_util.h"
 #include <ctype.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <string.h>
 
 static bool pm_has_column(sqlite3 *db, const char *col) {
@@ -401,8 +402,76 @@ hu_error_t hu_prospective_repo_upsert_time(sqlite3 *db, const char *contact, siz
     return HU_OK;
 }
 
-/* Fix round 2, I1: it->trigger_value is the source key pm_mirror_time
- * (src/memory/superhuman.c) wrote when this row was inserted --
+hu_error_t hu_prospective_repo_mirror_time(sqlite3 *db, bool is_followup, int64_t ledger_id,
+                                           const char *contact, size_t contact_len,
+                                           const char *action, size_t action_len, int64_t due_at,
+                                           hu_prospective_status_t status, int64_t now,
+                                           bool *inserted) {
+    char key[64];
+    snprintf(key, sizeof(key), "%s:%lld", is_followup ? "followup" : "commitment",
+             (long long)ledger_id);
+    return hu_prospective_repo_upsert_time(
+        db, contact, contact_len, action, action_len, due_at, HU_PROSPECTIVE_TIME_GRACE_S,
+        is_followup ? HU_PM_SOURCE_FOLLOWUP : HU_PM_SOURCE_PROMISE_KEEPER, key, status, now,
+        inserted);
+}
+
+/* Columns: id, contact, text, who, due. The follow-up's `who` is its paired
+ * commitment's (see the header), a contact-owned one first. */
+static const char k_pm_ledger_commitments[] =
+    "SELECT id, contact_id, description, who, deadline FROM commitments "
+    "WHERE status = 'pending' AND deadline > 0 AND contact_id <> '' AND description <> '' "
+    "ORDER BY id";
+static const char k_pm_ledger_followups[] =
+    "SELECT f.id, f.contact_id, f.topic, (SELECT c.who FROM commitments c "
+    "WHERE c.contact_id = f.contact_id AND c.description = f.topic "
+    "ORDER BY (c.who IS NOT NULL AND c.who NOT IN ('', 'me')) DESC, c.id DESC LIMIT 1), "
+    "f.scheduled_at FROM delayed_followups f "
+    "WHERE f.sent = 0 AND f.scheduled_at > 0 AND f.contact_id <> '' AND f.topic <> '' "
+    "ORDER BY f.id";
+
+static hu_error_t pm_each_ledger(sqlite3 *db, const char *sql, bool is_followup,
+                                 hu_prospective_ledger_fn fn, void *ctx) {
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
+        return HU_ERR_MEMORY_BACKEND;
+    hu_error_t err = HU_OK;
+    int rc = SQLITE_DONE;
+    while (err == HU_OK && (rc = sqlite3_step(st)) == SQLITE_ROW) {
+        hu_prospective_ledger_row_t r;
+        memset(&r, 0, sizeof(r));
+        r.is_followup = is_followup;
+        r.id = sqlite3_column_int64(st, 0);
+        r.contact = (const char *)sqlite3_column_text(st, 1);
+        r.contact_len = (size_t)sqlite3_column_bytes(st, 1);
+        r.text = (const char *)sqlite3_column_text(st, 2);
+        r.text_len = (size_t)sqlite3_column_bytes(st, 2);
+        r.who = (const char *)sqlite3_column_text(st, 3);
+        r.who_len = r.who ? (size_t)sqlite3_column_bytes(st, 3) : 0;
+        r.due_at = sqlite3_column_int64(st, 4);
+        if (!r.contact || !r.text)
+            continue; /* the WHERE excludes these; a NULL here is an OOM */
+        err = fn(ctx, &r);
+    }
+    if (err == HU_OK && rc != SQLITE_DONE)
+        err = HU_ERR_MEMORY_BACKEND;
+    sqlite3_finalize(st);
+    return err;
+}
+
+hu_error_t hu_prospective_repo_each_dated_ledger_row(sqlite3 *db, hu_prospective_ledger_fn fn,
+                                                     void *ctx) {
+    if (!db || !fn)
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_error_t err = pm_each_ledger(db, k_pm_ledger_commitments, false, fn, ctx);
+    if (err == HU_OK)
+        err = pm_each_ledger(db, k_pm_ledger_followups, true, fn, ctx);
+    return err;
+}
+
+/* Fix round 2, I1: it->trigger_value is the source key
+ * hu_prospective_repo_mirror_time (live writers in src/memory/superhuman.c,
+ * and the backfill) wrote when this row was inserted --
  * "commitment:<rowid>" or "followup:<rowid>". Parse it and retire BY
  * ROWID, not by matching it->action as literal ledger text: for a
  * contact-owned commitment, hu_superhuman_commitment_store's mirror
@@ -472,7 +541,7 @@ static hu_error_t pm_sync_source_by_text(sqlite3 *db, const hu_prospective_item_
  *
  * Fix round 3 (defense in depth): every statement here also requires
  * contact_id = <the intention's own contact>. trigger_value's rowid is
- * only ever minted by pm_mirror_time immediately after the INSERT it
+ * only ever minted by hu_prospective_repo_mirror_time for the ledger row it
  * keys, so today it always names a row this same contact owns -- but
  * rowids are global, not per-contact, and this function trusts a value
  * read out of the database rather than one it derived itself. Without

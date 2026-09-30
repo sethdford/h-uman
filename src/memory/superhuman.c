@@ -200,90 +200,48 @@ void hu_superhuman_inside_joke_free(hu_allocator_t *alloc, hu_inside_joke_t *arr
  * logged and the time path misses this one item. A commitment and its paired
  * delayed follow-up collapse into one row (the upsert dedupes on contact +
  * action, IGNORING due_at -- see prospective_repo.h's
- * hu_prospective_repo_upsert_time contract). */
-static void pm_mirror_time(sqlite3 *db, const char *kind, const char *contact, size_t contact_len,
-                           const char *text, size_t text_len, int64_t due_at,
-                           hu_prospective_source_t source) {
-    char key[64];
-    snprintf(key, sizeof(key), "%s:%lld", kind, (long long)sqlite3_last_insert_rowid(db));
-    if (hu_prospective_repo_upsert_time(db, contact, contact_len, text, text_len, due_at,
-                                        HU_PROSPECTIVE_TIME_GRACE_S, source, key, HU_PM_PENDING,
-                                        (int64_t)time(NULL), NULL) != HU_OK)
-        hu_log_warn("superhuman", NULL, "prospective time mirror failed for %s", key);
-}
-
-/* Controller ruling F4: a dated intention is either the CONTACT's own
+ * hu_prospective_repo_upsert_time contract).
+ *
+ * Controller ruling F4: a dated intention is either the CONTACT's own
  * ("I'll send the photos", who="them" -- the F20 keeper in daemon.c stores
  * these, and its paired delayed_followup_schedule call for the SAME
  * commitment carries the same who) or the OWNER's (who NULL or "me" -- the
  * promise keeper and the unrelated daemon_dated_followup.c situation-frame
- * path, which has no ownership concept at all). `who` is the call-site fact
- * that tells them apart; both hu_superhuman_commitment_store and
- * hu_superhuman_delayed_followup_schedule route through this one helper so
- * the F20 pair decides ownership identically and their mirrors land on the
- * SAME rephrased text -- which is what lets the Task 3 upsert collapse them
- * into ONE row instead of two (one rephrased, one quoting the contact's
- * first-person words back as the owner's). Mirroring a contact's commitment
- * verbatim would do exactly that misattribution, so a contact-owned mirror
- * is rephrased to third person via hu_prospective_commitment_action() first.
- * When that rephrasing is not safe (returns 0), the mirror is skipped
- * entirely -- the ledger row stays the record, and the skip is logged with
- * a running count so the miss is visible, never silent (fail toward
- * silence, not toward misattribution). Atomic: the daemon calls into this
- * from multiple threads (M1 fix round), so a plain size_t++ would race. */
+ * path, which has no ownership concept at all). What text each mirrors as
+ * is decided ONCE, by hu_prospective_mirror_action (prospective_policy.h),
+ * which the one-time backfill (hu_prospective_v2_backfill) also uses, so a
+ * live row and a backfilled row for the same ledger item are identical and
+ * the F20 pair lands on the SAME rephrased text. A contact-owned mirror whose
+ * rephrasing is not safe is skipped -- the ledger row stays the record, and
+ * the skip is logged with a running count so the miss is visible, never
+ * silent (fail toward silence, not toward misattribution). Atomic: the
+ * daemon calls into this from multiple threads (M1 fix round), so a plain
+ * size_t++ would race. */
 static atomic_size_t s_commitment_mirror_skipped = 0;
-
-static bool pm_who_is_contact(const char *who, size_t who_len) {
-    if (!who || who_len == 0)
-        return false; /* no signal -- owner-equivalent */
-    return !(who_len == 2 && strncmp(who, "me", 2) == 0);
-}
 
 static void pm_mirror_owned_time(sqlite3 *db, const char *kind, const char *contact,
                                  size_t contact_len, const char *text, size_t text_len,
-                                 int64_t due_at, const char *who, size_t who_len,
-                                 hu_prospective_source_t source) {
-    if (!pm_who_is_contact(who, who_len)) {
-        /* A dated-moment situation frame mirrors as its topic: the frame's
-         * relative day is stale once due and its wrapper words defeat the
-         * done-after-evidence match. The ledger row keeps the frame. */
-        char topic[512];
-        size_t tl = strcmp(kind, "followup") == 0
-                        ? hu_prospective_frame_topic(text, text_len, topic, sizeof(topic))
-                        : 0;
-        pm_mirror_time(db, kind, contact, contact_len, tl > 0 ? topic : text,
-                       tl > 0 ? tl : text_len, due_at, source);
-        return;
-    }
-
-    /* Contact-owned: rephrase via the pure predicate. It wants a
-     * NUL-terminated C string; text/text_len is not guaranteed to be one,
-     * so copy into a bounded local first. Too-long input is not safe to
-     * rephrase either -- skip it the same way a failed rewrite is skipped. */
-    char text_z[512];
-    if (text_len >= sizeof(text_z)) {
+                                 int64_t due_at, const char *who, size_t who_len) {
+    bool is_followup = strcmp(kind, "followup") == 0;
+    char buf[HU_PROSPECTIVE_MIRROR_CAP];
+    const char *action = NULL;
+    size_t action_len = 0;
+    hu_prospective_mirror_t m = hu_prospective_mirror_action(
+        is_followup, text, text_len, who, who_len, buf, sizeof(buf), &action, &action_len);
+    if (m == HU_PM_MIRROR_SKIP_TOO_LONG || m == HU_PM_MIRROR_SKIP_UNSAFE) {
         size_t skipped = atomic_fetch_add(&s_commitment_mirror_skipped, 1) + 1;
         hu_log_warn("superhuman", NULL,
-                    "prospective time mirror skipped (%zu total): contact %s text too long to "
-                    "rephrase safely",
-                    skipped, kind);
+                    "prospective time mirror skipped (%zu total): contact %s %s", skipped, kind,
+                    m == HU_PM_MIRROR_SKIP_TOO_LONG ? "text too long to rephrase safely"
+                                                    : "could not be rephrased safely");
         return;
     }
-    memcpy(text_z, text, text_len);
-    text_z[text_len] = '\0';
-
-    char action_buf[600];
-    size_t action_len =
-        hu_prospective_commitment_action(text_z, true, action_buf, sizeof(action_buf));
-    if (action_len == 0) {
-        size_t skipped = atomic_fetch_add(&s_commitment_mirror_skipped, 1) + 1;
-        hu_log_warn("superhuman", NULL,
-                    "prospective time mirror skipped (%zu total): contact %s could not be "
-                    "rephrased safely",
-                    skipped, kind);
-        return;
-    }
-    pm_mirror_time(db, kind, contact, contact_len, action_buf, action_len, due_at, source);
+    int64_t rowid = sqlite3_last_insert_rowid(db);
+    if (hu_prospective_repo_mirror_time(db, is_followup, rowid, contact, contact_len, action,
+                                        action_len, due_at, HU_PM_PENDING, (int64_t)time(NULL),
+                                        NULL) != HU_OK)
+        hu_log_warn("superhuman", NULL, "prospective time mirror failed for %s:%lld", kind,
+                    (long long)rowid);
 }
 
 hu_error_t hu_superhuman_commitment_store(void *sqlite_ctx, hu_allocator_t *alloc,
@@ -321,7 +279,7 @@ hu_error_t hu_superhuman_commitment_store(void *sqlite_ctx, hu_allocator_t *allo
         return HU_ERR_MEMORY_BACKEND;
     if (deadline > 0)
         pm_mirror_owned_time(db, "commitment", contact_id, contact_id_len, description, desc_len,
-                             deadline, who, who_len, HU_PM_SOURCE_PROMISE_KEEPER);
+                             deadline, who, who_len);
     return HU_OK;
 }
 
@@ -635,7 +593,7 @@ hu_error_t hu_superhuman_delayed_followup_schedule(void *sqlite_ctx, hu_allocato
         return HU_ERR_MEMORY_BACKEND;
     if (scheduled_at > 0)
         pm_mirror_owned_time(db, "followup", contact_id, contact_id_len, topic, topic_len,
-                             scheduled_at, who, who_len, HU_PM_SOURCE_FOLLOWUP);
+                             scheduled_at, who, who_len);
     return HU_OK;
 }
 

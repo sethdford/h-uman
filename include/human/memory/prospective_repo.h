@@ -91,6 +91,45 @@ hu_error_t hu_prospective_repo_upsert_time(sqlite3 *db, const char *contact, siz
                                            const char *source_key, hu_prospective_status_t status,
                                            int64_t now, bool *inserted);
 
+/* The time-row mirror of ONE dated ledger row, shared by the live writers
+ * (src/memory/superhuman.c) and the backfill (hu_prospective_v2_backfill):
+ * hu_prospective_repo_upsert_time with source key "commitment:<ledger_id>"
+ * (source promise_keeper) or "followup:<ledger_id>" (source followup) and
+ * grace HU_PROSPECTIVE_TIME_GRACE_S. `action` is what
+ * hu_prospective_mirror_action decided. *inserted may be NULL. */
+hu_error_t hu_prospective_repo_mirror_time(sqlite3 *db, bool is_followup, int64_t ledger_id,
+                                           const char *contact, size_t contact_len,
+                                           const char *action, size_t action_len, int64_t due_at,
+                                           hu_prospective_status_t status, int64_t now,
+                                           bool *inserted);
+
+/* One dated ledger row, borrowed for the duration of the callback. */
+typedef struct hu_prospective_ledger_row {
+    bool is_followup; /* false: commitments row; true: delayed_followups row */
+    int64_t id;       /* the ledger row's own id */
+    const char *contact;
+    size_t contact_len;
+    const char *text; /* description / topic, full length */
+    size_t text_len;
+    const char *who; /* NULL: no ownership signal */
+    size_t who_len;
+    int64_t due_at; /* deadline / scheduled_at, > 0 */
+} hu_prospective_ledger_row_t;
+
+typedef hu_error_t (*hu_prospective_ledger_fn)(void *ctx, const hu_prospective_ledger_row_t *row);
+
+/* Visits every still-open dated ledger row with a contact and text: pending
+ * commitments with deadline > 0 (id order), then unsent delayed follow-ups
+ * with scheduled_at > 0 (id order). delayed_followups has no `who` column,
+ * so a follow-up carries the `who` of a commitment with the same contact and
+ * description == topic -- the pair the F20 keeper and the promise keeper
+ * write together -- preferring a contact-owned one; a follow-up with no such
+ * commitment (the dated-moment path) has no signal (NULL). The callback may
+ * write prospective_memories; a non-HU_OK return stops the walk and is
+ * returned. */
+hu_error_t hu_prospective_repo_each_dated_ledger_row(sqlite3 *db, hu_prospective_ledger_fn fn,
+                                                     void *ctx);
+
 /* A settled time intention (DONE / CANCELED / EXPIRED) retires its ledger
  * twins so the legacy readers never resurface it: pending commitments with
  * the same contact + description get status 'followed_up' / 'canceled' /
