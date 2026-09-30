@@ -3696,6 +3696,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     hu_director_form_name(selftest.form),
                                     selftest.effect[0] ? selftest.effect : "none");
                     }
+                    /* Unknown-event guard (2026-09-30): never an invented outcome. */
+                    if (director_result_valid)
+                        hu_expressive_unknown_event_guard(&director_result, combined, combined_len,
+                                                          early_history, early_history_count);
                     if (trace_on && director_result_valid) {
                         hu_log_info("director_trace", NULL,
                                     "OUTPUT contact=%.*s action=%d delay_s=%u direction=\"%s\"",
