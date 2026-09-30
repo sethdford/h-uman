@@ -3646,6 +3646,7 @@ set(HU_TEST_SOURCES
     tests/test_autonomy.c
     tests/test_retrieval.c
     tests/test_reranker.c
+    tests/test_score_fusion.c
     tests/test_retrieval_contact_isolation.c
     tests/test_prompt.c
     tests/test_prompt_trim.c
