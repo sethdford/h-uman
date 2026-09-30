@@ -88,7 +88,12 @@ symbols() {
     done < "$work/cmds"
 }
 
-if ! symbols "$file" base; then
+# The baseline is compiled from the probe PATH too: under ASan the object's
+# __TEXT,__const embeds the source file name, so a baseline built from
+# "$file" differs from every probe built from "$probe" and nothing is ever
+# dropped (measured 2026-09-30 on turn_retrieve.c: 0 of 177 removed).
+cp "$file" "$probe"
+if ! symbols "$probe" base; then
     cat "$work/log" >&2
     echo "prune-includes: $file does not compile before pruning" >&2
     exit 1

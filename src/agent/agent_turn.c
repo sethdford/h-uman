@@ -6,6 +6,7 @@
 #include "human/agent/intent.h"
 #include "human/agent/self_uncertainty.h"
 #include "human/agent/theory_of_mind.h"
+#include "human/agent/turn.h"
 #include "human/config.h"
 #include "human/core/json.h"
 #include "human/core/paths.h"
@@ -168,8 +169,8 @@ static void at_free_patterns(hu_allocator_t *alloc, const char **arr, const char
 }
 
 /* Story F.2 — collect HU_ROLE_TOOL names from recent history (newest first). */
-static size_t at_collect_recent_tool_names_(const hu_agent_t *agent, const char **out_names,
-                                            size_t out_cap) {
+size_t hu_agent_internal_collect_recent_tool_names(const hu_agent_t *agent, const char **out_names,
+                                                   size_t out_cap) {
     if (!agent || !out_names || out_cap == 0 || agent->history_count <= 1)
         return 0;
     size_t n = 0;
@@ -1522,138 +1523,18 @@ void hu_agent_build_humanness_context(hu_agent_t *agent, const char *msg, size_t
         *residue_dir_len_out = residue_dir_len;
 }
 
-hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, char **response_out,
-                         size_t *response_len_out) {
-    if (!agent || !msg || !response_out)
-        return HU_ERR_INVALID_ARGUMENT;
-    if (!agent->provider.vtable)
-        return HU_ERR_INVALID_ARGUMENT;
-    *response_out = NULL;
-    if (response_len_out)
-        *response_len_out = 0;
-
-    if (getenv("HU_DEBUG"))
-        hu_log_info("agent_turn", NULL, "ENTER agent_turn msg_len=%zu", msg_len);
-
-    hu_agent_set_current_for_tools(agent);
-
-    /* Reset per-turn state tracking so this turn's behavior-log stash sees a
-     * clean slate (tool_count, tool_sequence_hash, emotional_register,
-     * persona_delta_kind). Populated as the turn progresses; consumed by
-     * hu_agent_internal_emit_behavior_record at stash time. */
-    hu_agent_turn_state_reset(agent);
-
-    /* Clear the last rejected draft so DPO pairing only captures rejections from THIS turn.
-     * Per-turn pairing prevents stale cross-turn alternatives from contaminating the dataset. */
-    if (agent->sota.last_rejected_draft) {
-        agent->alloc->free(agent->alloc->ctx, agent->sota.last_rejected_draft,
-                           agent->sota.last_rejected_draft_len + 1);
-        agent->sota.last_rejected_draft = NULL;
-        agent->sota.last_rejected_draft_len = 0;
-    }
-
-    /* Free any previously-built humanness context, then build fresh for this turn */
-    hu_agent_free_turn_context(agent);
-    hu_agent_build_turn_context(agent);
-
-    /* Speculative cache: check for pre-computed response */
-    if (agent->infra.speculative_cache) {
-        hu_speculative_config_t spec_cfg = hu_speculative_config_default();
-        hu_prediction_t *hit = NULL;
-        int64_t now = (int64_t)time(NULL);
-        if (hu_speculative_cache_lookup(agent->infra.speculative_cache, msg, msg_len, now,
-                                        &spec_cfg, &hit) == HU_OK &&
-            hit) {
-            *response_out = hu_strndup(agent->alloc, hit->response, hit->response_len);
-            if (*response_out) {
-                if (response_len_out)
-                    *response_len_out = hit->response_len;
-                hu_agent_clear_current_for_tools();
-                return HU_OK;
-            }
-        }
-    }
-
-    /* Semantic response cache: check for semantically similar past query */
-    if (agent->infra.response_cache) {
-        hu_semantic_cache_hit_t cache_hit;
-        memset(&cache_hit, 0, sizeof(cache_hit));
-        if (hu_semantic_cache_get(agent->infra.response_cache, agent->alloc, msg, msg_len, msg,
-                                  msg_len, &cache_hit) == HU_OK &&
-            cache_hit.response) {
-            if (cache_hit.similarity >= 0.92f) {
-                *response_out = cache_hit.response;
-                if (response_len_out)
-                    *response_len_out = strlen(cache_hit.response);
-                hu_agent_clear_current_for_tools();
-                return HU_OK;
-            }
-            hu_semantic_cache_hit_free(agent->alloc, &cache_hit);
-        }
-    }
-
-    hu_agent_internal_process_mailbox_messages(agent);
-
-    char *slash_resp = hu_agent_handle_slash_command(agent, msg, msg_len);
-    if (slash_resp) {
-        hu_agent_clear_current_for_tools();
-        *response_out = slash_resp;
-        if (response_len_out)
-            *response_len_out = strlen(slash_resp);
-        return HU_OK;
-    }
-
-    /* Log workflow step start */
-    if (agent->infra.workflow_log) {
-        hu_workflow_event_t ev = {0};
-        ev.type = HU_WF_EVENT_STEP_STARTED;
-        ev.timestamp = hu_workflow_event_current_timestamp_ms();
-        hu_workflow_event_log_append(agent->infra.workflow_log, agent->alloc, &ev);
-    }
-
-    /* Prompt injection defense-in-depth */
+/* The turn body. hu_agent_turn (end of this file) validates the arguments,
+ * owns the heap-allocated per-turn context and calls this. */
+static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, const char *msg,
+                                 size_t msg_len, char **response_out, size_t *response_len_out) {
+    /* S0 entry (per-turn resets, response caches, mailbox, slash commands,
+     * input guard, persona-correction observation) lives in
+     * src/agent/turn/turn_entry.c. A RETURN step ends the turn exactly where
+     * the inline block returned. */
     {
-        hu_injection_risk_t risk = HU_INJECTION_SAFE;
-        hu_error_t guard_err = hu_input_guard_check(msg, msg_len, &risk);
-        if (guard_err != HU_OK) {
-            hu_agent_clear_current_for_tools();
-            return guard_err;
-        }
-        if (risk == HU_INJECTION_HIGH_RISK) {
-            if (agent->observer) {
-                hu_observer_event_t ev = {.tag = HU_OBSERVER_EVENT_ERR};
-                ev.data.err.component = "input_guard";
-                ev.data.err.message = "high-risk injection pattern detected";
-                hu_observer_record_event(*agent->observer, &ev);
-            }
-            *response_out = hu_strndup(agent->alloc,
-                                       "I can't process that request due to safety concerns.", 52);
-            if (response_len_out)
-                *response_len_out = 52;
-            hu_agent_clear_current_for_tools();
-            return HU_OK;
-        }
-    }
-
-    /* W5 producer (FIX 9) + W13 learner bridge (post-FIX-19):
-     *
-     * Scan the safe user message for explicit persona-correction phrases
-     * ("be more X", "stop saying Y", etc.) and record them as delta
-     * proposals. The daemon's daily evolver (FIX 3) reads this table at
-     * 3 AM and applies stable proposals. The `_with_learner` variant
-     * additionally drains every just-proposed delta through
-     * `hu_learner_bridge_emit_persona_deltas` so the W13 learner can use
-     * them at the next sleep-time training tick. `agent->learner` is
-     * tolerated NULL by the bridge — installations without ML enabled
-     * get the propose-only path identical to FIX 9. */
-    if (agent->verifier_graph && agent->memory_session_id && agent->memory_session_id_len > 0) {
-        size_t observed = 0;
-        hu_persona_observe_user_correction_with_learner(
-            agent->verifier_graph, agent->learner, agent->memory_session_id,
-            agent->memory_session_id_len, agent->active_channel, agent->active_channel_len, msg,
-            msg_len, 0, &observed);
-        if (observed > 0)
-            agent->persona_deltas_proposed += observed;
+        hu_turn_step_t entry_step = hu_turn_entry(turn_ctx);
+        if (entry_step.kind == HU_TURN_STEP_RETURN)
+            return entry_step.err;
     }
 
     /* Automatic planning + execution for complex tasks */
@@ -1826,42 +1707,23 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         }
     }
 
-    /* ACP inbox: check for pending inter-agent messages */
-    char *acp_context = NULL;
-    size_t acp_context_len = 0;
-    if (agent->infra.acp_inbox) {
-        hu_acp_inbox_t *inbox = (hu_acp_inbox_t *)agent->infra.acp_inbox;
-        size_t pending = hu_acp_inbox_count(inbox, -1);
-        if (pending > 0) {
-            char acp_buf[2048];
-            size_t acp_pos = 0;
-            const char *hdr = "[Inter-agent messages]\n";
-            size_t hdr_len = strlen(hdr);
-            memcpy(acp_buf, hdr, hdr_len);
-            acp_pos = hdr_len;
-            for (size_t ai = 0; ai < pending && ai < 5; ai++) {
-                hu_acp_message_t acp_msg;
-                if (hu_acp_inbox_pop(inbox, &acp_msg) != HU_OK)
-                    break;
-                const char *type_name = hu_acp_msg_type_name(acp_msg.type);
-                int n = snprintf(acp_buf + acp_pos, sizeof(acp_buf) - acp_pos,
-                                 "- %s from %.*s: %.*s\n", type_name, (int)(acp_msg.sender_id_len),
-                                 acp_msg.sender_id ? acp_msg.sender_id : "?",
-                                 (int)(acp_msg.payload_len > 200 ? 200 : acp_msg.payload_len),
-                                 acp_msg.payload ? acp_msg.payload : "");
-                if (n > 0 && acp_pos + (size_t)n < sizeof(acp_buf))
-                    acp_pos += (size_t)n;
-                hu_acp_message_free(agent->alloc, &acp_msg);
-            }
-            if (acp_pos > hdr_len) {
-                acp_context = hu_strndup(agent->alloc, acp_buf, acp_pos);
-                acp_context_len = acp_pos;
-            }
-        }
-    }
-
-    hu_cognition_budget_t cognition_budget =
-        hu_cognition_get_budget(HU_COGNITION_FAST, agent->max_tool_iterations);
+    /* S2 perception (ACP inbox, cognition budget + dual-process dispatch,
+     * fast capture / STM / pattern radar, commitments, preferences, outcome
+     * feedback, tone and rhythm) lives in src/agent/turn/turn_perceive.c.
+     * Outputs are unpacked into the historical locals; ownership moves with
+     * them. The context declarations that follow belong to S5 and stay here. */
+    (void)hu_turn_perceive(turn_ctx);
+    char *acp_context = turn_ctx->perception.acp_context;
+    size_t acp_context_len = turn_ctx->perception.acp_context_len;
+    hu_cognition_budget_t cognition_budget = turn_ctx->perception.cognition_budget;
+    const char *tone_hint = turn_ctx->perception.tone_hint;
+    size_t tone_hint_len = turn_ctx->perception.tone_hint_len;
+    char *pref_ctx = turn_ctx->perception.pref_ctx;
+    size_t pref_ctx_len = turn_ctx->perception.pref_ctx_len;
+    turn_ctx->perception.acp_context = NULL;
+    turn_ctx->perception.acp_context_len = 0;
+    turn_ctx->perception.pref_ctx = NULL;
+    turn_ctx->perception.pref_ctx_len = 0;
     char *emotional_ctx = NULL;
     size_t emotional_ctx_len = 0;
     char *episodic_replay = NULL;
@@ -1902,505 +1764,23 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
     char *conv_goals_ctx = NULL;
     size_t conv_goals_ctx_len = 0;
 
-    /* Superhuman: observe user message (emotional, silence services) */
-    (void)hu_superhuman_observe_all(&agent->superhuman, agent->alloc, msg, msg_len, "user", 4);
-
-    /* Fast-capture and STM: extract entities/emotions, record turn, populate last turn */
-    {
-        hu_fc_result_t fc_result;
-        memset(&fc_result, 0, sizeof(fc_result));
-        (void)hu_fast_capture(agent->alloc, msg, msg_len, &fc_result);
-
-        uint64_t ts_ms = (uint64_t)time(NULL) * 1000;
-        err = hu_stm_record_turn(&agent->stm, "user", 4, msg, msg_len, ts_ms);
-        if (err == HU_OK) {
-            size_t last_idx = hu_stm_count(&agent->stm) - 1;
-            if (fc_result.primary_topic && fc_result.primary_topic[0]) {
-                (void)hu_stm_turn_set_primary_topic(&agent->stm, last_idx, fc_result.primary_topic,
-                                                    strlen(fc_result.primary_topic));
-            }
-            for (size_t i = 0; i < fc_result.entity_count; i++) {
-                const hu_fc_entity_match_t *e = &fc_result.entities[i];
-                uint32_t mention = 1;
-                (void)hu_stm_turn_add_entity(&agent->stm, last_idx, e->name, e->name_len,
-                                             e->type ? e->type : "entity",
-                                             e->type ? e->type_len : 6, mention);
-            }
-            for (size_t i = 0; i < fc_result.emotion_count; i++) {
-                (void)hu_stm_turn_add_emotion(&agent->stm, last_idx, fc_result.emotions[i].tag,
-                                              fc_result.emotions[i].intensity);
-            }
-        }
-
-        /* Pattern radar: observe entities as topic recurrence, emotions as emotional trend */
-        {
-            char ts_buf[32];
-            int ts_n = snprintf(ts_buf, sizeof(ts_buf), "%llu", (unsigned long long)(ts_ms / 1000));
-            const char *ts = ts_n > 0 ? ts_buf : NULL;
-            size_t ts_len = (ts_n > 0 && ts_n < (int)sizeof(ts_buf)) ? (size_t)ts_n : 0;
-
-            for (size_t i = 0; i < fc_result.entity_count; i++) {
-                const hu_fc_entity_match_t *e = &fc_result.entities[i];
-                if (e->name && e->name_len > 0) {
-                    (void)hu_pattern_radar_observe(
-                        &agent->radar, e->name, e->name_len, HU_PATTERN_TOPIC_RECURRENCE,
-                        e->type ? e->type : NULL, e->type ? e->type_len : 0, ts, ts_len);
-                }
-            }
-            static const char *emotion_names[] = {"neutral",     "joy",        "sadness",
-                                                  "anger",       "fear",       "surprise",
-                                                  "frustration", "excitement", "anxiety"};
-            for (size_t i = 0; i < fc_result.emotion_count; i++) {
-                hu_emotion_tag_t tag = fc_result.emotions[i].tag;
-                if ((size_t)tag < sizeof(emotion_names) / sizeof(emotion_names[0])) {
-                    const char *name = emotion_names[tag];
-                    (void)hu_pattern_radar_observe(&agent->radar, name, strlen(name),
-                                                   HU_PATTERN_EMOTIONAL_TREND, NULL, 0, ts, ts_len);
-                }
-            }
-        }
-        hu_fc_result_deinit(&fc_result, agent->alloc);
-    }
-
-    /* Cognition: emotional fusion + dual-process dispatch (memory loader budgets, prompt hints) */
-    {
-        hu_emotional_perception_t percep;
-        memset(&percep, 0, sizeof(percep));
-        percep.voice_valence = NAN;
-        percep.egraph_dominant = HU_EMOTION_NEUTRAL;
-        percep.egraph_intensity = 0.0f;
-
-        size_t stm_n = hu_stm_count(&agent->stm);
-        const hu_stm_emotion_t *stm_emo = NULL;
-        size_t stm_emo_count = 0;
-        if (stm_n > 0) {
-            const hu_stm_turn_t *lt = hu_stm_get(&agent->stm, stm_n - 1);
-            if (lt && lt->emotion_count > 0) {
-                stm_emo = lt->emotions;
-                stm_emo_count = lt->emotion_count;
-            }
-        }
-        percep.stm_emotions = stm_emo;
-        percep.stm_emotion_count = stm_emo_count;
-        percep.fast_capture = NULL;
-        percep.conversation = NULL;
-
-        hu_emotional_cognition_perceive(&agent->infra.emotional_cognition, &percep);
-
-        size_t recent_tools = 0;
-        if (agent->history_count > 1) {
-            for (size_t hi = agent->history_count - 1; hi > 0; hi--) {
-                if (agent->history[hi - 1].role == HU_ROLE_TOOL) {
-                    recent_tools++;
-                    if (recent_tools >= 8)
-                        break;
-                }
-            }
-        }
-
-        hu_cognition_dispatch_input_t d_in = {
-            .message = msg,
-            .message_len = msg_len,
-            .emotional = &agent->infra.emotional_cognition,
-            .tools_count = agent->tools_count,
-            .recent_tool_calls = recent_tools,
-            .agent_max_tool_iterations = agent->max_tool_iterations,
-        };
-        agent->infra.current_cognition_mode = hu_cognition_dispatch(&d_in);
-        cognition_budget = hu_cognition_get_budget(agent->infra.current_cognition_mode,
-                                                   agent->max_tool_iterations);
-
-        if (agent->observer) {
-            hu_observer_event_t ev = {.tag = HU_OBSERVER_EVENT_COGNITION_MODE};
-            ev.data.cognition_mode.mode =
-                hu_cognition_mode_name(agent->infra.current_cognition_mode);
-            HU_OBS_SAFE_RECORD_EVENT(agent, &ev);
-        }
-        if (agent->bth_metrics) {
-            switch (agent->infra.current_cognition_mode) {
-            case HU_COGNITION_FAST:
-                agent->bth_metrics->cognition_fast_turns++;
-                break;
-            case HU_COGNITION_SLOW:
-                agent->bth_metrics->cognition_slow_turns++;
-                break;
-            case HU_COGNITION_EMOTIONAL:
-                agent->bth_metrics->cognition_emotional_turns++;
-                break;
-            default:
-                break;
-            }
-        }
-    }
-
-    /* Commitment detection: extract promises, intentions, reminders, goals from user message */
-    if (agent->commitment_store) {
-        hu_commitment_detect_result_t commit_result;
-        memset(&commit_result, 0, sizeof(commit_result));
-        hu_error_t cerr =
-            hu_commitment_detect(agent->alloc, msg, msg_len, "user", 4, &commit_result);
-        if (cerr == HU_OK && commit_result.count > 0) {
-            const char *sess = agent->memory_session_id;
-            size_t sess_len = agent->memory_session_id ? agent->memory_session_id_len : 0;
-            for (size_t i = 0; i < commit_result.count; i++) {
-                hu_error_t cs_err = hu_commitment_store_save(
-                    agent->commitment_store, &commit_result.commitments[i], sess, sess_len);
-                if (cs_err != HU_OK)
-                    hu_log_error("agent", NULL, "commitment save failed: %s",
-                                 hu_error_string(cs_err));
-                /* Mirror goal-type commitments into the personal model so
-                 * build_prompt can surface "Active goals" in context. */
-                if ((commit_result.commitments[i].type == HU_COMMITMENT_GOAL ||
-                     commit_result.commitments[i].type == HU_COMMITMENT_INTENTION) &&
-                    commit_result.commitments[i].summary &&
-                    commit_result.commitments[i].summary_len > 0 &&
-                    agent->personal_model.goal_count < HU_PM_MAX_GOALS) {
-                    hu_personal_goal_t *g =
-                        &agent->personal_model.goals[agent->personal_model.goal_count];
-                    memset(g, 0, sizeof(*g));
-                    size_t sn = commit_result.commitments[i].summary_len;
-                    if (sn > sizeof(g->description) - 1)
-                        sn = sizeof(g->description) - 1;
-                    memcpy(g->description, commit_result.commitments[i].summary, sn);
-                    g->description[sn] = '\0';
-                    g->active = true;
-                    g->created_at = (int64_t)time(NULL);
-                    agent->personal_model.goal_count++;
-                }
-            }
-        }
-        hu_commitment_detect_result_deinit(&commit_result, agent->alloc);
-    }
-
-    /* Detect preferences from user corrections and store them */
-    bool is_correction = hu_preferences_is_correction(msg, msg_len);
-    if (agent->memory && is_correction) {
-        size_t pref_len = 0;
-        char *pref = hu_preferences_extract(agent->alloc, msg, msg_len, &pref_len);
-        if (pref) {
-            hu_error_t pref_err = hu_preferences_store(agent->memory, agent->alloc, pref, pref_len);
-            if (pref_err != HU_OK)
-                hu_log_warn("agent", NULL, "preference store failed: %s",
-                            hu_error_string(pref_err));
-            agent->alloc->free(agent->alloc->ctx, pref, pref_len + 1);
-        }
-    }
-
-    /* Outcome tracking: record corrections and positive feedback */
-    if (agent->outcomes) {
-        if (is_correction) {
-            const char *prev_response = NULL;
-            if (agent->history_count >= 2 &&
-                agent->history[agent->history_count - 2].role == HU_ROLE_ASSISTANT)
-                prev_response = agent->history[agent->history_count - 2].content;
-            hu_outcome_record_correction(agent->outcomes, prev_response, msg);
-
-            if (agent->outcomes->auto_apply_feedback && agent->persona && agent->persona_name &&
-                prev_response) {
-                hu_persona_feedback_t fb = {
-                    .channel = agent->active_channel,
-                    .channel_len = agent->active_channel_len,
-                    .original_response = prev_response,
-                    .original_response_len = strlen(prev_response),
-                    .corrected_response = msg,
-                    .corrected_response_len = msg_len,
-                };
-                (void)hu_persona_feedback_record(agent->alloc, agent->persona_name,
-                                                 strlen(agent->persona_name), &fb);
-            }
-        } else if (msg_len >= 5 && msg_len <= 80) {
-            /* Detect simple positive feedback */
-            bool positive = false;
-            for (size_t k = 0; k + 5 <= msg_len && !positive; k++) {
-                char c0 = msg[k] | 0x20, c1 = msg[k + 1] | 0x20, c2 = msg[k + 2] | 0x20;
-                char c3 = msg[k + 3] | 0x20, c4 = msg[k + 4] | 0x20;
-                if (c0 == 't' && c1 == 'h' && c2 == 'a' && c3 == 'n' && c4 == 'k')
-                    positive = true;
-                if (c0 == 'g' && c1 == 'r' && c2 == 'e' && c3 == 'a' && c4 == 't')
-                    positive = true;
-                if (k + 6 <= msg_len && c0 == 'p' && c1 == 'e' && c2 == 'r' && c3 == 'f' &&
-                    c4 == 'e' && (msg[k + 5] | 0x20) == 'c')
-                    positive = true;
-            }
-            if (positive) {
-                hu_outcome_record_positive(agent->outcomes, msg);
-                if (agent->frontiers.initialized)
-                    hu_tcal_update(&agent->frontiers.trust, 0.6f, 0.5f, 0.5f);
-            }
-        }
-        if (is_correction && agent->frontiers.initialized)
-            hu_tcal_update(&agent->frontiers.trust, -0.3f, 0.0f, -0.2f);
-    }
-
-    /* Detect tone from recent user messages */
-    const char *tone_hint = NULL;
-    size_t tone_hint_len = 0;
-    {
-        const char *recent_msgs[3];
-        size_t recent_lens[3];
-        size_t rm_count = 0;
-        for (size_t i = agent->history_count; i > 0 && rm_count < 3; i--) {
-            if (agent->history[i - 1].role == HU_ROLE_USER && agent->history[i - 1].content) {
-                recent_msgs[rm_count] = agent->history[i - 1].content;
-                recent_lens[rm_count] = agent->history[i - 1].content_len;
-                rm_count++;
-            }
-        }
-        if (rm_count > 0) {
-            hu_tone_t tone = hu_detect_tone(recent_msgs, recent_lens, rm_count);
-            tone_hint = hu_tone_hint_string(tone, &tone_hint_len);
-        }
-    }
-
-    /* Rhythm matching: when user sends a short casual message, nudge the
-     * agent to match their brevity. Long reflective messages get more space. */
-    static const char rhythm_short[] =
-        " The user sent a very short message — match their energy with a brief, "
-        "conversational reply. Don't over-explain.";
-    static const char rhythm_long[] =
-        " The user wrote a long, thoughtful message — give it the space it deserves "
-        "with a proportional, considered response.";
-    if (msg_len <= 15 && msg_len > 0 && !tone_hint) {
-        tone_hint = rhythm_short;
-        tone_hint_len = sizeof(rhythm_short) - 1;
-    } else if (msg_len >= 400 && !tone_hint) {
-        tone_hint = rhythm_long;
-        tone_hint_len = sizeof(rhythm_long) - 1;
-    }
-
-    /* Load user preferences for prompt injection */
-    char *pref_ctx = NULL;
-    size_t pref_ctx_len = 0;
-    if (agent->memory) {
-        hu_error_t pref_err =
-            hu_preferences_load(agent->memory, agent->alloc, &pref_ctx, &pref_ctx_len);
-        if (pref_err != HU_OK)
-            hu_log_error("agent_turn", NULL, "preferences load failed: %s",
-                         hu_error_string(pref_err));
-    }
-
-    /* Self-RAG gate: decide whether retrieval is needed before loading memory */
-    hu_srag_assessment_t srag_assessment;
-    memset(&srag_assessment, 0, sizeof(srag_assessment));
-    bool srag_skip_retrieval = false;
-    if (agent->sota.sota_initialized && agent->sota.srag_config.enabled) {
-        hu_srag_should_retrieve(agent->alloc, &agent->sota.srag_config, msg, msg_len, NULL, 0,
-                                &srag_assessment);
-        if (srag_assessment.decision == HU_SRAG_NO_RETRIEVAL)
-            srag_skip_retrieval = true;
-    }
-
-    /* Load memory context for this turn (gated by Self-RAG) */
-    char *memory_ctx = NULL;
-    size_t memory_ctx_len = 0;
-    char *graph_ctx = NULL;
-    size_t graph_ctx_len = 0;
-    if (agent->memory && agent->memory->vtable && !srag_skip_retrieval) {
-        hu_memory_loader_t loader;
-        hu_memory_loader_init(&loader, agent->alloc, agent->memory, agent->retrieval_engine,
-                              cognition_budget.max_memory_entries,
-                              cognition_budget.max_memory_chars);
-        hu_memory_loader_set_facade(&loader, agent->w7_facade);
-        hu_memory_loader_set_personal_model(&loader, &agent->personal_model);
-        /* Story B (sprint-4 follow-up): bind persona context so the loader's
-         * supplementary graph render runs with persona-grounded ToM and the
-         * channel-aware pragmatics digest. */
-        hu_persona_context_t loader_pctx = {0};
-        if (agent->persona) {
-            const char *loader_recent_tools[HU_SELF_RECENT_TOOLS];
-            size_t loader_recent_tools_n =
-                at_collect_recent_tool_names_(agent, loader_recent_tools, HU_SELF_RECENT_TOOLS);
-            loader_pctx.persona = agent->persona;
-            loader_pctx.channel = agent->active_channel;
-            loader_pctx.channel_len = agent->active_channel_len;
-            loader_pctx.delta_limit = 8;
-            loader_pctx.tools = agent->tools;
-            loader_pctx.tools_count = agent->tools_count;
-            loader_pctx.recent_tools_used = loader_recent_tools_n ? loader_recent_tools : NULL;
-            loader_pctx.recent_tools_used_count = loader_recent_tools_n;
-            hu_memory_loader_set_persona_context(&loader, &loader_pctx);
-        }
-        hu_error_t load_err = hu_memory_loader_load(
-            &loader, msg, msg_len, agent->memory_session_id ? agent->memory_session_id : "",
-            agent->memory_session_id ? agent->memory_session_id_len : 0, &memory_ctx,
-            &memory_ctx_len);
-        if (load_err != HU_OK)
-            hu_log_error("agent_turn", NULL, "memory loader failed: %s", hu_error_string(load_err));
-
-        /* GraphRAG activation gated on a blind A/B measurement. Default is
-         * SHADOW since 2026-05-31 (the first A/B measured ON-win-rate 43.3%,
-         * below 50% — see hu_graph_grounding_mode). 2026-07-25: the read path
-         * became query-conditioned (hu_graph_ground_compose keys retrieval on
-         * the incoming msg, empty when nothing matches) but the gate stays
-         * SHADOW; do not flip to default-ON without a FRESH blind A/B showing
-         * the conversation-specific injection is judged superior by humans.
-         * graph_ctx is protected-core in the prompt and is NOT subject to the
-         * Self-RAG memory-relevance verdict below. */
-        hu_agent_load_graph_grounding(agent, &loader, msg, msg_len, &graph_ctx, &graph_ctx_len);
-
-        /* Self-RAG: verify relevance of retrieved content */
-        if (srag_assessment.decision == HU_SRAG_RETRIEVE_AND_VERIFY && memory_ctx &&
-            memory_ctx_len > 0) {
-            double relevance = 0.0;
-            bool should_use = false;
-            hu_srag_verify_relevance(agent->alloc, &agent->sota.srag_config, msg, msg_len,
-                                     memory_ctx, memory_ctx_len, &relevance, &should_use);
-            if (!should_use) {
-                /* Drop ONLY flat memory_ctx. hu_srag_verify_relevance scored
-                 * memory_ctx, NOT graph_ctx — GraphRAG community-summary
-                 * grounding ("who this contact is") is a distinct signal that a
-                 * flat-memory relevance miss says nothing about. Freeing it here
-                 * silently defeated grounding whenever flat memory happened to be
-                 * judged irrelevant. graph_ctx is protected-core in the prompt and
-                 * is freed downstream after the build (or on any earlier guarded
-                 * exit), so leaving it live here cannot leak. */
-                agent->alloc->free(agent->alloc->ctx, memory_ctx, memory_ctx_len + 1);
-                memory_ctx = NULL;
-                memory_ctx_len = 0;
-            }
-        }
-    }
-    const bool behavior_memory_ctx_nonempty = (memory_ctx != NULL && memory_ctx_len > 0);
+    /* S3 retrieval (Self-RAG gate, memory loader, graph grounding, instruction
+     * discovery, data quality, adaptive RAG, W12 contact recall) lives in
+     * src/agent/turn/turn_retrieve.c. Its outputs are unpacked into the
+     * historical locals so the downstream uses stay untouched until their own
+     * stage moves; the unpack moves ownership (the ctx fields are cleared). */
+    (void)hu_turn_retrieve(turn_ctx);
+    char *memory_ctx = turn_ctx->retrieval.memory_ctx;
+    size_t memory_ctx_len = turn_ctx->retrieval.memory_ctx_len;
+    char *graph_ctx = turn_ctx->retrieval.graph_ctx;
+    size_t graph_ctx_len = turn_ctx->retrieval.graph_ctx_len;
+    const bool behavior_memory_ctx_nonempty = turn_ctx->retrieval.memory_ctx_nonempty;
     bool behavior_opinion_kb_hit = false;
     bool behavior_contrarian_hint = false;
-
-    /* Check freshness of cached instruction discovery and re-discover if stale */
-    if (agent->instruction_discovery &&
-        !hu_instruction_discovery_is_fresh(agent->instruction_discovery)) {
-        hu_instruction_discovery_destroy(agent->alloc, agent->instruction_discovery);
-        agent->instruction_discovery = NULL;
-    }
-
-    /* Re-discover instructions if needed */
-    if (!agent->instruction_discovery && agent->workspace_dir && agent->workspace_dir_len > 0) {
-        hu_error_t disc_err =
-            hu_instruction_discovery_run(agent->alloc, agent->workspace_dir,
-                                         agent->workspace_dir_len, &agent->instruction_discovery);
-        if (disc_err != HU_OK) {
-            agent->instruction_discovery = NULL;
-        }
-    }
-
-    /* Gather instruction context from discovery results */
-    char *instruction_ctx = NULL;
-    size_t instruction_ctx_len = 0;
-    if (agent->instruction_discovery && agent->instruction_discovery->merged_content &&
-        agent->instruction_discovery->merged_content_len > 0) {
-        instruction_ctx = agent->instruction_discovery->merged_content;
-        instruction_ctx_len = agent->instruction_discovery->merged_content_len;
-    }
-
-    /* Data quality: validate memory context fragments before assembly */
-    if (agent->sota.dq_config.enabled && memory_ctx && memory_ctx_len > 0) {
-        hu_dq_fragment_t frag = {
-            .content = memory_ctx,
-            .content_len = memory_ctx_len,
-            .source = "memory",
-            .source_len = 6,
-        };
-        hu_dq_result_t dq_result;
-        if (hu_dq_check(&agent->sota.dq_config, &frag, 1, &dq_result) == HU_OK &&
-            !dq_result.passed) {
-            hu_log_info("agent_turn", NULL, "data quality: %zu issues in memory context",
-                        dq_result.issue_count);
-        }
-    }
-
-    /* Adaptive RAG: select strategy and record for learning */
-    hu_rag_strategy_t rag_strategy_used = HU_RAG_NONE;
-    if (agent->sota.sota_initialized && !srag_skip_retrieval) {
-        rag_strategy_used = hu_adaptive_rag_select(&agent->sota.adaptive_rag, msg, msg_len);
-    }
-
-#ifdef HU_ENABLE_SQLITE
-    /* W12: goal-conditioned planner recall via the W7 facade bridge.
-     * Falls back to v1 hu_memory_recall_for_contact on planner failure
-     * or when the facade is not wired. */
-    if (agent->memory_session_id && agent->memory_session_id_len > 0) {
-        char *contact_text = NULL;
-        size_t contact_text_len = 0;
-        bool planner_ok = false;
-
-        if (agent->w7_facade) {
-            /* P4: route through the LLM planner backend when a provider
-             * is available. Under HU_IS_TEST the LLM planner falls back to
-             * a deterministic single-step plan so tests stay free of
-             * provider I/O. With no provider it degrades to goal-conditioned
-             * → heuristic, identical to the original `hu_w12_planner_recall`
-             * call. */
-            hu_provider_t *provider = hu_agent_internal_recall_provider(agent, msg, msg_len);
-            hu_error_t pe = hu_w12_planner_recall_with_provider(
-                agent->w7_facade, agent->alloc, provider,
-                /*model=*/NULL, /*model_len=*/0, agent->memory_session_id,
-                agent->memory_session_id_len, msg, msg_len, 5, 4000, &contact_text,
-                &contact_text_len);
-            planner_ok = (pe == HU_OK && contact_text && contact_text_len > 0);
-        }
-
-        if (!planner_ok && agent->memory) {
-            hu_memory_entry_t *contact_entries = NULL;
-            size_t contact_count = 0;
-            if (hu_memory_recall_for_contact(agent->memory, agent->alloc, agent->memory_session_id,
-                                             agent->memory_session_id_len, msg, msg_len, 5, "", 0,
-                                             &contact_entries, &contact_count) == HU_OK &&
-                contact_entries && contact_count > 0) {
-                size_t extra_len = 0;
-                for (size_t i = 0; i < contact_count; i++) {
-                    if (extra_len > SIZE_MAX - contact_entries[i].content_len - 1)
-                        break;
-                    extra_len += contact_entries[i].content_len + 1;
-                }
-                if (extra_len > 0) {
-                    contact_text = (char *)agent->alloc->alloc(agent->alloc->ctx, extra_len + 32);
-                    if (contact_text) {
-                        size_t pos = 0;
-                        pos = hu_buf_appendf(contact_text, extra_len + 32, pos,
-                                             "[About this contact]\n");
-                        for (size_t i = 0; i < contact_count && pos < extra_len + 31; i++) {
-                            size_t to_copy = contact_entries[i].content_len;
-                            if (pos + to_copy + 1 > extra_len + 31)
-                                to_copy = extra_len + 31 - pos;
-                            memcpy(contact_text + pos, contact_entries[i].content, to_copy);
-                            pos += to_copy;
-                            contact_text[pos++] = '\n';
-                        }
-                        contact_text[pos] = '\0';
-                        contact_text_len = pos;
-                    }
-                }
-                for (size_t i = 0; i < contact_count; i++)
-                    hu_memory_entry_free_fields(agent->alloc, &contact_entries[i]);
-                agent->alloc->free(agent->alloc->ctx, contact_entries,
-                                   contact_count * sizeof(hu_memory_entry_t));
-            }
-        }
-
-        if (contact_text && contact_text_len > 0) {
-            size_t old_len = memory_ctx ? memory_ctx_len : 0;
-            size_t new_total = old_len + (old_len > 0 ? 2 : 0) + contact_text_len + 1;
-            char *merged = (char *)agent->alloc->alloc(agent->alloc->ctx, new_total);
-            if (merged) {
-                size_t pos = 0;
-                if (memory_ctx && memory_ctx_len > 0) {
-                    memcpy(merged, memory_ctx, memory_ctx_len);
-                    pos = memory_ctx_len;
-                    merged[pos++] = '\n';
-                    merged[pos++] = '\n';
-                }
-                memcpy(merged + pos, contact_text, contact_text_len);
-                pos += contact_text_len;
-                merged[pos] = '\0';
-                if (memory_ctx)
-                    agent->alloc->free(agent->alloc->ctx, memory_ctx, memory_ctx_len + 1);
-                /* graph_ctx is its own protected-core section; merging into
-                 * memory_ctx must not drop it (it did until 2026-09-30). */
-                memory_ctx = merged;
-                memory_ctx_len = pos;
-            }
-            agent->alloc->free(agent->alloc->ctx, contact_text, contact_text_len + 1);
-        }
-    }
-#endif
+    char *instruction_ctx = turn_ctx->retrieval.instruction_ctx;
+    size_t instruction_ctx_len = turn_ctx->retrieval.instruction_ctx_len;
+    hu_rag_strategy_t rag_strategy_used = turn_ctx->retrieval.rag_strategy_used;
+    memset(&turn_ctx->retrieval, 0, sizeof(turn_ctx->retrieval));
 
     /* Build STM context for this turn */
     char *stm_ctx = NULL;
@@ -4258,8 +3638,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             const hu_persona_context_t *pctx_p = NULL;
             if (agent->persona) {
                 const char *recent_tool_names[HU_SELF_RECENT_TOOLS];
-                size_t recent_tool_names_n =
-                    at_collect_recent_tool_names_(agent, recent_tool_names, HU_SELF_RECENT_TOOLS);
+                size_t recent_tool_names_n = hu_agent_internal_collect_recent_tool_names(
+                    agent, recent_tool_names, HU_SELF_RECENT_TOOLS);
                 pctx.persona = agent->persona;
                 pctx.channel = agent->active_channel;
                 pctx.channel_len = agent->active_channel_len;
@@ -10413,4 +9793,25 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
     if (agent->turn_arena)
         hu_arena_reset(agent->turn_arena);
     return HU_ERR_TIMEOUT;
+}
+
+hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, char **response_out,
+                         size_t *response_len_out) {
+    if (!agent || !msg || !response_out)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (!agent->provider.vtable)
+        return HU_ERR_INVALID_ARGUMENT;
+    /* One heap context per turn, never on this stack: the turn runs on worker
+     * threads (CLI spinner, daemon) and ASan on Darwin arm64 false-positives
+     * cross-thread stack structs (.claude/rules/asan-pthread-stack-aliasing-darwin.md). */
+    hu_turn_ctx_t *turn_ctx = hu_turn_ctx_new(agent, msg, msg_len, response_out, response_len_out);
+    if (!turn_ctx) {
+        *response_out = NULL;
+        if (response_len_out)
+            *response_len_out = 0;
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+    hu_error_t err = agent_turn_run(turn_ctx, agent, msg, msg_len, response_out, response_len_out);
+    hu_turn_ctx_free(turn_ctx);
+    return err;
 }
