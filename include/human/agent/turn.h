@@ -54,6 +54,28 @@ typedef struct hu_turn_ctx {
         size_t instruction_ctx_len;
         hu_rag_strategy_t rag_strategy_used;
     } retrieval;
+    struct {
+        const char *plan_ctx; /* borrowed from the turn body (input) */
+        size_t plan_ctx_len;
+        char *stm_ctx; /* owned */
+        size_t stm_ctx_len;
+        char *commitment_ctx; /* owned */
+        size_t commitment_ctx_len;
+        char *pattern_ctx; /* owned */
+        size_t pattern_ctx_len;
+        char *proactive_ctx; /* owned */
+        size_t proactive_ctx_len;
+        char *superhuman_ctx; /* owned */
+        size_t superhuman_ctx_len;
+        char *adaptive_ctx; /* owned */
+        size_t adaptive_ctx_len;
+        char *awareness_ctx; /* owned */
+        size_t awareness_ctx_len;
+        char *outcome_ctx; /* owned */
+        size_t outcome_ctx_len;
+        char *intelligence_ctx; /* owned */
+        size_t intelligence_ctx_len;
+    } context;
 } hu_turn_ctx_t;
 
 /* How a stage that can end the turn reports back (S0, S8). */
@@ -104,5 +126,19 @@ hu_error_t hu_turn_perceive(hu_turn_ctx_t *turn_ctx);
  * otherwise. RETURN(HU_ERR_INVALID_ARGUMENT) on a NULL ctx, agent or
  * response_out. */
 hu_turn_step_t hu_turn_entry(hu_turn_ctx_t *turn_ctx);
+
+/* S8 silence gate (src/agent/turn/turn_silence.c): decides whether to skip the
+ * LLM call; when it answers (silence or a brief acknowledgment) it writes
+ * *response_out, records the experience (SQLite builds) and returns RETURN(HU_OK)
+ * — the caller then frees its turn-body buffers. CONTINUE when the full
+ * response path should run. RETURN(HU_ERR_INVALID_ARGUMENT) on NULL input. */
+hu_turn_step_t hu_turn_silence(hu_turn_ctx_t *turn_ctx);
+
+/* S4 context builders (src/agent/turn/turn_context.c): STM, commitments,
+ * pattern radar, proactive, superhuman + cross-channel identity,
+ * adaptive/circadian, awareness + PWA, outcomes, AGI-frontier intelligence.
+ * Reads in.*, context.plan_ctx; writes the nine owned context.* strings.
+ * HU_ERR_INVALID_ARGUMENT on a NULL ctx or agent. */
+hu_error_t hu_turn_context(hu_turn_ctx_t *turn_ctx);
 
 #endif /* HU_AGENT_TURN_H */

@@ -36,5 +36,17 @@ void hu_turn_ctx_free(hu_turn_ctx_t *turn_ctx) {
     turn_ctx_release(alloc, &turn_ctx->perception.acp_context,
                      &turn_ctx->perception.acp_context_len);
     turn_ctx_release(alloc, &turn_ctx->perception.pref_ctx, &turn_ctx->perception.pref_ctx_len);
+    turn_ctx_release(alloc, &turn_ctx->context.stm_ctx, &turn_ctx->context.stm_ctx_len);
+    turn_ctx_release(alloc, &turn_ctx->context.commitment_ctx,
+                     &turn_ctx->context.commitment_ctx_len);
+    turn_ctx_release(alloc, &turn_ctx->context.pattern_ctx, &turn_ctx->context.pattern_ctx_len);
+    turn_ctx_release(alloc, &turn_ctx->context.proactive_ctx, &turn_ctx->context.proactive_ctx_len);
+    turn_ctx_release(alloc, &turn_ctx->context.superhuman_ctx,
+                     &turn_ctx->context.superhuman_ctx_len);
+    turn_ctx_release(alloc, &turn_ctx->context.adaptive_ctx, &turn_ctx->context.adaptive_ctx_len);
+    turn_ctx_release(alloc, &turn_ctx->context.awareness_ctx, &turn_ctx->context.awareness_ctx_len);
+    turn_ctx_release(alloc, &turn_ctx->context.outcome_ctx, &turn_ctx->context.outcome_ctx_len);
+    turn_ctx_release(alloc, &turn_ctx->context.intelligence_ctx,
+                     &turn_ctx->context.intelligence_ctx_len);
     alloc->free(alloc->ctx, turn_ctx, sizeof(*turn_ctx));
 }

@@ -22,8 +22,8 @@
 
 /* Hand ratchets. Lower both to the values this suite prints in every stage
  * commit; never raise them. */
-#define TS_AGENT_TURN_C_MAX_LINES   9817
-#define TS_AGENT_TURN_RUN_MAX_LINES 8269
+#define TS_AGENT_TURN_C_MAX_LINES   9084
+#define TS_AGENT_TURN_RUN_MAX_LINES 7536
 
 static char *ts_read(const char *path) {
     FILE *f = fopen(path, "rb");
@@ -58,9 +58,8 @@ static size_t ts_count(const char *hay, const char *needle) {
 }
 
 /* Lines containing `needle` inside an `#ifndef HU_IS_TEST` or
- * `#if … !defined(HU_IS_TEST)` region (the #else arm of one is test-only).
- * First caller arrives with S4 (Task 10), which drops the unused attribute. */
-static __attribute__((unused)) size_t ts_count_not_test(const char *src, const char *needle) {
+ * `#if … !defined(HU_IS_TEST)` region (the #else arm of one is test-only). */
+static size_t ts_count_not_test(const char *src, const char *needle) {
     enum { TS_MAXD = 64 };
     bool guard[TS_MAXD];
     int depth = 0;
@@ -176,9 +175,24 @@ static void agent_turn_body_and_file_only_shrink(void) {
     HU_ASSERT_LE(file_lines, TS_AGENT_TURN_C_MAX_LINES);
 }
 
+/* S4's two local-hour reads run only in the daemon (tests pin hour = 10). */
+static void turn_context_keeps_both_not_test_hour_blocks(void) {
+    char *stage = ts_read("src/agent/turn/turn_context.c");
+    char *turn = ts_read("src/agent/agent_turn.c");
+    HU_SKIP_IF(!stage || !turn, "run from the repo root");
+    const char *needle = "hour = (uint8_t)(lt->tm_hour & 0xFF);";
+    size_t in_stage = ts_count_not_test(stage, needle);
+    size_t in_turn = ts_count(turn, needle);
+    free(stage);
+    free(turn);
+    HU_ASSERT_EQ(in_stage, 2);
+    HU_ASSERT_EQ(in_turn, 0);
+}
+
 void run_turn_sources_tests(void) {
     HU_TEST_SUITE("TurnSources");
     HU_RUN_TEST(turn_stage_files_never_include_sqlite3_or_the_provider_factory);
     HU_RUN_TEST(turn_retrieve_w12_merge_leaves_graph_ctx_alive);
+    HU_RUN_TEST(turn_context_keeps_both_not_test_hour_blocks);
     HU_RUN_TEST(agent_turn_body_and_file_only_shrink);
 }

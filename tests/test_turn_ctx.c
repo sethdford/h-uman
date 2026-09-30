@@ -65,6 +65,24 @@ static void turn_ctx_free_releases_still_owned_outputs(void) {
     turn_ctx->perception.acp_context_len = 3;
     turn_ctx->perception.pref_ctx = hu_strndup(&alloc, "pref", 4);
     turn_ctx->perception.pref_ctx_len = 4;
+    turn_ctx->context.stm_ctx = hu_strndup(&alloc, "stm", 3);
+    turn_ctx->context.stm_ctx_len = 3;
+    turn_ctx->context.commitment_ctx = hu_strndup(&alloc, "commit", 6);
+    turn_ctx->context.commitment_ctx_len = 6;
+    turn_ctx->context.pattern_ctx = hu_strndup(&alloc, "pattern", 7);
+    turn_ctx->context.pattern_ctx_len = 7;
+    turn_ctx->context.proactive_ctx = hu_strndup(&alloc, "proactive", 9);
+    turn_ctx->context.proactive_ctx_len = 9;
+    turn_ctx->context.superhuman_ctx = hu_strndup(&alloc, "super", 5);
+    turn_ctx->context.superhuman_ctx_len = 5;
+    turn_ctx->context.adaptive_ctx = hu_strndup(&alloc, "adaptive", 8);
+    turn_ctx->context.adaptive_ctx_len = 8;
+    turn_ctx->context.awareness_ctx = hu_strndup(&alloc, "aware", 5);
+    turn_ctx->context.awareness_ctx_len = 5;
+    turn_ctx->context.outcome_ctx = hu_strndup(&alloc, "outcome", 7);
+    turn_ctx->context.outcome_ctx_len = 7;
+    turn_ctx->context.intelligence_ctx = hu_strndup(&alloc, "intel", 5);
+    turn_ctx->context.intelligence_ctx_len = 5;
     HU_ASSERT_GT(hu_tracking_allocator_leaks(ta), 0); /* precondition: live allocations */
     hu_turn_ctx_free(turn_ctx);
     HU_ASSERT_EQ(hu_tracking_allocator_leaks(ta), 0);
