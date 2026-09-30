@@ -1,0 +1,253 @@
+/* tests/test_turn_tail.c — contract tests for hu_turn_tail and hu_turn_exhausted
+ * (src/agent/turn/turn_tail.c, S17–S18 of the hu_agent_turn carve): the end of
+ * each tool iteration (replan on tool failure, mid-turn and goal-relevant
+ * retrieval, scratchpad, checkpoint) and the observer events of the
+ * tool-iterations-exhausted exit. */
+#include "human/agent/checkpoint.h"
+#include "human/agent/scratchpad.h"
+#include "human/agent/turn.h"
+#include "human/observer.h"
+#include "test_framework.h"
+#include "turn_test_fixture.h"
+#include <string.h>
+
+/* tests/ is not on src/agent's include path (same as test_turn_tools.c). */
+hu_error_t hu_agent_internal_append_history(hu_agent_t *agent, hu_role_t role, const char *content,
+                                            size_t content_len, const char *name, size_t name_len,
+                                            const char *tool_call_id, size_t tool_call_id_len);
+
+static const char k_plan[] = "[PLAN]: 2 steps planned, 1 completed";
+
+static bool tl_append(tf_fixture_t *f, hu_role_t role, const char *text) {
+    if (role == HU_ROLE_TOOL)
+        return hu_agent_internal_append_history(&f->agent, role, text, strlen(text), "memory_list",
+                                                11, "call_1", 6) == HU_OK;
+    return hu_agent_internal_append_history(&f->agent, role, text, strlen(text), NULL, 0, NULL,
+                                            0) == HU_OK;
+}
+
+/* The replan scan looks at the last 8 history entries and, as written, only
+ * runs once the history holds at least 8 (history_count - 8 is unsigned), so
+ * the fixture pads the conversation to 6 turns before its tool results. */
+static bool tl_history_with_tool_results(tf_fixture_t *f, const char *r1, const char *r2) {
+    for (int i = 0; i < 3; i++) {
+        if (!tl_append(f, HU_ROLE_USER, "list my things") ||
+            !tl_append(f, HU_ROLE_ASSISTANT, "sure, looking"))
+            return false;
+    }
+    return tl_append(f, HU_ROLE_TOOL, r1) && tl_append(f, HU_ROLE_TOOL, r2);
+}
+
+static hu_turn_ctx_t *tl_ctx(tf_fixture_t *f, const char *msg, uint32_t iter) {
+    hu_turn_ctx_t *turn_ctx = hu_turn_ctx_new(&f->agent, msg, strlen(msg), &f->resp, &f->resp_len);
+    if (turn_ctx)
+        turn_ctx->loop.iter = iter;
+    return turn_ctx;
+}
+
+static void turn_tail_rejects_a_null_context(void) {
+    HU_ASSERT_EQ(hu_turn_tail(NULL), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_turn_exhausted(NULL), HU_ERR_INVALID_ARGUMENT);
+}
+
+/* Two failed tool results + a plan: the HU_IS_TEST planner stub returns one
+ * step, so the stage appends exactly this system note. */
+static void turn_tail_replans_after_two_tool_failures(void) {
+    tf_fixture_t f;
+    HU_ASSERT_TRUE(tf_open(&f, NULL, 0, false, HU_AUTONOMY_AUTONOMOUS));
+    HU_ASSERT_TRUE(tl_history_with_tool_results(&f, "Error: disk full", "denied: not allowed"));
+    size_t before = f.agent.history_count;
+    hu_turn_ctx_t *turn_ctx = tl_ctx(&f, "list my things", 1);
+    HU_ASSERT_NOT_NULL(turn_ctx);
+    turn_ctx->context.plan_ctx = k_plan;
+    turn_ctx->context.plan_ctx_len = sizeof(k_plan) - 1;
+    HU_ASSERT_EQ(hu_turn_tail(turn_ctx), HU_OK);
+    HU_ASSERT_EQ(f.agent.history_count, before + 1);
+    const hu_owned_message_t *m = &f.agent.history[f.agent.history_count - 1];
+    HU_ASSERT_EQ(m->role, HU_ROLE_SYSTEM);
+    HU_ASSERT_STR_EQ(m->content, "[REPLAN after 2 tool failures]: 1 new steps");
+    hu_turn_ctx_free(turn_ctx);
+    tf_close(&f);
+}
+
+/* Control for the test above: same failures, no plan in progress. */
+static void turn_tail_without_a_plan_does_not_replan(void) {
+    tf_fixture_t f;
+    HU_ASSERT_TRUE(tf_open(&f, NULL, 0, false, HU_AUTONOMY_AUTONOMOUS));
+    HU_ASSERT_TRUE(tl_history_with_tool_results(&f, "Error: disk full", "denied: not allowed"));
+    size_t before = f.agent.history_count;
+    hu_turn_ctx_t *turn_ctx = tl_ctx(&f, "list my things", 1);
+    HU_ASSERT_NOT_NULL(turn_ctx);
+    HU_ASSERT_EQ(hu_turn_tail(turn_ctx), HU_OK);
+    HU_ASSERT_EQ(f.agent.history_count, before);
+    hu_turn_ctx_free(turn_ctx);
+    tf_close(&f);
+}
+
+/* Control: a plan but only one failure is below the replan threshold. */
+static void turn_tail_one_failure_does_not_replan(void) {
+    tf_fixture_t f;
+    HU_ASSERT_TRUE(tf_open(&f, NULL, 0, false, HU_AUTONOMY_AUTONOMOUS));
+    HU_ASSERT_TRUE(tl_history_with_tool_results(&f, "listed 2 items: alpha, beta", "Error: x"));
+    size_t before = f.agent.history_count;
+    hu_turn_ctx_t *turn_ctx = tl_ctx(&f, "list my things", 1);
+    HU_ASSERT_NOT_NULL(turn_ctx);
+    turn_ctx->context.plan_ctx = k_plan;
+    turn_ctx->context.plan_ctx_len = sizeof(k_plan) - 1;
+    HU_ASSERT_EQ(hu_turn_tail(turn_ctx), HU_OK);
+    HU_ASSERT_EQ(f.agent.history_count, before);
+    hu_turn_ctx_free(turn_ctx);
+    tf_close(&f);
+}
+
+/* The scratchpad records this iteration's token and tool-result counts under
+ * turn_<iter>; iteration 3 is not a checkpoint step (interval 5). */
+static void turn_tail_records_the_iteration_in_the_scratchpad(void) {
+    tf_fixture_t f;
+    HU_ASSERT_TRUE(tf_open(&f, NULL, 0, false, HU_AUTONOMY_AUTONOMOUS));
+    HU_ASSERT_FALSE(hu_scratchpad_has(&f.agent.sota.scratchpad, "turn_3", 6));
+    hu_turn_ctx_t *turn_ctx = tl_ctx(&f, "list my things", 3);
+    HU_ASSERT_NOT_NULL(turn_ctx);
+    turn_ctx->loop.turn_tokens = 42;
+    turn_ctx->loop.turn_tool_results_count = 2;
+    HU_ASSERT_EQ(hu_turn_tail(turn_ctx), HU_OK);
+    const char *val = NULL;
+    size_t val_len = 0;
+    HU_ASSERT_EQ(hu_scratchpad_get(&f.agent.sota.scratchpad, "turn_3", 6, &val, &val_len), HU_OK);
+    HU_ASSERT_EQ(val_len, strlen("tokens=42,tools=2"));
+    HU_ASSERT_TRUE(memcmp(val, "tokens=42,tools=2", val_len) == 0);
+    HU_ASSERT_EQ(f.agent.sota.checkpoint_store.count, 0);
+    hu_turn_ctx_free(turn_ctx);
+    tf_close(&f);
+}
+
+/* Every fifth iteration saves an "agent_turn" checkpoint with the iteration
+ * and the agent's running token total. */
+static void turn_tail_checkpoints_every_fifth_iteration(void) {
+    tf_fixture_t f;
+    HU_ASSERT_TRUE(tf_open(&f, NULL, 0, false, HU_AUTONOMY_AUTONOMOUS));
+    HU_ASSERT_EQ(f.agent.sota.checkpoint_store.count, 0);
+    f.agent.total_tokens = 7;
+    hu_turn_ctx_t *turn_ctx = tl_ctx(&f, "list my things", 5);
+    HU_ASSERT_NOT_NULL(turn_ctx);
+    HU_ASSERT_EQ(hu_turn_tail(turn_ctx), HU_OK);
+    hu_checkpoint_t cp;
+    HU_ASSERT_EQ(hu_checkpoint_load(&f.agent.sota.checkpoint_store, "agent_turn", 10, &cp), HU_OK);
+    HU_ASSERT_EQ(cp.step, 5);
+    HU_ASSERT_STR_EQ(cp.state_json, "{\"iter\":5,\"tokens\":7}");
+    /* hu_agent_deinit does not release checkpoint state (pre-existing; not
+     * this carve's to fix), so the test frees the one it caused. */
+    hu_checkpoint_t *slot = &f.agent.sota.checkpoint_store.checkpoints[0];
+    f.alloc.free(f.alloc.ctx, slot->state_json, slot->state_json_len + 1);
+    slot->state_json = NULL;
+    slot->state_json_len = 0;
+    hu_turn_ctx_free(turn_ctx);
+    tf_close(&f);
+}
+
+#ifdef HU_ENABLE_SQLITE
+/* After a tool result, memory relevant to it is folded in as a system note;
+ * from iteration 2 on, memory relevant to the user's goal is too. */
+static void turn_tail_folds_memory_relevant_to_the_tool_result_and_the_goal(void) {
+    tf_fixture_t f;
+    HU_ASSERT_TRUE(tf_open(&f, NULL, 0, true, HU_AUTONOMY_AUTONOMOUS));
+    HU_ASSERT_TRUE(tf_store(&f, "alpha_deadline", "the alpha project deadline is friday", NULL));
+    HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_USER, "when is the alpha project deadline"));
+    HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_TOOL, "alpha project deadline: not in calendar"));
+    size_t before = f.agent.history_count;
+    hu_turn_ctx_t *turn_ctx = tl_ctx(&f, "when is the alpha project deadline", 2);
+    HU_ASSERT_NOT_NULL(turn_ctx);
+    HU_ASSERT_EQ(hu_turn_tail(turn_ctx), HU_OK);
+    HU_ASSERT_EQ(f.agent.history_count, before + 2);
+    const hu_owned_message_t *mid = &f.agent.history[before];
+    const hu_owned_message_t *goal = &f.agent.history[before + 1];
+    HU_ASSERT_EQ(mid->role, HU_ROLE_SYSTEM);
+    HU_ASSERT_TRUE(strncmp(mid->content, "[memory context from tool results]: ", 36) == 0);
+    HU_ASSERT_STR_CONTAINS(mid->content, "friday");
+    HU_ASSERT_EQ(goal->role, HU_ROLE_SYSTEM);
+    HU_ASSERT_TRUE(strncmp(goal->content, "[goal-relevant memory]: ", 24) == 0);
+    HU_ASSERT_STR_CONTAINS(goal->content, "friday");
+    hu_turn_ctx_free(turn_ctx);
+    tf_close(&f);
+}
+
+/* Control: on the first iteration only the tool-result note is added. */
+static void turn_tail_skips_goal_memory_on_the_first_iteration(void) {
+    tf_fixture_t f;
+    HU_ASSERT_TRUE(tf_open(&f, NULL, 0, true, HU_AUTONOMY_AUTONOMOUS));
+    HU_ASSERT_TRUE(tf_store(&f, "alpha_deadline", "the alpha project deadline is friday", NULL));
+    HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_USER, "when is the alpha project deadline"));
+    HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_TOOL, "alpha project deadline: not in calendar"));
+    size_t before = f.agent.history_count;
+    hu_turn_ctx_t *turn_ctx = tl_ctx(&f, "when is the alpha project deadline", 1);
+    HU_ASSERT_NOT_NULL(turn_ctx);
+    HU_ASSERT_EQ(hu_turn_tail(turn_ctx), HU_OK);
+    HU_ASSERT_EQ(f.agent.history_count, before + 1);
+    HU_ASSERT_STR_CONTAINS(f.agent.history[before].content, "[memory context from tool results]");
+    hu_turn_ctx_free(turn_ctx);
+    tf_close(&f);
+}
+#endif /* HU_ENABLE_SQLITE */
+
+typedef struct tl_obs {
+    size_t count;
+    hu_observer_event_tag_t tags[4];
+    uint32_t iterations;
+    const char *component;
+    const char *message;
+} tl_obs_t;
+
+static void tl_obs_record(void *ctx, const hu_observer_event_t *ev) {
+    tl_obs_t *o = (tl_obs_t *)ctx;
+    if (o->count < 4)
+        o->tags[o->count] = ev->tag;
+    o->count++;
+    if (ev->tag == HU_OBSERVER_EVENT_TOOL_ITERATIONS_EXHAUSTED)
+        o->iterations = ev->data.tool_iterations_exhausted.iterations;
+    if (ev->tag == HU_OBSERVER_EVENT_ERR) {
+        o->component = ev->data.err.component;
+        o->message = ev->data.err.message;
+    }
+}
+
+/* The exhausted exit reports the iteration cap, then an agent error, in that
+ * order; the turn-body frees and the HU_ERR_TIMEOUT return stay in
+ * agent_turn_run (pinned end to end by the iteration_exhaustion golden). */
+static void turn_exhausted_reports_the_cap_then_an_error(void) {
+    static const hu_observer_vtable_t vt = {.record_event = tl_obs_record};
+    tl_obs_t rec;
+    memset(&rec, 0, sizeof(rec));
+    hu_observer_t obs = {.ctx = &rec, .vtable = &vt};
+    tf_fixture_t f;
+    HU_ASSERT_TRUE(tf_open(&f, NULL, 0, false, HU_AUTONOMY_AUTONOMOUS));
+    f.agent.observer = &obs;
+    hu_turn_ctx_t *turn_ctx = tl_ctx(&f, "keep listing", 4);
+    HU_ASSERT_NOT_NULL(turn_ctx);
+    HU_ASSERT_EQ(hu_turn_exhausted(turn_ctx), HU_OK);
+    f.agent.observer = NULL;
+    HU_ASSERT_EQ(rec.count, 2);
+    HU_ASSERT_EQ(rec.tags[0], HU_OBSERVER_EVENT_TOOL_ITERATIONS_EXHAUSTED);
+    HU_ASSERT_EQ(rec.tags[1], HU_OBSERVER_EVENT_ERR);
+    HU_ASSERT_GT(f.agent.max_tool_iterations, 0);
+    HU_ASSERT_EQ(rec.iterations, f.agent.max_tool_iterations);
+    HU_ASSERT_STR_EQ(rec.component, "agent");
+    HU_ASSERT_STR_EQ(rec.message, "tool iterations exhausted");
+    HU_ASSERT_NULL(f.resp);
+    hu_turn_ctx_free(turn_ctx);
+    tf_close(&f);
+}
+
+void run_turn_tail_tests(void) {
+    HU_TEST_SUITE("TurnTail");
+    HU_RUN_TEST(turn_tail_rejects_a_null_context);
+    HU_RUN_TEST(turn_tail_replans_after_two_tool_failures);
+    HU_RUN_TEST(turn_tail_without_a_plan_does_not_replan);
+    HU_RUN_TEST(turn_tail_one_failure_does_not_replan);
+    HU_RUN_TEST(turn_tail_records_the_iteration_in_the_scratchpad);
+    HU_RUN_TEST(turn_tail_checkpoints_every_fifth_iteration);
+#ifdef HU_ENABLE_SQLITE
+    HU_RUN_TEST(turn_tail_folds_memory_relevant_to_the_tool_result_and_the_goal);
+    HU_RUN_TEST(turn_tail_skips_goal_memory_on_the_first_iteration);
+#endif
+    HU_RUN_TEST(turn_exhausted_reports_the_cap_then_an_error);
+}
