@@ -63,4 +63,14 @@ hu_error_t hu_daemon_name_catch(hu_allocator_t *alloc, hu_graph_t *g, hu_gate_mo
 void hu_daemon_name_catch_tick(hu_allocator_t *alloc, hu_graph_t *g, const char *contact_id,
                                size_t contact_id_len, const char *inbound, size_t inbound_len);
 
+/* Daemon batch wiring: one reply batch msgs[start..end] (inclusive, all from
+ * msgs[start].session_key, the contact id). Skips the whole batch unless
+ * hu_name_catch_eligible(&msgs[start], config); otherwise feeds each
+ * message's raw inbound `content` (never the reply or the combined prompt
+ * text) to hu_daemon_name_catch_tick. The daemon calls it after the send, only
+ * when a reply went out. NULL msgs/graph or start > end is a no-op. */
+void hu_daemon_name_catch_batch(hu_allocator_t *alloc, hu_graph_t *graph,
+                                const hu_channel_loop_msg_t *msgs, size_t start, size_t end,
+                                const struct hu_config *config);
+
 #endif /* HU_DAEMON_NAME_CATCH_H */

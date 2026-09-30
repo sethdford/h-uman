@@ -117,3 +117,15 @@ void hu_daemon_name_catch_tick(hu_allocator_t *alloc, hu_graph_t *g, const char 
         hu_log_info("name_catch", NULL, "name_catch shadow: known=%zu new=%zu (not written)",
                     c.known, c.fresh);
 }
+
+void hu_daemon_name_catch_batch(hu_allocator_t *alloc, hu_graph_t *graph,
+                                const hu_channel_loop_msg_t *msgs, size_t start, size_t end,
+                                const struct hu_config *config) {
+    if (!alloc || !graph || !msgs || start > end || !hu_name_catch_eligible(&msgs[start], config))
+        return;
+    const char *key = msgs[start].session_key;
+    size_t key_len = strnlen(key, sizeof(msgs[start].session_key));
+    for (size_t b = start; b <= end; b++)
+        hu_daemon_name_catch_tick(alloc, graph, key, key_len, msgs[b].content,
+                                  strnlen(msgs[b].content, sizeof(msgs[b].content)));
+}

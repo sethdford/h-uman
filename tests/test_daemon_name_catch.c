@@ -67,31 +67,73 @@ static void test_bad_args_are_rejected_and_counts_zeroed(void) {
     HU_ASSERT_EQ((long)(c.known + c.fresh + c.written), 0L);
 }
 
-/* The call site is compiled out of test builds (HU_IS_TEST), so pin it by
- * source: the catcher is fed each raw inbound message, never the reply
- * (no self-reinforcing hallucination). Source-presence style, like
- * test_gate_comment_exists_at_agent_turn_1471. */
-static void test_daemon_feeds_the_catcher_inbound_text_only(void) {
-    FILE *f = fopen("src/daemon.c", "r");
-    HU_ASSERT_NOT_NULL(f);
-    char line[512], call[1024] = {0};
-    bool in_call = false, gated = false;
+/* Reads `path` and returns the first statement (up to ';') that contains
+ * `needle`, plus whether `must_precede` appeared on an earlier line and
+ * whether the statement sits inside an `#ifndef HU_IS_TEST` block. */
+typedef struct nc_src_hit {
+    char stmt[1024];
+    bool preceded;
+    bool in_not_test;
+} nc_src_hit_t;
+
+static nc_src_hit_t nc_src_find(const char *path, const char *needle, const char *must_precede) {
+    nc_src_hit_t h;
+    memset(&h, 0, sizeof(h));
+    FILE *f = fopen(path, "r");
+    if (!f)
+        return h;
+    char line[512];
+    bool in_call = false;
+    int depth = 0, not_test_depth = 0;
     while (fgets(line, sizeof(line), f)) {
-        if (strstr(line, "hu_name_catch_eligible(&msgs[batch_start], config)") != NULL)
-            gated = true;
-        if (!in_call && strstr(line, "hu_daemon_name_catch_tick(") != NULL)
+        if (strncmp(line, "#if", 3) == 0) {
+            depth++;
+            if (strncmp(line, "#ifndef HU_IS_TEST", 18) == 0 && not_test_depth == 0)
+                not_test_depth = depth;
+        } else if (strncmp(line, "#endif", 6) == 0) {
+            if (depth == not_test_depth)
+                not_test_depth = 0;
+            depth--;
+        }
+        if (!in_call && must_precede && strstr(line, must_precede) != NULL)
+            h.preceded = true;
+        if (!in_call && strstr(line, needle) != NULL) {
             in_call = true;
+            h.in_not_test = not_test_depth != 0;
+        }
         if (in_call) {
-            strncat(call, line, sizeof(call) - strlen(call) - 1);
+            strncat(h.stmt, line, sizeof(h.stmt) - strlen(h.stmt) - 1);
             if (strchr(line, ';') != NULL)
                 break;
         }
     }
     fclose(f);
-    HU_ASSERT_STR_CONTAINS(call, "msgs[b].content");
-    HU_ASSERT_STR_NOT_CONTAINS(call, "response");
-    HU_ASSERT_STR_NOT_CONTAINS(call, "combined");
-    HU_ASSERT_TRUE(gated); /* group chats and self-chat never reach the catcher */
+    return h;
+}
+
+/* The daemon call site is compiled out of test builds (HU_IS_TEST), so pin it
+ * by source: daemon.c hands the batch to hu_daemon_name_catch_batch only after
+ * a reply went out, and the helper gates on eligibility and feeds each raw
+ * inbound message, never the reply or the combined prompt text (no
+ * self-reinforcing hallucination). Source-presence style, like
+ * test_gate_comment_exists_at_agent_turn_1471. The behaviour of the helper
+ * itself is pinned by test_batch_* below. */
+static void test_daemon_feeds_the_catcher_inbound_text_only(void) {
+    nc_src_hit_t d = nc_src_find("src/daemon.c", "hu_daemon_name_catch_batch(",
+                                 "if (err == HU_OK && response && response_len > 0 && graph)");
+    HU_ASSERT_TRUE(d.preceded);
+    HU_ASSERT_TRUE(d.in_not_test);
+    HU_ASSERT_STR_CONTAINS(d.stmt, "msgs, batch_start, batch_end, config");
+    HU_ASSERT_STR_NOT_CONTAINS(d.stmt, "response");
+    HU_ASSERT_STR_NOT_CONTAINS(d.stmt, "combined");
+
+    nc_src_hit_t h =
+        nc_src_find("src/daemon/daemon_name_catch.c", "hu_daemon_name_catch_tick(alloc",
+                    "hu_name_catch_eligible(&msgs[start], config)");
+    HU_ASSERT_TRUE(h.preceded); /* group chats and self-chat never reach the catcher */
+    HU_ASSERT_STR_CONTAINS(h.stmt, "msgs[b].content");
+    HU_ASSERT_STR_NOT_CONTAINS(h.stmt, "response");
+    HU_ASSERT_STR_NOT_CONTAINS(h.stmt, "combined");
 }
 
 #ifdef HU_ENABLE_SQLITE
@@ -285,6 +327,80 @@ static void test_tick_follows_the_env_gate(void) {
     HU_ASSERT_TRUE(nc_row(g, NC_CID, "Priya").found);
     hu_graph_close(g, &alloc);
 }
+
+static void nc_msg(hu_channel_loop_msg_t *m, const char *key, const char *text, bool group) {
+    memset(m, 0, sizeof(*m));
+    snprintf(m->session_key, sizeof(m->session_key), "%s", key);
+    snprintf(m->content, sizeof(m->content), "%s", text);
+    m->is_group = group;
+}
+
+/* The batch helper feeds every message in [start, end] under the batch's
+ * contact, and nothing outside the range. */
+static void test_batch_feeds_each_message_in_range(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_graph_t *g = nc_graph(&alloc);
+    hu_channel_loop_msg_t msgs[5];
+    nc_msg(&msgs[0], NC_CID, "before the batch with Olga", false);
+    nc_msg(&msgs[1], NC_CID, "lunch with Priya", false);
+    nc_msg(&msgs[2], NC_CID, "", false); /* attachment-only: no text */
+    nc_msg(&msgs[3], NC_CID, "and Marco came too", false);
+    nc_msg(&msgs[4], NC_CID, "after the batch with Wendell", false);
+    setenv("HU_NAME_CATCH", "live", 1);
+    hu_daemon_name_catch_batch(&alloc, g, msgs, 1, 3, NULL);
+    unsetenv("HU_NAME_CATCH");
+    HU_ASSERT_TRUE(nc_row(g, NC_CID, "Priya").found);
+    HU_ASSERT_TRUE(nc_row(g, NC_CID, "Marco").found);
+    HU_ASSERT_FALSE(nc_row(g, NC_CID, "Olga").found);
+    HU_ASSERT_FALSE(nc_row(g, NC_CID, "Wendell").found);
+    hu_graph_close(g, &alloc);
+}
+
+static void test_batch_skips_group_chat(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_graph_t *g = nc_graph(&alloc);
+    hu_channel_loop_msg_t msgs[2];
+    nc_msg(&msgs[0], NC_CID, "lunch with Priya", true);
+    nc_msg(&msgs[1], NC_CID, "and Marco came too", true);
+    setenv("HU_NAME_CATCH", "live", 1);
+    hu_daemon_name_catch_batch(&alloc, g, msgs, 0, 1, NULL);
+    unsetenv("HU_NAME_CATCH");
+    HU_ASSERT_FALSE(nc_row(g, NC_CID, "Priya").found);
+    HU_ASSERT_FALSE(nc_row(g, NC_CID, "Marco").found);
+    hu_graph_close(g, &alloc);
+}
+
+static void test_batch_skips_loopback_self_chat(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_graph_t *g = nc_graph(&alloc);
+    static hu_config_t cfg; /* zeroed */
+    char self[] = NC_CID;
+    cfg.channels.imessage.loopback_handle = self;
+    hu_channel_loop_msg_t msgs[1];
+    nc_msg(&msgs[0], NC_CID, "lunch with Priya", false);
+    setenv("HU_NAME_CATCH", "live", 1);
+    hu_daemon_name_catch_batch(&alloc, g, msgs, 0, 0, &cfg);
+    HU_ASSERT_FALSE(nc_row(g, NC_CID, "Priya").found);
+    cfg.channels.imessage.loopback_handle = NULL; /* same batch, not self-chat: fed */
+    hu_daemon_name_catch_batch(&alloc, g, msgs, 0, 0, &cfg);
+    unsetenv("HU_NAME_CATCH");
+    HU_ASSERT_TRUE(nc_row(g, NC_CID, "Priya").found);
+    hu_graph_close(g, &alloc);
+}
+
+static void test_batch_bad_args_are_a_no_op(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_graph_t *g = nc_graph(&alloc);
+    hu_channel_loop_msg_t msgs[1];
+    nc_msg(&msgs[0], NC_CID, "lunch with Priya", false);
+    setenv("HU_NAME_CATCH", "live", 1);
+    hu_daemon_name_catch_batch(&alloc, NULL, msgs, 0, 0, NULL);
+    hu_daemon_name_catch_batch(&alloc, g, NULL, 0, 0, NULL);
+    hu_daemon_name_catch_batch(&alloc, g, msgs, 1, 0, NULL); /* start > end */
+    unsetenv("HU_NAME_CATCH");
+    HU_ASSERT_FALSE(nc_row(g, NC_CID, "Priya").found);
+    hu_graph_close(g, &alloc);
+}
 #endif /* HU_ENABLE_SQLITE */
 
 void run_daemon_name_catch_tests(void) {
@@ -303,5 +419,9 @@ void run_daemon_name_catch_tests(void) {
     HU_RUN_TEST(test_unconfirmed_caught_name_matches_case_sensitively);
     HU_RUN_TEST(test_catcher_does_not_stamp_a_legacy_row);
     HU_RUN_TEST(test_tick_follows_the_env_gate);
+    HU_RUN_TEST(test_batch_feeds_each_message_in_range);
+    HU_RUN_TEST(test_batch_skips_group_chat);
+    HU_RUN_TEST(test_batch_skips_loopback_self_chat);
+    HU_RUN_TEST(test_batch_bad_args_are_a_no_op);
 #endif
 }

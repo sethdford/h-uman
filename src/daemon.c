@@ -8289,15 +8289,6 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                          batch_key, key_len, combined, combined_len,
                                                          response, response_len);
                 }
-#ifndef HU_IS_TEST
-                /* Name catcher (spec 2026-09-29 §4.2): each raw inbound text, never the reply. */
-                if (err == HU_OK && response && response_len > 0 && graph &&
-                    hu_name_catch_eligible(&msgs[batch_start], config))
-                    for (size_t b = batch_start; b <= batch_end; b++)
-                        hu_daemon_name_catch_tick(alloc, graph, batch_key, key_len, msgs[b].content,
-                                                  strlen(msgs[b].content));
-#endif
-
 #ifdef HU_ENABLE_SQLITE
                 /* Task 18: Extraction pipeline — post-turn storage */
                 if (err == HU_OK && response && response_len > 0 && agent->memory) {
@@ -8461,6 +8452,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #endif
 
 #ifndef HU_IS_TEST
+                if (err == HU_OK && response && response_len > 0 && graph) /* names, §4.2 */
+                    hu_daemon_name_catch_batch(alloc, graph, msgs, batch_start, batch_end, config);
                 /* F27: If we responded to negative emotion, set pending to record engagement
                  * when we get their next reply.
                  * Skip in llm_decides: avoids post-response emotion LLM call. */
