@@ -777,6 +777,7 @@ set(HU_CORE_SOURCES
     src/agent/turn/turn_retrieve.c
     src/agent/turn/turn_perceive.c
     src/agent/turn/turn_entry.c
+    src/agent/turn/turn_silence.c
     src/agent/best_of_n.c
     src/agent/humanness.c
     src/agent/context.c
@@ -3887,6 +3888,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_turn_retrieve.c
     tests/test_turn_perceive.c
     tests/test_turn_entry.c
+    tests/test_turn_silence.c
     tests/test_turn_sources.c
     tests/test_agent_llm_latency_wall_clock.c
     tests/test_agent_turn_request_overrides.c

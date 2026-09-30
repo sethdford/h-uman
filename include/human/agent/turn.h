@@ -105,4 +105,11 @@ hu_error_t hu_turn_perceive(hu_turn_ctx_t *turn_ctx);
  * response_out. */
 hu_turn_step_t hu_turn_entry(hu_turn_ctx_t *turn_ctx);
 
+/* S8 silence gate (src/agent/turn/turn_silence.c): decides whether to skip the
+ * LLM call; when it answers (silence or a brief acknowledgment) it writes
+ * *response_out, records the experience (SQLite builds) and returns RETURN(HU_OK)
+ * — the caller then frees its turn-body buffers. CONTINUE when the full
+ * response path should run. RETURN(HU_ERR_INVALID_ARGUMENT) on NULL input. */
+hu_turn_step_t hu_turn_silence(hu_turn_ctx_t *turn_ctx);
+
 #endif /* HU_AGENT_TURN_H */

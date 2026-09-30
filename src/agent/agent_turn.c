@@ -4602,110 +4602,43 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
     hu_allocator_t turn_alloc =
         agent->turn_arena ? hu_arena_allocator(agent->turn_arena) : *agent->alloc;
 
-    /* Silence intuition: decide if we should skip the LLM call entirely */
+    /* S8 silence gate lives in src/agent/turn/turn_silence.c. When it answers,
+     * this turn is over: free the buffers that survive the prompt build and
+     * clear the current agent, exactly as the inline block did. */
     {
-        hu_emotional_weight_t ew = hu_emotional_weight_classify(msg, msg_len);
-        /* Detect explicit questions AND imperative requests (help me, can you, etc.) */
-        bool user_asked = (msg_len > 0 && memchr(msg, '?', msg_len) != NULL);
-        if (!user_asked && msg && msg_len >= 4) {
-            static const char *request_phrases[] = {
-                "help",    "can you", "could you", "please", "how do", "what is",
-                "show me", "tell me", "explain",   "write",  "create", "fix",
-                "find",    "search",  "give me",   "build",  "make",   "do ",
-            };
-            for (size_t ri = 0; ri < sizeof(request_phrases) / sizeof(request_phrases[0]); ri++) {
-                size_t rlen = strlen(request_phrases[ri]);
-                if (msg_len >= rlen) {
-                    for (size_t p = 0; p + rlen <= msg_len; p++) {
-                        bool match = true;
-                        for (size_t c = 0; c < rlen && match; c++) {
-                            char lc = msg[p + c];
-                            if (lc >= 'A' && lc <= 'Z')
-                                lc += 32;
-                            if (lc != request_phrases[ri][c])
-                                match = false;
-                        }
-                        if (match) {
-                            user_asked = true;
-                            goto silence_check;
-                        }
-                    }
-                }
-            }
-        }
-    silence_check:;
-        hu_silence_response_t silence =
-            hu_silence_intuit(msg, msg_len, ew, (uint32_t)agent->history_count, user_asked);
-        if (silence != HU_SILENCE_FULL_RESPONSE) {
-            const char *silence_resp = NULL;
-            size_t silence_resp_len = 0;
-            if (silence == HU_SILENCE_ACTUAL_SILENCE) {
-                silence_resp = "";
-                silence_resp_len = 0;
-            } else {
-                char *ack =
-                    hu_silence_build_acknowledgment(agent->alloc, silence, &silence_resp_len);
-                silence_resp = ack;
-            }
-            if (silence_resp || silence == HU_SILENCE_ACTUAL_SILENCE) {
-                *response_out = silence_resp
-                                    ? hu_strndup(agent->alloc, silence_resp, silence_resp_len)
-                                    : hu_strndup(agent->alloc, "", 0);
-                if (response_len_out)
-                    *response_len_out = silence_resp_len;
-                /* Record this silent turn for learning (don't drop from training) */
-#ifdef HU_ENABLE_SQLITE
-                if (agent->memory) {
-                    hu_experience_store_t sil_exp;
-                    if (hu_agent_internal_experience_init(agent, &sil_exp) == HU_OK) {
-                        sqlite3 *sil_db = hu_sqlite_memory_get_db(agent->memory);
-                        if (sil_db)
-                            sil_exp.db = sil_db;
-                        (void)hu_experience_record(&sil_exp, msg, msg_len, "silence_intuit", 14,
-                                                   silence_resp ? silence_resp : "",
-                                                   silence_resp_len, 0.5);
-                        hu_experience_store_deinit(&sil_exp);
-                    }
-                }
-#endif
-                /* Free silence acknowledgment if allocated */
-                if (silence_resp && silence != HU_SILENCE_ACTUAL_SILENCE)
-                    agent->alloc->free(agent->alloc->ctx, (void *)silence_resp,
-                                       silence_resp_len + 1);
-                /* Free all allocated context buffers (system_prompt consumed
-                 * most ctx vars; these survive past prompt build) */
-                if (system_prompt)
-                    agent->alloc->free(agent->alloc->ctx, system_prompt, system_prompt_len + 1);
-                if (intelligence_ctx)
-                    agent->alloc->free(agent->alloc->ctx, intelligence_ctx,
-                                       intelligence_ctx_len + 1);
-                if (plan_ctx)
-                    agent->alloc->free(agent->alloc->ctx, plan_ctx, plan_ctx_len + 1);
-                if (routed_specs)
-                    agent->alloc->free(agent->alloc->ctx, routed_specs,
-                                       routed_specs_count * sizeof(hu_tool_spec_t));
-                if (pref_ctx)
-                    agent->alloc->free(agent->alloc->ctx, pref_ctx, pref_ctx_len + 1);
-                if (commitment_ctx)
-                    agent->alloc->free(agent->alloc->ctx, commitment_ctx, commitment_ctx_len + 1);
-                if (pattern_ctx)
-                    agent->alloc->free(agent->alloc->ctx, pattern_ctx, pattern_ctx_len + 1);
-                if (adaptive_ctx)
-                    agent->alloc->free(agent->alloc->ctx, adaptive_ctx, adaptive_ctx_len + 1);
-                if (proactive_ctx)
-                    agent->alloc->free(agent->alloc->ctx, proactive_ctx, proactive_ctx_len + 1);
-                if (superhuman_ctx)
-                    agent->alloc->free(agent->alloc->ctx, superhuman_ctx, superhuman_ctx_len + 1);
-                if (outcome_ctx)
-                    agent->alloc->free(agent->alloc->ctx, outcome_ctx, outcome_ctx_len + 1);
-                if (acp_context)
-                    agent->alloc->free(agent->alloc->ctx, acp_context, acp_context_len + 1);
-                if (turn_cache)
-                    hu_tool_cache_destroy(agent->alloc, turn_cache);
-                hu_agent_clear_current_for_tools();
-                return HU_OK;
-            }
-            /* If acknowledgment build failed, fall through to full response */
+        hu_turn_step_t silence_step = hu_turn_silence(turn_ctx);
+        if (silence_step.kind == HU_TURN_STEP_RETURN) {
+            /* Free all allocated context buffers (system_prompt consumed
+             * most ctx vars; these survive past prompt build) */
+            if (system_prompt)
+                agent->alloc->free(agent->alloc->ctx, system_prompt, system_prompt_len + 1);
+            if (intelligence_ctx)
+                agent->alloc->free(agent->alloc->ctx, intelligence_ctx, intelligence_ctx_len + 1);
+            if (plan_ctx)
+                agent->alloc->free(agent->alloc->ctx, plan_ctx, plan_ctx_len + 1);
+            if (routed_specs)
+                agent->alloc->free(agent->alloc->ctx, routed_specs,
+                                   routed_specs_count * sizeof(hu_tool_spec_t));
+            if (pref_ctx)
+                agent->alloc->free(agent->alloc->ctx, pref_ctx, pref_ctx_len + 1);
+            if (commitment_ctx)
+                agent->alloc->free(agent->alloc->ctx, commitment_ctx, commitment_ctx_len + 1);
+            if (pattern_ctx)
+                agent->alloc->free(agent->alloc->ctx, pattern_ctx, pattern_ctx_len + 1);
+            if (adaptive_ctx)
+                agent->alloc->free(agent->alloc->ctx, adaptive_ctx, adaptive_ctx_len + 1);
+            if (proactive_ctx)
+                agent->alloc->free(agent->alloc->ctx, proactive_ctx, proactive_ctx_len + 1);
+            if (superhuman_ctx)
+                agent->alloc->free(agent->alloc->ctx, superhuman_ctx, superhuman_ctx_len + 1);
+            if (outcome_ctx)
+                agent->alloc->free(agent->alloc->ctx, outcome_ctx, outcome_ctx_len + 1);
+            if (acp_context)
+                agent->alloc->free(agent->alloc->ctx, acp_context, acp_context_len + 1);
+            if (turn_cache)
+                hu_tool_cache_destroy(agent->alloc, turn_cache);
+            hu_agent_clear_current_for_tools();
+            return silence_step.err;
         }
     }
 
