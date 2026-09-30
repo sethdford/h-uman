@@ -168,8 +168,8 @@ static void at_free_patterns(hu_allocator_t *alloc, const char **arr, const char
 }
 
 /* Story F.2 — collect HU_ROLE_TOOL names from recent history (newest first). */
-static size_t at_collect_recent_tool_names_(const hu_agent_t *agent, const char **out_names,
-                                            size_t out_cap) {
+size_t hu_agent_internal_collect_recent_tool_names(const hu_agent_t *agent, const char **out_names,
+                                                   size_t out_cap) {
     if (!agent || !out_names || out_cap == 0 || agent->history_count <= 1)
         return 0;
     size_t n = 0;
@@ -2208,8 +2208,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         hu_persona_context_t loader_pctx = {0};
         if (agent->persona) {
             const char *loader_recent_tools[HU_SELF_RECENT_TOOLS];
-            size_t loader_recent_tools_n =
-                at_collect_recent_tool_names_(agent, loader_recent_tools, HU_SELF_RECENT_TOOLS);
+            size_t loader_recent_tools_n = hu_agent_internal_collect_recent_tool_names(
+                agent, loader_recent_tools, HU_SELF_RECENT_TOOLS);
             loader_pctx.persona = agent->persona;
             loader_pctx.channel = agent->active_channel;
             loader_pctx.channel_len = agent->active_channel_len;
@@ -4258,8 +4258,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             const hu_persona_context_t *pctx_p = NULL;
             if (agent->persona) {
                 const char *recent_tool_names[HU_SELF_RECENT_TOOLS];
-                size_t recent_tool_names_n =
-                    at_collect_recent_tool_names_(agent, recent_tool_names, HU_SELF_RECENT_TOOLS);
+                size_t recent_tool_names_n = hu_agent_internal_collect_recent_tool_names(
+                    agent, recent_tool_names, HU_SELF_RECENT_TOOLS);
                 pctx.persona = agent->persona;
                 pctx.channel = agent->active_channel;
                 pctx.channel_len = agent->active_channel_len;
