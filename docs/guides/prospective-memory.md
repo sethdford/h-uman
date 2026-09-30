@@ -204,6 +204,21 @@ LIVE-only: the lazy-history note under item 1.
    sees the retired rows, so its `commitments_seen` / `followups_seen` /
    `skipped_existing` are lower by them.
 
+Still open before `=live` (found by the final review of the fix rounds; OFF and
+SHADOW are unaffected):
+
+6. **A legacy settle can close the survivor it just re-mirrored.** When three
+   same-action F20 pairs sit within a few days of each other, `mark_sent` on
+   the middle follow-up re-mirrors the latest one and then, on the loop's
+   second pass, action-matches it inside the follow-up's own date window and
+   closes it (done / no outcome) while its ledger rows stay pending. v2 then
+   never surfaces that promise; only the legacy F31 path might. Fix: after
+   the first pass, match by key only, or skip rows this call re-mirrored.
+7. **The legacy F31 path is still ungated in LIVE.** Because the legacy settle
+   (correctly) leaves any twin v2 has ever surfaced to v2, an F31 send of a
+   follow-up that v2 has pending for retry does not close it, and v2 can raise
+   the same topic again. Gate F31 off in LIVE for items that have a v2 twin.
+
 Ruling F16 (applies before any promotion, not just this one): the nightly
 eval (`scripts/eval_prospective_memory.py`) must read v2's `status` /
 `outcome` columns, not the legacy `fired` flag, before a promotion decision
