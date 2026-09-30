@@ -5867,6 +5867,15 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
             sqlite3_finalize(col_check);
         }
     }
+    bool has_chat_style = false;
+    {
+        sqlite3_stmt *col_check = NULL;
+        if (sqlite3_prepare_v2(db, "SELECT style FROM chat LIMIT 0", -1, &col_check, NULL) ==
+            SQLITE_OK) {
+            has_chat_style = true;
+            sqlite3_finalize(col_check);
+        }
+    }
 
     /* If last_rowid was never seeded (e.g. FDA wasn't granted at startup),
      * seed it now to current max so we only pick up truly new messages. */
@@ -5899,6 +5908,8 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
      *   11: balloon_bundle_id, 12: expressive_send_style_id, 13: unix_ts,
      *   14: was_retracted (only when has_date_retracted, else absent),
      *   15: chat_id (from chat_message_join → chat.guid)
+     *   16: chat_style (chat.style, or NULL when the column is absent)
+     *   Without date_retracted, chat_id and chat_style shift down to 14/15.
      *
      * Attachment type classification uses EXISTS (cheaper than COUNT). */
 
@@ -5919,10 +5930,7 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
     "             AND (LOWER(av.filename) LIKE '%.mov' OR LOWER(av.filename) LIKE '%.mp4' " \
     "               OR LOWER(av.filename) LIKE '%.m4v')) "                                  \
     "       THEN '[Video]' ELSE '[Photo]' END)) AS text, h.id, "                            \
-    "  COALESCE("                                                                           \
-    "    (SELECT COUNT(DISTINCT chj2.handle_id) FROM chat_message_join cmj "                \
-    "     JOIN chat_handle_join chj2 ON chj2.chat_id = cmj.chat_id "                        \
-    "     WHERE cmj.message_id = m.ROWID), 0) AS participant_count, "                       \
+    "  " HU_IMESSAGE_SQL_HANDLE_COUNT_OF_MESSAGE " AS participant_count, "                  \
     "  EXISTS (SELECT 1 FROM message_attachment_join maj "                                  \
     "   JOIN attachment a ON maj.attachment_id = a.ROWID "                                  \
     "   WHERE maj.message_id = m.ROWID AND a.filename IS NOT NULL "                         \
@@ -5955,6 +5963,11 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
     "   JOIN chat c ON cmj2.chat_id = c.ROWID "     \
     "   WHERE cmj2.message_id = m.ROWID LIMIT 1) AS chat_guid"
 
+/* chat.style of the message's chat (43 group / 45 1:1), or NULL on a chat.db
+ * without the column. Always the LAST selected column. */
+#define IMSG_POLL_SQL_CHAT_STYLE      ", " HU_IMESSAGE_SQL_CHAT_STYLE_OF_MESSAGE " AS chat_style"
+#define IMSG_POLL_SQL_CHAT_STYLE_NULL ", NULL AS chat_style"
+
 #define IMSG_POLL_SQL_FROM                                                              \
     " FROM message m "                                                                  \
     "JOIN handle h ON m.handle_id = h.ROWID "                                           \
@@ -5980,12 +5993,15 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
     /* Build SQL variant based on available columns */
     char sql_buf[4096];
     int sql_len;
+    const char *style_sql =
+        has_chat_style ? IMSG_POLL_SQL_CHAT_STYLE : IMSG_POLL_SQL_CHAT_STYLE_NULL;
     if (has_date_retracted) {
-        sql_len = snprintf(sql_buf, sizeof(sql_buf), "%s%s%s%s", IMSG_POLL_SQL_BASE,
-                           IMSG_POLL_SQL_RETRACT, IMSG_POLL_SQL_CHAT_ID, IMSG_POLL_SQL_FROM);
+        sql_len =
+            snprintf(sql_buf, sizeof(sql_buf), "%s%s%s%s%s", IMSG_POLL_SQL_BASE,
+                     IMSG_POLL_SQL_RETRACT, IMSG_POLL_SQL_CHAT_ID, style_sql, IMSG_POLL_SQL_FROM);
     } else {
-        sql_len = snprintf(sql_buf, sizeof(sql_buf), "%s%s%s", IMSG_POLL_SQL_BASE,
-                           IMSG_POLL_SQL_CHAT_ID, IMSG_POLL_SQL_FROM);
+        sql_len = snprintf(sql_buf, sizeof(sql_buf), "%s%s%s%s", IMSG_POLL_SQL_BASE,
+                           IMSG_POLL_SQL_CHAT_ID, style_sql, IMSG_POLL_SQL_FROM);
     }
     if (sql_len < 0 || (size_t)sql_len >= sizeof(sql_buf)) {
         sqlite3_close(db);
@@ -6007,6 +6023,7 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
 
     const int col_retracted = has_date_retracted ? 14 : -1;
     const int col_chat_guid = has_date_retracted ? 15 : 14;
+    const int col_chat_style = col_chat_guid + 1;
 
     size_t count = 0;
     int step_rc;
@@ -6199,7 +6216,14 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
         memcpy(msgs[count].content, text, text_len);
         msgs[count].content[text_len] = '\0';
         msgs[count].message_id = rowid;
-        msgs[count].is_group = (participant_count > 2);
+        /* chat.style is authoritative (43 group, 45 1:1). participant_count
+         * comes from chat_handle_join, which never lists the owner: a 1:1 has
+         * 1 handle and a 3-person group has 2, so the old `> 2` test ran every
+         * 3-person group through the DM path (DM send target, no group gate). */
+        int chat_style = sqlite3_column_type(stmt, col_chat_style) == SQLITE_NULL
+                             ? HU_IMESSAGE_CHAT_STYLE_UNKNOWN
+                             : sqlite3_column_int(stmt, col_chat_style);
+        msgs[count].is_group = hu_imessage_chat_is_group(chat_style, participant_count);
         msgs[count].has_attachment = (has_image != 0 || has_audio != 0);
         msgs[count].has_video = (has_video != 0);
         if (guid && strlen(guid) > 0) {
