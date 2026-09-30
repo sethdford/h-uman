@@ -79,7 +79,17 @@ static void read_clock(const char *s, int *hour, int *minute) {
 }
 
 static int event_key(const hu_briefing_event_t *e) {
+    if (e->all_day)
+        return -1;                                           /* all-day first */
     return e->hour < 0 ? 24 * 60 : e->hour * 60 + e->minute; /* unknown times last */
+}
+
+static bool json_number(const hu_json_value_t *obj, const char *key, int lo, int hi, int *out) {
+    const hu_json_value_t *v = hu_json_object_get(obj, key);
+    if (!v || v->type != HU_JSON_NUMBER || v->data.number < lo || v->data.number > hi)
+        return false;
+    *out = (int)v->data.number;
+    return true;
 }
 
 bool hu_briefing_parse_calendar(const char *json, size_t len, hu_briefing_event_t *out, size_t cap,
@@ -109,8 +119,17 @@ bool hu_briefing_parse_calendar(const char *json, size_t len, hu_briefing_event_
         }
         hu_briefing_event_t *e = &out[*out_n];
         snprintf(e->name, sizeof(e->name), "%s", name);
-        const char *start = hu_json_get_string(ev, "start");
-        read_clock(start ? start : "", &e->hour, &e->minute);
+        const hu_json_value_t *ad = hu_json_object_get(ev, "allday");
+        e->all_day = ad && ad->type == HU_JSON_BOOL && ad->data.boolean;
+        int h = -1, m = 0;
+        if (e->all_day) {
+            e->hour = -1, e->minute = 0;
+        } else if (json_number(ev, "h", 0, 23, &h) && json_number(ev, "m", 0, 59, &m)) {
+            e->hour = h, e->minute = m;
+        } else {
+            const char *start = hu_json_get_string(ev, "start");
+            read_clock(start ? start : "", &e->hour, &e->minute);
+        }
         /* Insertion sort by start time: the helper lists by calendar, not time. */
         for (size_t j = *out_n; j > 0 && event_key(&out[j - 1]) > event_key(&out[j]); j--) {
             hu_briefing_event_t t = out[j - 1];
