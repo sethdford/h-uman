@@ -952,19 +952,8 @@ static void imessage_report_sent(const char *tgt, size_t tgt_len, const char *te
 }
 #endif
 
-#if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
-
-/* Forward declarations for the native Messages.app bridge (defined later). */
-static void ax_open_conversation(const char *recipient, size_t recipient_len);
-static bool ax_start_typing(const char *target, size_t target_len);
-static bool ax_stop_typing(void);
-#ifdef HU_IMESSAGE_TAPBACK_ENABLED
-static bool ax_tapback(const char *content_prefix, int row_offset, const char *tapback_label);
-#endif
-static bool imcore_init(hu_imessage_ctx_t *c);
-static bool imcore_start_typing(hu_imessage_ctx_t *c, const char *recipient, size_t recipient_len);
-static bool imcore_stop_typing(hu_imessage_ctx_t *c, const char *recipient, size_t recipient_len);
-
+/* Outbound echo ring. Pure memory, so it is compiled in test builds too: the
+ * threaded-reply wrapper writes it on every build and tests read it. */
 static uint32_t imessage_hash(const char *s, size_t len) {
     uint32_t h = 2166136261u;
     for (size_t i = 0; i < len; i++)
@@ -983,6 +972,19 @@ static void imessage_record_sent(hu_imessage_ctx_t *c, const char *msg, size_t m
     c->sent_ring_hash[slot] = imessage_hash(msg, msg_len);
     c->sent_ring_idx++;
 }
+
+#if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
+
+/* Forward declarations for the native Messages.app bridge (defined later). */
+static void ax_open_conversation(const char *recipient, size_t recipient_len);
+static bool ax_start_typing(const char *target, size_t target_len);
+static bool ax_stop_typing(void);
+#ifdef HU_IMESSAGE_TAPBACK_ENABLED
+static bool ax_tapback(const char *content_prefix, int row_offset, const char *tapback_label);
+#endif
+static bool imcore_init(hu_imessage_ctx_t *c);
+static bool imcore_start_typing(hu_imessage_ctx_t *c, const char *recipient, size_t recipient_len);
+static bool imcore_stop_typing(hu_imessage_ctx_t *c, const char *recipient, size_t recipient_len);
 
 /* A text went out: remember it (echo filter) and record its provenance. */
 static void imessage_text_sent(hu_imessage_ctx_t *c, const char *tgt, size_t tgt_len,
@@ -5352,6 +5354,19 @@ static bool imessage_supports_link_unfurl(void *ctx) {
     return true;
 }
 
+/* A delivered threaded reply joins the echo ring like any text send, or a
+ * self-chat answers its own bubbles (2026-09-30 loop). Provenance is already
+ * reported inside hu_imessage_reply. */
+static hu_error_t imessage_reply(void *ctx, const char *target, size_t target_len,
+                                 const char *parent_guid, size_t parent_guid_len, const char *body,
+                                 size_t body_len) {
+    hu_error_t err =
+        hu_imessage_reply(ctx, target, target_len, parent_guid, parent_guid_len, body, body_len);
+    if (err == HU_OK && ctx && body)
+        imessage_record_sent((hu_imessage_ctx_t *)ctx, body, body_len);
+    return err;
+}
+
 static const hu_channel_vtable_t imessage_vtable = {
     .start = imessage_start,
     .stop = imessage_stop,
@@ -5364,8 +5379,7 @@ static const hu_channel_vtable_t imessage_vtable = {
     .load_conversation_history = imessage_load_conversation_history,
     .get_response_constraints = imessage_get_response_constraints,
     .react = imessage_react,
-    .reply = (hu_error_t (*)(void *, const char *, size_t, const char *, size_t, const char *,
-                             size_t))hu_imessage_reply,
+    .reply = imessage_reply,
     .react_emoji = hu_imessage_react_emoji_with_fallback,
     /* send_sticker is intentionally NULL: macOS exposes no automation API to
      * send a native sticker/Memoji balloon (AppleScript/JXA/imsg/BlueBubbles
@@ -6774,6 +6788,17 @@ void hu_imessage_test_store_guid_text(hu_channel_t *ch, const char *guid, const 
     memcpy(c->mock_guid_store[i], guid, gl);
     c->mock_guid_store[i][gl] = '\0';
     (void)text;
+}
+
+bool hu_imessage_test_in_echo_ring(hu_channel_t *ch, const char *text, size_t len) {
+    if (!ch || !ch->ctx || !text)
+        return false;
+    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ch->ctx;
+    size_t want = len < HU_IMESSAGE_SENT_PREFIX_LEN - 1 ? len : HU_IMESSAGE_SENT_PREFIX_LEN - 1;
+    for (size_t i = 0; i < HU_IMESSAGE_SENT_RING_SIZE; i++)
+        if (c->sent_ring_len[i] == want && want > 0 && memcmp(c->sent_ring[i], text, want) == 0)
+            return true;
+    return false;
 }
 
 const char *hu_imessage_test_get_last_message(hu_channel_t *ch, size_t *out_len) {

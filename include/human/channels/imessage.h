@@ -547,6 +547,8 @@ void hu_imessage_test_set_guid_lookup(const char *guid, const char *text);
 void hu_imessage_test_clear_guid_lookups(void);
 
 const char *hu_imessage_test_get_last_message(hu_channel_t *ch, size_t *out_len);
+/* Test-only: is `text` in the outbound echo ring (poll drops such inbound rows)? */
+bool hu_imessage_test_in_echo_ring(hu_channel_t *ch, const char *text, size_t len);
 
 /* Test-only accessor for the courtesy-reply mirror field. After the poll
  * loop emits a courtesy reply, the channel ctx records the same text here

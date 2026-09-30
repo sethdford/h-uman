@@ -33,6 +33,7 @@
 #include "human/core/time.h"
 #include "human/daemon.h"
 #include "human/daemon/message_router.h"
+#include "human/daemon/share_queue.h"
 #include "human/memory/agent_facts.h"
 #include "human/persona/pacing.h"
 #include <stdio.h>
@@ -613,6 +614,10 @@ hu_error_t hu_daemon_record_delivered_reply(struct hu_agent *agent, const char *
         return HU_OK;
     if (!prompt || prompt_len == 0)
         return HU_OK; /* the table's join needs a prompt; a media-only turn has none */
+    /* Self-test traffic is not training data: the owner's own handles (persona
+     * relationship "test") are never recorded (2026-09-30). */
+    if (hu_share_is_owner(agent->persona, target, target_len))
+        return HU_OK;
     /* Sprint 46 R5.3 — P(Seth) from the in-process PersonaEval classifier;
      * 0.5 when no model is loaded, stored as-is. */
     double p_seth = hu_persona_eval_score(agent->persona_eval, text, text_len);
@@ -625,4 +630,24 @@ hu_error_t hu_daemon_record_delivered_reply(struct hu_agent *agent, const char *
         hu_log_warn("daemon", agent->observer, "production_outcomes record_outbound failed: %s",
                     hu_error_string(err));
     return err;
+}
+
+size_t hu_daemon_burst_carry(hu_channel_loop_msg_t *msgs, size_t *count, size_t cap,
+                             const hu_channel_loop_msg_t *burst, size_t burst_count,
+                             const char *batch_key) {
+    if (!msgs || !count || !burst || !batch_key)
+        return 0;
+    size_t lost = 0;
+    for (size_t i = 0; i < burst_count; i++) {
+        if (strcmp(burst[i].session_key, batch_key) == 0 || !burst[i].content[0])
+            continue; /* the batch's own follow-up is merged by the caller */
+        if (*count < cap) {
+            msgs[(*count)++] = burst[i];
+            continue;
+        }
+        lost++;
+        hu_log_warn("human", NULL, "burst re-poll: no room to keep a message from %.20s — dropped",
+                    burst[i].session_key);
+    }
+    return lost;
 }

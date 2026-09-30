@@ -183,6 +183,7 @@ static void briefing_window_is_send_hour_until_noon(void) {
 #include "human/memory/reminder_repo.h"
 #include "human/memory/superhuman.h"
 #include <sqlite3.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #define OWNER  "+15550000009"
@@ -336,6 +337,9 @@ static void briefing_shadow_writes_the_file_and_sends_nothing(void) {
     HU_ASSERT_EQ(f.rec.sends, 0);
     char path[256], got[512] = "";
     snprintf(path, sizeof(path), "%s/briefings/2026-10-14.txt", f.state_dir);
+    struct stat st;
+    HU_ASSERT_EQ(stat(path, &st), 0);
+    HU_ASSERT_EQ(st.st_mode & 0777, 0600); /* private messages and calendar titles */
     FILE *fp = fopen(path, "r");
     HU_ASSERT_NOT_NULL(fp);
     size_t n = fread(got, 1, sizeof(got) - 1, fp);
