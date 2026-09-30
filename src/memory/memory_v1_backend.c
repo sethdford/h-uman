@@ -11,11 +11,11 @@
  * exists to make migration mechanical and zero-behavior-change.
  */
 
-#include "human/memory/memory.h"
 #include "human/memory/belief.h"
 #include "human/memory/erasure.h"
 #include "human/memory/graph.h"
 #include "human/memory/hyperedge.h"
+#include "human/memory/memory.h"
 
 #include "human/core/error.h"
 #include "human/core/string.h"
@@ -37,7 +37,8 @@ static inline void *xalloc(hu_allocator_t *a, size_t n) {
     return a->alloc(a->ctx, n);
 }
 static inline void xfree(hu_allocator_t *a, void *p, size_t n) {
-    if (p) a->free(a->ctx, p, n);
+    if (p)
+        a->free(a->ctx, p, n);
 }
 
 /* Shared ctx — held once by hu_memory_facade and pointed to by every kind that the
@@ -56,11 +57,25 @@ hu_memory_facade_t *hu_memory__v1_ctx_facade(void *vctx) {
 
 /* --------- ENTITY ----------------------------------------------------- */
 
-static hu_error_t v1_entity_read(void *vctx, const hu_memory_query_t *q,
-                                  hu_allocator_t *alloc,
-                                  hu_memory_record_t **out, size_t *out_count) {
+/* OOM unwind for the NEIGHBORS read: frees the payload structs already hung
+ * on recs[0..filled) (payload_len is their sizeof; the strings inside still
+ * belong to ents/rels), then the graph rows and the record array. */
+static hu_error_t v1_neighbors_oom(hu_allocator_t *alloc, hu_memory_record_t *recs, size_t filled,
+                                   hu_graph_entity_t *ents, hu_graph_relation_t *rels,
+                                   size_t count) {
+    for (size_t j = 0; j < filled; j++)
+        xfree(alloc, recs[j].payload, recs[j].payload_len);
+    hu_graph_entities_free(alloc, ents, count);
+    hu_graph_relations_free(alloc, rels, count);
+    xfree(alloc, recs, 0);
+    return HU_ERR_OUT_OF_MEMORY;
+}
+
+static hu_error_t v1_entity_read(void *vctx, const hu_memory_query_t *q, hu_allocator_t *alloc,
+                                 hu_memory_record_t **out, size_t *out_count) {
     struct hu_memory_v1_ctx *ctx = vctx;
-    if (q->kind != HU_MEM_ENTITY) return HU_ERR_INVALID_ARGUMENT;
+    if (q->kind != HU_MEM_ENTITY)
+        return HU_ERR_INVALID_ARGUMENT;
 
     /* Two query shapes today: by_name lookup, neighbors traversal.
      *
@@ -105,12 +120,10 @@ static hu_error_t v1_entity_read(void *vctx, const hu_memory_query_t *q,
         }
     }
 
-    if (v == HU_MEMORY_QUERY_BY_NAME && q->as.by_name.name != NULL &&
-        q->as.by_name.name_len > 0) {
+    if (v == HU_MEMORY_QUERY_BY_NAME && q->as.by_name.name != NULL && q->as.by_name.name_len > 0) {
         hu_graph_entity_t e;
         memset(&e, 0, sizeof(e));
-        hu_error_t err = hu_graph_find_entity(ctx->graph,
-                                              q->contact_id, q->contact_id_len,
+        hu_error_t err = hu_graph_find_entity(ctx->graph, q->contact_id, q->contact_id_len,
                                               q->as.by_name.name, q->as.by_name.name_len, &e);
         if (err != HU_OK) {
             *out = NULL;
@@ -167,10 +180,9 @@ static hu_error_t v1_entity_read(void *vctx, const hu_memory_query_t *q,
         size_t count = 0;
         size_t hops = q->as.neighbors.hops > 0 ? q->as.neighbors.hops : 1;
         size_t lim = q->as.neighbors.limit > 0 ? q->as.neighbors.limit : 16;
-        hu_error_t err = hu_graph_neighbors(ctx->graph, alloc,
-                                             q->contact_id, q->contact_id_len,
-                                             q->as.neighbors.entity_id, hops, lim,
-                                             &ents, &rels, &count);
+        hu_error_t err =
+            hu_graph_neighbors(ctx->graph, alloc, q->contact_id, q->contact_id_len,
+                               q->as.neighbors.entity_id, hops, lim, &ents, &rels, &count);
         if (err != HU_OK) {
             *out = NULL;
             *out_count = 0;
@@ -184,7 +196,7 @@ static hu_error_t v1_entity_read(void *vctx, const hu_memory_query_t *q,
             return HU_OK;
         }
 
-        size_t total = count * 2;  /* entities + relations, parallel arrays */
+        size_t total = count * 2; /* entities + relations, parallel arrays */
         hu_memory_record_t *recs = xalloc(alloc, sizeof(*recs) * total);
         if (recs == NULL) {
             hu_graph_entities_free(alloc, ents, count);
@@ -203,16 +215,8 @@ static hu_error_t v1_entity_read(void *vctx, const hu_memory_query_t *q,
             recs[i].event_start = ents[i].first_seen;
             recs[i].confidence = 1.0f;
             hu_graph_entity_t *p = xalloc(alloc, sizeof(*p));
-            if (p == NULL) {
-                for (size_t j = 0; j < i; j++) {
-                    hu_graph_entity_t *prev = (hu_graph_entity_t *)recs[j].payload;
-                    if (prev) xfree(alloc, prev, sizeof(*prev));
-                }
-                hu_graph_entities_free(alloc, ents, count);
-                hu_graph_relations_free(alloc, rels, count);
-                xfree(alloc, recs, 0);
-                return HU_ERR_OUT_OF_MEMORY;
-            }
+            if (p == NULL)
+                return v1_neighbors_oom(alloc, recs, i, ents, rels, count);
             *p = ents[i];
             recs[i].payload = p;
             recs[i].payload_len = sizeof(*p);
@@ -226,23 +230,8 @@ static hu_error_t v1_entity_read(void *vctx, const hu_memory_query_t *q,
         for (size_t i = 0; i < count; i++) {
             size_t k = count + i;
             hu_memory_relation_row_t *rp = xalloc(alloc, sizeof(*rp));
-            if (rp == NULL) {
-                /* Roll back entity payloads (just heap-alloc structs at
-                 * this point; strings are still owned by `ents[]`). */
-                for (size_t j = 0; j < count; j++) {
-                    hu_graph_entity_t *prev = (hu_graph_entity_t *)recs[j].payload;
-                    if (prev) xfree(alloc, prev, sizeof(*prev));
-                }
-                for (size_t j = count; j < k; j++) {
-                    hu_memory_relation_row_t *prev =
-                        (hu_memory_relation_row_t *)recs[j].payload;
-                    if (prev) xfree(alloc, prev, sizeof(*prev));
-                }
-                hu_graph_entities_free(alloc, ents, count);
-                hu_graph_relations_free(alloc, rels, count);
-                xfree(alloc, recs, 0);
-                return HU_ERR_OUT_OF_MEMORY;
-            }
+            if (rp == NULL)
+                return v1_neighbors_oom(alloc, recs, k, ents, rels, count);
             /* hu_memory_relation_row_t is hu_graph_relation_t — shallow-
              * copy the whole row so we claim every string field
              * (context, provenance, source_name, target_name). Missing
@@ -253,9 +242,13 @@ static hu_error_t v1_entity_read(void *vctx, const hu_memory_query_t *q,
             recs[k].kind = HU_MEM_RELATION;
             recs[k].id = rels[i].id;
             recs[k].event_start = rels[i].first_seen;
-            recs[k].confidence = 1.0f;
             recs[k].payload = rp;
             recs[k].payload_len = sizeof(*rp);
+            /* The edge's own W8 belief, as the WINDOW/BY_TIME paths report
+             * it: the W11 per-step filter reads this (a hardcoded 1.0 let
+             * sub-0.3 edges through every verify_after neighbors step). */
+            recs[k].confidence = rp->confidence;
+            recs[k].confidence_variance = rp->confidence_variance;
         }
         /* Ownership: payload string pointers are shallow-copied; the
          * graph entity/relation array backings are no longer owners.
@@ -274,19 +267,20 @@ static hu_error_t v1_entity_read(void *vctx, const hu_memory_query_t *q,
 
 static hu_error_t v1_entity_write(void *vctx, const hu_memory_record_t *rec) {
     struct hu_memory_v1_ctx *ctx = vctx;
-    if (rec->kind != HU_MEM_ENTITY || rec->payload == NULL) return HU_ERR_INVALID_ARGUMENT;
+    if (rec->kind != HU_MEM_ENTITY || rec->payload == NULL)
+        return HU_ERR_INVALID_ARGUMENT;
     const hu_graph_entity_t *e = rec->payload;
     int64_t out_id = 0;
     /* P2G — honor contact_id scope from the record so callers can do
      * per-contact entity upserts through the facade. */
-    return hu_graph_upsert_entity(ctx->graph, rec->contact_id, rec->contact_id_len,
-                                  e->name, e->name_len, e->type, e->metadata_json,
-                                  &out_id);
+    return hu_graph_upsert_entity(ctx->graph, rec->contact_id, rec->contact_id_len, e->name,
+                                  e->name_len, e->type, e->metadata_json, &out_id);
 }
 
 static hu_error_t v1_entity_erase(void *vctx, hu_memory_kind_t kind, int64_t id) {
     struct hu_memory_v1_ctx *ctx = vctx;
-    if (kind != HU_MEM_ENTITY) return HU_ERR_INVALID_ARGUMENT;
+    if (kind != HU_MEM_ENTITY)
+        return HU_ERR_INVALID_ARGUMENT;
     hu_erase_report_t rep;
     return hu_memory_erase_entity(ctx->graph, id, &rep);
 }
@@ -297,10 +291,11 @@ static hu_error_t v1_entity_erase_by_prov(void *vctx, const char *substring, siz
     return hu_memory_erase_by_provenance(ctx->graph, substring, len, &rep);
 }
 
-static void v1_entity_records_free(void *vctx, hu_allocator_t *alloc,
-                                    hu_memory_record_t *r, size_t n) {
+static void v1_entity_records_free(void *vctx, hu_allocator_t *alloc, hu_memory_record_t *r,
+                                   size_t n) {
     (void)vctx;
-    if (r == NULL || n == 0) return;
+    if (r == NULL || n == 0)
+        return;
     /* Kind-aware free. Most paths return pure-entity arrays, but the
      * NEIGHBORS query returns a mixed entity+relation response so
      * the W12 P6 re-ranker can score relation contexts. We dispatch
@@ -368,11 +363,11 @@ static hu_memory_facade_vtable_t s_v1_entity_vt = {
 
 /* --------- RELATION --------------------------------------------------- */
 
-static hu_error_t v1_relation_read(void *vctx, const hu_memory_query_t *q,
-                                    hu_allocator_t *alloc,
-                                    hu_memory_record_t **out, size_t *out_count) {
+static hu_error_t v1_relation_read(void *vctx, const hu_memory_query_t *q, hu_allocator_t *alloc,
+                                   hu_memory_record_t **out, size_t *out_count) {
     struct hu_memory_v1_ctx *ctx = vctx;
-    if (q->kind != HU_MEM_RELATION) return HU_ERR_INVALID_ARGUMENT;
+    if (q->kind != HU_MEM_RELATION)
+        return HU_ERR_INVALID_ARGUMENT;
 
     /* P4 — Honor explicit variant when present. The legacy AUTO path uses
      * `q->as.by_id.id == HU_MEMORY_REL_VERIFIER_SCAN` as an implicit
@@ -384,9 +379,8 @@ static hu_error_t v1_relation_read(void *vctx, const hu_memory_query_t *q,
         size_t lim = q->as.by_id.limit > 0 ? q->as.by_id.limit : 64;
         hu_graph_relation_t *rels = NULL;
         size_t count = 0;
-        hu_error_t err = hu_graph_list_relations_verifier_scan(ctx->graph, alloc,
-                                                               q->contact_id, q->contact_id_len,
-                                                               lim, &rels, &count);
+        hu_error_t err = hu_graph_list_relations_verifier_scan(
+            ctx->graph, alloc, q->contact_id, q->contact_id_len, lim, &rels, &count);
         if (err != HU_OK) {
             *out = NULL;
             *out_count = 0;
@@ -441,16 +435,13 @@ static hu_error_t v1_relation_read(void *vctx, const hu_memory_query_t *q,
      * P4 — Explicit WINDOW takes priority. Falling back to legacy AUTO
      * triggers a window read when either timestamp is non-zero. */
     if (v == HU_MEMORY_QUERY_WINDOW ||
-        (v == HU_MEMORY_QUERY_AUTO &&
-         (q->as.window.from_ts != 0 || q->as.window.to_ts != 0))) {
+        (v == HU_MEMORY_QUERY_AUTO && (q->as.window.from_ts != 0 || q->as.window.to_ts != 0))) {
         hu_graph_relation_t *rels = NULL;
         size_t count = 0;
         size_t lim = q->as.window.limit > 0 ? q->as.window.limit : 32;
-        hu_error_t err = hu_graph_relations_in_window(ctx->graph, alloc,
-                                                       q->contact_id, q->contact_id_len,
-                                                       q->as.window.from_ts,
-                                                       q->as.window.to_ts, lim,
-                                                       &rels, &count);
+        hu_error_t err = hu_graph_relations_in_window(ctx->graph, alloc, q->contact_id,
+                                                      q->contact_id_len, q->as.window.from_ts,
+                                                      q->as.window.to_ts, lim, &rels, &count);
         if (err != HU_OK) {
             *out = NULL;
             *out_count = 0;
@@ -500,9 +491,8 @@ static hu_error_t v1_relation_read(void *vctx, const hu_memory_query_t *q,
     hu_graph_relation_t *rels = NULL;
     size_t count = 0;
     size_t lim = q->as.window.limit > 0 ? q->as.window.limit : 32;
-    hu_error_t err = hu_graph_list_relations(ctx->graph, alloc,
-                                              q->contact_id, q->contact_id_len, lim,
-                                              &rels, &count);
+    hu_error_t err = hu_graph_list_relations(ctx->graph, alloc, q->contact_id, q->contact_id_len,
+                                             lim, &rels, &count);
     if (err != HU_OK) {
         *out = NULL;
         *out_count = 0;
@@ -549,7 +539,8 @@ static hu_error_t v1_relation_read(void *vctx, const hu_memory_query_t *q,
 
 static hu_error_t v1_relation_write(void *vctx, const hu_memory_record_t *rec) {
     struct hu_memory_v1_ctx *ctx = vctx;
-    if (rec->kind != HU_MEM_RELATION || rec->payload == NULL) return HU_ERR_INVALID_ARGUMENT;
+    if (rec->kind != HU_MEM_RELATION || rec->payload == NULL)
+        return HU_ERR_INVALID_ARGUMENT;
     const hu_graph_relation_t *r = rec->payload;
     /* P2G — Honor explicit (mean, variance) from the record. If variance is
      * negative or zero, derive it from provenance via the W8 heuristic so
@@ -558,30 +549,30 @@ static hu_error_t v1_relation_write(void *vctx, const hu_memory_record_t *rec) {
     float mean = rec->confidence < 0.0f ? 1.0f : rec->confidence;
     float variance = rec->confidence_variance;
     if (variance <= 0.0f) {
-        variance = hu_belief_initial_variance_for_provenance(
-            rec->provenance, rec->provenance_len);
+        variance = hu_belief_initial_variance_for_provenance(rec->provenance, rec->provenance_len);
     }
     return hu_graph_upsert_relation_with_belief(
-        ctx->graph, rec->contact_id, rec->contact_id_len,
-        r->source_id, r->target_id, r->type, r->weight,
-        rec->event_start, rec->event_end, mean, variance, r->context,
-        r->context_len, rec->provenance, rec->provenance_len, NULL);
+        ctx->graph, rec->contact_id, rec->contact_id_len, r->source_id, r->target_id, r->type,
+        r->weight, rec->event_start, rec->event_end, mean, variance, r->context, r->context_len,
+        rec->provenance, rec->provenance_len, NULL);
 }
 
 static hu_error_t v1_relation_erase(void *vctx, hu_memory_kind_t kind, int64_t id) {
     (void)vctx;
     (void)id;
-    if (kind != HU_MEM_RELATION) return HU_ERR_INVALID_ARGUMENT;
+    if (kind != HU_MEM_RELATION)
+        return HU_ERR_INVALID_ARGUMENT;
     /* v1 has no direct "delete relation by id"; erasure goes through the
      * cascading entity erase or provenance erase. Surface this honestly so
      * callers don't expect a row-level delete that doesn't exist. */
     return HU_ERR_NOT_SUPPORTED;
 }
 
-static void v1_relation_records_free(void *vctx, hu_allocator_t *alloc,
-                                      hu_memory_record_t *r, size_t n) {
+static void v1_relation_records_free(void *vctx, hu_allocator_t *alloc, hu_memory_record_t *r,
+                                     size_t n) {
     (void)vctx;
-    if (r == NULL || n == 0) return;
+    if (r == NULL || n == 0)
+        return;
     for (size_t i = 0; i < n; i++) {
         hu_graph_relation_t *p = (hu_graph_relation_t *)r[i].payload;
         /* hu_graph_relations_free frees the strings AND the struct backing
@@ -862,7 +853,7 @@ static hu_error_t v1_case_write(void *vctx, const hu_memory_record_t *rec) {
         return HU_ERR_IO;
 
     sqlite3_bind_text(st, 1, rec->contact_id ? rec->contact_id : "",
-                       rec->contact_id ? (int)rec->contact_id_len : 0, SQLITE_STATIC);
+                      rec->contact_id ? (int)rec->contact_id_len : 0, SQLITE_STATIC);
     sqlite3_bind_text(st, 2, p->goal_verb, (int)p->goal_verb_len, SQLITE_STATIC);
     sqlite3_bind_text(st, 3, anchors, -1, SQLITE_STATIC);
     if (p->plan_text && p->plan_text_len > 0)
@@ -888,7 +879,8 @@ static hu_error_t v1_case_erase(void *vctx, hu_memory_kind_t kind, int64_t id) {
     return HU_ERR_NOT_SUPPORTED;
 }
 
-static void v1_case_records_free(void *vctx, hu_allocator_t *alloc, hu_memory_record_t *r, size_t n) {
+static void v1_case_records_free(void *vctx, hu_allocator_t *alloc, hu_memory_record_t *r,
+                                 size_t n) {
     (void)vctx;
     if (r == NULL || n == 0 || alloc == NULL)
         return;
@@ -936,23 +928,23 @@ static hu_memory_facade_vtable_t s_v1_case_vt = {
  * hyperedge API. The shared ctx (defined at the top of this file)
  * holds the facade pointer that hu_hyperedge_upsert/query expects. */
 
-static hu_error_t v1_hyperedge_read(void *vctx, const hu_memory_query_t *q,
-                                     hu_allocator_t *alloc,
-                                     hu_memory_record_t **out, size_t *out_count) {
-    if (q->kind != HU_MEM_HYPEREDGE) return HU_ERR_INVALID_ARGUMENT;
+static hu_error_t v1_hyperedge_read(void *vctx, const hu_memory_query_t *q, hu_allocator_t *alloc,
+                                    hu_memory_record_t **out, size_t *out_count) {
+    if (q->kind != HU_MEM_HYPEREDGE)
+        return HU_ERR_INVALID_ARGUMENT;
     if (q->as.neighbors.entity_id == 0) {
         /* Hyperedge query is "by member entity"; without an anchor we
          * decline rather than scan the whole table. */
         return HU_ERR_INVALID_ARGUMENT;
     }
     hu_memory_facade_t *m = hu_memory__v1_ctx_facade(vctx);
-    if (!m) return HU_ERR_INVALID_ARGUMENT;
+    if (!m)
+        return HU_ERR_INVALID_ARGUMENT;
 
     hu_hyperedge_t *edges = NULL;
     size_t count = 0;
-    hu_error_t err = hu_hyperedge_query_by_member(m, alloc,
-                                                   q->as.neighbors.entity_id,
-                                                   &edges, &count);
+    hu_error_t err =
+        hu_hyperedge_query_by_member(m, alloc, q->as.neighbors.entity_id, &edges, &count);
     if (err != HU_OK) {
         *out = NULL;
         *out_count = 0;
@@ -1006,7 +998,8 @@ static hu_error_t v1_hyperedge_write(void *vctx, const hu_memory_record_t *rec) 
     if (rec->kind != HU_MEM_HYPEREDGE || rec->payload == NULL)
         return HU_ERR_INVALID_ARGUMENT;
     hu_memory_facade_t *m = hu_memory__v1_ctx_facade(vctx);
-    if (!m) return HU_ERR_INVALID_ARGUMENT;
+    if (!m)
+        return HU_ERR_INVALID_ARGUMENT;
     const hu_hyperedge_t *he = rec->payload;
     int64_t out_id = 0;
     return hu_hyperedge_upsert(m, "", 0, he, &out_id);
@@ -1015,16 +1008,18 @@ static hu_error_t v1_hyperedge_write(void *vctx, const hu_memory_record_t *rec) 
 static hu_error_t v1_hyperedge_erase(void *vctx, hu_memory_kind_t kind, int64_t id) {
     (void)vctx;
     (void)id;
-    if (kind != HU_MEM_HYPEREDGE) return HU_ERR_INVALID_ARGUMENT;
+    if (kind != HU_MEM_HYPEREDGE)
+        return HU_ERR_INVALID_ARGUMENT;
     /* v1 has no row-level hyperedge delete yet (cascading erasure goes
      * through entity-level erase). Surface honestly. */
     return HU_ERR_NOT_SUPPORTED;
 }
 
-static void v1_hyperedge_records_free(void *vctx, hu_allocator_t *alloc,
-                                       hu_memory_record_t *r, size_t n) {
+static void v1_hyperedge_records_free(void *vctx, hu_allocator_t *alloc, hu_memory_record_t *r,
+                                      size_t n) {
     (void)vctx;
-    if (r == NULL || n == 0) return;
+    if (r == NULL || n == 0)
+        return;
     for (size_t i = 0; i < n; i++) {
         hu_hyperedge_t *p = (hu_hyperedge_t *)r[i].payload;
         if (p != NULL) {
@@ -1050,11 +1045,13 @@ static hu_memory_facade_vtable_t s_v1_hyperedge_vt = {
 /* --------- registration ---------------------------------------------- */
 
 hu_error_t hu_memory__v1_backend_register(struct hu_memory_facade *m, hu_graph_t *graph) {
-    if (m == NULL || graph == NULL) return HU_ERR_INVALID_ARGUMENT;
+    if (m == NULL || graph == NULL)
+        return HU_ERR_INVALID_ARGUMENT;
     /* One ctx, shared across the kinds the v1 backend services. memory.c frees
      * it once at hu_memory_facade_close via v1_bundle_ctx after all slots clear. */
     struct hu_memory_v1_ctx *ctx = malloc(sizeof(*ctx));
-    if (ctx == NULL) return HU_ERR_OUT_OF_MEMORY;
+    if (ctx == NULL)
+        return HU_ERR_OUT_OF_MEMORY;
     ctx->facade = m;
     ctx->graph = graph;
     hu_memory__v1_set_bundle_for_close(m, ctx);

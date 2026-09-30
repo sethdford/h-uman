@@ -136,6 +136,27 @@ static void briefing_reads_calendar_times_in_either_clock_and_sorts(void) {
     HU_ASSERT_EQ(more, 2);
 }
 
+static void briefing_prefers_numeric_times_and_lists_all_day_first(void) {
+    /* Current helper output: numbers win over a start string in any locale. */
+    const char *json =
+        "[{\"name\":\"dentist\",\"start\":\"jeudi 1 octobre 2026 14 h 30\",\"h\":14,\"m\":30,"
+        "\"allday\":false},"
+        "{\"name\":\"Mom\\u2019s birthday\",\"start\":\"x\",\"h\":0,\"m\":0,\"allday\":true},"
+        "{\"name\":\"say \\\"hi\\\"\",\"start\":\"x\",\"h\":9,\"m\":5,\"allday\":false}]";
+    hu_briefing_event_t ev[4];
+    size_t n = 0, more = 0;
+    HU_ASSERT_TRUE(hu_briefing_parse_calendar(json, strlen(json), ev, 4, &n, &more));
+    HU_ASSERT_EQ(n, 3);
+    HU_ASSERT_TRUE(ev[0].all_day);
+    HU_ASSERT_EQ(ev[0].hour, -1);
+    HU_ASSERT_STR_EQ(ev[1].name, "say \"hi\""); /* an escaped title survives */
+    HU_ASSERT_EQ(ev[1].hour, 9);
+    HU_ASSERT_EQ(ev[1].minute, 5);
+    HU_ASSERT_STR_EQ(ev[2].name, "dentist");
+    HU_ASSERT_EQ(ev[2].hour, 14);
+    HU_ASSERT_EQ(ev[2].minute, 30);
+}
+
 static void briefing_refuses_calendar_output_it_cannot_parse(void) {
     /* A title with an unescaped quote breaks the helper's JSON. */
     const char *bad = "[{\"name\":\"say \"hi\"\",\"start\":\"x\"}]";
@@ -362,6 +383,7 @@ void run_daemon_briefing_tests(void) {
     HU_RUN_TEST(briefing_says_everything_in_one_message_with_sources);
     HU_RUN_TEST(briefing_with_only_weather_says_nothing);
     HU_RUN_TEST(briefing_reads_calendar_times_in_either_clock_and_sorts);
+    HU_RUN_TEST(briefing_prefers_numeric_times_and_lists_all_day_first);
     HU_RUN_TEST(briefing_refuses_calendar_output_it_cannot_parse);
     HU_RUN_TEST(briefing_window_is_send_hour_until_noon);
 #ifdef HU_ENABLE_SQLITE
