@@ -46,6 +46,10 @@ typedef enum hu_init_proposer_result {
      * fired). The draft has been captured as a DPO negative pair for
      * future LoRA training. Daemon caller skips the send. */
     HU_INIT_RESULT_GUARD_REJECT = 10,
+    /* initiative.enabled=false. Distinct from SKIP, which means "every gate
+     * passed" and lets the caller proceed to the LLM: reusing SKIP here made
+     * the kill switch call the model on every daemon loop (2026-09-30). */
+    HU_INIT_RESULT_DISABLED = 11,
 } hu_init_proposer_result_t;
 
 /* Sprint 41 follow-up #2 — single-source-of-truth proactive arbiter.

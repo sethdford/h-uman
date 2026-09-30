@@ -411,21 +411,20 @@ def _parse_semantic_results(stdout):
     return out
 
 
-def semantic_search(human_bin, memory_db, embed_url, query, k, timeout=90):
-    """Returns a list of up to `k` memory snippets, [] for no results, or
-    None on infra failure (binary missing, timeout, non-zero exit) — callers
-    must treat None as "could not measure LIVE for this context", not as
-    "no memories", or the LIVE arm would silently degrade toward SHADOW."""
+def _cli_search(human_bin, memory_db, embed_url, search_args, k, extra_env=None, timeout=90):
+    """Run `human memory search <search_args>` against the db COPY; None on any
+    infra failure (binary missing, timeout, non-zero exit)."""
     if not human_bin or not os.path.isfile(human_bin):
         return None
     env = dict(os.environ)
     env["HU_MEMORY_SQLITE_PATH"] = memory_db
     env["HU_SEMANTIC_EMBED_URL"] = embed_url
+    env.update(extra_env or {})
     try:
         # errors="replace": the CLI cuts each hit at 2000 bytes (%.*s) and can
         # split a multi-byte UTF-8 sequence; strict decoding killed the
         # 2026-09-03 rerun at LIVE 11/40. A mangled byte becomes U+FFFD.
-        proc = subprocess.run([human_bin, "memory", "search", "--semantic", query],
+        proc = subprocess.run([human_bin, "memory", "search", *search_args],
                               capture_output=True, encoding="utf-8", errors="replace",
                               timeout=timeout, env=env)
     except (subprocess.TimeoutExpired, OSError):
@@ -433,6 +432,49 @@ def semantic_search(human_bin, memory_db, embed_url, query, k, timeout=90):
     if proc.returncode != 0:
         return None
     return _parse_semantic_results(proc.stdout)[:k]
+
+
+def semantic_search(human_bin, memory_db, embed_url, query, k, timeout=90):
+    """Returns a list of up to `k` memory snippets, [] for no results, or
+    None on infra failure (binary missing, timeout, non-zero exit) — callers
+    must treat None as "could not measure LIVE for this context", not as
+    "no memories", or the LIVE arm would silently degrade toward SHADOW."""
+    return _cli_search(human_bin, memory_db, embed_url, ["--semantic", query], k, None, timeout)
+
+
+def hybrid_search(human_bin, memory_db, embed_url, query, k, fusion_env, timeout=90):
+    """The daemon memory loader's call (`memory search --hybrid --plain`) under
+    `fusion_env` (see fusion_env_for_arm). Same None-on-failure contract as
+    semantic_search."""
+    return _cli_search(human_bin, memory_db, embed_url, ["--hybrid", "--plain", query], k,
+                       fusion_env, timeout)
+
+
+def fusion_env_for_arm(arm_name, fusion, alpha):
+    """--fusion pair (HU_HYBRID_FUSION promotion gate): BOTH arms recall through
+    the plain hybrid call with semantic recall LIVE (so the dense leg gets the
+    production content filter + byte clamp before the merge); the SHADOW arm is
+    the production rrf merge, the LIVE arm is `fusion` at `alpha`. `--fusion rrf`
+    makes the two arms identical: an A/A run that measures the gate's noise."""
+    env = {"HU_SEMANTIC_RECALL": "live", "HU_HYBRID_FUSION": "rrf"}
+    if arm_name == "live":
+        env["HU_HYBRID_FUSION"] = fusion
+        if fusion == "score":
+            env["HU_HYBRID_FUSION_ALPHA"] = f"{alpha:.2f}"
+    return env
+
+
+def validate_fusion_args(fusion, alpha, register_gate):
+    """None when the fusion arguments are usable, else the refusal reason."""
+    if fusion is None:
+        return None if alpha is None else "--alpha needs --fusion score"
+    if register_gate != "off":
+        return "--fusion measures the merge; run it with --register-gate off"
+    if fusion == "score" and (alpha is None or not (0.0 <= alpha <= 1.0)):
+        return f"--fusion score needs --alpha in [0,1], got {alpha!r}"
+    if fusion == "rrf" and alpha is not None:
+        return "--alpha applies to --fusion score only"
+    return None
 
 
 # Byte budget for the recall block — MIRRORS the in-binary clamp
@@ -582,7 +624,7 @@ def score_single_reply_anti_ai(human_bin, reply, channel):
 # generation exception, empty completion) — see the per-context `reasons`
 # dict for why, so failures are attributable, not silently dropped.
 # --------------------------------------------------------------------------
-def recall_mode_for_arm(arm_name, register_gate):
+def recall_mode_for_arm(arm_name, register_gate, fusion=None):
     """Which contexts get the 'Relevant memories:' block in an arm.
 
     register_gate off/shadow (the original C1 pair): shadow = "none", live = "all".
@@ -592,6 +634,8 @@ def recall_mode_for_arm(arm_name, register_gate):
     arm carried no recall at all cannot see the register gate: the 2026-09-05 first run
     produced casual-arm scores identical to 16 digits in both arms and an INCONCLUSIVE
     whose coverage denominator counted the very contexts the gate suppresses by design."""
+    if fusion is not None:  # fusion pair: both arms inject; they differ in the merge only
+        return "all"
     if arm_name != "live":
         return "all" if register_gate == "live" else "none"
     return "admitted" if register_gate == "live" else "all"
@@ -604,7 +648,8 @@ def run_arm(arm_name, contexts, system_prompt, args, memory_db_path, registers=N
     every context but WITHHOLD the block for casual ones, recording the bytes withheld
     in recall_suppressed_bytes so the gate's effect is measured, not assumed."""
     if recall_mode is None:
-        recall_mode = recall_mode_for_arm(arm_name, getattr(args, "register_gate", "off"))
+        recall_mode = recall_mode_for_arm(arm_name, getattr(args, "register_gate", "off"),
+                                          getattr(args, "fusion", None))
     register_gate = getattr(args, "register_gate", "off")
     results = {}
     fail_reasons = {}
@@ -619,10 +664,17 @@ def run_arm(arm_name, contexts, system_prompt, args, memory_db_path, registers=N
             if arm_name == "live" and casual and register_gate == "shadow":
                 log(f"  [live] {i}: register gate SHADOW would suppress casual "
                     f"(words<={REGISTER_MAX_CASUAL_WORDS})", flush=True)
-            snippets = semantic_search(args.human_bin, memory_db_path, args.embed_url,
-                                       ctx, args.top_k)
+            fusion = getattr(args, "fusion", None)
+            if fusion is not None:
+                snippets = hybrid_search(args.human_bin, memory_db_path, args.embed_url, ctx,
+                                         args.top_k,
+                                         fusion_env_for_arm(arm_name, fusion, args.alpha))
+            else:
+                snippets = semantic_search(args.human_bin, memory_db_path, args.embed_url,
+                                           ctx, args.top_k)
             if snippets is None:
-                fail_reasons[i] = "semantic_search_failed"
+                fail_reasons[i] = ("hybrid_search_failed" if fusion is not None
+                                   else "semantic_search_failed")
                 log(f"  [warn][{arm_name}] semantic search failed, skipping context "
                     f"{i}: {ctx[:50]!r}", file=sys.stderr, flush=True)
                 continue
@@ -897,14 +949,24 @@ def main(argv=None):
                     help="verdict JSON path (default: "
                          "docs/plans/2026-08-02-semantic-retrieval/semantic-live-gate-<date>.json)")
     ap.add_argument("--tmp-dir", default=None, help="scratch dir for the memory.db copy")
+    ap.add_argument("--fusion", choices=["rrf", "score"], default=None,
+                    help="HU_HYBRID_FUSION promotion pair: both arms recall via `memory search "
+                         "--hybrid --plain`; SHADOW = rrf (production), LIVE = this mode. "
+                         "`rrf` gives an A/A noise run")
+    ap.add_argument("--alpha", type=float, default=None,
+                    help="HU_HYBRID_FUSION_ALPHA for the LIVE arm (required with --fusion score)")
     ap.add_argument("--dry-run", action="store_true",
                     help="parse arguments and initialize, but skip generation/scoring")
     args = ap.parse_args(argv)
+    fusion_problem = validate_fusion_args(args.fusion, args.alpha, args.register_gate)
+    if fusion_problem:
+        return refuse(fusion_problem)
 
     if args.out is None:
         date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        stem = "semantic-live-gate" + (f"-fusion-{args.fusion}" if args.fusion else "")
         args.out = str(REPO_ROOT / "docs/plans/2026-08-02-semantic-retrieval" /
-                      f"semantic-live-gate-{date}.json")
+                      f"{stem}-{date}.json")
 
     print(f"[1/6] embedder preflight ({args.embed_url}) ...", flush=True)
     if not preflight_embedder(args.embed_url):
@@ -948,8 +1010,10 @@ def main(argv=None):
                         indent=2))
         return 0
 
-    print(f"[6/6] generating + scoring both arms (SHADOW={recall_mode_for_arm('shadow', args.register_gate)}, "
-          f"then LIVE={recall_mode_for_arm('live', args.register_gate)}) ...", flush=True)
+    print(f"[6/6] generating + scoring both arms "
+          f"(SHADOW={recall_mode_for_arm('shadow', args.register_gate, args.fusion)}, "
+          f"then LIVE={recall_mode_for_arm('live', args.register_gate, args.fusion)}) ...",
+          flush=True)
     shadow_results, shadow_fail = run_arm("shadow", contexts, system_prompt, args, memory_db_path,
                                           registers=registers)
     live_results, live_fail = run_arm("live", contexts, system_prompt, args, memory_db_path,
@@ -1033,11 +1097,17 @@ def main(argv=None):
         "schema": "semantic_live_gate.v2",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "git_commit": git_commit,
-        "gate": ("HU_SEMANTIC_RECALL_REGISTER_GATE off->live (semantic recall LIVE in both "
+        "gate": (f"HU_HYBRID_FUSION rrf->{args.fusion} (both arms recall via memory search "
+                 f"--hybrid --plain, semantic recall LIVE; the pair differs in the merge only)"
+                 if args.fusion else
+                 "HU_SEMANTIC_RECALL_REGISTER_GATE off->live (semantic recall LIVE in both "
                  "arms; the pair differs on casual contexts only)"
                  if args.register_gate == "live" else "HU_SEMANTIC_RECALL shadow->live"),
-        "arms": {"shadow": recall_mode_for_arm("shadow", args.register_gate),
-                 "live": recall_mode_for_arm("live", args.register_gate)},
+        "fusion": ({"shadow": fusion_env_for_arm("shadow", args.fusion, args.alpha),
+                    "live": fusion_env_for_arm("live", args.fusion, args.alpha)}
+                   if args.fusion else None),
+        "arms": {"shadow": recall_mode_for_arm("shadow", args.register_gate, args.fusion),
+                 "live": recall_mode_for_arm("live", args.register_gate, args.fusion)},
         "n_contexts": len(contexts),
         "n_paired": len(ids),
         "n_shadow_only": len(shadow_only),

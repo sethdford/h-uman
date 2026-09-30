@@ -36,6 +36,7 @@
 
 #include "human/agent.h"
 #include "human/agent/output_validator_chain.h"
+#include "human/agent/response_guard_retry.h"
 #include "human/agent/validators/builtin.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
@@ -377,6 +378,69 @@ static void e2e_clean_reply_passes_through_validator_chain(void) {
     hu_agent_deinit(&agent);
 }
 
+/* ── Slim retry never ships a truncated reply ─────────────────────────────
+ * 2026-09-30: the retry's cloud fallback (gemini-3.8-flash) spent its
+ * 128-token cap on thinking it was told not to do and stopped on MAX_TOKENS;
+ * "Wait, did we actually lock" went to a real chat. */
+typedef struct {
+    const char *text;
+    const char *finish; /* NULL = provider surfaced no reason */
+    uint32_t max_tokens_seen;
+} retry_mock_t;
+
+static hu_error_t retry_mock_chat(void *ctx, hu_allocator_t *alloc,
+                                  const hu_chat_request_t *request, const char *model,
+                                  size_t model_len, double temperature, hu_chat_response_t *out) {
+    (void)model;
+    (void)model_len;
+    (void)temperature;
+    retry_mock_t *m = (retry_mock_t *)ctx;
+    m->max_tokens_seen = request->max_tokens;
+    memset(out, 0, sizeof(*out));
+    out->content = hu_strndup(alloc, m->text, strlen(m->text));
+    out->content_len = strlen(m->text);
+    if (m->finish) {
+        out->finish_reason = hu_strndup(alloc, m->finish, strlen(m->finish));
+        out->finish_reason_len = strlen(m->finish);
+    }
+    return HU_OK;
+}
+
+static const hu_provider_vtable_t retry_mock_vtable = {
+    .chat = retry_mock_chat,
+    .supports_native_tools = two_phase_supports_native_tools,
+    .deinit = two_phase_deinit,
+};
+
+static hu_error_t run_slim_retry(retry_mock_t *m, char **out, size_t *out_len) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_provider_t prov = {.ctx = m, .vtable = &retry_mock_vtable};
+    return hu_response_guard_retry_slim(&alloc, NULL, NULL, &prov, "m", 1, "whats the plan", 14,
+                                        out, out_len, NULL);
+}
+
+static void slim_retry_refuses_a_reply_cut_off_by_its_token_cap(void) {
+    const char *reasons[] = {"MAX_TOKENS", "length"}; /* Gemini, OpenAI-shape */
+    for (size_t i = 0; i < 2; i++) {
+        retry_mock_t m = {.text = "Wait, did we actually lock", .finish = reasons[i]};
+        char *out = NULL;
+        size_t out_len = 0;
+        HU_ASSERT_TRUE(run_slim_retry(&m, &out, &out_len) != HU_OK);
+        HU_ASSERT_NULL(out);
+    }
+}
+
+static void slim_retry_keeps_a_complete_reply_with_room_to_finish(void) {
+    retry_mock_t m = {.text = "honestly haven't thought about it yet", .finish = "STOP"};
+    char *out = NULL;
+    size_t out_len = 0;
+    HU_ASSERT_EQ(run_slim_retry(&m, &out, &out_len), HU_OK);
+    HU_ASSERT_STR_EQ(out, "honestly haven't thought about it yet");
+    HU_ASSERT_TRUE(m.max_tokens_seen >= 512); /* room for thinking a model does anyway */
+    hu_allocator_t alloc = hu_system_allocator();
+    alloc.free(alloc.ctx, out, out_len + 1);
+}
+
 /* ── Registration ────────────────────────────────────────────────────────── */
 
 void run_daemon_e2e_validator_tests(void) {
@@ -384,4 +448,6 @@ void run_daemon_e2e_validator_tests(void) {
     HU_RUN_TEST(e2e_outbound_chain_is_cached_and_rejects_f1);
     HU_RUN_TEST(e2e_leak_blocked_by_validator_chain);
     HU_RUN_TEST(e2e_clean_reply_passes_through_validator_chain);
+    HU_RUN_TEST(slim_retry_refuses_a_reply_cut_off_by_its_token_cap);
+    HU_RUN_TEST(slim_retry_keeps_a_complete_reply_with_room_to_finish);
 }
