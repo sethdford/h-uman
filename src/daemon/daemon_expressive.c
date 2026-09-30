@@ -368,10 +368,20 @@ static size_t ue_words(const char *s, size_t len, char out[][UE_WORD], size_t ca
 }
 
 /* Does any history entry contain `w` at the start of a word? */
-static bool ue_mentioned(const char *w, const hu_channel_history_entry_t *h, size_t n) {
+/* Is history entry `t` the message being answered? The loaded history holds
+ * it (live 2026-09-30: "dentist" was "known" from the question itself), and a
+ * question does not establish its own event. */
+static bool ue_is_the_question(const char *t, const char *q) {
+    return t[0] && q[0] && (hu_strcasestr(t, q) != NULL || hu_strcasestr(q, t) != NULL);
+}
+
+static bool ue_mentioned(const char *w, const hu_channel_history_entry_t *h, size_t n,
+                         const char *q) {
     size_t wl = strlen(w);
     for (size_t e = 0; e < n; e++) {
         const char *t = h[e].text;
+        if (ue_is_the_question(t, q))
+            continue;
         for (size_t i = 0; t[i]; i++) {
             if (i > 0 && isalnum((unsigned char)t[i - 1]))
                 continue;
@@ -402,6 +412,10 @@ bool hu_expressive_unknown_event(const char *msg, size_t msg_len,
         return false;
     char w[UE_MAX_WORDS][UE_WORD];
     size_t n = ue_words(msg, msg_len, w, UE_MAX_WORDS);
+    char q[512]; /* the question, NUL-terminated, for the is-this-it check */
+    size_t ql = msg_len < sizeof(q) - 1 ? msg_len : sizeof(q) - 1;
+    memcpy(q, msg, ql);
+    q[ql] = '\0';
 
     for (size_t i = 0; i < n; i++) {
         size_t p = 0;           /* first word of the event phrase */
@@ -455,7 +469,7 @@ bool hu_expressive_unknown_event(const char *msg, size_t msg_len,
         bool known = false;
         for (size_t k = p; k < e && !known; k++)
             if (strlen(w[k]) >= 4 && !ue_in(w[k], k_vague))
-                known = ue_mentioned(w[k], history, history_count);
+                known = ue_mentioned(w[k], history, history_count, q);
         if (known)
             return false;
         if (topic && topic_cap) {

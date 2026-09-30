@@ -8323,6 +8323,34 @@ static size_t conv_utf8_safe_len(const char *buf, size_t want) {
     return i - 1;    /* incomplete — cut before the lead byte */
 }
 
+/* Is p[i] one of `marks`, closing a clause (followed by whitespace or the end)? */
+static bool conv_clause_end_at(const char *p, size_t rem, size_t i, const char *marks) {
+    return p[i] != '\0' && strchr(marks, p[i]) &&
+           (i + 1 >= rem || isspace((unsigned char)p[i + 1]));
+}
+
+/* Length of the next bubble of a long reply (rem > max_chunk). A person breaks
+ * at a thought boundary, so in order: a sentence end in the back half of the
+ * window, a comma there, the first sentence end or comma past the window (a
+ * longer bubble beats a mid-clause cut, 2026-09-30), and only then the last
+ * space in the window. */
+static size_t conv_long_split_cut(const char *p, size_t rem, size_t max_chunk) {
+    static const char *const tiers[] = {".!?", ","};
+    size_t hard = rem < 511 ? rem : 511;
+    for (size_t t = 0; t < 2; t++)
+        for (size_t i = max_chunk; i > max_chunk / 2; i--)
+            if (conv_clause_end_at(p, rem, i - 1, tiers[t]))
+                return i;
+    for (size_t t = 0; t < 2; t++)
+        for (size_t i = max_chunk; i < hard; i++)
+            if (conv_clause_end_at(p, rem, i, tiers[t]))
+                return i + 1;
+    for (size_t i = max_chunk; i > max_chunk / 2; i--)
+        if (p[i - 1] == ' ' && i > 1) /* a zero cut would never advance */
+            return i - 1;
+    return max_chunk;
+}
+
 size_t hu_conversation_split_into_texts(const char *response, size_t resp_len, size_t max_chunk,
                                         char chunks[][512], size_t max_chunks) {
     if (!response || resp_len == 0 || !chunks || max_chunks == 0 || max_chunk == 0)
@@ -8353,29 +8381,11 @@ size_t hu_conversation_split_into_texts(const char *response, size_t resp_len, s
             break;
         }
 
-        /* Find sentence boundary near max_chunk (stay within bounds) */
-        size_t cut = max_chunk;
-        if (pos + cut > resp_len)
-            cut = resp_len - pos;
-        size_t search = cut;
-        while (search > max_chunk / 2) {
-            search--;
-            char ch = response[pos + search];
-            if (ch == '.' || ch == '!' || ch == '?') {
-                cut = search + 1; /* include the punctuation */
-                break;
-            }
-        }
-        /* Fallback: split at last space */
-        if (cut == max_chunk || (pos + cut > resp_len)) {
-            if (pos + cut > resp_len)
-                cut = resp_len - pos;
-            size_t sp = cut;
-            while (sp > max_chunk / 2 && response[pos + sp - 1] != ' ')
-                sp--;
-            if (sp > max_chunk / 2)
-                cut = sp;
-        }
+        /* The last bubble allowed takes the rest, or it would be dropped. */
+        bool last = count + 1 == max_chunks;
+        size_t cut = (last && remaining <= 511)
+                         ? remaining
+                         : conv_long_split_cut(response + pos, remaining, last ? 511 : max_chunk);
 
         size_t n = cut > 511 ? 511 : cut;
         /* Never sever a multi-byte UTF-8 codepoint at the cut point. */
