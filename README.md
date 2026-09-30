@@ -21,7 +21,7 @@
 
 The smallest fully autonomous AI assistant infrastructure — a static C binary that fits on any $5 board, boots in milliseconds, and requires nothing but libc.
 
-**<!-- fp:binary_kb -->~2760 KB<!-- /fp --> binary · <!-- fp:startup_bound --><6 ms<!-- /fp --> startup · 14,031+ tests · 97 providers · 31 channels · 87 tools · Pluggable everything**
+**<!-- fp:binary_kb -->~2760 KB<!-- /fp --> binary · <!-- fp:startup_bound --><6 ms<!-- /fp --> startup · 14,023+ tests · 97 providers · 31 channels · 87 tools · Pluggable everything**
 
 ### Features
 
@@ -76,7 +76,7 @@ Human's measured numbers (<!-- fp:measured_platform -->macOS arm64<!-- /fp -->, 
 | release-size: MinSizeRel + LTO, all channels, sqlite-vec off | <!-- fp:binary_kb -->~2760 KB<!-- /fp --> | <!-- fp:idle_rss_mb -->8.6 MB<!-- /fp --> | <!-- fp:version_rss_mb -->6.9 MB<!-- /fp --> | <!-- fp:startup_range -->3–6 ms<!-- /fp --> |
 | `cmake --preset release`: adds sqlite-vec, ML, embedded model, Cartesia, … | <!-- fp:full_binary_mb -->3.3 MB<!-- /fp --> (<!-- fp:full_binary_bytes -->3,327,168<!-- /fp --> bytes) | <!-- fp:full_idle_rss_mb -->8.8 MB<!-- /fp --> | | |
 
-Tests:         14,031 passing, 0 ASan errors
+Tests:         14,023 passing, 0 ASan errors
 
 ### Why Switch from OpenClaw?
 
@@ -654,7 +654,7 @@ Build and tests require a C11 compiler and CMake 3.20+. One-time setup:
 mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Debug -DHU_ENABLE_ALL_CHANNELS=ON
 cmake --build .                            # Dev build
-./human_tests                             # 14,031+ tests
+./human_tests                             # 14,023+ tests
 cd ..
 ```
 
@@ -698,10 +698,10 @@ Channel CJM coverage (ingress parsing/filtering, session key routing, account pr
 ```
 
 Language: C11 + ASM (aarch64, x86_64)
-Source files: 1,949
-Lines of code: ~414K
-Test files: 858
-Tests: 14,031
+Source files: 1,945
+Lines of code: ~413K
+Test files: 857
+Tests: 14,023
 Dependencies: libc + optional SQLite, libcurl
 
 ```
@@ -734,7 +734,7 @@ config.c Config loading/merging (~/.human/config.json)
 ...
 
 include/human/ Public C headers
-tests/ 580+ test files, 14,031+ tests
+tests/ 580+ test files, 14,023+ tests
 asm/ Platform-specific assembly (aarch64, x86_64, generic C)
 
 ui/ Web UI (LitElement + Vite)
