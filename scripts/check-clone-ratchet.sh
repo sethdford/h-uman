@@ -32,7 +32,7 @@ fi
 # 2026-07-18: origin/main itself measured 11557 (baseline had gone stale);
 # the S2.1b carve merge lands at 11553 — a net -4 vs main with zero new
 # groups (verified by set-diffing merged-tree windows against origin/main).
-CLONE_BASELINE=10100   # merged tree measured 2026-09-30 after resolution (branch 10109, main 10101)
+CLONE_BASELINE=10096   # auto-locked 2026-09-30 (was 10100)
                        # Both sides conflicted here (branch 10447, main 11015), and
                        # neither is right for the merged tree: this is its own
                        # measurement, below both, so the merge tightens the ratchet.
