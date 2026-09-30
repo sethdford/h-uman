@@ -528,3 +528,24 @@ hu_outbound_pipeline_stage_t hu_outbound_pipeline_stage_style_governor = {
     .run = style_governor_run,
     .state = NULL,
 };
+
+/* ── Action C per bubble ─────────────────────────────────────────────── */
+
+bool hu_style_governor_case_bubble_pct(char *buf, size_t len, unsigned lowercase_start_pct,
+                                       unsigned casing_roll) {
+    if (!buf || len == 0 || lowercase_start_pct >= 100 || casing_roll < lowercase_start_pct)
+        return false;
+    size_t i = line_start(buf, 0, len);
+    if (i >= len || buf[i] < 'a' || buf[i] > 'z' || starts_with_url(buf + i, len - i))
+        return false;
+    buf[i] = (char)(buf[i] - 'a' + 'A');
+    return true;
+}
+
+bool hu_style_governor_case_bubble(const struct hu_persona *persona, char *buf, size_t len) {
+    if (hu_style_governor_mode() != HU_STYLE_GOVERNOR_LIVE || !buf || len == 0)
+        return false;
+    return hu_style_governor_case_bubble_pct(buf, len,
+                                             hu_style_governor_lowercase_start_pct(persona),
+                                             hu_style_governor_casing_roll(buf, len));
+}

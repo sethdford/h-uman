@@ -118,6 +118,15 @@ hu_error_t hu_style_governor_shape_full(hu_allocator_t *alloc, const char *text,
  * casing decision is not correlated with the period decision). */
 unsigned hu_style_governor_casing_roll(const char *text, size_t len);
 
+/* Action C for one BUBBLE, in place (length never changes). Shaping runs on
+ * the whole reply before it is split into bubbles, so a bubble cut mid-line
+ * kept a lowercase start (2026-09-30: 32% of follow-on bubbles vs Seth's 9%).
+ * Capitalizes the first letter unless `casing_roll` < `lowercase_start_pct`
+ * (which keeps the card's measured share); URLs are left alone. Returns true
+ * when it changed the buffer. */
+bool hu_style_governor_case_bubble_pct(char *buf, size_t len, unsigned lowercase_start_pct,
+                                       unsigned casing_roll);
+
 /* Per-token 0-99 roll for action D. Mixes the token bytes, the message's
  * casing roll and the token's byte offset, so: the same message always
  * shapes identically (reproducible), two mentions of the same token in one
@@ -140,6 +149,10 @@ const hu_style_entity_token_t *hu_style_governor_entity_table(const struct hu_pe
  * cached; 100 when HU_STYLE_GOVERNOR_CASING=off. `persona` may be NULL. */
 struct hu_persona;
 unsigned hu_style_governor_lowercase_start_pct(const struct hu_persona *persona);
+
+/* hu_style_governor_case_bubble_pct with the persona's card rate and the
+ * bubble's own casing roll; a no-op unless the governor is LIVE. */
+bool hu_style_governor_case_bubble(const struct hu_persona *persona, char *buf, size_t len);
 
 /* FNV-1a based 0-99 roll for a message — exposed so tests and the stage
  * derive identical values. */

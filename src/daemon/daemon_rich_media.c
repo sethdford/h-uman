@@ -6,6 +6,7 @@
  * named entry point so the service loop reads as a sequence of steps. */
 
 #include "human/agent.h"
+#include "human/agent/style_governor.h"
 #include "human/config.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
@@ -216,6 +217,8 @@ void hu_daemon_rich_media_tick(hu_allocator_t *alloc, hu_agent_t *agent, const h
                                 /* Same human-pacing delay as the legacy path so the
                                  * share lands in a natural conversational rhythm. */
                                 usleep(3000000 + (music_seed % 4000000));
+                                (void)hu_style_governor_case_bubble(agent->persona, casual_msg,
+                                                                    strlen(casual_msg));
 
                                 if (hu_inspiration_send_two_bubble(
                                         ch->channel, batch_key, key_len, casual_msg, url,

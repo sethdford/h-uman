@@ -495,7 +495,33 @@ static void entity_roll_is_deterministic_and_varies_by_message(void) {
     HU_ASSERT_TRUE(differing > 20u);
 }
 
+/* Action C per bubble (2026-09-30). The governor cased the reply before it was
+ * split, so a bubble cut mid-line ("nah too windy." | "just hung out...")
+ * went out lowercase: 32% of the twin's follow-on bubbles in a week started
+ * lowercase, first bubbles 10%, Seth 9%. His phone capitalizes every text. */
+static void case_bubble_capitalizes_a_follow_on_bubble(void) {
+    char b[] = "just hung out by the water";
+    HU_ASSERT_TRUE(hu_style_governor_case_bubble_pct(b, strlen(b), 9, 50));
+    HU_ASSERT_STR_EQ(b, "Just hung out by the water");
+    char s[] = "  you deserve it though";
+    HU_ASSERT_TRUE(hu_style_governor_case_bubble_pct(s, strlen(s), 9, 50));
+    HU_ASSERT_STR_EQ(s, "  You deserve it though");
+}
+
+static void case_bubble_keeps_the_measured_lowercase_share(void) {
+    char b[] = "just chilling";
+    HU_ASSERT_FALSE(hu_style_governor_case_bubble_pct(b, strlen(b), 9, 3)); /* roll < rate */
+    HU_ASSERT_STR_EQ(b, "just chilling");
+    HU_ASSERT_FALSE(hu_style_governor_case_bubble_pct(b, strlen(b), 100, 99)); /* unresolved */
+    char u[] = "https://music.apple.com/us/album/x";
+    HU_ASSERT_FALSE(hu_style_governor_case_bubble_pct(u, strlen(u), 9, 50));
+    char c[] = "Already fine";
+    HU_ASSERT_FALSE(hu_style_governor_case_bubble_pct(c, strlen(c), 9, 50));
+}
+
 void run_style_governor_tests(void) {
+    HU_RUN_TEST(case_bubble_capitalizes_a_follow_on_bubble);
+    HU_RUN_TEST(case_bubble_keeps_the_measured_lowercase_share);
     HU_TEST_SUITE("style_governor");
     HU_RUN_TEST(shape_full_capitalizes_listed_entity_mid_sentence);
     HU_RUN_TEST(shape_full_rate_zero_never_capitalizes);

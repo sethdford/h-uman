@@ -5,6 +5,7 @@
  * the hu_daemon_dispatch and hu_daemon_cross_channel prefixes rather than
  * hu_daemon_message_router, so the basename heuristic alone would miss it. */
 #include "human/agent.h"
+#include "human/agent/style_governor.h"
 #include "human/channel.h"
 #include "human/channel_loop.h"
 #include "human/channels/imessage.h"
@@ -797,6 +798,28 @@ static void fresh_parent_still_reacts_tapback_sometimes(void) {
  * 2026-09-30: a message from another sender that landed during the reading
  * delay (Dermot during Lexi's turn, twice on 09-24) was read and discarded;
  * it must be carried into the tick's batch list instead. */
+/* Every bubble is cased at dispatch, not just the reply's first line: a
+ * bubble split mid-line ("nah too windy." | "just hung out...") used to go out
+ * lowercase (32% of follow-on bubbles, 2026-09-30). */
+static void dispatch_capitalizes_a_lowercase_bubble_when_the_governor_is_live(void) {
+    setup_mocks();
+    mock_vtable.reply = NULL;
+    mock_vtable.react_emoji = NULL;
+    hu_style_governor_set_mode_for_test(HU_STYLE_GOVERNOR_LIVE);
+    static const char body[] = "just hung out by the water";
+    /* This text's roll takes the capitalize branch at the card's rate. */
+    HU_ASSERT_TRUE(hu_style_governor_casing_roll(body, sizeof(body) - 1) >=
+                   hu_style_governor_lowercase_start_pct(&mock_persona));
+    hu_conversation_snapshot_t snap = {0};
+    snap.parent_seconds_ago = 5;
+    HU_ASSERT_EQ((int)hu_daemon_dispatch_imessage_reply(
+                     &mock_ch, &mock_persona, NULL, &mock_config, "+15555551212", 12, NULL, 0, body,
+                     sizeof(body) - 1, (const struct hu_conversation_snapshot *)&snap, 6),
+                 (int)HU_OK);
+    HU_ASSERT_STR_EQ(last_send_body, "Just hung out by the water");
+    hu_style_governor_set_mode_for_test(-1);
+}
+
 static void burst_carry_keeps_other_senders_for_this_tick(void) {
     static hu_channel_loop_msg_t msgs[4], burst[3];
     memset(msgs, 0, sizeof(msgs));
@@ -911,6 +934,7 @@ void run_imessage_dispatcher_tests(void) {
     HU_RUN_TEST(msg_ex_parrot_guard_reports_no_text_sent);
     HU_RUN_TEST(record_delivered_reply_noops_without_collector);
     HU_RUN_TEST(burst_carry_keeps_other_senders_for_this_tick);
+    HU_RUN_TEST(dispatch_capitalizes_a_lowercase_bubble_when_the_governor_is_live);
     HU_RUN_TEST(burst_carry_reports_what_it_cannot_keep);
     HU_RUN_TEST(vision_route_uses_the_declared_cloud_fallback);
     HU_RUN_TEST(unseen_photo_alone_becomes_a_note);

@@ -18,6 +18,7 @@
 #include "human/agent.h"
 #include "human/agent/persona_eval.h"
 #include "human/agent/reaction_handler.h"
+#include "human/agent/style_governor.h"
 #include "human/channel.h"
 #include "human/channel_loop.h"
 #include "human/channels/format.h"
@@ -85,12 +86,14 @@ static bool reacted_to(int64_t message_id, int64_t now) {
 
 /* Dispatcher: route iMessage reply through predicate (Phase A) to choose
  * between threaded / flat / tapback based on reply style facts. */
-hu_error_t hu_daemon_dispatch_imessage_reply_ex(
-    struct hu_channel *ch, const struct hu_persona *persona, const struct hu_agent *agent,
-    const struct hu_config *config, const char *target, size_t target_len,
-    const char *parent_msg_guid, size_t parent_guid_len, const char *body, size_t body_len,
-    const struct hu_conversation_snapshot *snapshot, int64_t inferred_message_id_for_react,
-    bool *out_text_sent, bool text_required) {
+static hu_error_t dispatch_reply_inner(struct hu_channel *ch, const struct hu_persona *persona,
+                                       const struct hu_agent *agent, const struct hu_config *config,
+                                       const char *target, size_t target_len,
+                                       const char *parent_msg_guid, size_t parent_guid_len,
+                                       const char *body, size_t body_len,
+                                       const struct hu_conversation_snapshot *snapshot,
+                                       int64_t inferred_message_id_for_react, bool *out_text_sent,
+                                       bool text_required) {
     if (out_text_sent)
         *out_text_sent = false;
     if (!ch || !ch->vtable || !target || !body) {
@@ -740,4 +743,26 @@ const char *hu_daemon_unseen_photo(const char *text, size_t *len, char *buf, siz
     memcpy(buf + o, note, sizeof(note));
     *len = o + sizeof(note) - 1;
     return buf;
+}
+
+/* Every bubble is cased here, not only the reply's first line: shaping runs
+ * before the reply is split, so a bubble cut mid-line kept a lowercase start
+ * (32% of follow-on bubbles vs Seth's 9%, 2026-09-30). Governor rules apply
+ * (LIVE only, the card's lowercase share is kept). */
+hu_error_t hu_daemon_dispatch_imessage_reply_ex(
+    struct hu_channel *ch, const struct hu_persona *persona, const struct hu_agent *agent,
+    const struct hu_config *config, const char *target, size_t target_len,
+    const char *parent_msg_guid, size_t parent_guid_len, const char *body, size_t body_len,
+    const struct hu_conversation_snapshot *snapshot, int64_t inferred_message_id_for_react,
+    bool *out_text_sent, bool text_required) {
+    char cased[1024];
+    if (persona && body && body_len > 0 && body_len < sizeof(cased)) {
+        memcpy(cased, body, body_len);
+        cased[body_len] = '\0';
+        if (hu_style_governor_case_bubble(persona, cased, body_len))
+            body = cased;
+    }
+    return dispatch_reply_inner(ch, persona, agent, config, target, target_len, parent_msg_guid,
+                                parent_guid_len, body, body_len, snapshot,
+                                inferred_message_id_for_react, out_text_sent, text_required);
 }
