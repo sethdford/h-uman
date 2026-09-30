@@ -33,6 +33,7 @@
 #include "human/core/time.h"
 #include "human/daemon.h"
 #include "human/daemon/message_router.h"
+#include "human/daemon/share_queue.h"
 #include "human/memory/agent_facts.h"
 #include "human/persona/pacing.h"
 #include <stdio.h>
@@ -613,6 +614,10 @@ hu_error_t hu_daemon_record_delivered_reply(struct hu_agent *agent, const char *
         return HU_OK;
     if (!prompt || prompt_len == 0)
         return HU_OK; /* the table's join needs a prompt; a media-only turn has none */
+    /* Self-test traffic is not training data: the owner's own handles (persona
+     * relationship "test") are never recorded (2026-09-30). */
+    if (hu_share_is_owner(agent->persona, target, target_len))
+        return HU_OK;
     /* Sprint 46 R5.3 — P(Seth) from the in-process PersonaEval classifier;
      * 0.5 when no model is loaded, stored as-is. */
     double p_seth = hu_persona_eval_score(agent->persona_eval, text, text_len);

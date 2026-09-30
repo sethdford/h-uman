@@ -540,6 +540,40 @@ static int count_rows(sqlite3 *db) {
     return n;
 }
 
+/* Self-test traffic is not training data (2026-09-30: 43 production_outcomes
+ * rows from the owner's own number, several of them garbage rewrites, sat in
+ * the table the evals read). Handles the persona marks relationship "test"
+ * are never recorded; everyone else still is. */
+static void record_delivered_reply_skips_the_owners_test_handles(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
+    hu_dpo_collector_t col = {0};
+    HU_ASSERT_EQ(hu_dpo_collector_create(&alloc, db, 64, &col), HU_OK);
+    HU_ASSERT_EQ(hu_dpo_init_tables(&col), HU_OK);
+    static const char pj[] = "{\"name\":\"Seth\",\"contacts\":{\"+15550000099\":{\"name\":"
+                             "\"Seth\",\"relationship\":\"test\"}}}";
+    hu_persona_t persona;
+    memset(&persona, 0, sizeof(persona));
+    HU_ASSERT_EQ(hu_persona_load_json(&alloc, pj, strlen(pj), &persona), HU_OK);
+    static hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.sota.dpo_collector = col;
+    agent.sota.sota_initialized = true;
+    agent.persona = &persona;
+    HU_ASSERT_EQ(hu_daemon_record_delivered_reply(&agent, "imessage", "+15550000099", 12, "q", 1,
+                                                  "went better than expected actually", 34),
+                 HU_OK);
+    HU_ASSERT_EQ(count_rows(db), 0);
+    HU_ASSERT_EQ(hu_daemon_record_delivered_reply(&agent, "imessage", "+15555551212", 12, "q", 1,
+                                                  "sounds good", 11),
+                 HU_OK);
+    HU_ASSERT_EQ(count_rows(db), 1);
+    hu_persona_deinit(&alloc, &persona);
+    hu_dpo_collector_deinit(&col);
+    sqlite3_close(db);
+}
+
 static void record_delivered_reply_stores_the_text_as_sent(void) {
     hu_allocator_t alloc = hu_system_allocator();
     sqlite3 *db = NULL;
@@ -778,6 +812,7 @@ void run_imessage_dispatcher_tests(void) {
     HU_RUN_TEST(record_delivered_reply_noops_without_collector);
 #if defined(HU_ENABLE_SQLITE) && defined(HU_ENABLE_ML)
     HU_RUN_TEST(record_delivered_reply_stores_the_text_as_sent);
+    HU_RUN_TEST(record_delivered_reply_skips_the_owners_test_handles);
 #endif
     HU_RUN_TEST(demote_stale_tapback_style_truth_table);
     HU_RUN_TEST(snapshot_age_sec_handles_unknown_and_future);
