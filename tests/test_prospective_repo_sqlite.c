@@ -674,6 +674,79 @@ static void repo_sync_source_retires_by_commitment_id_for_owner_pair(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
+/* Fix round 3 (defense in depth): trigger_value's rowid is only ever
+ * minted by pm_mirror_time for the row it keys, so this never happens
+ * through the real writers -- but nothing in this function's contract
+ * verifies that, and a hand-built or corrupted key would otherwise let
+ * contact A's intention retire contact B's commitment. The scoped lookup
+ * must find nothing for A and leave B's row untouched. */
+static void repo_sync_source_commitment_id_is_contact_scoped(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_EQ(sqlite3_exec(db,
+                              "INSERT INTO commitments(contact_id,description,who,deadline,status,"
+                              "created_at) VALUES('+15550000020','A''s own promise','me',5000,"
+                              "'pending',1),('+15550000021','B''s promise','me',5000,'pending',1)",
+                              NULL, NULL, NULL),
+                 SQLITE_OK);
+    char s[64];
+    /* pre: B's commitment (id=2) is pending */
+    q_text(db, "SELECT status FROM commitments WHERE contact_id='+15550000021'", s, sizeof(s));
+    HU_ASSERT_STR_EQ(s, "pending");
+
+    hu_prospective_item_t it;
+    memset(&it, 0, sizeof(it));
+    it.cue_kind = HU_PM_CUE_TIME;
+    snprintf(it.contact_id, sizeof(it.contact_id), "+15550000020");       /* contact A */
+    snprintf(it.trigger_value, sizeof(it.trigger_value), "commitment:2"); /* B's row */
+    snprintf(it.action, sizeof(it.action), "whatever");
+
+    HU_ASSERT_EQ(hu_prospective_repo_sync_source(db, &it, HU_PM_DONE, 9000), HU_OK);
+
+    /* post: B's commitment is UNTOUCHED -- the contact-scoped lookup found
+     * nothing for contact A under id=2 (it belongs to B), and the
+     * dispatcher never falls back to the text-match path once the key
+     * parses */
+    q_text(db, "SELECT status FROM commitments WHERE contact_id='+15550000021'", s, sizeof(s));
+    HU_ASSERT_STR_EQ(s, "pending");
+    /* A's own row (id=1) was never named by the key either */
+    q_text(db, "SELECT status FROM commitments WHERE contact_id='+15550000020'", s, sizeof(s));
+    HU_ASSERT_STR_EQ(s, "pending");
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* Fix round 3, same hazard on the followup:M path. */
+static void repo_sync_source_followup_id_is_contact_scoped(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_EQ(sqlite3_exec(db,
+                              "INSERT INTO delayed_followups(contact_id,topic,scheduled_at,sent) "
+                              "VALUES('+15550000022','A follow-up',5000,0),"
+                              "('+15550000023','B follow-up',5000,0)",
+                              NULL, NULL, NULL),
+                 SQLITE_OK);
+    char s[8];
+    q_text(db, "SELECT sent FROM delayed_followups WHERE contact_id='+15550000023'", s, sizeof(s));
+    HU_ASSERT_STR_EQ(s, "0");
+
+    hu_prospective_item_t it;
+    memset(&it, 0, sizeof(it));
+    it.cue_kind = HU_PM_CUE_TIME;
+    snprintf(it.contact_id, sizeof(it.contact_id), "+15550000022");     /* contact A */
+    snprintf(it.trigger_value, sizeof(it.trigger_value), "followup:2"); /* B's row */
+    snprintf(it.action, sizeof(it.action), "whatever");
+
+    HU_ASSERT_EQ(hu_prospective_repo_sync_source(db, &it, HU_PM_DONE, 9000), HU_OK);
+
+    q_text(db, "SELECT sent FROM delayed_followups WHERE contact_id='+15550000023'", s, sizeof(s));
+    HU_ASSERT_STR_EQ(s, "0"); /* B's row untouched */
+    q_text(db, "SELECT sent FROM delayed_followups WHERE contact_id='+15550000022'", s, sizeof(s));
+    HU_ASSERT_STR_EQ(s, "0"); /* A's own row (id=1) was never named either */
+    mem.vtable->deinit(mem.ctx);
+}
+
 void run_prospective_repo_sqlite_tests(void) {
     HU_TEST_SUITE("prospective repo");
     HU_RUN_TEST(ensure_schema_adds_typed_columns_and_maps_fired);
@@ -692,6 +765,8 @@ void run_prospective_repo_sqlite_tests(void) {
     HU_RUN_TEST(repo_sync_source_retires_by_commitment_id_for_them_pair);
     HU_RUN_TEST(repo_sync_source_retires_lone_followup_by_id);
     HU_RUN_TEST(repo_sync_source_retires_by_commitment_id_for_owner_pair);
+    HU_RUN_TEST(repo_sync_source_commitment_id_is_contact_scoped);
+    HU_RUN_TEST(repo_sync_source_followup_id_is_contact_scoped);
 }
 
 #else

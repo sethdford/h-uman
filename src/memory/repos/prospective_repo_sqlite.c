@@ -468,15 +468,30 @@ static hu_error_t pm_sync_source_by_text(sqlite3 *db, const hu_prospective_item_
  * commitment's description column doesn't change under a status
  * transition, so read it once (by id, before it's retired) and use it to
  * find that twin, rather than trusting it->action (the rephrased mirror
- * text) to match either ledger's raw column. */
+ * text) to match either ledger's raw column.
+ *
+ * Fix round 3 (defense in depth): every statement here also requires
+ * contact_id = <the intention's own contact>. trigger_value's rowid is
+ * only ever minted by pm_mirror_time immediately after the INSERT it
+ * keys, so today it always names a row this same contact owns -- but
+ * rowids are global, not per-contact, and this function trusts a value
+ * read out of the database rather than one it derived itself. Without
+ * the contact check, a hand-built or corrupted trigger_value ("commitment:1"
+ * pointing at someone else's row 1) would silently read and retire
+ * ANOTHER contact's commitment. If the contact-scoped lookup finds no
+ * row -- wrong contact, or the id just doesn't exist -- this is NOT a
+ * reason to fall back to the text-match path for this key: it means
+ * nothing, so it retires nothing and returns HU_OK. */
 static hu_error_t pm_sync_source_by_commitment_id(sqlite3 *db, const char *contact_id,
                                                   const char *ledger, int64_t now,
                                                   int64_t commitment_id) {
     sqlite3_stmt *st = NULL;
-    if (sqlite3_prepare_v2(db, "SELECT description FROM commitments WHERE id = ?1", -1, &st,
-                           NULL) != SQLITE_OK)
+    if (sqlite3_prepare_v2(db,
+                           "SELECT description FROM commitments WHERE id = ?1 AND contact_id = ?2",
+                           -1, &st, NULL) != SQLITE_OK)
         return HU_ERR_MEMORY_BACKEND;
     sqlite3_bind_int64(st, 1, commitment_id);
+    sqlite3_bind_text(st, 2, contact_id, -1, SQLITE_STATIC);
     int rc = sqlite3_step(st);
     char desc[512];
     desc[0] = '\0';
@@ -499,19 +514,20 @@ static hu_error_t pm_sync_source_by_commitment_id(sqlite3 *db, const char *conta
     st = NULL;
     if (sqlite3_prepare_v2(db,
                            "UPDATE commitments SET status = ?1, followed_up_at = ?2 WHERE id = "
-                           "?3 AND status = 'pending'",
+                           "?3 AND contact_id = ?4 AND status = 'pending'",
                            -1, &st, NULL) != SQLITE_OK)
         return HU_ERR_MEMORY_BACKEND;
     sqlite3_bind_text(st, 1, ledger, -1, SQLITE_STATIC);
     sqlite3_bind_int64(st, 2, now);
     sqlite3_bind_int64(st, 3, commitment_id);
+    sqlite3_bind_text(st, 4, contact_id, -1, SQLITE_STATIC);
     rc = sqlite3_step(st);
     sqlite3_finalize(st);
     if (rc != SQLITE_DONE)
         return HU_ERR_MEMORY_BACKEND;
 
     if (!have_desc)
-        return HU_OK; /* no such commitment row (or empty description): no twin to find */
+        return HU_OK; /* no such commitment row for this contact: no twin to find */
 
     st = NULL;
     if (sqlite3_prepare_v2(db,
@@ -526,12 +542,16 @@ static hu_error_t pm_sync_source_by_commitment_id(sqlite3 *db, const char *conta
     return rc == SQLITE_DONE ? HU_OK : HU_ERR_MEMORY_BACKEND;
 }
 
-static hu_error_t pm_sync_source_by_followup_id(sqlite3 *db, int64_t followup_id) {
+static hu_error_t pm_sync_source_by_followup_id(sqlite3 *db, const char *contact_id,
+                                                int64_t followup_id) {
     sqlite3_stmt *st = NULL;
-    if (sqlite3_prepare_v2(db, "UPDATE delayed_followups SET sent = 1 WHERE id = ?1 AND sent = 0",
+    if (sqlite3_prepare_v2(db,
+                           "UPDATE delayed_followups SET sent = 1 WHERE id = ?1 AND contact_id = "
+                           "?2 AND sent = 0",
                            -1, &st, NULL) != SQLITE_OK)
         return HU_ERR_MEMORY_BACKEND;
     sqlite3_bind_int64(st, 1, followup_id);
+    sqlite3_bind_text(st, 2, contact_id, -1, SQLITE_STATIC);
     int rc = sqlite3_step(st);
     sqlite3_finalize(st);
     return rc == SQLITE_DONE ? HU_OK : HU_ERR_MEMORY_BACKEND;
@@ -550,7 +570,7 @@ hu_error_t hu_prospective_repo_sync_source(sqlite3 *db, const hu_prospective_ite
     if (pm_parse_source_key(it->trigger_value, "commitment", &id))
         return pm_sync_source_by_commitment_id(db, it->contact_id, ledger, now, id);
     if (pm_parse_source_key(it->trigger_value, "followup", &id))
-        return pm_sync_source_by_followup_id(db, id);
+        return pm_sync_source_by_followup_id(db, it->contact_id, id);
     return pm_sync_source_by_text(db, it, ledger, now);
 }
 
