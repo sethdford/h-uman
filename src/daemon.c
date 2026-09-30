@@ -10130,6 +10130,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
             hu_reminders_tick(agent, channels, channel_count, (int64_t)time(NULL));
             /* Morning briefing (slice 2): HU_BRIEFING, off by default. */
             hu_briefing_tick(agent, channels, channel_count, (int64_t)time(NULL));
+            /* Date drafts (slice 4): HU_DATE_NUDGES, off by default. */
+            hu_date_nudges_tick(agent, channels, channel_count, (int64_t)time(NULL));
         }
 
         /* Sprint A.6 wire — periodic social tick: exercises the three

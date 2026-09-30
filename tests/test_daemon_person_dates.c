@@ -95,6 +95,20 @@ static void person_date_days_away_wraps_the_year_and_handles_feb_29(void) {
     tz_end();
 }
 
+static void date_draft_text_addresses_people_the_way_you_would(void) {
+    char b[64];
+    HU_ASSERT_TRUE(hu_date_draft_text("Betty Ford", "mother", "birthday", b, sizeof(b)) > 0);
+    HU_ASSERT_STR_EQ(b, "happy birthday mom!");
+    hu_date_draft_text("Tom Ford", "father", "anniversary", b, sizeof(b));
+    HU_ASSERT_STR_EQ(b, "happy anniversary dad!");
+    hu_date_draft_text("Mindy Ford", "sister", "birthday", b, sizeof(b));
+    HU_ASSERT_STR_EQ(b, "happy birthday mindy!");
+    hu_date_draft_text(NULL, NULL, "birthday", b, sizeof(b));
+    HU_ASSERT_STR_EQ(b, "happy birthday!");
+    HU_ASSERT_EQ(hu_date_draft_text("Mindy", "sister", "graduation", b, sizeof(b)), 0);
+    HU_ASSERT_EQ(hu_date_draft_text("Mindy", "sister", "birthday", b, 8), 0); /* too small */
+}
+
 #ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>
 #include <sys/stat.h>
@@ -106,14 +120,20 @@ static void person_date_days_away_wraps_the_year_and_handles_feb_29(void) {
 
 typedef struct rec_channel {
     int sends;
+    char target[64];
     char text[2048];
+    const char *fail_for; /* a recipient whose sends fail */
 } rec_channel_t;
 
 static hu_error_t rec_send(void *ctx, const char *target, size_t target_len, const char *msg,
                            size_t msg_len, const char *const *media, size_t media_count) {
-    (void)target, (void)target_len, (void)media, (void)media_count;
+    (void)media, (void)media_count;
     rec_channel_t *r = ctx;
+    if (r->fail_for && strlen(r->fail_for) == target_len &&
+        memcmp(r->fail_for, target, target_len) == 0)
+        return HU_ERR_IO;
     r->sends++;
+    snprintf(r->target, sizeof(r->target), "%.*s", (int)target_len, target);
     snprintf(r->text, sizeof(r->text), "%.*s", (int)msg_len, msg);
     return HU_OK;
 }
@@ -207,7 +227,13 @@ static void fixture_end(fixture_t *f) {
     unsetenv("HU_DATES");
     unsetenv("HU_ADDRESSBOOK_DIR");
     unsetenv("HU_BRIEFING");
+    unsetenv("HU_DATE_NUDGES");
     tz_end();
+}
+
+static bool say_at(fixture_t *f, const char *text, int64_t now, char *reply, size_t cap) {
+    return hu_person_dates_handle_owner_message(&f->agent, OWNER, strlen(OWNER), text, strlen(text),
+                                                now, reply, cap);
 }
 
 static bool say(fixture_t *f, const char *from, const char *text, char *reply, size_t cap) {
@@ -277,6 +303,109 @@ static void person_dates_reach_the_morning_briefing_by_name(void) {
                                  "- Tuesday: Betty's birthday");
     fixture_end(&f);
 }
+static int64_t at(int year, int mon, int day, int hour, int min) {
+    return local_at(year, mon, day, hour) + (int64_t)min * 60;
+}
+
+static void date_drafts_ask_once_and_send_only_after_the_owner_says_send(void) {
+    fixture_t f;
+    fixture_begin(&f, "live");
+    setenv("HU_DATE_NUDGES", "live", 1);
+    char reply[256];
+    HU_ASSERT_TRUE(say(&f, OWNER, "mom's birthday is march 3", reply, sizeof(reply)));
+
+    hu_date_nudges_tick(&f.agent, &f.svc, 1, at(2026, 3, 3, 8, 30));
+    HU_ASSERT_EQ(f.rec.sends, 0); /* not before 9 */
+    /* "send" with no open question is ordinary conversation. */
+    HU_ASSERT_FALSE(say_at(&f, "send", at(2026, 3, 3, 8, 31), reply, sizeof(reply)));
+
+    hu_date_nudges_tick(&f.agent, &f.svc, 1, at(2026, 3, 3, 9, 5));
+    HU_ASSERT_EQ(f.rec.sends, 1);
+    HU_ASSERT_STR_EQ(f.rec.target, OWNER); /* the question goes to the owner */
+    HU_ASSERT_STR_EQ(f.rec.text, "today is Betty's birthday. want me to text Betty: \"happy "
+                                 "birthday mom!\"? reply send, skip, or send: your own words");
+    hu_date_nudges_tick(&f.agent, &f.svc, 1, at(2026, 3, 3, 9, 6));
+    HU_ASSERT_EQ(f.rec.sends, 1); /* one open question, asked once */
+
+    HU_ASSERT_FALSE(say_at(&f, "how's it going", at(2026, 3, 3, 9, 7), reply, sizeof(reply)));
+    HU_ASSERT_TRUE(say_at(&f, "Send", at(2026, 3, 3, 9, 8), reply, sizeof(reply)));
+    HU_ASSERT_STR_EQ(reply, "ok, sending it to Betty");
+    hu_date_nudges_tick(&f.agent, &f.svc, 1, at(2026, 3, 3, 9, 9));
+    HU_ASSERT_EQ(f.rec.sends, 2);
+    HU_ASSERT_STR_EQ(f.rec.target, MOTHER);
+    HU_ASSERT_STR_EQ(f.rec.text, "happy birthday mom!");
+    hu_date_nudges_tick(&f.agent, &f.svc, 1, at(2026, 3, 3, 9, 10));
+    hu_date_nudges_tick(&f.agent, &f.svc, 1, at(2026, 3, 3, 13, 0));
+    HU_ASSERT_EQ(f.rec.sends, 2); /* sent once; Betty is not asked about again */
+    fixture_end(&f);
+}
+
+static void date_drafts_send_the_owners_own_words_and_report_a_failure(void) {
+    fixture_t f;
+    fixture_begin(&f, "live");
+    setenv("HU_DATE_NUDGES", "live", 1);
+    char reply[256];
+    /* Mindy's birthday comes from Contacts (Mar 2). */
+    hu_date_nudges_tick(&f.agent, &f.svc, 1, at(2027, 3, 2, 10, 0));
+    HU_ASSERT_EQ(f.rec.sends, 1);
+    HU_ASSERT_TRUE(
+        say_at(&f, "send: happy bday min, love you!", at(2027, 3, 2, 10, 1), reply, sizeof(reply)));
+    f.rec.fail_for = SISTER;
+    hu_date_nudges_tick(&f.agent, &f.svc, 1, at(2027, 3, 2, 10, 2));
+    /* Nothing reached Mindy; the owner is told instead of left believing it went. */
+    HU_ASSERT_STR_EQ(f.rec.target, OWNER);
+    HU_ASSERT_STR_EQ(f.rec.text, "couldn't send your note to Mindy (I/O error)");
+
+    fixture_end(&f);
+    fixture_begin(&f, "live");
+    setenv("HU_DATE_NUDGES", "live", 1);
+    hu_date_nudges_tick(&f.agent, &f.svc, 1, at(2028, 3, 2, 10, 0));
+    HU_ASSERT_TRUE(
+        say_at(&f, "send: happy bday min, love you!", at(2028, 3, 2, 10, 1), reply, sizeof(reply)));
+    hu_date_nudges_tick(&f.agent, &f.svc, 1, at(2028, 3, 2, 10, 2));
+    HU_ASSERT_STR_EQ(f.rec.target, SISTER);
+    HU_ASSERT_STR_EQ(f.rec.text, "happy bday min, love you!");
+    fixture_end(&f);
+}
+
+static void date_drafts_skip_and_shadow_send_nothing_to_the_contact(void) {
+    fixture_t f;
+    fixture_begin(&f, "live");
+    setenv("HU_DATE_NUDGES", "live", 1);
+    char reply[256];
+    hu_date_nudges_tick(&f.agent, &f.svc, 1, at(2029, 3, 2, 10, 0));
+    HU_ASSERT_EQ(f.rec.sends, 1);
+    HU_ASSERT_TRUE(say_at(&f, "skip", at(2029, 3, 2, 10, 1), reply, sizeof(reply)));
+    HU_ASSERT_STR_EQ(reply, "ok, skipped");
+    hu_date_nudges_tick(&f.agent, &f.svc, 1, at(2029, 3, 2, 10, 2));
+    hu_date_nudges_tick(&f.agent, &f.svc, 1, at(2029, 3, 2, 12, 0));
+    HU_ASSERT_EQ(f.rec.sends, 1);
+    fixture_end(&f);
+
+    fixture_begin(&f, "live");
+    setenv("HU_DATE_NUDGES", "shadow", 1);
+    hu_date_nudges_tick(&f.agent, &f.svc, 1, at(2030, 3, 2, 10, 0));
+    HU_ASSERT_EQ(f.rec.sends, 0);
+    HU_ASSERT_FALSE(say_at(&f, "send", at(2030, 3, 2, 10, 1), reply, sizeof(reply)));
+    fixture_end(&f);
+}
+static void date_drafts_cannot_be_approved_if_the_question_never_arrived(void) {
+    fixture_t f;
+    fixture_begin(&f, "live");
+    setenv("HU_DATE_NUDGES", "live", 1);
+    char reply[256];
+    f.rec.fail_for = OWNER; /* the question to the owner does not go through */
+    hu_date_nudges_tick(&f.agent, &f.svc, 1, at(2031, 3, 2, 10, 0));
+    HU_ASSERT_EQ(f.rec.sends, 0);
+    f.rec.fail_for = NULL;
+    /* The owner never saw a draft, so "send" approves nothing. */
+    HU_ASSERT_FALSE(say_at(&f, "send", at(2031, 3, 2, 10, 1), reply, sizeof(reply)));
+    /* The next pass asks for real. */
+    hu_date_nudges_tick(&f.agent, &f.svc, 1, at(2031, 3, 2, 10, 2));
+    HU_ASSERT_EQ(f.rec.sends, 1);
+    HU_ASSERT_STR_EQ(f.rec.target, OWNER);
+    fixture_end(&f);
+}
 #endif /* HU_ENABLE_SQLITE */
 
 void run_daemon_person_dates_tests(void) {
@@ -284,10 +413,15 @@ void run_daemon_person_dates_tests(void) {
     HU_RUN_TEST(person_date_parse_accepts_the_ways_people_say_it);
     HU_RUN_TEST(person_date_parse_refuses_what_is_not_a_date_statement);
     HU_RUN_TEST(person_date_days_away_wraps_the_year_and_handles_feb_29);
+    HU_RUN_TEST(date_draft_text_addresses_people_the_way_you_would);
 #ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(person_dates_owner_statements_are_stored_and_acked);
     HU_RUN_TEST(person_dates_do_nothing_unless_live);
     HU_RUN_TEST(person_dates_merge_owner_and_contacts_soonest_first);
     HU_RUN_TEST(person_dates_reach_the_morning_briefing_by_name);
+    HU_RUN_TEST(date_drafts_ask_once_and_send_only_after_the_owner_says_send);
+    HU_RUN_TEST(date_drafts_send_the_owners_own_words_and_report_a_failure);
+    HU_RUN_TEST(date_drafts_skip_and_shadow_send_nothing_to_the_contact);
+    HU_RUN_TEST(date_drafts_cannot_be_approved_if_the_question_never_arrived);
 #endif
 }

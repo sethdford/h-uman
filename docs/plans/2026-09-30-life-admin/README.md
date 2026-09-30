@@ -196,5 +196,24 @@ argument, so a persona birthday line would be injected into every contact's
 check-in that day. It only runs when proactive check-ins are enabled (off by
 default); the second half of this slice replaces it with person dates.
 
-Second half, still to build: on the day, a drafted message the owner approves
-with "send" before anything goes to the contact.
+## Slice 4 status, second half (2026-09-30) — drafts the owner approves
+
+Gate `HU_DATE_NUDGES` (off by default). Live, between 9am and 8pm, the owner
+gets one question at a time about a person date that is today:
+
+    today is Betty's birthday. want me to text Betty: "happy birthday mom!"?
+    reply send, skip, or send: your own words
+
+- Only "send", "send it", "skip" and "send: <words>" answer it, and only while
+  a question is open; "yes"/"no" never do, because they are ordinary words.
+- The question is recorded only after it reached the owner, so "send" can
+  never approve a draft the owner did not see (a test fails the question's
+  delivery and checks exactly that).
+- Approved text goes through the outbound sanitizer on the contact's channel;
+  if it cannot be sent the owner is told, rather than left believing it went.
+- Drafts address parents as mom/dad and everyone else by first name. They are
+  deterministic on purpose: an owner-approved message should be exactly what
+  the owner approved.
+
+The measurement to go live is the plan's: the owner's approval rate of drafts
+(sent + edited vs skipped), readable from `date_drafts`.

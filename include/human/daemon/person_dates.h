@@ -51,4 +51,27 @@ bool hu_person_dates_handle_owner_message(struct hu_agent *agent, const char *ow
 size_t hu_person_dates_upcoming(struct hu_agent *agent, int64_t now, int window_days,
                                 hu_briefing_date_t *out, size_t cap);
 
+/* ── Drafts on the day (slice 4, second half) ─────────────────────────────
+ *
+ * Gate: HU_DATE_NUDGES off | shadow | live (default off). Live, between 9am
+ * and 8pm local, the owner gets one question at a time about a person date
+ * that is today:
+ *   today is Betty's birthday. want me to text Betty: "happy birthday mom!"?
+ *   reply send, skip, or send: your own words
+ * Only "send", "send it", "skip" and "send: <text>" answer it, and only while
+ * a question is open; nothing reaches the contact without one of them. The
+ * question is recorded only after it was delivered, so "send" can never
+ * approve a draft the owner did not see. Approved text goes through the
+ * outbound sanitizer on the contact's channel; a failure is told to the
+ * owner. Shadow logs what would be asked and sends nothing. */
+
+/* "happy birthday mom!" — parents by relationship, others by first name. */
+size_t hu_date_draft_text(const char *name, const char *relationship, const char *label, char *buf,
+                          size_t cap);
+
+struct hu_service_channel;
+
+void hu_date_nudges_tick(struct hu_agent *agent, struct hu_service_channel *channels,
+                         size_t channel_count, int64_t now);
+
 #endif /* HU_DAEMON_PERSON_DATES_H */

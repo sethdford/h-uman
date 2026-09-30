@@ -1,9 +1,13 @@
 /* src/daemon/daemon_person_dates.c — contract in include/human/daemon/person_dates.h */
 #include "human/agent.h"
+#include "human/agent/outbound_sanitize.h"
+#include "human/channel.h"
 #include "human/core/gate_mode.h"
 #include "human/core/log.h"
+#include "human/daemon.h"
 #include "human/daemon/person_dates.h"
 #include "human/daemon/share_queue.h"
+#include "human/daemon_outbound_bus.h"
 #include "human/memory.h"
 #include "human/persona.h"
 #ifdef HU_ENABLE_SQLITE
@@ -197,6 +201,38 @@ int hu_person_date_days_away(int month, int day, int64_t now) {
 
 /* ── Daemon side ────────────────────────────────────────────────────────── */
 
+size_t hu_date_draft_text(const char *name, const char *relationship, const char *label, char *buf,
+                          size_t cap) {
+    if (!buf || cap == 0)
+        return 0;
+    buf[0] = '\0';
+    if (!label || (strcmp(label, "birthday") != 0 && strcmp(label, "anniversary") != 0))
+        return 0;
+    char who[64] = "";
+    if (relationship &&
+        (strcasecmp(relationship, "mother") == 0 || strcasecmp(relationship, "mom") == 0))
+        snprintf(who, sizeof(who), "mom");
+    else if (relationship &&
+             (strcasecmp(relationship, "father") == 0 || strcasecmp(relationship, "dad") == 0))
+        snprintf(who, sizeof(who), "dad");
+    else if (name && name[0]) {
+        size_t n = strcspn(name, " ");
+        for (size_t i = 0; i < n && i + 1 < sizeof(who); i++)
+            who[i] = (char)tolower((unsigned char)name[i]);
+        who[n < sizeof(who) ? n : sizeof(who) - 1] = '\0';
+    }
+    int w = who[0] ? snprintf(buf, cap, "happy %s %s!", label, who)
+                   : snprintf(buf, cap, "happy %s!", label);
+    if (w > 0 && (size_t)w < cap)
+        return (size_t)w;
+    buf[0] = '\0'; /* never half a greeting */
+    return 0;
+}
+
+static hu_gate_mode_t nudges_gate(void) {
+    return hu_gate_mode_from_env("HU_DATE_NUDGES", HU_GATE_OFF);
+}
+
 static hu_gate_mode_t dates_gate(void) {
     return hu_gate_mode_from_env("HU_DATES", HU_GATE_OFF);
 }
@@ -206,6 +242,9 @@ static hu_gate_mode_t dates_gate(void) {
 static const char *const k_month_names[] = {"January",   "February", "March",    "April",
                                             "May",       "June",     "July",     "August",
                                             "September", "October",  "November", "December"};
+
+static bool handle_draft_reply(struct hu_agent *agent, const char *text, size_t len, int64_t now,
+                               char *reply, size_t reply_cap);
 
 static const hu_contact_profile_t *contact_by_id(const hu_persona_t *p, const char *id) {
     for (size_t i = 0; p && i < p->contacts_count; i++)
@@ -234,9 +273,12 @@ bool hu_person_dates_handle_owner_message(struct hu_agent *agent, const char *ow
     if (!agent || !owner || !text || !reply || reply_cap == 0)
         return false;
     reply[0] = '\0';
+    if (!agent->persona || !hu_share_is_owner(agent->persona, owner, owner_len))
+        return false;
+    if (handle_draft_reply(agent, text, len, now, reply, reply_cap))
+        return true;
     hu_gate_mode_t gate = dates_gate();
-    if (gate == HU_GATE_OFF || !agent->persona ||
-        !hu_share_is_owner(agent->persona, owner, owner_len))
+    if (gate == HU_GATE_OFF)
         return false;
     hu_person_date_cmd_t cmd;
     if (!hu_person_date_parse(text, len, &cmd))
@@ -330,18 +372,16 @@ static void add_contacts_birthdays(struct hu_agent *agent, int64_t now, int wind
     }
 }
 
-size_t hu_person_dates_upcoming(struct hu_agent *agent, int64_t now, int window_days,
-                                hu_briefing_date_t *out, size_t cap) {
-    if (!agent || !out || cap == 0 || dates_gate() != HU_GATE_LIVE)
-        return 0;
+/* Person dates within window_days, soonest first, owner-given before Contacts. */
+static size_t collect(struct hu_agent *agent, int64_t now, int window_days, candidate_t *cand,
+                      size_t cap) {
     sqlite3 *db = agent->memory ? hu_sqlite_memory_get_db(agent->memory) : NULL;
-    candidate_t cand[64];
     size_t n = 0;
     if (db) {
         hu_person_date_t rows[64];
         size_t rn = 0;
         if (hu_person_dates_repo_list(db, rows, 64, &rn) == HU_OK)
-            for (size_t i = 0; i < rn; i++) {
+            for (size_t i = 0; i < rn && n < cap; i++) {
                 int away = hu_person_date_days_away(rows[i].month, rows[i].day, now);
                 if (away < 0 || away > window_days)
                     continue;
@@ -352,13 +392,22 @@ size_t hu_person_dates_upcoming(struct hu_agent *agent, int64_t now, int window_
             }
     }
     /* Owner-given dates came first, so they win over Contacts for a person. */
-    add_contacts_birthdays(agent, now, window_days, cand, 64, &n);
+    add_contacts_birthdays(agent, now, window_days, cand, cap, &n);
     for (size_t i = 1; i < n; i++) /* soonest first; small n */
         for (size_t j = i; j > 0 && cand[j - 1].days_away > cand[j].days_away; j--) {
             candidate_t t = cand[j - 1];
             cand[j - 1] = cand[j];
             cand[j] = t;
         }
+    return n;
+}
+
+size_t hu_person_dates_upcoming(struct hu_agent *agent, int64_t now, int window_days,
+                                hu_briefing_date_t *out, size_t cap) {
+    if (!agent || !out || cap == 0 || dates_gate() != HU_GATE_LIVE)
+        return 0;
+    candidate_t cand[64];
+    size_t n = collect(agent, now, window_days, cand, 64);
     size_t k = 0;
     for (; k < n && k < cap; k++) {
         person_label(agent->persona, cand[k].contact_id, cand[k].label, out[k].label,
@@ -366,6 +415,203 @@ size_t hu_person_dates_upcoming(struct hu_agent *agent, int64_t now, int window_
         out[k].days_away = cand[k].days_away;
     }
     return k;
+}
+
+static void local_day(int64_t now, char *buf, size_t cap) {
+    time_t t = (time_t)now;
+    struct tm tm;
+    if (localtime_r(&t, &tm))
+        snprintf(buf, cap, "%04d-%02d-%02d", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday);
+    else
+        snprintf(buf, cap, "?");
+}
+
+static const hu_contact_profile_t *owner_profile(const hu_persona_t *p) {
+    for (size_t i = 0; p && i < p->contacts_count; i++)
+        if (p->contacts[i].contact_id && p->contacts[i].relationship &&
+            strcmp(p->contacts[i].relationship, "test") == 0)
+            return &p->contacts[i];
+    return NULL;
+}
+
+static void first_name(const hu_contact_profile_t *c, const char *fallback, char *buf, size_t cap) {
+    if (c && c->name && c->name[0])
+        snprintf(buf, cap, "%.*s", (int)strcspn(c->name, " "), c->name);
+    else
+        snprintf(buf, cap, "%s", fallback);
+}
+
+/* "send", "send it", "skip", "send: <words>" while a question is open. */
+static bool handle_draft_reply(struct hu_agent *agent, const char *text, size_t len, int64_t now,
+                               char *reply, size_t reply_cap) {
+    if (nudges_gate() != HU_GATE_LIVE)
+        return false;
+    sqlite3 *db = agent->memory ? hu_sqlite_memory_get_db(agent->memory) : NULL;
+    if (!db)
+        return false;
+    char day[16];
+    local_day(now, day, sizeof(day));
+    hu_date_draft_t d;
+    if (hu_date_drafts_repo_open(db, day, &d) != HU_OK)
+        return false;
+    while (len > 0 && (text[0] == ' ' || text[0] == '\n'))
+        text++, len--;
+    while (len > 0 && strchr(" \n\r", text[len - 1]))
+        len--;            /* whitespace only: the owner's own words keep their punctuation */
+    size_t cmd_len = len; /* "send!" and "skip." still count as commands */
+    while (cmd_len > 0 && strchr(".!", text[cmd_len - 1]))
+        cmd_len--;
+    char who[64];
+    first_name(contact_by_id(agent->persona, d.contact_id), d.contact_id, who, sizeof(who));
+    const char *final_text = NULL;
+    char own[512];
+    if ((cmd_len == 4 && strncasecmp(text, "send", 4) == 0) ||
+        (cmd_len == 7 && strncasecmp(text, "send it", 7) == 0)) {
+        final_text = d.draft;
+    } else if (len > 5 && strncasecmp(text, "send:", 5) == 0) {
+        size_t off = 5;
+        while (off < len && text[off] == ' ')
+            off++;
+        if (off == len)
+            return false;
+        snprintf(own, sizeof(own), "%.*s", (int)(len - off), text + off);
+        final_text = own;
+    } else if (cmd_len == 4 && strncasecmp(text, "skip", 4) == 0) {
+        if (hu_date_drafts_repo_decide(db, d.id, "skipped", NULL, now) != HU_OK)
+            return false;
+        snprintf(reply, reply_cap, "ok, skipped");
+        return true;
+    } else {
+        return false; /* anything else is ordinary conversation */
+    }
+    if (hu_date_drafts_repo_decide(db, d.id, "approved", final_text, now) != HU_OK)
+        return false;
+    snprintf(reply, reply_cap, "ok, sending it to %s", who);
+    return true;
+}
+
+static const char *channel_for(const hu_contact_profile_t *c) {
+    return c && c->proactive_channel && c->proactive_channel[0] ? c->proactive_channel : "imessage";
+}
+
+static hu_error_t send_on(hu_service_channel_t *channels, size_t count, const char *channel,
+                          const char *to, const char *text, size_t len) {
+    hu_service_channel_t *sc = hu_daemon_outbound_find_sender(channels, count, channel);
+    if (!sc)
+        return HU_ERR_NOT_FOUND;
+    return sc->channel->vtable->send(sc->channel->ctx, to, strlen(to), text, len, NULL, 0);
+}
+
+/* Approved drafts go to their contact; the owner hears about a failure. */
+static void deliver_approved(struct hu_agent *agent, sqlite3 *db, const hu_contact_profile_t *owner,
+                             hu_service_channel_t *channels, size_t count, int64_t now) {
+    hu_date_draft_t rows[4];
+    size_t n = 0;
+    if (hu_date_drafts_repo_approved(db, rows, 4, &n) != HU_OK)
+        return;
+    for (size_t i = 0; i < n; i++) {
+        const hu_contact_profile_t *c = contact_by_id(agent->persona, rows[i].contact_id);
+        char text[512];
+        snprintf(text, sizeof(text), "%s", rows[i].final_text);
+        size_t len = strlen(text);
+        const char *why = NULL;
+        hu_error_t err = HU_ERR_INVALID_ARGUMENT;
+        if (c && hu_outbound_sanitize(text, &len, &why) && len > 0)
+            err = send_on(channels, count, channel_for(c), c->contact_id, text, len);
+        else
+            why = c ? (why ? why : "empty after cleanup") : "no such contact any more";
+        (void)hu_date_drafts_repo_decide(db, rows[i].id, err == HU_OK ? "sent" : "failed", NULL,
+                                         now);
+        char who[64];
+        first_name(c, rows[i].contact_id, who, sizeof(who));
+        if (err == HU_OK) {
+            hu_log_info("dates", agent->observer, "approved %s note sent to %s", rows[i].label,
+                        who);
+            continue;
+        }
+        char note[256];
+        int w = snprintf(note, sizeof(note), "couldn't send your note to %s (%s)", who,
+                         why ? why : hu_error_string(err));
+        if (w > 0)
+            (void)send_on(channels, count, channel_for(owner), owner->contact_id, note,
+                          strlen(note));
+        hu_log_warn("dates", agent->observer, "approved %s note to %s failed: %s", rows[i].label,
+                    who, why ? why : hu_error_string(err));
+    }
+}
+
+void hu_date_nudges_tick(struct hu_agent *agent, struct hu_service_channel *channels,
+                         size_t channel_count, int64_t now) {
+    static int64_t last_pass = 0;
+    static char shadow_day[16];
+    if (!agent)
+        return;
+    hu_gate_mode_t gate = nudges_gate();
+    if (gate == HU_GATE_OFF) {
+        static atomic_bool noted = false;
+        hu_log_info_once(&noted, "dates", agent->observer,
+                         "date drafts off (HU_DATE_NUDGES unset); set HU_DATE_NUDGES=shadow to "
+                         "log them or live to ask the owner");
+        return;
+    }
+    if (now >= last_pass && now - last_pass < 30)
+        return;
+    last_pass = now;
+    sqlite3 *db = agent->memory ? hu_sqlite_memory_get_db(agent->memory) : NULL;
+    const hu_contact_profile_t *owner = owner_profile(agent->persona);
+    if (!db || !owner)
+        return;
+    if (gate == HU_GATE_LIVE)
+        deliver_approved(agent, db, owner, channels, channel_count, now);
+
+    time_t t = (time_t)now;
+    struct tm tm;
+    if (!localtime_r(&t, &tm) || tm.tm_hour < 9 || tm.tm_hour >= 20)
+        return;
+    char day[16];
+    local_day(now, day, sizeof(day));
+    hu_date_draft_t open_q;
+    if (hu_date_drafts_repo_open(db, day, &open_q) == HU_OK)
+        return; /* one question at a time */
+    candidate_t cand[16];
+    size_t n = collect(agent, now, 0, cand, 16);
+    for (size_t i = 0; i < n; i++) {
+        const hu_contact_profile_t *c = contact_by_id(agent->persona, cand[i].contact_id);
+        bool seen = false;
+        if (!c || c == owner ||
+            hu_date_drafts_repo_seen(db, day, c->contact_id, cand[i].label, &seen) != HU_OK || seen)
+            continue;
+        char draft[256];
+        if (hu_date_draft_text(c->name, c->relationship, cand[i].label, draft, sizeof(draft)) == 0)
+            continue;
+        if (gate == HU_GATE_SHADOW) {
+            if (strcmp(shadow_day, day) != 0) {
+                snprintf(shadow_day, sizeof(shadow_day), "%s", day);
+                hu_log_info("dates", agent->observer, "shadow: would ask the owner about a %s",
+                            cand[i].label);
+            }
+            return;
+        }
+        char what[96], who[64], note[512];
+        person_label(agent->persona, c->contact_id, cand[i].label, what, sizeof(what));
+        first_name(c, c->contact_id, who, sizeof(who));
+        int w = snprintf(note, sizeof(note),
+                         "today is %s. want me to text %s: \"%s\"? reply send, skip, or send: "
+                         "your own words",
+                         what, who, draft);
+        if (w < 0 || (size_t)w >= sizeof(note))
+            continue;
+        /* Record the question only once the owner has actually seen it. */
+        if (send_on(channels, channel_count, channel_for(owner), owner->contact_id, note,
+                    (size_t)w) != HU_OK) {
+            hu_log_warn("dates", agent->observer, "could not ask the owner about a %s",
+                        cand[i].label);
+            return;
+        }
+        bool created = false;
+        (void)hu_date_drafts_repo_ask(db, day, c->contact_id, cand[i].label, draft, now, &created);
+        return;
+    }
 }
 
 #else /* !HU_ENABLE_SQLITE */
@@ -384,6 +630,11 @@ size_t hu_person_dates_upcoming(struct hu_agent *agent, int64_t now, int window_
                                 hu_briefing_date_t *out, size_t cap) {
     (void)agent, (void)now, (void)window_days, (void)out, (void)cap;
     return 0;
+}
+
+void hu_date_nudges_tick(struct hu_agent *agent, struct hu_service_channel *channels,
+                         size_t channel_count, int64_t now) {
+    (void)agent, (void)channels, (void)channel_count, (void)now, (void)nudges_gate;
 }
 
 #endif /* HU_ENABLE_SQLITE */
