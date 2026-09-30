@@ -64,4 +64,19 @@ hu_error_t cmd_hula(hu_allocator_t *alloc, int argc, char **argv);
  * test can pin that a trailing `--full` is honoured (cli_commands.c). */
 void hu_cli_parse_reindex_args(int argc, char **argv, size_t *limit_out, bool *full_out);
 
+/* `human memory ground [--full] <contact> <message>` (argv[3..]). False when
+ * the contact is missing/empty or the message is missing. Pure. */
+bool hu_cli_parse_ground_args(int argc, char **argv, const char **contact_out, const char **msg_out,
+                              bool *full_out);
+
+struct hu_graph_ground_turn_stats;
+/* `human memory ground` output. Plain (lexical compose only, unchanged):
+ *   "matched=<n> bytes=<b>"
+ * --full (hu_graph_ground_compose_turn, the live turn's composition):
+ *   "matched=<n> bytes=<b> fallback=<0|1> self=<0|1> names=<typed lines>"
+ * then the block, if any. scripts/eval_name_grounding.py parses this shape. */
+void hu_cli_memory_ground_emit(FILE *out, bool full, size_t matched,
+                               const struct hu_graph_ground_turn_stats *stats, const char *ctx,
+                               size_t ctx_len);
+
 #endif /* HU_CLI_COMMANDS_H */

@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #ifdef HU_ENABLE_SQLITE
 
@@ -163,21 +164,85 @@ typedef struct import_fact {
     int64_t ts;
 } import_fact_t;
 
+typedef struct import_entity {
+    char contact[128];
+    char name[128];
+    char source[64];
+    hu_entity_type_t type;
+    float confidence;
+    bool retype_only;
+} import_entity_t;
+
 static int import_fact_cmp_ts(const void *a, const void *b) {
     int64_t x = ((const import_fact_t *)a)->ts, y = ((const import_fact_t *)b)->ts;
     return (x > y) - (x < y);
 }
 
-/* One JSON object per line: {contact, subject, predicate, object, confidence,
- * ts, source}. Facts are ingested in ts order so supersession is chronological
- * (a lives_in from May closes a lives_in from March, never the reverse).
- * Prints {"imported":N,"skipped":M} and fails when nothing was imported — an
- * empty import must not look like a finished one. */
+/* Double a heap array holding `n` elements of `elem` bytes. Returns the new
+ * array (old one freed) or NULL on OOM (old one kept, *cap unchanged). */
+static void *import_grow(hu_allocator_t *alloc, void *arr, size_t n, size_t *cap, size_t elem) {
+    size_t ncap = *cap * 2;
+    void *grown = alloc->alloc(alloc->ctx, ncap * elem);
+    if (!grown)
+        return NULL;
+    memcpy(grown, arr, n * elem);
+    alloc->free(alloc->ctx, arr, *cap * elem);
+    *cap = ncap;
+    return grown;
+}
+
+/* Entity-line types (spec 2026-09-29 §4.3): exactly these five. */
+static bool import_entity_type(const char *s, hu_entity_type_t *out) {
+    static const struct {
+        const char *name;
+        hu_entity_type_t type;
+    } k_types[] = {
+        {"person", HU_ENTITY_PERSON}, {"place", HU_ENTITY_PLACE}, {"org", HU_ENTITY_ORGANIZATION},
+        {"event", HU_ENTITY_EVENT},   {"topic", HU_ENTITY_TOPIC},
+    };
+    for (size_t i = 0; s && i < sizeof(k_types) / sizeof(k_types[0]); i++) {
+        if (strcasecmp(s, k_types[i].name) == 0) {
+            *out = k_types[i].type;
+            return true;
+        }
+    }
+    return false;
+}
+
+/* An entity line -> *e. False (the line is skipped) on a missing or oversized
+ * contact/name, an unknown type, or a name hu_graph_ingest_fact would also
+ * refuse (self placeholder, non-referential). Never truncates a name. */
+static bool import_parse_entity(const hu_json_value_t *v, import_entity_t *e) {
+    const char *contact = hu_json_get_string(v, "contact");
+    const char *name = hu_json_get_string(v, "name");
+    const char *src = hu_json_get_string(v, "source");
+    memset(e, 0, sizeof(*e));
+    if (!contact || !contact[0] || strlen(contact) >= sizeof(e->contact) || !name || !name[0] ||
+        strlen(name) >= sizeof(e->name) ||
+        !import_entity_type(hu_json_get_string(v, "type"), &e->type))
+        return false;
+    size_t name_len = strlen(name);
+    if (hu_graph_name_is_self_placeholder(name, name_len) ||
+        hu_graph_name_is_nonreferential(name, name_len))
+        return false;
+    snprintf(e->contact, sizeof(e->contact), "%s", contact);
+    snprintf(e->name, sizeof(e->name), "%s", name);
+    snprintf(e->source, sizeof(e->source), "%s", src && src[0] ? src : "import");
+    e->confidence = (float)hu_json_get_number(v, "confidence", 0.5);
+    e->retype_only = hu_json_get_bool(v, "retype_only", false);
+    return true;
+}
+
+/* One JSON object per line; see graph_ingest.h for both line kinds. Facts are
+ * ingested in ts order so supersession is chronological (a lives_in from May
+ * closes a lives_in from March, never the reverse); entity lines follow. */
 hu_error_t hu_graph_import_facts_jsonl(hu_allocator_t *alloc, hu_graph_t *g, const char *path,
                                        const char *exclude, size_t *imported_out,
-                                       size_t *skipped_out) {
+                                       size_t *entities_out, size_t *skipped_out) {
     if (imported_out)
         *imported_out = 0;
+    if (entities_out)
+        *entities_out = 0;
     if (skipped_out)
         *skipped_out = 0;
     if (!alloc || !g || !path)
@@ -185,9 +250,14 @@ hu_error_t hu_graph_import_facts_jsonl(hu_allocator_t *alloc, hu_graph_t *g, con
     FILE *fp = fopen(path, "r");
     if (!fp)
         return HU_ERR_NOT_FOUND;
-    size_t cap = 256, n = 0, skipped = 0;
+    size_t cap = 256, n = 0, ecap = 16, ne = 0, skipped = 0;
     import_fact_t *facts = (import_fact_t *)alloc->alloc(alloc->ctx, cap * sizeof(*facts));
-    if (!facts) {
+    import_entity_t *ents = (import_entity_t *)alloc->alloc(alloc->ctx, ecap * sizeof(*ents));
+    if (!facts || !ents) {
+        if (facts)
+            alloc->free(alloc->ctx, facts, cap * sizeof(*facts));
+        if (ents)
+            alloc->free(alloc->ctx, ents, ecap * sizeof(*ents));
         fclose(fp);
         return HU_ERR_OUT_OF_MEMORY;
     }
@@ -201,6 +271,23 @@ hu_error_t hu_graph_import_facts_jsonl(hu_allocator_t *alloc, hu_graph_t *g, con
         hu_json_value_t *v = NULL;
         if (hu_json_parse(alloc, line, len, &v) != HU_OK || !v) {
             skipped++;
+            continue;
+        }
+        const char *kind = hu_json_get_string(v, "kind");
+        if (kind && strcmp(kind, "entity") == 0) {
+            if (ne == ecap) {
+                import_entity_t *ge = import_grow(alloc, ents, ne, &ecap, sizeof(*ents));
+                if (!ge) {
+                    hu_json_free(alloc, v);
+                    break;
+                }
+                ents = ge;
+            }
+            if (import_parse_entity(v, &ents[ne]))
+                ne++;
+            else
+                skipped++;
+            hu_json_free(alloc, v);
             continue;
         }
         const char *pred = hu_json_get_string(v, "predicate");
@@ -229,16 +316,12 @@ hu_error_t hu_graph_import_facts_jsonl(hu_allocator_t *alloc, hu_graph_t *g, con
             continue;
         }
         if (n == cap) {
-            size_t ncap = cap * 2;
-            import_fact_t *nf = (import_fact_t *)alloc->alloc(alloc->ctx, ncap * sizeof(*nf));
-            if (!nf) {
+            import_fact_t *gf = import_grow(alloc, facts, n, &cap, sizeof(*facts));
+            if (!gf) {
                 hu_json_free(alloc, v);
                 break;
             }
-            memcpy(nf, facts, n * sizeof(*nf));
-            alloc->free(alloc->ctx, facts, cap * sizeof(*facts));
-            facts = nf;
-            cap = ncap;
+            facts = gf;
         }
         import_fact_t *f = &facts[n++];
         memset(f, 0, sizeof(*f));
@@ -254,7 +337,7 @@ hu_error_t hu_graph_import_facts_jsonl(hu_allocator_t *alloc, hu_graph_t *g, con
     fclose(fp);
     qsort(facts, n, sizeof(*facts), import_fact_cmp_ts);
 
-    size_t imported = 0;
+    size_t imported = 0, entities = 0;
     for (size_t i = 0; i < n; i++) {
         const import_fact_t *f = &facts[i];
         if (hu_graph_ingest_fact(g, f->contact, strlen(f->contact), f->subject, f->predicate,
@@ -263,12 +346,25 @@ hu_error_t hu_graph_import_facts_jsonl(hu_allocator_t *alloc, hu_graph_t *g, con
         else
             skipped++;
     }
+    for (size_t i = 0; i < ne; i++) {
+        const import_entity_t *e = &ents[i];
+        int64_t id = 0;
+        if (hu_graph_upsert_entity_typed(
+                g, e->contact, strlen(e->contact), e->name, strlen(e->name), e->type, e->source,
+                e->confidence, e->retype_only ? HU_GRAPH_UPSERT_NO_TOUCH : 0u, &id) == HU_OK)
+            entities++;
+        else
+            skipped++;
+    }
     alloc->free(alloc->ctx, facts, cap * sizeof(*facts));
+    alloc->free(alloc->ctx, ents, ecap * sizeof(*ents));
     if (imported_out)
         *imported_out = imported;
+    if (entities_out)
+        *entities_out = entities;
     if (skipped_out)
         *skipped_out = skipped;
-    return imported > 0 ? HU_OK : HU_ERR_NOT_FOUND;
+    return imported + entities > 0 ? HU_OK : HU_ERR_NOT_FOUND;
 }
 
 #else /* !HU_ENABLE_SQLITE */
@@ -290,13 +386,15 @@ hu_error_t hu_graph_ingest_fact(hu_graph_t *g, const char *contact_id, size_t co
 
 hu_error_t hu_graph_import_facts_jsonl(hu_allocator_t *alloc, hu_graph_t *g, const char *path,
                                        const char *exclude, size_t *imported_out,
-                                       size_t *skipped_out) {
+                                       size_t *entities_out, size_t *skipped_out) {
     (void)alloc;
     (void)g;
     (void)path;
     (void)exclude;
     if (imported_out)
         *imported_out = 0;
+    if (entities_out)
+        *entities_out = 0;
     if (skipped_out)
         *skipped_out = 0;
     return HU_ERR_NOT_SUPPORTED;

@@ -37,6 +37,11 @@
 #define HU_PROACTIVE_DECISION_DECLINE "decline"
 #define HU_PROACTIVE_DECISION_DEFER   "defer"
 
+/* Size of one recent-send reference. Outside the SQLite guard: the repeat
+ * check that consumes these (hu_init_proposer_repeats_recent) is built
+ * without SQLite too, and its tests failed to compile in the minimal build. */
+#define HU_PROACTIVE_REF_MAX 160
+
 #ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>
 
@@ -86,7 +91,6 @@ hu_error_t hu_proactive_decisions_repo_count(sqlite3 *db, int64_t *out_count);
  * ts >= `since`, newest first, at most `cap` (each NUL-terminated,
  * truncated to HU_PROACTIVE_REF_MAX - 1 bytes). For the repeat guard: never
  * ask the same person the same thing twice in two weeks. */
-#define HU_PROACTIVE_REF_MAX 160
 hu_error_t hu_proactive_decisions_repo_recent_sent_refs(sqlite3 *db, const char *contact,
                                                         int64_t since,
                                                         char out[][HU_PROACTIVE_REF_MAX],
