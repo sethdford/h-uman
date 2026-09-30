@@ -1165,9 +1165,7 @@ set(HU_CORE_SOURCES
     src/tools/memory_forget.c
     src/tools/bff_memory.c
     src/tools/doc_ingest.c
-    src/agent/task_manager.c
     src/tools/ask_user.c
-    src/tools/task_tools.c
     src/tools/webhook_tools.c
     src/tools/meeting_transcribe.c
     src/tools/message.c
@@ -1267,6 +1265,7 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_voice_first.c
     src/daemon/daemon_expressive.c
     src/daemon/daemon_share_queue.c
+    src/daemon/daemon_reminders.c
     src/daemon/daemon_rich_media.c
     src/daemon/daemon_housekeeping.c
     src/daemon/daemon_promise_keeper.c
@@ -1668,6 +1667,7 @@ if(HU_ENABLE_SQLITE)
         src/memory/repos/proactive_decisions_repo_sqlite.c
         src/memory/repos/outbound_sends_repo_sqlite.c
         src/memory/repos/contact_optout_repo_sqlite.c
+        src/memory/repos/reminder_repo_sqlite.c
         src/memory/repos/repo_util_sqlite.c
         src/memory/repos/social_graph_repo_sqlite.c
         src/memory/repos/self_awareness_repo_sqlite.c
@@ -3646,6 +3646,7 @@ set(HU_TEST_SOURCES
     tests/test_autonomy.c
     tests/test_retrieval.c
     tests/test_reranker.c
+    tests/test_score_fusion.c
     tests/test_retrieval_contact_isolation.c
     tests/test_prompt.c
     tests/test_prompt_trim.c
@@ -3763,6 +3764,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_untested_modules.c
     tests/test_modules_coverage.c
     tests/test_coverage_new.c
+    tests/test_calendar_tool.c
     tests/test_context.c
     tests/test_tavily.c
     tests/test_awareness.c
@@ -4169,6 +4171,7 @@ if(HU_ENABLE_SQLITE)
     list(APPEND HU_TEST_SOURCES tests/test_proactive_decisions_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_outbound_sends_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_contact_optout_repo.c)
+    list(APPEND HU_TEST_SOURCES tests/test_reminder_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_repo_util_sqlite.c)
     list(APPEND HU_TEST_SOURCES tests/test_proactive_send_circuit.c)
     list(APPEND HU_TEST_SOURCES tests/test_social_graph_repo.c)
@@ -4200,8 +4203,6 @@ list(APPEND HU_TEST_SOURCES
     tests/test_data_quality.c
     tests/test_tool_validation.c
     tests/test_tool_ask_user.c
-    tests/test_task_manager.c
-    tests/test_task_tools.c
     tests/test_otlp.c
     tests/test_mar.c
     tests/test_mem_policy.c
@@ -4236,6 +4237,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_daemon_voice_first.c
     tests/test_daemon_expressive.c
     tests/test_daemon_share_queue.c
+    tests/test_daemon_reminders.c
     tests/test_agent_fit_history.c
     tests/test_prospective.c
     tests/test_eval_score.c
