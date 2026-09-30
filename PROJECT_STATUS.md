@@ -7,9 +7,9 @@ Last updated: 2026-09-30
 | Metric                         | Value                  |
 | ------------------------------ | ---------------------- |
 | Source files (src/ + include/) | **1,093**              |
-| Lines of C/H/ASM code          | **~415K**              |
+| Lines of C/H/ASM code          | **~416K**              |
 | Test files                     | ~308                   |
-| Tests passing                  | **14,137/14,137 (100%)** |
+| Tests passing                  | **14,168/14,168 (100%)** |
 | Binary size (MinSizeRel+LTO)   | **<!-- fp:binary_kb -->~2760 KB<!-- /fp -->** |
 | Idle RSS (`human mcp`)         | **<!-- fp:idle_rss_mb -->8.6 MB<!-- /fp -->** |
 
