@@ -766,3 +766,54 @@ hu_error_t hu_daemon_dispatch_imessage_reply_ex(
                                 parent_guid_len, body, body_len, snapshot,
                                 inferred_message_id_for_react, out_text_sent, text_required);
 }
+
+/* One draft at a time: the reply loop handles one contact's batch at a time. */
+static struct {
+    hu_allocator_t *alloc;
+    char *text;
+    size_t len;
+    char key[128];
+    size_t key_len;
+} s_quality_draft;
+
+static void quality_draft_drop(void) {
+    if (s_quality_draft.text && s_quality_draft.alloc)
+        s_quality_draft.alloc->free(s_quality_draft.alloc->ctx, s_quality_draft.text,
+                                    s_quality_draft.len + 1);
+    memset(&s_quality_draft, 0, sizeof(s_quality_draft));
+}
+
+void hu_daemon_quality_draft_keep(hu_allocator_t *alloc, const char *key, size_t key_len,
+                                  char *draft, size_t draft_len) {
+    quality_draft_drop();
+    if (!alloc || !draft)
+        return;
+    if (!key || key_len == 0 || key_len >= sizeof(s_quality_draft.key) || draft_len == 0) {
+        alloc->free(alloc->ctx, draft, draft_len + 1);
+        return;
+    }
+    s_quality_draft.alloc = alloc;
+    s_quality_draft.text = draft;
+    s_quality_draft.len = draft_len;
+    memcpy(s_quality_draft.key, key, key_len);
+    s_quality_draft.key_len = key_len;
+}
+
+bool hu_daemon_quality_draft_settle(hu_allocator_t *alloc, const char *key, size_t key_len,
+                                    char **response, size_t *response_len) {
+    if (!response || !response_len)
+        return false;
+    bool empty = !*response || *response_len == 0;
+    bool same = s_quality_draft.text && key && key_len == s_quality_draft.key_len &&
+                memcmp(key, s_quality_draft.key, key_len) == 0 && alloc == s_quality_draft.alloc;
+    if (empty && same) {
+        if (*response)
+            alloc->free(alloc->ctx, *response, *response_len + 1);
+        *response = s_quality_draft.text;
+        *response_len = s_quality_draft.len;
+        s_quality_draft.text = NULL; /* ownership moved to the caller */
+        hu_log_warn("human", NULL, "quality retry came back empty — sending the first draft");
+    }
+    quality_draft_drop();
+    return *response && *response_len > 0;
+}

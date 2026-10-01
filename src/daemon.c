@@ -7121,19 +7121,12 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             }
                         }
                     }
-                    /* L4 multimodal shadow-logging (2026-05-19).
-                     *
-                     * Run the predicate against the inbound message; log
-                     * the decision but DO NOT change routing. This collects
-                     * production data on tapback-vs-text-vs-voice routing
-                     * so we can calibrate confidence thresholds before
-                     * flipping live. Next round (per
-                     * docs/plans/2026-05-19-sota-round-3-findings.md):
-                     * route on the decision when conf >= 0.85 and channel
-                     * has react vtable.
-                     *
-                     * Scoped to iMessage channel only — other channels
-                     * have different tapback semantics. */
+                    /* L4 multimodal shadow-logging (2026-05-19): log the
+                     * inbound's tapback/text/voice routing decision, DO NOT
+                     * change routing, to calibrate thresholds before going
+                     * live (docs/plans/2026-05-19-sota-round-3-findings.md:
+                     * route when conf >= 0.85 and the channel can react).
+                     * iMessage only; other channels' tapbacks differ. */
                     if (err == HU_OK && response && response_len > 0 && ch && ch->channel &&
                         ch->channel->vtable && ch->channel->vtable->name) {
                         const char *ch_name = ch->channel->vtable->name(ch->channel->ctx);
@@ -7153,7 +7146,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             }
                         }
                     }
-                    if (err == HU_OK && (!response || response_len == 0)) {
+                    /* Settle a stashed quality-retry draft: restored if the retry is empty. */
+                    if (err == HU_OK &&
+                        !hu_daemon_quality_draft_settle(agent->alloc, batch_key, key_len, &response,
+                                                        &response_len)) {
                         g_empty_agent_response_streak++;
                         hu_log_error(
                             "human", agent ? agent->observer : NULL,
@@ -7403,7 +7399,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                         qscore.total, qscore.brevity, qscore.validation,
                                         qscore.warmth, qscore.naturalness,
                                         response_len > 40 ? response : response);
-                            agent->alloc->free(agent->alloc->ctx, response, response_len + 1);
+                            /* Kept, not freed: an empty retry falls back to it. */
+                            hu_daemon_quality_draft_keep(agent->alloc, batch_key, key_len, response,
+                                                         response_len);
                             response = NULL;
                             response_len = 0;
                             /* Prepend data-driven retry hint from quality score */

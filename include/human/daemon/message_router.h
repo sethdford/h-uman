@@ -161,6 +161,17 @@ bool hu_daemon_vision_route(const struct hu_config *cfg, const char *model, size
  * buf. Anything else is returned unchanged. *len is updated. */
 const char *hu_daemon_unseen_photo(const char *text, size_t *len, char *buf, size_t cap);
 
+/* Quality-retry draft. The quality gate used to free a reply before asking for
+ * a better one; when the retry came back empty the contact got nothing (Lexi,
+ * 2026-09-23). keep() takes ownership of the draft for `key` (dropping any
+ * earlier one); settle() then always runs on the next result: an empty
+ * *response for the same key gets the draft back, anything else drops it.
+ * Returns true when *response is non-empty afterwards. */
+void hu_daemon_quality_draft_keep(hu_allocator_t *alloc, const char *key, size_t key_len,
+                                  char *draft, size_t draft_len);
+bool hu_daemon_quality_draft_settle(hu_allocator_t *alloc, const char *key, size_t key_len,
+                                    char **response, size_t *response_len);
+
 /* hu_vision_describe_image on the provider hu_daemon_vision_route picks, else
  * on agent->provider with `model`. */
 hu_error_t hu_daemon_describe_image(hu_allocator_t *alloc, struct hu_agent *agent,

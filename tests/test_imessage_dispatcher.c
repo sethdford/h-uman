@@ -820,6 +820,48 @@ static void dispatch_capitalizes_a_lowercase_bubble_when_the_governor_is_live(vo
     hu_style_governor_set_mode_for_test(-1);
 }
 
+/* The quality retry freed the draft before regenerating; when the retry came
+ * back empty the contact got nothing (Lexi 2026-09-23: an 81-char draft
+ * scored 55, the retry was empty; 1 of 5 retries in a week ended empty). */
+static char *qd_dup(hu_allocator_t *a, const char *s) {
+    size_t n = strlen(s);
+    char *p = (char *)a->alloc(a->ctx, n + 1);
+    memcpy(p, s, n + 1);
+    return p;
+}
+
+static void quality_draft_restores_when_the_retry_is_empty(void) {
+    hu_allocator_t a = hu_system_allocator();
+    char *draft = qd_dup(&a, "Your cat seems to be enjoying the new home");
+    hu_daemon_quality_draft_keep(&a, "+15550000001", 12, draft, strlen(draft));
+    char *resp = NULL;
+    size_t len = 0;
+    HU_ASSERT_TRUE(hu_daemon_quality_draft_settle(&a, "+15550000001", 12, &resp, &len));
+    HU_ASSERT_STR_EQ(resp, "Your cat seems to be enjoying the new home");
+    a.free(a.ctx, resp, len + 1);
+    /* Settled: nothing left to restore into a later empty turn. */
+    resp = NULL;
+    len = 0;
+    HU_ASSERT_FALSE(hu_daemon_quality_draft_settle(&a, "+15550000001", 12, &resp, &len));
+}
+
+static void quality_draft_is_dropped_when_the_retry_succeeds_or_the_contact_differs(void) {
+    hu_allocator_t a = hu_system_allocator();
+    hu_daemon_quality_draft_keep(&a, "+15550000001", 12, qd_dup(&a, "old draft"), 9);
+    char *resp = qd_dup(&a, "better reply");
+    size_t len = 12;
+    HU_ASSERT_TRUE(hu_daemon_quality_draft_settle(&a, "+15550000001", 12, &resp, &len));
+    HU_ASSERT_STR_EQ(resp, "better reply");
+    a.free(a.ctx, resp, len + 1);
+    resp = NULL;
+    len = 0;
+    HU_ASSERT_FALSE(hu_daemon_quality_draft_settle(&a, "+15550000001", 12, &resp, &len));
+
+    hu_daemon_quality_draft_keep(&a, "+15550000001", 12, qd_dup(&a, "for someone else"), 16);
+    HU_ASSERT_FALSE(hu_daemon_quality_draft_settle(&a, "+15550000002", 12, &resp, &len));
+    HU_ASSERT_NULL(resp);
+}
+
 static void burst_carry_keeps_other_senders_for_this_tick(void) {
     static hu_channel_loop_msg_t msgs[4], burst[3];
     memset(msgs, 0, sizeof(msgs));
@@ -934,6 +976,8 @@ void run_imessage_dispatcher_tests(void) {
     HU_RUN_TEST(msg_ex_parrot_guard_reports_no_text_sent);
     HU_RUN_TEST(record_delivered_reply_noops_without_collector);
     HU_RUN_TEST(burst_carry_keeps_other_senders_for_this_tick);
+    HU_RUN_TEST(quality_draft_restores_when_the_retry_is_empty);
+    HU_RUN_TEST(quality_draft_is_dropped_when_the_retry_succeeds_or_the_contact_differs);
     HU_RUN_TEST(dispatch_capitalizes_a_lowercase_bubble_when_the_governor_is_live);
     HU_RUN_TEST(burst_carry_reports_what_it_cannot_keep);
     HU_RUN_TEST(vision_route_uses_the_declared_cloud_fallback);
