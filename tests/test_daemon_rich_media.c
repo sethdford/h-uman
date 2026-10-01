@@ -77,7 +77,38 @@ static void test_rich_media_after_gif_sends_nothing(void) {
     HU_ASSERT_EQ(g_sends, 0);
 }
 
+/* Proactive AI images (a 2% roll that texts a contact a generated picture)
+ * were dead since DALL·E's 2026-05-12 shutdown. Fixing image generation must
+ * not quietly bring them back: it is a gated behavior, OFF unless asked for. */
+static void test_proactive_image_is_off_unless_gated_live(void) {
+    const char *prev_gate = getenv("HU_PROACTIVE_IMAGE");
+    const char *prev_key = getenv("OPENAI_API_KEY");
+    char saved_gate[64] = {0}, saved_key[256] = {0};
+    if (prev_gate)
+        snprintf(saved_gate, sizeof(saved_gate), "%s", prev_gate);
+    if (prev_key)
+        snprintf(saved_key, sizeof(saved_key), "%s", prev_key);
+
+    setenv("OPENAI_API_KEY", "test-key", 1);
+    unsetenv("HU_PROACTIVE_IMAGE");
+    HU_ASSERT_FALSE(hu_daemon_proactive_image_live());
+    setenv("HU_PROACTIVE_IMAGE", "shadow", 1);
+    HU_ASSERT_FALSE(hu_daemon_proactive_image_live());
+    setenv("HU_PROACTIVE_IMAGE", "live", 1);
+    HU_ASSERT_TRUE(hu_daemon_proactive_image_live());
+    unsetenv("OPENAI_API_KEY");
+    HU_ASSERT_FALSE(hu_daemon_proactive_image_live()); /* no key, nothing to call */
+
+    if (prev_gate)
+        setenv("HU_PROACTIVE_IMAGE", saved_gate, 1);
+    else
+        unsetenv("HU_PROACTIVE_IMAGE");
+    if (prev_key)
+        setenv("OPENAI_API_KEY", saved_key, 1);
+}
+
 void run_daemon_rich_media_tests(void) {
+    HU_RUN_TEST(test_proactive_image_is_off_unless_gated_live);
     HU_TEST_SUITE("daemon rich media (carved)");
     HU_RUN_TEST(test_rich_media_no_text_sends_nothing);
     HU_RUN_TEST(test_rich_media_after_gif_sends_nothing);

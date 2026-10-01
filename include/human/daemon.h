@@ -85,6 +85,12 @@ struct hu_channel_daemon_config;
 const struct hu_channel_daemon_config *
 hu_daemon_active_daemon_config(const struct hu_config *config, const char *ch_name);
 
+/* Whether the 2% proactive AI-image send may run: HU_PROACTIVE_IMAGE=live and
+ * OPENAI_API_KEY set. OFF by default: texting a contact a generated picture
+ * unprompted is not something the owner does; it was dead from DALL·E's
+ * 2026-05-12 shutdown until 2026-09-30 and must not return unmeasured. */
+bool hu_daemon_proactive_image_live(void);
+
 /* Carved from hu_service_run (2026-09-12): see src/daemon/daemon_rich_media.c. */
 struct hu_director_result;
 void hu_daemon_rich_media_tick(hu_allocator_t *alloc, struct hu_agent *agent,

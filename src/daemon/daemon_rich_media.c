@@ -392,3 +392,9 @@ void hu_daemon_rich_media_tick(hu_allocator_t *alloc, hu_agent_t *agent, const h
         }
     }
 }
+
+bool hu_daemon_proactive_image_live(void) {
+    const char *key = getenv("OPENAI_API_KEY");
+    return key && key[0] &&
+           hu_gate_mode_from_env("HU_PROACTIVE_IMAGE", HU_GATE_OFF) == HU_GATE_LIVE;
+}

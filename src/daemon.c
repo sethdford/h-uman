@@ -9777,10 +9777,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     agent->provider.vtable && agent->provider.vtable->chat_with_system) {
                     float img_prob = 0.02f;
                     float roll_img = (float)(rand() % 10000) / 10000.0f;
-                    if (roll_img < img_prob && getenv("OPENAI_API_KEY")) {
+                    if (roll_img < img_prob && hu_daemon_proactive_image_live()) { /* gated OFF */
                         static const char img_sys[] =
                             "Given the conversation, suggest a fun image to generate "
-                            "and share. Return ONLY a DALL-E prompt (under 200 chars) or SKIP.\n"
+                            "and share. Return ONLY an image prompt (under 200 chars) or SKIP.\n"
                             "Example: A cozy cat reading a tiny newspaper with coffee\n"
                             "Only suggest when the moment genuinely calls for a visual — "
                             "funny, sweet, or illustrative. Reply SKIP if it doesn't fit.";
