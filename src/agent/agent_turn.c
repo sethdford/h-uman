@@ -4,6 +4,7 @@
 #include "human/agent/graph_grounding.h"
 #include "human/agent/humanness.h"
 #include "human/agent/intent.h"
+#include "human/agent/reask.h"
 #include "human/agent/self_uncertainty.h"
 #include "human/agent/theory_of_mind.h"
 #include "human/agent/turn.h"
@@ -6216,8 +6217,8 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                     const char *blob_cid = agent->memory_session_id ? agent->memory_session_id : "";
                     size_t blob_cid_len =
                         agent->memory_session_id ? agent->memory_session_id_len : 0;
-                    for (size_t hi = agent->history_count; hi > 0 && hi > agent->history_count - 4;
-                         hi--) {
+                    for (size_t hi = agent->history_count;
+                         hi > hu_agent_history_floor(agent->history_count, 4); hi--) {
                         const hu_owned_message_t *hm = &agent->history[hi - 1];
                         if (!hm->content_parts || hm->content_parts_count == 0)
                             continue;
@@ -6294,27 +6295,8 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
 
                         /* Re-ask detection: user repeats a similar message = previous answer was
                          * wrong */
-                        bool is_reask = false;
-                        if (agent->history_count >= 4 && msg_len > 10) {
-                            for (size_t hi = agent->history_count - 2;
-                                 hi > 0 && hi > agent->history_count - 8; hi--) {
-                                if (agent->history[hi].role == HU_ROLE_USER &&
-                                    agent->history[hi].content_len > 10) {
-                                    size_t min_l = msg_len < agent->history[hi].content_len
-                                                       ? msg_len
-                                                       : agent->history[hi].content_len;
-                                    size_t match = 0;
-                                    for (size_t ci = 0; ci < min_l && ci < 100; ci++) {
-                                        if (msg[ci] == agent->history[hi].content[ci])
-                                            match++;
-                                    }
-                                    if (min_l > 0 && match * 100 / min_l > 70) {
-                                        is_reask = true;
-                                        break;
-                                    }
-                                }
-                            }
-                        }
+                        bool is_reask = hu_agent_history_is_reask(
+                            agent->history, agent->history_count, msg, msg_len);
 
                         if (is_positive)
                             (void)hu_value_learn_from_approval(&ve, "helpfulness", 11, 0.15,

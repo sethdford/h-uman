@@ -26,8 +26,8 @@
  * behaviour change: it adds code to agent_turn.c in place (no stage file to
  * carry the growth), so this is the one commit where the ceiling moves up to
  * match, by exactly the lines the fix adds. */
-#define TS_AGENT_TURN_C_MAX_LINES   7237
-#define TS_AGENT_TURN_RUN_MAX_LINES 5898
+#define TS_AGENT_TURN_C_MAX_LINES   7219
+#define TS_AGENT_TURN_RUN_MAX_LINES 5879
 
 static char *ts_read(const char *path) {
     FILE *f = fopen(path, "rb");
