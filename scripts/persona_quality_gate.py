@@ -37,6 +37,7 @@ Usage:
   python3 scripts/persona_quality_gate.py --eval-suite eval_suites/X.json --responses path.json
 """
 
+import os
 import argparse
 import json
 import statistics
@@ -110,7 +111,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--responses", required=True,
                    help="JSON file with list of {prompt, actual_output}")
-    p.add_argument("--classifier", default="/tmp/seth_speaker_id.json")
+    p.add_argument("--classifier", default=os.path.expanduser("~/.human/models/seth_speaker_id.json"))
     p.add_argument("--threshold", type=float, default=0.55,
                    help="Mean P(Seth) below this fails the gate (default 0.55)")
     p.add_argument("--min-non-empty-rate", type=float, default=0.95,

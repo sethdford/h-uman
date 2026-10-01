@@ -41,6 +41,7 @@ Usage:
   python3 scripts/ablation_orchestrator.py --runs R0,R5  # subset
 """
 
+import os
 import argparse
 import json
 import statistics
@@ -221,7 +222,7 @@ def main():
     # switches to P(Seth) argmax once shape saturates.
     try:
         from personaeval_speaker_id import load_classifier
-        speaker_id_clf = load_classifier("/tmp/seth_speaker_id.json")
+        speaker_id_clf = load_classifier(os.path.expanduser("~/.human/models/seth_speaker_id.json"))
         print(f"speaker-ID classifier loaded (P(Seth) tiebreak active)")
     except (ImportError, FileNotFoundError):
         speaker_id_clf = None

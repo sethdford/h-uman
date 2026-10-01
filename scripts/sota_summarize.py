@@ -18,6 +18,7 @@ Usage:
   python3 scripts/sota_summarize.py
 """
 
+import os
 import json
 import statistics
 import sys
@@ -45,7 +46,7 @@ def rescore_texts(texts):
     except ImportError:
         return None
     try:
-        clf = load_classifier("/tmp/seth_speaker_id.json")
+        clf = load_classifier(os.path.expanduser("~/.human/models/seth_speaker_id.json"))
     except FileNotFoundError:
         return None
     return [p_seth(clf, t) for t in texts if t]

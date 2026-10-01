@@ -40,8 +40,10 @@ typedef struct hu_persona_eval_model hu_persona_eval_model_t;
  *
  * Path resolution:
  *   path != NULL  → use path
- *   path == NULL  → /tmp/seth_speaker_id.json (the canonical location
- *                   used by the rest of the pipeline)
+ *   path == NULL  → hu_persona_eval_default_path (the state dir), then the
+ *                   legacy /tmp/seth_speaker_id.json while scripts migrate.
+ *                   /tmp was the only location until 2026-09-30, and a
+ *                   reboot emptied it: P(Seth) silently fell back to 0.5.
  *
  * Returns HU_OK on success. *out is owned by the caller; free with
  * hu_persona_eval_free.
@@ -53,6 +55,10 @@ typedef struct hu_persona_eval_model hu_persona_eval_model_t;
  */
 hu_error_t hu_persona_eval_load(hu_allocator_t *alloc, const char *path,
                                 hu_persona_eval_model_t **out);
+
+/* <state dir>/models/seth_speaker_id.json into buf (hu_paths_state contract:
+ * length written, or -1 with buf[0] == '\0'). */
+int hu_persona_eval_default_path(char *buf, size_t cap);
 
 /* Free a model loaded with hu_persona_eval_load. */
 void hu_persona_eval_free(hu_allocator_t *alloc, hu_persona_eval_model_t *model);

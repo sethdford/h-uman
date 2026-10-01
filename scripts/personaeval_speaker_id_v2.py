@@ -31,6 +31,7 @@ Usage:
   python3 scripts/personaeval_speaker_id_v2.py --score "yeah let me look"
 """
 
+import os
 import argparse
 import json
 import math
@@ -294,7 +295,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--train", action="store_true")
     p.add_argument("--score", help="Single response to score")
-    p.add_argument("--out", default="/tmp/seth_speaker_id_v2.json")
+    p.add_argument("--out", default=os.path.expanduser("~/.human/models/seth_speaker_id_v2.json"))
     p.add_argument("--compare-v1", action="store_true",
                    help="Compare v1 and v2 on a held-out probe set")
     args = p.parse_args()
@@ -329,7 +330,7 @@ def main():
             load_classifier as load_v1,
             p_seth as p_seth_v1,
         )
-        v1 = load_v1("/tmp/seth_speaker_id.json")
+        v1 = load_v1(os.path.expanduser("~/.human/models/seth_speaker_id.json"))
         v2 = json.loads(Path(args.out).read_text())
         probes = [
             ("yeah just sent it", True),

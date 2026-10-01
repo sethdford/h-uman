@@ -28,6 +28,7 @@ Usage:
   python3 scripts/dpo_pair_persona_miner.py --source-filter imessage_tapback
 """
 
+import os
 import argparse
 import json
 import sqlite3
@@ -38,7 +39,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 DB_DEFAULT = str(Path.home() / ".human" / "memory.db")
-CLF_DEFAULT = "/tmp/seth_speaker_id.json"
+CLF_DEFAULT = os.path.expanduser("~/.human/models/seth_speaker_id.json")
 
 
 def fetch_pairs(db_path: str, source_filter: str = None) -> list:

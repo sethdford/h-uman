@@ -25,6 +25,7 @@ Usage:
   python3 scripts/verifier_ttt.py --log-to-sqlite ~/.human/memory.db
 """
 
+import os
 import argparse
 import json
 import sqlite3
@@ -37,7 +38,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from eval_shape_classifier import classify  # noqa: E402
 
 GATEWAY_DEFAULT = "http://127.0.0.1:3006/v1/chat/completions"
-SPEAKER_ID_CLF_DEFAULT = "/tmp/seth_speaker_id.json"
+SPEAKER_ID_CLF_DEFAULT = os.path.expanduser("~/.human/models/seth_speaker_id.json")
 
 
 def _maybe_load_speaker_id_clf(path: str):
