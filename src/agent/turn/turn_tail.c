@@ -37,7 +37,8 @@ hu_error_t hu_turn_tail(hu_turn_ctx_t *turn_ctx) {
         size_t fail_count = 0;
         char fail_detail[512];
         size_t fail_pos = 0;
-        for (size_t hi = agent->history_count; hi > 0 && hi > agent->history_count - 8; hi--) {
+        size_t floor_hi = hu_agent_history_floor(agent->history_count, 8);
+        for (size_t hi = agent->history_count; hi > floor_hi; hi--) {
             if (agent->history[hi - 1].role == HU_ROLE_TOOL && agent->history[hi - 1].content &&
                 agent->history[hi - 1].content_len > 0) {
                 const char *c = agent->history[hi - 1].content;

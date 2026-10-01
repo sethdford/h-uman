@@ -61,6 +61,15 @@ static inline uint64_t hu_agent_internal_monotonic_ms(void) {
     return (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)(ts.tv_nsec / 1000000L);
 }
 
+/* Exclusive lower bound of a backward scan over the last `window` history
+ * entries: `history_count - window`, clamped at 0. Written inline as a bare
+ * subtraction it wraps on size_t whenever the history is shorter than the
+ * window, so `hi > history_count - window` is false from the start and the
+ * scan silently never runs in a short conversation. */
+static inline size_t hu_agent_history_floor(size_t history_count, size_t window) {
+    return history_count > window ? history_count - window : 0;
+}
+
 /* Average content_len over the most-recent up-to-`max_n` assistant
  * turns in `agent->history` (skips system / user / tool entries).
  * Returns 0 when there are no qualifying turns; the response guard

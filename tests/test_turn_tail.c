@@ -26,9 +26,8 @@ static bool tl_append(tf_fixture_t *f, hu_role_t role, const char *text) {
                                             0) == HU_OK;
 }
 
-/* The replan scan looks at the last 8 history entries and, as written, only
- * runs once the history holds at least 8 (history_count - 8 is unsigned), so
- * the fixture pads the conversation to 6 turns before its tool results. */
+/* The replan scan looks at the last 8 history entries; this fixture pads the
+ * conversation to 6 turns before its tool results so the window is full. */
 static bool tl_history_with_tool_results(tf_fixture_t *f, const char *r1, const char *r2) {
     for (int i = 0; i < 3; i++) {
         if (!tl_append(f, HU_ROLE_USER, "list my things") ||
@@ -64,6 +63,29 @@ static void turn_tail_replans_after_two_tool_failures(void) {
     HU_ASSERT_EQ(hu_turn_tail(turn_ctx), HU_OK);
     HU_ASSERT_EQ(f.agent.history_count, before + 1);
     const hu_owned_message_t *m = &f.agent.history[f.agent.history_count - 1];
+    HU_ASSERT_EQ(m->role, HU_ROLE_SYSTEM);
+    HU_ASSERT_STR_EQ(m->content, "[REPLAN after 2 tool failures]: 1 new steps");
+    hu_turn_ctx_free(turn_ctx);
+    tf_close(&f);
+}
+
+/* A conversation shorter than the 8-entry window still replans: the floor of
+ * the backward scan once wrapped (history_count - 8 on a size_t), so with
+ * fewer than 8 entries the scan never ran and the failures went unseen. */
+static void turn_tail_replans_in_a_history_shorter_than_the_window(void) {
+    tf_fixture_t f;
+    HU_ASSERT_TRUE(tf_open(&f, NULL, 0, false, HU_AUTONOMY_AUTONOMOUS));
+    HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_USER, "list my things"));
+    HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_TOOL, "Error: disk full"));
+    HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_TOOL, "denied: not allowed"));
+    HU_ASSERT_EQ(f.agent.history_count, 3);
+    hu_turn_ctx_t *turn_ctx = tl_ctx(&f, "list my things", 1);
+    HU_ASSERT_NOT_NULL(turn_ctx);
+    turn_ctx->context.plan_ctx = k_plan;
+    turn_ctx->context.plan_ctx_len = sizeof(k_plan) - 1;
+    HU_ASSERT_EQ(hu_turn_tail(turn_ctx), HU_OK);
+    HU_ASSERT_EQ(f.agent.history_count, 4);
+    const hu_owned_message_t *m = &f.agent.history[3];
     HU_ASSERT_EQ(m->role, HU_ROLE_SYSTEM);
     HU_ASSERT_STR_EQ(m->content, "[REPLAN after 2 tool failures]: 1 new steps");
     hu_turn_ctx_free(turn_ctx);
@@ -241,6 +263,7 @@ void run_turn_tail_tests(void) {
     HU_TEST_SUITE("TurnTail");
     HU_RUN_TEST(turn_tail_rejects_a_null_context);
     HU_RUN_TEST(turn_tail_replans_after_two_tool_failures);
+    HU_RUN_TEST(turn_tail_replans_in_a_history_shorter_than_the_window);
     HU_RUN_TEST(turn_tail_without_a_plan_does_not_replan);
     HU_RUN_TEST(turn_tail_one_failure_does_not_replan);
     HU_RUN_TEST(turn_tail_records_the_iteration_in_the_scratchpad);
