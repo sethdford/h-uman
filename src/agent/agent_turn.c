@@ -978,9 +978,10 @@ void hu_agent_append_humanness_directives(hu_agent_t *agent, const char *contact
  * agent->alloc->free(ctx, p, len + 1). */
 void hu_agent_build_humanness_context(hu_agent_t *agent, const char *msg, size_t msg_len,
                                       const char *memory_ctx, size_t memory_ctx_len,
-                                      char **humanness_ctx_out, size_t *humanness_ctx_len_out,
-                                      char **imperfect_dir_out, size_t *imperfect_dir_len_out,
-                                      char **residue_dir_out, size_t *residue_dir_len_out) {
+                                      bool retrieval_relevant, char **humanness_ctx_out,
+                                      size_t *humanness_ctx_len_out, char **imperfect_dir_out,
+                                      size_t *imperfect_dir_len_out, char **residue_dir_out,
+                                      size_t *residue_dir_len_out) {
     if (humanness_ctx_out)
         *humanness_ctx_out = NULL;
     if (humanness_ctx_len_out)
@@ -1202,11 +1203,11 @@ void hu_agent_build_humanness_context(hu_agent_t *agent, const char *msg, size_t
         }
 #endif
 
-        /* Imperfect delivery — express genuine uncertainty */
+        /* Imperfect delivery — hedge only on low self-confidence + no relevant
+         * retrieval (DEF-4; no tool shortcut: tools have not run yet). */
         {
-            uint32_t tool_count = agent->tools_count > 0 ? (uint32_t)agent->tools_count : 0;
             hu_certainty_level_t cert = hu_certainty_classify(
-                msg, msg_len, (memory_ctx != NULL && memory_ctx_len > 0), tool_count);
+                retrieval_relevant, hu_metacog_trajectory_confidence(&agent->infra.metacognition));
             imperfect_dir = hu_imperfect_delivery_directive(agent->alloc, cert, &imperfect_dir_len);
             if ((sal_mode == HU_SALIENCE_SHADOW || sal_mode == HU_SALIENCE_LIVE) && imperfect_dir &&
                 imperfect_dir_len > 0 && sal_count < 8 &&
@@ -1868,6 +1869,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
     char *residue_dir = NULL;
     size_t residue_dir_len = 0;
     hu_agent_build_humanness_context(agent, msg, msg_len, memory_ctx, memory_ctx_len,
+                                     behavior_memory_ctx_nonempty || graph_ctx_len > 0,
                                      &humanness_ctx, &humanness_ctx_len, &imperfect_dir,
                                      &imperfect_dir_len, &residue_dir, &residue_dir_len);
 

@@ -944,12 +944,15 @@ void hu_agent_load_graph_grounding(hu_agent_t *agent, void *loader_v, const char
  * combined humanness context, the imperfect-delivery directive, and the
  * emotional-residue carryover directive. The caller frees each via
  * agent->alloc->free(ctx, p, len + 1). No-op (all outs NULL/0) if inputs are
- * NULL. */
+ * NULL. `retrieval_relevant` is this turn's own retrieval (memory recall that
+ * survived Self-RAG, or graph grounding) — not the core-memory block — and
+ * gates the imperfect-delivery hedge (DEF-4). */
 void hu_agent_build_humanness_context(hu_agent_t *agent, const char *msg, size_t msg_len,
                                       const char *memory_ctx, size_t memory_ctx_len,
-                                      char **humanness_ctx_out, size_t *humanness_ctx_len_out,
-                                      char **imperfect_dir_out, size_t *imperfect_dir_len_out,
-                                      char **residue_dir_out, size_t *residue_dir_len_out);
+                                      bool retrieval_relevant, char **humanness_ctx_out,
+                                      size_t *humanness_ctx_len_out, char **imperfect_dir_out,
+                                      size_t *imperfect_dir_len_out, char **residue_dir_out,
+                                      size_t *residue_dir_len_out);
 
 /* Optional: if non-NULL, called for each streaming token delta (CLI mode).
  * Provider must support streaming. When provided, uses stream_chat when available. */

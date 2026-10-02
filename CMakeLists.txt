@@ -3971,6 +3971,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_salience.c
     tests/test_hard_moment.c
     tests/test_turn_moment.c
+    tests/test_humanness_hedge_turn.c
     tests/test_planning.c
     tests/test_emotional_residue.c
     tests/test_consolidation_engine.c
