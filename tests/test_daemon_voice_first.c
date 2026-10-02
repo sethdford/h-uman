@@ -30,6 +30,7 @@ static hu_contact_profile_t *g_contact;    /* the sender's persona profile, or N
 static const hu_reactive_turn_ctx_t *g_rt; /* channel history, or NULL */
 static uint32_t g_max_chars = 200;
 
+#if defined(HU_ENABLE_SQLITE)
 /* A failed assert returns early and can leave these pointing at a dead frame;
  * every test that sets them starts from a clean slate. */
 static void vf_reset(void) {
@@ -38,6 +39,7 @@ static void vf_reset(void) {
     g_rt = NULL;
     g_max_chars = 200;
 }
+#endif
 
 static void run(const char *mode, const char *allow, const char *inbound, vf_run_t *r) {
     hu_allocator_t alloc = hu_system_allocator();
@@ -263,7 +265,7 @@ static void test_voice_triggers_v2_off_is_byte_identical(void) {
     HU_ASSERT_EQ(off.max_chars, unset.max_chars);
     HU_ASSERT_EQ(off.ctx_len, unset.ctx_len);
     HU_ASSERT_TRUE(memcmp(off.ctx, unset.ctx, unset.ctx_len) == 0);
-    HU_ASSERT_EQ(count_rows(&mem, "trigger = 'voice_v2'"), 0);
+    HU_ASSERT_EQ(count_rows(&mem, "trigger LIKE 'voice_v2%'"), 0);
     done(&unset);
     done(&off);
     g_mem = NULL;
@@ -287,16 +289,17 @@ static void test_voice_triggers_v2_shadow_does_not_change_the_decision(void) {
     HU_ASSERT_EQ(r.max_chars, 120);
     HU_ASSERT_STR_EQ(r.ctx, "[earlier] they asked about the lake");
     /* ...and it did evaluate: the would-voice row is there. */
-    HU_ASSERT_EQ(count_rows(&mem, "trigger = 'voice_v2' AND decision = 'send' AND "
+    HU_ASSERT_EQ(count_rows(&mem, "trigger = 'voice_v2_shadow' AND decision = 'send' AND "
                                   "reason = 'story_inbound' AND sent = 0"),
                  1);
+    HU_ASSERT_EQ(count_rows(&mem, "trigger = 'voice_v2'"), 0); /* the LIVE ledger is untouched */
     done(&r);
     /* A turn the base rules already decided is left to them: no v2 row. */
     setenv("HU_VOICE_TRIGGERS_V2", "shadow", 1);
     run("live", "+15550000001", "I'm so proud of you", &r);
     unsetenv("HU_VOICE_TRIGGERS_V2");
     HU_ASSERT_STR_EQ(r.vf.reason, "heartfelt");
-    HU_ASSERT_EQ(count_rows(&mem, "trigger = 'voice_v2'"), 1);
+    HU_ASSERT_EQ(count_rows(&mem, "trigger = 'voice_v2_shadow'"), 1);
     done(&r);
     g_max_chars = 200;
     g_mem = NULL;
@@ -316,6 +319,13 @@ static void test_voice_triggers_v2_live_writes_a_memo_for_a_story(void) {
     HU_ASSERT_TRUE(r.vf.memo);
     HU_ASSERT_STR_EQ(r.vf.reason, "story_inbound");
     HU_ASSERT_EQ(r.max_chars, HU_VOICE_FIRST_MEMO_MAX_CHARS);
+    done(&r);
+    HU_ASSERT_EQ(count_rows(&mem, "trigger = 'voice_v2' AND decision = 'send'"), 1);
+    /* Off the family list no memo is written, so nothing is booked to the cap. */
+    run("live", "+15550000009", k_story, &r);
+    HU_ASSERT_STR_EQ(r.vf.reason, "story_inbound");
+    HU_ASSERT_FALSE(r.vf.memo);
+    HU_ASSERT_EQ(count_rows(&mem, "trigger = 'voice_v2' AND decision = 'send'"), 1);
     done(&r);
     /* The existing spacing rule still sits on top. */
     log_row(&mem, "voice_reply", "send", "voice_first", 1, 60);
@@ -351,6 +361,70 @@ static void test_voice_triggers_v2_live_weekly_cap_per_contact(void) {
     g_mem = NULL;
     mem.vtable->deinit(mem.ctx);
 }
+
+/* Review of #576: for a family contact whose measured reply p90 is 240, the
+ * planned budget sits at the channel ceiling on every turn, so a budget-based
+ * memo_length_reply fired on "ok". A one-word reply is never a memo moment. */
+static void test_voice_triggers_v2_does_not_saturate_on_a_short_message(void) {
+    vf_reset();
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    g_mem = &mem;
+    hu_contact_profile_t cp;
+    memset(&cp, 0, sizeof(cp));
+    cp.contact_id = "+15550000001";
+    cp.relationship_type = "family";
+    cp.reply_chars_p90 = 240;
+    g_contact = &cp;
+    g_max_chars = 240;
+    setenv("HU_VOICE_TRIGGERS_V2", "live", 1);
+    vf_run_t r;
+    run("live", "+15550000001", "ok", &r);
+    unsetenv("HU_VOICE_TRIGGERS_V2");
+    HU_ASSERT_STR_EQ(r.vf.reason, "no_trigger");
+    HU_ASSERT_FALSE(r.vf.memo);
+    HU_ASSERT_EQ(count_rows(&mem, "trigger LIKE 'voice_v2%' AND decision = 'send'"), 0);
+    done(&r);
+    vf_reset();
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* Review of #576: a week of SHADOW would-voices must not use up the LIVE cap,
+ * or the first LIVE week starts at "weekly_cap" for everyone. */
+static void test_voice_triggers_v2_shadow_does_not_consume_the_live_cap(void) {
+    vf_reset();
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    g_mem = &mem;
+    g_max_chars = 120;
+    vf_run_t r;
+    setenv("HU_VOICE_TRIGGERS_V2", "shadow", 1);
+    for (int i = 0; i < 3; i++) {
+        run("live", "+15550000001", k_story, &r);
+        done(&r);
+    }
+    setenv("HU_VOICE_TRIGGERS_V2", "live", 1);
+    run("live", "+15550000001", k_story, &r);
+    unsetenv("HU_VOICE_TRIGGERS_V2");
+    HU_ASSERT_STR_EQ(r.vf.reason, "story_inbound");
+    HU_ASSERT_TRUE(r.vf.memo);
+    done(&r);
+    vf_reset();
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* The weekly cap cannot be read (no decision log): treat it as reached. */
+static void test_voice_triggers_v2_cap_fails_closed_without_a_log(void) {
+    vf_reset();
+    g_max_chars = 120;
+    setenv("HU_VOICE_TRIGGERS_V2", "live", 1);
+    vf_run_t r;
+    run("live", "+15550000001", k_story, &r);
+    unsetenv("HU_VOICE_TRIGGERS_V2");
+    HU_ASSERT_STR_EQ(r.vf.reason, "no_trigger");
+    HU_ASSERT_FALSE(r.vf.memo);
+    done(&r);
+}
 #endif
 
 /* "YYYY-MM-DD HH:MM:SS" local, `ago` seconds before now — chat.db's history format. */
@@ -380,10 +454,14 @@ static void test_voice_first_secs_since_owner_reply(void) {
     HU_ASSERT_TRUE(s >= 5 * 86400 - 5 && s <= 5 * 86400 + 5);
 }
 
+#if defined(HU_ENABLE_SQLITE)
 /* A close contact, first reply in 4 days: v2 LIVE picks long_gap_reconnect
  * from the turn's own channel history. A contact who is not close does not. */
 static void test_voice_triggers_v2_live_reconnects_with_a_close_contact(void) {
     vf_reset();
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    g_mem = &mem;
     hu_channel_history_entry_t h[2];
     memset(h, 0, sizeof(h));
     h[0].from_me = true;
@@ -412,10 +490,10 @@ static void test_voice_triggers_v2_live_reconnects_with_a_close_contact(void) {
     HU_ASSERT_FALSE(r.vf.memo);
     done(&r);
     unsetenv("HU_VOICE_TRIGGERS_V2");
-    g_max_chars = 200;
-    g_contact = NULL;
-    g_rt = NULL;
+    vf_reset();
+    mem.vtable->deinit(mem.ctx);
 }
+#endif
 
 void run_daemon_voice_first_tests(void) {
     HU_TEST_SUITE("daemon voice-first memos");
@@ -429,12 +507,15 @@ void run_daemon_voice_first_tests(void) {
     HU_RUN_TEST(test_voice_first_shadow_decides_but_writes_text);
     HU_RUN_TEST(test_voice_first_live_without_a_trigger_stays_text);
     HU_RUN_TEST(test_voice_first_secs_since_owner_reply);
-    HU_RUN_TEST(test_voice_triggers_v2_live_reconnects_with_a_close_contact);
 #if defined(HU_ENABLE_SQLITE)
+    HU_RUN_TEST(test_voice_triggers_v2_live_reconnects_with_a_close_contact);
     HU_RUN_TEST(test_voice_first_self_test_does_not_start_the_spacing_gap);
     HU_RUN_TEST(test_voice_triggers_v2_off_is_byte_identical);
     HU_RUN_TEST(test_voice_triggers_v2_shadow_does_not_change_the_decision);
     HU_RUN_TEST(test_voice_triggers_v2_live_writes_a_memo_for_a_story);
     HU_RUN_TEST(test_voice_triggers_v2_live_weekly_cap_per_contact);
+    HU_RUN_TEST(test_voice_triggers_v2_does_not_saturate_on_a_short_message);
+    HU_RUN_TEST(test_voice_triggers_v2_shadow_does_not_consume_the_live_cap);
+    HU_RUN_TEST(test_voice_triggers_v2_cap_fails_closed_without_a_log);
 #endif
 }

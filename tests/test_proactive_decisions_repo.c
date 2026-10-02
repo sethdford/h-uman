@@ -102,7 +102,8 @@ static void test_proactive_decisions_repo_last_sent_ts(void) {
     sqlite3 *db = hu_sqlite_memory_get_db(&mem);
     HU_ASSERT_NOT_NULL(db);
     int64_t ts = 0;
-    HU_ASSERT_EQ(hu_proactive_decisions_repo_last_sent_ts(db, "+15550000001", "voice_reply", &ts),
+    HU_ASSERT_EQ(hu_proactive_decisions_repo_last_sent_ts_except(db, "+15550000001", "voice_reply",
+                                                                 NULL, &ts),
                  HU_OK);
     HU_ASSERT_EQ(ts, -1);
     (void)hu_proactive_decisions_repo_record(db, 100, "+15550000001", "voice_reply",
@@ -113,7 +114,8 @@ static void test_proactive_decisions_repo_last_sent_ts(void) {
                                              HU_PROACTIVE_DECISION_SEND, "heartfelt", 1, NULL);
     (void)hu_proactive_decisions_repo_record(db, 400, "+15550000002", "voice_reply",
                                              HU_PROACTIVE_DECISION_SEND, "voice", 1, NULL);
-    HU_ASSERT_EQ(hu_proactive_decisions_repo_last_sent_ts(db, "+15550000001", "voice_reply", &ts),
+    HU_ASSERT_EQ(hu_proactive_decisions_repo_last_sent_ts_except(db, "+15550000001", "voice_reply",
+                                                                 NULL, &ts),
                  HU_OK);
     HU_ASSERT_EQ(ts, 100);
     mem.vtable->deinit(mem.ctx);

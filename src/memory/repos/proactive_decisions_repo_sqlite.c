@@ -141,11 +141,6 @@ static bool proactive_scalar_i64(sqlite3 *db, const char *sql, const char *param
     return ok;
 }
 
-hu_error_t hu_proactive_decisions_repo_last_sent_ts(sqlite3 *db, const char *contact,
-                                                    const char *trigger, int64_t *out_ts) {
-    return hu_proactive_decisions_repo_last_sent_ts_except(db, contact, trigger, NULL, out_ts);
-}
-
 hu_error_t hu_proactive_decisions_repo_last_sent_ts_except(sqlite3 *db, const char *contact,
                                                            const char *trigger,
                                                            const char *except_reason,

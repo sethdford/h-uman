@@ -21,20 +21,22 @@ static bool has_narrative_marker(const char *s, size_t n) {
     return false;
 }
 
-/* Sentences of at least HU_VOICE_V2_STORY_SENTENCE_MIN_WORDS words, split on
- * . ! ? and newlines ("lol." and "ok!" are not sentences). */
-static size_t count_sentences(const char *s, size_t n) {
-    size_t sentences = 0, start = 0;
+/* Segments of at least HU_VOICE_V2_STORY_SENTENCE_MIN_WORDS words, split on
+ * . ! ? and newlines ("lol." and "ok!" are not sentences). With
+ * questions_only, only segments that end in '?'. */
+static size_t count_segments(const char *s, size_t n, bool questions_only) {
+    size_t count = 0, start = 0;
     for (size_t i = 0; i <= n; i++) {
         bool end = i == n || s[i] == '.' || s[i] == '!' || s[i] == '?' || s[i] == '\n';
         if (!end)
             continue;
-        if (hu_voice_intent_word_count(s + start, i - start) >=
-            HU_VOICE_V2_STORY_SENTENCE_MIN_WORDS)
-            sentences++;
+        if ((!questions_only || (i < n && s[i] == '?')) &&
+            hu_voice_intent_word_count(s + start, i - start) >=
+                HU_VOICE_V2_STORY_SENTENCE_MIN_WORDS)
+            count++;
         start = i + 1;
     }
-    return sentences;
+    return count;
 }
 
 static bool has_link(const char *s, size_t n) {
@@ -48,11 +50,13 @@ bool hu_voice_v2_story_inbound(const char *s, size_t n) {
     if (n >= HU_VOICE_V2_STORY_LONG_CHARS && !has_link(s, n))
         return true;
     return n >= HU_VOICE_V2_STORY_NARRATIVE_CHARS &&
-           count_sentences(s, n) >= HU_VOICE_V2_STORY_MIN_SENTENCES && has_narrative_marker(s, n);
+           count_segments(s, n, false) >= HU_VOICE_V2_STORY_MIN_SENTENCES &&
+           has_narrative_marker(s, n);
 }
 
-bool hu_voice_v2_memo_length_reply(uint32_t planned_reply_chars) {
-    return planned_reply_chars >= HU_VOICE_V2_MEMO_PLANNED_CHARS;
+bool hu_voice_v2_memo_length_reply(bool close_contact, const char *s, size_t n) {
+    return close_contact && s && count_segments(s, n, true) >= HU_VOICE_V2_MEMO_MIN_QUESTIONS &&
+           !hu_voice_intent_is_logistics(s, n);
 }
 
 bool hu_voice_v2_late_evening_warmth(int local_minute, bool close_contact, const char *s,
@@ -89,7 +93,9 @@ uint32_t hu_voice_v2_parse_weekly_cap(const char *env) {
     return (uint32_t)v;
 }
 
-static const char *v2_reason(const hu_voice_v2_facts_t *f) {
+const char *hu_voice_v2_trigger(const hu_voice_v2_facts_t *f) {
+    if (!f)
+        return NULL;
     if (hu_voice_v2_story_inbound(f->inbound, f->inbound_len))
         return "story_inbound";
     if (hu_voice_v2_long_gap_reconnect(f->secs_since_owner_reply, f->close_contact))
@@ -97,13 +103,13 @@ static const char *v2_reason(const hu_voice_v2_facts_t *f) {
     if (hu_voice_v2_late_evening_warmth(f->local_minute, f->close_contact, f->inbound,
                                         f->inbound_len))
         return "late_evening_warmth";
-    if (hu_voice_v2_memo_length_reply(f->planned_reply_chars))
+    if (hu_voice_v2_memo_length_reply(f->close_contact, f->inbound, f->inbound_len))
         return "memo_length_reply";
     return NULL;
 }
 
 bool hu_voice_v2_decide(const hu_voice_v2_facts_t *f, const char **out_reason) {
-    const char *why = f ? v2_reason(f) : NULL;
+    const char *why = hu_voice_v2_trigger(f);
     bool voice = why != NULL;
     if (voice && f->v2_memos_this_week >= f->weekly_cap) {
         why = "weekly_cap";

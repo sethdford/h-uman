@@ -97,11 +97,8 @@ hu_error_t hu_proactive_decisions_repo_recent_sent_refs(sqlite3 *db, const char 
                                                         size_t cap, size_t *out_n);
 
 /* Timestamp of the newest row for (contact, trigger) that was actually sent
- * (sent = 1), or -1 when there is none. Voice-first memos use it for spacing. */
-hu_error_t hu_proactive_decisions_repo_last_sent_ts(sqlite3 *db, const char *contact,
-                                                    const char *trigger, int64_t *out_ts);
-
-/* Same, ignoring rows whose reason is `except_reason` (NULL ignores none).
+ * (sent = 1), ignoring rows whose reason is `except_reason` (NULL ignores
+ * none); -1 when there is none.
  * Voice-first spacing passes "self_test": an owner #voice self-test is not a
  * memo anyone received and must not start the gap (bug 2026-10-01). */
 hu_error_t hu_proactive_decisions_repo_last_sent_ts_except(sqlite3 *db, const char *contact,

@@ -48,10 +48,16 @@ static void test_voice_v2_story_narrative(void) {
 }
 
 static void test_voice_v2_memo_length_reply(void) {
-    HU_ASSERT_TRUE(hu_voice_v2_memo_length_reply(HU_VOICE_V2_MEMO_PLANNED_CHARS));
-    HU_ASSERT_TRUE(hu_voice_v2_memo_length_reply(640));
-    HU_ASSERT_FALSE(hu_voice_v2_memo_length_reply(HU_VOICE_V2_MEMO_PLANNED_CHARS - 1));
-    HU_ASSERT_FALSE(hu_voice_v2_memo_length_reply(0)); /* unknown */
+    const char *two = "how was the trip with the kids? did they like the lake house?";
+    HU_ASSERT_TRUE(hu_voice_v2_memo_length_reply(true, S(two)));
+    HU_ASSERT_FALSE(hu_voice_v2_memo_length_reply(false, S(two))); /* not close */
+    /* One real question is not enough (question_worth_talking covers long ones). */
+    HU_ASSERT_FALSE(hu_voice_v2_memo_length_reply(true, S("how was the trip with the kids?")));
+    /* Short questions under 3 words do not count. */
+    HU_ASSERT_FALSE(hu_voice_v2_memo_length_reply(true, S("you up? you ok?")));
+    /* The saturation case from review of #576: "ok" never qualifies. */
+    HU_ASSERT_FALSE(hu_voice_v2_memo_length_reply(true, S("ok")));
+    HU_ASSERT_FALSE(hu_voice_v2_memo_length_reply(true, NULL, 0));
 }
 
 static void test_voice_v2_late_evening_warmth(void) {
@@ -114,7 +120,6 @@ static void test_voice_v2_weekly_cap_parse(void) {
 static hu_voice_v2_facts_t facts(const char *inbound) {
     hu_voice_v2_facts_t f = {.inbound = inbound,
                              .inbound_len = inbound ? strlen(inbound) : 0,
-                             .planned_reply_chars = 120,
                              .local_minute = 12 * 60,
                              .close_contact = true,
                              .secs_since_owner_reply = 3600,
@@ -129,7 +134,9 @@ static void test_voice_v2_decide_picks_each_reason(void) {
     HU_ASSERT_FALSE(hu_voice_v2_decide(&f, &why));
     HU_ASSERT_STR_EQ(why, "none");
 
-    f.planned_reply_chars = HU_VOICE_V2_MEMO_PLANNED_CHARS;
+    HU_ASSERT_TRUE(hu_voice_v2_trigger(&f) == NULL);
+
+    f = facts("how was the trip with the kids? did they like the lake house?");
     HU_ASSERT_TRUE(hu_voice_v2_decide(&f, &why));
     HU_ASSERT_STR_EQ(why, "memo_length_reply");
 
@@ -158,6 +165,7 @@ static void test_voice_v2_decide_weekly_cap(void) {
     f.v2_memos_this_week = HU_VOICE_V2_WEEKLY_CAP_DEFAULT;
     HU_ASSERT_FALSE(hu_voice_v2_decide(&f, &why));
     HU_ASSERT_STR_EQ(why, "weekly_cap");
+    HU_ASSERT_STR_EQ(hu_voice_v2_trigger(&f), "long_gap_reconnect"); /* the pre-cap reason */
     f.v2_memos_this_week = 0;
     f.weekly_cap = 0; /* operator turned the v2 reasons off */
     HU_ASSERT_FALSE(hu_voice_v2_decide(&f, &why));

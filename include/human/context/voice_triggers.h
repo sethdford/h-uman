@@ -27,14 +27,16 @@
 #define HU_VOICE_V2_STORY_MIN_SENTENCES      2
 #define HU_VOICE_V2_STORY_SENTENCE_MIN_WORDS 3
 
-/* memo_length_reply: the decision is made BEFORE the reply is written
- * (daemon.c, hu_daemon_voice_first_prepare), so "reply length" is the planned
- * length budget the daemon already computed for this turn (max_chars: the
- * channel ceiling, scaled by their message length and the relationship). A
- * plan that uses the whole iMessage budget (200) is a reply better talked. */
-#define HU_VOICE_V2_MEMO_PLANNED_CHARS 200
+/* memo_length_reply: a close contact asked two or more real questions (each
+ * 3+ words, not a short logistics question). Answering several questions is a
+ * paragraph, which people talk rather than type. It reads their message, not
+ * the planned reply budget: that budget sits at the channel ceiling for any
+ * contact whose measured reply p90 reaches it, so a budget rule fired on "ok"
+ * (review of #576). */
+#define HU_VOICE_V2_MEMO_MIN_QUESTIONS 2
 
-/* late_evening_warmth: 20:00-23:30 local, a close contact, and a message of
+/* late_evening_warmth: 20:00-23:30 in the owner's local time (the machine the
+ * daemon runs on), not the contact's; a close contact, and a message of
  * more than a couple of words (not "ok", not "night!"). */
 #define HU_VOICE_V2_EVENING_START_MIN (20 * 60)
 #define HU_VOICE_V2_EVENING_END_MIN   (23 * 60 + 30)
@@ -51,7 +53,6 @@
 typedef struct {
     const char *inbound; /* the inbound batch text */
     size_t inbound_len;
-    uint32_t planned_reply_chars;   /* the turn's max_chars; 0 = unknown */
     int local_minute;               /* 0..1439 local time; -1 = unknown */
     bool close_contact;             /* hu_voice_v2_close_contact */
     int64_t secs_since_owner_reply; /* to this contact; -1 = unknown */
@@ -60,7 +61,7 @@ typedef struct {
 } hu_voice_v2_facts_t;
 
 bool hu_voice_v2_story_inbound(const char *s, size_t n);
-bool hu_voice_v2_memo_length_reply(uint32_t planned_reply_chars);
+bool hu_voice_v2_memo_length_reply(bool close_contact, const char *s, size_t n);
 bool hu_voice_v2_late_evening_warmth(int local_minute, bool close_contact, const char *s, size_t n);
 bool hu_voice_v2_long_gap_reconnect(int64_t secs_since_owner_reply, bool close_contact);
 
@@ -69,6 +70,9 @@ bool hu_voice_v2_close_contact(const hu_contact_profile_t *cp);
 
 /* HU_VOICE_V2_WEEKLY_CAP: a non-negative integer up to 14, else the default. */
 uint32_t hu_voice_v2_parse_weekly_cap(const char *env);
+
+/* The v2 reason that fires before the weekly cap, or NULL. */
+const char *hu_voice_v2_trigger(const hu_voice_v2_facts_t *f);
 
 /* Which v2 reason fires, if any, after the weekly cap. Returns true (VOICE)
  * with *out_reason one of "story_inbound", "long_gap_reconnect",
