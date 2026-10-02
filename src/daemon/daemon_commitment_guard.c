@@ -382,7 +382,9 @@ static char *rewrite(const hu_commitment_guard_io_t *io, hu_commit_decision_t wh
     return txt;
 }
 
-static void notify_owner(const hu_commitment_guard_io_t *io,
+/* Shown, or retried once and still not shown (false). The caller never sends
+ * the committing draft on false: the reply stays held either way. */
+static bool notify_owner(const hu_commitment_guard_io_t *io,
                          const hu_commitment_guard_result_t *r) {
     const char *who = (io->contact_name && io->contact_name[0]) ? io->contact_name : "a contact";
     const char *kind = hu_commit_kind_name(r->detection.kind);
@@ -400,7 +402,18 @@ static void notify_owner(const hu_commitment_guard_io_t *io,
                  r->decision == HU_COMMIT_REWRITE_CONFLICT ? " (your calendar is busy then)"
                  : r->calendar == HU_CAL_UNKNOWN           ? " (couldn't check your calendar)"
                                                            : "");
-    (void)hu_owner_notify_local(body);
+    bool (*notify)(const char *) = io->notify ? io->notify : hu_owner_notify_local;
+    return notify(body) || notify(body);
+}
+
+/* LIVE actions whose owner notice failed after the retry, process lifetime. */
+static atomic_uint g_notify_failed;
+
+static void note_notify_failed(const hu_commitment_guard_result_t *r) {
+    unsigned n = atomic_fetch_add(&g_notify_failed, 1) + 1;
+    hu_log_warn("commitment_guard", NULL,
+                "[HU_COMMITMENT_GUARD] notify_failed count=%u action=%s kind=%s", n,
+                r->suppressed ? "suppressed" : "rewritten", hu_commit_kind_name(r->detection.kind));
 }
 
 /* ── run ───────────────────────────────────────────────────────────────── */
@@ -496,8 +509,9 @@ hu_error_t hu_commitment_guard_run(hu_gate_mode_t mode, const hu_commitment_guar
             *response_len = new_len;
             r.rewritten = true;
         }
-        notify_owner(io, &r);
-        r.notified = true;
+        r.notified = notify_owner(io, &r);
+        if (!r.notified)
+            note_notify_failed(&r);
     }
     if (out)
         *out = r;
@@ -525,6 +539,14 @@ void hu_commitment_guard_set_test_calendar(hu_calendar_query_fn fn, void *ctx) {
 }
 void hu_commitment_guard_test_reset(void) {
     atomic_store(&g_miss_count, 0);
+    atomic_store(&g_notify_failed, 0);
+}
+static bool (*g_test_notify_fn)(const char *body);
+void hu_commitment_guard_set_test_notifier(bool (*fn)(const char *body)) {
+    g_test_notify_fn = fn;
+}
+unsigned hu_commitment_guard_test_notify_failed_count(void) {
+    return atomic_load(&g_notify_failed);
 }
 #endif
 
@@ -567,6 +589,7 @@ bool hu_daemon_commitment_guard_apply(struct hu_agent *agent, const char *batch_
         io.local = g_test_provider;
     io.calendar = g_test_cal_fn;
     io.calendar_ctx = g_test_cal_ctx;
+    io.notify = g_test_notify_fn;
 #else
     /* Local only: the loopback primary itself, never the reliable wrapper's
      * cloud fallbacks. No loopback model -> no call at all. */

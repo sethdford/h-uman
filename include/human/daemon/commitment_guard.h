@@ -119,6 +119,8 @@ typedef struct hu_commitment_guard_io {
     void *calendar_ctx;
     const char *contact_name; /* owner notice only; NULL -> "a contact" */
     int64_t now;              /* unix seconds, for the detector's "Now:" */
+    /* Owner notice; NULL -> hu_owner_notify_local. False = not shown. */
+    bool (*notify)(const char *body);
 } hu_commitment_guard_io_t;
 
 /* Gate mode from HU_COMMITMENT_GUARD; default OFF. */
@@ -167,6 +169,10 @@ void hu_commitment_guard_set_test_provider(const hu_provider_t *p);
 void hu_commitment_guard_set_test_calendar(hu_calendar_query_fn fn, void *ctx);
 /* Detector calls made since the last reset (shadow audit counter included). */
 void hu_commitment_guard_test_reset(void);
+/* Glue notifier override (NULL -> hu_owner_notify_local). */
+void hu_commitment_guard_set_test_notifier(bool (*fn)(const char *body));
+/* LIVE actions whose owner notice failed even after the retry. */
+unsigned hu_commitment_guard_test_notify_failed_count(void);
 #endif
 
 #ifdef __cplusplus

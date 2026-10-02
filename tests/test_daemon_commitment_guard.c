@@ -393,6 +393,58 @@ static void run_live_failed_rewrite_is_suppressed(void) {
     HU_ASSERT_EQ(hu_owner_notify_test_count(), 1u);
 }
 
+/* Owner notice fails (osascript down): critic MED on PR #609. The held reply
+ * must stay held, never fall back to the committing draft; the notice is
+ * retried once; a persistent failure is counted, not silent. */
+static unsigned g_notify_calls;
+static unsigned g_notify_fail_first;
+static bool failing_notify(const char *body) {
+    (void)body;
+    g_notify_calls++;
+    return g_notify_calls > g_notify_fail_first;
+}
+
+static void run_live_notify_failure_keeps_reply_held_and_is_counted(void) {
+    fake_llm_t f = {.replies = {k_money, NULL}, .n = 2}; /* rewrite fails -> suppress */
+    hu_commitment_guard_io_t io = make_io(&f, NULL);
+    io.notify = failing_notify;
+    g_notify_calls = 0;
+    g_notify_fail_first = 100; /* never succeeds */
+    hu_commitment_guard_test_reset();
+    HU_ASSERT_EQ(hu_commitment_guard_test_notify_failed_count(), 0u);
+    hu_owner_notify_test_reset();
+    size_t len;
+    char *draft = dup_draft("sure ill venmo you", &len);
+    hu_commitment_guard_result_t r;
+    HU_ASSERT_EQ(hu_commitment_guard_run(HU_GATE_LIVE, &io, "lend me 50?", 11, &draft, &len, &r),
+                 HU_OK);
+    HU_ASSERT_EQ(g_notify_calls, 2u); /* one try + one retry */
+    HU_ASSERT_TRUE(r.suppressed);
+    HU_ASSERT_NULL(draft); /* still held: nothing is sent */
+    HU_ASSERT_EQ(len, 0u);
+    HU_ASSERT_FALSE(r.notified);
+    HU_ASSERT_EQ(hu_commitment_guard_test_notify_failed_count(), 1u);
+    HU_ASSERT_EQ(hu_owner_notify_test_count(), 0u); /* the injected notifier was used */
+}
+
+static void run_live_notify_retry_success_is_not_counted(void) {
+    fake_llm_t f = {.replies = {k_money, NULL}, .n = 2};
+    hu_commitment_guard_io_t io = make_io(&f, NULL);
+    io.notify = failing_notify;
+    g_notify_calls = 0;
+    g_notify_fail_first = 1; /* first try fails, retry succeeds */
+    hu_commitment_guard_test_reset();
+    size_t len;
+    char *draft = dup_draft("sure ill venmo you", &len);
+    hu_commitment_guard_result_t r;
+    HU_ASSERT_EQ(hu_commitment_guard_run(HU_GATE_LIVE, &io, "lend me 50?", 11, &draft, &len, &r),
+                 HU_OK);
+    HU_ASSERT_EQ(g_notify_calls, 2u);
+    HU_ASSERT_TRUE(r.notified);
+    HU_ASSERT_NULL(draft);
+    HU_ASSERT_EQ(hu_commitment_guard_test_notify_failed_count(), 0u);
+}
+
 static void run_live_detector_down_falls_back_to_money_floor_only(void) {
     /* Detector fails, draft offers money: the deterministic floor holds it. */
     fake_llm_t f = {.replies = {NULL, k_rewrite, k_none}, .n = 3};
@@ -580,6 +632,33 @@ static void glue_live_without_a_local_provider_changes_nothing(void) {
     unsetenv("HU_COMMITMENT_GUARD");
 }
 
+/* Same failure through the real reply-path glue. */
+static void glue_live_notify_failure_holds_reply_and_counts(void) {
+    setenv("HU_COMMITMENT_GUARD", "live", 1);
+    fake_llm_t f = {.replies = {k_money, NULL}, .n = 2};
+    hu_provider_t tp = {.ctx = &f, .vtable = &fake_vtable};
+    hu_commitment_guard_set_test_provider(&tp);
+    hu_commitment_guard_set_test_notifier(failing_notify);
+    g_notify_calls = 0;
+    g_notify_fail_first = 100;
+    hu_commitment_guard_test_reset();
+    g_alloc = hu_system_allocator();
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.alloc = &g_alloc;
+    size_t len;
+    char *draft = dup_draft("sure ill venmo you", &len);
+    HU_ASSERT_TRUE(
+        hu_daemon_commitment_guard_apply(&agent, "+15550100", 9, "lend me 50?", 11, &draft, &len));
+    HU_ASSERT_NULL(draft);
+    HU_ASSERT_EQ(len, 0u);
+    HU_ASSERT_EQ(g_notify_calls, 2u);
+    HU_ASSERT_EQ(hu_commitment_guard_test_notify_failed_count(), 1u);
+    hu_commitment_guard_set_test_notifier(NULL);
+    hu_commitment_guard_set_test_provider(NULL);
+    unsetenv("HU_COMMITMENT_GUARD");
+}
+
 void run_daemon_commitment_guard_tests(void) {
     HU_TEST_SUITE("daemon_commitment_guard");
     HU_RUN_TEST(prefilter_fires_on_plans_times_money_and_promises);
@@ -608,4 +687,7 @@ void run_daemon_commitment_guard_tests(void) {
     HU_RUN_TEST(compatible_chat_sends_purpose_header_and_no_priority);
     HU_RUN_TEST(glue_off_by_default_leaves_reply_untouched);
     HU_RUN_TEST(glue_live_without_a_local_provider_changes_nothing);
+    HU_RUN_TEST(run_live_notify_failure_keeps_reply_held_and_is_counted);
+    HU_RUN_TEST(run_live_notify_retry_success_is_not_counted);
+    HU_RUN_TEST(glue_live_notify_failure_holds_reply_and_counts);
 }

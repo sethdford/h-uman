@@ -70,6 +70,21 @@ and the kind of commitment, never what was said. There is no approve/deny
 shortcut yet, because nothing reads a reply to the banner. The notice tells
 the owner to answer the thread himself.
 
+If the banner cannot be shown (osascript fails), the guard retries once. The
+reply stays held either way: a failed notice never lets the committing draft
+through. A notice that still fails is counted, not silent, with one
+counts-only line (no text, names or handles), and the reply line reports
+`notified=0`:
+
+```
+[HU_COMMITMENT_GUARD] notify_failed count=<process total> action=<suppressed|rewritten> kind=<kind>
+```
+
+Check before and during LIVE: `grep -c 'HU_COMMITMENT_GUARD\] notify_failed'
+~/.human/logs/service-loop-error.log` should be 0. Any hit means Seth was not
+told about a held reply. That contact got no answer (`suppressed`) or a
+non-committal one (`rewritten`), so check those threads by hand.
+
 ## Gate
 
 | Value | Behaviour |
