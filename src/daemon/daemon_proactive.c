@@ -36,6 +36,7 @@
 #include "human/core/paths.h"
 #include "human/core/string.h"
 #include "human/daemon/send_failure.h"
+#include "human/daemon/unprompted_gate.h"
 #include "human/daemon_learning_tick.h" /* hu_daemon_proactive_outcome_record_send */
 #include "human/feeds/awareness.h"
 #include "human/feeds/processor.h"
@@ -889,34 +890,6 @@ bool hu_daemon_proactive_gate_and_send(struct hu_agent *agent, hu_allocator_t *a
      * outcome row, so attributing it here would double-count. */
     const char *skip_reason = skip ? "llm_skip" : NULL;
 
-    /* Send circuit breaker — stop proposing to a contact whose sends keep
-     * failing to deliver. Measured 2026-09-22: +1801xxx8303 absorbed 124 of
-     * 136 proactive proposals (91% of all capacity) and delivered ZERO — it is
-     * RCS/Android and this path forces iMessage. A failed send deliberately
-     * records no send-recency (a message nobody received must not suppress a
-     * later real one), so nothing ever damped the retry: ~10 attempts/day,
-     * indefinitely. This supplies the negative feedback a delivery would have.
-     * Checked before the boundary gate so a dead address costs no further work. */
-#ifdef HU_ENABLE_SQLITE
-    if (!skip && agent->memory) {
-        struct sqlite3 *cb_db = hu_sqlite_memory_get_db(agent->memory);
-        if (cb_db && hu_proactive_send_circuit_is_open(cb_db, cp->contact_id, (int64_t)now)) {
-            skip = true;
-            skip_reason = "send_circuit_open";
-        }
-        /* The last outbound to this contact failed on every path (recorded by
-         * daemon_send_failure.c with sent=0, so the 14-day repeat guard does
-         * not count it as asked — they never saw it). Say so, aggregate only. */
-        int64_t undelivered_at = 0;
-        if (cb_db && !skip &&
-            hu_daemon_send_failure_last_undelivered(cb_db, cp->contact_id, &undelivered_at))
-            hu_log_info("human", agent ? agent->observer : NULL,
-                        "[send] proactive to a contact whose last outbound never arrived "
-                        "(%llds ago); not counted as asked",
-                        (long long)((int64_t)now - undelivered_at));
-    }
-#endif
-
     /* F68: Protective boundary — skip proactive if topic is boundary */
     if (!skip && agent->memory &&
         hu_protective_is_boundary(agent->memory, cp->contact_id, strlen(cp->contact_id),
@@ -924,29 +897,37 @@ bool hu_daemon_proactive_gate_and_send(struct hu_agent *agent, hu_allocator_t *a
         skip = true;
         skip_reason = "protective_boundary";
     }
-    /* Sprint 41 follow-up #2 — single-source-of-truth proactive
-     * arbiter. Replaces the two explicit predicates (quiet hours
-     * + daily budget) with one call to the same gate stack
-     * init_proposer.tick uses. Daemon-side recency stays handled
-     * by FU-1 below (different semantic — outbound vs inbound),
-     * so we pass last_inbound_unix=0 to disable the arbiter's
-     * inbound-recency gate. cfg=NULL is intentional: daemon
-     * doesn't have an initiative_config in scope and the
-     * arbiter's NULL-safe defaults apply. */
+    /* The unprompted gate stack (DEF-6/9/14): opt-out, governor + THIS
+     * contact's cool-off, the persisted cap, quiet hours and the send circuit
+     * breaker (measured 2026-09-22: one RCS-only contact absorbed 124 of 136
+     * proposals and received 0). The daemon already ran it before the
+     * proposer; it runs again here because the follow-up watcher enters
+     * through this function too. Content stages run at send below. target is
+     * NULL because both callers already ran the reachability pre-filter, so
+     * stage 6 is skipped instead of probing blue_guard a second time. */
+    hu_unprompted_gate_t gate;
+    hu_unprompted_gate_init(&gate, alloc, agent, gov_budget, throttle, ar_cfg, tz_offset_s, ch_name,
+                            NULL, 0);
     if (!skip) {
-        hu_init_proposer_result_t gate = hu_init_proposer_governor_check_only(
-            /*cfg=*/NULL, ar_cfg, tz_offset_s, gov_budget, /*last_inbound_unix=*/0, now);
-        if (gate != HU_INIT_RESULT_SKIP) {
-            const char *why = (gate == HU_INIT_RESULT_GATED_QUIET)    ? "autoresponder quiet hours"
-                              : (gate == HU_INIT_RESULT_GATED_BUDGET) ? "daily budget exhausted"
-                                                                      : "governor gated";
-            hu_log_info("human", agent ? agent->observer : NULL,
-                        "proactive check-in to %s skipped: %s", HU_LOG_WHO_CSTR(cp->contact_id),
-                        why);
+        hu_unprompted_reason_t r = hu_unprompted_send_check(
+            &gate, cp->contact_id, HU_UNPROMPTED_PROACTIVE, now, NULL, NULL, /*at_send=*/false);
+        if (r != HU_UNPROMPTED_ALLOW) {
             skip = true;
-            skip_reason = "governor_gated";
+            skip_reason = hu_unprompted_reason_str(r);
         }
     }
+#ifdef HU_ENABLE_SQLITE
+    /* The last outbound to this contact failed on every path (recorded by
+     * daemon_send_failure.c with sent=0, so the 14-day repeat guard does
+     * not count it as asked — they never saw it). Say so, aggregate only. */
+    int64_t undelivered_at = 0;
+    if (!skip && gate.db &&
+        hu_daemon_send_failure_last_undelivered(gate.db, cp->contact_id, &undelivered_at))
+        hu_log_info("human", agent ? agent->observer : NULL,
+                    "[send] proactive to a contact whose last outbound never arrived "
+                    "(%llds ago); not counted as asked",
+                    (long long)((int64_t)now - undelivered_at));
+#endif
     /* FU-1: defer proactive check-in if reactive turn fired recently. */
     if (!skip && hu_daemon_proactive_should_defer(&agent->contact_send_recency, cp->contact_id,
                                                   strlen(cp->contact_id), now)) {
@@ -974,42 +955,16 @@ bool hu_daemon_proactive_gate_and_send(struct hu_agent *agent, hu_allocator_t *a
             response[response_len - 1] = '\0';
             response_len--;
         }
-        /* 2026-05-16 P1-6 / P4-6: rate-limit + per-contact send-cap on
-         * proactive outbound. The pre-fix path called vtable->send
-         * directly with no throttle, leading to 4x burst sends. */
-        if (!hu_proactive_throttle_channel_try_consume(throttle, ch_name)) {
-            hu_log_info("human", agent ? agent->observer : NULL,
-                        "proactive check-in to %s skipped: rate-limited",
-                        HU_LOG_WHO_CSTR(cp->contact_id));
-            skip = true;
-            skip_reason = "rate_limited";
-        }
-        if (!skip && !hu_proactive_throttle_record_send(throttle, cp->contact_id, "proactive",
-                                                        (uint64_t)now * 1000ULL)) {
-            hu_log_info("human", agent ? agent->observer : NULL,
-                        "proactive check-in to %s skipped: send-cap",
-                        HU_LOG_WHO_CSTR(cp->contact_id));
-            skip = true;
-            skip_reason = "send_cap";
-        }
+        /* At send: the whole stack again (channel token bucket included —
+         * the 2026-05-16 4x burst), then sanitizer (U+FFFC, directive echo —
+         * the 2026-05-26 Annie/Mindy/Betty incident) and BLOCKING moderation. */
         if (!skip) {
-            /* 2026-05-26 Annie/Mindy/Betty incident fix:
-             * sanitize outbound BEFORE channel send. Strips
-             * U+FFFC (iMessage attachment placeholder) and
-             * rejects messages that look like LLM directive
-             * echoes (e.g. "shared history", "principle",
-             * "[SAFETY] ..."). See
-             * include/human/agent/outbound_sanitize.h. */
-            const char *sanitize_reason = NULL;
-            if (!hu_outbound_sanitize(response, &response_len, &sanitize_reason)) {
-                hu_log_warn("human", agent ? agent->observer : NULL,
-                            "proactive check-in to %s REJECTED by sanitizer: %s "
-                            "(would have sent: %s)",
-                            HU_LOG_WHO_CSTR(cp->contact_id),
-                            sanitize_reason ? sanitize_reason : "unknown",
-                            HU_LOG_TEXT(response, response_len, 80));
+            hu_unprompted_reason_t r =
+                hu_unprompted_send_check(&gate, cp->contact_id, HU_UNPROMPTED_PROACTIVE, now,
+                                         response, &response_len, /*at_send=*/true);
+            if (r != HU_UNPROMPTED_ALLOW) {
                 skip = true;
-                skip_reason = "sanitize_refused";
+                skip_reason = hu_unprompted_reason_str(r);
             }
         }
         /* A failed send must not log "sent" nor charge recency/outcome/governor;

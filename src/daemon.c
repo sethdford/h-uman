@@ -103,6 +103,8 @@
 #include "human/daemon/send_budget.h"
 #include "human/daemon/send_provenance.h"
 #include "human/daemon/share_queue.h"
+#include "human/daemon/unprompted_gate.h"
+#include "human/daemon/unprompted_sends.h"
 #include "human/daemon/voice_facade.h"
 #include "human/daemon/voice_first.h"
 
@@ -369,7 +371,9 @@ hu_proactive_budget_t gov_budget = {
     .daily_max = 6,
     .weekly_max = 15,
     .relationship_multiplier = 1.0,
-    .cool_off_after_unanswered = 2,
+    /* DEF-6: the cool-off is PER CONTACT now (unprompted_gate.c); the global
+     * one was reset by anyone's reply, so it never applied. Global = ceiling. */
+    .cool_off_after_unanswered = UINT8_MAX,
     .cool_off_hours = 72,
 };
 bool gov_budget_inited = true;
@@ -474,20 +478,6 @@ static hu_proactive_context_t g_proactive_ctx;
 static hu_proactive_throttle_t g_proactive_throttle;
 static int g_proactive_throttle_initialized;
 
-/* Persist scheduled.json after a slot changes. A failed save leaves memory and
- * disk disagreeing and the stale file replays on restart (the 2026-07-27
- * sched-send incident class), so the failure is logged rather than dropped. */
-static void daemon_sched_persist(hu_agent_t *agent, const char *what) {
-    char sp[512];
-    int sn = hu_paths_state(sp, sizeof(sp), "scheduled.json");
-    if (sn <= 0 || (size_t)sn >= sizeof(sp))
-        return;
-    hu_error_t se = hu_conversation_sched_save(sp, (size_t)sn);
-    if (se != HU_OK)
-        hu_log_error("human", agent ? agent->observer : NULL,
-                     "scheduled.json not persisted after %s (%d)", what, (int)se);
-}
-
 static hu_proactive_throttle_t *daemon_throttle(hu_allocator_t *alloc) {
     if (!g_proactive_throttle_initialized) {
         hu_proactive_throttle_init(&g_proactive_throttle, alloc);
@@ -541,7 +531,7 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
         hu_proactive_budget_config_t gcfg = {.daily_max = 6,
                                              .weekly_max = 15,
                                              .relationship_multiplier = 1.0,
-                                             .cool_off_after_unanswered = 2,
+                                             .cool_off_after_unanswered = UINT8_MAX,
                                              .cool_off_hours = 72};
         hu_governor_init(&gcfg, &gov_budget);
         gov_budget_inited = true;
@@ -560,6 +550,10 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
         double busy_mult = hu_busyness_budget_multiplier(&bs);
         gov_budget.relationship_multiplier = 1.0 * recip_mult * busy_mult;
     }
+    /* Scheduled-queue delivery runs BEFORE the budget gate: an owner-scheduled
+     * message is explicit owner intent and must not stall because unprompted
+     * sends spent the budget (bumps in the queue still face the full stack). */
+    hu_daemon_sched_deliver_due(alloc, agent, channels, channel_count, (int64_t)now);
     if (!hu_governor_has_budget(&gov_budget, gov_now_ms))
         return;
 
@@ -583,146 +577,10 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
     uint32_t throttle_ymd = (uint32_t)today_ymd;
 
 #ifndef HU_IS_TEST
-    /* F25: Emotional check-ins — due moments from 1–3 days ago */
-    if (agent->memory) {
-        hu_emotional_moment_t *due = NULL;
-        size_t due_count = 0;
-        if (hu_emotional_moment_get_due(alloc, agent->memory, (int64_t)now, &due, &due_count) ==
-                HU_OK &&
-            due && due_count > 0) {
-            for (size_t d = 0; d < due_count; d++) {
-                const hu_emotional_moment_t *m = &due[d];
-                /* Find contact and channel for this contact_id */
-                for (size_t i = 0; i < agent->persona->contacts_count; i++) {
-                    const hu_contact_profile_t *cp = &agent->persona->contacts[i];
-                    if (!cp->proactive_checkin || !cp->proactive_channel || !cp->contact_id)
-                        continue;
-                    /* Strict contact_id equality only.  See 2026-05-16 incident:
-                     * the prior implementation also accepted the moment's
-                     * contact_id matching cp->proactive_channel (whole or
-                     * after-colon), which routed Mindy's emotional moment to
-                     * three contacts whose proactive_channel handles
-                     * collided.  Predicate pinned by tests/test_proactive.c. */
-                    if (!hu_proactive_contact_matches_moment(cp->contact_id, m->contact_id))
-                        continue;
-
-                    char ch_buf[64] = {0};
-                    char target_route_buf[128] = {0};
-                    daemon_proactive_parse_route(cp, ch_buf, target_route_buf);
-                    size_t target_len = strlen(target_route_buf);
-                    daemon_contact_activity_apply_route(cp->contact_id, now, channels,
-                                                        channel_count, ch_buf, target_route_buf,
-                                                        &target_len);
-                    const char *ch_part = ch_buf;
-                    const char *target_part = target_route_buf;
-
-                    for (size_t c = 0; c < channel_count; c++) {
-                        if (!channels[c].channel || !channels[c].channel->vtable ||
-                            !channels[c].channel->vtable->name)
-                            continue;
-                        const char *ch_name =
-                            channels[c].channel->vtable->name(channels[c].channel->ctx);
-                        if (!ch_name || strcmp(ch_name, ch_part) != 0)
-                            continue;
-                        if (!channels[c].channel->vtable->send)
-                            break;
-
-                        /* Outbound safety gate — see 2026-05-16 incident.
-                         * m->topic can contain a raw window of the user's own
-                         * emotional confession or the literal "(last: %lld)"
-                         * recall-format string.  hu_proactive_topic_is_safe is
-                         * the predicate that pins what we refuse to ship; if
-                         * the topic fails, we drop the send and log enough
-                         * context to investigate without leaking the body. */
-                        size_t topic_len = strnlen(m->topic, sizeof(m->topic));
-                        if (!hu_proactive_topic_is_safe(m->topic, topic_len)) {
-                            hu_log_info("human", agent ? agent->observer : NULL,
-                                        "F25 emotional check-in BLOCKED for %s (unsafe topic, "
-                                        "%zu chars)",
-                                        HU_LOG_WHO_CSTR(cp->contact_id), topic_len);
-                            (void)hu_emotional_moment_mark_followed_up(agent->memory, m->id);
-                            break;
-                        }
-
-                        /* FU-1: defer F25 if reactive turn fired for this contact recently. */
-                        if (hu_daemon_proactive_should_defer(&agent->contact_send_recency,
-                                                             m->contact_id, strlen(m->contact_id),
-                                                             (int64_t)now)) {
-                            hu_log_info("human", agent ? agent->observer : NULL,
-                                        "F25 emotional check-in deferred for %s "
-                                        "(reactive turn within %ds)",
-                                        HU_LOG_WHO_CSTR(cp->contact_id),
-                                        HU_DAEMON_REACTIVE_GATE_WINDOW_S);
-                            break;
-                        }
-
-                        char msg_buf[384];
-                        int w = snprintf(msg_buf, sizeof(msg_buf), "hey how are you doing with %s?",
-                                         m->topic);
-                        if (w > 0 && (size_t)w < sizeof(msg_buf)) {
-                            /* 2026-05-16 P1-6: channel rate-limiter on outbound. */
-                            hu_proactive_throttle_t *th = daemon_throttle(alloc);
-                            if (!hu_proactive_throttle_channel_try_consume(th, ch_name)) {
-                                hu_log_info("human", agent ? agent->observer : NULL,
-                                            "F25 emotional check-in to %s skipped: rate-limited",
-                                            HU_LOG_WHO_CSTR(cp->contact_id));
-                                break;
-                            }
-                            /* 2026-05-16 P4-6: per-contact daily/weekly send cap. */
-                            uint64_t now_ms_p46 = (uint64_t)now * 1000ULL;
-                            if (!hu_proactive_throttle_record_send(th, cp->contact_id, "F25",
-                                                                   now_ms_p46)) {
-                                hu_log_info("human", agent ? agent->observer : NULL,
-                                            "F25 emotional check-in to %s skipped: send-cap",
-                                            HU_LOG_WHO_CSTR(cp->contact_id));
-                                break;
-                            }
-                            /* 2026-05-26 incident fix: sanitize F25 outbound
-                             * before send. The Annie/Mindy/Betty event surfaced
-                             * the F25 check-in sending identical garbled text
-                             * to multiple family contacts (cross-contact bleed
-                             * still under investigation — Bug #2 not yet
-                             * root-caused). Even before that fix lands, the
-                             * sanitizer strips U+FFFC + rejects directive
-                             * echoes so the family-tier failure mode is
-                             * contained. */
-                            size_t msg_sanitized_len = (size_t)w;
-                            const char *sanitize_reason = NULL;
-                            if (!hu_outbound_sanitize(msg_buf, &msg_sanitized_len,
-                                                      &sanitize_reason)) {
-                                hu_log_warn(
-                                    "human", agent ? agent->observer : NULL,
-                                    "F25 emotional check-in to %s REJECTED by sanitizer: %s "
-                                    "(would have sent: %s)",
-                                    HU_LOG_WHO_CSTR(cp->contact_id),
-                                    sanitize_reason ? sanitize_reason : "unknown",
-                                    HU_LOG_TEXT(msg_buf, msg_sanitized_len, 80));
-                                break;
-                            }
-                            hu_error_t send_err = channels[c].channel->vtable->send(
-                                channels[c].channel->ctx, target_part, target_len, msg_buf,
-                                msg_sanitized_len, NULL, 0);
-                            if (send_err == HU_OK) {
-                                (void)hu_emotional_moment_mark_followed_up(agent->memory, m->id);
-                                hu_contact_send_recency_record(
-                                    &agent->contact_send_recency, m->contact_id,
-                                    strlen(m->contact_id), (int64_t)now, HU_SEND_PATH_PROACTIVE);
-                                (void)hu_daemon_proactive_outcome_record_send(
-                                    agent->memory, ch_name, target_part, target_len);
-                                hu_log_info("human", agent ? agent->observer : NULL,
-                                            "F25 emotional check-in sent to %s: %s",
-                                            HU_LOG_WHO_CSTR(cp->contact_id),
-                                            HU_LOG_TEXT_CSTR(msg_buf, 120));
-                            }
-                        }
-                        break;
-                    }
-                    break;
-                }
-            }
-            alloc->free(alloc->ctx, due, due_count * sizeof(hu_emotional_moment_t));
-        }
-    }
+    /* F25 emotional check-ins — carved to daemon_unprompted_sends.c, gated by
+     * the unprompted stack (DEF-14). */
+    hu_daemon_f25_checkins_tick(alloc, agent, channels, channel_count, &g_proactive_ctx,
+                                (int64_t)now);
 #endif
 
 #ifdef HU_ENABLE_SQLITE
@@ -739,85 +597,9 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
     }
 #endif
 
-    /* Scheduled message delivery: once per channel, independent of contacts */
-    {
-        /* Re-sync from disk when the file changed — `human schedule add`
-         * writes from a separate process, and the previous once-per-process
-         * load left those entries invisible until the next daemon restart
-         * (2026-07-27). Cheap: one stat() per pass, load only on change. */
-        {
-            char sp[512];
-            int sn = hu_paths_state(sp, sizeof(sp), "scheduled.json");
-            if (sn > 0 && (size_t)sn < sizeof(sp))
-                hu_conversation_sched_reload_if_changed(sp, (size_t)sn);
-        }
-        uint64_t sched_now = (uint64_t)time(NULL) * 1000ULL;
-        for (size_t sc = 0; sc < channel_count; sc++) {
-            if (!channels[sc].channel || !channels[sc].channel->vtable ||
-                !channels[sc].channel->vtable->send || !channels[sc].channel->vtable->name)
-                continue;
-            const char *sched_ch = channels[sc].channel->vtable->name(channels[sc].channel->ctx);
-            if (!sched_ch)
-                continue;
-            char sched_contact[128], sched_channel[32], sched_msg[512];
-            size_t sched_len = hu_conversation_flush_scheduled_for(
-                sched_now, sched_ch, strlen(sched_ch), sched_contact, sizeof(sched_contact),
-                sched_channel, sizeof(sched_channel), sched_msg, sizeof(sched_msg));
-            if (sched_len > 0) {
-                /* FU-1: defer scheduled delivery if the reactive turn fired recently. */
-                if (agent &&
-                    hu_daemon_proactive_should_defer(&agent->contact_send_recency, sched_contact,
-                                                     strlen(sched_contact), (int64_t)time(NULL))) {
-                    hu_log_info("human", agent ? agent->observer : NULL,
-                                "scheduled message deferred for %s (reactive turn within %ds)",
-                                HU_LOG_WHO_CSTR(sched_contact), HU_DAEMON_REACTIVE_GATE_WINDOW_S);
-                    continue;
-                }
-                hu_validator_chain_apply_default_in_place(alloc, agent ? agent->observer : NULL,
-                                                          NULL, 0, "scheduled send", sched_msg,
-                                                          &sched_len, sizeof(sched_msg));
-                if (sched_len == 0)
-                    continue;
-                sched_len =
-                    hu_conversation_vary_complexity(sched_msg, sched_len, (uint32_t)time(NULL));
-                if (sched_len > 1 && sched_msg[0] >= 'A' && sched_msg[0] <= 'Z' &&
-                    sched_msg[1] >= 'a' && sched_msg[1] <= 'z' && sched_msg[0] != 'I') {
-                    sched_msg[0] = (char)(sched_msg[0] + 32);
-                }
-                if (sched_len > 1 && sched_msg[sched_len - 1] == '.') {
-                    sched_msg[sched_len - 1] = '\0';
-                    sched_len--;
-                }
-                /* Sprint 59 outbound safety — scheduled sends bypass the
-                 * proactive/F25 sanitizer call sites, so cross-contact bleed
-                 * and metadata-leak would slip through here. The Annie/Mindy/
-                 * Betty incident's verbatim string COULD have come out via a
-                 * scheduled send. Route every scheduled send through the
-                 * pipeline (currently configured the same as proactive). */
-                {
-                    size_t sched_san_len = sched_len;
-                    const char *sched_san_reason = NULL;
-                    if (!hu_outbound_sanitize(sched_msg, &sched_san_len, &sched_san_reason)) {
-                        hu_log_warn("human", agent ? agent->observer : NULL,
-                                    "scheduled send to %s REJECTED by outbound pipeline: %s "
-                                    "(would have sent: %s)",
-                                    HU_LOG_WHO_CSTR(sched_contact),
-                                    sched_san_reason ? sched_san_reason : "unknown",
-                                    HU_LOG_TEXT(sched_msg, sched_len, 80));
-                        continue;
-                    }
-                    sched_len = sched_san_len;
-                }
-                hu_daemon_sched_send_and_log(agent, channels[sc].channel, sched_ch, sched_contact,
-                                             sched_msg, sched_len);
-                daemon_sched_persist(agent, "send");
-            }
-        }
-    }
-
     /* Follow-up watcher (S2.1b) — carved to src/daemon/daemon_followup_sched.c
      * (file-size-ceiling ratchet). msg-id dedup + per-contact cooldown live
-     * there; scheduling flows through hu_conversation_schedule_message_on. */
+     * there; scheduling flows through hu_conversation_schedule_message_kind. */
     hu_daemon_followup_sched_tick(agent, channels, channel_count);
 
     for (size_t i = 0; i < agent->persona->contacts_count; i++) {
@@ -1456,15 +1238,16 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                  * docs/plans/2026-05-26-m3-dispatch-unification/. */
                 char *unified_mem_ctx = NULL;
                 size_t unified_mem_ctx_len = 0;
-                /* Reachability pre-filter (2026-09-20, HU_PROACTIVE_REACHABILITY):
-                 * skip the proposer for a contact blue_guard would HOLD anyway.
-                 * OFF/SHADOW never take this branch; see daemon_proactive.h. */
-                if (hu_daemon_contact_optout_should_skip(agent, cp->contact_id)) {
-                    /* Contact asked us to stop (O5): no proposer fire, no send,
-                     * nothing recorded — consent is not a candidate. */
-                } else if (hu_daemon_proactive_reach_should_skip(
-                               agent, alloc, ch_part, cp->contact_id, target_part, target_len)) {
-                    /* LIVE: no proposer fire, no send, nothing recorded. */
+                /* Unprompted gate stack, pre-LLM (DEF-9): opt-out, governor +
+                 * per-contact cool-off, persisted cap, quiet hours, circuit,
+                 * reachability. A denied contact costs no proposer call and
+                 * records nothing — it is not a candidate. */
+                hu_unprompted_gate_t pre_gate;
+                hu_daemon_unprompted_gate_init(&pre_gate, alloc, agent, ch_part, target_part,
+                                               target_len, (int64_t)now);
+                if (hu_unprompted_send_check(&pre_gate, cp->contact_id, HU_UNPROMPTED_PROACTIVE,
+                                             (int64_t)now, NULL, NULL,
+                                             false) != HU_UNPROMPTED_ALLOW) {
                 } else if (config && agent && agent->provider.vtable) {
                     if (agent->memory) {
                         unified_mem_ctx = hu_daemon_build_callback_context(
@@ -1597,86 +1380,10 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                 hu_daemon_agent_clear_session_scope(agent);
             }
 
-#ifdef HU_ENABLE_SQLITE
-            /* Proactive photo sharing: scan Apple Photos for shareable content */
-            if (channels[c].channel->vtable->send && combined_len > 0) {
-                static uint64_t last_photo_scan_ms;
-                uint64_t pnow_ms = (uint64_t)time(NULL) * 1000ULL;
-                if (pnow_ms - last_photo_scan_ms > 3600000) { /* max once per hour */
-                    last_photo_scan_ms = pnow_ms;
-                    char photos_db[512];
-                    size_t pdb_len = hu_visual_apple_photos_db_path(photos_db, sizeof(photos_db));
-                    if (pdb_len > 0) {
-                        hu_visual_entry_t *photos = NULL;
-                        size_t photo_count = 0;
-                        if (hu_visual_scan_apple_photos(alloc, photos_db, 3, &photos, &photo_count,
-                                                        5) == HU_OK &&
-                            photos && photo_count > 0) {
-                            /* Collect top N shareable photos (album mode: up to 3) */
-                            typedef struct {
-                                size_t idx;
-                                double conf;
-                            } photo_candidate_t;
-                            photo_candidate_t candidates[3];
-                            size_t cand_count = 0;
-                            for (size_t pi = 0; pi < photo_count; pi++) {
-                                bool should_share = false;
-                                double conf = 0.0;
-                                hu_visual_should_share(&photos[pi], combined, combined_len,
-                                                       &should_share, &conf);
-                                if (!should_share || conf < 0.3)
-                                    continue;
-                                if (cand_count < 3) {
-                                    candidates[cand_count].idx = pi;
-                                    candidates[cand_count].conf = conf;
-                                    cand_count++;
-                                } else {
-                                    size_t worst = 0;
-                                    for (size_t ci = 1; ci < 3; ci++) {
-                                        if (candidates[ci].conf < candidates[worst].conf)
-                                            worst = ci;
-                                    }
-                                    if (conf > candidates[worst].conf) {
-                                        candidates[worst].idx = pi;
-                                        candidates[worst].conf = conf;
-                                    }
-                                }
-                            }
-                            if (cand_count > 0) {
-                                const char *media[3];
-                                size_t media_count = 0;
-                                for (size_t ci = 0; ci < cand_count; ci++) {
-                                    if (photos[candidates[ci].idx].path[0])
-                                        media[media_count++] = photos[candidates[ci].idx].path;
-                                }
-                                /* FU-1: defer photo album if reactive turn fired recently. */
-                                bool photo_defer = hu_daemon_proactive_should_defer(
-                                    &agent->contact_send_recency, cp->contact_id,
-                                    strlen(cp->contact_id), (int64_t)now);
-                                if (photo_defer) {
-                                    hu_log_info("human", agent ? agent->observer : NULL,
-                                                "proactive photo album deferred for %s "
-                                                "(reactive turn within %ds)",
-                                                HU_LOG_WHO_CSTR(cp->contact_id),
-                                                HU_DAEMON_REACTIVE_GATE_WINDOW_S);
-                                } else if (media_count > 0) {
-                                    channels[c].channel->vtable->send(channels[c].channel->ctx,
-                                                                      target_part, target_len, "",
-                                                                      0, media, media_count);
-                                    hu_contact_send_recency_record(
-                                        &agent->contact_send_recency, cp->contact_id,
-                                        strlen(cp->contact_id), (int64_t)now, HU_SEND_PATH_PHOTO);
-                                    hu_log_info("human", agent ? agent->observer : NULL,
-                                                "proactive photo album: %zu photos shared",
-                                                media_count);
-                                }
-                            }
-                            hu_visual_entries_free(alloc, photos, photo_count);
-                        }
-                    }
-                }
-            }
-#endif
+            /* Proactive photo share — carved to daemon_unprompted_sends.c and
+             * gated by the unprompted stack (DEF-14; it had no guard at all). */
+            hu_daemon_photo_share_tick(alloc, agent, channels[c].channel, cp, target_part,
+                                       target_len, combined, combined_len, (int64_t)now);
             if (event_ctx)
                 alloc->free(alloc->ctx, event_ctx, event_ctx_len + 1);
             if (silence_ctx)
@@ -1687,6 +1394,28 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
 }
 
 #endif
+
+#ifdef HU_IS_TEST
+static hu_proactive_budget_t *s_test_budget;
+void hu_daemon_unprompted_set_budget_for_test(hu_proactive_budget_t *budget) {
+    s_test_budget = budget;
+}
+#endif
+
+/* The daemon's half of the unprompted gate stack (human/daemon/unprompted_gate.h):
+ * this file owns the governor budget, channel throttle, DND and tz it reads. */
+void hu_daemon_unprompted_gate_init(hu_unprompted_gate_t *g, hu_allocator_t *alloc,
+                                    hu_agent_t *agent, const char *channel_name, const char *target,
+                                    size_t target_len, int64_t now) {
+#ifndef HU_IS_TEST
+    hu_unprompted_gate_init(g, alloc, agent, &gov_budget, daemon_throttle(alloc),
+                            daemon_autoresponder_config(), daemon_local_tz_offset_seconds(now),
+                            channel_name, target, target_len);
+#else
+    hu_unprompted_gate_init(g, alloc, agent, s_test_budget, NULL, daemon_autoresponder_config(),
+                            daemon_local_tz_offset_seconds(now), channel_name, target, target_len);
+#endif
+}
 
 /* Tapback, delays, missed-message acknowledgment moved to daemon_routing.c */
 
@@ -2895,9 +2624,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     continue; /* before any bookkeeping: nothing learned */
 
 #ifndef HU_IS_TEST
-                /* F119: Contact replied — reset governor cool-off so proactive
-                 * outreach can resume after silence. */
-                (void)hu_governor_record_response(&gov_budget);
+                /* F119/DEF-6: THIS contact replied — reset only their cool-off. */
+                hu_unprompted_record_inbound(agent, &gov_budget, batch_key, key_len,
+                                             (int64_t)time(NULL));
 
                 /* Reciprocity: record their initiation for balanced outreach. The
                  * helper is declared only under HU_ENABLE_SQLITE (self_awareness.h). */

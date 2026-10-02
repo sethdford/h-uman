@@ -60,6 +60,19 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
  * and routes responses to the specified channel. */
 hu_error_t hu_service_run_agent_cron(hu_allocator_t *alloc, struct hu_agent *agent,
                                      hu_service_channel_t *channels, size_t channel_count);
+/* Undirected cron output (no "channel:contact" target) may only go to an
+ * owner sink — today the cli channel (daemon stdout). Any other channel would
+ * pick the recipient itself, so the unprompted gate denies it (no_recipient). */
+bool hu_daemon_cron_is_owner_sink(const char *channel_name);
+/* Blocking moderation for owner-sink output: false on violence, hate or
+ * sexual content, or when the check cannot run; a self-harm mention alone
+ * passes (the outbound pipeline's policy). */
+bool hu_daemon_cron_owner_text_ok(hu_allocator_t *alloc, const char *text, size_t len);
+
+/* Same, at an injected wall clock (schedule match, quiet hours, cap window). */
+hu_error_t hu_service_run_agent_cron_at(hu_allocator_t *alloc, struct hu_agent *agent,
+                                        hu_service_channel_t *channels, size_t channel_count,
+                                        time_t now);
 
 /* Proactive check-ins: iterate contacts with proactive_checkin=true,
  * check last interaction time, and initiate natural conversations.
@@ -142,7 +155,7 @@ void hu_daemon_followup_sched_tick(struct hu_agent *agent, hu_service_channel_t 
  * "delivered" over a blue_guard HOLD (2026-07-27), so lost messages read as
  * successes. Failures log 'FAILED — entry dropped' and skip the send-recency
  * record. Implemented in src/daemon/daemon_followup_sched.c. */
-void hu_daemon_sched_send_and_log(struct hu_agent *agent, struct hu_channel *channel,
+bool hu_daemon_sched_send_and_log(struct hu_agent *agent, struct hu_channel *channel,
                                   const char *channel_name, const char *contact, const char *msg,
                                   size_t msg_len);
 

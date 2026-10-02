@@ -9,6 +9,7 @@
 #include "human/daemon_cron.h"
 #include "human/core/log.h"
 #include "human/daemon.h"
+#include "human/daemon/unprompted_gate.h"
 #include "human/observability/validator_telemetry.h"
 
 #include "human/agent.h"
@@ -191,8 +192,30 @@ void hu_daemon_cron_tick(hu_allocator_t *alloc) {
     alloc->free(alloc->ctx, cron_path, cron_path_len + 1);
 }
 
+bool hu_daemon_cron_is_owner_sink(const char *channel_name) {
+    /* The cli channel writes to the daemon's stdout (the owner's terminal or
+     * launchd log) and nowhere else. */
+    return channel_name && strcmp(channel_name, "cli") == 0;
+}
+
+bool hu_daemon_cron_owner_text_ok(hu_allocator_t *alloc, const char *text, size_t len) {
+    hu_moderation_result_t mod;
+    memset(&mod, 0, sizeof(mod));
+    if (!text || len == 0 || hu_moderation_check(alloc, text, len, &mod) != HU_OK)
+        return false; /* blocking: a check that cannot run does not pass */
+    /* As in the outbound pipeline's moderation stage: a self-harm mention
+     * alone is not blocked; violence, hate and sexual content are. */
+    return !(mod.violence || mod.hate || mod.sexual);
+}
+
 hu_error_t hu_service_run_agent_cron(hu_allocator_t *alloc, hu_agent_t *agent,
                                      hu_service_channel_t *channels, size_t channel_count) {
+    return hu_service_run_agent_cron_at(alloc, agent, channels, channel_count, time(NULL));
+}
+
+hu_error_t hu_service_run_agent_cron_at(hu_allocator_t *alloc, hu_agent_t *agent,
+                                        hu_service_channel_t *channels, size_t channel_count,
+                                        time_t now) {
     if (!alloc || !agent || !agent->scheduler)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -201,7 +224,6 @@ hu_error_t hu_service_run_agent_cron(hu_allocator_t *alloc, hu_agent_t *agent,
     if (!jobs || job_count == 0)
         return HU_OK;
 
-    time_t now = time(NULL);
     struct tm tm;
     localtime_r(&now, &tm);
 
@@ -297,7 +319,7 @@ hu_error_t hu_service_run_agent_cron(hu_allocator_t *alloc, hu_agent_t *agent,
                             if (response_len == 0)
                                 break;
                             response_len = hu_conversation_vary_complexity(response, response_len,
-                                                                           (uint32_t)time(NULL));
+                                                                           (uint32_t)now);
                             if (response_len > 1 && response[0] >= 'A' && response[0] <= 'Z' &&
                                 response[1] >= 'a' && response[1] <= 'z' && response[0] != 'I') {
                                 response[0] = (char)(response[0] + 32);
@@ -306,24 +328,53 @@ hu_error_t hu_service_run_agent_cron(hu_allocator_t *alloc, hu_agent_t *agent,
                                 response[response_len - 1] = '\0';
                                 response_len--;
                             }
-                            /* SHIELD-004: Moderation check before cron send */
-                            {
-                                hu_moderation_result_t mod_r;
-                                memset(&mod_r, 0, sizeof(mod_r));
-                                hu_error_t mod_err =
-                                    hu_moderation_check(alloc, response, response_len, &mod_r);
-                                if (mod_err != HU_OK) {
-                                    hu_log_error("human", NULL, "cron moderation check failed: %s",
-                                                 hu_error_string(mod_err));
-                                } else if (mod_r.flagged) {
-                                    hu_log_info("human", NULL,
-                                                "cron moderation flagged: v=%.2f sh=%.2f",
-                                                mod_r.violence_score, mod_r.self_harm_score);
-                                }
+                            if (target_part && target_part_len > 0) {
+                                /* Directed at a contact = an unprompted send (DEF-7):
+                                 * the one gate stack, moderation BLOCKING, then the
+                                 * ledger row the per-contact cap counts. */
+                                hu_unprompted_gate_t ug;
+                                hu_daemon_unprompted_gate_init(&ug, alloc, agent, ch_part,
+                                                               target_part, target_part_len,
+                                                               (int64_t)now);
+                                if (hu_unprompted_send_check(&ug, target_part, HU_UNPROMPTED_CRON,
+                                                             (int64_t)now, response, &response_len,
+                                                             true) != HU_UNPROMPTED_ALLOW)
+                                    break;
+                                hu_error_t ug_err = channels[c].channel->vtable->send(
+                                    channels[c].channel->ctx, target_part, target_part_len,
+                                    response, response_len, NULL, 0);
+                                if (ug_err == HU_OK)
+                                    hu_unprompted_record_sent(&ug, target_part, HU_UNPROMPTED_CRON,
+                                                              (int64_t)now);
+                                else
+                                    hu_log_error("human", NULL, "cron send failed: %s",
+                                                 hu_error_string(ug_err));
+                                break;
+                            }
+                            /* No contact in the job: the channel picks the recipient
+                             * (iMessage falls back to its configured default_target,
+                             * which can be anyone). Only the owner's own stdout sink
+                             * may receive undirected output; anywhere else the
+                             * recipient is unresolvable, so the stack denies it
+                             * (fail closed, reason no_recipient). */
+                            if (!hu_daemon_cron_is_owner_sink(ch_part)) {
+                                hu_unprompted_gate_t ug;
+                                hu_daemon_unprompted_gate_init(&ug, alloc, agent, ch_part, NULL, 0,
+                                                               (int64_t)now);
+                                (void)hu_unprompted_send_check(&ug, NULL, HU_UNPROMPTED_CRON,
+                                                               (int64_t)now, response,
+                                                               &response_len, true);
+                                break;
+                            }
+                            /* SHIELD-004: moderation before the owner-sink send, now
+                             * BLOCKING (it only logged). Same policy as stage 7. */
+                            if (!hu_daemon_cron_owner_text_ok(alloc, response, response_len)) {
+                                hu_log_info("human", NULL, "cron output to %s withheld: moderation",
+                                            ch_part);
+                                break;
                             }
                             hu_error_t send_err = channels[c].channel->vtable->send(
-                                channels[c].channel->ctx, target_part, target_part_len, response,
-                                response_len, NULL, 0);
+                                channels[c].channel->ctx, NULL, 0, response, response_len, NULL, 0);
                             if (send_err != HU_OK) {
                                 hu_log_error("human", NULL, "cron send failed: %s",
                                              hu_error_string(send_err));
@@ -399,6 +450,13 @@ bool hu_cron_schedule_matches(const char *schedule, const struct tm *tm) {
 
 void hu_daemon_cron_tick(hu_allocator_t *alloc) {
     (void)alloc;
+}
+
+hu_error_t hu_service_run_agent_cron_at(hu_allocator_t *alloc, hu_agent_t *agent,
+                                        hu_service_channel_t *channels, size_t channel_count,
+                                        time_t now) {
+    (void)now;
+    return hu_service_run_agent_cron(alloc, agent, channels, channel_count);
 }
 
 hu_error_t hu_service_run_agent_cron(hu_allocator_t *alloc, hu_agent_t *agent,

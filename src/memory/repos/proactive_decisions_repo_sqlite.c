@@ -10,6 +10,7 @@
 
 #ifdef HU_ENABLE_SQLITE
 
+#include "human/memory.h"
 #include "human/memory/repo_util.h"
 #include <stdbool.h>
 #include <stdio.h>
@@ -271,6 +272,120 @@ bool hu_proactive_send_circuit_is_open(sqlite3 *db, const char *contact, int64_t
         return false;
 
     return (now - last_failure) < cooldown;
+}
+
+/* ── Unprompted-send ledger (per-contact cap + cool-off) ────────────────────
+ * Every trigger that records a DELIVERED unprompted send. One list, so the
+ * cap and the cool-off can never disagree about what counts as "we texted
+ * them first". */
+#define HU_UNPROMPTED_TRIGGERS_SQL                                            \
+    "('proactive_send','unprompted_cron','unprompted_bump','unprompted_f25'," \
+    "'unprompted_photo','unprompted_date_note')"
+
+sqlite3 *hu_proactive_decisions_repo_db(struct hu_legacy_memory *mem) {
+    return mem ? hu_sqlite_memory_get_db(mem) : NULL;
+}
+
+hu_error_t hu_proactive_decisions_repo_unprompted_state_ensure(sqlite3 *db, int64_t now) {
+    if (!db)
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_error_t err = hu_proactive_decisions_repo_ensure_schema(db);
+    if (err != HU_OK)
+        return err;
+    err = hu_repo_exec_ddl(db, "CREATE TABLE IF NOT EXISTS unprompted_contact_state (contact TEXT "
+                               "PRIMARY KEY, last_inbound_ts INTEGER NOT NULL);");
+    if (err != HU_OK)
+        return err;
+    /* The '*' row is the ledger's epoch: the first moment inbound replies were
+     * recorded at all. Sends older than it cannot be judged unanswered (nobody
+     * was listening for the reply), so they never start a cool-off. */
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db,
+                           "INSERT INTO unprompted_contact_state (contact, last_inbound_ts) "
+                           "VALUES ('*', ?1) ON CONFLICT(contact) DO NOTHING;",
+                           -1, &stmt, NULL) != SQLITE_OK)
+        return HU_ERR_MEMORY_STORE;
+    sqlite3_bind_int64(stmt, 1, now);
+    int rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return rc == SQLITE_DONE ? HU_OK : HU_ERR_MEMORY_STORE;
+}
+
+hu_error_t hu_proactive_decisions_repo_record_inbound(sqlite3 *db, const char *contact,
+                                                      int64_t ts) {
+    if (!db || !contact || !contact[0] || strcmp(contact, "*") == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_error_t err = hu_proactive_decisions_repo_unprompted_state_ensure(db, ts);
+    if (err != HU_OK)
+        return err;
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db,
+                           "INSERT INTO unprompted_contact_state (contact, last_inbound_ts) "
+                           "VALUES (?1, ?2) ON CONFLICT(contact) DO UPDATE SET "
+                           "last_inbound_ts = MAX(last_inbound_ts, excluded.last_inbound_ts);",
+                           -1, &stmt, NULL) != SQLITE_OK)
+        return HU_ERR_MEMORY_STORE;
+    sqlite3_bind_text(stmt, 1, contact, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(stmt, 2, ts);
+    int rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return rc == SQLITE_DONE ? HU_OK : HU_ERR_MEMORY_STORE;
+}
+
+hu_error_t hu_proactive_decisions_repo_unprompted_sent_since(sqlite3 *db, const char *contact,
+                                                             int64_t since, int64_t *out_n) {
+    if (!db || !contact || !out_n)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out_n = 0;
+    hu_error_t err = hu_proactive_decisions_repo_ensure_schema(db);
+    if (err != HU_OK)
+        return err;
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db,
+                           "SELECT COUNT(*) FROM proactive_decisions WHERE contact = ?1 AND "
+                           "sent = 1 AND ts >= ?2 AND trigger IN " HU_UNPROMPTED_TRIGGERS_SQL ";",
+                           -1, &stmt, NULL) != SQLITE_OK)
+        return HU_ERR_MEMORY_STORE;
+    sqlite3_bind_text(stmt, 1, contact, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(stmt, 2, since);
+    err = HU_ERR_MEMORY_STORE;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        *out_n = sqlite3_column_int64(stmt, 0);
+        err = HU_OK;
+    }
+    sqlite3_finalize(stmt);
+    return err;
+}
+
+hu_error_t hu_proactive_decisions_repo_unanswered(sqlite3 *db, const char *contact, int64_t now,
+                                                  int64_t *out_n, int64_t *out_last_send_ts) {
+    if (!db || !contact || !out_n || !out_last_send_ts)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out_n = 0;
+    *out_last_send_ts = 0;
+    hu_error_t err = hu_proactive_decisions_repo_unprompted_state_ensure(db, now);
+    if (err != HU_OK)
+        return err;
+    /* Unanswered = delivered unprompted sends to THIS contact after the later
+     * of their last inbound and the ledger epoch. Nobody else's reply counts. */
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(
+            db,
+            "SELECT COUNT(*), MAX(ts) FROM proactive_decisions WHERE contact = ?1 AND sent = 1 "
+            "AND trigger IN " HU_UNPROMPTED_TRIGGERS_SQL " AND ts > COALESCE((SELECT "
+            "MAX(last_inbound_ts) FROM unprompted_contact_state WHERE contact IN (?1, '*')), 0);",
+            -1, &stmt, NULL) != SQLITE_OK)
+        return HU_ERR_MEMORY_STORE;
+    sqlite3_bind_text(stmt, 1, contact, -1, SQLITE_STATIC);
+    err = HU_ERR_MEMORY_STORE;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        *out_n = sqlite3_column_int64(stmt, 0);
+        if (sqlite3_column_type(stmt, 1) != SQLITE_NULL)
+            *out_last_send_ts = sqlite3_column_int64(stmt, 1);
+        err = HU_OK;
+    }
+    sqlite3_finalize(stmt);
+    return err;
 }
 
 hu_error_t hu_proactive_decisions_repo_last_send_failure_ts(sqlite3 *db, const char *contact,

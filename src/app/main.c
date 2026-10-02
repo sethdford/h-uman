@@ -1519,53 +1519,25 @@ static hu_error_t cmd_service_loop(hu_allocator_t *alloc, int argc, char **argv)
 #ifdef HU_HAS_CRON
     hu_log_info("human", NULL, "%zu channel(s) active, cron enabled", app_ctx.channel_count);
 
-    /* Register proactive engagement cron jobs from persona contacts.
-     *
-     * 2026-05-16 incident follow-up: this cron-based path is INDEPENDENT of
-     * hu_service_run_proactive_checkins (which has its own gate at the top).
-     * Discovered by local E2E on 2026-05-17 — the daemon was still
-     * registering cron jobs for Mindy/Betty/Annie at 10am even though the
-     * persona-level master kill switch (proactive.master_enabled) was off.
-     * Gate at registration time so cron entries never get created when
-     * proactive is disabled. */
-    if (app_ctx.agent && app_ctx.agent->persona && app_ctx.agent->scheduler &&
-        hu_persona_proactive_is_enabled(app_ctx.agent->persona)) {
-        const hu_persona_t *persona = app_ctx.agent->persona;
-        for (size_t ci = 0; ci < persona->contacts_count; ci++) {
-            const hu_contact_profile_t *cp = &persona->contacts[ci];
-            if (!cp->proactive_checkin || !cp->proactive_channel)
-                continue;
-            const char *sched = cp->proactive_schedule ? cp->proactive_schedule : "0 10 * * *";
-
-            char prompt[512];
-            snprintf(prompt, sizeof(prompt),
-                     "You are checking in with %s (%s). Based on your relationship and "
-                     "recent conversations, send a brief, natural check-in message. "
-                     "Follow the NOTICE>WAIT>BRIDGE>OFFER>INVITE pattern: notice something "
-                     "relevant, bridge to a shared interest, optionally offer or invite. "
-                     "Keep it 1-2 sentences. If you have nothing meaningful to say, respond "
-                     "with exactly 'SKIP' and nothing else.",
-                     cp->name ? cp->name : cp->contact_id, cp->contact_id);
-
-            char job_name[128];
-            snprintf(job_name, sizeof(job_name), "proactive:%s",
-                     cp->name ? cp->name : cp->contact_id);
-
-            /* Encode target as "channel:contact_id" for directed sends */
-            char channel_target[192];
-            snprintf(channel_target, sizeof(channel_target), "%s:%s", cp->proactive_channel,
-                     cp->contact_id);
-
-            uint64_t job_id = 0;
-            hu_error_t jerr =
-                hu_cron_add_agent_job((hu_cron_scheduler_t *)app_ctx.agent->scheduler, alloc, sched,
-                                      prompt, channel_target, job_name, &job_id);
-            if (jerr == HU_OK) {
-                hu_log_info("human", NULL,
-                            "proactive check-in registered for %s (id=%llu sched=%s)",
-                            HU_LOG_WHO_CSTR(cp->contact_id), (unsigned long long)job_id, sched);
-            }
-        }
+    /* No per-contact proactive cron jobs (DEF-7, 2026-10-02). They used to be
+     * registered here at `0 10 * * *` per contact and sent straight through
+     * vtable->send, past every unprompted guard (governor, cap, quiet hours,
+     * circuit, reachability, opt-out; moderation only logged). Check-ins are
+     * owned by the proactive proposer (hu_service_run_proactive_checkins),
+     * which runs the unprompted gate stack before its LLM call. A cron job
+     * that still targets a contact (schedule tool, admin API) is gated by the
+     * same stack in hu_service_run_agent_cron. */
+    if (app_ctx.agent && app_ctx.agent->persona) {
+        size_t ignored = 0;
+        for (size_t ci = 0; ci < app_ctx.agent->persona->contacts_count; ci++)
+            if (app_ctx.agent->persona->contacts[ci].proactive_schedule)
+                ignored++;
+        if (ignored > 0)
+            hu_log_info("human", NULL,
+                        "contacts.proactive_schedule is ignored (%zu contact(s) set it): the "
+                        "per-contact check-in cron was removed; check-in timing is owned by the "
+                        "proactive proposer. Remove the key from the persona to silence this.",
+                        ignored);
     }
 
 #ifdef HU_ENABLE_FEEDS

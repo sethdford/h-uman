@@ -145,6 +145,35 @@ hu_error_t hu_proactive_decisions_repo_consecutive_send_failures(sqlite3 *db, co
  * that cannot read its own evidence must not silence a contact. */
 bool hu_proactive_send_circuit_is_open(sqlite3 *db, const char *contact, int64_t now);
 
+/* ── Unprompted-send ledger (DEF-6 / DEF-9, 2026-10-02) ─────────────────────
+ * Every unprompted send kind (proactive check-in, cron, read-no-reply bump,
+ * F25 emotional check-in, photo share) records a delivered row here, so the
+ * per-contact cap and the per-contact cool-off are derived from the log and
+ * survive restarts (the in-memory throttle reset ~43 times in 13 days). */
+
+/* The decision log's handle for a SQLite-backed memory (NULL otherwise), so
+ * domain code reaches the ledger through this repo, not the raw engine. */
+struct hu_legacy_memory;
+sqlite3 *hu_proactive_decisions_repo_db(struct hu_legacy_memory *mem);
+
+/* Creates unprompted_contact_state and seeds its epoch row ('*') with `now`
+ * if absent. Sends before the epoch never count as unanswered: nothing was
+ * recording replies then. Idempotent. */
+hu_error_t hu_proactive_decisions_repo_unprompted_state_ensure(sqlite3 *db, int64_t now);
+
+/* Contact `contact` wrote to us at `ts`: resets ONLY that contact's
+ * unanswered count (the global reset was DEF-6). */
+hu_error_t hu_proactive_decisions_repo_record_inbound(sqlite3 *db, const char *contact, int64_t ts);
+
+/* Delivered unprompted sends (any kind) to `contact` with ts >= since. */
+hu_error_t hu_proactive_decisions_repo_unprompted_sent_since(sqlite3 *db, const char *contact,
+                                                             int64_t since, int64_t *out_n);
+
+/* Delivered unprompted sends to `contact` since their last inbound (or the
+ * epoch), plus the newest such send's ts (0 when none). */
+hu_error_t hu_proactive_decisions_repo_unanswered(sqlite3 *db, const char *contact, int64_t now,
+                                                  int64_t *out_n, int64_t *out_last_send_ts);
+
 /* Trigger of the row the daemon writes when an outbound text failed on every
  * channel path (src/daemon/daemon_send_failure.c). Distinct from
  * 'proactive_send' so the circuit breaker's counts are unchanged. */
