@@ -184,7 +184,7 @@ bytes and misleads every future audit.
 | `HU_PROACTIVE_REACHABILITY` | n≥30 met; run the named FIR reading, then promote |
 | `HU_WIKI_HEAD` | Most friend-like memory; run the named bytes/specificity A/B |
 | `HU_EMOTION_REGISTER` | JSD 0.167 vs 0.15 target; tune, then blind A/B |
-| `HU_HARD_MOMENT` | 0 would-fires in 44 1:1 batches — check the classifier before any A/B; not called on the non-stream retry path |
+| `HU_HARD_MOMENT` | Until 2026-10-01 it ran only in `agent_stream.c` after the `can_stream=0` return, so prod (`hu_agent_turn`, never streams) logged 0 lines. Now also called from `hu_agent_turn` (DEF-13), same gate. Promote SHADOW→LIVE only after ≥30 `[hard_moment] shadow: would add` lines show the kind distribution matches hand-labelled hard moments (spot-check 20: ≥80% agree, 0 on neutral texts), then the blind A/B + dead-end-rate split named in `agent_stream.c`. Rollback: `launchctl setenv HU_HARD_MOMENT off` (or remove it from the plist env) and restart the service |
 | `HU_SUBSTANTIVE_REGISTER` | Three prompt variants moved nothing; tune or retire |
 | `HU_PROACTIVE_CONTEXTUAL` | 1 detection in 8 days; needs data |
 | `HU_IMMERSIVE_HUMANNESS` | Fires; needs a per-feature sheet |

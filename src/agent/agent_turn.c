@@ -2,6 +2,7 @@
 #include "agent_internal.h"
 #include "human/agent/best_of_n.h"
 #include "human/agent/graph_grounding.h"
+#include "human/agent/hard_moment.h"
 #include "human/agent/humanness.h"
 #include "human/agent/intent.h"
 #include "human/agent/reask.h"
@@ -1694,6 +1695,9 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
      * — measured 2026-07-11 (tools_dump_prompt.c): the legacy stage vocabulary never
      * fires on real personas, so the warmth vocabulary is what makes this note live. */
     hu_agent_apply_relationship_tone(agent, &persona_prompt, &persona_prompt_len);
+    if (persona_prompt) /* HU_HARD_MOMENT, same gate as agent_stream.c (DEF-13) */
+        (void)hu_hard_moment_apply(agent->alloc, hu_hard_moment_mode(), msg, msg_len,
+                                   &persona_prompt, &persona_prompt_len);
 
     /* Build skills context from skillforge if available */
     char *skills_ctx = NULL;
