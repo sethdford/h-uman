@@ -11,14 +11,20 @@
  * shared counter when that contact last spoke.
  *
  * Now the stage of a contact is a function of that contact alone:
- *   volume      vol = 1 - 2^(-n / median_n)              messages exchanged
- *   regularity  reg = 1 - 2^(-active_days / median_days) distinct days talked
- *   reciprocity r   = 2 * min(in, out) / (in + out)
+ *   volume      vol = 1 - 2^(-inbound / median_inbound)  messages FROM the contact
+ *   regularity  reg = 1 - 2^(-active_days / median_days) days they wrote
+ *   reciprocity r   = min(1, (seth_replies / inbound) / median_reply_ratio)
  *   evidence    e   = (vol + reg) / 2 * (0.75 + 0.25 * r)
+ * Only the contact's own messages and SETH's own replies count: the session
+ * store's assistant rows are the twin's replies, so measuring them would
+ * measure the twin against itself. Seth's reply turns come from the
+ * learned-style profile (`contacts.<handle>.overall.n`, chat.db with the
+ * daemon's sends attributed away, docs/guides/learned-style.md); a contact
+ * the profile does not cover gets r = 0.5 (neutral).
  * Half-saturation is at the MEDIAN contact of this owner (norms below), so the
  * scale adapts to how much this person texts, not a hand-picked constant.
  * The persona's declared Dunbar layer is a prior whose weight shrinks as
- * evidence accumulates:  q = (1 - w) * prior + w * e,  w = n / (n + median_n).
+ * evidence accumulates:  q = (1 - w) * prior + w * e,  w = in / (in + median_inbound).
  * q maps to a stage with hu_relationship_stage_from_quality's bands.
  *
  * Calendar span (first to last message) is deliberately not used: the
@@ -33,22 +39,23 @@
 
 typedef struct hu_contact_stage_signals {
     uint32_t inbound;     /* messages from the contact */
-    uint32_t outbound;    /* messages to the contact */
-    uint32_t active_days; /* distinct days with any message */
+    uint32_t active_days; /* distinct days the contact wrote */
+    int64_t seth_replies; /* Seth's own reply turns to them; -1 = unknown */
 } hu_contact_stage_signals_t;
 
-/* Owner-level norms: the median contact's volume and active days. */
+/* Owner-level norms: the median contact. */
 typedef struct hu_contact_stage_norms {
-    double median_msgs;
+    double median_inbound;
     double median_days;
+    double median_reply_ratio; /* seth_replies / inbound; <= 0 = unknown */
 } hu_contact_stage_norms_t;
 
 /* Norms used when fewer than HU_CONTACT_STAGE_MIN_NORM_CONTACTS contacts have
  * history (a new install): documented defaults, replaced by the medians as
  * soon as there is data. */
-#define HU_CONTACT_STAGE_MIN_NORM_CONTACTS   5u
-#define HU_CONTACT_STAGE_DEFAULT_MEDIAN_MSGS 50.0
-#define HU_CONTACT_STAGE_DEFAULT_MEDIAN_DAYS 7.0
+#define HU_CONTACT_STAGE_MIN_NORM_CONTACTS      5u
+#define HU_CONTACT_STAGE_DEFAULT_MEDIAN_INBOUND 40.0
+#define HU_CONTACT_STAGE_DEFAULT_MEDIAN_DAYS    7.0
 
 /* Prior from the persona's declared layer: the midpoint of the stage band the
  * layer maps to. Dunbar names or sizes ("intimate"/"support"/5 -> 0.90,

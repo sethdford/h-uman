@@ -63,15 +63,17 @@ static double saturate(double x, double half) {
 
 float hu_contact_stage_evidence(const hu_contact_stage_signals_t *s,
                                 const hu_contact_stage_norms_t *norms) {
-    if (!s || !norms)
+    if (!s || !norms || s->inbound == 0)
         return 0.0f;
-    double n = (double)s->inbound + (double)s->outbound;
-    if (n <= 0.0)
-        return 0.0f;
-    double vol = saturate(n, norms->median_msgs);
+    double vol = saturate((double)s->inbound, norms->median_inbound);
     double reg = saturate((double)s->active_days, norms->median_days);
-    double lo = s->inbound < s->outbound ? (double)s->inbound : (double)s->outbound;
-    double recip = 2.0 * lo / n;
+    double recip = 0.5; /* unknown: neutral */
+    if (s->seth_replies >= 0) {
+        double ratio = (double)s->seth_replies / (double)s->inbound;
+        recip = norms->median_reply_ratio > 0.0 ? ratio / norms->median_reply_ratio : ratio;
+        if (recip > 1.0)
+            recip = 1.0;
+    }
     return (float)((vol + reg) / 2.0 * (0.75 + 0.25 * recip));
 }
 
@@ -85,8 +87,8 @@ hu_relationship_stage_t hu_contact_stage_derive(const hu_contact_stage_signals_t
     float e = hu_contact_stage_evidence(s, norms);
     float q = e;
     if (prior >= 0.0f) {
-        double n = (double)s->inbound + (double)s->outbound;
-        double half = norms->median_msgs > 0.0 ? norms->median_msgs : 1.0;
+        double n = (double)s->inbound;
+        double half = norms->median_inbound > 0.0 ? norms->median_inbound : 1.0;
         float w = (float)(n / (n + half));
         q = (1.0f - w) * prior + w * e;
     }

@@ -1,57 +1,76 @@
 ---
-title: Contact stage — per-contact relationship stage from interaction data
+title: Contact stage — HU_REL_STAGE_DERIVED, per-contact relationship stage
 created: 2026-10-02
 status: operator-facing
 ---
 
-# Per-contact relationship stage (DEF-16)
+# Per-contact relationship stage (`HU_REL_STAGE_DERIVED`, DEF-16)
 
 `agent->relationship` (NEW / FAMILIAR / TRUSTED / DEEP) feeds the length
 calibration, the brief-mode cap, the model-route relationship weight, the
-`### Relationship Context` prompt line and inner-world disclosure. It used
-to be **one agent-wide state**: loaded from whichever contact spoke first
-after a restart and raised by every turn with every contact
+`### Relationship Context` prompt line and inner-world disclosure. It is
+**one agent-wide state**: loaded from whichever contact spoke first after a
+restart and raised by every turn with every contact
 (`hu_relationship_update`, 20/80/200 turns → FAMILIAR/TRUSTED/DEEP). A
-contact's stage measured the daemon's uptime, not the relationship.
+contact's stage measures the daemon's uptime, not the relationship.
 
-Now `hu_contact_stage_refresh` (`src/agent/turn/contact_stage_turn.c`)
-derives the stage of the turn's contact alone, from the session store
-(`messages`, counts only) and the persona's declared Dunbar layer as a
-prior. Formula and rationale: `include/human/persona/contact_stage.h`.
+`hu_contact_stage_refresh` (`src/agent/turn/contact_stage_turn.c`) derives
+the stage of the turn's contact alone. Formula and rationale:
+`include/human/persona/contact_stage.h`.
+
+| Signal | Source | Never |
+|---|---|---|
+| volume, active days | the contact's own messages in the session store (`messages`, role `user`) | the `assistant` rows: those are the twin's replies |
+| reciprocity | Seth's own reply turns per contact from the learned-style profile (`<persona>.learned-style.json`, `contacts.<handle>.overall.n`, chat.db with the daemon's sends attributed away) | the twin's replies; a contact the profile does not cover gets a neutral value |
+| prior | the persona's declared Dunbar layer (or `relationship_stage`) | |
+
 Volume and active days saturate at the owner's **median** contact, so the
-scale adapts to how much this person texts. Turn counting can no longer
-raise a derived stage.
+scale adapts to how much this person texts. The norms and the profile's reply
+counts are cached for an hour; a turn costs one indexed per-contact count.
 
 It is called where a turn learns its contact: the daemon's per-batch context
-load (before length calibration reads the stage) and the turn entry (every
-path). Ungated: this is a correctness fix.
+load (before length calibration reads the stage) and the turn entry.
 
-## Persistence and migration
+## Gate
 
-The per-contact stage lives in the existing `frontier_state.rel_stage`
-column. Existing rows are overwritten with the derived stage on the
-contact's next turn; new contacts get a row from the end-of-turn frontier
-save. Rows are never inserted early (a new row would make the frontier
-loader treat the contact as restored, with column defaults).
+| Mode | Effect |
+|---|---|
+| `off` (default) | Nothing: the old agent-wide stage, no query, no write. |
+| `shadow` | Derives and logs `[contact_stage shadow] prev=… stage=… failed=… q=… prior=… inbound=… days=… seth_replies=…`. Changes nothing and writes nothing. |
+| `live` | `agent->relationship.stage` = the derived stage; turn counting can no longer raise it. The derived row goes to its own table, `contact_rel_stage`. `session_count` and `total_turns` keep their old meaning and are not touched, so `frontier_state.rel_*` holds exactly what it held before. A failed derivation (no memory backend, query error) resets the stage to the persona prior alone (NEW without one), never the previous contact's. |
+
+Each norms recompute (hourly, shadow or live) also logs the distribution:
+
+```
+[contact_stage] distribution contacts=N before=a/b/c/d after=a/b/c/d median_inbound=.. median_days=.. reply_ratio=.. profile_contacts=..
+```
+
+`before` is `frontier_state.rel_stage` (snapshots of the shared counter),
+`after` the derived stages. Counts only; no contact ids.
 
 ## Before / after (prod, counts only, 2026-10-02)
 
 | | NEW | FAMILIAR | TRUSTED | DEEP |
 |---|---:|---:|---:|---:|
-| before: `frontier_state.rel_stage` (14 rows, snapshots of the shared counter) | 7 | 4 | 3 | 0 |
-| after: derived for the 14 contacts with history (8 have a persona prior) | 2 | 3 | 8 | 1 |
+| before: `frontier_state.rel_stage` (14 rows) | 7 | 4 | 3 | 0 |
+| after: derived for the 14 contacts with history (8 with a persona prior) | 2 | 3 | 8 | 1 |
 
-Norms: median 186.5 messages, 20 active days. In prod the daemon logs the
-same comparison once per process:
+Norms: median 127.5 inbound messages, 20 active days. The learned-style
+profile does not exist on this machine yet, so every contact's reciprocity is
+neutral until the nightly learner writes it.
 
-```
-[contact_stage] distribution contacts=N before=a/b/c/d after=a/b/c/d median_msgs=.. median_days=..
-[contact_stage] stage=2 prev=0 q=0.71 prior=3 msgs=947 days=54
-```
+## Promotion: SHADOW → LIVE
 
-(`prior` is the stage the declared layer maps to, -1 when none.)
+1. Run `shadow` for a week. Read the `distribution` lines and a sample of
+   `prev → stage` pairs; Seth confirms the derived stage of each contact he
+   has a view on (counts only in the log; he maps them himself).
+2. The real-turn replay (`docs/guides/replay-harness.md`) with
+   `--arm prod: --arm stage:HU_REL_STAGE_DERIVED=live` must show the length
+   KS against Seth not worse.
+3. Flip to `live`.
 
 ## Rollback
 
-Revert the commit. There is no gate; the persisted rows are rewritten by
-whichever code runs next.
+Set `HU_REL_STAGE_DERIVED=off` (or unset it). Nothing else is needed: the old
+`frontier_state` columns were never rewritten, and `contact_rel_stage` is
+only read by this code.
