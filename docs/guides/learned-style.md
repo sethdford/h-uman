@@ -191,26 +191,30 @@ consumers must read the group's `n`.
 **Twin contamination.** Text and media sends use the v1 attribution labels, so
 an h-uman or ambiguous send excludes its unit.
 
-*Tapback provenance (learner side ready, daemon side missing).* The learner
-reads memory.db `outbound_sends` rows with `kind = 'tapback'`: each claims the
-first from-me tapback for that contact after its `prior_max_rowid` boundary,
-dated from 5 minutes before the record to 30 s after it (one-sided: the record
-is written once delivery is confirmed, so the bot's row precedes it; a tapback
-well after the record is a later one), and a response unit holding a claimed tapback is the bot's
-and leaves the tapback sample. Text attribution ignores `tapback` rows (with no
-text they would otherwise claim the nearest Seth text). The run log carries
-`tapback_provenance_rows_n`, `tapback_provenance_excluded_n` and
-`tapback_provenance_excluded_share` (aggregate counts only). **The daemon does
-not write these rows yet:** `imessage_react` (`src/channels/imessage.c:3577`,
-successful returns at :3601, :3621, :3691 and the JXA tier) and
-`hu_imessage_react_emoji_with_fallback` (:5205) never call the send observer,
-and the `outbound_sends` CHECK (`src/memory/repos/outbound_sends_repo_sqlite.c:29`,
-validator :15) admits only text/media/reply, so an existing table needs a
-migration. Until then the counts are 0 and the fallback below does the work.
+*Tapback provenance.* The learner reads memory.db `outbound_sends` rows with
+`kind = 'tapback'`. A row may claim a from-me tapback for that contact above its
+`prior_max_rowid` boundary, dated from 5 minutes before the record to 30 s after
+it (one-sided: the record is written once delivery is confirmed, so the bot's
+row precedes it; a tapback well after the record is a later one). Claiming is
+one-to-one, nearest in time first: each tapback is claimed by at most one row
+and each row claims at most one tapback, so two quick reacts claim two distinct
+tapbacks. A row with no boundary (`prior_max_rowid` -1 or NULL: a group-chat
+target, or chat.db unreadable at send time) claims nothing, since by time alone
+it could take Seth's own tapback. A response unit holding a claimed tapback is
+the bot's and leaves the tapback sample. Text attribution ignores `tapback`
+rows (with no text they would otherwise claim the nearest Seth text). The run
+log carries `tapback_provenance_rows_n`, `tapback_provenance_no_boundary_n`,
+`tapback_provenance_excluded_n` and `tapback_provenance_excluded_share`
+(aggregate counts only). The daemon writes these rows once PR #611
+(`feat/tapback-provenance`) lands; before that the counts are 0 and the
+fallback below does the work. **Known gap:** a tapback tier that reports
+failure but whose tapback actually landed writes no row, so that tapback is
+still attributed to Seth (the daemon-activity window below is the only guard
+for it).
 
-The twin's **tapbacks write no provenance** today (`src/daemon.c` tapback-only
-path: no `outbound_sends` row, no assistant row), so a from-me tapback cannot
-be attributed directly. The daemon
+Until PR #611 lands the twin's **tapbacks write no provenance** (`src/daemon.c`
+tapback-only path: no `outbound_sends` row, no assistant row), so a from-me
+tapback cannot be attributed directly. The daemon
 does save every inbound batch it handles as memory.db `messages` rows, so a
 response unit with any daemon trace for that contact (messages of any role,
 `proactive_sends`, `outbound_sends`) within 15 minutes of the burst or the

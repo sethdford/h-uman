@@ -819,6 +819,58 @@ def test_tapback_provenance_rows_never_claim_a_text_send(tmp_path):
     assert [lab for _, lab in att["labeled"][A]] == ["seth"]
 
 
+@pytest.mark.parametrize("prior", [-1, None])
+def test_unbounded_provenance_row_claims_nothing(prior):
+    """A row with no chat.db boundary (group target, chat.db unreadable) could
+    claim Seth's own tapback by time alone, so it claims nothing."""
+    rec_t = NOW - dt.timedelta(days=1)
+    msgs = [{"guid": "t", "rowid": 50, "from_me": True, "atype": 2000,
+             "t": rec_t - dt.timedelta(seconds=5)}]
+    assert v2.claim_bot_tapbacks(msgs, [(rec_t, prior)]) == set()
+    assert v2.claim_bot_tapbacks(msgs, [(rec_t, 10)]) == {"t"}     # bounded: claimed
+
+
+def _tap(guid, rowid, t):
+    return {"guid": guid, "rowid": rowid, "from_me": True, "atype": 2000, "t": t}
+
+
+def test_each_row_claims_the_nearest_tapback_not_the_first():
+    rec_t = NOW - dt.timedelta(days=1)
+    msgs = [_tap("seth", 50, rec_t - dt.timedelta(seconds=100)),   # Seth's, in the window
+            _tap("bot", 51, rec_t + dt.timedelta(seconds=1))]
+    assert v2.claim_bot_tapbacks(msgs, [(rec_t, 10)]) == {"bot"}
+
+
+def test_two_quick_reacts_claim_two_distinct_tapbacks():
+    """Claiming is one-to-one and nearest-first: two reacts 20 s apart claim
+    their own two tapbacks, not Seth's earlier one plus the first bot one."""
+    t1 = NOW - dt.timedelta(days=1)
+    t2 = t1 + dt.timedelta(seconds=20)
+    msgs = [_tap("seth", 50, t1 - dt.timedelta(seconds=100)),
+            _tap("bot1", 51, t1 + dt.timedelta(seconds=1)),
+            _tap("bot2", 52, t2 + dt.timedelta(seconds=1))]
+    assert v2.claim_bot_tapbacks(msgs, [(t1, 10), (t2, 10)]) == {"bot1", "bot2"}
+    # Two rows, one tapback: claimed once; the other row claims nothing.
+    assert v2.claim_bot_tapbacks(msgs[1:2], [(t1, 10), (t2, 10)]) == {"bot1"}
+
+
+def _unbounded_fill(fx):
+    _behaviour_fill(fx)
+    g = fx.msg(B, 300 * HOUR, "check this", False)
+    fx.react(B, 300 * HOUR + 15, g, 2000)
+    fx.outbound(B, 300 * HOUR + 16, None, -1, kind="tapback")     # no boundary
+
+
+def test_main_logs_unbounded_provenance_rows_and_does_not_claim_them(tmp_path):
+    e = Env(tmp_path)
+    e.build(_unbounded_fill)
+    assert e.run() == 0
+    line = e.log_lines()[-1]
+    assert line["tapback_provenance_rows_n"] == 1
+    assert line["tapback_provenance_no_boundary_n"] == 1
+    assert line["tapback_provenance_excluded_n"] == 0
+
+
 def _golden_fill(fx):
     _behaviour_fill(fx)
     g = fx.msg(B, 300 * HOUR, "check this", False)

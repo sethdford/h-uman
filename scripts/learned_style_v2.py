@@ -17,15 +17,15 @@ the v1 reply samples. Text exists only in memory, inside the functions that
 read it; nothing here returns, logs or prints text.
 
 Twin contamination. Text and media sends use v1's attribution labels. The
-twin's TAPBACKS write no provenance (src/daemon.c tapback-only path), so a
-from-me tapback cannot be attributed directly. The daemon does save every
-inbound batch it handles as memory.db rows, so any response unit with
+twin's TAPBACKS write no provenance until PR #611 lands (src/daemon.c
+tapback-only path), so a from-me tapback cannot be attributed directly.
+The daemon does save every inbound batch it handles as memory.db rows, so any response unit with
 daemon activity for that contact within 15 minutes of the burst or the
 response is left out of the tapback sample, whether Seth answered with a
 tapback or with text: excluding only the tapback units would bias
 tapback_only_rate down. If memory.db outbound_sends holds kind='tapback' rows
-(the daemon does not write them yet), each claims the bot's own tapback and
-its unit is excluded exactly (load_tapback_provenance / claim_bot_tapbacks).
+(the daemon writes them once PR #611 lands), each claims the bot's own tapback
+and its unit is excluded exactly (load_tapback_provenance / claim_bot_tapbacks).
 
 The m3 corpus (--extra-history) is older real history. It has no tapbacks,
 attachments or chat ids, so the tapback, reaction and modality fields are
@@ -258,11 +258,10 @@ def load_daemon_activity(mem_path, since):
 def load_tapback_provenance(mem_path, since):
     """{contact: [(datetime, prior_max_rowid)]} of the tapbacks the daemon
     recorded sending: memory.db outbound_sends rows with kind 'tapback'.
-    Empty when the table is absent or holds none. NOTE: as of this PR the
-    daemon does NOT record tapbacks (imessage_react never reports to the send
-    observer, and the outbound_sends CHECK admits only text/media/reply), so
-    in production this returns {} until that lands; the learner then relies
-    on the daemon-activity window above."""
+    Empty when the table is absent or holds none. The daemon writes these
+    rows once PR #611 lands; until then this returns {} in production and the
+    learner relies on the daemon-activity window above. prior is -1 when the
+    row has no boundary (NULL or -1 stored)."""
     con = cq._connect_ro(mem_path)
     out = {}
     try:
@@ -284,25 +283,43 @@ def load_tapback_provenance(mem_path, since):
 
 
 def claim_bot_tapbacks(msgs, records):
-    """Guids of from-me tapbacks the daemon sent: each record claims the
-    first unclaimed from-me tapback after its chat.db ROWID boundary (when
-    known), dated from cq.EXACT_WINDOW_S before the record (the send, then the
-    record once delivered) to TAPBACK_RECORD_SKEW_S after it. One-sided on
-    purpose: a tapback well after the record cannot be the send it reports."""
+    """Guids of from-me tapbacks the daemon sent. A record may claim a from-me
+    tapback above its chat.db ROWID boundary, dated from cq.EXACT_WINDOW_S
+    before the record (the send, then the record once delivered) to
+    TAPBACK_RECORD_SKEW_S after it. One-sided on purpose: a tapback well after
+    the record cannot be the send it reports.
+
+    A record with no boundary (prior_max_rowid -1/None: a group target, or
+    chat.db unreadable) claims nothing: by time alone it could take Seth's own
+    tapback (see no_boundary_provenance_n). Claiming is one-to-one, nearest in
+    time first: each tapback goes to at most one record and each record takes
+    at most one tapback, so two quick reacts claim two distinct tapbacks."""
     taps = [m for m in msgs if m["from_me"] and m["atype"] in TAPBACK_CODES]
-    claimed = set()
-    for t, prior in records:
-        for m in taps:
-            if m["guid"] in claimed:
-                continue
-            if prior is not None and prior >= 0 and m.get("rowid", prior + 1) <= prior:
+    pairs = []
+    for ri, (t, prior) in enumerate(records):
+        if prior is None or prior < 0:
+            continue
+        for ti, m in enumerate(taps):
+            if m.get("rowid", prior + 1) <= prior:
                 continue
             d = (m["t"] - t).total_seconds()
             if d < -cq.EXACT_WINDOW_S or d > TAPBACK_RECORD_SKEW_S:
                 continue
-            claimed.add(m["guid"])
-            break
+            pairs.append((abs(d), ri, ti))
+    claimed, used = set(), set()
+    for _, ri, ti in sorted(pairs):
+        guid = taps[ti]["guid"]
+        if ri in used or guid in claimed:
+            continue
+        used.add(ri)
+        claimed.add(guid)
     return claimed
+
+
+def no_boundary_provenance_n(records):
+    """Tapback provenance records with no chat.db boundary, which claim_bot_tapbacks
+    skips: an aggregate count for the run log."""
+    return sum(1 for _, prior in records if prior is None or prior < 0)
 
 
 # ── response units (one per inbound burst Seth answered) ──────────────────

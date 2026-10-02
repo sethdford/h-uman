@@ -470,7 +470,8 @@ def load_all(chat_path, mem_path, contacts, now, tz, behaviour=True):
                                                    meta, activity.get(c, []), now, tz,
                                                    prov.get(c, [])),
                       "starts": starts, "segments": [seg] if seg else [],
-                      "prov_rows": len(prov.get(c, []))}
+                      "prov_rows": len(prov.get(c, [])),
+                      "prov_no_boundary": lsv2.no_boundary_provenance_n(prov.get(c, []))}
     return out, counts, beh, att
 
 
@@ -745,6 +746,10 @@ def _behaviour_counts(samples, behaviour):
         # Tapbacks the daemon recorded sending (outbound_sends kind 'tapback')
         # and how many of Seth's from-me tapbacks they claimed: aggregate only.
         "tapback_provenance_rows_n": sum(b.get("prov_rows", 0) for b in behaviour.values()),
+        # Rows with no chat.db boundary: they claim nothing (time alone could
+        # take Seth's own tapback), so their tapbacks stay attributed to Seth.
+        "tapback_provenance_no_boundary_n": sum(b.get("prov_no_boundary", 0)
+                                                for b in behaviour.values()),
         "tapback_provenance_excluded_n": bot,
         "tapback_provenance_excluded_share": round(bot / taps, 4) if taps else 0.0,
         "initiation_starts_n": sum(1 for s in starts if s["who"] != "unknown"),
