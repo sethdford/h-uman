@@ -1514,7 +1514,20 @@ void run_proactive_tests(void) {
     HU_RUN_TEST(proactive_callbacks_returns_false_without_due_items);
     HU_RUN_TEST(proactive_callbacks_ex_exposes_followup_id_and_supports_retry);
     HU_RUN_TEST(proactive_callbacks_wrapper_ignores_id);
-    HU_RUN_TEST(proactive_callbacks_skip_v2_owned_rows_only_when_time_live);
+    {
+        /* The test sets HU_PROSPECTIVE_TIME and a failed assert longjmps past its
+         * own cleanup; restore the caller's value here so one failure can't
+         * leak "live" into every later suite. */
+        const char *prev = getenv("HU_PROSPECTIVE_TIME");
+        char *saved = prev ? strdup(prev) : NULL;
+        HU_RUN_TEST(proactive_callbacks_skip_v2_owned_rows_only_when_time_live);
+        if (saved) {
+            setenv("HU_PROSPECTIVE_TIME", saved, 1);
+            free(saved);
+        } else {
+            unsetenv("HU_PROSPECTIVE_TIME");
+        }
+    }
 #endif
     HU_RUN_TEST(daemon_weather_awareness_build_directive_and_should_mention);
     HU_RUN_TEST(daemon_visual_should_share_decision);

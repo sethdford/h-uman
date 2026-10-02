@@ -1204,6 +1204,29 @@ static void repo_ledger_v2_owned_by_key_f20_and_bounded_action(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
+/* Review minor: a commitment whose open twin is keyed by its F20 follow-up
+ * partner (followup:<id>) is v2's too. The follow-up is scheduled first, so
+ * the twin carries the follow-up's key and the commitment collapses into it;
+ * only pm_twin_f20's delayed_followups lookup can find it from the commitment. */
+static void repo_ledger_v2_owned_commitment_by_f20_partner(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    bool owned = false;
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(
+                     &mem, &alloc, "+15550000045", 12, "fix the fence", 13, PM_T0 + PM_D, "me", 2),
+                 HU_OK); /* follow-up 1: twin followup:1 */
+    HU_ASSERT_EQ(hu_superhuman_commitment_store(&mem, &alloc, "+15550000045", 12, "fix the fence",
+                                                13, "me", 2, PM_T0 + PM_D),
+                 HU_OK); /* commitment 1: its F20 pair */
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE "
+                           "trigger_value='commitment:1' AND status IN ('pending','surfaced')"),
+                 (int64_t)0); /* precondition: no twin under the commitment's own key */
+    HU_ASSERT_EQ(hu_prospective_repo_ledger_v2_owned(db, false, 1, &owned), HU_OK);
+    HU_ASSERT_TRUE(owned);
+    mem.vtable->deinit(mem.ctx);
+}
+
 /* Fix round 2, minor P3: after_delivery judged the surfaced row IGNORED and
  * put it back to pending for its retry (attempts 1). A later legacy
  * mark-sent must not close it: v2 owns every row it has ever surfaced. */
@@ -1344,6 +1367,7 @@ void run_prospective_repo_sqlite_tests(void) {
     HU_RUN_TEST(repo_legacy_mark_sent_remirrors_a_later_sibling);
     HU_RUN_TEST(repo_legacy_mark_sent_keeps_the_survivor_it_remirrored);
     HU_RUN_TEST(repo_ledger_v2_owned_by_key_f20_and_bounded_action);
+    HU_RUN_TEST(repo_ledger_v2_owned_commitment_by_f20_partner);
     HU_RUN_TEST(repo_legacy_mark_sent_skips_a_twin_v2_ever_surfaced);
     HU_RUN_TEST(repo_undated_rows_are_out_of_bound);
     HU_RUN_TEST(repo_settle_is_one_unit);
