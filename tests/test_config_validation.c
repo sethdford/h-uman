@@ -136,6 +136,108 @@ static void test_config_validate_strict_ensemble_routing_ignored_when_lenient(vo
     HU_ASSERT_EQ(validate_session_json("{\"ensemble\":{\"routing\":\"test\"}}", false), HU_OK);
 }
 
+/* Drift guards: each JSON object below sets every key its parser reads. Strict
+ * validation always runs in config_mutator.c, so a parsed key missing from the
+ * allowlist in config_validate.c makes `config set` refuse the whole config.
+ * When a parser gains a key, add it here; this test then fails until the
+ * allowlist gains it too. */
+
+/* keep in sync with parse_gateway in config_parse.c */
+static void test_config_validate_strict_gateway_all_parsed_keys_accepted(void) {
+    HU_ASSERT_EQ(validate_session_json("{\"gateway\":{"
+                                       "\"enabled\":true,"
+                                       "\"port\":3000,"
+                                       "\"host\":\"127.0.0.1\","
+                                       "\"require_pairing\":true,"
+                                       "\"auth_token\":\"test-token\","
+                                       "\"allow_public_bind\":false,"
+                                       "\"pair_rate_limit_per_minute\":10,"
+                                       "\"rate_limit_requests\":100,"
+                                       "\"rate_limit_window\":60,"
+                                       "\"webhook_hmac_secret\":\"test-secret\","
+                                       "\"control_ui_dir\":\"test-ui\","
+                                       "\"cors_origins\":[\"https://test.example\"]}}",
+                                       true),
+                 HU_OK);
+}
+
+/* keep in sync with parse_memory in config_parse.c */
+static void test_config_validate_strict_memory_all_parsed_keys_accepted(void) {
+    HU_ASSERT_EQ(validate_session_json("{\"memory\":{"
+                                       "\"profile\":\"test-profile\","
+                                       "\"backend\":\"none\","
+                                       "\"sqlite_path\":\"test.db\","
+                                       "\"auto_save\":true,"
+                                       "\"encrypt_at_rest\":true,"
+                                       "\"consolidation_interval_hours\":24,"
+                                       "\"postgres_url\":\"postgres://test\","
+                                       "\"postgres_schema\":\"test-schema\","
+                                       "\"postgres_table\":\"test-table\","
+                                       "\"redis_host\":\"test-host\","
+                                       "\"redis_port\":6379,"
+                                       "\"redis_key_prefix\":\"test:\","
+                                       "\"api_base_url\":\"https://test.example\","
+                                       "\"api_key\":\"test-key\","
+                                       "\"api_timeout_ms\":1000}}",
+                                       true),
+                 HU_OK);
+}
+
+/* keep in sync with the inline `security` block in hu_config_parse_json
+ * (config_parse.c). Only the top level is allowlisted; the sub-objects'
+ * contents are not checked by validate_document. */
+static void test_config_validate_strict_security_all_parsed_keys_accepted(void) {
+    HU_ASSERT_EQ(validate_session_json("{\"security\":{"
+                                       "\"autonomy_level\":2,"
+                                       "\"sandbox\":\"none\","
+                                       "\"sandbox_config\":{\"enabled\":false},"
+                                       "\"resources\":{\"max_memory_mb\":512},"
+                                       "\"audit\":{\"enabled\":true}}}",
+                                       true),
+                 HU_OK);
+}
+
+/* keep in sync with parse_ensemble in config_parse.c */
+static void test_config_validate_strict_ensemble_all_parsed_keys_accepted(void) {
+    HU_ASSERT_EQ(validate_session_json("{\"ensemble\":{"
+                                       "\"providers\":[\"openai\"],"
+                                       "\"strategy\":\"test-strategy\"}}",
+                                       true),
+                 HU_OK);
+}
+
+/* keep in sync with parse_voice in config_parse.c (HU_PARSE_VOICE_STR keys
+ * plus privacy_mode) */
+static void test_config_validate_strict_voice_all_parsed_keys_accepted(void) {
+    HU_ASSERT_EQ(validate_session_json("{\"voice\":{"
+                                       "\"local_stt_endpoint\":\"http://localhost:1\","
+                                       "\"local_tts_endpoint\":\"http://localhost:2\","
+                                       "\"stt_provider\":\"test-stt\","
+                                       "\"tts_provider\":\"test-tts\","
+                                       "\"tts_voice\":\"test-voice\","
+                                       "\"tts_model\":\"test-model\","
+                                       "\"stt_model\":\"test-model\","
+                                       "\"stt_language\":\"en\","
+                                       "\"mode\":\"test-mode\","
+                                       "\"realtime_model\":\"test-model\","
+                                       "\"realtime_voice\":\"test-voice\","
+                                       "\"vertex_access_token\":\"test-key\","
+                                       "\"vertex_region\":\"test-region\","
+                                       "\"vertex_project\":\"test-project\","
+                                       "\"privacy_mode\":true}}",
+                                       true),
+                 HU_OK);
+}
+
+/* keep in sync with parse_session in config_parse.c */
+static void test_config_validate_strict_session_all_parsed_keys_accepted(void) {
+    HU_ASSERT_EQ(validate_session_json("{\"session\":{"
+                                       "\"idle_minutes\":30,"
+                                       "\"dm_scope\":\"per_peer\"}}",
+                                       true),
+                 HU_OK);
+}
+
 static void test_config_validate_strict_invalid_url_https_required(void) {
     hu_config_t cfg = {0};
     cfg.default_provider = "openai";
@@ -350,6 +452,12 @@ void run_config_validation_tests(void) {
     HU_RUN_TEST(test_config_validate_strict_voice_vertex_keys_are_known);
     HU_RUN_TEST(test_config_validate_strict_ensemble_routing_rejected_in_strict);
     HU_RUN_TEST(test_config_validate_strict_ensemble_routing_ignored_when_lenient);
+    HU_RUN_TEST(test_config_validate_strict_gateway_all_parsed_keys_accepted);
+    HU_RUN_TEST(test_config_validate_strict_memory_all_parsed_keys_accepted);
+    HU_RUN_TEST(test_config_validate_strict_security_all_parsed_keys_accepted);
+    HU_RUN_TEST(test_config_validate_strict_ensemble_all_parsed_keys_accepted);
+    HU_RUN_TEST(test_config_validate_strict_voice_all_parsed_keys_accepted);
+    HU_RUN_TEST(test_config_validate_strict_session_all_parsed_keys_accepted);
     HU_RUN_TEST(test_config_validate_strict_invalid_url_https_required);
     HU_RUN_TEST(test_config_validate_strict_extreme_numeric_warning);
     HU_RUN_TEST(test_config_validate_strict_path_traversal_rejected);
