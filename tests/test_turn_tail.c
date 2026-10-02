@@ -4,6 +4,7 @@
  * retrieval, scratchpad, checkpoint) and the observer events of the
  * tool-iterations-exhausted exit. */
 #include "human/agent/checkpoint.h"
+#include "human/agent/compaction.h"
 #include "human/agent/scratchpad.h"
 #include "human/agent/turn.h"
 #include "human/core/allocator.h"
@@ -217,6 +218,59 @@ static void turn_tail_replans_again_for_new_failures_only(void) {
     tf_close(&f);
 }
 
+/* Mid-turn compaction drops entries from the front of history. The replan
+ * floor recorded at turn start must move down with them, or it sits past the
+ * end of the shrunk history and this turn's failures are never scanned. */
+static void turn_tail_replans_after_mid_turn_compaction(void) {
+    tf_fixture_t f;
+    HU_ASSERT_TRUE(tf_open(&f, NULL, 0, false, HU_AUTONOMY_AUTONOMOUS));
+    for (int i = 0; i < 10; i++) {
+        HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_USER, "list my things"));
+        HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_ASSISTANT, "sure, looking"));
+    }
+    hu_turn_ctx_t *turn_ctx = tl_ctx(&f, "list my things", 1);
+    HU_ASSERT_NOT_NULL(turn_ctx);
+    tl_set_plan(turn_ctx);
+    HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_USER, "list my things"));
+    hu_compaction_config_t cfg;
+    hu_compaction_config_default(&cfg);
+    cfg.keep_recent = 4;
+    cfg.max_history_messages = 8; /* trigger: 21 messages > 8 */
+    size_t before = f.agent.history_count;
+    HU_ASSERT_EQ(hu_compact_history(&f.alloc, &f.agent.history, &f.agent.history_count,
+                                    &f.agent.history_cap, &cfg),
+                 HU_OK);
+    HU_ASSERT_LT(f.agent.history_count + 4, before); /* precondition: it really shrank */
+    hu_turn_note_history_shift(turn_ctx, before, f.agent.history_count);
+    HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_TOOL, "Error: disk full"));
+    HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_TOOL, "denied: not allowed"));
+    HU_ASSERT_LT(f.agent.history_count, 20); /* the turn-start floor (20) is past the end */
+    HU_ASSERT_EQ(hu_turn_tail(turn_ctx), HU_OK);
+    HU_ASSERT_EQ(tl_count_replans(&f), 1);
+    const hu_owned_message_t *m = &f.agent.history[f.agent.history_count - 1];
+    HU_ASSERT_STR_EQ(m->content, "[REPLAN after 2 tool failures]: 1 new steps");
+    hu_turn_ctx_free(turn_ctx);
+    tf_close(&f);
+}
+
+/* The shift never underflows the floor and ignores a history that grew. */
+static void turn_note_history_shift_clamps_and_ignores_growth(void) {
+    tf_fixture_t f;
+    HU_ASSERT_TRUE(tf_open(&f, NULL, 0, false, HU_AUTONOMY_AUTONOMOUS));
+    hu_turn_ctx_t *turn_ctx = tl_ctx(&f, "hi", 1);
+    HU_ASSERT_NOT_NULL(turn_ctx);
+    turn_ctx->loop.replan_floor = 10;
+    hu_turn_note_history_shift(turn_ctx, 30, 26);
+    HU_ASSERT_EQ(turn_ctx->loop.replan_floor, 6);
+    hu_turn_note_history_shift(turn_ctx, 26, 30);
+    HU_ASSERT_EQ(turn_ctx->loop.replan_floor, 6);
+    hu_turn_note_history_shift(turn_ctx, 30, 2);
+    HU_ASSERT_EQ(turn_ctx->loop.replan_floor, 0);
+    hu_turn_note_history_shift(NULL, 30, 2);
+    hu_turn_ctx_free(turn_ctx);
+    tf_close(&f);
+}
+
 /* The scratchpad records this iteration's token and tool-result counts under
  * turn_<iter>; iteration 3 is not a checkpoint step (interval 5). */
 static void turn_tail_records_the_iteration_in_the_scratchpad(void) {
@@ -381,7 +435,9 @@ static const trp_step_t k_tl_exhaust[] = {
     {.err = HU_OK, .tool_calls = {{"c5", "memory_list", "{\"q\":\"5\"}"}}, .tool_calls_count = 1},
 };
 
-/* End to end: a turn that resumes an [ACTIVE_PLAN] from history and runs out
+/* Asserts zero live allocations for the WHOLE turn plus hu_agent_deinit, not
+ * only plan_ctx: any other leak on this exit fails it too.
+ * End to end: a turn that resumes an [ACTIVE_PLAN] from history and runs out
  * of tool iterations frees its plan context on the HU_ERR_TIMEOUT exit, as
  * every other exit does. The precondition proves the plan was live this turn
  * (it reached the system prompt as "### [ACTIVE_PLAN] ..."). */
@@ -418,6 +474,8 @@ void run_turn_tail_tests(void) {
     HU_RUN_TEST(turn_tail_ignores_tool_failures_from_a_previous_turn);
     HU_RUN_TEST(turn_tail_replans_once_per_failure_set);
     HU_RUN_TEST(turn_tail_replans_again_for_new_failures_only);
+    HU_RUN_TEST(turn_tail_replans_after_mid_turn_compaction);
+    HU_RUN_TEST(turn_note_history_shift_clamps_and_ignores_growth);
     HU_RUN_TEST(turn_tail_records_the_iteration_in_the_scratchpad);
     HU_RUN_TEST(turn_tail_checkpoints_every_fifth_iteration);
     HU_RUN_TEST(turn_tail_checkpoint_state_is_released_by_agent_deinit);

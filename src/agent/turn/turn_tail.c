@@ -36,8 +36,10 @@ hu_error_t hu_turn_tail(hu_turn_ctx_t *turn_ctx) {
      * Only this turn's failures count, and only those newer than the turn's
      * last replan: earlier turns' failures (still inside the 8-entry window)
      * and failures already replanned for would cost an extra LLM call every
-     * iteration. Mid-turn compaction only moves entries down, so a stale
-     * floor can hide this turn's failures but never admit an earlier turn's. */
+     * iteration. Mid-turn compaction drops entries from the front;
+     * hu_turn_note_history_shift moves the floor down with them. If the turn's
+     * own start was folded into the summary, the shifted floor can reach the
+     * summary or system entries below it, which are never TOOL results. */
     if (plan_ctx && !agent->cancel_requested) {
         size_t fail_count = 0;
         char fail_detail[512];
@@ -182,6 +184,14 @@ hu_error_t hu_turn_tail(hu_turn_ctx_t *turn_ctx) {
     }
 
     return HU_OK;
+}
+
+void hu_turn_note_history_shift(hu_turn_ctx_t *turn_ctx, size_t before, size_t after) {
+    if (!turn_ctx || after >= before)
+        return;
+    size_t d = before - after;
+    size_t floor = turn_ctx->loop.replan_floor;
+    turn_ctx->loop.replan_floor = floor > d ? floor - d : 0;
 }
 
 hu_error_t hu_turn_exhausted(hu_turn_ctx_t *turn_ctx) {

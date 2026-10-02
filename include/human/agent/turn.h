@@ -180,6 +180,14 @@ hu_error_t hu_turn_tools(hu_turn_ctx_t *turn_ctx);
  * HU_ERR_INVALID_ARGUMENT on a NULL ctx, agent or msg, else HU_OK. */
 hu_error_t hu_turn_tail(hu_turn_ctx_t *turn_ctx);
 
+/* Keeps loop.replan_floor pointing at the same entries after mid-turn history
+ * compaction (src/agent/turn/turn_tail.c): compaction drops entries from the
+ * front, so a floor recorded before it would sit past the end of the shrunk
+ * history and S17 would never scan again. Shifts the floor down by
+ * before - after, clamped at 0; a non-shrinking change leaves it alone.
+ * NULL-safe. */
+void hu_turn_note_history_shift(hu_turn_ctx_t *turn_ctx, size_t before, size_t after);
+
 /* S18 tool-iterations-exhausted exit (src/agent/turn/turn_tail.c): records the
  * TOOL_ITERATIONS_EXHAUSTED and ERR observer events. The exit's frees and its
  * HU_ERR_TIMEOUT return stay in the turn body (plan gap G7).

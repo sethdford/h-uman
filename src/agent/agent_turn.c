@@ -1329,8 +1329,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
             return entry_step.err;
     }
 
-    /* Automatic planning + execution for complex tasks, resuming any
-     * [ACTIVE_PLAN] left in history (src/agent/turn/turn_plan.c) */
+    /* Resume an [ACTIVE_PLAN] (turn/turn_plan.c), then auto-plan complex tasks */
     size_t plan_ctx_len = 0;
     char *plan_ctx = hu_turn_active_plan(agent, &plan_ctx_len);
 #ifndef HU_IS_TEST
@@ -3776,6 +3775,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
         /* Compact history if it exceeds limits (before each provider call).
          * Uses LLM summarization when the provider is available, with
          * rule-based fallback. */
+        size_t hist_before_compact = agent->history_count;
         if (hu_should_compact(agent->history, agent->history_count, &compact_cfg)) {
             hu_error_t compact_err =
                 hu_compact_history_llm(agent->alloc, &agent->history, &agent->history_count,
@@ -3865,6 +3865,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                 agent->context_pressure_warning_95_emitted = pr.warning_95_emitted;
             }
         }
+        hu_turn_note_history_shift(turn_ctx, hist_before_compact, agent->history_count);
 
         /* Format messages for this iteration using arena allocator */
         {
@@ -7149,8 +7150,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
         (void)hu_turn_tools(turn_ctx);
         turn_tool_results_count = turn_ctx->loop.turn_tool_results_count;
 
-        /* S17 iteration tail (replan on tool failure, mid-turn retrieval,
-         * scratchpad, checkpoint) lives in src/agent/turn/turn_tail.c. */
+        /* S17 iteration tail (replan, mid-turn retrieval, scratchpad, checkpoint): turn_tail.c */
         turn_ctx->context.plan_ctx = plan_ctx;
         turn_ctx->context.plan_ctx_len = plan_ctx_len;
         turn_ctx->loop.iter = iter;
