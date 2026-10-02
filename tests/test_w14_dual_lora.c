@@ -191,7 +191,7 @@ static void dual_setup_ctx(hu_lora_retrain_ctx_t *ctx, dual_capture_t *cap,
     snprintf(today, sizeof(today), "2026-05-17");
     snprintf(kl_probe, sizeof(kl_probe), "tests/fixtures/kl_probe_200.jsonl");
     snprintf(old_pairs, sizeof(old_pairs), "tests/fixtures/old_pairs_holdout.jsonl");
-    snprintf(base_path, sizeof(base_path), "");
+    base_path[0] = '\0';
 
     ctx->slow_dir = slow_dir;
     ctx->quarantine_dir = q_dir;

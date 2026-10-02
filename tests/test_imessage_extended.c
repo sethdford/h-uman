@@ -93,6 +93,8 @@ static void test_imessage_health_check(void) {
     hu_imessage_destroy(&ch);
 }
 
+/* Registered only on Darwin (see run_imessage_extended_tests). */
+#if defined(__APPLE__) && defined(__MACH__)
 static void test_imessage_send_test_mode(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_channel_t ch;
@@ -145,6 +147,7 @@ static void test_imessage_poll_test_mode(void) {
     HU_ASSERT_EQ(out_count, 0u);
     hu_imessage_destroy(&ch);
 }
+#endif
 
 static void test_imessage_reaction_to_tapback_mapping(void) {
     HU_ASSERT_NULL(hu_imessage_reaction_to_tapback_name(HU_REACTION_NONE));
