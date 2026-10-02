@@ -241,6 +241,37 @@ static void outbound_sends_repo_fresh_table_accepts_tapback(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
+/* DEF-8 x tapback provenance: chat.db's prev-own boundary skips reactions
+ * (associated_message_type = 0), so a daemon tapback record sits between our
+ * last text and Seth's next hand-typed one. A reaction on that text must not
+ * be credited to the daemon through the tapback record. */
+static void find_delivery_never_claims_a_text_through_a_tapback_record(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem;
+    sqlite3 *db = open_mem(&mem, &alloc);
+    HU_ASSERT_NOT_NULL(db);
+    const char who[] = "+15550001111";
+    /* our text: boundary 10, lands as chat.db row 11 */
+    HU_ASSERT_EQ(hu_outbound_sends_repo_record(db, 1000, "imessage", who, 12,
+                                               HU_OUTBOUND_SEND_KIND_TEXT, "hey", 3, 10),
+                 HU_OK);
+    /* our tapback: boundary 20 (row 21 is a reaction row, not a message) */
+    HU_ASSERT_EQ(hu_outbound_sends_repo_record(db, 5000, "imessage", who, 12,
+                                               HU_OUTBOUND_SEND_KIND_TAPBACK, NULL, 0, 20),
+                 HU_OK);
+    int64_t sent = -1;
+    /* pre: the text record claims its own row */
+    HU_ASSERT_EQ(
+        hu_outbound_sends_repo_find_delivery(db, "imessage", who, 12, 11, 0, 1200, 5000, &sent),
+        HU_OK);
+    HU_ASSERT_EQ(sent, 1000);
+    /* Seth types row 22 half a second after the tapback: not ours */
+    HU_ASSERT_EQ(
+        hu_outbound_sends_repo_find_delivery(db, "imessage", who, 12, 22, 11, 5500, 5000, &sent),
+        HU_ERR_NOT_FOUND);
+    mem.vtable->deinit(mem.ctx);
+}
+
 static void send_provenance_install_rejects_null_db(void) {
     HU_ASSERT_EQ(hu_daemon_send_provenance_install(NULL), HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT_FALSE(hu_imessage_send_observer_active());
@@ -255,6 +286,7 @@ void run_outbound_sends_repo_tests(void) {
     HU_RUN_TEST(send_provenance_install_rejects_null_db);
     HU_RUN_TEST(outbound_sends_repo_migrates_old_check_preserving_rows);
     HU_RUN_TEST(outbound_sends_repo_fresh_table_accepts_tapback);
+    HU_RUN_TEST(find_delivery_never_claims_a_text_through_a_tapback_record);
 }
 #else
 void run_outbound_sends_repo_tests(void) {

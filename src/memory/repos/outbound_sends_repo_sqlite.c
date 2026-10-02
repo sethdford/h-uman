@@ -178,11 +178,14 @@ hu_error_t hu_outbound_sends_repo_find_delivery(sqlite3 *db, const char *channel
         return HU_ERR_MEMORY_STORE;
     /* The send whose chat.db boundary sits in [prev own message, target):
      * its first is_from_me row after the boundary IS the target. A send whose
-     * boundary precedes an earlier message of ours cannot claim this row. */
+     * boundary precedes an earlier message of ours cannot claim this row.
+     * A tapback record never does: chat.db's prev-own boundary skips reaction
+     * rows, so one would claim the next message Seth types by hand. */
     sqlite3_stmt *stmt = NULL;
     if (sqlite3_prepare_v2(db,
                            "SELECT sent_at_ms FROM outbound_sends WHERE channel = ?1 "
-                           "AND contact = ?2 AND prior_max_rowid >= ?3 AND prior_max_rowid < ?4 "
+                           "AND contact = ?2 AND kind <> 'tapback' "
+                           "AND prior_max_rowid >= ?3 AND prior_max_rowid < ?4 "
                            "AND ABS(sent_at_ms - ?5) <= ?6 "
                            "ORDER BY ABS(sent_at_ms - ?5) LIMIT 1;",
                            -1, &stmt, NULL) != SQLITE_OK)
