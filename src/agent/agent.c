@@ -65,6 +65,7 @@
 #ifdef HU_HAS_SKILLS
 #include "human/skillforge.h"
 #endif
+#include "human/agent/guard_repair.h"
 #include "human/context.h"
 #include "human/context_tokens.h"
 #include "human/core/json.h"
@@ -754,6 +755,44 @@ size_t hu_agent_internal_recent_assistant_avg_len(const hu_agent_t *agent, size_
     if (ewma < 1.0)
         return 1;
     return (size_t)ewma;
+}
+
+void hu_agent_internal_guard_context(const hu_agent_t *agent, const char *msg, size_t msg_len,
+                                     hu_guard_context_t *out) {
+    memset(out, 0, sizeof(*out));
+    if (!agent)
+        return;
+    out->recent_avg_len = hu_agent_internal_recent_assistant_avg_len(agent, 5);
+    out->inbound_is_ask = hu_guard_inbound_is_ask(msg, msg_len);
+    out->length_anomaly_mult =
+        hu_guard_length_anomaly_mult_for_channel(agent->active_channel, agent->active_channel_len);
+    out->director_text = agent->scene_direction_text;
+    out->director_len = agent->scene_direction_text_len;
+    /* Sprint 37 — cross-turn director history. */
+    out->director_history = (const char *const *)agent->director_history;
+    out->director_history_lens = agent->director_history_lens;
+    out->director_history_count = agent->director_history_count;
+    /* Sprint 41 follow-up #4 — consult per-channel G9 disable list. */
+    out->naked_opener_disabled =
+        hu_response_guard_g9_disabled_for_channel(agent->active_channel, agent->active_channel_len);
+    if (!agent->persona)
+        return;
+    if (agent->persona->name && agent->persona->name_len > 1) {
+        out->persona_name = agent->persona->name;
+        out->persona_name_len = agent->persona->name_len;
+    }
+    /* Prefer `identity` (full biographical string); fall back to
+     * `core_anchor` (one-line bio). */
+    const char *id =
+        agent->persona->identity ? agent->persona->identity : agent->persona->core_anchor;
+    if (id) {
+        out->persona_identity = id;
+        out->persona_identity_len = strlen(id);
+    }
+    if (agent->persona->biography) {
+        out->persona_biography = agent->persona->biography;
+        out->persona_biography_len = strlen(agent->persona->biography);
+    }
 }
 
 #define HU_AGENT_HISTORY_INIT_CAP 16

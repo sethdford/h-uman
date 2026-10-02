@@ -1,4 +1,5 @@
 #include "human/agent.h"
+#include "human/agent/response_guard.h"
 #include "human/core/allocator.h"
 #include "human/core/string.h"
 #include "human/daemon/director.h"
@@ -368,12 +369,110 @@ static void agent_g5_length_anomaly_rejects_and_retries(void) {
     HU_ASSERT_EQ(hu_agent_turn(&agent, "what's up", 9, &r3, &r3_len), HU_OK);
     /* Provider was called at least 4 times — original + slim retry. */
     HU_ASSERT(pctx.calls >= 4);
-    /* Final response must NOT be the 1500-byte dump. */
-    HU_ASSERT(r3_len < 200);
+    /* Final response must NOT be the 1500-byte dump. Since 2026-10-01 a
+     * collapsed retry (20 bytes, < 40% of a length-only original) loses to
+     * the original cut to a sentence end under G5's cap ("what's up" is a
+     * question, so the cap is the ask ceiling) — see guard_repair.h. */
+    HU_ASSERT(r3_len < long_len);
+    HU_ASSERT(r3_len <= HU_GUARD_LENGTH_ASK_CEILING);
     /* Retry path returned the clean text. */
     HU_ASSERT_NOT_NULL(r3);
     alloc.free(alloc.ctx, r3, r3_len + 1);
 
+    hu_agent_deinit(&agent);
+}
+
+/* 2026-10-01 — a guard repair never sends a fragment. The thanksgiving
+ * send: a reply over G5's cap, a slim retry cut mid-clause ("Wait, did we
+ * actually lock"). The agent surfaces the original, cut to a sentence end
+ * under the cap, not the fragment. */
+static const char k_fragment_retry[] = "Wait, did we actually lock";
+
+static void agent_g5_fragment_retry_keeps_the_original_trimmed(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    length_provider_ctx_t pctx;
+    memset(&pctx, 0, sizeof(pctx));
+    static char long_reply[1600];
+    static const char phrase[] = "Sure thing, that all sounds reasonable to me right now. "
+                                 "Maybe we can grab coffee tomorrow if you have free time then. ";
+    size_t i = 0;
+    while (i + sizeof(phrase) - 1 < 700) {
+        memcpy(long_reply + i, phrase, sizeof(phrase) - 1);
+        i += sizeof(phrase) - 1;
+    }
+    long_reply[i] = '\0';
+    static const char short1[] = "yeah, sounds good lol";
+    static const char short2[] = "hahaha ok, fair enough";
+    pctx.call_text[0] = short1;
+    pctx.call_text_len[0] = sizeof(short1) - 1;
+    pctx.call_text[1] = short2;
+    pctx.call_text_len[1] = sizeof(short2) - 1;
+    pctx.call_text[2] = long_reply;
+    pctx.call_text_len[2] = i;
+    pctx.call_text[3] = k_fragment_retry; /* the slim retry */
+    pctx.call_text_len[3] = sizeof(k_fragment_retry) - 1;
+
+    hu_provider_t provider = length_provider_create(&pctx);
+    hu_agent_t agent;
+    HU_ASSERT_EQ(hu_agent_from_config(&agent, &alloc, provider, NULL, 0, NULL, NULL, NULL, NULL,
+                                      "test-model", 10, "length_anomaly_mock", 19, 0.7, "/tmp", 4,
+                                      5, 50, false, 3, NULL, 0, NULL, 0, NULL),
+                 HU_OK);
+    agent.active_channel = "imessage";
+    agent.active_channel_len = 8;
+    char *r = NULL;
+    size_t rlen = 0;
+    HU_ASSERT_EQ(hu_agent_turn(&agent, "hey", 3, &r, &rlen), HU_OK);
+    alloc.free(alloc.ctx, r, rlen + 1);
+    HU_ASSERT_EQ(hu_agent_turn(&agent, "hi", 2, &r, &rlen), HU_OK);
+    alloc.free(alloc.ctx, r, rlen + 1);
+    /* Not a question: G5 judges 700 bytes against max(320, ~21 x 6). */
+    HU_ASSERT_EQ(hu_agent_turn(&agent, "ok cool then", 12, &r, &rlen), HU_OK);
+    HU_ASSERT(pctx.calls >= 4); /* original + slim retry ran */
+    HU_ASSERT_NOT_NULL(r);
+    HU_ASSERT(strstr(r, "did we actually lock") == NULL);
+    HU_ASSERT(strstr(r, "grab coffee tomorrow") != NULL);
+    HU_ASSERT(rlen <= HU_GUARD_LENGTH_ANOMALY_FLOOR);
+    HU_ASSERT(rlen > sizeof(k_fragment_retry));
+    alloc.free(alloc.ctx, r, rlen + 1);
+    hu_agent_deinit(&agent);
+}
+
+/* The original leaked the director's text, so it can't be sent; the retry
+ * is a fragment, so it can't either. The canned fallback goes out. */
+static void agent_g6_leak_plus_fragment_retry_sends_neither(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    length_provider_ctx_t pctx;
+    memset(&pctx, 0, sizeof(pctx));
+    static const char director[] =
+        "Slightly skeptical but intrigued, acknowledge the observation about the AI";
+    static char leaked[256];
+    int n = snprintf(leaked, sizeof(leaked), "got it - %s. yeah lol", director);
+    HU_ASSERT(n > 0 && (size_t)n < sizeof(leaked));
+    pctx.call_text[0] = leaked;
+    pctx.call_text_len[0] = (size_t)n;
+    pctx.call_text[1] = k_fragment_retry;
+    pctx.call_text_len[1] = sizeof(k_fragment_retry) - 1;
+    hu_provider_t provider = length_provider_create(&pctx);
+    hu_agent_t agent;
+    HU_ASSERT_EQ(hu_agent_from_config(&agent, &alloc, provider, NULL, 0, NULL, NULL, NULL, NULL,
+                                      "test-model", 10, "length_anomaly_mock", 19, 0.7, "/tmp", 4,
+                                      5, 50, false, 1, NULL, 0, NULL, 0, NULL),
+                 HU_OK);
+    agent.active_channel = "imessage";
+    agent.active_channel_len = 8;
+    agent.scene_direction_text = director;
+    agent.scene_direction_text_len = sizeof(director) - 1;
+    char *r = NULL;
+    size_t rlen = 0;
+    HU_ASSERT_EQ(hu_agent_turn(&agent, "interesting", 11, &r, &rlen), HU_OK);
+    HU_ASSERT(pctx.calls >= 2);
+    HU_ASSERT_NOT_NULL(r);
+    HU_ASSERT(strstr(r, "did we actually lock") == NULL);
+    HU_ASSERT(strstr(r, director) == NULL);
+    agent.scene_direction_text = NULL;
+    agent.scene_direction_text_len = 0;
+    alloc.free(alloc.ctx, r, rlen + 1);
     hu_agent_deinit(&agent);
 }
 
@@ -963,6 +1062,8 @@ void run_response_guard_retry_tests(void) {
     /* Sprint 34 — end-to-end wired G5 + G6 through hu_agent_turn. */
     HU_RUN_TEST(agent_g5_length_anomaly_rejects_and_retries);
     HU_RUN_TEST(agent_g6_director_echo_rejects_and_retries);
+    HU_RUN_TEST(agent_g5_fragment_retry_keeps_the_original_trimmed);
+    HU_RUN_TEST(agent_g6_leak_plus_fragment_retry_sends_neither);
 
     /* Sprint 35 — end-to-end persona-PII echo (G7). */
     HU_RUN_TEST(agent_g7_persona_pii_echo_rejects_and_retries);

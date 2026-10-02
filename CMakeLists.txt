@@ -854,6 +854,7 @@ set(HU_CORE_SOURCES
     src/agent/growth_narrative.c
     src/agent/frontier_persist.c
     src/context/conversation.c
+    src/context/reply_fragment.c
     src/context/contact_send_recency.c
     src/context/filler_recency.c
     src/context/contact_send_recency.c
@@ -1068,6 +1069,7 @@ set(HU_CORE_SOURCES
     src/agent/outbound/crosstalk_sqlite.c
     src/agent/outbound/persona.c
     src/agent/outbound/moderation.c
+    src/agent/outbound/guard_repair.c
     src/agent/outbound/stats.c
     src/agent/burst_egress.c
     src/agent/multimodal_policy.c
@@ -3865,6 +3867,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_daemon_e2e_validator.c
     tests/test_response_guard.c
     tests/test_response_guard_retry.c
+    tests/test_reply_fragment.c
     # Sprint 59 — outbound validation pipeline (Phase A runner contract).
     tests/test_outbound_pipeline.c
     # Sprint 59 Phase B — strip stage.

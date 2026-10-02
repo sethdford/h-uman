@@ -497,39 +497,42 @@ unsigned hu_guard_length_anomaly_mult_for_channel(const char *channel, size_t ch
     return HU_GUARD_LENGTH_ANOMALY_MULT_DEFAULT;
 }
 
-static bool hu_guard_has_length_anomaly(const hu_guard_context_t *ctx, size_t response_len) {
+size_t hu_guard_length_cap(const hu_guard_context_t *ctx) {
     if (!ctx)
-        return false;
-
-    /* Absolute floor: a context/CoT dump is intrinsically large. Below the
-     * floor, no reply can be such a dump, so don't penalize natural-length
-     * messages just because the recipient's rolling average is tiny. This
-     * breaks the forced-short → low-avg → reject → shorter death-spiral. */
-    if (response_len <= HU_GUARD_LENGTH_ANOMALY_FLOOR)
-        return false;
-
-    /* Task 10 (AC-9) — prefer learned per-contact baseline if available.
-     * When the personal model has tracked avg_message_length for this contact,
-     * use that as the baseline instead of the rolling average. This allows
-     * Seth-normal length (e.g. 500 chars habitually sent to a contact) to
-     * bypass the anomaly check. If the learned baseline says this length is
-     * normal for this contact, the guard passes. */
+        return SIZE_MAX;
+    /* Task 10 (AC-9) — prefer the learned per-contact baseline when the
+     * personal model has tracked avg_message_length for this contact: within
+     * 1.5x of it is Seth-normal for this contact (e.g. 500 chars habitually
+     * sent to one person). Otherwise the rolling average x the channel
+     * multiplier; no baseline at all disables the check. */
+    size_t cap;
     if (ctx->learned_avg_message_length > 0) {
-        /* If the response is within the learned baseline + a small tolerance
-         * (1.5x), it's not anomalous for this contact. The 1.5x allows for
-         * some natural variation while still catching huge dumps. */
-        size_t learned_baseline = ctx->learned_avg_message_length;
-        return response_len > learned_baseline * 3 / 2; /* 1.5x multiplier */
+        cap = ctx->learned_avg_message_length * 3 / 2;
+    } else if (ctx->recent_avg_len > 0) {
+        unsigned mult = ctx->length_anomaly_mult;
+        if (mult == 0)
+            mult = HU_GUARD_LENGTH_ANOMALY_MULT_DEFAULT;
+        cap = ctx->recent_avg_len * (size_t)mult;
+    } else {
+        return SIZE_MAX;
     }
+    /* Absolute floor: a context/CoT dump is intrinsically large. Below the
+     * floor no reply can be such a dump, so a tiny rolling average never
+     * penalizes a natural-length message (the forced-short -> low-avg ->
+     * reject -> shorter death-spiral). */
+    if (cap < HU_GUARD_LENGTH_ANOMALY_FLOOR)
+        cap = HU_GUARD_LENGTH_ANOMALY_FLOOR;
+    /* 2026-10-01: an answer to a question or request is long by design.
+     * Judging a "walk me through it" answer against a recent average of 28
+     * chars rejects the answer for being one; the ask ceiling replaces the
+     * relative cap when it is higher. Never stricter than without the flag. */
+    if (ctx->inbound_is_ask && cap < HU_GUARD_LENGTH_ASK_CEILING)
+        cap = HU_GUARD_LENGTH_ASK_CEILING;
+    return cap;
+}
 
-    /* Fall back to rolling average if no learned baseline. */
-    if (ctx->recent_avg_len == 0)
-        return false;
-
-    unsigned mult = ctx->length_anomaly_mult;
-    if (mult == 0)
-        mult = HU_GUARD_LENGTH_ANOMALY_MULT_DEFAULT;
-    return response_len > ctx->recent_avg_len * (size_t)mult;
+static bool hu_guard_has_length_anomaly(const hu_guard_context_t *ctx, size_t response_len) {
+    return response_len > hu_guard_length_cap(ctx);
 }
 
 /* Helper — slide a 30-char window over `src[0..src_len)` and return

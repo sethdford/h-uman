@@ -1,5 +1,6 @@
 #include "human/context/conversation.h"
 #include "human/channel_class.h"
+#include "human/context/reply_fragment.h"
 #include "human/core/allocator.h"
 #include "human/core/file.h"
 #include "human/core/io_secure.h"
@@ -22,6 +23,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 #if defined(__unix__) || defined(__APPLE__)
 #include <dirent.h>
@@ -8361,22 +8363,38 @@ static bool conv_clause_end_at(const char *p, size_t rem, size_t i, const char *
            (i + 1 >= rem || isspace((unsigned char)p[i + 1]));
 }
 
+/* Does p[0..rem) start with the conjunction "and " or "but "? */
+static bool conv_starts_conjunction(const char *p, size_t rem) {
+    return (rem > 4 && strncasecmp(p, "and ", 4) == 0) ||
+           (rem > 4 && strncasecmp(p, "but ", 4) == 0);
+}
+
 /* Length of the next bubble of a long reply (rem > max_chunk). A person breaks
  * at a thought boundary, so in order: a sentence end in the back half of the
  * window, a comma there, the first sentence end or comma past the window (a
- * longer bubble beats a mid-clause cut, 2026-09-30), and only then the last
- * space in the window. */
+ * longer bubble beats a mid-clause cut, 2026-09-30), a space before "and" /
+ * "but" in the window, the last space whose bubble does not end on a function
+ * word ("Nah too windy. just", 2026-09-30), and only then the last space.
+ * Every punctuation/conjunction cut must also be clean: no 1-word tail
+ * (hu_reply_cut_is_clean). */
 static size_t conv_long_split_cut(const char *p, size_t rem, size_t max_chunk) {
     static const char *const tiers[] = {".!?", ","};
     size_t hard = rem < 511 ? rem : 511;
     for (size_t t = 0; t < 2; t++)
         for (size_t i = max_chunk; i > max_chunk / 2; i--)
-            if (conv_clause_end_at(p, rem, i - 1, tiers[t]))
+            if (conv_clause_end_at(p, rem, i - 1, tiers[t]) && hu_reply_cut_is_clean(p, rem, i))
                 return i;
     for (size_t t = 0; t < 2; t++)
         for (size_t i = max_chunk; i < hard; i++)
-            if (conv_clause_end_at(p, rem, i, tiers[t]))
+            if (conv_clause_end_at(p, rem, i, tiers[t]) && hu_reply_cut_is_clean(p, rem, i + 1))
                 return i + 1;
+    for (size_t i = max_chunk; i > max_chunk / 2; i--)
+        if (p[i - 1] == ' ' && i > 1 && conv_starts_conjunction(p + i, rem - i) &&
+            hu_reply_cut_is_clean(p, rem, i - 1))
+            return i - 1;
+    for (size_t i = max_chunk; i > max_chunk / 2; i--)
+        if (p[i - 1] == ' ' && i > 1 && hu_reply_cut_is_clean(p, rem, i - 1))
+            return i - 1;
     for (size_t i = max_chunk; i > max_chunk / 2; i--)
         if (p[i - 1] == ' ' && i > 1) /* a zero cut would never advance */
             return i - 1;

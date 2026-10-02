@@ -208,6 +208,14 @@ typedef struct {
      * operators who want to disable G9 across all channels without
      * touching every call site. */
     bool naked_opener_disabled;
+
+    /* 2026-10-01 — the inbound message is a question or a request
+     * (hu_guard_inbound_is_ask). An answer to "walk me through it" is
+     * longer than the conversation's recent average by design, so G5's
+     * relative cap (recent_avg_len x mult, or the learned baseline) is
+     * raised to at least HU_GUARD_LENGTH_ASK_CEILING for it. Never
+     * stricter than without the flag. Default false (memset 0). */
+    bool inbound_is_ask;
 } hu_guard_context_t;
 
 /* Sprint 38 — cumulative REJECT counts by detector (process-wide).
@@ -265,6 +273,18 @@ void hu_guard_reject_stats_reset(void);
  * below the documented leak size, so it removes the spiral without
  * weakening dump detection. */
 #define HU_GUARD_LENGTH_ANOMALY_FLOOR 320u
+
+/* G5 floor for a reply to a question or request (ctx->inbound_is_ask): the
+ * relative cap never drops below this. Under the 2026-05-12 dump (979 chars),
+ * so a context dump of that size still trips G5 even when it answers a
+ * question; well above a long human answer to "walk me through it". */
+#define HU_GUARD_LENGTH_ASK_CEILING 900u
+
+/* The longest reply G5 accepts under `ctx`: max(FLOOR, baseline x mult),
+ * raised to HU_GUARD_LENGTH_ASK_CEILING when ctx->inbound_is_ask. SIZE_MAX
+ * when no length check applies (NULL ctx, no baseline). G5 rejects exactly
+ * the replies longer than this. */
+size_t hu_guard_length_cap(const hu_guard_context_t *ctx);
 
 /* Channel-aware G5 threshold. imessage / cli / sms → 6×; else 8×. */
 unsigned hu_guard_length_anomaly_mult_for_channel(const char *channel, size_t channel_len);
