@@ -6340,8 +6340,9 @@ static void test_lora_runner_respects_max_examples(void) {
     FILE *fp = fopen(output, "rb");
     HU_ASSERT_NOT_NULL(fp);
     char buf[1024] = {0};
-    fread(buf, 1, sizeof(buf) - 1, fp);
+    size_t got = fread(buf, 1, sizeof(buf) - 1, fp);
     fclose(fp);
+    HU_ASSERT_TRUE(got > 0);
     /* Only the first example's response (canned: "hey") should
      * appear; "good u" and "ayy lmk" must be absent. */
     HU_ASSERT_TRUE(strstr(buf, "hey") != NULL);
@@ -6439,8 +6440,9 @@ static void test_fidelity_status_emits_json_with_baseline(void) {
     FILE *fp = fopen(output, "rb");
     HU_ASSERT_NOT_NULL(fp);
     char buf[2048] = {0};
-    fread(buf, 1, sizeof(buf) - 1, fp);
+    size_t got = fread(buf, 1, sizeof(buf) - 1, fp);
     fclose(fp);
+    HU_ASSERT_TRUE(got > 0);
     HU_ASSERT_TRUE(strstr(buf, "\"persona\"") != NULL);
     HU_ASSERT_TRUE(strstr(buf, "\"baseline\"") != NULL);
     HU_ASSERT_TRUE(strstr(buf, "\"mean\"") != NULL);
@@ -6500,8 +6502,9 @@ static void test_fidelity_status_includes_ab_when_files_provided(void) {
     fp = fopen(output, "rb");
     HU_ASSERT_NOT_NULL(fp);
     char buf[2048] = {0};
-    fread(buf, 1, sizeof(buf) - 1, fp);
+    size_t got = fread(buf, 1, sizeof(buf) - 1, fp);
     fclose(fp);
+    HU_ASSERT_TRUE(got > 0);
     HU_ASSERT_TRUE(strstr(buf, "\"available\":true") != NULL ||
                    strstr(buf, "\"available\": true") != NULL);
     HU_ASSERT_TRUE(strstr(buf, "\"delta\"") != NULL);

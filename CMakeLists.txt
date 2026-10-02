@@ -3319,7 +3319,9 @@ if(HU_ENABLE_TUI)
     endif()
 endif()
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
-    target_compile_options(human_core_test PRIVATE -ffunction-sections -fdata-sections -Wall -Wextra -Wpedantic -Wshadow -Wformat-security)
+    # -Werror like human_core: without it, warnings in test-only builds of src/
+    # (and in human_devlib, which inherits these options) piled up unseen.
+    target_compile_options(human_core_test PRIVATE -ffunction-sections -fdata-sections -Wall -Wextra -Wpedantic -Wshadow -Wformat-security -Werror ${HU_GCC_WERROR_RELAX})
 endif()
 if(HU_ENABLE_ASAN)
     target_compile_options(human_core_test PRIVATE -fsanitize=address -fno-omit-frame-pointer)
@@ -4795,7 +4797,7 @@ endif()
 # Compiler warnings
 target_compile_options(human_core PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wformat-security -Werror ${HU_GCC_WERROR_RELAX})
 target_compile_options(human PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wformat-security -Werror ${HU_GCC_WERROR_RELAX})
-target_compile_options(human_tests PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wformat-security)
+target_compile_options(human_tests PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wformat-security -Werror ${HU_GCC_WERROR_RELAX})
 
 # Per-file warning exceptions.
 #

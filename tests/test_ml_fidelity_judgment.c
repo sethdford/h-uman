@@ -288,7 +288,7 @@ static void test_baseline_signature_unchanged_compile_check(void) {
      * fails at compile time. */
     hu_error_t (*const fn)(const hu_persona_t *, const hu_communication_style_t *,
                            hu_communication_style_set_summary_t *) = &hu_ml_fidelity_score_baseline;
-    HU_ASSERT_NOT_NULL((void *)fn);
+    HU_ASSERT_TRUE(fn != NULL); /* ISO C has no function-to-object pointer cast */
     /* Runtime smoke: invalid args path is unchanged. */
     HU_ASSERT_EQ(fn(NULL, NULL, NULL), HU_ERR_INVALID_ARGUMENT);
 }
