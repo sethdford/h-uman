@@ -84,6 +84,14 @@ bool hu_share_is_owner(const struct hu_persona *p, const char *handle, size_t le
     return false;
 }
 
+bool hu_share_is_tool_prompt(const struct hu_persona *p, const char *handle, size_t handle_len,
+                             const char *text, size_t len) {
+    static const char prefix[] = "[h-uman ";
+    const size_t plen = sizeof(prefix) - 1;
+    return text && len > plen && memcmp(text, prefix, plen) == 0 &&
+           hu_share_is_owner(p, handle, handle_len);
+}
+
 /* "mom" names a relationship; the rest name a person by first name. */
 static const char *relationship_for(const char *name) {
     static const char *const map[][2] = {{"mom", "mother"}, {"mum", "mother"},  {"dad", "father"},

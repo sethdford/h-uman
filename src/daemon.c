@@ -75,7 +75,6 @@
 #include "human/daemon/director.h"
 #include "human/daemon/expressive.h"
 #include "human/daemon/feeds_facade.h"
-#include "human/daemon/hurt_handoff.h"
 #include "human/daemon/identity_graph.h"
 #include "human/daemon/insight_overuse.h"
 #include "human/daemon/intelligence_facade.h"
@@ -2994,21 +2993,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     continue;
                 }
 
-                /* Hurt-signal hand-off: "u mad at me?", "why are you being short"
-                 * is a repair moment the owner must answer himself. Before any
-                 * LLM call, typing indicator or send; messages are already
-                 * consumed upstream, so a skip is never replayed.
-                 * HU_HURT_HANDOFF activation gated on a shadow fire-rate review
-                 * (share of 1:1 batches, false positives read by the owner): do
-                 * not flip to default-ON without that measurement. */
-                if (!msgs[batch_start].is_group) {
-                    const hu_contact_profile_t *cp_hurt =
-                        agent->persona ? hu_persona_find_contact(agent->persona, batch_key, key_len)
-                                       : NULL;
-                    if (hu_hurt_handoff_apply(hu_hurt_handoff_mode(), combined, combined_len,
-                                              cp_hurt ? cp_hurt->name : NULL))
-                        continue;
-                }
+                /* Tool prompts on the owner's number, hurt-signal hand-off. */
+                if (hu_daemon_batch_withheld(agent->persona, batch_key, key_len, combined,
+                                             combined_len, msgs[batch_start].is_group,
+                                             agent->observer))
+                    continue;
 
                 hu_log_info("human", agent ? agent->observer : NULL,
                             "processing batch for %.*s: \"%.*s\" (group=%d)",

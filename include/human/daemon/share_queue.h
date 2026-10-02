@@ -27,6 +27,13 @@ bool hu_share_capture_parse(const char *text, size_t len, hu_share_capture_t *ou
 /* One of Seth's own handles (persona relationship "test"). */
 bool hu_share_is_owner(const struct hu_persona *p, const char *handle, size_t len);
 
+/* A prompt one of Seth's own tools sent to his own number ("[h-uman rating
+ * 5-9/48] ...", "[h-uman voice ..."). Those tools read his answer back from
+ * chat.db, where a reply from us is a from-me row too, so the daemon must
+ * neither answer nor learn from it. Pure. */
+bool hu_share_is_tool_prompt(const struct hu_persona *p, const char *handle, size_t handle_len,
+                             const char *text, size_t len);
+
 /* A name as Seth would say it ("mindy", "mom") -> that contact's handle. By
  * first name or relationship; an ambiguous match resolves to nothing. */
 bool hu_share_resolve_contact(const struct hu_persona *p, const char *name, char *handle_out,

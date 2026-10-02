@@ -155,6 +155,13 @@ size_t hu_daemon_burst_carry(struct hu_channel_loop_msg *msgs, size_t *count, si
 bool hu_daemon_vision_route(const struct hu_config *cfg, const char *model, size_t model_len,
                             const char **provider_out, const char **model_out);
 
+struct hu_persona;
+/* True when this inbound batch gets no reply and teaches nothing: a tool
+ * prompt from the owner (hu_share_is_tool_prompt), or, 1:1 only, a hurt
+ * signal the HU_HURT_HANDOFF gate hands to the owner. Logs the reason. */
+bool hu_daemon_batch_withheld(const struct hu_persona *p, const char *key, size_t key_len,
+                              const char *text, size_t len, bool is_group, void *observer);
+
 /* Inbound text whose U+FFFC attachment vision could not describe (it is not
  * `buf`, where a description is written): the placeholder is replaced by a
  * note that a picture came and did not load, kept after any text, written to

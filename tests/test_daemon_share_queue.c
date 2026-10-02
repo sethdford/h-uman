@@ -2,6 +2,7 @@
  * Seth texts a link to his own number with "save" or "for <name>"; the daemon
  * keeps it and offers it to the director when that person writes. */
 #include "human/channel.h"
+#include "human/daemon/message_router.h"
 #include "human/daemon/share_queue.h"
 #include "human/persona.h"
 #include "test_framework.h"
@@ -147,10 +148,42 @@ static void test_share_send_saved_sends_the_link_once(void) {
     unlink(path);
 }
 
+/* rating_drip.py / voice_ab.py text Seth's own number and read his answer back
+ * from chat.db, where any reply of ours is a from-me row too: 2026-10-01 the
+ * twin answered "[h-uman rating 5-9/48] which sounds more like you?". */
+static void test_tool_prompt_from_owner_is_recognised(void) {
+    const hu_persona_t *p = persona();
+    static const char rating[] = "[h-uman rating 5-9/48] which sounds more like you?\nA: hey";
+    static const char voice[] = "[h-uman voice 3/12] which memo sounds like you?";
+    HU_ASSERT_TRUE(hu_share_is_tool_prompt(p, "+15550000009", 12, rating, strlen(rating)));
+    HU_ASSERT_TRUE(hu_share_is_tool_prompt(p, "+15550000009", 12, voice, strlen(voice)));
+    /* the same text from anyone else is a conversation */
+    HU_ASSERT_FALSE(hu_share_is_tool_prompt(p, "+15550000001", 12, rating, strlen(rating)));
+    /* Seth chatting with the twin, or a #self-test, still gets an answer */
+    HU_ASSERT_FALSE(hu_share_is_tool_prompt(p, "+15550000009", 12, "#text hey", 9));
+    HU_ASSERT_FALSE(hu_share_is_tool_prompt(p, "+15550000009", 12, "what's [h-uman", 14));
+    HU_ASSERT_FALSE(hu_share_is_tool_prompt(p, "+15550000009", 12, "[h-uman", 7));
+    HU_ASSERT_FALSE(hu_share_is_tool_prompt(NULL, "+15550000009", 12, rating, strlen(rating)));
+}
+
+static void test_batch_withheld_for_a_tool_prompt_only(void) {
+    const hu_persona_t *p = persona();
+    static const char rating[] = "[h-uman rating 1-4/48] reply with 4 letters";
+    HU_ASSERT_TRUE(
+        hu_daemon_batch_withheld(p, "+15550000009", 12, rating, strlen(rating), false, NULL));
+    HU_ASSERT_TRUE(
+        hu_daemon_batch_withheld(p, "+15550000009", 12, rating, strlen(rating), true, NULL));
+    HU_ASSERT_FALSE(hu_daemon_batch_withheld(p, "+15550000009", 12, "hey", 3, false, NULL));
+    HU_ASSERT_FALSE(
+        hu_daemon_batch_withheld(p, "+15550000001", 12, rating, strlen(rating), false, NULL));
+}
+
 void run_daemon_share_queue_tests(void) {
     HU_TEST_SUITE("daemon share queue");
     HU_RUN_TEST(test_share_capture_needs_an_explicit_save);
     HU_RUN_TEST(test_share_owner_and_contact_resolution);
+    HU_RUN_TEST(test_tool_prompt_from_owner_is_recognised);
+    HU_RUN_TEST(test_batch_withheld_for_a_tool_prompt_only);
     HU_RUN_TEST(test_share_queue_offers_tagged_first_then_anyone);
     HU_RUN_TEST(test_share_capture_handle_files_and_acks);
     HU_RUN_TEST(test_share_send_saved_sends_the_link_once);
