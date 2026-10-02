@@ -38,12 +38,13 @@ static void test_social_graph_store_get_returns_it(void) {
 
 static void test_social_graph_build_directive_mom_sister_contains_both(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_relationship_t rels[2] = {{0}};
+    hu_relationship_t rels[2];
+    memset(rels, 0, sizeof(rels));
     snprintf(rels[0].name, sizeof(rels[0].name), "Sarah");
     snprintf(rels[0].role, sizeof(rels[0].role), "sister");
     snprintf(rels[0].notes, sizeof(rels[0].notes), "going through a divorce");
     snprintf(rels[1].name, sizeof(rels[1].name), "mom");
-    snprintf(rels[1].role, sizeof(rels[1].role), "");
+    rels[1].role[0] = '\0';
     snprintf(rels[1].notes, sizeof(rels[1].notes), "ask how she's doing when appropriate");
 
     const char *contact = "Alice";
@@ -61,7 +62,8 @@ static void test_social_graph_build_directive_mom_sister_contains_both(void) {
 
 static void test_social_graph_no_relationships_null_directive(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    hu_relationship_t rels[1] = {{0}};
+    hu_relationship_t rels[1];
+    memset(rels, 0, sizeof(rels));
 
     size_t len = 0;
     char *dir = hu_social_graph_build_directive(&alloc, "Alice", 5, rels, 0, &len);
@@ -116,18 +118,18 @@ static void test_social_graph_build_context_null_args_returns_error(void) {
 
     char *out = NULL;
     size_t out_len = 0;
-    HU_ASSERT_EQ(hu_social_graph_build_context(NULL, g, "alice", 5, NULL, 0, 1, 1024, &out,
-                                                &out_len),
-                 HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_social_graph_build_context(&alloc, NULL, "alice", 5, NULL, 0, 1, 1024, &out,
-                                                &out_len),
-                 HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_social_graph_build_context(&alloc, g, NULL, 5, NULL, 0, 1, 1024, &out,
-                                                &out_len),
-                 HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_social_graph_build_context(&alloc, g, "alice", 5, NULL, 0, 1, 1024, NULL,
-                                                &out_len),
-                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(
+        hu_social_graph_build_context(NULL, g, "alice", 5, NULL, 0, 1, 1024, &out, &out_len),
+        HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(
+        hu_social_graph_build_context(&alloc, NULL, "alice", 5, NULL, 0, 1, 1024, &out, &out_len),
+        HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(
+        hu_social_graph_build_context(&alloc, g, NULL, 5, NULL, 0, 1, 1024, &out, &out_len),
+        HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(
+        hu_social_graph_build_context(&alloc, g, "alice", 5, NULL, 0, 1, 1024, NULL, &out_len),
+        HU_ERR_INVALID_ARGUMENT);
 
     hu_graph_close(g, &alloc);
 }
