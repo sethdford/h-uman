@@ -1,4 +1,5 @@
 #include "human/context/conversation.h"
+#include "human/agent/length_policy.h"
 #include "human/channel_class.h"
 #include "human/core/allocator.h"
 #include "human/core/file.h"
@@ -1544,13 +1545,18 @@ hu_quality_score_t hu_conversation_evaluate_quality(const char *response, size_t
      * (ratio < 0.2). A terse reply to terse banter keeps full marks. Without
      * this, the A/B scorer prefers a clipped fragment over a natural reply. */
     double ratio = (double)response_len / (double)ref_len;
+    /* Over-length checks divide by the cap-aware reference under
+     * HU_LENGTH_POLICY=live, so a reply inside the cap is never "too long"
+     * (identical to ratio when off/shadow). */
+    double over = (double)response_len / (double)hu_length_policy_quality_over_ref(
+                                             ref_len, max_chars, hu_length_policy_mode());
     if (ref_len >= HU_QUALITY_SUBSTANTIVE_REF_LEN && ratio < 0.2)
         score.brevity = 10;
-    else if (ratio <= 1.5)
+    else if (over <= 1.5)
         score.brevity = 25;
-    else if (ratio <= 3.0)
+    else if (over <= 3.0)
         score.brevity = 20;
-    else if (ratio <= 6.0)
+    else if (over <= 6.0)
         score.brevity = 10;
     else
         score.brevity = 0;
@@ -1637,11 +1643,11 @@ hu_quality_score_t hu_conversation_evaluate_quality(const char *response, size_t
      * (was 10×) aligns with G5's 8× guard and post-mortem action item —
      * the 2026-05-12 leak was ~22× rolling avg but still slipped through
      * when quality only fired at 10×. */
-    bool gross_length = (ratio > 5.0 || (ratio < 0.1 && response_len > 5));
+    bool gross_length = (over > 5.0 || (ratio < 0.1 && response_len > 5));
     bool gross_structural = (score.warmth < 5 || score.naturalness < 5);
     score.needs_revision = gross_length || gross_structural;
 
-    if (score.needs_revision && ratio > 5.0 && their_avg > 0) {
+    if (score.needs_revision && over > 5.0 && their_avg > 0) {
         int n = snprintf(score.guidance, sizeof(score.guidance),
                          "Your response was %zu chars but their last messages averaged %zu chars. "
                          "Tighten up significantly. Match their energy.",
@@ -3748,6 +3754,10 @@ int hu_conversation_max_response_chars(size_t incoming_len) {
     return result;
 }
 
+uint32_t hu_conversation_max_response_chars_ceiling(void) {
+    return g_max_response_chars;
+}
+
 /* Floor a 1:1 length cap at the owner's own measured reply length to this
  * contact. The ratio heuristics scale with THEIR message, but a person's
  * reply length does not: 2026-09-26 a contact who texts "Heyo" got a 15-char
@@ -3928,9 +3938,16 @@ static size_t calibrate_length_impl(const char *last_msg, size_t last_msg_len,
     }
 
     /* Last message length (structural) + numeric char limit for prompt */
-    int max_chars = is_group ? hu_conversation_max_response_chars(last_msg_len)
-                             : hu_conversation_max_response_chars_relational(last_msg_len, contact,
-                                                                             session_stage);
+    /* Same number the RESPONSE LIMIT line carries (HU_LENGTH_POLICY; legacy when off). */
+    hu_length_turn_result_t lt;
+    hu_length_policy_turn(&(hu_length_turn_t){.inbound = last_msg,
+                                              .inbound_len = last_msg_len,
+                                              .contact = is_group ? NULL : contact,
+                                              .stage = session_stage,
+                                              .is_group = is_group,
+                                              .quiet = true},
+                          hu_length_policy_mode(), &lt);
+    int max_chars = (int)lt.cap;
     w = snprintf(buf + pos, cap - pos, "Their last message: %zu chars. ", last_msg_len);
     POS_ADVANCE(w, pos, cap);
     if (last_msg_len < 15) {

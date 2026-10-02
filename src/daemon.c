@@ -29,6 +29,7 @@
 #include "human/agent/init_outcome.h"
 #include "human/agent/init_proposer.h"
 #include "human/agent/kv_cache.h"
+#include "human/agent/length_policy.h"
 #include "human/agent/lora_runner.h"
 #include "human/agent/model_router_health.h"
 #include "human/agent/multimodal_policy.h"
@@ -5323,31 +5324,21 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                 }
 
-                /* F15: Apply ratio-based length calibration */
-                {
-                    const hu_contact_profile_t *cp_lim =
-                        (!msgs[batch_start].is_group && agent->persona && batch_key && key_len > 0)
-                            ? hu_persona_find_contact(agent->persona, batch_key, key_len)
-                            : NULL;
-                    int calibrated = msgs[batch_start].is_group
-                                         ? hu_conversation_max_response_chars(combined_len)
-                                         : hu_conversation_max_response_chars_relational(
-                                               combined_len, cp_lim, agent->relationship.stage);
-                    if (calibrated > 0 && (max_chars == 0 || (uint32_t)calibrated < max_chars))
-                        max_chars = (uint32_t)calibrated;
-                }
-
-                /* Brief mode: cap length (tight in groups; headroom for trusted 1:1). */
-                if (brief_mode) {
-                    const hu_contact_profile_t *cp_brief =
-                        (!msgs[batch_start].is_group && agent->persona && batch_key && key_len > 0)
-                            ? hu_persona_find_contact(agent->persona, batch_key, key_len)
-                            : NULL;
-                    uint32_t brief_cap = hu_conversation_brief_char_cap(
-                        msgs[batch_start].is_group, cp_brief, agent->relationship.stage);
-                    if (max_chars > brief_cap)
-                        max_chars = brief_cap;
-                }
+                /* F15 calibration + brief cap, then HU_LENGTH_POLICY (length_policy.h). */
+                hu_length_turn_result_t len_turn;
+                hu_length_policy_turn(
+                    &(hu_length_turn_t){
+                        .inbound = combined,
+                        .inbound_len = combined_len,
+                        .contact = (!msgs[batch_start].is_group && agent->persona && key_len)
+                                       ? hu_persona_find_contact(agent->persona, batch_key, key_len)
+                                       : NULL,
+                        .stage = agent->relationship.stage,
+                        .channel_max = max_chars,
+                        .is_group = msgs[batch_start].is_group,
+                        .brief_mode = brief_mode},
+                    hu_length_policy_mode(), &len_turn);
+                max_chars = len_turn.cap;
 
                 /* Honesty guardrail: inject if they asked "did you do X?" */
                 {
@@ -6308,6 +6299,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 agent->ab_history_entries = history_entries;
                 agent->ab_history_count = history_count;
                 agent->max_response_chars = max_chars;
+                agent->response_limit_tight = voice_first_memo ? 0 : (uint8_t)len_turn.tight;
                 agent->voice_memo_turn = voice_first_memo;
                 /* Owner self-test: a clean slate — only the last few messages, so a
                  * thread full of test traffic doesn't confuse the reply. */

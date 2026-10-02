@@ -312,6 +312,9 @@ size_t hu_conversation_split_response(hu_allocator_t *alloc, const char *respons
  * Use for max_response_chars to match response length within ~1.5x ratio. */
 int hu_conversation_max_response_chars(size_t incoming_len);
 
+/* The configured upper clamp of the two functions above (behavior.max_response_chars). */
+uint32_t hu_conversation_max_response_chars_ceiling(void);
+
 /* Like hu_conversation_max_response_chars, but scales length with relationship warmth
  * (session stage + optional persona contact hints). Group threads should pass contact=NULL
  * and rely on the caller forcing plain max for is_group. */

@@ -174,3 +174,25 @@ class TestMain:
 
         mode = stat.S_IMODE(os.stat(out_path).st_mode)
         assert mode == 0o600
+
+
+class TestKs:
+    def test_identical_samples_have_zero_distance(self):
+        assert rlg.ks_2samp([1, 2, 3, 4, 5], [1, 2, 3, 4, 5]) == (0.0, 1.0)
+
+    def test_disjoint_samples_have_distance_one(self):
+        d, p = rlg.ks_2samp(list(range(30)), list(range(100, 130)))
+        assert d == 1.0 and p < 1e-6
+
+    def test_distance_matches_scipy(self):
+        scipy_stats = __import__("pytest").importorskip("scipy.stats")
+        a = [22, 18, 30, 15, 40, 22, 19, 25, 60, 12] * 3
+        b = [71, 50, 35, 90, 20, 66, 44, 120, 38, 52] * 3
+        d, p = rlg.ks_2samp(a, b)
+        ref = scipy_stats.ks_2samp(a, b, method="asymp")
+        assert abs(d - ref.statistic) < 1e-9
+        assert abs(p - ref.pvalue) < 0.02
+
+    def test_metrics_carry_ks_over_byte_lengths(self):
+        m = rlg._metrics([10] * 20, [10] * 20, [40] * 20, [40] * 20)
+        assert m["ks_d"] == 1.0
