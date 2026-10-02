@@ -188,7 +188,9 @@ def main():
     better_key = load_better_key(a.better_key)
     rows = load_better_rows(a.sheets)
 
-    if detect_rater_kind(rows) == "synthetic":
+    # Detect on the RAW sheet rows: load_better_rows keeps only id/choice/
+    # confidence/_rater, so the judge_api/judge_model stamps are gone there.
+    if detect_rater_kind(load_sheets(a.sheets)) == "synthetic":
         print("refused: these rows carry the judge_api/judge_model stamps "
               "synthetic_judge.py writes -- an LLM judged this sheet, not "
               "the owner. The better-than-human measurement is only "

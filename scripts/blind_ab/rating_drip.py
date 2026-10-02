@@ -618,8 +618,12 @@ def run_better_score(st=None):
     r = subprocess.run(better_score_argv(st),
                        capture_output=True, text=True, timeout=60)
     print(r.stdout[-500:] if r.stdout else r.stderr[-300:])
-    # better_score.py exit semantics mirror score.py: 0 = measurement written,
-    # 1 is not used (no PASS/FAIL verdict here), >=2 = usage/no-evidence.
+    # better_score.py exit semantics: 0 = measurement written; 3 = nothing
+    # to score (all skipped or ties) -- final, no rate exists, so the pass is
+    # complete; any other non-zero = a real failure to retry.
+    if r.returncode == 3:
+        print("better_score.py: no non-tie better answers -- no rate; pass complete")
+        return True
     return r.returncode == 0
 
 

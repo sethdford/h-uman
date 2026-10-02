@@ -273,3 +273,29 @@ def test_main_all_ties_is_no_rate(tmp_path):
         _sys.argv = argv
         os.unlink(sheet)
     assert not out.exists()
+
+
+def test_main_refuses_llm_judged_sheet(tmp_path):
+    # synthetic_judge.py stamps judge_api/judge_model on every row. The check
+    # must see the RAW rows: load_better_rows drops those columns.
+    sheet = _mk_sheet([
+        {"id": "t0", "context": "c", "option_A": "a", "option_B": "b",
+         "choice": "A", "confidence": "3", "better_choice": "A",
+         "judge_api": "openai", "judge_model": "gemma4-26b"},
+    ], fields=FIELDS + ["judge_api", "judge_model"])
+    keyf = tmp_path / "better_key.json"
+    keyf.write_text(json.dumps({"t0": "A"}))
+    out = tmp_path / "better.json"
+    import sys as _sys
+    argv = _sys.argv
+    _sys.argv = ["better_score.py", sheet, "--better-key", str(keyf), "--out", str(out)]
+    try:
+        try:
+            bs.main()
+            assert False, "an LLM-judged sheet must be refused"
+        except SystemExit as e:
+            assert e.code == 2
+    finally:
+        _sys.argv = argv
+        os.unlink(sheet)
+    assert not out.exists(), "a refused sheet must never write a measurement"

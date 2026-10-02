@@ -687,9 +687,21 @@ def test_run_better_score_passes_the_better_key_path():
 def test_run_better_score_nonzero_exit_is_failure():
     import subprocess as sp
     orig = sp.run
-    sp.run = _patched_run(3, [])
+    sp.run = _patched_run(2, [])
     try:
         assert rd.run_better_score() is False
+    finally:
+        sp.run = orig
+
+
+def test_run_better_score_nothing_to_score_is_final():
+    # exit 3 = every better row was skipped or a tie: no rate exists, and
+    # re-running every tick would only log a fake FAILED forever.
+    import subprocess as sp
+    orig = sp.run
+    sp.run = _patched_run(3, [])
+    try:
+        assert rd.run_better_score() is True
     finally:
         sp.run = orig
 
