@@ -3538,9 +3538,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         delay_ms += (delay_seed & 1) ? jitter : 0;
                         if (delay_ms > 120000)
                             delay_ms = 120000;
-                        /* Seen-then-reply choreography: mark as read early,
-                         * then pause before typing — like a real human who
-                         * picks up their phone, reads, thinks, then replies. */
+                        /* Seen-then-reply: mark read early; the rest follows below. */
                         uint32_t read_wait;
                         if (delay_ms <= 5000) {
                             /* Quick reply: read fast (200-800ms) */
@@ -3560,8 +3558,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         if (ch->channel->vtable->mark_read)
                             ch->channel->vtable->mark_read(ch->channel->ctx, batch_key, key_len);
                         uint32_t remaining = delay_ms > read_wait ? delay_ms - read_wait : 0;
-                        if (remaining > 0)
+                        if (remaining > 15000) /* busy: stay away; typing would show too long */
                             usleep(remaining * 1000u);
+                        else /* the work runs inside the delay; the send waits */
+                            hu_daemon_reply_hold_for(batch_key, key_len, remaining);
                     }
                     goto llm_decides_skip_delays;
                 }

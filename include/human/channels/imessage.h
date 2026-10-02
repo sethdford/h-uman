@@ -157,6 +157,12 @@ int hu_imessage_count_recent_music_tapbacks(const char *contact_id, size_t conta
  * Returns -1 on failure or when SQLite/macOS unavailable. */
 int64_t hu_imessage_get_latest_sent_rowid(const char *handle, size_t handle_len);
 
+/** How many tapbacks of ours (is_from_me, associated_message_type 2000-2005)
+ * chat.db holds on the message with this ROWID ($HU_CHATDB honoured). -1 when
+ * chat.db cannot be read. A tapback path that reports success is believed
+ * only when this count grew. */
+int64_t hu_imessage_my_reaction_count(int64_t message_rowid);
+
 #ifndef HU_IS_TEST
 /** Check if the real user sent a message to `handle` within the last
  * `within_seconds` seconds.  Queries chat.db for is_from_me=1 rows.

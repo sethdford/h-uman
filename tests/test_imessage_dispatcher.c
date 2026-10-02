@@ -798,6 +798,41 @@ static void fresh_parent_still_reacts_tapback_sometimes(void) {
  * 2026-09-30: a message from another sender that landed during the reading
  * delay (Dermot during Lexi's turn, twice on 09-24) was read and discarded;
  * it must be carried into the tick's batch list instead. */
+/* The director's "reply after N seconds" used to be slept BEFORE the turn's
+ * work (memory, planner, generation: ~30-50 s), so the two added up and the
+ * twin never answered in under ~50 s (median 1.8 min vs Seth's 30 s, 30 days to
+ * 2026-10-01). Now the delay is a hold the send waits out: the work runs
+ * inside it. */
+static void reply_hold_is_per_contact_and_replaced_by_the_next(void) {
+    hu_daemon_reply_hold("+15550001111", 12, 10000);
+    HU_ASSERT_EQ(hu_daemon_reply_hold_wait_ms("+15550001111", 12, 4000), (int64_t)6000);
+    HU_ASSERT_EQ(hu_daemon_reply_hold_wait_ms("+15550002222", 12, 4000), (int64_t)0);
+    HU_ASSERT_EQ(hu_daemon_reply_hold_wait_ms("+15550001111", 12, 12000), (int64_t)0);
+    hu_daemon_reply_hold("+15550002222", 12, 9000);
+    HU_ASSERT_EQ(hu_daemon_reply_hold_wait_ms("+15550001111", 12, 4000), (int64_t)0);
+    HU_ASSERT_EQ(hu_daemon_reply_hold_wait_ms("+15550002222", 12, 4000), (int64_t)5000);
+    hu_daemon_reply_hold(NULL, 0, 0);
+    HU_ASSERT_EQ(hu_daemon_reply_hold_wait_ms("+15550002222", 12, 4000), (int64_t)0);
+}
+
+/* A burst's later bubbles must not wait again: the first send consumes it. */
+static void dispatch_consumes_the_reply_hold(void) {
+    setup_mocks();
+    mock_vtable.reply = NULL;
+    mock_vtable.react_emoji = NULL;
+    hu_daemon_reply_hold_for("+15555551212", 12, 600000);
+    HU_ASSERT_TRUE(hu_daemon_reply_hold_wait_ms("+15555551212", 12, hu_time_get_current_ms()) > 0);
+    static const char body[] = "omw";
+    hu_conversation_snapshot_t snap = {0};
+    snap.parent_seconds_ago = 5;
+    HU_ASSERT_EQ((int)hu_daemon_dispatch_imessage_reply(
+                     &mock_ch, &mock_persona, NULL, &mock_config, "+15555551212", 12, NULL, 0, body,
+                     sizeof(body) - 1, (const struct hu_conversation_snapshot *)&snap, 6),
+                 (int)HU_OK);
+    HU_ASSERT_EQ(hu_daemon_reply_hold_wait_ms("+15555551212", 12, hu_time_get_current_ms()),
+                 (int64_t)0);
+}
+
 /* Every bubble is cased at dispatch, not just the reply's first line: a
  * bubble split mid-line ("nah too windy." | "just hung out...") used to go out
  * lowercase (32% of follow-on bubbles, 2026-09-30). */
@@ -979,6 +1014,8 @@ void run_imessage_dispatcher_tests(void) {
     HU_RUN_TEST(quality_draft_restores_when_the_retry_is_empty);
     HU_RUN_TEST(quality_draft_is_dropped_when_the_retry_succeeds_or_the_contact_differs);
     HU_RUN_TEST(dispatch_capitalizes_a_lowercase_bubble_when_the_governor_is_live);
+    HU_RUN_TEST(reply_hold_is_per_contact_and_replaced_by_the_next);
+    HU_RUN_TEST(dispatch_consumes_the_reply_hold);
     HU_RUN_TEST(burst_carry_reports_what_it_cannot_keep);
     HU_RUN_TEST(vision_route_uses_the_declared_cloud_fallback);
     HU_RUN_TEST(unseen_photo_alone_becomes_a_note);

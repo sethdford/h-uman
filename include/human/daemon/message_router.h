@@ -155,6 +155,17 @@ size_t hu_daemon_burst_carry(struct hu_channel_loop_msg *msgs, size_t *count, si
 bool hu_daemon_vision_route(const struct hu_config *cfg, const char *model, size_t model_len,
                             const char **provider_out, const char **model_out);
 
+/* "Reply no sooner than": the director's chosen delay runs alongside the
+ * turn's work instead of before it. hold() records until_ms (monotonic, as
+ * hu_time_get_current_ms) for one contact, replacing any earlier hold; NULL
+ * clears it. wait_ms() is how long a reply to that contact must still wait
+ * (0 for any other contact or once the time has passed). The reply dispatch
+ * waits it out and clears it, so a burst's later bubbles do not wait again. */
+void hu_daemon_reply_hold(const char *key, size_t key_len, int64_t until_ms);
+int64_t hu_daemon_reply_hold_wait_ms(const char *key, size_t key_len, int64_t now_ms);
+/* hold() for `ms` from now. */
+void hu_daemon_reply_hold_for(const char *key, size_t key_len, uint32_t ms);
+
 struct hu_persona;
 /* Rating-tool traffic on the owner's number (hu_share_is_tool_traffic): the
  * batch gets no reply and teaches nothing. Checked before any per-batch
