@@ -737,7 +737,7 @@ const char *hu_prospective_judge_system(size_t *len) {
 size_t hu_prospective_judge_user(char *buf, size_t cap, const char *history, size_t history_len,
                                  const char *action, const char *cue,
                                  hu_prospective_cue_kind_t kind, int64_t overdue_s,
-                                 int64_t noted_age_s) {
+                                 int64_t noted_days) {
     if (!buf || cap == 0)
         return 0;
     buf[0] = '\0';
@@ -770,8 +770,8 @@ size_t hu_prospective_judge_user(char *buf, size_t cap, const char *history, siz
          * judge cannot tell "vet visit tomorrow" said yesterday from said
          * today, and answered not_now ("not happened yet") on cross-day cues. */
         pos = hu_buf_appendf(buf, cap, pos, "\nintention: %s\n", action);
-        if (noted_age_s >= 0) {
-            long long d = (long long)(noted_age_s / 86400);
+        if (noted_days >= 0) {
+            long long d = (long long)noted_days;
             if (d == 0)
                 pos = hu_buf_appendf(buf, cap, pos, "noted: today\n");
             else
@@ -799,4 +799,11 @@ int64_t hu_prospective_local_day_start(int64_t now) {
     tmv.tm_isdst = -1;
     time_t m = mktime(&tmv);
     return m == (time_t)-1 ? now - (now % 86400) : (int64_t)m;
+}
+
+int64_t hu_prospective_noted_days(int64_t created_at, int64_t now) {
+    if (created_at <= 0 || created_at > now)
+        return -1;
+    int64_t span = hu_prospective_local_day_start(now) - hu_prospective_local_day_start(created_at);
+    return (span + 43200) / 86400;
 }

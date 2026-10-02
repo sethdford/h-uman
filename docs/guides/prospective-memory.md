@@ -134,6 +134,23 @@ been promoted through the §3 bar (spec §4.4) — see the rollout below.
      `yes`/`no` counts as unanswered, never as `no`.
    - Set `HU_PROSPECTIVE=live` only if the step-2 harness PASSed **and**
      this precision bar is met.
+   - **Re-measure the judge out of sample first.** The fire-time judge prompt
+     was tuned against `pm_bench_local.py` itself (2026-10-01,
+     `fix/prospective-judge-recall`), so its set_f1 0.861 is **in-sample**.
+     Before `HU_PROSPECTIVE=live`, re-run the harness (a) with prod-shaped
+     history: the cueing inbound message as the last `them:` line of the
+     history the judge sees, as the daemon's channel history has it (the
+     harness passes it only as `--inbound`, which the judge never sees), and
+     (b) on NEW held-out scenarios that were not used for prompt tuning.
+     Both must still meet the step-2 bars. In a replay with the inbound
+     appended, the tuned prompt fired 1 of 8 cancellation steps.
+   - **Note ages run short for insight-stream rows.** The judge sees "noted:
+     today / N days ago" from `created_at`, but `scripts/insight_stream.py`
+     (line 561) stamps `created_at` at batch time, not at the time of the
+     message that produced the intention. Those rows read younger than they
+     are (an intention said Monday and batched Wednesday reads "today" on
+     Wednesday), which biases the judge toward "has not happened yet"
+     (`not_now`).
 5. **Then `HU_PROSPECTIVE_TIME=shadow` for 7 days**, and follow the same
    shadow-report → spot-check → precision-bar pattern before setting it to
    `live`.

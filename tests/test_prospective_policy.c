@@ -399,18 +399,18 @@ static void judge_system_says_the_cue_is_the_moment_and_unclear_stays_silent(voi
 static void judge_user_keyword_carries_noted_age(void) {
     char buf[2048];
     static const char hist[] = "them: vet visit tomorrow\n";
-    size_t n = hu_prospective_judge_user(buf, sizeof(buf), hist, sizeof(hist) - 1,
-                                         "ask how the vet visit went", "vet", HU_PM_CUE_KEYWORD, 0,
-                                         5 * 86400 + 7200);
+    size_t n =
+        hu_prospective_judge_user(buf, sizeof(buf), hist, sizeof(hist) - 1,
+                                  "ask how the vet visit went", "vet", HU_PM_CUE_KEYWORD, 0, 5);
     HU_ASSERT_TRUE(n > 0 && n == strlen(buf));
     HU_ASSERT_STR_CONTAINS(buf, "intention: ask how the vet visit went\nnoted: 5 days ago\n"
                                 "cue: they just mentioned \"vet\"\nanswer:");
     n = hu_prospective_judge_user(buf, sizeof(buf), hist, sizeof(hist) - 1, "a", "vet",
-                                  HU_PM_CUE_KEYWORD, 0, 86400 + 1);
+                                  HU_PM_CUE_KEYWORD, 0, 1);
     HU_ASSERT_TRUE(n > 0);
     HU_ASSERT_STR_CONTAINS(buf, "\nnoted: 1 day ago\n");
     n = hu_prospective_judge_user(buf, sizeof(buf), hist, sizeof(hist) - 1, "a", "vet",
-                                  HU_PM_CUE_KEYWORD, 0, 3600);
+                                  HU_PM_CUE_KEYWORD, 0, 0);
     HU_ASSERT_TRUE(n > 0);
     HU_ASSERT_STR_CONTAINS(buf, "\nnoted: today\n");
     n = hu_prospective_judge_user(buf, sizeof(buf), hist, sizeof(hist) - 1, "a", "vet",
@@ -418,7 +418,7 @@ static void judge_user_keyword_carries_noted_age(void) {
     HU_ASSERT_TRUE(n > 0);
     HU_ASSERT_NULL(strstr(buf, "noted:"));
     n = hu_prospective_judge_user(buf, sizeof(buf), hist, sizeof(hist) - 1, "a", NULL,
-                                  HU_PM_CUE_TIME, 86400, 5 * 86400);
+                                  HU_PM_CUE_TIME, 86400, 5);
     HU_ASSERT_TRUE(n > 0);
     HU_ASSERT_NULL(strstr(buf, "noted:"));
     HU_ASSERT_STR_CONTAINS(buf, "cue: it came due 1 day(s) ago");
@@ -442,6 +442,19 @@ static void judge_user_keeps_tail_when_only_newline_is_trailing(void) {
     HU_ASSERT_NULL(strstr(big, "(none)"));
     HU_ASSERT_NOT_NULL(strstr(big, "MARKER_TAIL"));
     free(longh);
+}
+
+/* Calendar days, not 24 h periods; unknown ages are -1. */
+static void noted_days_counts_local_calendar_days(void) {
+    int64_t d0 = hu_prospective_local_day_start(1790000000);
+    int64_t eleven_pm = d0 + 23 * 3600;
+    int64_t next_8am = hu_prospective_local_day_start(d0 + 36 * 3600) + 8 * 3600;
+    HU_ASSERT_EQ(hu_prospective_noted_days(eleven_pm, next_8am), (int64_t)1); /* 9 h later */
+    HU_ASSERT_EQ(hu_prospective_noted_days(d0 + 8 * 3600, eleven_pm), (int64_t)0);
+    HU_ASSERT_EQ(hu_prospective_noted_days(eleven_pm, eleven_pm), (int64_t)0);
+    HU_ASSERT_EQ(hu_prospective_noted_days(0, next_8am), (int64_t)-1);
+    HU_ASSERT_EQ(hu_prospective_noted_days(-5, next_8am), (int64_t)-1);
+    HU_ASSERT_EQ(hu_prospective_noted_days(next_8am + 1, next_8am), (int64_t)-1);
 }
 
 static void local_day_start_is_a_stable_midnight(void) {
@@ -551,5 +564,6 @@ void run_prospective_policy_tests(void) {
     HU_RUN_TEST(judge_user_keeps_tail_when_only_newline_is_trailing);
     HU_RUN_TEST(judge_system_says_the_cue_is_the_moment_and_unclear_stays_silent);
     HU_RUN_TEST(judge_user_keyword_carries_noted_age);
+    HU_RUN_TEST(noted_days_counts_local_calendar_days);
     HU_RUN_TEST(local_day_start_is_a_stable_midnight);
 }
