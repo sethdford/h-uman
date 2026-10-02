@@ -106,6 +106,13 @@ static void test_config_validate_strict_session_known_keys_pass(void) {
         HU_OK);
 }
 
+/* parse_memory reads memory.encrypt_at_rest, so strict validation must accept
+ * it; otherwise every `config set` on an encrypted config is refused. */
+static void test_config_validate_strict_memory_encrypt_at_rest_is_known(void) {
+    HU_ASSERT_EQ(validate_session_json("{\"memory\":{\"auto_save\":true}}", true), HU_OK);
+    HU_ASSERT_EQ(validate_session_json("{\"memory\":{\"encrypt_at_rest\":true}}", true), HU_OK);
+}
+
 static void test_config_validate_strict_invalid_url_https_required(void) {
     hu_config_t cfg = {0};
     cfg.default_provider = "openai";
@@ -316,6 +323,7 @@ void run_config_validation_tests(void) {
     HU_RUN_TEST(test_config_validate_strict_session_identity_links_rejected_in_strict);
     HU_RUN_TEST(test_config_validate_strict_session_identity_links_ignored_when_lenient);
     HU_RUN_TEST(test_config_validate_strict_session_known_keys_pass);
+    HU_RUN_TEST(test_config_validate_strict_memory_encrypt_at_rest_is_known);
     HU_RUN_TEST(test_config_validate_strict_invalid_url_https_required);
     HU_RUN_TEST(test_config_validate_strict_extreme_numeric_warning);
     HU_RUN_TEST(test_config_validate_strict_path_traversal_rejected);

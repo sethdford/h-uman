@@ -133,6 +133,7 @@ static const char *const hu_memory_keys[] = {
     "api_base_url",
     "api_key",
     "api_timeout_ms",
+    "encrypt_at_rest",
 };
 static const size_t hu_memory_keys_len = sizeof(hu_memory_keys) / sizeof(hu_memory_keys[0]);
 
