@@ -131,12 +131,40 @@ typedef struct {
     hu_agent_t agent;
     trp_t trp;
     char dir[256];
+    char saved_home[512];
+    char saved_state[512];
+    bool had_home, had_state;
 } hm_turn_t;
+
+/* HOME and HU_STATE_DIR point at the scratch dir for the turn: hermetic. */
+static void hm_env_swap(hm_turn_t *t) {
+    const char *h = getenv("HOME"), *s = getenv("HU_STATE_DIR");
+    t->had_home = h != NULL;
+    t->had_state = s != NULL;
+    if (h)
+        snprintf(t->saved_home, sizeof(t->saved_home), "%s", h);
+    if (s)
+        snprintf(t->saved_state, sizeof(t->saved_state), "%s", s);
+    setenv("HOME", t->dir, 1);
+    setenv("HU_STATE_DIR", t->dir, 1);
+}
+
+static void hm_env_restore(hm_turn_t *t) {
+    if (t->had_home)
+        setenv("HOME", t->saved_home, 1);
+    else
+        unsetenv("HOME");
+    if (t->had_state)
+        setenv("HU_STATE_DIR", t->saved_state, 1);
+    else
+        unsetenv("HU_STATE_DIR");
+}
 
 static bool hm_turn_init(hm_turn_t *t, hu_allocator_t *alloc) {
     memset(t, 0, sizeof(*t));
     if (!hu_test_mkdtemp("/tmp/hu_hm_turn_", t->dir, sizeof(t->dir)))
         return false;
+    hm_env_swap(t);
     trp_init(&t->trp, NULL, 0, "ok.");
     if (hu_agent_from_config(&t->agent, alloc, trp_provider(&t->trp), NULL, 0, NULL, NULL, NULL,
                              NULL, "hm-model", 8, "hm", 2, 0.7, t->dir, strlen(t->dir), 5, 50,
@@ -161,6 +189,7 @@ static bool hm_turn_init(hm_turn_t *t, hu_allocator_t *alloc) {
 static void hm_turn_deinit(hm_turn_t *t) {
     hu_agent_deinit(&t->agent);
     trp_deinit(&t->trp);
+    hm_env_restore(t);
     hu_test_rm_rf(t->dir);
 }
 
