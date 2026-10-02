@@ -2,6 +2,7 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/json.h"
+#include "human/core/llm_purpose.h"
 #include "human/core/log.h"
 #include "human/core/string.h"
 #include "human/provider.h"
@@ -48,6 +49,23 @@
 #if !HU_IS_TEST
 static pthread_mutex_t g_compatible_chat_lock = PTHREAD_MUTEX_INITIALIZER;
 #endif
+
+/* X-HU-Purpose, plus X-HU-Priority: batch for background work, for a request
+ * made now on this thread (llm_purpose.h owns the purpose -> priority map).
+ * Test builds keep a copy so the suite can assert what the wire carries. */
+#if HU_IS_TEST
+static _Thread_local char s_test_last_headers[128];
+const char *hu_compatible_test_last_headers(void) {
+    return s_test_last_headers;
+}
+#endif
+static const char *compatible_request_headers(char *buf, size_t cap) {
+    size_t n = hu_llm_purpose_headers(hu_llm_purpose_current(), buf, cap);
+#if HU_IS_TEST
+    (void)snprintf(s_test_last_headers, sizeof(s_test_last_headers), "%s", buf);
+#endif
+    return n > 0 ? buf : NULL;
+}
 
 typedef struct hu_compatible_ctx {
     char *api_key;
@@ -388,8 +406,11 @@ static hu_error_t compatible_chat(void *ctx, hu_allocator_t *alloc,
     hu_compatible_ctx_t *cc = (hu_compatible_ctx_t *)ctx;
     if (!cc || !request || !out)
         return HU_ERR_INVALID_ARGUMENT;
+    char purpose_hdr[128];
+    const char *extra_headers = compatible_request_headers(purpose_hdr, sizeof(purpose_hdr));
 
 #if HU_IS_TEST
+    (void)extra_headers;
     (void)model;
     (void)model_len;
     (void)temperature;
@@ -469,8 +490,8 @@ static hu_error_t compatible_chat(void *ctx, hu_allocator_t *alloc,
     hu_http_request_opts_t http_opts;
     hu_compatible_request_opts_for_url(url_buf, (size_t)n, &http_opts);
     pthread_mutex_lock(&g_compatible_chat_lock);
-    err = hu_provider_http_post_json_opts(alloc, url_buf, auth, NULL, body, body_len, &http_opts,
-                                          &parsed);
+    err = hu_provider_http_post_json_opts(alloc, url_buf, auth, extra_headers, body, body_len,
+                                          &http_opts, &parsed);
     pthread_mutex_unlock(&g_compatible_chat_lock);
     alloc->free(alloc->ctx, body, body_len);
     if (err != HU_OK)
@@ -949,17 +970,6 @@ static bool compatible_supports_vision(void *ctx) {
     return true;
 }
 
-/* Task 10 (2026-09-01): the serving queue was 99.8% internal machinery. The
- * mlx-server admits requests tagged `X-HU-Priority: live` ahead of batch
- * work; the daemon process sets HU_LLM_PRIORITY=live in its launchd env, the
- * judges/arena/proposer scripts do not. Unset = no header = batch. */
-__attribute__((unused)) static const char *compatible_priority_header(void) {
-    const char *p = getenv("HU_LLM_PRIORITY");
-    if (p && strcmp(p, "live") == 0)
-        return "X-HU-Priority: live\r\n";
-    return NULL;
-}
-
 static hu_error_t compatible_stream_chat(void *ctx, hu_allocator_t *alloc,
                                          const hu_chat_request_t *request, const char *model,
                                          size_t model_len, double temperature,
@@ -1140,9 +1150,11 @@ static hu_error_t compatible_stream_chat(void *ctx, hu_allocator_t *alloc,
      * MLX upstream. See g_compatible_chat_lock declaration. The lock is
      * held for the duration of the stream (covers SSE keep-alive); other
      * iMessages dispatched in parallel will wait their turn. */
+    char purpose_hdr[128];
+    const char *extra_headers = compatible_request_headers(purpose_hdr, sizeof(purpose_hdr));
     pthread_mutex_lock(&g_compatible_chat_lock);
-    err = hu_http_post_json_stream(alloc, url_buf, auth, compatible_priority_header(), body,
-                                   body_len, compatible_stream_write_cb, &sctx);
+    err = hu_http_post_json_stream(alloc, url_buf, auth, extra_headers, body, body_len,
+                                   compatible_stream_write_cb, &sctx);
     pthread_mutex_unlock(&g_compatible_chat_lock);
     hu_provider_sse_parser_deinit(&sctx.parser);
     alloc->free(alloc->ctx, body, body_len);

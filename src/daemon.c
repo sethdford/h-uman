@@ -6833,12 +6833,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 size_t turing_rejected_len = 0;
                 hu_log_info("human", agent ? agent->observer : NULL, "calling agent turn for %s...",
                             HU_LOG_WHO(batch_key, key_len));
+                hu_post_send_defer_begin(); /* HU_POST_SEND_DEFER; flushed after skip_send */
 
-                /* Inject the director's scene direction and arm G6 against a
-                 * verbatim echo. ONCE PER TURN, outside the retry loop:
-                 * convo_ctx is built once above and never rebuilt between
-                 * iterations, so arming per iteration appended a second "this
-                 * message only" block. Contract: daemon/director.h. */
+                /* Inject the director's direction and arm G6 against a verbatim echo ONCE per
+                 * turn, outside the retry loop: convo_ctx is built once, so arming per
+                 * iteration appended a second "this message only" block. See director.h. */
                 /* On a memo turn the director's texting length cue would win over
                  * the memo directive (live #voice test, 2026-09-29 06:09). */
                 if (voice_first_memo && director_result_valid)
@@ -9458,6 +9457,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                      send_target_len);
                 }
 #endif
+                (void)hu_post_send_defer_flush(); /* sent or aborted: run the deferred work */
                 if (response) {
                     /* Bump consecutive response counter for this contact */
                     hu_consec_limiter_note_reply(&consec_limiter, batch_key, key_len,

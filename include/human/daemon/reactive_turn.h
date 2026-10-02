@@ -18,6 +18,7 @@
 #include "human/agent/inner_thoughts.h" /* hu_inner_thought_store_t */
 #include "human/channel.h"              /* hu_channel_history_entry_t */
 #include "human/context/repair.h"       /* hu_repair_signal_t */
+#include "human/core/post_send_defer.h" /* the reply turn's post-send window */
 #include "human/daemon.h"               /* hu_service_channel_t */
 #include "human/daemon_proactive.h"     /* hu_proactive_context_t */
 #include "human/persona.h"              /* hu_contact_profile_t */

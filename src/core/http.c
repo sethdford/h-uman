@@ -79,6 +79,14 @@ static hu_error_t hu_http_get_impl(hu_allocator_t *alloc, const char *url, const
     return HU_OK;
 }
 
+/* Extra headers of the last mock POST, so tests can assert what the wire
+ * request would have carried (e.g. X-HU-Purpose / X-HU-Priority). */
+static _Thread_local char s_test_last_extra_headers[512];
+
+const char *hu_http_test_last_extra_headers(void) {
+    return s_test_last_extra_headers;
+}
+
 static hu_error_t hu_http_post_json_impl(hu_allocator_t *alloc, const char *url,
                                          const char *auth_header, const char *extra_headers,
                                          const char *json_body, size_t json_body_len,
@@ -86,10 +94,11 @@ static hu_error_t hu_http_post_json_impl(hu_allocator_t *alloc, const char *url,
                                          hu_http_response_t *out) {
     (void)url;
     (void)auth_header;
-    (void)extra_headers;
     (void)json_body;
     (void)json_body_len;
     (void)opts;
+    (void)snprintf(s_test_last_extra_headers, sizeof(s_test_last_extra_headers), "%s",
+                   extra_headers ? extra_headers : "");
 
     const char *mock =
         "{\"choices\":[{\"message\":{\"content\":\"Hello from mock HTTP\"}}],"

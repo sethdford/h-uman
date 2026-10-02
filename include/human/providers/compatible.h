@@ -27,6 +27,12 @@ void hu_compatible_request_opts_for_url(const char *url, size_t url_len,
  * for any other provider type, including wrappers around one. NULL-safe. */
 bool hu_compatible_is_loopback(const hu_provider_t *p);
 
+#if defined(HU_IS_TEST) && HU_IS_TEST
+/* Test builds only: the X-HU-Purpose / X-HU-Priority block this thread's last
+ * chat or stream_chat request carried (compatible_request_headers). */
+const char *hu_compatible_test_last_headers(void);
+#endif
+
 hu_error_t hu_compatible_create(hu_allocator_t *alloc, const char *api_key, size_t api_key_len,
                                 const char *base_url, size_t base_url_len, hu_provider_t *out);
 

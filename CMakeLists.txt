@@ -597,6 +597,8 @@ set(HU_CORE_SOURCES
     src/core/error.c
     src/core/gate_mode.c
     src/core/local_only_guard.c
+    src/core/llm_purpose.c
+    src/core/post_send_defer.c
     src/core/arena.c
     src/core/string.c
     src/core/tokens.c
@@ -786,6 +788,7 @@ set(HU_CORE_SOURCES
     src/agent/turn/contact_stage_turn.c
     src/agent/turn/turn_perceive.c
     src/agent/turn/turn_entry.c
+    src/agent/turn/turn_scope.c
     src/agent/turn/turn_silence.c
     src/agent/turn/turn_context.c
     src/agent/turn/turn_tools.c
@@ -3504,6 +3507,8 @@ set(HU_TEST_SOURCES
     tests/test_fact_extract.c
     tests/test_personal_model.c
     tests/test_personal_model_llm_extract.c
+    tests/test_llm_purpose.c
+    tests/test_post_send_defer.c
     tests/test_personal_model_atomic_save.c
     tests/test_personal_model_per_contact.c
     # Cross-channel ACL trust-property tests. File uses internal-#ifdef-wrap-

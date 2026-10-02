@@ -194,4 +194,15 @@ void hu_turn_note_history_shift(hu_turn_ctx_t *turn_ctx, size_t before, size_t a
  * HU_ERR_INVALID_ARGUMENT on a NULL ctx or agent, else HU_OK. */
 hu_error_t hu_turn_exhausted(hu_turn_ctx_t *turn_ctx);
 
+/* Per-turn thread scope around agent_turn_run (src/agent/turn/turn_scope.c):
+ * tags the local-only guard's audit caller as "agent_turn" and, when the
+ * thread is untagged, sets the X-HU-Purpose to REPLY (a caller's tag wins).
+ * hu_turn_scope_exit restores both, in reverse order. */
+typedef struct hu_turn_scope {
+    const char *local_only_prev;
+    int llm_purpose_prev; /* hu_llm_purpose_t */
+} hu_turn_scope_t;
+hu_turn_scope_t hu_turn_scope_enter(void);
+void hu_turn_scope_exit(hu_turn_scope_t scope);
+
 #endif /* HU_AGENT_TURN_H */

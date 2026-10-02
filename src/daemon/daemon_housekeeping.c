@@ -9,6 +9,7 @@
 #include "human/config.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/llm_purpose.h"
 #include "human/core/log.h"
 #include "human/core/paths.h"
 #include "human/core/rand.h"
@@ -39,6 +40,11 @@
 #include <unistd.h>
 
 void hu_daemon_housekeeping_tick(hu_daemon_housekeeping_ctx_t *ctx) {
+    /* Everything this tick does (cron turns, proactive check-ins, maintenance,
+     * reflection, autodream) is background work: every local LLM / embedding
+     * request it makes goes out as X-HU-Priority: batch, so a reply arriving
+     * meanwhile is admitted ahead of it. */
+    hu_llm_background_enter();
 #ifdef HU_HAS_CRON
     hu_allocator_t *alloc = ctx->alloc;
     hu_agent_t *agent = ctx->agent;
@@ -1162,4 +1168,5 @@ void hu_daemon_housekeeping_tick(hu_daemon_housekeeping_ctx_t *ctx) {
      * the cron scheduler's); the block was inside that gate in daemon.c too. */
     (void)ctx;
 #endif /* HU_HAS_CRON */
+    hu_llm_background_exit();
 }
