@@ -154,7 +154,7 @@ replaces `decay_days` and `dedup_threshold` with the `behavior` values. The macr
 defaults match `config_merge.c`, so running without a config behaves like running with
 a default one.
 
-`max_entries` is fixed at 5000. `memory.max_entries` is parsed, but nothing reads it. A `memory.consolidation` object is not a recognized key: the config validator warns
+`max_entries` is fixed at 5000; there is no config key for it. A `memory.consolidation` object is not a recognized key: the config validator warns
 `unknown key` and nothing reads it.
 
 ---
