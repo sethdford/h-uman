@@ -239,7 +239,7 @@ static void test_sql_quote_escape_only_quotes(void) {
 }
 
 static void test_sql_quote_escape_empty_input(void) {
-    char buf[8] = "leftover";
+    char buf[8] = {'l', 'e', 'f', 't', 'o', 'v', 'e', 'r'}; /* full, unterminated */
     size_t n = SIZE_MAX;
     HU_ASSERT_EQ(hu_sql_quote_escape_into("", 0, buf, sizeof(buf), &n), HU_OK);
     HU_ASSERT_EQ(n, (size_t)0);
@@ -247,7 +247,7 @@ static void test_sql_quote_escape_empty_input(void) {
 }
 
 static void test_sql_quote_escape_null_src(void) {
-    char buf[8] = "leftover";
+    char buf[8] = {'l', 'e', 'f', 't', 'o', 'v', 'e', 'r'}; /* full, unterminated */
     size_t n = SIZE_MAX;
     HU_ASSERT_EQ(hu_sql_quote_escape_into(NULL, 0, buf, sizeof(buf), &n), HU_OK);
     HU_ASSERT_EQ(n, (size_t)0);
@@ -268,11 +268,9 @@ static void test_sql_quote_escape_truncates_silently(void) {
 static void test_sql_quote_escape_invalid_args(void) {
     char buf[8];
     size_t n = SIZE_MAX;
-    HU_ASSERT_EQ(hu_sql_quote_escape_into("x", 1, NULL, sizeof(buf), &n),
-                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_sql_quote_escape_into("x", 1, NULL, sizeof(buf), &n), HU_ERR_INVALID_ARGUMENT);
     HU_ASSERT_EQ(hu_sql_quote_escape_into("x", 1, buf, 0, &n), HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_sql_quote_escape_into("x", 1, buf, sizeof(buf), NULL),
-                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_sql_quote_escape_into("x", 1, buf, sizeof(buf), NULL), HU_ERR_INVALID_ARGUMENT);
 }
 
 void run_string_tests(void) {

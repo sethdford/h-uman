@@ -135,6 +135,38 @@ static void test_checkpoint_null_args(void) {
     HU_ASSERT_FALSE(hu_checkpoint_should_save(NULL, 0));
 }
 
+/* Two saves to one task plus one to another, then deinit: zero live bytes,
+ * an empty store, and the configuration kept. */
+static void test_checkpoint_store_deinit_frees_every_state(void) {
+    hu_tracking_allocator_t *ta = hu_tracking_allocator_create();
+    HU_ASSERT_NOT_NULL(ta);
+    hu_allocator_t alloc = hu_tracking_allocator_allocator(ta);
+    hu_checkpoint_store_t store;
+    hu_checkpoint_store_init(&store, true, 5);
+    static const char s1[] = "{\"a\":1}";
+    static const char s2[] = "{\"a\":2}";
+    HU_ASSERT_EQ(
+        hu_checkpoint_save(&store, &alloc, "t1", 2, 1, HU_CHECKPOINT_ACTIVE, s1, sizeof(s1) - 1),
+        HU_OK);
+    HU_ASSERT_EQ(
+        hu_checkpoint_save(&store, &alloc, "t1", 2, 2, HU_CHECKPOINT_ACTIVE, s2, sizeof(s2) - 1),
+        HU_OK);
+    HU_ASSERT_EQ(hu_checkpoint_save(&store, &alloc, "t2", 2, 1, HU_CHECKPOINT_ACTIVE, "{}", 2),
+                 HU_OK);
+    HU_ASSERT_EQ(store.count, 2);
+    HU_ASSERT_GT(hu_tracking_allocator_leaks(ta), 0); /* precondition: live state copies */
+    hu_checkpoint_store_deinit(&store, &alloc);
+    HU_ASSERT_EQ(hu_tracking_allocator_leaks(ta), 0);
+    HU_ASSERT_EQ(store.count, 0);
+    HU_ASSERT_TRUE(store.auto_checkpoint);
+    HU_ASSERT_EQ(store.interval_steps, 5);
+    hu_checkpoint_store_deinit(&store, &alloc); /* idempotent */
+    hu_checkpoint_store_deinit(NULL, &alloc);
+    hu_checkpoint_store_deinit(&store, NULL);
+    HU_ASSERT_EQ(hu_tracking_allocator_leaks(ta), 0);
+    hu_tracking_allocator_destroy(ta);
+}
+
 void run_checkpoint_tests(void) {
     HU_TEST_SUITE("Checkpoint");
     HU_RUN_TEST(test_checkpoint_store_init);
@@ -146,4 +178,5 @@ void run_checkpoint_tests(void) {
     HU_RUN_TEST(test_checkpoint_should_save);
     HU_RUN_TEST(test_checkpoint_status_names);
     HU_RUN_TEST(test_checkpoint_null_args);
+    HU_RUN_TEST(test_checkpoint_store_deinit_frees_every_state);
 }

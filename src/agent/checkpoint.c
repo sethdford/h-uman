@@ -95,6 +95,19 @@ hu_error_t hu_checkpoint_load_latest(const hu_checkpoint_store_t *store, hu_chec
     return HU_OK;
 }
 
+void hu_checkpoint_store_deinit(hu_checkpoint_store_t *store, hu_allocator_t *alloc) {
+    if (!store || !alloc)
+        return;
+    for (size_t i = 0; i < store->count && i < HU_CHECKPOINT_MAX_STORED; i++) {
+        hu_checkpoint_t *cp = &store->checkpoints[i];
+        if (cp->state_json)
+            alloc->free(alloc->ctx, cp->state_json, cp->state_json_len + 1);
+        cp->state_json = NULL;
+        cp->state_json_len = 0;
+    }
+    store->count = 0;
+}
+
 bool hu_checkpoint_should_save(const hu_checkpoint_store_t *store, uint32_t current_step) {
     if (!store || !store->auto_checkpoint)
         return false;

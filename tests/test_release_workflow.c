@@ -10,51 +10,7 @@
 
 // Simple YAML key-value line matcher
 // Returns true if a line contains "key: <pattern>"
-static bool yaml_line_contains(const char *line, const char *key, const char *value_pattern) {
-    if (!line || !key || !value_pattern)
-        return false;
-    if (line[0] == '#')
-        return false; // Skip comments
-
-    // Find the key
-    const char *key_pos = strstr(line, key);
-    if (!key_pos)
-        return false;
-
-    // Verify it's followed by a colon
-    size_t key_len = strlen(key);
-    if (key_pos[key_len] != ':')
-        return false;
-
-    // Find the value part after the colon
-    const char *value_pos = strchr(key_pos, ':');
-    if (!value_pos)
-        return false;
-    value_pos++; // Skip the colon
-
-    // Skip whitespace
-    while (*value_pos && isspace((unsigned char)*value_pos)) {
-        value_pos++;
-    }
-
-    // Check if value matches pattern
-    return strstr(value_pos, value_pattern) != NULL;
-}
-
 // Check if a line indicates a GitHub Actions trigger
-static bool is_trigger_line(const char *line, const char *trigger_type) {
-    // Look for lines like:
-    //   branches: [main]
-    //   tags: [v*]
-    //   push:
-    if (!line || !trigger_type)
-        return false;
-    if (line[0] == '#')
-        return false;
-
-    return strstr(line, trigger_type) != NULL;
-}
-
 static void test_release_workflow_yaml_exists(void) {
     FILE *f = fopen(".github/workflows/release-macos.yml", "r");
     HU_ASSERT_NOT_NULL(f);
