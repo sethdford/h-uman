@@ -10,10 +10,15 @@
 #include "human/core/log_redact.h"
 #include "human/daemon.h"
 #include "human/daemon/crisis.h"
+#include "human/daemon_outbound_bus.h"
 #include "human/observer.h"
 #include "human/security/moderation.h"
 #include "human/security/self_harm.h"
 #include "test_framework.h"
+#include "test_tmpdir.h"
+#include <stdint.h>
+#include <stdio.h>
+#include <sys/stat.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -453,7 +458,7 @@ static void test_log_who_is_tag_by_default(void) {
     const char *w = HU_LOG_WHO(h, strlen(h));
     HU_ASSERT_STR_NOT_CONTAINS(w, "555");
     HU_ASSERT_EQ(w[0], '#');
-    HU_ASSERT_EQ(strlen(w), 5u);
+    HU_ASSERT_EQ(strlen(w), 13u);
     /* stable: same handle, same tag; different handle, different tag */
     char a[32], b[32];
     hu_log_who(h, strlen(h), a, sizeof(a));
@@ -496,6 +501,247 @@ static void test_log_content_ignores_hu_debug(void) {
         unsetenv("HU_LOG_CONTENT");
 }
 
+/* ── Round 2 (review of #596) ─────────────────────────────────────────── */
+
+/* CRITICAL 1: a third-person pronoun before a self-object phrase is not the
+ * subject of the harm — "they'd be better off without me" is about the sender. */
+static void test_self_harm_self_object_never_demoted(void) {
+    HU_ASSERT_EQ(tier_of("they'd be better off without me"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("they would all be better off without me"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("my wife would be better off without me"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("he'd be better off without me"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("she said i should just end my life"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("my mom thinks i want to kms"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("they told me to take my own life"), HU_SELF_HARM_EXPLICIT);
+}
+
+/* CRITICAL 2: phrasings that used to be NONE. */
+static void test_self_harm_hurt_and_cut_myself(void) {
+    HU_ASSERT_EQ(tier_of("i'm going to hurt myself"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("i want to hurt myself"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("i've been cutting myself again"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("cut myself"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("hurt myself"), HU_SELF_HARM_LOW);
+    HU_ASSERT_EQ(tier_of("i cut myself shaving lol"), HU_SELF_HARM_LOW);
+}
+
+static void test_self_harm_live_and_here_phrasings(void) {
+    HU_ASSERT_EQ(tier_of("no reason to live"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("i do not want to live"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("i don't wanna live anymore"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("dont wanna be here anymore"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("don't want to be here"), HU_SELF_HARM_LOW);
+    HU_ASSERT_EQ(tier_of("i just want to disappear"), HU_SELF_HARM_LOW);
+    HU_ASSERT_EQ(tier_of("i can't do this anymore"), HU_SELF_HARM_LOW);
+}
+
+/* Morphology, not a growing list: "my self" joins, joined forms split, and
+ * every tense of kill + myself is one rule. */
+static void test_self_harm_kill_morphology(void) {
+    HU_ASSERT_EQ(tier_of("i want to kill my self"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("killmyself"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("i should have killed myself"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("kills myself"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("i almost killed myself on the stairs"), HU_SELF_HARM_LOW);
+}
+
+static void test_self_harm_end_it_needs_self_context(void) {
+    HU_ASSERT_EQ(tier_of("i just want to end it"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("i'm going to end it tonight"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("let's end it here and pick up tomorrow"), HU_SELF_HARM_NONE);
+    HU_ASSERT_EQ(tier_of("i'm going to end it with her"), HU_SELF_HARM_NONE);
+}
+
+/* Minors. */
+static void test_self_harm_suicide_needs_personal_context(void) {
+    HU_ASSERT_EQ(tier_of("watching suicide squad tonight"), HU_SELF_HARM_NONE);
+    HU_ASSERT_EQ(tier_of("the suicide hotline number is 988"), HU_SELF_HARM_NONE);
+    HU_ASSERT_EQ(tier_of("i've been thinking about suicide"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("suicide"), HU_SELF_HARM_LOW);
+}
+
+static void test_self_harm_third_person_reflexive_with_tried(void) {
+    HU_ASSERT_EQ(tier_of("he tried to unalive himself"), HU_SELF_HARM_THIRD_PERSON);
+    HU_ASSERT_EQ(tier_of("she tried to kill herself last year"), HU_SELF_HARM_THIRD_PERSON);
+}
+
+static void test_self_harm_kms_is_not_kilometres(void) {
+    HU_ASSERT_EQ(tier_of("only a few kms left"), HU_SELF_HARM_NONE);
+    HU_ASSERT_EQ(tier_of("ran 10 kms"), HU_SELF_HARM_NONE);
+    HU_ASSERT_EQ(tier_of("ugh kms"), HU_SELF_HARM_EXPLICIT);
+}
+
+static void test_self_harm_confusable_apostrophes(void) {
+    /* U+02BC and U+FF07 */
+    HU_ASSERT_EQ(tier_of("I don\xca\xbct want to live"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("what\xef\xbc\x87s the point"), HU_SELF_HARM_LOW);
+}
+
+/* Ruling: LOW needs personal-despair context, so a meeting gripe is NONE. */
+static void test_self_harm_low_needs_despair_context(void) {
+    HU_ASSERT_EQ(tier_of("what's the point of this meeting"), HU_SELF_HARM_NONE);
+    HU_ASSERT_EQ(tier_of("what's the point of this?"), HU_SELF_HARM_LOW);
+    HU_ASSERT_EQ(tier_of("honestly what's the point anymore"), HU_SELF_HARM_LOW);
+    HU_ASSERT_EQ(tier_of("what's the point of even trying"), HU_SELF_HARM_LOW);
+    HU_ASSERT_EQ(tier_of("i can't go on like this"), HU_SELF_HARM_LOW);
+    HU_ASSERT_EQ(tier_of("i can't go on the trip"), HU_SELF_HARM_NONE);
+}
+
+/* Quoting the contact is not a self-harm statement by the speaker. */
+static void test_self_harm_quoting_you_is_not_actionable(void) {
+    HU_ASSERT_EQ(tier_of("when you say you want to die, i'm right here"), HU_SELF_HARM_NONE);
+    HU_ASSERT_EQ(tier_of("you said you wanted to kill yourself, are you safe?"), HU_SELF_HARM_NONE);
+}
+
+/* CRITICAL 3: the reply side. */
+static const char k_good_reply[] =
+    "i'm really glad you reached out. i'm here. please call or text 988 Suicide & Crisis Lifeline "
+    "(call/text 988) if it gets worse tonight";
+
+static void test_reply_with_988_line_is_not_self_harm(void) {
+    HU_ASSERT_EQ(tier_of(k_good_reply), HU_SELF_HARM_NONE);
+    HU_ASSERT_EQ(tier_of("Crisis Text Line (text HOME to 741741), 988 Suicide & Crisis "
+                         "Lifeline"),
+                 HU_SELF_HARM_NONE);
+}
+
+static void test_reply_resources_keyed_to_inbound_only(void) {
+    const char *in = "i want to die";
+    const char *plain = "i'm here. talk to me";
+    HU_ASSERT_TRUE(hu_self_harm_reply_needs_resources(in, strlen(in), plain, strlen(plain)));
+    HU_ASSERT_FALSE(
+        hu_self_harm_reply_needs_resources(in, strlen(in), k_good_reply, strlen(k_good_reply)));
+    const char *low = "what's the point";
+    HU_ASSERT_FALSE(hu_self_harm_reply_needs_resources(low, strlen(low), plain, strlen(plain)));
+    /* the reply's own words never trigger it */
+    const char *hi = "hey";
+    HU_ASSERT_FALSE(hu_self_harm_reply_needs_resources(hi, 3, "i want to die lol", 17));
+    size_t n = 0;
+    HU_ASSERT_NOT_NULL(hu_self_harm_resource_line(&n));
+    HU_ASSERT_GT(n, 0u);
+}
+
+static size_t count_of(const char *hay, const char *needle) {
+    size_t c = 0, nl = strlen(needle);
+    for (const char *p = hay; (p = strstr(p, needle)) != NULL; p += nl)
+        c++;
+    return c;
+}
+
+/* End to end over the production path: inbound "i want to die" → model reply
+ * carrying the 988 line → final gates clear, nothing appended, nothing
+ * blocked, no canned line. The reply is sent exactly as written. */
+static void test_crisis_reply_e2e_good_reply_sent_as_is(void) {
+    hu_crisis_tiers_mode_set_for_test(HU_GATE_LIVE);
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *in = "i want to die";
+    hu_self_harm_tier_t tier = hu_daemon_inbound_crisis_tier(&alloc, in, strlen(in), "x", 1, NULL);
+    HU_ASSERT_EQ(tier, HU_SELF_HARM_EXPLICIT);
+    size_t len = 0;
+    char *reply = ctx_dup(&alloc, k_good_reply, &len);
+    const char *why = NULL;
+    HU_ASSERT_TRUE(hu_daemon_outbound_final_gates_clear(&alloc, reply, len, &why));
+    HU_ASSERT_STR_EQ(why, "clear");
+    HU_ASSERT_FALSE(hu_daemon_crisis_ensure_resources(&alloc, tier, &reply, &len));
+    HU_ASSERT_FALSE(hu_daemon_reply_blocked(&alloc, reply, len, NULL));
+    HU_ASSERT_STR_EQ(reply, k_good_reply);
+    HU_ASSERT_STR_NOT_CONTAINS(reply, "brain fart");
+    HU_ASSERT_EQ(count_of(reply, "988 Suicide"), 1u);
+    alloc.free(alloc.ctx, reply, len + 1);
+    hu_crisis_tiers_mode_set_for_test(-1);
+}
+
+/* A reply that forgot the resources gets the line once, never twice. */
+static void test_crisis_reply_missing_988_appended_once(void) {
+    hu_crisis_tiers_mode_set_for_test(HU_GATE_LIVE);
+    hu_allocator_t alloc = hu_system_allocator();
+    size_t len = 0;
+    char *reply = ctx_dup(&alloc, "i'm here with you. talk to me", &len);
+    HU_ASSERT_TRUE(hu_daemon_crisis_ensure_resources(&alloc, HU_SELF_HARM_EXPLICIT, &reply, &len));
+    HU_ASSERT_EQ(len, strlen(reply));
+    HU_ASSERT_STR_CONTAINS(reply, "i'm here with you. talk to me");
+    HU_ASSERT_EQ(count_of(reply, "988"), 2u); /* "988 Suicide ... (call/text 988)" */
+    HU_ASSERT_FALSE(hu_daemon_crisis_ensure_resources(&alloc, HU_SELF_HARM_EXPLICIT, &reply, &len));
+    HU_ASSERT_FALSE(hu_daemon_crisis_ensure_resources(&alloc, HU_SELF_HARM_LOW, &reply, &len));
+    alloc.free(alloc.ctx, reply, len + 1);
+    hu_crisis_tiers_mode_set_for_test(-1);
+}
+
+/* A model reply that quotes the contact or offers 988 is never blocked; one
+ * endorsing violence against others is (and nothing replaces it). */
+static void test_crisis_reply_blocked_only_for_non_self_harm(void) {
+    hu_crisis_tiers_mode_set_for_test(HU_GATE_LIVE);
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *quote = "when you said you wanted to kill yourself, did you mean tonight?";
+    HU_ASSERT_FALSE(hu_daemon_reply_blocked(&alloc, quote, strlen(quote), NULL));
+    const char *self = "honestly i want to die too some days";
+    HU_ASSERT_FALSE(hu_daemon_reply_blocked(&alloc, self, strlen(self), NULL));
+    const char *viol = "you should kill them with violence";
+    HU_ASSERT_TRUE(hu_daemon_reply_blocked(&alloc, viol, strlen(viol), NULL));
+    hu_crisis_tiers_mode_set_for_test(-1);
+}
+
+/* IMPORTANT 4: the log tag is keyed, 48-bit, and the key lives 0600. */
+static void test_log_tag_keyed_and_48_bit(void) {
+    hu_log_content_set_for_test(0);
+    uint8_t k1[16], k2[16];
+    for (int i = 0; i < 16; i++) {
+        k1[i] = (uint8_t)i;
+        k2[i] = (uint8_t)(i + 1);
+    }
+    const char *h = "+15551234567";
+    hu_log_tag_set_key_for_test(k1);
+    uint64_t t1 = hu_log_contact_tag(h, strlen(h));
+    char w1[32];
+    hu_log_who(h, strlen(h), w1, sizeof(w1));
+    hu_log_tag_set_key_for_test(k2);
+    uint64_t t2 = hu_log_contact_tag(h, strlen(h));
+    HU_ASSERT_TRUE(t1 != t2);          /* the key matters */
+    HU_ASSERT_TRUE(t1 < (1ULL << 48)); /* 48 bits */
+    HU_ASSERT_TRUE(t1 > 0xffffULL);    /* not the old 16-bit fold */
+    HU_ASSERT_EQ(strlen(w1), 13u);     /* "#" + 12 hex */
+    /* Standard SipHash-2-4: the reference vector for key 00..0f and the empty
+     * message is 0x726fdb47dd0e0e31; the tag is its low 48 bits. */
+    hu_log_tag_set_key_for_test(k1);
+    HU_ASSERT_TRUE(hu_log_contact_tag("", 0) == 0xdb47dd0e0e31ULL);
+    hu_log_tag_set_key_for_test(NULL);
+    hu_log_content_set_for_test(-1);
+}
+
+static void test_log_tag_key_file_created_0600_and_stable(void) {
+    char d[512];
+    HU_ASSERT_TRUE(hu_test_mkdtemp("hu_logtag", d, sizeof(d)));
+    uint8_t a[16], b[16];
+    memset(a, 0, sizeof(a));
+    memset(b, 0xff, sizeof(b));
+    HU_ASSERT_TRUE(hu_log_tag_key_load(d, a));
+    char p[600];
+    snprintf(p, sizeof(p), "%s/log_tag.key", d);
+    struct stat st;
+    HU_ASSERT_EQ(stat(p, &st), 0);
+    HU_ASSERT_EQ((int)(st.st_mode & 0777), 0600);
+    HU_ASSERT_EQ((long long)st.st_size, 16LL);
+    HU_ASSERT_TRUE(hu_log_tag_key_load(d, b)); /* second load reads, not regenerates */
+    HU_ASSERT_TRUE(memcmp(a, b, 16) == 0);
+    uint8_t zero[16] = {0};
+    HU_ASSERT_TRUE(memcmp(a, zero, 16) != 0);
+    hu_test_rm_rf(d);
+}
+
+static void test_log_tag_key_rejects_bad_file(void) {
+    char d[512];
+    HU_ASSERT_TRUE(hu_test_mkdtemp("hu_logtag", d, sizeof(d)));
+    char p[600];
+    snprintf(p, sizeof(p), "%s/log_tag.key", d);
+    FILE *f = fopen(p, "w");
+    HU_ASSERT_NOT_NULL(f);
+    fputs("short", f);
+    fclose(f);
+    uint8_t k[16];
+    HU_ASSERT_FALSE(hu_log_tag_key_load(d, k));
+    hu_test_rm_rf(d);
+}
+
 void run_self_harm_tests(void) {
     HU_TEST_SUITE("Self-harm detector (DEF-1)");
     HU_RUN_TEST(test_self_harm_kill_myself_is_explicit);
@@ -535,4 +781,24 @@ void run_self_harm_tests(void) {
     HU_RUN_TEST(test_log_text_is_length_by_default);
     HU_RUN_TEST(test_log_content_flag_shows_text);
     HU_RUN_TEST(test_log_content_ignores_hu_debug);
+    HU_TEST_SUITE("Self-harm round 2 (#596 review)");
+    HU_RUN_TEST(test_self_harm_self_object_never_demoted);
+    HU_RUN_TEST(test_self_harm_hurt_and_cut_myself);
+    HU_RUN_TEST(test_self_harm_live_and_here_phrasings);
+    HU_RUN_TEST(test_self_harm_kill_morphology);
+    HU_RUN_TEST(test_self_harm_end_it_needs_self_context);
+    HU_RUN_TEST(test_self_harm_suicide_needs_personal_context);
+    HU_RUN_TEST(test_self_harm_third_person_reflexive_with_tried);
+    HU_RUN_TEST(test_self_harm_kms_is_not_kilometres);
+    HU_RUN_TEST(test_self_harm_confusable_apostrophes);
+    HU_RUN_TEST(test_self_harm_low_needs_despair_context);
+    HU_RUN_TEST(test_self_harm_quoting_you_is_not_actionable);
+    HU_RUN_TEST(test_reply_with_988_line_is_not_self_harm);
+    HU_RUN_TEST(test_reply_resources_keyed_to_inbound_only);
+    HU_RUN_TEST(test_crisis_reply_e2e_good_reply_sent_as_is);
+    HU_RUN_TEST(test_crisis_reply_missing_988_appended_once);
+    HU_RUN_TEST(test_crisis_reply_blocked_only_for_non_self_harm);
+    HU_RUN_TEST(test_log_tag_keyed_and_48_bit);
+    HU_RUN_TEST(test_log_tag_key_file_created_0600_and_stable);
+    HU_RUN_TEST(test_log_tag_key_rejects_bad_file);
 }

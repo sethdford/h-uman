@@ -43,6 +43,13 @@ bool hu_str_contains_ci_cstr(const char *hay, size_t hlen, const char *needle);
  * the cases where naive substring matching is the correct choice instead. */
 bool hu_str_contains_word_ci(const char *s, const char *needle);
 
+/* Case-insensitive prefix match after leading ASCII whitespace ("   I think"
+ * matches "I think"). When the prefix ends in a letter, the next character
+ * must not continue the word (letter, '_' or apostrophe); a prefix ending in a
+ * space or punctuation already carries its own boundary ("Maybe " matches
+ * "Maybe Berlin"). Shared by the response verifier and self-RAG splitter. */
+bool hu_str_sentence_starts_with_ci(const char *s, size_t len, const char *prefix);
+
 /* Length-bounded variant of hu_str_contains_word_ci: the haystack is read
  * for exactly `hlen` bytes and need not be NUL-terminated (for callers that
  * pass a slice into a larger buffer). The needle is NUL-terminated. NULL-safe.

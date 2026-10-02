@@ -68,6 +68,7 @@
 #include "human/persona/somatic.h"
 #include "human/reflection.h" /* T7: reflection-loop slice in build_prompt */
 #include "human/security/moderation.h"
+#include "human/security/self_harm.h"
 #include "human/security/sycophancy_guard.h"
 #include "human/tool.h"
 #ifdef HU_ENABLE_SQLITE
@@ -2393,6 +2394,24 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             }
         }
 
+        /* 988 keyed to the INBOUND message, never to the reply's own words. */
+        if (final_content &&
+            hu_self_harm_reply_needs_resources(msg, msg_len, final_content, final_content_len)) {
+            size_t rl = 0;
+            const char *line = hu_self_harm_resource_line(&rl);
+            size_t new_len = final_content_len + 2 + rl;
+            char *expanded = (char *)agent->alloc->alloc(agent->alloc->ctx, new_len + 1);
+            if (expanded) {
+                memcpy(expanded, final_content, final_content_len);
+                memcpy(expanded + final_content_len, "\n\n", 2);
+                memcpy(expanded + final_content_len + 2, line, rl);
+                expanded[new_len] = '\0';
+                agent->alloc->free(agent->alloc->ctx, final_content, final_content_len + 1);
+                final_content = expanded;
+                final_content_len = new_len;
+            }
+        }
+
         /* Outbound moderation: check the response for safety (matches batch) */
         {
             hu_moderation_result_t mod_result;
@@ -2403,21 +2422,6 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                 hu_log_info("agent_stream_v2", NULL,
                             "outbound moderation flagged response (violence=%d self_harm=%d)",
                             mod_result.violence, mod_result.self_harm);
-                if (mod_result.self_harm) {
-                    static const char crisis[] = "\n\nIf you're in crisis, please reach out: "
-                                                 "988 Suicide & Crisis Lifeline (call/text 988), "
-                                                 "Crisis Text Line (text HOME to 741741)";
-                    size_t new_len = final_content_len + sizeof(crisis) - 1;
-                    char *expanded = (char *)agent->alloc->alloc(agent->alloc->ctx, new_len + 1);
-                    if (expanded) {
-                        memcpy(expanded, final_content, final_content_len);
-                        memcpy(expanded + final_content_len, crisis, sizeof(crisis) - 1);
-                        expanded[new_len] = '\0';
-                        agent->alloc->free(agent->alloc->ctx, final_content, final_content_len + 1);
-                        final_content = expanded;
-                        final_content_len = new_len;
-                    }
-                }
                 if (mod_result.violence) {
                     static const char deesc[] =
                         "[SAFETY] This response touches on violence. "

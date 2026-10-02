@@ -21,16 +21,58 @@ import sys
 OWNER_HANDLES = {"+18012017497", "sethdouglasford@gmail.com", "+14845661687"}
 
 
-def log_tag(handle):
-    """The daemon logs handles as a 16-bit FNV-1a tag ("#3fa2"; src/core/log_redact.c)."""
-    h = 2166136261
-    for b in handle.encode():
-        h = ((h ^ b) * 16777619) & 0xFFFFFFFF
-    return "#%04x" % ((h ^ (h >> 16)) & 0xFFFF)
+def _siphash24(key, data):
+    """SipHash-2-4, 64-bit — the same function as src/core/log_redact.c."""
+    M = 0xFFFFFFFFFFFFFFFF
+    rotl = lambda x, b: ((x << b) | (x >> (64 - b))) & M
+    k0 = int.from_bytes(key[:8], "little")
+    k1 = int.from_bytes(key[8:16], "little")
+    v = [0x736F6D6570736575 ^ k0, 0x646F72616E646F6D ^ k1,
+         0x6C7967656E657261 ^ k0, 0x7465646279746573 ^ k1]
+
+    def rnd():
+        v[0] = (v[0] + v[1]) & M; v[1] = rotl(v[1], 13); v[1] ^= v[0]; v[0] = rotl(v[0], 32)
+        v[2] = (v[2] + v[3]) & M; v[3] = rotl(v[3], 16); v[3] ^= v[2]
+        v[0] = (v[0] + v[3]) & M; v[3] = rotl(v[3], 21); v[3] ^= v[0]
+        v[2] = (v[2] + v[1]) & M; v[1] = rotl(v[1], 17); v[1] ^= v[2]; v[2] = rotl(v[2], 32)
+
+    full = len(data) - len(data) % 8
+    for i in range(0, full, 8):
+        m = int.from_bytes(data[i:i + 8], "little")
+        v[3] ^= m; rnd(); rnd(); v[0] ^= m
+    b = (len(data) << 56) & M
+    for i, byte in enumerate(data[full:]):
+        b |= byte << (8 * i)
+    v[3] ^= b; rnd(); rnd(); v[0] ^= b
+    v[2] ^= 0xFF
+    for _ in range(4):
+        rnd()
+    return v[0] ^ v[1] ^ v[2] ^ v[3]
 
 
+def load_tag_key():
+    """The daemon's per-install log-tag key (<state dir>/log_tag.key, 0600).
+
+    Handles are logged as a keyed 48-bit tag, so matching the owner's handles
+    needs the same key. Returns None when the file is absent (logs written
+    before 2026-10-02 carry raw handles and still match)."""
+    state = os.environ.get("HU_STATE_DIR") or os.path.expanduser("~/.human")
+    try:
+        with open(os.path.join(state, "log_tag.key"), "rb") as f:
+            key = f.read()
+    except OSError:
+        return None
+    return key if len(key) == 16 else None
+
+
+def log_tag(handle, key):
+    """The daemon's "#" + 12-hex tag for a handle (src/core/log_redact.c)."""
+    return "#%012x" % (_siphash24(key, handle.encode()) & 0xFFFFFFFFFFFF)
+
+
+_KEY = load_tag_key()
 # Raw handles too, for logs from before 2026-10-02 or HU_LOG_CONTENT=1 runs.
-OWNER = OWNER_HANDLES | {log_tag(h) for h in OWNER_HANDLES}
+OWNER = OWNER_HANDLES | ({log_tag(h, _KEY) for h in OWNER_HANDLES} if _KEY else set())
 
 
 def parse_ts(s):

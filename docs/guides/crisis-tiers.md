@@ -24,20 +24,54 @@ policy; nothing here is learned.
 
 | Tier | Example | Reply directive | Forced reply | Voice memo |
 |---|---|---|---|---|
-| `explicit` | "kill myself", "want to die", "i wanna die lol", "kms", "suicidal" | `[CRISIS SUPPORT]` with 988 and 741741 (byte-identical to the old directive) | yes | never |
-| `low` | "what's the point", "can't do this anymore", "can't go on" | `[CHECK-IN]`: a gentle check-in, no hotline list | yes | never |
-| `third_person` | "my friend wants to die", "he's suicidal", "my uncle died by suicide" | `[SUPPORT]`: support the sender as the helper; 988 helps helpers too | yes | never |
-| `none` | "this traffic is killing me", "kill the lights", "i don't want to die" | — | — | — |
+| `explicit` | "kill myself" (any tense, "kill my self", "killmyself"), "want to die", "i wanna die lol", "kms", "suicidal", "no reason to live", "i do not want to live", "dont wanna be here anymore", "i'm going to hurt myself", "cutting myself", "i just want to end it", "they'd be better off without me" | `[CRISIS SUPPORT]` with 988 and 741741 (byte-identical to the old directive) | yes | never |
+| `low` | "what's the point" (ending the clause, or "of even trying" / "of this?"), "can't do this anymore", "can't go on like this", "don't want to be here", "want to disappear", bare "hurt myself", "i cut myself shaving", "i almost killed myself", bare "suicide" with no personal context | `[CHECK-IN]`: a gentle check-in, no hotline list | yes | never |
+| `third_person` | "my friend wants to die", "he's suicidal", "he tried to unalive himself", "my uncle died by suicide" | `[SUPPORT]`: support the sender as the helper; 988 helps helpers too | yes | never |
+| `none` | "this traffic is killing me", "kill the lights", "i don't want to die", "what's the point of this meeting", "can't go on the trip", "watching suicide squad", "a few kms left", "when you say you want to die" (quoting the contact), the 988 resource line itself | — | — | — |
 
-Matching is whole-word on a canonical form: lowercase, apostrophes dropped
-(iOS sends `’`, so "can’t" and "cant" agree), leet only inside words that also
-have letters ("k1ll" but not "5 kms"). A short look back at the subject turns a
-negation ("i don't", "i'm not", "never") into `none` and a third-person subject
-into `third_person`; with no subject it counts as the sender, because texts
-drop it. First person outranks low outranks third person. Spaced-letter evasion
-("s e l f h a r m") is still caught. A self-harm phrase containing a kill-word
-is blanked before the violence check, so "kill myself" is self-harm, not
-violence; "kill myself and kill them" is both.
+### How it decides
+
+1. **Tokens.** Lowercase words; apostrophes are dropped, including the iOS
+   `’`, U+02BC and U+FF07, so "can't", "can’t" and "cant" agree. Leet is
+   mapped only inside words that also have letters ("k1ll", not "5").
+   Punctuation (`. , ! ? ; : ( )` and newlines) marks a clause break.
+2. **Morphology, not a growing list.** "my self" joins to "myself";
+   "killmyself" splits; "dont" → "do not", "wanna" → "want to", "cant" →
+   "can not". One rule covers kill/unalive/harm/hurt/cut + myself/himself/
+   yourself in every tense.
+3. **Subject look-back** within the clause, skipping filler: a negation
+   ("not", "never") drops the match; "you" drops it (the speaker is quoting
+   the contact); a third-person subject makes it `third_person` — **except**
+   for phrases whose object is the speaker ("better off without me", "end my
+   life", "kms", "wish i was dead", "<verb> myself"), which are never demoted.
+   With no subject, the sender is assumed (texts drop it: "wanna die lol").
+4. **Context rules.** "end it" needs intent ("want to", "going to") and must
+   end its clause ("end it with her" is not). "hurt myself" is `explicit` only
+   with intent, a habit ("hurting myself") or "again"; "cut myself" is
+   `explicit` unless an accident follows ("shaving", "cooking"). "almost/nearly
+   killed myself" is `low`. "kms" after a number or quantity ("10 kms", "a few
+   kms") or before "away/left/…" is a distance.
+5. **Ruling on low.** `low` forces a reply, so it needs personal-despair
+   context: "what's the point" must end its clause or take a despair object
+   ("of even trying", "of anything", "of this?"); "can't go on" must end its
+   clause. A meeting gripe is `none`.
+
+## The reply side
+
+The reply's own words are never treated as a crisis. Before 2026-10-02 the
+directive made the model write "988 Suicide & Crisis Lifeline"; moderation
+read "suicide" as explicit self-harm, the bus deferred the reply, and the
+fallback path sent "ugh brain fart — lemme rephrase that" plus a canned 988
+block instead. Now:
+
+- The resource line is appended **only** when the **inbound** tier is
+  `explicit` and the reply lacks "988" (`hu_daemon_crisis_ensure_resources`,
+  `hu_self_harm_reply_needs_resources` in `agent_turn`/`agent_stream`). Never
+  twice.
+- Self-harm wording in a reply never blocks or replaces it (the final gates
+  and `hu_daemon_reply_blocked` look only at violence, hate and sexual).
+- A reply that is unsafe for another reason is **dropped**, not replaced:
+  there is no canned text on this path.
 
 ## Gate
 

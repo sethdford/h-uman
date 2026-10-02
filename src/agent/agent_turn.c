@@ -365,6 +365,7 @@ static hu_error_t agent_skill_route_embed_fn(void *embed_ctx, hu_allocator_t *al
 #include "human/security/cot_audit.h"
 #include "human/security/history_scorer.h"
 #include "human/security/moderation.h"
+#include "human/security/self_harm.h"
 #include "human/security/sensitivity.h"
 #include "human/tools/cache_ttl.h"
 #include "human/voice.h"
@@ -6621,25 +6622,6 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                                 "violence=%.2f self_harm=%.2f hate=%.2f",
                                 mod_result.violence_score, mod_result.self_harm_score,
                                 mod_result.hate_score);
-                    if (mod_result.self_harm) {
-                        /* Crisis escalation: inject crisis resources */
-                        static const char crisis[] =
-                            "\n\nIf you're in crisis, please reach out: "
-                            "988 Suicide & Crisis Lifeline (call/text 988), "
-                            "Crisis Text Line (text HOME to 741741)";
-                        size_t orig_len = *response_len_out;
-                        size_t new_len = orig_len + sizeof(crisis) - 1;
-                        char *expanded =
-                            (char *)agent->alloc->alloc(agent->alloc->ctx, new_len + 1);
-                        if (expanded) {
-                            memcpy(expanded, *response_out, orig_len);
-                            memcpy(expanded + orig_len, crisis, sizeof(crisis) - 1);
-                            expanded[new_len] = '\0';
-                            agent->alloc->free(agent->alloc->ctx, *response_out, orig_len + 1);
-                            *response_out = expanded;
-                            *response_len_out = new_len;
-                        }
-                    }
                     if (mod_result.violence) {
                         hu_log_warn("agent_turn", NULL,
                                     "CRITICAL FIX 2026-05-26: violence flagged "
@@ -6691,6 +6673,26 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                             *response_len_out = safe_len;
                         }
                     }
+                }
+            }
+
+            /* SHIELD-005: 988 keyed to the INBOUND message, never to the reply's own
+             * words (a reply offering 988 used to trip it and gain a second copy). */
+            if (*response_out && response_len_out &&
+                hu_self_harm_reply_needs_resources(msg, msg_len, *response_out,
+                                                   *response_len_out)) {
+                size_t rl = 0;
+                const char *line = hu_self_harm_resource_line(&rl);
+                size_t orig_len = *response_len_out, new_len = orig_len + 2 + rl;
+                char *expanded = (char *)agent->alloc->alloc(agent->alloc->ctx, new_len + 1);
+                if (expanded) {
+                    memcpy(expanded, *response_out, orig_len);
+                    memcpy(expanded + orig_len, "\n\n", 2);
+                    memcpy(expanded + orig_len + 2, line, rl);
+                    expanded[new_len] = '\0';
+                    agent->alloc->free(agent->alloc->ctx, *response_out, orig_len + 1);
+                    *response_out = expanded;
+                    *response_len_out = new_len;
                 }
             }
 

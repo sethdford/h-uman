@@ -27,4 +27,17 @@ hu_self_harm_tier_t hu_daemon_inbound_crisis_tier(hu_allocator_t *alloc, const c
 bool hu_daemon_crisis_prepend(hu_allocator_t *alloc, hu_self_harm_tier_t tier, char **ctx,
                               size_t *ctx_len);
 
+/* Append the 988 resource line to an owned reply (*reply allocated len+1)
+ * when the inbound tier is EXPLICIT and the reply lacks "988". Keyed to the
+ * INBOUND tier only. Returns true when it appended. */
+bool hu_daemon_crisis_ensure_resources(hu_allocator_t *alloc, hu_self_harm_tier_t inbound_tier,
+                                       char **reply, size_t *reply_len);
+
+/* True when the reply must not be sent: moderation flags violence, hate or
+ * sexual content. Self-harm wording alone never blocks (it is usually the
+ * model offering help), and nothing is substituted: a blocked reply is
+ * dropped, never replaced with canned text. Logs the categories, not text. */
+bool hu_daemon_reply_blocked(hu_allocator_t *alloc, const char *reply, size_t reply_len,
+                             hu_observer_t *obs);
+
 #endif /* HU_DAEMON_CRISIS_H */

@@ -22,11 +22,21 @@ Helpers (`include/human/core/log_redact.h`, `src/core/log_redact.c`), used with
 
 | Macro | Default output | With `HU_LOG_CONTENT=1` |
 |---|---|---|
-| `HU_LOG_WHO(h, len)` / `HU_LOG_WHO_CSTR(h)` | `#3fa2`: a 16-bit FNV tag, stable across restarts, the same fold as the voice-first shadow line | the handle (first 24 bytes) |
+| `HU_LOG_WHO(h, len)` / `HU_LOG_WHO_CSTR(h)` | `#7a50b4f77146`: keyed SipHash-2-4 of the handle, low 48 bits | the handle (first 24 bytes) |
 | `HU_LOG_TEXT(t, len, max)` / `HU_LOG_TEXT_CSTR(t, max)` | `<23 chars>` | the first `max` bytes |
 
-The tag is pseudonymous, not anonymous: anyone holding the contact list can
-hash it. It is enough to count lines per contact.
+The key is 16 random bytes created once per install at
+`<state dir>/log_tag.key` (mode 0600, `O_EXCL`), so a tag can be neither
+reversed nor recomputed from a contact list without that file, and 48 bits
+make collisions across a contact list negligible. Tags are stable across
+restarts, so lines can still be counted per contact. If the state dir is
+unavailable the daemon uses a per-process random key (unlinkable, not
+stable). Test builds use a fixed in-memory key and never touch the state dir.
+
+`scripts/imessage_reply_latency.py` reads the same key file (honouring
+`HU_STATE_DIR`) to recognise the owner's own handles; without it, it still
+matches raw handles in pre-2026-10-02 logs. The voice-first shadow line uses
+the same tag.
 
 The reply hex dump in `hu_service_run` is skipped entirely unless
 `HU_LOG_CONTENT=1`.

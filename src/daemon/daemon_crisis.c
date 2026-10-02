@@ -60,3 +60,44 @@ bool hu_daemon_crisis_prepend(hu_allocator_t *alloc, hu_self_harm_tier_t tier, c
     }
     return true;
 }
+
+bool hu_daemon_crisis_ensure_resources(hu_allocator_t *alloc, hu_self_harm_tier_t inbound_tier,
+                                       char **reply, size_t *reply_len) {
+    if (!alloc || !reply || !*reply || !reply_len || inbound_tier != HU_SELF_HARM_EXPLICIT)
+        return false;
+    for (size_t i = 0; i + 3 <= *reply_len; i++)
+        if (memcmp(*reply + i, "988", 3) == 0)
+            return false; /* the model already gave the line: never twice */
+    size_t rl = 0;
+    const char *line = hu_self_harm_resource_line(&rl);
+    size_t new_len = *reply_len + 2 + rl;
+    char *merged = (char *)alloc->alloc(alloc->ctx, new_len + 1);
+    if (!merged)
+        return false;
+    memcpy(merged, *reply, *reply_len);
+    merged[*reply_len] = '\n';
+    merged[*reply_len + 1] = '\n';
+    memcpy(merged + *reply_len + 2, line, rl);
+    merged[new_len] = '\0';
+    alloc->free(alloc->ctx, *reply, *reply_len + 1);
+    *reply = merged;
+    *reply_len = new_len;
+    return true;
+}
+
+bool hu_daemon_reply_blocked(hu_allocator_t *alloc, const char *reply, size_t reply_len,
+                             hu_observer_t *obs) {
+    if (!alloc || !reply || reply_len == 0)
+        return false;
+    hu_moderation_result_t mod;
+    memset(&mod, 0, sizeof(mod));
+    if (hu_moderation_check(alloc, reply, reply_len, &mod) != HU_OK)
+        return false;
+    if (!mod.violence && !mod.hate && !mod.sexual)
+        return false;
+    hu_log_warn("human", obs,
+                "moderation blocked the reply (violence=%d hate=%d sexual=%d, %zu chars); "
+                "nothing sent in its place",
+                (int)mod.violence, (int)mod.hate, (int)mod.sexual, reply_len);
+    return true;
+}

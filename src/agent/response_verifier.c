@@ -3,6 +3,7 @@
 #include "human/agent/world_model.h" /* sprint-2c Story A — wm->negatives */
 #include "human/core/log.h"
 #include "human/core/log_redact.h"
+#include "human/core/string.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -99,36 +100,6 @@ void hu_provenance_render(const hu_memory_relation_row_t *rel, char *buf, size_t
     }
 }
 
-/* Case-insensitive word-boundary prefix check (skips leading whitespace).
- *
- * The boundary check (next char after prefix is non-alpha) only fires
- * when the prefix's LAST char is alpha — otherwise the prefix already
- * encodes its own boundary (trailing space, etc.) and double-checking
- * the next char would over-reject. Example: prefix "Maybe " matching
- * "Maybe Berlin ..." — the trailing space in the prefix is the
- * boundary; the next char ('B') is alpha but that's the next word,
- * not a continuation of the prefix. */
-static bool rv_sentence_starts_with_ci(const char *s, size_t len, const char *prefix) {
-    size_t i = 0;
-    while (i < len && isspace((unsigned char)s[i]))
-        i++;
-    size_t pl = strlen(prefix);
-    if (pl == 0 || len - i < pl)
-        return false;
-    for (size_t j = 0; j < pl; j++) {
-        if (tolower((unsigned char)s[i + j]) != tolower((unsigned char)prefix[j]))
-            return false;
-    }
-    char last = prefix[pl - 1];
-    bool last_is_alpha = isalpha((unsigned char)last) != 0;
-    if (last_is_alpha && i + pl < len) {
-        char c = s[i + pl];
-        if (isalpha((unsigned char)c) || c == '_' || c == '\'')
-            return false;
-    }
-    return true;
-}
-
 /* W11 — propositional-claim filter. Rejects sentence shapes the
  * heuristic verifier should NOT score as factual claims:
  *   - Opinion / mental-verb starts: "I think ...", "I believe ..."
@@ -154,7 +125,7 @@ static bool rv_sentence_is_propositional_claim(const char *s, size_t len) {
         "Rewrite ",   NULL,
     };
     for (size_t k = 0; k_skip[k]; k++) {
-        if (rv_sentence_starts_with_ci(s, len, k_skip[k]))
+        if (hu_str_sentence_starts_with_ci(s, len, k_skip[k]))
             return false;
     }
     return true;

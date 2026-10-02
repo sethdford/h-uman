@@ -209,13 +209,12 @@ hu_error_t hu_moderation_check(hu_allocator_t *alloc, const char *text, size_t t
 hu_error_t hu_crisis_response_build(hu_allocator_t *alloc, char **out, size_t *out_len) {
     if (!alloc || !out || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
-    static const char msg[] = "If you're in crisis, please reach out: "
-                              "988 Suicide & Crisis Lifeline (call/text 988), "
-                              "Crisis Text Line (text HOME to 741741)";
-    *out = (char *)alloc->alloc(alloc->ctx, sizeof(msg));
+    size_t n = 0;
+    const char *line = hu_self_harm_resource_line(&n); /* one copy of the 988 line */
+    *out = (char *)alloc->alloc(alloc->ctx, n + 1);
     if (!*out)
         return HU_ERR_OUT_OF_MEMORY;
-    memcpy(*out, msg, sizeof(msg));
-    *out_len = sizeof(msg) - 1;
+    memcpy(*out, line, n + 1);
+    *out_len = n;
     return HU_OK;
 }

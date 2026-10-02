@@ -8582,6 +8582,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                      * passes the same safety gates the text path below applies, and the
                      * bus defers a gate-flagged final; a false return with
                      * text_delivered_via_bus still false leaves delivery to that path. */
+                    /* SHIELD-005: resources keyed to the INBOUND tier, once. */
+                    (void)hu_daemon_crisis_ensure_resources(alloc, crisis_tier, &response,
+                                                            &response_len);
                     hu_daemon_final_reply_t final_reply = {
                         .alloc = alloc,
                         .agent = agent,
@@ -8752,50 +8755,19 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 }
                             }
                         }
-                        /* SHIELD-004/005: Moderation + crisis escalation before send */
-                        {
-                            hu_moderation_result_t mod_r;
-                            memset(&mod_r, 0, sizeof(mod_r));
-                            if (hu_moderation_check(alloc, send_ptr, send_len, &mod_r) == HU_OK &&
-                                mod_r.flagged) {
-                                hu_log_warn("human", agent ? agent->observer : NULL,
-                                            "moderation flagged output (categories: %s%s%s%s), "
-                                            "blocking send",
-                                            mod_r.violence ? "violence " : "",
-                                            mod_r.hate ? "hate " : "",
-                                            mod_r.sexual ? "sexual " : "",
-                                            mod_r.self_harm ? "self-harm " : "");
-                                static const char mod_safe_reply[] =
-                                    "ugh brain fart — lemme rephrase that";
-                                if (send_buf_ack) {
-                                    alloc->free(alloc->ctx, send_buf_ack, send_len + 1);
-                                    send_buf_ack = NULL;
-                                }
-                                send_ptr = mod_safe_reply;
-                                send_len = sizeof(mod_safe_reply) - 1;
-                                if (mod_r.self_harm) {
-                                    char *crisis = NULL;
-                                    size_t crisis_len = 0;
-                                    if (hu_crisis_response_build(alloc, &crisis, &crisis_len) ==
-                                            HU_OK &&
-                                        crisis) {
-                                        size_t new_len = send_len + 2 + crisis_len;
-                                        char *merged =
-                                            (char *)alloc->alloc(alloc->ctx, new_len + 1);
-                                        if (merged) {
-                                            memcpy(merged, send_ptr, send_len);
-                                            merged[send_len] = '\n';
-                                            merged[send_len + 1] = '\n';
-                                            memcpy(merged + send_len + 2, crisis, crisis_len);
-                                            merged[new_len] = '\0';
-                                            send_buf_ack = merged;
-                                            send_ptr = send_buf_ack;
-                                            send_len = new_len;
-                                        }
-                                        alloc->free(alloc->ctx, crisis, crisis_len + 1);
-                                    }
-                                }
-                            }
+                        /* SHIELD-004: a reply unsafe for others is dropped, never
+                         * swapped for canned text; self-harm wording alone (the
+                         * model offering 988) never blocks (daemon/crisis.h). */
+                        if (hu_daemon_reply_blocked(alloc, send_ptr, send_len,
+                                                    agent ? agent->observer : NULL)) {
+                            if (send_buf_ack)
+                                alloc->free(alloc->ctx, send_buf_ack, send_len + 1);
+                            send_buf_ack = NULL;
+                            send_ptr = "";
+                            send_len = 0;
+#ifndef HU_IS_TEST
+                            goto skip_send;
+#endif
                         }
                         /* SHIELD-001: Companion safety check before send */
                         {

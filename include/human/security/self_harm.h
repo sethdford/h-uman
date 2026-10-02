@@ -49,6 +49,16 @@ const char *hu_self_harm_tier_name(hu_self_harm_tier_t tier);
  * EXPLICIT returns the daemon's SHIELD-005 crisis directive byte-for-byte. */
 const char *hu_self_harm_directive(hu_self_harm_tier_t tier, size_t *len_out);
 
+/* The crisis resource line (988 / 741741) as appended to a reply. */
+const char *hu_self_harm_resource_line(size_t *len_out);
+
+/* True when the INBOUND message is explicit first-person intent and the reply
+ * does not already carry 988 — the only case a resource line is appended. The
+ * reply's own wording is never classified: a model offering 988 is a good
+ * reply, not a crisis. */
+bool hu_self_harm_reply_needs_resources(const char *inbound, size_t inbound_len, const char *reply,
+                                        size_t reply_len);
+
 /* HU_CRISIS_TIERS gate. off = the legacy lists, byte-identical to before;
  * shadow = legacy acts, the canonical tier is logged at the inbound site;
  * live = the canonical detector everywhere. Unset is LIVE: this is a safety
