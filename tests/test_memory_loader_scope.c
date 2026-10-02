@@ -26,9 +26,9 @@ static void session_scope_keeps_own_and_global_rows(void) {
 #include "human/memory/engines.h"
 
 static void store_for(hu_memory_t *m, const char *key, const char *text, const char *who) {
-    HU_ASSERT_EQ(m->vtable->store(m->ctx, key, strlen(key), text, strlen(text), NULL, who,
-                                  who ? strlen(who) : 0),
-                 HU_OK);
+    hu_error_t err = m->vtable->store(m->ctx, key, strlen(key), text, strlen(text), NULL, who,
+                                      who ? strlen(who) : 0);
+    HU_ASSERT_EQ(err, HU_OK);
 }
 
 static void loader_recall_skips_other_contacts_memories(void) {
