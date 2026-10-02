@@ -145,10 +145,11 @@ Off is exactly the pre-v2 path.
 
 ## Before `HU_PROSPECTIVE_TIME=shadow` (rollout step 5) or `=live`: known controller gaps
 
-A checklist for the person promoting the time gate. All five items are
+A checklist for the person promoting the time gate. All seven items are
 closed: 1 and 3 in `9ad82174f`, 2 and 4 in `21ff0738f`, 5 in `4b89ec964`
-(review follow-ups pinned in `999592acb`). One residual stays open and is
-LIVE-only: the lazy-history note under item 1.
+(review follow-ups pinned in `999592acb`), 6 in `78e72afd6`, 7 in
+`7737d02af`. One residual stays open and is LIVE-only: the lazy-history note
+under item 1.
 
 1. **Closed (`9ad82174f`): the history load no longer happens every tick for
    contacts with nothing due.** `pm_time_v2`
@@ -204,20 +205,43 @@ LIVE-only: the lazy-history note under item 1.
    sees the retired rows, so its `commitments_seen` / `followups_seen` /
    `skipped_existing` are lower by them.
 
-Still open before `=live` (found by the final review of the fix rounds; OFF and
-SHADOW are unaffected):
+Two more were found by the final review of the fix rounds and are now closed
+too (OFF and SHADOW were never affected):
 
-6. **A legacy settle can close the survivor it just re-mirrored.** When three
-   same-action F20 pairs sit within a few days of each other, `mark_sent` on
-   the middle follow-up re-mirrors the latest one and then, on the loop's
-   second pass, action-matches it inside the follow-up's own date window and
-   closes it (done / no outcome) while its ledger rows stay pending. v2 then
-   never surfaces that promise; only the legacy F31 path might. Fix: after
-   the first pass, match by key only, or skip rows this call re-mirrored.
-7. **The legacy F31 path is still ungated in LIVE.** Because the legacy settle
-   (correctly) leaves any twin v2 has ever surfaced to v2, an F31 send of a
-   follow-up that v2 has pending for retry does not close it, and v2 can raise
-   the same topic again. Gate F31 off in LIVE for items that have a v2 twin.
+6. **Closed (`78e72afd6`): a legacy settle no longer closes the survivor it
+   just re-mirrored.** With three same-action F20 pairs a few days apart,
+   `mark_sent` on the middle follow-up closed the collapsed row and the
+   bounded sweep re-mirrored the latest pair as a fresh open row -- whose due
+   sat inside the middle follow-up's own action window, so the twin loop's
+   next pass closed it as done / no outcome while its ledger rows stayed
+   pending. `hu_prospective_repo_settle_followup_twin` now reads `MAX(id)`
+   before its first pass and only considers rows at or below it; the table
+   is `AUTOINCREMENT`, so that is exactly the rows that predate the call. A
+   re-mirrored survivor is never a candidate; every pre-existing twin, keyed
+   or action-matched, still is (key-only matching after the first pass would
+   have dropped a pre-existing action-matched twin listed after a keyed one).
+7. **Closed (`7737d02af`): F31 leaves v2-owned rows to v2 when the time gate
+   is LIVE.** With `HU_PROSPECTIVE_TIME=live`, the F31 callback injection
+   (`hu_proactive_check_callbacks_ex`) skips any delayed follow-up -- and, in
+   its fallback, any due commitment -- that v2 owns, and moves on to the next
+   row. v2 owns a ledger row when an **open** time row of its contact
+   (pending, surfaced, or pending again for its retry) is its twin: its own
+   key, its F20 partner's key, or, for a dated row, its normalized mirror
+   text with a due within the row's due + grace
+   (`hu_prospective_repo_ledger_v2_owned`). A row whose twins are all
+   terminal, or that never had one (skipped mirror), is still F31's. The
+   decision is `hu_prospective_legacy_may_raise`: OFF and SHADOW always raise
+   without looking anything up, so F31 is byte-identical to before; in LIVE a
+   failed lookup raises nothing (fail toward silence).
+
+What still stands between `shadow` and `live` for `HU_PROSPECTIVE_TIME` is the
+measurement, not code: `HU_PROSPECTIVE` must first pass its own promotion
+(rollout steps 2-4), then `HU_PROSPECTIVE_TIME=shadow` runs for 7 days and
+must clear the spec §3 bar the same way -- the `pm_bench_local.py` harness
+PASS (Set-F1 >= 0.80, silent-negative false alarms <= 5%, cross-day miss
+<= 10%), the 7-day shadow report's `time_*` numbers, and >= 30 blind
+spot-checked time would-fires at precision >= 0.8 -- plus ruling F16 below.
+The LIVE-only lazy-history residual under item 1 also remains.
 
 Ruling F16 (applies before any promotion, not just this one): the nightly
 eval (`scripts/eval_prospective_memory.py`) must read v2's `status` /
