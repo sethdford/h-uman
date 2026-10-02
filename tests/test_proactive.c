@@ -23,6 +23,8 @@
 #include <string.h>
 #ifdef HU_ENABLE_SQLITE
 #include "human/memory/superhuman.h"
+#include <sqlite3.h>
+#include <stdlib.h>
 #include <time.h>
 #endif
 
@@ -1095,6 +1097,70 @@ static void proactive_callbacks_ex_exposes_followup_id_and_supports_retry(void) 
     mem.vtable->deinit(mem.ctx);
 }
 
+/* Known gap 7: with HU_PROSPECTIVE_TIME=live, F31 must not raise a ledger
+ * row v2 owns (an open time twin): v2 raises it, F31 would raise it again.
+ * OFF and SHADOW are main's behavior to the byte: the earliest due
+ * follow-up, owned or not. LIVE skips the owned follow-up for the one whose
+ * twin is terminal, and with only owned rows left (a follow-up and a
+ * commitment) raises nothing. */
+static void f31_pick(hu_memory_t *mem, const char *contact, char *msg, size_t cap, int64_t *id,
+                     bool *ok) {
+    hu_allocator_t alloc = hu_system_allocator();
+    *ok = hu_proactive_check_callbacks_ex(&alloc, mem, contact, strlen(contact), 0, msg, cap, id);
+}
+
+static void proactive_callbacks_skip_v2_owned_rows_only_when_time_live(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    static const char CONTACT[] = "contact_cb_gap7";
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, CONTACT, sizeof(CONTACT) - 1,
+                                                         "loan paperwork", 14, 1000000, NULL, 0),
+                 HU_OK); /* follow-up 1, twin followup:1 open: v2's */
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, CONTACT, sizeof(CONTACT) - 1,
+                                                         "the bike repair", 15, 1000100, NULL, 0),
+                 HU_OK); /* follow-up 2 */
+    HU_ASSERT_EQ(sqlite3_exec(db,
+                              "UPDATE prospective_memories SET status='expired', fired=3 WHERE "
+                              "trigger_value='followup:2'",
+                              NULL, NULL, NULL),
+                 SQLITE_OK); /* its twin is terminal: v2 no longer raises it */
+    static const char *const quiet[] = {NULL, "off", "shadow"};
+    char msg[512];
+    int64_t id = -999;
+    bool ok = false;
+    for (size_t i = 0; i < sizeof(quiet) / sizeof(quiet[0]); i++) {
+        if (quiet[i])
+            setenv("HU_PROSPECTIVE_TIME", quiet[i], 1);
+        else
+            unsetenv("HU_PROSPECTIVE_TIME");
+        f31_pick(&mem, CONTACT, msg, sizeof(msg), &id, &ok);
+        HU_ASSERT_TRUE(ok);
+        HU_ASSERT_STR_EQ(msg, "CALLBACK: Consider asking about: loan paperwork. Only if natural.");
+        HU_ASSERT_EQ(id, (int64_t)1);
+    }
+    setenv("HU_PROSPECTIVE_TIME", "live", 1);
+    f31_pick(&mem, CONTACT, msg, sizeof(msg), &id, &ok);
+    HU_ASSERT_TRUE(ok);
+    HU_ASSERT_STR_EQ(msg, "CALLBACK: Consider asking about: the bike repair. Only if natural.");
+    HU_ASSERT_EQ(id, (int64_t)2);
+
+    /* follow-up 2 delivered; a due commitment with an open twin remains */
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_mark_sent(&mem, 2), HU_OK);
+    HU_ASSERT_EQ(hu_superhuman_commitment_store(&mem, &alloc, CONTACT, sizeof(CONTACT) - 1,
+                                                "send the photos", 15, "me", 2, 1000200),
+                 HU_OK);
+    f31_pick(&mem, CONTACT, msg, sizeof(msg), &id, &ok);
+    HU_ASSERT_FALSE(ok); /* both rows are v2's: F31 stays silent */
+    HU_ASSERT_EQ(id, (int64_t)-1);
+    unsetenv("HU_PROSPECTIVE_TIME");
+    f31_pick(&mem, CONTACT, msg, sizeof(msg), &id, &ok);
+    HU_ASSERT_TRUE(ok); /* OFF: main's pick again */
+    HU_ASSERT_EQ(id, (int64_t)1);
+    mem.vtable->deinit(mem.ctx);
+}
+
 /* Sanity: the wrapper hu_proactive_check_callbacks still works when caller
  * doesn't care about the id (backward compat). */
 static void proactive_callbacks_wrapper_ignores_id(void) {
@@ -1448,6 +1514,20 @@ void run_proactive_tests(void) {
     HU_RUN_TEST(proactive_callbacks_returns_false_without_due_items);
     HU_RUN_TEST(proactive_callbacks_ex_exposes_followup_id_and_supports_retry);
     HU_RUN_TEST(proactive_callbacks_wrapper_ignores_id);
+    {
+        /* The test sets HU_PROSPECTIVE_TIME and a failed assert longjmps past its
+         * own cleanup; restore the caller's value here so one failure can't
+         * leak "live" into every later suite. */
+        const char *prev = getenv("HU_PROSPECTIVE_TIME");
+        char *saved = prev ? strdup(prev) : NULL;
+        HU_RUN_TEST(proactive_callbacks_skip_v2_owned_rows_only_when_time_live);
+        if (saved) {
+            setenv("HU_PROSPECTIVE_TIME", saved, 1);
+            free(saved);
+        } else {
+            unsetenv("HU_PROSPECTIVE_TIME");
+        }
+    }
 #endif
     HU_RUN_TEST(daemon_weather_awareness_build_directive_and_should_mention);
     HU_RUN_TEST(daemon_visual_should_share_decision);

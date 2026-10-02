@@ -53,4 +53,36 @@ hu_error_t hu_contact_insights_render(hu_memory_t *mem, hu_allocator_t *alloc,
                                       size_t max_items, size_t max_bytes, double min_confidence,
                                       char **out, size_t *out_len);
 
+/* How many of the newest live insights render_for_query weighs. */
+#define HU_CONTACT_INSIGHTS_CANDIDATES 40
+
+/* Choose at most `max_pick` of `n` insights (newest first) for a reply to
+ * `query`: the ones sharing a content word with the message come first, most
+ * shared words first, ties keeping recency; the rest of the slots go to the
+ * newest of the others, for what is going on with them now. Writes candidate
+ * indices to out_idx and returns how many. A NULL/empty query picks the
+ * newest. Pure: no I/O. */
+size_t hu_contact_insights_select(const char *const *insights, size_t n, const char *query,
+                                  size_t query_len, size_t max_pick, size_t *out_idx);
+
+/* hu_contact_insights_render, but the rows are chosen by
+ * hu_contact_insights_select from the newest HU_CONTACT_INSIGHTS_CANDIDATES
+ * against `query` (the incoming message) and rendered in that order. */
+hu_error_t hu_contact_insights_render_for_query(hu_memory_t *mem, hu_allocator_t *alloc,
+                                                const char *contact_id, size_t contact_id_len,
+                                                const char *query, size_t query_len,
+                                                size_t max_items, size_t max_bytes,
+                                                double min_confidence, char **out, size_t *out_len);
+
+/* The contact's live insights that became true at or after since_ms (as_of,
+ * else created_at), newest first, joined with '\n' — at most 200 rows, with
+ * the same confidence floor and curator_wide rule as the rendered block, so
+ * "covered" means covered by notes the model can be shown. For deciding what
+ * has gone unmentioned lately, not for the prompt. *out is allocated with
+ * `alloc` (*out_len + 1 bytes); none: *out = NULL, HU_OK. */
+hu_error_t hu_contact_insights_recent_text(hu_memory_t *mem, hu_allocator_t *alloc,
+                                           const char *contact_id, size_t contact_id_len,
+                                           int64_t since_ms, double min_confidence, char **out,
+                                           size_t *out_len);
+
 #endif /* HU_MEMORY_CONTACT_INSIGHTS_REPO_H */

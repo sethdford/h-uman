@@ -46,6 +46,7 @@ hu_error_t hu_turn_retrieve(hu_turn_ctx_t *turn_ctx) {
                               cognition_budget.max_memory_chars);
         hu_memory_loader_set_facade(&loader, agent->w7_facade);
         hu_memory_loader_set_personal_model(&loader, &agent->personal_model);
+        hu_memory_loader_set_offer_gap(&loader, true);
         /* Story B (sprint-4 follow-up): bind persona context so the loader's
          * supplementary graph render runs with persona-grounded ToM and the
          * channel-aware pragmatics digest. */

@@ -60,7 +60,6 @@ forgetting.c            Spaced-repetition based forgetting
 forgetting_curve.c      Ebbinghaus forgetting curve implementation
 promotion.c             Promotes important short-term to long-term
 compression.c           Compresses verbose memories
-connections.c           Cross-memory connection discovery
 ```
 
 ## Rules

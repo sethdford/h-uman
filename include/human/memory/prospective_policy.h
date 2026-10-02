@@ -132,6 +132,9 @@ hu_prospective_action_t hu_prospective_decide(bool judge_ok, hu_prospective_verd
  * `max`. Returns the count. */
 size_t hu_prospective_key_terms(const char *action, char out[][HU_PROSPECTIVE_KEY_TERM_LEN],
                                 size_t max);
+/* `term` (a key term) appears in text as a whole word, case-insensitive, a
+ * trailing plural 's' tolerated either way ("cramp" matches "cramps"). */
+bool hu_prospective_text_has_term(const char *text, size_t len, const char *term);
 /* The delivered reply carries the action: at least half of its key terms
  * (and at least one) appear as whole words, a trailing plural 's' tolerated
  * either way. An action with no key terms can never be proven used. */
@@ -208,6 +211,14 @@ hu_prospective_mirror_t hu_prospective_mirror_action(bool is_followup, const cha
                                                      size_t text_len, const char *who,
                                                      size_t who_len, char *buf, size_t cap,
                                                      const char **action, size_t *action_len);
+
+/* ── Legacy raisers under HU_PROSPECTIVE_TIME (known gap 7) ──────────
+ * May a legacy path that initiates a message (F31's callback injection)
+ * raise a ledger row? OFF and SHADOW: always -- today's behavior, and the
+ * caller needs no lookup. LIVE: only when the ownership lookup
+ * (hu_prospective_repo_ledger_v2_owned) succeeded and found no open v2
+ * twin; a failed lookup fails toward silence. */
+bool hu_prospective_legacy_may_raise(hu_gate_mode_t time_mode, bool lookup_ok, bool v2_owned);
 
 /* ── Judge prompt ────────────────────────────────────────────────────── */
 const char *hu_prospective_judge_system(size_t *len);

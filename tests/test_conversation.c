@@ -3735,6 +3735,33 @@ static void strip_channel_tag_sys_markers(void) {
 
 /* ── Formal structure stripping tests ─────────────────────────────── */
 
+/* The memo direction says "Voice memo, a few connected thoughts"; GLM opened
+ * a reply with "Voice memo:\n\n" and, when the memo fell back to text, the
+ * label went out as a text (2026-10-01). */
+static void strip_formal_leading_delivery_label(void) {
+    char buf[128];
+    strcpy(buf, "Voice memo:\n\n\"Let's see... A for the first one");
+    size_t len = hu_conversation_strip_formal_structure(buf, strlen(buf));
+    HU_ASSERT_STR_EQ(buf, "\"Let's see... A for the first one");
+    HU_ASSERT_EQ(len, strlen(buf));
+    strcpy(buf, "voice note: ugh ok so");
+    len = hu_conversation_strip_formal_structure(buf, strlen(buf));
+    HU_ASSERT_STR_EQ(buf, "ugh ok so");
+    strcpy(buf, "Text: running late");
+    len = hu_conversation_strip_formal_structure(buf, strlen(buf));
+    HU_ASSERT_STR_EQ(buf, "running late");
+    /* only a label that opens the reply; words that merely start like one stay */
+    strcpy(buf, "voice memos are weird lol");
+    len = hu_conversation_strip_formal_structure(buf, strlen(buf));
+    HU_ASSERT_STR_EQ(buf, "voice memos are weird lol");
+    strcpy(buf, "lol\nvoice memo: later");
+    len = hu_conversation_strip_formal_structure(buf, strlen(buf));
+    HU_ASSERT_STR_EQ(buf, "lol\nvoice memo: later");
+    strcpy(buf, "Voice memo:");
+    len = hu_conversation_strip_formal_structure(buf, strlen(buf));
+    HU_ASSERT_EQ(len, (size_t)0);
+}
+
 static void strip_formal_numbered_list(void) {
     char buf[128];
     strcpy(buf, "1. First thing\n2. Second thing\n3. Third thing");
@@ -5226,6 +5253,7 @@ void run_conversation_tests(void) {
 
     /* Formal structure stripping */
     HU_RUN_TEST(strip_formal_numbered_list);
+    HU_RUN_TEST(strip_formal_leading_delivery_label);
     HU_RUN_TEST(strip_formal_em_dash);
     HU_RUN_TEST(strip_formal_no_change);
     HU_RUN_TEST(strip_formal_en_dash);
