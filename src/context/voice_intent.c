@@ -55,6 +55,14 @@ static bool is_real_question(const char *s, size_t n) {
     return ends_with_question(s, n) && count_words(s, n) >= 8;
 }
 
+size_t hu_voice_intent_word_count(const char *s, size_t len) {
+    return s ? count_words(s, len) : 0;
+}
+
+bool hu_voice_intent_is_logistics(const char *s, size_t len) {
+    return s && is_logistics(s, len);
+}
+
 bool hu_voice_intent_memo_shaped(const char *text, size_t len) {
     if (!text)
         return false;

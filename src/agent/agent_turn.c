@@ -3801,61 +3801,11 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                 hu_log_warn("agent", NULL, "history compaction failed: %s",
                             hu_error_string(compact_err));
 
-            /* Hierarchical summarization for deeper memory */
-            if (agent->provider.vtable && agent->provider.vtable->chat) {
-                char *session_sum = NULL, *chapter_sum = NULL, *overall_sum = NULL;
-                size_t session_len = 0, chapter_len = 0, overall_len = 0;
-                if (agent->history_count > 0) {
-                    const char *last_content = agent->history[agent->history_count - 1].content;
-                    size_t last_len = last_content ? strlen(last_content) : 0;
-                    if (last_len > 0 && hu_compact_hierarchical(
-                                            agent->alloc, &agent->provider, agent->model_name,
-                                            agent->model_name_len, last_content, last_len,
-                                            &session_sum, &session_len, &chapter_sum, &chapter_len,
-                                            &overall_sum, &overall_len) == HU_OK) {
-#if defined(HU_ENABLE_SQLITE)
-                        if (agent->memory && agent->memory->vtable &&
-                            agent->memory->vtable->store && agent->memory_session_id &&
-                            agent->memory_session_id_len > 0) {
-                            hu_memory_category_t hcat = {.tag = HU_MEMORY_CATEGORY_CONVERSATION};
-                            const char *hsid = agent->memory_session_id;
-                            size_t hsid_len = agent->memory_session_id_len;
-                            static const char src[] = "compaction";
-                            if (session_sum && session_len > 0) {
-                                hu_error_t store_err = hu_memory_store_with_source(
-                                    agent->memory, "hierarchical_session", 20, session_sum,
-                                    session_len, &hcat, hsid, hsid_len, src, sizeof(src) - 1);
-                                if (store_err != HU_OK)
-                                    hu_log_warn("agent", NULL, "memory store failed: %s",
-                                                hu_error_string(store_err));
-                            }
-                            if (chapter_sum && chapter_len > 0) {
-                                hu_error_t store_err = hu_memory_store_with_source(
-                                    agent->memory, "hierarchical_chapter", 21, chapter_sum,
-                                    chapter_len, &hcat, hsid, hsid_len, src, sizeof(src) - 1);
-                                if (store_err != HU_OK)
-                                    hu_log_warn("agent", NULL, "memory store failed: %s",
-                                                hu_error_string(store_err));
-                            }
-                            if (overall_sum && overall_len > 0) {
-                                hu_error_t store_err = hu_memory_store_with_source(
-                                    agent->memory, "hierarchical_overall", 21, overall_sum,
-                                    overall_len, &hcat, hsid, hsid_len, src, sizeof(src) - 1);
-                                if (store_err != HU_OK)
-                                    hu_log_warn("agent", NULL, "memory store failed: %s",
-                                                hu_error_string(store_err));
-                            }
-                        }
-#endif
-                    }
-                    if (session_sum)
-                        agent->alloc->free(agent->alloc->ctx, session_sum, session_len + 1);
-                    if (chapter_sum)
-                        agent->alloc->free(agent->alloc->ctx, chapter_sum, chapter_len + 1);
-                    if (overall_sum)
-                        agent->alloc->free(agent->alloc->ctx, overall_sum, overall_len + 1);
-                }
-            }
+            /* No "hierarchical" summaries here. They summarised only the last
+             * history message, were stored under three global keys that each
+             * compaction overwrote for whichever contact compacted last, and
+             * nothing read them by key: they reached other contacts' prompts
+             * through recall (removed 2026-10-01). */
         }
 
         /* Context pressure: estimate tokens, check thresholds, auto-compact if needed */
