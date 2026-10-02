@@ -1,7 +1,8 @@
+// @covers-none — spans ingest, inbox, consolidation and the sqlite engine;
+// the name implies src/memory/memory.c (the facade), which it never tests.
 #include "human/core/allocator.h"
 #include "human/core/string.h"
 #include "human/memory.h"
-#include "human/memory/connections.h"
 #include "human/memory/consolidation.h"
 #include "human/memory/inbox.h"
 #include "human/memory/ingest.h"
@@ -106,15 +107,14 @@ static void contact_memory_store_and_recall(void) {
 
     const char *contact_a = "user_a";
     size_t contact_a_len = 6;
-    hu_error_t err = hu_memory_store_for_contact(&mem, contact_a, contact_a_len,
-                                                  "pref", 4, "likes dark mode", 15,
-                                                  NULL, "", 0);
+    hu_error_t err = hu_memory_store_for_contact(&mem, contact_a, contact_a_len, "pref", 4,
+                                                 "likes dark mode", 15, NULL, "", 0);
     HU_ASSERT_EQ(err, HU_OK);
 
     hu_memory_entry_t *entries = NULL;
     size_t count = 0;
-    err = hu_memory_recall_for_contact(&mem, &alloc, contact_a, contact_a_len,
-                                       "dark", 4, 5, "", 0, &entries, &count);
+    err = hu_memory_recall_for_contact(&mem, &alloc, contact_a, contact_a_len, "dark", 4, 5, "", 0,
+                                       &entries, &count);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(count >= 1);
     HU_ASSERT_TRUE(entries[0].content && memcmp(entries[0].content, "likes dark mode", 15) == 0);
@@ -135,14 +135,16 @@ static void contact_memory_cross_contact_isolation(void) {
     size_t len_a = 6, len_b = 6;
 
     HU_ASSERT_EQ(hu_memory_store_for_contact(&mem, contact_a, len_a, "key_a", 5,
-                                             "alpha likes coffee", 18, NULL, "", 0), HU_OK);
+                                             "alpha likes coffee", 18, NULL, "", 0),
+                 HU_OK);
     HU_ASSERT_EQ(hu_memory_store_for_contact(&mem, contact_b, len_b, "key_b", 5,
-                                             "bravo prefers tea", 17, NULL, "", 0), HU_OK);
+                                             "bravo prefers tea", 17, NULL, "", 0),
+                 HU_OK);
 
     hu_memory_entry_t *entries = NULL;
     size_t count = 0;
-    hu_error_t err = hu_memory_recall_for_contact(&mem, &alloc, contact_a, len_a,
-                                                   "coffee", 6, 5, "", 0, &entries, &count);
+    hu_error_t err = hu_memory_recall_for_contact(&mem, &alloc, contact_a, len_a, "coffee", 6, 5,
+                                                  "", 0, &entries, &count);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(count >= 1);
     HU_ASSERT_TRUE(memcmp(entries[0].content, "alpha likes coffee", 18) == 0);
@@ -152,8 +154,8 @@ static void contact_memory_cross_contact_isolation(void) {
 
     entries = NULL;
     count = 0;
-    err = hu_memory_recall_for_contact(&mem, &alloc, contact_a, len_a, "tea", 3,
-                                       5, "", 0, &entries, &count);
+    err = hu_memory_recall_for_contact(&mem, &alloc, contact_a, len_a, "tea", 3, 5, "", 0, &entries,
+                                       &count);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_EQ(count, 0u);
     if (entries) {
@@ -178,96 +180,7 @@ static void test_store_with_source_fallback(void) {
 
 /* ── Feature 2: Connection discovery ─────────────────────────────────── */
 
-static void test_connections_build_prompt(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_memory_entry_t entries[2];
-    memset(entries, 0, sizeof(entries));
-    entries[0].key = "note1";
-    entries[0].key_len = 5;
-    entries[0].content = "AI agents are growing fast";
-    entries[0].content_len = 26;
-    entries[0].timestamp = "2026-03-01";
-    entries[0].timestamp_len = 10;
-    entries[1].key = "note2";
-    entries[1].key_len = 5;
-    entries[1].content = "Reduce inference costs by 40%";
-    entries[1].content_len = 29;
-    entries[1].timestamp = "2026-03-02";
-    entries[1].timestamp_len = 10;
-
-    char *prompt = NULL;
-    size_t prompt_len = 0;
-    hu_error_t err = hu_connections_build_prompt(&alloc, entries, 2, &prompt, &prompt_len);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_NOT_NULL(prompt);
-    HU_ASSERT_TRUE(prompt_len > 0);
-    HU_ASSERT_TRUE(strstr(prompt, "Memory 0") != NULL);
-    HU_ASSERT_TRUE(strstr(prompt, "AI agents") != NULL);
-    HU_ASSERT_TRUE(strstr(prompt, "Memory 1") != NULL);
-    alloc.free(alloc.ctx, prompt, HU_CONN_PROMPT_CAP);
-}
-
-static void test_connections_parse_valid(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    const char *json = "{\"connections\":[{\"a\":0,\"b\":1,\"relationship\":\"both about cost\","
-                       "\"strength\":0.8}],\"insights\":[{\"text\":\"Cost and scale are linked\","
-                       "\"related\":[0,1]}]}";
-    size_t json_len = strlen(json);
-
-    hu_connection_result_t result;
-    hu_error_t err = hu_connections_parse(&alloc, json, json_len, 2, &result);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_EQ(result.connection_count, 1);
-    HU_ASSERT_EQ(result.connections[0].memory_a_idx, 0);
-    HU_ASSERT_EQ(result.connections[0].memory_b_idx, 1);
-    HU_ASSERT_NOT_NULL(result.connections[0].relationship);
-    HU_ASSERT_EQ(result.insight_count, 1);
-    HU_ASSERT_NOT_NULL(result.insights[0].text);
-    HU_ASSERT_TRUE(strstr(result.insights[0].text, "Cost") != NULL);
-    hu_connection_result_deinit(&result, &alloc);
-}
-
-static void test_connections_parse_empty(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_connection_result_t result;
-    hu_error_t err = hu_connections_parse(&alloc, "{}", 2, 0, &result);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_EQ(result.connection_count, 0);
-    HU_ASSERT_EQ(result.insight_count, 0);
-    hu_connection_result_deinit(&result, &alloc);
-}
-
 #ifdef HU_ENABLE_SQLITE
-static void test_connections_store_insights(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
-
-    hu_memory_entry_t entries[2];
-    memset(entries, 0, sizeof(entries));
-    entries[0].key = "a";
-    entries[0].key_len = 1;
-    entries[0].content = "content a";
-    entries[0].content_len = 9;
-    entries[1].key = "b";
-    entries[1].key_len = 1;
-    entries[1].content = "content b";
-    entries[1].content_len = 9;
-
-    hu_connection_result_t result;
-    memset(&result, 0, sizeof(result));
-    result.insight_count = 1;
-    result.insights[0].text = (char *)"Test insight about a and b";
-    result.insights[0].text_len = 26;
-
-    hu_error_t err = hu_connections_store_insights(&alloc, &mem, &result, entries, 2);
-    HU_ASSERT_EQ(err, HU_OK);
-
-    size_t count = 0;
-    mem.vtable->count(mem.ctx, &count);
-    HU_ASSERT_TRUE(count >= 1);
-
-    mem.vtable->deinit(mem.ctx);
-}
 #endif
 
 /* ── Feature 3: Multimodal ingestion ─────────────────────────────────── */
@@ -406,34 +319,6 @@ static void test_insight_category_store_recall(void) {
 
 /* ── Audit fix regression tests ──────────────────────────────────────── */
 
-static void test_connections_parse_markdown_wrapped(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    const char *json = "```json\n{\"connections\":[],\"insights\":[{\"text\":\"wrapped insight\","
-                       "\"related\":[]}]}\n```";
-    size_t json_len = strlen(json);
-
-    hu_connection_result_t result;
-    hu_error_t err = hu_connections_parse(&alloc, json, json_len, 0, &result);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_EQ(result.insight_count, 1);
-    HU_ASSERT_NOT_NULL(result.insights[0].text);
-    HU_ASSERT_TRUE(strstr(result.insights[0].text, "wrapped") != NULL);
-    hu_connection_result_deinit(&result, &alloc);
-}
-
-static void test_connections_parse_out_of_bounds_indices(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    const char *json = "{\"connections\":[{\"a\":5,\"b\":10,\"relationship\":\"oob\","
-                       "\"strength\":0.5}],\"insights\":[]}";
-    size_t json_len = strlen(json);
-
-    hu_connection_result_t result;
-    hu_error_t err = hu_connections_parse(&alloc, json, json_len, 3, &result);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_EQ(result.connection_count, 0);
-    hu_connection_result_deinit(&result, &alloc);
-}
-
 static void test_consolidation_timestamp_compare(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_memory_t mem = hu_none_memory_create(&alloc);
@@ -536,73 +421,10 @@ static void test_consolidation_max_entries(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
-static void test_connection_pipeline_end_to_end(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
-
-    hu_memory_entry_t entries[3];
-    memset(entries, 0, sizeof(entries));
-    entries[0].key = "project-deadline";
-    entries[0].key_len = 16;
-    entries[0].content = "Main project deadline is end of March";
-    entries[0].content_len = 37;
-    entries[1].key = "meeting-notes";
-    entries[1].key_len = 13;
-    entries[1].content = "Team wants to ship before March deadline";
-    entries[1].content_len = 40;
-    entries[2].key = "user-preference";
-    entries[2].key_len = 15;
-    entries[2].content = "User prefers dark mode for late-night work";
-    entries[2].content_len = 43;
-
-    char *prompt = NULL;
-    size_t prompt_len = 0;
-    hu_error_t err = hu_connections_build_prompt(&alloc, entries, 3, &prompt, &prompt_len);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_NOT_NULL(prompt);
-    HU_ASSERT_TRUE(strstr(prompt, "Memory 0") != NULL);
-    HU_ASSERT_TRUE(strstr(prompt, "Memory 2") != NULL);
-    alloc.free(alloc.ctx, prompt, HU_CONN_PROMPT_CAP);
-
-    const char *mock_response =
-        "{\"connections\":[{\"a\":0,\"b\":1,\"relationship\":\"both about March deadline\","
-        "\"strength\":0.9}],\"insights\":[{\"text\":\"Project deadline and team shipping "
-        "goal are tightly coupled\",\"related\":[0,1]}]}";
-    hu_connection_result_t result;
-    err = hu_connections_parse(&alloc, mock_response, strlen(mock_response), 3, &result);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_EQ(result.connection_count, 1);
-    HU_ASSERT_EQ(result.insight_count, 1);
-
-    err = hu_connections_store_insights(&alloc, &mem, &result, entries, 3);
-    HU_ASSERT_EQ(err, HU_OK);
-    hu_connection_result_deinit(&result, &alloc);
-
-    size_t count = 0;
-    mem.vtable->count(mem.ctx, &count);
-    HU_ASSERT_TRUE(count >= 1);
-
-    hu_memory_entry_t *listed = NULL;
-    size_t listed_count = 0;
-    hu_memory_category_t cat = {.tag = HU_MEMORY_CATEGORY_INSIGHT};
-    err = mem.vtable->list(mem.ctx, &alloc, &cat, NULL, 0, &listed, &listed_count);
-    HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_EQ(listed_count, 1);
-    HU_ASSERT_TRUE(strstr(listed[0].content, "tightly coupled") != NULL);
-    HU_ASSERT_NOT_NULL(listed[0].source);
-    HU_ASSERT_TRUE(memcmp(listed[0].source, "connection_discovery", 20) == 0);
-
-    for (size_t i = 0; i < listed_count; i++)
-        hu_memory_entry_free_fields(&alloc, &listed[i]);
-    alloc.free(alloc.ctx, listed, listed_count * sizeof(hu_memory_entry_t));
-    mem.vtable->deinit(mem.ctx);
-}
-
 static void test_ingest_file_with_provider_unknown_type(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
-    hu_error_t err =
-        hu_ingest_file_with_provider(&alloc, &mem, NULL, "data.xyz", 8, NULL, 0);
+    hu_error_t err = hu_ingest_file_with_provider(&alloc, &mem, NULL, "data.xyz", 8, NULL, 0);
     HU_ASSERT_EQ(err, HU_ERR_NOT_SUPPORTED);
     mem.vtable->deinit(mem.ctx);
 }
@@ -636,11 +458,7 @@ void run_memory_features_tests(void) {
     HU_RUN_TEST(test_store_with_source_fallback);
 
     HU_TEST_SUITE("memory_features — connections");
-    HU_RUN_TEST(test_connections_build_prompt);
-    HU_RUN_TEST(test_connections_parse_valid);
-    HU_RUN_TEST(test_connections_parse_empty);
 #ifdef HU_ENABLE_SQLITE
-    HU_RUN_TEST(test_connections_store_insights);
 #endif
 
     HU_TEST_SUITE("memory_features — ingestion");
@@ -667,8 +485,6 @@ void run_memory_features_tests(void) {
 #endif
 
     HU_TEST_SUITE("memory_features — audit fixes");
-    HU_RUN_TEST(test_connections_parse_markdown_wrapped);
-    HU_RUN_TEST(test_connections_parse_out_of_bounds_indices);
     HU_RUN_TEST(test_consolidation_timestamp_compare);
 #ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(test_consolidation_iso_decay);
@@ -679,7 +495,6 @@ void run_memory_features_tests(void) {
 #ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(test_consolidation_dedup);
     HU_RUN_TEST(test_consolidation_max_entries);
-    HU_RUN_TEST(test_connection_pipeline_end_to_end);
     HU_RUN_TEST(test_ingest_file_with_provider_unknown_type);
 #endif
     HU_RUN_TEST(test_similarity_score_basics);

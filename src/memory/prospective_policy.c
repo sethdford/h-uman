@@ -97,6 +97,12 @@ hu_gate_mode_t hu_prospective_gate_mode(void) {
     return hu_gate_mode_from_env("HU_PROSPECTIVE", HU_GATE_OFF);
 }
 
+bool hu_prospective_legacy_may_raise(hu_gate_mode_t time_mode, bool lookup_ok, bool v2_owned) {
+    if (time_mode != HU_GATE_LIVE)
+        return true;
+    return lookup_ok && !v2_owned;
+}
+
 hu_gate_mode_t hu_prospective_time_gate_mode(void) {
     return hu_gate_mode_from_env("HU_PROSPECTIVE_TIME", HU_GATE_OFF);
 }
@@ -262,7 +268,7 @@ size_t hu_prospective_key_terms(const char *action, char out[][HU_PROSPECTIVE_KE
     return n;
 }
 
-static bool pm_reply_has_term(const char *reply, size_t len, const char *term) {
+bool hu_prospective_text_has_term(const char *reply, size_t len, const char *term) {
     if (hu_str_contains_word_ci_n(reply, len, term))
         return true;
     char alt[HU_PROSPECTIVE_KEY_TERM_LEN + 2];
@@ -287,7 +293,7 @@ bool hu_prospective_reply_uses_action(const char *action, const char *reply, siz
         return false;
     size_t hit = 0;
     for (size_t i = 0; i < n; i++)
-        if (pm_reply_has_term(reply, reply_len, terms[i]))
+        if (hu_prospective_text_has_term(reply, reply_len, terms[i]))
             hit++;
     return hit > 0 && hit * 2 >= n;
 }

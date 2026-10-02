@@ -3801,61 +3801,11 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                 hu_log_warn("agent", NULL, "history compaction failed: %s",
                             hu_error_string(compact_err));
 
-            /* Hierarchical summarization for deeper memory */
-            if (agent->provider.vtable && agent->provider.vtable->chat) {
-                char *session_sum = NULL, *chapter_sum = NULL, *overall_sum = NULL;
-                size_t session_len = 0, chapter_len = 0, overall_len = 0;
-                if (agent->history_count > 0) {
-                    const char *last_content = agent->history[agent->history_count - 1].content;
-                    size_t last_len = last_content ? strlen(last_content) : 0;
-                    if (last_len > 0 && hu_compact_hierarchical(
-                                            agent->alloc, &agent->provider, agent->model_name,
-                                            agent->model_name_len, last_content, last_len,
-                                            &session_sum, &session_len, &chapter_sum, &chapter_len,
-                                            &overall_sum, &overall_len) == HU_OK) {
-#if defined(HU_ENABLE_SQLITE)
-                        if (agent->memory && agent->memory->vtable &&
-                            agent->memory->vtable->store && agent->memory_session_id &&
-                            agent->memory_session_id_len > 0) {
-                            hu_memory_category_t hcat = {.tag = HU_MEMORY_CATEGORY_CONVERSATION};
-                            const char *hsid = agent->memory_session_id;
-                            size_t hsid_len = agent->memory_session_id_len;
-                            static const char src[] = "compaction";
-                            if (session_sum && session_len > 0) {
-                                hu_error_t store_err = hu_memory_store_with_source(
-                                    agent->memory, "hierarchical_session", 20, session_sum,
-                                    session_len, &hcat, hsid, hsid_len, src, sizeof(src) - 1);
-                                if (store_err != HU_OK)
-                                    hu_log_warn("agent", NULL, "memory store failed: %s",
-                                                hu_error_string(store_err));
-                            }
-                            if (chapter_sum && chapter_len > 0) {
-                                hu_error_t store_err = hu_memory_store_with_source(
-                                    agent->memory, "hierarchical_chapter", 21, chapter_sum,
-                                    chapter_len, &hcat, hsid, hsid_len, src, sizeof(src) - 1);
-                                if (store_err != HU_OK)
-                                    hu_log_warn("agent", NULL, "memory store failed: %s",
-                                                hu_error_string(store_err));
-                            }
-                            if (overall_sum && overall_len > 0) {
-                                hu_error_t store_err = hu_memory_store_with_source(
-                                    agent->memory, "hierarchical_overall", 21, overall_sum,
-                                    overall_len, &hcat, hsid, hsid_len, src, sizeof(src) - 1);
-                                if (store_err != HU_OK)
-                                    hu_log_warn("agent", NULL, "memory store failed: %s",
-                                                hu_error_string(store_err));
-                            }
-                        }
-#endif
-                    }
-                    if (session_sum)
-                        agent->alloc->free(agent->alloc->ctx, session_sum, session_len + 1);
-                    if (chapter_sum)
-                        agent->alloc->free(agent->alloc->ctx, chapter_sum, chapter_len + 1);
-                    if (overall_sum)
-                        agent->alloc->free(agent->alloc->ctx, overall_sum, overall_len + 1);
-                }
-            }
+            /* No "hierarchical" summaries here. They summarised only the last
+             * history message, were stored under three global keys that each
+             * compaction overwrote for whichever contact compacted last, and
+             * nothing read them by key: they reached other contacts' prompts
+             * through recall (removed 2026-10-01). */
         }
 
         /* Context pressure: estimate tokens, check thresholds, auto-compact if needed */
@@ -6902,75 +6852,11 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                 }
             }
 
-            /* Fact extraction: extract structured facts from user + AI messages
-             * with intra-batch dedup to avoid duplicate stores.
-             *
-             * 2026-05-26 issue-sweep — stored_facts[16] was previously a ~24KB
-             * STACK array declared inside this if-block. ASan stack-use-after-
-             * scope caught a cross-thread write to stored_facts[~10] at
-             * agent_turn.c:797 (resolved coarsely) — a worker thread (T1 from
-             * cli.c:1234 pthread_create) wrote to the address AFTER the
-             * if-block exited. Moving to heap eliminates the intra-function
-             * UAS window because the buffer lives until explicit free, not
-             * until block exit. Allocation failure → silently skip fact
-             * extraction (non-fatal — facts are a learned signal, not a
-             * correctness invariant). */
-            if (*response_out && response_len_out && *response_len_out > 0 && agent->memory &&
-                agent->memory->vtable && agent->memory->vtable->store) {
-                hu_heuristic_fact_t *stored_facts = (hu_heuristic_fact_t *)agent->alloc->alloc(
-                    agent->alloc->ctx, 16 * sizeof(hu_heuristic_fact_t));
-                if (stored_facts) {
-                    memset(stored_facts, 0, 16 * sizeof(hu_heuristic_fact_t));
-                    size_t stored_count = 0;
-                    const char *fact_sources[] = {msg, *response_out};
-                    size_t fact_source_lens[] = {msg_len, *response_len_out};
-                    for (size_t fs = 0; fs < 2; fs++) {
-                        if (!fact_sources[fs] || fact_source_lens[fs] == 0)
-                            continue;
-                        hu_fact_extract_result_t fact_res;
-                        memset(&fact_res, 0, sizeof(fact_res));
-                        if (hu_fact_extract(fact_sources[fs], fact_source_lens[fs], &fact_res) ==
-                                HU_OK &&
-                            fact_res.fact_count > 0) {
-                            if (stored_count > 0)
-                                hu_fact_dedup(&fact_res, stored_facts, stored_count);
-                            for (size_t fi = 0; fi < fact_res.fact_count; fi++) {
-                                if (fact_res.facts[fi].confidence < HU_FACT_CONFIDENCE_MIN)
-                                    continue;
-                                /* Intra-batch dedup: skip if same subject+predicate already stored.
-                                 */
-                                bool dup = false;
-                                for (size_t si = 0; si < stored_count && !dup; si++) {
-                                    if (strcmp(fact_res.facts[fi].subject,
-                                               stored_facts[si].subject) == 0 &&
-                                        strcmp(fact_res.facts[fi].predicate,
-                                               stored_facts[si].predicate) == 0)
-                                        dup = true;
-                                }
-                                if (dup)
-                                    continue;
-                                char *fk = NULL, *fv = NULL;
-                                size_t fk_len = 0, fv_len = 0;
-                                if (hu_fact_format_for_store(agent->alloc, &fact_res.facts[fi], &fk,
-                                                             &fk_len, &fv, &fv_len) == HU_OK &&
-                                    fk && fv) {
-                                    (void)agent->memory->vtable->store(
-                                        agent->memory->ctx, fk, fk_len, fv, fv_len, NULL,
-                                        agent->memory_session_id, agent->memory_session_id_len);
-                                    if (stored_count < 16)
-                                        stored_facts[stored_count++] = fact_res.facts[fi];
-                                }
-                                if (fk)
-                                    agent->alloc->free(agent->alloc->ctx, fk, fk_len + 1);
-                                if (fv)
-                                    agent->alloc->free(agent->alloc->ctx, fv, fv_len + 1);
-                            }
-                        }
-                    }
-                    agent->alloc->free(agent->alloc->ctx, stored_facts,
-                                       16 * sizeof(hu_heuristic_fact_t));
-                }
-            }
+            /* No heuristic fact store here. The regex SPO extractor ran on both the
+             * inbound text and our own reply, always with subject "user", and in
+             * 30 days of production left 12 rows such as "user loves that for
+             * you" and "user cat doesn't". Per-contact facts come from the
+             * nightly LLM extractor (contact_insights) instead. */
 
             /* Auto-save session after successful turn completion */
             if (agent->auto_save && agent->session_id[0] != '\0') {

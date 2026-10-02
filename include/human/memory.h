@@ -203,6 +203,12 @@ hu_error_t hu_sqlite_memory_reindex_semantic(hu_memory_t *mem, size_t limit, siz
  * reindex only embeds rows missing from the index. */
 hu_error_t hu_sqlite_memory_reindex_semantic_full(hu_memory_t *mem, size_t limit,
                                                   size_t *indexed_out);
+/* The session (contact) a stored memory belongs to, by key, into buf ("" for
+ * a global row). False when the key is not stored or mem is not sqlite: the
+ * semantic index keeps only key and text, so retrieval reads the owner back
+ * from here. */
+bool hu_sqlite_memory_session_of(hu_memory_t *mem, const char *key, size_t key_len, char *buf,
+                                 size_t cap);
 
 #ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>
