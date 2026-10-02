@@ -373,7 +373,10 @@ done
 STAMP="\$(date +%Y%m%d%H%M%S)fake"
 mkdir -p "\$HOME/.human/logs"
 # A trainer that ran long enough to learn, then died on a checkpoint write.
+# A templated trainer prints its contract line before step 1 (2026-10-02);
+# LEAVES=complete_untemplated simulates the old untemplated path, which never does.
 {
+  [ "$2" != "complete_untemplated" ] && echo "[mlx_lm_sft_templated] template contract holds on 1164 trainer-tokenized sequences (one leading [gMASK], last token '<|user|>')"
   echo "Iter 1: Val loss 5.545, Val took 14.1s"
   echo "Iter 1000: Val loss 2.187, Val took 13.1s"
   echo "Iter 2000: Val loss 2.390, Val took 12.0s"
@@ -417,6 +420,7 @@ FAKE_CRASH
 # Runs the stage against a crashing fake trainer; echoes the stage's log output.
 run_crash_case() {
     local home=$1 leaves=$2 repo="$1/fake-repo"
+    # complete_untemplated writes the same complete adapter as `complete`.
     mkdir -p "$repo/scripts/blind_ab" "$home/.human/training-data/glm-v61-pref" "$home/.human/venvs/eval312/bin"
     # Self-contained: Case 9's cleanup has already removed the shared backup.
     cat > "$repo/scripts/blind_ab/score_candidate_offline.py" <<'FAKE_SCORE_CRASH'
@@ -507,5 +511,19 @@ check "quarantine: the planted .rejected- sibling really does sort last" \
     "[[ \"\$(ls -d \"$T13\"/.human/training-data/adapters/seth-glm-air-* | sort | tail -1)\" == *'.rejected-'* ]]" \
     "$(ls -d "$T13"/.human/training-data/adapters/seth-glm-air-* 2>/dev/null | sort)"
 rm -rf "$T13"
+
+# ── Case 14: a complete adapter whose train log has NO template contract line
+#    (the untemplated path the 2026-10-02 fix retires) is staged but NOT scored,
+#    and marked UNTEMPLATED; HU_TRAIN_ALLOW_UNTEMPLATED=1 (the rollback) scores it.
+T14=$(mktemp -d); out14=$(run_crash_case "$T14" complete_untemplated)
+check "untemplated: refuses to score a candidate trained without the chat template" \
+    "[[ \"\$out14\" == *'NOT trained on the production chat template'* ]] && [ ! -f \"$T14/.fake-score.record\" ]" "$out14"
+check "untemplated: UNTEMPLATED marker written beside the adapter" \
+    "ls \"$T14\"/.human/training-data/adapters/*/UNTEMPLATED >/dev/null 2>&1" "$out14"
+rm -rf "$T14"
+T14b=$(mktemp -d); out14b=$(HU_TRAIN_ALLOW_UNTEMPLATED=1 run_crash_case "$T14b" complete_untemplated)
+check "untemplated+rollback: HU_TRAIN_ALLOW_UNTEMPLATED=1 still scores it, loudly" \
+    "[[ \"\$out14b\" == *'WITHOUT the production chat template; scoring anyway'* && \"\$out14b\" == *'scoring candidate vs serving (offline LUAR)'* ]]" "$out14b"
+rm -rf "$T14b"
 
 exit $fail

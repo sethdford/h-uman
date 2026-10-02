@@ -656,6 +656,76 @@ def test_m3_promote_skip_smoke_gate_records_override():
         srv.shutdown()
 
 
+# ─────────────────────────────────────────────────────────────────────
+# Empty-reply gate (scripts/empty_reply_gate.py manifest, written by the
+# nightly retrain's spare-port eval). Enforced only when the manifest says so
+# (HU_RETRAIN_EMPTY_EVAL=live); no manifest / shadow manifest changes nothing.
+# ─────────────────────────────────────────────────────────────────────
+
+def _write_empty_manifest(adapter_dir: Path, verdict: str, enforce: bool):
+    (adapter_dir / "promotion_manifest.json").write_text(json.dumps({
+        "schema": 1, "candidate_adapter": str(adapter_dir), "serving_adapter": "/serving-adapter",
+        "empty_reply": {"verdict": verdict, "reason": "fixture", "enforce": enforce,
+                        "mode": "live" if enforce else "shadow",
+                        "candidate_rate": 0.083, "serving_rate": 0.069},
+        "authorship": {"verdict": "PASS"},
+        "promotion_gate": {"verdict": verdict if enforce else "PASS"}}))
+
+
+def _empty_gate_case(verdict, enforce, *extra):
+    FakeMLX.CURRENT_ADAPTER = "/serving-adapter"
+    FakeMLX.SWAP_HISTORY = []
+    srv, url = serve_fake()
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            home = Path(d)
+            adapter = home / "seth-glm-air-cand"
+            adapter.mkdir()
+            # Authorship and smoke gates both PASS, so only the empty-reply gate can refuse.
+            _write_gate_fixture(home, str(adapter), candidate_twin=0.71,
+                                serving_twin=0.625, floor=0.62)
+            _write_smoke_fixture(home, str(adapter))
+            if verdict is not None:
+                _write_empty_manifest(adapter, verdict, enforce)
+            r = run_cli(home, url, "promote", "--adapter", str(adapter), "--yes",
+                        "--no-prod-check", "--evidence", "blind_ab gate PASS (test fixture)", *extra)
+            entry = _read_registry(home).get("adapters", {}).get(adapter.name, {})
+            return r, list(FakeMLX.SWAP_HISTORY), (entry.get("promotion") or {}).get("evidence", "")
+    finally:
+        srv.shutdown()
+
+
+def test_m3_promote_blocks_on_enforced_empty_reply_regression():
+    print("\n--- test_m3_promote_blocks_on_enforced_empty_reply_regression ---")
+    r, swaps, _ = _empty_gate_case("BLOCK", True)
+    _ok("enforced empty-reply BLOCK exits 7", r.returncode == 7,
+        f"rc={r.returncode}\n{r.stdout}\n{r.stderr}")
+    _ok("stderr names the empty-reply gate", "empty-reply gate" in r.stderr, r.stderr)
+    _ok("fake server NEVER received the swap POST", swaps == [], f"swaps={swaps}")
+    r2, swaps2, _ = _empty_gate_case("INCONCLUSIVE", True)
+    _ok("enforced INCONCLUSIVE also refuses (exit 7, no swap)",
+        r2.returncode == 7 and swaps2 == [], f"rc={r2.returncode} swaps={swaps2}")
+
+
+def test_m3_promote_ignores_shadow_or_missing_empty_reply_manifest():
+    print("\n--- test_m3_promote_ignores_shadow_or_missing_empty_reply_manifest ---")
+    r, swaps, _ = _empty_gate_case("BLOCK", False)
+    _ok("shadow manifest does not block (exit 0, swapped)",
+        r.returncode == 0 and len(swaps) == 1, f"rc={r.returncode}\n{r.stderr}")
+    r2, swaps2, _ = _empty_gate_case(None, False)
+    _ok("no manifest: unchanged behaviour (exit 0, swapped)",
+        r2.returncode == 0 and len(swaps2) == 1, f"rc={r2.returncode}\n{r2.stderr}")
+
+
+def test_m3_promote_skip_empty_reply_gate_records_override():
+    print("\n--- test_m3_promote_skip_empty_reply_gate_records_override ---")
+    r, swaps, evidence = _empty_gate_case("BLOCK", True, "--skip-empty-reply-gate")
+    _ok("override promote exits 0 and swaps", r.returncode == 0 and len(swaps) == 1,
+        f"rc={r.returncode}\n{r.stderr}")
+    _ok("registry evidence records the empty-reply override",
+        "empty-reply gate OVERRIDDEN" in evidence and "BLOCK" in evidence, evidence)
+
+
 def main():
     print("M3 promote CLI (G2) verifier")
     test_current_against_unreachable()
@@ -673,6 +743,9 @@ def main():
     test_m3_promote_refuses_without_smoke_measurement()
     test_m3_promote_uses_newest_smoke_for_adapter()
     test_m3_promote_skip_smoke_gate_records_override()
+    test_m3_promote_blocks_on_enforced_empty_reply_regression()
+    test_m3_promote_ignores_shadow_or_missing_empty_reply_manifest()
+    test_m3_promote_skip_empty_reply_gate_records_override()
     print(f"\n--- Results: {_PASS} passed, {_FAIL} failed ---")
     return 0 if _FAIL == 0 else 1
 

@@ -266,6 +266,106 @@ candidate's number.
 3. **Promote:** `python3 scripts/m3_promote.py promote --adapter $CAND --yes`. This hot-swaps `:8741`. It enforces the scale ceiling, the smoke gate and the authorship gate, and records the swap in the lineage file. Roll back with `m3_promote.py rollback --yes`. Make the change persist across restarts with `mlx_local.adapter_path` in `~/.human/config.json`. Only the owner of that file edits it.
 4. **After promotion:** watch the daemon's cloud-failover count for 24 h. The empty-reply share should fall from about 13% toward 0. If it does not, roll back.
 
+## 5. The nightly retrain (`scripts/nightly-retrain.sh`, 03:07)
+
+The launchd job `ai.human.nightly-retrain` runs the main checkout's
+`scripts/nightly-retrain.sh`. Its plist pins `HU_RETRAIN_MLXTUNE_TRAINER=mlx_lm`,
+`HU_RETRAIN_MLXTUNE_MODE=sft` and the `seth-sft-20260919` corpus.
+
+### What the stock SFT path trained (measured 2026-10-02)
+
+Stock `mlx_lm.lora` templates `{prompt, completion}` itself. On the GLM tokenizer
+it trains these targets for one row, read off mlx_lm's own `iterate_batches` and
+`default_loss` mask:
+
+```
+\n <think> </think> \n <reply...> !
+```
+
+- The user turn has no `/nothink`.
+- `<think></think>` are **targets**, though production already puts them in the prompt.
+- The last target is mlx_lm's pad id 0 (`!`): `default_loss` masks `steps <= length`,
+  one past the last real token. No stop token is ever a target.
+
+### What it trains now
+
+For a GLM base, `train-glm-adapter.sh --trainer mlx_lm` templates the rows with
+`chat_template_rows.py` (`{prompt, completion}` rows are supported) and trains
+through `scripts/mlx_lm_sft_templated.py`:
+
+```
+\n <reply...> <|user|>
+```
+
+- `PretemplatedCompletionsDataset` masks every prompt token (offset =
+  `len(encode(prompt))`).
+- `turn_end_mask` ends the loss at the last real token, so `<|user|>` is the
+  last target and the pad is never trained. Everything else is stock mlx_lm.lora:
+  same config, optimizer, iters, lr, rank and scale.
+- Before step 1 the driver runs the contract check on every row of the exact
+  train/valid sets: one leading `[gMASK]`, last token `<|user|>`, the row fits
+  `max_seq_length`, and the mask starts at the first reply token. It prints
+  `template contract holds on N`, and `train-glm-adapter.sh` refuses the run if
+  that line is missing.
+- The hooks are pinned to mlx-lm 0.31.3 (`assert_mlx_lm_preconditions`); any
+  other version refuses to train.
+
+On `seth-sft-20260919` (2026-10-02, tokenizer only): train kept 1164/1164,
+valid 63/63, longest row 518 tokens against `max_seq_length` 1024, and the
+contract holds on all 1227 rows.
+
+Why not mlx_tune for SFT: mlx-tune 0.6.0's `SFTTrainer` writes the rows back out
+and loads them with mlx_lm's own dataset code, so it is the same stock path with
+no `prompt_length` pin. ORPO/SimPO/KTO candidates keep the mlx_tune path from §2.
+
+The nightly candidate stage also refuses to **score** a candidate whose train log
+lacks the contract line. It writes `UNTEMPLATED` beside the adapter.
+
+**Rollback:** `HU_TRAIN_ALLOW_UNTEMPLATED=1` in the nightly plist restores the
+stock SFT path and lets the stage score such a candidate (both are logged).
+
+### Offline empty-reply eval stage: `HU_RETRAIN_EMPTY_EVAL=off|shadow|live`
+
+Default **off**: nothing runs and nothing is printed.
+
+After training and LUAR scoring, while `:8741` is still down, the stage serves the
+**current** adapter and then the **candidate** on spare port `:8748`. It runs one
+server at a time, with prod's flags and `MLX_EMPTY_RETRY=0`. It measures both
+with `eval_empty_reply_rate.py` and writes `<candidate>/promotion_manifest.json`
+through `scripts/empty_reply_gate.py`.
+
+| Mode | Effect |
+|---|---|
+| `off` | No stage. Byte-identical to before. |
+| `shadow` | Measured and recorded (`empty_reply.enforce: false`). The promotion verdict is the authorship verdict, unchanged. |
+| `live` | `promotion_gate` also needs `rate(candidate) <= rate(serving)` on the overall rate. `m3_promote.py` refuses the swap otherwise (exit 7; `--skip-empty-reply-gate` overrides and is recorded). |
+
+An arm that cannot run is recorded as `INCONCLUSIVE`, which blocks in `live`.
+That covers serving not stopped, a busy or forbidden port, a resident model,
+a spare that never becomes healthy, the deadline, or an unmeasured run.
+
+**Memory.** Prod plus a second GLM is about 114 GB of 128. That co-residency
+rebooted the box on 2026-07-26, so the eval runs while prod is still down. Each
+arm is preceded by `check-no-resident-model.sh` and reaped before the next.
+`restore_serving` stops any spare before it brings prod back.
+
+**Added downtime.** One arm is a server load (16–59 s restart-to-healthy,
+2026-09-29..10-02) plus 24 prompts × `HU_RETRAIN_EVAL_SAMPLES` (default 3)
+requests at about 4.1 s each (prod log mean, n=22,106). That is about 6–7 min per
+arm, **about 13–15 min for both**. Prod has come back at 04:13–04:18 on recent
+nights, so expect about 04:30.
+
+An arm only starts if it can finish (`HU_RETRAIN_EVAL_ARM_MAX_MIN`, default 12)
+before `HU_RETRAIN_EVAL_DEADLINE` (default `04:35`, ahead of `kto-train-window`
+at 04:40). The stage logs `added prod-down time Ns` every night. A manual run
+outside the window needs `HU_RETRAIN_EVAL_DEADLINE=none`.
+
+**SHADOW → LIVE.** Promote when three shadow nights have both arms measured, and
+the serving arm reproduces the known failure: classifier empty rate ≥ 5%
+(measured 13–18%). If it does not, the prompt set is not exercising the failure.
+
+**Rollback:** remove `HU_RETRAIN_EMPTY_EVAL` from the plist (or set `off`).
+
 ## Known risks
 
 - **Harvested pairs may carry scaffold.** DPO and KTO pairs mined from
@@ -282,10 +382,7 @@ candidate's number.
   `_tokenize_preference_pair` or `_tokenize_pair`, the pin raises
   `AttributeError` at start-up rather than silently training without it. The
   contract check refuses any `prompt_length` that differs from the prompt.
-- **The nightly SFT path (`TRAINER=mlx_lm`, seth-sft-20260919) is unchanged.**
-  `mlx_lm`'s chat dataset also renders without `enable_thinking=False`. It was
-  out of scope here, but the same audit applies before any SFT adapter is
-  promoted.
+- **The nightly SFT path is templated as of 2026-10-02.** See §5.
 - **Template drift.** The manifest records a hash of the chat template.
   `test_template_matches_mlx_server_render` fails if the server's rendering
   diverges from the training rows.
