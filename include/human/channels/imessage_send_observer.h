@@ -5,9 +5,10 @@
  * Send-provenance observer for the iMessage channel.
  *
  * Every outbound iMessage the daemon DELIVERS — plain text and media through
- * imessage_send, threaded replies through hu_imessage_reply — is reported
- * here exactly once, after the send succeeded, with the final text as it
- * went to chat.db (after overlay, markdown strip and sanitize). A send that
+ * imessage_send, threaded replies through hu_imessage_reply, tapbacks through
+ * the react / react_emoji vtable entries — is reported here exactly once,
+ * after the send succeeded, with the final text as it went to chat.db (after
+ * overlay, markdown strip and sanitize; tapbacks carry no text). A send that
  * failed or was held reports nothing.
  *
  * Why: h-uman and Seth both send from Seth's account, so chat.db alone can't
@@ -30,9 +31,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define HU_IMESSAGE_SENT_KIND_TEXT  "text"
-#define HU_IMESSAGE_SENT_KIND_MEDIA "media"
-#define HU_IMESSAGE_SENT_KIND_REPLY "reply"
+#define HU_IMESSAGE_SENT_KIND_TEXT    "text"
+#define HU_IMESSAGE_SENT_KIND_MEDIA   "media"
+#define HU_IMESSAGE_SENT_KIND_REPLY   "reply"
+#define HU_IMESSAGE_SENT_KIND_TAPBACK "tapback"
 
 typedef struct hu_imessage_sent_event {
     const char *handle; /* recipient handle; (ptr, len), not NUL-terminated */

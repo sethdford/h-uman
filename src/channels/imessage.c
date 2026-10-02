@@ -976,6 +976,78 @@ static void imessage_record_sent(hu_imessage_ctx_t *c, const char *msg, size_t m
     c->sent_ring_idx++;
 }
 
+#if defined(HU_ENABLE_SQLITE) && (HU_IS_TEST || (defined(__APPLE__) && defined(__MACH__)))
+/* Open chat.db readonly: up to `attempts` opens while it is locked (backoff
+ * 100/200/400 ms), then a `busy_ms` busy timeout on the handle. One attempt
+ * never sleeps. */
+static int imessage_open_chatdb_budget(const char *db_path, sqlite3 **db_out, int attempts,
+                                       int busy_ms) {
+    int rc = SQLITE_OK;
+    for (int attempt = 0; attempt < attempts; attempt++) {
+        *db_out = NULL;
+        rc = sqlite3_open_v2(db_path, db_out, SQLITE_OPEN_READONLY, NULL);
+        if (rc == SQLITE_OK) {
+            sqlite3_busy_timeout(*db_out, busy_ms);
+            return SQLITE_OK;
+        }
+        if (*db_out) {
+            sqlite3_close(*db_out);
+            *db_out = NULL;
+        }
+        if (rc != SQLITE_BUSY && rc != SQLITE_LOCKED)
+            return rc;
+        if (attempts == 1)
+            return rc;
+        hu_log_info("imessage", NULL, "chat.db locked (attempt %d/%d, rc=%d), retrying",
+                    attempt + 1, attempts, rc);
+        usleep((unsigned)(100000 << attempt));
+    }
+    return rc;
+}
+
+/* MAX(ROWID) of our own messages to `handle` in an open chat.db; -1 when
+ * there is none or the read fails (busy included). Closes `db`. */
+static int64_t imessage_latest_sent_rowid_in(sqlite3 *db, const char *handle, size_t handle_len) {
+    const char *sql = "SELECT MAX(m.ROWID) FROM message m "
+                      "JOIN handle h ON m.handle_id = h.ROWID "
+                      "WHERE m.is_from_me = 1 AND h.id = ?1";
+
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        sqlite3_close(db);
+        return -1;
+    }
+
+    char hbuf[128];
+    size_t hlen = handle_len < sizeof(hbuf) - 1 ? handle_len : sizeof(hbuf) - 1;
+    memcpy(hbuf, handle, hlen);
+    hbuf[hlen] = '\0';
+    sqlite3_bind_text(stmt, 1, hbuf, (int)hlen, SQLITE_STATIC);
+
+    int64_t rowid = -1;
+    if (sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_type(stmt, 0) != SQLITE_NULL)
+        rowid = sqlite3_column_int64(stmt, 0);
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return rowid;
+}
+
+/* The tapback boundary sits on the react path before any tier runs, so it
+ * gets one open and a 100 ms busy budget: a locked chat.db yields -1
+ * (unknown) at once instead of the text path's ~3.7 s of retries. */
+static int64_t imessage_boundary_rowid(const char *handle, size_t handle_len) {
+    char db_path[512];
+    int dp = hu_paths_chatdb(db_path, sizeof(db_path));
+    if (dp < 0 || (size_t)dp >= sizeof(db_path))
+        return -1;
+    sqlite3 *db = NULL;
+    if (imessage_open_chatdb_budget(db_path, &db, 1, 100) != SQLITE_OK)
+        return -1;
+    return imessage_latest_sent_rowid_in(db, handle, handle_len);
+}
+#endif
+
 #if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
 
 /* Forward declarations for the native Messages.app bridge (defined later). */
@@ -1026,25 +1098,7 @@ static bool imessage_was_sent_by_us(hu_imessage_ctx_t *c, const char *text, size
  * Retries up to 3 times with exponential backoff (100ms, 200ms, 400ms)
  * when the database is locked. */
 static int imessage_open_chatdb(const char *db_path, sqlite3 **db_out) {
-    int rc = SQLITE_OK;
-    for (int attempt = 0; attempt < 3; attempt++) {
-        *db_out = NULL;
-        rc = sqlite3_open_v2(db_path, db_out, SQLITE_OPEN_READONLY, NULL);
-        if (rc == SQLITE_OK) {
-            sqlite3_busy_timeout(*db_out, 3000);
-            return SQLITE_OK;
-        }
-        if (*db_out) {
-            sqlite3_close(*db_out);
-            *db_out = NULL;
-        }
-        if (rc != SQLITE_BUSY && rc != SQLITE_LOCKED)
-            return rc;
-        hu_log_info("imessage", NULL, "chat.db locked (attempt %d/3, rc=%d), retrying", attempt + 1,
-                    rc);
-        usleep((unsigned)(100000 << attempt));
-    }
-    return rc;
+    return imessage_open_chatdb_budget(db_path, db_out, 3, 3000);
 }
 
 bool hu_imessage_user_responded_recently(void *channel_ctx, const char *handle, size_t handle_len,
@@ -3395,30 +3449,7 @@ int64_t hu_imessage_get_latest_sent_rowid(const char *handle, size_t handle_len)
     sqlite3 *db = NULL;
     if (imessage_open_chatdb(db_path, &db) != SQLITE_OK)
         return -1;
-
-    const char *sql = "SELECT MAX(m.ROWID) FROM message m "
-                      "JOIN handle h ON m.handle_id = h.ROWID "
-                      "WHERE m.is_from_me = 1 AND h.id = ?1";
-
-    sqlite3_stmt *stmt = NULL;
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
-        sqlite3_close(db);
-        return -1;
-    }
-
-    char hbuf[128];
-    size_t hlen = handle_len < sizeof(hbuf) - 1 ? handle_len : sizeof(hbuf) - 1;
-    memcpy(hbuf, handle, hlen);
-    hbuf[hlen] = '\0';
-    sqlite3_bind_text(stmt, 1, hbuf, (int)hlen, SQLITE_STATIC);
-
-    int64_t rowid = -1;
-    if (sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_type(stmt, 0) != SQLITE_NULL)
-        rowid = sqlite3_column_int64(stmt, 0);
-
-    sqlite3_finalize(stmt);
-    sqlite3_close(db);
-    return rowid;
+    return imessage_latest_sent_rowid_in(db, handle, handle_len);
 }
 
 hu_error_t hu_imessage_build_read_receipt_context(hu_allocator_t *alloc, const char *contact_id,
@@ -3760,8 +3791,8 @@ static hu_error_t imessage_get_response_constraints(void *ctx,
     return HU_OK;
 }
 
-static hu_error_t imessage_react(void *ctx, const char *target, size_t target_len,
-                                 int64_t message_id, hu_reaction_type_t reaction) {
+static hu_error_t imessage_react_tiers(void *ctx, const char *target, size_t target_len,
+                                       int64_t message_id, hu_reaction_type_t reaction) {
     (void)target;
     (void)target_len;
     (void)message_id;
@@ -4017,6 +4048,53 @@ static hu_error_t imessage_react(void *ctx, const char *target, size_t target_le
     return HU_OK;
 #endif
 #endif
+}
+
+/* Send provenance for tapbacks: the chat.db boundary is read before the
+ * tiers run and the observer hears only a delivered tapback, so the record
+ * claims the first from-me reaction above the boundary. Bookkeeping cannot
+ * fail the tapback: the observer returns nothing and logs its own failures. */
+#if HU_IS_TEST
+static int64_t (*g_test_tapback_boundary)(const char *, size_t) = NULL;
+void hu_imessage_set_test_tapback_boundary_stub(int64_t (*stub)(const char *handle,
+                                                                size_t handle_len)) {
+    g_test_tapback_boundary = stub;
+}
+#endif
+
+static int64_t imessage_tapback_boundary(const char *target, size_t target_len) {
+    if (!hu_imessage_send_observer_active() || !target || target_len == 0)
+        return -1;
+#if HU_IS_TEST
+    if (g_test_tapback_boundary)
+        return g_test_tapback_boundary(target, target_len);
+    /* Tests read only an explicit $HU_CHATDB fixture, never the real chat.db. */
+    const char *fixture = getenv("HU_CHATDB");
+    if (!fixture || !fixture[0])
+        return -1;
+#endif
+#if defined(HU_ENABLE_SQLITE) && (HU_IS_TEST || (defined(__APPLE__) && defined(__MACH__)))
+    return imessage_boundary_rowid(target, target_len);
+#else
+    return -1;
+#endif
+}
+
+static void imessage_report_tapback(const char *target, size_t target_len, int64_t prior) {
+    hu_imessage_sent_event_t ev = {.handle = target,
+                                   .handle_len = target_len,
+                                   .kind = HU_IMESSAGE_SENT_KIND_TAPBACK,
+                                   .prior_max_rowid = prior};
+    hu_imessage_send_observer_notify(&ev);
+}
+
+static hu_error_t imessage_react(void *ctx, const char *target, size_t target_len,
+                                 int64_t message_id, hu_reaction_type_t reaction) {
+    int64_t prior = imessage_tapback_boundary(target, target_len);
+    hu_error_t err = imessage_react_tiers(ctx, target, target_len, message_id, reaction);
+    if (err == HU_OK)
+        imessage_report_tapback(target, target_len, prior);
+    return err;
 }
 
 static char *imessage_vt_get_attachment_path(void *ctx, hu_allocator_t *alloc, int64_t message_id) {
@@ -5382,10 +5460,8 @@ hu_error_t hu_imessage_mark_read(void *ctx, const char *target, size_t target_le
 #endif
 }
 
-hu_error_t hu_imessage_react_emoji_with_fallback(void *ctx, const char *target, size_t target_len,
-                                                 int64_t message_id, const char *emoji_utf8,
-                                                 size_t emoji_utf8_len) {
-    (void)emoji_utf8_len; /* emoji_utf8 is NUL-terminated; len is informational */
+static hu_error_t react_emoji_tiers(void *ctx, const char *target, size_t target_len,
+                                    int64_t message_id, const char *emoji_utf8) {
 
     if (!emoji_utf8 || !emoji_utf8[0])
         return HU_ERR_INVALID_ARGUMENT;
@@ -5416,6 +5492,17 @@ hu_error_t hu_imessage_react_emoji_with_fallback(void *ctx, const char *target, 
     (void)message_id;
 #endif
     return HU_ERR_NOT_SUPPORTED;
+}
+
+hu_error_t hu_imessage_react_emoji_with_fallback(void *ctx, const char *target, size_t target_len,
+                                                 int64_t message_id, const char *emoji_utf8,
+                                                 size_t emoji_utf8_len) {
+    (void)emoji_utf8_len; /* emoji_utf8 is NUL-terminated; len is informational */
+    int64_t prior = imessage_tapback_boundary(target, target_len);
+    hu_error_t err = react_emoji_tiers(ctx, target, target_len, message_id, emoji_utf8);
+    if (err == HU_OK)
+        imessage_report_tapback(target, target_len, prior);
+    return err;
 }
 
 /* ── Typing indicators ────────────────────────────────────────────────

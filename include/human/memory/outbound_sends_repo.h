@@ -6,7 +6,9 @@
  * DELIVERED, so offline measurement can tell h-uman's chat.db rows from
  * Seth's own (both come from Seth's account). Fed by the iMessage send
  * observer via src/daemon/daemon_send_provenance.c; read by
- * scripts/eval_conversation_quality.py.
+ * scripts/eval_conversation_quality.py (message kinds) and
+ * scripts/learned_style_v2.py (kind 'tapback', to drop the twin's own
+ * reactions from the learned behaviour profile).
  *
  * Recall (memory) bounded context: the legal home for a raw sqlite3 include
  * (sqlite-includer-ratchet.md). Same free-function shape as
@@ -22,9 +24,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define HU_OUTBOUND_SEND_KIND_TEXT  "text"
-#define HU_OUTBOUND_SEND_KIND_MEDIA "media"
-#define HU_OUTBOUND_SEND_KIND_REPLY "reply"
+#define HU_OUTBOUND_SEND_KIND_TEXT    "text"
+#define HU_OUTBOUND_SEND_KIND_MEDIA   "media"
+#define HU_OUTBOUND_SEND_KIND_REPLY   "reply"
+#define HU_OUTBOUND_SEND_KIND_TAPBACK "tapback"
 
 #ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>
@@ -33,7 +36,10 @@
 extern "C" {
 #endif
 
-/* Idempotent CREATE TABLE/INDEX IF NOT EXISTS; cheap no-op after the first. */
+/* Idempotent CREATE TABLE/INDEX IF NOT EXISTS. A table created before
+ * 'tapback' joined the kind CHECK is rebuilt once under the new CHECK, every
+ * row and id kept (SQLite cannot ALTER a CHECK); after that it is a cheap
+ * no-op. */
 hu_error_t hu_outbound_sends_repo_ensure_schema(sqlite3 *db);
 
 /* Insert one delivered send.

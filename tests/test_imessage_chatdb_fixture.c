@@ -2,8 +2,10 @@
  * Creates an in-memory SQLite database with the iMessage schema and seed data,
  * then runs the same queries used by imessage.c to catch schema/column drift. */
 #if HU_HAS_IMESSAGE && defined(HU_ENABLE_SQLITE)
+#include "human/channel.h"
 #include "human/channels/imessage.h"
 #include "human/channels/imessage_chat_kind.h"
+#include "human/channels/imessage_send_observer.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "test_framework.h"
@@ -12,6 +14,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 static const char *schema_sql = "CREATE TABLE handle ("
                                 "  ROWID INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -832,6 +835,72 @@ static void test_chatdb_my_reaction_count_reads_the_real_db(void) {
     remove(path);
 }
 
+/* The tapback boundary is read on the react path before any tier runs, so a
+ * locked chat.db must not stall the reaction: the read gets one open and a
+ * ~100 ms busy budget, then gives up with -1 (unknown). The shared text-send
+ * open (3 retries + 3 s busy timeout) would hold a tapback ~3.7 s. */
+static int64_t g_bnd_prior = -2;
+static int g_bnd_calls;
+static void bnd_capture(void *user, const hu_imessage_sent_event_t *ev) {
+    (void)user;
+    g_bnd_prior = ev->prior_max_rowid;
+    g_bnd_calls++;
+}
+
+static int64_t bnd_mono_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+static void test_chatdb_tapback_boundary_gives_up_fast_on_locked_db(void) {
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "boundary_chat.db"));
+    remove(path);
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(sqlite3_open(path, &db), SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_exec(db, schema_sql, NULL, NULL, NULL), SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_exec(db, seed_sql, NULL, NULL, NULL), SQLITE_OK);
+    const char *prev = getenv("HU_CHATDB");
+    char saved[512] = {0};
+    if (prev)
+        snprintf(saved, sizeof(saved), "%s", prev);
+    setenv("HU_CHATDB", path, 1);
+
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    HU_ASSERT_EQ(hu_imessage_create(&alloc, "+15559999999", 12, NULL, 0, &ch), HU_OK);
+    hu_imessage_send_observer_set(bnd_capture, NULL);
+    g_bnd_calls = 0;
+
+    /* Unlocked: the boundary is the fixture's latest from-me ROWID (MSG-002). */
+    HU_ASSERT_EQ(ch.vtable->react(ch.ctx, "+15559999999", 12, 1, HU_REACTION_HEART), HU_OK);
+    HU_ASSERT_EQ(g_bnd_calls, 1);
+    HU_ASSERT_EQ(g_bnd_prior, (int64_t)2);
+
+    /* Locked by another writer: the read gives up within its short budget. */
+    sqlite3 *locker = NULL;
+    HU_ASSERT_EQ(sqlite3_open(path, &locker), SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_exec(locker, "BEGIN EXCLUSIVE", NULL, NULL, NULL), SQLITE_OK);
+    int64_t t0 = bnd_mono_ms();
+    HU_ASSERT_EQ(ch.vtable->react(ch.ctx, "+15559999999", 12, 1, HU_REACTION_THUMBS_UP), HU_OK);
+    int64_t elapsed = bnd_mono_ms() - t0;
+    HU_ASSERT_EQ(g_bnd_calls, 2);
+    HU_ASSERT_EQ(g_bnd_prior, (int64_t)-1);
+    HU_ASSERT_TRUE(elapsed < 1000);
+    sqlite3_exec(locker, "ROLLBACK", NULL, NULL, NULL);
+    sqlite3_close(locker);
+
+    hu_imessage_send_observer_set(NULL, NULL);
+    hu_imessage_destroy(&ch);
+    if (saved[0])
+        setenv("HU_CHATDB", saved, 1);
+    else
+        unsetenv("HU_CHATDB");
+    sqlite3_close(db);
+    remove(path);
+}
+
 static void test_chatdb_voice_msg_has_attachment_flag(void) {
     sqlite3 *db = open_fixture();
     HU_ASSERT_NOT_NULL(db);
@@ -1301,6 +1370,7 @@ void run_imessage_chatdb_fixture_tests(void) {
     HU_RUN_TEST(test_chatdb_retracted_detection);
     HU_RUN_TEST(test_chatdb_edited_detection);
     HU_RUN_TEST(test_chatdb_no_sent_rowid_for_unknown_handle);
+    HU_RUN_TEST(test_chatdb_tapback_boundary_gives_up_fast_on_locked_db);
     HU_RUN_TEST(test_chatdb_optimized_poll_exists_and_inline_retract);
     HU_RUN_TEST(test_chatdb_unix_timestamp_conversion);
     HU_RUN_TEST(test_chatdb_group_chat_participant_count);
