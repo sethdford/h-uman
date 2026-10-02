@@ -1345,6 +1345,8 @@ hu_error_t hu_persona_creator_write(hu_allocator_t *alloc, const hu_persona_t *p
                     c->sends_links_often ? "true" : "false");
             if (c->reply_chars_p90 > 0)
                 fprintf(f, ",\n      \"reply_chars_p90\": %u", (unsigned)c->reply_chars_p90);
+            if (c->reply_chars_p50 > 0)
+                fprintf(f, ",\n      \"reply_chars_p50\": %u", (unsigned)c->reply_chars_p50);
             if (c->proactive_checkin) {
                 fputs(",\n      \"proactive_checkin\": true", f);
                 if (c->proactive_channel) {

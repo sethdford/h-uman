@@ -2486,6 +2486,11 @@ hu_error_t hu_persona_load_json(hu_allocator_t *alloc, const char *json, size_t 
                     double v = rl->data.number;
                     cp->reply_chars_p90 = (uint16_t)(v > 2000 ? 2000 : v);
                 }
+                hu_json_value_t *r5 = hu_json_object_get(cval, "reply_chars_p50");
+                if (r5 && r5->type == HU_JSON_NUMBER && r5->data.number >= 1) {
+                    double v = r5->data.number;
+                    cp->reply_chars_p50 = (uint16_t)(v > 2000 ? 2000 : v);
+                }
             }
 
             /* Proactive engagement config */
