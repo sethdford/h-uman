@@ -330,6 +330,18 @@ static void w11_abstain_passes_draft_through_bridge(void) {
     HU_ASSERT(modified == NULL);
     HU_ASSERT_EQ(modified_len, (size_t)0);
 
+    /* ...and since the draft was SENT, nothing may record it as refused.
+     * graph.db held 566 phantom "Refused: <sent reply>" rows on 2026-10-02,
+     * each rendered back as "Avoid:" / "They expect I cannot:". */
+    char *txt = NULL;
+    size_t tlen = 0;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, A(), "u_abstain", 9, 1700000000000LL, &txt, &tlen,
+                                          NULL, 0, NULL, 0, NULL, 0, NULL, NULL),
+                 HU_OK);
+    HU_ASSERT(txt == NULL || strstr(txt, "Refused:") == NULL);
+    if (txt)
+        A()->free(A()->ctx, txt, tlen + 1);
+
     cleanup(g, f);
 }
 
