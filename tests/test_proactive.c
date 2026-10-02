@@ -1518,8 +1518,11 @@ void run_proactive_tests(void) {
         /* The test sets HU_PROSPECTIVE_TIME and a failed assert longjmps past its
          * own cleanup; restore the caller's value here so one failure can't
          * leak "live" into every later suite. */
-        const char *prev = getenv("HU_PROSPECTIVE_TIME");
-        char *saved = prev ? strdup(prev) : NULL;
+        /* volatile, and no prev local: HU_RUN_TEST calls setjmp in this function,
+         * so a non-volatile local here is indeterminate after a longjmp (GCC
+         * -Wclobbered at -Os). */
+        char *volatile saved =
+            getenv("HU_PROSPECTIVE_TIME") ? strdup(getenv("HU_PROSPECTIVE_TIME")) : NULL;
         HU_RUN_TEST(proactive_callbacks_skip_v2_owned_rows_only_when_time_live);
         if (saved) {
             setenv("HU_PROSPECTIVE_TIME", saved, 1);

@@ -36,6 +36,7 @@ handle. Written 0600, atomically, to
 import argparse
 import datetime as dt
 import json
+import math
 import os
 import sqlite3
 import sys
@@ -90,6 +91,29 @@ def _compare(seth_stats, huuman_lens):
     }
 
 
+def ks_2samp(a, b):
+    """Two-sample Kolmogorov-Smirnov over non-empty lists: (D, asymptotic
+    two-sided p). stdlib-only so the gauge keeps no scipy dependency; D is
+    exact, p uses the Stephens small-sample correction."""
+    a, b = sorted(a), sorted(b)
+    n, m = len(a), len(b)
+    i = j = 0
+    d = 0.0
+    while i < n and j < m:
+        x = min(a[i], b[j])
+        while i < n and a[i] <= x:
+            i += 1
+        while j < m and b[j] <= x:
+            j += 1
+        d = max(d, abs(i / n - j / m))
+    en = math.sqrt(n * m / (n + m))
+    lam = (en + 0.12 + 0.11 / en) * d
+    if lam < 1e-9:
+        return d, 1.0
+    p = 2.0 * sum((-1) ** (k - 1) * math.exp(-2.0 * k * k * lam * lam) for k in range(1, 101))
+    return d, max(0.0, min(1.0, p))
+
+
 def _metrics(seth_lens, seth_blens, huuman_lens, huuman_blens):
     """Full metric bundle for one seth/huuman pair of (non-empty) length
     lists -- used for both a single contact and the pooled overall."""
@@ -97,6 +121,8 @@ def _metrics(seth_lens, seth_blens, huuman_lens, huuman_blens):
     huuman = _stats(huuman_lens, huuman_blens)
     out = {"n_seth": seth["n"], "n_huuman": huuman["n"], "seth": seth, "huuman": huuman}
     out.update(_compare(seth, huuman_lens))
+    # Byte lengths: the unit the HU_LENGTH_POLICY cap compares against.
+    out["ks_d"], out["ks_p"] = ks_2samp(huuman_blens, seth_blens)
     return out
 
 
@@ -197,6 +223,7 @@ def main(argv=None):
     ov = result["overall"]
     print(f"reply-length gauge: median_ratio={ov['median_ratio']:.3f}  "
           f"brevity_rate={ov['brevity_rate']:.3f}  excess_rate={ov['excess_rate']:.3f}  "
+          f"ks_d={ov['ks_d']:.3f} ks_p={ov['ks_p']:.4f}  "
           f"contacts_measured={ov['contacts_measured']}")
 
     payload = {

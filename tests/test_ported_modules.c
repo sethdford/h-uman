@@ -562,6 +562,7 @@ static void test_update_apply_mock(void) {
  *   • HOME unset (defensive)
  *   • imsg CLI absent on PATH is exercised implicitly under HU_IS_TEST. */
 
+#if HU_HAS_IMESSAGE /* the helpers serve only the HU_HAS_IMESSAGE tests below */
 static void doctor_imsg_swap_home(const char *new_home, char **old_out) {
     const char *h = getenv("HOME");
     *old_out = h ? strdup(h) : NULL;
@@ -596,6 +597,7 @@ static void doctor_imsg_remove_status(const char *home) {
     snprintf(path, sizeof(path), "%s/.human/imessage.poll_status", home);
     unlink(path);
 }
+#endif /* HU_HAS_IMESSAGE */
 
 static void test_doctor_check_imessage_null_args_rejected(void) {
     hu_diag_item_t *items = NULL;

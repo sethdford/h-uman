@@ -6,18 +6,18 @@
  * All tests set HU_KEYSTORE_DIR to a process-specific temp path so
  * tombstone files don't bleed across test runs. */
 
-#include "human/security/keystore.h"
-#include "human/security/audit_log.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/security/audit_log.h"
+#include "human/security/keystore.h"
 #include "test_framework.h"
 
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #ifdef HU_ENABLE_SQLITE
@@ -41,7 +41,8 @@ static void set_ks_dir(void) {
 static void remove_tombstone(const char *user_id) {
     char path[256];
     const char *dir = getenv("HU_KEYSTORE_DIR");
-    if (!dir) dir = "/tmp";
+    if (!dir)
+        dir = "/tmp";
     snprintf(path, sizeof(path), "%s/%s.tomb", dir, user_id);
     (void)remove(path);
 }
@@ -50,7 +51,8 @@ static void remove_tombstone(const char *user_id) {
 static void remove_salt(const char *user_id) {
     char path[256];
     const char *dir = getenv("HU_KEYSTORE_DIR");
-    if (!dir) dir = "/tmp";
+    if (!dir)
+        dir = "/tmp";
     snprintf(path, sizeof(path), "%s/%s.salt", dir, user_id);
     (void)remove(path);
 }
@@ -62,7 +64,8 @@ static void remove_salt(const char *user_id) {
 static void remove_kdf_flag(const char *user_id) {
     char path[256];
     const char *dir = getenv("HU_KEYSTORE_DIR");
-    if (!dir) dir = "/tmp";
+    if (!dir)
+        dir = "/tmp";
     snprintf(path, sizeof(path), "%s/%s.kdf", dir, user_id);
     (void)remove(path);
 }
@@ -73,12 +76,14 @@ static void remove_kdf_flag(const char *user_id) {
 static void force_kdf_flag(const char *user_id, unsigned char version) {
     char path[256];
     const char *dir = getenv("HU_KEYSTORE_DIR");
-    if (!dir) dir = "/tmp";
+    if (!dir)
+        dir = "/tmp";
     /* Best-effort mkdir; ignore EEXIST. */
     (void)mkdir(dir, 0700);
     snprintf(path, sizeof(path), "%s/%s.kdf", dir, user_id);
     FILE *f = fopen(path, "wb");
-    if (!f) return;
+    if (!f)
+        return;
     (void)fwrite(&version, 1, 1, f);
     fclose(f);
 }
@@ -89,14 +94,16 @@ static void force_kdf_flag(const char *user_id, unsigned char version) {
 static unsigned char read_kdf_flag(const char *user_id) {
     char path[256];
     const char *dir = getenv("HU_KEYSTORE_DIR");
-    if (!dir) dir = "/tmp";
+    if (!dir)
+        dir = "/tmp";
     snprintf(path, sizeof(path), "%s/%s.kdf", dir, user_id);
     FILE *f = fopen(path, "rb");
-    if (!f) return 0xFF;
+    if (!f)
+        return 0xFF;
     unsigned char v = 0xFF;
-    (void)fread(&v, 1, 1, f);
+    size_t got = fread(&v, 1, 1, f);
     fclose(f);
-    return v;
+    return got == 1 ? v : 0xFF;
 }
 
 /* ── keystore tests ─────────────────────────────────────────────────────── */
@@ -222,8 +229,7 @@ static void test_w15_cryptographic_forgetting_unrecoverable(void) {
     const char *payload = "private memory contents";
     void *ct = NULL;
     size_t ct_len = 0;
-    HU_ASSERT_EQ(hu_keystore_encrypt(ks, "blobs", payload, strlen(payload), &ct, &ct_len),
-                 HU_OK);
+    HU_ASSERT_EQ(hu_keystore_encrypt(ks, "blobs", payload, strlen(payload), &ct, &ct_len), HU_OK);
     hu_keystore_close(ks, A());
 
     /* Destroy the master key — writes tombstone. */
@@ -412,8 +418,7 @@ static void test_w15_v1_ciphertext_has_magic_byte_when_libsodium_enabled(void) {
     const char *pt = "v1 envelope";
     void *ct = NULL;
     size_t ct_len = 0;
-    HU_ASSERT_EQ(hu_keystore_encrypt(ks, "entities", pt, strlen(pt), &ct, &ct_len),
-                 HU_OK);
+    HU_ASSERT_EQ(hu_keystore_encrypt(ks, "entities", pt, strlen(pt), &ct, &ct_len), HU_OK);
     HU_ASSERT_NOT_NULL(ct);
     /* v1 overhead = 1 (magic) + 24 (nonce) + 16 (tag) = 41. */
     HU_ASSERT_GT(ct_len, strlen(pt) + 40);
@@ -422,8 +427,7 @@ static void test_w15_v1_ciphertext_has_magic_byte_when_libsodium_enabled(void) {
     /* Round-trip must still succeed. */
     void *out = NULL;
     size_t out_len = 0;
-    HU_ASSERT_EQ(hu_keystore_decrypt(ks, "entities", ct, ct_len, &out, &out_len),
-                 HU_OK);
+    HU_ASSERT_EQ(hu_keystore_decrypt(ks, "entities", ct, ct_len, &out, &out_len), HU_OK);
     HU_ASSERT_EQ(out_len, strlen(pt));
     HU_ASSERT_EQ(memcmp(out, pt, out_len), 0);
 
@@ -466,8 +470,7 @@ static void test_w15_v0_kdf_remains_decryptable_under_libsodium(void) {
     const char *pt = "legacy-kdf payload";
     void *ct = NULL;
     size_t ct_len = 0;
-    HU_ASSERT_EQ(hu_keystore_encrypt(ks, "entities", pt, strlen(pt), &ct, &ct_len),
-                 HU_OK);
+    HU_ASSERT_EQ(hu_keystore_encrypt(ks, "entities", pt, strlen(pt), &ct, &ct_len), HU_OK);
 
     hu_keystore_close(ks, A());
 
@@ -479,8 +482,7 @@ static void test_w15_v0_kdf_remains_decryptable_under_libsodium(void) {
 
     void *out = NULL;
     size_t out_len = 0;
-    HU_ASSERT_EQ(hu_keystore_decrypt(ks2, "entities", ct, ct_len, &out, &out_len),
-                 HU_OK);
+    HU_ASSERT_EQ(hu_keystore_decrypt(ks2, "entities", ct, ct_len, &out, &out_len), HU_OK);
     HU_ASSERT_EQ(out_len, strlen(pt));
     HU_ASSERT_EQ(memcmp(out, pt, out_len), 0);
 
@@ -514,12 +516,11 @@ static void test_w15_decrypt_handles_short_buffer_with_v1_magic(void) {
     /* A truncated buffer that starts with the v1 magic byte but is
      * shorter than the v1 overhead AND shorter than the v0 minimum
      * (12 nonce + 32 hmac = 44). Both paths must reject it cleanly. */
-    unsigned char tiny[3] = { 0x01, 0xAA, 0xBB };
+    unsigned char tiny[3] = {0x01, 0xAA, 0xBB};
     void *out = NULL;
     size_t out_len = 0;
-    HU_ASSERT_EQ(
-        hu_keystore_decrypt(ks, "entities", tiny, sizeof(tiny), &out, &out_len),
-        HU_ERR_CRYPTO_DECRYPT);
+    HU_ASSERT_EQ(hu_keystore_decrypt(ks, "entities", tiny, sizeof(tiny), &out, &out_len),
+                 HU_ERR_CRYPTO_DECRYPT);
     HU_ASSERT_NULL(out);
 
     hu_keystore_close(ks, A());
@@ -581,31 +582,31 @@ static void test_w15_audit_log_round_trip(void) {
 
     /* Append three events with explicit timestamps so ordering is stable. */
     hu_audit_log_event_t ev1 = {
-        .operation   = HU_AUDIT_OP_WRITE,
-        .kind        = HU_MEM_ENTITY,
-        .target_id   = 42,
-        .actor       = "agent",
+        .operation = HU_AUDIT_OP_WRITE,
+        .kind = HU_MEM_ENTITY,
+        .target_id = 42,
+        .actor = "agent",
         .occurred_at = 1000,
-        .summary     = "upsert entity",
-        .contact_id  = "user_audit1",
+        .summary = "upsert entity",
+        .contact_id = "user_audit1",
     };
     hu_audit_log_event_t ev2 = {
-        .operation   = HU_AUDIT_OP_READ,
-        .kind        = HU_MEM_RELATION,
-        .target_id   = 7,
-        .actor       = "user",
+        .operation = HU_AUDIT_OP_READ,
+        .kind = HU_MEM_RELATION,
+        .target_id = 7,
+        .actor = "user",
         .occurred_at = 2000,
-        .summary     = "recall relation",
-        .contact_id  = "user_audit1",
+        .summary = "recall relation",
+        .contact_id = "user_audit1",
     };
     hu_audit_log_event_t ev3 = {
-        .operation   = HU_AUDIT_OP_ERASE,
-        .kind        = HU_MEM_ENTITY,
-        .target_id   = 42,
-        .actor       = "scheduler",
+        .operation = HU_AUDIT_OP_ERASE,
+        .kind = HU_MEM_ENTITY,
+        .target_id = 42,
+        .actor = "scheduler",
         .occurred_at = 3000,
-        .summary     = NULL,
-        .contact_id  = "user_audit1",
+        .summary = NULL,
+        .contact_id = "user_audit1",
     };
     HU_ASSERT_EQ(hu_audit_log_append(log, &ev1), HU_OK);
     HU_ASSERT_EQ(hu_audit_log_append(log, &ev2), HU_OK);
@@ -621,14 +622,14 @@ static void test_w15_audit_log_round_trip(void) {
     HU_ASSERT_NOT_NULL(results);
 
     HU_ASSERT_EQ(results[0].operation, HU_AUDIT_OP_WRITE);
-    HU_ASSERT_EQ(results[0].kind,      HU_MEM_ENTITY);
+    HU_ASSERT_EQ(results[0].kind, HU_MEM_ENTITY);
     HU_ASSERT_EQ(results[0].target_id, (int64_t)42);
     HU_ASSERT_NOT_NULL(results[0].actor);
     HU_ASSERT_EQ(strcmp(results[0].actor, "agent"), 0);
     HU_ASSERT_EQ(results[0].occurred_at, (int64_t)1000);
 
     HU_ASSERT_EQ(results[1].operation, HU_AUDIT_OP_READ);
-    HU_ASSERT_EQ(results[1].kind,      HU_MEM_RELATION);
+    HU_ASSERT_EQ(results[1].kind, HU_MEM_RELATION);
 
     HU_ASSERT_EQ(results[2].operation, HU_AUDIT_OP_ERASE);
     HU_ASSERT_NULL(results[2].summary);
@@ -642,28 +643,28 @@ static void test_w15_audit_log_filter_by_actor(void) {
     HU_ASSERT_EQ(hu_audit_log_open(A(), NULL, "user_filter", &log), HU_OK);
 
     hu_audit_log_event_t ev_agent = {
-        .operation   = HU_AUDIT_OP_WRITE,
-        .kind        = HU_MEM_ENTITY,
-        .actor       = "agent",
+        .operation = HU_AUDIT_OP_WRITE,
+        .kind = HU_MEM_ENTITY,
+        .actor = "agent",
         .occurred_at = 100,
-        .contact_id  = "user_filter",
+        .contact_id = "user_filter",
     };
     hu_audit_log_event_t ev_user = {
-        .operation   = HU_AUDIT_OP_READ,
-        .kind        = HU_MEM_RELATION,
-        .actor       = "user",
+        .operation = HU_AUDIT_OP_READ,
+        .kind = HU_MEM_RELATION,
+        .actor = "user",
         .occurred_at = 200,
-        .contact_id  = "user_filter",
+        .contact_id = "user_filter",
     };
     hu_audit_log_event_t ev_agent2 = {
-        .operation   = HU_AUDIT_OP_ERASE,
-        .kind        = HU_MEM_ENTITY,
-        .actor       = "agent",
+        .operation = HU_AUDIT_OP_ERASE,
+        .kind = HU_MEM_ENTITY,
+        .actor = "agent",
         .occurred_at = 300,
-        .contact_id  = "user_filter",
+        .contact_id = "user_filter",
     };
-    HU_ASSERT_EQ(hu_audit_log_append(log, &ev_agent),  HU_OK);
-    HU_ASSERT_EQ(hu_audit_log_append(log, &ev_user),   HU_OK);
+    HU_ASSERT_EQ(hu_audit_log_append(log, &ev_agent), HU_OK);
+    HU_ASSERT_EQ(hu_audit_log_append(log, &ev_user), HU_OK);
     HU_ASSERT_EQ(hu_audit_log_append(log, &ev_agent2), HU_OK);
 
     /* Filter: only "agent" events. */
@@ -718,13 +719,13 @@ static void test_w15_audit_log_invalid_args_rejected(void) {
     HU_ASSERT_EQ(hu_audit_log_open(A(), NULL, "u_inv2", &log), HU_OK);
 
     HU_ASSERT_EQ(hu_audit_log_append(NULL, NULL), HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_audit_log_append(log,  NULL), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_audit_log_append(log, NULL), HU_ERR_INVALID_ARGUMENT);
 
     hu_audit_log_event_t *r = NULL;
     size_t n = 0;
     HU_ASSERT_EQ(hu_audit_log_query(NULL, NULL, A(), &r, &n), HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_audit_log_query(log,  NULL, A(), NULL, &n), HU_ERR_INVALID_ARGUMENT);
-    HU_ASSERT_EQ(hu_audit_log_query(log,  NULL, A(), &r, NULL), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_audit_log_query(log, NULL, A(), NULL, &n), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_audit_log_query(log, NULL, A(), &r, NULL), HU_ERR_INVALID_ARGUMENT);
 
     hu_audit_log_close(log, A());
 }
