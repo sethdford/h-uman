@@ -342,7 +342,6 @@ static void test_config_load_defaults_new_fields(void) {
     HU_ASSERT_TRUE(cfg.gateway.enabled);
     HU_ASSERT_NULL(cfg.tunnel.domain);
     HU_ASSERT_NULL(cfg.memory.sqlite_path);
-    HU_ASSERT_EQ(cfg.memory.max_entries, 0u);
     HU_ASSERT_FALSE(cfg.security.audit.enabled);
     HU_ASSERT_EQ(cfg.agent.token_limit, 200000u);
     HU_ASSERT_EQ(cfg.agent.max_tool_iterations, 1000u);
@@ -370,7 +369,7 @@ static void test_config_parse_new_fields(void) {
         "\"scheduler\":{\"max_concurrent\":8},"
         "\"tunnel\":{\"provider\":\"cloudflared\",\"domain\":\"test.example.com\"},"
         "\"memory\":{\"profile\":\"local_keyword\",\"sqlite_path\":\"/tmp/"
-        "db.sqlite\",\"max_entries\":1000},"
+        "db.sqlite\"},"
         "\"gateway\":{\"enabled\":false},"
         "\"channels\":{\"default_channel\":\"telegram\"},"
         "\"tools\":{\"enabled_tools\":[\"shell\",\"file_read\"],\"disabled_tools\":[\"browser\"]},"
@@ -389,7 +388,6 @@ static void test_config_parse_new_fields(void) {
     HU_ASSERT_STR_EQ(cfg.tunnel.provider, "cloudflared");
     HU_ASSERT_STR_EQ(cfg.tunnel.domain, "test.example.com");
     HU_ASSERT_STR_EQ(cfg.memory.sqlite_path, "/tmp/db.sqlite");
-    HU_ASSERT_EQ(cfg.memory.max_entries, 1000u);
     HU_ASSERT_FALSE(cfg.gateway.enabled);
     HU_ASSERT_STR_EQ(cfg.channels.default_channel, "telegram");
     HU_ASSERT_EQ(cfg.tools.enabled_tools_len, 2u);
@@ -899,12 +897,11 @@ static void test_config_parse_multiple_providers_with_keys(void) {
 
 static void test_config_parse_json_nested_deep(void) {
     hu_config_t *cfg = make_config_with_arena();
-    const char *j = "{\"agent\":{\"token_limit\":50000},\"memory\":{\"backend\":\"sqlite\",\"max_"
-                    "entries\":500},\"gateway\":{\"port\":4444}}";
+    const char *j = "{\"agent\":{\"token_limit\":50000},\"memory\":{\"backend\":\"sqlite\"},"
+                    "\"gateway\":{\"port\":4444}}";
     hu_config_parse_json(cfg, j, strlen(j));
     HU_ASSERT_EQ(cfg->agent.token_limit, 50000u);
     HU_ASSERT_STR_EQ(cfg->memory.backend, "sqlite");
-    HU_ASSERT_EQ(cfg->memory.max_entries, 500u);
     HU_ASSERT_EQ(cfg->gateway.port, 4444);
     free_config(cfg);
 }

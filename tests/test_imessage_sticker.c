@@ -35,8 +35,10 @@ static char *make_tmp_file(void) {
     int fd = mkstemp(path);
     if (fd < 0)
         return NULL;
-    write(fd, "fake-png", 8);
+    ssize_t wrote = write(fd, "fake-png", 8);
     close(fd);
+    if (wrote != 8)
+        return NULL;
     return path;
 }
 

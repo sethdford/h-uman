@@ -72,9 +72,11 @@ static inline void tf_restore_env(const char *name, char *saved) {
     }
 }
 
-/* script may be NULL: every chat() then answers "ok.". */
-static inline bool tf_open(tf_fixture_t *f, const trp_step_t *script, size_t script_count,
-                           bool memory, uint8_t autonomy) {
+/* script may be NULL: every chat() then answers "ok.". `alloc` becomes the
+ * agent's (and the memory's) allocator — pass a tracking allocator to count
+ * leaks across a turn and hu_agent_deinit. */
+static inline bool tf_open_alloc(tf_fixture_t *f, hu_allocator_t alloc, const trp_step_t *script,
+                                 size_t script_count, bool memory, uint8_t autonomy) {
     static const hu_tool_vtable_t vt = {
         .execute = tf_tool_execute,
         .name = tf_tool_name,
@@ -82,7 +84,7 @@ static inline bool tf_open(tf_fixture_t *f, const trp_step_t *script, size_t scr
         .parameters_json = tf_tool_params,
     };
     memset(f, 0, sizeof(*f));
-    f->alloc = hu_system_allocator();
+    f->alloc = alloc;
     trp_init(&f->trp, script, script_count, "ok.");
     if (!hu_test_mkdtemp(NULL, f->dir, sizeof(f->dir))) {
         f->dir[0] = '\0';
@@ -110,6 +112,11 @@ static inline bool tf_open(tf_fixture_t *f, const trp_step_t *script, size_t scr
                                        10, "turn", 4, 0.7, f->dir, strlen(f->dir), 4, 50, false,
                                        autonomy, NULL, 0, NULL, 0, NULL) == HU_OK;
     return f->agent_ok;
+}
+
+static inline bool tf_open(tf_fixture_t *f, const trp_step_t *script, size_t script_count,
+                           bool memory, uint8_t autonomy) {
+    return tf_open_alloc(f, hu_system_allocator(), script, script_count, memory, autonomy);
 }
 
 static inline void tf_close(tf_fixture_t *f) {

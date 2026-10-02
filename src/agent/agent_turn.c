@@ -1340,28 +1340,10 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
             return entry_step.err;
     }
 
-    /* Automatic planning + execution for complex tasks */
-    char *plan_ctx = NULL;
+    /* Resume an [ACTIVE_PLAN] (turn/turn_plan.c), then auto-plan complex tasks */
     size_t plan_ctx_len = 0;
+    char *plan_ctx = hu_turn_active_plan(agent, &plan_ctx_len);
 #ifndef HU_IS_TEST
-    if (agent->history_count > 0) {
-        size_t scan_n = agent->history_count < 10 ? agent->history_count : 10;
-        for (size_t k = 0; k < scan_n; k++) {
-            size_t hi = agent->history_count - 1 - k;
-            if (agent->history[hi].role != HU_ROLE_SYSTEM || !agent->history[hi].content)
-                continue;
-            const char *hc = agent->history[hi].content;
-            if (strncmp(hc, "[ACTIVE_PLAN]", 13) != 0)
-                continue;
-            if (plan_ctx == NULL) {
-                size_t clen = strlen(hc);
-                plan_ctx = hu_strndup(agent->alloc, hc, clen);
-                if (plan_ctx)
-                    plan_ctx_len = clen;
-            }
-            break;
-        }
-    }
     if (msg_len > 200 && agent->tools_count >= 5 && agent->provider.vtable &&
         agent->provider.vtable->chat) {
         const char *tool_names[32];
@@ -2954,7 +2936,6 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
 
         hu_prompt_config_t cfg = {
             .provider_name = agent->provider.vtable->get_name(agent->provider.ctx),
-            .provider_name_len = 0,
             .model_name = agent->model_name,
             .model_name_len = agent->model_name_len,
             .workspace_dir = agent->workspace_dir,
@@ -3002,6 +2983,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
             .conversation_context = agent->conversation_context,
             .conversation_context_len = agent->conversation_context_len,
             .max_response_chars = agent->max_response_chars,
+            .response_limit_tight = agent->response_limit_tight,
             .intelligence_context = intelligence_ctx,
             .intelligence_context_len = intelligence_ctx_len,
             .skills_context = skills_ctx,
@@ -3807,6 +3789,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
         /* Compact history if it exceeds limits (before each provider call).
          * Uses LLM summarization when the provider is available, with
          * rule-based fallback. */
+        size_t hist_before_compact = agent->history_count;
         if (hu_should_compact(agent->history, agent->history_count, &compact_cfg)) {
             hu_error_t compact_err =
                 hu_compact_history_llm(agent->alloc, &agent->history, &agent->history_count,
@@ -3846,6 +3829,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                 agent->context_pressure_warning_95_emitted = pr.warning_95_emitted;
             }
         }
+        hu_turn_note_history_shift(turn_ctx, hist_before_compact, agent->history_count);
 
         /* Format messages for this iteration using arena allocator */
         {
@@ -4952,12 +4936,11 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                 bool ab_owned = false;
                 uint32_t max_chars = agent->max_response_chars ? agent->max_response_chars : 0;
                 if (agent->ab_history_entries && agent->ab_history_count > 0) {
-                    hu_quality_score_t q0 = hu_conversation_evaluate_quality(
+                    hu_quality_score_t q0 = hu_conversation_evaluate_quality_capped(
                         resp.content, resp.content_len, agent->ab_history_entries,
-                        agent->ab_history_count, max_chars);
+                        agent->ab_history_count, max_chars, agent->response_limit_tight != 0);
                     if (q0.total < 70) {
-                        hu_ab_result_t ab_result;
-                        memset(&ab_result, 0, sizeof(ab_result));
+                        hu_ab_result_t ab_result = {.cap_from_stats = agent->response_limit_tight};
                         ab_result.candidates[0].response =
                             hu_strndup(agent->alloc, resp.content, resp.content_len);
                         ab_result.candidates[0].response_len = resp.content_len;
@@ -5007,11 +4990,11 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                                     ab_result.candidate_count = 2;
                                     hu_chat_response_free(agent->alloc, &alt_resp);
 
-                                    hu_quality_score_t q1 = hu_conversation_evaluate_quality(
+                                    hu_quality_score_t q1 = hu_conversation_evaluate_quality_capped(
                                         ab_result.candidates[1].response,
                                         ab_result.candidates[1].response_len,
                                         agent->ab_history_entries, agent->ab_history_count,
-                                        max_chars);
+                                        max_chars, agent->response_limit_tight != 0);
                                     if (q1.total < 70) {
                                         hu_chat_response_t alt2_resp;
                                         memset(&alt2_resp, 0, sizeof(alt2_resp));
@@ -7066,8 +7049,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
         (void)hu_turn_tools(turn_ctx);
         turn_tool_results_count = turn_ctx->loop.turn_tool_results_count;
 
-        /* S17 iteration tail (replan on tool failure, mid-turn retrieval,
-         * scratchpad, checkpoint) lives in src/agent/turn/turn_tail.c. */
+        /* S17 iteration tail (replan, mid-turn retrieval, scratchpad, checkpoint): turn_tail.c */
         turn_ctx->context.plan_ctx = plan_ctx;
         turn_ctx->context.plan_ctx_len = plan_ctx_len;
         turn_ctx->loop.iter = iter;
@@ -7092,6 +7074,8 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
         hu_tool_cache_destroy(agent->alloc, turn_cache);
     if (acp_context)
         agent->alloc->free(agent->alloc->ctx, acp_context, acp_context_len + 1);
+    if (plan_ctx)
+        agent->alloc->free(agent->alloc->ctx, plan_ctx, plan_ctx_len + 1);
     if (agent->turn_arena)
         hu_arena_reset(agent->turn_arena);
     return HU_ERR_TIMEOUT;

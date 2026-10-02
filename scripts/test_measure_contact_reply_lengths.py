@@ -55,6 +55,14 @@ class TestMeasure(unittest.TestCase):
         self.assertEqual(self.run_main("--write"), 0)
         self.assertEqual(self.contacts()["+1"][FIELD], 10)
 
+    def test_writes_p50_beside_p90(self):
+        self.seth_texts("+1", ["x" * 10] * 10 + ["x" * 40] * 10)
+        self.run_main("--write")
+        c = self.contacts()["+1"]
+        self.assertEqual(c[FIELD], 40)
+        self.assertEqual(c[mr.FIELD_P50], 10)
+        self.assertNotIn(mr.FIELD_P50, self.contacts()["+2"])  # unmeasured: nothing written
+
     def test_length_is_utf8_bytes(self):
         self.seth_texts("+1", ["gn 😘"] * 20)  # 3 ASCII + 4-byte emoji
         self.run_main("--write")

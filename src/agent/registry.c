@@ -20,8 +20,7 @@ static char *dup_str(hu_allocator_t *alloc, const char *s) {
 static const char **dup_string_array(hu_allocator_t *alloc, const char **src, size_t count) {
     if (!src || count == 0)
         return NULL;
-    const char **arr =
-        (const char **)alloc->alloc(alloc->ctx, count * sizeof(const char *));
+    const char **arr = (const char **)alloc->alloc(alloc->ctx, count * sizeof(const char *));
     if (!arr)
         return NULL;
     for (size_t i = 0; i < count; i++)
@@ -224,8 +223,8 @@ const hu_named_agent_config_t *hu_agent_registry_get(const hu_agent_registry_t *
 
 hu_error_t hu_agent_registry_find_by_capability(const hu_agent_registry_t *reg,
                                                 const char *capability,
-                                                const hu_named_agent_config_t **out,
-                                                size_t max_out, size_t *count) {
+                                                const hu_named_agent_config_t **out, size_t max_out,
+                                                size_t *count) {
     if (!reg || !capability || !out || !count)
         return HU_ERR_INVALID_ARGUMENT;
     *count = 0;
@@ -265,7 +264,9 @@ const hu_named_agent_config_t *hu_agent_registry_get_default(const hu_agent_regi
 hu_error_t hu_agent_registry_discover(hu_agent_registry_t *reg, const char *dir_path) {
     if (!reg || !dir_path)
         return HU_ERR_INVALID_ARGUMENT;
-    snprintf(reg->discover_dir, sizeof(reg->discover_dir), "%s", dir_path);
+    /* reload passes reg->discover_dir itself; snprintf onto its own source is UB. */
+    if (dir_path != reg->discover_dir)
+        snprintf(reg->discover_dir, sizeof(reg->discover_dir), "%s", dir_path);
 #ifndef _WIN32
     DIR *d = opendir(dir_path);
     if (!d)
@@ -313,7 +314,9 @@ hu_error_t hu_agent_registry_discover(hu_agent_registry_t *reg, const char *dir_
 hu_error_t hu_agent_registry_discover(hu_agent_registry_t *reg, const char *dir_path) {
     if (!reg || !dir_path)
         return HU_ERR_INVALID_ARGUMENT;
-    snprintf(reg->discover_dir, sizeof(reg->discover_dir), "%s", dir_path);
+    /* reload passes reg->discover_dir itself; snprintf onto its own source is UB. */
+    if (dir_path != reg->discover_dir)
+        snprintf(reg->discover_dir, sizeof(reg->discover_dir), "%s", dir_path);
     return HU_OK;
 }
 #endif

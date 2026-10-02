@@ -40,6 +40,7 @@
 #include "human/cost.h"
 #include "human/filler_recency.h"
 #include "human/memory.h"
+#include "human/memory/consolidation.h"
 #include "human/memory/policy.h"
 #include "human/memory/retrieval.h"
 #include "human/ml/m3_frontier_adapter.h"
@@ -294,6 +295,9 @@ struct hu_agent {
     size_t director_history_count;
 
     uint32_t max_response_chars;
+    /* hu_length_tight_t for the RESPONSE LIMIT line, set with
+     * max_response_chars; LEGACY (0) = today's wording. */
+    uint8_t response_limit_tight;
 
     /* Per-turn model override (set by daemon/CLI, not owned; NULL = use default) */
     const char *turn_model;
@@ -1086,7 +1090,14 @@ void hu_agent_self_rag_telemetry(const hu_agent_t *agent, uint64_t *runs, uint64
                                  uint64_t *refusals_rendered, uint64_t *claims_total,
                                  uint64_t *claims_flagged);
 
-/* Run memory consolidation (merge similar entries, decay old). */
+/* Settings for every hu_memory_consolidate caller (daemon tick, topic switch,
+ * per-turn, gateway memory.consolidate): HU_CONSOLIDATION_DEFAULTS with
+ * decay_days / dedup_threshold taken from config->behavior when config is
+ * non-NULL. One builder so the callers cannot drift apart again. */
+hu_consolidation_config_t hu_agent_consolidation_config(const struct hu_config *config);
+
+/* Run memory consolidation (merge similar entries, decay old) with
+ * hu_agent_consolidation_config(agent->config). */
 hu_error_t hu_agent_consolidate_memory(hu_agent_t *agent);
 
 /* Reload configuration from ~/.human/config.json:

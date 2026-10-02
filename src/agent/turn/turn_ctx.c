@@ -24,6 +24,7 @@ hu_turn_ctx_t *hu_turn_ctx_new(hu_agent_t *agent, const char *msg, size_t msg_le
     turn_ctx->in.msg_len = msg_len;
     turn_ctx->in.response_out = response_out;
     turn_ctx->in.response_len_out = response_len_out;
+    turn_ctx->loop.replan_floor = agent->history_count;
     return turn_ctx;
 }
 

@@ -15,6 +15,7 @@
  * structs on the stack. Never reads ~/.human, chat.db or the network. */
 #include "human/agent.h"
 #include "human/agent/learned_style_turn.h"
+#include "human/agent/length_policy.h"
 #include "human/agent/prompt.h"
 #include "human/agent/reply_prompt.h"
 #include "human/core/allocator.h"
@@ -1011,6 +1012,41 @@ static void agent_turn_live_renders_line_and_strips_length_rules(void) {
     ls_e2e_close(&e);
 }
 
+/* Follow-up to #580: with HU_LEARNED_STYLE=live the learned per-contact
+ * p50/p90 (whole reply-turn bytes) feed HU_LENGTH_POLICY when the persona
+ * contact carries no hand-measured reply_chars stats. Only a contact-level
+ * answer counts — the global row must not widen every contact's cap. */
+static void length_policy_takes_learned_stats_when_live(void) {
+    ls_setup();
+    ls_write(ls_json_v1, 0);
+    hu_persona_t p;
+    ls_persona(&p);
+    const hu_contact_profile_t *cp = hu_persona_find_contact(&p, LS_CONTACT_A, 12);
+    HU_ASSERT_NOT_NULL(cp);
+    HU_ASSERT_EQ(cp->reply_chars_p50, 0);
+    HU_ASSERT_EQ(cp->reply_chars_p90, 0);
+    hu_length_turn_t t = {.inbound = "you around later", .inbound_len = 16, .contact = cp};
+    hu_length_turn_result_t r;
+
+    setenv("HU_LEARNED_STYLE", "shadow", 1); /* SHADOW never feeds the cap */
+    hu_length_policy_turn(&t, HU_GATE_LIVE, &r);
+    HU_ASSERT_FALSE(r.from_stats);
+    uint32_t without = r.cap;
+
+    setenv("HU_LEARNED_STYLE", "live", 1);
+    hu_length_policy_turn(&t, HU_GATE_LIVE, &r);
+    HU_ASSERT_TRUE(r.from_stats);
+    HU_ASSERT_TRUE(r.cap >= 25u); /* never below the learned p50 */
+    HU_ASSERT_TRUE(r.cap >= without);
+
+    /* A persona contact with no learned row (global only): unchanged. */
+    const hu_contact_profile_t *cb = hu_persona_find_contact(&p, LS_CONTACT_B, 12);
+    hu_length_turn_t tb = {.inbound = "you around later", .inbound_len = 16, .contact = cb};
+    hu_length_policy_turn(&tb, HU_GATE_LIVE, &r);
+    HU_ASSERT_FALSE(r.from_stats);
+    ls_teardown();
+}
+
 void run_learned_style_tests(void) {
     HU_TEST_SUITE("learned_style");
     HU_RUN_TEST(shape_rule_matches_shared_vectors);
@@ -1032,6 +1068,7 @@ void run_learned_style_tests(void) {
     HU_RUN_TEST(gate_live_renders_line_and_suppresses_exactly_length_rules);
     HU_RUN_TEST(gate_live_compact_head_and_ineligible_turns);
     HU_RUN_TEST(shadow_count_equals_live_suppression);
+    HU_RUN_TEST(length_policy_takes_learned_stats_when_live);
     HU_RUN_TEST(prompt_strips_contact_length_only_when_live_flag_set);
     HU_RUN_TEST(agent_turn_shadow_logs_once_and_leaves_prompt_unchanged);
     HU_RUN_TEST(agent_turn_live_renders_line_and_strips_length_rules);

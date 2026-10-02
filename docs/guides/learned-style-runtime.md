@@ -24,7 +24,8 @@ This page covers the C side: how the daemon reads that file and what the
 | Inbound shape rule (`question` / `story` / `casual`), identical to the learner's | `hu_learned_style_shape`, `src/persona/learned_style.c` |
 | Shape input: the contact's bubbles in the batch joined with `\n`, with daemon-injected notes (`[They sent a photo: …]`, `[Audio transcription: …]`, `[They sent a video]`, attachment placeholders) dropped. Part A classifies the same thing: the inbound bubbles since the owner's last send, joined with `\n` | `hu_learned_style_shape_inbound` |
 | Loader: mtime-keyed cache, re-stat at most every 60 s. A missing, malformed or wrong-schema file is treated as absent. It logs one WARN per file version (a rewrite that is still bad logs again) and one per disappearance | same file |
-| `hu_learned_style_lookup(contact, shape)`: contact `shape:<x>` bucket, then contact `overall`, then `global`. `hu_learned_style_lookup_for` sets the persona and looks up under one lock | same file; exposed for the length cap (follow-up after #580) |
+| `hu_learned_style_lookup(contact, shape)`: contact `shape:<x>` bucket, then contact `overall`, then `global`. `hu_learned_style_lookup_for` sets the persona and looks up under one lock | same file |
+| Length cap source: with `HU_LEARNED_STYLE=live`, a contact with no hand-measured `reply_chars_p50/p90` gives `HU_LENGTH_POLICY` the learned `len_p50`/`len_p90` (whole reply-turn bytes, contact-level answers only) | `length_contact_stats`, `src/agent/turn/length_policy.c` |
 | One second-person line, with rate clauses only when decisive (≤ 0.2 or ≥ 0.8) | `hu_learned_style_render_line` |
 | Fixed-length rule classifier, applied **sentence by sentence**: word/char counts, `MAX N`, `one line`, `brief`/`short` (a sentence that itself says "match" is a mirroring rule and stays) | `hu_learned_style_is_length_rule`, `hu_learned_style_strip_sentences` |
 | Per-turn wiring: eligibility, head build, SHADOW count and log | `hu_agent_build_head_learned`, `src/agent/turn/learned_style_turn.c` |
@@ -106,7 +107,9 @@ persisted by the runtime, so there is nothing to undo.
 
 ## Not in this change
 
-- **Length cap.** The cap (#580) does not use the lookup yet. Wiring it is a
-  follow-up after both PRs merge.
+- **Length cap ordering.** The cap uses the learned stats only for contacts
+  without hand-measured stats. The lookup reads the persona that the previous
+  turn's head build selected, so the first turn after a restart uses today's
+  cap.
 - **Time and pace buckets.** `time:*` and `pace:rapid` are stored by the learner
   but not used by the runtime in v1.

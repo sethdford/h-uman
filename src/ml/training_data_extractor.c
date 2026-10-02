@@ -46,6 +46,7 @@ static hu_error_t ensure_extraction_tracking(sqlite3 *db) {
 
 /* ── JSON escaping helper ──────────────────────────────────────────────── */
 
+#if !defined(HU_IS_TEST) && defined(HU_ENABLE_SQLITE)
 static void write_json_escaped(FILE *f, const char *s) {
     if (!s)
         return;
@@ -72,6 +73,7 @@ static void write_json_escaped(FILE *f, const char *s) {
         }
     }
 }
+#endif
 
 /* ── DPO table helper (mirrors dpo.c schema) ───────────────────────────── */
 
