@@ -559,6 +559,86 @@ hu_error_t hu_dpo_record_outcome(hu_dpo_collector_t *collector, const char *chan
     return HU_OK;
 }
 
+/* DEF-8 (2026-10-02). A tapback is an outcome on a SPECIFIC outbound, and it
+ * must land whatever else already resolved that row: in production the
+ * contact's text reply resolves the row first (652 of 661 rows), and
+ * hu_dpo_record_outcome only touches rows with outcome_resolved_at IS NULL,
+ * so tapback_polarity stayed NULL on 661 of 661. Match by message_ref when
+ * the row has one; otherwise by send time — the reply row whose
+ * send_timestamp is the latest within [sent - WINDOW_BEFORE, sent + SLACK].
+ * send_timestamp is stamped when the FIRST bubble is delivered, so later
+ * bubbles of the same reply (choreography) sit after it, never before. */
+#define HU_DPO_TAPBACK_WINDOW_BEFORE_S 600
+#define HU_DPO_TAPBACK_SLACK_AFTER_S   15
+
+hu_error_t hu_dpo_record_tapback(hu_dpo_collector_t *collector, const char *channel,
+                                 const char *target, const char *message_ref,
+                                 int64_t target_sent_unix, int polarity, bool dry_run,
+                                 int64_t *out_row_id) {
+    if (out_row_id)
+        *out_row_id = 0;
+    if (!collector || !channel || !channel[0] || !target || !target[0])
+        return HU_ERR_INVALID_ARGUMENT;
+    if (polarity < -1 || polarity > 1)
+        return HU_ERR_INVALID_ARGUMENT;
+#ifndef HU_ENABLE_SQLITE
+    (void)message_ref;
+    (void)target_sent_unix;
+    (void)dry_run;
+    return HU_ERR_NOT_SUPPORTED;
+#else
+    if (!collector->db)
+        return HU_ERR_NOT_SUPPORTED;
+    sqlite3_int64 row_id = 0;
+    sqlite3_stmt *st = NULL;
+    if (message_ref && message_ref[0]) {
+        if (sqlite3_prepare_v2(collector->db,
+                               "SELECT id FROM production_outcomes WHERE channel=? AND target=? "
+                               "AND message_ref=? ORDER BY id DESC LIMIT 1",
+                               -1, &st, NULL) != SQLITE_OK)
+            return HU_ERR_IO;
+        sqlite3_bind_text(st, 1, channel, -1, SQLITE_STATIC);
+        sqlite3_bind_text(st, 2, target, -1, SQLITE_STATIC);
+        sqlite3_bind_text(st, 3, message_ref, -1, SQLITE_STATIC);
+        if (sqlite3_step(st) == SQLITE_ROW)
+            row_id = sqlite3_column_int64(st, 0);
+        sqlite3_finalize(st);
+    }
+    if (row_id == 0 && target_sent_unix > 0) {
+        if (sqlite3_prepare_v2(collector->db,
+                               "SELECT id FROM production_outcomes WHERE channel=? AND target=? "
+                               "AND send_timestamp BETWEEN ? AND ? "
+                               "ORDER BY send_timestamp DESC, id DESC LIMIT 1",
+                               -1, &st, NULL) != SQLITE_OK)
+            return HU_ERR_IO;
+        sqlite3_bind_text(st, 1, channel, -1, SQLITE_STATIC);
+        sqlite3_bind_text(st, 2, target, -1, SQLITE_STATIC);
+        sqlite3_bind_int64(st, 3, target_sent_unix - HU_DPO_TAPBACK_WINDOW_BEFORE_S);
+        sqlite3_bind_int64(st, 4, target_sent_unix + HU_DPO_TAPBACK_SLACK_AFTER_S);
+        if (sqlite3_step(st) == SQLITE_ROW)
+            row_id = sqlite3_column_int64(st, 0);
+        sqlite3_finalize(st);
+    }
+    if (row_id == 0)
+        return HU_ERR_NOT_FOUND;
+    if (out_row_id)
+        *out_row_id = (int64_t)row_id;
+    if (dry_run)
+        return HU_OK;
+    if (sqlite3_prepare_v2(collector->db,
+                           "UPDATE production_outcomes SET tapback_polarity=?, "
+                           "outcome_resolved_at=COALESCE(outcome_resolved_at, ?) WHERE id=?",
+                           -1, &st, NULL) != SQLITE_OK)
+        return HU_ERR_IO;
+    sqlite3_bind_int(st, 1, polarity);
+    sqlite3_bind_int64(st, 2, (sqlite3_int64)time(NULL));
+    sqlite3_bind_int64(st, 3, row_id);
+    int rc = sqlite3_step(st);
+    sqlite3_finalize(st);
+    return rc == SQLITE_DONE ? HU_OK : HU_ERR_IO;
+#endif
+}
+
 hu_error_t hu_dpo_record_inbound_arrival(hu_dpo_collector_t *collector, const char *channel,
                                          size_t channel_len, const char *target, size_t target_len,
                                          int inbound_length) {

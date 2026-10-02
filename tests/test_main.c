@@ -144,6 +144,7 @@ void run_slack_reactions_tests(void);
  * minimal-build / no-sqlite / cross-arm64 variants. */
 #ifdef HU_ENABLE_SQLITE
 void run_reaction_handler_e2e_tests(void);
+void run_outcome_join_tests(void);
 #endif
 void run_declarative_tools_tests(void);
 void run_skill_trust_tests(void);
@@ -1247,6 +1248,7 @@ int main(int argc, char **argv) {
     run_slack_reactions_tests();
 #ifdef HU_ENABLE_SQLITE
     run_reaction_handler_e2e_tests();
+    run_outcome_join_tests();
 #endif
     run_declarative_tools_tests();
     run_skill_trust_tests();

@@ -123,6 +123,9 @@ void hu_reaction_handler_register_assistant_message_for_test(
     const char *channel, const char *thread, const char *msg_ref, const char *prompt,
     const char *response, const char *alternative);
 void hu_reaction_handler_reset_for_test(void);
+/* Force the HU_OUTCOME_JOIN gate (hu_gate_mode_t value) for tests; pass -1
+ * to return to reading the environment. */
+void hu_reaction_handler_set_outcome_join_mode_for_test(int mode);
 #ifdef HU_ENABLE_SQLITE
 /* Test seam: run the production SQLite open+migrate at an arbitrary path.
  * Returns 1 when the store opened (fresh create, reopen of an already-

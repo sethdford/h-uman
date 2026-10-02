@@ -4189,6 +4189,8 @@ list(APPEND HU_TEST_SOURCES tests/test_slack_reactions.c)
 # to keep minimal-build / no-sqlite / cross-arm64 builds linkable.
 if(HU_ENABLE_SQLITE)
     list(APPEND HU_TEST_SOURCES tests/test_reaction_handler_e2e.c)
+    # DEF-8: tapback -> production_outcomes join by (thread, send time).
+    list(APPEND HU_TEST_SOURCES tests/test_outcome_join.c)
 endif()
 
 # Sprint 59 Phase C (2026-05-26 Annie/Mindy/Betty incident): pin per-contact

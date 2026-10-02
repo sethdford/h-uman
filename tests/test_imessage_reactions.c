@@ -151,11 +151,85 @@ static void test_imessage_poll_reactions_returns_recent_tapbacks(void) {
 }
 #endif
 
+#ifdef HU_ENABLE_SQLITE
+#include <sqlite3.h>
+#include <stdlib.h>
+
+/* DEF-8 fixture: the poll resolves WHAT was reacted to. 98% of our sent
+ * chat.db rows have text NULL (body in attributedBody), so the join must not
+ * depend on text — only on the target GUID's row. Mac time = unix - 978307200,
+ * in nanoseconds. Fixture handles are synthetic 555 numbers. */
+static void poll_db_resolves_target_owner_and_send_time(void) {
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
+    const char *sql =
+        "CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);"
+        "CREATE TABLE chat (ROWID INTEGER PRIMARY KEY, guid TEXT);"
+        "CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);"
+        "CREATE TABLE message (ROWID INTEGER PRIMARY KEY, guid TEXT UNIQUE, text TEXT,"
+        "  handle_id INTEGER, date INTEGER, is_from_me INTEGER,"
+        "  associated_message_type INTEGER DEFAULT 0, associated_message_guid TEXT,"
+        "  associated_message_emoji TEXT);"
+        "INSERT INTO handle VALUES (1, '+15550002222');"
+        "INSERT INTO chat VALUES (1, 'any;-;+15550002222');"
+        /* 1: OUR reply, text NULL (Ventura+ shape), sent at unix 1790000000 */
+        "INSERT INTO message VALUES (1, 'OURS-GUID-1', NULL, 1, 812000000000000000, 1, 0, NULL, "
+        "NULL);"
+        /* 2: the contact's own message */
+        "INSERT INTO message VALUES (2, 'THEIRS-GUID-2', 'hey', 1, 812000010000000000, 0, 0, "
+        "NULL, NULL);"
+        /* 3: contact loves OUR reply (p:0/ prefix) */
+        "INSERT INTO message VALUES (3, 'R3', NULL, 1, 812000020000000000, 0, 2000, "
+        "'p:0/OURS-GUID-1', NULL);"
+        /* 4: contact laughs at their OWN message */
+        "INSERT INTO message VALUES (4, 'R4', NULL, 1, 812000030000000000, 0, 2003, "
+        "'p:0/THEIRS-GUID-2', NULL);"
+        /* 5: WE tapback the contact's message — reactor is us */
+        "INSERT INTO message VALUES (5, 'R5', NULL, 1, 812000040000000000, 1, 2001, "
+        "'p:0/THEIRS-GUID-2', NULL);"
+        /* 6: contact likes our reply via the balloon (bp:) form */
+        "INSERT INTO message VALUES (6, 'R6', NULL, 1, 812000050000000000, 0, 2001, "
+        "'bp:OURS-GUID-1', NULL);"
+        "INSERT INTO chat_message_join VALUES (1,1),(1,2),(1,3),(1,4),(1,5),(1,6);";
+    char *err = NULL;
+    HU_ASSERT_EQ(sqlite3_exec(db, sql, NULL, NULL, &err), SQLITE_OK);
+    if (err)
+        sqlite3_free(err);
+
+    hu_reaction_event_t ev[8];
+    memset(ev, 0, sizeof(ev));
+    size_t n = 0;
+    HU_ASSERT_EQ(hu_imessage_poll_reactions_db(db, 1789999000, ev, 8, &n), HU_OK);
+    HU_ASSERT_EQ(n, 4);
+    /* ORDER BY date DESC: R6, R5, R4, R3 */
+    const int64_t ours_sent = 812000000LL + 978307200LL;
+    HU_ASSERT_STR_EQ(ev[0].target_message_ref, "OURS-GUID-1"); /* bp: stripped */
+    HU_ASSERT_EQ(ev[0].target_is_ours, 1);
+    HU_ASSERT_EQ(ev[0].target_sent_unix, ours_sent);
+    HU_ASSERT_EQ(ev[1].target_is_ours, 0); /* we reacted: not a contact signal */
+    HU_ASSERT_EQ(ev[2].target_is_ours, 0); /* their own message */
+    HU_ASSERT_STR_EQ(ev[3].target_message_ref, "OURS-GUID-1");
+    HU_ASSERT_EQ(ev[3].target_is_ours, 1);
+    HU_ASSERT_EQ(ev[3].target_sent_unix, ours_sent);
+    HU_ASSERT_STR_EQ(ev[3].target_thread_id, "+15550002222");
+    for (size_t i = 0; i < n; i++) {
+        free((void *)ev[i].target_thread_id);
+        free((void *)ev[i].target_message_ref);
+        free((void *)ev[i].sender_handle);
+        free((void *)ev[i].emoji);
+    }
+    sqlite3_close(db);
+}
+#endif
+
 void run_imessage_reactions_tests(void) {
     HU_TEST_SUITE("imessage_reactions");
     HU_RUN_TEST(assoc_guid_strips_part_prefix);
     HU_RUN_TEST(thread_key_reduces_chat_guid_to_bare_id);
     HU_RUN_TEST(poll_key_matches_registered_key);
+#ifdef HU_ENABLE_SQLITE
+    HU_RUN_TEST(poll_db_resolves_target_owner_and_send_time);
+#endif
 #ifdef HU_HAVE_CHATDB
     HU_RUN_TEST(test_imessage_poll_reactions_returns_recent_tapbacks);
 #else

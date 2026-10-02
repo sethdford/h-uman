@@ -16,6 +16,8 @@
  * restart (R4 in the Phase-5 risk register). */
 #include "human/agent/reaction_handler.h"
 #include "human/channels/imessage_ingest.h"
+#include "human/core/gate_mode.h"
+#include "human/core/log.h"
 #include "human/core/paths.h"
 #include "human/memory/identity_resolver.h"
 #include "human/memory/personal_model.h"
@@ -53,6 +55,7 @@ typedef struct {
     char prompt[2048];
     char response[4096];
     char alternative[4096];
+    int64_t inserted_at; /* unix seconds, as the SQLite store's column */
 } lookup_entry_t;
 
 static lookup_entry_t s_lookup[LOOKUP_CAP];
@@ -251,6 +254,26 @@ static void rxn_db_register(const char *channel, const char *thread, const char 
         rxn_db_cleanup_old();
 }
 
+/* Step a prepared (prompt, response, alternative) SELECT once, copy the row
+ * into the caller's buffers, finalize. Returns 1 on a row, 0 otherwise. */
+static int rxn_db_take_row(sqlite3_stmt *st, char *prompt_out, size_t prompt_cap,
+                           char *response_out, size_t response_cap, char *alternative_out,
+                           size_t alternative_cap) {
+    int found = 0;
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        const unsigned char *p = sqlite3_column_text(st, 0);
+        const unsigned char *r = sqlite3_column_text(st, 1);
+        const unsigned char *a = sqlite3_column_text(st, 2);
+        snprintf(prompt_out, prompt_cap, "%s", p ? (const char *)p : "");
+        snprintf(response_out, response_cap, "%s", r ? (const char *)r : "");
+        if (alternative_out && alternative_cap > 0)
+            snprintf(alternative_out, alternative_cap, "%s", a ? (const char *)a : "");
+        found = 1;
+    }
+    sqlite3_finalize(st);
+    return found;
+}
+
 /* Lookup returns 1 on hit, 0 on miss. On hit, prompt_out/response_out/alternative_out are
  * filled (truncated via snprintf if needed). alternative_out and alternative_cap may be NULL
  * if the caller doesn't need the alternative. */
@@ -271,19 +294,8 @@ static int rxn_db_lookup(const char *channel, const char *thread, const char *ms
     sqlite3_bind_text(st, 2, thread, -1, SQLITE_STATIC);
     sqlite3_bind_text(st, 3, msg_ref, -1, SQLITE_STATIC);
 
-    int found = 0;
-    if (sqlite3_step(st) == SQLITE_ROW) {
-        const unsigned char *p = sqlite3_column_text(st, 0);
-        const unsigned char *r = sqlite3_column_text(st, 1);
-        const unsigned char *a = sqlite3_column_text(st, 2);
-        snprintf(prompt_out, prompt_cap, "%s", p ? (const char *)p : "");
-        snprintf(response_out, response_cap, "%s", r ? (const char *)r : "");
-        if (alternative_out && alternative_cap > 0)
-            snprintf(alternative_out, alternative_cap, "%s", a ? (const char *)a : "");
-        found = 1;
-    }
-    sqlite3_finalize(st);
-    return found;
+    return rxn_db_take_row(st, prompt_out, prompt_cap, response_out, response_cap, alternative_out,
+                           alternative_cap);
 }
 
 #endif /* HU_RXN_LOOKUP_USES_SQLITE */
@@ -333,6 +345,101 @@ static int reaction_lookup_find(const hu_reaction_event_t *e, char *prompt_out, 
     }
     return 0;
 #endif
+}
+
+/* DEF-8: join a tapback on OUR message to the reply registered closest
+ * before that message was sent, within the same thread. Registration happens
+ * right after the first bubble is delivered, so the target's send time is at
+ * or after it (later bubbles), within the window. Used when the exact msg_ref
+ * join misses — in production the router fell back to a synthetic
+ * "out-<ts>" ref for 440 of 492 registrations because chat.db `text` is NULL
+ * for ~98% of our sent rows and the GUID lookup matched on text. */
+#define RXN_NEAR_WINDOW_BEFORE_S 600
+#define RXN_NEAR_SLACK_AFTER_S   15
+
+static int reaction_lookup_find_near(const hu_reaction_event_t *e, char *prompt_out,
+                                     size_t prompt_cap, char *response_out, size_t response_cap,
+                                     char *alternative_out, size_t alternative_cap) {
+    const char *thread = e->target_thread_id ? e->target_thread_id : "";
+    int64_t lo = e->target_sent_unix - RXN_NEAR_WINDOW_BEFORE_S;
+    int64_t hi = e->target_sent_unix + RXN_NEAR_SLACK_AFTER_S;
+#if HU_RXN_LOOKUP_USES_SQLITE
+    if (!rxn_db_open())
+        return 0;
+    sqlite3_stmt *st = NULL;
+    static const char sql[] =
+        "SELECT prompt, response, COALESCE(alternative, '') FROM reaction_lookup "
+        "WHERE channel = ? AND thread = ? AND inserted_at BETWEEN ? AND ? "
+        "ORDER BY inserted_at DESC LIMIT 1";
+    if (sqlite3_prepare_v2(s_db, sql, -1, &st, NULL) != SQLITE_OK)
+        return 0;
+    sqlite3_bind_text(st, 1, e->channel_id, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 2, thread, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(st, 3, (sqlite3_int64)lo);
+    sqlite3_bind_int64(st, 4, (sqlite3_int64)hi);
+    return rxn_db_take_row(st, prompt_out, prompt_cap, response_out, response_cap, alternative_out,
+                           alternative_cap);
+#else
+    const lookup_entry_t *best = NULL;
+    for (size_t i = 0; i < s_lookup_n; i++) {
+        const lookup_entry_t *x = &s_lookup[i];
+        if (strcmp(x->channel, e->channel_id) != 0 || strcmp(x->thread, thread) != 0)
+            continue;
+        if (x->inserted_at < lo || x->inserted_at > hi)
+            continue;
+        if (!best || x->inserted_at >= best->inserted_at)
+            best = x;
+    }
+    if (!best)
+        return 0;
+    snprintf(prompt_out, prompt_cap, "%s", best->prompt);
+    snprintf(response_out, response_cap, "%s", best->response);
+    snprintf(alternative_out, alternative_cap, "%s", best->alternative);
+    return 1;
+#endif
+}
+
+#if HU_IS_TEST
+static int s_outcome_join_override = -1;
+void hu_reaction_handler_set_outcome_join_mode_for_test(int mode) {
+    s_outcome_join_override = mode;
+}
+#endif
+
+static hu_gate_mode_t outcome_join_mode(void) {
+#if HU_IS_TEST
+    if (s_outcome_join_override >= 0)
+        return (hu_gate_mode_t)s_outcome_join_override;
+#endif
+    return hu_gate_mode_from_env("HU_OUTCOME_JOIN", HU_GATE_OFF);
+}
+
+/* HU_OUTCOME_JOIN != off: land the tapback on its production_outcomes row
+ * (LIVE writes; SHADOW only finds the row and logs one aggregate line).
+ * Returns the time-window reaction_lookup hit (0/1); the buffers are filled
+ * on a hit and the caller uses them only when LIVE. */
+static int outcome_join_apply(hu_gate_mode_t mode, const hu_reaction_event_t *e, int exact_hit,
+                              char *prompt_buf, size_t prompt_cap, char *response_buf,
+                              size_t response_cap, char *alternative_buf, size_t alternative_cap) {
+    int ours = e->target_is_ours && e->target_sent_unix > 0;
+    int time_hit = 0;
+    if (!exact_hit && ours)
+        time_hit = reaction_lookup_find_near(e, prompt_buf, prompt_cap, response_buf, response_cap,
+                                             alternative_buf, alternative_cap);
+    int64_t row_id = 0;
+    hu_error_t rerr = HU_ERR_NOT_FOUND;
+    if (s_collector && e->target_thread_id && (exact_hit || ours)) {
+        int pol = (e->polarity > 0) ? 1 : (e->polarity < 0 ? -1 : 0);
+        rerr = hu_dpo_record_tapback(s_collector, e->channel_id, e->target_thread_id,
+                                     e->target_message_ref, ours ? e->target_sent_unix : 0, pol,
+                                     /*dry_run=*/mode != HU_GATE_LIVE, &row_id);
+    }
+    if (mode == HU_GATE_SHADOW)
+        hu_log_info("reaction_handler", NULL,
+                    "[HU_OUTCOME_JOIN shadow] tapback polarity=%d ours=%d exact_hit=%d "
+                    "time_hit=%d outcome_row=%d",
+                    (int)e->polarity, ours, exact_hit, time_hit, (rerr == HU_OK && row_id > 0));
+    return time_hit;
 }
 
 /* SOTA roadmap #13 (continuity): most recent outbound response for a
@@ -405,6 +512,16 @@ hu_error_t hu_reaction_handler_handle_event(const hu_reaction_event_t *e) {
     int lookup_hit =
         reaction_lookup_find(e, prompt_buf, sizeof(prompt_buf), response_buf, sizeof(response_buf),
                              alternative_buf, sizeof(alternative_buf));
+
+    /* DEF-8: HU_OUTCOME_JOIN (default OFF -> nothing below runs). */
+    hu_gate_mode_t oj_mode = outcome_join_mode();
+    if (oj_mode != HU_GATE_OFF) {
+        int time_hit =
+            outcome_join_apply(oj_mode, e, lookup_hit, prompt_buf, sizeof(prompt_buf), response_buf,
+                               sizeof(response_buf), alternative_buf, sizeof(alternative_buf));
+        if (oj_mode == HU_GATE_LIVE && time_hit)
+            lookup_hit = 1;
+    }
 
     /* Personal-model ingest fires REGARDLESS of lookup hit. DPO below
      * still requires the lookup (DPO only learns from reactions on OUR
@@ -517,7 +634,7 @@ hu_error_t hu_reaction_handler_handle_event(const hu_reaction_event_t *e) {
      * is the "reaction came in" signal that resolves an outbound's
      * outcome columns. Best-effort: failures here don't fail the
      * caller's signal — the per-turn flag is already set. */
-    if (e->channel_id && e->target_thread_id && e->target_message_ref) {
+    if (oj_mode != HU_GATE_LIVE && e->channel_id && e->target_thread_id && e->target_message_ref) {
         int polarity_int = (e->polarity > 0) ? 1 : (e->polarity < 0 ? -1 : 0);
         (void)hu_dpo_record_outcome(s_collector, e->channel_id, strlen(e->channel_id),
                                     e->target_thread_id, strlen(e->target_thread_id),
@@ -545,6 +662,7 @@ static void register_assistant_message(const char *channel, const char *thread, 
             snprintf(s_lookup[i].response, sizeof(s_lookup[i].response), "%s", response);
             snprintf(s_lookup[i].alternative, sizeof(s_lookup[i].alternative), "%s",
                      alternative ? alternative : "");
+            s_lookup[i].inserted_at = (int64_t)time(NULL);
             return;
         }
     }
@@ -557,6 +675,7 @@ static void register_assistant_message(const char *channel, const char *thread, 
     snprintf(s_lookup[s_lookup_n].response, sizeof(s_lookup[0].response), "%s", response);
     snprintf(s_lookup[s_lookup_n].alternative, sizeof(s_lookup[0].alternative), "%s",
              alternative ? alternative : "");
+    s_lookup[s_lookup_n].inserted_at = (int64_t)time(NULL);
     s_lookup_n++;
 #endif
 }

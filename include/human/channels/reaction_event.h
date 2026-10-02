@@ -46,6 +46,15 @@ typedef struct {
      * same place sender_handle / target_thread_id / target_message_ref
      * are freed. */
     const char *emoji;
+    /* DEF-8 (2026-10-02): what the reaction points AT, resolved by the
+     * producer from the same chat.db row. target_is_ours = 1 when a CONTACT
+     * reacted to a message WE sent (target is_from_me=1, reactor is not us);
+     * 0 = not ours or unknown. target_sent_unix = the target message's send
+     * time (0 = unknown). Lets the handler join a tapback to our reply by
+     * (thread, send time) when the registration-time GUID lookup missed —
+     * which it did for ~98% of replies, see hu_reaction_handler_handle_event. */
+    int target_is_ours;
+    int64_t target_sent_unix;
 } hu_reaction_event_t;
 
 /* iMessage tapback codes — AUTHORITY for the full set comes from the
