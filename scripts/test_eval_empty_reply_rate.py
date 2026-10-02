@@ -127,3 +127,40 @@ def test_measured_run_records_basis_and_definition(monkeypatch, tmp_path):
     assert rep["summary"]["all"]["rate"] == 1.0      # every fake reply was empty, and seen
     assert "environment" in rep["empty_retry_off_basis"]
     assert "SUPERSET" in rep["empty_definition"]
+
+
+# --- server_env against fixture lsof / ps eww output (no real process) ---
+
+PS_EWW_OFF = ("/Users/x/Documents/gemma-realtime-1/.venv312/bin/python3.12 "
+              "/Users/x/Documents/gemma-realtime-1/scripts/mlx-server.py --model "
+              "mlx-community/GLM-4.5-Air-4bit --port 8748 --realtime --kv-bits 8 "
+              "--adapter-path /a TERM_PROGRAM=Apple_Terminal SHELL=/bin/zsh "
+              "MLX_EMPTY_RETRY=0 GEMMA_DISABLE_THINKING=1 HOME=/Users/x PATH=/usr/bin:/bin\n")
+PS_NO_ENV = ("/Users/x/Documents/gemma-realtime-1/.venv312/bin/python3.12 "
+             "/Users/x/Documents/gemma-realtime-1/scripts/mlx-server.py --port 8748\n")
+
+
+def _fake_run(lsof_out, ps_out):
+    import subprocess
+
+    def run(cmd, **kw):
+        out = lsof_out if cmd[0] == "lsof" else ps_out
+        assert cmd[0] in ("lsof", "ps")
+        if cmd[0] == "ps":
+            assert cmd[1:3] == ["eww", "-o"] and cmd[-2:] == ["-p", "4242"]
+        return subprocess.CompletedProcess(cmd, 0, stdout=out, stderr="")
+    return run
+
+
+@pytest.mark.parametrize("lsof_out,ps_out,expect", [
+    ("4242\n", PS_EWW_OFF, "off"),
+    ("4242\n", PS_EWW_OFF.replace("MLX_EMPTY_RETRY=0 ", ""), "on"),
+    ("4242\n", PS_NO_ENV, None),                      # env not readable -> unknown
+    ("", PS_EWW_OFF, None),                           # nothing listening
+    ("4242\n4243\n", PS_EWW_OFF, None),               # ambiguous listener
+    ("4242\n", "/usr/bin/python3 other.py A=1\n", None),  # not an mlx-server
+])
+def test_server_env_parses_fixture_ps_output(monkeypatch, lsof_out, ps_out, expect):
+    monkeypatch.setattr(ev.subprocess, "run", _fake_run(lsof_out, ps_out))
+    env = ev.server_env(8748)
+    assert (None if env is None else ev.empty_retry_state(env)) == expect

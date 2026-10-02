@@ -178,7 +178,10 @@ oversized system prompt stops the run instead of silently shrinking the corpus.
   - Log: `~/.human/logs/train-glm-<TAG>-<STAMP>.log`.
   - Smoke results: `~/.human/logs/v6-smoke-<STAMP>.json`.
 - **Must appear in the log:**
-  - `template contract holds on N trainer-tokenized sequences (one leading [gMASK], last token '<|user|>', loss starts at the first reply token)`
+  - `template contract holds on N trainer-tokenized sequences (one leading [gMASK], last token '<|user|>'; loss starts at the first reply token (shared-prefix path))`.
+    The run refuses to start, before any step, if the pin cannot take effect:
+    mlx-tune is not 0.6.0, the trainer loop no longer calls the pinned
+    tokenizer method, or the trainer is not on the native path.
   - `Training Mode: orpo`
   - `lora_parameters.scale = 2.0`
   - `lora_b non-zero 80/80`

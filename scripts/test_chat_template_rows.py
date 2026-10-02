@@ -304,3 +304,73 @@ def test_system_prompt_token_count_and_reply_share(tok, tmp_path):
     a, b = bare["files"]["train.jsonl"], withsys["files"]["train.jsonl"]
     # a long system prompt shrinks the reply's share of the NLL denominator
     assert b["chosen_reply_share_median"] < a["chosen_reply_share_median"] / 5
+
+
+# --- the pin must provably take effect (mlx-tune internals it depends on) ---
+
+def _native_trainer():
+    return SimpleNamespace(use_native=True)
+
+
+@pytest.mark.parametrize("mode", ["orpo", "simpo"])
+def test_pin_preconditions_hold_on_installed_mlx_tune(mode):
+    import importlib.metadata
+    import mlx_tune_train as mt
+
+    assert importlib.metadata.version("mlx-tune") == mt.PINNED_MLX_TUNE_VERSION == "0.6.0"
+    assert mt.assert_pin_preconditions(_native_trainer(), mode) is True
+
+
+def test_pin_preconditions_refuse_other_mlx_tune_version(monkeypatch):
+    import importlib.metadata
+    import mlx_tune_train as mt
+
+    monkeypatch.setattr(importlib.metadata, "version", lambda name: "0.7.0")
+    with pytest.raises(SystemExit) as e:
+        mt.assert_pin_preconditions(_native_trainer(), "orpo")
+    assert "0.7.0" in str(e.value) and "0.6.0" in str(e.value)
+
+
+@pytest.mark.parametrize("mode,cls_name,loop", [("orpo", "ORPOTrainer", "_train_native"),
+                                                ("simpo", "SimPOTrainer", "train")])
+def test_pin_preconditions_refuse_renamed_call_site(monkeypatch, mode, cls_name, loop):
+    """Simulates an mlx-tune whose loop calls a renamed tokenizer: the pin
+    would shadow a method nobody calls."""
+    import mlx_tune_train as mt
+    from mlx_tune import rl_trainers
+
+    def renamed(self):
+        return self._tokenize_pair_v2(None)
+    monkeypatch.setattr(getattr(rl_trainers, cls_name), loop, renamed)
+    with pytest.raises(SystemExit) as e:
+        mt.assert_pin_preconditions(_native_trainer(), mode)
+    assert "no longer calls" in str(e.value)
+
+
+def test_pin_preconditions_refuse_subprocess_fallback():
+    import mlx_tune_train as mt
+
+    with pytest.raises(SystemExit) as e:
+        mt.assert_pin_preconditions(SimpleNamespace(use_native=False), "orpo")
+    assert "use_native" in str(e.value)
+
+
+def test_pin_preconditions_skip_kto():
+    import mlx_tune_train as mt
+
+    assert mt.assert_pin_preconditions(SimpleNamespace(use_native=False), "kto") is False
+
+
+@pytest.mark.parametrize("batch_size,expect", [(1, "first reply token"),
+                                               (4, "non-shared path")])
+def test_contract_log_line_matches_batch_size(tok, capsys, batch_size, expect):
+    import mlx_tune_train as mt
+
+    trainer = _orpo_trainer(tok)
+    mt.pin_prompt_length(trainer, "orpo", tok)
+    mt.assert_trainer_sees_template(trainer, [ctr.format_pair(tok, ROW, system=SYSTEM)],
+                                    "orpo", tok, batch_size=batch_size)
+    out = capsys.readouterr().out
+    assert expect in out
+    if batch_size != 1:
+        assert "first reply token" not in out

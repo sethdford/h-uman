@@ -348,6 +348,50 @@ def require_templated_corpus(model_id, data_dir) -> dict:
 _PAIR_TOKENIZERS = {"orpo": "_tokenize_preference_pair", "simpo": "_tokenize_pair"}
 
 
+# pin_prompt_length depends on mlx-tune internals: which method the training
+# loop calls per pair, that the loop takes the native (not subprocess) path,
+# and the shared-prefix semantics of prompt_length. All three were read off
+# mlx-tune 0.6.0. A version bump could rename the method (the pin would then
+# shadow nothing and the bug returns silently) or route to the subprocess SFT
+# fallback (which never calls the pinned method). Fail loudly instead.
+PINNED_MLX_TUNE_VERSION = "0.6.0"
+_PAIR_CALL_SITES = {
+    # mode: (trainer class name, method whose source must call the tokenizer)
+    "orpo": ("ORPOTrainer", "_train_native"),
+    "simpo": ("SimPOTrainer", "train"),
+}
+
+
+def assert_pin_preconditions(trainer, train_mode, installed_version=None):
+    """Exit unless the prompt_length pin is guaranteed to take effect for
+    this trainer. No-op for KTO (no prompt_length). Returns True when checked."""
+    if train_mode not in _PAIR_TOKENIZERS:
+        return False
+    import inspect
+    import importlib.metadata
+
+    from mlx_tune import rl_trainers
+
+    version = installed_version or importlib.metadata.version("mlx-tune")
+    if version != PINNED_MLX_TUNE_VERSION:
+        sys.exit(f"[mlx_tune_train] FATAL: mlx-tune {version} installed; the prompt_length "
+                 f"pin was verified against {PINNED_MLX_TUNE_VERSION} only. Re-verify "
+                 "pin_prompt_length against the new trainer source, then bump "
+                 "PINNED_MLX_TUNE_VERSION.")
+    cls_name, loop_name = _PAIR_CALL_SITES[train_mode]
+    attr = _PAIR_TOKENIZERS[train_mode]
+    src = inspect.getsource(getattr(getattr(rl_trainers, cls_name), loop_name))
+    if f"self.{attr}(" not in src:
+        sys.exit(f"[mlx_tune_train] FATAL: {cls_name}.{loop_name} no longer calls "
+                 f"self.{attr}( -- pin_prompt_length would shadow a method the training "
+                 "loop never uses, and the first reply token would silently go untrained.")
+    if not getattr(trainer, "use_native", False):
+        sys.exit(f"[mlx_tune_train] FATAL: {cls_name}.use_native is False -- training would "
+                 "take the subprocess/SFT fallback, which never calls the pinned tokenizer "
+                 "(SimPO returns {'status': 'fallback'} without training at all).")
+    return True
+
+
 def pin_prompt_length(trainer, train_mode, tokenizer):
     """Make the trainer's own per-pair tokenizer report prompt_length =
     len(encode(prompt)), so the shared-prefix loss starts at the first reply
@@ -387,7 +431,8 @@ def trainer_tokenization(trainer, sample, train_mode):
     return [trainer.tokenizer.encode(sample["prompt"] + sample["completion"])[: trainer.max_seq_length]], None
 
 
-def assert_trainer_sees_template(trainer, dataset, train_mode, tokenizer, max_check=16):
+def assert_trainer_sees_template(trainer, dataset, train_mode, tokenizer, max_check=16,
+                                 batch_size=1):
     """After the trainer exists, prove ITS tokenization of the templated rows
     starts with exactly one [gMASK] (nothing re-added), ends with the
     end-of-turn id (nothing truncated away), and -- for the pair trainers --
@@ -415,8 +460,15 @@ def assert_trainer_sees_template(trainer, dataset, train_mode, tokenizer, max_ch
                 sys.exit(f"[mlx_tune_train] FATAL: trainer tokenization ends with {ids[-1]}, "
                          f"not end-of-turn {eot} ({END_OF_TURN!r}) -- row truncated or untemplated")
             checked += 1
+    if train_mode in _PAIR_TOKENIZERS and batch_size == 1:
+        loss_note = "loss starts at the first reply token (shared-prefix path)"
+    elif train_mode in _PAIR_TOKENIZERS:
+        loss_note = (f"batch_size={batch_size}: non-shared path, loss covers the whole "
+                     "sequence including the prompt; prompt_length unused")
+    else:
+        loss_note = "KTO: loss covers the whole sequence"
     print(f"[mlx_tune_train] template contract holds on {checked} trainer-tokenized sequences "
-          f"(one leading [gMASK], last token {END_OF_TURN!r}, loss starts at the first reply token)")
+          f"(one leading [gMASK], last token {END_OF_TURN!r}; {loss_note})")
     return checked
 
 
@@ -757,8 +809,10 @@ def cmd_train(args: argparse.Namespace) -> int:
         sys.exit(f"[mlx_tune_train] FATAL: unknown --train-mode {args.train_mode!r}")
 
     if is_glm_model(model_id) and os.environ.get("HU_MLX_TUNE_ALLOW_RAW_ROWS") != "1":
+        assert_pin_preconditions(trainer, args.train_mode)
         pin_prompt_length(trainer, args.train_mode, tokenizer)
-        assert_trainer_sees_template(trainer, train_dataset, args.train_mode, tokenizer)
+        assert_trainer_sees_template(trainer, train_dataset, args.train_mode, tokenizer,
+                                     batch_size=batch_size)
 
     print(f"Training Mode: {args.train_mode}")  # matches train-glm-adapter.sh's grep
     heldout = []
