@@ -8,11 +8,16 @@ static _Thread_local hu_llm_purpose_t s_purpose = HU_LLM_PURPOSE_UNTAGGED;
 static _Thread_local unsigned s_background_depth = 0;
 
 static const char *const k_names[HU_LLM_PURPOSE__COUNT] = {
-    [HU_LLM_PURPOSE_UNTAGGED] = "untagged",       [HU_LLM_PURPOSE_REPLY] = "reply",
-    [HU_LLM_PURPOSE_GUARD_RETRY] = "guard_retry", [HU_LLM_PURPOSE_PLANNER] = "planner",
-    [HU_LLM_PURPOSE_EXTRACT] = "extract",         [HU_LLM_PURPOSE_EMBED] = "embed",
-    [HU_LLM_PURPOSE_PROACTIVE] = "proactive",     [HU_LLM_PURPOSE_JUDGE] = "judge",
+    [HU_LLM_PURPOSE_UNTAGGED] = "untagged",
+    [HU_LLM_PURPOSE_REPLY] = "reply",
+    [HU_LLM_PURPOSE_GUARD_RETRY] = "guard_retry",
+    [HU_LLM_PURPOSE_PLANNER] = "planner",
+    [HU_LLM_PURPOSE_EXTRACT] = "extract",
+    [HU_LLM_PURPOSE_EMBED] = "embed",
+    [HU_LLM_PURPOSE_PROACTIVE] = "proactive",
+    [HU_LLM_PURPOSE_JUDGE] = "judge",
     [HU_LLM_PURPOSE_BACKGROUND] = "background",
+    [HU_LLM_PURPOSE_COMMITMENT_CHECK] = "commitment_check",
 };
 
 const char *hu_llm_purpose_name(hu_llm_purpose_t purpose) {

@@ -27,6 +27,7 @@ typedef enum hu_llm_purpose {
     HU_LLM_PURPOSE_REPLY,
     HU_LLM_PURPOSE_GUARD_RETRY,
     HU_LLM_PURPOSE_PLANNER,
+    HU_LLM_PURPOSE_COMMITMENT_CHECK, /* commitment guard detector/rewrite (daemon) */
     /* Label-only: priority follows the caller. The prospective judge runs both
      * in the reactive prompt build (pre-send) and from proactive ticks; fact
      * extraction runs inline or, deferred, after the send. Batch only when
