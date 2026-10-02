@@ -269,8 +269,19 @@ def templated_report(jsonl_path):
 # --------------------------------------------------------------------------
 
 
+def _median(xs):
+    xs = sorted(xs)
+    return xs[len(xs) // 2] if xs else None
+
+
 def convert_file(tokenizer, src, dst, max_seq_length, system=None, end_of_turn=END_OF_TURN):
+    """Template one JSONL file. Besides kept/dropped counts, reports the token
+    shape that matters for training: prompt length, and the chosen reply's
+    share of its sequence. mlx-tune's ORPO NLL is divided by the FULL sequence
+    length (prompt included), so a long system prompt dilutes the reply/stop
+    signal by roughly that share."""
     kept, dropped, reasons, longest = 0, 0, {}, 0
+    prompt_toks, reply_share = [], []
     with open(src) as fin, open(dst, "w") as fout:
         for line in fin:
             line = line.strip()
@@ -285,10 +296,32 @@ def convert_file(tokenizer, src, dst, max_seq_length, system=None, end_of_turn=E
                 dropped += 1
                 reasons[e.key] = reasons.get(e.key, 0) + 1
                 continue
+            p = len(token_ids(tokenizer, out["prompt"]))
+            total = len(token_ids(tokenizer, out["prompt"] + out["chosen"]))
+            prompt_toks.append(p)
+            reply_share.append(round((total - p) / total, 4))
             fout.write(json.dumps(out, ensure_ascii=False) + "\n")
             kept += 1
     return {"src": str(src), "dst": str(dst), "kept": kept, "dropped": dropped,
-            "drop_reasons": reasons, "max_tokens": longest}
+            "drop_reasons": reasons, "max_tokens": longest,
+            "prompt_tokens_median": _median(prompt_toks),
+            "prompt_tokens_max": max(prompt_toks) if prompt_toks else None,
+            "chosen_reply_share_median": _median(reply_share)}
+
+
+def kept_fraction_failures(files, min_kept_frac):
+    """Messages for every file (train AND valid) that kept too few rows. A
+    valid split that silently shrank would make every held-out number
+    downstream describe a different set."""
+    fails = []
+    for name, rep in files.items():
+        total = rep["kept"] + rep["dropped"]
+        if total == 0 or rep["kept"] == 0:
+            fails.append(f"{name}: no usable rows")
+        elif rep["kept"] / total < min_kept_frac:
+            fails.append(f"{name}: only {rep['kept']}/{total} rows survived "
+                         f"(< {min_kept_frac:.0%}) {rep['drop_reasons']}")
+    return fails
 
 
 def convert_dir(in_dir, out_dir, model_id=DEFAULT_MODEL, max_seq_length=2048,
@@ -312,6 +345,7 @@ def convert_dir(in_dir, out_dir, model_id=DEFAULT_MODEL, max_seq_length=2048,
         "enable_thinking": False,
         "system_prompt_sha256_16": (hashlib.sha256(system.encode()).hexdigest()[:16]
                                     if system else None),
+        "system_prompt_tokens": (len(token_ids(tokenizer, system)) if system else 0),
         "max_seq_length": max_seq_length,
         "source_dir": str(in_dir),
         "files": files,
@@ -329,29 +363,30 @@ def main(argv=None):
     ap.add_argument("--system-prompt-file", default=None,
                     help="system prompt for rows without their own `system` field")
     ap.add_argument("--end-of-turn", default=END_OF_TURN)
-    ap.add_argument("--min-kept-frac", type=float, default=0.5,
-                    help="fail if fewer than this fraction of train rows survive")
+    ap.add_argument("--min-kept-frac", type=float, default=0.9,
+                    help="fail if fewer than this fraction of train OR valid rows survive")
     args = ap.parse_args(argv)
 
     system = Path(args.system_prompt_file).read_text() if args.system_prompt_file else None
     m = convert_dir(args.in_dir, args.out_dir, model_id=args.model,
                     max_seq_length=args.max_seq_length, system=system,
                     end_of_turn=args.end_of_turn)
+    print(f"[chat-template] system prompt: {m['system_prompt_tokens']} tokens"
+          + ("" if system else " (none)"))
     for name, rep in m["files"].items():
         print(f"[chat-template] {name}: kept {rep['kept']}, dropped {rep['dropped']} "
-              f"{rep['drop_reasons'] or ''} (max {rep['max_tokens']} tokens)")
+              f"{rep['drop_reasons'] or ''} (max {rep['max_tokens']} tokens, prompt median "
+              f"{rep['prompt_tokens_median']} max {rep['prompt_tokens_max']}, chosen reply "
+              f"median share {rep['chosen_reply_share_median']})")
     print(f"[chat-template] suffix={m['prompt_suffix']!r} end_of_turn={m['end_of_turn']!r} "
           f"(id {m['end_of_turn_id']}) -> {args.out_dir}/{MANIFEST_NAME}")
-    tr = m["files"].get("train.jsonl")
-    if not tr or tr["kept"] == 0:
-        print("[chat-template] FATAL: no trainable rows", file=sys.stderr)
+    if "train.jsonl" not in m["files"]:
+        print("[chat-template] FATAL: no train.jsonl", file=sys.stderr)
         return 1
-    frac = tr["kept"] / (tr["kept"] + tr["dropped"])
-    if frac < args.min_kept_frac:
-        print(f"[chat-template] FATAL: only {frac:.0%} of train rows survived "
-              f"(< {args.min_kept_frac:.0%}) -- inspect drop_reasons", file=sys.stderr)
-        return 1
-    return 0
+    fails = kept_fraction_failures(m["files"], args.min_kept_frac)
+    for f in fails:
+        print(f"[chat-template] FATAL: {f}", file=sys.stderr)
+    return 1 if fails else 0
 
 
 if __name__ == "__main__":

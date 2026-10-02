@@ -14,6 +14,24 @@
 # same prompts, on the same spare server config, before it goes to the blind
 # A/B gate. See docs/guides/persona-adapter-retrain-runbook.md.
 #
+# EMPTY-RETRY MUST BE OFF (2026-10-01, gemma-realtime c02bd50/32cd6d1): the
+# server now regenerates an empty adapter reply on base weights by default
+# (MLX_EMPTY_RETRY, default ON), which hides exactly the failure this measures
+# -- both arms would read ~0%. /health does not expose the switch, so the
+# ruling is: (1) PRECONDITION -- read the listening process's own environment
+# (`lsof` for the pid, `ps eww` for its env) and refuse unless
+# MLX_EMPTY_RETRY is explicitly 0/false/no/off; the server reads os.environ
+# and never sets it, so the exec-time env is the switch's value. If the env
+# cannot be read, refuse unless --retry-disabled-confirmed AND --server-log
+# are both given. (2) TRIPWIRE -- with --server-log, any new `[empty-retry]`
+# line during the run voids it (the server logs one per retry event).
+#
+# "empty" here is a SUPERSET of the server's _is_empty_generation: any reply
+# whose visible text is empty after stripping scaffold counts, including long
+# generations a server guard emptied (runaway deliberation, echo), which the
+# server's retry deliberately ignores. For a candidate-vs-serving comparison
+# on the same server both arms use the same definition.
+#
 # Refuses ports 8741 (production) and 8743 (arena). Never starts or stops a
 # server. Exit codes: 0 measured (and under --max-empty-rate if given),
 # 1 measured but over --max-empty-rate, 2 NOT measured (server unreachable,
@@ -25,6 +43,7 @@
 import argparse
 import json
 import re
+import subprocess
 import sys
 import time
 import urllib.error
@@ -42,6 +61,43 @@ def check_port(port: int) -> None:
     if port in FORBIDDEN_PORTS:
         raise SystemExit(f"REFUSING port {port} ({FORBIDDEN_PORTS[port]}): evaluate on a spare "
                          "server instance, never a live one")
+
+
+_RETRY_ENV_RE = re.compile(r"(?:^|\s)MLX_EMPTY_RETRY=(\S*)")
+_RETRY_OFF = ("0", "false", "no", "off")
+RETRY_LOG_MARK = "[empty-retry]"
+
+
+def empty_retry_state(env_cmdline):
+    """'off' | 'on' from a `ps eww` line. Mirrors mlx-server.py
+    _empty_retry_enabled(): unset or any value but 0/false/no/off is ON."""
+    m = _RETRY_ENV_RE.search(env_cmdline or "")
+    if m and m.group(1).strip().lower() in _RETRY_OFF:
+        return "off"
+    return "on"
+
+
+def server_env(port):
+    """`ps eww` line (command + exec-time environment) of the process
+    listening on 127.0.0.1:<port>, or None if it cannot be read."""
+    try:
+        pids = subprocess.run(["lsof", "-tnP", f"-iTCP:{port}", "-sTCP:LISTEN"],
+                              capture_output=True, text=True, timeout=10).stdout.split()
+        if len(pids) != 1:
+            return None
+        out = subprocess.run(["ps", "eww", "-o", "command=", "-p", pids[0]],
+                             capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    # ps prints the env only for processes it may inspect; without it there is
+    # no '=' assignment after the argv and the state is unknowable.
+    return out if "mlx-server" in out and "=" in out else None
+
+
+def retry_lines(log_path):
+    if not log_path or not Path(log_path).is_file():
+        return None
+    return Path(log_path).read_text(errors="replace").count(RETRY_LOG_MARK)
 
 
 def visible_text(content) -> str:
@@ -99,9 +155,32 @@ def main(argv=None):
     ap.add_argument("--out", required=True, help="result JSON path")
     ap.add_argument("--max-empty-rate", type=float, default=None,
                     help="exit 1 if the classifier empty rate exceeds this")
+    ap.add_argument("--server-log", default=None,
+                    help="the spare server's stdout log; any new [empty-retry] line voids the run")
+    ap.add_argument("--retry-disabled-confirmed", action="store_true",
+                    help="only if the server env is unreadable: you launched it with "
+                         "MLX_EMPTY_RETRY=0 (requires --server-log)")
     args = ap.parse_args(argv)
 
     check_port(args.port)
+    env = server_env(args.port)
+    if env is not None:
+        retry = empty_retry_state(env)
+        if retry != "off":
+            print(f"NOT MEASURED: the server on :{args.port} runs with MLX_EMPTY_RETRY on "
+                  "(default) -- empty adapter replies are regenerated on base weights and "
+                  "would read as 0%. Relaunch it with MLX_EMPTY_RETRY=0.", file=sys.stderr)
+            return 2
+        retry_basis = "server process environment: MLX_EMPTY_RETRY off"
+    elif args.retry_disabled_confirmed and retry_lines(args.server_log) is not None:
+        retry_basis = "operator-confirmed MLX_EMPTY_RETRY=0 + server-log tripwire"
+    else:
+        print(f"NOT MEASURED: cannot read the environment of the server on :{args.port} to "
+              "confirm MLX_EMPTY_RETRY=0. Pass --retry-disabled-confirmed together with "
+              "--server-log <its stdout log> if you launched it with MLX_EMPTY_RETRY=0.",
+              file=sys.stderr)
+        return 2
+    retry_before = retry_lines(args.server_log)
     base = f"http://127.0.0.1:{args.port}"
     try:
         health = _http(f"{base}/health", timeout=10)
@@ -141,12 +220,24 @@ def main(argv=None):
               "no result written", file=sys.stderr)
         return 2
 
+    retry_after = retry_lines(args.server_log)
+    if retry_before is not None and retry_after != retry_before:
+        print(f"NOT MEASURED: {args.server_log} gained {RETRY_LOG_MARK} lines during the run -- "
+              "the server retried empty replies, so they were not observed. No result written.",
+              file=sys.stderr)
+        return 2
+
     summary = summarize(results)
     report = {"label": args.label, "port": args.port, "model": health.get("model"),
               "adapter": adapter, "adapter_applied": health.get("adapter_applied"),
               "tensors_loaded": health.get("tensors_loaded"),
               "prompts_file": str(args.prompts), "samples": args.samples,
               "max_tokens": args.max_tokens, "temperature": args.temperature,
+              "empty_retry_off_basis": retry_basis,
+              "server_log_tripwire": args.server_log,
+              "empty_definition": "visible text empty after stripping scaffold; a SUPERSET of "
+                                  "mlx-server _is_empty_generation (also counts long "
+                                  "generations a server guard emptied)",
               "summary": summary, "results": results}
     Path(args.out).write_text(json.dumps(report, indent=2) + "\n")
     for cat in ("classifier", "chat", "all"):
