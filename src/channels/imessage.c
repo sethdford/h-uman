@@ -1618,9 +1618,23 @@ static bool imsg_try_react(hu_imessage_ctx_t *c, int64_t message_id, hu_reaction
 
     const char *react_argv[] = {"imsg",       "react",      "--chat-id", chat_rowid_str,
                                 "--reaction", tapback_name, NULL};
+    int64_t reacted_before = hu_imessage_my_reaction_count(message_id);
     hu_run_result_t rr = {0};
     hu_error_t re = hu_process_run_with_timeout(c->alloc, react_argv, NULL, 65536, 15, &rr);
     bool rok = (re == HU_OK && rr.success && rr.exit_code == 0);
+    /* `imsg react` names a chat, not a message, and exits 0 without reacting:
+     * 2026-09-19..26 it "succeeded" ~50 times while chat.db gained a fraction of
+     * those reactions, and each phantom left the contact with no reply at all.
+     * Believe it only when a reaction of ours appears on the target. */
+    if (rok && reacted_before >= 0) {
+        usleep(1500000);
+        if (!hu_imessage_send_landed(reacted_before, hu_imessage_my_reaction_count(message_id))) {
+            hu_log_warn("imessage", NULL,
+                        "imsg react exited 0 but no reaction landed on message %lld; failing",
+                        (long long)message_id);
+            rok = false;
+        }
+    }
     if (!rok)
         hu_log_info(
             "imessage", NULL, "imsg react failed (exit=%d stdout=%.*s stderr=%.*s)", rr.exit_code,
@@ -6959,5 +6973,41 @@ bool hu_imessage_test_chatdb_busy_log_emitted(hu_channel_t *ch) {
 
 void hu_imessage_set_test_send_stub(hu_imessage_test_send_stub_fn fn) {
     g_imessage_test_send_stub = fn;
+}
+#endif
+
+#ifdef HU_ENABLE_SQLITE
+int64_t hu_imessage_my_reaction_count(int64_t message_rowid) {
+    char db_path[512];
+    int dp = hu_paths_chatdb(db_path, sizeof(db_path));
+    if (message_rowid <= 0 || dp < 0 || (size_t)dp >= sizeof(db_path))
+        return -1;
+    sqlite3 *db = NULL;
+    if (sqlite3_open_v2(db_path, &db, SQLITE_OPEN_READONLY, NULL) != SQLITE_OK) {
+        if (db)
+            sqlite3_close(db);
+        return -1;
+    }
+    sqlite3_busy_timeout(db, 3000);
+    /* associated_message_guid is "p:<part>/<guid>" (or "bp:<guid>"). */
+    const char *sql = "SELECT COUNT(*) FROM message r WHERE r.is_from_me = 1"
+                      " AND r.associated_message_type BETWEEN 2000 AND 2005"
+                      " AND r.associated_message_guid LIKE"
+                      " '%' || (SELECT guid FROM message WHERE ROWID = ?1)";
+    sqlite3_stmt *st = NULL;
+    int64_t n = -1;
+    if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) == SQLITE_OK) {
+        sqlite3_bind_int64(st, 1, (sqlite3_int64)message_rowid);
+        if (sqlite3_step(st) == SQLITE_ROW)
+            n = sqlite3_column_int64(st, 0);
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(db);
+    return n;
+}
+#else
+int64_t hu_imessage_my_reaction_count(int64_t message_rowid) {
+    (void)message_rowid;
+    return -1;
 }
 #endif

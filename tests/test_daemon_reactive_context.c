@@ -11,6 +11,7 @@
 #include "human/memory.h"
 #include "test_framework.h"
 
+#include <stdio.h>
 #include <string.h>
 
 /* ── Fixtures ───────────────────────────────────────────────────────── */
@@ -28,6 +29,7 @@ typedef struct fake_store {
     size_t load_calls;
     size_t sid_len_seen;
     char sid_seen[64];
+    size_t many; /* 0: the two-message thread below; N: m0..m(N-1), alternating roles */
 } fake_store_t;
 
 static hu_error_t fake_load_messages(void *ctx, hu_allocator_t *alloc, const char *sid,
@@ -41,6 +43,24 @@ static hu_error_t fake_load_messages(void *ctx, hu_allocator_t *alloc, const cha
     }
     /* Allocated exactly the way the production restore loop frees them:
      * role/content via len+1, the array via count*sizeof. */
+    if (fs->many) {
+        hu_message_entry_t *m =
+            (hu_message_entry_t *)alloc->alloc(alloc->ctx, fs->many * sizeof(hu_message_entry_t));
+        if (!m)
+            return HU_ERR_OUT_OF_MEMORY;
+        memset(m, 0, fs->many * sizeof(hu_message_entry_t));
+        for (size_t i = 0; i < fs->many; i++) {
+            char c[16];
+            int n = snprintf(c, sizeof(c), "m%zu", i);
+            m[i].role = hu_strndup(alloc, i % 2 ? "assistant" : "user", i % 2 ? 9 : 4);
+            m[i].role_len = i % 2 ? 9 : 4;
+            m[i].content = hu_strndup(alloc, c, (size_t)n);
+            m[i].content_len = (size_t)n;
+        }
+        *out = m;
+        *out_count = fs->many;
+        return HU_OK;
+    }
     hu_message_entry_t *e =
         (hu_message_entry_t *)alloc->alloc(alloc->ctx, 2 * sizeof(hu_message_entry_t));
     if (!e)
@@ -124,6 +144,24 @@ static void test_restores_session_history_with_roles(void) {
     HU_ASSERT_EQ(f.agent.history[0].content_len, 3u);
     HU_ASSERT_EQ((int)f.agent.history[1].role, (int)HU_ROLE_ASSISTANT);
     HU_ASSERT_STR_EQ(f.agent.history[1].content, "yo");
+    fixture_free(&f);
+}
+
+/* The store returns every stored message for the contact. Restoring them all
+ * pushed long threads past the 100-message compaction threshold, so every turn
+ * paid a ~13 s summary call (2026-10-01) whose result the history budget then
+ * dropped; the recent thread reaches the model through the system prompt. */
+static void test_restores_only_the_recent_messages(void) {
+    fixture_t f;
+    fixture_init(&f, true);
+    f.store_ctx.many = 150;
+
+    load(&f);
+
+    HU_ASSERT_EQ(f.agent.history_count, (size_t)HU_DAEMON_RESTORE_RECENT);
+    HU_ASSERT_STR_EQ(f.agent.history[0].content, "m126"); /* oldest kept */
+    HU_ASSERT_STR_EQ(f.agent.history[f.agent.history_count - 1].content, "m149");
+    HU_ASSERT_EQ((int)f.agent.history[0].role, (int)HU_ROLE_USER); /* m126: even = user */
     fixture_free(&f);
 }
 
@@ -219,6 +257,7 @@ static void test_prompt_build_is_compiled_out_under_test(void) {
 void run_daemon_reactive_context_tests(void) {
     HU_TEST_SUITE("Daemon Reactive Context (slice A)");
     HU_RUN_TEST(test_restores_session_history_with_roles);
+    HU_RUN_TEST(test_restores_only_the_recent_messages);
     HU_RUN_TEST(test_sets_active_channel_from_vtable_name);
     HU_RUN_TEST(test_clears_prior_history_before_restore);
     HU_RUN_TEST(test_outputs_start_empty);
