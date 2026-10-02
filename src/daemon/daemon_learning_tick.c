@@ -18,11 +18,13 @@
 #include "human/agent.h"
 #include "human/agent/contextual_bandit.h"
 #include "human/core/log.h"
+#include "human/daemon/spontaneity.h"
 #include "human/ml/dpo.h"
 
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <string.h>
+#include <time.h>
 
 /* NOTE: no direct <sqlite3.h> include (sqlite-includer-ratchet.md) — the
  * sqlite3 handle type comes from human/memory.h's get_db declaration, and
@@ -69,6 +71,8 @@ hu_error_t hu_daemon_proactive_outcome_record_send(hu_memory_t *memory, const ch
 
 hu_error_t hu_daemon_proactive_outcome_mark_reply(hu_memory_t *memory, const char *channel,
                                                   const char *contact, size_t contact_len) {
+    /* HU_SPONTANEITY: an inbound credits the contact's delivered extras. */
+    hu_daemon_spontaneity_on_inbound(contact, contact_len, (int64_t)time(NULL) * 1000);
     if (!memory || !channel || !contact || contact_len == 0)
         return HU_OK;
     sqlite3 *db = hu_sqlite_memory_get_db(memory);
@@ -114,7 +118,8 @@ hu_error_t hu_daemon_proactive_outcome_record_send(hu_memory_t *memory, const ch
 
 hu_error_t hu_daemon_proactive_outcome_mark_reply(hu_memory_t *memory, const char *channel,
                                                   const char *contact, size_t contact_len) {
-    (void)memory, (void)channel, (void)contact, (void)contact_len;
+    (void)memory, (void)channel;
+    hu_daemon_spontaneity_on_inbound(contact, contact_len, (int64_t)time(NULL) * 1000);
     return HU_OK;
 }
 

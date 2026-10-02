@@ -43,6 +43,7 @@
 #include "human/daemon/daemon_shape.h"
 #include "human/daemon/grief_decay.h"
 #include "human/daemon/proposer_context.h"
+#include "human/daemon/spontaneity.h"
 #include "human/memory/celebration_repo.h"
 #include "human/memory/graph_ingest.h"
 #include "human/memory/opinion_challenge.h" /* roadmap #14: stance-hold directive */
@@ -9177,113 +9178,34 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #endif
 
 #if !defined(HU_IS_TEST)
-                /* F9: Double-text — natural afterthought follow-up.
-                 * When llm_decides is active, use the fast classify provider. */
-                {
-                    const hu_provider_vtable_t *dt_vtable = (llm_decides && g_classify_provider_ok)
-                                                                ? g_classify_provider.vtable
-                                                                : agent->provider.vtable;
-                    void *dt_ctx = (llm_decides && g_classify_provider_ok) ? g_classify_provider.ctx
-                                                                           : agent->provider.ctx;
-                    /* One-emission-per-turn (2026-05-29 policy): suppress the
-                     * double-text afterthought when a reactive reply already
-                     * fired for this contact this turn — same FU-1 defer gate
-                     * the proactive paths use, so the reply doesn't pile into a
-                     * multi-bubble burst. */
-                    if (response && response_len > 0 && agent->persona &&
-                        ch->channel->vtable->send && dt_vtable && dt_vtable->chat_with_system &&
-                        !hu_daemon_proactive_should_defer(&agent->contact_send_recency, batch_key,
-                                                          key_len, (int64_t)time(NULL))) {
-                        float dt_prob = agent->persona->humanization.double_text_probability;
-                        uint32_t dt_seed = (uint32_t)time(NULL) * 1103515245u + 12345u +
-                                           (uint32_t)(uintptr_t)response;
-                        if (hu_conversation_should_double_text(response, response_len,
-                                                               history_entries, history_count,
-                                                               bth_hour, dt_seed, dt_prob)) {
-                            char dt_user[512];
-                            int dt_n = snprintf(
-                                dt_user, sizeof(dt_user),
-                                "You just sent this message: \"%.*s\"\n"
-                                "Add a brief, natural follow-up thought (1 short sentence max). "
-                                "Something you'd double-text a moment later.",
-                                (int)(response_len > 200 ? 200 : response_len), response);
-                            if (dt_n > 0 && (size_t)dt_n < sizeof(dt_user)) {
-                                char *dt_resp = NULL;
-                                size_t dt_resp_len = 0;
-                                size_t dt_fb_len = 0;
-                                const char *dt_fb = hu_daemon_fallback_model(config, &dt_fb_len);
-                                const char *dt_model =
-                                    (llm_decides && g_classify_provider_ok)
-                                        ? g_classify_model
-                                        : (agent->model_name ? agent->model_name : dt_fb);
-                                size_t dt_model_len =
-                                    (llm_decides && g_classify_provider_ok)
-                                        ? g_classify_model_len
-                                        : (agent->model_name ? agent->model_name_len : dt_fb_len);
-                                hu_error_t dt_err = dt_vtable->chat_with_system(
-                                    dt_ctx, alloc,
-                                    "You are texting as this person. Keep it casual, short, "
-                                    "lowercase. "
-                                    "No quotes, no explanation, just the follow-up text.",
-                                    93, dt_user, (size_t)dt_n, dt_model, dt_model_len, 0.9,
-                                    &dt_resp, &dt_resp_len);
-                                if (dt_err == HU_OK && dt_resp && dt_resp_len > 0 &&
-                                    dt_resp_len < 200) {
-                                    /* Post-process double-text through the same BTH pipeline */
-                                    hu_validator_chain_apply_default_in_place(
-                                        alloc, agent ? agent->observer : NULL, NULL, 0,
-                                        "double-text send", dt_resp, &dt_resp_len, dt_resp_len + 1);
-                                    if (dt_resp_len > 0) {
-                                        dt_resp_len = hu_conversation_vary_complexity(
-                                            dt_resp, dt_resp_len, dt_seed);
-                                        if (dt_resp_len > 1 && dt_resp[0] >= 'A' &&
-                                            dt_resp[0] <= 'Z' && dt_resp[1] >= 'a' &&
-                                            dt_resp[1] <= 'z' && dt_resp[0] != 'I') {
-                                            dt_resp[0] = (char)(dt_resp[0] + 32);
-                                        }
-                                        if (dt_resp_len > 1 && dt_resp[dt_resp_len - 1] == '.') {
-                                            dt_resp[dt_resp_len - 1] = '\0';
-                                            dt_resp_len--;
-                                        }
-                                        unsigned int dt_delay = 10000u + (dt_seed % 35000u);
-                                        usleep((useconds_t)(dt_delay * 1000u));
-                                        ch->channel->vtable->send(ch->channel->ctx, send_target,
-                                                                  send_target_len, dt_resp,
-                                                                  dt_resp_len, NULL, 0);
-                                        if (agent->bth_metrics)
-                                            agent->bth_metrics->double_texts++;
-                                    }
-                                }
-                                if (dt_resp)
-                                    alloc->free(alloc->ctx, dt_resp, dt_resp_len + 1);
-                            }
-                        }
-                    }
-                } /* end dt_vtable scope */
-
-                /* Self-reaction: occasionally haha/emphasize own message (~2%).
-                 * Skip for groups: get_latest_sent_rowid uses handle.id SQL. */
-                if (response && response_len > 0 && ch->channel->vtable->react &&
-                    !msgs[batch_start].is_group &&
-                    !hu_daemon_proactive_should_defer(&agent->contact_send_recency, batch_key,
-                                                      key_len, (int64_t)time(NULL))) {
-                    hu_reaction_type_t self_r = hu_conversation_classify_self_reaction(
-                        response, response_len, (uint32_t)time(NULL));
-                    if (self_r != HU_REACTION_NONE) {
-                        usleep(1500000 + ((uint32_t)time(NULL) % 3000000));
-#ifdef HU_HAS_IMESSAGE
-                        int64_t sent_id = hu_imessage_get_latest_sent_rowid(batch_key, key_len);
-#else
-                        int64_t sent_id = msgs[batch_end].message_id + 1;
-#endif
-                        if (sent_id > 0) {
-                            ch->channel->vtable->react(ch->channel->ctx, send_target,
-                                                       send_target_len, sent_id, self_r);
-                            hu_log_info("human", agent ? agent->observer : NULL,
-                                        "self-reaction on own message: %d", (int)self_r);
-                        }
-                    }
-                }
+                /* DEF-15: double-text afterthought, self-reaction and GIF, gated by
+                 * HU_SPONTANEITY (include/human/daemon/spontaneity.h). */
+                hu_spontaneity_turn_t spont = {.agent = agent,
+                                               .config = config,
+                                               .channel = ch->channel,
+                                               .alloc = alloc,
+                                               .contact = batch_key,
+                                               .contact_len = key_len,
+                                               .send_target = send_target,
+                                               .send_target_len = send_target_len,
+                                               .response = response,
+                                               .response_len = response ? response_len : 0,
+                                               .inbound = combined,
+                                               .inbound_len = combined_len,
+                                               .history = history_entries,
+                                               .history_count = history_count,
+                                               .hour_local = (uint8_t)bth_hour,
+                                               .is_group = msgs[batch_start].is_group,
+                                               .fallback_sent_id = msgs[batch_end].message_id + 1,
+                                               .classify = (llm_decides && g_classify_provider_ok)
+                                                               ? &g_classify_provider
+                                                               : NULL,
+                                               .classify_model = g_classify_model,
+                                               .classify_model_len = g_classify_model_len,
+                                               .chosen = HU_SPONT_NONE};
+                hu_daemon_spontaneity_choose(&spont);
+                hu_daemon_spontaneity_double_text(&spont);
+                hu_daemon_spontaneity_self_reaction(&spont);
 
                 /* GIF/music calibration: skip for group chats where batch_key
                  * is a chat identifier rather than a handle.id — SQL queries
@@ -9341,9 +9263,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 
                 /* GIF reaction: send a GIF when the moment calls for it */
                 bool gif_sent_this_turn = false;
+                uint64_t gif_now_ms = (uint64_t)time(NULL) * 1000ULL;
                 if (combined_len > 0 && ch->channel->vtable->send &&
-                    !hu_daemon_proactive_should_defer(&agent->contact_send_recency, batch_key,
-                                                      key_len, (int64_t)time(NULL))) {
+                    hu_daemon_spontaneity_gif_open(&spont, gif_now_ms)) {
                     float gif_prob = 0.10f;
                     const char *contact_rel = NULL;
                     size_t contact_rel_len = 0;
@@ -9371,12 +9293,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         gif_prob = 1.0f;
                     uint32_t gif_seed =
                         (uint32_t)time(NULL) * 2654435761u + (uint32_t)(uintptr_t)combined;
-                    uint64_t gif_now_ms = (uint64_t)time(NULL) * 1000ULL;
                     if ((selftest_on && selftest.form == HU_DIR_FORM_GIF) ||
-                        (hu_conversation_should_send_gif(combined, combined_len, history_entries,
-                                                         history_count, gif_seed, gif_prob) &&
-                         hu_conversation_gif_rate_allow(batch_key, key_len, gif_now_ms, 5,
-                                                        600000))) {
+                        hu_daemon_spontaneity_gif_roll(&spont, gif_seed, gif_prob, gif_now_ms)) {
                         /* Klipy (Tenor's v2 contract; Tenor shut down 2026-06-30). */
                         const char *gif_key =
                             config ? hu_config_get_provider_key(config, "klipy") : NULL;
@@ -9416,31 +9334,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 if (gif_query && gif_query_len > 0 && gif_query_len < 100) {
                                     char *gif_path = hu_imessage_fetch_gif(
                                         alloc, gif_query, gif_query_len, gif_key, strlen(gif_key));
-                                    if (gif_path) {
-                                        usleep(2000000 + (gif_seed % 3000000));
-                                        const char *media[] = {gif_path};
-                                        ch->channel->vtable->send(ch->channel->ctx, batch_key,
-                                                                  key_len, "", 0, media, 1);
-                                        (void)unlink(gif_path);
-                                        hu_conversation_gif_rate_record(batch_key, key_len,
-                                                                        gif_now_ms);
-                                        hu_conversation_gif_cal_record_send(
-                                            batch_key, key_len, gif_query, gif_query_len);
-                                        {
-                                            char cal_path[512];
-                                            int cp_n = hu_paths_state(cal_path, sizeof(cal_path),
-                                                                      "gif_calibration.json");
-                                            if (cp_n > 0 && (size_t)cp_n < sizeof(cal_path))
-                                                hu_conversation_gif_cal_save(cal_path,
-                                                                             (size_t)cp_n);
-                                        }
-                                        gif_sent_this_turn = true;
-                                        hu_log_info("human", agent ? agent->observer : NULL,
-                                                    "sent GIF: query=\"%s\"",
-                                                    HU_LOG_TEXT(gif_query, gif_query_len, 120));
-                                        size_t gp_path_len = strlen(gif_path);
-                                        alloc->free(alloc->ctx, gif_path, gp_path_len + 1);
-                                    }
+                                    if (gif_path)
+                                        gif_sent_this_turn = hu_daemon_spontaneity_gif_send(
+                                            &spont, gif_path, gif_query, gif_query_len, gif_seed,
+                                            gif_now_ms);
                                 }
                                 if (gif_query)
                                     alloc->free(alloc->ctx, gif_query, gif_query_len + 1);

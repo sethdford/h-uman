@@ -81,6 +81,10 @@ hu_error_t hu_imessage_strip_assoc_guid_prefix(const char *raw, char *out, size_
         if (d > p + 2 && *d == '/')
             return rxn_copy_out(d + 1, out, cap);
     }
+    /* "bp:<GUID>" — a tapback on a balloon/link-preview message (2 of 92
+     * contact tapbacks in 30 days of real chat.db). Same message identity. */
+    if (p[0] == 'b' && p[1] == 'p' && p[2] == ':' && p[3])
+        return rxn_copy_out(p + 3, out, cap);
     return rxn_copy_out(raw, out, cap);
 }
 
@@ -111,26 +115,49 @@ hu_error_t hu_imessage_normalize_thread_key(const char *raw, char *out, size_t c
     return rxn_copy_out(last ? last + 1 : raw, out, cap);
 }
 
-#if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__) && defined(HU_ENABLE_SQLITE)
+#if defined(HU_ENABLE_SQLITE)
 #include <sqlite3.h>
-#endif
 
-hu_error_t hu_imessage_poll_reactions(const char *db_path, int64_t since_unix,
-                                      hu_reaction_event_t *out, size_t cap, size_t *out_n) {
-    if (!db_path || !out || !out_n)
+/* The reacted-to message, resolved in the same statement: chat.db stores the
+ * target as "p:<part>/<GUID>" or "bp:<GUID>" (or a bare GUID), so the join key
+ * is the same strip hu_imessage_strip_assoc_guid_prefix does, in SQL. */
+#define HU_RXN_TARGET_JOIN                                                                   \
+    "LEFT JOIN message t ON t.guid = (CASE "                                                 \
+    "  WHEN instr(m.associated_message_guid, '/') > 0 "                                      \
+    "    THEN substr(m.associated_message_guid, instr(m.associated_message_guid, '/') + 1) " \
+    "  WHEN substr(m.associated_message_guid, 1, 3) = 'bp:' "                                \
+    "    THEN substr(m.associated_message_guid, 4) "                                         \
+    "  ELSE m.associated_message_guid END) "
+
+/* The previous message WE sent in the same chat before the reacted-to row:
+ * the DEF-8 join requires the outbound send's chat.db boundary to sit at or
+ * after it, so a send whose own message came earlier cannot claim this one. */
+#define HU_RXN_PREV_OWN                                       \
+    "(SELECT MAX(p.ROWID) FROM message p "                    \
+    "  JOIN chat_message_join pj ON pj.message_id = p.ROWID " \
+    "  WHERE pj.chat_id = cmj.chat_id AND p.is_from_me = 1 "  \
+    "    AND p.associated_message_type = 0 AND p.ROWID < t.ROWID)"
+
+/* Shared FROM/WHERE of both poll variants (with and without the iOS 17
+ * emoji column). The outer parens around the OR are required for SQL
+ * precedence — without them the AND below binds tighter and silently drops
+ * the 3xxx removal rows. */
+#define HU_RXN_POLL_FROM_WHERE                                        \
+    "FROM message m "                                                 \
+    "JOIN chat_message_join cmj ON cmj.message_id = m.ROWID "         \
+    "JOIN chat c ON c.ROWID = cmj.chat_id "                           \
+    "LEFT JOIN handle h ON h.ROWID = m.handle_id " HU_RXN_TARGET_JOIN \
+    "WHERE (m.associated_message_type BETWEEN 2000 AND 2006 OR "      \
+    "m.associated_message_type BETWEEN 3000 AND 3006) "               \
+    "  AND m.associated_message_guid IS NOT NULL "                    \
+    "  AND m.date > ((? - 978307200) * 1000000000) "                  \
+    "ORDER BY m.date DESC LIMIT ?"
+
+hu_error_t hu_imessage_poll_reactions_db(struct sqlite3 *db, int64_t since_unix,
+                                         hu_reaction_event_t *out, size_t cap, size_t *out_n) {
+    if (!db || !out || !out_n)
         return HU_ERR_INVALID_ARGUMENT;
     *out_n = 0;
-#if HU_IS_TEST || !defined(__APPLE__) || !defined(__MACH__) || !defined(HU_ENABLE_SQLITE)
-    (void)since_unix;
-    (void)cap;
-    return HU_ERR_NOT_SUPPORTED;
-#else
-    sqlite3 *db = NULL;
-    if (sqlite3_open_v2(db_path, &db, SQLITE_OPEN_READONLY, NULL) != SQLITE_OK) {
-        if (db)
-            sqlite3_close(db);
-        return HU_ERR_IO;
-    }
     /* iMessage reactions: associated_message_type 2000-2006 (add) or
      * 3000-3006 (remove) with associated_message_guid pointing at the
      * original message. The outer parens around the OR are required for
@@ -142,29 +169,16 @@ hu_error_t hu_imessage_poll_reactions(const char *db_path, int64_t since_unix,
      * The column may not exist on Big Sur / Monterey; we probe via
      * a SELECT-with-fallback pattern: try the new column first, on
      * SQLITE_ERROR retry without it. */
-    const char *sql_v17 = "SELECT m.associated_message_type, m.associated_message_guid, "
-                          "       m.handle_id, h.id, c.guid, m.date, "
-                          "       m.associated_message_emoji "
-                          "FROM message m "
-                          "JOIN chat_message_join cmj ON cmj.message_id = m.ROWID "
-                          "JOIN chat c ON c.ROWID = cmj.chat_id "
-                          "LEFT JOIN handle h ON h.ROWID = m.handle_id "
-                          "WHERE (m.associated_message_type BETWEEN 2000 AND 2006 OR "
-                          "m.associated_message_type BETWEEN 3000 AND 3006) "
-                          "  AND m.associated_message_guid IS NOT NULL "
-                          "  AND m.date > ((? - 978307200) * 1000000000) "
-                          "ORDER BY m.date DESC LIMIT ?";
-    const char *sql_legacy = "SELECT m.associated_message_type, m.associated_message_guid, "
-                             "       m.handle_id, h.id, c.guid, m.date "
-                             "FROM message m "
-                             "JOIN chat_message_join cmj ON cmj.message_id = m.ROWID "
-                             "JOIN chat c ON c.ROWID = cmj.chat_id "
-                             "LEFT JOIN handle h ON h.ROWID = m.handle_id "
-                             "WHERE (m.associated_message_type BETWEEN 2000 AND 2006 OR "
-                             "m.associated_message_type BETWEEN 3000 AND 3006) "
-                             "  AND m.associated_message_guid IS NOT NULL "
-                             "  AND m.date > ((? - 978307200) * 1000000000) "
-                             "ORDER BY m.date DESC LIMIT ?";
+    const char *sql_v17 =
+        "SELECT m.associated_message_type, m.associated_message_guid, "
+        "       m.handle_id, h.id, c.guid, m.date, "
+        "       (m.is_from_me = 0 AND t.is_from_me = 1), t.date, t.ROWID, " HU_RXN_PREV_OWN
+        ", m.associated_message_emoji " HU_RXN_POLL_FROM_WHERE;
+    const char *sql_legacy =
+        "SELECT m.associated_message_type, m.associated_message_guid, "
+        "       m.handle_id, h.id, c.guid, m.date, "
+        "       (m.is_from_me = 0 AND t.is_from_me = 1), t.date, t.ROWID, " HU_RXN_PREV_OWN
+        " " HU_RXN_POLL_FROM_WHERE;
     sqlite3_stmt *stmt = NULL;
     bool emoji_available = true;
     if (sqlite3_prepare_v2(db, sql_v17, -1, &stmt, NULL) != SQLITE_OK) {
@@ -172,10 +186,8 @@ hu_error_t hu_imessage_poll_reactions(const char *db_path, int64_t since_unix,
          * associated_message_emoji. Fall back to the legacy SQL so the
          * reader still works on Big Sur / Monterey. */
         emoji_available = false;
-        if (sqlite3_prepare_v2(db, sql_legacy, -1, &stmt, NULL) != SQLITE_OK) {
-            sqlite3_close(db);
+        if (sqlite3_prepare_v2(db, sql_legacy, -1, &stmt, NULL) != SQLITE_OK)
             return HU_ERR_IO;
-        }
     }
     sqlite3_bind_int64(stmt, 1, since_unix);
     sqlite3_bind_int(stmt, 2, (int)cap);
@@ -186,7 +198,11 @@ hu_error_t hu_imessage_poll_reactions(const char *db_path, int64_t since_unix,
         const unsigned char *handle = sqlite3_column_text(stmt, 3);
         const unsigned char *chat_guid = sqlite3_column_text(stmt, 4);
         int64_t mac_ns = sqlite3_column_int64(stmt, 5);
-        const unsigned char *emoji = emoji_available ? sqlite3_column_text(stmt, 6) : NULL;
+        int target_is_ours = sqlite3_column_int(stmt, 6) == 1; /* NULL (no target) -> 0 */
+        int64_t target_mac_ns = sqlite3_column_int64(stmt, 7);
+        int64_t target_rowid = sqlite3_column_int64(stmt, 8);
+        int64_t target_prev_own = sqlite3_column_int64(stmt, 9); /* NULL -> 0 */
+        const unsigned char *emoji = emoji_available ? sqlite3_column_text(stmt, 10) : NULL;
 
         hu_reaction_kind_t k = HU_REACTION_UNKNOWN;
         hu_reaction_polarity_t p = HU_REACTION_NEUTRAL;
@@ -214,11 +230,37 @@ hu_error_t hu_imessage_poll_reactions(const char *db_path, int64_t since_unix,
         out[*out_n].timestamp_unix = (mac_ns / 1000000000) + 978307200;
         out[*out_n].is_removal = code >= 3000 ? 1 : 0;
         out[*out_n].emoji = (emoji && emoji[0]) ? strdup((const char *)emoji) : NULL;
+        out[*out_n].target_is_ours = target_is_ours;
+        out[*out_n].target_rowid = target_rowid;
+        out[*out_n].target_prev_own_rowid = target_prev_own;
+        out[*out_n].target_sent_ms =
+            target_mac_ns > 0 ? (target_mac_ns / 1000000) + 978307200000LL : 0;
         (*out_n)++;
     }
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
     return HU_OK;
+}
+#endif /* HU_ENABLE_SQLITE */
+
+hu_error_t hu_imessage_poll_reactions(const char *db_path, int64_t since_unix,
+                                      hu_reaction_event_t *out, size_t cap, size_t *out_n) {
+    if (!db_path || !out || !out_n)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out_n = 0;
+#if HU_IS_TEST || !defined(__APPLE__) || !defined(__MACH__) || !defined(HU_ENABLE_SQLITE)
+    (void)since_unix;
+    (void)cap;
+    return HU_ERR_NOT_SUPPORTED;
+#else
+    sqlite3 *db = NULL;
+    if (sqlite3_open_v2(db_path, &db, SQLITE_OPEN_READONLY, NULL) != SQLITE_OK) {
+        if (db)
+            sqlite3_close(db);
+        return HU_ERR_IO;
+    }
+    hu_error_t err = hu_imessage_poll_reactions_db(db, since_unix, out, cap, out_n);
+    sqlite3_close(db);
+    return err;
 #endif
 }
 

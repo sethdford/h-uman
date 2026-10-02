@@ -20,6 +20,7 @@
 #include "human/daemon/persona_facade.h"
 #include "human/daemon/platform_facade.h"
 #include "human/daemon/reactive_turn.h"
+#include "human/daemon/spontaneity.h"
 #include "human/daemon_cron.h"
 #include "human/daemon_learning_tick.h"
 #include "human/daemon_maintenance.h"
@@ -52,6 +53,14 @@ void hu_daemon_housekeeping_tick(hu_daemon_housekeeping_ctx_t *ctx) {
     (void)config;
     (void)graph;
     (void)community_insights;
+
+    /* HU_SPONTANEITY LIVE: deliver queued extras and expire their outcomes
+     * every pass — the extras never sleep on the reply path (DEF-15). */
+    for (size_t sp = 0; sp < channel_count; sp++) {
+        hu_channel_t *sp_ch = channels[sp].channel;
+        if (sp_ch && sp_ch->vtable && sp_ch->vtable->name)
+            hu_daemon_spontaneity_tick(sp_ch, sp_ch->vtable->name(sp_ch->ctx), (int64_t)t * 1000);
+    }
 
     if (current_minute > (*ctx->last_cron_minute)) {
         hu_daemon_cron_tick(alloc);

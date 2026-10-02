@@ -1305,6 +1305,7 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_crisis.c
     src/daemon/daemon_voice_first.c
     src/daemon/daemon_expressive.c
+    src/daemon/daemon_spontaneity.c
     src/daemon/daemon_share_queue.c
     src/daemon/daemon_reminders.c
     src/daemon/daemon_briefing.c
@@ -4236,6 +4237,8 @@ list(APPEND HU_TEST_SOURCES tests/test_slack_reactions.c)
 # to keep minimal-build / no-sqlite / cross-arm64 builds linkable.
 if(HU_ENABLE_SQLITE)
     list(APPEND HU_TEST_SOURCES tests/test_reaction_handler_e2e.c)
+    # DEF-8: tapback -> production_outcomes join by (thread, send time).
+    list(APPEND HU_TEST_SOURCES tests/test_outcome_join.c)
 endif()
 
 # Sprint 59 Phase C (2026-05-26 Annie/Mindy/Betty incident): pin per-contact
@@ -4334,6 +4337,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_daemon_voice_reply.c
     tests/test_daemon_voice_first.c
     tests/test_daemon_expressive.c
+    tests/test_daemon_spontaneity.c
     tests/test_daemon_share_queue.c
     tests/test_daemon_reminders.c
     tests/test_daemon_briefing.c

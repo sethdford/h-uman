@@ -111,4 +111,42 @@ hu_error_t hu_outbound_sends_repo_last_sent_ms(sqlite3 *db, const char *contact,
     return ok ? HU_OK : HU_ERR_MEMORY_STORE;
 }
 
+hu_error_t hu_outbound_sends_repo_find_delivery(sqlite3 *db, const char *channel,
+                                                const char *contact, size_t contact_len,
+                                                int64_t target_rowid, int64_t prev_own_rowid,
+                                                int64_t target_sent_ms, int64_t slack_ms,
+                                                int64_t *out_sent_at_ms) {
+    if (out_sent_at_ms)
+        *out_sent_at_ms = 0;
+    if (!db || !channel || !contact || contact_len == 0 || !out_sent_at_ms || target_rowid <= 0 ||
+        target_sent_ms <= 0 || slack_ms < 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (hu_outbound_sends_repo_ensure_schema(db) != HU_OK)
+        return HU_ERR_MEMORY_STORE;
+    /* The send whose chat.db boundary sits in [prev own message, target):
+     * its first is_from_me row after the boundary IS the target. A send whose
+     * boundary precedes an earlier message of ours cannot claim this row. */
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db,
+                           "SELECT sent_at_ms FROM outbound_sends WHERE channel = ?1 "
+                           "AND contact = ?2 AND prior_max_rowid >= ?3 AND prior_max_rowid < ?4 "
+                           "AND ABS(sent_at_ms - ?5) <= ?6 "
+                           "ORDER BY ABS(sent_at_ms - ?5) LIMIT 1;",
+                           -1, &stmt, NULL) != SQLITE_OK)
+        return HU_ERR_MEMORY_STORE;
+    sqlite3_bind_text(stmt, 1, channel, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, contact, (int)contact_len, SQLITE_STATIC);
+    sqlite3_bind_int64(stmt, 3, prev_own_rowid > 0 ? prev_own_rowid : 0);
+    sqlite3_bind_int64(stmt, 4, target_rowid);
+    sqlite3_bind_int64(stmt, 5, target_sent_ms);
+    sqlite3_bind_int64(stmt, 6, slack_ms);
+    int rc = sqlite3_step(stmt);
+    if (rc == SQLITE_ROW)
+        *out_sent_at_ms = sqlite3_column_int64(stmt, 0);
+    sqlite3_finalize(stmt);
+    if (rc == SQLITE_ROW)
+        return HU_OK;
+    return rc == SQLITE_DONE ? HU_ERR_NOT_FOUND : HU_ERR_MEMORY_STORE;
+}
+
 #endif /* HU_ENABLE_SQLITE */

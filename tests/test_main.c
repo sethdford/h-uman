@@ -144,6 +144,7 @@ void run_slack_reactions_tests(void);
  * minimal-build / no-sqlite / cross-arm64 variants. */
 #ifdef HU_ENABLE_SQLITE
 void run_reaction_handler_e2e_tests(void);
+void run_outcome_join_tests(void);
 #endif
 void run_declarative_tools_tests(void);
 void run_skill_trust_tests(void);
@@ -837,6 +838,7 @@ void run_daemon_rich_media_tests(void);
 void run_daemon_voice_reply_tests(void);
 void run_daemon_voice_first_tests(void);
 void run_daemon_expressive_tests(void);
+void run_daemon_spontaneity_tests(void);
 void run_daemon_share_queue_tests(void);
 void run_daemon_reminders_tests(void);
 void run_daemon_briefing_tests(void);
@@ -1269,6 +1271,7 @@ int main(int argc, char **argv) {
     run_slack_reactions_tests();
 #ifdef HU_ENABLE_SQLITE
     run_reaction_handler_e2e_tests();
+    run_outcome_join_tests();
 #endif
     run_declarative_tools_tests();
     run_skill_trust_tests();
@@ -1936,6 +1939,7 @@ int main(int argc, char **argv) {
     run_daemon_voice_reply_tests();
     run_daemon_voice_first_tests();
     run_daemon_expressive_tests();
+    run_daemon_spontaneity_tests();
     run_daemon_share_queue_tests();
     run_daemon_reminders_tests();
     run_daemon_briefing_tests();

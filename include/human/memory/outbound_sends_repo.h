@@ -56,6 +56,19 @@ hu_error_t hu_outbound_sends_repo_count(sqlite3 *db, int64_t *out_count);
 hu_error_t hu_outbound_sends_repo_last_sent_ms(sqlite3 *db, const char *contact, int64_t *out_ms,
                                                bool *have);
 
+/* DEF-8: did the DAEMON deliver chat.db row `target_rowid`? A contact's
+ * tapback can land on any is_from_me row — Seth's own typing included — so
+ * a reaction is attributed to the daemon only when a recorded send for
+ * `contact` has its chat.db boundary in [prev_own_rowid, target_rowid) (so
+ * the target is the first message of ours after it) and was delivered within
+ * slack_ms of the target's chat.db date. *out_sent_at_ms = that send's
+ * time. HU_ERR_NOT_FOUND when no recorded send qualifies. */
+hu_error_t hu_outbound_sends_repo_find_delivery(sqlite3 *db, const char *channel,
+                                                const char *contact, size_t contact_len,
+                                                int64_t target_rowid, int64_t prev_own_rowid,
+                                                int64_t target_sent_ms, int64_t slack_ms,
+                                                int64_t *out_sent_at_ms);
+
 #ifdef __cplusplus
 }
 #endif

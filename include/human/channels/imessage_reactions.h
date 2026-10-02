@@ -18,6 +18,15 @@ extern "C" {
 hu_error_t hu_imessage_poll_reactions(const char *db_path, int64_t since_unix,
                                       hu_reaction_event_t *out, size_t cap, size_t *out_n);
 
+#ifdef HU_ENABLE_SQLITE
+struct sqlite3;
+/* Same query as hu_imessage_poll_reactions against an already-open chat.db
+ * handle (fixture-testable). Also resolves the reacted-to message:
+ * target_is_ours / target_sent_unix (see hu_reaction_event_t). */
+hu_error_t hu_imessage_poll_reactions_db(struct sqlite3 *db, int64_t since_unix,
+                                         hu_reaction_event_t *out, size_t cap, size_t *out_n);
+#endif
+
 /* After an outbound send, resolve the latest is_from_me message GUID in chat.db
  * for correlation with tapback reactions. `chat_guid` may be either a full
  * chat.guid ("any;-;+15551234") or the bare handle ("+15551234") — the daemon's
@@ -51,7 +60,8 @@ hu_error_t hu_imessage_lookup_latest_sent_guid(const char *db_path, const char *
  * all occur in real data; ~10% of rows carry no prefix at all). The part
  * index is not part of message identity for training purposes — a tapback on
  * any part is a reaction to the message — so it is stripped.
- *   "p:0/ABC-123" -> "ABC-123"      "ABC-123" -> "ABC-123" */
+ * "bp:<GUID>" (tapback on a balloon / link preview) is stripped the same way.
+ *   "p:0/ABC-123" -> "ABC-123"      "ABC-123" -> "ABC-123"   "bp:ABC" -> "ABC" */
 hu_error_t hu_imessage_strip_assoc_guid_prefix(const char *raw, char *out, size_t cap);
 
 /* chat.db `chat.guid` is "<service>;<kind>;<id>" ("any;-;+15551234" for DMs,
