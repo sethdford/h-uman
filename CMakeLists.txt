@@ -1024,6 +1024,7 @@ set(HU_CORE_SOURCES
     src/memory/name_extract.c
     src/memory/agent_facts.c
     src/memory/semantic_recall.c
+    src/memory/context_relevance.c
     src/memory/conflict_resolver.c
     src/memory/write_trust.c
     src/memory/erasure.c
@@ -3832,6 +3833,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_hybrid_reconstructive.c
     tests/test_semantic_recall.c
     tests/test_semantic_recall_register.c
+    tests/test_context_relevance.c
     tests/test_embedder_http.c
     tests/test_w1_bitemporal.c
     tests/test_graph_state.c

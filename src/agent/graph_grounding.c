@@ -4,6 +4,7 @@
 #include "human/agent/world_model_bridge.h"
 #include "human/core/gate_mode.h"
 #include "human/core/log.h"
+#include "human/memory/context_relevance.h"
 #include "human/memory/graph.h"
 #include "human/memory/graph_state.h"
 #include "human/memory/name_extract.h"
@@ -804,7 +805,11 @@ void hu_agent_load_graph_grounding(hu_agent_t *agent, void *loader_v, const char
                     *graph_ctx_len, matched_entities,
                     (unsigned)hu_graph_ground_fingerprint(*graph_ctx, *graph_ctx_len));
         drop_reason = "shadow";
-    } else if (graph_mode == HU_GRAPH_GROUNDING_ON && agent->turn_tier < (int)HU_TIER_ANALYTICAL) {
+    } else if (graph_mode == HU_GRAPH_GROUNDING_ON && agent->turn_tier < (int)HU_TIER_ANALYTICAL &&
+               /* HU_CONTEXT_RELEVANCE LIVE keeps a query-conditioned block
+                * (cut to the casual budget); the contact fallback is not one. */
+               !hu_context_relevance_graph(agent->alloc, graph_ctx, graph_ctx_len,
+                                           via_fallback ? 0 : matched_entities + via_self)) {
         hu_log_info("graph_grounding", NULL,
                     "live: %zu bytes skipped for casual register (tier=%d)", *graph_ctx_len,
                     agent->turn_tier);

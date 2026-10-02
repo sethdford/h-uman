@@ -409,6 +409,7 @@ void run_semantic_index_tests(void);
 void run_hybrid_reconstructive_tests(void);
 void run_semantic_recall_tests(void);
 void run_semantic_recall_register_tests(void);
+void run_context_relevance_tests(void);
 void run_embedder_http_tests(void);
 void run_w1_bitemporal_tests(void);
 void run_graph_state_tests(void);
@@ -1511,6 +1512,7 @@ int main(int argc, char **argv) {
     run_hybrid_reconstructive_tests();
     run_semantic_recall_tests();
     run_semantic_recall_register_tests();
+    run_context_relevance_tests();
     run_embedder_http_tests();
     run_w1_bitemporal_tests();
     run_graph_state_tests();
