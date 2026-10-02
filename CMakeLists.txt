@@ -635,6 +635,7 @@ set(HU_CORE_SOURCES
     src/core/vertex_auth.c
     src/core/process_util.c
     src/core/log.c
+    src/core/log_redact.c
     src/websocket/websocket.c
     src/config/config.c
     src/config/config_schema.c
@@ -1278,6 +1279,7 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_follow_up_watcher.c
     src/daemon/daemon_followup_sched.c
     src/daemon/daemon_voice_reply.c
+    src/daemon/daemon_crisis.c
     src/daemon/daemon_voice_first.c
     src/daemon/daemon_expressive.c
     src/daemon/daemon_share_queue.c
@@ -1453,6 +1455,7 @@ list(APPEND HU_CORE_SOURCES
     src/security/escalate.c
     src/security/normalize.c
     src/security/moderation.c
+    src/security/self_harm.c
     src/security/companion_safety.c
     src/tools/code_sandbox.c
     src/tools/computer_use.c
@@ -4341,6 +4344,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_otel.c
     tests/test_cot_audit.c
     tests/test_moderation.c
+    tests/test_self_harm.c
     tests/test_companion_safety.c
     tests/test_code_sandbox.c
     tests/test_computer_use.c

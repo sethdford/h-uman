@@ -71,6 +71,7 @@
 #include "human/daemon/config_reload.h"
 #include "human/daemon/consecutive_limiter.h"
 #include "human/daemon/context_facade.h"
+#include "human/daemon/crisis.h"
 #include "human/daemon/dated_followup.h"
 #include "human/daemon/director.h"
 #include "human/daemon/expressive.h"
@@ -2897,20 +2898,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 if (combined_len == 0)
                     continue;
 
-                /* SHIELD-005: Inbound moderation — catch crisis signals early */
-                bool inbound_crisis = false;
-                {
-                    hu_moderation_result_t inbound_mod;
-                    memset(&inbound_mod, 0, sizeof(inbound_mod));
-                    if (hu_moderation_check(alloc, combined, combined_len, &inbound_mod) == HU_OK &&
-                        inbound_mod.self_harm) {
-                        hu_log_error("human", agent ? agent->observer : NULL,
-                                     "INBOUND crisis detected from %.*s (score=%.2f)",
-                                     (int)(key_len > 20 ? 20 : key_len), batch_key,
-                                     inbound_mod.self_harm_score);
-                        inbound_crisis = true;
-                    }
-                }
+                /* SHIELD-005: inbound crisis tier from the one self-harm detector. */
+                hu_self_harm_tier_t crisis_tier =
+                    hu_daemon_inbound_crisis_tier(alloc, combined, combined_len, batch_key, key_len,
+                                                  agent ? agent->observer : NULL);
+                bool inbound_crisis = crisis_tier != HU_SELF_HARM_NONE;
 
                 /* Clear STM before each contact batch to avoid cross-contact emotion contamination
                  */
@@ -6250,30 +6242,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 }
 #endif
 
-                /* SHIELD-005: Inbound crisis — force response and inject supportive context */
-                if (inbound_crisis) {
+                /* SHIELD-005: force a reply and prepend the tier's directive (crisis,
+                 * check-in, or support for a helper). */
+                if (hu_daemon_crisis_prepend(alloc, crisis_tier, &convo_ctx, &convo_ctx_len))
                     action = HU_RESPONSE_FULL;
-                    static const char crisis_directive[] =
-                        "[CRISIS SUPPORT]: The user may be in distress. "
-                        "Respond with empathy and care. Include crisis resources: "
-                        "988 Suicide & Crisis Lifeline (call/text 988), "
-                        "Crisis Text Line (text HOME to 741741). "
-                        "Do not dismiss their feelings. Do not give advice. "
-                        "Listen and validate.\n";
-                    size_t cd_len = sizeof(crisis_directive) - 1;
-                    size_t new_len = cd_len + convo_ctx_len;
-                    char *merged = (char *)alloc->alloc(alloc->ctx, new_len + 1);
-                    if (merged) {
-                        memcpy(merged, crisis_directive, cd_len);
-                        if (convo_ctx && convo_ctx_len > 0)
-                            memcpy(merged + cd_len, convo_ctx, convo_ctx_len);
-                        merged[new_len] = '\0';
-                        if (convo_ctx)
-                            alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
-                        convo_ctx = merged;
-                        convo_ctx_len = new_len;
-                    }
-                }
 
                 /* Voice-first memos: decide voice from what arrived and, LIVE for
                  * family, have this turn write the memo. Never for a crisis turn. */

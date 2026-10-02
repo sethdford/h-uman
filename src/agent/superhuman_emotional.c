@@ -4,6 +4,7 @@
 #include "human/agent/superhuman_emotional.h"
 #include "human/agent/superhuman.h"
 #include "human/core/string.h"
+#include "human/security/self_harm.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -43,7 +44,28 @@ static hu_error_t emotional_build_context(void *ctx, hu_allocator_t *alloc, char
     if (text_len == 0)
         return HU_OK;
 
-    if (has_crisis(text, text_len)) {
+    /* HU_CRISIS_TIERS live: the one detector (security/self_harm.c). A low
+     * "can't go on" gets a check-in, not the crisis line; someone else at risk
+     * gets support for the helper. off/shadow: the legacy keyword list. */
+    hu_self_harm_tier_t tier = HU_SELF_HARM_NONE;
+    bool crisis;
+    if (hu_crisis_tiers_mode() == HU_GATE_LIVE) {
+        tier = hu_self_harm_classify(text, text_len);
+        crisis = tier == HU_SELF_HARM_EXPLICIT;
+    } else {
+        crisis = has_crisis(text, text_len);
+    }
+    if (tier == HU_SELF_HARM_LOW || tier == HU_SELF_HARM_THIRD_PERSON) {
+        size_t dlen = 0;
+        const char *d = hu_self_harm_directive(tier, &dlen);
+        *out = hu_strndup(alloc, d, dlen);
+        if (!*out)
+            return HU_ERR_OUT_OF_MEMORY;
+        *out_len = dlen;
+        return HU_OK;
+    }
+
+    if (crisis) {
         static const char SAFETY[] =
             "SAFETY: The user may be in crisis. Prioritize empathy, validation, and crisis "
             "resources. Do not minimize. Suggest professional help (988, crisis line) if "

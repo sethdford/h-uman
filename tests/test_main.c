@@ -854,6 +854,7 @@ void run_sota_adversarial_tests(void);
 void run_otel_tests(void);
 void run_cot_audit_tests(void);
 void run_moderation_tests(void);
+void run_self_harm_tests(void);
 void run_companion_safety_tests(void);
 void run_code_sandbox_tests(void);
 void run_computer_use_tests(void);
@@ -1930,6 +1931,7 @@ int main(int argc, char **argv) {
     run_otel_tests();
     run_cot_audit_tests();
     run_moderation_tests();
+    run_self_harm_tests();
     run_companion_safety_tests();
     run_code_sandbox_tests();
     run_computer_use_tests();

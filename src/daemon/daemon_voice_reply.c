@@ -88,10 +88,11 @@ bool hu_voice_reply_gates_clear(hu_allocator_t *alloc, const char *text, size_t 
     if (text && text_len > 0) {
         hu_moderation_result_t in_mod;
         memset(&in_mod, 0, sizeof(in_mod));
-        /* Same criterion as the daemon's SHIELD-005 inbound_crisis flag. */
+        /* Same criterion as the daemon's SHIELD-005 inbound_crisis flag: any
+         * tier, including someone-else-at-risk, is never a voice memo. */
         if (inbound && inbound_len > 0 &&
             (hu_moderation_check(alloc, inbound, inbound_len, &in_mod) != HU_OK ||
-             in_mod.self_harm))
+             in_mod.self_harm || in_mod.self_harm_tier != HU_SELF_HARM_NONE))
             why = "inbound_crisis";
         else /* the reply itself: the one definition of the outbound gates */
             clear = hu_daemon_outbound_final_gates_clear(alloc, text, text_len, &why);
