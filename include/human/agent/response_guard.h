@@ -143,16 +143,6 @@ typedef struct {
      * `hu_guard_length_anomaly_mult_for_channel`. */
     unsigned length_anomaly_mult;
 
-    /* Task 10 (AC-9) — learned per-contact baseline length from the personal
-     * model. When non-zero, G5 uses this as the baseline instead of
-     * recent_avg_len (falling back to recent_avg_len if this is 0). Populated
-     * from personal_model.style.avg_message_length when available. Enables
-     * Seth-normal length to a given contact to bypass the length anomaly
-     * detector (e.g. a contact Seth habitually sends 500-char msgs to can
-     * receive 500-char replies without triggering G5). 0 disables this check
-     * (falls back to recent_avg_len + multiplier). */
-    size_t learned_avg_message_length;
-
     /* The director's / scene-direction text for this turn (the
      * upstream prompt fragment that drove tone/style decisions).
      * The guard rejects if a 30+ char substring of director_text
@@ -209,13 +199,16 @@ typedef struct {
      * touching every call site. */
     bool naked_opener_disabled;
 
-    /* 2026-10-01 — the inbound message is a question or a request
-     * (hu_guard_inbound_is_ask). An answer to "walk me through it" is
-     * longer than the conversation's recent average by design, so G5's
-     * relative cap (recent_avg_len x mult, or the learned baseline) is
-     * raised to at least HU_GUARD_LENGTH_ASK_CEILING for it. Never
-     * stricter than without the flag. Default false (memset 0). */
+    /* 2026-10-01 — the inbound message is a question
+     * (hu_guard_inbound_is_ask) and the persona owner's measured 90th-
+     * percentile reply length to this contact (hu_contact_profile_t
+     * .reply_chars_p90; 0 = not measured). An answer to "walk me through it"
+     * is longer than the last few replies by design, so for an ask G5's
+     * baseline is the larger of recent_avg_len and contact_reply_p90 (same
+     * multiplier, same floor). Never stricter than without them. Default
+     * false / 0 (memset 0) = today's behaviour. */
     bool inbound_is_ask;
+    size_t contact_reply_p90;
 } hu_guard_context_t;
 
 /* Sprint 38 — cumulative REJECT counts by detector (process-wide).
@@ -274,16 +267,10 @@ void hu_guard_reject_stats_reset(void);
  * weakening dump detection. */
 #define HU_GUARD_LENGTH_ANOMALY_FLOOR 320u
 
-/* G5 floor for a reply to a question or request (ctx->inbound_is_ask): the
- * relative cap never drops below this. Under the 2026-05-12 dump (979 chars),
- * so a context dump of that size still trips G5 even when it answers a
- * question; well above a long human answer to "walk me through it". */
-#define HU_GUARD_LENGTH_ASK_CEILING 900u
-
 /* The longest reply G5 accepts under `ctx`: max(FLOOR, baseline x mult),
- * raised to HU_GUARD_LENGTH_ASK_CEILING when ctx->inbound_is_ask. SIZE_MAX
- * when no length check applies (NULL ctx, no baseline). G5 rejects exactly
- * the replies longer than this. */
+ * where the baseline is recent_avg_len, or for an ask the larger of it and
+ * contact_reply_p90. SIZE_MAX when no length check applies (NULL ctx, no
+ * recent average). G5 rejects exactly the replies longer than this. */
 size_t hu_guard_length_cap(const hu_guard_context_t *ctx);
 
 /* Channel-aware G5 threshold. imessage / cli / sms → 6×; else 8×. */

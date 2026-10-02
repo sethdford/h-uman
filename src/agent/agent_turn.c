@@ -5445,9 +5445,9 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                                     hu_agent_internal_monotonic_ms() - vc_retry_t0_ms;
                                 /* The chain rejected the original: only the retry can go
                                  * out, and never as a fragment (guard_repair.h). */
-                                (void)hu_guard_repair_resolve(agent->alloc, agent->observer,
-                                                              final_content, final_len, NULL, NULL,
-                                                              &retry_content, &retry_len);
+                                hu_guard_repair_kept_t vc_kept = hu_guard_repair_resolve(
+                                    agent->alloc, agent->observer, final_content, final_len, NULL,
+                                    NULL, &retry_content, &retry_len);
                                 if (retry_err == HU_OK && retry_content && retry_len > 0) {
                                     /* Spec 2026-05-19 self-model-scaffold Phase
                                      * B: stash validator-retry length + latency.
@@ -5477,10 +5477,11 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                                      * pair — final_content (rejected by the
                                      * validator chain) vs retry_content
                                      * (accepted after the slim retry). */
-                                    (void)hu_m3_rewrite_pair_record(
-                                        agent->alloc, NULL, msg, msg_len, final_content, final_len,
-                                        retry_content, retry_len,
-                                        /*turn_kind=batch=*/2);
+                                    if (vc_kept == HU_GUARD_REPAIR_KEPT_RETRY)
+                                        (void)hu_m3_rewrite_pair_record(
+                                            agent->alloc, NULL, msg, msg_len, final_content,
+                                            final_len, retry_content, retry_len,
+                                            /*turn_kind=batch=*/2);
                                     /* Re-validate the retry output through the chain so a
                                      * regenerated CoT or helper-closer cannot escape (Fix 3). */
                                     hu_chain_result_t retry_cr;
@@ -5660,8 +5661,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                                 hu_response_guard_record_g9_retry_outcome(retry_ok,
                                                                           retry_tripped_g9);
                             }
-                            /* Never send a fragment or a collapse; keep (a trimmed) original
-                             * when its only fault was length (guard_repair.h). */
+                            /* Never send a cut-off reply from the repair (guard_repair.h). */
                             hu_guard_repair_kept_t repair_kept = hu_guard_repair_resolve(
                                 agent->alloc, agent->observer, final_content, final_len,
                                 &guard_report, &guard_ctx, &retry_content, &retry_len);
@@ -5709,42 +5709,22 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                                 final_len = retry_len;
                                 ab_owned = true;
                             } else {
-                                /* 2026-05-24 fix: response_guard REJECT + slim-retry both
-                                 * failed. Previously this nulled final_content and let the
-                                 * function return HU_OK with empty response_out, which the
-                                 * gateway misclassified as a transient "Agent returned empty
-                                 * response" 502 (telling clients to retry — but retrying won't
-                                 * help if the model keeps producing rejected content). Worse,
-                                 * iMessage saw HU_OK + NULL and silently skipped the send,
-                                 * leaving the user with no reply at all.
-                                 *
-                                 * Mirror the critique-echo guard's pattern (~line 5136): install
-                                 * a canonical short safe fallback so the function's contract
-                                 * holds ("HU_OK ⇒ non-NULL content"). The fallback matches the
-                                 * persona register (lowercase, no AI-tells) so it's plausibly
-                                 * something Seth would say while he gathers his thoughts. */
-                                hu_log_error(
-                                    "agent_turn", agent->observer,
-                                    "response_guard retry failed (err=%s) — installing fallback",
-                                    hu_error_string(retry_err));
+                                /* Nothing sendable (retry failed, or cut off with no complete
+                                 * sentence and an unsendable original): send NOTHING, the same
+                                 * as the validator-chain path. Silence is human; a canned line
+                                 * is not (owner ruling 2026-10-01, replaced the 2026-05-24
+                                 * canned fallback line). guard_repair
+                                 * logged kept=none. */
+                                hu_log_error("agent_turn", agent->observer,
+                                             "response_guard retry unusable (err=%s) — "
+                                             "suppressing send",
+                                             hu_error_string(retry_err));
                                 if (ab_owned)
                                     agent->alloc->free(agent->alloc->ctx, (void *)final_content,
                                                        final_len + 1);
-                                static const char fallback[] = "hold on, let me think on that";
-                                size_t fallback_len = sizeof(fallback) - 1;
-                                char *fb_copy = hu_strndup(agent->alloc, fallback, fallback_len);
-                                if (fb_copy) {
-                                    final_content = fb_copy;
-                                    final_len = fallback_len;
-                                    ab_owned = true;
-                                } else {
-                                    /* OOM on the fallback alloc — last resort: NULL content,
-                                     * but log loudly. Gateway will still 502 in this case, but
-                                     * OOM is its own real failure so 502 is appropriate. */
-                                    final_content = NULL;
-                                    final_len = 0;
-                                    ab_owned = false;
-                                }
+                                final_content = NULL;
+                                final_len = 0;
+                                ab_owned = false;
                             }
                         } else if (guard_outcome == HU_GUARD_REWROTE) {
                             hu_log_warn(

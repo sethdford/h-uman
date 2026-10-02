@@ -777,6 +777,12 @@ void hu_agent_internal_guard_context(const hu_agent_t *agent, const char *msg, s
         hu_response_guard_g9_disabled_for_channel(agent->active_channel, agent->active_channel_len);
     if (!agent->persona)
         return;
+    if (out->inbound_is_ask && agent->memory_session_id) {
+        const hu_contact_profile_t *cp = hu_persona_find_contact(
+            agent->persona, agent->memory_session_id, agent->memory_session_id_len);
+        if (cp)
+            out->contact_reply_p90 = cp->reply_chars_p90;
+    }
     if (agent->persona->name && agent->persona->name_len > 1) {
         out->persona_name = agent->persona->name;
         out->persona_name_len = agent->persona->name_len;

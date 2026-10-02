@@ -369,12 +369,8 @@ static void agent_g5_length_anomaly_rejects_and_retries(void) {
     HU_ASSERT_EQ(hu_agent_turn(&agent, "what's up", 9, &r3, &r3_len), HU_OK);
     /* Provider was called at least 4 times — original + slim retry. */
     HU_ASSERT(pctx.calls >= 4);
-    /* Final response must NOT be the 1500-byte dump. Since 2026-10-01 a
-     * collapsed retry (20 bytes, < 40% of a length-only original) loses to
-     * the original cut to a sentence end under G5's cap ("what's up" is a
-     * question, so the cap is the ask ceiling) — see guard_repair.h. */
-    HU_ASSERT(r3_len < long_len);
-    HU_ASSERT(r3_len <= HU_GUARD_LENGTH_ASK_CEILING);
+    /* Final response must NOT be the 1500-byte dump. */
+    HU_ASSERT(r3_len < 200);
     /* Retry path returned the clean text. */
     HU_ASSERT_NOT_NULL(r3);
     alloc.free(alloc.ctx, r3, r3_len + 1);
@@ -382,13 +378,14 @@ static void agent_g5_length_anomaly_rejects_and_retries(void) {
     hu_agent_deinit(&agent);
 }
 
-/* 2026-10-01 — a guard repair never sends a fragment. The thanksgiving
- * send: a reply over G5's cap, a slim retry cut mid-clause ("Wait, did we
- * actually lock"). The agent surfaces the original, cut to a sentence end
- * under the cap, not the fragment. */
-static const char k_fragment_retry[] = "Wait, did we actually lock";
+/* 2026-10-01 — a guard repair never sends a cut-off reply. The original is
+ * a length-only reject (G5, the context-dump detector: over its cap), and
+ * the slim retry comes back cut off mid-clause. Neither may go out — not the
+ * dump, not a slice of it, not the fragment, not a canned line: the turn
+ * sends nothing. */
+static const char k_fragment_retry[] = "Wait, did we actually lock in the";
 
-static void agent_g5_fragment_retry_keeps_the_original_trimmed(void) {
+static void agent_g5_dump_plus_fragment_retry_sends_nothing(void) {
     hu_allocator_t alloc = hu_system_allocator();
     length_provider_ctx_t pctx;
     memset(&pctx, 0, sizeof(pctx));
@@ -427,19 +424,21 @@ static void agent_g5_fragment_retry_keeps_the_original_trimmed(void) {
     HU_ASSERT_EQ(hu_agent_turn(&agent, "hi", 2, &r, &rlen), HU_OK);
     alloc.free(alloc.ctx, r, rlen + 1);
     /* Not a question: G5 judges 700 bytes against max(320, ~21 x 6). */
-    HU_ASSERT_EQ(hu_agent_turn(&agent, "ok cool then", 12, &r, &rlen), HU_OK);
+    r = NULL;
+    rlen = 0;
+    (void)hu_agent_turn(&agent, "ok cool then", 12, &r, &rlen);
     HU_ASSERT(pctx.calls >= 4); /* original + slim retry ran */
+    /* Exactly nothing is sent: the suppressed-send contract (as on the
+     * validator-chain path) is an empty response the daemon does not send. */
     HU_ASSERT_NOT_NULL(r);
-    HU_ASSERT(strstr(r, "did we actually lock") == NULL);
-    HU_ASSERT(strstr(r, "grab coffee tomorrow") != NULL);
-    HU_ASSERT(rlen <= HU_GUARD_LENGTH_ANOMALY_FLOOR);
-    HU_ASSERT(rlen > sizeof(k_fragment_retry));
+    HU_ASSERT_STR_EQ(r, "");
+    HU_ASSERT_EQ(rlen, 0u);
     alloc.free(alloc.ctx, r, rlen + 1);
     hu_agent_deinit(&agent);
 }
 
 /* The original leaked the director's text, so it can't be sent; the retry
- * is a fragment, so it can't either. The canned fallback goes out. */
+ * is a fragment, so it can't either. Exactly nothing is sent. */
 static void agent_g6_leak_plus_fragment_retry_sends_neither(void) {
     hu_allocator_t alloc = hu_system_allocator();
     length_provider_ctx_t pctx;
@@ -465,14 +464,16 @@ static void agent_g6_leak_plus_fragment_retry_sends_neither(void) {
     agent.scene_direction_text_len = sizeof(director) - 1;
     char *r = NULL;
     size_t rlen = 0;
-    HU_ASSERT_EQ(hu_agent_turn(&agent, "interesting", 11, &r, &rlen), HU_OK);
+    (void)hu_agent_turn(&agent, "interesting", 11, &r, &rlen);
     HU_ASSERT(pctx.calls >= 2);
+    /* Exactly nothing is sent — no leak, no fragment, no canned line: the
+     * suppressed-send contract is an empty response. */
     HU_ASSERT_NOT_NULL(r);
-    HU_ASSERT(strstr(r, "did we actually lock") == NULL);
-    HU_ASSERT(strstr(r, director) == NULL);
+    HU_ASSERT_STR_EQ(r, "");
+    HU_ASSERT_EQ(rlen, 0u);
+    alloc.free(alloc.ctx, r, rlen + 1);
     agent.scene_direction_text = NULL;
     agent.scene_direction_text_len = 0;
-    alloc.free(alloc.ctx, r, rlen + 1);
     hu_agent_deinit(&agent);
 }
 
@@ -1062,7 +1063,7 @@ void run_response_guard_retry_tests(void) {
     /* Sprint 34 — end-to-end wired G5 + G6 through hu_agent_turn. */
     HU_RUN_TEST(agent_g5_length_anomaly_rejects_and_retries);
     HU_RUN_TEST(agent_g6_director_echo_rejects_and_retries);
-    HU_RUN_TEST(agent_g5_fragment_retry_keeps_the_original_trimmed);
+    HU_RUN_TEST(agent_g5_dump_plus_fragment_retry_sends_nothing);
     HU_RUN_TEST(agent_g6_leak_plus_fragment_retry_sends_neither);
 
     /* Sprint 35 — end-to-end persona-PII echo (G7). */

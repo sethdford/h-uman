@@ -7,15 +7,16 @@
  * path, the bubble splitters and the final outbound check can refuse it.
  *
  * Casual texting is NOT a fragment: "lol", "peaceful", "did you eat",
- * "yeah we should" all end without punctuation and are complete. A fragment
- * is one of:
+ * "Did you eat", "yeah we should", "aw no :(" all end without a period and are
+ * complete. A fragment is one of:
  *   - ends on a function word no complete utterance ends on ("just", "and",
  *     "the", "because", a contracted auxiliary like "it's"),
- *   - ends on clause punctuation that promises more (",", ";", ":", a dash),
- *   - has an unclosed paren or quote,
- *   - is sentence-case ("Wait, ...") yet ends its final clause, an inverted
- *     question ("did we actually lock"), with no "?" — the register says the
- *     writer punctuates, so the missing "?" means the text was cut.
+ *   - ends on clause punctuation trailing a word (",", ";", ":", a dash),
+ *   - has an unclosed paren or quote.
+ * A final emoticon or URL is a complete ending; its brackets close nothing.
+ * Cut-off clauses with no such marker ("did we actually lock") are not
+ * detectable from the text; the slim retry refuses a reply its token cap cut
+ * off (finish_reason MAX_TOKENS) instead.
  *
  * Pure functions; no allocation. */
 #ifndef HU_CONTEXT_REPLY_FRAGMENT_H
@@ -49,9 +50,9 @@ size_t hu_reply_trim_to_sentence(const char *text, size_t len, size_t cap);
 size_t hu_reply_drop_dangling_tail(const char *text, size_t len);
 
 /* True when cutting `text` at byte `cut` makes a clean bubble break: the left
- * side does not end on a dangling function word — nor, since a splitter can
- * always pick another space, on a preposition, pronoun or bare auxiliary —
- * and the right side has at least two words (no 1-word tail). */
+ * bubble does not end mid-clause — on a dangling function word, or (since a
+ * splitter can always pick another space) on a preposition, pronoun or bare
+ * auxiliary. The right side is not judged: a 1-word tail ("haha") is human. */
 bool hu_reply_cut_is_clean(const char *text, size_t len, size_t cut);
 
 /* Final outbound check, run on the text about to be bubbled and sent. When it

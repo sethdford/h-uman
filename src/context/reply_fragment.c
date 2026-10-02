@@ -20,12 +20,6 @@ static const char *const k_dangling[] = {
     "he's",  "she's",   "what's",   "i've", "you've",  "we've",   "they've", "i'll",    "you'll",
     "we'll", "they'll", "it'll",    "i'd",  "you'd",   "we'd",    "they'd",  NULL};
 
-/* Auxiliaries that open an inverted yes/no question ("did we ...", "are you"). */
-static const char *const k_aux[] = {"did",  "do",  "does",  "are",  "is",    "was",
-                                    "were", "can", "could", "will", "would", "should",
-                                    "have", "has", "shall", "am",   NULL};
-static const char *const k_subj[] = {"i", "we", "you", "they", "he", "she", "it", "u", "ya", NULL};
-
 static bool rf_in_list(const char *const *list, const char *w, size_t n) {
     for (size_t i = 0; list[i]; i++)
         if (strlen(list[i]) == n && strncasecmp(list[i], w, n) == 0)
@@ -94,18 +88,6 @@ static size_t rf_word_start(const char *t, size_t end) {
     return s;
 }
 
-static size_t rf_word_count(const char *t, size_t len) {
-    size_t n = 0;
-    bool in = false;
-    for (size_t i = 0; i < len; i++) {
-        bool w = !rf_is_space(t[i]);
-        if (w && !in)
-            n++;
-        in = w;
-    }
-    return n;
-}
-
 /* Ends on a dangling word, with the "just because" exception (a complete
  * idiom: "why?" "just because"). */
 static bool rf_ends_dangling(const char *t, size_t end) {
@@ -126,55 +108,64 @@ static bool rf_ends_dangling(const char *t, size_t end) {
     return true;
 }
 
+/* Is t[0..n) a symbol token rather than a word: a URL ("https://x.com/a/",
+ * "www.x.com") or an emoticon / kaomoji (":(", ":/", ";)", ":P", ":-)", "<3",
+ * "=]"). The rule is the shape, not a list: an emoticon has eyes (":", ";",
+ * "=") or is the heart "<3", is short, and has no run of two letters (so
+ * "plan:" and "(see" stay words). A symbol token is a complete ending, and its
+ * brackets are not punctuation. */
+static bool rf_token_is_symbolic(const char *t, size_t n) {
+    if (n >= 4 && strncasecmp(t, "www.", 4) == 0)
+        return true;
+    for (size_t i = 0; i + 3 <= n; i++)
+        if (t[i] == ':' && t[i + 1] == '/' && t[i + 2] == '/')
+            return true;
+    if (n == 2 && t[0] == '<' && t[1] == '3')
+        return true;
+    if (n < 2 || n > 6)
+        return false;
+    bool eyes = false;
+    for (size_t i = 0; i < n; i++) {
+        unsigned char c = (unsigned char)t[i];
+        if (c == ':' || c == ';' || c == '=')
+            eyes = true;
+        if (i > 0 && isalpha(c) && isalpha((unsigned char)t[i - 1]))
+            return false;
+    }
+    return eyes;
+}
+
+/* Unclosed paren or quote, counting only word tokens (an emoticon's or a
+ * URL's brackets close nothing). */
 static bool rf_unbalanced(const char *t, size_t len) {
     int paren = 0;
     size_t dq = 0, curly_open = 0, curly_close = 0;
-    for (size_t i = 0; i < len; i++) {
-        unsigned char c = (unsigned char)t[i];
-        if (c == '(')
-            paren++;
-        else if (c == ')')
-            paren--;
-        else if (c == '"')
-            dq++;
-        else if (c == 0xE2 && i + 2 < len && (unsigned char)t[i + 1] == 0x80) {
-            if ((unsigned char)t[i + 2] == 0x9C)
-                curly_open++;
-            else if ((unsigned char)t[i + 2] == 0x9D)
-                curly_close++;
+    size_t i = 0;
+    while (i < len) {
+        while (i < len && rf_is_space(t[i]))
+            i++;
+        size_t s = i;
+        while (i < len && !rf_is_space(t[i]))
+            i++;
+        if (i == s || rf_token_is_symbolic(t + s, i - s))
+            continue;
+        for (size_t k = s; k < i; k++) {
+            unsigned char c = (unsigned char)t[k];
+            if (c == '(')
+                paren++;
+            else if (c == ')')
+                paren--;
+            else if (c == '"')
+                dq++;
+            else if (c == 0xE2 && k + 2 < i && (unsigned char)t[k + 1] == 0x80) {
+                if ((unsigned char)t[k + 2] == 0x9C)
+                    curly_open++;
+                else if ((unsigned char)t[k + 2] == 0x9D)
+                    curly_close++;
+            }
         }
     }
     return paren > 0 || (dq % 2) == 1 || curly_open > curly_close;
-}
-
-/* Sentence-case text ("Wait, ...") whose final clause is an inverted question
- * with no "?" anywhere: a writer who capitalizes and punctuates would close
- * the question, so the missing "?" means the text was cut. Lowercase casual
- * texts ("did you eat") never trip this. */
-static bool rf_unclosed_question(const char *t, size_t len) {
-    if (memchr(t, '?', len))
-        return false;
-    size_t i = 0;
-    while (i < len && !isalpha((unsigned char)t[i]))
-        i++;
-    if (i >= len || !isupper((unsigned char)t[i]))
-        return false;
-    size_t c = len; /* start of the final clause */
-    while (c > 0 && !strchr(".!;,", t[c - 1]))
-        c--;
-    while (c < len && !isalpha((unsigned char)t[c]))
-        c++;
-    size_t a = c;
-    while (a < len && isalpha((unsigned char)t[a]))
-        a++;
-    if (!rf_in_list(k_aux, t + c, a - c))
-        return false;
-    while (a < len && rf_is_space(t[a]))
-        a++;
-    size_t b = a;
-    while (b < len && isalpha((unsigned char)t[b]))
-        b++;
-    return b > a && rf_in_list(k_subj, t + a, b - a) && b < len;
 }
 
 bool hu_reply_is_fragment(const char *text, size_t len) {
@@ -185,7 +176,13 @@ bool hu_reply_is_fragment(const char *text, size_t len) {
         return false;
     if (rf_unbalanced(text, len))
         return true;
+    size_t ts = len;
+    while (ts > 0 && !rf_is_space(text[ts - 1]))
+        ts--;
+    if (rf_token_is_symbolic(text + ts, len - ts))
+        return false; /* ends on an emoticon or a URL */
     unsigned char last = (unsigned char)text[len - 1];
+    /* Clause punctuation trailing a word promises more ("Let me check and,"). */
     if (strchr(",;:-(&/", last))
         return true;
     /* En/em dash (E2 80 93 / E2 80 94) promise more too. */
@@ -202,9 +199,7 @@ bool hu_reply_is_fragment(const char *text, size_t len) {
         if (!curly_apos)
             return false;
     }
-    if (rf_ends_dangling(text, len))
-        return true;
-    return rf_unclosed_question(text, len);
+    return rf_ends_dangling(text, len);
 }
 
 size_t hu_reply_trim_to_sentence(const char *text, size_t len, size_t cap) {
@@ -245,10 +240,11 @@ size_t hu_reply_drop_dangling_tail(const char *text, size_t len) {
     return p > 0 ? p : len;
 }
 
-/* A bubble break may also not land after a preposition, pronoun or bare
- * auxiliary ("talking about the best of" | "the summers"). These complete
- * plenty of utterances, so they are not fragment evidence, but a splitter can
- * always pick another space, so for choosing a cut they cost nothing. */
+/* A bubble break never lands mid-clause: after a dangling function word, or
+ * after a preposition, pronoun or bare auxiliary ("talking about the best of" |
+ * "the summers"). Those complete plenty of utterances, so they are not
+ * fragment evidence, but a splitter can always pick another space. What
+ * follows the cut is not judged: "sounds good." | "haha" is human. */
 static const char *const k_weak_cut[] = {
     "of",     "to",       "in",    "on",    "at",    "for",   "with", "from", "about", "into",
     "by",     "as",       "so",    "that",  "this",  "is",    "was",  "are",  "were",  "be",
@@ -268,7 +264,7 @@ bool hu_reply_cut_is_clean(const char *text, size_t len, size_t cut) {
         if (n > 0 && rf_in_list(k_weak_cut, w, n))
             return false;
     }
-    return rf_word_count(text + cut, len - cut) >= 2;
+    return true;
 }
 
 static atomic_uint_fast64_t s_final_fragments;

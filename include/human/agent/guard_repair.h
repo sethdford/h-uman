@@ -1,24 +1,20 @@
 /* Response-guard repair policy — what to send after a guard REJECT + retry.
  *
- * Since 2026-09-17 every guard repair shrank the reply below half its
- * original length (median 767 -> 29 chars), and on 2026-09-30 a repair sent
- * "Wait, did we actually lock" — a sentence cut mid-clause — in place of a
- * 94-char answer. The repair retry was trusted blindly. This module decides
- * between the original and the retry instead:
+ * 2026-09-30 a repair retry cut off mid-clause was sent in place of a
+ * rejected answer. The retry was trusted blindly. The floor this module adds
+ * is: never send a cut-off reply from the repair path.
  *
- *   - the retry is kept when it is a complete reply and is not a collapse
- *     (< 40% of the original) of an original whose only violation was length;
- *   - otherwise, when the original's only violation was length, the original
- *     is kept — cut to a sentence end under the guard's length cap when it is
- *     over the cap, so the sent text is one the guard itself would accept;
- *   - otherwise (the original leaked something: director/persona echo, CoT,
- *     repetition loop ...) it is never sent; a fragment retry is cut back to
- *     its last complete sentence or dangling-word-free form, else nothing is
- *     kept and the caller installs its canned fallback.
+ *   - a complete retry is sent as before;
+ *   - a fragment retry loses to the original only when the guard has nothing
+ *     against the original (within the length cap, no other violation) —
+ *     a length-only (G5 context-dump) reject is never sent, whole or sliced;
+ *   - otherwise the fragment retry is cut back to its last complete sentence
+ *     or its lone dangling word dropped;
+ *   - otherwise nothing is sent (kept=none). Silence, not a canned line.
  *
- * Never sends a fragment from the repair path. Logs one aggregate line per
- * repair: "[guard_repair] kept=<retry|original|trimmed|retry_trimmed|none>
- * reason=<...> orig_len=N retry_len=N sent_len=N" — lengths and enums only. */
+ * Logs one aggregate line per repair: "[guard_repair] kept=<retry|original|
+ * retry_trimmed|none> reason=<ok|retry_fragment|retry_failed> orig_len=N
+ * retry_len=N sent_len=N" — lengths and enums only. */
 #ifndef HU_AGENT_GUARD_REPAIR_H
 #define HU_AGENT_GUARD_REPAIR_H
 
@@ -35,18 +31,17 @@ extern "C" {
 
 typedef enum {
     HU_GUARD_REPAIR_KEPT_RETRY = 0,
-    HU_GUARD_REPAIR_KEPT_ORIGINAL,
-    HU_GUARD_REPAIR_KEPT_TRIMMED,       /* original cut to a sentence end under the cap */
+    HU_GUARD_REPAIR_KEPT_ORIGINAL,      /* guard has nothing against it but the retry's cut */
     HU_GUARD_REPAIR_KEPT_RETRY_TRIMMED, /* retry with its cut-off tail removed */
-    HU_GUARD_REPAIR_KEPT_NONE,          /* nothing sendable: caller installs its fallback */
+    HU_GUARD_REPAIR_KEPT_NONE,          /* nothing sendable: the caller sends nothing */
 } hu_guard_repair_kept_t;
 
 typedef struct {
     hu_guard_repair_kept_t kept;
-    /* Bytes of the chosen source (original for ORIGINAL/TRIMMED, retry for
+    /* Bytes of the chosen source (original for ORIGINAL, retry for
      * RETRY/RETRY_TRIMMED) to send, from its start. 0 for NONE. */
     size_t len;
-    /* Static enum-like slug: "ok", "retry_fragment", "retry_collapsed". */
+    /* Static enum-like slug: "ok", "retry_fragment", "retry_failed". */
     const char *reason;
 } hu_guard_repair_decision_t;
 
@@ -60,19 +55,22 @@ hu_guard_repair_decision_t hu_guard_repair_decide(const char *original, size_t o
 /* Applies the policy at a guard-repair call site. On entry `*retry` is the
  * allocator-owned retry text (may be NULL/empty when the retry failed). On
  * return `*retry`/`*retry_len` hold the allocator-owned text to send — the
- * retry, or a fresh copy of (a prefix of) the original — or NULL/0 for NONE.
- * Text taken from the original is re-checked with hu_response_guard_check_ex
- * under `ctx` and only kept when the guard passes it. Logs the aggregate
- * [guard_repair] line. On OOM leaves the retry untouched. */
+ * retry, a trimmed copy of it, or a copy of the original — or NULL/0 for NONE,
+ * which means send nothing. An original is re-checked with
+ * hu_response_guard_check_ex under `ctx` and kept only when the guard passes
+ * it. `original_report`/`ctx` NULL (validator-chain path) never keeps the
+ * original. Logs the aggregate [guard_repair] line. */
 hu_guard_repair_kept_t hu_guard_repair_resolve(hu_allocator_t *alloc, hu_observer_t *obs,
                                                const char *original, size_t original_len,
                                                const hu_guard_report_t *original_report,
                                                const hu_guard_context_t *ctx, char **retry,
                                                size_t *retry_len);
 
-/* Is the inbound message a question or a request ("walk me through it",
- * "can you", "whats the plan")? Such a message licenses a longer answer than
- * the conversation's recent average; see hu_guard_context_t.inbound_is_ask. */
+/* Is the inbound message a question: a "?", or a clause with interrogative
+ * structure — a fronted wh-word ("whats the plan") or subject-auxiliary
+ * inversion ("did you end up renting that kayak"). "have fun tonight" is not.
+ * An answer to one is judged against the contact's long-reply length, not the
+ * conversation's recent average; see hu_guard_context_t.inbound_is_ask. */
 bool hu_guard_inbound_is_ask(const char *msg, size_t len);
 
 const char *hu_guard_repair_kept_name(hu_guard_repair_kept_t kept);

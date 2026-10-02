@@ -1,8 +1,8 @@
 /* tests/test_reply_fragment.c — fragment detector, guard repair policy,
  * question-aware G5 cap, bubble-split cleanliness and the final outbound
- * check. Real 2026-09-30 sends anchor the battery:
- *   - "Wait, did we actually lock" (guard repair retry, sent in place of a
- *     94-char answer to "walk me through it")
+ * check. Real 2026-09-30 sends anchor it:
+ *   - "Wait, did we actually lock" (guard repair retry cut by its token cap,
+ *     sent in place of a 94-char answer to "walk me through it")
  *   - "Nah too windy. just" | "hung out by the water" | "peaceful" (split) */
 #include "human/agent/choreography.h"
 #include "human/agent/guard_repair.h"
@@ -23,8 +23,8 @@
 
 static void fragment_detector_flags_the_real_fragments(void) {
     static const char *const frags[] = {
-        "Wait, did we actually lock",        /* 2026-09-30 guard repair */
         "Nah too windy. just",               /* 2026-09-30 bubble split */
+        "Wait, did we actually lock in the", /* the 09-30 retry, cut one word later */
         "I was thinking we could go to the", /* article */
         "yeah and",                          /* conjunction */
         "It's not that bad because",         /* subordinator */
@@ -36,8 +36,7 @@ static void fragment_detector_flags_the_real_fragments(void) {
         "here's the plan:",                  /* colon promising more */
         "He said (and I quote",              /* unclosed paren */
         "she said \"meet at the",            /* unclosed quote */
-        "Did you end up booking the place",  /* sentence-case inverted question, no ? */
-        "Sounds good. Are we still on for",  /* sentence-case inverted question, no ? */
+        "lol (and then she :(",              /* the emoticon closes nothing */
     };
     for (size_t i = 0; i < sizeof(frags) / sizeof(frags[0]); i++) {
         if (!hu_reply_is_fragment(frags[i], strlen(frags[i])))
@@ -53,6 +52,16 @@ static void fragment_detector_passes_casual_complete_texts(void) {
         "haha yeah",
         "nah im good",
         "did you eat", /* lowercase casual question, no ? */
+        "Did you eat", /* sentence-case question, no ? — fine texting */
+        "Sounds good. Are you free Saturday",
+        "aw no :(",
+        "ugh :/",
+        "see you then ;)",
+        "lol :P",
+        "haha xD",
+        "miss you <3",
+        "check this https://x.com/a/",
+        "see www.example.com/",
         "omg yes",
         "same",
         "on my way",
@@ -136,9 +145,9 @@ static void final_check_drops_a_lone_dangling_word_and_counts(void) {
     size_t n = hu_reply_final_check(S("Nah too windy. just"), NULL);
     HU_ASSERT_EQ(n, strlen("Nah too windy."));
     HU_ASSERT_EQ(hu_reply_final_fragment_count(), before + 1);
-    /* A fragment without a lone function word is counted, not altered. */
-    n = hu_reply_final_check(S("Wait, did we actually lock"), NULL);
-    HU_ASSERT_EQ(n, strlen("Wait, did we actually lock"));
+    /* A fragment whose dangling word is mid-clause is counted, not altered. */
+    n = hu_reply_final_check(S("I was thinking we could go to the"), NULL);
+    HU_ASSERT_EQ(n, strlen("I was thinking we could go to the"));
     HU_ASSERT_EQ(hu_reply_final_fragment_count(), before + 2);
 }
 
@@ -159,15 +168,15 @@ static void final_check_leaves_well_formed_replies_byte_identical(void) {
 
 /* ── (d) splitters ────────────────────────────────────────────────────── */
 
-static void cut_is_clean_rejects_dangling_left_and_one_word_tail(void) {
+static void cut_is_clean_rejects_a_mid_clause_left_only(void) {
     const char *t = "Nah too windy. just hung out by the water";
-    /* After "just": left ends on a dangling word. */
+    /* After "just": the left bubble ends on a dangling word. */
     HU_ASSERT_FALSE(hu_reply_cut_is_clean(t, strlen(t), strlen("Nah too windy. just")));
     /* After "windy.": clean. */
     HU_ASSERT_TRUE(hu_reply_cut_is_clean(t, strlen(t), strlen("Nah too windy.")));
-    const char *u = "nah too windy, just hung out by the water. peaceful";
-    /* Before "peaceful": a 1-word tail. */
-    HU_ASSERT_FALSE(hu_reply_cut_is_clean(u, strlen(u), strlen(u) - strlen("peaceful")));
+    /* A 1-word tail is not judged: "sounds good." | "haha" is human. */
+    const char *u = "sounds good, see you at the lake then. haha";
+    HU_ASSERT_TRUE(hu_reply_cut_is_clean(u, strlen(u), strlen(u) - strlen("haha")));
 }
 
 static hu_message_plan_t rf_double_text(hu_allocator_t *alloc, const char *msg) {
@@ -179,15 +188,15 @@ static hu_message_plan_t rf_double_text(hu_allocator_t *alloc, const char *msg) 
     return plan;
 }
 
-/* The kayak case with its "peaceful" tail: the sentence end nearest the
- * middle leaves a 1-word bubble, so the split takes the comma instead. */
-static void double_text_never_leaves_a_one_word_tail(void) {
+/* Byte-identical to main: a double text whose sentence end leaves a 1-word
+ * tail still splits there — double-texting "haha" is human. */
+static void double_text_keeps_a_one_word_haha_tail(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_message_plan_t plan =
-        rf_double_text(&alloc, "nah too windy, just hung out by the water. peaceful");
+        rf_double_text(&alloc, "sounds good, see you saturday at the lake then. haha");
     HU_ASSERT_EQ(plan.segment_count, 2u);
-    HU_ASSERT_STR_EQ(plan.segments[0].text, "nah too windy,");
-    HU_ASSERT_STR_EQ(plan.segments[1].text, "just hung out by the water. peaceful");
+    HU_ASSERT_STR_EQ(plan.segments[0].text, "sounds good, see you saturday at the lake then.");
+    HU_ASSERT_STR_EQ(plan.segments[1].text, "haha");
     hu_choreography_plan_free(&alloc, &plan);
 }
 
@@ -267,54 +276,54 @@ static hu_guard_report_t rf_length_only(void) {
     return r;
 }
 
-/* Thanksgiving, length-only shape: an answer over the cap, a fragment
- * retry. The original is trimmed to a sentence end under the cap. */
-static void guard_repair_fragment_retry_keeps_the_original_trimmed(void) {
-    const char *orig = "Honestly not much of a plan yet. Mom wants everyone at her place by noon. "
-                       "Then we eat way too much and watch football till we pass out on the couch "
-                       "like every year since forever, you know how it goes with my family";
+/* Prod 2026-09-17..30: every final-guard reject was length-only (G5, the
+ * context-dump detector), 692-889 bytes, with a ~29-byte retry. A complete
+ * short retry must win: the dump is never sent, whole or sliced. */
+static void guard_repair_short_clean_retry_beats_a_length_only_dump(void) {
+    static char dump[900];
+    memset(dump, 0, sizeof(dump));
+    while (strlen(dump) < 800)
+        strcat(dump, "Mom wants everyone at her place by noon. ");
     hu_guard_report_t rep = rf_length_only();
     hu_guard_repair_decision_t d =
-        hu_guard_repair_decide(orig, strlen(orig), &rep, S("Wait, did we actually lock"), 80);
-    HU_ASSERT_EQ(d.kept, HU_GUARD_REPAIR_KEPT_TRIMMED);
-    HU_ASSERT_EQ(d.len, strlen("Honestly not much of a plan yet. Mom wants everyone at her place "
-                               "by noon."));
-    HU_ASSERT_STR_EQ(d.reason, "retry_fragment");
-}
-
-static void guard_repair_original_under_the_cap_is_kept_whole(void) {
-    const char *orig = "Thanksgiving's at my mom's, noon. Bring the pie.";
-    hu_guard_report_t rep = rf_length_only();
-    hu_guard_repair_decision_t d =
-        hu_guard_repair_decide(orig, strlen(orig), &rep, S("Wait, did we actually lock"), 900);
-    HU_ASSERT_EQ(d.kept, HU_GUARD_REPAIR_KEPT_ORIGINAL);
-    HU_ASSERT_EQ(d.len, strlen(orig));
-}
-
-/* A complete but collapsed retry (< 40%) of a length-only original: the
- * original (trimmed) wins — the 767 -> 29 pattern. */
-static void guard_repair_collapsed_retry_loses_to_the_original(void) {
-    const char *orig = "Honestly not much of a plan yet. Mom wants everyone at her place by noon. "
-                       "Then we eat way too much and watch football till we pass out.";
-    hu_guard_report_t rep = rf_length_only();
-    hu_guard_repair_decision_t d =
-        hu_guard_repair_decide(orig, strlen(orig), &rep, S("not sure yet lol"), 80);
-    HU_ASSERT_EQ(d.kept, HU_GUARD_REPAIR_KEPT_TRIMMED);
-    HU_ASSERT_STR_EQ(d.reason, "retry_collapsed");
-}
-
-static void guard_repair_good_retry_is_kept(void) {
-    const char *orig = "Honestly not much of a plan yet. Mom wants everyone at her place by noon.";
-    hu_guard_report_t rep = rf_length_only();
-    const char *retry = "mom's at noon, then football and a food coma like always";
-    hu_guard_repair_decision_t d =
-        hu_guard_repair_decide(orig, strlen(orig), &rep, retry, strlen(retry), 80);
+        hu_guard_repair_decide(dump, strlen(dump), &rep, S("moms at noon, then football"), 320);
     HU_ASSERT_EQ(d.kept, HU_GUARD_REPAIR_KEPT_RETRY);
-    HU_ASSERT_EQ(d.len, strlen(retry));
+    HU_ASSERT_EQ(d.len, strlen("moms at noon, then football"));
     HU_ASSERT_STR_EQ(d.reason, "ok");
 }
 
-/* The original leaked (director echo, the 2026-09-30 thanksgiving flags):
+/* Over the cap the original is never sent, even when the retry is cut off:
+ * the retry is cut back to its last complete sentence, else nothing. */
+static void guard_repair_fragment_retry_never_resurrects_a_dump(void) {
+    static char dump[900];
+    memset(dump, 0, sizeof(dump));
+    while (strlen(dump) < 800)
+        strcat(dump, "Mom wants everyone at her place by noon. ");
+    hu_guard_report_t rep = rf_length_only();
+    hu_guard_repair_decision_t d = hu_guard_repair_decide(
+        dump, strlen(dump), &rep, S("Wait, did we actually lock in the"), 320);
+    HU_ASSERT_EQ(d.kept, HU_GUARD_REPAIR_KEPT_NONE);
+    HU_ASSERT_EQ(d.len, 0u);
+    d = hu_guard_repair_decide(dump, strlen(dump), &rep, S("Nah too windy. just"), 320);
+    HU_ASSERT_EQ(d.kept, HU_GUARD_REPAIR_KEPT_RETRY_TRIMMED);
+    HU_ASSERT_EQ(d.len, strlen("Nah too windy."));
+}
+
+/* The original goes out only when the guard has nothing against it: within
+ * the cap, no non-length violation, and the retry is cut off. */
+static void guard_repair_clean_original_within_cap_beats_a_fragment_retry(void) {
+    const char *orig = "Thanksgiving's at my mom's, noon. Bring the pie.";
+    hu_guard_report_t rep = rf_length_only();
+    hu_guard_repair_decision_t d = hu_guard_repair_decide(
+        orig, strlen(orig), &rep, S("Wait, did we actually lock in the"), 320);
+    HU_ASSERT_EQ(d.kept, HU_GUARD_REPAIR_KEPT_ORIGINAL);
+    HU_ASSERT_EQ(d.len, strlen(orig));
+    /* ...but not when the retry is complete. */
+    d = hu_guard_repair_decide(orig, strlen(orig), &rep, S("moms at noon"), 320);
+    HU_ASSERT_EQ(d.kept, HU_GUARD_REPAIR_KEPT_RETRY);
+}
+
+/* The original leaked (director echo — the 2026-09-30 thanksgiving flags):
  * it is never sent, and neither is the fragment. */
 static void guard_repair_leaky_original_never_sends_the_fragment(void) {
     const char *orig = "so whats the plan, admit he hasn't really thought about it yet lol";
@@ -322,46 +331,45 @@ static void guard_repair_leaky_original_never_sends_the_fragment(void) {
     memset(&rep, 0, sizeof(rep));
     rep.detected_director_echo = true;
     rep.max_repetition_run = 2;
-    hu_guard_repair_decision_t d =
-        hu_guard_repair_decide(orig, strlen(orig), &rep, S("Wait, did we actually lock"), 900);
+    hu_guard_repair_decision_t d = hu_guard_repair_decide(
+        orig, strlen(orig), &rep, S("Wait, did we actually lock in the"), SIZE_MAX);
     HU_ASSERT_EQ(d.kept, HU_GUARD_REPAIR_KEPT_NONE);
     HU_ASSERT_EQ(d.len, 0u);
-    /* A fragment retry with a complete first sentence keeps that sentence. */
-    d = hu_guard_repair_decide(orig, strlen(orig), &rep, S("Nah too windy. just"), 900);
-    HU_ASSERT_EQ(d.kept, HU_GUARD_REPAIR_KEPT_RETRY_TRIMMED);
-    HU_ASSERT_EQ(d.len, strlen("Nah too windy."));
     /* A runaway repetition loop is never kept either. */
     memset(&rep, 0, sizeof(rep));
     rep.detected_degenerate_repetition = true;
-    rep.detected_length_anomaly = true;
-    d = hu_guard_repair_decide(orig, strlen(orig), &rep, S("ok"), 900);
-    HU_ASSERT_EQ(d.kept, HU_GUARD_REPAIR_KEPT_RETRY);
+    d = hu_guard_repair_decide(orig, strlen(orig), &rep, S("it was very"), SIZE_MAX);
+    HU_ASSERT_EQ(d.kept, HU_GUARD_REPAIR_KEPT_NONE);
+    /* A failed retry is never covered by the original or a canned line. */
+    d = hu_guard_repair_decide(orig, strlen(orig), &rep, NULL, 0, SIZE_MAX);
+    HU_ASSERT_EQ(d.kept, HU_GUARD_REPAIR_KEPT_NONE);
+    HU_ASSERT_STR_EQ(d.reason, "retry_failed");
 }
 
-static void guard_repair_resolve_swaps_in_the_trimmed_original(void) {
+static void guard_repair_resolve_trims_a_fragment_retry(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    const char *orig = "Honestly not much of a plan yet. Mom wants everyone at her place by noon. "
-                       "Then we eat way too much and watch football till we pass out on the couch "
-                       "like every year since forever, you know how it goes with my family and "
-                       "all their opinions about everything under the sun, which is a lot, and "
-                       "somehow it is still my favorite day of the whole year even with the drive "
-                       "home in the dark and the traffic and the leftovers sliding around the "
-                       "trunk the entire way back up the highway at night in the cold";
     hu_guard_report_t rep = rf_length_only();
     hu_guard_context_t ctx;
     memset(&ctx, 0, sizeof(ctx));
     ctx.recent_avg_len = 28;
     ctx.length_anomaly_mult = HU_GUARD_LENGTH_ANOMALY_MULT_COMPACT;
-    char *retry = hu_strndup(&alloc, S("Wait, did we actually lock"));
+    char *retry = hu_strndup(&alloc, S("Nah too windy. just"));
     size_t retry_len = strlen(retry);
-    hu_guard_repair_kept_t k =
-        hu_guard_repair_resolve(&alloc, NULL, orig, strlen(orig), &rep, &ctx, &retry, &retry_len);
-    HU_ASSERT_EQ(k, HU_GUARD_REPAIR_KEPT_TRIMMED);
-    HU_ASSERT_NOT_NULL(retry);
-    HU_ASSERT(retry_len <= HU_GUARD_LENGTH_ANOMALY_FLOOR);
-    HU_ASSERT_EQ(memcmp(retry, orig, retry_len), 0);
-    HU_ASSERT_EQ(retry[retry_len - 1], '.');
-    HU_ASSERT_FALSE(hu_reply_is_fragment(retry, retry_len));
+    /* A clean original within the cap beats the cut-off retry, and is a copy. */
+    hu_guard_repair_kept_t k = hu_guard_repair_resolve(&alloc, NULL, S("moms at noon. bring pie."),
+                                                       &rep, &ctx, &retry, &retry_len);
+    HU_ASSERT_EQ(k, HU_GUARD_REPAIR_KEPT_ORIGINAL);
+    HU_ASSERT_STR_EQ(retry, "moms at noon. bring pie.");
+    alloc.free(alloc.ctx, retry, retry_len + 1);
+
+    retry = hu_strndup(&alloc, S("Nah too windy. just"));
+    retry_len = strlen(retry);
+    rep.detected_director_echo = true; /* original unsendable */
+    k = hu_guard_repair_resolve(&alloc, NULL, S("moms at noon. bring pie."), &rep, &ctx, &retry,
+                                &retry_len);
+    HU_ASSERT_EQ(k, HU_GUARD_REPAIR_KEPT_RETRY_TRIMMED);
+    HU_ASSERT_STR_EQ(retry, "Nah too windy.");
+    HU_ASSERT_EQ(retry_len, strlen("Nah too windy."));
     alloc.free(alloc.ctx, retry, retry_len + 1);
 }
 
@@ -372,7 +380,7 @@ static void guard_repair_resolve_none_frees_the_retry(void) {
     rep.detected_semantic_leak = true;
     hu_guard_context_t ctx;
     memset(&ctx, 0, sizeof(ctx));
-    char *retry = hu_strndup(&alloc, S("Wait, did we actually lock"));
+    char *retry = hu_strndup(&alloc, S("Wait, did we actually lock in the"));
     size_t retry_len = strlen(retry);
     hu_guard_repair_kept_t k =
         hu_guard_repair_resolve(&alloc, NULL, S("leaky text"), &rep, &ctx, &retry, &retry_len);
@@ -381,18 +389,31 @@ static void guard_repair_resolve_none_frees_the_retry(void) {
     HU_ASSERT_EQ(retry_len, 0u);
 }
 
-/* ── (c) G5 against recent_avg for questions / requests ───────────────── */
+/* Validator-chain path (no report/ctx): the original is never kept. */
+static void guard_repair_resolve_without_report_never_keeps_the_original(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    char *retry = hu_strndup(&alloc, S("Wait, did we actually lock in the"));
+    size_t retry_len = strlen(retry);
+    hu_guard_repair_kept_t k =
+        hu_guard_repair_resolve(&alloc, NULL, S("fine text."), NULL, NULL, &retry, &retry_len);
+    HU_ASSERT_EQ(k, HU_GUARD_REPAIR_KEPT_NONE);
+    HU_ASSERT_NULL(retry);
+}
+
+/* ── (c) G5 against recent_avg for questions ─────────────────────────── */
 
 static void inbound_ask_detector(void) {
     HU_ASSERT_TRUE(hu_guard_inbound_is_ask(
         S("so whats the plan for thanksgiving this year, walk me through it")));
     HU_ASSERT_TRUE(hu_guard_inbound_is_ask(S("did you end up renting that kayak")));
-    HU_ASSERT_TRUE(hu_guard_inbound_is_ask(S("can you send me the address")));
-    HU_ASSERT_TRUE(hu_guard_inbound_is_ask(S("tell me about the trip")));
+    HU_ASSERT_TRUE(hu_guard_inbound_is_ask(S("ok can you send me the address")));
     HU_ASSERT_TRUE(hu_guard_inbound_is_ask(S("you around?")));
+    HU_ASSERT_TRUE(hu_guard_inbound_is_ask(S("lol nice. how was the drive")));
+    HU_ASSERT_FALSE(hu_guard_inbound_is_ask(S("have fun tonight")));
     HU_ASSERT_FALSE(hu_guard_inbound_is_ask(S("lol nice")));
     HU_ASSERT_FALSE(hu_guard_inbound_is_ask(S("i know what you mean")));
     HU_ASSERT_FALSE(hu_guard_inbound_is_ask(S("ok sounds good")));
+    HU_ASSERT_FALSE(hu_guard_inbound_is_ask(S("tell me about it")));
     HU_ASSERT_FALSE(hu_guard_inbound_is_ask(NULL, 0));
 }
 
@@ -420,30 +441,32 @@ static void rf_fill_answer(char *buf, size_t want) {
     buf[i] = '\0';
 }
 
-static void guard_length_does_not_reject_an_answer_on_recent_avg(void) {
+/* An answer to a question is judged against how long the owner writes to
+ * this contact (measured p90), not just the last few replies. No p90, or not
+ * an ask: today's rule exactly. */
+static void guard_length_judges_an_answer_against_the_contact_p90(void) {
     static char answer[1200];
     rf_fill_answer(answer, 500);
     size_t alen = strlen(answer);
-    HU_ASSERT(alen > HU_GUARD_LENGTH_ANOMALY_FLOOR && alen < HU_GUARD_LENGTH_ASK_CEILING);
     hu_guard_context_t ctx;
     memset(&ctx, 0, sizeof(ctx));
     ctx.recent_avg_len = 28; /* the thanksgiving conversation's average */
     ctx.length_anomaly_mult = HU_GUARD_LENGTH_ANOMALY_MULT_COMPACT;
-    /* Not an ask: judged against recent_avg x 6 = 168 -> REJECT (today's behaviour). */
-    HU_ASSERT_EQ(rf_guard(answer, alen, &ctx), HU_GUARD_REJECT);
+    ctx.contact_reply_p90 = 120; /* Seth's long replies to this contact */
+    /* Not an ask: max(320, 28 x 6) = 320 -> REJECT (today's behaviour). */
     HU_ASSERT_EQ(hu_guard_length_cap(&ctx), (size_t)HU_GUARD_LENGTH_ANOMALY_FLOOR);
-    /* An ask: the relative cap rises to the ask ceiling -> OK. */
+    HU_ASSERT_EQ(rf_guard(answer, alen, &ctx), HU_GUARD_REJECT);
+    /* An ask: 120 x 6 = 720 -> OK. */
     ctx.inbound_is_ask = true;
-    HU_ASSERT_EQ(hu_guard_length_cap(&ctx), (size_t)HU_GUARD_LENGTH_ASK_CEILING);
+    HU_ASSERT_EQ(hu_guard_length_cap(&ctx), (size_t)720);
     HU_ASSERT_EQ(rf_guard(answer, alen, &ctx), HU_GUARD_OK);
-    /* Past the ceiling a dump still trips G5, ask or not (2026-05-12: 979). */
+    /* Past the contact's own long-reply scale a dump still trips G5. */
     rf_fill_answer(answer, 1000);
     HU_ASSERT_EQ(rf_guard(answer, strlen(answer), &ctx), HU_GUARD_REJECT);
-    /* A learned per-contact baseline is raised the same way. */
-    ctx.learned_avg_message_length = 40;
-    rf_fill_answer(answer, 500);
-    HU_ASSERT_EQ(rf_guard(answer, strlen(answer), &ctx), HU_GUARD_OK);
-    /* No baseline at all: no length check (unchanged). */
+    /* An ask with no measured p90: today's rule. */
+    ctx.contact_reply_p90 = 0;
+    HU_ASSERT_EQ(hu_guard_length_cap(&ctx), (size_t)HU_GUARD_LENGTH_ANOMALY_FLOOR);
+    /* No rolling average at all: no length check (unchanged). */
     memset(&ctx, 0, sizeof(ctx));
     HU_ASSERT_EQ(hu_guard_length_cap(&ctx), (size_t)SIZE_MAX);
 }
@@ -457,18 +480,18 @@ void run_reply_fragment_tests(void) {
     HU_RUN_TEST(fragment_drop_dangling_tail_only_after_a_break);
     HU_RUN_TEST(final_check_drops_a_lone_dangling_word_and_counts);
     HU_RUN_TEST(final_check_leaves_well_formed_replies_byte_identical);
-    HU_RUN_TEST(cut_is_clean_rejects_dangling_left_and_one_word_tail);
-    HU_RUN_TEST(double_text_never_leaves_a_one_word_tail);
+    HU_RUN_TEST(cut_is_clean_rejects_a_mid_clause_left_only);
+    HU_RUN_TEST(double_text_keeps_a_one_word_haha_tail);
     HU_RUN_TEST(long_split_prefers_a_conjunction_over_a_dangling_space);
     HU_RUN_TEST(long_split_space_fallback_skips_dangling_words);
     HU_RUN_TEST(splitters_leave_well_formed_replies_byte_identical);
-    HU_RUN_TEST(guard_repair_fragment_retry_keeps_the_original_trimmed);
-    HU_RUN_TEST(guard_repair_original_under_the_cap_is_kept_whole);
-    HU_RUN_TEST(guard_repair_collapsed_retry_loses_to_the_original);
-    HU_RUN_TEST(guard_repair_good_retry_is_kept);
+    HU_RUN_TEST(guard_repair_short_clean_retry_beats_a_length_only_dump);
+    HU_RUN_TEST(guard_repair_fragment_retry_never_resurrects_a_dump);
+    HU_RUN_TEST(guard_repair_clean_original_within_cap_beats_a_fragment_retry);
     HU_RUN_TEST(guard_repair_leaky_original_never_sends_the_fragment);
-    HU_RUN_TEST(guard_repair_resolve_swaps_in_the_trimmed_original);
+    HU_RUN_TEST(guard_repair_resolve_trims_a_fragment_retry);
     HU_RUN_TEST(guard_repair_resolve_none_frees_the_retry);
+    HU_RUN_TEST(guard_repair_resolve_without_report_never_keeps_the_original);
     HU_RUN_TEST(inbound_ask_detector);
-    HU_RUN_TEST(guard_length_does_not_reject_an_answer_on_recent_avg);
+    HU_RUN_TEST(guard_length_judges_an_answer_against_the_contact_p90);
 }
