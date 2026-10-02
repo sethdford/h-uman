@@ -786,6 +786,7 @@ set(HU_CORE_SOURCES
     src/agent/turn/turn_tail.c
     src/agent/turn/turn_plan.c
     src/agent/turn/reask.c
+    src/agent/turn/length_policy.c
     src/agent/best_of_n.c
     src/agent/humanness.c
     src/agent/context.c
@@ -1288,6 +1289,7 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_housekeeping.c
     src/daemon/daemon_promise_keeper.c
     src/daemon/daemon_insight_overuse.c
+    src/daemon/daemon_proposer_context.c
     src/daemon/cron.c
     src/daemon/crontab.c
     src/gateway/webhook.c
@@ -3318,7 +3320,9 @@ if(HU_ENABLE_TUI)
     endif()
 endif()
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
-    target_compile_options(human_core_test PRIVATE -ffunction-sections -fdata-sections -Wall -Wextra -Wpedantic -Wshadow -Wformat-security)
+    # -Werror like human_core: without it, warnings in test-only builds of src/
+    # (and in human_devlib, which inherits these options) piled up unseen.
+    target_compile_options(human_core_test PRIVATE -ffunction-sections -fdata-sections -Wall -Wextra -Wpedantic -Wshadow -Wformat-security -Werror ${HU_GCC_WERROR_RELAX})
 endif()
 if(HU_ENABLE_ASAN)
     target_compile_options(human_core_test PRIVATE -fsanitize=address -fno-omit-frame-pointer)
@@ -3623,6 +3627,7 @@ set(HU_TEST_SOURCES
     tests/test_reply_delay_model.c
     tests/test_daemon_promise_keeper.c
     tests/test_daemon_insight_overuse.c
+    tests/test_daemon_proposer_context.c
     tests/test_daemon_config_reload.c
     tests/test_daemon_identity_graph.c
     tests/test_daemon_name_catch.c
@@ -3895,6 +3900,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_agent.c
     tests/test_lean_head.c
     tests/test_reply_prompt.c
+    tests/test_length_policy.c
     tests/test_agent_turn_state.c
     tests/test_agent_turn_transport.c
     tests/turn_recording_provider.c
@@ -4199,6 +4205,7 @@ if(HU_ENABLE_SQLITE)
 endif()
 
 list(APPEND HU_TEST_SOURCES tests/test_curiosity_gaps.c)
+list(APPEND HU_TEST_SOURCES tests/test_agent_recall_provider.c)
 list(APPEND HU_TEST_SOURCES tests/test_memory_loader_scope.c)
 
 # Sprint 60 follow-up — crosstalk SQLite lookup. Test seeds the
@@ -4792,7 +4799,7 @@ endif()
 # Compiler warnings
 target_compile_options(human_core PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wformat-security -Werror ${HU_GCC_WERROR_RELAX})
 target_compile_options(human PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wformat-security -Werror ${HU_GCC_WERROR_RELAX})
-target_compile_options(human_tests PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wformat-security)
+target_compile_options(human_tests PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wformat-security -Werror ${HU_GCC_WERROR_RELAX})
 
 # Per-file warning exceptions.
 #

@@ -1859,7 +1859,9 @@ size_t hu_personal_model_describe_recently_completed(const hu_personal_model_t *
             continue;
         if (!hu_personal_goal_is_recently_completed(&model->goals[i], now))
             continue;
-        const char *sep = any ? ", " : "";
+        /* Always point at ", " and copy 0 or 2 bytes: a pointer that may be the
+         * 1-byte "" made GCC's -Warray-bounds see a 2-byte read past it. */
+        const char *sep = ", ";
         size_t sep_len = any ? 2 : 0;
         size_t desc_len = strlen(model->goals[i].description);
         /* Need: written + sep_len + desc_len + 1 (NUL) <= cap.

@@ -234,7 +234,9 @@ static void test_hmac_sha256_rfc4231_2(void) {
     uint8_t msg[] = "what do ya want for nothing?";
     uint8_t out[32];
     hu_hmac_sha256(key, key_len, msg, 28, out);
-    const char *exp = "5bdcc146bf60" "754e6a0424260" "89575c75a003f089d2739839dec58b964ec3843";
+    const char *exp = "5bdcc146bf60"
+                      "754e6a0424260"
+                      "89575c75a003f089d2739839dec58b964ec3843";
     HU_ASSERT_TRUE(hex_eq(out, exp, 32));
 }
 
@@ -252,7 +254,7 @@ static void test_chacha20_different_counters(void) {
 }
 
 static void test_chacha20_different_nonce(void) {
-    uint8_t key[32];
+    uint8_t key[32] = {0}; /* was uninitialized: encrypting with an indeterminate key is UB */
     uint8_t nonce0[12] = {0}, nonce1[12] = {0};
     nonce1[0] = 1;
     uint8_t in[] = "plain";

@@ -2235,10 +2235,19 @@ hu_error_t hu_agent_bind_sqlite_graph(hu_agent_t *agent, struct hu_graph *graph,
 }
 #endif
 
+hu_consolidation_config_t hu_agent_consolidation_config(const struct hu_config *config) {
+    hu_consolidation_config_t c = HU_CONSOLIDATION_DEFAULTS;
+    if (config) {
+        c.decay_days = config->behavior.decay_days;
+        c.dedup_threshold = config->behavior.dedup_threshold;
+    }
+    return c;
+}
+
 hu_error_t hu_agent_consolidate_memory(hu_agent_t *agent) {
     if (!agent || !agent->memory || !agent->memory->vtable)
         return HU_ERR_INVALID_ARGUMENT;
-    hu_consolidation_config_t config = HU_CONSOLIDATION_DEFAULTS;
+    hu_consolidation_config_t config = hu_agent_consolidation_config(agent->config);
     hu_error_t err = hu_memory_consolidate(agent->alloc, agent->memory, &config);
 
     /* After consolidation, demote stale recall-tier entries to archival.
@@ -3033,6 +3042,12 @@ size_t hu_agent_internal_fit_history(const hu_agent_t *agent, hu_chat_message_t 
 hu_provider_t *hu_agent_internal_recall_provider(hu_agent_t *agent, const char *msg,
                                                  size_t msg_len) {
     if (!agent || !agent->provider.vtable || !hu_semantic_recall_register_admits(msg, msg_len))
+        return NULL;
+    /* HU_RECALL_PLANNER_LLM (default live = today's routing): off/shadow send
+     * the planner down its local heuristic path. The LLM plan costs ~5.5 s per
+     * message over 12 words (2026-10-01 trace); the gate exists so an A/B can
+     * show whether that buys anything. */
+    if (hu_gate_mode_from_env("HU_RECALL_PLANNER_LLM", HU_GATE_LIVE) != HU_GATE_LIVE)
         return NULL;
     return &agent->provider;
 }
