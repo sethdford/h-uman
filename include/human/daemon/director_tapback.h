@@ -19,6 +19,9 @@
  *   tapback_disengage_rate   after his tapback-only replies, the share where
  *                            they went quiet or pushed for a real answer     OPTIONAL
  *   tapback_disengage_n      how many replies that rate is over              OPTIONAL
+ *   voice_memo_rate / gif_rate / share_rate
+ *                            how often his replies are a voice memo, a GIF,
+ *                            or carry a shared song/video                    OPTIONAL
  *
  * The OPTIONAL fields are not in v1 yet; absent means no data.
  *
@@ -59,6 +62,7 @@ typedef enum {
 const char *hu_tapback_src_name(hu_tapback_src_t src);
 
 #define HU_TAPBACK_KINDS 6
+#define HU_FORM_KINDS    3 /* voice_memo_rate, gif_rate, share_rate */
 extern const char *const hu_tapback_kind_names[HU_TAPBACK_KINDS];
 
 /* Minimum samples for a cell, the learner's own thresholds
@@ -88,6 +92,9 @@ typedef struct {
     uint32_t disengage_n;
     bool latency_found;
     int32_t latency_s;
+    /* voice memo, GIF, share; bit f of form_found set when form_rates[f] was read */
+    unsigned form_found;
+    float form_rates[HU_FORM_KINDS];
 } hu_tapback_profile_t;
 
 /* Pure: read the evidence for (contact, shape) out of a parsed profile.

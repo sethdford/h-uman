@@ -66,8 +66,17 @@ lists.
      first, so the new message and the `This turn:` line always fit. A test
      pins this.
 4. **Prompt size, measured.**
-   - The system prompt is 1,372 bytes, or 1,822 bytes with the
+   - The system prompt is 1,372 bytes, or 1,811 bytes with the
      `HU_DIRECTOR_FORMS` block.
+   - The forms block lists the vocabulary plus one principle: use each form
+     "as Seth would with this person". It has no who-gets-a-GIF list, no
+     sad-news rule and no daily cap.
+     - The model gets the contact's relationship, plus Seth's learned
+       `voice_memo_rate`, `gif_rate` and `share_rate` when the profile has
+       them (optional; absent fields are omitted).
+     - The static safety limits stay downstream in
+       `src/daemon/daemon_expressive.c` (`hu_expressive_*_allowed`) and are
+       not restated in the prompt.
    - The per-turn context is capped at 2,560 bytes.
    - The worst case is therefore about **4.4 KB**.
 
@@ -144,29 +153,40 @@ How the cutoff behaves:
 
   - A test holds the provider for 3 s, and decide still returns v1 in under
     1 s.
-  - **Privacy:** until #587 moves the director to the local model, shadow runs
-    v2 only when the director's endpoint is **loopback**.
-    - Otherwise it logs `[director_v2 shadow] v1_action=… v1_brevity=…
-      v2=skipped_nonlocal`, and the thread never goes to a cloud model for a
-      thrown-away result.
-    - The endpoint is the agent's default provider under #587, or the
-      director provider's own config entry today. An unknown endpoint counts
-      as not local.
-    - Today's director is Gemini, so shadow logs `skipped_nonlocal` until #587
-      lands.
+  - **Its own provider.** The worker never calls the shared director provider
+    (`g_classify_provider`) or `agent->provider`. Both may sit behind the
+    non-reentrant `reliable` wrapper and a Gemini fallback.
+    - It builds a plain compatible provider on the primary's endpoint, with no
+      wrapper and no fallback (`hu_director_v2_worker_provider_create`). The
+      endpoint is `default_provider`, or `reliability.primary_provider` when
+      that is `reliable`, which is `mlx_local` in prod.
+    - It is created lazily, rebuilt if the endpoint moves, and used only by the
+      worker. `hu_director_v2_shutdown` frees it when the daemon loop ends.
+    - A test pins that the shared and agent providers see zero calls.
+  - **Privacy.** Shadow runs v2 only when that endpoint is **loopback**,
+    decided by real host parsing in `hu_compatible_url_is_loopback`.
+    - The scheme is required, and userinfo and port are stripped.
+    - The host must be exactly 127/8 (strict octets), `localhost` or `[::1]`.
+    - So `http://127.0.0.1:8080@evil.com/` is not local.
+    - Otherwise the turn logs `v2=skipped_nonlocal` and the thread goes
+      nowhere.
+  - **Shutdown.** The daemon's teardown calls
+    `hu_director_v2_shutdown(5000)`. It refuses new jobs and waits for the
+    running worker before its inputs go away. If the worker outlives the wait,
+    its provider is kept rather than freed under it.
 - **live:** v2 decides inline, replacing v1's call, and falls back to v1 if v2
   fails. The log line is
   `[director_v2 live] v2_action=… v2_brevity=… tapback_overridden=…
   tapback_src=… shape=… v2_bytes=… fallback_v1=0|1`.
 
 **Cost:** SHADOW adds no reply latency, only background director calls on the
-local model. LIVE costs one director call, as today, plus a chat.db read and a
+local primary model (`:8741` in prod), one at a time. LIVE costs one director call, as today, plus a chat.db read and a
 cached profile lookup.
 
 ## Promotion: SHADOW → LIVE
 
-Prerequisite: #587 is merged, so shadow lines say `v2=ran`. Run SHADOW for at
-least 7 days, then measure:
+Prerequisite: shadow lines say `v2=ran`. This needs a loopback primary, as in
+prod. Run SHADOW for at least 7 days, then measure:
 
 **(a) Shadow log.**
 

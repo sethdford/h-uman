@@ -32,6 +32,7 @@ static const char k_profile[] =
     "\"global\":{\"n\":900,\"latency_p50_s\":300,\"tapback_only_rate\":0.35},"
     "\"contacts\":{"
     "\"" MOM "\":{\"overall\":{\"n\":132,\"latency_p50_s\":240,\"tapback_only_rate\":0.30,"
+    "\"voice_memo_rate\":0.12,\"gif_rate\":0.0,"
     "\"tapback_disengage_rate\":0.4,\"tapback_disengage_n\":10},"
     "\"buckets\":{"
     "\"shape:question\":{\"n\":40,\"latency_p50_s\":45,\"tapback_only_rate\":0.05},"
@@ -285,7 +286,9 @@ static void tapback_facts_state_his_numbers(void) {
                                 "time (n=80)");
     HU_ASSERT_STR_CONTAINS(buf, "his reactions: heart 70%, haha 30%");
     HU_ASSERT_STR_NOT_CONTAINS(buf, "bogus"); /* only known reaction names reach the prompt */
-    HU_ASSERT_STR_CONTAINS(buf, "pushed for a real answer 40% of the time (n=10).");
+    HU_ASSERT_STR_CONTAINS(buf, "pushed for a real answer 40% of the time (n=10);");
+    HU_ASSERT_STR_CONTAINS(buf, "of his replies to them: a voice memo 12%, a GIF 0%.");
+    HU_ASSERT_STR_NOT_CONTAINS(buf, "shared song"); /* absent field: omitted */
     HU_ASSERT_STR_NOT_CONTAINS(buf, MOM);
     /* The question bucket has its own delay. */
     tp = profile_for(k_profile, MOM, HU_DIR_SHAPE_QUESTION);

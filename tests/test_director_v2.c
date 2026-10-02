@@ -9,6 +9,7 @@
 #include "human/daemon/director.h"
 #include "human/daemon/director_v2.h"
 #include "human/persona.h"
+#include "human/providers/compatible.h"
 #include "test_framework.h"
 
 #include <stdatomic.h>
@@ -203,8 +204,10 @@ typedef struct {
     const char *reply;
     bool fail;
     atomic_int calls;
-    atomic_bool block;   /* hold the call until released (or 3 s) */
-    atomic_bool entered; /* the call has started */
+    atomic_bool block;    /* hold the call until released (or 3 s) */
+    atomic_bool entered;  /* the call has started */
+    atomic_bool finished; /* the call has returned */
+    int hold_ms;          /* with block: hold this long (0 = up to 3 s) */
     size_t sys_len, user_len;
     char user[HU_DIRECTOR_V2_USER_CAP];
 } mock_ctx_t;
@@ -231,13 +234,15 @@ static hu_error_t mock_chat_with_system(void *ctx, hu_allocator_t *alloc, const 
     mock_ctx_t *m = (mock_ctx_t *)ctx;
     atomic_fetch_add(&m->calls, 1);
     atomic_store(&m->entered, true);
-    for (int waited = 0; atomic_load(&m->block) && waited < 3000; waited += 5)
+    int hold = m->hold_ms > 0 ? m->hold_ms : 3000;
+    for (int waited = 0; atomic_load(&m->block) && waited < hold; waited += 5)
         sleep_ms(5);
     m->sys_len = sys_len;
     m->user_len = msg_len;
     size_t cp = msg_len < sizeof(m->user) - 1 ? msg_len : sizeof(m->user) - 1;
     memcpy(m->user, msg, cp);
     m->user[cp] = '\0';
+    atomic_store(&m->finished, true);
     if (m->fail)
         return HU_ERR_INTERNAL;
     *out = hu_strndup(alloc, m->reply, strlen(m->reply));
@@ -253,7 +258,7 @@ static const char *mock_get_name(void *ctx) {
 static const hu_provider_vtable_t mock_vtable = {.chat_with_system = mock_chat_with_system,
                                                  .get_name = mock_get_name};
 
-/* An agent whose config puts the director's provider ("mockdir") on `url`. */
+/* An agent whose primary provider ("mockdir") is on `url`. */
 static hu_agent_t g_agent;
 static hu_config_t g_cfg;
 static hu_provider_entry_t g_entry;
@@ -266,6 +271,7 @@ static hu_agent_t *agent_with_director_at(const char *url) {
     g_entry.base_url = (char *)url;
     g_cfg.providers = &g_entry;
     g_cfg.providers_len = 1;
+    g_cfg.default_provider = "mockdir";
     g_agent.config = &g_cfg;
     return &g_agent;
 }
@@ -335,12 +341,15 @@ static saved_provider_t install_mock(mock_ctx_t *m) {
     g_classify_provider.ctx = m;
     g_classify_provider.vtable = &mock_vtable;
     g_classify_provider_ok = true;
+    hu_provider_t w = {.ctx = m, .vtable = &mock_vtable}; /* the shadow worker's own */
+    hu_director_v2_set_worker_provider(&w);
     return s;
 }
 
 static void restore_provider(saved_provider_t s) {
     g_classify_provider = s.prov;
     g_classify_provider_ok = s.ok;
+    hu_director_v2_set_worker_provider(NULL);
     unsetenv("HU_DIRECTOR_V2");
 }
 
@@ -445,21 +454,144 @@ static void director_v2_shadow_skips_a_nonlocal_director(void) {
     HU_ASSERT_EQ(atomic_load(&m.calls), 0);
 }
 
-static void director_v2_endpoint_follows_the_provider_in_use(void) {
-    mock_ctx_t m = {0};
-    hu_provider_t own = {.ctx = &m, .vtable = &mock_vtable};
-    hu_agent_t *ag = agent_with_director_at("http://127.0.0.1:8741");
-    HU_ASSERT_STR_EQ(hu_director_v2_endpoint(ag, &own), "http://127.0.0.1:8741");
-    HU_ASSERT_TRUE(hu_director_v2_endpoint_is_local(ag, &own));
-    /* #587 shape: the director borrows the agent's provider, so the
-     * endpoint is the default provider's. */
-    ag->provider = own;
-    g_cfg.default_provider = "other";
-    HU_ASSERT_NULL(hu_director_v2_endpoint(ag, &own));
-    HU_ASSERT_FALSE(hu_director_v2_endpoint_is_local(ag, &own));
-    g_cfg.default_provider = "mockdir";
-    HU_ASSERT_TRUE(hu_director_v2_endpoint_is_local(ag, &own));
-    HU_ASSERT_FALSE(hu_director_v2_endpoint_is_local(NULL, &own));
+/* Real host parsing: a prefix match let "http://127.0.0.1:8080@evil.com/"
+ * through, and its host is evil.com. */
+static void compatible_url_is_loopback_parses_the_host(void) {
+    static const char *const local[] = {
+        "http://127.0.0.1:8741/v1", "http://localhost",     "https://localhost:443/x",
+        "HTTP://LOCALHOST/",        "http://127.255.0.9:1", "http://127.0.0.1",
+        "http://[::1]:8741/v1",     "http://[::1]",         "http://user@127.0.0.1/v1",
+    };
+    static const char *const remote[] = {
+        "http://127.0.0.1:8080@evil.com/",
+        "http://localhost@evil.com",
+        "http://127.0.0.1.evil.com/",
+        "http://localhost.evil.com",
+        "http://127.0.0.256/",
+        "http://127.0.0/",
+        "http://127.0.0.1.1/",
+        "http://1270.0.0.1/",
+        "http://0127.0.0.1/",
+        "127.0.0.1:8741",
+        "ftp://127.0.0.1/",
+        "http://[::1].evil.com/",
+        "http://[::2]/",
+        "http://127.0.0.1:80x/",
+        "http://127.0.0.1:/",
+        "https://aiplatform.googleapis.com/v1",
+        "http://evil.com/?q=127.0.0.1",
+        "http://evil.com#@127.0.0.1",
+        "http://128.0.0.1/",
+        "",
+    };
+    for (size_t i = 0; i < sizeof(local) / sizeof(local[0]); i++)
+        HU_ASSERT_TRUE(hu_compatible_url_is_loopback(local[i], strlen(local[i])));
+    for (size_t i = 0; i < sizeof(remote) / sizeof(remote[0]); i++)
+        HU_ASSERT_FALSE(hu_compatible_url_is_loopback(remote[i], strlen(remote[i])));
+    HU_ASSERT_FALSE(hu_compatible_url_is_loopback(NULL, 4));
+}
+
+/* The worker's provider is its own: a plain compatible provider on the
+ * primary's loopback endpoint, never the shared (reliable, fallback) one. */
+static void director_v2_worker_provider_is_plain_and_local_only(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_provider_t p;
+    memset(&p, 0, sizeof(p));
+    HU_ASSERT_EQ((int)hu_director_v2_worker_provider_create(&alloc, "http://127.0.0.1:8741/v1", &p),
+                 (int)HU_OK);
+    HU_ASSERT_NOT_NULL(p.vtable);
+    HU_ASSERT_STR_EQ(p.vtable->get_name(p.ctx), "compatible");
+    p.vtable->deinit(p.ctx, &alloc);
+    hu_provider_t q;
+    memset(&q, 0, sizeof(q));
+    HU_ASSERT_EQ((int)hu_director_v2_worker_provider_create(
+                     &alloc, "https://aiplatform.googleapis.com/v1", &q),
+                 (int)HU_ERR_NOT_SUPPORTED);
+    HU_ASSERT_NULL(q.vtable);
+    HU_ASSERT_EQ(
+        (int)hu_director_v2_worker_provider_create(&alloc, "http://127.0.0.1:1@evil.com", &q),
+        (int)HU_ERR_NOT_SUPPORTED);
+}
+
+static void director_v2_primary_endpoint_follows_the_config(void) {
+    hu_agent_t *ag = agent_with_director_at("http://127.0.0.1:8741/v1");
+    HU_ASSERT_STR_EQ(hu_director_v2_primary_endpoint(ag), "http://127.0.0.1:8741/v1");
+    /* "reliable" wraps the primary named in reliability.primary_provider. */
+    g_cfg.default_provider = "reliable";
+    g_cfg.reliability.primary_provider = "mockdir";
+    HU_ASSERT_STR_EQ(hu_director_v2_primary_endpoint(ag), "http://127.0.0.1:8741/v1");
+    g_cfg.reliability.primary_provider = "other";
+    HU_ASSERT_NULL(hu_director_v2_primary_endpoint(ag));
+    HU_ASSERT_NULL(hu_director_v2_primary_endpoint(NULL));
+}
+
+/* The shadow worker never calls the shared director provider or the agent's
+ * provider, whatever they are: only its own. */
+static void director_v2_shadow_worker_uses_only_its_own_provider(void) {
+    mock_ctx_t shared = {.reply = "action:text|direction:x"};
+    mock_ctx_t agents = {.reply = "action:text|direction:x"};
+    mock_ctx_t own = {.reply = "action:text|direction:engage fully"};
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_history_entry_t e[4];
+    fill_entries(e, 4, 12);
+    saved_provider_t s = install_mock(&shared);
+    hu_provider_t w = {.ctx = &own, .vtable = &mock_vtable};
+    hu_director_v2_set_worker_provider(&w);
+    hu_agent_t *ag = agent_with_director_at("http://127.0.0.1:8741/v1");
+    ag->provider.ctx = &agents;
+    ag->provider.vtable = &mock_vtable;
+    setenv("HU_DIRECTOR_V2", "shadow", 1);
+    hu_director_result_t got;
+    bool ok = hu_director_v2_decide(&alloc, ag, NULL, S("+15550000000"), S("ok"), e, 4, NULL, &got);
+    bool drained = hu_director_v2_shadow_drain(5000);
+    restore_provider(s);
+    HU_ASSERT_TRUE(ok);
+    HU_ASSERT_TRUE(drained);
+    HU_ASSERT_EQ(atomic_load(&own.calls), 1);
+    HU_ASSERT_EQ(atomic_load(&shared.calls), 0);
+    HU_ASSERT_EQ(atomic_load(&agents.calls), 0);
+}
+
+/* Shutdown waits for a running worker before its inputs go away, refuses new
+ * jobs afterwards, and reports a worker it could not wait out. */
+static void director_v2_shutdown_waits_for_the_worker(void) {
+    mock_ctx_t m = {.reply = "action:text|direction:engage fully", .hold_ms = 300};
+    atomic_store(&m.block, true);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_history_entry_t e[4];
+    fill_entries(e, 4, 12);
+    saved_provider_t s = install_mock(&m);
+    setenv("HU_DIRECTOR_V2", "shadow", 1);
+    hu_agent_t *ag = agent_with_director_at("http://127.0.0.1:8741/v1");
+    hu_director_result_t got;
+    (void)hu_director_v2_decide(&alloc, ag, NULL, S("+15550000000"), S("ok"), e, 4, NULL, &got);
+    bool finished_before = atomic_load(&m.finished);
+    bool drained = hu_director_v2_shutdown(5000);
+    bool finished_after = atomic_load(&m.finished);
+    /* Closed: a new turn runs v1 only. */
+    (void)hu_director_v2_decide(&alloc, ag, NULL, S("+15550000000"), S("ok"), e, 4, NULL, &got);
+    bool idle = hu_director_v2_shadow_drain(1000);
+    int calls = atomic_load(&m.calls);
+    /* A worker that outlives the timeout is reported, not abandoned silently. */
+    mock_ctx_t stuck = {.reply = "action:text|direction:x", .hold_ms = 3000};
+    atomic_store(&stuck.block, true);
+    hu_provider_t sw = {.ctx = &stuck, .vtable = &mock_vtable};
+    hu_director_v2_set_worker_provider(&sw); /* reopens (test seam) */
+    (void)hu_director_v2_decide(&alloc, ag, NULL, S("+15550000000"), S("ok"), e, 4, NULL, &got);
+    for (int waited = 0; !atomic_load(&stuck.entered) && waited < 3000; waited += 5)
+        sleep_ms(5);
+    bool timed_out = !hu_director_v2_shutdown(50);
+    atomic_store(&stuck.block, false);
+    bool drained2 = hu_director_v2_shadow_drain(5000);
+    restore_provider(s);
+    HU_ASSERT_FALSE(finished_before);
+    HU_ASSERT_TRUE(drained);
+    HU_ASSERT_TRUE(finished_after);
+    HU_ASSERT_TRUE(idle);
+    HU_ASSERT_EQ(calls, 1); /* the post-shutdown turn started no worker */
+    HU_ASSERT_TRUE(atomic_load(&stuck.entered));
+    HU_ASSERT_TRUE(timed_out);
+    HU_ASSERT_TRUE(drained2);
 }
 
 static void director_v2_live_uses_v2_decision(void) {
@@ -499,7 +631,11 @@ void run_director_v2_tests(void) {
     HU_RUN_TEST(director_v2_shadow_computes_v2_but_keeps_v1_decision);
     HU_RUN_TEST(director_v2_shadow_adds_no_latency_to_the_decision);
     HU_RUN_TEST(director_v2_shadow_skips_a_nonlocal_director);
-    HU_RUN_TEST(director_v2_endpoint_follows_the_provider_in_use);
+    HU_RUN_TEST(compatible_url_is_loopback_parses_the_host);
+    HU_RUN_TEST(director_v2_worker_provider_is_plain_and_local_only);
+    HU_RUN_TEST(director_v2_primary_endpoint_follows_the_config);
+    HU_RUN_TEST(director_v2_shadow_worker_uses_only_its_own_provider);
+    HU_RUN_TEST(director_v2_shutdown_waits_for_the_worker);
     HU_RUN_TEST(director_v2_live_uses_v2_decision);
     HU_RUN_TEST(director_v2_live_falls_back_to_v1_when_v2_fails);
 }

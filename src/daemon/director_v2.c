@@ -110,15 +110,19 @@ static const char k_v2_system[] =
     "plans or outcomes; if he doesn't know how something went, he says so.\n"
     "- If they test whether he's real, never fabricate a memory.";
 
-/* Expressive forms (HU_DIRECTOR_FORMS live): v1's vocabulary without its
- * length cues. */
+/* Expressive forms (HU_DIRECTOR_FORMS live): the vocabulary and one
+ * principle. Who may get a GIF, sad news and pacing are not restated here:
+ * the Contact line and Seth's learned form rates ("How Seth replies") inform
+ * the model, and the downstream safety limits (hu_expressive_effect_allowed,
+ * _gif_allowed, _share_allowed in src/daemon/daemon_expressive.c) still
+ * block what must never be sent. */
 static const char k_v2_forms[] =
-    "\n\nOther forms, rare, and only what the 'This turn:' line allows: action:voice (a voice "
-    "memo: they sent one, or a heartfelt moment); action:gif|gif:<search words> (playful, close "
-    "friends or siblings only); effect:<impact|loud|gentle|invisibleink|confetti|lasers> on a "
-    "text (a genuine big moment, never sad news); reply_to:true (answering an older message); "
-    "action:share|share:<song|video|short|saved>|q:<words> (at most once a day, never on sad "
-    "news).";
+    "\n\nOther forms, only what the 'This turn:' line allows: action:voice (a voice memo); "
+    "action:gif|gif:<search words>; effect:<impact|loud|gentle|invisibleink|confetti|lasers> "
+    "on a text; reply_to:true (answering an older message); "
+    "action:share|share:<song|video|short|saved>|q:<words>. Use them as Seth would with this "
+    "person: the Contact line says who they are, and the 'How Seth replies' line, when it "
+    "has them, says how often he sends each.";
 
 size_t hu_director_v2_system_prompt(char *buf, size_t cap) {
     if (!buf || cap == 0)
@@ -305,23 +309,25 @@ static int brevity_bit(const hu_director_result_t *r, bool ok) {
     return ok && hu_director_brevity_directive(r->direction, strlen(r->direction)) ? 1 : 0;
 }
 
-/* ── where the director's provider sends the thread ────────────────── */
+/* ── the provider endpoints ────────────────────────────────────────── */
 
-const char *hu_director_v2_endpoint(const struct hu_agent *agent, const hu_provider_t *provider) {
-    if (!agent || !agent->config || !provider || !provider->vtable)
+const char *hu_director_v2_primary_endpoint(const struct hu_agent *agent) {
+    const hu_config_t *cfg = agent ? agent->config : NULL;
+    if (!cfg || !cfg->default_provider)
         return NULL;
-    /* Under #587 local_only the director borrows the agent's own provider:
-     * its endpoint is the default provider's. Otherwise it is the provider
-     * of its own name (today "gemini"; no base_url means Vertex). */
-    const char *name = provider->ctx == agent->provider.ctx ? agent->config->default_provider
-                       : provider->vtable->get_name ? provider->vtable->get_name(provider->ctx)
-                                                    : NULL;
-    return hu_config_get_provider_base_url(agent->config, name);
+    const char *name = strcmp(cfg->default_provider, "reliable") == 0
+                           ? cfg->reliability.primary_provider
+                           : cfg->default_provider;
+    return name ? hu_config_get_provider_base_url(cfg, name) : NULL;
 }
 
-bool hu_director_v2_endpoint_is_local(const struct hu_agent *agent, const hu_provider_t *provider) {
-    const char *url = hu_director_v2_endpoint(agent, provider);
-    return url && hu_compatible_url_is_loopback(url, strlen(url)); /* unknown: not local */
+hu_error_t hu_director_v2_worker_provider_create(hu_allocator_t *alloc, const char *base_url,
+                                                 hu_provider_t *out) {
+    if (!alloc || !out || !base_url || !hu_compatible_url_is_loopback(base_url, strlen(base_url)))
+        return HU_ERR_NOT_SUPPORTED;
+    /* Plain compatible: no reliable wrapper, no fallback, no shared state
+     * with the reply path's provider. */
+    return hu_compatible_create(alloc, NULL, 0, base_url, strlen(base_url), out);
 }
 
 /* ── one v2 decision, shared by LIVE (inline) and SHADOW (worker) ──── */
@@ -334,7 +340,8 @@ typedef struct {
     size_t bytes;
 } v2_outcome_t;
 
-static void run_v2(hu_allocator_t *alloc, hu_channel_t *channel, const char *key, size_t key_len,
+static void run_v2(hu_allocator_t *alloc, hu_provider_t *provider, const char *model,
+                   size_t model_len, hu_channel_t *channel, const char *key, size_t key_len,
                    const char *persona, size_t persona_len, const hu_contact_profile_t *cp,
                    const char *combined, size_t combined_len,
                    const hu_channel_history_entry_t *entries, size_t entry_count,
@@ -356,25 +363,33 @@ static void run_v2(hu_allocator_t *alloc, hu_channel_t *channel, const char *key
     (void)hu_tapback_profile_load(persona, persona_len, key, key_len, out->shape, &tp);
     char facts[V2_FACTS_MAX + 20];
     (void)hu_tapback_profile_facts(&tp, out->shape, facts, sizeof(facts));
-    out->ok = g_classify_provider_ok &&
-              hu_director_v2_call(alloc, &g_classify_provider, g_classify_model,
-                                  g_classify_model_len, cp, hist_n > 0 ? hist : entries,
-                                  hist_n > 0 ? hist_n : entry_count, combined, combined_len,
-                                  situation, &tp, facts, &out->result, &out->src, &out->bytes);
+    out->ok = provider && hu_director_v2_call(
+                              alloc, provider, model, model_len, cp, hist_n > 0 ? hist : entries,
+                              hist_n > 0 ? hist_n : entry_count, combined, combined_len, situation,
+                              &tp, facts, &out->result, &out->src, &out->bytes);
     if (hist)
         alloc->free(alloc->ctx, hist, hist_n * sizeof(hu_channel_history_entry_t));
 }
 
-/* ── SHADOW: off the reply path ────────────────────────────────────── */
+/* ── SHADOW: off the reply path, on its own provider ───────────────── */
 
 /* One shadow job in flight at a time: shadow is a sample, and a second
  * director round trip must never queue behind replies. */
 static atomic_int s_shadow_inflight;
+static atomic_bool s_shadow_closed; /* set by hu_director_v2_shutdown */
+
+/* The worker's own provider (or a test's), used only by the worker thread;
+ * s_worker_mu also serialises it against shutdown. */
+static pthread_mutex_t s_worker_mu = PTHREAD_MUTEX_INITIALIZER;
+static hu_provider_t s_worker_override;
+static bool s_worker_override_set;
+static hu_provider_t s_worker_own;
+static char s_worker_own_url[512];
 
 typedef struct {
     hu_channel_t *channel; /* channels live for the process */
-    char *key, *combined, *situation, *persona, *relationship, *dunbar;
-    size_t key_len, combined_len, persona_len;
+    char *key, *combined, *situation, *persona, *relationship, *dunbar, *base_url, *model;
+    size_t key_len, combined_len, persona_len, model_len;
     hu_channel_history_entry_t *entries;
     size_t entry_count;
     const char *v1_action; /* static string */
@@ -403,8 +418,38 @@ static void job_free(v2_shadow_job_t *j) {
     free(j->persona);
     free(j->relationship);
     free(j->dunbar);
+    free(j->base_url);
+    free(j->model);
     free(j->entries);
     free(j);
+}
+
+static void worker_own_free_locked(void) {
+    if (s_worker_own.vtable && s_worker_own.vtable->deinit) {
+        hu_allocator_t a = hu_system_allocator();
+        s_worker_own.vtable->deinit(s_worker_own.ctx, &a);
+    }
+    memset(&s_worker_own, 0, sizeof(s_worker_own));
+    s_worker_own_url[0] = '\0';
+}
+
+/* The worker's provider for base_url. Caller holds s_worker_mu. Never the
+ * shared g_classify_provider and never agent->provider. */
+static hu_provider_t *worker_provider_locked(const char *base_url) {
+    if (s_worker_override_set)
+        return &s_worker_override;
+    if (!base_url || strlen(base_url) >= sizeof(s_worker_own_url))
+        return NULL;
+    if (s_worker_own.vtable && strcmp(s_worker_own_url, base_url) == 0)
+        return &s_worker_own;
+    worker_own_free_locked(); /* created lazily; rebuilt when the endpoint moves */
+    hu_allocator_t a = hu_system_allocator();
+    if (hu_director_v2_worker_provider_create(&a, base_url, &s_worker_own) != HU_OK) {
+        memset(&s_worker_own, 0, sizeof(s_worker_own));
+        return NULL;
+    }
+    memcpy(s_worker_own_url, base_url, strlen(base_url) + 1);
+    return &s_worker_own;
 }
 
 static void *shadow_worker(void *arg) {
@@ -415,8 +460,11 @@ static void *shadow_worker(void *arg) {
     cp.relationship = j->relationship;
     cp.dunbar_layer = j->dunbar;
     v2_outcome_t v2;
-    run_v2(&alloc, j->channel, j->key, j->key_len, j->persona, j->persona_len, &cp, j->combined,
-           j->combined_len, j->entries, j->entry_count, j->situation, &v2);
+    pthread_mutex_lock(&s_worker_mu);
+    run_v2(&alloc, worker_provider_locked(j->base_url), j->model, j->model_len, j->channel, j->key,
+           j->key_len, j->persona, j->persona_len, &cp, j->combined, j->combined_len, j->entries,
+           j->entry_count, j->situation, &v2);
+    pthread_mutex_unlock(&s_worker_mu);
     hu_log_info("director", NULL,
                 "[director_v2 shadow] v1_action=%s v2_action=%s v1_brevity=%d v2_brevity=%d "
                 "tapback_overridden=%d tapback_src=%s shape=%s v2_bytes=%zu v2=ran",
@@ -428,12 +476,14 @@ static void *shadow_worker(void *arg) {
     return NULL;
 }
 
-static bool shadow_enqueue(const hu_agent_t *agent, hu_channel_t *channel, const char *key,
-                           size_t key_len, const char *combined, size_t combined_len,
-                           const hu_channel_history_entry_t *entries, size_t entry_count,
-                           const char *situation, const hu_director_result_t *v1, bool v1_ok) {
+static bool shadow_enqueue(const hu_agent_t *agent, const char *base_url, hu_channel_t *channel,
+                           const char *key, size_t key_len, const char *combined,
+                           size_t combined_len, const hu_channel_history_entry_t *entries,
+                           size_t entry_count, const char *situation,
+                           const hu_director_result_t *v1, bool v1_ok) {
     int idle = 0;
-    if (!atomic_compare_exchange_strong(&s_shadow_inflight, &idle, 1))
+    if (atomic_load(&s_shadow_closed) ||
+        !atomic_compare_exchange_strong(&s_shadow_inflight, &idle, 1))
         return false;
     v2_shadow_job_t *j = (v2_shadow_job_t *)calloc(1, sizeof(*j));
     const hu_persona_t *persona = agent ? agent->persona : NULL;
@@ -446,6 +496,11 @@ static bool shadow_enqueue(const hu_agent_t *agent, hu_channel_t *channel, const
         j->combined = dup_n(combined, combined ? combined_len : 0);
         j->combined_len = combined ? combined_len : 0;
         j->situation = dup_z(situation);
+        j->base_url = dup_z(base_url);
+        if (agent && agent->model_name && agent->model_name_len > 0) {
+            j->model = dup_n(agent->model_name, agent->model_name_len);
+            j->model_len = agent->model_name_len;
+        }
         if (persona && persona->name) {
             j->persona = dup_n(persona->name, persona->name_len);
             j->persona_len = persona->name_len;
@@ -488,6 +543,27 @@ bool hu_director_v2_shadow_drain(unsigned timeout_ms) {
     return true;
 }
 
+void hu_director_v2_set_worker_provider(const hu_provider_t *p) {
+    pthread_mutex_lock(&s_worker_mu);
+    s_worker_override_set = p != NULL;
+    if (p)
+        s_worker_override = *p;
+    else
+        memset(&s_worker_override, 0, sizeof(s_worker_override));
+    pthread_mutex_unlock(&s_worker_mu);
+    atomic_store(&s_shadow_closed, false);
+}
+
+bool hu_director_v2_shutdown(unsigned timeout_ms) {
+    atomic_store(&s_shadow_closed, true);
+    if (!hu_director_v2_shadow_drain(timeout_ms))
+        return false; /* the worker still holds its provider: leave it */
+    pthread_mutex_lock(&s_worker_mu);
+    worker_own_free_locked();
+    pthread_mutex_unlock(&s_worker_mu);
+    return true;
+}
+
 /* ── the gate ──────────────────────────────────────────────────────── */
 
 /* HU_DIRECTOR_V2 promotion is gated on docs/guides/director-v2.md: shadow brevity share
@@ -503,29 +579,36 @@ bool hu_director_v2_decide(hu_allocator_t *alloc, struct hu_agent *agent, hu_cha
                                        situation, result);
 
     if (mode == HU_GATE_SHADOW) {
-        /* v1 decides and returns now; v2 never sits on the reply path. Until
-         * #587 moves the director local, v2 runs only on a loopback provider:
-         * a thrown-away result is no reason to send the thread to a cloud. */
+        /* v1 decides and returns now; v2 never sits on the reply path. The
+         * worker runs on its OWN plain provider for the primary's endpoint,
+         * and only when that endpoint is loopback: a thrown-away result is
+         * no reason to send the thread to a cloud. */
         bool v1_ok = hu_daemon_director_call(alloc, combined, combined_len, entries, entry_count,
                                              situation, result);
-        const char *skip = !g_classify_provider_ok ? "skipped_noprovider"
-                           : !hu_director_v2_endpoint_is_local(agent, &g_classify_provider)
-                               ? "skipped_nonlocal"
-                           : !shadow_enqueue(agent, channel, key, key_len, combined, combined_len,
-                                             entries, entry_count, situation, result, v1_ok)
-                               ? "skipped_busy"
-                               : NULL;
+        const char *url = hu_director_v2_primary_endpoint(agent);
+        const char *skip =
+            !url || !hu_compatible_url_is_loopback(url, strlen(url)) ? "skipped_nonlocal"
+            : !shadow_enqueue(agent, url, channel, key, key_len, combined, combined_len, entries,
+                              entry_count, situation, result, v1_ok)
+                ? "skipped_busy"
+                : NULL;
         if (skip)
             hu_log_info("director", NULL, "[director_v2 shadow] v1_action=%s v1_brevity=%d v2=%s",
                         action_name(result, v1_ok), brevity_bit(result, v1_ok), skip);
         return v1_ok;
     }
 
+    /* LIVE decides on the reply path, on the same director provider as v1.
+     * TODO(#587): when local_only lands, wrap this run_v2 in
+     * hu_local_only_set_caller("director") / restore, exactly as #587 wraps
+     * v1's chat_with_system in hu_daemon_director_call
+     * (feat/local-only-enforce, src/daemon/daemon_director.c:448-454). */
     const hu_persona_t *persona = agent ? agent->persona : NULL;
     const hu_contact_profile_t *cp =
         persona && key ? hu_persona_find_contact(persona, key, key_len) : NULL;
     v2_outcome_t v2;
-    run_v2(alloc, channel, key, key_len, persona ? persona->name : NULL,
+    run_v2(alloc, g_classify_provider_ok ? &g_classify_provider : NULL, g_classify_model,
+           g_classify_model_len, channel, key, key_len, persona ? persona->name : NULL,
            persona ? persona->name_len : 0, cp, combined, combined_len, entries, entry_count,
            situation, &v2);
     hu_log_info("director", NULL,

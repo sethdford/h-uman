@@ -255,6 +255,12 @@ bool hu_tapback_profile_from_json(const hu_json_value_t *root, const char *conta
             out->disengage_found = true;
             (void)count_field(levels[l], "tapback_disengage_n", &out->disengage_n);
         }
+        static const char *const form_keys[HU_FORM_KINDS] = {"voice_memo_rate", "gif_rate",
+                                                             "share_rate"};
+        for (size_t f = 0; f < HU_FORM_KINDS; f++)
+            if (!(out->form_found & (1u << f)) &&
+                rate_field(levels[l], form_keys[f], &out->form_rates[f]))
+                out->form_found |= 1u << f;
         uint32_t lat = 0;
         if (!out->latency_found && count_field(levels[l], "latency_p50_s", &lat)) {
             out->latency_found = true;
@@ -263,7 +269,8 @@ bool hu_tapback_profile_from_json(const hu_json_value_t *root, const char *conta
     }
     if (out->found && strcmp(out->level, "global") != 0)
         derive_cutoff(contacts, strcmp(out->level, "bucket") == 0, out);
-    return out->found || out->types_found || out->disengage_found || out->latency_found;
+    return out->found || out->types_found || out->disengage_found || out->latency_found ||
+           out->form_found != 0;
 }
 
 /* ── the mtime cache ───────────────────────────────────────────────── */
@@ -352,7 +359,8 @@ size_t hu_tapback_profile_facts(const hu_tapback_profile_t *p, hu_dir_shape_t sh
     if (!buf || cap == 0)
         return 0;
     buf[0] = '\0';
-    if (!p || (!p->found && !p->types_found && !p->disengage_found && !p->latency_found))
+    bool forms = p && p->form_found != 0;
+    if (!p || (!p->found && !p->types_found && !p->disengage_found && !p->latency_found && !forms))
         return 0;
     size_t pos = 0;
 #define FACT(...)                                             \
@@ -397,6 +405,18 @@ size_t hu_tapback_profile_facts(const hu_tapback_profile_t *p, hu_dir_shape_t sh
              pct(p->disengage_rate));
         if (p->disengage_n > 0)
             FACT(" (n=%u)", (unsigned)p->disengage_n);
+        FACT(";");
+    }
+    if (forms) {
+        static const char *const form_names[HU_FORM_KINDS] = {"a voice memo", "a GIF",
+                                                              "a shared song or video"};
+        bool first = true;
+        for (size_t f = 0; f < HU_FORM_KINDS; f++)
+            if (p->form_found & (1u << f)) {
+                FACT("%s %s %d%%", first ? " of his replies to them:" : ",", form_names[f],
+                     pct(p->form_rates[f]));
+                first = false;
+            }
         FACT(";");
     }
 #undef FACT

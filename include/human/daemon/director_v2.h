@@ -68,14 +68,26 @@ bool hu_director_v2_call(hu_allocator_t *alloc, hu_provider_t *provider, const c
                          const hu_tapback_profile_t *tp, const char *facts,
                          hu_director_result_t *result, hu_tapback_src_t *src, size_t *prompt_bytes);
 
-/* The endpoint the director's provider sends the thread to: under #587
- * local_only it borrows the agent's provider (config default_provider's
- * base_url); otherwise its own named entry (today "gemini"; NULL = Vertex).
- * NULL when unknown. */
-const char *hu_director_v2_endpoint(const struct hu_agent *agent, const hu_provider_t *provider);
+/* The primary provider's endpoint: config default_provider's base_url, or
+ * reliability.primary_provider's when default_provider is "reliable". The
+ * SHADOW worker's own provider talks to it. NULL when unknown. */
+const char *hu_director_v2_primary_endpoint(const struct hu_agent *agent);
 
-/* True only when that endpoint is known and loopback. Unknown is not local. */
-bool hu_director_v2_endpoint_is_local(const struct hu_agent *agent, const hu_provider_t *provider);
+/* The SHADOW worker's own provider: a plain compatible provider on base_url,
+ * no reliable wrapper, no fallback, so it shares no state with the reply
+ * path. HU_ERR_NOT_SUPPORTED (and *out untouched) unless base_url is loopback
+ * (hu_compatible_url_is_loopback). Free with out->vtable->deinit. */
+hu_error_t hu_director_v2_worker_provider_create(hu_allocator_t *alloc, const char *base_url,
+                                                 hu_provider_t *out);
+
+/* Test seam: the worker uses *p instead of building its own (NULL restores).
+ * Any call also reopens SHADOW after hu_director_v2_shutdown. */
+void hu_director_v2_set_worker_provider(const hu_provider_t *p);
+
+/* Daemon teardown: refuse new SHADOW jobs, wait up to timeout_ms for the
+ * running one, then free the worker's provider. False if the worker was still
+ * running (its provider is then kept, never freed under it). */
+bool hu_director_v2_shutdown(unsigned timeout_ms);
 
 /* Test seam: wait up to timeout_ms for the SHADOW worker to finish. False on
  * timeout. */

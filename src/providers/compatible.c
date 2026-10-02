@@ -1325,21 +1325,88 @@ static const hu_provider_vtable_t compatible_vtable = {
     .stream_chat = compatible_stream_chat,
 };
 
+static bool ascii_ieq(const char *a, size_t n, const char *lit) {
+    if (strlen(lit) != n)
+        return false;
+    for (size_t i = 0; i < n; i++) {
+        char c = a[i];
+        if (c >= 'A' && c <= 'Z')
+            c = (char)(c - 'A' + 'a');
+        if (c != lit[i])
+            return false;
+    }
+    return true;
+}
+
+/* 127.0.0.0/8 as a strict dotted quad: four 1-3 digit octets, each <= 255,
+ * no leading zeros. */
+static bool host_is_ipv4_loopback(const char *h, size_t n) {
+    unsigned oct[4];
+    size_t k = 0, i = 0;
+    while (k < 4) {
+        size_t start = i;
+        unsigned v = 0;
+        while (i < n && h[i] >= '0' && h[i] <= '9' && i - start < 3)
+            v = v * 10 + (unsigned)(h[i++] - '0');
+        size_t digits = i - start;
+        if (digits == 0 || v > 255 || (digits > 1 && h[start] == '0'))
+            return false;
+        oct[k++] = v;
+        if (k < 4) {
+            if (i >= n || h[i] != '.')
+                return false;
+            i++;
+        }
+    }
+    return i == n && oct[0] == 127;
+}
+
+/* Real host extraction, not a prefix test: "http://127.0.0.1:8080@evil.com/"
+ * names the host evil.com. Scheme http/https required; userinfo and port
+ * stripped; host must be 127/8, localhost or [::1] exactly. */
 bool hu_compatible_url_is_loopback(const char *url, size_t url_len) {
     if (!url)
         return false;
-    static const char *const prefixes[] = {"http://127.0.0.1", "http://localhost",
-                                           "https://127.0.0.1", "https://localhost"};
-    for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); i++) {
-        size_t plen = strlen(prefixes[i]);
-        if (url_len < plen || strncmp(url, prefixes[i], plen) != 0)
-            continue;
-        /* host must end here: "localhost" is not "localhost.example" */
-        char next = url_len > plen ? url[plen] : '\0';
-        if (next == '\0' || next == ':' || next == '/')
-            return true;
+    size_t p;
+    if (url_len >= 7 && ascii_ieq(url, 7, "http://"))
+        p = 7;
+    else if (url_len >= 8 && ascii_ieq(url, 8, "https://"))
+        p = 8;
+    else
+        return false;
+    size_t end = p;
+    while (end < url_len && url[end] != '/' && url[end] != '?' && url[end] != '#')
+        end++;
+    size_t h = p; /* userinfo ends at the authority's last '@' */
+    for (size_t i = p; i < end; i++)
+        if (url[i] == '@')
+            h = i + 1;
+    size_t host_end, port_at;
+    if (h < end && url[h] == '[') {
+        size_t close = h;
+        while (close < end && url[close] != ']')
+            close++;
+        if (close >= end || !ascii_ieq(url + h + 1, close - h - 1, "::1"))
+            return false;
+        host_end = close + 1;
+        port_at = host_end;
+    } else {
+        host_end = h;
+        while (host_end < end && url[host_end] != ':')
+            host_end++;
+        port_at = host_end;
+        if (!ascii_ieq(url + h, host_end - h, "localhost") &&
+            !host_is_ipv4_loopback(url + h, host_end - h))
+            return false;
     }
-    return false;
+    if (port_at == end)
+        return true;
+    if (url[port_at] != ':' || port_at + 1 == end)
+        return false;
+    for (size_t i = port_at + 1; i < end; i++)
+        if (url[i] < '0' || url[i] > '9')
+            return false;
+    return true;
 }
 
 void hu_compatible_request_opts_for_url(const char *url, size_t url_len,
