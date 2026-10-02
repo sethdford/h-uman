@@ -274,3 +274,13 @@ def test_load_questions_keeps_every_question_without_a_limit(tmp_path):
     assert {q["question_type"] for q, _ in load_questions(str(p), types=["y"])} == {"y"}
     q, rows = load_questions(str(p))[0]
     assert rows == [("ss1:t0", "s1", "user: hi")]
+
+
+def test_resume_retries_error_rows_and_keeps_the_latest(tmp_path):
+    from eval_longmemeval_qa import QAResult, load_checkpoint, save_result, settled
+    path = str(tmp_path / "results.jsonl")
+    save_result(path, QAResult("q1", "multi-session", "correct"))
+    save_result(path, QAResult("q2", "multi-session", "error", error="embedder down"))
+    assert set(settled(load_checkpoint(path))) == {"q1"}
+    save_result(path, QAResult("q2", "multi-session", "incorrect"))
+    assert settled(load_checkpoint(path))["q2"].verdict == "incorrect"
