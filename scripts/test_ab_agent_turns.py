@@ -26,7 +26,9 @@ def test_contexts_match_what_each_ab_is_about():
     assert not ab.keep_context("cache", "ok", True)  # too short to say anything about
     assert not ab.keep_context("cache", "x" * 301, True)
     assert [a for a, _, _ in ab.ARMS["cache"]] == ["off", "live"]
-    for kind in ("tot", "planner", "beat", "cache"):
+    assert ab.keep_context("voice", "lol same", True)
+    assert ab.ARMS["voice"][1][2] == {"HU_VOICE_RELATIONSHIP_FLOOR": "live"}
+    for kind in ("tot", "planner", "beat", "cache", "voice"):
         assert not ab.keep_context(kind, "look ￼", True)
         assert not ab.keep_context(kind, "see https://example.com " + long_msg, True)
 
