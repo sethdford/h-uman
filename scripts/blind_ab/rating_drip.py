@@ -25,12 +25,14 @@ holds which reply so the answer can't be recalled from the first pass:
     A) <option>
     B) <option>
 
+    (reply A, B, or T = tie / can't tell)
 This measures better-than-human, not just indistinguishable-from-human — a
 0.50 detection rate says nothing about whether the reply is actually
 preferred. Answers land in the sheet's `better_choice` column; when that
-pass completes too, better_score.py scores it into
+pass completes, better_score.py scores it into
 ~/.human/blind_ab_better.json — a SEPARATE file, never the LoRA promotion
-gate. The pass activates only when drip_state.json's "better_enabled" is
+gate. score.py still runs the tick the DETECTION pass completes; it never
+waits on the better pass. The pass activates only when drip_state.json's "better_enabled" is
 true: a freshly-seeded sheet defaults it on; an existing in-progress sheet
 stays off until the owner/lead runs `rating_drip.py enable-better`.
 
@@ -172,15 +174,21 @@ def parse_answer(text):
 # Positional mapping means a wrong COUNT would assign answers to the wrong rows,
 # so any mismatch is refused, never guessed at.
 BATCH_SIZE = max(1, int(os.environ.get("HU_RATING_DRIP_BATCH", "5") or "5"))
+# The better question's answers: A, B, or T = tie / can't tell. A forced A/B
+# choice coerced genuine indifference into a direction and biased the rate;
+# better_score.py excludes T from the rate's denominator and reports it.
+BETTER_ANSWER_LETTERS = "ABT"
 _BATCH_SEPARATORS = re.compile(r"[\s,]+")
 
 
-def parse_batch_answer(text, n):
-    """Exactly n A/B letters, in order. Returns ["A", "B", ...] or None.
+def parse_batch_answer(text, n, allowed="AB"):
+    """Exactly n letters from `allowed`, in order. Returns ["A", "B", ...] or None.
 
     Accepts "ABBAB", "a b b a b", "A, B, B, A, B". Rejects any other count, any
     other character, and prose — which is what keeps an ordinary note-to-self
-    (or the drip reading its own long question back) from parsing as ratings."""
+    (or the drip reading its own long question back) from parsing as ratings.
+    The detection pass keeps the default "AB"; the better pass passes
+    BETTER_ANSWER_LETTERS so "T" (tie / can't tell) is a legal answer."""
     if not text or n < 1:
         return None
     stripped = text.strip()
@@ -189,7 +197,8 @@ def parse_batch_answer(text, n):
     if len(stripped) > 3 * n:
         return None
     letters = _BATCH_SEPARATORS.sub("", stripped)
-    if len(letters) != n or any(ch not in "abAB" for ch in letters):
+    ok = set(allowed.upper()) | set(allowed.lower())
+    if len(letters) != n or any(ch not in ok for ch in letters):
         return None
     return [ch.upper() for ch in letters]
 
@@ -261,11 +270,11 @@ def compose_better_question(rows, detection_key, better_key_store, answered, tot
     which reply is BETTER (not which sounds more like Seth)."""
     n = len(rows)
     first, last = answered + 1, answered + n
-    example = ("ABBAB" * n)[:n]
+    example = ("ABTAB" * n)[:n]
     parts = [
         f"[h-uman rating {first}-{last}/{total}] which reply is BETTER for "
         f"this person -- more caring, more useful, more like a great friend?",
-        f"reply with {n} letters in order, e.g. {example}",
+        f"reply with {n} letters in order (A, B, or T = tie / can't tell), e.g. {example}",
     ]
     for i, row in enumerate(rows):
         a_text, b_text = better_display_options(row, detection_key, better_key_store)
@@ -432,7 +441,7 @@ def first_answer_after(rows_desc, since_unix, decoder=None, parser=None):
     return best
 
 
-def harvest_answer(target, since_unix, db_path=CHAT_DB, n=1):
+def harvest_answer(target, since_unix, db_path=CHAT_DB, n=1, allowed="AB"):
     """Newest short A/B-shaped message in the target chat after since_unix.
     Self-chat means both directions are 'from me' — the strict parser is what
     separates the answer from the drip's own (long) question.
@@ -457,12 +466,12 @@ def harvest_answer(target, since_unix, db_path=CHAT_DB, n=1):
         from export_seth_triples import decode_attributed_body
     except ImportError:
         decode_attributed_body = None
-    if n <= 1:
+    if n <= 1 and allowed == "AB":
         # Unchanged contract: (choice, conf) or None. voice_ab.py calls this
         # with the default n and depends on that tuple shape.
         return first_answer_after(rows, since_unix, decoder=decode_attributed_body)
     letters = first_answer_after(rows, since_unix, decoder=decode_attributed_body,
-                                 parser=lambda t: parse_batch_answer(t, n))
+                                 parser=lambda t: parse_batch_answer(t, max(1, n), allowed))
     return [(c, 3) for c in letters] if letters else None
 
 
@@ -699,7 +708,8 @@ def tick(dry_run=False, now=None):
     #     `rating_drip.py enable-better`).
     bids = better_pending_ids(st)
     if better_on and bids and st.get("better_question_unix"):
-        ans = harvest_answer(st["target"], st["better_question_unix"], n=len(bids))
+        ans = harvest_answer(st["target"], st["better_question_unix"], n=len(bids),
+                             allowed=BETTER_ANSWER_LETTERS)
         if ans:
             answers = [ans] if isinstance(ans, tuple) else list(ans)
             if len(answers) == len(bids):
@@ -711,32 +721,36 @@ def tick(dry_run=False, now=None):
                 rows, _ = load_sheet()
 
     detect_done = next_unanswered(rows, st.get("skipped")) is None
-    better_done = (not better_on) or (
+    better_done = better_on and (
         next_unanswered(rows, st.get("better_skipped"), field="better_choice") is None)
 
-    # 2) complete? run the scorer(s) -> writes ~/.human/blind_ab_gate.json
-    #    (promotion-gating, unchanged) and, only when better_on, a SEPARATE
-    #    ~/.human/blind_ab_better.json via better_score.py — never the gate.
-    if detect_done and better_done:
-        if not st.get("complete"):
-            print(f"sheet complete ({total}/{total}) — running score.py -> gate verdict")
-            ok = run_score()
-            if not ok:
-                print("score.py FAILED — sheet is fully rated but the gate "
-                      "verdict was NOT emitted; will retry next tick",
-                      file=sys.stderr)
-            elif better_on:
-                print("running better_score.py -> better-than-human measurement")
-                if not run_better_score():
-                    ok = False
-                    print("better_score.py FAILED — the detection gate verdict "
-                          "was written, but the better-than-human measurement "
-                          "was NOT; will retry next tick", file=sys.stderr)
-            if ok:
-                st["complete"] = True
-                # Leave complete=False on any failure above so the next tick
-                # retries scoring; a silently-unscored complete sheet blocks
-                # the human tier.
+    # 2) detection complete? score.py -> ~/.human/blind_ab_gate.json, the
+    #    LoRA promotion-gate verdict, the tick the detection pass completes --
+    #    the pre-better-pass cadence. It never waits on the better pass: that
+    #    measurement is not promotion-gating, so it must not gate the timing
+    #    of the one that is.
+    if detect_done and not st.get("complete"):
+        print(f"sheet complete ({total}/{total}) — running score.py -> gate verdict")
+        if run_score():
+            st["complete"] = True
+        else:
+            # complete stays False so the next tick retries; a silently-
+            # unscored complete sheet blocks the human tier.
+            print("score.py FAILED — sheet is fully rated but the gate "
+                  "verdict was NOT emitted; will retry next tick",
+                  file=sys.stderr)
+
+    # 2b) better pass complete (only when better_on)? better_score.py ->
+    #     ~/.human/blind_ab_better.json, a SEPARATE file — never the gate.
+    if detect_done and better_done and not st.get("better_complete"):
+        print("running better_score.py -> better-than-human measurement")
+        if run_better_score():
+            st["better_complete"] = True
+        else:
+            print("better_score.py FAILED — the better-than-human measurement "
+                  "was NOT written; will retry next tick", file=sys.stderr)
+
+    if detect_done and (not better_on or better_done):
         save_state(st)
         return
 

@@ -22,6 +22,10 @@ written by rating_drip.py to better_key.json (id -> "A"|"B", the displayed
 letter holding h-uman's reply for THAT posing) -- see
 rating_drip.decide_better_key().
 
+The question offers A, B, or T (tie / can't tell). Ties are excluded from
+the rate's denominator -- better_rate and its Wilson CI are over non-tie
+answers only -- and reported separately (ties, n_answered, tie_rate).
+
 This script NEVER writes ~/.human/blind_ab_gate.json or
 docs/evaluation/blind_ab_gate.json (the LoRA promotion gate). Its only
 output is the aggregate evidence JSON at --out (default
@@ -74,11 +78,34 @@ def load_better_rows(paths):
     return out
 
 
+TIE = "T"
+
+
+def score_better(rows, key):
+    """score_rows() (unmodified) over the non-tie answers, plus the ties.
+
+    The better question offers A, B, or T (tie / can't tell). A tie is neither
+    a win nor a loss, so it is excluded from the rate's denominator -- the
+    rate and its Wilson CI are over non-tie answers only -- and reported
+    separately (ties, n_answered, tie_rate). score_rows() already skips any
+    choice that is not A/B, so a sheet with no T scores exactly as before."""
+    agg = score_rows(rows, key)
+    ties = sum(1 for r in rows
+               if r.get("id") in key and (r.get("choice") or "").strip().upper() == TIE)
+    answered = agg["n"] + ties
+    agg.update({"ties": ties, "n_answered": answered,
+                "tie_rate": (ties / answered) if answered else 0.0})
+    return agg
+
+
 def report(agg):
-    print(f"items scored (better)  : {agg['n']}")
+    print(f"items scored (better)  : {agg['n']}   (ties excluded: {agg.get('ties', 0)})")
     print(f"better-than-human rate  : {agg['detect']:.3f}   "
           f"(0.50 = tied with Seth; >0.50 = h-uman judged better)")
-    print(f"  95% Wilson CI         : [{agg['ci_lo']:.3f}, {agg['ci_hi']:.3f}]")
+    print(f"  95% Wilson CI         : [{agg['ci_lo']:.3f}, {agg['ci_hi']:.3f}]  (non-tie answers)")
+    if agg.get("ties"):
+        print(f"ties / can't tell       : {agg['ties']} of {agg['n_answered']} "
+              f"({agg['tie_rate']:.3f})")
     print("per-rater better rate:")
     for k, (rate, t) in sorted(agg["per_rater"].items()):
         print(f"  {k:12} {rate:.3f}  (n={t})")
@@ -168,20 +195,20 @@ def main():
               "meaningful as a real human preference.", file=sys.stderr)
         sys.exit(2)
 
-    agg = score_rows(rows, better_key)
+    agg = score_better(rows, better_key)
 
-    # A sheet with ZERO scored items must never produce a rate: see
+    # A sheet with ZERO scored (non-tie) items must never produce a rate: see
     # .claude/rules/no-number-without-a-measurement.md. wilson(0, 0) is a
     # well-formed (0.0, 0.0, 0.0) -- printing or writing it reads as "h-uman
     # never wins" from no evidence at all, not as "unmeasured."
     if agg["n"] == 0:
-        print("RESULT_better=INVALID (0 items scored -- no better_choice "
-              "answers matched the key; refusing to emit a rate or write "
-              "a measurement)", file=sys.stderr)
+        print(f"RESULT_better=INVALID (0 non-tie items scored, {agg['ties']} ties -- "
+              "no A/B better_choice answers matched the key; refusing to emit "
+              "a rate or write a measurement)", file=sys.stderr)
         sys.exit(3)
 
     report(agg)
-    print(f"\nRESULT_better=SCORED n={agg['n']} "
+    print(f"\nRESULT_better=SCORED n={agg['n']} ties={agg['ties']} "
           f"better_rate={agg['detect']:.3f} ci=[{agg['ci_lo']:.3f},{agg['ci_hi']:.3f}]")
 
     if a.dry_run:
@@ -190,7 +217,10 @@ def main():
 
     out = {
         "schema_version": 1,
-        "n": agg["n"],
+        "n": agg["n"],            # non-tie answers: the rate's denominator
+        "ties": agg["ties"],      # "T" answers, excluded from the rate
+        "n_answered": agg["n_answered"],
+        "tie_rate": round(agg["tie_rate"], 4),
         "better_rate": round(agg["detect"], 4),
         "ci_lo": round(agg["ci_lo"], 4),
         "ci_hi": round(agg["ci_hi"], 4),
