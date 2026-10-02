@@ -1,6 +1,8 @@
 /* Director v2 (HU_DIRECTOR_V2): intent not length, tapback-vs-text from
  * Seth's learned data, 12 messages of context. Hermetic: the provider is a
  * mock, no channel, no DB. */
+#include "human/agent.h"
+#include "human/config.h"
 #include "human/core/allocator.h"
 #include "human/core/string.h"
 #include "human/daemon/common.h"
@@ -9,9 +11,11 @@
 #include "human/persona.h"
 #include "test_framework.h"
 
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #define S(lit) (lit), (sizeof(lit) - 1)
 
@@ -59,15 +63,23 @@ static void director_v2_system_prompt_has_no_length_instructions(void) {
     HU_ASSERT_GT(n, 0u);
     HU_ASSERT_LE(n, (size_t)HU_DIRECTOR_V2_SYSTEM_CAP);
     HU_ASSERT_EQ((hu_director_directive_flags(buf, n) & HU_DIRECTIVE_LENGTH), 0u);
-    HU_ASSERT_STR_CONTAINS(buf, "really saying");
+    HU_ASSERT_STR_CONTAINS(buf, "really mean or ask");
     HU_ASSERT_STR_CONTAINS(buf, "ask a follow-up");
     HU_ASSERT_STR_CONTAINS(buf, "share something of his own");
     HU_ASSERT_STR_CONTAINS(buf, "just react");
     HU_ASSERT_STR_CONTAINS(buf, "Never dodge");
-    HU_ASSERT_STR_CONTAINS(buf, "How Seth reacts");
-    /* No hand-written tapback rule list: the learned facts decide. */
+    HU_ASSERT_STR_CONTAINS(buf, "How Seth replies");
+    HU_ASSERT_STR_CONTAINS(buf, "Always write the direction");
+    /* No fixed behaviour rules: no tapback word list, no silence rule, no
+     * delay ranges, no topic list, and no examples to copy. */
     HU_ASSERT_STR_NOT_CONTAINS(buf, "Never tapback");
     HU_ASSERT_STR_NOT_CONTAINS(buf, "pure acknowledgement");
+    HU_ASSERT_STR_NOT_CONTAINS(buf, "unanswered");
+    HU_ASSERT_STR_NOT_CONTAINS(buf, "2-8");
+    HU_ASSERT_STR_NOT_CONTAINS(buf, "15-60");
+    HU_ASSERT_STR_NOT_CONTAINS(buf, "illness");
+    HU_ASSERT_STR_NOT_CONTAINS(buf, "Examples");
+    HU_ASSERT_STR_NOT_CONTAINS(buf, "action:text|");
     /* v1, for contrast, asks for length: the thing v2 removes. */
     static char v1[16384];
     size_t n1 = hu_daemon_director_system_prompt(v1, sizeof(v1));
@@ -157,13 +169,56 @@ static void director_v2_user_prompt_stays_in_budget_with_long_messages(void) {
 
 /* ── the call and the gate, against a mock provider ─────────────────── */
 
+/* At every field's maximum the new message and the situation line still
+ * fit; the history gives way, oldest message first. */
+static void director_v2_user_prompt_drops_oldest_history_first(void) {
+    hu_channel_history_entry_t e[12];
+    fill_entries(e, 12, 511);
+    char rel[64], dun[64], big[1200], sit[240];
+    memset(rel, 'r', sizeof(rel) - 1);
+    rel[sizeof(rel) - 1] = '\0';
+    memset(dun, 'd', sizeof(dun) - 1);
+    dun[sizeof(dun) - 1] = '\0';
+    memset(big, 'y', sizeof(big) - 1);
+    big[sizeof(big) - 1] = '\0';
+    memset(sit, 's', sizeof(sit) - 1);
+    memcpy(sit, "This turn:", 10);
+    sit[sizeof(sit) - 1] = '\0';
+    hu_contact_profile_t cp;
+    memset(&cp, 0, sizeof(cp));
+    cp.relationship = rel;
+    cp.dunbar_layer = dun;
+    static char buf[16384];
+    size_t n = hu_director_v2_user_prompt(buf, sizeof(buf), &cp, e, 12, big, strlen(big), sit,
+                                          k_long_facts);
+    HU_ASSERT_LE(n, (size_t)HU_DIRECTOR_V2_USER_CAP);
+    HU_ASSERT_STR_CONTAINS(buf, "This turn:");
+    HU_ASSERT_STR_CONTAINS(buf, "New message from them:\nyyyy");
+    HU_ASSERT_STR_CONTAINS(buf, "Seth: msg11 ");     /* the newest message kept */
+    HU_ASSERT_STR_NOT_CONTAINS(buf, "Them: msg00 "); /* the oldest dropped */
+    HU_ASSERT_LT(count_occurrences(buf, "\nSeth: ") + count_occurrences(buf, "\nThem: "), 12u);
+}
+
 typedef struct {
     const char *reply;
     bool fail;
-    int calls;
+    atomic_int calls;
+    atomic_bool block;   /* hold the call until released (or 3 s) */
+    atomic_bool entered; /* the call has started */
     size_t sys_len, user_len;
     char user[HU_DIRECTOR_V2_USER_CAP];
 } mock_ctx_t;
+
+static void sleep_ms(long ms) {
+    struct timespec ts = {ms / 1000, (ms % 1000) * 1000000L};
+    nanosleep(&ts, NULL);
+}
+
+static long now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec * 1000L + ts.tv_nsec / 1000000L;
+}
 
 static hu_error_t mock_chat_with_system(void *ctx, hu_allocator_t *alloc, const char *sys,
                                         size_t sys_len, const char *msg, size_t msg_len,
@@ -174,7 +229,10 @@ static hu_error_t mock_chat_with_system(void *ctx, hu_allocator_t *alloc, const 
     (void)model_len;
     (void)temperature;
     mock_ctx_t *m = (mock_ctx_t *)ctx;
-    m->calls++;
+    atomic_fetch_add(&m->calls, 1);
+    atomic_store(&m->entered, true);
+    for (int waited = 0; atomic_load(&m->block) && waited < 3000; waited += 5)
+        sleep_ms(5);
     m->sys_len = sys_len;
     m->user_len = msg_len;
     size_t cp = msg_len < sizeof(m->user) - 1 ? msg_len : sizeof(m->user) - 1;
@@ -187,7 +245,30 @@ static hu_error_t mock_chat_with_system(void *ctx, hu_allocator_t *alloc, const 
     return *out ? HU_OK : HU_ERR_OUT_OF_MEMORY;
 }
 
-static const hu_provider_vtable_t mock_vtable = {.chat_with_system = mock_chat_with_system};
+static const char *mock_get_name(void *ctx) {
+    (void)ctx;
+    return "mockdir";
+}
+
+static const hu_provider_vtable_t mock_vtable = {.chat_with_system = mock_chat_with_system,
+                                                 .get_name = mock_get_name};
+
+/* An agent whose config puts the director's provider ("mockdir") on `url`. */
+static hu_agent_t g_agent;
+static hu_config_t g_cfg;
+static hu_provider_entry_t g_entry;
+
+static hu_agent_t *agent_with_director_at(const char *url) {
+    memset(&g_agent, 0, sizeof(g_agent));
+    memset(&g_cfg, 0, sizeof(g_cfg));
+    memset(&g_entry, 0, sizeof(g_entry));
+    g_entry.name = "mockdir";
+    g_entry.base_url = (char *)url;
+    g_cfg.providers = &g_entry;
+    g_cfg.providers_len = 1;
+    g_agent.config = &g_cfg;
+    return &g_agent;
+}
 
 /* Seth's learned profile for this contact: when they tell him something he
  * replies with only a reaction 2% of the time; the lower quartile of all his
@@ -218,7 +299,7 @@ static void director_v2_call_learned_data_overrides_model_tapback(void) {
     const char msg[] = "Dad and I both got covid. Feeling pretty rough. How are you doing";
     HU_ASSERT_TRUE(hu_director_v2_call(&alloc, &p, S("m"), NULL, e, 3, msg, sizeof(msg) - 1, NULL,
                                        &tp, "How Seth reacts: 2%.", &r, &src, &bytes));
-    HU_ASSERT_EQ(m.calls, 1);
+    HU_ASSERT_EQ(atomic_load(&m.calls), 1);
     HU_ASSERT_EQ((int)src, (int)HU_TAPBACK_SRC_LEARNED);
     HU_ASSERT_EQ((int)r.action, (int)DIR_TEXT);
     HU_ASSERT_EQ(bytes, m.sys_len + m.user_len);
@@ -264,8 +345,8 @@ static void restore_provider(saved_provider_t s) {
 }
 
 /* Runs decide under `gate` and v1 alone on the same input. */
-static void run_both(const char *gate, mock_ctx_t *m, const char *msg, hu_director_result_t *got,
-                     hu_director_result_t *v1, bool *got_ok) {
+static void run_both_as(hu_agent_t *agent, const char *gate, mock_ctx_t *m, const char *msg,
+                        hu_director_result_t *got, hu_director_result_t *v1, bool *got_ok) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_channel_history_entry_t e[4];
     fill_entries(e, 4, 12);
@@ -276,10 +357,16 @@ static void run_both(const char *gate, mock_ctx_t *m, const char *msg, hu_direct
         unsetenv("HU_DIRECTOR_V2");
     memset(got, 0xA5, sizeof(*got));
     memset(v1, 0xA5, sizeof(*v1));
-    *got_ok = hu_director_v2_decide(&alloc, NULL, NULL, S("+15550000000"), msg, strlen(msg), e, 4,
+    *got_ok = hu_director_v2_decide(&alloc, agent, NULL, S("+15550000000"), msg, strlen(msg), e, 4,
                                     NULL, got);
     (void)hu_daemon_director_call(&alloc, msg, strlen(msg), e, 4, NULL, v1);
+    HU_ASSERT_TRUE(hu_director_v2_shadow_drain(5000)); /* no worker outlives the mock */
     restore_provider(s);
+}
+
+static void run_both(const char *gate, mock_ctx_t *m, const char *msg, hu_director_result_t *got,
+                     hu_director_result_t *v1, bool *got_ok) {
+    run_both_as(NULL, gate, m, msg, got, v1, got_ok);
 }
 
 static void director_v2_off_is_byte_identical_to_v1(void) {
@@ -289,22 +376,90 @@ static void director_v2_off_is_byte_identical_to_v1(void) {
     run_both(NULL, &m, "ok", &got, &v1, &ok);
     HU_ASSERT_TRUE(ok);
     HU_ASSERT_EQ(memcmp(&got, &v1, sizeof(got)), 0);
-    HU_ASSERT_EQ(m.calls, 0); /* v2 never ran */
+    HU_ASSERT_EQ(atomic_load(&m.calls), 0); /* v2 never ran */
     run_both("off", &m, "what time is dinner", &got, &v1, &ok);
     HU_ASSERT_EQ(memcmp(&got, &v1, sizeof(got)), 0);
-    HU_ASSERT_EQ(m.calls, 0);
+    HU_ASSERT_EQ(atomic_load(&m.calls), 0);
 }
 
+/* SHADOW on a loopback director: v1 decides, v2 runs later on a worker. */
 static void director_v2_shadow_computes_v2_but_keeps_v1_decision(void) {
     /* v1's test stub tapbacks "ok"; the mock v2 answers with text. */
     mock_ctx_t m = {.reply = "action:text|delay_s:4|direction:engage fully"};
     hu_director_result_t got, v1;
     bool ok = false;
-    run_both("shadow", &m, "ok", &got, &v1, &ok);
+    run_both_as(agent_with_director_at("http://127.0.0.1:8741/v1"), "shadow", &m, "ok", &got, &v1,
+                &ok);
     HU_ASSERT_TRUE(ok);
-    HU_ASSERT_EQ(m.calls, 1); /* v2 was computed */
+    HU_ASSERT_EQ(atomic_load(&m.calls), 1); /* v2 was computed */
     HU_ASSERT_EQ((int)v1.action, (int)DIR_TAPBACK);
     HU_ASSERT_EQ(memcmp(&got, &v1, sizeof(got)), 0); /* ...and v1 still decides */
+}
+
+/* The reply path never waits on v2: the director provider is held for up to
+ * 3 s, and decide still returns v1's decision at once. */
+static void director_v2_shadow_adds_no_latency_to_the_decision(void) {
+    mock_ctx_t m = {.reply = "action:text|delay_s:4|direction:engage fully"};
+    atomic_store(&m.block, true);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_history_entry_t e[4];
+    fill_entries(e, 4, 12);
+    saved_provider_t s = install_mock(&m);
+    setenv("HU_DIRECTOR_V2", "shadow", 1);
+    hu_director_result_t got, v1;
+    long t0 = now_ms();
+    bool ok = hu_director_v2_decide(&alloc, agent_with_director_at("http://localhost:8741"), NULL,
+                                    S("+15550000000"), S("ok"), e, 4, NULL, &got);
+    long elapsed = now_ms() - t0;
+    bool released_before_return = !atomic_load(&m.block);
+    atomic_store(&m.block, false);
+    bool drained = hu_director_v2_shadow_drain(5000);
+    (void)hu_daemon_director_call(&alloc, S("ok"), e, 4, NULL, &v1);
+    restore_provider(s);
+    HU_ASSERT_TRUE(ok);
+    HU_ASSERT_FALSE(released_before_return);
+    HU_ASSERT_LT(elapsed, 1000L); /* inline v2 would take the full 3 s hold */
+    HU_ASSERT_EQ(memcmp(&got, &v1, sizeof(got)), 0);
+    HU_ASSERT_TRUE(drained);
+    HU_ASSERT_EQ(atomic_load(&m.calls), 1); /* ...and v2 did run, off the path */
+}
+
+/* Until #587 moves the director local, a cloud director never sees the
+ * thread for a thrown-away shadow result. */
+static void director_v2_shadow_skips_a_nonlocal_director(void) {
+    static const char *const urls[] = {NULL, "https://us-central1-aiplatform.googleapis.com",
+                                       "http://localhost.example.com"};
+    for (size_t i = 0; i < sizeof(urls) / sizeof(urls[0]); i++) {
+        mock_ctx_t m = {.reply = "action:text|direction:engage fully"};
+        hu_director_result_t got, v1;
+        bool ok = false;
+        run_both_as(agent_with_director_at(urls[i]), "shadow", &m, "ok", &got, &v1, &ok);
+        HU_ASSERT_TRUE(ok);
+        HU_ASSERT_EQ(atomic_load(&m.calls), 0);
+        HU_ASSERT_EQ(memcmp(&got, &v1, sizeof(got)), 0);
+    }
+    mock_ctx_t m = {.reply = "action:text|direction:engage fully"};
+    hu_director_result_t got, v1;
+    bool ok = false;
+    run_both("shadow", &m, "ok", &got, &v1, &ok); /* no agent, no config: unknown */
+    HU_ASSERT_EQ(atomic_load(&m.calls), 0);
+}
+
+static void director_v2_endpoint_follows_the_provider_in_use(void) {
+    mock_ctx_t m = {0};
+    hu_provider_t own = {.ctx = &m, .vtable = &mock_vtable};
+    hu_agent_t *ag = agent_with_director_at("http://127.0.0.1:8741");
+    HU_ASSERT_STR_EQ(hu_director_v2_endpoint(ag, &own), "http://127.0.0.1:8741");
+    HU_ASSERT_TRUE(hu_director_v2_endpoint_is_local(ag, &own));
+    /* #587 shape: the director borrows the agent's provider, so the
+     * endpoint is the default provider's. */
+    ag->provider = own;
+    g_cfg.default_provider = "other";
+    HU_ASSERT_NULL(hu_director_v2_endpoint(ag, &own));
+    HU_ASSERT_FALSE(hu_director_v2_endpoint_is_local(ag, &own));
+    g_cfg.default_provider = "mockdir";
+    HU_ASSERT_TRUE(hu_director_v2_endpoint_is_local(ag, &own));
+    HU_ASSERT_FALSE(hu_director_v2_endpoint_is_local(NULL, &own));
 }
 
 static void director_v2_live_uses_v2_decision(void) {
@@ -313,7 +468,7 @@ static void director_v2_live_uses_v2_decision(void) {
     bool ok = false;
     run_both("live", &m, "ok", &got, &v1, &ok);
     HU_ASSERT_TRUE(ok);
-    HU_ASSERT_EQ(m.calls, 1);
+    HU_ASSERT_EQ(atomic_load(&m.calls), 1);
     HU_ASSERT_EQ((int)v1.action, (int)DIR_TAPBACK);
     HU_ASSERT_EQ((int)got.action, (int)DIR_TEXT);
     HU_ASSERT_STR_EQ(got.direction, "engage fully");
@@ -325,7 +480,7 @@ static void director_v2_live_falls_back_to_v1_when_v2_fails(void) {
     bool ok = false;
     run_both("live", &m, "ok", &got, &v1, &ok);
     HU_ASSERT_TRUE(ok);
-    HU_ASSERT_EQ(m.calls, 1);
+    HU_ASSERT_EQ(atomic_load(&m.calls), 1);
     HU_ASSERT_EQ(memcmp(&got, &v1, sizeof(got)), 0);
 }
 
@@ -337,10 +492,14 @@ void run_director_v2_tests(void) {
     HU_RUN_TEST(director_v2_system_prompt_forms_block_stays_in_budget);
     HU_RUN_TEST(director_v2_user_prompt_has_twelve_labelled_messages);
     HU_RUN_TEST(director_v2_user_prompt_stays_in_budget_with_long_messages);
+    HU_RUN_TEST(director_v2_user_prompt_drops_oldest_history_first);
     HU_RUN_TEST(director_v2_call_learned_data_overrides_model_tapback);
     HU_RUN_TEST(director_v2_call_without_data_trusts_the_model);
     HU_RUN_TEST(director_v2_off_is_byte_identical_to_v1);
     HU_RUN_TEST(director_v2_shadow_computes_v2_but_keeps_v1_decision);
+    HU_RUN_TEST(director_v2_shadow_adds_no_latency_to_the_decision);
+    HU_RUN_TEST(director_v2_shadow_skips_a_nonlocal_director);
+    HU_RUN_TEST(director_v2_endpoint_follows_the_provider_in_use);
     HU_RUN_TEST(director_v2_live_uses_v2_decision);
     HU_RUN_TEST(director_v2_live_falls_back_to_v1_when_v2_fails);
 }

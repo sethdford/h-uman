@@ -12,8 +12,8 @@
  * (director_tapback.h). A tapback-only choice becomes text only when that
  * learned data says he almost never does it here; no data, no override.
  *
- * OFF: exactly hu_daemon_director_call. SHADOW: v1 decides, v2 is computed
- * and one aggregate line is logged. LIVE: v2 decides (v1 if v2 fails).
+ * OFF: exactly hu_daemon_director_call. SHADOW: v1 decides; v2 runs off the
+ * reply path, loopback providers only. LIVE: v2 decides (v1 if v2 fails).
  * Guide: docs/guides/director-v2.md. */
 
 #include "human/channel.h"
@@ -68,9 +68,26 @@ bool hu_director_v2_call(hu_allocator_t *alloc, hu_provider_t *provider, const c
                          const hu_tapback_profile_t *tp, const char *facts,
                          hu_director_result_t *result, hu_tapback_src_t *src, size_t *prompt_bytes);
 
-/* The daemon's director entry point. Gate OFF is exactly
- * hu_daemon_director_call. SHADOW/LIVE also load a 12-message thread from
- * `channel` (falling back to `entries`) and run v2 on g_classify_provider. */
+/* The endpoint the director's provider sends the thread to: under #587
+ * local_only it borrows the agent's provider (config default_provider's
+ * base_url); otherwise its own named entry (today "gemini"; NULL = Vertex).
+ * NULL when unknown. */
+const char *hu_director_v2_endpoint(const struct hu_agent *agent, const hu_provider_t *provider);
+
+/* True only when that endpoint is known and loopback. Unknown is not local. */
+bool hu_director_v2_endpoint_is_local(const struct hu_agent *agent, const hu_provider_t *provider);
+
+/* Test seam: wait up to timeout_ms for the SHADOW worker to finish. False on
+ * timeout. */
+bool hu_director_v2_shadow_drain(unsigned timeout_ms);
+
+/* The daemon's director entry point.
+ *   OFF:    exactly hu_daemon_director_call.
+ *   SHADOW: v1 decides and returns at once; v2 runs on a detached worker
+ *           (one in flight; otherwise logged v2=skipped_busy), and only when
+ *           the director endpoint is loopback (else v2=skipped_nonlocal).
+ *   LIVE:   v2 decides inline (12-message read, learned profile, call); v1
+ *           if v2 fails. */
 bool hu_director_v2_decide(hu_allocator_t *alloc, struct hu_agent *agent, hu_channel_t *channel,
                            const char *key, size_t key_len, const char *combined,
                            size_t combined_len, const hu_channel_history_entry_t *entries,

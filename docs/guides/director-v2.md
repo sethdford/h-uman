@@ -1,5 +1,5 @@
 ---
-title: Director v2 — intent instead of length, learned tapbacks (HU_DIRECTOR_V2)
+title: Director v2 — intent instead of length, decisions from Seth's own data (HU_DIRECTOR_V2)
 created: 2026-10-02
 status: operator-facing
 ---
@@ -8,10 +8,12 @@ status: operator-facing
 
 The scene director runs before every reactive reply. It decides whether Seth
 texts, reacts with a tapback, or stays silent, and it writes a one-line
-`direction` that the reply model follows. v1 lives in
-`src/daemon/daemon_director.c`. v2 lives in `src/daemon/director_v2.c` and
-`src/daemon/director_tapback.c`, and the daemon calls it at one site
-(`hu_director_v2_decide`, `src/daemon.c`).
+`direction` that the reply model follows.
+
+- v1 lives in `src/daemon/daemon_director.c`.
+- v2 lives in `src/daemon/director_v2.c` (prompt, call and gate) and
+  `src/daemon/director_tapback.c` (Seth's learned behaviour).
+- The daemon calls v2 at one site, `hu_director_v2_decide` in `src/daemon.c`.
 
 ## Why
 
@@ -19,131 +21,157 @@ The prod log from 2026-09-17 to 2026-10-01 holds 456 director decisions.
 
 - **335 of the 456 (73.5%)** carried a length or deflection cue. Examples are
   "one line", "a few words", "keep it light", "non-committal" and "don't
-  over-explain". This count comes from `hu_director_directive_flags`, which
-  is the measurement helper below.
+  over-explain". This count comes from `hu_director_directive_flags`, the
+  measurement helper below.
 - **108 of the 456 (23.7%)** were tapback-only.
 - Three real cases:
   - A parent shared covid news and asked how Seth was doing. The direction
-    was `Acknowledge the sickness briefly, keep it low-pressure, one line`.
-  - "Walk me through the thanksgiving plan" got `Keep it light and
-    non-committal`, and the reply dodged.
-  - "Seth your AI is messed up?" got `Laugh it off` and a "Liked" tapback.
+    was "Acknowledge the sickness briefly … one line".
+  - A walk-me-through request was directed to "Keep it light and
+    non-committal", and the reply dodged.
+  - "Seth your AI is messed up?" got "Laugh it off" and a "Liked" tapback.
 
 v1 sees 5 messages. It has no contact context, and its prompt says "BREVITY
 IS THE DEFAULT".
 
 ## What v2 changes
 
-1. **It directs intent, never length.** The direction has three parts: what
-   they are really saying, the move (engage fully, ask a follow-up, share
-   something of his own, or just react), and what to draw on from the shared
-   history.
-   - The prompt forbids line, word and sentence counts. Length belongs to the
-     length policy and learned style.
-   - It forbids dodging a real question or a walk-me-through request.
-   - A test pins that the prompt contains no length cue.
-2. **Tapback-only comes from what Seth actually does, not from a word list.**
-   The details are below.
-3. **It sees more context, cheaply.**
-   - The last 12 messages, labelled Seth/Them. They are a separate channel
-     read, so the rest of the turn still sees its usual 10.
-   - A `Contact:` line with the relationship and Dunbar layer, never a name.
-   - The learned "How Seth reacts" line.
-   - Budgets are enforced by tests: the system prompt (≈2.1 KB, 2.5 KB with
-     the forms block) is capped at 2,560 bytes. The per-turn context is also
-     capped at 2,560 bytes: 130 bytes per message, 360 for the new message,
-     300 for the facts line.
+There are no fixed behaviour rules. Delay, silence and tapbacks are judged
+from the thread and from Seth's measured behaviour, never from ranges or word
+lists.
 
-v2 uses the same provider and model as v1 (`g_classify_provider`). When #587
-moves the director to the local model under `privacy.local_only`, v2 follows
-it.
+1. **A schema, not examples.** The direction has three parts: what they really
+   mean or ask; the move (engage fully, ask a follow-up, share something of
+   his own, or just react); and what to draw on from the shared history.
+   - The prompt never mentions length, which a test pins.
+   - It keeps three principles:
+     - answer a real question or a walk-me-through request; never dodge;
+     - never invent events, people or outcomes;
+     - never fabricate a memory when tested.
+   - There are no examples to copy. A test pins that too.
+2. **Seth's measured behaviour as plain facts.** One line from the
+   learned-style profile, for example:
+   > How Seth replies, measured from his own texts: he usually answers them
+   > after about 4 minutes; with them, when they ask something he replies with
+   > only a reaction 3% of the time (n=40); his reactions: heart 70%, haha 30%.
+
+   When there is no data, the line is absent and the model judges from the
+   thread. There are no default ranges.
+3. **More context.**
+   - The last 12 messages, labelled Seth/Them. They come from a separate read,
+     so the rest of the turn still sees its usual 10.
+   - A `Contact:` line with the relationship and Dunbar layer, never a name.
+   - The facts line above.
+   - When fields are at their maximum, the oldest history messages are dropped
+     first, so the new message and the `This turn:` line always fit. A test
+     pins this.
+4. **Prompt size, measured.**
+   - The system prompt is 1,372 bytes, or 1,822 bytes with the
+     `HU_DIRECTOR_FORMS` block.
+   - The per-turn context is capped at 2,560 bytes.
+   - The worst case is therefore about **4.4 KB**.
 
 ## Tapback-only: learned data, no rules
 
-The source is the learned-style profile,
-`<persona dir>/<persona>.learned-style.json` (schema `learned-style/v1`, from
-the learner in #584). v2 reads these **optional** fields from a contact's
-`shape:<x>` bucket, the contact's `overall`, or `global`, in that order:
+The data comes from `<persona dir>/<persona>.learned-style.json`, schema
+`learned-style/v1` (learner #584). These **optional** fields are read from the
+contact's `shape:<x>` bucket, then the contact's `overall`, then `global`:
 
-| Field | Meaning |
-|---|---|
-| `tapback_only_rate` | how often Seth replied with only a tapback, in that cell |
-| `tapback_types` | his mix of reactions, e.g. `{"heart":0.7,"haha":0.3}` |
-| `tapback_disengage_rate`, `tapback_disengage_n` | how often, after his tapback-only replies, they went quiet or pushed for a real answer |
+- `tapback_only_rate`
+- `tapback_types`
+- `tapback_disengage_rate` with `tapback_disengage_n`
+- `latency_p50_s` (already in v1)
 
-The shape is the learner's bucket rule: `question` if the text has a `?`,
-`story` if it is long or has several sentences, `casual` otherwise.
+The shape is the learner's bucket rule: `question`, `story` or `casual`.
 
-**What the model sees.** One plain-fact line, for example:
+**The post-check is a learned threshold.** It turns a tapback-only choice into
+text only when Seth's rate for this contact and shape is at or below the
+**n-weighted lower quartile of his own cells at the same level**:
 
-> How Seth reacts, measured from his own texts: with them, when they ask
-> something he replies with only a reaction 3% of the time (n=40); his
-> reactions: heart 70%, haha 30%.
+| Lookup answered at | Cutoff built from | Minimum n per cell |
+|---|---|---|
+| contact × shape bucket | every contact's `shape:*` buckets | 3 (learner `MIN_BUCKET_N`) |
+| contact `overall` | every contact's `overall` | 5 (learner `MIN_CONTACT_N`) |
+| `global` | no peer cells | no override |
 
-The model decides.
+How the cutoff behaves:
 
-**The post-check is a learned threshold.**
-
-- **What it is.** The cutoff is the lower quartile (nearest rank) of Seth's
-  own `tapback_only_rate` values. They are taken over every contact cell: each
-  contact's `shape:*` buckets and its `overall`.
-- **When it acts.** It turns a tapback-only decision into text only when the
-  rate for this contact and shape is at or below that cutoff. In other words,
-  only where his own history says he almost never does it.
-- **When there is no data.** If no rate is found, or there are fewer than 4
-  cells, there is no override and the model's choice stands
-  (`tapback_src=nodata`).
-- **Why the lower quartile.** It is the conventional "low" boundary of a
-  distribution, and it moves with his data. The constants are only the
-  quartile rank and the 4-cell minimum below which a quartile means nothing.
+- The minimum n values are the learner's own thresholds in
+  `scripts/learned_style_profile.py` (#584). They are not new constants.
+- `overall` and the buckets are never mixed in one distribution.
+- Fewer than 4 cells means no quartile, so there is no override.
+- **All zeros:** if every peer cell is 0, Seth never answers with only a
+  tapback, so the cutoff is 0 and every tapback-only choice is overridden.
+  That is what his data says, and a test pins it.
+- An override changes only the form (text instead of tapback). The model's own
+  delay and direction stand; there are no canned values.
+- With no data (`tapback_src=nodata`), the model's choice stands.
 
 **What exists today.**
 
-- learned-style/v1 has no reaction fields yet. Until the learner writes them,
-  every turn logs `tapback_src=nodata`, and v2 tapbacks are the model's
-  choice, informed only by the prompt.
-- No disengagement data exists inside h-uman. `outbound_sends.kind` admits only
-  `text`, `media` and `reply`, so no tapback is recorded. `reaction_lookup`
-  holds their reactions to us, and `proactive_decisions` is proactive-only.
+- learned-style/v1 has **no reaction fields yet**, so until the learner writes
+  them, every turn logs `tapback_src=nodata`. `latency_p50_s` already exists
+  and reaches the prompt.
+- **No disengagement data exists in h-uman's DB:**
+  - `outbound_sends.kind` admits only text, media and reply;
+  - `reaction_lookup` holds their reactions to us;
+  - `proactive_decisions` is proactive-only.
+
   The learner should derive `tapback_disengage_rate` from chat.db: Seth's
-  tapbacks (`associated_message_type` 2000–2005, `is_from_me`), then what the
-  contact sent next.
-- The reader is local (`hu_tapback_profile_load`) because #586
-  (`hu_learned_style_lookup`) is not merged. When it merges, move the shape
-  rule and the file read onto it.
+  tapbacks, then what the contact sent next.
+- **Reconciliation with #586** (unmerged):
+  - `hu_director_inbound_shape` mirrors `hu_learned_style_shape_inbound`
+    exactly, with the same injected-note prefixes. Its tests are #586's own
+    vectors.
+  - The profile reader has an mtime + size cache.
+  - When #586 merges, delete both and call its functions.
 
 ## The gate
 
 `HU_DIRECTOR_V2=off|shadow|live`, default **off**, parsed by
 `hu_gate_mode_from_env`.
 
-- **off**: `hu_director_v2_decide` is exactly `hu_daemon_director_call`.
-  There is no extra read, call or log. A test pins that the result is
-  byte-identical.
-- **shadow**: v1 decides. v2 is computed alongside, with a second director
-  call per turn, and one aggregate line is logged (counts and enums only, no
-  text, no handle):
+- **off:** exactly `hu_daemon_director_call`. A test pins that the result is
+  byte-identical and that no v2 call is made.
+- **shadow:** v1 decides and returns at once. v2 **never sits on the reply
+  path**.
+  - It runs on a detached worker, one job in flight at a time. While one is in
+    flight, the turn logs `v2=skipped_busy`.
+  - The worker does the 12-message read, the profile read and the director
+    call, then logs one aggregate line (enums and counts only):
 
-      [director_v2 shadow] v1_action=text v2_action=text v1_brevity=1 v2_brevity=0 tapback_overridden=0 tapback_src=nodata shape=question v2_bytes=2310
+        [director_v2 shadow] v1_action=text v2_action=text v1_brevity=1 v2_brevity=0 tapback_overridden=0 tapback_src=nodata shape=question v2_bytes=3120 v2=ran
 
-- **live**: v2 decides. If the v2 call fails, v1 decides
-  (`fallback_v1=1`). The log line is
-  `[director_v2 live] v2_action=… v2_brevity=… tapback_overridden=… tapback_src=… shape=… v2_bytes=… fallback_v1=0|1`.
+  - A test holds the provider for 3 s, and decide still returns v1 in under
+    1 s.
+  - **Privacy:** until #587 moves the director to the local model, shadow runs
+    v2 only when the director's endpoint is **loopback**.
+    - Otherwise it logs `[director_v2 shadow] v1_action=… v1_brevity=…
+      v2=skipped_nonlocal`, and the thread never goes to a cloud model for a
+      thrown-away result.
+    - The endpoint is the agent's default provider under #587, or the
+      director provider's own config entry today. An unknown endpoint counts
+      as not local.
+    - Today's director is Gemini, so shadow logs `skipped_nonlocal` until #587
+      lands.
+- **live:** v2 decides inline, replacing v1's call, and falls back to v1 if v2
+  fails. The log line is
+  `[director_v2 live] v2_action=… v2_brevity=… tapback_overridden=…
+  tapback_src=… shape=… v2_bytes=… fallback_v1=0|1`.
 
-**Latency cost in shadow:** one more director round trip per reactive turn
-(v2 runs before v1, sequentially). It has not been measured. Expect roughly
-v1's own director time again, readable from the gap between the
-`[director_v2 shadow]` line and the `meta:` line. Prod GPU and quota budget
-is acceptable for now. LIVE has the cost of one call, as today.
+**Cost:** SHADOW adds no reply latency, only background director calls on the
+local model. LIVE costs one director call, as today, plus a chat.db read and a
+cached profile lookup.
 
 ## Promotion: SHADOW → LIVE
 
-Run SHADOW for at least 7 days, then measure all three:
+Prerequisite: #587 is merged, so shadow lines say `v2=ran`. Run SHADOW for at
+least 7 days, then measure:
 
 **(a) Shadow log.**
 
 ```bash
-grep -h '\[director_v2 shadow\]' ~/.human/logs/service-loop-error.log | awk '
+grep -h '\[director_v2 shadow\].*v2=ran' ~/.human/logs/service-loop-error.log | awk '
   {for(i=1;i<=NF;i++){split($i,kv,"="); f[kv[1]]=kv[2]}
    n++; v1b+=f["v1_brevity"]; v2b+=f["v2_brevity"]
    if (f["shape"]!="casual") {qs++; if (f["v2_action"]=="tapback") qt++}
@@ -154,24 +182,18 @@ grep -h '\[director_v2 shadow\]' ~/.human/logs/service-loop-error.log | awk '
 
 Pass when all of these hold:
 
-- `v1_brevity` is near the 73% baseline. This confirms the helper reads the
-  same thing.
+- `v1_brevity` is near the 73% baseline.
 - `v2_brevity` is **≤ 25%**.
-- On question and story turns, v2's tapback share is no higher than Seth's own
-  learned rate for those shapes, and it is 0 wherever `tapback_src=learned`
-  fired.
-- A precondition: `learned_data` covers most turns. This means the learner
-  writes `tapback_only_rate`. Without it, the tapback half is unmeasured, and
-  only the length half can be promoted.
+- On question and story turns, v2's tapback share is no higher than Seth's
+  learned rate for those shapes.
+- `learned_data` covers most turns. Without the reaction fields, only the
+  length half is measured.
 
 **(b) Replay A/B.** Use `human replay` from the sibling PR
-`feat/replay-harness`. Run the same inbound threads through v1 and v2. Reply
-depth must rise (median reply bytes, and the share of replies that answer the
-question asked). The fragment rate must not rise.
+`feat/replay-harness`. Reply depth must rise, and the fragment rate must not.
 
-**(c) Blind gate.** Run the human/synthetic blind gate
-(`scripts/blind_ab_gate.py`) with `HU_DIRECTOR_V2=live` on the candidate arm.
-Detection must hold or fall.
+**(c) Blind gate.** Run `scripts/blind_ab_gate.py` with `HU_DIRECTOR_V2=live`
+on the candidate arm. Detection must hold or fall.
 
 **Gated on:** do not flip to LIVE without all three.
 
@@ -179,4 +201,4 @@ Detection must hold or fall.
 
 Remove `HU_DIRECTOR_V2` from the service-loop plist environment, or set it to
 `off`. Then reinstall with `scripts/install-human-daemon.sh`. v2 persists
-nothing, so there is nothing to undo.
+nothing.

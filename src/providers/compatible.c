@@ -1325,7 +1325,9 @@ static const hu_provider_vtable_t compatible_vtable = {
     .stream_chat = compatible_stream_chat,
 };
 
-static bool compatible_url_is_loopback(const char *url, size_t url_len) {
+bool hu_compatible_url_is_loopback(const char *url, size_t url_len) {
+    if (!url)
+        return false;
     static const char *const prefixes[] = {"http://127.0.0.1", "http://localhost",
                                            "https://127.0.0.1", "https://localhost"};
     for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); i++) {
@@ -1347,7 +1349,7 @@ void hu_compatible_request_opts_for_url(const char *url, size_t url_len,
     memset(out, 0, sizeof(*out));
     if (!url || url_len == 0)
         return;
-    if (compatible_url_is_loopback(url, url_len))
+    if (hu_compatible_url_is_loopback(url, url_len))
         out->timeout_secs = HU_COMPATIBLE_LOCAL_TIMEOUT_SECS;
 }
 

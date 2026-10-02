@@ -3,15 +3,21 @@
  * and docs/guides/director-v2.md. */
 #include "human/daemon/director_v2.h"
 #include "human/agent.h"
+#include "human/config.h"
 #include "human/core/gate_mode.h"
 #include "human/core/log.h"
 #include "human/daemon/common.h"
 #include "human/daemon/director_tapback.h"
 #include "human/persona.h"
+#include "human/providers/compatible.h"
 
 #include <ctype.h>
+#include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /* ── directive flags (the brevity measurement) ─────────────────────── */
 
@@ -78,43 +84,34 @@ bool hu_director_brevity_directive(const char *dir, size_t len) {
 
 /* ── prompts ───────────────────────────────────────────────────────── */
 
+/* A schema and principles, no examples and no fixed rules: delay, silence
+ * and tapbacks are judged from the thread and from Seth's measured behaviour
+ * (the "How Seth replies" line), never from ranges or word lists. */
 static const char k_v2_system[] =
     "You direct one beat of a text conversation. The actor plays Seth, 45, a tech "
     "entrepreneur who lives alone with his cat; his kids don't live with him. Decide what Seth "
-    "does with their message: the intent and the tone, never the length.\n\n"
-    "Answer in this exact format, on a single line:\n"
-    "action:<text|tapback|silence>[|delay_s:N][|reaction:<heart|haha|thumbs_up|emphasis>]"
-    "[|direction:...]\n\n"
-    "direction has three parts separated by ' ; ':\n"
-    "1. what they are really saying or asking, under the words\n"
-    "2. the move: engage fully, ask a follow-up, share something of his own, or just react\n"
-    "3. what to draw on from the shared history above, or 'nothing'\n"
-    "Never say how long the reply should be: no line, word or sentence counts. Length is "
-    "decided elsewhere.\n\n"
-    "Rules:\n"
-    "- action:text is the default. delay_s 2-8 normally, 15-60 if he'd be busy.\n"
-    "- A real question, or a request to explain or walk them through something: answer it "
-    "for real. Never dodge, stall or stay vague on purpose.\n"
-    "- News or feelings, good or bad, worry, illness, a complaint about Seth or his "
-    "assistant: engage. Ask, care, take it seriously.\n"
-    "- Replying with only a reaction (tapback) is something Seth does with some people and "
-    "some messages and not others. When a 'How Seth reacts' line is given, it is measured "
-    "from his own texts with this person: follow it.\n"
-    "- silence only for abuse, or after 3+ unanswered 'k'/'ok'.\n"
+    "does with their message: its intent and its tone. How long the reply is gets decided "
+    "elsewhere, so never mention length: no line, word or sentence counts.\n\n"
+    "Answer on a single line, fields separated by '|', direction last:\n"
+    "action:<text|tapback|silence> - write back, react to their message, or not reply\n"
+    "delay_s:<seconds> - how long he waits before answering\n"
+    "reaction:<heart|haha|thumbs_up|emphasis> - with tapback\n"
+    "direction:<what they really mean or ask> ; <the move: engage fully, ask a follow-up, "
+    "share something of his own, or just react> ; <what from the shared history to draw on, "
+    "or nothing>\n"
+    "Always write the direction, for a tapback or silence too.\n\n"
+    "Judge from the thread. When a 'How Seth replies' line is given, it is measured from his "
+    "own texts with this person (how soon he answers, how often he answers with only a "
+    "reaction): follow it.\n\n"
+    "Principles:\n"
+    "- When they ask a real question or ask to be walked through something, answer it. Never "
+    "dodge, stall or stay vague on purpose.\n"
     "- Draw only on what the thread or the Contact line shows. Never invent events, people, "
-    "plans or outcomes; if he doesn't know how something went, he says so and asks.\n"
-    "- If they test whether he's real, never fabricate a memory.\n\n"
-    "Examples:\n"
-    "action:text|delay_s:5|direction:She's sick and worried about him too ; engage fully: "
-    "sorry, ask how bad it is and what they need, answer how he's doing ; her news above\n"
-    "action:text|delay_s:4|direction:He wants the actual plan ; engage fully, lay out what "
-    "Seth knows and ask what he thinks ; the plan in the thread\n"
-    "action:text|delay_s:3|direction:They think something went wrong ; take it seriously, ask "
-    "what happened ; nothing\n"
-    "action:tapback|reaction:heart";
+    "plans or outcomes; if he doesn't know how something went, he says so.\n"
+    "- If they test whether he's real, never fabricate a memory.";
 
-/* Expressive forms (HU_DIRECTOR_FORMS live): same vocabulary as v1's block,
- * without its length cues. */
+/* Expressive forms (HU_DIRECTOR_FORMS live): v1's vocabulary without its
+ * length cues. */
 static const char k_v2_forms[] =
     "\n\nOther forms, rare, and only what the 'This turn:' line allows: action:voice (a voice "
     "memo: they sent one, or a heartfelt moment); action:gif|gif:<search words> (playful, close "
@@ -182,6 +179,8 @@ static void put_field(v2_out_t *o, const char *s, size_t max) {
     put(o, s, utf8_prefix(s, n, max), true);
 }
 
+static const char k_new_hdr[] = "\nNew message from them:\n";
+
 size_t hu_director_v2_user_prompt(char *buf, size_t cap, const struct hu_contact_profile *cp,
                                   const hu_channel_history_entry_t *entries, size_t entry_count,
                                   const char *combined, size_t combined_len, const char *situation,
@@ -209,24 +208,42 @@ size_t hu_director_v2_user_prompt(char *buf, size_t cap, const struct hu_contact
         put_lit(&o, "\n");
     }
     put_lit(&o, "Thread, oldest first:\n");
-    size_t start = entry_count > HU_DIRECTOR_V2_HISTORY ? entry_count - HU_DIRECTOR_V2_HISTORY : 0;
-    for (size_t i = start; entries && i < entry_count; i++) {
+
+    /* The new message and the situation line always fit: the history gives
+     * way, oldest message first. */
+    size_t new_n = combined ? utf8_prefix(combined, combined_len, V2_NEW_MAX) : 0;
+    size_t sit_n =
+        situation && situation[0] ? utf8_prefix(situation, strlen(situation), V2_SITUATION_MAX) : 0;
+    size_t tail = sizeof(k_new_hdr) - 1 + new_n + (sit_n ? 2 + sit_n : 0) + 1;
+    size_t room = o.lim > o.pos + tail ? o.lim - o.pos - tail : 0;
+    size_t last = entries ? entry_count : 0;
+    size_t start = last > HU_DIRECTOR_V2_HISTORY ? last - HU_DIRECTOR_V2_HISTORY : 0;
+    size_t first = last, used = 0;
+    while (first > start) {
+        const char *t = entries[first - 1].text;
+        size_t need = 6 + utf8_prefix(t, strnlen(t, sizeof(entries[0].text)), V2_ENTRY_MAX) + 1;
+        if (used + need > room)
+            break;
+        used += need;
+        first--;
+    }
+    for (size_t i = first; i < last; i++) {
         put_lit(&o, entries[i].from_me ? "Seth: " : "Them: ");
         size_t tn = strnlen(entries[i].text, sizeof(entries[i].text));
         put(&o, entries[i].text, utf8_prefix(entries[i].text, tn, V2_ENTRY_MAX), true);
         put_lit(&o, "\n");
     }
-    put_lit(&o, "\nNew message from them:\n");
-    if (combined && combined_len > 0)
-        put(&o, combined, utf8_prefix(combined, combined_len, V2_NEW_MAX), false);
-    if (situation && situation[0]) {
+    put_lit(&o, k_new_hdr);
+    if (new_n)
+        put(&o, combined, new_n, false);
+    if (sit_n) {
         put_lit(&o, "\n\n");
-        put_field(&o, situation, V2_SITUATION_MAX);
+        put(&o, situation, sit_n, true);
     }
     return o.pos;
 }
 
-/* ── the call and the gate ─────────────────────────────────────────── */
+/* ── the call ──────────────────────────────────────────────────────── */
 
 bool hu_director_v2_call(hu_allocator_t *alloc, hu_provider_t *provider, const char *model,
                          size_t model_len, const struct hu_contact_profile *cp,
@@ -288,19 +305,41 @@ static int brevity_bit(const hu_director_result_t *r, bool ok) {
     return ok && hu_director_brevity_directive(r->direction, strlen(r->direction)) ? 1 : 0;
 }
 
-/* HU_DIRECTOR_V2 promotion is gated on docs/guides/director-v2.md: shadow brevity share
- * <= 25% and no tapback-only reply where Seth's learned rate says he would answer, the
- * replay A/B, and the blind gate. */
-bool hu_director_v2_decide(hu_allocator_t *alloc, struct hu_agent *agent, hu_channel_t *channel,
-                           const char *key, size_t key_len, const char *combined,
-                           size_t combined_len, const hu_channel_history_entry_t *entries,
-                           size_t entry_count, const char *situation,
-                           hu_director_result_t *result) {
-    hu_gate_mode_t mode = hu_gate_mode_from_env("HU_DIRECTOR_V2", HU_GATE_OFF);
-    if (mode == HU_GATE_OFF)
-        return hu_daemon_director_call(alloc, combined, combined_len, entries, entry_count,
-                                       situation, result);
+/* ── where the director's provider sends the thread ────────────────── */
 
+const char *hu_director_v2_endpoint(const struct hu_agent *agent, const hu_provider_t *provider) {
+    if (!agent || !agent->config || !provider || !provider->vtable)
+        return NULL;
+    /* Under #587 local_only the director borrows the agent's own provider:
+     * its endpoint is the default provider's. Otherwise it is the provider
+     * of its own name (today "gemini"; no base_url means Vertex). */
+    const char *name = provider->ctx == agent->provider.ctx ? agent->config->default_provider
+                       : provider->vtable->get_name ? provider->vtable->get_name(provider->ctx)
+                                                    : NULL;
+    return hu_config_get_provider_base_url(agent->config, name);
+}
+
+bool hu_director_v2_endpoint_is_local(const struct hu_agent *agent, const hu_provider_t *provider) {
+    const char *url = hu_director_v2_endpoint(agent, provider);
+    return url && hu_compatible_url_is_loopback(url, strlen(url)); /* unknown: not local */
+}
+
+/* ── one v2 decision, shared by LIVE (inline) and SHADOW (worker) ──── */
+
+typedef struct {
+    hu_director_result_t result;
+    bool ok;
+    hu_tapback_src_t src;
+    hu_dir_shape_t shape;
+    size_t bytes;
+} v2_outcome_t;
+
+static void run_v2(hu_allocator_t *alloc, hu_channel_t *channel, const char *key, size_t key_len,
+                   const char *persona, size_t persona_len, const hu_contact_profile_t *cp,
+                   const char *combined, size_t combined_len,
+                   const hu_channel_history_entry_t *entries, size_t entry_count,
+                   const char *situation, v2_outcome_t *out) {
+    memset(out, 0, sizeof(*out));
     /* 12 messages: a separate read, so nothing else on the turn sees a longer history. */
     hu_channel_history_entry_t *hist = NULL;
     size_t hist_n = 0;
@@ -311,55 +350,193 @@ bool hu_director_v2_decide(hu_allocator_t *alloc, struct hu_agent *agent, hu_cha
         hist = NULL;
         hist_n = 0;
     }
-    const hu_channel_history_entry_t *h = hist_n > 0 ? hist : entries;
-    size_t hn = hist_n > 0 ? hist_n : entry_count;
+    /* What Seth actually does with this contact and this shape of message. */
+    out->shape = hu_director_inbound_shape(combined, combined_len);
+    hu_tapback_profile_t tp;
+    (void)hu_tapback_profile_load(persona, persona_len, key, key_len, out->shape, &tp);
+    char facts[V2_FACTS_MAX + 20];
+    (void)hu_tapback_profile_facts(&tp, out->shape, facts, sizeof(facts));
+    out->ok = g_classify_provider_ok &&
+              hu_director_v2_call(alloc, &g_classify_provider, g_classify_model,
+                                  g_classify_model_len, cp, hist_n > 0 ? hist : entries,
+                                  hist_n > 0 ? hist_n : entry_count, combined, combined_len,
+                                  situation, &tp, facts, &out->result, &out->src, &out->bytes);
+    if (hist)
+        alloc->free(alloc->ctx, hist, hist_n * sizeof(hu_channel_history_entry_t));
+}
+
+/* ── SHADOW: off the reply path ────────────────────────────────────── */
+
+/* One shadow job in flight at a time: shadow is a sample, and a second
+ * director round trip must never queue behind replies. */
+static atomic_int s_shadow_inflight;
+
+typedef struct {
+    hu_channel_t *channel; /* channels live for the process */
+    char *key, *combined, *situation, *persona, *relationship, *dunbar;
+    size_t key_len, combined_len, persona_len;
+    hu_channel_history_entry_t *entries;
+    size_t entry_count;
+    const char *v1_action; /* static string */
+    int v1_brevity;
+} v2_shadow_job_t;
+
+static char *dup_n(const char *s, size_t n) {
+    if (!s)
+        return NULL;
+    char *d = (char *)malloc(n + 1);
+    if (d) {
+        memcpy(d, s, n);
+        d[n] = '\0';
+    }
+    return d;
+}
+
+static char *dup_z(const char *s) {
+    return s ? dup_n(s, strlen(s)) : NULL;
+}
+
+static void job_free(v2_shadow_job_t *j) {
+    free(j->key);
+    free(j->combined);
+    free(j->situation);
+    free(j->persona);
+    free(j->relationship);
+    free(j->dunbar);
+    free(j->entries);
+    free(j);
+}
+
+static void *shadow_worker(void *arg) {
+    v2_shadow_job_t *j = (v2_shadow_job_t *)arg;
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_contact_profile_t cp;
+    memset(&cp, 0, sizeof(cp));
+    cp.relationship = j->relationship;
+    cp.dunbar_layer = j->dunbar;
+    v2_outcome_t v2;
+    run_v2(&alloc, j->channel, j->key, j->key_len, j->persona, j->persona_len, &cp, j->combined,
+           j->combined_len, j->entries, j->entry_count, j->situation, &v2);
+    hu_log_info("director", NULL,
+                "[director_v2 shadow] v1_action=%s v2_action=%s v1_brevity=%d v2_brevity=%d "
+                "tapback_overridden=%d tapback_src=%s shape=%s v2_bytes=%zu v2=ran",
+                j->v1_action, action_name(&v2.result, v2.ok), j->v1_brevity,
+                brevity_bit(&v2.result, v2.ok), v2.ok && v2.src == HU_TAPBACK_SRC_LEARNED,
+                hu_tapback_src_name(v2.src), hu_director_shape_name(v2.shape), v2.bytes);
+    job_free(j);
+    atomic_fetch_sub(&s_shadow_inflight, 1);
+    return NULL;
+}
+
+static bool shadow_enqueue(const hu_agent_t *agent, hu_channel_t *channel, const char *key,
+                           size_t key_len, const char *combined, size_t combined_len,
+                           const hu_channel_history_entry_t *entries, size_t entry_count,
+                           const char *situation, const hu_director_result_t *v1, bool v1_ok) {
+    int idle = 0;
+    if (!atomic_compare_exchange_strong(&s_shadow_inflight, &idle, 1))
+        return false;
+    v2_shadow_job_t *j = (v2_shadow_job_t *)calloc(1, sizeof(*j));
     const hu_persona_t *persona = agent ? agent->persona : NULL;
     const hu_contact_profile_t *cp =
         persona && key ? hu_persona_find_contact(persona, key, key_len) : NULL;
-
-    /* What Seth actually does: his learned tapback-only rate for this contact
-     * and message shape, read as data, never a word list. */
-    hu_dir_shape_t shape = hu_director_inbound_shape(combined, combined_len);
-    hu_tapback_profile_t tp;
-    if (!persona || !persona->name ||
-        !hu_tapback_profile_load(alloc, persona->name, persona->name_len, key, key_len, shape,
-                                 &tp)) {
-        memset(&tp, 0, sizeof(tp));
-        tp.level = "none";
+    if (j) {
+        j->channel = channel;
+        j->key = dup_n(key, key ? key_len : 0);
+        j->key_len = key ? key_len : 0;
+        j->combined = dup_n(combined, combined ? combined_len : 0);
+        j->combined_len = combined ? combined_len : 0;
+        j->situation = dup_z(situation);
+        if (persona && persona->name) {
+            j->persona = dup_n(persona->name, persona->name_len);
+            j->persona_len = persona->name_len;
+        }
+        j->relationship = cp ? dup_z(cp->relationship) : NULL;
+        j->dunbar = cp ? dup_z(cp->dunbar_layer) : NULL;
+        if (entries && entry_count > 0) {
+            j->entries = (hu_channel_history_entry_t *)malloc(entry_count * sizeof(*entries));
+            if (j->entries) {
+                memcpy(j->entries, entries, entry_count * sizeof(*entries));
+                j->entry_count = entry_count;
+            }
+        }
+        j->v1_action = action_name(v1, v1_ok);
+        j->v1_brevity = brevity_bit(v1, v1_ok);
     }
-    char facts[320];
-    (void)hu_tapback_profile_facts(&tp, shape, facts, sizeof(facts));
+    pthread_attr_t attr;
+    pthread_t tid;
+    bool started = false;
+    if (j && pthread_attr_init(&attr) == 0) {
+        pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+        started = pthread_create(&tid, &attr, shadow_worker, j) == 0;
+        pthread_attr_destroy(&attr);
+    }
+    if (!started) {
+        if (j)
+            job_free(j);
+        atomic_fetch_sub(&s_shadow_inflight, 1);
+    }
+    return started;
+}
 
-    hu_director_result_t v2;
-    hu_tapback_src_t src = HU_TAPBACK_SRC_NODATA;
-    size_t bytes = 0;
-    bool v2_ok = g_classify_provider_ok &&
-                 hu_director_v2_call(alloc, &g_classify_provider, g_classify_model,
-                                     g_classify_model_len, cp, h, hn, combined, combined_len,
-                                     situation, &tp, facts, &v2, &src, &bytes);
-    if (hist)
-        alloc->free(alloc->ctx, hist, hist_n * sizeof(hu_channel_history_entry_t));
-    int overridden = v2_ok && src == HU_TAPBACK_SRC_LEARNED ? 1 : 0;
+bool hu_director_v2_shadow_drain(unsigned timeout_ms) {
+    for (unsigned waited = 0; atomic_load(&s_shadow_inflight) > 0; waited += 5) {
+        if (waited >= timeout_ms)
+            return false;
+        struct timespec ts = {0, 5 * 1000 * 1000};
+        nanosleep(&ts, NULL);
+    }
+    return true;
+}
 
-    if (mode == HU_GATE_SHADOW) { /* v1 still decides */
+/* ── the gate ──────────────────────────────────────────────────────── */
+
+/* HU_DIRECTOR_V2 promotion is gated on docs/guides/director-v2.md: shadow brevity share
+ * <= 25%, tapbacks that match Seth's learned behaviour, the replay A/B, and the blind gate. */
+bool hu_director_v2_decide(hu_allocator_t *alloc, struct hu_agent *agent, hu_channel_t *channel,
+                           const char *key, size_t key_len, const char *combined,
+                           size_t combined_len, const hu_channel_history_entry_t *entries,
+                           size_t entry_count, const char *situation,
+                           hu_director_result_t *result) {
+    hu_gate_mode_t mode = hu_gate_mode_from_env("HU_DIRECTOR_V2", HU_GATE_OFF);
+    if (mode == HU_GATE_OFF)
+        return hu_daemon_director_call(alloc, combined, combined_len, entries, entry_count,
+                                       situation, result);
+
+    if (mode == HU_GATE_SHADOW) {
+        /* v1 decides and returns now; v2 never sits on the reply path. Until
+         * #587 moves the director local, v2 runs only on a loopback provider:
+         * a thrown-away result is no reason to send the thread to a cloud. */
         bool v1_ok = hu_daemon_director_call(alloc, combined, combined_len, entries, entry_count,
                                              situation, result);
-        hu_log_info("director", NULL,
-                    "[director_v2 shadow] v1_action=%s v2_action=%s v1_brevity=%d v2_brevity=%d "
-                    "tapback_overridden=%d tapback_src=%s shape=%s v2_bytes=%zu",
-                    action_name(result, v1_ok), action_name(&v2, v2_ok), brevity_bit(result, v1_ok),
-                    brevity_bit(&v2, v2_ok), overridden, hu_tapback_src_name(src),
-                    hu_director_shape_name(shape), bytes);
+        const char *skip = !g_classify_provider_ok ? "skipped_noprovider"
+                           : !hu_director_v2_endpoint_is_local(agent, &g_classify_provider)
+                               ? "skipped_nonlocal"
+                           : !shadow_enqueue(agent, channel, key, key_len, combined, combined_len,
+                                             entries, entry_count, situation, result, v1_ok)
+                               ? "skipped_busy"
+                               : NULL;
+        if (skip)
+            hu_log_info("director", NULL, "[director_v2 shadow] v1_action=%s v1_brevity=%d v2=%s",
+                        action_name(result, v1_ok), brevity_bit(result, v1_ok), skip);
         return v1_ok;
     }
+
+    const hu_persona_t *persona = agent ? agent->persona : NULL;
+    const hu_contact_profile_t *cp =
+        persona && key ? hu_persona_find_contact(persona, key, key_len) : NULL;
+    v2_outcome_t v2;
+    run_v2(alloc, channel, key, key_len, persona ? persona->name : NULL,
+           persona ? persona->name_len : 0, cp, combined, combined_len, entries, entry_count,
+           situation, &v2);
     hu_log_info("director", NULL,
                 "[director_v2 live] v2_action=%s v2_brevity=%d tapback_overridden=%d "
                 "tapback_src=%s shape=%s v2_bytes=%zu fallback_v1=%d",
-                action_name(&v2, v2_ok), brevity_bit(&v2, v2_ok), overridden,
-                hu_tapback_src_name(src), hu_director_shape_name(shape), bytes, v2_ok ? 0 : 1);
-    if (!v2_ok)
+                action_name(&v2.result, v2.ok), brevity_bit(&v2.result, v2.ok),
+                v2.ok && v2.src == HU_TAPBACK_SRC_LEARNED, hu_tapback_src_name(v2.src),
+                hu_director_shape_name(v2.shape), v2.bytes, v2.ok ? 0 : 1);
+    if (!v2.ok)
         return hu_daemon_director_call(alloc, combined, combined_len, entries, entry_count,
                                        situation, result);
-    *result = v2;
+    *result = v2.result;
     return true;
 }
