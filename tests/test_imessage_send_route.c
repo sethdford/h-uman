@@ -117,7 +117,7 @@ static void argv_rcs_route_addresses_the_chat(void) {
     const char *argv[12];
     size_t n = hu_imsg_route_build_argv(&r, H, "hey", "auto", argv, 12);
     HU_ASSERT_EQ(n, 6u);
-    const char *want[] = {"imsg", "send", "--chat-guid", "any;-;" H, "--text", "hey"};
+    const char *want[] = {"imsg", "send", "--chat-guid", ("any;-;" H), "--text", "hey"};
     for (size_t i = 0; i < 6; i++)
         HU_ASSERT_STR_EQ(argv[i], want[i]);
     HU_ASSERT_NULL(argv[6]);
@@ -173,11 +173,13 @@ typedef struct {
     char script[1024];
     char lines[4][160];
     int nlines;
-    /* chat.db boundary: `boundary` until call `land_on_call` (1-based), then
-     * boundary+1 (the text appeared). 0 = never lands. -1 = unreadable. */
+    /* chat.db: `boundary` is the pre-send read (-1 = unreadable); the text
+     * is found on landing check `land_on_call` (1-based), 0 = never. */
     int64_t boundary;
     int land_on_call;
     int boundary_calls;
+    int landed_calls;
+    char landed_text[64]; /* the text the landing check was asked about */
     int sleeps;
     unsigned as_timeout;
 } fake_t;
@@ -210,10 +212,16 @@ static int64_t fake_boundary(void *ctx, const hu_imsg_send_route_t *route, const
     (void)to;
     fake_t *f = (fake_t *)ctx;
     f->boundary_calls++;
-    if (f->boundary < 0)
-        return -1;
-    return (f->land_on_call > 0 && f->boundary_calls >= f->land_on_call) ? f->boundary + 1
-                                                                         : f->boundary;
+    return f->boundary;
+}
+static bool fake_landed(void *ctx, const hu_imsg_send_route_t *route, const char *to, int64_t prior,
+                        const char *text) {
+    (void)route;
+    (void)to;
+    fake_t *f = (fake_t *)ctx;
+    f->landed_calls++;
+    snprintf(f->landed_text, sizeof(f->landed_text), "%s", text ? text : "");
+    return prior >= 0 && f->land_on_call > 0 && f->landed_calls >= f->land_on_call;
 }
 static void fake_sleep(void *ctx, unsigned ms) {
     (void)ms;
@@ -227,6 +235,7 @@ static hu_imsg_send_backend_t fake_backend(fake_t *f, bool imsg_available) {
                                  .run_applescript = fake_as,
                                  .log_outcome = fake_log,
                                  .sent_boundary = fake_boundary,
+                                 .landed = fake_landed,
                                  .sleep_ms = fake_sleep};
     if (f->boundary == 0 && f->land_on_call == 0)
         f->boundary = 100;
@@ -326,7 +335,7 @@ static void file_argv_routes_sms_by_chat_and_keeps_imessage_pre_fix(void) {
     hu_imsg_send_route_t sms = {.chat_guid = "SMS;-;" H, .service = HU_IMSG_SERVICE_SMS};
     const char *argv[12];
     HU_ASSERT_EQ(hu_imsg_route_build_file_argv(&sms, H, "/tmp/a.jpg", argv, 12), 6u);
-    const char *want_sms[] = {"imsg", "send", "--chat-guid", "SMS;-;" H, "--file", "/tmp/a.jpg"};
+    const char *want_sms[] = {"imsg", "send", "--chat-guid", ("SMS;-;" H), "--file", "/tmp/a.jpg"};
     for (size_t i = 0; i < 6; i++)
         HU_ASSERT_STR_EQ(argv[i], want_sms[i]);
     HU_ASSERT_NULL(argv[6]);
@@ -354,7 +363,7 @@ static void send_timed_out_imsg_that_landed_is_not_sent_again(void) {
     fake_t f;
     memset(&f, 0, sizeof(f));
     f.boundary = 500;
-    f.land_on_call = 3; /* 1 = prior, 2 = first poll, 3 = second poll */
+    f.land_on_call = 2; /* found on the second poll */
     f.as_ok = true;
     hu_imsg_send_route_t r = {.chat_guid = "any;-;" H, .service = HU_IMSG_SERVICE_RCS};
     hu_imsg_send_backend_t be = fake_backend(&f, true);
@@ -370,7 +379,7 @@ static void send_applescript_failure_that_landed_is_not_a_final_failure(void) {
     fake_t f;
     memset(&f, 0, sizeof(f));
     f.boundary = 7;
-    f.land_on_call = 2 + (int)HU_IMSG_LAND_POLLS_BY_CHAT + 1; /* after the AppleScript */
+    f.land_on_call = (int)HU_IMSG_LAND_POLLS_BY_CHAT + 1; /* after the AppleScript */
     hu_imsg_send_route_t r = {.chat_guid = "SMS;-;" H, .service = HU_IMSG_SERVICE_SMS};
     hu_imsg_send_backend_t be = fake_backend(&f, true);
     hu_imsg_send_request_t q = req_for(&r);
@@ -390,22 +399,55 @@ static void send_never_landed_polls_a_bounded_number_of_times(void) {
     hu_imsg_send_request_t q = req_for(&r);
     HU_ASSERT_EQ((int)hu_imsg_send_text_via(&be, &q), (int)HU_IMSG_SEND_PATH_NONE);
     HU_ASSERT_EQ(f.sleeps, 2 * (int)HU_IMSG_LAND_POLLS_BY_CHAT);
-    HU_ASSERT_EQ(f.boundary_calls, 1 + 2 * (int)HU_IMSG_LAND_POLLS_BY_CHAT);
+    HU_ASSERT_EQ(f.boundary_calls, 1);
+    HU_ASSERT_EQ(f.landed_calls, 2 * (int)HU_IMSG_LAND_POLLS_BY_CHAT);
+    HU_ASSERT_STR_EQ(f.landed_text, "hey"); /* asked about THIS bubble's text */
 }
 
-static void send_unreadable_boundary_falls_back_as_before(void) {
-    /* No evidence either way: the pre-fix fallback, but no polling stall. */
+static void send_unreadable_chatdb_after_imsg_failure_does_not_fall_back(void) {
+    /* Round 2: no pre-send boundary means a timed-out imsg cannot be checked;
+     * an AppleScript retry could double-text family. A missed send is less
+     * bad than a duplicate: retry the read once, then report the failure. */
     fake_t f;
     memset(&f, 0, sizeof(f));
     f.boundary = -1;
-    f.land_on_call = -1;
     f.as_ok = true;
+    hu_imsg_send_route_t r = {.chat_guid = "any;-;" H, .service = HU_IMSG_SERVICE_RCS};
     hu_imsg_send_backend_t be = fake_backend(&f, true);
+    hu_imsg_send_request_t q = req_for(&r);
+    HU_ASSERT_EQ((int)hu_imsg_send_text_via(&be, &q), (int)HU_IMSG_SEND_PATH_NONE);
+    HU_ASSERT_EQ(f.imsg_calls, 1);
+    HU_ASSERT_EQ(f.as_calls, 0);
+    HU_ASSERT_EQ(f.boundary_calls, 2); /* one retry */
+    HU_ASSERT_EQ(f.sleeps, 1);
+    HU_ASSERT_STR_EQ(f.lines[1],
+                     "[send] path=applescript result=skipped chat_service=RCS by_chat=1");
+}
+
+static void send_unreadable_chatdb_without_imsg_still_tries_applescript(void) {
+    /* Nothing was attempted yet, so AppleScript cannot duplicate anything. */
+    fake_t f;
+    memset(&f, 0, sizeof(f));
+    f.boundary = -1;
+    f.as_ok = true;
+    hu_imsg_send_backend_t be = fake_backend(&f, false);
     hu_imsg_send_request_t q = req_for(NULL);
     HU_ASSERT_EQ((int)hu_imsg_send_text_via(&be, &q), (int)HU_IMSG_SEND_PATH_APPLESCRIPT);
     HU_ASSERT_EQ(f.as_calls, 1);
-    HU_ASSERT_EQ(f.sleeps, 0);
     HU_ASSERT_EQ(f.as_timeout, HU_IMSG_AS_TIMEOUT_BY_HANDLE_S);
+}
+
+/* Round 2: a newer outbound row only proves delivery when it is THIS text. */
+static void landed_text_must_match_the_bubble(void) {
+    HU_ASSERT_TRUE(hu_imsg_landed_text_matches("feel better", 11, "feel better", 11));
+    HU_ASSERT_TRUE(hu_imsg_landed_text_matches(" feel better\n", 13, "feel better", 11));
+    /* Seth typing from his phone in the window is not our bubble. */
+    HU_ASSERT_FALSE(hu_imsg_landed_text_matches("on my way", 9, "feel better", 11));
+    HU_ASSERT_FALSE(hu_imsg_landed_text_matches("feel", 4, "feel better", 11));
+    HU_ASSERT_FALSE(hu_imsg_landed_text_matches("", 0, "feel better", 11));
+    /* Undecodable body: a filtered (plain, unerrored) from-me row in the
+     * window counts — the duplicate is the worse outcome. */
+    HU_ASSERT_TRUE(hu_imsg_landed_text_matches(NULL, 0, "feel better", 11));
 }
 
 void run_imessage_send_route_tests(void) {
@@ -436,6 +478,8 @@ void run_imessage_send_route_tests(void) {
     HU_RUN_TEST(send_timed_out_imsg_that_landed_is_not_sent_again);
     HU_RUN_TEST(send_applescript_failure_that_landed_is_not_a_final_failure);
     HU_RUN_TEST(send_never_landed_polls_a_bounded_number_of_times);
-    HU_RUN_TEST(send_unreadable_boundary_falls_back_as_before);
+    HU_RUN_TEST(send_unreadable_chatdb_after_imsg_failure_does_not_fall_back);
+    HU_RUN_TEST(send_unreadable_chatdb_without_imsg_still_tries_applescript);
+    HU_RUN_TEST(landed_text_must_match_the_bubble);
     hu_imsg_route_reset();
 }

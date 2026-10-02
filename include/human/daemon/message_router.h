@@ -143,6 +143,12 @@ hu_error_t hu_daemon_record_delivered_reply(struct hu_agent *agent, const char *
     "[delivery] Your previous reply was NOT delivered: the send failed and they never saw " \
     "it. Do not refer to it as something you said."
 struct hu_session_store;
+/* Did this reply reach nobody because sending failed? `any_send_err`: a
+ * vtable->send for this reply returned an error (every build); the counter
+ * pair brackets the reply with hu_daemon_send_failure_total(). False when any
+ * bubble was delivered or nothing failed (a deliberate non-send). */
+bool hu_daemon_reply_lost(bool delivered, bool any_send_err, uint64_t fails_before,
+                          uint64_t fails_after);
 hu_error_t hu_daemon_note_reply_undelivered(struct hu_session_store *store, const char *session,
                                             size_t session_len);
 

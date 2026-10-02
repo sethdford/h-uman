@@ -1668,6 +1668,106 @@ hu_blue_verdict_t hu_imessage_blue_guard_verdict(hu_allocator_t *alloc, const ch
 }
 #endif /* __APPLE__ && __MACH__ && !HU_IS_TEST */
 
+#ifdef HU_ENABLE_SQLITE
+/* Send-path chat.db reads (see imessage.h). Only plain, unerrored outbound
+ * rows: a tapback or a failed copy in the window is not our bubble landing. */
+#define IMSG_OUT_PLAIN " m.is_from_me = 1 AND m.associated_message_type = 0 AND m.error = 0"
+#define IMSG_FROM_CHAT                                                       \
+    " FROM message m JOIN chat_message_join cmj ON cmj.message_id = m.ROWID" \
+    " JOIN chat c ON c.ROWID = cmj.chat_id WHERE c.guid = ?1 AND"
+#define IMSG_FROM_HANDLE                                                             \
+    " FROM message m WHERE (m.handle_id IN (SELECT ROWID FROM handle WHERE id = ?1)" \
+    " OR m.ROWID IN (SELECT cmj.message_id FROM chat_message_join cmj"               \
+    " JOIN chat c ON c.ROWID = cmj.chat_id WHERE c.chat_identifier = ?1)) AND"
+
+int64_t hu_imessage_chatdb_sent_boundary(void *sqlite_db, const char *chat_guid,
+                                         const char *handle) {
+    sqlite3 *db = (sqlite3 *)sqlite_db;
+    const char *key = chat_guid ? chat_guid : handle;
+    if (!db || !key || !key[0])
+        return -1;
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(db,
+                           chat_guid
+                               ? "SELECT COALESCE(MAX(m.ROWID), 0)" IMSG_FROM_CHAT IMSG_OUT_PLAIN
+                               : "SELECT COALESCE(MAX(m.ROWID), 0)" IMSG_FROM_HANDLE IMSG_OUT_PLAIN,
+                           -1, &st, NULL) != SQLITE_OK)
+        return -1;
+    sqlite3_bind_text(st, 1, key, -1, SQLITE_STATIC);
+    int64_t v = sqlite3_step(st) == SQLITE_ROW ? sqlite3_column_int64(st, 0) : -1;
+    sqlite3_finalize(st);
+    return v;
+}
+
+bool hu_imessage_chatdb_text_landed(void *sqlite_db, const char *chat_guid, const char *handle,
+                                    int64_t prior, const char *text, size_t text_len) {
+    sqlite3 *db = (sqlite3 *)sqlite_db;
+    const char *key = chat_guid ? chat_guid : handle;
+    if (!db || !key || !key[0] || prior < 0 || !text)
+        return false;
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(db,
+                           chat_guid
+                               ? "SELECT m.text, m.attributedBody" IMSG_FROM_CHAT IMSG_OUT_PLAIN
+                                 " AND m.ROWID > ?2 ORDER BY m.ROWID"
+                               : "SELECT m.text, m.attributedBody" IMSG_FROM_HANDLE IMSG_OUT_PLAIN
+                                 " AND m.ROWID > ?2 ORDER BY m.ROWID",
+                           -1, &st, NULL) != SQLITE_OK)
+        return false;
+    sqlite3_bind_text(st, 1, key, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(st, 2, prior);
+    bool hit = false;
+    while (!hit && sqlite3_step(st) == SQLITE_ROW) {
+        const char *row = (const char *)sqlite3_column_text(st, 0);
+        char decoded[4096];
+        if (!row || !row[0] || hu_imessage_text_is_placeholder(row)) {
+            /* macOS 15+ keeps the text in attributedBody; same decoder as poll. */
+            const unsigned char *blob = sqlite3_column_blob(st, 1);
+            int blen = sqlite3_column_bytes(st, 1);
+            size_t n = (blob && blen > 0) ? hu_imessage_extract_attributed_body(
+                                                blob, (size_t)blen, decoded, sizeof(decoded))
+                                          : 0;
+            row = n > 0 ? decoded : NULL; /* NULL: undecodable */
+        }
+        hit = hu_imsg_landed_text_matches(row, row ? strlen(row) : 0, text, text_len);
+    }
+    sqlite3_finalize(st);
+    return hit;
+}
+
+bool hu_imessage_chatdb_inbound_route(void *sqlite_db, const char *handle, size_t handle_len,
+                                      char *guid_out, size_t guid_cap, char *service_out,
+                                      size_t service_cap) {
+    sqlite3 *db = (sqlite3 *)sqlite_db;
+    if (!db || !handle || handle_len == 0 || !guid_out || guid_cap == 0 || !service_out ||
+        service_cap == 0)
+        return false;
+    guid_out[0] = service_out[0] = '\0';
+    /* One row, two columns: the chat and the service of the same message. */
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(db,
+                           "SELECT c.guid, m.service FROM message m "
+                           "JOIN handle h ON m.handle_id = h.ROWID "
+                           "JOIN chat_message_join cmj ON cmj.message_id = m.ROWID "
+                           "JOIN chat c ON c.ROWID = cmj.chat_id "
+                           "WHERE h.id = ?1 AND m.is_from_me = 0 AND m.service IS NOT NULL "
+                           "AND c.chat_identifier = h.id ORDER BY m.date DESC LIMIT 1",
+                           -1, &st, NULL) != SQLITE_OK)
+        return false;
+    sqlite3_bind_text(st, 1, handle, (int)handle_len, SQLITE_STATIC);
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        const char *g = (const char *)sqlite3_column_text(st, 0);
+        const char *v = (const char *)sqlite3_column_text(st, 1);
+        if (g && v) {
+            snprintf(guid_out, guid_cap, "%s", g);
+            snprintf(service_out, service_cap, "%s", v);
+        }
+    }
+    sqlite3_finalize(st);
+    return guid_out[0] && service_out[0];
+}
+#endif /* HU_ENABLE_SQLITE */
+
 static hu_error_t imessage_start(void *ctx) {
     hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ctx;
     if (!c)
@@ -2263,29 +2363,44 @@ static bool imsg_be_run_applescript(void *ctx, const char *script, unsigned time
     return ok;
 }
 
-/* MAX(ROWID) of is_from_me rows for the route's chat (by GUID — SMS/RCS rows
- * can carry handle_id 0) or for the handle, as decimal text through the shared
- * one-column helper. 0 = none yet; -1 = chat.db unreadable. */
+/* chat.db reads for the landing check, on the user's chat.db: by chat GUID
+ * for SMS/RCS routes, else by handle. -1 / false when it cannot be read. */
 static int64_t imsg_be_sent_boundary(void *ctx, const hu_imsg_send_route_t *route, const char *to) {
     (void)ctx;
-    char buf[32];
-    bool by_chat = hu_imsg_route_by_chat(route);
-    const char *key = by_chat ? route->chat_guid : to;
-    if (!key || !key[0])
+#ifdef HU_ENABLE_SQLITE
+    sqlite3 *db = imsg_open_user_chatdb();
+    if (!db)
         return -1;
-    if (!imsg_query_text1(by_chat ? "SELECT CAST(COALESCE(MAX(m.ROWID), 0) AS TEXT) FROM message m "
-                                    "JOIN chat_message_join cmj ON cmj.message_id = m.ROWID "
-                                    "JOIN chat c ON c.ROWID = cmj.chat_id "
-                                    "WHERE c.guid = ?1 AND m.is_from_me = 1"
-                                  : "SELECT CAST(COALESCE(MAX(m.ROWID), 0) AS TEXT) FROM message m "
-                                    "WHERE m.is_from_me = 1 AND (m.handle_id IN "
-                                    "(SELECT ROWID FROM handle WHERE id = ?1) OR m.ROWID IN "
-                                    "(SELECT cmj.message_id FROM chat_message_join cmj "
-                                    "JOIN chat c ON c.ROWID = cmj.chat_id "
-                                    "WHERE c.chat_identifier = ?1))",
-                          0, key, strlen(key), buf, sizeof(buf)))
-        return -1;
-    return (int64_t)strtoll(buf, NULL, 10);
+    int64_t v = hu_imessage_chatdb_sent_boundary(
+        db, hu_imsg_route_by_chat(route) ? route->chat_guid : NULL, to);
+    sqlite3_close(db);
+    return v;
+#else
+    (void)route;
+    (void)to;
+    return -1;
+#endif
+}
+
+static bool imsg_be_landed(void *ctx, const hu_imsg_send_route_t *route, const char *to,
+                           int64_t prior, const char *text) {
+    (void)ctx;
+#ifdef HU_ENABLE_SQLITE
+    sqlite3 *db = imsg_open_user_chatdb();
+    if (!db)
+        return false;
+    bool hit =
+        hu_imessage_chatdb_text_landed(db, hu_imsg_route_by_chat(route) ? route->chat_guid : NULL,
+                                       to, prior, text, text ? strlen(text) : 0);
+    sqlite3_close(db);
+    return hit;
+#else
+    (void)route;
+    (void)to;
+    (void)prior;
+    (void)text;
+    return false;
+#endif
 }
 
 static void imsg_be_sleep_ms(void *ctx, unsigned ms) {
@@ -2294,21 +2409,29 @@ static void imsg_be_sleep_ms(void *ctx, unsigned ms) {
 }
 
 /* After a restart the in-process route table is empty: rebuild this contact's
- * route from chat.db — the chat of their latest message and the service of
- * their latest INBOUND message — so the first reply still goes to the right
- * chat. Not from the blue guard (HU_IMESSAGE_ALLOW_GREEN skips its lookup). */
+ * route from chat.db — the chat AND service of their latest INBOUND message,
+ * one row — so the first reply still goes to the right chat. Not from the blue guard
+ * (HU_IMESSAGE_ALLOW_GREEN skips its lookup). */
 static bool imsg_route_recover(const char *tgt, size_t tgt_len, hu_imsg_send_route_t *route) {
+#ifdef HU_ENABLE_SQLITE
     char guid[HU_IMSG_ROUTE_GUID_MAX];
     char svc[16];
-    if (!hu_imessage_reply_chat_guid_for_handle(tgt, tgt_len, guid, sizeof(guid)))
+    sqlite3 *db = imsg_open_user_chatdb();
+    if (!db)
         return false;
-    if (!imsg_query_text1("SELECT m.service FROM message m JOIN handle h ON m.handle_id = h.ROWID "
-                          "WHERE h.id = ? AND m.is_from_me = 0 AND m.service IS NOT NULL "
-                          "ORDER BY m.date DESC LIMIT 1",
-                          0, tgt, tgt_len, svc, sizeof(svc)))
+    bool ok =
+        hu_imessage_chatdb_inbound_route(db, tgt, tgt_len, guid, sizeof(guid), svc, sizeof(svc));
+    sqlite3_close(db);
+    if (!ok)
         return false;
     hu_imsg_route_note_inbound(tgt, tgt_len, guid, svc);
     return hu_imsg_route_lookup(tgt, tgt_len, route);
+#else
+    (void)tgt;
+    (void)tgt_len;
+    (void)route;
+    return false;
+#endif
 }
 
 static void imsg_be_log_outcome(void *ctx, const char *line) {
@@ -2639,6 +2762,7 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
                                          .run_applescript = imsg_be_run_applescript,
                                          .log_outcome = imsg_be_log_outcome,
                                          .sent_boundary = imsg_be_sent_boundary,
+                                         .landed = imsg_be_landed,
                                          .sleep_ms = imsg_be_sleep_ms};
             /* "auto" lets the CLI fall back to SMS for a handle-addressed
              * contact with no iMessage account; hardcoding "imessage" here is

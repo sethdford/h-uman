@@ -235,14 +235,14 @@ static void log_attempt(const hu_imsg_send_backend_t *be, const char *path, cons
  * times. False when the boundary is unknown — no evidence is not delivery. */
 static bool landed_since(const hu_imsg_send_backend_t *be, const hu_imsg_send_request_t *req,
                          int64_t prior) {
-    if (prior < 0 || !be->sent_boundary)
+    if (prior < 0 || !be->landed)
         return false;
     unsigned polls = hu_imsg_route_by_chat(req->route) ? HU_IMSG_LAND_POLLS_BY_CHAT
                                                        : HU_IMSG_LAND_POLLS_BY_HANDLE;
     for (unsigned i = 0; i < polls; i++) {
         if (be->sleep_ms)
             be->sleep_ms(be->ctx, HU_IMSG_LAND_POLL_MS);
-        if (be->sent_boundary(be->ctx, req->route, req->to) > prior)
+        if (be->landed(be->ctx, req->route, req->to, prior, req->text))
             return true;
     }
     return false;
@@ -254,9 +254,16 @@ hu_imsg_send_path_t hu_imsg_send_text_via(const hu_imsg_send_backend_t *be,
         return HU_IMSG_SEND_PATH_NONE;
     /* Read before any attempt: 0 = chat has no outbound rows yet, -1 = unknown. */
     int64_t prior = be->sent_boundary ? be->sent_boundary(be->ctx, req->route, req->to) : -1;
+    if (prior < 0 && be->sent_boundary) { /* chat.db busy: one retry */
+        if (be->sleep_ms)
+            be->sleep_ms(be->ctx, HU_IMSG_BOUNDARY_RETRY_MS);
+        prior = be->sent_boundary(be->ctx, req->route, req->to);
+    }
+    bool imsg_tried = false;
     if (be->imsg_available && be->run_imsg) {
         const char *argv[10];
         if (hu_imsg_route_build_argv(req->route, req->to, req->text, req->service, argv, 10) > 0) {
+            imsg_tried = true;
             if (be->run_imsg(be->ctx, argv)) {
                 log_attempt(be, "imsg", "ok", req->route);
                 return HU_IMSG_SEND_PATH_IMSG;
@@ -271,6 +278,13 @@ hu_imsg_send_path_t hu_imsg_send_text_via(const hu_imsg_send_backend_t *be,
     }
     if (!be->run_applescript)
         return HU_IMSG_SEND_PATH_NONE;
+    /* imsg failed and chat.db cannot tell whether it delivered anyway: a
+     * second send could double-text family. A missed send is less bad —
+     * report the failure (recorded, owner told "may not have been delivered"). */
+    if (imsg_tried && prior < 0) {
+        log_attempt(be, "applescript", "skipped", req->route);
+        return HU_IMSG_SEND_PATH_NONE;
+    }
     size_t cap = 256 + strlen(req->msg_esc ? req->msg_esc : "") +
                  strlen(req->tgt_esc ? req->tgt_esc : "") + HU_IMSG_ROUTE_GUID_MAX;
     /* The caller caps text at 1000 chars (<= 2000 escaped), so this always
@@ -300,4 +314,25 @@ hu_imsg_send_path_t hu_imsg_send_text_via(const hu_imsg_send_backend_t *be,
     }
     log_attempt(be, "applescript", "fail", req->route);
     return HU_IMSG_SEND_PATH_NONE;
+}
+
+static void trim_span(const char **p, size_t *len) {
+    while (*len > 0 && ((*p)[0] == ' ' || (*p)[0] == '\n' || (*p)[0] == '\t' || (*p)[0] == '\r')) {
+        (*p)++;
+        (*len)--;
+    }
+    while (*len > 0 && ((*p)[*len - 1] == ' ' || (*p)[*len - 1] == '\n' || (*p)[*len - 1] == '\t' ||
+                        (*p)[*len - 1] == '\r'))
+        (*len)--;
+}
+
+bool hu_imsg_landed_text_matches(const char *row, size_t row_len, const char *sent,
+                                 size_t sent_len) {
+    if (!row)
+        return true; /* undecodable plain from-me row: the duplicate is worse */
+    if (!sent)
+        return false;
+    trim_span(&row, &row_len);
+    trim_span(&sent, &sent_len);
+    return row_len > 0 && row_len == sent_len && memcmp(row, sent, row_len) == 0;
 }

@@ -117,8 +117,23 @@ typedef struct hu_imsg_send_backend {
      * landing checks. A failure report is not proof nothing went out: a
      * timed-out imsg or osascript may still deliver (Mindy, 2026-09-27). */
     int64_t (*sent_boundary)(void *ctx, const hu_imsg_send_route_t *route, const char *to);
+    /* True when a plain, unerrored outbound row newer than `prior` carries
+     * `text` (hu_imsg_landed_text_matches). A newer row alone is not proof:
+     * Seth typing from his phone or a tapback lands in the same window. */
+    bool (*landed)(void *ctx, const hu_imsg_send_route_t *route, const char *to, int64_t prior,
+                   const char *text);
     void (*sleep_ms)(void *ctx, unsigned ms);
 } hu_imsg_send_backend_t;
+
+/* Does an outbound chat.db row's decoded text prove `sent` landed? Equal
+ * after trimming surrounding whitespace. `row` NULL means the body could not
+ * be decoded: the (already filtered) plain from-me row then counts, because a
+ * duplicate to family is worse than a missed send. */
+bool hu_imsg_landed_text_matches(const char *row, size_t row_len, const char *sent,
+                                 size_t sent_len);
+
+/* Pre-send boundary read retried once after this delay when chat.db is busy. */
+#define HU_IMSG_BOUNDARY_RETRY_MS 200u
 
 /* Landing-check polling after a failed attempt: every 500 ms, up to 5 s for a
  * chat-addressed (SMS/RCS) route, 2 s otherwise. */

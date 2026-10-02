@@ -611,6 +611,11 @@ hu_error_t hu_daemon_dispatch_imessage_reply_msg_ex(
         out_text_sent, text_required);
 }
 
+bool hu_daemon_reply_lost(bool delivered, bool any_send_err, uint64_t fails_before,
+                          uint64_t fails_after) {
+    return !delivered && (any_send_err || fails_after > fails_before);
+}
+
 hu_error_t hu_daemon_note_reply_undelivered(struct hu_session_store *store, const char *session,
                                             size_t session_len) {
     if (!store || !store->vtable || !store->vtable->save_message || !session || session_len == 0)

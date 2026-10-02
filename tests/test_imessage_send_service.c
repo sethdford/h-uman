@@ -168,6 +168,90 @@ static void send_to_sms_contact_uses_the_chat_route(void) {
     hu_imsg_route_reset();
 }
 
+#ifdef HU_ENABLE_SQLITE
+/* Round 2: the chat.db halves of the send path, against a fixture chat.db
+ * (in-memory, only the columns these queries read). */
+#include <sqlite3.h>
+
+#define FX_H "+15550007777"
+
+static sqlite3 *fixture_chatdb(void) {
+    sqlite3 *db = NULL;
+    if (sqlite3_open(":memory:", &db) != SQLITE_OK)
+        return NULL;
+    const char *ddl =
+        "CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT, service TEXT);"
+        "CREATE TABLE chat (ROWID INTEGER PRIMARY KEY, guid TEXT, chat_identifier TEXT,"
+        " service_name TEXT, style INTEGER);"
+        "CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);"
+        "CREATE TABLE message (ROWID INTEGER PRIMARY KEY, text TEXT, attributedBody BLOB,"
+        " handle_id INTEGER, is_from_me INTEGER, date INTEGER, service TEXT,"
+        " associated_message_type INTEGER DEFAULT 0, error INTEGER DEFAULT 0);"
+        /* Two handles for one number (iMessage placeholder + RCS), two 1:1 chats. */
+        "INSERT INTO handle VALUES (1, '" FX_H "', 'iMessage'), (2, '" FX_H "', 'RCS');"
+        "INSERT INTO chat VALUES (1, 'iMessage;-;" FX_H "', '" FX_H "', 'iMessage', 45),"
+        " (2, 'any;-;" FX_H "', '" FX_H "', 'SMS', 45);"
+        /* Her latest inbound is RCS (date 100); OUR latest message went out on
+         * the stale iMessage chat (date 200). */
+        "INSERT INTO message (ROWID, text, handle_id, is_from_me, date, service) VALUES"
+        " (1, 'not much going on', 2, 0, 100, 'RCS'),"
+        " (2, 'old reply', 1, 1, 200, 'iMessage');"
+        "INSERT INTO chat_message_join VALUES (2, 1), (1, 2);";
+    if (sqlite3_exec(db, ddl, NULL, NULL, NULL) != SQLITE_OK) {
+        sqlite3_close(db);
+        return NULL;
+    }
+    return db;
+}
+
+static void chatdb_route_recovery_takes_chat_and_service_from_latest_inbound(void) {
+    sqlite3 *db = fixture_chatdb();
+    HU_ASSERT_NOT_NULL(db);
+    char guid[160], svc[16];
+    HU_ASSERT_TRUE(hu_imessage_chatdb_inbound_route(db, FX_H, strlen(FX_H), guid, sizeof(guid), svc,
+                                                    sizeof(svc)));
+    /* Not the stale outbound iMessage chat: the chat she wrote on. */
+    HU_ASSERT_STR_EQ(guid, "any;-;" FX_H);
+    HU_ASSERT_STR_EQ(svc, "RCS");
+    HU_ASSERT_FALSE(hu_imessage_chatdb_inbound_route(db, "+15550000000", 12, guid, sizeof(guid),
+                                                     svc, sizeof(svc)));
+    sqlite3_close(db);
+}
+
+static void chatdb_landing_ignores_tapbacks_errors_and_owner_texts(void) {
+    sqlite3 *db = fixture_chatdb();
+    HU_ASSERT_NOT_NULL(db);
+    const char *chat = "any;-;" FX_H;
+    int64_t prior = hu_imessage_chatdb_sent_boundary(db, chat, FX_H);
+    HU_ASSERT_EQ(prior, 0); /* no outbound row in her RCS chat yet */
+    HU_ASSERT_EQ(sqlite3_exec(db,
+                              "INSERT INTO message (ROWID, text, handle_id, is_from_me, date,"
+                              " service, associated_message_type, error) VALUES"
+                              /* a tapback, Seth typing on his phone, an errored copy */
+                              " (3, 'Loved \"not much\"', 2, 1, 300, 'RCS', 2000, 0),"
+                              " (4, 'on my way', 2, 1, 301, 'RCS', 0, 0),"
+                              " (5, 'feel better', 2, 1, 302, 'RCS', 0, 22);"
+                              "INSERT INTO chat_message_join VALUES (2, 3), (2, 4), (2, 5);",
+                              NULL, NULL, NULL),
+                 SQLITE_OK);
+    HU_ASSERT_FALSE(hu_imessage_chatdb_text_landed(db, chat, FX_H, prior, "feel better", 11));
+    /* The boundary counts only plain, unerrored outbound rows. */
+    HU_ASSERT_EQ(hu_imessage_chatdb_sent_boundary(db, chat, FX_H), 4);
+
+    HU_ASSERT_EQ(sqlite3_exec(db,
+                              "INSERT INTO message (ROWID, text, handle_id, is_from_me, date,"
+                              " service) VALUES (6, 'feel better', 2, 1, 303, 'RCS');"
+                              "INSERT INTO chat_message_join VALUES (2, 6);",
+                              NULL, NULL, NULL),
+                 SQLITE_OK);
+    HU_ASSERT_TRUE(hu_imessage_chatdb_text_landed(db, chat, FX_H, prior, "feel better", 11));
+    /* By handle (no chat route) finds it too; a later prior does not. */
+    HU_ASSERT_TRUE(hu_imessage_chatdb_text_landed(db, NULL, FX_H, prior, "feel better", 11));
+    HU_ASSERT_FALSE(hu_imessage_chatdb_text_landed(db, chat, FX_H, 6, "feel better", 11));
+    sqlite3_close(db);
+}
+#endif /* HU_ENABLE_SQLITE */
+
 void run_imessage_send_service_tests(void) {
     HU_RUN_TEST(test_send_service_defaults_to_auto);
     HU_RUN_TEST(test_send_service_env_can_restore_imessage_only);
@@ -178,6 +262,10 @@ void run_imessage_send_service_tests(void) {
     HU_RUN_TEST(poll_remembers_the_sms_chat_a_contact_wrote_on);
     HU_RUN_TEST(poll_group_message_leaves_no_route);
     HU_RUN_TEST(send_to_sms_contact_uses_the_chat_route);
+#ifdef HU_ENABLE_SQLITE
+    HU_RUN_TEST(chatdb_route_recovery_takes_chat_and_service_from_latest_inbound);
+    HU_RUN_TEST(chatdb_landing_ignores_tapbacks_errors_and_owner_texts);
+#endif
 }
 
 #else

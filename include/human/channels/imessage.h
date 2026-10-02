@@ -546,6 +546,21 @@ hu_error_t hu_imessage_test_inject_mock_full(hu_channel_t *ch, const char *sessi
                                              size_t content_len,
                                              const hu_imessage_test_msg_opts_t *opts);
 
+/* chat.db helpers of the send path, on a database the caller opened
+ * (tests pass a fixture). `chat_guid` non-NULL addresses that chat, else the
+ * handle's rows and 1:1 chats. Only plain (associated_message_type 0),
+ * unerrored outbound rows count. */
+int64_t hu_imessage_chatdb_sent_boundary(void *sqlite_db, const char *chat_guid,
+                                         const char *handle);
+bool hu_imessage_chatdb_text_landed(void *sqlite_db, const char *chat_guid, const char *handle,
+                                    int64_t prior, const char *text, size_t text_len);
+/* Route of the contact's latest INBOUND 1:1 message: that row's chat GUID and
+ * service, from the same row (a newer outbound on a stale chat cannot pair an
+ * iMessage chat with an RCS service). */
+bool hu_imessage_chatdb_inbound_route(void *sqlite_db, const char *handle, size_t handle_len,
+                                      char *guid_out, size_t guid_cap, char *service_out,
+                                      size_t service_cap);
+
 /** Test builds: the send route imessage_send looked up for its last send
  *  (zeroed when none). Proves the send entry point consults the route table. */
 struct hu_imsg_send_route;
