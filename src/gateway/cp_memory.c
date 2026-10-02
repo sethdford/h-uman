@@ -485,7 +485,7 @@ hu_error_t cp_memory_consolidate(hu_allocator_t *alloc, hu_app_context_t *app, h
         return HU_ERR_NOT_SUPPORTED;
 
     hu_memory_t *memory = app->agent->memory;
-    hu_consolidation_config_t config = HU_CONSOLIDATION_DEFAULTS;
+    hu_consolidation_config_t config = hu_agent_consolidation_config(app->config);
     hu_error_t err = hu_memory_consolidate(alloc, memory, &config);
     if (err != HU_OK)
         return err;

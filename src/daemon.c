@@ -39,6 +39,7 @@
 #include "human/behavior/win_detect.h"
 #include "human/core/gate_mode.h"
 #include "human/daemon/daemon_shape.h"
+#include "human/daemon/proposer_context.h"
 #include "human/memory/celebration_repo.h"
 #include "human/memory/graph_ingest.h"
 #include "human/memory/opinion_challenge.h" /* roadmap #14: stance-hold directive */
@@ -932,6 +933,8 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                 }
                 combined[combined_len] = '\0';
             }
+            hu_proposer_context_t pctx; /* HU_PROPOSER_CONTEXT: thread kept only for local */
+            hu_proposer_context_begin(&pctx, &agent->provider, entries, entry_count, (int64_t)now);
             if (entries)
                 alloc->free(alloc->ctx, entries, entry_count * sizeof(*entries));
 
@@ -1496,16 +1499,13 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                         inputs.due_followups_context_len = due_fu_len;
                     }
 
-                    int64_t unified_last_tick = 0;
-                    uint64_t unified_tick_id = 0;
                     hu_init_proposer_result_t unified_result = HU_INIT_RESULT_SKIP;
-                    hu_init_decision_t unified_decision;
-                    memset(&unified_decision, 0, sizeof(unified_decision));
-                    (void)hu_init_proposer_tick_with_provider_ex(
-                        &config->initiative, daemon_autoresponder_config(),
+                    hu_init_decision_t unified_decision = {0};
+                    hu_proposer_context_decide(
+                        &pctx, &config->initiative, daemon_autoresponder_config(),
                         daemon_local_tz_offset_seconds((int64_t)now), &gov_budget, agent,
-                        &agent->provider, alloc, &inputs, /*last_inbound_unix=*/0, (int64_t)now,
-                        &unified_last_tick, &unified_tick_id, &unified_result, &unified_decision);
+                        &agent->provider, alloc, cp, &inputs, (int64_t)now, &unified_result,
+                        &unified_decision);
 
                     if (unified_result == HU_INIT_RESULT_FIRED && unified_decision.draft_len > 0) {
                         response = (char *)alloc->alloc(alloc->ctx, unified_decision.draft_len + 1);
