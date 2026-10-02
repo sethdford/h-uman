@@ -2,6 +2,7 @@
 #include "human/agent/self_rag.h"
 #include "human/agent/world_model.h" /* sprint-2c Story A — wm->negatives */
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -533,9 +534,8 @@ hu_error_t hu_response_verify_against_world_model(hu_allocator_t *alloc, hu_memo
                      neg_refusal0);
             if (policy_hit0)
                 hu_log_warn("response_verifier", NULL,
-                            "negative-memory [policy] hit forced ABSTAIN for contact=%.*s",
-                            (int)(contact_id_len > 64 ? 64 : contact_id_len),
-                            contact_id ? contact_id : "");
+                            "negative-memory [policy] hit forced ABSTAIN for contact=%s",
+                            HU_LOG_WHO(contact_id, contact_id_len));
         } else if (o == HU_VERIFY_RESULT_HEDGED) {
             out_report->outcome = HU_VERIFY_RESULT_HEDGED;
             if (cfg->mode == HU_VERIFY_SOFT) {
@@ -573,9 +573,8 @@ hu_error_t hu_response_verify_against_world_model(hu_allocator_t *alloc, hu_memo
              * tooling can grep for them. NULL observer = stdout fallback. */
             if (policy_hit)
                 hu_log_warn("response_verifier", NULL,
-                            "negative-memory [policy] hit forced ABSTAIN for contact=%.*s",
-                            (int)(contact_id_len > 64 ? 64 : contact_id_len),
-                            contact_id ? contact_id : "");
+                            "negative-memory [policy] hit forced ABSTAIN for contact=%s",
+                            HU_LOG_WHO(contact_id, contact_id_len));
             return HU_OK;
         }
     }

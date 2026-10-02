@@ -32,6 +32,7 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include "human/core/paths.h"
 #include "human/cost.h"
 #include "human/cron.h"
@@ -1557,9 +1558,9 @@ static hu_error_t cmd_service_loop(hu_allocator_t *alloc, int argc, char **argv)
                 hu_cron_add_agent_job((hu_cron_scheduler_t *)app_ctx.agent->scheduler, alloc, sched,
                                       prompt, channel_target, job_name, &job_id);
             if (jerr == HU_OK) {
-                hu_log_info(
-                    "human", NULL, "proactive check-in registered for %s (id=%llu sched=%s)",
-                    cp->name ? cp->name : cp->contact_id, (unsigned long long)job_id, sched);
+                hu_log_info("human", NULL,
+                            "proactive check-in registered for %s (id=%llu sched=%s)",
+                            HU_LOG_WHO_CSTR(cp->contact_id), (unsigned long long)job_id, sched);
             }
         }
     }

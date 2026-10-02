@@ -21,6 +21,7 @@
 #include "human/config.h"
 #include "human/core/gate_mode.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include "human/core/string.h"
 #include "human/daemon/agent_facade.h"
 #include "human/daemon/context_facade.h"
@@ -656,10 +657,10 @@ void hu_daemon_reactive_prompt_build(hu_allocator_t *alloc, hu_agent_t *agent,
                                     if (!hold_would)
                                         continue;
                                     hu_log_info("opinion_hold", agent ? agent->observer : NULL,
-                                                "%s: inbound challenges stance [%.*s]",
+                                                "%s: inbound challenges stance [%s]",
                                                 hold_mode == HU_GATE_LIVE ? "live" : "shadow",
-                                                (int)evo_opinions[oi].topic_len,
-                                                evo_opinions[oi].topic);
+                                                HU_LOG_TEXT(evo_opinions[oi].topic,
+                                                            evo_opinions[oi].topic_len, 120));
                                     if (hold_dir && hold_len > 0)
                                         PHASE6_APPEND(hold_dir, hold_len);
                                     break; /* one hold directive max per turn */

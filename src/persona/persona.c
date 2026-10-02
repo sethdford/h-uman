@@ -3,6 +3,7 @@
 #include "human/core/gate_mode.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include "human/core/paths.h"
 #include "human/core/string.h"
 #include "human/data/loader.h"
@@ -616,9 +617,8 @@ const hu_contact_profile_t *hu_persona_find_contact(const hu_persona_t *persona,
             return cp;
     }
     if (getenv("HU_DEBUG"))
-        hu_log_info("persona", NULL, "find_contact: no match for '%.*s' among %zu contacts",
-                    (int)(contact_id_len > 30 ? 30 : contact_id_len), contact_id,
-                    persona->contacts_count);
+        hu_log_info("persona", NULL, "find_contact: no match for '%s' among %zu contacts",
+                    HU_LOG_WHO(contact_id, contact_id_len), persona->contacts_count);
     return NULL;
 }
 

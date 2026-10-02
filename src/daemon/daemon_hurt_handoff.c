@@ -1,6 +1,7 @@
 /* Hurt-signal hand-off. Contract: include/human/daemon/hurt_handoff.h. */
 #include "human/core/allocator.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include "human/core/process_util.h"
 #include "human/core/string.h"
 #include "human/daemon/hurt_handoff.h"
@@ -185,7 +186,8 @@ static void hurt_notify_owner(const char *contact_name) {
     hu_run_result_free(&alloc, &r);
 #else
     hu_log_warn("hurt_handoff", NULL,
-                "no owner notification on this platform; the auto-reply was held for %s", who);
+                "no owner notification on this platform; the auto-reply was held for %s",
+                HU_LOG_WHO_CSTR(who));
 #endif
 }
 

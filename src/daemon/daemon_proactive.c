@@ -55,6 +55,7 @@
 
 #include "human/core/debug.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -929,8 +930,8 @@ bool hu_daemon_proactive_gate_and_send(struct hu_agent *agent, hu_allocator_t *a
                               : (gate == HU_INIT_RESULT_GATED_BUDGET) ? "daily budget exhausted"
                                                                       : "governor gated";
             hu_log_info("human", agent ? agent->observer : NULL,
-                        "proactive check-in to %s skipped: %s",
-                        cp->name ? cp->name : cp->contact_id, why);
+                        "proactive check-in to %s skipped: %s", HU_LOG_WHO_CSTR(cp->contact_id),
+                        why);
             skip = true;
             skip_reason = "governor_gated";
         }
@@ -941,7 +942,7 @@ bool hu_daemon_proactive_gate_and_send(struct hu_agent *agent, hu_allocator_t *a
         hu_log_info("human", agent ? agent->observer : NULL,
                     "proactive check-in deferred for %s "
                     "(reactive turn within %ds)",
-                    cp->name ? cp->name : cp->contact_id, HU_DAEMON_REACTIVE_GATE_WINDOW_S);
+                    HU_LOG_WHO_CSTR(cp->contact_id), HU_DAEMON_REACTIVE_GATE_WINDOW_S);
         skip = true;
         skip_reason = "reactive_recent";
     }
@@ -968,7 +969,7 @@ bool hu_daemon_proactive_gate_and_send(struct hu_agent *agent, hu_allocator_t *a
         if (!hu_proactive_throttle_channel_try_consume(throttle, ch_name)) {
             hu_log_info("human", agent ? agent->observer : NULL,
                         "proactive check-in to %s skipped: rate-limited",
-                        cp->name ? cp->name : cp->contact_id);
+                        HU_LOG_WHO_CSTR(cp->contact_id));
             skip = true;
             skip_reason = "rate_limited";
         }
@@ -976,7 +977,7 @@ bool hu_daemon_proactive_gate_and_send(struct hu_agent *agent, hu_allocator_t *a
                                                         (uint64_t)now * 1000ULL)) {
             hu_log_info("human", agent ? agent->observer : NULL,
                         "proactive check-in to %s skipped: send-cap",
-                        cp->name ? cp->name : cp->contact_id);
+                        HU_LOG_WHO_CSTR(cp->contact_id));
             skip = true;
             skip_reason = "send_cap";
         }
@@ -992,11 +993,10 @@ bool hu_daemon_proactive_gate_and_send(struct hu_agent *agent, hu_allocator_t *a
             if (!hu_outbound_sanitize(response, &response_len, &sanitize_reason)) {
                 hu_log_warn("human", agent ? agent->observer : NULL,
                             "proactive check-in to %s REJECTED by sanitizer: %s "
-                            "(would have sent: %.*s)",
-                            cp->name ? cp->name : cp->contact_id,
+                            "(would have sent: %s)",
+                            HU_LOG_WHO_CSTR(cp->contact_id),
                             sanitize_reason ? sanitize_reason : "unknown",
-                            (int)(response_len > 80 ? 80 : response_len),
-                            response ? response : "(null)");
+                            HU_LOG_TEXT(response, response_len, 80));
                 skip = true;
                 skip_reason = "sanitize_refused";
             }
@@ -1030,7 +1030,7 @@ bool hu_daemon_proactive_send_and_record(struct hu_agent *agent, hu_channel_t *c
         hu_log_warn("human", agent ? agent->observer : NULL,
                     "proactive check-in to %s FAILED (err=%d), nothing delivered; "
                     "skipping recency/outcome/governor bookkeeping",
-                    who, (int)send_rc);
+                    HU_LOG_WHO_CSTR(who), (int)send_rc);
         daemon_proactive_record_decision(agent, cp->contact_id, HU_PROACTIVE_DECISION_DECLINE,
                                          "send_failed", 0, NULL, 0, now);
         return false;
@@ -1042,8 +1042,8 @@ bool hu_daemon_proactive_send_and_record(struct hu_agent *agent, hu_channel_t *c
                                        strlen(cp->contact_id), now, HU_SEND_PATH_PROACTIVE);
     (void)hu_daemon_proactive_outcome_record_send(agent ? agent->memory : NULL, ch_name, target,
                                                   target_len);
-    hu_log_info("human", agent ? agent->observer : NULL, "proactive check-in sent to %s: %.*s", who,
-                (int)message_len, message ? message : "");
+    hu_log_info("human", agent ? agent->observer : NULL, "proactive check-in sent to %s: %s",
+                HU_LOG_WHO_CSTR(who), HU_LOG_TEXT(message, message_len, 120));
     daemon_proactive_record_decision(agent, cp->contact_id, HU_PROACTIVE_DECISION_SEND, NULL, 1,
                                      message, message_len, now);
     if (gov_budget)
@@ -1097,12 +1097,12 @@ bool hu_daemon_proactive_reach_should_skip(struct hu_agent *agent, hu_allocator_
     static unsigned excluded = 0;
     excluded++;
     hu_log_info("human", agent ? agent->observer : NULL,
-                "proactive reachability [%s]: %s %s (%.*s) — not iMessage-reachable "
+                "proactive reachability [%s]: %s %s (%s) — not iMessage-reachable "
                 "(whois=%d recent=%d handle=%d) [n=%u this process]",
                 mode == HU_PROACTIVE_REACH_LIVE ? "live" : "shadow",
                 act == HU_PROACTIVE_REACH_SKIP ? "excluded" : "would-exclude",
-                contact_id ? contact_id : "?", (int)(target_len > 24 ? 24 : target_len),
-                target ? target : "", (int)live, (int)recent, (int)handle_svc, excluded);
+                HU_LOG_WHO_CSTR(contact_id), HU_LOG_WHO(target, target_len), (int)live, (int)recent,
+                (int)handle_svc, excluded);
     return act == HU_PROACTIVE_REACH_SKIP;
 #else
     (void)agent;

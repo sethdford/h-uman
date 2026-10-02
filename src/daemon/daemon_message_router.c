@@ -31,6 +31,7 @@
 #include "human/context/conversation.h"
 #include "human/context/vision.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include "human/core/paths.h"
 #include "human/core/time.h"
 #include "human/daemon.h"
@@ -65,8 +66,8 @@ void hu_daemon_log_send_effect(void *observer, const char *eff_ch, const char *t
 #ifndef HU_IS_TEST
     const char *eff = hu_conversation_classify_effect(text, len);
     if (eff)
-        hu_log_info("human", (hu_observer_t *)observer, "%s effect: %s (%.*s)", eff_ch, eff,
-                    (int)(len > 60 ? 60 : len), text);
+        hu_log_info("human", (hu_observer_t *)observer, "%s effect: %s (%s)", eff_ch, eff,
+                    HU_LOG_TEXT(text, len, 60));
 #else
     (void)observer;
     (void)eff_ch;
@@ -597,8 +598,8 @@ hu_error_t hu_daemon_dispatch_imessage_reply_msg_ex(
     if (m && m->content[0] && body && body_len > 0 &&
         hu_conversation_reply_parrots_inbound(body, body_len, m->content, strlen(m->content))) {
         hu_log_warn("human", agent ? agent->observer : NULL,
-                    "parrot guard: dropped bubble echoing the inbound (%.*s…)",
-                    (int)(body_len > 40 ? 40 : body_len), body);
+                    "parrot guard: dropped bubble echoing the inbound (%s…)",
+                    HU_LOG_TEXT(body, body_len, 40));
         return HU_OK;
     }
 
@@ -661,8 +662,8 @@ size_t hu_daemon_burst_carry(hu_channel_loop_msg_t *msgs, size_t *count, size_t 
             continue;
         }
         lost++;
-        hu_log_warn("human", NULL, "burst re-poll: no room to keep a message from %.20s — dropped",
-                    burst[i].session_key);
+        hu_log_warn("human", NULL, "burst re-poll: no room to keep a message from %s — dropped",
+                    HU_LOG_WHO_CSTR(burst[i].session_key));
     }
     return lost;
 }

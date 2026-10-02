@@ -18,7 +18,19 @@ import re
 import statistics
 import sys
 
-OWNER = {"+18012017497", "sethdouglasford@gmail.com", "+14845661687"}
+OWNER_HANDLES = {"+18012017497", "sethdouglasford@gmail.com", "+14845661687"}
+
+
+def log_tag(handle):
+    """The daemon logs handles as a 16-bit FNV-1a tag ("#3fa2"; src/core/log_redact.c)."""
+    h = 2166136261
+    for b in handle.encode():
+        h = ((h ^ b) * 16777619) & 0xFFFFFFFF
+    return "#%04x" % ((h ^ (h >> 16)) & 0xFFFF)
+
+
+# Raw handles too, for logs from before 2026-10-02 or HU_LOG_CONTENT=1 runs.
+OWNER = OWNER_HANDLES | {log_tag(h) for h in OWNER_HANDLES}
 
 
 def parse_ts(s):

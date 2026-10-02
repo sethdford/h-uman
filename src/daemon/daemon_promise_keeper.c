@@ -12,6 +12,7 @@
 #include "human/core/gate_mode.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include "human/core/string.h"
 #include "human/data/loader.h"
 #include "human/memory/superhuman.h"
@@ -196,8 +197,8 @@ hu_error_t hu_daemon_promise_keeper_scan_outbound(void *memory, hu_allocator_t *
 
     if (mode == HU_PROMISE_KEEPER_SHADOW) {
         hu_log_info("human", observer,
-                    "[promise-keeper SHADOW] would store '%s' for %.*s (deadline %lld)", desc,
-                    (int)(contact_id_len > 20 ? 20 : contact_id_len), contact_id,
+                    "[promise-keeper SHADOW] would store '%s' for %s (deadline %lld)",
+                    HU_LOG_TEXT_CSTR(desc, 120), HU_LOG_WHO(contact_id, contact_id_len),
                     (long long)deadline);
         return HU_OK;
     }
@@ -205,8 +206,8 @@ hu_error_t hu_daemon_promise_keeper_scan_outbound(void *memory, hu_allocator_t *
     hu_error_t err = hu_superhuman_commitment_store(memory, alloc, contact_id, contact_id_len, desc,
                                                     strlen(desc), who, strlen(who), deadline);
     if (err != HU_OK) {
-        hu_log_warn("human", observer, "[promise-keeper] store failed (%d) for %.*s", (int)err,
-                    (int)(contact_id_len > 20 ? 20 : contact_id_len), contact_id);
+        hu_log_warn("human", observer, "[promise-keeper] store failed (%d) for %s", (int)err,
+                    HU_LOG_WHO(contact_id, contact_id_len));
         return err;
     }
     if (stored_out)
@@ -217,11 +218,11 @@ hu_error_t hu_daemon_promise_keeper_scan_outbound(void *memory, hu_allocator_t *
                                                     strlen(desc), deadline, who, strlen(who));
         if (schedule_err != HU_OK)
             hu_log_warn("human", observer,
-                        "[promise-keeper] delayed_followup_schedule failed (%d) for %.*s",
-                        (int)schedule_err, (int)(contact_id_len > 20 ? 20 : contact_id_len),
-                        contact_id);
+                        "[promise-keeper] delayed_followup_schedule failed (%d) for %s",
+                        (int)schedule_err, HU_LOG_WHO(contact_id, contact_id_len));
     }
-    hu_log_info("human", observer, "[promise-keeper] stored '%s' for %.*s (deadline %lld)", desc,
-                (int)(contact_id_len > 20 ? 20 : contact_id_len), contact_id, (long long)deadline);
+    hu_log_info("human", observer, "[promise-keeper] stored '%s' for %s (deadline %lld)",
+                HU_LOG_TEXT_CSTR(desc, 120), HU_LOG_WHO(contact_id, contact_id_len),
+                (long long)deadline);
     return HU_OK;
 }

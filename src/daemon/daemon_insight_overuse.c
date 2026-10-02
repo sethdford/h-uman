@@ -2,6 +2,7 @@
 
 #include "human/agent/memory_loader.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include "human/core/string.h"
 #ifdef HU_ENABLE_SQLITE
 #include "human/memory/contact_insights_repo.h"
@@ -133,9 +134,9 @@ hu_error_t hu_daemon_insight_overuse_scan(hu_memory_t *memory, hu_allocator_t *a
     /* One line per reply; the report script aggregates. "shadow" is literal
      * for both modes: nothing sent changes until the closed loop lands. */
     hu_log_info("insight-overuse", observer,
-                "shadow: injected=%zu surfaced=%zu prompted=%zu unprompted=%zu for %.*s",
+                "shadow: injected=%zu surfaced=%zu prompted=%zu unprompted=%zu for %s",
                 local.injected, local.surfaced, local.prompted, local.surfaced - local.prompted,
-                (int)(contact_id_len > 24 ? 24 : contact_id_len), contact_id);
+                HU_LOG_WHO(contact_id, contact_id_len));
     return HU_OK;
 #else
     (void)observer;

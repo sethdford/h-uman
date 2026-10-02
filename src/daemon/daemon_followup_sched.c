@@ -27,6 +27,7 @@
 #include "human/context/conversation.h"
 #include "human/core/error.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include "human/daemon.h"
 #include "human/follow_up.h"
 #include "human/persona.h"
@@ -153,7 +154,7 @@ void hu_daemon_followup_sched_tick(hu_agent_t *agent, hu_service_channel_t *chan
                     hu_log_info("human", agent->observer,
                                 "[followup-compose] shadow: would send \"%s\" to %s "
                                 "(template sent instead)",
-                                composed, cp->contact_id);
+                                HU_LOG_TEXT_CSTR(composed, 120), HU_LOG_WHO_CSTR(cp->contact_id));
                 send_text = hu_followup_compose_pick(cmode, cerr, composed, fdec.template_text);
                 if (!send_text) {
                     /* LIVE and composition failed. Skip the bump entirely
@@ -162,7 +163,7 @@ void hu_daemon_followup_sched_tick(hu_agent_t *agent, hu_service_channel_t *chan
                     hu_log_info("human", agent->observer,
                                 "follow-up skipped: compose failed (err=%d) for contact=%s; "
                                 "not substituting a static template",
-                                (int)cerr, cp->contact_id);
+                                (int)cerr, HU_LOG_WHO_CSTR(cp->contact_id));
                     continue;
                 }
             }
@@ -177,8 +178,8 @@ void hu_daemon_followup_sched_tick(hu_agent_t *agent, hu_service_channel_t *chan
                                            (uint64_t)fnow_t * 1000ULL);
                 hu_log_info("human", agent->observer,
                             "scheduled follow-up: contact=%s msg_id=%lld send_at_ms=%llu warmth=%d",
-                            cp->contact_id, (long long)fmsg_id, (unsigned long long)fdec.send_at_ms,
-                            (int)warmth);
+                            HU_LOG_WHO_CSTR(cp->contact_id), (long long)fmsg_id,
+                            (unsigned long long)fdec.send_at_ms, (int)warmth);
             }
         }
     }
@@ -198,8 +199,8 @@ void hu_daemon_sched_send_and_log(struct hu_agent *agent, struct hu_channel *cha
         channel->vtable->send(channel->ctx, contact, strlen(contact), msg, msg_len, NULL, 0);
     if (err != HU_OK) {
         hu_log_warn("human", agent ? agent->observer : NULL,
-                    "scheduled send to %s via %s FAILED (err=%d) — entry dropped", contact,
-                    channel_name ? channel_name : "?", (int)err);
+                    "scheduled send to %s via %s FAILED (err=%d) — entry dropped",
+                    HU_LOG_WHO_CSTR(contact), channel_name ? channel_name : "?", (int)err);
         return;
     }
     if (agent) {
@@ -207,5 +208,5 @@ void hu_daemon_sched_send_and_log(struct hu_agent *agent, struct hu_channel *cha
                                        (int64_t)time(NULL), HU_SEND_PATH_SCHEDULED);
     }
     hu_log_info("human", agent ? agent->observer : NULL, "scheduled message delivered to %s via %s",
-                contact, channel_name ? channel_name : "?");
+                HU_LOG_WHO_CSTR(contact), channel_name ? channel_name : "?");
 }

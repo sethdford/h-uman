@@ -18,6 +18,7 @@
 #include "human/config.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include "human/memory.h"
 #include "human/memory/proactive_decisions_repo.h" /* C5 Part A: decision log */
 #include "human/provider.h"
@@ -896,8 +897,8 @@ hu_error_t hu_init_proposer_tick_with_provider(
         }
         preview[copy] = '\0';
         hu_log_warn("init_proposer", NULL,
-                    "response parse failed: err=%d response_len=%zu preview=%.*s%s", (int)perr,
-                    response_len, (int)copy, preview, response_len > copy ? "..." : "");
+                    "response parse failed: err=%d response_len=%zu preview=%s", (int)perr,
+                    response_len, HU_LOG_TEXT(preview, copy, 120));
         alloc->free(alloc->ctx, response, response_len + 1);
         if (out_result)
             *out_result = HU_INIT_RESULT_PARSE_ERROR;
@@ -910,9 +911,9 @@ hu_error_t hu_init_proposer_tick_with_provider(
 
     hu_log_info("init_proposer", NULL,
                 "LLM verdict: should_propose=%d confidence=%.3f draft_len=%zu result=%d "
-                "reason=%.*s",
+                "reason=%s",
                 decision.should_propose ? 1 : 0, decision.confidence, decision.draft_len,
-                (int)verdict, (int)decision.skip_reason_len, decision.skip_reason);
+                (int)verdict, HU_LOG_TEXT(decision.skip_reason, decision.skip_reason_len, 120));
 
     if (out_result)
         *out_result = verdict;
@@ -1261,17 +1262,17 @@ hu_error_t hu_init_proposer_tick_with_provider_ex(
                                           now_unix)) {
         verdict = HU_INIT_RESULT_GUARD_REJECT;
         hu_log_info("init_proposer", NULL,
-                    "FIRED draft rejected: repeats a check-in from the last 14 days (%.60s)",
-                    decision.draft);
+                    "FIRED draft rejected: repeats a check-in from the last 14 days (%s)",
+                    HU_LOG_TEXT_CSTR(decision.draft, 60));
     }
 
     hu_log_info("init_proposer", NULL,
                 "LLM verdict (ex, channel=%.*s): should_propose=%d confidence=%.3f "
-                "draft_len=%zu result=%d user_msg_bytes=%zu reason=%.*s",
+                "draft_len=%zu result=%d user_msg_bytes=%zu reason=%s",
                 (int)inputs->channel_name_len, inputs->channel_name ? inputs->channel_name : "",
                 decision.should_propose ? 1 : 0, decision.confidence, decision.draft_len,
-                (int)verdict, strlen(user_msg), (int)decision.skip_reason_len,
-                decision.skip_reason);
+                (int)verdict, strlen(user_msg),
+                HU_LOG_TEXT(decision.skip_reason, decision.skip_reason_len, 120));
 
     if (out_result)
         *out_result = verdict;

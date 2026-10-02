@@ -10,6 +10,7 @@
 #include "human/core/log_redact.h"
 #include "human/daemon.h"
 #include "human/daemon/crisis.h"
+#include "human/observer.h"
 #include "human/security/moderation.h"
 #include "human/security/self_harm.h"
 #include "test_framework.h"
@@ -396,6 +397,54 @@ static void test_emotional_off_is_legacy(void) {
     hu_crisis_tiers_mode_set_for_test(-1);
 }
 
+/* ── The inbound crisis log line carries a tag, never the handle or text ── */
+
+static char g_cap[8][512];
+static int g_cap_n;
+static void cap_event(void *ctx, const hu_observer_event_t *ev) {
+    (void)ctx;
+    if (ev->tag == HU_OBSERVER_EVENT_ERR && g_cap_n < 8 && ev->data.err.message) {
+        strncpy(g_cap[g_cap_n], ev->data.err.message, sizeof(g_cap[0]) - 1);
+        g_cap[g_cap_n][sizeof(g_cap[0]) - 1] = '\0';
+        g_cap_n++;
+    }
+}
+static const hu_observer_vtable_t CAP_VT = {.record_event = cap_event};
+
+static void test_daemon_crisis_log_has_tag_not_handle_or_text(void) {
+    hu_crisis_tiers_mode_set_for_test(HU_GATE_LIVE);
+    hu_log_content_set_for_test(0);
+    hu_observer_t obs = {.ctx = NULL, .vtable = &CAP_VT};
+    g_cap_n = 0;
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *t = "i want to kill myself";
+    const char *h = "+15551234567";
+    HU_ASSERT_EQ(hu_daemon_inbound_crisis_tier(&alloc, t, strlen(t), h, strlen(h), &obs),
+                 HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(g_cap_n, 1);
+    HU_ASSERT_STR_CONTAINS(g_cap[0], "tier=explicit");
+    HU_ASSERT_STR_CONTAINS(g_cap[0], "contact=#");
+    HU_ASSERT_STR_NOT_CONTAINS(g_cap[0], "555");
+    HU_ASSERT_STR_NOT_CONTAINS(g_cap[0], "kill");
+    hu_log_content_set_for_test(-1);
+    hu_crisis_tiers_mode_set_for_test(-1);
+}
+
+/* SHADOW: legacy acts (any self_harm = crisis), one aggregate line names both. */
+static void test_daemon_crisis_shadow_logs_both_tiers(void) {
+    hu_crisis_tiers_mode_set_for_test(HU_GATE_SHADOW);
+    hu_observer_t obs = {.ctx = NULL, .vtable = &CAP_VT};
+    g_cap_n = 0;
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *t = "what's the point";
+    HU_ASSERT_EQ(hu_daemon_inbound_crisis_tier(&alloc, t, strlen(t), "x", 1, &obs),
+                 HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_GE(g_cap_n, 1);
+    HU_ASSERT_STR_CONTAINS(g_cap[0], "[HU_CRISIS_TIERS shadow] legacy=explicit tier=low changed=1");
+    HU_ASSERT_STR_NOT_CONTAINS(g_cap[0], "point");
+    hu_crisis_tiers_mode_set_for_test(-1);
+}
+
 /* ── Log redaction (DEF-12) ────────────────────────────────────────────── */
 
 static void test_log_who_is_tag_by_default(void) {
@@ -480,6 +529,8 @@ void run_self_harm_tests(void) {
     HU_RUN_TEST(test_emotional_off_is_legacy);
 
     HU_TEST_SUITE("Log redaction (DEF-12)");
+    HU_RUN_TEST(test_daemon_crisis_log_has_tag_not_handle_or_text);
+    HU_RUN_TEST(test_daemon_crisis_shadow_logs_both_tiers);
     HU_RUN_TEST(test_log_who_is_tag_by_default);
     HU_RUN_TEST(test_log_text_is_length_by_default);
     HU_RUN_TEST(test_log_content_flag_shows_text);

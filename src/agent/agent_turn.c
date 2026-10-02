@@ -309,6 +309,7 @@ static hu_error_t agent_skill_route_embed_fn(void *embed_ctx, hu_allocator_t *al
 #include "human/cognition/metacognition.h"
 #include "human/core/gate_mode.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include "human/humanness.h"
 #include "human/memory/evolved_opinions.h"
 #include "human/memory/lifecycle/semantic_cache.h"
@@ -1980,11 +1981,9 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                                     agent->relationship.total_turns = (uint32_t)rt;
                             }
                         }
-                        hu_log_info("agent", agent->observer, "frontier state restored for %.*s",
-                                    (int)(agent->memory_session_id_len > 20
-                                              ? 20
-                                              : agent->memory_session_id_len),
-                                    agent->memory_session_id);
+                        hu_log_info(
+                            "agent", agent->observer, "frontier state restored for %s",
+                            HU_LOG_WHO(agent->memory_session_id, agent->memory_session_id_len));
                     }
                 }
             }
@@ -6194,12 +6193,10 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                                         HU_OK &&
                                     got_blob) {
                                     if (got_blob->caption && got_blob->caption_len > 0)
-                                        hu_log_info(
-                                            "agent_turn", agent->observer,
-                                            "W10 blob %lld caption: %.*s", (long long)blob_id,
-                                            (int)(got_blob->caption_len < 80 ? got_blob->caption_len
-                                                                             : 80),
-                                            got_blob->caption);
+                                        hu_log_info("agent_turn", agent->observer,
+                                                    "W10 blob %lld caption: %s", (long long)blob_id,
+                                                    HU_LOG_TEXT(got_blob->caption,
+                                                                got_blob->caption_len, 80));
                                     hu_memory_blob_free(agent->alloc, got_blob);
                                 }
                             }
