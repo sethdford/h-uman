@@ -1130,7 +1130,6 @@ set(HU_CORE_SOURCES
     src/memory/rerank.c
     src/memory/retrieval/strategy_learner.c
     src/memory/retrieval/engine.c
-    src/memory/connections.c
     src/memory/knowledge.c
     src/memory/rag_pipeline.c
     src/memory/compression.c
