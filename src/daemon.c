@@ -39,6 +39,7 @@
 #include "human/behavior/win_detect.h"
 #include "human/core/gate_mode.h"
 #include "human/daemon/daemon_shape.h"
+#include "human/daemon/grief_decay.h"
 #include "human/daemon/proposer_context.h"
 #include "human/memory/celebration_repo.h"
 #include "human/memory/graph_ingest.h"
@@ -905,12 +906,9 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
             /* Build combined text from user messages for event extraction */
             char combined[4096];
             size_t combined_len = 0;
-            /* P6-3: also capture the MOST RECENT inbound text for the
-             * emotional-tone gate below. Entries are id-ascending, so
-             * the last !from_me entry is the latest. */
-            char last_inbound_buf[1024];
-            size_t last_inbound_len = 0;
-            last_inbound_buf[0] = '\0';
+            /* P6-3: the MOST RECENT inbound (entries are id-ascending) and
+             * its time, for the emotional-tone gate below. */
+            hu_grief_decay_inbound_t last_inbound = {0};
             if (entries && entry_count > 0) {
                 for (size_t e = 0; e < entry_count; e++) {
                     if (entries[e].from_me)
@@ -924,12 +922,8 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                         memcpy(combined + combined_len, entries[e].text, tlen);
                         combined_len += tlen;
                     }
-                    size_t copy = tlen;
-                    if (copy >= sizeof(last_inbound_buf))
-                        copy = sizeof(last_inbound_buf) - 1;
-                    memcpy(last_inbound_buf, entries[e].text, copy);
-                    last_inbound_buf[copy] = '\0';
-                    last_inbound_len = copy;
+                    hu_grief_decay_note_inbound(&last_inbound, entries[e].text, tlen,
+                                                entries[e].timestamp);
                 }
                 combined[combined_len] = '\0';
             }
@@ -1050,13 +1044,10 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
              * detector via hu_daemon_dated_followup_apply (after the event, with
              * the situation as context, marked sent only on delivery). */
 
-            /* P6-3: emotional-tone gate. If the contact's most-recent
-             * inbound message was heavy/grief, skip the generic
-             * proactive check-in — the next reactive turn will
-             * respond. Generic "hey what's up" on top of a vulnerable
-             * message reads as oblivious. */
-            if (should_checkin &&
-                hu_proactive_should_suppress_for_emotion(last_inbound_buf, last_inbound_len)) {
+            /* P6-3: after a heavy/grief last inbound, no generic check-in.
+             * HU_GRIEF_DECAY (DEF-10, src/daemon/daemon_grief_decay.c) ends
+             * that after a quiet window instead of never. */
+            if (should_checkin && hu_grief_decay_suppress_checkin(&last_inbound, (int64_t)now)) {
                 hu_log_info(
                     "daemon", agent ? agent->observer : NULL,
                     "proactive: suppressing check-in for %s — last inbound emotionally heavy",
