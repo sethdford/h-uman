@@ -1,4 +1,5 @@
 #include "human/multimodal.h"
+#include "human/core/local_only_guard.h"
 #include "human/multimodal/audio.h"
 #include "human/multimodal/video.h"
 #include <string.h>
@@ -34,8 +35,8 @@ hu_error_t hu_multimodal_detect_type(const char *mime, size_t mime_len, hu_modal
     return HU_OK;
 }
 
-hu_error_t hu_multimodal_needs_fallback(const hu_provider_capabilities_t *caps,
-                                         hu_modality_t type, bool *needs_fallback) {
+hu_error_t hu_multimodal_needs_fallback(const hu_provider_capabilities_t *caps, hu_modality_t type,
+                                        bool *needs_fallback) {
     if (!caps || !needs_fallback)
         return HU_ERR_INVALID_ARGUMENT;
     switch (type) {
@@ -111,11 +112,14 @@ hu_error_t hu_multimodal_route_local_media(hu_allocator_t *alloc, const char *fi
     *out_text = NULL;
     *out_text_len = 0;
 
+    hu_error_t err = HU_ERR_INVALID_ARGUMENT;
+    const char *lo_prev = hu_local_only_set_caller("inbound_media");
     if (path_is_audio_media(file_path, path_len))
-        return hu_multimodal_process_audio(alloc, file_path, path_len, provider, model, model_len,
-                                           out_text, out_text_len);
-    if (path_is_video_media(file_path, path_len))
-        return hu_multimodal_process_video(alloc, file_path, path_len, provider, model, model_len,
-                                           out_text, out_text_len);
-    return HU_ERR_INVALID_ARGUMENT;
+        err = hu_multimodal_process_audio(alloc, file_path, path_len, provider, model, model_len,
+                                          out_text, out_text_len);
+    else if (path_is_video_media(file_path, path_len))
+        err = hu_multimodal_process_video(alloc, file_path, path_len, provider, model, model_len,
+                                          out_text, out_text_len);
+    (void)hu_local_only_set_caller(lo_prev);
+    return err;
 }

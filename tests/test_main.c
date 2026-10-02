@@ -200,6 +200,9 @@ void run_process_util_tests(void);
 void run_prompt_tests(void);
 void run_prompt_trim_tests(void);
 void run_gate_mode_tests(void);
+void run_local_only_guard_tests(void);
+void run_local_only_config_tests(void);
+void run_local_only_voice_tests(void);
 void run_graph_grounding_tests(void);
 void run_uncertainty_tests(void);
 void run_tool_search_tests(void);
@@ -598,6 +601,7 @@ void run_calibration_tests(void);
 void run_behavioral_clone_tests(void);
 void run_governor_tests(void);
 void run_model_router_tests(void);
+void run_local_only_route_tests(void);
 void run_model_router_health_tests(void);
 void run_cp_admin_tests(void);
 void run_humanness_context_tests(void);
@@ -947,6 +951,7 @@ void run_daemon_reactive_context_tests(void);
 void run_consecutive_limiter_tests(void);
 void run_proactive_policy_tests(void);
 void run_daemon_director_tests(void);
+void run_daemon_director_local_only_tests(void);
 /* Sprint 59 Phase C — test seeds feed_items via sqlite3 directly so the
  * test source is gated by HU_ENABLE_SQLITE in CMakeLists.txt. Mirror that
  * gate here so the forward decl + call site don't reference a missing
@@ -1323,6 +1328,9 @@ int main(int argc, char **argv) {
     run_prompt_tests();
     run_prompt_trim_tests();
     run_gate_mode_tests();
+    run_local_only_guard_tests();
+    run_local_only_config_tests();
+    run_local_only_voice_tests();
     run_graph_grounding_tests();
     run_uncertainty_tests();
     run_tool_search_tests();
@@ -1710,6 +1718,7 @@ int main(int argc, char **argv) {
     run_behavioral_clone_tests();
     run_governor_tests();
     run_model_router_tests();
+    run_local_only_route_tests();
     run_model_router_health_tests();
     run_cp_admin_tests();
     run_humanness_context_tests();
@@ -2046,6 +2055,7 @@ int main(int argc, char **argv) {
     run_consecutive_limiter_tests();
     run_proactive_policy_tests();
     run_daemon_director_tests();
+    run_daemon_director_local_only_tests();
 #ifdef HU_ENABLE_SQLITE
     run_daemon_proactive_feed_scope_tests();
 #endif

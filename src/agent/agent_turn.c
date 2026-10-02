@@ -36,6 +36,7 @@
 #include "human/persona/voice_maturity.h"
 
 #include "human/agent/conv_goals.h"
+#include "human/agent/local_only_route.h"
 #include "human/agent/model_router.h"
 /* Phase 2 Task 14 (RL SOTA): forward-declare the two reaction-handler
  * lifecycle hooks instead of including human/agent/reaction_handler.h.
@@ -310,6 +311,7 @@ static hu_error_t agent_skill_route_embed_fn(void *embed_ctx, hu_allocator_t *al
 #include "human/cognition/emotional.h"
 #include "human/cognition/metacognition.h"
 #include "human/core/gate_mode.h"
+#include "human/core/local_only_guard.h"
 #include "human/core/log.h"
 #include "human/core/log_redact.h"
 #include "human/humanness.h"
@@ -4039,6 +4041,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
         } else {
             /* Inline routing: emotional/vulnerable messages get better models */
             hu_model_router_config_t mr_cfg = hu_model_router_default_config();
+            hu_local_only_router_defaults(&mr_cfg, agent->model_name, agent->model_name_len);
             mr_cfg.on_device_available = agent->on_device_available;
             /* "Gemma = Seth" policy: when personalization.force_local_mlx is
              * set in config, route ALL tiers through the on-device model
@@ -4118,7 +4121,8 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
          * S2 content (PII) logs audit trail. */
         {
             hu_sensitivity_result_t sens = hu_sensitivity_classify_message(msg, msg_len);
-            if (hu_sensitivity_requires_local(sens.level)) {
+            /* local_only LIVE: every model is already local — no switch. */
+            if (hu_sensitivity_requires_local(sens.level) && !hu_local_only_enforced()) {
                 const char *prev_model = turn_model;
                 if (agent->sota.degradation_config.s3_local_model &&
                     agent->sota.degradation_config.s3_local_model_len > 0) {
@@ -4289,7 +4293,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
 
         /* On-device → cloud fallback: if on-device model failed, retry with cloud reflexive */
         if (err != HU_OK && turn_model && turn_model_len > 0 && agent->config &&
-            agent->config->agent.mr_on_device_enabled) {
+            agent->config->agent.mr_on_device_enabled && !hu_local_only_enforced()) {
             hu_model_router_config_t fb_cfg = hu_model_router_default_config();
             if (fb_cfg.on_device_model && turn_model_len == fb_cfg.on_device_model_len &&
                 memcmp(turn_model, fb_cfg.on_device_model, turn_model_len) == 0 &&
@@ -4297,6 +4301,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                 hu_log_info("agent_turn", agent->observer,
                             "on-device failed (err=%d), falling back to cloud: %s", err,
                             fb_cfg.reflexive_model);
+                hu_chat_response_free(agent->alloc, &resp); /* degrade honest-failure text */
                 memset(&resp, 0, sizeof(resp));
                 err = agent->provider.vtable->chat(agent->provider.ctx, agent->alloc, &req,
                                                    fb_cfg.reflexive_model,
@@ -7012,7 +7017,9 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             *response_len_out = 0;
         return HU_ERR_OUT_OF_MEMORY;
     }
+    const char *lo_prev = hu_local_only_enter("agent_turn"); /* audit/refusal caller tag */
     hu_error_t err = agent_turn_run(turn_ctx, agent, msg, msg_len, response_out, response_len_out);
+    (void)hu_local_only_set_caller(lo_prev);
     hu_turn_ctx_free(turn_ctx);
     return err;
 }

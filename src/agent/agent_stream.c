@@ -14,6 +14,7 @@
 #include "human/agent/humanness.h"
 #include "human/agent/input_guard.h"
 #include "human/agent/learned_style_turn.h"
+#include "human/agent/local_only_route.h"
 #include "human/agent/memory_loader.h"
 #include "human/agent/model_router.h"
 #include "human/agent/outcomes.h"
@@ -47,6 +48,7 @@
 #include "human/context/conversation.h"
 #include "human/context_engine.h"
 #include "human/core/json.h"
+#include "human/core/local_only_guard.h"
 #include "human/core/log.h"
 #include "human/core/paths.h"
 #include "human/core/string.h"
@@ -296,9 +298,23 @@ hu_error_t hu_agent_turn_stream(hu_agent_t *agent, const char *msg, size_t msg_l
 
 #define STREAM_V2_MAX_TOOL_DEPTH 10
 
+static hu_error_t agent_turn_stream_v2_run(hu_agent_t *agent, const char *msg, size_t msg_len,
+                                           hu_agent_stream_event_cb on_event, void *event_ctx,
+                                           char **response_out, size_t *response_len_out);
+
 hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t msg_len,
                                    hu_agent_stream_event_cb on_event, void *event_ctx,
                                    char **response_out, size_t *response_len_out) {
+    const char *lo_prev = hu_local_only_enter("agent_turn"); /* audit/refusal caller tag */
+    hu_error_t err = agent_turn_stream_v2_run(agent, msg, msg_len, on_event, event_ctx,
+                                              response_out, response_len_out);
+    (void)hu_local_only_set_caller(lo_prev);
+    return err;
+}
+
+static hu_error_t agent_turn_stream_v2_run(hu_agent_t *agent, const char *msg, size_t msg_len,
+                                           hu_agent_stream_event_cb on_event, void *event_ctx,
+                                           char **response_out, size_t *response_len_out) {
     if (!agent || !msg || !response_out)
         return HU_ERR_INVALID_ARGUMENT;
     if (!agent->provider.vtable)
@@ -1349,6 +1365,7 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             turn_model_len = agent->turn_model_len;
         } else if (early_tier >= HU_TIER_ANALYTICAL) {
             hu_model_router_config_t mr_cfg = hu_model_router_default_config();
+            hu_local_only_router_defaults(&mr_cfg, agent->model_name, agent->model_name_len);
             const char *rel = NULL;
             size_t rel_len = 0;
             if (agent->relationship.stage >= HU_REL_TRUSTED) {

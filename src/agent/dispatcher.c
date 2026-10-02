@@ -1,13 +1,14 @@
 #include "human/agent/dispatcher.h"
 #include "human/core/json.h"
+#include "human/core/local_only_guard.h"
 #include "human/core/string.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
-static uint64_t tool_cache_hash(const char *name, size_t name_len,
-                                 const char *args, size_t args_len) {
+static uint64_t tool_cache_hash(const char *name, size_t name_len, const char *args,
+                                size_t args_len) {
     uint64_t h = 14695981039346656037ULL;
     for (size_t i = 0; i < name_len; i++) {
         h ^= (uint64_t)(unsigned char)name[i];
@@ -22,9 +23,8 @@ static uint64_t tool_cache_hash(const char *name, size_t name_len,
     return h;
 }
 
-static const char *tool_cache_skip_tools[] = {
-    "shell", "memory_store", "memory_delete", "send_message", "file_write"
-};
+static const char *tool_cache_skip_tools[] = {"shell", "memory_store", "memory_delete",
+                                              "send_message", "file_write"};
 
 static bool tool_cache_should_skip(const char *name, size_t name_len) {
     for (size_t i = 0; i < sizeof(tool_cache_skip_tools) / sizeof(tool_cache_skip_tools[0]); i++) {
@@ -35,10 +35,9 @@ static bool tool_cache_should_skip(const char *name, size_t name_len) {
     return false;
 }
 
-static bool tool_cache_lookup(hu_tool_cache_t *cache, hu_allocator_t *alloc,
-                               const char *name, size_t name_len,
-                               const char *args, size_t args_len,
-                               hu_tool_result_t *out) {
+static bool tool_cache_lookup(hu_tool_cache_t *cache, hu_allocator_t *alloc, const char *name,
+                              size_t name_len, const char *args, size_t args_len,
+                              hu_tool_result_t *out) {
     if (!cache || tool_cache_should_skip(name, name_len))
         return false;
     uint64_t h = tool_cache_hash(name, name_len, args, args_len);
@@ -56,10 +55,9 @@ static bool tool_cache_lookup(hu_tool_cache_t *cache, hu_allocator_t *alloc,
     return false;
 }
 
-static void tool_cache_store(hu_tool_cache_t *cache, hu_allocator_t *alloc,
-                              const char *name, size_t name_len,
-                              const char *args, size_t args_len,
-                              const hu_tool_result_t *result) {
+static void tool_cache_store(hu_tool_cache_t *cache, hu_allocator_t *alloc, const char *name,
+                             size_t name_len, const char *args, size_t args_len,
+                             const hu_tool_result_t *result) {
     if (!cache || !result->success || tool_cache_should_skip(name, name_len))
         return;
     uint64_t h = tool_cache_hash(name, name_len, args, args_len);
@@ -70,8 +68,7 @@ static void tool_cache_store(hu_tool_cache_t *cache, hu_allocator_t *alloc,
                     cache->slots[slot].result.output_len + 1);
     cache->slots[slot].hash = h;
     cache->slots[slot].occupied = true;
-    cache->slots[slot].result.output =
-        hu_strndup(alloc, result->output, result->output_len);
+    cache->slots[slot].result.output = hu_strndup(alloc, result->output, result->output_len);
     cache->slots[slot].result.output_len = result->output_len;
     cache->slots[slot].result.output_owned = true;
     cache->slots[slot].result.success = result->success;
@@ -104,8 +101,8 @@ static void execute_one_impl(hu_allocator_t *alloc, hu_tool_t *tools, size_t too
         return;
     }
 
-    if (cache && tool_cache_lookup(cache, alloc, call->name, call->name_len,
-                                    call->arguments, call->arguments_len, result_out))
+    if (cache && tool_cache_lookup(cache, alloc, call->name, call->name_len, call->arguments,
+                                   call->arguments_len, result_out))
         return;
 
     hu_json_value_t *args = NULL;
@@ -116,15 +113,17 @@ static void execute_one_impl(hu_allocator_t *alloc, hu_tool_t *tools, size_t too
     }
     *result_out = hu_tool_result_fail("invalid arguments", 16);
     if (args) {
+        const char *lo_prev = hu_local_only_set_caller("tools");
         if (on_chunk && tool->vtable->execute_streaming) {
             tool->vtable->execute_streaming(tool->ctx, alloc, args, on_chunk, cb_ctx, result_out);
         } else if (tool->vtable->execute) {
             tool->vtable->execute(tool->ctx, alloc, args, result_out);
         }
+        (void)hu_local_only_set_caller(lo_prev);
         hu_json_free(alloc, args);
         if (cache)
-            tool_cache_store(cache, alloc, call->name, call->name_len,
-                             call->arguments, call->arguments_len, result_out);
+            tool_cache_store(cache, alloc, call->name, call->name_len, call->arguments,
+                             call->arguments_len, result_out);
     }
 }
 
@@ -180,10 +179,10 @@ static int timed_join(pthread_t thread, uint32_t timeout_secs, volatile int *don
 #endif
 
 /* Sequential dispatch — always used when HU_IS_TEST or max_parallel==1 or non-POSIX */
-static hu_error_t dispatch_sequential_ex(hu_allocator_t *alloc, hu_tool_t *tools, size_t tools_count,
-                                         const hu_tool_call_t *calls, size_t calls_count,
-                                         uint32_t timeout_secs, hu_tool_cache_t *cache,
-                                         hu_dispatch_result_t *out) {
+static hu_error_t dispatch_sequential_ex(hu_allocator_t *alloc, hu_tool_t *tools,
+                                         size_t tools_count, const hu_tool_call_t *calls,
+                                         size_t calls_count, uint32_t timeout_secs,
+                                         hu_tool_cache_t *cache, hu_dispatch_result_t *out) {
     hu_tool_result_t *results =
         (hu_tool_result_t *)alloc->alloc(alloc->ctx, calls_count * sizeof(hu_tool_result_t));
     if (!results)
@@ -225,7 +224,6 @@ static hu_error_t dispatch_sequential_ex(hu_allocator_t *alloc, hu_tool_t *tools
     out->count = calls_count;
     return HU_OK;
 }
-
 
 #if defined(HU_GATEWAY_POSIX) && !defined(HU_IS_TEST)
 
@@ -380,15 +378,16 @@ hu_error_t hu_dispatcher_dispatch(hu_dispatcher_t *d, hu_allocator_t *alloc, hu_
         return dispatch_parallel(d, alloc, tools, tools_count, calls, calls_count, out);
     }
 #endif
-    return dispatch_sequential_ex(alloc, tools, tools_count, calls, calls_count,
-                                   d->timeout_secs, d->cache, out);
+    return dispatch_sequential_ex(alloc, tools, tools_count, calls, calls_count, d->timeout_secs,
+                                  d->cache, out);
 #endif
 }
 
 hu_error_t hu_dispatcher_dispatch_streaming(hu_dispatcher_t *d, hu_allocator_t *alloc,
                                             hu_tool_t *tools, size_t tools_count,
                                             const hu_tool_call_t *calls, size_t calls_count,
-                                            void (*on_chunk)(void *ctx, const char *data, size_t len),
+                                            void (*on_chunk)(void *ctx, const char *data,
+                                                             size_t len),
                                             void *cb_ctx, hu_dispatch_result_t *out) {
     if (!d || !alloc || !out)
         return HU_ERR_INVALID_ARGUMENT;
@@ -404,8 +403,8 @@ hu_error_t hu_dispatcher_dispatch_streaming(hu_dispatcher_t *d, hu_allocator_t *
     if (!results)
         return HU_ERR_OUT_OF_MEMORY;
     for (size_t i = 0; i < calls_count; i++) {
-        execute_one_retried(alloc, tools, tools_count, &calls[i], &results[i],
-                            d->cache, on_chunk, cb_ctx, d->max_retries, d->retry_base_ms);
+        execute_one_retried(alloc, tools, tools_count, &calls[i], &results[i], d->cache, on_chunk,
+                            cb_ctx, d->max_retries, d->retry_base_ms);
     }
     out->results = results;
     out->count = calls_count;

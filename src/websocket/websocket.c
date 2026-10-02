@@ -1,6 +1,7 @@
 #include "human/websocket/websocket.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/local_only_guard.h"
 #include "human/core/log.h"
 #include <stdint.h>
 #include <stdio.h>
@@ -455,6 +456,12 @@ hu_error_t hu_ws_connect_with_headers(hu_allocator_t *alloc, const char *url,
     if (!alloc || !url || !out)
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
+    /* local_only: every remote websocket here is conversational (Gemini Live,
+     * OpenAI Realtime, ws_streaming chat) unless it is an allowed voice
+     * service (Cartesia streaming TTS). Checked before the transport. */
+    hu_error_t lo = hu_local_only_check_ws(url);
+    if (lo != HU_OK)
+        return lo;
 
 #if HU_IS_TEST
     (void)extra_headers;
@@ -852,8 +859,8 @@ hu_error_t hu_ws_recv(hu_ws_client_t *ws, hu_allocator_t *alloc, char **data_out
         if (hdr.payload_len > HU_WS_MAX_MSG)
             return HU_ERR_IO;
 
-        if ((hdr.opcode == HU_WS_OP_TEXT || hdr.opcode == HU_WS_OP_BINARY) && hdr.fin
-            && hdr.payload_len == 0) {
+        if ((hdr.opcode == HU_WS_OP_TEXT || hdr.opcode == HU_WS_OP_BINARY) && hdr.fin &&
+            hdr.payload_len == 0) {
             if (ws->frag_buf) {
                 alloc->free(alloc->ctx, ws->frag_buf, ws->frag_cap);
                 ws->frag_buf = NULL;
@@ -940,8 +947,8 @@ hu_error_t hu_ws_recv(hu_ws_client_t *ws, hu_allocator_t *alloc, char **data_out
             if (ws->sockfd != HU_WS_INVALID_SOCK) {
                 char close_buf[16];
                 unsigned char mask[4] = {0, 0, 0, 0};
-                size_t n = hu_ws_build_frame(close_buf, sizeof(close_buf), HU_WS_OP_CLOSE, "", 0,
-                                             mask);
+                size_t n =
+                    hu_ws_build_frame(close_buf, sizeof(close_buf), HU_WS_OP_CLOSE, "", 0, mask);
                 if (n > 0) {
                     size_t sent = 0;
                     while (sent < n) {

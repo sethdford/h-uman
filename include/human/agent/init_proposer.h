@@ -122,6 +122,9 @@ hu_error_t hu_init_proposer_tick(const struct hu_initiative_config *cfg,
 /* Test-only: reset the one-shot warn guards (enabled/disabled log lines)
  * so each test starts with a clean slate. No-op outside HU_IS_TEST. */
 void hu_init_proposer_reset_warn_guards_for_test(void);
+/* The local_only caller tag in force at the most recent propose-model call
+ * point (NULL before any). Lets tests pin that the request is attributed. */
+const char *hu_init_proposer_last_llm_caller_for_test(void);
 
 /* ──────────────────────────────────────────────────────────────────────────
  * T2 — Context bundle assembly (AC-2 partial)

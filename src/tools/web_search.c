@@ -7,6 +7,7 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/json.h"
+#include "human/core/local_only_guard.h"
 #include "human/core/string.h"
 #include "human/tool.h"
 #include "human/tools/validation.h"
@@ -71,6 +72,14 @@ static hu_error_t web_search_execute(void *ctx, hu_allocator_t *alloc, const hu_
     }
     if (qlen > HU_WEB_QUERY_MAX) {
         *out = hu_tool_result_fail("query too long", 14);
+        return HU_OK;
+    }
+    /* local_only: the query is written from the conversation, so it is
+     * content. Refused unless "tool:web_search" is on privacy.local_only_allow. */
+    if (hu_local_only_check_service("tool:web_search", NULL) != HU_OK) {
+        static const char msg[] =
+            "web_search refused by local_only (query is conversation content)";
+        *out = hu_tool_result_fail(msg, sizeof(msg) - 1);
         return HU_OK;
     }
 

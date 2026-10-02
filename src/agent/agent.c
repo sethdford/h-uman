@@ -81,6 +81,7 @@
 #include "human/persona/genuine_boundaries.h"
 #include "human/persona/narrative_self.h"
 #include "human/provider.h"
+#include "human/providers/local_only_config.h"
 #include "human/security/arg_inspector.h"
 #include "human/voice.h"
 #ifdef HU_ENABLE_ML
@@ -2901,6 +2902,9 @@ hu_error_t hu_agent_reload_config(hu_agent_t *agent, char **summary_out, size_t 
      * by tests/test_config_reload.c). */
 #if !HU_IS_TEST
     hu_privacy_set_enforced(fresh_cfg.voice.privacy_mode);
+    /* privacy.local_only: re-resolve (mode + voice allow-list) from the fresh
+     * config; never cleared by a reload that merely omits the block. */
+    (void)hu_config_apply_local_only(&fresh_cfg);
 #endif
 
     char *summary_buf = (char *)agent->alloc->alloc(agent->alloc->ctx, 512);

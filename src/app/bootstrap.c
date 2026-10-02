@@ -12,6 +12,7 @@
 #include "human/config.h"
 #include "human/context_engine.h"
 #include "human/context_engine_rag.h"
+#include "human/core/local_only_guard.h"
 #include "human/core/log.h"
 #include "human/core/paths.h"
 #include "human/data/loader.h"
@@ -29,6 +30,7 @@
 #include "human/plugin_discovery.h"
 #include "human/plugin_loader.h"
 #include "human/providers/factory.h"
+#include "human/providers/local_only_config.h"
 #include "human/vertex_adc.h"
 #ifdef HU_ENABLE_APPLE_INTELLIGENCE
 #include "human/providers/apple.h"
@@ -593,6 +595,12 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
     if (err != HU_OK)
         goto fail;
     ctx->cfg = &bi->cfg;
+#if !HU_IS_TEST
+    /* privacy.local_only: set the process mode before any provider or
+     * embedder exists (tests drive hu_config_apply_local_only directly, so a
+     * bootstrap test's config never leaks a mode into later suites). */
+    (void)hu_config_apply_local_only(&bi->cfg);
+#endif
 
     if (bi->cfg.data_dir && bi->cfg.data_dir[0])
         hu_data_set_dir(bi->cfg.data_dir);
@@ -978,10 +986,13 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
          * not configured. Final fallback: local embedder. */
         hu_embedding_provider_t gem_provider = {0};
         const char *adc_project = hu_vertex_adc_default_project(alloc);
-        if (adc_project && adc_project[0]) {
+        /* local_only: memory text never goes to a cloud embedder; the local
+         * embedder below takes over. */
+        bool cloud_embed_ok = !hu_local_only_enforced();
+        if (cloud_embed_ok && adc_project && adc_project[0]) {
             gem_provider = hu_embedding_gemini_create_vertex(alloc, NULL, NULL, NULL, 0);
         }
-        if (!gem_provider.ctx) {
+        if (cloud_embed_ok && !gem_provider.ctx) {
             const char *gemini_key = getenv("GEMINI_API_KEY");
             if (gemini_key && gemini_key[0]) {
                 gem_provider = hu_embedding_gemini_create(alloc, gemini_key, NULL, 0);

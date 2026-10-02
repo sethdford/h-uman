@@ -1,4 +1,5 @@
 #include "human/providers/local_only.h"
+#include "human/core/local_only_guard.h"
 #include "human/core/log.h"
 #include <string.h>
 #include <strings.h>
@@ -14,12 +15,6 @@ const hu_local_only_span_kind_t *hu_local_only_span_kinds(size_t *count) {
         *count = SPAN_KIND_COUNT;
     return k_span_kinds;
 }
-
-/* Model-name prefixes only a cloud API serves (case-insensitive). Bare
- * OpenAI o-series ("o1", "o3", "o4-mini") is matched separately. */
-static const char *const k_cloud_model_prefixes[] = {
-    "gemini", "gpt-", "chatgpt", "claude", "grok",
-};
 
 /* Backends whose base_url is a MODEL PATH (factory.c), never a host: always
  * local, decided before any URL parsing. */
@@ -61,43 +56,10 @@ bool hu_local_only_provider_is_local(const hu_provider_t *prov) {
     return hu_local_only_provider_name_is_local(prov->vtable->get_name(prov->ctx));
 }
 
+/* One cloud-model classifier: #587's privacy.local_only guard carried a
+ * verbatim copy; the integration train keeps the core one and delegates. */
 bool hu_local_only_model_is_cloud(const char *model, size_t model_len) {
-    if (!model || model_len == 0)
-        return false;
-    /* "publishers/google/models/gemini-..." and "google/gemini-..." forms */
-    for (size_t i = model_len; i > 0; i--) {
-        if (model[i - 1] == '/') {
-            model += i;
-            model_len -= i;
-            break;
-        }
-    }
-    for (size_t i = 0; i < sizeof(k_cloud_model_prefixes) / sizeof(k_cloud_model_prefixes[0]);
-         i++) {
-        size_t pl = strlen(k_cloud_model_prefixes[i]);
-        if (model_len >= pl && strncasecmp(model, k_cloud_model_prefixes[i], pl) == 0)
-            return true;
-    }
-    /* OpenAI o-series: "o1", "o3-pro", "o4-mini" (o + digits, then end or '-'). */
-    if (model_len >= 2 && (model[0] == 'o' || model[0] == 'O') && model[1] >= '0' &&
-        model[1] <= '9') {
-        size_t j = 1;
-        while (j < model_len && model[j] >= '0' && model[j] <= '9')
-            j++;
-        if (j == model_len || model[j] == '-')
-            return true;
-    }
-    /* Ollama cloud models run on ollama.com: "gpt-oss:120b-cloud", "x:cloud". */
-    static const char k_cloud_suffix[] = "-cloud";
-    size_t sl = sizeof(k_cloud_suffix) - 1;
-    if (model_len >= sl && strncasecmp(model + model_len - sl, k_cloud_suffix, sl) == 0)
-        return true;
-    for (size_t i = 0; i + 6 <= model_len; i++) {
-        if (model[i] == ':' && strncasecmp(model + i + 1, "cloud", 5) == 0 &&
-            (i + 6 == model_len || model[i + 6] == '-' || model[i + 6] == ':'))
-            return true;
-    }
-    return false;
+    return hu_local_only_model_name_is_cloud(model, model_len);
 }
 
 bool hu_local_only_attempt_is_local(bool provider_local, const char *model, size_t model_len) {

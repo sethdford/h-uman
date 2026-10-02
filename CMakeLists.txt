@@ -596,6 +596,7 @@ set(HU_CORE_SOURCES
     src/core/rand.c
     src/core/error.c
     src/core/gate_mode.c
+    src/core/local_only_guard.c
     src/core/arena.c
     src/core/string.c
     src/core/tokens.c
@@ -833,6 +834,7 @@ set(HU_CORE_SOURCES
     src/agent/orchestrator_llm.c
     src/agent/swarm.c
     src/agent/model_router.c
+    src/agent/turn/local_only_route.c
     src/agent/model_router_health.c
     src/agent/registry.c
     src/agent/undo.c
@@ -974,6 +976,7 @@ set(HU_CORE_SOURCES
     src/providers/reliable.c
     src/providers/local_only.c
     src/providers/from_config.c
+    src/providers/local_only_config.c
     src/providers/router.c
     src/providers/ensemble.c
     src/providers/codex_cli.c
@@ -3669,6 +3672,7 @@ set(HU_TEST_SOURCES
     tests/test_consecutive_limiter.c
     tests/test_proactive_policy.c
     tests/test_daemon_director.c
+    tests/test_daemon_director_local_only.c
     tests/test_daemon_trust.c
     tests/test_config_parse.c
     tests/test_config_mutator_writes.c
@@ -3713,6 +3717,9 @@ set(HU_TEST_SOURCES
     tests/test_prompt.c
     tests/test_prompt_trim.c
     tests/test_gate_mode.c
+    tests/test_local_only_guard.c
+    tests/test_local_only_config.c
+    tests/test_local_only_voice.c
     tests/test_graph_grounding.c
     tests/test_uncertainty.c
     tests/test_tool_search.c
@@ -4088,6 +4095,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_sota_humanness.c
     tests/test_distiller.c
     tests/test_model_router.c
+    tests/test_local_only_route.c
     tests/test_model_router_health.c
     tests/test_cp_admin.c
     tests/test_humanness_context.c

@@ -30,6 +30,7 @@
 #include "human/config.h"
 #include "human/context/conversation.h"
 #include "human/context/vision.h"
+#include "human/core/local_only_guard.h"
 #include "human/core/log.h"
 #include "human/core/log_redact.h"
 #include "human/core/paths.h"
@@ -708,6 +709,11 @@ hu_error_t hu_daemon_describe_image(hu_allocator_t *alloc, hu_agent_t *agent,
                                     size_t *desc_len) {
     if (!alloc || !agent)
         return HU_ERR_INVALID_ARGUMENT;
+    /* local_only: no image bytes leave the process — the cloud is off-limits
+     * and the local server is text-only (422s). The caller substitutes a
+     * placeholder the model can react to. */
+    if (hu_local_only_enforced())
+        return HU_ERR_NOT_SUPPORTED;
     const char *vp = NULL, *vm = NULL;
     if (hu_daemon_vision_route(cfg, model, model_len, &vp, &vm)) {
         hu_provider_t prov = {0};
@@ -724,6 +730,58 @@ hu_error_t hu_daemon_describe_image(hu_allocator_t *alloc, hu_agent_t *agent,
     }
     return hu_vision_describe_image(alloc, &agent->provider, path, path_len, model, model_len,
                                     desc_out, desc_len);
+}
+
+static const char k_obj_char[] = "\xEF\xBF\xBC"; /* U+FFFC, the attachment placeholder */
+
+/* text without any U+FFFC, trimmed of surrounding spaces/newlines, into buf.
+ * Returns the length, or (size_t)-1 when buf is too small. */
+static size_t strip_attachment_char(const char *text, size_t n, char *buf, size_t cap, bool *had) {
+    size_t o = 0;
+    *had = false;
+    for (size_t i = 0; i < n; i++) {
+        if (i + 3 <= n && memcmp(text + i, k_obj_char, 3) == 0) {
+            *had = true;
+            i += 2;
+            continue;
+        }
+        if (o + 1 >= cap)
+            return (size_t)-1;
+        buf[o++] = text[i];
+    }
+    while (o > 0 && (buf[o - 1] == ' ' || buf[o - 1] == '\n'))
+        o--;
+    size_t lead = 0;
+    while (lead < o && (buf[lead] == ' ' || buf[lead] == '\n'))
+        lead++;
+    memmove(buf, buf + lead, o - lead);
+    return o - lead;
+}
+
+/* buf[0..o) + (o ? "\n" : "") + note (NUL-terminated note of note_size). */
+static const char *append_note(const char *text, size_t *len, char *buf, size_t cap, size_t o,
+                               const char *note, size_t note_size) {
+    if (o + (o ? 1 : 0) + note_size > cap)
+        return text;
+    if (o)
+        buf[o++] = '\n';
+    memcpy(buf + o, note, note_size);
+    *len = o + note_size - 1;
+    return buf;
+}
+
+const char *hu_daemon_photo_placeholder(const char *text, size_t *len, char *buf, size_t cap) {
+    static const char note[] = "[They sent a photo]";
+    if (!text || !len || !buf || cap < sizeof(note) || text == buf)
+        return text;
+    size_t o = 0;
+    if (!(*len == 7 && memcmp(text, "[Photo]", 7) == 0)) { /* keep the caption */
+        bool had = false;
+        o = strip_attachment_char(text, *len, buf, cap, &had);
+        if (o == (size_t)-1)
+            return text;
+    }
+    return append_note(text, len, buf, cap, o, note, sizeof(note));
 }
 
 bool hu_daemon_tool_traffic(const struct hu_persona *p, const char *key, size_t key_len,
@@ -750,40 +808,15 @@ bool hu_daemon_hurt_withheld(const struct hu_persona *p, const char *key, size_t
 }
 
 const char *hu_daemon_unseen_photo(const char *text, size_t *len, char *buf, size_t cap) {
-    static const char obj[] = "\xEF\xBF\xBC"; /* U+FFFC, the attachment placeholder */
     static const char note[] =
         "[They sent a picture that didn't load on your phone \xE2\x80\x94 you can't see it]";
     if (!text || !len || !buf || cap == 0 || text == buf)
         return text;
-    size_t n = *len, o = 0;
     bool had = false;
-    for (size_t i = 0; i < n; i++) {
-        if (i + 3 <= n && memcmp(text + i, obj, 3) == 0) {
-            had = true;
-            i += 2;
-            continue;
-        }
-        if (o + 1 >= cap)
-            return text;
-        buf[o++] = text[i];
-    }
-    if (!had)
+    size_t o = strip_attachment_char(text, *len, buf, cap, &had);
+    if (o == (size_t)-1 || !had)
         return text;
-    while (o > 0 && (buf[o - 1] == ' ' || buf[o - 1] == '\n'))
-        o--;
-    size_t lead = 0;
-    while (lead < o && (buf[lead] == ' ' || buf[lead] == '\n'))
-        lead++;
-    memmove(buf, buf + lead, o - lead);
-    o -= lead;
-    size_t need = o + (o ? 1 : 0) + sizeof(note) - 1;
-    if (need + 1 > cap)
-        return text;
-    if (o)
-        buf[o++] = '\n';
-    memcpy(buf + o, note, sizeof(note));
-    *len = o + sizeof(note) - 1;
-    return buf;
+    return append_note(text, len, buf, cap, o, note, sizeof(note));
 }
 
 /* Every bubble is cased here, not only the reply's first line: shaping runs
