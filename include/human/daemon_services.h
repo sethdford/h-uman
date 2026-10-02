@@ -14,7 +14,6 @@
 
 /* Forward declarations to avoid circular includes */
 typedef struct hu_channel hu_channel_t;
-typedef struct hu_provider hu_provider_t;
 
 /* Consolidation debounce tracker — moved here to avoid impl header dependency */
 typedef struct hu_consolidation_debounce {
@@ -28,9 +27,6 @@ typedef struct hu_consolidation_config {
     double decay_factor;
     uint32_t dedup_threshold; /* 0-100 token overlap percentage */
     uint32_t max_entries;
-    hu_provider_t *provider; /* optional; NULL = skip connection discovery */
-    const char *model;       /* model name for LLM calls; NULL uses provider default */
-    size_t model_len;
     bool extract_facts; /* run deep_extract on surviving entries and store as propositions */
     float
         fact_confidence_threshold; /* minimum confidence for stored facts (0.0-1.0, default 0.5) */
@@ -41,9 +37,6 @@ typedef struct hu_consolidation_config {
      .decay_factor = 0.9,         \
      .dedup_threshold = 85,       \
      .max_entries = 10000,        \
-     .provider = NULL,            \
-     .model = NULL,               \
-     .model_len = 0,              \
      .extract_facts = false,      \
      .fact_confidence_threshold = 0.5f}
 
