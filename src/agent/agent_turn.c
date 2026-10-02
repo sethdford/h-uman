@@ -1971,7 +1971,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                             if (hu_frontier_persist_load_relationship(
                                     fp_db, agent->memory_session_id, agent->memory_session_id_len,
                                     &rs, &rsc, &rt) == HU_OK &&
-                                (rs || rsc || rt)) {
+                                (rs || rsc || rt) && !agent->relationship.derived) {
                                 if (rs >= HU_REL_NEW && rs <= HU_REL_DEEP)
                                     agent->relationship.stage = (hu_relationship_stage_t)rs;
                                 if (rsc >= 0)

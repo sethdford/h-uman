@@ -778,6 +778,7 @@ set(HU_CORE_SOURCES
     src/agent/agent_turn.c
     src/agent/turn/turn_ctx.c
     src/agent/turn/turn_retrieve.c
+    src/agent/turn/contact_stage_turn.c
     src/agent/turn/turn_perceive.c
     src/agent/turn/turn_entry.c
     src/agent/turn/turn_silence.c
@@ -1529,6 +1530,7 @@ list(APPEND HU_CORE_SOURCES
     src/agent/followup_compose.c
     src/persona/temporal.c
     src/persona/relationship.c
+    src/persona/contact_stage.c
     src/persona/auto_profile.c
     src/persona/auto_tune.c
     src/persona/voice_maturity.c
@@ -1690,6 +1692,7 @@ if(HU_ENABLE_SQLITE)
         src/memory/repos/proactive_decisions_repo_sqlite.c
         src/memory/repos/outbound_sends_repo_sqlite.c
         src/memory/repos/contact_optout_repo_sqlite.c
+        src/memory/repos/contact_stage_repo_sqlite.c
         src/memory/repos/prospective_repo_sqlite.c
         src/memory/repos/reminder_repo_sqlite.c
         src/memory/repos/briefing_repo_sqlite.c
@@ -4072,7 +4075,7 @@ if(HU_ENABLE_FEEDS)
     list(APPEND HU_TEST_SOURCES
         tests/test_research_feeds.c tests/test_research_executor.c)
 endif()
-list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/test_relationship.c tests/test_replay.c tests/test_style_clone.c tests/test_life_sim.c tests/test_persona_mood.c tests/test_persona_feedback.c tests/test_persona_examples_style.c tests/test_persona_cli.c tests/test_voice_maturity.c tests/test_style_learner.c tests/test_temporal.c tests/test_inner_world.c tests/test_persona_eval.c tests/test_persona_filler_roundtrip.c tests/test_style_critique_patterns.c tests/test_style_self_critique.c)
+list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/test_relationship.c tests/test_contact_stage.c tests/test_replay.c tests/test_style_clone.c tests/test_life_sim.c tests/test_persona_mood.c tests/test_persona_feedback.c tests/test_persona_examples_style.c tests/test_persona_cli.c tests/test_voice_maturity.c tests/test_style_learner.c tests/test_temporal.c tests/test_inner_world.c tests/test_persona_eval.c tests/test_persona_filler_roundtrip.c tests/test_style_critique_patterns.c tests/test_style_self_critique.c)
 # Moment Context Decision Layer (Task 0.2) — paired with src/persona/moment.c
 # and src/persona/moment_render.c above; unconditional per gate-symmetry rule.
 list(APPEND HU_TEST_SOURCES tests/test_moment_compose.c tests/test_moment_render.c)
