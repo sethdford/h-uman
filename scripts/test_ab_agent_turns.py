@@ -19,9 +19,30 @@ def test_contexts_match_what_each_ab_is_about():
     assert not ab.keep_context("planner", planner_msg, False)  # needs Seth's own reply
     assert not ab.keep_context("planner", "hey whats up", True)  # 12 words or fewer
     assert ab.keep_context("beat", "how was the game?", True)
-    for kind in ("tot", "planner", "beat"):
+    # cache order touches every reply: ordinary messages Seth answered
+    assert ab.keep_context("cache", "lol same", True)
+    assert ab.keep_context("cache", planner_msg, True)
+    assert not ab.keep_context("cache", "lol same", False)
+    assert not ab.keep_context("cache", "ok", True)  # too short to say anything about
+    assert not ab.keep_context("cache", "x" * 301, True)
+    assert [a for a, _, _ in ab.ARMS["cache"]] == ["off", "live"]
+    for kind in ("tot", "planner", "beat", "cache"):
         assert not ab.keep_context(kind, "look ￼", True)
         assert not ab.keep_context(kind, "see https://example.com " + long_msg, True)
+
+
+def test_setup_snapshots_the_personal_model(tmp_path, monkeypatch):
+    """Without personal_model.bin every arm ran on a fresh model, so the
+    production style lines (e.g. "avg 2 chars") never reached an A/B."""
+    import sqlite3
+    home = tmp_path / "home"
+    (home / "personas").mkdir(parents=True)
+    (home / "config.json").write_text("{}")
+    sqlite3.connect(str(home / "memory.db")).close()
+    (home / "personal_model.bin").write_bytes(b"PM")
+    monkeypatch.setattr(ab, "STATE_HOME", str(home))
+    pristine = ab.setup(str(tmp_path / "work"))
+    assert open(os.path.join(pristine, "personal_model.bin"), "rb").read() == b"PM"
 
 
 def test_reset_state_restores_the_snapshot_every_time(tmp_path):
