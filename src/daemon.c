@@ -76,7 +76,6 @@
 #include "human/daemon/director.h"
 #include "human/daemon/expressive.h"
 #include "human/daemon/feeds_facade.h"
-#include "human/daemon/hurt_handoff.h"
 #include "human/daemon/identity_graph.h"
 #include "human/daemon/insight_overuse.h"
 #include "human/daemon/intelligence_facade.h"
@@ -2916,19 +2915,17 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 /* Clear STM before each contact batch to avoid cross-contact emotion contamination
                  */
                 hu_stm_clear(&agent->stm);
+                if (hu_daemon_tool_traffic(agent->persona, batch_key, key_len, combined,
+                                           combined_len, agent->observer))
+                    continue; /* before any bookkeeping: nothing learned */
 
 #ifndef HU_IS_TEST
                 /* F119: Contact replied — reset governor cool-off so proactive
                  * outreach can resume after silence. */
                 (void)hu_governor_record_response(&gov_budget);
 
-                /* Reciprocity tracking: record their initiation for balanced outreach.
-                 * Gated on HU_ENABLE_SQLITE because the helper's declaration lives
-                 * inside that guard in include/human/context/self_awareness.h.
-                 * The other three call sites are already gated; this one was
-                 * missed when reciprocity was wired in, so the no-sqlite /
-                 * cross-arm64 / minimal builds tripped
-                 * -Werror=implicit-function-declaration. */
+                /* Reciprocity: record their initiation for balanced outreach. The
+                 * helper is declared only under HU_ENABLE_SQLITE (self_awareness.h). */
 #ifdef HU_ENABLE_SQLITE
                 if (agent->memory) {
                     bool they_asked = (memchr(combined, '?', combined_len) != NULL);
@@ -2994,21 +2991,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     continue;
                 }
 
-                /* Hurt-signal hand-off: "u mad at me?", "why are you being short"
-                 * is a repair moment the owner must answer himself. Before any
-                 * LLM call, typing indicator or send; messages are already
-                 * consumed upstream, so a skip is never replayed.
-                 * HU_HURT_HANDOFF activation gated on a shadow fire-rate review
-                 * (share of 1:1 batches, false positives read by the owner): do
-                 * not flip to default-ON without that measurement. */
-                if (!msgs[batch_start].is_group) {
-                    const hu_contact_profile_t *cp_hurt =
-                        agent->persona ? hu_persona_find_contact(agent->persona, batch_key, key_len)
-                                       : NULL;
-                    if (hu_hurt_handoff_apply(hu_hurt_handoff_mode(), combined, combined_len,
-                                              cp_hurt ? cp_hurt->name : NULL))
-                        continue;
-                }
+                /* Hurt-signal hand-off (hurt_handoff.h). */
+                if (hu_daemon_hurt_withheld(agent->persona, batch_key, key_len, combined,
+                                            combined_len, msgs[batch_start].is_group))
+                    continue;
 
                 hu_log_info("human", agent ? agent->observer : NULL,
                             "processing batch for %.*s: \"%.*s\" (group=%d)",

@@ -444,6 +444,7 @@ void run_outbound_crosstalk_tests(void);
 /* Sprint 60 follow-up — SQLite-backed crosstalk lookup. Tests seed
  * the messages table directly via sqlite3, so source + tests are
  * gated by HU_ENABLE_SQLITE in CMakeLists.txt. Mirror that gate here. */
+void run_curiosity_gaps_tests(void);
 #ifdef HU_ENABLE_SQLITE
 void run_boundary_repo_tests(void);
 void run_opinions_repo_tests(void);
@@ -1540,6 +1541,7 @@ int main(int argc, char **argv) {
     run_outbound_shape_tests();
     run_outbound_echo_tests();
     run_outbound_crosstalk_tests();
+    run_curiosity_gaps_tests();
 #ifdef HU_ENABLE_SQLITE
     run_boundary_repo_tests();
     run_opinions_repo_tests();

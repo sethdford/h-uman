@@ -10,8 +10,8 @@ typedef struct hu_consolidation_config {
     double decay_factor;
     uint32_t dedup_threshold; /* 0-100 token overlap percentage */
     uint32_t max_entries;
-    hu_provider_t *provider; /* optional; NULL = skip connection discovery */
-    const char *model;       /* model name for LLM calls; NULL uses provider default */
+    hu_provider_t *provider; /* unread since connection discovery was removed (2026-10-01) */
+    const char *model;       /* unread, as above */
     size_t model_len;
 } hu_consolidation_config_t;
 
@@ -30,7 +30,7 @@ hu_error_t hu_memory_consolidate(hu_allocator_t *alloc, hu_memory_t *memory,
 
 /* ── Topic-switch consolidation debounce (inspired by EdgeClaw) ───────── */
 
-#define HU_CONSOLIDATION_MIN_ENTRIES 5
+#define HU_CONSOLIDATION_MIN_ENTRIES       5
 #define HU_CONSOLIDATION_MIN_INTERVAL_SECS 60
 
 typedef struct hu_consolidation_debounce {

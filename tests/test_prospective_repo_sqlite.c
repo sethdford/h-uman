@@ -1077,6 +1077,156 @@ static void repo_legacy_mark_sent_remirrors_a_later_sibling(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
+/* Known gap 6: three same-words F20 pairs 2.5 days apart (T0, T0+2.5d,
+ * T0+5d) collapse into commitment:1. Marking the MIDDLE follow-up sent
+ * closes commitment:1 (its due T0 is within the follow-up's window) and the
+ * bounded sweep re-mirrors the T0+5d pair as commitment:3 -- a later
+ * promise. That fresh row's due (T0+5d) is inside the middle follow-up's
+ * own action window (T0+2.5d + 3d), so the twin loop's next pass used to
+ * action-match it and close it as done/no-outcome while its ledger rows
+ * stayed pending: v2 would never surface that promise. A row this call
+ * re-mirrored is never this follow-up's twin. */
+static void repo_legacy_mark_sent_keeps_the_survivor_it_remirrored(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    static const int64_t due[] = {PM_T0, PM_T0 + 5 * PM_D / 2, PM_T0 + 5 * PM_D};
+    for (size_t i = 0; i < sizeof(due) / sizeof(due[0]); i++) {
+        HU_ASSERT_EQ(hu_superhuman_commitment_store(&mem, &alloc, "+15550000042", 12, "call mom", 8,
+                                                    "me", 2, due[i]),
+                     HU_OK);
+        HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, "+15550000042", 12,
+                                                             "call mom", 8, due[i], "me", 2),
+                     HU_OK); /* pair i+1: commitment i+1, follow-up i+1 */
+    }
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories"), (int64_t)1);
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_mark_sent(&mem, 2), HU_OK);
+
+    char s[160];
+    q_text(db, "SELECT status FROM prospective_memories WHERE trigger_value='commitment:1'", s,
+           sizeof(s));
+    HU_ASSERT_STR_EQ(s, "done"); /* the twin of the middle follow-up */
+    /* the T0+5d promise: an OPEN row keyed by its own ledger id, its own due */
+    q_text(db,
+           "SELECT status || '|' || attempts || '|' || ifnull(outcome, 'none') || '|' || due_at "
+           "FROM prospective_memories WHERE trigger_value='commitment:3'",
+           s, sizeof(s));
+    HU_ASSERT_STR_EQ(s, "pending|0|none|1790432000");
+    /* ...and its ledger rows are still pending: the legacy path marked only #2 */
+    q_text(db,
+           "SELECT (SELECT group_concat(status) FROM (SELECT status FROM commitments ORDER BY id))"
+           " || '/' || (SELECT group_concat(sent) FROM (SELECT sent FROM delayed_followups ORDER "
+           "BY id))",
+           s, sizeof(s));
+    HU_ASSERT_STR_EQ(s, "pending,pending,pending/0,1,0");
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE status IN "
+                           "('pending','surfaced')"),
+                 (int64_t)1); /* exactly one open intention: the later promise */
+
+    /* that row is still the third follow-up's twin: its own send settles it */
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_mark_sent(&mem, 3), HU_OK);
+    q_text(db, "SELECT status FROM prospective_memories WHERE trigger_value='commitment:3'", s,
+           sizeof(s));
+    HU_ASSERT_STR_EQ(s, "done");
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* Known gap 7: v2 owns a ledger row when an OPEN time row of its contact is
+ * its twin -- by its own key, its F20 partner's key, or (dated) its mirror
+ * text within its due + grace -- and keeps owning it while surfaced or
+ * retrying. A terminal twin, a later same-words promise, another contact's
+ * identical words and a missing row are not owned. */
+static void repo_ledger_v2_owned_by_key_f20_and_bounded_action(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    bool owned = false;
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, "+15550000043", 12,
+                                                         "renew the passport", 18, PM_T0, "me", 2),
+                 HU_OK); /* follow-up 1: its own row, followup:1 */
+    HU_ASSERT_EQ(hu_superhuman_commitment_store(&mem, &alloc, "+15550000043", 12, "call mom", 8,
+                                                "me", 2, PM_T0 + PM_D),
+                 HU_OK); /* commitment 1: commitment:1 */
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, "+15550000043", 12,
+                                                         "call mom", 8, PM_T0 + PM_D, "me", 2),
+                 HU_OK); /* follow-up 2: its F20 pair, collapsed into commitment:1 */
+    char sql[512];
+    snprintf(sql, sizeof(sql),
+             "INSERT INTO delayed_followups(contact_id,topic,scheduled_at,sent) VALUES"
+             "('+15550000043','call mom',%lld,0)," /* 3: same words, 11 days earlier */
+             "('+15550000044','call mom',%lld,0)," /* 4: another contact */
+             "('+15550000043','call mom',%lld,0)", /* 5: unkeyed, within the window */
+             (long long)(PM_T0 - 10 * PM_D), (long long)(PM_T0 + PM_D), (long long)PM_T0);
+    HU_ASSERT_EQ(sqlite3_exec(db, sql, NULL, NULL, NULL), SQLITE_OK); /* pre-mirror rows */
+
+    HU_ASSERT_EQ(hu_prospective_repo_ledger_v2_owned(db, true, 1, &owned), HU_OK);
+    HU_ASSERT_TRUE(owned); /* own key */
+    HU_ASSERT_EQ(hu_prospective_repo_ledger_v2_owned(db, true, 2, &owned), HU_OK);
+    HU_ASSERT_TRUE(owned); /* the F20 partner's key */
+    HU_ASSERT_EQ(hu_prospective_repo_ledger_v2_owned(db, false, 1, &owned), HU_OK);
+    HU_ASSERT_TRUE(owned); /* a commitment, by its own key */
+    HU_ASSERT_EQ(hu_prospective_repo_ledger_v2_owned(db, true, 5, &owned), HU_OK);
+    HU_ASSERT_TRUE(owned); /* due T0+1d <= T0 + grace: the bounded action match */
+    HU_ASSERT_EQ(hu_prospective_repo_ledger_v2_owned(db, true, 3, &owned), HU_OK);
+    HU_ASSERT_FALSE(owned); /* T0+1d > T0-10d + grace: a different promise */
+    HU_ASSERT_EQ(hu_prospective_repo_ledger_v2_owned(db, true, 4, &owned), HU_OK);
+    HU_ASSERT_FALSE(owned); /* another contact's identical words */
+
+    /* surfaced, and back to pending for its retry: still v2's */
+    hu_prospective_item_t it;
+    open_item(&alloc, db, "+15550000043", "call mom", &it);
+    HU_ASSERT_EQ(hu_prospective_repo_transition(db, &it, HU_PM_SURFACED, HU_PM_OUTCOME_NONE, 0,
+                                                PM_T0 + 60, NULL),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_prospective_repo_ledger_v2_owned(db, true, 2, &owned), HU_OK);
+    HU_ASSERT_TRUE(owned);
+    HU_ASSERT_EQ(hu_prospective_repo_transition(db, &it, HU_PM_PENDING, HU_PM_OUTCOME_IGNORED, 1,
+                                                PM_T0 + 120, NULL),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_prospective_repo_ledger_v2_owned(db, true, 2, &owned), HU_OK);
+    HU_ASSERT_TRUE(owned);
+
+    /* a terminal twin owns nothing; the ledger row is untouched by the question */
+    open_item(&alloc, db, "+15550000043", "renew the passport", &it);
+    HU_ASSERT_EQ(hu_prospective_repo_transition(db, &it, HU_PM_EXPIRED, HU_PM_OUTCOME_NONE, 0,
+                                                PM_T0 + 60, NULL),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_prospective_repo_ledger_v2_owned(db, true, 1, &owned), HU_OK);
+    HU_ASSERT_FALSE(owned);
+    HU_ASSERT_EQ(q_int(db, "SELECT sent FROM delayed_followups WHERE id=1"), (int64_t)0);
+
+    owned = true;
+    HU_ASSERT_EQ(hu_prospective_repo_ledger_v2_owned(db, true, 99, &owned), HU_OK);
+    HU_ASSERT_FALSE(owned); /* no such row */
+    HU_ASSERT_EQ(hu_prospective_repo_ledger_v2_owned(NULL, true, 1, &owned),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_prospective_repo_ledger_v2_owned(db, true, 1, NULL), HU_ERR_INVALID_ARGUMENT);
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* Review minor: a commitment whose open twin is keyed by its F20 follow-up
+ * partner (followup:<id>) is v2's too. The follow-up is scheduled first, so
+ * the twin carries the follow-up's key and the commitment collapses into it;
+ * only pm_twin_f20's delayed_followups lookup can find it from the commitment. */
+static void repo_ledger_v2_owned_commitment_by_f20_partner(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    bool owned = false;
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(
+                     &mem, &alloc, "+15550000045", 12, "fix the fence", 13, PM_T0 + PM_D, "me", 2),
+                 HU_OK); /* follow-up 1: twin followup:1 */
+    HU_ASSERT_EQ(hu_superhuman_commitment_store(&mem, &alloc, "+15550000045", 12, "fix the fence",
+                                                13, "me", 2, PM_T0 + PM_D),
+                 HU_OK); /* commitment 1: its F20 pair */
+    HU_ASSERT_EQ(q_int(db, "SELECT COUNT(*) FROM prospective_memories WHERE "
+                           "trigger_value='commitment:1' AND status IN ('pending','surfaced')"),
+                 (int64_t)0); /* precondition: no twin under the commitment's own key */
+    HU_ASSERT_EQ(hu_prospective_repo_ledger_v2_owned(db, false, 1, &owned), HU_OK);
+    HU_ASSERT_TRUE(owned);
+    mem.vtable->deinit(mem.ctx);
+}
+
 /* Fix round 2, minor P3: after_delivery judged the surfaced row IGNORED and
  * put it back to pending for its retry (attempts 1). A later legacy
  * mark-sent must not close it: v2 owns every row it has ever surfaced. */
@@ -1215,6 +1365,9 @@ void run_prospective_repo_sqlite_tests(void) {
     HU_RUN_TEST(repo_legacy_mark_sent_skips_a_surfaced_twin);
     HU_RUN_TEST(repo_legacy_mark_sent_leaves_a_later_dated_same_action_row_open);
     HU_RUN_TEST(repo_legacy_mark_sent_remirrors_a_later_sibling);
+    HU_RUN_TEST(repo_legacy_mark_sent_keeps_the_survivor_it_remirrored);
+    HU_RUN_TEST(repo_ledger_v2_owned_by_key_f20_and_bounded_action);
+    HU_RUN_TEST(repo_ledger_v2_owned_commitment_by_f20_partner);
     HU_RUN_TEST(repo_legacy_mark_sent_skips_a_twin_v2_ever_surfaced);
     HU_RUN_TEST(repo_undated_rows_are_out_of_bound);
     HU_RUN_TEST(repo_settle_is_one_unit);

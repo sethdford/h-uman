@@ -69,6 +69,7 @@ static bool proactive_entry_content_is_safe(const char *content, size_t content_
     return true;
 }
 #ifdef HU_ENABLE_SQLITE
+#include "human/memory/prospective_policy.h"
 #include "human/memory/superhuman.h"
 #endif
 
@@ -828,6 +829,19 @@ bool hu_proactive_check_curiosity(hu_allocator_t *alloc, hu_memory_t *memory,
     return true;
 }
 
+/* Known gap 7: with HU_PROSPECTIVE_TIME=live every ledger row that has an
+ * open v2 twin is v2's to raise (hu_prospective_repo_ledger_v2_owned); F31
+ * raising it too would bring the same topic up twice. OFF and SHADOW never
+ * look it up, so F31 is exactly what it was. */
+static bool f31_may_raise(hu_memory_t *memory, hu_gate_mode_t pm_time, bool is_followup,
+                          int64_t id) {
+    if (pm_time != HU_GATE_LIVE)
+        return true;
+    bool owned = false;
+    bool ok = hu_superhuman_ledger_v2_owned(memory, is_followup, id, &owned) == HU_OK;
+    return hu_prospective_legacy_may_raise(pm_time, ok, owned);
+}
+
 /* F31: Callback opportunities — reference previous conversations (30% per conversation start).
  *
  * 2026-05-16 P4-4: this body lives in _ex; the original signature delegates
@@ -850,6 +864,7 @@ bool hu_proactive_check_callbacks_ex(hu_allocator_t *alloc, hu_memory_t *memory,
 #endif
 
     int64_t now_ts = (int64_t)time(NULL);
+    hu_gate_mode_t pm_time = hu_prospective_time_gate_mode();
 
     /* Try delayed follow-ups first */
     hu_delayed_followup_t *followups = NULL;
@@ -869,6 +884,8 @@ bool hu_proactive_check_callbacks_ex(hu_allocator_t *alloc, hu_memory_t *memory,
             /* Reject the entry if the stored "topic" is actually a raw user
              * confession or recall-format leak.  Same predicate as F25/F30. */
             if (!hu_proactive_topic_is_safe(followups[i].topic, topic_len))
+                continue;
+            if (!f31_may_raise(memory, pm_time, true, followups[i].id))
                 continue;
             if (topic_len > 200)
                 topic_len = 200;
@@ -905,6 +922,8 @@ bool hu_proactive_check_callbacks_ex(hu_allocator_t *alloc, hu_memory_t *memory,
             /* Same safety predicate as the followup branch above — refuse to
              * recycle a commitment description that looks like a confession. */
             if (!hu_proactive_topic_is_safe(commitments[i].description, desc_len))
+                continue;
+            if (!f31_may_raise(memory, pm_time, false, commitments[i].id))
                 continue;
             if (desc_len > 200)
                 desc_len = 200;
