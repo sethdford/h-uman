@@ -99,12 +99,24 @@ def serve_fake() -> tuple[HTTPServer, str]:
     return srv, f"http://127.0.0.1:{port}"
 
 
-def run_cli(home: Path, mlx_url: str, *args) -> subprocess.CompletedProcess:
+def run_cli(home: Path, mlx_url: str, *args, env_extra: dict | None = None,
+            broken_gate_dir: Path | None = None) -> subprocess.CompletedProcess:
     env = os.environ.copy()
     env["HOME"] = str(home)
-    return subprocess.run(
-        [sys.executable, str(PROMOTE), "--mlx-url", mlx_url, *args],
-        env=env, capture_output=True, text=True, timeout=30)
+    env.pop("HU_RETRAIN_EMPTY_EVAL", None)  # never inherit the caller's gate mode
+    env.update(env_extra or {})
+    if broken_gate_dir is None:
+        cmd = [sys.executable, str(PROMOTE), "--mlx-url", mlx_url, *args]
+    else:
+        # Run the REAL m3_promote.py with a broken empty_reply_gate.py shadowing
+        # the real one on sys.path (simulates an import-time failure).
+        cmd = [sys.executable, "-c",
+               "import runpy, sys; sys.path[:0] = [sys.argv[1], sys.argv[2]]; "
+               "sys.argv = [sys.argv[3]] + sys.argv[4:]; "
+               "runpy.run_path(sys.argv[0], run_name='__main__')",
+               str(broken_gate_dir), str(PROMOTE.parent), str(PROMOTE),
+               "--mlx-url", mlx_url, *args]
+    return subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=30)
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -672,7 +684,7 @@ def _write_empty_manifest(adapter_dir: Path, verdict: str, enforce: bool):
         "promotion_gate": {"verdict": verdict if enforce else "PASS"}}))
 
 
-def _empty_gate_case(verdict, enforce, *extra):
+def _empty_gate_case(verdict, enforce, *extra, env_extra=None, broken_gate_dir=None):
     FakeMLX.CURRENT_ADAPTER = "/serving-adapter"
     FakeMLX.SWAP_HISTORY = []
     srv, url = serve_fake()
@@ -688,7 +700,8 @@ def _empty_gate_case(verdict, enforce, *extra):
             if verdict is not None:
                 _write_empty_manifest(adapter, verdict, enforce)
             r = run_cli(home, url, "promote", "--adapter", str(adapter), "--yes",
-                        "--no-prod-check", "--evidence", "blind_ab gate PASS (test fixture)", *extra)
+                        "--no-prod-check", "--evidence", "blind_ab gate PASS (test fixture)", *extra,
+                        env_extra=env_extra, broken_gate_dir=broken_gate_dir)
             entry = _read_registry(home).get("adapters", {}).get(adapter.name, {})
             return r, list(FakeMLX.SWAP_HISTORY), (entry.get("promotion") or {}).get("evidence", "")
     finally:
@@ -726,6 +739,45 @@ def test_m3_promote_skip_empty_reply_gate_records_override():
         "empty-reply gate OVERRIDDEN" in evidence and "BLOCK" in evidence, evidence)
 
 
+def test_m3_promote_live_blocks_when_empty_reply_manifest_missing():
+    # Critic HIGH (2026-10-02): the gate script crashing before it wrote the
+    # manifest left "no manifest" == "no gate" -> fail OPEN in live.
+    print("\n--- test_m3_promote_live_blocks_when_empty_reply_manifest_missing ---")
+    r0, swaps0, _ = _empty_gate_case(None, False)
+    _ok("pre: no manifest with the gate off swaps (exit 0)",
+        r0.returncode == 0 and len(swaps0) == 1, f"rc={r0.returncode}\n{r0.stderr}")
+    r, swaps, _ = _empty_gate_case(None, False, env_extra={"HU_RETRAIN_EMPTY_EVAL": "live"})
+    _ok("live + no manifest refuses (exit 7)", r.returncode == 7,
+        f"rc={r.returncode}\n{r.stdout}\n{r.stderr}")
+    _ok("live + no manifest: stderr says the manifest is missing",
+        "no promotion_manifest.json" in r.stderr, r.stderr)
+    _ok("live + no manifest: fake server NEVER received the swap POST", swaps == [],
+        f"swaps={swaps}")
+    r2, swaps2, _ = _empty_gate_case(None, False, env_extra={"HU_RETRAIN_EMPTY_EVAL": "shadow"})
+    _ok("shadow + no manifest still swaps (exit 0)",
+        r2.returncode == 0 and len(swaps2) == 1, f"rc={r2.returncode}\n{r2.stderr}")
+
+
+def test_m3_promote_empty_reply_gate_import_failure():
+    print("\n--- test_m3_promote_empty_reply_gate_import_failure ---")
+    with tempfile.TemporaryDirectory() as broken:
+        (Path(broken) / "empty_reply_gate.py").write_text(
+            "raise RuntimeError('simulated import-time failure')\n")
+        r, swaps, _ = _empty_gate_case(None, False, env_extra={"HU_RETRAIN_EMPTY_EVAL": "live"},
+                                       broken_gate_dir=Path(broken))
+        _ok("live + gate module import failure refuses (exit 7, no swap)",
+            r.returncode == 7 and swaps == [], f"rc={r.returncode} swaps={swaps}\n{r.stderr}")
+        _ok("live + import failure: stderr names the import failure loudly",
+            "failed to import" in r.stderr and "RuntimeError" in r.stderr, r.stderr)
+        r2, swaps2, _ = _empty_gate_case(None, False,
+                                         env_extra={"HU_RETRAIN_EMPTY_EVAL": "shadow"},
+                                         broken_gate_dir=Path(broken))
+        _ok("shadow + import failure continues (exit 0, swapped)",
+            r2.returncode == 0 and len(swaps2) == 1, f"rc={r2.returncode}\n{r2.stderr}")
+        _ok("shadow + import failure prints a WARNING",
+            "WARNING: empty_reply_gate module failed to import" in r2.stderr, r2.stderr)
+
+
 def main():
     print("M3 promote CLI (G2) verifier")
     test_current_against_unreachable()
@@ -746,6 +798,8 @@ def main():
     test_m3_promote_blocks_on_enforced_empty_reply_regression()
     test_m3_promote_ignores_shadow_or_missing_empty_reply_manifest()
     test_m3_promote_skip_empty_reply_gate_records_override()
+    test_m3_promote_live_blocks_when_empty_reply_manifest_missing()
+    test_m3_promote_empty_reply_gate_import_failure()
     print(f"\n--- Results: {_PASS} passed, {_FAIL} failed ---")
     return 0 if _FAIL == 0 else 1
 

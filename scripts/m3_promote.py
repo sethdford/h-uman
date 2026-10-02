@@ -43,6 +43,11 @@ Exit codes:
         scripts/blind_ab/adapter_smoke_test.py run found regressions, or no
         smoke run exists for this exact adapter (pass --skip-smoke-gate to
         override; recorded in the registry evidence string, never silent).
+    7 — empty-reply gate BLOCK or INCONCLUSIVE: the candidate's
+        promotion_manifest.json enforces a non-PASS verdict, or
+        HU_RETRAIN_EMPTY_EVAL=live and the manifest is missing/unreadable or
+        the gate module failed to import (pass --skip-empty-reply-gate to
+        override; recorded in the registry evidence string, never silent).
 """
 from __future__ import annotations
 
@@ -75,12 +80,17 @@ except ImportError:
 
 # Empty-reply gate (2026-10-02): the nightly retrain's spare-port eval writes
 # <candidate>/promotion_manifest.json via scripts/empty_reply_gate.py. Enforced
-# here only when that manifest says so (HU_RETRAIN_EMPTY_EVAL=live); no
-# manifest or a shadow one changes nothing. Stdlib-only module.
+# when that manifest says so, AND whenever HU_RETRAIN_EMPTY_EVAL=live is set at
+# promote time -- then a missing/unreadable manifest or an unimportable gate
+# module BLOCKS (fail closed: a measurement that never completed is not a
+# PASS). Any import-time failure is caught, not just ImportError, so a broken
+# module can never silently disable enforcement. Stdlib-only module.
+EMPTY_REPLY_GATE_IMPORT_ERROR = None
 try:
     import empty_reply_gate
-except ImportError:
+except Exception as e:  # noqa: BLE001 -- any import-time failure, recorded below
     empty_reply_gate = None
+    EMPTY_REPLY_GATE_IMPORT_ERROR = f"{type(e).__name__}: {e}"
 
 HUMAN_HOME = Path.home() / ".human"
 LINEAGE_PATH = HUMAN_HOME / "training-data" / "adapter_lineage.jsonl"
@@ -256,6 +266,36 @@ def smoke_verdict(smoke_json: Path | None) -> dict:
     return {"verdict": "PASS", "reason": f"no regressions in {smoke_json}"}
 
 
+def empty_reply_eval_mode(env=None) -> str:
+    """HU_RETRAIN_EMPTY_EVAL as nightly-retrain.sh's empty_eval_mode() reads it:
+    exactly "shadow" or "live", anything else is "off"."""
+    v = (os.environ if env is None else env).get("HU_RETRAIN_EMPTY_EVAL", "off")
+    return v if v in ("shadow", "live") else "off"
+
+
+def empty_reply_promotion_verdict(adapter: str, env=None) -> dict | None:
+    """The empty-reply verdict cmd_promote enforces, or None (nothing to enforce).
+
+    live: delegated to empty_reply_gate.required_empty_reply_verdict(), which
+    fails closed on a missing/unreadable manifest; if the module itself could
+    not be imported, INCONCLUSIVE (blocks). off/shadow: the manifest-driven
+    enforced_empty_reply_verdict(); an import failure there is a loud warning
+    and promotion continues, exactly as before this gate existed."""
+    mode = empty_reply_eval_mode(env)
+    if empty_reply_gate is None:
+        if mode == "live":
+            return {"verdict": "INCONCLUSIVE",
+                    "reason": f"empty_reply_gate module failed to import "
+                              f"({EMPTY_REPLY_GATE_IMPORT_ERROR}); HU_RETRAIN_EMPTY_EVAL=live "
+                              f"fails closed"}
+        print(f"WARNING: empty_reply_gate module failed to import "
+              f"({EMPTY_REPLY_GATE_IMPORT_ERROR}); empty-reply promotion gate NOT checked "
+              f"(HU_RETRAIN_EMPTY_EVAL={mode}). Set it to live to fail closed instead.",
+              file=sys.stderr)
+        return None
+    return empty_reply_gate.required_empty_reply_verdict(adapter, mode)
+
+
 def cmd_promote(args):
     if not args.adapter:
         print("ERROR: --adapter required", file=sys.stderr)
@@ -334,8 +374,7 @@ def cmd_promote(args):
               f"not silently).", file=sys.stderr)
         return 5
 
-    empty_verdict = (empty_reply_gate.enforced_empty_reply_verdict(args.adapter)
-                     if empty_reply_gate is not None else None)
+    empty_verdict = empty_reply_promotion_verdict(args.adapter)
     if empty_verdict is not None and empty_verdict.get("verdict") != "PASS" \
             and not args.skip_empty_reply_gate:
         print(f"ERROR: refusing to promote {args.adapter}: empty-reply gate "

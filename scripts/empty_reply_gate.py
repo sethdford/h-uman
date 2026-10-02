@@ -17,8 +17,10 @@
 #   promotion_gate       live: authorship verdict AND empty_reply must PASS.
 #                        shadow: the authorship verdict, unchanged.
 # scripts/m3_promote.py reads the manifest and refuses a swap when
-# empty_reply.enforce is true and the verdict is not PASS. No manifest, or a
-# shadow manifest, changes nothing.
+# empty_reply.enforce is true and the verdict is not PASS, and -- when
+# HU_RETRAIN_EMPTY_EVAL=live at promote time -- also when the manifest is
+# missing or unreadable (required_empty_reply_verdict: fail closed). Otherwise
+# no manifest, or a shadow manifest, changes nothing.
 #
 # Pure arithmetic on numbers eval_empty_reply_rate.py measured. Never loads a
 # model or touches a server. Only rates, counts and paths are recorded; reply
@@ -89,6 +91,31 @@ def enforced_empty_reply_verdict(adapter_dir):
     return er if er.get("enforce") is True else None
 
 
+def required_empty_reply_verdict(adapter_dir, mode):
+    """For m3_promote.py, given the PROMOTE-time HU_RETRAIN_EMPTY_EVAL mode.
+
+    off/shadow: enforced_empty_reply_verdict() -- the manifest decides.
+    live: fail closed. A missing manifest (the gate never ran, or crashed
+    before writing), an unreadable one (crashed mid-write), or one with no
+    empty_reply verdict is INCONCLUSIVE, which blocks; a recorded verdict is
+    enforced whatever mode wrote it. A measurement that never completed is
+    never a PASS."""
+    if mode != "live":
+        return enforced_empty_reply_verdict(adapter_dir)
+    p = Path(str(adapter_dir)) / MANIFEST_NAME
+    if not p.is_file():
+        return {"verdict": "INCONCLUSIVE",
+                "reason": f"HU_RETRAIN_EMPTY_EVAL=live but no {MANIFEST_NAME} in {adapter_dir} "
+                          f"(the gate never ran or crashed before writing it)"}
+    try:
+        er = json.loads(p.read_text()).get("empty_reply")
+    except (OSError, ValueError, AttributeError):
+        return {"verdict": "INCONCLUSIVE", "reason": f"unreadable {p}"}
+    if not isinstance(er, dict) or not er.get("verdict"):
+        return {"verdict": "INCONCLUSIVE", "reason": f"{p} has no empty_reply verdict"}
+    return er
+
+
 def _load(path):
     if not path or not os.path.isfile(path):
         return None
@@ -131,7 +158,10 @@ def main(argv=None):
         "authorship": {"verdict": auth_verdict or "UNKNOWN", "score_json": args.authorship_json},
         "promotion_gate": {"verdict": combine(auth_verdict, er, args.mode), "mode": args.mode},
     }
-    Path(args.out).write_text(json.dumps(manifest, indent=2) + "\n")
+    # Atomic: a crash mid-write must never leave a half-written manifest.
+    tmp = Path(f"{args.out}.tmp.{os.getpid()}")
+    tmp.write_text(json.dumps(manifest, indent=2) + "\n")
+    os.replace(tmp, args.out)
     print(f"empty_reply={er['verdict']} ({er['reason']}) candidate_rate={er.get('candidate_rate')} "
           f"serving_rate={er.get('serving_rate')} authorship={manifest['authorship']['verdict']} "
           f"promotion_gate={manifest['promotion_gate']['verdict']} mode={args.mode} -> {args.out}")

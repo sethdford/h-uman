@@ -16,8 +16,15 @@
 #     \n <reply...> <|user|>
 # through mlx_lm's OWN dataset/batching/mask code, not a re-implementation.
 #
-# Uses the REAL local GLM-4.5-Air-4bit tokenizer files (no weights, no
-# network, no server). Skips if they are not cached.
+# Every tokenizer-dependent test runs TWICE:
+#   [fixture]   a hermetic GLM-4.5-Air stand-in built at test time: the
+#               model's chat template vendored verbatim
+#               (tests/fixtures/glm45_air_tokenizer/chat_template.jinja), the
+#               same 36 added tokens, pre-tokenizer, decoder and pad-id-0 = '!',
+#               with a tiny BPE vocab. Always runs -- CI has no HF cache, and a
+#               skip here once meant the headline contract silently vanished.
+#   [glm45-real] the REAL local GLM-4.5-Air-4bit tokenizer files (no weights,
+#               no network, no server). Optional: skips if they are not cached.
 # Run: ~/.human/venvs/mlxtune312/bin/python -m pytest scripts/test_mlx_lm_sft_templated.py -v
 import json
 import os
@@ -33,17 +40,93 @@ import chat_template_rows as ctr  # noqa: E402
 import mlx_lm_sft_templated as sft  # noqa: E402
 
 MODEL = ctr.DEFAULT_MODEL
-EOT_ID = 151336
+EOT_ID = 151336  # <|user|> in the real GLM-4.5-Air vocab
 SFT_ROW = {"prompt": "Seth: You too\nThem: Headache go away?",
            "completion": "Yeah feeling pretty good today"}
+FIXTURE_TEMPLATE = (Path(__file__).resolve().parent.parent / "tests" / "fixtures"
+                    / "glm45_air_tokenizer" / "chat_template.jinja")
+# The real tokenizer.json's added tokens, in id order (special, then plain
+# tool/think markers, then /nothink) -- copied from the GLM-4.5-Air-4bit files.
+_SPECIAL = ["<|endoftext|>", "[MASK]", "[gMASK]", "[sMASK]", "<sop>", "<eop>", "<|system|>",
+            "<|user|>", "<|assistant|>", "<|observation|>", "<|begin_of_image|>",
+            "<|end_of_image|>", "<|begin_of_video|>", "<|end_of_video|>", "<|begin_of_audio|>",
+            "<|end_of_audio|>", "<|begin_of_transcription|>", "<|end_of_transcription|>",
+            "<|code_prefix|>", "<|code_middle|>", "<|code_suffix|>"]
+_PLAIN = ["<think>", "</think>", "<tool_call>", "</tool_call>", "<tool_response>",
+          "</tool_response>", "<arg_key>", "</arg_key>", "<arg_value>", "</arg_value>"]
+_SPLIT = (r"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}"
+          r"| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+")
+
+
+def build_fixture_tokenizer_dir(dst):
+    """A GLM-4.5-Air stand-in on disk, loadable by the production loader
+    (ctr.load_serving_tokenizer -> mlx_lm load_tokenizer). Same chat template
+    (verbatim), added tokens, pre-tokenizer regex, ByteLevel decoder and
+    pad id 0 == '!'; only the BPE vocab is tiny. Deterministic, no network."""
+    from tokenizers import AddedToken, Regex, Tokenizer, decoders, models, \
+        pre_tokenizers, processors, trainers
+
+    t = Tokenizer(models.BPE())
+    t.pre_tokenizer = pre_tokenizers.Sequence([
+        pre_tokenizers.Split(Regex(_SPLIT), behavior="isolated"),
+        pre_tokenizers.ByteLevel(add_prefix_space=False, use_regex=False)])
+    t.decoder = decoders.ByteLevel()
+    t.post_processor = processors.ByteLevel(trim_offsets=False)
+    corpus = [SFT_ROW["prompt"], SFT_ROW["completion"], "Them: yo", "sup"] * 50
+    t.train_from_iterator(corpus, trainers.BpeTrainer(
+        vocab_size=600, min_frequency=1, show_progress=False,
+        initial_alphabet=pre_tokenizers.ByteLevel.alphabet()))
+    t.add_special_tokens([AddedToken(x, special=True, normalized=False) for x in _SPECIAL])
+    t.add_tokens([AddedToken(x, special=False, normalized=False) for x in _PLAIN])
+    t.add_special_tokens([AddedToken("/nothink", special=True, normalized=False)])
+    dst = Path(dst)
+    dst.mkdir(parents=True, exist_ok=True)
+    t.save(str(dst / "tokenizer.json"))
+    (dst / "tokenizer_config.json").write_text(json.dumps({
+        "additional_special_tokens": _SPECIAL + ["/nothink"],
+        "clean_up_tokenization_spaces": False, "do_lower_case": False,
+        "eos_token": "<|endoftext|>", "pad_token": "<|endoftext|>", "padding_side": "left",
+        "model_max_length": 128000, "remove_space": False,
+        "tokenizer_class": "PreTrainedTokenizer"}))
+    (dst / "chat_template.jinja").write_text(FIXTURE_TEMPLATE.read_text())
+    return dst
 
 
 @pytest.fixture(scope="module")
-def tok():
+def fixture_tok(tmp_path_factory):
+    return ctr.load_serving_tokenizer(
+        str(build_fixture_tokenizer_dir(tmp_path_factory.mktemp("glm45_fixture_tok"))))
+
+
+@pytest.fixture(scope="module")
+def real_tok():
     try:
         return ctr.load_serving_tokenizer(MODEL)
     except Exception as e:  # tokenizer files not in the local HF cache
-        pytest.skip(f"local {MODEL} tokenizer unavailable: {e}")
+        pytest.skip(f"optional variant: local {MODEL} tokenizer unavailable: {e}")
+
+
+@pytest.fixture(scope="module", params=["fixture", "glm45-real"])
+def tok(request):
+    return request.getfixturevalue("fixture_tok" if request.param == "fixture" else "real_tok")
+
+
+def _eot(tok):
+    return tok.convert_tokens_to_ids(ctr.END_OF_TURN)
+
+
+def test_fixture_tokenizer_is_a_faithful_glm_stand_in(fixture_tok):
+    """Guards the fixture itself: if it drifted from GLM's shape, the [fixture]
+    runs below would prove nothing."""
+    assert fixture_tok.convert_ids_to_tokens([0]) == ["!"]          # mlx_lm's pad id
+    for t in ("[gMASK]", "<sop>", "<|user|>", "<|assistant|>", "<think>", "</think>", "/nothink"):
+        ids = fixture_tok.encode(t)
+        assert len(ids) == 1 and fixture_tok.convert_ids_to_tokens(ids) == [t], t
+    assert "enable_thinking" in fixture_tok.chat_template  # the vendored template
+
+
+def test_real_tokenizer_end_of_turn_id(real_tok):
+    assert _eot(real_tok) == EOT_ID
 
 
 def _trained_targets(tok, dataset, loss_mask):
@@ -133,7 +216,7 @@ def test_templated_rows_route_to_pretemplated_dataset(tok):
     assert isinstance(ds, sft.PretemplatedCompletionsDataset)
     ids, offset = ds.process(ds[0])
     assert ids[0] == tok.convert_tokens_to_ids("[gMASK]") and ids.count(ids[0]) == 1
-    assert ids[-1] == EOT_ID
+    assert ids[-1] == _eot(tok)
     assert offset == len(tok.encode(row["prompt"]))
 
 

@@ -344,6 +344,13 @@ An arm that cannot run is recorded as `INCONCLUSIVE`, which blocks in `live`.
 That covers serving not stopped, a busy or forbidden port, a resident model,
 a spare that never becomes healthy, the deadline, or an unmeasured run.
 
+The gate fails closed when the gate script itself fails. In `live` the stage
+pre-writes an enforced `INCONCLUSIVE` manifest and rewrites it if
+`empty_reply_gate.py` exits non-zero. With `HU_RETRAIN_EMPTY_EVAL=live` set
+when you run `m3_promote.py promote`, a missing or unreadable manifest, or an
+`empty_reply_gate` module that fails to import, also refuses the swap (exit 7).
+In `off`/`shadow`, an import failure prints a `WARNING` and promotion continues.
+
 **Memory.** Prod plus a second GLM is about 114 GB of 128. That co-residency
 rebooted the box on 2026-07-26, so the eval runs while prod is still down. Each
 arm is preceded by `check-no-resident-model.sh` and reaped before the next.

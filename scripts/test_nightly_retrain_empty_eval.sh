@@ -71,7 +71,7 @@ setup_home() {
 
 # $1 = HOME, $2 = candidate dir, $3 = spare port; extra env via the caller.
 run_stage() {
-    HOME="$1" HU_REPO_DIR="$REPO" HU_RETRAIN_STAGE_TEST=1 HU_RETRAIN_PORT=19741 \
+    HOME="$1" HU_REPO_DIR="${TEST_REPO_DIR:-$REPO}" HU_RETRAIN_STAGE_TEST=1 HU_RETRAIN_PORT=19741 \
     HU_RETRAIN_EVAL_PORT="$3" HU_RETRAIN_EVAL_SERVER="$FAKE_DIR/mlx-server.py" \
     HU_RETRAIN_EVAL_SERVER_PY="$(command -v python3)" HU_RETRAIN_EVAL_SAMPLES=1 \
     HU_RETRAIN_EVAL_POLL_SECS=1 HU_RETRAIN_EVAL_REAP_SECS=10 \
@@ -181,5 +181,44 @@ out10=$(HU_RETRAIN_STAGE_TEST=1 bash -c '
 check "stop_empty_eval_spare reaps the spare server" "[[ \"\$out10\" == *REAPED* ]]" "$out10"
 check "restore_serving stops the spare BEFORE bringing prod back" \
     "awk '/^restore_serving\\(\\)/{f=1} f&&/stop_empty_eval_spare/{print \"ok\"; exit} f&&/launchctl bootstrap/{exit}' \"$SCRIPT\" | grep -q ok" "(textual wiring check)"
+
+
+# ── Case 11-13: empty_reply_gate.py ITSELF crashes (critic HIGH 2026-10-02) ─
+# A fake repo whose empty_reply_gate.py dies. 11: it truncates the manifest
+# and exits 1 (crash mid-write); 12: it dies before writing anything. Serving
+# is "not stopped" so no arm runs and only the gate script is exercised. The
+# manifest left behind must be read as a BLOCKING verdict by the REAL
+# scripts/empty_reply_gate.py reader m3_promote.py uses -- the schema contract
+# between the shell fallback and the Python reader is what this pins.
+CRASH_REPO=$(mktemp -d); mkdir -p "$CRASH_REPO/scripts"
+cat > "$CRASH_REPO/scripts/empty_reply_gate.py" <<'CRASH_GATE'
+import os, sys
+out = sys.argv[sys.argv.index("--out") + 1]
+if os.environ.get("CRASH_MID_WRITE") == "1":
+    open(out, "w").write('{"schema": 1, "empty_reply": {"verd')
+raise SystemExit(1)
+CRASH_GATE
+reader_verdict() { python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import empty_reply_gate as g
+v = g.enforced_empty_reply_verdict(sys.argv[2]); print(None if v is None else v.get("verdict"))' "$REPO/scripts" "$1"; }
+for variant in mid_write before_write; do
+    HC=$(mktemp -d); setup_home "$HC"; CC="$HC/.human/training-data/adapters/seth-glm-air-good-cand"; mkdir -p "$CC"
+    outc=$(CRASH_MID_WRITE=$([ $variant = mid_write ] && echo 1 || echo 0) TEST_REPO_DIR="$CRASH_REPO" \
+           TEST_SERVING_STOPPED=0 HU_RETRAIN_EMPTY_EVAL=live HU_RETRAIN_EVAL_DEADLINE=none run_stage "$HC" "$CC" 19756)
+    check "gate crash ($variant), live: manifest is INCONCLUSIVE + enforced" \
+        "[ \"\$(manifest_field \"$CC/promotion_manifest.json\" empty_reply.verdict)\" = INCONCLUSIVE ] && [ \"\$(manifest_field \"$CC/promotion_manifest.json\" empty_reply.enforce)\" = True ]" "$outc"
+    check "gate crash ($variant), live: m3_promote's reader BLOCKS (enforced INCONCLUSIVE, not None)" \
+        "[ \"\$(reader_verdict \"$CC\")\" = INCONCLUSIVE ]" "$outc"
+    check "gate crash ($variant), live: log names the gate's exit status" "[[ \"\$outc\" == *'empty_reply_gate.py exited 1'* ]]" "$outc"
+    check "gate crash ($variant), live: no temp file left beside the manifest" \
+        "[ \"\$(ls \"$CC\" | tr '\n' ' ')\" = 'promotion_manifest.json ' ]" "$(ls -a "$CC")"
+    rm -rf "$HC"
+done
+HS=$(mktemp -d); setup_home "$HS"; CS="$HS/.human/training-data/adapters/seth-glm-air-good-cand"; mkdir -p "$CS"
+outs=$(TEST_REPO_DIR="$CRASH_REPO" TEST_SERVING_STOPPED=0 HU_RETRAIN_EMPTY_EVAL=shadow \
+       HU_RETRAIN_EVAL_DEADLINE=none run_stage "$HS" "$CS" 19757)
+check "gate crash, shadow: nothing enforced (no manifest written by the fallback)" \
+    "[ \"\$(reader_verdict \"$CS\")\" = None ]" "$outs"
+check "gate crash, shadow: the failure is still logged" "[[ \"\$outs\" == *'empty_reply_gate.py exited 1'* ]]" "$outs"
+rm -rf "$HS" "$CRASH_REPO"
 
 exit $fail

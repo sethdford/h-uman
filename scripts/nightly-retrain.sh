@@ -559,6 +559,16 @@ run_empty_reply_eval_arm() {
     return 0
 }
 
+# Write an enforced INCONCLUSIVE empty-reply manifest WITHOUT empty_reply_gate.py
+# (the fallback for when that script fails). Same schema its reader,
+# empty_reply_gate.enforced_empty_reply_verdict(), expects: empty_reply.verdict
+# + empty_reply.enforce=true. Atomic (tmp + mv). $2 must be [A-Za-z0-9_] only.
+write_blocking_empty_manifest() {
+    local out="$1" reason="$2" tmp="$1.tmp.$$"
+    printf '{"schema": 1, "written_at": "%s", "empty_reply": {"verdict": "INCONCLUSIVE", "reason": "%s", "mode": "live", "enforce": true}, "promotion_gate": {"verdict": "INCONCLUSIVE", "mode": "live"}}\n' \
+        "$(date +%Y-%m-%dT%H:%M:%S)" "$reason" > "$tmp" && mv -f "$tmp" "$out"
+}
+
 # $1 candidate adapter dir, $2 the night's authorship score json (may be "").
 run_empty_reply_eval_stage() {
     local candidate_dir="$1" score_out="${2:-}" mode
@@ -594,7 +604,26 @@ run_empty_reply_eval_stage() {
     else
         gate_args+=(--serving-json "$s_out" --candidate-json "$c_out")
     fi
-    [[ -d "$candidate_dir" ]] && python3 "$REPO/scripts/empty_reply_gate.py" "${gate_args[@]}" 2>&1 | tee -a "$LOG"
+    # Fail closed (critic HIGH, 2026-10-02): no `set -e` here, so a crashed
+    # empty_reply_gate.py used to leave no manifest -- which m3_promote.py read
+    # as "no gate". In live a blocking manifest is pre-written (a crash before
+    # or during the gate's own write leaves it, or an unreadable file, behind)
+    # and rewritten if the gate exits non-zero. The fallback writer is plain
+    # printf, so it works even when the gate script cannot.
+    local manifest="$candidate_dir/promotion_manifest.json" gate_rc
+    if [[ -d "$candidate_dir" ]]; then
+        [[ "$mode" == "live" ]] && write_blocking_empty_manifest "$manifest" "empty_reply_gate_did_not_complete"
+        python3 "$REPO/scripts/empty_reply_gate.py" "${gate_args[@]}" 2>&1 | tee -a "$LOG"
+        gate_rc=${PIPESTATUS[0]}
+        if [[ "$gate_rc" != "0" ]]; then
+            if [[ "$mode" == "live" ]]; then
+                write_blocking_empty_manifest "$manifest" "empty_reply_gate_exit_$gate_rc"
+                log "$tag: empty_reply_gate.py exited $gate_rc — INCONCLUSIVE recorded (enforced); promotion BLOCKED"
+            else
+                log "$tag: empty_reply_gate.py exited $gate_rc — shadow, nothing enforced"
+            fi
+        fi
+    fi
     log "$tag: done — added prod-down time $(( $(date +%s) - t0 ))s"
 }
 

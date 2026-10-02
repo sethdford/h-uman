@@ -122,6 +122,55 @@ def test_no_manifest_means_nothing_enforced():
         assert g.enforced_empty_reply_verdict(str(Path(d) / "a-file.bin")) is None
 
 
+# ── required_empty_reply_verdict: m3_promote's view, fail-closed in live ────
+# The 2026-10-02 critic HIGH: a gate script that crashed before writing its
+# manifest left "no manifest", which read as "no gate" even in live. In live
+# (promote-time HU_RETRAIN_EMPTY_EVAL), absence must BLOCK.
+
+def test_live_missing_manifest_is_inconclusive_not_none():
+    with tempfile.TemporaryDirectory() as d:
+        assert g.enforced_empty_reply_verdict(d) is None  # pre: the fail-open read
+        v = g.required_empty_reply_verdict(d, "live")
+        assert v is not None and v["verdict"] == "INCONCLUSIVE"
+        assert "no promotion_manifest.json" in v["reason"]
+
+
+def test_live_unreadable_or_verdictless_manifest_is_inconclusive():
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / g.MANIFEST_NAME
+        p.write_text('{"schema": 1, "empty_reply": {"verd')  # truncated mid-write
+        assert g.required_empty_reply_verdict(d, "live")["verdict"] == "INCONCLUSIVE"
+        p.write_text(json.dumps({"verdict": "INCONCLUSIVE"}))  # wrong schema: no empty_reply
+        v = g.required_empty_reply_verdict(d, "live")
+        assert v["verdict"] == "INCONCLUSIVE" and "no empty_reply verdict" in v["reason"]
+
+
+def test_live_enforces_a_shadow_written_manifest():
+    with tempfile.TemporaryDirectory() as d:
+        cand = Path(d) / "cand"; cand.mkdir()
+        g.main(["--mode", "shadow", "--candidate-adapter", str(cand), "--serving-adapter", "/s",
+                "--candidate-json", _write(d, "c.json", _report(str(cand), 9)),
+                "--serving-json", _write(d, "s.json", _report("/s", 1)),
+                "--out", str(cand / g.MANIFEST_NAME)])
+        assert g.required_empty_reply_verdict(str(cand), "shadow") is None
+        assert g.required_empty_reply_verdict(str(cand), "live")["verdict"] == "BLOCK"
+
+
+def test_off_and_shadow_keep_manifest_driven_behaviour():
+    with tempfile.TemporaryDirectory() as d:
+        for mode in ("off", "shadow"):
+            assert g.required_empty_reply_verdict(d, mode) is None
+
+
+def test_cli_writes_manifest_atomically():
+    # No temp file is left beside the manifest after a clean write.
+    with tempfile.TemporaryDirectory() as d:
+        cand = Path(d) / "cand"; cand.mkdir()
+        g.main(["--mode", "live", "--candidate-adapter", str(cand), "--serving-adapter", "/s",
+                "--inconclusive", "x", "--out", str(cand / g.MANIFEST_NAME)])
+        assert sorted(p.name for p in cand.iterdir()) == [g.MANIFEST_NAME]
+
+
 if __name__ == "__main__":
     import inspect
     fails = 0
