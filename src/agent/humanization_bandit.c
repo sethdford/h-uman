@@ -60,9 +60,15 @@ hu_humanization_config_t hu_humanization_decide_contact_params(hu_contextual_ban
     if (arm.alpha == 1.0 && arm.beta == 1.0 && arm.updates == 0)
         return tier_config(hum_conservative);
 
-    double theta = 0.0;
-    if (hu_humanization_bandit_sample_theta(bandit, contact_handle, &theta) != HU_OK)
-        return tier_config(hum_conservative);
+    /* The backchannel tier is a decision that never reports back: nothing
+     * credits the arm when a backchannel lands or flops (the arm learns only
+     * from proactive REPLY/IGNORED outcomes). Thompson exploration without
+     * feedback is noise, so decide on the posterior mean — exploit what the
+     * outcomes say. Consumers that DO report back sample through
+     * hu_humanization_bandit_sample_theta.
+     * TODO(learning-loops): make this a (contact, tier) bandit credited on the
+     * contact's reply / DEF-8-joined tapback after a backchannel, then sample. */
+    double theta = arm.alpha / (arm.alpha + arm.beta);
 
     static int logged = 0;
     if (!logged) {

@@ -446,12 +446,12 @@ static void bandit_loaded_posterior_changes_next_choice(void) {
     remove(path);
 }
 
-/* DEF-5: Thompson sampling must actually SAMPLE. The decide path used to copy
- * rng_seed into a local and never write it back, so theta was a pure function
- * of (alpha, beta) for the life of the process — every call for a contact
- * returned the same tier. With Beta(5,5), P(theta outside (0.35, 0.65]) is
- * ~0.33, so 400 genuine draws hit at least two tiers with certainty. */
-static void bandit_decide_draws_vary_across_calls(void) {
+/* DEF-5 / review item 5: the backchannel tier never reports an outcome back,
+ * so exploring it is noise — the decision uses the posterior MEAN, one stable
+ * tier per (alpha, beta), and moves only when outcomes move the arm. A
+ * per-call Thompson draw on Beta(5,5) lands outside the moderate band ~1/3 of
+ * the time; the mean (0.5) never does. */
+static void bandit_decide_uses_posterior_mean(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_contextual_bandit_t *bandit = NULL;
     HU_ASSERT_EQ(hu_contextual_bandit_create(&alloc, 64, &bandit), HU_OK);
@@ -460,21 +460,15 @@ static void bandit_decide_draws_vary_across_calls(void) {
         HU_ASSERT_EQ(hu_contextual_bandit_update(bandit, contact, HU_BANDIT_REPLY), HU_OK);
         HU_ASSERT_EQ(hu_contextual_bandit_update(bandit, contact, HU_BANDIT_IGNORED), HU_OK);
     }
-    int n_cons = 0, n_mod = 0, n_aggr = 0;
     for (int i = 0; i < 400; i++) {
         hu_humanization_config_t c = hu_humanization_decide_contact_params(bandit, contact);
-        if (c.backchannel_probability > 0.40f)
-            n_aggr++;
-        else if (c.backchannel_probability > 0.20f)
-            n_mod++;
-        else
-            n_cons++;
+        HU_ASSERT_TRUE(c.backchannel_probability > 0.20f && c.backchannel_probability < 0.40f);
     }
-    int tiers_hit = (n_cons > 0) + (n_mod > 0) + (n_aggr > 0);
-    HU_ASSERT_TRUE(tiers_hit >= 2);
-    /* Mostly moderate (mean 0.5), but the tails must show up. */
-    HU_ASSERT_TRUE(n_mod > n_cons);
-    HU_ASSERT_TRUE(n_mod > n_aggr);
+    /* Outcomes move it: six more replies -> Beta(11,5), mean 0.69 -> aggressive. */
+    for (int i = 0; i < 6; i++)
+        HU_ASSERT_EQ(hu_contextual_bandit_update(bandit, contact, HU_BANDIT_REPLY), HU_OK);
+    hu_humanization_config_t c = hu_humanization_decide_contact_params(bandit, contact);
+    HU_ASSERT_TRUE(c.backchannel_probability > 0.40f);
     hu_contextual_bandit_destroy(bandit);
 }
 
@@ -530,6 +524,6 @@ void run_humanization_bandit_tests(void) {
     HU_RUN_TEST(bandit_load_corrupt_file_keeps_state);
     HU_RUN_TEST(bandit_load_clamps_out_of_range);
     HU_RUN_TEST(bandit_loaded_posterior_changes_next_choice);
-    HU_RUN_TEST(bandit_decide_draws_vary_across_calls);
+    HU_RUN_TEST(bandit_decide_uses_posterior_mean);
     HU_RUN_TEST(bandit_sample_theta_has_posterior_mean);
 }

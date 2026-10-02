@@ -16,14 +16,15 @@ extern "C" {
  * backchannel_probability set (other fields left at caller's defaults).
  *
  * Decision logic:
- * - Sample θ from the contact's arm's Beta(α, β) posterior
+ * - θ = the posterior mean α / (α + β) of the contact's arm (this decision
+ *   never reports an outcome back, so it exploits rather than explores)
  * - If θ > 0.65: aggressive (disfluency=0.25, backchannel=0.45)
  * - Else if θ > 0.35: moderate (disfluency=0.15, backchannel=0.30)
  * - Else: conservative (disfluency=0.05, backchannel=0.10)
  * - New contacts default to conservative (safe)
  *
- * Advances the bandit's sampler state (each call is a fresh Thompson draw);
- * NOT thread-safe — call from the daemon thread that owns the bandit. */
+ * Deterministic in (α, β); inserts an arm for an unseen contact, so call it
+ * from the daemon thread that owns the bandit. */
 hu_humanization_config_t hu_humanization_decide_contact_params(hu_contextual_bandit_t *bandit,
                                                                uint64_t contact_handle);
 
