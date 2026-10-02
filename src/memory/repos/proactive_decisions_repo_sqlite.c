@@ -273,6 +273,25 @@ bool hu_proactive_send_circuit_is_open(sqlite3 *db, const char *contact, int64_t
     return (now - last_failure) < cooldown;
 }
 
+hu_error_t hu_proactive_decisions_repo_last_send_failure_ts(sqlite3 *db, const char *contact,
+                                                            int64_t *out_ts, bool *have) {
+    if (!db || !contact || !out_ts || !have)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out_ts = 0;
+    *have = false;
+    hu_error_t schema_err = hu_proactive_decisions_repo_ensure_schema(db);
+    if (schema_err != HU_OK)
+        return schema_err;
+    if (!proactive_scalar_i64(
+            db,
+            "SELECT MAX(ts) FROM proactive_decisions "
+            "WHERE contact = ?1 AND trigger = '" HU_PROACTIVE_TRIGGER_OUTBOUND_SEND
+            "' AND reason = 'send_failed';",
+            contact, out_ts, have))
+        return HU_ERR_MEMORY_STORE;
+    return HU_OK;
+}
+
 #endif /* HU_ENABLE_SQLITE */
 
 hu_error_t hu_proactive_decisions_repo_recent_sent_refs(sqlite3 *db, const char *contact,

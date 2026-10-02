@@ -18,6 +18,7 @@
  */
 
 #include "human/core/error.h"
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -50,6 +51,10 @@ hu_error_t hu_outbound_sends_repo_record(sqlite3 *db, int64_t sent_at_ms, const 
                                          int64_t prior_max_rowid);
 
 hu_error_t hu_outbound_sends_repo_count(sqlite3 *db, int64_t *out_count);
+
+/* Newest delivered send to `contact` (unix ms); *have false when none. */
+hu_error_t hu_outbound_sends_repo_last_sent_ms(sqlite3 *db, const char *contact, int64_t *out_ms,
+                                               bool *have);
 
 #ifdef __cplusplus
 }

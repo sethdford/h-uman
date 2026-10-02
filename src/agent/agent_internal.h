@@ -3,6 +3,7 @@
 #define HU_AGENT_INTERNAL_H
 
 #include "human/agent.h"
+#include "human/agent/response_guard.h"
 #include "human/observer.h"
 #include "human/provider.h"
 #include "human/security.h"
@@ -85,6 +86,13 @@ static inline size_t hu_agent_history_floor(size_t history_count, size_t window)
 #define HU_GUARD_ASSISTANT_LEN_EWMA_ALPHA 0.35
 
 size_t hu_agent_internal_recent_assistant_avg_len(const hu_agent_t *agent, size_t max_n);
+
+/* The response guard's per-turn context (G5-G9) for a reply to `msg`: the
+ * recent-length baseline, whether `msg` is a question/request, the channel's
+ * G5 multiplier and G9 opt-out, the director text + history, and the persona
+ * strings G7/G8 look for. One builder for every guard call site. */
+void hu_agent_internal_guard_context(const hu_agent_t *agent, const char *msg, size_t msg_len,
+                                     hu_guard_context_t *out);
 
 /* Fit the request's messages ([0] = system, last = the current message): the
  * per-turn history_msg_cap first, then the 20 KB byte budget (oldest first).
