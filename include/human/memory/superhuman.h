@@ -120,6 +120,11 @@ hu_error_t hu_superhuman_delayed_followup_mark_sent(void *sqlite_ctx, int64_t id
 hu_error_t hu_superhuman_delayed_followup_pending_exists(void *sqlite_ctx, const char *contact_id,
                                                          size_t contact_id_len, const char *topic,
                                                          size_t topic_len, bool *out_exists);
+/* Known gap 7: *owned = prospective memory v2 owns ledger row `id` (a
+ * delayed follow-up when `is_followup`, else a commitment) -- an open time
+ * twin exists (hu_prospective_repo_ledger_v2_owned). Read-only. */
+hu_error_t hu_superhuman_ledger_v2_owned(void *sqlite_ctx, bool is_followup, int64_t id,
+                                         bool *owned);
 void hu_superhuman_delayed_followup_free(hu_allocator_t *alloc, hu_delayed_followup_t *arr,
                                          size_t count);
 

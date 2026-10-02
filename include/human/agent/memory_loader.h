@@ -32,6 +32,9 @@ typedef struct hu_memory_loader {
      * into the rendered prompt. Caller retains ownership of the pointed-to
      * persona; this is a borrowed pointer. */
     const struct hu_persona_context *persona_ctx;
+    /* Only the load for the contact's own message offers a curiosity gap
+     * (curiosity_gaps.h); tool-loop loads pass tool output as the query. */
+    bool offer_curiosity_gap;
 } hu_memory_loader_t;
 
 hu_error_t hu_memory_loader_init(hu_memory_loader_t *loader, hu_allocator_t *alloc,
@@ -46,8 +49,10 @@ hu_error_t hu_memory_loader_init(hu_memory_loader_t *loader, hu_allocator_t *all
 hu_gate_mode_t hu_memory_loader_insight_mode(void);
 
 /* The insight block's budget. Shared with the overuse scan so it can re-render
- * the exact lines this loader injected for the turn (same query, same order). */
-#define HU_INSIGHT_MAX_ITEMS      8
+ * the exact lines this loader injected for the turn (same query, same order).
+ * Three, chosen against the incoming message: the 8 newest put ~33 content
+ * words in front of the model and replies reused about 3 of them. */
+#define HU_INSIGHT_MAX_ITEMS      3
 #define HU_INSIGHT_MAX_BYTES      900
 #define HU_INSIGHT_MIN_CONFIDENCE 0.5
 /* Test seam: force a mode; -1 reverts to reading the env. */
@@ -73,6 +78,8 @@ void hu_memory_loader_set_facade(hu_memory_loader_t *loader, struct hu_w7_facade
  * supplementary world-model render merges personal style/topics/goals into
  * the graph snapshot. Safe to pass NULL. */
 void hu_memory_loader_set_personal_model(hu_memory_loader_t *loader, struct hu_personal_model *pm);
+/* Let this loader's insight block carry a curiosity gap (default false). */
+void hu_memory_loader_set_offer_gap(hu_memory_loader_t *loader, bool offer);
 
 /* Story B (sprint-4 follow-up) — bind a persona context for W9 graph
  * rendering. When set, the loader's supplementary render call threads the

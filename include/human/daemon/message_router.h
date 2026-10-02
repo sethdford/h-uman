@@ -156,11 +156,16 @@ bool hu_daemon_vision_route(const struct hu_config *cfg, const char *model, size
                             const char **provider_out, const char **model_out);
 
 struct hu_persona;
-/* True when this inbound batch gets no reply and teaches nothing: a tool
- * prompt from the owner (hu_share_is_tool_prompt), or, 1:1 only, a hurt
- * signal the HU_HURT_HANDOFF gate hands to the owner. Logs the reason. */
-bool hu_daemon_batch_withheld(const struct hu_persona *p, const char *key, size_t key_len,
-                              const char *text, size_t len, bool is_group, void *observer);
+/* Rating-tool traffic on the owner's number (hu_share_is_tool_traffic): the
+ * batch gets no reply and teaches nothing. Checked before any per-batch
+ * bookkeeping. Logs when it withholds. */
+bool hu_daemon_tool_traffic(const struct hu_persona *p, const char *key, size_t key_len,
+                            const char *text, size_t len, void *observer);
+
+/* 1:1 only: a hurt signal the HU_HURT_HANDOFF gate hands to the owner, so the
+ * daemon does not auto-reply (see hurt_handoff.h). */
+bool hu_daemon_hurt_withheld(const struct hu_persona *p, const char *key, size_t key_len,
+                             const char *text, size_t len, bool is_group);
 
 /* Inbound text whose U+FFFC attachment vision could not describe (it is not
  * `buf`, where a description is written): the placeholder is replaced by a

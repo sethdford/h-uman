@@ -709,13 +709,17 @@ hu_error_t hu_daemon_describe_image(hu_allocator_t *alloc, hu_agent_t *agent,
                                     desc_out, desc_len);
 }
 
-bool hu_daemon_batch_withheld(const struct hu_persona *p, const char *key, size_t key_len,
-                              const char *text, size_t len, bool is_group, void *observer) {
-    if (hu_share_is_tool_prompt(p, key, key_len, text, len)) {
-        hu_log_info("human", (hu_observer_t *)observer,
-                    "tool prompt on the owner's number: no reply, nothing learned");
-        return true;
-    }
+bool hu_daemon_tool_traffic(const struct hu_persona *p, const char *key, size_t key_len,
+                            const char *text, size_t len, void *observer) {
+    if (!hu_share_is_tool_traffic(p, key, key_len, text, len))
+        return false;
+    hu_log_info("human", (hu_observer_t *)observer,
+                "rating-tool traffic on the owner's number: no reply, nothing learned");
+    return true;
+}
+
+bool hu_daemon_hurt_withheld(const struct hu_persona *p, const char *key, size_t key_len,
+                             const char *text, size_t len, bool is_group) {
     if (is_group)
         return false;
     /* Hurt-signal hand-off: "u mad at me?", "why are you being short" is a

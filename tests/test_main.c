@@ -22,7 +22,6 @@ void run_agent_modules_tests(void);
 void run_agent_definition_tests(void);
 void run_agent_git_tests(void);
 void run_agent_app_config_tests(void);
-void run_compaction_hierarchical_tests(void);
 void run_tot_recursive_tests(void);
 void run_agent_subsystems_tests(void);
 void run_crypto_tests(void);
@@ -444,6 +443,8 @@ void run_outbound_crosstalk_tests(void);
 /* Sprint 60 follow-up — SQLite-backed crosstalk lookup. Tests seed
  * the messages table directly via sqlite3, so source + tests are
  * gated by HU_ENABLE_SQLITE in CMakeLists.txt. Mirror that gate here. */
+void run_curiosity_gaps_tests(void);
+void run_memory_loader_scope_tests(void);
 #ifdef HU_ENABLE_SQLITE
 void run_boundary_repo_tests(void);
 void run_opinions_repo_tests(void);
@@ -1151,7 +1152,6 @@ int main(int argc, char **argv) {
     run_agent_definition_tests();
     run_agent_git_tests();
     run_agent_app_config_tests();
-    run_compaction_hierarchical_tests();
     run_tot_recursive_tests();
     run_agent_subsystems_tests();
     run_crypto_tests();
@@ -1539,6 +1539,8 @@ int main(int argc, char **argv) {
     run_outbound_shape_tests();
     run_outbound_echo_tests();
     run_outbound_crosstalk_tests();
+    run_curiosity_gaps_tests();
+    run_memory_loader_scope_tests();
 #ifdef HU_ENABLE_SQLITE
     run_boundary_repo_tests();
     run_opinions_repo_tests();
