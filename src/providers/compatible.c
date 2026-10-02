@@ -1424,7 +1424,7 @@ bool hu_compatible_is_loopback(const hu_provider_t *p) {
     if (!p || p->vtable != &compatible_vtable || !p->ctx)
         return false;
     const hu_compatible_ctx_t *cc = (const hu_compatible_ctx_t *)p->ctx;
-    return cc->base_url && compatible_url_is_loopback(cc->base_url, cc->base_url_len);
+    return cc->base_url && hu_compatible_url_is_loopback(cc->base_url, cc->base_url_len);
 }
 
 hu_error_t hu_compatible_create(hu_allocator_t *alloc, const char *api_key, size_t api_key_len,
