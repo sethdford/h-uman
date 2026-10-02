@@ -875,13 +875,15 @@ hu_error_t hu_prospective_repo_settle(sqlite3 *db, const hu_prospective_item_t *
     return err;
 }
 
-/* Known gap 2: what identifies a legacy follow-up's time twin. */
+/* Known gap 2: what identifies a legacy ledger row's time twin (a
+ * follow-up's; known gap 7 asks the same of a commitment's). */
 #define PM_F20_MAX 8
 typedef struct pm_twin_q {
-    hu_prospective_item_t it; /* contact_id, trigger_value = "followup:<id>" */
-    char norm[512];           /* the follow-up's mirror text, normalized */
-    int64_t fu_due;           /* its scheduled_at */
-    int64_t f20[PM_F20_MAX];  /* fix round 2, I1: its F20 commitments */
+    hu_prospective_item_t it; /* contact_id, trigger_value = "followup:<id>" / "commitment:<id>" */
+    char norm[512];           /* the row's mirror text, normalized */
+    int64_t fu_due;           /* its scheduled_at / deadline */
+    bool pair_followup;       /* its F20 partners are follow-ups (a commitment's query) */
+    int64_t f20[PM_F20_MAX];  /* fix round 2, I1: its F20 partners' ids */
     size_t f20_n;
 } pm_twin_q_t;
 
@@ -893,8 +895,11 @@ typedef struct pm_twin_q {
 static hu_error_t pm_twin_f20(sqlite3 *db, pm_twin_q_t *q, const char *topic) {
     sqlite3_stmt *st = NULL;
     if (sqlite3_prepare_v2(db,
-                           "SELECT id FROM commitments WHERE contact_id = ?1 AND description = ?2 "
-                           "AND deadline = ?3 ORDER BY id",
+                           q->pair_followup
+                               ? "SELECT id FROM delayed_followups WHERE contact_id = ?1 AND "
+                                 "topic = ?2 AND scheduled_at = ?3 ORDER BY id"
+                               : "SELECT id FROM commitments WHERE contact_id = ?1 AND "
+                                 "description = ?2 AND deadline = ?3 ORDER BY id",
                            -1, &st, NULL) != SQLITE_OK)
         return HU_ERR_MEMORY_BACKEND;
     sqlite3_bind_text(st, 1, q->it.contact_id, -1, SQLITE_STATIC);
@@ -907,19 +912,24 @@ static hu_error_t pm_twin_f20(sqlite3 *db, pm_twin_q_t *q, const char *topic) {
     return rc == SQLITE_ROW || rc == SQLITE_DONE ? HU_OK : HU_ERR_MEMORY_BACKEND;
 }
 
-/* The follow-up's contact, mirror text, due, key and F20 commitments; false:
- * no such row, a contact or topic too long, or a skipped mirror (no twin). */
-static bool pm_followup_twin_of(sqlite3 *db, int64_t followup_id, pm_twin_q_t *q, hu_error_t *err) {
+/* The ledger row's contact, mirror text, due, key and F20 partners (a
+ * follow-up's commitments, a commitment's follow-ups); false: no such row, a
+ * contact or text too long, or a skipped mirror (no twin). */
+static bool pm_ledger_twin_of(sqlite3 *db, bool is_followup, int64_t ledger_id, pm_twin_q_t *q,
+                              hu_error_t *err) {
     *err = HU_OK;
+    q->pair_followup = !is_followup;
     sqlite3_stmt *st = NULL;
     if (sqlite3_prepare_v2(db,
-                           "SELECT f.contact_id, f.topic, " PM_FOLLOWUP_WHO
-                           ", f.scheduled_at FROM delayed_followups f WHERE f.id = ?1",
+                           is_followup ? "SELECT f.contact_id, f.topic, " PM_FOLLOWUP_WHO
+                                         ", f.scheduled_at FROM delayed_followups f WHERE f.id = ?1"
+                                       : "SELECT contact_id, description, who, deadline FROM "
+                                         "commitments WHERE id = ?1",
                            -1, &st, NULL) != SQLITE_OK) {
         *err = HU_ERR_MEMORY_BACKEND;
         return false;
     }
-    sqlite3_bind_int64(st, 1, followup_id);
+    sqlite3_bind_int64(st, 1, ledger_id);
     int rc = sqlite3_step(st);
     bool ok = false;
     char topic[512];
@@ -934,7 +944,7 @@ static bool pm_followup_twin_of(sqlite3 *db, int64_t followup_id, pm_twin_q_t *q
         const char *a = NULL;
         size_t al = 0;
         ok = cl > 0 && cl < sizeof(q->it.contact_id) && tl > 0 && tl < sizeof(topic) &&
-             pm_mirror_of(true, t, tl, w, wl, buf, &a, &al, q->norm, sizeof(q->norm));
+             pm_mirror_of(is_followup, t, tl, w, wl, buf, &a, &al, q->norm, sizeof(q->norm));
         if (ok) {
             pm_col_copy(st, 0, q->it.contact_id, sizeof(q->it.contact_id));
             pm_col_copy(st, 1, topic, sizeof(topic));
@@ -944,8 +954,8 @@ static bool pm_followup_twin_of(sqlite3 *db, int64_t followup_id, pm_twin_q_t *q
         *err = HU_ERR_MEMORY_BACKEND;
     }
     sqlite3_finalize(st);
-    snprintf(q->it.trigger_value, sizeof(q->it.trigger_value), "followup:%lld",
-             (long long)followup_id);
+    snprintf(q->it.trigger_value, sizeof(q->it.trigger_value), "%s:%lld",
+             is_followup ? "followup" : "commitment", (long long)ledger_id);
     if (ok && (*err = pm_twin_f20(db, q, topic)) != HU_OK)
         ok = false;
     return ok;
@@ -957,7 +967,7 @@ static bool pm_twin_keyed(const pm_twin_q_t *q, const char *key) {
     if (strcmp(key, q->it.trigger_value) == 0)
         return true;
     int64_t id = 0;
-    if (!pm_parse_source_key(key, "commitment", &id))
+    if (!pm_parse_source_key(key, q->pair_followup ? "followup" : "commitment", &id))
         return false;
     for (size_t i = 0; i < q->f20_n; i++)
         if (q->f20[i] == id)
@@ -965,21 +975,23 @@ static bool pm_twin_keyed(const pm_twin_q_t *q, const char *key) {
     return false;
 }
 
-/* The first twin row of q->it.contact_id: PENDING and never surfaced by
- * v2 (fix round 2, P3: attempts 0, no surfaced_at -- v2 owns a row it has
- * ever surfaced, retries included), and either keyed (the follow-up's own
- * key, or I1's F20 commitment key: unbounded, like every rowid path) or --
- * C2 -- with an action normalizing to the follow-up's mirror text AND not
- * dated beyond the follow-up's due + grace. An undated follow-up gets the
- * key matches only. Copies the row's action, attempts and due into q->it. */
-/* k_pm_open_candidates' columns, restricted to rows that existed when the
- * settle began (?2, see hu_prospective_repo_settle_followup_twin). */
+/* k_pm_open_candidates' columns, restricted to rows with id <= ?2 (known
+ * gap 6: those that existed when the settle began). */
 static const char k_pm_twin_candidates[] =
     "SELECT action, trigger_value, attempts, due_at, status, surfaced_at FROM "
     "prospective_memories WHERE cue_kind = 'time' AND contact_id = ?1 AND "
     "status IN ('pending', 'surfaced') AND id <= ?2";
 
-static bool pm_find_open_twin(sqlite3 *db, pm_twin_q_t *q, int64_t max_id, hu_error_t *err) {
+/* The first twin row of q->it.contact_id with id <= max_id: PENDING and
+ * never surfaced by v2 (fix round 2, P3: attempts 0, no surfaced_at -- v2
+ * owns a row it has ever surfaced, retries included) -- or, `any_open`
+ * (known gap 7's ownership question), any open row -- and either keyed (the
+ * row's own key, or I1's F20 partner key: unbounded, like every rowid path)
+ * or -- C2 -- with an action normalizing to the row's mirror text AND not
+ * dated beyond the row's due + grace. An undated row gets the key matches
+ * only. Copies the twin's action, attempts and due into q->it. */
+static bool pm_find_open_twin(sqlite3 *db, pm_twin_q_t *q, bool any_open, int64_t max_id,
+                              hu_error_t *err) {
     *err = HU_OK;
     sqlite3_stmt *st = NULL;
     if (sqlite3_prepare_v2(db, k_pm_twin_candidates, -1, &st, NULL) != SQLITE_OK) {
@@ -994,8 +1006,9 @@ static bool pm_find_open_twin(sqlite3 *db, pm_twin_q_t *q, int64_t max_id, hu_er
     while (!found && (rc = sqlite3_step(st)) == SQLITE_ROW) {
         const char *a = (const char *)sqlite3_column_text(st, 0);
         const char *status = (const char *)sqlite3_column_text(st, 4);
-        if (!a || !status || strcmp(status, "pending") != 0 || sqlite3_column_int(st, 2) > 0 ||
-            sqlite3_column_int64(st, 5) > 0)
+        if (!a || !status ||
+            (!any_open && (strcmp(status, "pending") != 0 || sqlite3_column_int(st, 2) > 0 ||
+                           sqlite3_column_int64(st, 5) > 0)))
             continue;
         pm_normalize_action(a, (size_t)sqlite3_column_bytes(st, 0), cand, sizeof(cand));
         int64_t due = sqlite3_column_int64(st, 3);
@@ -1045,7 +1058,7 @@ hu_error_t hu_prospective_repo_settle_followup_twin(sqlite3 *db, int64_t followu
     memset(&q, 0, sizeof(q));
     q.it.cue_kind = HU_PM_CUE_TIME;
     hu_error_t err = HU_OK;
-    if (!pm_followup_twin_of(db, followup_id, &q, &err))
+    if (!pm_ledger_twin_of(db, true, followup_id, &q, &err))
         return err;
     /* Known gap 6: a survivor a pass re-mirrors is a LATER promise, yet its
      * due can sit inside this follow-up's action window; a later pass must
@@ -1057,7 +1070,7 @@ hu_error_t hu_prospective_repo_settle_followup_twin(sqlite3 *db, int64_t followu
     if ((err = pm_max_id(db, &max_id)) != HU_OK)
         return err;
     for (int pass = 0; pass < PM_TWIN_PASSES; pass++) {
-        if (!pm_find_open_twin(db, &q, max_id, &err))
+        if (!pm_find_open_twin(db, &q, false, max_id, &err))
             return err;
         /* DONE, no outcome: the legacy path may only have LISTED the
          * follow-up, so there is no evidence the reply used it (C1). The
@@ -1071,6 +1084,26 @@ hu_error_t hu_prospective_repo_settle_followup_twin(sqlite3 *db, int64_t followu
             *changed += ch;
     }
     return HU_OK;
+}
+
+/* Known gap 7: the twin search the legacy settle runs, but any OPEN row
+ * counts (a surfaced or retrying row is v2's too) and nothing is written. */
+hu_error_t hu_prospective_repo_ledger_v2_owned(sqlite3 *db, bool is_followup, int64_t ledger_id,
+                                               bool *owned) {
+    if (owned)
+        *owned = false;
+    if (!db || !owned || ledger_id <= 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    pm_twin_q_t q;
+    memset(&q, 0, sizeof(q));
+    q.it.cue_kind = HU_PM_CUE_TIME;
+    hu_error_t err = HU_OK;
+    if (!pm_ledger_twin_of(db, is_followup, ledger_id, &q, &err))
+        return err;
+    *owned = pm_find_open_twin(db, &q, true, INT64_MAX, &err);
+    if (err != HU_OK)
+        *owned = false;
+    return err;
 }
 
 #endif /* HU_ENABLE_SQLITE */

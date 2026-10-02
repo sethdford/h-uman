@@ -97,6 +97,12 @@ hu_gate_mode_t hu_prospective_gate_mode(void) {
     return hu_gate_mode_from_env("HU_PROSPECTIVE", HU_GATE_OFF);
 }
 
+bool hu_prospective_legacy_may_raise(hu_gate_mode_t time_mode, bool lookup_ok, bool v2_owned) {
+    if (time_mode != HU_GATE_LIVE)
+        return true;
+    return lookup_ok && !v2_owned;
+}
+
 hu_gate_mode_t hu_prospective_time_gate_mode(void) {
     return hu_gate_mode_from_env("HU_PROSPECTIVE_TIME", HU_GATE_OFF);
 }
