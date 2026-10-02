@@ -435,6 +435,7 @@ void run_validator_chain_cache_tests(void);
 void run_daemon_e2e_validator_tests(void);
 void run_response_guard_tests(void);
 void run_response_guard_retry_tests(void);
+void run_reply_fragment_tests(void);
 void run_outbound_pipeline_tests(void);
 void run_outbound_strip_tests(void);
 void run_style_governor_tests(void);
@@ -1540,6 +1541,7 @@ int main(int argc, char **argv) {
     run_daemon_e2e_validator_tests();
     run_response_guard_tests();
     run_response_guard_retry_tests();
+    run_reply_fragment_tests();
     run_outbound_pipeline_tests();
     run_outbound_strip_tests();
     run_style_governor_tests();

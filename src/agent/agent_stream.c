@@ -8,6 +8,7 @@
 #include "human/agent/frontier_persist.h"
 #include "human/agent/graph_grounding.h"
 #include "human/agent/growth_narrative.h"
+#include "human/agent/guard_repair.h"
 #include "human/agent/gvr.h"
 #include "human/agent/hard_moment.h"
 #include "human/agent/humanness.h"
@@ -1580,37 +1581,7 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                 hu_guard_report_t guard_report;
                 memset(&guard_report, 0, sizeof(guard_report));
                 hu_guard_context_t guard_ctx;
-                memset(&guard_ctx, 0, sizeof(guard_ctx));
-                guard_ctx.recent_avg_len = hu_agent_internal_recent_assistant_avg_len(agent, 5);
-                guard_ctx.length_anomaly_mult = hu_guard_length_anomaly_mult_for_channel(
-                    agent->active_channel, agent->active_channel_len);
-                guard_ctx.director_text = agent->scene_direction_text;
-                guard_ctx.director_len = agent->scene_direction_text_len;
-                /* Sprint 37 — cross-turn director history. */
-                guard_ctx.director_history = (const char *const *)agent->director_history;
-                guard_ctx.director_history_lens = agent->director_history_lens;
-                guard_ctx.director_history_count = agent->director_history_count;
-                /* Sprint 41 follow-up #4 — consult per-channel G9 disable list. */
-                guard_ctx.naked_opener_disabled = hu_response_guard_g9_disabled_for_channel(
-                    agent->active_channel, agent->active_channel_len);
-                if (agent->persona) {
-                    if (agent->persona->name && agent->persona->name_len > 1) {
-                        guard_ctx.persona_name = agent->persona->name;
-                        guard_ctx.persona_name_len = agent->persona->name_len;
-                    }
-                    /* Prefer `identity` (full biographical string); fall
-                     * back to `core_anchor` (one-line bio). */
-                    const char *id = agent->persona->identity ? agent->persona->identity
-                                                              : agent->persona->core_anchor;
-                    if (id) {
-                        guard_ctx.persona_identity = id;
-                        guard_ctx.persona_identity_len = strlen(id);
-                    }
-                    if (agent->persona->biography) {
-                        guard_ctx.persona_biography = agent->persona->biography;
-                        guard_ctx.persona_biography_len = strlen(agent->persona->biography);
-                    }
-                }
+                hu_agent_internal_guard_context(agent, msg, msg_len, &guard_ctx);
                 hu_error_t guard_err = hu_response_guard_check_ex(
                     agent->alloc, sresp.content, sresp.content_len, &guard_ctx, &guard_out,
                     &guard_out_len, &guard_outcome, &guard_report);
@@ -1681,6 +1652,12 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                                                                 safe_content, safe_content_len);
                         hu_response_guard_record_g9_retry_outcome(retry_ok, retry_tripped_g9);
                     }
+                    /* Never a cut-off reply from the repair (guard_repair.h). */
+                    hu_guard_repair_kept_t repair_kept = hu_guard_repair_resolve(
+                        agent->alloc, agent->observer, sresp.content, sresp.content_len,
+                        &guard_report, &guard_ctx, &safe_content, &safe_content_len);
+                    if (repair_kept != HU_GUARD_REPAIR_KEPT_NONE)
+                        retry_err = HU_OK;
                     if (retry_err == HU_OK && safe_content && safe_content_len > 0) {
                         /* Post-retry persona_voice check: catch AI-disclosure that
                          * leaked through the repair prompt anyway. response_guard
@@ -1688,36 +1665,19 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                          * detect "I am an AI"-class phrases. Without this gate, the
                          * twin-break shipped to the user. */
                         if (!hu_persona_voice_response_is_clean(safe_content, safe_content_len)) {
-                            /* 2026-05-24 companion fix to agent_turn.c:6395 batch-path
-                             * fallback: install a canonical short safe reply so the
-                             * function's contract holds (safe_content non-NULL when
-                             * downstream code reaches line ~1612). The streaming bytes
-                             * have already been sent to the client by this point, so
-                             * the user already saw the rejected text — but the AGENT'S
-                             * HISTORY would otherwise miss this turn entirely,
-                             * conditioning subsequent responses on a phantom turn.
-                             * Installing the fallback keeps history honest about
-                             * "an assistant turn happened, and this is what we'd say
-                             * if we could rewind." Wording differs slightly from
-                             * agent_turn's "hold on, let me think on that" so logs
-                             * can distinguish which path fired. */
+                            /* AI-disclosure in the retry: record nothing rather than a
+                             * canned line (owner ruling 2026-10-01; replaced the
+                             * canned fallback line). The streamed bytes
+                             * already reached the client; history skips this turn. */
                             hu_log_error("agent_stream", agent->observer,
                                          "persona_voice REJECT: stream retry produced "
-                                         "AI-disclosure (len=%zu) — installing safe fallback",
+                                         "AI-disclosure (len=%zu) — recording nothing",
                                          safe_content_len);
                             agent->alloc->free(agent->alloc->ctx, safe_content,
                                                safe_content_len + 1);
-                            static const char fallback[] = "let me think on that, sorry";
-                            size_t fallback_len = sizeof(fallback) - 1;
-                            safe_content = hu_strndup(agent->alloc, fallback, fallback_len);
-                            if (safe_content) {
-                                safe_content_len = fallback_len;
-                                safe_owned = true;
-                            } else {
-                                /* OOM — last resort: NULL, downstream skip. */
-                                safe_content_len = 0;
-                                safe_owned = false;
-                            }
+                            safe_content = NULL;
+                            safe_content_len = 0;
+                            safe_owned = false;
                         } else {
                             /* Spec 2026-05-19 self-model-scaffold Phase B:
                              * stash post-retry length + latency. Other metric
@@ -1749,10 +1709,11 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                              * m3-rewrite-pairs.jsonl for the DPO trainer to
                              * consume. Best-effort; failure here MUST NOT
                              * break the chat path. */
-                            (void)hu_m3_rewrite_pair_record(agent->alloc, NULL, msg, msg_len,
-                                                            sresp.content, sresp.content_len,
-                                                            safe_content, safe_content_len,
-                                                            /*turn_kind=stream=*/1);
+                            if (repair_kept == HU_GUARD_REPAIR_KEPT_RETRY)
+                                (void)hu_m3_rewrite_pair_record(agent->alloc, NULL, msg, msg_len,
+                                                                sresp.content, sresp.content_len,
+                                                                safe_content, safe_content_len,
+                                                                /*turn_kind=stream=*/1);
                             safe_owned = true;
                             hu_log_warn("agent_stream", agent->observer,
                                         "response_guard RECOVERED: stream retry passed (len=%zu, "
@@ -1760,26 +1721,19 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                                         safe_content_len, retry_report.bytes_stripped);
                         }
                     } else {
-                        /* 2026-05-24 companion fix: retry call itself failed (transport,
-                         * OOM, etc.) — install the same canonical fallback as the
-                         * persona_voice REJECT branch above so safe_content is non-NULL
-                         * and downstream history/final_content gets recorded. The
-                         * client already saw the streamed-then-rejected response;
-                         * this just keeps the agent's record honest. */
+                        /* Retry failed or unusable (guard_repair logged kept=none):
+                         * record nothing rather than a canned line (owner ruling
+                         * 2026-10-01; replaced the canned fallback line). */
                         hu_log_error("agent_stream", agent->observer,
-                                     "response_guard stream retry failed (err=%s) — installing "
-                                     "safe fallback",
+                                     "response_guard stream retry unusable (err=%s) — "
+                                     "recording nothing",
                                      hu_error_string(retry_err));
-                        static const char fallback[] = "let me think on that, sorry";
-                        size_t fallback_len = sizeof(fallback) - 1;
-                        safe_content = hu_strndup(agent->alloc, fallback, fallback_len);
-                        if (safe_content) {
-                            safe_content_len = fallback_len;
-                            safe_owned = true;
-                        } else {
-                            safe_content_len = 0;
-                            safe_owned = false;
-                        }
+                        if (safe_content)
+                            agent->alloc->free(agent->alloc->ctx, safe_content,
+                                               safe_content_len + 1);
+                        safe_content = NULL;
+                        safe_content_len = 0;
+                        safe_owned = false;
                     }
                 } else if (guard_err == HU_OK && guard_outcome == HU_GUARD_REWROTE) {
                     safe_content = guard_out;
@@ -2498,34 +2452,7 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             hu_guard_report_t guard_report;
             memset(&guard_report, 0, sizeof(guard_report));
             hu_guard_context_t guard_ctx;
-            memset(&guard_ctx, 0, sizeof(guard_ctx));
-            guard_ctx.recent_avg_len = hu_agent_internal_recent_assistant_avg_len(agent, 5);
-            guard_ctx.length_anomaly_mult = hu_guard_length_anomaly_mult_for_channel(
-                agent->active_channel, agent->active_channel_len);
-            guard_ctx.director_text = agent->scene_direction_text;
-            guard_ctx.director_len = agent->scene_direction_text_len;
-            guard_ctx.director_history = (const char *const *)agent->director_history;
-            guard_ctx.director_history_lens = agent->director_history_lens;
-            guard_ctx.director_history_count = agent->director_history_count;
-            /* Sprint 41 follow-up #4 — consult per-channel G9 disable list. */
-            guard_ctx.naked_opener_disabled = hu_response_guard_g9_disabled_for_channel(
-                agent->active_channel, agent->active_channel_len);
-            if (agent->persona) {
-                if (agent->persona->name && agent->persona->name_len > 1) {
-                    guard_ctx.persona_name = agent->persona->name;
-                    guard_ctx.persona_name_len = agent->persona->name_len;
-                }
-                const char *id = agent->persona->identity ? agent->persona->identity
-                                                          : agent->persona->core_anchor;
-                if (id) {
-                    guard_ctx.persona_identity = id;
-                    guard_ctx.persona_identity_len = strlen(id);
-                }
-                if (agent->persona->biography) {
-                    guard_ctx.persona_biography = agent->persona->biography;
-                    guard_ctx.persona_biography_len = strlen(agent->persona->biography);
-                }
-            }
+            hu_agent_internal_guard_context(agent, msg, msg_len, &guard_ctx);
             hu_error_t guard_err = hu_response_guard_check_ex(
                 agent->alloc, final_content, final_content_len, &guard_ctx, &guard_out,
                 &guard_out_len, &guard_outcome, &guard_report);
@@ -2619,6 +2546,12 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                                 hu_response_is_naked_discourse_opener(retry_txt, retry_txt_len);
                             hu_response_guard_record_g9_retry_outcome(retry_ok, retry_tripped_g9);
                         }
+                        /* Never a cut-off reply from the repair (guard_repair.h). */
+                        hu_guard_repair_kept_t repair_kept = hu_guard_repair_resolve(
+                            agent->alloc, agent->observer, rejected_snap, rejected_snap_len,
+                            &guard_report, &guard_ctx, &retry_txt, &retry_txt_len);
+                        if (repair_kept != HU_GUARD_REPAIR_KEPT_NONE)
+                            rre = HU_OK;
                         if (rre == HU_OK && retry_txt && retry_txt_len > 0) {
                             if (!hu_persona_voice_response_is_clean(retry_txt, retry_txt_len)) {
                                 hu_log_error("agent_stream", agent->observer,
@@ -2650,7 +2583,8 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                                 /* E1 (2026-05-18): DPO preference pair —
                                  * rejected_snap (snapshotted above before free)
                                  * vs retry_txt (accepted). Best-effort. */
-                                if (rejected_snap && rejected_snap_len > 0) {
+                                if (rejected_snap && rejected_snap_len > 0 &&
+                                    repair_kept == HU_GUARD_REPAIR_KEPT_RETRY) {
                                     (void)hu_m3_rewrite_pair_record(
                                         agent->alloc, NULL, msg, msg_len, rejected_snap,
                                         rejected_snap_len, retry_txt, retry_txt_len,
