@@ -35,6 +35,9 @@ typedef struct hu_relationship_state {
     uint32_t session_count;
     uint32_t total_turns;
     hu_relationship_quality_score_t quality;
+    /* true when stage was derived for the current contact from interaction
+     * data (persona/contact_stage.h): turn counting must not raise it. */
+    bool derived;
 } hu_relationship_state_t;
 
 /* Compute weighted quality score from a single session's signals.
@@ -52,7 +55,13 @@ void hu_relationship_new_session_quality(hu_relationship_state_t *state,
                                          const hu_session_quality_t *quality,
                                          float velocity_factor);
 
+/* Adds turn_count to total_turns. When the stage was NOT derived from
+ * per-contact data, also raises it to a turn-count floor (CLI fallback). */
 void hu_relationship_update(hu_relationship_state_t *state, uint32_t turn_count);
+
+/* Stage band for a quality in [0, 1]: NEW < 0.25 <= FAMILIAR < 0.55 <=
+ * TRUSTED < 0.80 <= DEEP. */
+hu_relationship_stage_t hu_relationship_stage_from_quality(float quality);
 hu_error_t hu_relationship_build_prompt(hu_allocator_t *alloc, const hu_relationship_state_t *state,
                                         char **out, size_t *out_len);
 

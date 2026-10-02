@@ -4,6 +4,7 @@
 #include "human/agent/world_model_bridge.h"
 #include "human/core/gate_mode.h"
 #include "human/core/log.h"
+#include "human/memory/context_relevance.h"
 #include "human/memory/graph.h"
 #include "human/memory/graph_state.h"
 #include "human/memory/name_extract.h"
@@ -457,6 +458,7 @@ hu_error_t hu_graph_ground_compose_ex(hu_memory_loader_t *loader, const char *co
         size_t words = hu_graph_ground_name_word_count(e->name, e->name_len);
         size_t hits = hu_graph_ground_entity_match_count(msg, msg_len, e->name, e->name_len);
         bool partial = (flags & HU_GG_REQUIRE_FULL_NAME) && hits < words;
+        partial = partial || ((flags & HU_GG_NO_EMOTION_SEED) && e->type == HU_ENTITY_EMOTION);
         scores[i] =
             partial ? 0.0
                     : hu_graph_ground_score(hits, words, e->mention_count, e->last_seen, now_ms);
@@ -758,6 +760,30 @@ hu_error_t hu_graph_ground_compose_turn(hu_memory_loader_t *loader, const char *
     return HU_OK;
 }
 
+/* HU_CONTEXT_RELEVANCE on a casual turn: recompose strictly (every word of an
+ * entity's name in the message, no EMOTION seeds) and, when LIVE keeps it,
+ * replace *ctx with that block. False = drop as before. */
+static bool gg_casual_relevant(hu_agent_t *agent, hu_memory_loader_t *loader, const char *msg,
+                               size_t msg_len, char **ctx, size_t *ctx_len) {
+    if (hu_context_relevance_mode() == HU_GATE_OFF)
+        return false;
+    char *strict = NULL;
+    size_t strict_len = 0, matched = 0;
+    hu_graph_ground_compose_ex(loader, agent->memory_session_id, agent->memory_session_id_len, msg,
+                               msg_len, 0, HU_GG_REQUIRE_FULL_NAME | HU_GG_NO_EMOTION_SEED, &strict,
+                               &strict_len, &matched);
+    if (!hu_context_relevance_graph(agent->alloc, &strict, &strict_len, strict ? matched : 0)) {
+        if (strict)
+            agent->alloc->free(agent->alloc->ctx, strict, strict_len + 1);
+        return false;
+    }
+    if (*ctx)
+        agent->alloc->free(agent->alloc->ctx, *ctx, *ctx_len + 1);
+    *ctx = strict;
+    *ctx_len = strict_len;
+    return true;
+}
+
 /* Graph grounding load, shared by BOTH turn paths (see agent.h). Composes
  * QUERY-CONDITIONED graph context for the incoming message (entity-overlap
  * scored, 1-hop; empty when nothing matches — see hu_graph_ground_compose)
@@ -804,7 +830,10 @@ void hu_agent_load_graph_grounding(hu_agent_t *agent, void *loader_v, const char
                     *graph_ctx_len, matched_entities,
                     (unsigned)hu_graph_ground_fingerprint(*graph_ctx, *graph_ctx_len));
         drop_reason = "shadow";
-    } else if (graph_mode == HU_GRAPH_GROUNDING_ON && agent->turn_tier < (int)HU_TIER_ANALYTICAL) {
+    } else if (graph_mode == HU_GRAPH_GROUNDING_ON && agent->turn_tier < (int)HU_TIER_ANALYTICAL &&
+               /* HU_CONTEXT_RELEVANCE LIVE keeps a strictly query-conditioned
+                * block (cut to the casual budget); the fallback is not one. */
+               !gg_casual_relevant(agent, loader, msg, msg_len, graph_ctx, graph_ctx_len)) {
         hu_log_info("graph_grounding", NULL,
                     "live: %zu bytes skipped for casual register (tier=%d)", *graph_ctx_len,
                     agent->turn_tier);

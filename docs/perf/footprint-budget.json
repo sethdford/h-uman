@@ -9,9 +9,9 @@
   "budgets": {
     "binary_bytes": {
       "build": "release-size",
-      "max": 2867200,
-      "since": "2026-09-20",
-      "why": "2800 KB. Raised from 2600 KB after a linker-map audit of the 2611 KB binary found nothing to trim (__text 1809 KB, __cstring 512 KB, -Oz and no-unwind-tables already on); the growth was product code. Previously hard-coded in the release-size job (PR #424). Raise only with a measurement, never to make a red run green."
+      "max": 3072000,
+      "since": "2026-10-02",
+      "why": "3000 KB. Raised from 2800 KB after a linker-map audit of the 2,942,816-byte binary (2026-10-02, MinSizeRel+LTO, release-size config): __text 2,053,828 (1809 KB at the 2026-09-20 audit), __cstring 560,490 (512 KB); the growth is product code spread over the reply path and new features (hu_service_run 53 KB, agent_turn_run 41 KB, persona 78 KB, conversation 52 KB, prospective v2, reminders, person dates, proposer context, briefing), no single module to cut. The only non-product code is the eval CLI (~26 KB), which the nightly scripts call through the installed binary. Before that: 2600 -> 2800 KB on 2026-09-20 (PR #424). Raise only with a measurement, never to make a red run green."
     },
     "version_peak_rss_bytes": {
       "build": "release-size",
