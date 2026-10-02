@@ -6635,20 +6635,6 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                                     "user-facing reply. Band-aid: replace with safe "
                                     "decline; proper fix is regenerate-with-sterner-prompt.",
                                     mod_result.violence_score);
-                        /* Replace unsafe output with a safe canned decline.
-                         * Seth-shaped, short, no bracket markers, no directive
-                         * text. Channel receives this and sends. */
-                        static const char safe_decline[] = "rather not get into that one";
-                        size_t safe_len = sizeof(safe_decline) - 1;
-                        char *safe = (char *)agent->alloc->alloc(agent->alloc->ctx, safe_len + 1);
-                        if (safe) {
-                            memcpy(safe, safe_decline, safe_len);
-                            safe[safe_len] = '\0';
-                            agent->alloc->free(agent->alloc->ctx, *response_out,
-                                               *response_len_out + 1);
-                            *response_out = safe;
-                            *response_len_out = safe_len;
-                        }
                     }
                     if (mod_result.hate) {
                         hu_log_info("agent_turn", NULL,
@@ -6657,15 +6643,20 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                                     "[SAFETY] boundary directive to outgoing — same "
                                     "class of bug as the violence branch above)",
                                     mod_result.hate_score);
-                        /* Replace unsafe output with a safe canned decline.
-                         * Prior code prepended the boundary directive text to
-                         * *response_out, which sent the directive verbatim to
-                         * the recipient. */
-                        static const char hate_decline[] = "i'm gonna pass on this one";
-                        size_t safe_len = sizeof(hate_decline) - 1;
+                    }
+                    /* Replace unsafe output with a short decline (never the
+                     * directive text, which once reached the recipient). On a
+                     * crisis turn the SHIELD-005 floor instead: never a deflection. */
+                    if (mod_result.violence || mod_result.hate) {
+                        size_t safe_len = 0;
+                        const char *decline = hu_self_harm_decline_or_floor(
+                            msg, msg_len,
+                            mod_result.violence ? "rather not get into that one"
+                                                : "i'm gonna pass on this one",
+                            &safe_len);
                         char *safe = (char *)agent->alloc->alloc(agent->alloc->ctx, safe_len + 1);
                         if (safe) {
-                            memcpy(safe, hate_decline, safe_len);
+                            memcpy(safe, decline, safe_len);
                             safe[safe_len] = '\0';
                             agent->alloc->free(agent->alloc->ctx, *response_out,
                                                *response_len_out + 1);

@@ -8755,20 +8755,17 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 }
                             }
                         }
-                        /* SHIELD-004: a reply unsafe for others is dropped, never
-                         * swapped for canned text; self-harm wording alone (the
-                         * model offering 988) never blocks (daemon/crisis.h). */
-                        if (hu_daemon_reply_blocked(alloc, send_ptr, send_len,
-                                                    agent ? agent->observer : NULL)) {
-                            if (send_buf_ack)
-                                alloc->free(alloc->ctx, send_buf_ack, send_len + 1);
-                            send_buf_ack = NULL;
-                            send_ptr = "";
-                            send_len = 0;
+                        /* SHIELD-004/005 screen + crisis floor (daemon/crisis.h). */
+                        size_t floor_len = 0;
+                        const char *crisis_floor =
+                            hu_self_harm_crisis_floor(crisis_tier, &floor_len);
+                        if (!hu_daemon_crisis_screen(alloc, crisis_tier, &send_ptr, &send_len,
+                                                     &send_buf_ack, agent ? agent->observer : NULL))
 #ifndef HU_IS_TEST
                             goto skip_send;
+#else
+                            send_len = 0;
 #endif
-                        }
                         /* SHIELD-001: Companion safety check before send */
                         {
                             hu_companion_safety_result_t cs_r;
@@ -8783,8 +8780,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     alloc->free(alloc->ctx, send_buf_ack, send_len + 1);
                                     send_buf_ack = NULL;
                                 }
-                                send_ptr = cs_safe_reply;
-                                send_len = sizeof(cs_safe_reply) - 1;
+                                send_ptr = crisis_floor ? crisis_floor : cs_safe_reply;
+                                send_len = crisis_floor ? floor_len : sizeof(cs_safe_reply) - 1;
                             }
                         }
                         /* MEM-002: Memory claim verification gate + TRUST-006 updates */

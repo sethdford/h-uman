@@ -1,10 +1,12 @@
 /* Keep message text and handles out of production logs. See log_redact.h. */
 #include "human/core/log_redact.h"
+#include "human/core/log.h"
 #include "human/core/paths.h"
 
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -104,45 +106,73 @@ static int random_bytes(uint8_t *buf, size_t len) {
 #endif
 }
 
+static bool read_key(const char *path, uint8_t key[16], bool *absent) {
+    *absent = false;
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) {
+        *absent = errno == ENOENT;
+        return false;
+    }
+    uint8_t buf[17];
+    ssize_t n = read(fd, buf, sizeof(buf));
+    close(fd);
+    if (n != 16)
+        return false; /* short or oversized: never guess a key */
+    memcpy(key, buf, 16);
+    return true;
+}
+
 bool hu_log_tag_key_load(const char *dir, uint8_t key[16]) {
     if (!dir || !key)
         return false;
-    char path[1024];
+    char path[1024], tmp[1100];
     int pn = snprintf(path, sizeof(path), "%s/log_tag.key", dir);
     if (pn < 0 || (size_t)pn >= sizeof(path))
         return false;
-    for (int attempt = 0; attempt < 2; attempt++) {
-        int fd = open(path, O_RDONLY | O_CLOEXEC);
-        if (fd >= 0) {
-            uint8_t buf[17];
-            ssize_t n = read(fd, buf, sizeof(buf));
-            close(fd);
-            if (n != 16)
-                return false; /* short or oversized: never guess a key */
-            memcpy(key, buf, 16);
-            return true;
-        }
-        if (errno != ENOENT)
-            return false;
-        uint8_t fresh[16];
-        if (random_bytes(fresh, sizeof(fresh)) != 0)
-            return false;
-        fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
-        if (fd < 0) {
-            if (errno == EEXIST)
-                continue; /* another process won the race: read theirs */
-            return false;
-        }
-        bool ok = write(fd, fresh, sizeof(fresh)) == (ssize_t)sizeof(fresh);
-        ok = (fchmod(fd, 0600) == 0) && ok;
-        close(fd);
-        if (!ok) {
-            (void)unlink(path);
-            return false;
-        }
+    bool absent = false;
+    if (read_key(path, key, &absent))
+        return true;
+    if (!absent)
+        return false;
+    /* Publish atomically: write a private temp file in full, then link() it
+     * into place. link() never overwrites, so a racing process keeps the key
+     * that won and no reader ever sees a partial file. */
+    uint8_t fresh[16];
+    if (random_bytes(fresh, sizeof(fresh)) != 0)
+        return false;
+    int tn = snprintf(tmp, sizeof(tmp), "%s.tmp.%ld", path, (long)getpid());
+    if (tn < 0 || (size_t)tn >= sizeof(tmp))
+        return false;
+    int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+    if (fd < 0)
+        return false;
+    bool ok = write(fd, fresh, sizeof(fresh)) == (ssize_t)sizeof(fresh);
+    ok = fchmod(fd, 0600) == 0 && ok;
+    ok = fsync(fd) == 0 && ok;
+    close(fd);
+    bool linked = ok && link(tmp, path) == 0;
+    int link_errno = errno;
+    (void)unlink(tmp);
+    if (linked) {
         memcpy(key, fresh, 16);
         return true;
     }
+    return ok && link_errno == EEXIST && read_key(path, key, &absent);
+}
+
+static atomic_bool g_fallback_warned = false;
+
+bool hu_log_tag_key_resolve(const char *dir, uint8_t key[16]) {
+    if (dir && hu_log_tag_key_load(dir, key))
+        return true;
+    /* Last resort: a per-process random key keeps tags unlinkable, at the
+     * cost of stability across restarts. Say so once. */
+    if (random_bytes(key, 16) != 0)
+        for (int i = 0; i < 16; i++)
+            key[i] = (uint8_t)(((uintptr_t)key >> (i % 8)) ^ (uint8_t)(i * 37 + 1));
+    hu_log_warn_once(&g_fallback_warned, "log", NULL,
+                     "log_tag.key unavailable; using a per-process random tag key (tags "
+                     "will not match across restarts)");
     return false;
 }
 
@@ -157,13 +187,8 @@ static void key_init(void) {
         g_key[i] = (uint8_t)(0xA5 ^ (i * 29));
 #else
     char dir[1024];
-    if (hu_paths_state_dir(dir, sizeof(dir)) > 0 && hu_log_tag_key_load(dir, g_key))
-        return;
-    /* No state dir: a per-process random key keeps tags unlinkable, at the
-     * cost of stability across restarts. */
-    if (random_bytes(g_key, sizeof(g_key)) != 0)
-        for (int i = 0; i < 16; i++)
-            g_key[i] = (uint8_t)((uintptr_t)&g_key >> (i % 8));
+    const char *d = hu_paths_state_dir(dir, sizeof(dir)) > 0 ? dir : NULL;
+    (void)hu_log_tag_key_resolve(d, g_key);
 #endif
 }
 

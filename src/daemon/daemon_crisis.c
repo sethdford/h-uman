@@ -101,3 +101,18 @@ bool hu_daemon_reply_blocked(hu_allocator_t *alloc, const char *reply, size_t re
                 (int)mod.violence, (int)mod.hate, (int)mod.sexual, reply_len);
     return true;
 }
+
+bool hu_daemon_crisis_screen(hu_allocator_t *alloc, hu_self_harm_tier_t inbound_tier,
+                             const char **text, size_t *len, char **owned, hu_observer_t *obs) {
+    if (!text || !len || !hu_daemon_reply_blocked(alloc, *text, *len, obs))
+        return true;
+    if (owned && *owned) {
+        alloc->free(alloc->ctx, *owned, *len + 1);
+        *owned = NULL;
+    }
+    size_t n = 0;
+    const char *floor = hu_self_harm_crisis_floor(inbound_tier, &n);
+    *text = floor ? floor : "";
+    *len = n;
+    return floor != NULL;
+}

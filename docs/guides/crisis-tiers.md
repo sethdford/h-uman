@@ -46,11 +46,21 @@ policy; nothing here is learned.
    life", "kms", "wish i was dead", "<verb> myself"), which are never demoted.
    With no subject, the sender is assumed (texts drop it: "wanna die lol").
 4. **Context rules.** "end it" needs intent ("want to", "going to") and must
-   end its clause ("end it with her" is not). "hurt myself" is `explicit` only
-   with intent, a habit ("hurting myself") or "again"; "cut myself" is
-   `explicit` unless an accident follows ("shaving", "cooking"). "almost/nearly
-   killed myself" is `low`. "kms" after a number or quantity ("10 kms", "a few
-   kms") or before "away/left/…" is a distance.
+   end its clause ("end it with her" is not). "on purpose", "deliberately",
+   "intentionally" make any `<verb> myself` explicit. "hurt myself" is
+   `explicit` only with intent, a habit ("hurting myself") or "again"; "cut
+   myself" is `explicit` unless a real accident cue follows ("shaving",
+   "cooking", "chopping", "opening a can", "by accident") or "accidentally"
+   precedes it — "with a razor" and "on my wrist" stay explicit. "almost
+   killed myself" is `low` only when it is past tense, carries no intent, and
+   is followed by an activity or place ("on that hike", "skiing", "at the
+   gym", "laughing"); "i almost killed myself last night" is an attempt
+   disclosure and gets the full directive. "kms" is a distance only after a
+   number or quantity ("10 kms", "a few kms").
+   Stockpiled means ("pills saved up", "stockpiling my meds") is `explicit`.
+   "can't stop / can't help thinking about suicide" is first-person ideation
+   (the negation is of the stopping), so `explicit`. "goodbye everyone" and
+   "no one would care if i was gone" are `low`.
 5. **Ruling on low.** `low` forces a reply, so it needs personal-despair
    context: "what's the point" must end its clause or take a despair object
    ("of even trying", "of anything", "of this?"); "can't go on" must end its
@@ -70,8 +80,15 @@ block instead. Now:
   twice.
 - Self-harm wording in a reply never blocks or replaces it (the final gates
   and `hu_daemon_reply_blocked` look only at violence, hate and sexual).
-- A reply that is unsafe for another reason is **dropped**, not replaced:
-  there is no canned text on this path.
+- A reply naming the act to argue against it or ask about it ("please don't
+  kill yourself", "have you thought about killing yourself?") is not
+  violence; "go kill yourself" still is.
+- A reply that is unsafe for another reason is **dropped** on an ordinary
+  turn. On an `explicit` turn there is a **safety floor**: a reply that is
+  blocked or replaced for any reason becomes a short caring line plus the
+  resource line (`hu_self_harm_crisis_floor`) — never silence, never "rather
+  not get into that one". This is the one fixed reply in the path; crisis
+  handling is exempt from the no-static-replies rule by owner policy.
 
 ## Gate
 

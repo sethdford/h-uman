@@ -31,6 +31,11 @@ uint64_t hu_log_contact_tag(const char *handle, size_t len);
  * random bytes when absent. False on any I/O error or a short/oversized file. */
 bool hu_log_tag_key_load(const char *dir, uint8_t key[16]);
 
+/* The runtime key: <dir>/log_tag.key when it loads, else a per-process random
+ * key (unlinkable, not stable) with one warning per process. Returns true when
+ * the key came from the file. */
+bool hu_log_tag_key_resolve(const char *dir, uint8_t key[16]);
+
 /* Tests: use this key (NULL restores the build default). */
 void hu_log_tag_set_key_for_test(const uint8_t *key16);
 

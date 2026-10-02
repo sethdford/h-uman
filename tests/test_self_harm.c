@@ -16,6 +16,7 @@
 #include "human/security/self_harm.h"
 #include "test_framework.h"
 #include "test_tmpdir.h"
+#include <dirent.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <sys/stat.h>
@@ -742,6 +743,186 @@ static void test_log_tag_key_rejects_bad_file(void) {
     hu_test_rm_rf(d);
 }
 
+/* ── Round 3 (final review of #596) ───────────────────────────────────── */
+
+/* CRITICAL (a): a caring reply that names the act is not violence. */
+static void test_reply_second_person_care_is_not_violence(void) {
+    hu_crisis_tiers_mode_set_for_test(HU_GATE_LIVE);
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *r1 = "please don't kill yourself, i'm here";
+    HU_ASSERT_FALSE(hu_daemon_reply_blocked(&alloc, r1, strlen(r1), NULL));
+    const char *r2 = "have you thought about killing yourself?";
+    HU_ASSERT_FALSE(hu_daemon_reply_blocked(&alloc, r2, strlen(r2), NULL));
+    const char *r3 = "are you thinking of killing yourself tonight";
+    HU_ASSERT_FALSE(hu_daemon_reply_blocked(&alloc, r3, strlen(r3), NULL));
+    const char *r4 = "never kill yourself over this";
+    HU_ASSERT_FALSE(hu_daemon_reply_blocked(&alloc, r4, strlen(r4), NULL));
+    const char *bad = "go kill yourself";
+    HU_ASSERT_TRUE(hu_daemon_reply_blocked(&alloc, bad, strlen(bad), NULL));
+    hu_crisis_tiers_mode_set_for_test(-1);
+}
+
+/* End to end: EXPLICIT inbound + "please don't kill yourself, i'm here" →
+ * the gates clear it, nothing blocks it, and it goes out with one 988 line. */
+static void test_crisis_reply_e2e_caring_kill_yourself_sent(void) {
+    hu_crisis_tiers_mode_set_for_test(HU_GATE_LIVE);
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *in = "i want to kill myself";
+    hu_self_harm_tier_t tier = hu_daemon_inbound_crisis_tier(&alloc, in, strlen(in), "x", 1, NULL);
+    HU_ASSERT_EQ(tier, HU_SELF_HARM_EXPLICIT);
+    size_t len = 0;
+    char *reply = ctx_dup(&alloc, "please don't kill yourself, i'm here", &len);
+    const char *why = NULL;
+    HU_ASSERT_TRUE(hu_daemon_outbound_final_gates_clear(&alloc, reply, len, &why));
+    HU_ASSERT_FALSE(hu_daemon_reply_blocked(&alloc, reply, len, NULL));
+    HU_ASSERT_TRUE(hu_daemon_crisis_ensure_resources(&alloc, tier, &reply, &len));
+    HU_ASSERT_TRUE(strncmp(reply, "please don't kill yourself, i'm here", 36) == 0);
+    HU_ASSERT_EQ(count_of(reply, "988 Suicide"), 1u);
+    alloc.free(alloc.ctx, reply, len + 1);
+    hu_crisis_tiers_mode_set_for_test(-1);
+}
+
+/* CRITICAL (b): an EXPLICIT turn whose reply is blocked still gets an answer —
+ * the caring floor with 988, never silence and never a deflection. */
+static void test_crisis_blocked_reply_gets_floor_never_nothing(void) {
+    hu_crisis_tiers_mode_set_for_test(HU_GATE_LIVE);
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *bad = "you should kill them with violence";
+    HU_ASSERT_TRUE(hu_daemon_reply_blocked(&alloc, bad, strlen(bad), NULL));
+    size_t n = 0;
+    const char *floor = hu_self_harm_crisis_floor(HU_SELF_HARM_EXPLICIT, &n);
+    HU_ASSERT_NOT_NULL(floor);
+    HU_ASSERT_EQ(n, strlen(floor));
+    HU_ASSERT_GT(n, 40u);
+    HU_ASSERT_EQ(count_of(floor, "988 Suicide"), 1u);
+    HU_ASSERT_STR_NOT_CONTAINS(floor, "rather not");
+    /* the floor itself passes every gate, so it is never re-blocked */
+    const char *why = NULL;
+    HU_ASSERT_TRUE(hu_daemon_outbound_final_gates_clear(&alloc, floor, n, &why));
+    HU_ASSERT_NULL(hu_self_harm_crisis_floor(HU_SELF_HARM_LOW, &n));
+    HU_ASSERT_EQ(n, 0u);
+    hu_crisis_tiers_mode_set_for_test(-1);
+}
+
+/* The daemon's last screen: a blocked reply on a crisis turn becomes the
+ * floor (and the owned buffer is freed); on an ordinary turn, nothing. */
+static void test_daemon_crisis_screen_floor_or_drop(void) {
+    hu_crisis_tiers_mode_set_for_test(HU_GATE_LIVE);
+    hu_allocator_t alloc = hu_system_allocator();
+    size_t len = 0;
+    char *owned = ctx_dup(&alloc, "you should kill them with violence", &len);
+    const char *text = owned;
+    HU_ASSERT_TRUE(
+        hu_daemon_crisis_screen(&alloc, HU_SELF_HARM_EXPLICIT, &text, &len, &owned, NULL));
+    HU_ASSERT_NULL(owned);
+    HU_ASSERT_GT(len, 0u);
+    HU_ASSERT_STR_CONTAINS(text, "988");
+    HU_ASSERT_STR_NOT_CONTAINS(text, "violence");
+    char *owned2 = ctx_dup(&alloc, "you should kill them with violence", &len);
+    text = owned2;
+    HU_ASSERT_FALSE(hu_daemon_crisis_screen(&alloc, HU_SELF_HARM_NONE, &text, &len, &owned2, NULL));
+    HU_ASSERT_EQ(len, 0u);
+    HU_ASSERT_NULL(owned2);
+    const char *ok = "please don't kill yourself, i'm here";
+    text = ok;
+    len = strlen(ok);
+    HU_ASSERT_TRUE(hu_daemon_crisis_screen(&alloc, HU_SELF_HARM_EXPLICIT, &text, &len, NULL, NULL));
+    HU_ASSERT_TRUE(text == ok); /* a caring reply is sent as written */
+    hu_crisis_tiers_mode_set_for_test(-1);
+}
+
+/* agent_turn's violence/hate decline: never "rather not get into that one"
+ * on a crisis turn. */
+static void test_decline_or_floor_on_crisis_turn(void) {
+    size_t n = 0;
+    const char *in = "i want to die";
+    const char *d =
+        hu_self_harm_decline_or_floor(in, strlen(in), "rather not get into that one", &n);
+    HU_ASSERT_STR_NOT_CONTAINS(d, "rather not");
+    HU_ASSERT_STR_CONTAINS(d, "988");
+    HU_ASSERT_EQ(n, strlen(d));
+    const char *hi = "how was the game";
+    d = hu_self_harm_decline_or_floor(hi, strlen(hi), "rather not get into that one", &n);
+    HU_ASSERT_STR_EQ(d, "rather not get into that one");
+}
+
+/* IMPORTANT 2: only real accident cues demote "cut myself". */
+static void test_self_harm_cut_accident_cues_are_narrow(void) {
+    HU_ASSERT_EQ(tier_of("i cut myself with a razor"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("i cut myself on my wrist"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("i cut myself on purpose"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("i hurt myself on purpose"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("i deliberately hurt myself"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("i cut myself chopping onions"), HU_SELF_HARM_LOW);
+    HU_ASSERT_EQ(tier_of("cut myself opening a can"), HU_SELF_HARM_LOW);
+    HU_ASSERT_EQ(tier_of("i cut myself by accident"), HU_SELF_HARM_LOW);
+    HU_ASSERT_EQ(tier_of("i accidentally cut myself"), HU_SELF_HARM_LOW);
+}
+
+/* IMPORTANT 3: "almost" demotes only a past accident at an activity/place. */
+static void test_self_harm_almost_demotes_only_accidents(void) {
+    HU_ASSERT_EQ(tier_of("i'm almost ready to kill myself"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("i almost killed myself last night"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("i almost killed myself"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("i almost killed myself on that hike"), HU_SELF_HARM_LOW);
+    HU_ASSERT_EQ(tier_of("nearly killed myself skiing"), HU_SELF_HARM_LOW);
+    HU_ASSERT_EQ(tier_of("almost killed myself at the gym"), HU_SELF_HARM_LOW);
+    HU_ASSERT_EQ(tier_of("i almost killed myself laughing"), HU_SELF_HARM_LOW);
+}
+
+/* IMPORTANT 4: kms is a distance only after a number or quantity. */
+static void test_self_harm_kms_needs_quantity_to_be_distance(void) {
+    HU_ASSERT_EQ(tier_of("i'm gonna kms today"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("kms away from home"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("only a few kms left"), HU_SELF_HARM_NONE);
+    HU_ASSERT_EQ(tier_of("ran 10 kms"), HU_SELF_HARM_NONE);
+}
+
+/* IMPORTANT 5: coverage. */
+static void test_self_harm_goodbye_and_gone(void) {
+    HU_ASSERT_EQ(tier_of("i'm done. goodbye everyone"), HU_SELF_HARM_LOW);
+    HU_ASSERT_EQ(tier_of("no one would care if i was gone"), HU_SELF_HARM_LOW);
+    HU_ASSERT_EQ(tier_of("nobody would even notice if i died"), HU_SELF_HARM_LOW);
+}
+
+static void test_self_harm_stockpiled_means(void) {
+    HU_ASSERT_EQ(tier_of("i have pills saved up"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("i've been saving up my pills"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("been stockpiling my meds"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("my brother has pills saved up"), HU_SELF_HARM_THIRD_PERSON);
+    HU_ASSERT_EQ(tier_of("i saved up for a new bike"), HU_SELF_HARM_NONE);
+}
+
+static void test_self_harm_ideation_with_cant_stop(void) {
+    HU_ASSERT_EQ(tier_of("can't stop thinking about suicide"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("i keep thinking about suicide"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("i can't help thinking about killing myself"), HU_SELF_HARM_EXPLICIT);
+    HU_ASSERT_EQ(tier_of("i'm not thinking about suicide"), HU_SELF_HARM_NONE);
+}
+
+/* Minors: the key is published atomically (no temp left behind), and the
+ * fallback key is used, non-zero, when the state dir is unusable. */
+static void test_log_tag_key_atomic_and_fallback(void) {
+    char d[512];
+    HU_ASSERT_TRUE(hu_test_mkdtemp("hu_logtag", d, sizeof(d)));
+    uint8_t k[16];
+    HU_ASSERT_TRUE(hu_log_tag_key_resolve(d, k));
+    DIR *dir = opendir(d);
+    HU_ASSERT_NOT_NULL(dir);
+    int entries = 0;
+    for (struct dirent *e; (e = readdir(dir)) != NULL;)
+        if (e->d_name[0] != '.')
+            entries++;
+    closedir(dir);
+    HU_ASSERT_EQ(entries, 1); /* log_tag.key only, no temp file */
+    hu_test_rm_rf(d);
+    uint8_t fb[16];
+    memset(fb, 0, sizeof(fb));
+    HU_ASSERT_FALSE(hu_log_tag_key_resolve("/nonexistent/hu_logtag_dir", fb));
+    uint8_t zero[16] = {0};
+    HU_ASSERT_TRUE(memcmp(fb, zero, 16) != 0);
+}
+
 void run_self_harm_tests(void) {
     HU_TEST_SUITE("Self-harm detector (DEF-1)");
     HU_RUN_TEST(test_self_harm_kill_myself_is_explicit);
@@ -801,4 +982,17 @@ void run_self_harm_tests(void) {
     HU_RUN_TEST(test_log_tag_keyed_and_48_bit);
     HU_RUN_TEST(test_log_tag_key_file_created_0600_and_stable);
     HU_RUN_TEST(test_log_tag_key_rejects_bad_file);
+    HU_TEST_SUITE("Self-harm round 3 (#596 final)");
+    HU_RUN_TEST(test_reply_second_person_care_is_not_violence);
+    HU_RUN_TEST(test_crisis_reply_e2e_caring_kill_yourself_sent);
+    HU_RUN_TEST(test_crisis_blocked_reply_gets_floor_never_nothing);
+    HU_RUN_TEST(test_daemon_crisis_screen_floor_or_drop);
+    HU_RUN_TEST(test_decline_or_floor_on_crisis_turn);
+    HU_RUN_TEST(test_self_harm_cut_accident_cues_are_narrow);
+    HU_RUN_TEST(test_self_harm_almost_demotes_only_accidents);
+    HU_RUN_TEST(test_self_harm_kms_needs_quantity_to_be_distance);
+    HU_RUN_TEST(test_self_harm_goodbye_and_gone);
+    HU_RUN_TEST(test_self_harm_stockpiled_means);
+    HU_RUN_TEST(test_self_harm_ideation_with_cant_stop);
+    HU_RUN_TEST(test_log_tag_key_atomic_and_fallback);
 }

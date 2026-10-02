@@ -40,4 +40,12 @@ bool hu_daemon_crisis_ensure_resources(hu_allocator_t *alloc, hu_self_harm_tier_
 bool hu_daemon_reply_blocked(hu_allocator_t *alloc, const char *reply, size_t reply_len,
                              hu_observer_t *obs);
 
+/* The last screen before the fallback send. A reply blocked by
+ * hu_daemon_reply_blocked frees *owned (allocated *len + 1, may be NULL) and,
+ * on an EXPLICIT turn, points *text at the crisis floor (caring line + 988)
+ * and returns true — a crisis turn never ends in silence. On any other turn a
+ * blocked reply returns false: send nothing. An unblocked reply is untouched. */
+bool hu_daemon_crisis_screen(hu_allocator_t *alloc, hu_self_harm_tier_t inbound_tier,
+                             const char **text, size_t *len, char **owned, hu_observer_t *obs);
+
 #endif /* HU_DAEMON_CRISIS_H */

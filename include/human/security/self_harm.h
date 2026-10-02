@@ -59,6 +59,18 @@ const char *hu_self_harm_resource_line(size_t *len_out);
 bool hu_self_harm_reply_needs_resources(const char *inbound, size_t inbound_len, const char *reply,
                                         size_t reply_len);
 
+/* SHIELD-005 safety floor: on an EXPLICIT turn whose reply was blocked or
+ * replaced for any reason, this is what is sent instead — a short caring line
+ * plus the resource line. Never silence, never a deflection. NULL (and
+ * *len_out = 0) for every other tier. The one fixed reply in the reply path:
+ * crisis handling is exempt from the no-static-replies rule by owner policy. */
+const char *hu_self_harm_crisis_floor(hu_self_harm_tier_t inbound_tier, size_t *len_out);
+
+/* The text to send in place of an unsafe reply: the crisis floor when the
+ * inbound message is EXPLICIT, else `decline` (strlen'd). */
+const char *hu_self_harm_decline_or_floor(const char *inbound, size_t inbound_len,
+                                          const char *decline, size_t *len_out);
+
 /* HU_CRISIS_TIERS gate. off = the legacy lists, byte-identical to before;
  * shadow = legacy acts, the canonical tier is logged at the inbound site;
  * live = the canonical detector everywhere. Unset is LIVE: this is a safety

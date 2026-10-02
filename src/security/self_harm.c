@@ -38,25 +38,115 @@ static const char *const THIRD_PERSON[] = {
     "cousin",   "kid",     "wife",     "husband", "partner", "boyfriend", "girlfriend", "roommate",
     "coworker", "someone", "somebody", "uncle",   "aunt",    "grandma",   "grandpa",    NULL};
 /* Words that say the speaker means to do it ("going to", "want to"). */
-static const char *const INTENT[] = {"want",     "wants",  "wanted",   "going", "will",    "ill",
-                                     "about",    "ready",  "planning", "plan",  "decided", "need",
-                                     "thinking", "think",  "should",   "might", "could",   "gotta",
-                                     "try",      "trying", NULL};
+static const char *const INTENT[] = {
+    "want",     "wants", "wanted",  "going",  "will",         "ill",           "about",     "ready",
+    "planning", "plan",  "decided", "need",   "thinking",     "think",         "should",    "might",
+    "could",    "gotta", "try",     "trying", "deliberately", "intentionally", "purposely", NULL};
 /* Skipped while looking back for the subject. */
-static const char *const FILLER[] = {
-    "just",     "really",   "literally", "actually", "kinda",     "kind",      "of",
-    "lowkey",   "honestly", "so",        "still",    "sometimes", "seriously", "totally",
-    "going",    "to",       "want",      "wants",    "wanted",    "will",      "would",
-    "could",    "might",    "should",    "about",    "thinking",  "think",     "thinks",
-    "feel",     "feels",    "feeling",   "like",     "is",        "was",       "were",
-    "are",      "am",       "been",      "being",    "be",        "seems",     "gets",
-    "getting",  "has",      "have",      "had",      "says",      "said",      "say",
-    "saying",   "told",     "keeps",     "keep",     "kept",      "do",        "does",
-    "did",      "a",        "bit",       "lil",      "little",    "everyone",  "everyones",
-    "all",      "probably", "maybe",     "also",     "too",       "even",      "ready",
-    "planning", "plan",     "decided",   "need",     "gotta",     "got",       "try",
-    "trying",   "tried",    "almost",    "nearly",   "fucking",   "fr",        "rn",
-    NULL};
+static const char *const FILLER[] = {"just",
+                                     "really",
+                                     "literally",
+                                     "actually",
+                                     "kinda",
+                                     "kind",
+                                     "of",
+                                     "lowkey",
+                                     "honestly",
+                                     "so",
+                                     "still",
+                                     "sometimes",
+                                     "seriously",
+                                     "totally",
+                                     "going",
+                                     "to",
+                                     "want",
+                                     "wants",
+                                     "wanted",
+                                     "will",
+                                     "would",
+                                     "could",
+                                     "might",
+                                     "should",
+                                     "about",
+                                     "thinking",
+                                     "think",
+                                     "thinks",
+                                     "feel",
+                                     "feels",
+                                     "feeling",
+                                     "like",
+                                     "is",
+                                     "was",
+                                     "were",
+                                     "are",
+                                     "am",
+                                     "been",
+                                     "being",
+                                     "be",
+                                     "seems",
+                                     "gets",
+                                     "getting",
+                                     "has",
+                                     "have",
+                                     "had",
+                                     "says",
+                                     "said",
+                                     "say",
+                                     "saying",
+                                     "told",
+                                     "keeps",
+                                     "keep",
+                                     "kept",
+                                     "do",
+                                     "does",
+                                     "did",
+                                     "a",
+                                     "bit",
+                                     "lil",
+                                     "little",
+                                     "everyone",
+                                     "everyones",
+                                     "all",
+                                     "probably",
+                                     "maybe",
+                                     "also",
+                                     "too",
+                                     "even",
+                                     "ready",
+                                     "planning",
+                                     "plan",
+                                     "decided",
+                                     "need",
+                                     "gotta",
+                                     "got",
+                                     "try",
+                                     "trying",
+                                     "tried",
+                                     "almost",
+                                     "nearly",
+                                     "fucking",
+                                     "fr",
+                                     "rn",
+                                     "can",
+                                     "stop",
+                                     "help",
+                                     "thought",
+                                     "considering",
+                                     "considered",
+                                     "please",
+                                     "accidentally",
+                                     "deliberately",
+                                     "intentionally",
+                                     "purposely",
+                                     "contemplating",
+                                     NULL};
+/* Ideation verbs: "can't stop thinking about suicide" is the speaker's own. */
+static const char *const IDEATION[] = {"thinking",   "think",         "thought",   "considering",
+                                       "considered", "contemplating", "obsessing", NULL};
+/* Before "<verb> yourself": talking ABOUT the act ("thought about killing
+ * yourself"), not urging it. */
+static const char *const ABOUT[] = {"about",       "of",         "thinking", "thought",
+                                    "considering", "considered", NULL};
 /* A clause may end in one of these without punctuation ("can't go on like this"). */
 static const char *const TAIL[] = {
     "anymore", "any",   "longer", "like", "lol",     "honestly", "tbh",  "though", "really",
@@ -70,13 +160,21 @@ static const char *const DESPAIR_OBJ[] = {
 static const char *const QUANTITY[] = {"few",      "many",  "several", "some",  "couple",
                                        "more",     "less",  "fewer",   "extra", "hundred",
                                        "thousand", "dozen", "the",     "a",     NULL};
-static const char *const KMS_AFTER[] = {"away",  "from", "per",   "of",    "left",   "long",
-                                        "run",   "walk", "drive", "ride",  "to",     "north",
-                                        "south", "east", "west",  "today", "uphill", NULL};
-/* After "cut myself": an accident, not self-harm. */
-static const char *const ACCIDENT[] = {"shaving",      "cooking",  "on",      "by",
-                                       "accidentally", "chopping", "opening", "while",
-                                       "with",         "slicing",  NULL};
+/* After "cut/hurt myself": a real accident cue (not on/with/by — "on my
+ * wrist", "with a razor" are self-harm). "by accident" is matched as a pair. */
+static const char *const ACCIDENT[] = {"shaving", "cooking", "chopping",     "slicing", "opening",
+                                       "peeling", "carving", "accidentally", NULL};
+/* After "almost killed myself": an activity or place, so a near-miss accident. */
+static const char *const ACTIVITY[] = {
+    "on",       "at",           "in",      "skiing",  "hiking",   "laughing",
+    "driving",  "biking",       "running", "falling", "tripping", "crashing",
+    "climbing", "snowboarding", "surfing", "playing", "swimming", NULL};
+/* Stockpiled means: "pills saved up", "stockpiling my meds". */
+static const char *const MEANS[] = {"pills",       "pill",    "meds",          "medication",
+                                    "medications", "tablets", "sleepingpills", NULL};
+static const char *const STOCKPILE[] = {"saved",     "saving",     "stockpiled", "stockpiling",
+                                        "hoarded",   "hoarding",   "stashed",    "stashing",
+                                        "collected", "collecting", NULL};
 
 /* ── Phrase table ─────────────────────────────────────────────────────── */
 
@@ -145,6 +243,21 @@ static const phrase_t PHRASES[] = {
     /* ambiguous, often venting: a gentle check-in */
     {"do not want to be here", HU_SELF_HARM_LOW, 0},
     {"want to disappear", HU_SELF_HARM_LOW, 0},
+    {"goodbye everyone", HU_SELF_HARM_LOW, 0},
+    {"goodbye forever", HU_SELF_HARM_LOW, 0},
+    {"goodbye world", HU_SELF_HARM_LOW, 0},
+    {"done with life", HU_SELF_HARM_LOW, 0},
+    /* "no one would care if i was gone": the speaker is the one gone */
+    {"care if i was gone", HU_SELF_HARM_LOW, F_SELF},
+    {"care if i were gone", HU_SELF_HARM_LOW, F_SELF},
+    {"care if i died", HU_SELF_HARM_LOW, F_SELF},
+    {"care if i disappeared", HU_SELF_HARM_LOW, F_SELF},
+    {"notice if i was gone", HU_SELF_HARM_LOW, F_SELF},
+    {"notice if i were gone", HU_SELF_HARM_LOW, F_SELF},
+    {"notice if i died", HU_SELF_HARM_LOW, F_SELF},
+    {"notice if i disappeared", HU_SELF_HARM_LOW, F_SELF},
+    {"miss me if i was gone", HU_SELF_HARM_LOW, F_SELF},
+    {"miss me if i died", HU_SELF_HARM_LOW, F_SELF},
     {"whats the point", HU_SELF_HARM_LOW, F_CLAUSE_END | F_DESPAIR},
     {"what is the point", HU_SELF_HARM_LOW, F_CLAUSE_END | F_DESPAIR},
     {"can not do this anymore", HU_SELF_HARM_LOW, 0},
@@ -160,14 +273,18 @@ typedef struct {
     const char *form;
     int family;
     bool progressive; /* "-ing": habitual, "i've been cutting myself" */
+    bool past;        /* "killed": "almost killed myself" may be a near-miss */
 } verb_form_t;
 static const verb_form_t VERBS[] = {
-    {"kill", V_KILL, false},        {"kills", V_KILL, false},       {"killed", V_KILL, false},
-    {"killing", V_KILL, true},      {"unalive", V_UNALIVE, false},  {"unalives", V_UNALIVE, false},
-    {"unalived", V_UNALIVE, false}, {"unaliving", V_UNALIVE, true}, {"harm", V_HARM, false},
-    {"harms", V_HARM, false},       {"harmed", V_HARM, false},      {"harming", V_HARM, true},
-    {"hurt", V_HURT, false},        {"hurts", V_HURT, false},       {"hurting", V_HURT, true},
-    {"cut", V_CUT, false},          {"cuts", V_CUT, false},         {"cutting", V_CUT, true},
+    {"kill", V_KILL, false, false},       {"kills", V_KILL, false, false},
+    {"killed", V_KILL, false, true},      {"killing", V_KILL, true, false},
+    {"unalive", V_UNALIVE, false, false}, {"unalives", V_UNALIVE, false, false},
+    {"unalived", V_UNALIVE, false, true}, {"unaliving", V_UNALIVE, true, false},
+    {"harm", V_HARM, false, false},       {"harms", V_HARM, false, false},
+    {"harmed", V_HARM, false, true},      {"harming", V_HARM, true, false},
+    {"hurt", V_HURT, false, false},       {"hurts", V_HURT, false, false},
+    {"hurting", V_HURT, true, false},     {"cut", V_CUT, false, false},
+    {"cuts", V_CUT, false, false},        {"cutting", V_CUT, true, false},
 };
 #define N_VERBS (sizeof(VERBS) / sizeof(VERBS[0]))
 enum { R_SELF, R_THIRD, R_SECOND };
@@ -382,17 +499,24 @@ typedef enum { SUBJ_NONE, SUBJ_FIRST, SUBJ_SECOND, SUBJ_THIRD, SUBJ_NEGATED } su
 
 typedef struct {
     subject_t subject;
-    bool intent; /* "want to", "going to", … between subject and phrase */
-    bool almost; /* "almost killed myself": an accident */
+    bool intent;   /* "want to", "going to", … between subject and phrase */
+    bool almost;   /* "almost killed myself" */
+    bool about;    /* "thought about / thinking of …" precedes the phrase */
+    bool ideation; /* "thinking", "considering" … precedes the phrase */
+    bool accident; /* "accidentally" precedes the phrase */
 } lookback_t;
 
 static lookback_t look_back(const toks_t *t, size_t k) {
-    lookback_t r = {SUBJ_NONE, false, false};
+    lookback_t r = {SUBJ_NONE, false, false, false, false, false};
+    const tok_t *closer = NULL; /* the token just after w, toward the phrase */
     for (size_t back = 0; back < 8 && k > back; back++) {
         const tok_t *w = &t->t[k - 1 - back];
         if (w->brk)
             break; /* the previous clause ended here */
-        if (word_in(w, NEGATIONS)) {
+        /* "can't stop / can't help thinking about …" negates the stopping,
+         * not the thought: a double negative, read as filler. */
+        bool double_neg = closer && (word_is(closer, "stop") || word_is(closer, "help"));
+        if (word_in(w, NEGATIONS) && !double_neg) {
             r.subject = SUBJ_NEGATED;
             return r;
         }
@@ -412,8 +536,12 @@ static lookback_t look_back(const toks_t *t, size_t k) {
             r.intent = true;
         if (word_is(w, "almost") || word_is(w, "nearly"))
             r.almost = true;
-        if (!word_in(w, FILLER))
+        r.about |= word_in(w, ABOUT);
+        r.ideation |= word_in(w, IDEATION);
+        r.accident |= word_is(w, "accidentally");
+        if (!word_in(w, FILLER) && !word_in(w, NEGATIONS))
             break;
+        closer = w;
     }
     return r;
 }
@@ -486,23 +614,45 @@ static void record(hits_t *h, hu_self_harm_tier_t tier) {
         h->third_hit = true;
 }
 
-/* The tier of "<verb> myself" for the speaker. */
+/* "on purpose", "deliberately", "intentionally", "purposely" after the act. */
+static bool intentional_after(const toks_t *t, size_t i) {
+    if (i >= t->n)
+        return false;
+    const tok_t *w = &t->t[i];
+    if (word_is(w, "deliberately") || word_is(w, "intentionally") || word_is(w, "purposely"))
+        return true;
+    return word_is(w, "on") && !w->brk && i + 1 < t->n && word_is(&t->t[i + 1], "purpose");
+}
+
+/* A real accident cue right after the act: "shaving", "by accident". */
+static bool accident_after(const toks_t *t, size_t i) {
+    if (i >= t->n)
+        return false;
+    if (word_in(&t->t[i], ACCIDENT))
+        return true;
+    return word_is(&t->t[i], "by") && !t->t[i].brk && i + 1 < t->n &&
+           word_is(&t->t[i + 1], "accident");
+}
+
+/* The tier of "<verb> myself" (verb at k) for the speaker. */
 static hu_self_harm_tier_t reflexive_self_tier(const toks_t *t, size_t k, const verb_form_t *v,
                                                const lookback_t *lb) {
-    const tok_t *after = k + 2 < t->n && !t->t[k + 1].brk ? &t->t[k + 2] : NULL;
+    size_t a = t->t[k + 1].brk ? t->n : k + 2; /* first token after the act */
+    if (intentional_after(t, a) || lb->intent || v->progressive)
+        return HU_SELF_HARM_EXPLICIT;
     switch (v->family) {
     case V_KILL:
     case V_UNALIVE:
     case V_HARM:
-        return lb->almost ? HU_SELF_HARM_LOW : HU_SELF_HARM_EXPLICIT;
-    case V_CUT:
-        return (!v->progressive && !lb->intent && after && word_in(after, ACCIDENT))
+        /* Only a past near-miss at an activity/place ("almost killed myself
+         * on that hike") is demoted; an attempt disclosure is not. */
+        return (lb->almost && v->past && a < t->n && word_in(&t->t[a], ACTIVITY))
                    ? HU_SELF_HARM_LOW
                    : HU_SELF_HARM_EXPLICIT;
+    case V_CUT:
+        return (lb->accident || accident_after(t, a)) ? HU_SELF_HARM_LOW : HU_SELF_HARM_EXPLICIT;
     default: /* hurt: an accident unless intent, habit or "again" */
-        return (v->progressive || lb->intent || (after && word_is(after, "again")))
-                   ? HU_SELF_HARM_EXPLICIT
-                   : HU_SELF_HARM_LOW;
+        return (a < t->n && word_is(&t->t[a], "again")) ? HU_SELF_HARM_EXPLICIT : HU_SELF_HARM_LOW;
     }
 }
 
@@ -522,9 +672,12 @@ static void scan_reflexives(const toks_t *t, bool *covered, hits_t *h, on_mask_f
         const verb_form_t *v = &VERBS[vi];
         lookback_t lb = look_back(t, k);
         bool killish = v->family == V_KILL || v->family == V_UNALIVE;
-        /* Quoting the contact ("you said you wanted to kill yourself") is not
-         * violence; "go kill yourself" stays with the violence check. */
-        bool quoted = who == R_SECOND && lb.subject == SUBJ_SECOND;
+        /* Quoting the contact ("you said you wanted to kill yourself"), urging
+         * against it ("please don't kill yourself") or asking about it ("have
+         * you thought about killing yourself?") is not violence; "go kill
+         * yourself" stays with the violence check. */
+        bool quoted = who == R_SECOND &&
+                      (lb.subject == SUBJ_SECOND || lb.subject == SUBJ_NEGATED || lb.about);
         if (mask && ((killish && who != R_SECOND) || quoted))
             mask(ud, t->t[k].raw_start, t->t[k + 1].raw_end);
         if (who == R_SECOND || lb.subject == SUBJ_NEGATED)
@@ -533,10 +686,41 @@ static void scan_reflexives(const toks_t *t, bool *covered, hits_t *h, on_mask_f
     }
 }
 
+/* No clause break between tokens lo and hi (inclusive of lo, exclusive of hi). */
+static bool same_clause(const toks_t *t, size_t lo, size_t hi) {
+    for (size_t i = lo; i < hi; i++)
+        if (t->t[i].brk)
+            return false;
+    return true;
+}
+
+/* Stockpiled means: a MEANS word within three tokens of a STOCKPILE word, in
+ * one clause ("i have pills saved up", "been stockpiling my meds"). */
+static void scan_means(const toks_t *t, const bool *covered, hits_t *h) {
+    for (size_t k = 0; k < t->n; k++) {
+        if (covered[k] || !word_in(&t->t[k], MEANS))
+            continue;
+        size_t first = t->n;
+        for (size_t d = 1; d <= 3 && first == t->n; d++) {
+            if (k + d < t->n && word_in(&t->t[k + d], STOCKPILE) && same_clause(t, k, k + d))
+                first = k;
+            else if (k >= d && word_in(&t->t[k - d], STOCKPILE) && same_clause(t, k - d, k))
+                first = k - d;
+        }
+        if (first == t->n)
+            continue;
+        lookback_t lb = look_back(t, first);
+        if (lb.subject == SUBJ_NEGATED || lb.subject == SUBJ_SECOND)
+            continue;
+        record(h, lb.subject == SUBJ_THIRD ? HU_SELF_HARM_THIRD_PERSON : HU_SELF_HARM_EXPLICIT);
+    }
+}
+
 static bool kms_is_distance(const toks_t *t, size_t k) {
-    if (k > 0 && !t->t[k - 1].brk && (tok_numeric(&t->t[k - 1]) || word_in(&t->t[k - 1], QUANTITY)))
-        return true;
-    return k + 1 < t->n && !t->t[k].brk && word_in(&t->t[k + 1], KMS_AFTER);
+    /* Only a number or quantity before it makes it a distance ("10 kms",
+     * "a few kms"); "gonna kms today" is not. */
+    return k > 0 && !t->t[k - 1].brk &&
+           (tok_numeric(&t->t[k - 1]) || word_in(&t->t[k - 1], QUANTITY));
 }
 
 /* Can phrase ph stand at k (n tokens), given its context flags? */
@@ -565,7 +749,7 @@ static hu_self_harm_tier_t phrase_tier(const phrase_t *ph, const lookback_t *lb)
         return HU_SELF_HARM_NONE; /* quoting the contact */
     if (lb->subject == SUBJ_THIRD)
         return HU_SELF_HARM_THIRD_PERSON;
-    if ((ph->flags & F_PERSONAL) && lb->subject != SUBJ_FIRST)
+    if ((ph->flags & F_PERSONAL) && lb->subject != SUBJ_FIRST && !lb->ideation)
         return HU_SELF_HARM_LOW;
     return ph->tier;
 }
@@ -627,6 +811,7 @@ static hu_self_harm_tier_t scan_window(const char *text, size_t len, on_mask_fn 
         hits_t h = {false, false, false};
         scan_reflexives(t, covered, &h, mask, ud);
         scan_phrases(t, covered, &h, mask, ud);
+        scan_means(t, covered, &h);
         if (!h.explicit_hit && spaced_evasion(t))
             h.explicit_hit = true;
         out = h.explicit_hit ? HU_SELF_HARM_EXPLICIT
@@ -753,9 +938,10 @@ const char *hu_self_harm_directive(hu_self_harm_tier_t tier, size_t *len_out) {
     return d;
 }
 
-static const char RESOURCE_LINE[] = "If you're in crisis, please reach out: "
-                                    "988 Suicide & Crisis Lifeline (call/text 988), "
-                                    "Crisis Text Line (text HOME to 741741)";
+#define RESOURCE_TEXT                                                                        \
+    "If you're in crisis, please reach out: 988 Suicide & Crisis Lifeline (call/text 988), " \
+    "Crisis Text Line (text HOME to 741741)"
+static const char RESOURCE_LINE[] = RESOURCE_TEXT;
 
 const char *hu_self_harm_resource_line(size_t *len_out) {
     if (len_out)
@@ -789,4 +975,28 @@ hu_gate_mode_t hu_crisis_tiers_mode(void) {
 
 void hu_crisis_tiers_mode_set_for_test(int mode_or_minus1) {
     g_mode_override = mode_or_minus1;
+}
+
+/* The SHIELD-005 floor: a short caring line, then the resource line once. */
+#define CRISIS_CARE                                                        \
+    "i'm right here with you and i care about you. you don't have to get " \
+    "through this alone.\n\n"
+static const char CRISIS_FLOOR[] = CRISIS_CARE RESOURCE_TEXT;
+
+const char *hu_self_harm_crisis_floor(hu_self_harm_tier_t inbound_tier, size_t *len_out) {
+    bool crisis = inbound_tier == HU_SELF_HARM_EXPLICIT;
+    if (len_out)
+        *len_out = crisis ? sizeof(CRISIS_FLOOR) - 1 : 0;
+    return crisis ? CRISIS_FLOOR : NULL;
+}
+
+const char *hu_self_harm_decline_or_floor(const char *inbound, size_t inbound_len,
+                                          const char *decline, size_t *len_out) {
+    const char *floor =
+        hu_self_harm_crisis_floor(hu_self_harm_classify(inbound, inbound_len), len_out);
+    if (floor)
+        return floor;
+    if (len_out)
+        *len_out = decline ? strlen(decline) : 0;
+    return decline;
 }
