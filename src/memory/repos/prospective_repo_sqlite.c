@@ -972,14 +972,22 @@ static bool pm_twin_keyed(const pm_twin_q_t *q, const char *key) {
  * C2 -- with an action normalizing to the follow-up's mirror text AND not
  * dated beyond the follow-up's due + grace. An undated follow-up gets the
  * key matches only. Copies the row's action, attempts and due into q->it. */
-static bool pm_find_open_twin(sqlite3 *db, pm_twin_q_t *q, hu_error_t *err) {
+/* k_pm_open_candidates' columns, restricted to rows that existed when the
+ * settle began (?2, see hu_prospective_repo_settle_followup_twin). */
+static const char k_pm_twin_candidates[] =
+    "SELECT action, trigger_value, attempts, due_at, status, surfaced_at FROM "
+    "prospective_memories WHERE cue_kind = 'time' AND contact_id = ?1 AND "
+    "status IN ('pending', 'surfaced') AND id <= ?2";
+
+static bool pm_find_open_twin(sqlite3 *db, pm_twin_q_t *q, int64_t max_id, hu_error_t *err) {
     *err = HU_OK;
     sqlite3_stmt *st = NULL;
-    if (sqlite3_prepare_v2(db, k_pm_open_candidates, -1, &st, NULL) != SQLITE_OK) {
+    if (sqlite3_prepare_v2(db, k_pm_twin_candidates, -1, &st, NULL) != SQLITE_OK) {
         *err = HU_ERR_MEMORY_BACKEND;
         return false;
     }
     sqlite3_bind_text(st, 1, q->it.contact_id, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(st, 2, max_id);
     char cand[512];
     bool found = false;
     int rc = SQLITE_DONE;
@@ -1010,6 +1018,23 @@ static bool pm_find_open_twin(sqlite3 *db, pm_twin_q_t *q, hu_error_t *err) {
  * and the action may still name more than one row. */
 #define PM_TWIN_PASSES 4
 
+/* Known gap 6: the highest prospective_memories id before this settle
+ * wrote anything. The table is AUTOINCREMENT, so every row a pass inserts
+ * (the sweep's survivor re-mirror) gets a larger id; `id <= max` is exactly
+ * "rows that existed when the follow-up was marked sent". */
+static hu_error_t pm_max_id(sqlite3 *db, int64_t *out) {
+    *out = 0;
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(db, "SELECT COALESCE(MAX(id), 0) FROM prospective_memories", -1, &st,
+                           NULL) != SQLITE_OK)
+        return HU_ERR_MEMORY_BACKEND;
+    int rc = sqlite3_step(st);
+    if (rc == SQLITE_ROW)
+        *out = sqlite3_column_int64(st, 0);
+    sqlite3_finalize(st);
+    return rc == SQLITE_ROW ? HU_OK : HU_ERR_MEMORY_BACKEND;
+}
+
 hu_error_t hu_prospective_repo_settle_followup_twin(sqlite3 *db, int64_t followup_id, int64_t now,
                                                     int *changed) {
     if (changed)
@@ -1022,8 +1047,17 @@ hu_error_t hu_prospective_repo_settle_followup_twin(sqlite3 *db, int64_t followu
     hu_error_t err = HU_OK;
     if (!pm_followup_twin_of(db, followup_id, &q, &err))
         return err;
+    /* Known gap 6: a survivor a pass re-mirrors is a LATER promise, yet its
+     * due can sit inside this follow-up's action window; a later pass must
+     * never close it as this follow-up's twin. Only rows that predate the
+     * call are candidates (key-only matching after the first pass would
+     * also drop a pre-existing action-matched twin listed after a keyed
+     * one). */
+    int64_t max_id = 0;
+    if ((err = pm_max_id(db, &max_id)) != HU_OK)
+        return err;
     for (int pass = 0; pass < PM_TWIN_PASSES; pass++) {
-        if (!pm_find_open_twin(db, &q, &err))
+        if (!pm_find_open_twin(db, &q, max_id, &err))
             return err;
         /* DONE, no outcome: the legacy path may only have LISTED the
          * follow-up, so there is no evidence the reply used it (C1). The
