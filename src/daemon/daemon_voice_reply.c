@@ -351,7 +351,8 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, hu_agent_t *agent, const hu_co
 #if defined(HU_ENABLE_CARTESIA)
         if (voice_channel_ok && agent->persona && agent->persona->voice.voice_id[0] &&
             agent->persona->voice_messages.enabled) {
-            const char *vreason = "voice_first";
+            /* A #voice self-test logs "self_test" so it never starts the spacing gap. */
+            const char *vreason = hu_daemon_voice_first_reply_reason(voice_first);
             /* Voice-first LIVE already decided from what arrived, and the turn
              * wrote a memo; the post-hoc classifier would judge it as a text.
              * The safety gates above still ran. */
