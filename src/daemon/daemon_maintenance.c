@@ -56,16 +56,12 @@
 #include <time.h>
 #include <utime.h>
 
-hu_consolidation_config_t hu_daemon_consolidation_config(const hu_config_t *config,
-                                                         struct hu_agent *agent) {
+hu_consolidation_config_t hu_daemon_consolidation_config(const hu_config_t *config) {
     hu_consolidation_config_t cfg = {
         .decay_days = config ? config->behavior.decay_days : 30,
         .decay_factor = 0.5,
         .dedup_threshold = config ? config->behavior.dedup_threshold : 0,
         .max_entries = 5000,
-        .provider = agent ? &agent->provider : NULL,
-        .model = agent ? agent->model_name : NULL,
-        .model_len = agent ? agent->model_name_len : 0,
     };
     return cfg;
 }
@@ -227,7 +223,7 @@ void hu_daemon_maintenance_tick(hu_allocator_t *alloc, struct hu_agent *agent,
         if (last_consolidation_ms == 0)
             last_consolidation_ms = now_ms;
         if (now_ms - last_consolidation_ms >= interval_ms) {
-            hu_consolidation_config_t cons_cfg = hu_daemon_consolidation_config(config, agent);
+            hu_consolidation_config_t cons_cfg = hu_daemon_consolidation_config(config);
             if (hu_memory_consolidate(alloc, agent->memory, &cons_cfg) == HU_OK) {
                 last_consolidation_ms = now_ms;
                 hu_log_info("human", agent ? agent->observer : NULL,

@@ -10,6 +10,7 @@
 #include <sqlite3.h>
 #endif
 
+#if defined(HU_ENABLE_SQLITE)
 static void write_text(const char *path, const char *s) {
     FILE *f = fopen(path, "w");
     if (f) {
@@ -17,6 +18,7 @@ static void write_text(const char *path, const char *s) {
         fclose(f);
     }
 }
+#endif
 
 #ifdef HU_ENABLE_SQLITE
 static void make_chatdb(const char *path, long long max_rowid) {
