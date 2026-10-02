@@ -145,6 +145,16 @@ hu_error_t hu_proactive_decisions_repo_consecutive_send_failures(sqlite3 *db, co
  * that cannot read its own evidence must not silence a contact. */
 bool hu_proactive_send_circuit_is_open(sqlite3 *db, const char *contact, int64_t now);
 
+/* Trigger of the row the daemon writes when an outbound text failed on every
+ * channel path (src/daemon/daemon_send_failure.c). Distinct from
+ * 'proactive_send' so the circuit breaker's counts are unchanged. */
+#define HU_PROACTIVE_TRIGGER_OUTBOUND_SEND "outbound_send"
+
+/* Newest final send failure to `contact` (trigger outbound_send, reason
+ * send_failed). *have is false when there is none. */
+hu_error_t hu_proactive_decisions_repo_last_send_failure_ts(sqlite3 *db, const char *contact,
+                                                            int64_t *out_ts, bool *have);
+
 #ifdef __cplusplus
 }
 #endif

@@ -20,6 +20,7 @@
 #include "human/agent/registry.h"
 #include "human/agent/response_guard.h"
 #include "human/agent/spawn.h"
+#include "human/agent/spoken_turn.h"
 #include "human/bootstrap.h"
 #include "human/bus.h"
 #include "human/channel.h"
@@ -3267,8 +3268,23 @@ static bool gw_agent_on_message(hu_bus_event_type_t type, const hu_bus_event_t *
     snprintf(stream_ctx.channel, HU_BUS_CHANNEL_LEN, "%s",
              ev->channel[0] ? ev->channel : "gateway");
     snprintf(stream_ctx.id, HU_BUS_ID_LEN, "%s", ev->id);
+    /* HU_SPOKEN_TURN activation gated on the voice-latency measurement: live only in
+     * a gateway process dedicated to voice, after its turns are measured faster with
+     * the profile than without. Applies to every turn in this process (voice and
+     * dashboard text share one bus channel). */
+    hu_gate_mode_t spoken_mode = hu_spoken_turn_mode();
+    if (spoken_mode == HU_GATE_SHADOW) {
+        static atomic_bool warned_spoken_shadow = false;
+        hu_log_info_once(&warned_spoken_shadow, "gateway", NULL,
+                         "spoken-turn profile (shadow): would apply lean prompt, %d memories, "
+                         "%d examples to gateway turns; set HU_SPOKEN_TURN=live to use it",
+                         HU_SPOKEN_TURN_MEMORY_ENTRIES, HU_SPOKEN_TURN_EXAMPLES);
+    }
+    hu_spoken_turn_saved_t spoken_saved;
+    hu_spoken_turn_begin(b->agent, spoken_mode, &spoken_saved);
     hu_error_t err = hu_agent_turn_stream_v2(b->agent, msg, strlen(msg), gw_stream_event_cb,
                                              &stream_ctx, &reply, &reply_len);
+    hu_spoken_turn_end(b->agent, &spoken_saved);
     if (err == HU_OK && reply && reply_len > 0) {
         hu_bus_event_t rev;
         memset(&rev, 0, sizeof(rev));

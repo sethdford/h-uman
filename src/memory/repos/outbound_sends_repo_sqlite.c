@@ -88,4 +88,27 @@ hu_error_t hu_outbound_sends_repo_count(sqlite3 *db, int64_t *out_count) {
     return ok ? HU_OK : HU_ERR_MEMORY_STORE;
 }
 
+hu_error_t hu_outbound_sends_repo_last_sent_ms(sqlite3 *db, const char *contact, int64_t *out_ms,
+                                               bool *have) {
+    if (!db || !contact || !out_ms || !have)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out_ms = 0;
+    *have = false;
+    hu_error_t schema_err = hu_outbound_sends_repo_ensure_schema(db);
+    if (schema_err != HU_OK)
+        return schema_err;
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db, "SELECT MAX(sent_at_ms) FROM outbound_sends WHERE contact = ?1;", -1,
+                           &stmt, NULL) != SQLITE_OK)
+        return HU_ERR_MEMORY_STORE;
+    sqlite3_bind_text(stmt, 1, contact, -1, NULL);
+    bool ok = sqlite3_step(stmt) == SQLITE_ROW;
+    if (ok && sqlite3_column_type(stmt, 0) != SQLITE_NULL) {
+        *out_ms = sqlite3_column_int64(stmt, 0);
+        *have = true;
+    }
+    sqlite3_finalize(stmt);
+    return ok ? HU_OK : HU_ERR_MEMORY_STORE;
+}
+
 #endif /* HU_ENABLE_SQLITE */
