@@ -295,7 +295,6 @@ static void set_defaults(hu_config_t *cfg, hu_allocator_t *a) {
     cfg->memory.auto_save = true;
     cfg->memory.consolidation_interval_hours = 24;
     cfg->memory.sqlite_path = NULL;
-    cfg->memory.max_entries = 0;
     /* W15 envelope encryption is opt-in. Default false stays here so
      * an upgrade does not silently change on-disk format for users
      * who haven't provisioned a keystore. */

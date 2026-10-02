@@ -23,7 +23,9 @@ Optional methods may be NULL: `update`, `get_name`, `get_provider_config`.
 ## Consolidation & Lifecycle
 
 - Consolidation must be idempotent (safe to re-run)
-- Deduplication uses configurable similarity threshold (default 0.85)
+- Deduplication uses `behavior.dedup_threshold` (0–100 token-overlap score, default 70); the older
+  entry of a same-contact pair is deleted. Every caller gets its settings from
+  `hu_agent_consolidation_config()`; never build a `hu_consolidation_config_t` by hand.
 - Promotion: short-term → long-term happens after `promotion_threshold` accesses
 - Forgetting follows Ebbinghaus curve; parameters are configurable per policy
 - RAG pipeline must verify facts before returning (no naked hallucinations)
