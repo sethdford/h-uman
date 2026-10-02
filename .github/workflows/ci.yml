@@ -1238,6 +1238,12 @@ jobs:
       # cap/refusal guardrails, and that no message text reaches any output.
       - name: Learned-style learner + drift check pins (hermetic, no chat.db)
         run: python3 -m pytest -q tests/test_learned_style_profile.py tests/test_learned_style_drift.py
+      # Cut-over kit (docs/guides/cutover-kit.md): the pre-registered PROMOTE/HOLD
+      # rules on synthetic arms, gate detection, judge loopback guard, and the
+      # dry run (fixture chat.db + fake loopback server; skips until the replay
+      # harness and the memory-probe scorer are in the tree).
+      - name: Cut-over kit rules + dry run (hermetic, no chat.db, no model)
+        run: python3 -m pytest -q tests/test_cutover_report.py tests/test_cutover_plan.py tests/test_cutover_dryrun.py
       - name: Prospective memory v2 harness + backfill + shadow report + spot check (hermetic)
         run: python3 -m pytest -q tests/test_pm_bench_local.py tests/test_prospective_backfill.py tests/test_prospective_shadow_report.py tests/test_prospective_spot_check.py
       # Memory benchmarks (LoCoMo / MSC / SOC-2508 -> replay turns + probe
