@@ -2237,9 +2237,6 @@ hu_error_t hu_agent_consolidate_memory(hu_agent_t *agent) {
     if (!agent || !agent->memory || !agent->memory->vtable)
         return HU_ERR_INVALID_ARGUMENT;
     hu_consolidation_config_t config = HU_CONSOLIDATION_DEFAULTS;
-    config.provider = &agent->provider;
-    config.model = agent->model_name;
-    config.model_len = agent->model_name_len;
     hu_error_t err = hu_memory_consolidate(agent->alloc, agent->memory, &config);
 
     /* After consolidation, demote stale recall-tier entries to archival.

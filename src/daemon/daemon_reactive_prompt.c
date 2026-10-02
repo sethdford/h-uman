@@ -1349,8 +1349,7 @@ void hu_daemon_reactive_prompt_build(hu_allocator_t *alloc, hu_agent_t *agent,
                 {
                     int64_t tc_now = (int64_t)time(NULL);
                     if (hu_consolidation_should_run(&topic_consolidation_debounce, tc_now)) {
-                        hu_consolidation_config_t tc_cfg =
-                            hu_daemon_consolidation_config(config, agent);
+                        hu_consolidation_config_t tc_cfg = hu_daemon_consolidation_config(config);
                         if (hu_memory_consolidate(alloc, agent->memory, &tc_cfg) == HU_OK) {
                             hu_consolidation_debounce_reset(&topic_consolidation_debounce, tc_now);
                             hu_log_info("human", agent ? agent->observer : NULL,

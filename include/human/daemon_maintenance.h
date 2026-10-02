@@ -24,11 +24,10 @@ struct hu_agent;
 /** The consolidation settings the daemon uses for every hu_memory_consolidate
  *  call it makes (periodic tick and topic-switch): behavior.decay_days /
  *  behavior.dedup_threshold from config (30 / 0 when config is NULL), a fixed
- *  0.5 decay factor and 5000-entry cap, and the agent's provider + model.
+ *  0.5 decay factor and 5000-entry cap.
  *  Unconditional (not cron/test gated) because the reactive prompt slice
  *  links against it in every build variant. */
-hu_consolidation_config_t hu_daemon_consolidation_config(const hu_config_t *config,
-                                                         struct hu_agent *agent);
+hu_consolidation_config_t hu_daemon_consolidation_config(const hu_config_t *config);
 
 struct hu_prompt_budget;
 struct hu_verifier_metrics;
