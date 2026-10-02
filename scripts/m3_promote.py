@@ -73,6 +73,15 @@ try:
 except ImportError:
     authorship_promotion_gate = None
 
+# Empty-reply gate (2026-10-02): the nightly retrain's spare-port eval writes
+# <candidate>/promotion_manifest.json via scripts/empty_reply_gate.py. Enforced
+# here only when that manifest says so (HU_RETRAIN_EMPTY_EVAL=live); no
+# manifest or a shadow one changes nothing. Stdlib-only module.
+try:
+    import empty_reply_gate
+except ImportError:
+    empty_reply_gate = None
+
 HUMAN_HOME = Path.home() / ".human"
 LINEAGE_PATH = HUMAN_HOME / "training-data" / "adapter_lineage.jsonl"
 DEFAULT_MLX_URL = os.environ.get("HUMAN_MLX_URL", "http://127.0.0.1:8741")
@@ -325,6 +334,16 @@ def cmd_promote(args):
               f"not silently).", file=sys.stderr)
         return 5
 
+    empty_verdict = (empty_reply_gate.enforced_empty_reply_verdict(args.adapter)
+                     if empty_reply_gate is not None else None)
+    if empty_verdict is not None and empty_verdict.get("verdict") != "PASS" \
+            and not args.skip_empty_reply_gate:
+        print(f"ERROR: refusing to promote {args.adapter}: empty-reply gate "
+              f"{empty_verdict.get('verdict')} ({empty_verdict.get('reason')}; candidate rate "
+              f"{empty_verdict.get('candidate_rate')} vs serving {empty_verdict.get('serving_rate')}). "
+              f"Pass --skip-empty-reply-gate to override (recorded, not silent).", file=sys.stderr)
+        return 7
+
     mlx_url = args.mlx_url
 
     # Promotion requires recorded evidence (gate ref, eval score, A/B verdict).
@@ -346,6 +365,10 @@ def cmd_promote(args):
     if args.skip_authorship_gate and gap_verdict.get("verdict") != "PASS":
         evidence = (f"(authorship gate OVERRIDDEN: {gap_verdict.get('verdict')}/"
                     f"{gap_verdict.get('reason')}) " + evidence)
+    if args.skip_empty_reply_gate and empty_verdict is not None \
+            and empty_verdict.get("verdict") != "PASS":
+        evidence = (f"(empty-reply gate OVERRIDDEN: {empty_verdict.get('verdict')}/"
+                    f"{empty_verdict.get('reason')}) " + evidence)
     if args.skip_smoke_gate and smoke["verdict"] != "PASS":
         evidence = (f"(smoke gate OVERRIDDEN: {smoke['verdict']}/{smoke['reason']}) "
                     + evidence)
@@ -446,6 +469,10 @@ def main():
     p_promote.add_argument("--smoke-json", type=str, default=None,
                             help="Explicit adapter_smoke_test.py report to gate on (default: "
                                  "newest ~/.human/logs/v6-smoke-*.json whose adapter_b is --adapter)")
+    p_promote.add_argument("--skip-empty-reply-gate", action="store_true",
+                           help="promote even though the candidate's enforced "
+                                "promotion_manifest.json empty-reply gate is not PASS "
+                                "(recorded in the registry evidence)")
     p_promote.add_argument("--skip-smoke-gate", action="store_true",
                             help="Override the base-capability smoke gate (BLOCK/INCONCLUSIVE). "
                                  "Recorded in the registry evidence string, never silent.")

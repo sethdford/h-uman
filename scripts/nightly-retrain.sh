@@ -53,9 +53,13 @@ log() { printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" | tee -a "$LOG"; 
 # UNPROMOTED family the window itself produces and never touches the served
 # adapter, anything in the registry, or hand-placed dirs. free_gb_check refuses
 # to stop production for a training run that cannot save its result.
+# The adapter prod serves, as ~/.human/config.json records it (empty if unknown).
+serving_adapter_path() {
+    python3 -c 'import json,os;c=json.load(open(os.path.expanduser("~/.human/config.json")));print(c.get("personalization",{}).get("lora_adapter_path") or c.get("mlx_local",{}).get("adapter_path") or "")' 2>/dev/null
+}
 retain_adapters() {
     local dir="${1:-$HOME/.human/training-data/adapters}" keep="${HU_RETRAIN_KEEP_PER_FAMILY:-5}"
-    local serving; serving=$(python3 -c 'import json,os;c=json.load(open(os.path.expanduser("~/.human/config.json")));print(c.get("personalization",{}).get("lora_adapter_path") or c.get("mlx_local",{}).get("adapter_path") or "")' 2>/dev/null)
+    local serving; serving=$(serving_adapter_path)
     local registered; registered=$(python3 -c 'import json,sys
 try:
     r=json.load(open(sys.argv[1]))
@@ -414,8 +418,184 @@ run_mlxtune_candidate_stage() {
         log "mlx-tune candidate stage: promotion_gate=$gate_verdict (see $score_out)"
     fi
 
+    run_empty_reply_eval_stage "$candidate_dir" "${score_out:-}"
+
     log "mlx-tune candidate stage: candidate staged at $candidate_dir (NOT promoted)"
     log "mlx-tune candidate stage: to promote after human review: python3 $REPO/scripts/register_v6_adapter.py --adapter $candidate_dir --log $mlxtune_train_log"
+}
+
+# ── Offline empty-reply eval (HU_RETRAIN_EMPTY_EVAL=off|shadow|live) ────────
+#
+# WHY (2026-10-02): the served GLM adapter ends ~13-18% of classifier-style
+# replies immediately, which sends that traffic to cloud failover. A candidate
+# must not make that worse, and only a measurement says so. After training and
+# LUAR scoring, while :8741 is still DOWN, this stage serves the CURRENT adapter
+# and then the CANDIDATE on a spare port (one at a time, same flags as prod,
+# MLX_EMPTY_RETRY=0 so the server cannot hide empties by regenerating them on
+# base weights), measures both with scripts/eval_empty_reply_rate.py, and writes
+# <candidate>/promotion_manifest.json via scripts/empty_reply_gate.py.
+#   off (default) : nothing runs, nothing is printed -- today's behaviour.
+#   shadow        : measured and recorded; the promotion verdict is unchanged.
+#   live          : promotion also requires rate(candidate) <= rate(serving);
+#                   scripts/m3_promote.py refuses a swap otherwise (exit 7).
+# An arm that cannot run is recorded as INCONCLUSIVE, which blocks in live.
+#
+# MEMORY / SEQUENCING: one 4-bit GLM-4.5-Air is 56 GB on disk; prod held 32 GB
+# RSS idle (2026-10-02) and ~44 GB wired under load. Prod (~57 GB) plus an eval
+# server (~57 GB) is ~114 GB of 128 -- the co-residency that rebooted this box
+# four times on 2026-07-26. So the eval runs while prod is still down: the
+# trainer and the LUAR scorer have exited, each arm is preceded by
+# check-no-resident-model.sh, and each spare is killed and reaped (pid gone,
+# port free) before the next load. restore_serving stops a spare left running
+# BEFORE it brings prod back.
+#
+# DOWNTIME: this stage adds prod-down time. Per arm: server load (16-59 s
+# restart-to-healthy over 2026-09-29..10-02) + 24 prompts x HU_RETRAIN_EVAL_SAMPLES
+# (default 3) requests at ~4.1 s mean (prod mlx-server log, n=22,106) ~ 5 min,
+# so ~6-7 min per arm, ~13-15 min for both. Bounded: an arm only starts if it
+# can finish (HU_RETRAIN_EVAL_ARM_MAX_MIN, default 12) before
+# HU_RETRAIN_EVAL_DEADLINE (default 04:35, ahead of kto-train-window at 04:40,
+# which loads a model with no resident-model guard); otherwise INCONCLUSIVE.
+# The stage logs its measured added downtime every night.
+EMPTY_EVAL_SPARE_PID=""
+
+empty_eval_mode() {
+    case "${HU_RETRAIN_EMPTY_EVAL:-off}" in
+        shadow) echo shadow ;;
+        live) echo live ;;
+        *) echo off ;;
+    esac
+}
+
+# Kill and reap the spare eval server, if one is running. Safe to call twice.
+stop_empty_eval_spare() {
+    local pid="${EMPTY_EVAL_SPARE_PID:-}" waited=0
+    [[ -n "$pid" ]] || return 0
+    if kill -0 "$pid" 2>/dev/null; then
+        kill -TERM "$pid" 2>/dev/null
+        while kill -0 "$pid" 2>/dev/null && (( waited < ${HU_RETRAIN_EVAL_REAP_SECS:-120} )); do
+            sleep 1; waited=$((waited + 1))
+        done
+        kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null
+    fi
+    wait "$pid" 2>/dev/null || true
+    EMPTY_EVAL_SPARE_PID=""
+}
+
+_empty_eval_deadline_ok() {   # $1 = minutes the next arm may take
+    local dl="${HU_RETRAIN_EVAL_DEADLINE:-04:35}" now d
+    [[ "$dl" == "none" ]] && return 0
+    now=$(date +%H:%M | awk -F: '{print $1 * 60 + $2}')
+    d=$(awk -F: '{print $1 * 60 + $2}' <<<"$dl")
+    (( now + $1 <= d ))
+}
+
+# One arm: serve <adapter> on the spare port, measure it, stop it.
+# $1 label, $2 adapter dir, $3 result json. 0 = measured (json written).
+run_empty_reply_eval_arm() {
+    local label="$1" adapter="$2" out="$3"
+    local eval_port="${HU_RETRAIN_EVAL_PORT:-8748}" cap="${HU_RETRAIN_EVAL_ARM_MAX_MIN:-12}"
+    local srv="${HU_RETRAIN_EVAL_SERVER:-$HOME/Documents/gemma-realtime-1/scripts/mlx-server.py}"
+    local srv_py="${HU_RETRAIN_EVAL_SERVER_PY:-$HOME/Documents/gemma-realtime-1/.venv312/bin/python3.12}"
+    local model="${HU_RETRAIN_EVAL_MODEL:-mlx-community/GLM-4.5-Air-4bit}"
+    local poll="${HU_RETRAIN_EVAL_POLL_SECS:-5}" load_max="${HU_RETRAIN_EVAL_LOAD_SECS:-600}"
+    local tag="empty-reply eval: $label arm"
+    if ! _empty_eval_deadline_ok "$cap"; then
+        log "$tag not started: it could run past the ${HU_RETRAIN_EVAL_DEADLINE:-04:35} deadline (cap ${cap} min)"
+        EMPTY_EVAL_WHY="deadline: $label arm could not finish before ${HU_RETRAIN_EVAL_DEADLINE:-04:35}"
+        return 2
+    fi
+    if [[ -f "$REPO/scripts/check-no-resident-model.sh" ]]; then
+        local guard
+        if ! guard=$(HU_MLX_HEALTH_URL="http://127.0.0.1:$PORT/health" bash "$REPO/scripts/check-no-resident-model.sh" 2>&1); then
+            log "$tag refused (never two loaders): $guard"
+            EMPTY_EVAL_WHY="resident-model guard refused before the $label arm"
+            return 2
+        fi
+    fi
+    if lsof -nP -iTCP:"$eval_port" -sTCP:LISTEN >/dev/null 2>&1; then
+        log "$tag refused: spare port :$eval_port is already in use"
+        EMPTY_EVAL_WHY="spare port $eval_port in use"
+        return 2
+    fi
+    local srv_log; srv_log="$HOME/.human/logs/spare-${eval_port}-${label}-$(date +%Y%m%d-%H%M%S).log"
+    log "$tag: serving $adapter on :$eval_port (MLX_EMPTY_RETRY=0, prod flags)"
+    MLX_EMPTY_RETRY=0 GEMMA_DISABLE_THINKING=1 HU_SELF_RAG_MODE=soft HU_SELF_RAG_STREAMING=1 \
+        "$srv_py" "$srv" --model "$model" --port "$eval_port" --realtime --kv-bits 8 \
+        --adapter-path "$adapter" >"$srv_log" 2>&1 &
+    EMPTY_EVAL_SPARE_PID=$!
+    local waited=0
+    until curl -sf --max-time 3 "http://127.0.0.1:$eval_port/health" >/dev/null 2>&1; do
+        if ! kill -0 "$EMPTY_EVAL_SPARE_PID" 2>/dev/null || (( waited >= load_max )); then
+            log "$tag: spare server never became healthy (${waited}s; see $srv_log)"
+            stop_empty_eval_spare
+            EMPTY_EVAL_WHY="$label arm: spare server never became healthy"
+            return 2
+        fi
+        sleep "$poll"; waited=$((waited + poll))
+    done
+    # Watchdog: kill the spare if the measurement overruns its cap. The eval
+    # script then reports request errors and writes nothing (NOT measured).
+    local spid="$EMPTY_EVAL_SPARE_PID"
+    ( sleep $(( cap * 60 )) & sp=$!
+      trap 'kill $sp 2>/dev/null; exit 0' TERM
+      wait $sp; kill -TERM "$spid" 2>/dev/null ) >/dev/null 2>&1 &
+    local wd=$!
+    python3 "$REPO/scripts/eval_empty_reply_rate.py" --port "$eval_port" \
+        --samples "${HU_RETRAIN_EVAL_SAMPLES:-3}" --label "$label" --expect-adapter "$adapter" \
+        --server-log "$srv_log" --out "$out" 2>&1 | tee -a "$LOG"
+    local rc=${PIPESTATUS[0]}
+    kill -TERM "$wd" 2>/dev/null; wait "$wd" 2>/dev/null
+    stop_empty_eval_spare
+    local free_wait=0
+    while lsof -nP -iTCP:"$eval_port" -sTCP:LISTEN >/dev/null 2>&1 && (( free_wait < 30 )); do
+        sleep 1; free_wait=$((free_wait + 1))
+    done
+    log "$tag: eval_empty_reply_rate.py rc=$rc; spare stopped"
+    if [[ "$rc" != "0" || ! -s "$out" ]]; then
+        EMPTY_EVAL_WHY="$label arm not measured (eval_empty_reply_rate.py rc=$rc)"
+        return 2
+    fi
+    return 0
+}
+
+# $1 candidate adapter dir, $2 the night's authorship score json (may be "").
+run_empty_reply_eval_stage() {
+    local candidate_dir="$1" score_out="${2:-}" mode
+    mode=$(empty_eval_mode)
+    [[ "$mode" == "off" ]] && return 0
+    local tag="empty-reply eval [$mode]" t0 stamp serving eval_port="${HU_RETRAIN_EVAL_PORT:-8748}"
+    t0=$(date +%s); stamp=$(date +%Y%m%d-%H%M)
+    serving=$(serving_adapter_path)
+    local s_out="$HOME/.human/logs/empty-reply-serving-$stamp.json"
+    local c_out="$HOME/.human/logs/empty-reply-candidate-$stamp.json"
+    EMPTY_EVAL_WHY=""
+    if [[ "${serving_stopped:-0}" != "1" ]]; then
+        EMPTY_EVAL_WHY="serving not stopped (never beside prod)"
+    elif [[ "$eval_port" == "8741" || "$eval_port" == "8743" || "$eval_port" == "$PORT" ]]; then
+        EMPTY_EVAL_WHY="spare port $eval_port is a live port"
+    elif lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+        EMPTY_EVAL_WHY="prod port $PORT is listening (never two loaders)"
+    elif [[ -z "$serving" || ! -d "$serving" ]]; then
+        EMPTY_EVAL_WHY="serving adapter unresolved from ~/.human/config.json"
+    elif [[ ! -d "$candidate_dir" ]]; then
+        EMPTY_EVAL_WHY="candidate dir missing"
+    fi
+    [[ -n "$EMPTY_EVAL_WHY" ]] && log "$tag: not run — $EMPTY_EVAL_WHY"
+    [[ -z "$EMPTY_EVAL_WHY" ]] && run_empty_reply_eval_arm serving "$serving" "$s_out"
+    [[ -z "$EMPTY_EVAL_WHY" ]] && run_empty_reply_eval_arm candidate "$candidate_dir" "$c_out"
+    stop_empty_eval_spare
+    local gate_args=(--mode "$mode" --candidate-adapter "$candidate_dir"
+                     --serving-adapter "${serving:-unknown}"
+                     --out "$candidate_dir/promotion_manifest.json")
+    [[ -n "$score_out" && -f "$score_out" ]] && gate_args+=(--authorship-json "$score_out")
+    if [[ -n "$EMPTY_EVAL_WHY" ]]; then
+        gate_args+=(--inconclusive "$EMPTY_EVAL_WHY")
+    else
+        gate_args+=(--serving-json "$s_out" --candidate-json "$c_out")
+    fi
+    [[ -d "$candidate_dir" ]] && python3 "$REPO/scripts/empty_reply_gate.py" "${gate_args[@]}" 2>&1 | tee -a "$LOG"
+    log "$tag: done — added prod-down time $(( $(date +%s) - t0 ))s"
 }
 
 # ── Stop serving (a function so scripts/test_nightly_retrain_stop_serving.sh
@@ -611,6 +791,8 @@ log "serving base: ${SERVING_BASE:-<none detected>}"
 # a skipped retrain.
 serving_stopped=0
 restore_serving() {
+    # Never bring prod back beside a spare eval server (interrupt mid-eval).
+    stop_empty_eval_spare
     if [[ "$serving_stopped" == "1" ]]; then
         log "restarting mlx-server"
         # Booted OUT below (not just killed), so bootstrap it back; kickstart is
