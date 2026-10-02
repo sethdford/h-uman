@@ -1,9 +1,10 @@
 /* Commitment store — persist and query commitments via memory backend */
-#include "human/agent/commitment.h"
 #include "human/agent/commitment_store.h"
+#include "human/agent/commitment.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
 #include "human/memory.h"
+#include "human/memory/confidence_boundary.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -74,8 +75,7 @@ hu_error_t hu_commitment_store_create(hu_allocator_t *alloc, hu_memory_t *memory
     return HU_OK;
 }
 
-hu_error_t hu_commitment_store_save(hu_commitment_store_t *store,
-                                    const hu_commitment_t *commitment,
+hu_error_t hu_commitment_store_save(hu_commitment_store_t *store, const hu_commitment_t *commitment,
                                     const char *session_id, size_t session_id_len) {
     if (!store || !commitment || !store->memory || !store->memory->vtable)
         return HU_ERR_INVALID_ARGUMENT;
@@ -84,33 +84,30 @@ hu_error_t hu_commitment_store_save(hu_commitment_store_t *store,
     if (!obj)
         return HU_ERR_OUT_OF_MEMORY;
 
-    hu_json_object_set(
-        store->alloc, obj, "statement",
-        hu_json_string_new(store->alloc, commitment->statement ? commitment->statement : "",
-                          commitment->statement_len));
-    hu_json_object_set(
-        store->alloc, obj, "summary",
-        hu_json_string_new(store->alloc, commitment->summary ? commitment->summary : "",
-                          commitment->summary_len));
+    hu_json_object_set(store->alloc, obj, "statement",
+                       hu_json_string_new(store->alloc,
+                                          commitment->statement ? commitment->statement : "",
+                                          commitment->statement_len));
+    hu_json_object_set(store->alloc, obj, "summary",
+                       hu_json_string_new(store->alloc,
+                                          commitment->summary ? commitment->summary : "",
+                                          commitment->summary_len));
     hu_json_object_set(store->alloc, obj, "type",
                        hu_json_string_new(store->alloc, type_to_string(commitment->type),
-                                         strlen(type_to_string(commitment->type))));
+                                          strlen(type_to_string(commitment->type))));
     hu_json_object_set(store->alloc, obj, "status",
                        hu_json_string_new(store->alloc, status_to_string(commitment->status),
-                                         strlen(status_to_string(commitment->status))));
-    hu_json_object_set(
-        store->alloc, obj, "owner",
-        hu_json_string_new(store->alloc, commitment->owner ? commitment->owner : "user",
-                          commitment->owner ? strlen(commitment->owner) : 4));
+                                          strlen(status_to_string(commitment->status))));
+    hu_json_object_set(store->alloc, obj, "owner",
+                       hu_json_string_new(store->alloc,
+                                          commitment->owner ? commitment->owner : "user",
+                                          commitment->owner ? strlen(commitment->owner) : 4));
     hu_json_object_set(
         store->alloc, obj, "created_at",
         hu_json_string_new(store->alloc, commitment->created_at ? commitment->created_at : "",
-                          commitment->created_at ? strlen(commitment->created_at) : 0));
-    double ew = commitment->emotional_weight
-                    ? strtod(commitment->emotional_weight, NULL)
-                    : 0.5;
-    hu_json_object_set(store->alloc, obj, "emotional_weight",
-                       hu_json_number_new(store->alloc, ew));
+                           commitment->created_at ? strlen(commitment->created_at) : 0));
+    double ew = commitment->emotional_weight ? strtod(commitment->emotional_weight, NULL) : 0.5;
+    hu_json_object_set(store->alloc, obj, "emotional_weight", hu_json_number_new(store->alloc, ew));
 
     char *content = NULL;
     size_t content_len = 0;
@@ -133,6 +130,10 @@ hu_error_t hu_commitment_store_save(hu_commitment_store_t *store,
     err = store->memory->vtable->store(store->memory->ctx, key_buf, key_len, content, content_len,
                                        &cat, session_id, session_id_len);
     store->alloc->free(store->alloc->ctx, content, content_len + 1);
+    if (err == HU_OK && (!session_id || session_id_len == 0)) /* whose conversation wrote it */
+        hu_confidence_stamp_write(store->memory, key_buf, key_len,
+                                  store->memory->current_session_id,
+                                  store->memory->current_session_id_len);
     return err;
 }
 
@@ -152,9 +153,11 @@ hu_error_t hu_commitment_store_list_active(hu_commitment_store_t *store, hu_allo
     hu_memory_entry_t *entries = NULL;
     size_t count = 0;
     hu_error_t err = store->memory->vtable->list(store->memory->ctx, alloc, &cat, session_id,
-                                                  session_id_len, &entries, &count);
+                                                 session_id_len, &entries, &count);
     if (err != HU_OK)
         return err;
+    count = hu_confidence_filter_entries(store->memory, alloc, HU_CB_PATH_COMMITMENTS, &entries,
+                                         count, session_id, session_id_len);
     if (!entries || count == 0) {
         /* Some memory engines return a pre-allocated entries buffer
          * even when count==0 (the in-memory engines allocate scratch
@@ -235,8 +238,8 @@ hu_error_t hu_commitment_store_list_active(hu_commitment_store_t *store, hu_allo
 }
 
 hu_error_t hu_commitment_store_build_context(hu_commitment_store_t *store, hu_allocator_t *alloc,
-                                              const char *session_id, size_t session_id_len,
-                                              char **out, size_t *out_len) {
+                                             const char *session_id, size_t session_id_len,
+                                             char **out, size_t *out_len) {
     if (!store || !alloc || !out || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
@@ -244,8 +247,8 @@ hu_error_t hu_commitment_store_build_context(hu_commitment_store_t *store, hu_al
 
     hu_commitment_t *active = NULL;
     size_t count = 0;
-    hu_error_t err = hu_commitment_store_list_active(store, alloc, session_id, session_id_len,
-                                                      &active, &count);
+    hu_error_t err =
+        hu_commitment_store_list_active(store, alloc, session_id, session_id_len, &active, &count);
     if (err != HU_OK || count == 0 || !active)
         return err;
 

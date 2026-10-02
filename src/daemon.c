@@ -4985,9 +4985,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 size_t episodic_ctx_len = 0;
                 char *avoidance_json = NULL;
                 size_t avoidance_len = 0;
-                if (agent->memory && !llm_decides) {
-                    hu_episodic_load(agent->memory, alloc, &episodic_ctx, &episodic_ctx_len);
-                }
+                if (agent->memory && !llm_decides) /* scoped: HU_CONFIDENCE_BOUNDARY */
+                    hu_episodic_load_for_contact(agent->memory, alloc, batch_key, key_len,
+                                                 &episodic_ctx, &episodic_ctx_len);
                 /* F19: Inside jokes — inject for natural callback opportunities.
                  * Skip in llm_decides mode — prompt inflation. */
                 hu_inside_joke_t *jokes_ctx = NULL;

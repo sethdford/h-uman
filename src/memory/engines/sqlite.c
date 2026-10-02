@@ -15,6 +15,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "human/memory/confidence_repo.h"
 #include "human/memory/encrypted_store.h"
 #include "human/memory/entropy_gate.h"
 #include "human/memory/graph_index.h"
@@ -768,6 +769,7 @@ static hu_error_t impl_store(void *ctx, const char *key, size_t key_len, const c
 
     if (rc != SQLITE_DONE)
         return HU_ERR_MEMORY_STORE;
+    hu_confidence_repo_stamp(self->db, key, key_len, session_id, session_id_len);
 
     /* Feed into MAGMA graph index for multi-dimensional reranking */
     if (self->graph_initialized && content && content_len > 0) {
@@ -823,6 +825,7 @@ static hu_error_t impl_store_ex(void *ctx, const char *key, size_t key_len, cons
     hu_str_free(self->alloc, id);
     if (rc != SQLITE_DONE)
         return HU_ERR_MEMORY_STORE;
+    hu_confidence_repo_stamp(self->db, key, key_len, session_id, session_id_len);
 
     if (self->graph_initialized && content && content_len > 0) {
         (void)hu_graph_index_add(&self->graph_index, key, key_len, content, content_len,
@@ -1853,6 +1856,10 @@ hu_memory_t hu_sqlite_memory_create(hu_allocator_t *alloc, const char *db_path) 
      * memory-v2-design.md §4.1): additive typed columns + fired -> status. */
     if (hu_prospective_repo_ensure_schema(db) != HU_OK)
         hu_log_warn("memory.sqlite", NULL, "prospective_memories v2 migration failed");
+    /* Confidence boundary provenance (confidence_repo.h): source_contact +
+     * share_level, backfilled conservatively. Metadata only. */
+    if (hu_confidence_repo_ensure_schema(db) < 0)
+        hu_log_warn("memory.sqlite", NULL, "memories provenance migration failed");
 
     hu_sqlite_memory_t *self =
         (hu_sqlite_memory_t *)alloc->alloc(alloc->ctx, sizeof(hu_sqlite_memory_t));

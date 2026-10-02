@@ -447,6 +447,7 @@ void run_outbound_crosstalk_tests(void);
 void run_curiosity_gaps_tests(void);
 void run_agent_recall_provider_tests(void);
 void run_memory_loader_scope_tests(void);
+void run_confidence_boundary_tests(void);
 #ifdef HU_ENABLE_SQLITE
 void run_boundary_repo_tests(void);
 void run_opinions_repo_tests(void);
@@ -1548,6 +1549,7 @@ int main(int argc, char **argv) {
     run_curiosity_gaps_tests();
     run_agent_recall_provider_tests();
     run_memory_loader_scope_tests();
+    run_confidence_boundary_tests();
 #ifdef HU_ENABLE_SQLITE
     run_boundary_repo_tests();
     run_opinions_repo_tests();

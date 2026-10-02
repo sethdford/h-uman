@@ -16,6 +16,7 @@
 #include "human/memory/retrieval/strategy_learner.h"
 #endif
 #include "human/core/gate_mode.h"
+#include "human/memory/confidence_boundary.h"
 #include "human/memory/contact_insights_repo.h"
 #include <stdatomic.h>
 
@@ -547,6 +548,11 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
                                   ? hu_wiki_recall_cap(loader->max_context_chars, wiki_len)
                                   : loader->max_context_chars;
 
+    /* Confidence boundary (HU_CONFIDENCE_BOUNDARY): a global row another
+     * contact's conversation wrote (experience, promises) passes
+     * keep_contact_scope; this drops it in LIVE, counts it in SHADOW. */
+    count = hu_confidence_filter_entries(loader->memory, loader->alloc, HU_CB_PATH_SEMANTIC,
+                                         &entries, count, session_id, session_id_len);
     if (!entries || count == 0)
         goto supplement;
 
