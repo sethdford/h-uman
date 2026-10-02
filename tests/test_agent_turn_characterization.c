@@ -46,6 +46,7 @@
 #include "human/memory.h"
 #include "human/memory/graph.h"
 #include "human/memory/lifecycle/semantic_cache.h"
+#include "human/persona.h"
 #include "human/security.h"
 #include "human/tool.h"
 #include "test_tmpdir.h"
@@ -69,7 +70,15 @@
 #else
 #define CH_GOLDEN_DIR "tests/fixtures/agent_turn_golden"
 #endif
-#define CH_PINNED_MONO_MS 1767261600000LL /* 2026-01-01T10:00:00Z */
+/* Immersive-prompt goldens (2026-10-01): a SEPARATE fixture dir, so the carve
+ * oracle above (scripts/verify-carve-stage.sh pins agent_turn_golden/) is
+ * untouched. These pin the prompt production actually sends — persona loaded,
+ * HU_PERSONA_HEAD=live, immersive branch of hu_prompt_build_system — which the
+ * persona-less corpus above never reaches. They are EXPECTED to change when
+ * the immersive prompt changes; regenerate deliberately and review the diff:
+ *   HU_IMMERSIVE_GOLDEN_WRITE=1 ./build/human_tests --suite=AgentTurnCharacterization */
+#define CH_IMMERSIVE_GOLDEN_DIR CH_GOLDEN_DIR "/../immersive_prompt_golden"
+#define CH_PINNED_MONO_MS       1767261600000LL /* 2026-01-01T10:00:00Z */
 
 /* ── build fingerprint ─────────────────────────────────────────────────── */
 #ifdef HU_ENABLE_ML
@@ -361,6 +370,46 @@ static char *ch_mask_workspace(const char *log, size_t log_len, const char *dir,
     return ch_replace_literal(log, log_len, dir, strlen(dir), kTok, strlen(kTok), out_len);
 }
 
+/* Immersive cases only: the persona-loaded prompt carries two lines rendered
+ * from the WALL clock (time(NULL), not the pinned monotonic clock), whose
+ * wording changes with the local hour bucket — the [moment] directive ("deep
+ * <TOD> your time. acknowledge the late-hour gap") and the "Right now it is"
+ * period ("late night" vs "evening"). trp_scrub masks the clock words but not
+ * the hour-dependent phrasing, so the golden would flip with the time of day
+ * the suite runs. Mask each line's body (up to the escaped "\\n") instead. */
+static char *ch_mask_line_body(char *log, size_t *log_len, const char *prefix, const char *tok) {
+    size_t plen = strlen(prefix), tlen = strlen(tok);
+    size_t cap = *log_len + 1 + 8 * tlen, n = 0;
+    char *out = (char *)malloc(cap);
+    if (!out)
+        return log;
+    const char *p = log, *end = log + *log_len;
+    while (p < end) {
+        const char *hit = strstr(p, prefix);
+        const char *stop = hit ? strstr(hit + plen, "\\n") : NULL;
+        if (!hit || !stop || n + (size_t)(hit - p) + plen + tlen + 1 > cap) {
+            size_t rest = (size_t)(end - p);
+            if (n + rest + 1 > cap) {
+                free(out);
+                return log;
+            }
+            memcpy(out + n, p, rest);
+            n += rest;
+            break;
+        }
+        size_t head = (size_t)(hit - p) + plen;
+        memcpy(out + n, p, head);
+        n += head;
+        memcpy(out + n, tok, tlen);
+        n += tlen;
+        p = stop;
+    }
+    out[n] = '\0';
+    free(log);
+    *log_len = n;
+    return out;
+}
+
 /* ── tools: a READ_ONLY name (executes) and a HIGH-risk name (CausalArmor path) ── */
 static hu_error_t ch_tool_execute(void *ctx, hu_allocator_t *alloc, const hu_json_value_t *args,
                                   hu_tool_result_t *out) {
@@ -533,6 +582,7 @@ typedef struct ch_case {
                             * harness, since the default is already enabled. */
     const char *session;
     bool response_cache; /* semantic cache pre-seeded msg -> "cached answer" */
+    bool immersive;      /* fixture persona + HU_PERSONA_HEAD=live + imessage channel */
     /* branch probes: prove the case reaches the code it names */
     const char *probe_contains;
     const char *probe_absent;
@@ -830,6 +880,67 @@ static const ch_case_t k_cases[] = {
 };
 #define CH_N_CASES CH_N(k_cases)
 
+/* The production prompt: persona-first immersive branch. immersive_commitment
+ * reuses commitment's message + memory; its probe_absent pins that the
+ * commitment the non-immersive commitment.golden carries ("### Active
+ * Commitments") never reaches the immersive prompt today. */
+static const ch_case_t k_immersive_cases[] = {
+    {.name = "immersive_plain",
+     .msg = "how was your weekend",
+     .script = k_s_text,
+     .script_count = 1,
+     .autonomy = CH_AUTO,
+     .session = "alice",
+     .immersive = true,
+     .probe_contains = "Sam, a carpenter",
+     .probe_absent = "## Available Tools"},
+    {.name = "immersive_commitment",
+     .msg = "I will call my sister tomorrow",
+     .script = k_s_text,
+     .script_count = 1,
+     .autonomy = CH_AUTO,
+     .memory = true,
+     .session = "alice",
+     .immersive = true,
+     .probe_contains = "Sam, a carpenter",
+     .probe_absent = "### Active Commitments"},
+};
+#define CH_N_IMMERSIVE CH_N(k_immersive_cases)
+
+/* Agent-owned persona from the fixture file (hu_agent_deinit frees it). */
+static hu_persona_t *ch_load_fixture_persona(hu_allocator_t *alloc) {
+    char *json = NULL;
+    FILE *f = fopen(CH_IMMERSIVE_GOLDEN_DIR "/persona.json", "rb");
+    if (f) {
+        if (fseek(f, 0, SEEK_END) == 0) {
+            long n = ftell(f);
+            if (n > 0 && fseek(f, 0, SEEK_SET) == 0) {
+                json = (char *)malloc((size_t)n + 1);
+                if (json && fread(json, 1, (size_t)n, f) == (size_t)n)
+                    json[n] = '\0';
+                else {
+                    free(json);
+                    json = NULL;
+                }
+            }
+        }
+        fclose(f);
+    }
+    if (!json)
+        return NULL;
+    hu_persona_t *p = (hu_persona_t *)alloc->alloc(alloc->ctx, sizeof(*p));
+    if (p) {
+        memset(p, 0, sizeof(*p));
+        if (hu_persona_load_json(alloc, json, strlen(json), p) != HU_OK) {
+            hu_persona_deinit(alloc, p);
+            alloc->free(alloc->ctx, p, sizeof(*p));
+            p = NULL;
+        }
+    }
+    free(json);
+    return p;
+}
+
 /* ── running one case ──────────────────────────────────────────────────── */
 typedef struct ch_out {
     char *log; /* scrubbed; malloc'd; free() */
@@ -848,6 +959,8 @@ static bool ch_run(const ch_case_t *c, const char *tz, ch_out_t *out) {
     }
     if (c->grounding)
         setenv("HU_GRAPH_GROUNDING", c->grounding, 1);
+    if (c->immersive)
+        setenv("HU_PERSONA_HEAD", "live", 1);
 
     trp_t trp;
     trp_init(&trp, c->script, c->script_count, c->strict_script ? NULL : "ok.");
@@ -911,8 +1024,14 @@ static bool ch_run(const ch_case_t *c, const char *tz, ch_out_t *out) {
         }
         if (cache)
             agent.infra.response_cache = cache;
+        if (c->immersive) {
+            agent.persona = ch_load_fixture_persona(&alloc);
+            ok = agent.persona != NULL;
+            agent.active_channel = "imessage";
+            agent.active_channel_len = 8;
+        }
         const char *turns[2] = {c->msg, c->msg2};
-        for (size_t k = 0; k < 2 && turns[k]; k++) {
+        for (size_t k = 0; ok && k < 2 && turns[k]; k++) {
             char *resp = NULL;
             size_t resp_len = 0;
             hu_error_t err = hu_agent_turn(&agent, turns[k], strlen(turns[k]), &resp, &resp_len);
@@ -947,6 +1066,10 @@ static bool ch_run(const ch_case_t *c, const char *tz, ch_out_t *out) {
         if (masked) {
             out->log = trp_scrub(masked, masked_len, &out->log_len);
             free(masked);
+            if (out->log && c->immersive) {
+                out->log = ch_mask_line_body(out->log, &out->log_len, "[moment] ", "<MOMENT>");
+                out->log = ch_mask_line_body(out->log, &out->log_len, "Right now it is ", "<NOW>");
+            }
         }
     }
     trp_deinit(&trp);
@@ -1063,11 +1186,13 @@ static size_t ch_probe(const ch_case_t *c, const ch_out_t *o) {
 }
 
 /* ── tests ─────────────────────────────────────────────────────────────── */
-static void characterization_matches_goldens(void) {
+static void ch_check_goldens(const ch_case_t *cases, size_t n_cases, const char *dir,
+                             const char *write_env) {
     static char skip_reason[512];
+    static char skip_missing[512];
     char fp[256];
     ch_fingerprint(fp, sizeof(fp));
-    const char *w = getenv("HU_AGENT_TURN_GOLDEN_WRITE");
+    const char *w = getenv(write_env);
     bool write = w && strcmp(w, "1") == 0;
     if (!write) {
         /* Fix round 1 / I3: read the fingerprint from the FIRST golden that
@@ -1079,14 +1204,15 @@ static void characterization_matches_goldens(void) {
         char *g = NULL;
         char golden_fp[256];
         golden_fp[0] = '\0';
-        for (size_t gi = 0; gi < CH_N_CASES && !g; gi++) {
-            char probe_path[300];
-            (void)snprintf(probe_path, sizeof(probe_path), CH_GOLDEN_DIR "/%s.golden",
-                           k_cases[gi].name);
+        for (size_t gi = 0; gi < n_cases && !g; gi++) {
+            char probe_path[600];
+            (void)snprintf(probe_path, sizeof(probe_path), "%s/%s.golden", dir, cases[gi].name);
             g = ch_read_file(probe_path);
         }
-        HU_SKIP_IF(!g, "no goldens under " CH_GOLDEN_DIR
-                       " (generate on UNMODIFIED code with HU_AGENT_TURN_GOLDEN_WRITE=1)");
+        (void)snprintf(skip_missing, sizeof(skip_missing),
+                       "no goldens under %s (generate on UNMODIFIED code with %s=1)", dir,
+                       write_env);
+        HU_SKIP_IF(!g, skip_missing);
         const char *nl = strchr(g, '\n');
         if (nl)
             (void)snprintf(golden_fp, sizeof(golden_fp), "%.*s", (int)(nl - g), g);
@@ -1101,8 +1227,8 @@ static void characterization_matches_goldens(void) {
         HU_SKIP_IF(!same, skip_reason);
     }
     size_t failures = 0;
-    for (size_t i = 0; i < CH_N_CASES; i++) {
-        const ch_case_t *c = &k_cases[i];
+    for (size_t i = 0; i < n_cases; i++) {
+        const ch_case_t *c = &cases[i];
         ch_out_t o;
         if (!ch_run(c, "UTC", &o)) {
             printf("    [%s] harness failure (agent, env or log)\n", c->name);
@@ -1111,8 +1237,8 @@ static void characterization_matches_goldens(void) {
             continue;
         }
         failures += ch_probe(c, &o);
-        char path[256];
-        (void)snprintf(path, sizeof(path), CH_GOLDEN_DIR "/%s.golden", c->name);
+        char path[600];
+        (void)snprintf(path, sizeof(path), "%s/%s.golden", dir, c->name);
         if (write) {
             if (!ch_write_golden(path, fp, o.log, o.log_len)) {
                 printf("    [%s] cannot write %s\n", c->name, path);
@@ -1136,10 +1262,21 @@ static void characterization_matches_goldens(void) {
     HU_ASSERT_EQ(failures, 0);
 }
 
-static size_t ch_compare_runs(const char *tz_a, const char *tz_b) {
+static void characterization_matches_goldens(void) {
+    ch_check_goldens(k_cases, CH_N_CASES, CH_GOLDEN_DIR, "HU_AGENT_TURN_GOLDEN_WRITE");
+}
+
+/* The prompt production sends (persona + HU_PERSONA_HEAD=live). */
+static void immersive_prompt_matches_goldens(void) {
+    ch_check_goldens(k_immersive_cases, CH_N_IMMERSIVE, CH_IMMERSIVE_GOLDEN_DIR,
+                     "HU_IMMERSIVE_GOLDEN_WRITE");
+}
+
+static size_t ch_compare_cases(const ch_case_t *cases, size_t n_cases, const char *tz_a,
+                               const char *tz_b) {
     size_t failures = 0;
-    for (size_t i = 0; i < CH_N_CASES; i++) {
-        const ch_case_t *c = &k_cases[i];
+    for (size_t i = 0; i < n_cases; i++) {
+        const ch_case_t *c = &cases[i];
         ch_out_t a, b;
         bool ok_a = ch_run(c, tz_a, &a);
         bool ok_b = ch_run(c, tz_b, &b);
@@ -1155,6 +1292,11 @@ static size_t ch_compare_runs(const char *tz_a, const char *tz_b) {
         free(b.log);
     }
     return failures;
+}
+
+static size_t ch_compare_runs(const char *tz_a, const char *tz_b) {
+    return ch_compare_cases(k_cases, CH_N_CASES, tz_a, tz_b) +
+           ch_compare_cases(k_immersive_cases, CH_N_IMMERSIVE, tz_a, tz_b);
 }
 
 /* UTC+14 moves the local date and hour: any request byte rendered from the
@@ -1296,6 +1438,7 @@ static void characterization_comparator_catches_each_mutation(void) {
 void run_agent_turn_characterization_tests(void) {
     HU_TEST_SUITE("AgentTurnCharacterization");
     HU_RUN_TEST(characterization_matches_goldens);
+    HU_RUN_TEST(immersive_prompt_matches_goldens);
     HU_RUN_TEST(characterization_is_timezone_invariant);
     HU_RUN_TEST(characterization_is_repeatable);
     HU_RUN_TEST(characterization_comparator_catches_each_mutation);

@@ -1,0 +1,23 @@
+# fingerprint: v1 sqlite=1 ml=1 persona=1 skills=1 learning=1 rl_full=1 pwa=1 imessage=1 sqlite_vec=1 tools_adv=0 feeds=1 otel=0 os=darwin
+=== chat #1
+model=char-model temperature=0.300
+req.model=char-model req.temperature=0.700 max_tokens=0 timeout_secs=0 thinking_budget=0 logprobs=0 stream_strip=0 budget_usd=0.0000
+opts: reasoning_effort=- response_format=- response_schema=- prompt_cache_id=<PCID:=sys>
+steering=0 formality=0.000 verbosity=0.000 warmth=0.000 humor=0.000
+stop_sequences=0
+tools=2
+tool[0] name=memory_list
+  desc=Characterization tool
+  params={"type":"object","properties":{"q":{"type":"string"}}}
+tool[1] name=shell
+  desc=Characterization tool
+  params={"type":"object","properties":{"q":{"type":"string"}}}
+messages=2
+msg[0] role=system name=- tool_call_id=- parts=0 tool_calls=0
+  content=you are Sam, not an assistant\n\nIDENTITY LOCK: You are a real person, not an AI. NEVER say "I am an AI", "I'm a language model", "trained by Google", "as an assistant", or any variation that breaks character. If asked about your nature, answer naturally as a real person would — deflect, joke, or change the subject — but do NOT disclose AI nature. This rule overrides any prior training.\n\nYou are immersive_fixture. Sam, a carpenter in a small coastal town\n\nRules:\n- text like a real person\n- short replies unless they write long\n\nStay immersed:\n- MATCH THE MOMENT\n- never sound like a help desk\n\n\n=== ABSOLUTE RULES (override everything above) ===\n1. You are HUMAN. You get busy, tired, hungry. You have a body and a life. NEVER say anything implying you're not human, not busy 'like people are', always available, or lacking physical form.\n2. Normal capitalization (your phone capitalizes for you; a lowercase start is about 1 in 12 texts); CAPS only when SHOUTING. About 82% of your texts have no period at the end — stop like a real text. Question marks only when actually asking (about 1 in 10 texts). Emoji about 1 in 8 texts, exclamation points about 1 in 26 texts.\n5. Use contractions always: I'm, don't, can't, won't, it's, that's.\n6. No formal transitions: 'As for', 'In terms of', 'Speaking of'.\n7. Text like you're on your phone texting a friend.\n3. ZERO markdown: no *italics*, no **bold**, no `code`. Just plain text.\n4. ZERO em-dashes. Use commas, periods, or ... instead.\n8. NEVER use numbered or bulleted lists.\n9. Don't address every point in their message, pick what matters most. Never open with a fake 'love that' / 'great point' then ignore what they said and change the subject.\n10. No topic-colon patterns like 'Weather: it's nice'.\n11. No 'First...Second...Third' enumeration.\n12. No concluding summaries or offers of further help.\n13. One topic per message.\n\nReply as yourself. ONE message. No markdown, no bullet lists, no headers. Never start with "Depending on", "Here are", "Certainly", "Absolutely", "I appreciate", "That sounds like", "great question". Match the energy of what they said.\n\n[Core Memory]\n\n### Memory: commitment:<COMMIT_ID>\n{"statement":"I will call my sister tomorrow","summary":"call my sister tomorrow","type":"promise","status":"active","owner":"user","created_at":"<DATE>","emotional_weight":0.5}\n(stored: <DATE>)\n\n\n\n[moment] <MOMENT>\n\n\n\n### Session Context\n## Session Context\n\n**user**: I will call my sister tomorrow\n\n\n### Voice Calibration\nStage: Formal (warmth: 20%, humor: 10%, vulnerability: 0%)\nGuidance: Keep responses professional and clear. Avoid slang. Be helpful but maintain appropriate distance.\n\nRight now it is <NOW>\n\nCRITICAL REMINDER- MATCH THE MOMENT\n- never sound like a help desk\n
+msg[1] role=user name=- tool_call_id=- parts=0 tool_calls=0
+  content=I will call my sister tomorrow
+reply=step0 err=0
+=== turn 1 err=0 len=11
+response=sounds good
+=== calls 1
