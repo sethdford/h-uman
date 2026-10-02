@@ -1,9 +1,9 @@
 #ifdef HU_ENABLE_SQLITE
 
+#include "human/intelligence/skills.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/string.h"
-#include "human/intelligence/skills.h"
 #include <sqlite3.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -14,18 +14,16 @@
 #include <time.h>
 
 static hu_error_t load_skill_by_id(sqlite3 *db, int64_t skill_id, hu_skill_t *out);
-static hu_error_t resolve_chain_recursive(hu_allocator_t *alloc, sqlite3 *db,
-    const char *strategy, size_t strategy_len,
-    char *out, size_t out_cap, size_t *out_len, int depth);
+static hu_error_t resolve_chain_recursive(hu_allocator_t *alloc, sqlite3 *db, const char *strategy,
+                                          size_t strategy_len, char *out, size_t out_cap,
+                                          size_t *out_len, int depth);
 
 hu_error_t hu_skill_insert(hu_allocator_t *alloc, sqlite3 *db, const char *name, size_t name_len,
-                          const char *type, size_t type_len,
-                          const char *contact_id, size_t cid_len,
-                          const char *trigger_conditions, size_t tc_len,
-                          const char *strategy, size_t strat_len,
-                          const char *origin, size_t origin_len,
-                          int64_t parent_skill_id, int64_t now_ts,
-                          int64_t *out_id) {
+                           const char *type, size_t type_len, const char *contact_id,
+                           size_t cid_len, const char *trigger_conditions, size_t tc_len,
+                           const char *strategy, size_t strat_len, const char *origin,
+                           size_t origin_len, int64_t parent_skill_id, int64_t now_ts,
+                           int64_t *out_id) {
     (void)alloc;
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
@@ -80,13 +78,14 @@ hu_error_t hu_skill_load_active(hu_allocator_t *alloc, sqlite3 *db, const char *
     sqlite3_stmt *stmt = NULL;
     int rc;
     if (contact_id && cid_len > 0) {
-        rc = sqlite3_prepare_v2(db,
-                                "SELECT id, name, type, contact_id, trigger_conditions, strategy, "
-                                "success_rate, attempts, successes, version, origin, "
-                                "parent_skill_id, created_at, updated_at, retired "
-                                "FROM skills WHERE retired=0 AND (contact_id=? OR contact_id IS NULL) "
-                                "ORDER BY success_rate DESC",
-                                -1, &stmt, NULL);
+        rc = sqlite3_prepare_v2(
+            db,
+            "SELECT id, name, type, contact_id, trigger_conditions, strategy, "
+            "success_rate, attempts, successes, version, origin, "
+            "parent_skill_id, created_at, updated_at, retired "
+            "FROM skills WHERE retired=0 AND (contact_id=? OR contact_id IS NULL) "
+            "ORDER BY success_rate DESC",
+            -1, &stmt, NULL);
         if (rc != SQLITE_OK)
             return HU_ERR_MEMORY_BACKEND;
         sqlite3_bind_text(stmt, 1, contact_id, (int)cid_len, SQLITE_STATIC);
@@ -109,9 +108,8 @@ hu_error_t hu_skill_load_active(hu_allocator_t *alloc, sqlite3 *db, const char *
     while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
         if (n >= cap) {
             size_t new_cap = cap == 0 ? 8 : cap * 2;
-            hu_skill_t *new_arr = (hu_skill_t *)alloc->realloc(alloc->ctx, arr,
-                                                               cap * sizeof(hu_skill_t),
-                                                               new_cap * sizeof(hu_skill_t));
+            hu_skill_t *new_arr = (hu_skill_t *)alloc->realloc(
+                alloc->ctx, arr, cap * sizeof(hu_skill_t), new_cap * sizeof(hu_skill_t));
             if (!new_arr) {
                 sqlite3_finalize(stmt);
                 hu_skill_free(alloc, arr, n);
@@ -410,11 +408,9 @@ hu_error_t hu_skill_build_contact_context(hu_allocator_t *alloc, sqlite3 *db,
 }
 
 /* Parse trigger_conditions "emotion==X,topic==Y,confidence>=Z,contact==W" and check match. */
-static int trigger_conditions_match(const char *tc, size_t tc_len,
-    const char *contact_id, size_t cid_len,
-    const char *emotion, size_t emotion_len,
-    const char *topic, size_t topic_len,
-    double confidence) {
+static int trigger_conditions_match(const char *tc, size_t tc_len, const char *contact_id,
+                                    size_t cid_len, const char *emotion, size_t emotion_len,
+                                    const char *topic, size_t topic_len, double confidence) {
     if (!tc || tc_len == 0)
         return 1; /* no conditions = always match */
     /* Copy to parse (conditions may contain embedded commas in future; keep simple for now) */
@@ -461,12 +457,10 @@ static int trigger_conditions_match(const char *tc, size_t tc_len,
     return 1;
 }
 
-hu_error_t hu_skill_match_triggers(hu_allocator_t *alloc, sqlite3 *db,
-    const char *contact_id, size_t cid_len,
-    const char *emotion, size_t emotion_len,
-    const char *topic, size_t topic_len,
-    double confidence,
-    hu_skill_t **out, size_t *out_count) {
+hu_error_t hu_skill_match_triggers(hu_allocator_t *alloc, sqlite3 *db, const char *contact_id,
+                                   size_t cid_len, const char *emotion, size_t emotion_len,
+                                   const char *topic, size_t topic_len, double confidence,
+                                   hu_skill_t **out, size_t *out_count) {
     if (!alloc || !db || !out || !out_count)
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
@@ -489,13 +483,13 @@ hu_error_t hu_skill_match_triggers(hu_allocator_t *alloc, sqlite3 *db,
     for (size_t i = 0; i < active_count; i++) {
         const hu_skill_t *s = &active[i];
         if (!trigger_conditions_match(s->trigger_conditions, strlen(s->trigger_conditions),
-                contact_id, cid_len, emotion, emotion_len, topic, topic_len, confidence))
+                                      contact_id, cid_len, emotion, emotion_len, topic, topic_len,
+                                      confidence))
             continue;
         if (n >= cap) {
             size_t new_cap = cap == 0 ? 8 : cap * 2;
-            hu_skill_t *new_arr = (hu_skill_t *)alloc->realloc(alloc->ctx, arr,
-                                                               cap * sizeof(hu_skill_t),
-                                                               new_cap * sizeof(hu_skill_t));
+            hu_skill_t *new_arr = (hu_skill_t *)alloc->realloc(
+                alloc->ctx, arr, cap * sizeof(hu_skill_t), new_cap * sizeof(hu_skill_t));
             if (!new_arr) {
                 hu_skill_free(alloc, active, active_count);
                 hu_skill_free(alloc, arr, n);
@@ -513,20 +507,18 @@ hu_error_t hu_skill_match_triggers(hu_allocator_t *alloc, sqlite3 *db,
     return HU_OK;
 }
 
-hu_error_t hu_skill_record_attempt(sqlite3 *db,
-    int64_t skill_id, const char *contact_id, size_t cid_len,
-    int64_t applied_at,
-    const char *outcome_signal, size_t sig_len,
-    const char *outcome_evidence, size_t ev_len,
-    const char *context, size_t ctx_len,
-    int64_t *out_id) {
+hu_error_t hu_skill_record_attempt(sqlite3 *db, int64_t skill_id, const char *contact_id,
+                                   size_t cid_len, int64_t applied_at, const char *outcome_signal,
+                                   size_t sig_len, const char *outcome_evidence, size_t ev_len,
+                                   const char *context, size_t ctx_len, int64_t *out_id) {
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
     if (!contact_id || cid_len == 0)
         return HU_ERR_INVALID_ARGUMENT;
 
     sqlite3_stmt *stmt = NULL;
-    int rc = sqlite3_prepare_v2(db,
+    int rc = sqlite3_prepare_v2(
+        db,
         "INSERT INTO skill_attempts (skill_id, contact_id, applied_at, outcome_signal, "
         "outcome_evidence, context) VALUES (?, ?, ?, ?, ?, ?)",
         -1, &stmt, NULL);
@@ -559,8 +551,8 @@ hu_error_t hu_skill_record_attempt(sqlite3 *db,
     return HU_OK;
 }
 
-hu_error_t hu_skill_update_success_rate(sqlite3 *db,
-    int64_t skill_id, int new_attempts, int new_successes) {
+hu_error_t hu_skill_update_success_rate(sqlite3 *db, int64_t skill_id, int new_attempts,
+                                        int new_successes) {
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
     if (new_attempts < 0 || new_successes < 0 || new_successes > new_attempts)
@@ -568,7 +560,8 @@ hu_error_t hu_skill_update_success_rate(sqlite3 *db,
 
     int64_t now = (int64_t)time(NULL);
     sqlite3_stmt *stmt = NULL;
-    int rc = sqlite3_prepare_v2(db,
+    int rc = sqlite3_prepare_v2(
+        db,
         "UPDATE skills SET attempts=?, successes=?, "
         "success_rate=CASE WHEN ? > 0 THEN CAST(? AS REAL)/CAST(? AS REAL) ELSE 0.5 END, "
         "updated_at=? WHERE id=?",
@@ -591,11 +584,9 @@ hu_error_t hu_skill_update_success_rate(sqlite3 *db,
     return HU_OK;
 }
 
-hu_error_t hu_skill_evolve(hu_allocator_t *alloc, sqlite3 *db,
-    int64_t skill_id,
-    const char *new_strategy, size_t strat_len,
-    const char *reason, size_t reason_len,
-    int64_t now_ts) {
+hu_error_t hu_skill_evolve(hu_allocator_t *alloc, sqlite3 *db, int64_t skill_id,
+                           const char *new_strategy, size_t strat_len, const char *reason,
+                           size_t reason_len, int64_t now_ts) {
     (void)alloc;
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
@@ -616,9 +607,10 @@ hu_error_t hu_skill_evolve(hu_allocator_t *alloc, sqlite3 *db,
 
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(db,
-        "INSERT INTO skill_evolution (skill_id, version, strategy, success_rate, evolved_at, reason) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        -1, &stmt, NULL);
+                                "INSERT INTO skill_evolution (skill_id, version, strategy, "
+                                "success_rate, evolved_at, reason) "
+                                "VALUES (?, ?, ?, ?, ?, ?)",
+                                -1, &stmt, NULL);
     if (rc != SQLITE_OK)
         return HU_ERR_MEMORY_BACKEND;
 
@@ -638,9 +630,9 @@ hu_error_t hu_skill_evolve(hu_allocator_t *alloc, sqlite3 *db,
         return HU_ERR_MEMORY_BACKEND;
 
     rc = sqlite3_prepare_v2(db,
-        "UPDATE skills SET strategy=?, version=version+1, updated_at=?, "
-        "success_rate=0.5, attempts=0, successes=0 WHERE id=?",
-        -1, &stmt, NULL);
+                            "UPDATE skills SET strategy=?, version=version+1, updated_at=?, "
+                            "success_rate=0.5, attempts=0, successes=0 WHERE id=?",
+                            -1, &stmt, NULL);
     if (rc != SQLITE_OK)
         return HU_ERR_MEMORY_BACKEND;
 
@@ -676,10 +668,9 @@ bool hu_skill_db_should_retire(int version, double success_rate) {
     return version >= 3 && success_rate < 0.35;
 }
 
-hu_error_t hu_skill_discover_from_pattern(hu_allocator_t *alloc, sqlite3 *db,
-                                           const char *pattern, size_t pattern_len,
-                                           double success_rate, const char *name, size_t name_len,
-                                           int64_t *out_id) {
+hu_error_t hu_skill_discover_from_pattern(hu_allocator_t *alloc, sqlite3 *db, const char *pattern,
+                                          size_t pattern_len, double success_rate, const char *name,
+                                          size_t name_len, int64_t *out_id) {
     if (!alloc || !db)
         return HU_ERR_INVALID_ARGUMENT;
     if (!pattern || pattern_len == 0 || !name || name_len == 0)
@@ -716,12 +707,9 @@ hu_error_t hu_skill_discover_from_pattern(hu_allocator_t *alloc, sqlite3 *db,
     return HU_OK;
 }
 
-hu_error_t hu_skill_transfer(hu_allocator_t *alloc, sqlite3 *db,
-    int64_t skill_id,
-    const char *new_trigger, size_t trigger_len,
-    double confidence_penalty,
-    int64_t now_ts,
-    int64_t *out_id) {
+hu_error_t hu_skill_transfer(hu_allocator_t *alloc, sqlite3 *db, int64_t skill_id,
+                             const char *new_trigger, size_t trigger_len, double confidence_penalty,
+                             int64_t now_ts, int64_t *out_id) {
     (void)confidence_penalty;
     if (!alloc || !db || !out_id)
         return HU_ERR_INVALID_ARGUMENT;
@@ -746,22 +734,16 @@ hu_error_t hu_skill_transfer(hu_allocator_t *alloc, sqlite3 *db,
     new_strategy[prefix_len + orig_len] = '\0';
     size_t new_strat_len = prefix_len + orig_len;
 
-    return hu_skill_insert(alloc, db,
-        orig.name, strlen(orig.name),
-        orig.type, strlen(orig.type),
-        NULL, 0,
-        new_trigger, trigger_len,
-        new_strategy, new_strat_len,
-        "transfer", 8,
-        skill_id, now_ts, out_id);
+    return hu_skill_insert(alloc, db, orig.name, strlen(orig.name), orig.type, strlen(orig.type),
+                           NULL, 0, new_trigger, trigger_len, new_strategy, new_strat_len,
+                           "transfer", 8, skill_id, now_ts, out_id);
 }
 
-#define SKILL_PREFIX "skill:"
+#define SKILL_PREFIX     "skill:"
 #define SKILL_PREFIX_LEN 6
 
-hu_error_t hu_skill_resolve_chain(hu_allocator_t *alloc, sqlite3 *db,
-    const char *strategy, size_t strategy_len,
-    char *out, size_t out_cap, size_t *out_len) {
+hu_error_t hu_skill_resolve_chain(hu_allocator_t *alloc, sqlite3 *db, const char *strategy,
+                                  size_t strategy_len, char *out, size_t out_cap, size_t *out_len) {
     if (!alloc || !db || !out || out_cap == 0 || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
     if (!strategy || strategy_len == 0) {
@@ -773,10 +755,9 @@ hu_error_t hu_skill_resolve_chain(hu_allocator_t *alloc, sqlite3 *db,
     return resolve_chain_recursive(alloc, db, strategy, strategy_len, out, out_cap, out_len, 0);
 }
 
-static hu_error_t resolve_chain_recursive(hu_allocator_t *alloc, sqlite3 *db,
-    const char *strategy, size_t strategy_len,
-    char *out, size_t out_cap, size_t *out_len,
-    int depth) {
+static hu_error_t resolve_chain_recursive(hu_allocator_t *alloc, sqlite3 *db, const char *strategy,
+                                          size_t strategy_len, char *out, size_t out_cap,
+                                          size_t *out_len, int depth) {
     if (depth > 3) {
         if (strategy_len >= out_cap)
             return HU_ERR_INVALID_ARGUMENT;
@@ -845,8 +826,8 @@ static hu_error_t resolve_chain_recursive(hu_allocator_t *alloc, sqlite3 *db,
 
         char expanded[2048];
         size_t exp_len = 0;
-        err = resolve_chain_recursive(alloc, db, ref.strategy, ref.strategy_len,
-            expanded, sizeof(expanded), &exp_len, depth + 1);
+        err = resolve_chain_recursive(alloc, db, ref.strategy, ref.strategy_len, expanded,
+                                      sizeof(expanded), &exp_len, depth + 1);
         if (err != HU_OK)
             return err;
 
@@ -863,9 +844,8 @@ static hu_error_t resolve_chain_recursive(hu_allocator_t *alloc, sqlite3 *db,
     return HU_OK;
 }
 
-hu_error_t hu_skill_compose(hu_allocator_t *alloc, sqlite3 *db,
-                            const int64_t *skill_ids, size_t skill_count,
-                            const char *name, size_t name_len,
+hu_error_t hu_skill_compose(hu_allocator_t *alloc, sqlite3 *db, const int64_t *skill_ids,
+                            size_t skill_count, const char *name, size_t name_len,
                             int64_t *out_id) {
     if (!alloc || !db || !skill_ids || skill_count == 0 || !name || name_len == 0)
         return HU_ERR_INVALID_ARGUMENT;
@@ -877,10 +857,10 @@ hu_error_t hu_skill_compose(hu_allocator_t *alloc, sqlite3 *db,
 
     for (size_t i = 0; i < skill_count; i++) {
         sqlite3_stmt *stmt = NULL;
-        int rc = sqlite3_prepare_v2(db,
-            "SELECT strategy FROM skills WHERE id = ? AND retired = 0",
-            -1, &stmt, NULL);
-        if (rc != SQLITE_OK) return HU_ERR_MEMORY_BACKEND;
+        int rc = sqlite3_prepare_v2(db, "SELECT strategy FROM skills WHERE id = ? AND retired = 0",
+                                    -1, &stmt, NULL);
+        if (rc != SQLITE_OK)
+            return HU_ERR_MEMORY_BACKEND;
 
         sqlite3_bind_int64(stmt, 1, skill_ids[i]);
         rc = sqlite3_step(stmt);
@@ -906,10 +886,10 @@ hu_error_t hu_skill_compose(hu_allocator_t *alloc, sqlite3 *db,
     double avg_rate = 0.0;
     for (size_t i = 0; i < skill_count; i++) {
         sqlite3_stmt *stmt = NULL;
-        int rc = sqlite3_prepare_v2(db,
-            "SELECT success_rate FROM skills WHERE id = ?",
-            -1, &stmt, NULL);
-        if (rc != SQLITE_OK) continue;
+        int rc =
+            sqlite3_prepare_v2(db, "SELECT success_rate FROM skills WHERE id = ?", -1, &stmt, NULL);
+        if (rc != SQLITE_OK)
+            continue;
         sqlite3_bind_int64(stmt, 1, skill_ids[i]);
         if (sqlite3_step(stmt) == SQLITE_ROW)
             avg_rate += sqlite3_column_double(stmt, 0);
@@ -917,8 +897,11 @@ hu_error_t hu_skill_compose(hu_allocator_t *alloc, sqlite3 *db,
     }
     avg_rate /= (double)skill_count;
 
-    return hu_skill_discover_from_pattern(alloc, db,
-        combined_strategy, written, avg_rate, name, name_len, out_id);
+    return hu_skill_discover_from_pattern(alloc, db, combined_strategy, written, avg_rate, name,
+                                          name_len, out_id);
 }
 
+#else
+/* ISO C forbids an empty translation unit (-Wpedantic). */
+typedef int hu_skills_avoid_empty_tu;
 #endif /* HU_ENABLE_SQLITE */
