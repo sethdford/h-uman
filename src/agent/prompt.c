@@ -2,6 +2,7 @@
  * System prompt builder — identity, tools, memory, constraints.
  */
 #include "human/agent/prompt.h"
+#include "human/agent/length_policy.h"
 #include "human/agent/prompt_budget.h"
 #include "human/agent/prompt_trim.h"
 #include "human/core/gate_mode.h"
@@ -600,9 +601,17 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
         if (config->max_response_chars > 0) {
             char lbuf[192];
             int ln;
-            if (config->max_response_chars <= 80) {
+            /* LEGACY: "keep it tight" at <= 80. HU_LENGTH_POLICY LIVE: only for a
+             * short, casual inbound, else the bare limit (length_policy.h). */
+            bool tight = config->response_limit_tight == HU_LENGTH_TIGHT_LEGACY
+                             ? config->max_response_chars <= HU_LENGTH_POLICY_LEGACY_TIGHT_MAX
+                             : config->response_limit_tight == HU_LENGTH_TIGHT_YES;
+            if (tight) {
                 ln = snprintf(lbuf, sizeof(lbuf),
                               "\nRESPONSE LIMIT: Maximum %u characters. Keep it tight.\n",
+                              config->max_response_chars);
+            } else if (config->response_limit_tight == HU_LENGTH_TIGHT_NO) {
+                ln = snprintf(lbuf, sizeof(lbuf), "\nRESPONSE LIMIT: Maximum %u characters.\n",
                               config->max_response_chars);
             } else {
                 ln = snprintf(

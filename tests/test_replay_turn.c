@@ -14,6 +14,7 @@
 #include "human/core/allocator.h"
 #include "human/daemon/replay_turn.h"
 #include "human/memory.h"
+#include "human/persona.h"
 #include "test_framework.h"
 #include "turn_recording_provider.h"
 
@@ -218,6 +219,65 @@ static void replay_provider_pins_model_and_temperature(void) {
     rt_teardown(&f);
 }
 
+/* HU_LENGTH_POLICY (#580) lives in the shared reply-budget seam, so the replay
+ * measures it: LIVE with the contact's measured lengths changes the reply
+ * request; OFF twice is byte-identical. */
+static const char k_lp_persona[] =
+    "{\"version\":1,\"name\":\"lptest\","
+    "\"core\":{\"identity\":\"Seth\",\"traits\":[\"warm\"]},"
+    "\"contacts\":{\"+15550001111\":{\"name\":\"Lexi\",\"relationship\":\"friend\","
+    "\"reply_chars_p90\":50,\"reply_chars_p50\":21}}}";
+
+static uint64_t rt_length_policy_fp(const char *mode, uint32_t *max_chars) {
+    const char *prev = getenv("HU_LENGTH_POLICY");
+    char saved[32] = "";
+    bool had = prev != NULL;
+    if (had)
+        snprintf(saved, sizeof(saved), "%s", prev);
+    if (mode)
+        setenv("HU_LENGTH_POLICY", mode, 1);
+    else
+        unsetenv("HU_LENGTH_POLICY");
+    rt_fixture_t f;
+    uint64_t fp = 0;
+    if (rt_setup(&f, "lol same")) {
+        hu_persona_t *p = (hu_persona_t *)f.alloc.alloc(f.alloc.ctx, sizeof(hu_persona_t));
+        memset(p, 0, sizeof(*p));
+        if (hu_persona_load_json(&f.alloc, k_lp_persona, strlen(k_lp_persona), p) == HU_OK) {
+            f.agent.persona = p; /* owned by the agent from here */
+            /* A question: today's rule says "keep it tight" at cap <= 80; the
+             * policy, with this contact's lengths, does not tighten a question. */
+            hu_replay_turn_input_t in = rt_input("you around later tonight?");
+            in.director = false;
+            hu_replay_turn_result_t r;
+            if (hu_replay_turn_run(&f.alloc, &f.agent, NULL, &f.rp, &in, &r) == HU_OK) {
+                fp = r.reply_fp;
+                *max_chars = r.max_chars;
+                hu_replay_turn_result_deinit(&f.alloc, &r);
+            }
+        } else {
+            f.alloc.free(f.alloc.ctx, p, sizeof(*p));
+        }
+        rt_teardown(&f);
+    }
+    if (had)
+        setenv("HU_LENGTH_POLICY", saved, 1);
+    else
+        unsetenv("HU_LENGTH_POLICY");
+    return fp;
+}
+
+static void replay_turn_length_policy_live_changes_reply_request(void) {
+    uint32_t cap_off = 0, cap_off2 = 0, cap_live = 0;
+    uint64_t off = rt_length_policy_fp(NULL, &cap_off);
+    uint64_t off2 = rt_length_policy_fp("off", &cap_off2);
+    uint64_t live = rt_length_policy_fp("live", &cap_live);
+    HU_ASSERT_NEQ(off, 0);
+    HU_ASSERT_EQ(off, off2); /* unset == off, byte for byte */
+    HU_ASSERT_EQ(cap_off, cap_off2);
+    HU_ASSERT_NEQ(off, live); /* the gate reached the reply request */
+}
+
 /* ── 4. the session store (memory.db) is never touched ──────────────── */
 
 typedef struct spy_store {
@@ -281,5 +341,6 @@ void run_replay_turn_tests(void) {
     HU_RUN_TEST(replay_turn_director_tapback_skips_the_reply_turn);
     HU_RUN_TEST(replay_turn_gate_env_changes_reply_request);
     HU_RUN_TEST(replay_provider_pins_model_and_temperature);
+    HU_RUN_TEST(replay_turn_length_policy_live_changes_reply_request);
     HU_RUN_TEST(replay_turn_detaches_the_session_store);
 }

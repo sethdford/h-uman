@@ -29,6 +29,7 @@
 #include "human/agent/init_outcome.h"
 #include "human/agent/init_proposer.h"
 #include "human/agent/kv_cache.h"
+#include "human/agent/length_policy.h"
 #include "human/agent/lora_runner.h"
 #include "human/agent/model_router_health.h"
 #include "human/agent/multimodal_policy.h"
@@ -39,6 +40,7 @@
 #include "human/behavior/win_detect.h"
 #include "human/core/gate_mode.h"
 #include "human/daemon/daemon_shape.h"
+#include "human/daemon/proposer_context.h"
 #include "human/memory/celebration_repo.h"
 #include "human/memory/graph_ingest.h"
 #include "human/memory/opinion_challenge.h" /* roadmap #14: stance-hold directive */
@@ -934,6 +936,8 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                 }
                 combined[combined_len] = '\0';
             }
+            hu_proposer_context_t pctx; /* HU_PROPOSER_CONTEXT: thread kept only for local */
+            hu_proposer_context_begin(&pctx, &agent->provider, entries, entry_count, (int64_t)now);
             if (entries)
                 alloc->free(alloc->ctx, entries, entry_count * sizeof(*entries));
 
@@ -1498,16 +1502,13 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                         inputs.due_followups_context_len = due_fu_len;
                     }
 
-                    int64_t unified_last_tick = 0;
-                    uint64_t unified_tick_id = 0;
                     hu_init_proposer_result_t unified_result = HU_INIT_RESULT_SKIP;
-                    hu_init_decision_t unified_decision;
-                    memset(&unified_decision, 0, sizeof(unified_decision));
-                    (void)hu_init_proposer_tick_with_provider_ex(
-                        &config->initiative, daemon_autoresponder_config(),
+                    hu_init_decision_t unified_decision = {0};
+                    hu_proposer_context_decide(
+                        &pctx, &config->initiative, daemon_autoresponder_config(),
                         daemon_local_tz_offset_seconds((int64_t)now), &gov_budget, agent,
-                        &agent->provider, alloc, &inputs, /*last_inbound_unix=*/0, (int64_t)now,
-                        &unified_last_tick, &unified_tick_id, &unified_result, &unified_decision);
+                        &agent->provider, alloc, cp, &inputs, (int64_t)now, &unified_result,
+                        &unified_decision);
 
                     if (unified_result == HU_INIT_RESULT_FIRED && unified_decision.draft_len > 0) {
                         response = (char *)alloc->alloc(alloc->ctx, unified_decision.draft_len + 1);
@@ -4056,12 +4057,23 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 convo_ctx = rt.convo_ctx;
                 convo_ctx_len = rt.convo_ctx_len;
 
+                /* 4. Response budget: channel cap, F15 calibration + brief cap, then
+                 * HU_LENGTH_POLICY (daemon/reactive_calibration.h; the replay harness calls the
+                 * same seam). Before 2c so its Target matches. */
+                bool voice_first_memo = false; /* spec 2026-09-28 */
+                hu_length_turn_result_t len_turn;
+                hu_daemon_reply_budget(agent, ch->channel, batch_key, key_len, combined,
+                                       combined_len, msgs[batch_start].is_group, brief_mode,
+                                       &len_turn);
+                uint32_t max_chars = len_turn.cap;
+
                 /* 2c. Length calibration fallback (daemon/reactive_calibration.h). In llm_decides
                  * mode build_awareness is skipped, so calibration is appended after whatever
-                 * the prompt builder returned. The replay harness runs the same call. */
+                 * the prompt builder returned. */
                 if ((!convo_ctx || llm_decides) && combined_len > 0)
                     hu_daemon_append_length_calibration(alloc, agent, batch_key, key_len, combined,
                                                         combined_len, msgs[batch_start].is_group,
+                                                        len_turn.tight ? len_turn.cap : 0,
                                                         &convo_ctx, &convo_ctx_len);
 
 #if defined(HU_ENABLE_SQLITE) && !defined(HU_IS_TEST)
@@ -5265,13 +5277,6 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 }
 #endif
 
-                /* 4. Response budget: channel cap, F15 relational ratio, brief-mode cap
-                 * (daemon/reactive_calibration.h; the replay harness calls it too). */
-                bool voice_first_memo = false; /* spec 2026-09-28 */
-                uint32_t max_chars =
-                    hu_daemon_reply_budget(agent, ch->channel, batch_key, key_len, combined_len,
-                                           msgs[batch_start].is_group, brief_mode);
-
                 /* Honesty guardrail: inject if they asked "did you do X?" */
                 {
                     char *honesty = hu_conversation_honesty_check(alloc, combined, combined_len);
@@ -6231,6 +6236,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 agent->ab_history_entries = history_entries;
                 agent->ab_history_count = history_count;
                 agent->max_response_chars = max_chars;
+                agent->response_limit_tight = voice_first_memo ? 0 : (uint8_t)len_turn.tight;
                 agent->voice_memo_turn = voice_first_memo;
                 /* Owner self-test: a clean slate — only the last few messages, so a
                  * thread full of test traffic doesn't confuse the reply. */
@@ -7304,8 +7310,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     if (err == HU_OK && response && response_len > 0 && history_entries &&
                         !voice_first_memo &&
                         hu_reactive_gate_active(HU_REACTIVE_GATE_QUALITY_RETRY, llm_decides)) {
-                        hu_quality_score_t qscore = hu_conversation_evaluate_quality(
-                            response, response_len, history_entries, history_count, max_chars);
+                        hu_quality_score_t qscore = hu_conversation_evaluate_quality_capped(
+                            response, response_len, history_entries, history_count, max_chars,
+                            len_turn.tight != HU_LENGTH_TIGHT_LEGACY && !voice_first_memo);
                         if (qscore.needs_revision && !retried) {
                             retried = true;
                             hu_log_info("human", agent ? agent->observer : NULL,

@@ -71,19 +71,19 @@ static void length_calibration_appends_after_existing_context(void) {
     memset(&agent, 0, sizeof(agent));
     const char *msg = "are you coming tonight?";
     char expect[1024];
-    size_t expect_len = hu_conversation_calibrate_length_for_contact(
-        msg, strlen(msg), NULL, 0, false, NULL, agent.relationship.stage, expect, sizeof(expect));
+    size_t expect_len = hu_conversation_calibrate_length_capped(
+        msg, strlen(msg), false, NULL, agent.relationship.stage, 0, expect, sizeof(expect));
     HU_ASSERT_GT(expect_len, 0);
 
     char *ctx = NULL;
     size_t ctx_len = 0;
-    hu_daemon_append_length_calibration(&alloc, &agent, "+1", 2, msg, strlen(msg), false, &ctx,
+    hu_daemon_append_length_calibration(&alloc, &agent, "+1", 2, msg, strlen(msg), false, 0, &ctx,
                                         &ctx_len);
     HU_ASSERT_NOT_NULL(ctx);
     HU_ASSERT_EQ(ctx_len, expect_len);
     HU_ASSERT_EQ(memcmp(ctx, expect, expect_len), 0);
 
-    hu_daemon_append_length_calibration(&alloc, &agent, "+1", 2, msg, strlen(msg), false, &ctx,
+    hu_daemon_append_length_calibration(&alloc, &agent, "+1", 2, msg, strlen(msg), false, 0, &ctx,
                                         &ctx_len);
     HU_ASSERT_EQ(ctx_len, expect_len * 2 + 2);
     HU_ASSERT_EQ(memcmp(ctx + expect_len, "\n\n", 2), 0);
@@ -95,7 +95,21 @@ static hu_error_t budget_constraints(void *ctx, hu_channel_response_constraints_
     return HU_OK;
 }
 
+static uint32_t budget_cap(const hu_agent_t *agent, hu_channel_t *ch, size_t in_len, bool brief) {
+    char in[64];
+    memset(in, 'a', sizeof(in));
+    hu_length_turn_result_t r;
+    hu_daemon_reply_budget(agent, ch, "+1", 2, in, in_len, false, brief, &r);
+    return r.cap;
+}
+
 static void reply_budget_takes_the_smallest_of_channel_ratio_and_brief(void) {
+    /* HU_LENGTH_POLICY off (unset): the pre-move daemon.c step 4, exactly. */
+    const char *prev = getenv("HU_LENGTH_POLICY");
+    char saved[32] = "";
+    if (prev)
+        snprintf(saved, sizeof(saved), "%s", prev);
+    unsetenv("HU_LENGTH_POLICY");
     hu_agent_t agent;
     memset(&agent, 0, sizeof(agent));
     uint32_t chan_cap = 200;
@@ -106,15 +120,20 @@ static void reply_budget_takes_the_smallest_of_channel_ratio_and_brief(void) {
     const size_t in_len = 20;
     int rel = hu_conversation_max_response_chars_relational(in_len, NULL, agent.relationship.stage);
     uint32_t want = (rel > 0 && (uint32_t)rel < chan_cap) ? (uint32_t)rel : chan_cap;
-    HU_ASSERT_EQ(hu_daemon_reply_budget(&agent, &ch, "+1", 2, in_len, false, false), want);
-
+    uint32_t got = budget_cap(&agent, &ch, in_len, false);
     uint32_t brief = hu_conversation_brief_char_cap(false, NULL, agent.relationship.stage);
     uint32_t want_brief = want > brief ? brief : want;
-    HU_ASSERT_EQ(hu_daemon_reply_budget(&agent, &ch, "+1", 2, in_len, false, true), want_brief);
-
+    uint32_t got_brief = budget_cap(&agent, &ch, in_len, true);
     chan_cap = 10; /* a tighter channel wins */
-    HU_ASSERT_EQ(hu_daemon_reply_budget(&agent, &ch, "+1", 2, in_len, false, false), 10);
-    HU_ASSERT_EQ(hu_daemon_reply_budget(NULL, &ch, "+1", 2, in_len, false, false), 0);
+    uint32_t got_tight = budget_cap(&agent, &ch, in_len, false);
+    hu_length_turn_result_t none;
+    hu_daemon_reply_budget(NULL, &ch, "+1", 2, "x", 1, false, false, &none);
+    if (prev)
+        setenv("HU_LENGTH_POLICY", saved, 1);
+    HU_ASSERT_EQ(got, want);
+    HU_ASSERT_EQ(got_brief, want_brief);
+    HU_ASSERT_EQ(got_tight, 10);
+    HU_ASSERT_EQ(none.cap, 0);
 }
 
 static void director_decide_runs_the_director(void) {

@@ -297,13 +297,15 @@ static void proactive_starter_with_memory(void) {
     const char *content1 =
         "recent topics activities interests: user wanted to try that pasta recipe";
     static const char CONTACT[] = "contact_a";
-    mem.vtable->store(mem.ctx, key1, strlen(key1), content1, strlen(content1), &cat, CONTACT,
-                      sizeof(CONTACT) - 1);
+    HU_ASSERT_EQ(mem.vtable->store(mem.ctx, key1, strlen(key1), content1, strlen(content1), &cat,
+                                   CONTACT, sizeof(CONTACT) - 1),
+                 HU_OK);
 
     const char *key2 = "topic:contact_a:2";
     const char *content2 = "recent topics activities interests: new apartment move";
-    mem.vtable->store(mem.ctx, key2, strlen(key2), content2, strlen(content2), &cat, CONTACT,
-                      sizeof(CONTACT) - 1);
+    HU_ASSERT_EQ(mem.vtable->store(mem.ctx, key2, strlen(key2), content2, strlen(content2), &cat,
+                                   CONTACT, sizeof(CONTACT) - 1),
+                 HU_OK);
 
     char *out = NULL;
     size_t out_len = 0;
@@ -356,13 +358,15 @@ static void proactive_starter_skips_first_person_confession_entry(void) {
     /* Poisonous entry: a first-person confession fragment. */
     const char *key1 = "topic:contact_p24:1";
     const char *content1 = "recent topics activities interests: I confessed something terrible";
-    mem.vtable->store(mem.ctx, key1, strlen(key1), content1, strlen(content1), &cat, CONTACT,
-                      sizeof(CONTACT) - 1);
+    HU_ASSERT_EQ(mem.vtable->store(mem.ctx, key1, strlen(key1), content1, strlen(content1), &cat,
+                                   CONTACT, sizeof(CONTACT) - 1),
+                 HU_OK);
     /* Clean entry mixed in. */
     const char *key2 = "topic:contact_p24:2";
     const char *content2 = "recent topics activities interests: pasta recipe weekend";
-    mem.vtable->store(mem.ctx, key2, strlen(key2), content2, strlen(content2), &cat, CONTACT,
-                      sizeof(CONTACT) - 1);
+    HU_ASSERT_EQ(mem.vtable->store(mem.ctx, key2, strlen(key2), content2, strlen(content2), &cat,
+                                   CONTACT, sizeof(CONTACT) - 1),
+                 HU_OK);
 
     char *out = NULL;
     size_t out_len = 0;
@@ -394,8 +398,9 @@ static void proactive_starter_skips_emotion_keyword_entry(void) {
     };
     const char *key = "topic:contact_p24b:1";
     const char *content = "recent topics activities interests: feeling lonely and depressed";
-    mem.vtable->store(mem.ctx, key, strlen(key), content, strlen(content), &cat, CONTACT,
-                      sizeof(CONTACT) - 1);
+    HU_ASSERT_EQ(mem.vtable->store(mem.ctx, key, strlen(key), content, strlen(content), &cat,
+                                   CONTACT, sizeof(CONTACT) - 1),
+                 HU_OK);
 
     char *out = NULL;
     size_t out_len = 0;
@@ -617,8 +622,9 @@ static void proactive_starter_diverse_memories_produce_context(void) {
         "recent topics activities interests: house renovation project",
     };
     for (int i = 0; i < 6; i++) {
-        mem.vtable->store(mem.ctx, keys[i], strlen(keys[i]), contents[i], strlen(contents[i]), &cat,
-                          CONTACT, sizeof(CONTACT) - 1);
+        HU_ASSERT_EQ(mem.vtable->store(mem.ctx, keys[i], strlen(keys[i]), contents[i],
+                                       strlen(contents[i]), &cat, CONTACT, sizeof(CONTACT) - 1),
+                     HU_OK);
     }
 
     char *out = NULL;
@@ -1518,8 +1524,11 @@ void run_proactive_tests(void) {
         /* The test sets HU_PROSPECTIVE_TIME and a failed assert longjmps past its
          * own cleanup; restore the caller's value here so one failure can't
          * leak "live" into every later suite. */
-        const char *prev = getenv("HU_PROSPECTIVE_TIME");
-        char *saved = prev ? strdup(prev) : NULL;
+        /* volatile, and no prev local: HU_RUN_TEST calls setjmp in this function,
+         * so a non-volatile local here is indeterminate after a longjmp (GCC
+         * -Wclobbered at -Os). */
+        char *volatile saved =
+            getenv("HU_PROSPECTIVE_TIME") ? strdup(getenv("HU_PROSPECTIVE_TIME")) : NULL;
         HU_RUN_TEST(proactive_callbacks_skip_v2_owned_rows_only_when_time_live);
         if (saved) {
             setenv("HU_PROSPECTIVE_TIME", saved, 1);

@@ -506,6 +506,7 @@ void hu_daemon_reactive_turn_end(hu_agent_t *agent) {
     agent->turn_temperature = 0.0;
     agent->turn_thinking_budget = 0;
     agent->max_response_chars = 0;
+    agent->response_limit_tight = 0;
     agent->voice_memo_turn = false;
     agent->history_msg_cap = 0;
     agent->self_test_turn = false;

@@ -12,6 +12,7 @@
 
 #include "../agent/agent_internal.h"
 #include "human/agent/choreography.h"
+#include "human/agent/length_policy.h"
 #include "human/agent/validators/builtin.h"
 #include "human/channel_class.h"
 #include "human/context/conversation.h"
@@ -201,7 +202,8 @@ static void replay_split(hu_allocator_t *alloc, hu_agent_t *agent, hu_channel_t 
 static hu_error_t replay_agent_turn(hu_allocator_t *alloc, hu_agent_t *agent, const char *key,
                                     size_t key_len, char *combined, size_t combined_len,
                                     char **convo, size_t *convo_len, bool voice_memo,
-                                    hu_replay_turn_result_t *out, char **resp, size_t *resp_len) {
+                                    bool cap_from_stats, hu_replay_turn_result_t *out, char **resp,
+                                    size_t *resp_len) {
     hu_error_t err = HU_OK;
     bool retried = false;
     size_t saved_tools = agent->tools_count;
@@ -245,9 +247,9 @@ static hu_error_t replay_agent_turn(hu_allocator_t *alloc, hu_agent_t *agent, co
         }
         if (!voice_memo && agent->ab_history_entries &&
             hu_reactive_gate_active(HU_REACTIVE_GATE_QUALITY_RETRY, true)) {
-            hu_quality_score_t q = hu_conversation_evaluate_quality(
+            hu_quality_score_t q = hu_conversation_evaluate_quality_capped(
                 *resp, *resp_len, agent->ab_history_entries, agent->ab_history_count,
-                agent->max_response_chars);
+                agent->max_response_chars, cap_from_stats);
             if (q.needs_revision && !retried) {
                 retried = true;
                 hu_daemon_quality_draft_keep(agent->alloc, key, key_len, *resp, *resp_len);
@@ -383,8 +385,15 @@ hu_error_t hu_replay_turn_run(hu_allocator_t *alloc, hu_agent_t *agent, const hu
     convo = rt.convo_ctx;
     convo_len = rt.convo_ctx_len;
     rt.convo_ctx = NULL;
+    /* Reply budget + HU_LENGTH_POLICY before calibration, as daemon.c step 4.
+     * Media messages force brief mode (daemon.c media awareness). */
+    hu_length_turn_result_t len_turn;
+    hu_daemon_reply_budget(agent, &ch, key, key_len, combined, combined_len, false,
+                           hu_conversation_is_media_message(combined, combined_len, NULL, 0),
+                           &len_turn);
+    uint32_t max_chars = len_turn.cap;
     hu_daemon_append_length_calibration(alloc, agent, key, key_len, combined, combined_len, false,
-                                        &convo, &convo_len);
+                                        len_turn.tight ? len_turn.cap : 0, &convo, &convo_len);
     if (rt.cross_channel_ctx) {
         replay_ctx_prepend(alloc, &convo, &convo_len, rt.cross_channel_ctx,
                            rt.cross_channel_ctx_len, "\n\n");
@@ -394,10 +403,6 @@ hu_error_t hu_replay_turn_run(hu_allocator_t *alloc, hu_agent_t *agent, const hu
         convo_len = REPLAY_CONVO_CAP;
     }
 
-    /* Media messages force brief mode (daemon.c media awareness). */
-    uint32_t max_chars =
-        hu_daemon_reply_budget(agent, &ch, key, key_len, combined_len, false,
-                               hu_conversation_is_media_message(combined, combined_len, NULL, 0));
     if (!crisis) {
         hu_daemon_voice_first_t vf;
         hu_daemon_voice_first_prepare(alloc, agent, key, key_len, false, false, combined,
@@ -413,6 +418,7 @@ hu_error_t hu_replay_turn_run(hu_allocator_t *alloc, hu_agent_t *agent, const hu
     agent->ab_history_entries = rt.history_entries;
     agent->ab_history_count = rt.history_count;
     agent->max_response_chars = max_chars;
+    agent->response_limit_tight = out->voice_memo ? 0 : (uint8_t)len_turn.tight;
     agent->voice_memo_turn = out->voice_memo;
     agent->history_msg_cap = 0;
     agent->self_test_turn = false;
@@ -427,8 +433,9 @@ hu_error_t hu_replay_turn_run(hu_allocator_t *alloc, hu_agent_t *agent, const hu
         hu_daemon_voice_first_direction(dr.direction, sizeof(dr.direction));
     if (out->director_valid)
         hu_daemon_director_arm_guard(alloc, agent, &dr, &convo, &convo_len);
-    out->err = replay_agent_turn(alloc, agent, key, key_len, combined, combined_len, &convo,
-                                 &convo_len, out->voice_memo, out, &resp, &resp_len);
+    out->err = replay_agent_turn(
+        alloc, agent, key, key_len, combined, combined_len, &convo, &convo_len, out->voice_memo,
+        len_turn.tight != HU_LENGTH_TIGHT_LEGACY && !out->voice_memo, out, &resp, &resp_len);
     hu_daemon_director_end_turn(agent);
 
     if (out->err != HU_OK) {

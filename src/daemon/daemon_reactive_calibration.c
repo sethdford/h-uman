@@ -4,6 +4,7 @@
 #include "human/daemon/reactive_calibration.h"
 
 #include "human/agent.h"
+#include "human/agent/length_policy.h"
 #include "human/channel.h"
 #include "human/context/conversation.h"
 #include "human/persona.h"
@@ -11,16 +12,17 @@
 
 void hu_daemon_append_length_calibration(hu_allocator_t *alloc, hu_agent_t *agent, const char *key,
                                          size_t key_len, const char *combined, size_t combined_len,
-                                         bool is_group, char **convo_ctx, size_t *convo_ctx_len) {
+                                         bool is_group, uint32_t turn_cap, char **convo_ctx,
+                                         size_t *convo_ctx_len) {
     if (!alloc || !agent || !convo_ctx || !convo_ctx_len || !combined || combined_len == 0)
         return;
     char cal_buf[1024];
     const hu_contact_profile_t *cp_cal = (agent->persona && key && key_len > 0)
                                              ? hu_persona_find_contact(agent->persona, key, key_len)
                                              : NULL;
-    size_t cal_len = hu_conversation_calibrate_length_for_contact(
-        combined, combined_len, NULL, 0, is_group, cp_cal, agent->relationship.stage, cal_buf,
-        sizeof(cal_buf));
+    size_t cal_len = hu_conversation_calibrate_length_capped(combined, combined_len, is_group,
+                                                             cp_cal, agent->relationship.stage,
+                                                             turn_cap, cal_buf, sizeof(cal_buf));
     if (cal_len == 0)
         return;
     if (!*convo_ctx) {
@@ -48,30 +50,29 @@ void hu_daemon_append_length_calibration(hu_allocator_t *alloc, hu_agent_t *agen
     *convo_ctx_len = total;
 }
 
-uint32_t hu_daemon_reply_budget(const hu_agent_t *agent, hu_channel_t *ch, const char *key,
-                                size_t key_len, size_t combined_len, bool is_group,
-                                bool brief_mode) {
+void hu_daemon_reply_budget(const hu_agent_t *agent, hu_channel_t *ch, const char *key,
+                            size_t key_len, const char *combined, size_t combined_len,
+                            bool is_group, bool brief_mode, hu_length_turn_result_t *out) {
+    if (!out)
+        return;
+    memset(out, 0, sizeof(*out));
     if (!agent)
-        return 0;
-    uint32_t max_chars = 0;
+        return;
+    uint32_t channel_max = 0;
     if (ch && ch->vtable && ch->vtable->get_response_constraints) {
         hu_channel_response_constraints_t constraints = {0};
         if (ch->vtable->get_response_constraints(ch->ctx, &constraints) == HU_OK)
-            max_chars = constraints.max_chars;
+            channel_max = constraints.max_chars;
     }
     const hu_contact_profile_t *cp = (!is_group && agent->persona && key && key_len > 0)
                                          ? hu_persona_find_contact(agent->persona, key, key_len)
                                          : NULL;
-    int calibrated = is_group ? hu_conversation_max_response_chars(combined_len)
-                              : hu_conversation_max_response_chars_relational(
-                                    combined_len, cp, agent->relationship.stage);
-    if (calibrated > 0 && (max_chars == 0 || (uint32_t)calibrated < max_chars))
-        max_chars = (uint32_t)calibrated;
-    if (brief_mode) {
-        uint32_t brief_cap =
-            hu_conversation_brief_char_cap(is_group, cp, agent->relationship.stage);
-        if (max_chars > brief_cap)
-            max_chars = brief_cap;
-    }
-    return max_chars;
+    hu_length_turn_t turn = {.inbound = combined,
+                             .inbound_len = combined_len,
+                             .contact = cp,
+                             .stage = agent->relationship.stage,
+                             .channel_max = channel_max,
+                             .is_group = is_group,
+                             .brief_mode = brief_mode};
+    hu_length_policy_turn(&turn, hu_length_policy_mode(), out);
 }
