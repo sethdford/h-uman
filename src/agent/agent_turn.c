@@ -1,6 +1,7 @@
 /* Core turn execution: hu_agent_turn and turn-local helpers */
 #include "agent_internal.h"
 #include "human/agent/best_of_n.h"
+#include "human/agent/empty_retry.h"
 #include "human/agent/graph_grounding.h"
 #include "human/agent/humanness.h"
 #include "human/agent/intent.h"
@@ -4332,6 +4333,33 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
         }
 
         (void)degrade_strategy;
+
+        /* HU_EMPTY_REPLY_RETRY activation gated on the shadow measurement: do not flip
+         * to live until shadow logs show retries of discarded drafts (completion_tokens
+         * > 0, empty body) coming back non-empty on most blanked turns. Live changes what
+         * reaches a contact; the retry stays on the same provider and model. */
+        if (err == HU_OK) {
+            hu_gate_mode_t er_mode = hu_empty_retry_mode();
+            if (hu_empty_retry_applies(er_mode, &resp, false)) {
+                hu_chat_response_t retry_resp;
+                hu_error_t rerr =
+                    hu_empty_retry_chat(&agent->provider, agent->alloc, &req, turn_model,
+                                        turn_model_len, turn_temp, &retry_resp);
+                bool usable = rerr == HU_OK && retry_resp.content && retry_resp.content_len > 0;
+                hu_log_info("agent_turn", agent->observer,
+                            "empty-reply retry (%s): first completion_tokens=%u retry_err=%d "
+                            "retry_len=%zu",
+                            er_mode == HU_GATE_LIVE ? "live" : "shadow",
+                            resp.usage.completion_tokens, (int)rerr,
+                            rerr == HU_OK ? retry_resp.content_len : (size_t)0);
+                if (usable && er_mode == HU_GATE_LIVE) {
+                    hu_chat_response_free(agent->alloc, &resp);
+                    resp = retry_resp;
+                } else if (rerr == HU_OK) {
+                    hu_chat_response_free(agent->alloc, &retry_resp);
+                }
+            }
+        }
         uint64_t llm_duration_ms = hu_agent_internal_monotonic_ms() - llm_start_ms;
         if (llm_span)
             hu_otlp_span_end(llm_span, (err == HU_OK) ? 1 : 2);
