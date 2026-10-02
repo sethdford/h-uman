@@ -2915,19 +2915,17 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 /* Clear STM before each contact batch to avoid cross-contact emotion contamination
                  */
                 hu_stm_clear(&agent->stm);
+                if (hu_daemon_tool_traffic(agent->persona, batch_key, key_len, combined,
+                                           combined_len, agent->observer))
+                    continue; /* before any bookkeeping: nothing learned */
 
 #ifndef HU_IS_TEST
                 /* F119: Contact replied — reset governor cool-off so proactive
                  * outreach can resume after silence. */
                 (void)hu_governor_record_response(&gov_budget);
 
-                /* Reciprocity tracking: record their initiation for balanced outreach.
-                 * Gated on HU_ENABLE_SQLITE because the helper's declaration lives
-                 * inside that guard in include/human/context/self_awareness.h.
-                 * The other three call sites are already gated; this one was
-                 * missed when reciprocity was wired in, so the no-sqlite /
-                 * cross-arm64 / minimal builds tripped
-                 * -Werror=implicit-function-declaration. */
+                /* Reciprocity: record their initiation for balanced outreach. The
+                 * helper is declared only under HU_ENABLE_SQLITE (self_awareness.h). */
 #ifdef HU_ENABLE_SQLITE
                 if (agent->memory) {
                     bool they_asked = (memchr(combined, '?', combined_len) != NULL);
@@ -2993,10 +2991,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     continue;
                 }
 
-                /* Tool prompts on the owner's number, hurt-signal hand-off. */
-                if (hu_daemon_batch_withheld(agent->persona, batch_key, key_len, combined,
-                                             combined_len, msgs[batch_start].is_group,
-                                             agent->observer))
+                /* Hurt-signal hand-off (hurt_handoff.h). */
+                if (hu_daemon_hurt_withheld(agent->persona, batch_key, key_len, combined,
+                                            combined_len, msgs[batch_start].is_group))
                     continue;
 
                 hu_log_info("human", agent ? agent->observer : NULL,

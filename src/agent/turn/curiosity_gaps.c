@@ -58,10 +58,17 @@ static bool mentions_any(const char *text, size_t len, const char *const *words)
     return false;
 }
 
-hu_curiosity_topic_t hu_curiosity_gap_pick(const char *recent, size_t len) {
-    for (size_t t = 0; t < TOPIC_COUNT; t++)
-        if (!recent || len == 0 || !mentions_any(recent, len, k_topics[t].words))
-            return k_topics[t].topic;
+hu_curiosity_topic_t hu_curiosity_gap_pick(const char *recent, size_t len,
+                                           hu_curiosity_topic_t after) {
+    size_t start = 0; /* index after `after`; NONE (or unknown) starts at the first */
+    for (size_t i = 0; i < TOPIC_COUNT; i++)
+        if (k_topics[i].topic == after)
+            start = i + 1;
+    for (size_t k = 0; k < TOPIC_COUNT; k++) {
+        const gap_topic_t *t = &k_topics[(start + k) % TOPIC_COUNT];
+        if (!recent || len == 0 || !mentions_any(recent, len, t->words))
+            return t->topic;
+    }
     return HU_CURIOSITY_NONE;
 }
 
@@ -72,21 +79,24 @@ const char *hu_curiosity_gap_line(hu_curiosity_topic_t t) {
     return NULL;
 }
 
-/* Per-process cooldown, keyed by contact. A restart forgets it, which at worst
- * offers one gap a little early. */
+/* Per-process cooldown and last topic, keyed by contact. A restart forgets
+ * them, which at worst offers one gap a little early. */
 #define COOLDOWN_SLOTS 64
 static struct {
     char contact[64];
     int64_t at;
+    hu_curiosity_topic_t last;
 } s_offered[COOLDOWN_SLOTS];
 static pthread_mutex_t s_offered_mu = PTHREAD_MUTEX_INITIALIZER;
 
-bool hu_curiosity_gap_offer_now(const char *contact, size_t contact_len, const char *inbound,
-                                size_t inbound_len, int64_t now_s) {
+hu_curiosity_topic_t hu_curiosity_gap_offer(const char *contact, size_t contact_len,
+                                            const char *inbound, size_t inbound_len,
+                                            const char *recent, size_t recent_len, int64_t now_s,
+                                            bool commit) {
     if (!contact || contact_len == 0 || contact_len >= sizeof(s_offered[0].contact))
-        return false;
+        return HU_CURIOSITY_NONE;
     if (inbound && memchr(inbound, '?', inbound_len))
-        return false; /* they asked us something: answer it first */
+        return HU_CURIOSITY_NONE; /* they asked us something: answer it first */
     const int64_t cooldown = (int64_t)HU_CURIOSITY_COOLDOWN_HOURS * 3600;
     pthread_mutex_lock(&s_offered_mu);
     size_t slot = COOLDOWN_SLOTS, oldest = 0;
@@ -99,17 +109,21 @@ bool hu_curiosity_gap_offer_now(const char *contact, size_t contact_len, const c
         if (s_offered[i].at < s_offered[oldest].at)
             oldest = i;
     }
-    bool ok = slot == COOLDOWN_SLOTS || now_s - s_offered[slot].at >= cooldown;
-    if (ok) {
+    hu_curiosity_topic_t t = HU_CURIOSITY_NONE;
+    if (slot == COOLDOWN_SLOTS || now_s - s_offered[slot].at >= cooldown)
+        t = hu_curiosity_gap_pick(
+            recent, recent_len, slot == COOLDOWN_SLOTS ? HU_CURIOSITY_NONE : s_offered[slot].last);
+    if (t != HU_CURIOSITY_NONE && commit) {
         if (slot == COOLDOWN_SLOTS) {
             slot = oldest;
             memcpy(s_offered[slot].contact, contact, contact_len);
             s_offered[slot].contact[contact_len] = '\0';
         }
         s_offered[slot].at = now_s;
+        s_offered[slot].last = t;
     }
     pthread_mutex_unlock(&s_offered_mu);
-    return ok;
+    return t;
 }
 
 hu_gate_mode_t hu_curiosity_gaps_mode(void) {

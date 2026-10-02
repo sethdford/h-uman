@@ -1359,8 +1359,12 @@ static hu_error_t impl_forget(void *ctx, const char *key, size_t key_len, bool *
     sqlite3_finalize(stmt);
     /* The vector side keeps its own copy of the text, so an orphaned vector
      * is still recallable: drop it with the row. Best effort, as on store. */
-    if (*deleted && self->sem_store && self->sem_store->vtable && self->sem_store->vtable->remove)
-        (void)self->sem_store->vtable->remove(self->sem_store->ctx, key, key_len);
+    if (*deleted && self->sem_store && self->sem_store->vtable && self->sem_store->vtable->remove) {
+        hu_error_t rerr = self->sem_store->vtable->remove(self->sem_store->ctx, key, key_len);
+        if (rerr != HU_OK)
+            hu_log_warn("memory.semantic", NULL, "vector remove failed for key %.*s: %s",
+                        (int)key_len, key, hu_error_string(rerr));
+    }
     return HU_OK;
 }
 

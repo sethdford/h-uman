@@ -310,9 +310,9 @@ static void recent_text_keeps_only_notes_since_the_cutoff(void) {
     seed_three(&mem); /* as_of 2026, 2025, 2024 */
     char *out = NULL;
     size_t len = 0;
-    HU_ASSERT_EQ(
-        hu_contact_insights_recent_text(&mem, &a, k_contact, strlen(k_contact), T_2025, &out, &len),
-        HU_OK);
+    HU_ASSERT_EQ(hu_contact_insights_recent_text(&mem, &a, k_contact, strlen(k_contact), T_2025,
+                                                 0.5, &out, &len),
+                 HU_OK);
     HU_ASSERT_NOT_NULL(out);
     HU_ASSERT_EQ(strlen(out), len);
     HU_ASSERT_NOT_NULL(strstr(out, "Initech"));
@@ -322,7 +322,7 @@ static void recent_text_keeps_only_notes_since_the_cutoff(void) {
     a.free(a.ctx, out, len + 1);
     /* nothing that recent: NULL, OK */
     HU_ASSERT_EQ(hu_contact_insights_recent_text(&mem, &a, k_contact, strlen(k_contact), T_2026 + 1,
-                                                 &out, &len),
+                                                 0.5, &out, &len),
                  HU_OK);
     HU_ASSERT_NULL(out);
     HU_ASSERT_EQ(len, (size_t)0);
@@ -336,6 +336,20 @@ static void loader_offers_a_curiosity_gap_only_when_live(void) {
     hu_memory_loader_t loader;
     HU_ASSERT_EQ(hu_memory_loader_init(&loader, &a, &mem, NULL, 8, 4096), HU_OK);
     hu_memory_loader_set_insight_mode_for_test(HU_GATE_LIVE);
+    /* a loader that was not asked to (the tool-loop loads) never offers one */
+    setenv("HU_CURIOSITY_GAPS", "live", 1);
+    hu_curiosity_gaps_reset_for_test();
+    {
+        char *c0 = NULL;
+        size_t c0_len = 0;
+        HU_ASSERT_EQ(hu_memory_loader_load(&loader, "ugh long day", 12, k_contact,
+                                           strlen(k_contact), &c0, &c0_len),
+                     HU_OK);
+        HU_ASSERT_TRUE(c0 == NULL || strstr(c0, "what they have coming up") == NULL);
+        if (c0)
+            a.free(a.ctx, c0, c0_len + 1);
+    }
+    hu_memory_loader_set_offer_gap(&loader, true);
     static const char *const modes[] = {"off", "shadow", "live"};
     for (size_t i = 0; i < 3; i++) {
         hu_curiosity_gaps_reset_for_test();

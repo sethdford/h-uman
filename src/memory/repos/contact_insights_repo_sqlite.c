@@ -193,8 +193,10 @@ static hu_error_t render_rows(hu_memory_t *mem, hu_allocator_t *alloc, const cha
     while (nrows < limit && sqlite3_step(st) == SQLITE_ROW) {
         const char *ins = (const char *)sqlite3_column_text(st, 0);
         size_t il = ins ? strlen(ins) : 0;
-        if (il == 0 || il >= sizeof(rows[0].text))
-            continue; /* an over-long note is dropped whole, never cut mid-line */
+        /* Leave room for "- " and " (as of Mon YYYY)\n" so a picked note always
+         * renders; an over-long note is dropped whole, never cut mid-line. */
+        if (il == 0 || il + 24 >= sizeof(rows[0].text))
+            continue;
         memcpy(rows[nrows].text, ins, il + 1);
         rows[nrows].as_of = (int64_t)sqlite3_column_int64(st, 1);
         nrows++;
@@ -204,7 +206,9 @@ static hu_error_t render_rows(hu_memory_t *mem, hu_allocator_t *alloc, const cha
     size_t order[HU_CONTACT_INSIGHTS_CANDIDATES];
     for (size_t i = 0; i < nrows; i++)
         texts[i] = rows[i].text;
-    size_t npick = hu_contact_insights_select(texts, nrows, query, query_len, max_items, order);
+    /* A tool result can be tens of KB; its opening is enough to score against. */
+    size_t npick = hu_contact_insights_select(
+        texts, nrows, query, query_len > 2048 ? 2048 : query_len, max_items, order);
     size_t len = 0;
     for (size_t k = 0; k < npick; k++) {
         const char *ins = rows[order[k]].text;
@@ -276,7 +280,8 @@ hu_error_t hu_contact_insights_render_for_query(hu_memory_t *mem, hu_allocator_t
 
 hu_error_t hu_contact_insights_recent_text(hu_memory_t *mem, hu_allocator_t *alloc,
                                            const char *contact_id, size_t contact_id_len,
-                                           int64_t since_ms, char **out, size_t *out_len) {
+                                           int64_t since_ms, double min_confidence, char **out,
+                                           size_t *out_len) {
     if (!alloc || !out || !out_len || !contact_id || contact_id_len == 0)
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
@@ -287,13 +292,17 @@ hu_error_t hu_contact_insights_recent_text(hu_memory_t *mem, hu_allocator_t *all
     sqlite3_stmt *st = NULL;
     if (sqlite3_prepare_v2(db,
                            "SELECT insight FROM contact_insights WHERE contact_id = ?1"
-                           " AND retired_at_ms = 0 AND confidence >= 0.5"
+                           " AND retired_at_ms = 0 AND confidence >= ?3"
+                           " AND (?4 OR source IS NULL OR source NOT LIKE 'curator_wide%')"
                            " AND (CASE WHEN as_of_ms > 0 THEN as_of_ms ELSE created_at_ms END)"
                            " >= ?2 ORDER BY as_of_ms DESC, id DESC LIMIT 200",
                            -1, &st, NULL) != SQLITE_OK)
         return HU_OK; /* no table yet: nothing known */
     sqlite3_bind_text(st, 1, contact_id, (int)contact_id_len, SQLITE_STATIC);
     sqlite3_bind_int64(st, 2, (sqlite3_int64)since_ms);
+    sqlite3_bind_double(st, 3, min_confidence);
+    sqlite3_bind_int(st, 4,
+                     hu_gate_mode_from_env("HU_INSIGHT_WIDE", HU_GATE_OFF) == HU_GATE_LIVE ? 1 : 0);
     size_t cap = 0, len = 0;
     char *buf = NULL;
     hu_error_t err = HU_OK;
@@ -397,12 +406,14 @@ hu_error_t hu_contact_insights_render_for_query(hu_memory_t *mem, hu_allocator_t
 
 hu_error_t hu_contact_insights_recent_text(hu_memory_t *mem, hu_allocator_t *alloc,
                                            const char *contact_id, size_t contact_id_len,
-                                           int64_t since_ms, char **out, size_t *out_len) {
+                                           int64_t since_ms, double min_confidence, char **out,
+                                           size_t *out_len) {
     (void)mem;
     (void)alloc;
     (void)contact_id;
     (void)contact_id_len;
     (void)since_ms;
+    (void)min_confidence;
     if (out)
         *out = NULL;
     if (out_len)

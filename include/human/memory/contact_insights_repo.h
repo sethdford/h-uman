@@ -75,11 +75,14 @@ hu_error_t hu_contact_insights_render_for_query(hu_memory_t *mem, hu_allocator_t
                                                 double min_confidence, char **out, size_t *out_len);
 
 /* The contact's live insights that became true at or after since_ms (as_of,
- * else created_at), newest first, joined with '\n' — at most 200 rows. For
- * deciding what has gone unmentioned lately, not for the prompt. *out is
- * allocated with `alloc` (*out_len + 1 bytes); none: *out = NULL, HU_OK. */
+ * else created_at), newest first, joined with '\n' — at most 200 rows, with
+ * the same confidence floor and curator_wide rule as the rendered block, so
+ * "covered" means covered by notes the model can be shown. For deciding what
+ * has gone unmentioned lately, not for the prompt. *out is allocated with
+ * `alloc` (*out_len + 1 bytes); none: *out = NULL, HU_OK. */
 hu_error_t hu_contact_insights_recent_text(hu_memory_t *mem, hu_allocator_t *alloc,
                                            const char *contact_id, size_t contact_id_len,
-                                           int64_t since_ms, char **out, size_t *out_len);
+                                           int64_t since_ms, double min_confidence, char **out,
+                                           size_t *out_len);
 
 #endif /* HU_MEMORY_CONTACT_INSIGHTS_REPO_H */

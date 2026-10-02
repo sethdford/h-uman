@@ -125,20 +125,20 @@ static const char k_insight_header[] =
 static const char *curiosity_gap_for(hu_memory_loader_t *loader, const char *query,
                                      size_t query_len, const char *sid, size_t sid_len) {
     hu_gate_mode_t cg = hu_curiosity_gaps_mode();
-    if (cg == HU_GATE_OFF)
+    if (cg == HU_GATE_OFF || !loader->offer_curiosity_gap)
         return NULL;
     int64_t now_s = (int64_t)time(NULL);
     int64_t since_ms = (now_s - (int64_t)HU_CURIOSITY_RECENT_DAYS * 86400) * 1000;
     char *recent = NULL;
     size_t recent_len = 0;
     if (hu_contact_insights_recent_text(loader->memory, loader->alloc, sid, sid_len, since_ms,
-                                        &recent, &recent_len) != HU_OK)
+                                        HU_INSIGHT_MIN_CONFIDENCE, &recent, &recent_len) != HU_OK)
         return NULL;
-    hu_curiosity_topic_t t = hu_curiosity_gap_pick(recent, recent_len);
+    hu_curiosity_topic_t t = hu_curiosity_gap_offer(sid, sid_len, query, query_len, recent,
+                                                    recent_len, now_s, cg == HU_GATE_LIVE);
     if (recent)
         loader->alloc->free(loader->alloc->ctx, recent, recent_len + 1);
-    if (t == HU_CURIOSITY_NONE ||
-        !hu_curiosity_gap_offer_now(sid, sid_len, query, query_len, now_s))
+    if (t == HU_CURIOSITY_NONE)
         return NULL;
     const char *line = hu_curiosity_gap_line(t);
     if (cg == HU_GATE_SHADOW) {
@@ -250,6 +250,7 @@ hu_error_t hu_memory_loader_init(hu_memory_loader_t *loader, hu_allocator_t *all
     loader->facade = NULL;
     loader->personal_model = NULL;
     loader->persona_ctx = NULL;
+    loader->offer_curiosity_gap = false;
     return HU_OK;
 }
 
@@ -257,6 +258,11 @@ void hu_memory_loader_set_facade(hu_memory_loader_t *loader, struct hu_w7_facade
     if (!loader)
         return;
     loader->facade = facade;
+}
+
+void hu_memory_loader_set_offer_gap(hu_memory_loader_t *loader, bool offer) {
+    if (loader)
+        loader->offer_curiosity_gap = offer;
 }
 
 void hu_memory_loader_set_personal_model(hu_memory_loader_t *loader, struct hu_personal_model *pm) {
