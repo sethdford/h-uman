@@ -36,7 +36,7 @@ count_cross() {
       | sed -E 's#.*human/channels/([a-z_]+)\.h.*#\1#' \
       | while IFS= read -r inc; do
           case "$inc" in
-            "$base"|format|dispatch|contact_signature|channel_embed|behavior_class|reaction_event|meta_common|imessage_caps|imessage_schema|imessage_bb_event|imessage_send_observer|imessage_voice_record|channel_mock) ;;
+            "$base"|format|dispatch|contact_signature|channel_embed|behavior_class|reaction_event|meta_common|imessage_caps|imessage_schema|imessage_bb_event|imessage_send_observer|imessage_send_route|imessage_voice_record|channel_mock) ;;
             *) echo x ;;
           esac
         done | wc -l | tr -d ' ')
@@ -54,7 +54,7 @@ list_cross() {
       | sed -E 's#.*human/channels/([a-z_]+)\.h.*#\1#' \
       | while IFS= read -r inc; do
           case "$inc" in
-            "$base"|format|dispatch|contact_signature|channel_embed|behavior_class|reaction_event|meta_common|imessage_caps|imessage_schema|imessage_bb_event|imessage_send_observer|imessage_voice_record|channel_mock) ;;
+            "$base"|format|dispatch|contact_signature|channel_embed|behavior_class|reaction_event|meta_common|imessage_caps|imessage_schema|imessage_bb_event|imessage_send_observer|imessage_send_route|imessage_voice_record|channel_mock) ;;
             *) echo "  $f -> $inc.h" ;;
           esac
         done

@@ -17,7 +17,9 @@
  * fails on every Linux job. Stub runner in #else keeps the symbol resolvable.
  * See .claude/rules/test-source-gate-symmetry.md. */
 #if HU_HAS_IMESSAGE
+#include "human/channel_loop.h"
 #include "human/channels/imessage.h"
+#include "human/channels/imessage_send_route.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -91,6 +93,52 @@ static void test_applescript_service_type_token(void) {
     HU_ASSERT_TRUE(strcmp(hu_imessage_applescript_service_type(""), "iMessage") == 0);
 }
 
+/* Wiring (2026-09-26 lost reply): the channel's poll path is what teaches
+ * the send path which chat a contact wrote on. A 1:1 inbound on an SMS chat
+ * must leave an SMS route behind; a group message must not (a group reply
+ * goes to the group, never to one member's 1:1). */
+static void poll_remembers_the_sms_chat_a_contact_wrote_on(void) {
+    hu_imsg_route_reset();
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    HU_ASSERT_EQ(hu_imessage_create(&alloc, "+15551234567", 12, NULL, 0, &ch), HU_OK);
+    hu_imsg_send_route_t r;
+    HU_ASSERT_FALSE(hu_imsg_route_lookup("+15550003333", 12, &r));
+
+    hu_imessage_test_msg_opts_t opts = {.chat_id = "SMS;-;+15550003333"};
+    HU_ASSERT_EQ(hu_imessage_test_inject_mock_full(&ch, "+15550003333", 12, "not much", 8, &opts),
+                 HU_OK);
+    hu_channel_loop_msg_t msgs[2];
+    memset(msgs, 0, sizeof(msgs));
+    size_t count = 0;
+    HU_ASSERT_EQ(hu_imessage_poll(ch.ctx, &alloc, msgs, 2, &count), HU_OK);
+    HU_ASSERT_EQ(count, 1u);
+
+    HU_ASSERT_TRUE(hu_imsg_route_lookup("+15550003333", 12, &r));
+    HU_ASSERT_EQ((int)r.service, (int)HU_IMSG_SERVICE_SMS);
+    HU_ASSERT_STR_EQ(r.chat_guid, "SMS;-;+15550003333");
+    hu_imessage_destroy(&ch);
+    hu_imsg_route_reset();
+}
+
+static void poll_group_message_leaves_no_route(void) {
+    hu_imsg_route_reset();
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    HU_ASSERT_EQ(hu_imessage_create(&alloc, "+15551234567", 12, NULL, 0, &ch), HU_OK);
+    hu_imessage_test_msg_opts_t opts = {.chat_id = "SMS;+;chat42", .is_group = true};
+    HU_ASSERT_EQ(hu_imessage_test_inject_mock_full(&ch, "+15550004444", 12, "group hi", 8, &opts),
+                 HU_OK);
+    hu_channel_loop_msg_t msgs[2];
+    memset(msgs, 0, sizeof(msgs));
+    size_t count = 0;
+    HU_ASSERT_EQ(hu_imessage_poll(ch.ctx, &alloc, msgs, 2, &count), HU_OK);
+    HU_ASSERT_EQ(count, 1u);
+    hu_imsg_send_route_t r;
+    HU_ASSERT_FALSE(hu_imsg_route_lookup("+15550004444", 12, &r));
+    hu_imessage_destroy(&ch);
+}
+
 void run_imessage_send_service_tests(void) {
     HU_RUN_TEST(test_send_service_defaults_to_auto);
     HU_RUN_TEST(test_send_service_env_can_restore_imessage_only);
@@ -98,6 +146,8 @@ void run_imessage_send_service_tests(void) {
     HU_RUN_TEST(test_send_service_rejects_anything_else);
     HU_RUN_TEST(test_send_service_is_never_null_or_empty);
     HU_RUN_TEST(test_applescript_service_type_token);
+    HU_RUN_TEST(poll_remembers_the_sms_chat_a_contact_wrote_on);
+    HU_RUN_TEST(poll_group_message_leaves_no_route);
 }
 
 #else

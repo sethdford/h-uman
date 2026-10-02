@@ -1,0 +1,231 @@
+/* Outbound route + outcome for iMessage-channel text sends. Contract and the
+ * 2026-09-26 incident that motivated it: include/human/channels/imessage_send_route.h. */
+#include "human/channels/imessage_send_route.h"
+#include <pthread.h>
+#include <stdio.h>
+#include <string.h>
+
+#define ROUTE_SLOTS      64
+#define ROUTE_HANDLE_MAX 128
+
+typedef struct {
+    char handle[ROUTE_HANDLE_MAX];
+    size_t handle_len;
+    hu_imsg_send_route_t route;
+    unsigned long seq; /* recency, for replacement */
+} route_slot_t;
+
+static route_slot_t s_slots[ROUTE_SLOTS];
+static unsigned long s_seq;
+static pthread_mutex_t s_mu = PTHREAD_MUTEX_INITIALIZER;
+
+const char *hu_imsg_route_service_name(hu_imessage_service_t svc) {
+    switch (svc) {
+    case HU_IMSG_SERVICE_IMESSAGE:
+        return "iMessage";
+    case HU_IMSG_SERVICE_SMS:
+        return "SMS";
+    case HU_IMSG_SERVICE_RCS:
+        return "RCS";
+    default:
+        return "unknown";
+    }
+}
+
+/* Whitelist, not escaping: the GUID goes into argv and into an AppleScript
+ * string literal. Real chat GUIDs ("any;-;+1555…", "SMS;-;x@y.com",
+ * "iMessage;+;chat123") use only these characters. */
+static bool guid_is_safe(const char *g, size_t len) {
+    if (!g || len == 0 || len >= HU_IMSG_ROUTE_GUID_MAX)
+        return false;
+    for (size_t i = 0; i < len; i++) {
+        char ch = g[i];
+        bool ok = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+                  (ch >= '0' && ch <= '9') || ch == ';' || ch == '+' || ch == '@' || ch == '.' ||
+                  ch == '_' || ch == '-';
+        if (!ok)
+            return false;
+    }
+    return true;
+}
+
+static hu_imessage_service_t service_from_guid_prefix(const char *g) {
+    const char *semi = strchr(g, ';');
+    if (!semi)
+        return HU_IMSG_SERVICE_UNKNOWN;
+    return hu_imessage_service_from_string(g, (size_t)(semi - g));
+}
+
+void hu_imsg_route_note_inbound(const char *handle, size_t handle_len, const char *chat_guid,
+                                const char *service) {
+    if (!handle || handle_len == 0 || handle_len >= ROUTE_HANDLE_MAX || !chat_guid)
+        return;
+    size_t glen = strlen(chat_guid);
+    if (!guid_is_safe(chat_guid, glen))
+        return;
+    hu_imessage_service_t svc = service ? hu_imessage_service_from_string(service, strlen(service))
+                                        : HU_IMSG_SERVICE_UNKNOWN;
+    if (svc == HU_IMSG_SERVICE_UNKNOWN)
+        svc = service_from_guid_prefix(chat_guid);
+
+    pthread_mutex_lock(&s_mu);
+    route_slot_t *slot = NULL;
+    route_slot_t *oldest = &s_slots[0];
+    for (size_t i = 0; i < ROUTE_SLOTS; i++) {
+        route_slot_t *s = &s_slots[i];
+        if (s->handle_len == handle_len && memcmp(s->handle, handle, handle_len) == 0) {
+            slot = s;
+            break;
+        }
+        if (s->seq < oldest->seq)
+            oldest = s;
+    }
+    if (!slot) {
+        slot = oldest;
+        memset(slot, 0, sizeof(*slot));
+        memcpy(slot->handle, handle, handle_len);
+        slot->handle_len = handle_len;
+    }
+    memcpy(slot->route.chat_guid, chat_guid, glen + 1);
+    slot->route.service = svc;
+    slot->seq = ++s_seq;
+    pthread_mutex_unlock(&s_mu);
+}
+
+bool hu_imsg_route_lookup(const char *handle, size_t handle_len, hu_imsg_send_route_t *out) {
+    if (!handle || handle_len == 0 || !out)
+        return false;
+    bool hit = false;
+    pthread_mutex_lock(&s_mu);
+    for (size_t i = 0; i < ROUTE_SLOTS; i++) {
+        const route_slot_t *s = &s_slots[i];
+        if (s->seq != 0 && s->handle_len == handle_len &&
+            memcmp(s->handle, handle, handle_len) == 0) {
+            *out = s->route;
+            hit = true;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&s_mu);
+    return hit;
+}
+
+void hu_imsg_route_reset(void) {
+    pthread_mutex_lock(&s_mu);
+    memset(s_slots, 0, sizeof(s_slots));
+    s_seq = 0;
+    pthread_mutex_unlock(&s_mu);
+}
+
+bool hu_imsg_route_by_chat(const hu_imsg_send_route_t *route) {
+    return route && route->chat_guid[0] &&
+           (route->service == HU_IMSG_SERVICE_SMS || route->service == HU_IMSG_SERVICE_RCS);
+}
+
+size_t hu_imsg_route_build_argv(const hu_imsg_send_route_t *route, const char *to, const char *text,
+                                const char *service, const char **argv, size_t cap) {
+    if (!argv || !text)
+        return 0;
+    if (hu_imsg_route_by_chat(route)) {
+        if (cap < 7)
+            return 0;
+        /* No --service: the chat carries its own (SMS or RCS). */
+        const char *v[] = {"imsg", "send", "--chat-guid", route->chat_guid, "--text", text, NULL};
+        memcpy(argv, v, sizeof(v));
+        return 6;
+    }
+    if (cap < 9 || !to || !service)
+        return 0;
+    /* Pre-fix argv, unchanged. */
+    const char *v[] = {"imsg", "send", "--to", to, "--text", text, "--service", service, NULL};
+    memcpy(argv, v, sizeof(v));
+    return 8;
+}
+
+int hu_imsg_route_build_applescript(const hu_imsg_send_route_t *route, const char *as_service,
+                                    const char *tgt_esc, const char *msg_esc, char *out,
+                                    size_t cap) {
+    if (!out || cap == 0 || !msg_esc)
+        return -1;
+    if (hu_imsg_route_by_chat(route)) {
+        /* The chat's own account decides the service. Bounded: an unanswered
+         * Apple event otherwise holds the daemon for its 120 s default. */
+        return snprintf(out, cap,
+                        "tell application \"Messages\"\n"
+                        "  with timeout of 20 seconds\n"
+                        "    set targetChat to chat id \"%s\"\n"
+                        "    send \"%s\" to targetChat\n"
+                        "  end timeout\n"
+                        "end tell",
+                        route->chat_guid, msg_esc);
+    }
+    if (!as_service || !tgt_esc)
+        return -1;
+    /* Pre-fix script, unchanged. */
+    return snprintf(out, cap,
+                    "tell application \"Messages\"\n"
+                    "  set targetService to 1st service whose service type = %s\n"
+                    "  set targetBuddy to buddy \"%s\" of targetService\n"
+                    "  send \"%s\" to targetBuddy\n"
+                    "end tell",
+                    as_service, tgt_esc, msg_esc);
+}
+
+size_t hu_imsg_send_outcome_format(char *out, size_t cap, const char *path, bool ok,
+                                   const hu_imsg_send_route_t *route) {
+    if (!out || cap == 0)
+        return 0;
+    int n = snprintf(out, cap, "[send] path=%s result=%s chat_service=%s by_chat=%d",
+                     path ? path : "?", ok ? "ok" : "fail",
+                     hu_imsg_route_service_name(route ? route->service : HU_IMSG_SERVICE_UNKNOWN),
+                     hu_imsg_route_by_chat(route) ? 1 : 0);
+    if (n < 0) {
+        out[0] = '\0';
+        return 0;
+    }
+    return (size_t)n < cap ? (size_t)n : cap - 1;
+}
+
+static void log_attempt(const hu_imsg_send_backend_t *be, const char *path, bool ok,
+                        const hu_imsg_send_route_t *route) {
+    if (!be->log_outcome)
+        return;
+    char line[128];
+    hu_imsg_send_outcome_format(line, sizeof(line), path, ok, route);
+    be->log_outcome(be->ctx, line);
+}
+
+hu_imsg_send_path_t hu_imsg_send_text_via(const hu_imsg_send_backend_t *be,
+                                          const hu_imsg_send_request_t *req) {
+    if (!be || !req || !req->text)
+        return HU_IMSG_SEND_PATH_NONE;
+    if (be->imsg_available && be->run_imsg) {
+        const char *argv[10];
+        if (hu_imsg_route_build_argv(req->route, req->to, req->text, req->service, argv, 10) > 0) {
+            bool ok = be->run_imsg(be->ctx, argv);
+            log_attempt(be, "imsg", ok, req->route);
+            if (ok)
+                return HU_IMSG_SEND_PATH_IMSG;
+        }
+    }
+    if (!be->run_applescript)
+        return HU_IMSG_SEND_PATH_NONE;
+    size_t cap = 256 + strlen(req->msg_esc ? req->msg_esc : "") +
+                 strlen(req->tgt_esc ? req->tgt_esc : "") + HU_IMSG_ROUTE_GUID_MAX;
+    /* The caller caps text at 1000 chars (<= 2000 escaped), so this always
+     * fits; an oversized request is refused and logged, never truncated. */
+    char script[4608];
+    if (cap > sizeof(script)) {
+        log_attempt(be, "applescript", false, req->route);
+        return HU_IMSG_SEND_PATH_NONE;
+    }
+    int n = hu_imsg_route_build_applescript(req->route, req->as_service, req->tgt_esc, req->msg_esc,
+                                            script, cap);
+    if (n < 0 || (size_t)n >= cap) {
+        log_attempt(be, "applescript", false, req->route);
+        return HU_IMSG_SEND_PATH_NONE;
+    }
+    bool ok = be->run_applescript(be->ctx, script);
+    log_attempt(be, "applescript", ok, req->route);
+    return ok ? HU_IMSG_SEND_PATH_APPLESCRIPT : HU_IMSG_SEND_PATH_NONE;
+}

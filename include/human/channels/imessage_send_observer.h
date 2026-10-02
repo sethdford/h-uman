@@ -60,6 +60,26 @@ bool hu_imessage_send_observer_active(void);
  * the handle is empty. */
 void hu_imessage_send_observer_notify(const hu_imessage_sent_event_t *ev);
 
+/* ── Final send FAILURE (2026-09-26) ──────────────────────────────────────
+ * A text send whose every path failed is reported here once, so it is never
+ * lost silently: the daemon records a send_failed row the proactive pass can
+ * read and tells the owner. Policy holds (blue_guard, exclusion) are NOT
+ * failures and are not reported. Same process-wide, one-observer shape. */
+typedef struct hu_imessage_send_failed_event {
+    const char *handle; /* (ptr, len), not NUL-terminated */
+    size_t handle_len;
+    const char *chat_service; /* "iMessage" / "SMS" / "RCS" / "unknown" */
+    const char *text;         /* final text that did not go out */
+    size_t text_len;
+} hu_imessage_send_failed_event_t;
+
+typedef void (*hu_imessage_send_failure_fn)(void *user, const hu_imessage_send_failed_event_t *ev);
+
+void hu_imessage_send_failure_observer_set(hu_imessage_send_failure_fn fn, void *user);
+
+/* No-op when no observer is set, ev is NULL, or the handle is empty. */
+void hu_imessage_send_failure_notify(const hu_imessage_send_failed_event_t *ev);
+
 #ifdef __cplusplus
 }
 #endif
