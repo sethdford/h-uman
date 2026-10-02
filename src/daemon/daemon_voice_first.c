@@ -1,8 +1,11 @@
 #include "human/agent.h"
 #include "human/channels/imessage_voice_record.h"
 #include "human/context/voice_intent.h"
+#include "human/context/voice_triggers.h"
 #include "human/core/gate_mode.h"
 #include "human/core/log.h"
+#include "human/daemon/reactive_turn.h"
+#include "human/daemon/share_queue.h"
 #include "human/daemon/voice_first.h"
 #include "human/persona.h"
 #if defined(HU_ENABLE_SQLITE)
@@ -41,7 +44,8 @@ static int64_t secs_since_last_memo(struct hu_agent *agent, const char *contact)
     sqlite3 *db = memory_db(agent);
     int64_t ts = -1;
     if (!db || !contact[0] ||
-        hu_proactive_decisions_repo_last_sent_ts(db, contact, "voice_reply", &ts) != HU_OK ||
+        hu_proactive_decisions_repo_last_sent_ts_except(db, contact, "voice_reply",
+                                                        HU_VOICE_SELF_TEST_REASON, &ts) != HU_OK ||
         ts < 0)
         return -1;
     int64_t d = (int64_t)time(NULL) - ts;
@@ -95,10 +99,107 @@ static bool contact_listed(const char *key, size_t key_len) {
     return key && allow && allow[0] && hu_voice_record_handle_allowed(allow, key, key_len);
 }
 
+/* v2 VOICE decisions (would-voice in SHADOW) to this contact in the last week. */
+static uint32_t v2_memos_this_week(struct hu_agent *agent, const char *contact) {
+#if defined(HU_ENABLE_SQLITE)
+    sqlite3 *db = memory_db(agent);
+    int64_t n = 0;
+    if (!db || !contact[0] ||
+        hu_proactive_decisions_repo_count_since(db, contact, "voice_v2", HU_PROACTIVE_DECISION_SEND,
+                                                (int64_t)time(NULL) - HU_VOICE_V2_WEEK_SEC,
+                                                &n) != HU_OK)
+        return 0;
+    return n > 0 ? (uint32_t)n : 0;
+#else
+    (void)agent;
+    (void)contact;
+    return 0;
+#endif
+}
+
+static void record_v2(struct hu_agent *agent, const char *contact, bool voice, const char *why) {
+#if defined(HU_ENABLE_SQLITE)
+    sqlite3 *db = memory_db(agent);
+    if (db && contact[0])
+        (void)hu_proactive_decisions_repo_record(
+            db, (int64_t)time(NULL), contact, "voice_v2",
+            voice ? HU_PROACTIVE_DECISION_SEND : HU_PROACTIVE_DECISION_DECLINE, why, 0, NULL);
+#else
+    (void)agent;
+    (void)contact;
+    (void)voice;
+    (void)why;
+#endif
+}
+
+/* A 16-bit tag for the shadow log: enough to count per contact, too coarse to
+ * name a phone number (each tag has ~150k preimages among 10-digit numbers). */
+static unsigned contact_tag(const char *s, size_t n) {
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < n; i++)
+        h = (h ^ (unsigned char)s[i]) * 16777619u;
+    return (unsigned)((h ^ (h >> 16)) & 0xffffu);
+}
+
+static int local_minute_now(void) {
+    time_t t = time(NULL);
+    struct tm tmv;
+    if (!localtime_r(&t, &tmv))
+        return -1;
+    return tmv.tm_hour * 60 + tmv.tm_min;
+}
+
+/* Voice triggers v2: only where the base decision found no trigger, so audio,
+ * logistics and spacing still win. SHADOW logs and records the would-voice
+ * decision; LIVE lets it choose voice. HU_VOICE_TRIGGERS_V2 LIVE is gated on
+ * the shadow would-voice rate for close, non-owner contacts landing in 5-12% of
+ * replies and Seth listening to the first shadow-picked moments; see
+ * docs/guides/voice-triggers.md. */
+static void voice_v2_apply(struct hu_agent *agent, hu_gate_mode_t mode, const char *contact,
+                           size_t contact_len, const char *inbound, size_t inbound_len,
+                           uint32_t planned, const hu_reactive_turn_ctx_t *rt,
+                           hu_daemon_voice_first_t *out) {
+    /* One line per decision, so the line count is the rate's denominator. v2
+     * runs only where the base decision found no trigger; elsewhere the base
+     * decision stands (reason "base"). */
+    const char *base = out->reason;
+    bool evaluate = strcmp(base, "no_trigger") == 0;
+    const hu_contact_profile_t *cp = hu_persona_find_contact(agent->persona, contact, contact_len);
+    hu_voice_v2_facts_t f = {
+        .inbound = inbound,
+        .inbound_len = inbound ? inbound_len : 0,
+        .planned_reply_chars = planned,
+        .local_minute = local_minute_now(),
+        .close_contact = hu_voice_v2_close_contact(cp),
+        .secs_since_owner_reply = rt ? hu_daemon_voice_first_secs_since_owner_reply(
+                                           rt->history_entries, rt->history_count, time(NULL))
+                                     : -1,
+        .v2_memos_this_week = v2_memos_this_week(agent, contact),
+        .weekly_cap = hu_voice_v2_parse_weekly_cap(getenv("HU_VOICE_V2_WEEKLY_CAP")),
+    };
+    const char *why = "base";
+    bool voice = evaluate ? hu_voice_v2_decide(&f, &why) : out->decision == HU_VOICE_SEND_VOICE;
+    hu_log_info("voice_first", NULL,
+                "[HU_VOICE_TRIGGERS_V2 %s] base=%s reason=%s would_voice=%d contact=%04x owner=%d "
+                "close=%d week=%u planned=%u",
+                mode == HU_GATE_LIVE ? "live" : "shadow", base, why, voice ? 1 : 0,
+                contact_tag(contact, contact_len),
+                hu_share_is_owner(agent->persona, contact, contact_len) ? 1 : 0,
+                f.close_contact ? 1 : 0, f.v2_memos_this_week, planned);
+    if (!evaluate)
+        return;
+    record_v2(agent, contact, voice, why);
+    if (mode == HU_GATE_LIVE && voice) {
+        out->decision = HU_VOICE_SEND_VOICE;
+        out->reason = why;
+    }
+}
+
 void hu_daemon_voice_first_prepare(hu_allocator_t *alloc, struct hu_agent *agent,
                                    const char *batch_key, size_t key_len, bool is_group, bool force,
                                    const char *inbound, size_t inbound_len, char **convo_ctx,
                                    size_t *convo_ctx_len, uint32_t *max_chars,
+                                   const struct hu_reactive_turn_ctx *rt,
                                    hu_daemon_voice_first_t *out) {
     if (!out)
         return;
@@ -134,6 +235,10 @@ void hu_daemon_voice_first_prepare(hu_allocator_t *alloc, struct hu_agent *agent
         out->reason = "self_test";
     } else {
         out->decision = hu_voice_intent_decide(&facts, &out->reason);
+        hu_gate_mode_t v2 = hu_gate_mode_from_env("HU_VOICE_TRIGGERS_V2", HU_GATE_OFF);
+        if (v2 != HU_GATE_OFF)
+            voice_v2_apply(agent, v2, contact, n, inbound, inbound_len, max_chars ? *max_chars : 0,
+                           rt, out);
     }
 
     bool listed = contact_listed(contact, n);
@@ -170,4 +275,35 @@ void hu_daemon_voice_first_direction(char *direction, size_t cap) {
         snprintf(direction, cap, "%s: %s", k_memo, objective);
     else
         snprintf(direction, cap, "%s", k_memo);
+}
+
+const char *hu_daemon_voice_first_reply_reason(int voice_first) {
+    return voice_first == HU_VOICE_FIRST_FORCED ? HU_VOICE_SELF_TEST_REASON : "voice_first";
+}
+
+/* chat.db history stamps are "YYYY-MM-DD HH:MM:SS" in local time. */
+static int64_t parse_local_stamp(const char *ts) {
+    struct tm tmv;
+    memset(&tmv, 0, sizeof(tmv));
+    char tail = 0;
+    if (sscanf(ts, "%4d-%2d-%2d %2d:%2d:%2d%c", &tmv.tm_year, &tmv.tm_mon, &tmv.tm_mday,
+               &tmv.tm_hour, &tmv.tm_min, &tmv.tm_sec, &tail) != 6)
+        return -1;
+    tmv.tm_year -= 1900;
+    tmv.tm_mon -= 1;
+    tmv.tm_isdst = -1;
+    time_t t = mktime(&tmv);
+    return t == (time_t)-1 ? -1 : (int64_t)t;
+}
+
+int64_t hu_daemon_voice_first_secs_since_owner_reply(const hu_channel_history_entry_t *history,
+                                                     size_t count, int64_t now) {
+    for (size_t i = count; history && i > 0; i--) {
+        if (!history[i - 1].from_me)
+            continue;
+        int64_t t = parse_local_stamp(history[i - 1].timestamp);
+        if (t >= 0)
+            return now > t ? now - t : 0;
+    }
+    return -1;
 }
