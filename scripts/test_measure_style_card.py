@@ -158,6 +158,33 @@ class RunCli(unittest.TestCase):
             for _, reply in pairs:  # no reply text on the card
                 self.assertNotIn(reply, json.dumps(card))
 
+    def test_second_beat_axis_counts_replies_with_two_thoughts(self):
+        """2026-10-02: 52% of Seth's replies carried a second beat (a second
+        bubble, or a second sentence) against 35% of the twin's."""
+        runs = [["Excellent!", "We gonna hang out soon?"],   # two bubbles
+                ["Did they reach out yet?"],                   # one thought
+                ["Got it. appreciate you looking out"],        # one bubble, two sentences
+                ["ok"],
+                ["Sorry crisis at work", "Our internet is down"],
+                ["Mr. Smith said 3.5 is fine"]]                # abbreviation/decimal: one thought
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "test.style-card.json")
+            rc = msc.run(self._args(out), messages=synthetic_corpus(400), reply_runs=runs)
+            self.assertEqual(rc, 0)
+            axis = json.load(open(out))["axes"]["second_beat_rate"]
+            self.assertEqual(axis["n"], 6)
+            self.assertAlmostEqual(axis["value"], 3 / 6)
+            for run in runs:  # no reply text on the card ("ok" alone is inside "tokens")
+                for bubble in run:
+                    if len(bubble) > 3:
+                        self.assertNotIn(bubble, open(out).read())
+
+    def test_no_reply_runs_writes_no_second_beat_axis(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "test.style-card.json")
+            self.assertEqual(msc.run(self._args(out), messages=synthetic_corpus(400)), 0)
+            self.assertNotIn("second_beat_rate", json.load(open(out))["axes"])
+
     def test_no_pairs_given_and_axis_disabled_writes_no_axis(self):
         with tempfile.TemporaryDirectory() as d:
             out = os.path.join(d, "test.style-card.json")
