@@ -37,7 +37,7 @@
 #include <string.h>
 #include <time.h>
 
-#define HU_PROPOSER_CTX_INSIGHT_ITEMS 6
+#define HU_PROPOSER_CTX_INSIGHT_ITEMS 3 /* the reactive path's count since 49a919668 */
 
 /* ── gate ─────────────────────────────────────────────────────────────── */
 
@@ -110,6 +110,9 @@ void hu_proposer_context_begin(hu_proposer_context_t *pc, const hu_provider_t *a
                          mode_name(mode), ok ? "loopback" : "none — thread is never built");
     }
     hu_proposer_context_begin_with_local(pc, mode, ok ? &local : NULL);
+    hu_provider_t prim = {0};
+    if (pc && ok && hu_reliable_primary(agent_provider, &prim) == HU_OK)
+        pc->via = agent_provider; /* re-checked just before each local call */
     hu_proposer_context_capture_thread(pc, entries, n, now_unix);
 }
 
@@ -284,12 +287,25 @@ void hu_proposer_context_build(hu_proposer_context_t *pc, hu_allocator_t *alloc,
     if (alloc && memory && cp && cp->contact_id) {
         char *lines = NULL;
         size_t lines_len = 0;
-        if (hu_contact_insights_render(memory, alloc, cp->contact_id, strlen(cp->contact_id),
-                                       HU_PROPOSER_CTX_INSIGHT_ITEMS, sizeof(pc->memory) - 1,
-                                       HU_INSIGHT_MIN_CONFIDENCE, &lines, &lines_len) == HU_OK &&
+        /* Same selection as the reactive path (render_for_query): the thread
+         * is the query, so insights that share words with it come first. */
+        if (hu_contact_insights_render_for_query(
+                memory, alloc, cp->contact_id, strlen(cp->contact_id), pc->thread, pc->thread_len,
+                HU_PROPOSER_CTX_INSIGHT_ITEMS, sizeof(pc->memory) - 1, HU_INSIGHT_MIN_CONFIDENCE,
+                &lines, &lines_len) == HU_OK &&
             lines && lines_len > 0) {
-            if (!content_is_safe || content_is_safe(lines, lines_len))
-                pc->memory_len = append(pc->memory, sizeof(pc->memory), 0, lines, lines_len);
+            /* One unsafe insight drops that line, not the whole block. */
+            size_t i = 0;
+            while (i < lines_len) {
+                size_t j = i;
+                while (j < lines_len && lines[j] != '\n')
+                    j++;
+                size_t line = j < lines_len ? j - i + 1 : j - i;
+                if (j > i && (!content_is_safe || content_is_safe(lines + i, j - i)))
+                    pc->memory_len =
+                        append(pc->memory, sizeof(pc->memory), pc->memory_len, lines + i, line);
+                i += line;
+            }
             alloc->free(alloc->ctx, lines, lines_len + 1);
         }
     }
@@ -403,19 +419,59 @@ static bool reached_model(hu_init_proposer_result_t r) {
            r == HU_INIT_RESULT_PARSE_ERROR || r == HU_INIT_RESULT_LLM_ERROR;
 }
 
+/* Which provider served the production call: "primary"/"fallback" for a
+ * reliable wrapper, "direct" for any other provider, "none" if nothing did. */
+static const char *served_name(const hu_provider_t *provider) {
+    hu_provider_t tmp = {0};
+    if (!provider || hu_reliable_primary(provider, &tmp) == HU_ERR_INVALID_ARGUMENT)
+        return "direct";
+    int who = hu_reliable_last_served(provider);
+    return who == 0 ? "primary" : who > 0 ? "fallback" : "none";
+}
+
+/* The local provider is still the wrapper's primary with its circuit closed.
+ * Checked just before every local call, not only at begin(). */
+static bool local_still_ok(const hu_proposer_context_t *pc) {
+    if (!pc->local_ok)
+        return false;
+    if (!pc->via)
+        return true;
+    hu_provider_t prim = {0};
+    return hu_reliable_primary(pc->via, &prim) == HU_OK && prim.ctx == pc->local.ctx;
+}
+
 /* ONE aggregate line per event: byte counts, enums and the contact's index in
  * the persona's contact list (stable across restarts, meaningless outside this
- * machine) — never message text, drafts, reasons, names or numbers. */
+ * machine) — never message text, drafts, reasons, names or numbers. ctrl/rich
+ * are FINAL verdicts (threshold + guard + repeat check), as hu_init_proposer_
+ * result_t values; -1 = not run. */
 static void log_event(const hu_proposer_context_t *pc, int contact_idx,
-                      hu_init_proposer_result_t prod, int local_err, bool should_propose,
-                      double confidence, size_t reason_len) {
+                      hu_init_proposer_result_t prod, const char *prod_provider, int local_err) {
     hu_log_info("proposer_context", NULL,
                 "[HU_PROPOSER_CONTEXT %s] outcome=%s contact_idx=%d contact_bytes=%zu "
                 "conversation_bytes=%zu memory_bytes=%zu block_bytes=%zu days_since=%lld "
-                "prod_result=%d local_err=%d should_propose=%d confidence=%.3f reason_len=%zu",
+                "prod_result=%d prod_provider=%s ctrl=%d rich=%d ctrl_conf=%.3f rich_conf=%.3f "
+                "local_err=%d",
                 mode_name(pc->mode), outcome_name(pc->outcome), contact_idx, pc->contact_len,
                 pc->thread_len, pc->memory_len, pc->block_len, (long long)pc->days_since_last,
-                (int)prod, local_err, should_propose ? 1 : 0, confidence, reason_len);
+                (int)prod, prod_provider, pc->shadow_ctrl_result, pc->shadow_rich_result,
+                pc->shadow_ctrl_confidence, pc->shadow_rich_confidence, local_err);
+}
+
+/* One local decide_once + the production verdict pipeline. HU_OK and *out set
+ * to the final verdict, or the local error. */
+static hu_error_t local_final(hu_proposer_context_t *pc, const struct hu_initiative_config *cfg,
+                              struct hu_agent *agent, hu_allocator_t *alloc,
+                              const hu_proactive_compose_inputs_t *in, int64_t now, int *out_result,
+                              double *out_conf) {
+    const char *model = (cfg && cfg->propose_model) ? cfg->propose_model : "";
+    hu_init_decision_t d;
+    hu_error_t err = hu_init_proposer_decide_once(alloc, &pc->local, model, in, now, 0, &d);
+    if (err != HU_OK)
+        return err;
+    *out_result = (int)hu_init_proposer_final_verdict(cfg, agent, alloc, in, now, &d);
+    *out_conf = d.confidence;
+    return HU_OK;
 }
 
 void hu_proposer_context_decide(hu_proposer_context_t *pc, const struct hu_initiative_config *cfg,
@@ -431,8 +487,13 @@ void hu_proposer_context_decide(hu_proposer_context_t *pc, const struct hu_initi
     int64_t last_tick = 0;
     uint64_t tick_id = 0;
     hu_gate_mode_t mode = pc ? pc->mode : HU_GATE_OFF;
-    if (pc)
+    if (pc) {
         pc->outcome = HU_PROPOSER_CTX_NONE;
+        pc->shadow_ctrl_result = -1;
+        pc->shadow_rich_result = -1;
+        pc->shadow_ctrl_confidence = 0.0;
+        pc->shadow_rich_confidence = 0.0;
+    }
 
     if (mode == HU_GATE_OFF || !inputs) { /* today's call, unchanged */
         (void)tick(cfg, ar_cfg, tz_offset_s, budget, agent, provider, alloc, inputs, 0, now_unix,
@@ -446,68 +507,73 @@ void hu_proposer_context_decide(hu_proposer_context_t *pc, const struct hu_initi
     hu_proactive_compose_inputs_t rich = *inputs;
     rich.proposer_context = pc->block;
     rich.proposer_context_len = pc->block_len;
-    bool have_block = pc->local_ok && pc->block_len > 0;
-    uint64_t key = contact_hash(inputs->contact_id ? inputs->contact_id : "",
-                                inputs->contact_id ? inputs->contact_id_len : 0);
     int idx = -1;
     if (agent && agent->persona && cp && cp >= agent->persona->contacts &&
         cp < agent->persona->contacts + agent->persona->contacts_count)
         idx = (int)(cp - agent->persona->contacts);
 
     if (mode == HU_GATE_LIVE) {
-        if (have_block) {
-            /* The local provider itself — never the reliable chain. */
+        if (pc->local_ok && pc->block_len > 0 && local_still_ok(pc)) {
+            /* The local provider itself — never the reliable chain. Its
+             * failure records no row; the fallback below records the one. */
+            rich.defer_llm_failure_row = true;
             (void)tick(cfg, ar_cfg, tz_offset_s, budget, agent, &pc->local, alloc, &rich, 0,
                        now_unix, &last_tick, &tick_id, &result, out_decision);
             if (result != HU_INIT_RESULT_LLM_ERROR && result != HU_INIT_RESULT_PARSE_ERROR) {
                 pc->outcome = HU_PROPOSER_CTX_OK;
-                log_event(pc, idx, result, 0, result == HU_INIT_RESULT_FIRED, 0.0, 0);
+                pc->shadow_rich_result = (int)result;
+                log_event(pc, idx, result, "local", 0);
                 if (out_result)
                     *out_result = result;
                 return;
             }
             pc->outcome = HU_PROPOSER_CTX_LOCAL_UNAVAILABLE;
         } else {
-            pc->outcome = pc->local_ok ? HU_PROPOSER_CTX_EMPTY : HU_PROPOSER_CTX_LOCAL_UNAVAILABLE;
+            pc->outcome = (pc->local_ok && pc->block_len == 0) ? HU_PROPOSER_CTX_EMPTY
+                                                               : HU_PROPOSER_CTX_LOCAL_UNAVAILABLE;
         }
         /* Fall back to today's prompt — the block is NOT carried over. */
         last_tick = 0;
         tick_id = 0;
         (void)tick(cfg, ar_cfg, tz_offset_s, budget, agent, provider, alloc, inputs, 0, now_unix,
                    &last_tick, &tick_id, &result, out_decision);
-        log_event(pc, idx, result, 0, false, 0.0, 0);
+        log_event(pc, idx, result, served_name(provider), 0);
         if (out_result)
             *out_result = result;
         return;
     }
 
-    /* SHADOW: today's call decides; the enriched prompt is only observed. */
+    /* SHADOW: today's call decides. The comparison runs BOTH prompts on the
+     * same local model through the same verdict pipeline — a control with
+     * today's inputs and the enriched one — so the provider (production is
+     * mostly Gemini on fallback) and the threshold/guard/repeat stages cancel. */
     (void)tick(cfg, ar_cfg, tz_offset_s, budget, agent, provider, alloc, inputs, 0, now_unix,
                &last_tick, &tick_id, &result, out_decision);
     if (out_result)
         *out_result = result;
+    const char *prod_provider = served_name(provider);
 
-    hu_init_decision_t shadow;
-    memset(&shadow, 0, sizeof(shadow));
     int local_err = 0;
     if (!reached_model(result))
         pc->outcome = HU_PROPOSER_CTX_NOT_REACHED;
-    else if (!pc->local_ok)
+    else if (!pc->local_ok || !local_still_ok(pc))
         pc->outcome = HU_PROPOSER_CTX_LOCAL_UNAVAILABLE;
     else if (pc->block_len == 0)
         pc->outcome = HU_PROPOSER_CTX_EMPTY;
-    else if (!rate_allow(key, now_unix))
+    else if (!rate_allow(contact_hash(inputs->contact_id ? inputs->contact_id : "",
+                                      inputs->contact_id ? inputs->contact_id_len : 0),
+                         now_unix))
         pc->outcome = HU_PROPOSER_CTX_RATE_LIMITED;
     else {
-        const struct hu_initiative_config *ic = cfg;
-        const char *model = (ic && ic->propose_model) ? ic->propose_model : "";
-        hu_error_t err =
-            hu_init_proposer_decide_once(alloc, &pc->local, model, &rich, now_unix, 0, &shadow);
+        hu_error_t err = local_final(pc, cfg, agent, alloc, inputs, now_unix,
+                                     &pc->shadow_ctrl_result, &pc->shadow_ctrl_confidence);
+        if (err == HU_OK && local_still_ok(pc))
+            err = local_final(pc, cfg, agent, alloc, &rich, now_unix, &pc->shadow_rich_result,
+                              &pc->shadow_rich_confidence);
+        else if (err == HU_OK)
+            err = HU_ERR_PROVIDER_UNAVAILABLE;
         local_err = (int)err;
         pc->outcome = err == HU_OK ? HU_PROPOSER_CTX_OK : HU_PROPOSER_CTX_LOCAL_UNAVAILABLE;
     }
-    pc->shadow_should_propose = pc->outcome == HU_PROPOSER_CTX_OK && shadow.should_propose;
-    pc->shadow_confidence = pc->outcome == HU_PROPOSER_CTX_OK ? shadow.confidence : 0.0;
-    log_event(pc, idx, result, local_err, pc->shadow_should_propose, pc->shadow_confidence,
-              pc->outcome == HU_PROPOSER_CTX_OK ? shadow.skip_reason_len : 0);
+    log_event(pc, idx, result, prod_provider, local_err);
 }

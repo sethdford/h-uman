@@ -107,6 +107,11 @@ void hu_reliable_set_clock(hu_provider_t *reliable, time_t (*now_fn)(void *), vo
  * circuit is open (calls are being routed to the fallbacks). */
 hu_error_t hu_reliable_primary(const hu_provider_t *reliable, hu_provider_t *out);
 
+/* Which provider answered this wrapper's most recent chat call: 0 = the
+ * primary, n = fallback extras[n-1], -1 = none answered (or `reliable` is not
+ * a reliable wrapper). Read-only; for telemetry about where a prompt went. */
+int hu_reliable_last_served(const hu_provider_t *reliable);
+
 void hu_reliable_set_empty_failover(hu_provider_t *reliable, bool on);
 
 #endif /* HU_RELIABLE_H */

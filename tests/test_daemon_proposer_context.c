@@ -67,8 +67,10 @@ static void fake_contact(hu_contact_profile_t *cp) {
 /* Scripted fake provider: answers `reply` and keeps the last user message. */
 typedef struct fake_llm {
     int calls;
-    const char *reply; /* NULL = empty answer */
+    const char *reply;  /* NULL = empty answer */
+    const char *reply2; /* if set, the answer from the 2nd call on */
     char last_msg[16384];
+    char first_msg[16384];
 } fake_llm_t;
 
 static hu_error_t fake_llm_chat(void *ctx, hu_allocator_t *alloc, const char *sys, size_t sys_len,
@@ -84,15 +86,18 @@ static hu_error_t fake_llm_chat(void *ctx, hu_allocator_t *alloc, const char *sy
     size_t n = msg_len < sizeof(f->last_msg) - 1 ? msg_len : sizeof(f->last_msg) - 1;
     memcpy(f->last_msg, msg, n);
     f->last_msg[n] = '\0';
+    if (f->calls == 1)
+        memcpy(f->first_msg, f->last_msg, n + 1);
     *out = NULL;
     *out_len = 0;
-    if (!f->reply)
+    const char *reply = (f->calls > 1 && f->reply2) ? f->reply2 : f->reply;
+    if (!reply)
         return HU_OK;
-    size_t rl = strlen(f->reply);
+    size_t rl = strlen(reply);
     char *b = (char *)alloc->alloc(alloc->ctx, rl + 1);
     if (!b)
         return HU_ERR_OUT_OF_MEMORY;
-    memcpy(b, f->reply, rl + 1);
+    memcpy(b, reply, rl + 1);
     *out = b;
     *out_len = rl;
     return HU_OK;
@@ -100,12 +105,23 @@ static hu_error_t fake_llm_chat(void *ctx, hu_allocator_t *alloc, const char *sy
 
 static const hu_provider_vtable_t fake_llm_vtable = {.chat_with_system = fake_llm_chat};
 
+static hu_error_t always_fail(void *ctx, hu_allocator_t *alloc, const char *s, size_t sl,
+                              const char *m, size_t ml, const char *mo, size_t mol, double t,
+                              char **out, size_t *out_len) {
+    (void)ctx, (void)alloc, (void)s, (void)sl, (void)m, (void)ml, (void)mo, (void)mol, (void)t;
+    *out = NULL;
+    *out_len = 0;
+    return HU_ERR_IO;
+}
+static const hu_provider_vtable_t failing_vtable = {.chat_with_system = always_fail};
+
 /* Fake production tick: records what the proposer was asked and returns a
  * scripted result per call. */
 static struct {
     int calls;
     void *provider_ctx[4];
     char msg[4][16384];
+    bool defer_row[4];
     hu_init_proposer_result_t script[4];
 } g_tick;
 
@@ -127,6 +143,7 @@ static hu_error_t fake_tick(const struct hu_initiative_config *cfg,
     (void)tick_id;
     int i = g_tick.calls < 4 ? g_tick.calls : 3;
     g_tick.provider_ctx[i] = provider ? provider->ctx : NULL;
+    g_tick.defer_row[i] = inputs->defer_llm_failure_row;
     hu_init_proposer_build_propose_user_message_ex(inputs, now, last_inbound, g_tick.msg[i],
                                                    sizeof(g_tick.msg[i]));
     g_tick.calls++;
@@ -321,10 +338,11 @@ static void build_holds_the_budget_with_oversized_inputs(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
-static bool reject_all(const char *s, size_t n) {
-    (void)s;
-    (void)n;
-    return false;
+static bool reject_cross(const char *s, size_t n) {
+    for (size_t i = 0; i + 5 <= n; i++)
+        if (memcmp(s + i, "cross", 5) == 0)
+            return false;
+    return true;
 }
 
 static void build_drops_insights_the_safety_predicate_rejects(void) {
@@ -334,15 +352,51 @@ static void build_drops_insights_the_safety_predicate_rejects(void) {
                                          "something cross-contact", 0.9, 1767225600000LL, "test",
                                          NULL),
                  HU_OK);
+    HU_ASSERT_EQ(hu_contact_insights_add(&mem, k_contact, strlen(k_contact), "fact",
+                                         "starts night shifts in november", 0.9, 1767225500000LL,
+                                         "test", NULL),
+                 HU_OK);
     hu_contact_profile_t cp;
     fake_contact(&cp);
     hu_provider_t local = local_provider(NULL);
     hu_proposer_context_t pc;
     hu_proposer_context_begin_with_local(&pc, HU_GATE_SHADOW, &local);
-    hu_proposer_context_build(&pc, &a, &mem, &cp, reject_all);
-    HU_ASSERT_EQ(pc.memory_len, (size_t)0);
+    hu_proposer_context_build(&pc, &a, &mem, &cp, reject_cross);
+    /* per insight: the unsafe line goes, the safe one stays */
     HU_ASSERT_STR_NOT_CONTAINS(pc.block, "cross-contact");
+    HU_ASSERT_STR_CONTAINS(pc.memory, "night shifts");
     HU_ASSERT_GT(pc.contact_len, (size_t)0); /* the rest still builds */
+    mem.vtable->deinit(mem.ctx);
+}
+static void insights_are_chosen_by_the_thread_like_the_reactive_path(void) {
+    hu_allocator_t a = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&a, ":memory:");
+    /* oldest: the one the thread is about; four newer, unrelated */
+    HU_ASSERT_EQ(hu_contact_insights_add(&mem, k_contact, strlen(k_contact), "thread",
+                                         "the roof guy keeps rescheduling", 0.9, 1767225600000LL,
+                                         "test", NULL),
+                 HU_OK);
+    const char *other[] = {"loves pickleball", "adopted a beagle", "learning italian",
+                           "hates cilantro"};
+    for (int i = 0; i < 4; i++)
+        HU_ASSERT_EQ(hu_contact_insights_add(&mem, k_contact, strlen(k_contact), "fact", other[i],
+                                             0.9, 1767225600000LL + 1000 * (i + 1), "test", NULL),
+                     HU_OK);
+    hu_contact_profile_t cp;
+    fake_contact(&cp);
+    hu_channel_history_entry_t e[3];
+    size_t n = make_thread(e, T_NOW);
+    hu_provider_t local = local_provider(NULL);
+    hu_proposer_context_t pc;
+    hu_proposer_context_begin_with_local(&pc, HU_GATE_SHADOW, &local);
+    hu_proposer_context_capture_thread(&pc, e, n, T_NOW);
+    hu_proposer_context_build(&pc, &a, &mem, &cp, NULL);
+    /* 3 items, and the thread-matching one is picked despite being oldest */
+    HU_ASSERT_STR_CONTAINS(pc.memory, "roof guy keeps rescheduling");
+    size_t lines = 0;
+    for (size_t i = 0; i < pc.memory_len; i++)
+        lines += pc.memory[i] == '\n';
+    HU_ASSERT_EQ(lines, (size_t)3);
     mem.vtable->deinit(mem.ctx);
 }
 #endif /* HU_ENABLE_SQLITE */
@@ -413,8 +467,11 @@ static void decide_off_is_exactly_todays_call(void) {
 /* ── 4. SHADOW ────────────────────────────────────────────────────────── */
 
 static void shadow_keeps_the_decision_input_and_runs_local_once_per_cycle(void) {
+    /* control (today's prompt) declines; the enriched prompt proposes */
     hu_provider_t local =
-        local_provider("{\"should_propose\":true,\"confidence\":0.91,\"draft\":\"x\"}");
+        local_provider("{\"should_propose\":false,\"confidence\":0.2,\"reason\":\"nothing new\"}");
+    g_local_llm.reply2 = "{\"should_propose\":true,\"confidence\":0.91,\"draft\":\"did the "
+                         "roofer ever make it out\"}";
     fake_llm_t rel_llm = {0};
     hu_provider_t reliable = {.ctx = &rel_llm, .vtable = &fake_llm_vtable};
     tick_reset(HU_INIT_RESULT_NEGATIVE, HU_INIT_RESULT_NEGATIVE);
@@ -427,22 +484,24 @@ static void shadow_keeps_the_decision_input_and_runs_local_once_per_cycle(void) 
     HU_ASSERT_TRUE(g_tick.provider_ctx[0] == (void *)&rel_llm);
     HU_ASSERT_STR_EQ(g_tick.msg[0], k_plain_golden);
     HU_ASSERT_EQ((int)r, (int)HU_INIT_RESULT_NEGATIVE); /* shadow said propose; ignored */
-    /* shadow: one call, on the local provider, carrying the thread */
-    HU_ASSERT_EQ(g_local_llm.calls, 1);
+    /* shadow: control + enriched, both on the local provider */
+    HU_ASSERT_EQ(g_local_llm.calls, 2);
+    HU_ASSERT_STR_EQ(g_local_llm.first_msg, k_plain_golden); /* control = today's prompt */
     HU_ASSERT_STR_CONTAINS(g_local_llm.last_msg, "them: did the roof guy");
     HU_ASSERT_EQ(rel_llm.calls, 0);
     HU_ASSERT_EQ((int)pc.outcome, (int)HU_PROPOSER_CTX_OK);
-    HU_ASSERT_TRUE(pc.shadow_should_propose);
+    HU_ASSERT_EQ(pc.shadow_ctrl_result, (int)HU_INIT_RESULT_NEGATIVE);
+    HU_ASSERT_EQ(pc.shadow_rich_result, (int)HU_INIT_RESULT_FIRED);
 
-    /* same contact, same cycle: rate-limited, no second GPU call */
+    /* same contact, same cycle: rate-limited, no further GPU calls */
     g_tick.calls = 0;
     run_decide(&pc, HU_GATE_SHADOW, &local, &reliable, T_NOW, &r);
-    HU_ASSERT_EQ(g_local_llm.calls, 1);
+    HU_ASSERT_EQ(g_local_llm.calls, 2);
     HU_ASSERT_EQ((int)pc.outcome, (int)HU_PROPOSER_CTX_RATE_LIMITED);
     HU_ASSERT_EQ(g_tick.calls, 1); /* production still ran */
     /* next cycle: runs again */
     run_decide(&pc, HU_GATE_SHADOW, &local, &reliable, T_NOW + 1800, &r);
-    HU_ASSERT_EQ(g_local_llm.calls, 2);
+    HU_ASSERT_EQ(g_local_llm.calls, 4);
     hu_proposer_context_set_tick_fn_for_test(NULL);
 }
 
@@ -457,6 +516,65 @@ static void shadow_skips_when_production_never_reached_the_model(void) {
     HU_ASSERT_EQ((int)r, (int)HU_INIT_RESULT_GATED_QUIET);
     HU_ASSERT_EQ(g_local_llm.calls, 0);
     HU_ASSERT_EQ((int)pc.outcome, (int)HU_PROPOSER_CTX_NOT_REACHED);
+    hu_proposer_context_set_tick_fn_for_test(NULL);
+}
+
+/* Review fix: a raw should_propose under the threshold is not a would-propose. */
+static void shadow_scores_both_prompts_through_the_production_threshold(void) {
+    hu_provider_t local = local_provider(
+        "{\"should_propose\":true,\"confidence\":0.95,\"draft\":\"how did the roofer go\"}");
+    g_local_llm.reply2 =
+        "{\"should_propose\":true,\"confidence\":0.5,\"draft\":\"did the roofer show up\"}";
+    fake_llm_t rel_llm = {0};
+    hu_provider_t reliable = {.ctx = &rel_llm, .vtable = &fake_llm_vtable};
+    tick_reset(HU_INIT_RESULT_NEGATIVE, HU_INIT_RESULT_SKIP);
+    hu_proposer_context_t pc;
+    hu_init_proposer_result_t r = HU_INIT_RESULT_SKIP;
+    run_decide(&pc, HU_GATE_SHADOW, &local, &reliable, T_NOW, &r);
+    HU_ASSERT_EQ((int)pc.outcome, (int)HU_PROPOSER_CTX_OK);
+    HU_ASSERT_EQ(pc.shadow_ctrl_result, (int)HU_INIT_RESULT_FIRED);
+    HU_ASSERT_EQ(pc.shadow_rich_result, (int)HU_INIT_RESULT_LOW_CONFIDENCE); /* 0.5 < 0.85 */
+    HU_ASSERT_FLOAT_EQ(pc.shadow_rich_confidence, 0.5, 1e-9);
+    hu_proposer_context_set_tick_fn_for_test(NULL);
+}
+
+/* Review fix: the circuit is re-checked just before the local call. */
+static void shadow_rechecks_the_circuit_before_calling_local(void) {
+    hu_allocator_t a = hu_system_allocator();
+    int dummy_p = 0, dummy_f = 0;
+    hu_provider_t prim = {.ctx = &dummy_p, .vtable = &failing_vtable};
+    hu_provider_t fb = {.ctx = &dummy_f, .vtable = &failing_vtable};
+    hu_reliable_provider_entry_t extras[1] = {{.name = "fb", .name_len = 2, .provider = fb}};
+    hu_provider_t rel = {0};
+    HU_ASSERT_EQ(hu_reliable_create_ex(&a, prim, 0, 50, extras, 1, NULL, 0, &rel), HU_OK);
+    hu_reliable_set_circuit(&rel, 1, 300);
+    char *o = NULL;
+    size_t ol = 0;
+    (void)rel.vtable->chat_with_system(rel.ctx, &a, "s", 1, "m", 1, "x", 1, 0.1, &o, &ol);
+
+    hu_provider_t local = local_provider("{\"should_propose\":true,\"confidence\":0.9}");
+    fake_llm_t rel_llm = {0};
+    hu_provider_t reliable = {.ctx = &rel_llm, .vtable = &fake_llm_vtable};
+    tick_reset(HU_INIT_RESULT_NEGATIVE, HU_INIT_RESULT_SKIP);
+    hu_contact_profile_t cp;
+    fake_contact(&cp);
+    hu_channel_history_entry_t e[3];
+    size_t n = make_thread(e, T_NOW);
+    hu_proposer_context_t pc;
+    hu_proposer_context_begin_with_local(&pc, HU_GATE_SHADOW, &local);
+    hu_proposer_context_capture_thread(&pc, e, n, T_NOW);
+    pc.via = &rel; /* taken from a wrapper whose circuit has since opened */
+    hu_proactive_compose_inputs_t in;
+    plain_inputs(&in);
+    hu_initiative_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    hu_init_decision_t d;
+    hu_init_proposer_result_t r = HU_INIT_RESULT_SKIP;
+    hu_proposer_context_decide(&pc, &cfg, NULL, 0, NULL, NULL, &reliable, &a, &cp, &in, T_NOW, &r,
+                               &d);
+    HU_ASSERT_EQ(g_local_llm.calls, 0);
+    HU_ASSERT_EQ((int)pc.outcome, (int)HU_PROPOSER_CTX_LOCAL_UNAVAILABLE);
+    rel.vtable->deinit(rel.ctx, &a);
     hu_proposer_context_set_tick_fn_for_test(NULL);
 }
 
@@ -521,6 +639,9 @@ static void live_local_failure_falls_back_to_todays_prompt_not_the_thread(void) 
     HU_ASSERT_TRUE(g_tick.provider_ctx[0] == (void *)&g_local_llm);
     HU_ASSERT_TRUE(g_tick.provider_ctx[1] == (void *)&rel_llm);
     HU_ASSERT_STR_EQ(g_tick.msg[1], k_plain_golden); /* the retry carries no thread */
+    /* one decision row: the failed local call records none, the fallback does */
+    HU_ASSERT_TRUE(g_tick.defer_row[0]);
+    HU_ASSERT_FALSE(g_tick.defer_row[1]);
     HU_ASSERT_EQ((int)r, (int)HU_INIT_RESULT_NEGATIVE);
     HU_ASSERT_EQ((int)pc.outcome, (int)HU_PROPOSER_CTX_LOCAL_UNAVAILABLE);
     hu_proposer_context_set_tick_fn_for_test(NULL);
@@ -598,16 +719,6 @@ static void local_provider_unwraps_reliable_primary_only(void) {
     rel2.vtable->deinit(rel2.ctx, &a);
 }
 
-static hu_error_t always_fail(void *ctx, hu_allocator_t *alloc, const char *s, size_t sl,
-                              const char *m, size_t ml, const char *mo, size_t mol, double t,
-                              char **out, size_t *out_len) {
-    (void)ctx, (void)alloc, (void)s, (void)sl, (void)m, (void)ml, (void)mo, (void)mol, (void)t;
-    *out = NULL;
-    *out_len = 0;
-    return HU_ERR_IO;
-}
-static const hu_provider_vtable_t failing_vtable = {.chat_with_system = always_fail};
-
 static void reliable_primary_is_unavailable_while_the_circuit_is_open(void) {
     hu_allocator_t a = hu_system_allocator();
     int dummy_p = 0, dummy_f = 0;
@@ -627,6 +738,45 @@ static void reliable_primary_is_unavailable_while_the_circuit_is_open(void) {
     rel.vtable->deinit(rel.ctx, &a);
 }
 
+/* Review fix: a context-enriched verdict never logs the reason text. */
+static void verdict_log_drops_reason_text_when_the_block_was_used(void) {
+    hu_proactive_compose_inputs_t in;
+    plain_inputs(&in);
+    hu_init_decision_t d;
+    memset(&d, 0, sizeof(d));
+    snprintf(d.skip_reason, sizeof(d.skip_reason), "she said the roof guy flaked again");
+    d.skip_reason_len = strlen(d.skip_reason);
+    char line[512];
+    hu_init_proposer_format_ex_verdict(&in, &d, 9, 100, line, sizeof(line));
+    HU_ASSERT_STR_CONTAINS(line, "reason=she said the roof guy"); /* pre: today's line */
+    in.proposer_context = "\n--- recent thread ---\n[1h ago] them: the roof guy flaked\n";
+    in.proposer_context_len = strlen(in.proposer_context);
+    hu_init_proposer_format_ex_verdict(&in, &d, 9, 100, line, sizeof(line));
+    HU_ASSERT_STR_NOT_CONTAINS(line, "roof");
+    HU_ASSERT_STR_CONTAINS(line, "reason_len=34");
+}
+
+static void reliable_reports_which_provider_served(void) {
+    hu_allocator_t a = hu_system_allocator();
+    int dp = 0;
+    hu_provider_t prim = {.ctx = &dp, .vtable = &failing_vtable};
+    fake_llm_t fb_llm = {0};
+    fb_llm.reply = "ok";
+    hu_provider_t fb = {.ctx = &fb_llm, .vtable = &fake_llm_vtable};
+    hu_reliable_provider_entry_t extras[1] = {{.name = "fb", .name_len = 2, .provider = fb}};
+    hu_provider_t rel = {0};
+    HU_ASSERT_EQ(hu_reliable_create_ex(&a, prim, 0, 50, extras, 1, NULL, 0, &rel), HU_OK);
+    HU_ASSERT_EQ(hu_reliable_last_served(&rel), -1); /* pre: nothing served */
+    char *o = NULL;
+    size_t ol = 0;
+    HU_ASSERT_EQ(rel.vtable->chat_with_system(rel.ctx, &a, "s", 1, "m", 1, "x", 1, 0.1, &o, &ol),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_reliable_last_served(&rel), 1); /* the fallback answered */
+    a.free(a.ctx, o, ol + 1);
+    HU_ASSERT_EQ(hu_reliable_last_served(&prim), -1); /* not a wrapper */
+    rel.vtable->deinit(rel.ctx, &a);
+}
+
 void run_daemon_proposer_context_tests(void) {
     HU_TEST_SUITE("daemon_proposer_context");
     HU_RUN_TEST(render_thread_labels_speakers_times_and_days_since);
@@ -636,6 +786,7 @@ void run_daemon_proposer_context_tests(void) {
     HU_RUN_TEST(build_fills_contact_conversation_memory_within_budget);
     HU_RUN_TEST(build_holds_the_budget_with_oversized_inputs);
     HU_RUN_TEST(build_drops_insights_the_safety_predicate_rejects);
+    HU_RUN_TEST(insights_are_chosen_by_the_thread_like_the_reactive_path);
 #endif
     HU_RUN_TEST(thread_is_never_captured_without_a_local_provider);
     HU_RUN_TEST(nothing_is_captured_when_off);
@@ -643,6 +794,8 @@ void run_daemon_proposer_context_tests(void) {
     HU_RUN_TEST(decide_off_is_exactly_todays_call);
     HU_RUN_TEST(shadow_keeps_the_decision_input_and_runs_local_once_per_cycle);
     HU_RUN_TEST(shadow_skips_when_production_never_reached_the_model);
+    HU_RUN_TEST(shadow_scores_both_prompts_through_the_production_threshold);
+    HU_RUN_TEST(shadow_rechecks_the_circuit_before_calling_local);
     HU_RUN_TEST(shadow_without_local_provider_sends_the_thread_nowhere);
     HU_RUN_TEST(shadow_local_empty_answer_is_local_unavailable);
     HU_RUN_TEST(live_feeds_the_enriched_prompt_to_the_local_provider);
@@ -652,4 +805,6 @@ void run_daemon_proposer_context_tests(void) {
     HU_RUN_TEST(local_provider_accepts_loopback_and_refuses_cloud);
     HU_RUN_TEST(local_provider_unwraps_reliable_primary_only);
     HU_RUN_TEST(reliable_primary_is_unavailable_while_the_circuit_is_open);
+    HU_RUN_TEST(verdict_log_drops_reason_text_when_the_block_was_used);
+    HU_RUN_TEST(reliable_reports_which_provider_served);
 }

@@ -25,10 +25,13 @@
  *
  *   off    — today's call, byte-identical; nothing captured.
  *   shadow — today's call decides. Then, at most once per contact per proposer
- *            cycle and only if the production call reached the model, the
- *            enriched prompt is run once more on the local provider; ONE line
- *            "[HU_PROPOSER_CONTEXT shadow] ..." logs byte counts, should_propose,
- *            confidence and the reason LENGTH. Never sends, never records.
+ *            cycle and only if the production call reached the model, TWO
+ *            local calls run: a control with today's inputs and the enriched
+ *            prompt, each scored by the production verdict pipeline
+ *            (threshold, guard, repeat check). ONE line
+ *            "[HU_PROPOSER_CONTEXT shadow] ..." logs byte counts, both final
+ *            verdicts and confidences, and which provider served production.
+ *            Never sends, never records.
  *   live   — the enriched prompt on the local provider decides. On a local
  *            failure (error / empty / unparseable) the call falls back to
  *            today's un-enriched call.
@@ -77,10 +80,17 @@ typedef struct hu_proposer_context {
     size_t memory_len;
     char block[HU_PROPOSER_CTX_BUDGET + 1];
     size_t block_len;
-    /* What happened on the last decide(). */
+    /* The reliable wrapper the local provider was taken from (NULL = used
+     * directly); its circuit is re-checked just before each local call. */
+    const hu_provider_t *via;
+    /* What happened on the last decide(). ctrl/rich are FINAL verdicts
+     * (hu_init_proposer_result_t; -1 = not run) of the control (today's
+     * inputs) and enriched prompts, both on the local provider. */
     hu_proposer_ctx_outcome_t outcome;
-    bool shadow_should_propose;
-    double shadow_confidence;
+    int shadow_ctrl_result;
+    int shadow_rich_result;
+    double shadow_ctrl_confidence;
+    double shadow_rich_confidence;
 } hu_proposer_context_t;
 
 /* HU_PROPOSER_CONTEXT per hu_gate_mode_parse; unset -> OFF. */
