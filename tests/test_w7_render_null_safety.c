@@ -248,6 +248,41 @@ static void w7_render_empty_personal_model_is_safe(void) {
     w7ns_cleanup(g, f);
 }
 
+/* HU_PROMPT_CACHE_ORDER=live drops the raw "avg N chars/msg" from the world
+ * model's style line, the same noisy per-message number the personal model
+ * drops (it changed the prompt mid-way every turn). */
+static void w7_render_cache_order_live_drops_raw_avg(void) {
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    w7ns_open(&g, &f);
+    hu_personal_model_t pm;
+    hu_personal_model_init(&pm);
+    const char *t = "hey how is it going today";
+    HU_ASSERT_EQ(hu_personal_model_ingest(&pm, t, strlen(t), true, 1700000000LL, NULL), HU_OK);
+
+    char *txt = NULL;
+    size_t tlen = 0;
+    unsetenv("HU_PROMPT_CACHE_ORDER");
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, W7NS_A(), "m4_avg", 6, 1700000000000LL, &txt, &tlen,
+                                          NULL, 0, NULL, 0, NULL, 0, &pm, NULL),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT_NOT_NULL(strstr(txt, "chars/msg"));
+    W7NS_A()->free(W7NS_A()->ctx, txt, tlen + 1);
+
+    setenv("HU_PROMPT_CACHE_ORDER", "live", 1);
+    txt = NULL;
+    HU_ASSERT_EQ(hu_w7_render_world_model(f, W7NS_A(), "m4_avg", 6, 1700000000000LL, &txt, &tlen,
+                                          NULL, 0, NULL, 0, NULL, 0, &pm, NULL),
+                 HU_OK);
+    unsetenv("HU_PROMPT_CACHE_ORDER");
+    HU_ASSERT_NOT_NULL(txt);
+    HU_ASSERT_NOT_NULL(strstr(txt, "Communication style: "));
+    HU_ASSERT_NULL(strstr(txt, "chars/msg"));
+    W7NS_A()->free(W7NS_A()->ctx, txt, tlen + 1);
+    w7ns_cleanup(g, f);
+}
+
 /* Repeated render calls with the FULL null-everything-optional shape —
  * exercises any per-call leak or use-after-free that would surface as a
  * BUS only after thousands of turns through the gateway. */
@@ -281,6 +316,7 @@ void run_w7_render_null_safety_tests(void) {
     HU_RUN_TEST(w7_render_persona_ctx_null_tools_does_not_crash);
     HU_RUN_TEST(w7_render_persona_ctx_null_recent_tools_does_not_crash);
     HU_RUN_TEST(w7_render_empty_personal_model_is_safe);
+    HU_RUN_TEST(w7_render_cache_order_live_drops_raw_avg);
     HU_RUN_TEST(w7_render_repeated_null_optional_calls_stable);
 #endif
 }

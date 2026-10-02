@@ -2,10 +2,76 @@
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/persona.h"
 #include "human/persona/voice_maturity.h"
 #include "test_framework.h"
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
+
+/* The daemon's voice profiles live in memory and reset to FORMAL on every
+ * restart, so on 2026-10-02 a close friend's reply prompt said "Keep
+ * responses professional and clear. Avoid slang. Be helpful but maintain
+ * appropriate distance." A known relationship sets a floor. Exact matching:
+ * "professional_friend" must not read as "friend". */
+static void voice_floor_maps_known_relationships(void) {
+    HU_ASSERT_EQ((int)hu_voice_stage_floor_for_relationship("mother", 6), (int)HU_VOICE_INTIMATE);
+    HU_ASSERT_EQ((int)hu_voice_stage_floor_for_relationship("close_friend", 12),
+                 (int)HU_VOICE_INTIMATE);
+    HU_ASSERT_EQ((int)hu_voice_stage_floor_for_relationship("Romantic Interest", 17),
+                 (int)HU_VOICE_INTIMATE);
+    HU_ASSERT_EQ((int)hu_voice_stage_floor_for_relationship("friend", 6), (int)HU_VOICE_CANDID);
+    HU_ASSERT_EQ((int)hu_voice_stage_floor_for_relationship("professional_friend", 19),
+                 (int)HU_VOICE_WARM);
+    HU_ASSERT_EQ((int)hu_voice_stage_floor_for_relationship("casual", 6), (int)HU_VOICE_WARM);
+    HU_ASSERT_EQ((int)hu_voice_stage_floor_for_relationship("test", 4), (int)HU_VOICE_FORMAL);
+    HU_ASSERT_EQ((int)hu_voice_stage_floor_for_relationship("unfriendly", 10),
+                 (int)HU_VOICE_FORMAL);
+    HU_ASSERT_EQ((int)hu_voice_stage_floor_for_relationship(NULL, 0), (int)HU_VOICE_FORMAL);
+}
+
+static void voice_floor_survives_updates(void) {
+    hu_voice_profile_t p;
+    hu_voice_profile_init(&p);
+    hu_voice_profile_apply_floor(&p, HU_VOICE_CANDID);
+    HU_ASSERT_EQ((int)p.stage, (int)HU_VOICE_CANDID);
+    HU_ASSERT_TRUE(p.warmth_score >= 0.5f);
+    for (int i = 0; i < 5; i++)
+        hu_voice_profile_update(&p, false, false, false);
+    HU_ASSERT_EQ((int)p.stage, (int)HU_VOICE_CANDID); /* counters alone said FORMAL */
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_allocator_t a = hu_system_allocator();
+    HU_ASSERT_EQ(hu_voice_build_guidance(&p, &a, &out, &out_len), HU_OK);
+    HU_ASSERT_NULL(strstr(out, "Avoid slang"));
+    a.free(a.ctx, out, out_len + 1);
+}
+
+static void voice_relationship_floor_is_gated(void) {
+    hu_contact_profile_t contacts[1];
+    memset(contacts, 0, sizeof(contacts));
+    contacts[0].contact_id = "+15550000001";
+    contacts[0].relationship = "son";
+    hu_persona_t persona;
+    memset(&persona, 0, sizeof(persona));
+    persona.contacts = contacts;
+    persona.contacts_count = 1;
+
+    hu_voice_profile_t p;
+    hu_voice_profile_init(&p);
+    unsetenv("HU_VOICE_RELATIONSHIP_FLOOR");
+    hu_voice_profile_apply_relationship(&p, &persona, "+15550000001", 12);
+    HU_ASSERT_EQ((int)p.stage, (int)HU_VOICE_FORMAL); /* OFF: unchanged */
+    setenv("HU_VOICE_RELATIONSHIP_FLOOR", "shadow", 1);
+    hu_voice_profile_apply_relationship(&p, &persona, "+15550000001", 12);
+    HU_ASSERT_EQ((int)p.stage, (int)HU_VOICE_FORMAL); /* SHADOW: unchanged */
+    setenv("HU_VOICE_RELATIONSHIP_FLOOR", "live", 1);
+    hu_voice_profile_apply_relationship(&p, &persona, "+15550000002", 12);
+    HU_ASSERT_EQ((int)p.stage, (int)HU_VOICE_FORMAL); /* unknown contact */
+    hu_voice_profile_apply_relationship(&p, &persona, "+15550000001", 12);
+    unsetenv("HU_VOICE_RELATIONSHIP_FLOOR");
+    HU_ASSERT_EQ((int)p.stage, (int)HU_VOICE_INTIMATE);
+}
 
 static void voice_profile_init_null_safe(void) {
     hu_voice_profile_init(NULL);
@@ -401,6 +467,9 @@ static void voice_build_directive_formal_differs_from_intimate(void) {
 
 void run_voice_maturity_tests(void) {
     HU_TEST_SUITE("VoiceMaturity");
+    HU_RUN_TEST(voice_floor_maps_known_relationships);
+    HU_RUN_TEST(voice_floor_survives_updates);
+    HU_RUN_TEST(voice_relationship_floor_is_gated);
 
     HU_RUN_TEST(voice_profile_init_null_safe);
     HU_RUN_TEST(voice_profile_init_sets_defaults);

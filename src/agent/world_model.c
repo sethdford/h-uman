@@ -15,6 +15,7 @@
  */
 
 #include "human/agent/world_model.h"
+#include "human/core/gate_mode.h"
 
 #include "human/agent/autonomy.h"
 #include "human/agent/goals.h"
@@ -1043,10 +1044,19 @@ void hu_world_model_merge_personal(hu_world_model_t *wm, const hu_personal_model
     /* Style summary — always overwrite from the PM since it's the
      * authoritative source for communication style. */
     if (pm->style.sample_count > 0) {
-        snprintf(wm->style_summary, sizeof(wm->style_summary), "%s, %s, %s emoji, avg %u chars/msg",
-                 pm_formality_label(pm->style.formality), pm_verbosity_label(pm->style.verbosity),
-                 pm->style.emoji_frequency > 0.3f ? "uses" : "rare",
-                 (unsigned)pm->style.avg_message_length);
+        /* HU_PROMPT_CACHE_ORDER=live: no raw average, same as the personal
+         * model's line (it changes every message). */
+        if (hu_gate_mode_from_env("HU_PROMPT_CACHE_ORDER", HU_GATE_OFF) == HU_GATE_LIVE)
+            snprintf(wm->style_summary, sizeof(wm->style_summary), "%s, %s, %s emoji",
+                     pm_formality_label(pm->style.formality),
+                     pm_verbosity_label(pm->style.verbosity),
+                     pm->style.emoji_frequency > 0.3f ? "uses" : "rare");
+        else
+            snprintf(wm->style_summary, sizeof(wm->style_summary),
+                     "%s, %s, %s emoji, avg %u chars/msg", pm_formality_label(pm->style.formality),
+                     pm_verbosity_label(pm->style.verbosity),
+                     pm->style.emoji_frequency > 0.3f ? "uses" : "rare",
+                     (unsigned)pm->style.avg_message_length);
     }
 
     /* Goals — append PM goals the world model doesn't already have.
@@ -1872,10 +1882,17 @@ static size_t resolve_cache_slots_(void) {
     return (size_t)v;
 }
 
+/* The cache is global and outlives every caller, so its entries are cloned
+ * and freed with an allocator it owns. Borrowing the caller's left a
+ * dangling pointer whenever that allocator died first (2026-10-02 ASan:
+ * stack-use-after-scope in hu_world_model_cache_reset_for_tests). */
+static hu_allocator_t s_cache_alloc;
+
 /* MUST be called with WM_CACHE_LOCK held. Returns true if cache is ready. */
 static bool cache_init_locked_(void) {
     if (s_cache)
         return true;
+    s_cache_alloc = hu_system_allocator();
     size_t slots = resolve_cache_slots_();
     s_cache = (struct wm_cache_entry *)calloc(slots, sizeof(*s_cache));
     if (!s_cache)
@@ -2211,9 +2228,9 @@ hu_error_t hu_world_model_load_with_channel(hu_memory_facade_t *m, hu_allocator_
                 hu_world_model_free(slot->alloc, slot->wm);
                 slot->wm = NULL;
             }
-            slot->wm = clone_wm(alloc, fresh);
+            slot->wm = clone_wm(&s_cache_alloc, fresh);
             if (slot->wm) {
-                slot->alloc = alloc;
+                slot->alloc = &s_cache_alloc;
                 memcpy(slot->contact_id, contact_id, cid_len);
                 slot->contact_id[cid_len] = '\0';
                 slot->channel_len = channel_len;

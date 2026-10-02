@@ -39,6 +39,10 @@ ARMS = {
                 ("live", "config.json", {"HU_RECALL_PLANNER_LLM": "live"})],
     "beat": [("off", "config.json", {"HU_STYLE_SECOND_BEAT": "off"}),
              ("live", "config.json", {"HU_STYLE_SECOND_BEAT": "live"})],
+    "cache": [("off", "config.json", {"HU_PROMPT_CACHE_ORDER": "off"}),
+              ("live", "config.json", {"HU_PROMPT_CACHE_ORDER": "live"})],
+    "voice": [("off", "config.json", {"HU_VOICE_RELATIONSHIP_FLOOR": "off"}),
+              ("live", "config.json", {"HU_VOICE_RELATIONSHIP_FLOOR": "live"})],
 }
 
 
@@ -73,6 +77,8 @@ def keep_context(kind, text, has_seth_reply):
         return len(text.split()) > 12 and len(text) <= 400 and has_seth_reply
     if kind == "beat":
         return 8 <= len(text) <= 160 and has_seth_reply
+    if kind in ("cache", "voice"):  # both touch every reply
+        return 4 <= len(text) <= 300 and has_seth_reply
     raise ValueError(kind)
 
 
@@ -127,6 +133,9 @@ def setup(work, card=None):
         cfg.setdefault("agent", {})["tree_of_thought"] = tot
         json.dump(cfg, open(os.path.join(pristine, name), "w"), indent=1)
     shutil.copytree(os.path.join(STATE_HOME, "personas"), os.path.join(pristine, "personas"))
+    pm = os.path.join(STATE_HOME, "personal_model.bin")  # style lines in every reply prompt
+    if os.path.exists(pm):
+        shutil.copy2(pm, os.path.join(pristine, "personal_model.bin"))
     if card:
         shutil.copy(card, os.path.join(pristine, "personas", "seth.style-card.json"))
     src = sqlite3.connect(os.path.join(STATE_HOME, "memory.db"))

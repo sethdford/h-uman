@@ -438,6 +438,61 @@ static void test_prompt_graph_context_present_immersive(void) {
     alloc.free(alloc.ctx, out, out_len + 1);
 }
 
+/* HU_PROMPT_CACHE_ORDER: the session context is the one table section that
+ * changes every message (2026-10-02 captures), so LIVE moves it after the
+ * stable sections and the model server's prefix cache covers the rest. OFF
+ * keeps today's order; SHADOW must not change the prompt. */
+static char *build_order_prompt(const char *mode, size_t *out_len) {
+    hu_allocator_t alloc = hu_system_allocator();
+    if (mode)
+        setenv("HU_PROMPT_CACHE_ORDER", mode, 1);
+    else
+        unsetenv("HU_PROMPT_CACHE_ORDER");
+    hu_prompt_config_t cfg = {
+        .provider_name = "ollama",
+        .provider_name_len = 6,
+        .model_name = "llama3",
+        .model_name_len = 6,
+        .workspace_dir = ".",
+        .workspace_dir_len = 1,
+        .autonomy_level = 1,
+        .persona_immersive = true,
+        .persona_prompt = "Be yourself.",
+        .persona_prompt_len = 12,
+        .stm_context = "STM_MARKER latest message",
+        .stm_context_len = 25,
+        .conversation_context = "CONV_MARKER voice calibration",
+        .conversation_context_len = 29,
+    };
+    char *out = NULL;
+    HU_ASSERT_EQ(hu_prompt_build_system(&alloc, &cfg, NULL, NULL, &out, out_len), HU_OK);
+    unsetenv("HU_PROMPT_CACHE_ORDER");
+    return out;
+}
+
+static void test_prompt_cache_order_live_moves_session_context_last(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    size_t off_len = 0, live_len = 0, shadow_len = 0;
+    char *off = build_order_prompt(NULL, &off_len);
+    char *live = build_order_prompt("live", &live_len);
+    char *shadow = build_order_prompt("shadow", &shadow_len);
+    HU_ASSERT_NOT_NULL(off);
+    HU_ASSERT_NOT_NULL(live);
+    HU_ASSERT_NOT_NULL(shadow);
+    /* OFF: today's order, session context before the conversation block. */
+    HU_ASSERT_TRUE(strstr(off, "STM_MARKER") < strstr(off, "CONV_MARKER"));
+    /* LIVE: same content, session context after it. */
+    HU_ASSERT_TRUE(strstr(live, "STM_MARKER") > strstr(live, "CONV_MARKER"));
+    HU_ASSERT_NOT_NULL(strstr(live, "### Session Context\nSTM_MARKER"));
+    HU_ASSERT_EQ(live_len, off_len);
+    /* SHADOW: byte-identical to OFF. */
+    HU_ASSERT_EQ(shadow_len, off_len);
+    HU_ASSERT_STR_EQ(shadow, off);
+    alloc.free(alloc.ctx, off, off_len + 1);
+    alloc.free(alloc.ctx, live, live_len + 1);
+    alloc.free(alloc.ctx, shadow, shadow_len + 1);
+}
+
 /* ─── Immersive value-aware trim + compact safety section (HU_PROMPT_TRIM) ──
  *
  * Pre/post contract per integration-done-contract.md: gate OFF preserves
@@ -872,6 +927,7 @@ void run_prompt_tests(void) {
     HU_RUN_TEST(test_prompt_graph_context_present);
     HU_RUN_TEST(test_prompt_graph_context_absent_is_noop);
     HU_RUN_TEST(test_prompt_graph_context_present_immersive);
+    HU_RUN_TEST(test_prompt_cache_order_live_moves_session_context_last);
     HU_RUN_TEST(test_prompt_immersive_trim_live_drops_middle_keeps_tail);
     HU_RUN_TEST(test_prompt_immersive_humanness_absent_when_gate_unset);
     HU_RUN_TEST(test_prompt_immersive_humanness_shadow_leaves_prompt_unchanged);

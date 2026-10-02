@@ -130,6 +130,30 @@ static void test_w9_load_cache_hit_within_ttl(void) {
     close_facade_(g, m);
 }
 
+/* The cache is global and outlives its callers, but it freed each entry
+ * with the CALLER's allocator. A caller whose allocator dies first (a test
+ * agent on the stack, 2026-10-02 ASan stack-use-after-scope in
+ * hu_world_model_cache_reset_for_tests) left a dangling pointer behind.
+ * The cache must own the allocator its entries are freed with. */
+static void test_w9_cache_outlives_the_callers_allocator(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+    seed_one_relation_(g, "u-lifetime");
+
+    hu_allocator_t *caller = (hu_allocator_t *)malloc(sizeof(*caller));
+    HU_ASSERT_NOT_NULL(caller);
+    *caller = hu_system_allocator();
+    hu_world_model_t *wm = NULL;
+    HU_ASSERT_EQ(hu_world_model_load(m, caller, "u-lifetime", 10, 1000LL, &wm), HU_OK);
+    hu_world_model_free(caller, wm);
+    memset(caller, 0, sizeof(*caller)); /* the caller's allocator is gone */
+    free(caller);
+
+    hu_world_model_cache_reset_for_tests(); /* frees the cached entry */
+    close_facade_(g, m);
+}
+
 static void test_w9_load_cache_miss_after_invalidation(void) {
     hu_graph_t *g = NULL;
     hu_memory_facade_t *m = NULL;
@@ -1522,8 +1546,7 @@ static void test_w9_self_model_drift_history_ring(void) {
     open_facade_(&g, &m);
 
     hu_world_model_t *wm = NULL;
-    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-drift-h", 9,
-                                       1735690000000LL, &wm), HU_OK);
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-drift-h", 9, 1735690000000LL, &wm), HU_OK);
 
     hu_persona_t persona;
     hu_persona_overlay_t overlay;
@@ -1561,8 +1584,7 @@ static void test_w9_self_model_merge_self_emotion(void) {
     open_facade_(&g, &m);
 
     hu_world_model_t *wm = NULL;
-    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-emo-self", 10,
-                                       1735690000000LL, &wm), HU_OK);
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-emo-self", 10, 1735690000000LL, &wm), HU_OK);
     snprintf(wm->dominant_emotion, sizeof(wm->dominant_emotion), "playful");
 
     hu_world_model_merge_self_emotion(wm);
@@ -1582,8 +1604,7 @@ static void test_w9_self_model_merge_self_recent_tools(void) {
     open_facade_(&g, &m);
 
     hu_world_model_t *wm = NULL;
-    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-tools-self", 12,
-                                       1735690000000LL, &wm), HU_OK);
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u-tools-self", 12, 1735690000000LL, &wm), HU_OK);
 
     const char *names[] = {"shell", "shell", "memory_query"};
     hu_world_model_merge_self_recent_tools(wm, names, 3);
@@ -1911,6 +1932,7 @@ void run_w9_world_model_tests(void) {
     HU_RUN_TEST(test_w9_build_returns_entities_and_relations);
     HU_RUN_TEST(test_w9_build_with_no_data_returns_empty_snapshot);
     HU_RUN_TEST(test_w9_load_cache_hit_within_ttl);
+    HU_RUN_TEST(test_w9_cache_outlives_the_callers_allocator);
     HU_RUN_TEST(test_w9_load_cache_miss_after_invalidation);
     HU_RUN_TEST(test_w9_upsert_auto_invalidates_cache);
     HU_RUN_TEST(test_w9_load_cache_expires_after_ttl);
