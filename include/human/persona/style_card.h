@@ -65,6 +65,11 @@ typedef struct hu_style_card {
      * predates the axis, and nothing about laughter renders then. Added
      * 2026-09-30: the twin laughed in 14% of its texts over a week, Seth 3%. */
     double laugh_rate;
+    /* Share of replies carrying a second thought (a second bubble or a second
+     * sentence), scripts/reply_pairs.has_second_beat. Optional: -1 when the
+     * card predates the axis. Seth 50%, the twin 35% (2026-10-02). Renders
+     * only with HU_STYLE_SECOND_BEAT=live (hu_style_second_beat_mode). */
+    double second_beat_rate;
     unsigned n; /* messages measured (0 for the default) */
     /* Judge-free pair axis (scripts/reply_pairs.py): how the persona answers
      * a LONG or question-bearing inbound. substantive_n == 0 when the card
@@ -110,6 +115,13 @@ hu_error_t hu_style_card_load_for_persona(hu_allocator_t *alloc, const char *nam
  * back so a missing card is a visible fact, not a silent regression to
  * stale numbers. NULL name -> default (no log). */
 void hu_style_card_resolve(const char *name, size_t name_len, hu_style_card_t *out);
+
+/* HU_STYLE_SECOND_BEAT (off | shadow | live, default off): render the card's
+ * second-beat rate into the casual rules. It changes what gets sent, so the
+ * line is A/B-gated: do not flip to default-ON without the measurement
+ * (the twin's second-beat and question rates against Seth's, judged
+ * non-inferior on humanness). SHADOW renders nothing. */
+hu_gate_mode_t hu_style_second_beat_mode(void);
 
 /* Render the casual register's rule 2 (capitalization / terminal
  * punctuation / question / emoji / exclamation) from the card's numbers.

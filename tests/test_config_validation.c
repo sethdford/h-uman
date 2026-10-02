@@ -299,6 +299,15 @@ static void test_config_validate_strict_unknown_key_fails_with_root(void) {
     hu_arena_destroy(arena);
 }
 
+/* memory.max_entries was parsed but never read: consolidation caps at 5000
+ * via hu_agent_consolidation_config. Removed so a config setting it is told
+ * the value does nothing instead of being silently ignored. */
+static void test_config_validate_strict_memory_max_entries_is_unknown(void) {
+    HU_ASSERT_EQ(validate_session_json("{\"memory\":{\"auto_save\":true}}", true), HU_OK);
+    HU_ASSERT_EQ(validate_session_json("{\"memory\":{\"max_entries\":50000}}", true),
+                 HU_ERR_CONFIG_INVALID);
+}
+
 void run_config_validation_tests(void) {
     HU_TEST_SUITE("Config validation");
     HU_RUN_TEST(test_config_validate_strict_valid_passes);
@@ -321,4 +330,5 @@ void run_config_validation_tests(void) {
     HU_RUN_TEST(test_config_validate_strict_unknown_key_fails_with_root);
     HU_RUN_TEST(test_config_validate_strict_reaction_collection_is_known_top_key);
     HU_RUN_TEST(test_config_validate_strict_personalization_is_known_top_key);
+    HU_RUN_TEST(test_config_validate_strict_memory_max_entries_is_unknown);
 }

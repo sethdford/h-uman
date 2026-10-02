@@ -229,6 +229,18 @@ def attach_entity_casing(card: dict, texts) -> dict:
     return card
 
 
+def attach_second_beat(card: dict, runs) -> dict:
+    """axes.second_beat_rate: share of the user's replies (runs of bubbles to
+    one inbound run) that carry a second thought (reply_pairs.has_second_beat).
+    Rendered by the C card only when HU_STYLE_SECOND_BEAT=live."""
+    from reply_pairs import has_second_beat
+    runs = [r for r in runs if r]
+    if runs:
+        hits = sum(1 for r in runs if has_second_beat(r))
+        card["axes"]["second_beat_rate"] = {"value": hits / len(runs), "n": len(runs)}
+    return card
+
+
 def attach_substantive(card: dict, pairs, days: int) -> dict:
     stats = reply_stats(pairs)
     stats["days"] = days
@@ -259,10 +271,11 @@ def parse_args(argv=None):
     return p.parse_args(argv)
 
 
-def run(args, messages=None, substantive_pairs=None) -> int:
+def run(args, messages=None, substantive_pairs=None, reply_runs=None) -> int:
     end = (datetime.datetime.strptime(args.end, "%Y-%m-%d")
            if args.end else datetime.datetime.now())
     start = end - datetime.timedelta(days=args.days)
+    live = messages is None
     if messages is None:
         messages = fetch_outbound_messages(args.db, start, end,
                                            exclude_handles=owner_handles(args.persona))
@@ -283,6 +296,16 @@ def run(args, messages=None, substantive_pairs=None) -> int:
         substantive_pairs = fetch_reply_pairs(args.db, sdays, is_substantive)
     if substantive_pairs is not None:
         attach_substantive(card, substantive_pairs, sdays or DEFAULT_SUBSTANTIVE_DAYS)
+    # Second-beat axis: reply runs, the twin's own excluded like the axes above.
+    if reply_runs is None and live:
+        from extract_imessage_pairs import daemon_send_predicate, load_daemon_records
+        from reply_pairs import fetch_reply_runs
+        is_daemon = daemon_send_predicate(load_daemon_records())
+        runs = fetch_reply_runs(args.db, args.days, skip_handles=owner_handles(args.persona))
+        reply_runs = [[t for _, t in r] for r in runs
+                      if not any(is_daemon(t, ts) for ts, t in r)]
+    if reply_runs is not None:
+        attach_second_beat(card, reply_runs)
     # Entity-casing axis over the SAME window the axes above used.
     attach_entity_casing(card, [t for ts, t in messages if start <= ts < end])
 

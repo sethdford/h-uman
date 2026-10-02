@@ -135,3 +135,80 @@ def reply_stats(pairs) -> dict:
         "median_reply_to_inbound_ratio": statistics.median(len(r) / max(1, len(i)) for i, r in pairs),
         "window_seconds": REPLY_WINDOW_S,
     }
+
+
+# Second beat (2026-10-02): a reply that carries a second thought — a second
+# bubble, or a second sentence in one bubble. Seth: 52% of replies; the twin:
+# 35%, its replies mostly one beat.
+_BEAT_BREAK = re.compile(r"([A-Za-z]+)?[.!?]+\s+[A-Za-z\"'(]")
+_ABBREV = {"mr", "mrs", "ms", "dr", "st", "vs", "jr", "sr", "etc", "approx", "e.g", "i.e"}
+
+
+def has_second_beat(bubbles) -> bool:
+    texts = [b.strip() for b in bubbles if b and b.strip()]
+    if len(texts) >= 2:
+        return True
+    if not texts:
+        return False
+    for m in _BEAT_BREAK.finditer(texts[0]):
+        word = (m.group(1) or "").lower()
+        if word not in _ABBREV:
+            return True
+    return False
+
+
+def fetch_reply_runs(db_path: str, days: int, skip_handles=(), window_s: int = REPLY_WINDOW_S):
+    """Per inbound run in a 1:1 chat, the user's next run of text bubbles
+    within window_s: [[(epoch_seconds, text), ...], ...]. Tapbacks,
+    attachment-only bubbles and bare links are skipped; chats with
+    skip_handles (the owner's own numbers) are left out."""
+    from eval_persona_evolution import decode_attributed_body  # local, stdlib
+
+    con = sqlite3.connect(f"file:{db_path}?mode=ro&immutable=1", uri=True)
+    try:
+        rows = con.execute(
+            """
+            SELECT m.date, m.text, m.attributedBody, m.is_from_me, ch.chat_identifier
+            FROM message m JOIN chat_message_join c ON c.message_id = m.ROWID
+            JOIN chat ch ON ch.ROWID = c.chat_id
+            WHERE ch.style = 45 AND COALESCE(m.associated_message_type, 0) = 0
+              AND m.date > (strftime('%s','now') - ? * 86400 - 978307200) * 1000000000
+            ORDER BY ch.chat_identifier, m.date
+            """,
+            (int(days),),
+        ).fetchall()
+    finally:
+        con.close()
+
+    def text_of(t, blob):
+        if t and t.strip():
+            return t.strip()
+        return (decode_attributed_body(blob) or "").strip() if blob is not None else ""
+
+    by_chat = {}
+    for date, t, blob, me, chat in rows:
+        if chat not in skip_handles:
+            by_chat.setdefault(chat, []).append((date / 1e9 + 978307200, text_of(t, blob), me))
+    runs = []
+    for msgs in by_chat.values():
+        i = 0
+        while i < len(msgs):
+            if msgs[i][2]:
+                i += 1
+                continue
+            j = i
+            while j < len(msgs) and not msgs[j][2]:
+                j += 1
+            last_in = msgs[j - 1][0]
+            k = j
+            run = []
+            while k < len(msgs) and msgs[k][2]:
+                ts, txt, _ = msgs[k]
+                if ts - last_in <= window_s and txt and txt != "\ufffc" and not txt.startswith("http"):
+                    run.append((ts, txt))
+                k += 1
+            if run:
+                runs.append(run)
+            i = k
+    return runs
+

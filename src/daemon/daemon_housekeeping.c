@@ -48,6 +48,10 @@ void hu_daemon_housekeeping_tick(hu_daemon_housekeeping_ctx_t *ctx) {
     time_t t = ctx->t;
     time_t current_minute = ctx->current_minute;
     char *community_insights = ctx->community_insights;
+    /* Read only by feature-gated blocks below; not every build has them. */
+    (void)config;
+    (void)graph;
+    (void)community_insights;
 
     if (current_minute > (*ctx->last_cron_minute)) {
         hu_daemon_cron_tick(alloc);

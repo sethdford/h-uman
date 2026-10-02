@@ -73,12 +73,19 @@ typedef struct hu_reactive_turn_ctx {
     size_t ctx_count;
 } hu_reactive_turn_ctx_t;
 
+/* Session messages restored into agent history per turn: the newest this many.
+ * The recent thread reaches the model through the system prompt's
+ * conversation context; restoring a contact's whole stored history pushed
+ * long threads past the 100-message compaction threshold, and every turn paid
+ * a ~13 s summary call whose result the history budget then dropped. */
+#define HU_DAEMON_RESTORE_RECENT 24
+
 /* Slice A: clear the agent's history, select the active channel and persona
- * override, restore the sender's prior conversation from the session store,
- * then (outside HU_IS_TEST) load the per-contact profile, run BTH style
+ * override, restore the sender's last HU_DAEMON_RESTORE_RECENT messages from the
+ * session store, then (outside HU_IS_TEST) load the per-contact profile, run BTH style
  * learning, load channel history, consume a pending comfort record and gather
  * cross-channel context. Fills the output fields of `rt`; every output starts
- * NULL/0. Pure move of the former daemon.c body — no behavior change. */
+ * NULL/0. Moved from daemon.c; the restore window was added 2026-10-02. */
 void hu_daemon_reactive_context_load(hu_allocator_t *alloc, struct hu_agent *agent,
                                      const struct hu_config *config, hu_service_channel_t *channels,
                                      size_t channel_count, hu_reactive_turn_ctx_t *rt);
