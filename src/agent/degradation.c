@@ -1,4 +1,5 @@
 #include "human/agent/degradation.h"
+#include "human/agent/empty_retry.h"
 #include "human/core/log.h"
 #include <stdatomic.h>
 #include <string.h>
@@ -28,8 +29,11 @@ static hu_error_t try_chat(hu_provider_t *provider, hu_allocator_t *alloc,
                            double temperature, hu_chat_response_t *resp) {
     if (!provider->vtable || !provider->vtable->chat)
         return HU_ERR_NOT_SUPPORTED;
-    return provider->vtable->chat(provider->ctx, alloc, request, model, model_len, temperature,
-                                  resp);
+    hu_error_t err =
+        provider->vtable->chat(provider->ctx, alloc, request, model, model_len, temperature, resp);
+    if (err == HU_OK) /* HU_EMPTY_REPLY_RETRY, gated OFF: see human/agent/empty_retry.h */
+        hu_empty_retry_maybe(provider, alloc, request, model, model_len, temperature, resp);
+    return err;
 }
 
 hu_error_t hu_provider_degrade_chat(hu_provider_degradation_config_t *config,

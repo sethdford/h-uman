@@ -800,6 +800,7 @@ set(HU_CORE_SOURCES
     src/agent/turn/learned_style_turn.c
     src/agent/turn/persona_head.c
     src/agent/turn/history_budget.c
+    src/agent/turn/empty_retry.c
     src/agent/turn/spoken_turn.c
     src/agent/turn/length_policy.c
     src/agent/best_of_n.c
@@ -3979,6 +3980,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_turn_plan.c
     tests/test_agent_turn_history_window.c
     tests/test_reask.c
+    tests/test_empty_retry.c
     tests/test_spoken_turn.c
     tests/test_turn_sources.c
     tests/test_agent_llm_latency_wall_clock.c
