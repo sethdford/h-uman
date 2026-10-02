@@ -42,6 +42,8 @@ from pathlib import Path
 
 import yaml
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling chat_template_rows
+
 # --------------------------------------------------------------------------
 # Config translation
 # --------------------------------------------------------------------------
@@ -293,6 +295,84 @@ def to_kto_examples(pairs: list) -> list:
 
 
 # --------------------------------------------------------------------------
+# Chat-template contract (2026-10-01)
+# --------------------------------------------------------------------------
+#
+# mlx-tune's preference trainers tokenize the raw string `prompt + chosen`
+# (mlx_tune/rl_trainers.py: ORPOTrainer._tokenize_preference_pair,
+# SimPOTrainer._tokenize_pair, KTOTrainer's `prompt + completion`). They never
+# apply a chat template and never append a stop token. A GLM adapter trained on
+# raw rows therefore never sees production's prompt shape
+# (`...<|assistant|>\n<think></think>`) and never learns where its turn ends;
+# the served 20260905 adapter answers ~13% of classifier-style prompts with an
+# immediate end-of-turn. The rows must arrive PRE-TEMPLATED -- built by
+# scripts/chat_template_rows.py, which train-glm-adapter.sh runs as the last
+# staging step -- and this driver refuses a GLM run on anything else.
+
+
+def is_glm_model(model_id) -> bool:
+    return "glm" in str(model_id or "").lower()
+
+
+def require_templated_corpus(model_id, data_dir) -> dict:
+    """Refuse to train a GLM adapter on raw rows. Returns the report."""
+    from chat_template_rows import templated_report
+
+    rep = templated_report(Path(data_dir) / "train.jsonl")
+    if not is_glm_model(model_id):
+        return rep
+    if os.environ.get("HU_MLX_TUNE_ALLOW_RAW_ROWS") == "1":
+        print(f"[mlx_tune_train] WARNING: HU_MLX_TUNE_ALLOW_RAW_ROWS=1 -- training on "
+              f"{rep['raw']} raw rows; the adapter will not learn production's template")
+        return rep
+    if rep["count"] == 0 or rep["raw"] != 0:
+        sys.exit(
+            f"[mlx_tune_train] FATAL: {rep['raw']}/{rep['count']} rows in {data_dir}/train.jsonl "
+            "are not chat-templated. mlx-tune tokenizes `prompt + chosen` verbatim, so raw rows "
+            "train a GLM adapter on a prompt shape production never sends and with no "
+            "end-of-turn token. Build the corpus with scripts/chat_template_rows.py (done "
+            "automatically by scripts/train-glm-adapter.sh --trainer mlx_tune)."
+        )
+    return rep
+
+
+def trainer_token_ids(trainer, sample, train_mode):
+    """The token ids the trainer will actually train on for one sample, via
+    the trainer's OWN tokenization method (not a re-implementation)."""
+    if train_mode == "orpo":
+        return [trainer._tokenize_preference_pair(sample)["chosen_ids"]]
+    if train_mode == "simpo":
+        t = trainer._tokenize_pair(sample)
+        return [t["chosen_ids"], t["rejected_ids"]]
+    # KTO has no per-sample method; this mirrors KTOTrainer.train()'s
+    # `self.tokenizer.encode(prompt + completion)[:max_seq_length]`.
+    return [trainer.tokenizer.encode(sample["prompt"] + sample["completion"])[: trainer.max_seq_length]]
+
+
+def assert_trainer_sees_template(trainer, dataset, train_mode, tokenizer, max_check=16):
+    """After the trainer exists, prove ITS tokenization of the templated rows
+    starts with exactly one [gMASK] (nothing re-added) and ends with the
+    end-of-turn id (nothing truncated away). Exits on failure."""
+    from chat_template_rows import END_OF_TURN
+
+    gmask = tokenizer.convert_tokens_to_ids("[gMASK]")
+    eot = tokenizer.convert_tokens_to_ids(END_OF_TURN)
+    checked = 0
+    for sample in dataset[:max_check]:
+        for ids in trainer_token_ids(trainer, sample, train_mode):
+            if not ids or ids[0] != gmask or list(ids).count(gmask) != 1:
+                sys.exit("[mlx_tune_train] FATAL: trainer tokenization does not start with "
+                         "exactly one [gMASK] -- BOS was re-added or the prompt is mangled")
+            if ids[-1] != eot:
+                sys.exit(f"[mlx_tune_train] FATAL: trainer tokenization ends with {ids[-1]}, "
+                         f"not end-of-turn {eot} ({END_OF_TURN!r}) -- row truncated or untemplated")
+            checked += 1
+    print(f"[mlx_tune_train] template contract holds on {checked} trainer-tokenized sequences "
+          f"(one leading [gMASK], last token {END_OF_TURN!r})")
+    return checked
+
+
+# --------------------------------------------------------------------------
 # The no-op guard -- reused verbatim in spirit from train-glm-adapter.sh
 # --------------------------------------------------------------------------
 
@@ -473,6 +553,15 @@ def cmd_dry_run(args: argparse.Namespace) -> int:
         print("[dry-run] FATAL: config has no 'data' key")
         ok = False
 
+    if data_dir and Path(data_dir, "train.jsonl").is_file():
+        from chat_template_rows import templated_report
+
+        trep = templated_report(Path(data_dir, "train.jsonl"))
+        print(f"[dry-run]   chat-templated rows: {trep['templated']}/{trep['count']}"
+              + ("" if trep["raw"] == 0 or not is_glm_model(model_id) else
+                 " -- raw; train-glm-adapter.sh templates them at stage time "
+                 "(a direct real run would refuse)"))
+
     if args.train_mode == "kto" and data_dir and Path(data_dir, "train.jsonl").is_file():
         pairs = load_preference_pairs(Path(data_dir, "train.jsonl"))
         kto_examples = to_kto_examples(pairs)
@@ -554,6 +643,8 @@ def cmd_train(args: argparse.Namespace) -> int:
     save_steps = int(cfg.get("save_every", 100))
     model_id = cfg["model"]
     data_dir = Path(cfg["data"])
+    # Before the 56 GB load: a raw corpus would waste the whole dark window.
+    require_templated_corpus(model_id, data_dir)
 
     print(f"[mlx_tune_train] loading base model: {model_id}")
     model, tokenizer = FastLanguageModel.from_pretrained(model_id)
@@ -616,6 +707,9 @@ def cmd_train(args: argparse.Namespace) -> int:
         )
     else:
         sys.exit(f"[mlx_tune_train] FATAL: unknown --train-mode {args.train_mode!r}")
+
+    if is_glm_model(model_id) and os.environ.get("HU_MLX_TUNE_ALLOW_RAW_ROWS") != "1":
+        assert_trainer_sees_template(trainer, train_dataset, args.train_mode, tokenizer)
 
     print(f"Training Mode: {args.train_mode}")  # matches train-glm-adapter.sh's grep
     heldout = []

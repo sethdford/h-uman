@@ -123,6 +123,31 @@ if [ "$TRAINER" = "mlx_tune" ]; then
   [ -x "$MLXTUNE_PY" ] || { echo "[train] FATAL: mlx-tune venv missing: $MLXTUNE_PY (see scripts/mlx_tune_env.txt)" >&2; exit 1; }
 fi
 
+# Chat-template contract (2026-10-01). Production renders every GLM prompt with
+# apply_chat_template(..., enable_thinking=False): `/nothink` on the user turn,
+# the prompt ending `<|assistant|>\n<think></think>`, and the reply ending at an
+# end-of-turn token. mlx_lm_lora's ORPODataset re-templates {prompt, chosen}
+# itself WITHOUT enable_thinking=False and with nothing after the reply, so the
+# end of the turn is never a training target -- that is how the served
+# seth-glm-air-mlxtune-orpo-20260905-* adapter was built, and why it answers
+# ~13% of classifier prompts with an immediate end-of-turn. Pre-templated rows
+# cannot fix it (that trainer would template them a second time), so refuse.
+# Use --trainer mlx_tune, which trains on the rows exactly as
+# scripts/chat_template_rows.py renders them. HU_TRAIN_ALLOW_UNTEMPLATED=1
+# overrides (recorded in the log, never silent).
+MODEL_ID=$(awk '/^model:/{print $2; exit}' "$CONFIG" 2>/dev/null)
+MAX_SEQ=$(awk '/^max_seq_length:/{print $2; exit}' "$CONFIG" 2>/dev/null)
+case "$MODEL_ID" in *[Gg][Ll][Mm]*) IS_GLM=1 ;; *) IS_GLM=0 ;; esac
+if [ "$TRAINER" = "mlx_lm_lora" ] && [ "$IS_GLM" = "1" ] \
+   && [ "${HU_TRAIN_ALLOW_UNTEMPLATED:-0}" != "1" ]; then
+  echo "[train] REFUSING --trainer mlx_lm_lora on $MODEL_ID: its preference datasets apply the" >&2
+  echo "        chat template without enable_thinking=False and train no end-of-turn token," >&2
+  echo "        so the adapter never sees production's prompt shape. Use --trainer mlx_tune" >&2
+  echo "        (rows templated by scripts/chat_template_rows.py), or set" >&2
+  echo "        HU_TRAIN_ALLOW_UNTEMPLATED=1 to override deliberately." >&2
+  exit 2
+fi
+
 STAMP=$(date +%Y%m%d-%H%M%S)
 ADAPTER=/Users/sethford/.human/training-data/adapters/seth-glm-air-${TAG}-${STAMP}
 LOG=/Users/sethford/.human/logs/train-glm-${TAG}-${STAMP}.log
@@ -170,6 +195,14 @@ fi
 if [ "$DRY_RUN" = "1" ]; then
   say "DRY RUN -- would train into $ADAPTER"
   say "corpus: $(wc -l < "$DATA_DIR/train.jsonl") train / $(wc -l < "$DATA_DIR/valid.jsonl") valid"
+  if [ "$TRAINER" = "mlx_tune" ] && [ "$IS_GLM" = "1" ]; then
+    TMPL_PREVIEW=$(mktemp -d "${TMPDIR:-/tmp}/chat-template-preview.XXXXXX")
+    say "chat-template preview (tokenizer files only) -> $TMPL_PREVIEW"
+    "$MLXTUNE_PY" "$(dirname "$0")/chat_template_rows.py" --in-dir "$DATA_DIR" \
+        --out-dir "$TMPL_PREVIEW" --model "$MODEL_ID" --max-seq-length "${MAX_SEQ:-2048}" \
+      || { rm -rf "$TMPL_PREVIEW"; die "chat-template preview failed -- a real run would refuse too"; }
+    rm -rf "$TMPL_PREVIEW"
+  fi
   if [ "$TRAINER" = "mlx_tune" ]; then
     say "delegating to mlx_tune_train.py --dry-run (config + data + architecture support, zero weight loading)"
     "$MLXTUNE_PY" "$(dirname "$0")/mlx_tune_train.py" --dry-run --config "$CONFIG" --train-mode "$TRAIN_MODE"
@@ -308,6 +341,31 @@ if [ "$UPWEIGHT_DEPTH" = "1" ]; then
   sed "s|^data:.*|data: $DEPTH_DIR|" "$CONFIG" > "$DEPTH_DIR/config.yaml"
   CONFIG="$DEPTH_DIR/config.yaml"
   say "depth upweight done -- training from $CONFIG (stats: $DEPTH_DIR/train.upweight_stats.json)"
+fi
+
+# --- chat-template staging (mlx_tune on GLM) -- ALWAYS the LAST data step -------
+# The rebalance and upweight passes above read reply TEXT (casing, emoji,
+# length); they must see raw replies, so templating runs after them. Renders
+# every row exactly as mlx-server.py's prepare_prompt_lm would and appends the
+# end-of-turn token; see scripts/chat_template_rows.py. Tokenizer files only --
+# no weights are loaded. mlx_tune_train.py refuses a GLM run on raw rows, so a
+# skipped or failed step here cannot silently produce an untemplated adapter.
+# HU_TRAIN_SYSTEM_PROMPT_FILE: optional system prompt for rows that carry none
+# (the v6/v6.1 corpora carry none; production sends the persona prompt).
+if [ "$TRAINER" = "mlx_tune" ] && [ "$IS_GLM" = "1" ]; then
+  SRC_DIR=$(awk '/^data:/{print $2; exit}' "$CONFIG" 2>/dev/null)
+  TMPL_DIR="${SRC_DIR}-tmpl-${STAMP}"
+  say "chat-template staging: $SRC_DIR -> $TMPL_DIR (model $MODEL_ID, max_seq ${MAX_SEQ:-2048})"
+  "$MLXTUNE_PY" "$(dirname "$0")/chat_template_rows.py" \
+      --in-dir "$SRC_DIR" --out-dir "$TMPL_DIR" \
+      --model "$MODEL_ID" --max-seq-length "${MAX_SEQ:-2048}" \
+      ${HU_TRAIN_SYSTEM_PROMPT_FILE:+--system-prompt-file "$HU_TRAIN_SYSTEM_PROMPT_FILE"} \
+      2>&1 | tee -a "$LOG"
+  TMPL_RC=${PIPESTATUS[0]}
+  [ "$TMPL_RC" -eq 0 ] || die "chat-template staging failed (rc=$TMPL_RC, see $LOG) -- refusing to train on raw rows"
+  sed "s|^data:.*|data: $TMPL_DIR|" "$CONFIG" > "$TMPL_DIR/config.yaml"
+  CONFIG="$TMPL_DIR/config.yaml"
+  say "chat-template staging done -- training from $CONFIG (manifest: $TMPL_DIR/chat_template_manifest.json)"
 fi
 
 # SimPO's reward is a per-token log-prob (|r_c - r_r| ~ 0.1-1 nat), so its beta
