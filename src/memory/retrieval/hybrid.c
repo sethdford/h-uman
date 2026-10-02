@@ -3,6 +3,7 @@
 #include "human/core/log.h"
 #include "human/core/string.h"
 #include "human/memory.h"
+#include "human/memory/context_relevance.h"
 #include "human/memory/graph.h"
 #include "human/memory/rerank.h"
 #include "human/memory/retrieval.h"
@@ -959,9 +960,13 @@ hu_error_t hu_hybrid_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, hu_em
     }
 
     hu_retrieval_result_t semantic_result = {0};
-    err = hu_semantic_retrieve(alloc, embedder, vector_store, query, query_len, opts,
-                               &semantic_result);
+    /* The query embedding is kept only for HU_CONTEXT_RELEVANCE's null sample. */
+    hu_embedding_t query_emb = {0};
+    err = hu_semantic_retrieve_ex(alloc, embedder, vector_store, query, query_len, opts,
+                                  &semantic_result,
+                                  hu_context_relevance_mode() != HU_GATE_OFF ? &query_emb : NULL);
     if (err != HU_OK) {
+        hu_embedding_free(alloc, &query_emb);
         hu_retrieval_result_free(alloc, &keyword_result);
 #ifdef HU_ENABLE_SQLITE
         hu_retrieval_result_free(alloc, &graph_result);
@@ -1001,6 +1006,14 @@ hu_error_t hu_hybrid_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, hu_em
          * observed on casual exchanges in the 2026-09-05 SOTA gate. */
         hu_gate_mode_t reg_gate = hu_semantic_recall_register_gate_mode();
         bool admits = hu_semantic_recall_register_admits(query, query_len);
+        size_t recall_budget = hu_semantic_recall_max_bytes();
+        /* HU_CONTEXT_RELEVANCE (default OFF; LIVE gated on the replay +
+         * memory-probe measurement in docs/guides/context-relevance.md):
+         * LIVE replaces the word-count cliff with a relevance threshold and a
+         * small casual budget; SHADOW only logs what it would inject. */
+        if (hu_context_relevance_semantic(alloc, &semantic_result, !admits, &recall_budget,
+                                          vector_store, &query_emb))
+            reg_gate = HU_GATE_OFF;
         if (reg_gate != HU_GATE_OFF && !admits) {
             if (reg_gate == HU_GATE_LIVE) {
                 hu_log_info("semantic_recall_register", NULL,
@@ -1025,14 +1038,15 @@ hu_error_t hu_hybrid_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, hu_em
              * the remaining 6/40 empties of that gate) so an excluded hit never
              * consumes byte budget. */
             size_t filtered = hu_semantic_recall_filter_result(alloc, &semantic_result);
-            size_t kept = hu_semantic_recall_clamp_result(alloc, &semantic_result,
-                                                          hu_semantic_recall_max_bytes(),
+            size_t kept = hu_semantic_recall_clamp_result(alloc, &semantic_result, recall_budget,
                                                           HU_SEMANTIC_RECALL_HIT_MAX_BYTES);
             hu_log_info("semantic_recall", NULL,
                         "live: sem=%zu filtered=%zu kept=%zu bytes=%zu budget=%zu", before,
-                        filtered, semantic_result.count, kept, hu_semantic_recall_max_bytes());
+                        filtered, semantic_result.count, kept, recall_budget);
         }
     }
+
+    hu_embedding_free(alloc, &query_emb);
 
     /* Contract C2: attempt reconstruction with keyword + semantic (+ graph).
      * Falls through to the plain RRF+cross-encoder merge below when

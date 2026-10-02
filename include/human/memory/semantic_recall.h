@@ -129,6 +129,13 @@ bool hu_semantic_recall_hit_is_excluded(const char *key, size_t key_len, const c
  * hit never consumes budget. */
 size_t hu_semantic_recall_filter_result(hu_allocator_t *alloc, hu_retrieval_result_t *res);
 
+/* Drop every entry scoring below min_score (entries[i].score, or scores[i]
+ * when present), with the same rank-order / alignment / freeing contract as
+ * hu_semantic_recall_filter_result. Returns the number dropped. Used by the
+ * HU_CONTEXT_RELEVANCE decision (context_relevance.h). */
+size_t hu_semantic_recall_drop_below(hu_allocator_t *alloc, hu_retrieval_result_t *res,
+                                     double min_score);
+
 /* ── Register-conditioned suppression (US-5: protect the LIVE gate from EI drift)
  *
  * Gate: HU_SEMANTIC_RECALL_REGISTER_GATE=off|shadow|live (default OFF).

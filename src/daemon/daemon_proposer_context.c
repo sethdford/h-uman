@@ -83,6 +83,7 @@ void hu_proposer_context_begin_with_local(hu_proposer_context_t *pc, hu_gate_mod
     pc->mode = mode;
     pc->days_since_last = -1;
     pc->days_since_inbound = -1;
+    pc->heavy_inbound_hours_ago = -1;
     if (mode != HU_GATE_OFF && local && local->vtable) {
         pc->local = *local;
         pc->local_ok = true;
@@ -338,6 +339,15 @@ void hu_proposer_context_build(hu_proposer_context_t *pc, hu_allocator_t *alloc,
         if (n > 0 && (size_t)n < sizeof(h))
             pos = append(b, cap, pos, h, (size_t)n);
         pos = append(b, cap, pos, pc->thread, pc->thread_len);
+    }
+    if (pc->heavy_inbound_hours_ago >= 0) {
+        char h[128];
+        int n = snprintf(h, sizeof(h),
+                         "\n--- note ---\nTheir last message was emotionally heavy, about %lld "
+                         "hours ago.\n",
+                         (long long)pc->heavy_inbound_hours_ago);
+        if (n > 0 && (size_t)n < sizeof(h))
+            pos = append(b, cap, pos, h, (size_t)n);
     }
     if (pc->memory_len > 0) {
         static const char h[] = "\n--- what you remember about them ---\n";

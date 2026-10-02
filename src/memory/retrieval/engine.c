@@ -96,6 +96,18 @@ hu_error_t hu_semantic_retrieve(hu_allocator_t *alloc, hu_embedder_t *embedder,
                                 hu_vector_store_t *vector_store, const char *query,
                                 size_t query_len, const hu_retrieval_options_t *opts,
                                 hu_retrieval_result_t *out) {
+    return hu_semantic_retrieve_ex(alloc, embedder, vector_store, query, query_len, opts, out,
+                                   NULL);
+}
+
+hu_error_t hu_semantic_retrieve_ex(hu_allocator_t *alloc, hu_embedder_t *embedder,
+                                   hu_vector_store_t *vector_store, const char *query,
+                                   size_t query_len, const hu_retrieval_options_t *opts,
+                                   hu_retrieval_result_t *out, hu_embedding_t *query_out) {
+    if (query_out) {
+        query_out->values = NULL;
+        query_out->dim = 0;
+    }
     out->entries = NULL;
     out->count = 0;
     out->scores = NULL;
@@ -123,7 +135,10 @@ hu_error_t hu_semantic_retrieve(hu_allocator_t *alloc, hu_embedder_t *embedder,
     size_t count = 0;
     err = vector_store->vtable->search(vector_store->ctx, alloc, &query_embedding, limit, &results,
                                        &count);
-    hu_embedding_free(alloc, &query_embedding);
+    if (err == HU_OK && query_out)
+        *query_out = query_embedding; /* moved: the caller frees it */
+    else
+        hu_embedding_free(alloc, &query_embedding);
     if (err != HU_OK)
         return err;
     if (!results || count == 0)

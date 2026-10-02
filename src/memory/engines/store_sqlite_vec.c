@@ -269,6 +269,48 @@ hu_vector_store_t hu_vector_store_sqlite_vec_create(hu_allocator_t *alloc, struc
     return vs;
 }
 
+hu_error_t hu_vector_store_sqlite_vec_sample_scores(const hu_vector_store_t *vs,
+                                                    const hu_embedding_t *query, size_t k,
+                                                    float *out, size_t *n_out) {
+    if (n_out)
+        *n_out = 0;
+    if (!vs || vs->vtable != &vec_vtable || !vs->ctx)
+        return HU_ERR_NOT_SUPPORTED;
+    vec_store_ctx_t *ctx = (vec_store_ctx_t *)vs->ctx;
+    if (!query || !query->values || query->dim != ctx->dim || !out || !n_out || k == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    sqlite3_stmt *ids = NULL, *one = NULL;
+    if (sqlite3_prepare_v2(ctx->db, "SELECT id FROM memories_vec_rowids ORDER BY random() LIMIT ?1",
+                           -1, &ids, NULL) != SQLITE_OK ||
+        sqlite3_prepare_v2(ctx->db, "SELECT embedding FROM memories_vec WHERE id = ?1", -1, &one,
+                           NULL) != SQLITE_OK) {
+        sqlite3_finalize(ids);
+        sqlite3_finalize(one);
+        return HU_ERR_IO;
+    }
+    sqlite3_bind_int64(ids, 1, (sqlite3_int64)k);
+    size_t n = 0;
+    while (n < k && sqlite3_step(ids) == SQLITE_ROW) {
+        const unsigned char *id = sqlite3_column_text(ids, 0);
+        if (!id)
+            continue;
+        sqlite3_reset(one);
+        /* id stays valid until `ids` steps again, after this lookup */
+        sqlite3_bind_text(one, 1, (const char *)id, -1, SQLITE_STATIC);
+        if (sqlite3_step(one) != SQLITE_ROW)
+            continue;
+        const void *blob = sqlite3_column_blob(one, 0);
+        int bytes = sqlite3_column_bytes(one, 0);
+        if (!blob || bytes != (int)(ctx->dim * sizeof(float)))
+            continue;
+        out[n++] = hu_cosine_similarity(query->values, (const float *)blob, ctx->dim);
+    }
+    sqlite3_finalize(ids);
+    sqlite3_finalize(one);
+    *n_out = n;
+    return HU_OK;
+}
+
 #else /* !HU_ENABLE_SQLITE || !HU_ENABLE_SQLITE_VEC: stub, attach refuses */
 
 hu_vector_store_t hu_vector_store_sqlite_vec_create(hu_allocator_t *alloc, struct sqlite3 *db,
@@ -278,6 +320,18 @@ hu_vector_store_t hu_vector_store_sqlite_vec_create(hu_allocator_t *alloc, struc
     (void)dim;
     hu_vector_store_t vs = {.ctx = NULL, .vtable = NULL};
     return vs;
+}
+
+hu_error_t hu_vector_store_sqlite_vec_sample_scores(const hu_vector_store_t *vs,
+                                                    const hu_embedding_t *query, size_t k,
+                                                    float *out, size_t *n_out) {
+    (void)vs;
+    (void)query;
+    (void)k;
+    (void)out;
+    if (n_out)
+        *n_out = 0;
+    return HU_ERR_NOT_SUPPORTED;
 }
 
 #endif

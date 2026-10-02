@@ -6,6 +6,7 @@
 #include "human/channels/imessage_send_observer.h"
 #include "human/core/log.h"
 #include "human/core/time.h"
+#include "human/daemon/send_failure.h"
 #include "human/memory/outbound_sends_repo.h"
 #include <stdatomic.h>
 
@@ -26,6 +27,13 @@ static void send_provenance_record(void *user, const hu_imessage_sent_event_t *e
     }
 }
 
+/* A text that failed on every path: record it, count it, tell the owner
+ * (include/human/daemon/send_failure.h). Same memory.db as the provenance
+ * rows, which is what lets "undelivered since" compare the two. */
+static void send_failure_observe(void *user, const hu_imessage_send_failed_event_t *ev) {
+    hu_daemon_send_failure_record((sqlite3 *)user, ev, hu_time_wall_ms() / 1000);
+}
+
 hu_error_t hu_daemon_send_provenance_install(sqlite3 *db) {
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
@@ -33,6 +41,7 @@ hu_error_t hu_daemon_send_provenance_install(sqlite3 *db) {
     if (err != HU_OK)
         return err;
     hu_imessage_send_observer_set(send_provenance_record, db);
+    hu_imessage_send_failure_observer_set(send_failure_observe, db);
     static atomic_bool announced = false;
     hu_log_info_once(&announced, "send_provenance", NULL,
                      "send provenance active: recording delivered iMessage sends to "
@@ -42,6 +51,7 @@ hu_error_t hu_daemon_send_provenance_install(sqlite3 *db) {
 
 void hu_daemon_send_provenance_uninstall(void) {
     hu_imessage_send_observer_set(NULL, NULL);
+    hu_imessage_send_failure_observer_set(NULL, NULL);
 }
 
 #endif /* HU_ENABLE_SQLITE */
