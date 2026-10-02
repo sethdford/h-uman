@@ -84,6 +84,30 @@ bool hu_share_is_owner(const struct hu_persona *p, const char *handle, size_t le
     return false;
 }
 
+static bool is_rating_answer(const char *text, size_t len) {
+    if (len == 0 || len > 40)
+        return false;
+    bool letter = false;
+    for (size_t i = 0; i < len; i++) {
+        char c = text[i];
+        if (c == 'a' || c == 'A' || c == 'b' || c == 'B')
+            letter = true;
+        else if (!(c >= '1' && c <= '5') && c != ' ' && c != ',')
+            return false;
+    }
+    return letter;
+}
+
+bool hu_share_is_tool_traffic(const struct hu_persona *p, const char *handle, size_t handle_len,
+                              const char *text, size_t len) {
+    static const char prefix[] = "[h-uman ";
+    const size_t plen = sizeof(prefix) - 1;
+    if (!text)
+        return false;
+    bool tool = (len > plen && memcmp(text, prefix, plen) == 0) || is_rating_answer(text, len);
+    return tool && hu_share_is_owner(p, handle, handle_len);
+}
+
 /* "mom" names a relationship; the rest name a person by first name. */
 static const char *relationship_for(const char *name) {
     static const char *const map[][2] = {{"mom", "mother"}, {"mum", "mother"},  {"dad", "father"},

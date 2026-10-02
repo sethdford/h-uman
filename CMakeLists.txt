@@ -791,6 +791,7 @@ set(HU_CORE_SOURCES
     src/agent/prompt.c
     src/agent/prompt_trim.c
     src/agent/graph_grounding.c
+    src/agent/turn/curiosity_gaps.c
     src/agent/memory_loader.c
     src/agent/channel_trust.c
     src/agent/agent_definition.c
@@ -1130,7 +1131,6 @@ set(HU_CORE_SOURCES
     src/memory/rerank.c
     src/memory/retrieval/strategy_learner.c
     src/memory/retrieval/engine.c
-    src/memory/connections.c
     src/memory/knowledge.c
     src/memory/rag_pipeline.c
     src/memory/compression.c
@@ -4195,6 +4195,8 @@ endif()
 if(HU_ENABLE_SQLITE)
     list(APPEND HU_TEST_SOURCES tests/test_daemon_proactive_feed_scope.c)
 endif()
+
+list(APPEND HU_TEST_SOURCES tests/test_curiosity_gaps.c)
 
 # Sprint 60 follow-up — crosstalk SQLite lookup. Test seeds the
 # messages table directly via sqlite3 to verify the lookup returns

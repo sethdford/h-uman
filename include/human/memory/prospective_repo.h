@@ -196,5 +196,21 @@ hu_error_t hu_prospective_repo_retire_ledger_row(sqlite3 *db, bool is_followup, 
 hu_error_t hu_prospective_repo_settle_followup_twin(sqlite3 *db, int64_t followup_id, int64_t now,
                                                     int *changed);
 
+/* Known gap 7: does v2 own legacy ledger row `ledger_id` (a delayed
+ * follow-up when `is_followup`, else a commitment)? True when an OPEN
+ * (pending or surfaced -- retries included) time row of the row's contact
+ * is its twin, by the same identification the legacy settle uses: keyed by
+ * the row's own key ("followup:<id>" / "commitment:<id>"), or by its F20
+ * partner's key (same contact, description == topic, deadline ==
+ * scheduled_at), or -- for a dated row -- an action equal to the row's
+ * mirror text (normalized) with a due <= the row's due +
+ * HU_PROSPECTIVE_TIME_GRACE_S. Unlike the settle, ANY open row counts: the
+ * question is who raises the topic next, and with HU_PROSPECTIVE_TIME=live
+ * that is v2 for every open row. A row with only terminal twins, a skipped
+ * mirror (never had a twin) or no such ledger row is not owned (*owned
+ * false, HU_OK). Read-only. */
+hu_error_t hu_prospective_repo_ledger_v2_owned(sqlite3 *db, bool is_followup, int64_t ledger_id,
+                                               bool *owned);
+
 #endif /* HU_ENABLE_SQLITE */
 #endif /* HU_MEMORY_PROSPECTIVE_REPO_H */

@@ -36,7 +36,7 @@ MEMORY_DB = os.path.join(HOME, ".human/memory.db")
 CHAT_DB = os.path.join(HOME, "Library/Messages/chat.db")
 
 # Must match src/agent/memory_loader.h and src/daemon/daemon_insight_overuse.c.
-MAX_ITEMS, MAX_BYTES, MIN_CONFIDENCE = 8, 900, 0.5
+MAX_ITEMS, MAX_BYTES, MIN_CONFIDENCE = 3, 900, 0.5  # memory_loader.h
 STOP = {
     "with", "that", "this", "have", "they", "them", "their", "about", "just",
     "like", "what", "when", "from", "will", "your", "been", "were", "also",
@@ -112,7 +112,10 @@ def aggregate(rows):
 
 
 def render_block(mem, contact_id):
-    """Same query, order, and byte budget as contact_insights_repo_sqlite.c."""
+    """The newest MAX_ITEMS within the byte budget. Since 2026-10-01 the daemon
+    picks its MAX_ITEMS by relevance to each incoming message
+    (hu_contact_insights_render_for_query); this baseline still uses the
+    newest ones, so it approximates the live block rather than copying it."""
     rows = mem.execute(
         "SELECT insight, as_of_ms FROM contact_insights WHERE contact_id=? AND retired_at_ms=0 "
         "AND confidence>=? ORDER BY as_of_ms DESC, id DESC LIMIT ?",

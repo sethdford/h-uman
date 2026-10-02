@@ -116,9 +116,9 @@ hu_error_t hu_daemon_insight_overuse_scan(hu_memory_t *memory, hu_allocator_t *a
 #ifdef HU_ENABLE_SQLITE
     char *lines = NULL;
     size_t lines_len = 0;
-    hu_error_t err = hu_contact_insights_render(memory, alloc, contact_id, contact_id_len,
-                                                HU_INSIGHT_MAX_ITEMS, HU_INSIGHT_MAX_BYTES,
-                                                HU_INSIGHT_MIN_CONFIDENCE, &lines, &lines_len);
+    hu_error_t err = hu_contact_insights_render_for_query(
+        memory, alloc, contact_id, contact_id_len, inbound, inbound_len, HU_INSIGHT_MAX_ITEMS,
+        HU_INSIGHT_MAX_BYTES, HU_INSIGHT_MIN_CONFIDENCE, &lines, &lines_len);
     if (err != HU_OK)
         return err;
     if (lines && lines_len) {
