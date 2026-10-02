@@ -487,6 +487,28 @@ static void v2_judge_sees_history_intention_and_cue(void) {
     HU_ASSERT_STR_CONTAINS(s.last_user, "them: going to that new taco place friday");
     HU_ASSERT_STR_CONTAINS(s.last_user, "intention: ask how the new taco place was");
     HU_ASSERT_STR_CONTAINS(s.last_user, "cue: they just mentioned \"taco place\"");
+    /* seeded NOW - 86400: the judge is told the note's age */
+    HU_ASSERT_STR_CONTAINS(s.last_user, "\nnoted: 1 day ago\n");
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* A row whose created_at is in the future (clock skew) has no usable age:
+ * the noted line is omitted rather than invented. */
+static void v2_judge_omits_noted_age_when_unknown(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    seed_kw_exp(db, "taco place", "ask how the new taco place was", NOW + 600, 0);
+    static const char *const r[] = {"not_now"};
+    script_t s;
+    hu_prospective_judge_t j = judge_of(&s, r, 1);
+    hu_prospective_counts_t c;
+    hu_prospective_turn_t t = turn_for("the taco place!!", NOW);
+    HU_ASSERT_EQ(hu_prospective_v2_run(&alloc, db, HU_PM_CUE_KEYWORD, &t, &j, true, &c, NULL, NULL),
+                 HU_OK);
+    HU_ASSERT_EQ(s.calls, (size_t)1);
+    HU_ASSERT_STR_CONTAINS(s.last_user, "intention: ask how the new taco place was\ncue: ");
+    HU_ASSERT_NULL(strstr(s.last_user, "noted:"));
     mem.vtable->deinit(mem.ctx);
 }
 
@@ -1260,6 +1282,7 @@ void run_prospective_v2_tests(void) {
     HU_RUN_TEST(v2_undelivered_surfacing_is_reclaimed_as_an_attempt);
     HU_RUN_TEST(v2_time_done_retires_ledger_twins);
     HU_RUN_TEST(v2_judge_sees_history_intention_and_cue);
+    HU_RUN_TEST(v2_judge_omits_noted_age_when_unknown);
     HU_RUN_TEST(v2_rejects_invalid_arguments);
     HU_RUN_TEST(v2_shadow_never_writes_resolved_cancel_or_reclaim);
     HU_RUN_TEST(v2_surface_write_failure_is_not_rendered_and_stays_pending);

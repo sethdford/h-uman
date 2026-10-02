@@ -338,14 +338,14 @@ static void judge_prompt_carries_history_intention_and_cue(void) {
     static const char hist[] = "them: lasagna night friday?\nme: yes!\n";
     size_t n =
         hu_prospective_judge_user(buf, sizeof(buf), hist, sizeof(hist) - 1,
-                                  "send the lasagna recipe", "lasagna", HU_PM_CUE_KEYWORD, 0);
+                                  "send the lasagna recipe", "lasagna", HU_PM_CUE_KEYWORD, 0, -1);
     HU_ASSERT_TRUE(n > 0 && n == strlen(buf));
     HU_ASSERT_STR_CONTAINS(buf, "conversation (oldest first):\nthem: lasagna night friday?\n");
     HU_ASSERT_STR_CONTAINS(buf, "intention: send the lasagna recipe");
     HU_ASSERT_STR_CONTAINS(buf, "cue: they just mentioned \"lasagna\"");
     HU_ASSERT_TRUE(strcmp(buf + n - 7, "answer:") == 0);
     n = hu_prospective_judge_user(buf, sizeof(buf), NULL, 0, "send the lasagna recipe", NULL,
-                                  HU_PM_CUE_TIME, 2 * 86400 + 5);
+                                  HU_PM_CUE_TIME, 2 * 86400 + 5, -1);
     HU_ASSERT_TRUE(n > 0);
     HU_ASSERT_STR_CONTAINS(buf, "(none)");
     HU_ASSERT_STR_CONTAINS(buf, "it came due 2 day(s) ago");
@@ -357,14 +357,71 @@ static void judge_prompt_carries_history_intention_and_cue(void) {
     for (int i = 0; pos + 40 < 6000; i++)
         pos += (size_t)snprintf(longh + pos, 6000 - pos, "them: line %04d of the history\n", i);
     char big[6144];
-    n = hu_prospective_judge_user(big, sizeof(big), longh, pos, "act", "cue", HU_PM_CUE_KEYWORD, 0);
+    n = hu_prospective_judge_user(big, sizeof(big), longh, pos, "act", "cue", HU_PM_CUE_KEYWORD, 0,
+                                  -1);
     HU_ASSERT_TRUE(n > 0);
     HU_ASSERT_NULL(strstr(big, "line 0000"));
     HU_ASSERT_STR_CONTAINS(big, "\nthem: line ");
     free(longh);
     HU_ASSERT_EQ(hu_prospective_judge_user(buf, 16, hist, sizeof(hist) - 1, "act", "cue",
-                                           HU_PM_CUE_KEYWORD, 0),
+                                           HU_PM_CUE_KEYWORD, 0, -1),
                  (size_t)0); /* does not fit: nothing half-written is used */
+}
+
+/* 2026-10-01 recall fix (pm_bench_local set_f1 0.444): the system prompt
+ * must tell the model a candidate reached it because its moment arrived, and
+ * must keep spec §4.3's asymmetry (an unclear conversation stays silent). */
+static void judge_system_says_the_cue_is_the_moment_and_unclear_stays_silent(void) {
+    size_t sl = 0;
+    const char *sys = hu_prospective_judge_system(&sl);
+    /* the old wording defaulted every open reminder to not_now */
+    HU_ASSERT_NULL(strstr(sys, "still open, but this is not a good moment"));
+    HU_ASSERT_STR_CONTAINS(sys, "its moment arrived");
+    HU_ASSERT_STR_CONTAINS(sys, "a reminder that is still open should fire");
+    HU_ASSERT_STR_CONTAINS(sys, "time passing alone settles nothing");
+    HU_ASSERT_STR_CONTAINS(sys, "If you cannot tell whether the conversation settles it, answer "
+                                "not_now.");
+    /* every verdict word the parser accepts is offered, settled ones first */
+    const char *res = strstr(sys, "\nalready_resolved - ");
+    const char *can = strstr(sys, "\ncancel - ");
+    const char *nn = strstr(sys, "\nnot_now - ");
+    const char *fi = strstr(sys, "\nfire - ");
+    HU_ASSERT_TRUE(res && can && nn && fi);
+    HU_ASSERT_TRUE(res < can && can < nn && nn < fi);
+    HU_ASSERT_EQ(hu_prospective_parse_verdict(fi + 1, 4), HU_PM_VERDICT_FIRE);
+    HU_ASSERT_EQ(hu_prospective_parse_verdict(res + 1, 16), HU_PM_VERDICT_RESOLVED);
+    HU_ASSERT_EQ(hu_prospective_parse_verdict(can + 1, 6), HU_PM_VERDICT_CANCEL);
+    HU_ASSERT_EQ(hu_prospective_parse_verdict(nn + 1, 7), HU_PM_VERDICT_NOT_NOW);
+}
+
+/* A keyword cue carries how long ago the intention was noted; a time cue
+ * does not (its due time is its clock); an unknown age omits the line. */
+static void judge_user_keyword_carries_noted_age(void) {
+    char buf[2048];
+    static const char hist[] = "them: vet visit tomorrow\n";
+    size_t n = hu_prospective_judge_user(buf, sizeof(buf), hist, sizeof(hist) - 1,
+                                         "ask how the vet visit went", "vet", HU_PM_CUE_KEYWORD, 0,
+                                         5 * 86400 + 7200);
+    HU_ASSERT_TRUE(n > 0 && n == strlen(buf));
+    HU_ASSERT_STR_CONTAINS(buf, "intention: ask how the vet visit went\nnoted: 5 days ago\n"
+                                "cue: they just mentioned \"vet\"\nanswer:");
+    n = hu_prospective_judge_user(buf, sizeof(buf), hist, sizeof(hist) - 1, "a", "vet",
+                                  HU_PM_CUE_KEYWORD, 0, 86400 + 1);
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_STR_CONTAINS(buf, "\nnoted: 1 day ago\n");
+    n = hu_prospective_judge_user(buf, sizeof(buf), hist, sizeof(hist) - 1, "a", "vet",
+                                  HU_PM_CUE_KEYWORD, 0, 3600);
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_STR_CONTAINS(buf, "\nnoted: today\n");
+    n = hu_prospective_judge_user(buf, sizeof(buf), hist, sizeof(hist) - 1, "a", "vet",
+                                  HU_PM_CUE_KEYWORD, 0, -1);
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_NULL(strstr(buf, "noted:"));
+    n = hu_prospective_judge_user(buf, sizeof(buf), hist, sizeof(hist) - 1, "a", NULL,
+                                  HU_PM_CUE_TIME, 86400, 5 * 86400);
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_NULL(strstr(buf, "noted:"));
+    HU_ASSERT_STR_CONTAINS(buf, "cue: it came due 1 day(s) ago");
 }
 
 /* M1 (fix round 1): when the only '\n' in the last 4000 bytes of history is
@@ -380,7 +437,7 @@ static void judge_user_keeps_tail_when_only_newline_is_trailing(void) {
     longh[4499] = '\n';                      /* the ONLY newline, at the very end */
     char big[8192];
     size_t n = hu_prospective_judge_user(big, sizeof(big), longh, 4500, "act", "cue",
-                                         HU_PM_CUE_KEYWORD, 0);
+                                         HU_PM_CUE_KEYWORD, 0, -1);
     HU_ASSERT_TRUE(n > 0);
     HU_ASSERT_NULL(strstr(big, "(none)"));
     HU_ASSERT_NOT_NULL(strstr(big, "MARKER_TAIL"));
@@ -492,5 +549,7 @@ void run_prospective_policy_tests(void) {
     HU_RUN_TEST(commitment_action_flips_contact_promises_into_a_question);
     HU_RUN_TEST(judge_prompt_carries_history_intention_and_cue);
     HU_RUN_TEST(judge_user_keeps_tail_when_only_newline_is_trailing);
+    HU_RUN_TEST(judge_system_says_the_cue_is_the_moment_and_unclear_stays_silent);
+    HU_RUN_TEST(judge_user_keyword_carries_noted_age);
     HU_RUN_TEST(local_day_start_is_a_stable_midnight);
 }
