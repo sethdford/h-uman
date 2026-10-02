@@ -72,6 +72,10 @@ typedef struct hu_proposer_context {
     hu_provider_t local;        /* borrowed; valid only when local_ok */
     int64_t days_since_last;    /* -1 = unknown */
     int64_t days_since_inbound; /* -1 = unknown */
+    /* Hours since a heavy/grief last inbound, set by HU_GRIEF_DECAY when it
+     * lets a check-in through after the quiet window; -1 = none. A number,
+     * never the message. */
+    int64_t heavy_inbound_hours_ago;
     char contact[HU_PROPOSER_CTX_CONTACT_MAX];
     size_t contact_len;
     char thread[HU_PROPOSER_CTX_THREAD_MAX];

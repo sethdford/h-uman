@@ -18,7 +18,12 @@
  *   live   — suppression only inside the quiet window after the heavy
  *            message; after it the check-in is ELIGIBLE again and still goes
  *            through every other gate (24 h since last contact, governor,
- *            throttle, reachability, opt-out, the proposer).
+ *            throttle, reachability, opt-out, the proposer). LIVE requires
+ *            HU_PROPOSER_CONTEXT live with a local provider, so the proposer
+ *            sees the thread plus a "heavy inbound N hours ago" signal (no
+ *            text); without it the old suppression holds and the line says
+ *            grief_decay=blocked_no_context. On that tick the contact gets no
+ *            bookend greeting and no celebratory extra (birthday confetti).
  *
  * The window: $HU_GRIEF_DECAY_QUIET_HOURS, default
  * HU_GRIEF_DECAY_DEFAULT_QUIET_HOURS (24 h, "the next day"). No measurement
@@ -33,6 +38,7 @@
  * Logs carry the age, window and decision only — never text or contact ids.
  */
 #include "human/core/gate_mode.h"
+#include "human/daemon/proposer_context.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -66,8 +72,19 @@ int64_t hu_grief_decay_parse_ts(const char *ts);
  * heavy_ts < 0: unknown time fails closed to quiet). */
 bool hu_grief_decay_in_quiet_window(int64_t heavy_ts, int64_t now, double quiet_hours);
 
-/* The check-in gate at daemon.c's P6-3 site: true = suppress this check-in.
- * Not heavy/grief -> false in every mode. */
-bool hu_grief_decay_suppress_checkin(const hu_grief_decay_inbound_t *li, int64_t now);
+typedef enum hu_grief_decay_verdict {
+    HU_GRIEF_DECAY_NONE = 0, /* last inbound not heavy: no effect */
+    HU_GRIEF_DECAY_SUPPRESS, /* no check-in this tick */
+    HU_GRIEF_DECAY_GENTLE,   /* eligible after a hard moment: no extras */
+} hu_grief_decay_verdict_t;
+
+/* The check-in gate at daemon.c's P6-3 site. `pc` is this contact's proposer
+ * context (may be NULL = no context); on GENTLE its heavy_inbound_hours_ago is
+ * set. Not heavy/grief -> NONE in every mode. */
+hu_grief_decay_verdict_t hu_grief_decay_decide(const hu_grief_decay_inbound_t *li, int64_t now,
+                                               hu_proposer_context_t *pc);
+
+/* True when the tick must skip bookend greetings and celebratory extras. */
+bool hu_grief_decay_skip_extras(hu_grief_decay_verdict_t v);
 
 #endif /* HU_DAEMON_GRIEF_DECAY_H */

@@ -2,6 +2,8 @@
  * check-ins forever. HU_GRIEF_DECAY ends the suppression after a quiet window. */
 #include "human/daemon/grief_decay.h"
 
+#include "human/daemon/proposer_context.h"
+#include "human/provider.h"
 #include "test_framework.h"
 
 #include <math.h>
@@ -11,6 +13,20 @@
 
 static const char k_grief[] = "i lost my dad last night";
 static const char k_light[] = "lol that meme was good";
+
+/* A proposer context the way the daemon builds one for a check-in. */
+static hu_proposer_context_t ctx_live(void) {
+    static const hu_provider_vtable_t vt = {0};
+    hu_provider_t local = {.ctx = (void *)&vt, .vtable = &vt};
+    hu_proposer_context_t pc;
+    hu_proposer_context_begin_with_local(&pc, HU_GATE_LIVE, &local);
+    return pc;
+}
+
+static bool suppressed(const hu_grief_decay_inbound_t *li, int64_t now) {
+    hu_proposer_context_t pc = ctx_live();
+    return hu_grief_decay_decide(li, now, &pc) == HU_GRIEF_DECAY_SUPPRESS;
+}
 
 static void clear_env(void) {
     unsetenv("HU_GRIEF_DECAY");
@@ -98,11 +114,11 @@ static void test_live_ends_suppression_after_quiet_window(void) {
     time_t now = time(NULL);
     hu_grief_decay_inbound_t old = inbound(k_grief, now, 72.0);
     clear_env();
-    HU_ASSERT_TRUE(hu_grief_decay_suppress_checkin(&old, (int64_t)now)); /* off: today */
+    HU_ASSERT_TRUE(suppressed(&old, (int64_t)now)); /* off: today */
     setenv("HU_GRIEF_DECAY", "shadow", 1);
-    HU_ASSERT_TRUE(hu_grief_decay_suppress_checkin(&old, (int64_t)now)); /* shadow: unchanged */
+    HU_ASSERT_TRUE(suppressed(&old, (int64_t)now)); /* shadow: unchanged */
     setenv("HU_GRIEF_DECAY", "live", 1);
-    HU_ASSERT_FALSE(hu_grief_decay_suppress_checkin(&old, (int64_t)now)); /* live: eligible */
+    HU_ASSERT_FALSE(suppressed(&old, (int64_t)now)); /* live: eligible */
     clear_env();
 }
 
@@ -110,14 +126,41 @@ static void test_live_keeps_quiet_inside_window_and_on_unknown_time(void) {
     time_t now = time(NULL);
     setenv("HU_GRIEF_DECAY", "live", 1);
     hu_grief_decay_inbound_t recent = inbound(k_grief, now, 2.0);
-    HU_ASSERT_TRUE(hu_grief_decay_suppress_checkin(&recent, (int64_t)now));
+    HU_ASSERT_TRUE(suppressed(&recent, (int64_t)now));
     hu_grief_decay_inbound_t no_ts;
     memset(&no_ts, 0, sizeof(no_ts));
     hu_grief_decay_note_inbound(&no_ts, k_grief, strlen(k_grief), "garbage");
-    HU_ASSERT_TRUE(hu_grief_decay_suppress_checkin(&no_ts, (int64_t)now));
+    HU_ASSERT_TRUE(suppressed(&no_ts, (int64_t)now));
     /* the window is the env value: 1 h makes the 2 h-old message eligible */
     setenv("HU_GRIEF_DECAY_QUIET_HOURS", "1", 1);
-    HU_ASSERT_FALSE(hu_grief_decay_suppress_checkin(&recent, (int64_t)now));
+    HU_ASSERT_FALSE(suppressed(&recent, (int64_t)now));
+    clear_env();
+}
+
+/* LIVE needs the proposer to see the thread: without HU_PROPOSER_CONTEXT live
+ * (and a local provider) the old suppression holds. With it, the verdict is
+ * GENTLE: extras skipped, the age signal set on the context, no text. */
+static void test_live_requires_proposer_context_and_marks_gentle(void) {
+    time_t now = time(NULL);
+    hu_grief_decay_inbound_t old = inbound(k_grief, now, 72.0);
+    setenv("HU_GRIEF_DECAY", "live", 1);
+    HU_ASSERT_EQ((int)hu_grief_decay_decide(&old, (int64_t)now, NULL),
+                 (int)HU_GRIEF_DECAY_SUPPRESS);
+    hu_proposer_context_t off;
+    hu_proposer_context_begin_with_local(&off, HU_GATE_SHADOW, NULL);
+    HU_ASSERT_EQ((int)hu_grief_decay_decide(&old, (int64_t)now, &off),
+                 (int)HU_GRIEF_DECAY_SUPPRESS);
+    hu_proposer_context_t pc = ctx_live();
+    HU_ASSERT_EQ(pc.heavy_inbound_hours_ago, (int64_t)-1);
+    hu_grief_decay_verdict_t v = hu_grief_decay_decide(&old, (int64_t)now, &pc);
+    HU_ASSERT_EQ((int)v, (int)HU_GRIEF_DECAY_GENTLE);
+    HU_ASSERT_TRUE(hu_grief_decay_skip_extras(v));
+    HU_ASSERT_FALSE(hu_grief_decay_skip_extras(HU_GRIEF_DECAY_NONE));
+    HU_ASSERT_TRUE(pc.heavy_inbound_hours_ago >= 71 && pc.heavy_inbound_hours_ago <= 72);
+    /* the signal reaches the proposer block, as hours only */
+    hu_proposer_context_build(&pc, NULL, NULL, NULL, NULL);
+    HU_ASSERT_TRUE(strstr(pc.block, "emotionally heavy, about 7") != NULL);
+    HU_ASSERT_TRUE(strstr(pc.block, "dad") == NULL);
     clear_env();
 }
 
@@ -129,10 +172,12 @@ static void test_light_inbound_never_suppresses(void) {
     const char *modes[] = {"off", "shadow", "live"};
     for (int i = 0; i < 3; i++) {
         setenv("HU_GRIEF_DECAY", modes[i], 1);
-        HU_ASSERT_FALSE(hu_grief_decay_suppress_checkin(&light, (int64_t)now));
-        HU_ASSERT_FALSE(hu_grief_decay_suppress_checkin(&empty, (int64_t)now));
+        HU_ASSERT_FALSE(suppressed(&light, (int64_t)now));
+        HU_ASSERT_FALSE(suppressed(&empty, (int64_t)now));
     }
-    HU_ASSERT_FALSE(hu_grief_decay_suppress_checkin(NULL, (int64_t)now));
+    HU_ASSERT_FALSE(suppressed(NULL, (int64_t)now));
+    hu_proposer_context_t pc = ctx_live();
+    HU_ASSERT_EQ((int)hu_grief_decay_decide(&light, (int64_t)now, &pc), (int)HU_GRIEF_DECAY_NONE);
     clear_env();
 }
 
@@ -145,5 +190,6 @@ void run_daemon_grief_decay_tests(void) {
     HU_RUN_TEST(test_note_inbound_truncates_and_keeps_ts);
     HU_RUN_TEST(test_live_ends_suppression_after_quiet_window);
     HU_RUN_TEST(test_live_keeps_quiet_inside_window_and_on_unknown_time);
+    HU_RUN_TEST(test_live_requires_proposer_context_and_marks_gentle);
     HU_RUN_TEST(test_light_inbound_never_suppresses);
 }

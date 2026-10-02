@@ -25,10 +25,24 @@ is the P6-3 gate in `hu_service_run_proactive_checkins` (`src/daemon.c`).
 | `shadow` | Same decision. Each suppression logs `[grief_decay shadow] heavy=1 age_h=<hours since the message> quiet_h=<window> would_allow=<0/1>`. |
 | `live` | Suppressed only inside the quiet window after the heavy message. After it the check-in is **eligible**: it still needs every other gate (24 h since the last message either way, governor, throttle, reachability, opt-out, the proposer's own judgement). |
 
+LIVE requires `HU_PROPOSER_CONTEXT=live` with a local provider, because a
+gentle check-in needs the proposer to see the thread. The proposer block
+then carries one extra line, `Their last message was emotionally heavy, about
+N hours ago.` (a number, never the text). Without that context the old
+suppression holds and the line says `grief_decay=blocked_no_context`. On a
+tick where a check-in goes out after a heavy message, the contact gets no
+bookend greeting and no important-date extra (birthday confetti).
+
+Each decision logs `[grief_decay live|shadow] heavy=1 age_h=… quiet_h=…
+would_allow=0|1 context=0|1 grief_decay=quiet|eligible|blocked_no_context`.
 A timestamp that does not parse fails closed (the old suppression). Logs
-carry hours and the decision only, never text or contact ids. With
-`HU_PROPOSER_CONTEXT` on, the proposer sees the thread, including the heavy
-message, so the wording can be gentle without a fixed directive.
+carry hours and the decision only, never text or contact ids.
+
+**Gate order.** This gate only decides whether the contact is *eligible* this
+tick. Everything after it in `hu_service_run_proactive_checkins` still
+applies, including the unprompted-send gate stack (#597, not yet merged at
+the time of writing); when #597 lands, its gate runs at send time, after this
+one, so a GENTLE verdict can still be stopped there.
 
 ## The window
 

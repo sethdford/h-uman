@@ -76,17 +76,31 @@ bool hu_grief_decay_in_quiet_window(int64_t heavy_ts, int64_t now, double quiet_
     return (double)(now - heavy_ts) < quiet_hours * 3600.0;
 }
 
-bool hu_grief_decay_suppress_checkin(const hu_grief_decay_inbound_t *li, int64_t now) {
+hu_grief_decay_verdict_t hu_grief_decay_decide(const hu_grief_decay_inbound_t *li, int64_t now,
+                                               hu_proposer_context_t *pc) {
     if (!li || !hu_proactive_should_suppress_for_emotion(li->text, li->len))
-        return false;
+        return HU_GRIEF_DECAY_NONE;
     hu_gate_mode_t mode = hu_grief_decay_mode();
     if (mode == HU_GATE_OFF)
-        return true; /* byte-identical to before: heavy/grief suppresses */
+        return HU_GRIEF_DECAY_SUPPRESS; /* byte-identical to before */
     double quiet_h = hu_grief_decay_quiet_hours();
     int64_t heavy_ts = hu_grief_decay_parse_ts(li->ts);
     bool quiet = hu_grief_decay_in_quiet_window(heavy_ts, now, quiet_h);
     long long age_h = heavy_ts < 0 ? -1 : (long long)((now - heavy_ts) / 3600);
-    hu_log_info("daemon", NULL, "[grief_decay %s] heavy=1 age_h=%lld quiet_h=%.0f would_allow=%d",
-                mode == HU_GATE_LIVE ? "live" : "shadow", age_h, quiet_h, quiet ? 0 : 1);
-    return mode == HU_GATE_LIVE ? quiet : true;
+    /* A gentle check-in needs the proposer to see the thread. */
+    bool context = pc && pc->mode == HU_GATE_LIVE && pc->local_ok;
+    const char *grief_decay = quiet ? "quiet" : (context ? "eligible" : "blocked_no_context");
+    hu_log_info("daemon", NULL,
+                "[grief_decay %s] heavy=1 age_h=%lld quiet_h=%.0f would_allow=%d context=%d "
+                "grief_decay=%s",
+                mode == HU_GATE_LIVE ? "live" : "shadow", age_h, quiet_h, quiet ? 0 : 1,
+                context ? 1 : 0, grief_decay);
+    if (mode != HU_GATE_LIVE || quiet || !context)
+        return HU_GRIEF_DECAY_SUPPRESS;
+    pc->heavy_inbound_hours_ago = age_h;
+    return HU_GRIEF_DECAY_GENTLE;
+}
+
+bool hu_grief_decay_skip_extras(hu_grief_decay_verdict_t v) {
+    return v == HU_GRIEF_DECAY_GENTLE;
 }
