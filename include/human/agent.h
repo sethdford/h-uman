@@ -893,6 +893,14 @@ void hu_agent_apply_relationship_tone(hu_agent_t *agent, char **persona_prompt,
 hu_error_t hu_agent_build_persona_head(hu_agent_t *agent, const char *topic, size_t topic_len,
                                        char **out, size_t *out_len);
 
+/* Same head; `opts` (learned style, persona.h) reaches the compact head only
+ * — the full head ignores it — and *compact_built (may be NULL) reports
+ * which head was ACTUALLY built (false = full, including the compact
+ * fail-safe). opts == NULL is byte-identical to hu_agent_build_persona_head. */
+hu_error_t hu_agent_build_persona_head_ex(hu_agent_t *agent, const char *topic, size_t topic_len,
+                                          hu_persona_style_opts_t *opts, char **out,
+                                          size_t *out_len, bool *compact_built);
+
 /* The lean persona head the llm_decides (production iMessage) path sends:
  * identity, output constraint, communication rules, core anchor, immersive
  * reinforcement, anti-patterns, style rules, channel examples, optional RAG

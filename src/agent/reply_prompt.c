@@ -85,15 +85,12 @@ hu_error_t hu_reply_prompt_render(hu_allocator_t *alloc, const hu_reply_prompt_r
 
     char *head = NULL;
     size_t head_len = 0;
-    hu_error_t err = hu_agent_build_lean_persona_head(&agent, req->incoming, req->incoming_len,
-                                                      &head, &head_len);
+    /* Lean head + HU_LEARNED_STYLE, the same helper the turn paths use. */
+    hu_learned_style_turn_t ls_turn;
+    hu_error_t err = hu_agent_build_head_learned(&agent, true, NULL, 0, req->incoming,
+                                                 req->incoming_len, &head, &head_len, &ls_turn);
     if (err != HU_OK)
         return err;
-    /* Same order as agent_stream.c: learned style before anything is
-     * appended to the head (HU_LEARNED_STYLE, default off). */
-    hu_learned_style_turn_t ls_turn;
-    hu_agent_learned_style_apply(&agent, req->incoming, req->incoming_len, &head, &head_len,
-                                 &ls_turn);
     hu_agent_apply_relationship_tone(&agent, &head, &head_len);
     if (head)
         (void)hu_hard_moment_apply(alloc, hu_hard_moment_mode(), req->incoming, req->incoming_len,

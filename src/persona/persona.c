@@ -5443,9 +5443,10 @@ static hu_error_t persona_build_prompt_compact_ex(hu_allocator_t *alloc,
             if (err != HU_OK)
                 goto fail;
         }
-        if (overlay->avg_length && overlay->avg_length[0] &&
-            !hu_persona_style_opts_suppress(opts, overlay->avg_length)) {
-            n = snprintf(tmp, sizeof(tmp), "- Length: %.300s\n", overlay->avg_length);
+        char fb[1024]; /* learned-style filtered entry */
+        const char *avg = hu_persona_style_opts_filter(opts, overlay->avg_length, fb, sizeof(fb));
+        if (avg && avg[0]) {
+            n = snprintf(tmp, sizeof(tmp), "- Length: %.300s\n", avg);
             err = persona_compact_append(alloc, &buf, &len, &cap, tmp, (size_t)n);
             if (err != HU_OK)
                 goto fail;
@@ -5458,10 +5459,11 @@ static hu_error_t persona_build_prompt_compact_ex(hu_allocator_t *alloc,
         }
         size_t notes_max = overlay->style_notes_count < 4 ? overlay->style_notes_count : 4;
         for (size_t i = 0; i < notes_max; i++) {
-            if (!overlay->style_notes[i] ||
-                hu_persona_style_opts_suppress(opts, overlay->style_notes[i]))
+            const char *note =
+                hu_persona_style_opts_filter(opts, overlay->style_notes[i], fb, sizeof(fb));
+            if (!note)
                 continue;
-            n = snprintf(tmp, sizeof(tmp), "- %.250s\n", overlay->style_notes[i]);
+            n = snprintf(tmp, sizeof(tmp), "- %.250s\n", note);
             err = persona_compact_append(alloc, &buf, &len, &cap, tmp, (size_t)n);
             if (err != HU_OK)
                 goto fail;
@@ -5489,11 +5491,13 @@ static hu_error_t persona_build_prompt_compact_ex(hu_allocator_t *alloc,
         size_t r_max =
             persona->communication_rules_count < 4 ? persona->communication_rules_count : 4;
         for (size_t i = 0; i < r_max; i++) {
-            if (!persona->communication_rules[i] ||
-                hu_persona_style_opts_suppress(opts, persona->communication_rules[i]))
+            char fb[1024]; /* learned-style filtered entry */
+            const char *rule =
+                hu_persona_style_opts_filter(opts, persona->communication_rules[i], fb, sizeof(fb));
+            if (!rule)
                 continue;
             char tmp[512];
-            int n = snprintf(tmp, sizeof(tmp), "- %.300s\n", persona->communication_rules[i]);
+            int n = snprintf(tmp, sizeof(tmp), "- %.300s\n", rule);
             err = persona_compact_append(alloc, &buf, &len, &cap, tmp, (size_t)n);
             if (err != HU_OK)
                 goto fail;

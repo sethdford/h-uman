@@ -49,6 +49,15 @@ typedef enum { HU_LS_SHAPE_CASUAL = 0, HU_LS_SHAPE_QUESTION, HU_LS_SHAPE_STORY }
  * else casual. NULL/empty -> casual. Identical to Part A's Python rule. */
 hu_ls_shape_t hu_learned_style_shape(const char *inbound, size_t len);
 
+/* The shape of what the contact actually typed in a batch. The daemon's
+ * turn input joins the burst's bubbles with '\n' and also carries notes it
+ * injected (photo descriptions, audio/video transcriptions, "[They sent a
+ * video]", attachment placeholders), each on its own line. Those lines are
+ * dropped and the rest re-joined with '\n' before hu_learned_style_shape —
+ * the same input Part A classifies: the inbound bubbles since the owner's
+ * last send, joined with '\n'. */
+hu_ls_shape_t hu_learned_style_shape_inbound(const char *batch, size_t len);
+
 /* "question" / "story" / "casual" — the bucket suffix and log token. */
 const char *hu_learned_style_shape_name(hu_ls_shape_t shape);
 
@@ -74,6 +83,10 @@ void hu_learned_style_set_persona(const char *name, size_t name_len);
  * that is found=false, logged once at WARN. Thread-safe. */
 bool hu_learned_style_lookup(const char *contact_id, size_t len, hu_ls_shape_t shape,
                              hu_learned_style_t *out);
+
+/* set_persona + lookup under ONE lock acquisition (the per-turn path). */
+bool hu_learned_style_lookup_for(const char *persona, size_t persona_len, const char *contact_id,
+                                 size_t len, hu_ls_shape_t shape, hu_learned_style_t *out);
 
 /* Drop the cache (tests; persona reload). */
 void hu_learned_style_cache_reset(void);
@@ -103,10 +116,17 @@ size_t hu_learned_style_render_line(const hu_learned_style_t *ls, hu_ls_shape_t 
  * relative, not fixed, and is kept. */
 bool hu_learned_style_is_length_rule(const char *s, size_t len);
 
+/* Remove the length-imposing SENTENCES of one free-text entry, keeping the
+ * rest byte for byte ("Don't perform empathy. Be brief and real." keeps
+ * "Don't perform empathy."). Sentences end at runs of . ! ?. Writes to out
+ * (cap >= len + 1) when out is non-NULL; returns the sentences removed. */
+size_t hu_learned_style_strip_sentences(const char *in, size_t len, char *out, size_t cap,
+                                        size_t *out_len);
+
 /* Strip length-imposing sentences from a contact-profile context block
- * (hu_contact_profile_build_context output): only the "Dynamic:" line
- * (sentence by sentence; the line goes if nothing is left) and "Pattern:"
- * lines are examined, everything else is copied byte for byte. Writes to
+ * (hu_contact_profile_build_context output): only "Dynamic:" and "Pattern:"
+ * lines are examined, sentence by sentence (a line goes when nothing is
+ * left); everything else is copied byte for byte. Writes to
  * out (cap >= len + 1) when out is non-NULL; returns the number of entries
  * removed either way. */
 size_t hu_learned_style_strip_contact(const char *in, size_t len, char *out, size_t cap,

@@ -16,7 +16,6 @@
 
 #include <ctype.h>
 #include <pthread.h>
-#include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
@@ -69,6 +68,59 @@ const char *hu_learned_style_shape_name(hu_ls_shape_t shape) {
     }
 }
 
+/* Text the daemon injects into the batch that the contact never typed: media
+ * descriptions/transcriptions and attachment placeholders. Each sits on its
+ * own line (daemon.c joins bubbles and their notes with '\n'). */
+static bool ls_injected_line(const char *s, size_t n) {
+    static const char *const prefixes[] = {
+        "[Audio transcription: ",
+        "[Video transcription: ",
+        "[They sent a photo: ",
+        "[They sent a video]",
+        "[They sent a picture ",
+        "[Photo]",
+        "[Video]",
+        "[Audio]",
+    };
+    while (n > 0 && isspace((unsigned char)s[n - 1]))
+        n--;
+    if (n == 0 || s[0] != '[' || s[n - 1] != ']')
+        return false;
+    for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); i++) {
+        size_t pl = strlen(prefixes[i]);
+        if (n >= pl && memcmp(s, prefixes[i], pl) == 0)
+            return true;
+    }
+    return false;
+}
+
+hu_ls_shape_t hu_learned_style_shape_inbound(const char *s, size_t len) {
+    if (!s || len == 0)
+        return HU_LS_SHAPE_CASUAL;
+    hu_allocator_t a = hu_system_allocator();
+    char *buf = (char *)a.alloc(a.ctx, len + 1);
+    if (!buf)
+        return hu_learned_style_shape(s, len);
+    size_t o = 0, i = 0;
+    while (i < len) {
+        size_t l0 = i;
+        while (i < len && s[i] != '\n')
+            i++;
+        size_t ll = i - l0;
+        if (i < len)
+            i++; /* the '\n' */
+        if (ls_injected_line(s + l0, ll))
+            continue;
+        if (o > 0)
+            buf[o++] = '\n';
+        memcpy(buf + o, s + l0, ll);
+        o += ll;
+    }
+    hu_ls_shape_t shape = hu_learned_style_shape(buf, o);
+    a.free(a.ctx, buf, len + 1);
+    return shape;
+}
+
 hu_gate_mode_t hu_learned_style_mode(void) {
     return hu_gate_mode_from_env("HU_LEARNED_STYLE", HU_GATE_OFF);
 }
@@ -87,6 +139,7 @@ typedef struct {
     time_t mtime;
     off_t size;
     bool present;          /* file existed at the last stat */
+    bool missing_logged;   /* WARNed that the file is absent; cleared when it appears */
     hu_json_value_t *root; /* validated document, or NULL (absent/malformed) */
 } hu_ls_cache_t;
 
@@ -121,8 +174,7 @@ void hu_learned_style_cache_reset(void) {
     pthread_mutex_unlock(&s_ls_mu);
 }
 
-void hu_learned_style_set_persona(const char *name, size_t name_len) {
-    pthread_mutex_lock(&s_ls_mu);
+static void ls_set_persona_locked(const char *name, size_t name_len) {
     char next[HU_LS_NAME_MAX] = {0};
     if (name && name_len > 0 && name_len < sizeof(next))
         memcpy(next, name, name_len);
@@ -130,6 +182,11 @@ void hu_learned_style_set_persona(const char *name, size_t name_len) {
         ls_drop_locked();
         memcpy(s_ls.persona, next, sizeof(next));
     }
+}
+
+void hu_learned_style_set_persona(const char *name, size_t name_len) {
+    pthread_mutex_lock(&s_ls_mu);
+    ls_set_persona_locked(name, name_len);
     pthread_mutex_unlock(&s_ls_mu);
 }
 
@@ -218,8 +275,17 @@ static void ls_refresh_locked(void) {
             s_ls.root = NULL;
         }
         s_ls.present = false;
+        /* Once per disappearance, not per turn: re-armed when it appears. */
+        if (!s_ls.missing_logged) {
+            s_ls.missing_logged = true;
+            hu_log_warn("learned_style", NULL,
+                        "%s%s not found in the persona dir; learned style is off until the "
+                        "learner writes it",
+                        s_ls.persona, HU_LEARNED_STYLE_SUFFIX);
+        }
         return;
     }
+    s_ls.missing_logged = false;
     if (s_ls.present && st.st_mtime == s_ls.mtime && st.st_size == s_ls.size)
         return; /* unchanged since the last load (valid or not) */
 
@@ -247,23 +313,20 @@ static void ls_refresh_locked(void) {
     }
     if (root)
         hu_json_free(&a, root);
-    /* Once per process: the operator needs to know the learned style is not
-     * being applied and why, without a line per turn. */
-    static atomic_bool warned_malformed = false;
-    if (hu_log_once_check_(&warned_malformed))
-        hu_log_warn("learned_style", NULL,
-                    "%s%s is malformed or not schema %s (err=%d); treating it as absent — "
-                    "re-run the learned-style learner",
-                    s_ls.persona, HU_LEARNED_STYLE_SUFFIX, HU_LEARNED_STYLE_SCHEMA, (int)err);
+    /* Once per file version: this branch runs only when the mtime or size
+     * changed since the last load, so a bad file logs once, and a later
+     * rewrite that is still bad logs once more. */
+    hu_log_warn("learned_style", NULL,
+                "%s%s is malformed or not schema %s (err=%d); treating it as absent — "
+                "re-run the learned-style learner",
+                s_ls.persona, HU_LEARNED_STYLE_SUFFIX, HU_LEARNED_STYLE_SCHEMA, (int)err);
 }
 
-bool hu_learned_style_lookup(const char *contact_id, size_t len, hu_ls_shape_t shape,
+/* Caller holds s_ls_mu. */
+static bool ls_lookup_locked(const char *contact_id, size_t len, hu_ls_shape_t shape,
                              hu_learned_style_t *out) {
-    if (!out)
-        return false;
     memset(out, 0, sizeof(*out));
     out->latency_p50_s = -1;
-    pthread_mutex_lock(&s_ls_mu);
     ls_refresh_locked();
     const hu_json_value_t *root = s_ls.root;
     if (root) {
@@ -290,8 +353,28 @@ bool hu_learned_style_lookup(const char *contact_id, size_t len, hu_ls_shape_t s
         if (!out->found && ls_read_stats(hu_json_object_get(root, "global"), out))
             out->found = true;
     }
-    pthread_mutex_unlock(&s_ls_mu);
     return out->found;
+}
+
+bool hu_learned_style_lookup(const char *contact_id, size_t len, hu_ls_shape_t shape,
+                             hu_learned_style_t *out) {
+    if (!out)
+        return false;
+    pthread_mutex_lock(&s_ls_mu);
+    bool found = ls_lookup_locked(contact_id, len, shape, out);
+    pthread_mutex_unlock(&s_ls_mu);
+    return found;
+}
+
+bool hu_learned_style_lookup_for(const char *persona, size_t persona_len, const char *contact_id,
+                                 size_t len, hu_ls_shape_t shape, hu_learned_style_t *out) {
+    if (!out)
+        return false;
+    pthread_mutex_lock(&s_ls_mu);
+    ls_set_persona_locked(persona, persona_len);
+    bool found = ls_lookup_locked(contact_id, len, shape, out);
+    pthread_mutex_unlock(&s_ls_mu);
+    return found;
 }
 
 /* ── render ──────────────────────────────────────────────────────────── */
@@ -438,15 +521,15 @@ bool hu_learned_style_is_length_rule(const char *s, size_t len) {
     return false;
 }
 
-bool hu_persona_style_opts_suppress(hu_persona_style_opts_t *opts, const char *entry) {
-    if (!opts || !opts->suppress_length_rules || !entry ||
-        !hu_learned_style_is_length_rule(entry, strlen(entry)))
-        return false;
-    opts->suppressed++;
-    return true;
-}
-
 /* ── contact profile stripping ───────────────────────────────────────── */
+
+static void ls_terminate(char *out, size_t pos, size_t *out_len) {
+    if (!out)
+        return;
+    out[pos] = '\0';
+    if (out_len)
+        *out_len = pos;
+}
 
 static void ls_emit(char *out, size_t cap, size_t *pos, const char *s, size_t n) {
     if (out && *pos + n < cap)
@@ -454,8 +537,8 @@ static void ls_emit(char *out, size_t cap, size_t *pos, const char *s, size_t n)
     *pos += n;
 }
 
-/* Strip length sentences from one "Dynamic: …" body. Returns removed count;
- * writes the kept body (trailing spaces trimmed) through ls_emit. */
+/* Strip length sentences from one body. Returns removed count; writes the
+ * kept body (trailing spaces trimmed) through ls_emit. */
 static size_t ls_strip_sentences(const char *b, size_t blen, char *out, size_t cap, size_t *pos,
                                  size_t *kept) {
     size_t removed = 0, i = 0, kept_bytes = 0;
@@ -486,6 +569,33 @@ static size_t ls_strip_sentences(const char *b, size_t blen, char *out, size_t c
     return removed;
 }
 
+size_t hu_learned_style_strip_sentences(const char *in, size_t len, char *out, size_t cap,
+                                        size_t *out_len) {
+    if (out_len)
+        *out_len = 0;
+    if (!in || (out && cap < len + 1))
+        return 0;
+    size_t pos = 0, kept = 0;
+    size_t removed = ls_strip_sentences(in, len, out, cap, &pos, &kept);
+    ls_terminate(out, pos, out_len);
+    return removed;
+}
+
+const char *hu_persona_style_opts_filter(hu_persona_style_opts_t *opts, const char *entry,
+                                         char *buf, size_t cap) {
+    if (!opts || !opts->suppress_length_rules || !entry || !buf)
+        return entry;
+    size_t len = strlen(entry);
+    if (cap < len + 1)
+        return entry; /* longer than any persona entry the heads render */
+    size_t kept = 0;
+    size_t removed = hu_learned_style_strip_sentences(entry, len, buf, cap, &kept);
+    if (removed == 0)
+        return entry;
+    opts->suppressed += removed;
+    return kept > 0 ? buf : NULL;
+}
+
 size_t hu_learned_style_strip_contact(const char *in, size_t len, char *out, size_t cap,
                                       size_t *out_len) {
     static const char k_dyn[] = "Dynamic: ";
@@ -505,10 +615,15 @@ size_t hu_learned_style_strip_contact(const char *in, size_t len, char *out, siz
         size_t nl = (i < len) ? 1 : 0;
         i += nl;
         size_t llen = le - ls0;
-        if (llen >= sizeof(k_dyn) - 1 && memcmp(in + ls0, k_dyn, sizeof(k_dyn) - 1) == 0) {
+        size_t pfx = 0;
+        if (llen >= sizeof(k_dyn) - 1 && memcmp(in + ls0, k_dyn, sizeof(k_dyn) - 1) == 0)
+            pfx = sizeof(k_dyn) - 1;
+        else if (llen >= sizeof(k_pat) - 1 && memcmp(in + ls0, k_pat, sizeof(k_pat) - 1) == 0)
+            pfx = sizeof(k_pat) - 1;
+        if (pfx > 0) {
             size_t line_pos = pos, kept = 0;
-            ls_emit(out, cap, &pos, k_dyn, sizeof(k_dyn) - 1);
-            size_t body = ls0 + sizeof(k_dyn) - 1;
+            ls_emit(out, cap, &pos, in + ls0, pfx);
+            size_t body = ls0 + pfx;
             size_t r = ls_strip_sentences(in + body, le - body, out, cap, &pos, &kept);
             removed += r;
             if (r > 0 && kept == 0) {
@@ -518,17 +633,8 @@ size_t hu_learned_style_strip_contact(const char *in, size_t len, char *out, siz
             ls_emit(out, cap, &pos, "\n", nl);
             continue;
         }
-        if (llen >= sizeof(k_pat) - 1 && memcmp(in + ls0, k_pat, sizeof(k_pat) - 1) == 0 &&
-            hu_learned_style_is_length_rule(in + ls0, llen)) {
-            removed++;
-            continue;
-        }
         ls_emit(out, cap, &pos, in + ls0, llen + nl);
     }
-    if (out) {
-        out[pos] = '\0';
-        if (out_len)
-            *out_len = pos;
-    }
+    ls_terminate(out, pos, out_len);
     return removed;
 }

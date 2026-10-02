@@ -21,6 +21,8 @@
 #include "human/persona.h"
 #include "human/persona/learned_style.h"
 #include "test_framework.h"
+#include "turn_test_fixture.h"
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -111,11 +113,16 @@ static void ls_teardown(void) {
 
 /* Persona with every hand-written length rule production carries, each next
  * to a non-length sibling that must survive. */
-static char *ls_comm_rules[] = {(char *)"Match energy: short messages get short replies.",
-                                (char *)"Never use markdown."};
+static char *ls_comm_rules[] = {
+    (char *)"Match energy: short messages get short replies.", (char *)"Never use markdown.",
+    (char *)"Match the energy and depth of what they said. Short message gets short reply. Deep "
+            "message gets a real response."};
 static char *ls_style_rules[] = {(char *)"Default to natural short texts (5-20 words).",
                                  (char *)"Use contractions always."};
-static char *ls_notes[] = {(char *)"Be brief and real", (char *)"dry humor"};
+static char *ls_notes[] = {
+    (char *)"Don't perform empathy. Be brief and real.",
+    (char *)"Respond like you're thumb-typing on a phone. Short, punchy, real.",
+    (char *)"dry humor"};
 static hu_persona_overlay_t ls_overlay;
 static hu_contact_profile_t ls_contacts[2];
 
@@ -126,7 +133,7 @@ static void ls_persona(hu_persona_t *p) {
     p->identity = (char *)"Test person who texts from a phone.";
     p->core_anchor = (char *)"You are Test Person.";
     p->communication_rules = ls_comm_rules;
-    p->communication_rules_count = 2;
+    p->communication_rules_count = 3;
     p->style_rules = ls_style_rules;
     p->style_rules_count = 2;
     memset(&ls_overlay, 0, sizeof(ls_overlay));
@@ -134,7 +141,7 @@ static void ls_persona(hu_persona_t *p) {
     ls_overlay.formality = (char *)"casual";
     ls_overlay.avg_length = (char *)"Default 5-15 words";
     ls_overlay.style_notes = ls_notes;
-    ls_overlay.style_notes_count = 2;
+    ls_overlay.style_notes_count = 3;
     p->overlays = &ls_overlay;
     p->overlays_count = 1;
     memset(ls_contacts, 0, sizeof(ls_contacts));
@@ -174,6 +181,10 @@ static void shape_rule_matches_shared_vectors(void) {
     for (size_t i = 0; i < sizeof(v) / sizeof(v[0]); i++)
         HU_ASSERT_EQ((int)hu_learned_style_shape(v[i].in, strlen(v[i].in)), (int)v[i].want);
     HU_ASSERT_EQ((int)hu_learned_style_shape(NULL, 0), (int)HU_LS_SHAPE_CASUAL);
+    /* Multi-bubble: a burst joined with '\n' (shared with Part A). */
+    static const char burst[] = "So today was wild.\nWork ran late and the car wouldn't start.\n"
+                                "Ended up getting a ride home from Dave.";
+    HU_ASSERT_EQ((int)hu_learned_style_shape(burst, sizeof(burst) - 1), (int)HU_LS_SHAPE_STORY);
     /* Whitespace is trimmed before measuring. */
     HU_ASSERT_EQ((int)hu_learned_style_shape("  ok \n", 6), (int)HU_LS_SHAPE_CASUAL);
 }
@@ -188,6 +199,34 @@ static void shape_rule_140_byte_boundary(void) {
     memset(padded, ' ', sizeof(padded));
     memcpy(padded + 5, s, 139);
     HU_ASSERT_EQ((int)hu_learned_style_shape(padded, 150), (int)HU_LS_SHAPE_CASUAL);
+}
+
+/* The daemon's batch text carries notes the contact never typed; the shape is
+ * taken from the bubbles alone, joined with '\n', as Part A does. */
+static void shape_inbound_ignores_injected_notes(void) {
+    static const char burst[] = "So today was wild.\nWork ran late and the car wouldn't start.\n"
+                                "Ended up getting a ride home from Dave.";
+    HU_ASSERT_EQ((int)hu_learned_style_shape_inbound(burst, sizeof(burst) - 1),
+                 (int)HU_LS_SHAPE_STORY);
+    /* A short bubble plus a long photo description is still casual… */
+    static const char photo[] =
+        "lol look\n[They sent a photo: a golden retriever wearing sunglasses on a beach at "
+        "sunset. The dog is sitting on a towel. There is a cooler. Waves behind.]";
+    HU_ASSERT_EQ((int)hu_learned_style_shape(photo, sizeof(photo) - 1), (int)HU_LS_SHAPE_STORY);
+    HU_ASSERT_EQ((int)hu_learned_style_shape_inbound(photo, sizeof(photo) - 1),
+                 (int)HU_LS_SHAPE_CASUAL);
+    /* …and a '?' inside a transcription note is not their question. */
+    static const char memo[] = "ok\n[Audio transcription: are you coming?]\n[They sent a video]";
+    HU_ASSERT_EQ((int)hu_learned_style_shape_inbound(memo, sizeof(memo) - 1),
+                 (int)HU_LS_SHAPE_CASUAL);
+    static const char unseen[] =
+        "[They sent a picture that didn't load on your phone \xE2\x80\x94 you can't see it]";
+    HU_ASSERT_EQ((int)hu_learned_style_shape_inbound(unseen, sizeof(unseen) - 1),
+                 (int)HU_LS_SHAPE_CASUAL);
+    /* A bracketed bubble the contact typed is kept. */
+    static const char typed[] = "[sigh] what now?";
+    HU_ASSERT_EQ((int)hu_learned_style_shape_inbound(typed, sizeof(typed) - 1),
+                 (int)HU_LS_SHAPE_QUESTION);
 }
 
 /* ── lookup ───────────────────────────────────────────────────────────── */
@@ -275,6 +314,65 @@ static void lookup_cache_restats_at_most_every_60s(void) {
     g_fake_now += 2;
     HU_ASSERT_TRUE(hu_learned_style_lookup(LS_CONTACT_A, 12, HU_LS_SHAPE_CASUAL, &ls));
     HU_ASSERT_EQ(ls.len_p50, 40);
+    ls_teardown();
+}
+
+/* stderr capture (hu_log writes there without an observer). */
+typedef struct {
+    char path[64];
+    int fd, saved;
+} ls_cap_t;
+
+static void ls_cap_begin(ls_cap_t *c) {
+    snprintf(c->path, sizeof(c->path), "/tmp/hu_ls_cap_XXXXXX");
+    c->fd = mkstemp(c->path);
+    HU_ASSERT_TRUE(c->fd >= 0);
+    fflush(stderr);
+    c->saved = dup(STDERR_FILENO);
+    HU_ASSERT_TRUE(c->saved >= 0);
+    dup2(c->fd, STDERR_FILENO);
+}
+
+static size_t ls_cap_end(ls_cap_t *c, char *buf, size_t cap) {
+    fflush(stderr);
+    dup2(c->saved, STDERR_FILENO);
+    close(c->saved);
+    lseek(c->fd, 0, SEEK_SET);
+    ssize_t got = read(c->fd, buf, cap - 1);
+    size_t n = got > 0 ? (size_t)got : 0;
+    buf[n] = '\0';
+    close(c->fd);
+    unlink(c->path);
+    return n;
+}
+
+static size_t ls_count_str(const char *hay, const char *needle) {
+    size_t n = 0;
+    for (const char *q = strstr(hay, needle); q; q = strstr(q + 1, needle))
+        n++;
+    return n;
+}
+
+/* A bad file WARNs once per file version, not once per process (a rewrite
+ * that is still bad must surface) and not once per turn. */
+static void malformed_file_warns_once_per_mtime(void) {
+    ls_setup();
+    g_fake_now = 1800000000;
+    hu_learned_style_set_clock(ls_fake_clock);
+    hu_learned_style_t ls;
+    char log[4096];
+    ls_cap_t c;
+    ls_cap_begin(&c);
+    ls_write("{not json", 1700000000);
+    (void)hu_learned_style_lookup(LS_CONTACT_A, 12, HU_LS_SHAPE_CASUAL, &ls);
+    g_fake_now += 61; /* re-stat: same mtime, no new WARN */
+    (void)hu_learned_style_lookup(LS_CONTACT_A, 12, HU_LS_SHAPE_CASUAL, &ls);
+    ls_write("[1,2]", 1700000100); /* rewritten, still bad */
+    g_fake_now += 61;
+    (void)hu_learned_style_lookup(LS_CONTACT_A, 12, HU_LS_SHAPE_CASUAL, &ls);
+    ls_cap_end(&c, log, sizeof(log));
+    HU_ASSERT_EQ(ls_count_str(log, "is malformed or not schema"), 2u);
+    HU_ASSERT_FALSE(ls.found);
     ls_teardown();
 }
 
@@ -380,15 +478,59 @@ static void strip_contact_removes_only_length_sentences(void) {
     char out[512];
     size_t out_len = 0;
     size_t removed = hu_learned_style_strip_contact(in, sizeof(in) - 1, out, sizeof(out), &out_len);
-    HU_ASSERT_EQ(removed, 2u);
+    HU_ASSERT_EQ(removed, 3u); /* 1 Dynamic sentence + both Pattern sentences */
     HU_ASSERT_STR_EQ(out, want);
     HU_ASSERT_EQ(out_len, sizeof(want) - 1);
     /* Count-only mode agrees. */
-    HU_ASSERT_EQ(hu_learned_style_strip_contact(in, sizeof(in) - 1, NULL, 0, NULL), 2u);
+    HU_ASSERT_EQ(hu_learned_style_strip_contact(in, sizeof(in) - 1, NULL, 0, NULL), 3u);
     /* A Dynamic line that is nothing but a length rule disappears whole. */
     static const char only[] = "Name: A\nDynamic: Keep it brief.\nWarmth: high\n";
     hu_learned_style_strip_contact(only, sizeof(only) - 1, out, sizeof(out), &out_len);
     HU_ASSERT_STR_EQ(out, "Name: A\nWarmth: high\n");
+}
+
+/* Suppression is SENTENCE by sentence: the non-length instruction in a mixed
+ * entry survives, and a "match the energy" entry keeps only its non-length
+ * sentences. */
+static void strip_sentences_keeps_non_length_instructions(void) {
+    static const struct {
+        const char *in, *want;
+        size_t removed;
+    } v[] = {
+        {"Don't perform empathy. Be brief and real.", "Don't perform empathy.", 1},
+        {"Respond like you're thumb-typing on a phone. Short, punchy, real.",
+         "Respond like you're thumb-typing on a phone.", 1},
+        {"Match the energy and depth of what they said. Short message gets short reply. Deep "
+         "message gets a real response.",
+         "Match the energy and depth of what they said. Deep message gets a real response.", 1},
+        {"Default to natural short texts (5-20 words). Go longer (30-80 words) when the "
+         "conversation calls for depth.",
+         "", 2},
+        {"3-10 words. MAX 15 words.", "", 2},
+        {"Match energy: short messages get short replies.",
+         "Match energy: short messages get short replies.", 0},
+        {"dry humor", "dry humor", 0},
+    };
+    for (size_t i = 0; i < sizeof(v) / sizeof(v[0]); i++) {
+        char out[256];
+        size_t out_len = 99;
+        size_t r =
+            hu_learned_style_strip_sentences(v[i].in, strlen(v[i].in), out, sizeof(out), &out_len);
+        HU_ASSERT_EQ(r, v[i].removed);
+        HU_ASSERT_STR_EQ(out, v[i].want);
+        HU_ASSERT_EQ(out_len, strlen(v[i].want));
+    }
+    /* The head-builder filter: same entry back when nothing is stripped (and
+     * nothing counted), the stripped copy, or NULL when nothing is left. */
+    hu_persona_style_opts_t o = {NULL, 0, true, 0};
+    char fb[256];
+    const char *keep = "dry humor";
+    HU_ASSERT_TRUE(hu_persona_style_opts_filter(&o, keep, fb, sizeof(fb)) == keep);
+    HU_ASSERT_STR_EQ(hu_persona_style_opts_filter(&o, v[0].in, fb, sizeof(fb)),
+                     "Don't perform empathy.");
+    HU_ASSERT_NULL(hu_persona_style_opts_filter(&o, "Be brief.", fb, sizeof(fb)));
+    HU_ASSERT_EQ(o.suppressed, 2u);
+    HU_ASSERT_TRUE(hu_persona_style_opts_filter(NULL, v[0].in, fb, sizeof(fb)) == v[0].in);
 }
 
 /* ── head builders ────────────────────────────────────────────────────── */
@@ -424,12 +566,19 @@ static void compact_head_ex_suppresses_exactly_length_rules(void) {
     HU_ASSERT_STR_CONTAINS(h, line);
     HU_ASSERT_STR_NOT_CONTAINS(h, "5-15 words");
     HU_ASSERT_STR_NOT_CONTAINS(h, "Be brief");
+    HU_ASSERT_STR_NOT_CONTAINS(h, "Short, punchy");
+    HU_ASSERT_STR_NOT_CONTAINS(h, "Short message gets short reply");
+    HU_ASSERT_STR_CONTAINS(h, "- Don't perform empathy.\n");
+    HU_ASSERT_STR_CONTAINS(h, "- Respond like you're thumb-typing on a phone.\n");
+    HU_ASSERT_STR_CONTAINS(h, "Match the energy and depth of what they said. Deep message gets a "
+                              "real response.");
     HU_ASSERT_STR_CONTAINS(h, "dry humor");
     HU_ASSERT_STR_CONTAINS(h, "Match energy: short messages");
     HU_ASSERT_STR_CONTAINS(h, "Never use markdown.");
     /* After the channel style block. */
     HU_ASSERT_TRUE(strstr(h, line) > strstr(h, "dry humor"));
-    HU_ASSERT_EQ(o.suppressed, 2u); /* avg_length + one style note */
+    /* avg_length + 2 note sentences + 1 rule sentence */
+    HU_ASSERT_EQ(o.suppressed, 4u);
     alloc.free(alloc.ctx, h, hl + 1);
 }
 
@@ -462,10 +611,12 @@ static void lean_head_ex_suppresses_style_rules_and_overlay(void) {
     HU_ASSERT_STR_NOT_CONTAINS(h, "5-15 words");
     HU_ASSERT_STR_NOT_CONTAINS(h, "Be brief");
     HU_ASSERT_STR_CONTAINS(h, "Use contractions always.");
+    HU_ASSERT_STR_CONTAINS(h, " Don't perform empathy..");
     HU_ASSERT_STR_CONTAINS(h, "dry humor");
     HU_ASSERT_STR_CONTAINS(h, "Match energy: short messages");
     HU_ASSERT_STR_CONTAINS(h, line);
-    HU_ASSERT_EQ(o.suppressed, 3u); /* style rule + avg_length + style note */
+    /* style rule + avg_length + 2 note sentences + 1 rule sentence */
+    HU_ASSERT_EQ(o.suppressed, 5u);
     alloc.free(alloc.ctx, plain, pl + 1);
     alloc.free(alloc.ctx, h, hl + 1);
 }
@@ -511,30 +662,34 @@ static void gate_off_and_shadow_leave_prompt_byte_identical(void) {
     HU_ASSERT_STR_CONTAINS(off, "3-8 words");
     HU_ASSERT_STR_NOT_CONTAINS(off, "How you text");
 
-    /* The apply step itself: OFF/SHADOW never touch the head (same pointer,
-     * same bytes), and SHADOW still measured what LIVE would do. */
+    /* The helper itself: OFF/SHADOW build the plain head byte for byte, and
+     * SHADOW still counted what LIVE would strip — without building it. */
     hu_agent_t agent;
     ls_agent(&agent, &alloc, &p, true);
-    char *head = NULL;
-    size_t head_len = 0;
-    HU_ASSERT_EQ(hu_agent_build_lean_persona_head(&agent, "ok", 2, &head, &head_len), HU_OK);
-    char *before = strdup(head);
-    char *before_ptr = head;
+    static const char cctx[] = "Dynamic: Easygoing old friend. Keeps texts short, usually 3-8 "
+                               "words. Loves hiking.\n";
+    agent.contact_context = cctx;
+    agent.contact_context_len = sizeof(cctx) - 1;
+    char *plain = NULL, *head = NULL;
+    size_t plain_len = 0, head_len = 0;
+    HU_ASSERT_EQ(hu_agent_build_lean_persona_head(&agent, "ok", 2, &plain, &plain_len), HU_OK);
+    char *before = strdup(plain);
+    alloc.free(alloc.ctx, plain, plain_len + 1);
     hu_learned_style_turn_t t;
     setenv("HU_LEARNED_STYLE", "off", 1);
-    hu_agent_learned_style_apply(&agent, "ok", 2, &head, &head_len, &t);
-    HU_ASSERT_TRUE(head == before_ptr);
+    HU_ASSERT_EQ(hu_agent_build_head_learned(&agent, true, NULL, 0, "ok", 2, &head, &head_len, &t),
+                 HU_OK);
     HU_ASSERT_STR_EQ(head, before);
     HU_ASSERT_FALSE(t.found);
+    alloc.free(alloc.ctx, head, head_len + 1);
     setenv("HU_LEARNED_STYLE", "shadow", 1);
-    hu_agent_learned_style_apply(&agent, "ok", 2, &head, &head_len, &t);
-    HU_ASSERT_TRUE(head == before_ptr);
+    HU_ASSERT_EQ(hu_agent_build_head_learned(&agent, true, NULL, 0, "ok", 2, &head, &head_len, &t),
+                 HU_OK);
     HU_ASSERT_STR_EQ(head, before);
     HU_ASSERT_TRUE(t.found);
     HU_ASSERT_FALSE(t.live);
-    HU_ASSERT_EQ(t.suppressed_rules, 4u); /* 3 head entries + 1 Dynamic sentence */
+    HU_ASSERT_EQ(t.suppressed_rules, 6u); /* 5 head sentences + 1 Dynamic sentence */
     HU_ASSERT_TRUE(t.line_bytes > 0);
-
     free(before);
     alloc.free(alloc.ctx, head, head_len + 1);
     alloc.free(alloc.ctx, unset, unset_len + 1);
@@ -564,6 +719,8 @@ static void gate_live_renders_line_and_suppresses_exactly_length_rules(void) {
     HU_ASSERT_STR_CONTAINS(out, "Match energy: short messages get short replies.");
     HU_ASSERT_STR_CONTAINS(out, "Never use markdown.");
     HU_ASSERT_STR_CONTAINS(out, "Easygoing old friend. Loves hiking.");
+    HU_ASSERT_STR_CONTAINS(out, "Don't perform empathy.");
+    HU_ASSERT_STR_CONTAINS(out, "Respond like you're thumb-typing on a phone.");
     hu_allocator_t alloc = hu_system_allocator();
     alloc.free(alloc.ctx, out, len + 1);
 
@@ -584,50 +741,106 @@ static void gate_live_compact_head_and_ineligible_turns(void) {
     ls_agent(&agent, &alloc, &p, false);
     setenv("HU_LEARNED_STYLE", "live", 1);
 
-    /* HU_PERSONA_HEAD=live (compact immersive head): rebuilt with the line. */
+    /* HU_PERSONA_HEAD=live: the compact head is built once, with the line. */
     setenv("HU_PERSONA_HEAD", "live", 1);
     char *head = NULL;
     size_t head_len = 0;
-    HU_ASSERT_EQ(hu_agent_build_persona_head(&agent, NULL, 0, &head, &head_len), HU_OK);
-    HU_ASSERT_STR_CONTAINS(head, "5-15 words");
     hu_learned_style_turn_t t;
-    hu_agent_learned_style_apply(&agent, "ok", 2, &head, &head_len, &t);
+    HU_ASSERT_EQ(hu_agent_build_head_learned(&agent, false, NULL, 0, "ok", 2, &head, &head_len, &t),
+                 HU_OK);
     HU_ASSERT_TRUE(t.live);
     HU_ASSERT_STR_CONTAINS(head, "How you text Alex:");
     HU_ASSERT_STR_NOT_CONTAINS(head, "5-15 words");
     HU_ASSERT_STR_CONTAINS(head, "dry humor");
+    /* It IS the compact head (lean_prompt is false and ignored here). */
+    HU_ASSERT_STR_CONTAINS(head, "IDENTITY LOCK");
+    HU_ASSERT_STR_NOT_CONTAINS(head, "You ARE this person");
     HU_ASSERT_EQ(strlen(head), head_len);
     alloc.free(alloc.ctx, head, head_len + 1);
 
-    /* Full head (HU_PERSONA_HEAD off): LIVE degrades to no change. */
+    /* lean_prompt set on an agent whose path builds the compact head (as the
+     * daemon's llm_decides does before hu_agent_turn): still the compact
+     * head — the kind comes from what was built, not from the flag. */
+    agent.lean_prompt = true;
+    HU_ASSERT_EQ(hu_agent_build_head_learned(&agent, false, NULL, 0, "ok", 2, &head, &head_len, &t),
+                 HU_OK);
+    HU_ASSERT_TRUE(t.live);
+    HU_ASSERT_STR_CONTAINS(head, "IDENTITY LOCK");
+    HU_ASSERT_STR_NOT_CONTAINS(head, "You ARE this person");
+    alloc.free(alloc.ctx, head, head_len + 1);
+    agent.lean_prompt = false;
+
+    /* Full head (HU_PERSONA_HEAD off): LIVE changes nothing. */
     unsetenv("HU_PERSONA_HEAD");
-    HU_ASSERT_EQ(hu_agent_build_persona_head(&agent, NULL, 0, &head, &head_len), HU_OK);
-    char *ptr = head;
-    hu_agent_learned_style_apply(&agent, "ok", 2, &head, &head_len, &t);
-    HU_ASSERT_TRUE(head == ptr);
+    char *full = NULL;
+    size_t full_len = 0;
+    HU_ASSERT_EQ(hu_agent_build_persona_head(&agent, NULL, 0, &full, &full_len), HU_OK);
+    HU_ASSERT_EQ(hu_agent_build_head_learned(&agent, false, NULL, 0, "ok", 2, &head, &head_len, &t),
+                 HU_OK);
+    HU_ASSERT_STR_EQ(head, full);
     HU_ASSERT_FALSE(t.live);
     alloc.free(alloc.ctx, head, head_len + 1);
+    alloc.free(alloc.ctx, full, full_len + 1);
 
     /* Not a persona contact (group chat id, stranger): no-op even in LIVE. */
-    agent.lean_prompt = true;
     agent.memory_session_id = "chat123456789";
     agent.memory_session_id_len = 13;
-    HU_ASSERT_EQ(hu_agent_build_lean_persona_head(&agent, "ok", 2, &head, &head_len), HU_OK);
-    ptr = head;
-    hu_agent_learned_style_apply(&agent, "ok", 2, &head, &head_len, &t);
-    HU_ASSERT_TRUE(head == ptr);
+    HU_ASSERT_EQ(hu_agent_build_head_learned(&agent, true, NULL, 0, "ok", 2, &head, &head_len, &t),
+                 HU_OK);
     HU_ASSERT_FALSE(t.found);
     HU_ASSERT_STR_NOT_CONTAINS(head, "How you text");
     alloc.free(alloc.ctx, head, head_len + 1);
 
+    /* A proactive turn (deep extract, check-ins) is not a reply: no-op. */
+    agent.memory_session_id = LS_CONTACT_A;
+    agent.memory_session_id_len = 12;
+    agent.proactive_turn = true;
+    HU_ASSERT_EQ(hu_agent_build_head_learned(&agent, true, NULL, 0, "ok", 2, &head, &head_len, &t),
+                 HU_OK);
+    HU_ASSERT_FALSE(t.found);
+    HU_ASSERT_STR_NOT_CONTAINS(head, "How you text");
+    alloc.free(alloc.ctx, head, head_len + 1);
+    agent.proactive_turn = false;
+
     /* A persona contact with no name and no learned row: global stats, "them". */
     agent.memory_session_id = LS_CONTACT_B;
-    agent.memory_session_id_len = 12;
-    HU_ASSERT_EQ(hu_agent_build_lean_persona_head(&agent, "ok", 2, &head, &head_len), HU_OK);
-    hu_agent_learned_style_apply(&agent, "ok", 2, &head, &head_len, &t);
+    HU_ASSERT_EQ(hu_agent_build_head_learned(&agent, true, NULL, 0, "ok", 2, &head, &head_len, &t),
+                 HU_OK);
     HU_ASSERT_TRUE(t.live);
     HU_ASSERT_STR_CONTAINS(head, "How you text them: usually about 30 characters, up to about 120");
     alloc.free(alloc.ctx, head, head_len + 1);
+    ls_teardown();
+}
+
+/* SHADOW counts from the persona rules without building the LIVE head; the
+ * count must equal what the LIVE build actually removes, for both kinds. */
+static void shadow_count_equals_live_suppression(void) {
+    ls_setup();
+    ls_write(ls_json_v1, 0);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t p;
+    ls_persona(&p);
+    hu_agent_t agent;
+    ls_agent(&agent, &alloc, &p, false);
+    setenv("HU_PERSONA_HEAD", "live", 1);
+    for (int lean = 0; lean <= 1; lean++) {
+        hu_learned_style_turn_t sh, lv;
+        char *head = NULL;
+        size_t head_len = 0;
+        setenv("HU_LEARNED_STYLE", "shadow", 1);
+        HU_ASSERT_EQ(
+            hu_agent_build_head_learned(&agent, lean != 0, NULL, 0, "ok", 2, &head, &head_len, &sh),
+            HU_OK);
+        alloc.free(alloc.ctx, head, head_len + 1);
+        setenv("HU_LEARNED_STYLE", "live", 1);
+        HU_ASSERT_EQ(
+            hu_agent_build_head_learned(&agent, lean != 0, NULL, 0, "ok", 2, &head, &head_len, &lv),
+            HU_OK);
+        alloc.free(alloc.ctx, head, head_len + 1);
+        HU_ASSERT_TRUE(lv.live);
+        HU_ASSERT_EQ(sh.suppressed_rules, lv.suppressed_rules);
+        HU_ASSERT_EQ(lv.suppressed_rules, lean ? 5u : 4u);
+    }
     ls_teardown();
 }
 
@@ -657,22 +870,169 @@ static void prompt_strips_contact_length_only_when_live_flag_set(void) {
     alloc.free(alloc.ctx, b, bl + 1);
 }
 
+/* ── end to end through hu_agent_turn (the production reactive path) ─────
+ *
+ * Prod's provider does not stream, so hu_agent_turn_stream_v2 hands every
+ * reply to hu_agent_turn, which builds its own head. These drive that path
+ * with HU_PERSONA_HEAD=live (prod) over the scripted recording provider and
+ * read the system prompt the provider actually received. */
+
+static const char ls_persona_json[] =
+    "{\"name\":\"lstest\",\"core_anchor\":\"You are Test Person, texting from your phone.\","
+    "\"core\":{\"identity\":\"Test person who texts from a phone.\","
+    "\"communication_rules\":[\"Never use markdown.\"]},"
+    "\"style_rules\":[\"Default to natural short texts (5-20 words).\"],"
+    "\"channel_overlays\":{\"imessage\":{\"formality\":\"casual\","
+    "\"avg_length\":\"Default 5-15 words\","
+    "\"style_notes\":[\"Don't perform empathy. Be brief and real.\",\"dry humor\"]}},"
+    "\"contacts\":{\"" LS_CONTACT_A "\":{\"name\":\"Alex Rivera\","
+    "\"dynamic\":\"Easygoing old friend. Keeps texts short, usually 3-8 words. Loves hiking.\"}}}";
+
+typedef struct {
+    tf_fixture_t f;
+    char log[8192];
+    size_t log_len;
+} ls_e2e_t;
+
+static void ls_e2e_write(const char *dir, const char *name, const char *json) {
+    char path[640];
+    snprintf(path, sizeof(path), "%s/%s", dir, name);
+    FILE *fp = fopen(path, "wb");
+    HU_ASSERT_NOT_NULL(fp);
+    fputs(json, fp);
+    fclose(fp);
+}
+
+/* One reactive turn; stderr (where hu_log goes without an observer) is
+ * captured into e->log. */
+static void ls_e2e_turn(ls_e2e_t *e, const char *mode, const char *inbound) {
+    memset(e, 0, sizeof(*e));
+    HU_ASSERT_TRUE(tf_open(&e->f, NULL, 0, false, HU_AUTONOMY_AUTONOMOUS));
+    setenv("HU_PERSONA_DIR", e->f.dir, 1);
+    setenv("HU_PERSONA_HEAD", "live", 1);
+    if (mode)
+        setenv("HU_LEARNED_STYLE", mode, 1);
+    else
+        unsetenv("HU_LEARNED_STYLE");
+    ls_e2e_write(e->f.dir, "lstest.json", ls_persona_json);
+    ls_e2e_write(e->f.dir, "lstest.learned-style.json", ls_json_v1);
+    hu_learned_style_cache_reset();
+    HU_ASSERT_EQ(hu_agent_set_persona(&e->f.agent, "lstest", 6), HU_OK);
+    e->f.agent.active_channel = "imessage";
+    e->f.agent.active_channel_len = 8;
+    e->f.agent.memory_session_id = LS_CONTACT_A;
+    e->f.agent.memory_session_id_len = 12;
+    const hu_contact_profile_t *cp = hu_persona_find_contact(e->f.agent.persona, LS_CONTACT_A, 12);
+    HU_ASSERT_NOT_NULL(cp);
+    char *cctx = NULL;
+    size_t cctx_len = 0;
+    HU_ASSERT_EQ(hu_contact_profile_build_context(&e->f.alloc, cp, &cctx, &cctx_len), HU_OK);
+    e->f.agent.contact_context = cctx;
+    e->f.agent.contact_context_len = cctx_len;
+
+    char tmpl[] = "/tmp/hu_ls_e2e_log_XXXXXX";
+    int tfd = mkstemp(tmpl);
+    HU_ASSERT_TRUE(tfd >= 0);
+    fflush(stderr);
+    int save_err = dup(STDERR_FILENO);
+    HU_ASSERT_TRUE(save_err >= 0);
+    dup2(tfd, STDERR_FILENO);
+    hu_error_t err =
+        hu_agent_turn(&e->f.agent, inbound, strlen(inbound), &e->f.resp, &e->f.resp_len);
+    fflush(stderr);
+    dup2(save_err, STDERR_FILENO);
+    close(save_err);
+    lseek(tfd, 0, SEEK_SET);
+    ssize_t got = read(tfd, e->log, sizeof(e->log) - 1);
+    e->log_len = got > 0 ? (size_t)got : 0;
+    e->log[e->log_len] = '\0';
+    close(tfd);
+    unlink(tmpl);
+    e->f.agent.contact_context = NULL;
+    e->f.agent.contact_context_len = 0;
+    e->f.alloc.free(e->f.alloc.ctx, cctx, cctx_len + 1);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(e->f.trp.log);
+}
+
+static void ls_e2e_close(ls_e2e_t *e) {
+    e->f.agent.memory_session_id = NULL;
+    e->f.agent.memory_session_id_len = 0;
+    tf_close(&e->f);
+    unsetenv("HU_PERSONA_DIR");
+    unsetenv("HU_PERSONA_HEAD");
+    unsetenv("HU_LEARNED_STYLE");
+    hu_learned_style_set_persona(NULL, 0);
+    hu_learned_style_cache_reset();
+}
+
+static void agent_turn_shadow_logs_once_and_leaves_prompt_unchanged(void) {
+    ls_e2e_t off, sh;
+    ls_e2e_turn(&off, NULL, "you around later");
+    char *off_log = strdup(off.f.trp.log);
+    ls_e2e_close(&off);
+    ls_e2e_turn(&sh, "shadow", "you around later");
+    /* The provider saw the same request bytes as with the gate off. */
+    char *a = trp_scrub(off_log, strlen(off_log), NULL);
+    char *b = trp_scrub(sh.f.trp.log, strlen(sh.f.trp.log), NULL);
+    HU_ASSERT_STR_EQ(a, b);
+    HU_ASSERT_STR_CONTAINS(b, "5-15 words");
+    HU_ASSERT_STR_NOT_CONTAINS(b, "How you text");
+    /* …and SHADOW ran on this path: exactly one aggregate line, no handle,
+     * no name. Head is the compact one HU_PERSONA_HEAD=live built. */
+    HU_ASSERT_STR_CONTAINS(sh.log, "[learned_style shadow] found=1 level=contact shape=casual "
+                                   "n=80 p50=25 p90=90 suppressed_rules=3");
+    HU_ASSERT_STR_CONTAINS(sh.log, "head=compact applied=0");
+    HU_ASSERT_STR_NOT_CONTAINS(sh.log, LS_CONTACT_A);
+    HU_ASSERT_STR_NOT_CONTAINS(sh.log, "Alex");
+    const char *first = strstr(sh.log, "[learned_style shadow]");
+    HU_ASSERT_TRUE(first && !strstr(first + 1, "[learned_style shadow]"));
+    free(a);
+    free(b);
+    free(off_log);
+    ls_e2e_close(&sh);
+}
+
+static void agent_turn_live_renders_line_and_strips_length_rules(void) {
+    ls_e2e_t e;
+    ls_e2e_turn(&e, "live", "you coming tonight?");
+    const char *log = e.f.trp.log;
+    HU_ASSERT_STR_CONTAINS(log, "How you text Alex when they ask something: usually about 12 "
+                                "characters, up to about 40; lowercase start most of the time; "
+                                "usually end with punctuation; rarely use emoji.");
+    HU_ASSERT_STR_NOT_CONTAINS(log, "5-15 words");
+    HU_ASSERT_STR_NOT_CONTAINS(log, "Be brief");
+    HU_ASSERT_STR_NOT_CONTAINS(log, "3-8 words");
+    HU_ASSERT_STR_CONTAINS(log, "Don't perform empathy.");
+    HU_ASSERT_STR_CONTAINS(log, "dry humor");
+    HU_ASSERT_STR_CONTAINS(log, "Easygoing old friend. Loves hiking.");
+    HU_ASSERT_STR_CONTAINS(e.log, "[learned_style live] found=1 level=bucket shape=question");
+    HU_ASSERT_STR_CONTAINS(e.log, "head=compact applied=1");
+    ls_e2e_close(&e);
+}
+
 void run_learned_style_tests(void) {
     HU_TEST_SUITE("learned_style");
     HU_RUN_TEST(shape_rule_matches_shared_vectors);
     HU_RUN_TEST(shape_rule_140_byte_boundary);
+    HU_RUN_TEST(shape_inbound_ignores_injected_notes);
     HU_RUN_TEST(lookup_falls_back_bucket_then_contact_then_global);
     HU_RUN_TEST(lookup_treats_malformed_and_wrong_schema_as_absent);
     HU_RUN_TEST(lookup_cache_restats_at_most_every_60s);
+    HU_RUN_TEST(malformed_file_warns_once_per_mtime);
     HU_RUN_TEST(render_line_names_only_decisive_rates);
     HU_RUN_TEST(render_line_qualifies_shape_only_from_bucket);
     HU_RUN_TEST(length_rule_classifier_vectors);
     HU_RUN_TEST(strip_contact_removes_only_length_sentences);
+    HU_RUN_TEST(strip_sentences_keeps_non_length_instructions);
     HU_RUN_TEST(compact_head_ex_null_opts_is_byte_identical);
     HU_RUN_TEST(compact_head_ex_suppresses_exactly_length_rules);
     HU_RUN_TEST(lean_head_ex_suppresses_style_rules_and_overlay);
     HU_RUN_TEST(gate_off_and_shadow_leave_prompt_byte_identical);
     HU_RUN_TEST(gate_live_renders_line_and_suppresses_exactly_length_rules);
     HU_RUN_TEST(gate_live_compact_head_and_ineligible_turns);
+    HU_RUN_TEST(shadow_count_equals_live_suppression);
     HU_RUN_TEST(prompt_strips_contact_length_only_when_live_flag_set);
+    HU_RUN_TEST(agent_turn_shadow_logs_once_and_leaves_prompt_unchanged);
+    HU_RUN_TEST(agent_turn_live_renders_line_and_strips_length_rules);
 }

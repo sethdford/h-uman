@@ -515,6 +515,7 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
     if (agent->outcomes && !agent->lean_prompt)
         outcome_ctx = hu_outcome_build_summary(agent->outcomes, agent->alloc, &outcome_ctx_len);
 
+    hu_learned_style_turn_t ls_turn = {0}; /* HU_LEARNED_STYLE, learned_style_turn.h */
     char *persona_prompt = NULL;
     size_t persona_prompt_len = 0;
     if (agent->persona) {
@@ -522,15 +523,16 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             /* Lean head: shared with offline prompt rendering (persona show
              * --contact). On failure the turn continues without a head, as the
              * inline version did when its strndup failed. */
-            (void)hu_agent_build_lean_persona_head(agent, msg, msg_len, &persona_prompt,
-                                                   &persona_prompt_len);
+            (void)hu_agent_build_head_learned(agent, true, NULL, 0, msg, msg_len, &persona_prompt,
+                                              &persona_prompt_len, &ls_turn);
         } else {
             /* HU_PERSONA_HEAD-gated head selection — shared helper, same as
              * hu_agent_turn (single-path wiring was dead in prod for
              * HU_WARMTH_TONE_VOCAB; this streaming path is the daemon's
              * PRIMARY inbound route). */
             hu_error_t perr =
-                hu_agent_build_persona_head(agent, NULL, 0, &persona_prompt, &persona_prompt_len);
+                hu_agent_build_head_learned(agent, false, NULL, 0, msg, msg_len, &persona_prompt,
+                                            &persona_prompt_len, &ls_turn);
             if (perr != HU_OK) {
                 if (memory_ctx)
                     agent->alloc->free(agent->alloc->ctx, memory_ctx, memory_ctx_len + 1);
@@ -545,12 +547,6 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             }
         }
     }
-    /* Learned style (HU_LEARNED_STYLE, default off): BEFORE anything is
-     * appended to the head, since LIVE rebuilds it with the learned line in
-     * and the hand-written length rules out. OFF returns at the gate. */
-    hu_learned_style_turn_t ls_turn;
-    hu_agent_learned_style_apply(agent, msg, msg_len, &persona_prompt, &persona_prompt_len,
-                                 &ls_turn);
     /* Relationship tone note (HU_WARMTH_TONE_VOCAB) — shared helper, same as
      * hu_agent_turn. This streaming path is the daemon's PRIMARY inbound
      * route; the 2026-07-11 wiring lived only in hu_agent_turn, so the gate
