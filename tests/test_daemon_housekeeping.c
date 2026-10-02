@@ -9,40 +9,16 @@
  * unit-tested; this test guards the integration shape (config layout,
  * argument plumbing, report inspection) from drift. */
 
-#include "human/agent.h"
 #include "human/agent/autodream.h"
-#include "human/config.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/daemon/housekeeping.h"
-#include "human/daemon_maintenance.h"
 #include "human/memory/graph.h"
 #include "human/persona/persona_deltas.h"
 #include "test_framework.h"
 
 #include <string.h>
 #include <time.h>
-
-/* Both consolidation call sites in the daemon (periodic tick, topic switch)
- * take their settings from this one builder. */
-static void daemon_consolidation_config_reads_behavior(void) {
-    hu_config_t cfg;
-    memset(&cfg, 0, sizeof(cfg));
-    cfg.behavior.decay_days = 7;
-    cfg.behavior.dedup_threshold = 42;
-
-    hu_consolidation_config_t c = hu_daemon_consolidation_config(&cfg);
-    HU_ASSERT_EQ(c.decay_days, 7u);
-    HU_ASSERT_EQ(c.dedup_threshold, 42u);
-    HU_ASSERT_FLOAT_EQ(c.decay_factor, 0.5, 1e-9);
-    HU_ASSERT_EQ(c.max_entries, 5000u);
-}
-
-static void daemon_consolidation_config_null_config_uses_defaults(void) {
-    hu_consolidation_config_t c = hu_daemon_consolidation_config(NULL);
-    HU_ASSERT_EQ(c.decay_days, 30u);
-    HU_ASSERT_EQ(c.dedup_threshold, 0u);
-}
 
 #ifdef HU_ENABLE_SQLITE
 
@@ -165,17 +141,14 @@ void run_daemon_housekeeping_tests(void) {
     HU_RUN_TEST(test_housekeeping_tick_is_noop_within_the_same_minute);
     HU_RUN_TEST(daemon_housekeeping_runs_autodream_and_evolver_e2e);
     HU_RUN_TEST(daemon_housekeeping_handles_empty_graph);
-    HU_RUN_TEST(daemon_consolidation_config_reads_behavior);
-    HU_RUN_TEST(daemon_consolidation_config_null_config_uses_defaults);
 }
 
 #else /* !HU_ENABLE_SQLITE */
 
 void run_daemon_housekeeping_tests(void) {
     HU_TEST_SUITE("DaemonHousekeeping");
-    /* Housekeeping itself is sqlite-only; the config builder is not. */
-    HU_RUN_TEST(daemon_consolidation_config_reads_behavior);
-    HU_RUN_TEST(daemon_consolidation_config_null_config_uses_defaults);
+    /* Housekeeping is sqlite-only. The consolidation config builder moved to
+     * hu_agent_consolidation_config, tested in test_consolidation.c. */
 }
 
 #endif

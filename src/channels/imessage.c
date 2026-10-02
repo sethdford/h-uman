@@ -1177,8 +1177,8 @@ static void imsg_bb_on_event(const hu_imessage_bb_event_t *evp, void *user) {
                                                       (double)time(NULL), &hold_s);
     hu_log_info("imessage", NULL,
                 "bb-event: kind=%d chat=%s handle=%s ts=%.3f would_hold_send=%d hold_s=%.1f",
-                (int)ev.kind, ev.chat_guid[0] ? ev.chat_guid : "-", ev.handle[0] ? ev.handle : "-",
-                ev.timestamp, (int)would_hold, hold_s);
+                (int)ev.kind, HU_LOG_WHO(ev.chat_guid, strlen(ev.chat_guid)),
+                HU_LOG_WHO(ev.handle, strlen(ev.handle)), ev.timestamp, (int)would_hold, hold_s);
 }
 
 static void imsg_watch_start(hu_imessage_ctx_t *c) {
@@ -1637,10 +1637,10 @@ static bool imsg_try_react(hu_imessage_ctx_t *c, int64_t message_id, hu_reaction
         }
     }
     if (!rok)
-        hu_log_info(
-            "imessage", NULL, "imsg react failed (exit=%d stdout=%.*s stderr=%.*s)", rr.exit_code,
-            (int)(rr.stdout_len < 200 ? rr.stdout_len : 200), rr.stdout_buf ? rr.stdout_buf : "",
-            (int)(rr.stderr_len < 200 ? rr.stderr_len : 200), rr.stderr_buf ? rr.stderr_buf : "");
+        hu_log_info("imessage", NULL, "imsg react failed (exit=%d stdout=%s stderr=%s)",
+                    rr.exit_code,
+                    HU_LOG_TEXT(rr.stdout_buf, rr.stdout_buf ? rr.stdout_len : 0, 120),
+                    HU_LOG_TEXT(rr.stderr_buf, rr.stderr_buf ? rr.stderr_len : 0, 120));
     hu_run_result_free(c->alloc, &rr);
     return rok;
 }
@@ -3822,16 +3822,10 @@ static hu_error_t imessage_react(void *ctx, const char *target, size_t target_le
     int exit_code = result.exit_code;
     bool ok = result.success && exit_code == 0;
     if (!ok) {
-        hu_log_error("imessage", NULL, "tapback JXA failed: exit=%d stdout=%.*s stderr=%.*s",
-                     exit_code,
-                     (int)(result.stdout_buf && result.stdout_len > 0
-                               ? (result.stdout_len < 200 ? result.stdout_len : 200)
-                               : 0),
-                     result.stdout_buf ? result.stdout_buf : "",
-                     (int)(result.stderr_buf && result.stderr_len > 0
-                               ? (result.stderr_len < 200 ? result.stderr_len : 200)
-                               : 0),
-                     result.stderr_buf ? result.stderr_buf : "");
+        hu_log_error(
+            "imessage", NULL, "tapback JXA failed: exit=%d stdout=%s stderr=%s", exit_code,
+            HU_LOG_TEXT(result.stdout_buf, result.stdout_buf ? result.stdout_len : 0, 120),
+            HU_LOG_TEXT(result.stderr_buf, result.stderr_buf ? result.stderr_len : 0, 120));
     }
     hu_run_result_free(c->alloc, &result);
     if (!ok)
