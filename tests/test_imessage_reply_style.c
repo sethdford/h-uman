@@ -413,26 +413,16 @@ static void emotional_protection_holds_across_all_dimensions(void) {
  * random draw swallowed whole single-bubble replies into a bare thumbs-up. The
  * text always goes out; only the director adds a reaction, once. */
 static void test_reply_style_finalize_never_drops_text_or_reacts_twice(void) {
-    /* No director reaction: a drawn tapback style is plain text. */
-    HU_ASSERT_EQ((int)hu_imessage_reply_style_finalize(HU_REPLY_STYLE_TAPBACK, false, false),
+    /* A drawn tapback style is plain text: the draw never decides a reaction. */
+    HU_ASSERT_EQ((int)hu_imessage_reply_style_finalize(HU_REPLY_STYLE_TAPBACK),
                  (int)HU_REPLY_STYLE_FLAT);
-    HU_ASSERT_EQ(
-        (int)hu_imessage_reply_style_finalize(HU_REPLY_STYLE_TAPBACK_PLUS_FLAT, false, false),
-        (int)HU_REPLY_STYLE_FLAT);
-    /* The director asked: the reaction rides along with the text. */
-    HU_ASSERT_EQ((int)hu_imessage_reply_style_finalize(HU_REPLY_STYLE_FLAT, false, true),
-                 (int)HU_REPLY_STYLE_TAPBACK_PLUS_FLAT);
-    HU_ASSERT_EQ((int)hu_imessage_reply_style_finalize(HU_REPLY_STYLE_TAPBACK, false, true),
-                 (int)HU_REPLY_STYLE_TAPBACK_PLUS_FLAT);
-    /* One reaction per inbound message: later bubbles are plain text. */
-    HU_ASSERT_EQ((int)hu_imessage_reply_style_finalize(HU_REPLY_STYLE_TAPBACK, true, true),
+    HU_ASSERT_EQ((int)hu_imessage_reply_style_finalize(HU_REPLY_STYLE_TAPBACK_PLUS_FLAT),
                  (int)HU_REPLY_STYLE_FLAT);
-    HU_ASSERT_EQ((int)hu_imessage_reply_style_finalize(HU_REPLY_STYLE_FLAT, true, true),
-                 (int)HU_REPLY_STYLE_FLAT);
-    /* Text shapes without a reaction pass through. */
-    HU_ASSERT_EQ((int)hu_imessage_reply_style_finalize(HU_REPLY_STYLE_THREADED, true, true),
+    /* Text shapes pass through — THREADED keeps its threading (round-1 fix:
+     * a director reaction used to turn it into TAPBACK_PLUS_FLAT). */
+    HU_ASSERT_EQ((int)hu_imessage_reply_style_finalize(HU_REPLY_STYLE_THREADED),
                  (int)HU_REPLY_STYLE_THREADED);
-    HU_ASSERT_EQ((int)hu_imessage_reply_style_finalize(HU_REPLY_STYLE_FLAT, false, false),
+    HU_ASSERT_EQ((int)hu_imessage_reply_style_finalize(HU_REPLY_STYLE_FLAT),
                  (int)HU_REPLY_STYLE_FLAT);
 }
 

@@ -238,11 +238,6 @@ hu_error_t hu_imessage_action_log_jsonl(const hu_imessage_action_log_t *log) {
     return HU_OK;
 }
 
-hu_reply_style_t hu_imessage_reply_style_finalize(hu_reply_style_t chosen, bool already_reacted,
-                                                  bool director_reacts) {
-    if (director_reacts && !already_reacted)
-        return HU_REPLY_STYLE_TAPBACK_PLUS_FLAT;
-    if (chosen == HU_REPLY_STYLE_TAPBACK || chosen == HU_REPLY_STYLE_TAPBACK_PLUS_FLAT)
-        return HU_REPLY_STYLE_FLAT;
-    return chosen;
+hu_reply_style_t hu_imessage_reply_style_finalize(hu_reply_style_t chosen) {
+    return chosen == HU_REPLY_STYLE_THREADED ? HU_REPLY_STYLE_THREADED : HU_REPLY_STYLE_FLAT;
 }

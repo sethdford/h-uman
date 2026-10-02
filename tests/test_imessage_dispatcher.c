@@ -476,6 +476,32 @@ static void second_bubble_never_reacts_to_the_same_message_again(void) {
     HU_ASSERT_TRUE(false); /* no seed reacted: the sweep proved nothing */
 }
 
+/* Round-1 fix: a director reaction must not cost the reply its threading. When
+ * the predicate draws THREADED, the reply still goes through reply() (native
+ * thread) and the reaction is added alongside it. */
+static void director_reaction_keeps_a_threaded_reply_threaded(void) {
+    bool saw_threaded = false;
+    for (int64_t mid = 7000; mid <= 7400; mid++) {
+        setup_mocks();
+        hu_conversation_snapshot_t snap = {0};
+        snap.parent_seconds_ago = 400;
+        snap.parent_is_question = true;
+        snap.other_threaded_replies_recent = 3;
+        snap.conv_density_msgs_per_min = 6.0f;
+        bool sent = false;
+        hu_error_t err = hu_daemon_dispatch_imessage_reply_ex(
+            &mock_ch, &mock_persona, NULL, &mock_config, "+15555551212", 12, "GUID-1", 6, "yes", 3,
+            (const struct hu_conversation_snapshot *)&snap, mid, &sent, HU_REACTION_HEART);
+        HU_ASSERT_EQ((int)err, (int)HU_OK);
+        HU_ASSERT_TRUE(sent);
+        HU_ASSERT_EQ(react_emoji_calls, 1);
+        HU_ASSERT_EQ(reply_calls + send_calls, 1);
+        if (reply_calls == 1)
+            saw_threaded = true;
+    }
+    HU_ASSERT_TRUE(saw_threaded);
+}
+
 /* DEF-2 (2026-10-01): the director chose TEXT and the model wrote it; the
  * whole-reply dispatch (daemon.c) used to let the reply-style predicate's
  * random draw (p_tap 0.15) answer with a bare thumbs-up instead — 15
@@ -999,6 +1025,7 @@ void run_imessage_dispatcher_tests(void) {
     HU_RUN_TEST(director_reaction_rides_along_with_the_text);
     HU_RUN_TEST(second_bubble_never_reacts_to_the_same_message_again);
     HU_RUN_TEST(director_text_reply_is_never_swallowed_by_a_random_tapback);
+    HU_RUN_TEST(director_reaction_keeps_a_threaded_reply_threaded);
     HU_RUN_TEST(msg_ex_parrot_guard_reports_no_text_sent);
     HU_RUN_TEST(record_delivered_reply_noops_without_collector);
     HU_RUN_TEST(burst_carry_keeps_other_senders_for_this_tick);

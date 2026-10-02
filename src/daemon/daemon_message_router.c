@@ -183,15 +183,28 @@ static hu_error_t dispatch_reply_inner(struct hu_channel *ch, const struct hu_pe
         }
     }
 
-    /* The text was decided upstream: never swallow it, never react twice, and
-     * react only when the director asked for it (DEF-2). */
-    style = hu_imessage_reply_style_finalize(
-        style, reacted_to(inferred_message_id_for_react, (int64_t)time(NULL)),
-        director_reaction != HU_REACTION_NONE);
+    /* The text was decided upstream: never swallow it. The predicate picks only
+     * its shape (threaded or flat); a reaction rides along, before the text and
+     * in whatever shape it has, only when the director asked for one and this
+     * message has none yet (DEF-2). */
+    style = hu_imessage_reply_style_finalize(style);
+    bool add_reaction = director_reaction != HU_REACTION_NONE &&
+                        !reacted_to(inferred_message_id_for_react, (int64_t)time(NULL));
 
     /* Pacing (C5) — start. */
     uint64_t pace_start = 0;
     hu_persona_pace_reply_start(&pace_start);
+
+    if (add_reaction && ch->vtable->react_emoji) {
+        const char *emoji = director_reaction_emoji(director_reaction);
+        if (ch->vtable->react_emoji(ch->ctx, target, target_len, inferred_message_id_for_react,
+                                    emoji, strlen(emoji)) == HU_OK) {
+            s_reacted.message_id = inferred_message_id_for_react;
+            s_reacted.at = (int64_t)time(NULL);
+            hu_log_info("human", agent ? agent->observer : NULL,
+                        "imessage_dispatch: director reaction sent with the text");
+        }
+    }
 
     /* Dispatch by style. `actual_style` tracks what was ACTUALLY sent (which
      * can differ from the chosen `style` — e.g. a THREADED attempt that the AX
@@ -264,7 +277,8 @@ static hu_error_t dispatch_reply_inner(struct hu_channel *ch, const struct hu_pe
         break;
     }
 
-    case HU_REPLY_STYLE_TAPBACK: /* finalize never returns a bare tapback */
+    case HU_REPLY_STYLE_TAPBACK: /* finalize returns only THREADED or FLAT */
+    case HU_REPLY_STYLE_TAPBACK_PLUS_FLAT:
     case HU_REPLY_STYLE_FLAT:
         actual_style = HU_REPLY_STYLE_FLAT;
         if (ch->vtable->send) {
@@ -273,26 +287,6 @@ static hu_error_t dispatch_reply_inner(struct hu_channel *ch, const struct hu_pe
                 tier_used = "flat";
                 hu_log_info("human", agent ? agent->observer : NULL,
                             "imessage_dispatch: flat send");
-            }
-        }
-        break;
-
-    case HU_REPLY_STYLE_TAPBACK_PLUS_FLAT:
-        /* The director's reaction first (best-effort), then the text. */
-        if (ch->vtable->react_emoji) {
-            const char *emoji = director_reaction_emoji(director_reaction);
-            if (ch->vtable->react_emoji(ch->ctx, target, target_len, inferred_message_id_for_react,
-                                        emoji, strlen(emoji)) == HU_OK) {
-                s_reacted.message_id = inferred_message_id_for_react;
-                s_reacted.at = (int64_t)time(NULL);
-            }
-        }
-        if (ch->vtable->send) {
-            err = ch->vtable->send(ch->ctx, target, target_len, body, body_len, NULL, 0);
-            if (err == HU_OK) {
-                tier_used = "tapback_plus_flat";
-                hu_log_info("human", agent ? agent->observer : NULL,
-                            "imessage_dispatch: tapback + flat");
             }
         }
         break;
