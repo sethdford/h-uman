@@ -791,6 +791,8 @@ set(HU_CORE_SOURCES
     src/agent/turn/turn_tail.c
     src/agent/turn/turn_plan.c
     src/agent/turn/reask.c
+    src/agent/turn/learned_style_turn.c
+    src/agent/turn/persona_head.c
     src/agent/turn/spoken_turn.c
     src/agent/turn/length_policy.c
     src/agent/best_of_n.c
@@ -1525,6 +1527,7 @@ list(APPEND HU_CORE_SOURCES
     src/persona/persona.c
     src/persona/card_file.c
     src/persona/style_card.c
+    src/persona/learned_style.c
     src/persona/emotion_card.c
     src/persona/pacing.c
     src/persona/render.c
@@ -3522,6 +3525,7 @@ set(HU_TEST_SOURCES
     tests/test_lora_subprocess.c
     tests/test_persona_overlay_render.c
     tests/test_style_card.c
+    tests/test_learned_style.c
     tests/test_card_file.c
     tests/test_emotion_card.c
     tests/test_terseness.c

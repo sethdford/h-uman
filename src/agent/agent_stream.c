@@ -13,6 +13,7 @@
 #include "human/agent/hard_moment.h"
 #include "human/agent/humanness.h"
 #include "human/agent/input_guard.h"
+#include "human/agent/learned_style_turn.h"
 #include "human/agent/memory_loader.h"
 #include "human/agent/model_router.h"
 #include "human/agent/outcomes.h"
@@ -519,6 +520,7 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
     if (agent->outcomes && !agent->lean_prompt)
         outcome_ctx = hu_outcome_build_summary(agent->outcomes, agent->alloc, &outcome_ctx_len);
 
+    hu_learned_style_turn_t ls_turn = {0}; /* HU_LEARNED_STYLE, learned_style_turn.h */
     char *persona_prompt = NULL;
     size_t persona_prompt_len = 0;
     if (agent->persona) {
@@ -526,15 +528,16 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             /* Lean head: shared with offline prompt rendering (persona show
              * --contact). On failure the turn continues without a head, as the
              * inline version did when its strndup failed. */
-            (void)hu_agent_build_lean_persona_head(agent, msg, msg_len, &persona_prompt,
-                                                   &persona_prompt_len);
+            (void)hu_agent_build_head_learned(agent, true, NULL, 0, msg, msg_len, &persona_prompt,
+                                              &persona_prompt_len, &ls_turn);
         } else {
             /* HU_PERSONA_HEAD-gated head selection — shared helper, same as
              * hu_agent_turn (single-path wiring was dead in prod for
              * HU_WARMTH_TONE_VOCAB; this streaming path is the daemon's
              * PRIMARY inbound route). */
             hu_error_t perr =
-                hu_agent_build_persona_head(agent, NULL, 0, &persona_prompt, &persona_prompt_len);
+                hu_agent_build_head_learned(agent, false, NULL, 0, msg, msg_len, &persona_prompt,
+                                            &persona_prompt_len, &ls_turn);
             if (perr != HU_OK) {
                 if (memory_ctx)
                     agent->alloc->free(agent->alloc->ctx, memory_ctx, memory_ctx_len + 1);
@@ -1083,6 +1086,7 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             .contact_context = enriched_contact ? enriched_contact : agent->contact_context,
             .contact_context_len =
                 enriched_contact ? enriched_contact_len : agent->contact_context_len,
+            .learned_style_live = ls_turn.live,
             .conversation_context = agent->conversation_context,
             .conversation_context_len = agent->conversation_context_len,
             .max_response_chars = agent->max_response_chars,

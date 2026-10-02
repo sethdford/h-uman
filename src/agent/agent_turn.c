@@ -4,6 +4,7 @@
 #include "human/agent/graph_grounding.h"
 #include "human/agent/humanness.h"
 #include "human/agent/intent.h"
+#include "human/agent/learned_style_turn.h"
 #include "human/agent/reask.h"
 #include "human/agent/self_uncertainty.h"
 #include "human/agent/theory_of_mind.h"
@@ -845,38 +846,6 @@ hu_error_t hu_agent_finalize_system_prompt(hu_agent_t *agent, char **prompt, siz
     return err;
 }
 
-hu_error_t hu_agent_build_persona_head(hu_agent_t *agent, const char *topic, size_t topic_len,
-                                       char **out, size_t *out_len) {
-    if (!agent || !agent->alloc || !agent->persona || !out || !out_len)
-        return HU_ERR_INVALID_ARGUMENT;
-    const char *ch = agent->active_channel;
-    size_t ch_len = agent->active_channel_len;
-    hu_gate_mode_t mode = hu_gate_mode_from_env("HU_PERSONA_HEAD", HU_GATE_OFF);
-    if (mode == HU_GATE_LIVE) {
-        hu_error_t cerr = hu_persona_build_prompt_compact_immersive(agent->alloc, agent->persona,
-                                                                    ch, ch_len, out, out_len);
-        if (cerr == HU_OK)
-            return HU_OK;
-        /* fail-safe: any compact-build failure reverts to OFF behavior */
-    }
-    hu_error_t err = hu_persona_build_prompt(agent->alloc, agent->persona, ch, ch_len, topic,
-                                             topic_len, out, out_len);
-    if (err != HU_OK)
-        return err;
-    if (mode == HU_GATE_SHADOW) {
-        char *compact = NULL;
-        size_t compact_len = 0;
-        if (hu_persona_build_prompt_compact_immersive(agent->alloc, agent->persona, ch, ch_len,
-                                                      &compact, &compact_len) == HU_OK) {
-            hu_log_info("persona_head", agent->observer,
-                        "shadow: full_head=%zu compact_head=%zu budget=%d", *out_len, compact_len,
-                        HU_PROMPT_TRIM_BUDGET_BYTES);
-            agent->alloc->free(agent->alloc->ctx, compact, compact_len + 1);
-        }
-    }
-    return HU_OK;
-}
-
 /* Append the per-turn humanness directives — Theory-of-Mind, calibrated
  * self-uncertainty, intent-aware response-type — to the system prompt, and log
  * active gates once. Shared by BOTH hu_agent_turn (the non-streaming fallback)
@@ -1590,11 +1559,13 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
     /* Build persona prompt fresh each turn (channel-dependent; no caching) */
     char *persona_prompt = NULL;
     size_t persona_prompt_len = 0;
+    hu_learned_style_turn_t ls_turn = {0}; /* HU_LEARNED_STYLE, learned_style_turn.h */
     if (agent->persona) {
-        /* HU_PERSONA_HEAD-gated head selection — shared helper, same as
-         * hu_agent_turn_stream_v2. */
+        /* HU_PERSONA_HEAD-gated head selection + HU_LEARNED_STYLE — shared
+         * helper, same as hu_agent_turn_stream_v2. */
         hu_error_t perr =
-            hu_agent_build_persona_head(agent, msg, msg_len, &persona_prompt, &persona_prompt_len);
+            hu_agent_build_head_learned(agent, false, msg, msg_len, msg, msg_len, &persona_prompt,
+                                        &persona_prompt_len, &ls_turn);
         if (perr != HU_OK) {
             if (pref_ctx)
                 agent->alloc->free(agent->alloc->ctx, pref_ctx, pref_ctx_len + 1);
@@ -2964,6 +2935,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
             .outcome_context_len = outcome_ctx_len,
             .persona_immersive = (persona_prompt && persona_prompt_len > 0),
             .persona = agent->persona,
+            .learned_style_live = ls_turn.live,
             .contact_context = enriched_contact ? enriched_contact : agent->contact_context,
             .contact_context_len =
                 enriched_contact ? enriched_contact_len : agent->contact_context_len,

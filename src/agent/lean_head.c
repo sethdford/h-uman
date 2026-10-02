@@ -16,14 +16,23 @@
  * head the daemon sends on the llm_decides path instead of approximating it. */
 hu_error_t hu_agent_build_lean_persona_head(hu_agent_t *agent, const char *msg, size_t msg_len,
                                             char **out, size_t *out_len) {
+    return hu_agent_build_lean_persona_head_ex(agent, msg, msg_len, NULL, out, out_len);
+}
+
+hu_error_t hu_agent_build_lean_persona_head_ex(hu_agent_t *agent, const char *msg, size_t msg_len,
+                                               hu_persona_style_opts_t *opts, char **out,
+                                               size_t *out_len) {
     if (!agent || !out || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
+    if (opts)
+        opts->suppressed = 0;
     *out = NULL;
     *out_len = 0;
     if (!agent->persona)
         return HU_OK;
     char lp[16384];
     size_t lpo = 0;
+    char fb[1024]; /* learned-style filtered entry (hu_persona_style_opts_filter) */
     {
         const hu_persona_t *pp = agent->persona;
         if (pp->identity) {
@@ -44,8 +53,10 @@ hu_error_t hu_agent_build_lean_persona_head(hu_agent_t *agent, const char *msg, 
         if (n > 0 && lpo + (size_t)n < sizeof(lp))
             lpo += (size_t)n;
         for (size_t ri = 0; ri < pp->communication_rules_count && ri < 12; ri++) {
-            if (pp->communication_rules[ri]) {
-                n = snprintf(lp + lpo, sizeof(lp) - lpo, "- %s\n", pp->communication_rules[ri]);
+            const char *rule =
+                hu_persona_style_opts_filter(opts, pp->communication_rules[ri], fb, sizeof(fb));
+            if (rule) {
+                n = snprintf(lp + lpo, sizeof(lp) - lpo, "- %s\n", rule);
                 if (n > 0 && lpo + (size_t)n < sizeof(lp))
                     lpo += (size_t)n;
             }
@@ -80,15 +91,31 @@ hu_error_t hu_agent_build_lean_persona_head(hu_agent_t *agent, const char *msg, 
         }
     }
     if (p->style_rules_count > 0) {
-        int n = snprintf(lp + lpo, sizeof(lp) - lpo, "\nStyle:\n");
-        if (n > 0 && lpo + (size_t)n < sizeof(lp))
-            lpo += (size_t)n;
+        /* With suppression the header is emitted lazily, so a list whose
+         * every entry was a length rule leaves no empty "Style:" behind;
+         * without it the original eager header is kept byte for byte. */
+        bool header = false;
+        if (!opts || !opts->suppress_length_rules) {
+            int n = snprintf(lp + lpo, sizeof(lp) - lpo, "\nStyle:\n");
+            if (n > 0 && lpo + (size_t)n < sizeof(lp))
+                lpo += (size_t)n;
+            header = true;
+        }
         for (size_t i = 0; i < p->style_rules_count; i++) {
-            if (p->style_rules[i]) {
-                n = snprintf(lp + lpo, sizeof(lp) - lpo, "- %s\n", p->style_rules[i]);
+            const char *rule =
+                hu_persona_style_opts_filter(opts, p->style_rules[i], fb, sizeof(fb));
+            if (!rule)
+                continue;
+            int n;
+            if (!header) {
+                n = snprintf(lp + lpo, sizeof(lp) - lpo, "\nStyle:\n");
                 if (n > 0 && lpo + (size_t)n < sizeof(lp))
                     lpo += (size_t)n;
+                header = true;
             }
+            n = snprintf(lp + lpo, sizeof(lp) - lpo, "- %s\n", rule);
+            if (n > 0 && lpo + (size_t)n < sizeof(lp))
+                lpo += (size_t)n;
         }
     }
     /* Add examples to prime the model on correct tone.
@@ -164,8 +191,9 @@ hu_error_t hu_agent_build_lean_persona_head(hu_agent_t *agent, const char *msg, 
             if (n > 0 && lpo + (size_t)n < sizeof(lp))
                 lpo += (size_t)n;
         }
-        if (ov->avg_length) {
-            n = snprintf(lp + lpo, sizeof(lp) - lpo, " Length: %s.", ov->avg_length);
+        const char *avg = hu_persona_style_opts_filter(opts, ov->avg_length, fb, sizeof(fb));
+        if (avg) {
+            n = snprintf(lp + lpo, sizeof(lp) - lpo, " Length: %s.", avg);
             if (n > 0 && lpo + (size_t)n < sizeof(lp))
                 lpo += (size_t)n;
         }
@@ -175,13 +203,23 @@ hu_error_t hu_agent_build_lean_persona_head(hu_agent_t *agent, const char *msg, 
                 lpo += (size_t)n;
         }
         for (size_t i = 0; i < ov->style_notes_count; i++) {
-            if (ov->style_notes[i]) {
-                n = snprintf(lp + lpo, sizeof(lp) - lpo, " %s.", ov->style_notes[i]);
+            const char *note =
+                hu_persona_style_opts_filter(opts, ov->style_notes[i], fb, sizeof(fb));
+            if (note) {
+                n = snprintf(lp + lpo, sizeof(lp) - lpo, " %s.", note);
                 if (n > 0 && lpo + (size_t)n < sizeof(lp))
                     lpo += (size_t)n;
             }
         }
         n = snprintf(lp + lpo, sizeof(lp) - lpo, "\n");
+        if (n > 0 && lpo + (size_t)n < sizeof(lp))
+            lpo += (size_t)n;
+    }
+    /* Learned style line (HU_LEARNED_STYLE=live), right after the channel
+     * style it replaces the fixed-length parts of. */
+    if (opts && opts->learned_line && opts->learned_line_len > 0) {
+        int n = snprintf(lp + lpo, sizeof(lp) - lpo, "%.*s\n", (int)opts->learned_line_len,
+                         opts->learned_line);
         if (n > 0 && lpo + (size_t)n < sizeof(lp))
             lpo += (size_t)n;
     }

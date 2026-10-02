@@ -11,6 +11,7 @@
 #include "human/core/string.h"
 #include "human/data/loader.h"
 #include "human/persona.h"
+#include "human/persona/learned_style.h"
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -353,6 +354,10 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
     buf[0] = '\0';
 
     hu_error_t err;
+    /* Contact profile with the length sentences stripped (learned_style_live
+     * only); owned here so every `goto fail` releases it. */
+    char *ls_contact = NULL;
+    size_t ls_contact_cap = 0;
 
     /* Identity — use persona override or default */
     if (config->persona_prompt && config->persona_prompt_len > 0) {
@@ -512,6 +517,21 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
             }
         }
 
+        /* HU_LEARNED_STYLE=live rendered a learned line in the persona head
+         * this turn: the contact profile's hand-written length sentences
+         * ("usually 3-8 words") would contradict it, so they go too. */
+        const char *contact_text = config->contact_context;
+        size_t contact_text_len = config->contact_context_len;
+        if (config->learned_style_live && contact_text && contact_text_len > 0) {
+            ls_contact_cap = contact_text_len + 1;
+            ls_contact = (char *)alloc->alloc(alloc->ctx, ls_contact_cap);
+            if (ls_contact) {
+                (void)hu_learned_style_strip_contact(contact_text, contact_text_len, ls_contact,
+                                                     ls_contact_cap, &contact_text_len);
+                contact_text = ls_contact;
+            }
+        }
+
         /* Immersive middle sections, in prompt order. One row per section
          * collapses what were 12 copy-paste blocks (07-12 review): each row
          * appends optional header + text + optional trailer, records its
@@ -561,8 +581,8 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
                  HU_PROMPT_FIELD_CONTINUITY_CONTEXT, HU_TRIM_SLOT_CONTINUITY},
                 {hum_text, hum_text_len, k_hdr_humanness, sizeof(k_hdr_humanness) - 1, k_sep1, 1,
                  HU_PROMPT_FIELD_HUMANNESS_CONTEXT, HU_TRIM_SLOT_HUMANNESS},
-                {config->contact_context, config->contact_context_len, NULL, 0, NULL, 0,
-                 HU_PROMPT_FIELD_CONTACT_CONTEXT, -1},
+                {contact_text, contact_text_len, NULL, 0, NULL, 0, HU_PROMPT_FIELD_CONTACT_CONTEXT,
+                 -1},
                 {config->conversation_context, config->conversation_context_len, NULL, 0, NULL, 0,
                  HU_PROMPT_FIELD_CONVERSATION_CONTEXT, -1},
             };
@@ -592,6 +612,10 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
                 }
                 HU_PROMPT_TRACK_AFTER(sections[i].field);
             }
+        }
+        if (ls_contact) {
+            alloc->free(alloc->ctx, ls_contact, ls_contact_cap);
+            ls_contact = NULL;
         }
         /* Everything appended from here to the early return is the guard
          * tail the positional cap must keep (hu_prompt_positional_cap_apply).
@@ -1707,6 +1731,8 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
     return HU_OK;
 
 fail:
+    if (ls_contact)
+        alloc->free(alloc->ctx, ls_contact, ls_contact_cap);
     alloc->free(alloc->ctx, buf, cap);
     return err;
 }
