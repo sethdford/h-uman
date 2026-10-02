@@ -607,6 +607,13 @@ void hu_imessage_set_test_send_stub(hu_imessage_test_send_stub_fn fn);
  * Pass NULL to disable the stub and revert to the real AX path (if available). */
 void hu_imessage_set_test_react_emoji_stub(bool (*stub)(const char *emoji_utf8));
 
+/** Test-only — replaces the chat.db boundary read a tapback takes before it
+ * is sent (hu_imessage_get_latest_sent_rowid is a -1 stub in test builds).
+ * Lets tests pin that the boundary is read BEFORE the react runs. NULL
+ * restores the default. */
+void hu_imessage_set_test_tapback_boundary_stub(int64_t (*stub)(const char *handle,
+                                                                size_t handle_len));
+
 /** Test-only: deterministic check of CLASSIC_MAP lookup + fallback. */
 const char *hu_imessage_test_classic_label_for_emoji(const char *emoji_utf8);
 #endif

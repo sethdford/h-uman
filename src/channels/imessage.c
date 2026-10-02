@@ -3574,8 +3574,8 @@ static hu_error_t imessage_get_response_constraints(void *ctx,
     return HU_OK;
 }
 
-static hu_error_t imessage_react(void *ctx, const char *target, size_t target_len,
-                                 int64_t message_id, hu_reaction_type_t reaction) {
+static hu_error_t imessage_react_tiers(void *ctx, const char *target, size_t target_len,
+                                       int64_t message_id, hu_reaction_type_t reaction) {
     (void)target;
     (void)target_len;
     (void)message_id;
@@ -3837,6 +3837,45 @@ static hu_error_t imessage_react(void *ctx, const char *target, size_t target_le
     return HU_OK;
 #endif
 #endif
+}
+
+/* Send provenance for tapbacks: the chat.db boundary is read before the
+ * tiers run and the observer hears only a delivered tapback, so the record
+ * claims the first from-me reaction above the boundary. Bookkeeping cannot
+ * fail the tapback: the observer returns nothing and logs its own failures. */
+#if HU_IS_TEST
+static int64_t (*g_test_tapback_boundary)(const char *, size_t) = NULL;
+void hu_imessage_set_test_tapback_boundary_stub(int64_t (*stub)(const char *handle,
+                                                                size_t handle_len)) {
+    g_test_tapback_boundary = stub;
+}
+#endif
+
+static int64_t imessage_tapback_boundary(const char *target, size_t target_len) {
+    if (!hu_imessage_send_observer_active() || !target || target_len == 0)
+        return -1;
+#if HU_IS_TEST
+    if (g_test_tapback_boundary)
+        return g_test_tapback_boundary(target, target_len);
+#endif
+    return hu_imessage_get_latest_sent_rowid(target, target_len);
+}
+
+static void imessage_report_tapback(const char *target, size_t target_len, int64_t prior) {
+    hu_imessage_sent_event_t ev = {.handle = target,
+                                   .handle_len = target_len,
+                                   .kind = HU_IMESSAGE_SENT_KIND_TAPBACK,
+                                   .prior_max_rowid = prior};
+    hu_imessage_send_observer_notify(&ev);
+}
+
+static hu_error_t imessage_react(void *ctx, const char *target, size_t target_len,
+                                 int64_t message_id, hu_reaction_type_t reaction) {
+    int64_t prior = imessage_tapback_boundary(target, target_len);
+    hu_error_t err = imessage_react_tiers(ctx, target, target_len, message_id, reaction);
+    if (err == HU_OK)
+        imessage_report_tapback(target, target_len, prior);
+    return err;
 }
 
 static char *imessage_vt_get_attachment_path(void *ctx, hu_allocator_t *alloc, int64_t message_id) {
@@ -5202,10 +5241,8 @@ hu_error_t hu_imessage_mark_read(void *ctx, const char *target, size_t target_le
 #endif
 }
 
-hu_error_t hu_imessage_react_emoji_with_fallback(void *ctx, const char *target, size_t target_len,
-                                                 int64_t message_id, const char *emoji_utf8,
-                                                 size_t emoji_utf8_len) {
-    (void)emoji_utf8_len; /* emoji_utf8 is NUL-terminated; len is informational */
+static hu_error_t react_emoji_tiers(void *ctx, const char *target, size_t target_len,
+                                    int64_t message_id, const char *emoji_utf8) {
 
     if (!emoji_utf8 || !emoji_utf8[0])
         return HU_ERR_INVALID_ARGUMENT;
@@ -5236,6 +5273,17 @@ hu_error_t hu_imessage_react_emoji_with_fallback(void *ctx, const char *target, 
     (void)message_id;
 #endif
     return HU_ERR_NOT_SUPPORTED;
+}
+
+hu_error_t hu_imessage_react_emoji_with_fallback(void *ctx, const char *target, size_t target_len,
+                                                 int64_t message_id, const char *emoji_utf8,
+                                                 size_t emoji_utf8_len) {
+    (void)emoji_utf8_len; /* emoji_utf8 is NUL-terminated; len is informational */
+    int64_t prior = imessage_tapback_boundary(target, target_len);
+    hu_error_t err = react_emoji_tiers(ctx, target, target_len, message_id, emoji_utf8);
+    if (err == HU_OK)
+        imessage_report_tapback(target, target_len, prior);
+    return err;
 }
 
 /* ── Typing indicators ────────────────────────────────────────────────

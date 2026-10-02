@@ -283,6 +283,19 @@ class TestExactProvenance(unittest.TestCase):
         self.assertEqual(r["turns"]["huuman"], 1)
         self.assertIsNotNone(r["attribution"]["exact_from"])
 
+    def test_tapback_record_does_not_claim_seth_text(self):
+        # The daemon records its tapbacks (kind 'tapback', no text). A
+        # text-less record must not claim the next from-me text: that is
+        # Seth typing, not h-uman.
+        def fill(fx):
+            fx.msg("+1", 0, "how did it go", False)
+            fx.outbound("+1", 30, None, fx.max_rowid(), kind="tapback")
+            fx.msg("+1", 60, "so good honestly", True)  # Seth, typed by hand
+            fx.msg("+1", 3 * MIN, "yay", False)
+        r = self.run_fixture(fill)
+        self.assertEqual(r["turns"]["huuman"], 0)
+        self.assertEqual(r["turns"]["seth"], 1)
+
     def test_record_without_delivered_row_is_counted_unmatched(self):
         def fill(fx):
             fx.outbound("+1", 0, "never landed in chat.db", fx.max_rowid())
