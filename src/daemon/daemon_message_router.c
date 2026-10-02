@@ -41,10 +41,12 @@
 #include "human/memory/agent_facts.h"
 #include "human/persona/pacing.h"
 #include "human/providers/factory.h"
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 bool hu_daemon_plaintext_for_split_channel(void *ch_v, hu_allocator_t *alloc, const char *text,
                                            size_t len, char **out, size_t *out_len) {
@@ -773,12 +775,54 @@ const char *hu_daemon_unseen_photo(const char *text, size_t *len, char *buf, siz
  * before the reply is split, so a bubble cut mid-line kept a lowercase start
  * (32% of follow-on bubbles vs Seth's 9%, 2026-09-30). Governor rules apply
  * (LIVE only, the card's lowercase share is kept). */
+/* One hold at a time: the service loop handles one batch at a time, and the
+ * next batch's hold replaces this one. */
+static struct {
+    char key[64];
+    int64_t until_ms;
+} s_reply_hold;
+static pthread_mutex_t s_reply_hold_mu = PTHREAD_MUTEX_INITIALIZER;
+
+void hu_daemon_reply_hold(const char *key, size_t key_len, int64_t until_ms) {
+    pthread_mutex_lock(&s_reply_hold_mu);
+    if (!key || key_len == 0 || key_len >= sizeof(s_reply_hold.key)) {
+        s_reply_hold.key[0] = '\0';
+        s_reply_hold.until_ms = 0;
+    } else {
+        memcpy(s_reply_hold.key, key, key_len);
+        s_reply_hold.key[key_len] = '\0';
+        s_reply_hold.until_ms = until_ms;
+    }
+    pthread_mutex_unlock(&s_reply_hold_mu);
+}
+
+void hu_daemon_reply_hold_for(const char *key, size_t key_len, uint32_t ms) {
+    hu_daemon_reply_hold(key, key_len, hu_time_get_current_ms() + (int64_t)ms);
+}
+
+int64_t hu_daemon_reply_hold_wait_ms(const char *key, size_t key_len, int64_t now_ms) {
+    int64_t wait = 0;
+    pthread_mutex_lock(&s_reply_hold_mu);
+    if (key && key_len > 0 && strlen(s_reply_hold.key) == key_len &&
+        memcmp(s_reply_hold.key, key, key_len) == 0 && s_reply_hold.until_ms > now_ms)
+        wait = s_reply_hold.until_ms - now_ms;
+    pthread_mutex_unlock(&s_reply_hold_mu);
+    return wait;
+}
+
 hu_error_t hu_daemon_dispatch_imessage_reply_ex(
     struct hu_channel *ch, const struct hu_persona *persona, const struct hu_agent *agent,
     const struct hu_config *config, const char *target, size_t target_len,
     const char *parent_msg_guid, size_t parent_guid_len, const char *body, size_t body_len,
     const struct hu_conversation_snapshot *snapshot, int64_t inferred_message_id_for_react,
     bool *out_text_sent, bool text_required) {
+    int64_t hold_ms = hu_daemon_reply_hold_wait_ms(target, target_len, hu_time_get_current_ms());
+    if (hold_ms > 0) {
+#ifndef HU_IS_TEST
+        usleep((useconds_t)(hold_ms * 1000));
+#endif
+        hu_daemon_reply_hold(NULL, 0, 0); /* consumed: a burst's later bubbles go at once */
+    }
     char cased[1024];
     if (persona && body && body_len > 0 && body_len < sizeof(cased)) {
         memcpy(cased, body, body_len);
