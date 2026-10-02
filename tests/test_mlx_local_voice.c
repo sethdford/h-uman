@@ -103,7 +103,6 @@ static void mlx_local_reconnect(void) {
 }
 
 static void mlx_local_null_args_rejected(void) {
-    hu_allocator_t alloc = hu_system_allocator();
     hu_error_t err = hu_voice_provider_mlx_local_create(NULL, NULL, NULL);
     HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
 

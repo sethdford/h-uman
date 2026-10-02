@@ -513,6 +513,7 @@ void run_turn_entry_tests(void);                  /* agent-turn carve: S0 entry 
 void run_turn_silence_tests(void);                /* agent-turn carve: S8 silence stage */
 void run_turn_context_tests(void);                /* agent-turn carve: S4 context builders */
 void run_turn_tools_tests(void);                  /* agent-turn carve: S16 tool dispatch */
+void run_turn_plan_tests(void);                   /* agent-turn: [ACTIVE_PLAN] resume */
 void run_turn_tail_tests(void);                   /* agent-turn carve: S17-S18 iteration tail */
 void run_agent_turn_history_window_tests(void);   /* agent-turn: short-history scan windows */
 void run_reask_tests(void);                       /* agent-turn: re-ask predicate */
@@ -1608,6 +1609,7 @@ int main(int argc, char **argv) {
     run_turn_context_tests();
     run_turn_tools_tests();
     run_turn_tail_tests();
+    run_turn_plan_tests();
     run_agent_turn_history_window_tests();
     run_reask_tests();
     run_turn_sources_tests();

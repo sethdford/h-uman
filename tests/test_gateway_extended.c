@@ -1422,6 +1422,7 @@ static void cp_fidelity_setup_persona_dir(char *out_dir, size_t cap) {
     setenv("HUMAN_PERSONAL_MODEL_PATH", "/dev/null/__nonexistent__", 1);
 }
 
+#ifdef HU_ENABLE_ML
 static void cp_fidelity_write_fixture_persona(const char *dir, const char *name) {
     char path[512];
     snprintf(path, sizeof(path), "%s/%s.json", dir, name);
@@ -1439,6 +1440,7 @@ static void cp_fidelity_write_fixture_persona(const char *dir, const char *name)
           f);
     fclose(f);
 }
+#endif
 
 static void cp_fidelity_cleanup(const char *dir) {
     char path[512];
@@ -1570,6 +1572,7 @@ static void test_cp_admin_metrics_fidelity_returns_zero_state_without_persona(vo
     hu_json_free(&alloc, root);
 }
 
+#ifdef HU_ENABLE_ML
 static void test_cp_admin_metrics_fidelity_uses_params_persona(void) {
     char dir[256];
     cp_fidelity_setup_persona_dir(dir, sizeof(dir));
@@ -1607,7 +1610,9 @@ static void test_cp_admin_metrics_fidelity_uses_params_persona(void) {
     hu_json_free(&alloc, root);
     cp_fidelity_cleanup(dir);
 }
+#endif
 
+#ifdef HU_ENABLE_ML
 static void test_cp_admin_metrics_fidelity_merges_ab_status_file(void) {
     char dir[256];
     cp_fidelity_setup_persona_dir(dir, sizeof(dir));
@@ -1661,6 +1666,7 @@ static void test_cp_admin_metrics_fidelity_merges_ab_status_file(void) {
     unlink(ab_path);
     cp_fidelity_cleanup(dir);
 }
+#endif
 
 static void test_cp_admin_metrics_directive_telemetry_returns_counts(void) {
     /* Drive one casual+emoji directive fire through
