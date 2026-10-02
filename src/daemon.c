@@ -72,7 +72,7 @@
 #include "human/daemon/consecutive_limiter.h"
 #include "human/daemon/context_facade.h"
 #include "human/daemon/dated_followup.h"
-#include "human/daemon/director.h"
+#include "human/daemon/director_v2.h" /* includes director.h */
 #include "human/daemon/expressive.h"
 #include "human/daemon/feeds_facade.h"
 #include "human/daemon/identity_graph.h"
@@ -3493,9 +3493,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             hu_imessage_caps_cached(alloc)->advanced, msgs[batch_start].is_group,
                             share_saved_waiting(batch_key, key_len));
                     if (g_classify_provider_ok) {
-                        director_result_valid = hu_daemon_director_call(
-                            alloc, combined, combined_len, early_history, early_history_count,
-                            situation, &director_result);
+                        director_result_valid = hu_director_v2_decide(
+                            alloc, agent, ch->channel, batch_key, key_len, combined, combined_len,
+                            early_history, early_history_count, situation, &director_result);
                     }
                     if (forms_on && director_result_valid) {
                         const hu_contact_profile_t *fcp =
