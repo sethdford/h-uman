@@ -3907,6 +3907,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_turn_context.c
     tests/test_turn_tools.c
     tests/test_turn_tail.c
+    tests/test_turn_plan.c
     tests/test_agent_turn_history_window.c
     tests/test_reask.c
     tests/test_turn_sources.c
