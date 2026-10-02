@@ -29,6 +29,7 @@ _human() {
                 doctor:Run system diagnostics
                 drafts:Predictive draft suggestions (Sprint B Story 1)
                 reply-prompt:Print the system prompt the daemon would send for a 1:1 reply (offline)
+                replay:Replay real inbound turns through the reply path offline \(no sends, local only\)
                 demo:Reproducible end-to-end demonstrations
                 cron:Manage scheduled tasks
                 channel:Channel management
@@ -165,6 +166,22 @@ _human() {
                 update)
                     _describe 'update option' '(
                         --check:Check only, do not update
+                    )'
+                    ;;
+                replay)
+                    _describe 'replay option' '(
+                        --in:Turns JSONL from replay_export_turns.py
+                        --out:Result JSONL \(written 0600\)
+                        --arm:Arm label written into every row
+                        --endpoint:Loopback OpenAI-compatible endpoint
+                        --provider:Provider name \(default mlx_local\)
+                        --model:Model name sent on every call
+                        --temperature:Pin the temperature of every call
+                        --delay-ms:Pause between turns
+                        --limit:Replay at most N turns
+                        --no-director:Skip the llm_decides director
+                        --dump-requests:Write each reply request to DIR
+                        --seed:Shaping seed
                     )'
                     ;;
                 prospective)

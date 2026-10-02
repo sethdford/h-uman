@@ -609,6 +609,8 @@ static const hu_command_t commands[] = {
      HU_CLI_HELP_SELF},
     {"reply-prompt", "Print the system prompt the daemon would send for a 1:1 reply (offline)",
      cmd_reply_prompt, HU_CLI_HELP_SELF},
+    {"replay", "Replay real inbound turns through the reply path offline (no sends, local only)",
+     cmd_replay, HU_CLI_HELP_SELF},
     {"autoresponder", "Manage the DND autoresponder (digest of recent replies)", cmd_autoresponder,
      HU_CLI_HELP_SELF},
     {"initiative", "Inspect init_proposer JSONL (log | status)", cmd_initiative, HU_CLI_HELP_BARE},
@@ -3650,9 +3652,10 @@ int main(int argc, char *argv[]) {
 
 #if defined(HU_HAS_UPDATE) && !HU_IS_TEST
     /* init/onboard create the config, so loading it first only logs errors. */
+    /* replay is local-only: no update check against GitHub either. */
     if (strcmp(cmd_name, "update") != 0 && strcmp(cmd_name, "version") != 0 &&
         strcmp(cmd_name, "help") != 0 && strcmp(cmd_name, "init") != 0 &&
-        strcmp(cmd_name, "onboard") != 0) {
+        strcmp(cmd_name, "onboard") != 0 && strcmp(cmd_name, "replay") != 0) {
         hu_config_t update_cfg;
         if (hu_config_load(&alloc, &update_cfg) == HU_OK) {
             hu_update_maybe_check(&alloc, &update_cfg);

@@ -479,3 +479,35 @@ void hu_daemon_reactive_context_load(hu_allocator_t *alloc, hu_agent_t *agent,
 #endif
     rt->contact_for_tapback = contact_for_tapback;
 }
+
+void hu_daemon_agent_clear_session_scope(hu_agent_t *agent) {
+    if (!agent)
+        return;
+    agent->memory_session_id = NULL;
+    agent->memory_session_id_len = 0;
+    if (agent->memory && agent->memory->vtable) {
+        agent->memory->current_session_id = NULL;
+        agent->memory->current_session_id_len = 0;
+    }
+}
+
+void hu_daemon_reactive_turn_end(hu_agent_t *agent) {
+    if (!agent)
+        return;
+    agent->contact_context = NULL;
+    agent->contact_context_len = 0;
+    agent->conversation_context = NULL;
+    agent->conversation_context_len = 0;
+    agent->ab_history_entries = NULL;
+    agent->ab_history_count = 0;
+    agent->turn_model = NULL;
+    agent->turn_model_len = 0;
+    agent->lean_prompt = false;
+    agent->turn_temperature = 0.0;
+    agent->turn_thinking_budget = 0;
+    agent->max_response_chars = 0;
+    agent->voice_memo_turn = false;
+    agent->history_msg_cap = 0;
+    agent->self_test_turn = false;
+    hu_daemon_agent_clear_session_scope(agent);
+}
