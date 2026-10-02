@@ -202,15 +202,19 @@ static void poll_db_resolves_target_owner_and_send_time(void) {
     HU_ASSERT_EQ(hu_imessage_poll_reactions_db(db, 1789999000, ev, 8, &n), HU_OK);
     HU_ASSERT_EQ(n, 4);
     /* ORDER BY date DESC: R6, R5, R4, R3 */
-    const int64_t ours_sent = 812000000LL + 978307200LL;
+    const int64_t ours_sent_ms = 812000000000LL + 978307200000LL;
     HU_ASSERT_STR_EQ(ev[0].target_message_ref, "OURS-GUID-1"); /* bp: stripped */
     HU_ASSERT_EQ(ev[0].target_is_ours, 1);
-    HU_ASSERT_EQ(ev[0].target_sent_unix, ours_sent);
-    HU_ASSERT_EQ(ev[1].target_is_ours, 0); /* we reacted: not a contact signal */
-    HU_ASSERT_EQ(ev[2].target_is_ours, 0); /* their own message */
+    HU_ASSERT_EQ(ev[0].target_sent_ms, ours_sent_ms);
+    HU_ASSERT_EQ(ev[0].target_rowid, 1);
+    HU_ASSERT_EQ(ev[0].target_prev_own_rowid, 0); /* nothing of ours before it */
+    HU_ASSERT_EQ(ev[1].target_is_ours, 0);        /* we reacted: not a contact signal */
+    HU_ASSERT_EQ(ev[2].target_is_ours, 0);        /* their own message */
     HU_ASSERT_STR_EQ(ev[3].target_message_ref, "OURS-GUID-1");
     HU_ASSERT_EQ(ev[3].target_is_ours, 1);
-    HU_ASSERT_EQ(ev[3].target_sent_unix, ours_sent);
+    HU_ASSERT_EQ(ev[3].target_sent_ms, ours_sent_ms);
+    HU_ASSERT_EQ(ev[2].target_rowid, 2);
+    HU_ASSERT_EQ(ev[2].target_prev_own_rowid, 1); /* our reply precedes their message */
     HU_ASSERT_STR_EQ(ev[3].target_thread_id, "+15550002222");
     for (size_t i = 0; i < n; i++) {
         free((void *)ev[i].target_thread_id);

@@ -117,6 +117,13 @@ int hu_reaction_lookup_last_response(const char *channel, const char *thread, ch
 int hu_reaction_handler_lookup_db_probe(void);
 #endif
 
+/* DEF-8: called (contact, len, delivered_ms) whenever a contact's tapback is
+ * attributed to a message the daemon delivered (HU_OUTCOME_JOIN != off).
+ * The spontaneity learner credits its extras through this; NULL clears. */
+typedef void (*hu_reaction_engagement_sink_fn)(const char *contact, size_t contact_len,
+                                               int64_t delivered_ms);
+void hu_reaction_handler_set_engagement_sink(hu_reaction_engagement_sink_fn fn);
+
 #if HU_IS_TEST
 /* Test seam: same lookup store as production registration. */
 void hu_reaction_handler_register_assistant_message_for_test(

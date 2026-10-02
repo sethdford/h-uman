@@ -16,10 +16,12 @@
  * restart (R4 in the Phase-5 risk register). */
 #include "human/agent/reaction_handler.h"
 #include "human/channels/imessage_ingest.h"
+#include "human/contact_send_recency.h"
 #include "human/core/gate_mode.h"
 #include "human/core/log.h"
 #include "human/core/paths.h"
 #include "human/memory/identity_resolver.h"
+#include "human/memory/outbound_sends_repo.h"
 #include "human/memory/personal_model.h"
 #include "human/ml/dpo.h"
 #include "human/reflection.h" /* T8: retire-on-contradiction */
@@ -347,22 +349,24 @@ static int reaction_lookup_find(const hu_reaction_event_t *e, char *prompt_out, 
 #endif
 }
 
-/* DEF-8: join a tapback on OUR message to the reply registered closest
- * before that message was sent, within the same thread. Registration happens
- * right after the first bubble is delivered, so the target's send time is at
- * or after it (later bubbles), within the window. Used when the exact msg_ref
- * join misses — in production the router fell back to a synthetic
- * "out-<ts>" ref for 440 of 492 registrations because chat.db `text` is NULL
- * for ~98% of our sent rows and the GUID lookup matched on text. */
-#define RXN_NEAR_WINDOW_BEFORE_S 600
-#define RXN_NEAR_SLACK_AFTER_S   15
+/* DEF-8: the reply a tapback is about, anchored on ONE delivery the daemon
+ * made (outbound_sends): the registration in the same thread closest at or
+ * before that delivery, no earlier than the FU-1 window before it — no
+ * proactive or scheduled send reaches a contact within that window of a
+ * reactive reply, so every daemon bubble inside it belongs to that reply.
+ * Used when the exact msg_ref join misses: in production the router fell
+ * back to a synthetic "out-<ts>" ref for 440 of 492 registrations because
+ * chat.db `text` is NULL for ~98% of our sent rows. */
+#define RXN_DELIVERY_SLACK_MS 5000 /* outbound_sends vs chat.db date: 192/197 within 3 s */
+#define RXN_ANCHOR_SLACK_S    5    /* registration vs first delivery: 73/73 within 5 s */
 
-static int reaction_lookup_find_near(const hu_reaction_event_t *e, char *prompt_out,
-                                     size_t prompt_cap, char *response_out, size_t response_cap,
-                                     char *alternative_out, size_t alternative_cap) {
+static int reaction_lookup_find_anchored(const hu_reaction_event_t *e, int64_t anchor_s,
+                                         char *prompt_out, size_t prompt_cap, char *response_out,
+                                         size_t response_cap, char *alternative_out,
+                                         size_t alternative_cap) {
     const char *thread = e->target_thread_id ? e->target_thread_id : "";
-    int64_t lo = e->target_sent_unix - RXN_NEAR_WINDOW_BEFORE_S;
-    int64_t hi = e->target_sent_unix + RXN_NEAR_SLACK_AFTER_S;
+    int64_t lo = anchor_s - HU_DAEMON_REACTIVE_GATE_WINDOW_S;
+    int64_t hi = anchor_s + RXN_ANCHOR_SLACK_S;
 #if HU_RXN_LOOKUP_USES_SQLITE
     if (!rxn_db_open())
         return 0;
@@ -414,32 +418,62 @@ static hu_gate_mode_t outcome_join_mode(void) {
     return hu_gate_mode_from_env("HU_OUTCOME_JOIN", HU_GATE_OFF);
 }
 
+static hu_reaction_engagement_sink_fn s_engagement_sink = NULL;
+void hu_reaction_handler_set_engagement_sink(hu_reaction_engagement_sink_fn fn) {
+    s_engagement_sink = fn;
+}
+
+/* Did the daemon deliver the reacted-to message? Only a contact's reaction on
+ * an is_from_me row that a recorded send claims (outbound_sends) counts —
+ * Seth's own typing is is_from_me too. Returns the delivery time (ms) or 0. */
+static int64_t outcome_join_delivery(const hu_reaction_event_t *e) {
+    if (!s_collector || !e->target_is_ours || e->target_rowid <= 0 || e->target_sent_ms <= 0 ||
+        !e->target_thread_id || !e->target_thread_id[0])
+        return 0;
+#ifdef HU_ENABLE_SQLITE
+    int64_t sent_ms = 0;
+    if (s_collector->db &&
+        hu_outbound_sends_repo_find_delivery(s_collector->db, e->channel_id, e->target_thread_id,
+                                             strlen(e->target_thread_id), e->target_rowid,
+                                             e->target_prev_own_rowid, e->target_sent_ms,
+                                             RXN_DELIVERY_SLACK_MS, &sent_ms) == HU_OK)
+        return sent_ms;
+#endif
+    return 0;
+}
+
 /* HU_OUTCOME_JOIN != off: land the tapback on its production_outcomes row
  * (LIVE writes; SHADOW only finds the row and logs one aggregate line).
- * Returns the time-window reaction_lookup hit (0/1); the buffers are filled
- * on a hit and the caller uses them only when LIVE. */
+ * Returns the anchored reaction_lookup hit (0/1); the buffers are filled on
+ * a hit and the caller uses them only when LIVE. */
 static int outcome_join_apply(hu_gate_mode_t mode, const hu_reaction_event_t *e, int exact_hit,
                               char *prompt_buf, size_t prompt_cap, char *response_buf,
                               size_t response_cap, char *alternative_buf, size_t alternative_cap) {
-    int ours = e->target_is_ours && e->target_sent_unix > 0;
-    int time_hit = 0;
-    if (!exact_hit && ours)
-        time_hit = reaction_lookup_find_near(e, prompt_buf, prompt_cap, response_buf, response_cap,
-                                             alternative_buf, alternative_cap);
+    int64_t delivered_ms = outcome_join_delivery(e);
+    int64_t anchor_s = delivered_ms / 1000;
+    int anchored_hit = 0;
+    if (!exact_hit && delivered_ms > 0)
+        anchored_hit =
+            reaction_lookup_find_anchored(e, anchor_s, prompt_buf, prompt_cap, response_buf,
+                                          response_cap, alternative_buf, alternative_cap);
     int64_t row_id = 0;
     hu_error_t rerr = HU_ERR_NOT_FOUND;
-    if (s_collector && e->target_thread_id && (exact_hit || ours)) {
+    if (s_collector && e->target_thread_id && (exact_hit || delivered_ms > 0)) {
         int pol = (e->polarity > 0) ? 1 : (e->polarity < 0 ? -1 : 0);
         rerr = hu_dpo_record_tapback(s_collector, e->channel_id, e->target_thread_id,
-                                     e->target_message_ref, ours ? e->target_sent_unix : 0, pol,
+                                     e->target_message_ref, anchor_s,
+                                     HU_DAEMON_REACTIVE_GATE_WINDOW_S, pol,
                                      /*dry_run=*/mode != HU_GATE_LIVE, &row_id);
     }
-    if (mode == HU_GATE_SHADOW)
-        hu_log_info("reaction_handler", NULL,
-                    "[HU_OUTCOME_JOIN shadow] tapback polarity=%d ours=%d exact_hit=%d "
-                    "time_hit=%d outcome_row=%d",
-                    (int)e->polarity, ours, exact_hit, time_hit, (rerr == HU_OK && row_id > 0));
-    return time_hit;
+    if (delivered_ms > 0 && s_engagement_sink)
+        s_engagement_sink(e->target_thread_id, strlen(e->target_thread_id), delivered_ms);
+    hu_log_info("reaction_handler", NULL,
+                "[HU_OUTCOME_JOIN %s] tapback polarity=%d is_from_me_target=%d daemon_sent=%d "
+                "exact_hit=%d anchored_hit=%d outcome_row=%d",
+                mode == HU_GATE_LIVE ? "live" : "shadow", (int)e->polarity,
+                e->target_is_ours ? 1 : 0, delivered_ms > 0 ? 1 : 0, exact_hit, anchored_hit,
+                (rerr == HU_OK && row_id > 0));
+    return anchored_hit;
 }
 
 /* SOTA roadmap #13 (continuity): most recent outbound response for a
@@ -489,6 +523,17 @@ hu_error_t hu_reaction_handler_handle_event(const hu_reaction_event_t *e) {
     if (e->is_removal)
         return HU_OK; /* drop removals; we only record adds */
 
+    /* DEF-8: HU_OUTCOME_JOIN (default OFF -> e is used unchanged). LIVE also
+     * reads a custom-emoji tapback's polarity from its glyph instead of
+     * counting every custom emoji (😢 included) as positive. */
+    hu_gate_mode_t oj_mode = outcome_join_mode();
+    hu_reaction_event_t oj_event;
+    if (oj_mode == HU_GATE_LIVE && e->kind == HU_REACTION_KIND_CUSTOM_EMOJI) {
+        oj_event = *e;
+        oj_event.polarity = hu_reaction_emoji_polarity(e->emoji);
+        e = &oj_event;
+    }
+
 #ifdef HU_ENABLE_SQLITE
     /* T8: a thumbs_down (NEGATIVE polarity) is a contradiction signal.
      * Retire the reflection patterns that shaped the thumbed-down turn's
@@ -514,12 +559,11 @@ hu_error_t hu_reaction_handler_handle_event(const hu_reaction_event_t *e) {
                              alternative_buf, sizeof(alternative_buf));
 
     /* DEF-8: HU_OUTCOME_JOIN (default OFF -> nothing below runs). */
-    hu_gate_mode_t oj_mode = outcome_join_mode();
     if (oj_mode != HU_GATE_OFF) {
-        int time_hit =
+        int anchored_hit =
             outcome_join_apply(oj_mode, e, lookup_hit, prompt_buf, sizeof(prompt_buf), response_buf,
                                sizeof(response_buf), alternative_buf, sizeof(alternative_buf));
-        if (oj_mode == HU_GATE_LIVE && time_hit)
+        if (oj_mode == HU_GATE_LIVE && anchored_hit)
             lookup_hit = 1;
     }
 
@@ -627,6 +671,9 @@ hu_error_t hu_reaction_handler_handle_event(const hu_reaction_event_t *e) {
      * heuristic should still defer. The return code is the caller's
      * diagnostic; the flag is the side-effect signal. */
     s_called_this_turn = 1;
+    /* LIVE: a changed reaction replaces the earlier pair for this reply. */
+    if (oj_mode == HU_GATE_LIVE)
+        (void)hu_dpo_forget_reaction_pairs(s_collector, pair.source, pair.prompt, response_buf);
     hu_error_t rec_err = hu_dpo_record_pair(s_collector, &pair);
 
     /* AGI-C1b — also update the production_outcomes row for this

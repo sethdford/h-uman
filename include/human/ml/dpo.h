@@ -138,18 +138,25 @@ hu_error_t hu_dpo_record_outcome(hu_dpo_collector_t *collector, const char *chan
                                  const char *message_ref, size_t message_ref_len,
                                  int tapback_polarity, int reply_latency_s, int reply_length);
 
-/* DEF-8: record a tapback on the outbound row it reacts to. Matches by
- * message_ref when given and present, else by send time (the latest row for
- * (channel, target) with send_timestamp in [sent-600s, sent+15s]). Unlike
- * hu_dpo_record_outcome it does NOT require the row to be unresolved — the
- * contact's text reply usually resolves it first. dry_run finds the row
- * without writing (SHADOW). *out_row_id = matched row id (0 when none).
- * Returns HU_OK, HU_ERR_NOT_FOUND (no row), HU_ERR_INVALID_ARGUMENT,
- * HU_ERR_NOT_SUPPORTED (no store), or HU_ERR_IO. */
+/* DEF-8: record a tapback on the reply row it reacts to. Matches by
+ * message_ref when given and present, else by the anchor — the delivery the
+ * caller attributed to the daemon — as the latest row for (channel, target)
+ * with send_timestamp in [anchor - window_before_s, anchor + 5 s]. Unlike
+ * hu_dpo_record_outcome it does NOT require the row to be unresolved, and a
+ * changed reaction overwrites the polarity. dry_run finds the row without
+ * writing (SHADOW). *out_row_id = matched row id (0 when none). Returns
+ * HU_OK, HU_ERR_NOT_FOUND, HU_ERR_INVALID_ARGUMENT, HU_ERR_NOT_SUPPORTED or
+ * HU_ERR_IO. */
 hu_error_t hu_dpo_record_tapback(hu_dpo_collector_t *collector, const char *channel,
                                  const char *target, const char *message_ref,
-                                 int64_t target_sent_unix, int polarity, bool dry_run,
-                                 int64_t *out_row_id);
+                                 int64_t anchor_sent_unix, int64_t window_before_s, int polarity,
+                                 bool dry_run, int64_t *out_row_id);
+
+/* Delete the reaction-derived pairs already recorded for (prompt, response)
+ * under `source`, so a contact who changes a reaction (love -> dislike)
+ * leaves ONE pair, not two opposite ones. */
+hu_error_t hu_dpo_forget_reaction_pairs(hu_dpo_collector_t *collector, const char *source,
+                                        const char *prompt, const char *response);
 
 /* Sprint 46 R5.1 — latency ingest helper.
  *

@@ -563,27 +563,28 @@ hu_error_t hu_dpo_record_outcome(hu_dpo_collector_t *collector, const char *chan
  * must land whatever else already resolved that row: in production the
  * contact's text reply resolves the row first (652 of 661 rows), and
  * hu_dpo_record_outcome only touches rows with outcome_resolved_at IS NULL,
- * so tapback_polarity stayed NULL on 661 of 661. Match by message_ref when
- * the row has one; otherwise by send time — the reply row whose
- * send_timestamp is the latest within [sent - WINDOW_BEFORE, sent + SLACK].
- * send_timestamp is stamped when the FIRST bubble is delivered, so later
- * bubbles of the same reply (choreography) sit after it, never before. */
-#define HU_DPO_TAPBACK_WINDOW_BEFORE_S 600
-#define HU_DPO_TAPBACK_SLACK_AFTER_S   15
+ * so tapback_polarity stayed NULL on 661 of 661. The caller anchors the
+ * match on ONE delivery it attributed to the daemon (outbound_sends): the
+ * reply row is the latest whose send_timestamp lies in
+ * [anchor - window_before_s, anchor + HU_DPO_TAPBACK_SLACK_AFTER_S].
+ * send_timestamp is stamped right after the reply's first bubble is
+ * delivered; on 2026-10-02, 73 of 73 recent rows had an outbound_sends row
+ * within 5 s of it. */
+#define HU_DPO_TAPBACK_SLACK_AFTER_S 5
 
 hu_error_t hu_dpo_record_tapback(hu_dpo_collector_t *collector, const char *channel,
                                  const char *target, const char *message_ref,
-                                 int64_t target_sent_unix, int polarity, bool dry_run,
-                                 int64_t *out_row_id) {
+                                 int64_t anchor_sent_unix, int64_t window_before_s, int polarity,
+                                 bool dry_run, int64_t *out_row_id) {
     if (out_row_id)
         *out_row_id = 0;
     if (!collector || !channel || !channel[0] || !target || !target[0])
         return HU_ERR_INVALID_ARGUMENT;
-    if (polarity < -1 || polarity > 1)
+    if (polarity < -1 || polarity > 1 || window_before_s < 0)
         return HU_ERR_INVALID_ARGUMENT;
 #ifndef HU_ENABLE_SQLITE
     (void)message_ref;
-    (void)target_sent_unix;
+    (void)anchor_sent_unix;
     (void)dry_run;
     return HU_ERR_NOT_SUPPORTED;
 #else
@@ -604,7 +605,7 @@ hu_error_t hu_dpo_record_tapback(hu_dpo_collector_t *collector, const char *chan
             row_id = sqlite3_column_int64(st, 0);
         sqlite3_finalize(st);
     }
-    if (row_id == 0 && target_sent_unix > 0) {
+    if (row_id == 0 && anchor_sent_unix > 0) {
         if (sqlite3_prepare_v2(collector->db,
                                "SELECT id FROM production_outcomes WHERE channel=? AND target=? "
                                "AND send_timestamp BETWEEN ? AND ? "
@@ -613,8 +614,8 @@ hu_error_t hu_dpo_record_tapback(hu_dpo_collector_t *collector, const char *chan
             return HU_ERR_IO;
         sqlite3_bind_text(st, 1, channel, -1, SQLITE_STATIC);
         sqlite3_bind_text(st, 2, target, -1, SQLITE_STATIC);
-        sqlite3_bind_int64(st, 3, target_sent_unix - HU_DPO_TAPBACK_WINDOW_BEFORE_S);
-        sqlite3_bind_int64(st, 4, target_sent_unix + HU_DPO_TAPBACK_SLACK_AFTER_S);
+        sqlite3_bind_int64(st, 3, anchor_sent_unix - window_before_s);
+        sqlite3_bind_int64(st, 4, anchor_sent_unix + HU_DPO_TAPBACK_SLACK_AFTER_S);
         if (sqlite3_step(st) == SQLITE_ROW)
             row_id = sqlite3_column_int64(st, 0);
         sqlite3_finalize(st);
@@ -625,6 +626,7 @@ hu_error_t hu_dpo_record_tapback(hu_dpo_collector_t *collector, const char *chan
         *out_row_id = (int64_t)row_id;
     if (dry_run)
         return HU_OK;
+    /* A changed reaction (love -> dislike) overwrites: one polarity per row. */
     if (sqlite3_prepare_v2(collector->db,
                            "UPDATE production_outcomes SET tapback_polarity=?, "
                            "outcome_resolved_at=COALESCE(outcome_resolved_at, ?) WHERE id=?",
@@ -636,6 +638,35 @@ hu_error_t hu_dpo_record_tapback(hu_dpo_collector_t *collector, const char *chan
     int rc = sqlite3_step(st);
     sqlite3_finalize(st);
     return rc == SQLITE_DONE ? HU_OK : HU_ERR_IO;
+#endif
+}
+
+hu_error_t hu_dpo_forget_reaction_pairs(hu_dpo_collector_t *collector, const char *source,
+                                        const char *prompt, const char *response) {
+    if (!collector || !source || !prompt || !response || !response[0])
+        return HU_ERR_INVALID_ARGUMENT;
+#ifndef HU_ENABLE_SQLITE
+    return HU_ERR_NOT_SUPPORTED;
+#else
+    if (!collector->db)
+        return HU_ERR_NOT_SUPPORTED;
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(collector->db,
+                           "DELETE FROM dpo_pairs WHERE source=? AND prompt=? "
+                           "AND (chosen=? OR rejected=?)",
+                           -1, &st, NULL) != SQLITE_OK)
+        return HU_ERR_IO;
+    sqlite3_bind_text(st, 1, source, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 2, prompt, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 3, response, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 4, response, -1, SQLITE_STATIC);
+    int rc = sqlite3_step(st);
+    sqlite3_finalize(st);
+    if (rc != SQLITE_DONE)
+        return HU_ERR_IO;
+    size_t removed = (size_t)sqlite3_changes(collector->db);
+    collector->pair_count = removed > collector->pair_count ? 0 : collector->pair_count - removed;
+    return HU_OK;
 #endif
 }
 

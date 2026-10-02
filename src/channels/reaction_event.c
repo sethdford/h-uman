@@ -2,10 +2,10 @@
 #include "human/channels/reaction_event.h"
 #include <string.h>
 
-hu_error_t hu_reaction_normalize_imessage(int32_t code,
-                                          hu_reaction_kind_t *kind,
+hu_error_t hu_reaction_normalize_imessage(int32_t code, hu_reaction_kind_t *kind,
                                           hu_reaction_polarity_t *polarity) {
-    if (!kind || !polarity) return HU_ERR_INVALID_ARGUMENT;
+    if (!kind || !polarity)
+        return HU_ERR_INVALID_ARGUMENT;
     /* AUTHORITY (full set): src/channels/imessage.c:1812-1832 (switch table)
      * + line 1890 ("positive tapbacks ... 2000-2004,2006") + line 1783
      * (SQL `BETWEEN 2000 AND 2006`). The comment block at imessage.c:1017
@@ -21,39 +21,114 @@ hu_error_t hu_reaction_normalize_imessage(int32_t code,
      * tapback. Verified against imessage.c during the spec-verifier gate. */
     int32_t base = code >= 3000 ? code - 1000 : code;
     switch (base) {
-        case 2000: *kind = HU_REACTION_LOVE;         *polarity = HU_REACTION_POSITIVE; return HU_OK;
-        case 2001: *kind = HU_REACTION_LIKE;         *polarity = HU_REACTION_POSITIVE; return HU_OK;
-        case 2002: *kind = HU_REACTION_DISLIKE;      *polarity = HU_REACTION_NEGATIVE; return HU_OK;
-        case 2003: *kind = HU_REACTION_LAUGH;        *polarity = HU_REACTION_POSITIVE; return HU_OK;
-        case 2004: *kind = HU_REACTION_EMPHASIZE;    *polarity = HU_REACTION_POSITIVE; return HU_OK;
-        case 2005: *kind = HU_REACTION_KIND_QUESTION;     *polarity = HU_REACTION_NEUTRAL;  return HU_OK;
-        case 2006: *kind = HU_REACTION_KIND_CUSTOM_EMOJI; *polarity = HU_REACTION_POSITIVE; return HU_OK;
-        default:   *kind = HU_REACTION_UNKNOWN;      *polarity = HU_REACTION_NEUTRAL;  return HU_ERR_INVALID_ARGUMENT;
+    case 2000:
+        *kind = HU_REACTION_LOVE;
+        *polarity = HU_REACTION_POSITIVE;
+        return HU_OK;
+    case 2001:
+        *kind = HU_REACTION_LIKE;
+        *polarity = HU_REACTION_POSITIVE;
+        return HU_OK;
+    case 2002:
+        *kind = HU_REACTION_DISLIKE;
+        *polarity = HU_REACTION_NEGATIVE;
+        return HU_OK;
+    case 2003:
+        *kind = HU_REACTION_LAUGH;
+        *polarity = HU_REACTION_POSITIVE;
+        return HU_OK;
+    case 2004:
+        *kind = HU_REACTION_EMPHASIZE;
+        *polarity = HU_REACTION_POSITIVE;
+        return HU_OK;
+    case 2005:
+        *kind = HU_REACTION_KIND_QUESTION;
+        *polarity = HU_REACTION_NEUTRAL;
+        return HU_OK;
+    case 2006:
+        *kind = HU_REACTION_KIND_CUSTOM_EMOJI;
+        *polarity = HU_REACTION_POSITIVE;
+        return HU_OK;
+    default:
+        *kind = HU_REACTION_UNKNOWN;
+        *polarity = HU_REACTION_NEUTRAL;
+        return HU_ERR_INVALID_ARGUMENT;
     }
 }
 
-hu_error_t hu_reaction_normalize_slack(const char *name,
-                                       hu_reaction_kind_t *kind,
+/* Custom-emoji tapbacks (iMessage 2006) carry a glyph; the code alone says
+ * nothing about sentiment. Known-negative glyphs -> NEGATIVE, known-positive
+ * -> POSITIVE, anything else (including no glyph) -> NEUTRAL, which yields
+ * no training signal rather than a guessed one. Variation selector U+FE0F
+ * is ignored so "\u2764\ufe0f" and "\u2764" match alike. */
+hu_reaction_polarity_t hu_reaction_emoji_polarity(const char *emoji) {
+    if (!emoji || !emoji[0])
+        return HU_REACTION_NEUTRAL;
+    char g[32];
+    size_t n = 0;
+    for (const char *p = emoji; *p && n + 1 < sizeof(g);) {
+        if ((unsigned char)p[0] == 0xEF && (unsigned char)p[1] == 0xB8 &&
+            (unsigned char)p[2] == 0x8F) {
+            p += 3;
+            continue;
+        }
+        g[n++] = *p++;
+    }
+    g[n] = '\0';
+    static const char *const negative[] = {
+        "\U0001F622", "\U0001F62D", "\U0001F61E", "\U0001F614", "\U0001F61F", "\U0001F620",
+        "\U0001F621", "\U0001F92C", "\U0001F44E", "\U0001F494", "\U0001F612", "\U0001F644",
+        "\U0001F615", "\u2639",     "\U0001F623", "\U0001F616", "\U0001F62B", "\U0001F629",
+        "\U0001F624", "\U0001F92E", "\U0001F922", "\U0001F625", "\U0001F630", "\U0001F628"};
+    static const char *const positive[] = {
+        "\u2764",     "\U0001F60D", "\U0001F970", "\U0001F602", "\U0001F923", "\U0001F44D",
+        "\U0001F64C", "\U0001F525", "\U0001F4AF", "\U0001F60A", "\U0001F601", "\U0001F979",
+        "\U0001F606", "\U0001F495", "\U0001F496", "\U0001F618", "\U0001F44F", "\U0001F389",
+        "\U0001F499", "\U0001F49C", "\U0001F9E1", "\U0001F49B", "\U0001F49A", "\U0001F600"};
+    for (size_t i = 0; i < sizeof(negative) / sizeof(negative[0]); i++)
+        if (strcmp(g, negative[i]) == 0)
+            return HU_REACTION_NEGATIVE;
+    for (size_t i = 0; i < sizeof(positive) / sizeof(positive[0]); i++)
+        if (strcmp(g, positive[i]) == 0)
+            return HU_REACTION_POSITIVE;
+    return HU_REACTION_NEUTRAL;
+}
+
+hu_error_t hu_reaction_normalize_slack(const char *name, hu_reaction_kind_t *kind,
                                        hu_reaction_polarity_t *polarity) {
-    if (!name || !kind || !polarity) return HU_ERR_INVALID_ARGUMENT;
+    if (!name || !kind || !polarity)
+        return HU_ERR_INVALID_ARGUMENT;
     if (strcmp(name, "+1") == 0 || strcmp(name, "thumbsup") == 0) {
-        *kind = HU_REACTION_LIKE; *polarity = HU_REACTION_POSITIVE; return HU_OK;
+        *kind = HU_REACTION_LIKE;
+        *polarity = HU_REACTION_POSITIVE;
+        return HU_OK;
     }
     if (strcmp(name, "-1") == 0 || strcmp(name, "thumbsdown") == 0) {
-        *kind = HU_REACTION_DISLIKE; *polarity = HU_REACTION_NEGATIVE; return HU_OK;
+        *kind = HU_REACTION_DISLIKE;
+        *polarity = HU_REACTION_NEGATIVE;
+        return HU_OK;
     }
     if (strcmp(name, "heart") == 0 || strcmp(name, "heart_eyes") == 0) {
-        *kind = HU_REACTION_LOVE; *polarity = HU_REACTION_POSITIVE; return HU_OK;
+        *kind = HU_REACTION_LOVE;
+        *polarity = HU_REACTION_POSITIVE;
+        return HU_OK;
     }
     if (strcmp(name, "joy") == 0 || strcmp(name, "laughing") == 0) {
-        *kind = HU_REACTION_LAUGH; *polarity = HU_REACTION_POSITIVE; return HU_OK;
+        *kind = HU_REACTION_LAUGH;
+        *polarity = HU_REACTION_POSITIVE;
+        return HU_OK;
     }
     if (strcmp(name, "thinking_face") == 0 || strcmp(name, "question") == 0) {
-        *kind = HU_REACTION_KIND_QUESTION; *polarity = HU_REACTION_NEUTRAL; return HU_OK;
+        *kind = HU_REACTION_KIND_QUESTION;
+        *polarity = HU_REACTION_NEUTRAL;
+        return HU_OK;
     }
     if (strcmp(name, "exclamation") == 0 || strcmp(name, "bangbang") == 0) {
-        *kind = HU_REACTION_EMPHASIZE; *polarity = HU_REACTION_POSITIVE; return HU_OK;
+        *kind = HU_REACTION_EMPHASIZE;
+        *polarity = HU_REACTION_POSITIVE;
+        return HU_OK;
     }
-    *kind = HU_REACTION_UNKNOWN; *polarity = HU_REACTION_NEUTRAL;
+    *kind = HU_REACTION_UNKNOWN;
+    *polarity = HU_REACTION_NEUTRAL;
     return HU_ERR_INVALID_ARGUMENT;
 }

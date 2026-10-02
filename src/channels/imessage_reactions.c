@@ -129,6 +129,15 @@ hu_error_t hu_imessage_normalize_thread_key(const char *raw, char *out, size_t c
     "    THEN substr(m.associated_message_guid, 4) "                                         \
     "  ELSE m.associated_message_guid END) "
 
+/* The previous message WE sent in the same chat before the reacted-to row:
+ * the DEF-8 join requires the outbound send's chat.db boundary to sit at or
+ * after it, so a send whose own message came earlier cannot claim this one. */
+#define HU_RXN_PREV_OWN                                       \
+    "(SELECT MAX(p.ROWID) FROM message p "                    \
+    "  JOIN chat_message_join pj ON pj.message_id = p.ROWID " \
+    "  WHERE pj.chat_id = cmj.chat_id AND p.is_from_me = 1 "  \
+    "    AND p.associated_message_type = 0 AND p.ROWID < t.ROWID)"
+
 /* Shared FROM/WHERE of both poll variants (with and without the iOS 17
  * emoji column). The outer parens around the OR are required for SQL
  * precedence — without them the AND below binds tighter and silently drops
@@ -160,14 +169,16 @@ hu_error_t hu_imessage_poll_reactions_db(struct sqlite3 *db, int64_t since_unix,
      * The column may not exist on Big Sur / Monterey; we probe via
      * a SELECT-with-fallback pattern: try the new column first, on
      * SQLITE_ERROR retry without it. */
-    const char *sql_v17 = "SELECT m.associated_message_type, m.associated_message_guid, "
-                          "       m.handle_id, h.id, c.guid, m.date, "
-                          "       (m.is_from_me = 0 AND t.is_from_me = 1), t.date, "
-                          "       m.associated_message_emoji " HU_RXN_POLL_FROM_WHERE;
+    const char *sql_v17 =
+        "SELECT m.associated_message_type, m.associated_message_guid, "
+        "       m.handle_id, h.id, c.guid, m.date, "
+        "       (m.is_from_me = 0 AND t.is_from_me = 1), t.date, t.ROWID, " HU_RXN_PREV_OWN
+        ", m.associated_message_emoji " HU_RXN_POLL_FROM_WHERE;
     const char *sql_legacy =
         "SELECT m.associated_message_type, m.associated_message_guid, "
         "       m.handle_id, h.id, c.guid, m.date, "
-        "       (m.is_from_me = 0 AND t.is_from_me = 1), t.date " HU_RXN_POLL_FROM_WHERE;
+        "       (m.is_from_me = 0 AND t.is_from_me = 1), t.date, t.ROWID, " HU_RXN_PREV_OWN
+        " " HU_RXN_POLL_FROM_WHERE;
     sqlite3_stmt *stmt = NULL;
     bool emoji_available = true;
     if (sqlite3_prepare_v2(db, sql_v17, -1, &stmt, NULL) != SQLITE_OK) {
@@ -189,7 +200,9 @@ hu_error_t hu_imessage_poll_reactions_db(struct sqlite3 *db, int64_t since_unix,
         int64_t mac_ns = sqlite3_column_int64(stmt, 5);
         int target_is_ours = sqlite3_column_int(stmt, 6) == 1; /* NULL (no target) -> 0 */
         int64_t target_mac_ns = sqlite3_column_int64(stmt, 7);
-        const unsigned char *emoji = emoji_available ? sqlite3_column_text(stmt, 8) : NULL;
+        int64_t target_rowid = sqlite3_column_int64(stmt, 8);
+        int64_t target_prev_own = sqlite3_column_int64(stmt, 9); /* NULL -> 0 */
+        const unsigned char *emoji = emoji_available ? sqlite3_column_text(stmt, 10) : NULL;
 
         hu_reaction_kind_t k = HU_REACTION_UNKNOWN;
         hu_reaction_polarity_t p = HU_REACTION_NEUTRAL;
@@ -218,8 +231,10 @@ hu_error_t hu_imessage_poll_reactions_db(struct sqlite3 *db, int64_t since_unix,
         out[*out_n].is_removal = code >= 3000 ? 1 : 0;
         out[*out_n].emoji = (emoji && emoji[0]) ? strdup((const char *)emoji) : NULL;
         out[*out_n].target_is_ours = target_is_ours;
-        out[*out_n].target_sent_unix =
-            target_mac_ns > 0 ? (target_mac_ns / 1000000000) + 978307200 : 0;
+        out[*out_n].target_rowid = target_rowid;
+        out[*out_n].target_prev_own_rowid = target_prev_own;
+        out[*out_n].target_sent_ms =
+            target_mac_ns > 0 ? (target_mac_ns / 1000000) + 978307200000LL : 0;
         (*out_n)++;
     }
     sqlite3_finalize(stmt);
