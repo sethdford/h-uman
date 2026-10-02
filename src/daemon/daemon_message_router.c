@@ -34,6 +34,7 @@
 #include "human/core/paths.h"
 #include "human/core/time.h"
 #include "human/daemon.h"
+#include "human/daemon/hurt_handoff.h"
 #include "human/daemon/message_router.h"
 #include "human/daemon/prospective.h"
 #include "human/daemon/share_queue.h"
@@ -706,6 +707,29 @@ hu_error_t hu_daemon_describe_image(hu_allocator_t *alloc, hu_agent_t *agent,
     }
     return hu_vision_describe_image(alloc, &agent->provider, path, path_len, model, model_len,
                                     desc_out, desc_len);
+}
+
+bool hu_daemon_tool_traffic(const struct hu_persona *p, const char *key, size_t key_len,
+                            const char *text, size_t len, void *observer) {
+    if (!hu_share_is_tool_traffic(p, key, key_len, text, len))
+        return false;
+    hu_log_info("human", (hu_observer_t *)observer,
+                "rating-tool traffic on the owner's number: no reply, nothing learned");
+    return true;
+}
+
+bool hu_daemon_hurt_withheld(const struct hu_persona *p, const char *key, size_t key_len,
+                             const char *text, size_t len, bool is_group) {
+    if (is_group)
+        return false;
+    /* Hurt-signal hand-off: "u mad at me?", "why are you being short" is a
+     * repair moment the owner must answer himself. Runs before any LLM call,
+     * typing indicator or send; messages are already consumed upstream, so a
+     * skip is never replayed. HU_HURT_HANDOFF activation gated on a shadow
+     * fire-rate review (share of 1:1 batches, false positives read by the
+     * owner): do not flip to default-ON without that measurement. */
+    const hu_contact_profile_t *c = p ? hu_persona_find_contact(p, key, key_len) : NULL;
+    return hu_hurt_handoff_apply(hu_hurt_handoff_mode(), text, len, c ? c->name : NULL);
 }
 
 const char *hu_daemon_unseen_photo(const char *text, size_t *len, char *buf, size_t cap) {

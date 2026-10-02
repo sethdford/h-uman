@@ -2,6 +2,7 @@
  * Seth texts a link to his own number with "save" or "for <name>"; the daemon
  * keeps it and offers it to the director when that person writes. */
 #include "human/channel.h"
+#include "human/daemon/message_router.h"
 #include "human/daemon/share_queue.h"
 #include "human/persona.h"
 #include "test_framework.h"
@@ -147,10 +148,48 @@ static void test_share_send_saved_sends_the_link_once(void) {
     unlink(path);
 }
 
+/* rating_drip.py / voice_ab.py text Seth's own number and read his answer back
+ * from chat.db, where any reply of ours is a from-me row too: on 2026-09-22 the
+ * twin answered "[h-uman rating 3/48]" with "B 3" and the harvester recorded it
+ * as his rating. His own bare answers ("a", "B", "ABBAB") are tool traffic too. */
+static void test_tool_traffic_from_owner_is_recognised(void) {
+    const hu_persona_t *p = persona();
+    static const char rating[] = "[h-uman rating 5-9/48] which sounds more like you?\nA: hey";
+    static const char voice[] = "[h-uman voice 3/12] which memo sounds like you?";
+    static const char *const answers[] = {"a", "B", "B 3", "ABBAB", "a, b, b", "A3"};
+    HU_ASSERT_TRUE(hu_share_is_tool_traffic(p, "+15550000009", 12, rating, strlen(rating)));
+    HU_ASSERT_TRUE(hu_share_is_tool_traffic(p, "+15550000009", 12, voice, strlen(voice)));
+    for (size_t i = 0; i < sizeof(answers) / sizeof(answers[0]); i++)
+        HU_ASSERT_TRUE(
+            hu_share_is_tool_traffic(p, "+15550000009", 12, answers[i], strlen(answers[i])));
+    /* the same text from anyone else is a conversation */
+    HU_ASSERT_FALSE(hu_share_is_tool_traffic(p, "+15550000001", 12, rating, strlen(rating)));
+    HU_ASSERT_FALSE(hu_share_is_tool_traffic(p, "+15550000001", 12, "a", 1));
+    /* Seth chatting with the twin, or a #self-test, still gets an answer */
+    static const char *const chat[] = {"#text hey", "what's [h-uman",
+                                       "[h-uman",   "Hey u",
+                                       "ab test",   "3",
+                                       "bab?",      "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"};
+    for (size_t i = 0; i < sizeof(chat) / sizeof(chat[0]); i++)
+        HU_ASSERT_FALSE(hu_share_is_tool_traffic(p, "+15550000009", 12, chat[i], strlen(chat[i])));
+    HU_ASSERT_FALSE(hu_share_is_tool_traffic(NULL, "+15550000009", 12, rating, strlen(rating)));
+}
+
+static void test_daemon_tool_traffic_logs_and_withholds(void) {
+    const hu_persona_t *p = persona();
+    static const char rating[] = "[h-uman rating 1-4/48] reply with 4 letters";
+    HU_ASSERT_TRUE(hu_daemon_tool_traffic(p, "+15550000009", 12, rating, strlen(rating), NULL));
+    HU_ASSERT_TRUE(hu_daemon_tool_traffic(p, "+15550000009", 12, "ABBA", 4, NULL));
+    HU_ASSERT_FALSE(hu_daemon_tool_traffic(p, "+15550000009", 12, "hey", 3, NULL));
+    HU_ASSERT_FALSE(hu_daemon_tool_traffic(p, "+15550000001", 12, rating, strlen(rating), NULL));
+}
+
 void run_daemon_share_queue_tests(void) {
     HU_TEST_SUITE("daemon share queue");
     HU_RUN_TEST(test_share_capture_needs_an_explicit_save);
     HU_RUN_TEST(test_share_owner_and_contact_resolution);
+    HU_RUN_TEST(test_tool_traffic_from_owner_is_recognised);
+    HU_RUN_TEST(test_daemon_tool_traffic_logs_and_withholds);
     HU_RUN_TEST(test_share_queue_offers_tagged_first_then_anyone);
     HU_RUN_TEST(test_share_capture_handle_files_and_acks);
     HU_RUN_TEST(test_share_send_saved_sends_the_link_once);

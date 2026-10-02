@@ -1,8 +1,7 @@
-#include "human/core/log.h"
 #include "human/memory/consolidation.h"
 #include "human/core/error.h"
+#include "human/core/log.h"
 #include "human/core/string.h"
-#include "human/memory/connections.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,9 +12,9 @@
 
 static bool is_stop_word(const char *w, size_t wlen) {
     static const char *stops[] = {
-        "a", "an", "the", "is", "was", "are", "were", "be", "been", "being",
-        "to", "of", "in", "for", "on", "with", "at", "by", "from", "and",
-        "or", "but", "not", "this", "that", "it", "i", "my", "me", "we",
+        "a",  "an",  "the", "is",   "was",  "are",  "were", "be", "been", "being",
+        "to", "of",  "in",  "for",  "on",   "with", "at",   "by", "from", "and",
+        "or", "but", "not", "this", "that", "it",   "i",    "my", "me",   "we",
     };
     for (size_t i = 0; i < sizeof(stops) / sizeof(stops[0]); i++) {
         size_t slen = strlen(stops[i]);
@@ -154,8 +153,10 @@ static size_t contact_prefix_len(const char *key, size_t key_len) {
 static bool same_contact(const hu_memory_entry_t *a, const hu_memory_entry_t *b) {
     size_t pa = contact_prefix_len(a->key, a->key_len);
     size_t pb = contact_prefix_len(b->key, b->key_len);
-    if (pa == 0 && pb == 0) return true; /* both non-contact */
-    if (pa != pb) return false;
+    if (pa == 0 && pb == 0)
+        return true; /* both non-contact */
+    if (pa != pb)
+        return false;
     return memcmp(a->key, b->key, pa) == 0;
 }
 
@@ -221,52 +222,12 @@ hu_error_t hu_memory_consolidate(hu_allocator_t *alloc, hu_memory_t *memory,
         }
     }
 
-#ifndef HU_IS_TEST
-    if (config->provider && config->provider->vtable &&
-        config->provider->vtable->chat_with_system) {
-        size_t surviving = 0;
-        for (size_t i = 0; i < count; i++)
-            if (!to_forget[i])
-                surviving++;
-
-        if (surviving >= 2) {
-            hu_memory_entry_t *surv = (hu_memory_entry_t *)alloc->alloc(
-                alloc->ctx, surviving * sizeof(hu_memory_entry_t));
-            if (surv) {
-                size_t si = 0;
-                for (size_t i = 0; i < count; i++)
-                    if (!to_forget[i])
-                        surv[si++] = entries[i];
-
-                char *prompt = NULL;
-                size_t prompt_len = 0;
-                if (hu_connections_build_prompt(alloc, surv, surviving, &prompt, &prompt_len) ==
-                        HU_OK &&
-                    prompt) {
-                    char *response = NULL;
-                    size_t response_len = 0;
-                    const char *sys = "Return JSON only.";
-                    hu_error_t chat_err = config->provider->vtable->chat_with_system(
-                        config->provider->ctx, alloc, sys, 17, prompt, prompt_len, config->model,
-                        config->model_len, 0.2, &response, &response_len);
-                    alloc->free(alloc->ctx, prompt, HU_CONN_PROMPT_CAP);
-
-                    if (chat_err == HU_OK && response) {
-                        hu_connection_result_t conn_result = {0};
-                        if (hu_connections_parse(alloc, response, response_len, surviving,
-                                                 &conn_result) == HU_OK) {
-                            (void)hu_connections_store_insights(alloc, memory, &conn_result, surv,
-                                                                surviving);
-                            hu_connection_result_deinit(&conn_result, alloc);
-                        }
-                        alloc->free(alloc->ctx, response, response_len + 1);
-                    }
-                }
-                alloc->free(alloc->ctx, surv, surviving * sizeof(hu_memory_entry_t));
-            }
-        }
-    }
-#endif
+    /* No LLM "connection discovery" pass here. It summarised the most recently
+     * touched rows, which were mostly its own earlier output plus the global
+     * hierarchical reflections, so it wrote ~36 self-referential "insight"
+     * rows a day ("The memory system consistently mirrors user interactions
+     * into tiered hierarchical reflections..."), unscoped to any contact, and
+     * they were 92% of the semantic-recall index. */
 
     for (size_t i = 0; i < count; i++) {
         if (to_forget[i] && entries[i].key) {
@@ -275,7 +236,7 @@ hu_error_t hu_memory_consolidate(hu_allocator_t *alloc, hu_memory_t *memory,
                 memory->vtable->forget(memory->ctx, entries[i].key, entries[i].key_len, &deleted);
             if (ferr != HU_OK)
                 hu_log_error("consolidation", NULL, "forget key '%.*s' failed: %s",
-                        (int)entries[i].key_len, entries[i].key, hu_error_string(ferr));
+                             (int)entries[i].key_len, entries[i].key, hu_error_string(ferr));
         }
     }
 
@@ -344,7 +305,7 @@ hu_error_t hu_memory_consolidate(hu_allocator_t *alloc, hu_memory_t *memory,
             memory->vtable->forget(memory->ctx, entries[i].key, entries[i].key_len, &deleted);
         if (ferr != HU_OK)
             hu_log_error("consolidation", NULL, "evict key '%.*s' failed: %s",
-                    (int)entries[i].key_len, entries[i].key, hu_error_string(ferr));
+                         (int)entries[i].key_len, entries[i].key, hu_error_string(ferr));
         else {
             evicted[i] = true;
             removed++;
