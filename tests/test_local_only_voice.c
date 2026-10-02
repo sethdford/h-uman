@@ -19,11 +19,14 @@
 #include "human/tools/web_search.h"
 #include "human/tts/cartesia.h"
 #include "human/voice.h"
+#include "human/voice/local_stt.h"
+#include "human/voice/local_tts.h"
 #include "human/websocket/websocket.h"
 #include "test_framework.h"
 
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #define GEMINI_LIVE_URL                           \
     "wss://generativelanguage.googleapis.com/ws/" \
@@ -264,6 +267,69 @@ static void web_search_tool_refused(void) {
     lo_clean();
 }
 
+/* voice.local_*_endpoint is trusted by field name only: a LAN or cloud URL
+ * there is still refused under local_only; loopback passes. */
+static void local_stt_tts_endpoints_must_be_local(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_local_stt_config_t lan_stt = {.endpoint = "http://10.0.0.5:9000/transcribe"};
+    hu_local_stt_config_t lo_stt = {.endpoint = "http://127.0.0.1:9000/transcribe"};
+    char *text = NULL;
+    size_t tlen = 0;
+
+    lo_clean(); /* OFF: the LAN endpoint is used */
+    HU_ASSERT_EQ((int)hu_local_stt_transcribe(&alloc, &lan_stt, "/tmp/a.m4a", &text, &tlen),
+                 (int)HU_OK);
+    alloc.free(alloc.ctx, text, tlen + 1);
+
+    lo_live_default();
+    text = NULL;
+    HU_ASSERT_EQ((int)hu_local_stt_transcribe(&alloc, &lan_stt, "/tmp/a.m4a", &text, &tlen),
+                 (int)HU_ERR_PERMISSION_DENIED);
+    HU_ASSERT_NULL(text);
+    HU_ASSERT_EQ((int)hu_local_stt_transcribe(&alloc, &lo_stt, "/tmp/a.m4a", &text, &tlen),
+                 (int)HU_OK);
+    alloc.free(alloc.ctx, text, tlen + 1);
+
+    hu_local_tts_config_t lan_tts = {.endpoint = "https://tts.example.com/v1/synthesize"};
+    hu_local_tts_config_t lo_tts = {.endpoint = "http://localhost:8880/v1/synthesize"};
+    char *path = NULL;
+    HU_ASSERT_EQ((int)hu_local_tts_synthesize(&alloc, &lan_tts, "hey", &path),
+                 (int)HU_ERR_PERMISSION_DENIED);
+    HU_ASSERT_NULL(path);
+    HU_ASSERT_EQ((int)hu_local_tts_synthesize(&alloc, &lo_tts, "hey", &path), (int)HU_OK);
+    HU_ASSERT_NOT_NULL(path);
+    (void)unlink(path);
+    alloc.free(alloc.ctx, path, strlen(path) + 1);
+    HU_ASSERT_EQ(hu_local_only_refused_count(), 2u);
+    lo_clean();
+}
+
+/* A Gemini STT URL too long to check is refused, never waved through. */
+static void gemini_stt_unverifiable_url_fails_closed(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    static char longep[700];
+    memcpy(longep, "https://", 8);
+    memset(longep + 8, 'a', sizeof(longep) - 10);
+    longep[sizeof(longep) - 2] = '/';
+    longep[sizeof(longep) - 1] = '\0';
+    hu_voice_config_t vc = {0};
+    vc.api_key = "test-key";
+    vc.api_key_len = 8;
+    vc.stt_endpoint = longep;
+    char *text = NULL;
+    size_t tlen = 0;
+    lo_clean();
+    HU_ASSERT_EQ((int)hu_voice_stt_gemini(&alloc, &vc, "AAAA", 4, "audio/m4a", &text, &tlen),
+                 (int)HU_OK); /* OFF: unchanged */
+    alloc.free(alloc.ctx, text, tlen + 1);
+    lo_live_default();
+    text = NULL;
+    HU_ASSERT_EQ((int)hu_voice_stt_gemini(&alloc, &vc, "AAAA", 4, "audio/m4a", &text, &tlen),
+                 (int)HU_ERR_PERMISSION_DENIED);
+    HU_ASSERT_NULL(text);
+    lo_clean();
+}
+
 void run_local_only_voice_tests(void) {
     HU_TEST_SUITE("local_only_voice");
     HU_RUN_TEST(voice_service_names_come_from_the_endpoint);
@@ -276,4 +342,6 @@ void run_local_only_voice_tests(void) {
     HU_RUN_TEST(openai_ws_streaming_refused);
     HU_RUN_TEST(audit_sees_ws_and_curl_paths);
     HU_RUN_TEST(web_search_tool_refused);
+    HU_RUN_TEST(local_stt_tts_endpoints_must_be_local);
+    HU_RUN_TEST(gemini_stt_unverifiable_url_fails_closed);
 }

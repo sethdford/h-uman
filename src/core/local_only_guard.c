@@ -289,30 +289,119 @@ bool hu_local_only_voice_service(const char *url, char *out, size_t cap) {
     return n > 0 && (size_t)n < cap;
 }
 
-#define LO_ALLOW_MAX  16
-#define LO_ALLOW_SIZE 48
-static char g_allow[LO_ALLOW_MAX][LO_ALLOW_SIZE];
-static atomic_size_t g_allow_count = 0;
+/* Reloadable policy: the voice allow-list and the provider endpoint
+ * overrides. Published as an immutable snapshot through an atomic pointer,
+ * so a reload never rewrites memory a reader is using. A replaced snapshot
+ * is kept on a retired list (reachable, a few KB per reload) because readers
+ * hold no reference count; hu_local_only_reset frees them (tests only, no
+ * concurrent readers). Writers compare-and-swap, so two concurrent reloads
+ * never lose an update. */
+#define LO_LIST_MAX  16
+#define LO_ITEM_SIZE 256
 
-void hu_local_only_set_allow(const char *const *items, size_t count) {
+typedef struct lo_policy {
+    size_t allow_n, vouched_n, vetoed_n;
+    char allow[LO_LIST_MAX][LO_ITEM_SIZE];
+    char vouched[LO_LIST_MAX][LO_ITEM_SIZE];
+    char vetoed[LO_LIST_MAX][LO_ITEM_SIZE];
+    struct lo_policy *retired_next;
+} lo_policy_t;
+
+static _Atomic(lo_policy_t *) g_policy = NULL;
+static _Atomic(lo_policy_t *) g_retired = NULL;
+
+static size_t copy_list(char dst[LO_LIST_MAX][LO_ITEM_SIZE], const char *const *items,
+                        size_t count) {
     size_t n = 0;
-    for (size_t i = 0; items && i < count && n < LO_ALLOW_MAX; i++) {
-        if (!items[i] || !items[i][0] || strlen(items[i]) >= LO_ALLOW_SIZE)
+    for (size_t i = 0; items && i < count && n < LO_LIST_MAX; i++) {
+        if (!items[i] || !items[i][0] || strlen(items[i]) >= LO_ITEM_SIZE)
             continue;
-        memcpy(g_allow[n], items[i], strlen(items[i]) + 1);
+        memcpy(dst[n], items[i], strlen(items[i]) + 1);
         n++;
     }
-    atomic_store(&g_allow_count, n);
+    return n;
+}
+
+/* Publish a copy of the current snapshot with one half replaced. */
+static void policy_publish(bool set_allow, const char *const *allow, size_t allow_n,
+                           const char *const *vouched, size_t vouched_n, const char *const *vetoed,
+                           size_t vetoed_n) {
+    lo_policy_t *next = (lo_policy_t *)calloc(1, sizeof(*next));
+    if (!next)
+        return; /* keep the previous policy */
+    lo_policy_t *cur = atomic_load(&g_policy);
+    for (;;) {
+        if (cur)
+            memcpy(next, cur, sizeof(*next));
+        else
+            memset(next, 0, sizeof(*next));
+        next->retired_next = NULL;
+        if (set_allow) {
+            next->allow_n = copy_list(next->allow, allow, allow_n);
+        } else {
+            next->vouched_n = copy_list(next->vouched, vouched, vouched_n);
+            next->vetoed_n = copy_list(next->vetoed, vetoed, vetoed_n);
+        }
+        if (atomic_compare_exchange_weak(&g_policy, &cur, next))
+            break; /* cur reloaded on failure */
+    }
+    if (cur) {
+        lo_policy_t *head = atomic_load(&g_retired);
+        do {
+            cur->retired_next = head;
+        } while (!atomic_compare_exchange_weak(&g_retired, &head, cur));
+    }
+}
+
+void hu_local_only_set_allow(const char *const *items, size_t count) {
+    policy_publish(true, items, count, NULL, 0, NULL, 0);
+}
+
+void hu_local_only_set_endpoint_overrides(const char *const *vouched, size_t vouched_count,
+                                          const char *const *vetoed, size_t vetoed_count) {
+    policy_publish(false, NULL, 0, vouched, vouched_count, vetoed, vetoed_count);
 }
 
 bool hu_local_only_service_allowed(const char *service) {
     if (!service || !service[0])
         return false;
-    size_t n = atomic_load(&g_allow_count);
-    for (size_t i = 0; i < n; i++)
-        if (strcasecmp(g_allow[i], service) == 0)
+    const lo_policy_t *p = atomic_load(&g_policy);
+    for (size_t i = 0; p && i < p->allow_n; i++)
+        if (strcasecmp(p->allow[i], service) == 0)
             return true;
     return false;
+}
+
+static const char *after_scheme(const char *u) {
+    const char *p = strstr(u, "://");
+    return p ? p + 3 : u;
+}
+
+/* url starts with base at a path boundary (":4000" never covers ":40001").
+ * The scheme is ignored, so an http base also covers its ws:// socket. */
+static bool url_under_base(const char *url, const char *base) {
+    url = after_scheme(url);
+    base = after_scheme(base);
+    size_t bl = strlen(base);
+    while (bl > 0 && base[bl - 1] == '/')
+        bl--;
+    if (bl == 0 || strncasecmp(url, base, bl) != 0)
+        return false;
+    char c = url[bl];
+    return c == '\0' || c == '/' || c == '?' || c == '#';
+}
+
+bool hu_local_only_request_url_is_local(const char *url) {
+    if (!url || !url[0])
+        return false;
+    const lo_policy_t *p = atomic_load(&g_policy);
+    for (size_t i = 0; p && i < p->vetoed_n; i++)
+        if (url_under_base(url, p->vetoed[i]))
+            return false;
+    for (size_t i = 0; p && i < p->vouched_n; i++)
+        if (url_under_base(url, p->vouched[i]))
+            return true;
+    return hu_provider_endpoint_is_local(url, strlen(url));
 }
 
 /* ── Mode ──────────────────────────────────────────────────────────────── */
@@ -355,7 +444,14 @@ void hu_local_only_reset(void) {
     atomic_store(&g_configured, -1);
     atomic_store(&g_refused, 0);
     atomic_store(&g_audited, 0);
-    atomic_store(&g_allow_count, 0);
+    lo_policy_t *p = atomic_exchange(&g_policy, (lo_policy_t *)NULL);
+    free(p);
+    lo_policy_t *r = atomic_exchange(&g_retired, (lo_policy_t *)NULL);
+    while (r) {
+        lo_policy_t *nx = r->retired_next;
+        free(r);
+        r = nx;
+    }
 }
 
 static void copy_ident(char *out, size_t cap, const char *s, size_t n);
@@ -389,6 +485,10 @@ const char *hu_local_only_set_caller(const char *tag) {
     const char *prev = t_caller;
     t_caller = tag;
     return prev;
+}
+
+const char *hu_local_only_current_caller(void) {
+    return t_caller;
 }
 
 const char *hu_local_only_enter(const char *tag) {
@@ -479,7 +579,7 @@ hu_error_t hu_local_only_check_request(const char *url, const char *body, size_t
     bool voice = !model_req && hu_local_only_voice_service(url, svc, sizeof(svc));
     if (!model_req && !voice)
         return HU_OK; /* feeds, channel APIs, OAuth */
-    bool local = hu_provider_endpoint_is_local(url, strlen(url));
+    bool local = hu_local_only_request_url_is_local(url);
     if (voice)
         return (local || hu_local_only_service_allowed(svc)) ? HU_OK : lo_refuse(mode, url, svc);
     char model[64];
@@ -491,18 +591,24 @@ hu_error_t hu_local_only_check_request(const char *url, const char *body, size_t
     return lo_refuse(mode, url, model);
 }
 
-hu_error_t hu_local_only_check_ws(const char *url) {
+hu_error_t hu_local_only_check_endpoint(const char *url) {
     hu_gate_mode_t mode = hu_local_only_mode();
-    if (mode == HU_GATE_OFF || !url)
+    if (mode == HU_GATE_OFF)
         return HU_OK;
-    if (hu_provider_endpoint_is_local(url, strlen(url)))
+    if (!url || !url[0])
+        return lo_refuse(mode, url, "endpoint");
+    if (hu_local_only_request_url_is_local(url))
         return HU_OK;
     char svc[64];
     svc[0] = '\0';
     bool voice = hu_local_only_voice_service(url, svc, sizeof(svc));
     if (voice && hu_local_only_service_allowed(svc))
         return HU_OK;
-    return lo_refuse(mode, url, voice ? svc : "websocket");
+    return lo_refuse(mode, url, voice ? svc : "endpoint");
+}
+
+hu_error_t hu_local_only_check_ws(const char *url) {
+    return hu_local_only_check_endpoint(url);
 }
 
 hu_error_t hu_local_only_check_service(const char *service, const char *url) {

@@ -129,6 +129,25 @@ hu_error_t hu_local_only_check_request(const char *url, const char *body, size_t
  * Realtime, OpenAI ws_streaming chat). */
 hu_error_t hu_local_only_check_ws(const char *url);
 
+/* The same strict rule for any endpoint configured as "local" by field name
+ * (voice.local_stt_endpoint / local_tts_endpoint): a non-local URL is
+ * refused unless it is an allowed voice service. */
+hu_error_t hu_local_only_check_endpoint(const char *url);
+
+/* Provider-level overrides, registered at apply time (providers[].local and
+ * the cloud-gateway list), consulted by every per-request check. A request
+ * whose URL starts with a VETOED base (a gateway, or providers[].local=false)
+ * is never local, even on loopback; one under a VOUCHED base
+ * (providers[].local=true) is local, even on a LAN address. Vetoed wins.
+ * Copied; at most 16 of each, 255 bytes each. */
+void hu_local_only_set_endpoint_overrides(const char *const *vouched, size_t vouched_count,
+                                          const char *const *vetoed, size_t vetoed_count);
+/* hu_provider_endpoint_is_local with the registered overrides applied. */
+bool hu_local_only_request_url_is_local(const char *url);
+
+/* The caller tag set on this thread (NULL when none). */
+const char *hu_local_only_current_caller(void);
+
 /* Explicit service gate for a content path that is not an endpoint shape
  * (e.g. "tool:web_search"). Refused unless allowed; logs and counts like the
  * backstop. `url` may be NULL. */

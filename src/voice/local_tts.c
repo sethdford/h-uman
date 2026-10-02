@@ -8,6 +8,7 @@
 #endif
 #include "human/voice/local_tts.h"
 #include "human/core/json.h"
+#include "human/core/local_only_guard.h"
 #include "human/core/process_util.h"
 #include "human/core/string.h"
 #include "human/platform.h"
@@ -82,6 +83,9 @@ hu_error_t hu_local_tts_synthesize(hu_allocator_t *alloc, const hu_local_tts_con
     *out_path = NULL;
     if (!text || !text[0])
         return HU_ERR_INVALID_ARGUMENT;
+    /* local_only: "local" is a field name, not a fact; the endpoint must be. */
+    if (hu_local_only_check_endpoint(config->endpoint) != HU_OK)
+        return HU_ERR_PERMISSION_DENIED;
 
 #if HU_IS_TEST
     char tmpl[] = "/tmp/hu_lttsXXXXXX";

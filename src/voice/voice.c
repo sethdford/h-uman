@@ -675,11 +675,12 @@ hu_error_t hu_voice_stt_gemini(hu_allocator_t *alloc, const hu_voice_config_t *c
                              : HU_VOICE_GEMINI_DEFAULT_ENDPOINT;
         char check_url[512];
         int cn = snprintf(check_url, sizeof(check_url), "%s%s:generateContent", gb, gm);
-        if (cn > 0 && (size_t)cn < sizeof(check_url)) {
-            hu_error_t lo = hu_local_only_check_request(check_url, NULL, 0);
-            if (lo != HU_OK)
-                return lo;
-        }
+        /* A URL too long to check is refused, never waved through. */
+        hu_error_t lo = (cn > 0 && (size_t)cn < sizeof(check_url))
+                            ? hu_local_only_check_request(check_url, NULL, 0)
+                            : hu_local_only_check_service("model:unverifiable-url", NULL);
+        if (lo != HU_OK)
+            return lo;
     }
 
 #if HU_IS_TEST

@@ -40,6 +40,11 @@ static atomic_bool g_warned_enabled = false;
 /* Guard for DND-gate diagnostic: alert when no config but gate fires */
 static atomic_bool g_warned_no_dnd_config = false;
 
+static const char *g_last_llm_caller = NULL;
+const char *hu_init_proposer_last_llm_caller_for_test(void) {
+    return g_last_llm_caller;
+}
+
 void hu_init_proposer_reset_warn_guards_for_test(void) {
 #if HU_IS_TEST
     atomic_store(&g_warned_disabled, false);
@@ -796,7 +801,7 @@ hu_init_proposer_result_t hu_init_proposer_evaluate_decision(const hu_init_decis
     return HU_INIT_RESULT_FIRED;
 }
 
-hu_error_t hu_init_proposer_tick_with_provider(
+static hu_error_t init_proposer_tick_run(
     const struct hu_initiative_config *cfg, const struct hu_autoresponder_config *ar_cfg,
     int32_t tz_offset_seconds, struct hu_proactive_budget *budget, const struct hu_agent *agent,
     struct hu_provider *provider, hu_allocator_t *alloc, int64_t last_inbound_unix,
@@ -850,6 +855,7 @@ hu_error_t hu_init_proposer_tick_with_provider(
     static char user_msg[16384];
     hu_init_proposer_build_propose_prompt(&bundle, sys_prompt, sizeof(sys_prompt), user_msg,
                                           sizeof(user_msg));
+    g_last_llm_caller = hu_local_only_current_caller(); /* the tag this request carries */
 
 #if HU_IS_TEST
     /* Test builds: never make a real network call. Return SKIP so unit
@@ -921,6 +927,22 @@ hu_error_t hu_init_proposer_tick_with_provider(
         memcpy(out_decision, &decision, sizeof(decision));
     return HU_OK;
 #endif
+}
+
+/* Tags the owner-initiative propose-model request "initiative" for local_only
+ * (the daemon calls this entry point directly; the _ex one tags "proactive"). */
+hu_error_t hu_init_proposer_tick_with_provider(
+    const struct hu_initiative_config *cfg, const struct hu_autoresponder_config *ar_cfg,
+    int32_t tz_offset_seconds, struct hu_proactive_budget *budget, const struct hu_agent *agent,
+    struct hu_provider *provider, hu_allocator_t *alloc, int64_t last_inbound_unix,
+    int64_t now_unix, int64_t *last_tick_unix_inout, uint64_t *tick_id_inout,
+    hu_init_proposer_result_t *out_result, hu_init_decision_t *out_decision) {
+    const char *lo_prev = hu_local_only_enter("initiative"); /* keeps an outer "proactive" */
+    hu_error_t err = init_proposer_tick_run(
+        cfg, ar_cfg, tz_offset_seconds, budget, agent, provider, alloc, last_inbound_unix, now_unix,
+        last_tick_unix_inout, tick_id_inout, out_result, out_decision);
+    (void)hu_local_only_set_caller(lo_prev);
+    return err;
 }
 
 /* ──────────────────────────────────────────────────────────────────────────

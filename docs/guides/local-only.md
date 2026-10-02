@@ -35,6 +35,21 @@ in-process model path, or an in-process backend with no URL (`embedded`,
 `providers[].local` (`true`/`false`) overrides the endpoint rule for one
 provider.
 
+These provider-level rules apply to every request, not only to choosing the
+default mode. At startup and on reload, each provider whose verdict differs
+from what its URL alone says has its base URL registered with the backstop:
+
+- `local: true` on a LAN or remote URL is **vouched**. Requests under that
+  base are allowed, so the install is not bricked.
+- A cloud gateway, or `local: false`, on a loopback URL is **vetoed**.
+  Requests under that base are refused even on `127.0.0.1`, whatever the
+  model alias.
+
+Matching is a path-boundary prefix match that ignores the scheme: `:4000`
+never covers `:40001`, and an `http://` base also covers its `ws://` socket.
+The policy (allow-list and overrides) is published as an immutable snapshot
+through an atomic pointer, so a reload never races a reader.
+
 ## What enforce changes
 
 | Route | Before | Enforce |
@@ -71,6 +86,11 @@ The same check runs outside `http.c`:
   OpenAI Realtime and the OpenAI `ws_streaming` chat path.
 - **Spawned-curl voice paths** (`voice.c`, `cartesia.c`): checked before the
   process is spawned.
+- **`voice.local_stt_endpoint` / `local_tts_endpoint`** (`local_stt.c`,
+  `local_tts.c`): "local" is a field name, not a fact. A non-loopback URL
+  there is refused unless it is an allowed voice service or a vouched base.
+- **Gemini transcription:** a URL too long to check is refused, not waved
+  through.
 - **`web_search` tool:** the query is written from the conversation, so it is
   content and is refused unless `tool:web_search` is on the allow-list.
   `web_fetch` (a URL the model chose) is not gated.
@@ -112,7 +132,8 @@ including Cartesia.
 ## Caller tags
 
 Refusal and audit lines carry `caller=<tag>`. The tags are `director`,
-`agent_turn`, `proactive`, `tools`, `voice`, `inbound_media` and `embedder`.
+`agent_turn`, `proactive`, `initiative` (the owner-initiative propose model),
+`tools`, `voice`, `inbound_media` and `embedder`.
 Anything else shows `unknown`.
 
 ## Out of scope

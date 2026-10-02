@@ -71,10 +71,34 @@ hu_gate_mode_t hu_config_local_only_mode(const hu_config_t *cfg) {
                                  hu_config_primary_is_local(cfg));
 }
 
+/* Register, for the per-request backstop, every provider whose provider-level
+ * verdict differs from what its URL alone says: providers[].local=true on a
+ * non-loopback URL (vouched) and cloud-forwarding gateways or
+ * providers[].local=false on a loopback URL (vetoed). */
+static void apply_endpoint_overrides(const hu_config_t *cfg) {
+    const char *vouched[16], *vetoed[16];
+    size_t nv = 0, nx = 0;
+    for (size_t i = 0; cfg && i < cfg->providers_len; i++) {
+        const hu_provider_entry_t *p = &cfg->providers[i];
+        const char *url =
+            p->base_url && p->base_url[0] ? p->base_url : hu_compatible_provider_url(p->name);
+        if (!url || !url[0])
+            continue;
+        bool by_url = hu_provider_endpoint_is_local(url, strlen(url));
+        bool by_rule = hu_local_only_provider_endpoint_is_local(p->name, url, p->local_override);
+        if (by_rule && !by_url && nv < 16)
+            vouched[nv++] = url;
+        else if (!by_rule && by_url && nx < 16)
+            vetoed[nx++] = url;
+    }
+    hu_local_only_set_endpoint_overrides(vouched, nv, vetoed, nx);
+}
+
 hu_gate_mode_t hu_config_apply_local_only(const hu_config_t *cfg) {
     hu_gate_mode_t mode = hu_config_local_only_mode(cfg);
     hu_local_only_configure(mode);
     apply_allow_list(cfg);
+    apply_endpoint_overrides(cfg);
     const char *why = hu_local_only_env_parse(getenv("HU_LOCAL_ONLY")) >= 0 ? "HU_LOCAL_ONLY env"
                       : (cfg && cfg->privacy.local_only_set)
                           ? "privacy.local_only"

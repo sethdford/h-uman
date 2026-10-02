@@ -297,6 +297,42 @@ static void unknown_env_value_enforces(void) {
     lo_clean();
 }
 
+/* Per-request overrides: a vouched LAN base is local, a vetoed loopback
+ * gateway is not, and prefix matching respects the port boundary. */
+static void request_overrides_vouched_and_vetoed(void) {
+    lo_clean();
+    hu_local_only_configure(HU_GATE_LIVE);
+    const char glm[] = "{\"model\":\"GLM-4.5-Air-4bit\"}";
+    const char alias[] = "{\"model\":\"house-model\"}";
+    /* Before registering: LAN refused, loopback gateway allowed. */
+    HU_ASSERT_EQ((int)hu_local_only_check_request("http://10.0.0.5:8741/v1/chat/completions", glm,
+                                                  sizeof(glm) - 1),
+                 (int)HU_ERR_PERMISSION_DENIED);
+    HU_ASSERT_EQ((int)hu_local_only_check_request("http://127.0.0.1:4000/v1/chat/completions",
+                                                  alias, sizeof(alias) - 1),
+                 (int)HU_OK);
+    static const char *const vouched[] = {"http://10.0.0.5:8741/v1"};
+    static const char *const vetoed[] = {"http://127.0.0.1:4000"};
+    hu_local_only_set_endpoint_overrides(vouched, 1, vetoed, 1);
+    HU_ASSERT_EQ((int)hu_local_only_check_request("http://10.0.0.5:8741/v1/chat/completions", glm,
+                                                  sizeof(glm) - 1),
+                 (int)HU_OK);
+    HU_ASSERT_EQ((int)hu_local_only_check_request("http://127.0.0.1:4000/v1/chat/completions",
+                                                  alias, sizeof(alias) - 1),
+                 (int)HU_ERR_PERMISSION_DENIED);
+    /* Port boundary: :40001 is not under :4000. */
+    HU_ASSERT_TRUE(hu_local_only_request_url_is_local("http://127.0.0.1:40001/v1"));
+    HU_ASSERT_FALSE(hu_local_only_request_url_is_local("http://127.0.0.1:4000/v1"));
+    /* The websocket path honours the same overrides. */
+    hu_local_only_set_allow(NULL, 0);
+    HU_ASSERT_EQ((int)hu_local_only_check_ws("ws://10.0.0.5:8741/v1/realtime"), (int)HU_OK);
+    HU_ASSERT_EQ((int)hu_local_only_check_ws("ws://127.0.0.1:4000/ws"),
+                 (int)HU_ERR_PERMISSION_DENIED);
+    lo_clean();
+    /* reset clears the registrations */
+    HU_ASSERT_FALSE(hu_local_only_request_url_is_local("http://10.0.0.5:8741/v1"));
+}
+
 void run_local_only_guard_tests(void) {
     HU_TEST_SUITE("local_only_guard");
     HU_RUN_TEST(endpoint_loopback_and_unix_socket_are_local);
@@ -314,4 +350,5 @@ void run_local_only_guard_tests(void) {
     HU_RUN_TEST(provider_level_locality);
     HU_RUN_TEST(live_refuses_cloud_model_on_loopback);
     HU_RUN_TEST(unknown_env_value_enforces);
+    HU_RUN_TEST(request_overrides_vouched_and_vetoed);
 }

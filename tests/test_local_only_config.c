@@ -192,6 +192,34 @@ static void allow_list_parse_and_default(void) {
     lo_clean();
 }
 
+/* apply registers the provider overrides with the per-request backstop. */
+static void apply_registers_overrides_for_the_backstop(void) {
+    lo_clean();
+    /* local:true on a LAN box: enforce resolves ON and requests to it pass,
+     * so the install is not bricked. */
+    hu_config_t *lan = lo_cfg("{" PROD_SHAPE_NO_PROVIDERS ",\"providers\":[{\"name\":\"mlx_local\","
+                              "\"base_url\":\"http://10.0.0.5:8741/v1\",\"local\":true}]}");
+    HU_ASSERT_EQ((int)hu_config_apply_local_only(lan), (int)HU_GATE_LIVE);
+    const char glm[] = "{\"model\":\"GLM-4.5-Air-4bit\"}";
+    HU_ASSERT_EQ((int)hu_local_only_check_request("http://10.0.0.5:8741/v1/chat/completions", glm,
+                                                  sizeof(glm) - 1),
+                 (int)HU_OK);
+    lo_cfg_free(lan);
+    lo_clean();
+    /* A loopback litellm gateway under explicit enforce: a non-cloud alias
+     * is still refused (the gateway forwards to the cloud). */
+    hu_config_t *gw = lo_cfg("{\"default_provider\":\"litellm\",\"privacy\":{\"local_only\":true},"
+                             "\"providers\":[{\"name\":\"litellm\",\"base_url\":"
+                             "\"http://127.0.0.1:4000\"}]}");
+    HU_ASSERT_EQ((int)hu_config_apply_local_only(gw), (int)HU_GATE_LIVE);
+    const char alias[] = "{\"model\":\"house-model\"}";
+    HU_ASSERT_EQ((int)hu_local_only_check_request("http://127.0.0.1:4000/v1/chat/completions",
+                                                  alias, sizeof(alias) - 1),
+                 (int)HU_ERR_PERMISSION_DENIED);
+    lo_cfg_free(gw);
+    lo_clean();
+}
+
 void run_local_only_config_tests(void) {
     HU_TEST_SUITE("local_only_config");
     HU_RUN_TEST(parse_absent_key_is_unset);
@@ -202,4 +230,5 @@ void run_local_only_config_tests(void) {
     HU_RUN_TEST(apply_sets_the_process_mode);
     HU_RUN_TEST(providers_local_override_and_in_process_names);
     HU_RUN_TEST(allow_list_parse_and_default);
+    HU_RUN_TEST(apply_registers_overrides_for_the_backstop);
 }
