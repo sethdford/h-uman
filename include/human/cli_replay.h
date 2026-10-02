@@ -43,6 +43,11 @@ typedef struct hu_cli_replay_args {
 bool hu_cli_replay_parse(int argc, char **argv, hu_cli_replay_args_t *out, char *why,
                          size_t why_cap);
 
+/* --provider allowlist: local OpenAI-compatible servers only (mlx_local,
+ * mlx-local, mlx_http, mlx-http, compatible, llamacpp, lmstudio, ollama).
+ * The endpoint is still loopback-checked separately. */
+bool hu_cli_replay_provider_allowed(const char *name);
+
 /* True when the environment isolates this process from the live state:
  * HU_STATE_DIR names an existing directory that is not $HOME/.human, and
  * HU_MEMORY_SQLITE_PATH names an existing file outside $HOME/.human. False

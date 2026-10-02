@@ -3490,9 +3490,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             hu_imessage_caps_cached(alloc)->advanced, msgs[batch_start].is_group,
                             share_saved_waiting(batch_key, key_len));
                     if (g_classify_provider_ok) {
-                        director_result_valid = hu_daemon_director_call(
-                            alloc, combined, combined_len, early_history, early_history_count,
-                            situation, &director_result);
+                        director_result_valid = hu_daemon_director_decide(
+                            alloc, agent, ch->channel, batch_key, key_len, combined, combined_len,
+                            early_history, early_history_count, situation, &director_result);
                     }
                     if (forms_on && director_result_valid) {
                         const hu_contact_profile_t *fcp =
@@ -5265,42 +5265,12 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 }
 #endif
 
-                /* 4. Response constraints via channel vtable */
-                uint32_t max_chars = 0;
+                /* 4. Response budget: channel cap, F15 relational ratio, brief-mode cap
+                 * (daemon/reactive_calibration.h; the replay harness calls it too). */
                 bool voice_first_memo = false; /* spec 2026-09-28 */
-                if (ch->channel->vtable->get_response_constraints) {
-                    hu_channel_response_constraints_t constraints = {0};
-                    if (ch->channel->vtable->get_response_constraints(ch->channel->ctx,
-                                                                      &constraints) == HU_OK) {
-                        max_chars = constraints.max_chars;
-                    }
-                }
-
-                /* F15: Apply ratio-based length calibration */
-                {
-                    const hu_contact_profile_t *cp_lim =
-                        (!msgs[batch_start].is_group && agent->persona && batch_key && key_len > 0)
-                            ? hu_persona_find_contact(agent->persona, batch_key, key_len)
-                            : NULL;
-                    int calibrated = msgs[batch_start].is_group
-                                         ? hu_conversation_max_response_chars(combined_len)
-                                         : hu_conversation_max_response_chars_relational(
-                                               combined_len, cp_lim, agent->relationship.stage);
-                    if (calibrated > 0 && (max_chars == 0 || (uint32_t)calibrated < max_chars))
-                        max_chars = (uint32_t)calibrated;
-                }
-
-                /* Brief mode: cap length (tight in groups; headroom for trusted 1:1). */
-                if (brief_mode) {
-                    const hu_contact_profile_t *cp_brief =
-                        (!msgs[batch_start].is_group && agent->persona && batch_key && key_len > 0)
-                            ? hu_persona_find_contact(agent->persona, batch_key, key_len)
-                            : NULL;
-                    uint32_t brief_cap = hu_conversation_brief_char_cap(
-                        msgs[batch_start].is_group, cp_brief, agent->relationship.stage);
-                    if (max_chars > brief_cap)
-                        max_chars = brief_cap;
-                }
+                uint32_t max_chars =
+                    hu_daemon_reply_budget(agent, ch->channel, batch_key, key_len, combined_len,
+                                           msgs[batch_start].is_group, brief_mode);
 
                 /* Honesty guardrail: inject if they asked "did you do X?" */
                 {
@@ -8623,19 +8593,12 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 delay_secs, recv_hr, curr_hr, (uint32_t)now_ts, batch_key, key_len,
                                 now_ts);
                             if (ack) {
-                                size_t ack_len = strlen(ack);
-                                if (response_len <= SIZE_MAX - ack_len &&
-                                    ack_len + response_len <= SIZE_MAX - 3) {
-                                    send_buf_ack = (char *)alloc->alloc(
-                                        alloc->ctx, ack_len + 2 + response_len + 1);
-                                }
+                                size_t joined_len = 0;
+                                send_buf_ack = hu_daemon_join_ack(alloc, ack, response,
+                                                                  response_len, &joined_len);
                                 if (send_buf_ack) {
-                                    memcpy(send_buf_ack, ack, ack_len);
-                                    send_buf_ack[ack_len] = '\n';
-                                    send_buf_ack[ack_len + 1] = '\n';
-                                    memcpy(send_buf_ack + ack_len + 2, response, response_len + 1);
                                     send_ptr = send_buf_ack;
-                                    send_len = ack_len + 2 + response_len;
+                                    send_len = joined_len;
                                 }
                             }
                         }

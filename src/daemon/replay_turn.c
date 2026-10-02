@@ -87,27 +87,6 @@ static void replay_ctx_prepend(hu_allocator_t *alloc, char **ctx, size_t *ctx_le
     *ctx_len = total;
 }
 
-/* The daemon's reply budget for a 1:1 turn: the channel cap, lowered to the
- * relational limit, and to the brief cap for a media message (daemon.c F15
- * and brief mode). */
-static uint32_t replay_max_chars(const hu_agent_t *agent, const hu_replay_channel_t *rc,
-                                 const char *key, size_t key_len, const char *combined,
-                                 size_t combined_len) {
-    const hu_contact_profile_t *cp =
-        agent->persona ? hu_persona_find_contact(agent->persona, key, key_len) : NULL;
-    uint32_t max_chars = rc->max_chars;
-    int rel =
-        hu_conversation_max_response_chars_relational(combined_len, cp, agent->relationship.stage);
-    if (rel > 0 && (max_chars == 0 || (uint32_t)rel < max_chars))
-        max_chars = (uint32_t)rel;
-    if (hu_conversation_is_media_message(combined, combined_len, NULL, 0)) {
-        uint32_t brief = hu_conversation_brief_char_cap(false, cp, agent->relationship.stage);
-        if (max_chars > brief)
-            max_chars = brief;
-    }
-    return max_chars;
-}
-
 static void replay_noop_stream_cb(const hu_agent_stream_event_t *event, void *ctx) {
     (void)event, (void)ctx;
 }
@@ -299,7 +278,7 @@ static hu_error_t replay_agent_turn(hu_allocator_t *alloc, hu_agent_t *agent, co
 
 /* Director: the call, the unknown-event guard, then the daemon's
  * silence/tapback routing. Returns true when no text turn should run. */
-static bool replay_director(hu_allocator_t *alloc, hu_agent_t *agent,
+static bool replay_director(hu_allocator_t *alloc, hu_agent_t *agent, hu_channel_t *ch,
                             const hu_replay_turn_input_t *in, const char *combined,
                             size_t combined_len, hu_director_result_t *dr,
                             hu_replay_turn_result_t *out) {
@@ -310,8 +289,9 @@ static bool replay_director(hu_allocator_t *alloc, hu_agent_t *agent,
             situation, sizeof(situation),
             hu_daemon_voice_first_available(agent, in->contact_id, key_len, false), true, false,
             false);
-    out->director_valid = hu_daemon_director_call(alloc, combined, combined_len, in->history,
-                                                  in->history_count, situation, dr);
+    out->director_valid =
+        hu_daemon_director_decide(alloc, agent, ch, in->contact_id, key_len, combined, combined_len,
+                                  in->history, in->history_count, situation, dr);
     if (!out->director_valid)
         return false;
     hu_expressive_unknown_event_guard(dr, combined, combined_len, in->history, in->history_count);
@@ -370,7 +350,7 @@ hu_error_t hu_replay_turn_run(hu_allocator_t *alloc, hu_agent_t *agent, const hu
     memset(&rt, 0, sizeof(rt));
     char *convo = NULL;
     size_t convo_len = 0;
-    if (in->director && replay_director(alloc, agent, in, combined, combined_len, &dr, out))
+    if (in->director && replay_director(alloc, agent, &ch, in, combined, combined_len, &dr, out))
         goto done;
     out->action = HU_REPLAY_ACTION_TEXT;
 
@@ -414,7 +394,10 @@ hu_error_t hu_replay_turn_run(hu_allocator_t *alloc, hu_agent_t *agent, const hu
         convo_len = REPLAY_CONVO_CAP;
     }
 
-    uint32_t max_chars = replay_max_chars(agent, &rc, key, key_len, combined, combined_len);
+    /* Media messages force brief mode (daemon.c media awareness). */
+    uint32_t max_chars =
+        hu_daemon_reply_budget(agent, &ch, key, key_len, combined_len, false,
+                               hu_conversation_is_media_message(combined, combined_len, NULL, 0));
     if (!crisis) {
         hu_daemon_voice_first_t vf;
         hu_daemon_voice_first_prepare(alloc, agent, key, key_len, false, false, combined,

@@ -4,6 +4,7 @@
 #include "human/daemon/reactive_calibration.h"
 
 #include "human/agent.h"
+#include "human/channel.h"
 #include "human/context/conversation.h"
 #include "human/persona.h"
 #include <string.h>
@@ -45,4 +46,32 @@ void hu_daemon_append_length_calibration(hu_allocator_t *alloc, hu_agent_t *agen
     alloc->free(alloc->ctx, *convo_ctx, old_len + 1);
     *convo_ctx = merged;
     *convo_ctx_len = total;
+}
+
+uint32_t hu_daemon_reply_budget(const hu_agent_t *agent, hu_channel_t *ch, const char *key,
+                                size_t key_len, size_t combined_len, bool is_group,
+                                bool brief_mode) {
+    if (!agent)
+        return 0;
+    uint32_t max_chars = 0;
+    if (ch && ch->vtable && ch->vtable->get_response_constraints) {
+        hu_channel_response_constraints_t constraints = {0};
+        if (ch->vtable->get_response_constraints(ch->ctx, &constraints) == HU_OK)
+            max_chars = constraints.max_chars;
+    }
+    const hu_contact_profile_t *cp = (!is_group && agent->persona && key && key_len > 0)
+                                         ? hu_persona_find_contact(agent->persona, key, key_len)
+                                         : NULL;
+    int calibrated = is_group ? hu_conversation_max_response_chars(combined_len)
+                              : hu_conversation_max_response_chars_relational(
+                                    combined_len, cp, agent->relationship.stage);
+    if (calibrated > 0 && (max_chars == 0 || (uint32_t)calibrated < max_chars))
+        max_chars = (uint32_t)calibrated;
+    if (brief_mode) {
+        uint32_t brief_cap =
+            hu_conversation_brief_char_cap(is_group, cp, agent->relationship.stage);
+        if (max_chars > brief_cap)
+            max_chars = brief_cap;
+    }
+    return max_chars;
 }

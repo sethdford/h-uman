@@ -7,6 +7,7 @@
 #include "human/daemon/outbound_sanitize.h"
 
 #include "human/core/log.h"
+#include <stdint.h>
 #include <string.h>
 
 /* Strip invalid UTF-8 and surrogate-encoded garbage.
@@ -108,4 +109,27 @@ void hu_daemon_outbound_sanitize(char *response, size_t *response_len, size_t ca
     strip_invalid_utf8(response, response_len);
     if (llm_decides)
         strip_meta_reasoning(response, response_len, cap, observer);
+}
+
+char *hu_daemon_join_ack(hu_allocator_t *alloc, const char *ack, const char *reply,
+                         size_t reply_len, size_t *out_len) {
+    if (!alloc || !ack || !out_len || (!reply && reply_len > 0))
+        return NULL;
+    size_t ack_len = strlen(ack);
+    size_t sep = reply_len > 0 ? 2 : 0;
+    if (reply_len > SIZE_MAX - ack_len - sep - 1)
+        return NULL;
+    size_t total = ack_len + sep + reply_len;
+    char *buf = (char *)alloc->alloc(alloc->ctx, total + 1);
+    if (!buf)
+        return NULL;
+    memcpy(buf, ack, ack_len);
+    if (sep) {
+        buf[ack_len] = '\n';
+        buf[ack_len + 1] = '\n';
+        memcpy(buf + ack_len + 2, reply, reply_len);
+    }
+    buf[total] = '\0';
+    *out_len = total;
+    return buf;
 }

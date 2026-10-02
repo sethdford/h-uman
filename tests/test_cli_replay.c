@@ -29,6 +29,20 @@ static void cli_replay_parse_requires_in_and_out(void) {
     HU_ASSERT_EQ(a.delay_ms, 2000);
 }
 
+static void cli_replay_provider_allowlist_is_local_only(void) {
+    HU_ASSERT_TRUE(hu_cli_replay_provider_allowed("mlx_local"));
+    HU_ASSERT_TRUE(hu_cli_replay_provider_allowed("ollama"));
+    HU_ASSERT_FALSE(hu_cli_replay_provider_allowed("gemini"));
+    HU_ASSERT_FALSE(hu_cli_replay_provider_allowed("openai"));
+    HU_ASSERT_FALSE(hu_cli_replay_provider_allowed("anthropic"));
+    HU_ASSERT_FALSE(hu_cli_replay_provider_allowed(NULL));
+    hu_cli_replay_args_t a;
+    char why[128];
+    char *argv[] = {"human", "replay", "--in", "t", "--out", "o", "--provider", "gemini"};
+    HU_ASSERT_FALSE(hu_cli_replay_parse(8, argv, &a, why, sizeof(why)));
+    HU_ASSERT_STR_CONTAINS(why, "provider");
+}
+
 typedef struct env_save {
     char home[1024], state[1024], mem[1024];
     bool had_home, had_state, had_mem;
@@ -158,6 +172,7 @@ static void cli_replay_result_row_has_bubbles_and_no_contact(void) {
 void run_cli_replay_tests(void) {
     HU_TEST_SUITE("cli_replay");
     HU_RUN_TEST(cli_replay_parse_requires_in_and_out);
+    HU_RUN_TEST(cli_replay_provider_allowlist_is_local_only);
     HU_RUN_TEST(cli_replay_isolation_refuses_the_live_state);
     HU_RUN_TEST(cli_replay_parse_turn_joins_bubbles_and_history);
     HU_RUN_TEST(cli_replay_result_row_has_bubbles_and_no_contact);

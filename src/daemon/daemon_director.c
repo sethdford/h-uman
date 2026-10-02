@@ -426,6 +426,19 @@ bool hu_daemon_director_call(hu_allocator_t *alloc, const char *combined, size_t
 #endif
 }
 
+bool hu_daemon_director_decide(hu_allocator_t *alloc, hu_agent_t *agent, hu_channel_t *ch,
+                               const char *key, size_t key_len, const char *combined,
+                               size_t combined_len, const hu_channel_history_entry_t *entries,
+                               size_t entry_count, const char *situation,
+                               hu_director_result_t *result) {
+    (void)agent;
+    (void)ch;
+    (void)key;
+    (void)key_len;
+    return hu_daemon_director_call(alloc, combined, combined_len, entries, entry_count, situation,
+                                   result);
+}
+
 bool hu_daemon_director_silence_overridden(const char *msg, size_t msg_len) {
     if (!msg || msg_len == 0)
         return false;

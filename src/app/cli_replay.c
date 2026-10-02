@@ -42,6 +42,16 @@ static bool replay_why(char *why, size_t cap, const char *msg) {
     return false;
 }
 
+bool hu_cli_replay_provider_allowed(const char *name) {
+    static const char *const k_local[] = {"mlx_local",  "mlx-local", "mlx_http", "mlx-http",
+                                          "compatible", "llamacpp",  "lmstudio", "ollama"};
+    for (size_t i = 0; name && i < sizeof(k_local) / sizeof(k_local[0]); i++) {
+        if (strcmp(name, k_local[i]) == 0)
+            return true;
+    }
+    return false;
+}
+
 bool hu_cli_replay_parse(int argc, char **argv, hu_cli_replay_args_t *out, char *why,
                          size_t why_cap) {
     if (!out)
@@ -96,6 +106,8 @@ bool hu_cli_replay_parse(int argc, char **argv, hu_cli_replay_args_t *out, char 
     }
     if (!out->in_path || !out->out_path)
         return replay_why(why, why_cap, "--in and --out are required");
+    if (!hu_cli_replay_provider_allowed(out->provider))
+        return replay_why(why, why_cap, "--provider must be a local OpenAI-compatible provider");
     return true;
 }
 

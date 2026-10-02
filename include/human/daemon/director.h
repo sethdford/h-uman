@@ -129,6 +129,17 @@ void hu_daemon_director_end_turn(hu_agent_t *agent);
  * `key`/`key_len` is the batch session key. */
 void hu_daemon_director_contact_boundary(hu_agent_t *agent, const char *key, size_t key_len);
 
+/* The reactive path's director decision — the one seam both hu_service_run
+ * and the replay harness call, so a new director (HU_DIRECTOR_V2, PR #590)
+ * hooks HERE and the harness measures it. Today: hu_daemon_director_call;
+ * agent/channel/key are for directors that use per-contact or learned data.
+ * Returns true when `result` is valid. */
+bool hu_daemon_director_decide(hu_allocator_t *alloc, hu_agent_t *agent, hu_channel_t *ch,
+                               const char *key, size_t key_len, const char *combined,
+                               size_t combined_len, const hu_channel_history_entry_t *entries,
+                               size_t entry_count, const char *situation,
+                               hu_director_result_t *result);
+
 /* A director SILENCE is overridden to a text reply when the message asks a
  * question or is a short (< 30 bytes) greeting. `msg` must be NUL-terminated
  * (the greeting check is strstr). Shared by the daemon and the replay
