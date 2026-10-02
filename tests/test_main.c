@@ -956,6 +956,8 @@ void run_consecutive_limiter_tests(void);
 void run_proactive_policy_tests(void);
 void run_daemon_director_tests(void);
 void run_daemon_director_local_only_tests(void);
+void run_director_v2_tests(void);
+void run_director_tapback_tests(void);
 /* Sprint 59 Phase C — test seeds feed_items via sqlite3 directly so the
  * test source is gated by HU_ENABLE_SQLITE in CMakeLists.txt. Mirror that
  * gate here so the forward decl + call site don't reference a missing
@@ -2066,6 +2068,8 @@ int main(int argc, char **argv) {
     run_proactive_policy_tests();
     run_daemon_director_tests();
     run_daemon_director_local_only_tests();
+    run_director_v2_tests();
+    run_director_tapback_tests();
 #ifdef HU_ENABLE_SQLITE
     run_daemon_proactive_feed_scope_tests();
 #endif

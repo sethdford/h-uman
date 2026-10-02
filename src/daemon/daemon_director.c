@@ -10,6 +10,7 @@
 #include "human/core/string.h"
 #include "human/daemon/common.h"
 #include "human/daemon/director.h"
+#include "human/daemon/director_v2.h"
 #include "human/daemon_comfort_summary.h"
 #include "human/memory.h"
 #include "human/memory/deep_extract.h"
@@ -479,12 +480,10 @@ bool hu_daemon_director_decide(hu_allocator_t *alloc, hu_agent_t *agent, hu_chan
                                size_t combined_len, const hu_channel_history_entry_t *entries,
                                size_t entry_count, const char *situation,
                                hu_director_result_t *result) {
-    (void)agent;
-    (void)ch;
-    (void)key;
-    (void)key_len;
-    return hu_daemon_director_call(alloc, combined, combined_len, entries, entry_count, situation,
-                                   result);
+    /* HU_DIRECTOR_V2 (#590): OFF is exactly hu_daemon_director_call; SHADOW
+     * returns v1 and runs v2 off the reply path; LIVE runs v2, v1 on failure. */
+    return hu_director_v2_decide(alloc, agent, ch, key, key_len, combined, combined_len, entries,
+                                 entry_count, situation, result);
 }
 
 bool hu_daemon_director_silence_overridden(const char *msg, size_t msg_len) {

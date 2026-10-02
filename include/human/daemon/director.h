@@ -136,8 +136,9 @@ void hu_daemon_director_contact_boundary(hu_agent_t *agent, const char *key, siz
 
 /* The reactive path's director decision — the one seam both hu_service_run
  * and the replay harness call, so a new director (HU_DIRECTOR_V2, PR #590)
- * hooks HERE and the harness measures it. Today: hu_daemon_director_call;
- * agent/channel/key are for directors that use per-contact or learned data.
+ * hooks HERE and the harness measures it: it delegates to
+ * hu_director_v2_decide, which is hu_daemon_director_call while HU_DIRECTOR_V2
+ * is off; agent/channel/key feed v2's per-contact and learned data.
  * Returns true when `result` is valid. */
 bool hu_daemon_director_decide(hu_allocator_t *alloc, hu_agent_t *agent, hu_channel_t *ch,
                                const char *key, size_t key_len, const char *combined,

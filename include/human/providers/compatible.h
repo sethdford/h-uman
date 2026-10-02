@@ -14,6 +14,10 @@
  * that let a half-open socket freeze the daemon on 2026-09-03. */
 #define HU_COMPATIBLE_LOCAL_TIMEOUT_SECS 120L
 
+/* Pure predicate: true when `url` names a loopback host (127.0.0.1 or
+ * localhost, http or https, the host ending at ':', '/' or the end). NULL-safe. */
+bool hu_compatible_url_is_loopback(const char *url, size_t url_len);
+
 /* Pure predicate: fill *out with the transport caps compatible_chat will use
  * for `url`. Loopback hosts (127.0.0.1 / localhost) get
  * HU_COMPATIBLE_LOCAL_TIMEOUT_SECS; everything else gets the shared defaults

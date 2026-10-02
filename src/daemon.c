@@ -81,7 +81,7 @@
 #include "human/daemon/context_facade.h"
 #include "human/daemon/crisis.h"
 #include "human/daemon/dated_followup.h"
-#include "human/daemon/director.h"
+#include "human/daemon/director_v2.h" /* includes director.h */
 #include "human/daemon/expressive.h"
 #include "human/daemon/feeds_facade.h"
 #include "human/daemon/identity_graph.h"
@@ -9867,7 +9867,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
         hu_inner_thought_store_deinit(&inner_thought_store);
         inner_thought_store_ok = false;
     }
-
+    (void)hu_director_v2_shutdown(5000); /* no director-v2 shadow worker outlives the loop */
     hu_bus_unsubscribe(&daemon_outbound_bus, hu_daemon_outbound_bus_cb, &daemon_out_bus_bridge);
     hu_bus_deinit(&daemon_outbound_bus);
     hu_inbox_deinit(&inbox_watcher);

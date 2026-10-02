@@ -1294,6 +1294,8 @@ set(HU_CORE_SOURCES
     src/daemon/owner_notify.c
     src/daemon/daemon_reply_delay.c
     src/daemon/daemon_director.c
+    src/daemon/director_v2.c
+    src/daemon/director_tapback.c
     src/daemon/reply_dedup.c
     src/daemon/send_budget.c
     src/daemon/reactive_gates.c
@@ -3687,6 +3689,8 @@ set(HU_TEST_SOURCES
     tests/test_proactive_policy.c
     tests/test_daemon_director.c
     tests/test_daemon_director_local_only.c
+    tests/test_director_v2.c
+    tests/test_director_tapback.c
     tests/test_daemon_trust.c
     tests/test_config_parse.c
     tests/test_config_mutator_writes.c
