@@ -39,6 +39,7 @@
 #include "human/behavior/prosocial_moment.h"
 #include "human/behavior/win_detect.h"
 #include "human/core/gate_mode.h"
+#include "human/daemon/commitment_guard.h"
 #include "human/daemon/daemon_shape.h"
 #include "human/daemon/proposer_context.h"
 #include "human/memory/celebration_repo.h"
@@ -7577,12 +7578,13 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     break;
                 } while (1);
 
-                /* G6 end-of-turn: push the going-stale director into the
-                 * agent's heap-owned ring and drop the borrowed pointer into
-                 * `director_result`, which dies with this batch iteration.
-                 * MUST stay after the retry loop — every retry is
-                 * still guarded against the current director. */
+                /* G6 end-of-turn: push the going-stale director into the agent's heap-owned
+                 * ring (`director_result` dies with this batch iteration). MUST stay after the
+                 * retry loop — every retry is still guarded against the current director. */
                 hu_daemon_director_end_turn(agent);
+                /* Commitment guard (commitment_guard.h): never commit Seth. */
+                (void)hu_daemon_commitment_guard_apply(agent, batch_key, key_len, combined,
+                                                       combined_len, &response, &response_len);
 
                 /* DPO: pair rejected response from Turing retry with chosen retry result */
                 if (turing_rejected_resp && turing_rejected_len > 0 && response &&
@@ -8562,13 +8564,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         }
                     }
 
-                    /* F40 (inline "> {quoted}" reply fallback) was REMOVED here
-                     * 2026-07-25: native threading owns reply semantics in the
-                     * router, and the fake quote interacted with the markdown
-                     * plaintext-ifier + splitter to ship a bare echo of the
-                     * contact's own message as its own bubble (Dermot
-                     * incident). The router's parrot guard now structurally
-                     * blocks that whole family. */
+                    /* F40 (inline "> {quoted}" reply fallback) was REMOVED here 2026-07-25:
+                     * native threading owns reply semantics in the router, and the fake quote
+                     * interacted with the markdown plaintext-ifier + splitter to ship a bare
+                     * echo of the contact's own message as its own bubble (Dermot incident).
+                     * The router's parrot guard now structurally blocks that whole family. */
                     /* ── Pre-send re-check: abort if real user responded while
                      * we were generating.  Prevents piling onto a conversation
                      * the user is actively handling. ─────────────────────────── */

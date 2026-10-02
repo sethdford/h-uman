@@ -923,6 +923,7 @@ void run_reply_delay_model_tests(void);
 void run_daemon_promise_keeper_tests(void);
 void run_daemon_insight_overuse_tests(void);
 void run_daemon_proposer_context_tests(void);
+void run_daemon_commitment_guard_tests(void);
 void run_daemon_config_reload_tests(void);
 void run_daemon_identity_graph_tests(void);
 void run_daemon_reply_fallback_tests(void);
@@ -2007,6 +2008,7 @@ int main(int argc, char **argv) {
     run_daemon_promise_keeper_tests();
     run_daemon_insight_overuse_tests();
     run_daemon_proposer_context_tests();
+    run_daemon_commitment_guard_tests();
     run_daemon_config_reload_tests();
     run_daemon_identity_graph_tests();
     run_daemon_reply_fallback_tests();

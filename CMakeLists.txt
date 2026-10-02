@@ -1262,6 +1262,7 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_prospective.c
     src/daemon/daemon_outbound_bus.c
     src/daemon/daemon_send_provenance.c
+    src/daemon/owner_notify.c
     src/daemon/daemon_reply_delay.c
     src/daemon/daemon_director.c
     src/daemon/reply_dedup.c
@@ -1290,6 +1291,8 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_promise_keeper.c
     src/daemon/daemon_insight_overuse.c
     src/daemon/daemon_proposer_context.c
+    src/daemon/daemon_commitment_guard.c
+    src/daemon/calendar_free_busy.c
     src/daemon/cron.c
     src/daemon/crontab.c
     src/gateway/webhook.c
@@ -3628,6 +3631,7 @@ set(HU_TEST_SOURCES
     tests/test_daemon_promise_keeper.c
     tests/test_daemon_insight_overuse.c
     tests/test_daemon_proposer_context.c
+    tests/test_daemon_commitment_guard.c
     tests/test_daemon_config_reload.c
     tests/test_daemon_identity_graph.c
     tests/test_daemon_name_catch.c
