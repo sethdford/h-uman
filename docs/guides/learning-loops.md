@@ -106,8 +106,11 @@ now live in `src/daemon/daemon_spontaneity.c`.
   contact with no outcomes). Fires log `[HU_SPONTANEITY live] kind=… p=… fired=1`.
 
 `learned_rate` comes from the optional fields `double_text_rate`,
-`self_reaction_rate` and `gif_rate` (each in [0, 1]) of
-`~/.human/personas/<persona>.learned-style.json`, re-read every 10 minutes.
+`self_reaction_rate` and `gif_rate` (each in [0, 1]) of the `global` stats block
+of `~/.human/personas/<persona>.learned-style.json` (`learned-style/v1`, see
+`docs/guides/learned-style.md`; a top-level field is also accepted), re-read
+every 10 minutes. The v1 learner does not emit these fields yet, so until it
+does every extra is shadow-only.
 A missing field means not measured: that extra never fires live and is only
 logged. Eligibility (no farewell, not three of our last four messages, no GIF
 on a question or sad news, the GIF rate cap) is the legacy predicates'.

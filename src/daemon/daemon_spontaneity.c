@@ -66,8 +66,15 @@ hu_error_t hu_spontaneity_rates_parse(hu_allocator_t *alloc, const char *json, s
     hu_error_t err = hu_persona_card_parse_object(alloc, json, len, &root);
     if (err != HU_OK)
         return HU_ERR_PARSE;
+    /* learned-style/v1 keeps per-reply rates in the "global" stats block
+     * (docs/guides/learned-style.md); a top-level field is also accepted. */
+    const hu_json_value_t *global = hu_json_object_get(root, "global");
+    if (global && global->type != HU_JSON_OBJECT)
+        global = NULL;
     for (int k = 0; k < HU_SPONT_KIND_COUNT; k++) {
-        double v = hu_json_get_number(root, k_rate_key[k], -1.0);
+        double v = global ? hu_json_get_number(global, k_rate_key[k], -1.0) : -1.0;
+        if (!(v >= 0.0 && v <= 1.0))
+            v = hu_json_get_number(root, k_rate_key[k], -1.0);
         if (v >= 0.0 && v <= 1.0)
             out->rate[k] = v;
     }

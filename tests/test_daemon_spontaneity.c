@@ -177,6 +177,14 @@ static void spontaneity_rates_parse_reads_optional_fields(void) {
     HU_ASSERT_EQ(hu_spontaneity_rates_parse(&alloc, bad, strlen(bad), &r), HU_OK);
     HU_ASSERT_TRUE(r.rate[HU_SPONT_DOUBLE_TEXT] < 0.0);
     HU_ASSERT_TRUE(r.rate[HU_SPONT_GIF] < 0.0);
+    /* learned-style/v1 shape: rates live in the "global" stats block */
+    const char *v1 = "{\"schema\": \"learned-style/v1\", \"global\": {\"n\": 900, "
+                     "\"self_reaction_rate\": 0.01, \"gif_rate\": null}, \"contacts\": {}}";
+    HU_ASSERT_EQ(hu_spontaneity_rates_parse(&alloc, v1, strlen(v1), &r), HU_OK);
+    HU_ASSERT_TRUE(r.rate[HU_SPONT_SELF_REACTION] > 0.0099 &&
+                   r.rate[HU_SPONT_SELF_REACTION] < 0.0101);
+    HU_ASSERT_TRUE(r.rate[HU_SPONT_GIF] < 0.0);         /* null = not measured */
+    HU_ASSERT_TRUE(r.rate[HU_SPONT_DOUBLE_TEXT] < 0.0); /* absent */
     HU_ASSERT_EQ(hu_spontaneity_rates_parse(&alloc, "[1]", 3, &r), HU_ERR_PARSE);
 }
 
