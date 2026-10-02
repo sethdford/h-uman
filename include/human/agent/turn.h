@@ -126,6 +126,19 @@ void hu_turn_ctx_free(hu_turn_ctx_t *turn_ctx);
  * writes retrieval.*. HU_ERR_INVALID_ARGUMENT on a NULL ctx or agent. */
 hu_error_t hu_turn_retrieve(hu_turn_ctx_t *turn_ctx);
 
+/* Self-RAG relevance of retrieved memory to `msg` (hu_srag_verify_relevance
+ * with the agent's srag_config) — the check S3 uses to drop irrelevant flat
+ * memory. True when the memory may be used. */
+bool hu_turn_srag_memory_verified(hu_agent_t *agent, const char *msg, size_t msg_len,
+                                  const char *memory_ctx, size_t memory_ctx_len);
+
+/* Did this turn's memory retrieval find something relevant, by the same
+ * Self-RAG rules S3 applies (gate, then verify)? For a path that loads
+ * memory without S3 (the streaming turn), so the imperfect-delivery hedge
+ * (DEF-4) reads the same signal on both paths. False for empty memory. */
+bool hu_turn_memory_relevant(hu_agent_t *agent, const char *msg, size_t msg_len,
+                             const char *memory_ctx, size_t memory_ctx_len);
+
 /* S1 plan resume (src/agent/turn/turn_plan.c): a copy of the newest
  * "[ACTIVE_PLAN]" system message among the last 10 history entries, allocated
  * with agent->alloc (caller frees plan_len + 1 bytes), or NULL when there is

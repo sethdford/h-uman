@@ -612,6 +612,8 @@ void run_adversarial_turing_tests(void);
 void run_arbitrator_tests(void);
 void run_salience_tests(void);
 void run_hard_moment_tests(void);
+void run_turn_moment_tests(void);
+void run_humanness_hedge_turn_tests(void);
 void run_planning_tests(void);
 void run_emotional_residue_tests(void);
 void run_consolidation_engine_tests(void);
@@ -1737,6 +1739,8 @@ int main(int argc, char **argv) {
     run_arbitrator_tests();
     run_salience_tests();
     run_hard_moment_tests();
+    run_turn_moment_tests();
+    run_humanness_hedge_turn_tests();
     run_planning_tests();
 #ifdef HU_ENABLE_SQLITE
     run_emotional_residue_tests();

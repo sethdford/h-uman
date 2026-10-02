@@ -442,30 +442,32 @@ static void opinion_moderate_conviction(void) {
 
 /* ── Imperfect Delivery Tests ────────────────────────────────────────────── */
 
-static void certainty_with_tools(void) {
-    hu_certainty_level_t c = hu_certainty_classify(S("what's the weather"), false, 2);
-    HU_ASSERT(c == HU_CERTAIN);
+/* DEF-4 (owner ruling 2026-10-02: no static behaviour rules). The hedge is
+ * decided by two learned/real signals only: the agent's own trajectory
+ * confidence and whether this turn's retrieval found anything relevant. The
+ * old message-word verdicts (opinion -> UNCERTAIN, "meaning of life" ->
+ * GENUINELY_UNSURE, memory -> MOSTLY_SURE, and the round-0 fact-cue list)
+ * are gone with the word lists that produced them. */
+static void certainty_low_confidence_and_no_retrieval_hedges(void) {
+    HU_ASSERT_EQ((int)hu_certainty_classify(false, 0.2f), (int)HU_UNCERTAIN);
+    hu_allocator_t alloc = hu_system_allocator();
+    size_t len = 0;
+    char *d = hu_imperfect_delivery_directive(&alloc, HU_UNCERTAIN, &len);
+    HU_ASSERT_NOT_NULL(d);
+    alloc.free(alloc.ctx, d, len + 1);
 }
 
-static void certainty_with_memory(void) {
-    hu_certainty_level_t c = hu_certainty_classify(S("how's it going"), true, 0);
-    HU_ASSERT(c == HU_MOSTLY_SURE);
+static void certainty_relevant_retrieval_never_hedges(void) {
+    HU_ASSERT_EQ((int)hu_certainty_classify(true, 0.2f), (int)HU_CERTAIN);
+    HU_ASSERT_EQ((int)hu_certainty_classify(true, 0.9f), (int)HU_CERTAIN);
 }
 
-static void certainty_opinion_question(void) {
-    hu_certainty_level_t c =
-        hu_certainty_classify(S("what do you think about remote work"), false, 0);
-    HU_ASSERT(c == HU_UNCERTAIN);
-}
-
-static void certainty_philosophical(void) {
-    hu_certainty_level_t c = hu_certainty_classify(S("what is the meaning of life"), false, 0);
-    HU_ASSERT(c == HU_GENUINELY_UNSURE);
-}
-
-static void certainty_empty(void) {
-    hu_certainty_level_t c = hu_certainty_classify(NULL, 0, false, 0);
-    HU_ASSERT(c == HU_CERTAIN);
+static void certainty_confident_agent_never_hedges(void) {
+    HU_ASSERT_EQ((int)hu_certainty_classify(false, 0.9f), (int)HU_CERTAIN);
+    /* 0.5 is the metacognition ring's no-data value: no evidence, no hedge. */
+    HU_ASSERT_EQ((int)hu_certainty_classify(false, 0.5f), (int)HU_CERTAIN);
+    hu_allocator_t alloc = hu_system_allocator();
+    HU_ASSERT_NULL(hu_imperfect_delivery_directive(&alloc, HU_CERTAIN, NULL));
 }
 
 static void imperfect_certain_no_directive(void) {
@@ -629,11 +631,9 @@ int run_humanness_tests(void) {
     HU_RUN_TEST(opinion_moderate_conviction);
 
     /* Imperfect delivery */
-    HU_RUN_TEST(certainty_with_tools);
-    HU_RUN_TEST(certainty_with_memory);
-    HU_RUN_TEST(certainty_opinion_question);
-    HU_RUN_TEST(certainty_philosophical);
-    HU_RUN_TEST(certainty_empty);
+    HU_RUN_TEST(certainty_low_confidence_and_no_retrieval_hedges);
+    HU_RUN_TEST(certainty_relevant_retrieval_never_hedges);
+    HU_RUN_TEST(certainty_confident_agent_never_hedges);
     HU_RUN_TEST(imperfect_certain_no_directive);
     HU_RUN_TEST(imperfect_uncertain_has_directive);
     HU_RUN_TEST(imperfect_genuinely_unsure);

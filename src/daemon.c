@@ -8713,6 +8713,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         bool delivered_recorded = false; /* one production_outcomes row per reply */
                         uint64_t send_fails0 = hu_daemon_send_failure_total();
                         int send_errs = 0; /* this reply's own send errors, every build */
+                        hu_reaction_type_t dir_rx = director_result.reaction; /* DEF-2 */
                         bool use_choreography = false;
                         if (agent && agent->frontiers.initialized) {
                             hu_choreography_config_t choreo_cfg = hu_choreography_config_default();
@@ -8761,7 +8762,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                             config, send_target, send_target_len,
                                             &msgs[batch_start], choreo_plan.segments[seg].text,
                                             choreo_plan.segments[seg].text_len, &seg_text_sent,
-                                            choreo_plan.segment_count > 1) != HU_OK;
+                                            dir_rx) != HU_OK;
                                 } else {
                                     seg_text_sent =
                                         ch->channel->vtable->send(
@@ -8880,7 +8881,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                         ch->channel, agent ? agent->persona : NULL,
                                                         agent, config, send_target, send_target_len,
                                                         &msgs[batch_start], dt_chunks[dt], dt_len,
-                                                        &dt_text_sent, true) != HU_OK;
+                                                        &dt_text_sent, dir_rx) != HU_OK;
                                             } else {
                                                 dt_text_sent = ch->channel->vtable->send(
                                                                    ch->channel->ctx, batch_key,
@@ -8914,7 +8915,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                          agent, config, send_target,
                                                          send_target_len, &msgs[batch_start],
                                                          fragments[f].text, fragments[f].text_len,
-                                                         &frag_text_sent, true) != HU_OK;
+                                                         &frag_text_sent, dir_rx) != HU_OK;
                                     } else {
                                         frag_text_sent =
                                             ch->channel->vtable->send(ch->channel->ctx, batch_key,
@@ -8988,8 +8989,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 const char *const *pv_ptr =
                                     all_send_media_cnt > 0 ? all_send_media_ptr : NULL;
                                 size_t pv_cnt = all_send_media_cnt;
-                                /* F2c: single-fragment reply, no choreography or split:
-                                 * action-surface dispatcher for iMessage, else flat. */
+                                /* F2c: one fragment: iMessage action surface, else flat. */
                                 const char *ch_name_f2c =
                                     ch->channel->vtable->name
                                         ? ch->channel->vtable->name(ch->channel->ctx)
@@ -9001,7 +9001,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                      ch->channel, agent ? agent->persona : NULL,
                                                      agent, config, send_target, send_target_len,
                                                      &msgs[batch_start], send_text, send_text_len,
-                                                     &whole_text_sent, false) != HU_OK;
+                                                     &whole_text_sent, dir_rx) != HU_OK;
                                 } else {
                                     whole_text_sent =
                                         ch->channel->vtable->send(

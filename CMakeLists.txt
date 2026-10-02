@@ -794,6 +794,7 @@ set(HU_CORE_SOURCES
     src/agent/turn/turn_context.c
     src/agent/turn/turn_tools.c
     src/agent/turn/turn_tail.c
+    src/agent/turn/turn_moment.c
     src/agent/turn/turn_plan.c
     src/agent/turn/reask.c
     src/agent/turn/learned_style_turn.c
@@ -4032,6 +4033,8 @@ tests/test_imessage_action_telemetry.c
     tests/test_arbitrator.c
     tests/test_salience.c
     tests/test_hard_moment.c
+    tests/test_turn_moment.c
+    tests/test_humanness_hedge_turn.c
     tests/test_planning.c
     tests/test_emotional_residue.c
     tests/test_consolidation_engine.c

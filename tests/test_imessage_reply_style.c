@@ -409,28 +409,20 @@ static void emotional_protection_holds_across_all_dimensions(void) {
 
 /* Live 2026-09-29 07:54: an 88-char reply split into two bubbles. Bubble 1
  * drew TAPBACK (reaction only, text dropped), bubble 2 drew TAPBACK_PLUS_FLAT
- * (a second reaction, then "What about you"). The contact got a reaction, a
- * changed reaction, and half a reply. */
+ * (a second reaction, then "What about you"). DEF-2 (2026-10-01): the same
+ * random draw swallowed whole single-bubble replies into a bare thumbs-up. The
+ * text always goes out; only the director adds a reaction, once. */
 static void test_reply_style_finalize_never_drops_text_or_reacts_twice(void) {
-    /* One bubble of several: its text must go out, so a bare tapback carries it. */
-    HU_ASSERT_EQ((int)hu_imessage_reply_style_finalize(HU_REPLY_STYLE_TAPBACK, false, true),
-                 (int)HU_REPLY_STYLE_TAPBACK_PLUS_FLAT);
-    /* A single-bubble reply may still be answered by a bare tapback. */
-    HU_ASSERT_EQ((int)hu_imessage_reply_style_finalize(HU_REPLY_STYLE_TAPBACK, false, false),
-                 (int)HU_REPLY_STYLE_TAPBACK);
-    /* One reaction per inbound message: later bubbles are plain text. */
-    HU_ASSERT_EQ((int)hu_imessage_reply_style_finalize(HU_REPLY_STYLE_TAPBACK, true, true),
+    /* A drawn tapback style is plain text: the draw never decides a reaction. */
+    HU_ASSERT_EQ((int)hu_imessage_reply_style_finalize(HU_REPLY_STYLE_TAPBACK),
                  (int)HU_REPLY_STYLE_FLAT);
-    HU_ASSERT_EQ(
-        (int)hu_imessage_reply_style_finalize(HU_REPLY_STYLE_TAPBACK_PLUS_FLAT, true, false),
-        (int)HU_REPLY_STYLE_FLAT);
-    /* Styles without a reaction pass through. */
-    HU_ASSERT_EQ(
-        (int)hu_imessage_reply_style_finalize(HU_REPLY_STYLE_TAPBACK_PLUS_FLAT, false, true),
-        (int)HU_REPLY_STYLE_TAPBACK_PLUS_FLAT);
-    HU_ASSERT_EQ((int)hu_imessage_reply_style_finalize(HU_REPLY_STYLE_THREADED, true, true),
+    HU_ASSERT_EQ((int)hu_imessage_reply_style_finalize(HU_REPLY_STYLE_TAPBACK_PLUS_FLAT),
+                 (int)HU_REPLY_STYLE_FLAT);
+    /* Text shapes pass through — THREADED keeps its threading (round-1 fix:
+     * a director reaction used to turn it into TAPBACK_PLUS_FLAT). */
+    HU_ASSERT_EQ((int)hu_imessage_reply_style_finalize(HU_REPLY_STYLE_THREADED),
                  (int)HU_REPLY_STYLE_THREADED);
-    HU_ASSERT_EQ((int)hu_imessage_reply_style_finalize(HU_REPLY_STYLE_FLAT, false, false),
+    HU_ASSERT_EQ((int)hu_imessage_reply_style_finalize(HU_REPLY_STYLE_FLAT),
                  (int)HU_REPLY_STYLE_FLAT);
 }
 

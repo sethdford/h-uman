@@ -50,14 +50,13 @@ hu_reply_style_scores_t hu_imessage_score_reply_style(const hu_reply_style_facts
 hu_reply_style_t hu_imessage_choose_reply_style(const hu_reply_style_facts_t *facts,
                                                 uint64_t rng_seed);
 
-/* The style a bubble is actually sent with. Once this inbound message has a
- * reaction (`already_reacted`) any tapback style becomes FLAT — one reaction
- * per message. When the bubble's text must go out (`text_required`: one
- * bubble of several), a bare TAPBACK becomes TAPBACK_PLUS_FLAT instead of
- * dropping it; a single-bubble reply may still be answered by a bare tapback.
- * Pure. */
-hu_reply_style_t hu_imessage_reply_style_finalize(hu_reply_style_t chosen, bool already_reacted,
-                                                  bool text_required);
+/* The shape a reply bubble's text is sent in: THREADED stays THREADED,
+ * everything else is FLAT. The predicate's random draw only picks that shape;
+ * any tapback style it drew becomes plain text, because DEF-2 (2026-10-01): a
+ * random draw used to swallow the director's text reply into a bare
+ * thumbs-up. Whether a reaction rides along is the director's call and is sent
+ * by the dispatcher alongside the text, in whichever shape. Pure. */
+hu_reply_style_t hu_imessage_reply_style_finalize(hu_reply_style_t chosen);
 
 /* Should the threaded-intent fallback carry an explicit inline `↩ "quote"`?
  * True only when a human would actually reference the parent — parent not the

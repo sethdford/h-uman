@@ -6,6 +6,7 @@
 #define _GNU_SOURCE
 #include "human/humanness.h"
 #include "human/agent/proactive.h"
+#include "human/agent/self_uncertainty.h"
 #include "human/core/string.h"
 #include <ctype.h>
 #include <stdio.h>
@@ -788,35 +789,18 @@ char *hu_evolved_opinion_build_directive(hu_allocator_t *alloc,
 
 /* ── 8. Imperfect Delivery ───────────────────────────────────────────────── */
 
-hu_certainty_level_t hu_certainty_classify(const char *msg, size_t msg_len, bool has_memory_context,
-                                           uint32_t tool_results_count) {
-    if (!msg || msg_len == 0)
-        return HU_CERTAIN;
-
-    /* Tool results increase certainty */
-    if (tool_results_count > 0)
-        return HU_CERTAIN;
-
-    /* Memory context increases certainty */
-    if (has_memory_context)
-        return HU_MOSTLY_SURE;
-
-    static const char *uncertain_domains[] = {
-        "should i",    "what do you think", "opinion",         "would you",
-        "best way to", "which is better",   "how do you feel", "advice",
-    };
-    if (contains_any(msg, msg_len, uncertain_domains,
-                     sizeof(uncertain_domains) / sizeof(uncertain_domains[0])))
-        return HU_UNCERTAIN;
-
-    static const char *unsure_domains[] = {
-        "meaning of life", "future", "predict", "will i", "what happens when", "philosophy",
-    };
-    if (contains_any(msg, msg_len, unsure_domains,
-                     sizeof(unsure_domains) / sizeof(unsure_domains[0])))
-        return HU_GENUINELY_UNSURE;
-
-    return HU_MOSTLY_SURE;
+/* Learned signals only (DEF-4, owner ruling 2026-10-02: no static behaviour
+ * rules). The old classifier defaulted to MOSTLY_SURE and substring-matched
+ * "opinion"/"future"/"advice", so ~260 of 307 reply turns carried a hedge
+ * directive; a first fix keyed on a fact-question word list and on
+ * memory_ctx, which the always-present "[Core Memory]" block makes non-empty
+ * on every turn. Now: hedge only when the agent's own trajectory confidence
+ * (metacognition ring, via hu_self_uncertainty_assess) is low AND this turn's
+ * retrieval found nothing relevant. */
+hu_certainty_level_t hu_certainty_classify(bool retrieval_relevant, float self_confidence) {
+    hu_self_uncertainty_t su;
+    hu_self_uncertainty_assess(self_confidence, &su);
+    return (su.hedge && !retrieval_relevant) ? HU_UNCERTAIN : HU_CERTAIN;
 }
 
 char *hu_imperfect_delivery_directive(hu_allocator_t *alloc, hu_certainty_level_t level,

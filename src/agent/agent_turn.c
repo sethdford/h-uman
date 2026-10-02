@@ -2,6 +2,7 @@
 #include "agent_internal.h"
 #include "human/agent/best_of_n.h"
 #include "human/agent/graph_grounding.h"
+#include "human/agent/hard_moment.h"
 #include "human/agent/humanness.h"
 #include "human/agent/intent.h"
 #include "human/agent/learned_style_turn.h"
@@ -9,13 +10,13 @@
 #include "human/agent/self_uncertainty.h"
 #include "human/agent/theory_of_mind.h"
 #include "human/agent/turn.h"
+#include "human/agent/turn_moment.h"
 #include "human/config.h"
 #include "human/core/json.h"
 #include "human/core/paths.h"
 #include "human/core/string.h"
 #include "human/core/tokens.h"
 #include "human/data/loader.h"
-#include "human/moment.h"
 #include "human/persona/taste.h"
 
 #include "human/agent/choreography.h"
@@ -952,9 +953,10 @@ void hu_agent_append_humanness_directives(hu_agent_t *agent, const char *contact
  * agent->alloc->free(ctx, p, len + 1). */
 void hu_agent_build_humanness_context(hu_agent_t *agent, const char *msg, size_t msg_len,
                                       const char *memory_ctx, size_t memory_ctx_len,
-                                      char **humanness_ctx_out, size_t *humanness_ctx_len_out,
-                                      char **imperfect_dir_out, size_t *imperfect_dir_len_out,
-                                      char **residue_dir_out, size_t *residue_dir_len_out) {
+                                      bool retrieval_relevant, char **humanness_ctx_out,
+                                      size_t *humanness_ctx_len_out, char **imperfect_dir_out,
+                                      size_t *imperfect_dir_len_out, char **residue_dir_out,
+                                      size_t *residue_dir_len_out) {
     if (humanness_ctx_out)
         *humanness_ctx_out = NULL;
     if (humanness_ctx_len_out)
@@ -1176,11 +1178,11 @@ void hu_agent_build_humanness_context(hu_agent_t *agent, const char *msg, size_t
         }
 #endif
 
-        /* Imperfect delivery — express genuine uncertainty */
+        /* Imperfect delivery — hedge only on low self-confidence + no relevant
+         * retrieval (DEF-4; no tool shortcut: tools have not run yet). */
         {
-            uint32_t tool_count = agent->tools_count > 0 ? (uint32_t)agent->tools_count : 0;
             hu_certainty_level_t cert = hu_certainty_classify(
-                msg, msg_len, (memory_ctx != NULL && memory_ctx_len > 0), tool_count);
+                retrieval_relevant, hu_metacog_trajectory_confidence(&agent->infra.metacognition));
             imperfect_dir = hu_imperfect_delivery_directive(agent->alloc, cert, &imperfect_dir_len);
             if ((sal_mode == HU_SALIENCE_SHADOW || sal_mode == HU_SALIENCE_LIVE) && imperfect_dir &&
                 imperfect_dir_len > 0 && sal_count < 8 &&
@@ -1671,6 +1673,9 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
      * — measured 2026-07-11 (tools_dump_prompt.c): the legacy stage vocabulary never
      * fires on real personas, so the warmth vocabulary is what makes this note live. */
     hu_agent_apply_relationship_tone(agent, &persona_prompt, &persona_prompt_len);
+    if (persona_prompt) /* HU_HARD_MOMENT, same gate as agent_stream.c (DEF-13) */
+        (void)hu_hard_moment_apply(agent->alloc, hu_hard_moment_mode(), msg, msg_len,
+                                   &persona_prompt, &persona_prompt_len);
 
     /* Build skills context from skillforge if available */
     char *skills_ctx = NULL;
@@ -1841,6 +1846,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
     char *residue_dir = NULL;
     size_t residue_dir_len = 0;
     hu_agent_build_humanness_context(agent, msg, msg_len, memory_ctx, memory_ctx_len,
+                                     behavior_memory_ctx_nonempty || graph_ctx_len > 0,
                                      &humanness_ctx, &humanness_ctx_len, &imperfect_dir,
                                      &imperfect_dir_len, &residue_dir, &residue_dir_len);
 
@@ -2636,37 +2642,11 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
         if (personal_model_ctx_len > 0)
             personal_model_ctx = personal_model_buf;
 
-        /* Moment-context decision layer — bridges existing timing / persona /
-         * tone signals into a per-turn fragment for the LLM. Phase 3 minimal
-         * wiring: pass persona + per-channel overlay; history loader
-         * integration is a follow-up (today we pass NULL → predicate skips
-         * thread/style/topic fields gracefully). Future: load 25-turn history
-         * via the same path the daemon uses (load_conversation_history) and
-         * the contact_send_recency timestamps for full timing fidelity. */
+        /* Moment cue from the contact's real thread (src/agent/turn/turn_moment.c). */
         char moment_prompt_buf[512];
-        const char *moment_ctx = NULL;
-        size_t moment_ctx_len = 0;
-        if (agent->persona) {
-            const struct hu_persona_overlay_t *moment_overlay = NULL;
-            if (agent->active_channel && agent->active_channel_len > 0) {
-                moment_overlay = (const struct hu_persona_overlay_t *)hu_persona_find_overlay(
-                    agent->persona, agent->active_channel, agent->active_channel_len);
-            }
-            hu_moment_t moment;
-            hu_error_t mc_err = hu_moment_compose_from_inputs(
-                (const struct hu_persona_t *)agent->persona, moment_overlay,
-                /* history */ NULL, /* last_their_ts */ -1, /* last_our_ts */ -1,
-                /* contact_tz */ NULL, (int64_t)time(NULL), &moment);
-            if (mc_err == HU_OK) {
-                size_t mr_n = 0;
-                hu_error_t mr_err = hu_moment_render_prompt(&moment, moment_prompt_buf,
-                                                            sizeof(moment_prompt_buf), &mr_n);
-                if (mr_err == HU_OK && mr_n > 0) {
-                    moment_ctx = moment_prompt_buf;
-                    moment_ctx_len = mr_n;
-                }
-            }
-        }
+        size_t moment_ctx_len = hu_turn_moment_render(agent, (int64_t)time(NULL), moment_prompt_buf,
+                                                      sizeof(moment_prompt_buf));
+        const char *moment_ctx = moment_ctx_len > 0 ? moment_prompt_buf : NULL;
 
         /* W9 world-model snapshot (FIX 12). Cached for 60s by hu_world_model_load
          * so per-turn cost is dominated by the SQL fetch on first miss. We only
