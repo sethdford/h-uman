@@ -27,6 +27,7 @@
 #include "human/agent/session_persist.h"
 #include "human/agent/superhuman.h"
 #include "human/agent/tool_call_parser.h"
+#include "human/agent/turn.h"
 #include "human/agent/validators/builtin.h"
 #include "human/agent/world_model_bridge.h"
 #include "human/cognition/attachment.h"
@@ -1038,10 +1039,12 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
         size_t imperfect_dir_len = 0;
         char *residue_dir = NULL;
         size_t residue_dir_len = 0;
-        hu_agent_build_humanness_context(agent, msg, msg_len, memory_ctx, memory_ctx_len,
-                                         memory_ctx_len > 0 || graph_ctx_len > 0, &humanness_ctx,
-                                         &humanness_ctx_len, &imperfect_dir, &imperfect_dir_len,
-                                         &residue_dir, &residue_dir_len);
+        hu_agent_build_humanness_context(
+            agent, msg, msg_len, memory_ctx, memory_ctx_len,
+            hu_turn_memory_relevant(agent, msg, msg_len, memory_ctx, memory_ctx_len) ||
+                graph_ctx_len > 0,
+            &humanness_ctx, &humanness_ctx_len, &imperfect_dir, &imperfect_dir_len, &residue_dir,
+            &residue_dir_len);
         hu_prompt_config_t cfg = {
             .provider_name = agent->provider.vtable->get_name(agent->provider.ctx),
             .provider_name_len = 0,

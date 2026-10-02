@@ -16,6 +16,31 @@
 #include "human/core/log.h"
 #include "human/core/string.h"
 
+bool hu_turn_srag_memory_verified(hu_agent_t *agent, const char *msg, size_t msg_len,
+                                  const char *memory_ctx, size_t memory_ctx_len) {
+    double relevance = 0.0;
+    bool should_use = false;
+    hu_srag_verify_relevance(agent->alloc, &agent->sota.srag_config, msg, msg_len, memory_ctx,
+                             memory_ctx_len, &relevance, &should_use);
+    return should_use;
+}
+
+bool hu_turn_memory_relevant(hu_agent_t *agent, const char *msg, size_t msg_len,
+                             const char *memory_ctx, size_t memory_ctx_len) {
+    if (!agent || !memory_ctx || memory_ctx_len == 0)
+        return false;
+    if (!agent->sota.sota_initialized || !agent->sota.srag_config.enabled)
+        return true; /* S3 keeps memory unfiltered when Self-RAG is off */
+    hu_srag_assessment_t a;
+    memset(&a, 0, sizeof(a));
+    hu_srag_should_retrieve(agent->alloc, &agent->sota.srag_config, msg, msg_len, NULL, 0, &a);
+    if (a.decision == HU_SRAG_NO_RETRIEVAL)
+        return false; /* S3 would not have loaded it */
+    if (a.decision == HU_SRAG_RETRIEVE_AND_VERIFY)
+        return hu_turn_srag_memory_verified(agent, msg, msg_len, memory_ctx, memory_ctx_len);
+    return true;
+}
+
 hu_error_t hu_turn_retrieve(hu_turn_ctx_t *turn_ctx) {
     if (!turn_ctx || !turn_ctx->in.agent)
         return HU_ERR_INVALID_ARGUMENT;
@@ -86,11 +111,7 @@ hu_error_t hu_turn_retrieve(hu_turn_ctx_t *turn_ctx) {
         /* Self-RAG: verify relevance of retrieved content */
         if (srag_assessment.decision == HU_SRAG_RETRIEVE_AND_VERIFY && memory_ctx &&
             memory_ctx_len > 0) {
-            double relevance = 0.0;
-            bool should_use = false;
-            hu_srag_verify_relevance(agent->alloc, &agent->sota.srag_config, msg, msg_len,
-                                     memory_ctx, memory_ctx_len, &relevance, &should_use);
-            if (!should_use) {
+            if (!hu_turn_srag_memory_verified(agent, msg, msg_len, memory_ctx, memory_ctx_len)) {
                 /* Drop ONLY flat memory_ctx. hu_srag_verify_relevance scored
                  * memory_ctx, NOT graph_ctx — GraphRAG community-summary
                  * grounding ("who this contact is") is a distinct signal that a
