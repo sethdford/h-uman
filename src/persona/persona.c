@@ -5351,10 +5351,13 @@ static hu_error_t persona_compact_append_line(hu_allocator_t *alloc, char **buf,
 
 static hu_error_t persona_build_prompt_compact_ex(hu_allocator_t *alloc,
                                                   const hu_persona_t *persona, const char *channel,
-                                                  size_t channel_len, bool immersive, char **out,
+                                                  size_t channel_len, bool immersive,
+                                                  hu_persona_style_opts_t *opts, char **out,
                                                   size_t *out_len) {
     if (!alloc || !persona || !channel || !out || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
+    if (opts)
+        opts->suppressed = 0;
     size_t cap = HU_PERSONA_PROMPT_INIT_CAP; /* 4 KB initial, doubles as needed */
     char *buf = (char *)alloc->alloc(alloc->ctx, cap);
     if (!buf)
@@ -5440,7 +5443,8 @@ static hu_error_t persona_build_prompt_compact_ex(hu_allocator_t *alloc,
             if (err != HU_OK)
                 goto fail;
         }
-        if (overlay->avg_length && overlay->avg_length[0]) {
+        if (overlay->avg_length && overlay->avg_length[0] &&
+            !hu_persona_style_opts_suppress(opts, overlay->avg_length)) {
             n = snprintf(tmp, sizeof(tmp), "- Length: %.300s\n", overlay->avg_length);
             err = persona_compact_append(alloc, &buf, &len, &cap, tmp, (size_t)n);
             if (err != HU_OK)
@@ -5454,7 +5458,8 @@ static hu_error_t persona_build_prompt_compact_ex(hu_allocator_t *alloc,
         }
         size_t notes_max = overlay->style_notes_count < 4 ? overlay->style_notes_count : 4;
         for (size_t i = 0; i < notes_max; i++) {
-            if (!overlay->style_notes[i])
+            if (!overlay->style_notes[i] ||
+                hu_persona_style_opts_suppress(opts, overlay->style_notes[i]))
                 continue;
             n = snprintf(tmp, sizeof(tmp), "- %.250s\n", overlay->style_notes[i]);
             err = persona_compact_append(alloc, &buf, &len, &cap, tmp, (size_t)n);
@@ -5462,6 +5467,16 @@ static hu_error_t persona_build_prompt_compact_ex(hu_allocator_t *alloc,
                 goto fail;
         }
         err = persona_compact_append_str(alloc, &buf, &len, &cap, "\n");
+        if (err != HU_OK)
+            goto fail;
+    }
+    /* 3b. Learned style line (HU_LEARNED_STYLE=live), in place of the
+     * fixed-length entries the block above just omitted. */
+    if (opts && opts->learned_line && opts->learned_line_len > 0) {
+        err = persona_compact_append(alloc, &buf, &len, &cap, opts->learned_line,
+                                     opts->learned_line_len);
+        if (err == HU_OK)
+            err = persona_compact_append_str(alloc, &buf, &len, &cap, "\n\n");
         if (err != HU_OK)
             goto fail;
     }
@@ -5474,7 +5489,8 @@ static hu_error_t persona_build_prompt_compact_ex(hu_allocator_t *alloc,
         size_t r_max =
             persona->communication_rules_count < 4 ? persona->communication_rules_count : 4;
         for (size_t i = 0; i < r_max; i++) {
-            if (!persona->communication_rules[i])
+            if (!persona->communication_rules[i] ||
+                hu_persona_style_opts_suppress(opts, persona->communication_rules[i]))
                 continue;
             char tmp[512];
             int n = snprintf(tmp, sizeof(tmp), "- %.300s\n", persona->communication_rules[i]);
@@ -5656,7 +5672,7 @@ fail:
 hu_error_t hu_persona_build_prompt_compact(hu_allocator_t *alloc, const hu_persona_t *persona,
                                            const char *channel, size_t channel_len, char **out,
                                            size_t *out_len) {
-    return persona_build_prompt_compact_ex(alloc, persona, channel, channel_len, false, out,
+    return persona_build_prompt_compact_ex(alloc, persona, channel, channel_len, false, NULL, out,
                                            out_len);
 }
 
@@ -5664,7 +5680,16 @@ hu_error_t hu_persona_build_prompt_compact_immersive(hu_allocator_t *alloc,
                                                      const hu_persona_t *persona,
                                                      const char *channel, size_t channel_len,
                                                      char **out, size_t *out_len) {
-    return persona_build_prompt_compact_ex(alloc, persona, channel, channel_len, true, out,
+    return persona_build_prompt_compact_ex(alloc, persona, channel, channel_len, true, NULL, out,
+                                           out_len);
+}
+
+hu_error_t hu_persona_build_prompt_compact_immersive_ex(hu_allocator_t *alloc,
+                                                        const hu_persona_t *persona,
+                                                        const char *channel, size_t channel_len,
+                                                        hu_persona_style_opts_t *opts, char **out,
+                                                        size_t *out_len) {
+    return persona_build_prompt_compact_ex(alloc, persona, channel, channel_len, true, opts, out,
                                            out_len);
 }
 

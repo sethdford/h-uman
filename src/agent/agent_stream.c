@@ -12,6 +12,7 @@
 #include "human/agent/hard_moment.h"
 #include "human/agent/humanness.h"
 #include "human/agent/input_guard.h"
+#include "human/agent/learned_style_turn.h"
 #include "human/agent/memory_loader.h"
 #include "human/agent/model_router.h"
 #include "human/agent/outcomes.h"
@@ -544,6 +545,12 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             }
         }
     }
+    /* Learned style (HU_LEARNED_STYLE, default off): BEFORE anything is
+     * appended to the head, since LIVE rebuilds it with the learned line in
+     * and the hand-written length rules out. OFF returns at the gate. */
+    hu_learned_style_turn_t ls_turn;
+    hu_agent_learned_style_apply(agent, msg, msg_len, &persona_prompt, &persona_prompt_len,
+                                 &ls_turn);
     /* Relationship tone note (HU_WARMTH_TONE_VOCAB) — shared helper, same as
      * hu_agent_turn. This streaming path is the daemon's PRIMARY inbound
      * route; the 2026-07-11 wiring lived only in hu_agent_turn, so the gate
@@ -1078,6 +1085,7 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             .contact_context = enriched_contact ? enriched_contact : agent->contact_context,
             .contact_context_len =
                 enriched_contact ? enriched_contact_len : agent->contact_context_len,
+            .learned_style_live = ls_turn.live,
             .conversation_context = agent->conversation_context,
             .conversation_context_len = agent->conversation_context_len,
             .max_response_chars = agent->max_response_chars,

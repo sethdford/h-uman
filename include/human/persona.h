@@ -584,6 +584,32 @@ hu_error_t hu_persona_build_prompt_compact_immersive(hu_allocator_t *alloc,
                                                      const char *channel, size_t channel_len,
                                                      char **out, size_t *out_len);
 
+/* Learned-style head options (HU_LEARNED_STYLE=live; see
+ * include/human/persona/learned_style.h). When suppress_length_rules is set,
+ * the head omits the hand-written persona entries that impose a fixed length
+ * (hu_learned_style_is_length_rule) — style_rules, communication_rules,
+ * the channel overlay's avg_length and style_notes — and renders
+ * learned_line after the channel style block instead. `suppressed` is an
+ * OUTPUT: the number of entries omitted. A NULL options pointer is exactly
+ * the plain builder. */
+typedef struct hu_persona_style_opts {
+    const char *learned_line;
+    size_t learned_line_len;
+    bool suppress_length_rules;
+    size_t suppressed;
+} hu_persona_style_opts_t;
+
+/* True when `entry` must be omitted under these options (a fixed-length
+ * rule while suppress_length_rules is set); counts it in opts->suppressed.
+ * NULL opts -> false. Shared by every head builder so they cannot drift. */
+bool hu_persona_style_opts_suppress(hu_persona_style_opts_t *opts, const char *entry);
+
+hu_error_t hu_persona_build_prompt_compact_immersive_ex(hu_allocator_t *alloc,
+                                                        const hu_persona_t *persona,
+                                                        const char *channel, size_t channel_len,
+                                                        hu_persona_style_opts_t *opts, char **out,
+                                                        size_t *out_len);
+
 /* P6-5: shared absolute-rules block. Writes the highest-weight
  * formatting/identity instructions ("You are HUMAN", lowercase, no
  * markdown, etc.) into the caller's buffer. Called from BOTH the

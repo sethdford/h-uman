@@ -2,6 +2,7 @@
 #include "human/agent/reply_prompt.h"
 #include "human/agent.h"
 #include "human/agent/hard_moment.h"
+#include "human/agent/learned_style_turn.h"
 #include "human/agent/prompt.h"
 #include "human/agent/prompt_budget.h"
 #include "human/context/conversation.h"
@@ -88,6 +89,11 @@ hu_error_t hu_reply_prompt_render(hu_allocator_t *alloc, const hu_reply_prompt_r
                                                       &head, &head_len);
     if (err != HU_OK)
         return err;
+    /* Same order as agent_stream.c: learned style before anything is
+     * appended to the head (HU_LEARNED_STYLE, default off). */
+    hu_learned_style_turn_t ls_turn;
+    hu_agent_learned_style_apply(&agent, req->incoming, req->incoming_len, &head, &head_len,
+                                 &ls_turn);
     hu_agent_apply_relationship_tone(&agent, &head, &head_len);
     if (head)
         (void)hu_hard_moment_apply(alloc, hu_hard_moment_mode(), req->incoming, req->incoming_len,
@@ -110,6 +116,7 @@ hu_error_t hu_reply_prompt_render(hu_allocator_t *alloc, const hu_reply_prompt_r
         .persona = NULL, /* lean path, as agent_stream.c */
         .contact_context = contact_ctx,
         .contact_context_len = contact_ctx_len,
+        .learned_style_live = ls_turn.live,
         .conversation_context = convo,
         .conversation_context_len = convo_len,
         .max_response_chars = hu_reply_prompt_max_chars(req),

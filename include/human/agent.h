@@ -904,6 +904,14 @@ hu_error_t hu_agent_build_persona_head(hu_agent_t *agent, const char *topic, siz
 hu_error_t hu_agent_build_lean_persona_head(hu_agent_t *agent, const char *msg, size_t msg_len,
                                             char **out, size_t *out_len);
 
+/* Same head with learned-style options (hu_persona_style_opts_t in
+ * persona.h): length-imposing style_rules / communication_rules / overlay
+ * entries omitted and the learned line appended after the channel style
+ * line. opts == NULL is byte-identical to hu_agent_build_lean_persona_head. */
+hu_error_t hu_agent_build_lean_persona_head_ex(hu_agent_t *agent, const char *msg, size_t msg_len,
+                                               hu_persona_style_opts_t *opts, char **out,
+                                               size_t *out_len);
+
 /* Finish an assembled system prompt the way every turn path must: cap it to
  * HU_PROMPT_TRIM_BUDGET_BYTES (keeping `guard_tail_reserved` bytes of the
  * prompt.c guard tail) and make the persona's formality-aware ABSOLUTE RULES
