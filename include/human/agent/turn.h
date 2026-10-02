@@ -84,6 +84,9 @@ typedef struct hu_turn_ctx {
         size_t turn_tool_results_count;   /* in/out: accumulates across iterations */
         uint32_t iter;                    /* S17 input: the current tool iteration (1-based) */
         uint64_t turn_tokens;             /* S17 input: tokens this turn has used so far */
+        size_t replan_floor;              /* S17 scan floor: agent->history_count at hu_turn_ctx_new
+                                           * (earlier turns sit below it), then after each replan
+                                           * (failures below it have had theirs) */
     } loop;
 } hu_turn_ctx_t;
 
@@ -109,7 +112,8 @@ static inline hu_turn_step_t hu_turn_step_return(hu_error_t err) {
 }
 
 /* NULL when agent, agent->alloc or the allocation is missing. Stores the
- * pointers only; touches neither *response_out nor *response_len_out. */
+ * pointers and records agent->history_count as loop.replan_floor; touches
+ * neither *response_out nor *response_len_out. */
 hu_turn_ctx_t *hu_turn_ctx_new(hu_agent_t *agent, const char *msg, size_t msg_len,
                                char **response_out, size_t *response_len_out);
 
@@ -121,6 +125,12 @@ void hu_turn_ctx_free(hu_turn_ctx_t *turn_ctx);
  * pick, W12 contact-recall merge. Reads in.*, perception.cognition_budget;
  * writes retrieval.*. HU_ERR_INVALID_ARGUMENT on a NULL ctx or agent. */
 hu_error_t hu_turn_retrieve(hu_turn_ctx_t *turn_ctx);
+
+/* S1 plan resume (src/agent/turn/turn_plan.c): a copy of the newest
+ * "[ACTIVE_PLAN]" system message among the last 10 history entries, allocated
+ * with agent->alloc (caller frees plan_len + 1 bytes), or NULL when there is
+ * none, on NULL input or on allocation failure. *plan_len_out is always set. */
+char *hu_turn_active_plan(hu_agent_t *agent, size_t *plan_len_out);
 
 /* S2 perception (src/agent/turn/turn_perceive.c): ACP inbox, cognition budget +
  * dual-process dispatch, fast capture / STM / pattern radar, commitments,
@@ -160,13 +170,23 @@ hu_error_t hu_turn_context(hu_turn_ctx_t *turn_ctx);
 hu_error_t hu_turn_tools(hu_turn_ctx_t *turn_ctx);
 
 /* S17 iteration tail (src/agent/turn/turn_tail.c): after one iteration's tool
- * results — replan when a plan is in progress and >= 2 recent tool results
- * failed, mid-turn memory retrieval against the last tool result (plus the
- * user's goal from iteration 2), scratchpad turn metadata, periodic
- * checkpoint. Reads in.*, context.plan_ctx (presence only), loop.iter,
- * loop.turn_tokens, loop.turn_tool_results_count; writes only through
- * in.agent. HU_ERR_INVALID_ARGUMENT on a NULL ctx, agent or msg, else HU_OK. */
+ * results — replan when a plan is in progress and >= 2 of THIS turn's tool
+ * results failed since its last replan (within the 8 newest history entries),
+ * mid-turn memory retrieval against the last tool result (plus the user's goal
+ * from iteration 2), scratchpad turn metadata, periodic checkpoint. Reads in.*,
+ * context.plan_ctx (presence only), loop.iter, loop.turn_tokens,
+ * loop.turn_tool_results_count, loop.replan_floor; writes
+ * loop.replan_floor and otherwise only through in.agent.
+ * HU_ERR_INVALID_ARGUMENT on a NULL ctx, agent or msg, else HU_OK. */
 hu_error_t hu_turn_tail(hu_turn_ctx_t *turn_ctx);
+
+/* Keeps loop.replan_floor pointing at the same entries after mid-turn history
+ * compaction (src/agent/turn/turn_tail.c): compaction drops entries from the
+ * front, so a floor recorded before it would sit past the end of the shrunk
+ * history and S17 would never scan again. Shifts the floor down by
+ * before - after, clamped at 0; a non-shrinking change leaves it alone.
+ * NULL-safe. */
+void hu_turn_note_history_shift(hu_turn_ctx_t *turn_ctx, size_t before, size_t after);
 
 /* S18 tool-iterations-exhausted exit (src/agent/turn/turn_tail.c): records the
  * TOOL_ITERATIONS_EXHAUSTED and ERR observer events. The exit's frees and its

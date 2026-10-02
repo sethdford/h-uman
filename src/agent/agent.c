@@ -2078,6 +2078,9 @@ void hu_agent_deinit(hu_agent_t *agent) {
      * inline array) and handles the never-set case gracefully via
      * entry_count==0. */
     hu_scratchpad_deinit(&agent->sota.scratchpad, agent->alloc);
+    /* hu_turn_tail checkpoints every interval_steps iterations; each save
+     * frees the previous copy for its task, so only this frees the last. */
+    hu_checkpoint_store_deinit(&agent->sota.checkpoint_store, agent->alloc);
     hu_pattern_radar_deinit(&agent->radar);
     if (agent->commitment_store) {
         hu_commitment_store_destroy(agent->commitment_store);

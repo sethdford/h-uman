@@ -22,7 +22,6 @@ void run_agent_modules_tests(void);
 void run_agent_definition_tests(void);
 void run_agent_git_tests(void);
 void run_agent_app_config_tests(void);
-void run_compaction_hierarchical_tests(void);
 void run_tot_recursive_tests(void);
 void run_agent_subsystems_tests(void);
 void run_crypto_tests(void);
@@ -357,6 +356,7 @@ void run_speech_rewrite_tests(void);
 void run_speech_direction_tests(void);
 void run_opener_gate_tests(void);
 void run_voice_intent_tests(void);
+void run_voice_triggers_tests(void);
 void run_speech_perform_tests(void);
 void run_imessage_custom_tapback_tests(void);
 void run_imessage_action_facts_tests(void);
@@ -445,6 +445,7 @@ void run_outbound_crosstalk_tests(void);
  * the messages table directly via sqlite3, so source + tests are
  * gated by HU_ENABLE_SQLITE in CMakeLists.txt. Mirror that gate here. */
 void run_curiosity_gaps_tests(void);
+void run_memory_loader_scope_tests(void);
 #ifdef HU_ENABLE_SQLITE
 void run_boundary_repo_tests(void);
 void run_opinions_repo_tests(void);
@@ -512,6 +513,7 @@ void run_turn_entry_tests(void);                  /* agent-turn carve: S0 entry 
 void run_turn_silence_tests(void);                /* agent-turn carve: S8 silence stage */
 void run_turn_context_tests(void);                /* agent-turn carve: S4 context builders */
 void run_turn_tools_tests(void);                  /* agent-turn carve: S16 tool dispatch */
+void run_turn_plan_tests(void);                   /* agent-turn: [ACTIVE_PLAN] resume */
 void run_turn_tail_tests(void);                   /* agent-turn carve: S17-S18 iteration tail */
 void run_agent_turn_history_window_tests(void);   /* agent-turn: short-history scan windows */
 void run_reask_tests(void);                       /* agent-turn: re-ask predicate */
@@ -1152,7 +1154,6 @@ int main(int argc, char **argv) {
     run_agent_definition_tests();
     run_agent_git_tests();
     run_agent_app_config_tests();
-    run_compaction_hierarchical_tests();
     run_tot_recursive_tests();
     run_agent_subsystems_tests();
     run_crypto_tests();
@@ -1456,6 +1457,7 @@ int main(int argc, char **argv) {
     run_speech_direction_tests();
     run_opener_gate_tests();
     run_voice_intent_tests();
+    run_voice_triggers_tests();
     run_speech_perform_tests();
     run_imessage_custom_tapback_tests();
     run_imessage_action_facts_tests();
@@ -1541,6 +1543,7 @@ int main(int argc, char **argv) {
     run_outbound_echo_tests();
     run_outbound_crosstalk_tests();
     run_curiosity_gaps_tests();
+    run_memory_loader_scope_tests();
 #ifdef HU_ENABLE_SQLITE
     run_boundary_repo_tests();
     run_opinions_repo_tests();
@@ -1606,6 +1609,7 @@ int main(int argc, char **argv) {
     run_turn_context_tests();
     run_turn_tools_tests();
     run_turn_tail_tests();
+    run_turn_plan_tests();
     run_agent_turn_history_window_tests();
     run_reask_tests();
     run_turn_sources_tests();

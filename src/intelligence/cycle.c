@@ -784,4 +784,7 @@ hu_error_t hu_intelligence_run_cycle(hu_allocator_t *alloc, sqlite3 *db,
     return steps_succeeded > 0 ? HU_OK : HU_ERR_IO;
 }
 
+#else
+/* ISO C forbids an empty translation unit (-Wpedantic). */
+typedef int hu_cycle_avoid_empty_tu;
 #endif /* HU_ENABLE_SQLITE */

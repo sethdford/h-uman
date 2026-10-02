@@ -83,7 +83,7 @@ static void validator_disclosure_rewrites_to_default_deflection(void) {
     HU_ASSERT_TRUE(out.text_len < 80);
 
     if (out.text_owned)
-        alloc.free(alloc.ctx, out.text, out.text_len + 1);
+        alloc.free(alloc.ctx, (char *)out.text, out.text_len + 1);
     hu_output_validator_deinit(&v, &alloc);
 }
 
@@ -106,7 +106,7 @@ static void validator_disclosure_rewrites_to_custom_replacement(void) {
     HU_ASSERT_EQ(memcmp(out.text, replacement, replacement_len), 0);
 
     if (out.text_owned)
-        alloc.free(alloc.ctx, out.text, out.text_len + 1);
+        alloc.free(alloc.ctx, (char *)out.text, out.text_len + 1);
     hu_output_validator_deinit(&v, &alloc);
 }
 
@@ -125,7 +125,7 @@ static void validator_null_replacement_falls_back_to_default(void) {
     HU_ASSERT_NOT_NULL(out.text);
 
     if (out.text_owned)
-        alloc.free(alloc.ctx, out.text, out.text_len + 1);
+        alloc.free(alloc.ctx, (char *)out.text, out.text_len + 1);
     hu_output_validator_deinit(&v, &alloc);
 }
 

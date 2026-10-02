@@ -487,7 +487,72 @@ static void v2_judge_sees_history_intention_and_cue(void) {
     HU_ASSERT_STR_CONTAINS(s.last_user, "them: going to that new taco place friday");
     HU_ASSERT_STR_CONTAINS(s.last_user, "intention: ask how the new taco place was");
     HU_ASSERT_STR_CONTAINS(s.last_user, "cue: they just mentioned \"taco place\"");
+    /* seeded NOW - 86400: the judge is told the note's age */
+    HU_ASSERT_STR_CONTAINS(s.last_user, "\nnoted: 1 day ago\n");
     mem.vtable->deinit(mem.ctx);
+}
+
+/* Local wall-clock time `days` after NOW's local day, at hh:00. */
+static int64_t local_at(int days, int hh) {
+    time_t t = (time_t)NOW;
+    struct tm tmv;
+    HU_ASSERT_NOT_NULL(localtime_r(&t, &tmv));
+    tmv.tm_mday += days;
+    tmv.tm_hour = hh;
+    tmv.tm_min = 0;
+    tmv.tm_sec = 0;
+    tmv.tm_isdst = -1;
+    return (int64_t)mktime(&tmv);
+}
+
+/* One keyword intention noted at `created`, cued at `now`: the judge's user
+ * turn lands in s->last_user. */
+static void judge_once(script_t *s, int64_t created, int64_t now) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    seed_kw_exp(db, "taco place", "ask how the new taco place was", created, 0);
+    static const char *const r[] = {"not_now"};
+    hu_prospective_judge_t j = judge_of(s, r, 1);
+    hu_prospective_counts_t c;
+    hu_prospective_turn_t t = turn_for("the taco place!!", now);
+    HU_ASSERT_EQ(hu_prospective_v2_run(&alloc, db, HU_PM_CUE_KEYWORD, &t, &j, true, &c, NULL, NULL),
+                 HU_OK);
+    HU_ASSERT_EQ(s->calls, (size_t)1);
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* The note's age is in CALENDAR days, not 24 h periods: noted at 23:00 and
+ * cued at 08:00 the next morning is "1 day ago" (9 h later), and 08:00 ->
+ * 23:00 the same day is "today" (15 h later). */
+static void v2_judge_noted_age_counts_calendar_days(void) {
+    script_t s;
+    judge_once(&s, local_at(0, 23), local_at(1, 8));
+    HU_ASSERT_STR_CONTAINS(s.last_user, "intention: ask how the new taco place was\n"
+                                        "noted: 1 day ago\ncue: ");
+    judge_once(&s, local_at(0, 8), local_at(0, 23));
+    HU_ASSERT_STR_CONTAINS(s.last_user, "\nnoted: today\ncue: ");
+    judge_once(&s, local_at(0, 23), local_at(5, 1));
+    HU_ASSERT_STR_CONTAINS(s.last_user, "\nnoted: 5 days ago\ncue: ");
+}
+
+/* created_at 0 (a legacy row that never recorded one) has no usable age:
+ * the noted line is omitted rather than invented as ~20,000 days. */
+static void v2_judge_omits_noted_age_when_created_at_is_zero(void) {
+    script_t s;
+    judge_once(&s, 0, NOW);
+    HU_ASSERT_STR_CONTAINS(s.last_user, "intention: ask how the new taco place was\ncue: ");
+    HU_ASSERT_NULL(strstr(s.last_user, "noted:"));
+}
+
+/* created_at later than now (clock skew), on the SAME local day so that an
+ * unguarded calendar-day count would print "noted: today": omitted. */
+static void v2_judge_omits_noted_age_when_created_in_the_future(void) {
+    script_t s;
+    int64_t now = local_at(0, 6);
+    judge_once(&s, now + 3600, now);
+    HU_ASSERT_STR_CONTAINS(s.last_user, "intention: ask how the new taco place was\ncue: ");
+    HU_ASSERT_NULL(strstr(s.last_user, "noted:"));
 }
 
 static void v2_rejects_invalid_arguments(void) {
@@ -1260,6 +1325,9 @@ void run_prospective_v2_tests(void) {
     HU_RUN_TEST(v2_undelivered_surfacing_is_reclaimed_as_an_attempt);
     HU_RUN_TEST(v2_time_done_retires_ledger_twins);
     HU_RUN_TEST(v2_judge_sees_history_intention_and_cue);
+    HU_RUN_TEST(v2_judge_noted_age_counts_calendar_days);
+    HU_RUN_TEST(v2_judge_omits_noted_age_when_created_at_is_zero);
+    HU_RUN_TEST(v2_judge_omits_noted_age_when_created_in_the_future);
     HU_RUN_TEST(v2_rejects_invalid_arguments);
     HU_RUN_TEST(v2_shadow_never_writes_resolved_cancel_or_reclaim);
     HU_RUN_TEST(v2_surface_write_failure_is_not_rendered_and_stays_pending);

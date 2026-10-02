@@ -80,7 +80,6 @@ static void su_clamps_out_of_range(void) {
 
 static void su_null_safe(void) {
     hu_self_uncertainty_assess(0.3f, NULL); /* must not crash */
-    hu_allocator_t alloc = hu_system_allocator();
     char *dir = NULL;
     size_t dir_len = 0;
     HU_ASSERT_EQ((int)hu_self_uncertainty_build_directive(NULL, NULL, &dir, &dir_len),

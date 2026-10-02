@@ -170,33 +170,6 @@ static hu_error_t read_file(hu_allocator_t *alloc, const char *path, char **out,
     return HU_OK;
 }
 
-static void load_persona_seed(const char ***out_held_out, size_t *out_n_prompts) {
-    hu_allocator_t alloc = hu_system_allocator();
-    char *json = NULL;
-    size_t json_len = 0;
-    HU_ASSERT_EQ(read_file(&alloc, "tests/fixtures/e2e_persona_seed.json", &json, &json_len),
-                 HU_OK);
-    hu_json_value_t *root = NULL;
-    HU_ASSERT_EQ(hu_json_parse(&alloc, json, json_len, &root), HU_OK);
-    alloc.free(alloc.ctx, json, json_len + 1);
-
-    hu_json_value_t *held = hu_json_object_get(root, "held_out_prompts");
-    HU_ASSERT_NOT_NULL(held);
-    HU_ASSERT_EQ(held->type, HU_JSON_ARRAY);
-    HU_ASSERT_EQ(held->data.array.len, 100u);
-    const char **held_out = (const char **)alloc.alloc(alloc.ctx, 100 * sizeof(const char *));
-    for (size_t i = 0; i < 100; i++) {
-        hu_json_value_t *p = held->data.array.items[i];
-        char *dup = (char *)alloc.alloc(alloc.ctx, p->data.string.len + 1);
-        memcpy(dup, p->data.string.ptr, p->data.string.len);
-        dup[p->data.string.len] = '\0';
-        held_out[i] = dup;
-    }
-    *out_held_out = held_out;
-    *out_n_prompts = 100;
-    hu_json_free(&alloc, root);
-}
-
 typedef struct e2e_loaded_events {
     hu_reaction_event_t *events;
     char **event_storage;
@@ -518,12 +491,21 @@ static void test_e2e_closed_loop_deterministic_run1_vs_run2(void) {
     tear_down_env();
 }
 
+#if defined(HU_ENABLE_LEARNING) && defined(HU_ENABLE_SQLITE)
+static void test_e2e_closed_loop_pair_count_trigger_closes_the_loop(void);
+#endif
+
 void run_e2e_closed_loop_tests(void) {
     HU_TEST_SUITE("E2E-closed-loop");
     HU_RUN_TEST(test_e2e_closed_loop_dpo_shows_measurable_response_change);
     HU_RUN_TEST(test_e2e_closed_loop_all_synthetic_reactions_become_dpo_pairs);
     HU_RUN_TEST(test_e2e_closed_loop_provider_after_response_differs_from_before);
     HU_RUN_TEST(test_e2e_closed_loop_deterministic_run1_vs_run2);
+#if defined(HU_ENABLE_LEARNING) && defined(HU_ENABLE_SQLITE)
+    /* Dropped by the 2026-05-24 merge resolution a48c92d57, which re-took
+     * main's registration list; the test itself survived, unrun, until now. */
+    HU_RUN_TEST(test_e2e_closed_loop_pair_count_trigger_closes_the_loop);
+#endif
 }
 /* Spec 2026-05-19 (Task 7) — E2E proof that the DPO pair-count trigger
  * (`hu_training_runner_pair_count_should_fire`) actually closes the

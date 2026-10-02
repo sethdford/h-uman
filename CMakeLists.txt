@@ -784,6 +784,7 @@ set(HU_CORE_SOURCES
     src/agent/turn/turn_context.c
     src/agent/turn/turn_tools.c
     src/agent/turn/turn_tail.c
+    src/agent/turn/turn_plan.c
     src/agent/turn/reask.c
     src/agent/best_of_n.c
     src/agent/humanness.c
@@ -1645,6 +1646,7 @@ list(APPEND HU_CORE_SOURCES src/tts/speech_rewrite.c)
 list(APPEND HU_CORE_SOURCES src/tts/speech_direction.c)
 list(APPEND HU_CORE_SOURCES src/tts/opener_gate.c)
 list(APPEND HU_CORE_SOURCES src/context/voice_intent.c)
+list(APPEND HU_CORE_SOURCES src/context/voice_triggers.c)
 list(APPEND HU_CORE_SOURCES src/tts/speech_perform.c)
 
 # Cartesia full pipeline (requires libcurl for API calls)
@@ -3906,6 +3908,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_turn_context.c
     tests/test_turn_tools.c
     tests/test_turn_tail.c
+    tests/test_turn_plan.c
     tests/test_agent_turn_history_window.c
     tests/test_reask.c
     tests/test_turn_sources.c
@@ -4081,6 +4084,7 @@ list(APPEND HU_TEST_SOURCES tests/test_speech_rewrite.c)
 list(APPEND HU_TEST_SOURCES tests/test_speech_direction.c)
 list(APPEND HU_TEST_SOURCES tests/test_opener_gate.c)
 list(APPEND HU_TEST_SOURCES tests/test_voice_intent.c)
+list(APPEND HU_TEST_SOURCES tests/test_voice_triggers.c)
 list(APPEND HU_TEST_SOURCES tests/test_speech_perform.c)
 list(APPEND HU_TEST_SOURCES tests/test_send_voice_message.c)
 list(APPEND HU_TEST_SOURCES tests/test_voice_message_integration.c)
@@ -4195,6 +4199,7 @@ if(HU_ENABLE_SQLITE)
 endif()
 
 list(APPEND HU_TEST_SOURCES tests/test_curiosity_gaps.c)
+list(APPEND HU_TEST_SOURCES tests/test_memory_loader_scope.c)
 
 # Sprint 60 follow-up — crosstalk SQLite lookup. Test seeds the
 # messages table directly via sqlite3 to verify the lookup returns
@@ -4338,7 +4343,6 @@ list(APPEND HU_TEST_SOURCES
     tests/test_moderation.c
     tests/test_companion_safety.c
     tests/test_code_sandbox.c
-    tests/test_compaction_hierarchical.c
     tests/test_computer_use.c
     tests/test_image_gen.c
     tests/test_visual_grounding.c

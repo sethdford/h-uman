@@ -45,12 +45,13 @@ bool hu_expressive_share_allowed(bool somber, bool is_group, int64_t secs_since_
  * YouTube (needs a key), saved links via the share queue (NONE here). */
 hu_inspiration_medium_t hu_expressive_share_medium(hu_share_kind_t kind, bool have_youtube_key);
 
-/* Who decides a song/video share this turn: the director's share (LIVE), else
- * nothing when the director is LIVE, else today's dice (dice_hit). kind_out is
- * the director's kind, or NONE for a dice share (the medium is picked as today).
- * Saved links are not shared here. */
+/* Who decides a song/video share this turn: the director's share, only when
+ * the director is LIVE (then nothing else shares), else today's dice
+ * (dice_hit). Never when the inbound is somber (hu_expressive_somber).
+ * kind_out is the director's kind, or NONE for a dice share (the medium is
+ * picked as today). Saved links are not shared here. */
 bool hu_expressive_share_should_go(const hu_director_result_t *director, bool forms_live,
-                                   bool dice_hit, hu_share_kind_t *kind_out);
+                                   bool dice_hit, bool somber, hu_share_kind_t *kind_out);
 
 /* The director result to hand the sharer, or NULL: only a valid SHARE choice,
  * only with HU_DIRECTOR_FORMS LIVE, only past the guards (not somber, not a

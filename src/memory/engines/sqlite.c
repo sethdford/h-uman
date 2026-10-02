@@ -2160,6 +2160,31 @@ sqlite3 *hu_sqlite_memory_get_db(hu_memory_t *mem) {
     return ((hu_sqlite_memory_t *)mem->ctx)->db;
 }
 
+bool hu_sqlite_memory_session_of(hu_memory_t *mem, const char *key, size_t key_len, char *buf,
+                                 size_t cap) {
+    sqlite3 *db = hu_sqlite_memory_get_db(mem);
+    if (!db || !key || key_len == 0 || !buf || cap == 0)
+        return false;
+    buf[0] = '\0';
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(db, "SELECT COALESCE(session_id, '') FROM memories WHERE key = ?1", -1,
+                           &st, NULL) != SQLITE_OK)
+        return false;
+    sqlite3_bind_text(st, 1, key, (int)key_len, SQLITE_STATIC);
+    bool found = sqlite3_step(st) == SQLITE_ROW;
+    if (found) {
+        const char *sid = (const char *)sqlite3_column_text(st, 0);
+        size_t n = sid ? strlen(sid) : 0;
+        if (n >= cap)
+            n = cap - 1;
+        if (n)
+            memcpy(buf, sid, n);
+        buf[n] = '\0';
+    }
+    sqlite3_finalize(st);
+    return found;
+}
+
 #else /* !HU_ENABLE_SQLITE */
 #include "human/memory.h"
 
@@ -2178,6 +2203,16 @@ hu_memory_t hu_sqlite_memory_create(hu_allocator_t *alloc, const char *db_path) 
 hu_session_store_t hu_sqlite_memory_get_session_store(hu_memory_t *mem) {
     (void)mem;
     return (hu_session_store_t){.ctx = NULL, .vtable = NULL};
+}
+
+bool hu_sqlite_memory_session_of(hu_memory_t *mem, const char *key, size_t key_len, char *buf,
+                                 size_t cap) {
+    (void)mem;
+    (void)key;
+    (void)key_len;
+    if (buf && cap)
+        buf[0] = '\0';
+    return false;
 }
 
 #endif

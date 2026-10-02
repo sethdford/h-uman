@@ -1329,28 +1329,10 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
             return entry_step.err;
     }
 
-    /* Automatic planning + execution for complex tasks */
-    char *plan_ctx = NULL;
+    /* Resume an [ACTIVE_PLAN] (turn/turn_plan.c), then auto-plan complex tasks */
     size_t plan_ctx_len = 0;
+    char *plan_ctx = hu_turn_active_plan(agent, &plan_ctx_len);
 #ifndef HU_IS_TEST
-    if (agent->history_count > 0) {
-        size_t scan_n = agent->history_count < 10 ? agent->history_count : 10;
-        for (size_t k = 0; k < scan_n; k++) {
-            size_t hi = agent->history_count - 1 - k;
-            if (agent->history[hi].role != HU_ROLE_SYSTEM || !agent->history[hi].content)
-                continue;
-            const char *hc = agent->history[hi].content;
-            if (strncmp(hc, "[ACTIVE_PLAN]", 13) != 0)
-                continue;
-            if (plan_ctx == NULL) {
-                size_t clen = strlen(hc);
-                plan_ctx = hu_strndup(agent->alloc, hc, clen);
-                if (plan_ctx)
-                    plan_ctx_len = clen;
-            }
-            break;
-        }
-    }
     if (msg_len > 200 && agent->tools_count >= 5 && agent->provider.vtable &&
         agent->provider.vtable->chat) {
         const char *tool_names[32];
@@ -3793,6 +3775,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
         /* Compact history if it exceeds limits (before each provider call).
          * Uses LLM summarization when the provider is available, with
          * rule-based fallback. */
+        size_t hist_before_compact = agent->history_count;
         if (hu_should_compact(agent->history, agent->history_count, &compact_cfg)) {
             hu_error_t compact_err =
                 hu_compact_history_llm(agent->alloc, &agent->history, &agent->history_count,
@@ -3801,61 +3784,11 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                 hu_log_warn("agent", NULL, "history compaction failed: %s",
                             hu_error_string(compact_err));
 
-            /* Hierarchical summarization for deeper memory */
-            if (agent->provider.vtable && agent->provider.vtable->chat) {
-                char *session_sum = NULL, *chapter_sum = NULL, *overall_sum = NULL;
-                size_t session_len = 0, chapter_len = 0, overall_len = 0;
-                if (agent->history_count > 0) {
-                    const char *last_content = agent->history[agent->history_count - 1].content;
-                    size_t last_len = last_content ? strlen(last_content) : 0;
-                    if (last_len > 0 && hu_compact_hierarchical(
-                                            agent->alloc, &agent->provider, agent->model_name,
-                                            agent->model_name_len, last_content, last_len,
-                                            &session_sum, &session_len, &chapter_sum, &chapter_len,
-                                            &overall_sum, &overall_len) == HU_OK) {
-#if defined(HU_ENABLE_SQLITE)
-                        if (agent->memory && agent->memory->vtable &&
-                            agent->memory->vtable->store && agent->memory_session_id &&
-                            agent->memory_session_id_len > 0) {
-                            hu_memory_category_t hcat = {.tag = HU_MEMORY_CATEGORY_CONVERSATION};
-                            const char *hsid = agent->memory_session_id;
-                            size_t hsid_len = agent->memory_session_id_len;
-                            static const char src[] = "compaction";
-                            if (session_sum && session_len > 0) {
-                                hu_error_t store_err = hu_memory_store_with_source(
-                                    agent->memory, "hierarchical_session", 20, session_sum,
-                                    session_len, &hcat, hsid, hsid_len, src, sizeof(src) - 1);
-                                if (store_err != HU_OK)
-                                    hu_log_warn("agent", NULL, "memory store failed: %s",
-                                                hu_error_string(store_err));
-                            }
-                            if (chapter_sum && chapter_len > 0) {
-                                hu_error_t store_err = hu_memory_store_with_source(
-                                    agent->memory, "hierarchical_chapter", 21, chapter_sum,
-                                    chapter_len, &hcat, hsid, hsid_len, src, sizeof(src) - 1);
-                                if (store_err != HU_OK)
-                                    hu_log_warn("agent", NULL, "memory store failed: %s",
-                                                hu_error_string(store_err));
-                            }
-                            if (overall_sum && overall_len > 0) {
-                                hu_error_t store_err = hu_memory_store_with_source(
-                                    agent->memory, "hierarchical_overall", 21, overall_sum,
-                                    overall_len, &hcat, hsid, hsid_len, src, sizeof(src) - 1);
-                                if (store_err != HU_OK)
-                                    hu_log_warn("agent", NULL, "memory store failed: %s",
-                                                hu_error_string(store_err));
-                            }
-                        }
-#endif
-                    }
-                    if (session_sum)
-                        agent->alloc->free(agent->alloc->ctx, session_sum, session_len + 1);
-                    if (chapter_sum)
-                        agent->alloc->free(agent->alloc->ctx, chapter_sum, chapter_len + 1);
-                    if (overall_sum)
-                        agent->alloc->free(agent->alloc->ctx, overall_sum, overall_len + 1);
-                }
-            }
+            /* No "hierarchical" summaries here. They summarised only the last
+             * history message, were stored under three global keys that each
+             * compaction overwrote for whichever contact compacted last, and
+             * nothing read them by key: they reached other contacts' prompts
+             * through recall (removed 2026-10-01). */
         }
 
         /* Context pressure: estimate tokens, check thresholds, auto-compact if needed */
@@ -3882,6 +3815,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                 agent->context_pressure_warning_95_emitted = pr.warning_95_emitted;
             }
         }
+        hu_turn_note_history_shift(turn_ctx, hist_before_compact, agent->history_count);
 
         /* Format messages for this iteration using arena allocator */
         {
@@ -7102,8 +7036,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
         (void)hu_turn_tools(turn_ctx);
         turn_tool_results_count = turn_ctx->loop.turn_tool_results_count;
 
-        /* S17 iteration tail (replan on tool failure, mid-turn retrieval,
-         * scratchpad, checkpoint) lives in src/agent/turn/turn_tail.c. */
+        /* S17 iteration tail (replan, mid-turn retrieval, scratchpad, checkpoint): turn_tail.c */
         turn_ctx->context.plan_ctx = plan_ctx;
         turn_ctx->context.plan_ctx_len = plan_ctx_len;
         turn_ctx->loop.iter = iter;
@@ -7128,6 +7061,8 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
         hu_tool_cache_destroy(agent->alloc, turn_cache);
     if (acp_context)
         agent->alloc->free(agent->alloc->ctx, acp_context, acp_context_len + 1);
+    if (plan_ctx)
+        agent->alloc->free(agent->alloc->ctx, plan_ctx, plan_ctx_len + 1);
     if (agent->turn_arena)
         hu_arena_reset(agent->turn_arena);
     return HU_ERR_TIMEOUT;
