@@ -1081,6 +1081,7 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             .conversation_context = agent->conversation_context,
             .conversation_context_len = agent->conversation_context_len,
             .max_response_chars = agent->max_response_chars,
+            .response_limit_tight = agent->response_limit_tight,
             .intelligence_context = intelligence_ctx,
             .intelligence_context_len = intelligence_ctx_len,
             .instruction_context = instruction_ctx,

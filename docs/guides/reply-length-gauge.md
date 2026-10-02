@@ -47,6 +47,7 @@ huuman-labeled replies in the window:
 | `excess_rate` | share longer than this contact's own `seth.p90` |
 | `excess_chars_mean` | mean, over the daemon's replies, of `max(0, len - seth.p90)` -- the YapScore-style overshoot |
 | `deficit_chars_mean` | mean of `max(0, seth.p10 - len)` -- the undershoot |
+| `ks_d` / `ks_p` | two-sample Kolmogorov-Smirnov distance and asymptotic p-value between the daemon's and Seth's UTF-8 byte lengths |
 
 `overall` pools the same metrics across every measured contact, weighting
 each **reply** equally (not each contact), plus `contacts_measured` and
@@ -90,6 +91,8 @@ is mode `0600`.
 
 ## Related
 
+- `docs/guides/length-policy.md` -- `HU_LENGTH_POLICY`; this gauge is its
+  LIVE-canary measurement.
 - `scripts/measure_contact_reply_lengths.py` -- the sibling tool this reuses
   attribution from; measures only Seth's own reply lengths, to set the
   per-contact floor on the daemon's reply cap.

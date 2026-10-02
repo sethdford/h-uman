@@ -786,6 +786,7 @@ set(HU_CORE_SOURCES
     src/agent/turn/turn_tail.c
     src/agent/turn/turn_plan.c
     src/agent/turn/reask.c
+    src/agent/turn/length_policy.c
     src/agent/best_of_n.c
     src/agent/humanness.c
     src/agent/context.c
@@ -3899,6 +3900,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_agent.c
     tests/test_lean_head.c
     tests/test_reply_prompt.c
+    tests/test_length_policy.c
     tests/test_agent_turn_state.c
     tests/test_agent_turn_transport.c
     tests/turn_recording_provider.c
