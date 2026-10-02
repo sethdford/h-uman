@@ -207,6 +207,7 @@ void run_persona_tests(void);
 void run_terseness_tests(void);
 void run_circadian_tests(void);
 void run_relationship_tests(void);
+void run_contact_stage_tests(void);
 void run_replay_tests(void);
 void run_style_clone_tests(void);
 void run_uncertainty_tests(void);
@@ -409,6 +410,7 @@ void run_semantic_index_tests(void);
 void run_hybrid_reconstructive_tests(void);
 void run_semantic_recall_tests(void);
 void run_semantic_recall_register_tests(void);
+void run_context_relevance_tests(void);
 void run_embedder_http_tests(void);
 void run_w1_bitemporal_tests(void);
 void run_graph_state_tests(void);
@@ -522,6 +524,7 @@ void run_turn_plan_tests(void);                   /* agent-turn: [ACTIVE_PLAN] r
 void run_turn_tail_tests(void);                   /* agent-turn carve: S17-S18 iteration tail */
 void run_agent_turn_history_window_tests(void);   /* agent-turn: short-history scan windows */
 void run_reask_tests(void);                       /* agent-turn: re-ask predicate */
+void run_empty_retry_tests(void);                 /* agent-turn: retry a discarded draft */
 void run_spoken_turn_tests(void);                 /* voice: latency-first prompt profile */
 void run_turn_sources_tests(void);                /* agent-turn carve: source-presence pins */
 void run_agent_llm_latency_wall_clock_tests(void); /* M3 latency_ms measures wall clock */
@@ -927,6 +930,7 @@ void run_reply_delay_model_tests(void);
 void run_daemon_promise_keeper_tests(void);
 void run_daemon_insight_overuse_tests(void);
 void run_daemon_proposer_context_tests(void);
+void run_daemon_grief_decay_tests(void);
 void run_daemon_config_reload_tests(void);
 void run_daemon_identity_graph_tests(void);
 void run_daemon_reply_fallback_tests(void);
@@ -1319,6 +1323,7 @@ int main(int argc, char **argv) {
     run_terseness_tests();
     run_circadian_tests();
     run_relationship_tests();
+    run_contact_stage_tests();
     run_replay_tests();
     run_style_clone_tests();
     run_uncertainty_tests();
@@ -1517,6 +1522,7 @@ int main(int argc, char **argv) {
     run_hybrid_reconstructive_tests();
     run_semantic_recall_tests();
     run_semantic_recall_register_tests();
+    run_context_relevance_tests();
     run_embedder_http_tests();
     run_w1_bitemporal_tests();
     run_graph_state_tests();
@@ -1624,6 +1630,7 @@ int main(int argc, char **argv) {
     run_turn_plan_tests();
     run_agent_turn_history_window_tests();
     run_reask_tests();
+    run_empty_retry_tests();
     run_spoken_turn_tests();
     run_turn_sources_tests();
     /* M3 live-fire fix: provider latency_ms must span the blocking round trip */
@@ -2015,6 +2022,7 @@ int main(int argc, char **argv) {
     run_daemon_promise_keeper_tests();
     run_daemon_insight_overuse_tests();
     run_daemon_proposer_context_tests();
+    run_daemon_grief_decay_tests();
     run_daemon_config_reload_tests();
     run_daemon_identity_graph_tests();
     run_daemon_reply_fallback_tests();

@@ -15,7 +15,7 @@ else
     ratchet_autolock() { :; }
 fi
 
-MAX_BASELINE=10275   # auto-locked 2026-10-02 (was 10278)
+MAX_BASELINE=10266   # auto-locked 2026-10-02 (was 10275)
                      # main's #438 carved src/daemon.c to 10256 (10264 here with this
                      # branch's changes), so the largest file is src/agent/agent_turn.c,
                      # which the dead-code sweep had taken to 10511 against main's 10512.

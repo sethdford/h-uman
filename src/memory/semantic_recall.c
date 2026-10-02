@@ -231,13 +231,18 @@ bool hu_semantic_recall_hit_is_excluded(const char *key, size_t key_len, const c
     return content_is_bare_identity_question(content, content_len);
 }
 
-size_t hu_semantic_recall_filter_result(hu_allocator_t *alloc, hu_retrieval_result_t *res) {
+/* Drop every entry `drop` selects, preserving rank order and score alignment;
+ * dropped entries are freed and the arrays shrunk. Returns the number dropped. */
+typedef bool (*result_drop_fn)(const hu_memory_entry_t *e, double score, const void *ctx);
+
+static size_t result_drop_if(hu_allocator_t *alloc, hu_retrieval_result_t *res, result_drop_fn drop,
+                             const void *ctx) {
     if (!alloc || !res || !res->entries || res->count == 0)
         return 0;
     size_t old = res->count, keep = 0;
     for (size_t i = 0; i < old; i++) {
         hu_memory_entry_t *e = &res->entries[i];
-        if (hu_semantic_recall_hit_is_excluded(e->key, e->key_len, e->content, e->content_len)) {
+        if (drop(e, res->scores ? res->scores[i] : e->score, ctx)) {
             hu_memory_entry_free_fields(alloc, e);
             memset(e, 0, sizeof(*e));
             continue;
@@ -254,6 +259,26 @@ size_t hu_semantic_recall_filter_result(hu_allocator_t *alloc, hu_retrieval_resu
         return 0;
     result_shrink(alloc, res, old, keep);
     return old - keep;
+}
+
+static bool drop_excluded(const hu_memory_entry_t *e, double score, const void *ctx) {
+    (void)score;
+    (void)ctx;
+    return hu_semantic_recall_hit_is_excluded(e->key, e->key_len, e->content, e->content_len);
+}
+
+static bool drop_below(const hu_memory_entry_t *e, double score, const void *ctx) {
+    (void)e;
+    return score < *(const double *)ctx;
+}
+
+size_t hu_semantic_recall_filter_result(hu_allocator_t *alloc, hu_retrieval_result_t *res) {
+    return result_drop_if(alloc, res, drop_excluded, NULL);
+}
+
+size_t hu_semantic_recall_drop_below(hu_allocator_t *alloc, hu_retrieval_result_t *res,
+                                     double min_score) {
+    return result_drop_if(alloc, res, drop_below, &min_score);
 }
 
 hu_gate_mode_t hu_semantic_recall_mode(void) {
