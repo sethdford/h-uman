@@ -1882,10 +1882,17 @@ static size_t resolve_cache_slots_(void) {
     return (size_t)v;
 }
 
+/* The cache is global and outlives every caller, so its entries are cloned
+ * and freed with an allocator it owns. Borrowing the caller's left a
+ * dangling pointer whenever that allocator died first (2026-10-02 ASan:
+ * stack-use-after-scope in hu_world_model_cache_reset_for_tests). */
+static hu_allocator_t s_cache_alloc;
+
 /* MUST be called with WM_CACHE_LOCK held. Returns true if cache is ready. */
 static bool cache_init_locked_(void) {
     if (s_cache)
         return true;
+    s_cache_alloc = hu_system_allocator();
     size_t slots = resolve_cache_slots_();
     s_cache = (struct wm_cache_entry *)calloc(slots, sizeof(*s_cache));
     if (!s_cache)
@@ -2221,9 +2228,9 @@ hu_error_t hu_world_model_load_with_channel(hu_memory_facade_t *m, hu_allocator_
                 hu_world_model_free(slot->alloc, slot->wm);
                 slot->wm = NULL;
             }
-            slot->wm = clone_wm(alloc, fresh);
+            slot->wm = clone_wm(&s_cache_alloc, fresh);
             if (slot->wm) {
-                slot->alloc = alloc;
+                slot->alloc = &s_cache_alloc;
                 memcpy(slot->contact_id, contact_id, cid_len);
                 slot->contact_id[cid_len] = '\0';
                 slot->channel_len = channel_len;
