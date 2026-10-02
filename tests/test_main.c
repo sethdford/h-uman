@@ -436,6 +436,7 @@ void run_validator_chain_cache_tests(void);
 void run_daemon_e2e_validator_tests(void);
 void run_response_guard_tests(void);
 void run_response_guard_retry_tests(void);
+void run_reply_fragment_tests(void);
 void run_outbound_pipeline_tests(void);
 void run_outbound_strip_tests(void);
 void run_style_governor_tests(void);
@@ -448,6 +449,7 @@ void run_outbound_crosstalk_tests(void);
 void run_curiosity_gaps_tests(void);
 void run_agent_recall_provider_tests(void);
 void run_memory_loader_scope_tests(void);
+void run_imessage_send_route_tests(void); /* pure; every build */
 #ifdef HU_ENABLE_SQLITE
 void run_boundary_repo_tests(void);
 void run_opinions_repo_tests(void);
@@ -468,6 +470,7 @@ void run_daemon_outbound_bus_tests(void);
 void run_repo_util_sqlite_tests(void);
 void run_proactive_send_circuit_tests(void);
 void run_imessage_send_service_tests(void);
+void run_daemon_send_failure_tests(void);
 void run_social_graph_repo_tests(void);
 void run_self_awareness_repo_tests(void);
 void run_feed_items_repo_tests(void);
@@ -1544,6 +1547,7 @@ int main(int argc, char **argv) {
     run_daemon_e2e_validator_tests();
     run_response_guard_tests();
     run_response_guard_retry_tests();
+    run_reply_fragment_tests();
     run_outbound_pipeline_tests();
     run_outbound_strip_tests();
     run_style_governor_tests();
@@ -1553,6 +1557,7 @@ int main(int argc, char **argv) {
     run_curiosity_gaps_tests();
     run_agent_recall_provider_tests();
     run_memory_loader_scope_tests();
+    run_imessage_send_route_tests();
 #ifdef HU_ENABLE_SQLITE
     run_boundary_repo_tests();
     run_opinions_repo_tests();
@@ -1573,6 +1578,7 @@ int main(int argc, char **argv) {
     run_repo_util_sqlite_tests();
     run_proactive_send_circuit_tests();
     run_imessage_send_service_tests();
+    run_daemon_send_failure_tests();
     run_social_graph_repo_tests();
     run_self_awareness_repo_tests();
     run_feed_items_repo_tests();

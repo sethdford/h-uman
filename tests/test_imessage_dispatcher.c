@@ -992,8 +992,24 @@ static void burst_carry_reports_what_it_cannot_keep(void) {
     HU_ASSERT_STR_EQ(msgs[1].content, "one");
 }
 
+/* Round 2 of #591: the lost-reply note is keyed to THIS reply's own send
+ * results (a vtable->send error), with the SQLite-only failure counter as a
+ * second signal — so it works in builds without SQLite. A reply that sent
+ * nothing on purpose (a bare tapback, the parrot guard) gets no note. */
+static void lost_reply_note_keyed_to_this_replys_send_outcome(void) {
+    /* a send error on this reply, no counter (no-SQLite build) */
+    HU_ASSERT_TRUE(hu_daemon_reply_lost(false, true, 0, 0));
+    /* the counter moved during this reply */
+    HU_ASSERT_TRUE(hu_daemon_reply_lost(false, false, 4, 5));
+    /* nothing failed: a deliberate non-send */
+    HU_ASSERT_FALSE(hu_daemon_reply_lost(false, false, 4, 4));
+    /* some bubble arrived: the reply is not lost */
+    HU_ASSERT_FALSE(hu_daemon_reply_lost(true, true, 4, 5));
+}
+
 void run_imessage_dispatcher_tests(void) {
     HU_TEST_SUITE("imessage_dispatcher");
+    HU_RUN_TEST(lost_reply_note_keyed_to_this_replys_send_outcome);
     HU_RUN_TEST(invalid_args_short_circuit);
     HU_RUN_TEST(disabled_feature_falls_back_to_flat);
     HU_RUN_TEST(reply_failure_falls_back_to_flat);
