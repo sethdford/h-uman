@@ -42,6 +42,8 @@ from pathlib import Path
 
 import yaml
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling chat_template_rows
+
 # --------------------------------------------------------------------------
 # Config translation
 # --------------------------------------------------------------------------
@@ -293,6 +295,184 @@ def to_kto_examples(pairs: list) -> list:
 
 
 # --------------------------------------------------------------------------
+# Chat-template contract (2026-10-01)
+# --------------------------------------------------------------------------
+#
+# mlx-tune's preference trainers tokenize the raw string `prompt + chosen`
+# (mlx_tune/rl_trainers.py: ORPOTrainer._tokenize_preference_pair,
+# SimPOTrainer._tokenize_pair, KTOTrainer's `prompt + completion`). They never
+# apply a chat template and never append a stop token. A GLM adapter trained on
+# raw rows therefore never sees production's prompt shape
+# (`...<|assistant|>\n<think></think>`) and never learns where its turn ends;
+# the served 20260905 adapter answers ~13% of classifier-style prompts with an
+# immediate end-of-turn. The rows must arrive PRE-TEMPLATED -- built by
+# scripts/chat_template_rows.py, which train-glm-adapter.sh runs as the last
+# staging step -- and this driver refuses a GLM run on anything else.
+
+
+def is_glm_model(model_id) -> bool:
+    return "glm" in str(model_id or "").lower()
+
+
+def require_templated_corpus(model_id, data_dir) -> dict:
+    """Refuse to train a GLM adapter on raw rows. Returns the report."""
+    from chat_template_rows import templated_report
+
+    rep = templated_report(Path(data_dir) / "train.jsonl")
+    if not is_glm_model(model_id):
+        return rep
+    if os.environ.get("HU_MLX_TUNE_ALLOW_RAW_ROWS") == "1":
+        print(f"[mlx_tune_train] WARNING: HU_MLX_TUNE_ALLOW_RAW_ROWS=1 -- training on "
+              f"{rep['raw']} raw rows; the adapter will not learn production's template")
+        return rep
+    if rep["count"] == 0 or rep["raw"] != 0:
+        sys.exit(
+            f"[mlx_tune_train] FATAL: {rep['raw']}/{rep['count']} rows in {data_dir}/train.jsonl "
+            "are not chat-templated. mlx-tune tokenizes `prompt + chosen` verbatim, so raw rows "
+            "train a GLM adapter on a prompt shape production never sends and with no "
+            "end-of-turn token. Build the corpus with scripts/chat_template_rows.py (done "
+            "automatically by scripts/train-glm-adapter.sh --trainer mlx_tune)."
+        )
+    return rep
+
+
+# The shared-prefix trap (2026-10-01 review, C1). With batch_size 1, mlx-tune's
+# ORPO/SimPO take the prompt-prefix KV-sharing path, and `prompt_length` is
+# the COMMON TOKEN PREFIX of chosen_ids and rejected_ids
+# (rl_trainers.py `common_prefix_length`), not the prompt. The loss covers only
+# ids[prompt_length:] (losses.py compute_log_probs_pair_shared_prefix). Every
+# templated reply starts with "\n" -- its own token after `</think>` -- so the
+# FIRST reply token, plus any leading words both replies share, got no loss.
+# Measured on glm-v61-pref: all 426 rows lost 1-8 leading reply tokens. That
+# first position is exactly where the served adapter emits EOS / `</think>`.
+_PAIR_TOKENIZERS = {"orpo": "_tokenize_preference_pair", "simpo": "_tokenize_pair"}
+
+
+# pin_prompt_length depends on mlx-tune internals: which method the training
+# loop calls per pair, that the loop takes the native (not subprocess) path,
+# and the shared-prefix semantics of prompt_length. All three were read off
+# mlx-tune 0.6.0. A version bump could rename the method (the pin would then
+# shadow nothing and the bug returns silently) or route to the subprocess SFT
+# fallback (which never calls the pinned method). Fail loudly instead.
+PINNED_MLX_TUNE_VERSION = "0.6.0"
+_PAIR_CALL_SITES = {
+    # mode: (trainer class name, method whose source must call the tokenizer)
+    "orpo": ("ORPOTrainer", "_train_native"),
+    "simpo": ("SimPOTrainer", "train"),
+}
+
+
+def assert_pin_preconditions(trainer, train_mode, installed_version=None):
+    """Exit unless the prompt_length pin is guaranteed to take effect for
+    this trainer. No-op for KTO (no prompt_length). Returns True when checked."""
+    if train_mode not in _PAIR_TOKENIZERS:
+        return False
+    import inspect
+    import importlib.metadata
+
+    from mlx_tune import rl_trainers
+
+    version = installed_version or importlib.metadata.version("mlx-tune")
+    if version != PINNED_MLX_TUNE_VERSION:
+        sys.exit(f"[mlx_tune_train] FATAL: mlx-tune {version} installed; the prompt_length "
+                 f"pin was verified against {PINNED_MLX_TUNE_VERSION} only. Re-verify "
+                 "pin_prompt_length against the new trainer source, then bump "
+                 "PINNED_MLX_TUNE_VERSION.")
+    cls_name, loop_name = _PAIR_CALL_SITES[train_mode]
+    attr = _PAIR_TOKENIZERS[train_mode]
+    src = inspect.getsource(getattr(getattr(rl_trainers, cls_name), loop_name))
+    if f"self.{attr}(" not in src:
+        sys.exit(f"[mlx_tune_train] FATAL: {cls_name}.{loop_name} no longer calls "
+                 f"self.{attr}( -- pin_prompt_length would shadow a method the training "
+                 "loop never uses, and the first reply token would silently go untrained.")
+    if not getattr(trainer, "use_native", False):
+        sys.exit(f"[mlx_tune_train] FATAL: {cls_name}.use_native is False -- training would "
+                 "take the subprocess/SFT fallback, which never calls the pinned tokenizer "
+                 "(SimPO returns {'status': 'fallback'} without training at all).")
+    return True
+
+
+def pin_prompt_length(trainer, train_mode, tokenizer):
+    """Make the trainer's own per-pair tokenizer report prompt_length =
+    len(encode(prompt)), so the shared-prefix loss starts at the first reply
+    token. Installed as an instance attribute (shadows the class method; no
+    site-packages edit). Refuses a row whose prompt tokens are not an exact
+    prefix of both sequences -- then the KV cache would not be shareable.
+    No-op for KTO (whole-sequence loss, no prompt_length)."""
+    attr = _PAIR_TOKENIZERS.get(train_mode)
+    if attr is None:
+        return False
+    original = getattr(trainer, attr)
+
+    def tokenize_with_true_prompt_length(sample):
+        t = original(sample)
+        p_ids = list(tokenizer.encode(sample["prompt"]))
+        n = len(p_ids)
+        for side in ("chosen_ids", "rejected_ids"):
+            if list(t[side][:n]) != p_ids or len(t[side]) <= n:
+                raise ValueError(f"{side}: prompt tokens are not a strict prefix -- "
+                                 "row is untemplated or truncated")
+        t["prompt_length"] = n
+        return t
+
+    setattr(trainer, attr, tokenize_with_true_prompt_length)
+    return True
+
+
+def trainer_tokenization(trainer, sample, train_mode):
+    """(sequences, prompt_length) exactly as the trainer will train them, via
+    the trainer's OWN tokenization method (not a re-implementation)."""
+    attr = _PAIR_TOKENIZERS.get(train_mode)
+    if attr is not None:
+        t = getattr(trainer, attr)(sample)
+        return [t["chosen_ids"], t["rejected_ids"]], t["prompt_length"]
+    # KTO has no per-sample method; this mirrors KTOTrainer.train()'s
+    # `self.tokenizer.encode(prompt + completion)[:max_seq_length]`.
+    return [trainer.tokenizer.encode(sample["prompt"] + sample["completion"])[: trainer.max_seq_length]], None
+
+
+def assert_trainer_sees_template(trainer, dataset, train_mode, tokenizer, max_check=16,
+                                 batch_size=1):
+    """After the trainer exists, prove ITS tokenization of the templated rows
+    starts with exactly one [gMASK] (nothing re-added), ends with the
+    end-of-turn id (nothing truncated away), and -- for the pair trainers --
+    starts the loss at the first reply token (prompt_length ==
+    len(encode(prompt))). Exits on failure."""
+    from chat_template_rows import END_OF_TURN
+
+    gmask = tokenizer.convert_tokens_to_ids("[gMASK]")
+    eot = tokenizer.convert_tokens_to_ids(END_OF_TURN)
+    checked = 0
+    for sample in dataset[:max_check]:
+        try:
+            seqs, prompt_length = trainer_tokenization(trainer, sample, train_mode)
+        except ValueError as e:
+            sys.exit(f"[mlx_tune_train] FATAL: {e}")
+        if prompt_length is not None and prompt_length != len(tokenizer.encode(sample["prompt"])):
+            sys.exit(f"[mlx_tune_train] FATAL: trainer prompt_length={prompt_length} != "
+                     f"len(encode(prompt))={len(tokenizer.encode(sample['prompt']))} -- the first "
+                     "reply token(s) would get no loss (shared-prefix trap; see pin_prompt_length)")
+        for ids in seqs:
+            if not ids or ids[0] != gmask or list(ids).count(gmask) != 1:
+                sys.exit("[mlx_tune_train] FATAL: trainer tokenization does not start with "
+                         "exactly one [gMASK] -- BOS was re-added or the prompt is mangled")
+            if ids[-1] != eot:
+                sys.exit(f"[mlx_tune_train] FATAL: trainer tokenization ends with {ids[-1]}, "
+                         f"not end-of-turn {eot} ({END_OF_TURN!r}) -- row truncated or untemplated")
+            checked += 1
+    if train_mode in _PAIR_TOKENIZERS and batch_size == 1:
+        loss_note = "loss starts at the first reply token (shared-prefix path)"
+    elif train_mode in _PAIR_TOKENIZERS:
+        loss_note = (f"batch_size={batch_size}: non-shared path, loss covers the whole "
+                     "sequence including the prompt; prompt_length unused")
+    else:
+        loss_note = "KTO: loss covers the whole sequence"
+    print(f"[mlx_tune_train] template contract holds on {checked} trainer-tokenized sequences "
+          f"(one leading [gMASK], last token {END_OF_TURN!r}; {loss_note})")
+    return checked
+
+
+# --------------------------------------------------------------------------
 # The no-op guard -- reused verbatim in spirit from train-glm-adapter.sh
 # --------------------------------------------------------------------------
 
@@ -473,6 +653,15 @@ def cmd_dry_run(args: argparse.Namespace) -> int:
         print("[dry-run] FATAL: config has no 'data' key")
         ok = False
 
+    if data_dir and Path(data_dir, "train.jsonl").is_file():
+        from chat_template_rows import templated_report
+
+        trep = templated_report(Path(data_dir, "train.jsonl"))
+        print(f"[dry-run]   chat-templated rows: {trep['templated']}/{trep['count']}"
+              + ("" if trep["raw"] == 0 or not is_glm_model(model_id) else
+                 " -- raw; train-glm-adapter.sh templates them at stage time "
+                 "(a direct real run would refuse)"))
+
     if args.train_mode == "kto" and data_dir and Path(data_dir, "train.jsonl").is_file():
         pairs = load_preference_pairs(Path(data_dir, "train.jsonl"))
         kto_examples = to_kto_examples(pairs)
@@ -554,6 +743,8 @@ def cmd_train(args: argparse.Namespace) -> int:
     save_steps = int(cfg.get("save_every", 100))
     model_id = cfg["model"]
     data_dir = Path(cfg["data"])
+    # Before the 56 GB load: a raw corpus would waste the whole dark window.
+    require_templated_corpus(model_id, data_dir)
 
     print(f"[mlx_tune_train] loading base model: {model_id}")
     model, tokenizer = FastLanguageModel.from_pretrained(model_id)
@@ -616,6 +807,12 @@ def cmd_train(args: argparse.Namespace) -> int:
         )
     else:
         sys.exit(f"[mlx_tune_train] FATAL: unknown --train-mode {args.train_mode!r}")
+
+    if is_glm_model(model_id) and os.environ.get("HU_MLX_TUNE_ALLOW_RAW_ROWS") != "1":
+        assert_pin_preconditions(trainer, args.train_mode)
+        pin_prompt_length(trainer, args.train_mode, tokenizer)
+        assert_trainer_sees_template(trainer, train_dataset, args.train_mode, tokenizer,
+                                     batch_size=batch_size)
 
     print(f"Training Mode: {args.train_mode}")  # matches train-glm-adapter.sh's grep
     heldout = []

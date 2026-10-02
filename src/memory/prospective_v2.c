@@ -52,9 +52,12 @@ static hu_prospective_verdict_t pm_judge(hu_allocator_t *alloc, const hu_prospec
         return HU_PM_VERDICT_PARSE_FAIL;
     bool is_time = it->cue_kind == HU_PM_CUE_TIME;
     char user[PM_USER_CAP];
-    size_t ul = hu_prospective_judge_user(user, sizeof(user), turn->history, turn->history_len,
-                                          it->action, is_time ? NULL : it->trigger_value,
-                                          it->cue_kind, is_time ? turn->now - it->due_at : 0);
+    /* -1 (line omitted) for created_at 0 (legacy row) or in the future. */
+    int64_t noted_days = hu_prospective_noted_days(it->created_at, turn->now);
+    size_t ul =
+        hu_prospective_judge_user(user, sizeof(user), turn->history, turn->history_len, it->action,
+                                  is_time ? NULL : it->trigger_value, it->cue_kind,
+                                  is_time ? turn->now - it->due_at : 0, noted_days);
     if (ul == 0)
         return HU_PM_VERDICT_PARSE_FAIL;
     size_t sl = 0;

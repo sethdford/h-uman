@@ -711,16 +711,28 @@ hu_prospective_mirror_t hu_prospective_mirror_action(bool is_followup, const cha
     return HU_PM_MIRROR_REPHRASED;
 }
 
+/* Calibrated 2026-10-01 against scripts/pm_bench_local.py --judge model (GLM
+ * on :8741): the earlier wording ("not_now - still open, but this is not a
+ * good moment") never told the model that a candidate reaches it BECAUSE its
+ * moment arrived, so it missed 28 of 40 due/cued intentions (24 as not_now;
+ * set_f1 0.444). The verdicts are listed settled-first so the model checks
+ * the conversation for evidence before defaulting to fire, "time passing
+ * alone settles nothing" stops it inventing an off-screen resolution, and
+ * an unclear conversation still means not_now (spec §4.3: fail toward
+ * silence). */
 static const char k_pm_judge_system[] =
     "You check one reminder before it is shown to Seth while he texts a friend. You see the "
-    "recent conversation (oldest first) and one thing Seth meant to bring up. Answer with "
-    "exactly one word:\n"
-    "fire - it is still open and bringing it up now would be natural\n"
-    "already_resolved - the conversation shows it already happened, was answered, or no "
-    "longer applies\n"
-    "cancel - Seth or the other person called it off\n"
-    "not_now - still open, but this is not a good moment\n"
-    "If you are unsure, answer not_now.";
+    "recent conversation (oldest first), one thing Seth meant to bring up, and why it came up "
+    "now. Answer with exactly one word:\n"
+    "already_resolved - the conversation above shows it is covered: they already said how it "
+    "went, Seth already asked or answered it, or Seth already did it\n"
+    "cancel - Seth or the other person called it off, or it no longer applies\n"
+    "not_now - the conversation moved it to a later time, or it clearly has not happened yet\n"
+    "fire - none of the above: it is still open\n"
+    "Judge only from the conversation shown; time passing alone settles nothing. It came up "
+    "because its moment arrived: they just mentioned its topic, or the time Seth meant to follow "
+    "up has come. So a reminder that is still open should fire. If you cannot tell whether the "
+    "conversation settles it, answer not_now.";
 
 const char *hu_prospective_judge_system(size_t *len) {
     if (len)
@@ -730,7 +742,8 @@ const char *hu_prospective_judge_system(size_t *len) {
 
 size_t hu_prospective_judge_user(char *buf, size_t cap, const char *history, size_t history_len,
                                  const char *action, const char *cue,
-                                 hu_prospective_cue_kind_t kind, int64_t overdue_s) {
+                                 hu_prospective_cue_kind_t kind, int64_t overdue_s,
+                                 int64_t noted_days) {
     if (!buf || cap == 0)
         return 0;
     buf[0] = '\0';
@@ -758,9 +771,21 @@ size_t hu_prospective_judge_user(char *buf, size_t cap, const char *history, siz
                              "\nintention: %s\ncue: it came due %lld day(s) ago; nobody has "
                              "brought it up yet\n",
                              action, (long long)(overdue_s > 0 ? overdue_s / 86400 : 0));
-    else
-        pos = hu_buf_appendf(buf, cap, pos, "\nintention: %s\ncue: they just mentioned \"%s\"\n",
-                             action, cue ? cue : "");
+    else {
+        /* A keyword cue has no clock of its own: without the note's age the
+         * judge cannot tell "vet visit tomorrow" said yesterday from said
+         * today, and answered not_now ("not happened yet") on cross-day cues. */
+        pos = hu_buf_appendf(buf, cap, pos, "\nintention: %s\n", action);
+        if (noted_days >= 0) {
+            long long d = (long long)noted_days;
+            if (d == 0)
+                pos = hu_buf_appendf(buf, cap, pos, "noted: today\n");
+            else
+                pos =
+                    hu_buf_appendf(buf, cap, pos, "noted: %lld day%s ago\n", d, d == 1 ? "" : "s");
+        }
+        pos = hu_buf_appendf(buf, cap, pos, "cue: they just mentioned \"%s\"\n", cue ? cue : "");
+    }
     pos = hu_buf_appendf(buf, cap, pos, "answer:");
     if (pos >= cap - 1) { /* hu_buf_appendf clamps to cap-1 on truncation */
         buf[0] = '\0';
@@ -780,4 +805,11 @@ int64_t hu_prospective_local_day_start(int64_t now) {
     tmv.tm_isdst = -1;
     time_t m = mktime(&tmv);
     return m == (time_t)-1 ? now - (now % 86400) : (int64_t)m;
+}
+
+int64_t hu_prospective_noted_days(int64_t created_at, int64_t now) {
+    if (created_at <= 0 || created_at > now)
+        return -1;
+    int64_t span = hu_prospective_local_day_start(now) - hu_prospective_local_day_start(created_at);
+    return (span + 43200) / 86400;
 }

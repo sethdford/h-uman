@@ -122,10 +122,13 @@ hu_inspiration_medium_t hu_expressive_share_medium(hu_share_kind_t kind, bool ha
 }
 
 bool hu_expressive_share_should_go(const hu_director_result_t *director, bool forms_live,
-                                   bool dice_hit, hu_share_kind_t *kind_out) {
+                                   bool dice_hit, bool somber, hu_share_kind_t *kind_out) {
     if (kind_out)
         *kind_out = HU_SHARE_NONE;
-    if (director && director->form == HU_DIR_FORM_SHARE && director->share != HU_SHARE_NONE) {
+    if (somber)
+        return false;
+    if (forms_live && director && director->form == HU_DIR_FORM_SHARE &&
+        director->share != HU_SHARE_NONE) {
         if (director->share == HU_SHARE_SAVED)
             return false; /* the share queue sends saved links */
         if (kind_out)
