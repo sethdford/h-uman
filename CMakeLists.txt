@@ -786,6 +786,7 @@ set(HU_CORE_SOURCES
     src/agent/turn/turn_tail.c
     src/agent/turn/turn_plan.c
     src/agent/turn/reask.c
+    src/agent/turn/spoken_turn.c
     src/agent/turn/length_policy.c
     src/agent/best_of_n.c
     src/agent/humanness.c
@@ -855,6 +856,7 @@ set(HU_CORE_SOURCES
     src/agent/growth_narrative.c
     src/agent/frontier_persist.c
     src/context/conversation.c
+    src/context/reply_fragment.c
     src/context/contact_send_recency.c
     src/context/filler_recency.c
     src/context/contact_send_recency.c
@@ -1069,6 +1071,7 @@ set(HU_CORE_SOURCES
     src/agent/outbound/crosstalk_sqlite.c
     src/agent/outbound/persona.c
     src/agent/outbound/moderation.c
+    src/agent/outbound/guard_repair.c
     src/agent/outbound/stats.c
     src/agent/burst_egress.c
     src/agent/multimodal_policy.c
@@ -3874,6 +3877,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_daemon_e2e_validator.c
     tests/test_response_guard.c
     tests/test_response_guard_retry.c
+    tests/test_reply_fragment.c
     # Sprint 59 — outbound validation pipeline (Phase A runner contract).
     tests/test_outbound_pipeline.c
     # Sprint 59 Phase B — strip stage.
@@ -3921,6 +3925,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_turn_plan.c
     tests/test_agent_turn_history_window.c
     tests/test_reask.c
+    tests/test_spoken_turn.c
     tests/test_turn_sources.c
     tests/test_agent_llm_latency_wall_clock.c
     tests/test_agent_turn_request_overrides.c
