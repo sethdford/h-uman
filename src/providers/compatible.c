@@ -49,6 +49,48 @@
 static pthread_mutex_t g_compatible_chat_lock = PTHREAD_MUTEX_INITIALIZER;
 #endif
 
+/* X-HU-Purpose for this thread's next non-stream requests (compatible.h).
+ * The name is a static string owned by the caller; only [a-z_]{1,24} is kept,
+ * so nothing a caller passes can add a header line. No X-HU-Priority: an
+ * unmarked request is live, and every tagged caller today is on the reply
+ * path. Test builds keep the block the wire would carry. */
+static _Thread_local const char *s_purpose;
+#if HU_IS_TEST
+static _Thread_local char s_test_last_headers[64];
+const char *hu_compatible_test_last_headers(void) {
+    return s_test_last_headers;
+}
+#endif
+
+static bool compatible_purpose_name_ok(const char *name) {
+    size_t n = 0;
+    for (; name[n]; n++) {
+        if (n >= 24 || !((name[n] >= 'a' && name[n] <= 'z') || name[n] == '_'))
+            return false;
+    }
+    return n > 0;
+}
+
+const char *hu_compatible_purpose_set(const char *name) {
+    const char *prev = s_purpose;
+    s_purpose = (name && compatible_purpose_name_ok(name)) ? name : NULL;
+    return prev;
+}
+
+const char *hu_compatible_purpose_current(void) {
+    return s_purpose;
+}
+
+static const char *compatible_purpose_header(char *buf, size_t cap) {
+    buf[0] = '\0';
+    if (s_purpose)
+        (void)snprintf(buf, cap, "X-HU-Purpose: %s\r\n", s_purpose);
+#if HU_IS_TEST
+    (void)snprintf(s_test_last_headers, sizeof(s_test_last_headers), "%s", buf);
+#endif
+    return buf[0] ? buf : NULL;
+}
+
 typedef struct hu_compatible_ctx {
     char *api_key;
     size_t api_key_len;
@@ -389,10 +431,13 @@ static hu_error_t compatible_chat(void *ctx, hu_allocator_t *alloc,
     if (!cc || !request || !out)
         return HU_ERR_INVALID_ARGUMENT;
 
+    char purpose_hdr[64];
+    const char *extra_headers = compatible_purpose_header(purpose_hdr, sizeof(purpose_hdr));
 #if HU_IS_TEST
     (void)model;
     (void)model_len;
     (void)temperature;
+    (void)extra_headers;
     memset(out, 0, sizeof(*out));
     if (request->tools && request->tools_count > 0) {
         out->content = NULL;
@@ -469,8 +514,8 @@ static hu_error_t compatible_chat(void *ctx, hu_allocator_t *alloc,
     hu_http_request_opts_t http_opts;
     hu_compatible_request_opts_for_url(url_buf, (size_t)n, &http_opts);
     pthread_mutex_lock(&g_compatible_chat_lock);
-    err = hu_provider_http_post_json_opts(alloc, url_buf, auth, NULL, body, body_len, &http_opts,
-                                          &parsed);
+    err = hu_provider_http_post_json_opts(alloc, url_buf, auth, extra_headers, body, body_len,
+                                          &http_opts, &parsed);
     pthread_mutex_unlock(&g_compatible_chat_lock);
     alloc->free(alloc->ctx, body, body_len);
     if (err != HU_OK)

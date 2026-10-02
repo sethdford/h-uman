@@ -27,6 +27,20 @@ void hu_compatible_request_opts_for_url(const char *url, size_t url_len,
  * for any other provider type, including wrappers around one. NULL-safe. */
 bool hu_compatible_is_loopback(const hu_provider_t *p);
 
+/* Name the purpose of this thread's next non-stream requests: compatible_chat
+ * sends "X-HU-Purpose: <name>" so the local server can log what each call is
+ * for (never message text). `name` must be a static string matching
+ * [a-z_]{1,24}; anything else clears the tag. NULL clears. Returns the previous
+ * tag so the caller can restore it. No X-HU-Priority is added. */
+const char *hu_compatible_purpose_set(const char *name);
+const char *hu_compatible_purpose_current(void);
+
+#if defined(HU_IS_TEST) && HU_IS_TEST
+/* The extra-header block this thread's last compatible_chat carried ("" when
+ * untagged). */
+const char *hu_compatible_test_last_headers(void);
+#endif
+
 hu_error_t hu_compatible_create(hu_allocator_t *alloc, const char *api_key, size_t api_key_len,
                                 const char *base_url, size_t base_url_len, hu_provider_t *out);
 
