@@ -1247,6 +1247,8 @@ set(HU_CORE_SOURCES
     src/interactions/choices.c
     src/daemon.c
     src/daemon/daemon_shape.c
+    src/daemon/daemon_outbound_sanitize.c
+    src/daemon/daemon_reactive_calibration.c
     src/daemon/daemon_comfort_summary.c
     src/daemon/daemon_name_catch.c
     src/daemon/daemon_maintenance.c
@@ -4296,6 +4298,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_daemon_prospective_time.c
     tests/test_prospective_v2.c
     tests/test_cli_prospective.c
+    tests/test_daemon_outbound_sanitize.c
     tests/test_daemon_prospective.c
     tests/test_eval_score.c
     tests/test_corrective_rag.c

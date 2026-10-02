@@ -426,6 +426,22 @@ bool hu_daemon_director_call(hu_allocator_t *alloc, const char *combined, size_t
 #endif
 }
 
+bool hu_daemon_director_silence_overridden(const char *msg, size_t msg_len) {
+    if (!msg || msg_len == 0)
+        return false;
+    if (memchr(msg, '?', msg_len) != NULL)
+        return true;
+    if (msg_len >= 30)
+        return false;
+    static const char *const k_greetings[] = {"hey", "Hey", "hi",    "Hi",    "yo",
+                                              "Yo",  "sup", "hello", "Hello", "what"};
+    for (size_t i = 0; i < sizeof(k_greetings) / sizeof(k_greetings[0]); i++) {
+        if (strstr(msg, k_greetings[i]))
+            return true;
+    }
+    return false;
+}
+
 /* F27: Classify our response type for comfort pattern learning.
  * Heuristic: haha/lol/joke -> distraction; sorry/i understand/that sucks -> empathy;
  * very short (<20 chars) -> space; you should/try this/maybe -> advice; default empathy. */

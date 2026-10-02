@@ -129,6 +129,12 @@ void hu_daemon_director_end_turn(hu_agent_t *agent);
  * `key`/`key_len` is the batch session key. */
 void hu_daemon_director_contact_boundary(hu_agent_t *agent, const char *key, size_t key_len);
 
+/* A director SILENCE is overridden to a text reply when the message asks a
+ * question or is a short (< 30 bytes) greeting. `msg` must be NUL-terminated
+ * (the greeting check is strstr). Shared by the daemon and the replay
+ * harness. */
+bool hu_daemon_director_silence_overridden(const char *msg, size_t msg_len);
+
 /* F27: Classify our response type for comfort pattern learning.
  * Heuristic: haha/lol/joke -> distraction; sorry/i understand/that sucks -> empathy;
  * very short (<20 chars) -> space; you should/try this/maybe -> advice; default empathy. */
