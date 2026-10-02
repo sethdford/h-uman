@@ -4199,6 +4199,7 @@ if(HU_ENABLE_SQLITE)
 endif()
 
 list(APPEND HU_TEST_SOURCES tests/test_curiosity_gaps.c)
+list(APPEND HU_TEST_SOURCES tests/test_agent_recall_provider.c)
 list(APPEND HU_TEST_SOURCES tests/test_memory_loader_scope.c)
 
 # Sprint 60 follow-up — crosstalk SQLite lookup. Test seeds the
