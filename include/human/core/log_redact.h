@@ -48,9 +48,16 @@ const char *hu_log_text(const char *text, size_t len, size_t max, char *buf, siz
 
 /* Call-site forms: the compound-literal buffer lives until the end of the
  * enclosing block, which outlives the log call. Format with %s. */
+/* NULL-safe strlen as a function, not `(s) ? strlen(s) : 0` in the macro:
+ * when a caller passes a char array GCC's -Waddress flags the test as
+ * always true, and -Werror turns that into a build break. */
+static inline size_t hu_log_cstrlen(const char *s) {
+    return s ? strlen(s) : 0;
+}
+
 #define HU_LOG_WHO(h, n)         hu_log_who((h), (n), (char[32]){0}, 32)
-#define HU_LOG_WHO_CSTR(h)       hu_log_who((h), (h) ? strlen(h) : 0, (char[32]){0}, 32)
+#define HU_LOG_WHO_CSTR(h)       hu_log_who((h), hu_log_cstrlen(h), (char[32]){0}, 32)
 #define HU_LOG_TEXT(t, n, max)   hu_log_text((t), (n), (max), (char[128]){0}, 128)
-#define HU_LOG_TEXT_CSTR(t, max) hu_log_text((t), (t) ? strlen(t) : 0, (max), (char[128]){0}, 128)
+#define HU_LOG_TEXT_CSTR(t, max) hu_log_text((t), hu_log_cstrlen(t), (max), (char[128]){0}, 128)
 
 #endif /* HU_CORE_LOG_REDACT_H */
