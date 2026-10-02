@@ -203,14 +203,20 @@ static void fmt_top(char *buf, size_t cap, const hu_retrieval_result_t *res) {
 
 /* Score the message against K random stored vectors: the null sample. */
 static size_t null_sample(const hu_vector_store_t *store, const hu_embedding_t *query, float *out) {
-    size_t n = 0;
     if (!store || !query || !query->values)
         return 0;
+#ifndef HU_ENABLE_SQLITE
+    /* store_sqlite_vec.c is not compiled without SQLite: no null sample. */
+    (void)out;
+    return 0;
+#else
+    size_t n = 0;
     if (hu_vector_store_sqlite_vec_sample_scores(store, query, HU_CONTEXT_RELEVANCE_NULL_K, out,
                                                  &n) != HU_OK)
         return 0;
     hu_context_relevance_null_add(out, n);
     return n;
+#endif
 }
 
 bool hu_context_relevance_semantic(hu_allocator_t *alloc, hu_retrieval_result_t *sem, bool casual,
