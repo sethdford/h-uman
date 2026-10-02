@@ -29,6 +29,13 @@ typedef struct {
  * 110 words is ~42 s). A slim retry or canned fallback is not one. */
 bool hu_voice_intent_memo_shaped(const char *text, size_t len);
 
+/* Whitespace-separated words in s[0..len). */
+size_t hu_voice_intent_word_count(const char *s, size_t len);
+
+/* A short (<= 12 words) question about what time / where / when / address:
+ * answers faster as text. */
+bool hu_voice_intent_is_logistics(const char *s, size_t len);
+
 /* HU_VOICE_MIN_GAP_SEC: a non-negative integer, else the 3 h default. */
 uint32_t hu_voice_intent_parse_gap(const char *env);
 

@@ -244,3 +244,58 @@ def test_write_err_under_budget_excludes_steps_from_scoring_denominators(tmp_pat
     assert counts["silent_steps"] == 48    # unaffected: excluded step isn't tagged silent
     assert counts["cross_day_expectations"] == 16   # unaffected: not tagged cross_day
     assert counts["update_steps"] == 16              # unaffected: not tagged update
+
+
+# --dump-steps: the per-step expected-vs-judged diagnostic (off by default).
+
+
+def test_dump_steps_is_off_by_default(tmp_path, monkeypatch):
+    out = tmp_path / "logs"
+    rc = pb.main(["--human-bin", fake_bin(tmp_path, monkeypatch, "always"), "--judge", "fire",
+                  "--out-dir", str(out)])
+    assert rc == 1
+    assert [p.name for p in out.iterdir()][0].startswith("pm-bench-local-")
+    assert len(list(out.iterdir())) == 1
+    assert not list(tmp_path.glob("*.jsonl"))
+
+
+def test_dump_steps_writes_one_private_line_per_judged_step(tmp_path, monkeypatch):
+    out = tmp_path / "logs"
+    dump = tmp_path / "diag" / "steps.jsonl"
+    rc = pb.main(["--human-bin", fake_bin(tmp_path, monkeypatch, "always"), "--judge", "fire",
+                  "--out-dir", str(out), "--dump-steps", str(dump)])
+    assert rc == 1
+    assert stat.S_IMODE(dump.stat().st_mode) == 0o600
+    rows = [json.loads(line) for line in dump.read_text().splitlines()]
+    report = json.loads(next(out.iterdir()).read_text())
+    assert len(rows) == report["steps"] == 112
+    classes = {r["class"] for r in rows}
+    assert classes == {"clean", "overloaded", "silent_negative", "cancellation", "reschedule",
+                       "cross_day_keyword", "cross_day_time"}
+    # overloaded-taco: the cued intention is expected and judged fire; the four
+    # distractors were never cued, so the filter never sent them to the judge.
+    [ov] = [r for r in rows if r["scenario"] == "overloaded-taco"]
+    by_key = {i["key"]: i for i in ov["intentions"]}
+    assert by_key["taco"] == {"key": "taco", "expected": True, "verdict": "fire"}
+    assert len(by_key) == 5
+    assert all(i == {"key": k, "expected": False, "verdict": "not_candidate"}
+               for k, i in by_key.items() if k != "taco")
+    # a silent-negative step: nothing expected, the always-fire fake fired anyway.
+    sil = [r for r in rows if r["class"] == "silent_negative"]
+    assert len(sil) == 24 and all(r["tags"] == ["silent"] for r in sil)
+    assert all(r["intentions"][0]["expected"] is False and r["intentions"][0]["verdict"] == "fire"
+               for r in sil)
+    # counts agree with the report: every expected+fire pair is a TP.
+    tp = sum(1 for r in rows for i in r["intentions"] if i["expected"] and i["verdict"] == "fire")
+    assert tp == report["counts"]["tp"]
+    text = dump.read_text()  # keys and verdicts only: no action, cue or conversation text
+    for s in pb.SITUATIONS:
+        assert s["action"] not in text and s["cue_text"] not in text and s["reply"] not in text
+
+
+def test_dump_steps_is_not_written_on_a_refusal(tmp_path, monkeypatch):
+    dump = tmp_path / "steps.jsonl"
+    rc = pb.main(["--human-bin", fake_bin(tmp_path, monkeypatch, "crash"), "--out-dir",
+                  str(tmp_path / "logs"), "--dump-steps", str(dump)])
+    assert rc == 2
+    assert not dump.exists()
