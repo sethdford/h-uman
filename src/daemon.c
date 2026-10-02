@@ -9023,7 +9023,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                         send_target, send_target_len, &msgs[batch_start],
                                         choreo_plan.segments[seg].text,
                                         choreo_plan.segments[seg].text_len, &seg_text_sent,
-                                        choreo_plan.segment_count > 1);
+                                        director_result.reaction);
                                 } else {
                                     seg_text_sent =
                                         ch->channel->vtable->send(
@@ -9141,7 +9141,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                     ch->channel, agent ? agent->persona : NULL,
                                                     agent, config, send_target, send_target_len,
                                                     &msgs[batch_start], dt_chunks[dt], dt_len,
-                                                    &dt_text_sent, true);
+                                                    &dt_text_sent, director_result.reaction);
                                             } else {
                                                 dt_text_sent = ch->channel->vtable->send(
                                                                    ch->channel->ctx, batch_key,
@@ -9174,7 +9174,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                             ch->channel, agent ? agent->persona : NULL, agent,
                                             config, send_target, send_target_len,
                                             &msgs[batch_start], fragments[f].text,
-                                            fragments[f].text_len, &frag_text_sent, true);
+                                            fragments[f].text_len, &frag_text_sent,
+                                            director_result.reaction);
                                     } else {
                                         frag_text_sent =
                                             ch->channel->vtable->send(ch->channel->ctx, batch_key,
@@ -9247,10 +9248,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 const char *const *pv_ptr =
                                     all_send_media_cnt > 0 ? all_send_media_ptr : NULL;
                                 size_t pv_cnt = all_send_media_cnt;
-                                /* F2c: Route through action-surface dispatcher for iMessage
-                                 * when enabled, else flat send. This is the reactive-reply
-                                 * path for short single-fragment messages with no choreography
-                                 * and no multi-fragment split. */
+                                /* F2c: iMessage via the action-surface dispatcher when enabled
+                                 * (else flat): one fragment, no choreography or split. Text is
+                                 * always sent; a reaction only if the director asked (DEF-2). */
                                 const char *ch_name_f2c =
                                     ch->channel->vtable->name
                                         ? ch->channel->vtable->name(ch->channel->ctx)
@@ -9261,7 +9261,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     (void)hu_daemon_dispatch_imessage_reply_msg_ex(
                                         ch->channel, agent ? agent->persona : NULL, agent, config,
                                         send_target, send_target_len, &msgs[batch_start], send_text,
-                                        send_text_len, &whole_text_sent, false);
+                                        send_text_len, &whole_text_sent, director_result.reaction);
                                 } else {
                                     whole_text_sent =
                                         ch->channel->vtable->send(

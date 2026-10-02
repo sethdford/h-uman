@@ -87,8 +87,30 @@ static bool reacted_to(int64_t message_id, int64_t now) {
     return message_id > 0 && s_reacted.message_id == message_id && now - s_reacted.at < 600;
 }
 
+/* The emoji that carries a director-chosen reaction (the channel maps it back
+ * to the native tapback). */
+static const char *director_reaction_emoji(hu_reaction_type_t r) {
+    switch (r) {
+    case HU_REACTION_THUMBS_UP:
+        return "👍";
+    case HU_REACTION_THUMBS_DOWN:
+        return "👎";
+    case HU_REACTION_HAHA:
+        return "😂";
+    case HU_REACTION_EMPHASIS:
+        return "‼️";
+    case HU_REACTION_QUESTION:
+        return "❓";
+    default:
+        return "❤️";
+    }
+}
+
 /* Dispatcher: route iMessage reply through predicate (Phase A) to choose
- * between threaded / flat / tapback based on reply style facts. */
+ * between threaded / flat / tapback based on reply style facts. The predicate
+ * picks only the shape of the text (threaded or flat); whether a reaction
+ * rides along is the director's call (`director_reaction`, NONE = no
+ * reaction). The reply text always goes out. */
 static hu_error_t dispatch_reply_inner(struct hu_channel *ch, const struct hu_persona *persona,
                                        const struct hu_agent *agent, const struct hu_config *config,
                                        const char *target, size_t target_len,
@@ -96,7 +118,7 @@ static hu_error_t dispatch_reply_inner(struct hu_channel *ch, const struct hu_pe
                                        const char *body, size_t body_len,
                                        const struct hu_conversation_snapshot *snapshot,
                                        int64_t inferred_message_id_for_react, bool *out_text_sent,
-                                       bool text_required) {
+                                       hu_reaction_type_t director_reaction) {
     if (out_text_sent)
         *out_text_sent = false;
     if (!ch || !ch->vtable || !target || !body) {
@@ -148,6 +170,10 @@ static hu_error_t dispatch_reply_inner(struct hu_channel *ch, const struct hu_pe
                              tb_key, &tb_band);
         hu_reply_style_t demoted =
             hu_daemon_demote_stale_tapback_style(style, facts.seconds_since_parent, &tb_band);
+        if (director_reaction != HU_REACTION_NONE &&
+            hu_daemon_demote_stale_tapback_style(HU_REPLY_STYLE_TAPBACK, facts.seconds_since_parent,
+                                                 &tb_band) != HU_REPLY_STYLE_TAPBACK)
+            director_reaction = HU_REACTION_NONE; /* never a late reaction */
         if (demoted != style) {
             hu_log_info("human", agent ? agent->observer : NULL,
                         "reply-style tapback stale (parent %llds old > band cap) — demoted to "
@@ -157,10 +183,11 @@ static hu_error_t dispatch_reply_inner(struct hu_channel *ch, const struct hu_pe
         }
     }
 
-    /* The text was decided upstream: never swallow it, never react twice. */
-    hu_reply_style_t style_chosen = style;
+    /* The text was decided upstream: never swallow it, never react twice, and
+     * react only when the director asked for it (DEF-2). */
     style = hu_imessage_reply_style_finalize(
-        style, reacted_to(inferred_message_id_for_react, (int64_t)time(NULL)), text_required);
+        style, reacted_to(inferred_message_id_for_react, (int64_t)time(NULL)),
+        director_reaction != HU_REACTION_NONE);
 
     /* Pacing (C5) — start. */
     uint64_t pace_start = 0;
@@ -237,7 +264,9 @@ static hu_error_t dispatch_reply_inner(struct hu_channel *ch, const struct hu_pe
         break;
     }
 
+    case HU_REPLY_STYLE_TAPBACK: /* finalize never returns a bare tapback */
     case HU_REPLY_STYLE_FLAT:
+        actual_style = HU_REPLY_STYLE_FLAT;
         if (ch->vtable->send) {
             err = ch->vtable->send(ch->ctx, target, target_len, body, body_len, NULL, 0);
             if (err == HU_OK) {
@@ -248,36 +277,10 @@ static hu_error_t dispatch_reply_inner(struct hu_channel *ch, const struct hu_pe
         }
         break;
 
-    case HU_REPLY_STYLE_TAPBACK:
-        if (ch->vtable->react_emoji) {
-            const char *emoji = "👍"; /* universal-positive default */
-            err = ch->vtable->react_emoji(ch->ctx, target, target_len,
-                                          inferred_message_id_for_react, emoji, strlen(emoji));
-            if (err == HU_OK) {
-                tier_used = "tapback";
-                hu_log_info("human", agent ? agent->observer : NULL,
-                            "imessage_dispatch: tapback emoji sent");
-            }
-        }
-        if (err != HU_OK || !ch->vtable->react_emoji) {
-            if (ch->vtable->send) {
-                err = ch->vtable->send(ch->ctx, target, target_len, body, body_len, NULL, 0);
-                if (err == HU_OK) {
-                    tier_used = "flat_fallback";
-                    actual_style = HU_REPLY_STYLE_FLAT;
-                    hu_log_info("human", agent ? agent->observer : NULL,
-                                "imessage_dispatch: tapback unavailable, flat fallback");
-                }
-            }
-        }
-        break;
-
     case HU_REPLY_STYLE_TAPBACK_PLUS_FLAT:
-        /* Both: tapback first (best-effort), then text. */
+        /* The director's reaction first (best-effort), then the text. */
         if (ch->vtable->react_emoji) {
-            /* heart for emotional acknowledgment; a tapback upgraded to carry
-             * its bubble keeps the thumbs-up it was chosen as */
-            const char *emoji = style_chosen == HU_REPLY_STYLE_TAPBACK ? "👍" : "❤️";
+            const char *emoji = director_reaction_emoji(director_reaction);
             if (ch->vtable->react_emoji(ch->ctx, target, target_len, inferred_message_id_for_react,
                                         emoji, strlen(emoji)) == HU_OK) {
                 s_reacted.message_id = inferred_message_id_for_react;
@@ -577,13 +580,13 @@ hu_error_t hu_daemon_dispatch_imessage_reply(
     const struct hu_conversation_snapshot *snapshot, int64_t inferred_message_id_for_react) {
     return hu_daemon_dispatch_imessage_reply_ex(
         ch, persona, agent, config, target, target_len, parent_msg_guid, parent_guid_len, body,
-        body_len, snapshot, inferred_message_id_for_react, NULL, false);
+        body_len, snapshot, inferred_message_id_for_react, NULL, HU_REACTION_NONE);
 }
 
 hu_error_t hu_daemon_dispatch_imessage_reply_msg_ex(
     void *ch, const void *persona, const struct hu_agent *agent, const struct hu_config *config,
     const char *target, size_t target_len, const struct hu_channel_loop_msg *msg, const char *body,
-    size_t body_len, bool *out_text_sent, bool text_required) {
+    size_t body_len, bool *out_text_sent, hu_reaction_type_t director_reaction) {
     const hu_channel_loop_msg_t *m = (const hu_channel_loop_msg_t *)msg;
     if (out_text_sent)
         *out_text_sent = false;
@@ -608,7 +611,7 @@ hu_error_t hu_daemon_dispatch_imessage_reply_msg_ex(
         (struct hu_channel *)ch, (const struct hu_persona *)persona, agent, config, target,
         target_len, guid, guid ? strlen(guid) : 0, body, body_len,
         (const struct hu_conversation_snapshot *)&snap, m ? (int64_t)m->message_id : 0,
-        out_text_sent, text_required);
+        out_text_sent, director_reaction);
 }
 
 /* ── production_outcomes: one row per DELIVERED reply ─────────────────────── */
@@ -815,7 +818,7 @@ hu_error_t hu_daemon_dispatch_imessage_reply_ex(
     const struct hu_config *config, const char *target, size_t target_len,
     const char *parent_msg_guid, size_t parent_guid_len, const char *body, size_t body_len,
     const struct hu_conversation_snapshot *snapshot, int64_t inferred_message_id_for_react,
-    bool *out_text_sent, bool text_required) {
+    bool *out_text_sent, hu_reaction_type_t director_reaction) {
     int64_t hold_ms = hu_daemon_reply_hold_wait_ms(target, target_len, hu_time_get_current_ms());
     if (hold_ms > 0) {
 #ifndef HU_IS_TEST
@@ -832,7 +835,7 @@ hu_error_t hu_daemon_dispatch_imessage_reply_ex(
     }
     return dispatch_reply_inner(ch, persona, agent, config, target, target_len, parent_msg_guid,
                                 parent_guid_len, body, body_len, snapshot,
-                                inferred_message_id_for_react, out_text_sent, text_required);
+                                inferred_message_id_for_react, out_text_sent, director_reaction);
 }
 
 /* One draft at a time: the reply loop handles one contact's batch at a time. */
