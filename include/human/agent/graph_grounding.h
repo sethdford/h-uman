@@ -98,7 +98,11 @@ bool hu_graph_ground_is_placeholder_name(const char *name, size_t name_len, cons
  * the higher-scored row), and after the entity lines render the contact's
  * HU_GG_TOPIC_LINE_MAX most recent TOPICs on one "Been talking about: a, b, c"
  * line (only on a non-empty block). EMOTION never seeds. */
-#define HU_GG_NAMES            0x4u
+#define HU_GG_NAMES 0x4u
+/* Never seed an EMOTION entity, even when the message names it ("love you"
+ * must not ground on the contact's "love"). Used with HU_GG_REQUIRE_FULL_NAME
+ * for HU_CONTEXT_RELEVANCE's casual-turn decision. */
+#define HU_GG_NO_EMOTION_SEED  0x8u
 #define HU_GG_TYPED_NAME_BONUS 0.5
 #define HU_GG_TOPIC_LINE_MAX   3
 

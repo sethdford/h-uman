@@ -640,7 +640,7 @@ static size_t casual_grounding_len(gg_fixture_t *fx, const char *relevance, cons
     hu_agent_load_graph_grounding(agent, &fx->loader, msg, strlen(msg), &ctx, &ctx_len);
     if (ctx) {
         HU_ASSERT_EQ(strlen(ctx), ctx_len); /* NUL-terminated at the cut */
-        HU_ASSERT_TRUE(strstr(ctx, "sailboat") != NULL);
+        HU_ASSERT_TRUE(strstr(msg, "sailboat") == NULL || strstr(ctx, "sailboat") != NULL);
         fx->alloc.free(fx->alloc.ctx, ctx, ctx_len + 1);
     }
     unsetenv("HU_GRAPH_GROUNDING");
@@ -661,6 +661,53 @@ static void test_context_relevance_injects_relevant_graph_on_casual_turn(void) {
     HU_ASSERT_TRUE(live <= (size_t)HU_CONTEXT_RELEVANCE_DEFAULT_CASUAL_BYTES);
     /* lexical miss + fallback LIVE: not query-conditioned, still dropped */
     HU_ASSERT_EQ((int)casual_grounding_len(&fx, "live", "live", "wanna grab tacos tonight"), 0);
+    gg_fixture_close(&fx);
+}
+
+/* The casual decision is strict: an EMOTION entity the message names, or a
+ * multi-word entity it names only partly, does not make the turn relevant.
+ * Plain lexical seeding (what ANALYTICAL turns use) would ground on all three. */
+static void test_context_relevance_casual_graph_needs_full_name_and_no_emotion(void) {
+    gg_fixture_t fx;
+    gg_fixture_open(&fx);
+    int64_t id = 0;
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(fx.graph, "alice", 5, "love", 4, HU_ENTITY_EMOTION, NULL, &id),
+        HU_OK);
+    HU_ASSERT_EQ(
+        hu_graph_upsert_entity(fx.graph, "alice", 5, "work trip", 9, HU_ENTITY_EVENT, NULL, &id),
+        HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(fx.graph, "alice", 5, "home renovation", 15,
+                                        HU_ENTITY_TOPIC, NULL, &id),
+                 HU_OK);
+    const char *msgs[] = {"love you", "at work rn", "home now"};
+    for (size_t i = 0; i < 3; i++) {
+        char *out = NULL;
+        size_t out_len = 0;
+        HU_ASSERT_EQ(hu_graph_ground_compose(&fx.loader, "alice", 5, msgs[i], strlen(msgs[i]), 0,
+                                             &out, &out_len, NULL),
+                     HU_OK);
+        HU_ASSERT_NOT_NULL(out); /* lexical seeding matches... */
+        fx.alloc.free(fx.alloc.ctx, out, out_len + 1);
+        hu_agent_t *agent = (hu_agent_t *)calloc(1, sizeof(hu_agent_t));
+        HU_ASSERT_NOT_NULL(agent);
+        agent->alloc = &fx.alloc;
+        agent->memory_session_id = "alice";
+        agent->memory_session_id_len = 5;
+        agent->turn_tier = (int)HU_TIER_REFLEXIVE;
+        setenv("HU_GRAPH_GROUNDING", "on", 1);
+        setenv("HU_CONTEXT_RELEVANCE", "live", 1);
+        char *ctx = NULL;
+        size_t ctx_len = 0;
+        hu_agent_load_graph_grounding(agent, &fx.loader, msgs[i], strlen(msgs[i]), &ctx, &ctx_len);
+        HU_ASSERT_TRUE(ctx == NULL); /* ...the casual relevance decision does not */
+        HU_ASSERT_EQ((int)ctx_len, 0);
+        unsetenv("HU_GRAPH_GROUNDING");
+        unsetenv("HU_CONTEXT_RELEVANCE");
+        free(agent);
+    }
+    /* naming the whole entity still counts */
+    HU_ASSERT_TRUE(casual_grounding_len(&fx, "live", NULL, "how was the work trip") > 0);
     gg_fixture_close(&fx);
 }
 
@@ -1755,6 +1802,7 @@ void run_graph_grounding_tests(void) {
     HU_RUN_TEST(test_self_facts_mode_defaults_off);
     HU_RUN_TEST(test_load_grounding_contact_fallback_gate);
     HU_RUN_TEST(test_context_relevance_injects_relevant_graph_on_casual_turn);
+    HU_RUN_TEST(test_context_relevance_casual_graph_needs_full_name_and_no_emotion);
     HU_RUN_TEST(test_loader_golden_lexical_plus_self_facts);
     HU_RUN_TEST(test_loader_live_output_equals_compose_turn);
     HU_RUN_TEST(test_compose_turn_golden_and_stats);
