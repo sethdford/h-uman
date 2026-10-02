@@ -5,19 +5,22 @@
  *
  * RED-TEAM-2: 14 tests targeting MCP, hooks, session, and instruction discovery.
  */
+// @covers-none
+/* Cross-module red-team suite; it does not test src/security/adversarial.c, whose name the
+ * reference checker would otherwise infer. */
 #define HU_IS_TEST 1
-#include "test_framework.h"
+#include "human/agent.h"
+#include "human/agent/compaction_structured.h"
+#include "human/agent/instruction_discover.h"
+#include "human/agent/session_persist.h"
+#include "human/config.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
-#include "human/config.h"
-#include "human/mcp_manager.h"
 #include "human/hook.h"
 #include "human/hook_pipeline.h"
+#include "human/mcp_manager.h"
 #include "human/permission.h"
-#include "human/agent/session_persist.h"
-#include "human/agent/instruction_discover.h"
-#include "human/agent/compaction_structured.h"
-#include "human/agent.h"
+#include "test_framework.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,13 +46,12 @@ static hu_agent_t make_test_agent(hu_allocator_t *alloc) {
 }
 
 /* Allocate owned messages for an agent. Caller must free. */
-static void agent_add_msg(hu_allocator_t *alloc, hu_agent_t *agent,
-                          hu_role_t role, const char *content) {
+static void agent_add_msg(hu_allocator_t *alloc, hu_agent_t *agent, hu_role_t role,
+                          const char *content) {
     if (agent->history_count >= agent->history_cap) {
         size_t new_cap = agent->history_cap == 0 ? 8 : agent->history_cap * 2;
         hu_owned_message_t *nh = (hu_owned_message_t *)alloc->realloc(
-            alloc->ctx, agent->history,
-            agent->history_cap * sizeof(hu_owned_message_t),
+            alloc->ctx, agent->history, agent->history_cap * sizeof(hu_owned_message_t),
             new_cap * sizeof(hu_owned_message_t));
         HU_ASSERT_NOT_NULL(nh);
         agent->history = nh;
@@ -77,8 +79,7 @@ static void free_agent_history(hu_allocator_t *alloc, hu_agent_t *agent) {
             alloc->free(alloc->ctx, m->tool_call_id, m->tool_call_id_len + 1);
     }
     if (agent->history)
-        alloc->free(alloc->ctx, agent->history,
-                    agent->history_cap * sizeof(hu_owned_message_t));
+        alloc->free(alloc->ctx, agent->history, agent->history_cap * sizeof(hu_owned_message_t));
     agent->history = NULL;
     agent->history_count = 0;
     agent->history_cap = 0;
@@ -104,7 +105,9 @@ static void write_file(const char *dir, const char *name, const char *content) {
 static void rm_rf(const char *dir) {
     char cmd[512];
     snprintf(cmd, sizeof(cmd), "rm -rf '%s'", dir);
-    (void)system(cmd);
+    if (system(cmd) != 0) {
+        /* best-effort cleanup; a (void) cast does not silence glibc warn_unused_result */
+    }
 }
 
 /* ======================================================================
@@ -161,9 +164,12 @@ static void test_mcp_out_of_order_server_lookup(void) {
 
     struct hu_mcp_server_entry entries[3];
     memset(entries, 0, sizeof(entries));
-    entries[0].name = "alpha"; entries[0].command = "/bin/true";
-    entries[1].name = "beta";  entries[1].command = "/bin/true";
-    entries[2].name = "gamma"; entries[2].command = "/bin/true";
+    entries[0].name = "alpha";
+    entries[0].command = "/bin/true";
+    entries[1].name = "beta";
+    entries[1].command = "/bin/true";
+    entries[2].name = "gamma";
+    entries[2].command = "/bin/true";
 
     hu_mcp_manager_t *mgr = NULL;
     hu_error_t err = hu_mcp_manager_create(&alloc, entries, 3, &mgr);
@@ -233,8 +239,8 @@ static void test_mcp_batched_exceed_max_servers(void) {
 
     /* Try to create more than max */
     size_t over_count = HU_MCP_MANAGER_MAX_SERVERS + 5;
-    struct hu_mcp_server_entry *entries = (struct hu_mcp_server_entry *)
-        alloc.alloc(alloc.ctx, over_count * sizeof(struct hu_mcp_server_entry));
+    struct hu_mcp_server_entry *entries = (struct hu_mcp_server_entry *)alloc.alloc(
+        alloc.ctx, over_count * sizeof(struct hu_mcp_server_entry));
     memset(entries, 0, over_count * sizeof(struct hu_mcp_server_entry));
 
     char names[HU_MCP_MANAGER_MAX_SERVERS + 5][32];
@@ -353,8 +359,8 @@ static void test_hook_posthook_timeout_session_intact(void) {
 
     /* Post-hook with timeout behavior — required hook returns unexpected code */
     hu_hook_result_t post_result;
-    err = hu_hook_pipeline_post_tool(reg, &alloc, "file_write", 10, "{}", 2,
-                                     "output", 6, true, &post_result);
+    err = hu_hook_pipeline_post_tool(reg, &alloc, "file_write", 10, "{}", 2, "output", 6, true,
+                                     &post_result);
     HU_ASSERT_EQ(err, HU_OK);
     /* Required hook with exit 137 → deny */
     HU_ASSERT_EQ(post_result.decision, HU_HOOK_DENY);
@@ -377,15 +383,19 @@ static void test_hook_interleaved_pre_post_decisions(void) {
 
     /* Two pre-hooks: first warns, second allows */
     hu_hook_entry_t h1 = {
-        .name = "warn_hook", .name_len = 9,
+        .name = "warn_hook",
+        .name_len = 9,
         .event = HU_HOOK_PRE_TOOL_EXECUTE,
-        .command = "echo warn", .command_len = 9,
+        .command = "echo warn",
+        .command_len = 9,
         .required = false,
     };
     hu_hook_entry_t h2 = {
-        .name = "allow_hook", .name_len = 10,
+        .name = "allow_hook",
+        .name_len = 10,
         .event = HU_HOOK_PRE_TOOL_EXECUTE,
-        .command = "true", .command_len = 4,
+        .command = "true",
+        .command_len = 4,
         .required = false,
     };
     err = hu_hook_registry_add(reg, &alloc, &h1);
@@ -448,8 +458,7 @@ static void test_session_save_append_save(void) {
     hu_agent_t agent2 = make_test_agent(&alloc);
     /* Pre-allocate history for load */
     agent2.history_cap = 8;
-    agent2.history = (hu_owned_message_t *)alloc.alloc(
-        alloc.ctx, 8 * sizeof(hu_owned_message_t));
+    agent2.history = (hu_owned_message_t *)alloc.alloc(alloc.ctx, 8 * sizeof(hu_owned_message_t));
     memset(agent2.history, 0, 8 * sizeof(hu_owned_message_t));
 
     err = hu_session_persist_load(&alloc, &agent2, tmpdir, sid2);
@@ -483,8 +492,7 @@ static void test_session_load_during_save(void) {
     /* Immediate load — the file should be fully written (atomic rename) */
     hu_agent_t loaded = make_test_agent(&alloc);
     loaded.history_cap = 8;
-    loaded.history = (hu_owned_message_t *)alloc.alloc(
-        alloc.ctx, 8 * sizeof(hu_owned_message_t));
+    loaded.history = (hu_owned_message_t *)alloc.alloc(alloc.ctx, 8 * sizeof(hu_owned_message_t));
     memset(loaded.history, 0, 8 * sizeof(hu_owned_message_t));
 
     err = hu_session_persist_load(&alloc, &loaded, tmpdir, sid);
@@ -535,8 +543,7 @@ static void test_session_two_interleaved_saves(void) {
     /* Load each and verify isolation */
     hu_agent_t loaded1 = make_test_agent(&alloc);
     loaded1.history_cap = 4;
-    loaded1.history = (hu_owned_message_t *)alloc.alloc(
-        alloc.ctx, 4 * sizeof(hu_owned_message_t));
+    loaded1.history = (hu_owned_message_t *)alloc.alloc(alloc.ctx, 4 * sizeof(hu_owned_message_t));
     memset(loaded1.history, 0, 4 * sizeof(hu_owned_message_t));
 
     err = hu_session_persist_load(&alloc, &loaded1, tmpdir, sid1);
@@ -546,8 +553,7 @@ static void test_session_two_interleaved_saves(void) {
 
     hu_agent_t loaded2 = make_test_agent(&alloc);
     loaded2.history_cap = 4;
-    loaded2.history = (hu_owned_message_t *)alloc.alloc(
-        alloc.ctx, 4 * sizeof(hu_owned_message_t));
+    loaded2.history = (hu_owned_message_t *)alloc.alloc(alloc.ctx, 4 * sizeof(hu_owned_message_t));
     memset(loaded2.history, 0, 4 * sizeof(hu_owned_message_t));
 
     err = hu_session_persist_load(&alloc, &loaded2, tmpdir, sid2);
@@ -691,17 +697,15 @@ static void test_instruction_path_toctou_null_byte(void) {
     char *canonical = NULL;
     size_t canonical_len = 0;
     hu_error_t err = hu_instruction_validate_path(
-        &alloc, path_with_null, sizeof(path_with_null) - 1,
-        &canonical, &canonical_len);
+        &alloc, path_with_null, sizeof(path_with_null) - 1, &canonical, &canonical_len);
     /* Should fail due to embedded null */
     HU_ASSERT_EQ(err, HU_ERR_SECURITY_COMMAND_NOT_ALLOWED);
     HU_ASSERT_NULL(canonical);
 
     /* Also test path that doesn't exist */
     const char *nonexistent = "/tmp/hu_conc_nonexistent_path_12345";
-    err = hu_instruction_validate_path(
-        &alloc, nonexistent, strlen(nonexistent),
-        &canonical, &canonical_len);
+    err = hu_instruction_validate_path(&alloc, nonexistent, strlen(nonexistent), &canonical,
+                                       &canonical_len);
     HU_ASSERT_EQ(err, HU_ERR_NOT_FOUND);
 
     HU_ASSERT_EQ(hu_tracking_allocator_leaks(ta), 0);

@@ -11,9 +11,14 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+// @covers-none
+/* Not standalone: this covers src/doctor/check_chatdb.c through its exported
+ * vtable struct hu_doctor_check_chatdb. check-test-references.sh only matches
+ * exported functions, so it cannot see a struct and needs the marker above. */
 /* Forward declaration of the check */
 extern hu_doctor_check_t hu_doctor_check_chatdb;
 
+#ifdef __APPLE__ /* chat.db exists only on macOS; run_doctor_chatdb_tests registers these there */
 /* Test: chatdb_readable returns missing when file doesn't exist */
 static void test_chatdb_missing_returns_fail_with_missing_reason(void) {
     /* Create a temporary directory to serve as HOME with no chat.db */
@@ -137,8 +142,8 @@ static void test_chatdb_permission_denied_returns_fail_with_fda_link(void) {
     rmdir(temp_home);
 }
 
+#else
 /* Test: on non-macOS platforms, check returns NA */
-#ifndef __APPLE__
 static void test_chatdb_platform_not_applicable_returns_na(void) {
     hu_doctor_check_result_t result = hu_doctor_check_chatdb.run(&hu_doctor_check_chatdb, NULL);
     HU_ASSERT_EQ((int)result.verdict, (int)HU_DOCTOR_NA);
