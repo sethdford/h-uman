@@ -10,9 +10,11 @@
 #ifdef HU_ENABLE_SQLITE
 
 #include "human/agent.h"
+#include "human/agent/turn.h"
 #include "human/core/allocator.h"
 #include "human/humanness.h"
 #include "human/memory.h"
+#include "test_env_guard.h"
 #include "test_tmpdir.h"
 #include "turn_recording_provider.h"
 #include <stdio.h>
@@ -28,44 +30,26 @@ typedef struct {
     hu_memory_t mem;
     bool have_mem;
     char dir[256];
-    char saved_home[512];
-    char saved_state[512];
-    bool had_home, had_state;
+    hu_test_env_guard_t env; /* HOME / HU_STATE_DIR as they were before the turn */
 } hedge_turn_t;
 
-static void env_swap(hedge_turn_t *t) {
-    const char *h = getenv("HOME"), *s = getenv("HU_STATE_DIR");
-    t->had_home = h != NULL;
-    t->had_state = s != NULL;
-    if (h)
-        snprintf(t->saved_home, sizeof(t->saved_home), "%s", h);
-    if (s)
-        snprintf(t->saved_state, sizeof(t->saved_state), "%s", s);
-    setenv("HOME", t->dir, 1);
-    setenv("HU_STATE_DIR", t->dir, 1);
-}
-
-static void env_restore(hedge_turn_t *t) {
-    if (t->had_home)
-        setenv("HOME", t->saved_home, 1);
-    else
-        unsetenv("HOME");
-    if (t->had_state)
-        setenv("HU_STATE_DIR", t->saved_state, 1);
-    else
-        unsetenv("HU_STATE_DIR");
-}
+/* The current test's tmpdir, for the runner (HU_RUN_TEST_ENV_GUARDED) to
+ * remove after restoring the env — a failed assert longjmps past deinit. */
+static char s_hedge_scratch[256];
 
 static bool hedge_turn_init(hedge_turn_t *t, hu_allocator_t *alloc, bool seed_memory) {
     memset(t, 0, sizeof(*t));
     if (!hu_test_mkdtemp("/tmp/hu_hedge_turn_", t->dir, sizeof(t->dir)))
         return false;
-    env_swap(t);
+    snprintf(s_hedge_scratch, sizeof(s_hedge_scratch), "%s", t->dir);
+    hu_test_env_guard_save(&t->env);
+    setenv("HOME", t->dir, 1);
+    setenv("HU_STATE_DIR", t->dir, 1);
     if (seed_memory) {
         t->mem = hu_sqlite_memory_create(alloc, ":memory:");
         t->have_mem = t->mem.vtable != NULL;
         if (!t->have_mem)
-            return false;
+            goto fail;
         hu_memory_category_t cat = {.tag = HU_MEMORY_CATEGORY_CORE};
         const char *key = "fav_color", *val = "favorite color: teal";
         (void)t->mem.vtable->store(t->mem.ctx, key, strlen(key), val, strlen(val), &cat, NULL, 0);
@@ -74,9 +58,18 @@ static bool hedge_turn_init(hedge_turn_t *t, hu_allocator_t *alloc, bool seed_me
     if (hu_agent_from_config(&t->agent, alloc, trp_provider(&t->trp), NULL, 0,
                              t->have_mem ? &t->mem : NULL, NULL, NULL, NULL, "hedge-model", 11,
                              "hedge", 5, 0.7, t->dir, strlen(t->dir), 5, 50, false, 1, NULL, 0,
-                             NULL, 0, NULL) != HU_OK)
-        return false;
+                             NULL, 0, NULL) != HU_OK) {
+        trp_deinit(&t->trp);
+        goto fail;
+    }
     return true;
+fail:
+    if (t->have_mem && t->mem.vtable->deinit)
+        t->mem.vtable->deinit(t->mem.ctx);
+    hu_test_env_guard_restore(&t->env);
+    hu_test_rm_rf(t->dir);
+    s_hedge_scratch[0] = '\0';
+    return false;
 }
 
 static void hedge_turn_deinit(hedge_turn_t *t) {
@@ -84,8 +77,9 @@ static void hedge_turn_deinit(hedge_turn_t *t) {
     trp_deinit(&t->trp);
     if (t->have_mem && t->mem.vtable->deinit)
         t->mem.vtable->deinit(t->mem.ctx);
-    env_restore(t);
+    hu_test_env_guard_restore(&t->env);
     hu_test_rm_rf(t->dir);
+    s_hedge_scratch[0] = '\0';
 }
 
 /* Seed the metacognition ring with one low-confidence turn: the learned
@@ -143,11 +137,31 @@ static void hedge_turn_casual_turn_does_not_hedge(void) {
     hedge_turn_deinit(&t);
 }
 
+/* The stream path's retrieval signal (hu_turn_memory_relevant) applies the
+ * same Self-RAG gate + verify as S3, so a recall that S3 would drop as
+ * irrelevant does not count as "retrieval found something" there either. */
+static void hedge_memory_relevant_uses_self_rag_like_s3(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hedge_turn_t t;
+    HU_ASSERT_TRUE(hedge_turn_init(&t, &alloc, false));
+    HU_ASSERT_TRUE(t.agent.sota.sota_initialized && t.agent.sota.srag_config.enabled);
+    static const char q[] = "what actually happened around here yesterday";
+    static const char unrelated[] = "yesterday it rained hard, otherwise a quiet day";
+    static const char related[] = "around here yesterday the street fair actually happened";
+    HU_ASSERT_FALSE(hu_turn_memory_relevant(&t.agent, q, sizeof(q) - 1, NULL, 0));
+    HU_ASSERT_FALSE(
+        hu_turn_memory_relevant(&t.agent, q, sizeof(q) - 1, unrelated, sizeof(unrelated) - 1));
+    HU_ASSERT_TRUE(
+        hu_turn_memory_relevant(&t.agent, q, sizeof(q) - 1, related, sizeof(related) - 1));
+    hedge_turn_deinit(&t);
+}
+
 void run_humanness_hedge_turn_tests(void) {
     HU_TEST_SUITE("humanness_hedge_turn");
-    HU_RUN_TEST(hedge_turn_low_confidence_and_empty_retrieval_hedges);
-    HU_RUN_TEST(hedge_turn_relevant_retrieval_does_not_hedge);
-    HU_RUN_TEST(hedge_turn_casual_turn_does_not_hedge);
+    HU_RUN_TEST_ENV_GUARDED(hedge_turn_low_confidence_and_empty_retrieval_hedges, s_hedge_scratch);
+    HU_RUN_TEST_ENV_GUARDED(hedge_turn_relevant_retrieval_does_not_hedge, s_hedge_scratch);
+    HU_RUN_TEST_ENV_GUARDED(hedge_turn_casual_turn_does_not_hedge, s_hedge_scratch);
+    HU_RUN_TEST_ENV_GUARDED(hedge_memory_relevant_uses_self_rag_like_s3, s_hedge_scratch);
 }
 
 #else

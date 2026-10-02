@@ -8,6 +8,7 @@
 #include "human/core/allocator.h"
 #include "human/core/string.h"
 #include "human/persona.h"
+#include "test_env_guard.h"
 #include "test_framework.h"
 #include "test_tmpdir.h"
 #include "turn_recording_provider.h"
@@ -131,50 +132,34 @@ typedef struct {
     hu_agent_t agent;
     trp_t trp;
     char dir[256];
-    char saved_home[512];
-    char saved_state[512];
-    bool had_home, had_state;
+    hu_test_env_guard_t env; /* HOME / HU_STATE_DIR as they were before the turn */
 } hm_turn_t;
 
-/* HOME and HU_STATE_DIR point at the scratch dir for the turn: hermetic. */
-static void hm_env_swap(hm_turn_t *t) {
-    const char *h = getenv("HOME"), *s = getenv("HU_STATE_DIR");
-    t->had_home = h != NULL;
-    t->had_state = s != NULL;
-    if (h)
-        snprintf(t->saved_home, sizeof(t->saved_home), "%s", h);
-    if (s)
-        snprintf(t->saved_state, sizeof(t->saved_state), "%s", s);
-    setenv("HOME", t->dir, 1);
-    setenv("HU_STATE_DIR", t->dir, 1);
-}
-
-static void hm_env_restore(hm_turn_t *t) {
-    if (t->had_home)
-        setenv("HOME", t->saved_home, 1);
-    else
-        unsetenv("HOME");
-    if (t->had_state)
-        setenv("HU_STATE_DIR", t->saved_state, 1);
-    else
-        unsetenv("HU_STATE_DIR");
-}
+/* The current test's tmpdir, for the runner to remove (HU_RUN_TEST_ENV_GUARDED
+ * restores HOME / HU_STATE_DIR there too, so a failed assert that longjmps
+ * past hm_turn_deinit cannot leak them into later suites). */
+static char s_hm_scratch[256];
 
 static bool hm_turn_init(hm_turn_t *t, hu_allocator_t *alloc) {
     memset(t, 0, sizeof(*t));
     if (!hu_test_mkdtemp("/tmp/hu_hm_turn_", t->dir, sizeof(t->dir)))
         return false;
-    hm_env_swap(t);
+    snprintf(s_hm_scratch, sizeof(s_hm_scratch), "%s", t->dir);
+    hu_test_env_guard_save(&t->env);
+    setenv("HOME", t->dir, 1);
+    setenv("HU_STATE_DIR", t->dir, 1);
     trp_init(&t->trp, NULL, 0, "ok.");
     if (hu_agent_from_config(&t->agent, alloc, trp_provider(&t->trp), NULL, 0, NULL, NULL, NULL,
                              NULL, "hm-model", 8, "hm", 2, 0.7, t->dir, strlen(t->dir), 5, 50,
                              false, 1, NULL, 0, NULL, 0, NULL) != HU_OK)
-        return false;
+        goto fail_no_agent;
     t->agent.active_channel = "imessage";
     t->agent.active_channel_len = 8;
     hu_persona_t *p = (hu_persona_t *)alloc->alloc(alloc->ctx, sizeof(*p));
-    if (!p)
-        return false;
+    if (!p) {
+        hu_agent_deinit(&t->agent);
+        goto fail_no_agent;
+    }
     memset(p, 0, sizeof(*p));
     p->name = hu_strndup(alloc, "testname", 8);
     p->name_len = 8;
@@ -184,13 +169,20 @@ static bool hm_turn_init(hm_turn_t *t, hu_allocator_t *alloc) {
     }
     t->agent.persona = p;
     return true;
+fail_no_agent:
+    trp_deinit(&t->trp);
+    hu_test_env_guard_restore(&t->env);
+    hu_test_rm_rf(t->dir);
+    s_hm_scratch[0] = '\0';
+    return false;
 }
 
 static void hm_turn_deinit(hm_turn_t *t) {
     hu_agent_deinit(&t->agent);
     trp_deinit(&t->trp);
-    hm_env_restore(t);
+    hu_test_env_guard_restore(&t->env);
     hu_test_rm_rf(t->dir);
+    s_hm_scratch[0] = '\0';
 }
 
 /* Run one turn with HU_HARD_MOMENT=<mode>, stderr captured into a malloc'd
@@ -303,7 +295,7 @@ void run_hard_moment_tests(void) {
     HU_RUN_TEST(hard_moment_apply_shadow_classifies_but_leaves_prompt);
     HU_RUN_TEST(hard_moment_apply_live_appends_matching_note);
     HU_RUN_TEST(hard_moment_apply_live_neutral_message_leaves_prompt);
-    HU_RUN_TEST(hard_moment_agent_turn_shadow_logs_and_leaves_prompt);
-    HU_RUN_TEST(hard_moment_agent_turn_off_is_silent);
-    HU_RUN_TEST(hard_moment_agent_turn_live_puts_the_note_in_the_prompt);
+    HU_RUN_TEST_ENV_GUARDED(hard_moment_agent_turn_shadow_logs_and_leaves_prompt, s_hm_scratch);
+    HU_RUN_TEST_ENV_GUARDED(hard_moment_agent_turn_off_is_silent, s_hm_scratch);
+    HU_RUN_TEST_ENV_GUARDED(hard_moment_agent_turn_live_puts_the_note_in_the_prompt, s_hm_scratch);
 }
