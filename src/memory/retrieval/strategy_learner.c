@@ -198,6 +198,9 @@ hu_error_t hu_strategy_learner_record_gated(hu_strategy_learner_t *learner,
                                             hu_query_category_t category,
                                             hu_retrieval_strategy_t strategy, bool success,
                                             int64_t now_ts) {
+    /* TODO(learning-loops): a real outcome is "a retrieved item was USED in the
+     * reply" (and the contact engaged, via the DEF-8 tapback/reply join);
+     * record that from the turn, keyed by the strategy that retrieved it. */
     if (hu_strategy_signal_mode() == HU_GATE_LIVE)
         return HU_OK; /* "returned rows" is not a retrieval outcome — write nothing */
     return hu_strategy_learner_record(learner, category, strategy, success, now_ts);
