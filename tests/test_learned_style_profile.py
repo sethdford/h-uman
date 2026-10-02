@@ -170,7 +170,7 @@ def test_thresholds_omit_small_contacts_and_buckets():
     assert "shape:question" in b and b["shape:question"]["n"] == 3
     assert "shape:story" not in b                           # n=2 < 3
     assert "pace:rapid" not in b
-    assert prof["schema"] == "learned-style/v1"
+    assert prof["schema"] == "learned-style/v2"
     assert prof["window_days"] == 180 and prof["half_life_days"] == 21
 
 
@@ -627,10 +627,15 @@ def test_output_file_has_no_text_leaves(tmp_path, capsys):
     e.build(_fill_two(reply=SECRET_OUT))
     assert e.run() == 0
     prof = e.load()
-    metadata = {("schema",): "learned-style/v1", ("persona",): "seth",
+    metadata = {("schema",): "learned-style/v2", ("persona",): "seth",
                 ("generated_at",): NOW_ISO}
     leaves = list(_leaves(prof))
     assert len(leaves) > 40
+    # The walk covers the v2 behaviour fields too (they are leaves of every
+    # stats node), so a text value in any of them fails below.
+    names = {p[-1] for p, _ in leaves}
+    assert {"latency_p90_s", "tapback_only_rate", "love", "double_text_rate",
+            "initiation_share", "voice_memo_rate", "inter_bubble_gap_s_p50"} <= names
     for path, v in leaves:
         if isinstance(v, str):
             assert path in metadata and metadata[path] == v, path

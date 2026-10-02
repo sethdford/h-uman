@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Nightly learner for the Learned Style Profile (learned-style/v1).
+"""Nightly learner for the Learned Style Profile (learned-style/v2).
 
 Learns how Seth texts each persona contact from his OWN sent iMessages, per
 situation, and writes ~/.human/personas/<persona>.learned-style.json for the C
@@ -50,8 +50,12 @@ import unicodedata
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import eval_conversation_quality as cq  # noqa: E402
+import learned_style_v2 as lsv2  # noqa: E402
 
-SCHEMA = "learned-style/v1"
+SCHEMA = "learned-style/v2"
+# A previous file of either schema is read for the per-run cap and history:
+# v2 keeps every v1 field identical and only adds fields.
+READABLE_SCHEMAS = ("learned-style/v1", SCHEMA)
 WINDOW_DAYS = 180
 HALF_LIFE_DAYS = 21
 PAIR_WINDOW_S = 6 * 3600
@@ -225,27 +229,54 @@ def in_bucket(sample, bucket):
     return sample["rapid"]
 
 
-def build_profile(samples_by_contact, persona, now):
-    """The learned-style/v1 document from per-contact samples. Contacts with
-    n < 5 and buckets with n < 3 are omitted; global covers every sample."""
+def _starts_in(starts, bucket):
+    """Initiation applies to the contact level and time:* buckets only: a
+    thread start answers no inbound, so it has no shape or pace."""
+    kind, val = bucket.split(":", 1)
+    return [s for s in starts if s["band"] == val] if kind == "time" else None
+
+
+def build_profile(samples_by_contact, persona, now, behaviour=None):
+    """The learned-style/v2 document from per-contact samples. Contacts with
+    n < 5 and buckets with n < 3 are omitted; global covers every sample.
+    The v1 fields are computed exactly as in v1; behaviour (per contact:
+    response units, thread starts and observed segments) adds the v2 fields,
+    each group shrunk with its own n_eff."""
+    behaviour = behaviour or {}
+    empty = {"units": [], "starts": [], "segments": []}
     every = [s for ss in samples_by_contact.values() for s in ss]
     glob = compute_stats(every) if every else None
+    if glob is not None:
+        bh = list(behaviour.values())
+        glob.update(lsv2.raw_node(every, [u for b in bh for u in b["units"]],
+                                  [x for b in bh for x in b["starts"]],
+                                  [g for b in bh for g in b["segments"]]))
+        lsv2.order_v2(glob)
     contacts = {}
     for c in sorted(samples_by_contact):
         ss = samples_by_contact[c]
         if len(ss) < MIN_CONTACT_N:
             continue
+        bh = behaviour.get(c, empty)
         overall = shrink(compute_stats(ss), glob)
+        overall.update(lsv2.raw_node(ss, bh["units"], bh["starts"], bh["segments"]))
+        overall = lsv2.shrink_v2(overall, glob)
         buckets = {}
         for b in BUCKETS:
             bs = [s for s in ss if in_bucket(s, b)]
-            if len(bs) >= MIN_BUCKET_N:
-                buckets[b] = shrink(compute_stats(bs), overall)
-        contacts[c] = {"overall": overall, "buckets": buckets}
+            if len(bs) < MIN_BUCKET_N:
+                continue
+            st = shrink(compute_stats(bs), overall)
+            starts = _starts_in(bh["starts"], b)
+            st.update(lsv2.raw_node(bs, [u for u in bh["units"] if in_bucket(u, b)],
+                                    starts or [], bh["segments"], starts is not None))
+            groups = tuple(g for g in lsv2.GROUPS if starts is not None or g != "initiation")
+            buckets[b] = lsv2.nest(lsv2.shrink_v2(st, overall, groups))
+        contacts[c] = {"overall": lsv2.nest(overall), "buckets": buckets}
     return {"schema": SCHEMA, "persona": persona,
             "generated_at": now.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "window_days": WINDOW_DAYS, "half_life_days": HALF_LIFE_DAYS,
-            "global": glob, "contacts": contacts}
+            "global": lsv2.nest(glob) if glob is not None else None, "contacts": contacts}
 
 
 # ── samples from chat.db (the only place message text exists) ──────────────
@@ -256,11 +287,11 @@ def learnable_contacts(contacts):
             if not (isinstance(c, dict) and c.get("relationship") == "test")]
 
 
-def burst_text(burst, reply_t):
-    """The inbound text a reply answers: walking back from the contact's last
+def burst_kept(burst, reply_t):
+    """The bubbles a reply answers: walking back from the contact's last
     bubble, keep each bubble that is <= BURST_GAP_S before the next kept one
     and <= PAIR_WINDOW_S before the reply; stop at the first that is not.
-    Joined in time order with "\n". burst: [(time, text)] in time order."""
+    burst: [(time, text)] in time order; returns the kept ones in time order."""
     kept = []
     for t, text in reversed(burst):
         if (reply_t - t).total_seconds() > PAIR_WINDOW_S:
@@ -268,13 +299,45 @@ def burst_text(burst, reply_t):
         if kept and (kept[-1][0] - t).total_seconds() > BURST_GAP_S:
             break
         kept.append((t, text))
-    return "\n".join(text for _, text in reversed(kept))
+    return list(reversed(kept))
 
 
-def samples_from_timeline(timeline, labels, now, tz):
+def burst_text(burst, reply_t):
+    """The inbound text a reply answers (burst_kept), joined with "\n"."""
+    return "\n".join(text for _, text in burst_kept(burst, reply_t))
+
+
+def _double_text(timeline, j, turn_end, labels, horizon):
+    """After a Seth turn ending at turn_end (timeline[j] is the next message):
+    (True, gap) if Seth's next turn came within DOUBLE_TEXT_MAX_S with no
+    reply in between, (False, None) if not, (None, None) when it cannot be
+    known: the next turn is not attributed to Seth, or the timeline ends
+    before the window has passed (horizon: now, or the corpus end)."""
+    n = len(timeline)
+    if j >= n:
+        if (horizon - turn_end).total_seconds() < lsv2.DOUBLE_TEXT_MAX_S:
+            return None, None
+        return False, None
+    nxt = timeline[j]
+    if not nxt["from_me"]:
+        return False, None
+    gap = (nxt["t"] - turn_end).total_seconds()
+    if gap > lsv2.DOUBLE_TEXT_MAX_S:
+        return False, None
+    k = j
+    while k < n and timeline[k]["from_me"] and (
+            k == j or (timeline[k]["t"] - timeline[k - 1]["t"]).total_seconds() <= BUBBLE_GAP_S):
+        if labels.get(timeline[k]["guid"]) != "seth":
+            return None, None
+        k += 1
+    return True, int(gap)
+
+
+def samples_from_timeline(timeline, labels, now, tz, horizon=None):
     """Feature dicts for every learnable reply turn in one contact's 1:1
     timeline (sorted by time, reactions removed). Text is read here and
-    reduced to numbers; nothing textual leaves this function."""
+    reduced to numbers; nothing textual leaves this function. v2 adds the
+    turn's inter-bubble gaps and whether Seth double-texted after it."""
     out = []
     last_me_t = None        # Seth's (any from-me) latest send so far
     inbound_gap = None      # inbound arrival minus the from-me send before it
@@ -292,6 +355,7 @@ def samples_from_timeline(timeline, labels, now, tz):
                and (timeline[j]["t"] - timeline[j - 1]["t"]).total_seconds() <= BUBBLE_GAP_S):
             j += 1
         turn = timeline[i:j]
+        dbl, dbl_gap = _double_text(timeline, j, turn[-1]["t"], labels, horizon or now)
         prev = timeline[i - 1] if i > 0 else None
         answered = burst_text(burst, turn[0]["t"])
         last_shape = shape(burst[-1][1]) if burst else "casual"
@@ -325,12 +389,25 @@ def samples_from_timeline(timeline, labels, now, tz):
             "burst_changed_shape": shape(answered) != last_shape,
             "band": time_band(turn[0]["t"], tz),
             "rapid": inbound_gap is not None and inbound_gap < RAPID_S and latency <= RAPID_S,
+            # v2: seconds between consecutive bubbles of the turn, and the
+            # double text after it (None = unknown, never learned).
+            "gaps": [int((b["t"] - a["t"]).total_seconds()) for a, b in zip(turn, turn[1:])],
+            "double_text": dbl,
+            "double_text_gap_s": dbl_gap,
         })
     return out
 
 
 def load_samples(chat_path, mem_path, contacts, now, tz):
-    """({contact: [sample]}, attribution counts) for the given handles.
+    """({contact: [sample]}, attribution counts): load_all without the v2
+    behaviour data (the drift check uses this)."""
+    samples, counts, _, _ = load_all(chat_path, mem_path, contacts, now, tz, behaviour=False)
+    return samples, counts
+
+
+def load_all(chat_path, mem_path, contacts, now, tz, behaviour=True):
+    """({contact: [sample]}, attribution counts, {contact: behaviour},
+    the attribution result) for the given handles.
     The counts cover every from-me message to those handles in the window:
     sent_n, ambiguous_n, huuman_n, plus exact_unmatched (outbound_sends
     records that never resolved to a delivered message). Raises
@@ -343,6 +420,9 @@ def load_samples(chat_path, mem_path, contacts, now, tz):
     out = {}
     counts = {"sent_n": 0, "ambiguous_n": 0, "huuman_n": 0,
               "exact_unmatched": int(att["exact_unmatched"])}
+    meta = lsv2.load_meta(chat_path, since) if behaviour else {}
+    activity = lsv2.load_daemon_activity(mem_path, since) if behaviour else {}
+    beh = {}
     for c in contacts:
         tl = att["timelines"].get(c)
         out[c] = samples_from_timeline(tl, att["labels"], now, tz) if tl else []
@@ -350,7 +430,12 @@ def load_samples(chat_path, mem_path, contacts, now, tz):
             counts["sent_n"] += 1
             counts["ambiguous_n"] += label == "ambiguous"
             counts["huuman_n"] += label == "huuman"
-    return out, counts
+        if behaviour:
+            starts, seg = lsv2.initiation_starts(tl or [], att["labels"], now, tz)
+            beh[c] = {"units": lsv2.response_units(att["messages"].get(c, []), att["labels"],
+                                                   meta, activity.get(c, []), now, tz),
+                      "starts": starts, "segments": [seg] if seg else []}
+    return out, counts, beh, att
 
 
 # ── per-run cap ────────────────────────────────────────────────────────────
@@ -404,6 +489,12 @@ def apply_cap(new_doc, prev_doc):
             continue
         capped, clamped, rel = cap_stats(st, prev_nodes[path])
         st.update(capped)
+        rel2 = lsv2.max_rel_v2(st, prev_nodes[path])
+        capped, clamped2 = lsv2.cap_v2(st, prev_nodes[path])
+        st.update(capped)
+        clamped = clamped + clamped2
+        if rel2 is not None:
+            rel = rel2 if rel is None else max(rel, rel2)
         clamped_n += len(clamped)
         for f in clamped:
             fields[f] = fields.get(f, 0) + 1
@@ -467,7 +558,7 @@ def load_previous(path):
             doc = json.load(f)
     except (OSError, ValueError):
         return None, "unreadable"
-    if not isinstance(doc, dict) or doc.get("schema") != SCHEMA:
+    if not isinstance(doc, dict) or doc.get("schema") not in READABLE_SCHEMAS:
         return None, "unreadable"
     return doc, "ok"
 
@@ -501,6 +592,10 @@ def parse_args(argv):
                     help="time zone for the time:* bands (tests use utc)")
     ap.add_argument("--dry-run", action="store_true", help="print counts only; write nothing")
     ap.add_argument("--no-cap", action="store_true", help="skip the per-run change cap (reseed)")
+    ap.add_argument("--extra-history", default=None, metavar="JSONL",
+                    help="older real history from scripts/m3_extract_corpus.py "
+                         "(e.g. ~/.human/training-data/m3-corpus.jsonl); its sends are "
+                         "attributed like chat.db's and only Seth's are learned")
     a = ap.parse_args(argv)
     if not PERSONA_RE.match(a.persona):
         ap.error("--persona must be letters, digits, '-' or '_'")
@@ -534,6 +629,64 @@ def _refusal(doc, prev, att, max_ambiguous_frac):
     return None, None
 
 
+def _extra_history(a, handles, samples, behaviour, attribution, now, tz):
+    """Add --extra-history samples and thread starts in place. Returns the
+    counts-only log fields, or None when the file cannot be read. A corpus
+    whose sends are ambiguously attributed above --max-ambiguous-frac is
+    dropped whole (extra_refused_ambiguous), not learned and not a refusal
+    of the run: the chat.db profile stands on its own."""
+    out = {"extra_history": bool(a.extra_history), "extra_samples": 0,
+           "extra_refused_ambiguous": False, "extra_sent_n": 0, "extra_ambiguous_n": 0,
+           "extra_huuman_n": 0}
+    if not a.extra_history:
+        return out
+    starts = [m["t"] for msgs in attribution["messages"].values() for m in msgs]
+    chat_min_t = min(starts) if starts else None
+    since = now - dt.timedelta(days=WINDOW_DAYS)
+    try:
+        assistant = cq._load_assistant(a.memory_db, since)
+        tls, counts = lsv2.load_extra_history(a.extra_history, handles, assistant, now, tz,
+                                              chat_min_t)
+    except (OSError, sqlite3.Error):
+        return None
+    labels, end_t = counts.pop("_labels"), counts.pop("_end_t")
+    out.update(counts)
+    if counts["extra_sent_n"] and (counts["extra_ambiguous_n"] / counts["extra_sent_n"]
+                                   > a.max_ambiguous_frac):
+        out["extra_refused_ambiguous"] = True
+        return out
+    end_age = (now - end_t).total_seconds() / 86400 if end_t else 0.0
+    for c, tl in tls.items():
+        ss = samples_from_timeline(tl, labels, now, tz, horizon=end_t)
+        samples.setdefault(c, []).extend(ss)
+        out["extra_samples"] += len(ss)
+        st, seg = lsv2.initiation_starts(tl, labels, now, tz, end_age=end_age)
+        b = behaviour.setdefault(c, {"units": [], "starts": [], "segments": []})
+        b["starts"].extend(st)
+        if seg:
+            b["segments"].append(seg)
+    return out
+
+
+def _behaviour_counts(samples, behaviour):
+    units = [u for b in behaviour.values() for u in b["units"]]
+    starts = [s for b in behaviour.values() for s in b["starts"]]
+    every = [s for ss in samples.values() for s in ss]
+    return {
+        "response_units_n": len(units),
+        "tapback_units_n": sum(1 for u in units if u["tap_ok"]),
+        # Units left out of the tapback sample because the daemon was active
+        # near them: the twin's tapbacks carry no provenance.
+        "tapback_daemon_near_n": sum(1 for u in units if u["att_ok"] and u["daemon_near"]),
+        "reactions_n": sum(len(u["reactions"]) + len(u["self_reactions"])
+                           for u in units if u["tap_ok"]),
+        "modality_n": sum(1 for u in units if u["att_ok"] and u["has_msg"]),
+        "double_text_n": sum(1 for s in every if s.get("double_text") is not None),
+        "initiation_starts_n": sum(1 for s in starts if s["who"] != "unknown"),
+        "initiation_unknown_n": sum(1 for s in starts if s["who"] == "unknown"),
+    }
+
+
 def main(argv=None):
     a = parse_args(argv)
     now = _now(a)
@@ -554,13 +707,16 @@ def main(argv=None):
         return refuse("refused_persona_unreadable", "persona file unreadable")
     handles = learnable_contacts(persona_contacts)
     try:
-        samples, att = load_samples(a.chat_db, a.memory_db, handles, now, tz)
+        samples, att, behaviour, attribution = load_all(a.chat_db, a.memory_db, handles, now, tz)
     except (OSError, sqlite3.Error):
         # memory.db is required: without it h-uman's own sends would be
         # learned as Seth's.
         return refuse("refused_db_unreadable", "chat.db or memory.db unreadable")
 
-    doc = build_profile(samples, a.persona, now)
+    extra = _extra_history(a, handles, samples, behaviour, attribution, now, tz)
+    if extra is None:
+        return refuse("refused_extra_history_unreadable", "--extra-history file unreadable")
+    doc = build_profile(samples, a.persona, now, behaviour)
     prev, prev_status = load_previous(out_path)
     status, msg = _refusal(doc, prev, att, a.max_ambiguous_frac)
     first_run = prev is None
@@ -589,6 +745,8 @@ def main(argv=None):
         "ambiguous_frac": round(att["ambiguous_n"] / att["sent_n"], 4) if att["sent_n"] else 0.0,
         "exact_unmatched": att["exact_unmatched"],
     }
+    counts.update(_behaviour_counts(samples, behaviour))
+    counts.update(extra)
     if a.dry_run:
         summary = dict(counts, dry_run=True,
                        refuse_global_n=status == "refused_global_n",

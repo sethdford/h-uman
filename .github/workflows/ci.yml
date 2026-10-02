@@ -1237,7 +1237,7 @@ jobs:
       # nightly wrapper. Pins the shape vectors shared with the C runtime, the
       # cap/refusal guardrails, and that no message text reaches any output.
       - name: Learned-style learner + drift check pins (hermetic, no chat.db)
-        run: python3 -m pytest -q tests/test_learned_style_profile.py tests/test_learned_style_drift.py
+        run: python3 -m pytest -q tests/test_learned_style_profile.py tests/test_learned_style_v2.py tests/test_learned_style_drift.py
       - name: Prospective memory v2 harness + backfill + shadow report + spot check (hermetic)
         run: python3 -m pytest -q tests/test_pm_bench_local.py tests/test_prospective_backfill.py tests/test_prospective_shadow_report.py tests/test_prospective_spot_check.py
       - name: Enforce capability registry against blind_ab gate

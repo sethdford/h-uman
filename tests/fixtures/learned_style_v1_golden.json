@@ -1,0 +1,207 @@
+{
+ "contacts": {
+  "+15550000001": {
+   "buckets": {
+    "shape:casual": {
+     "bubbles_p50": 1.0,
+     "emoji_rate": 0.1372,
+     "end_punct_rate": 0.1374,
+     "latency_p50_s": 375,
+     "len_p25": 31,
+     "len_p50": 43,
+     "len_p90": 63,
+     "lower_start_rate": 0.3622,
+     "n": 16,
+     "n_eff": 11.6795,
+     "shrunk": true
+    },
+    "shape:question": {
+     "bubbles_p50": 1.0,
+     "emoji_rate": 0.1956,
+     "end_punct_rate": 0.1433,
+     "latency_p50_s": 400,
+     "len_p25": 32,
+     "len_p50": 45,
+     "len_p90": 66,
+     "lower_start_rate": 0.3565,
+     "n": 8,
+     "n_eff": 5.8264,
+     "shrunk": true
+    },
+    "shape:story": {
+     "bubbles_p50": 1.0,
+     "emoji_rate": 0.1432,
+     "end_punct_rate": 0.1957,
+     "latency_p50_s": 353,
+     "len_p25": 29,
+     "len_p50": 39,
+     "len_p90": 66,
+     "lower_start_rate": 0.3041,
+     "n": 8,
+     "n_eff": 5.8316,
+     "shrunk": true
+    },
+    "time:day": {
+     "bubbles_p50": 1.0,
+     "emoji_rate": 0.1885,
+     "end_punct_rate": 0.1084,
+     "latency_p50_s": 263,
+     "len_p25": 29,
+     "len_p50": 40,
+     "len_p90": 66,
+     "lower_start_rate": 0.3512,
+     "n": 14,
+     "n_eff": 10.1856,
+     "shrunk": true
+    },
+    "time:evening": {
+     "bubbles_p50": 1.0,
+     "emoji_rate": 0.143,
+     "end_punct_rate": 0.1957,
+     "latency_p50_s": 415,
+     "len_p25": 32,
+     "len_p50": 46,
+     "len_p90": 66,
+     "lower_start_rate": 0.3567,
+     "n": 8,
+     "n_eff": 5.8184,
+     "shrunk": true
+    },
+    "time:late": {
+     "bubbles_p50": 1.0,
+     "emoji_rate": 0.1292,
+     "end_punct_rate": 0.1772,
+     "latency_p50_s": 548,
+     "len_p25": 26,
+     "len_p50": 44,
+     "len_p90": 61,
+     "lower_start_rate": 0.3227,
+     "n": 10,
+     "n_eff": 7.3337,
+     "shrunk": true
+    }
+   },
+   "overall": {
+    "bubbles_p50": 1.0,
+    "emoji_rate": 0.156,
+    "end_punct_rate": 0.1562,
+    "latency_p50_s": 353,
+    "len_p25": 29,
+    "len_p50": 43,
+    "len_p90": 66,
+    "lower_start_rate": 0.3436,
+    "n": 32,
+    "n_eff": 23.3376,
+    "shrunk": true
+   }
+  },
+  "+15550000002": {
+   "buckets": {
+    "shape:casual": {
+     "bubbles_p50": 1.0,
+     "emoji_rate": 0.1367,
+     "end_punct_rate": 0.1369,
+     "latency_p50_s": 376,
+     "len_p25": 31,
+     "len_p50": 43,
+     "len_p90": 63,
+     "lower_start_rate": 0.3628,
+     "n": 16,
+     "n_eff": 12.5109,
+     "shrunk": true
+    },
+    "shape:question": {
+     "bubbles_p50": 1.0,
+     "emoji_rate": 0.1972,
+     "end_punct_rate": 0.1428,
+     "latency_p50_s": 402,
+     "len_p25": 32,
+     "len_p50": 45,
+     "len_p90": 66,
+     "lower_start_rate": 0.3571,
+     "n": 8,
+     "n_eff": 6.2412,
+     "shrunk": true
+    },
+    "shape:story": {
+     "bubbles_p50": 1.0,
+     "emoji_rate": 0.1427,
+     "end_punct_rate": 0.1973,
+     "latency_p50_s": 353,
+     "len_p25": 29,
+     "len_p50": 39,
+     "len_p90": 66,
+     "lower_start_rate": 0.3026,
+     "n": 8,
+     "n_eff": 6.2467,
+     "shrunk": true
+    },
+    "time:day": {
+     "bubbles_p50": 1.0,
+     "emoji_rate": 0.1482,
+     "end_punct_rate": 0.1483,
+     "latency_p50_s": 239,
+     "len_p25": 29,
+     "len_p50": 45,
+     "len_p90": 66,
+     "lower_start_rate": 0.3515,
+     "n": 14,
+     "n_eff": 10.9494,
+     "shrunk": true
+    },
+    "time:evening": {
+     "bubbles_p50": 1.0,
+     "emoji_rate": 0.1423,
+     "end_punct_rate": 0.1426,
+     "latency_p50_s": 369,
+     "len_p25": 30,
+     "len_p50": 40,
+     "len_p90": 64,
+     "lower_start_rate": 0.3572,
+     "n": 8,
+     "n_eff": 6.2152,
+     "shrunk": true
+    },
+    "time:late": {
+     "bubbles_p50": 1.0,
+     "emoji_rate": 0.1777,
+     "end_punct_rate": 0.1778,
+     "latency_p50_s": 536,
+     "len_p25": 26,
+     "len_p50": 42,
+     "len_p90": 66,
+     "lower_start_rate": 0.322,
+     "n": 10,
+     "n_eff": 7.8343,
+     "shrunk": true
+    }
+   },
+   "overall": {
+    "bubbles_p50": 1.0,
+    "emoji_rate": 0.156,
+    "end_punct_rate": 0.1562,
+    "latency_p50_s": 353,
+    "len_p25": 29,
+    "len_p50": 43,
+    "len_p90": 66,
+    "lower_start_rate": 0.3436,
+    "n": 32,
+    "n_eff": 24.9988,
+    "shrunk": true
+   }
+  }
+ },
+ "global": {
+  "bubbles_p50": 1.0,
+  "emoji_rate": 0.156,
+  "end_punct_rate": 0.1562,
+  "latency_p50_s": 353,
+  "len_p25": 29,
+  "len_p50": 43,
+  "len_p90": 66,
+  "lower_start_rate": 0.3436,
+  "n": 64,
+  "n_eff": 48.3364,
+  "shrunk": false
+ }
+}

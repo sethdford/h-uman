@@ -34,11 +34,13 @@ a separate file that the runtime reads on top of the persona.
 (temp file + rename). The persona dir is `$HU_PERSONA_DIR`, else
 `$HU_STATE_DIR/personas`, else `~/.human/personas`, the same order as
 `hu_persona_base_dir`. memory.db and the logs dir default under
-`$HU_STATE_DIR` (or `~/.human`) too. Schema `learned-style/v1`:
+`$HU_STATE_DIR` (or `~/.human`) too. Schema `learned-style/v2` (v2 only adds
+fields to every stats node; every v1 field is computed exactly as in v1, pinned
+by a golden test, so a v1 reader that ignores unknown keys keeps working):
 
 ```
 {
-  "schema": "learned-style/v1", "persona": "seth",
+  "schema": "learned-style/v2", "persona": "seth",
   "generated_at": "2026-10-02T05:10:00Z", "window_days": 180, "half_life_days": 21,
   "global": { stats },
   "contacts": { "<handle>": { "overall": { stats },
@@ -49,10 +51,11 @@ a separate file that the runtime reads on top of the persona.
 `stats` holds `n`, `n_eff`, `len_p25` / `len_p50` / `len_p90` (reply length in
 UTF-8 **bytes**, summed over the turn's bubbles),
 `bubbles_p50`, `lower_start_rate`, `emoji_rate`, `end_punct_rate`,
-`latency_p50_s` (or null) and `shrunk`. Every leaf is a number, a boolean or
+`latency_p50_s` (or null) and `shrunk`, plus the [v2 behaviour
+fields](#v2-behaviour-fields). Every leaf is a number, a boolean or
 null, except the three metadata strings `schema`, `persona` and
-`generated_at`. A test walks every leaf of a generated file and fails on
-anything else.
+`generated_at`. A test walks every leaf of a generated file, v2 fields
+included, and fails on anything else.
 
 Buckets: `shape:question|story|casual` (shape of the inbound burst being
 answered, joined in time order with `\n`; Part B classifies the same joined
@@ -76,7 +79,8 @@ python3 scripts/learned_style_profile.py --persona seth --no-cap    # reseed, sk
 
 Overrides (used by the tests): `--persona-dir`, `--out-dir`, `--chat-db`,
 `--memory-db`, `--log-dir`, `--now`, `--tz utc`. `--max-ambiguous-frac`
-(default 0.05) sets the attribution refusal below.
+(default 0.05) sets the attribution refusal below. `--extra-history <jsonl>`
+adds older history ([below](#older-history---extra-history)).
 
 **What is a sample.** A reply *turn* is one or more consecutive `is_from_me`
 bubbles, each within 90 s of the one before. It is a sample when the message
@@ -155,10 +159,102 @@ omitted, and Part B falls back to global for them.
 - **Refusal (exit 2, nothing written, previous file untouched).** More than
   `--max-ambiguous-frac` (5%) of sends ambiguously attributed; global
   `n < 50`; more than 50% of the previous file's contacts would disappear;
-  persona file, chat.db or memory.db unreadable. A refusal still appends its
+  persona file, chat.db, memory.db or the `--extra-history` file unreadable. A refusal still appends its
   log line (not under `--dry-run`).
 - **`--dry-run`** prints one counts-only JSON line, writes nothing (no file,
   history or log), and exits 2 when a real run would refuse.
+
+## v2 behaviour fields
+
+v1 learns how long Seth's replies are. v2 learns the rest of how he texts, per
+contact and situation, so runtime consumers can replace static constants
+(director reply delay, tapback bands, double-text and proactive cadence) with
+his own observed ranges. Code: `scripts/learned_style_v2.py`. Every stats node
+(global, contact `overall`, every bucket) carries these fields. Each group has
+its own `n` / `n_eff` where its sample differs from the reply samples, and is
+shrunk toward its parent with that group's own `n_eff` (same formula, K = 8).
+A group with no data at a level takes its parent's value and reports `n = 0`;
+consumers must read the group's `n`.
+
+| Field(s) | Sample (`n` key) | Definition |
+|---|---|---|
+| `latency_p25_s`, `latency_p75_s`, `latency_p90_s` | reply samples (`n`) | Weighted quantiles of seconds from the contact's last bubble to Seth's first reply bubble. Gaps over the 6 h pairing window are not replies. With v1's `latency_p50_s` they condition on the `time:*` buckets like every field. |
+| `bubbles_p90` | reply samples (`n`) | Weighted p90 of bubbles per reply turn (v1 has p50). |
+| `inter_bubble_gap_s_p50` | `inter_bubble_gap_n` | Median seconds between consecutive bubbles of a turn (turns with ≥ 2 bubbles). |
+| `double_text_rate` | `double_text_n` | Share of Seth's reply turns followed by another Seth turn (> 90 s later, so not a bubble) within 24 h with no message from the contact in between. Unknown (excluded) when the follow-up is not attributed to Seth, or the 24 h have not passed yet. |
+| `double_text_gap_s_p50` | `double_text_gap_n` | Median gap of those double texts. |
+| `tapback_only_rate`, `tapback_with_text_rate` | `tapback_n` | Share of Seth's responses to an inbound burst (every from-me event after the burst, before the contact's next message, within 6 h) that were only a tapback (types 2000–2006, 2006 = custom emoji) on their message, or a tapback plus text/media. |
+| `tapback_types{love,like,dislike,laugh,emphasize,question,emoji}`, `self_reaction_rate` | `reaction_n` | Share of Seth's tapbacks of each kind, and the share placed on his own message. |
+| `voice_memo_rate`, `gif_rate`, `share_rate` | `modality_n` | Share of Seth's message responses (tapback-only responses excluded) containing an audio message (`is_audio_message` or an `audio/*` attachment), a GIF (`image/gif` or a GIF balloon), or a link/media share (URL, URL balloon, any other attachment). |
+| `initiation_rate_per_week`, `initiation_share` | `initiation_n` | Thread starts: the first message after ≥ 6 h of silence either way. Rate = recency-weighted Seth starts per week of observed time (the exposure is the recency-weighted length of each observed span, so a 3-month gap between corpus and chat.db is not counted as silence). Share = Seth starts / (Seth + contact starts). Contact `overall` and `time:*` buckets only (a start answers nothing, so it has no shape or pace); absent from `shape:*` and `pace:*`. |
+
+**Twin contamination.** Text and media sends use the v1 attribution labels, so
+an h-uman or ambiguous send excludes its unit. The twin's **tapbacks write no
+provenance** (`src/daemon.c` tapback-only path: no `outbound_sends` row, no
+assistant row), so a from-me tapback cannot be attributed directly. The daemon
+does save every inbound batch it handles as memory.db `messages` rows, so a
+response unit with any daemon trace for that contact (messages of any role,
+`proactive_sends`, `outbound_sends`) within 15 minutes of the burst or the
+response is left out of the tapback sample. The exclusion applies to text and
+tapback responses alike; dropping only the tapback ones would bias
+`tapback_only_rate` down. The run log counts the exclusions
+(`tapback_daemon_near_n`). Expect that count to be large while h-uman serves a
+contact: the tapback fields then come mostly from periods the daemon was not
+handling that contact.
+
+**Per-run cap.** The v1 cap (30% relative) applies to every v2 value with these
+floors: latency 60 s, `bubbles_p90` 0.5, `inter_bubble_gap_s_p50` 10 s,
+`double_text_gap_s_p50` 600 s, `initiation_rate_per_week` 0.25, every rate and
+`tapback_types` share 0.05. `n`/`n_eff` fields are counts and never capped. A
+v1 file is still read as the previous file (cap and history); its nodes have
+no v2 fields, so the first v2 run is uncapped for them. New quantiles are kept
+ordered around v1's (`latency_p25 ≤ p50 ≤ p75 ≤ p90`, `bubbles_p90 ≥ p50`)
+without ever moving a v1 field.
+
+**Run-log counts (also printed by `--dry-run`).** `response_units_n`,
+`tapback_units_n`, `tapback_daemon_near_n`, `reactions_n`, `modality_n`,
+`double_text_n`, `initiation_starts_n`, `initiation_unknown_n` (from-me starts
+not attributed to Seth), and the `extra_*` counts below. Numbers and booleans
+only.
+
+### Older history (`--extra-history`)
+
+`~/.human/training-data/m3-corpus.jsonl` (written by
+`scripts/m3_extract_corpus.py`; keys `channel`, `content`, `handle`, `role`,
+`ts_ms`) holds real history older than chat.db's retention. What its roles
+mean, from the generator:
+
+- `imessage` / `user`: the contact.
+- `imessage` / `assistant`: **any** `is_from_me` row. That includes the twin's
+  own iMessage sends, so these rows are **not** all Seth's.
+- `memory_db` / `assistant` (`daemon` since 2026-09-03): the twin's replies.
+  Never learned from; used only as attribution evidence.
+
+Handles are `sha256(handle)[:8]`; the learner maps persona contacts the same
+way. Each corpus send is attributed exactly like a chat.db send
+(`_label_send`), against the live memory.db assistant rows plus the corpus's
+own `memory_db` twin rows (their `ts_ms` was parsed from a UTC string as local
+time by the generator; the learner undoes that). Only `seth` sends are
+learned. If the corpus's ambiguous share exceeds `--max-ambiguous-frac`, the
+whole corpus is dropped for that run (`extra_refused_ambiguous: true`) and the
+chat.db profile is written alone. Also dropped and counted: tapback-as-text
+rows (`Loved “…”`, `extra_reaction_rows_dropped`), rows for non-persona or
+empty handles (`extra_unmapped_dropped`), rows at or after chat.db's earliest
+message (`extra_overlap_dropped`), and rows outside the 180-day window
+(`extra_out_of_window`).
+
+**chat.db-only fields.** The corpus has no tapbacks, attachments or chat ids,
+so `tapback_*`, `tapback_types`, `self_reaction_rate`, `voice_memo_rate`,
+`gif_rate` and `share_rate` come from chat.db only. The corpus feeds the v1
+fields, the latency/bubble/gap quantiles, double texting and initiation.
+
+Known limits of the corpus: content was PII-redacted by the generator
+(`[phone]`, `[email]`, `[number]`), which shifts those replies' byte lengths;
+group-chat inbound rows carry the sender's handle and cannot be told apart
+from 1:1 rows; and with the 21-day half-life a row 140 days old weighs about
+1% of a fresh one, so the corpus mostly matters for `n`, for contacts with
+little recent data, and for initiation. The nightly wrapper does not pass
+`--extra-history`; add it there only after a `--dry-run` on real data.
 
 ## Drift self-check (Part A)
 
@@ -234,14 +330,23 @@ lacks access.
 ### Tests
 
 ```bash
-python3 -m pytest -q tests/test_learned_style_profile.py tests/test_learned_style_drift.py
+python3 -m pytest -q tests/test_learned_style_profile.py tests/test_learned_style_v2.py tests/test_learned_style_drift.py
 ```
+
+`tests/test_learned_style_v2.py` pins the v1 fields against a golden file
+produced by the v1 learner (`tests/fixtures/learned_style_v1_golden.json`).
 
 Hermetic: synthetic chat.db / memory.db built in a temp dir, HOME pointed at
 the temp dir, a fake interpreter for the wrapper. They run in CI in the
 `capability-gate-check` job's pytest step.
 
 ## Runtime (Part B)
+
+**Schema compatibility.** The learner now writes `learned-style/v2`. Every v1
+field is unchanged, so the runtime loader should accept both
+`learned-style/v1` and `learned-style/v2` (a prefix check on
+`learned-style/v`). A loader that requires the exact string
+`learned-style/v1` treats a v2 file as absent.
 
 Unit note for the rendered line: "characters" in it (for example "usually
 about 25 characters") are the learned `len_*` values, which are **bytes**. An
