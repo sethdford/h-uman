@@ -35,7 +35,9 @@ extern "C" {
 #endif
 
 #define HU_LEARNED_STYLE_SCHEMA "learned-style/v1"
-#define HU_LEARNED_STYLE_SUFFIX ".learned-style.json"
+/* v2 (#603) keeps every v1 field and adds optional ones; both are read. */
+#define HU_LEARNED_STYLE_SCHEMA_V2 "learned-style/v2"
+#define HU_LEARNED_STYLE_SUFFIX    ".learned-style.json"
 /* Re-stat the file at most this often; between stats the cache is trusted. */
 #define HU_LEARNED_STYLE_RESTAT_SECS 60
 /* A rate is "decisive" — worth a clause in the line — at or beyond these. */
@@ -61,6 +63,40 @@ hu_ls_shape_t hu_learned_style_shape_inbound(const char *batch, size_t len);
 /* "question" / "story" / "casual" — the bucket suffix and log token. */
 const char *hu_learned_style_shape_name(hu_ls_shape_t shape);
 
+/* Optional learned-style/v2 behaviour fields (#603), read where present.
+ * Index into hu_learned_style_t.v2; -1 = absent, null or malformed. Rates
+ * are shares in [0, 1]; *_S are seconds; *_N are sample counts. Consumers
+ * (director v2, #590) must check the matching *_N before trusting a rate. */
+typedef enum {
+    HU_LS_V2_LATENCY_P25_S = 0,
+    HU_LS_V2_LATENCY_P75_S,
+    HU_LS_V2_LATENCY_P90_S,
+    HU_LS_V2_BUBBLES_P90,
+    HU_LS_V2_INTER_BUBBLE_GAP_S_P50,
+    HU_LS_V2_DOUBLE_TEXT_RATE,
+    HU_LS_V2_DOUBLE_TEXT_GAP_S_P50,
+    HU_LS_V2_TAPBACK_N,
+    HU_LS_V2_TAPBACK_ONLY_RATE,
+    HU_LS_V2_TAPBACK_WITH_TEXT_RATE,
+    HU_LS_V2_REACTION_N,
+    HU_LS_V2_TAPBACK_LOVE, /* tapback_types.*: share of the owner's tapbacks */
+    HU_LS_V2_TAPBACK_LIKE,
+    HU_LS_V2_TAPBACK_DISLIKE,
+    HU_LS_V2_TAPBACK_LAUGH,
+    HU_LS_V2_TAPBACK_EMPHASIZE,
+    HU_LS_V2_TAPBACK_QUESTION,
+    HU_LS_V2_TAPBACK_EMOJI,
+    HU_LS_V2_SELF_REACTION_RATE,
+    HU_LS_V2_MODALITY_N,
+    HU_LS_V2_VOICE_MEMO_RATE,
+    HU_LS_V2_GIF_RATE,
+    HU_LS_V2_SHARE_RATE,
+    HU_LS_V2_INITIATION_N,
+    HU_LS_V2_INITIATION_RATE_PER_WEEK,
+    HU_LS_V2_INITIATION_SHARE,
+    HU_LS_V2_COUNT
+} hu_ls_v2_field_t;
+
 typedef struct {
     bool found;        /* false: no file / wrong schema / no usable stats */
     bool from_bucket;  /* contact's "shape:<x>" bucket answered */
@@ -70,7 +106,8 @@ typedef struct {
     uint16_t len_p25, len_p50, len_p90; /* reply length in bytes */
     float bubbles_p50;
     float lower_start_rate, emoji_rate, end_punct_rate;
-    int32_t latency_p50_s; /* -1 when the file has null */
+    int32_t latency_p50_s;    /* -1 when the file has null */
+    float v2[HU_LS_V2_COUNT]; /* learned-style/v2 optional fields; -1 = absent */
 } hu_learned_style_t;
 
 /* Which persona's file lookups read. The agent wiring calls this with

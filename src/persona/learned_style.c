@@ -202,6 +202,54 @@ static bool ls_num(const hu_json_value_t *obj, const char *key, double lo, doubl
     return true;
 }
 
+/* learned-style/v2 optional fields: name, upper bound. A malformed or out
+ * of range value is absent (-1), never a reason to drop the level. */
+static const struct {
+    const char *key;
+    double hi;
+} k_ls_v2[HU_LS_V2_COUNT] = {
+    [HU_LS_V2_LATENCY_P25_S] = {"latency_p25_s", 2.0e9},
+    [HU_LS_V2_LATENCY_P75_S] = {"latency_p75_s", 2.0e9},
+    [HU_LS_V2_LATENCY_P90_S] = {"latency_p90_s", 2.0e9},
+    [HU_LS_V2_BUBBLES_P90] = {"bubbles_p90", 1000},
+    [HU_LS_V2_INTER_BUBBLE_GAP_S_P50] = {"inter_bubble_gap_s_p50", 2.0e9},
+    [HU_LS_V2_DOUBLE_TEXT_RATE] = {"double_text_rate", 1},
+    [HU_LS_V2_DOUBLE_TEXT_GAP_S_P50] = {"double_text_gap_s_p50", 2.0e9},
+    [HU_LS_V2_TAPBACK_N] = {"tapback_n", 4.0e9},
+    [HU_LS_V2_TAPBACK_ONLY_RATE] = {"tapback_only_rate", 1},
+    [HU_LS_V2_TAPBACK_WITH_TEXT_RATE] = {"tapback_with_text_rate", 1},
+    [HU_LS_V2_REACTION_N] = {"reaction_n", 4.0e9},
+    [HU_LS_V2_TAPBACK_LOVE] = {"love", 1},
+    [HU_LS_V2_TAPBACK_LIKE] = {"like", 1},
+    [HU_LS_V2_TAPBACK_DISLIKE] = {"dislike", 1},
+    [HU_LS_V2_TAPBACK_LAUGH] = {"laugh", 1},
+    [HU_LS_V2_TAPBACK_EMPHASIZE] = {"emphasize", 1},
+    [HU_LS_V2_TAPBACK_QUESTION] = {"question", 1},
+    [HU_LS_V2_TAPBACK_EMOJI] = {"emoji", 1},
+    [HU_LS_V2_SELF_REACTION_RATE] = {"self_reaction_rate", 1},
+    [HU_LS_V2_MODALITY_N] = {"modality_n", 4.0e9},
+    [HU_LS_V2_VOICE_MEMO_RATE] = {"voice_memo_rate", 1},
+    [HU_LS_V2_GIF_RATE] = {"gif_rate", 1},
+    [HU_LS_V2_SHARE_RATE] = {"share_rate", 1},
+    [HU_LS_V2_INITIATION_N] = {"initiation_n", 4.0e9},
+    [HU_LS_V2_INITIATION_RATE_PER_WEEK] = {"initiation_rate_per_week", 1000},
+    [HU_LS_V2_INITIATION_SHARE] = {"initiation_share", 1},
+};
+
+static void ls_read_v2(const hu_json_value_t *o, hu_learned_style_t *out) {
+    const hu_json_value_t *types = hu_json_object_get(o, "tapback_types");
+    if (types && types->type != HU_JSON_OBJECT)
+        types = NULL;
+    for (int i = 0; i < HU_LS_V2_COUNT; i++) {
+        bool nested = i >= HU_LS_V2_TAPBACK_LOVE && i <= HU_LS_V2_TAPBACK_EMOJI;
+        double d;
+        out->v2[i] = (nested ? (types && ls_num(types, k_ls_v2[i].key, 0, k_ls_v2[i].hi, &d))
+                             : ls_num(o, k_ls_v2[i].key, 0, k_ls_v2[i].hi, &d))
+                         ? (float)d
+                         : -1.0f;
+    }
+}
+
 /* A stats object is all-or-nothing: one bad field and the level is skipped,
  * so a half-parsed row can never render a line from defaults. */
 static bool ls_read_stats(const hu_json_value_t *o, hu_learned_style_t *out) {
@@ -231,12 +279,14 @@ static bool ls_read_stats(const hu_json_value_t *o, hu_learned_style_t *out) {
     out->emoji_rate = (float)emo;
     out->end_punct_rate = (float)endp;
     out->latency_p50_s = lat;
+    ls_read_v2(o, out);
     return true;
 }
 
 static bool ls_document_valid(const hu_json_value_t *root) {
     const char *schema = hu_json_get_string(root, "schema");
-    if (!schema || strcmp(schema, HU_LEARNED_STYLE_SCHEMA) != 0)
+    if (!schema || (strcmp(schema, HU_LEARNED_STYLE_SCHEMA) != 0 &&
+                    strcmp(schema, HU_LEARNED_STYLE_SCHEMA_V2) != 0))
         return false;
     hu_learned_style_t g;
     return ls_read_stats(hu_json_object_get(root, "global"), &g);
@@ -327,6 +377,8 @@ static bool ls_lookup_locked(const char *contact_id, size_t len, hu_ls_shape_t s
                              hu_learned_style_t *out) {
     memset(out, 0, sizeof(*out));
     out->latency_p50_s = -1;
+    for (int i = 0; i < HU_LS_V2_COUNT; i++)
+        out->v2[i] = -1.0f;
     ls_refresh_locked();
     const hu_json_value_t *root = s_ls.root;
     if (root) {

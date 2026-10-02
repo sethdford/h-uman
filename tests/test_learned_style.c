@@ -377,6 +377,84 @@ static void malformed_file_warns_once_per_mtime(void) {
     ls_teardown();
 }
 
+/* learned-style/v2 (#603) keeps every v1 field and adds optional behaviour
+ * fields. The loader accepts both schemas, reads the v1 fields the same way,
+ * exposes the v2 fields (-1 = absent) and ignores fields it does not know. */
+#define LS_V2_EXTRA                                                                            \
+    ",\"latency_p25_s\":40,\"latency_p75_s\":600,\"latency_p90_s\":3600,\"bubbles_p90\":3.0,"  \
+    "\"tapback_n\":30,\"tapback_only_rate\":0.25,\"tapback_with_text_rate\":0.1,"              \
+    "\"tapback_types\":{\"love\":0.5,\"like\":0.1,\"dislike\":0.0,\"laugh\":0.3,"              \
+    "\"emphasize\":0.05,\"question\":0.0,\"emoji\":0.05},\"self_reaction_rate\":0.02,"         \
+    "\"double_text_rate\":0.12,\"voice_memo_rate\":0.03,\"gif_rate\":0.01,\"share_rate\":0.2," \
+    "\"initiation_rate_per_week\":2.5,\"initiation_share\":0.4,\"inter_bubble_gap_s_p50\":12," \
+    "\"double_text_gap_s_p50\":5400,\"some_future_field\":{\"x\":1}}"
+
+static const char ls_json_schema_v2[] =
+    "{\"schema\":\"learned-style/v2\",\"persona\":\"lstest\",\"future_top_level\":[1,2],"
+    "\"global\":" LS_STATS(
+        500, 30, 120, 0.5, 0.1,
+        0.5) ","
+             "\"contacts\":{\"" LS_CONTACT_A
+             "\":{\"overall\":{\"n\":80,\"n_eff\":80.0,\"len_p25\":5,"
+             "\"len_p50\":25,\"len_p90\":90,\"bubbles_p50\":1.0,\"lower_start_rate\":0.9,"
+             "\"emoji_rate\":0.5,\"end_punct_rate\":0.1,\"latency_p50_s\":240,\"shrunk\":"
+             "true" LS_V2_EXTRA ",\"buckets\":{}}}}";
+
+static void lookup_reads_v2_schema_and_its_optional_fields(void) {
+    ls_setup();
+    ls_write(ls_json_schema_v2, 0);
+    hu_learned_style_t ls;
+    HU_ASSERT_TRUE(hu_learned_style_lookup(LS_CONTACT_A, 12, HU_LS_SHAPE_CASUAL, &ls));
+    HU_ASSERT_TRUE(ls.from_contact);
+    HU_ASSERT_EQ(ls.len_p50, 25);
+    HU_ASSERT_EQ(ls.len_p90, 90);
+    HU_ASSERT_EQ(ls.latency_p50_s, 240);
+    HU_ASSERT_TRUE(ls.v2[HU_LS_V2_TAPBACK_ONLY_RATE] > 0.24f &&
+                   ls.v2[HU_LS_V2_TAPBACK_ONLY_RATE] < 0.26f);
+    HU_ASSERT_TRUE(ls.v2[HU_LS_V2_TAPBACK_LOVE] > 0.49f && ls.v2[HU_LS_V2_TAPBACK_LOVE] < 0.51f);
+    HU_ASSERT_TRUE(ls.v2[HU_LS_V2_TAPBACK_QUESTION] == 0.0f);
+    HU_ASSERT_TRUE(ls.v2[HU_LS_V2_LATENCY_P90_S] == 3600.0f);
+    HU_ASSERT_TRUE(ls.v2[HU_LS_V2_DOUBLE_TEXT_GAP_S_P50] == 5400.0f);
+    HU_ASSERT_TRUE(ls.v2[HU_LS_V2_INITIATION_RATE_PER_WEEK] == 2.5f);
+    HU_ASSERT_TRUE(ls.v2[HU_LS_V2_TAPBACK_N] == 30.0f);
+    /* The global row has no v2 fields: all absent (-1). */
+    HU_ASSERT_TRUE(hu_learned_style_lookup(LS_CONTACT_B, 12, HU_LS_SHAPE_CASUAL, &ls));
+    HU_ASSERT_FALSE(ls.from_contact);
+    for (int i = 0; i < HU_LS_V2_COUNT; i++)
+        HU_ASSERT_TRUE(ls.v2[i] == -1.0f);
+    ls_teardown();
+
+    /* A v1 file still loads; its v2 fields read as absent. */
+    ls_setup();
+    ls_write(ls_json_v1, 0);
+    HU_ASSERT_TRUE(hu_learned_style_lookup(LS_CONTACT_A, 12, HU_LS_SHAPE_STORY, &ls));
+    HU_ASSERT_TRUE(ls.v2[HU_LS_V2_TAPBACK_ONLY_RATE] == -1.0f);
+    ls_teardown();
+
+    /* An unknown schema is still refused. */
+    ls_setup();
+    ls_write(
+        "{\"schema\":\"learned-style/v3\",\"global\":" LS_STATS(500, 30, 120, 0.5, 0.1, 0.5) "}",
+        0);
+    HU_ASSERT_FALSE(hu_learned_style_lookup(LS_CONTACT_A, 12, HU_LS_SHAPE_CASUAL, &ls));
+    ls_teardown();
+
+    /* A malformed OPTIONAL field is absent, never a reason to drop the row. */
+    ls_setup();
+    ls_write("{\"schema\":\"learned-style/v2\",\"global\":{\"n\":500,\"n_eff\":500.0,"
+             "\"len_p25\":5,\"len_p50\":30,\"len_p90\":120,\"bubbles_p50\":1.0,"
+             "\"lower_start_rate\":0.5,\"emoji_rate\":0.1,\"end_punct_rate\":0.5,"
+             "\"latency_p50_s\":null,\"shrunk\":false,\"tapback_only_rate\":\"lots\","
+             "\"gif_rate\":7,\"tapback_types\":[1]}}",
+             0);
+    HU_ASSERT_TRUE(hu_learned_style_lookup(LS_CONTACT_A, 12, HU_LS_SHAPE_CASUAL, &ls));
+    HU_ASSERT_EQ(ls.len_p50, 30);
+    HU_ASSERT_TRUE(ls.v2[HU_LS_V2_TAPBACK_ONLY_RATE] == -1.0f);
+    HU_ASSERT_TRUE(ls.v2[HU_LS_V2_GIF_RATE] == -1.0f);
+    HU_ASSERT_TRUE(ls.v2[HU_LS_V2_TAPBACK_LOVE] == -1.0f);
+    ls_teardown();
+}
+
 /* ── render ───────────────────────────────────────────────────────────── */
 
 static void render_line_names_only_decisive_rates(void) {
@@ -1056,6 +1134,7 @@ void run_learned_style_tests(void) {
     HU_RUN_TEST(lookup_treats_malformed_and_wrong_schema_as_absent);
     HU_RUN_TEST(lookup_cache_restats_at_most_every_60s);
     HU_RUN_TEST(malformed_file_warns_once_per_mtime);
+    HU_RUN_TEST(lookup_reads_v2_schema_and_its_optional_fields);
     HU_RUN_TEST(render_line_names_only_decisive_rates);
     HU_RUN_TEST(render_line_qualifies_shape_only_from_bucket);
     HU_RUN_TEST(length_rule_classifier_vectors);
