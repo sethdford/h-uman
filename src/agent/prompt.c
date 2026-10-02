@@ -2,6 +2,7 @@
  * System prompt builder — identity, tools, memory, constraints.
  */
 #include "human/agent/prompt.h"
+#include "human/agent/immersive_context.h"
 #include "human/agent/prompt_budget.h"
 #include "human/agent/prompt_trim.h"
 #include "human/core/gate_mode.h"
@@ -508,6 +509,24 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
                 hu_log_info("immersive_humanness", NULL,
                             "shadow: would add %zu B of humanness directives: %.160s",
                             config->humanness_context_len, config->humanness_context);
+            }
+        }
+
+        /* HU_IMMERSIVE_CONTEXT: the budgeted "## What you know right now"
+         * block (commitments, episodic, emotional/presence, proactive,
+         * goals/residue) the early return below otherwise drops. Ahead of the
+         * trimmable middle so the positional cap cannot cut it. OFF does no
+         * work; SHADOW logs; LIVE appends. Gate comment and measurement:
+         * src/agent/turn/immersive_context.c. */
+        {
+            char *ictx = NULL;
+            size_t ictx_len = 0;
+            /* A composer failure fails open to the OFF prompt. */
+            if (hu_immersive_context_for_prompt(alloc, config, &ictx, &ictx_len) == HU_OK && ictx) {
+                err = append(alloc, &buf, &len, &cap, ictx, ictx_len);
+                alloc->free(alloc->ctx, ictx, ictx_len + 1);
+                if (err != HU_OK)
+                    goto fail;
             }
         }
 

@@ -1,5 +1,6 @@
 #include "human/agent/degradation.h"
 #include "human/core/log.h"
+#include "human/providers/private_context.h"
 #include <stdatomic.h>
 #include <string.h>
 
@@ -98,21 +99,31 @@ hu_error_t hu_provider_degrade_chat(hu_provider_degradation_config_t *config,
     /* Primary failed — record failure and try fallback */
     hu_circuit_breaker_record_failure(&config->breaker);
 
-    if (config->fallback_model && config->fallback_model_len > 0) {
+    /* The fallback model is a fallback attempt: private prompt blocks
+     * (owner memory text) are removed first — include/human/providers/
+     * private_context.h. A failed redaction skips the fallback entirely. */
+    hu_private_request_t fb_scratch;
+    const hu_chat_request_t *fb_req =
+        (config->fallback_model && config->fallback_model_len > 0)
+            ? hu_private_context_redact_request(alloc, request, &fb_scratch)
+            : NULL;
+    if (fb_req) {
         memset(&out->response, 0, sizeof(out->response));
         for (uint32_t attempt = 0; attempt < max_retries; attempt++) {
-            hu_error_t err = try_chat(provider, alloc, request, config->fallback_model,
+            hu_error_t err = try_chat(provider, alloc, fb_req, config->fallback_model,
                                       config->fallback_model_len, temperature, &out->response);
             out->attempts += 1;
             if (err == HU_OK) {
                 out->strategy_used = HU_DEGRADE_FALLBACK;
                 hu_circuit_breaker_record_success(&config->breaker);
+                hu_private_context_release(alloc, &fb_scratch);
                 return HU_OK;
             }
             if (err != HU_ERR_IO && err != HU_ERR_TIMEOUT)
                 all_transport = false;
         }
         hu_circuit_breaker_record_failure(&config->breaker);
+        hu_private_context_release(alloc, &fb_scratch);
     }
 
     /* All attempts failed — honest failure. Propagate transport semantic

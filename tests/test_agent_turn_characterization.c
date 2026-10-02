@@ -180,6 +180,7 @@ static const char *const k_ch_env[] = {
     "HU_HUMOR_DIRECTIVE",
     "HU_HYBRID_FUSION",
     "HU_HYBRID_FUSION_ALPHA",
+    "HU_IMMERSIVE_CONTEXT",
     "HU_IMMERSIVE_HUMANNESS",
     "HU_INSIGHT_STREAM",
     "HU_INSIGHT_WIDE",
@@ -581,8 +582,9 @@ typedef struct ch_case {
                             * the only way to actually disable Self-RAG from this
                             * harness, since the default is already enabled. */
     const char *session;
-    bool response_cache; /* semantic cache pre-seeded msg -> "cached answer" */
-    bool immersive;      /* fixture persona + HU_PERSONA_HEAD=live + imessage channel */
+    bool response_cache;           /* semantic cache pre-seeded msg -> "cached answer" */
+    bool immersive;                /* fixture persona + HU_PERSONA_HEAD=live + imessage channel */
+    const char *immersive_context; /* HU_IMMERSIVE_CONTEXT, NULL = unset */
     /* branch probes: prove the case reaches the code it names */
     const char *probe_contains;
     const char *probe_absent;
@@ -904,6 +906,20 @@ static const ch_case_t k_immersive_cases[] = {
      .immersive = true,
      .probe_contains = "Sam, a carpenter",
      .probe_absent = "### Active Commitments"},
+    /* HU_IMMERSIVE_CONTEXT=live on the same turn: the golden equals
+     * immersive_commitment plus the "## What you know right now" block,
+     * which carries the commitment the immersive prompt otherwise drops. */
+    {.name = "immersive_commitment_context_live",
+     .msg = "I will call my sister tomorrow",
+     .script = k_s_text,
+     .script_count = 1,
+     .autonomy = CH_AUTO,
+     .memory = true,
+     .session = "alice",
+     .immersive = true,
+     .immersive_context = "live",
+     .probe_contains = "## What you know right now\\nStill open between you two:\\n- call my "
+                       "sister tomorrow"},
 };
 #define CH_N_IMMERSIVE CH_N(k_immersive_cases)
 
@@ -961,6 +977,8 @@ static bool ch_run(const ch_case_t *c, const char *tz, ch_out_t *out) {
         setenv("HU_GRAPH_GROUNDING", c->grounding, 1);
     if (c->immersive)
         setenv("HU_PERSONA_HEAD", "live", 1);
+    if (c->immersive_context)
+        setenv("HU_IMMERSIVE_CONTEXT", c->immersive_context, 1);
 
     trp_t trp;
     trp_init(&trp, c->script, c->script_count, c->strict_script ? NULL : "ok.");
@@ -1272,6 +1290,29 @@ static void immersive_prompt_matches_goldens(void) {
                      "HU_IMMERSIVE_GOLDEN_WRITE");
 }
 
+/* The LIVE golden must be the OFF golden plus exactly the block: splice the
+ * escaped block ("## What you know right now\\n" ... "\\n\\n") out of
+ * immersive_commitment_context_live and compare to immersive_commitment. */
+static void immersive_context_live_golden_is_off_golden_plus_block(void) {
+    char *off = ch_read_file(CH_IMMERSIVE_GOLDEN_DIR "/immersive_commitment.golden");
+    char *live = ch_read_file(CH_IMMERSIVE_GOLDEN_DIR "/immersive_commitment_context_live.golden");
+    HU_SKIP_IF(!off || !live, "immersive goldens not generated (HU_IMMERSIVE_GOLDEN_WRITE=1)");
+    char *start = strstr(live, "## What you know right now\\n");
+    HU_ASSERT_NOT_NULL(start);
+    char *end = strstr(start, "\\n\\n");
+    HU_ASSERT_NOT_NULL(end);
+    end += 4;
+    memmove(start, end, strlen(end) + 1);
+    HU_ASSERT_NULL(strstr(off, "## What you know right now"));
+    char why[640];
+    size_t line = ch_first_diff(off, live, why, sizeof(why));
+    if (line != 0)
+        printf("    immersive LIVE minus block differs from OFF at %s\n", why);
+    HU_ASSERT_EQ(line, 0);
+    free(off);
+    free(live);
+}
+
 static size_t ch_compare_cases(const ch_case_t *cases, size_t n_cases, const char *tz_a,
                                const char *tz_b) {
     size_t failures = 0;
@@ -1439,6 +1480,7 @@ void run_agent_turn_characterization_tests(void) {
     HU_TEST_SUITE("AgentTurnCharacterization");
     HU_RUN_TEST(characterization_matches_goldens);
     HU_RUN_TEST(immersive_prompt_matches_goldens);
+    HU_RUN_TEST(immersive_context_live_golden_is_off_golden_plus_block);
     HU_RUN_TEST(characterization_is_timezone_invariant);
     HU_RUN_TEST(characterization_is_repeatable);
     HU_RUN_TEST(characterization_comparator_catches_each_mutation);

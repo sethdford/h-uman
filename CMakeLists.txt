@@ -775,6 +775,7 @@ set(HU_CORE_SOURCES
     src/agent/agent_stream.c
     src/agent/lean_head.c
     src/agent/reply_prompt.c
+    src/agent/turn/immersive_context.c
     src/agent/agent_turn.c
     src/agent/turn/turn_ctx.c
     src/agent/turn/turn_retrieve.c
@@ -959,6 +960,7 @@ set(HU_CORE_SOURCES
     src/providers/sse.c
     src/providers/scrub.c
     src/providers/reliable.c
+    src/providers/private_context.c
     src/providers/from_config.c
     src/providers/router.c
     src/providers/ensemble.c
@@ -3893,6 +3895,8 @@ tests/test_imessage_action_telemetry.c
     tests/test_agent.c
     tests/test_lean_head.c
     tests/test_reply_prompt.c
+    tests/test_immersive_context.c
+    tests/test_private_context.c
     tests/test_agent_turn_state.c
     tests/test_agent_turn_transport.c
     tests/turn_recording_provider.c

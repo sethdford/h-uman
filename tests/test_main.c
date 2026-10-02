@@ -500,6 +500,8 @@ void run_persona_eval_tests(void);
 void run_agent_tests(void); /* Sprint 46 R5.3 carryover */
 void run_lean_head_tests(void);
 void run_reply_prompt_tests(void);
+void run_immersive_context_tests(void);
+void run_private_context_tests(void);
 void run_agent_turn_state_tests(void);            /* #26: per-turn state tracking */
 void run_agent_turn_transport_tests(void);        /* M4 follow-up: transport-error fast-fail */
 void run_turn_recording_provider_tests(void);     /* agent-turn carve: recording provider */
@@ -1588,6 +1590,8 @@ int main(int argc, char **argv) {
     run_agent_tests();
     run_lean_head_tests();
     run_reply_prompt_tests();
+    run_immersive_context_tests();
+    run_private_context_tests();
     /* #26: per-turn state tracking unit tests (tool_count, hash, registers) */
     run_agent_turn_state_tests();
     /* M4 follow-up: transport-error fast-fail in agent_turn tool-loop */
