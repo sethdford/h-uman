@@ -8553,6 +8553,14 @@ hu_error_t hu_conversation_schedule_message_on(const char *contact_id, size_t ci
                                                const char *channel_name, size_t ch_len,
                                                const char *message, size_t msg_len,
                                                uint64_t deliver_at_ms) {
+    return hu_conversation_schedule_message_kind(contact_id, cid_len, channel_name, ch_len, message,
+                                                 msg_len, deliver_at_ms, 0);
+}
+
+hu_error_t hu_conversation_schedule_message_kind(const char *contact_id, size_t cid_len,
+                                                 const char *channel_name, size_t ch_len,
+                                                 const char *message, size_t msg_len,
+                                                 uint64_t deliver_at_ms, uint8_t kind) {
     if (!contact_id || cid_len == 0 || !message || msg_len == 0 || deliver_at_ms == 0)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -8573,6 +8581,7 @@ hu_error_t hu_conversation_schedule_message_on(const char *contact_id, size_t ci
             sched_queue[i].message[mn] = '\0';
             sched_queue[i].msg_len = mn;
             sched_queue[i].deliver_at_ms = deliver_at_ms;
+            sched_queue[i].kind = kind;
             sched_queue[i].active = true;
             return HU_OK;
         }
@@ -8597,6 +8606,18 @@ size_t hu_conversation_flush_scheduled_for(uint64_t now_ms, const char *channel_
                                            size_t filter_len, char *out_contact, size_t contact_cap,
                                            char *out_channel, size_t channel_cap, char *out_message,
                                            size_t message_cap) {
+    return hu_conversation_flush_scheduled_kind(now_ms, channel_filter, filter_len, out_contact,
+                                                contact_cap, out_channel, channel_cap, out_message,
+                                                message_cap, NULL);
+}
+
+size_t hu_conversation_flush_scheduled_kind(uint64_t now_ms, const char *channel_filter,
+                                            size_t filter_len, char *out_contact,
+                                            size_t contact_cap, char *out_channel,
+                                            size_t channel_cap, char *out_message,
+                                            size_t message_cap, uint8_t *out_kind) {
+    if (out_kind)
+        *out_kind = 0;
     if (!out_contact || !out_message || contact_cap == 0 || message_cap == 0)
         return 0;
 
@@ -8629,6 +8650,8 @@ size_t hu_conversation_flush_scheduled_for(uint64_t now_ms, const char *channel_
             mn = message_cap - 1;
         memcpy(out_message, sched_queue[i].message, mn);
         out_message[mn] = '\0';
+        if (out_kind)
+            *out_kind = sched_queue[i].kind;
         sched_queue[i].active = false;
         return mn;
     }
@@ -8674,8 +8697,10 @@ hu_error_t hu_conversation_sched_save(const char *path, size_t path_len) {
         fprint_json_escaped(f, sched_queue[i].channel_name);
         fprintf(f, "\",\"message\":\"");
         fprint_json_escaped(f, sched_queue[i].message);
-        fprintf(f, "\",\"deliver_at\":%llu}%s\n", (unsigned long long)sched_queue[i].deliver_at_ms,
-                (written + 1 < active_count) ? "," : "");
+        fprintf(f, "\",\"deliver_at\":%llu", (unsigned long long)sched_queue[i].deliver_at_ms);
+        if (sched_queue[i].kind)
+            fprintf(f, ",\"kind\":%u", (unsigned)sched_queue[i].kind);
+        fprintf(f, "}%s\n", (written + 1 < active_count) ? "," : "");
         written++;
     }
     fprintf(f, "]\n");
@@ -8885,6 +8910,13 @@ hu_error_t hu_conversation_sched_load(const char *path, size_t path_len) {
         if (sscanf(dstart + 13, "%llu", &deliver) != 1 || deliver == 0)
             continue;
         sched_queue[slot].deliver_at_ms = (uint64_t)deliver;
+        /* Optional unprompted-kind tag, written after deliver_at only when
+         * non-zero. A file without it loads as owner-scheduled (kind 0). */
+        sched_queue[slot].kind = 0;
+        const char *kstart = strstr(dstart, "\"kind\":");
+        unsigned kind = 0;
+        if (kstart && sscanf(kstart + 7, "%u", &kind) == 1 && kind <= 255)
+            sched_queue[slot].kind = (uint8_t)kind;
         sched_queue[slot].active = true;
         slot++;
     }

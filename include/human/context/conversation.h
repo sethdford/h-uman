@@ -968,6 +968,21 @@ size_t hu_conversation_flush_scheduled_for(uint64_t now_ms, const char *channel_
                                            char *out_channel, size_t channel_cap, char *out_message,
                                            size_t message_cap);
 
+/* Tagged scheduling: `kind` is a hu_unprompted_kind_t (human/daemon/unprompted_gate.h).
+ * 0 = owner-scheduled (the _on/_for API above). A non-zero kind marks an
+ * UNPROMPTED send (e.g. the read-no-reply bump) so the delivery side runs the
+ * unprompted gate stack at send time; it is persisted as "kind" in
+ * scheduled.json only when non-zero, so untagged files are unchanged. */
+hu_error_t hu_conversation_schedule_message_kind(const char *contact_id, size_t cid_len,
+                                                 const char *channel_name, size_t ch_len,
+                                                 const char *message, size_t msg_len,
+                                                 uint64_t deliver_at_ms, uint8_t kind);
+size_t hu_conversation_flush_scheduled_kind(uint64_t now_ms, const char *channel_filter,
+                                            size_t filter_len, char *out_contact,
+                                            size_t contact_cap, char *out_channel,
+                                            size_t channel_cap, char *out_message,
+                                            size_t message_cap, uint8_t *out_kind);
+
 /* Persist scheduled messages to a JSON file. Load restores on startup. */
 hu_error_t hu_conversation_sched_save(const char *path, size_t path_len);
 hu_error_t hu_conversation_sched_load(const char *path, size_t path_len);
@@ -988,6 +1003,7 @@ typedef struct hu_sched_slot {
     size_t msg_len;
     uint64_t deliver_at_ms;
     bool active;
+    uint8_t kind; /* hu_unprompted_kind_t; 0 = owner-scheduled */
 } hu_sched_slot_t;
 
 /* Access a scheduled slot by index (0..HU_SCHED_MAX-1). Returns NULL if out of range. */

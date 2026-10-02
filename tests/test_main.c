@@ -453,6 +453,7 @@ void run_life_chapter_repo_tests(void);
 void run_proactive_decisions_repo_tests(void);
 void run_outbound_sends_repo_tests(void);
 void run_daemon_proactive_decline_tests(void);
+void run_unprompted_gate_tests(void);
 void run_daemon_proactive_reachability_tests(void);
 void run_daemon_contact_optout_tests(void);
 void run_daemon_name_catch_tests(void);
@@ -1551,6 +1552,7 @@ int main(int argc, char **argv) {
     run_proactive_decisions_repo_tests();
     run_outbound_sends_repo_tests();
     run_daemon_proactive_decline_tests();
+    run_unprompted_gate_tests();
     run_daemon_proactive_reachability_tests();
     run_daemon_contact_optout_tests();
     run_daemon_name_catch_tests();

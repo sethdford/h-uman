@@ -142,7 +142,7 @@ void hu_daemon_followup_sched_tick(struct hu_agent *agent, hu_service_channel_t 
  * "delivered" over a blue_guard HOLD (2026-07-27), so lost messages read as
  * successes. Failures log 'FAILED — entry dropped' and skip the send-recency
  * record. Implemented in src/daemon/daemon_followup_sched.c. */
-void hu_daemon_sched_send_and_log(struct hu_agent *agent, struct hu_channel *channel,
+bool hu_daemon_sched_send_and_log(struct hu_agent *agent, struct hu_channel *channel,
                                   const char *channel_name, const char *contact, const char *msg,
                                   size_t msg_len);
 

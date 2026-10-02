@@ -106,26 +106,3 @@ bool hu_daemon_contact_optout_observe(struct hu_agent *agent, const char *contac
     return false;
 #endif
 }
-
-bool hu_daemon_contact_optout_should_skip(struct hu_agent *agent, const char *contact) {
-    if (!hu_contact_optout_enabled())
-        return false;
-#ifdef HU_ENABLE_SQLITE
-    if (!agent || !agent->memory || !contact)
-        return false;
-    struct sqlite3 *db = hu_sqlite_memory_get_db(agent->memory);
-    if (!hu_contact_optout_is_suppressed_db(db, contact))
-        return false;
-    /* Per-process count so a reading is one grep of the service log. */
-    static unsigned skipped = 0;
-    skipped++;
-    hu_log_info("human", agent->observer,
-                "[optout] proactive skipped for %.24s — contact opted out [n=%u this process]",
-                contact, skipped);
-    return true;
-#else
-    (void)agent;
-    (void)contact;
-    return false;
-#endif
-}

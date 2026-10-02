@@ -175,10 +175,13 @@ static void test_gate_and_send_open_circuit_skips_and_attributes(void) {
     HU_ASSERT_EQ(hu_proactive_decisions_repo_ensure_schema(db), HU_OK);
 
     char who[] = "+15555550177";
+    /* 13:26 UTC (tz 0 below): outside the unprompted stack's static 23:00-06:00
+     * sleep floor, which runs BEFORE the circuit breaker (DEF-14 stage order). */
+    const int64_t T = 1789046800;
     /* Five sends that never reached the contact — the shape of an unreachable
      * address, not a policy decline. */
     for (int i = 1; i <= 5; i++)
-        HU_ASSERT_EQ(hu_proactive_decisions_repo_record(db, 1789000000 + i, who, "proactive_send",
+        HU_ASSERT_EQ(hu_proactive_decisions_repo_record(db, T + i, who, "proactive_send",
                                                         HU_PROACTIVE_DECISION_DECLINE,
                                                         "send_failed", 0, NULL),
                      HU_OK);
@@ -190,13 +193,18 @@ static void test_gate_and_send_open_circuit_skips_and_attributes(void) {
     cp.contact_id = who;
     hu_channel_vtable_t vt = {0}; /* .send NULL — reaching it would be the bug */
     hu_channel_t chan = {.ctx = (void *)"imessage", .vtable = &vt};
+    /* A budget WITH room: the governor stage now precedes the breaker, so a
+     * zeroed (exhausted) budget would be blamed instead of the circuit. */
     hu_proactive_budget_t budget = {0};
+    budget.daily_max = 3;
+    budget.weekly_max = 10;
+    budget.relationship_multiplier = 1.0;
     char response[64] = "hey, you around this weekend?";
     size_t response_len = 29;
 
     bool sent =
         hu_daemon_proactive_gate_and_send(&agent, &alloc, &chan, &cp, "imessage", who, 12, response,
-                                          &response_len, 1789000010, &budget, NULL, 0, NULL);
+                                          &response_len, T + 10, &budget, NULL, 0, NULL);
 
     HU_ASSERT_FALSE(sent);
     HU_ASSERT_EQ(decline_row_count(db), before + 1);
@@ -206,15 +214,15 @@ static void test_gate_and_send_open_circuit_skips_and_attributes(void) {
     /* And it is not a permanent ban: once the contact actually receives one,
      * the breaker closes and the next proposal is gated by policy again
      * (governor, with a zeroed budget) rather than by the circuit. */
-    HU_ASSERT_EQ(hu_proactive_decisions_repo_record(db, 1789000020, who, "proactive_send",
+    HU_ASSERT_EQ(hu_proactive_decisions_repo_record(db, T + 20, who, "proactive_send",
                                                     HU_PROACTIVE_DECISION_SEND, NULL, 1, NULL),
                  HU_OK);
     response_len = 29;
     (void)hu_daemon_proactive_gate_and_send(&agent, &alloc, &chan, &cp, "imessage", who, 12,
-                                            response, &response_len, 1789000030, &budget, NULL, 0,
+                                            response, &response_len, T + 30, &budget, NULL, 0,
                                             NULL);
     HU_ASSERT_TRUE(!decline_row_matches(db, who, "proactive_send", HU_PROACTIVE_DECISION_DECLINE,
-                                        "send_circuit_open", 1789000030));
+                                        "send_circuit_open", 0));
     mem.vtable->deinit(mem.ctx);
 }
 
@@ -255,9 +263,10 @@ static void test_gate_and_send_missing_send_vtable_is_not_a_policy_drop(void) {
     char response[16] = "hey there";
     size_t response_len = 9;
 
+    /* 13:26 UTC with tz 0: outside the unprompted stack's static sleep floor. */
     bool sent = hu_daemon_proactive_gate_and_send(
         &agent, &alloc, &chan, &cp, "imessage", "+15555550100", 12, response, &response_len,
-        1789000000, &budget, /*ar_cfg=*/NULL, /*tz_offset_s=*/0, /*throttle=*/NULL);
+        1789046800, &budget, /*ar_cfg=*/NULL, /*tz_offset_s=*/0, /*throttle=*/NULL);
 
     HU_ASSERT_FALSE(sent);
     HU_ASSERT_EQ(response_len, 9);

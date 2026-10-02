@@ -9,6 +9,7 @@
 #include "human/daemon_cron.h"
 #include "human/core/log.h"
 #include "human/daemon.h"
+#include "human/daemon/unprompted_gate.h"
 #include "human/observability/validator_telemetry.h"
 
 #include "human/agent.h"
@@ -305,6 +306,29 @@ hu_error_t hu_service_run_agent_cron(hu_allocator_t *alloc, hu_agent_t *agent,
                             if (response_len > 1 && response[response_len - 1] == '.') {
                                 response[response_len - 1] = '\0';
                                 response_len--;
+                            }
+                            if (target_part && target_part_len > 0) {
+                                /* Directed at a contact = an unprompted send (DEF-7):
+                                 * the one gate stack, moderation BLOCKING, then the
+                                 * ledger row the per-contact cap counts. */
+                                hu_unprompted_gate_t ug;
+                                hu_daemon_unprompted_gate_init(&ug, alloc, agent, ch_part,
+                                                               target_part, target_part_len,
+                                                               (int64_t)now);
+                                if (hu_unprompted_send_check(&ug, target_part, HU_UNPROMPTED_CRON,
+                                                             (int64_t)now, response, &response_len,
+                                                             true) != HU_UNPROMPTED_ALLOW)
+                                    break;
+                                hu_error_t ug_err = channels[c].channel->vtable->send(
+                                    channels[c].channel->ctx, target_part, target_part_len,
+                                    response, response_len, NULL, 0);
+                                if (ug_err == HU_OK)
+                                    hu_unprompted_record_sent(&ug, target_part, HU_UNPROMPTED_CRON,
+                                                              (int64_t)now);
+                                else
+                                    hu_log_error("human", NULL, "cron send failed: %s",
+                                                 hu_error_string(ug_err));
+                                break;
                             }
                             /* SHIELD-004: Moderation check before cron send */
                             {

@@ -1277,6 +1277,8 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_proactive_policy.c
     src/daemon/daemon_follow_up_watcher.c
     src/daemon/daemon_followup_sched.c
+    src/daemon/daemon_unprompted_sends.c
+    src/daemon/unprompted_gate.c
     src/daemon/daemon_voice_reply.c
     src/daemon/daemon_voice_first.c
     src/daemon/daemon_expressive.c
@@ -3615,6 +3617,7 @@ set(HU_TEST_SOURCES
     tests/test_daemon_routing.c
     tests/test_daemon_proactive.c
     tests/test_daemon_proactive_decline.c
+    tests/test_unprompted_gate.c
     tests/test_daemon_proactive_reachability.c
     tests/test_daemon_contact_optout.c
     tests/test_daemon_hurt_handoff.c
