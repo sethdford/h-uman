@@ -211,7 +211,9 @@ if [ "$SKIP_MEMORY" = 0 ]; then
     python3 "$KIT/cutover_plan.py" prep-probes --src "$PROBES_SRC" --dst "$MEMRUN/turns.jsonl" \
         --n "$PROBES" | sed 's/^/[cutover]   /'
     mkdir -p "$MEMRUN/state"; chmod 700 "$MEMRUN/state"
-    cp -R "$RUN/state/base" "$MEMRUN/state/base"
+    # copy-on-write clone on APFS (memory.db is hundreds of MB); plain copy elsewhere
+    cp -cR "$RUN/state/base" "$MEMRUN/state/base" 2>/dev/null \
+        || { rm -rf "$MEMRUN/state/base"; cp -R "$RUN/state/base" "$MEMRUN/state/base"; }
 fi
 
 # ── 2. replay every arm (sequential, paced) ───────────────────────────
