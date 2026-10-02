@@ -100,6 +100,13 @@ void hu_reliable_set_clock(hu_provider_t *reliable, time_t (*now_fn)(void *), vo
  * ON by default: the empty reply is treated as HU_ERR_PROVIDER_RESPONSE for
  * that provider (no retry on it, no circuit-breaker credit) and the chain
  * moves to the mapped fallback model / next provider. */
+/* The primary (inner) provider of a reliable wrapper, for a caller whose
+ * prompt must NOT fail over — content that may only reach a local model. The
+ * returned provider is borrowed from the wrapper. HU_ERR_INVALID_ARGUMENT when
+ * `reliable` is not a reliable wrapper; HU_ERR_PROVIDER_UNAVAILABLE while the
+ * circuit is open (calls are being routed to the fallbacks). */
+hu_error_t hu_reliable_primary(const hu_provider_t *reliable, hu_provider_t *out);
+
 void hu_reliable_set_empty_failover(hu_provider_t *reliable, bool on);
 
 #endif /* HU_RELIABLE_H */

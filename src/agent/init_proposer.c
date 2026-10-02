@@ -655,11 +655,8 @@ static void find_first_json_object(const char *text, size_t len, size_t *out_sta
  *
  * On failure, *out_response is NULL.
  */
-/* Both call sites live in the #else (non-test) branches of the proposer
- * tick/run functions, so in HU_IS_TEST (human_tests) builds this helper
- * is unused and would trip -Wunused-function under -Werror. Guard the
- * definition with the same condition as its callers. */
-#if !HU_IS_TEST
+/* Also called by hu_init_proposer_decide_once in every build, so it is not
+ * guarded by HU_IS_TEST (the tick paths still never reach it in tests). */
 static hu_error_t init_proposer_call_llm(hu_allocator_t *alloc, struct hu_provider *provider,
                                          const char *sys_prompt, const char *user_msg,
                                          const char *model, char **out_response,
@@ -671,7 +668,6 @@ static hu_error_t init_proposer_call_llm(hu_allocator_t *alloc, struct hu_provid
                                     strlen(sys_prompt), user_msg, strlen(user_msg), &opts,
                                     out_response, out_response_len);
 }
-#endif /* !HU_IS_TEST */
 
 /* 2026-05-26 issue-sweep — defense-in-depth fallback for truncated
  * responses. Even with gemini-3.5-flash + json_object mode, the model
@@ -968,6 +964,16 @@ size_t hu_init_proposer_build_propose_user_message_ex(const hu_proactive_compose
             pos += (size_t)n;
     }
 
+    /* HU_PROPOSER_CONTEXT block (contact profile, recent thread, insights):
+     * pre-rendered with its own headers; absent on every call not pinned to
+     * a local provider, so today's prompt is unchanged byte for byte. */
+    if (inputs->proposer_context && inputs->proposer_context_len > 0 && pos + 1 < out_cap) {
+        size_t avail = out_cap - pos - 1;
+        size_t copy = inputs->proposer_context_len < avail ? inputs->proposer_context_len : avail;
+        memcpy(out + pos, inputs->proposer_context, copy);
+        pos += copy;
+    }
+
     /* Content fragments. Each gets its own labeled header so the model
      * can see WHICH source contributed what. Memory is filtered through
      * the optional content_is_safe predicate if present — risk-mitigation
@@ -1037,6 +1043,35 @@ size_t hu_init_proposer_build_propose_user_message_ex(const hu_proactive_compose
     }
     out[pos] = '\0';
     return pos;
+}
+
+hu_error_t hu_init_proposer_decide_once(hu_allocator_t *alloc, struct hu_provider *provider,
+                                        const char *model,
+                                        const hu_proactive_compose_inputs_t *inputs,
+                                        int64_t now_unix, int64_t last_inbound_unix,
+                                        hu_init_decision_t *out) {
+    if (!alloc || !provider || !provider->vtable || !inputs || !out)
+        return HU_ERR_INVALID_ARGUMENT;
+    memset(out, 0, sizeof(*out));
+    const size_t cap = 16384; /* same cap as the _ex path's user message */
+    char *user_msg = (char *)alloc->alloc(alloc->ctx, cap);
+    if (!user_msg)
+        return HU_ERR_OUT_OF_MEMORY;
+    hu_init_proposer_build_propose_user_message_ex(inputs, now_unix, last_inbound_unix, user_msg,
+                                                   cap);
+    char *response = NULL;
+    size_t response_len = 0;
+    hu_error_t err = init_proposer_call_llm(alloc, provider, s_system_prompt, user_msg,
+                                            model ? model : "", &response, &response_len);
+    alloc->free(alloc->ctx, user_msg, cap);
+    if (err != HU_OK || !response || response_len == 0) {
+        if (response)
+            alloc->free(alloc->ctx, response, response_len + 1);
+        return err != HU_OK ? err : HU_ERR_PROVIDER_RESPONSE;
+    }
+    err = hu_init_proposer_parse_response(response, response_len, out);
+    alloc->free(alloc->ctx, response, response_len + 1);
+    return err;
 }
 
 /* M3 Dispatch T2 — pure verdict mapping. Exposed in the header so the

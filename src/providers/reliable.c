@@ -600,6 +600,16 @@ hu_error_t hu_reliable_provider_create(hu_allocator_t *alloc, const hu_reliable_
     return HU_OK;
 }
 
+hu_error_t hu_reliable_primary(const hu_provider_t *reliable, hu_provider_t *out) {
+    if (!reliable || reliable->vtable != &reliable_vtable || !reliable->ctx || !out)
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_reliable_ctx_t *r = (hu_reliable_ctx_t *)reliable->ctx;
+    if (circuit_skip_primary(r))
+        return HU_ERR_PROVIDER_UNAVAILABLE;
+    *out = r->inner;
+    return HU_OK;
+}
+
 void hu_reliable_set_empty_failover(hu_provider_t *reliable, bool on) {
     if (!reliable || !reliable->ctx)
         return;
