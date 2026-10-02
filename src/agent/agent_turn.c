@@ -8,13 +8,13 @@
 #include "human/agent/self_uncertainty.h"
 #include "human/agent/theory_of_mind.h"
 #include "human/agent/turn.h"
+#include "human/agent/turn_moment.h"
 #include "human/config.h"
 #include "human/core/json.h"
 #include "human/core/paths.h"
 #include "human/core/string.h"
 #include "human/core/tokens.h"
 #include "human/data/loader.h"
-#include "human/moment.h"
 #include "human/persona/taste.h"
 
 #include "human/agent/choreography.h"
@@ -2688,37 +2688,11 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
             }
         }
 
-        /* Moment-context decision layer — bridges existing timing / persona /
-         * tone signals into a per-turn fragment for the LLM. Phase 3 minimal
-         * wiring: pass persona + per-channel overlay; history loader
-         * integration is a follow-up (today we pass NULL → predicate skips
-         * thread/style/topic fields gracefully). Future: load 25-turn history
-         * via the same path the daemon uses (load_conversation_history) and
-         * the contact_send_recency timestamps for full timing fidelity. */
+        /* Moment cue from the contact's real thread (src/agent/turn/turn_moment.c). */
         char moment_prompt_buf[512];
-        const char *moment_ctx = NULL;
-        size_t moment_ctx_len = 0;
-        if (agent->persona) {
-            const struct hu_persona_overlay_t *moment_overlay = NULL;
-            if (agent->active_channel && agent->active_channel_len > 0) {
-                moment_overlay = (const struct hu_persona_overlay_t *)hu_persona_find_overlay(
-                    agent->persona, agent->active_channel, agent->active_channel_len);
-            }
-            hu_moment_t moment;
-            hu_error_t mc_err = hu_moment_compose_from_inputs(
-                (const struct hu_persona_t *)agent->persona, moment_overlay,
-                /* history */ NULL, /* last_their_ts */ -1, /* last_our_ts */ -1,
-                /* contact_tz */ NULL, (int64_t)time(NULL), &moment);
-            if (mc_err == HU_OK) {
-                size_t mr_n = 0;
-                hu_error_t mr_err = hu_moment_render_prompt(&moment, moment_prompt_buf,
-                                                            sizeof(moment_prompt_buf), &mr_n);
-                if (mr_err == HU_OK && mr_n > 0) {
-                    moment_ctx = moment_prompt_buf;
-                    moment_ctx_len = mr_n;
-                }
-            }
-        }
+        size_t moment_ctx_len = hu_turn_moment_render(agent, (int64_t)time(NULL), moment_prompt_buf,
+                                                      sizeof(moment_prompt_buf));
+        const char *moment_ctx = moment_ctx_len > 0 ? moment_prompt_buf : NULL;
 
         /* W9 world-model snapshot (FIX 12). Cached for 60s by hu_world_model_load
          * so per-turn cost is dominated by the SQL fetch on first miss. We only
