@@ -2810,11 +2810,13 @@ static bool imessage_health_check(void *ctx) {
 #endif
 }
 
-static hu_error_t imessage_load_conversation_history(void *ctx, hu_allocator_t *alloc,
-                                                     const char *contact_id, size_t contact_id_len,
-                                                     size_t limit, hu_channel_history_entry_t **out,
-                                                     size_t *out_count) {
-    (void)ctx;
+/* Shared body of both history loaders: run `sql` (?1 = handle, ?2 = limit)
+ * and decode rows. `label_own_media`: Seth's text-less rows carry their media
+ * label instead of the legacy "[you replied]" (DM loader only). */
+static hu_error_t imessage_load_history_sql(const char *sql, bool label_own_media,
+                                            hu_allocator_t *alloc, const char *contact_id,
+                                            size_t contact_id_len, size_t limit,
+                                            hu_channel_history_entry_t **out, size_t *out_count) {
     if (!alloc || !contact_id || !out || !out_count)
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
@@ -2834,8 +2836,6 @@ static hu_error_t imessage_load_conversation_history(void *ctx, hu_allocator_t *
     sqlite3 *db = NULL;
     if (imessage_open_chatdb(db_path, &db) != SQLITE_OK)
         return HU_ERR_INTERNAL;
-
-    const char *sql = HU_IMESSAGE_SQL_DM_HISTORY;
 
     sqlite3_stmt *stmt = NULL;
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
@@ -2906,6 +2906,8 @@ static hu_error_t imessage_load_conversation_history(void *ctx, hu_allocator_t *
                 tlen = sizeof(entries[0].text) - 1;
             memcpy(entries[count].text, txt, tlen);
             entries[count].text[tlen] = '\0';
+        } else if (entries[count].from_me && !label_own_media) {
+            snprintf(entries[count].text, sizeof(entries[0].text), "[you replied]");
         } else if (has_audio) {
             snprintf(entries[count].text, sizeof(entries[0].text), "[Voice Message]");
         } else if (has_video) {
@@ -2942,10 +2944,29 @@ static hu_error_t imessage_load_conversation_history(void *ctx, hu_allocator_t *
     *out_count = count;
     return HU_OK;
 #else
+    (void)sql;
+    (void)label_own_media;
     (void)contact_id_len;
     (void)limit;
     return HU_ERR_NOT_SUPPORTED;
 #endif
+}
+
+static hu_error_t imessage_load_conversation_history(void *ctx, hu_allocator_t *alloc,
+                                                     const char *contact_id, size_t contact_id_len,
+                                                     size_t limit, hu_channel_history_entry_t **out,
+                                                     size_t *out_count) {
+    (void)ctx;
+    return imessage_load_history_sql(HU_IMESSAGE_SQL_HANDLE_HISTORY, false, alloc, contact_id,
+                                     contact_id_len, limit, out, out_count);
+}
+
+hu_error_t hu_imessage_load_dm_history(void *ctx, hu_allocator_t *alloc, const char *contact_id,
+                                       size_t contact_id_len, size_t limit,
+                                       hu_channel_history_entry_t **out, size_t *out_count) {
+    (void)ctx;
+    return imessage_load_history_sql(HU_IMESSAGE_SQL_DM_HISTORY, true, alloc, contact_id,
+                                     contact_id_len, limit, out, out_count);
 }
 
 #if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__) && defined(HU_ENABLE_SQLITE)

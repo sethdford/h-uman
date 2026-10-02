@@ -187,6 +187,15 @@ static void test_local_only_url_loopback_and_socket(void) {
     HU_ASSERT_FALSE(hu_local_only_url_is_local("http://127.0.0.1.example.com"));
     HU_ASSERT_FALSE(hu_local_only_url_is_local("http://evil.com/127.0.0.1"));
     HU_ASSERT_FALSE(hu_local_only_url_is_local("http://0.0.0.0:8741"));
+    /* strict parser (#587): octets range-checked, scheme required at the start */
+    HU_ASSERT_FALSE(hu_local_only_url_is_local("http://127.0.0.999:8741"));
+    HU_ASSERT_FALSE(hu_local_only_url_is_local("http://127.0.0.256"));
+    HU_ASSERT_TRUE(hu_local_only_url_is_local("http://127.255.255.254:1"));
+    HU_ASSERT_FALSE(hu_local_only_url_is_local("evil.com/?u=http://127.0.0.1"));
+    HU_ASSERT_FALSE(hu_local_only_url_is_local("localhost:8741"));
+    HU_ASSERT_FALSE(hu_local_only_url_is_local("ftp://127.0.0.1"));
+    HU_ASSERT_TRUE(hu_local_only_url_is_local("WS://localhost:9000/ws"));
+    HU_ASSERT_TRUE(hu_local_only_url_is_local("https://127.0.0.1"));
     HU_ASSERT_FALSE(hu_local_only_url_is_local(""));
     HU_ASSERT_FALSE(hu_local_only_url_is_local(NULL));
 }
@@ -200,6 +209,11 @@ static void test_local_only_endpoint_decision(void) {
     HU_ASSERT_FALSE(hu_local_only_endpoint_is_local("openrouter", "http://127.0.0.1:9", 0));
     /* in-process backends have no URL */
     HU_ASSERT_TRUE(hu_local_only_endpoint_is_local("apple", NULL, 0));
+    /* path backends: base_url is a model path, never a host */
+    HU_ASSERT_TRUE(hu_local_only_endpoint_is_local("embedded", "models/x.gguf", 0));
+    HU_ASSERT_TRUE(hu_local_only_endpoint_is_local("llamacpp", "/opt/models/q4.gguf", 0));
+    HU_ASSERT_TRUE(hu_local_only_endpoint_is_local("huml", "ckpt/huml.bin", 0));
+    HU_ASSERT_FALSE(hu_local_only_endpoint_is_local("mlx_local", "models/x.gguf", 0));
     HU_ASSERT_FALSE(hu_local_only_endpoint_is_local("gemini", NULL, 0));
     HU_ASSERT_FALSE(hu_local_only_endpoint_is_local("compatible", NULL, 0));
     /* the explicit per-provider override wins both ways */

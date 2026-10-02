@@ -47,13 +47,18 @@ Mike: [photo]
   `[attachment]`. Message text is capped at 240 bytes.
 - The trailing contact messages the model already receives as the current
   message are left out (`skipped_current=1`).
-- The loader reads the 1:1 chat only: messages in a chat whose only other
-  participant is this handle (`chat_message_join` → `chat_handle_join`). It
-  used to join on the handle alone, which pulled this contact's group-chat
-  messages into the DM context and missed Seth's 1:1 rows stored with
-  `handle_id` 0.
-- Seth's rows with no text and no recognised media render as `[no text]`.
-  His photos and voice memos now carry their media label.
+- It reads its own loader, `hu_imessage_load_dm_history`, and never the
+  shared `load_conversation_history` result. The DM query mirrors
+  `hu_imessage_chat_is_group`: `chat.style` 45 is a DM and 43 a group, and
+  only an unknown style falls back to "exactly one other participant". The
+  shared loader is unchanged, byte for byte. It still joins on the handle,
+  which also returns this contact's group messages. Every other consumer
+  (emotion, director, awareness, proactive, prospective) keeps that
+  behaviour. This costs one extra chat.db query per reactive turn, only
+  while the gate is not `off`.
+- In the DM loader only, Seth's rows with no text and no recognised media
+  render as `[no text]`, and his photos and voice memos carry their media
+  label.
 - No block for group chats (chat.db rows carry no sender) or for an empty
   thread.
 
@@ -80,9 +85,13 @@ row to it.
 - **Every attempt is checked.** The reliable provider strips every span from
   any attempt, first or fallback (`chat`, `chat_with_system`, `stream_chat`),
   that is not local. An attempt is local only when both hold:
-  - its **endpoint** is on this machine: a loopback (`127.0.0.0/8`,
-    `localhost`, `::1`) or unix-socket `base_url`, and the provider is not a
-    cloud gateway (`openrouter`, `litellm`, ...). `from_config` resolves this
+  - its **endpoint** is on this machine: a `base_url` that opens with
+    `http://`, `https://`, `ws://` or `wss://` and names a loopback host
+    (`127.0.0.0/8` with octets 0–255, `localhost`, `::1`), or a unix socket.
+    The provider must also not be a cloud gateway (`openrouter`, `litellm`,
+    ...). Path backends (`embedded`, `coreml`, `mlx`, `llama-cli`, `llamacpp`,
+    `huml`) take a model path as `base_url` and are local before any URL
+    parsing. `from_config` resolves this
     per provider from the configured `base_url`. In-process backends (`apple`,
     `coreml`, `llamacpp`, ...) need no URL. Set `"local": true|false` on a
     `providers[]` entry to override it.

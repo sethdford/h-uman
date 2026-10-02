@@ -49,15 +49,18 @@ const hu_local_only_span_kind_t *hu_local_only_span_kinds(size_t *count);
  * about where an HTTP endpoint points. NULL / unknown -> not local. */
 bool hu_local_only_provider_name_is_local(const char *name);
 
-/* True for a loopback (127.0.0.0/8, localhost, *.localhost, ::1) or unix-socket
- * ("unix:", "/path") base URL. 0.0.0.0 and anything unparsable are NOT local. */
+/* True for a loopback or unix-socket base URL. Strict: the string must open
+ * with http:// https:// ws:// wss:// (host 127.0.0.0/8 with octets 0-255,
+ * localhost, *.localhost, ::1), or be "unix:" / an absolute path. 0.0.0.0,
+ * scheme-less strings and anything unparsable are NOT local. */
 bool hu_local_only_url_is_local(const char *base_url);
 
 /* The endpoint decision. `override` > 0 forces local, < 0 forces not local
- * (config providers[].local). Otherwise: a known cloud gateway/proxy name
- * (openrouter, litellm, ...) is never local; a non-empty base_url decides by
- * hu_local_only_url_is_local; no URL is local only for in-process backends
- * (apple, coreml, embedded, llama-cli, huml, mlx). */
+ * (config providers[].local). Otherwise, in order: a cloud gateway/proxy name
+ * (openrouter, litellm, ...) is never local; a path backend (coreml, mlx,
+ * embedded, llama-cli, llamacpp, huml — base_url is a model path) is always
+ * local; a non-empty base_url decides by hu_local_only_url_is_local; no URL
+ * is local only for in-process backends. */
 bool hu_local_only_endpoint_is_local(const char *provider_name, const char *base_url, int override);
 
 /* hu_local_only_provider_name_is_local(get_name()). An mlx_local instance

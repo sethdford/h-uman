@@ -395,6 +395,8 @@ static hu_error_t attempt_chat_with_system(hu_reliable_ctx_t *r, hu_allocator_t 
         err = hu_local_only_strip(alloc, message, message_len, &mp, &mp_len);
     if (sp)
         hu_local_only_log_strip(system_prompt, system_prompt_len, endpoint_local, model, model_len);
+    else if (mp)
+        hu_local_only_log_strip(message, message_len, endpoint_local, model, model_len);
     if (err == HU_OK)
         err = try_chat_with_system(r, alloc, prov, sp ? sp : system_prompt,
                                    sp ? sp_len : system_prompt_len, mp ? mp : message,

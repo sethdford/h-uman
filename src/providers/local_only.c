@@ -21,11 +21,17 @@ static const char *const k_cloud_model_prefixes[] = {
     "gemini", "gpt-", "chatgpt", "claude", "grok",
 };
 
-/* Backends that run in this process / a local subprocess and have no URL. */
+/* Backends whose base_url is a MODEL PATH (factory.c), never a host: always
+ * local, decided before any URL parsing. */
+static const char *const k_path_backends[] = {
+    "coreml", "mlx", "embedded", "llama-cli", "llamacpp", "huml",
+};
+
+/* In-process backends that are local when no URL is configured (the Apple
+ * family may point base_url at an apfel server, so a URL there decides). */
 static const char *const k_in_process_names[] = {
-    "apple",    "apfel",     "apple-intelligence", "foundationmodels", "coreml",
-    "embedded", "llama-cli", "llamacpp",           "llama.cpp",        "huml",
-    "mlx",
+    "apple", "apfel",    "apple-intelligence", "foundationmodels", "coreml",
+    "mlx",   "embedded", "llama-cli",          "llamacpp",         "huml",
 };
 
 /* Gateways that forward to cloud APIs even when they listen on loopback. */
@@ -267,11 +273,22 @@ void hu_local_only_request_release(hu_allocator_t *alloc, hu_local_only_request_
     memset(scratch, 0, sizeof(*scratch));
 }
 
-/* Host of a URL: after "scheme://", after any "user@", up to ':' '/' '?' '#'
- * (or the closing ']' of an IPv6 literal). Returns false if absent. */
+/* Strict URL parse (aligned with #587): the scheme must open the string and
+ * be http/https/ws/wss; nothing is searched for mid-string, so
+ * "evil.com/?u=http://127.0.0.1" has no host at all. Returns the host of the
+ * authority (after any "user@"; IPv6 inside brackets). */
 static bool url_host(const char *url, const char **host, size_t *host_len) {
-    const char *p = strstr(url, "://");
-    p = p ? p + 3 : url;
+    static const char *const schemes[] = {"http://", "https://", "ws://", "wss://"};
+    const char *p = NULL;
+    for (size_t i = 0; i < sizeof(schemes) / sizeof(schemes[0]); i++) {
+        size_t sl = strlen(schemes[i]);
+        if (strncasecmp(url, schemes[i], sl) == 0) {
+            p = url + sl;
+            break;
+        }
+    }
+    if (!p)
+        return false;
     const char *auth_end = p + strcspn(p, "/?#");
     for (const char *q = p; q < auth_end; q++) {
         if (*q == '@')
@@ -291,6 +308,31 @@ static bool url_host(const char *url, const char **host, size_t *host_len) {
     return n > 0;
 }
 
+/* 127.a.b.c with four decimal octets, each 0-255. */
+static bool host_is_ipv4_loopback(const char *h, size_t n) {
+    if (n < 7 || memcmp(h, "127.", 4) != 0)
+        return false;
+    int octets = 0;
+    size_t i = 0;
+    while (i < n) {
+        size_t start = i;
+        unsigned v = 0;
+        while (i < n && h[i] >= '0' && h[i] <= '9' && i - start < 3)
+            v = v * 10 + (unsigned)(h[i++] - '0');
+        if (i == start || v > 255)
+            return false;
+        octets++;
+        if (i == n)
+            break;
+        if (h[i] != '.' || octets == 4)
+            return false;
+        i++;
+        if (i == n)
+            return false;
+    }
+    return octets == 4;
+}
+
 static bool host_is_loopback(const char *h, size_t n) {
     if (n == 9 && strncasecmp(h, "localhost", 9) == 0)
         return true;
@@ -298,24 +340,7 @@ static bool host_is_loopback(const char *h, size_t n) {
         return true;
     if ((n == 3 && memcmp(h, "::1", 3) == 0) || (n == 15 && memcmp(h, "0:0:0:0:0:0:0:1", 15) == 0))
         return true;
-    /* 127.a.b.c — exactly four numeric octets */
-    if (n < 9 || memcmp(h, "127.", 4) != 0)
-        return false;
-    int dots = 0, digits = 0;
-    for (size_t i = 0; i < n; i++) {
-        if (h[i] == '.') {
-            if (digits == 0)
-                return false;
-            dots++;
-            digits = 0;
-        } else if (h[i] >= '0' && h[i] <= '9') {
-            if (++digits > 3)
-                return false;
-        } else {
-            return false;
-        }
-    }
-    return dots == 3 && digits > 0;
+    return host_is_ipv4_loopback(h, n);
 }
 
 bool hu_local_only_url_is_local(const char *base_url) {
@@ -337,6 +362,8 @@ bool hu_local_only_endpoint_is_local(const char *provider_name, const char *base
         return false;
     if (NAME_IN(provider_name, k_cloud_proxy_names))
         return false;
+    if (NAME_IN(provider_name, k_path_backends))
+        return true;
     if (base_url && base_url[0])
         return hu_local_only_url_is_local(base_url);
     return NAME_IN(provider_name, k_in_process_names);
