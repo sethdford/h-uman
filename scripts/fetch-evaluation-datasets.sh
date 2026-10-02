@@ -14,7 +14,8 @@
 # Required tools: curl, jq, sha256sum (or shasum -a 256 on macOS).
 #
 # Public sources (research-licensed, redistributable for non-commercial use):
-#   - LoCoMo: https://github.com/snap-stanford/locomo (MIT)
+#   - LoCoMo: https://github.com/snap-research/locomo (CC BY-NC 4.0 — see
+#     docs/guides/memory-benchmarks.md; it was recorded here as MIT until 2026-10-02)
 #   - LongMemEval: https://github.com/xiaowu0162/LongMemEval (Apache-2.0)
 #
 # Schema (per <suite>.json):

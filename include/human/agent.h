@@ -604,6 +604,7 @@ struct hu_agent {
     bool style_rules_enabled;
     bool multi_agent_enabled;
     bool lean_prompt; /* strip heavy contexts for fast local-model texting */
+    bool spoken_turn; /* voice turn: implies lean_prompt; see human/agent/spoken_turn.h */
     /* Voice-first memos (spec 2026-09-28): this turn is written as a voice memo,
      * so text-length guards (G5 length anomaly) must not shrink it. */
     bool voice_memo_turn;
