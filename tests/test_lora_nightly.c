@@ -191,7 +191,9 @@ static void test_nightly_orchestrator_creates_checkpoint_directory(void) {
      * that the version dir exists. */
     char tmpdir[256];
     snprintf(tmpdir, sizeof(tmpdir), "/tmp/hu_nightly_orchestrator_test_%d", (int)getpid());
-    (void)system("rm -rf /tmp/hu_nightly_orchestrator_test_*");
+    if (system("rm -rf /tmp/hu_nightly_orchestrator_test_*") != 0) {
+        /* best-effort cleanup; a (void) cast does not silence glibc warn_unused_result */
+    }
 
     hu_lora_nightly_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
@@ -208,7 +210,9 @@ static void test_nightly_orchestrator_creates_checkpoint_directory(void) {
     /* In HU_IS_TEST, export returns NOT_SUPPORTED, so orchestrator returns early.
      * This test verifies that the basic wiring is in place (no crashes). */
     HU_ASSERT_TRUE(err == HU_ERR_NOT_SUPPORTED || err == HU_OK);
-    (void)system("rm -rf /tmp/hu_nightly_orchestrator_test_*");
+    if (system("rm -rf /tmp/hu_nightly_orchestrator_test_*") != 0) {
+        /* best-effort cleanup; a (void) cast does not silence glibc warn_unused_result */
+    }
 }
 
 /* ── US-106 adapter swap tests ────────────────────────────────────────── */

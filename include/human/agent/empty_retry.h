@@ -39,4 +39,14 @@ hu_error_t hu_empty_retry_chat(hu_provider_t *provider, hu_allocator_t *alloc,
                                const hu_chat_request_t *req, const char *model, size_t model_len,
                                double temperature, hu_chat_response_t *out);
 
+/* The model-call hook (degradation.c try_chat, which every agent-turn chat call goes
+ * through): under the gate, retry a discarded draft once and log the outcome. Live
+ * replaces *resp with the retry when it has text; shadow and a failed retry leave
+ * *resp as it was. Activation is gated on the shadow measurement: do not flip to live
+ * until shadow logs show retries coming back non-empty on most blanked turns. Live
+ * changes what reaches a contact; the retry stays on the same provider and model. */
+void hu_empty_retry_maybe(hu_provider_t *provider, hu_allocator_t *alloc,
+                          const hu_chat_request_t *req, const char *model, size_t model_len,
+                          double temperature, hu_chat_response_t *resp);
+
 #endif /* HU_AGENT_EMPTY_RETRY_H */

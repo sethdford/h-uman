@@ -6,6 +6,7 @@
  * checks that used to open the block stay in hu_agent_turn, which needs them
  * before the per-turn context exists. */
 #include "../agent_internal.h"
+#include "human/agent/contact_stage_turn.h"
 #include "human/agent/humanness.h"
 #include "human/agent/input_guard.h"
 #include "human/agent/speculative.h"
@@ -34,6 +35,9 @@ hu_turn_step_t hu_turn_entry(hu_turn_ctx_t *turn_ctx) {
         hu_log_info("agent_turn", NULL, "ENTER agent_turn msg_len=%zu", msg_len);
 
     hu_agent_set_current_for_tools(agent);
+    /* DEF-16: the relationship stage of THIS turn's contact, not an
+     * agent-wide counter (src/agent/turn/contact_stage_turn.c). */
+    (void)hu_contact_stage_refresh(agent, agent->memory_session_id, agent->memory_session_id_len);
 
     /* Reset per-turn state tracking so this turn's behavior-log stash sees a
      * clean slate (tool_count, tool_sequence_hash, emotional_register,

@@ -7,6 +7,7 @@ from ordinary notes-to-self. Pin it hard.
 """
 import csv
 import os
+import random
 import tempfile
 
 import rating_drip as rd
@@ -534,5 +535,383 @@ def test_tick_still_ingests_the_legacy_single_pending_row():
         got = {r["id"]: (r["choice"], r["confidence"]) for r in csv.DictReader(open(sheet))}
         assert got["r2"] == ("B", "4")
         assert got["r1"] == ("", "") and got["r3"] == ("", "")
+    finally:
+        _restore(orig)
+
+
+# ── "better" measurement: a second pass over the same items, re-randomized,
+# answering "which is BETTER" instead of "which sounds more like you" ──────
+
+def test_decide_better_key_assigns_each_row_once():
+    det_key = {"r1": "A", "r2": "B"}
+    store = {}
+    rd.decide_better_key(["r1", "r2"], det_key, store, rng=random.Random(1))
+    assert set(store.keys()) == {"r1", "r2"}
+    assert store["r1"] in ("A", "B") and store["r2"] in ("A", "B")
+
+
+def test_decide_better_key_keeps_prior_decision_on_reask():
+    # A re-ask of the same pending batch must not reshuffle which text sits
+    # under which letter -- the owner's eventual reply still has to map onto
+    # the posing they actually read.
+    det_key = {"r1": "A"}
+    store = {"r1": "B"}
+    rd.decide_better_key(["r1"], det_key, store, rng=random.Random(2))
+    assert store["r1"] == "B"
+
+
+def test_decide_better_key_skips_rows_with_no_detection_pairing():
+    store = {}
+    rd.decide_better_key(["ghost"], {}, store, rng=random.Random(3))
+    assert store == {}
+
+
+def test_better_display_options_honors_the_decided_letter():
+    row = {"id": "r1", "option_A": "seth text", "option_B": "model text"}
+    det_key = {"r1": "A"}  # option_A holds Seth's real reply
+    # Decided: model (huuman) reply displayed on A this time.
+    a, b = rd.better_display_options(row, det_key, {"r1": "A"})
+    assert a == "model text" and b == "seth text"
+    # Decided: model reply displayed on B this time.
+    a, b = rd.better_display_options(row, det_key, {"r1": "B"})
+    assert a == "seth text" and b == "model text"
+
+
+def test_compose_better_question_asks_which_is_better():
+    rows = [{"id": "r1", "context": "ctx", "option_A": "a", "option_B": "b"}]
+    q = rd.compose_better_question(rows, {"r1": "A"}, {"r1": "A"}, answered=0, total=5)
+    assert "BETTER" in q and "more caring" in q
+    assert "1-1/5" in q
+    assert "reply with 1 letters" in q
+    assert "a" in q and "b" in q
+
+
+def test_compose_better_question_is_numbered_for_a_batch():
+    rows = [{"id": f"r{i}", "context": f"c{i}", "option_A": f"a{i}", "option_B": f"b{i}"}
+            for i in range(3)]
+    det_key = {f"r{i}": "A" for i in range(3)}
+    better_key = {f"r{i}": "B" for i in range(3)}
+    q = rd.compose_better_question(rows, det_key, better_key, answered=4, total=48)
+    assert "5-7/48" in q
+    for i in range(3):
+        assert f"{i + 1})" in q and f"c{i}" in q
+
+
+def test_write_better_choice_adds_column_backward_compat():
+    # Sheets built before this feature have no `better_choice` column at
+    # all -- writing one must append the column, not raise.
+    path = _mk_sheet([
+        {"id": "r1", "context": "c", "option_A": "a", "option_B": "b", "choice": "A", "confidence": "3"},
+        {"id": "r2", "context": "c", "option_A": "a", "option_B": "b", "choice": "B", "confidence": "4"},
+    ])
+    try:
+        assert rd.write_better_choice(path, "r2", "B") is True
+        with open(path, newline="") as f:
+            rows = list(csv.DictReader(f))
+        assert rows[1]["better_choice"] == "B"
+        assert rows[0]["better_choice"] == ""  # untouched, added blank
+        assert rows[0]["choice"] == "A"  # detection column undisturbed
+    finally:
+        os.unlink(path)
+
+
+def test_write_better_choice_unknown_row_returns_false():
+    path = _mk_sheet([{"id": "r1", "context": "c", "option_A": "a", "option_B": "b", "choice": "", "confidence": ""}])
+    try:
+        assert rd.write_better_choice(path, "nope", "A") is False
+    finally:
+        os.unlink(path)
+
+
+def test_next_unanswered_with_better_field():
+    rows = [
+        {"id": "r1", "choice": "A", "better_choice": "A"},
+        {"id": "r2", "choice": "B", "better_choice": ""},
+    ]
+    assert rd.next_unanswered(rows, field="better_choice")["id"] == "r2"
+    assert rd.next_unanswered(rows) is None  # default field="choice": both rated
+
+
+def test_load_state_fallback_defaults_better_enabled_true():
+    # A freshly-seeded sheet (no drip_state.json on disk yet) defaults the
+    # "better" pass ON; an existing state file loaded below (same function,
+    # different branch) simply lacks the key and reads False via .get().
+    tmpdir = tempfile.mkdtemp()
+    missing_state = os.path.join(tmpdir, "drip_state.json")
+    orig_state = rd.STATE
+    rd.STATE = missing_state
+    try:
+        st = rd.load_state()
+        assert st["better_enabled"] is True
+    finally:
+        rd.STATE = orig_state
+        import shutil as _sh
+        _sh.rmtree(tmpdir, ignore_errors=True)
+
+
+def test_enable_better_merges_flag_into_existing_state():
+    import json as _json
+    tmpdir = tempfile.mkdtemp()
+    state_path = os.path.join(tmpdir, "drip_state.json")
+    with open(state_path, "w") as f:
+        _json.dump({"target": "t", "pending_row": None, "question_unix": 0,
+                    "sent": 3, "answered": 8, "complete": False}, f)
+    orig = (rd.STATE, rd.SHEET_DIR)
+    rd.STATE, rd.SHEET_DIR = state_path, tmpdir
+    try:
+        rd.enable_better()
+        with open(state_path) as f:
+            st = _json.load(f)
+        assert st["better_enabled"] is True
+        assert st["sent"] == 3 and st["answered"] == 8  # the live sheet's own
+        # progress fields are untouched -- enable-better only adds the flag.
+    finally:
+        rd.STATE, rd.SHEET_DIR = orig
+        import shutil as _sh
+        _sh.rmtree(tmpdir, ignore_errors=True)
+
+
+def test_run_better_score_passes_the_better_key_path():
+    import subprocess as sp
+    calls, orig = [], sp.run
+    sp.run = _patched_run(0, calls)
+    try:
+        assert rd.run_better_score() is True
+    finally:
+        sp.run = orig
+    argv = calls[0]
+    assert "--better-key" in argv
+    assert argv[argv.index("--better-key") + 1] == rd.BETTER_KEY
+
+
+def test_run_better_score_nonzero_exit_is_failure():
+    import subprocess as sp
+    orig = sp.run
+    sp.run = _patched_run(2, [])
+    try:
+        assert rd.run_better_score() is False
+    finally:
+        sp.run = orig
+
+
+def test_run_better_score_nothing_to_score_is_final():
+    # exit 3 = every better row was skipped or a tie: no rate exists, and
+    # re-running every tick would only log a fake FAILED forever.
+    import subprocess as sp
+    orig = sp.run
+    sp.run = _patched_run(3, [])
+    try:
+        assert rd.run_better_score() is True
+    finally:
+        sp.run = orig
+
+
+def _fill_choices(sheet, choice="A", confidence="3"):
+    with open(sheet, newline="") as f:
+        reader = csv.DictReader(f)
+        fields = reader.fieldnames
+        rows = list(reader)
+    for r in rows:
+        r["choice"] = choice
+        r["confidence"] = confidence
+    with open(sheet, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=fields)
+        w.writeheader()
+        w.writerows(rows)
+
+
+def _better_fixture(n_rows=3, state_extra=None):
+    import json as _json
+    tmpdir, sheet, state = _batch_fixture(n_rows, {"better_enabled": True, **(state_extra or {})})
+    _fill_choices(sheet)  # detection pass already fully answered
+    det_key_path = os.path.join(tmpdir, "answer_key.json")
+    with open(det_key_path, "w") as f:
+        _json.dump({f"r{i + 1}": "AB"[i % 2] for i in range(n_rows)}, f)
+    return tmpdir, sheet, state, det_key_path, os.path.join(tmpdir, "better_key.json")
+
+
+def test_tick_scores_detection_then_sends_better_batch():
+    # Was test_tick_sends_better_batch_only_after_detection_is_complete, which
+    # also asserted `not complete` -- i.e. it PINNED A BUG: score.py (the only
+    # writer of the promotion-gate file) waited on the unrelated better pass.
+    # Detection completion now scores immediately, and the better batch still goes out.
+    import json as _json
+    tmpdir, sheet, state, det_key_path, better_key_path = _better_fixture()
+    sent, calls = [], []
+    orig = _with_drip(tmpdir, sheet, state, BATCH_SIZE=5,
+                      ANSWER_KEY=det_key_path, BETTER_KEY=better_key_path,
+                      send_question=lambda t, q, dry_run=False: sent.append(q) or True,
+                      harvest_answer=lambda *a, **k: None,
+                      run_score=lambda: calls.append("score") or True,
+                      run_better_score=lambda: calls.append("better") or True)
+    try:
+        rd.tick(now=_noon())
+        st = _json.load(open(state))
+        assert calls == ["score"], "detection gate scored as soon as detection completed"
+        assert st["complete"] is True
+        assert len(sent) == 1, "one better-question message for the whole batch"
+        assert "BETTER" in sent[0]
+        assert st["better_pending_rows"] == ["r1", "r2", "r3"]
+        key_on_disk = _json.load(open(better_key_path))
+        assert set(key_on_disk.keys()) == {"r1", "r2", "r3"}
+    finally:
+        _restore(orig)
+
+
+def test_run_score_fires_when_detection_done_but_better_pass_open():
+    # The pre-#610 cadence: score.py -> blind_ab_gate.json runs the tick the
+    # detection pass completes, whatever the better pass is doing. Here the
+    # better batch is in flight and unanswered; better_score must NOT run.
+    import json as _json
+    tmpdir, sheet, state, det_key_path, better_key_path = _better_fixture(
+        3, {"better_pending_rows": ["r1", "r2", "r3"], "better_question_unix": _noon() - 60})
+    calls = []
+    orig = _with_drip(tmpdir, sheet, state, BATCH_SIZE=5,
+                      ANSWER_KEY=det_key_path, BETTER_KEY=better_key_path,
+                      send_question=lambda *a, **k: True,
+                      harvest_answer=lambda *a, **k: None,
+                      run_score=lambda: calls.append("score") or True,
+                      run_better_score=lambda: calls.append("better") or True)
+    try:
+        st0 = _json.load(open(state))
+        assert st0["complete"] is False  # pre: detection not yet scored
+        rd.tick(now=_noon())
+        st = _json.load(open(state))
+        assert calls == ["score"]
+        assert st["complete"] is True
+        assert not st.get("better_complete")
+        assert st["better_pending_rows"] == ["r1", "r2", "r3"]  # better pass untouched
+        rd.tick(now=_noon())
+        assert calls == ["score"], "a scored detection sheet is not re-scored every tick"
+    finally:
+        _restore(orig)
+
+
+def test_better_completion_runs_only_better_score_when_detection_already_scored():
+    import json as _json
+    tmpdir, sheet, state, det_key_path, better_key_path = _better_fixture(
+        3, {"complete": True, "better_pending_rows": ["r1", "r2", "r3"],
+            "better_question_unix": 1000})
+    with open(better_key_path, "w") as f:
+        _json.dump({"r1": "A", "r2": "A", "r3": "B"}, f)
+    calls = []
+    orig = _with_drip(tmpdir, sheet, state, BATCH_SIZE=5,
+                      ANSWER_KEY=det_key_path, BETTER_KEY=better_key_path,
+                      send_question=lambda *a, **k: True,
+                      harvest_answer=lambda *a, **k: [("A", 3), ("T", 3), ("B", 3)],
+                      run_score=lambda: calls.append("score") or True,
+                      run_better_score=lambda: calls.append("better") or True)
+    try:
+        rd.tick(now=_noon())
+        assert calls == ["better"], "better_score never re-runs or gates the detection scorer"
+        st = _json.load(open(state))
+        assert st["better_complete"] is True and st["complete"] is True
+        got = {r["id"]: r["better_choice"] for r in csv.DictReader(open(sheet))}
+        assert got == {"r1": "A", "r2": "T", "r3": "B"}
+    finally:
+        _restore(orig)
+
+
+def test_better_score_failure_retries_without_touching_detection_complete():
+    import json as _json
+    tmpdir, sheet, state, det_key_path, better_key_path = _better_fixture(
+        1, {"complete": True})
+    with open(sheet, newline="") as f:
+        rows = list(csv.DictReader(f))
+    rd.write_better_choice(sheet, rows[0]["id"], "A")
+    calls = []
+    orig = _with_drip(tmpdir, sheet, state, BATCH_SIZE=5,
+                      ANSWER_KEY=det_key_path, BETTER_KEY=better_key_path,
+                      harvest_answer=lambda *a, **k: None,
+                      run_score=lambda: calls.append("score") or True,
+                      run_better_score=lambda: calls.append("better") or False)
+    try:
+        rd.tick(now=_noon())
+        st = _json.load(open(state))
+        assert calls == ["better"] and not st.get("better_complete") and st["complete"] is True
+    finally:
+        _restore(orig)
+
+
+# ── tie / can't-tell option on the better question ──────────────────────
+
+def test_better_batch_parse_accepts_tie_letter():
+    assert rd.parse_batch_answer("ATB", 3, allowed="ABT") == ["A", "T", "B"]
+    assert rd.parse_batch_answer("t", 1, allowed="ABT") == ["T"]
+    assert rd.parse_batch_answer("a, t, b", 3, allowed="ABT") == ["A", "T", "B"]
+
+
+def test_detection_batch_parse_still_rejects_tie_letter():
+    assert rd.parse_batch_answer("ATB", 3) is None   # default allowed="AB": unchanged
+    assert rd.parse_batch_answer("ABB", 3) == ["A", "B", "B"]
+
+
+def test_compose_better_question_offers_a_tie():
+    rows = [{"id": "r1", "context": "ctx", "option_A": "a", "option_B": "b"}]
+    q = rd.compose_better_question(rows, {"r1": "A"}, {"r1": "A"}, answered=0, total=5)
+    assert "T = tie" in q
+
+
+def test_better_harvest_single_row_accepts_tie(monkeypatch=None):
+    # A better batch of one goes through the tie-aware batch parser, not the
+    # A/B-only single-answer parser the detection pass keeps.
+    rows_desc = [("T", None, (_noon() - rd.APPLE_EPOCH) * 1e9)]
+    got = rd.first_answer_after(rows_desc, _noon() - 60,
+                                parser=lambda t: rd.parse_batch_answer(t, 1, allowed="ABT"))
+    assert got == ["T"]
+    assert rd.first_answer_after(rows_desc, _noon() - 60) is None  # detection: T is not an answer
+
+
+def test_tick_ingests_better_batch_and_runs_both_scorers_in_order():
+    import json as _json
+    tmpdir, sheet, state = _batch_fixture(
+        3, {"better_enabled": True, "better_pending_rows": ["r1", "r2", "r3"],
+            "better_question_unix": 1000})
+    _fill_choices(sheet)  # detection pass already fully answered
+    det_key_path = os.path.join(tmpdir, "answer_key.json")
+    with open(det_key_path, "w") as f:
+        _json.dump({"r1": "A", "r2": "B", "r3": "A"}, f)
+    better_key_path = os.path.join(tmpdir, "better_key.json")
+    with open(better_key_path, "w") as f:
+        _json.dump({"r1": "A", "r2": "A", "r3": "B"}, f)
+    calls = []
+    orig = _with_drip(tmpdir, sheet, state, BATCH_SIZE=5,
+                      ANSWER_KEY=det_key_path, BETTER_KEY=better_key_path,
+                      send_question=lambda *a, **k: True,
+                      harvest_answer=lambda *a, **k: [("A", 3), ("B", 3), ("B", 3)],
+                      run_score=lambda: calls.append("score") or True,
+                      run_better_score=lambda: calls.append("better") or True)
+    try:
+        rd.tick(now=_noon())
+        got = {r["id"]: r["better_choice"] for r in csv.DictReader(open(sheet))}
+        assert got == {"r1": "A", "r2": "B", "r3": "B"}
+        # Detection's own promotion-gating scorer always runs first; the
+        # better-than-human measurement (never a gate) runs only after.
+        assert calls == ["score", "better"]
+        st = _json.load(open(state))
+        assert st["complete"] is True and st["better_complete"] is True
+        assert st["better_pending_rows"] == []
+    finally:
+        _restore(orig)
+
+
+def test_tick_completion_without_better_enabled_never_touches_better_state():
+    # Backward compatibility: a sheet with no "better_enabled" key at all
+    # (every sheet in the field before this feature) must behave exactly as
+    # it did before -- only score.py runs, no better_* state appears.
+    import json as _json
+    tmpdir, sheet, state = _batch_fixture(1, {})
+    _fill_choices(sheet)
+    calls = []
+    orig = _with_drip(tmpdir, sheet, state, BATCH_SIZE=5,
+                      run_score=lambda: calls.append("score") or True,
+                      run_better_score=lambda: calls.append("better") or True)
+    try:
+        rd.tick(now=_noon())
+        assert calls == ["score"]
+        st = _json.load(open(state))
+        assert st["complete"] is True
+        assert "better_pending_rows" not in st
+        assert "better_choice" not in csv.DictReader(open(sheet)).fieldnames
     finally:
         _restore(orig)

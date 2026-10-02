@@ -21,6 +21,16 @@ extern "C" {
 hu_vector_store_t hu_vector_store_sqlite_vec_create(hu_allocator_t *alloc, struct sqlite3 *db,
                                                     size_t dim);
 
+/* Null-distribution sample for relevance calibration (HU_CONTEXT_RELEVANCE):
+ * cosine similarity of `query` against up to `k` stored vectors chosen at
+ * random. Dot products only: no ids, keys or text leave this function.
+ * Writes *n_out <= k scores to out[]. HU_ERR_NOT_SUPPORTED when `vs` is not a
+ * sqlite-vec store (or the build has none); HU_ERR_INVALID_ARGUMENT on a
+ * dimension mismatch. */
+hu_error_t hu_vector_store_sqlite_vec_sample_scores(const hu_vector_store_t *vs,
+                                                    const hu_embedding_t *query, size_t k,
+                                                    float *out, size_t *n_out);
+
 #ifdef __cplusplus
 }
 #endif

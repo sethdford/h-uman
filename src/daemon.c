@@ -29,6 +29,7 @@
 #include "human/agent/init_outcome.h"
 #include "human/agent/init_proposer.h"
 #include "human/agent/kv_cache.h"
+#include "human/agent/length_policy.h"
 #include "human/agent/lora_runner.h"
 #include "human/agent/model_router_health.h"
 #include "human/agent/multimodal_policy.h"
@@ -39,6 +40,7 @@
 #include "human/behavior/win_detect.h"
 #include "human/core/gate_mode.h"
 #include "human/daemon/daemon_shape.h"
+#include "human/daemon/grief_decay.h"
 #include "human/daemon/proposer_context.h"
 #include "human/memory/celebration_repo.h"
 #include "human/memory/graph_ingest.h"
@@ -161,6 +163,7 @@
 #include "human/daemon/peripheral_gov.h"
 #include "human/daemon/proactive_policy.h"
 #include "human/daemon/reply_dedup.h"
+#include "human/daemon/send_failure.h"
 
 /* follow_up.h must be included unconditionally — the read-receipt watcher
  * scheduling block at L~1259 uses hu_followup_dedup_t / hu_followup_decide
@@ -177,6 +180,7 @@
 #include "human/agent/proactive_ext.h"
 #include "human/agent/proactive_throttle.h"
 #include "human/agent/validators/builtin.h"
+#include "human/context/reply_fragment.h"
 #include "human/context/self_awareness.h"
 #include "human/observability/validator_telemetry.h"
 #ifdef HU_HAS_CRON
@@ -905,12 +909,9 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
             /* Build combined text from user messages for event extraction */
             char combined[4096];
             size_t combined_len = 0;
-            /* P6-3: also capture the MOST RECENT inbound text for the
-             * emotional-tone gate below. Entries are id-ascending, so
-             * the last !from_me entry is the latest. */
-            char last_inbound_buf[1024];
-            size_t last_inbound_len = 0;
-            last_inbound_buf[0] = '\0';
+            /* P6-3: the MOST RECENT inbound (entries are id-ascending) and
+             * its time, for the emotional-tone gate below. */
+            hu_grief_decay_inbound_t last_inbound = {0};
             if (entries && entry_count > 0) {
                 for (size_t e = 0; e < entry_count; e++) {
                     if (entries[e].from_me)
@@ -924,12 +925,8 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                         memcpy(combined + combined_len, entries[e].text, tlen);
                         combined_len += tlen;
                     }
-                    size_t copy = tlen;
-                    if (copy >= sizeof(last_inbound_buf))
-                        copy = sizeof(last_inbound_buf) - 1;
-                    memcpy(last_inbound_buf, entries[e].text, copy);
-                    last_inbound_buf[copy] = '\0';
-                    last_inbound_len = copy;
+                    hu_grief_decay_note_inbound(&last_inbound, entries[e].text, tlen,
+                                                entries[e].timestamp);
                 }
                 combined[combined_len] = '\0';
             }
@@ -1050,13 +1047,10 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
              * detector via hu_daemon_dated_followup_apply (after the event, with
              * the situation as context, marked sent only on delivery). */
 
-            /* P6-3: emotional-tone gate. If the contact's most-recent
-             * inbound message was heavy/grief, skip the generic
-             * proactive check-in — the next reactive turn will
-             * respond. Generic "hey what's up" on top of a vulnerable
-             * message reads as oblivious. */
-            if (should_checkin &&
-                hu_proactive_should_suppress_for_emotion(last_inbound_buf, last_inbound_len)) {
+            /* P6-3 + HU_GRIEF_DECAY (DEF-10, src/daemon/daemon_grief_decay.c). */
+            hu_grief_decay_verdict_t gd =
+                should_checkin ? hu_grief_decay_decide(&last_inbound, (int64_t)now, &pctx) : 0;
+            if (gd == HU_GRIEF_DECAY_SUPPRESS) {
                 hu_log_info(
                     "daemon", agent ? agent->observer : NULL,
                     "proactive: suppressing check-in for %s — last inbound emotionally heavy",
@@ -1097,7 +1091,7 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                     }
                 }
             }
-            if (!important_date_sent_today &&
+            if (!important_date_sent_today && !hu_grief_decay_skip_extras(gd) &&
                 hu_proactive_check_important_dates(
                     agent->persona, cp->contact_id, strlen(cp->contact_id), tm_now.tm_mon + 1,
                     tm_now.tm_mday, important_date_msg, sizeof(important_date_msg),
@@ -1127,7 +1121,7 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
             /* F12: Bookend messages — morning/evening greetings for close contacts */
             char *bookend_ctx = NULL;
             size_t bookend_ctx_len = 0;
-            if (!had_important_date && agent->persona) {
+            if (!had_important_date && agent->persona && !hu_grief_decay_skip_extras(gd)) {
                 bool contact_is_close = (cp->dunbar_layer && atoi(cp->dunbar_layer) <= 2);
                 bool bookend_sent_today = hu_proactive_throttle_dedup_already_today(
                     &g_proactive_throttle, "important_date", cp->contact_id, throttle_ymd);
@@ -3831,28 +3825,15 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     combined[combined_len] = '\0';
                 }
 
-                /* ── Contextual (context-driven) proactive outreach ───────────
-                 * The schedule-driven proactive path checks in "because it's
-                 * 10am Tuesday". This closes the gap to context-driven outreach:
-                 * detect a future-dated event in the inbound message ("interview
-                 * is Friday") and schedule a post-event "how'd it go?" through the
-                 * EXISTING governed scheduled-send path. The scheduled-delivery
-                 * loop runs inside hu_service_run_proactive_checkins, behind the
-                 * master_enabled gate + backoff governor + outbound sanitizer +
-                 * validator chain — so contextual proactives inherit ALL of that
-                 * governance; we never bypass it here.
-                 *
-                 * The message text is FROZEN here from the detected topic and is
-                 * never regenerated at send time — the no-invented-FACTS guard
-                 * against cross-contact bleed (the specific always comes from the
-                 * stored obligation).
-                 *
-                 * Gated OFF -> SHADOW -> ON via HU_PROACTIVE_CONTEXTUAL, default
-                 * OFF. Promotion to ON is gated on a blind A/B measurement that
-                 * unprompted contextual outreach reads as more human, not less —
-                 * do NOT flip the default without it (unprompted texting as the
-                 * user is the highest-stakes behavior in the system).
-                 * See .claude/rules/feature-gate-requires-measurement.md. */
+                /* ── Contextual proactive outreach: a future-dated event in the
+                 * inbound ("interview is Friday") schedules a post-event "how'd it
+                 * go?" through the EXISTING governed scheduled-send path (master
+                 * gate, backoff governor, sanitizer, validator chain — never
+                 * bypassed). The text is FROZEN from the detected topic, never
+                 * regenerated at send time (no invented facts, no cross-contact
+                 * bleed). HU_PROACTIVE_CONTEXTUAL OFF -> SHADOW -> ON, default OFF;
+                 * ON is gated on a blind A/B showing it reads as more human — do
+                 * NOT flip without it (feature-gate-requires-measurement.md). */
                 {
                     hu_contextual_proactive_mode_t cp_mode = hu_contextual_proactive_mode();
                     const char *cp_channel =
@@ -4059,6 +4040,33 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 convo_ctx = rt.convo_ctx;
                 convo_ctx_len = rt.convo_ctx_len;
 
+                /* 4. Response constraints: channel cap, F15 calibration + brief cap, then
+                 * HU_LENGTH_POLICY (length_policy.h). Before 2c so its Target matches. */
+                uint32_t max_chars = 0;
+                bool voice_first_memo = false; /* spec 2026-09-28 */
+                if (ch->channel->vtable->get_response_constraints) {
+                    hu_channel_response_constraints_t constraints = {0};
+                    if (ch->channel->vtable->get_response_constraints(ch->channel->ctx,
+                                                                      &constraints) == HU_OK) {
+                        max_chars = constraints.max_chars;
+                    }
+                }
+                const hu_contact_profile_t *cp_turn =
+                    (agent->persona && batch_key && key_len > 0)
+                        ? hu_persona_find_contact(agent->persona, batch_key, key_len)
+                        : NULL;
+                hu_length_turn_result_t len_turn;
+                hu_length_policy_turn(
+                    &(hu_length_turn_t){.inbound = combined,
+                                        .inbound_len = combined_len,
+                                        .contact = msgs[batch_start].is_group ? NULL : cp_turn,
+                                        .stage = agent->relationship.stage,
+                                        .channel_max = max_chars,
+                                        .is_group = msgs[batch_start].is_group,
+                                        .brief_mode = brief_mode},
+                    hu_length_policy_mode(), &len_turn);
+                max_chars = len_turn.cap;
+
                 /* 2c. Length calibration fallback for channels without history.
                  * When history exists, calibration runs inside build_awareness.
                  * When it doesn't, we still want message-type guidance. */
@@ -4067,13 +4075,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                      * context the prompt builder can return is the prospective
                      * directive; calibration must still be appended after it. */
                     char cal_buf[1024];
-                    const hu_contact_profile_t *cp_cal =
-                        (agent->persona && batch_key && key_len > 0)
-                            ? hu_persona_find_contact(agent->persona, batch_key, key_len)
-                            : NULL;
-                    size_t cal_len = hu_conversation_calibrate_length_for_contact(
-                        combined, combined_len, NULL, 0, msgs[batch_start].is_group, cp_cal,
-                        agent->relationship.stage, cal_buf, sizeof(cal_buf));
+                    size_t cal_len = hu_conversation_calibrate_length_capped(
+                        combined, combined_len, msgs[batch_start].is_group, cp_turn,
+                        agent->relationship.stage, len_turn.tight ? len_turn.cap : 0, cal_buf,
+                        sizeof(cal_buf));
                     if (cal_len > 0 && !convo_ctx) {
                         convo_ctx = (char *)alloc->alloc(alloc->ctx, cal_len + 1);
                         if (convo_ctx) {
@@ -5298,43 +5303,6 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 }
 #endif
 
-                /* 4. Response constraints via channel vtable */
-                uint32_t max_chars = 0;
-                bool voice_first_memo = false; /* spec 2026-09-28 */
-                if (ch->channel->vtable->get_response_constraints) {
-                    hu_channel_response_constraints_t constraints = {0};
-                    if (ch->channel->vtable->get_response_constraints(ch->channel->ctx,
-                                                                      &constraints) == HU_OK) {
-                        max_chars = constraints.max_chars;
-                    }
-                }
-
-                /* F15: Apply ratio-based length calibration */
-                {
-                    const hu_contact_profile_t *cp_lim =
-                        (!msgs[batch_start].is_group && agent->persona && batch_key && key_len > 0)
-                            ? hu_persona_find_contact(agent->persona, batch_key, key_len)
-                            : NULL;
-                    int calibrated = msgs[batch_start].is_group
-                                         ? hu_conversation_max_response_chars(combined_len)
-                                         : hu_conversation_max_response_chars_relational(
-                                               combined_len, cp_lim, agent->relationship.stage);
-                    if (calibrated > 0 && (max_chars == 0 || (uint32_t)calibrated < max_chars))
-                        max_chars = (uint32_t)calibrated;
-                }
-
-                /* Brief mode: cap length (tight in groups; headroom for trusted 1:1). */
-                if (brief_mode) {
-                    const hu_contact_profile_t *cp_brief =
-                        (!msgs[batch_start].is_group && agent->persona && batch_key && key_len > 0)
-                            ? hu_persona_find_contact(agent->persona, batch_key, key_len)
-                            : NULL;
-                    uint32_t brief_cap = hu_conversation_brief_char_cap(
-                        msgs[batch_start].is_group, cp_brief, agent->relationship.stage);
-                    if (max_chars > brief_cap)
-                        max_chars = brief_cap;
-                }
-
                 /* Honesty guardrail: inject if they asked "did you do X?" */
                 {
                     char *honesty = hu_conversation_honesty_check(alloc, combined, combined_len);
@@ -6294,6 +6262,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 agent->ab_history_entries = history_entries;
                 agent->ab_history_count = history_count;
                 agent->max_response_chars = max_chars;
+                agent->response_limit_tight = voice_first_memo ? 0 : (uint8_t)len_turn.tight;
                 agent->voice_memo_turn = voice_first_memo;
                 /* Owner self-test: a clean slate — only the last few messages, so a
                  * thread full of test traffic doesn't confuse the reply. */
@@ -7375,8 +7344,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     if (err == HU_OK && response && response_len > 0 && history_entries &&
                         !voice_first_memo &&
                         hu_reactive_gate_active(HU_REACTIVE_GATE_QUALITY_RETRY, llm_decides)) {
-                        hu_quality_score_t qscore = hu_conversation_evaluate_quality(
-                            response, response_len, history_entries, history_count, max_chars);
+                        hu_quality_score_t qscore = hu_conversation_evaluate_quality_capped(
+                            response, response_len, history_entries, history_count, max_chars,
+                            len_turn.tight != HU_LENGTH_TIGHT_LEGACY && !voice_first_memo);
                         if (qscore.needs_revision && !retried) {
                             retried = true;
                             hu_log_info("human", agent ? agent->observer : NULL,
@@ -8078,6 +8048,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 agent->turn_temperature = 0.0;
                 agent->turn_thinking_budget = 0;
                 agent->max_response_chars = 0;
+                agent->response_limit_tight = 0;
                 agent->voice_memo_turn = false;
                 agent->history_msg_cap = 0;
                 agent->self_test_turn = false;
@@ -8958,9 +8929,6 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                          * only REMOVES markup — never adds HTML/mrkdwn — so it is a
                          * strict cleanup for every channel and cannot regress email/slack.
                          * Falls back to send_ptr if the strip fails — never a regression. */
-                        /* Plaintext-ify ONCE before the choreo/fragment split so every bubble
-                         * path inherits clean text (was: only the whole-reply fallback ran the
-                         * chain). NULL result → keep send_ptr (no regression). */
                         char *split_clean = NULL;
                         size_t split_clean_len = 0;
                         const char *split_src = send_ptr;
@@ -8970,11 +8938,15 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                                   &split_clean_len)) {
                             split_src = split_clean;
                             split_src_len = split_clean_len;
-                        }
+                        } /* every bubble path sends split_src: WARN on a fragment ending */
+                        split_src_len = hu_reply_final_check(split_src, split_src_len,
+                                                             agent ? agent->observer : NULL);
 
                         /* F2: Choreography-driven message delivery */
                         hu_message_plan_t choreo_plan = {0};
                         bool delivered_recorded = false; /* one production_outcomes row per reply */
+                        uint64_t send_fails0 = hu_daemon_send_failure_total();
+                        int send_errs = 0; /* this reply's own send errors, every build */
                         bool use_choreography = false;
                         if (agent && agent->frontiers.initialized) {
                             hu_choreography_config_t choreo_cfg = hu_choreography_config_default();
@@ -9009,8 +8981,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                                 : NULL;
                                 size_t pv_cnt =
                                     (seg == 0 && all_send_media_cnt > 0) ? all_send_media_cnt : 0;
-                                /* F2b: Route through action-surface dispatcher for iMessage
-                                 * when enabled, else flat send */
+                                /* F2b: action-surface dispatcher for iMessage, else flat */
                                 const char *ch_name_choreo =
                                     ch->channel->vtable->name
                                         ? ch->channel->vtable->name(ch->channel->ctx)
@@ -9018,12 +8989,13 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 bool seg_text_sent = false;
                                 if (ch_name_choreo && strcmp(ch_name_choreo, "imessage") == 0 &&
                                     config && config->channels.imessage.action_surface_v2.enabled) {
-                                    (void)hu_daemon_dispatch_imessage_reply_msg_ex(
-                                        ch->channel, agent ? agent->persona : NULL, agent, config,
-                                        send_target, send_target_len, &msgs[batch_start],
-                                        choreo_plan.segments[seg].text,
-                                        choreo_plan.segments[seg].text_len, &seg_text_sent,
-                                        choreo_plan.segment_count > 1);
+                                    send_errs +=
+                                        hu_daemon_dispatch_imessage_reply_msg_ex(
+                                            ch->channel, agent ? agent->persona : NULL, agent,
+                                            config, send_target, send_target_len,
+                                            &msgs[batch_start], choreo_plan.segments[seg].text,
+                                            choreo_plan.segments[seg].text_len, &seg_text_sent,
+                                            choreo_plan.segment_count > 1) != HU_OK;
                                 } else {
                                     seg_text_sent =
                                         ch->channel->vtable->send(
@@ -9031,6 +9003,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                             choreo_plan.segments[seg].text,
                                             choreo_plan.segments[seg].text_len, pv_ptr,
                                             pv_cnt) == HU_OK;
+                                    send_errs += !seg_text_sent;
                                 }
                                 if (seg_text_sent && !delivered_recorded) {
                                     delivered_recorded = true;
@@ -9126,8 +9099,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                 usleep((useconds_t)(dt_ms * 1000));
                                             }
                                             size_t dt_len = strlen(dt_chunks[dt]);
-                                            /* F2b: Route through action-surface dispatcher for
-                                             * iMessage when enabled, else flat send */
+                                            /* F2b: dispatcher for iMessage, else flat */
                                             const char *ch_name_f2b =
                                                 ch->channel->vtable->name
                                                     ? ch->channel->vtable->name(ch->channel->ctx)
@@ -9137,17 +9109,19 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                 strcmp(ch_name_f2b, "imessage") == 0 && config &&
                                                 config->channels.imessage.action_surface_v2
                                                     .enabled) {
-                                                (void)hu_daemon_dispatch_imessage_reply_msg_ex(
-                                                    ch->channel, agent ? agent->persona : NULL,
-                                                    agent, config, send_target, send_target_len,
-                                                    &msgs[batch_start], dt_chunks[dt], dt_len,
-                                                    &dt_text_sent, true);
+                                                send_errs +=
+                                                    hu_daemon_dispatch_imessage_reply_msg_ex(
+                                                        ch->channel, agent ? agent->persona : NULL,
+                                                        agent, config, send_target, send_target_len,
+                                                        &msgs[batch_start], dt_chunks[dt], dt_len,
+                                                        &dt_text_sent, true) != HU_OK;
                                             } else {
                                                 dt_text_sent = ch->channel->vtable->send(
                                                                    ch->channel->ctx, batch_key,
                                                                    key_len, dt_chunks[dt], dt_len,
                                                                    (dt == 0) ? pv_ptr : NULL,
                                                                    (dt == 0) ? pv_cnt : 0) == HU_OK;
+                                                send_errs += !dt_text_sent;
                                             }
                                             if (dt_text_sent && !delivered_recorded) {
                                                 delivered_recorded = true;
@@ -9160,8 +9134,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 }
 #endif
                                 if (!did_double_text) {
-                                    /* F2b: Route through action-surface dispatcher for iMessage
-                                     * when enabled, else flat send */
+                                    /* F2b: action-surface dispatcher for iMessage, else flat */
                                     const char *ch_name_f2b =
                                         ch->channel->vtable->name
                                             ? ch->channel->vtable->name(ch->channel->ctx)
@@ -9170,17 +9143,19 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     if (ch_name_f2b && strcmp(ch_name_f2b, "imessage") == 0 &&
                                         config &&
                                         config->channels.imessage.action_surface_v2.enabled) {
-                                        (void)hu_daemon_dispatch_imessage_reply_msg_ex(
-                                            ch->channel, agent ? agent->persona : NULL, agent,
-                                            config, send_target, send_target_len,
-                                            &msgs[batch_start], fragments[f].text,
-                                            fragments[f].text_len, &frag_text_sent, true);
+                                        send_errs += hu_daemon_dispatch_imessage_reply_msg_ex(
+                                                         ch->channel, agent ? agent->persona : NULL,
+                                                         agent, config, send_target,
+                                                         send_target_len, &msgs[batch_start],
+                                                         fragments[f].text, fragments[f].text_len,
+                                                         &frag_text_sent, true) != HU_OK;
                                     } else {
                                         frag_text_sent =
                                             ch->channel->vtable->send(ch->channel->ctx, batch_key,
                                                                       key_len, fragments[f].text,
                                                                       fragments[f].text_len, pv_ptr,
                                                                       pv_cnt) == HU_OK;
+                                        send_errs += !frag_text_sent;
                                     }
                                     if (frag_text_sent && !delivered_recorded) {
                                         delivered_recorded = true;
@@ -9247,10 +9222,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 const char *const *pv_ptr =
                                     all_send_media_cnt > 0 ? all_send_media_ptr : NULL;
                                 size_t pv_cnt = all_send_media_cnt;
-                                /* F2c: Route through action-surface dispatcher for iMessage
-                                 * when enabled, else flat send. This is the reactive-reply
-                                 * path for short single-fragment messages with no choreography
-                                 * and no multi-fragment split. */
+                                /* F2c: single-fragment reply, no choreography or split:
+                                 * action-surface dispatcher for iMessage, else flat. */
                                 const char *ch_name_f2c =
                                     ch->channel->vtable->name
                                         ? ch->channel->vtable->name(ch->channel->ctx)
@@ -9258,15 +9231,17 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 bool whole_text_sent = false;
                                 if (ch_name_f2c && strcmp(ch_name_f2c, "imessage") == 0 && config &&
                                     config->channels.imessage.action_surface_v2.enabled) {
-                                    (void)hu_daemon_dispatch_imessage_reply_msg_ex(
-                                        ch->channel, agent ? agent->persona : NULL, agent, config,
-                                        send_target, send_target_len, &msgs[batch_start], send_text,
-                                        send_text_len, &whole_text_sent, false);
+                                    send_errs += hu_daemon_dispatch_imessage_reply_msg_ex(
+                                                     ch->channel, agent ? agent->persona : NULL,
+                                                     agent, config, send_target, send_target_len,
+                                                     &msgs[batch_start], send_text, send_text_len,
+                                                     &whole_text_sent, false) != HU_OK;
                                 } else {
                                     whole_text_sent =
                                         ch->channel->vtable->send(
                                             ch->channel->ctx, send_target, send_target_len,
                                             send_text, send_text_len, pv_ptr, pv_cnt) == HU_OK;
+                                    send_errs += !whole_text_sent;
                                 }
                                 if (whole_text_sent && !delivered_recorded) {
                                     delivered_recorded = true;
@@ -9285,6 +9260,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 }
                             }
                         }
+                        if (hu_daemon_reply_lost(delivered_recorded, send_errs > 0, send_fails0,
+                                                 hu_daemon_send_failure_total()))
+                            (void)hu_daemon_note_reply_undelivered(agent->session_store, batch_key,
+                                                                   key_len);
                         if (split_clean)
                             alloc->free(alloc->ctx, split_clean, split_clean_len + 1);
                         /* Send correction after main message (2.5–5s delay) */

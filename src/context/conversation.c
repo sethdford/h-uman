@@ -1,5 +1,7 @@
 #include "human/context/conversation.h"
+#include "human/agent/length_policy.h"
 #include "human/channel_class.h"
+#include "human/context/reply_fragment.h"
 #include "human/core/allocator.h"
 #include "human/core/file.h"
 #include "human/core/io_secure.h"
@@ -22,6 +24,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 #if defined(__unix__) || defined(__APPLE__)
 #include <dirent.h>
@@ -1526,6 +1529,14 @@ static void compute_their_avg_len(const hu_channel_history_entry_t *entries, siz
 hu_quality_score_t hu_conversation_evaluate_quality(const char *response, size_t response_len,
                                                     const hu_channel_history_entry_t *entries,
                                                     size_t count, uint32_t max_chars) {
+    return hu_conversation_evaluate_quality_capped(response, response_len, entries, count,
+                                                   max_chars, false);
+}
+
+hu_quality_score_t
+hu_conversation_evaluate_quality_capped(const char *response, size_t response_len,
+                                        const hu_channel_history_entry_t *entries, size_t count,
+                                        uint32_t max_chars, bool cap_from_stats) {
     hu_quality_score_t score = {0, 0, 0, 0, 0, false, {0}};
     if (!response || response_len == 0)
         return score;
@@ -1544,13 +1555,19 @@ hu_quality_score_t hu_conversation_evaluate_quality(const char *response, size_t
      * (ratio < 0.2). A terse reply to terse banter keeps full marks. Without
      * this, the A/B scorer prefers a clipped fragment over a natural reply. */
     double ratio = (double)response_len / (double)ref_len;
+    /* Over-length checks divide by the cap-aware reference under
+     * HU_LENGTH_POLICY=live for a contact with measured stats, so a reply
+     * inside that cap is never "too long" (identical to ratio otherwise). */
+    double over =
+        (double)response_len / (double)hu_length_policy_quality_over_ref(
+                                   ref_len, max_chars, hu_length_policy_mode(), cap_from_stats);
     if (ref_len >= HU_QUALITY_SUBSTANTIVE_REF_LEN && ratio < 0.2)
         score.brevity = 10;
-    else if (ratio <= 1.5)
+    else if (over <= 1.5)
         score.brevity = 25;
-    else if (ratio <= 3.0)
+    else if (over <= 3.0)
         score.brevity = 20;
-    else if (ratio <= 6.0)
+    else if (over <= 6.0)
         score.brevity = 10;
     else
         score.brevity = 0;
@@ -1637,11 +1654,11 @@ hu_quality_score_t hu_conversation_evaluate_quality(const char *response, size_t
      * (was 10×) aligns with G5's 8× guard and post-mortem action item —
      * the 2026-05-12 leak was ~22× rolling avg but still slipped through
      * when quality only fired at 10×. */
-    bool gross_length = (ratio > 5.0 || (ratio < 0.1 && response_len > 5));
+    bool gross_length = (over > 5.0 || (ratio < 0.1 && response_len > 5));
     bool gross_structural = (score.warmth < 5 || score.naturalness < 5);
     score.needs_revision = gross_length || gross_structural;
 
-    if (score.needs_revision && ratio > 5.0 && their_avg > 0) {
+    if (score.needs_revision && over > 5.0 && their_avg > 0) {
         int n = snprintf(score.guidance, sizeof(score.guidance),
                          "Your response was %zu chars but their last messages averaged %zu chars. "
                          "Tighten up significantly. Match their energy.",
@@ -3748,6 +3765,10 @@ int hu_conversation_max_response_chars(size_t incoming_len) {
     return result;
 }
 
+uint32_t hu_conversation_max_response_chars_ceiling(void) {
+    return g_max_response_chars;
+}
+
 /* Floor a 1:1 length cap at the owner's own measured reply length to this
  * contact. The ratio heuristics scale with THEIR message, but a person's
  * reply length does not: 2026-09-26 a contact who texts "Heyo" got a 15-char
@@ -3885,7 +3906,8 @@ uint32_t hu_conversation_brief_char_cap(bool is_group, const hu_contact_profile_
 static size_t calibrate_length_impl(const char *last_msg, size_t last_msg_len,
                                     const hu_channel_history_entry_t *entries, size_t count,
                                     bool is_group, const hu_contact_profile_t *contact,
-                                    hu_relationship_stage_t session_stage, char *buf, size_t cap) {
+                                    hu_relationship_stage_t session_stage, uint32_t turn_cap,
+                                    char *buf, size_t cap) {
     if (!last_msg || last_msg_len == 0 || !buf || cap < 64)
         return 0;
 
@@ -3928,9 +3950,13 @@ static size_t calibrate_length_impl(const char *last_msg, size_t last_msg_len,
     }
 
     /* Last message length (structural) + numeric char limit for prompt */
-    int max_chars = is_group ? hu_conversation_max_response_chars(last_msg_len)
-                             : hu_conversation_max_response_chars_relational(last_msg_len, contact,
-                                                                             session_stage);
+    /* turn_cap: the turn's RESPONSE LIMIT under HU_LENGTH_POLICY=live, so the
+     * two numbers agree; 0 keeps today's formula. */
+    int max_chars =
+        turn_cap > 0 ? (int)turn_cap
+        : is_group
+            ? hu_conversation_max_response_chars(last_msg_len)
+            : hu_conversation_max_response_chars_relational(last_msg_len, contact, session_stage);
     w = snprintf(buf + pos, cap - pos, "Their last message: %zu chars. ", last_msg_len);
     POS_ADVANCE(w, pos, cap);
     if (last_msg_len < 15) {
@@ -4021,7 +4047,7 @@ static size_t calibrate_length_impl(const char *last_msg, size_t last_msg_len,
 size_t hu_conversation_calibrate_length(const char *last_msg, size_t last_msg_len,
                                         const hu_channel_history_entry_t *entries, size_t count,
                                         char *buf, size_t cap) {
-    return calibrate_length_impl(last_msg, last_msg_len, entries, count, false, NULL, HU_REL_NEW,
+    return calibrate_length_impl(last_msg, last_msg_len, entries, count, false, NULL, HU_REL_NEW, 0,
                                  buf, cap);
 }
 
@@ -4032,7 +4058,15 @@ size_t hu_conversation_calibrate_length_for_contact(const char *last_msg, size_t
                                                     hu_relationship_stage_t session_stage,
                                                     char *buf, size_t cap) {
     return calibrate_length_impl(last_msg, last_msg_len, entries, count, is_group, contact,
-                                 session_stage, buf, cap);
+                                 session_stage, 0, buf, cap);
+}
+
+size_t hu_conversation_calibrate_length_capped(const char *last_msg, size_t last_msg_len,
+                                               bool is_group, const hu_contact_profile_t *contact,
+                                               hu_relationship_stage_t session_stage,
+                                               uint32_t turn_cap, char *buf, size_t cap) {
+    return calibrate_length_impl(last_msg, last_msg_len, NULL, 0, is_group, contact, session_stage,
+                                 turn_cap, buf, cap);
 }
 
 /* ── Texting style analysis ───────────────────────────────────────────── */
@@ -8361,22 +8395,38 @@ static bool conv_clause_end_at(const char *p, size_t rem, size_t i, const char *
            (i + 1 >= rem || isspace((unsigned char)p[i + 1]));
 }
 
+/* Does p[0..rem) start with the conjunction "and " or "but "? */
+static bool conv_starts_conjunction(const char *p, size_t rem) {
+    return (rem > 4 && strncasecmp(p, "and ", 4) == 0) ||
+           (rem > 4 && strncasecmp(p, "but ", 4) == 0);
+}
+
 /* Length of the next bubble of a long reply (rem > max_chunk). A person breaks
  * at a thought boundary, so in order: a sentence end in the back half of the
  * window, a comma there, the first sentence end or comma past the window (a
- * longer bubble beats a mid-clause cut, 2026-09-30), and only then the last
- * space in the window. */
+ * longer bubble beats a mid-clause cut, 2026-09-30), a space before "and" /
+ * "but" in the window, the last space whose bubble does not end on a function
+ * word ("Nah too windy. just", 2026-09-30), and only then the last space.
+ * Every punctuation/conjunction cut must also be clean: no 1-word tail
+ * (hu_reply_cut_is_clean). */
 static size_t conv_long_split_cut(const char *p, size_t rem, size_t max_chunk) {
     static const char *const tiers[] = {".!?", ","};
     size_t hard = rem < 511 ? rem : 511;
     for (size_t t = 0; t < 2; t++)
         for (size_t i = max_chunk; i > max_chunk / 2; i--)
-            if (conv_clause_end_at(p, rem, i - 1, tiers[t]))
+            if (conv_clause_end_at(p, rem, i - 1, tiers[t]) && hu_reply_cut_is_clean(p, rem, i))
                 return i;
     for (size_t t = 0; t < 2; t++)
         for (size_t i = max_chunk; i < hard; i++)
-            if (conv_clause_end_at(p, rem, i, tiers[t]))
+            if (conv_clause_end_at(p, rem, i, tiers[t]) && hu_reply_cut_is_clean(p, rem, i + 1))
                 return i + 1;
+    for (size_t i = max_chunk; i > max_chunk / 2; i--)
+        if (p[i - 1] == ' ' && i > 1 && conv_starts_conjunction(p + i, rem - i) &&
+            hu_reply_cut_is_clean(p, rem, i - 1))
+            return i - 1;
+    for (size_t i = max_chunk; i > max_chunk / 2; i--)
+        if (p[i - 1] == ' ' && i > 1 && hu_reply_cut_is_clean(p, rem, i - 1))
+            return i - 1;
     for (size_t i = max_chunk; i > max_chunk / 2; i--)
         if (p[i - 1] == ' ' && i > 1) /* a zero cut would never advance */
             return i - 1;

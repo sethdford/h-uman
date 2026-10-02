@@ -1,7 +1,6 @@
 /* Core turn execution: hu_agent_turn and turn-local helpers */
 #include "agent_internal.h"
 #include "human/agent/best_of_n.h"
-#include "human/agent/empty_retry.h"
 #include "human/agent/graph_grounding.h"
 #include "human/agent/humanness.h"
 #include "human/agent/intent.h"
@@ -63,6 +62,7 @@ int hu_reaction_handler_was_called_this_turn(void);
 int hu_reaction_lookup_last_response(const char *channel, const char *thread, char *out,
                                      size_t out_cap);
 #include "human/agent/channel_trust.h"
+#include "human/agent/guard_repair.h"
 #include "human/agent/output_validator_chain.h"
 #include "human/agent/response_guard.h"
 #include "human/agent/response_guard_dpo.h"
@@ -1973,7 +1973,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                                     fp_db, agent->memory_session_id, agent->memory_session_id_len,
                                     &rs, &rsc, &rt) == HU_OK &&
                                 (rs || rsc || rt)) {
-                                if (rs >= HU_REL_NEW && rs <= HU_REL_DEEP)
+                                if (!agent->relationship.derived && rs >= 0 && rs <= HU_REL_DEEP)
                                     agent->relationship.stage = (hu_relationship_stage_t)rs;
                                 if (rsc >= 0)
                                     agent->relationship.session_count = (uint32_t)rsc;
@@ -2924,7 +2924,6 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
 
         hu_prompt_config_t cfg = {
             .provider_name = agent->provider.vtable->get_name(agent->provider.ctx),
-            .provider_name_len = 0,
             .model_name = agent->model_name,
             .model_name_len = agent->model_name_len,
             .workspace_dir = agent->workspace_dir,
@@ -2971,6 +2970,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
             .conversation_context = agent->conversation_context,
             .conversation_context_len = agent->conversation_context_len,
             .max_response_chars = agent->max_response_chars,
+            .response_limit_tight = agent->response_limit_tight,
             .intelligence_context = intelligence_ctx,
             .intelligence_context_len = intelligence_ctx_len,
             .skills_context = skills_ctx,
@@ -4333,33 +4333,6 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
         }
 
         (void)degrade_strategy;
-
-        /* HU_EMPTY_REPLY_RETRY activation gated on the shadow measurement: do not flip
-         * to live until shadow logs show retries of discarded drafts (completion_tokens
-         * > 0, empty body) coming back non-empty on most blanked turns. Live changes what
-         * reaches a contact; the retry stays on the same provider and model. */
-        if (err == HU_OK) {
-            hu_gate_mode_t er_mode = hu_empty_retry_mode();
-            if (hu_empty_retry_applies(er_mode, &resp, false)) {
-                hu_chat_response_t retry_resp;
-                hu_error_t rerr =
-                    hu_empty_retry_chat(&agent->provider, agent->alloc, &req, turn_model,
-                                        turn_model_len, turn_temp, &retry_resp);
-                bool usable = rerr == HU_OK && retry_resp.content && retry_resp.content_len > 0;
-                hu_log_info("agent_turn", agent->observer,
-                            "empty-reply retry (%s): first completion_tokens=%u retry_err=%d "
-                            "retry_len=%zu",
-                            er_mode == HU_GATE_LIVE ? "live" : "shadow",
-                            resp.usage.completion_tokens, (int)rerr,
-                            rerr == HU_OK ? retry_resp.content_len : (size_t)0);
-                if (usable && er_mode == HU_GATE_LIVE) {
-                    hu_chat_response_free(agent->alloc, &resp);
-                    resp = retry_resp;
-                } else if (rerr == HU_OK) {
-                    hu_chat_response_free(agent->alloc, &retry_resp);
-                }
-            }
-        }
         uint64_t llm_duration_ms = hu_agent_internal_monotonic_ms() - llm_start_ms;
         if (llm_span)
             hu_otlp_span_end(llm_span, (err == HU_OK) ? 1 : 2);
@@ -4950,12 +4923,11 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                 bool ab_owned = false;
                 uint32_t max_chars = agent->max_response_chars ? agent->max_response_chars : 0;
                 if (agent->ab_history_entries && agent->ab_history_count > 0) {
-                    hu_quality_score_t q0 = hu_conversation_evaluate_quality(
+                    hu_quality_score_t q0 = hu_conversation_evaluate_quality_capped(
                         resp.content, resp.content_len, agent->ab_history_entries,
-                        agent->ab_history_count, max_chars);
+                        agent->ab_history_count, max_chars, agent->response_limit_tight != 0);
                     if (q0.total < 70) {
-                        hu_ab_result_t ab_result;
-                        memset(&ab_result, 0, sizeof(ab_result));
+                        hu_ab_result_t ab_result = {.cap_from_stats = agent->response_limit_tight};
                         ab_result.candidates[0].response =
                             hu_strndup(agent->alloc, resp.content, resp.content_len);
                         ab_result.candidates[0].response_len = resp.content_len;
@@ -5005,11 +4977,11 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                                     ab_result.candidate_count = 2;
                                     hu_chat_response_free(agent->alloc, &alt_resp);
 
-                                    hu_quality_score_t q1 = hu_conversation_evaluate_quality(
+                                    hu_quality_score_t q1 = hu_conversation_evaluate_quality_capped(
                                         ab_result.candidates[1].response,
                                         ab_result.candidates[1].response_len,
                                         agent->ab_history_entries, agent->ab_history_count,
-                                        max_chars);
+                                        max_chars, agent->response_limit_tight != 0);
                                     if (q1.total < 70) {
                                         hu_chat_response_t alt2_resp;
                                         memset(&alt2_resp, 0, sizeof(alt2_resp));
@@ -5470,6 +5442,11 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                                     &retry_len, &retry_report);
                                 uint64_t vc_retry_latency_ms =
                                     hu_agent_internal_monotonic_ms() - vc_retry_t0_ms;
+                                /* The chain rejected the original: only the retry can go
+                                 * out, and never as a fragment (guard_repair.h). */
+                                hu_guard_repair_kept_t vc_kept = hu_guard_repair_resolve(
+                                    agent->alloc, agent->observer, final_content, final_len, NULL,
+                                    NULL, &retry_content, &retry_len);
                                 if (retry_err == HU_OK && retry_content && retry_len > 0) {
                                     /* Spec 2026-05-19 self-model-scaffold Phase
                                      * B: stash validator-retry length + latency.
@@ -5499,10 +5476,11 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                                      * pair — final_content (rejected by the
                                      * validator chain) vs retry_content
                                      * (accepted after the slim retry). */
-                                    (void)hu_m3_rewrite_pair_record(
-                                        agent->alloc, NULL, msg, msg_len, final_content, final_len,
-                                        retry_content, retry_len,
-                                        /*turn_kind=batch=*/2);
+                                    if (vc_kept == HU_GUARD_REPAIR_KEPT_RETRY)
+                                        (void)hu_m3_rewrite_pair_record(
+                                            agent->alloc, NULL, msg, msg_len, final_content,
+                                            final_len, retry_content, retry_len,
+                                            /*turn_kind=batch=*/2);
                                     /* Re-validate the retry output through the chain so a
                                      * regenerated CoT or helper-closer cannot escape (Fix 3). */
                                     hu_chain_result_t retry_cr;
@@ -5611,34 +5589,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                     hu_guard_report_t guard_report;
                     memset(&guard_report, 0, sizeof(guard_report));
                     hu_guard_context_t guard_ctx;
-                    memset(&guard_ctx, 0, sizeof(guard_ctx));
-                    guard_ctx.recent_avg_len = hu_agent_internal_recent_assistant_avg_len(agent, 5);
-                    guard_ctx.length_anomaly_mult = hu_guard_length_anomaly_mult_for_channel(
-                        agent->active_channel, agent->active_channel_len);
-                    guard_ctx.director_text = agent->scene_direction_text;
-                    guard_ctx.director_len = agent->scene_direction_text_len;
-                    guard_ctx.director_history = (const char *const *)agent->director_history;
-                    guard_ctx.director_history_lens = agent->director_history_lens;
-                    guard_ctx.director_history_count = agent->director_history_count;
-                    /* Sprint 41 follow-up #4 — consult per-channel G9 disable list. */
-                    guard_ctx.naked_opener_disabled = hu_response_guard_g9_disabled_for_channel(
-                        agent->active_channel, agent->active_channel_len);
-                    if (agent->persona) {
-                        if (agent->persona->name && agent->persona->name_len > 1) {
-                            guard_ctx.persona_name = agent->persona->name;
-                            guard_ctx.persona_name_len = agent->persona->name_len;
-                        }
-                        const char *id = agent->persona->identity ? agent->persona->identity
-                                                                  : agent->persona->core_anchor;
-                        if (id) {
-                            guard_ctx.persona_identity = id;
-                            guard_ctx.persona_identity_len = strlen(id);
-                        }
-                        if (agent->persona->biography) {
-                            guard_ctx.persona_biography = agent->persona->biography;
-                            guard_ctx.persona_biography_len = strlen(agent->persona->biography);
-                        }
-                    }
+                    hu_agent_internal_guard_context(agent, msg, msg_len, &guard_ctx);
                     hu_error_t guard_err = hu_response_guard_check_ex(
                         agent->alloc, final_content, final_len, &guard_ctx, &guard_out,
                         &guard_out_len, &guard_outcome, &guard_report);
@@ -5709,6 +5660,12 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                                 hu_response_guard_record_g9_retry_outcome(retry_ok,
                                                                           retry_tripped_g9);
                             }
+                            /* Never send a cut-off reply from the repair (guard_repair.h). */
+                            hu_guard_repair_kept_t repair_kept = hu_guard_repair_resolve(
+                                agent->alloc, agent->observer, final_content, final_len,
+                                &guard_report, &guard_ctx, &retry_content, &retry_len);
+                            if (repair_kept != HU_GUARD_REPAIR_KEPT_NONE)
+                                retry_err = HU_OK;
                             if (retry_err == HU_OK && retry_content && retry_len > 0) {
                                 /* Spec 2026-05-19 self-model-scaffold Phase B:
                                  * stash response_guard-retry length + latency.
@@ -5736,9 +5693,10 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                                  * retry_content (accepted after slim retry).
                                  * Captured BEFORE the ab_owned free below so
                                  * the rejected text is still valid. */
-                                (void)hu_m3_rewrite_pair_record(
-                                    agent->alloc, NULL, msg, msg_len, final_content, final_len,
-                                    retry_content, retry_len, /*turn_kind=batch=*/2);
+                                if (repair_kept == HU_GUARD_REPAIR_KEPT_RETRY)
+                                    (void)hu_m3_rewrite_pair_record(
+                                        agent->alloc, NULL, msg, msg_len, final_content, final_len,
+                                        retry_content, retry_len, /*turn_kind=batch=*/2);
                                 hu_log_warn("agent_turn", agent->observer,
                                             "response_guard RECOVERED: retry passed (len=%zu, "
                                             "stripped=%zu)",
@@ -5750,42 +5708,22 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                                 final_len = retry_len;
                                 ab_owned = true;
                             } else {
-                                /* 2026-05-24 fix: response_guard REJECT + slim-retry both
-                                 * failed. Previously this nulled final_content and let the
-                                 * function return HU_OK with empty response_out, which the
-                                 * gateway misclassified as a transient "Agent returned empty
-                                 * response" 502 (telling clients to retry — but retrying won't
-                                 * help if the model keeps producing rejected content). Worse,
-                                 * iMessage saw HU_OK + NULL and silently skipped the send,
-                                 * leaving the user with no reply at all.
-                                 *
-                                 * Mirror the critique-echo guard's pattern (~line 5136): install
-                                 * a canonical short safe fallback so the function's contract
-                                 * holds ("HU_OK ⇒ non-NULL content"). The fallback matches the
-                                 * persona register (lowercase, no AI-tells) so it's plausibly
-                                 * something Seth would say while he gathers his thoughts. */
-                                hu_log_error(
-                                    "agent_turn", agent->observer,
-                                    "response_guard retry failed (err=%s) — installing fallback",
-                                    hu_error_string(retry_err));
+                                /* Nothing sendable (retry failed, or cut off with no complete
+                                 * sentence and an unsendable original): send NOTHING, the same
+                                 * as the validator-chain path. Silence is human; a canned line
+                                 * is not (owner ruling 2026-10-01, replaced the 2026-05-24
+                                 * canned fallback line). guard_repair
+                                 * logged kept=none. */
+                                hu_log_error("agent_turn", agent->observer,
+                                             "response_guard retry unusable (err=%s) — "
+                                             "suppressing send",
+                                             hu_error_string(retry_err));
                                 if (ab_owned)
                                     agent->alloc->free(agent->alloc->ctx, (void *)final_content,
                                                        final_len + 1);
-                                static const char fallback[] = "hold on, let me think on that";
-                                size_t fallback_len = sizeof(fallback) - 1;
-                                char *fb_copy = hu_strndup(agent->alloc, fallback, fallback_len);
-                                if (fb_copy) {
-                                    final_content = fb_copy;
-                                    final_len = fallback_len;
-                                    ab_owned = true;
-                                } else {
-                                    /* OOM on the fallback alloc — last resort: NULL content,
-                                     * but log loudly. Gateway will still 502 in this case, but
-                                     * OOM is its own real failure so 502 is appropriate. */
-                                    final_content = NULL;
-                                    final_len = 0;
-                                    ab_owned = false;
-                                }
+                                final_content = NULL;
+                                final_len = 0;
+                                ab_owned = false;
                             }
                         } else if (guard_outcome == HU_GUARD_REWROTE) {
                             hu_log_warn(

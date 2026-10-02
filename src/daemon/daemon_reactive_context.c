@@ -13,6 +13,7 @@
 #include "human/daemon/reactive_turn.h"
 
 #include "human/agent.h"
+#include "human/agent/contact_stage_turn.h"
 #include "human/channel.h"
 #include "human/config.h"
 #include "human/core/log.h"
@@ -58,6 +59,9 @@ void hu_daemon_reactive_context_load(hu_allocator_t *alloc, hu_agent_t *agent,
     (void)comfort_pending;
 
     hu_agent_clear_history(agent);
+    /* DEF-16: this contact's own relationship stage, before the length
+     * calibration reads it (src/agent/turn/contact_stage_turn.c). */
+    (void)hu_contact_stage_refresh(agent, batch_key, key_len);
 
     /* Set active channel for per-channel persona overlays */
     if (ch->channel->vtable->name) {

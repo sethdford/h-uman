@@ -135,6 +135,23 @@ hu_error_t hu_daemon_record_delivered_reply(struct hu_agent *agent, const char *
                                             const char *prompt, size_t prompt_len, const char *text,
                                             size_t text_len);
 
+/* A reply whose text reached nobody: the session store already holds it as
+ * an assistant turn (it is saved before sending), so append a system note
+ * right after it. The next turn's history restore carries the note, and the
+ * model does not treat the lost reply as said (2026-09-26). */
+#define HU_DAEMON_UNDELIVERED_NOTE                                                          \
+    "[delivery] Your previous reply was NOT delivered: the send failed and they never saw " \
+    "it. Do not refer to it as something you said."
+struct hu_session_store;
+/* Did this reply reach nobody because sending failed? `any_send_err`: a
+ * vtable->send for this reply returned an error (every build); the counter
+ * pair brackets the reply with hu_daemon_send_failure_total(). False when any
+ * bubble was delivered or nothing failed (a deliberate non-send). */
+bool hu_daemon_reply_lost(bool delivered, bool any_send_err, uint64_t fails_before,
+                          uint64_t fails_after);
+hu_error_t hu_daemon_note_reply_undelivered(struct hu_session_store *store, const char *session,
+                                            size_t session_len);
+
 /* Burst re-poll triage. The re-poll before a reply has already consumed every
  * message in `burst` (the channel's read cursor moved past them), so a message
  * from a sender other than `batch_key` must not be dropped: it is appended to

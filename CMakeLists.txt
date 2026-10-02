@@ -467,6 +467,9 @@ list(APPEND CHANNEL_SOURCES src/channels/imessage_reply.c)
 # Send provenance observer: pure C, no Apple deps, so unconditional like
 # imessage_reply.c (the daemon records every delivered send through it).
 list(APPEND CHANNEL_SOURCES src/channels/imessage_send_observer.c)
+# Outbound route (answer SMS/RCS chats on their own chat) + per-attempt outcome
+# line. Pure C, no Apple deps, so unconditional; imessage.c sends through it.
+list(APPEND CHANNEL_SOURCES src/channels/imessage_send_route.c)
 # Native Messages voice delivery (W3): pure policy + orchestrator, no Apple
 # deps, so unconditional; imessage.c calls it from the production send path.
 list(APPEND CHANNEL_SOURCES src/channels/imessage_voice_record.c)
@@ -778,6 +781,7 @@ set(HU_CORE_SOURCES
     src/agent/agent_turn.c
     src/agent/turn/turn_ctx.c
     src/agent/turn/turn_retrieve.c
+    src/agent/turn/contact_stage_turn.c
     src/agent/turn/turn_perceive.c
     src/agent/turn/turn_entry.c
     src/agent/turn/turn_silence.c
@@ -787,6 +791,8 @@ set(HU_CORE_SOURCES
     src/agent/turn/turn_plan.c
     src/agent/turn/reask.c
     src/agent/turn/empty_retry.c
+    src/agent/turn/spoken_turn.c
+    src/agent/turn/length_policy.c
     src/agent/best_of_n.c
     src/agent/humanness.c
     src/agent/context.c
@@ -855,6 +861,7 @@ set(HU_CORE_SOURCES
     src/agent/growth_narrative.c
     src/agent/frontier_persist.c
     src/context/conversation.c
+    src/context/reply_fragment.c
     src/context/contact_send_recency.c
     src/context/filler_recency.c
     src/context/contact_send_recency.c
@@ -1025,6 +1032,7 @@ set(HU_CORE_SOURCES
     src/memory/name_extract.c
     src/memory/agent_facts.c
     src/memory/semantic_recall.c
+    src/memory/context_relevance.c
     src/memory/conflict_resolver.c
     src/memory/write_trust.c
     src/memory/erasure.c
@@ -1069,6 +1077,7 @@ set(HU_CORE_SOURCES
     src/agent/outbound/crosstalk_sqlite.c
     src/agent/outbound/persona.c
     src/agent/outbound/moderation.c
+    src/agent/outbound/guard_repair.c
     src/agent/outbound/stats.c
     src/agent/burst_egress.c
     src/agent/multimodal_policy.c
@@ -1262,6 +1271,8 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_prospective.c
     src/daemon/daemon_outbound_bus.c
     src/daemon/daemon_send_provenance.c
+    src/daemon/daemon_send_failure.c
+    src/daemon/owner_notify.c
     src/daemon/daemon_reply_delay.c
     src/daemon/daemon_director.c
     src/daemon/reply_dedup.c
@@ -1290,6 +1301,7 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_promise_keeper.c
     src/daemon/daemon_insight_overuse.c
     src/daemon/daemon_proposer_context.c
+    src/daemon/daemon_grief_decay.c
     src/daemon/cron.c
     src/daemon/crontab.c
     src/gateway/webhook.c
@@ -1529,6 +1541,7 @@ list(APPEND HU_CORE_SOURCES
     src/agent/followup_compose.c
     src/persona/temporal.c
     src/persona/relationship.c
+    src/persona/contact_stage.c
     src/persona/auto_profile.c
     src/persona/auto_tune.c
     src/persona/voice_maturity.c
@@ -1690,6 +1703,7 @@ if(HU_ENABLE_SQLITE)
         src/memory/repos/proactive_decisions_repo_sqlite.c
         src/memory/repos/outbound_sends_repo_sqlite.c
         src/memory/repos/contact_optout_repo_sqlite.c
+        src/memory/repos/contact_stage_repo_sqlite.c
         src/memory/repos/prospective_repo_sqlite.c
         src/memory/repos/reminder_repo_sqlite.c
         src/memory/repos/briefing_repo_sqlite.c
@@ -3320,7 +3334,9 @@ if(HU_ENABLE_TUI)
     endif()
 endif()
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
-    target_compile_options(human_core_test PRIVATE -ffunction-sections -fdata-sections -Wall -Wextra -Wpedantic -Wshadow -Wformat-security)
+    # -Werror like human_core: without it, warnings in test-only builds of src/
+    # (and in human_devlib, which inherits these options) piled up unseen.
+    target_compile_options(human_core_test PRIVATE -ffunction-sections -fdata-sections -Wall -Wextra -Wpedantic -Wshadow -Wformat-security -Werror ${HU_GCC_WERROR_RELAX})
 endif()
 if(HU_ENABLE_ASAN)
     target_compile_options(human_core_test PRIVATE -fsanitize=address -fno-omit-frame-pointer)
@@ -3626,6 +3642,7 @@ set(HU_TEST_SOURCES
     tests/test_daemon_promise_keeper.c
     tests/test_daemon_insight_overuse.c
     tests/test_daemon_proposer_context.c
+    tests/test_daemon_grief_decay.c
     tests/test_daemon_config_reload.c
     tests/test_daemon_identity_graph.c
     tests/test_daemon_name_catch.c
@@ -3833,6 +3850,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_hybrid_reconstructive.c
     tests/test_semantic_recall.c
     tests/test_semantic_recall_register.c
+    tests/test_context_relevance.c
     tests/test_embedder_http.c
     tests/test_w1_bitemporal.c
     tests/test_graph_state.c
@@ -3868,6 +3886,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_daemon_e2e_validator.c
     tests/test_response_guard.c
     tests/test_response_guard_retry.c
+    tests/test_reply_fragment.c
     # Sprint 59 — outbound validation pipeline (Phase A runner contract).
     tests/test_outbound_pipeline.c
     # Sprint 59 Phase B — strip stage.
@@ -3898,6 +3917,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_agent.c
     tests/test_lean_head.c
     tests/test_reply_prompt.c
+    tests/test_length_policy.c
     tests/test_agent_turn_state.c
     tests/test_agent_turn_transport.c
     tests/turn_recording_provider.c
@@ -3915,6 +3935,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_agent_turn_history_window.c
     tests/test_reask.c
     tests/test_empty_retry.c
+    tests/test_spoken_turn.c
     tests/test_turn_sources.c
     tests/test_agent_llm_latency_wall_clock.c
     tests/test_agent_turn_request_overrides.c
@@ -4072,7 +4093,7 @@ if(HU_ENABLE_FEEDS)
     list(APPEND HU_TEST_SOURCES
         tests/test_research_feeds.c tests/test_research_executor.c)
 endif()
-list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/test_relationship.c tests/test_replay.c tests/test_style_clone.c tests/test_life_sim.c tests/test_persona_mood.c tests/test_persona_feedback.c tests/test_persona_examples_style.c tests/test_persona_cli.c tests/test_voice_maturity.c tests/test_style_learner.c tests/test_temporal.c tests/test_inner_world.c tests/test_persona_eval.c tests/test_persona_filler_roundtrip.c tests/test_style_critique_patterns.c tests/test_style_self_critique.c)
+list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/test_relationship.c tests/test_contact_stage.c tests/test_replay.c tests/test_style_clone.c tests/test_life_sim.c tests/test_persona_mood.c tests/test_persona_feedback.c tests/test_persona_examples_style.c tests/test_persona_cli.c tests/test_voice_maturity.c tests/test_style_learner.c tests/test_temporal.c tests/test_inner_world.c tests/test_persona_eval.c tests/test_persona_filler_roundtrip.c tests/test_style_critique_patterns.c tests/test_style_self_critique.c)
 # Moment Context Decision Layer (Task 0.2) — paired with src/persona/moment.c
 # and src/persona/moment_render.c above; unconditional per gate-symmetry rule.
 list(APPEND HU_TEST_SOURCES tests/test_moment_compose.c tests/test_moment_render.c)
@@ -4135,6 +4156,7 @@ list(APPEND HU_TEST_SOURCES tests/test_reaction_event.c)
 list(APPEND HU_TEST_SOURCES tests/test_imessage_reactions.c)
 list(APPEND HU_TEST_SOURCES tests/test_imessage_caps.c)
 list(APPEND HU_TEST_SOURCES tests/test_imessage_send_service.c)
+list(APPEND HU_TEST_SOURCES tests/test_imessage_send_route.c)
 list(APPEND HU_TEST_SOURCES tests/test_imessage_bb_event.c)
 # Phase 1a of docs/plans/2026-05-18-imessage-sota.md: pure-synthesis tests
 # for src/channels/imessage_ingest.c. No chat.db / Apple deps; tests run
@@ -4203,6 +4225,7 @@ if(HU_ENABLE_SQLITE)
 endif()
 
 list(APPEND HU_TEST_SOURCES tests/test_curiosity_gaps.c)
+list(APPEND HU_TEST_SOURCES tests/test_agent_recall_provider.c)
 list(APPEND HU_TEST_SOURCES tests/test_memory_loader_scope.c)
 
 # Sprint 60 follow-up — crosstalk SQLite lookup. Test seeds the
@@ -4220,6 +4243,7 @@ if(HU_ENABLE_SQLITE)
     list(APPEND HU_TEST_SOURCES tests/test_life_chapter_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_proactive_decisions_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_outbound_sends_repo.c)
+    list(APPEND HU_TEST_SOURCES tests/test_daemon_send_failure.c)
     list(APPEND HU_TEST_SOURCES tests/test_contact_optout_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_reminder_repo.c)
     list(APPEND HU_TEST_SOURCES tests/test_person_dates_repo.c)
@@ -4796,7 +4820,7 @@ endif()
 # Compiler warnings
 target_compile_options(human_core PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wformat-security -Werror ${HU_GCC_WERROR_RELAX})
 target_compile_options(human PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wformat-security -Werror ${HU_GCC_WERROR_RELAX})
-target_compile_options(human_tests PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wformat-security)
+target_compile_options(human_tests PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wformat-security -Werror ${HU_GCC_WERROR_RELAX})
 
 # Per-file warning exceptions.
 #

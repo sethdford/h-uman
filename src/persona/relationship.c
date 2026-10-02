@@ -42,7 +42,7 @@ float hu_session_quality_score(const hu_session_quality_t *q) {
 }
 
 /* Map cumulative quality to relationship stage */
-static hu_relationship_stage_t stage_from_quality(float quality) {
+hu_relationship_stage_t hu_relationship_stage_from_quality(float quality) {
     if (quality >= 0.80f)
         return HU_REL_DEEP;
     if (quality >= 0.55f)
@@ -108,13 +108,15 @@ void hu_relationship_new_session_quality(hu_relationship_state_t *state,
     qs->quality_sessions++;
 
     /* Stage can both advance AND regress based on quality */
-    state->stage = stage_from_quality(qs->cumulative_quality);
+    state->stage = hu_relationship_stage_from_quality(qs->cumulative_quality);
 }
 
 void hu_relationship_update(hu_relationship_state_t *state, uint32_t turn_count) {
     if (!state)
         return;
     state->total_turns += turn_count;
+    if (state->derived)
+        return; /* per-contact stage: counting turns must not raise it */
 
     /* Gradually advance stage based on accumulated turns when no quality
      * scoring is available (e.g. CLI mode without the daemon). This is a

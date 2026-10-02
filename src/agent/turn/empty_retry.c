@@ -1,6 +1,7 @@
 /* src/agent/turn/empty_retry.c — retry a reply the serving layer discarded.
  * See include/human/agent/empty_retry.h for the contract and the gate. */
 #include "human/agent/empty_retry.h"
+#include "human/core/log.h"
 #include <string.h>
 
 hu_gate_mode_t hu_empty_retry_mode(void) {
@@ -46,4 +47,28 @@ hu_error_t hu_empty_retry_chat(hu_provider_t *provider, hu_allocator_t *alloc,
         provider->vtable->chat(provider->ctx, alloc, &retry, model, model_len, temperature, out);
     alloc->free(alloc->ctx, msgs, (n + 1) * sizeof(hu_chat_message_t));
     return err;
+}
+
+void hu_empty_retry_maybe(hu_provider_t *provider, hu_allocator_t *alloc,
+                          const hu_chat_request_t *req, const char *model, size_t model_len,
+                          double temperature, hu_chat_response_t *resp) {
+    if (!provider || !alloc || !req || !resp)
+        return;
+    hu_gate_mode_t mode = hu_empty_retry_mode();
+    if (!hu_empty_retry_applies(mode, resp, false))
+        return;
+    hu_chat_response_t retry;
+    hu_error_t rerr =
+        hu_empty_retry_chat(provider, alloc, req, model, model_len, temperature, &retry);
+    bool usable = rerr == HU_OK && retry.content && retry.content_len > 0;
+    hu_log_info("agent_turn", NULL,
+                "empty-reply retry (%s): first completion_tokens=%u retry_err=%d retry_len=%zu",
+                mode == HU_GATE_LIVE ? "live" : "shadow", resp->usage.completion_tokens, (int)rerr,
+                rerr == HU_OK ? retry.content_len : (size_t)0);
+    if (usable && mode == HU_GATE_LIVE) {
+        hu_chat_response_free(alloc, resp);
+        *resp = retry;
+    } else if (rerr == HU_OK) {
+        hu_chat_response_free(alloc, &retry);
+    }
 }
