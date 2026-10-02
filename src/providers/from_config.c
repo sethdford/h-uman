@@ -6,6 +6,7 @@
 #include "human/providers/api_key.h"
 #include "human/providers/ensemble.h"
 #include "human/providers/factory.h"
+#include "human/providers/local_only.h"
 #include "human/providers/reliable.h"
 #include "human/providers/router.h"
 #include <string.h>
@@ -113,6 +114,23 @@ static void free_model_fallback_chain(hu_allocator_t *alloc, const hu_config_t *
     }
     if (entries && alloc_size > 0)
         alloc->free(alloc->ctx, entries, alloc_size);
+}
+
+/* Whether prompts sent to provider `name` stay on this machine: its resolved
+ * base_url (configured, else the compatible-table default) and the
+ * providers[].local override. See providers/local_only.h. */
+static bool provider_is_local(const hu_config_t *cfg, const char *name) {
+    const char *url = hu_config_get_provider_base_url(cfg, name);
+    if (!url || !url[0])
+        url = hu_compatible_provider_url(name);
+    return hu_local_only_endpoint_is_local(name, url,
+                                           hu_config_get_provider_local_override(cfg, name));
+}
+
+static void mark_extras_locality(const hu_config_t *cfg, hu_reliable_provider_entry_t *extras,
+                                 size_t n) {
+    for (size_t i = 0; i < n; i++)
+        extras[i].local = provider_is_local(cfg, extras[i].name);
 }
 
 static hu_error_t create_provider_from_name(hu_allocator_t *alloc, const hu_config_t *cfg,
@@ -289,10 +307,13 @@ hu_error_t hu_provider_create_from_config(hu_allocator_t *alloc, const hu_config
             hu_log_info("provider", NULL, "reliable: wired %zu model_fallback chain(s)", mf_count);
         }
 
+        mark_extras_locality(cfg, extras, extras_count);
         err = hu_reliable_create_ex(alloc, primary, max_retries, backoff_ms, extras, extras_count,
                                     mf_entries, mf_count, out);
-        if (err == HU_OK)
+        if (err == HU_OK) {
             apply_reliability_tuning(cfg, out);
+            hu_reliable_set_primary_local(out, provider_is_local(cfg, primary_name));
+        }
         if (err != HU_OK) {
             if (primary.vtable && primary.vtable->deinit)
                 primary.vtable->deinit(primary.ctx, alloc);
@@ -484,10 +505,13 @@ hu_error_t hu_provider_create_default(hu_allocator_t *alloc, const hu_config_t *
                     prov_name, mf_count);
     }
 
+    mark_extras_locality(cfg, extras, extras_count);
     err = hu_reliable_create_ex(alloc, base, max_retries, backoff_ms, extras, extras_count,
                                 mf_entries, mf_count, out);
-    if (err == HU_OK)
+    if (err == HU_OK) {
         apply_reliability_tuning(cfg, out);
+        hu_reliable_set_primary_local(out, provider_is_local(cfg, prov_name));
+    }
     if (err != HU_OK) {
         if (base.vtable && base.vtable->deinit)
             base.vtable->deinit(base.ctx, alloc);

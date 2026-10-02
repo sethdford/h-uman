@@ -3014,11 +3014,13 @@ static bool imessage_health_check(void *ctx) {
 #endif
 }
 
-static hu_error_t imessage_load_conversation_history(void *ctx, hu_allocator_t *alloc,
-                                                     const char *contact_id, size_t contact_id_len,
-                                                     size_t limit, hu_channel_history_entry_t **out,
-                                                     size_t *out_count) {
-    (void)ctx;
+/* Shared body of both history loaders: run `sql` (?1 = handle, ?2 = limit)
+ * and decode rows. `label_own_media`: Seth's text-less rows carry their media
+ * label instead of the legacy "[you replied]" (DM loader only). */
+static hu_error_t imessage_load_history_sql(const char *sql, bool label_own_media,
+                                            hu_allocator_t *alloc, const char *contact_id,
+                                            size_t contact_id_len, size_t limit,
+                                            hu_channel_history_entry_t **out, size_t *out_count) {
     if (!alloc || !contact_id || !out || !out_count)
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
@@ -3038,34 +3040,6 @@ static hu_error_t imessage_load_conversation_history(void *ctx, hu_allocator_t *
     sqlite3 *db = NULL;
     if (imessage_open_chatdb(db_path, &db) != SQLITE_OK)
         return HU_ERR_INTERNAL;
-
-    const char *sql = "SELECT m.is_from_me, m.text, "
-                      "  datetime(m.date/1000000000 + 978307200, 'unixepoch', 'localtime') as ts, "
-                      "  (SELECT COUNT(*) FROM message_attachment_join maj "
-                      "   JOIN attachment a ON maj.attachment_id = a.ROWID "
-                      "   WHERE maj.message_id = m.ROWID AND a.filename IS NOT NULL "
-                      "   AND (LOWER(a.filename) LIKE '%.mov' OR LOWER(a.filename) LIKE '%.mp4' "
-                      "     OR LOWER(a.filename) LIKE '%.m4v')) > 0 AS has_video, "
-                      "  (SELECT COUNT(*) FROM message_attachment_join maj2 "
-                      "   JOIN attachment a2 ON maj2.attachment_id = a2.ROWID "
-                      "   WHERE maj2.message_id = m.ROWID AND a2.filename IS NOT NULL "
-                      "   AND (LOWER(a2.filename) LIKE '%.jpg' OR LOWER(a2.filename) LIKE '%.jpeg' "
-                      "     OR LOWER(a2.filename) LIKE '%.png' OR LOWER(a2.filename) LIKE '%.heic' "
-                      "     OR LOWER(a2.filename) LIKE '%.gif' OR LOWER(a2.filename) LIKE "
-                      "'%.webp')) > 0 AS has_image, "
-                      "  (SELECT COUNT(*) FROM message_attachment_join maj3 "
-                      "   JOIN attachment a3 ON maj3.attachment_id = a3.ROWID "
-                      "   WHERE maj3.message_id = m.ROWID AND a3.filename IS NOT NULL "
-                      "   AND (LOWER(a3.filename) LIKE '%.caf' OR LOWER(a3.filename) LIKE '%.m4a' "
-                      "     OR LOWER(a3.filename) LIKE '%.mp3' OR LOWER(a3.filename) LIKE '%.aac' "
-                      "     OR LOWER(a3.filename) LIKE '%.opus')) > 0 AS has_audio, "
-                      "  m.attributedBody, "
-                      "  m.balloon_bundle_id, "
-                      "  m.expressive_send_style_id "
-                      "FROM message m "
-                      "JOIN handle h ON m.handle_id = h.ROWID "
-                      "WHERE h.id = ?1 AND m.associated_message_type = 0 "
-                      "ORDER BY m.date DESC LIMIT ?2";
 
     sqlite3_stmt *stmt = NULL;
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
@@ -3136,17 +3110,20 @@ static hu_error_t imessage_load_conversation_history(void *ctx, hu_allocator_t *
                 tlen = sizeof(entries[0].text) - 1;
             memcpy(entries[count].text, txt, tlen);
             entries[count].text[tlen] = '\0';
+        } else if (entries[count].from_me && !label_own_media) {
+            snprintf(entries[count].text, sizeof(entries[0].text), "[you replied]");
+        } else if (has_audio) {
+            snprintf(entries[count].text, sizeof(entries[0].text), "[Voice Message]");
+        } else if (has_video) {
+            snprintf(entries[count].text, sizeof(entries[0].text), "[Video]");
+        } else if (has_image) {
+            snprintf(entries[count].text, sizeof(entries[0].text), "[Photo]");
         } else if (entries[count].from_me) {
+            /* No text and no media we recognise: an unsent/edited row, a
+             * game or Digital Touch balloon. Not necessarily an attachment. */
             snprintf(entries[count].text, sizeof(entries[0].text), "[you replied]");
         } else {
-            if (has_audio)
-                snprintf(entries[count].text, sizeof(entries[0].text), "[Voice Message]");
-            else if (has_video)
-                snprintf(entries[count].text, sizeof(entries[0].text), "[Video]");
-            else if (has_image)
-                snprintf(entries[count].text, sizeof(entries[0].text), "[Photo]");
-            else
-                snprintf(entries[count].text, sizeof(entries[0].text), "[image or attachment]");
+            snprintf(entries[count].text, sizeof(entries[0].text), "[image or attachment]");
         }
         if (ts) {
             size_t tslen = strlen(ts);
@@ -3171,10 +3148,29 @@ static hu_error_t imessage_load_conversation_history(void *ctx, hu_allocator_t *
     *out_count = count;
     return HU_OK;
 #else
+    (void)sql;
+    (void)label_own_media;
     (void)contact_id_len;
     (void)limit;
     return HU_ERR_NOT_SUPPORTED;
 #endif
+}
+
+static hu_error_t imessage_load_conversation_history(void *ctx, hu_allocator_t *alloc,
+                                                     const char *contact_id, size_t contact_id_len,
+                                                     size_t limit, hu_channel_history_entry_t **out,
+                                                     size_t *out_count) {
+    (void)ctx;
+    return imessage_load_history_sql(HU_IMESSAGE_SQL_HANDLE_HISTORY, false, alloc, contact_id,
+                                     contact_id_len, limit, out, out_count);
+}
+
+hu_error_t hu_imessage_load_dm_history(void *ctx, hu_allocator_t *alloc, const char *contact_id,
+                                       size_t contact_id_len, size_t limit,
+                                       hu_channel_history_entry_t **out, size_t *out_count) {
+    (void)ctx;
+    return imessage_load_history_sql(HU_IMESSAGE_SQL_DM_HISTORY, true, alloc, contact_id,
+                                     contact_id_len, limit, out, out_count);
 }
 
 #if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__) && defined(HU_ENABLE_SQLITE)

@@ -30,6 +30,10 @@ typedef struct hu_provider_entry {
     int threads;
     bool use_gpu;
     int n_gpu_layers;
+    /* providers[].local: whether prompts sent to this provider stay on this
+     * machine. 0 = unset (decided from base_url), 1 = local, -1 = not local.
+     * Read by the reliable provider's private-span strip (providers/local_only.h). */
+    int local_override;
 } hu_provider_entry_t;
 
 typedef struct hu_diagnostics_config {
@@ -900,6 +904,8 @@ const char *hu_config_default_provider_key(const hu_config_t *cfg);
 bool hu_config_provider_requires_api_key(const char *provider);
 const char *hu_config_get_provider_base_url(const hu_config_t *cfg, const char *name);
 bool hu_config_get_provider_native_tools(const hu_config_t *cfg, const char *name);
+/* providers[].local as 1 / -1, or 0 when unset or the provider is absent. */
+int hu_config_get_provider_local_override(const hu_config_t *cfg, const char *name);
 const char *hu_config_get_web_search_provider(const hu_config_t *cfg);
 size_t hu_config_get_channel_configured_count(const hu_config_t *cfg, const char *key);
 bool hu_config_get_provider_ws_streaming(const hu_config_t *cfg, const char *name);

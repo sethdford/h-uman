@@ -157,6 +157,66 @@ int hu_imessage_count_recent_music_tapbacks(const char *contact_id, size_t conta
  * Returns -1 on failure or when SQLite/macOS unavailable. */
 int64_t hu_imessage_get_latest_sent_rowid(const char *handle, size_t handle_len);
 
+/* History queries (?1 = handle id, ?2 = limit; newest first). Public so the
+ * chat.db fixture test runs the exact production SQL. */
+#define HU_IMESSAGE_SQL_HISTORY_COLUMNS                                            \
+    "SELECT m.is_from_me, m.text, "                                                \
+    "  datetime(m.date/1000000000 + 978307200, 'unixepoch', 'localtime') as ts, "  \
+    "  (SELECT COUNT(*) FROM message_attachment_join maj "                         \
+    "   JOIN attachment a ON maj.attachment_id = a.ROWID "                         \
+    "   WHERE maj.message_id = m.ROWID AND a.filename IS NOT NULL "                \
+    "   AND (LOWER(a.filename) LIKE '%.mov' OR LOWER(a.filename) LIKE '%.mp4' "    \
+    "     OR LOWER(a.filename) LIKE '%.m4v')) > 0 AS has_video, "                  \
+    "  (SELECT COUNT(*) FROM message_attachment_join maj2 "                        \
+    "   JOIN attachment a2 ON maj2.attachment_id = a2.ROWID "                      \
+    "   WHERE maj2.message_id = m.ROWID AND a2.filename IS NOT NULL "              \
+    "   AND (LOWER(a2.filename) LIKE '%.jpg' OR LOWER(a2.filename) LIKE '%.jpeg' " \
+    "     OR LOWER(a2.filename) LIKE '%.png' OR LOWER(a2.filename) LIKE '%.heic' " \
+    "     OR LOWER(a2.filename) LIKE '%.gif' OR LOWER(a2.filename) LIKE "          \
+    "'%.webp')) > 0 AS has_image, "                                                \
+    "  (SELECT COUNT(*) FROM message_attachment_join maj3 "                        \
+    "   JOIN attachment a3 ON maj3.attachment_id = a3.ROWID "                      \
+    "   WHERE maj3.message_id = m.ROWID AND a3.filename IS NOT NULL "              \
+    "   AND (LOWER(a3.filename) LIKE '%.caf' OR LOWER(a3.filename) LIKE '%.m4a' "  \
+    "     OR LOWER(a3.filename) LIKE '%.mp3' OR LOWER(a3.filename) LIKE '%.aac' "  \
+    "     OR LOWER(a3.filename) LIKE '%.opus')) > 0 AS has_audio, "                \
+    "  m.attributedBody, "                                                         \
+    "  m.balloon_bundle_id, "                                                      \
+    "  m.expressive_send_style_id "
+
+/* load_conversation_history (every existing consumer): rows whose handle is
+ * ?1, in any chat. Unchanged since before 2026-10-01. */
+#define HU_IMESSAGE_SQL_HANDLE_HISTORY                   \
+    HU_IMESSAGE_SQL_HISTORY_COLUMNS                      \
+    "FROM message m "                                    \
+    "JOIN handle h ON m.handle_id = h.ROWID "            \
+    "WHERE h.id = ?1 AND m.associated_message_type = 0 " \
+    "ORDER BY m.date DESC LIMIT ?2"
+
+/* hu_imessage_load_dm_history (HU_THREAD_CONTEXT only): the 1:1 chat with
+ * ?1, both directions. Mirrors hu_imessage_chat_is_group: chat.style decides
+ * (45 = DM, 43 = group); only an unknown style falls back to "exactly one
+ * other participant". */
+#define HU_IMESSAGE_SQL_DM_HISTORY                                     \
+    HU_IMESSAGE_SQL_HISTORY_COLUMNS                                    \
+    "FROM message m "                                                  \
+    "JOIN chat_message_join cmj ON cmj.message_id = m.ROWID "          \
+    "JOIN chat c ON c.ROWID = cmj.chat_id "                            \
+    "WHERE c.ROWID IN (SELECT chj.chat_id FROM chat_handle_join chj "  \
+    "  JOIN handle h ON h.ROWID = chj.handle_id WHERE h.id = ?1) "     \
+    "AND (c.style = 45 OR (COALESCE(c.style, -1) NOT IN (43, 45) AND " \
+    "  (SELECT COUNT(DISTINCT c2.handle_id) FROM chat_handle_join c2 " \
+    "   WHERE c2.chat_id = c.ROWID) = 1)) "                            \
+    "AND m.associated_message_type = 0 "                               \
+    "ORDER BY m.date DESC LIMIT ?2"
+
+/* The DM-only history for HU_THREAD_CONTEXT's recent-thread block. Same
+ * contract and entry shape as the channel's load_conversation_history.
+ * `ctx` is the iMessage channel ctx (unused today). */
+hu_error_t hu_imessage_load_dm_history(void *ctx, hu_allocator_t *alloc, const char *contact_id,
+                                       size_t contact_id_len, size_t limit,
+                                       hu_channel_history_entry_t **out, size_t *out_count);
+
 /** How many tapbacks of ours (is_from_me, associated_message_type 2000-2005)
  * chat.db holds on the message with this ROWID ($HU_CHATDB honoured). -1 when
  * chat.db cannot be read. A tapback path that reports success is believed
