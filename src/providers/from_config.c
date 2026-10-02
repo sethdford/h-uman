@@ -6,6 +6,7 @@
 #include "human/providers/api_key.h"
 #include "human/providers/ensemble.h"
 #include "human/providers/factory.h"
+#include "human/providers/local_only.h"
 #include "human/providers/reliable.h"
 #include "human/providers/router.h"
 #include <string.h>
@@ -291,8 +292,10 @@ hu_error_t hu_provider_create_from_config(hu_allocator_t *alloc, const hu_config
 
         err = hu_reliable_create_ex(alloc, primary, max_retries, backoff_ms, extras, extras_count,
                                     mf_entries, mf_count, out);
-        if (err == HU_OK)
+        if (err == HU_OK) {
             apply_reliability_tuning(cfg, out);
+            hu_reliable_set_primary_local(out, hu_local_only_provider_name_is_local(primary_name));
+        }
         if (err != HU_OK) {
             if (primary.vtable && primary.vtable->deinit)
                 primary.vtable->deinit(primary.ctx, alloc);

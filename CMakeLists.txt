@@ -959,6 +959,7 @@ set(HU_CORE_SOURCES
     src/providers/sse.c
     src/providers/scrub.c
     src/providers/reliable.c
+    src/providers/local_only.c
     src/providers/from_config.c
     src/providers/router.c
     src/providers/ensemble.c
@@ -1248,6 +1249,7 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_shape.c
     src/daemon/daemon_comfort_summary.c
     src/daemon/daemon_name_catch.c
+    src/daemon/daemon_thread_context.c
     src/daemon/daemon_maintenance.c
     src/daemon/daemon_lifecycle.c
     src/daemon/daemon_cron.c
@@ -3624,6 +3626,7 @@ set(HU_TEST_SOURCES
     tests/test_daemon_config_reload.c
     tests/test_daemon_identity_graph.c
     tests/test_daemon_name_catch.c
+    tests/test_daemon_thread_context.c
     tests/test_daemon_reply_fallback.c
     tests/test_reply_dedup.c
     tests/test_send_budget.c
@@ -3708,6 +3711,7 @@ set(HU_TEST_SOURCES
     tests/test_imessage_replay_guard.c
     tests/test_chatdb_cursor_repo_sqlite.c
     tests/test_reliable_circuit.c
+    tests/test_local_only.c
     tests/test_imessage_adversarial.c
     tests/test_imessage_non_allowlisted.c
     tests/test_imessage_rich_link.c

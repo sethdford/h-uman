@@ -102,4 +102,13 @@ void hu_reliable_set_clock(hu_provider_t *reliable, time_t (*now_fn)(void *), vo
  * moves to the mapped fallback model / next provider. */
 void hu_reliable_set_empty_failover(hu_provider_t *reliable, bool on);
 
+/* Is the primary on-device? Local-only prompt spans (providers/local_only.h)
+ * are stripped from every attempt on a provider that is not local. Defaults to
+ * the primary's get_name at create; from_config sets it from the configured
+ * primary name (an mlx_local instance reports "compatible"). */
+void hu_reliable_set_primary_local(hu_provider_t *reliable, bool local);
+
+/* False for NULL or a non-reliable provider. */
+bool hu_reliable_primary_is_local(const hu_provider_t *reliable);
+
 #endif /* HU_RELIABLE_H */
