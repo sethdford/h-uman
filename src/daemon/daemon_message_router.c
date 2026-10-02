@@ -30,6 +30,7 @@
 #include "human/config.h"
 #include "human/context/conversation.h"
 #include "human/context/vision.h"
+#include "human/core/local_only_guard.h"
 #include "human/core/log.h"
 #include "human/core/paths.h"
 #include "human/core/time.h"
@@ -691,6 +692,11 @@ hu_error_t hu_daemon_describe_image(hu_allocator_t *alloc, hu_agent_t *agent,
                                     size_t *desc_len) {
     if (!alloc || !agent)
         return HU_ERR_INVALID_ARGUMENT;
+    /* local_only: no image bytes leave the process — the cloud is off-limits
+     * and the local server is text-only (422s). The caller substitutes a
+     * placeholder the model can react to. */
+    if (hu_local_only_enforced())
+        return HU_ERR_NOT_SUPPORTED;
     const char *vp = NULL, *vm = NULL;
     if (hu_daemon_vision_route(cfg, model, model_len, &vp, &vm)) {
         hu_provider_t prov = {0};
@@ -707,6 +713,15 @@ hu_error_t hu_daemon_describe_image(hu_allocator_t *alloc, hu_agent_t *agent,
     }
     return hu_vision_describe_image(alloc, &agent->provider, path, path_len, model, model_len,
                                     desc_out, desc_len);
+}
+
+const char *hu_daemon_photo_placeholder(const char *text, size_t *len, char *buf, size_t cap) {
+    static const char note[] = "[They sent a photo]";
+    if (!text || !len || !buf || *len != 7 || memcmp(text, "[Photo]", 7) != 0 || cap < sizeof(note))
+        return text;
+    memcpy(buf, note, sizeof(note));
+    *len = sizeof(note) - 1;
+    return buf;
 }
 
 bool hu_daemon_tool_traffic(const struct hu_persona *p, const char *key, size_t key_len,

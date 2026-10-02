@@ -173,6 +173,11 @@ bool hu_daemon_hurt_withheld(const struct hu_persona *p, const char *key, size_t
  * buf. Anything else is returned unchanged. *len is updated. */
 const char *hu_daemon_unseen_photo(const char *text, size_t *len, char *buf, size_t cap);
 
+/* local_only: a bare "[Photo]" placeholder (an image with no caption) becomes
+ * "[They sent a photo]" in buf, so the model can react to a picture it cannot
+ * see. Anything else is returned unchanged. *len is updated. */
+const char *hu_daemon_photo_placeholder(const char *text, size_t *len, char *buf, size_t cap);
+
 /* Quality-retry draft. The quality gate used to free a reply before asking for
  * a better one; when the retry came back empty the contact got nothing (Lexi,
  * 2026-09-23). keep() takes ownership of the draft for `key` (dropping any

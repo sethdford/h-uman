@@ -1737,6 +1737,15 @@ hu_error_t hu_config_parse_json(hu_config_t *cfg, const char *content, size_t le
     if (follow_up_watcher_obj)
         parse_follow_up_watcher(a, cfg, follow_up_watcher_obj);
 
+    hu_json_value_t *privacy_obj = hu_json_object_get(root, "privacy");
+    if (privacy_obj && privacy_obj->type == HU_JSON_OBJECT) {
+        hu_json_value_t *lo = hu_json_object_get(privacy_obj, "local_only");
+        if (lo && lo->type == HU_JSON_BOOL) {
+            cfg->privacy.local_only_set = true;
+            cfg->privacy.local_only = lo->data.boolean;
+        }
+    }
+
     hu_json_value_t *reliability_obj = hu_json_object_get(root, "reliability");
     if (reliability_obj) {
         hu_error_t rel_err = parse_reliability(a, cfg, reliability_obj);

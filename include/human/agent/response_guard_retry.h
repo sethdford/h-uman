@@ -6,6 +6,7 @@
 #include "human/core/error.h"
 #include "human/provider.h"
 
+#include <stdbool.h>
 #include <stddef.h>
 
 #include "human/observer.h"
@@ -20,6 +21,10 @@ struct hu_config;
  * provider still fails or the guarded output is rejected again, and
  * `cfg` is non-NULL, tries a short cloud completion via `hu_provider_create_from_config`
  * when HU_ENABLE_CURL is defined (gemini, then openai). */
+
+/* Whether the slim retry may try its cloud fallback (gemini, openai) at all:
+ * a config to build it from, and local_only not enforced. */
+bool hu_response_guard_retry_cloud_fallback_allowed(const struct hu_config *cfg);
 
 hu_error_t hu_response_guard_retry_slim(hu_allocator_t *alloc, hu_observer_t *obs,
                                         const struct hu_config *cfg, hu_provider_t *primary,

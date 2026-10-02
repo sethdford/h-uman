@@ -65,7 +65,9 @@
 #include "human/ml/m3_frontier_adapter.h"
 #endif
 #include "human/agent/choreography.h"
+#include "human/agent/local_only_route.h"
 #include "human/channels/imessage_caps.h"
+#include "human/core/local_only_guard.h"
 #include "human/daemon/agent_facade.h"
 #include "human/daemon/briefing.h"
 #include "human/daemon/config_reload.h"
@@ -1870,8 +1872,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
         }
     }
 
-    /* Hybrid routing: create a lightweight cloud provider for classification/scoring
-     * when the primary provider is a slow local model (llm_decides mode). */
+    /* Classify provider for the director / emotion / double-text (llm_decides). */
     {
         bool any_llm_decides = false;
         if (config) {
@@ -1886,23 +1887,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 }
             }
         }
-        if (any_llm_decides && !g_classify_provider_ok) {
-            const char *gemini_url =
-                config ? hu_config_get_provider_base_url(config, "gemini") : NULL;
-            size_t gemini_url_len = gemini_url ? strlen(gemini_url) : 0;
-            hu_error_t cp_err = hu_provider_create(alloc, "gemini", 6, NULL, 0, gemini_url,
-                                                   gemini_url_len, &g_classify_provider);
-            if (cp_err == HU_OK) {
-                g_classify_provider_ok = true;
-                hu_log_info("human", NULL,
-                            "hybrid routing: classify provider ready (gemini flash-lite)");
-            } else {
-                hu_log_error("human", NULL,
-                             "hybrid routing: classify provider failed (%s), "
-                             "classifications will be skipped",
-                             hu_error_string(cp_err));
-            }
-        }
+        hu_daemon_classify_provider_init(alloc, config, agent, any_llm_decides);
     }
 
 #ifdef HU_HAS_CRON
@@ -2821,6 +2806,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 } else if (media_desc) {
                                     alloc->free(alloc->ctx, media_desc, media_desc_len + 1);
                                 }
+                            } else if (hu_local_only_enforced()) { /* no image bytes out */
+                                content_to_add = hu_daemon_photo_placeholder(
+                                    content_to_add, &mlen, augmented, sizeof(augmented));
                             } else if (agent->provider.vtable->supports_vision &&
                                        agent->provider.vtable->supports_vision(
                                            agent->provider.ctx)) {
@@ -6320,6 +6308,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 }
                 {
                     mr_cfg = hu_model_router_default_config();
+                    hu_local_only_router_defaults(&mr_cfg, agent->model_name,
+                                                  agent->model_name_len);
                     if (config && config->agent.mr_reflexive_model) {
                         mr_cfg.reflexive_model = config->agent.mr_reflexive_model;
                         mr_cfg.reflexive_model_len = strlen(config->agent.mr_reflexive_model);
@@ -7082,7 +7072,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                           agent->turn_model_len == mr_cfg.mlx_local_model_len &&
                                           strncmp(agent->turn_model, mr_cfg.mlx_local_model,
                                                   mr_cfg.mlx_local_model_len) == 0;
-                        if (!local_fallback_done && used_local &&
+                        if (!local_fallback_done && used_local && !hu_local_only_enforced() &&
                             (err != HU_OK || !response || response_len == 0)) {
                             local_fallback_done = true;
                             size_t fb_len = 0;

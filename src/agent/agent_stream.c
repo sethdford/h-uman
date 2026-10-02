@@ -12,6 +12,7 @@
 #include "human/agent/hard_moment.h"
 #include "human/agent/humanness.h"
 #include "human/agent/input_guard.h"
+#include "human/agent/local_only_route.h"
 #include "human/agent/memory_loader.h"
 #include "human/agent/model_router.h"
 #include "human/agent/outcomes.h"
@@ -1339,6 +1340,7 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             turn_model_len = agent->turn_model_len;
         } else if (early_tier >= HU_TIER_ANALYTICAL) {
             hu_model_router_config_t mr_cfg = hu_model_router_default_config();
+            hu_local_only_router_defaults(&mr_cfg, agent->model_name, agent->model_name_len);
             const char *rel = NULL;
             size_t rel_len = 0;
             if (agent->relationship.stage >= HU_REL_TRUSTED) {

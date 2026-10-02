@@ -35,6 +35,7 @@ static const char *const hu_config_top_keys[] = {
      * this entry the validator warns "unknown key" for a block it does read. */
     "follow_up_watcher",
     "reliability",
+    "privacy", /* privacy.local_only — providers/local_only_config.h */
     "router",
     "ensemble",
     "diagnostics",

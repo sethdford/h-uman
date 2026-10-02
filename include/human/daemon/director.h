@@ -57,6 +57,11 @@ const char *hu_director_form_name(hu_director_form_t form);
  * HU_DIRECTOR_FORMS is shadow or live. Length written, 0 if it did not fit. */
 size_t hu_daemon_director_system_prompt(char *buf, size_t cap);
 
+/* Set up g_classify_provider (director, emotion detection, double-text) when
+ * any channel runs llm_decides. Idempotent once it succeeds. */
+void hu_daemon_classify_provider_init(hu_allocator_t *alloc, const struct hu_config *config,
+                                      hu_agent_t *agent, bool any_llm_decides);
+
 /* Real-time emotion detection: test builds use heuristic-only (no LLM), production uses hybrid
  * routing via g_classify_provider when available. */
 hu_emotional_state_t hu_daemon_detect_emotion(hu_allocator_t *alloc, hu_agent_t *agent,
