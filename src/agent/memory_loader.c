@@ -116,6 +116,49 @@ static void append_contact_wiki(hu_memory_loader_t *loader, hu_gate_mode_t mode,
 /* HU_INSIGHT_MAX_ITEMS / MAX_BYTES / MIN_CONFIDENCE live in memory_loader.h so
  * the overuse scan (daemon_insight_overuse.c) re-renders exactly this block. */
 
+#ifdef HU_ENABLE_SQLITE
+/* Contact scope (2026-10-01): a recalled row stored for another contact is
+ * dropped; global rows (no session: facts about Seth) stay. The semantic index
+ * keeps only key and text, so the owner is read back from memories by key; a
+ * key no longer stored (an orphaned vector) is dropped too. Returns the new
+ * count; the array is shrunk to it so the caller's count-sized free matches. */
+static size_t keep_contact_scope(hu_memory_loader_t *loader, hu_memory_entry_t **entries,
+                                 size_t count, const char *sid, size_t sid_len) {
+    if (!sid || sid_len == 0 || !*entries || count == 0)
+        return count;
+    hu_memory_entry_t *e = *entries;
+    size_t keep = 0;
+    for (size_t i = 0; i < count; i++) {
+        char owner[128];
+        const char *key = e[i].key && e[i].key_len ? e[i].key : e[i].id;
+        size_t key_len = e[i].key && e[i].key_len ? e[i].key_len : e[i].id_len;
+        if (key &&
+            hu_sqlite_memory_session_of(loader->memory, key, key_len, owner, sizeof(owner)) &&
+            hu_retrieval_session_in_scope(owner, strlen(owner), sid, sid_len)) {
+            if (keep != i)
+                e[keep] = e[i];
+            keep++;
+        } else {
+            hu_memory_entry_free_fields(loader->alloc, &e[i]);
+        }
+    }
+    if (keep == count)
+        return count;
+    if (keep == 0) {
+        loader->alloc->free(loader->alloc->ctx, e, count * sizeof(hu_memory_entry_t));
+        *entries = NULL;
+        return 0;
+    }
+    hu_memory_entry_t *shrunk = (hu_memory_entry_t *)loader->alloc->realloc(
+        loader->alloc->ctx, e, count * sizeof(hu_memory_entry_t), keep * sizeof(hu_memory_entry_t));
+    if (shrunk)
+        *entries = shrunk;
+    else
+        memset(&e[keep], 0, (count - keep) * sizeof(hu_memory_entry_t)); /* keep the size honest */
+    return shrunk ? keep : count;
+}
+#endif
+
 #ifdef HU_ENABLE_SQLITE /* only the SQLite build renders the block (see below) */
 static const char k_insight_header[] =
     "### What you actually remember about them (weave in naturally, never recite):\n";
@@ -401,6 +444,7 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
             res.scores = NULL;
 
 #ifdef HU_ENABLE_SQLITE
+            count = keep_contact_scope(loader, &entries, count, session_id, session_id_len);
             if (loader->memory && loader->memory->ctx && count > 0) {
                 sqlite3 *sl_db = hu_sqlite_memory_get_db(loader->memory);
                 if (sl_db) {

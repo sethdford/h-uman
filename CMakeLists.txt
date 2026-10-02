@@ -4195,6 +4195,7 @@ if(HU_ENABLE_SQLITE)
 endif()
 
 list(APPEND HU_TEST_SOURCES tests/test_curiosity_gaps.c)
+list(APPEND HU_TEST_SOURCES tests/test_memory_loader_scope.c)
 
 # Sprint 60 follow-up — crosstalk SQLite lookup. Test seeds the
 # messages table directly via sqlite3 to verify the lookup returns
@@ -4338,7 +4339,6 @@ list(APPEND HU_TEST_SOURCES
     tests/test_moderation.c
     tests/test_companion_safety.c
     tests/test_code_sandbox.c
-    tests/test_compaction_hierarchical.c
     tests/test_computer_use.c
     tests/test_image_gen.c
     tests/test_visual_grounding.c

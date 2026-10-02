@@ -108,6 +108,12 @@ double hu_retrieval_parse_timestamp_hours(const char *timestamp, size_t timestam
 hu_error_t hu_retrieval_check_namespace(const hu_retrieval_options_t *opts);
 bool hu_retrieval_entry_in_contact_scope(const hu_memory_entry_t *e, const char *contact_id,
                                          size_t contact_id_len);
+/* Contact scope for a recalled memory owned by `owner` (its session_id): in
+ * scope when it is global (empty owner), the same contact, or when there is
+ * no contact to scope to. Pure. */
+bool hu_retrieval_session_in_scope(const char *owner, size_t owner_len, const char *contact,
+                                   size_t contact_len);
+
 hu_error_t hu_retrieval_filter_by_namespace(hu_allocator_t *alloc, hu_retrieval_result_t *r,
                                             const hu_retrieval_options_t *opts);
 
