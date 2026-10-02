@@ -137,10 +137,10 @@ static const char *const hu_memory_keys[] = {
 };
 static const size_t hu_memory_keys_len = sizeof(hu_memory_keys) / sizeof(hu_memory_keys[0]);
 
+/* Only the keys parse_ensemble reads; `routing` had no parser or config field. */
 static const char *const hu_ensemble_keys[] = {
     "providers",
     "strategy",
-    "routing",
 };
 static const size_t hu_ensemble_keys_len = sizeof(hu_ensemble_keys) / sizeof(hu_ensemble_keys[0]);
 
