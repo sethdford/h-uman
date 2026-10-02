@@ -7,7 +7,10 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "test_framework.h"
+#include "test_tmpdir.h"
 #include <sqlite3.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static const char *schema_sql = "CREATE TABLE handle ("
@@ -689,6 +692,43 @@ static void test_chatdb_latest_sent_rowid_query(void) {
     sqlite3_close(db);
 }
 
+/* The `imsg react` fallback exits 0 without reacting (it takes a chat, not a
+ * message): on 2026-09-24 the daemon logged 12 tapbacks "ok" and chat.db held
+ * 5 outgoing reactions that day, Seth's included, so contacts got silence.
+ * The fallback now has to show a new reaction of ours on the target message. */
+static void test_chatdb_my_reaction_count_reads_the_real_db(void) {
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "reaction_chat.db"));
+    remove(path);
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(sqlite3_open(path, &db), SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_exec(db, schema_sql, NULL, NULL, NULL), SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_exec(db, seed_sql, NULL, NULL, NULL), SQLITE_OK);
+    const char *prev = getenv("HU_CHATDB");
+    char saved[512] = {0};
+    if (prev)
+        snprintf(saved, sizeof(saved), "%s", prev);
+    setenv("HU_CHATDB", path, 1);
+
+    HU_ASSERT_EQ(hu_imessage_my_reaction_count(1), (int64_t)0); /* MSG-001: none yet */
+    HU_ASSERT_EQ(hu_imessage_my_reaction_count(2), (int64_t)0); /* MSG-003 is THEIR tapback */
+    HU_ASSERT_EQ(sqlite3_exec(db,
+                              "INSERT INTO message (guid, handle_id, is_from_me, "
+                              "associated_message_type, associated_message_guid) VALUES "
+                              "('MSG-900', 1, 1, 2000, 'p:0/MSG-001');",
+                              NULL, NULL, NULL),
+                 SQLITE_OK);
+    HU_ASSERT_EQ(hu_imessage_my_reaction_count(1), (int64_t)1);
+    HU_ASSERT_EQ(hu_imessage_my_reaction_count(2), (int64_t)0);
+
+    if (saved[0])
+        setenv("HU_CHATDB", saved, 1);
+    else
+        unsetenv("HU_CHATDB");
+    sqlite3_close(db);
+    remove(path);
+}
+
 static void test_chatdb_voice_msg_has_attachment_flag(void) {
     sqlite3 *db = open_fixture();
     HU_ASSERT_NOT_NULL(db);
@@ -1149,6 +1189,7 @@ void run_imessage_chatdb_fixture_tests(void) {
     HU_RUN_TEST(test_chatdb_read_receipt_query);
     HU_RUN_TEST(test_chatdb_gif_tapback_count_query);
     HU_RUN_TEST(test_chatdb_latest_sent_rowid_query);
+    HU_RUN_TEST(test_chatdb_my_reaction_count_reads_the_real_db);
     HU_RUN_TEST(test_chatdb_voice_msg_has_attachment_flag);
     HU_RUN_TEST(test_chatdb_inline_reply_guid_lookup);
     HU_RUN_TEST(test_chatdb_voice_message_coalesce_text);
