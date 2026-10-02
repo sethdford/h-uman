@@ -30,6 +30,15 @@ static hu_contact_profile_t *g_contact;    /* the sender's persona profile, or N
 static const hu_reactive_turn_ctx_t *g_rt; /* channel history, or NULL */
 static uint32_t g_max_chars = 200;
 
+/* A failed assert returns early and can leave these pointing at a dead frame;
+ * every test that sets them starts from a clean slate. */
+static void vf_reset(void) {
+    g_mem = NULL;
+    g_contact = NULL;
+    g_rt = NULL;
+    g_max_chars = 200;
+}
+
 static void run(const char *mode, const char *allow, const char *inbound, vf_run_t *r) {
     hu_allocator_t alloc = hu_system_allocator();
     static hu_persona_t persona;
@@ -206,6 +215,7 @@ static int64_t count_rows(hu_memory_t *mem, const char *where) {
  * self-test is not a memo the contact heard; it must not start the gap. A real
  * memo still must. */
 static void test_voice_first_self_test_does_not_start_the_spacing_gap(void) {
+    vf_reset();
     hu_allocator_t alloc = hu_system_allocator();
     hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
     HU_ASSERT_NOT_NULL(mem.ctx);
@@ -232,6 +242,7 @@ static const char k_story[] = "We went to the lake this morning with the kids. E
 /* HU_VOICE_TRIGGERS_V2 unset or off: the decision, context and length budget
  * are exactly what voice-first decides today, and nothing new is logged. */
 static void test_voice_triggers_v2_off_is_byte_identical(void) {
+    vf_reset();
     hu_allocator_t alloc = hu_system_allocator();
     hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
     g_mem = &mem;
@@ -261,6 +272,7 @@ static void test_voice_triggers_v2_off_is_byte_identical(void) {
 
 /* SHADOW evaluates v2 and records what it would do, but the turn is unchanged. */
 static void test_voice_triggers_v2_shadow_does_not_change_the_decision(void) {
+    vf_reset();
     hu_allocator_t alloc = hu_system_allocator();
     hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
     g_mem = &mem;
@@ -293,6 +305,7 @@ static void test_voice_triggers_v2_shadow_does_not_change_the_decision(void) {
 
 /* LIVE lets a v2 reason choose voice: on the family list the turn writes a memo. */
 static void test_voice_triggers_v2_live_writes_a_memo_for_a_story(void) {
+    vf_reset();
     hu_allocator_t alloc = hu_system_allocator();
     hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
     g_mem = &mem;
@@ -318,6 +331,7 @@ static void test_voice_triggers_v2_live_writes_a_memo_for_a_story(void) {
 
 /* Two v2 memos to one contact this week: the third story stays a text. */
 static void test_voice_triggers_v2_live_weekly_cap_per_contact(void) {
+    vf_reset();
     hu_allocator_t alloc = hu_system_allocator();
     hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
     g_mem = &mem;
@@ -369,6 +383,7 @@ static void test_voice_first_secs_since_owner_reply(void) {
 /* A close contact, first reply in 4 days: v2 LIVE picks long_gap_reconnect
  * from the turn's own channel history. A contact who is not close does not. */
 static void test_voice_triggers_v2_live_reconnects_with_a_close_contact(void) {
+    vf_reset();
     hu_channel_history_entry_t h[2];
     memset(h, 0, sizeof(h));
     h[0].from_me = true;
