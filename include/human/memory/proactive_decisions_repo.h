@@ -174,6 +174,16 @@ hu_error_t hu_proactive_decisions_repo_unprompted_sent_since(sqlite3 *db, const 
 hu_error_t hu_proactive_decisions_repo_unanswered(sqlite3 *db, const char *contact, int64_t now,
                                                   int64_t *out_n, int64_t *out_last_send_ts);
 
+/* Trigger of the row the daemon writes when an outbound text failed on every
+ * channel path (src/daemon/daemon_send_failure.c). Distinct from
+ * 'proactive_send' so the circuit breaker's counts are unchanged. */
+#define HU_PROACTIVE_TRIGGER_OUTBOUND_SEND "outbound_send"
+
+/* Newest final send failure to `contact` (trigger outbound_send, reason
+ * send_failed). *have is false when there is none. */
+hu_error_t hu_proactive_decisions_repo_last_send_failure_ts(sqlite3 *db, const char *contact,
+                                                            int64_t *out_ts, bool *have);
+
 #ifdef __cplusplus
 }
 #endif
