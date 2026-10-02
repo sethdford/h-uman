@@ -1,6 +1,23 @@
+#include "human/memory/retrieval/strategy_learner.h"
+
+#if HU_IS_TEST
+static int s_signal_override = -1;
+void hu_strategy_signal_set_mode_for_test(int mode) {
+    s_signal_override = mode;
+}
+#endif
+
+hu_gate_mode_t hu_strategy_signal_mode(void) {
+#if HU_IS_TEST
+    if (s_signal_override >= 0)
+        return (hu_gate_mode_t)s_signal_override;
+#endif
+    return hu_gate_mode_from_env("HU_STRATEGY_SIGNAL", HU_GATE_OFF);
+}
+
 #ifdef HU_ENABLE_SQLITE
 
-#include "human/memory/retrieval/strategy_learner.h"
+#include "human/core/log.h"
 #include <ctype.h>
 #include <string.h>
 
@@ -163,6 +180,27 @@ hu_retrieval_strategy_t hu_strategy_learner_recommend(hu_strategy_learner_t *lea
     return result;
 }
 
-#endif /* HU_ENABLE_SQLITE */
+/* DEF-17: the gate-aware entry points the memory loader calls. */
+hu_retrieval_strategy_t hu_strategy_learner_recommend_gated(hu_strategy_learner_t *learner,
+                                                            hu_query_category_t category) {
+    hu_gate_mode_t mode = hu_strategy_signal_mode();
+    if (mode == HU_GATE_LIVE)
+        return HU_RSTRAT_HYBRID; /* no evidence-backed override: let the analyzer decide */
+    hu_retrieval_strategy_t learned = hu_strategy_learner_recommend(learner, category);
+    if (mode == HU_GATE_SHADOW)
+        hu_log_info("strategy_learner", NULL,
+                    "[HU_STRATEGY_SIGNAL shadow] category=%d learned=%d overrides_default=%d",
+                    (int)category, (int)learned, learned != HU_RSTRAT_HYBRID);
+    return learned;
+}
 
-typedef int hu_strategy_learner_empty_unit_guard;
+hu_error_t hu_strategy_learner_record_gated(hu_strategy_learner_t *learner,
+                                            hu_query_category_t category,
+                                            hu_retrieval_strategy_t strategy, bool success,
+                                            int64_t now_ts) {
+    if (hu_strategy_signal_mode() == HU_GATE_LIVE)
+        return HU_OK; /* "returned rows" is not a retrieval outcome — write nothing */
+    return hu_strategy_learner_record(learner, category, strategy, success, now_ts);
+}
+
+#endif /* HU_ENABLE_SQLITE */
