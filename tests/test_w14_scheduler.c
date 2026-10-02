@@ -24,11 +24,13 @@
 #include <string.h>
 #include <time.h>
 
+#ifdef HU_ENABLE_SQLITE
 static hu_allocator_t g_alloc;
 static hu_allocator_t *A(void) {
     g_alloc = hu_system_allocator();
     return &g_alloc;
 }
+#endif
 
 /* ── Shared test fixtures ─────────────────────────────────────────────── */
 /* `clear_w14_env` is used by the probe tests below (which run without
