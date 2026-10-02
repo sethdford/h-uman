@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Measure how long Seth's OWN texts are, per persona contact, and store it on
-the contact profile as reply_chars_p90.
+the contact profile as reply_chars_p90 (and reply_chars_p50, which
+HU_LENGTH_POLICY uses as the floor of the reply cap).
 
 Why (2026-09-26, the Lexi incident): the daemon capped 1:1 replies at the
 contact's message length times ~2-2.7 with a 15-char floor, and the prompt
@@ -31,6 +32,7 @@ sys.path.insert(0, HERE)
 import eval_conversation_quality as cq  # noqa: E402
 
 FIELD = "reply_chars_p90"
+FIELD_P50 = "reply_chars_p50"
 
 
 def percentile(values, q):
@@ -80,8 +82,9 @@ def main(argv=None):
             print(f"{name:24} n={r['n']:4}  {note}")
             continue
         print(f"{name:24} n={r['n']:4}  p50={r['p50']:4}  p90={r['p90']:4}  (was {old})")
-        if old != r["p90"]:
+        if old != r["p90"] or contacts[key].get(FIELD_P50) != r["p50"]:
             contacts[key][FIELD] = r["p90"]
+            contacts[key][FIELD_P50] = r["p50"]
             changed += 1
 
     if not a.write:

@@ -70,6 +70,14 @@ hu_quality_score_t hu_conversation_evaluate_quality(const char *response, size_t
                                                     const hu_channel_history_entry_t *entries,
                                                     size_t count, uint32_t max_chars);
 
+/* As above. cap_from_stats: max_chars came from HU_LENGTH_POLICY=live for a
+ * contact with measured reply stats (agent->response_limit_tight != 0); only
+ * then may a reply inside the cap keep full brevity marks. */
+hu_quality_score_t
+hu_conversation_evaluate_quality_capped(const char *response, size_t response_len,
+                                        const hu_channel_history_entry_t *entries, size_t count,
+                                        uint32_t max_chars, bool cap_from_stats);
+
 /* Honesty guardrail: detect "did you do X?" questions and inject honest context.
  * Returns a context string if an honesty injection is needed, NULL otherwise.
  * Caller owns returned string; free with strlen(result) + 1 bytes. */
@@ -312,6 +320,9 @@ size_t hu_conversation_split_response(hu_allocator_t *alloc, const char *respons
  * Use for max_response_chars to match response length within ~1.5x ratio. */
 int hu_conversation_max_response_chars(size_t incoming_len);
 
+/* The configured upper clamp of the two functions above (behavior.max_response_chars). */
+uint32_t hu_conversation_max_response_chars_ceiling(void);
+
 /* Like hu_conversation_max_response_chars, but scales length with relationship warmth
  * (session stage + optional persona contact hints). Group threads should pass contact=NULL
  * and rely on the caller forcing plain max for is_group. */
@@ -341,6 +352,14 @@ size_t hu_conversation_calibrate_length_for_contact(const char *last_msg, size_t
                                                     const hu_contact_profile_t *contact,
                                                     hu_relationship_stage_t session_stage,
                                                     char *buf, size_t cap);
+
+/* The no-history calibration with a known turn cap: when turn_cap > 0 the
+ * "Target" it states is that cap (the RESPONSE LIMIT under HU_LENGTH_POLICY);
+ * 0 keeps today's formula. */
+size_t hu_conversation_calibrate_length_capped(const char *last_msg, size_t last_msg_len,
+                                               bool is_group, const hu_contact_profile_t *contact,
+                                               hu_relationship_stage_t session_stage,
+                                               uint32_t turn_cap, char *buf, size_t cap);
 
 /* ── Texting style analysis ───────────────────────────────────────────── */
 
