@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # scripts/chat_template_rows.py
 #
-# Renders preference rows ({prompt, chosen, rejected}) through the SERVING
-# model's chat template, so a persona adapter trains on the exact token stream
-# production feeds it.
+# Renders preference rows ({prompt, chosen, rejected}) and SFT rows
+# ({prompt, completion}) through the SERVING model's chat template, so a
+# persona adapter trains on the exact token stream production feeds it.
 #
 # WHY (2026-10-01): production renders every GLM-4.5-Air prompt with
 #   tokenizer.apply_chat_template(messages, add_generation_prompt=True,
@@ -175,6 +175,39 @@ def render_completion(tokenizer, messages, prompt_text, content, end_of_turn=END
     return full[len(prompt_text):] + end_of_turn
 
 
+def is_sft_row(row):
+    """{prompt, completion} (mlx_lm's completions format) rather than a
+    preference pair. The nightly SFT corpus (seth-sft-20260919) is this shape."""
+    return "completion" in row and "chosen" not in row
+
+
+def format_completion_row(tokenizer, row, system=None, end_of_turn=END_OF_TURN):
+    """One raw {prompt, completion} row -> {prompt, completion} rendered exactly
+    as production serves it, with the end-of-turn marker as the completion's
+    last token. An empty completion is refused: it would teach an immediate
+    end-of-turn, the failure being fixed."""
+    messages = row_messages(row, system=system)
+    prompt_text = render_prompt(tokenizer, messages)
+    if not prompt_text.startswith(PRODUCTION_PREFIX) or not prompt_text.endswith(PRODUCTION_SUFFIX):
+        raise RowRejected("rendered prompt does not match the production prefix/suffix")
+    out = {"prompt": prompt_text,
+           "completion": render_completion(tokenizer, messages, prompt_text,
+                                           row.get("completion"), end_of_turn=end_of_turn)}
+    for k, v in row.items():
+        if k not in ("prompt", "completion", "messages", "system"):
+            out[k] = v
+    return out
+
+
+def format_row(tokenizer, row, system=None, end_of_turn=END_OF_TURN):
+    fmt = format_completion_row if is_sft_row(row) else format_pair
+    return fmt(tokenizer, row, system=system, end_of_turn=end_of_turn)
+
+
+def reply_sides(row):
+    return ("completion",) if is_sft_row(row) else ("chosen", "rejected")
+
+
 def format_pair(tokenizer, row, system=None, end_of_turn=END_OF_TURN):
     """One raw {prompt, chosen, rejected} row -> one templated row.
 
@@ -225,7 +258,7 @@ def check_trainer_tokenization(tokenizer, row, max_seq_length, end_of_turn=END_O
     eot = tokenizer.convert_tokens_to_ids(end_of_turn)
     p_ids = token_ids(tokenizer, row["prompt"])
     longest = 0
-    for side in ("chosen", "rejected"):
+    for side in reply_sides(row):
         ids = token_ids(tokenizer, row["prompt"] + row[side])
         if ids[:1] != [gmask] or ids.count(gmask) != 1:
             raise RowRejected("encode() did not yield exactly one leading [gMASK]", side)
@@ -247,7 +280,7 @@ def is_templated_row(row, end_of_turn=END_OF_TURN):
             and row["prompt"].startswith(PRODUCTION_PREFIX)
             and row["prompt"].endswith(PRODUCTION_SUFFIX)
             and all(isinstance(row.get(k), str) and row[k].endswith(end_of_turn)
-                    for k in ("chosen", "rejected")))
+                    for k in reply_sides(row)))
 
 
 def templated_report(jsonl_path):
@@ -289,7 +322,7 @@ def convert_file(tokenizer, src, dst, max_seq_length, system=None, end_of_turn=E
                 continue
             row = json.loads(line)
             try:
-                out = format_pair(tokenizer, row, system=system, end_of_turn=end_of_turn)
+                out = format_row(tokenizer, row, system=system, end_of_turn=end_of_turn)
                 longest = max(longest, check_trainer_tokenization(
                     tokenizer, out, max_seq_length, end_of_turn=end_of_turn))
             except RowRejected as e:
@@ -297,7 +330,7 @@ def convert_file(tokenizer, src, dst, max_seq_length, system=None, end_of_turn=E
                 reasons[e.key] = reasons.get(e.key, 0) + 1
                 continue
             p = len(token_ids(tokenizer, out["prompt"]))
-            total = len(token_ids(tokenizer, out["prompt"] + out["chosen"]))
+            total = len(token_ids(tokenizer, out["prompt"] + out[reply_sides(out)[0]]))
             prompt_toks.append(p)
             reply_share.append(round((total - p) / total, 4))
             fout.write(json.dumps(out, ensure_ascii=False) + "\n")

@@ -195,12 +195,19 @@ fi
 if [ "$DRY_RUN" = "1" ]; then
   say "DRY RUN -- would train into $ADAPTER"
   say "corpus: $(wc -l < "$DATA_DIR/train.jsonl") train / $(wc -l < "$DATA_DIR/valid.jsonl") valid"
-  if [ "$TRAINER" = "mlx_tune" ] && [ "$IS_GLM" = "1" ]; then
+  if [ "$IS_GLM" = "1" ] && { [ "$TRAINER" = "mlx_tune" ] || \
+       { [ "$TRAINER" = "mlx_lm" ] && [ "${HU_TRAIN_ALLOW_UNTEMPLATED:-0}" != "1" ]; }; }; then
     TMPL_PREVIEW=$(mktemp -d "${TMPDIR:-/tmp}/chat-template-preview.XXXXXX")
     say "chat-template preview (tokenizer files only) -> $TMPL_PREVIEW"
     "$MLXTUNE_PY" "$(dirname "$0")/chat_template_rows.py" --in-dir "$DATA_DIR" \
         --out-dir "$TMPL_PREVIEW" --model "$MODEL_ID" --max-seq-length "${MAX_SEQ:-2048}" \
       || { rm -rf "$TMPL_PREVIEW"; die "chat-template preview failed -- a real run would refuse too"; }
+    if [ "$TRAINER" = "mlx_lm" ]; then
+      # The SFT trainer's own dataset path + contract check, tokenizer files only.
+      "$TRAIN_PY" "$(dirname "$0")/mlx_lm_sft_templated.py" --check-only --data "$TMPL_PREVIEW" \
+          --model "$MODEL_ID" --max-seq-length "${MAX_SEQ:-2048}" \
+        || { rm -rf "$TMPL_PREVIEW"; die "templated SFT contract check failed -- a real run would refuse too"; }
+    fi
     rm -rf "$TMPL_PREVIEW"
   fi
   if [ "$TRAINER" = "mlx_tune" ]; then
@@ -343,7 +350,7 @@ if [ "$UPWEIGHT_DEPTH" = "1" ]; then
   say "depth upweight done -- training from $CONFIG (stats: $DEPTH_DIR/train.upweight_stats.json)"
 fi
 
-# --- chat-template staging (mlx_tune on GLM) -- ALWAYS the LAST data step -------
+# --- chat-template staging (mlx_tune / mlx_lm on GLM) -- ALWAYS the LAST data step -
 # The rebalance and upweight passes above read reply TEXT (casing, emoji,
 # length); they must see raw replies, so templating runs after them. Renders
 # every row exactly as mlx-server.py's prepare_prompt_lm would and appends the
@@ -352,7 +359,15 @@ fi
 # skipped or failed step here cannot silently produce an untemplated adapter.
 # HU_TRAIN_SYSTEM_PROMPT_FILE: optional system prompt for rows that carry none
 # (the v6/v6.1 corpora carry none; production sends the persona prompt).
-if [ "$TRAINER" = "mlx_tune" ] && [ "$IS_GLM" = "1" ]; then
+# mlx_lm SFT (2026-10-02): the nightly SFT candidate used stock mlx_lm.lora,
+# which templates {prompt, completion} without enable_thinking=False, trains
+# `<think></think>` as targets and ends on its pad id 0 -- never a stop token.
+# Its {prompt, completion} rows are templated here too and trained by
+# scripts/mlx_lm_sft_templated.py. HU_TRAIN_ALLOW_UNTEMPLATED=1 restores the
+# stock path (the rollback), recorded in the log.
+SFT_TEMPLATED=0
+if [ "$IS_GLM" = "1" ] && { [ "$TRAINER" = "mlx_tune" ] || \
+     { [ "$TRAINER" = "mlx_lm" ] && [ "${HU_TRAIN_ALLOW_UNTEMPLATED:-0}" != "1" ]; }; }; then
   SRC_DIR=$(awk '/^data:/{print $2; exit}' "$CONFIG" 2>/dev/null)
   TMPL_DIR="${SRC_DIR}-tmpl-${STAMP}"
   say "chat-template staging: $SRC_DIR -> $TMPL_DIR (model $MODEL_ID, max_seq ${MAX_SEQ:-2048})"
@@ -365,7 +380,10 @@ if [ "$TRAINER" = "mlx_tune" ] && [ "$IS_GLM" = "1" ]; then
   [ "$TMPL_RC" -eq 0 ] || die "chat-template staging failed (rc=$TMPL_RC, see $LOG) -- refusing to train on raw rows"
   sed "s|^data:.*|data: $TMPL_DIR|" "$CONFIG" > "$TMPL_DIR/config.yaml"
   CONFIG="$TMPL_DIR/config.yaml"
+  [ "$TRAINER" = "mlx_lm" ] && SFT_TEMPLATED=1
   say "chat-template staging done -- training from $CONFIG (manifest: $TMPL_DIR/chat_template_manifest.json)"
+elif [ "$IS_GLM" = "1" ] && [ "$TRAINER" = "mlx_lm" ]; then
+  say "HU_TRAIN_ALLOW_UNTEMPLATED=1 -- mlx_lm SFT on RAW rows (stock template, no end-of-turn target)"
 fi
 
 # SimPO's reward is a per-token log-prob (|r_c - r_r| ~ 0.1-1 nat), so its beta
@@ -386,7 +404,13 @@ say "log      -> $LOG"
 # 3.0.0 -- `train_mode: orpo` in YAML produced "Unsupported data format for SFT
 # training", and `beta: 0.05` would have silently trained at 0.1.
 # ORPO_BETA comes from --beta (or its default) at the top; do NOT reassign it here.
-if [ "$TRAINER" = "mlx_lm" ]; then
+if [ "$TRAINER" = "mlx_lm" ] && [ "$SFT_TEMPLATED" = "1" ]; then
+  say "trainer: mlx_lm.lora (SFT) on chat-templated rows via mlx_lm_sft_templated.py"
+  # HU_MLX_LM_ALLOW_LOAD=1: the driver refuses to load the base otherwise --
+  # only this guarded sequence (prod stopped + reaped + headroom-checked) loads.
+  HU_MLX_LM_ALLOW_LOAD=1 "$TRAIN_PY" "$(dirname "$0")/mlx_lm_sft_templated.py" \
+      -c "$CONFIG" --adapter-path "$ADAPTER" 2>&1 | tee "$LOG"
+elif [ "$TRAINER" = "mlx_lm" ]; then
   say "trainer: mlx_lm.lora (SFT) -- the path that produced the live v5 adapter"
   "$TRAIN_PY" -m mlx_lm.lora -c "$CONFIG" --adapter-path "$ADAPTER" 2>&1 | tee "$LOG"
 elif [ "$TRAINER" = "mlx_tune" ]; then
@@ -418,6 +442,13 @@ if [ "$TRAINER" = "mlx_lm_lora" ] || [ "$TRAINER" = "mlx_tune" ]; then
   grep -qiE "Training Mode:.*${TRAIN_MODE:-dpo}" "$LOG" \
     || die "trainer did not resolve mode=${TRAIN_MODE:-dpo} (see $LOG)"
   say "confirmed: trainer resolved mode=${TRAIN_MODE:-dpo}, beta=$ORPO_BETA"
+fi
+# Same assert-don't-trust for the templated SFT path: the driver prints the
+# contract line only after checking every row it is about to train.
+if [ "$SFT_TEMPLATED" = "1" ]; then
+  grep -q "template contract holds on" "$LOG" \
+    || die "templated SFT ran without its tokenization contract line (see $LOG)"
+  say "confirmed: SFT trained on chat-templated rows (contract line present)"
 fi
 
 # --- verify the artifact BEFORE spending a smoke run on it --------------------

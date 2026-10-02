@@ -360,6 +360,23 @@ run_mlxtune_candidate_stage() {
         else
             log "mlx-tune candidate stage: WARNING no train log matching train-glm-${mlxtune_tag}-*.log — cannot check that training learned"
         fi
+        # Was it trained on the production chat template? (2026-10-02) Both
+        # templated trainers -- mlx_tune_train.py (ORPO/SimPO/KTO) and
+        # mlx_lm_sft_templated.py (SFT) -- print "template contract holds on N"
+        # only after checking the rows they are about to train: production's
+        # `[gMASK]...<|assistant|>\n<think></think>` prompt and an end-of-turn
+        # target. A log without it is an untemplated candidate, the shape that
+        # ends ~13-18% of replies immediately; scoring it would only measure the
+        # old bug. HU_TRAIN_ALLOW_UNTEMPLATED=1 (the rollback) scores it anyway.
+        if [[ -n "$train_log" ]] && ! grep -a -q "template contract holds on" "$train_log"; then
+            if [[ "${HU_TRAIN_ALLOW_UNTEMPLATED:-0}" == "1" ]]; then
+                log "mlx-tune candidate stage: WARNING HU_TRAIN_ALLOW_UNTEMPLATED=1 — candidate trained WITHOUT the production chat template; scoring anyway"
+            else
+                log "mlx-tune candidate stage: candidate was NOT trained on the production chat template (no 'template contract holds on' line in $train_log) — staged at $candidate_dir, NOT scored"
+                printf '%s\n' "no template contract line in $train_log" > "$candidate_dir/UNTEMPLATED"
+                return 0
+            fi
+        fi
     else
         log "mlx-tune candidate stage: adapter FAILED the real-adapter guard: $why"
         log "mlx-tune candidate stage: quarantining $candidate_dir -> $candidate_dir.rejected-$(date +%s)"
