@@ -45,7 +45,7 @@
  * branch in route_per_turn so it doesn't crash. */
 static void route_per_turn_symbol_is_linkable(void) {
     void (*sym)(hu_agent_t *) = &hu_agent_m3_route_per_turn;
-    HU_ASSERT_NOT_NULL((void *)sym);
+    HU_ASSERT_TRUE(sym != NULL); /* ISO C has no function-to-object pointer cast */
 }
 
 /* Read a file into a heap buffer. Returns NULL on any I/O failure;

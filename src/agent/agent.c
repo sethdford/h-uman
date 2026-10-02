@@ -3043,6 +3043,12 @@ hu_provider_t *hu_agent_internal_recall_provider(hu_agent_t *agent, const char *
                                                  size_t msg_len) {
     if (!agent || !agent->provider.vtable || !hu_semantic_recall_register_admits(msg, msg_len))
         return NULL;
+    /* HU_RECALL_PLANNER_LLM (default live = today's routing): off/shadow send
+     * the planner down its local heuristic path. The LLM plan costs ~5.5 s per
+     * message over 12 words (2026-10-01 trace); the gate exists so an A/B can
+     * show whether that buys anything. */
+    if (hu_gate_mode_from_env("HU_RECALL_PLANNER_LLM", HU_GATE_LIVE) != HU_GATE_LIVE)
+        return NULL;
     return &agent->provider;
 }
 
