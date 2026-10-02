@@ -347,6 +347,56 @@ static void test_chatdb_history_query_returns_both_directions(void) {
     sqlite3_close(db);
 }
 
+/* load_conversation_history must return the 1:1 thread only. Joining on the
+ * handle alone pulled the contact's GROUP messages (and dropped Seth's own
+ * 1:1 rows stored with handle_id 0) into the DM context. */
+static void test_chatdb_dm_history_excludes_group_messages(void) {
+    sqlite3 *db = open_fixture();
+    HU_ASSERT_NOT_NULL(db);
+    HU_ASSERT_EQ(
+        sqlite3_exec(db,
+                     "INSERT INTO handle (id) VALUES ('+15550000002');"
+                     "INSERT INTO chat (guid, style) VALUES ('iMessage;+;chat-group-1', 43);"
+                     "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (2, 1);"
+                     "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (2, 3);"
+                     "INSERT INTO message (guid, text, handle_id, date, is_from_me) "
+                     "  VALUES ('G-1', 'group-only from contact', 1, 790000000000000000, 0);"
+                     "INSERT INTO chat_message_join (chat_id, message_id) "
+                     "  VALUES (2, (SELECT ROWID FROM message WHERE guid='G-1'));"
+                     "INSERT INTO message (guid, text, handle_id, date, is_from_me) "
+                     "  VALUES ('G-2', 'group-only from seth', 1, 790000001000000000, 1);"
+                     "INSERT INTO chat_message_join (chat_id, message_id) "
+                     "  VALUES (2, (SELECT ROWID FROM message WHERE guid='G-2'));"
+                     "INSERT INTO message (guid, text, handle_id, date, is_from_me) "
+                     "  VALUES ('D-0', 'dm reply with no handle', 0, 790000002000000000, 1);"
+                     "INSERT INTO chat_message_join (chat_id, message_id) "
+                     "  VALUES (1, (SELECT ROWID FROM message WHERE guid='D-0'));",
+                     NULL, NULL, NULL),
+        SQLITE_OK);
+
+    sqlite3_stmt *stmt = NULL;
+    HU_ASSERT_EQ(sqlite3_prepare_v2(db, HU_IMESSAGE_SQL_DM_HISTORY, -1, &stmt, NULL), SQLITE_OK);
+    sqlite3_bind_text(stmt, 1, "+15559999999", -1, NULL);
+    sqlite3_bind_int(stmt, 2, 50);
+    int rows = 0, group_rows = 0, dm_seth_no_handle = 0, dm_hello = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        rows++;
+        const char *t = (const char *)sqlite3_column_text(stmt, 1);
+        if (t && strstr(t, "group-only"))
+            group_rows++;
+        if (t && strcmp(t, "dm reply with no handle") == 0)
+            dm_seth_no_handle++;
+        if (t && strcmp(t, "Hello there") == 0)
+            dm_hello++;
+    }
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    HU_ASSERT_GT(rows, 0);
+    HU_ASSERT_EQ(dm_hello, 1);
+    HU_ASSERT_EQ(group_rows, 0);
+    HU_ASSERT_EQ(dm_seth_no_handle, 1);
+}
+
 static void test_chatdb_attachment_join_works(void) {
     sqlite3 *db = open_fixture();
     HU_ASSERT_NOT_NULL(db);
@@ -1137,6 +1187,7 @@ void run_imessage_chatdb_fixture_tests(void) {
     HU_RUN_TEST(test_chatdb_poll_query_returns_inbound);
     HU_RUN_TEST(test_chatdb_tapback_query_counts_reactions);
     HU_RUN_TEST(test_chatdb_history_query_returns_both_directions);
+    HU_RUN_TEST(test_chatdb_dm_history_excludes_group_messages);
     HU_RUN_TEST(test_chatdb_attachment_join_works);
     HU_RUN_TEST(test_chatdb_chat_guid_lookup);
     HU_RUN_TEST(test_chatdb_max_rowid);

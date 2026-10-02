@@ -40,12 +40,38 @@ static size_t sum_bytes(const hu_chat_message_t *msgs, size_t from, size_t count
     return t;
 }
 
+/* Tool-loop integrity. fit_history also runs on tool iterations, where the
+ * sequence ends [.., user, assistant(tool_calls), tool, tool]. Dropping from
+ * the front by bytes alone kept only the trailing tool result: no question,
+ * and a tool result whose tool_calls message is gone. So, when the sequence
+ * carries tool traffic: never cut past the last USER message, and never start
+ * on a tool result. A sequence with no tool traffic is returned untouched,
+ * which keeps the OFF policy byte-identical for every non-tool turn. */
+static size_t snap_keep_from(const hu_chat_message_t *msgs, size_t count, size_t keep_from) {
+    bool tool_traffic = false;
+    size_t last_user = 0;
+    for (size_t i = 1; i < count; i++) {
+        if (msgs[i].role == HU_ROLE_TOOL || msgs[i].tool_calls_count > 0)
+            tool_traffic = true;
+        if (msgs[i].role == HU_ROLE_USER)
+            last_user = i;
+    }
+    if (!tool_traffic)
+        return keep_from;
+    if (last_user > 0 && keep_from > last_user)
+        keep_from = last_user;
+    while (keep_from < count - 1 && msgs[keep_from].role == HU_ROLE_TOOL)
+        keep_from++;
+    return keep_from;
+}
+
 size_t hu_history_budget_keep_from_legacy(const hu_chat_message_t *msgs, size_t count,
                                           size_t budget) {
     if (!msgs || count <= 2)
         return 1;
     /* A1b (2026-05-19): system prompt + history under one budget. */
-    return drop_oldest_until(msgs, count, sum_bytes(msgs, 0, count), budget);
+    return snap_keep_from(msgs, count,
+                          drop_oldest_until(msgs, count, sum_bytes(msgs, 0, count), budget));
 }
 
 size_t hu_history_budget_keep_from_scoped(const hu_chat_message_t *msgs, size_t count,
@@ -55,7 +81,8 @@ size_t hu_history_budget_keep_from_scoped(const hu_chat_message_t *msgs, size_t 
     size_t sys = hu_chat_message_estimate_bytes(&msgs[0]);
     size_t room = max_total > sys ? max_total - sys : 0;
     size_t limit = hist_budget < room ? hist_budget : room;
-    return drop_oldest_until(msgs, count, sum_bytes(msgs, 1, count), limit);
+    return snap_keep_from(msgs, count,
+                          drop_oldest_until(msgs, count, sum_bytes(msgs, 1, count), limit));
 }
 
 /* Keep msgs[0] and msgs[keep_from..count), sliding survivors down. */

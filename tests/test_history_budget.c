@@ -163,6 +163,85 @@ static void test_history_budget_planners_never_drop_current(void) {
                  1);
 }
 
+/* Tool iterations: fit_history runs with the tool results last. Over budget,
+ * the old planner kept only the trailing tool result, which orphaned it from
+ * its assistant tool_calls message and dropped the user's question. The
+ * planner must keep the last USER message and everything after it. */
+static hu_tool_call_t g_tc[1];
+
+static size_t hb_fill_tool_turn(size_t sys_len, size_t tool_len) {
+    memset(g_hb, 0, sizeof(g_hb));
+    memset(g_sys, 's', sys_len);
+    g_sys[sys_len] = '\0';
+    g_hb[0].role = HU_ROLE_SYSTEM;
+    g_hb[0].content = g_sys;
+    g_hb[0].content_len = sys_len;
+    g_hb[1].role = HU_ROLE_USER;
+    g_hb[1].content = "what's the weather";
+    g_hb[1].content_len = 18;
+    memset(g_tc, 0, sizeof(g_tc));
+    g_hb[2].role = HU_ROLE_ASSISTANT;
+    g_hb[2].tool_calls = g_tc;
+    g_hb[2].tool_calls_count = 1;
+    for (size_t i = 3; i <= 4; i++) {
+        memset(g_body[i], 't', tool_len);
+        g_body[i][tool_len] = '\0';
+        g_hb[i].role = HU_ROLE_TOOL;
+        g_hb[i].content = g_body[i];
+        g_hb[i].content_len = tool_len;
+    }
+    return 5;
+}
+
+static void test_history_budget_tool_turn_keeps_user_and_tool_calls(void) {
+    hu_gate_mode_t modes[] = {HU_GATE_OFF, HU_GATE_SHADOW, HU_GATE_LIVE};
+    for (size_t m = 0; m < 3; m++) {
+        size_t n = hb_fill_tool_turn(22 * 1024, 1500); /* over both budgets */
+        size_t out =
+            hu_history_budget_fit(g_hb, n, modes[m], HU_HISTORY_BUDGET_MAX_TOTAL_DEFAULT, NULL);
+        HU_ASSERT_EQ(out, 5);
+        HU_ASSERT_TRUE(g_hb[1].role == HU_ROLE_USER);
+        HU_ASSERT_TRUE(g_hb[2].role == HU_ROLE_ASSISTANT);
+        HU_ASSERT_EQ(g_hb[2].tool_calls_count, 1);
+        HU_ASSERT_TRUE(g_hb[3].role == HU_ROLE_TOOL);
+    }
+}
+
+/* Older turns still drop, and the cut never lands between a tool_calls
+ * message and its results. [sys, u, a(tc), tool, a, u, a(tc), tool, tool]. */
+static void test_history_budget_cut_never_orphans_tool_result(void) {
+    memset(g_hb, 0, sizeof(g_hb));
+    memset(g_sys, 's', 21 * 1024);
+    g_hb[0].role = HU_ROLE_SYSTEM;
+    g_hb[0].content = g_sys;
+    g_hb[0].content_len = 21 * 1024;
+    hu_role_t roles[] = {HU_ROLE_USER, HU_ROLE_ASSISTANT, HU_ROLE_TOOL, HU_ROLE_ASSISTANT,
+                         HU_ROLE_USER, HU_ROLE_ASSISTANT, HU_ROLE_TOOL, HU_ROLE_TOOL};
+    for (size_t i = 0; i < 8; i++) {
+        memset(g_body[i + 1], 'x', 1000);
+        g_body[i + 1][1000] = '\0';
+        g_hb[i + 1].role = roles[i];
+        g_hb[i + 1].content = g_body[i + 1];
+        g_hb[i + 1].content_len = 1000;
+        if (i == 1 || i == 5) {
+            g_hb[i + 1].tool_calls = g_tc;
+            g_hb[i + 1].tool_calls_count = 1;
+        }
+    }
+    size_t out =
+        hu_history_budget_fit(g_hb, 9, HU_GATE_OFF, HU_HISTORY_BUDGET_MAX_TOTAL_DEFAULT, NULL);
+    HU_ASSERT_TRUE(out < 9);
+    HU_ASSERT_TRUE(g_hb[1].role != HU_ROLE_TOOL);
+    for (size_t i = 1; i < out; i++) {
+        if (g_hb[i].role == HU_ROLE_TOOL)
+            HU_ASSERT_TRUE(g_hb[i - 1].role == HU_ROLE_TOOL || g_hb[i - 1].tool_calls_count > 0);
+    }
+    bool user = false;
+    for (size_t i = 1; i < out; i++)
+        user = user || g_hb[i].role == HU_ROLE_USER;
+    HU_ASSERT_TRUE(user);
+}
+
 /* Wiring: the agent's real entry point honours the gate. */
 static void test_agent_fit_history_honours_history_budget_gate(void) {
     hu_agent_t agent;
@@ -188,4 +267,6 @@ void run_history_budget_tests(void) {
     HU_RUN_TEST(test_history_budget_live_system_over_cap_keeps_current_only);
     HU_RUN_TEST(test_history_budget_planners_never_drop_current);
     HU_RUN_TEST(test_agent_fit_history_honours_history_budget_gate);
+    HU_RUN_TEST(test_history_budget_tool_turn_keeps_user_and_tool_calls);
+    HU_RUN_TEST(test_history_budget_cut_never_orphans_tool_result);
 }

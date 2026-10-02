@@ -9,15 +9,22 @@
 
 /* Local-only (private) prompt spans — the one place that strips them.
  *
- * Owner rule: real message text never reaches a cloud model without explicit
- * opt-in. Prompt sections built from that text may be shown to the on-device
- * model but are removed from any request that leaves the machine. The
- * reliable provider applies this to every attempt — primary or extra, first
- * try or fallback — whose provider is not local OR whose model name is a
- * cloud model's. The second half covers routes that switch model BY NAME on
- * the same provider (agent_turn.c: the analytical tier -> gemini-3.1-pro-
- * preview, S3 -> fallback_model, on-device failure -> the reflexive cloud
- * model, and the degradation retry).
+ * Scope: this strips a marked BLOCK from requests that go through the
+ * reliable provider. It does NOT make the underlying message content
+ * local-only. Other paths send chat.db text to a cloud model directly and
+ * never pass through here. The known one: the director and emotion
+ * detection (daemon.c -> daemon_director.c) send the last 5 chat.db
+ * messages to a raw gemini provider (g_classify_provider, created
+ * unwrapped in daemon.c). That is pre-existing and an open owner decision.
+ *
+ * What it does guarantee: a marked span may reach the on-device model but is
+ * removed from every reliable-provider attempt (primary or extra, first try
+ * or fallback) that is not local. An attempt is local when its provider's
+ * endpoint is loopback / unix-socket and not a cloud proxy, AND its model
+ * name is not a cloud model's. The model check covers routes that switch
+ * model BY NAME on the same provider (agent_turn.c: the analytical tier ->
+ * gemini-3.1-pro-preview, S3 -> fallback_model, on-device failure -> the
+ * reflexive cloud model, and the degradation retry).
  *
  * A span opens at a line starting with a registered heading and closes after
  * its end line, or — for a kind with no end line — at the first blank line.
@@ -32,16 +39,29 @@
 typedef struct hu_local_only_span_kind {
     const char *begin; /* line prefix that opens the span */
     const char *end;   /* full line that closes it (inclusive); NULL = first blank line */
+    const char *tag;   /* log prefix of the owning gate, e.g. "HU_THREAD_CONTEXT" */
 } hu_local_only_span_kind_t;
 
 /* The registered kinds (read-only). */
 const hu_local_only_span_kind_t *hu_local_only_span_kinds(size_t *count);
 
-/* True for provider names that serve from this machine. NULL / unknown names
- * are NOT local (fail closed). */
+/* True only for in-process backends (no URL): a provider NAME says nothing
+ * about where an HTTP endpoint points. NULL / unknown -> not local. */
 bool hu_local_only_provider_name_is_local(const char *name);
 
-/* True when `prov` reports a local name via get_name. */
+/* True for a loopback (127.0.0.0/8, localhost, *.localhost, ::1) or unix-socket
+ * ("unix:", "/path") base URL. 0.0.0.0 and anything unparsable are NOT local. */
+bool hu_local_only_url_is_local(const char *base_url);
+
+/* The endpoint decision. `override` > 0 forces local, < 0 forces not local
+ * (config providers[].local). Otherwise: a known cloud gateway/proxy name
+ * (openrouter, litellm, ...) is never local; a non-empty base_url decides by
+ * hu_local_only_url_is_local; no URL is local only for in-process backends
+ * (apple, coreml, embedded, llama-cli, huml, mlx). */
+bool hu_local_only_endpoint_is_local(const char *provider_name, const char *base_url, int override);
+
+/* hu_local_only_provider_name_is_local(get_name()). An mlx_local instance
+ * reports "compatible", so HTTP providers need the endpoint rule instead. */
 bool hu_local_only_provider_is_local(const hu_provider_t *prov);
 
 /* True for model names that only a cloud API serves (gemini-*, gpt-*,
@@ -51,6 +71,17 @@ bool hu_local_only_model_is_cloud(const char *model, size_t model_len);
 
 /* The attempt decision: local provider AND not a cloud model name. */
 bool hu_local_only_attempt_is_local(bool provider_local, const char *model, size_t model_len);
+
+/* One log line per span kind present in `text`, for an attempt that is
+ * about to be sent without it:
+ *   [<tag>] applied=0 reason=stripped_cloud_model|stripped_cloud_endpoint model=<m>
+ * stripped_cloud_model = an on-device endpoint asked for a cloud model by name
+ * (agent_turn.c analytical / S3 routes): the block never reached the model
+ * that answered, which a measurement must not count as "applied". */
+void hu_local_only_log_strip(const char *text, size_t len, bool endpoint_local, const char *model,
+                             size_t model_len);
+void hu_local_only_log_strip_request(const hu_chat_request_t *req, bool endpoint_local,
+                                     const char *model, size_t model_len);
 
 /* True when `s` holds at least one span. */
 bool hu_local_only_has_span(const char *s, size_t len);

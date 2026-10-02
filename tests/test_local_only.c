@@ -5,9 +5,11 @@
  * over to the gemini extra) carries no thread block while the local primary
  * still gets it and the rest of the prompt is unchanged. Fakes only. */
 #include "human/agent/model_router.h"
+#include "human/config.h"
 #include "human/core/allocator.h"
 #include "human/core/string.h"
 #include "human/provider.h"
+#include "human/providers/factory.h"
 #include "human/providers/local_only.h"
 #include "human/providers/reliable.h"
 #include "test_framework.h"
@@ -22,13 +24,16 @@
 static const char k_prompt[] = "persona head\n" BLOCK "guard tail\n";
 static const char k_prompt_stripped[] = "persona head\nguard tail\n";
 
+/* A provider NAME alone is local only for an in-process backend; an HTTP
+ * provider's locality comes from its endpoint (see the endpoint tests). */
 static void test_local_only_names(void) {
-    HU_ASSERT_TRUE(hu_local_only_provider_name_is_local("mlx_local"));
-    HU_ASSERT_TRUE(hu_local_only_provider_name_is_local("ollama"));
+    HU_ASSERT_TRUE(hu_local_only_provider_name_is_local("apple"));
+    HU_ASSERT_TRUE(hu_local_only_provider_name_is_local("coreml"));
     HU_ASSERT_TRUE(hu_local_only_provider_name_is_local("llamacpp"));
+    HU_ASSERT_FALSE(hu_local_only_provider_name_is_local("mlx_local"));
+    HU_ASSERT_FALSE(hu_local_only_provider_name_is_local("ollama"));
     HU_ASSERT_FALSE(hu_local_only_provider_name_is_local("gemini"));
     HU_ASSERT_FALSE(hu_local_only_provider_name_is_local("compatible"));
-    HU_ASSERT_FALSE(hu_local_only_provider_name_is_local("mlx_localhost.evil"));
     HU_ASSERT_FALSE(hu_local_only_provider_name_is_local(""));
     HU_ASSERT_FALSE(hu_local_only_provider_name_is_local(NULL));
 }
@@ -168,6 +173,88 @@ static void test_local_only_prepare_oom_at_every_step(void) {
     }
 }
 
+/* ── locality is keyed on the endpoint, not the provider name ─────────── */
+
+static void test_local_only_url_loopback_and_socket(void) {
+    HU_ASSERT_TRUE(hu_local_only_url_is_local("http://127.0.0.1:8741/v1"));
+    HU_ASSERT_TRUE(hu_local_only_url_is_local("http://localhost:11434"));
+    HU_ASSERT_TRUE(hu_local_only_url_is_local("http://[::1]:8080/v1"));
+    HU_ASSERT_TRUE(hu_local_only_url_is_local("http://user@127.0.0.2:9000"));
+    HU_ASSERT_TRUE(hu_local_only_url_is_local("unix:///tmp/mlx.sock"));
+    HU_ASSERT_TRUE(hu_local_only_url_is_local("/var/run/llama.sock"));
+    HU_ASSERT_FALSE(hu_local_only_url_is_local("https://gpu.example.com/v1"));
+    HU_ASSERT_FALSE(hu_local_only_url_is_local("http://localhost.example.com:8741"));
+    HU_ASSERT_FALSE(hu_local_only_url_is_local("http://127.0.0.1.example.com"));
+    HU_ASSERT_FALSE(hu_local_only_url_is_local("http://evil.com/127.0.0.1"));
+    HU_ASSERT_FALSE(hu_local_only_url_is_local("http://0.0.0.0:8741"));
+    HU_ASSERT_FALSE(hu_local_only_url_is_local(""));
+    HU_ASSERT_FALSE(hu_local_only_url_is_local(NULL));
+}
+
+static void test_local_only_endpoint_decision(void) {
+    /* mlx_local pointed at a remote host is NOT local */
+    HU_ASSERT_FALSE(hu_local_only_endpoint_is_local("mlx_local", "https://gpu.example.com/v1", 0));
+    HU_ASSERT_TRUE(hu_local_only_endpoint_is_local("mlx_local", "http://127.0.0.1:8741/v1", 0));
+    /* a gateway on loopback still forwards to the cloud */
+    HU_ASSERT_FALSE(hu_local_only_endpoint_is_local("litellm", "http://localhost:4000", 0));
+    HU_ASSERT_FALSE(hu_local_only_endpoint_is_local("openrouter", "http://127.0.0.1:9", 0));
+    /* in-process backends have no URL */
+    HU_ASSERT_TRUE(hu_local_only_endpoint_is_local("apple", NULL, 0));
+    HU_ASSERT_FALSE(hu_local_only_endpoint_is_local("gemini", NULL, 0));
+    HU_ASSERT_FALSE(hu_local_only_endpoint_is_local("compatible", NULL, 0));
+    /* the explicit per-provider override wins both ways */
+    HU_ASSERT_TRUE(hu_local_only_endpoint_is_local("mlx_local", "https://box.lan.example/v1", 1));
+    HU_ASSERT_FALSE(hu_local_only_endpoint_is_local("mlx_local", "http://127.0.0.1:8741", -1));
+}
+
+/* Ollama on loopback serving a cloud model ("…-cloud" / ":cloud") forwards
+ * the prompt to ollama.com: the model-name veto makes the attempt non-local. */
+static void test_local_only_ollama_cloud_model_not_local(void) {
+    bool ep = hu_local_only_endpoint_is_local("ollama", "http://localhost:11434", 0);
+    HU_ASSERT_TRUE(ep);
+    HU_ASSERT_FALSE(hu_local_only_attempt_is_local(ep, "gpt-oss:120b-cloud", 18));
+    HU_ASSERT_FALSE(hu_local_only_attempt_is_local(ep, "qwen3-coder:cloud", 17));
+    HU_ASSERT_FALSE(hu_local_only_attempt_is_local(ep, "kimi-k2-cloud", 13));
+    HU_ASSERT_TRUE(hu_local_only_attempt_is_local(ep, "llama3.1:8b", 11));
+    HU_ASSERT_TRUE(hu_local_only_model_is_cloud("o3", 2));
+    HU_ASSERT_TRUE(hu_local_only_model_is_cloud("o4-mini", 7));
+    HU_ASSERT_TRUE(hu_local_only_model_is_cloud("o1", 2));
+    HU_ASSERT_FALSE(hu_local_only_model_is_cloud("olmo-2-7b", 9));
+}
+
+/* from_config wiring: the reliable primary's locality comes from the
+ * configured base_url (+ override), not the "mlx_local" name. */
+static bool reliable_primary_local_for(const char *providers_json) {
+    char json[512];
+    snprintf(json, sizeof(json),
+             "{\"default_provider\":\"reliable\",\"reliability\":{\"primary_provider\":"
+             "\"mlx_local\"},\"providers\":[%s]}",
+             providers_json);
+    hu_allocator_t a = hu_system_allocator();
+    hu_config_t c;
+    HU_ASSERT_EQ(hu_config_load(&a, &c), HU_OK);
+    HU_ASSERT_EQ(hu_config_parse_json(&c, json, strlen(json)), HU_OK);
+    hu_provider_t p;
+    memset(&p, 0, sizeof(p));
+    HU_ASSERT_EQ(hu_provider_create_from_config(&a, &c, "reliable", 8, &p), HU_OK);
+    bool local = hu_reliable_primary_is_local(&p);
+    if (p.vtable && p.vtable->deinit)
+        p.vtable->deinit(p.ctx, &a);
+    hu_config_deinit(&c);
+    return local;
+}
+
+static void test_from_config_primary_locality_follows_base_url(void) {
+    HU_ASSERT_TRUE(reliable_primary_local_for(
+        "{\"name\":\"mlx_local\",\"base_url\":\"http://127.0.0.1:8741/v1\"}"));
+    HU_ASSERT_FALSE(reliable_primary_local_for(
+        "{\"name\":\"mlx_local\",\"base_url\":\"https://gpu.example.com/v1\"}"));
+    HU_ASSERT_TRUE(reliable_primary_local_for(
+        "{\"name\":\"mlx_local\",\"base_url\":\"https://gpu.example.com/v1\",\"local\":true}"));
+    HU_ASSERT_FALSE(reliable_primary_local_for(
+        "{\"name\":\"mlx_local\",\"base_url\":\"http://127.0.0.1:8741/v1\",\"local\":false}"));
+}
+
 /* ── through the reliable provider ──────────────────────────────────── */
 
 typedef struct cap_provider {
@@ -231,6 +318,20 @@ static hu_error_t cap_chat_with_system(void *ctx, hu_allocator_t *alloc, const c
     return HU_OK;
 }
 
+static hu_error_t cap_stream_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_request_t *req,
+                                  const char *model, size_t model_len, double temperature,
+                                  hu_stream_callback_t cb, void *cb_ctx,
+                                  hu_stream_chat_result_t *out) {
+    (void)cb;
+    (void)cb_ctx;
+    (void)out;
+    hu_chat_response_t resp;
+    memset(&resp, 0, sizeof(resp));
+    hu_error_t err = cap_chat(ctx, alloc, req, model, model_len, temperature, &resp);
+    hu_chat_response_free(alloc, &resp);
+    return err;
+}
+
 static const char *cap_get_name(void *ctx) {
     return ((cap_provider_t *)ctx)->name;
 }
@@ -243,6 +344,7 @@ static void cap_deinit(void *ctx, hu_allocator_t *alloc) {
 static const hu_provider_vtable_t cap_vtable = {
     .chat = cap_chat,
     .chat_with_system = cap_chat_with_system,
+    .stream_chat = cap_stream_chat,
     .get_name = cap_get_name,
     .deinit = cap_deinit,
 };
@@ -404,6 +506,31 @@ static void test_reliable_primary_local_flag(void) {
     g.reliable.vtable->deinit(g.reliable.ctx, &g.alloc);
 }
 
+/* Streaming: the primary's stream fails, the cloud extra streams — and gets
+ * no thread block. */
+static void test_reliable_stream_fallback_strips(void) {
+    lo_rig_t g;
+    lo_rig_init(&g, HU_ERR_PROVIDER_RESPONSE, true);
+    hu_chat_message_t msgs[1];
+    memset(msgs, 0, sizeof(msgs));
+    msgs[0].role = HU_ROLE_SYSTEM;
+    msgs[0].content = k_prompt;
+    msgs[0].content_len = sizeof(k_prompt) - 1;
+    hu_chat_request_t req;
+    memset(&req, 0, sizeof(req));
+    req.messages = msgs;
+    req.messages_count = 1;
+    hu_stream_chat_result_t out;
+    memset(&out, 0, sizeof(out));
+    HU_ASSERT_EQ(g.reliable.vtable->stream_chat(g.reliable.ctx, &g.alloc, &req, "GLM-4.5-Air-4bit",
+                                                16, 0.7, NULL, NULL, &out),
+                 HU_OK);
+    HU_ASSERT_STR_CONTAINS(g.prim.seen_system, "secret plans");
+    HU_ASSERT_EQ(g.cloud.calls, 1);
+    HU_ASSERT_STR_EQ(g.cloud.seen_system, k_prompt_stripped);
+    g.reliable.vtable->deinit(g.reliable.ctx, &g.alloc);
+}
+
 void run_local_only_tests(void) {
     HU_TEST_SUITE("local_only");
     HU_RUN_TEST(test_local_only_names);
@@ -418,6 +545,11 @@ void run_local_only_tests(void) {
     HU_RUN_TEST(test_local_only_model_names);
     HU_RUN_TEST(test_local_only_span_table_has_thread_kind);
     HU_RUN_TEST(test_local_only_prepare_oom_at_every_step);
+    HU_RUN_TEST(test_local_only_url_loopback_and_socket);
+    HU_RUN_TEST(test_local_only_endpoint_decision);
+    HU_RUN_TEST(test_local_only_ollama_cloud_model_not_local);
+    HU_RUN_TEST(test_from_config_primary_locality_follows_base_url);
+    HU_RUN_TEST(test_reliable_stream_fallback_strips);
     HU_RUN_TEST(test_route_analytical_tier_model_strips);
     HU_RUN_TEST(test_route_s3_fallback_model_strips);
     HU_RUN_TEST(test_route_on_device_failure_reflexive_model_strips);

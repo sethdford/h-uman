@@ -47,6 +47,13 @@ Mike: [photo]
   `[attachment]`. Message text is capped at 240 bytes.
 - The trailing contact messages the model already receives as the current
   message are left out (`skipped_current=1`).
+- The loader reads the 1:1 chat only: messages in a chat whose only other
+  participant is this handle (`chat_message_join` → `chat_handle_join`). It
+  used to join on the handle alone, which pulled this contact's group-chat
+  messages into the DM context and missed Seth's 1:1 rows stored with
+  `handle_id` 0.
+- Seth's rows with no text and no recognised media render as `[no text]`.
+  His photos and voice memos now carry their media label.
 - No block for group chats (chat.db rows carry no sender) or for an empty
   thread.
 
@@ -54,7 +61,16 @@ It does not de-duplicate against session history. Dropping the thread lines
 that also appear in the session store would leave holes that read as
 unanswered messages. The block is capped at 1.5 KB instead.
 
-### Never sent to a cloud model
+### Stripped from cloud attempts (the block, not the content)
+
+What this guarantees is narrow: the rendered block is removed from every
+request that goes through the reliable provider to a non-local endpoint or a
+cloud model name. It does **not** make the thread's message text local-only.
+The director and emotion detection (`daemon.c` director call →
+`daemon_director.c`) already send the last 5 chat.db messages to a **raw**
+Gemini provider (`g_classify_provider`, created unwrapped in `daemon.c`), with
+or without this gate. That path is pre-existing, outside this change, and an
+open owner decision.
 
 The block sits between local-only markers. `include/human/providers/local_only.h`
 is the one place that strips private spans: a table of headings, each closed
@@ -62,15 +78,30 @@ by an end line or by the first blank line. To protect another section, add a
 row to it.
 
 - **Every attempt is checked.** The reliable provider strips every span from
-  any attempt, first or fallback, whose provider is not on-device **or** whose
-  model name is a cloud model's (`gemini*`, `gpt-*`, `claude*`, ...). That
-  covers:
+  any attempt, first or fallback (`chat`, `chat_with_system`, `stream_chat`),
+  that is not local. An attempt is local only when both hold:
+  - its **endpoint** is on this machine: a loopback (`127.0.0.0/8`,
+    `localhost`, `::1`) or unix-socket `base_url`, and the provider is not a
+    cloud gateway (`openrouter`, `litellm`, ...). `from_config` resolves this
+    per provider from the configured `base_url`. In-process backends (`apple`,
+    `coreml`, `llamacpp`, ...) need no URL. Set `"local": true|false` on a
+    `providers[]` entry to override it.
+  - its **model name** is not a cloud model's: `gemini*`, `gpt-*`, `claude*`,
+    `grok*`, bare `o1`/`o3`/`o4-*`, and Ollama cloud models (`*-cloud`,
+    `*:cloud`).
+- **What that covers.**
   - the `gemini` extra that the `mlx_local` primary fails over to (failed
     call or circuit-open window);
   - the `agent_turn.c` routes that switch model by name on the same provider:
     the analytical tier to `gemini-3.1-pro-preview`, S3 to `fallback_model`,
     the on-device-failure retry to the reflexive model, and the degradation
     retry. Each one has a test in `tests/test_local_only.c`.
+  - an `mlx_local` whose `base_url` points at a remote host.
+- **Stripped turns are logged.** Each strip logs
+  `[HU_THREAD_CONTEXT] applied=0 reason=stripped_cloud_model|stripped_cloud_endpoint model=<m>`.
+  `stripped_cloud_model` is an analytical or S3 turn whose model never saw the
+  block, even though the daemon logged `applied=1`. Exclude those turns from
+  the A/B arm.
 - **A truncated block is still stripped.** If there is no end marker, the
   strip runs to the end of the message. When stripping cannot allocate, the
   attempt fails rather than sending the unstripped text.
@@ -126,6 +157,17 @@ counted, and every prior message was dropped. The prod log shows it:
 | `off` (default) | Legacy policy, byte-identical messages. |
 | `shadow` | Legacy policy is applied. One line per call: `[HU_HISTORY_BUDGET shadow] msgs_before=N msgs_after=N new_msgs_after=N sys_bytes=N hist_bytes=N new_keeps_more=0/1`. |
 | `live` | The 20 KB counts history only, the current message always stays, and system plus history is capped at `HU_HISTORY_BUDGET_MAX_TOTAL_BYTES` (default 40,960, clamped to 20,480–98,304). Logs `[HU_HISTORY_BUDGET live] ... total_bytes=N max_total=N`. |
+
+**Tool iterations.** `fit_history` also runs inside the tool loop, where the
+sequence ends `[.., user, assistant(tool_calls), tool, tool]`. The old policy
+could keep only the trailing tool result, losing the user's question and
+orphaning the result from its `tool_calls` message. Both policies now never
+cut past the last user message and never start on a tool result. This applies
+in **every mode, OFF included**, but only to sequences that contain tool
+traffic. A sequence without tool messages is returned untouched, so OFF stays
+byte-identical for every non-tool turn, including every `llm_decides` reply,
+which runs with 0 tools. The in-flight tool turn is kept whole even when it is
+over budget, so LIVE's total cap does not bound it.
 
 The old log-once `history truncated` warning is now a counter, logged on the
 first truncation and every 25th: `history truncated (N so far, logged every 25)`.

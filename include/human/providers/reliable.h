@@ -14,6 +14,10 @@ typedef struct hu_reliable_provider_entry {
     const char *name;
     size_t name_len;
     hu_provider_t provider;
+    /* Prompts sent here stay on this machine (local_only.h endpoint rule).
+     * from_config sets it from base_url + providers[].local; zero-initialised
+     * entries are NOT local, so private spans are stripped (fail closed). */
+    bool local;
 } hu_reliable_provider_entry_t;
 
 /* Model + fallback models for per-model failover */

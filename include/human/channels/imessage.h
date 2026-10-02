@@ -157,6 +157,46 @@ int hu_imessage_count_recent_music_tapbacks(const char *contact_id, size_t conta
  * Returns -1 on failure or when SQLite/macOS unavailable. */
 int64_t hu_imessage_get_latest_sent_rowid(const char *handle, size_t handle_len);
 
+/* load_conversation_history's query: the newest ?2 messages of the 1:1 thread
+ * with handle ?1, newest first. Public so the chat.db fixture test runs the
+ * exact production SQL. */
+#define HU_IMESSAGE_SQL_DM_HISTORY_COLUMNS                                               \
+    "SELECT m.is_from_me, m.text, "                                                      \
+    "  datetime(m.date/1000000000 + 978307200, 'unixepoch', 'localtime') as ts, "        \
+    "  (SELECT COUNT(*) FROM message_attachment_join maj "                               \
+    "   JOIN attachment a ON maj.attachment_id = a.ROWID "                               \
+    "   WHERE maj.message_id = m.ROWID AND a.filename IS NOT NULL "                      \
+    "   AND (LOWER(a.filename) LIKE '%.mov' OR LOWER(a.filename) LIKE '%.mp4' "          \
+    "     OR LOWER(a.filename) LIKE '%.m4v')) > 0 AS has_video, "                        \
+    "  (SELECT COUNT(*) FROM message_attachment_join maj2 "                              \
+    "   JOIN attachment a2 ON maj2.attachment_id = a2.ROWID "                            \
+    "   WHERE maj2.message_id = m.ROWID AND a2.filename IS NOT NULL "                    \
+    "   AND (LOWER(a2.filename) LIKE '%.jpg' OR LOWER(a2.filename) LIKE '%.jpeg' "       \
+    "     OR LOWER(a2.filename) LIKE '%.png' OR LOWER(a2.filename) LIKE '%.heic' "       \
+    "     OR LOWER(a2.filename) LIKE '%.gif' OR LOWER(a2.filename) LIKE '%.webp')) > 0 " \
+    "  AS has_image, "                                                                   \
+    "  (SELECT COUNT(*) FROM message_attachment_join maj3 "                              \
+    "   JOIN attachment a3 ON maj3.attachment_id = a3.ROWID "                            \
+    "   WHERE maj3.message_id = m.ROWID AND a3.filename IS NOT NULL "                    \
+    "   AND (LOWER(a3.filename) LIKE '%.caf' OR LOWER(a3.filename) LIKE '%.m4a' "        \
+    "     OR LOWER(a3.filename) LIKE '%.mp3' OR LOWER(a3.filename) LIKE '%.aac' "        \
+    "     OR LOWER(a3.filename) LIKE '%.opus')) > 0 AS has_audio, "                      \
+    "  m.attributedBody, "                                                               \
+    "  m.balloon_bundle_id, "                                                            \
+    "  m.expressive_send_style_id "
+
+#define HU_IMESSAGE_SQL_DM_HISTORY                                                          \
+    HU_IMESSAGE_SQL_DM_HISTORY_COLUMNS                                                      \
+    "FROM message m "                                                                       \
+    "JOIN chat_message_join cmj ON cmj.message_id = m.ROWID "                               \
+    "WHERE cmj.chat_id IN ("                                                                \
+    "  SELECT chj.chat_id FROM chat_handle_join chj "                                       \
+    "  JOIN handle h ON h.ROWID = chj.handle_id "                                           \
+    "  WHERE h.id = ?1 "                                                                    \
+    "  AND (SELECT COUNT(*) FROM chat_handle_join c2 WHERE c2.chat_id = chj.chat_id) = 1) " \
+    "AND m.associated_message_type = 0 "                                                    \
+    "ORDER BY m.date DESC LIMIT ?2"
+
 #ifndef HU_IS_TEST
 /** Check if the real user sent a message to `handle` within the last
  * `within_seconds` seconds.  Queries chat.db for is_from_me=1 rows.

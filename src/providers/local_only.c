@@ -1,10 +1,11 @@
 #include "human/providers/local_only.h"
+#include "human/core/log.h"
 #include <string.h>
 #include <strings.h>
 
 /* Private span kinds. One row per protected prompt section; see the header. */
 static const hu_local_only_span_kind_t k_span_kinds[] = {
-    {HU_LOCAL_ONLY_THREAD_BEGIN, HU_LOCAL_ONLY_THREAD_END},
+    {HU_LOCAL_ONLY_THREAD_BEGIN, HU_LOCAL_ONLY_THREAD_END, "HU_THREAD_CONTEXT"},
 };
 #define SPAN_KIND_COUNT (sizeof(k_span_kinds) / sizeof(k_span_kinds[0]))
 
@@ -14,30 +15,38 @@ const hu_local_only_span_kind_t *hu_local_only_span_kinds(size_t *count) {
     return k_span_kinds;
 }
 
-/* On-device backends only. HTTP names whose default URL is loopback
- * (mlx_local, ollama, llamacpp) count: pointing one at a remote host is an
- * owner's explicit choice of their own server. Anything else — including
- * "compatible", which is what an mlx_local instance reports from get_name —
- * is treated as cloud, so an unknown name strips (fails closed). */
-static const char *const k_local_names[] = {
-    "mlx_local", "mlx-local",          "mlx-http",         "mlx_http", "mlx",   "ollama",
-    "llamacpp",  "llama.cpp",          "llama-cli",        "apple",    "apfel", "coreml",
-    "embedded",  "apple-intelligence", "foundationmodels", "huml",
-};
-
-/* Model-name prefixes only a cloud API serves (case-insensitive). */
+/* Model-name prefixes only a cloud API serves (case-insensitive). Bare
+ * OpenAI o-series ("o1", "o3", "o4-mini") is matched separately. */
 static const char *const k_cloud_model_prefixes[] = {
-    "gemini", "gpt-", "chatgpt", "claude", "grok", "o1-", "o3-", "o4-",
+    "gemini", "gpt-", "chatgpt", "claude", "grok",
 };
 
-bool hu_local_only_provider_name_is_local(const char *name) {
+/* Backends that run in this process / a local subprocess and have no URL. */
+static const char *const k_in_process_names[] = {
+    "apple",    "apfel",     "apple-intelligence", "foundationmodels", "coreml",
+    "embedded", "llama-cli", "llamacpp",           "llama.cpp",        "huml",
+    "mlx",
+};
+
+/* Gateways that forward to cloud APIs even when they listen on loopback. */
+static const char *const k_cloud_proxy_names[] = {
+    "openrouter", "litellm", "portkey", "helicone", "together", "groq", "fireworks", "requesty",
+};
+
+static bool name_in(const char *name, const char *const *list, size_t n) {
     if (!name || !name[0])
         return false;
-    for (size_t i = 0; i < sizeof(k_local_names) / sizeof(k_local_names[0]); i++) {
-        if (strcmp(name, k_local_names[i]) == 0)
+    for (size_t i = 0; i < n; i++) {
+        if (strcasecmp(name, list[i]) == 0)
             return true;
     }
     return false;
+}
+#define NAME_IN(name, list) name_in((name), (list), sizeof(list) / sizeof((list)[0]))
+
+bool hu_local_only_provider_name_is_local(const char *name) {
+    /* A name alone (no URL) is local only for an in-process backend. */
+    return NAME_IN(name, k_in_process_names);
 }
 
 bool hu_local_only_provider_is_local(const hu_provider_t *prov) {
@@ -61,6 +70,25 @@ bool hu_local_only_model_is_cloud(const char *model, size_t model_len) {
          i++) {
         size_t pl = strlen(k_cloud_model_prefixes[i]);
         if (model_len >= pl && strncasecmp(model, k_cloud_model_prefixes[i], pl) == 0)
+            return true;
+    }
+    /* OpenAI o-series: "o1", "o3-pro", "o4-mini" (o + digits, then end or '-'). */
+    if (model_len >= 2 && (model[0] == 'o' || model[0] == 'O') && model[1] >= '0' &&
+        model[1] <= '9') {
+        size_t j = 1;
+        while (j < model_len && model[j] >= '0' && model[j] <= '9')
+            j++;
+        if (j == model_len || model[j] == '-')
+            return true;
+    }
+    /* Ollama cloud models run on ollama.com: "gpt-oss:120b-cloud", "x:cloud". */
+    static const char k_cloud_suffix[] = "-cloud";
+    size_t sl = sizeof(k_cloud_suffix) - 1;
+    if (model_len >= sl && strncasecmp(model + model_len - sl, k_cloud_suffix, sl) == 0)
+        return true;
+    for (size_t i = 0; i + 6 <= model_len; i++) {
+        if (model[i] == ':' && strncasecmp(model + i + 1, "cloud", 5) == 0 &&
+            (i + 6 == model_len || model[i + 6] == '-' || model[i + 6] == ':'))
             return true;
     }
     return false;
@@ -237,4 +265,113 @@ void hu_local_only_request_release(hu_allocator_t *alloc, hu_local_only_request_
     if (scratch->msgs)
         alloc->free(alloc->ctx, scratch->msgs, scratch->count * sizeof(hu_chat_message_t));
     memset(scratch, 0, sizeof(*scratch));
+}
+
+/* Host of a URL: after "scheme://", after any "user@", up to ':' '/' '?' '#'
+ * (or the closing ']' of an IPv6 literal). Returns false if absent. */
+static bool url_host(const char *url, const char **host, size_t *host_len) {
+    const char *p = strstr(url, "://");
+    p = p ? p + 3 : url;
+    const char *auth_end = p + strcspn(p, "/?#");
+    for (const char *q = p; q < auth_end; q++) {
+        if (*q == '@')
+            p = q + 1;
+    }
+    if (*p == '[') {
+        const char *close = memchr(p, ']', (size_t)(auth_end - p));
+        if (!close)
+            return false;
+        *host = p + 1;
+        *host_len = (size_t)(close - p - 1);
+        return *host_len > 0;
+    }
+    size_t n = strcspn(p, ":/?#");
+    *host = p;
+    *host_len = n;
+    return n > 0;
+}
+
+static bool host_is_loopback(const char *h, size_t n) {
+    if (n == 9 && strncasecmp(h, "localhost", 9) == 0)
+        return true;
+    if (n > 10 && strncasecmp(h + n - 10, ".localhost", 10) == 0)
+        return true;
+    if ((n == 3 && memcmp(h, "::1", 3) == 0) || (n == 15 && memcmp(h, "0:0:0:0:0:0:0:1", 15) == 0))
+        return true;
+    /* 127.a.b.c — exactly four numeric octets */
+    if (n < 9 || memcmp(h, "127.", 4) != 0)
+        return false;
+    int dots = 0, digits = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (h[i] == '.') {
+            if (digits == 0)
+                return false;
+            dots++;
+            digits = 0;
+        } else if (h[i] >= '0' && h[i] <= '9') {
+            if (++digits > 3)
+                return false;
+        } else {
+            return false;
+        }
+    }
+    return dots == 3 && digits > 0;
+}
+
+bool hu_local_only_url_is_local(const char *base_url) {
+    if (!base_url || !base_url[0])
+        return false;
+    if (base_url[0] == '/' || strncasecmp(base_url, "unix:", 5) == 0 ||
+        strncasecmp(base_url, "http+unix:", 10) == 0)
+        return true;
+    const char *h = NULL;
+    size_t n = 0;
+    return url_host(base_url, &h, &n) && host_is_loopback(h, n);
+}
+
+bool hu_local_only_endpoint_is_local(const char *provider_name, const char *base_url,
+                                     int override) {
+    if (override > 0)
+        return true;
+    if (override < 0)
+        return false;
+    if (NAME_IN(provider_name, k_cloud_proxy_names))
+        return false;
+    if (base_url && base_url[0])
+        return hu_local_only_url_is_local(base_url);
+    return NAME_IN(provider_name, k_in_process_names);
+}
+
+void hu_local_only_log_strip(const char *text, size_t len, bool endpoint_local, const char *model,
+                             size_t model_len) {
+    if (!text || len == 0)
+        return;
+    const char *reason = (endpoint_local && hu_local_only_model_is_cloud(model, model_len))
+                             ? "stripped_cloud_model"
+                             : "stripped_cloud_endpoint";
+    for (size_t k = 0; k < SPAN_KIND_COUNT; k++) {
+        const char *b = k_span_kinds[k].begin;
+        size_t bl = strlen(b);
+        for (size_t i = 0; i + bl <= len; i++) {
+            if ((i == 0 || text[i - 1] == '\n') && memcmp(text + i, b, bl) == 0) {
+                hu_log_info("local_only", NULL, "[%s] applied=0 reason=%s model=%.*s",
+                            k_span_kinds[k].tag, reason, (int)(model ? model_len : 0),
+                            model ? model : "");
+                break;
+            }
+        }
+    }
+}
+
+void hu_local_only_log_strip_request(const hu_chat_request_t *req, bool endpoint_local,
+                                     const char *model, size_t model_len) {
+    if (!req || !req->messages)
+        return;
+    for (size_t i = 0; i < req->messages_count; i++) {
+        if (hu_local_only_has_span(req->messages[i].content, req->messages[i].content_len)) {
+            hu_local_only_log_strip(req->messages[i].content, req->messages[i].content_len,
+                                    endpoint_local, model, model_len);
+            return;
+        }
+    }
 }

@@ -131,6 +131,16 @@ size_t hu_config_get_channel_configured_count(const hu_config_t *cfg, const char
     return 0;
 }
 
+int hu_config_get_provider_local_override(const hu_config_t *cfg, const char *name) {
+    if (!cfg || !name)
+        return 0;
+    for (size_t i = 0; i < cfg->providers_len; i++) {
+        if (cfg->providers[i].name && strcmp(cfg->providers[i].name, name) == 0)
+            return cfg->providers[i].local_override;
+    }
+    return 0;
+}
+
 bool hu_config_get_provider_ws_streaming(const hu_config_t *cfg, const char *name) {
     if (!cfg || !name)
         return false;

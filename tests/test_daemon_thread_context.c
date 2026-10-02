@@ -134,7 +134,7 @@ static void test_thread_render_collapses_attachments(void) {
     char *out = render(&a, es, 5, "Mike", NULL, HU_THREAD_CONTEXT_BUDGET, &len, &st);
     HU_ASSERT_NOT_NULL(out);
     HU_ASSERT_STR_CONTAINS(out, "Mike: [photo]\nMike: [voice memo]\nMike: [photo]\n");
-    HU_ASSERT_STR_CONTAINS(out, "you: [attachment]\n");
+    HU_ASSERT_STR_CONTAINS(out, "you: [no text]\n");
     HU_ASSERT_STR_CONTAINS(out, "Mike: [attachment] look at this\n");
     HU_ASSERT_STR_NOT_CONTAINS(out, "Voice Message");
     HU_ASSERT_STR_NOT_CONTAINS(out, "\xEF\xBF\xBC");

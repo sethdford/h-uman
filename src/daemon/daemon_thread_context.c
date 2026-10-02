@@ -62,7 +62,7 @@ static const char *collapse_placeholder(const char *t) {
     if (strcmp(t, "[Video]") == 0)
         return "[video]";
     if (strcmp(t, "[you replied]") == 0)
-        return "[attachment]";
+        return "[no text]"; /* Seth's row with no text and no known media */
     return NULL;
 }
 
