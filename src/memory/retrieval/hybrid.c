@@ -960,9 +960,13 @@ hu_error_t hu_hybrid_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, hu_em
     }
 
     hu_retrieval_result_t semantic_result = {0};
-    err = hu_semantic_retrieve(alloc, embedder, vector_store, query, query_len, opts,
-                               &semantic_result);
+    /* The query embedding is kept only for HU_CONTEXT_RELEVANCE's null sample. */
+    hu_embedding_t query_emb = {0};
+    err = hu_semantic_retrieve_ex(alloc, embedder, vector_store, query, query_len, opts,
+                                  &semantic_result,
+                                  hu_context_relevance_mode() != HU_GATE_OFF ? &query_emb : NULL);
     if (err != HU_OK) {
+        hu_embedding_free(alloc, &query_emb);
         hu_retrieval_result_free(alloc, &keyword_result);
 #ifdef HU_ENABLE_SQLITE
         hu_retrieval_result_free(alloc, &graph_result);
@@ -1007,7 +1011,8 @@ hu_error_t hu_hybrid_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, hu_em
          * memory-probe measurement in docs/guides/context-relevance.md):
          * LIVE replaces the word-count cliff with a relevance threshold and a
          * small casual budget; SHADOW only logs what it would inject. */
-        if (hu_context_relevance_semantic(alloc, &semantic_result, !admits, &recall_budget))
+        if (hu_context_relevance_semantic(alloc, &semantic_result, !admits, &recall_budget,
+                                          vector_store, &query_emb))
             reg_gate = HU_GATE_OFF;
         if (reg_gate != HU_GATE_OFF && !admits) {
             if (reg_gate == HU_GATE_LIVE) {
@@ -1040,6 +1045,8 @@ hu_error_t hu_hybrid_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, hu_em
                         filtered, semantic_result.count, kept, recall_budget);
         }
     }
+
+    hu_embedding_free(alloc, &query_emb);
 
     /* Contract C2: attempt reconstruction with keyword + semantic (+ graph).
      * Falls through to the plain RRF+cross-encoder merge below when

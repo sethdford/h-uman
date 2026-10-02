@@ -24,6 +24,7 @@ static void clear_env(void) {
     unsetenv("HU_CONTEXT_RELEVANCE");
     unsetenv("HU_CONTEXT_RELEVANCE_MIN_SCORE");
     unsetenv("HU_CONTEXT_RELEVANCE_CASUAL_BYTES");
+    hu_context_relevance_null_reset();
 }
 
 /* Build a result of n entries with the given contents and scores. */
@@ -95,9 +96,9 @@ static void test_assess_counts_passing_items_within_budget(void) {
     HU_ASSERT_EQ(st.items_passing, (size_t)2);
     HU_ASSERT_EQ(st.bytes_would_inject, strlen(c[0]) + strlen(c[1]));
     HU_ASSERT_TRUE(fabs(st.top_score - 0.81) < 1e-9);
-    HU_ASSERT_EQ(st.hist[1], 1u); /* 0.20 */
-    HU_ASSERT_EQ(st.hist[2], 1u); /* 0.55 */
-    HU_ASSERT_EQ(st.hist[4], 1u); /* 0.81 */
+    HU_ASSERT_EQ(st.hist[4], 1u);  /* 0.20 -> [0.20, 0.25) */
+    HU_ASSERT_EQ(st.hist[11], 1u); /* 0.55 -> [0.55, 0.60) */
+    HU_ASSERT_EQ(st.hist[16], 1u); /* 0.81 -> [0.80, 0.85) */
     /* A budget that fits only the first passing item: same rule as the clamp. */
     hu_context_relevance_assess(&r, 0.46, strlen(c[0]) + 3, 240, &st);
     HU_ASSERT_EQ(st.bytes_would_inject, strlen(c[0]));
@@ -143,7 +144,7 @@ static void test_semantic_decision_by_mode(void) {
         make_result(&a, &r, c, s, 2);
         size_t budget = 1200;
         setenv("HU_CONTEXT_RELEVANCE", m == 0 ? "off" : (m == 1 ? "shadow" : "live"), 1);
-        bool decided = hu_context_relevance_semantic(&a, &r, true, &budget);
+        bool decided = hu_context_relevance_semantic(&a, &r, true, &budget, NULL, NULL);
         if (m < 2) {
             HU_ASSERT_FALSE(decided);
             HU_ASSERT_EQ(r.count, (size_t)2);
@@ -155,14 +156,55 @@ static void test_semantic_decision_by_mode(void) {
         }
         hu_retrieval_result_free(&a, &r);
     }
-    /* A substantive turn under LIVE keeps the full budget. */
+    /* A substantive turn under LIVE is untouched until the threshold is
+     * calibrated: no hit dropped, full budget, no decision taken. */
     hu_retrieval_result_t r = {0};
     make_result(&a, &r, c, s, 2);
     size_t budget = 1200;
-    HU_ASSERT_TRUE(hu_context_relevance_semantic(&a, &r, false, &budget));
+    HU_ASSERT_FALSE(hu_context_relevance_semantic(&a, &r, false, &budget, NULL, NULL));
+    HU_ASSERT_EQ(r.count, (size_t)2);
     HU_ASSERT_EQ(budget, (size_t)1200);
     hu_retrieval_result_free(&a, &r);
     clear_env();
+}
+
+static void test_p95_is_nearest_rank(void) {
+    float v[20];
+    for (int i = 0; i < 20; i++)
+        v[i] = (float)(19 - i) / 20.0f; /* 0.95 .. 0.00, unsorted order */
+    HU_ASSERT_TRUE(fabs(hu_context_relevance_p95(v, 20) - 0.90) < 1e-6);
+    HU_ASSERT_TRUE(fabs(v[0] - 0.95f) < 1e-6); /* input not reordered */
+    HU_ASSERT_TRUE(hu_context_relevance_p95(v, 0) == 0.0);
+}
+
+/* The threshold is the null pool's p95 once the pool is full enough; the env
+ * overrides it; the 0.46 doc-to-doc number is only the cold start. */
+static void test_threshold_null_pool_then_env(void) {
+    clear_env();
+    hu_context_relevance_threshold_src_t src = HU_CR_THRESHOLD_ENV;
+    HU_ASSERT_TRUE(
+        fabs(hu_context_relevance_threshold(&src) - HU_CONTEXT_RELEVANCE_DEFAULT_MIN_SCORE) < 1e-9);
+    HU_ASSERT_EQ((int)src, (int)HU_CR_THRESHOLD_COLD);
+    float nulls[HU_CONTEXT_RELEVANCE_NULL_MIN];
+    for (size_t i = 0; i < HU_CONTEXT_RELEVANCE_NULL_MIN; i++)
+        nulls[i] = 0.10f + 0.20f * (float)i / (float)HU_CONTEXT_RELEVANCE_NULL_MIN; /* 0.10..0.30 */
+    hu_context_relevance_null_add(nulls, HU_CONTEXT_RELEVANCE_NULL_MIN - 1);
+    (void)hu_context_relevance_threshold(&src);
+    HU_ASSERT_EQ((int)src, (int)HU_CR_THRESHOLD_COLD); /* one short of the minimum */
+    hu_context_relevance_null_add(nulls + HU_CONTEXT_RELEVANCE_NULL_MIN - 1, 1);
+    HU_ASSERT_EQ(hu_context_relevance_null_count(), (size_t)HU_CONTEXT_RELEVANCE_NULL_MIN);
+    double t = hu_context_relevance_threshold(&src);
+    HU_ASSERT_EQ((int)src, (int)HU_CR_THRESHOLD_NULL);
+    HU_ASSERT_TRUE(t > 0.28 && t < 0.30); /* p95 of 0.10..0.30, not 0.46 */
+    setenv("HU_CONTEXT_RELEVANCE_MIN_SCORE", "0.62", 1);
+    HU_ASSERT_TRUE(fabs(hu_context_relevance_threshold(&src) - 0.62) < 1e-9);
+    HU_ASSERT_EQ((int)src, (int)HU_CR_THRESHOLD_ENV);
+    /* the pool is bounded: old scores roll out */
+    for (int k = 0; k < 20; k++)
+        hu_context_relevance_null_add(nulls, HU_CONTEXT_RELEVANCE_NULL_MIN);
+    HU_ASSERT_EQ(hu_context_relevance_null_count(), (size_t)HU_CONTEXT_RELEVANCE_NULL_POOL);
+    clear_env();
+    HU_ASSERT_EQ(hu_context_relevance_null_count(), (size_t)0);
 }
 
 #ifdef HU_ENABLE_SQLITE
@@ -212,7 +254,7 @@ static const hu_embedder_vtable_t stub_vt = {.embed = stub_embed,
 
 /* Run the REAL hybrid retrieve (prod config: recall live + register gate live)
  * on a casual one-word message and serialize what comes back. */
-static size_t casual_recall(const char *relevance_mode, char *dump, size_t dump_cap) {
+static size_t recall_q(const char *relevance_mode, const char *q, char *dump, size_t dump_cap) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
     HU_ASSERT_NOT_NULL(mem.vtable);
@@ -236,7 +278,6 @@ static size_t casual_recall(const char *relevance_mode, char *dump, size_t dump_
     hu_retrieval_options_t opts = {0};
     opts.limit = 10;
     hu_retrieval_result_t res = {0};
-    const char *q = "xq"; /* one word: casual; matches no keyword */
     HU_ASSERT_EQ(hu_hybrid_retrieve(&alloc, &mem, &emb, &vs, NULL, q, strlen(q), &opts, &res),
                  HU_OK);
     size_t n = 0, bytes = 0;
@@ -256,13 +297,20 @@ static size_t casual_recall(const char *relevance_mode, char *dump, size_t dump_
     mem.vtable->deinit(mem.ctx);
     unsetenv("HU_SEMANTIC_RECALL");
     unsetenv("HU_SEMANTIC_RECALL_REGISTER_GATE");
-    clear_env();
+    unsetenv("HU_CONTEXT_RELEVANCE");
+    unsetenv("HU_CONTEXT_RELEVANCE_MIN_SCORE");
     return bytes;
+}
+
+/* One word, casual; matches no keyword. */
+static size_t casual_recall(const char *relevance_mode, char *dump, size_t dump_cap) {
+    return recall_q(relevance_mode, "xq", dump, dump_cap);
 }
 
 /* Headline: a short message used to get ZERO recall (the word-count cliff);
  * under LIVE it gets the relevant memories and not the irrelevant one. */
 static void test_hybrid_casual_turn_recalls_relevant_memories_under_live(void) {
+    clear_env();
     char before[1024], after[1024];
     HU_ASSERT_EQ(casual_recall(NULL, before, sizeof(before)), (size_t)0); /* the cliff */
     size_t live_bytes = casual_recall("live", after, sizeof(after));
@@ -274,6 +322,7 @@ static void test_hybrid_casual_turn_recalls_relevant_memories_under_live(void) {
 
 /* OFF is byte-identical to the gate being unset; SHADOW changes nothing. */
 static void test_hybrid_off_and_shadow_are_byte_identical(void) {
+    clear_env();
     char unset[1024], off[1024], shadow[1024];
     size_t b0 = casual_recall(NULL, unset, sizeof(unset));
     size_t b1 = casual_recall("off", off, sizeof(off));
@@ -282,11 +331,32 @@ static void test_hybrid_off_and_shadow_are_byte_identical(void) {
     HU_ASSERT_EQ(b0, b2);
     HU_ASSERT_STR_EQ(unset, off);
     HU_ASSERT_STR_EQ(unset, shadow);
+    /* OFF samples nothing; SHADOW scored the query against the 3 stored
+     * vectors (the calibration sample) */
+    HU_ASSERT_EQ(hu_context_relevance_null_count(), (size_t)3);
+    clear_env();
+    (void)casual_recall("off", off, sizeof(off));
+    HU_ASSERT_EQ(hu_context_relevance_null_count(), (size_t)0);
+}
+
+/* Substantive turns are unchanged under LIVE until the threshold is
+ * calibrated: the low-scoring 'bills' row stays, exactly as under OFF. */
+static void test_hybrid_live_leaves_substantive_turns_unchanged(void) {
+    clear_env();
+    const char *q = "xq what was it she said about moving away for that new job again";
+    char off[1024], live[1024];
+    size_t b_off = recall_q(NULL, q, off, sizeof(off));
+    size_t b_live = recall_q("live", q, live, sizeof(live));
+    HU_ASSERT_TRUE(strstr(off, "bills") != NULL);
+    HU_ASSERT_EQ(b_off, b_live);
+    HU_ASSERT_STR_EQ(off, live);
+    clear_env();
 }
 
 /* The threshold comes from the env when set: lowered to 0.1, the 'b' row
  * (cosine ~0.21) is relevant too. */
 static void test_hybrid_live_threshold_override_is_honoured(void) {
+    clear_env();
     char dump[1024];
     setenv("HU_CONTEXT_RELEVANCE_MIN_SCORE", "0.1", 1); /* casual_recall clears it */
     size_t b = casual_recall("live", dump, sizeof(dump));
@@ -304,12 +374,17 @@ static void test_hybrid_off_and_shadow_are_byte_identical(void) {
 static void test_hybrid_live_threshold_override_is_honoured(void) {
     (void)0;
 }
+static void test_hybrid_live_leaves_substantive_turns_unchanged(void) {
+    (void)0;
+}
 #endif
 
 void run_context_relevance_tests(void) {
     HU_TEST_SUITE("context_relevance");
     HU_RUN_TEST(test_mode_defaults_off_and_parses);
     HU_RUN_TEST(test_min_score_default_and_override);
+    HU_RUN_TEST(test_p95_is_nearest_rank);
+    HU_RUN_TEST(test_threshold_null_pool_then_env);
     HU_RUN_TEST(test_assess_counts_passing_items_within_budget);
     HU_RUN_TEST(test_drop_below_keeps_rank_and_scores_aligned);
     HU_RUN_TEST(test_line_cut_keeps_whole_lines);
@@ -317,4 +392,5 @@ void run_context_relevance_tests(void) {
     HU_RUN_TEST(test_hybrid_casual_turn_recalls_relevant_memories_under_live);
     HU_RUN_TEST(test_hybrid_off_and_shadow_are_byte_identical);
     HU_RUN_TEST(test_hybrid_live_threshold_override_is_honoured);
+    HU_RUN_TEST(test_hybrid_live_leaves_substantive_turns_unchanged);
 }

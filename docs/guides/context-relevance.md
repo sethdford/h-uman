@@ -22,64 +22,71 @@ replaces both cliffs with one relevance decision
 
 | Mode | Effect |
 |---|---|
-| `off` (default) | Byte-identical to before: both cliffs apply. |
-| `shadow` | Retrieval and the cliffs run as before. One aggregate line per turn and source says what relevance would inject. Nothing sent changes. |
-| `live` | An item is injected when its relevance clears the threshold, whatever the word count or tier. Casual turns keep a small byte budget instead of zero. |
+| `off` (default) | Byte-identical to before: both cliffs apply, nothing is sampled. |
+| `shadow` | Retrieval and the cliffs run as before. One aggregate line per turn and source says what relevance would inject, plus the calibration sample. Nothing sent changes. |
+| `live` | On **casual** turns only (the turns the cliffs starved), an item is injected when its relevance clears the threshold, within a small byte budget instead of zero. **Substantive turns keep today's recall unchanged** until the threshold is calibrated. |
 
 Relevance per source:
 
-- **semantic** — the retrieval scorer's cosine score per hit. Threshold
-  `$HU_CONTEXT_RELEVANCE_MIN_SCORE`, default `0.46`. Casual turns (the old
-  ≤ 12-word classifier, which now only sizes the budget) get
-  `$HU_CONTEXT_RELEVANCE_CASUAL_BYTES`, default 480 bytes (two 240-byte hits);
-  substantive turns keep the full recall budget (`HU_SEMANTIC_RECALL_MAX_BYTES`,
-  default 1200). Only applies under `HU_SEMANTIC_RECALL=live`.
-- **graph** — the composer's own query-conditioning: relevant when the message
-  names one of the contact's entities, or an owner fact by full name. Kept
-  blocks are cut to the casual budget at a line boundary. The contact
-  fallback (`HU_GRAPH_GROUNDING_CONTACT_FALLBACK`) is not conditioned on the
-  message, so on a casual turn it is still dropped. Only applies under
-  `HU_GRAPH_GROUNDING=on`; prod runs grounding in `shadow`
-  (2026-09-30), so in prod today this gate changes semantic recall only.
+- **semantic** — the retrieval scorer's cosine score per hit (query-to-document,
+  `embed_query`). Casual turns (the old ≤ 12-word classifier, which now only
+  picks the turn class) get `$HU_CONTEXT_RELEVANCE_CASUAL_BYTES`, default two
+  recall hits (`2 * HU_SEMANTIC_RECALL_HIT_MAX_BYTES` = 480 bytes). Only
+  applies under `HU_SEMANTIC_RECALL=live`.
+- **graph** — strict query-conditioning: an entity counts only when **every**
+  scoreable word of its name is in the message (`HU_GG_REQUIRE_FULL_NAME`)
+  and it is not an EMOTION (`HU_GG_NO_EMOTION_SEED`). "love you" does not
+  ground on the contact's `love`, "at work rn" not on `work trip`. The kept
+  block is that strict composition, cut to the casual budget at a line
+  boundary. The contact fallback is not conditioned on the message, so it
+  stays dropped. Only applies under `HU_GRAPH_GROUNDING=on`; prod runs
+  grounding in `shadow` (2026-09-30), so in prod today this gate changes
+  semantic recall only. A single-word entity whose whole name a casual text
+  contains (a TOPIC literally named "work") still qualifies.
 
-## Where the threshold comes from
+## The threshold: a null distribution, not a guess
 
-No labelled data exists yet on which recalled items Seth's real replies
-referenced, so the default is the scorer's own floor, measured on the live
-index: the **median cosine similarity between two arbitrary stored memories**.
-A hit must be at least as close to the message as an unrelated pair of
-memories are to each other.
+The live score is query-to-document; a document-to-document number is the
+wrong distribution. So every non-OFF semantic decision also scores the
+message's own embedding against `HU_CONTEXT_RELEVANCE_NULL_K` (32) random
+stored vectors (`hu_vector_store_sqlite_vec_sample_scores`, dot products only,
+no text): what an **unrelated** memory scores against this kind of query.
+Those scores go into a rolling in-process pool of 1,024. The threshold is, in
+order:
 
-```bash
-python3 scripts/context_relevance_floor.py            # reads ~/.human/memory.db read-only
-# vectors=72 pairs=2556  p50: 0.4582  p75: 0.6948  p90: 0.7624  p95: 0.798  p99: 0.8614
+1. `$HU_CONTEXT_RELEVANCE_MIN_SCORE`, when set (config after review);
+2. the pool's **p95**, once it holds at least 128 scores (four decisions);
+3. `0.46`, the cold-start fallback only (the median doc-to-doc cosine of the
+   live index, `python3 scripts/context_relevance_floor.py`, 2026-10-02:
+   72 vectors, p50 0.458).
+
+A hit is relevant when it scores above 95% of random memories against the
+same kind of message. The pool restarts empty with the process, so the first
+few decisions after a restart use the cold start; `threshold_src` in the log
+says which applied.
+
+Every decision logs one line, counts and scores only:
+
+```
+[context_relevance shadow] src=semantic casual=1 applied=0 items_considered=5 items_passing=2
+    bytes_would_inject=311 top_score=0.712 min_score=0.598 threshold_src=null null_k=32
+    null_p95=0.601 null_pool=416 top=0.70,0.55,0.50 hist=0/0/0/.../1/2/1/0/0
 ```
 
-(2026-10-02). Document-to-document similarities run higher than
-query-to-document ones under an asymmetric embedder, so this floor is on the
-conservative side: it injects less, not more. Re-run the script after a
-reindex and set `HU_CONTEXT_RELEVANCE_MIN_SCORE` if the floor moves.
-
-**Learning it.** Every shadow/live line carries a score histogram, so the
-threshold can be refit from real turns:
-
-```
-[context_relevance shadow] src=semantic casual=1 items_considered=5 items_passing=2
-    bytes_would_inject=311 top_score=0.712 min_score=0.460 hist=0/1/2/1/1
-```
-
-Bands are `<0.2 / 0.2-0.4 / 0.4-0.6 / 0.6-0.8 / >=0.8`. Fields are counts,
-bytes and scores only: never text, keys or contact ids. The v2 learned
-behaviour profile (static-rules inventory §5) is where a per-contact threshold
-fitted against reply references belongs.
+`top` is the best five real scores at 0.05 resolution; `hist` counts all real
+scores in 0.05-wide bands over [0, 1]. Together with `null_p95` they are what a
+per-contact or learned threshold gets fitted on. The graph line carries
+`matched_full_name` instead.
 
 ## Promotion: SHADOW → LIVE
 
 1. Deploy with `HU_CONTEXT_RELEVANCE=shadow` and read a week of lines:
    `grep 'context_relevance shadow' ~/.human/logs/service-loop-error.log`.
-   Expect `casual=1` lines with `items_passing>0` on a real share of turns. If
-   `items_passing` is almost always 0, the threshold is too high for
-   query-to-document scores — lower it from the histogram before going further.
+   Expect `casual=1` lines with `items_passing>0` on a real share of turns and
+   `threshold_src=null` on most. Compare `top` against `null_p95`: if real
+   hits rarely beat the null, recall is not finding anything on casual turns
+   and LIVE would change little. Optionally pin the reviewed threshold with
+   `HU_CONTEXT_RELEVANCE_MIN_SCORE`.
 2. **Memory probes** (PR #593, `docs/guides/memory-benchmarks.md`): replay the
    LoCoMo/MSC probes with both arms and score them:
 

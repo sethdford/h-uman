@@ -84,6 +84,14 @@ hu_error_t hu_semantic_retrieve(hu_allocator_t *alloc, hu_embedder_t *embedder,
                                 hu_vector_store_t *vector_store, const char *query,
                                 size_t query_len, const hu_retrieval_options_t *opts,
                                 hu_retrieval_result_t *out);
+/* As hu_semantic_retrieve; when query_out is non-NULL the query embedding is
+ * moved there once the vector search succeeded, instead of being freed. The
+ * caller calls hu_embedding_free on it after ANY return (it is empty when
+ * the call failed before the search). */
+hu_error_t hu_semantic_retrieve_ex(hu_allocator_t *alloc, hu_embedder_t *embedder,
+                                   hu_vector_store_t *vector_store, const char *query,
+                                   size_t query_len, const hu_retrieval_options_t *opts,
+                                   hu_retrieval_result_t *out, hu_embedding_t *query_out);
 
 hu_error_t hu_keyword_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, const char *query,
                                size_t query_len, const hu_retrieval_options_t *opts,

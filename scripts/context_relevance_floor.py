@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Derive HU_CONTEXT_RELEVANCE's semantic threshold from the live index.
+"""Measure HU_CONTEXT_RELEVANCE's cold-start floor from the live index.
 
-The threshold is the cosine similarity an UNRELATED pair of stored memories
+The floor is the cosine similarity an UNRELATED pair of stored memories
 already reach with each other: the median over every pair of vectors in the
-sqlite-vec index (`memories_vec`). A recalled hit must score at least that
-high against the message before it is injected on a turn the word-count
-cliff used to starve (docs/guides/context-relevance.md).
+sqlite-vec index (`memories_vec`). It is document-to-document, so the daemon
+uses it only until its query-to-document null pool fills (the pool's p95 is
+the real threshold; docs/guides/context-relevance.md).
 
 Reads only the float vectors (no text, keys or ids) from the vec0 shadow
 tables, read-only. Prints quantiles; `--json` prints one JSON object.
@@ -97,7 +97,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"vectors={out['n_vectors']} pairs={out['n_pairs']}")
         for k, v in out["quantiles"].items():
             print(f"  {k}: {v}")
-        print(f"HU_CONTEXT_RELEVANCE_MIN_SCORE={out['suggested_min_score']}")
+        print(f"cold_start_floor={out['suggested_min_score']}")
     return 0
 
 
