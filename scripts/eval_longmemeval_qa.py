@@ -377,6 +377,13 @@ def load_checkpoint(checkpoint_path):
 
     return results
 
+def settled(checkpoint):
+    """The checkpoint rows --resume may skip: scored ones. An error row (the
+    embedder restarting, a 429) is retried, and its new row, appended later,
+    wins when the checkpoint is read back."""
+    return {qid: r for qid, r in checkpoint.items() if r.verdict != "error"}
+
+
 def save_result(checkpoint_path, result):
     """Append result to JSONL checkpoint."""
     with open(checkpoint_path, "a") as f:
@@ -415,7 +422,7 @@ def main():
     print(f"Running {len(qs)} questions, output: {a.out_dir}", flush=True)
 
     # Load checkpoint if resuming
-    done = load_checkpoint(checkpoint_path) if a.resume else {}
+    done = settled(load_checkpoint(checkpoint_path)) if a.resume else {}
 
     # Process questions
     results = list(done.values())

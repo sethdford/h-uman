@@ -59,7 +59,8 @@ void hu_daemon_rich_media_tick(hu_allocator_t *alloc, hu_agent_t *agent, const h
                                                           history_count, music_seed, music_prob);
         const char *yt_key = config ? hu_config_get_provider_key(config, "youtube") : NULL;
         hu_inspiration_medium_t medium = HU_INSPIRATION_NONE;
-        if (hu_expressive_share_should_go(director, forms_live, dice_hit, &forced))
+        if (hu_expressive_share_should_go(director, forms_live, dice_hit,
+                                          hu_expressive_somber(combined, combined_len), &forced))
             medium = forced != HU_SHARE_NONE
                          ? hu_expressive_share_medium(forced, yt_key && *yt_key)
                          : hu_inspiration_pick_medium(combined, combined_len, yt_key && *yt_key);

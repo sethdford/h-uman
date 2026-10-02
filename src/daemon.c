@@ -6282,7 +6282,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     hu_daemon_voice_first_prepare(
                         alloc, agent, batch_key, key_len, msgs[batch_start].is_group,
                         selftest_on && selftest.form == HU_DIR_FORM_VOICE, combined, combined_len,
-                        &convo_ctx, &convo_ctx_len, &max_chars, &vfirst);
+                        &convo_ctx, &convo_ctx_len, &max_chars, &rt, &vfirst);
                     voice_first_memo = vfirst.memo;
                 }
 

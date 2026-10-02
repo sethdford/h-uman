@@ -40,6 +40,13 @@ bool hu_retrieval_entry_in_contact_scope(const hu_memory_entry_t *e, const char 
     return true;
 }
 
+bool hu_retrieval_session_in_scope(const char *owner, size_t owner_len, const char *contact,
+                                   size_t contact_len) {
+    if (!contact || contact_len == 0 || !owner || owner_len == 0)
+        return true;
+    return owner_len == contact_len && memcmp(owner, contact, contact_len) == 0;
+}
+
 static bool entry_matches_session(const hu_memory_entry_t *e, const char *session_id,
                                   size_t session_id_len) {
     if (!session_id || session_id_len == 0)

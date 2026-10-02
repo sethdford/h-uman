@@ -193,8 +193,10 @@ static const char k_director_examples[] =
     "action:text|delay_s:45|direction:He's busy, one-word reply when he gets back";
 
 /* Spec 2026-09-28-expressive-imessage, Phase 2: the rest of how Seth responds.
- * Appended only when HU_DIRECTOR_FORMS is shadow or live; off, the prompt is
- * exactly today's. */
+ * Appended only when HU_DIRECTOR_FORMS is LIVE. The live decision comes from
+ * this same call, so appending it in SHADOW changed real choices (tapbacks fell
+ * from 30-45% of turns to 0-10%, 2026-09-28..10-01); off and shadow, the prompt
+ * is exactly today's. */
 static const char k_director_forms[] =
     "\n\nMORE WAYS SETH RESPONDS (rare; most replies are still plain texts). Only use what the "
     "'This turn:' line says is available.\n"
@@ -226,7 +228,7 @@ size_t hu_daemon_director_system_prompt(char *buf, size_t cap) {
         return 0;
     size_t rules = sizeof(k_director_system) - 1;
     size_t base = rules + sizeof(k_director_examples) - 1;
-    bool forms = hu_gate_mode_from_env("HU_DIRECTOR_FORMS", HU_GATE_OFF) != HU_GATE_OFF;
+    bool forms = hu_gate_mode_from_env("HU_DIRECTOR_FORMS", HU_GATE_OFF) == HU_GATE_LIVE;
     size_t extra = forms ? sizeof(k_director_forms) - 1 : 0;
     if (base + extra + 1 > cap) {
         buf[0] = '\0';
