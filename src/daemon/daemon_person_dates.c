@@ -4,6 +4,7 @@
 #include "human/channel.h"
 #include "human/core/gate_mode.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include "human/daemon.h"
 #include "human/daemon/person_dates.h"
 #include "human/daemon/share_queue.h"
@@ -526,7 +527,7 @@ static void deliver_approved(struct hu_agent *agent, sqlite3 *db, const hu_conta
         first_name(c, rows[i].contact_id, who, sizeof(who));
         if (err == HU_OK) {
             hu_log_info("dates", agent->observer, "approved %s note sent to %s", rows[i].label,
-                        who);
+                        HU_LOG_WHO_CSTR(who));
             continue;
         }
         char note[256];
@@ -536,7 +537,7 @@ static void deliver_approved(struct hu_agent *agent, sqlite3 *db, const hu_conta
             (void)send_on(channels, count, channel_for(owner), owner->contact_id, note,
                           strlen(note));
         hu_log_warn("dates", agent->observer, "approved %s note to %s failed: %s", rows[i].label,
-                    who, why ? why : hu_error_string(err));
+                    HU_LOG_WHO_CSTR(who), why ? why : hu_error_string(err));
     }
 }
 

@@ -4,6 +4,7 @@
 #include "human/core/error.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include "human/core/string.h"
 #include "human/memory/personal_model.h"
 #include "human/memory/retrieval/adaptive.h"
@@ -99,8 +100,8 @@ static void append_contact_wiki(hu_memory_loader_t *loader, hu_gate_mode_t mode,
                      mode == HU_GATE_LIVE ? "live" : "shadow");
     if (mode == HU_GATE_SHADOW) {
         hu_log_info("wiki-head", NULL,
-                    "shadow: would add %zu bytes of page head for %.*s (prompt unchanged)",
-                    wiki_len, (int)session_id_len, session_id);
+                    "shadow: would add %zu bytes of page head for %s (prompt unchanged)", wiki_len,
+                    HU_LOG_WHO(session_id, session_id_len));
         return;
     }
     const size_t hdr_len = sizeof(k_wiki_header) - 1;
@@ -191,8 +192,8 @@ static const char *curiosity_gap_for(hu_memory_loader_t *loader, const char *que
     const char *line = hu_curiosity_gap_line(t);
     if (cg == HU_GATE_SHADOW) {
         hu_log_info("curiosity-gaps", NULL,
-                    "shadow: would offer topic=%d for %.*s (prompt unchanged)", (int)t,
-                    (int)(sid_len > 24 ? 24 : sid_len), sid);
+                    "shadow: would offer topic=%d for %s (prompt unchanged)", (int)t,
+                    HU_LOG_WHO(sid, sid_len));
         return NULL;
     }
     return line;
@@ -243,8 +244,8 @@ static void append_contact_insights(hu_memory_loader_t *loader, const char *quer
                      mode == HU_GATE_LIVE ? "live" : "shadow");
     if (mode == HU_GATE_SHADOW) {
         hu_log_info("insight-stream", NULL,
-                    "shadow: would add %zu bytes of insights for %.*s (prompt unchanged)",
-                    lines_len, (int)session_id_len, session_id);
+                    "shadow: would add %zu bytes of insights for %s (prompt unchanged)", lines_len,
+                    HU_LOG_WHO(session_id, session_id_len));
     } else {
         const size_t hdr_len = sizeof(k_insight_header) - 1;
         size_t block_len = hdr_len + lines_len + gap_len;

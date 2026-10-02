@@ -13,6 +13,7 @@
 #include "human/core/error.h"
 #include "human/core/io_secure.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include "human/core/paths.h"
 #include "human/core/process_util.h"
 #include "human/core/string.h"
@@ -1178,8 +1179,8 @@ static void imsg_bb_on_event(const hu_imessage_bb_event_t *evp, void *user) {
                                                       (double)time(NULL), &hold_s);
     hu_log_info("imessage", NULL,
                 "bb-event: kind=%d chat=%s handle=%s ts=%.3f would_hold_send=%d hold_s=%.1f",
-                (int)ev.kind, ev.chat_guid[0] ? ev.chat_guid : "-", ev.handle[0] ? ev.handle : "-",
-                ev.timestamp, (int)would_hold, hold_s);
+                (int)ev.kind, HU_LOG_WHO(ev.chat_guid, strlen(ev.chat_guid)),
+                HU_LOG_WHO(ev.handle, strlen(ev.handle)), ev.timestamp, (int)would_hold, hold_s);
 }
 
 static void imsg_watch_start(hu_imessage_ctx_t *c) {
@@ -1339,12 +1340,12 @@ static bool imsg_validate_target(hu_imessage_ctx_t *c) {
 
     if (!found)
         hu_log_info("imessage", NULL,
-                    "target '%.*s' not found in active chats (imsg chats); "
+                    "target '%s' not found in active chats (imsg chats); "
                     "first message may create a new conversation",
-                    (int)c->default_target_len, c->default_target);
+                    HU_LOG_WHO(c->default_target, c->default_target_len));
     else if (getenv("HU_DEBUG"))
-        hu_log_info("imessage", NULL, "target '%.*s' validated via imsg chats",
-                    (int)c->default_target_len, c->default_target);
+        hu_log_info("imessage", NULL, "target '%s' validated via imsg chats",
+                    HU_LOG_WHO(c->default_target, c->default_target_len));
     return found;
 }
 
@@ -1638,10 +1639,10 @@ static bool imsg_try_react(hu_imessage_ctx_t *c, int64_t message_id, hu_reaction
         }
     }
     if (!rok)
-        hu_log_info(
-            "imessage", NULL, "imsg react failed (exit=%d stdout=%.*s stderr=%.*s)", rr.exit_code,
-            (int)(rr.stdout_len < 200 ? rr.stdout_len : 200), rr.stdout_buf ? rr.stdout_buf : "",
-            (int)(rr.stderr_len < 200 ? rr.stderr_len : 200), rr.stderr_buf ? rr.stderr_buf : "");
+        hu_log_info("imessage", NULL, "imsg react failed (exit=%d stdout=%s stderr=%s)",
+                    rr.exit_code,
+                    HU_LOG_TEXT(rr.stdout_buf, rr.stdout_buf ? rr.stdout_len : 0, 120),
+                    HU_LOG_TEXT(rr.stderr_buf, rr.stderr_buf ? rr.stderr_len : 0, 120));
     hu_run_result_free(c->alloc, &rr);
     return rok;
 }
@@ -2461,7 +2462,8 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
             memcpy(tgt, target + (target_len - copy), copy);
             tgt[copy] = '\0';
             if (hu_imessage_handle_excluded(tgt, xc->exclude_from, xc->exclude_from_count)) {
-                hu_log_info("imessage", NULL, "outbound to excluded handle %s blocked", tgt);
+                hu_log_info("imessage", NULL, "outbound to excluded handle %s blocked",
+                            HU_LOG_WHO_CSTR(tgt));
                 return HU_ERR_PERMISSION_DENIED;
             }
         }
@@ -2582,9 +2584,9 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
             HU_BLUE_HOLD) {
             hu_log_warn(
                 "imessage", NULL,
-                "blue_guard: HELD send to %.*s — not iMessage-reachable "
+                "blue_guard: HELD send to %s — not iMessage-reachable "
                 "(whois=%d recent=%d handle=%d); set HU_IMESSAGE_ALLOW_GREEN=1 to permit SMS",
-                (int)(tgt_len > 24 ? 24 : tgt_len), tgt, (int)live, (int)recent, (int)handle_svc);
+                HU_LOG_WHO(tgt, tgt_len), (int)live, (int)recent, (int)handle_svc);
             return HU_ERR_NOT_SUPPORTED;
         }
     }
@@ -4008,16 +4010,10 @@ static hu_error_t imessage_react(void *ctx, const char *target, size_t target_le
     int exit_code = result.exit_code;
     bool ok = result.success && exit_code == 0;
     if (!ok) {
-        hu_log_error("imessage", NULL, "tapback JXA failed: exit=%d stdout=%.*s stderr=%.*s",
-                     exit_code,
-                     (int)(result.stdout_buf && result.stdout_len > 0
-                               ? (result.stdout_len < 200 ? result.stdout_len : 200)
-                               : 0),
-                     result.stdout_buf ? result.stdout_buf : "",
-                     (int)(result.stderr_buf && result.stderr_len > 0
-                               ? (result.stderr_len < 200 ? result.stderr_len : 200)
-                               : 0),
-                     result.stderr_buf ? result.stderr_buf : "");
+        hu_log_error(
+            "imessage", NULL, "tapback JXA failed: exit=%d stdout=%s stderr=%s", exit_code,
+            HU_LOG_TEXT(result.stdout_buf, result.stdout_buf ? result.stdout_len : 0, 120),
+            HU_LOG_TEXT(result.stderr_buf, result.stderr_buf ? result.stderr_len : 0, 120));
     }
     hu_run_result_free(c->alloc, &result);
     if (!ok)
@@ -4861,8 +4857,8 @@ bool hu_imessage_ax_reply_tier2_show_menu(const char *target, size_t target_len,
         return false;
     AXUIElementRef row = ax_find_reply_row(target, target_len, prefix);
     if (!row) {
-        hu_log_info("imessage", NULL, "AX reply tier2: parent row not found (prefix=%.20s)",
-                    prefix);
+        hu_log_info("imessage", NULL, "AX reply tier2: parent row not found (prefix=%s)",
+                    HU_LOG_TEXT_CSTR(prefix, 20));
         return false;
     }
     bool menu_ok = ax_click_menu_item_reply(row);
@@ -6347,7 +6343,7 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
          * consumed and never re-processed. */
         if (hu_imessage_handle_excluded(handle, c->exclude_from, c->exclude_from_count)) {
             hu_log_info("imessage", NULL, "excluded handle %s; dropping silently (no reply)",
-                        handle);
+                        HU_LOG_WHO_CSTR(handle));
             c->last_rowid = rowid;
             continue;
         }
@@ -6374,8 +6370,8 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
                 int64_t now_epoch = (int64_t)time(NULL);
                 int64_t bucket = now_epoch / 86400;
                 hu_log_info("imessage", NULL,
-                            "non-allowlisted iMessage from %s; dropping (bucket=%lld)", handle,
-                            (long long)bucket);
+                            "non-allowlisted iMessage from %s; dropping (bucket=%lld)",
+                            HU_LOG_WHO_CSTR(handle), (long long)bucket);
                 bool dedup_already_replied = hu_imessage_courtesy_dedup_check(handle, bucket);
                 uint32_t aggregate_today_count = hu_imessage_courtesy_aggregate_count(bucket);
                 if (hu_imessage_should_courtesy_reply(false, dedup_already_replied,
@@ -6405,7 +6401,7 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
             if (hu_imessage_inbound_is_stale(msg_unix_ts, (int64_t)time(NULL), max_age)) {
                 hu_log_warn("imessage", NULL,
                             "dropping stale inbound rowid=%lld from %s (age=%llds > cap=%llds)",
-                            (long long)rowid, handle,
+                            (long long)rowid, HU_LOG_WHO_CSTR(handle),
                             (long long)((int64_t)time(NULL) - msg_unix_ts), (long long)max_age);
                 c->last_rowid = rowid;
                 continue;
@@ -6426,7 +6422,7 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
                                                imessage_is_ours_cb, c)) {
                 hu_log_info("imessage", NULL,
                             "skipping inbound rowid=%lld from %s: human already replied after it",
-                            (long long)rowid, handle);
+                            (long long)rowid, HU_LOG_WHO_CSTR(handle));
                 c->last_rowid = rowid;
                 continue;
             }
@@ -6494,7 +6490,8 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
         c->last_rowid = rowid;
         count++;
         if (getenv("HU_DEBUG"))
-            hu_log_info("imessage", NULL, "incoming handle=%s len=%zu", handle, text_len);
+            hu_log_info("imessage", NULL, "incoming handle=%s len=%zu", HU_LOG_WHO_CSTR(handle),
+                        text_len);
     }
 
     if (step_rc != SQLITE_DONE && step_rc != SQLITE_ROW)
@@ -7114,7 +7111,7 @@ hu_error_t hu_imessage_test_handle_non_allowlisted(hu_channel_t *ch, const char 
      * regardless of whether we send a reply. Uses info-level so it does
      * not trip log-noise alerts. */
     hu_log_info("imessage", NULL, "non-allowlisted iMessage from %s; dropping (bucket=%lld)",
-                handle, (long long)bucket);
+                HU_LOG_WHO_CSTR(handle), (long long)bucket);
     bool should = hu_imessage_should_courtesy_reply(
         false, dedup_already_replied, c->courtesy_replies_enabled, aggregate_today_count);
     if (!should)

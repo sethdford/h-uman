@@ -310,6 +310,7 @@ static hu_error_t agent_skill_route_embed_fn(void *embed_ctx, hu_allocator_t *al
 #include "human/cognition/metacognition.h"
 #include "human/core/gate_mode.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include "human/humanness.h"
 #include "human/memory/evolved_opinions.h"
 #include "human/memory/lifecycle/semantic_cache.h"
@@ -365,6 +366,7 @@ static hu_error_t agent_skill_route_embed_fn(void *embed_ctx, hu_allocator_t *al
 #include "human/security/cot_audit.h"
 #include "human/security/history_scorer.h"
 #include "human/security/moderation.h"
+#include "human/security/self_harm.h"
 #include "human/security/sensitivity.h"
 #include "human/tools/cache_ttl.h"
 #include "human/voice.h"
@@ -1981,11 +1983,9 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                                     agent->relationship.total_turns = (uint32_t)rt;
                             }
                         }
-                        hu_log_info("agent", agent->observer, "frontier state restored for %.*s",
-                                    (int)(agent->memory_session_id_len > 20
-                                              ? 20
-                                              : agent->memory_session_id_len),
-                                    agent->memory_session_id);
+                        hu_log_info(
+                            "agent", agent->observer, "frontier state restored for %s",
+                            HU_LOG_WHO(agent->memory_session_id, agent->memory_session_id_len));
                     }
                 }
             }
@@ -6160,12 +6160,10 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                                         HU_OK &&
                                     got_blob) {
                                     if (got_blob->caption && got_blob->caption_len > 0)
-                                        hu_log_info(
-                                            "agent_turn", agent->observer,
-                                            "W10 blob %lld caption: %.*s", (long long)blob_id,
-                                            (int)(got_blob->caption_len < 80 ? got_blob->caption_len
-                                                                             : 80),
-                                            got_blob->caption);
+                                        hu_log_info("agent_turn", agent->observer,
+                                                    "W10 blob %lld caption: %s", (long long)blob_id,
+                                                    HU_LOG_TEXT(got_blob->caption,
+                                                                got_blob->caption_len, 80));
                                     hu_memory_blob_free(agent->alloc, got_blob);
                                 }
                             }
@@ -6590,25 +6588,6 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                                 "violence=%.2f self_harm=%.2f hate=%.2f",
                                 mod_result.violence_score, mod_result.self_harm_score,
                                 mod_result.hate_score);
-                    if (mod_result.self_harm) {
-                        /* Crisis escalation: inject crisis resources */
-                        static const char crisis[] =
-                            "\n\nIf you're in crisis, please reach out: "
-                            "988 Suicide & Crisis Lifeline (call/text 988), "
-                            "Crisis Text Line (text HOME to 741741)";
-                        size_t orig_len = *response_len_out;
-                        size_t new_len = orig_len + sizeof(crisis) - 1;
-                        char *expanded =
-                            (char *)agent->alloc->alloc(agent->alloc->ctx, new_len + 1);
-                        if (expanded) {
-                            memcpy(expanded, *response_out, orig_len);
-                            memcpy(expanded + orig_len, crisis, sizeof(crisis) - 1);
-                            expanded[new_len] = '\0';
-                            agent->alloc->free(agent->alloc->ctx, *response_out, orig_len + 1);
-                            *response_out = expanded;
-                            *response_len_out = new_len;
-                        }
-                    }
                     if (mod_result.violence) {
                         hu_log_warn("agent_turn", NULL,
                                     "CRITICAL FIX 2026-05-26: violence flagged "
@@ -6622,20 +6601,6 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                                     "user-facing reply. Band-aid: replace with safe "
                                     "decline; proper fix is regenerate-with-sterner-prompt.",
                                     mod_result.violence_score);
-                        /* Replace unsafe output with a safe canned decline.
-                         * Seth-shaped, short, no bracket markers, no directive
-                         * text. Channel receives this and sends. */
-                        static const char safe_decline[] = "rather not get into that one";
-                        size_t safe_len = sizeof(safe_decline) - 1;
-                        char *safe = (char *)agent->alloc->alloc(agent->alloc->ctx, safe_len + 1);
-                        if (safe) {
-                            memcpy(safe, safe_decline, safe_len);
-                            safe[safe_len] = '\0';
-                            agent->alloc->free(agent->alloc->ctx, *response_out,
-                                               *response_len_out + 1);
-                            *response_out = safe;
-                            *response_len_out = safe_len;
-                        }
                     }
                     if (mod_result.hate) {
                         hu_log_info("agent_turn", NULL,
@@ -6644,15 +6609,20 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                                     "[SAFETY] boundary directive to outgoing — same "
                                     "class of bug as the violence branch above)",
                                     mod_result.hate_score);
-                        /* Replace unsafe output with a safe canned decline.
-                         * Prior code prepended the boundary directive text to
-                         * *response_out, which sent the directive verbatim to
-                         * the recipient. */
-                        static const char hate_decline[] = "i'm gonna pass on this one";
-                        size_t safe_len = sizeof(hate_decline) - 1;
+                    }
+                    /* Replace unsafe output with a short decline (never the
+                     * directive text, which once reached the recipient). On a
+                     * crisis turn the SHIELD-005 floor instead: never a deflection. */
+                    if (mod_result.violence || mod_result.hate) {
+                        size_t safe_len = 0;
+                        const char *decline = hu_self_harm_decline_or_floor(
+                            msg, msg_len,
+                            mod_result.violence ? "rather not get into that one"
+                                                : "i'm gonna pass on this one",
+                            &safe_len);
                         char *safe = (char *)agent->alloc->alloc(agent->alloc->ctx, safe_len + 1);
                         if (safe) {
-                            memcpy(safe, hate_decline, safe_len);
+                            memcpy(safe, decline, safe_len);
                             safe[safe_len] = '\0';
                             agent->alloc->free(agent->alloc->ctx, *response_out,
                                                *response_len_out + 1);
@@ -6660,6 +6630,26 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                             *response_len_out = safe_len;
                         }
                     }
+                }
+            }
+
+            /* SHIELD-005: 988 keyed to the INBOUND message, never to the reply's own
+             * words (a reply offering 988 used to trip it and gain a second copy). */
+            if (*response_out && response_len_out &&
+                hu_self_harm_reply_needs_resources(msg, msg_len, *response_out,
+                                                   *response_len_out)) {
+                size_t rl = 0;
+                const char *line = hu_self_harm_resource_line(&rl);
+                size_t orig_len = *response_len_out, new_len = orig_len + 2 + rl;
+                char *expanded = (char *)agent->alloc->alloc(agent->alloc->ctx, new_len + 1);
+                if (expanded) {
+                    memcpy(expanded, *response_out, orig_len);
+                    memcpy(expanded + orig_len, "\n\n", 2);
+                    memcpy(expanded + orig_len + 2, line, rl);
+                    expanded[new_len] = '\0';
+                    agent->alloc->free(agent->alloc->ctx, *response_out, orig_len + 1);
+                    *response_out = expanded;
+                    *response_len_out = new_len;
                 }
             }
 

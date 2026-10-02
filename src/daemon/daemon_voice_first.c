@@ -4,6 +4,7 @@
 #include "human/context/voice_triggers.h"
 #include "human/core/gate_mode.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include "human/daemon/reactive_turn.h"
 #include "human/daemon/share_queue.h"
 #include "human/daemon/voice_first.h"
@@ -147,16 +148,6 @@ static void record_v2(struct hu_agent *agent, hu_gate_mode_t mode, const char *c
 #endif
 }
 
-/* A 16-bit tag for the shadow log, enough to count per contact. It is
- * pseudonymous, not anonymous: anyone holding the contact list can hash it and
- * match every tag. It only keeps the handle itself out of the log. */
-static unsigned contact_tag(const char *s, size_t n) {
-    uint32_t h = 2166136261u;
-    for (size_t i = 0; i < n; i++)
-        h = (h ^ (unsigned char)s[i]) * 16777619u;
-    return (unsigned)((h ^ (h >> 16)) & 0xffffu);
-}
-
 /* The owner's local time: the clock of the machine the daemon runs on. */
 static int local_minute_now(void) {
     time_t t = time(NULL);
@@ -213,10 +204,10 @@ static v2_outcome_t voice_v2_apply(struct hu_agent *agent, hu_gate_mode_t mode, 
             snprintf(week, sizeof(week), "%u", f.v2_memos_this_week);
     }
     hu_log_info("voice_first", NULL,
-                "[HU_VOICE_TRIGGERS_V2 %s] base=%s reason=%s pre=%s would_voice=%d contact=%04x "
+                "[HU_VOICE_TRIGGERS_V2 %s] base=%s reason=%s pre=%s would_voice=%d contact=%s "
                 "owner=%d close=%d week=%s",
                 mode == HU_GATE_LIVE ? "live" : "shadow", out->reason, o.why, pre, o.voice ? 1 : 0,
-                contact_tag(contact, contact_len),
+                HU_LOG_WHO(contact, contact_len),
                 hu_share_is_owner(agent->persona, contact, contact_len) ? 1 : 0,
                 f.close_contact ? 1 : 0, week);
     if (o.evaluated && mode == HU_GATE_LIVE && o.voice) {

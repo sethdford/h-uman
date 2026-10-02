@@ -2,6 +2,7 @@
 #include "human/daemon_contact_optout.h"
 #include "human/agent.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include "human/core/string.h"
 #include "human/memory.h"
 #ifdef HU_ENABLE_SQLITE
@@ -93,9 +94,9 @@ bool hu_daemon_contact_optout_observe(struct hu_agent *agent, const char *contac
     if (!hu_contact_optout_observe_db(db, contact, contact_len, text, len, (int64_t)time(NULL)))
         return false;
     hu_log_warn("human", agent->observer,
-                "[optout] %.*s asked us to stop — proactive contact suppressed from the next "
+                "[optout] %s asked us to stop — proactive contact suppressed from the next "
                 "tick (HU_CONTACT_OPTOUT; clear via contact_suppressions)",
-                (int)(contact_len > 24 ? 24 : contact_len), contact);
+                HU_LOG_WHO(contact, contact_len));
     return true;
 #else
     (void)agent;
@@ -120,8 +121,8 @@ bool hu_daemon_contact_optout_should_skip(struct hu_agent *agent, const char *co
     static unsigned skipped = 0;
     skipped++;
     hu_log_info("human", agent->observer,
-                "[optout] proactive skipped for %.24s — contact opted out [n=%u this process]",
-                contact, skipped);
+                "[optout] proactive skipped for %s — contact opted out [n=%u this process]",
+                HU_LOG_WHO_CSTR(contact), skipped);
     return true;
 #else
     (void)agent;

@@ -40,6 +40,7 @@
 #include "human/core/error.h"
 #include "human/core/gate_mode.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include "human/daemon.h"
 #include "human/daemon_proactive.h"
 #include "human/follow_up.h"
@@ -367,8 +368,8 @@ static void follow_up_scan_contact(const follow_up_tick_ctx_t *tc, const hu_cont
 
     unsigned age_hours = (unsigned)(age_ms / 3600000ULL);
     hu_log_info("follow_up_watcher", agent ? agent->observer : NULL,
-                "[follow-up-watcher shadow] would follow up %s after %uh", cp->contact_id,
-                age_hours);
+                "[follow-up-watcher shadow] would follow up %s after %uh",
+                HU_LOG_WHO_CSTR(cp->contact_id), age_hours);
 
     /* DEFER, not SEND. scripts/eval_when_to_speak.py:406 counts ANY
      * decision='send' row in the window as "not missed", regardless of the
