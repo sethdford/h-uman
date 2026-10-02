@@ -4277,6 +4277,7 @@ list(APPEND HU_TEST_SOURCES tests/test_curiosity_gaps.c)
 list(APPEND HU_TEST_SOURCES tests/test_agent_recall_provider.c)
 list(APPEND HU_TEST_SOURCES tests/test_memory_loader_scope.c)
 list(APPEND HU_TEST_SOURCES tests/test_confidence_boundary.c)
+list(APPEND HU_TEST_SOURCES tests/test_personal_model_prompt.c)
 
 # Sprint 60 follow-up — crosstalk SQLite lookup. Test seeds the
 # messages table directly via sqlite3 to verify the lookup returns

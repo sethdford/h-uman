@@ -457,6 +457,7 @@ void run_agent_recall_provider_tests(void);
 void run_memory_loader_scope_tests(void);
 void run_imessage_send_route_tests(void); /* pure; every build */
 void run_confidence_boundary_tests(void);
+void run_personal_model_prompt_tests(void);
 #ifdef HU_ENABLE_SQLITE
 void run_boundary_repo_tests(void);
 void run_opinions_repo_tests(void);
@@ -1589,6 +1590,7 @@ int main(int argc, char **argv) {
     run_memory_loader_scope_tests();
     run_imessage_send_route_tests();
     run_confidence_boundary_tests();
+    run_personal_model_prompt_tests();
 #ifdef HU_ENABLE_SQLITE
     run_boundary_repo_tests();
     run_opinions_repo_tests();
