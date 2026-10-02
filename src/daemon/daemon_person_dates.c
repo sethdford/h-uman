@@ -557,6 +557,17 @@ static void deliver_approved(struct hu_agent *agent, sqlite3 *db, const hu_conta
     }
 }
 
+bool hu_person_date_note_due_today(struct hu_agent *agent, const char *contact_id, int64_t now) {
+    if (!agent || !agent->persona || !contact_id || nudges_gate() != HU_GATE_LIVE)
+        return false;
+    candidate_t cand[16];
+    size_t n = collect(agent, now, 0, cand, 16);
+    for (size_t i = 0; i < n; i++)
+        if (strcmp(cand[i].contact_id, contact_id) == 0 && cand[i].days_away == 0)
+            return true;
+    return false;
+}
+
 void hu_date_nudges_tick(struct hu_agent *agent, struct hu_service_channel *channels,
                          size_t channel_count, int64_t now) {
     static int64_t last_pass = 0;
@@ -632,6 +643,11 @@ void hu_date_nudges_tick(struct hu_agent *agent, struct hu_service_channel *chan
 }
 
 #else /* !HU_ENABLE_SQLITE */
+
+bool hu_person_date_note_due_today(struct hu_agent *agent, const char *contact_id, int64_t now) {
+    (void)agent, (void)contact_id, (void)now;
+    return false;
+}
 
 bool hu_person_dates_handle_owner_message(struct hu_agent *agent, const char *owner,
                                           size_t owner_len, const char *text, size_t len,

@@ -14,6 +14,15 @@ unprompted paths are:
 |---|---|
 | `proactive` | proactive proposer (`hu_service_run_proactive_checkins`), and the follow-up watcher via `hu_daemon_proactive_gate_and_send` |
 | `cron` | an agent cron job aimed at a contact (`channel:contact`), e.g. from the schedule tool |
+
+**Undirected cron jobs** (a `channel` with no `:contact`) let the channel pick
+the recipient. For example, iMessage falls back to its configured
+`default_target`, which can be anyone. Their output goes only to the owner's own
+stdout sink, the `cli` channel, after blocking moderation (violence, hate and
+sexual content are withheld; a self-harm mention is not). On any other channel
+the recipient cannot be resolved, so the stack denies the send (fail closed,
+`reason=no_recipient`). The built-in research, DPO and experiment jobs all use
+`cli`.
 | `bump` | the read-no-reply bump (`daemon_followup_sched.c`), screened before compose and again at delivery |
 | `f25` | the F25 emotional check-in |
 | `photo` | the proactive photo share |
@@ -35,6 +44,11 @@ opt-out sent from a contact's email address therefore counts for that contact.
 
 ## Stages (first deny wins)
 
+0. **date priority**: a `proactive` or `f25` check-in is skipped for a contact
+   whose date note (an owner-given date or a Contacts birthday) is due today
+   while `HU_DATE_NUDGES=live` (`reason=date_note_today`). The note takes that
+   contact's one slot under the cap. The cap itself is unchanged, so a third
+   unprompted send that day is still refused.
 1. **opt-out**: the contact asked us to stop (`contact_suppressions`).
 2. **governor**: the global daily and weekly ceiling, then this contact's
    unanswered cool-off. Two unanswered means 144 h, three means 288 h, and four

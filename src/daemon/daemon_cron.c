@@ -192,6 +192,22 @@ void hu_daemon_cron_tick(hu_allocator_t *alloc) {
     alloc->free(alloc->ctx, cron_path, cron_path_len + 1);
 }
 
+bool hu_daemon_cron_is_owner_sink(const char *channel_name) {
+    /* The cli channel writes to the daemon's stdout (the owner's terminal or
+     * launchd log) and nowhere else. */
+    return channel_name && strcmp(channel_name, "cli") == 0;
+}
+
+bool hu_daemon_cron_owner_text_ok(hu_allocator_t *alloc, const char *text, size_t len) {
+    hu_moderation_result_t mod;
+    memset(&mod, 0, sizeof(mod));
+    if (!text || len == 0 || hu_moderation_check(alloc, text, len, &mod) != HU_OK)
+        return false; /* blocking: a check that cannot run does not pass */
+    /* As in the outbound pipeline's moderation stage: a self-harm mention
+     * alone is not blocked; violence, hate and sexual content are. */
+    return !(mod.violence || mod.hate || mod.sexual);
+}
+
 hu_error_t hu_service_run_agent_cron(hu_allocator_t *alloc, hu_agent_t *agent,
                                      hu_service_channel_t *channels, size_t channel_count) {
     return hu_service_run_agent_cron_at(alloc, agent, channels, channel_count, time(NULL));
@@ -335,24 +351,30 @@ hu_error_t hu_service_run_agent_cron_at(hu_allocator_t *alloc, hu_agent_t *agent
                                                  hu_error_string(ug_err));
                                 break;
                             }
-                            /* SHIELD-004: Moderation check before cron send */
-                            {
-                                hu_moderation_result_t mod_r;
-                                memset(&mod_r, 0, sizeof(mod_r));
-                                hu_error_t mod_err =
-                                    hu_moderation_check(alloc, response, response_len, &mod_r);
-                                if (mod_err != HU_OK) {
-                                    hu_log_error("human", NULL, "cron moderation check failed: %s",
-                                                 hu_error_string(mod_err));
-                                } else if (mod_r.flagged) {
-                                    hu_log_info("human", NULL,
-                                                "cron moderation flagged: v=%.2f sh=%.2f",
-                                                mod_r.violence_score, mod_r.self_harm_score);
-                                }
+                            /* No contact in the job: the channel picks the recipient
+                             * (iMessage falls back to its configured default_target,
+                             * which can be anyone). Only the owner's own stdout sink
+                             * may receive undirected output; anywhere else the
+                             * recipient is unresolvable, so the stack denies it
+                             * (fail closed, reason no_recipient). */
+                            if (!hu_daemon_cron_is_owner_sink(ch_part)) {
+                                hu_unprompted_gate_t ug;
+                                hu_daemon_unprompted_gate_init(&ug, alloc, agent, ch_part, NULL, 0,
+                                                               (int64_t)now);
+                                (void)hu_unprompted_send_check(&ug, NULL, HU_UNPROMPTED_CRON,
+                                                               (int64_t)now, response,
+                                                               &response_len, true);
+                                break;
+                            }
+                            /* SHIELD-004: moderation before the owner-sink send, now
+                             * BLOCKING (it only logged). Same policy as stage 7. */
+                            if (!hu_daemon_cron_owner_text_ok(alloc, response, response_len)) {
+                                hu_log_info("human", NULL, "cron output to %s withheld: moderation",
+                                            ch_part);
+                                break;
                             }
                             hu_error_t send_err = channels[c].channel->vtable->send(
-                                channels[c].channel->ctx, target_part, target_part_len, response,
-                                response_len, NULL, 0);
+                                channels[c].channel->ctx, NULL, 0, response, response_len, NULL, 0);
                             if (send_err != HU_OK) {
                                 hu_log_error("human", NULL, "cron send failed: %s",
                                              hu_error_string(send_err));

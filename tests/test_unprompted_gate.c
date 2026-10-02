@@ -426,6 +426,69 @@ static void test_cron_directed_send_allowed_for_consenting_contact(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
+static const char *ug_cli_name(void *ctx) {
+    (void)ctx;
+    return "cli";
+}
+
+/* A cron job with no contact in its channel ("imessage", not
+ * "imessage:+1...") used to send with an empty target, which the iMessage
+ * channel resolves to its configured default_target — a real person the gate
+ * never saw. The recipient cannot be resolved, so the stack denies it; only
+ * the owner's own stdout sink (cli) may take undirected output. */
+static void test_cron_undirected_denied_except_owner_sink(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    hu_cron_scheduler_t *sched = hu_cron_create(&alloc, 8, true);
+    HU_ASSERT_NOT_NULL(sched);
+    uint64_t id = 0;
+    HU_ASSERT_EQ(
+        hu_cron_add_agent_job(sched, &alloc, "* * * * *", "say hi", "imessage", "undirected", &id),
+        HU_OK);
+    struct hu_agent agent = {0};
+    agent.alloc = &alloc;
+    agent.memory = &mem;
+    agent.scheduler = sched;
+    hu_channel_t chan = ug_channel();
+    hu_service_channel_t chans[1] = {{.channel = &chan}};
+    HU_ASSERT_EQ(hu_service_run_agent_cron_at(&alloc, &agent, chans, 1, (time_t)ug_local_noon(0)),
+                 HU_OK);
+    HU_ASSERT_EQ(g_ug.sends, 0);
+    hu_cron_destroy(sched, &alloc);
+
+    /* Control: the same undirected job on the owner sink IS delivered. */
+    sched = hu_cron_create(&alloc, 8, true);
+    HU_ASSERT_EQ(
+        hu_cron_add_agent_job(sched, &alloc, "* * * * *", "report", "cli", "research-agent", &id),
+        HU_OK);
+    agent.scheduler = sched;
+    hu_channel_vtable_t cli_vt = {.send = ug_send, .name = ug_cli_name};
+    hu_channel_t cli = {.ctx = NULL, .vtable = &cli_vt};
+    hu_service_channel_t cli_chans[1] = {{.channel = &cli}};
+    HU_ASSERT_EQ(
+        hu_service_run_agent_cron_at(&alloc, &agent, cli_chans, 1, (time_t)ug_local_noon(0)),
+        HU_OK);
+    HU_ASSERT_EQ(g_ug.sends, 1);
+    HU_ASSERT_STR_EQ(g_ug.last_target, "");
+    HU_ASSERT_STR_EQ(g_ug.last_msg, "[agent-cron-test]");
+    hu_cron_destroy(sched, &alloc);
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* The owner-sink moderation is blocking now (it only logged), with the
+ * outbound pipeline's policy: violence blocks, a self-harm mention and
+ * ordinary chat do not. */
+static void test_cron_owner_sink_moderation_blocks(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    HU_ASSERT_TRUE(hu_daemon_cron_is_owner_sink("cli"));
+    HU_ASSERT_FALSE(hu_daemon_cron_is_owner_sink("imessage"));
+    HU_ASSERT_FALSE(hu_daemon_cron_is_owner_sink(NULL));
+    HU_ASSERT_TRUE(hu_daemon_cron_owner_text_ok(&alloc, "3 new papers today", 18));
+    HU_ASSERT_TRUE(hu_daemon_cron_owner_text_ok(&alloc, "did you spend it all at the fair lol",
+                                                strlen("did you spend it all at the fair lol")));
+    HU_ASSERT_FALSE(hu_daemon_cron_owner_text_ok(&alloc, "i will kill him", 15));
+}
+
 /* Owner-scheduled delivery must not stall when unprompted sends spent the
  * global budget: the delivery pass runs before the daemon's budget gate and
  * consults the budget only for unprompted (tagged) entries. */
@@ -688,6 +751,8 @@ void run_unprompted_gate_tests(void) {
     HU_RUN_TEST(test_violent_text_blocked_by_stage7_and_clean_text_passes);
     HU_RUN_TEST(test_spend_it_all_is_not_blocked_at_send);
     HU_RUN_TEST(test_cron_directed_send_allowed_for_consenting_contact);
+    HU_RUN_TEST(test_cron_undirected_denied_except_owner_sink);
+    HU_RUN_TEST(test_cron_owner_sink_moderation_blocks);
     HU_RUN_TEST(test_owner_scheduled_delivered_with_budget_exhausted);
     HU_RUN_TEST(test_email_fallback_contact_is_one_key);
     HU_RUN_TEST(test_no_ledger_fails_closed);

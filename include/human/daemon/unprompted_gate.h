@@ -10,6 +10,8 @@
  * the LLM had already approved (47 wasted approvals; ~43 restarts reset it).
  *
  * Stages, always in this order (first deny wins):
+ *   0. date priority    a PROACTIVE or F25 check-in is skipped for a contact
+ *                       whose date note (birthday, anniversary) is due today
  *   1. opt-out          contact asked us to stop (consent)
  *   2. governor         global daily/weekly ceiling, then THIS contact's
  *                       unanswered cool-off (2 unanswered → 144h, 3 → 288h,
@@ -61,17 +63,19 @@ typedef enum hu_unprompted_kind {
 
 typedef enum hu_unprompted_reason {
     HU_UNPROMPTED_ALLOW = 0,
-    HU_UNPROMPTED_DENY_INVALID,     /* no contact / no gate */
-    HU_UNPROMPTED_DENY_OPTOUT,      /* stage 1 */
-    HU_UNPROMPTED_DENY_GOVERNOR,    /* stage 2: global ceiling */
-    HU_UNPROMPTED_DENY_COOLOFF,     /* stage 2: this contact's unanswered cool-off */
-    HU_UNPROMPTED_DENY_CAP,         /* stage 3: per-contact cap */
-    HU_UNPROMPTED_DENY_NO_LEDGER,   /* stage 3: cap cannot be counted — fail closed */
-    HU_UNPROMPTED_DENY_RATE_LIMIT,  /* stage 3: channel token bucket */
-    HU_UNPROMPTED_DENY_QUIET_HOURS, /* stage 4 */
-    HU_UNPROMPTED_DENY_CIRCUIT,     /* stage 5 */
-    HU_UNPROMPTED_DENY_UNREACHABLE, /* stage 6 */
-    HU_UNPROMPTED_DENY_SANITIZER,   /* stage 7 (includes the pipeline's moderation) */
+    HU_UNPROMPTED_DENY_INVALID,         /* no gate / no kind */
+    HU_UNPROMPTED_DENY_NO_RECIPIENT,    /* no resolvable contact: fail closed */
+    HU_UNPROMPTED_DENY_DATE_NOTE_TODAY, /* routine check-in yields to today's date note */
+    HU_UNPROMPTED_DENY_OPTOUT,          /* stage 1 */
+    HU_UNPROMPTED_DENY_GOVERNOR,        /* stage 2: global ceiling */
+    HU_UNPROMPTED_DENY_COOLOFF,         /* stage 2: this contact's unanswered cool-off */
+    HU_UNPROMPTED_DENY_CAP,             /* stage 3: per-contact cap */
+    HU_UNPROMPTED_DENY_NO_LEDGER,       /* stage 3: cap cannot be counted — fail closed */
+    HU_UNPROMPTED_DENY_RATE_LIMIT,      /* stage 3: channel token bucket */
+    HU_UNPROMPTED_DENY_QUIET_HOURS,     /* stage 4 */
+    HU_UNPROMPTED_DENY_CIRCUIT,         /* stage 5 */
+    HU_UNPROMPTED_DENY_UNREACHABLE,     /* stage 6 */
+    HU_UNPROMPTED_DENY_SANITIZER,       /* stage 7 (includes the pipeline's moderation) */
 } hu_unprompted_reason_t;
 
 #define HU_UNPROMPTED_DAILY_CAP     1

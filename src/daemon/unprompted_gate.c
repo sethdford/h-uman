@@ -6,6 +6,7 @@
 #include "human/agent/proactive.h"
 #include "human/autoresponder.h"
 #include "human/core/log.h"
+#include "human/daemon/person_dates.h"
 #include "human/daemon_contact_optout.h"
 #include "human/daemon_proactive.h"
 #include "human/memory.h"
@@ -58,6 +59,10 @@ const char *hu_unprompted_reason_str(hu_unprompted_reason_t reason) {
         return "none";
     case HU_UNPROMPTED_DENY_INVALID:
         return "invalid";
+    case HU_UNPROMPTED_DENY_NO_RECIPIENT:
+        return "no_recipient";
+    case HU_UNPROMPTED_DENY_DATE_NOTE_TODAY:
+        return "date_note_today";
     case HU_UNPROMPTED_DENY_OPTOUT:
         return "contact_optout";
     case HU_UNPROMPTED_DENY_GOVERNOR:
@@ -227,8 +232,19 @@ hu_unprompted_reason_t hu_unprompted_send_check(const hu_unprompted_gate_t *g, c
                                                 size_t *text_len_io, bool at_send) {
     hu_unprompted_reason_t r = HU_UNPROMPTED_DENY_INVALID;
     char key[128];
-    if (g && contact && contact[0] && kind != HU_UNPROMPTED_NONE)
-        r = unprompted_policy(g, unprompted_canon(g, contact, key, sizeof(key)), now, at_send);
+    if (g && kind != HU_UNPROMPTED_NONE && (!contact || !contact[0])) {
+        r = HU_UNPROMPTED_DENY_NO_RECIPIENT;
+    } else if (g && kind != HU_UNPROMPTED_NONE) {
+        const char *who = unprompted_canon(g, contact, key, sizeof(key));
+        /* 0. date priority: today's date note owns this contact's one slot
+         * under the cap, so the routine check-ins step aside (the cap itself
+         * is unchanged — the note still charges it). */
+        if ((kind == HU_UNPROMPTED_PROACTIVE || kind == HU_UNPROMPTED_F25) &&
+            hu_person_date_note_due_today(g->agent, who, now))
+            r = HU_UNPROMPTED_DENY_DATE_NOTE_TODAY;
+        else
+            r = unprompted_policy(g, who, now, at_send);
+    }
 
     /* 7. sanitizer: the PROACTIVE outbound pipeline, whose moderation stage
      * blocks violence/hate/sexual content and (deliberately) not a mention of
