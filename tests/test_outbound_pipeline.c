@@ -55,31 +55,6 @@ typedef struct fake_stage_state {
     int call_count;
 } fake_stage_state_t;
 
-static hu_outbound_verdict_t fake_stage_run(hu_outbound_pipeline_stage_t *self, hu_outbound_message_t *msg,
-                                            hu_outbound_context_t *ctx) {
-    (void)msg;
-    fake_stage_state_t *st = (fake_stage_state_t *)self->state;
-    st->call_count++;
-    switch (st->kind) {
-    case HU_OUTBOUND_SEND:
-        return hu_outbound_verdict_send();
-    case HU_OUTBOUND_REJECT:
-        return hu_outbound_verdict_reject(st->reason);
-    case HU_OUTBOUND_REGENERATE:
-        return hu_outbound_verdict_regenerate(st->reason, st->regenerate_hint);
-    case HU_OUTBOUND_REWRITE: {
-        size_t n = strlen(st->rewrite_text);
-        char *buf = (char *)ctx->alloc->alloc(ctx->alloc->ctx, n + 1);
-        if (!buf)
-            return hu_outbound_verdict_reject("alloc_failed");
-        memcpy(buf, st->rewrite_text, n);
-        buf[n] = '\0';
-        return hu_outbound_verdict_rewrite(st->reason, buf, n);
-    }
-    }
-    return hu_outbound_verdict_send();
-}
-
 /* Allocate a content buffer the pipeline can later free via apply_rewrite. */
 static char *test_dup(hu_allocator_t *alloc, const char *s) {
     size_t n = strlen(s);

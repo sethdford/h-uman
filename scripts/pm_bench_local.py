@@ -24,6 +24,15 @@ Reports counts and rates only, no action, cue or conversation text, to
   update_miss                  reschedule steps whose fired set was wrong / those steps
   judge_failure_rate           (parse_fail + judge_err) / candidates
 
+--dump-steps PATH (default off) also writes one JSON line per judged step, 0600 via
+the same private writer, once every scenario has run (also on an INCONCLUSIVE
+run, never on a refusal): scenario id, class (clean, overloaded, silent_negative,
+cancellation, reschedule, cross_day_keyword, cross_day_time), step index, op,
+tags, and per seeded intention its key, whether the step expected it to fire,
+and the judged verdict (fire|already_resolved|cancel|not_now|parse_fail|
+judge_err, or not_candidate when the filter never sent it to the judge).
+Scripted scenarios only: keys, ids and verdicts, never action or message text.
+
 Verdict PASS iff set_f1 >= 0.80, silent_negative_false_alarm <= 0.05 and
 cross_day_miss <= 0.10 (exit 0); otherwise FAIL (exit 1). Both write the report.
 Refuses (exit 2, writes nothing) when the binary is missing, any probe exits
@@ -348,7 +357,15 @@ def seed(con, it):
     con.commit()
 
 
-def run_scenario(a, scn, scratch, idx):
+def dump_class(scn):
+    """The diagnostic class name: cross_day splits into its keyword and time halves."""
+    if scn["cls"] == "cross_day":
+        return "cross_day_time" if scn["id"].startswith("crossday-time-") else "cross_day_keyword"
+    return {"clean_positive": "clean", "overloaded_positive": "overloaded"}.get(scn["cls"],
+                                                                             scn["cls"])
+
+
+def run_scenario(a, scn, scratch, idx, dump=None):
     db = os.path.join(scratch, f"s{idx}.db")
     if probe(a, ["init", "--db", db]).strip() != "ok":
         raise ProbeError("init did not print ok")
@@ -386,13 +403,21 @@ def run_scenario(a, scn, scratch, idx):
                 # read as a correct silence or a correct fire.
                 continue
             pred = set()
+            judged = {}
             for item_id, verdict in items:
                 row = con.execute("SELECT action FROM prospective_memories WHERE id=?",
                                   (item_id,)).fetchone()
                 if not row or row[0] not in by_action:
                     raise ProbeError("probe named an intention the scenario never seeded")
+                judged[by_action[row[0]]] = verdict
                 if verdict == "fire":
                     pred.add(by_action[row[0]])
+            if dump is not None:
+                dump.append({"scenario": scn["id"], "class": dump_class(scn), "step": k,
+                             "op": st["op"], "tags": list(st["tags"]),
+                             "intentions": [{"key": key, "expected": key in st["expect"],
+                                             "verdict": judged.get(key, "not_candidate")}
+                                            for key in sorted(set(by_action.values()))]})
             results.append({"expect": st["expect"], "pred": sorted(pred), "tags": st["tags"]})
     finally:
         con.close()
@@ -421,6 +446,8 @@ def main(argv=None):
                     choices=["model", "fire", "already_resolved", "cancel", "not_now"])
     ap.add_argument("--out-dir", default=os.path.join(HOME, ".human/logs"))
     ap.add_argument("--timeout", type=int, default=120)
+    ap.add_argument("--dump-steps", metavar="PATH", default=None,
+                    help="also write a per-step expected-vs-judged JSONL diagnostic (0600)")
     a = ap.parse_args(argv)
     if not (os.path.isfile(a.human_bin) and os.access(a.human_bin, os.X_OK)):
         return refuse(f"no executable human binary at {a.human_bin}")
@@ -431,10 +458,11 @@ def main(argv=None):
         return refuse(str(e))
     scratch = tempfile.mkdtemp(prefix="pm-bench-")
     results = []
+    dump = [] if a.dump_steps else None
     judge = {"candidates": 0, "parse_fail": 0, "judge_err": 0, "write_err": 0}
     try:
         for i, scn in enumerate(scenarios):
-            r, j = run_scenario(a, scn, scratch, i)
+            r, j = run_scenario(a, scn, scratch, i, dump)
             results += r
             for k in judge:
                 judge[k] += j[k]
@@ -444,6 +472,8 @@ def main(argv=None):
         shutil.rmtree(scratch, ignore_errors=True)
     if judge["candidates"] == 0:
         return refuse("no intention was ever judged")
+    if dump is not None:
+        print(f"wrote {cn.write_jsonl_private(a.dump_steps, dump)}")
     # write_err joins parse_fail/judge_err in the same failure budget (fix
     # round 1): a step whose surfaced write failed measured the plumbing, not
     # the policy, same as a judge parse failure or a judge error.

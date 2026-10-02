@@ -225,12 +225,23 @@ const char *hu_prospective_judge_system(size_t *len);
 /* The user turn: the last lines of `history` (at most 4000 bytes, cut at a
  * line start; "(none)" when empty), the intention and its cue ("they just
  * mentioned \"<cue>\"" for keyword, "it came due N day(s) ago" for time),
- * then "answer:". Returns the bytes written, 0 when it does not fit. */
+ * then "answer:". A keyword cue also carries "noted: today" / "noted: N
+ * day(s) ago" from `noted_days` (local CALENDAR days between the note and
+ * now, see hu_prospective_noted_days; < 0 = unknown, line omitted); a time
+ * cue ignores it (its due time is its clock). Returns the bytes written, 0
+ * when it does not fit. */
 size_t hu_prospective_judge_user(char *buf, size_t cap, const char *history, size_t history_len,
                                  const char *action, const char *cue,
-                                 hu_prospective_cue_kind_t kind, int64_t overdue_s);
+                                 hu_prospective_cue_kind_t kind, int64_t overdue_s,
+                                 int64_t noted_days);
 
 /* Local midnight at or before `now` — the day of the per-day cap. */
 int64_t hu_prospective_local_day_start(int64_t now);
+
+/* Local calendar days from `created_at` to `now` (noted 23:00, now 08:00 the
+ * next morning = 1), rounded so a 23 h / 25 h DST day still counts as one.
+ * -1 when the age is unknown: created_at <= 0 (never recorded) or later than
+ * now (clock skew). */
+int64_t hu_prospective_noted_days(int64_t created_at, int64_t now);
 
 #endif /* HU_MEMORY_PROSPECTIVE_POLICY_H */
