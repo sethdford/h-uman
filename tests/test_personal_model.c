@@ -82,6 +82,39 @@ static void personal_model_ingest_updates_style_metrics(void) {
     HU_ASSERT_EQ((unsigned)m.style.avg_message_length, (unsigned)len);
 }
 
+/* avg = (avg*n + len) / (n+1) in integers truncates: past a few dozen
+ * samples any message shorter than the average drops it by 1 and nothing
+ * can raise it. Production read "avg 2 chars" on 2026-10-02 and every
+ * reply prompt carried it. Messages alternating 30/50 chars average 40. */
+static void personal_model_avg_length_does_not_drift_down(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    char short_msg[31], long_msg[51];
+    memset(short_msg, 'a', 30);
+    short_msg[30] = '\0';
+    memset(long_msg, 'b', 50);
+    long_msg[50] = '\0';
+    for (int i = 0; i < 400; i++) {
+        const char *t = (i % 2) ? long_msg : short_msg;
+        HU_ASSERT_EQ(hu_personal_model_ingest(&m, t, strlen(t), true, 0, NULL), HU_OK);
+    }
+    HU_ASSERT_TRUE(m.style.avg_message_length >= 35 && m.style.avg_message_length <= 45);
+}
+
+/* A stuck-low average must recover once real messages arrive. */
+static void personal_model_avg_length_recovers_from_a_bad_value(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    m.style.sample_count = 5000;
+    m.style.avg_message_length = 2;
+    char msg[41];
+    memset(msg, 'c', 40);
+    msg[40] = '\0';
+    for (int i = 0; i < 100; i++)
+        HU_ASSERT_EQ(hu_personal_model_ingest(&m, msg, 40, true, 0, NULL), HU_OK);
+    HU_ASSERT_TRUE(m.style.avg_message_length >= 30);
+}
+
 static void personal_model_has_content_false_when_fresh(void) {
     hu_personal_model_t m;
     hu_personal_model_init(&m);
@@ -3179,6 +3212,8 @@ void run_personal_model_tests(void) {
     HU_RUN_TEST(personal_model_build_prompt_non_empty);
     HU_RUN_TEST(personal_model_query_preference_finds_match);
     HU_RUN_TEST(personal_model_ingest_updates_style_metrics);
+    HU_RUN_TEST(personal_model_avg_length_does_not_drift_down);
+    HU_RUN_TEST(personal_model_avg_length_recovers_from_a_bad_value);
     HU_RUN_TEST(personal_model_has_content_false_when_fresh);
     HU_RUN_TEST(personal_model_has_content_true_after_fact);
     HU_RUN_TEST(personal_model_has_content_true_after_style_observation);
