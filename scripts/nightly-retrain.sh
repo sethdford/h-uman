@@ -421,7 +421,11 @@ run_mlxtune_candidate_stage() {
     run_empty_reply_eval_stage "$candidate_dir" "${score_out:-}"
 
     log "mlx-tune candidate stage: candidate staged at $candidate_dir (NOT promoted)"
-    log "mlx-tune candidate stage: to promote after human review: python3 $REPO/scripts/register_v6_adapter.py --adapter $candidate_dir --log $mlxtune_train_log"
+    # register_v6_adapter.py only records the registry row (it never swaps or
+    # sets promoted); the swap -- and every promotion gate, including the
+    # empty-reply manifest -- is m3_promote.py promote. Name both.
+    log "mlx-tune candidate stage: to register: python3 $REPO/scripts/register_v6_adapter.py --adapter $candidate_dir --log $mlxtune_train_log"
+    log "mlx-tune candidate stage: to promote after human review: python3 $REPO/scripts/m3_promote.py promote --adapter $candidate_dir --evidence '<gate ref>' --yes"
 }
 
 # ── Offline empty-reply eval (HU_RETRAIN_EMPTY_EVAL=off|shadow|live) ────────
@@ -562,11 +566,17 @@ run_empty_reply_eval_arm() {
 # Write an enforced INCONCLUSIVE empty-reply manifest WITHOUT empty_reply_gate.py
 # (the fallback for when that script fails). Same schema its reader,
 # empty_reply_gate.enforced_empty_reply_verdict(), expects: empty_reply.verdict
-# + empty_reply.enforce=true. Atomic (tmp + mv). $2 must be [A-Za-z0-9_] only.
+# + empty_reply.enforce=true -- which m3_promote.py honours whatever the
+# promoter's own HU_RETRAIN_EMPTY_EVAL is. Atomic (tmp + mv). $2 must be
+# [A-Za-z0-9_] only. Non-zero (and no .tmp left) if it could not be written.
 write_blocking_empty_manifest() {
     local out="$1" reason="$2" tmp="$1.tmp.$$"
-    printf '{"schema": 1, "written_at": "%s", "empty_reply": {"verdict": "INCONCLUSIVE", "reason": "%s", "mode": "live", "enforce": true}, "promotion_gate": {"verdict": "INCONCLUSIVE", "mode": "live"}}\n' \
-        "$(date +%Y-%m-%dT%H:%M:%S)" "$reason" > "$tmp" && mv -f "$tmp" "$out"
+    if printf '{"schema": 1, "written_at": "%s", "empty_reply": {"verdict": "INCONCLUSIVE", "reason": "%s", "mode": "live", "enforce": true}, "promotion_gate": {"verdict": "INCONCLUSIVE", "mode": "live"}}\n' \
+            "$(date +%Y-%m-%dT%H:%M:%S)" "$reason" > "$tmp" 2>/dev/null && mv -f "$tmp" "$out" 2>/dev/null; then
+        return 0
+    fi
+    rm -f "$tmp" 2>/dev/null
+    return 1
 }
 
 # $1 candidate adapter dir, $2 the night's authorship score json (may be "").
@@ -575,6 +585,17 @@ run_empty_reply_eval_stage() {
     mode=$(empty_eval_mode)
     [[ "$mode" == "off" ]] && return 0
     local tag="empty-reply eval [$mode]" t0 stamp serving eval_port="${HU_RETRAIN_EVAL_PORT:-8748}"
+    local manifest="$candidate_dir/promotion_manifest.json" gate_rc
+    # Fail closed from the FIRST moment (re-review 2026-10-02): each arm loads
+    # a 56 GB model, and a kill or reboot mid-arm must still leave a manifest
+    # that blocks. It is enforce=true, so it blocks even when the human who
+    # promotes by hand has no HU_RETRAIN_EMPTY_EVAL set. If it cannot be
+    # written, no arm runs and the stage fails.
+    if [[ "$mode" == "live" && -d "$candidate_dir" ]] \
+            && ! write_blocking_empty_manifest "$manifest" "empty_reply_eval_did_not_complete"; then
+        log "$tag: blocking manifest write FAILED ($manifest) — stage aborted, no arm run"
+        return 1
+    fi
     t0=$(date +%s); stamp=$(date +%Y%m%d-%H%M)
     serving=$(serving_adapter_path)
     local s_out="$HOME/.human/logs/empty-reply-serving-$stamp.json"
@@ -606,18 +627,19 @@ run_empty_reply_eval_stage() {
     fi
     # Fail closed (critic HIGH, 2026-10-02): no `set -e` here, so a crashed
     # empty_reply_gate.py used to leave no manifest -- which m3_promote.py read
-    # as "no gate". In live a blocking manifest is pre-written (a crash before
-    # or during the gate's own write leaves it, or an unreadable file, behind)
-    # and rewritten if the gate exits non-zero. The fallback writer is plain
-    # printf, so it works even when the gate script cannot.
-    local manifest="$candidate_dir/promotion_manifest.json" gate_rc
+    # as "no gate". In live the blocking manifest written at stage start is
+    # still in place (a crash before or during the gate's own atomic write
+    # leaves it), and it is rewritten if the gate exits non-zero. The fallback
+    # writer is plain printf, so it works even when the gate script cannot.
     if [[ -d "$candidate_dir" ]]; then
-        [[ "$mode" == "live" ]] && write_blocking_empty_manifest "$manifest" "empty_reply_gate_did_not_complete"
         python3 "$REPO/scripts/empty_reply_gate.py" "${gate_args[@]}" 2>&1 | tee -a "$LOG"
         gate_rc=${PIPESTATUS[0]}
         if [[ "$gate_rc" != "0" ]]; then
             if [[ "$mode" == "live" ]]; then
-                write_blocking_empty_manifest "$manifest" "empty_reply_gate_exit_$gate_rc"
+                if ! write_blocking_empty_manifest "$manifest" "empty_reply_gate_exit_$gate_rc"; then
+                    log "$tag: empty_reply_gate.py exited $gate_rc and the blocking manifest write FAILED; the stage-start INCONCLUSIVE manifest (if intact) still blocks"
+                    return 1
+                fi
                 log "$tag: empty_reply_gate.py exited $gate_rc — INCONCLUSIVE recorded (enforced); promotion BLOCKED"
             else
                 log "$tag: empty_reply_gate.py exited $gate_rc — shadow, nothing enforced"

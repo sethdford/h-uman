@@ -1245,10 +1245,24 @@ jobs:
       # tests/fixtures/glm45_air_tokenizer/) -- no HF cache, no model; the
       # real-tokenizer variant skips here by design. mlx CPU wheel on Linux,
       # pinned to the versions assert_mlx_lm_preconditions() requires.
-      - name: Nightly SFT template-contract + empty-reply gate pins (hermetic)
+      # transformers/tokenizers pinned to the versions the tests were verified
+      # with (mlx-lm only requires transformers>=5). The INSTALL may flake on
+      # PyPI (3 tries, then continue-on-error); the tests never do -- they are
+      # skipped only when the install step itself failed, and that shows as a
+      # failed (allowed) step in the run, not as a pass.
+      - name: Install nightly SFT test deps (mlx CPU wheel; retried)
+        id: sft_deps
+        continue-on-error: true
         run: |
           python3 -m venv /tmp/sft-venv
-          /tmp/sft-venv/bin/pip install --quiet "mlx[cpu]==0.31.2" "mlx-lm==0.31.3" tokenizers tqdm pytest
-          HF_HUB_OFFLINE=1 /tmp/sft-venv/bin/python -m pytest -q scripts/test_mlx_lm_sft_templated.py scripts/test_empty_reply_gate.py
+          for i in 1 2 3; do
+            /tmp/sft-venv/bin/pip install --quiet "mlx[cpu]==0.31.2" "mlx-lm==0.31.3" \
+              "transformers==5.16.1" "tokenizers==0.23.1" tqdm pytest && exit 0
+            echo "pip install attempt $i failed; retrying"; sleep $((i * 15))
+          done
+          exit 1
+      - name: Nightly SFT template-contract + empty-reply gate pins (hermetic)
+        if: steps.sft_deps.outcome == 'success'
+        run: HF_HUB_OFFLINE=1 /tmp/sft-venv/bin/python -m pytest -q scripts/test_mlx_lm_sft_templated.py scripts/test_empty_reply_gate.py
       - name: Enforce capability registry against blind_ab gate
         run: python3 scripts/check_capability_gates.py

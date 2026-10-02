@@ -41,6 +41,12 @@ every = 2 if "bad" in name else 4 if "serving" in name else 0
 counter = itertools.count(1)
 with open(os.path.join(os.environ["HOME"], ".fake-server.launches"), "a") as f:
     f.write(f"{a.port} {a.adapter_path} MLX_EMPTY_RETRY={os.environ.get('MLX_EMPTY_RETRY')}\n")
+if os.environ.get("FAKE_SERVER_KILL_STAGE") == "1":
+    # Simulate nightly-retrain.sh killed (or the box rebooting) mid-arm: SIGKILL
+    # the stage shell that launched this spare, then exit.
+    import signal
+    os.kill(os.getppid(), signal.SIGKILL)
+    sys.exit(0)
 class H(BaseHTTPRequestHandler):
     def log_message(self, *x): pass
     def _send(self, obj):
@@ -220,5 +226,37 @@ check "gate crash, shadow: nothing enforced (no manifest written by the fallback
     "[ \"\$(reader_verdict \"$CS\")\" = None ]" "$outs"
 check "gate crash, shadow: the failure is still logged" "[[ \"\$outs\" == *'empty_reply_gate.py exited 1'* ]]" "$outs"
 rm -rf "$HS" "$CRASH_REPO"
+
+
+# ── Case 14: stage KILLED mid-arm (re-review MED) ───────────────────────────
+# The blocking manifest must already exist when the first 56 GB arm starts,
+# and it must block a promoter whose shell has NO HU_RETRAIN_EMPTY_EVAL set
+# (promotion is run by hand). Checked through m3_promote's own verdict path.
+HK=$(mktemp -d); setup_home "$HK"; CK="$HK/.human/training-data/adapters/seth-glm-air-good-cand"; mkdir -p "$CK"
+outk=$(FAKE_SERVER_KILL_STAGE=1 HU_RETRAIN_EMPTY_EVAL=live HU_RETRAIN_EVAL_DEADLINE=none run_stage "$HK" "$CK" 19758)
+check "killed mid-arm: the spare was launched (the kill happened inside an arm)" "[ -e \"$HK/.fake-server.launches\" ]" "$outk"
+check "killed mid-arm: manifest already written, INCONCLUSIVE + enforced" \
+    "[ \"\$(manifest_field \"$CK/promotion_manifest.json\" empty_reply.verdict)\" = INCONCLUSIVE ] && [ \"\$(manifest_field \"$CK/promotion_manifest.json\" empty_reply.enforce)\" = True ]" "$outk"
+promote_verdict=$(env -u HU_RETRAIN_EMPTY_EVAL HOME="$HK" python3 -c 'import os, sys, importlib.util
+sys.path.insert(0, os.path.dirname(sys.argv[1]))  # as `python3 scripts/m3_promote.py` would
+spec = importlib.util.spec_from_file_location("m3_promote", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+v = m.empty_reply_promotion_verdict(sys.argv[2], env={}); print(None if v is None else v.get("verdict"))' "$REPO/scripts/m3_promote.py" "$CK" 2>&1)
+check "killed mid-arm: m3_promote refuses with NO HU_RETRAIN_EMPTY_EVAL in the promoter's env" "[ \"\$promote_verdict\" = INCONCLUSIVE ]" "$promote_verdict"
+rm -rf "$HK"
+
+# ── Case 15: blocking manifest cannot be written -> stage aborts non-zero ───
+HW=$(mktemp -d); setup_home "$HW"; CW="$HW/.human/training-data/adapters/seth-glm-air-good-cand"; mkdir -p "$CW"
+chmod 555 "$CW"
+outw=$(HU_RETRAIN_EMPTY_EVAL=live HU_RETRAIN_EVAL_DEADLINE=none run_stage "$HW" "$CW" 19759; echo "STAGE_RC=$?")
+chmod 755 "$CW"
+check "unwritable candidate dir: stage returns non-zero" "[[ \"\$outw\" == *'STAGE_RC=1'* ]]" "$outw"
+check "unwritable candidate dir: no arm (no model load) started" "[ ! -e \"$HW/.fake-server.launches\" ]" "$outw"
+check "unwritable candidate dir: failure logged" "[[ \"\$outw\" == *'blocking manifest write FAILED'* ]]" "$outw"
+check "unwritable candidate dir: no .tmp left behind" "[ -z \"\$(ls -A \"$CW\")\" ]" "$(ls -A "$CW")"
+rm -rf "$HW"
+
+# ── Case 16: the operator hint names the GATED promote path ─────────────────
+check "promote hint names m3_promote.py promote (the path that enforces the gate)" \
+    "grep -q 'to promote after human review:.*m3_promote.py promote --adapter' \"$SCRIPT\"" "(textual check)"
 
 exit $fail
