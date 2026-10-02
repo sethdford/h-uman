@@ -9,7 +9,7 @@ Scope: entire repository.
 
 human is a C11 autonomous AI assistant runtime optimized for:
 
-- minimal binary size (<!-- fp:binary_kb -->~2760 KB<!-- /fp --> release-size build: MinSizeRel + LTO, all channels, sqlite-vec off; CI budget <!-- fp:budget_binary_kb -->2800 KB<!-- /fp -->)
+- minimal binary size (<!-- fp:binary_kb -->~2760 KB<!-- /fp --> release-size build: MinSizeRel + LTO, all channels, sqlite-vec off; CI budget <!-- fp:budget_binary_kb -->3000 KB<!-- /fp -->)
 - minimal memory footprint (<!-- fp:idle_rss_mb -->8.6 MB<!-- /fp --> idle RSS, <!-- fp:version_rss_mb -->6.9 MB<!-- /fp --> `--version` peak RSS; `docs/perf/footprint.json`)
 - zero dependencies beyond libc, optional SQLite and libcurl
 - Zig reference implementation archived in `archive/zig-reference/`
@@ -35,7 +35,7 @@ Performance baseline (<!-- fp:measured_platform -->macOS arm64<!-- /fp -->, rele
 
 | Metric                   | Measured       | Budget |
 | ------------------------ | -------------- | ------ |
-| Binary size              | <!-- fp:binary_kb -->~2760 KB<!-- /fp --> | <!-- fp:budget_binary_kb -->2800 KB<!-- /fp --> |
+| Binary size              | <!-- fp:binary_kb -->~2760 KB<!-- /fp --> | <!-- fp:budget_binary_kb -->3000 KB<!-- /fp --> |
 | Text section (`__text`)  | <!-- fp:text_kb -->1915 KB<!-- /fp --> | (part of binary size) |
 | Cold-start (`--version`) | <!-- fp:startup_range -->3–6 ms<!-- /fp --> | <!-- fp:budget_startup_ms -->100 ms<!-- /fp --> median |
 | Peak RSS (`--version`)   | <!-- fp:version_rss_mb -->6.9 MB<!-- /fp --> | <!-- fp:budget_version_rss_mb -->8 MB<!-- /fp --> |
@@ -64,7 +64,7 @@ These codebase realities should drive every design decision:
 2. **Binary size and memory are hard product constraints**
    - `cmake -DCMAKE_BUILD_TYPE=MinSizeRel -DHU_ENABLE_LTO=ON` is the release target. Every dependency and abstraction has a size cost.
    - Avoid adding unnecessary runtime allocations or large data tables without justification.
-   - Current release-size binary: <!-- fp:binary_kb -->~2760 KB<!-- /fp --> (MinSizeRel + LTO, all channels, sqlite-vec off), against a <!-- fp:budget_binary_kb -->2800 KB<!-- /fp --> budget CI enforces. `cmake --preset release` turns on sqlite-vec, ML and more: <!-- fp:full_binary_mb -->3.3 MB<!-- /fp -->.
+   - Current release-size binary: <!-- fp:binary_kb -->~2760 KB<!-- /fp --> (MinSizeRel + LTO, all channels, sqlite-vec off), against a <!-- fp:budget_binary_kb -->3000 KB<!-- /fp --> budget CI enforces. `cmake --preset release` turns on sqlite-vec, ML and more: <!-- fp:full_binary_mb -->3.3 MB<!-- /fp -->.
 
 3. **Security-critical surfaces are first-class**
    - `src/gateway/gateway.c`, `src/security/`, `src/tools/`, `src/runtime/` carry high blast radius.
