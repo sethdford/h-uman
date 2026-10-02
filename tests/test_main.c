@@ -515,6 +515,7 @@ void run_turn_entry_tests(void);                  /* agent-turn carve: S0 entry 
 void run_turn_silence_tests(void);                /* agent-turn carve: S8 silence stage */
 void run_turn_context_tests(void);                /* agent-turn carve: S4 context builders */
 void run_turn_tools_tests(void);                  /* agent-turn carve: S16 tool dispatch */
+void run_turn_plan_tests(void);                   /* agent-turn: [ACTIVE_PLAN] resume */
 void run_turn_tail_tests(void);                   /* agent-turn carve: S17-S18 iteration tail */
 void run_agent_turn_history_window_tests(void);   /* agent-turn: short-history scan windows */
 void run_reask_tests(void);                       /* agent-turn: re-ask predicate */
@@ -922,6 +923,7 @@ void run_daemon_proactive_tests(void);
 void run_reply_delay_model_tests(void);
 void run_daemon_promise_keeper_tests(void);
 void run_daemon_insight_overuse_tests(void);
+void run_daemon_proposer_context_tests(void);
 void run_daemon_config_reload_tests(void);
 void run_daemon_identity_graph_tests(void);
 void run_daemon_reply_fallback_tests(void);
@@ -1613,6 +1615,7 @@ int main(int argc, char **argv) {
     run_turn_context_tests();
     run_turn_tools_tests();
     run_turn_tail_tests();
+    run_turn_plan_tests();
     run_agent_turn_history_window_tests();
     run_reask_tests();
     run_turn_sources_tests();
@@ -2005,6 +2008,7 @@ int main(int argc, char **argv) {
     run_reply_delay_model_tests();
     run_daemon_promise_keeper_tests();
     run_daemon_insight_overuse_tests();
+    run_daemon_proposer_context_tests();
     run_daemon_config_reload_tests();
     run_daemon_identity_graph_tests();
     run_daemon_reply_fallback_tests();

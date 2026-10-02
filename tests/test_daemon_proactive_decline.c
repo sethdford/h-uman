@@ -174,7 +174,7 @@ static void test_gate_and_send_open_circuit_skips_and_attributes(void) {
     sqlite3 *db = hu_sqlite_memory_get_db(&mem);
     HU_ASSERT_EQ(hu_proactive_decisions_repo_ensure_schema(db), HU_OK);
 
-    const char *who = "+15555550177";
+    char who[] = "+15555550177";
     /* Five sends that never reached the contact — the shape of an unreachable
      * address, not a policy decline. */
     for (int i = 1; i <= 5; i++)

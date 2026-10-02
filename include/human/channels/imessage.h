@@ -217,6 +217,12 @@ hu_error_t hu_imessage_load_dm_history(void *ctx, hu_allocator_t *alloc, const c
                                        size_t contact_id_len, size_t limit,
                                        hu_channel_history_entry_t **out, size_t *out_count);
 
+/** How many tapbacks of ours (is_from_me, associated_message_type 2000-2005)
+ * chat.db holds on the message with this ROWID ($HU_CHATDB honoured). -1 when
+ * chat.db cannot be read. A tapback path that reports success is believed
+ * only when this count grew. */
+int64_t hu_imessage_my_reaction_count(int64_t message_rowid);
+
 #ifndef HU_IS_TEST
 /** Check if the real user sent a message to `handle` within the last
  * `within_seconds` seconds.  Queries chat.db for is_from_me=1 rows.

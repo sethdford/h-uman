@@ -32,8 +32,7 @@
   "memory": {
     "profile": "sqlite_full",
     "backend": "sqlite",
-    "auto_save": true,
-    "max_entries": 10000
+    "auto_save": true
   },
 
   "agent": {

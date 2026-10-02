@@ -687,7 +687,6 @@ typedef struct hu_memory_config {
     bool auto_save;
     uint32_t consolidation_interval_hours; /* 0 = disabled, default 24 */
     char *sqlite_path;
-    uint32_t max_entries;
     char *postgres_url;
     char *postgres_schema;
     char *postgres_table;

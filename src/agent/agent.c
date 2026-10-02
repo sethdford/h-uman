@@ -2079,6 +2079,9 @@ void hu_agent_deinit(hu_agent_t *agent) {
      * inline array) and handles the never-set case gracefully via
      * entry_count==0. */
     hu_scratchpad_deinit(&agent->sota.scratchpad, agent->alloc);
+    /* hu_turn_tail checkpoints every interval_steps iterations; each save
+     * frees the previous copy for its task, so only this frees the last. */
+    hu_checkpoint_store_deinit(&agent->sota.checkpoint_store, agent->alloc);
     hu_pattern_radar_deinit(&agent->radar);
     if (agent->commitment_store) {
         hu_commitment_store_destroy(agent->commitment_store);
@@ -2233,10 +2236,19 @@ hu_error_t hu_agent_bind_sqlite_graph(hu_agent_t *agent, struct hu_graph *graph,
 }
 #endif
 
+hu_consolidation_config_t hu_agent_consolidation_config(const struct hu_config *config) {
+    hu_consolidation_config_t c = HU_CONSOLIDATION_DEFAULTS;
+    if (config) {
+        c.decay_days = config->behavior.decay_days;
+        c.dedup_threshold = config->behavior.dedup_threshold;
+    }
+    return c;
+}
+
 hu_error_t hu_agent_consolidate_memory(hu_agent_t *agent) {
     if (!agent || !agent->memory || !agent->memory->vtable)
         return HU_ERR_INVALID_ARGUMENT;
-    hu_consolidation_config_t config = HU_CONSOLIDATION_DEFAULTS;
+    hu_consolidation_config_t config = hu_agent_consolidation_config(agent->config);
     hu_error_t err = hu_memory_consolidate(agent->alloc, agent->memory, &config);
 
     /* After consolidation, demote stale recall-tier entries to archival.

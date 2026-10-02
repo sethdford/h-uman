@@ -98,7 +98,9 @@ void hu_daemon_reactive_context_load(hu_allocator_t *alloc, hu_agent_t *agent,
         if (agent->session_store->vtable->load_messages(agent->session_store->ctx, alloc, batch_key,
                                                         key_len, &entries, &entry_count) == HU_OK &&
             entries && entry_count > 0) {
-            for (size_t e = 0; e < entry_count; e++) {
+            size_t first =
+                entry_count > HU_DAEMON_RESTORE_RECENT ? entry_count - HU_DAEMON_RESTORE_RECENT : 0;
+            for (size_t e = first; e < entry_count; e++) {
                 if (!entries[e].content || entries[e].content_len == 0)
                     continue;
                 hu_role_t role = HU_ROLE_USER;

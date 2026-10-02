@@ -52,6 +52,8 @@ typedef struct hu_reliable_ctx {
      * primary's get_name; from_config overrides it with the configured name
      * because an mlx_local instance reports "compatible". */
     bool inner_local;
+    /* Which provider answered the last call: 0 primary, e+1 extras[e], -1 none. */
+    int last_served;
 } hu_reliable_ctx_t;
 
 static time_t circuit_now(hu_reliable_ctx_t *r) {
@@ -436,6 +438,7 @@ static hu_error_t reliable_chat_with_system(void *ctx, hu_allocator_t *alloc,
                                             const char *model, size_t model_len, double temperature,
                                             char **out, size_t *out_len) {
     hu_reliable_ctx_t *r = (hu_reliable_ctx_t *)ctx;
+    r->last_served = -1;
     *out = NULL;
     *out_len = 0;
 
@@ -456,6 +459,7 @@ static hu_error_t reliable_chat_with_system(void *ctx, hu_allocator_t *alloc,
                                            cur_len, temperature, out, out_len);
             if (err == HU_OK) {
                 circuit_record_success(r);
+                r->last_served = 0;
                 alloc->free(alloc->ctx, chain, chain_count * sizeof(hu_model_ref_t));
                 return HU_OK;
             }
@@ -470,6 +474,7 @@ static hu_error_t reliable_chat_with_system(void *ctx, hu_allocator_t *alloc,
                                            system_prompt, system_prompt_len, message, message_len,
                                            xm.model, xm.model_len, temperature, out, out_len);
             if (err == HU_OK) {
+                r->last_served = (int)e + 1;
                 alloc->free(alloc->ctx, chain, chain_count * sizeof(hu_model_ref_t));
                 return HU_OK;
             }
@@ -484,6 +489,7 @@ static hu_error_t reliable_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_
                                 const char *model, size_t model_len, double temperature,
                                 hu_chat_response_t *out) {
     hu_reliable_ctx_t *r = (hu_reliable_ctx_t *)ctx;
+    r->last_served = -1;
     memset(out, 0, sizeof(*out));
 
     hu_model_ref_t *chain = NULL;
@@ -501,6 +507,7 @@ static hu_error_t reliable_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_
                                temperature, out);
             if (err == HU_OK) {
                 circuit_record_success(r);
+                r->last_served = 0;
                 alloc->free(alloc->ctx, chain, chain_count * sizeof(hu_model_ref_t));
                 return HU_OK;
             }
@@ -514,6 +521,7 @@ static hu_error_t reliable_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_
             err = attempt_chat(r, alloc, &r->extras[e].provider, extra_is_local(r, e), request,
                                xm.model, xm.model_len, temperature, out);
             if (err == HU_OK) {
+                r->last_served = (int)e + 1;
                 alloc->free(alloc->ctx, chain, chain_count * sizeof(hu_model_ref_t));
                 return HU_OK;
             }
@@ -703,6 +711,22 @@ bool hu_reliable_primary_is_local(const hu_provider_t *reliable) {
     return ((const hu_reliable_ctx_t *)reliable->ctx)->inner_local;
 }
 
+hu_error_t hu_reliable_primary(const hu_provider_t *reliable, hu_provider_t *out) {
+    if (!reliable || reliable->vtable != &reliable_vtable || !reliable->ctx || !out)
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_reliable_ctx_t *r = (hu_reliable_ctx_t *)reliable->ctx;
+    if (circuit_skip_primary(r))
+        return HU_ERR_PROVIDER_UNAVAILABLE;
+    *out = r->inner;
+    return HU_OK;
+}
+
+int hu_reliable_last_served(const hu_provider_t *reliable) {
+    if (!reliable || reliable->vtable != &reliable_vtable || !reliable->ctx)
+        return -1;
+    return ((const hu_reliable_ctx_t *)reliable->ctx)->last_served;
+}
+
 void hu_reliable_set_empty_failover(hu_provider_t *reliable, bool on) {
     if (!reliable || !reliable->ctx)
         return;
@@ -796,6 +820,7 @@ hu_error_t hu_reliable_create_ex(hu_allocator_t *alloc, hu_provider_t inner, uin
     r->cb_recovery_seconds = HU_RELIABLE_CIRCUIT_DEFAULT_RECOVERY_SECS;
     r->empty_failover = true;
     r->inner_local = hu_local_only_provider_is_local(&inner);
+    r->last_served = -1;
 
     if (extras_count > 0 && extras) {
         r->extras = (hu_reliable_provider_entry_t *)((char *)r + sizeof(hu_reliable_ctx_t));
