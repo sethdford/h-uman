@@ -788,35 +788,30 @@ char *hu_evolved_opinion_build_directive(hu_allocator_t *alloc,
 
 /* ── 8. Imperfect Delivery ───────────────────────────────────────────────── */
 
+/* Evidence-only (DEF-4, 2026-10-01). The old classifier defaulted to
+ * MOSTLY_SURE and substring-matched "opinion"/"future"/"advice", so ~260 of
+ * 307 reply turns carried a hedge directive with nothing uncertain about
+ * them. A hedge now needs a real signal: the message asks for a fact
+ * (recall, a time, a count, a place) and nothing retrieved for this turn
+ * covers it. Tool results or memory context mean the facts are in front of
+ * the model; anything else (chat, opinions, feelings) is not uncertainty. */
 hu_certainty_level_t hu_certainty_classify(const char *msg, size_t msg_len, bool has_memory_context,
                                            uint32_t tool_results_count) {
-    if (!msg || msg_len == 0)
+    if (!msg || msg_len == 0 || tool_results_count > 0 || has_memory_context)
         return HU_CERTAIN;
 
-    /* Tool results increase certainty */
-    if (tool_results_count > 0)
-        return HU_CERTAIN;
-
-    /* Memory context increases certainty */
-    if (has_memory_context)
-        return HU_MOSTLY_SURE;
-
-    static const char *uncertain_domains[] = {
-        "should i",    "what do you think", "opinion",         "would you",
-        "best way to", "which is better",   "how do you feel", "advice",
+    static const char *const fact_cues[] = {
+        "remember",        "recall",         "do you know",      "what was",  "what were",
+        "when did",        "when was",       "when is",          "when's",    "where did",
+        "where was",       "where is",       "who was",          "who is",    "how many",
+        "how much",        "what time",      "what day",         "what date", "what year",
+        "what's the name", "whats the name", "what is the name",
     };
-    if (contains_any(msg, msg_len, uncertain_domains,
-                     sizeof(uncertain_domains) / sizeof(uncertain_domains[0])))
-        return HU_UNCERTAIN;
-
-    static const char *unsure_domains[] = {
-        "meaning of life", "future", "predict", "will i", "what happens when", "philosophy",
-    };
-    if (contains_any(msg, msg_len, unsure_domains,
-                     sizeof(unsure_domains) / sizeof(unsure_domains[0])))
-        return HU_GENUINELY_UNSURE;
-
-    return HU_MOSTLY_SURE;
+    for (size_t i = 0; i < sizeof(fact_cues) / sizeof(fact_cues[0]); i++) {
+        if (hu_str_contains_word_ci_n(msg, msg_len, fact_cues[i]))
+            return HU_UNCERTAIN;
+    }
+    return HU_CERTAIN;
 }
 
 char *hu_imperfect_delivery_directive(hu_allocator_t *alloc, hu_certainty_level_t level,

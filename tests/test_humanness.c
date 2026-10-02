@@ -447,25 +447,67 @@ static void certainty_with_tools(void) {
     HU_ASSERT(c == HU_CERTAIN);
 }
 
+/* DEF-4 changed these three: memory context, an opinion question and a
+ * philosophical question are not evidence of uncertainty, so no hedge. They
+ * pinned MOSTLY_SURE / UNCERTAIN / GENUINELY_UNSURE from substring hits. */
 static void certainty_with_memory(void) {
     hu_certainty_level_t c = hu_certainty_classify(S("how's it going"), true, 0);
-    HU_ASSERT(c == HU_MOSTLY_SURE);
+    HU_ASSERT(c == HU_CERTAIN);
 }
 
 static void certainty_opinion_question(void) {
     hu_certainty_level_t c =
         hu_certainty_classify(S("what do you think about remote work"), false, 0);
-    HU_ASSERT(c == HU_UNCERTAIN);
+    HU_ASSERT(c == HU_CERTAIN);
 }
 
 static void certainty_philosophical(void) {
     hu_certainty_level_t c = hu_certainty_classify(S("what is the meaning of life"), false, 0);
-    HU_ASSERT(c == HU_GENUINELY_UNSURE);
+    HU_ASSERT(c == HU_CERTAIN);
 }
 
 static void certainty_empty(void) {
     hu_certainty_level_t c = hu_certainty_classify(NULL, 0, false, 0);
     HU_ASSERT(c == HU_CERTAIN);
+}
+
+/* DEF-4 (2026-10-01): a hedge directive went into ~260 of 307 reply turns
+ * because the classifier defaulted to MOSTLY_SURE. No evidence of
+ * uncertainty, no directive. */
+static void certainty_casual_message_gets_no_hedge(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_certainty_level_t c = hu_certainty_classify(S("lol nice one"), false, 0);
+    HU_ASSERT_EQ((int)c, (int)HU_CERTAIN);
+    HU_ASSERT_NULL(hu_imperfect_delivery_directive(&alloc, c, NULL));
+}
+
+static void certainty_memory_backed_turn_gets_no_hedge(void) {
+    HU_ASSERT_EQ((int)hu_certainty_classify(S("how's it going"), true, 0), (int)HU_CERTAIN);
+    HU_ASSERT_EQ(
+        (int)hu_certainty_classify(S("do you remember what time the game starts"), true, 0),
+        (int)HU_CERTAIN);
+}
+
+static void certainty_fact_question_without_context_hedges(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_certainty_level_t c =
+        hu_certainty_classify(S("do you remember what time the game starts"), false, 0);
+    HU_ASSERT_EQ((int)c, (int)HU_UNCERTAIN);
+    size_t len = 0;
+    char *d = hu_imperfect_delivery_directive(&alloc, c, &len);
+    HU_ASSERT_NOT_NULL(d);
+    HU_ASSERT_NOT_NULL(strstr(d, "uncertainty"));
+    alloc.free(alloc.ctx, d, len + 1);
+    HU_ASSERT_EQ((int)hu_certainty_classify(S("how many people are coming saturday"), false, 0),
+                 (int)HU_UNCERTAIN);
+}
+
+static void certainty_cue_needs_a_whole_word(void) {
+    /* "nowhere is" contains "where is"; "opinions"/"futures" were substring hits. */
+    HU_ASSERT_EQ((int)hu_certainty_classify(S("nowhere is open this late"), false, 0),
+                 (int)HU_CERTAIN);
+    HU_ASSERT_EQ((int)hu_certainty_classify(S("my opinions on futures lol"), false, 0),
+                 (int)HU_CERTAIN);
 }
 
 static void imperfect_certain_no_directive(void) {
@@ -635,6 +677,10 @@ int run_humanness_tests(void) {
     HU_RUN_TEST(certainty_philosophical);
     HU_RUN_TEST(certainty_empty);
     HU_RUN_TEST(imperfect_certain_no_directive);
+    HU_RUN_TEST(certainty_casual_message_gets_no_hedge);
+    HU_RUN_TEST(certainty_memory_backed_turn_gets_no_hedge);
+    HU_RUN_TEST(certainty_fact_question_without_context_hedges);
+    HU_RUN_TEST(certainty_cue_needs_a_whole_word);
     HU_RUN_TEST(imperfect_uncertain_has_directive);
     HU_RUN_TEST(imperfect_genuinely_unsure);
 
