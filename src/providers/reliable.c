@@ -107,9 +107,10 @@ bool hu_reliable_error_ends_provider_attempts(hu_error_t err) {
  * these. Retrying them only multiplies the round-trips and the latency. */
 static bool error_code_is_terminal(hu_error_t err) {
     switch (err) {
-    case HU_ERR_PROVIDER_AUTH:    /* 401 — credentials will not change in 500ms */
-    case HU_ERR_INVALID_ARGUMENT: /* malformed request / unknown model */
-    case HU_ERR_NOT_SUPPORTED:    /* provider cannot serve this at all */
+    case HU_ERR_PROVIDER_AUTH:     /* 401 — credentials will not change in 500ms */
+    case HU_ERR_INVALID_ARGUMENT:  /* malformed request / unknown model */
+    case HU_ERR_NOT_SUPPORTED:     /* provider cannot serve this at all */
+    case HU_ERR_PERMISSION_DENIED: /* local_only refusal: policy, not transport */
         return true;
     default:
         return false;

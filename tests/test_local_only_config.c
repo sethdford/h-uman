@@ -28,6 +28,10 @@
     "{\"name\":\"mlx_local\",\"base_url\":\"http://127.0.0.1:8741/v1\"}],"                     \
     "\"reliability\":{\"primary_provider\":\"mlx_local\",\"fallback_providers\":[]}"
 
+#define PROD_SHAPE_NO_PROVIDERS                                                 \
+    "\"default_provider\":\"reliable\",\"default_model\":\"GLM-4.5-Air-4bit\"," \
+    "\"reliability\":{\"primary_provider\":\"mlx_local\",\"fallback_providers\":[]}"
+
 #define CLOUD_SHAPE                                                                            \
     "\"default_provider\":\"gemini\",\"default_model\":\"gemini-3.1-flash-lite\","             \
     "\"providers\":[{\"name\":\"gemini\",\"base_url\":\"https://aiplatform.googleapis.com/v1/" \
@@ -124,6 +128,70 @@ static void apply_sets_the_process_mode(void) {
     lo_clean();
 }
 
+static void providers_local_override_and_in_process_names(void) {
+    lo_clean();
+    /* providers[].local=false vetoes a loopback endpoint. */
+    hu_config_t *veto =
+        lo_cfg("{" PROD_SHAPE_NO_PROVIDERS ",\"providers\":[{\"name\":\"mlx_local\","
+               "\"base_url\":\"http://127.0.0.1:8741/v1\",\"local\":false}]}");
+    HU_ASSERT_FALSE(hu_config_primary_is_local(veto));
+    HU_ASSERT_EQ((int)hu_config_local_only_mode(veto), (int)HU_GATE_OFF);
+    lo_cfg_free(veto);
+    /* providers[].local=true vouches for a LAN box. */
+    hu_config_t *lan = lo_cfg("{" PROD_SHAPE_NO_PROVIDERS ",\"providers\":[{\"name\":\"mlx_local\","
+                              "\"base_url\":\"http://10.0.0.5:8741/v1\",\"local\":true}]}");
+    HU_ASSERT_TRUE(hu_config_primary_is_local(lan));
+    lo_cfg_free(lan);
+    /* An in-process backend with no URL resolves ON. */
+    hu_config_t *emb = lo_cfg("{\"default_provider\":\"embedded\"}");
+    HU_ASSERT_TRUE(hu_config_primary_is_local(emb));
+    HU_ASSERT_EQ((int)hu_config_local_only_mode(emb), (int)HU_GATE_LIVE);
+    lo_cfg_free(emb);
+    /* A loopback cloud gateway does not. */
+    hu_config_t *gw = lo_cfg("{\"default_provider\":\"litellm\",\"providers\":[{\"name\":"
+                             "\"litellm\",\"base_url\":\"http://127.0.0.1:4000\"}]}");
+    HU_ASSERT_FALSE(hu_config_primary_is_local(gw));
+    lo_cfg_free(gw);
+    lo_clean();
+}
+
+static void allow_list_parse_and_default(void) {
+    lo_clean();
+    hu_config_t *dflt = lo_cfg("{" PROD_SHAPE "}");
+    HU_ASSERT_FALSE(dflt->privacy.local_only_allow_set);
+    HU_ASSERT_FALSE(hu_local_only_service_allowed("tts:cartesia"));
+    (void)hu_config_apply_local_only(dflt);
+    HU_ASSERT_TRUE(hu_local_only_service_allowed("tts:cartesia"));
+    HU_ASSERT_TRUE(hu_local_only_service_allowed("stt:cartesia"));
+    HU_ASSERT_FALSE(hu_local_only_service_allowed("tts:openai"));
+    lo_cfg_free(dflt);
+    lo_clean();
+
+    /* The configured STT provider replaces stt:cartesia in the default. */
+    hu_config_t *groq = lo_cfg("{" PROD_SHAPE ",\"voice\":{\"stt_provider\":\"groq\"}}");
+    (void)hu_config_apply_local_only(groq);
+    HU_ASSERT_TRUE(hu_local_only_service_allowed("stt:groq"));
+    HU_ASSERT_FALSE(hu_local_only_service_allowed("stt:cartesia"));
+    lo_cfg_free(groq);
+    lo_clean();
+
+    /* An explicit list replaces the default entirely; [] allows nothing. */
+    hu_config_t *mine =
+        lo_cfg("{" PROD_SHAPE ",\"privacy\":{\"local_only_allow\":[\"tts:cartesia\"]}}");
+    HU_ASSERT_TRUE(mine->privacy.local_only_allow_set);
+    HU_ASSERT_EQ(mine->privacy.local_only_allow_len, (size_t)1);
+    (void)hu_config_apply_local_only(mine);
+    HU_ASSERT_TRUE(hu_local_only_service_allowed("tts:cartesia"));
+    HU_ASSERT_FALSE(hu_local_only_service_allowed("stt:cartesia"));
+    lo_cfg_free(mine);
+    lo_clean();
+    hu_config_t *none = lo_cfg("{" PROD_SHAPE ",\"privacy\":{\"local_only_allow\":[]}}");
+    (void)hu_config_apply_local_only(none);
+    HU_ASSERT_FALSE(hu_local_only_service_allowed("tts:cartesia"));
+    lo_cfg_free(none);
+    lo_clean();
+}
+
 void run_local_only_config_tests(void) {
     HU_TEST_SUITE("local_only_config");
     HU_RUN_TEST(parse_absent_key_is_unset);
@@ -132,4 +200,6 @@ void run_local_only_config_tests(void) {
     HU_RUN_TEST(absent_key_defaults_on_for_local_primary_off_for_cloud);
     HU_RUN_TEST(explicit_value_and_env_override);
     HU_RUN_TEST(apply_sets_the_process_mode);
+    HU_RUN_TEST(providers_local_override_and_in_process_names);
+    HU_RUN_TEST(allow_list_parse_and_default);
 }

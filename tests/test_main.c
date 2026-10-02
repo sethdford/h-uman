@@ -202,6 +202,7 @@ void run_prompt_trim_tests(void);
 void run_gate_mode_tests(void);
 void run_local_only_guard_tests(void);
 void run_local_only_config_tests(void);
+void run_local_only_voice_tests(void);
 void run_graph_grounding_tests(void);
 void run_uncertainty_tests(void);
 void run_tool_search_tests(void);
@@ -1311,6 +1312,7 @@ int main(int argc, char **argv) {
     run_gate_mode_tests();
     run_local_only_guard_tests();
     run_local_only_config_tests();
+    run_local_only_voice_tests();
     run_graph_grounding_tests();
     run_uncertainty_tests();
     run_tool_search_tests();

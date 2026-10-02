@@ -1,6 +1,7 @@
 #include "human/memory/vector/embeddings_gemini.h"
 #include "human/core/http.h"
 #include "human/core/json.h"
+#include "human/core/local_only_guard.h"
 #include "human/core/log.h"
 #include "human/core/string.h"
 #include "human/vertex_adc.h"
@@ -233,7 +234,10 @@ static hu_error_t gemini_embed(void *ctx, hu_allocator_t *alloc, const char *tex
 
     /* Vertex mode: project_id presence is the discriminator. */
     if (g->project_id && g->project_id[0] && g->location && g->location[0]) {
-        return gemini_embed_vertex(g, alloc, text, text_len, out);
+        const char *lo_prev = hu_local_only_set_caller("embedder");
+        hu_error_t verr = gemini_embed_vertex(g, alloc, text, text_len, out);
+        (void)hu_local_only_set_caller(lo_prev);
+        return verr;
     }
 
     /* Build body: {"model":"models/xxx","content":{"parts":[{"text":"..."}]}} */

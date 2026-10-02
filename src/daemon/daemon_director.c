@@ -94,9 +94,13 @@ hu_emotional_state_t hu_daemon_detect_emotion(hu_allocator_t *alloc, hu_agent_t 
 #else
     /* Hybrid routing: prefer fast cloud classify provider when available */
     if (g_classify_provider_ok && g_classify_provider.vtable &&
-        g_classify_provider.vtable->chat_with_system)
-        return hu_conversation_detect_emotion_llm(alloc, &g_classify_provider, g_classify_model,
-                                                  g_classify_model_len, entries, count);
+        g_classify_provider.vtable->chat_with_system) {
+        const char *lo_prev = hu_local_only_set_caller("director");
+        hu_emotional_state_t st = hu_conversation_detect_emotion_llm(
+            alloc, &g_classify_provider, g_classify_model, g_classify_model_len, entries, count);
+        (void)hu_local_only_set_caller(lo_prev);
+        return st;
+    }
     if (agent && agent->provider.vtable && agent->provider.vtable->chat_with_system)
         return hu_conversation_detect_emotion_llm(alloc, &agent->provider, agent->model_name,
                                                   agent->model_name_len, entries, count);
@@ -441,11 +445,13 @@ bool hu_daemon_director_call(hu_allocator_t *alloc, const char *combined, size_t
     size_t sys_len = hu_daemon_director_system_prompt(sys_prompt, sys_cap);
     char *raw = NULL;
     size_t raw_len = 0;
+    const char *lo_prev = hu_local_only_set_caller("director");
     hu_error_t err = sys_len == 0
                          ? HU_ERR_INTERNAL
                          : g_classify_provider.vtable->chat_with_system(
                                g_classify_provider.ctx, alloc, sys_prompt, sys_len, user_buf, pos,
                                g_classify_model, g_classify_model_len, 0.4, &raw, &raw_len);
+    (void)hu_local_only_set_caller(lo_prev);
     alloc->free(alloc->ctx, sys_prompt, sys_cap);
 
     if (err != HU_OK || !raw || raw_len == 0 || raw_len > 500) {

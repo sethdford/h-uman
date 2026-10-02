@@ -80,6 +80,9 @@ static void model_request_shapes_match_and_channel_apis_do_not(void) {
         hu_local_only_url_is_model_request("https://api.openai.com/v1/chat/completions"));
     HU_ASSERT_TRUE(hu_local_only_url_is_model_request("https://api.openai.com/v1/embeddings"));
     HU_ASSERT_TRUE(
+        hu_local_only_url_is_model_request("https://api.openai.com/v1/images/generations"));
+    /* Speech endpoints are voice services (allow-listable), not model requests. */
+    HU_ASSERT_FALSE(
         hu_local_only_url_is_model_request("https://api.openai.com/v1/audio/transcriptions"));
     HU_ASSERT_TRUE(hu_local_only_url_is_model_request("https://api.anthropic.com/v1/messages"));
     HU_ASSERT_TRUE(hu_local_only_url_is_model_request("http://10.0.0.5:11434/api/chat"));
@@ -105,7 +108,11 @@ static void env_parse_vocabulary(void) {
     HU_ASSERT_EQ(hu_local_only_env_parse("true"), 2);
     HU_ASSERT_EQ(hu_local_only_env_parse(NULL), -1);
     HU_ASSERT_EQ(hu_local_only_env_parse(""), -1);
-    HU_ASSERT_EQ(hu_local_only_env_parse("maybe"), -1);
+    HU_ASSERT_EQ(hu_local_only_env_parse("enforce"), 2);
+    HU_ASSERT_EQ(hu_local_only_env_parse("ENFORCE"), 2);
+    /* Unrecognized fails CLOSED (enforce), never open. */
+    HU_ASSERT_EQ(hu_local_only_env_parse("maybe"), 2);
+    HU_ASSERT_EQ(hu_local_only_env_parse("of"), 2);
 }
 
 static void resolve_table(void) {
@@ -119,8 +126,8 @@ static void resolve_table(void) {
     HU_ASSERT_EQ((int)hu_local_only_resolve("0", 1, true), (int)HU_GATE_OFF);
     HU_ASSERT_EQ((int)hu_local_only_resolve("1", 0, false), (int)HU_GATE_LIVE);
     HU_ASSERT_EQ((int)hu_local_only_resolve("audit", 1, true), (int)HU_GATE_SHADOW);
-    /* An unrecognized env value is ignored, not treated as OFF. */
-    HU_ASSERT_EQ((int)hu_local_only_resolve("maybe", 1, false), (int)HU_GATE_LIVE);
+    /* An unrecognized env value fails closed even over an explicit false. */
+    HU_ASSERT_EQ((int)hu_local_only_resolve("maybe", 0, false), (int)HU_GATE_LIVE);
 }
 
 static void unconfigured_process_is_off(void) {
@@ -214,6 +221,82 @@ static void http_post_refuses_cloud_model_request_when_live(void) {
     lo_clean();
 }
 
+static void cloud_model_names(void) {
+    static const char *const cloud[] = {"gemini-3.1-flash-lite",
+                                        "publishers/google/models/gemini-3.1-pro-preview",
+                                        "gpt-4o",
+                                        "GPT-5",
+                                        "chatgpt-4o-latest",
+                                        "claude-opus-5",
+                                        "grok-4",
+                                        "o1",
+                                        "o3-pro",
+                                        "o4-mini",
+                                        "gpt-oss:120b-cloud",
+                                        "qwen3:cloud",
+                                        "deepseek-v3.1:671b-cloud"};
+    for (size_t i = 0; i < sizeof(cloud) / sizeof(cloud[0]); i++)
+        HU_ASSERT_TRUE(hu_local_only_model_name_is_cloud(cloud[i], strlen(cloud[i])));
+    static const char *const local[] = {"GLM-4.5-Air-4bit",
+                                        "mlx-community/GLM-4.5-Air-4bit",
+                                        "qwen3:8b",
+                                        "llama3.1",
+                                        "o",
+                                        "omni-local",
+                                        "cloudy-7b"};
+    for (size_t i = 0; i < sizeof(local) / sizeof(local[0]); i++)
+        HU_ASSERT_FALSE(hu_local_only_model_name_is_cloud(local[i], strlen(local[i])));
+    HU_ASSERT_FALSE(hu_local_only_model_name_is_cloud(NULL, 0));
+}
+
+static void provider_level_locality(void) {
+    /* Endpoint decides by default. */
+    HU_ASSERT_TRUE(
+        hu_local_only_provider_endpoint_is_local("mlx_local", "http://127.0.0.1:8741/v1", 0));
+    HU_ASSERT_FALSE(hu_local_only_provider_endpoint_is_local(
+        "gemini", "https://aiplatform.googleapis.com/v1", 0));
+    /* A loopback gateway that forwards to the cloud is not local. */
+    HU_ASSERT_FALSE(
+        hu_local_only_provider_endpoint_is_local("litellm", "http://127.0.0.1:4000", 0));
+    HU_ASSERT_FALSE(
+        hu_local_only_provider_endpoint_is_local("openrouter", "http://localhost:9999", 0));
+    /* In-process backends are local with no URL; unknown names are not. */
+    static const char *const inproc[] = {"embedded", "coreml", "mlx", "llamacpp", "huml", "apple"};
+    for (size_t i = 0; i < sizeof(inproc) / sizeof(inproc[0]); i++)
+        HU_ASSERT_TRUE(hu_local_only_provider_endpoint_is_local(inproc[i], NULL, 0));
+    HU_ASSERT_FALSE(hu_local_only_provider_endpoint_is_local("openai", NULL, 0));
+    /* providers[].local overrides both ways. */
+    HU_ASSERT_TRUE(
+        hu_local_only_provider_endpoint_is_local("compatible", "http://10.0.0.5:8000/v1", 1));
+    HU_ASSERT_FALSE(
+        hu_local_only_provider_endpoint_is_local("mlx_local", "http://127.0.0.1:8741/v1", -1));
+}
+
+/* A cloud model name is refused even when the URL is loopback (a local
+ * gateway that forwards to the cloud). */
+static void live_refuses_cloud_model_on_loopback(void) {
+    lo_clean();
+    hu_local_only_configure(HU_GATE_LIVE);
+    const char cloud_body[] = "{\"model\":\"gemini-3.1-pro-preview\",\"messages\":[]}";
+    HU_ASSERT_EQ((int)hu_local_only_check_request(LOCAL_URL, cloud_body, sizeof(cloud_body) - 1),
+                 (int)HU_ERR_PERMISSION_DENIED);
+    const char ollama_cloud[] = "{\"model\":\"gpt-oss:120b-cloud\"}";
+    HU_ASSERT_EQ((int)hu_local_only_check_request("http://127.0.0.1:11434/api/chat", ollama_cloud,
+                                                  sizeof(ollama_cloud) - 1),
+                 (int)HU_ERR_PERMISSION_DENIED);
+    HU_ASSERT_EQ(hu_local_only_refused_count(), 2u);
+    lo_clean();
+}
+
+static void unknown_env_value_enforces(void) {
+    lo_clean();
+    setenv("HU_LOCAL_ONLY", "yes-please", 1);
+    HU_ASSERT_TRUE(hu_local_only_enforced());
+    HU_ASSERT_EQ((int)hu_local_only_check_request(VERTEX_URL, NULL, 0),
+                 (int)HU_ERR_PERMISSION_DENIED);
+    lo_clean();
+}
+
 void run_local_only_guard_tests(void) {
     HU_TEST_SUITE("local_only_guard");
     HU_RUN_TEST(endpoint_loopback_and_unix_socket_are_local);
@@ -227,4 +310,8 @@ void run_local_only_guard_tests(void) {
     HU_RUN_TEST(audit_mode_counts_but_never_refuses);
     HU_RUN_TEST(env_override_beats_configured_mode);
     HU_RUN_TEST(http_post_refuses_cloud_model_request_when_live);
+    HU_RUN_TEST(cloud_model_names);
+    HU_RUN_TEST(provider_level_locality);
+    HU_RUN_TEST(live_refuses_cloud_model_on_loopback);
+    HU_RUN_TEST(unknown_env_value_enforces);
 }

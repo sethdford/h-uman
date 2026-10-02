@@ -7088,7 +7088,9 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             *response_len_out = 0;
         return HU_ERR_OUT_OF_MEMORY;
     }
+    const char *lo_prev = hu_local_only_enter("agent_turn"); /* audit/refusal caller tag */
     hu_error_t err = agent_turn_run(turn_ctx, agent, msg, msg_len, response_out, response_len_out);
+    (void)hu_local_only_set_caller(lo_prev);
     hu_turn_ctx_free(turn_ctx);
     return err;
 }

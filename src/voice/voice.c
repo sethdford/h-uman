@@ -6,6 +6,7 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/json.h"
+#include "human/core/local_only_guard.h"
 #include "human/core/privacy.h"
 #include "human/core/process_util.h"
 #include "human/core/string.h"
@@ -79,6 +80,19 @@ static bool voice_privacy_active(const hu_voice_config_t *config) {
     return hu_privacy_enforced();
 }
 
+/* local_only (core/local_only_guard.h): the cloud STT / TTS endpoint this
+ * config would reach is checked against the voice allow-list before any
+ * process is spawned. The endpoint, not the provider name, decides. */
+static const char *voice_stt_cloud_endpoint(const hu_voice_config_t *config) {
+    return config->stt_endpoint && config->stt_endpoint[0] ? config->stt_endpoint
+                                                           : HU_VOICE_STT_DEFAULT_ENDPOINT;
+}
+
+static const char *voice_tts_cloud_endpoint(const hu_voice_config_t *config) {
+    return config->tts_endpoint && config->tts_endpoint[0] ? config->tts_endpoint
+                                                           : HU_VOICE_TTS_DEFAULT_ENDPOINT;
+}
+
 hu_error_t hu_voice_stt_file(hu_allocator_t *alloc, const hu_voice_config_t *config,
                              const char *file_path, char **out_text, size_t *out_len) {
     if (!alloc || !config || !out_text || !out_len)
@@ -110,6 +124,8 @@ hu_error_t hu_voice_stt_file(hu_allocator_t *alloc, const hu_voice_config_t *con
     }
     if (!config->api_key || config->api_key_len == 0)
         return HU_ERR_PROVIDER_AUTH;
+    if (hu_local_only_check_request(voice_stt_cloud_endpoint(config), NULL, 0) != HU_OK)
+        return HU_ERR_PERMISSION_DENIED;
     {
         (void)file_path;
         const char *prefix = "This is a mock transcription of ";
@@ -163,9 +179,9 @@ hu_error_t hu_voice_stt_file(hu_allocator_t *alloc, const hu_voice_config_t *con
     if (!config->api_key || config->api_key_len == 0)
         return HU_ERR_PROVIDER_AUTH;
 
-    const char *endpoint = config->stt_endpoint && config->stt_endpoint[0]
-                               ? config->stt_endpoint
-                               : HU_VOICE_STT_DEFAULT_ENDPOINT;
+    const char *endpoint = voice_stt_cloud_endpoint(config);
+    if (hu_local_only_check_request(endpoint, NULL, 0) != HU_OK)
+        return HU_ERR_PERMISSION_DENIED;
     const char *model =
         config->stt_model && config->stt_model[0] ? config->stt_model : HU_VOICE_STT_DEFAULT_MODEL;
 
@@ -405,6 +421,8 @@ hu_error_t hu_voice_tts(hu_allocator_t *alloc, const hu_voice_config_t *config, 
         return HU_ERR_NOT_SUPPORTED; /* privacy mode: TTS is local-only; no cloud egress */
     if (!config->api_key || config->api_key_len == 0)
         return HU_ERR_PROVIDER_AUTH;
+    if (hu_local_only_check_request(voice_tts_cloud_endpoint(config), NULL, 0) != HU_OK)
+        return HU_ERR_PERMISSION_DENIED;
     {
         (void)text;
         (void)text_len;
@@ -514,9 +532,9 @@ hu_error_t hu_voice_tts(hu_allocator_t *alloc, const hu_voice_config_t *config, 
     if (!config->api_key || config->api_key_len == 0)
         return HU_ERR_PROVIDER_AUTH;
 
-    const char *endpoint = config->tts_endpoint && config->tts_endpoint[0]
-                               ? config->tts_endpoint
-                               : HU_VOICE_TTS_DEFAULT_ENDPOINT;
+    const char *endpoint = voice_tts_cloud_endpoint(config);
+    if (hu_local_only_check_request(endpoint, NULL, 0) != HU_OK)
+        return HU_ERR_PERMISSION_DENIED;
     const char *model =
         config->tts_model && config->tts_model[0] ? config->tts_model : HU_VOICE_TTS_DEFAULT_MODEL;
     const char *voice =
@@ -647,6 +665,22 @@ hu_error_t hu_voice_stt_gemini(hu_allocator_t *alloc, const hu_voice_config_t *c
         return HU_ERR_INVALID_ARGUMENT;
     if (!mime_type)
         mime_type = "audio/webm";
+    {
+        /* local_only: Gemini transcription is a generateContent model request
+         * (never allow-listable). The key is not part of the checked URL. */
+        const char *gm = config->stt_model && config->stt_model[0] ? config->stt_model
+                                                                   : HU_VOICE_GEMINI_DEFAULT_MODEL;
+        const char *gb = config->stt_endpoint && config->stt_endpoint[0]
+                             ? config->stt_endpoint
+                             : HU_VOICE_GEMINI_DEFAULT_ENDPOINT;
+        char check_url[512];
+        int cn = snprintf(check_url, sizeof(check_url), "%s%s:generateContent", gb, gm);
+        if (cn > 0 && (size_t)cn < sizeof(check_url)) {
+            hu_error_t lo = hu_local_only_check_request(check_url, NULL, 0);
+            if (lo != HU_OK)
+                return lo;
+        }
+    }
 
 #if HU_IS_TEST
     {

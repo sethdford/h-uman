@@ -50,10 +50,11 @@ static hu_error_t fake_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_requ
     memset(out, 0, sizeof(*out));
     const char *body = "a dog on a beach";
     size_t n = strlen(body);
-    out->content = (char *)alloc->alloc(alloc->ctx, n + 1);
-    if (!out->content)
+    char *buf = (char *)alloc->alloc(alloc->ctx, n + 1);
+    if (!buf)
         return HU_ERR_OUT_OF_MEMORY;
-    memcpy(out->content, body, n + 1);
+    memcpy(buf, body, n + 1);
+    out->content = buf;
     out->content_len = n;
     return HU_OK;
 }
@@ -264,16 +265,23 @@ static void describe_image_live_ignores_cloud_vision_route(void) {
     free(agent);
 }
 
-static void photo_placeholder_replaces_bare_photo_only(void) {
+static void photo_placeholder_bare_and_captioned(void) {
     char buf[128];
     size_t len = 7;
     const char *out = hu_daemon_photo_placeholder("[Photo]", &len, buf, sizeof(buf));
     HU_ASSERT_STR_EQ(out, "[They sent a photo]");
     HU_ASSERT_EQ(len, strlen("[They sent a photo]"));
-    const char *cap = "look at this";
-    len = strlen(cap);
-    HU_ASSERT_TRUE(hu_daemon_photo_placeholder(cap, &len, buf, sizeof(buf)) == cap);
-    HU_ASSERT_EQ(len, strlen(cap));
+    /* A captioned photo keeps its caption and gets the placeholder too; the
+     * U+FFFC attachment character is dropped (no second "didn't load" note). */
+    const char cap[] = "look at this \xEF\xBF\xBC";
+    len = sizeof(cap) - 1;
+    out = hu_daemon_photo_placeholder(cap, &len, buf, sizeof(buf));
+    HU_ASSERT_STR_EQ(out, "look at this\n[They sent a photo]");
+    HU_ASSERT_EQ(len, strlen("look at this\n[They sent a photo]"));
+    const char plain[] = "look at this";
+    len = sizeof(plain) - 1;
+    out = hu_daemon_photo_placeholder(plain, &len, buf, sizeof(buf));
+    HU_ASSERT_STR_EQ(out, "look at this\n[They sent a photo]");
 }
 
 void run_daemon_director_local_only_tests(void) {
@@ -284,5 +292,5 @@ void run_daemon_director_local_only_tests(void) {
     HU_RUN_TEST(classify_audit_routes_like_off);
     HU_RUN_TEST(describe_image_live_sends_no_bytes);
     HU_RUN_TEST(describe_image_live_ignores_cloud_vision_route);
-    HU_RUN_TEST(photo_placeholder_replaces_bare_photo_only);
+    HU_RUN_TEST(photo_placeholder_bare_and_captioned);
 }

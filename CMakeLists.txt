@@ -3684,6 +3684,7 @@ set(HU_TEST_SOURCES
     tests/test_gate_mode.c
     tests/test_local_only_guard.c
     tests/test_local_only_config.c
+    tests/test_local_only_voice.c
     tests/test_graph_grounding.c
     tests/test_uncertainty.c
     tests/test_tool_search.c

@@ -97,10 +97,11 @@ static hu_error_t rec_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_reque
         return HU_ERR_PROVIDER_RESPONSE;
     const char *body = "sure thing";
     size_t n = strlen(body);
-    out->content = (char *)alloc->alloc(alloc->ctx, n + 1);
-    if (!out->content)
+    char *buf = (char *)alloc->alloc(alloc->ctx, n + 1);
+    if (!buf)
         return HU_ERR_OUT_OF_MEMORY;
-    memcpy(out->content, body, n + 1);
+    memcpy(buf, body, n + 1);
+    out->content = buf;
     out->content_len = n;
     return HU_OK;
 }

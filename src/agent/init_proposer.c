@@ -17,6 +17,7 @@
 #include "human/autoresponder.h"
 #include "human/config.h"
 #include "human/core/json.h"
+#include "human/core/local_only_guard.h"
 #include "human/core/log.h"
 #include "human/memory.h"
 #include "human/memory/proactive_decisions_repo.h" /* C5 Part A: decision log */
@@ -1055,13 +1056,14 @@ hu_init_proposer_result_t hu_init_proposer_evaluate_guard_outcome(int guard_outc
     }
 }
 
-hu_error_t hu_init_proposer_tick_with_provider_ex(
-    const struct hu_initiative_config *cfg, const struct hu_autoresponder_config *ar_cfg,
-    int32_t tz_offset_seconds, struct hu_proactive_budget *budget, const struct hu_agent *agent,
-    struct hu_provider *provider, hu_allocator_t *alloc,
-    const hu_proactive_compose_inputs_t *inputs, int64_t last_inbound_unix, int64_t now_unix,
-    int64_t *last_tick_unix_inout, uint64_t *tick_id_inout, hu_init_proposer_result_t *out_result,
-    hu_init_decision_t *out_decision) {
+static hu_error_t
+init_proposer_tick_ex_run(const struct hu_initiative_config *cfg,
+                          const struct hu_autoresponder_config *ar_cfg, int32_t tz_offset_seconds,
+                          struct hu_proactive_budget *budget, const struct hu_agent *agent,
+                          struct hu_provider *provider, hu_allocator_t *alloc,
+                          const hu_proactive_compose_inputs_t *inputs, int64_t last_inbound_unix,
+                          int64_t now_unix, int64_t *last_tick_unix_inout, uint64_t *tick_id_inout,
+                          hu_init_proposer_result_t *out_result, hu_init_decision_t *out_decision) {
     /* AC-6 backwards compatibility: inputs=NULL → identical to the
      * original function. T2-T8 will land additional behavior; T1 is
      * pure addition. */
@@ -1294,6 +1296,22 @@ hu_error_t hu_init_proposer_tick_with_provider_ex(
                                   msg_ref_buf[0] ? msg_ref_buf : NULL, now_unix);
     return HU_OK;
 #endif
+}
+
+/* Tags every model request of a proactive tick "proactive" for local_only. */
+hu_error_t hu_init_proposer_tick_with_provider_ex(
+    const struct hu_initiative_config *cfg, const struct hu_autoresponder_config *ar_cfg,
+    int32_t tz_offset_seconds, struct hu_proactive_budget *budget, const struct hu_agent *agent,
+    struct hu_provider *provider, hu_allocator_t *alloc,
+    const hu_proactive_compose_inputs_t *inputs, int64_t last_inbound_unix, int64_t now_unix,
+    int64_t *last_tick_unix_inout, uint64_t *tick_id_inout, hu_init_proposer_result_t *out_result,
+    hu_init_decision_t *out_decision) {
+    const char *lo_prev = hu_local_only_set_caller("proactive");
+    hu_error_t err = init_proposer_tick_ex_run(
+        cfg, ar_cfg, tz_offset_seconds, budget, agent, provider, alloc, inputs, last_inbound_unix,
+        now_unix, last_tick_unix_inout, tick_id_inout, out_result, out_decision);
+    (void)hu_local_only_set_caller(lo_prev);
+    return err;
 }
 
 /* Content words of a check-in: lowercased letters, apostrophes dropped,

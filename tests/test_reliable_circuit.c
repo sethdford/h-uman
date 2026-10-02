@@ -135,6 +135,19 @@ static void test_predicate_only_timeout_ends_provider_attempts(void) {
     HU_ASSERT(!hu_reliable_error_ends_provider_attempts(HU_OK));
 }
 
+/* local_only refusal (HU_ERR_PERMISSION_DENIED) is decided by policy, not
+ * by the network: retrying it only repeats the refusal (and the WARN line). */
+static void test_permission_denied_is_not_retried(void) {
+    rig_t g;
+    rig_init(&g, 99, HU_ERR_PERMISSION_DENIED, 2);
+    char *out = NULL;
+    size_t out_len = 0;
+    (void)rig_call(&g, &out, &out_len);
+    HU_ASSERT_EQ(g.prim.calls, 1); /* pre-fix: 3 (1 + 2 retries) */
+    rig_free_out(&g, out, out_len);
+    rig_deinit(&g);
+}
+
 /* ── 2. a timeout is not retried on the same provider ───────────────── */
 
 static void test_timeout_is_not_retried_and_falls_to_fallback(void) {
@@ -475,6 +488,7 @@ void run_reliable_circuit_tests(void) {
     HU_TEST_SUITE("Reliable Circuit Breaker");
     HU_RUN_TEST(test_unmatched_model_still_offers_declared_fallback_to_extras);
     HU_RUN_TEST(test_predicate_only_timeout_ends_provider_attempts);
+    HU_RUN_TEST(test_permission_denied_is_not_retried);
     HU_RUN_TEST(test_timeout_is_not_retried_and_falls_to_fallback);
     HU_RUN_TEST(test_non_timeout_error_still_retries_same_provider);
     HU_RUN_TEST(test_circuit_opens_after_default_threshold_and_skips_primary);

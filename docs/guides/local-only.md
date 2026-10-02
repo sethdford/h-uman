@@ -12,7 +12,7 @@ outage fallbacks, and images all stopped going to Gemini.
 
 | Source | Values | Wins over |
 |---|---|---|
-| `HU_LOCAL_ONLY` env | `1`/`on`/`live`/`true` = enforce, `audit`/`shadow` = audit, `0`/`off`/`false` = off | everything |
+| `HU_LOCAL_ONLY` env | `1`/`on`/`live`/`true`/`enforce` = enforce, `audit`/`shadow` = audit, `0`/`off`/`false` = off. Any other value logs one WARN and **fails closed to enforce** | everything |
 | `privacy.local_only` in config.json | `true` / `false` | the default |
 | default (key absent) | enforce when the primary provider's endpoint is local, else off | — |
 
@@ -21,9 +21,19 @@ primary is a cloud provider would otherwise refuse every reply, so it keeps
 working until its owner opts in. The daemon logs the resolved mode once at
 startup: `local_only mode=enforce (from default (primary endpoint locality); primary=mlx_local)`.
 
-Locality is decided by the endpoint, never by provider name. Local means a
-loopback host (`localhost`, `*.localhost`, `127.0.0.0/8`, `::1`), a unix
-socket, or an in-process model path.
+Locality is decided by the endpoint. Local means a loopback host
+(`localhost`, `*.localhost`, `127.0.0.0/8`, `::1`), a unix socket, an
+in-process model path, or an in-process backend with no URL (`embedded`,
+`coreml`, `mlx`, `llamacpp`, `llama-cli`, `huml`, `apple*`). Two vetoes:
+
+- A gateway that forwards to the cloud is never local, even on loopback:
+  `openrouter`, `litellm`, `portkey`, `helicone`, `together`, `groq`,
+  `fireworks`, `requesty`.
+- A cloud model name is refused even on a loopback URL: `gemini*`, `gpt-*`,
+  `chatgpt*`, `claude*`, `grok*`, `o1`/`o3`/`o4`, `*-cloud`, `*:cloud`.
+
+`providers[].local` (`true`/`false`) overrides the endpoint rule for one
+provider.
 
 ## What enforce changes
 
@@ -51,8 +61,64 @@ logs one line, with no content:
 ```
 
 Feeds, channel APIs and OAuth do not match the model shapes and are never
-touched. Not covered: websocket voice (Gemini Live, OpenAI Realtime) and
-Cartesia TTS. Those are governed by `voice.privacy_mode` (`core/privacy.h`).
+touched. A refused request is terminal in the reliable provider
+(`HU_ERR_PERMISSION_DENIED`), so it is never retried.
+
+The same check runs outside `http.c`:
+
+- **Websockets** (`hu_ws_connect_with_headers`): any non-local websocket is
+  refused unless it is an allowed voice service. That covers Gemini Live,
+  OpenAI Realtime and the OpenAI `ws_streaming` chat path.
+- **Spawned-curl voice paths** (`voice.c`, `cartesia.c`): checked before the
+  process is spawned.
+- **`web_search` tool:** the query is written from the conversation, so it is
+  content and is refused unless `tool:web_search` is on the allow-list.
+  `web_fetch` (a URL the model chose) is not gated.
+
+## Voice allow-list
+
+Owner ruling 2026-10-02, "allow voice services only". Under local_only the
+only content that may leave is:
+
+- reply text sent to the allowed TTS service for an outgoing voice note;
+- inbound audio sent to the allowed STT service.
+
+Neither ever receives memory, persona, history or the system prompt.
+
+```json
+"privacy": { "local_only_allow": ["tts:cartesia", "stt:cartesia"] }
+```
+
+Services are named `tts:<vendor>` / `stt:<vendor>`. The vendor comes from the
+endpoint's host (`api.cartesia.ai` gives `cartesia`, `api.groq.com` gives
+`groq`). When the key is absent the default is
+`["tts:cartesia", "stt:<voice.stt_provider, else cartesia>"]`. Prod has no
+`voice` block, so its default is `stt:cartesia`. Inbound memos in prod are
+transcribed on-device by iOS before the daemon sees them, so cloud STT is a
+backup path. `[]` allows nothing.
+
+Refused even when listed, because they are model requests:
+
+- Gemini Live and OpenAI Realtime;
+- Gemini transcription (`:generateContent`);
+- vision and media generation.
+
+The OpenAI `/audio/speech` fallback TTS is refused by default, which leaves
+Cartesia as the one TTS. If Cartesia fails, the voice note falls back to text.
+
+`voice.privacy_mode` is unchanged and stricter: it blocks all voice egress,
+including Cartesia.
+
+## Caller tags
+
+Refusal and audit lines carry `caller=<tag>`. The tags are `director`,
+`agent_turn`, `proactive`, `tools`, `voice`, `inbound_media` and `embedder`.
+Anything else shows `unknown`.
+
+## Out of scope
+
+`daemon_cron` shell jobs run whatever command the owner configured. A command
+that calls a cloud API is the owner's explicit choice and is not inspected.
 
 ## Audit mode
 
@@ -71,4 +137,5 @@ grep '\[local_only audit\]' ~/.human/logs/service-loop*.log | sed 's/.*caller=//
 Enforce is licensed when every listed caller is one you accept losing.
 
 **Rollback:** set `HU_LOCAL_ONLY=0` in the launchd plist environment and
-restart the service, or set `"privacy": {"local_only": false}`.
+restart the service, or set `"privacy": {"local_only": false}`. A config
+reload (SIGHUP) re-resolves the mode and the allow-list from the file.

@@ -20,6 +20,8 @@ typedef struct hu_provider_entry {
     char *base_url;
     bool native_tools;
     bool ws_streaming;
+    /* providers[].local: 1 true, -1 false, 0 unset (the endpoint decides). */
+    int local_override;
     /* Phase 1 (RL SOTA) — llamacpp-specific tuning. These fields are
      * read from `providers[].context_size`/`.threads`/`.use_gpu`/
      * `.n_gpu_layers` in the JSON config and forwarded into
@@ -772,6 +774,12 @@ typedef struct hu_voice_settings {
 typedef struct hu_privacy_config {
     bool local_only_set; /* the key was present in config.json */
     bool local_only;
+    /* privacy.local_only_allow: voice services that may receive content
+     * under local_only ("tts:cartesia", "stt:<vendor>"). Unset = the default
+     * {"tts:cartesia", "stt:<voice.stt_provider or cartesia>"}. */
+    bool local_only_allow_set;
+    char **local_only_allow;
+    size_t local_only_allow_len;
 } hu_privacy_config_t;
 
 typedef struct hu_identity_config {

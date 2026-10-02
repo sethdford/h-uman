@@ -113,16 +113,17 @@ bool hu_provider_endpoint_is_local(const char *url, size_t url_len) {
 /* Path suffixes (matched at the end of the path, query stripped). Specific
  * enough that channel APIs ("/channels/1/messages", "sendMessage") never hit. */
 static const char *const k_model_path_suffixes[] = {
-    "/chat/completions",     "/completions",        "/embeddings",
-    "/v1/responses",         "/v1/messages",        "/api/chat",
-    "/api/generate",         "/api/embed",          "/api/embeddings",
-    "/audio/transcriptions", "/audio/translations",
+    "/chat/completions", "/completions",        "/embeddings",   "/v1/responses",
+    "/v1/messages",      "/api/chat",           "/api/generate", "/api/embed",
+    "/api/embeddings",   "/images/generations", "/images/edits", "/images/variations",
+    "/v1/realtime",
 };
 
 /* Gemini / Vertex method suffixes ("models/<m>:generateContent"). */
 static const char *const k_model_methods[] = {
-    ":generateContent",    ":streamGenerateContent", ":predict",    ":embedContent",
-    ":batchEmbedContents", ":countTokens",           ":rawPredict", ":streamRawPredict",
+    ":generateContent", ":streamGenerateContent", ":predict",
+    ":embedContent",    ":batchEmbedContents",    ":countTokens",
+    ":rawPredict",      ":streamRawPredict",      ":predictLongRunning",
 };
 
 bool hu_local_only_url_is_model_request(const char *url) {
@@ -144,9 +145,180 @@ bool hu_local_only_url_is_model_request(const char *url) {
     return false;
 }
 
+/* ── Cloud model names and provider-level locality (shared with #581) ──── */
+
+static const char *const k_cloud_model_prefixes[] = {
+    "gemini", "gpt-", "chatgpt", "claude", "grok",
+};
+
+bool hu_local_only_model_name_is_cloud(const char *model, size_t model_len) {
+    if (!model || model_len == 0)
+        return false;
+    for (size_t i = model_len; i > 0; i--) { /* "publishers/google/models/gemini-..." */
+        if (model[i - 1] == '/') {
+            model += i;
+            model_len -= i;
+            break;
+        }
+    }
+    for (size_t i = 0; i < sizeof(k_cloud_model_prefixes) / sizeof(k_cloud_model_prefixes[0]);
+         i++) {
+        size_t pl = strlen(k_cloud_model_prefixes[i]);
+        if (model_len >= pl && strncasecmp(model, k_cloud_model_prefixes[i], pl) == 0)
+            return true;
+    }
+    /* OpenAI o-series: "o1", "o3-pro", "o4-mini" (o + digits, then end or '-'). */
+    if (model_len >= 2 && (model[0] == 'o' || model[0] == 'O') && model[1] >= '0' &&
+        model[1] <= '9') {
+        size_t j = 1;
+        while (j < model_len && model[j] >= '0' && model[j] <= '9')
+            j++;
+        if (j == model_len || model[j] == '-')
+            return true;
+    }
+    /* Ollama cloud models run on ollama.com: "gpt-oss:120b-cloud", "x:cloud". */
+    static const char k_cloud_suffix[] = "-cloud";
+    size_t sl = sizeof(k_cloud_suffix) - 1;
+    if (model_len >= sl && strncasecmp(model + model_len - sl, k_cloud_suffix, sl) == 0)
+        return true;
+    for (size_t i = 0; i + 6 <= model_len; i++) {
+        if (model[i] == ':' && strncasecmp(model + i + 1, "cloud", 5) == 0 &&
+            (i + 6 == model_len || model[i + 6] == '-' || model[i + 6] == ':'))
+            return true;
+    }
+    return false;
+}
+
+/* Gateways that forward to cloud APIs even when they listen on loopback. */
+static const char *const k_cloud_proxy_names[] = {
+    "openrouter", "litellm", "portkey", "helicone", "together", "groq", "fireworks", "requesty",
+};
+
+/* In-process backends: local when no URL is configured. */
+static const char *const k_in_process_names[] = {
+    "apple", "apfel",    "apple-intelligence", "foundationmodels", "coreml",
+    "mlx",   "embedded", "llama-cli",          "llamacpp",         "huml",
+};
+
+static bool name_in(const char *name, const char *const *list, size_t n) {
+    if (!name || !name[0])
+        return false;
+    for (size_t i = 0; i < n; i++)
+        if (strcasecmp(name, list[i]) == 0)
+            return true;
+    return false;
+}
+
+bool hu_local_only_provider_endpoint_is_local(const char *provider_name, const char *base_url,
+                                              int override) {
+    if (override > 0)
+        return true;
+    if (override < 0)
+        return false;
+    if (name_in(provider_name, k_cloud_proxy_names,
+                sizeof(k_cloud_proxy_names) / sizeof(k_cloud_proxy_names[0])))
+        return false;
+    if (base_url && base_url[0])
+        return hu_provider_endpoint_is_local(base_url, strlen(base_url));
+    return name_in(provider_name, k_in_process_names,
+                   sizeof(k_in_process_names) / sizeof(k_in_process_names[0]));
+}
+
+/* ── Voice services (owner ruling 2026-10-02) ──────────────────────────── */
+
+static bool path_has(const char *path, size_t len, const char *needle) {
+    size_t nl = strlen(needle);
+    for (size_t i = 0; i + nl <= len; i++)
+        if (strncasecmp(path + i, needle, nl) == 0)
+            return true;
+    return false;
+}
+
+static bool path_ends(const char *path, size_t len, const char *suffix) {
+    size_t sl = strlen(suffix);
+    return len >= sl && strncasecmp(path + len - sl, suffix, sl) == 0;
+}
+
+bool hu_local_only_voice_service(const char *url, char *out, size_t cap) {
+    if (!url || !out || cap < 8)
+        return false;
+    size_t ulen = strlen(url);
+    const char *h = NULL;
+    size_t hl = 0;
+    if (!url_host(url, ulen, &h, &hl))
+        return false;
+    const char *path = h + hl;
+    while (*path == ':' || (*path >= '0' && *path <= '9')) /* skip :port */
+        path++;
+    size_t plen = strcspn(path, "?#");
+    while (plen > 0 && path[plen - 1] == '/')
+        plen--;
+    const char *kind = NULL;
+    if (path_has(path, plen, "/tts/") || path_ends(path, plen, "/tts") ||
+        path_ends(path, plen, "/audio/speech") || path_has(path, plen, "/text-to-speech"))
+        kind = "tts";
+    else if (path_has(path, plen, "/stt/") || path_ends(path, plen, "/stt") ||
+             path_ends(path, plen, "/audio/transcriptions") ||
+             path_ends(path, plen, "/audio/translations") || path_ends(path, plen, "/listen") ||
+             path_ends(path, plen, "speech:recognize") ||
+             path_ends(path, plen, "speech:longrunningrecognize"))
+        kind = "stt";
+    if (!kind)
+        return false;
+    /* Vendor: the registrable label (the one before the TLD). */
+    size_t end = hl, dot_last = hl, dot_prev = (size_t)-1;
+    for (size_t i = 0; i < end; i++) {
+        if (h[i] == '.') {
+            dot_prev = dot_last == hl ? (size_t)-1 : dot_last;
+            dot_last = i;
+        }
+    }
+    size_t vs = 0, ve = hl;
+    if (dot_last != hl) {
+        ve = dot_last;
+        vs = dot_prev == (size_t)-1 ? 0 : dot_prev + 1;
+    }
+    char vendor[40];
+    size_t vn = ve - vs < sizeof(vendor) - 1 ? ve - vs : sizeof(vendor) - 1;
+    for (size_t i = 0; i < vn; i++) {
+        char c = h[vs + i];
+        vendor[i] = (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c;
+    }
+    vendor[vn] = '\0';
+    int n = snprintf(out, cap, "%s:%s", kind, vendor);
+    return n > 0 && (size_t)n < cap;
+}
+
+#define LO_ALLOW_MAX  16
+#define LO_ALLOW_SIZE 48
+static char g_allow[LO_ALLOW_MAX][LO_ALLOW_SIZE];
+static atomic_size_t g_allow_count = 0;
+
+void hu_local_only_set_allow(const char *const *items, size_t count) {
+    size_t n = 0;
+    for (size_t i = 0; items && i < count && n < LO_ALLOW_MAX; i++) {
+        if (!items[i] || !items[i][0] || strlen(items[i]) >= LO_ALLOW_SIZE)
+            continue;
+        memcpy(g_allow[n], items[i], strlen(items[i]) + 1);
+        n++;
+    }
+    atomic_store(&g_allow_count, n);
+}
+
+bool hu_local_only_service_allowed(const char *service) {
+    if (!service || !service[0])
+        return false;
+    size_t n = atomic_load(&g_allow_count);
+    for (size_t i = 0; i < n; i++)
+        if (strcasecmp(g_allow[i], service) == 0)
+            return true;
+    return false;
+}
+
 /* ── Mode ──────────────────────────────────────────────────────────────── */
 
-int hu_local_only_env_parse(const char *v) {
+/* -2 = present but not a recognized value. */
+static int env_parse_strict(const char *v) {
     if (!v || !v[0])
         return -1;
     if (!strcasecmp(v, "0") || !strcasecmp(v, "off") || !strcasecmp(v, "false"))
@@ -154,9 +326,14 @@ int hu_local_only_env_parse(const char *v) {
     if (!strcasecmp(v, "audit") || !strcasecmp(v, "shadow"))
         return (int)HU_GATE_SHADOW;
     if (!strcasecmp(v, "1") || !strcasecmp(v, "on") || !strcasecmp(v, "live") ||
-        !strcasecmp(v, "true"))
+        !strcasecmp(v, "true") || !strcasecmp(v, "enforce"))
         return (int)HU_GATE_LIVE;
-    return -1;
+    return -2;
+}
+
+int hu_local_only_env_parse(const char *v) {
+    int r = env_parse_strict(v);
+    return r == -2 ? (int)HU_GATE_LIVE : r; /* unknown fails CLOSED */
 }
 
 hu_gate_mode_t hu_local_only_resolve(const char *env_value, int cfg_value, bool primary_is_local) {
@@ -178,10 +355,26 @@ void hu_local_only_reset(void) {
     atomic_store(&g_configured, -1);
     atomic_store(&g_refused, 0);
     atomic_store(&g_audited, 0);
+    atomic_store(&g_allow_count, 0);
 }
 
+static void copy_ident(char *out, size_t cap, const char *s, size_t n);
+
 hu_gate_mode_t hu_local_only_mode(void) {
-    int env = hu_local_only_env_parse(getenv("HU_LOCAL_ONLY"));
+    const char *v = getenv("HU_LOCAL_ONLY");
+    int env = env_parse_strict(v);
+    if (env == -2) {
+        static atomic_bool warned = false;
+        if (!atomic_exchange(&warned, true)) {
+            char shown[32];
+            copy_ident(shown, sizeof(shown), v, strlen(v));
+            hu_log_warn("local_only", NULL,
+                        "HU_LOCAL_ONLY=%s is not recognized (0|off|false, audit|shadow, "
+                        "1|on|live|true|enforce) — failing closed: enforcing",
+                        shown);
+        }
+        return HU_GATE_LIVE;
+    }
     if (env >= 0)
         return (hu_gate_mode_t)env;
     int cfg = atomic_load(&g_configured);
@@ -198,12 +391,19 @@ const char *hu_local_only_set_caller(const char *tag) {
     return prev;
 }
 
-/* ── The check ─────────────────────────────────────────────────────────── */
+const char *hu_local_only_enter(const char *tag) {
+    const char *prev = t_caller;
+    if (!prev)
+        t_caller = tag;
+    return prev;
+}
+
+/* ── The checks ────────────────────────────────────────────────────────── */
 
 /* Copy an identifier, keeping only [A-Za-z0-9._:-/]; never content. */
 static void copy_ident(char *out, size_t cap, const char *s, size_t n) {
     size_t w = 0;
-    for (size_t i = 0; i < n && w + 1 < cap; i++) {
+    for (size_t i = 0; s && i < n && w + 1 < cap; i++) {
         char c = s[i];
         bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
                   c == '.' || c == '_' || c == '-' || c == ':' || c == '/';
@@ -216,13 +416,15 @@ static void copy_ident(char *out, size_t cap, const char *s, size_t n) {
         memcpy(out, "?", 2);
 }
 
-static void model_for_log(const char *url, const char *body, size_t body_len, char *out,
+/* The model id of a request: from ".../models/<m>:method" or the body's
+ * leading "model" field. False when neither names one. */
+static bool model_extract(const char *url, const char *body, size_t body_len, char *out,
                           size_t cap) {
     const char *m = strstr(url, "/models/");
     if (m) {
         m += 8;
         copy_ident(out, cap, m, strcspn(m, ":?#/"));
-        return;
+        return out[0] != '?';
     }
     static const char key[] = "\"model\":\"";
     if (body && body_len > sizeof(key)) {
@@ -234,41 +436,82 @@ static void model_for_log(const char *url, const char *body, size_t body_len, ch
                 while (i + sizeof(key) - 1 + vn < body_len && v[vn] != '"')
                     vn++;
                 copy_ident(out, cap, v, vn);
-                return;
+                return out[0] != '?';
             }
         }
     }
     copy_ident(out, cap, "", 0);
+    return false;
+}
+
+/* One WARN + counter per refused (or, in audit, would-be-refused) request.
+ * Logs the host, an identifier (model or service) and the caller tag only. */
+static hu_error_t lo_refuse(hu_gate_mode_t mode, const char *url, const char *what) {
+    char host[96];
+    const char *h = NULL;
+    size_t hl = 0;
+    if (url && url_host(url, strlen(url), &h, &hl))
+        copy_ident(host, sizeof(host), h, hl);
+    else
+        copy_ident(host, sizeof(host), "", 0);
+    char ident[64];
+    copy_ident(ident, sizeof(ident), what, what ? strlen(what) : 0);
+    const char *caller = t_caller ? t_caller : "unknown";
+    if (mode == HU_GATE_SHADOW) {
+        atomic_fetch_add(&g_audited, 1);
+        hu_log_warn("local_only", NULL,
+                    "[local_only audit] would refuse provider=%s model=%s caller=%s", host, ident,
+                    caller);
+        return HU_OK;
+    }
+    atomic_fetch_add(&g_refused, 1);
+    hu_log_warn("local_only", NULL, "[local_only] refused provider=%s model=%s caller=%s", host,
+                ident, caller);
+    return HU_ERR_PERMISSION_DENIED;
 }
 
 hu_error_t hu_local_only_check_request(const char *url, const char *body, size_t body_len) {
     hu_gate_mode_t mode = hu_local_only_mode();
     if (mode == HU_GATE_OFF || !url)
         return HU_OK;
-    if (!hu_local_only_url_is_model_request(url) || hu_provider_endpoint_is_local(url, strlen(url)))
-        return HU_OK;
+    bool model_req = hu_local_only_url_is_model_request(url);
+    char svc[64];
+    bool voice = !model_req && hu_local_only_voice_service(url, svc, sizeof(svc));
+    if (!model_req && !voice)
+        return HU_OK; /* feeds, channel APIs, OAuth */
+    bool local = hu_provider_endpoint_is_local(url, strlen(url));
+    if (voice)
+        return (local || hu_local_only_service_allowed(svc)) ? HU_OK : lo_refuse(mode, url, svc);
+    char model[64];
+    bool have = model_extract(url, body, body_len, model, sizeof(model));
+    if (local) /* a loopback gateway may still forward a cloud model */
+        return (have && hu_local_only_model_name_is_cloud(model, strlen(model)))
+                   ? lo_refuse(mode, url, model)
+                   : HU_OK;
+    return lo_refuse(mode, url, model);
+}
 
-    char host[96], model[64];
-    const char *h = NULL;
-    size_t hl = 0;
-    if (url_host(url, strlen(url), &h, &hl))
-        copy_ident(host, sizeof(host), h, hl);
-    else
-        copy_ident(host, sizeof(host), "", 0);
-    model_for_log(url, body, body_len, model, sizeof(model));
-    const char *caller = t_caller ? t_caller : "unknown";
-
-    if (mode == HU_GATE_SHADOW) {
-        atomic_fetch_add(&g_audited, 1);
-        hu_log_warn("local_only", NULL,
-                    "[local_only audit] would refuse provider=%s model=%s caller=%s", host, model,
-                    caller);
+hu_error_t hu_local_only_check_ws(const char *url) {
+    hu_gate_mode_t mode = hu_local_only_mode();
+    if (mode == HU_GATE_OFF || !url)
         return HU_OK;
-    }
-    atomic_fetch_add(&g_refused, 1);
-    hu_log_warn("local_only", NULL, "[local_only] refused provider=%s model=%s caller=%s", host,
-                model, caller);
-    return HU_ERR_PERMISSION_DENIED;
+    if (hu_provider_endpoint_is_local(url, strlen(url)))
+        return HU_OK;
+    char svc[64];
+    svc[0] = '\0';
+    bool voice = hu_local_only_voice_service(url, svc, sizeof(svc));
+    if (voice && hu_local_only_service_allowed(svc))
+        return HU_OK;
+    return lo_refuse(mode, url, voice ? svc : "websocket");
+}
+
+hu_error_t hu_local_only_check_service(const char *service, const char *url) {
+    hu_gate_mode_t mode = hu_local_only_mode();
+    if (mode == HU_GATE_OFF)
+        return HU_OK;
+    if (hu_local_only_service_allowed(service))
+        return HU_OK;
+    return lo_refuse(mode, url, service);
 }
 
 uint64_t hu_local_only_refused_count(void) {

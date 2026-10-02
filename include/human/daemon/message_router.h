@@ -173,9 +173,10 @@ bool hu_daemon_hurt_withheld(const struct hu_persona *p, const char *key, size_t
  * buf. Anything else is returned unchanged. *len is updated. */
 const char *hu_daemon_unseen_photo(const char *text, size_t *len, char *buf, size_t cap);
 
-/* local_only: a bare "[Photo]" placeholder (an image with no caption) becomes
- * "[They sent a photo]" in buf, so the model can react to a picture it cannot
- * see. Anything else is returned unchanged. *len is updated. */
+/* local_only: an image the model may not see. A bare "[Photo]" becomes
+ * "[They sent a photo]"; a caption is kept (U+FFFC dropped) with the note on
+ * the next line. Written to buf; *len is updated. Returns text unchanged only
+ * when buf is too small. */
 const char *hu_daemon_photo_placeholder(const char *text, size_t *len, char *buf, size_t cap);
 
 /* Quality-retry draft. The quality gate used to free a reply before asking for
