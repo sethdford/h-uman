@@ -3,7 +3,7 @@
   "text": {
     "binary_kb": "~2760 KB",
     "binary_mb": "~3 MB",
-    "budget_binary_kb": "2800 KB",
+    "budget_binary_kb": "3000 KB",
     "budget_startup_ms": "100 ms",
     "budget_version_rss_mb": "8 MB",
     "full_binary_bytes": "3,327,168",
