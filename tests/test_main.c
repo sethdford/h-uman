@@ -963,6 +963,8 @@ void run_fact_extract_llm_tests(void);
 void run_fact_extract_tests(void);
 void run_personal_model_tests(void);
 void run_personal_model_llm_extract_tests(void);
+void run_llm_purpose_tests(void);
+void run_post_send_defer_tests(void);
 void run_personal_model_atomic_save_tests(void);
 void run_personal_model_per_contact_tests(void);
 #ifdef HU_ENABLE_SQLITE
@@ -2038,6 +2040,8 @@ int main(int argc, char **argv) {
     run_fact_extract_tests();
     run_personal_model_tests();
     run_personal_model_llm_extract_tests();
+    run_llm_purpose_tests();
+    run_post_send_defer_tests();
     run_personal_model_atomic_save_tests();
     run_personal_model_per_contact_tests();
 #ifdef HU_ENABLE_SQLITE

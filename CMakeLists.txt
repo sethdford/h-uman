@@ -593,6 +593,8 @@ set(HU_CORE_SOURCES
     src/core/rand.c
     src/core/error.c
     src/core/gate_mode.c
+    src/core/llm_purpose.c
+    src/core/post_send_defer.c
     src/core/arena.c
     src/core/string.c
     src/core/tokens.c
@@ -3473,6 +3475,8 @@ set(HU_TEST_SOURCES
     tests/test_fact_extract.c
     tests/test_personal_model.c
     tests/test_personal_model_llm_extract.c
+    tests/test_llm_purpose.c
+    tests/test_post_send_defer.c
     tests/test_personal_model_atomic_save.c
     tests/test_personal_model_per_contact.c
     # Cross-channel ACL trust-property tests. File uses internal-#ifdef-wrap-

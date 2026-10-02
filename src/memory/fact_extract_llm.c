@@ -23,6 +23,7 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/json.h"
+#include "human/core/llm_purpose.h"
 #include "human/memory/fact_extract.h"
 #include "human/memory/trust.h"
 #include "human/provider.h"
@@ -33,10 +34,10 @@
 /* Prompt template — focused, asks for JSON output. Length is bounded
  * by the snprintf below; if you grow it past ~1.5 KB, bump the stack
  * buffer or promote to alloc. */
-#define HU_FACT_LLM_SYS                                                            \
-    "You are a personal-fact extractor for text-message conversations. Read the "  \
-    "message and output ONLY a JSON object listing personal facts you can "        \
-    "extract. Output the JSON immediately — no preamble, no reasoning, no "        \
+#define HU_FACT_LLM_SYS                                                           \
+    "You are a personal-fact extractor for text-message conversations. Read the " \
+    "message and output ONLY a JSON object listing personal facts you can "       \
+    "extract. Output the JSON immediately — no preamble, no reasoning, no "       \
     "explanation, no markdown fences."
 
 /* Predicate vocabulary: the original preference/state set alone measured
@@ -188,9 +189,11 @@ hu_error_t hu_fact_extract_llm(hu_allocator_t *alloc, hu_provider_t *provider, c
     size_t response_len = 0;
     hu_json_value_t *root = NULL;
 
+    hu_llm_purpose_t prev_purpose = hu_llm_purpose_set(HU_LLM_PURPOSE_EXTRACT);
     hu_error_t err = provider->vtable->chat_with_system(
         provider->ctx, alloc, HU_FACT_LLM_SYS, strlen(HU_FACT_LLM_SYS), user_msg, (size_t)n, model,
         model_len, 0.0, &response, &response_len);
+    (void)hu_llm_purpose_set(prev_purpose);
     if (err != HU_OK) {
         ret = err;
         goto cleanup;

@@ -17,6 +17,7 @@
 #include "human/autoresponder.h"
 #include "human/config.h"
 #include "human/core/json.h"
+#include "human/core/llm_purpose.h"
 #include "human/core/log.h"
 #include "human/memory.h"
 #include "human/memory/proactive_decisions_repo.h" /* C5 Part A: decision log */
@@ -662,9 +663,13 @@ static hu_error_t init_proposer_call_llm(hu_allocator_t *alloc, struct hu_provid
     /* max_tokens 512, thinking_budget 0, json_object: see the comment above. */
     const hu_chat_oneshot_opts_t opts = {
         .temperature = 0.2, .max_tokens = 512, .json_object = true};
-    return hu_provider_chat_oneshot(alloc, provider, model, strlen(model), sys_prompt,
-                                    strlen(sys_prompt), user_msg, strlen(user_msg), &opts,
-                                    out_response, out_response_len);
+    /* Drafts are background work: X-HU-Priority: batch lets a reply jump them. */
+    hu_llm_purpose_t prev_purpose = hu_llm_purpose_set(HU_LLM_PURPOSE_PROACTIVE);
+    hu_error_t err = hu_provider_chat_oneshot(alloc, provider, model, strlen(model), sys_prompt,
+                                              strlen(sys_prompt), user_msg, strlen(user_msg), &opts,
+                                              out_response, out_response_len);
+    (void)hu_llm_purpose_set(prev_purpose);
+    return err;
 }
 
 /* 2026-05-26 issue-sweep — defense-in-depth fallback for truncated

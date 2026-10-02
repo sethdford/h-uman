@@ -78,6 +78,7 @@ int hu_reaction_lookup_last_response(const char *channel, const char *thread, ch
 #include "human/cognition/humor.h"
 #include "human/cognition/trust.h"
 #include "human/context/contact_style_overlay.h"
+#include "human/core/llm_purpose.h"
 #include "human/eval/consistency.h"
 #include "human/memory/fact_extract.h"
 #include "human/memory/hallucination_guard.h"
@@ -7083,7 +7084,11 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             *response_len_out = 0;
         return HU_ERR_OUT_OF_MEMORY;
     }
+    /* X-HU-Purpose: an untagged turn's LLM calls are the reply; a caller's tag
+     * (proactive, background lane) wins. llm_purpose.h maps it to priority. */
+    hu_llm_purpose_t prev_purpose = hu_llm_purpose_set_if_untagged(HU_LLM_PURPOSE_REPLY);
     hu_error_t err = agent_turn_run(turn_ctx, agent, msg, msg_len, response_out, response_len_out);
+    (void)hu_llm_purpose_set(prev_purpose);
     hu_turn_ctx_free(turn_ctx);
     return err;
 }

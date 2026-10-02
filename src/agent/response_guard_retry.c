@@ -1,6 +1,7 @@
 #include "human/agent/response_guard_retry.h"
 #include "human/agent/tool_call_parser.h"
 #include "human/config.h"
+#include "human/core/llm_purpose.h"
 #include "human/core/log.h"
 #include "human/core/string.h"
 #include "human/providers/factory.h"
@@ -117,7 +118,9 @@ static hu_error_t dispatch_slim_chat(hu_allocator_t *alloc, hu_observer_t *obs, 
 
     hu_chat_response_t resp;
     memset(&resp, 0, sizeof(resp));
+    hu_llm_purpose_t prev_purpose = hu_llm_purpose_set(HU_LLM_PURPOSE_GUARD_RETRY);
     hu_error_t err = prov->vtable->chat(prov->ctx, alloc, &req, model, model_len, 0.2, &resp);
+    (void)hu_llm_purpose_set(prev_purpose);
     /* Free the built system prompt now that the chat call has copied/consumed it. */
     if (built_instruction) {
         size_t free_cap = identity_anchor_len + 2 + sizeof(repair_instruction_base);
