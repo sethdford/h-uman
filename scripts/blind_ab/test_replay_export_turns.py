@@ -64,6 +64,29 @@ def build_chat_db(path):
     con.close()
 
 
+def build_memory_db(path, outbound=(), assistant=()):
+    con = sqlite3.connect(path)
+    con.executescript("""
+        CREATE TABLE outbound_sends (id INTEGER PRIMARY KEY, sent_at_ms INTEGER, channel TEXT,
+            contact TEXT, kind TEXT, text TEXT, prior_max_rowid INTEGER);
+        CREATE TABLE messages (id INTEGER PRIMARY KEY, session_id TEXT, role TEXT,
+            content TEXT, created_at TEXT);
+    """)
+    for contact, epoch, text in outbound:
+        con.execute("INSERT INTO outbound_sends (sent_at_ms, channel, contact, kind, text, "
+                    "prior_max_rowid) VALUES (?, 'imessage', ?, 'text', ?, -1)",
+                    (int(epoch * 1000), contact, text))
+    for contact, epoch, text in assistant:
+        con.execute("INSERT INTO messages (session_id, role, content, created_at) "
+                    "VALUES (?, 'assistant', ?, datetime(?, 'unixepoch'))", (contact, text, epoch))
+    con.commit()
+    con.close()
+
+
+def epoch(sec):
+    return BASE + sec + ex.APPLE_EPOCH
+
+
 def sha(path):
     with open(path, "rb") as f:
         return hashlib.sha256(f.read()).hexdigest()
@@ -73,12 +96,13 @@ def sha(path):
 def fixture(tmp_path):
     db = tmp_path / "chat.db"
     build_chat_db(str(db))
+    build_memory_db(str(tmp_path / "memory.db"))
     return tmp_path, str(db)
 
 
 def run_export(tmp_path, db, capsys, *extra):
     rc = ex.main(["--name", "r1", "--run-root", str(tmp_path / "runs"), "--db", db,
-                  "--since-days", "0", *extra])
+                  "--since-days", "0", "--memory-db", str(tmp_path / "memory.db"), *extra])
     out = capsys.readouterr()
     return rc, out
 
@@ -144,3 +168,51 @@ def test_limit_and_per_contact_caps(fixture, capsys):
 def test_apple_ts_handles_seconds_and_nanoseconds():
     assert ex.apple_ts(ns(5)) == BASE + 5 + ex.APPLE_EPOCH
     assert ex.apple_ts(BASE + 5) == BASE + 5 + ex.APPLE_EPOCH
+
+
+def test_drops_turns_the_daemon_answered(tmp_path, capsys):
+    db = tmp_path / "chat.db"
+    build_chat_db(str(db))
+    mem = tmp_path / "memory.db"
+    # The daemon sent "what time" (outbound_sends) and, in March-era form, its
+    # session store holds the reply that became the "ha nice" bubble.
+    build_memory_db(str(mem),
+                    outbound=[("+15550001111", epoch(1105) + 20, "what time")],
+                    assistant=[("+15550001111", epoch(60) - 30, "ha nice")])
+    rc = ex.main(["--name", "r1", "--run-root", str(tmp_path / "runs"), "--db", str(db),
+                  "--since-days", "0", "--memory-db", str(mem)])
+    out = capsys.readouterr().out
+    assert rc == 0
+    turns = read_turns(tmp_path)
+    assert [t["seth_action"] for t in turns] == ["tapback"]
+    assert "excluded because the daemon sent the response: 2" in out
+    assert all("_reply_ts" not in t for t in turns)
+
+
+def test_record_outside_the_window_does_not_exclude(tmp_path, capsys):
+    db = tmp_path / "chat.db"
+    build_chat_db(str(db))
+    mem = tmp_path / "memory.db"
+    build_memory_db(str(mem), outbound=[("+15550001111", epoch(1105) + 3600, "what time")])
+    ex.main(["--name", "r1", "--run-root", str(tmp_path / "runs"), "--db", str(db),
+             "--since-days", "0", "--memory-db", str(mem)])
+    assert len(read_turns(tmp_path)) == 3
+
+
+def test_daemon_activity_drops_a_tapback_turn(tmp_path, capsys):
+    db = tmp_path / "chat.db"
+    build_chat_db(str(db))
+    mem = tmp_path / "memory.db"
+    build_memory_db(str(mem), outbound=[("+15550001111", epoch(2030) + 60, "haha")])
+    ex.main(["--name", "r1", "--run-root", str(tmp_path / "runs"), "--db", str(db),
+             "--since-days", "0", "--memory-db", str(mem)])
+    assert [t["seth_action"] for t in read_turns(tmp_path)] == ["text", "text"]
+
+
+def test_refuses_without_provenance_db(tmp_path, capsys):
+    db = tmp_path / "chat.db"
+    build_chat_db(str(db))
+    rc = ex.main(["--name", "r1", "--run-root", str(tmp_path / "runs"), "--db", str(db),
+                  "--since-days", "0", "--memory-db", str(tmp_path / "missing.db")])
+    assert rc == 2
+    assert not (tmp_path / "runs" / "r1" / "turns.jsonl").exists()

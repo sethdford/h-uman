@@ -24,6 +24,7 @@ Prints numbers only, never message text. Runbook: docs/guides/replay-harness.md.
 """
 import argparse
 import json
+import math
 import os
 import re
 import statistics
@@ -81,6 +82,14 @@ the a an and or but so to of in on at for with from about is are was were be bee
 do does did have has had i you he she it we they me my your our their this that what
 when where who how why are you u ur r just like ok okay yeah yes no not
 """.split())
+# A reply that opens with one of these, or carries a number or a clock time,
+# is answering — "yeah what time?" answers "you coming?" before it asks.
+ANSWER_OPENERS = frozenset("""
+yes yeah yea yep yup ya ye no nah nope sure ok okay k kk def definitely absolutely
+totally of course probably prob already tonight today tomorrow tmrw now soon later
+""".split())
+CONTENT_MIN_LEN = 4  # content words: >= 4 letters and not in _STOP
+_NUMBERISH = re.compile(r"\b\d+(:\d\d)?\s*(am|pm)?\b|\b(noon|midnight)\b")
 
 
 def _has_phrase(text, phrase):
@@ -88,21 +97,67 @@ def _has_phrase(text, phrase):
 
 
 def _content_words(text):
-    return {w for w in _WORD.findall(text.lower()) if len(w) > 3 and w not in _STOP}
+    return {w for w in _WORD.findall((text or "").lower())
+            if len(w) >= CONTENT_MIN_LEN and w not in _STOP}
+
+
+def asked_question(inbound):
+    return "?" in (inbound or "")
+
+
+def answers(inbound, reply):
+    """The reply engages the question: it shares a content word with it,
+    opens with an answer word, or carries a number / clock time."""
+    r = (reply or "").strip().lower()
+    words = _WORD.findall(r)
+    if words and words[0] in ANSWER_OPENERS:
+        return True
+    if _NUMBERISH.search(r):
+        return True
+    return bool(_content_words(inbound) & _content_words(r))
 
 
 def is_deflection(inbound, reply):
-    """True when the reply sidesteps: a stock non-answer phrase (word-bounded),
-    or a direct question answered only with a question that shares none of
-    its content words ("what about you?")."""
+    """Defined only for a reply to a question. True when the reply does NOT
+    answer (answers() is false) AND it either uses a stock non-answer phrase
+    (word-bounded) or is only a question back."""
     r = (reply or "").strip().lower()
-    if not r:
+    if not r or not asked_question(inbound) or answers(inbound, r):
         return False
     if any(_has_phrase(r, p) for p in DEFLECT_PHRASES):
         return True
-    asked = "?" in (inbound or "")
-    only_question = r.endswith("?") and r.count("?") >= 1 and not re.search(r"[.!]\s", r)
-    return asked and only_question and not (_content_words(inbound) & _content_words(r))
+    return r.endswith("?") and not re.search(r"[.!]\s", r)
+
+
+def ks_two_sample(xs, ys):
+    """Two-sample Kolmogorov-Smirnov: (D, asymptotic p). None when a side is
+    empty. p uses the Kolmogorov series with the Stephens small-n correction;
+    with heavy ties (lengths are integers) it is conservative."""
+    if not xs or not ys:
+        return None
+    a, b = sorted(xs), sorted(ys)
+    n, m = len(a), len(b)
+    i = j = 0
+    d = 0.0
+    while i < n and j < m:
+        v = min(a[i], b[j])
+        while i < n and a[i] == v:
+            i += 1
+        while j < m and b[j] == v:
+            j += 1
+        d = max(d, abs(i / n - j / m))
+    en = math.sqrt(n * m / (n + m))
+    lam = (en + 0.12 + 0.11 / en) * d
+    if lam < 1e-9:
+        return d, 1.0
+    p = 2.0 * sum((-1) ** (k - 1) * math.exp(-2.0 * k * k * lam * lam) for k in range(1, 101))
+    return d, min(1.0, max(0.0, p))
+
+
+def p90(values):
+    """Nearest-rank 90th percentile: the ceil(0.9 n)-th smallest value."""
+    v = sorted(values)
+    return v[max(0, math.ceil(0.9 * len(v)) - 1)] if v else None
 
 
 def has_question(reply):
@@ -135,6 +190,8 @@ def summarize(rows):
     def rate(pred):
         return (sum(1 for r in texts if pred(r)) / nt) if nt else None
 
+    asked = [r for r in texts if asked_question(r["inbound"])]
+
     return {
         "n": n,
         "text_n": nt,
@@ -143,11 +200,14 @@ def summarize(rows):
         "dropped_share": share("dropped"),
         "len_mean": statistics.fmean(lens) if lens else None,
         "len_median": statistics.median(lens) if lens else None,
-        "len_p90": sorted(lens)[min(len(lens) - 1, int(0.9 * len(lens)))] if lens else None,
+        "len_p90": p90(lens),
         "bubbles_mean": statistics.fmean(r["bubbles"] for r in texts) if texts else None,
         "question_rate": rate(lambda r: has_question(r["reply"])),
         "fragment_rate": rate(lambda r: any(is_fragment(b) for b in r["bubble_list"])),
-        "deflection_rate": rate(lambda r: is_deflection(r["inbound"], r["reply"])),
+        "deflection_n": len(asked),
+        "deflection_rate": (sum(1 for r in asked if is_deflection(r["inbound"], r["reply"]))
+                            / len(asked)) if asked else None,
+        "lengths": lens,
     }
 
 
@@ -191,6 +251,29 @@ def arm_order(run_dir, out_dir):
     return ordered + sorted(present - set(ordered))
 
 
+def partial_reasons(run_dir, by_id, results):
+    """Why these arms are not one complete measurement (empty when they are):
+    the driver's manifest missing or marking an arm INCOMPLETE, an arm absent
+    from the manifest, or arms covering different turn sets."""
+    out = []
+    try:
+        with open(os.path.join(run_dir, "manifest.json")) as f:
+            manifest = json.load(f)
+        flags = {x["arm"]: x.get("complete") for x in manifest["arms"]}
+    except (OSError, ValueError, KeyError):
+        return ["no readable manifest.json from replay_driver.py run"]
+    for arm in results:
+        if arm not in flags:
+            out.append(f"arm {arm} is not in the manifest")
+        elif flags[arm] is not True:
+            out.append(f"arm {arm} is marked INCOMPLETE in the manifest")
+    sets = {arm: frozenset(r["id"] for r in rows) for arm, rows in results.items()}
+    if len(set(sets.values())) > 1:
+        sizes = ", ".join(f"{arm}={len(v)}" for arm, v in sets.items())
+        out.append(f"arms cover different turn sets ({sizes})")
+    return out
+
+
 def write_private_json(path, obj):
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:
@@ -204,6 +287,8 @@ def main(argv=None):
     ap.add_argument("--arm", action="append", default=[],
                     help="arms to feed (default: every out/*.jsonl)")
     ap.add_argument("--sheets", action="store_true", help="also run make_rating_sheet.py")
+    ap.add_argument("--allow-partial", action="store_true",
+                    help="feed INCOMPLETE arms on the turns every arm finished (exploration only)")
     a = ap.parse_args(argv)
     try:
         run_dir = run_dir_for(a.name, a.run_root)
@@ -218,6 +303,15 @@ def main(argv=None):
         print("refusing: no arm output", file=sys.stderr)
         return 1
     results = {arm: load_jsonl(os.path.join(out_dir, f"{arm}.jsonl")) for arm in arms}
+    why = partial_reasons(run_dir, by_id, results)
+    if why and not a.allow_partial:
+        for w in why:
+            print(f"refusing: {w}", file=sys.stderr)
+        print("refusing: a partial arm is not a measurement (--allow-partial to compare the "
+              "turns every arm finished)", file=sys.stderr)
+        return 1
+    for w in why:
+        print(f"WARNING (--allow-partial): {w}", file=sys.stderr)
     for arm, rows in results.items():
         bad = sum(1 for r in rows if r["action"] == "error")
         unknown = sum(1 for r in rows if r["id"] not in by_id)
@@ -235,6 +329,8 @@ def main(argv=None):
     for arm in arms:
         rows = [r for r in results[arm] if r["id"] in common]
         s = summarize(arm_rows(by_id, rows))
+        ks = ks_two_sample(s.get("lengths") or [], stats["seth"].get("lengths") or [])
+        s["ks_len_vs_seth"] = None if ks is None else {"D": ks[0], "p": ks[1]}
         if arm != first:
             both = [r for r in rows if r.get("reply_fp") and first_fp.get(r["id"])]
             s[f"compared_with_{first}"] = len(both)
@@ -253,7 +349,10 @@ def main(argv=None):
                     os.chmod(os.path.join(arm_dir, fn), 0o600)
     write_private_json(os.path.join(feed_root, "stats.json"), stats)
     cols = ("n", "tapback_share", "len_median", "len_p90", "bubbles_mean", "question_rate",
-            "fragment_rate", "deflection_rate")
+            "fragment_rate", "deflection_rate", "ks_D", "ks_p")
+    for s in stats["arms"].values():
+        if s.get("ks_len_vs_seth"):
+            s["ks_D"], s["ks_p"] = s["ks_len_vs_seth"]["D"], s["ks_len_vs_seth"]["p"]
     print("who".ljust(16) + "".join(c[:12].rjust(13) for c in cols))
     for who, s in [("seth", stats["seth"])] + list(stats["arms"].items()):
         cells = []

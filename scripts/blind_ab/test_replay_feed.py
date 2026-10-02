@@ -56,6 +56,14 @@ def test_deflection_phrases_are_word_bounded():
     assert not rf.is_deflection("you coming?", "yeah be there at 7")
 
 
+def test_answer_plus_question_is_not_deflection():
+    assert not rf.is_deflection("you coming tonight?", "yeah what time?")
+    assert not rf.is_deflection("what time works?", "7 maybe? idk")       # a time answers
+    assert not rf.is_deflection("you around?", "nah not sure yet")         # answer opener
+    assert rf.is_deflection("you around?", "not sure, we'll see")
+    assert not rf.is_deflection("ok cool", "idk")                          # no question asked
+
+
 def test_question_answered_with_unrelated_question_is_deflection():
     assert rf.is_deflection("how was the interview?", "what about you?")
     assert not rf.is_deflection("how was the interview?", "the interview went fine, you?")
@@ -78,9 +86,12 @@ def row(i, action, bubbles, fp):
             "bubble_count": len(bubbles), "reply_fp": fp}
 
 
-def make_run(tmp_path, arms):
+def make_run(tmp_path, arms, complete=None):
     run = tmp_path / "runs" / "r1"
     (run / "out").mkdir(parents=True)
+    complete = complete or {}
+    (run / "manifest.json").write_text(json.dumps(
+        {"arms": [{"arm": n, "complete": complete.get(n, True)} for n in arms]}))
     with open(run / "turns.jsonl", "w") as f:
         for t in TURNS:
             f.write(json.dumps(t) + "\n")
@@ -107,7 +118,13 @@ def test_feed_writes_triples_and_stats(tmp_path, capsys):
     off, on = stats["arms"]["off"], stats["arms"]["on"]
     assert off["tapback_share"] == pytest.approx(1 / 3) and on["tapback_share"] == 0.0
     assert off["fragment_rate"] == pytest.approx(0.5)
-    assert off["deflection_rate"] == pytest.approx(0.5)
+    # off: "yeah i was just" answers "you coming tonight?" (opener yeah);
+    # "idk" does not answer "how was it?" -> 1 of 2 question replies
+    assert off["deflection_n"] == 2 and off["deflection_rate"] == pytest.approx(0.5)
+    # on: "yeah what time?" answers; "it was great" answers -> 0 of 2
+    assert on["deflection_n"] == 2 and on["deflection_rate"] == 0.0
+    assert seth["deflection_rate"] == 0.0
+    assert on["ks_len_vs_seth"]["D"] > 0 and 0.0 <= on["ks_len_vs_seth"]["p"] <= 1.0
     assert on["question_rate"] == pytest.approx(1 / 3)
     assert on["same_request_as_off"] == 0 and on["compared_with_off"] == 2
     triples = json.loads((run / "feed" / "off" / "triples.json").read_text())
@@ -137,3 +154,49 @@ def test_feed_refuses_an_arm_with_errors(tmp_path, capsys):
 
 def test_summarize_empty_is_absent_not_zero():
     assert rf.summarize([]) == {"n": 0}
+
+
+def full_rows(arm_ids):
+    return [row(i, "text", ["ok sure"], f"fp-{i}") for i in arm_ids]
+
+
+def test_feed_refuses_an_incomplete_arm_from_the_manifest(tmp_path, capsys):
+    run = make_run(tmp_path, {"off": full_rows(["t1", "t2", "t3"]),
+                              "on": full_rows(["t1", "t2", "t3"])}, complete={"on": False})
+    assert rf.main(["--name", "r1", "--run-root", str(tmp_path / "runs")]) == 1
+    assert "INCOMPLETE" in capsys.readouterr().err
+    assert not (run / "feed").exists()
+
+
+def test_feed_refuses_arms_covering_different_turns(tmp_path, capsys):
+    run = make_run(tmp_path, {"off": full_rows(["t1", "t2", "t3"]), "on": full_rows(["t1", "t2"])})
+    assert rf.main(["--name", "r1", "--run-root", str(tmp_path / "runs")]) == 1
+    assert "different turn sets" in capsys.readouterr().err
+    assert not (run / "feed").exists()
+    # --allow-partial compares the shared turns, loudly
+    assert rf.main(["--name", "r1", "--run-root", str(tmp_path / "runs"), "--allow-partial"]) == 0
+    stats = json.loads((run / "feed" / "stats.json").read_text())
+    assert stats["turns"] == 2
+
+
+def test_feed_refuses_without_a_manifest(tmp_path, capsys):
+    run = make_run(tmp_path, {"off": full_rows(["t1", "t2", "t3"])})
+    (run / "manifest.json").unlink()
+    assert rf.main(["--name", "r1", "--run-root", str(tmp_path / "runs")]) == 1
+
+
+def test_p90_is_nearest_rank():
+    assert rf.p90(list(range(1, 11))) == 9        # ceil(0.9*10)=9th smallest
+    assert rf.p90([5]) == 5
+    assert rf.p90(list(range(1, 21))) == 18
+    assert rf.p90([]) is None
+
+
+def test_ks_two_sample():
+    d, p = rf.ks_two_sample([1, 2, 3, 4], [1, 2, 3, 4])
+    assert d == 0 and p == 1.0
+    d, p = rf.ks_two_sample(list(range(0, 40)), list(range(100, 140)))
+    assert d == 1.0 and p < 1e-6
+    d, p = rf.ks_two_sample([1, 1, 2], [1, 2, 2])     # ties handled as steps
+    assert d == pytest.approx(1 / 3)
+    assert rf.ks_two_sample([], [1]) is None

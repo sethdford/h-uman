@@ -11,6 +11,14 @@ had. Output is one JSON object per line:
    "history": [{"from_me", "text", "ts"}, ...],
    "seth_action": "text"|"tapback", "seth_reply_bubbles": [...]}
 
+Seth's own responses only: Seth's account also carries the daemon's replies,
+so a turn is dropped when memory.db (read-only) shows the daemon produced the
+response — outbound_sends or a session-store assistant row for that contact
+within 10 minutes whose text contains or is contained in the bubble. A tapback
+turn is dropped when the daemon produced anything for that contact within 10
+minutes (chat.db cannot tell the director's tapbacks from Seth's). The number
+dropped is printed; no text is.
+
 Privacy, by construction:
   - chat.db is opened read-only (sqlite URI mode=ro); nothing is written to it;
   - output goes ONLY to a private run dir outside the repo
@@ -34,6 +42,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from export_seth_triples import msg_text  # noqa: E402  (the shared decoder)
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+# A Seth-side message is the DAEMON's (not Seth's) when memory.db has a
+# matching record for that contact within this window: outbound_sends (one
+# row per delivered send, since 2026-09-25) or the session store's assistant
+# rows (every reply the daemon produced, since 2026-03). A turn whose
+# response the daemon sent is not a sample of Seth.
+PROVENANCE_WINDOW_S = 10 * 60
+UPTIME_STAMP_MAX_MS = 10 ** 12  # outbound_sends rows stamped with uptime: time unknown
 APPLE_EPOCH = 978307200
 TAPBACK_TYPES = range(2000, 2006)  # love, like, dislike, laugh, emphasize, question
 
@@ -52,6 +67,65 @@ def apple_ts(raw):
 
 def fmt_local(epoch):
     return datetime.datetime.fromtimestamp(epoch).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def default_memory_db():
+    state = os.environ.get("HU_STATE_DIR") or os.path.expanduser("~/.human")
+    return os.path.join(state, "memory.db")
+
+
+def _norm(text):
+    return " ".join((text or "").lower().split())
+
+
+def load_daemon_sends(mem_path):
+    """{contact: [(epoch_s or None, normalized_text)]} of every message the
+    daemon produced, read-only. Raises FileNotFoundError when there is no db."""
+    if not os.path.isfile(mem_path):
+        raise FileNotFoundError(mem_path)
+    con = sqlite3.connect(f"file:{mem_path}?mode=ro", uri=True)
+    con.text_factory = lambda b: b.decode("utf-8", "replace")
+    out = {}
+    try:
+        try:
+            for contact, ms, text in con.execute(
+                    "SELECT contact, sent_at_ms, text FROM outbound_sends WHERE text IS NOT NULL"):
+                t = None if ms < UPTIME_STAMP_MAX_MS else ms / 1000.0
+                out.setdefault(contact, []).append((t, _norm(text)))
+        except sqlite3.OperationalError:
+            pass  # memory.db that predates outbound_sends
+        try:
+            for contact, created, text in con.execute(
+                    "SELECT session_id, CAST(strftime('%s', created_at) AS INTEGER), content "
+                    "FROM messages WHERE role = 'assistant'"):
+                out.setdefault(contact, []).append((created, _norm(text)))
+        except sqlite3.OperationalError:
+            pass
+    finally:
+        con.close()
+    return out
+
+
+def daemon_sent(sends, contact, ts, text):
+    """True when `text` sent at `ts` to `contact` matches a daemon record:
+    either text contains the other (the daemon splits a reply into bubbles),
+    and the record is within PROVENANCE_WINDOW_S (or has no usable time)."""
+    t = _norm(text)
+    if not t:
+        return False
+    for when, rec in sends.get(contact, ()):
+        if when is not None and abs(when - ts) > PROVENANCE_WINDOW_S:
+            continue
+        if rec and (t in rec or rec in t):
+            return True
+    return False
+
+
+def daemon_active(sends, contact, ts):
+    """True when the daemon produced anything for `contact` near `ts` — a
+    tapback then may be the director's, and chat.db cannot tell."""
+    return any(when is not None and abs(when - ts) <= PROVENANCE_WINDOW_S
+               for when, _ in sends.get(contact, ()))
 
 
 def run_dir_for(name, root):
@@ -119,7 +193,8 @@ def load_threads(con):
 
 
 def turns_in_thread(handle, rows, history_n, max_gap_s):
-    """Yield turns: their run of texts, then Seth's next text run or tapback."""
+    """Yield turns: their run of texts, then Seth's next text run or tapback.
+    Every is_from_me row is a candidate; select_turns drops the daemon's."""
     i = 0
     n = len(rows)
     while i < n:
@@ -144,13 +219,14 @@ def turns_in_thread(handle, rows, history_n, max_gap_s):
             if rows[j][4] not in inbound_guids:
                 i = j + 1
                 continue
-            action, reply = "tapback", []
+            action, reply, reply_ts = "tapback", [], [rows[j][0]]
             k = j + 1
         else:
             k = j
-            reply = []
+            reply, reply_ts = [], []
             while k < n and rows[k][1] and rows[k][2] is not None:
                 reply.append(rows[k][2])
+                reply_ts.append(rows[k][0])
                 k += 1
             action = "text"
         hist_rows = [r for r in rows[max(0, start - 4 * history_n):start] if r[2] is not None]
@@ -163,18 +239,37 @@ def turns_in_thread(handle, rows, history_n, max_gap_s):
             "history": history,
             "seth_action": action,
             "seth_reply_bubbles": reply,
+            "_reply_ts": reply_ts,
         }
         i = k
 
 
-def select_turns(threads, limit, per_contact, since_ts, history_n, max_gap_s):
+def is_daemon_turn(turn, sends):
+    """The response in this turn came from the daemon, not Seth."""
+    c = turn["contact_id"]
+    if turn["seth_action"] == "tapback":
+        return daemon_active(sends, c, turn["_reply_ts"][0])
+    return any(daemon_sent(sends, c, ts, text)
+               for ts, text in zip(turn["_reply_ts"], turn["seth_reply_bubbles"]))
+
+
+def select_turns(threads, limit, per_contact, since_ts, history_n, max_gap_s, sends=None,
+                 excluded=None):
     """Newest turns first, round-robin across contacts, capped per contact.
 
     Newest first because the memory snapshot is taken now: the closer a turn is
     to today, the less the replay's memory knows about its own future."""
     buckets = []
     for handle, rows in threads.values():
-        ts = [t for t in turns_in_thread(handle, rows, history_n, max_gap_s) if t["ts"] >= since_ts]
+        ts = []
+        for t in turns_in_thread(handle, rows, history_n, max_gap_s):
+            if t["ts"] < since_ts:
+                continue
+            if sends is not None and is_daemon_turn(t, sends):
+                if excluded is not None:
+                    excluded.append(t["ts"])
+                continue
+            ts.append(t)
         ts.sort(key=lambda t: t["ts"], reverse=True)
         if ts:
             buckets.append(ts[:per_contact] if per_contact > 0 else ts)
@@ -189,6 +284,7 @@ def select_turns(threads, limit, per_contact, since_ts, history_n, max_gap_s):
     out.sort(key=lambda t: t["ts"])
     for k, t in enumerate(out, 1):
         t["id"] = f"t{k:04d}"
+        t.pop("_reply_ts", None)
     return out
 
 
@@ -203,6 +299,8 @@ def main(argv=None):
     ap.add_argument("--history", type=int, default=20, help="thread messages kept per turn")
     ap.add_argument("--max-gap-min", type=int, default=240,
                     help="Seth's response must start within this many minutes")
+    ap.add_argument("--memory-db", default=default_memory_db(),
+                    help="memory.db holding the daemon's send provenance (read-only)")
     a = ap.parse_args(argv)
     try:
         run_dir = run_dir_for(a.name, a.run_root)
@@ -212,6 +310,12 @@ def main(argv=None):
     if not os.path.exists(a.db):
         print("refusing: chat.db not found", file=sys.stderr)
         return 2
+    try:
+        sends = load_daemon_sends(a.memory_db)
+    except FileNotFoundError:
+        print("refusing: no memory.db for send provenance (--memory-db); without it the "
+              "daemon's own replies would be counted as Seth's", file=sys.stderr)
+        return 2
     con = sqlite3.connect(f"file:{a.db}?mode=ro", uri=True)
     try:
         threads, undecoded = load_threads(con)
@@ -219,7 +323,9 @@ def main(argv=None):
         con.close()
     since = 0 if a.since_days <= 0 else int(
         datetime.datetime.now().timestamp()) - a.since_days * 86400
-    turns = select_turns(threads, a.limit, a.per_contact, since, a.history, a.max_gap_min * 60)
+    excluded = []
+    turns = select_turns(threads, a.limit, a.per_contact, since, a.history, a.max_gap_min * 60,
+                         sends=sends, excluded=excluded)
     if not turns:
         print("refusing: no turns matched (widen --since-days?)", file=sys.stderr)
         return 1
@@ -229,6 +335,7 @@ def main(argv=None):
     print(f"wrote {len(turns)} turns ({tapbacks} where Seth tapbacked) from "
           f"{len({t['contact_id'] for t in turns})} contacts to {run_dir}/turns.jsonl")
     print(f"  1:1 threads scanned: {len(threads)}; undecodable bodies skipped: {undecoded}")
+    print(f"  turns excluded because the daemon sent the response: {len(excluded)}")
     return 0
 
 

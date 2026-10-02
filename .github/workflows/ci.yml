@@ -1237,6 +1237,6 @@ jobs:
       # Real-turn replay harness (docs/guides/replay-harness.md): fixture chat.db,
       # fake `human` binary, temp dirs — never ~/.human, chat.db or a model.
       - name: Replay harness exporter + driver + feed (hermetic)
-        run: python3 -m pytest -q scripts/blind_ab/test_replay_export_turns.py scripts/blind_ab/test_replay_driver.py scripts/blind_ab/test_replay_feed.py
+        run: python3 -m pytest -q scripts/blind_ab/test_replay_export_turns.py scripts/blind_ab/test_replay_driver.py scripts/blind_ab/test_replay_feed.py scripts/blind_ab/test_replay_real_binary.py
       - name: Enforce capability registry against blind_ab gate
         run: python3 scripts/check_capability_gates.py
