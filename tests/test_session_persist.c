@@ -1,8 +1,8 @@
-#include "test_framework.h"
-#include "human/agent/session_persist.h"
 #include "human/agent.h"
+#include "human/agent/session_persist.h"
 #include "human/core/json.h"
 #include "human/core/string.h"
+#include "test_framework.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,13 +16,20 @@ static hu_allocator_t g_alloc;
 static char g_tmpdir[256];
 
 /* Minimal mock provider vtable */
-static const char *mock_get_name(void *ctx) { (void)ctx; return "mock"; }
-static hu_error_t mock_chat(void *ctx, hu_allocator_t *alloc,
-                            const hu_chat_request_t *request,
+static const char *mock_get_name(void *ctx) {
+    (void)ctx;
+    return "mock";
+}
+static hu_error_t mock_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_request_t *request,
                             const char *model, size_t model_len, double temperature,
                             hu_chat_response_t *out) {
-    (void)ctx; (void)alloc; (void)request;
-    (void)model; (void)model_len; (void)temperature; (void)out;
+    (void)ctx;
+    (void)alloc;
+    (void)request;
+    (void)model;
+    (void)model_len;
+    (void)temperature;
+    (void)out;
     return HU_OK;
 }
 static hu_provider_vtable_t g_mock_vtable = {
@@ -38,7 +45,9 @@ static void make_tmpdir(void) {
 static void rm_rf(const char *path) {
     char cmd[512];
     snprintf(cmd, sizeof(cmd), "rm -rf '%s'", path);
-    (void)system(cmd);
+    if (system(cmd) != 0) {
+        /* best-effort cleanup; a (void) cast does not silence glibc warn_unused_result */
+    }
 }
 
 static void setup(void) {
@@ -55,7 +64,7 @@ static void teardown(void) {
 static void init_agent(hu_agent_t *agent) {
     memset(agent, 0, sizeof(*agent));
     agent->alloc = &g_alloc;
-    hu_provider_t prov = { .vtable = &g_mock_vtable, .ctx = NULL };
+    hu_provider_t prov = {.vtable = &g_mock_vtable, .ctx = NULL};
     agent->provider = prov;
     agent->model_name = hu_strdup(&g_alloc, "test-model");
     agent->model_name_len = 10;
@@ -69,8 +78,7 @@ static void init_agent(hu_agent_t *agent) {
 static void add_message(hu_agent_t *agent, hu_role_t role, const char *content) {
     size_t new_count = agent->history_count + 1;
     hu_owned_message_t *new_hist = (hu_owned_message_t *)agent->alloc->realloc(
-        agent->alloc->ctx, agent->history,
-        agent->history_cap * sizeof(hu_owned_message_t),
+        agent->alloc->ctx, agent->history, agent->history_cap * sizeof(hu_owned_message_t),
         new_count * sizeof(hu_owned_message_t));
     HU_ASSERT_NOT_NULL(new_hist);
     agent->history = new_hist;
@@ -96,9 +104,13 @@ static void free_agent(hu_agent_t *agent) {
         if (m->tool_calls) {
             for (size_t j = 0; j < m->tool_calls_count; j++) {
                 hu_tool_call_t *tc = &m->tool_calls[j];
-                if (tc->id) agent->alloc->free(agent->alloc->ctx, (void *)tc->id, tc->id_len + 1);
-                if (tc->name) agent->alloc->free(agent->alloc->ctx, (void *)tc->name, tc->name_len + 1);
-                if (tc->arguments) agent->alloc->free(agent->alloc->ctx, (void *)tc->arguments, tc->arguments_len + 1);
+                if (tc->id)
+                    agent->alloc->free(agent->alloc->ctx, (void *)tc->id, tc->id_len + 1);
+                if (tc->name)
+                    agent->alloc->free(agent->alloc->ctx, (void *)tc->name, tc->name_len + 1);
+                if (tc->arguments)
+                    agent->alloc->free(agent->alloc->ctx, (void *)tc->arguments,
+                                       tc->arguments_len + 1);
             }
             agent->alloc->free(agent->alloc->ctx, m->tool_calls,
                                m->tool_calls_count * sizeof(hu_tool_call_t));
@@ -347,7 +359,8 @@ static void test_list_nonexistent_dir(void) {
     setup();
     hu_session_metadata_t *sessions = NULL;
     size_t count = 0;
-    hu_error_t err = hu_session_persist_list(&g_alloc, "/tmp/hu_no_such_dir_xyz", &sessions, &count);
+    hu_error_t err =
+        hu_session_persist_list(&g_alloc, "/tmp/hu_no_such_dir_xyz", &sessions, &count);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_EQ(count, 0);
     teardown();

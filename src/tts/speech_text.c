@@ -433,7 +433,9 @@ hu_speech_drift_t hu_speech_drift_check_ex(const char *orig_in, size_t on, const
     const char *rew = rew_in ? rew_buf : NULL;
     on = ascii_apostrophes(orig_in, on, orig_buf, sizeof(orig_buf));
     rn = ascii_apostrophes(rew_in, rn, rew_buf, sizeof(rew_buf));
-    dword_t ow[SPEECH_MAX_WORDS], rw[SPEECH_MAX_WORDS];
+    /* words_of fills [0, oc) and [0, rc); zeroed so GCC -O2 can see every read is
+     * initialized (-Wmaybe-uninitialized cannot follow it through the call). */
+    dword_t ow[SPEECH_MAX_WORDS] = {{0}}, rw[SPEECH_MAX_WORDS] = {{0}};
     size_t oc = orig ? words_of(orig, on, ow, SPEECH_MAX_WORDS) : 0;
     size_t rc = rew ? words_of(rew, rn, rw, SPEECH_MAX_WORDS) : 0;
 

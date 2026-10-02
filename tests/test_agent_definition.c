@@ -19,7 +19,8 @@ static void ta_free(void *ctx, void *ptr, size_t size) {
     (void)size;
     free(ptr);
 }
-static hu_allocator_t test_alloc = {.alloc = ta_alloc, .realloc = ta_realloc, .free = ta_free, .ctx = NULL};
+static hu_allocator_t test_alloc = {
+    .alloc = ta_alloc, .realloc = ta_realloc, .free = ta_free, .ctx = NULL};
 
 static char g_tmp[256];
 
@@ -98,7 +99,9 @@ static void test_agent_definition_load_parses_workspace(void) {
 
     char cmd[384];
     snprintf(cmd, sizeof(cmd), "rm -rf '%s'", g_tmp);
-    (void)system(cmd);
+    if (system(cmd) != 0) {
+        /* best-effort cleanup; a (void) cast does not silence glibc warn_unused_result */
+    }
 }
 
 void run_agent_definition_tests(void) {
