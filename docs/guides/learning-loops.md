@@ -18,13 +18,18 @@ path.
 | `HU_STRATEGY_SIGNAL` | The retrieval strategy learner stops writing `success=1` tautologies and stops steering retrieval | off |
 | `HU_SPONTANEITY` | The double-text afterthought, self-reaction and GIF can fire after a reply, at Seth's learned rates | off |
 
-## DEF-5: the humanization bandit now samples (no gate)
+## DEF-5: the humanization bandit samples — and stops exploring blind (no gate)
 
 `hu_humanization_decide_contact_params` copied the sampler seed into a local
-and dropped it, so θ was a fixed function of (α, β) for the life of the
-process. `hu_humanization_bandit_sample_theta` draws through the bandit's own
-seed, so every call is a fresh Thompson draw. This sits behind the existing
-`HU_BANDIT_HUMANIZATION` gate (live in prod); with it off nothing changes.
+and dropped it, so θ was a fixed but arbitrary draw from (α, β) for the life of
+the process. `hu_humanization_bandit_sample_theta` now draws through the
+bandit's own seed, for consumers that report an outcome back. The backchannel
+tier (`src/daemon.c` reactive path) never does: nothing credits the arm when a
+backchannel lands or flops (the arm learns only from proactive REPLY/IGNORED).
+Exploration without feedback is noise, so that decision uses the posterior
+mean α / (α + β), which moves only when outcomes move the arm. A TODO marks
+the follow-up: a (contact, tier) bandit credited on the reply or the DEF-8
+tapback join. Behind the existing `HU_BANDIT_HUMANIZATION` gate (live in prod).
 
 ## DEF-8: tapbacks never reached `production_outcomes` (`HU_OUTCOME_JOIN`)
 
@@ -45,23 +50,35 @@ Measured 2026-10-02: `tapback_polarity` NULL in 661 of 661 rows, and zero
    (`src/ml/dpo.c:480`) only updates rows with `outcome_resolved_at IS NULL`,
    and the contact's text reply resolves the row first (652 of 661).
 
-The fix resolves the reacted-to message in the tapback poll itself
-(`target_is_ours`, `target_sent_unix`), joins by thread and send time when the
-exact ref misses, and writes through `hu_dpo_record_tapback`, which matches by
-`message_ref` or by the latest row sent in `[sent − 600 s, sent + 15 s]`,
-whatever its resolution state.
+**Attribution.** `is_from_me = 1` is true of Seth's own typing as well as the
+daemon's sends, so the tapped row is attributed to the daemon only through its
+own delivery record: the tapback poll returns the target's chat.db ROWID, the
+ROWID of our previous message in that chat and its send time; the handler
+then needs an `outbound_sends` row for that contact whose chat.db boundary
+(`prior_max_rowid`) sits in [previous own ROWID, target ROWID) — so the target
+is the first message of ours after that send — and whose `sent_at_ms` is
+within 5 s of the target (192 of 197 sends matched within 3 s on
+2026-10-02). No such send, no join. That ONE delivery anchors both the
+outcome row (`hu_dpo_record_tapback`: the latest reply row sent in
+[delivery − 60 s, delivery + 5 s], whatever its resolution state; 60 s is the
+FU-1 window inside which nothing but the reply's own bubbles reaches the
+contact) and the DPO pair (the reaction_lookup registration in the same
+window). A changed reaction (love → dislike) overwrites the polarity and
+replaces the earlier pair instead of adding an opposite one. A custom-emoji
+tapback (code 2006) takes its polarity from the glyph in LIVE (😢 → −1,
+❤️ → +1, unknown → neutral, which records nothing) instead of a blanket +1.
 
 - **off** — the old exact join only.
 - **shadow** — finds the row without writing; one line per tapback:
-  `[HU_OUTCOME_JOIN shadow] tapback polarity=<-1|0|1> ours=<0|1> exact_hit=<0|1> time_hit=<0|1> outcome_row=<0|1>`.
-- **live** — writes polarity on the row and records the DPO pair.
+  `[HU_OUTCOME_JOIN shadow] tapback polarity=<-1|0|1> is_from_me_target=<0|1> daemon_sent=<0|1> exact_hit=<0|1> anchored_hit=<0|1> outcome_row=<0|1>`.
+- **live** — the same line tagged `live`; writes the polarity and the DPO pair.
 
-**Promotion measurement.** Run shadow for at least 7 days. Over the lines with
-`ours=1`, `outcome_row=1` must be ≥ 80 % and `time_hit=1` ≥ 80 %. Then hand-check
-10 joined rows: the row's `send_timestamp` must be the reply that precedes the
-tapped message's chat.db `date` in the same thread (compare by row id and
-timestamps only; never print text). Any join to the wrong reply blocks
-promotion.
+**Promotion measurement.** Shadow for at least 7 days. Over lines with
+`daemon_sent=1`, `outcome_row=1` and `anchored_hit=1` must each be ≥ 80 %, and
+`daemon_sent=1 / is_from_me_target=1` must sit near the share of our sent
+chat.db rows that `outbound_sends` claims for the same window (a much higher
+share means Seth's own messages are being attributed). Then hand-check 10
+joined rows by row ids and timestamps only; any wrong join blocks promotion.
 
 **`reply_sentiment` stays NULL.** There is no local sentiment classifier to
 fill it. The only scorer in the tree is a two-list word count private to
@@ -98,27 +115,52 @@ last 60 s", and the reactive path records that send just before checking them
 now live in `src/daemon/daemon_spontaneity.c`.
 
 - **off** — the original path, unreachable as before.
-- **shadow** — the original path, plus one line per eligible extra:
-  `[HU_SPONTANEITY shadow] kind=<double_text|self_reaction|gif> eligible=1 rate_src=<learned|none> p=<0..1> would_fire=<0|1> capped=<0|1>`.
-- **live** — at most one extra per reactive turn. An eligible extra fires with
-  `p = learned_rate × (0.8 + 0.45·θ)`, where `learned_rate` is Seth's measured
-  rate and θ a fresh draw from the contact's humanization-bandit arm (×1 for a
-  contact with no outcomes). Fires log `[HU_SPONTANEITY live] kind=… p=… fired=1`.
+- **shadow** — the original path, plus ONE line per reactive turn:
+  `[HU_SPONTANEITY shadow] turn=1 dt=<e>/<p>/<f> sr=<e>/<p>/<f> gif=<e>/<p>/<f> chosen=<kind|none> fired=0`
+  (e = eligible, p = the sampled firing probability, −1 when not measured,
+  f = would fire).
+- **live** — the same line tagged `live`, `fired=0|1`. At most one extra per
+  reactive turn: each eligible kind draws p from its learned posterior and
+  fires with probability p; among the kinds that fire one is picked uniformly
+  (no fixed order). Nothing sleeps on the daemon loop: the extra is queued and
+  delivered by the next housekeeping pass (`hu_daemon_spontaneity_tick`,
+  `src/daemon/daemon_housekeeping.c`), the afterthought after Seth's own
+  measured gap when `double_text_gap_s` is present. Delivery logs
+  `[HU_SPONTANEITY live] kind=… delivered=0|1`. The conversation scheduler
+  (`hu_conversation_schedule_message`) is not used: the hourly proactive pass
+  drains it, so an afterthought would land up to ~90 minutes late, and its
+  FU-1 defer drops anything due within 60 s of a reply.
 
-`learned_rate` comes from the optional fields `double_text_rate`,
-`self_reaction_rate` and `gif_rate` (each in [0, 1]) of the `global` stats block
-of `~/.human/personas/<persona>.learned-style.json` (`learned-style/v1`, see
-`docs/guides/learned-style.md`; a top-level field is also accepted), re-read
-every 10 minutes. The v1 learner does not emit these fields yet, so until it
-does every extra is shadow-only.
-A missing field means not measured: that extra never fires live and is only
-logged. Eligibility (no farewell, not three of our last four messages, no GIF
-on a question or sad news, the GIF rate cap) is the legacy predicates'.
+**The learned posterior.** Per (contact, kind), p ~ Beta(r·n0 + successes,
+(1 − r)·n0 + failures). The prior is Seth's own P(extra | eligible) `r` and the
+number of eligible replies it was measured on `n0`; outcomes move it. After an
+extra is delivered, the contact writing back or tapping back on a message the
+DEF-8 join attributes to the daemon (the extra or later) is a success; 24 h of
+silence (the proactive IGNORED horizon) is a failure; an extra still queued
+when they write is cancelled and teaches nothing. Counts persist in
+`~/.human/bandit_spontaneity.json`, one log line each:
+`[HU_SPONTANEITY outcome] kind=… success=0|1`. The fields are read from the
+`global` block of `~/.human/personas/<persona>.learned-style.json`:
+`double_text_rate` / `double_text_n`, `self_reaction_rate` /
+`self_reaction_n`, `gif_rate` / `gif_n` (n falls back to `n_eff`, then `n`),
+and `double_text_gap_s`; re-read every 10 minutes. A kind with no rate never
+fires live. `scripts/spontaneity_rate_check.py --emit-learned` prints these
+from chat.db (read-only, aggregates only); the learned-style learner should
+write them. Measured 2026-10-02 over 180 days: double-text 0.081 of 804
+eligible replies, self-reaction 0 of 66, GIF 0.022 of 45, afterthought gap
+217 s. Those numbers include the daemon's own sends (chat.db cannot tell them
+apart before `outbound_sends` existed), so they are an upper bound on Seth.
 
-**Promotion measurement.** Shadow for 7 days with the learned rates present.
-For each kind, `would_fire=1 / eligible` must sit inside Seth's own measured
-rate ±50 %. Then run a blind A/B on 40 turns that include extras; detection
-must not rise above the current human-gate value.
+**Promotion measurement — one that can fail.**
+`scripts/spontaneity_rate_check.py --mode shadow` (then `--mode live`)
+compares, per kind, the daemon's fires per reactive turn (the turn lines
+above) with Seth's per-reply rate of the same extra, counted only on replies
+the same eligibility rules allow (parsed from `src/context/conversation.c`, so
+they cannot drift). Two-proportion z-test at 95 %: exit 0 PASS, 1 FAIL (the
+daemon fires measurably more or less often than Seth), 2 INCONCLUSIVE (fewer
+turns than n·p ≥ 5 needs). `--self-test` proves it fails on a daemon that
+over-fires 3×. Shadow must PASS before live; live must PASS after 7 days, then
+a blind A/B on 40 turns with extras must not raise detection.
 
 ## Rollback
 

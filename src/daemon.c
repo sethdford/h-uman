@@ -9447,7 +9447,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                                ? &g_classify_provider
                                                                : NULL,
                                                .classify_model = g_classify_model,
-                                               .classify_model_len = g_classify_model_len};
+                                               .classify_model_len = g_classify_model_len,
+                                               .chosen = HU_SPONT_NONE};
+                hu_daemon_spontaneity_choose(&spont);
                 hu_daemon_spontaneity_double_text(&spont);
                 hu_daemon_spontaneity_self_reaction(&spont);
 
@@ -9578,31 +9580,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 if (gif_query && gif_query_len > 0 && gif_query_len < 100) {
                                     char *gif_path = hu_imessage_fetch_gif(
                                         alloc, gif_query, gif_query_len, gif_key, strlen(gif_key));
-                                    if (gif_path) {
-                                        usleep(2000000 + (gif_seed % 3000000));
-                                        const char *media[] = {gif_path};
-                                        ch->channel->vtable->send(ch->channel->ctx, batch_key,
-                                                                  key_len, "", 0, media, 1);
-                                        (void)unlink(gif_path);
-                                        hu_conversation_gif_rate_record(batch_key, key_len,
-                                                                        gif_now_ms);
-                                        hu_conversation_gif_cal_record_send(
-                                            batch_key, key_len, gif_query, gif_query_len);
-                                        {
-                                            char cal_path[512];
-                                            int cp_n = hu_paths_state(cal_path, sizeof(cal_path),
-                                                                      "gif_calibration.json");
-                                            if (cp_n > 0 && (size_t)cp_n < sizeof(cal_path))
-                                                hu_conversation_gif_cal_save(cal_path,
-                                                                             (size_t)cp_n);
-                                        }
-                                        gif_sent_this_turn = true;
-                                        hu_log_info("human", agent ? agent->observer : NULL,
-                                                    "sent GIF: query=\"%.*s\"", (int)gif_query_len,
-                                                    gif_query);
-                                        size_t gp_path_len = strlen(gif_path);
-                                        alloc->free(alloc->ctx, gif_path, gp_path_len + 1);
-                                    }
+                                    if (gif_path)
+                                        gif_sent_this_turn = hu_daemon_spontaneity_gif_send(
+                                            &spont, gif_path, gif_query, gif_query_len, gif_seed,
+                                            gif_now_ms);
                                 }
                                 if (gif_query)
                                     alloc->free(alloc->ctx, gif_query, gif_query_len + 1);
