@@ -608,7 +608,8 @@ void hu_imessage_set_test_send_stub(hu_imessage_test_send_stub_fn fn);
 void hu_imessage_set_test_react_emoji_stub(bool (*stub)(const char *emoji_utf8));
 
 /** Test-only — replaces the chat.db boundary read a tapback takes before it
- * is sent (hu_imessage_get_latest_sent_rowid is a -1 stub in test builds).
+ * is sent. Without a stub, test builds read only an explicit $HU_CHATDB
+ * fixture (one open, 100 ms busy budget) and otherwise return -1.
  * Lets tests pin that the boundary is read BEFORE the react runs. NULL
  * restores the default. */
 void hu_imessage_set_test_tapback_boundary_stub(int64_t (*stub)(const char *handle,
