@@ -75,6 +75,31 @@ item that is private (or unstamped) when its source is unknown or is not X.
 Owner_self and shareable items always pass. With no current contact, nothing
 is dropped.
 
+## Owner bypass (self-chat)
+
+The daemon scopes every batch to its contact (`agent->memory_session_id =
+batch_key`), including the batch where Seth texts his own twin. Without a
+bypass, LIVE would filter Seth's self-chat like a stranger's and hide from
+him what his own contacts said. So the owner's contact keeps everything:
+every per-path filter (`hu_confidence_filter_entries`,
+`hu_confidence_pm_view`) returns its input unchanged for that contact, and
+notes nothing in the backstop ledger, so the backstop drops nothing.
+
+"The owner's contact" is the existing owner predicate, not a new setting:
+`hu_share_is_owner` (a persona contact whose `relationship` is `"test"`,
+the same predicate the self-test commands, saved shares and reminders use).
+`hu_daemon_confidence_owner_wire(agent)` registers it at daemon start and
+unregisters it at teardown (`src/daemon/daemon_confidence_owner.c`). It reads
+`agent->persona` on every check, so a persona swap is picked up. If no persona
+contact carries that marker, no contact is the owner and nothing is bypassed.
+In SHADOW and LIVE an owner batch logs one line instead of the usual count:
+`[confidence-boundary <mode>] path=<p> considered=N owner=1`.
+`tests/test_confidence_boundary.c`
+(`owner_self_chat_live_sees_another_contacts_confidence`,
+`pm_facts_live_owner_sees_another_contacts_fact`) pins it: under LIVE the
+owner sees another contact's private row and their LIVE prompt equals OFF;
+a stranger still does not; OFF is byte-identical with or without the wiring.
+
 ## What each state does
 
 - **off**: no filtering, counting or logging. Prompts are byte for byte what
@@ -95,6 +120,16 @@ is dropped.
   nothing is sent. Silence is the safe failure.
 
 ## Measurement: SHADOW to LIVE
+
+**LIVE promotion is BLOCKED** until two known gaps are closed, whatever the
+SHADOW numbers say:
+
+1. Personal-model **topics and goals** carry provenance and pass through
+   `hu_confidence_pm_view` (today only facts do).
+2. The `agent_stream.c` render path of the personal model goes through the
+   boundary too (today only `hu_agent_turn` does).
+
+SHADOW may run before then; the steps below apply once both land.
 
 1. **Run SHADOW for 7 days.** Set `HU_CONFIDENCE_BOUNDARY=shadow` in the
    service-loop plist (rollback commands below, with `shadow`). Aggregate:

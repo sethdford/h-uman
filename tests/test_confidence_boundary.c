@@ -3,10 +3,13 @@
  * include/human/memory/confidence_boundary.h, src/memory/confidence_*.c. */
 #include "test_framework.h"
 
+#include "human/agent.h"
 #include "human/core/allocator.h"
+#include "human/daemon/share_queue.h"
 #include "human/memory/confidence_boundary.h"
 #include "human/memory/fact_extract.h"
 #include "human/memory/personal_model.h"
+#include "human/persona.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -366,6 +369,78 @@ static void commitments_live_keep_a_global_promise_out_of_b_prompt(void) {
     mem.vtable->deinit(mem.ctx);
     hu_confidence_ledger_clear();
 }
+/* Owner bypass (critic HIGH, PR #608): agent->memory_session_id is the
+ * batch's contact for every batch, Seth's own handle included when he texts
+ * his twin. Through the real daemon wiring (hu_share_is_owner over the
+ * persona), the owner's contact keeps everything in LIVE; a stranger still
+ * does not; OFF is byte-identical with or without the wiring. */
+static const char k_o[] = "+15550000009"; /* the owner's own handle (fake) */
+#define O_LEN (sizeof(k_o) - 1)
+static hu_contact_profile_t g_owner_contacts[2];
+static hu_persona_t g_owner_persona;
+static hu_agent_t g_owner_agent;
+
+static void wire_owner(void) {
+    memset(g_owner_contacts, 0, sizeof(g_owner_contacts));
+    g_owner_contacts[0].contact_id = (char *)k_b;
+    g_owner_contacts[0].relationship = "friend";
+    g_owner_contacts[1].contact_id = (char *)k_o;
+    g_owner_contacts[1].relationship = "test"; /* the persona's owner marker */
+    memset(&g_owner_persona, 0, sizeof(g_owner_persona));
+    g_owner_persona.contacts = g_owner_contacts;
+    g_owner_persona.contacts_count = 2;
+    memset(&g_owner_agent, 0, sizeof(g_owner_agent));
+    g_owner_agent.persona = &g_owner_persona;
+    hu_daemon_confidence_owner_wire(&g_owner_agent);
+}
+
+static char *load_for(hu_allocator_t *a, hu_memory_t *mem, int mode, const char *who,
+                      size_t who_len, size_t *len) {
+    hu_confidence_set_mode_for_test(mode);
+    hu_retrieval_engine_t eng = hu_retrieval_create(a, mem);
+    hu_memory_loader_t loader;
+    HU_ASSERT_EQ(hu_memory_loader_init(&loader, a, mem, &eng, 8, 4096), HU_OK);
+    char *ctx = NULL;
+    *len = 0;
+    HU_ASSERT_EQ(hu_memory_loader_load(&loader, "news", 4, who, who_len, &ctx, len), HU_OK);
+    eng.vtable->deinit(eng.ctx, a);
+    hu_confidence_set_mode_for_test(-1);
+    return ctx;
+}
+
+static void owner_self_chat_live_sees_another_contacts_confidence(void) {
+    hu_allocator_t a = hu_system_allocator();
+    hu_memory_t mem = fixture(&a);
+    hu_confidence_ledger_clear();
+    size_t off0_len = 0, off_len = 0, live_len = 0, str_len = 0;
+    char *off0 = load_for(&a, &mem, HU_GATE_OFF, k_o, O_LEN, &off0_len); /* unwired */
+    HU_ASSERT_FALSE(hu_confidence_is_owner_contact(k_o, O_LEN));
+    wire_owner();
+    HU_ASSERT_TRUE(hu_confidence_is_owner_contact(k_o, O_LEN));
+    HU_ASSERT_FALSE(hu_confidence_is_owner_contact(k_b, B_LEN));
+    char *off = load_for(&a, &mem, HU_GATE_OFF, k_o, O_LEN, &off_len);
+    HU_ASSERT_NOT_NULL(off0);
+    HU_ASSERT_NOT_NULL(off);
+    HU_ASSERT_EQ(off_len, off0_len); /* OFF: byte-identical with or without the wiring */
+    HU_ASSERT_TRUE(memcmp(off, off0, off0_len) == 0);
+    char *live = load_for(&a, &mem, HU_GATE_LIVE, k_o, O_LEN, &live_len);
+    HU_ASSERT_NOT_NULL(live);
+    HU_ASSERT_NOT_NULL(strstr(live, "pregnant")); /* A's private row reaches the owner */
+    HU_ASSERT_EQ(live_len, off_len); /* the owner's LIVE prompt == OFF: nothing filtered */
+    HU_ASSERT_TRUE(memcmp(live, off, off_len) == 0);
+    HU_ASSERT_EQ(hu_confidence_ledger_count(), 0); /* nothing for the backstop to strip */
+    char *str = load_for(&a, &mem, HU_GATE_LIVE, k_b, B_LEN, &str_len);
+    HU_ASSERT_NOT_NULL(str);
+    HU_ASSERT_NULL(strstr(str, "pregnant")); /* a stranger still does not see it */
+    hu_daemon_confidence_owner_wire(NULL);
+    HU_ASSERT_FALSE(hu_confidence_is_owner_contact(k_o, O_LEN));
+    a.free(a.ctx, off0, off0_len + 1);
+    a.free(a.ctx, off, off_len + 1);
+    a.free(a.ctx, live, live_len + 1);
+    a.free(a.ctx, str, str_len + 1);
+    mem.vtable->deinit(mem.ctx);
+    hu_confidence_ledger_clear();
+}
 #endif /* HU_ENABLE_SQLITE */
 
 /* Personal model: facts from every contact share one model; "Key facts" and
@@ -418,6 +493,31 @@ static void pm_facts_live_keep_a_fact_out_of_b_prompt(void) {
     hu_confidence_ledger_clear();
 }
 
+#ifdef HU_ENABLE_SQLITE
+static void pm_facts_live_owner_sees_another_contacts_fact(void) {
+    hu_personal_model_t *pm = (hu_personal_model_t *)calloc(1, sizeof(*pm));
+    HU_ASSERT_NOT_NULL(pm);
+    hu_personal_model_init(pm);
+    pm->updated_at = 1767225600;
+    add_fact(pm, "sister", "is", "pregnant", k_a, "imessage_dm");
+    hu_allocator_t a = hu_system_allocator();
+    wire_owner();
+    hu_confidence_set_mode_for_test(HU_GATE_LIVE);
+    hu_personal_model_t *owned = NULL;
+    const hu_personal_model_t *view = hu_confidence_pm_view(&a, pm, k_o, O_LEN, &owned);
+    hu_confidence_set_mode_for_test(-1);
+    hu_daemon_confidence_owner_wire(NULL);
+    HU_ASSERT_TRUE(view == pm); /* unfiltered: no copy */
+    HU_ASSERT_NULL(owned);
+    static char buf[8192];
+    HU_ASSERT_TRUE(hu_personal_model_build_prompt(view, buf, sizeof(buf)) > 0);
+    HU_ASSERT_NOT_NULL(strstr(buf, "pregnant"));
+    HU_ASSERT_EQ(hu_confidence_ledger_count(), 0);
+    free(pm);
+    hu_confidence_ledger_clear();
+}
+#endif
+
 void run_confidence_boundary_tests(void) {
     HU_TEST_SUITE("confidence boundary");
     HU_RUN_TEST(derive_row_rules_first_match_wins);
@@ -434,5 +534,7 @@ void run_confidence_boundary_tests(void) {
     HU_RUN_TEST(semantic_recall_live_keeps_a_own_confidence_for_a);
     HU_RUN_TEST(episodic_live_keeps_a_session_summary_out_of_b_prompt);
     HU_RUN_TEST(commitments_live_keep_a_global_promise_out_of_b_prompt);
+    HU_RUN_TEST(owner_self_chat_live_sees_another_contacts_confidence);
+    HU_RUN_TEST(pm_facts_live_owner_sees_another_contacts_fact);
 #endif
 }

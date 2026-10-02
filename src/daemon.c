@@ -1788,10 +1788,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
      * sink works regardless of whether the DPO collector is wired. */
     if (agent) {
         hu_reaction_handler_set_personal_model(&agent->personal_model);
-        /* Phase 3 completion: route audio transcripts, edit history,
-         * group events, and balloon-plugin payloads through the same
-         * personal-model sink. */
+        /* Phase 3 completion: route audio transcripts, edit history, group events, and
+         * balloon-plugin payloads through the same personal-model sink. */
         hu_daemon_imessage_observer_wire_personal_model(&agent->personal_model);
+        hu_daemon_confidence_owner_wire(agent); /* self-chat is the owner, not a stranger */
     }
 
 #ifdef HU_ENABLE_SQLITE
@@ -10230,9 +10230,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #if defined(HU_ENABLE_RL_FULL)
     hu_reaction_handler_set_collector(NULL);
 #endif
-    /* Phase 1c teardown: detach the personal-model sinks. */
-    hu_reaction_handler_set_personal_model(NULL);
+    hu_reaction_handler_set_personal_model(NULL); /* Phase 1c teardown: detach the sinks. */
     hu_daemon_imessage_observer_wire_personal_model(NULL);
+    hu_daemon_confidence_owner_wire(NULL);
 #ifdef HU_ENABLE_SQLITE
     /* Sprint 60 follow-up teardown: clear the static crosstalk lookup
      * BEFORE the SQLite memory is closed so the callback never sees a

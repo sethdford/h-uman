@@ -11,6 +11,17 @@
 #include <stdio.h>
 #include <string.h>
 
+/* The owner's own contact keeps everything; SHADOW/LIVE say so once per event. */
+static bool owner_bypass(hu_gate_mode_t mode, hu_cb_path_t path, const char *contact,
+                         size_t contact_len, size_t considered) {
+    if (!hu_confidence_is_owner_contact(contact, contact_len))
+        return false;
+    hu_log_info("confidence-boundary", NULL,
+                "[confidence-boundary %s] path=%s considered=%zu owner=1",
+                mode == HU_GATE_LIVE ? "live" : "shadow", hu_cb_path_name(path), considered);
+    return true;
+}
+
 static void log_path(hu_gate_mode_t mode, hu_cb_path_t path, size_t considered, size_t hits) {
     hu_log_info("confidence-boundary", NULL,
                 "[confidence-boundary %s] path=%s considered=%zu %s=%zu",
@@ -39,6 +50,8 @@ size_t hu_confidence_filter_entries(hu_memory_t *mem, hu_allocator_t *alloc, hu_
     hu_gate_mode_t mode = hu_confidence_mode();
     if (mode == HU_GATE_OFF || !alloc || !entries || !*entries || count == 0 || !contact ||
         contact_len == 0)
+        return count;
+    if (owner_bypass(mode, path, contact, contact_len, count))
         return count;
     hu_memory_entry_t *e = *entries;
     size_t keep = 0, hits = 0;
@@ -91,6 +104,8 @@ const hu_personal_model_t *hu_confidence_pm_view(hu_allocator_t *alloc,
         *owned = NULL;
     hu_gate_mode_t mode = hu_confidence_mode();
     if (mode == HU_GATE_OFF || !pm || !contact || contact_len == 0 || pm->fact_count == 0)
+        return pm;
+    if (owner_bypass(mode, HU_CB_PATH_PM_FACTS, contact, contact_len, pm->fact_count))
         return pm;
     size_t hits = 0;
     bool drop[HU_PM_MAX_FACTS];

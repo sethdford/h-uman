@@ -1285,6 +1285,7 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_voice_first.c
     src/daemon/daemon_expressive.c
     src/daemon/daemon_share_queue.c
+    src/daemon/daemon_confidence_owner.c
     src/daemon/daemon_reminders.c
     src/daemon/daemon_briefing.c
     src/daemon/daemon_person_dates.c

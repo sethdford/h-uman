@@ -137,6 +137,19 @@ bool hu_confidence_excludes(hu_share_level_t level, const char *source, size_t s
     return !(source_len == current_len && memcmp(source, current, current_len) == 0);
 }
 
+static hu_confidence_owner_fn s_owner_fn;
+static const void *s_owner_ctx;
+
+void hu_confidence_set_owner_resolver(hu_confidence_owner_fn fn, const void *ctx) {
+    s_owner_fn = fn;
+    s_owner_ctx = fn ? ctx : NULL;
+}
+
+bool hu_confidence_is_owner_contact(const char *contact, size_t contact_len) {
+    return s_owner_fn && contact && contact_len > 0 &&
+           s_owner_fn(s_owner_ctx, contact, contact_len);
+}
+
 /* ── Backstop ledger ───────────────────────────────────────────────────────
  * The daemon runs one reply turn at a time, and the filters and the backstop
  * of a turn run on that thread, so a process-wide ledger keyed by contact is

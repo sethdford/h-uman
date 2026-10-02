@@ -78,6 +78,16 @@ bool hu_confidence_is_owner_channel(const char *channel, size_t channel_len);
 bool hu_confidence_excludes(hu_share_level_t level, const char *source, size_t source_len,
                             const char *current, size_t current_len);
 
+/* Owner bypass. The owner texting the twin from their own handle (self-chat)
+ * is the owner, not a third party: every per-path filter keeps everything for
+ * that contact, as for HU_SHARE_OWNER_SELF. Memory cannot see the persona, so
+ * the daemon registers its owner predicate (hu_daemon_confidence_owner_wire ->
+ * hu_share_is_owner over the live persona). fn NULL unregisters; with none
+ * registered no contact is the owner. */
+typedef bool (*hu_confidence_owner_fn)(const void *ctx, const char *contact, size_t contact_len);
+void hu_confidence_set_owner_resolver(hu_confidence_owner_fn fn, const void *ctx);
+bool hu_confidence_is_owner_contact(const char *contact, size_t contact_len);
+
 /* ── Per-path filters (no-ops in OFF) ─────────────────────────────────────
  * Each logs one counts-only line per call with candidates in SHADOW/LIVE:
  *   [confidence-boundary shadow] path=<p> considered=N would_exclude=M
