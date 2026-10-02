@@ -628,7 +628,12 @@ def test_output_file_has_no_text_leaves(tmp_path, capsys):
     assert e.run() == 0
     prof = e.load()
     metadata = {("schema",): "learned-style/v2", ("persona",): "seth",
-                ("generated_at",): NOW_ISO}
+                ("generated_at",): NOW_ISO,
+                ("provenance", "schema"): "learned-style/v2",
+                ("provenance", "generated_at"): NOW_ISO,
+                ("provenance", "window", "start"):
+                    (NOW - dt.timedelta(days=180)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                ("provenance", "window", "end"): NOW_ISO}
     leaves = list(_leaves(prof))
     assert len(leaves) > 40
     # The walk covers the v2 behaviour fields too (they are leaves of every

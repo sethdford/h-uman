@@ -181,7 +181,7 @@ consumers must read the group's `n`.
 | `latency_p25_s`, `latency_p75_s`, `latency_p90_s` | reply samples (`n`) | Weighted quantiles of seconds from the contact's last bubble to Seth's first reply bubble. Gaps over the 6 h pairing window are not replies. With v1's `latency_p50_s` they condition on the `time:*` buckets like every field. |
 | `bubbles_p90` | reply samples (`n`) | Weighted p90 of bubbles per reply turn (v1 has p50). |
 | `inter_bubble_gap_s_p50` | `inter_bubble_gap_n` | Median seconds between consecutive bubbles of a turn (turns with ≥ 2 bubbles). |
-| `double_text_rate` | `double_text_n` | Share of Seth's reply turns followed by another Seth turn (> 90 s later, so not a bubble) within 24 h with no message from the contact in between. Unknown (excluded) when the follow-up is not attributed to Seth, or the 24 h have not passed yet. |
+| `double_text_rate` | `double_text_n` | Share of Seth's reply turns followed by another Seth turn (> 90 s later, so not a bubble) within **2 h** (inclusive) with no message from the contact in between. Unknown (excluded) when the follow-up is not attributed to Seth, or the 2 h have not passed yet. Disjoint from initiation by construction: 2 h < the 6 h thread gap, so an outbound after a long silence is a thread start, never a double text. |
 | `double_text_gap_s_p50` | `double_text_gap_n` | Median gap of those double texts. |
 | `tapback_only_rate`, `tapback_with_text_rate` | `tapback_n` | Share of Seth's responses to an inbound burst (every from-me event after the burst, before the contact's next message, within 6 h) that were only a tapback (types 2000–2006, 2006 = custom emoji) on their message, or a tapback plus text/media. |
 | `tapback_types{love,like,dislike,laugh,emphasize,question,emoji}`, `self_reaction_rate` | `reaction_n` | Share of Seth's tapbacks of each kind, and the share placed on his own message. |
@@ -189,9 +189,26 @@ consumers must read the group's `n`.
 | `initiation_rate_per_week`, `initiation_share` | `initiation_n` | Thread starts: the first message after ≥ 6 h of silence either way. Rate = recency-weighted Seth starts per week of observed time (the exposure is the recency-weighted length of each observed span, so a 3-month gap between corpus and chat.db is not counted as silence). Share = Seth starts / (Seth + contact starts). Contact `overall` and `time:*` buckets only (a start answers nothing, so it has no shape or pace); absent from `shape:*` and `pace:*`. |
 
 **Twin contamination.** Text and media sends use the v1 attribution labels, so
-an h-uman or ambiguous send excludes its unit. The twin's **tapbacks write no
-provenance** (`src/daemon.c` tapback-only path: no `outbound_sends` row, no
-assistant row), so a from-me tapback cannot be attributed directly. The daemon
+an h-uman or ambiguous send excludes its unit.
+
+*Tapback provenance (learner side ready, daemon side missing).* The learner
+reads memory.db `outbound_sends` rows with `kind = 'tapback'`: each claims the
+first from-me tapback for that contact after its `prior_max_rowid` boundary
+within 5 minutes, and a response unit holding a claimed tapback is the bot's
+and leaves the tapback sample. Text attribution ignores `tapback` rows (with no
+text they would otherwise claim the nearest Seth text). The run log carries
+`tapback_provenance_rows_n`, `tapback_provenance_excluded_n` and
+`tapback_provenance_excluded_share` (aggregate counts only). **The daemon does
+not write these rows yet:** `imessage_react` (`src/channels/imessage.c:3577`,
+successful returns at :3601, :3621, :3691 and the JXA tier) and
+`hu_imessage_react_emoji_with_fallback` (:5205) never call the send observer,
+and the `outbound_sends` CHECK (`src/memory/repos/outbound_sends_repo_sqlite.c:29`,
+validator :15) admits only text/media/reply, so an existing table needs a
+migration. Until then the counts are 0 and the fallback below does the work.
+
+The twin's **tapbacks write no provenance** today (`src/daemon.c` tapback-only
+path: no `outbound_sends` row, no assistant row), so a from-me tapback cannot
+be attributed directly. The daemon
 does save every inbound batch it handles as memory.db `messages` rows, so a
 response unit with any daemon trace for that contact (messages of any role,
 `proactive_sends`, `outbound_sends`) within 15 minutes of the burst or the
@@ -210,6 +227,28 @@ v1 file is still read as the previous file (cap and history); its nodes have
 no v2 fields, so the first v2 run is uncapped for them. New quantiles are kept
 ordered around v1's (`latency_p25 ≤ p50 ≤ p75 ≤ p90`, `bubbles_p90 ≥ p50`)
 without ever moving a v1 field.
+
+**Bounded to the global prior.** After shrinkage every contact node (`overall`
+and buckets) is bounded to the global value: probabilities (`double_text_rate`,
+`tapback_*_rate`, `self_reaction_rate`, the modality rates,
+`initiation_share`) move at most 25% relative or 0.05 absolute, whichever is
+larger; times (`latency_p25/p75/p90_s`, `inter_bubble_gap_s_p50`,
+`double_text_gap_s_p50`) at most 25% relative. Latency quantiles are then
+re-ordered around v1's `latency_p50_s`, and ordering wins over the bound.
+`tapback_types` is a distribution: a contact's mix is pulled toward the global
+mix until their total-variation distance is ≤ 0.25, then renormalised so it
+sums to 1 (global too). The bound is applied again after the per-run cap, so
+it holds in the written file even where that overrides the per-run cap. Run
+log: `prior_clamped_n`, `mix_capped_n`, `post_cap_prior_clamped_n`,
+`post_cap_mix_capped_n`.
+
+**Provenance block.** The file carries `provenance`: `schema`,
+`generated_at`, `window` (`start`, `end`, `days`, `half_life_days`) and
+`sources` (chat.db and `--extra-history` sample counts, overlap rows dropped,
+contacts, global n, response/tapback units, tapback provenance rows and
+exclusions, initiation starts). Counts and fixed-format UTC timestamps only;
+pinned by `tests/fixtures/learned_style_v2_provenance_golden.json`
+(regenerate with `UPDATE_GOLDEN=1` only for an intended change).
 
 **Run-log counts (also printed by `--dry-run`).** `response_units_n`,
 `tapback_units_n`, `tapback_daemon_near_n`, `reactions_n`, `modality_n`,
@@ -241,7 +280,10 @@ chat.db profile is written alone. Also dropped and counted: tapback-as-text
 rows (`Loved “…”`, `extra_reaction_rows_dropped`), rows for non-persona or
 empty handles (`extra_unmapped_dropped`), rows at or after chat.db's earliest
 message (`extra_overlap_dropped`), and rows outside the 180-day window
-(`extra_out_of_window`).
+(`extra_out_of_window`). The corpus's observed segment (initiation exposure
+and the double-text censoring horizon) ends at chat.db's earliest message,
+`chat_min_t`, even when the corpus runs past it, so the overlapping period is
+counted once.
 
 **chat.db-only fields.** The corpus has no tapbacks, attachments or chat ids,
 so `tapback_*`, `tapback_types`, `self_reaction_rate`, `voice_memo_rate`,

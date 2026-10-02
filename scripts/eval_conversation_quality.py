@@ -170,11 +170,15 @@ def _load_outbound(mem_path, since):
     table."""
     con = _connect_ro(mem_path)
     try:
-        first = con.execute("select min(sent_at_ms) from outbound_sends where sent_at_ms >= ?",
+        # Tapback records (kind 'tapback') are not message sends: with no
+        # text they would claim the nearest Seth text as h-uman's.
+        first = con.execute("select min(sent_at_ms) from outbound_sends where sent_at_ms >= ? "
+                            "and coalesce(kind, '') != 'tapback'",
                             (UPTIME_STAMP_MAX_MS,)).fetchone()[0]
         rows = con.execute(
             "select contact, sent_at_ms, prior_max_rowid, text from outbound_sends "
-            "where sent_at_ms >= ? or sent_at_ms < ? order by id",
+            "where (sent_at_ms >= ? or sent_at_ms < ?) and coalesce(kind, '') != 'tapback' "
+            "order by id",
             (int(since.timestamp() * 1000), UPTIME_STAMP_MAX_MS),
         ).fetchall()
     except sqlite3.OperationalError:

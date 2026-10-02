@@ -493,7 +493,12 @@ def test_output_leaves_are_numbers_only_with_v2_fields(tmp_path, capsys):
                         fx.msg(A, 200 * HOUR + 30, SECRET_OUT, True)))
     assert e.run() == 0
     doc = e.load()
-    meta = {("schema",): "learned-style/v2", ("persona",): "seth", ("generated_at",): NOW_ISO}
+    meta = {("schema",): "learned-style/v2", ("persona",): "seth", ("generated_at",): NOW_ISO,
+            ("provenance", "schema"): "learned-style/v2",
+            ("provenance", "generated_at"): NOW_ISO,
+            ("provenance", "window", "start"):
+                (NOW - dt.timedelta(days=180)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            ("provenance", "window", "end"): NOW_ISO}
     leaves = list(_leaves(doc))
     v2_leaves = [p for p, _ in leaves if p[-1] in v2.TAPBACK_KINDS or p[-1] in v2.V2_FIELDS]
     assert len(v2_leaves) > 100
@@ -671,3 +676,236 @@ def test_dry_run_prints_v2_counts_only(tmp_path, capsys):
         assert isinstance(v, (int, float, bool)) or v is None
     _assert_no_text(out.out + out.err)
     assert "+1555" not in out.out + out.err
+
+
+# ── review round 1 (PR #603) ───────────────────────────────────────────────
+
+def test_extra_history_segment_ends_at_chat_min_t(tmp_path):
+    """The corpus exposure segment must end where chat.db begins, even when
+    the corpus itself runs on past it, or the overlap is counted twice."""
+    import argparse
+
+    def fill(fx):
+        for i in range(6):
+            fx.msg(A, i * 2 * HOUR, "you around?", False)
+            fx.msg(A, i * 2 * HOUR + 50, "yep", True)
+
+    e = Env(tmp_path, contacts={A: {"name": "A"}})
+    e.build(fill)
+    p = tmp_path / "m3.jsonl"
+    overlap = [{"channel": "imessage", "ts_ms": int((T0 + dt.timedelta(hours=h)).timestamp() * 1000),
+                "handle": _h8(A), "role": "user", "content": "still here"} for h in (3, 30)]
+    _corpus(p, _corpus_rows(10) + overlap)               # corpus runs 30 h into chat.db
+    samples, _, beh, attribution = lsp.load_all(e.chat, e.mem, [A], NOW, UTC)
+    a = argparse.Namespace(extra_history=str(p), memory_db=e.mem, max_ambiguous_frac=0.05)
+    out = lsp._extra_history(a, [A], samples, beh, attribution, NOW, UTC)
+    assert out["extra_overlap_dropped"] == 2
+    chat_seg, corpus_seg = beh[A]["segments"]
+    chat_min_age = (NOW - T0).total_seconds() / 86400
+    assert chat_seg[0] == pytest.approx(chat_min_age, abs=1e-6)
+    assert corpus_seg[1] == pytest.approx(chat_min_age, abs=1e-6)   # ends at chat_min_t
+    # Disjoint: total exposure equals the exposure of the union.
+    assert v2._exposure_days([chat_seg, corpus_seg]) == pytest.approx(
+        v2._exposure_days([(corpus_seg[0], chat_seg[1])]), rel=1e-9)
+
+
+def _dt_timeline(gap):
+    """Contact asks, Seth replies, then Seth's next outbound `gap` s after
+    his reply with nothing inbound in between."""
+    t0 = NOW - dt.timedelta(days=3)
+    tl = [{"guid": "in1", "from_me": False, "t": t0, "text": "hey"},
+          {"guid": "me1", "from_me": True, "t": t0 + dt.timedelta(seconds=30), "text": "yo"},
+          {"guid": "me2", "from_me": True, "t": t0 + dt.timedelta(seconds=30 + gap),
+           "text": "also"},
+          {"guid": "in2", "from_me": False, "t": t0 + dt.timedelta(seconds=30 + gap + 60),
+           "text": "ok"}]
+    return tl, {"me1": "seth", "me2": "seth"}
+
+
+@pytest.mark.parametrize("gap,double,start", [
+    (2 * HOUR, True, False),            # <= 2 h: double text
+    (2 * HOUR + 1, False, False),       # just past 2 h: neither
+    (6 * HOUR - 1, False, False),       # just under the initiation gap: neither
+    (6 * HOUR, False, True),            # initiation, never a double text
+])
+def test_double_text_window_is_2h_and_disjoint_from_initiation(gap, double, start):
+    tl, labels = _dt_timeline(gap)
+    s = lsp.samples_from_timeline(tl, labels, NOW, UTC)[0]
+    assert s["double_text"] is double
+    assert s["double_text_gap_s"] == (gap if double else None)
+    starts, _ = v2.initiation_starts(tl, labels, NOW, UTC)
+    is_start = any(st["who"] == "seth" for st in starts)
+    assert is_start is start
+    assert not (s["double_text"] and is_start)
+
+
+def _unit(age=1.0, kind="tapback_only", reactions=(), **kw):
+    u = {"age_days": age, "latency_s": 30, "shape": "casual", "band": "day", "rapid": False,
+         "kind": kind, "reactions": list(reactions), "self_reactions": [], "att_ok": True,
+         "tap_ok": True, "daemon_near": False, "daemon_tapback": False, "has_msg": False,
+         "voice": False, "gif": False, "share": False}
+    u.update(kw)
+    return u
+
+
+def _tv(p, q):
+    return 0.5 * sum(abs(p[k] - q[k]) for k in v2.TAPBACK_KINDS)
+
+
+def _mix_doc(cap=None):
+    """Contact A only ever 'love's (always with text), B only 'laugh's
+    (tapback only): each sits TV 0.5 from the pooled mix and 0.5 from the
+    pooled tapback-only rate before the bounds."""
+    samples = {c: [_s(1.0) for _ in range(6)] for c in (A, B)}
+    beh = {A: {"units": [_unit(kind="tapback_text", has_msg=True, reactions=["love"])
+                         for _ in range(40)], "starts": [],
+               "segments": []},
+           B: {"units": [_unit(reactions=["laugh"]) for _ in range(40)], "starts": [],
+               "segments": []}}
+    return lsp.build_profile(samples, "seth", NOW, beh)
+
+
+def test_tapback_mix_is_tv_capped_to_global_and_sums_to_one():
+    doc = _mix_doc()
+    g = doc["global"]["tapback_types"]
+    assert abs(sum(g.values()) - 1.0) <= 1e-9
+    cap = v2.TAPBACK_MIX_TV_CAP
+    assert cap == 0.25
+    for c in (A, B):
+        nodes = [doc["contacts"][c]["overall"]] + list(doc["contacts"][c]["buckets"].values())
+        for st in nodes:
+            mix = st["tapback_types"]
+            assert abs(sum(mix.values()) - 1.0) <= 1e-9, mix
+            assert _tv(mix, g) <= cap + 1e-9, (c, _tv(mix, g))
+            assert all(v >= 0 for v in mix.values())
+    # At the cap, not collapsed onto the global mix: A still leans 'love'.
+    a = doc["contacts"][A]["overall"]["tapback_types"]
+    assert _tv(a, g) == pytest.approx(cap, abs=1e-9)
+    assert a["love"] > g["love"]
+
+
+def test_daemon_tapback_provenance_excludes_its_own_tapbacks(tmp_path):
+    fx = Fx(str(tmp_path))
+    g1 = fx.msg(A, 0, "lol look", False)
+    fx.react(A, 20, g1, 2003)                             # Seth's own tapback
+    g2 = fx.msg(A, 3 * HOUR, "dinner?", False)
+    prior = fx.max_rowid()
+    fx.react(A, 3 * HOUR + 20, g2, 2000)                  # the daemon's tapback
+    fx.outbound(A, 3 * HOUR + 21, None, prior, kind="tapback")
+    fx.close()
+    att, meta, _ = v2_inputs(fx)
+    since = NOW - dt.timedelta(days=lsp.WINDOW_DAYS)
+    prov = v2.load_tapback_provenance(fx.mem_path, since)
+    assert len(prov[A]) == 1
+    us = v2.response_units(att["messages"][A], att["labels"], meta, [], NOW, UTC, prov.get(A, []))
+    assert [u["tap_ok"] for u in us] == [True, False]
+    assert [u["daemon_tapback"] for u in us] == [False, True]
+    assert v2.unit_stats(us)["tapback_types.laugh"] == 1.0   # only Seth's reaction learned
+    # Without the provenance row the bot's tapback would have been learned.
+    us0 = v2.response_units(att["messages"][A], att["labels"], meta, [], NOW, UTC, [])
+    assert [u["tap_ok"] for u in us0] == [True, True]
+
+
+def test_tapback_provenance_rows_never_claim_a_text_send(tmp_path):
+    fx = Fx(str(tmp_path))
+    fx.msg(A, 0, "you up?", False)
+    prior = fx.max_rowid()
+    fx.msg(A, 30, "yeah", True)                           # Seth's text
+    fx.outbound(A, 31, None, prior, kind="tapback")       # a daemon tapback record nearby
+    fx.close()
+    att = lsp.cq.attribute(fx.chat_path, fx.mem_path, NOW - dt.timedelta(days=180))
+    assert [lab for _, lab in att["labeled"][A]] == ["seth"]
+
+
+def _golden_fill(fx):
+    _behaviour_fill(fx)
+    g = fx.msg(B, 300 * HOUR, "check this", False)
+    prior = fx.max_rowid()
+    fx.react(B, 300 * HOUR + 15, g, 2000)                 # the daemon's own tapback
+    fx.outbound(B, 300 * HOUR + 16, None, prior, kind="tapback")
+
+
+def test_main_logs_the_excluded_tapback_share_as_counts(tmp_path, capsys):
+    e = Env(tmp_path)
+    e.build(_golden_fill)
+    assert e.run() == 0
+    line = e.log_lines()[-1]
+    assert line["tapback_provenance_rows_n"] == 1
+    assert line["tapback_provenance_excluded_n"] == 1
+    assert 0 < line["tapback_provenance_excluded_share"] < 1
+    for k in ("tapback_provenance_rows_n", "tapback_provenance_excluded_n",
+              "tapback_provenance_excluded_share"):
+        assert isinstance(line[k], (int, float)) and not isinstance(line[k], bool)
+    assert "+1555" not in json.dumps(line)
+
+
+def test_contact_priors_move_at_most_25pct_from_global():
+    glob = {"tapback_only_rate": 0.4, "voice_memo_rate": 0.1, "inter_bubble_gap_s_p50": 100,
+            "double_text_gap_s_p50": 1000, "double_text_rate": 0.2}
+    node = {"tapback_only_rate": 0.9, "voice_memo_rate": 0.0, "inter_bubble_gap_s_p50": 400,
+            "double_text_gap_s_p50": 100, "double_text_rate": 0.22}
+    out, clamped = v2.bound_to_global(dict(node), glob)
+    assert out["tapback_only_rate"] == pytest.approx(0.5)          # 0.4 + 25%
+    assert out["voice_memo_rate"] == pytest.approx(0.05)           # 0.1 - 0.05 floor
+    assert out["inter_bubble_gap_s_p50"] == 125                    # 100 + 25%
+    assert out["double_text_gap_s_p50"] == 750                     # 1000 - 25%
+    assert out["double_text_rate"] == pytest.approx(0.22)          # inside: untouched
+    assert set(clamped) == {"tapback_only_rate", "voice_memo_rate", "inter_bubble_gap_s_p50",
+                            "double_text_gap_s_p50"}
+
+
+def test_built_profile_contacts_stay_within_the_global_prior_bound():
+    doc = _mix_doc()
+    g = doc["global"]
+    # B never tapbacks with text; A always does: raw rates 0 and 1.
+    assert g["tapback_only_rate"] == pytest.approx(0.5)
+    for c in (A, B):
+        for st in [doc["contacts"][c]["overall"]] + list(doc["contacts"][c]["buckets"].values()):
+            for f in v2.PRIOR_BOUND_FIELDS:
+                v, p = st.get(f), g.get(f)
+                if v is None or p is None:
+                    continue
+                allowed = max(v2.PRIOR_BOUND_REL * abs(p), v2.PRIOR_BOUND_FLOOR.get(f, 0.0))
+                assert abs(v - p) <= allowed + 1e-9, (c, f, v, p)
+
+
+PROVENANCE_GOLDEN = Path(__file__).parent / "fixtures" / "learned_style_v2_provenance_golden.json"
+
+
+def test_provenance_block_matches_golden(tmp_path):
+    e = Env(tmp_path)
+    e.build(_golden_fill)
+    p = tmp_path / "m3.jsonl"
+    _corpus(p, _corpus_rows(12))
+    assert e.run("--extra-history", str(p)) == 0
+    prov = e.load()["provenance"]
+    if os.environ.get("UPDATE_GOLDEN") == "1":
+        PROVENANCE_GOLDEN.write_text(json.dumps(prov, indent=2, sort_keys=True) + "\n")
+    assert prov == json.loads(PROVENANCE_GOLDEN.read_text())
+    assert prov["schema"] == "learned-style/v2"
+    assert prov["window"]["end"] == NOW_ISO
+
+
+def test_bounds_still_hold_after_the_per_run_cap(tmp_path):
+    """The per-run cap clamps each mix share on its own (breaking the sum)
+    and can pull a contact back outside the global bound; the final pass
+    restores both in the written file."""
+    e = Env(tmp_path)
+    e.build(_behaviour_fill)
+    assert e.run() == 0
+    doc = e.load()
+    for ent in doc["contacts"].values():
+        ent["overall"]["tapback_types"] = dict.fromkeys(v2.TAPBACK_KINDS, 0.0) | {"dislike": 1.0}
+        ent["overall"]["tapback_only_rate"] = 1.0
+    with open(e.out, "w") as f:
+        json.dump(doc, f)
+    assert e.run() == 0
+    out = e.load()
+    g = out["global"]
+    for ent in out["contacts"].values():
+        st = ent["overall"]
+        assert abs(sum(st["tapback_types"].values()) - 1.0) <= 1e-9
+        assert v2.tv_distance(st["tapback_types"], g["tapback_types"]) <= v2.TAPBACK_MIX_TV_CAP + 1e-9
+        assert abs(st["tapback_only_rate"] - g["tapback_only_rate"]) <= max(
+            0.25 * g["tapback_only_rate"], 0.05) + 1e-9
+    assert e.log_lines()[-1]["post_cap_mix_capped_n"] >= 1

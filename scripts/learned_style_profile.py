@@ -236,12 +236,13 @@ def _starts_in(starts, bucket):
     return [s for s in starts if s["band"] == val] if kind == "time" else None
 
 
-def build_profile(samples_by_contact, persona, now, behaviour=None):
+def build_profile(samples_by_contact, persona, now, behaviour=None, stats=None):
     """The learned-style/v2 document from per-contact samples. Contacts with
     n < 5 and buckets with n < 3 are omitted; global covers every sample.
     The v1 fields are computed exactly as in v1; behaviour (per contact:
     response units, thread starts and observed segments) adds the v2 fields,
-    each group shrunk with its own n_eff."""
+    each group shrunk with its own n_eff, then every contact node bounded to
+    the global prior (lsv2.enforce_global_bounds; its counts go to `stats`)."""
     behaviour = behaviour or {}
     empty = {"units": [], "starts": [], "segments": []}
     every = [s for ss in samples_by_contact.values() for s in ss]
@@ -273,10 +274,42 @@ def build_profile(samples_by_contact, persona, now, behaviour=None):
             groups = tuple(g for g in lsv2.GROUPS if starts is not None or g != "initiation")
             buckets[b] = lsv2.nest(lsv2.shrink_v2(st, overall, groups))
         contacts[c] = {"overall": lsv2.nest(overall), "buckets": buckets}
-    return {"schema": SCHEMA, "persona": persona,
-            "generated_at": now.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "window_days": WINDOW_DAYS, "half_life_days": HALF_LIFE_DAYS,
-            "global": lsv2.nest(glob) if glob is not None else None, "contacts": contacts}
+    doc = {"schema": SCHEMA, "persona": persona, "generated_at": _iso(now),
+           "window_days": WINDOW_DAYS, "half_life_days": HALF_LIFE_DAYS,
+           "global": lsv2.nest(glob) if glob is not None else None, "contacts": contacts}
+    bounds = lsv2.enforce_global_bounds(doc)
+    if stats is not None:
+        stats.update(bounds)
+    return doc
+
+
+def _iso(t):
+    return t.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def provenance_block(now, counts):
+    """Where the numbers came from: schema, the learning window and source
+    counts. Counts, booleans and fixed-format UTC timestamps only."""
+    return {
+        "schema": SCHEMA,
+        "generated_at": _iso(now),
+        "window": {"start": _iso(now - dt.timedelta(days=WINDOW_DAYS)), "end": _iso(now),
+                   "days": WINDOW_DAYS, "half_life_days": HALF_LIFE_DAYS},
+        "sources": {
+            "chatdb_samples": counts["samples"] - counts.get("extra_samples", 0),
+            "chatdb_sent_n": counts["sent_n"],
+            "extra_history": bool(counts.get("extra_history")),
+            "extra_history_samples": counts.get("extra_samples", 0),
+            "extra_history_overlap_dropped": counts.get("extra_overlap_dropped", 0),
+            "contacts": counts["contacts"],
+            "global_n": counts["global_n"],
+            "response_units_n": counts["response_units_n"],
+            "tapback_units_n": counts["tapback_units_n"],
+            "tapback_provenance_rows_n": counts["tapback_provenance_rows_n"],
+            "tapback_provenance_excluded_n": counts["tapback_provenance_excluded_n"],
+            "initiation_starts_n": counts["initiation_starts_n"],
+        },
+    }
 
 
 # ── samples from chat.db (the only place message text exists) ──────────────
@@ -422,6 +455,7 @@ def load_all(chat_path, mem_path, contacts, now, tz, behaviour=True):
               "exact_unmatched": int(att["exact_unmatched"])}
     meta = lsv2.load_meta(chat_path, since) if behaviour else {}
     activity = lsv2.load_daemon_activity(mem_path, since) if behaviour else {}
+    prov = lsv2.load_tapback_provenance(mem_path, since) if behaviour else {}
     beh = {}
     for c in contacts:
         tl = att["timelines"].get(c)
@@ -433,8 +467,10 @@ def load_all(chat_path, mem_path, contacts, now, tz, behaviour=True):
         if behaviour:
             starts, seg = lsv2.initiation_starts(tl or [], att["labels"], now, tz)
             beh[c] = {"units": lsv2.response_units(att["messages"].get(c, []), att["labels"],
-                                                   meta, activity.get(c, []), now, tz),
-                      "starts": starts, "segments": [seg] if seg else []}
+                                                   meta, activity.get(c, []), now, tz,
+                                                   prov.get(c, [])),
+                      "starts": starts, "segments": [seg] if seg else [],
+                      "prov_rows": len(prov.get(c, []))}
     return out, counts, beh, att
 
 
@@ -655,9 +691,13 @@ def _extra_history(a, handles, samples, behaviour, attribution, now, tz):
                                    > a.max_ambiguous_frac):
         out["extra_refused_ambiguous"] = True
         return out
-    end_age = (now - end_t).total_seconds() / 86400 if end_t else 0.0
+    # The corpus segment ends where chat.db begins: end_t is the newest corpus
+    # row INCLUDING rows dropped as overlapping chat.db, so ending there would
+    # count the overlap's exposure (and double-text horizon) twice.
+    horizon = end_t if chat_min_t is None or end_t is None else min(end_t, chat_min_t)
+    end_age = (now - horizon).total_seconds() / 86400 if horizon else 0.0
     for c, tl in tls.items():
-        ss = samples_from_timeline(tl, labels, now, tz, horizon=end_t)
+        ss = samples_from_timeline(tl, labels, now, tz, horizon=horizon)
         samples.setdefault(c, []).extend(ss)
         out["extra_samples"] += len(ss)
         st, seg = lsv2.initiation_starts(tl, labels, now, tz, end_age=end_age)
@@ -670,6 +710,8 @@ def _extra_history(a, handles, samples, behaviour, attribution, now, tz):
 
 def _behaviour_counts(samples, behaviour):
     units = [u for b in behaviour.values() for u in b["units"]]
+    bot = sum(u.get("bot_tapbacks_n", 0) for u in units)
+    taps = sum(u.get("tapbacks_n", 0) for u in units)
     starts = [s for b in behaviour.values() for s in b["starts"]]
     every = [s for ss in samples.values() for s in ss]
     return {
@@ -682,6 +724,11 @@ def _behaviour_counts(samples, behaviour):
                            for u in units if u["tap_ok"]),
         "modality_n": sum(1 for u in units if u["att_ok"] and u["has_msg"]),
         "double_text_n": sum(1 for s in every if s.get("double_text") is not None),
+        # Tapbacks the daemon recorded sending (outbound_sends kind 'tapback')
+        # and how many of Seth's from-me tapbacks they claimed: aggregate only.
+        "tapback_provenance_rows_n": sum(b.get("prov_rows", 0) for b in behaviour.values()),
+        "tapback_provenance_excluded_n": bot,
+        "tapback_provenance_excluded_share": round(bot / taps, 4) if taps else 0.0,
         "initiation_starts_n": sum(1 for s in starts if s["who"] != "unknown"),
         "initiation_unknown_n": sum(1 for s in starts if s["who"] == "unknown"),
     }
@@ -716,7 +763,8 @@ def main(argv=None):
     extra = _extra_history(a, handles, samples, behaviour, attribution, now, tz)
     if extra is None:
         return refuse("refused_extra_history_unreadable", "--extra-history file unreadable")
-    doc = build_profile(samples, a.persona, now, behaviour)
+    bounds = {}
+    doc = build_profile(samples, a.persona, now, behaviour, stats=bounds)
     prev, prev_status = load_previous(out_path)
     status, msg = _refusal(doc, prev, att, a.max_ambiguous_frac)
     first_run = prev is None
@@ -726,6 +774,12 @@ def main(argv=None):
             _, _, max_rel = apply_cap(json.loads(json.dumps(doc)), prev)
         else:
             clamped_n, clamped_fields, max_rel = apply_cap(doc, prev)
+            # The per-run cap can pull a contact back outside the global
+            # prior bound or break its mix's sum: the bound is re-applied
+            # last, so it holds in the written file.
+            post = lsv2.enforce_global_bounds(doc)
+            bounds["post_cap_prior_clamped_n"] = post["prior_clamped_n"]
+            bounds["post_cap_mix_capped_n"] = post["mix_capped_n"]
     counts = {
         "samples": sum(len(v) for v in samples.values()),
         "contacts": len(doc["contacts"]),
@@ -747,6 +801,7 @@ def main(argv=None):
     }
     counts.update(_behaviour_counts(samples, behaviour))
     counts.update(extra)
+    counts.update(bounds)
     if a.dry_run:
         summary = dict(counts, dry_run=True,
                        refuse_global_n=status == "refused_global_n",
@@ -759,6 +814,7 @@ def main(argv=None):
     if prev_status != "absent":
         archive_previous(out_path, os.path.join(a.out_dir, "learned-style-history"),
                          a.persona, now)
+    doc["provenance"] = provenance_block(now, counts)
     write_atomic(out_path, doc)
     append_log(a.log_dir, dict(record, status="written", prev=prev_status,
                                no_cap=a.no_cap, clamped_fields=clamped_fields, **counts))

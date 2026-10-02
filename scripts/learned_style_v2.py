@@ -23,7 +23,9 @@ inbound batch it handles as memory.db rows, so any response unit with
 daemon activity for that contact within 15 minutes of the burst or the
 response is left out of the tapback sample, whether Seth answered with a
 tapback or with text: excluding only the tapback units would bias
-tapback_only_rate down.
+tapback_only_rate down. If memory.db outbound_sends holds kind='tapback' rows
+(the daemon does not write them yet), each claims the bot's own tapback and
+its unit is excluded exactly (load_tapback_provenance / claim_bot_tapbacks).
 
 The m3 corpus (--extra-history) is older real history. It has no tapbacks,
 attachments or chat ids, so the tapback, reaction and modality fields are
@@ -53,11 +55,15 @@ SHRINK_K = 8
 # sample: the same window attribution uses for assistant rows.
 DAEMON_NEAR_S = cq.MATCH_WINDOW_S
 # A Seth turn followed by another Seth turn (more than 90 s later, so not a
-# bubble of the same turn) with no reply in between, within this window.
-DOUBLE_TEXT_MAX_S = 24 * 3600
+# bubble of the same turn) with no reply in between, within this window
+# (review ruling, PR #603: <= 2 h). It must stay below THREAD_GAP_S so a
+# double text and a thread start are disjoint: an outbound after a long
+# silence is an initiation, never a double text.
+DOUBLE_TEXT_MAX_S = 2 * 3600
 # A thread start: the first message after this much silence either way. The
 # pairing window: past it, a message no longer answers anything.
 THREAD_GAP_S = 6 * 3600
+assert DOUBLE_TEXT_MAX_S < THREAD_GAP_S
 # Tapback types: 2000-2006 are reactions, 2007 is sticker, 3xxx are removals.
 # Learn reactions (2000-2006) only; exclude stickers and removal markers.
 REACTION_RANGE = list(range(2000, 2007)) + list(range(3000, 4000))
@@ -98,6 +104,25 @@ CAP_FLOOR = {"latency_p25_s": 60, "latency_p75_s": 60, "latency_p90_s": 60,
              "initiation_rate_per_week": 0.25}
 RATE_FLOOR = 0.05
 VALUE_FIELDS = tuple(f for g in GROUPS.values() for f in g[2])
+# Per-contact bound against the global prior (applied after shrinkage, to the
+# contact overall and every bucket): probabilities and times move at most 25%
+# relative from the global value (the static-rules v2 design's figure;
+# probabilities also get its 0.05 absolute floor so a small global rate can
+# still differ per contact). Latency quantiles are re-ordered around v1's
+# unbounded latency_p50_s afterwards; ordering wins over the bound.
+PRIOR_BOUND_REL = 0.25
+PRIOR_PROB_FIELDS = ("double_text_rate", "tapback_only_rate", "tapback_with_text_rate",
+                     "self_reaction_rate", "voice_memo_rate", "gif_rate", "share_rate",
+                     "initiation_share")
+PRIOR_TIME_FIELDS = ("latency_p25_s", "latency_p75_s", "latency_p90_s",
+                     "inter_bubble_gap_s_p50", "double_text_gap_s_p50")
+PRIOR_BOUND_FIELDS = PRIOR_PROB_FIELDS + PRIOR_TIME_FIELDS
+PRIOR_BOUND_FLOOR = dict.fromkeys(PRIOR_PROB_FIELDS, 0.05)
+# A contact's tapback_types mix is held within this total-variation distance
+# of the global mix, then renormalised to sum to 1. The spec gives no figure
+# for contact-vs-global (its 0.1 TV is the night-to-night cap), so 0.25,
+# matching PRIOR_BOUND_REL.
+TAPBACK_MIX_TV_CAP = 0.25
 N_FIELDS = tuple(k for g in GROUPS.values() for k in g[:2] if k not in ("n", "n_eff"))
 # Top-level keys v2 adds to every stats node (tapback_types is one nested
 # object). Initiation keys are absent from shape:* and pace:* buckets.
@@ -213,20 +238,71 @@ def load_daemon_activity(mem_path, since):
     return out
 
 
+def load_tapback_provenance(mem_path, since):
+    """{contact: [(datetime, prior_max_rowid)]} of the tapbacks the daemon
+    recorded sending: memory.db outbound_sends rows with kind 'tapback'.
+    Empty when the table is absent or holds none. NOTE: as of this PR the
+    daemon does NOT record tapbacks (imessage_react never reports to the send
+    observer, and the outbound_sends CHECK admits only text/media/reply), so
+    in production this returns {} until that lands; the learner then relies
+    on the daemon-activity window above."""
+    con = cq._connect_ro(mem_path)
+    out = {}
+    try:
+        rows = con.execute(
+            "select contact, sent_at_ms, prior_max_rowid from outbound_sends "
+            "where kind = 'tapback' and sent_at_ms >= ? order by id",
+            (int(since.timestamp() * 1000),)).fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+    finally:
+        con.close()
+    for contact, ms, prior in rows:
+        try:
+            t = dt.datetime.fromtimestamp(ms / 1000, dt.timezone.utc)
+        except (TypeError, ValueError, OverflowError, OSError):
+            continue
+        out.setdefault(contact, []).append((t, prior if prior is not None else -1))
+    return out
+
+
+def claim_bot_tapbacks(msgs, records):
+    """Guids of from-me tapbacks the daemon sent: each record claims the
+    first unclaimed from-me tapback after its chat.db ROWID boundary (when
+    known) within cq.EXACT_WINDOW_S of the record time."""
+    taps = [m for m in msgs if m["from_me"] and m["atype"] in TAPBACK_CODES]
+    claimed = set()
+    for t, prior in records:
+        for m in taps:
+            if m["guid"] in claimed:
+                continue
+            if prior is not None and prior >= 0 and m.get("rowid", prior + 1) <= prior:
+                continue
+            if abs((m["t"] - t).total_seconds()) > cq.EXACT_WINDOW_S:
+                continue
+            claimed.add(m["guid"])
+            break
+    return claimed
+
+
 # ── response units (one per inbound burst Seth answered) ──────────────────
 
 def _target(m):
     return cq._target_guid(m.get("assoc"))
 
 
-def response_units(msgs, labels, meta, activity, now, tz):
+def response_units(msgs, labels, meta, activity, now, tz, tapback_prov=()):
     """Seth's response to each inbound burst: every from-me event (message or
     tapback) after the contact's burst and before their next message, within
     6 h of the burst's last bubble. msgs: one contact's chat.db rows in time
-    order, reactions included. Returns numbers, booleans and kind names."""
+    order, reactions included. tapback_prov: the daemon's own tapback records
+    for this contact (load_tapback_provenance); a unit holding a tapback the
+    daemon sent is the bot's and leaves the tapback sample. Returns numbers,
+    booleans and kind names."""
     import learned_style_profile as lsp       # shape / bands / burst rule
 
     me_guids = {m["guid"] for m in msgs if m["from_me"] and m["atype"] not in REACTION_RANGE}
+    bot_taps = claim_bot_tapbacks(msgs, tapback_prov)
     units, burst, resp = [], [], None
     last_me_t, inbound_gap = None, None
 
@@ -244,6 +320,7 @@ def response_units(msgs, labels, meta, activity, now, tz):
         self_r = [TAPBACK_CODES[e["atype"]] for e in taps if _target(e) in me_guids]
         to_them = [TAPBACK_CODES[e["atype"]] for e in taps if _target(e) not in me_guids]
         att_ok = all(labels.get(e["guid"]) == "seth" for e in sent)
+        bot = sum(1 for e in taps if e["guid"] in bot_taps)
         flags = [meta.get(e["guid"], {}) for e in sent]
         if to_them:
             kind = "tapback_text" if sent else "tapback_only"
@@ -260,8 +337,11 @@ def response_units(msgs, labels, meta, activity, now, tz):
             "reactions": to_them,
             "self_reactions": self_r,
             "att_ok": att_ok,
-            "tap_ok": att_ok and not near,
+            "tap_ok": att_ok and not near and not bot,
             "daemon_near": near,
+            "daemon_tapback": bool(bot),
+            "tapbacks_n": len(taps),
+            "bot_tapbacks_n": bot,
             "has_msg": bool(sent),
             "voice": any(f.get("audio") for f in flags),
             "gif": any(f.get("gif") for f in flags),
@@ -491,6 +571,85 @@ def max_rel_v2(new, prev):
             if isinstance(fn.get(f), (int, float)) and isinstance(fp.get(f), (int, float))
             and not isinstance(fp.get(f), bool) and fp[f] != 0]
     return max(rels) if rels else None
+
+
+# ── per-contact bounds against the global prior ───────────────────────────
+
+def bound_to_global(node, glob):
+    """Clamp node's PRIOR_BOUND_FIELDS (in place) to within
+    max(PRIOR_BOUND_REL * |global|, floor) of the global value; probabilities
+    stay in [0, 1], times stay integers rounded toward the global value.
+    Returns (node, [clamped field names])."""
+    clamped = []
+    for f in PRIOR_BOUND_FIELDS:
+        v, p = node.get(f), (glob or {}).get(f)
+        if v is None or p is None:
+            continue
+        allowed = max(PRIOR_BOUND_REL * abs(p), PRIOR_BOUND_FLOOR.get(f, 0.0))
+        lo, hi = p - allowed, p + allowed
+        if f in PRIOR_PROB_FIELDS:
+            lo, hi = max(lo, 0.0), min(hi, 1.0)
+        if f in INT_FIELDS:
+            lo, hi = math.ceil(lo - 1e-9), math.floor(hi + 1e-9)
+        if v < lo - 1e-12:
+            node[f] = lo
+        elif v > hi + 1e-12:
+            node[f] = hi
+        else:
+            continue
+        clamped.append(f)
+    return node, clamped
+
+
+def _normalise(mix):
+    """The mix with negatives clipped and summing to 1, or None if it has a
+    missing kind or no mass."""
+    if not isinstance(mix, dict) or any(mix.get(k) is None for k in TAPBACK_KINDS):
+        return None
+    vals = {k: max(0.0, float(mix[k])) for k in TAPBACK_KINDS}
+    tot = sum(vals.values())
+    return {k: v / tot for k, v in vals.items()} if tot > 0 else None
+
+
+def tv_distance(p, q):
+    return 0.5 * sum(abs(p[k] - q[k]) for k in TAPBACK_KINDS)
+
+
+def cap_mix(mix, gmix, cap=TAPBACK_MIX_TV_CAP):
+    """Pull mix toward gmix along the straight line until their
+    total-variation distance is at most cap, then renormalise. Returns
+    (mix or None, capped)."""
+    p, g = _normalise(mix), _normalise(gmix)
+    if p is None or g is None:
+        return p, False
+    tv = tv_distance(p, g)
+    if tv <= cap:
+        return p, False
+    s = cap / tv
+    return _normalise({k: g[k] + s * (p[k] - g[k]) for k in TAPBACK_KINDS}), True
+
+
+def enforce_global_bounds(doc):
+    """Final pass over a profile document (after shrinkage, and again after
+    the per-run cap): bound every contact node to the global prior and cap
+    its tapback mix. Returns counts only."""
+    out = {"prior_clamped_n": 0, "mix_capped_n": 0}
+    glob = doc.get("global")
+    if not isinstance(glob, dict):
+        return out
+    gmix = _normalise(glob.get("tapback_types"))
+    if gmix is not None:
+        glob["tapback_types"] = gmix
+    for entry in (doc.get("contacts") or {}).values():
+        for st in [entry["overall"]] + list(entry["buckets"].values()):
+            _, clamped = bound_to_global(st, glob)
+            order_v2(st)
+            out["prior_clamped_n"] += len(clamped)
+            mix, capped = cap_mix(st.get("tapback_types"), gmix)
+            if mix is not None:
+                st["tapback_types"] = mix
+            out["mix_capped_n"] += capped
+    return out
 
 
 # ── node assembly ─────────────────────────────────────────────────────────
