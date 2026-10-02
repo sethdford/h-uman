@@ -10,6 +10,7 @@
 
 #ifdef HU_ENABLE_SQLITE
 
+#include "human/memory.h"
 #include "human/memory/repo_util.h"
 #include <stdbool.h>
 #include <stdio.h>
@@ -279,7 +280,11 @@ bool hu_proactive_send_circuit_is_open(sqlite3 *db, const char *contact, int64_t
  * them first". */
 #define HU_UNPROMPTED_TRIGGERS_SQL                                            \
     "('proactive_send','unprompted_cron','unprompted_bump','unprompted_f25'," \
-    "'unprompted_photo')"
+    "'unprompted_photo','unprompted_date_note')"
+
+sqlite3 *hu_proactive_decisions_repo_db(struct hu_legacy_memory *mem) {
+    return mem ? hu_sqlite_memory_get_db(mem) : NULL;
+}
 
 hu_error_t hu_proactive_decisions_repo_unprompted_state_ensure(sqlite3 *db, int64_t now) {
     if (!db)

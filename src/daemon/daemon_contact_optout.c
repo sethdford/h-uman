@@ -3,9 +3,11 @@
 #include "human/agent.h"
 #include "human/core/log.h"
 #include "human/core/string.h"
+#include "human/daemon/unprompted_gate.h"
 #include "human/memory.h"
 #ifdef HU_ENABLE_SQLITE
 #include "human/memory/contact_optout_repo.h"
+#include "human/memory/proactive_decisions_repo.h"
 #endif
 #include <ctype.h>
 #include <stdlib.h>
@@ -89,8 +91,14 @@ bool hu_daemon_contact_optout_observe(struct hu_agent *agent, const char *contac
 #ifdef HU_ENABLE_SQLITE
     if (!agent || !agent->memory)
         return false;
-    struct sqlite3 *db = hu_sqlite_memory_get_db(agent->memory);
-    if (!hu_contact_optout_observe_db(db, contact, contact_len, text, len, (int64_t)time(NULL)))
+    struct sqlite3 *db = hu_proactive_decisions_repo_db(agent->memory);
+    /* Stored under the canonical key the unprompted gate checks, so an
+     * opt-out sent from a contact's email address suppresses the contact. */
+    char who[128];
+    size_t who_len =
+        hu_unprompted_contact_key(agent->persona, contact, contact_len, who, sizeof(who));
+    if (who_len == 0 ||
+        !hu_contact_optout_observe_db(db, who, who_len, text, len, (int64_t)time(NULL)))
         return false;
     hu_log_warn("human", agent->observer,
                 "[optout] %.*s asked us to stop — proactive contact suppressed from the next "

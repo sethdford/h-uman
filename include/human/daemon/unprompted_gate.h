@@ -21,8 +21,17 @@
  *                       operator's autoresponder DND window
  *   5. circuit breaker  delivery keeps failing to this contact
  *   6. reachability     HU_PROACTIVE_REACHABILITY pre-filter (its own gate)
- *   7. sanitizer        at send time, when there is text
- *   8. moderation       at send time, when there is text — BLOCKING
+ *   7. sanitizer        at send time, when there is text: the PROACTIVE
+ *                       outbound pipeline (strip, shape, echo, crosstalk,
+ *                       persona, moderation, style). Its moderation stage
+ *                       already blocks violence/hate/sexual content and
+ *                       deliberately lets self-harm mentions through (a
+ *                       check-in on a struggling friend), so there is no
+ *                       separate moderation stage after it.
+ *
+ * The contact is canonicalised first (hu_unprompted_contact_key): an inbound
+ * from a contact's email address and a send to their contact_id are the same
+ * person for opt-out, cap and cool-off.
  *
  * These limits are STATIC by policy (anti-spam / consent / sleep ceilings);
  * adaptive cadence may only sit underneath them. Ungated: these are
@@ -37,6 +46,7 @@
 
 struct hu_agent;
 struct hu_autoresponder_config;
+struct hu_persona;
 struct sqlite3;
 
 typedef enum hu_unprompted_kind {
@@ -46,6 +56,7 @@ typedef enum hu_unprompted_kind {
     HU_UNPROMPTED_BUMP = 3,
     HU_UNPROMPTED_F25 = 4,
     HU_UNPROMPTED_PHOTO = 5,
+    HU_UNPROMPTED_DATE_NOTE = 6, /* owner-approved date note, sent to the contact */
 } hu_unprompted_kind_t;
 
 typedef enum hu_unprompted_reason {
@@ -60,8 +71,7 @@ typedef enum hu_unprompted_reason {
     HU_UNPROMPTED_DENY_QUIET_HOURS, /* stage 4 */
     HU_UNPROMPTED_DENY_CIRCUIT,     /* stage 5 */
     HU_UNPROMPTED_DENY_UNREACHABLE, /* stage 6 */
-    HU_UNPROMPTED_DENY_SANITIZER,   /* stage 7 */
-    HU_UNPROMPTED_DENY_MODERATION,  /* stage 8 */
+    HU_UNPROMPTED_DENY_SANITIZER,   /* stage 7 (includes the pipeline's moderation) */
 } hu_unprompted_reason_t;
 
 #define HU_UNPROMPTED_DAILY_CAP     1
@@ -106,7 +116,7 @@ void hu_daemon_unprompted_gate_init(hu_unprompted_gate_t *g, hu_allocator_t *all
  * at_send=false: the pre-LLM / pre-compose screen (stages 1–6). Run it before
  *   any model call, so a capped or opted-out contact costs no GPU.
  * at_send=true: immediately before the channel send — all stages, consumes a
- *   channel token, and runs stages 7–8 on `text` when it is non-NULL (the
+ *   channel token, and runs stage 7 on `text` when it is non-NULL (the
  *   sanitizer may shorten *text_len_io in place).
  *
  * Logs one aggregate line per deny, and per allow at send time:
@@ -128,6 +138,19 @@ void hu_unprompted_record_sent(const hu_unprompted_gate_t *g, const char *contac
  * reciprocity multiplier, not a cool-off). Either pointer may be NULL. */
 void hu_unprompted_record_inbound(struct hu_agent *agent, hu_proactive_budget_t *gov_budget,
                                   const char *contact, size_t contact_len, int64_t now);
+
+/* Canonical contact key: the persona contact's contact_id when `key` names a
+ * persona contact (by contact_id, then email, then name — the same order as
+ * hu_persona_find_contact), else `key` itself. Writes a NUL-terminated copy
+ * into out; returns its length (0 when it does not fit). */
+size_t hu_unprompted_contact_key(const struct hu_persona *persona, const char *key, size_t key_len,
+                                 char *out, size_t cap);
+
+#ifdef HU_IS_TEST
+/* Test seam: the global budget hu_daemon_unprompted_gate_init hands out in
+ * test builds (production uses the daemon's own). NULL = none. */
+void hu_daemon_unprompted_set_budget_for_test(hu_proactive_budget_t *budget);
+#endif
 
 const char *hu_unprompted_kind_str(hu_unprompted_kind_t kind);
 const char *hu_unprompted_reason_str(hu_unprompted_reason_t reason);

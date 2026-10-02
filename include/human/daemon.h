@@ -60,6 +60,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
  * and routes responses to the specified channel. */
 hu_error_t hu_service_run_agent_cron(hu_allocator_t *alloc, struct hu_agent *agent,
                                      hu_service_channel_t *channels, size_t channel_count);
+/* Same, at an injected wall clock (schedule match, quiet hours, cap window). */
+hu_error_t hu_service_run_agent_cron_at(hu_allocator_t *alloc, struct hu_agent *agent,
+                                        hu_service_channel_t *channels, size_t channel_count,
+                                        time_t now);
 
 /* Proactive check-ins: iterate contacts with proactive_checkin=true,
  * check last interaction time, and initiate natural conversations.

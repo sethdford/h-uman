@@ -466,20 +466,6 @@ static hu_proactive_context_t g_proactive_ctx;
 static hu_proactive_throttle_t g_proactive_throttle;
 static int g_proactive_throttle_initialized;
 
-/* Persist scheduled.json after a slot changes. A failed save leaves memory and
- * disk disagreeing and the stale file replays on restart (the 2026-07-27
- * sched-send incident class), so the failure is logged rather than dropped. */
-static void daemon_sched_persist(hu_agent_t *agent, const char *what) {
-    char sp[512];
-    int sn = hu_paths_state(sp, sizeof(sp), "scheduled.json");
-    if (sn <= 0 || (size_t)sn >= sizeof(sp))
-        return;
-    hu_error_t se = hu_conversation_sched_save(sp, (size_t)sn);
-    if (se != HU_OK)
-        hu_log_error("human", agent ? agent->observer : NULL,
-                     "scheduled.json not persisted after %s (%d)", what, (int)se);
-}
-
 static hu_proactive_throttle_t *daemon_throttle(hu_allocator_t *alloc) {
     if (!g_proactive_throttle_initialized) {
         hu_proactive_throttle_init(&g_proactive_throttle, alloc);
@@ -552,6 +538,10 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
         double busy_mult = hu_busyness_budget_multiplier(&bs);
         gov_budget.relationship_multiplier = 1.0 * recip_mult * busy_mult;
     }
+    /* Scheduled-queue delivery runs BEFORE the budget gate: an owner-scheduled
+     * message is explicit owner intent and must not stall because unprompted
+     * sends spent the budget (bumps in the queue still face the full stack). */
+    hu_daemon_sched_deliver_due(alloc, agent, channels, channel_count, (int64_t)now);
     if (!hu_governor_has_budget(&gov_budget, gov_now_ms))
         return;
 
@@ -594,39 +584,6 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
         }
     }
 #endif
-
-    /* Scheduled message delivery: once per channel, independent of contacts */
-    {
-        /* Re-sync from disk when the file changed — `human schedule add`
-         * writes from a separate process, and the previous once-per-process
-         * load left those entries invisible until the next daemon restart
-         * (2026-07-27). Cheap: one stat() per pass, load only on change. */
-        {
-            char sp[512];
-            int sn = hu_paths_state(sp, sizeof(sp), "scheduled.json");
-            if (sn > 0 && (size_t)sn < sizeof(sp))
-                hu_conversation_sched_reload_if_changed(sp, (size_t)sn);
-        }
-        uint64_t sched_now = (uint64_t)time(NULL) * 1000ULL;
-        for (size_t sc = 0; sc < channel_count; sc++) {
-            if (!channels[sc].channel || !channels[sc].channel->vtable ||
-                !channels[sc].channel->vtable->send || !channels[sc].channel->vtable->name)
-                continue;
-            const char *sched_ch = channels[sc].channel->vtable->name(channels[sc].channel->ctx);
-            if (!sched_ch)
-                continue;
-            char sched_contact[128], sched_channel[32], sched_msg[512];
-            uint8_t sched_kind = 0; /* non-zero = unprompted (the bump): full gate stack */
-            size_t sched_len = hu_conversation_flush_scheduled_kind(
-                sched_now, sched_ch, strlen(sched_ch), sched_contact, sizeof(sched_contact),
-                sched_channel, sizeof(sched_channel), sched_msg, sizeof(sched_msg), &sched_kind);
-            if (sched_len > 0 &&
-                hu_daemon_sched_deliver(alloc, agent, channels[sc].channel, sched_ch, sched_contact,
-                                        sched_msg, sched_len, sizeof(sched_msg), sched_kind,
-                                        (int64_t)time(NULL)))
-                daemon_sched_persist(agent, "send");
-        }
-    }
 
     /* Follow-up watcher (S2.1b) — carved to src/daemon/daemon_followup_sched.c
      * (file-size-ceiling ratchet). msg-id dedup + per-contact cooldown live
@@ -1441,6 +1398,13 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
 
 #endif
 
+#ifdef HU_IS_TEST
+static hu_proactive_budget_t *s_test_budget;
+void hu_daemon_unprompted_set_budget_for_test(hu_proactive_budget_t *budget) {
+    s_test_budget = budget;
+}
+#endif
+
 /* The daemon's half of the unprompted gate stack (human/daemon/unprompted_gate.h):
  * this file owns the governor budget, channel throttle, DND and tz it reads. */
 void hu_daemon_unprompted_gate_init(hu_unprompted_gate_t *g, hu_allocator_t *alloc,
@@ -1451,7 +1415,7 @@ void hu_daemon_unprompted_gate_init(hu_unprompted_gate_t *g, hu_allocator_t *all
                             daemon_autoresponder_config(), daemon_local_tz_offset_seconds(now),
                             channel_name, target, target_len);
 #else
-    hu_unprompted_gate_init(g, alloc, agent, NULL, NULL, daemon_autoresponder_config(),
+    hu_unprompted_gate_init(g, alloc, agent, s_test_budget, NULL, daemon_autoresponder_config(),
                             daemon_local_tz_offset_seconds(now), channel_name, target, target_len);
 #endif
 }

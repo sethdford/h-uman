@@ -16,6 +16,7 @@
 #ifdef HU_ENABLE_SQLITE
 
 #include "human/agent.h"
+#include "human/agent/governor.h"
 #include "human/agent/proactive_throttle.h"
 #include "human/channel.h"
 #include "human/context/conversation.h"
@@ -354,7 +355,7 @@ static void test_cooloff_ignores_sends_before_epoch(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
-static void test_violent_text_blocked_at_send_and_clean_text_passes(void) {
+static void test_violent_text_blocked_by_stage7_and_clean_text_passes(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
     struct hu_agent agent = {0};
@@ -365,14 +366,155 @@ static void test_violent_text_blocked_at_send_and_clean_text_passes(void) {
     HU_ASSERT_EQ(hu_unprompted_send_check(&g, UG_X, HU_UNPROMPTED_CRON, now, ok, &ok_len, true),
                  HU_UNPROMPTED_ALLOW);
     HU_ASSERT_EQ(ok_len, strlen("hey how was the trip"));
-    /* The cron used to only LOG this. The sanitizer's outbound pipeline runs
-     * the same classifier first, so either content stage may be the one that
-     * refuses; what matters is that nothing violent is allowed to send. */
+    /* The cron used to only LOG this; stage 7's pipeline moderation blocks it. */
     char bad[] = "i will kill him";
     size_t bad_len = strlen(bad);
-    hu_unprompted_reason_t r =
-        hu_unprompted_send_check(&g, UG_X, HU_UNPROMPTED_CRON, now, bad, &bad_len, true);
-    HU_ASSERT_TRUE(r == HU_UNPROMPTED_DENY_SANITIZER || r == HU_UNPROMPTED_DENY_MODERATION);
+    HU_ASSERT_EQ(hu_unprompted_send_check(&g, UG_X, HU_UNPROMPTED_CRON, now, bad, &bad_len, true),
+                 HU_UNPROMPTED_DENY_SANITIZER);
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* No second moderation pass after stage 7: the old stage 8 blocked anything
+ * the raw self-harm classifier flagged, and its substring match reads
+ * "spend it all" as "end it all". Ordinary chat must still go out. */
+static void test_spend_it_all_is_not_blocked_at_send(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    struct hu_agent agent = {0};
+    int64_t now = ug_local_noon(0);
+    hu_unprompted_gate_t g = ug_gate(&mem, &agent, now);
+    char msg[] = "did you spend it all at the fair lol";
+    size_t len = strlen(msg);
+    HU_ASSERT_EQ(hu_unprompted_send_check(&g, UG_X, HU_UNPROMPTED_PROACTIVE, now, msg, &len, true),
+                 HU_UNPROMPTED_ALLOW);
+    HU_ASSERT_EQ(len, strlen("did you spend it all at the fair lol"));
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* Positive control for the cron: a contact who has NOT opted out, at local
+ * noon, IS sent the agent's text — through the validator chain and the stack
+ * (the ledger row proves the stack's record path ran), never a raw send. */
+static void test_cron_directed_send_allowed_for_consenting_contact(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    hu_cron_scheduler_t *sched = hu_cron_create(&alloc, 8, true);
+    HU_ASSERT_NOT_NULL(sched);
+    uint64_t id = 0;
+    HU_ASSERT_EQ(hu_cron_add_agent_job(sched, &alloc, "* * * * *", "check in", "imessage:" UG_X,
+                                       "proactive:x", &id),
+                 HU_OK);
+    struct hu_agent agent = {0};
+    agent.alloc = &alloc;
+    agent.memory = &mem;
+    agent.scheduler = sched;
+    hu_channel_t chan = ug_channel();
+    hu_service_channel_t chans[1] = {{.channel = &chan}};
+    HU_ASSERT_EQ(ug_sent_rows(db, UG_X, "unprompted_cron"), 0);
+    HU_ASSERT_EQ(hu_service_run_agent_cron_at(&alloc, &agent, chans, 1, (time_t)ug_local_noon(0)),
+                 HU_OK);
+    HU_ASSERT_EQ(g_ug.sends, 1);
+    HU_ASSERT_STR_EQ(g_ug.last_target, UG_X);
+    HU_ASSERT_STR_EQ(g_ug.last_msg, "[agent-cron-test]"); /* the HU_IS_TEST agent turn */
+    HU_ASSERT_EQ(ug_sent_rows(db, UG_X, "unprompted_cron"), 1);
+    /* Same job one hour later: the cap the first send charged now holds. */
+    HU_ASSERT_EQ(
+        hu_service_run_agent_cron_at(&alloc, &agent, chans, 1, (time_t)ug_local_noon(0) + 3600),
+        HU_OK);
+    HU_ASSERT_EQ(g_ug.sends, 1);
+    hu_cron_destroy(sched, &alloc);
+    mem.vtable->deinit(mem.ctx);
+}
+
+/* Owner-scheduled delivery must not stall when unprompted sends spent the
+ * global budget: the delivery pass runs before the daemon's budget gate and
+ * consults the budget only for unprompted (tagged) entries. */
+static void test_owner_scheduled_delivered_with_budget_exhausted(void) {
+    char dir[] = "/tmp/hu_ug_state_XXXXXX";
+    HU_ASSERT_NOT_NULL(mkdtemp(dir));
+    const char *old_state = getenv("HU_STATE_DIR");
+    char saved[512];
+    snprintf(saved, sizeof(saved), "%s", old_state ? old_state : "");
+    setenv("HU_STATE_DIR", dir, 1);
+
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    struct hu_agent agent = {0};
+    agent.memory = &mem;
+    agent.alloc = &alloc;
+    hu_proactive_budget_t budget = ug_budget();
+    int64_t now = ug_local_noon(0);
+    while (hu_governor_has_budget(&budget, (uint64_t)now * 1000ULL))
+        HU_ASSERT_EQ(hu_governor_record_sent(&budget, (uint64_t)now * 1000ULL), HU_OK);
+    hu_daemon_unprompted_set_budget_for_test(&budget);
+
+    hu_channel_t chan = ug_channel();
+    hu_service_channel_t chans[1] = {{.channel = &chan}};
+    uint64_t due = (uint64_t)(now - 60) * 1000ULL;
+    HU_ASSERT_EQ(hu_conversation_schedule_message_kind(UG_X, strlen(UG_X), "imessage", 8,
+                                                       "hey no rush", 11, due, HU_UNPROMPTED_BUMP),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_conversation_schedule_message_on(UG_Y, strlen(UG_Y), "imessage", 8,
+                                                     "Dinner at 7.", 12, due),
+                 HU_OK);
+    /* One entry per channel per pass, as before. */
+    hu_daemon_sched_deliver_due(&alloc, &agent, chans, 1, now);
+    hu_daemon_sched_deliver_due(&alloc, &agent, chans, 1, now);
+    HU_ASSERT_EQ(g_ug.sends, 1);              /* the bump met the exhausted budget */
+    HU_ASSERT_STR_EQ(g_ug.last_target, UG_Y); /* the owner's message went out */
+    HU_ASSERT_STR_EQ(g_ug.last_msg, "dinner at 7");
+
+    hu_daemon_unprompted_set_budget_for_test(NULL);
+    mem.vtable->deinit(mem.ctx);
+    char sp[600];
+    snprintf(sp, sizeof(sp), "%s/scheduled.json", dir);
+    unlink(sp);
+    rmdir(dir);
+    if (old_state)
+        setenv("HU_STATE_DIR", saved, 1);
+    else
+        unsetenv("HU_STATE_DIR");
+}
+
+/* An inbound from a contact's EMAIL address (hu_persona_find_contact's
+ * fallback) is the same person as their contact_id for cool-off and opt-out. */
+static void test_email_fallback_contact_is_one_key(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    hu_contact_profile_t cp = {0};
+    cp.contact_id = (char *)UG_X;
+    cp.email = (char *)"x@example.com";
+    hu_persona_t persona;
+    memset(&persona, 0, sizeof(persona));
+    persona.contacts = &cp;
+    persona.contacts_count = 1;
+    struct hu_agent agent = {0};
+    agent.persona = &persona;
+    int64_t now = ug_local_noon(0);
+    hu_unprompted_gate_t g = ug_gate(&mem, &agent, now);
+    HU_ASSERT_EQ(hu_proactive_decisions_repo_unprompted_state_ensure(db, now - 30 * 86400), HU_OK);
+    hu_unprompted_record_sent(&g, UG_X, HU_UNPROMPTED_BUMP, now - 3 * 86400);
+    hu_unprompted_record_sent(&g, UG_X, HU_UNPROMPTED_F25, now - 2 * 86400);
+    HU_ASSERT_EQ(
+        hu_unprompted_send_check(&g, UG_X, HU_UNPROMPTED_PROACTIVE, now, NULL, NULL, false),
+        HU_UNPROMPTED_DENY_COOLOFF);
+    hu_unprompted_record_inbound(&agent, NULL, "x@example.com", strlen("x@example.com"), now - 30);
+    HU_ASSERT_EQ(
+        hu_unprompted_send_check(&g, UG_X, HU_UNPROMPTED_PROACTIVE, now, NULL, NULL, false),
+        HU_UNPROMPTED_ALLOW);
+    /* Opt-out typed from the email address suppresses the contact_id. */
+    HU_ASSERT_TRUE(hu_daemon_contact_optout_observe(
+        &agent, "x@example.com", strlen("x@example.com"), "stop texting me", 15));
+    HU_ASSERT_EQ(
+        hu_unprompted_send_check(&g, UG_X, HU_UNPROMPTED_PROACTIVE, now, NULL, NULL, false),
+        HU_UNPROMPTED_DENY_OPTOUT);
+    char key[64];
+    HU_ASSERT_EQ(hu_unprompted_contact_key(&persona, "x@example.com", 13, key, sizeof(key)),
+                 strlen(UG_X));
+    HU_ASSERT_STR_EQ(key, UG_X);
+    HU_ASSERT_EQ(hu_unprompted_contact_key(&persona, UG_Y, strlen(UG_Y), key, sizeof(key)),
+                 strlen(UG_Y)); /* unknown contact: its own key */
     mem.vtable->deinit(mem.ctx);
 }
 
@@ -543,7 +685,11 @@ void run_unprompted_gate_tests(void) {
     HU_RUN_TEST(test_every_kind_denied_over_cap_and_cap_counts_every_kind);
     HU_RUN_TEST(test_cooloff_is_per_contact);
     HU_RUN_TEST(test_cooloff_ignores_sends_before_epoch);
-    HU_RUN_TEST(test_violent_text_blocked_at_send_and_clean_text_passes);
+    HU_RUN_TEST(test_violent_text_blocked_by_stage7_and_clean_text_passes);
+    HU_RUN_TEST(test_spend_it_all_is_not_blocked_at_send);
+    HU_RUN_TEST(test_cron_directed_send_allowed_for_consenting_contact);
+    HU_RUN_TEST(test_owner_scheduled_delivered_with_budget_exhausted);
+    HU_RUN_TEST(test_email_fallback_contact_is_one_key);
     HU_RUN_TEST(test_no_ledger_fails_closed);
     HU_RUN_TEST(test_sched_bump_gated_but_owner_scheduled_unchanged);
     HU_RUN_TEST(test_sched_kind_round_trips_through_scheduled_json);

@@ -47,4 +47,12 @@ bool hu_daemon_sched_deliver(hu_allocator_t *alloc, hu_agent_t *agent, hu_channe
                              const char *ch_name, const char *contact, char *msg, size_t msg_len,
                              size_t msg_cap, uint8_t kind, int64_t now);
 
+/* One delivery pass over the scheduled queue: reload scheduled.json if it
+ * changed, pop every due entry per channel, deliver it via
+ * hu_daemon_sched_deliver, and persist the queue after each attempt. The
+ * daemon calls this BEFORE the global budget gate, so owner-scheduled
+ * messages never stall behind unprompted sends. */
+void hu_daemon_sched_deliver_due(hu_allocator_t *alloc, hu_agent_t *agent,
+                                 hu_service_channel_t *channels, size_t channel_count, int64_t now);
+
 #endif /* HU_DAEMON_UNPROMPTED_SENDS_H */

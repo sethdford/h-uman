@@ -1523,6 +1523,18 @@ static hu_error_t cmd_service_loop(hu_allocator_t *alloc, int argc, char **argv)
      * which runs the unprompted gate stack before its LLM call. A cron job
      * that still targets a contact (schedule tool, admin API) is gated by the
      * same stack in hu_service_run_agent_cron. */
+    if (app_ctx.agent && app_ctx.agent->persona) {
+        size_t ignored = 0;
+        for (size_t ci = 0; ci < app_ctx.agent->persona->contacts_count; ci++)
+            if (app_ctx.agent->persona->contacts[ci].proactive_schedule)
+                ignored++;
+        if (ignored > 0)
+            hu_log_info("human", NULL,
+                        "contacts.proactive_schedule is ignored (%zu contact(s) set it): the "
+                        "per-contact check-in cron was removed; check-in timing is owned by the "
+                        "proactive proposer. Remove the key from the persona to silence this.",
+                        ignored);
+    }
 
 #ifdef HU_ENABLE_FEEDS
     if (app_ctx.agent && app_ctx.agent->scheduler) {

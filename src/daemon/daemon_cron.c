@@ -194,6 +194,12 @@ void hu_daemon_cron_tick(hu_allocator_t *alloc) {
 
 hu_error_t hu_service_run_agent_cron(hu_allocator_t *alloc, hu_agent_t *agent,
                                      hu_service_channel_t *channels, size_t channel_count) {
+    return hu_service_run_agent_cron_at(alloc, agent, channels, channel_count, time(NULL));
+}
+
+hu_error_t hu_service_run_agent_cron_at(hu_allocator_t *alloc, hu_agent_t *agent,
+                                        hu_service_channel_t *channels, size_t channel_count,
+                                        time_t now) {
     if (!alloc || !agent || !agent->scheduler)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -202,7 +208,6 @@ hu_error_t hu_service_run_agent_cron(hu_allocator_t *alloc, hu_agent_t *agent,
     if (!jobs || job_count == 0)
         return HU_OK;
 
-    time_t now = time(NULL);
     struct tm tm;
     localtime_r(&now, &tm);
 
@@ -298,7 +303,7 @@ hu_error_t hu_service_run_agent_cron(hu_allocator_t *alloc, hu_agent_t *agent,
                             if (response_len == 0)
                                 break;
                             response_len = hu_conversation_vary_complexity(response, response_len,
-                                                                           (uint32_t)time(NULL));
+                                                                           (uint32_t)now);
                             if (response_len > 1 && response[0] >= 'A' && response[0] <= 'Z' &&
                                 response[1] >= 'a' && response[1] <= 'z' && response[0] != 'I') {
                                 response[0] = (char)(response[0] + 32);
@@ -423,6 +428,13 @@ bool hu_cron_schedule_matches(const char *schedule, const struct tm *tm) {
 
 void hu_daemon_cron_tick(hu_allocator_t *alloc) {
     (void)alloc;
+}
+
+hu_error_t hu_service_run_agent_cron_at(hu_allocator_t *alloc, hu_agent_t *agent,
+                                        hu_service_channel_t *channels, size_t channel_count,
+                                        time_t now) {
+    (void)now;
+    return hu_service_run_agent_cron(alloc, agent, channels, channel_count);
 }
 
 hu_error_t hu_service_run_agent_cron(hu_allocator_t *alloc, hu_agent_t *agent,

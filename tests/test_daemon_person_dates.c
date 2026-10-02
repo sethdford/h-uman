@@ -8,6 +8,7 @@
 #include "human/daemon.h"
 #include "human/daemon/briefing.h"
 #include "human/daemon/person_dates.h"
+#include "human/daemon_contact_optout.h"
 #include "human/memory.h"
 #include "human/persona.h"
 #include "test_framework.h"
@@ -389,6 +390,27 @@ static void date_drafts_skip_and_shadow_send_nothing_to_the_contact(void) {
     HU_ASSERT_FALSE(say_at(&f, "send", at(2030, 3, 2, 10, 1), reply, sizeof(reply)));
     fixture_end(&f);
 }
+/* An approved note is still a message the contact did not ask for: it goes
+ * through the unprompted gate stack, so a contact who opted out is never
+ * texted, and the owner is told why instead of believing it went. */
+static void date_drafts_never_reach_a_contact_who_opted_out(void) {
+    fixture_t f;
+    fixture_begin(&f, "live");
+    setenv("HU_DATE_NUDGES", "live", 1);
+    char reply[256];
+    HU_ASSERT_TRUE(say(&f, OWNER, "mom's birthday is march 3", reply, sizeof(reply)));
+    hu_date_nudges_tick(&f.agent, &f.svc, 1, at(2032, 3, 3, 9, 5));
+    HU_ASSERT_EQ(f.rec.sends, 1); /* the question to the owner */
+    HU_ASSERT_TRUE(say_at(&f, "send", at(2032, 3, 3, 9, 8), reply, sizeof(reply)));
+    HU_ASSERT_TRUE(hu_daemon_contact_optout_observe(&f.agent, MOTHER, strlen(MOTHER),
+                                                    "please stop texting me", 22));
+    hu_date_nudges_tick(&f.agent, &f.svc, 1, at(2032, 3, 3, 9, 9));
+    HU_ASSERT_EQ(f.rec.sends, 2);
+    HU_ASSERT_STR_EQ(f.rec.target, OWNER); /* nothing reached Betty */
+    HU_ASSERT_STR_EQ(f.rec.text, "couldn't send your note to Betty (contact_optout)");
+    fixture_end(&f);
+}
+
 static void date_drafts_cannot_be_approved_if_the_question_never_arrived(void) {
     fixture_t f;
     fixture_begin(&f, "live");
@@ -423,5 +445,6 @@ void run_daemon_person_dates_tests(void) {
     HU_RUN_TEST(date_drafts_send_the_owners_own_words_and_report_a_failure);
     HU_RUN_TEST(date_drafts_skip_and_shadow_send_nothing_to_the_contact);
     HU_RUN_TEST(date_drafts_cannot_be_approved_if_the_question_never_arrived);
+    HU_RUN_TEST(date_drafts_never_reach_a_contact_who_opted_out);
 #endif
 }

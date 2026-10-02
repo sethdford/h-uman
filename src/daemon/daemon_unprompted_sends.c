@@ -9,6 +9,7 @@
 #include "human/contact_send_recency.h"
 #include "human/context/conversation.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 #include "human/daemon/unprompted_gate.h"
 #include "human/daemon/unprompted_sends.h"
 #include "human/daemon_learning_tick.h"
@@ -272,4 +273,48 @@ bool hu_daemon_sched_deliver(hu_allocator_t *alloc, hu_agent_t *agent, hu_channe
     if (sent && kind != HU_UNPROMPTED_NONE)
         hu_unprompted_record_sent(&g, contact, (hu_unprompted_kind_t)kind, now);
     return true;
+}
+
+/* Persist scheduled.json after a slot changes. A failed save leaves memory and
+ * disk disagreeing and the stale file replays on restart (the 2026-07-27
+ * sched-send incident class), so the failure is logged rather than dropped. */
+static void sched_persist(hu_agent_t *agent, const char *what) {
+    char sp[512];
+    int sn = hu_paths_state(sp, sizeof(sp), "scheduled.json");
+    if (sn <= 0 || (size_t)sn >= sizeof(sp))
+        return;
+    hu_error_t se = hu_conversation_sched_save(sp, (size_t)sn);
+    if (se != HU_OK)
+        hu_log_error("human", agent ? agent->observer : NULL,
+                     "scheduled.json not persisted after %s (%d)", what, (int)se);
+}
+
+void hu_daemon_sched_deliver_due(hu_allocator_t *alloc, hu_agent_t *agent,
+                                 hu_service_channel_t *channels, size_t channel_count,
+                                 int64_t now) {
+    if (!channels)
+        return;
+    /* Re-sync from disk when the file changed — `human schedule add` writes
+     * from a separate process (2026-07-27). One stat() per pass. */
+    char sp[512];
+    int sn = hu_paths_state(sp, sizeof(sp), "scheduled.json");
+    if (sn > 0 && (size_t)sn < sizeof(sp))
+        hu_conversation_sched_reload_if_changed(sp, (size_t)sn);
+    uint64_t now_ms = (uint64_t)now * 1000ULL;
+    for (size_t sc = 0; sc < channel_count; sc++) {
+        hu_channel_t *ch = channels[sc].channel;
+        if (!ch || !ch->vtable || !ch->vtable->send || !ch->vtable->name)
+            continue;
+        const char *ch_name = ch->vtable->name(ch->ctx);
+        if (!ch_name)
+            continue;
+        char contact[128], channel[32], msg[512];
+        uint8_t kind = 0; /* non-zero = unprompted (the bump): full gate stack */
+        size_t len = hu_conversation_flush_scheduled_kind(now_ms, ch_name, strlen(ch_name), contact,
+                                                          sizeof(contact), channel, sizeof(channel),
+                                                          msg, sizeof(msg), &kind);
+        if (len > 0 && hu_daemon_sched_deliver(alloc, agent, ch, ch_name, contact, msg, len,
+                                               sizeof(msg), kind, now))
+            sched_persist(agent, "send");
+    }
 }

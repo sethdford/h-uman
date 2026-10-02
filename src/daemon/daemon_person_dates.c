@@ -1,12 +1,12 @@
 /* src/daemon/daemon_person_dates.c — contract in include/human/daemon/person_dates.h */
 #include "human/agent.h"
-#include "human/agent/outbound_sanitize.h"
 #include "human/channel.h"
 #include "human/core/gate_mode.h"
 #include "human/core/log.h"
 #include "human/daemon.h"
 #include "human/daemon/person_dates.h"
 #include "human/daemon/share_queue.h"
+#include "human/daemon/unprompted_gate.h"
 #include "human/daemon_outbound_bus.h"
 #include "human/memory.h"
 #include "human/persona.h"
@@ -516,10 +516,27 @@ static void deliver_approved(struct hu_agent *agent, sqlite3 *db, const hu_conta
         size_t len = strlen(text);
         const char *why = NULL;
         hu_error_t err = HU_ERR_INVALID_ARGUMENT;
-        if (c && hu_outbound_sanitize(text, &len, &why) && len > 0)
+        /* Owner-approved, but still a message the contact did not ask for:
+         * the one unprompted gate stack (opt-out, cap, cool-off, quiet hours,
+         * circuit, sanitizer). A deny is reported to the owner like any other
+         * failure, naming the stage, so they can resend later. */
+        hu_unprompted_gate_t g;
+        hu_unprompted_reason_t verdict = HU_UNPROMPTED_DENY_INVALID;
+        if (c) {
+            hu_daemon_unprompted_gate_init(&g, agent->alloc, agent, channel_for(c), c->contact_id,
+                                           strlen(c->contact_id), now);
+            verdict = hu_unprompted_send_check(&g, c->contact_id, HU_UNPROMPTED_DATE_NOTE, now,
+                                               text, &len, true);
+        }
+        if (c && verdict == HU_UNPROMPTED_ALLOW && len > 0) {
             err = send_on(channels, count, channel_for(c), c->contact_id, text, len);
-        else
-            why = c ? (why ? why : "empty after cleanup") : "no such contact any more";
+            if (err == HU_OK)
+                hu_unprompted_record_sent(&g, c->contact_id, HU_UNPROMPTED_DATE_NOTE, now);
+        } else {
+            why = c ? (verdict != HU_UNPROMPTED_ALLOW ? hu_unprompted_reason_str(verdict)
+                                                      : "empty after cleanup")
+                    : "no such contact any more";
+        }
         (void)hu_date_drafts_repo_decide(db, rows[i].id, err == HU_OK ? "sent" : "failed", NULL,
                                          now);
         char who[64];

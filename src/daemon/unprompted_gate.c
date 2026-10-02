@@ -10,7 +10,7 @@
 #include "human/daemon_proactive.h"
 #include "human/memory.h"
 #include "human/memory/proactive_decisions_repo.h"
-#include "human/security/moderation.h"
+#include "human/persona.h"
 #include <string.h>
 #include <time.h>
 
@@ -26,6 +26,8 @@ const char *hu_unprompted_kind_str(hu_unprompted_kind_t kind) {
         return "f25";
     case HU_UNPROMPTED_PHOTO:
         return "photo";
+    case HU_UNPROMPTED_DATE_NOTE:
+        return "date_note";
     default:
         return "none";
     }
@@ -43,6 +45,8 @@ const char *hu_unprompted_trigger(hu_unprompted_kind_t kind) {
         return "unprompted_f25";
     case HU_UNPROMPTED_PHOTO:
         return "unprompted_photo";
+    case HU_UNPROMPTED_DATE_NOTE:
+        return "unprompted_date_note";
     default:
         return NULL;
     }
@@ -74,8 +78,6 @@ const char *hu_unprompted_reason_str(hu_unprompted_reason_t reason) {
         return "unreachable";
     case HU_UNPROMPTED_DENY_SANITIZER:
         return "sanitize_refused";
-    case HU_UNPROMPTED_DENY_MODERATION:
-        return "moderation_flagged";
     }
     return "unknown";
 }
@@ -91,7 +93,7 @@ void hu_unprompted_gate_init(hu_unprompted_gate_t *g, hu_allocator_t *alloc, str
     g->agent = agent;
 #ifdef HU_ENABLE_SQLITE
     if (agent && agent->memory)
-        g->db = hu_sqlite_memory_get_db(agent->memory);
+        g->db = hu_proactive_decisions_repo_db(agent->memory);
 #endif
     g->gov_budget = gov_budget;
     g->throttle = throttle;
@@ -100,6 +102,31 @@ void hu_unprompted_gate_init(hu_unprompted_gate_t *g, hu_allocator_t *alloc, str
     g->channel_name = channel_name;
     g->target = target;
     g->target_len = target_len;
+}
+
+size_t hu_unprompted_contact_key(const struct hu_persona *persona, const char *key, size_t key_len,
+                                 char *out, size_t cap) {
+    if (!key || !out || cap == 0)
+        return 0;
+    const hu_contact_profile_t *cp = hu_persona_find_contact(persona, key, key_len);
+    const char *src = (cp && cp->contact_id) ? cp->contact_id : key;
+    size_t n = (cp && cp->contact_id) ? strlen(cp->contact_id) : key_len;
+    if (n >= cap) {
+        out[0] = '\0';
+        return 0;
+    }
+    memcpy(out, src, n);
+    out[n] = '\0';
+    return n;
+}
+
+/* The canonical key for `contact` under g's persona, into buf. */
+static const char *unprompted_canon(const hu_unprompted_gate_t *g, const char *contact, char *buf,
+                                    size_t cap) {
+    const struct hu_persona *persona = (g && g->agent) ? g->agent->persona : NULL;
+    if (hu_unprompted_contact_key(persona, contact, strlen(contact), buf, cap) == 0)
+        return contact;
+    return buf;
 }
 
 static bool unprompted_in_sleep_floor(int64_t now, int32_t tz_offset_s) {
@@ -199,22 +226,17 @@ hu_unprompted_reason_t hu_unprompted_send_check(const hu_unprompted_gate_t *g, c
                                                 hu_unprompted_kind_t kind, int64_t now, char *text,
                                                 size_t *text_len_io, bool at_send) {
     hu_unprompted_reason_t r = HU_UNPROMPTED_DENY_INVALID;
+    char key[128];
     if (g && contact && contact[0] && kind != HU_UNPROMPTED_NONE)
-        r = unprompted_policy(g, contact, now, at_send);
+        r = unprompted_policy(g, unprompted_canon(g, contact, key, sizeof(key)), now, at_send);
 
+    /* 7. sanitizer: the PROACTIVE outbound pipeline, whose moderation stage
+     * blocks violence/hate/sexual content and (deliberately) not a mention of
+     * self-harm. This replaced the cron's log-only moderation. */
     if (r == HU_UNPROMPTED_ALLOW && at_send && text && text_len_io) {
-        /* 7. sanitizer (strips U+FFFC in place; rejects directive echoes). */
         const char *why = NULL;
         if (!hu_outbound_sanitize(text, text_len_io, &why))
             r = HU_UNPROMPTED_DENY_SANITIZER;
-        /* 8. moderation — blocking (it was log-only on the cron path). */
-        if (r == HU_UNPROMPTED_ALLOW) {
-            hu_moderation_result_t mod;
-            memset(&mod, 0, sizeof(mod));
-            hu_error_t merr = hu_moderation_check(g->alloc, text, *text_len_io, &mod);
-            if (merr != HU_OK || mod.flagged)
-                r = HU_UNPROMPTED_DENY_MODERATION;
-        }
     }
 
     if (r != HU_UNPROMPTED_ALLOW || at_send)
@@ -231,8 +253,10 @@ void hu_unprompted_record_sent(const hu_unprompted_gate_t *g, const char *contac
         return;
 #ifdef HU_ENABLE_SQLITE
     if (g->db) {
+        char key[128];
         hu_error_t err = hu_proactive_decisions_repo_record(
-            g->db, now, contact, hu_unprompted_trigger(kind), HU_PROACTIVE_DECISION_SEND, NULL, 1,
+            g->db, now, unprompted_canon(g, contact, key, sizeof(key)), hu_unprompted_trigger(kind),
+            HU_PROACTIVE_DECISION_SEND, NULL, 1,
             /*message_ref=*/NULL);
         if (err != HU_OK)
             hu_log_warn("human", g->agent ? g->agent->observer : NULL,
@@ -251,14 +275,15 @@ void hu_unprompted_record_inbound(struct hu_agent *agent, hu_proactive_budget_t 
     if (gov_budget)
         (void)hu_governor_record_response(gov_budget);
 #ifdef HU_ENABLE_SQLITE
-    if (!agent || !agent->memory || !contact || contact_len == 0 || contact_len >= 128)
+    if (!agent || !agent->memory || !contact || contact_len == 0)
         return;
-    struct sqlite3 *db = hu_sqlite_memory_get_db(agent->memory);
-    if (!db)
-        return;
+    struct sqlite3 *db = hu_proactive_decisions_repo_db(agent->memory);
     char who[128];
-    memcpy(who, contact, contact_len);
-    who[contact_len] = '\0';
+    /* Canonical key: a reply from the contact's email address resets the
+     * same cool-off a send to their contact_id charged. */
+    if (!db ||
+        hu_unprompted_contact_key(agent->persona, contact, contact_len, who, sizeof(who)) == 0)
+        return;
     (void)hu_proactive_decisions_repo_record_inbound(db, who, now);
 #else
     (void)agent;

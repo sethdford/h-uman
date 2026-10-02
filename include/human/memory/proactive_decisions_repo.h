@@ -151,6 +151,11 @@ bool hu_proactive_send_circuit_is_open(sqlite3 *db, const char *contact, int64_t
  * per-contact cap and the per-contact cool-off are derived from the log and
  * survive restarts (the in-memory throttle reset ~43 times in 13 days). */
 
+/* The decision log's handle for a SQLite-backed memory (NULL otherwise), so
+ * domain code reaches the ledger through this repo, not the raw engine. */
+struct hu_legacy_memory;
+sqlite3 *hu_proactive_decisions_repo_db(struct hu_legacy_memory *mem);
+
 /* Creates unprompted_contact_state and seeds its epoch row ('*') with `now`
  * if absent. Sends before the epoch never count as unanswered: nothing was
  * recording replies then. Idempotent. */
