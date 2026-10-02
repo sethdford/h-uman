@@ -86,11 +86,13 @@
 #include "human/daemon/memory_facade.h"
 #include "human/daemon/ml_facade.h"
 #include "human/daemon/name_catch.h"
+#include "human/daemon/outbound_sanitize.h"
 #include "human/daemon/person_dates.h"
 #include "human/daemon/persona_facade.h"
 #include "human/daemon/platform_facade.h"
 #include "human/daemon/promise_keeper.h"
 #include "human/daemon/prospective_time.h"
+#include "human/daemon/reactive_calibration.h"
 #include "human/daemon/reactive_gates.h"
 #include "human/daemon/reactive_turn.h"
 #include "human/daemon/reminders.h"
@@ -1588,12 +1590,7 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
 
                 /* Clear proactive session scope so the next inbound message
                  * doesn't inherit a stale contact_id. */
-                agent->memory_session_id = NULL;
-                agent->memory_session_id_len = 0;
-                if (agent->memory && agent->memory->vtable) {
-                    agent->memory->current_session_id = NULL;
-                    agent->memory->current_session_id_len = 0;
-                }
+                hu_daemon_agent_clear_session_scope(agent);
             }
 
 #ifdef HU_ENABLE_SQLITE
@@ -3478,9 +3475,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             hu_imessage_caps_cached(alloc)->advanced, msgs[batch_start].is_group,
                             share_saved_waiting(batch_key, key_len));
                     if (g_classify_provider_ok) {
-                        director_result_valid = hu_daemon_director_call(
-                            alloc, combined, combined_len, early_history, early_history_count,
-                            situation, &director_result);
+                        director_result_valid = hu_daemon_director_decide(
+                            alloc, agent, ch->channel, batch_key, key_len, combined, combined_len,
+                            early_history, early_history_count, situation, &director_result);
                     }
                     if (forms_on && director_result_valid) {
                         const hu_contact_profile_t *fcp =
@@ -4032,67 +4029,24 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 convo_ctx = rt.convo_ctx;
                 convo_ctx_len = rt.convo_ctx_len;
 
-                /* 4. Response constraints: channel cap, F15 calibration + brief cap, then
-                 * HU_LENGTH_POLICY (length_policy.h). Before 2c so its Target matches. */
-                uint32_t max_chars = 0;
+                /* 4. Response budget: channel cap, F15 calibration + brief cap, then
+                 * HU_LENGTH_POLICY (daemon/reactive_calibration.h; the replay harness calls the
+                 * same seam). Before 2c so its Target matches. */
                 bool voice_first_memo = false; /* spec 2026-09-28 */
-                if (ch->channel->vtable->get_response_constraints) {
-                    hu_channel_response_constraints_t constraints = {0};
-                    if (ch->channel->vtable->get_response_constraints(ch->channel->ctx,
-                                                                      &constraints) == HU_OK) {
-                        max_chars = constraints.max_chars;
-                    }
-                }
-                const hu_contact_profile_t *cp_turn =
-                    (agent->persona && batch_key && key_len > 0)
-                        ? hu_persona_find_contact(agent->persona, batch_key, key_len)
-                        : NULL;
                 hu_length_turn_result_t len_turn;
-                hu_length_policy_turn(
-                    &(hu_length_turn_t){.inbound = combined,
-                                        .inbound_len = combined_len,
-                                        .contact = msgs[batch_start].is_group ? NULL : cp_turn,
-                                        .stage = agent->relationship.stage,
-                                        .channel_max = max_chars,
-                                        .is_group = msgs[batch_start].is_group,
-                                        .brief_mode = brief_mode},
-                    hu_length_policy_mode(), &len_turn);
-                max_chars = len_turn.cap;
+                hu_daemon_reply_budget(agent, ch->channel, batch_key, key_len, combined,
+                                       combined_len, msgs[batch_start].is_group, brief_mode,
+                                       &len_turn);
+                uint32_t max_chars = len_turn.cap;
 
-                /* 2c. Length calibration fallback for channels without history.
-                 * When history exists, calibration runs inside build_awareness.
-                 * When it doesn't, we still want message-type guidance. */
-                if ((!convo_ctx || llm_decides) && combined_len > 0) {
-                    /* In llm_decides mode build_awareness is skipped, so the only
-                     * context the prompt builder can return is the prospective
-                     * directive; calibration must still be appended after it. */
-                    char cal_buf[1024];
-                    size_t cal_len = hu_conversation_calibrate_length_capped(
-                        combined, combined_len, msgs[batch_start].is_group, cp_turn,
-                        agent->relationship.stage, len_turn.tight ? len_turn.cap : 0, cal_buf,
-                        sizeof(cal_buf));
-                    if (cal_len > 0 && !convo_ctx) {
-                        convo_ctx = (char *)alloc->alloc(alloc->ctx, cal_len + 1);
-                        if (convo_ctx) {
-                            memcpy(convo_ctx, cal_buf, cal_len);
-                            convo_ctx[cal_len] = '\0';
-                            convo_ctx_len = cal_len;
-                        }
-                    } else if (cal_len > 0) {
-                        size_t total = convo_ctx_len + cal_len + 2;
-                        char *merged = (char *)alloc->alloc(alloc->ctx, total + 1);
-                        if (merged) {
-                            memcpy(merged, convo_ctx, convo_ctx_len);
-                            merged[convo_ctx_len] = '\n';
-                            merged[convo_ctx_len + 1] = '\n';
-                            memcpy(merged + convo_ctx_len + 2, cal_buf, cal_len);
-                            merged[total] = '\0';
-                            alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
-                            convo_ctx = merged;
-                            convo_ctx_len = total;
-                        }
-                    }
-                }
+                /* 2c. Length calibration fallback (daemon/reactive_calibration.h). In llm_decides
+                 * mode build_awareness is skipped, so calibration is appended after whatever
+                 * the prompt builder returned. */
+                if ((!convo_ctx || llm_decides) && combined_len > 0)
+                    hu_daemon_append_length_calibration(alloc, agent, batch_key, key_len, combined,
+                                                        combined_len, msgs[batch_start].is_group,
+                                                        len_turn.tight ? len_turn.cap : 0,
+                                                        &convo_ctx, &convo_ctx_len);
 
 #if defined(HU_ENABLE_SQLITE) && !defined(HU_IS_TEST)
                 /* Prepend cross-channel snippets before other conversation context for the LLM. */
@@ -6506,15 +6460,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 /* Tapback-vs-text decision: gate reaction and/or LLM flow */
                 if (llm_decides) {
                     if (director_result_valid && director_result.action == DIR_SILENCE) {
-                        bool has_question = memchr(combined, '?', combined_len) != NULL;
-                        bool looks_like_greeting =
-                            (combined_len < 30 &&
-                             (strstr(combined, "hey") || strstr(combined, "Hey") ||
-                              strstr(combined, "hi") || strstr(combined, "Hi") ||
-                              strstr(combined, "yo") || strstr(combined, "Yo") ||
-                              strstr(combined, "sup") || strstr(combined, "hello") ||
-                              strstr(combined, "Hello") || strstr(combined, "what")));
-                        if (has_question || looks_like_greeting) {
+                        if (hu_daemon_director_silence_overridden(combined, combined_len)) {
                             hu_log_info(
                                 "human", agent ? agent->observer : NULL,
                                 "director: silence overridden (greeting/question detected)");
@@ -8007,28 +7953,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                      send_target_len);
                 /* Clear per-turn context and free */
 #ifndef HU_IS_TEST
-                agent->contact_context = NULL;
-                agent->contact_context_len = 0;
-                agent->conversation_context = NULL;
-                agent->conversation_context_len = 0;
-                agent->ab_history_entries = NULL;
-                agent->ab_history_count = 0;
-                agent->turn_model = NULL;
-                agent->turn_model_len = 0;
-                agent->lean_prompt = false;
-                agent->turn_temperature = 0.0;
-                agent->turn_thinking_budget = 0;
-                agent->max_response_chars = 0;
-                agent->response_limit_tight = 0;
-                agent->voice_memo_turn = false;
-                agent->history_msg_cap = 0;
-                agent->self_test_turn = false;
-                agent->memory_session_id = NULL;
-                agent->memory_session_id_len = 0;
-                if (agent->memory && agent->memory->vtable) {
-                    agent->memory->current_session_id = NULL;
-                    agent->memory->current_session_id_len = 0;
-                }
+                hu_daemon_reactive_turn_end(agent);
                 if (contact_ctx)
                     alloc->free(alloc->ctx, contact_ctx, contact_ctx_len + 1);
                 if (convo_ctx)
@@ -8608,91 +8533,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         const char *eff_ch = ch->channel->vtable->name
                                                  ? ch->channel->vtable->name(ch->channel->ctx)
                                                  : "unknown";
-                        /* Strip invalid UTF-8 and surrogate-encoded garbage.
-                         * Keeps: ASCII printable, newlines, valid multi-byte UTF-8 (including
-                         * emoji). Strips: invalid sequences, lone surrogates (U+D800-U+DFFF encoded
-                         * as 3-byte). */
-                        {
-                            size_t w = 0;
-                            for (size_t r = 0; r < response_len;) {
-                                unsigned char b = (unsigned char)response[r];
-                                if (b < 0x80) {
-                                    if (b >= 0x20 || b == '\n' || b == '\t')
-                                        response[w++] = response[r];
-                                    r++;
-                                } else {
-                                    size_t seq = 0;
-                                    if ((b & 0xE0) == 0xC0)
-                                        seq = 2;
-                                    else if ((b & 0xF0) == 0xE0)
-                                        seq = 3;
-                                    else if ((b & 0xF8) == 0xF0)
-                                        seq = 4;
-                                    if (seq == 0 || r + seq > response_len) {
-                                        r++;
-                                        continue;
-                                    }
-                                    bool valid = true;
-                                    for (size_t k = 1; k < seq; k++) {
-                                        if (((unsigned char)response[r + k] & 0xC0) != 0x80) {
-                                            valid = false;
-                                            break;
-                                        }
-                                    }
-                                    /* Reject 3-byte sequences encoding surrogates (U+D800-U+DFFF)
-                                     */
-                                    if (valid && seq == 3) {
-                                        unsigned int s_cp =
-                                            ((b & 0x0F) << 12) |
-                                            (((unsigned char)response[r + 1] & 0x3F) << 6) |
-                                            ((unsigned char)response[r + 2] & 0x3F);
-                                        if (s_cp >= 0xD800 && s_cp <= 0xDFFF)
-                                            valid = false;
-                                    }
-                                    if (valid) {
-                                        if (w != r)
-                                            memmove(response + w, response + r, seq);
-                                        w += seq;
-                                    }
-                                    r += valid ? seq : 1;
-                                }
-                            }
-                            if (w < response_len) {
-                                response[w] = '\0';
-                                response_len = w;
-                            }
-                        }
-                        /* Strip meta-reasoning: local models sometimes emit (parenthetical
-                         * analysis) instead of just the message. Remove any leading text
-                         * up to and including the last ')' if the response starts with '('. */
-                        if (llm_decides && response_len > 0 && response[0] == '(') {
-                            char *last_paren = NULL;
-                            for (size_t ri = 0; ri < response_len; ri++) {
-                                if (response[ri] == ')')
-                                    last_paren = response + ri;
-                            }
-                            if (last_paren) {
-                                char *clean = last_paren + 1;
-                                while (*clean == ' ' || *clean == '\n' || *clean == '\r')
-                                    clean++;
-                                size_t new_len = response_len - (size_t)(clean - response);
-                                if (new_len > 0 && new_len < response_len) {
-                                    memmove(response, clean, new_len);
-                                    response[new_len] = '\0';
-                                    response_len = new_len;
-                                    hu_log_info("human", agent ? agent->observer : NULL,
-                                                "stripped meta-reasoning, clean len=%zu", new_len);
-                                } else if (new_len == 0) {
-                                    /* Entire response was meta-reasoning; use a fallback */
-                                    static const char fb[] = "hey whats up";
-                                    memcpy(response, fb, sizeof(fb));
-                                    response_len = sizeof(fb) - 1;
-                                    hu_log_info(
-                                        "human", agent ? agent->observer : NULL,
-                                        "meta-reasoning fallback (entire response was reasoning)");
-                                }
-                            }
-                        }
+                        /* UTF-8 garbage + llm_decides meta-reasoning strip
+                         * (daemon/outbound_sanitize.h; the replay harness runs it too). */
+                        hu_daemon_outbound_sanitize(response, &response_len, response_alloc_len + 1,
+                                                    llm_decides, agent ? agent->observer : NULL);
                         const char *send_ptr = response;
                         size_t send_len = response_len;
                         {
@@ -8710,19 +8554,12 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 delay_secs, recv_hr, curr_hr, (uint32_t)now_ts, batch_key, key_len,
                                 now_ts);
                             if (ack) {
-                                size_t ack_len = strlen(ack);
-                                if (response_len <= SIZE_MAX - ack_len &&
-                                    ack_len + response_len <= SIZE_MAX - 3) {
-                                    send_buf_ack = (char *)alloc->alloc(
-                                        alloc->ctx, ack_len + 2 + response_len + 1);
-                                }
+                                size_t joined_len = 0;
+                                send_buf_ack = hu_daemon_join_ack(alloc, ack, response,
+                                                                  response_len, &joined_len);
                                 if (send_buf_ack) {
-                                    memcpy(send_buf_ack, ack, ack_len);
-                                    send_buf_ack[ack_len] = '\n';
-                                    send_buf_ack[ack_len + 1] = '\n';
-                                    memcpy(send_buf_ack + ack_len + 2, response, response_len + 1);
                                     send_ptr = send_buf_ack;
-                                    send_len = ack_len + 2 + response_len;
+                                    send_len = joined_len;
                                 }
                             }
                         }

@@ -100,4 +100,16 @@ void hu_daemon_reactive_context_load(hu_allocator_t *alloc, struct hu_agent *age
 void hu_daemon_reactive_prompt_build(hu_allocator_t *alloc, struct hu_agent *agent,
                                      const struct hu_config *config, hu_reactive_turn_ctx_t *rt);
 
+/* End of a reactive turn: clear every per-turn field the daemon set on the
+ * agent (contexts, history view, model/temperature/thinking overrides, lean
+ * prompt, reply budget, memo/self-test flags, memory session scope). Does not
+ * free anything — the contexts belong to the caller. Shared by hu_service_run
+ * and the replay harness. */
+void hu_daemon_reactive_turn_end(struct hu_agent *agent);
+
+/* Drop the agent's memory session scope (agent + memory backend), so the next
+ * turn does not inherit a stale contact. Part of hu_daemon_reactive_turn_end;
+ * the proactive path calls it alone. */
+void hu_daemon_agent_clear_session_scope(struct hu_agent *agent);
+
 #endif /* HU_DAEMON_REACTIVE_TURN_H */

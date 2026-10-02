@@ -1251,5 +1251,9 @@ jobs:
       # file:// downloads into tmp_path — no network, no ~/.human, no model.
       - name: Memory-benchmark converters + probe scorer + fetch scripts (hermetic)
         run: python3 -m pytest -q tests/test_memory_benchmarks_converters.py tests/test_memory_probe_score.py tests/test_memory_benchmarks_fetch.py
+      # Real-turn replay harness (docs/guides/replay-harness.md): fixture chat.db,
+      # fake `human` binary, temp dirs — never ~/.human, chat.db or a model.
+      - name: Replay harness exporter + driver + feed (hermetic)
+        run: python3 -m pytest -q scripts/blind_ab/test_replay_export_turns.py scripts/blind_ab/test_replay_driver.py scripts/blind_ab/test_replay_feed.py scripts/blind_ab/test_replay_real_binary.py
       - name: Enforce capability registry against blind_ab gate
         run: python3 scripts/check_capability_gates.py

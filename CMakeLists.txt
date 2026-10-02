@@ -1261,6 +1261,10 @@ set(HU_CORE_SOURCES
     src/interactions/choices.c
     src/daemon.c
     src/daemon/daemon_shape.c
+    src/daemon/daemon_outbound_sanitize.c
+    src/daemon/daemon_reactive_calibration.c
+    src/daemon/replay_harness_io.c
+    src/daemon/replay_turn.c
     src/daemon/daemon_comfort_summary.c
     src/daemon/daemon_name_catch.c
     src/daemon/daemon_thread_context.c
@@ -1316,6 +1320,7 @@ set(HU_CORE_SOURCES
     src/app/cli_commands.c
     src/app/cli_ctl.c
     src/app/cli_prospective.c
+    src/app/cli_replay.c
     src/app/cli_help.c
     src/eval/cli_evaluation.c
     src/eval/commitment_sample.c
@@ -4335,6 +4340,9 @@ list(APPEND HU_TEST_SOURCES
     tests/test_daemon_prospective_time.c
     tests/test_prospective_v2.c
     tests/test_cli_prospective.c
+    tests/test_replay_turn.c
+    tests/test_cli_replay.c
+    tests/test_daemon_outbound_sanitize.c
     tests/test_daemon_prospective.c
     tests/test_eval_score.c
     tests/test_corrective_rag.c
