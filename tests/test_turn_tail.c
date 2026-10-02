@@ -6,6 +6,7 @@
 #include "human/agent/checkpoint.h"
 #include "human/agent/scratchpad.h"
 #include "human/agent/turn.h"
+#include "human/core/allocator.h"
 #include "human/observer.h"
 #include "test_framework.h"
 #include "turn_test_fixture.h"
@@ -251,14 +252,31 @@ static void turn_tail_checkpoints_every_fifth_iteration(void) {
     HU_ASSERT_EQ(hu_checkpoint_load(&f.agent.sota.checkpoint_store, "agent_turn", 10, &cp), HU_OK);
     HU_ASSERT_EQ(cp.step, 5);
     HU_ASSERT_STR_EQ(cp.state_json, "{\"iter\":5,\"tokens\":7}");
-    /* hu_agent_deinit does not release checkpoint state (pre-existing; not
-     * this carve's to fix), so the test frees the one it caused. */
-    hu_checkpoint_t *slot = &f.agent.sota.checkpoint_store.checkpoints[0];
-    f.alloc.free(f.alloc.ctx, slot->state_json, slot->state_json_len + 1);
-    slot->state_json = NULL;
-    slot->state_json_len = 0;
     hu_turn_ctx_free(turn_ctx);
     tf_close(&f);
+}
+
+/* The checkpoint store owns each slot's state_json: a later save to the same
+ * task frees the previous copy, and hu_agent_deinit frees the last one. */
+static void turn_tail_checkpoint_state_is_released_by_agent_deinit(void) {
+    hu_tracking_allocator_t *ta = hu_tracking_allocator_create();
+    HU_ASSERT_NOT_NULL(ta);
+    tf_fixture_t f;
+    HU_ASSERT_TRUE(tf_open_alloc(&f, hu_tracking_allocator_allocator(ta), NULL, 0, false,
+                                 HU_AUTONOMY_AUTONOMOUS));
+    hu_turn_ctx_t *turn_ctx = tl_ctx(&f, "list my things", 5);
+    HU_ASSERT_NOT_NULL(turn_ctx);
+    HU_ASSERT_EQ(hu_turn_tail(turn_ctx), HU_OK);
+    turn_ctx->loop.iter = 10;
+    HU_ASSERT_EQ(hu_turn_tail(turn_ctx), HU_OK);
+    hu_turn_ctx_free(turn_ctx);
+    HU_ASSERT_EQ(f.agent.sota.checkpoint_store.count, 1);
+    HU_ASSERT_NOT_NULL(f.agent.sota.checkpoint_store.checkpoints[0].state_json);
+    HU_ASSERT_STR_EQ(f.agent.sota.checkpoint_store.checkpoints[0].state_json,
+                     "{\"iter\":10,\"tokens\":0}");
+    tf_close(&f);
+    HU_ASSERT_EQ(hu_tracking_allocator_leaks(ta), 0);
+    hu_tracking_allocator_destroy(ta);
 }
 
 #ifdef HU_ENABLE_SQLITE
@@ -365,6 +383,7 @@ void run_turn_tail_tests(void) {
     HU_RUN_TEST(turn_tail_replans_again_for_new_failures_only);
     HU_RUN_TEST(turn_tail_records_the_iteration_in_the_scratchpad);
     HU_RUN_TEST(turn_tail_checkpoints_every_fifth_iteration);
+    HU_RUN_TEST(turn_tail_checkpoint_state_is_released_by_agent_deinit);
 #ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(turn_tail_folds_memory_relevant_to_the_tool_result_and_the_goal);
     HU_RUN_TEST(turn_tail_skips_goal_memory_on_the_first_iteration);
