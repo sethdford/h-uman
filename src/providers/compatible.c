@@ -1420,6 +1420,13 @@ void hu_compatible_request_opts_for_url(const char *url, size_t url_len,
         out->timeout_secs = HU_COMPATIBLE_LOCAL_TIMEOUT_SECS;
 }
 
+bool hu_compatible_is_loopback(const hu_provider_t *p) {
+    if (!p || p->vtable != &compatible_vtable || !p->ctx)
+        return false;
+    const hu_compatible_ctx_t *cc = (const hu_compatible_ctx_t *)p->ctx;
+    return cc->base_url && compatible_url_is_loopback(cc->base_url, cc->base_url_len);
+}
+
 hu_error_t hu_compatible_create(hu_allocator_t *alloc, const char *api_key, size_t api_key_len,
                                 const char *base_url, size_t base_url_len, hu_provider_t *out) {
     hu_compatible_ctx_t *cc = (hu_compatible_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*cc));

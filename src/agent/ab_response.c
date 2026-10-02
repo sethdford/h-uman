@@ -20,8 +20,8 @@ hu_error_t hu_ab_evaluate(hu_allocator_t *alloc, hu_ab_result_t *result,
         hu_ab_candidate_t *c = &result->candidates[i];
         if (!c->response)
             continue;
-        hu_quality_score_t score = hu_conversation_evaluate_quality(
-            c->response, c->response_len, entries, entry_count, max_chars);
+        hu_quality_score_t score = hu_conversation_evaluate_quality_capped(
+            c->response, c->response_len, entries, entry_count, max_chars, result->cap_from_stats);
         c->quality_score = score.total;
         c->needs_revision = score.needs_revision;
     }
@@ -57,16 +57,17 @@ void hu_ab_result_deinit(hu_ab_result_t *result, hu_allocator_t *alloc) {
 #include <sqlite3.h>
 
 hu_error_t hu_ab_record_selection(sqlite3 *db, size_t best_idx, int quality_score,
-                                   size_t candidate_count, int64_t timestamp) {
+                                  size_t candidate_count, int64_t timestamp) {
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
     const char *sql = "CREATE TABLE IF NOT EXISTS ab_selections "
-                     "(id INTEGER PRIMARY KEY, best_idx INTEGER, quality_score INTEGER, "
-                     "candidate_count INTEGER, timestamp INTEGER)";
+                      "(id INTEGER PRIMARY KEY, best_idx INTEGER, quality_score INTEGER, "
+                      "candidate_count INTEGER, timestamp INTEGER)";
     (void)sqlite3_exec(db, sql, NULL, NULL, NULL);
     sqlite3_stmt *stmt = NULL;
-    const char *ins = "INSERT INTO ab_selections (best_idx, quality_score, candidate_count, timestamp) "
-                     "VALUES (?, ?, ?, ?)";
+    const char *ins =
+        "INSERT INTO ab_selections (best_idx, quality_score, candidate_count, timestamp) "
+        "VALUES (?, ?, ?, ?)";
     if (sqlite3_prepare_v2(db, ins, -1, &stmt, NULL) != SQLITE_OK)
         return HU_ERR_IO;
     sqlite3_bind_int(stmt, 1, (int)best_idx);

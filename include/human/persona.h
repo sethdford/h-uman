@@ -99,6 +99,9 @@ typedef struct hu_contact_profile {
      * this contact, measured by scripts/measure_contact_reply_lengths.py.
      * Floors the 1:1 reply cap. 0 = not measured (cap heuristics unchanged). */
     uint16_t reply_chars_p90;
+    /* Median of the same distribution (optional; 0 = not measured, and
+     * HU_LENGTH_POLICY derives it from p90). */
+    uint16_t reply_chars_p50;
 } hu_contact_profile_t;
 
 /* Motivation — the character's core drive (anti-drift anchor) */
