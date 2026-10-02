@@ -1,5 +1,6 @@
 #include "human/experience.h"
 #include "human/memory.h"
+#include "human/memory/confidence_boundary.h"
 #include "human/memory/vector.h"
 #include <ctype.h>
 #include <stdio.h>
@@ -182,8 +183,13 @@ hu_error_t hu_experience_record(hu_experience_store_t *store, const char *task, 
         hu_error_t err = store->memory->vtable->store(store->memory->ctx, key_buf, key_len, content,
                                                       content_len, NULL, "", 0);
         store->alloc->free(store->alloc->ctx, content, content_len + 1);
-        if (err == HU_OK)
+        if (err == HU_OK) {
             store->stored_count++;
+            /* The task text is the inbound message: private to its sender. */
+            hu_confidence_stamp_write(store->memory, key_buf, key_len,
+                                      store->memory->current_session_id,
+                                      store->memory->current_session_id_len);
+        }
 #ifdef HU_ENABLE_SQLITE
         /* Also persist to experience_log for distillation, even when
          * the memory vtable handled semantic storage above. */

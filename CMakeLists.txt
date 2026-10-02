@@ -789,6 +789,7 @@ set(HU_CORE_SOURCES
     src/agent/turn/turn_perceive.c
     src/agent/turn/turn_entry.c
     src/agent/turn/turn_scope.c
+    src/agent/turn/personal_model_prompt.c
     src/agent/turn/turn_silence.c
     src/agent/turn/turn_context.c
     src/agent/turn/turn_tools.c
@@ -1038,6 +1039,9 @@ set(HU_CORE_SOURCES
     src/memory/graph.c
     src/memory/graph_state.c
     src/memory/wiki_page.c
+    src/memory/confidence_boundary.c
+    src/memory/confidence_filters.c
+    src/memory/repos/confidence_repo_sqlite.c
     src/memory/graph_ingest.c
     src/memory/name_extract.c
     src/memory/agent_facts.c
@@ -1310,6 +1314,7 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_expressive.c
     src/daemon/daemon_spontaneity.c
     src/daemon/daemon_share_queue.c
+    src/daemon/daemon_confidence_owner.c
     src/daemon/daemon_reminders.c
     src/daemon/daemon_briefing.c
     src/daemon/daemon_person_dates.c
@@ -4261,6 +4266,7 @@ endif()
 list(APPEND HU_TEST_SOURCES tests/test_curiosity_gaps.c)
 list(APPEND HU_TEST_SOURCES tests/test_agent_recall_provider.c)
 list(APPEND HU_TEST_SOURCES tests/test_memory_loader_scope.c)
+list(APPEND HU_TEST_SOURCES tests/test_confidence_boundary.c)
 
 # Sprint 60 follow-up — crosstalk SQLite lookup. Test seeds the
 # messages table directly via sqlite3 to verify the lookup returns

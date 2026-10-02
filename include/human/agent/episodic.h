@@ -47,4 +47,11 @@ hu_error_t hu_episodic_store(hu_memory_t *memory, hu_allocator_t *alloc, const c
 hu_error_t hu_episodic_load(hu_memory_t *memory, hu_allocator_t *alloc, char **out,
                             size_t *out_len);
 
+/* hu_episodic_load for a reply to `contact`: under HU_CONFIDENCE_BOUNDARY the
+ * other contacts' session summaries are counted (shadow) or left out (live).
+ * A NULL/empty contact, or the gate off, is exactly hu_episodic_load. */
+hu_error_t hu_episodic_load_for_contact(hu_memory_t *memory, hu_allocator_t *alloc,
+                                        const char *contact, size_t contact_len, char **out,
+                                        size_t *out_len);
+
 #endif /* HU_AGENT_EPISODIC_H */

@@ -194,6 +194,13 @@ void hu_turn_note_history_shift(hu_turn_ctx_t *turn_ctx, size_t before, size_t a
  * HU_ERR_INVALID_ARGUMENT on a NULL ctx or agent, else HU_OK. */
 hu_error_t hu_turn_exhausted(hu_turn_ctx_t *turn_ctx);
 
+/* Renders the personal-model prompt block for this turn into buf
+ * (src/agent/turn/personal_model_prompt.c): the HU_CONFIDENCE_BOUNDARY view
+ * of agent->personal_model, with the reflection-loop slice when that loop is
+ * on and the memory is sqlite. Returns the bytes written (0 when there is
+ * nothing to render, or on NULL/0-cap input). */
+size_t hu_turn_personal_model_prompt(hu_agent_t *agent, char *buf, size_t cap);
+
 /* Per-turn thread scope around agent_turn_run (src/agent/turn/turn_scope.c):
  * tags the local-only guard's audit caller as "agent_turn" and, when the
  * thread is untagged, sets the X-HU-Purpose to REPLY (a caller's tag wins).

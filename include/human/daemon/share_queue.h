@@ -27,6 +27,14 @@ bool hu_share_capture_parse(const char *text, size_t len, hu_share_capture_t *ou
 /* One of Seth's own handles (persona relationship "test"). */
 bool hu_share_is_owner(const struct hu_persona *p, const char *handle, size_t len);
 
+/* Wires the confidence boundary's owner bypass (HU_CONFIDENCE_BOUNDARY) to
+ * hu_share_is_owner over agent->persona, read on every check so a persona swap
+ * is picked up: Seth texting his own twin is the owner, not a stranger. NULL
+ * unwires (daemon teardown). src/daemon/daemon_confidence_owner.c;
+ * docs/guides/confidence-boundary.md "Owner bypass". */
+struct hu_agent;
+void hu_daemon_confidence_owner_wire(const struct hu_agent *agent);
+
 /* Traffic of Seth's own rating tools on his own number: a prompt they sent
  * ("[h-uman rating 5-9/48] ...", "[h-uman voice ...") or his bare answer to
  * one ("a", "B 3", "ABBAB": only A/B letters, digits 1-5, spaces and commas,

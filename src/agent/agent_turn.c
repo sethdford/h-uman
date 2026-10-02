@@ -82,6 +82,7 @@ int hu_reaction_lookup_last_response(const char *channel, const char *thread, ch
 #include "human/cognition/trust.h"
 #include "human/context/contact_style_overlay.h"
 #include "human/eval/consistency.h"
+#include "human/memory/confidence_boundary.h"
 #include "human/memory/fact_extract.h"
 #include "human/memory/hallucination_guard.h"
 #include "human/memory/neural_memory.h"
@@ -2630,37 +2631,10 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
          * survives the entire turn until we free it. */
         char *personal_model_buf = (char *)agent->alloc->alloc(agent->alloc->ctx, 8192);
         const char *personal_model_ctx = NULL;
-        size_t personal_model_ctx_len = 0;
-        if (personal_model_buf && hu_personal_model_has_content(&agent->personal_model)) {
-            /* T7 of docs/plans/2026-05-26-reflection-loop: when the reflection
-             * loop is enabled in config, the per-channel slice is appended via
-             * _build_prompt_with_reflection (db + channel + max_patterns).
-             * Otherwise we fall back to the plain _build_prompt path so callers
-             * with no SQLite memory backend (or reflection disabled) keep the
-             * existing behavior. */
-            size_t pm_n = 0;
-#ifdef HU_ENABLE_SQLITE
-            if (agent->config && agent->config->reflection_loop.enabled && agent->memory &&
-                agent->active_channel && agent->active_channel_len > 0) {
-                sqlite3 *refl_db = hu_sqlite_memory_get_db(agent->memory);
-                const hu_persona_overlay_t *refl_overlay =
-                    agent->persona ? hu_persona_find_overlay(agent->persona, agent->active_channel,
-                                                             agent->active_channel_len)
-                                   : NULL;
-                pm_n = hu_personal_model_build_prompt_with_reflection(
-                    &agent->personal_model, refl_overlay, refl_db, agent->active_channel,
-                    /*max_patterns=*/5, personal_model_buf, 8192);
-            } else
-#endif
-            {
-                pm_n = hu_personal_model_build_prompt(&agent->personal_model, personal_model_buf,
-                                                      8192);
-            }
-            if (pm_n > 0) {
-                personal_model_ctx = personal_model_buf;
-                personal_model_ctx_len = pm_n;
-            }
-        }
+        size_t personal_model_ctx_len =
+            hu_turn_personal_model_prompt(agent, personal_model_buf, personal_model_buf ? 8192 : 0);
+        if (personal_model_ctx_len > 0)
+            personal_model_ctx = personal_model_buf;
 
         /* Moment-context decision layer — bridges existing timing / persona /
          * tone signals into a per-turn fragment for the LLM. Phase 3 minimal
@@ -6768,6 +6742,11 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                     *response_len_out = grounded_len;
                 }
             }
+            /* HU_CONFIDENCE_BOUNDARY backstop (live; shadow counts). */
+            if (*response_out && response_len_out)
+                (void)hu_confidence_backstop_apply(agent->alloc, agent->memory_session_id,
+                                                   agent->memory_session_id_len, response_out,
+                                                   response_len_out);
 
             /* No heuristic fact store here. The regex SPO extractor ran on both the
              * inbound text and our own reply, always with subject "user", and in
