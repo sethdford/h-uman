@@ -31,7 +31,10 @@ a separate file that the runtime reads on top of the persona.
 ## The file
 
 `~/.human/personas/<persona>.learned-style.json`, mode 0600, written atomically
-(temp file + rename). Schema `learned-style/v1`:
+(temp file + rename). The persona dir is `$HU_PERSONA_DIR`, else
+`$HU_STATE_DIR/personas`, else `~/.human/personas`, the same order as
+`hu_persona_base_dir`. memory.db and the logs dir default under
+`$HU_STATE_DIR` (or `~/.human`) too. Schema `learned-style/v1`:
 
 ```
 {
@@ -43,15 +46,17 @@ a separate file that the runtime reads on top of the persona.
 }
 ```
 
-`stats` holds `n`, `n_eff`, `len_p25` / `len_p50` / `len_p90` (reply bytes),
+`stats` holds `n`, `n_eff`, `len_p25` / `len_p50` / `len_p90` (reply length in
+UTF-8 **bytes**, summed over the turn's bubbles),
 `bubbles_p50`, `lower_start_rate`, `emoji_rate`, `end_punct_rate`,
 `latency_p50_s` (or null) and `shrunk`. Every leaf is a number, a boolean or
 null, except the three metadata strings `schema`, `persona` and
 `generated_at`. A test walks every leaf of a generated file and fails on
 anything else.
 
-Buckets: `shape:question|story|casual` (shape of the inbound message being
-answered), `time:day|evening|late` (local time of the reply), `pace:rapid`
+Buckets: `shape:question|story|casual` (shape of the inbound burst being
+answered: every bubble the contact sent since Seth's previous send, in time
+order, joined with `\n`; Part B classifies the same joined text), `time:day|evening|late` (local time of the reply), `pace:rapid`
 (inbound under 120 s after Seth's previous send, and a reply within 120 s).
 Part B only reads the `shape:*` buckets in v1.
 
@@ -64,7 +69,8 @@ python3 scripts/learned_style_profile.py --persona seth --no-cap    # reseed, sk
 ```
 
 Overrides (used by the tests): `--persona-dir`, `--out-dir`, `--chat-db`,
-`--memory-db`, `--log-dir`, `--now`, `--tz utc`.
+`--memory-db`, `--log-dir`, `--now`, `--tz utc`. `--max-ambiguous-frac`
+(default 0.05) sets the attribution refusal below.
 
 **What is a sample.** A reply *turn* is one or more consecutive `is_from_me`
 bubbles, each within 90 s of the one before. It is a sample when the message
@@ -82,13 +88,26 @@ would feed its habits back into its style. For that reason memory.db is
 required: if it cannot be read, the learner refuses. Owner self-test handles
 (persona contact `relationship: "test"`) are excluded too.
 
+**The attribution's blind spot, and its guard.** Before the first
+`outbound_sends` record, a send with no assistant row within 15 minutes is
+labelled Seth's; after it, any send provenance does not claim is labelled
+Seth's. A twin reply from a path that writes neither would therefore be
+learned as Seth's, and the drift check would not see it, because it uses the
+same attribution. Every run logs `ambiguous_n`, `sent_n`, `ambiguous_frac`,
+`huuman_n` and `exact_unmatched` (outbound_sends records that never resolved
+to a delivered message), and the learner refuses when `ambiguous_frac`
+exceeds `--max-ambiguous-frac`. `ambiguous` (h-uman was active nearby but the
+delivered text matches nothing it logged) is the observable symptom of that
+leak; a rising `exact_unmatched` says provenance and chat.db have drifted
+apart.
+
 **Privacy.** Message text exists only in memory inside
 `samples_from_timeline()`, where it is reduced to numbers. Nothing with text
 is written, logged or printed. The run log and stdout carry counts only, never
 a handle.
 
-**Shape rule** (identical in Part B, same test vectors in both suites). Trim
-C whitespace, then: `question` if the text contains `?`; else `story` if it is
+**Shape rule** (identical in Part B, same test vectors in both suites),
+applied to the joined inbound burst. Trim C whitespace, then: `question` if the text contains `?`; else `story` if it is
 at least 140 bytes, or at least 80 bytes with at least 2 runs of `.`/`!`;
 else `casual`. Empty or missing text is `casual`.
 
@@ -112,14 +131,18 @@ omitted, and Part B falls back to global for them.
   are not in the contract: without a floor, a rate that was 0.0 could never
   move again. A clamped value is counted in the log line (`clamped_n`,
   `clamped_fields`). There is no cap on the first run or with `--no-cap`.
+  After clamping the quantiles are kept ordered (p25 ≤ p50 ≤ p90) by lowering
+  the higher one, never by raising p50 or p90 past their own cap. With an
+  ordered previous file this never triggers; it guards a hand-edited one.
 - **History.** Before each write the previous file is copied to
   `~/.human/personas/learned-style-history/<persona>.<UTC stamp>.json` (0600);
   the newest 14 are kept.
 - **Run log.** One JSON line per run in `~/.human/logs/learned-style.jsonl`:
   `status`, `samples`, `contacts`, `contacts_omitted`, `buckets`, `global_n`,
   `clamped_n`, `clamped_fields`, `max_rel_change` (largest pre-clamp relative
-  move), `first_run`. Counts only.
-- **Refusal (exit 2, nothing written, previous file untouched).** Global
+  move), `first_run`, and the attribution counts above. Counts only.
+- **Refusal (exit 2, nothing written, previous file untouched).** More than
+  `--max-ambiguous-frac` (5%) of sends ambiguously attributed; global
   `n < 50`; more than 50% of the previous file's contacts would disappear;
   persona file, chat.db or memory.db unreadable. A refusal still appends its
   log line (not under `--dry-run`).
@@ -208,6 +231,10 @@ the temp dir, a fake interpreter for the wrapper. They run in CI in the
 `capability-gate-check` job's pytest step.
 
 ## Runtime (Part B)
+
+Unit note for the rendered line: "characters" in it (for example "usually
+about 25 characters") are the learned `len_*` values, which are **bytes**. An
+emoji counts as 4, an accented letter as 2.
 
 <!-- Part B (C runtime: loader, lookup, prompt line, HU_LEARNED_STYLE gate,
      SHADOW→LIVE measurement and rollback) is documented here by its PR. -->

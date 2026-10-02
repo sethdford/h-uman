@@ -124,8 +124,8 @@ def parse_args(argv):
     ap.add_argument("--persona", default="seth")
     ap.add_argument("--persona-dir", default=None)
     ap.add_argument("--chat-db", default=os.path.expanduser("~/Library/Messages/chat.db"))
-    ap.add_argument("--memory-db", default=os.path.expanduser("~/.human/memory.db"))
-    ap.add_argument("--log-dir", default=os.path.expanduser("~/.human/logs"))
+    ap.add_argument("--memory-db", default=os.path.join(lsp._state_dir(), "memory.db"))
+    ap.add_argument("--log-dir", default=os.path.join(lsp._state_dir(), "logs"))
     ap.add_argument("--days", type=int, default=DEFAULT_DAYS, help="h-uman window")
     ap.add_argument("--min-n", type=int, default=DEFAULT_MIN_N)
     ap.add_argument("--threshold", type=float, default=DEFAULT_THRESHOLD)
@@ -143,7 +143,7 @@ def main(argv=None):
     try:
         with open(os.path.join(a.persona_dir, f"{a.persona}.json")) as f:
             contacts = lsp.learnable_contacts(json.load(f).get("contacts") or {})
-        samples = lsp.load_samples(a.chat_db, a.memory_db, contacts, now, dt.timezone.utc)
+        samples, _ = lsp.load_samples(a.chat_db, a.memory_db, contacts, now, dt.timezone.utc)
         huuman = huuman_turn_lengths(a.memory_db, now - dt.timedelta(days=a.days))
     except (OSError, ValueError, sqlite3.Error):
         sys.stderr.write("learned_style_drift: persona, chat.db or memory.db unreadable; "

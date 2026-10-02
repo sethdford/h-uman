@@ -29,6 +29,7 @@ SECRET = "okapi axolotl drift marker"
 def _isolate_home(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.delenv("HU_PERSONA_DIR", raising=False)
+    monkeypatch.delenv("HU_STATE_DIR", raising=False)
 
 
 # ── KS statistic ───────────────────────────────────────────────────────────
@@ -152,6 +153,14 @@ def test_main_exit_0_when_lengths_match(tmp_path):
     assert lsd.main(args) == 0
     rep = json.loads(_report(logs).read_text())
     assert rep["flagged_n"] == 0
+
+
+def test_drift_defaults_honour_hu_state_dir(tmp_path, monkeypatch):
+    monkeypatch.setenv("HU_STATE_DIR", str(tmp_path / "state"))
+    a = lsd.parse_args([])
+    assert a.memory_db == str(tmp_path / "state" / "memory.db")
+    assert a.log_dir == str(tmp_path / "state" / "logs")
+    assert a.persona_dir == str(tmp_path / "state" / "personas")
 
 
 def test_main_exit_2_when_memory_db_unreadable(tmp_path):

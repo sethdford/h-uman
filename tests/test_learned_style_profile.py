@@ -33,6 +33,7 @@ def _isolate_home(tmp_path, monkeypatch):
     """Belt and braces: any expanduser() default lands in the temp dir."""
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.delenv("HU_PERSONA_DIR", raising=False)
+    monkeypatch.delenv("HU_STATE_DIR", raising=False)
 
 
 # ── shape rule (shared contract with the C runtime) ─────────────────────────
@@ -59,6 +60,9 @@ SHAPE_VECTORS = [
     # Whitespace is trimmed before measuring.
     ("   " + "a" * 139 + "   ", "casual"),
     (None, "casual"),
+    # A multi-bubble burst joined with "\n" (how both parts classify it).
+    ("So today was wild.\nWork ran late and the car wouldn't start.\n"
+     "Ended up getting a ride home from Dave.", "story"),
 ]
 
 
@@ -206,7 +210,7 @@ def test_load_samples_pairs_bubbles_and_excludes_huuman(tmp_path):
     fx.msg(c, 20 * 3600 + 100, "stop", False)
     fx.msg(c, 20 * 3600 + 130, "no u", True)
     fx.close()
-    out = lsp.load_samples(fx.chat_path, fx.mem_path, [c], NOW, dt.timezone.utc)
+    out, att = lsp.load_samples(fx.chat_path, fx.mem_path, [c], NOW, dt.timezone.utc)
     s = out[c]
     assert len(s) == 3, s           # pairs 1, 5a, 5b only
     first = s[0]
@@ -224,6 +228,43 @@ def test_load_samples_pairs_bubbles_and_excludes_huuman(tmp_path):
         assert all(not isinstance(v, str) or v in ("question", "story", "casual",
                                                    "day", "evening", "late")
                    for v in smp.values())
+
+
+def _burst_shape(tmp_path, bubbles):
+    fx = Fixture(str(tmp_path))
+    c = "+15550000009"
+    fx.msg(c, -600, "earlier", True)                 # Seth's previous send
+    for k, b in enumerate(bubbles):
+        fx.msg(c, k * 20, b, False)
+    fx.msg(c, len(bubbles) * 20 + 30, "ok", True)
+    fx.close()
+    s = lsp.load_samples(fx.chat_path, fx.mem_path, [c], NOW, dt.timezone.utc)[0][c]
+    assert len(s) == 1
+    return s[0]["shape"]
+
+
+def test_shape_uses_the_whole_inbound_burst(tmp_path):
+    # Each bubble alone is casual (< 80 bytes); joined they are a story.
+    assert _burst_shape(tmp_path, ["So today was wild.",
+                                   "Work ran late and the car wouldn't start.",
+                                   "Ended up getting a ride home from Dave."]) == "story"
+
+
+def test_question_in_an_earlier_bubble_makes_the_burst_a_question(tmp_path):
+    assert _burst_shape(tmp_path, ["wait are you coming tonight?", "also bring chips"]) == "question"
+
+
+def test_burst_starts_after_seths_previous_send(tmp_path):
+    # The "?" was answered by Seth's previous send; it is not part of this burst.
+    fx = Fixture(str(tmp_path))
+    c = "+15550000009"
+    fx.msg(c, -900, "you around?", False)
+    fx.msg(c, -600, "yep", True)
+    fx.msg(c, 0, "cool", False)
+    fx.msg(c, 30, "ok", True)
+    fx.close()
+    s = lsp.load_samples(fx.chat_path, fx.mem_path, [c], NOW, dt.timezone.utc)[0][c]
+    assert [x["shape"] for x in s] == ["question", "casual"]
 
 
 def test_time_bands():
@@ -330,6 +371,80 @@ def test_cap_allows_10_absolute_for_short_lengths():
     assert out["lower_start_rate"] == pytest.approx(0.05)   # prev 0: absolute floor
     assert out["emoji_rate"] == pytest.approx(0.55)          # +10% relative: allowed
     assert set(clamped) == {"len_p90", "lower_start_rate"}
+
+
+def test_clamped_quantiles_stay_ordered_without_breaking_the_cap():
+    # A malformed previous file (p25 > p50) is the only way clamping can
+    # unorder the quantiles; the fix lowers the higher one, never raises
+    # p50 / p90 past their own cap.
+    prev = {"len_p25": 100, "len_p50": 40, "len_p90": 200, "bubbles_p50": 1.0,
+            "lower_start_rate": 0.5, "emoji_rate": 0.5, "end_punct_rate": 0.5,
+            "latency_p50_s": 60}
+    new = dict(prev, len_p25=150)
+    out, clamped, _ = lsp.cap_stats(new, prev)
+    assert clamped == ["len_p25"]
+    assert out["len_p25"] <= out["len_p50"] <= out["len_p90"]
+    assert out["len_p50"] == 40                  # not raised to 130
+    assert out["len_p90"] == 200
+
+
+def _ambiguous_fill(n_ambiguous):
+    """_fill_two plus n_ambiguous Seth replies that have a NON-matching
+    assistant row within 15 min (attribution 'ambiguous'), and one
+    outbound_sends record that never resolves (exact_unmatched = 1)."""
+    base = _fill_two()
+
+    def fill(fx):
+        base(fx)
+        for i in range(n_ambiguous):
+            t = (T0 + dt.timedelta(seconds=i * 20 * MIN + 30)).strftime("%Y-%m-%d %H:%M:%S")
+            fx.mem.execute("insert into messages(session_id,role,content,created_at) "
+                           "values (?,?,?,?)",
+                           ("+15550000001", "assistant", "completely unrelated draft", t))
+        fx.outbound("+19990000000", 9 * 86400, "never delivered", 0)
+    return fill
+
+
+def test_ambiguity_and_unmatched_provenance_are_logged(tmp_path):
+    e = Env(tmp_path)
+    e.build(_ambiguous_fill(2))                  # 2 of 60 sends = 3.3%
+    assert e.run() == 0
+    line = e.log_lines()[-1]
+    assert line["status"] == "written"
+    assert line["ambiguous_n"] == 2 and line["sent_n"] == 60
+    assert line["ambiguous_frac"] == pytest.approx(2 / 60, abs=1e-4)
+    assert line["exact_unmatched"] == 1
+    assert e.load()["global"]["n"] == 58         # the ambiguous turns are not learned
+
+
+def test_refuses_when_ambiguous_attribution_exceeds_5_percent(tmp_path, capsys):
+    e = Env(tmp_path)
+    e.build(_ambiguous_fill(4))                  # 4 of 60 = 6.7% > 5%
+    assert e.run() == 2
+    assert not os.path.exists(e.out)
+    line = e.log_lines()[-1]
+    assert line["status"] == "refused_ambiguous"
+    assert line["ambiguous_n"] == 4 and line["exact_unmatched"] == 1
+    assert "ambiguous" in capsys.readouterr().err
+
+
+def test_max_ambiguous_frac_flag_raises_the_limit(tmp_path):
+    e = Env(tmp_path)
+    e.build(_ambiguous_fill(4))
+    assert e.run("--max-ambiguous-frac", "0.1") == 0
+    assert e.log_lines()[-1]["status"] == "written"
+
+
+def test_defaults_honour_hu_state_dir(tmp_path, monkeypatch):
+    state = tmp_path / "state"
+    monkeypatch.setenv("HU_STATE_DIR", str(state))
+    a = lsp.parse_args([])
+    assert a.persona_dir == str(state / "personas")
+    assert a.out_dir == str(state / "personas")
+    assert a.memory_db == str(state / "memory.db")
+    assert a.log_dir == str(state / "logs")
+    monkeypatch.setenv("HU_PERSONA_DIR", str(tmp_path / "p"))   # still wins
+    assert lsp.parse_args([]).persona_dir == str(tmp_path / "p")
 
 
 def test_no_cap_flag_reseeds(tmp_path):

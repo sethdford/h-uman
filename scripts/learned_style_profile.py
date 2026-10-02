@@ -8,8 +8,9 @@ words") with measured ones. Contract: docs/guides/learned-style.md.
 
 What counts as a sample: a reply TURN (consecutive is_from_me bubbles, each
 within 90 s of the previous) in a 1:1 chat with a persona contact, whose
-immediately preceding message is the contact's, sent within 6 hours. That
-inbound message is the one it answers. Seth follow-ups with no inbound
+immediately preceding message is the contact's, sent within 6 hours. Its
+shape is taken from the whole inbound burst (every contact bubble since Seth's
+previous send, joined with "\n"), the same text the C runtime classifies. Seth follow-ups with no inbound
 in between are not replies and are skipped.
 
 Only Seth's own texts are learned: attribution reuses
@@ -25,8 +26,10 @@ leaves are numbers, booleans, null and three fixed metadata strings.
 Guardrails: a per-run change cap (30% relative or 10 bytes for lengths;
 --no-cap reseeds), history of the last 14 files, one counts-only JSON line
 per run in ~/.human/logs/learned-style.jsonl, and refusal (exit 2, nothing
-written) when global n < 50, when more than half the previous contacts would
-disappear, or when chat.db / memory.db cannot be read.
+written) when more than 5% of sends are ambiguously attributed (a twin send
+from a path with no provenance would otherwise be learned as Seth's), when
+global n < 50, when more than half the previous contacts would disappear, or
+when chat.db / memory.db cannot be read.
 
 Usage:
   python3 scripts/learned_style_profile.py --persona seth --dry-run
@@ -59,6 +62,10 @@ MIN_BUCKET_N = 3
 MIN_CONTACT_N = 5
 MIN_GLOBAL_N = 50
 MAX_VANISH_SHARE = 0.5
+# Attribution "ambiguous" = h-uman was active near a send whose text matches
+# nothing it logged. Above this share, unattributed twin sends could be
+# leaking into Seth's samples through paths that write no provenance.
+MAX_AMBIGUOUS_FRAC = 0.05
 HISTORY_KEEP = 14
 CAP_REL = 0.30
 # Absolute floor for the per-run cap. Lengths: 10 bytes (contract). The other
@@ -176,8 +183,12 @@ def _finish(st):
         if v is None:
             continue
         st[f] = int(round(v)) if f in INT_FIELDS else round(float(v), 4)
-    st["len_p50"] = max(st["len_p50"], st["len_p25"])
-    st["len_p90"] = max(st["len_p90"], st["len_p50"])
+    # Lower the higher quantile, never raise one: raising p50 / p90 could
+    # push them past their per-run cap. With an ordered previous file the
+    # clamped values are already ordered (the cap interval is monotone in
+    # the previous value), so this only fires on a malformed one.
+    st["len_p50"] = min(st["len_p50"], st["len_p90"])
+    st["len_p25"] = min(st["len_p25"], st["len_p50"])
     return st
 
 
@@ -243,11 +254,13 @@ def samples_from_timeline(timeline, labels, now, tz):
     out = []
     last_me_t = None        # Seth's (any from-me) latest send so far
     inbound_gap = None      # inbound arrival minus the from-me send before it
+    burst = []              # contact's bubbles since that send, in time order
     i, n = 0, len(timeline)
     while i < n:
         m = timeline[i]
         if not m["from_me"]:
             inbound_gap = (m["t"] - last_me_t).total_seconds() if last_me_t else None
+            burst.append(m["text"] or "")
             i += 1
             continue
         j = i + 1
@@ -256,6 +269,8 @@ def samples_from_timeline(timeline, labels, now, tz):
             j += 1
         turn = timeline[i:j]
         prev = timeline[i - 1] if i > 0 else None
+        answered = "\n".join(burst)
+        burst = []
         last_me_t = turn[-1]["t"]
         i = j
         if prev is None or prev["from_me"]:
@@ -279,7 +294,9 @@ def samples_from_timeline(timeline, labels, now, tz):
             "emoji": any(is_emoji_char(ch) for t in texts for ch in t),
             "end_punct": end_punct(texts[-1]),
             "latency_s": int(latency),
-            "shape": shape(prev["text"]),
+            # The whole burst, joined with "\n": the C runtime classifies
+            # the same text, so both sides bucket a reply identically.
+            "shape": shape(answered),
             "band": time_band(turn[0]["t"], tz),
             "rapid": inbound_gap is not None and inbound_gap < RAPID_S and latency <= RAPID_S,
         })
@@ -287,18 +304,27 @@ def samples_from_timeline(timeline, labels, now, tz):
 
 
 def load_samples(chat_path, mem_path, contacts, now, tz):
-    """{contact: [sample]} for the given handles. Raises sqlite3.Error /
-    OSError when either database cannot be read."""
+    """({contact: [sample]}, attribution counts) for the given handles.
+    The counts cover every from-me message to those handles in the window:
+    sent_n, ambiguous_n, huuman_n, plus exact_unmatched (outbound_sends
+    records that never resolved to a delivered message). Raises
+    sqlite3.Error / OSError when either database cannot be read."""
     for p in (chat_path, mem_path):
         if not os.path.isfile(p):
             raise OSError(f"cannot read {os.path.basename(p)}")
     since = now - dt.timedelta(days=WINDOW_DAYS)
     att = cq.attribute(chat_path, mem_path, since)
     out = {}
+    counts = {"sent_n": 0, "ambiguous_n": 0, "huuman_n": 0,
+              "exact_unmatched": int(att["exact_unmatched"])}
     for c in contacts:
         tl = att["timelines"].get(c)
         out[c] = samples_from_timeline(tl, att["labels"], now, tz) if tl else []
-    return out
+        for _, label in att["labeled"].get(c, []):
+            counts["sent_n"] += 1
+            counts["ambiguous_n"] += label == "ambiguous"
+            counts["huuman_n"] += label == "huuman"
+    return out, counts
 
 
 # ── per-run cap ────────────────────────────────────────────────────────────
@@ -422,8 +448,14 @@ def load_previous(path):
 
 # ── CLI ────────────────────────────────────────────────────────────────────
 
+def _state_dir():
+    """$HU_STATE_DIR when set and non-empty, else ~/.human (hu_paths_state)."""
+    return os.environ.get("HU_STATE_DIR") or os.path.expanduser("~/.human")
+
+
 def _default_persona_dir():
-    return os.environ.get("HU_PERSONA_DIR") or os.path.expanduser("~/.human/personas")
+    """$HU_PERSONA_DIR, else <state>/personas (hu_persona_base_dir)."""
+    return os.environ.get("HU_PERSONA_DIR") or os.path.join(_state_dir(), "personas")
 
 
 def parse_args(argv):
@@ -434,9 +466,11 @@ def parse_args(argv):
     ap.add_argument("--out-dir", default=None,
                     help="where the learned file and its history go (default: --persona-dir)")
     ap.add_argument("--chat-db", default=os.path.expanduser("~/Library/Messages/chat.db"))
-    ap.add_argument("--memory-db", default=os.path.expanduser("~/.human/memory.db"))
-    ap.add_argument("--log-dir", default=os.path.expanduser("~/.human/logs"))
+    ap.add_argument("--memory-db", default=os.path.join(_state_dir(), "memory.db"))
+    ap.add_argument("--log-dir", default=os.path.join(_state_dir(), "logs"))
     ap.add_argument("--now", default=None, help="ISO-8601 UTC override (tests)")
+    ap.add_argument("--max-ambiguous-frac", type=float, default=MAX_AMBIGUOUS_FRAC,
+                    help="refuse when more than this share of sends is ambiguously attributed")
     ap.add_argument("--tz", choices=("local", "utc"), default="local",
                     help="time zone for the time:* bands (tests use utc)")
     ap.add_argument("--dry-run", action="store_true", help="print counts only; write nothing")
@@ -455,7 +489,13 @@ def _now(a):
     return dt.datetime.now(dt.timezone.utc)
 
 
-def _refusal(doc, prev):
+def _refusal(doc, prev, att, max_ambiguous_frac):
+    frac = att["ambiguous_n"] / att["sent_n"] if att["sent_n"] else 0.0
+    if frac > max_ambiguous_frac:
+        return ("refused_ambiguous",
+                f"{att['ambiguous_n']} of {att['sent_n']} sends ambiguously attributed "
+                f"({frac:.1%} > {max_ambiguous_frac:.1%}); h-uman sends may be leaking "
+                f"into Seth's samples")
     if doc["global"] is None or doc["global"]["n"] < MIN_GLOBAL_N:
         n = doc["global"]["n"] if doc["global"] else 0
         return "refused_global_n", f"global n={n} < {MIN_GLOBAL_N}"
@@ -475,10 +515,10 @@ def main(argv=None):
     out_path = os.path.join(a.out_dir, f"{a.persona}.learned-style.json")
     record = {"ts": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "persona": a.persona}
 
-    def refuse(status, msg):
+    def refuse(status, msg, **extra):
         sys.stderr.write(f"learned_style: refusing to write: {msg}\n")
         if not a.dry_run:
-            append_log(a.log_dir, dict(record, status=status))
+            append_log(a.log_dir, dict(record, status=status, **extra))
         return 2
 
     try:
@@ -488,7 +528,7 @@ def main(argv=None):
         return refuse("refused_persona_unreadable", "persona file unreadable")
     handles = learnable_contacts(persona_contacts)
     try:
-        samples = load_samples(a.chat_db, a.memory_db, handles, now, tz)
+        samples, att = load_samples(a.chat_db, a.memory_db, handles, now, tz)
     except (OSError, sqlite3.Error):
         # memory.db is required: without it h-uman's own sends would be
         # learned as Seth's.
@@ -496,7 +536,7 @@ def main(argv=None):
 
     doc = build_profile(samples, a.persona, now)
     prev, prev_status = load_previous(out_path)
-    status, msg = _refusal(doc, prev)
+    status, msg = _refusal(doc, prev, att, a.max_ambiguous_frac)
     first_run = prev is None
     clamped_n, clamped_fields, max_rel = 0, {}, None
     if status is None and prev is not None:
@@ -513,15 +553,21 @@ def main(argv=None):
         "clamped_n": clamped_n,
         "max_rel_change": round(max_rel, 4) if max_rel is not None else None,
         "first_run": first_run,
+        "sent_n": att["sent_n"],
+        "ambiguous_n": att["ambiguous_n"],
+        "huuman_n": att["huuman_n"],
+        "ambiguous_frac": round(att["ambiguous_n"] / att["sent_n"], 4) if att["sent_n"] else 0.0,
+        "exact_unmatched": att["exact_unmatched"],
     }
     if a.dry_run:
         summary = dict(counts, dry_run=True,
                        refuse_global_n=status == "refused_global_n",
-                       refuse_contacts_vanished=status == "refused_contacts_vanished")
+                       refuse_contacts_vanished=status == "refused_contacts_vanished",
+                       refuse_ambiguous=status == "refused_ambiguous")
         print(json.dumps(summary, sort_keys=True))
         return 2 if status else 0
     if status:
-        return refuse(status, msg)
+        return refuse(status, msg, **counts)
     if prev_status != "absent":
         archive_previous(out_path, os.path.join(a.out_dir, "learned-style-history"),
                          a.persona, now)
