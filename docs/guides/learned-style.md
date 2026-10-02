@@ -55,8 +55,14 @@ null, except the three metadata strings `schema`, `persona` and
 anything else.
 
 Buckets: `shape:question|story|casual` (shape of the inbound burst being
-answered: every bubble the contact sent since Seth's previous send, in time
-order, joined with `\n`; Part B classifies the same joined text), `time:day|evening|late` (local time of the reply), `pace:rapid`
+answered, joined in time order with `\n`; Part B classifies the same joined
+text). Walking back from the contact's last bubble, a bubble joins the burst
+only if it is at most 10 minutes before the next bubble kept and within 6
+hours of the reply; the walk stops at the first that is not, and never goes
+past Seth's previous send. An unanswered "dinner sunday?" on Monday therefore
+does not make Wednesday's "lol" a question. The daemon batches one poll's
+consecutive messages plus one re-poll and defines no time constant, so the
+10-minute gap is a review ruling, not a measured daemon value), `time:day|evening|late` (local time of the reply), `pace:rapid`
 (inbound under 120 s after Seth's previous send, and a reply within 120 s).
 Part B only reads the `shape:*` buckets in v1.
 
@@ -133,14 +139,19 @@ omitted, and Part B falls back to global for them.
   `clamped_fields`). There is no cap on the first run or with `--no-cap`.
   After clamping the quantiles are kept ordered (p25 ≤ p50 ≤ p90) by lowering
   the higher one, never by raising p50 or p90 past their own cap. With an
-  ordered previous file this never triggers; it guards a hand-edited one.
+  ordered previous file the clamped values are already ordered and every
+  field is within its cap (tested over 2,000 random cases). Ruling: only for
+  an unordered (hand-edited or corrupt) previous file can no assignment meet
+  both, and then ordering wins over the lower quantile's downward cap.
 - **History.** Before each write the previous file is copied to
   `~/.human/personas/learned-style-history/<persona>.<UTC stamp>.json` (0600);
   the newest 14 are kept.
 - **Run log.** One JSON line per run in `~/.human/logs/learned-style.jsonl`:
   `status`, `samples`, `contacts`, `contacts_omitted`, `buckets`, `global_n`,
   `clamped_n`, `clamped_fields`, `max_rel_change` (largest pre-clamp relative
-  move), `first_run`, and the attribution counts above. Counts only.
+  move), `first_run`, `shape_changed_by_burst_n` (replies whose shape from
+  the last inbound bubble alone differs from the burst's shape: how much the
+  burst rule moves bucketing), and the attribution counts above. Counts only.
 - **Refusal (exit 2, nothing written, previous file untouched).** More than
   `--max-ambiguous-frac` (5%) of sends ambiguously attributed; global
   `n < 50`; more than 50% of the previous file's contacts would disappear;

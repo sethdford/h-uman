@@ -55,6 +55,13 @@ SCHEMA = "learned-style/v1"
 WINDOW_DAYS = 180
 HALF_LIFE_DAYS = 21
 PAIR_WINDOW_S = 6 * 3600
+# A contact bubble joins the burst being answered only if it is at most this
+# long before the NEXT bubble of the burst (and within PAIR_WINDOW_S of the
+# reply). The daemon batches one poll's consecutive messages plus one re-poll
+# after the read delay (daemon.c burst accumulation) and defines no time
+# constant; 10 minutes is the review ruling for a gap that still reads as one
+# thought.
+BURST_GAP_S = 10 * 60
 BUBBLE_GAP_S = 90
 RAPID_S = 120
 SHRINK_K = 8
@@ -186,7 +193,9 @@ def _finish(st):
     # Lower the higher quantile, never raise one: raising p50 / p90 could
     # push them past their per-run cap. With an ordered previous file the
     # clamped values are already ordered (the cap interval is monotone in
-    # the previous value), so this only fires on a malformed one.
+    # the previous value), so this only fires on a malformed one. Ruling:
+    # for an UNORDERED previous file, ordering wins over p25's (or p50's)
+    # downward cap; there is no assignment that satisfies both.
     st["len_p50"] = min(st["len_p50"], st["len_p90"])
     st["len_p25"] = min(st["len_p25"], st["len_p50"])
     return st
@@ -247,6 +256,21 @@ def learnable_contacts(contacts):
             if not (isinstance(c, dict) and c.get("relationship") == "test")]
 
 
+def burst_text(burst, reply_t):
+    """The inbound text a reply answers: walking back from the contact's last
+    bubble, keep each bubble that is <= BURST_GAP_S before the next kept one
+    and <= PAIR_WINDOW_S before the reply; stop at the first that is not.
+    Joined in time order with "\n". burst: [(time, text)] in time order."""
+    kept = []
+    for t, text in reversed(burst):
+        if (reply_t - t).total_seconds() > PAIR_WINDOW_S:
+            break
+        if kept and (kept[-1][0] - t).total_seconds() > BURST_GAP_S:
+            break
+        kept.append((t, text))
+    return "\n".join(text for _, text in reversed(kept))
+
+
 def samples_from_timeline(timeline, labels, now, tz):
     """Feature dicts for every learnable reply turn in one contact's 1:1
     timeline (sorted by time, reactions removed). Text is read here and
@@ -260,7 +284,7 @@ def samples_from_timeline(timeline, labels, now, tz):
         m = timeline[i]
         if not m["from_me"]:
             inbound_gap = (m["t"] - last_me_t).total_seconds() if last_me_t else None
-            burst.append(m["text"] or "")
+            burst.append((m["t"], m["text"] or ""))
             i += 1
             continue
         j = i + 1
@@ -269,7 +293,8 @@ def samples_from_timeline(timeline, labels, now, tz):
             j += 1
         turn = timeline[i:j]
         prev = timeline[i - 1] if i > 0 else None
-        answered = "\n".join(burst)
+        answered = burst_text(burst, turn[0]["t"])
+        last_shape = shape(burst[-1][1]) if burst else "casual"
         burst = []
         last_me_t = turn[-1]["t"]
         i = j
@@ -297,6 +322,7 @@ def samples_from_timeline(timeline, labels, now, tz):
             # The whole burst, joined with "\n": the C runtime classifies
             # the same text, so both sides bucket a reply identically.
             "shape": shape(answered),
+            "burst_changed_shape": shape(answered) != last_shape,
             "band": time_band(turn[0]["t"], tz),
             "rapid": inbound_gap is not None and inbound_gap < RAPID_S and latency <= RAPID_S,
         })
@@ -553,6 +579,10 @@ def main(argv=None):
         "clamped_n": clamped_n,
         "max_rel_change": round(max_rel, 4) if max_rel is not None else None,
         "first_run": first_run,
+        # Replies whose shape differs between the last inbound bubble alone and
+        # the whole burst: how much the burst rule actually moves bucketing.
+        "shape_changed_by_burst_n": sum(1 for v in samples.values() for x in v
+                                        if x["burst_changed_shape"]),
         "sent_n": att["sent_n"],
         "ambiguous_n": att["ambiguous_n"],
         "huuman_n": att["huuman_n"],

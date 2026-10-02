@@ -267,6 +267,67 @@ def test_burst_starts_after_seths_previous_send(tmp_path):
     assert [x["shape"] for x in s] == ["question", "casual"]
 
 
+def test_stale_unanswered_question_does_not_join_a_later_burst(tmp_path):
+    # "dinner sunday?" Monday goes unanswered; "lol" Wednesday gets a reply.
+    # The daemon's batch on Wednesday holds only "lol": casual, not question.
+    fx = Fixture(str(tmp_path))
+    c = "+15550000009"
+    fx.msg(c, -600, "earlier", True)
+    fx.msg(c, 0, "dinner sunday?", False)
+    fx.msg(c, 2 * 86400, "lol", False)
+    fx.msg(c, 2 * 86400 + 30, "haha", True)
+    fx.close()
+    s = lsp.load_samples(fx.chat_path, fx.mem_path, [c], NOW, dt.timezone.utc)[0][c]
+    assert [x["shape"] for x in s] == ["casual"]
+    assert s[0]["burst_changed_shape"] is False
+
+
+def test_burst_gap_over_10_minutes_breaks_the_burst(tmp_path):
+    # Two bubbles 11 minutes apart, both within 6 h of the reply.
+    fx = Fixture(str(tmp_path))
+    c = "+15550000009"
+    fx.msg(c, -600, "earlier", True)
+    fx.msg(c, 0, "you coming tonight?", False)
+    fx.msg(c, 11 * MIN, "ok whatever", False)
+    fx.msg(c, 11 * MIN + 30, "sorry", True)
+    fx.close()
+    s = lsp.load_samples(fx.chat_path, fx.mem_path, [c], NOW, dt.timezone.utc)[0][c]
+    assert s[0]["shape"] == "casual"
+
+
+def test_three_bubble_story_within_two_minutes_is_story_and_counted(tmp_path):
+    fx = Fixture(str(tmp_path))
+    c = "+15550000009"
+    fx.msg(c, -600, "earlier", True)
+    fx.msg(c, 0, "So today was wild.", False)
+    fx.msg(c, 50, "Work ran late and the car wouldn't start.", False)
+    fx.msg(c, 110, "Ended up getting a ride home from Dave.", False)
+    fx.msg(c, 140, "oh no", True)
+    fx.close()
+    s = lsp.load_samples(fx.chat_path, fx.mem_path, [c], NOW, dt.timezone.utc)[0][c]
+    assert s[0]["shape"] == "story"
+    assert s[0]["burst_changed_shape"] is True     # last bubble alone: casual
+
+
+def test_shape_changed_by_burst_n_is_logged(tmp_path):
+    e = Env(tmp_path)
+
+    def fill(fx):
+        _fill_two()(fx)
+        c = "+15550000001"
+        base = 100 * 3600
+        for k in range(3):                           # 3 replies to split questions
+            t = base + k * 3600
+            fx.msg(c, t, "you around later?", False)
+            fx.msg(c, t + 40, "need a hand", False)
+            fx.msg(c, t + 70, "yep", True)
+    e.build(fill)
+    assert e.run() == 0
+    line = e.log_lines()[-1]
+    assert line["shape_changed_by_burst_n"] == 3
+    assert isinstance(line["shape_changed_by_burst_n"], int)
+
+
 def test_time_bands():
     utc = dt.timezone.utc
     assert lsp.time_band(dt.datetime(2026, 1, 1, 6, 0, tzinfo=utc), utc) == "day"
@@ -386,6 +447,26 @@ def test_clamped_quantiles_stay_ordered_without_breaking_the_cap():
     assert out["len_p25"] <= out["len_p50"] <= out["len_p90"]
     assert out["len_p50"] == 40                  # not raised to 130
     assert out["len_p90"] == 200
+
+
+def test_cap_holds_on_every_field_for_ordered_previous_files():
+    # Ruling: ordering is enforced by lowering, and it can override a cap
+    # ONLY when the previous file itself was unordered. For any ordered
+    # previous file every clamped field stays within its own cap.
+    import random
+    rng = random.Random(7)
+    for _ in range(2000):
+        p = sorted(rng.randint(1, 400) for _ in range(3))
+        v = sorted(rng.randint(1, 600) for _ in range(3))
+        prev = {"len_p25": p[0], "len_p50": p[1], "len_p90": p[2], "bubbles_p50": 1.0,
+                "lower_start_rate": 0.5, "emoji_rate": 0.5, "end_punct_rate": 0.5,
+                "latency_p50_s": 60}
+        new = dict(prev, len_p25=v[0], len_p50=v[1], len_p90=v[2])
+        out, _, _ = lsp.cap_stats(new, prev)
+        assert out["len_p25"] <= out["len_p50"] <= out["len_p90"]
+        for f in ("len_p25", "len_p50", "len_p90"):
+            allowed = max(0.3 * prev[f], 10)
+            assert abs(out[f] - prev[f]) <= allowed + 1e-9, (prev, new, out)
 
 
 def _ambiguous_fill(n_ambiguous):
