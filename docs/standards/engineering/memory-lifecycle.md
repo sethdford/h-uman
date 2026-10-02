@@ -96,9 +96,10 @@ Memory is stratified by access patterns and retention:
 1. **Periodic daemon tick:** every `memory.consolidation_interval_hours` (default 24; `0` disables).
 2. **Topic switch (daemon):** when the reactive path detects a topic change, gated by the debounce below.
 3. **Manual trigger:** the gateway control-protocol method `memory.consolidate`.
-4. **Agent API:** `hu_agent_consolidate_memory()`.
+4. **Per turn (agent):** `agent_turn.c` calls `hu_agent_consolidate_memory()` on every 10th
+   history entry, and on topic switch, gated by the debounce below.
 
-**Debounce (topic-switch path only):** consolidation runs only when at least
+**Debounce (topic-switch paths):** consolidation runs only when at least
 `HU_CONSOLIDATION_MIN_ENTRIES` (5) entries have arrived since the last run AND at least
 `HU_CONSOLIDATION_MIN_INTERVAL_SECS` (60) have elapsed. If either is unmet, it is deferred.
 
@@ -146,18 +147,14 @@ Only two consolidation settings are configurable, and they live under `behavior`
 | `behavior.dedup_threshold` | 70 | 1–100 | Similarity score at or above which the older entry is deleted |
 | `memory.consolidation_interval_hours` | 24 | 0–8760 | Periodic daemon consolidation; `0` disables |
 
-The other fields are fixed in code, and the effective values depend on the caller:
+All four callers build their settings with `hu_agent_consolidation_config()`
+(`src/agent/agent.c`), so they always agree. It starts from `HU_CONSOLIDATION_DEFAULTS`
+(`decay_days` 30, `dedup_threshold` 70, `max_entries` 5000) and, when a config is loaded,
+replaces `decay_days` and `dedup_threshold` with the `behavior` values. The macro's
+defaults match `config_merge.c`, so running without a config behaves like running with
+a default one.
 
-| Field | Daemon (periodic + topic switch) | `memory.consolidate` + `hu_agent_consolidate_memory()` |
-|-------|----------------------------------|--------------------------------------------------------|
-| `decay_days` | `behavior.decay_days` | 30 (`HU_CONSOLIDATION_DEFAULTS`) |
-| `dedup_threshold` | `behavior.dedup_threshold` | 85 (`HU_CONSOLIDATION_DEFAULTS`) |
-| `max_entries` | 5000 | 10000 |
-| `decay_factor` | 0.5 (unread) | 0.9 (unread) |
-
-The daemon's values come from `hu_daemon_consolidation_config()` in
-`src/daemon/daemon_maintenance.c`. `memory.max_entries` is parsed but no consolidation
-path reads it. A `memory.consolidation` object is not a recognized key: the config validator warns
+`max_entries` is fixed at 5000. `memory.max_entries` is parsed, but nothing reads it. A `memory.consolidation` object is not a recognized key: the config validator warns
 `unknown key` and nothing reads it.
 
 ---

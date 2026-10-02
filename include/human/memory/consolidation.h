@@ -15,11 +15,15 @@ typedef struct hu_consolidation_config {
     size_t model_len;
 } hu_consolidation_config_t;
 
+/* decay_days / dedup_threshold match the config_merge.c defaults for
+ * behavior.decay_days / behavior.dedup_threshold, so a NULL config and a
+ * freshly loaded one consolidate identically. Production callers go through
+ * hu_agent_consolidation_config(), which overrides both from config. */
 #define HU_CONSOLIDATION_DEFAULTS \
     {.decay_days = 30,            \
      .decay_factor = 0.9,         \
-     .dedup_threshold = 85,       \
-     .max_entries = 10000,        \
+     .dedup_threshold = 70,       \
+     .max_entries = 5000,         \
      .provider = NULL,            \
      .model = NULL,               \
      .model_len = 0}

@@ -1,3 +1,5 @@
+#include "human/agent.h"
+#include "human/config.h"
 #include "human/core/allocator.h"
 #include "human/memory.h"
 #include "human/memory/consolidation.h"
@@ -79,8 +81,8 @@ static void consolidation_cross_contact_isolation(void) {
     size_t content_len = strlen(content);
 
     /* Store identical content for two different contacts */
-    hu_error_t err = mem.vtable->store(mem.ctx, "contact:alice:pref", 18, content, content_len,
-                                        &cat, NULL, 0);
+    hu_error_t err =
+        mem.vtable->store(mem.ctx, "contact:alice:pref", 18, content, content_len, &cat, NULL, 0);
     HU_ASSERT_EQ(err, HU_OK);
     err = mem.vtable->store(mem.ctx, "contact:bob:pref", 16, content, content_len, &cat, NULL, 0);
     HU_ASSERT_EQ(err, HU_OK);
@@ -130,15 +132,15 @@ static void consolidation_eviction_preserves_last_contact_entry(void) {
         char key[64], content[128];
         int kn = snprintf(key, sizeof(key), "contact:alice:item%d", i);
         int cn = snprintf(content, sizeof(content), "alice memory item number %d content", i);
-        hu_error_t err = mem.vtable->store(mem.ctx, key, (size_t)kn, content, (size_t)cn,
-                                            &cat, NULL, 0);
+        hu_error_t err =
+            mem.vtable->store(mem.ctx, key, (size_t)kn, content, (size_t)cn, &cat, NULL, 0);
         HU_ASSERT_EQ(err, HU_OK);
     }
     {
         const char *key = "contact:bob:only";
         const char *content = "bob single memory entry that must survive";
-        hu_error_t err = mem.vtable->store(mem.ctx, key, strlen(key), content, strlen(content),
-                                            &cat, NULL, 0);
+        hu_error_t err =
+            mem.vtable->store(mem.ctx, key, strlen(key), content, strlen(content), &cat, NULL, 0);
         HU_ASSERT_EQ(err, HU_OK);
     }
 
@@ -199,6 +201,77 @@ static void similarity_same_prefix_reasonable(void) {
     uint32_t score = hu_similarity_score(a, 11, b, 11);
     HU_ASSERT_TRUE(score >= 30u);
     HU_ASSERT_TRUE(score <= 80u);
+}
+
+#ifdef HU_ENABLE_SQLITE
+/* Two entries scoring 80: duplicates at the loaded-config default (70), kept
+ * at the old hard-coded 85 that hu_agent_consolidate_memory used to ignore
+ * config with. */
+static const char k_near_dup_a[] = "seth bought fresh salmon tacos downtown friday night yesterday";
+static const char k_near_dup_b[] = "seth bought fresh salmon tacos downtown friday night today";
+
+static size_t consolidate_near_dups_via_agent(uint32_t dedup_threshold) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+    hu_memory_category_t cat = {.tag = HU_MEMORY_CATEGORY_CORE};
+    mem.vtable->store(mem.ctx, "near_a", 6, k_near_dup_a, sizeof(k_near_dup_a) - 1, &cat, NULL, 0);
+    mem.vtable->store(mem.ctx, "near_b", 6, k_near_dup_b, sizeof(k_near_dup_b) - 1, &cat, NULL, 0);
+
+    hu_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.behavior.decay_days = 30;
+    cfg.behavior.dedup_threshold = dedup_threshold;
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.alloc = &alloc;
+    agent.memory = &mem;
+    agent.config = &cfg;
+
+    HU_ASSERT_EQ(hu_agent_consolidate_memory(&agent), HU_OK);
+    size_t after = 0;
+    mem.vtable->count(mem.ctx, &after);
+    mem.vtable->deinit(mem.ctx);
+    return after;
+}
+
+static void agent_consolidate_memory_honors_configured_dedup_threshold(void) {
+    uint32_t score = hu_similarity_score(k_near_dup_a, sizeof(k_near_dup_a) - 1, k_near_dup_b,
+                                         sizeof(k_near_dup_b) - 1);
+    HU_ASSERT_TRUE(score >= 70u && score < 85u);
+
+    /* Same pair, only the configured threshold differs. */
+    HU_ASSERT_EQ(consolidate_near_dups_via_agent(70), 1u);
+    HU_ASSERT_EQ(consolidate_near_dups_via_agent(90), 2u);
+}
+#endif
+
+/* Every hu_memory_consolidate caller (daemon tick, topic switch, per-turn,
+ * gateway memory.consolidate) takes its settings from this one builder. */
+static void agent_consolidation_config_reads_behavior(void) {
+    hu_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.behavior.decay_days = 7;
+    cfg.behavior.dedup_threshold = 42;
+
+    hu_consolidation_config_t c = hu_agent_consolidation_config(&cfg);
+    HU_ASSERT_EQ(c.decay_days, 7u);
+    HU_ASSERT_EQ(c.dedup_threshold, 42u);
+    HU_ASSERT_EQ(c.max_entries, 5000u);
+}
+
+/* NULL config must match a freshly loaded config (config_merge defaults), not
+ * dedup_threshold = 0: every pair scores >= 0, so 0 would delete all but the
+ * newest entry per contact. */
+static void agent_consolidation_config_null_config_matches_loaded_defaults(void) {
+    hu_consolidation_config_t c = hu_agent_consolidation_config(NULL);
+    HU_ASSERT_EQ(c.decay_days, 30u);
+    HU_ASSERT_EQ(c.dedup_threshold, 70u);
+    HU_ASSERT_EQ(c.max_entries, 5000u);
+
+    hu_consolidation_config_t d = HU_CONSOLIDATION_DEFAULTS;
+    HU_ASSERT_EQ(d.dedup_threshold, c.dedup_threshold);
+    HU_ASSERT_EQ(d.max_entries, c.max_entries);
 }
 
 static void consolidation_null_memory_returns_error(void) {
@@ -294,12 +367,15 @@ void run_consolidation_tests(void) {
     HU_RUN_TEST(consolidation_removes_duplicates);
     HU_RUN_TEST(consolidation_cross_contact_isolation);
     HU_RUN_TEST(consolidation_eviction_preserves_last_contact_entry);
+    HU_RUN_TEST(agent_consolidate_memory_honors_configured_dedup_threshold);
 #endif
     HU_RUN_TEST(similarity_null_a_returns_0);
     HU_RUN_TEST(similarity_null_b_returns_0);
     HU_RUN_TEST(similarity_both_empty_returns_100);
     HU_RUN_TEST(similarity_same_prefix_reasonable);
     HU_RUN_TEST(consolidation_null_memory_returns_error);
+    HU_RUN_TEST(agent_consolidation_config_reads_behavior);
+    HU_RUN_TEST(agent_consolidation_config_null_config_matches_loaded_defaults);
 
     /* Topic-switch debounce */
     HU_RUN_TEST(debounce_init_prevents_immediate_run);
