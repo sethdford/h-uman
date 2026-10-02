@@ -46,8 +46,10 @@ hu_error_t hu_memory_loader_init(hu_memory_loader_t *loader, hu_allocator_t *all
 hu_gate_mode_t hu_memory_loader_insight_mode(void);
 
 /* The insight block's budget. Shared with the overuse scan so it can re-render
- * the exact lines this loader injected for the turn (same query, same order). */
-#define HU_INSIGHT_MAX_ITEMS      8
+ * the exact lines this loader injected for the turn (same query, same order).
+ * Three, chosen against the incoming message: the 8 newest put ~33 content
+ * words in front of the model and replies reused about 3 of them. */
+#define HU_INSIGHT_MAX_ITEMS      3
 #define HU_INSIGHT_MAX_BYTES      900
 #define HU_INSIGHT_MIN_CONFIDENCE 0.5
 /* Test seam: force a mode; -1 reverts to reading the env. */

@@ -132,6 +132,9 @@ hu_prospective_action_t hu_prospective_decide(bool judge_ok, hu_prospective_verd
  * `max`. Returns the count. */
 size_t hu_prospective_key_terms(const char *action, char out[][HU_PROSPECTIVE_KEY_TERM_LEN],
                                 size_t max);
+/* `term` (a key term) appears in text as a whole word, case-insensitive, a
+ * trailing plural 's' tolerated either way ("cramp" matches "cramps"). */
+bool hu_prospective_text_has_term(const char *text, size_t len, const char *term);
 /* The delivered reply carries the action: at least half of its key terms
  * (and at least one) appear as whole words, a trailing plural 's' tolerated
  * either way. An action with no key terms can never be proven used. */

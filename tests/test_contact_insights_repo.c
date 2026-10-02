@@ -6,12 +6,15 @@
 
 #ifdef HU_ENABLE_SQLITE
 
+#include "human/agent/curiosity_gaps.h"
 #include "human/agent/memory_loader.h"
 #include "human/core/allocator.h"
 #include "human/core/gate_mode.h"
 #include "human/memory/contact_insights_repo.h"
 #include "human/memory/engines.h"
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define T_2024 1704067200000LL /* 2024-01-01 */
@@ -196,8 +199,182 @@ static void loader_block_follows_the_gate(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
+/* Candidates are newest first, as the repo fetches them. */
+static const char *const k_cands[] = {
+    "cramps insane, feels sick",           /* 0: newest */
+    "bought an outfit for $150",           /* 1 */
+    "dad not ideal, rough time at home",   /* 2 */
+    "hates her closet, needs new dresses", /* 3 */
+    "sister Mara moving to Denver",        /* 4: oldest */
+};
+
+static void select_puts_a_word_shared_with_the_message_first(void) {
+    size_t idx[3];
+    const char q[] = "mara says denver is cold already";
+    size_t n = hu_contact_insights_select(k_cands, 5, q, strlen(q), 3, idx);
+    HU_ASSERT_EQ(n, (size_t)3);
+    HU_ASSERT_EQ(idx[0], (size_t)4); /* the oldest note, but it is what she is talking about */
+    HU_ASSERT_EQ(idx[1], (size_t)0); /* then the newest, for what is going on with her now */
+    HU_ASSERT_EQ(idx[2], (size_t)1);
+}
+
+static void select_ranks_more_shared_words_higher(void) {
+    size_t idx[2];
+    const char q[] = "my dad again. home is rough";
+    size_t n = hu_contact_insights_select(k_cands, 5, q, strlen(q), 2, idx);
+    HU_ASSERT_EQ(n, (size_t)2);
+    HU_ASSERT_EQ(idx[0], (size_t)2); /* rough + home ("dad" is under 4 letters) */
+    HU_ASSERT_EQ(idx[1], (size_t)0);
+}
+
+static void select_tolerates_a_plural_either_way(void) {
+    size_t idx[1];
+    static const char *const two[] = {"bought an outfit for $150", "cramps insane, feels sick"};
+    const char q1[] = "this cramp is killing me"; /* note says "cramps" */
+    HU_ASSERT_EQ(hu_contact_insights_select(two, 2, q1, strlen(q1), 1, idx), (size_t)1);
+    HU_ASSERT_EQ(idx[0], (size_t)1);
+    const char q2[] = "my closets are a mess"; /* note says "closet" */
+    HU_ASSERT_EQ(hu_contact_insights_select(k_cands, 5, q2, strlen(q2), 1, idx), (size_t)1);
+    HU_ASSERT_EQ(idx[0], (size_t)3);
+}
+
+static void select_without_a_message_keeps_the_newest(void) {
+    size_t idx[5];
+    HU_ASSERT_EQ(hu_contact_insights_select(k_cands, 5, NULL, 0, 2, idx), (size_t)2);
+    HU_ASSERT_EQ(idx[0], (size_t)0);
+    HU_ASSERT_EQ(idx[1], (size_t)1);
+    HU_ASSERT_EQ(hu_contact_insights_select(k_cands, 2, "hey", 3, 5, idx), (size_t)2);
+    HU_ASSERT_EQ(hu_contact_insights_select(k_cands, 0, "hey", 3, 5, idx), (size_t)0);
+}
+
+static void render_for_query_reaches_past_the_newest(void) {
+    hu_allocator_t a = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&a, ":memory:");
+    seed_three(&mem);
+    for (int i = 0; i < 6; i++) {
+        char note[64];
+        snprintf(note, sizeof(note), "filler note number %d", i);
+        HU_ASSERT_EQ(hu_contact_insights_add(&mem, k_contact, strlen(k_contact), "fact", note, 0.8,
+                                             T_2026 + 1000 + i, "test", NULL),
+                     HU_OK);
+    }
+    char *out = NULL;
+    size_t len = 0;
+    const char q[] = "remember the biscuit thing lol";
+    HU_ASSERT_EQ(hu_contact_insights_render_for_query(&mem, &a, k_contact, strlen(k_contact), q,
+                                                      strlen(q), 3, 900, 0.5, &out, &len),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_NOT_NULL(strstr(out, "biscuit")); /* oldest of nine, outside the newest 8 */
+    HU_ASSERT_TRUE(strstr(out, "biscuit") < strchr(out, '\n')); /* ranked first */
+    HU_ASSERT_NOT_NULL(strstr(out, "filler note number 5"));
+    HU_ASSERT_NULL(strstr(out, "Initech"));
+    size_t lines = 0;
+    for (size_t i = 0; i < len; i++)
+        lines += out[i] == '\n';
+    HU_ASSERT_EQ(lines, (size_t)3);
+    a.free(a.ctx, out, len + 1);
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void loader_block_uses_the_incoming_message(void) {
+    hu_allocator_t a = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&a, ":memory:");
+    seed_three(&mem);
+    for (int i = 0; i < HU_INSIGHT_MAX_ITEMS; i++) {
+        char note[64];
+        snprintf(note, sizeof(note), "newer filler %d", i);
+        HU_ASSERT_EQ(hu_contact_insights_add(&mem, k_contact, strlen(k_contact), "fact", note, 0.8,
+                                             T_2026 + 1000 + i, "test", NULL),
+                     HU_OK);
+    }
+    hu_memory_loader_t loader;
+    HU_ASSERT_EQ(hu_memory_loader_init(&loader, &a, &mem, NULL, 8, 4096), HU_OK);
+    hu_memory_loader_set_insight_mode_for_test(HU_GATE_LIVE);
+    char *ctx = NULL;
+    size_t ctx_len = 0;
+    const char q[] = "found a place near the water!!";
+    HU_ASSERT_EQ(
+        hu_memory_loader_load(&loader, q, strlen(q), k_contact, strlen(k_contact), &ctx, &ctx_len),
+        HU_OK);
+    HU_ASSERT_NOT_NULL(ctx);
+    HU_ASSERT_NOT_NULL(strstr(ctx, "still hunting for a place near the water"));
+    a.free(a.ctx, ctx, ctx_len + 1);
+    hu_memory_loader_set_insight_mode_for_test(-1);
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void recent_text_keeps_only_notes_since_the_cutoff(void) {
+    hu_allocator_t a = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&a, ":memory:");
+    seed_three(&mem); /* as_of 2026, 2025, 2024 */
+    char *out = NULL;
+    size_t len = 0;
+    HU_ASSERT_EQ(
+        hu_contact_insights_recent_text(&mem, &a, k_contact, strlen(k_contact), T_2025, &out, &len),
+        HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_EQ(strlen(out), len);
+    HU_ASSERT_NOT_NULL(strstr(out, "Initech"));
+    HU_ASSERT_NOT_NULL(strstr(out, "near the water"));
+    HU_ASSERT_NULL(strstr(out, "biscuit")); /* 2024: older than the cutoff */
+    HU_ASSERT_NOT_NULL(strchr(out, '\n'));
+    a.free(a.ctx, out, len + 1);
+    /* nothing that recent: NULL, OK */
+    HU_ASSERT_EQ(hu_contact_insights_recent_text(&mem, &a, k_contact, strlen(k_contact), T_2026 + 1,
+                                                 &out, &len),
+                 HU_OK);
+    HU_ASSERT_NULL(out);
+    HU_ASSERT_EQ(len, (size_t)0);
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void loader_offers_a_curiosity_gap_only_when_live(void) {
+    hu_allocator_t a = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&a, ":memory:");
+    seed_three(&mem); /* all older than 30 days: every topic is a gap */
+    hu_memory_loader_t loader;
+    HU_ASSERT_EQ(hu_memory_loader_init(&loader, &a, &mem, NULL, 8, 4096), HU_OK);
+    hu_memory_loader_set_insight_mode_for_test(HU_GATE_LIVE);
+    static const char *const modes[] = {"off", "shadow", "live"};
+    for (size_t i = 0; i < 3; i++) {
+        hu_curiosity_gaps_reset_for_test();
+        setenv("HU_CURIOSITY_GAPS", modes[i], 1);
+        char *ctx = NULL;
+        size_t ctx_len = 0;
+        HU_ASSERT_EQ(hu_memory_loader_load(&loader, "ugh long day", 12, k_contact,
+                                           strlen(k_contact), &ctx, &ctx_len),
+                     HU_OK);
+        HU_ASSERT_NOT_NULL(ctx);
+        bool has_gap = strstr(ctx, "what they have coming up") != NULL;
+        HU_ASSERT_EQ(has_gap, i == 2);
+        a.free(a.ctx, ctx, ctx_len + 1);
+    }
+    /* a question from them: answer it, no gap even when live */
+    hu_curiosity_gaps_reset_for_test();
+    char *ctx = NULL;
+    size_t ctx_len = 0;
+    HU_ASSERT_EQ(hu_memory_loader_load(&loader, "u around?", 9, k_contact, strlen(k_contact), &ctx,
+                                       &ctx_len),
+                 HU_OK);
+    HU_ASSERT_TRUE(ctx == NULL || strstr(ctx, "what they have coming up") == NULL);
+    if (ctx)
+        a.free(a.ctx, ctx, ctx_len + 1);
+    unsetenv("HU_CURIOSITY_GAPS");
+    hu_memory_loader_set_insight_mode_for_test(-1);
+    mem.vtable->deinit(mem.ctx);
+}
+
 void run_contact_insights_repo_tests(void) {
     HU_TEST_SUITE("contact insights (insight stream)");
+    HU_RUN_TEST(select_puts_a_word_shared_with_the_message_first);
+    HU_RUN_TEST(select_ranks_more_shared_words_higher);
+    HU_RUN_TEST(select_tolerates_a_plural_either_way);
+    HU_RUN_TEST(select_without_a_message_keeps_the_newest);
+    HU_RUN_TEST(render_for_query_reaches_past_the_newest);
+    HU_RUN_TEST(loader_block_uses_the_incoming_message);
+    HU_RUN_TEST(recent_text_keeps_only_notes_since_the_cutoff);
+    HU_RUN_TEST(loader_offers_a_curiosity_gap_only_when_live);
     HU_RUN_TEST(render_orders_newest_first_with_month_and_caps);
     HU_RUN_TEST(curator_wide_rows_follow_the_insight_wide_gate);
     HU_RUN_TEST(retired_and_low_confidence_rows_are_not_rendered);
