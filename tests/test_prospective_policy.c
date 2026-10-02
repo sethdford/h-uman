@@ -474,11 +474,27 @@ static void frame_topic_accepts_exactly_the_situation_frame(void) {
     HU_ASSERT_EQ(hu_prospective_frame_topic(NULL, 5, out, sizeof(out)), (size_t)0);
 }
 
+/* Known gap 7: OFF and SHADOW never gate a legacy raiser (whatever the
+ * lookup says -- the caller does not even look); LIVE lets it raise only a
+ * row the lookup proved v2 does not own, and a failed lookup is silence. */
+static void legacy_may_raise_truth_table(void) {
+    static const hu_gate_mode_t quiet[] = {HU_GATE_OFF, HU_GATE_SHADOW};
+    for (size_t i = 0; i < 2; i++)
+        for (int ok = 0; ok < 2; ok++)
+            for (int owned = 0; owned < 2; owned++)
+                HU_ASSERT_TRUE(hu_prospective_legacy_may_raise(quiet[i], ok, owned));
+    HU_ASSERT_TRUE(hu_prospective_legacy_may_raise(HU_GATE_LIVE, true, false));
+    HU_ASSERT_FALSE(hu_prospective_legacy_may_raise(HU_GATE_LIVE, true, true));
+    HU_ASSERT_FALSE(hu_prospective_legacy_may_raise(HU_GATE_LIVE, false, false));
+    HU_ASSERT_FALSE(hu_prospective_legacy_may_raise(HU_GATE_LIVE, false, true));
+}
+
 void run_prospective_policy_tests(void) {
     HU_TEST_SUITE("prospective policy");
     HU_RUN_TEST(policy_column_spellings_round_trip);
     HU_RUN_TEST(fired_mapping_matches_spec);
     HU_RUN_TEST(gates_default_off_and_banner_names_the_key);
+    HU_RUN_TEST(legacy_may_raise_truth_table);
     HU_RUN_TEST(filter_keyword_truth_table);
     HU_RUN_TEST(filter_time_due_grace_and_daily_cap);
     HU_RUN_TEST(parse_verdict_truth_table);

@@ -753,6 +753,18 @@ hu_error_t hu_superhuman_delayed_followup_pending_exists(void *sqlite_ctx, const
     return HU_OK;
 }
 
+hu_error_t hu_superhuman_ledger_v2_owned(void *sqlite_ctx, bool is_followup, int64_t id,
+                                         bool *owned) {
+    if (owned)
+        *owned = false;
+    if (!sqlite_ctx || !owned)
+        return HU_ERR_INVALID_ARGUMENT;
+    sqlite3 *db = get_db(sqlite_ctx);
+    if (!db)
+        return HU_ERR_NOT_SUPPORTED;
+    return hu_prospective_repo_ledger_v2_owned(db, is_followup, id, owned);
+}
+
 void hu_superhuman_delayed_followup_free(hu_allocator_t *alloc, hu_delayed_followup_t *arr,
                                          size_t count) {
     if (alloc && arr)
@@ -1962,6 +1974,16 @@ hu_error_t hu_superhuman_delayed_followup_pending_exists(void *sqlite_ctx, const
     (void)topic_len;
     if (out_exists)
         *out_exists = false;
+    return HU_ERR_NOT_SUPPORTED;
+}
+
+hu_error_t hu_superhuman_ledger_v2_owned(void *sqlite_ctx, bool is_followup, int64_t id,
+                                         bool *owned) {
+    (void)sqlite_ctx;
+    (void)is_followup;
+    (void)id;
+    if (owned)
+        *owned = false;
     return HU_ERR_NOT_SUPPORTED;
 }
 
