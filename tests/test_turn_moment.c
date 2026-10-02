@@ -117,6 +117,19 @@ static void turn_moment_burst_is_only_the_recent_inbound_run(void) {
     HU_ASSERT_NULL(strstr(buf, GREET_MORNING));
 }
 
+/* The night sign-off cue reads the message being answered (the burst), not
+ * the previous exchange: "night!" after a gap matches it. */
+static void turn_moment_night_signoff_after_a_gap_reads_the_current_burst(void) {
+    hu_channel_history_entry_t h[3];
+    entry(&h[0], false, at(0, 15, 0), "running late, see you at the game");
+    entry(&h[1], true, at(0, 15, 2), "all good");
+    entry(&h[2], false, at(0, 22, 29), "night! talk tomorrow");
+    char buf[512];
+    size_t n = hu_turn_moment_render_entries(PERSONA, NULL, h, 3, at(0, 22, 30), buf, sizeof buf);
+    HU_ASSERT_GT(n, 0u);
+    HU_ASSERT_NOT_NULL(strstr(buf, "match the night sign-off"));
+}
+
 /* The turn's call reads the thread the daemon set on the agent. */
 static void turn_moment_agent_call_uses_the_turn_thread(void) {
     hu_agent_t agent;
@@ -146,4 +159,5 @@ void run_turn_moment_tests(void) {
     HU_RUN_TEST(turn_moment_late_night_message_after_a_gap_acknowledges_it);
     HU_RUN_TEST(turn_moment_burst_is_only_the_recent_inbound_run);
     HU_RUN_TEST(turn_moment_agent_call_uses_the_turn_thread);
+    HU_RUN_TEST(turn_moment_night_signoff_after_a_gap_reads_the_current_burst);
 }

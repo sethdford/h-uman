@@ -84,8 +84,9 @@ size_t hu_turn_moment_render_entries(const struct hu_persona_t *persona,
 
     size_t n = 0;
     hu_moment_t moment;
-    if (hu_moment_compose_from_inputs(persona, overlay, history, last_their, last_our, NULL, now_s,
-                                      &moment) != HU_OK ||
+    if (hu_moment_compose_for_reply(persona, overlay, history, last_their, last_our, NULL,
+                                    entries[count - 1].from_me ? NULL : entries[count - 1].text,
+                                    now_s, &moment) != HU_OK ||
         hu_moment_render_prompt(&moment, buf, cap, &n) != HU_OK) {
         buf[0] = '\0';
         n = 0;
