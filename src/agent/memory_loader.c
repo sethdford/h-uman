@@ -7,6 +7,7 @@
 #include "human/core/string.h"
 #include "human/memory/personal_model.h"
 #include "human/memory/retrieval/adaptive.h"
+#include "human/memory/semantic_recall.h" /* hu_semantic_recall_hit_is_excluded */
 #include "human/memory/trust.h"
 #include "human/memory/wiki_page.h"
 #include <string.h>
@@ -576,6 +577,12 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
          * is enforced for hu_personal_model facts in the prompt builder,
          * not here in the recall list). */
         if (e->trust_tier == (int)HU_TRUST_UNTRUSTED)
+            continue;
+        /* Same content policy as semantic recall: experience scaffolding (global
+         * turn logs holding other contacts' messages) and AI-identity
+         * confrontations never reach a reply prompt. Keyword recall skipped
+         * this check until 2026-10-02. */
+        if (hu_semantic_recall_hit_is_excluded(e->key, e->key_len, e->content, e->content_len))
             continue;
         if (e->trust_tier <= (int)HU_TRUST_THIRD_PARTY && e->key && e->key_len > 0) {
             bool shadowed = false;
