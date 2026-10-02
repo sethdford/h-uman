@@ -160,6 +160,7 @@
 #include "human/daemon/peripheral_gov.h"
 #include "human/daemon/proactive_policy.h"
 #include "human/daemon/reply_dedup.h"
+#include "human/daemon/send_failure.h"
 
 /* follow_up.h must be included unconditionally — the read-receipt watcher
  * scheduling block at L~1259 uses hu_followup_dedup_t / hu_followup_decide
@@ -8975,6 +8976,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         /* F2: Choreography-driven message delivery */
                         hu_message_plan_t choreo_plan = {0};
                         bool delivered_recorded = false; /* one production_outcomes row per reply */
+                        uint64_t send_fails0 = hu_daemon_send_failure_total();
                         bool use_choreography = false;
                         if (agent && agent->frontiers.initialized) {
                             hu_choreography_config_t choreo_cfg = hu_choreography_config_default();
@@ -9009,8 +9011,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                                 : NULL;
                                 size_t pv_cnt =
                                     (seg == 0 && all_send_media_cnt > 0) ? all_send_media_cnt : 0;
-                                /* F2b: Route through action-surface dispatcher for iMessage
-                                 * when enabled, else flat send */
+                                /* F2b: action-surface dispatcher for iMessage, else flat */
                                 const char *ch_name_choreo =
                                     ch->channel->vtable->name
                                         ? ch->channel->vtable->name(ch->channel->ctx)
@@ -9126,8 +9127,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                 usleep((useconds_t)(dt_ms * 1000));
                                             }
                                             size_t dt_len = strlen(dt_chunks[dt]);
-                                            /* F2b: Route through action-surface dispatcher for
-                                             * iMessage when enabled, else flat send */
+                                            /* F2b: dispatcher for iMessage, else flat */
                                             const char *ch_name_f2b =
                                                 ch->channel->vtable->name
                                                     ? ch->channel->vtable->name(ch->channel->ctx)
@@ -9160,8 +9160,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 }
 #endif
                                 if (!did_double_text) {
-                                    /* F2b: Route through action-surface dispatcher for iMessage
-                                     * when enabled, else flat send */
+                                    /* F2b: action-surface dispatcher for iMessage, else flat */
                                     const char *ch_name_f2b =
                                         ch->channel->vtable->name
                                             ? ch->channel->vtable->name(ch->channel->ctx)
@@ -9247,10 +9246,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 const char *const *pv_ptr =
                                     all_send_media_cnt > 0 ? all_send_media_ptr : NULL;
                                 size_t pv_cnt = all_send_media_cnt;
-                                /* F2c: Route through action-surface dispatcher for iMessage
-                                 * when enabled, else flat send. This is the reactive-reply
-                                 * path for short single-fragment messages with no choreography
-                                 * and no multi-fragment split. */
+                                /* F2c: single-fragment reply, no choreography or split:
+                                 * action-surface dispatcher for iMessage, else flat. */
                                 const char *ch_name_f2c =
                                     ch->channel->vtable->name
                                         ? ch->channel->vtable->name(ch->channel->ctx)
@@ -9285,6 +9282,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 }
                             }
                         }
+                        if (!delivered_recorded && hu_daemon_send_failure_total() > send_fails0)
+                            (void)hu_daemon_note_reply_undelivered(agent->session_store, batch_key,
+                                                                   key_len);
                         if (split_clean)
                             alloc->free(alloc->ctx, split_clean, split_clean_len + 1);
                         /* Send correction after main message (2.5–5s delay) */

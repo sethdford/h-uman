@@ -611,6 +611,15 @@ hu_error_t hu_daemon_dispatch_imessage_reply_msg_ex(
         out_text_sent, text_required);
 }
 
+hu_error_t hu_daemon_note_reply_undelivered(struct hu_session_store *store, const char *session,
+                                            size_t session_len) {
+    if (!store || !store->vtable || !store->vtable->save_message || !session || session_len == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    return store->vtable->save_message(store->ctx, session, session_len, "system", 6,
+                                       HU_DAEMON_UNDELIVERED_NOTE,
+                                       sizeof(HU_DAEMON_UNDELIVERED_NOTE) - 1);
+}
+
 /* ── production_outcomes: one row per DELIVERED reply ─────────────────────── */
 
 hu_error_t hu_daemon_record_delivered_reply(struct hu_agent *agent, const char *ch_name,

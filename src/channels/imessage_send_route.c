@@ -93,7 +93,10 @@ void hu_imsg_route_note_inbound(const char *handle, size_t handle_len, const cha
 }
 
 bool hu_imsg_route_lookup(const char *handle, size_t handle_len, hu_imsg_send_route_t *out) {
-    if (!handle || handle_len == 0 || !out)
+    if (!out)
+        return false;
+    memset(out, 0, sizeof(*out)); /* a miss must read as "no route", never garbage */
+    if (!handle || handle_len == 0)
         return false;
     bool hit = false;
     pthread_mutex_lock(&s_mu);
@@ -171,12 +174,45 @@ int hu_imsg_route_build_applescript(const hu_imsg_send_route_t *route, const cha
                     as_service, tgt_esc, msg_esc);
 }
 
-size_t hu_imsg_send_outcome_format(char *out, size_t cap, const char *path, bool ok,
+size_t hu_imsg_route_build_file_argv(const hu_imsg_send_route_t *route, const char *to,
+                                     const char *path, const char **argv, size_t cap) {
+    if (!argv || !path)
+        return 0;
+    if (hu_imsg_route_by_chat(route)) {
+        if (cap < 7)
+            return 0;
+        const char *v[] = {"imsg", "send", "--chat-guid", route->chat_guid, "--file", path, NULL};
+        memcpy(argv, v, sizeof(v));
+        return 6;
+    }
+    if (cap < 9 || !to)
+        return 0;
+    /* Pre-fix attachment argv, unchanged. */
+    const char *v[] = {"imsg", "send", "--to", to, "--file", path, "--service", "imessage", NULL};
+    memcpy(argv, v, sizeof(v));
+    return 8;
+}
+
+int hu_imsg_route_build_chat_attach_script(const hu_imsg_send_route_t *route, const char *path_esc,
+                                           char *out, size_t cap) {
+    if (!hu_imsg_route_by_chat(route) || !path_esc || !out || cap == 0)
+        return -1;
+    return snprintf(out, cap,
+                    "tell application \"Messages\"\n"
+                    "  with timeout of 20 seconds\n"
+                    "    set targetChat to chat id \"%s\"\n"
+                    "    send (POSIX file \"%s\") to targetChat\n"
+                    "  end timeout\n"
+                    "end tell",
+                    route->chat_guid, path_esc);
+}
+
+size_t hu_imsg_send_outcome_format(char *out, size_t cap, const char *path, const char *result,
                                    const hu_imsg_send_route_t *route) {
     if (!out || cap == 0)
         return 0;
     int n = snprintf(out, cap, "[send] path=%s result=%s chat_service=%s by_chat=%d",
-                     path ? path : "?", ok ? "ok" : "fail",
+                     path ? path : "?", result ? result : "?",
                      hu_imsg_route_service_name(route ? route->service : HU_IMSG_SERVICE_UNKNOWN),
                      hu_imsg_route_by_chat(route) ? 1 : 0);
     if (n < 0) {
@@ -186,26 +222,51 @@ size_t hu_imsg_send_outcome_format(char *out, size_t cap, const char *path, bool
     return (size_t)n < cap ? (size_t)n : cap - 1;
 }
 
-static void log_attempt(const hu_imsg_send_backend_t *be, const char *path, bool ok,
+static void log_attempt(const hu_imsg_send_backend_t *be, const char *path, const char *result,
                         const hu_imsg_send_route_t *route) {
     if (!be->log_outcome)
         return;
     char line[128];
-    hu_imsg_send_outcome_format(line, sizeof(line), path, ok, route);
+    hu_imsg_send_outcome_format(line, sizeof(line), path, result, route);
     be->log_outcome(be->ctx, line);
+}
+
+/* Did an is_from_me row newer than `prior` appear? Polls a bounded number of
+ * times. False when the boundary is unknown — no evidence is not delivery. */
+static bool landed_since(const hu_imsg_send_backend_t *be, const hu_imsg_send_request_t *req,
+                         int64_t prior) {
+    if (prior < 0 || !be->sent_boundary)
+        return false;
+    unsigned polls = hu_imsg_route_by_chat(req->route) ? HU_IMSG_LAND_POLLS_BY_CHAT
+                                                       : HU_IMSG_LAND_POLLS_BY_HANDLE;
+    for (unsigned i = 0; i < polls; i++) {
+        if (be->sleep_ms)
+            be->sleep_ms(be->ctx, HU_IMSG_LAND_POLL_MS);
+        if (be->sent_boundary(be->ctx, req->route, req->to) > prior)
+            return true;
+    }
+    return false;
 }
 
 hu_imsg_send_path_t hu_imsg_send_text_via(const hu_imsg_send_backend_t *be,
                                           const hu_imsg_send_request_t *req) {
     if (!be || !req || !req->text)
         return HU_IMSG_SEND_PATH_NONE;
+    /* Read before any attempt: 0 = chat has no outbound rows yet, -1 = unknown. */
+    int64_t prior = be->sent_boundary ? be->sent_boundary(be->ctx, req->route, req->to) : -1;
     if (be->imsg_available && be->run_imsg) {
         const char *argv[10];
         if (hu_imsg_route_build_argv(req->route, req->to, req->text, req->service, argv, 10) > 0) {
-            bool ok = be->run_imsg(be->ctx, argv);
-            log_attempt(be, "imsg", ok, req->route);
-            if (ok)
+            if (be->run_imsg(be->ctx, argv)) {
+                log_attempt(be, "imsg", "ok", req->route);
                 return HU_IMSG_SEND_PATH_IMSG;
+            }
+            /* A timed-out imsg may have delivered: never send it twice. */
+            if (landed_since(be, req, prior)) {
+                log_attempt(be, "imsg", "landed", req->route);
+                return HU_IMSG_SEND_PATH_IMSG;
+            }
+            log_attempt(be, "imsg", "fail", req->route);
         }
     }
     if (!be->run_applescript)
@@ -216,16 +277,27 @@ hu_imsg_send_path_t hu_imsg_send_text_via(const hu_imsg_send_backend_t *be,
      * fits; an oversized request is refused and logged, never truncated. */
     char script[4608];
     if (cap > sizeof(script)) {
-        log_attempt(be, "applescript", false, req->route);
+        log_attempt(be, "applescript", "fail", req->route);
         return HU_IMSG_SEND_PATH_NONE;
     }
     int n = hu_imsg_route_build_applescript(req->route, req->as_service, req->tgt_esc, req->msg_esc,
                                             script, cap);
     if (n < 0 || (size_t)n >= cap) {
-        log_attempt(be, "applescript", false, req->route);
+        log_attempt(be, "applescript", "fail", req->route);
         return HU_IMSG_SEND_PATH_NONE;
     }
-    bool ok = be->run_applescript(be->ctx, script);
-    log_attempt(be, "applescript", ok, req->route);
-    return ok ? HU_IMSG_SEND_PATH_APPLESCRIPT : HU_IMSG_SEND_PATH_NONE;
+    unsigned timeout_s = hu_imsg_route_by_chat(req->route) ? HU_IMSG_AS_TIMEOUT_BY_CHAT_S
+                                                           : HU_IMSG_AS_TIMEOUT_BY_HANDLE_S;
+    if (be->run_applescript(be->ctx, script, timeout_s)) {
+        log_attempt(be, "applescript", "ok", req->route);
+        return HU_IMSG_SEND_PATH_APPLESCRIPT;
+    }
+    /* An expired Apple-event timeout can still deliver: look before calling
+     * it a failure. */
+    if (landed_since(be, req, prior)) {
+        log_attempt(be, "applescript", "landed", req->route);
+        return HU_IMSG_SEND_PATH_APPLESCRIPT;
+    }
+    log_attempt(be, "applescript", "fail", req->route);
+    return HU_IMSG_SEND_PATH_NONE;
 }

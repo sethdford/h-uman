@@ -45,7 +45,9 @@ bool hu_owner_notify_local(const char *body) {
         hu_log_warn("owner_notify", NULL, "owner notification failed (err=%d)", (int)err);
     return ok;
 #else
-    hu_log_warn("owner_notify", NULL, "no owner notification on this platform: %s", body);
+    /* Never echo the body: it names a contact. */
+    hu_log_warn("owner_notify", NULL, "no owner notification on this platform (%zu B dropped)",
+                strlen(body));
     return false;
 #endif
 }

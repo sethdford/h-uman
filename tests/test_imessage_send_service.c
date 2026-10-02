@@ -139,6 +139,35 @@ static void poll_group_message_leaves_no_route(void) {
     hu_imessage_destroy(&ch);
 }
 
+/* Wiring through the channel's send entry point: after an SMS inbound, a
+ * send to that contact carries the SMS chat route; a contact with no inbound
+ * gets "no route" (zeroed), never a stale or garbage one. */
+static void send_to_sms_contact_uses_the_chat_route(void) {
+    hu_imsg_route_reset();
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    HU_ASSERT_EQ(hu_imessage_create(&alloc, "+15551234567", 12, NULL, 0, &ch), HU_OK);
+    hu_imessage_test_msg_opts_t opts = {.chat_id = "RCS;-;+15550005555"};
+    HU_ASSERT_EQ(hu_imessage_test_inject_mock_full(&ch, "+15550005555", 12, "hi", 2, &opts), HU_OK);
+    hu_channel_loop_msg_t msgs[2];
+    memset(msgs, 0, sizeof(msgs));
+    size_t count = 0;
+    HU_ASSERT_EQ(hu_imessage_poll(ch.ctx, &alloc, msgs, 2, &count), HU_OK);
+
+    HU_ASSERT_EQ(ch.vtable->send(ch.ctx, "+15550005555", 12, "feel better", 11, NULL, 0), HU_OK);
+    hu_imsg_send_route_t r;
+    hu_imessage_test_last_send_route(&ch, &r);
+    HU_ASSERT_EQ((int)r.service, (int)HU_IMSG_SERVICE_RCS);
+    HU_ASSERT_TRUE(hu_imsg_route_by_chat(&r));
+
+    HU_ASSERT_EQ(ch.vtable->send(ch.ctx, "+15550006666", 12, "hey", 3, NULL, 0), HU_OK);
+    hu_imessage_test_last_send_route(&ch, &r);
+    HU_ASSERT_EQ((int)r.service, (int)HU_IMSG_SERVICE_UNKNOWN);
+    HU_ASSERT_FALSE(hu_imsg_route_by_chat(&r));
+    hu_imessage_destroy(&ch);
+    hu_imsg_route_reset();
+}
+
 void run_imessage_send_service_tests(void) {
     HU_RUN_TEST(test_send_service_defaults_to_auto);
     HU_RUN_TEST(test_send_service_env_can_restore_imessage_only);
@@ -148,6 +177,7 @@ void run_imessage_send_service_tests(void) {
     HU_RUN_TEST(test_applescript_service_type_token);
     HU_RUN_TEST(poll_remembers_the_sms_chat_a_contact_wrote_on);
     HU_RUN_TEST(poll_group_message_leaves_no_route);
+    HU_RUN_TEST(send_to_sms_contact_uses_the_chat_route);
 }
 
 #else

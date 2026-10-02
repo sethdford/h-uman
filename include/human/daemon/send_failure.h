@@ -26,12 +26,17 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#ifdef HU_ENABLE_SQLITE
-#include <sqlite3.h>
-
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* Final send failures recorded by this process (every build; 0 without
+ * SQLite). The reply loop compares it around a send to tell a failed send
+ * from a deliberate non-send (a bare tapback, the parrot guard). */
+uint64_t hu_daemon_send_failure_total(void);
+
+#ifdef HU_ENABLE_SQLITE
+#include <sqlite3.h>
 
 /* Record one final send failure (see above). `now` is unix seconds. */
 void hu_daemon_send_failure_record(sqlite3 *db, const hu_imessage_send_failed_event_t *ev,
@@ -41,17 +46,14 @@ void hu_daemon_send_failure_record(sqlite3 *db, const hu_imessage_send_failed_ev
  * recent delivered send (outbound_sends); *out_ts gets the failure time. */
 bool hu_daemon_send_failure_last_undelivered(sqlite3 *db, const char *contact, int64_t *out_ts);
 
-/* Final send failures recorded by this process. */
-uint64_t hu_daemon_send_failure_total(void);
-
 #ifdef HU_IS_TEST
 void hu_daemon_send_failure_test_reset(void);
 #endif
 
+#endif /* HU_ENABLE_SQLITE */
+
 #ifdef __cplusplus
 }
 #endif
-
-#endif /* HU_ENABLE_SQLITE */
 
 #endif /* HU_DAEMON_SEND_FAILURE_H */

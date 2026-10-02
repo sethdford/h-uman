@@ -341,6 +341,7 @@ typedef struct hu_imessage_ctx {
     size_t last_courtesy_message_len;
     size_t last_media_count;
     char last_media_path[256];
+    hu_imsg_send_route_t last_send_route; /* tests: route of the last send */
     struct {
         char session_key[128];
         char content[4096];
@@ -2244,33 +2245,70 @@ typedef struct {
 
 static bool imsg_be_run_imsg(void *ctx, const char *const *argv) {
     imsg_send_be_ctx_t *b = (imsg_send_be_ctx_t *)ctx;
-    int64_t land_prior = hu_imessage_get_latest_sent_rowid(b->tgt, b->tgt_len);
     hu_run_result_t r = {0};
     hu_error_t err = hu_process_run_with_timeout(b->c->alloc, argv, NULL, 65536, 15, &r);
     bool ok = (err == HU_OK && r.success && r.exit_code == 0);
     hu_run_result_free(b->c->alloc, &r);
-    if (!ok) {
-        /* A failure report is not proof nothing went out: a timed-out imsg
-         * had delivered, and the fallback sent it twice (Mindy, 2026-09-27).
-         * Give chat.db a moment, then look. */
-        usleep(2000000);
-        ok = hu_imessage_send_landed(land_prior,
-                                     hu_imessage_get_latest_sent_rowid(b->tgt, b->tgt_len));
-        if (ok)
-            hu_log_warn("imessage", NULL,
-                        "imsg reported failure but the text is in chat.db — not re-sending");
-    }
     return ok;
 }
 
-static bool imsg_be_run_applescript(void *ctx, const char *script) {
+static bool imsg_be_run_applescript(void *ctx, const char *script, unsigned timeout_s) {
     imsg_send_be_ctx_t *b = (imsg_send_be_ctx_t *)ctx;
     const char *argv[] = {"osascript", "-e", script, NULL};
     hu_run_result_t r = {0};
-    hu_error_t err = hu_process_run(b->c->alloc, argv, NULL, 65536, &r);
+    /* Outer bound: a wedged Messages must not hold the daemon indefinitely. */
+    hu_error_t err = hu_process_run_with_timeout(b->c->alloc, argv, NULL, 65536, timeout_s, &r);
     bool ok = (err == HU_OK && r.success && r.exit_code == 0);
     hu_run_result_free(b->c->alloc, &r);
     return ok;
+}
+
+/* MAX(ROWID) of is_from_me rows for the route's chat (by GUID — SMS/RCS rows
+ * can carry handle_id 0) or for the handle, as decimal text through the shared
+ * one-column helper. 0 = none yet; -1 = chat.db unreadable. */
+static int64_t imsg_be_sent_boundary(void *ctx, const hu_imsg_send_route_t *route, const char *to) {
+    (void)ctx;
+    char buf[32];
+    bool by_chat = hu_imsg_route_by_chat(route);
+    const char *key = by_chat ? route->chat_guid : to;
+    if (!key || !key[0])
+        return -1;
+    if (!imsg_query_text1(by_chat ? "SELECT CAST(COALESCE(MAX(m.ROWID), 0) AS TEXT) FROM message m "
+                                    "JOIN chat_message_join cmj ON cmj.message_id = m.ROWID "
+                                    "JOIN chat c ON c.ROWID = cmj.chat_id "
+                                    "WHERE c.guid = ?1 AND m.is_from_me = 1"
+                                  : "SELECT CAST(COALESCE(MAX(m.ROWID), 0) AS TEXT) FROM message m "
+                                    "WHERE m.is_from_me = 1 AND (m.handle_id IN "
+                                    "(SELECT ROWID FROM handle WHERE id = ?1) OR m.ROWID IN "
+                                    "(SELECT cmj.message_id FROM chat_message_join cmj "
+                                    "JOIN chat c ON c.ROWID = cmj.chat_id "
+                                    "WHERE c.chat_identifier = ?1))",
+                          0, key, strlen(key), buf, sizeof(buf)))
+        return -1;
+    return (int64_t)strtoll(buf, NULL, 10);
+}
+
+static void imsg_be_sleep_ms(void *ctx, unsigned ms) {
+    (void)ctx;
+    usleep((useconds_t)ms * 1000u);
+}
+
+/* After a restart the in-process route table is empty: rebuild this contact's
+ * route from chat.db — the chat of their latest message and the service of
+ * their latest INBOUND message — so the first reply still goes to the right
+ * chat. Not from the blue guard (HU_IMESSAGE_ALLOW_GREEN skips its lookup). */
+static bool imsg_route_recover(const char *tgt, size_t tgt_len, hu_imsg_send_route_t *route) {
+    char guid[HU_IMSG_ROUTE_GUID_MAX];
+    char svc[16];
+    if (!hu_imessage_reply_chat_guid_for_handle(tgt, tgt_len, guid, sizeof(guid)))
+        return false;
+    if (!imsg_query_text1("SELECT m.service FROM message m JOIN handle h ON m.handle_id = h.ROWID "
+                          "WHERE h.id = ? AND m.is_from_me = 0 AND m.service IS NOT NULL "
+                          "ORDER BY m.date DESC LIMIT 1",
+                          0, tgt, tgt_len, svc, sizeof(svc)))
+        return false;
+    hu_imsg_route_note_inbound(tgt, tgt_len, guid, svc);
+    return hu_imsg_route_lookup(tgt, tgt_len, route);
 }
 
 static void imsg_be_log_outcome(void *ctx, const char *line) {
@@ -2318,6 +2356,9 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
         if (message_len == 0 && media_count == 0)
             return HU_ERR_INVALID_ARGUMENT;
         c->last_media_count = media_count;
+        /* Same route lookup as production (a miss zeroes it); recorded so a
+         * test can see which chat the send would address. */
+        (void)hu_imsg_route_lookup(target, target_len, &c->last_send_route);
         if (media && media_count > 0 && media[0]) {
             size_t mp_len = strlen(media[0]);
             if (mp_len > sizeof(c->last_media_path) - 1)
@@ -2460,6 +2501,11 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
     hu_error_t send_err = HU_OK;
     char *clean = NULL;
     size_t clean_cap = 0;
+    /* Which chat this contact wrote on (SMS/RCS chats are sent to by chat).
+     * Zero-initialized: a miss must read as "no route". */
+    hu_imsg_send_route_t route = {0};
+    bool have_route =
+        hu_imsg_route_lookup(tgt, tgt_len, &route) || imsg_route_recover(tgt, tgt_len, &route);
 
     /* Skip empty text send when we have media (voice-only) */
     if (message_len > 0) {
@@ -2534,8 +2580,6 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
         /* Bridge sends (spec 2026-09-28): an effect the daemon marked for this
          * reply (Phase 3), or a bubble that is exactly one link as a rich-link
          * balloon (Phase 5). Any failure falls through to the plain send below. */
-        hu_imsg_send_route_t route;
-        bool have_route = hu_imsg_route_lookup(tgt, tgt_len, &route);
         /* The bridge verbs address `iMessage;-;<handle>`, which does not exist
          * for an SMS/RCS contact (read-only probe 2026-10-02: -1728), so a
          * green chat skips straight to the routed send below. */
@@ -2593,7 +2637,9 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
                                          .imsg_available = c->use_imsg_cli && imsg_cli_available(c),
                                          .run_imsg = imsg_be_run_imsg,
                                          .run_applescript = imsg_be_run_applescript,
-                                         .log_outcome = imsg_be_log_outcome};
+                                         .log_outcome = imsg_be_log_outcome,
+                                         .sent_boundary = imsg_be_sent_boundary,
+                                         .sleep_ms = imsg_be_sleep_ms};
             /* "auto" lets the CLI fall back to SMS for a handle-addressed
              * contact with no iMessage account; hardcoding "imessage" here is
              * what black-holed 124 sends to one RCS number. */
@@ -2725,8 +2771,11 @@ imsg_media:
                 continue;
 
             if (try_imsg_file) {
-                const char *fa[] = {"imsg", "send",      "--to",     imsg_tgt_buf, "--file",
-                                    url,    "--service", "imessage", NULL};
+                /* SMS/RCS chats get the file by chat GUID; others, as before. */
+                const char *fa[10];
+                if (hu_imsg_route_build_file_argv(have_route ? &route : NULL, imsg_tgt_buf, url, fa,
+                                                  10) == 0)
+                    continue;
                 hu_run_result_t ir = {0};
                 hu_error_t ie = hu_process_run_with_timeout(c->alloc, fa, NULL, 65536, 15, &ir);
                 bool fok = (ie == HU_OK && ir.success && ir.exit_code == 0);
@@ -2752,16 +2801,26 @@ imsg_media:
             if (!path_esc)
                 continue;
             escape_for_applescript(path_esc, path_esc_cap, url, path_len);
-            size_t m_script_cap = 256 + strlen(m_tgt_esc) + strlen(path_esc);
+            size_t m_script_cap =
+                256 + strlen(m_tgt_esc) + strlen(path_esc) + HU_IMSG_ROUTE_GUID_MAX;
             char *m_script = (char *)c->alloc->alloc(c->alloc->ctx, m_script_cap);
             if (m_script) {
+                bool m_by_chat = hu_imsg_route_by_chat(&route);
+                int m_chat_n = m_by_chat ? hu_imsg_route_build_chat_attach_script(
+                                               &route, path_esc, m_script, m_script_cap)
+                                         : -1;
                 size_t m_n =
-                    imessage_build_attach_script(m_script, m_script_cap, m_tgt_esc, path_esc);
+                    m_by_chat
+                        ? (m_chat_n > 0 && (size_t)m_chat_n < m_script_cap ? (size_t)m_chat_n : 0)
+                        : imessage_build_attach_script(m_script, m_script_cap, m_tgt_esc, path_esc);
                 c->alloc->free(c->alloc->ctx, path_esc, path_esc_cap);
                 if (m_n > 0) {
                     const char *argv[] = {"osascript", "-e", m_script, NULL};
                     hu_run_result_t result = {0};
-                    hu_error_t err = hu_process_run(c->alloc, argv, NULL, 65536, &result);
+                    hu_error_t err = hu_process_run_with_timeout(
+                        c->alloc, argv, NULL, 65536,
+                        m_by_chat ? HU_IMSG_AS_TIMEOUT_BY_CHAT_S : HU_IMSG_AS_TIMEOUT_BY_HANDLE_S,
+                        &result);
                     bool ok = (err == HU_OK && result.success && result.exit_code == 0);
                     hu_run_result_free(c->alloc, &result);
                     if (ok)
@@ -6994,6 +7053,14 @@ bool hu_imessage_test_chatdb_busy_log_emitted(hu_channel_t *ch) {
 
 void hu_imessage_set_test_send_stub(hu_imessage_test_send_stub_fn fn) {
     g_imessage_test_send_stub = fn;
+}
+
+void hu_imessage_test_last_send_route(hu_channel_t *ch, hu_imsg_send_route_t *out) {
+    if (!out)
+        return;
+    memset(out, 0, sizeof(*out));
+    if (ch && ch->ctx)
+        *out = ((hu_imessage_ctx_t *)ch->ctx)->last_send_route;
 }
 #endif
 

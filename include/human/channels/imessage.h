@@ -546,6 +546,11 @@ hu_error_t hu_imessage_test_inject_mock_full(hu_channel_t *ch, const char *sessi
                                              size_t content_len,
                                              const hu_imessage_test_msg_opts_t *opts);
 
+/** Test builds: the send route imessage_send looked up for its last send
+ *  (zeroed when none). Proves the send entry point consults the route table. */
+struct hu_imsg_send_route;
+void hu_imessage_test_last_send_route(hu_channel_t *ch, struct hu_imsg_send_route *out);
+
 /** Store a GUID→text mapping for lookup_message_by_guid in test builds (per-channel). */
 void hu_imessage_test_store_guid_text(hu_channel_t *ch, const char *guid, const char *text);
 

@@ -1,5 +1,12 @@
 /* Undelivered-send recorder. Contract: include/human/daemon/send_failure.h. */
 #include "human/daemon/send_failure.h"
+#include <stdatomic.h>
+
+static atomic_uint_fast64_t s_total;
+
+uint64_t hu_daemon_send_failure_total(void) {
+    return (uint64_t)atomic_load(&s_total);
+}
 
 #ifdef HU_ENABLE_SQLITE
 
@@ -17,16 +24,11 @@
 #define HU_SEND_FAILURE_NOTIFY_WINDOW_S 600
 #define HU_SEND_FAILURE_NOTIFY_SLOTS    16
 
-static atomic_uint_fast64_t s_total;
 static pthread_mutex_t s_mu = PTHREAD_MUTEX_INITIALIZER;
 static struct {
     char handle[64];
     int64_t at;
 } s_notified[HU_SEND_FAILURE_NOTIFY_SLOTS];
-
-uint64_t hu_daemon_send_failure_total(void) {
-    return (uint64_t)atomic_load(&s_total);
-}
 
 #ifdef HU_IS_TEST
 void hu_daemon_send_failure_test_reset(void) {
@@ -72,8 +74,9 @@ void hu_daemon_send_failure_record(sqlite3 *db, const hu_imessage_send_failed_ev
     uint64_t total = (uint64_t)atomic_fetch_add(&s_total, 1) + 1;
     /* Aggregate only: service and a count, never the text or the handle. */
     hu_log_warn("imessage", NULL,
-                "[send] UNDELIVERED: every path failed (chat_service=%s, %zu B); recorded as "
-                "send_failed, owner notified once per 10 min (failures this process: %llu)",
+                "[send] NOT CONFIRMED DELIVERED: every path failed and nothing landed in "
+                "chat.db (chat_service=%s, %zu B); recorded as send_failed, owner notified once "
+                "per 10 min (failures this process: %llu)",
                 svc, ev->text_len, (unsigned long long)total);
 
     if (db) {
@@ -97,8 +100,8 @@ void hu_daemon_send_failure_record(sqlite3 *db, const hu_imessage_send_failed_ev
         const char *tail = hl > 4 ? contact + hl - 4 : contact;
         char body[200];
         snprintf(body, sizeof(body),
-                 "h-uman could not deliver a message to ...%s (%s). Nothing went out - text "
-                 "them yourself.",
+                 "A message from h-uman to ...%s (%s) may not have been delivered. Check "
+                 "Messages before texting them yourself.",
                  tail, svc);
         (void)hu_owner_notify_local(body);
     }
