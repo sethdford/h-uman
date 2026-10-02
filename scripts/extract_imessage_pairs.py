@@ -37,6 +37,9 @@ MIN_REPLY_LENGTH = 2
 # Preceding turns attached to each ground-truth pair as `context_turns`. 6 covers
 # the typical iMessage exchange depth without blowing the eval's prompt budget.
 GT_CONTEXT_TURNS = 6
+# Consecutive bubbles from one speaker within this gap are one turn (Seth's
+# median gap between bubbles of one reply: 17 s, 2026-10-02).
+TURN_BUBBLE_GAP_S = 180
 
 # The daemon's own sends are is_from_me in chat.db too. A from-me message is
 # the daemon's when its text (normalized, >= DAEMON_MIN_CHARS) is contained in a
@@ -340,13 +343,44 @@ def build_conversation_windows(chat_messages):
     return windows
 
 
+def _speaker(m):
+    if _is_seth(m):
+        return "seth"
+    return "daemon" if m["is_from_me"] else "them"
+
+
+def collapse_turns(window):
+    """Merge consecutive bubbles from one speaker (Seth, the daemon, or the
+    contact) sent within TURN_BUBBLE_GAP_S of each other into one turn, the
+    texts joined with newlines (the daemon's splitter sends each line as its
+    own bubble). The turn keeps the first bubble's timestamp and fields.
+
+    Until 2026-10-02 every training target was a single bubble, so the model
+    never saw a reply that carries a second thought (50% of Seth's do)."""
+    turns = []
+    for m in window:
+        if not m.get("text"):
+            continue
+        last = turns[-1] if turns else None
+        if (last is not None and _speaker(last) == _speaker(m)
+                and m["timestamp"] - last["_last_ts"] <= TURN_BUBBLE_GAP_S):
+            last["text"] = last["text"] + "\n" + m["text"]
+            last["_last_ts"] = m["timestamp"]
+            continue
+        t = dict(m)
+        t["_last_ts"] = m["timestamp"]
+        turns.append(t)
+    return turns
+
+
 def extract_training_pairs(windows):
     """
-    For each window, create training examples where the last message is from Seth.
-    Use up to 6 messages of context.
+    For each window, create training examples whose last turn is Seth's whole
+    reply (collapse_turns), with up to 5 earlier turns of context.
     """
     pairs = []
     for window in windows:
+        window = collapse_turns(window)
         for i, msg in enumerate(window):
             if _is_seth(msg) and len(msg["text"]) >= MIN_REPLY_LENGTH:
                 context_start = max(0, i - 5)
@@ -386,6 +420,7 @@ def extract_ground_truth(windows):
     """
     gt = []
     for window in windows:
+        window = collapse_turns(window)  # whole replies, as in extract_training_pairs
         for i in range(len(window) - 1):
             incoming = window[i]
             reply = window[i + 1]

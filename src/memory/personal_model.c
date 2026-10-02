@@ -1368,14 +1368,19 @@ static void update_style_from_message(hu_communication_style_t *style, const cha
     if (timestamp > 0)
         style->last_observed_at = timestamp;
 
-    uint32_t len = (uint32_t)message_len;
-    if (prev_n == 0U) {
-        style->avg_message_length = len;
-    } else {
-        style->avg_message_length =
-            (uint32_t)(((uint64_t)style->avg_message_length * (uint64_t)prev_n + len) /
-                       (uint64_t)style->sample_count);
-    }
+    /* Exact (rounded) mean for the first HU_PM_LEN_WINDOW samples, then a
+     * rounded EWMA over the same window. The old cumulative integer mean
+     * truncated: past a few dozen samples a shorter message dropped it by 1
+     * and nothing could raise it, so production read "avg 2 chars"
+     * (2026-10-02) and recovery was impossible at sample_count ~5000. */
+    enum { HU_PM_LEN_WINDOW = 20 };
+    uint64_t len = (uint64_t)message_len;
+    uint64_t avg = style->avg_message_length;
+    uint64_t n = style->sample_count < HU_PM_LEN_WINDOW ? style->sample_count : HU_PM_LEN_WINDOW;
+    if (prev_n == 0U)
+        style->avg_message_length = (uint32_t)len;
+    else
+        style->avg_message_length = (uint32_t)((avg * (n - 1) + len + n / 2) / n);
 
     /* Verbosity: map length to 0..1 (500+ chars treated as fully verbose). */
     float verb = fminf(1.0f, (float)len / 500.0f);

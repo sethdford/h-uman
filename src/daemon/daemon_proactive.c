@@ -35,6 +35,7 @@
 #include "human/context/self_awareness.h"
 #include "human/core/paths.h"
 #include "human/core/string.h"
+#include "human/daemon/send_failure.h"
 #include "human/daemon_learning_tick.h" /* hu_daemon_proactive_outcome_record_send */
 #include "human/feeds/awareness.h"
 #include "human/feeds/processor.h"
@@ -902,6 +903,16 @@ bool hu_daemon_proactive_gate_and_send(struct hu_agent *agent, hu_allocator_t *a
             skip = true;
             skip_reason = "send_circuit_open";
         }
+        /* The last outbound to this contact failed on every path (recorded by
+         * daemon_send_failure.c with sent=0, so the 14-day repeat guard does
+         * not count it as asked — they never saw it). Say so, aggregate only. */
+        int64_t undelivered_at = 0;
+        if (cb_db && !skip &&
+            hu_daemon_send_failure_last_undelivered(cb_db, cp->contact_id, &undelivered_at))
+            hu_log_info("human", agent ? agent->observer : NULL,
+                        "[send] proactive to a contact whose last outbound never arrived "
+                        "(%llds ago); not counted as asked",
+                        (long long)((int64_t)now - undelivered_at));
     }
 #endif
 

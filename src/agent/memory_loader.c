@@ -7,6 +7,7 @@
 #include "human/core/string.h"
 #include "human/memory/personal_model.h"
 #include "human/memory/retrieval/adaptive.h"
+#include "human/memory/semantic_recall.h" /* hu_semantic_recall_hit_is_excluded */
 #include "human/memory/trust.h"
 #include "human/memory/wiki_page.h"
 #include <string.h>
@@ -78,6 +79,10 @@ void hu_memory_loader_set_wiki_mode_for_test(int mode) {
  * recall cap drops by the same bytes (hu_wiki_recall_cap), which is the
  * gate: prompt bytes per turn must go DOWN, specificity flat or up. */
 #define HU_WIKI_MAX_BYTES 1200
+
+/* Per-memory share of the recall budget. Real memory rows run 50-1,000 chars
+ * (2026-10-02); 600 keeps several in view instead of one monster. */
+#define HU_RECALL_ITEM_MAX_CHARS 600
 
 static const char k_wiki_header[] =
     "### Your page on them (compiled nightly from what you know; weave in, never recite):\n";
@@ -573,6 +578,12 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
          * not here in the recall list). */
         if (e->trust_tier == (int)HU_TRUST_UNTRUSTED)
             continue;
+        /* Same content policy as semantic recall: experience scaffolding (global
+         * turn logs holding other contacts' messages) and AI-identity
+         * confrontations never reach a reply prompt. Keyword recall skipped
+         * this check until 2026-10-02. */
+        if (hu_semantic_recall_hit_is_excluded(e->key, e->key_len, e->content, e->content_len))
+            continue;
         if (e->trust_tier <= (int)HU_TRUST_THIRD_PARTY && e->key && e->key_len > 0) {
             bool shadowed = false;
             for (size_t k = 0; k < count; k++) {
@@ -595,6 +606,14 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
         size_t content_len = e->content_len;
         const char *timestamp = e->timestamp ? e->timestamp : "";
         size_t timestamp_len = e->timestamp_len ? e->timestamp_len : strlen(timestamp);
+
+        /* One memory may not take the whole budget: a single 7,680-char row
+         * crowded out every other memory on 2026-10-02. */
+        if (content_len > HU_RECALL_ITEM_MAX_CHARS) {
+            content_len = HU_RECALL_ITEM_MAX_CHARS;
+            while (content_len > 0 && ((unsigned char)content[content_len] & 0xC0) == 0x80)
+                content_len--;
+        }
 
         /* Format: ### Memory: {key}\n{content}\n(stored: {timestamp})\n\n */
         size_t overhead = 26 + key_len + timestamp_len;
