@@ -1229,10 +1229,21 @@ jobs:
       # floor, the `limitations` field) join the same hermetic step — no
       # network, no real `human` binary, no chat.db/memory.db.
       - name: Insight-stream + curator + second-opinion pins (hermetic, no chat.db, no model)
-        run: python3 -m pytest -q tests/test_insight_stream_*.py tests/test_curator_*.py tests/test_second_opinion_*.py tests/test_graph_retype.py tests/test_eval_name_grounding.py tests/test_reply_length_gauge.py tests/test_eval_semantic_live_gate_fusion.py tests/test_eval_semantic_live_gate_judge.py scripts/test_eval_semantic_live_gate.py
+        run: python3 -m pytest -q tests/test_insight_stream_*.py tests/test_curator_*.py tests/test_second_opinion_*.py tests/test_graph_retype.py tests/test_eval_name_grounding.py tests/test_reply_length_gauge.py scripts/test_length_policy_caps.py tests/test_eval_semantic_live_gate_fusion.py tests/test_eval_semantic_live_gate_judge.py scripts/test_eval_semantic_live_gate.py
       # Prospective memory v2 tooling (spec 2026-09-30): fake `human` binary,
       # temp sqlite, temp logs — never ~/.human, chat.db or a model.
+      # Learned Style Profile (docs/guides/learned-style.md): fixture chat.db /
+      # memory.db in a temp dir, HOME redirected, fake interpreter for the
+      # nightly wrapper. Pins the shape vectors shared with the C runtime, the
+      # cap/refusal guardrails, and that no message text reaches any output.
+      - name: Learned-style learner + drift check pins (hermetic, no chat.db)
+        run: python3 -m pytest -q tests/test_learned_style_profile.py tests/test_learned_style_drift.py
       - name: Prospective memory v2 harness + backfill + shadow report + spot check (hermetic)
         run: python3 -m pytest -q tests/test_pm_bench_local.py tests/test_prospective_backfill.py tests/test_prospective_shadow_report.py tests/test_prospective_spot_check.py
+      # Memory benchmarks (LoCoMo / MSC / SOC-2508 -> replay turns + probe
+      # scorer, docs/guides/memory-benchmarks.md): synthetic format fixtures,
+      # file:// downloads into tmp_path — no network, no ~/.human, no model.
+      - name: Memory-benchmark converters + probe scorer + fetch scripts (hermetic)
+        run: python3 -m pytest -q tests/test_memory_benchmarks_converters.py tests/test_memory_probe_score.py tests/test_memory_benchmarks_fetch.py
       - name: Enforce capability registry against blind_ab gate
         run: python3 scripts/check_capability_gates.py

@@ -99,7 +99,8 @@ void hu_agent_internal_guard_context(const hu_agent_t *agent, const char *msg, s
  * Compacts msgs in place and returns the new count. */
 /* The provider the contact-recall planner may call: NULL (its local
  * heuristic path) for a short casual message, which is not worth a 4 s
- * planner call — the semantic-recall register gate already skips those. */
+ * planner call — the semantic-recall register gate already skips those —
+ * or when HU_RECALL_PLANNER_LLM is off/shadow (default live). */
 hu_provider_t *hu_agent_internal_recall_provider(hu_agent_t *agent, const char *msg,
                                                  size_t msg_len);
 

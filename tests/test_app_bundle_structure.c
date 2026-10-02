@@ -4,6 +4,7 @@
  * Verifies that the bundle directory tree exists, Info.plist is valid XML,
  * and that required keys are present in the plist.
  */
+// @covers-none — checks the on-disk apps/macOS bundle; there is no C module under test.
 
 #include "test_framework.h"
 
@@ -14,6 +15,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+/* Every test below is a no-op off Apple, so the helpers are Apple-only too. */
+#ifdef __APPLE__
 /**
  * Helper: resolve the path to the source bundle.
  * Searches up to 3 levels up from CWD for apps/macOS/Human.app/Contents.
@@ -65,20 +68,15 @@ static bool file_is_executable(const char *path) {
  * Helper: run plutil to validate Info.plist syntax.
  * Returns true if plutil -lint succeeds.
  *
- * Note: plutil is a macOS tool. On non-macOS, this test gracefully
- * skips bundle validation.
+ * plutil is a macOS tool, which is why these helpers are Apple-only.
  */
 static bool validate_plist_with_plutil(const char *plist_path) {
-#ifdef __APPLE__
     char cmd[512];
     snprintf(cmd, sizeof(cmd), "plutil -lint '%s' >/dev/null 2>&1", plist_path);
     int ret = system(cmd);
     return ret == 0;
-#else
-    (void)plist_path;
-    return true; /* skip on non-macOS */
-#endif
 }
+#endif /* __APPLE__ */
 
 /**
  * Test that the bundle directory structure exists.

@@ -4,6 +4,9 @@
  *
  * RED-TEAM-2: 18 tests covering full-stack integration and cross-feature pairs.
  */
+// @covers-none
+/* Cross-module red-team suite; it does not test src/security/adversarial.c, whose name the
+ * reference checker would otherwise infer. */
 #define HU_IS_TEST 1
 #include "human/agent.h"
 #include "human/agent/compaction_structured.h"
@@ -139,7 +142,9 @@ static void write_int_file(const char *dir, const char *name, const char *conten
 static void rm_int_rf(const char *dir) {
     char cmd[512];
     snprintf(cmd, sizeof(cmd), "rm -rf '%s'", dir);
-    (void)system(cmd);
+    if (system(cmd) != 0) {
+        /* best-effort cleanup; a (void) cast does not silence glibc warn_unused_result */
+    }
 }
 
 /* ======================================================================

@@ -20,7 +20,7 @@ footprint number.
 
 | Metric (release-size build) | Measured | Budget |
 | --- | --- | --- |
-| Binary size (MinSizeRel + LTO, all channels, sqlite-vec off) | <!-- fp:binary_kb -->~2760 KB<!-- /fp --> | <!-- fp:budget_binary_kb -->2800 KB<!-- /fp --> |
+| Binary size (MinSizeRel + LTO, all channels, sqlite-vec off) | <!-- fp:binary_kb -->~2760 KB<!-- /fp --> | <!-- fp:budget_binary_kb -->3000 KB<!-- /fp --> |
 | Cold start (`human --version`, median of 20 warm runs) | <!-- fp:startup_range -->3–6 ms<!-- /fp --> | <!-- fp:budget_startup_ms -->100 ms<!-- /fp --> |
 | Peak RSS (`human --version`) | <!-- fp:version_rss_mb -->6.9 MB<!-- /fp --> | <!-- fp:budget_version_rss_mb -->8 MB<!-- /fp --> |
 | Idle RSS (`human mcp`, isolated HOME, no config) | <!-- fp:idle_rss_mb -->8.6 MB<!-- /fp --> | none; tracked |

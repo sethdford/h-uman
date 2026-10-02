@@ -1,6 +1,7 @@
 /* Lean persona head. Contract: include/human/agent.h. */
 #include "human/agent.h"
 #include "human/agent/model_router.h"
+#include "human/agent/spoken_turn.h"
 #include "human/config.h"
 #include "human/core/paths.h"
 #include "human/core/string.h"
@@ -97,10 +98,11 @@ hu_error_t hu_agent_build_lean_persona_head(hu_agent_t *agent, const char *msg, 
      * which produced a stack-buffer-overflow caught by ASan and a
      * misuse of exs[ei] as an object instead of a pointer below. */
     {
-        const hu_persona_example_t *exs[5] = {NULL};
+        const hu_persona_example_t *exs[HU_TEXT_EXAMPLES] = {NULL};
         size_t ex_count = 0;
         hu_persona_select_examples(p, agent->active_channel, agent->active_channel_len, NULL, 0,
-                                   exs, &ex_count, 5, &agent->personal_model.style);
+                                   exs, &ex_count, hu_spoken_turn_example_cap(agent->spoken_turn),
+                                   &agent->personal_model.style);
         if (ex_count > 0) {
             int n = snprintf(lp + lpo, sizeof(lp) - lpo, "\nExamples of how you text:\n");
             if (n > 0 && lpo + (size_t)n < sizeof(lp))
@@ -114,6 +116,11 @@ hu_error_t hu_agent_build_lean_persona_head(hu_agent_t *agent, const char *msg, 
                 }
             }
         }
+    }
+    if (agent->spoken_turn) {
+        int n = snprintf(lp + lpo, sizeof(lp) - lpo, "%s", HU_SPOKEN_TURN_DIRECTIVE);
+        if (n > 0 && lpo + (size_t)n < sizeof(lp))
+            lpo += (size_t)n;
     }
     /* RAG-over-own-messages voice grounding (default off): retrieve
      * Seth's most-similar real past messages to THIS incoming message and
