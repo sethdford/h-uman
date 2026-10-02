@@ -183,7 +183,7 @@ consumers must read the group's `n`.
 | `inter_bubble_gap_s_p50` | `inter_bubble_gap_n` | Median seconds between consecutive bubbles of a turn (turns with ≥ 2 bubbles). |
 | `double_text_rate` | `double_text_n` | Share of Seth's reply turns followed by another Seth turn (> 90 s later, so not a bubble) within **2 h** (inclusive) with no message from the contact in between. Unknown (excluded) when the follow-up is not attributed to Seth, or the 2 h have not passed yet. Disjoint from initiation by construction: 2 h < the 6 h thread gap, so an outbound after a long silence is a thread start, never a double text. |
 | `double_text_gap_s_p50` | `double_text_gap_n` | Median gap of those double texts. |
-| `tapback_only_rate`, `tapback_with_text_rate` | `tapback_n` | Share of Seth's responses to an inbound burst (every from-me event after the burst, before the contact's next message, within 6 h) that were only a tapback (types 2000–2006, 2006 = custom emoji) on their message, or a tapback plus text/media. |
+| `tapback_only_rate`, `tapback_with_text_rate` | `tapback_n` | Share of Seth's responses to an inbound burst (every from-me event after the burst, before the contact's next message, within 6 h) that were only a tapback (types 2000–2006, 2006 = custom emoji) on their message, or a tapback plus text/media. Every 2000–3999 row (tapbacks, 2007 stickers, 3xxx removals) is a reaction row: it never opens or answers a burst and is never a sent message; only 2000–2006 are learned as tapbacks. |
 | `tapback_types{love,like,dislike,laugh,emphasize,question,emoji}`, `self_reaction_rate` | `reaction_n` | Share of Seth's tapbacks of each kind, and the share placed on his own message. |
 | `voice_memo_rate`, `gif_rate`, `share_rate` | `modality_n` | Share of Seth's message responses (tapback-only responses excluded) containing an audio message (`is_audio_message` or an `audio/*` attachment), a GIF (`image/gif` or a GIF balloon), or a link/media share (URL, URL balloon, any other attachment). |
 | `initiation_rate_per_week`, `initiation_share` | `initiation_n` | Thread starts: the first message after ≥ 6 h of silence either way. Rate = recency-weighted Seth starts per week of observed time (the exposure is the recency-weighted length of each observed span, so a 3-month gap between corpus and chat.db is not counted as silence). Share = Seth starts / (Seth + contact starts). Contact `overall` and `time:*` buckets only (a start answers nothing, so it has no shape or pace); absent from `shape:*` and `pace:*`. |
@@ -193,8 +193,10 @@ an h-uman or ambiguous send excludes its unit.
 
 *Tapback provenance (learner side ready, daemon side missing).* The learner
 reads memory.db `outbound_sends` rows with `kind = 'tapback'`: each claims the
-first from-me tapback for that contact after its `prior_max_rowid` boundary
-within 5 minutes, and a response unit holding a claimed tapback is the bot's
+first from-me tapback for that contact after its `prior_max_rowid` boundary,
+dated from 5 minutes before the record to 30 s after it (one-sided: the record
+is written once delivery is confirmed, so the bot's row precedes it; a tapback
+well after the record is a later one), and a response unit holding a claimed tapback is the bot's
 and leaves the tapback sample. Text attribution ignores `tapback` rows (with no
 text they would otherwise claim the nearest Seth text). The run log carries
 `tapback_provenance_rows_n`, `tapback_provenance_excluded_n` and
@@ -233,14 +235,22 @@ and buckets) is bounded to the global value: probabilities (`double_text_rate`,
 `tapback_*_rate`, `self_reaction_rate`, the modality rates,
 `initiation_share`) move at most 25% relative or 0.05 absolute, whichever is
 larger; times (`latency_p25/p75/p90_s`, `inter_bubble_gap_s_p50`,
-`double_text_gap_s_p50`) at most 25% relative. Latency quantiles are then
-re-ordered around v1's `latency_p50_s`, and ordering wins over the bound.
-`tapback_types` is a distribution: a contact's mix is pulled toward the global
-mix until their total-variation distance is ≤ 0.25, then renormalised so it
-sums to 1 (global too). The bound is applied again after the per-run cap, so
-it holds in the written file even where that overrides the per-run cap. Run
-log: `prior_clamped_n`, `mix_capped_n`, `post_cap_prior_clamped_n`,
-`post_cap_mix_capped_n`.
+`double_text_gap_s_p50`) at most 25% relative; `bubbles_p90` and
+`initiation_rate_per_week` 25% relative with the per-run floors (0.5, 0.25).
+Latency and bubble quantiles are then re-ordered around v1's unbounded
+`latency_p50_s` / `bubbles_p50`; ordering wins over the bound
+(`prior_order_overridden_n`). `tapback_types` is a distribution: a contact's
+mix is pulled toward the global mix until their total-variation distance is
+≤ 0.25, then renormalised so it sums to 1 (global too).
+
+*Bound vs per-run cap.* After the per-run cap the bound is re-applied to the
+capped global, restricted to each value's night-to-night interval (mixes: TV
+≤ 0.1 from the previous night's mix, which replaces the per-share cap), so the
+written file satisfies both. Only when the previous night itself lies outside
+the bound can the two not meet; then the per-run cap wins and
+`prior_bound_overridden_n` counts it. `max_rel_change` stays the largest
+pre-clamp move; `max_rel_change_written` is the largest move actually
+written. Run log also: `prior_clamped_n`, `mix_capped_n`, `post_cap_*`.
 
 **Provenance block.** The file carries `provenance`: `schema`,
 `generated_at`, `window` (`start`, `end`, `days`, `half_life_days`) and

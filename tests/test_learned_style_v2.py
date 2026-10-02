@@ -422,8 +422,10 @@ def test_cap_applies_to_v2_fields_with_floors():
     assert out["latency_p90_s"] == 780                    # +30%
     assert out["tapback_only_rate"] == pytest.approx(0.05)    # floor from 0
     assert out["initiation_rate_per_week"] == pytest.approx(2.2)  # +10%: allowed
-    assert out["tapback_types"]["love"] == pytest.approx(0.35)   # -30%
-    assert set(clamped) == {"latency_p90_s", "tapback_only_rate", "tapback_types.love"}
+    # The mix is a distribution: capped as a whole by TV in the final pass
+    # (enforce_global_bounds), never share by share here.
+    assert out["tapback_types"]["love"] == pytest.approx(0.1)
+    assert set(clamped) == {"latency_p90_s", "tapback_only_rate"}
 
 
 def test_v2_cap_clamps_are_logged_by_main(tmp_path):
@@ -886,26 +888,125 @@ def test_provenance_block_matches_golden(tmp_path):
     assert prov["window"]["end"] == NOW_ISO
 
 
-def test_bounds_still_hold_after_the_per_run_cap(tmp_path):
-    """The per-run cap clamps each mix share on its own (breaking the sum)
-    and can pull a contact back outside the global bound; the final pass
-    restores both in the written file."""
+# ── review round 2 (PR #603) ───────────────────────────────────────────────
+
+def test_sticker_rows_2007_open_no_units_and_are_not_tapbacks(tmp_path):
+    """2007 (sticker) is a reaction ROW like every 2000-3999 type: it never
+    opens or answers a burst, never counts as a sent message, and is not a
+    learned tapback kind (TAPBACK_CODES is 2000-2006)."""
+    fx = Fx(str(tmp_path))
+    fx.msg(A, 0, "hey", False)
+    g1 = fx.msg(A, 30, "yo", True)                        # unit 1: text
+    fx.react(A, HOUR, g1, 2007, from_me=False)            # their sticker: no burst
+    fx.react(A, HOUR + 20, g1, 2007)                      # Seth's sticker, nothing to answer
+    g2 = fx.msg(A, 3 * HOUR, "lol", False)
+    fx.react(A, 3 * HOUR + 15, g2, 2007)                  # unit 2: sticker-only response
+    us = _units(fx)
+    assert [u["kind"] for u in us] == ["text", "other"]
+    assert us[1]["has_msg"] is False and us[1]["att_ok"] is True
+    assert us[1]["latency_s"] == 15
+    assert all(u["reactions"] == [] and u["self_reactions"] == [] for u in us)
+    st = v2.unit_stats(us)
+    assert st["reaction_n"] == 0 and st["modality_n"] == 1
+    assert len(lsp.load_samples(fx.chat_path, fx.mem_path, [A], NOW, UTC)[0][A]) == 1
+
+
+def test_written_file_respects_the_per_run_cap_and_logs_bound_overrides(tmp_path):
+    """Previous night far outside the global bound: stability wins (the
+    per-run cap holds in the written file), the bound override is counted,
+    and max_rel_change_written describes the file actually written."""
     e = Env(tmp_path)
     e.build(_behaviour_fill)
     assert e.run() == 0
-    doc = e.load()
-    for ent in doc["contacts"].values():
-        ent["overall"]["tapback_types"] = dict.fromkeys(v2.TAPBACK_KINDS, 0.0) | {"dislike": 1.0}
+    prev = e.load()
+    for ent in prev["contacts"].values():
         ent["overall"]["tapback_only_rate"] = 1.0
+        ent["overall"]["tapback_types"] = dict.fromkeys(v2.TAPBACK_KINDS, 0.0) | {"dislike": 1.0}
     with open(e.out, "w") as f:
-        json.dump(doc, f)
+        json.dump(prev, f)
     assert e.run() == 0
     out = e.load()
-    g = out["global"]
-    for ent in out["contacts"].values():
-        st = ent["overall"]
+    for c, ent in out["contacts"].items():
+        st, pv = ent["overall"], prev["contacts"][c]["overall"]
+        assert abs(st["tapback_only_rate"] - 1.0) <= max(0.3 * 1.0, 0.05) + 1e-9
+        assert v2.tv_distance(st["tapback_types"], pv["tapback_types"]) <= \
+            v2.TAPBACK_MIX_NIGHT_TV_CAP + 1e-9
         assert abs(sum(st["tapback_types"].values()) - 1.0) <= 1e-9
-        assert v2.tv_distance(st["tapback_types"], g["tapback_types"]) <= v2.TAPBACK_MIX_TV_CAP + 1e-9
-        assert abs(st["tapback_only_rate"] - g["tapback_only_rate"]) <= max(
-            0.25 * g["tapback_only_rate"], 0.05) + 1e-9
-    assert e.log_lines()[-1]["post_cap_mix_capped_n"] >= 1
+    line = e.log_lines()[-1]
+    assert line["prior_bound_overridden_n"] >= 2
+    assert line["max_rel_change_written"] == pytest.approx(
+        lsp.max_rel_written(out, prev), abs=1e-4)
+    assert line["max_rel_change_written"] <= 0.3 + 1e-4 or line["max_rel_change_written"] < \
+        line["max_rel_change"]
+
+
+def test_bound_and_per_run_cap_both_hold_when_prev_is_inside_the_bound(tmp_path):
+    e = Env(tmp_path)
+    e.build(_behaviour_fill)
+    assert e.run() == 0
+    prev = e.load()
+    g = prev["global"]
+    pa = prev["contacts"][A]["overall"]
+    pa["tapback_only_rate"] = round(g["tapback_only_rate"] * 1.2, 4)   # inside the bound
+    with open(e.out, "w") as f:
+        json.dump(prev, f)
+    e.build(lambda fx: (_behaviour_fill(fx), [fx.react(A, 400 * HOUR + i, fx.msg(
+        A, 400 * HOUR + i - 10, "x", False), 2000) for i in range(0, 20 * 3 * HOUR, 3 * HOUR)]))
+    assert e.run() == 0
+    out = e.load()
+    st, go = out["contacts"][A]["overall"], out["global"]
+    assert abs(st["tapback_only_rate"] - pa["tapback_only_rate"]) <= \
+        max(0.3 * pa["tapback_only_rate"], 0.05) + 1e-9
+    assert abs(st["tapback_only_rate"] - go["tapback_only_rate"]) <= \
+        max(0.25 * go["tapback_only_rate"], 0.05) + 1e-9
+    assert e.log_lines()[-1]["prior_bound_overridden_n"] == 0
+
+
+def test_initiation_rate_and_bubbles_p90_are_bounded_too():
+    glob = {"initiation_rate_per_week": 2.0, "bubbles_p90": 2.0}
+    node = {"initiation_rate_per_week": 8.0, "bubbles_p90": 6.0}
+    out, clamped = v2.bound_to_global(dict(node), glob)
+    assert out["initiation_rate_per_week"] == pytest.approx(2.5)   # +25%
+    assert out["bubbles_p90"] == pytest.approx(2.5)                # +25%
+    assert set(clamped) == {"initiation_rate_per_week", "bubbles_p90"}
+
+
+def test_latency_ordering_wins_over_the_bound_and_is_counted():
+    """v1's latency_p50_s is never moved, so a bounded p25/p90 that would
+    cross it is re-ordered onto it: ordering wins, and it is counted."""
+    glob = {"latency_p25_s": 20, "latency_p50_s": 40, "latency_p75_s": 60,
+            "latency_p90_s": 100, "bubbles_p50": 1.0, "bubbles_p90": 2.0}
+    lo = {"latency_p25_s": 5, "latency_p50_s": 10, "latency_p75_s": 12, "latency_p90_s": 14,
+          "bubbles_p50": 1.0, "bubbles_p90": 2.0}
+    hi = {"latency_p25_s": 150, "latency_p50_s": 200, "latency_p75_s": 250,
+          "latency_p90_s": 300, "bubbles_p50": 1.0, "bubbles_p90": 2.0}
+    doc = {"global": glob, "contacts": {A: {"overall": dict(lo), "buckets": {}},
+                                        B: {"overall": dict(hi), "buckets": {}}}}
+    counts = v2.enforce_global_bounds(doc)
+    a, b = doc["contacts"][A]["overall"], doc["contacts"][B]["overall"]
+    assert a["latency_p50_s"] == 10 and b["latency_p50_s"] == 200      # v1 untouched
+    assert a["latency_p25_s"] == 10                     # bound says >= 15; ordering says <= 10
+    assert b["latency_p90_s"] == 200                    # bound says <= 125; ordering says >= 200
+    for st in (a, b):
+        assert st["latency_p25_s"] <= st["latency_p50_s"] <= st["latency_p75_s"] \
+            <= st["latency_p90_s"]
+    assert counts["prior_order_overridden_n"] >= 2
+
+
+@pytest.mark.parametrize("offset,claimed", [
+    (-60, True),          # the bot's row, stamped before its record (delivery first)
+    (10, True),           # chat.db date a little after the record: within the skew
+    (120, False),         # well after the record: a later tapback, not this send
+])
+def test_bot_tapback_window_is_one_sided(offset, claimed):
+    rec_t = NOW - dt.timedelta(days=1)
+    msgs = [{"guid": "t", "rowid": 50, "from_me": True, "atype": 2000,
+             "t": rec_t + dt.timedelta(seconds=offset)}]
+    assert (v2.claim_bot_tapbacks(msgs, [(rec_t, 10)]) == {"t"}) is claimed
+
+
+def test_bot_tapback_before_the_rowid_boundary_is_never_claimed():
+    rec_t = NOW - dt.timedelta(days=1)
+    msgs = [{"guid": "t", "rowid": 9, "from_me": True, "atype": 2000,
+             "t": rec_t - dt.timedelta(seconds=5)}]
+    assert v2.claim_bot_tapbacks(msgs, [(rec_t, 10)]) == set()

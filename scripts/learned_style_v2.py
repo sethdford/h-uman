@@ -64,10 +64,12 @@ DOUBLE_TEXT_MAX_S = 2 * 3600
 # pairing window: past it, a message no longer answers anything.
 THREAD_GAP_S = 6 * 3600
 assert DOUBLE_TEXT_MAX_S < THREAD_GAP_S
-# Tapback types: 2000-2006 are reactions, 2007 is sticker, 3xxx are removals.
-# Learn reactions (2000-2006) only; exclude stickers and removal markers.
-REACTION_RANGE = list(range(2000, 2007)) + list(range(3000, 4000))
-REACTION_RANGE = set(REACTION_RANGE)  # for O(1) lookup
+# "Is this a reaction ROW" (associated_message_type 2000-3999: tapbacks
+# 2000-2006, sticker 2007, removals 3xxx). Such a row never opens or answers
+# a burst and is never a sent message. Only TAPBACK_CODES (2000-2006) are
+# LEARNED as tapbacks; a sticker or removal is a reaction row learned as
+# nothing (review round 2: narrowing this set turned stickers into messages).
+REACTION_RANGE = frozenset(range(2000, 4000))
 TAPBACK_CODES = {2000: "love", 2001: "like", 2002: "dislike", 2003: "laugh",
                  2004: "emphasize", 2005: "question", 2006: "emoji"}
 TAPBACK_KINDS = tuple(TAPBACK_CODES.values())
@@ -116,13 +118,28 @@ PRIOR_PROB_FIELDS = ("double_text_rate", "tapback_only_rate", "tapback_with_text
                      "initiation_share")
 PRIOR_TIME_FIELDS = ("latency_p25_s", "latency_p75_s", "latency_p90_s",
                      "inter_bubble_gap_s_p50", "double_text_gap_s_p50")
-PRIOR_BOUND_FIELDS = PRIOR_PROB_FIELDS + PRIOR_TIME_FIELDS
-PRIOR_BOUND_FLOOR = dict.fromkeys(PRIOR_PROB_FIELDS, 0.05)
+# Neither probability nor time, bounded the same way (25% relative) with the
+# per-run cap's floors so a near-zero global value still lets a contact differ.
+# bubbles_p90 is re-ordered around v1's unbounded bubbles_p50 (ordering wins).
+PRIOR_OTHER_FIELDS = ("bubbles_p90", "initiation_rate_per_week")
+PRIOR_BOUND_FIELDS = PRIOR_PROB_FIELDS + PRIOR_TIME_FIELDS + PRIOR_OTHER_FIELDS
+PRIOR_BOUND_FLOOR = dict(dict.fromkeys(PRIOR_PROB_FIELDS, 0.05),
+                         bubbles_p90=0.5, initiation_rate_per_week=0.25)
+# Fields order_v2 may move after bounding.
+ORDERED_FIELDS = ("latency_p25_s", "latency_p75_s", "latency_p90_s", "bubbles_p90")
 # A contact's tapback_types mix is held within this total-variation distance
 # of the global mix, then renormalised to sum to 1. The spec gives no figure
 # for contact-vs-global (its 0.1 TV is the night-to-night cap), so 0.25,
 # matching PRIOR_BOUND_REL.
 TAPBACK_MIX_TV_CAP = 0.25
+# Night-to-night cap on a mix (the v2 design's "histograms by TV <= 0.1"):
+# replaces the per-share cap, which broke the mix's sum.
+TAPBACK_MIX_NIGHT_TV_CAP = 0.1
+# A tapback provenance record is written after delivery is confirmed (the
+# send-observer contract), so the bot's chat.db row is at or BEFORE the
+# record (bounded below by prior_max_rowid and EXACT_WINDOW_S); a row more
+# than this skew AFTER the record is a later tapback, never this send.
+TAPBACK_RECORD_SKEW_S = 30
 N_FIELDS = tuple(k for g in GROUPS.values() for k in g[:2] if k not in ("n", "n_eff"))
 # Top-level keys v2 adds to every stats node (tapback_types is one nested
 # object). Initiation keys are absent from shape:* and pace:* buckets.
@@ -269,7 +286,9 @@ def load_tapback_provenance(mem_path, since):
 def claim_bot_tapbacks(msgs, records):
     """Guids of from-me tapbacks the daemon sent: each record claims the
     first unclaimed from-me tapback after its chat.db ROWID boundary (when
-    known) within cq.EXACT_WINDOW_S of the record time."""
+    known), dated from cq.EXACT_WINDOW_S before the record (the send, then the
+    record once delivered) to TAPBACK_RECORD_SKEW_S after it. One-sided on
+    purpose: a tapback well after the record cannot be the send it reports."""
     taps = [m for m in msgs if m["from_me"] and m["atype"] in TAPBACK_CODES]
     claimed = set()
     for t, prior in records:
@@ -278,7 +297,8 @@ def claim_bot_tapbacks(msgs, records):
                 continue
             if prior is not None and prior >= 0 and m.get("rowid", prior + 1) <= prior:
                 continue
-            if abs((m["t"] - t).total_seconds()) > cq.EXACT_WINDOW_S:
+            d = (m["t"] - t).total_seconds()
+            if d < -cq.EXACT_WINDOW_S or d > TAPBACK_RECORD_SKEW_S:
                 continue
             claimed.add(m["guid"])
             break
@@ -553,16 +573,46 @@ def cap_v2(new, prev):
     fn, fp = flatten(new), flatten(prev) if isinstance(prev, dict) else {}
     clamped = []
     for f in VALUE_FIELDS:
+        if f.startswith("tapback_types."):
+            continue                 # a distribution: TV-capped in enforce_global_bounds
         v, p = fn.get(f), fp.get(f)
-        if v is None or not isinstance(p, (int, float)) or isinstance(p, bool):
+        if v is None or not _num(p):
             continue
-        allowed = max(lsp.CAP_REL * abs(p), CAP_FLOOR.get(f, RATE_FLOOR))
-        if abs(v - p) > allowed + 1e-9:
-            if f in INT_FIELDS:
-                allowed = math.floor(allowed)
-            fn[f] = p + allowed if v > p else p - allowed
+        lo, hi = run_interval(f, p)
+        if v < lo or v > hi:
+            fn[f] = hi if v > p else lo
             clamped.append(f)
     return nest(finish_v2(fn)), clamped
+
+
+def _num(x):
+    return isinstance(x, (int, float)) and not isinstance(x, bool)
+
+
+def _grid(lo, hi, f):
+    """Round an interval INWARD to what the file stores (integers or 4 dp),
+    so rounding a clamped value never moves it outside the interval."""
+    if f in INT_FIELDS:
+        return math.ceil(lo - 1e-9), math.floor(hi + 1e-9)
+    return math.ceil(lo * 1e4 - 1e-6) / 1e4, math.floor(hi * 1e4 + 1e-6) / 1e4
+
+
+def run_interval(f, p):
+    """The per-run (night-to-night) interval for field f around the previous
+    value p: max(30% of p, the field's floor)."""
+    import learned_style_profile as lsp
+
+    allowed = max(lsp.CAP_REL * abs(p), CAP_FLOOR.get(f, RATE_FLOOR))
+    return _grid(p - allowed, p + allowed, f)
+
+
+def bound_interval(f, g):
+    """The global-prior interval for field f around the global value g."""
+    allowed = max(PRIOR_BOUND_REL * abs(g), PRIOR_BOUND_FLOOR.get(f, 0.0))
+    lo, hi = g - allowed, g + allowed
+    if f in PRIOR_PROB_FIELDS:
+        lo, hi = max(lo, 0.0), min(hi, 1.0)
+    return _grid(lo, hi, f)
 
 
 def max_rel_v2(new, prev):
@@ -580,17 +630,29 @@ def bound_to_global(node, glob):
     max(PRIOR_BOUND_REL * |global|, floor) of the global value; probabilities
     stay in [0, 1], times stay integers rounded toward the global value.
     Returns (node, [clamped field names])."""
-    clamped = []
+    return _bound(node, glob, None)[:2]
+
+
+def _bound(node, glob, prev):
+    """bound_to_global, restricted to the per-run interval around prev's value
+    when prev (the previous night's node) has one: the result then satisfies
+    both whenever the two intervals meet. When they do not (prev itself lies
+    outside the bound), stability wins and the field is reported overridden.
+    Returns (node, [clamped], [overridden])."""
+    clamped, overridden = [], []
     for f in PRIOR_BOUND_FIELDS:
         v, p = node.get(f), (glob or {}).get(f)
         if v is None or p is None:
             continue
-        allowed = max(PRIOR_BOUND_REL * abs(p), PRIOR_BOUND_FLOOR.get(f, 0.0))
-        lo, hi = p - allowed, p + allowed
-        if f in PRIOR_PROB_FIELDS:
-            lo, hi = max(lo, 0.0), min(hi, 1.0)
-        if f in INT_FIELDS:
-            lo, hi = math.ceil(lo - 1e-9), math.floor(hi + 1e-9)
+        lo, hi = bound_interval(f, p)
+        q = (prev or {}).get(f)
+        if _num(q):
+            a, b = run_interval(f, q)
+            if max(lo, a) <= min(hi, b):
+                lo, hi = max(lo, a), min(hi, b)
+            else:
+                lo, hi = a, b
+                overridden.append(f)
         if v < lo - 1e-12:
             node[f] = lo
         elif v > hi + 1e-12:
@@ -598,7 +660,7 @@ def bound_to_global(node, glob):
         else:
             continue
         clamped.append(f)
-    return node, clamped
+    return node, clamped, overridden
 
 
 def _normalise(mix):
@@ -629,26 +691,69 @@ def cap_mix(mix, gmix, cap=TAPBACK_MIX_TV_CAP):
     return _normalise({k: g[k] + s * (p[k] - g[k]) for k in TAPBACK_KINDS}), True
 
 
-def enforce_global_bounds(doc):
-    """Final pass over a profile document (after shrinkage, and again after
-    the per-run cap): bound every contact node to the global prior and cap
-    its tapback mix. Returns counts only."""
-    out = {"prior_clamped_n": 0, "mix_capped_n": 0}
+def night_cap_mix(mix, prev, cap=TAPBACK_MIX_NIGHT_TV_CAP):
+    """Move from the previous night's mix toward `mix` until their TV is at
+    most cap (a point on the segment, so it stays a distribution)."""
+    p = _normalise(prev)
+    if mix is None or p is None:
+        return mix
+    tv = tv_distance(mix, p)
+    if tv <= cap:
+        return mix
+    t = cap / tv
+    return _normalise({k: p[k] + t * (mix[k] - p[k]) for k in TAPBACK_KINDS})
+
+
+def _contact_nodes(doc):
+    for c, entry in (doc.get("contacts") or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        if isinstance(entry.get("overall"), dict):
+            yield (c, "overall"), entry["overall"]
+        for b, st in (entry.get("buckets") or {}).items():
+            if isinstance(st, dict):
+                yield (c, b), st
+
+
+def enforce_global_bounds(doc, prev_doc=None):
+    """Bound every contact node to the global prior and cap its tapback mix
+    (TV <= TAPBACK_MIX_TV_CAP from the global mix, sum 1). Run after
+    shrinkage, and again after the per-run cap with prev_doc: then every
+    value is also kept inside its night-to-night interval (mixes: TV <=
+    TAPBACK_MIX_NIGHT_TV_CAP from the previous mix), so the written file
+    satisfies both caps whenever that is possible; where it is not, the
+    per-run cap wins and prior_bound_overridden_n counts it. order_v2
+    re-orders latency/bubble quantiles last (prior_order_overridden_n counts
+    a quantile ordering pushed outside its bound). Returns counts only."""
+    out = {"prior_clamped_n": 0, "mix_capped_n": 0, "prior_bound_overridden_n": 0,
+           "prior_order_overridden_n": 0}
     glob = doc.get("global")
     if not isinstance(glob, dict):
         return out
-    gmix = _normalise(glob.get("tapback_types"))
+    prev_doc = prev_doc if isinstance(prev_doc, dict) else {}
+    pglob = prev_doc.get("global") if isinstance(prev_doc.get("global"), dict) else {}
+    gmix = night_cap_mix(_normalise(glob.get("tapback_types")), pglob.get("tapback_types"))
     if gmix is not None:
         glob["tapback_types"] = gmix
-    for entry in (doc.get("contacts") or {}).values():
-        for st in [entry["overall"]] + list(entry["buckets"].values()):
-            _, clamped = bound_to_global(st, glob)
-            order_v2(st)
-            out["prior_clamped_n"] += len(clamped)
-            mix, capped = cap_mix(st.get("tapback_types"), gmix)
-            if mix is not None:
-                st["tapback_types"] = mix
-            out["mix_capped_n"] += capped
+    prev_nodes = dict(_contact_nodes(prev_doc))
+    for path, st in _contact_nodes(doc):
+        pv = prev_nodes.get(path) or {}
+        _, clamped, overridden = _bound(st, glob, pv)
+        before = {f: st.get(f) for f in ORDERED_FIELDS}
+        order_v2(st)
+        for f in ORDERED_FIELDS:
+            if st.get(f) != before[f] and glob.get(f) is not None:
+                lo, hi = bound_interval(f, glob[f])
+                out["prior_order_overridden_n"] += not (lo <= st[f] <= hi)
+        out["prior_clamped_n"] += len(clamped)
+        out["prior_bound_overridden_n"] += len(overridden)
+        mix, capped = cap_mix(st.get("tapback_types"), gmix)
+        mix = night_cap_mix(mix, pv.get("tapback_types"))
+        if mix is not None:
+            st["tapback_types"] = mix
+            if gmix is not None and tv_distance(mix, gmix) > TAPBACK_MIX_TV_CAP + 1e-9:
+                out["prior_bound_overridden_n"] += 1
+        out["mix_capped_n"] += capped
     return out
 
 

@@ -539,6 +539,24 @@ def apply_cap(new_doc, prev_doc):
     return clamped_n, fields, max_rel
 
 
+def max_rel_written(doc, prev_doc):
+    """Largest relative change of any v1 or v2 value between two documents
+    (same node, previous value non-zero), or None."""
+    prev_nodes = dict(_stat_nodes(prev_doc))
+    best = None
+    for path, st in _stat_nodes(doc):
+        pv = prev_nodes.get(path)
+        if pv is None:
+            continue
+        fn, fp = lsv2.flatten(st), lsv2.flatten(pv)
+        for f in VALUE_FIELDS + lsv2.VALUE_FIELDS:
+            v, p = fn.get(f), fp.get(f)
+            if lsv2._num(v) and lsv2._num(p) and p != 0:
+                rel = abs(v - p) / abs(p)
+                best = rel if best is None else max(best, rel)
+    return best
+
+
 # ── files ──────────────────────────────────────────────────────────────────
 
 def write_atomic(path, obj):
@@ -774,12 +792,13 @@ def main(argv=None):
             _, _, max_rel = apply_cap(json.loads(json.dumps(doc)), prev)
         else:
             clamped_n, clamped_fields, max_rel = apply_cap(doc, prev)
-            # The per-run cap can pull a contact back outside the global
-            # prior bound or break its mix's sum: the bound is re-applied
-            # last, so it holds in the written file.
-            post = lsv2.enforce_global_bounds(doc)
-            bounds["post_cap_prior_clamped_n"] = post["prior_clamped_n"]
-            bounds["post_cap_mix_capped_n"] = post["mix_capped_n"]
+            # Re-bound to the (capped) global, inside each value's per-run
+            # interval: both caps hold in the written file unless the
+            # previous night was itself outside the bound, where stability
+            # wins (prior_bound_overridden_n).
+            post = lsv2.enforce_global_bounds(doc, prev)
+            bounds.update({f"post_cap_{k}" if k != "prior_bound_overridden_n" else k: v
+                           for k, v in post.items()})
     counts = {
         "samples": sum(len(v) for v in samples.values()),
         "contacts": len(doc["contacts"]),
@@ -788,6 +807,11 @@ def main(argv=None):
         "global_n": doc["global"]["n"] if doc["global"] else 0,
         "clamped_n": clamped_n,
         "max_rel_change": round(max_rel, 4) if max_rel is not None else None,
+        # max_rel_change is the largest PRE-clamp move (v1 contract); this is
+        # the largest move actually written, after every cap and bound.
+        "max_rel_change_written": (round(max_rel_written(doc, prev), 4)
+                                   if prev is not None and status is None
+                                   and max_rel_written(doc, prev) is not None else None),
         "first_run": first_run,
         # Replies whose shape differs between the last inbound bubble alone and
         # the whole burst: how much the burst rule actually moves bucketing.
