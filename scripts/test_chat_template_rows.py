@@ -128,12 +128,43 @@ def test_mlx_tune_orpo_tokenization_of_templated_row(tok):
     for ids in (t["chosen_ids"], t["rejected_ids"]):
         assert ids[0] == gmask and ids.count(gmask) == 1   # encode() re-added no BOS
         assert ids[-1] == eot                              # the turn end is trained
-    # The shared prefix covers the whole production prompt.
     p_ids = tok.encode(row["prompt"])
-    assert t["prompt_length"] >= len(p_ids)
     assert t["chosen_ids"][: len(p_ids)] == p_ids
     s = SimPOTrainer._tokenize_pair(fake, row)
     assert s["chosen_ids"][-1] == eot and s["rejected_ids"][-1] == eot
+
+
+def test_newline_is_its_own_token_after_think_close(tok):
+    """The reply's first token is a standalone "\n" -- so it is exactly the
+    token the shared-prefix path used to leave untrained."""
+    row = ctr.format_pair(tok, ROW, system=SYSTEM)
+    ids = tok.encode(row["prompt"] + row["chosen"])
+    n = len(tok.encode(row["prompt"]))
+    assert tok.convert_ids_to_tokens(ids[n - 1:n + 2]) == ["</think>", "\u010a", "yeah"]
+
+
+@pytest.mark.parametrize("mode", ["orpo", "simpo"])
+@pytest.mark.parametrize("rejected", [ROW["rejected"], "yeah no, can't make it", ""])
+def test_loss_starts_at_first_reply_token(tok, mode, rejected):
+    """C1: with batch_size 1 mlx-tune trains only ids[prompt_length:], and
+    prompt_length was the common prefix of chosen/rejected -- which always
+    swallowed the leading "\n" (and shared words like "yeah"). After
+    pin_prompt_length it must equal len(encode(prompt)) exactly."""
+    import mlx_tune_train as mt
+    from mlx_tune.rl_trainers import ORPOTrainer, SimPOTrainer
+
+    cls = ORPOTrainer if mode == "orpo" else SimPOTrainer
+    attr = mt._PAIR_TOKENIZERS[mode]
+    trainer = SimpleNamespace(tokenizer=tok, max_seq_length=2048)
+    setattr(trainer, attr, lambda s: getattr(cls, attr)(trainer, s))
+    assert mt.pin_prompt_length(trainer, mode, tok) is True
+    row = ctr.format_pair(tok, {**ROW, "rejected": rejected}, system=SYSTEM)
+    t = getattr(trainer, attr)(row)
+    n = len(tok.encode(row["prompt"]))
+    assert t["prompt_length"] == n
+    # the first trained target is the reply's first token, "\n" (or the stop
+    # token itself for an empty rejected reply)
+    assert t["chosen_ids"][t["prompt_length"]] == tok.convert_tokens_to_ids("\u010a")
 
 
 def test_raw_row_is_what_the_old_pipeline_trained(tok):
@@ -148,20 +179,39 @@ def test_raw_row_is_what_the_old_pipeline_trained(tok):
     assert t["chosen_ids"][-1] not in (151329, 151336, 151338)
 
 
-def test_driver_contract_check_accepts_templated_and_rejects_raw(tok):
-    import mlx_tune_train as mt
+def _orpo_trainer(tok, max_seq_length=2048):
     from mlx_tune.rl_trainers import ORPOTrainer
 
-    trainer = SimpleNamespace(tokenizer=tok, max_seq_length=2048)
+    trainer = SimpleNamespace(tokenizer=tok, max_seq_length=max_seq_length)
     trainer._tokenize_preference_pair = lambda s: ORPOTrainer._tokenize_preference_pair(trainer, s)
+    return trainer
+
+
+def test_driver_contract_check_accepts_templated_and_rejects_raw(tok):
+    import mlx_tune_train as mt
+
     good = [ctr.format_pair(tok, ROW, system=SYSTEM)]
-    assert mt.assert_trainer_sees_template(trainer, good, "orpo", tok) == 1
+    trainer = _orpo_trainer(tok)
+    mt.pin_prompt_length(trainer, "orpo", tok)
+    assert mt.assert_trainer_sees_template(trainer, good, "orpo", tok) == 2
     with pytest.raises(SystemExit):
         mt.assert_trainer_sees_template(trainer, [ROW], "orpo", tok)
     # Truncation that cuts the end-of-turn token is caught too.
-    trainer.max_seq_length = 20
+    short = _orpo_trainer(tok, max_seq_length=20)
+    mt.pin_prompt_length(short, "orpo", tok)
     with pytest.raises(SystemExit):
-        mt.assert_trainer_sees_template(trainer, good, "orpo", tok)
+        mt.assert_trainer_sees_template(short, good, "orpo", tok)
+
+
+def test_driver_contract_check_rejects_unpinned_prompt_length(tok):
+    """Without pin_prompt_length the stock trainer's common-prefix
+    prompt_length is caught before any training step."""
+    import mlx_tune_train as mt
+
+    good = [ctr.format_pair(tok, ROW, system=SYSTEM)]
+    with pytest.raises(SystemExit) as e:
+        mt.assert_trainer_sees_template(_orpo_trainer(tok), good, "orpo", tok)
+    assert "prompt_length" in str(e.value)
 
 
 # --------------------------------------------------------------------------
@@ -221,3 +271,36 @@ def test_driver_refuses_raw_glm_corpus(tmp_path, monkeypatch):
         mt.require_templated_corpus(MODEL, tmp_path)
     # non-GLM bases are out of this contract's scope
     assert mt.require_templated_corpus("mlx-community/gemma-4-31b-it-4bit", tmp_path)["raw"] == 1
+
+
+def test_kept_fraction_gate_covers_valid_too():
+    ok = {"kept": 95, "dropped": 5, "drop_reasons": {}}
+    assert ctr.kept_fraction_failures({"train.jsonl": ok, "valid.jsonl": ok}, 0.9) == []
+    bad_valid = {"kept": 8, "dropped": 2, "drop_reasons": {"x": 2}}
+    fails = ctr.kept_fraction_failures({"train.jsonl": ok, "valid.jsonl": bad_valid}, 0.9)
+    assert len(fails) == 1 and fails[0].startswith("valid.jsonl")
+    assert ctr.kept_fraction_failures({"train.jsonl": {"kept": 0, "dropped": 0,
+                                                        "drop_reasons": {}}}, 0.9)
+
+
+def test_cli_default_threshold_fails_when_valid_rows_drop(tok, tmp_path, monkeypatch):
+    monkeypatch.setattr(ctr, "load_serving_tokenizer", lambda model_id=None: tok)
+    src = tmp_path / "raw"
+    src.mkdir()
+    (src / "train.jsonl").write_text("".join(json.dumps(ROW) + "\n" for _ in range(10)))
+    (src / "valid.jsonl").write_text(json.dumps(ROW) + "\n"
+                                     + json.dumps({**ROW, "chosen": "<think>x</think>y"}) + "\n")
+    assert ctr.main(["--in-dir", str(src), "--out-dir", str(tmp_path / "o")]) == 1
+
+
+def test_system_prompt_token_count_and_reply_share(tok, tmp_path):
+    src = tmp_path / "raw"
+    src.mkdir()
+    (src / "train.jsonl").write_text(json.dumps(ROW) + "\n")
+    bare = ctr.convert_dir(src, tmp_path / "a", tokenizer=tok)
+    long_sys = "You are Seth. " * 200
+    withsys = ctr.convert_dir(src, tmp_path / "b", tokenizer=tok, system=long_sys)
+    assert bare["system_prompt_tokens"] == 0 and withsys["system_prompt_tokens"] > 500
+    a, b = bare["files"]["train.jsonl"], withsys["files"]["train.jsonl"]
+    # a long system prompt shrinks the reply's share of the NLL denominator
+    assert b["chosen_reply_share_median"] < a["chosen_reply_share_median"] / 5
