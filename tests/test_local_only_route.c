@@ -77,12 +77,14 @@ static void rec_note(rec_prov_t *r, const char *model, size_t model_len) {
     r->calls++;
 }
 
+#ifdef HU_ENABLE_SQLITE
 static bool rec_saw(const rec_prov_t *r, const char *model) {
     for (unsigned i = 0; i < r->calls && i < 8; i++)
         if (strcmp(r->models[i], model) == 0)
             return true;
     return false;
 }
+#endif
 
 static hu_error_t rec_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_request_t *req,
                            const char *model, size_t model_len, double temperature,
