@@ -58,7 +58,10 @@ DOUBLE_TEXT_MAX_S = 24 * 3600
 # A thread start: the first message after this much silence either way. The
 # pairing window: past it, a message no longer answers anything.
 THREAD_GAP_S = 6 * 3600
-REACTION_RANGE = range(2000, 4000)          # tapbacks and their removals
+# Tapback types: 2000-2006 are reactions, 2007 is sticker, 3xxx are removals.
+# Learn reactions (2000-2006) only; exclude stickers and removal markers.
+REACTION_RANGE = list(range(2000, 2007)) + list(range(3000, 4000))
+REACTION_RANGE = set(REACTION_RANGE)  # for O(1) lookup
 TAPBACK_CODES = {2000: "love", 2001: "like", 2002: "dislike", 2003: "laugh",
                  2004: "emphasize", 2005: "question", 2006: "emoji"}
 TAPBACK_KINDS = tuple(TAPBACK_CODES.values())
@@ -223,7 +226,6 @@ def response_units(msgs, labels, meta, activity, now, tz):
     order, reactions included. Returns numbers, booleans and kind names."""
     import learned_style_profile as lsp       # shape / bands / burst rule
 
-    contact_guids = {m["guid"] for m in msgs if not m["from_me"] and m["atype"] not in REACTION_RANGE}
     me_guids = {m["guid"] for m in msgs if m["from_me"] and m["atype"] not in REACTION_RANGE}
     units, burst, resp = [], [], None
     last_me_t, inbound_gap = None, None

@@ -634,6 +634,27 @@ def test_main_drops_an_ambiguous_extra_history_instead_of_learning_it(tmp_path):
     assert line["extra_ambiguous_n"] == 10
 
 
+def test_non_utc_timezone_handling(tmp_path, monkeypatch):
+    """Verify that timestamp parsing is timezone-independent."""
+    fx = Fx(str(tmp_path))
+    # Set a non-UTC timezone to verify _memdb_true_t doesn't depend on local TZ
+    monkeypatch.setenv("TZ", "America/Los_Angeles")
+    fx.msg(A, 0, "hey", False)
+    fx.msg(A, 30, "hi", True)
+    fx.msg(A, 2 * HOUR, "hey", False)
+    fx.msg(A, 2 * HOUR + 30, "bye", True)
+
+    # Parse with explicit UTC timezone - should give consistent results
+    fx.close()
+    att, meta, act = v2_inputs(fx)
+    us = v2.response_units(att["messages"][A], att["labels"], meta, act.get(A, []), NOW, UTC)
+
+    # Verify the units were created correctly regardless of TZ env
+    assert len(us) == 2
+    assert us[0]["latency_s"] == 30
+    assert us[1]["latency_s"] == 30
+
+
 def test_dry_run_prints_v2_counts_only(tmp_path, capsys):
     e = Env(tmp_path)
     e.build(_behaviour_fill)
