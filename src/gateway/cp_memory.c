@@ -424,7 +424,8 @@ hu_error_t cp_memory_graph(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_c
     if (app && app->graph) {
         hu_graph_entity_t *entities = NULL;
         size_t entity_count = 0;
-        if (hu_graph_list_entities(app->graph, alloc, "", 0, 100, &entities, &entity_count) == HU_OK &&
+        if (hu_graph_list_entities(app->graph, alloc, "", 0, 100, &entities, &entity_count) ==
+                HU_OK &&
             entities) {
             for (size_t i = 0; i < entity_count; i++) {
                 hu_json_value_t *e = hu_json_object_new(alloc);
@@ -444,7 +445,8 @@ hu_error_t cp_memory_graph(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_c
 
         hu_graph_relation_t *relations = NULL;
         size_t relation_count = 0;
-        if (hu_graph_list_relations(app->graph, alloc, "", 0, 200, &relations, &relation_count) == HU_OK &&
+        if (hu_graph_list_relations(app->graph, alloc, "", 0, 200, &relations, &relation_count) ==
+                HU_OK &&
             relations) {
             for (size_t i = 0; i < relation_count; i++) {
                 hu_json_value_t *r = hu_json_object_new(alloc);
@@ -484,9 +486,6 @@ hu_error_t cp_memory_consolidate(hu_allocator_t *alloc, hu_app_context_t *app, h
 
     hu_memory_t *memory = app->agent->memory;
     hu_consolidation_config_t config = HU_CONSOLIDATION_DEFAULTS;
-    config.provider = &app->agent->provider;
-    config.model = app->agent->model_name;
-    config.model_len = app->agent->model_name_len;
     hu_error_t err = hu_memory_consolidate(alloc, memory, &config);
     if (err != HU_OK)
         return err;
