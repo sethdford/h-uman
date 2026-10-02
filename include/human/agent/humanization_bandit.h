@@ -22,9 +22,18 @@ extern "C" {
  * - Else: conservative (disfluency=0.05, backchannel=0.10)
  * - New contacts default to conservative (safe)
  *
- * Thread-safe: reads bandit arm state only; does not modify. */
+ * Advances the bandit's sampler state (each call is a fresh Thompson draw);
+ * NOT thread-safe — call from the daemon thread that owns the bandit. */
 hu_humanization_config_t hu_humanization_decide_contact_params(hu_contextual_bandit_t *bandit,
                                                                uint64_t contact_handle);
+
+/* One Thompson draw of theta ~ Beta(alpha, beta) for the contact's arm.
+ * Advances bandit->rng_seed, so repeated calls with a fixed posterior vary
+ * and average to alpha / (alpha + beta). An unseen contact gets a fresh
+ * Beta(1,1) arm (as hu_contextual_bandit_get_arm does). Returns
+ * HU_ERR_INVALID_ARGUMENT on NULL / zero handle. */
+hu_error_t hu_humanization_bandit_sample_theta(hu_contextual_bandit_t *bandit,
+                                               uint64_t contact_handle, double *out_theta);
 
 /* Apply bandit-based humanization override to params if gate is enabled.
  * Gate controlled by HU_BANDIT_HUMANIZATION env var (default OFF).

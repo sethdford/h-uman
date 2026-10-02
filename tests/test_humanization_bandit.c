@@ -446,6 +446,75 @@ static void bandit_loaded_posterior_changes_next_choice(void) {
     remove(path);
 }
 
+/* DEF-5: Thompson sampling must actually SAMPLE. The decide path used to copy
+ * rng_seed into a local and never write it back, so theta was a pure function
+ * of (alpha, beta) for the life of the process — every call for a contact
+ * returned the same tier. With Beta(5,5), P(theta outside (0.35, 0.65]) is
+ * ~0.33, so 400 genuine draws hit at least two tiers with certainty. */
+static void bandit_decide_draws_vary_across_calls(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_contextual_bandit_t *bandit = NULL;
+    HU_ASSERT_EQ(hu_contextual_bandit_create(&alloc, 64, &bandit), HU_OK);
+    uint64_t contact = 4242ULL;
+    for (int i = 0; i < 4; i++) {
+        HU_ASSERT_EQ(hu_contextual_bandit_update(bandit, contact, HU_BANDIT_REPLY), HU_OK);
+        HU_ASSERT_EQ(hu_contextual_bandit_update(bandit, contact, HU_BANDIT_IGNORED), HU_OK);
+    }
+    int n_cons = 0, n_mod = 0, n_aggr = 0;
+    for (int i = 0; i < 400; i++) {
+        hu_humanization_config_t c = hu_humanization_decide_contact_params(bandit, contact);
+        if (c.backchannel_probability > 0.40f)
+            n_aggr++;
+        else if (c.backchannel_probability > 0.20f)
+            n_mod++;
+        else
+            n_cons++;
+    }
+    int tiers_hit = (n_cons > 0) + (n_mod > 0) + (n_aggr > 0);
+    HU_ASSERT_TRUE(tiers_hit >= 2);
+    /* Mostly moderate (mean 0.5), but the tails must show up. */
+    HU_ASSERT_TRUE(n_mod > n_cons);
+    HU_ASSERT_TRUE(n_mod > n_aggr);
+    hu_contextual_bandit_destroy(bandit);
+}
+
+/* DEF-5: draws from a FIXED posterior vary and have the posterior's mean.
+ * Beta(3,7): mean 0.30, sd ~0.138, so the mean of 4000 draws sits within
+ * 0.30 +- 0.007 (3 sigma = 0.0066); 0.02 tolerance is generous. The old
+ * non-advancing sampler returned one value 4000 times (distinct == 1). */
+static void bandit_sample_theta_has_posterior_mean(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_contextual_bandit_t *bandit = NULL;
+    HU_ASSERT_EQ(hu_contextual_bandit_create(&alloc, 64, &bandit), HU_OK);
+    uint64_t contact = 9191ULL;
+    HU_ASSERT_EQ(hu_contextual_bandit_set_arm(bandit, contact, 3.0, 7.0, 8), HU_OK);
+    double sum = 0.0, first = -1.0, lo = 1.0, hi = 0.0;
+    int distinct_from_first = 0;
+    for (int i = 0; i < 4000; i++) {
+        double th = -1.0;
+        HU_ASSERT_EQ(hu_humanization_bandit_sample_theta(bandit, contact, &th), HU_OK);
+        HU_ASSERT_TRUE(th > 0.0 && th < 1.0);
+        if (i == 0)
+            first = th;
+        else if (th != first)
+            distinct_from_first++;
+        sum += th;
+        if (th < lo)
+            lo = th;
+        if (th > hi)
+            hi = th;
+    }
+    double mean = sum / 4000.0;
+    HU_ASSERT_TRUE(distinct_from_first > 3900);
+    HU_ASSERT_TRUE(mean > 0.28 && mean < 0.32);
+    HU_ASSERT_TRUE(hi - lo > 0.4); /* real spread, not a jitter */
+    double dummy = 0.0;
+    HU_ASSERT_EQ(hu_humanization_bandit_sample_theta(NULL, contact, &dummy),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_humanization_bandit_sample_theta(bandit, 0, &dummy), HU_ERR_INVALID_ARGUMENT);
+    hu_contextual_bandit_destroy(bandit);
+}
+
 void run_humanization_bandit_tests(void) {
     HU_TEST_SUITE("humanization_bandit");
     HU_RUN_TEST(test_humanization_high_theta_aggressive);
@@ -461,4 +530,6 @@ void run_humanization_bandit_tests(void) {
     HU_RUN_TEST(bandit_load_corrupt_file_keeps_state);
     HU_RUN_TEST(bandit_load_clamps_out_of_range);
     HU_RUN_TEST(bandit_loaded_posterior_changes_next_choice);
+    HU_RUN_TEST(bandit_decide_draws_vary_across_calls);
+    HU_RUN_TEST(bandit_sample_theta_has_posterior_mean);
 }
