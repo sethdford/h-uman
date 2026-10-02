@@ -29,6 +29,7 @@
 #include "human/agent/init_outcome.h"
 #include "human/agent/init_proposer.h"
 #include "human/agent/kv_cache.h"
+#include "human/agent/length_policy.h"
 #include "human/agent/lora_runner.h"
 #include "human/agent/model_router_health.h"
 #include "human/agent/multimodal_policy.h"
@@ -3789,6 +3790,33 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 convo_ctx = rt.convo_ctx;
                 convo_ctx_len = rt.convo_ctx_len;
 
+                /* 4. Response constraints: channel cap, F15 calibration + brief cap, then
+                 * HU_LENGTH_POLICY (length_policy.h). Before 2c so its Target matches. */
+                uint32_t max_chars = 0;
+                bool voice_first_memo = false; /* spec 2026-09-28 */
+                if (ch->channel->vtable->get_response_constraints) {
+                    hu_channel_response_constraints_t constraints = {0};
+                    if (ch->channel->vtable->get_response_constraints(ch->channel->ctx,
+                                                                      &constraints) == HU_OK) {
+                        max_chars = constraints.max_chars;
+                    }
+                }
+                const hu_contact_profile_t *cp_turn =
+                    (agent->persona && batch_key && key_len > 0)
+                        ? hu_persona_find_contact(agent->persona, batch_key, key_len)
+                        : NULL;
+                hu_length_turn_result_t len_turn;
+                hu_length_policy_turn(
+                    &(hu_length_turn_t){.inbound = combined,
+                                        .inbound_len = combined_len,
+                                        .contact = msgs[batch_start].is_group ? NULL : cp_turn,
+                                        .stage = agent->relationship.stage,
+                                        .channel_max = max_chars,
+                                        .is_group = msgs[batch_start].is_group,
+                                        .brief_mode = brief_mode},
+                    hu_length_policy_mode(), &len_turn);
+                max_chars = len_turn.cap;
+
                 /* 2c. Length calibration fallback for channels without history.
                  * When history exists, calibration runs inside build_awareness.
                  * When it doesn't, we still want message-type guidance. */
@@ -3797,13 +3825,10 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                      * context the prompt builder can return is the prospective
                      * directive; calibration must still be appended after it. */
                     char cal_buf[1024];
-                    const hu_contact_profile_t *cp_cal =
-                        (agent->persona && batch_key && key_len > 0)
-                            ? hu_persona_find_contact(agent->persona, batch_key, key_len)
-                            : NULL;
-                    size_t cal_len = hu_conversation_calibrate_length_for_contact(
-                        combined, combined_len, NULL, 0, msgs[batch_start].is_group, cp_cal,
-                        agent->relationship.stage, cal_buf, sizeof(cal_buf));
+                    size_t cal_len = hu_conversation_calibrate_length_capped(
+                        combined, combined_len, msgs[batch_start].is_group, cp_turn,
+                        agent->relationship.stage, len_turn.tight ? len_turn.cap : 0, cal_buf,
+                        sizeof(cal_buf));
                     if (cal_len > 0 && !convo_ctx) {
                         convo_ctx = (char *)alloc->alloc(alloc->ctx, cal_len + 1);
                         if (convo_ctx) {
@@ -5028,43 +5053,6 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 }
 #endif
 
-                /* 4. Response constraints via channel vtable */
-                uint32_t max_chars = 0;
-                bool voice_first_memo = false; /* spec 2026-09-28 */
-                if (ch->channel->vtable->get_response_constraints) {
-                    hu_channel_response_constraints_t constraints = {0};
-                    if (ch->channel->vtable->get_response_constraints(ch->channel->ctx,
-                                                                      &constraints) == HU_OK) {
-                        max_chars = constraints.max_chars;
-                    }
-                }
-
-                /* F15: Apply ratio-based length calibration */
-                {
-                    const hu_contact_profile_t *cp_lim =
-                        (!msgs[batch_start].is_group && agent->persona && batch_key && key_len > 0)
-                            ? hu_persona_find_contact(agent->persona, batch_key, key_len)
-                            : NULL;
-                    int calibrated = msgs[batch_start].is_group
-                                         ? hu_conversation_max_response_chars(combined_len)
-                                         : hu_conversation_max_response_chars_relational(
-                                               combined_len, cp_lim, agent->relationship.stage);
-                    if (calibrated > 0 && (max_chars == 0 || (uint32_t)calibrated < max_chars))
-                        max_chars = (uint32_t)calibrated;
-                }
-
-                /* Brief mode: cap length (tight in groups; headroom for trusted 1:1). */
-                if (brief_mode) {
-                    const hu_contact_profile_t *cp_brief =
-                        (!msgs[batch_start].is_group && agent->persona && batch_key && key_len > 0)
-                            ? hu_persona_find_contact(agent->persona, batch_key, key_len)
-                            : NULL;
-                    uint32_t brief_cap = hu_conversation_brief_char_cap(
-                        msgs[batch_start].is_group, cp_brief, agent->relationship.stage);
-                    if (max_chars > brief_cap)
-                        max_chars = brief_cap;
-                }
-
                 /* Honesty guardrail: inject if they asked "did you do X?" */
                 {
                     char *honesty = hu_conversation_honesty_check(alloc, combined, combined_len);
@@ -6024,6 +6012,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 agent->ab_history_entries = history_entries;
                 agent->ab_history_count = history_count;
                 agent->max_response_chars = max_chars;
+                agent->response_limit_tight = voice_first_memo ? 0 : (uint8_t)len_turn.tight;
                 agent->voice_memo_turn = voice_first_memo;
                 /* Owner self-test: a clean slate — only the last few messages, so a
                  * thread full of test traffic doesn't confuse the reply. */
@@ -7105,8 +7094,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     if (err == HU_OK && response && response_len > 0 && history_entries &&
                         !voice_first_memo &&
                         hu_reactive_gate_active(HU_REACTIVE_GATE_QUALITY_RETRY, llm_decides)) {
-                        hu_quality_score_t qscore = hu_conversation_evaluate_quality(
-                            response, response_len, history_entries, history_count, max_chars);
+                        hu_quality_score_t qscore = hu_conversation_evaluate_quality_capped(
+                            response, response_len, history_entries, history_count, max_chars,
+                            len_turn.tight != HU_LENGTH_TIGHT_LEGACY && !voice_first_memo);
                         if (qscore.needs_revision && !retried) {
                             retried = true;
                             hu_log_info("human", agent ? agent->observer : NULL,
@@ -7808,6 +7798,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 agent->turn_temperature = 0.0;
                 agent->turn_thinking_budget = 0;
                 agent->max_response_chars = 0;
+                agent->response_limit_tight = 0;
                 agent->voice_memo_turn = false;
                 agent->history_msg_cap = 0;
                 agent->self_test_turn = false;

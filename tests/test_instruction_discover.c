@@ -61,7 +61,9 @@ static void make_subdir(const char *parent, const char *name) {
 static void rm_rf(const char *path) {
     char cmd[600];
     snprintf(cmd, sizeof(cmd), "rm -rf '%s'", path);
-    (void)system(cmd);
+    if (system(cmd) != 0) {
+        /* best-effort cleanup; a (void) cast does not silence glibc warn_unused_result */
+    }
 }
 
 /* ── test: validate path rejects null bytes ──────────────────────────────── */
@@ -322,8 +324,7 @@ static void test_discovery_walk_upward(void) {
 
     /* Run discovery from the deepest dir */
     hu_instruction_discovery_t *disc = NULL;
-    hu_error_t err =
-        hu_instruction_discovery_run(&test_allocator, c_dir, strlen(c_dir), &disc);
+    hu_error_t err = hu_instruction_discovery_run(&test_allocator, c_dir, strlen(c_dir), &disc);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(disc);
 
@@ -427,7 +428,8 @@ static void test_discovery_prompt_injection(void) {
 
     /* Run discovery */
     hu_instruction_discovery_t *disc = NULL;
-    hu_error_t err = hu_instruction_discovery_run(&test_allocator, g_tmpdir, strlen(g_tmpdir), &disc);
+    hu_error_t err =
+        hu_instruction_discovery_run(&test_allocator, g_tmpdir, strlen(g_tmpdir), &disc);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(disc);
     HU_ASSERT_NOT_NULL(disc->merged_content);
@@ -453,7 +455,8 @@ static void test_discovery_freshness_trigger(void) {
 
     /* First discovery */
     hu_instruction_discovery_t *disc1 = NULL;
-    hu_error_t err = hu_instruction_discovery_run(&test_allocator, g_tmpdir, strlen(g_tmpdir), &disc1);
+    hu_error_t err =
+        hu_instruction_discovery_run(&test_allocator, g_tmpdir, strlen(g_tmpdir), &disc1);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(disc1);
     HU_ASSERT_TRUE(hu_instruction_discovery_is_fresh(disc1));

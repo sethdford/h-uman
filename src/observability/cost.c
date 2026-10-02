@@ -223,6 +223,8 @@ static void tm_from_secs(int64_t secs, struct tm *out) {
     struct tm *p = localtime(&t);
     if (p)
         *out = *p;
+    else
+        memset(out, 0, sizeof(*out)); /* never leave the caller's tm uninitialized */
 }
 
 static bool same_day(int64_t a_secs, int64_t b_secs) {

@@ -5,6 +5,10 @@
 
 #ifdef __linux__
 #include <unistd.h>
+#endif
+
+/* Only bubblewrap_available() calls this, and only on the branch below. */
+#if defined(__linux__) && defined(HU_GATEWAY_POSIX) && !HU_IS_TEST
 static bool bwrap_binary_exists(void) {
     if (access("/usr/bin/bwrap", X_OK) == 0)
         return true;
