@@ -56,7 +56,6 @@ static void consolidation_removes_duplicates(void) {
     config.dedup_threshold = 80;
     config.max_entries = 100;
     config.decay_days = 0;
-    config.decay_factor = 1.0;
 
     err = hu_memory_consolidate(&alloc, &mem, &config);
     HU_ASSERT_EQ(err, HU_OK);
@@ -154,7 +153,6 @@ static void consolidation_eviction_preserves_last_contact_entry(void) {
     config.dedup_threshold = 100; /* no dedup */
     config.max_entries = 3;
     config.decay_days = 0;
-    config.decay_factor = 1.0;
 
     err = hu_memory_consolidate(&alloc, &mem, &config);
     HU_ASSERT_EQ(err, HU_OK);
@@ -215,8 +213,12 @@ static size_t consolidate_near_dups_via_agent(uint32_t dedup_threshold) {
     hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
     HU_ASSERT_NOT_NULL(mem.ctx);
     hu_memory_category_t cat = {.tag = HU_MEMORY_CATEGORY_CORE};
-    mem.vtable->store(mem.ctx, "near_a", 6, k_near_dup_a, sizeof(k_near_dup_a) - 1, &cat, NULL, 0);
-    mem.vtable->store(mem.ctx, "near_b", 6, k_near_dup_b, sizeof(k_near_dup_b) - 1, &cat, NULL, 0);
+    HU_ASSERT_EQ(mem.vtable->store(mem.ctx, "near_a", 6, k_near_dup_a, sizeof(k_near_dup_a) - 1,
+                                   &cat, NULL, 0),
+                 HU_OK);
+    HU_ASSERT_EQ(mem.vtable->store(mem.ctx, "near_b", 6, k_near_dup_b, sizeof(k_near_dup_b) - 1,
+                                   &cat, NULL, 0),
+                 HU_OK);
 
     hu_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
@@ -230,7 +232,7 @@ static size_t consolidate_near_dups_via_agent(uint32_t dedup_threshold) {
 
     HU_ASSERT_EQ(hu_agent_consolidate_memory(&agent), HU_OK);
     size_t after = 0;
-    mem.vtable->count(mem.ctx, &after);
+    HU_ASSERT_EQ(mem.vtable->count(mem.ctx, &after), HU_OK);
     mem.vtable->deinit(mem.ctx);
     return after;
 }

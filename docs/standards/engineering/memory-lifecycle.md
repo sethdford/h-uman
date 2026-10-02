@@ -164,7 +164,7 @@ a default one.
 Memory follows **Ebbinghaus forgetting curve**: importance decays exponentially over time.
 
 > The `decay_days` / `decay_factor` names below are not the consolidation settings above.
-> Consolidation's `decay_days` is a hard age cutoff, and it never reads `decay_factor`.
+> Consolidation's `decay_days` is a hard age cutoff, and consolidation has no `decay_factor`.
 > Episode salience decay lives in `src/memory/repos/forgetting_repo_sqlite.c`.
 
 ### Importance Decay Formula
