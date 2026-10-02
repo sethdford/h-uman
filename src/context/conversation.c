@@ -7108,9 +7108,39 @@ size_t hu_conversation_strip_channel_tags(char *buf, size_t len) {
 
 /* ── Formal structure stripper (casual channels) ──────────────────────── */
 
+/* Length of a delivery label opening the reply ("Voice memo:\n\n", "text: "),
+ * whitespace after it included; 0 when there is none. The scene direction
+ * names the form ("Voice memo, a few connected thoughts") and the model
+ * sometimes writes it back as a heading. */
+static size_t leading_delivery_label_len(const char *buf, size_t len) {
+    static const char *const labels[] = {"voice memo", "voice note", "voice message", "memo",
+                                         "text",       "reply",      "message"};
+    for (size_t k = 0; k < sizeof(labels) / sizeof(labels[0]); k++) {
+        size_t n = strlen(labels[k]);
+        if (len <= n || buf[n] != ':')
+            continue;
+        size_t c = 0;
+        while (c < n && tolower((unsigned char)buf[c]) == labels[k][c])
+            c++;
+        if (c < n)
+            continue;
+        size_t j = n + 1;
+        while (j < len && isspace((unsigned char)buf[j]))
+            j++;
+        return j;
+    }
+    return 0;
+}
+
 size_t hu_conversation_strip_formal_structure(char *buf, size_t len) {
     if (!buf || len < 3)
         return len;
+    size_t label = leading_delivery_label_len(buf, len);
+    if (label > 0) {
+        memmove(buf, buf + label, len - label);
+        len -= label;
+        buf[len] = '\0';
+    }
 
     size_t w = 0;
     size_t i = 0;
