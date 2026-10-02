@@ -26,22 +26,40 @@ static bool tl_append(tf_fixture_t *f, hu_role_t role, const char *text) {
                                             0) == HU_OK;
 }
 
-/* The replan scan looks at the last 8 history entries; this fixture pads the
- * conversation to 6 turns before its tool results so the window is full. */
-static bool tl_history_with_tool_results(tf_fixture_t *f, const char *r1, const char *r2) {
+/* Earlier conversation: three user/assistant exchanges, so the replan scan's
+ * 8-entry window is full once this turn's tool results land after it. */
+static bool tl_pad(tf_fixture_t *f) {
     for (int i = 0; i < 3; i++) {
         if (!tl_append(f, HU_ROLE_USER, "list my things") ||
             !tl_append(f, HU_ROLE_ASSISTANT, "sure, looking"))
             return false;
     }
-    return tl_append(f, HU_ROLE_TOOL, r1) && tl_append(f, HU_ROLE_TOOL, r2);
+    return true;
 }
 
+/* hu_turn_ctx_new marks the turn's start in history, so a test creates the
+ * context first and appends this turn's tool results after it, as
+ * hu_agent_turn does. */
 static hu_turn_ctx_t *tl_ctx(tf_fixture_t *f, const char *msg, uint32_t iter) {
     hu_turn_ctx_t *turn_ctx = hu_turn_ctx_new(&f->agent, msg, strlen(msg), &f->resp, &f->resp_len);
     if (turn_ctx)
         turn_ctx->loop.iter = iter;
     return turn_ctx;
+}
+
+static void tl_set_plan(hu_turn_ctx_t *turn_ctx) {
+    turn_ctx->context.plan_ctx = k_plan;
+    turn_ctx->context.plan_ctx_len = sizeof(k_plan) - 1;
+}
+
+static size_t tl_count_replans(const tf_fixture_t *f) {
+    size_t n = 0;
+    for (size_t i = 0; i < f->agent.history_count; i++) {
+        const hu_owned_message_t *m = &f->agent.history[i];
+        if (m->role == HU_ROLE_SYSTEM && m->content && strncmp(m->content, "[REPLAN", 7) == 0)
+            n++;
+    }
+    return n;
 }
 
 static void turn_tail_rejects_a_null_context(void) {
@@ -54,12 +72,13 @@ static void turn_tail_rejects_a_null_context(void) {
 static void turn_tail_replans_after_two_tool_failures(void) {
     tf_fixture_t f;
     HU_ASSERT_TRUE(tf_open(&f, NULL, 0, false, HU_AUTONOMY_AUTONOMOUS));
-    HU_ASSERT_TRUE(tl_history_with_tool_results(&f, "Error: disk full", "denied: not allowed"));
-    size_t before = f.agent.history_count;
+    HU_ASSERT_TRUE(tl_pad(&f));
     hu_turn_ctx_t *turn_ctx = tl_ctx(&f, "list my things", 1);
     HU_ASSERT_NOT_NULL(turn_ctx);
-    turn_ctx->context.plan_ctx = k_plan;
-    turn_ctx->context.plan_ctx_len = sizeof(k_plan) - 1;
+    HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_TOOL, "Error: disk full"));
+    HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_TOOL, "denied: not allowed"));
+    size_t before = f.agent.history_count;
+    tl_set_plan(turn_ctx);
     HU_ASSERT_EQ(hu_turn_tail(turn_ctx), HU_OK);
     HU_ASSERT_EQ(f.agent.history_count, before + 1);
     const hu_owned_message_t *m = &f.agent.history[f.agent.history_count - 1];
@@ -75,14 +94,13 @@ static void turn_tail_replans_after_two_tool_failures(void) {
 static void turn_tail_replans_in_a_history_shorter_than_the_window(void) {
     tf_fixture_t f;
     HU_ASSERT_TRUE(tf_open(&f, NULL, 0, false, HU_AUTONOMY_AUTONOMOUS));
+    hu_turn_ctx_t *turn_ctx = tl_ctx(&f, "list my things", 1);
+    HU_ASSERT_NOT_NULL(turn_ctx);
     HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_USER, "list my things"));
     HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_TOOL, "Error: disk full"));
     HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_TOOL, "denied: not allowed"));
     HU_ASSERT_EQ(f.agent.history_count, 3);
-    hu_turn_ctx_t *turn_ctx = tl_ctx(&f, "list my things", 1);
-    HU_ASSERT_NOT_NULL(turn_ctx);
-    turn_ctx->context.plan_ctx = k_plan;
-    turn_ctx->context.plan_ctx_len = sizeof(k_plan) - 1;
+    tl_set_plan(turn_ctx);
     HU_ASSERT_EQ(hu_turn_tail(turn_ctx), HU_OK);
     HU_ASSERT_EQ(f.agent.history_count, 4);
     const hu_owned_message_t *m = &f.agent.history[3];
@@ -96,10 +114,12 @@ static void turn_tail_replans_in_a_history_shorter_than_the_window(void) {
 static void turn_tail_without_a_plan_does_not_replan(void) {
     tf_fixture_t f;
     HU_ASSERT_TRUE(tf_open(&f, NULL, 0, false, HU_AUTONOMY_AUTONOMOUS));
-    HU_ASSERT_TRUE(tl_history_with_tool_results(&f, "Error: disk full", "denied: not allowed"));
-    size_t before = f.agent.history_count;
+    HU_ASSERT_TRUE(tl_pad(&f));
     hu_turn_ctx_t *turn_ctx = tl_ctx(&f, "list my things", 1);
     HU_ASSERT_NOT_NULL(turn_ctx);
+    HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_TOOL, "Error: disk full"));
+    HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_TOOL, "denied: not allowed"));
+    size_t before = f.agent.history_count;
     HU_ASSERT_EQ(hu_turn_tail(turn_ctx), HU_OK);
     HU_ASSERT_EQ(f.agent.history_count, before);
     hu_turn_ctx_free(turn_ctx);
@@ -110,14 +130,88 @@ static void turn_tail_without_a_plan_does_not_replan(void) {
 static void turn_tail_one_failure_does_not_replan(void) {
     tf_fixture_t f;
     HU_ASSERT_TRUE(tf_open(&f, NULL, 0, false, HU_AUTONOMY_AUTONOMOUS));
-    HU_ASSERT_TRUE(tl_history_with_tool_results(&f, "listed 2 items: alpha, beta", "Error: x"));
-    size_t before = f.agent.history_count;
+    HU_ASSERT_TRUE(tl_pad(&f));
     hu_turn_ctx_t *turn_ctx = tl_ctx(&f, "list my things", 1);
     HU_ASSERT_NOT_NULL(turn_ctx);
-    turn_ctx->context.plan_ctx = k_plan;
-    turn_ctx->context.plan_ctx_len = sizeof(k_plan) - 1;
+    HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_TOOL, "listed 2 items: alpha, beta"));
+    HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_TOOL, "Error: x"));
+    size_t before = f.agent.history_count;
+    tl_set_plan(turn_ctx);
     HU_ASSERT_EQ(hu_turn_tail(turn_ctx), HU_OK);
     HU_ASSERT_EQ(f.agent.history_count, before);
+    hu_turn_ctx_free(turn_ctx);
+    tf_close(&f);
+}
+
+/* Failures from an EARLIER turn are history, not this turn's progress: they
+ * sit inside the 8-entry window but must not trigger a replan (one extra LLM
+ * call) when this turn's own tools all succeeded. */
+static void turn_tail_ignores_tool_failures_from_a_previous_turn(void) {
+    tf_fixture_t f;
+    HU_ASSERT_TRUE(tf_open(&f, NULL, 0, false, HU_AUTONOMY_AUTONOMOUS));
+    HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_USER, "list my things"));
+    HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_TOOL, "Error: disk full"));
+    HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_TOOL, "denied: not allowed"));
+    HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_ASSISTANT, "sorry, that failed"));
+    hu_turn_ctx_t *turn_ctx = tl_ctx(&f, "try again", 1);
+    HU_ASSERT_NOT_NULL(turn_ctx);
+    HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_USER, "try again"));
+    HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_TOOL, "listed 2 items: alpha, beta"));
+    HU_ASSERT_LE(f.agent.history_count, 8); /* the prior failures are inside the window */
+    size_t before = f.agent.history_count;
+    tl_set_plan(turn_ctx);
+    HU_ASSERT_EQ(hu_turn_tail(turn_ctx), HU_OK);
+    HU_ASSERT_EQ(f.agent.history_count, before);
+    HU_ASSERT_EQ(tl_count_replans(&f), 0);
+    hu_turn_ctx_free(turn_ctx);
+    tf_close(&f);
+}
+
+/* One failure set, one replan: a later iteration of the same turn with no new
+ * failures does not replan again for the failures already handled. */
+static void turn_tail_replans_once_per_failure_set(void) {
+    tf_fixture_t f;
+    HU_ASSERT_TRUE(tf_open(&f, NULL, 0, false, HU_AUTONOMY_AUTONOMOUS));
+    hu_turn_ctx_t *turn_ctx = tl_ctx(&f, "list my things", 1);
+    HU_ASSERT_NOT_NULL(turn_ctx);
+    tl_set_plan(turn_ctx);
+    HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_USER, "list my things"));
+    HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_TOOL, "Error: disk full"));
+    HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_TOOL, "denied: not allowed"));
+    HU_ASSERT_EQ(hu_turn_tail(turn_ctx), HU_OK);
+    HU_ASSERT_EQ(tl_count_replans(&f), 1);
+    /* iteration 2: one more tool call, which succeeds */
+    HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_ASSISTANT, ""));
+    HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_TOOL, "listed 2 items: alpha, beta"));
+    turn_ctx->loop.iter = 2;
+    size_t before = f.agent.history_count;
+    HU_ASSERT_EQ(hu_turn_tail(turn_ctx), HU_OK);
+    HU_ASSERT_EQ(f.agent.history_count, before);
+    HU_ASSERT_EQ(tl_count_replans(&f), 1);
+    hu_turn_ctx_free(turn_ctx);
+    tf_close(&f);
+}
+
+/* Control for the test above: NEW failures after a replan do replan again,
+ * and the note counts only the new ones. */
+static void turn_tail_replans_again_for_new_failures_only(void) {
+    tf_fixture_t f;
+    HU_ASSERT_TRUE(tf_open(&f, NULL, 0, false, HU_AUTONOMY_AUTONOMOUS));
+    hu_turn_ctx_t *turn_ctx = tl_ctx(&f, "list my things", 1);
+    HU_ASSERT_NOT_NULL(turn_ctx);
+    tl_set_plan(turn_ctx);
+    HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_USER, "list my things"));
+    HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_TOOL, "Error: disk full"));
+    HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_TOOL, "denied: not allowed"));
+    HU_ASSERT_EQ(hu_turn_tail(turn_ctx), HU_OK);
+    HU_ASSERT_EQ(tl_count_replans(&f), 1);
+    HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_TOOL, "Error: timeout"));
+    HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_TOOL, "error: bad args"));
+    turn_ctx->loop.iter = 2;
+    HU_ASSERT_EQ(hu_turn_tail(turn_ctx), HU_OK);
+    HU_ASSERT_EQ(tl_count_replans(&f), 2);
+    const hu_owned_message_t *m = &f.agent.history[f.agent.history_count - 1];
+    HU_ASSERT_STR_EQ(m->content, "[REPLAN after 2 tool failures]: 1 new steps");
     hu_turn_ctx_free(turn_ctx);
     tf_close(&f);
 }
@@ -266,6 +360,9 @@ void run_turn_tail_tests(void) {
     HU_RUN_TEST(turn_tail_replans_in_a_history_shorter_than_the_window);
     HU_RUN_TEST(turn_tail_without_a_plan_does_not_replan);
     HU_RUN_TEST(turn_tail_one_failure_does_not_replan);
+    HU_RUN_TEST(turn_tail_ignores_tool_failures_from_a_previous_turn);
+    HU_RUN_TEST(turn_tail_replans_once_per_failure_set);
+    HU_RUN_TEST(turn_tail_replans_again_for_new_failures_only);
     HU_RUN_TEST(turn_tail_records_the_iteration_in_the_scratchpad);
     HU_RUN_TEST(turn_tail_checkpoints_every_fifth_iteration);
 #ifdef HU_ENABLE_SQLITE

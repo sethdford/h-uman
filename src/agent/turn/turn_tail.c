@@ -32,12 +32,19 @@ hu_error_t hu_turn_tail(hu_turn_ctx_t *turn_ctx) {
     uint64_t turn_tokens = turn_ctx->loop.turn_tokens;
     size_t turn_tool_results_count = turn_ctx->loop.turn_tool_results_count;
     /* Replan on tool failure: if any tool failed and we have a plan, generate
-     * a revised plan and inject it as context for the next iteration */
+     * a revised plan and inject it as context for the next iteration.
+     * Only this turn's failures count, and only those newer than the turn's
+     * last replan: earlier turns' failures (still inside the 8-entry window)
+     * and failures already replanned for would cost an extra LLM call every
+     * iteration. Mid-turn compaction only moves entries down, so a stale
+     * floor can hide this turn's failures but never admit an earlier turn's. */
     if (plan_ctx && !agent->cancel_requested) {
         size_t fail_count = 0;
         char fail_detail[512];
         size_t fail_pos = 0;
         size_t floor_hi = hu_agent_history_floor(agent->history_count, 8);
+        if (floor_hi < turn_ctx->loop.replan_floor)
+            floor_hi = turn_ctx->loop.replan_floor;
         for (size_t hi = agent->history_count; hi > floor_hi; hi--) {
             if (agent->history[hi - 1].role == HU_ROLE_TOOL && agent->history[hi - 1].content &&
                 agent->history[hi - 1].content_len > 0) {
@@ -76,6 +83,8 @@ hu_error_t hu_turn_tail(hu_turn_ctx_t *turn_ctx) {
             }
             if (revised)
                 hu_plan_free(agent->alloc, revised);
+            /* this failure set has had its replan attempt, successful or not */
+            turn_ctx->loop.replan_floor = agent->history_count;
         }
     }
 
