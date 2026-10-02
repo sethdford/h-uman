@@ -68,8 +68,11 @@ static void test_director_parse_ignores_fields_inside_direction(void) {
     HU_ASSERT_STR_EQ(r.gif_query, "");
 }
 
-/* HU_DIRECTOR_FORMS off: the prompt is exactly today's. On: it teaches the new
- * forms and their appropriateness rules. */
+/* HU_DIRECTOR_FORMS off and shadow: the prompt is exactly today's. Shadow used
+ * to append the forms too, and since the live decision comes from that same
+ * call, "shadow" moved real choices: tapback-only decisions on real contacts
+ * fell from 30-45% of turns (09-21..27) to 0-10% after the 09-28 deploy,
+ * replaced by forms that run as plain text. Live: it teaches the new forms. */
 static void test_director_prompt_forms_block_follows_the_gate(void) {
     static char buf[16384];
     unsetenv("HU_DIRECTOR_FORMS");
@@ -77,6 +80,10 @@ static void test_director_prompt_forms_block_follows_the_gate(void) {
     HU_ASSERT_TRUE(off > 0);
     HU_ASSERT_STR_NOT_CONTAINS(buf, "action:voice");
     setenv("HU_DIRECTOR_FORMS", "shadow", 1);
+    size_t shadow = hu_daemon_director_system_prompt(buf, sizeof(buf));
+    HU_ASSERT_EQ(shadow, off);
+    HU_ASSERT_STR_NOT_CONTAINS(buf, "action:voice");
+    setenv("HU_DIRECTOR_FORMS", "live", 1);
     size_t on = hu_daemon_director_system_prompt(buf, sizeof(buf));
     unsetenv("HU_DIRECTOR_FORMS");
     HU_ASSERT_TRUE(on > off);

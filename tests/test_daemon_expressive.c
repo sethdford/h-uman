@@ -98,25 +98,31 @@ static void test_expressive_share_medium(void) {
     HU_ASSERT_EQ((int)hu_expressive_share_medium(HU_SHARE_SAVED, true), (int)HU_INSPIRATION_NONE);
 }
 
-/* One decider: a director share goes; with the director LIVE nothing else shares
- * (the old 5% dice stop); otherwise today's dice. Saved links have their own path. */
+/* One decider: with the director LIVE its share goes and nothing else shares
+ * (the old 5% dice stop); otherwise today's dice, and a director share chosen
+ * outside LIVE is not sent. Never on somber news: on 2026-10-01 the dice sent a
+ * Mac DeMarco song to a parent whose son was home sick. Saved links have their
+ * own path. */
 static void test_expressive_share_should_go(void) {
     hu_director_result_t d;
     memset(&d, 0, sizeof(d));
     hu_share_kind_t k = HU_SHARE_NONE;
     d.form = HU_DIR_FORM_SHARE;
     d.share = HU_SHARE_SHORT;
-    HU_ASSERT_TRUE(hu_expressive_share_should_go(&d, true, false, &k));
+    HU_ASSERT_TRUE(hu_expressive_share_should_go(&d, true, false, false, &k));
     HU_ASSERT_EQ((int)k, (int)HU_SHARE_SHORT);
-    HU_ASSERT_FALSE(hu_expressive_share_should_go(NULL, true, true, &k)); /* live: no dice */
-    HU_ASSERT_TRUE(hu_expressive_share_should_go(NULL, false, true, &k)); /* today's dice */
+    HU_ASSERT_FALSE(hu_expressive_share_should_go(&d, false, false, false, &k)); /* shadow */
+    HU_ASSERT_FALSE(hu_expressive_share_should_go(NULL, true, true, false, &k)); /* live: no dice */
+    HU_ASSERT_TRUE(hu_expressive_share_should_go(NULL, false, true, false, &k)); /* today's dice */
     HU_ASSERT_EQ((int)k, (int)HU_SHARE_NONE);
-    HU_ASSERT_FALSE(hu_expressive_share_should_go(NULL, false, false, &k));
+    HU_ASSERT_FALSE(hu_expressive_share_should_go(NULL, false, false, false, &k));
+    HU_ASSERT_FALSE(hu_expressive_share_should_go(NULL, false, true, true, &k)); /* somber */
+    HU_ASSERT_FALSE(hu_expressive_share_should_go(&d, true, false, true, &k));   /* somber */
     d.share = HU_SHARE_SAVED;
-    HU_ASSERT_FALSE(hu_expressive_share_should_go(&d, true, true, &k)); /* queue path */
+    HU_ASSERT_FALSE(hu_expressive_share_should_go(&d, true, true, false, &k)); /* queue path */
     d.form = HU_DIR_FORM_TEXT; /* a share kind without the share form is not a share */
     d.share = HU_SHARE_SONG;
-    HU_ASSERT_FALSE(hu_expressive_share_should_go(&d, true, false, &k));
+    HU_ASSERT_FALSE(hu_expressive_share_should_go(&d, true, false, false, &k));
 }
 
 /* The one door a director share goes through: only LIVE (a SHADOW choice is

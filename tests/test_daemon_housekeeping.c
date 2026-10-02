@@ -25,34 +25,23 @@
 
 /* Both consolidation call sites in the daemon (periodic tick, topic switch)
  * take their settings from this one builder. */
-static void daemon_consolidation_config_reads_behavior_and_agent(void) {
-    hu_agent_t agent;
-    memset(&agent, 0, sizeof(agent));
-    agent.model_name = "unit-model";
-    agent.model_name_len = 10;
+static void daemon_consolidation_config_reads_behavior(void) {
     hu_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
     cfg.behavior.decay_days = 7;
     cfg.behavior.dedup_threshold = 42;
 
-    hu_consolidation_config_t c = hu_daemon_consolidation_config(&cfg, &agent);
+    hu_consolidation_config_t c = hu_daemon_consolidation_config(&cfg);
     HU_ASSERT_EQ(c.decay_days, 7u);
     HU_ASSERT_EQ(c.dedup_threshold, 42u);
     HU_ASSERT_FLOAT_EQ(c.decay_factor, 0.5, 1e-9);
     HU_ASSERT_EQ(c.max_entries, 5000u);
-    HU_ASSERT_TRUE(c.provider == &agent.provider);
-    HU_ASSERT_STR_EQ(c.model, "unit-model");
-    HU_ASSERT_EQ(c.model_len, 10u);
 }
 
 static void daemon_consolidation_config_null_config_uses_defaults(void) {
-    hu_agent_t agent;
-    memset(&agent, 0, sizeof(agent));
-    hu_consolidation_config_t c = hu_daemon_consolidation_config(NULL, &agent);
+    hu_consolidation_config_t c = hu_daemon_consolidation_config(NULL);
     HU_ASSERT_EQ(c.decay_days, 30u);
     HU_ASSERT_EQ(c.dedup_threshold, 0u);
-    HU_ASSERT_NULL(c.model);
-    HU_ASSERT_TRUE(c.provider == &agent.provider);
 }
 
 #ifdef HU_ENABLE_SQLITE
@@ -176,7 +165,7 @@ void run_daemon_housekeeping_tests(void) {
     HU_RUN_TEST(test_housekeeping_tick_is_noop_within_the_same_minute);
     HU_RUN_TEST(daemon_housekeeping_runs_autodream_and_evolver_e2e);
     HU_RUN_TEST(daemon_housekeeping_handles_empty_graph);
-    HU_RUN_TEST(daemon_consolidation_config_reads_behavior_and_agent);
+    HU_RUN_TEST(daemon_consolidation_config_reads_behavior);
     HU_RUN_TEST(daemon_consolidation_config_null_config_uses_defaults);
 }
 
@@ -185,7 +174,7 @@ void run_daemon_housekeeping_tests(void) {
 void run_daemon_housekeeping_tests(void) {
     HU_TEST_SUITE("DaemonHousekeeping");
     /* Housekeeping itself is sqlite-only; the config builder is not. */
-    HU_RUN_TEST(daemon_consolidation_config_reads_behavior_and_agent);
+    HU_RUN_TEST(daemon_consolidation_config_reads_behavior);
     HU_RUN_TEST(daemon_consolidation_config_null_config_uses_defaults);
 }
 
