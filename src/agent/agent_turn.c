@@ -1329,28 +1329,11 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
             return entry_step.err;
     }
 
-    /* Automatic planning + execution for complex tasks */
-    char *plan_ctx = NULL;
+    /* Automatic planning + execution for complex tasks, resuming any
+     * [ACTIVE_PLAN] left in history (src/agent/turn/turn_plan.c) */
     size_t plan_ctx_len = 0;
+    char *plan_ctx = hu_turn_active_plan(agent, &plan_ctx_len);
 #ifndef HU_IS_TEST
-    if (agent->history_count > 0) {
-        size_t scan_n = agent->history_count < 10 ? agent->history_count : 10;
-        for (size_t k = 0; k < scan_n; k++) {
-            size_t hi = agent->history_count - 1 - k;
-            if (agent->history[hi].role != HU_ROLE_SYSTEM || !agent->history[hi].content)
-                continue;
-            const char *hc = agent->history[hi].content;
-            if (strncmp(hc, "[ACTIVE_PLAN]", 13) != 0)
-                continue;
-            if (plan_ctx == NULL) {
-                size_t clen = strlen(hc);
-                plan_ctx = hu_strndup(agent->alloc, hc, clen);
-                if (plan_ctx)
-                    plan_ctx_len = clen;
-            }
-            break;
-        }
-    }
     if (msg_len > 200 && agent->tools_count >= 5 && agent->provider.vtable &&
         agent->provider.vtable->chat) {
         const char *tool_names[32];
@@ -7192,6 +7175,8 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
         hu_tool_cache_destroy(agent->alloc, turn_cache);
     if (acp_context)
         agent->alloc->free(agent->alloc->ctx, acp_context, acp_context_len + 1);
+    if (plan_ctx)
+        agent->alloc->free(agent->alloc->ctx, plan_ctx, plan_ctx_len + 1);
     if (agent->turn_arena)
         hu_arena_reset(agent->turn_arena);
     return HU_ERR_TIMEOUT;

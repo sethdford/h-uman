@@ -126,6 +126,12 @@ void hu_turn_ctx_free(hu_turn_ctx_t *turn_ctx);
  * writes retrieval.*. HU_ERR_INVALID_ARGUMENT on a NULL ctx or agent. */
 hu_error_t hu_turn_retrieve(hu_turn_ctx_t *turn_ctx);
 
+/* S1 plan resume (src/agent/turn/turn_plan.c): a copy of the newest
+ * "[ACTIVE_PLAN]" system message among the last 10 history entries, allocated
+ * with agent->alloc (caller frees plan_len + 1 bytes), or NULL when there is
+ * none, on NULL input or on allocation failure. *plan_len_out is always set. */
+char *hu_turn_active_plan(hu_agent_t *agent, size_t *plan_len_out);
+
 /* S2 perception (src/agent/turn/turn_perceive.c): ACP inbox, cognition budget +
  * dual-process dispatch, fast capture / STM / pattern radar, commitments,
  * preference and outcome learning, tone and rhythm hints. Reads in.*; writes

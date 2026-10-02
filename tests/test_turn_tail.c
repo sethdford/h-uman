@@ -371,6 +371,43 @@ static void turn_exhausted_reports_the_cap_then_an_error(void) {
     tf_close(&f);
 }
 
+#ifdef HU_ENABLE_SQLITE
+/* Five distinct tool calls against the fixture's 4-iteration cap. */
+static const trp_step_t k_tl_exhaust[] = {
+    {.err = HU_OK, .tool_calls = {{"c1", "memory_list", "{\"q\":\"1\"}"}}, .tool_calls_count = 1},
+    {.err = HU_OK, .tool_calls = {{"c2", "memory_list", "{\"q\":\"2\"}"}}, .tool_calls_count = 1},
+    {.err = HU_OK, .tool_calls = {{"c3", "memory_list", "{\"q\":\"3\"}"}}, .tool_calls_count = 1},
+    {.err = HU_OK, .tool_calls = {{"c4", "memory_list", "{\"q\":\"4\"}"}}, .tool_calls_count = 1},
+    {.err = HU_OK, .tool_calls = {{"c5", "memory_list", "{\"q\":\"5\"}"}}, .tool_calls_count = 1},
+};
+
+/* End to end: a turn that resumes an [ACTIVE_PLAN] from history and runs out
+ * of tool iterations frees its plan context on the HU_ERR_TIMEOUT exit, as
+ * every other exit does. The precondition proves the plan was live this turn
+ * (it reached the system prompt as "### [ACTIVE_PLAN] ..."). */
+static void turn_exhausted_exit_releases_the_active_plan(void) {
+    hu_tracking_allocator_t *ta = hu_tracking_allocator_create();
+    HU_ASSERT_NOT_NULL(ta);
+    tf_fixture_t f;
+    HU_ASSERT_TRUE(tf_open_alloc(&f, hu_tracking_allocator_allocator(ta), k_tl_exhaust,
+                                 sizeof(k_tl_exhaust) / sizeof(k_tl_exhaust[0]), true,
+                                 HU_AUTONOMY_AUTONOMOUS));
+    HU_ASSERT_EQ(f.agent.max_tool_iterations, 4);
+    HU_ASSERT_TRUE(tl_append(&f, HU_ROLE_SYSTEM,
+                             "[ACTIVE_PLAN] 1/2 steps completed. Remaining: \n  Step 2: list"));
+    char *resp = NULL;
+    size_t resp_len = 0;
+    hu_error_t err = hu_agent_turn(&f.agent, "keep listing", 12, &resp, &resp_len);
+    HU_ASSERT_EQ(err, HU_ERR_TIMEOUT);
+    HU_ASSERT_NULL(resp);
+    HU_ASSERT_NOT_NULL(f.trp.log);
+    HU_ASSERT_NOT_NULL(strstr(f.trp.log, "### [ACTIVE_PLAN] 1/2 steps completed."));
+    tf_close(&f);
+    HU_ASSERT_EQ(hu_tracking_allocator_leaks(ta), 0);
+    hu_tracking_allocator_destroy(ta);
+}
+#endif /* HU_ENABLE_SQLITE */
+
 void run_turn_tail_tests(void) {
     HU_TEST_SUITE("TurnTail");
     HU_RUN_TEST(turn_tail_rejects_a_null_context);
@@ -389,4 +426,7 @@ void run_turn_tail_tests(void) {
     HU_RUN_TEST(turn_tail_skips_goal_memory_on_the_first_iteration);
 #endif
     HU_RUN_TEST(turn_exhausted_reports_the_cap_then_an_error);
+#ifdef HU_ENABLE_SQLITE
+    HU_RUN_TEST(turn_exhausted_exit_releases_the_active_plan);
+#endif
 }

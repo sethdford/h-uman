@@ -784,6 +784,7 @@ set(HU_CORE_SOURCES
     src/agent/turn/turn_context.c
     src/agent/turn/turn_tools.c
     src/agent/turn/turn_tail.c
+    src/agent/turn/turn_plan.c
     src/agent/turn/reask.c
     src/agent/best_of_n.c
     src/agent/humanness.c
