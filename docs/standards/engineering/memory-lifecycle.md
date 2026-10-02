@@ -91,80 +91,81 @@ Memory is stratified by access patterns and retention:
 
 ### Trigger Conditions
 
-Consolidation runs when ANY of these conditions are met:
+`hu_memory_consolidate()` (`src/memory/consolidation.c`) is called from four places:
 
-1. **Topic switch detected:** Agent or user changes topic (configurable; default: 5+ min silence then new topic)
-2. **Time interval:** Every 1 hour OR every 24 hours (configurable)
-3. **Entry threshold:** > 500 entries in working memory
-4. **Manual trigger:** User invokes `memory.consolidate` command
+1. **Periodic daemon tick:** every `memory.consolidation_interval_hours` (default 24; `0` disables).
+2. **Topic switch (daemon):** when the reactive path detects a topic change, gated by the debounce below.
+3. **Manual trigger:** the gateway control-protocol method `memory.consolidate`.
+4. **Per turn (agent):** `agent_turn.c` calls `hu_agent_consolidate_memory()` on every 10th
+   history entry, and on topic switch, gated by the debounce below.
 
-**Debounce logic (prevent thrashing):**
-
-```
-Min interval: 60 seconds between consolidations
-Min entries: 5 new entries since last consolidation
-If both NOT met, defer consolidation
-```
+**Debounce (topic-switch paths):** consolidation runs only when at least
+`HU_CONSOLIDATION_MIN_ENTRIES` (5) entries have arrived since the last run AND at least
+`HU_CONSOLIDATION_MIN_INTERVAL_SECS` (60) have elapsed. If either is unmet, it is deferred.
 
 ### Consolidation Algorithm
 
-**Input:** Working memory (short-term entries)  
-**Output:** Deduplicated, summarized entries ready for promotion
+**Input:** every entry returned by the memory backend's `list`  
+**Output:** entries deleted via the backend's `forget`; nothing is created or rewritten
 
 **Steps:**
 
-1. **Deduplication:** 
-   - Compute similarity scores between all entries (token overlap %)
-   - If similarity > threshold (default 85%), mark for merge
-   - Keep highest-quality entry; discard duplicates
+1. **Deduplication:**
+   - Compare entries pairwise, only within the same contact scope (key prefix).
+   - If `hu_similarity_score()` (0–100) is ≥ `dedup_threshold`, delete the **older** entry of the pair.
 
-2. **Summarization (if enabled):**
-   - Group entries by topic/session
-   - Invoke LLM to summarize group → single entry
-   - Preserve timestamps (earliest, latest)
-   - Estimate confidence (0.0–1.0)
+2. **Age cutoff:**
+   - Delete any entry whose timestamp is older than `decay_days` days. This is a hard cutoff, not a gradual decay.
 
-3. **Fact extraction (if enabled):**
-   - Run `hu_deep_extract()` on surviving entries
-   - Extract atomic facts (e.g., "User is engineer at Acme Corp")
-   - Store as propositions with confidence ≥ threshold
+3. **Size cap:**
+   - If the backend still holds more than `max_entries`, evict oldest-first until it is at the cap.
+   - Never evict the last remaining entry for a contact.
 
-4. **Promotion:**
-   - Move deduplicated entries to Tier 2 (working memory)
-   - Move oldest entries to Tier 3 (long-term) if > 7 days
+Consolidation does no summarization, fact extraction, or tier promotion. The LLM
+"connection discovery" pass was removed on 2026-10-01; the `provider` / `model`
+fields of `hu_consolidation_config_t` are now unread.
 
 ### Configuration
 
+Only two consolidation settings are configurable, and they live under `behavior`, not `memory`:
+
 ```json
 {
+  "behavior": {
+    "decay_days": 30,
+    "dedup_threshold": 70
+  },
   "memory": {
-    "consolidation": {
-      "enabled": true,
-      "decay_days": 30,
-      "decay_factor": 0.9,
-      "dedup_threshold": 85,
-      "max_entries": 10000,
-      "extract_facts": true,
-      "fact_confidence_threshold": 0.5
-    }
+    "consolidation_interval_hours": 24
   }
 }
 ```
 
-| Field | Default | Purpose |
-|-------|---------|---------|
-| `decay_days` | 30 | Time for entry to decay to 0 importance |
-| `decay_factor` | 0.9 | Multiplicative decay per day |
-| `dedup_threshold` | 85 | Token overlap % to consider duplicate |
-| `max_entries` | 10000 | Hard cap on working memory |
-| `extract_facts` | true | Run fact extraction on consolidation |
-| `fact_confidence_threshold` | 0.5 | Min confidence to store fact |
+| Key | Default | Accepted range | Purpose |
+|-----|---------|----------------|---------|
+| `behavior.decay_days` | 30 | 1–365 | Age cutoff: older entries are deleted |
+| `behavior.dedup_threshold` | 70 | 1–100 | Similarity score at or above which the older entry is deleted |
+| `memory.consolidation_interval_hours` | 24 | 0–8760 | Periodic daemon consolidation; `0` disables |
+
+All four callers build their settings with `hu_agent_consolidation_config()`
+(`src/agent/agent.c`), so they always agree. It starts from `HU_CONSOLIDATION_DEFAULTS`
+(`decay_days` 30, `dedup_threshold` 70, `max_entries` 5000) and, when a config is loaded,
+replaces `decay_days` and `dedup_threshold` with the `behavior` values. The macro's
+defaults match `config_merge.c`, so running without a config behaves like running with
+a default one.
+
+`max_entries` is fixed at 5000; there is no config key for it. A `memory.consolidation` object is not a recognized key: the config validator warns
+`unknown key` and nothing reads it.
 
 ---
 
 ## Forgetting Curve Implementation
 
 Memory follows **Ebbinghaus forgetting curve**: importance decays exponentially over time.
+
+> The `decay_days` / `decay_factor` names below are not the consolidation settings above.
+> Consolidation's `decay_days` is a hard age cutoff, and consolidation has no `decay_factor`.
+> Episode salience decay lives in `src/memory/repos/forgetting_repo_sqlite.c`.
 
 ### Importance Decay Formula
 
@@ -273,7 +274,7 @@ we discussed the Q3 budget review and Q4 planning."
 
 ### Fact Verification Workflow
 
-Before storing extracted facts from consolidation:
+Before storing extracted facts (consolidation itself extracts none):
 
 1. **LLM extracts:** "User is software engineer"
 2. **Confidence scoring:** 0.85
@@ -385,7 +386,7 @@ Required tests:
 
 - Tier promotion (5 accesses, 1+ day age)
 - Forgetting curve decay (importance over time)
-- Consolidation deduplication (85% threshold)
+- Consolidation deduplication (at `dedup_threshold`, same-contact only, older entry deleted)
 - Fact extraction (confidence scoring)
 - Hallucination guard (low-confidence filtering)
 - Vector similarity search (0.75 threshold)
