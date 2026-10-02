@@ -54,6 +54,35 @@ static void loader_recall_skips_other_contacts_memories(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
+/* One 7,680-char row filled the whole recall budget on 2026-10-02, so no
+ * other memory about the contact reached the reply. */
+static void loader_one_long_memory_cannot_fill_recall(void) {
+    hu_allocator_t a = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&a, ":memory:");
+    static char big[7700];
+    size_t n = 0;
+    while (n + 20 < sizeof(big)) {
+        memcpy(big + n, "weekend plans boat ", 19);
+        n += 19;
+    }
+    big[n] = '\0';
+    store_for(&mem, "experience:weekend plans", big, NULL);
+    store_for(&mem, "core:w1", "Seth takes the boat out most weekend mornings", NULL);
+    hu_retrieval_engine_t eng = hu_retrieval_create(&a, &mem);
+    hu_memory_loader_t loader;
+    HU_ASSERT_EQ(hu_memory_loader_init(&loader, &a, &mem, &eng, 8, 4096), HU_OK);
+    const char q[] = "weekend plans boat";
+    char *ctx = NULL;
+    size_t ctx_len = 0;
+    HU_ASSERT_EQ(hu_memory_loader_load(&loader, q, strlen(q), NULL, 0, &ctx, &ctx_len), HU_OK);
+    HU_ASSERT_NOT_NULL(ctx);
+    HU_ASSERT_NOT_NULL(strstr(ctx, "most weekend mornings"));
+    HU_ASSERT_TRUE(ctx_len < 2500);
+    a.free(a.ctx, ctx, ctx_len + 1);
+    eng.vtable->deinit(eng.ctx, &a);
+    mem.vtable->deinit(mem.ctx);
+}
+
 static void session_of_reads_the_owner_back_by_key(void) {
     hu_allocator_t a = hu_system_allocator();
     hu_memory_t mem = hu_sqlite_memory_create(&a, ":memory:");
@@ -74,6 +103,7 @@ void run_memory_loader_scope_tests(void) {
     HU_RUN_TEST(session_scope_keeps_own_and_global_rows);
 #ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(loader_recall_skips_other_contacts_memories);
+    HU_RUN_TEST(loader_one_long_memory_cannot_fill_recall);
     HU_RUN_TEST(session_of_reads_the_owner_back_by_key);
 #endif
 }

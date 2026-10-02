@@ -79,6 +79,10 @@ void hu_memory_loader_set_wiki_mode_for_test(int mode) {
  * gate: prompt bytes per turn must go DOWN, specificity flat or up. */
 #define HU_WIKI_MAX_BYTES 1200
 
+/* Per-memory share of the recall budget. Real memory rows run 50-1,000 chars
+ * (2026-10-02); 600 keeps several in view instead of one monster. */
+#define HU_RECALL_ITEM_MAX_CHARS 600
+
 static const char k_wiki_header[] =
     "### Your page on them (compiled nightly from what you know; weave in, never recite):\n";
 
@@ -595,6 +599,14 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
         size_t content_len = e->content_len;
         const char *timestamp = e->timestamp ? e->timestamp : "";
         size_t timestamp_len = e->timestamp_len ? e->timestamp_len : strlen(timestamp);
+
+        /* One memory may not take the whole budget: a single 7,680-char row
+         * crowded out every other memory on 2026-10-02. */
+        if (content_len > HU_RECALL_ITEM_MAX_CHARS) {
+            content_len = HU_RECALL_ITEM_MAX_CHARS;
+            while (content_len > 0 && ((unsigned char)content[content_len] & 0xC0) == 0x80)
+                content_len--;
+        }
 
         /* Format: ### Memory: {key}\n{content}\n(stored: {timestamp})\n\n */
         size_t overhead = 26 + key_len + timestamp_len;
