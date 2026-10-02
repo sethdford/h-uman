@@ -425,8 +425,8 @@ hu_spontaneity_kind_t hu_daemon_spontaneity_choose(hu_spontaneity_turn_t *t) {
 
     hu_spontaneity_rates_t rates;
     rates_for(t->agent, &rates);
-    int elig[HU_SPONT_KIND_COUNT], fire[HU_SPONT_KIND_COUNT];
-    double p[HU_SPONT_KIND_COUNT];
+    int elig[HU_SPONT_KIND_COUNT] = {0}, fire[HU_SPONT_KIND_COUNT] = {0};
+    double p[HU_SPONT_KIND_COUNT] = {0};
     hu_spontaneity_kind_t fired[HU_SPONT_KIND_COUNT];
     size_t n_fired = 0;
     for (int k = 0; k < HU_SPONT_KIND_COUNT; k++) {
