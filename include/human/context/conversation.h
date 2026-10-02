@@ -807,6 +807,10 @@ size_t hu_conversation_build_cold_restart_hint(const hu_channel_history_entry_t 
  * Only call for from_me=true messages. Returns HU_REACTION_NONE most of the time. */
 hu_reaction_type_t hu_conversation_classify_self_reaction(const char *msg, size_t msg_len,
                                                           uint32_t seed);
+/* The classification half of the above, without the ~2% roll: which
+ * reaction the message would carry (HAHA / EMPHASIS) or NONE when it is not
+ * self-reaction material. HU_SPONTANEITY decides WHEN from learned rates. */
+hu_reaction_type_t hu_conversation_self_reaction_kind(const char *msg, size_t msg_len);
 
 /* ── Group chat participant mention ──────────────────────────────────── */
 

@@ -7457,6 +7457,12 @@ hu_reaction_type_t hu_conversation_classify_self_reaction(const char *msg, size_
     /* ~2% chance of self-reacting at all */
     if (roll >= 20u)
         return HU_REACTION_NONE;
+    return hu_conversation_self_reaction_kind(msg, msg_len);
+}
+
+hu_reaction_type_t hu_conversation_self_reaction_kind(const char *msg, size_t msg_len) {
+    if (!msg || msg_len == 0)
+        return HU_REACTION_NONE;
 
     /* Self-deprecating humor: haha on own jokes / awkward messages */
     if (hu_str_contains_ci_cstr(msg, msg_len, "lol") ||
