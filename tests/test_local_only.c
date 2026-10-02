@@ -4,6 +4,7 @@
  * provider, that a cloud fallback attempt (prod: mlx_local primary failing
  * over to the gemini extra) carries no thread block while the local primary
  * still gets it and the rest of the prompt is unchanged. Fakes only. */
+#include "human/agent/model_router.h"
 #include "human/core/allocator.h"
 #include "human/core/string.h"
 #include "human/provider.h"
@@ -13,9 +14,10 @@
 #include <stdio.h>
 #include <string.h>
 
-#define BLOCK           \
-    HU_LOCAL_ONLY_BEGIN \
-    " (you and Mike, oldest first)\n[2d ago]\nMike: secret plans\nyou: ok\n" HU_LOCAL_ONLY_END
+#define BLOCK                                                            \
+    HU_LOCAL_ONLY_THREAD_BEGIN                                           \
+    " (you and Mike, oldest first)\n[2d ago]\nMike: secret plans\nyou: " \
+    "ok\n" HU_LOCAL_ONLY_THREAD_END
 
 static const char k_prompt[] = "persona head\n" BLOCK "guard tail\n";
 static const char k_prompt_stripped[] = "persona head\nguard tail\n";
@@ -60,7 +62,7 @@ static void test_local_only_strip_no_span_returns_null(void) {
  * fail closed — drop everything from BEGIN on. */
 static void test_local_only_strip_missing_end_fails_closed(void) {
     hu_allocator_t a = hu_system_allocator();
-    static const char cut[] = "persona head\n" HU_LOCAL_ONLY_BEGIN " (x)\nMike: secret pl";
+    static const char cut[] = "persona head\n" HU_LOCAL_ONLY_THREAD_BEGIN " (x)\nMike: secret pl";
     char *out = NULL;
     size_t out_len = 0;
     HU_ASSERT_EQ(hu_local_only_strip(&a, cut, sizeof(cut) - 1, &out, &out_len), HU_OK);
@@ -77,6 +79,93 @@ static void test_local_only_strip_two_spans(void) {
     HU_ASSERT_EQ(hu_local_only_strip(&a, two, sizeof(two) - 1, &out, &out_len), HU_OK);
     HU_ASSERT_STR_EQ(out, "a\nb\nc\n");
     a.free(a.ctx, out, out_len + 1);
+}
+
+static void test_local_only_model_names(void) {
+    HU_ASSERT_TRUE(hu_local_only_model_is_cloud("gemini-3.1-pro-preview", 22));
+    HU_ASSERT_TRUE(hu_local_only_model_is_cloud("gemini-3.8-flash", 16));
+    HU_ASSERT_TRUE(hu_local_only_model_is_cloud("publishers/google/models/gemini-3.8-flash", 41));
+    HU_ASSERT_TRUE(hu_local_only_model_is_cloud("GPT-4o", 6));
+    HU_ASSERT_TRUE(hu_local_only_model_is_cloud("claude-opus", 11));
+    HU_ASSERT_FALSE(hu_local_only_model_is_cloud("GLM-4.5-Air-4bit", 16));
+    HU_ASSERT_FALSE(hu_local_only_model_is_cloud("gemma-4-31b-it-4bit", 19));
+    HU_ASSERT_FALSE(hu_local_only_model_is_cloud("apple-foundationmodel", 21));
+    HU_ASSERT_FALSE(hu_local_only_model_is_cloud("", 0));
+    HU_ASSERT_TRUE(hu_local_only_attempt_is_local(true, "GLM-4.5-Air-4bit", 16));
+    HU_ASSERT_FALSE(hu_local_only_attempt_is_local(true, "gemini-3.8-flash", 16));
+    HU_ASSERT_FALSE(hu_local_only_attempt_is_local(false, "GLM-4.5-Air-4bit", 16));
+}
+
+static void test_local_only_span_table_has_thread_kind(void) {
+    size_t n = 0;
+    const hu_local_only_span_kind_t *k = hu_local_only_span_kinds(&n);
+    HU_ASSERT_GE(n, 1);
+    HU_ASSERT_STR_EQ(k[0].begin, HU_LOCAL_ONLY_THREAD_BEGIN);
+    HU_ASSERT_STR_EQ(k[0].end, HU_LOCAL_ONLY_THREAD_END);
+}
+
+/* Allocator that fails its Nth allocation (1-based); 0 = never. */
+typedef struct fail_alloc {
+    hu_allocator_t sys;
+    int fail_at;
+    int calls;
+    long live;
+} fail_alloc_t;
+
+static void *fa_alloc(void *ctx, size_t n) {
+    fail_alloc_t *f = (fail_alloc_t *)ctx;
+    if (++f->calls == f->fail_at)
+        return NULL;
+    void *p = f->sys.alloc(f->sys.ctx, n);
+    if (p)
+        f->live++;
+    return p;
+}
+
+static void *fa_realloc(void *ctx, void *ptr, size_t o, size_t n) {
+    fail_alloc_t *f = (fail_alloc_t *)ctx;
+    return f->sys.realloc(f->sys.ctx, ptr, o, n);
+}
+
+static void fa_free(void *ctx, void *ptr, size_t n) {
+    fail_alloc_t *f = (fail_alloc_t *)ctx;
+    if (ptr)
+        f->live--;
+    f->sys.free(f->sys.ctx, ptr, n);
+}
+
+/* Every allocation inside prepare can fail without freeing an uninitialised
+ * pointer or leaking, and a failed prepare never hands back a request. */
+static void test_local_only_prepare_oom_at_every_step(void) {
+    hu_chat_message_t msgs[2];
+    memset(msgs, 0, sizeof(msgs));
+    msgs[0].role = HU_ROLE_SYSTEM;
+    msgs[0].content = k_prompt;
+    msgs[0].content_len = sizeof(k_prompt) - 1;
+    msgs[1].role = HU_ROLE_USER;
+    msgs[1].content = k_prompt; /* two stripped messages: 5 allocations */
+    msgs[1].content_len = sizeof(k_prompt) - 1;
+    hu_chat_request_t req;
+    memset(&req, 0, sizeof(req));
+    req.messages = msgs;
+    req.messages_count = 2;
+    for (int k = 1; k <= 6; k++) {
+        fail_alloc_t f = {.sys = hu_system_allocator(), .fail_at = k};
+        hu_allocator_t a = {.ctx = &f, .alloc = fa_alloc, .realloc = fa_realloc, .free = fa_free};
+        hu_local_only_request_t lo;
+        const hu_chat_request_t *use = (const hu_chat_request_t *)&f;
+        hu_error_t err = hu_local_only_request_prepare(&a, &req, &lo, &use);
+        if (k <= 5) {
+            HU_ASSERT_EQ(err, HU_ERR_OUT_OF_MEMORY);
+            HU_ASSERT_NULL(use);
+        } else {
+            HU_ASSERT_EQ(err, HU_OK);
+            HU_ASSERT_NOT_NULL(use);
+            HU_ASSERT_EQ(lo.stripped, 2);
+        }
+        hu_local_only_request_release(&a, &lo);
+        HU_ASSERT_EQ(f.live, 0);
+    }
 }
 
 /* ── through the reliable provider ──────────────────────────────────── */
@@ -185,7 +274,7 @@ static void lo_rig_init(lo_rig_t *g, hu_error_t prim_err, bool primary_local) {
     hu_reliable_set_primary_local(&g->reliable, primary_local);
 }
 
-static hu_error_t lo_rig_chat(lo_rig_t *g, hu_chat_response_t *resp) {
+static hu_error_t lo_rig_chat_model(lo_rig_t *g, const char *model, hu_chat_response_t *resp) {
     hu_chat_message_t msgs[2];
     memset(msgs, 0, sizeof(msgs));
     msgs[0].role = HU_ROLE_SYSTEM;
@@ -200,8 +289,59 @@ static hu_error_t lo_rig_chat(lo_rig_t *g, hu_chat_response_t *resp) {
     req.messages_count = 2;
     req.prompt_cache_id = "persona-v1";
     req.prompt_cache_id_len = 10;
-    return g->reliable.vtable->chat(g->reliable.ctx, &g->alloc, &req, "GLM-4.5-Air-4bit", 16, 0.7,
+    return g->reliable.vtable->chat(g->reliable.ctx, &g->alloc, &req, model, strlen(model), 0.7,
                                     resp);
+}
+
+static hu_error_t lo_rig_chat(lo_rig_t *g, hu_chat_response_t *resp) {
+    return lo_rig_chat_model(g, "GLM-4.5-Air-4bit", resp);
+}
+
+/* agent_turn.c switches the model BY NAME on the same (reliable) provider.
+ * The first attempt then goes to the local primary carrying a cloud model
+ * name; it must not carry the thread block either. */
+static void route_first_attempt_strips(const char *model) {
+    lo_rig_t g;
+    lo_rig_init(&g, HU_OK, true);
+    hu_chat_response_t resp;
+    HU_ASSERT_EQ(lo_rig_chat_model(&g, model, &resp), HU_OK);
+    HU_ASSERT_EQ(g.prim.calls, 1);
+    HU_ASSERT_STR_EQ(g.prim.seen_system, k_prompt_stripped);
+    HU_ASSERT_FALSE(g.prim.saw_cache_id);
+    hu_chat_response_free(&g.alloc, &resp);
+    g.reliable.vtable->deinit(g.reliable.ctx, &g.alloc);
+}
+
+/* agent_turn.c:4156 — analytical tier -> the router's analytical model. */
+static void test_route_analytical_tier_model_strips(void) {
+    hu_model_router_config_t cfg = hu_model_router_default_config();
+    HU_ASSERT_NOT_NULL(cfg.analytical_model);
+    route_first_attempt_strips(cfg.analytical_model);
+}
+
+/* agent_turn.c:4220 — S3 sensitivity -> degradation fallback_model (prod:
+ * gemini-3.8-flash, the configured reliability.model_fallbacks target). */
+static void test_route_s3_fallback_model_strips(void) {
+    route_first_attempt_strips("gemini-3.8-flash");
+}
+
+/* agent_turn.c:4384 — on-device failure -> the router's reflexive model. */
+static void test_route_on_device_failure_reflexive_model_strips(void) {
+    hu_model_router_config_t cfg = hu_model_router_default_config();
+    HU_ASSERT_NOT_NULL(cfg.reflexive_model);
+    route_first_attempt_strips(cfg.reflexive_model);
+}
+
+/* The serving model on the local primary keeps the block. */
+static void test_route_local_model_keeps_block(void) {
+    lo_rig_t g;
+    lo_rig_init(&g, HU_OK, true);
+    hu_chat_response_t resp;
+    HU_ASSERT_EQ(lo_rig_chat(&g, &resp), HU_OK);
+    HU_ASSERT_STR_EQ(g.prim.seen_system, k_prompt);
+    HU_ASSERT_TRUE(g.prim.saw_cache_id);
+    hu_chat_response_free(&g.alloc, &resp);
+    g.reliable.vtable->deinit(g.reliable.ctx, &g.alloc);
 }
 
 static void test_reliable_cloud_fallback_carries_no_thread_block(void) {
@@ -216,7 +356,7 @@ static void test_reliable_cloud_fallback_carries_no_thread_block(void) {
     /* The cloud fallback answered, and its request had no thread block. */
     HU_ASSERT_EQ(g.cloud.calls, 1);
     HU_ASSERT_STR_EQ(resp.content, "gemini");
-    HU_ASSERT_STR_NOT_CONTAINS(g.cloud.seen_system, HU_LOCAL_ONLY_BEGIN);
+    HU_ASSERT_STR_NOT_CONTAINS(g.cloud.seen_system, HU_LOCAL_ONLY_THREAD_BEGIN);
     HU_ASSERT_STR_NOT_CONTAINS(g.cloud.seen_system, "secret plans");
     HU_ASSERT_STR_EQ(g.cloud.seen_system, k_prompt_stripped);
     HU_ASSERT_FALSE(g.cloud.saw_cache_id);
@@ -275,4 +415,11 @@ void run_local_only_tests(void) {
     HU_RUN_TEST(test_reliable_chat_with_system_fallback_strips);
     HU_RUN_TEST(test_reliable_unknown_primary_is_stripped_too);
     HU_RUN_TEST(test_reliable_primary_local_flag);
+    HU_RUN_TEST(test_local_only_model_names);
+    HU_RUN_TEST(test_local_only_span_table_has_thread_kind);
+    HU_RUN_TEST(test_local_only_prepare_oom_at_every_step);
+    HU_RUN_TEST(test_route_analytical_tier_model_strips);
+    HU_RUN_TEST(test_route_s3_fallback_model_strips);
+    HU_RUN_TEST(test_route_on_device_failure_reflexive_model_strips);
+    HU_RUN_TEST(test_route_local_model_keeps_block);
 }

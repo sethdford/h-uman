@@ -7,32 +7,57 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-/* Local-only prompt spans.
+/* Local-only (private) prompt spans — the one place that strips them.
  *
  * Owner rule: real message text never reaches a cloud model without explicit
- * opt-in. Some prompt sections (the HU_THREAD_CONTEXT "## Recent thread"
- * block: verbatim chat.db lines) may be shown to the on-device model but must
- * be removed before any attempt on a cloud provider — including the reliable
- * provider's cloud extras, which a failing or circuit-open local primary hands
- * the SAME request to (prod: mlx_local primary, gemini extra).
+ * opt-in. Prompt sections built from that text may be shown to the on-device
+ * model but are removed from any request that leaves the machine. The
+ * reliable provider applies this to every attempt — primary or extra, first
+ * try or fallback — whose provider is not local OR whose model name is a
+ * cloud model's. The second half covers routes that switch model BY NAME on
+ * the same provider (agent_turn.c: the analytical tier -> gemini-3.1-pro-
+ * preview, S3 -> fallback_model, on-device failure -> the reflexive cloud
+ * model, and the degradation retry).
  *
- * A span starts at a line beginning with HU_LOCAL_ONLY_BEGIN and ends after
- * the HU_LOCAL_ONLY_END line. A BEGIN with no END after it (the positional
- * prompt cap cut the block's tail) fails closed: everything from BEGIN to the
- * end of that message is removed. */
-#define HU_LOCAL_ONLY_BEGIN "## Recent thread"
-#define HU_LOCAL_ONLY_END   "## End of recent thread\n"
+ * A span opens at a line starting with a registered heading and closes after
+ * its end line, or — for a kind with no end line — at the first blank line.
+ * A span with no close (the positional prompt cap cut it) fails closed: the
+ * rest of that message is removed. To protect a new section, give it a unique
+ * heading and add one row to k_span_kinds in src/providers/local_only.c. */
 
-/* True for provider names that serve from this machine (doctor.c's list plus
- * the on-device backends). NULL / unknown names are NOT local (fail closed). */
+/* HU_THREAD_CONTEXT's "## Recent thread" block (daemon/thread_context.h). */
+#define HU_LOCAL_ONLY_THREAD_BEGIN "## Recent thread"
+#define HU_LOCAL_ONLY_THREAD_END   "## End of recent thread\n"
+
+typedef struct hu_local_only_span_kind {
+    const char *begin; /* line prefix that opens the span */
+    const char *end;   /* full line that closes it (inclusive); NULL = first blank line */
+} hu_local_only_span_kind_t;
+
+/* The registered kinds (read-only). */
+const hu_local_only_span_kind_t *hu_local_only_span_kinds(size_t *count);
+
+/* True for provider names that serve from this machine. NULL / unknown names
+ * are NOT local (fail closed). */
 bool hu_local_only_provider_name_is_local(const char *name);
 
 /* True when `prov` reports a local name via get_name. */
 bool hu_local_only_provider_is_local(const hu_provider_t *prov);
 
-/* Copy of `s` with every local-only span removed. `*out` is NULL (and
- * `*out_len` 0) when `s` holds no span — the caller keeps the original.
- * Returns HU_ERR_OUT_OF_MEMORY when a span exists but the copy failed. */
+/* True for model names that only a cloud API serves (gemini-*, gpt-*,
+ * claude-*, ...): sending one to a local provider still marks the attempt
+ * non-local. */
+bool hu_local_only_model_is_cloud(const char *model, size_t model_len);
+
+/* The attempt decision: local provider AND not a cloud model name. */
+bool hu_local_only_attempt_is_local(bool provider_local, const char *model, size_t model_len);
+
+/* True when `s` holds at least one span. */
+bool hu_local_only_has_span(const char *s, size_t len);
+
+/* Copy of `s` with every span removed. `*out` is NULL (and `*out_len` 0)
+ * when `s` holds no span — the caller keeps the original. Returns
+ * HU_ERR_OUT_OF_MEMORY when a span exists but the copy failed. */
 hu_error_t hu_local_only_strip(hu_allocator_t *alloc, const char *s, size_t len, char **out,
                                size_t *out_len);
 
@@ -46,8 +71,8 @@ typedef struct hu_local_only_request {
     size_t stripped; /* messages that lost a span */
 } hu_local_only_request_t;
 
-/* Point `*use` at a request safe for a non-local provider: `in` itself when
- * it carries no span, else `scratch->req` (spans removed, prompt_cache_id
+/* Point `*use` at a request safe for a non-local attempt: `in` itself when it
+ * carries no span, else `scratch->req` (spans removed, prompt_cache_id
  * cleared so a cloud cache keyed on the full prompt is never reused). Always
  * pair with hu_local_only_request_release. On error `*use` is NULL and the
  * caller must not send. */

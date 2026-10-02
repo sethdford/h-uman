@@ -180,7 +180,8 @@ static void fmt_span(long secs, char *out, size_t cap) {
 static void render_range(tc_buf_t *b, const hu_channel_history_entry_t *es, size_t start,
                          size_t end, const char *label, time_t now, hu_thread_context_stats_t *st) {
     char hdr[96];
-    snprintf(hdr, sizeof(hdr), "%s (you and %s, oldest first)\n", HU_LOCAL_ONLY_BEGIN, label);
+    snprintf(hdr, sizeof(hdr), "%s (you and %s, oldest first)\n", HU_LOCAL_ONLY_THREAD_BEGIN,
+             label);
     tc_puts(b, hdr);
     time_t prev = (time_t)-1;
     char text[HU_THREAD_CONTEXT_TEXT_CAP + 8];
@@ -210,7 +211,7 @@ static void render_range(tc_buf_t *b, const hu_channel_history_entry_t *es, size
         if (es[i].from_me)
             st->seth_lines++;
     }
-    tc_puts(b, HU_LOCAL_ONLY_END);
+    tc_puts(b, HU_LOCAL_ONLY_THREAD_END);
 }
 
 /* Is this trailing contact entry the inbound the model already gets? */

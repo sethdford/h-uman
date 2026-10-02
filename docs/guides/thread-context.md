@@ -56,19 +56,32 @@ unanswered messages. The block is capped at 1.5 KB instead.
 
 ### Never sent to a cloud model
 
-The block sits between local-only markers (`include/human/providers/local_only.h`).
+The block sits between local-only markers. `include/human/providers/local_only.h`
+is the one place that strips private spans: a table of headings, each closed
+by an end line or by the first blank line. To protect another section, add a
+row to it.
 
-- The reliable provider strips every marked span from the request before any
-  attempt on a provider that is not on-device. In prod that is the `gemini`
-  extra the `mlx_local` primary fails over to: on a failed call, on a
-  circuit-open window, and on the degradation and T4 cloud-model retries,
-  which all go through the same provider. A truncated block (no end marker)
-  is stripped to the end of the message.
-- The block is not built at all when the reply provider's primary is not
-  local (`local=0` in the log).
-- Prod log 2026-09-19 → 2026-10-01: the circuit opened 25 times, and each
-  opening routes every primary request to the gemini extra for 300 s. T4
-  local→cloud retries: 0.
+- **Every attempt is checked.** The reliable provider strips every span from
+  any attempt, first or fallback, whose provider is not on-device **or** whose
+  model name is a cloud model's (`gemini*`, `gpt-*`, `claude*`, ...). That
+  covers:
+  - the `gemini` extra that the `mlx_local` primary fails over to (failed
+    call or circuit-open window);
+  - the `agent_turn.c` routes that switch model by name on the same provider:
+    the analytical tier to `gemini-3.1-pro-preview`, S3 to `fallback_model`,
+    the on-device-failure retry to the reflexive model, and the degradation
+    retry. Each one has a test in `tests/test_local_only.c`.
+- **A truncated block is still stripped.** If there is no end marker, the
+  strip runs to the end of the message. When stripping cannot allocate, the
+  attempt fails rather than sending the unstripped text.
+- **No local primary, no block.** The block is not built when the reply
+  provider's primary is not local (`local=0` in the log).
+- **How often fallback fired.** In the prod log from 2026-09-19 to 2026-10-01,
+  the circuit opened 25 times. Each opening routes every primary request to
+  the gemini extra for 300 s. 66 calls went out with
+  `model=gemini-3.1-pro-preview` (the analytical route). The one inspected
+  (2026-09-19 04:16:22) hit :8741 first and then went to Vertex
+  `gemini-3.8-flash` with the full 19 KB prompt. There were 0 T4 local→cloud retries.
 
 ### Promotion: `shadow` → `live`
 

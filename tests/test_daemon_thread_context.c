@@ -51,12 +51,12 @@ static void test_thread_render_orders_oldest_first_with_labels(void) {
     size_t len = 0;
     char *out = render(&a, es, 3, "Mike Smith", NULL, HU_THREAD_CONTEXT_BUDGET, &len, &st);
     HU_ASSERT_NOT_NULL(out);
-    HU_ASSERT_EQ(strncmp(out, HU_LOCAL_ONLY_BEGIN, strlen(HU_LOCAL_ONLY_BEGIN)), 0);
+    HU_ASSERT_EQ(strncmp(out, HU_LOCAL_ONLY_THREAD_BEGIN, strlen(HU_LOCAL_ONLY_THREAD_BEGIN)), 0);
     HU_ASSERT_STR_CONTAINS(out, "Mike: you around saturday?\nyou: ya should be\nMike: cool\n");
     HU_ASSERT_STR_NOT_CONTAINS(out, "Smith");
-    size_t el = strlen(HU_LOCAL_ONLY_END);
+    size_t el = strlen(HU_LOCAL_ONLY_THREAD_END);
     HU_ASSERT_TRUE(len > el);
-    HU_ASSERT_EQ(strcmp(out + len - el, HU_LOCAL_ONLY_END), 0);
+    HU_ASSERT_EQ(strcmp(out + len - el, HU_LOCAL_ONLY_THREAD_END), 0);
     HU_ASSERT_EQ(st.lines, 3);
     HU_ASSERT_EQ(st.seth_lines, 1);
     HU_ASSERT_EQ(st.bytes, len);
@@ -279,7 +279,7 @@ static void test_thread_apply_live_appends_block(void) {
     apply_rig_t r;
     apply_rig_init(&r);
     size_t before_len = r.convo_len;
-    HU_ASSERT_TRUE(strstr(r.convo, HU_LOCAL_ONLY_BEGIN) == NULL);
+    HU_ASSERT_TRUE(strstr(r.convo, HU_LOCAL_ONLY_THREAD_BEGIN) == NULL);
     hu_thread_context_stats_t st;
     apply_rig_run(&r, HU_GATE_LIVE, true, &st);
     HU_ASSERT_EQ(r.convo_len, before_len + 2 + st.bytes);
@@ -301,7 +301,8 @@ static void test_thread_apply_live_into_empty_context(void) {
     apply_rig_run(&r, HU_GATE_LIVE, true, &st);
     HU_ASSERT_NOT_NULL(r.convo);
     HU_ASSERT_EQ(r.convo_len, st.bytes);
-    HU_ASSERT_EQ(strncmp(r.convo, HU_LOCAL_ONLY_BEGIN, strlen(HU_LOCAL_ONLY_BEGIN)), 0);
+    HU_ASSERT_EQ(strncmp(r.convo, HU_LOCAL_ONLY_THREAD_BEGIN, strlen(HU_LOCAL_ONLY_THREAD_BEGIN)),
+                 0);
     r.a.free(r.a.ctx, r.convo, r.convo_len + 1);
 }
 
@@ -312,7 +313,7 @@ static void test_thread_apply_live_skips_cloud_primary(void) {
     hu_thread_context_stats_t st;
     apply_rig_run(&r, HU_GATE_LIVE, false, &st);
     HU_ASSERT_EQ(r.convo_len, before_len);
-    HU_ASSERT_TRUE(strstr(r.convo, HU_LOCAL_ONLY_BEGIN) == NULL);
+    HU_ASSERT_TRUE(strstr(r.convo, HU_LOCAL_ONLY_THREAD_BEGIN) == NULL);
     HU_ASSERT_EQ(st.lines, 0);
     r.a.free(r.a.ctx, r.convo, r.convo_len + 1);
 }
