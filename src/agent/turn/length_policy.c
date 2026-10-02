@@ -10,62 +10,43 @@ bool hu_length_policy_legacy_tight(uint32_t cap) {
     return cap > 0 && cap <= HU_LENGTH_POLICY_LEGACY_TIGHT_MAX;
 }
 
-/* The relationship-stage multipliers today's relational cap uses
- * (conversation.c max_response_chars_relational_default), in hundredths. */
-static uint32_t stage_mult_x100(hu_relationship_stage_t stage) {
-    if (stage >= HU_REL_DEEP)
-        return 325u;
-    if (stage >= HU_REL_TRUSTED)
-        return 300u;
-    if (stage >= HU_REL_FAMILIAR)
-        return 255u;
-    return 200u;
-}
-
 hu_length_policy_result_t hu_length_policy_compute(const hu_length_policy_input_t *in) {
     hu_length_policy_result_t r = {0};
     if (!in)
         return r;
+    r.cap = in->legacy_cap;
     if (in->contact_p50 == 0 && in->contact_p90 == 0) {
-        r.cap = in->legacy_cap;
         r.tight = hu_length_policy_legacy_tight(in->legacy_cap);
         return r;
     }
     r.from_stats = true;
     uint32_t p50 = in->contact_p50;
-    uint32_t p90 = in->contact_p90;
     if (p50 == 0) {
-        p50 = p90 * HU_LENGTH_POLICY_P50_NUM / HU_LENGTH_POLICY_P50_DEN;
+        p50 = in->contact_p90 * HU_LENGTH_POLICY_P50_NUM / HU_LENGTH_POLICY_P50_DEN;
         if (p50 == 0)
             p50 = 1;
         r.p50_derived = true;
     }
-    if (p90 < p50)
-        p90 = p50;
     r.p50 = p50;
 
-    /* Seth's own reply distribution sets the cap, not a multiple of theirs. */
-    uint64_t cap = p90;
-    /* A long, story- or question-shaped inbound may RAISE it, by today's
-     * relationship multiplier. A short statement never does. */
-    bool raise = (in->shape & (HU_LENGTH_SHAPE_QUESTION | HU_LENGTH_SHAPE_STORY)) != 0 ||
-                 in->inbound_len >= HU_LENGTH_POLICY_LONG_INBOUND;
-    if (raise) {
-        uint64_t by_inbound = (uint64_t)in->inbound_len * stage_mult_x100(in->stage) / 100u;
-        if (by_inbound > cap)
-            cap = by_inbound;
-    }
-    if (in->brief_cap > 0 && cap > in->brief_cap)
-        cap = in->brief_cap;
-    if (cap < p50) /* never below the owner's own median */
-        cap = p50;
+    /* Today's cap is the starting point and is never lowered: it already
+     * scales with the inbound (per-contact multipliers included), keeps the
+     * 15-char floor and is floored at the owner's p90. A question or a story
+     * opens up further: brief mode no longer caps it. */
     uint32_t bound = HU_LENGTH_POLICY_HARD_MAX;
     if (in->hard_max > 0 && in->hard_max < bound)
         bound = in->hard_max;
-    if (cap > bound) /* the hard bound wins over the p50 floor */
-        cap = bound;
-    r.cap = (uint32_t)cap;
-    r.tight = r.cap < p50;
+    bool opens = (in->shape & (HU_LENGTH_SHAPE_QUESTION | HU_LENGTH_SHAPE_STORY)) != 0;
+    uint32_t open_cap = in->unbriefed_cap < bound ? in->unbriefed_cap : bound;
+    if (opens && open_cap > r.cap)
+        r.cap = open_cap;
+    uint32_t floor = p50 < bound ? p50 : bound; /* never below the owner's own median */
+    if (r.cap < floor)
+        r.cap = floor;
+
+    /* "Keep it tight" now describes the inbound, not the cap: a short, casual
+     * message (no question, no story) shorter than the owner's own median. */
+    r.tight = opens == false && in->inbound_len < p50;
     return r;
 }
 
@@ -88,7 +69,7 @@ unsigned hu_length_policy_inbound_shape(const char *inbound, size_t len) {
     return shape;
 }
 
-static uint32_t legacy_turn_cap(const hu_length_turn_t *t, uint32_t *brief_cap) {
+static uint32_t legacy_turn_cap(const hu_length_turn_t *t, uint32_t *unbriefed) {
     /* Moved verbatim from daemon.c (F15 ratio calibration, then brief mode). */
     uint32_t cap = t->channel_max;
     int cal = t->is_group ? hu_conversation_max_response_chars(t->inbound_len)
@@ -96,11 +77,11 @@ static uint32_t legacy_turn_cap(const hu_length_turn_t *t, uint32_t *brief_cap) 
                                                                           t->contact, t->stage);
     if (cal > 0 && (cap == 0 || (uint32_t)cal < cap))
         cap = (uint32_t)cal;
-    *brief_cap = 0;
+    *unbriefed = cap;
     if (t->brief_mode) {
-        *brief_cap = hu_conversation_brief_char_cap(t->is_group, t->contact, t->stage);
-        if (cap > *brief_cap)
-            cap = *brief_cap;
+        uint32_t bc = hu_conversation_brief_char_cap(t->is_group, t->contact, t->stage);
+        if (cap > bc)
+            cap = bc;
     }
     return cap;
 }
@@ -112,8 +93,8 @@ void hu_length_policy_turn(const hu_length_turn_t *t, hu_gate_mode_t mode,
     memset(out, 0, sizeof(*out));
     if (!t)
         return;
-    uint32_t brief_cap = 0;
-    uint32_t old_cap = legacy_turn_cap(t, &brief_cap);
+    uint32_t unbriefed = 0;
+    uint32_t old_cap = legacy_turn_cap(t, &unbriefed);
     out->cap = out->old_cap = out->new_cap = old_cap;
     out->tight = HU_LENGTH_TIGHT_LEGACY;
     if (mode == HU_GATE_OFF || t->is_group)
@@ -128,31 +109,29 @@ void hu_length_policy_turn(const hu_length_turn_t *t, hu_gate_mode_t mode,
         .shape = shape,
         .contact_p50 = t->contact ? t->contact->reply_chars_p50 : 0u,
         .contact_p90 = t->contact ? t->contact->reply_chars_p90 : 0u,
-        .stage = t->stage,
         .legacy_cap = old_cap,
+        .unbriefed_cap = unbriefed,
         .hard_max = bound,
-        .brief_cap = brief_cap,
     };
     hu_length_policy_result_t r = hu_length_policy_compute(&in);
     out->new_cap = r.cap;
     out->from_stats = r.from_stats;
     bool tight_old = hu_length_policy_legacy_tight(old_cap);
-    if (!t->quiet)
-        hu_log_info(
-            "length-policy", NULL,
-            "[HU_LENGTH_POLICY %s] old_cap=%u new_cap=%u tight_old=%d tight_new=%d stats=%d "
-            "p50=%u p50_derived=%d shape=%u inbound_len=%zu brief=%d stage=%d",
-            mode == HU_GATE_LIVE ? "live" : "shadow", (unsigned)old_cap, (unsigned)r.cap,
-            (int)tight_old, (int)r.tight, (int)r.from_stats, (unsigned)r.p50, (int)r.p50_derived,
-            shape, t->inbound_len, (int)t->brief_mode, (int)t->stage);
+    hu_log_info("length-policy", NULL,
+                "[HU_LENGTH_POLICY %s] old_cap=%u new_cap=%u tight_old=%d tight_new=%d stats=%d "
+                "p50=%u p50_derived=%d shape=%u inbound_len=%zu brief=%d stage=%d",
+                mode == HU_GATE_LIVE ? "live" : "shadow", (unsigned)old_cap, (unsigned)r.cap,
+                (int)tight_old, (int)r.tight, (int)r.from_stats, (unsigned)r.p50,
+                (int)r.p50_derived, shape, t->inbound_len, (int)t->brief_mode, (int)t->stage);
     if (mode != HU_GATE_LIVE || !r.from_stats)
         return;
     out->cap = r.cap;
     out->tight = r.tight ? HU_LENGTH_TIGHT_YES : HU_LENGTH_TIGHT_NO;
 }
 
-size_t hu_length_policy_quality_over_ref(size_t ref_len, uint32_t max_chars, hu_gate_mode_t mode) {
-    if (mode != HU_GATE_LIVE || max_chars == 0)
+size_t hu_length_policy_quality_over_ref(size_t ref_len, uint32_t max_chars, hu_gate_mode_t mode,
+                                         bool cap_from_stats) {
+    if (mode != HU_GATE_LIVE || !cap_from_stats || max_chars == 0)
         return ref_len;
     /* ratio <= 1.5 is full brevity marks; a reply of exactly max_chars lands there. */
     size_t cap_ref = ((size_t)max_chars * 2u + 2u) / 3u;

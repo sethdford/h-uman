@@ -4988,12 +4988,11 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                 bool ab_owned = false;
                 uint32_t max_chars = agent->max_response_chars ? agent->max_response_chars : 0;
                 if (agent->ab_history_entries && agent->ab_history_count > 0) {
-                    hu_quality_score_t q0 = hu_conversation_evaluate_quality(
+                    hu_quality_score_t q0 = hu_conversation_evaluate_quality_capped(
                         resp.content, resp.content_len, agent->ab_history_entries,
-                        agent->ab_history_count, max_chars);
+                        agent->ab_history_count, max_chars, agent->response_limit_tight != 0);
                     if (q0.total < 70) {
-                        hu_ab_result_t ab_result;
-                        memset(&ab_result, 0, sizeof(ab_result));
+                        hu_ab_result_t ab_result = {.cap_from_stats = agent->response_limit_tight};
                         ab_result.candidates[0].response =
                             hu_strndup(agent->alloc, resp.content, resp.content_len);
                         ab_result.candidates[0].response_len = resp.content_len;
@@ -5043,11 +5042,11 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                                     ab_result.candidate_count = 2;
                                     hu_chat_response_free(agent->alloc, &alt_resp);
 
-                                    hu_quality_score_t q1 = hu_conversation_evaluate_quality(
+                                    hu_quality_score_t q1 = hu_conversation_evaluate_quality_capped(
                                         ab_result.candidates[1].response,
                                         ab_result.candidates[1].response_len,
                                         agent->ab_history_entries, agent->ab_history_count,
-                                        max_chars);
+                                        max_chars, agent->response_limit_tight != 0);
                                     if (q1.total < 70) {
                                         hu_chat_response_t alt2_resp;
                                         memset(&alt2_resp, 0, sizeof(alt2_resp));

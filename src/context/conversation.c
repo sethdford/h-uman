@@ -1527,6 +1527,14 @@ static void compute_their_avg_len(const hu_channel_history_entry_t *entries, siz
 hu_quality_score_t hu_conversation_evaluate_quality(const char *response, size_t response_len,
                                                     const hu_channel_history_entry_t *entries,
                                                     size_t count, uint32_t max_chars) {
+    return hu_conversation_evaluate_quality_capped(response, response_len, entries, count,
+                                                   max_chars, false);
+}
+
+hu_quality_score_t
+hu_conversation_evaluate_quality_capped(const char *response, size_t response_len,
+                                        const hu_channel_history_entry_t *entries, size_t count,
+                                        uint32_t max_chars, bool cap_from_stats) {
     hu_quality_score_t score = {0, 0, 0, 0, 0, false, {0}};
     if (!response || response_len == 0)
         return score;
@@ -1546,10 +1554,11 @@ hu_quality_score_t hu_conversation_evaluate_quality(const char *response, size_t
      * this, the A/B scorer prefers a clipped fragment over a natural reply. */
     double ratio = (double)response_len / (double)ref_len;
     /* Over-length checks divide by the cap-aware reference under
-     * HU_LENGTH_POLICY=live, so a reply inside the cap is never "too long"
-     * (identical to ratio when off/shadow). */
-    double over = (double)response_len / (double)hu_length_policy_quality_over_ref(
-                                             ref_len, max_chars, hu_length_policy_mode());
+     * HU_LENGTH_POLICY=live for a contact with measured stats, so a reply
+     * inside that cap is never "too long" (identical to ratio otherwise). */
+    double over =
+        (double)response_len / (double)hu_length_policy_quality_over_ref(
+                                   ref_len, max_chars, hu_length_policy_mode(), cap_from_stats);
     if (ref_len >= HU_QUALITY_SUBSTANTIVE_REF_LEN && ratio < 0.2)
         score.brevity = 10;
     else if (over <= 1.5)
@@ -3895,7 +3904,8 @@ uint32_t hu_conversation_brief_char_cap(bool is_group, const hu_contact_profile_
 static size_t calibrate_length_impl(const char *last_msg, size_t last_msg_len,
                                     const hu_channel_history_entry_t *entries, size_t count,
                                     bool is_group, const hu_contact_profile_t *contact,
-                                    hu_relationship_stage_t session_stage, char *buf, size_t cap) {
+                                    hu_relationship_stage_t session_stage, uint32_t turn_cap,
+                                    char *buf, size_t cap) {
     if (!last_msg || last_msg_len == 0 || !buf || cap < 64)
         return 0;
 
@@ -3938,16 +3948,13 @@ static size_t calibrate_length_impl(const char *last_msg, size_t last_msg_len,
     }
 
     /* Last message length (structural) + numeric char limit for prompt */
-    /* Same number the RESPONSE LIMIT line carries (HU_LENGTH_POLICY; legacy when off). */
-    hu_length_turn_result_t lt;
-    hu_length_policy_turn(&(hu_length_turn_t){.inbound = last_msg,
-                                              .inbound_len = last_msg_len,
-                                              .contact = is_group ? NULL : contact,
-                                              .stage = session_stage,
-                                              .is_group = is_group,
-                                              .quiet = true},
-                          hu_length_policy_mode(), &lt);
-    int max_chars = (int)lt.cap;
+    /* turn_cap: the turn's RESPONSE LIMIT under HU_LENGTH_POLICY=live, so the
+     * two numbers agree; 0 keeps today's formula. */
+    int max_chars =
+        turn_cap > 0 ? (int)turn_cap
+        : is_group
+            ? hu_conversation_max_response_chars(last_msg_len)
+            : hu_conversation_max_response_chars_relational(last_msg_len, contact, session_stage);
     w = snprintf(buf + pos, cap - pos, "Their last message: %zu chars. ", last_msg_len);
     POS_ADVANCE(w, pos, cap);
     if (last_msg_len < 15) {
@@ -4038,7 +4045,7 @@ static size_t calibrate_length_impl(const char *last_msg, size_t last_msg_len,
 size_t hu_conversation_calibrate_length(const char *last_msg, size_t last_msg_len,
                                         const hu_channel_history_entry_t *entries, size_t count,
                                         char *buf, size_t cap) {
-    return calibrate_length_impl(last_msg, last_msg_len, entries, count, false, NULL, HU_REL_NEW,
+    return calibrate_length_impl(last_msg, last_msg_len, entries, count, false, NULL, HU_REL_NEW, 0,
                                  buf, cap);
 }
 
@@ -4049,7 +4056,15 @@ size_t hu_conversation_calibrate_length_for_contact(const char *last_msg, size_t
                                                     hu_relationship_stage_t session_stage,
                                                     char *buf, size_t cap) {
     return calibrate_length_impl(last_msg, last_msg_len, entries, count, is_group, contact,
-                                 session_stage, buf, cap);
+                                 session_stage, 0, buf, cap);
+}
+
+size_t hu_conversation_calibrate_length_capped(const char *last_msg, size_t last_msg_len,
+                                               bool is_group, const hu_contact_profile_t *contact,
+                                               hu_relationship_stage_t session_stage,
+                                               uint32_t turn_cap, char *buf, size_t cap) {
+    return calibrate_length_impl(last_msg, last_msg_len, NULL, 0, is_group, contact, session_stage,
+                                 turn_cap, buf, cap);
 }
 
 /* ── Texting style analysis ───────────────────────────────────────────── */

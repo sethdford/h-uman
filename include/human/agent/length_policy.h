@@ -3,25 +3,27 @@
 
 /* Reply-length policy: HU_LENGTH_POLICY=off|shadow|live, default off.
  *
- * Why (2026-10-01 humanness audit): the median reply was 22 chars against the
- * owner's ~71. The 1:1 cap was a multiple of the INBOUND length (2.0x, up to
- * 3.25x for a deep relationship, 15-char floor, floored at the contact's
- * measured p90), and the prompt said "Keep it tight" for every cap <= 80 —
- * so a contact whose measured p90 is 50 was told to keep it tight every turn,
- * and the quality retry asked for "Tighten up significantly" whenever a reply
- * ran past 5x their last message, even inside the cap.
+ * Goal: reply length should MATCH the owner's own per-contact distribution
+ * (measured p50 18-37 bytes across 6 contacts, 2026-10-01), never come out
+ * shorter than today, and open up only for questions and stories.
+ *
+ * Why (2026-10-01 humanness audit): the prompt said "Keep it tight" for every
+ * cap <= 80, so a contact whose measured p90 is 50 heard it every turn, and
+ * the quality retry asked to "Tighten up significantly" whenever a reply ran
+ * past 5x their last message, even inside the cap.
  *
  *   OFF     today's cap and prompt wording, byte for byte.
  *   SHADOW  computes the new cap and logs one aggregate line per 1:1 turn
  *           ("[HU_LENGTH_POLICY shadow] old_cap=… new_cap=… tight_old=…
  *           tight_new=…"); applies today's cap.
- *   LIVE    for a 1:1 contact with measured reply stats: cap = the owner's
- *           own p90 to that contact, raised (never lowered) for a long,
- *           story- or question-shaped inbound, never below the owner's p50,
- *           never above the hard bound. The prompt says "keep it tight" only
- *           when the cap is below the p50, and the quality retry scores
- *           against the same cap. Groups and contacts without stats keep
- *           today's cap and wording exactly.
+ *   LIVE    for a 1:1 contact with measured reply stats: cap = max(today's
+ *           cap, the owner's p50), and a question- or story-shaped inbound
+ *           also escapes brief mode. The RESPONSE LIMIT line says "keep it
+ *           tight" only when the INBOUND is short and casual (no question or
+ *           story, shorter than the owner's p50) and states the bare limit
+ *           otherwise. The calibration Target and the quality retry use the
+ *           same cap. Groups and contacts without stats keep today's cap,
+ *           wording and quality scoring exactly.
  *
  * Promotion (SHADOW→LIVE) and rollback: docs/guides/length-policy.md. */
 
@@ -66,13 +68,12 @@ typedef enum hu_length_tight {
 
 typedef struct hu_length_policy_input {
     size_t inbound_len;
-    unsigned shape;       /* HU_LENGTH_SHAPE_* */
-    uint32_t contact_p50; /* owner's median reply to this contact; 0 = unmeasured */
-    uint32_t contact_p90; /* owner's p90 reply to this contact; 0 = unmeasured */
-    hu_relationship_stage_t stage;
-    uint32_t legacy_cap; /* today's cap; returned verbatim without stats */
-    uint32_t hard_max;   /* channel / config bound; 0 = HU_LENGTH_POLICY_HARD_MAX */
-    uint32_t brief_cap;  /* brief-mode cap; 0 = not a brief turn */
+    unsigned shape;         /* HU_LENGTH_SHAPE_* */
+    uint32_t contact_p50;   /* owner's median reply to this contact; 0 = unmeasured */
+    uint32_t contact_p90;   /* owner's p90 reply to this contact; 0 = unmeasured */
+    uint32_t legacy_cap;    /* today's cap; the result is never below it */
+    uint32_t unbriefed_cap; /* today's cap before brief mode (== legacy_cap when not brief) */
+    uint32_t hard_max;      /* channel / config bound; 0 = HU_LENGTH_POLICY_HARD_MAX */
 } hu_length_policy_input_t;
 
 typedef struct hu_length_policy_result {
@@ -102,7 +103,6 @@ typedef struct hu_length_turn {
     uint32_t channel_max; /* channel response constraint; 0 = none */
     bool is_group;
     bool brief_mode;
-    bool quiet; /* skip the SHADOW/LIVE log line (a second read of the same turn) */
 } hu_length_turn_t;
 
 typedef struct hu_length_turn_result {
@@ -119,10 +119,11 @@ void hu_length_policy_turn(const hu_length_turn_t *t, hu_gate_mode_t mode,
                            hu_length_turn_result_t *out);
 
 /* The reference length the quality scorer's OVER-length checks divide by.
- * LIVE with a cap: max(ref_len, ceil(max_chars / 1.5)), so a reply inside the
- * cap keeps full brevity marks and never trips the 5x "tighten up" retry.
- * Otherwise ref_len unchanged. */
-size_t hu_length_policy_quality_over_ref(size_t ref_len, uint32_t max_chars, hu_gate_mode_t mode);
+ * LIVE with a cap that came from contact stats: max(ref_len, ceil(max_chars
+ * / 1.5)), so a reply inside the cap keeps full brevity marks and never trips
+ * the 5x "tighten up" retry. Otherwise ref_len unchanged. */
+size_t hu_length_policy_quality_over_ref(size_t ref_len, uint32_t max_chars, hu_gate_mode_t mode,
+                                         bool cap_from_stats);
 
 /* HU_LENGTH_POLICY, default OFF (unknown values fail closed). */
 hu_gate_mode_t hu_length_policy_mode(void);

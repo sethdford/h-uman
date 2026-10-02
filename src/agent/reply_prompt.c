@@ -38,11 +38,13 @@ uint32_t hu_reply_prompt_max_chars(const hu_reply_prompt_request_t *req) {
  * length calibration first, then the honesty check, joined like daemon.c. */
 static char *offline_conversation_context(hu_allocator_t *alloc,
                                           const hu_reply_prompt_request_t *req,
-                                          const hu_contact_profile_t *cp, size_t *out_len) {
+                                          const hu_contact_profile_t *cp,
+                                          const hu_length_turn_result_t *lim, size_t *out_len) {
     *out_len = 0;
     char cal[1024];
-    size_t cal_len = hu_conversation_calibrate_length_for_contact(
-        req->incoming, req->incoming_len, NULL, 0, false, cp, req->stage, cal, sizeof(cal));
+    size_t cal_len = hu_conversation_calibrate_length_capped(
+        req->incoming, req->incoming_len, false, cp, req->stage, lim->tight ? lim->cap : 0, cal,
+        sizeof(cal));
     char *honesty = req->incoming
                         ? hu_conversation_honesty_check(alloc, req->incoming, req->incoming_len)
                         : NULL;
@@ -108,11 +110,10 @@ hu_error_t hu_reply_prompt_render(hu_allocator_t *alloc, const hu_reply_prompt_r
     size_t contact_ctx_len = 0;
     if (cp)
         (void)hu_contact_profile_build_context(alloc, cp, &contact_ctx, &contact_ctx_len);
-    size_t convo_len = 0;
-    char *convo = offline_conversation_context(alloc, req, cp, &convo_len);
-
     hu_length_turn_result_t lim;
     reply_prompt_length(req, &lim);
+    size_t convo_len = 0;
+    char *convo = offline_conversation_context(alloc, req, cp, &lim, &convo_len);
     hu_prompt_config_t cfg = {
         .persona_prompt = head,
         .persona_prompt_len = head_len,

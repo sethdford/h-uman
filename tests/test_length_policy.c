@@ -5,6 +5,7 @@
  * 15-char floor. The prompt then said "Keep it tight" for every cap <= 80, so
  * a contact whose measured p90 is 50 was told to keep it tight on every turn.
  * The policy caps from the owner's own per-contact reply distribution. */
+#include "human/agent/ab_response.h"
 #include "human/agent/length_policy.h"
 #include "human/agent/prompt.h"
 #include "human/agent/reply_prompt.h"
@@ -21,78 +22,88 @@
 
 static void length_policy_short_inbound_cap_at_least_p50(void) {
     /* "ok" to a contact with p90=120 and no measured p50: the derived p50 is
-     * p90/3 = 40, and the cap is the owner's p90, never the 2x-inbound 15. */
+     * p90/3 = 40, and the cap never drops below it. */
     hu_length_policy_input_t in = {
-        .inbound_len = 2, .contact_p90 = 120, .stage = HU_REL_NEW, .legacy_cap = 15};
+        .inbound_len = 2, .contact_p90 = 120, .legacy_cap = 15, .unbriefed_cap = 15};
     hu_length_policy_result_t r = hu_length_policy_compute(&in);
     HU_ASSERT_TRUE(r.from_stats);
     HU_ASSERT_TRUE(r.p50_derived);
     HU_ASSERT_EQ(r.p50, 40u);
-    HU_ASSERT_GE(r.cap, r.p50);
-    HU_ASSERT_EQ(r.cap, 120u);
-    HU_ASSERT_FALSE(r.tight);
+    HU_ASSERT_EQ(r.cap, 40u);
+    HU_ASSERT_TRUE(r.tight); /* short, casual inbound */
 }
 
 static void length_policy_brief_cap_never_pushes_below_p50(void) {
     hu_length_policy_input_t in = {.inbound_len = 2,
                                    .contact_p50 = 45,
                                    .contact_p90 = 120,
-                                   .stage = HU_REL_NEW,
-                                   .legacy_cap = 15,
-                                   .brief_cap = 20};
+                                   .legacy_cap = 20,
+                                   .unbriefed_cap = 120};
     hu_length_policy_result_t r = hu_length_policy_compute(&in);
     HU_ASSERT_FALSE(r.p50_derived);
     HU_ASSERT_EQ(r.cap, 45u);
-    HU_ASSERT_FALSE(r.tight);
 }
 
-static void length_policy_long_story_inbound_raises_cap(void) {
+static void length_policy_question_or_story_escapes_brief_cap(void) {
+    /* Brief mode capped today's cap at 160; the unbriefed ratio cap is 200. */
     hu_length_policy_input_t in = {.inbound_len = 150,
                                    .shape = HU_LENGTH_SHAPE_STORY,
                                    .contact_p90 = 120,
-                                   .stage = HU_REL_DEEP,
-                                   .legacy_cap = 300};
-    hu_length_policy_result_t r = hu_length_policy_compute(&in);
-    /* 150 * 3.25 (the deep-relationship multiplier) = 487 > p90 120. */
-    HU_ASSERT_EQ(r.cap, 487u);
-
-    /* The same length without a shape flag still counts as long (>= 120). */
-    in.shape = 0;
-    HU_ASSERT_EQ(hu_length_policy_compute(&in).cap, 487u);
-
-    /* A short, unshaped inbound does not raise it. */
-    in.inbound_len = 40;
-    HU_ASSERT_EQ(hu_length_policy_compute(&in).cap, 120u);
-
-    /* A short QUESTION does (40 * 3.25 = 130). */
+                                   .legacy_cap = 160,
+                                   .unbriefed_cap = 200};
+    HU_ASSERT_EQ(hu_length_policy_compute(&in).cap, 200u);
     in.shape = HU_LENGTH_SHAPE_QUESTION;
-    HU_ASSERT_EQ(hu_length_policy_compute(&in).cap, 130u);
+    HU_ASSERT_EQ(hu_length_policy_compute(&in).cap, 200u);
+    in.shape = 0; /* a plain statement stays at today's cap */
+    HU_ASSERT_EQ(hu_length_policy_compute(&in).cap, 160u);
+}
+
+static void length_policy_never_below_todays_cap(void) {
+    static const uint32_t legacy[] = {15, 50, 80, 99, 165, 200};
+    for (size_t i = 0; i < sizeof(legacy) / sizeof(legacy[0]); i++) {
+        for (unsigned shape = 0; shape < 4; shape++) {
+            hu_length_policy_input_t in = {.inbound_len = 40,
+                                           .shape = shape,
+                                           .contact_p50 = 21,
+                                           .contact_p90 = 50,
+                                           .legacy_cap = legacy[i],
+                                           .unbriefed_cap = legacy[i],
+                                           .hard_max = 200};
+            HU_ASSERT_GE(hu_length_policy_compute(&in).cap, legacy[i]);
+        }
+    }
 }
 
 static void length_policy_hard_bound_holds(void) {
     hu_length_policy_input_t in = {.inbound_len = 400,
                                    .shape = HU_LENGTH_SHAPE_STORY,
                                    .contact_p90 = 120,
-                                   .stage = HU_REL_DEEP,
-                                   .legacy_cap = 200,
+                                   .legacy_cap = 160,
+                                   .unbriefed_cap = 900,
                                    .hard_max = 200};
     HU_ASSERT_EQ(hu_length_policy_compute(&in).cap, 200u);
-
-    /* No channel bound: the absolute ceiling still holds. */
-    in.hard_max = 0;
+    in.hard_max = 0; /* no channel bound: the absolute ceiling still holds */
     HU_ASSERT_EQ(hu_length_policy_compute(&in).cap, HU_LENGTH_POLICY_HARD_MAX);
 
-    /* The hard bound wins over the p50 floor — and then the cap IS below the
-     * owner's p50, so the prompt may say "keep it tight". */
-    hu_length_policy_input_t big = {.inbound_len = 2,
+    /* The hard bound wins over the p50 floor. */
+    hu_length_policy_input_t big = {.inbound_len = 300,
                                     .contact_p50 = 250,
                                     .contact_p90 = 400,
-                                    .stage = HU_REL_NEW,
                                     .legacy_cap = 200,
+                                    .unbriefed_cap = 200,
                                     .hard_max = 200};
-    hu_length_policy_result_t r = hu_length_policy_compute(&big);
-    HU_ASSERT_EQ(r.cap, 200u);
-    HU_ASSERT_TRUE(r.tight);
+    HU_ASSERT_EQ(hu_length_policy_compute(&big).cap, 200u);
+}
+
+static void length_policy_tight_describes_short_casual_inbound(void) {
+    hu_length_policy_input_t in = {
+        .inbound_len = 4, .contact_p50 = 21, .contact_p90 = 50, .legacy_cap = 50};
+    HU_ASSERT_TRUE(hu_length_policy_compute(&in).tight); /* "Heyo" */
+    in.shape = HU_LENGTH_SHAPE_QUESTION;
+    HU_ASSERT_FALSE(hu_length_policy_compute(&in).tight); /* "u up?" */
+    in.shape = 0;
+    in.inbound_len = 39; /* casual but longer than the owner's own median */
+    HU_ASSERT_FALSE(hu_length_policy_compute(&in).tight);
 }
 
 static void length_policy_missing_stats_returns_todays_formula(void) {
@@ -101,8 +112,8 @@ static void length_policy_missing_stats_returns_todays_formula(void) {
     for (size_t i = 0; i < sizeof(legacy) / sizeof(legacy[0]); i++) {
         hu_length_policy_input_t in = {.inbound_len = 300,
                                        .shape = HU_LENGTH_SHAPE_STORY,
-                                       .stage = HU_REL_DEEP,
                                        .legacy_cap = legacy[i],
+                                       .unbriefed_cap = 300,
                                        .hard_max = 200};
         hu_length_policy_result_t r = hu_length_policy_compute(&in);
         HU_ASSERT_FALSE(r.from_stats);
@@ -173,10 +184,8 @@ static void length_policy_turn_off_is_todays_cap_exactly(void) {
     }
 }
 
-static void length_policy_turn_live_applies_new_cap(void) {
-    /* p90 50 → derived p50 16. Today: cap 50, "keep it tight" (<= 80).
-     * LIVE: cap 50, tight=NO because 50 >= p50. A 40-char statement today
-     * gets 40*2.55 = 102; LIVE caps it at the owner's p90 (50). */
+static void length_policy_turn_live_never_lowers_and_keeps_contact_multipliers(void) {
+    /* A 39-char statement: today 39*2.55 = 99 > p90 50. LIVE keeps 99. */
     hu_contact_profile_t c = contact_with_p90(50);
     const char *msg = "ok heading out now see you at the place";
     hu_length_turn_t t = {.inbound = msg,
@@ -188,9 +197,37 @@ static void length_policy_turn_live_applies_new_cap(void) {
     hu_length_policy_turn(&t, HU_GATE_OFF, &off);
     hu_length_policy_turn(&t, HU_GATE_LIVE, &live);
     HU_ASSERT_EQ(off.cap, 99u);
-    HU_ASSERT_EQ(live.cap, 50u);
+    HU_ASSERT_EQ(live.cap, 99u);
     HU_ASSERT_EQ(live.tight, HU_LENGTH_TIGHT_NO);
     HU_ASSERT_TRUE(live.from_stats);
+
+    /* A 60-char question from a friend at stage NEW: the friend multiplier
+     * (2.75) gives 165, and LIVE must not drop it to a stage-only figure. */
+    hu_contact_profile_t f = contact_with_p90(50);
+    f.relationship_type = "friend";
+    char q[61];
+    memset(q, 'a', 59);
+    q[59] = '?';
+    q[60] = '\0';
+    hu_length_turn_t tq = {
+        .inbound = q, .inbound_len = 60, .contact = &f, .stage = HU_REL_NEW, .channel_max = 200};
+    hu_length_policy_turn(&tq, HU_GATE_LIVE, &live);
+    HU_ASSERT_GE(live.cap, 165u);
+
+    /* Brief mode: a question escapes the brief cap in LIVE only. */
+    hu_length_turn_t tb = tq;
+    tb.inbound_len = 72;
+    char qb[73];
+    memset(qb, 'a', 71);
+    qb[71] = '?';
+    qb[72] = '\0';
+    tb.inbound = qb;
+    tb.brief_mode = true;
+    tb.stage = HU_REL_FAMILIAR;
+    hu_length_policy_turn(&tb, HU_GATE_OFF, &off);
+    hu_length_policy_turn(&tb, HU_GATE_LIVE, &live);
+    HU_ASSERT_EQ(off.cap, 160u);  /* FAMILIAR brief cap */
+    HU_ASSERT_EQ(live.cap, 198u); /* 72 * 2.75 */
 
     /* Group turns and contacts without stats are never touched in LIVE. */
     t.is_group = true;
@@ -199,25 +236,6 @@ static void length_policy_turn_live_applies_new_cap(void) {
     hu_length_policy_turn(&t, HU_GATE_LIVE, &live);
     HU_ASSERT_EQ(live.cap, off.cap);
     HU_ASSERT_EQ(live.tight, HU_LENGTH_TIGHT_LEGACY);
-}
-
-static void length_policy_calibration_directive_uses_same_cap(void) {
-    /* The conversation-context calibration line carries its own "Target: ~N
-     * chars" number; under LIVE it must match the RESPONSE LIMIT cap. */
-    hu_contact_profile_t c = contact_with_p90(50);
-    const char *msg = "ok heading out now see you at the place";
-    char off[1024], live[1024];
-    hu_length_policy_set_mode_for_test(HU_GATE_OFF);
-    size_t n_off = hu_conversation_calibrate_length_for_contact(
-        msg, strlen(msg), NULL, 0, false, &c, HU_REL_FAMILIAR, off, sizeof(off));
-    hu_length_policy_set_mode_for_test(HU_GATE_LIVE);
-    size_t n_live = hu_conversation_calibrate_length_for_contact(
-        msg, strlen(msg), NULL, 0, false, &c, HU_REL_FAMILIAR, live, sizeof(live));
-    hu_length_policy_set_mode_for_test(-1);
-    HU_ASSERT_GT(n_off, 0u);
-    HU_ASSERT_GT(n_live, 0u);
-    HU_ASSERT_STR_CONTAINS(off, "Target: ~99 chars max.");
-    HU_ASSERT_STR_CONTAINS(live, "Target: ~50 chars max.");
 }
 
 /* ── prompt line ──────────────────────────────────────────────────────── */
@@ -247,12 +265,13 @@ static void length_policy_prompt_legacy_line_is_byte_identical(void) {
     a.free(a.ctx, p, len + 1);
 }
 
-static void length_policy_prompt_live_says_tight_only_below_p50(void) {
+static void length_policy_prompt_live_tight_or_bare_limit(void) {
     hu_allocator_t a = hu_system_allocator();
     size_t len = 0;
     char *p = build_limit_prompt(&a, 50, HU_LENGTH_TIGHT_NO, &len);
     HU_ASSERT_STR_NOT_CONTAINS(p, "Keep it tight");
-    HU_ASSERT_STR_CONTAINS(p, "RESPONSE LIMIT: Maximum 50 characters. Stay within it");
+    HU_ASSERT_STR_NOT_CONTAINS(p, "Stay within it");
+    HU_ASSERT_STR_CONTAINS(p, "\nRESPONSE LIMIT: Maximum 50 characters.\n");
     a.free(a.ctx, p, len + 1);
     p = build_limit_prompt(&a, 200, HU_LENGTH_TIGHT_YES, &len);
     HU_ASSERT_STR_CONTAINS(p, "RESPONSE LIMIT: Maximum 200 characters. Keep it tight.");
@@ -267,12 +286,12 @@ static const char k_persona_json[] =
     "\"contacts\":{\"+15550001111\":{\"name\":\"Lexi\",\"relationship\":\"friend\","
     "\"reply_chars_p90\":50,\"reply_chars_p50\":21}}}";
 
-static char *render(hu_allocator_t *a, hu_persona_t *p, size_t *len) {
+static char *render(hu_allocator_t *a, hu_persona_t *p, const char *incoming, size_t *len) {
     hu_reply_prompt_request_t req = {.persona = p,
                                      .channel = "imessage",
                                      .contact = "+15550001111",
-                                     .incoming = "Heyo",
-                                     .incoming_len = 4,
+                                     .incoming = incoming,
+                                     .incoming_len = strlen(incoming),
                                      .stage = HU_REL_NEW,
                                      .channel_max_chars = 200};
     char *out = NULL;
@@ -298,19 +317,24 @@ static void length_policy_live_changes_response_limit_line(void) {
     memset(&p, 0, sizeof(p));
     HU_ASSERT_EQ(hu_persona_load_json(&a, k_persona_json, strlen(k_persona_json), &p), HU_OK);
 
-    size_t off_len = 0, live_len = 0;
+    /* A question: today the cap (p90 50) is <= 80, so "Keep it tight". LIVE:
+     * same cap, the bare limit, because a question is not short and casual. */
+    size_t off_len = 0, live_len = 0, heyo_len = 0;
     hu_length_policy_set_mode_for_test(HU_GATE_OFF);
-    char *off = render(&a, &p, &off_len);
+    char *off = render(&a, &p, "you around later?", &off_len);
     hu_length_policy_set_mode_for_test(HU_GATE_LIVE);
-    char *live = render(&a, &p, &live_len);
+    char *live = render(&a, &p, "you around later?", &live_len);
+    char *heyo = render(&a, &p, "Heyo", &heyo_len);
     hu_length_policy_set_mode_for_test(-1);
 
-    /* OFF: today's line. LIVE: same cap (p90 50 >= p50 21) but not "tight". */
     HU_ASSERT_STR_CONTAINS(off, "RESPONSE LIMIT: Maximum 50 characters. Keep it tight.");
     HU_ASSERT_STR_NOT_CONTAINS(live, "Keep it tight");
-    HU_ASSERT_STR_CONTAINS(live, "RESPONSE LIMIT: Maximum 50 characters. Stay within it");
+    HU_ASSERT_STR_CONTAINS(live, "\nRESPONSE LIMIT: Maximum 50 characters.\n");
+    /* "Heyo" is short and casual: LIVE still says keep it tight. */
+    HU_ASSERT_STR_CONTAINS(heyo, "RESPONSE LIMIT: Maximum 50 characters. Keep it tight.");
     a.free(a.ctx, off, off_len + 1);
     a.free(a.ctx, live, live_len + 1);
+    a.free(a.ctx, heyo, heyo_len + 1);
     hu_persona_deinit(&a, &p);
 }
 
@@ -321,14 +345,46 @@ static void length_policy_off_render_is_byte_identical_to_unset(void) {
     HU_ASSERT_EQ(hu_persona_load_json(&a, k_persona_json, strlen(k_persona_json), &p), HU_OK);
     size_t l1 = 0, l2 = 0;
     hu_length_policy_set_mode_for_test(HU_GATE_OFF);
-    char *a1 = render(&a, &p, &l1);
+    char *a1 = render(&a, &p, "you around later?", &l1);
     hu_length_policy_set_mode_for_test(HU_GATE_SHADOW);
-    char *a2 = render(&a, &p, &l2);
+    char *a2 = render(&a, &p, "you around later?", &l2);
     hu_length_policy_set_mode_for_test(-1);
     HU_ASSERT_EQ(l1, l2);
     HU_ASSERT_EQ(memcmp(a1, a2, l1), 0);
     a.free(a.ctx, a1, l1 + 1);
     a.free(a.ctx, a2, l2 + 1);
+    hu_persona_deinit(&a, &p);
+}
+
+static void length_policy_calibration_directive_uses_same_cap(void) {
+    /* The calibration line carries its own "Target: ~N chars" number. Under
+     * LIVE it must equal the RESPONSE LIMIT, channel bound included: the
+     * relational formula says 99 (39 * 2.55, FAMILIAR), the channel 60. */
+    hu_allocator_t a = hu_system_allocator();
+    hu_persona_t p;
+    memset(&p, 0, sizeof(p));
+    HU_ASSERT_EQ(hu_persona_load_json(&a, k_persona_json, strlen(k_persona_json), &p), HU_OK);
+    const char *msg = "ok heading out now see you at the place";
+    hu_reply_prompt_request_t req = {.persona = &p,
+                                     .channel = "imessage",
+                                     .contact = "+15550001111",
+                                     .incoming = msg,
+                                     .incoming_len = strlen(msg),
+                                     .stage = HU_REL_FAMILIAR,
+                                     .channel_max_chars = 60};
+    char *off = NULL, *live = NULL;
+    size_t off_len = 0, live_len = 0;
+    hu_length_policy_set_mode_for_test(HU_GATE_OFF);
+    HU_ASSERT_EQ(hu_reply_prompt_render(&a, &req, &off, &off_len), HU_OK);
+    hu_length_policy_set_mode_for_test(HU_GATE_LIVE);
+    HU_ASSERT_EQ(hu_reply_prompt_render(&a, &req, &live, &live_len), HU_OK);
+    hu_length_policy_set_mode_for_test(-1);
+    HU_ASSERT_STR_CONTAINS(off, "Target: ~99 chars max.");
+    HU_ASSERT_STR_CONTAINS(off, "RESPONSE LIMIT: Maximum 60 characters");
+    HU_ASSERT_STR_CONTAINS(live, "Target: ~60 chars max.");
+    HU_ASSERT_STR_CONTAINS(live, "RESPONSE LIMIT: Maximum 60 characters");
+    a.free(a.ctx, off, off_len + 1);
+    a.free(a.ctx, live, live_len + 1);
     hu_persona_deinit(&a, &p);
 }
 
@@ -346,9 +402,12 @@ static void length_policy_quality_retry_does_not_fight_live_cap(void) {
     size_t rl = strlen(reply);
 
     hu_length_policy_set_mode_for_test(HU_GATE_OFF);
-    hu_quality_score_t off = hu_conversation_evaluate_quality(reply, rl, h, 2, 70);
+    hu_quality_score_t off = hu_conversation_evaluate_quality_capped(reply, rl, h, 2, 70, true);
     hu_length_policy_set_mode_for_test(HU_GATE_LIVE);
-    hu_quality_score_t live = hu_conversation_evaluate_quality(reply, rl, h, 2, 70);
+    hu_quality_score_t live = hu_conversation_evaluate_quality_capped(reply, rl, h, 2, 70, true);
+    hu_quality_score_t nostats =
+        hu_conversation_evaluate_quality_capped(reply, rl, h, 2, 70, false);
+    hu_quality_score_t plain = hu_conversation_evaluate_quality(reply, rl, h, 2, 70);
     hu_length_policy_set_mode_for_test(-1);
 
     HU_ASSERT_TRUE(off.needs_revision); /* today: "Tighten up significantly" */
@@ -356,40 +415,70 @@ static void length_policy_quality_retry_does_not_fight_live_cap(void) {
     HU_ASSERT_FALSE(live.needs_revision);
     HU_ASSERT_GT(live.brevity, off.brevity);
 
+    /* LIVE, but a group or a contact without stats: today's scoring exactly. */
+    HU_ASSERT_TRUE(nostats.needs_revision);
+    HU_ASSERT_EQ(nostats.brevity, off.brevity);
+    HU_ASSERT_EQ(nostats.total, off.total);
+    HU_ASSERT_EQ(plain.total, off.total);
+    HU_ASSERT_TRUE(plain.needs_revision);
+
     /* LIVE still flags a reply far past the cap. */
     char big[400];
     memset(big, 'a', sizeof(big) - 1);
     big[sizeof(big) - 1] = '\0';
     hu_length_policy_set_mode_for_test(HU_GATE_LIVE);
-    hu_quality_score_t over = hu_conversation_evaluate_quality(big, strlen(big), h, 2, 70);
+    hu_quality_score_t over =
+        hu_conversation_evaluate_quality_capped(big, strlen(big), h, 2, 70, true);
     hu_length_policy_set_mode_for_test(-1);
     HU_ASSERT_TRUE(over.needs_revision);
 }
 
 static void length_policy_quality_ref_is_unchanged_off(void) {
-    HU_ASSERT_EQ(hu_length_policy_quality_over_ref(10, 70, HU_GATE_OFF), 10u);
-    HU_ASSERT_EQ(hu_length_policy_quality_over_ref(10, 70, HU_GATE_SHADOW), 10u);
-    HU_ASSERT_EQ(hu_length_policy_quality_over_ref(10, 70, HU_GATE_LIVE), 47u);
-    HU_ASSERT_EQ(hu_length_policy_quality_over_ref(100, 70, HU_GATE_LIVE), 100u);
-    HU_ASSERT_EQ(hu_length_policy_quality_over_ref(10, 0, HU_GATE_LIVE), 10u);
+    HU_ASSERT_EQ(hu_length_policy_quality_over_ref(10, 70, HU_GATE_OFF, true), 10u);
+    HU_ASSERT_EQ(hu_length_policy_quality_over_ref(10, 70, HU_GATE_SHADOW, true), 10u);
+    HU_ASSERT_EQ(hu_length_policy_quality_over_ref(10, 70, HU_GATE_LIVE, true), 47u);
+    HU_ASSERT_EQ(hu_length_policy_quality_over_ref(10, 70, HU_GATE_LIVE, false), 10u);
+    HU_ASSERT_EQ(hu_length_policy_quality_over_ref(100, 70, HU_GATE_LIVE, true), 100u);
+    HU_ASSERT_EQ(hu_length_policy_quality_over_ref(10, 0, HU_GATE_LIVE, true), 10u);
+}
+
+static void length_policy_ab_pick_scores_with_the_same_cap(void) {
+    hu_allocator_t a = hu_system_allocator();
+    hu_channel_history_entry_t h[1];
+    memset(h, 0, sizeof(h));
+    snprintf(h[0].text, sizeof(h[0].text), "Heyo");
+    hu_ab_result_t r = {.candidate_count = 1, .cap_from_stats = true};
+    char reply[] = "hey! just got back from the gym, what are you up to tonight";
+    r.candidates[0].response = reply;
+    r.candidates[0].response_len = strlen(r.candidates[0].response);
+    hu_length_policy_set_mode_for_test(HU_GATE_LIVE);
+    HU_ASSERT_EQ(hu_ab_evaluate(&a, &r, h, 1, 70), HU_OK);
+    int live_score = r.candidates[0].quality_score;
+    r.cap_from_stats = false;
+    HU_ASSERT_EQ(hu_ab_evaluate(&a, &r, h, 1, 70), HU_OK);
+    hu_length_policy_set_mode_for_test(-1);
+    HU_ASSERT_GT(live_score, r.candidates[0].quality_score);
 }
 
 void run_length_policy_tests(void) {
     HU_TEST_SUITE("length_policy");
     HU_RUN_TEST(length_policy_short_inbound_cap_at_least_p50);
     HU_RUN_TEST(length_policy_brief_cap_never_pushes_below_p50);
-    HU_RUN_TEST(length_policy_long_story_inbound_raises_cap);
+    HU_RUN_TEST(length_policy_question_or_story_escapes_brief_cap);
+    HU_RUN_TEST(length_policy_never_below_todays_cap);
     HU_RUN_TEST(length_policy_hard_bound_holds);
+    HU_RUN_TEST(length_policy_tight_describes_short_casual_inbound);
     HU_RUN_TEST(length_policy_missing_stats_returns_todays_formula);
     HU_RUN_TEST(length_policy_inbound_shape_flags);
     HU_RUN_TEST(length_policy_turn_off_is_todays_cap_exactly);
-    HU_RUN_TEST(length_policy_turn_live_applies_new_cap);
+    HU_RUN_TEST(length_policy_turn_live_never_lowers_and_keeps_contact_multipliers);
     HU_RUN_TEST(length_policy_calibration_directive_uses_same_cap);
     HU_RUN_TEST(length_policy_prompt_legacy_line_is_byte_identical);
-    HU_RUN_TEST(length_policy_prompt_live_says_tight_only_below_p50);
+    HU_RUN_TEST(length_policy_prompt_live_tight_or_bare_limit);
     HU_RUN_TEST(length_policy_persona_parses_p50);
     HU_RUN_TEST(length_policy_live_changes_response_limit_line);
     HU_RUN_TEST(length_policy_off_render_is_byte_identical_to_unset);
     HU_RUN_TEST(length_policy_quality_retry_does_not_fight_live_cap);
     HU_RUN_TEST(length_policy_quality_ref_is_unchanged_off);
+    HU_RUN_TEST(length_policy_ab_pick_scores_with_the_same_cap);
 }
