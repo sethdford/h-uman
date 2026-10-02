@@ -115,6 +115,25 @@ static void personal_model_avg_length_recovers_from_a_bad_value(void) {
     HU_ASSERT_TRUE(m.style.avg_message_length >= 30);
 }
 
+/* HU_PROMPT_CACHE_ORDER=live drops the raw "avg N chars" number: it moved
+ * with every message, so it changed the prompt mid-way every turn, and the
+ * bucketed "keep replies ~N chars" directive already carries the length. */
+static void personal_model_cache_order_live_drops_raw_avg(void) {
+    hu_personal_model_t m;
+    hu_personal_model_init(&m);
+    const char *t = "hey how is it going today";
+    HU_ASSERT_EQ(hu_personal_model_ingest(&m, t, strlen(t), true, 0, NULL), HU_OK);
+    char buf[4096];
+    unsetenv("HU_PROMPT_CACHE_ORDER");
+    hu_personal_model_build_prompt(&m, buf, sizeof(buf));
+    HU_ASSERT_NOT_NULL(strstr(buf, "avg 25 chars"));
+    setenv("HU_PROMPT_CACHE_ORDER", "live", 1);
+    hu_personal_model_build_prompt(&m, buf, sizeof(buf));
+    unsetenv("HU_PROMPT_CACHE_ORDER");
+    HU_ASSERT_NOT_NULL(strstr(buf, "Communication style: "));
+    HU_ASSERT_NULL(strstr(buf, "avg "));
+}
+
 static void personal_model_has_content_false_when_fresh(void) {
     hu_personal_model_t m;
     hu_personal_model_init(&m);
@@ -3214,6 +3233,7 @@ void run_personal_model_tests(void) {
     HU_RUN_TEST(personal_model_ingest_updates_style_metrics);
     HU_RUN_TEST(personal_model_avg_length_does_not_drift_down);
     HU_RUN_TEST(personal_model_avg_length_recovers_from_a_bad_value);
+    HU_RUN_TEST(personal_model_cache_order_live_drops_raw_avg);
     HU_RUN_TEST(personal_model_has_content_false_when_fresh);
     HU_RUN_TEST(personal_model_has_content_true_after_fact);
     HU_RUN_TEST(personal_model_has_content_true_after_style_observation);

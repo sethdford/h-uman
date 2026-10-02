@@ -15,6 +15,7 @@
  */
 
 #include "human/agent/world_model.h"
+#include "human/core/gate_mode.h"
 
 #include "human/agent/autonomy.h"
 #include "human/agent/goals.h"
@@ -1043,10 +1044,19 @@ void hu_world_model_merge_personal(hu_world_model_t *wm, const hu_personal_model
     /* Style summary — always overwrite from the PM since it's the
      * authoritative source for communication style. */
     if (pm->style.sample_count > 0) {
-        snprintf(wm->style_summary, sizeof(wm->style_summary), "%s, %s, %s emoji, avg %u chars/msg",
-                 pm_formality_label(pm->style.formality), pm_verbosity_label(pm->style.verbosity),
-                 pm->style.emoji_frequency > 0.3f ? "uses" : "rare",
-                 (unsigned)pm->style.avg_message_length);
+        /* HU_PROMPT_CACHE_ORDER=live: no raw average, same as the personal
+         * model's line (it changes every message). */
+        if (hu_gate_mode_from_env("HU_PROMPT_CACHE_ORDER", HU_GATE_OFF) == HU_GATE_LIVE)
+            snprintf(wm->style_summary, sizeof(wm->style_summary), "%s, %s, %s emoji",
+                     pm_formality_label(pm->style.formality),
+                     pm_verbosity_label(pm->style.verbosity),
+                     pm->style.emoji_frequency > 0.3f ? "uses" : "rare");
+        else
+            snprintf(wm->style_summary, sizeof(wm->style_summary),
+                     "%s, %s, %s emoji, avg %u chars/msg", pm_formality_label(pm->style.formality),
+                     pm_verbosity_label(pm->style.verbosity),
+                     pm->style.emoji_frequency > 0.3f ? "uses" : "rare",
+                     (unsigned)pm->style.avg_message_length);
     }
 
     /* Goals — append PM goals the world model doesn't already have.

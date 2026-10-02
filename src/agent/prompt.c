@@ -566,32 +566,51 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
                 {config->conversation_context, config->conversation_context_len, NULL, 0, NULL, 0,
                  HU_PROMPT_FIELD_CONVERSATION_CONTEXT, -1},
             };
-            for (size_t i = 0; i < sizeof(sections) / sizeof(sections[0]); i++) {
-                if (!sections[i].text || sections[i].text_len == 0)
-                    continue;
-                HU_PROMPT_TRACK_BEFORE();
-                size_t span_start = len;
-                if (sections[i].header_len > 0) {
-                    err =
-                        append(alloc, &buf, &len, &cap, sections[i].header, sections[i].header_len);
-                    if (err != HU_OK)
-                        goto fail;
-                }
-                err = append(alloc, &buf, &len, &cap, sections[i].text, sections[i].text_len);
-                if (err != HU_OK)
-                    goto fail;
-                if (sections[i].trailer_len > 0) {
-                    err = append(alloc, &buf, &len, &cap, sections[i].trailer,
-                                 sections[i].trailer_len);
-                    if (err != HU_OK)
-                        goto fail;
-                }
-                if (sections[i].span_slot >= 0) {
-                    spans[sections[i].span_slot].offset = span_start;
-                    spans[sections[i].span_slot].length = len - span_start;
-                }
-                HU_PROMPT_TRACK_AFTER(sections[i].field);
+            /* HU_PROMPT_CACHE_ORDER (default OFF; gated on the 2026-10-02 offline
+             * A/B, scripts/ab_agent_turns.py kind "cache"): the session context
+             * is the one section here that changes every message, so LIVE emits
+             * it after the stable sections and the server's prefix cache covers
+             * everything before it. SHADOW changes nothing (log only). */
+            const hu_gate_mode_t order_mode =
+                hu_gate_mode_from_env("HU_PROMPT_CACHE_ORDER", HU_GATE_OFF);
+            const bool stm_last = order_mode == HU_GATE_LIVE;
+            if (order_mode == HU_GATE_SHADOW && config->stm_context_len > 0) {
+                static atomic_bool s_cache_order_shadow = false;
+                hu_log_info_once(&s_cache_order_shadow, "prompt", NULL,
+                                 "HU_PROMPT_CACHE_ORDER shadow: would move the session context "
+                                 "after the stable sections");
             }
+            for (int pass = 0; pass < 2; pass++)
+                for (size_t i = 0; i < sizeof(sections) / sizeof(sections[0]); i++) {
+                    const bool deferred =
+                        stm_last && sections[i].field == HU_PROMPT_FIELD_STM_CONTEXT;
+                    if (deferred != (pass == 1))
+                        continue;
+                    if (!sections[i].text || sections[i].text_len == 0)
+                        continue;
+                    HU_PROMPT_TRACK_BEFORE();
+                    size_t span_start = len;
+                    if (sections[i].header_len > 0) {
+                        err = append(alloc, &buf, &len, &cap, sections[i].header,
+                                     sections[i].header_len);
+                        if (err != HU_OK)
+                            goto fail;
+                    }
+                    err = append(alloc, &buf, &len, &cap, sections[i].text, sections[i].text_len);
+                    if (err != HU_OK)
+                        goto fail;
+                    if (sections[i].trailer_len > 0) {
+                        err = append(alloc, &buf, &len, &cap, sections[i].trailer,
+                                     sections[i].trailer_len);
+                        if (err != HU_OK)
+                            goto fail;
+                    }
+                    if (sections[i].span_slot >= 0) {
+                        spans[sections[i].span_slot].offset = span_start;
+                        spans[sections[i].span_slot].length = len - span_start;
+                    }
+                    HU_PROMPT_TRACK_AFTER(sections[i].field);
+                }
         }
         /* Everything appended from here to the early return is the guard
          * tail the positional cap must keep (hu_prompt_positional_cap_apply).

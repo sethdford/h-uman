@@ -551,9 +551,18 @@ size_t hu_personal_model_build_prompt_with_overlay(const hu_personal_model_t *mo
     }
 
     if (model->style.sample_count > 0U) {
-        append_fmt(buf, cap, &n, "Communication style: %s, %s, avg %u chars\n",
-                   formality_desc(model->style.formality), verbosity_desc(model->style.verbosity),
-                   (unsigned)model->style.avg_message_length);
+        /* HU_PROMPT_CACHE_ORDER=live drops the raw average: it moves with every
+         * message (a mid-prompt cache miss each turn) and the bucketed
+         * "keep replies ~N chars" directive below already carries length. */
+        if (hu_gate_mode_from_env("HU_PROMPT_CACHE_ORDER", HU_GATE_OFF) == HU_GATE_LIVE)
+            append_fmt(buf, cap, &n, "Communication style: %s, %s\n",
+                       formality_desc(model->style.formality),
+                       verbosity_desc(model->style.verbosity));
+        else
+            append_fmt(buf, cap, &n, "Communication style: %s, %s, avg %u chars\n",
+                       formality_desc(model->style.formality),
+                       verbosity_desc(model->style.verbosity),
+                       (unsigned)model->style.avg_message_length);
         detail = true;
     }
 
