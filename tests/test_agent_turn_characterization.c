@@ -40,6 +40,7 @@
 #include "human/agent/model_router.h"
 #include "human/agent/world_model.h"
 #include "human/agent/world_model_bridge.h"
+#include "human/config.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/time.h"
@@ -47,6 +48,7 @@
 #include "human/memory/graph.h"
 #include "human/memory/lifecycle/semantic_cache.h"
 #include "human/persona.h"
+#include "human/providers/reliable.h"
 #include "human/security.h"
 #include "human/tool.h"
 #include "test_tmpdir.h"
@@ -585,6 +587,14 @@ typedef struct ch_case {
     bool response_cache;           /* semantic cache pre-seeded msg -> "cached answer" */
     bool immersive;                /* fixture persona + HU_PERSONA_HEAD=live + imessage channel */
     const char *immersive_context; /* HU_IMMERSIVE_CONTEXT, NULL = unset */
+    /* Production provider shape: trp wrapped in a reliable provider whose
+     * primary is declared local and serves "char-model" (+ local_model2). */
+    bool local_provider;
+    const char *local_model2;
+    const char *turn_model;             /* agent.turn_model (daemon router), NULL = unset */
+    const char *fallback_model;         /* degradation fallback_model, NULL = unset */
+    bool on_device;                     /* config: mr_on_device_enabled (cloud retry route) */
+    const char *probe_absent_last_call; /* must not appear in the LAST chat call */
     /* branch probes: prove the case reaches the code it names */
     const char *probe_contains;
     const char *probe_absent;
@@ -906,22 +916,104 @@ static const ch_case_t k_immersive_cases[] = {
      .immersive = true,
      .probe_contains = "Sam, a carpenter",
      .probe_absent = "### Active Commitments"},
-    /* HU_IMMERSIVE_CONTEXT=live on the same turn: the golden equals
-     * immersive_commitment plus the "## What you know right now" block,
-     * which carries the commitment the immersive prompt otherwise drops. */
-    {.name = "immersive_commitment_context_live",
+    /* HU_IMMERSIVE_CONTEXT on a local provider + local model, two turns: the
+     * commitment made in turn 1 is in Core Memory on turn 1 (deduped out of
+     * the block) but not on turn 2, where the block carries it. The LIVE
+     * golden must equal the OFF twin plus exactly the block(s). */
+    {.name = "immersive_two_turns_local",
      .msg = "I will call my sister tomorrow",
-     .script = k_s_text,
-     .script_count = 1,
+     .msg2 = "how was your weekend",
+     .script = k_s_two_turns,
+     .script_count = CH_N(k_s_two_turns),
      .autonomy = CH_AUTO,
      .memory = true,
      .session = "alice",
      .immersive = true,
+     .local_provider = true,
+     .probe_absent = "## What you know right now"},
+    {.name = "immersive_two_turns_local_context_live",
+     .msg = "I will call my sister tomorrow",
+     .msg2 = "how was your weekend",
+     .script = k_s_two_turns,
+     .script_count = CH_N(k_s_two_turns),
+     .autonomy = CH_AUTO,
+     .memory = true,
+     .session = "alice",
+     .immersive = true,
+     .local_provider = true,
      .immersive_context = "live",
      .probe_contains = "## What you know right now\\nStill open between you two:\\n- call my "
-                       "sister tomorrow"},
+                       "sister tomorrow (their words)\\n"},
 };
 #define CH_N_IMMERSIVE CH_N(k_immersive_cases)
+
+/* Privacy routes (fix round 1): HU_IMMERSIVE_CONTEXT=live, local provider and
+ * local model at prompt time, so the block IS composed — then agent_turn
+ * reroutes the call to a cloud model by NAME. The request that leaves must
+ * carry no block. Probed, not golden: the property is the absence. */
+static const trp_step_t k_s_fail_then_text[] = {{.err = HU_ERR_PROVIDER_RESPONSE},
+                                                {.err = HU_OK, .content = "sounds good"}};
+/* Each route comes as a pair: the route itself (the call leaves on a cloud
+ * model, probe: no block) and a control that declares that same model local
+ * (probe: the block IS there) — proving the block was composed for this exact
+ * turn, so its absence in the route case is the strip, not an empty block. */
+#define CH_ANALYTICAL_MSG                                                                    \
+    "ugh I'm so tired and stressed and worried about it, should i explain why, what do you " \
+    "think, pros and cons"
+#define CH_S3_MSG "ugh I'm so tired and stressed today, my password is on the fridge"
+#define CH_ROUTE_BASE                                                                              \
+    .script_count = 1, .autonomy = CH_AUTO, .memory = true, .session = "alice", .immersive = true, \
+    .local_provider = true, .immersive_context = "live"
+static const ch_case_t k_route_cases[] = {
+    /* agent_turn inline model router: an analytical message routes to the
+     * router's default analytical model (gemini-3.1-pro-preview). */
+    {.name = "route_analytical_to_cloud_model",
+     .msg = CH_ANALYTICAL_MSG,
+     .script = k_s_text,
+     CH_ROUTE_BASE,
+     .probe_contains = "model=gemini-3.1-pro-preview",
+     .probe_absent = "## What you know right now"},
+    {.name = "route_analytical_control",
+     .msg = CH_ANALYTICAL_MSG,
+     .script = k_s_text,
+     CH_ROUTE_BASE,
+     .local_model2 = "gemini-3.1-pro-preview",
+     .probe_contains = "## What you know right now"},
+    /* S3 sensitivity: no s3_local_model, so the turn goes to fallback_model. */
+    {.name = "route_s3_to_fallback_model",
+     .msg = CH_S3_MSG,
+     .script = k_s_text,
+     CH_ROUTE_BASE,
+     .fallback_model = "gemini-3.8-flash",
+     .probe_contains = "model=gemini-3.8-flash",
+     .probe_absent = "## What you know right now"},
+    {.name = "route_s3_control",
+     .msg = CH_S3_MSG,
+     .script = k_s_text,
+     CH_ROUTE_BASE,
+     .fallback_model = "gemini-3.8-flash",
+     .local_model2 = "gemini-3.8-flash",
+     .probe_contains = "## What you know right now"},
+    /* On-device reply fails → agent_turn retries on the cloud reflexive model
+     * (gemini-3.1-flash-lite). The declared on-device attempt keeps the block
+     * (the in-log control); the cloud retry — the last call — must not. */
+    {.name = "route_on_device_failure_to_cloud",
+     .msg = CH_S3_MSG,
+     .script = k_s_fail_then_text,
+     .script_count = CH_N(k_s_fail_then_text),
+     .autonomy = CH_AUTO,
+     .memory = true,
+     .session = "alice",
+     .immersive = true,
+     .local_provider = true,
+     .immersive_context = "live",
+     .local_model2 = "apple-foundationmodel",
+     .turn_model = "apple-foundationmodel",
+     .on_device = true,
+     .probe_contains = "## What you know right now",
+     .probe_absent_last_call = "## What you know right now"},
+};
+#define CH_N_ROUTES CH_N(k_route_cases)
 
 /* Agent-owned persona from the fixture file (hu_agent_deinit frees it). */
 static hu_persona_t *ch_load_fixture_persona(hu_allocator_t *alloc) {
@@ -1014,12 +1106,27 @@ static bool ch_run(const ch_case_t *c, const char *tz, ch_out_t *out) {
                                         "cached answer", 13, 3, c->msg, strlen(c->msg));
     }
 
+    hu_provider_t provider = trp_provider(&trp);
+    if (c->local_provider) {
+        hu_provider_t rel;
+        if (hu_reliable_create_ex(&alloc, provider, 0, 50, NULL, 0, NULL, 0, &rel) == HU_OK) {
+            hu_reliable_set_primary_local(&rel, true);
+            hu_reliable_add_local_model(&rel, "char-model", 10);
+            if (c->local_model2)
+                hu_reliable_add_local_model(&rel, c->local_model2, strlen(c->local_model2));
+            provider = rel;
+        }
+    }
+    hu_config_t on_device_cfg;
+    memset(&on_device_cfg, 0, sizeof(on_device_cfg));
+    on_device_cfg.agent.mr_on_device_enabled = true;
+
     hu_agent_t agent;
     memset(&agent, 0, sizeof(agent));
-    bool ok = hu_agent_from_config(&agent, &alloc, trp_provider(&trp), tools, 2,
-                                   have_mem ? &mem : NULL, NULL, NULL, NULL, "char-model", 10,
-                                   "char", 4, 0.7, env.dir, strlen(env.dir), 4, 50, false,
-                                   c->autonomy, NULL, 0, NULL, 0, NULL) == HU_OK;
+    bool ok =
+        hu_agent_from_config(&agent, &alloc, provider, tools, 2, have_mem ? &mem : NULL, NULL, NULL,
+                             NULL, "char-model", 10, "char", 4, 0.7, env.dir, strlen(env.dir), 4,
+                             50, false, c->autonomy, NULL, 0, NULL, 0, NULL) == HU_OK;
     /* hu_agent_deinit frees agent->w7_facade once it is assigned (agent.c
      * ~line 2145) — track that so the harness does not double-free `facade`
      * below. `graph` stays ours: agent->verifier_graph is documented "not
@@ -1042,6 +1149,16 @@ static bool ch_run(const ch_case_t *c, const char *tz, ch_out_t *out) {
         }
         if (cache)
             agent.infra.response_cache = cache;
+        if (c->turn_model) {
+            agent.turn_model = c->turn_model;
+            agent.turn_model_len = strlen(c->turn_model);
+        }
+        if (c->fallback_model) {
+            agent.sota.degradation_config.fallback_model = (char *)c->fallback_model;
+            agent.sota.degradation_config.fallback_model_len = strlen(c->fallback_model);
+        }
+        if (c->on_device)
+            agent.config = &on_device_cfg;
         if (c->immersive) {
             agent.persona = ch_load_fixture_persona(&alloc);
             ok = agent.persona != NULL;
@@ -1187,6 +1304,14 @@ static size_t ch_probe(const ch_case_t *c, const ch_out_t *o) {
         printf("    [%s] probe: log lacks \"%s\"\n", c->name, c->probe_contains);
         bad++;
     }
+    const char *last_call = o->log;
+    for (const char *h = strstr(o->log, "=== chat #"); h; h = strstr(h + 1, "=== chat #"))
+        last_call = h;
+    if (c->probe_absent_last_call && strstr(last_call, c->probe_absent_last_call)) {
+        printf("    [%s] probe: last call must not contain \"%s\"\n", c->name,
+               c->probe_absent_last_call);
+        bad++;
+    }
     if (c->probe_absent && strstr(o->log, c->probe_absent)) {
         printf("    [%s] probe: log must not contain \"%s\"\n", c->name, c->probe_absent);
         bad++;
@@ -1290,19 +1415,23 @@ static void immersive_prompt_matches_goldens(void) {
                      "HU_IMMERSIVE_GOLDEN_WRITE");
 }
 
-/* The LIVE golden must be the OFF golden plus exactly the block: splice the
+/* The LIVE golden must be the OFF twin plus exactly the block(s): splice every
  * escaped block ("## What you know right now\\n" ... "\\n\\n") out of
- * immersive_commitment_context_live and compare to immersive_commitment. */
+ * immersive_two_turns_local_context_live and compare to immersive_two_turns_local. */
 static void immersive_context_live_golden_is_off_golden_plus_block(void) {
-    char *off = ch_read_file(CH_IMMERSIVE_GOLDEN_DIR "/immersive_commitment.golden");
-    char *live = ch_read_file(CH_IMMERSIVE_GOLDEN_DIR "/immersive_commitment_context_live.golden");
+    char *off = ch_read_file(CH_IMMERSIVE_GOLDEN_DIR "/immersive_two_turns_local.golden");
+    char *live =
+        ch_read_file(CH_IMMERSIVE_GOLDEN_DIR "/immersive_two_turns_local_context_live.golden");
     HU_SKIP_IF(!off || !live, "immersive goldens not generated (HU_IMMERSIVE_GOLDEN_WRITE=1)");
-    char *start = strstr(live, "## What you know right now\\n");
-    HU_ASSERT_NOT_NULL(start);
-    char *end = strstr(start, "\\n\\n");
-    HU_ASSERT_NOT_NULL(end);
-    end += 4;
-    memmove(start, end, strlen(end) + 1);
+    size_t blocks = 0;
+    for (char *start; (start = strstr(live, "## What you know right now\\n")) != NULL;) {
+        char *end = strstr(start, "\\n\\n");
+        HU_ASSERT_NOT_NULL(end);
+        end += 4;
+        memmove(start, end, strlen(end) + 1);
+        blocks++;
+    }
+    HU_ASSERT_GT(blocks, 0);
     HU_ASSERT_NULL(strstr(off, "## What you know right now"));
     char why[640];
     size_t line = ch_first_diff(off, live, why, sizeof(why));
@@ -1311,6 +1440,22 @@ static void immersive_context_live_golden_is_off_golden_plus_block(void) {
     HU_ASSERT_EQ(line, 0);
     free(off);
     free(live);
+}
+
+/* Each agent_turn route that renames the model to a cloud one by name. */
+static void immersive_context_never_reaches_a_cloud_routed_call(void) {
+    size_t failures = 0;
+    for (size_t i = 0; i < CH_N_ROUTES; i++) {
+        ch_out_t o;
+        if (!ch_run(&k_route_cases[i], "UTC", &o)) {
+            printf("    [%s] harness failure\n", k_route_cases[i].name);
+            failures++;
+        } else {
+            failures += ch_probe(&k_route_cases[i], &o);
+        }
+        free(o.log);
+    }
+    HU_ASSERT_EQ(failures, 0);
 }
 
 static size_t ch_compare_cases(const ch_case_t *cases, size_t n_cases, const char *tz_a,
@@ -1481,6 +1626,7 @@ void run_agent_turn_characterization_tests(void) {
     HU_RUN_TEST(characterization_matches_goldens);
     HU_RUN_TEST(immersive_prompt_matches_goldens);
     HU_RUN_TEST(immersive_context_live_golden_is_off_golden_plus_block);
+    HU_RUN_TEST(immersive_context_never_reaches_a_cloud_routed_call);
     HU_RUN_TEST(characterization_is_timezone_invariant);
     HU_RUN_TEST(characterization_is_repeatable);
     HU_RUN_TEST(characterization_comparator_catches_each_mutation);

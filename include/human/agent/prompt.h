@@ -186,6 +186,10 @@ typedef struct hu_prompt_config {
      * caller (agent_turn.c) sets it from query classification. Leaving it
      * false suppresses the addendum on casual/non-factual turns. */
     bool is_factual_query;
+    /* HU_IMMERSIVE_CONTEXT may compose owner memory text only when the turn
+     * is resolved to a local provider AND a local model
+     * (hu_private_context_attempt_is_local). false (the default) → never. */
+    bool private_context_local;
 } hu_prompt_config_t;
 
 /* Build the full system prompt. Caller owns returned string; free with alloc.

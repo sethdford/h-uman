@@ -14,6 +14,7 @@
 #include "human/providers/private_context.h"
 #include "human/providers/reliable.h"
 #include "test_framework.h"
+#include <stdlib.h>
 #include <string.h>
 
 #define BLOCK                                                                                \
@@ -196,7 +197,7 @@ typedef struct fb_rig {
 static void fb_rig_init(fb_rig_t *g) {
     memset(g, 0, sizeof(*g));
     g->alloc = hu_system_allocator();
-    g->local.name = "local";
+    g->local.name = "mlx_local";
     g->local.fail = true;
     g->cloud.name = "cloud";
     g->extras[0].name = "cloud";
@@ -205,6 +206,7 @@ static void fb_rig_init(fb_rig_t *g) {
     hu_provider_t inner = {.ctx = &g->local, .vtable = &rec_vtable};
     HU_ASSERT_EQ(
         hu_reliable_create_ex(&g->alloc, inner, 0, 50, g->extras, 1, NULL, 0, &g->reliable), HU_OK);
+    hu_reliable_add_local_model(&g->reliable, "local-model", 11);
 }
 
 static void fb_rig_deinit(fb_rig_t *g) {
@@ -271,7 +273,7 @@ static void private_context_reliable_stream_fallback_carries_no_block(void) {
 /* A declared fallback MODEL on the primary provider is a fallback attempt too. */
 static void private_context_reliable_model_fallback_carries_no_block(void) {
     hu_allocator_t a = hu_system_allocator();
-    rec_provider_t local = {.name = "local", .fail_model = "glm"};
+    rec_provider_t local = {.name = "mlx_local", .fail_model = "glm"};
     hu_reliable_fallback_model_t fbm[1] = {{"gemini-x", 8}};
     hu_reliable_model_fallback_entry_t entry = {"glm", 3, fbm, 1};
     hu_provider_t rel;
@@ -290,27 +292,178 @@ static void private_context_reliable_model_fallback_carries_no_block(void) {
     rel.vtable->deinit(rel.ctx, &a);
 }
 
+static hu_chat_request_t private_request(hu_chat_message_t *msg) {
+    msg->role = HU_ROLE_SYSTEM;
+    msg->content = k_sys_private;
+    msg->content_len = sizeof(k_sys_private) - 1;
+    return (hu_chat_request_t){.messages = msg, .messages_count = 1};
+}
+
+/* Degradation through a local reliable primary: the primary model is a
+ * declared local model and keeps the block; the fallback model does not. */
 static void private_context_degradation_fallback_model_carries_no_block(void) {
     hu_allocator_t a = hu_system_allocator();
-    rec_provider_t prov = {.name = "local", .fail_model = "primary"};
-    hu_provider_t p = {.ctx = &prov, .vtable = &rec_vtable};
+    rec_provider_t prov = {.name = "mlx_local", .fail_model = "primary"};
+    hu_provider_t rel;
+    HU_ASSERT_EQ(hu_reliable_create_ex(&a, (hu_provider_t){.ctx = &prov, .vtable = &rec_vtable}, 0,
+                                       50, NULL, 0, NULL, 0, &rel),
+                 HU_OK);
+    hu_reliable_add_local_model(&rel, "primary", 7);
     char fallback[] = "fallback";
     hu_provider_degradation_config_t cfg = {
         .enabled = true, .fallback_model = fallback, .fallback_model_len = 8, .max_retries = 1};
     hu_circuit_breaker_init(&cfg.breaker, 3, 5000);
-    hu_chat_message_t msgs[1] = {
-        {.role = HU_ROLE_SYSTEM,
-         .content = k_sys_private,
-         .content_len = sizeof(k_sys_private) - 1},
-    };
-    hu_chat_request_t req = {.messages = msgs, .messages_count = 1};
+    hu_chat_message_t msg;
+    hu_chat_request_t req = private_request(&msg);
     hu_degradation_result_t res;
-    HU_ASSERT_EQ(hu_provider_degrade_chat(&cfg, &p, &a, &req, "primary", 7, 0.5, &res), HU_OK);
+    HU_ASSERT_EQ(hu_provider_degrade_chat(&cfg, &rel, &a, &req, "primary", 7, 0.5, &res), HU_OK);
     HU_ASSERT_EQ((int)res.strategy_used, (int)HU_DEGRADE_FALLBACK);
     HU_ASSERT_EQ(prov.calls, 2);
     HU_ASSERT_TRUE(prov.saw_private);           /* primary model attempt kept it */
     HU_ASSERT_FALSE(prov.saw_private_fallback); /* fallback model attempt did not */
     hu_chat_response_free(&a, &res.response);
+    rel.vtable->deinit(rel.ctx, &a);
+}
+
+/* A cloud provider called directly (no reliable wrapper) never sees the
+ * block — not on the primary model, not on the fallback. Only degradation's
+ * own per-attempt check stands between them. */
+static void private_context_degradation_on_cloud_provider_never_sends_block(void) {
+    hu_allocator_t a = hu_system_allocator();
+    rec_provider_t prov = {.name = "gemini", .fail_model = "primary"};
+    hu_provider_t p = {.ctx = &prov, .vtable = &rec_vtable};
+    char fallback[] = "fallback";
+    hu_provider_degradation_config_t cfg = {
+        .enabled = true, .fallback_model = fallback, .fallback_model_len = 8, .max_retries = 1};
+    hu_circuit_breaker_init(&cfg.breaker, 3, 5000);
+    hu_chat_message_t msg;
+    hu_chat_request_t req = private_request(&msg);
+    hu_degradation_result_t res;
+    HU_ASSERT_EQ(hu_provider_degrade_chat(&cfg, &p, &a, &req, "primary", 7, 0.5, &res), HU_OK);
+    HU_ASSERT_EQ(prov.calls, 2);
+    HU_ASSERT_FALSE(prov.saw_private);
+    hu_chat_response_free(&a, &res.response);
+    cfg.enabled = false; /* the pass-through path checks too */
+    prov.fail_model = NULL;
+    HU_ASSERT_EQ(hu_provider_degrade_chat(&cfg, &p, &a, &req, "primary", 7, 0.5, &res), HU_OK);
+    HU_ASSERT_EQ(prov.calls, 3);
+    HU_ASSERT_FALSE(prov.saw_private);
+    hu_chat_response_free(&a, &res.response);
+}
+
+/* Locality is provider AND model: the truth table. */
+static void private_context_attempt_locality_truth_table(void) {
+    HU_ASSERT_TRUE(hu_private_context_provider_name_is_local("mlx_local"));
+    HU_ASSERT_TRUE(hu_private_context_provider_name_is_local("ollama"));
+    HU_ASSERT_FALSE(hu_private_context_provider_name_is_local("compatible"));
+    HU_ASSERT_FALSE(hu_private_context_provider_name_is_local("gemini"));
+    HU_ASSERT_FALSE(hu_private_context_provider_name_is_local("mlx_localhost.evil"));
+    HU_ASSERT_FALSE(hu_private_context_provider_name_is_local(""));
+    HU_ASSERT_FALSE(hu_private_context_provider_name_is_local(NULL));
+    HU_ASSERT_FALSE(hu_private_context_attempt_is_local(NULL, "m", 1));
+
+    hu_allocator_t a = hu_system_allocator();
+    rec_provider_t direct_local = {.name = "ollama"}, direct_cloud = {.name = "gemini"};
+    hu_provider_t dl = {.ctx = &direct_local, .vtable = &rec_vtable};
+    hu_provider_t dc = {.ctx = &direct_cloud, .vtable = &rec_vtable};
+    HU_ASSERT_TRUE(hu_private_context_attempt_is_local(&dl, "anything", 8));
+    HU_ASSERT_FALSE(hu_private_context_attempt_is_local(&dc, "anything", 8));
+
+    /* An mlx_local instance reports "compatible": not local until declared. */
+    rec_provider_t inner = {.name = "compatible"};
+    hu_provider_t rel;
+    HU_ASSERT_EQ(hu_reliable_create_ex(&a, (hu_provider_t){.ctx = &inner, .vtable = &rec_vtable}, 0,
+                                       50, NULL, 0, NULL, 0, &rel),
+                 HU_OK);
+    hu_reliable_add_local_model(&rel, "GLM-4.5-Air-4bit", 16);
+    HU_ASSERT_FALSE(hu_reliable_primary_is_local(&rel));
+    HU_ASSERT_FALSE(hu_private_context_attempt_is_local(&rel, "GLM-4.5-Air-4bit", 16));
+    hu_reliable_set_primary_local(&rel, true);
+    HU_ASSERT_TRUE(hu_private_context_attempt_is_local(&rel, "GLM-4.5-Air-4bit", 16));
+    HU_ASSERT_FALSE(hu_private_context_attempt_is_local(&rel, "gemini-3.1-pro-preview", 22));
+    HU_ASSERT_FALSE(hu_private_context_attempt_is_local(&rel, "GLM-4.5-Air", 11)); /* exact */
+    HU_ASSERT_FALSE(hu_private_context_attempt_is_local(&rel, NULL, 0));
+    rel.vtable->deinit(rel.ctx, &a);
+}
+
+/* Allocator that fails the Nth allocation and counts all of them. */
+typedef struct fail_alloc {
+    int fail_at; /* 0 = never */
+    int n;
+} fail_alloc_t;
+
+static void *fa_alloc(void *ctx, size_t size) {
+    fail_alloc_t *f = (fail_alloc_t *)ctx;
+    if (++f->n == f->fail_at)
+        return NULL;
+    return malloc(size);
+}
+
+static void *fa_realloc(void *ctx, void *ptr, size_t old_size, size_t new_size) {
+    (void)ctx;
+    (void)old_size;
+    return realloc(ptr, new_size);
+}
+
+static void fa_free(void *ctx, void *ptr, size_t size) {
+    (void)ctx;
+    (void)size;
+    free(ptr);
+}
+
+/* Every allocation failure returns NULL ("do not send") and releases only
+ * initialized state — ASan flags any free of an uninitialized pointer. */
+static void private_context_redact_request_survives_each_allocation_failure(void) {
+    hu_chat_message_t msgs[2] = {
+        {.role = HU_ROLE_SYSTEM,
+         .content = k_sys_private,
+         .content_len = sizeof(k_sys_private) - 1},
+        {.role = HU_ROLE_USER, .content = "hi", .content_len = 2},
+    };
+    hu_chat_request_t req = {.messages = msgs, .messages_count = 2};
+    size_t failed = 0;
+    for (int at = 1; at <= 8; at++) {
+        fail_alloc_t f = {.fail_at = at};
+        hu_allocator_t a = {.ctx = &f, .alloc = fa_alloc, .realloc = fa_realloc, .free = fa_free};
+        hu_private_request_t scratch;
+        const hu_chat_request_t *r = hu_private_context_redact_request(&a, &req, &scratch);
+        if (!r)
+            failed++;
+        else
+            HU_ASSERT_FALSE(strstr(r->messages[0].content, "PRIVATE_MARKER") != NULL);
+        hu_private_context_release(&a, &scratch);
+    }
+    HU_ASSERT_GT(failed, 2); /* bodies, body_lens and msgs each failed once */
+}
+
+/* reliable_chat builds the redacted copy only when a non-local attempt
+ * actually happens: a local primary that answers costs no extra allocation. */
+static void private_context_reliable_chat_redacts_lazily(void) {
+    fail_alloc_t f = {0};
+    hu_allocator_t a = {.ctx = &f, .alloc = fa_alloc, .realloc = fa_realloc, .free = fa_free};
+    rec_provider_t local = {.name = "mlx_local"};
+    hu_provider_t rel;
+    HU_ASSERT_EQ(hu_reliable_create_ex(&a, (hu_provider_t){.ctx = &local, .vtable = &rec_vtable}, 0,
+                                       50, NULL, 0, NULL, 0, &rel),
+                 HU_OK);
+    hu_reliable_add_local_model(&rel, "local-model", 11);
+    hu_chat_message_t msg;
+    hu_chat_request_t priv = private_request(&msg);
+    hu_chat_message_t pub_msg = {
+        .role = HU_ROLE_SYSTEM, .content = k_sys_public, .content_len = sizeof(k_sys_public) - 1};
+    hu_chat_request_t pub = {.messages = &pub_msg, .messages_count = 1};
+    hu_chat_response_t resp;
+    f.n = 0;
+    HU_ASSERT_EQ(rel.vtable->chat(rel.ctx, &a, &priv, "local-model", 11, 0.5, &resp), HU_OK);
+    int with_block = f.n;
+    hu_chat_response_free(&a, &resp);
+    f.n = 0;
+    HU_ASSERT_EQ(rel.vtable->chat(rel.ctx, &a, &pub, "local-model", 11, 0.5, &resp), HU_OK);
+    int without_block = f.n;
+    hu_chat_response_free(&a, &resp);
+    HU_ASSERT_TRUE(local.saw_private);
+    HU_ASSERT_EQ(with_block, without_block);
+    rel.vtable->deinit(rel.ctx, &a);
 }
 
 void run_private_context_tests(void) {
@@ -324,4 +477,8 @@ void run_private_context_tests(void) {
     HU_RUN_TEST(private_context_reliable_stream_fallback_carries_no_block);
     HU_RUN_TEST(private_context_reliable_model_fallback_carries_no_block);
     HU_RUN_TEST(private_context_degradation_fallback_model_carries_no_block);
+    HU_RUN_TEST(private_context_degradation_on_cloud_provider_never_sends_block);
+    HU_RUN_TEST(private_context_attempt_locality_truth_table);
+    HU_RUN_TEST(private_context_redact_request_survives_each_allocation_failure);
+    HU_RUN_TEST(private_context_reliable_chat_redacts_lazily);
 }

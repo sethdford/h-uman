@@ -6,6 +6,7 @@
 #include "human/providers/api_key.h"
 #include "human/providers/ensemble.h"
 #include "human/providers/factory.h"
+#include "human/providers/private_context.h"
 #include "human/providers/reliable.h"
 #include "human/providers/router.h"
 #include <string.h>
@@ -139,6 +140,23 @@ static hu_error_t create_provider_from_name(hu_allocator_t *alloc, const hu_conf
     if (api_key)
         alloc->free(alloc->ctx, api_key, api_key_len + 1);
     return err;
+}
+
+/* Private prompt blocks (private_context.h) reach the primary only when it
+ * is on-device and asked for a model the operator configured it to serve.
+ * The configured name decides locality: an mlx_local instance reports
+ * "compatible" from get_name. */
+static void declare_primary_locality(const hu_config_t *cfg, const char *primary_name,
+                                     hu_provider_t *out) {
+    bool local = hu_private_context_provider_name_is_local(primary_name);
+    hu_reliable_set_primary_local(out, local);
+    if (!local)
+        return;
+    const char *models[] = {cfg->default_model, cfg->agent.s3_local_model,
+                            cfg->agent.mr_mlx_local_model};
+    for (size_t i = 0; i < sizeof(models) / sizeof(models[0]); i++)
+        if (models[i] && models[i][0])
+            hu_reliable_add_local_model(out, models[i], strlen(models[i]));
 }
 
 hu_error_t hu_provider_create_from_config(hu_allocator_t *alloc, const hu_config_t *cfg,
@@ -291,8 +309,10 @@ hu_error_t hu_provider_create_from_config(hu_allocator_t *alloc, const hu_config
 
         err = hu_reliable_create_ex(alloc, primary, max_retries, backoff_ms, extras, extras_count,
                                     mf_entries, mf_count, out);
-        if (err == HU_OK)
+        if (err == HU_OK) {
             apply_reliability_tuning(cfg, out);
+            declare_primary_locality(cfg, primary_name, out);
+        }
         if (err != HU_OK) {
             if (primary.vtable && primary.vtable->deinit)
                 primary.vtable->deinit(primary.ctx, alloc);

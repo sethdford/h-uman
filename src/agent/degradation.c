@@ -24,13 +24,14 @@ char *hu_degradation_honest_failure_msg(hu_allocator_t *alloc, size_t *out_len) 
     return msg;
 }
 
+/* Every attempt — primary model, retries, fallback model, pass-through —
+ * applies the private-block rule at the call: owner memory text reaches it
+ * only when this provider AND this model are local; the fallback model
+ * usually is not. include/human/providers/private_context.h. */
 static hu_error_t try_chat(hu_provider_t *provider, hu_allocator_t *alloc,
                            const hu_chat_request_t *request, const char *model, size_t model_len,
                            double temperature, hu_chat_response_t *resp) {
-    if (!provider->vtable || !provider->vtable->chat)
-        return HU_ERR_NOT_SUPPORTED;
-    return provider->vtable->chat(provider->ctx, alloc, request, model, model_len, temperature,
-                                  resp);
+    return hu_private_context_chat(provider, alloc, request, model, model_len, temperature, resp);
 }
 
 hu_error_t hu_provider_degrade_chat(hu_provider_degradation_config_t *config,
@@ -99,31 +100,21 @@ hu_error_t hu_provider_degrade_chat(hu_provider_degradation_config_t *config,
     /* Primary failed — record failure and try fallback */
     hu_circuit_breaker_record_failure(&config->breaker);
 
-    /* The fallback model is a fallback attempt: private prompt blocks
-     * (owner memory text) are removed first — include/human/providers/
-     * private_context.h. A failed redaction skips the fallback entirely. */
-    hu_private_request_t fb_scratch;
-    const hu_chat_request_t *fb_req =
-        (config->fallback_model && config->fallback_model_len > 0)
-            ? hu_private_context_redact_request(alloc, request, &fb_scratch)
-            : NULL;
-    if (fb_req) {
+    if (config->fallback_model && config->fallback_model_len > 0) {
         memset(&out->response, 0, sizeof(out->response));
         for (uint32_t attempt = 0; attempt < max_retries; attempt++) {
-            hu_error_t err = try_chat(provider, alloc, fb_req, config->fallback_model,
+            hu_error_t err = try_chat(provider, alloc, request, config->fallback_model,
                                       config->fallback_model_len, temperature, &out->response);
             out->attempts += 1;
             if (err == HU_OK) {
                 out->strategy_used = HU_DEGRADE_FALLBACK;
                 hu_circuit_breaker_record_success(&config->breaker);
-                hu_private_context_release(alloc, &fb_scratch);
                 return HU_OK;
             }
             if (err != HU_ERR_IO && err != HU_ERR_TIMEOUT)
                 all_transport = false;
         }
         hu_circuit_breaker_record_failure(&config->breaker);
-        hu_private_context_release(alloc, &fb_scratch);
     }
 
     /* All attempts failed — honest failure. Propagate transport semantic

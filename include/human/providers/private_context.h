@@ -5,13 +5,19 @@
  * real memory and message text. Rule (2026-10-01, owner's privacy rule): real
  * message or memory text never reaches a cloud model without explicit opt-in.
  *
- * Production serves replies from a LOCAL primary (mlx_local) behind the
- * reliable wrapper, whose fallbacks (model_fallbacks, extra providers such as
- * gemini) re-issue the SAME request to the cloud when the local attempt fails.
- * A private block therefore reaches only the reliable wrapper's primary
- * attempt (inner provider, caller's model); every other attempt — an extra
- * provider, a fallback model, the degradation fallback model — is sent with
- * the private blocks removed.
+ * The rule keys on WHERE an attempt runs, never on whether it is the first
+ * attempt: a private block may reach an attempt only when its provider is
+ * local AND the model it asks for is a declared local model. Production runs
+ * a local mlx primary behind the reliable wrapper, but agent_turn also routes
+ * by MODEL NAME (analytical turns to gemini-3.1-pro-preview, S3 messages to
+ * the degradation fallback_model, a failed on-device reply to
+ * gemini-3.1-flash-lite) — each of those is a cloud attempt even when it is
+ * the first one. Every non-local attempt is sent with the private blocks
+ * removed; unknown provider names and undeclared models count as non-local
+ * (fail closed).
+ *
+ * Interim: feat/thread-context's providers/local_only.{h,c} becomes the
+ * canonical span table; this header folds into it after that merges.
  *
  * Block contract: a block starts at a line beginning with one of the headings
  * below (at the start of the text or right after '\n') and runs through the
@@ -29,6 +35,17 @@
 
 /* HU_IMMERSIVE_CONTEXT (src/agent/turn/immersive_context.c). */
 #define HU_PRIVATE_BLOCK_IMMERSIVE_CONTEXT "## What you know right now\n"
+
+/* On-device provider names (no data leaves the machine). "compatible" — what
+ * an mlx_local instance reports — is NOT on the list: callers that know the
+ * configured name (from_config) declare it via hu_reliable_set_primary_local. */
+bool hu_private_context_provider_name_is_local(const char *name);
+
+/* May a private block go to `prov` asked for `model`? A reliable provider
+ * answers via hu_reliable_attempt_is_local (local primary + declared local
+ * model); any other provider only by an on-device name. NULL → false. */
+bool hu_private_context_attempt_is_local(const hu_provider_t *prov, const char *model,
+                                         size_t model_len);
 
 /* True when `text` contains at least one private block. */
 bool hu_private_context_present(const char *text, size_t len);
@@ -51,6 +68,8 @@ typedef struct hu_private_request {
     char **bodies; /* stripped system contents, one slot per message */
     size_t *body_lens;
     size_t count;
+    bool ready; /* hu_private_context_request_for built `redacted` */
+    const hu_chat_request_t *redacted;
 } hu_private_request_t;
 
 /* The request to send on a non-primary attempt: `req` itself when no system
@@ -64,5 +83,21 @@ const hu_chat_request_t *hu_private_context_redact_request(hu_allocator_t *alloc
                                                            hu_private_request_t *scratch);
 
 void hu_private_context_release(hu_allocator_t *alloc, hu_private_request_t *scratch);
+
+/* The request one attempt may send: `req` itself when `local`, else the
+ * redacted copy, built at most once per `scratch` (zero-initialize it; it is
+ * only allocated when a non-local attempt actually happens). NULL when the
+ * copy could not be built — the caller must then not send. Release with
+ * hu_private_context_release. */
+const hu_chat_request_t *hu_private_context_request_for(hu_allocator_t *alloc, bool local,
+                                                        const hu_chat_request_t *req,
+                                                        hu_private_request_t *scratch);
+
+/* One chat attempt with the rule applied at the call: `req` as is when
+ * (prov, model) is local, else the redacted copy (built and released here).
+ * HU_ERR_OUT_OF_MEMORY when the copy cannot be built — nothing is sent. */
+hu_error_t hu_private_context_chat(hu_provider_t *prov, hu_allocator_t *alloc,
+                                   const hu_chat_request_t *req, const char *model,
+                                   size_t model_len, double temperature, hu_chat_response_t *out);
 
 #endif /* HU_PROVIDERS_PRIVATE_CONTEXT_H */

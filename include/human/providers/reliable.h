@@ -102,4 +102,30 @@ void hu_reliable_set_clock(hu_provider_t *reliable, time_t (*now_fn)(void *), vo
  * moves to the mapped fallback model / next provider. */
 void hu_reliable_set_empty_failover(hu_provider_t *reliable, bool on);
 
+/* ── Locality of an attempt (2026-10-01) ─────────────────────────────────
+ * Private prompt blocks (providers/private_context.h) may reach only an
+ * attempt that runs on this machine: the PRIMARY provider when it is local,
+ * asked for a model the operator declared it serves. Everything else — an
+ * extra (gemini), a model routed by name to a cloud model, the degradation
+ * fallback model — gets the request with the private blocks removed.
+ *
+ * The primary's locality defaults to its get_name (an allowlist of on-device
+ * names) at create; from_config overrides it with the configured primary name
+ * because an mlx_local instance reports "compatible". Local models default to
+ * the model_fallbacks keys (models the primary serves) when the primary is
+ * local; from_config adds default_model, agent.s3_local_model and
+ * agent.mr_mlx_local_model. */
+#define HU_RELIABLE_LOCAL_MODELS_MAX 8
+void hu_reliable_set_primary_local(hu_provider_t *reliable, bool local);
+/* True when `prov` is a reliable wrapper. */
+bool hu_reliable_is_reliable(const hu_provider_t *prov);
+/* False for NULL or a non-reliable provider. */
+bool hu_reliable_primary_is_local(const hu_provider_t *reliable);
+/* Declare a model the local primary serves. Ignored past
+ * HU_RELIABLE_LOCAL_MODELS_MAX or for names longer than 127 bytes. */
+void hu_reliable_add_local_model(hu_provider_t *reliable, const char *model, size_t model_len);
+/* True only for the local primary asked for a declared local model. */
+bool hu_reliable_attempt_is_local(const hu_provider_t *reliable, const char *model,
+                                  size_t model_len);
+
 #endif /* HU_RELIABLE_H */

@@ -47,6 +47,11 @@ typedef struct hu_reliable_ctx {
      * circuit breaker (the server is up; it just said nothing). */
     bool empty_failover;
     bool last_empty;
+    /* Locality (private_context.h): is the primary on-device, and which
+     * models does it serve? Fixed storage — no ownership to track. */
+    bool inner_local;
+    char local_models[HU_RELIABLE_LOCAL_MODELS_MAX][128];
+    size_t local_models_count;
 } hu_reliable_ctx_t;
 
 static time_t circuit_now(hu_reliable_ctx_t *r) {
@@ -359,120 +364,163 @@ static hu_error_t try_chat(hu_reliable_ctx_t *r, hu_allocator_t *alloc, hu_provi
     return final_failure(r);
 }
 
-/* Private prompt blocks reach only the PRIMARY attempt — the inner provider
- * with the caller's model (production: local mlx). Every other attempt is a
- * fallback that may leave the machine (model_fallbacks, extras such as
- * gemini), so it gets the redacted copy. See private_context.h. */
-static hu_error_t reliable_chat_with_system(void *ctx, hu_allocator_t *alloc,
-                                            const char *system_prompt, size_t system_prompt_len,
-                                            const char *message, size_t message_len,
-                                            const char *model, size_t model_len, double temperature,
-                                            char **out, size_t *out_len) {
-    hu_reliable_ctx_t *r = (hu_reliable_ctx_t *)ctx;
-    *out = NULL;
-    *out_len = 0;
+/* ── Locality per attempt (private_context.h) ─────────────────────────────
+ * A private prompt block may reach an attempt only when it runs on this
+ * machine: the local primary asked for a declared local model, or an extra
+ * whose configured / reported name is on-device. Every other attempt gets a
+ * redacted copy, built lazily — only once a non-local attempt happens. A copy
+ * that cannot be built fails the attempt; the unredacted text is never sent. */
+static bool model_is_declared_local(const hu_reliable_ctx_t *r, const char *model,
+                                    size_t model_len) {
+    if (!model || model_len == 0)
+        return false;
+    for (size_t i = 0; i < r->local_models_count; i++)
+        if (strlen(r->local_models[i]) == model_len &&
+            memcmp(r->local_models[i], model, model_len) == 0)
+            return true;
+    return false;
+}
 
-    char *redacted = NULL;
-    size_t redacted_len = 0;
-    hu_error_t err = hu_private_context_strip_dup(alloc, system_prompt, system_prompt_len,
-                                                  &redacted, &redacted_len);
-    if (err != HU_OK)
-        return err; /* never fall back with the private blocks still in */
-    const char *fb_sys = redacted ? redacted : system_prompt;
-    size_t fb_sys_len = redacted ? redacted_len : system_prompt_len;
+static bool attempt_local(const hu_reliable_ctx_t *r, const hu_provider_t *prov, const char *model,
+                          size_t model_len) {
+    if (prov == &r->inner)
+        return r->inner_local && model_is_declared_local(r, model, model_len);
+    for (size_t e = 0; e < r->extras_count; e++)
+        if (prov == &r->extras[e].provider)
+            return hu_private_context_provider_name_is_local(r->extras[e].name) ||
+                   hu_private_context_attempt_is_local(prov, model, model_len);
+    return false;
+}
 
+typedef struct lazy_sys {
+    const char *orig;
+    size_t orig_len;
+    char *copy;
+    size_t copy_len;
+    bool ready;
+    hu_error_t err;
+} lazy_sys_t;
+
+/* The system prompt for one attempt, or NULL when the redaction failed. */
+static const char *sys_for(hu_allocator_t *alloc, lazy_sys_t *lz, bool local, size_t *len) {
+    if (local) {
+        *len = lz->orig_len;
+        return lz->orig;
+    }
+    if (!lz->ready) {
+        lz->err =
+            hu_private_context_strip_dup(alloc, lz->orig, lz->orig_len, &lz->copy, &lz->copy_len);
+        lz->ready = true;
+    }
+    if (lz->err != HU_OK)
+        return NULL;
+    *len = lz->copy ? lz->copy_len : lz->orig_len;
+    return lz->copy ? lz->copy : lz->orig;
+}
+
+/* One attempt on `prov` for `model`; `call` carries the per-API arguments. */
+typedef hu_error_t (*attempt_fn_t)(hu_reliable_ctx_t *r, hu_allocator_t *alloc, hu_provider_t *prov,
+                                   const char *model, size_t model_len, void *call);
+
+/* The shared chain walk of chat and chat_with_system: for each model in the
+ * chain, the primary (unless the circuit is open), then the extras. */
+static hu_error_t run_chain(hu_reliable_ctx_t *r, hu_allocator_t *alloc, const char *model,
+                            size_t model_len, attempt_fn_t attempt, void *call) {
     hu_model_ref_t *chain = NULL;
     size_t chain_count = 0;
-    err = model_chain(r, alloc, model, model_len, &chain, &chain_count);
+    hu_error_t err = model_chain(r, alloc, model, model_len, &chain, &chain_count);
     if (err != HU_OK)
-        goto done;
-
+        return err;
     for (size_t m = 0; m < chain_count; m++) {
-        const char *cur_model = chain[m].model;
-        size_t cur_len = chain[m].model_len;
-
-        /* Try primary provider (skip if circuit open) */
         if (!circuit_skip_primary(r)) {
-            err = try_chat_with_system(r, alloc, &r->inner, m == 0 ? system_prompt : fb_sys,
-                                       m == 0 ? system_prompt_len : fb_sys_len, message,
-                                       message_len, cur_model, cur_len, temperature, out, out_len);
+            err = attempt(r, alloc, &r->inner, chain[m].model, chain[m].model_len, call);
             if (err == HU_OK) {
                 circuit_record_success(r);
                 goto done;
             }
             circuit_record_failure(r);
         }
-
-        /* Try extras — see extras_model() for why they do NOT get cur_model
-         * when the operator declared model fallbacks. */
+        /* Extras get the declared fallback models first; chain[0] is the
+         * primary's model and is their last resort. See extras_model(). */
         hu_model_ref_t xm = extras_model(chain, m, chain_count);
         for (size_t e = 0; e < r->extras_count; e++) {
-            err = try_chat_with_system(r, alloc, &r->extras[e].provider, fb_sys, fb_sys_len,
-                                       message, message_len, xm.model, xm.model_len, temperature,
-                                       out, out_len);
+            err = attempt(r, alloc, &r->extras[e].provider, xm.model, xm.model_len, call);
             if (err == HU_OK)
                 goto done;
         }
     }
     err = final_failure(r);
-
 done:
-    if (chain)
-        alloc->free(alloc->ctx, chain, chain_count * sizeof(hu_model_ref_t));
-    if (redacted)
-        alloc->free(alloc->ctx, redacted, redacted_len + 1);
+    alloc->free(alloc->ctx, chain, chain_count * sizeof(hu_model_ref_t));
+    return err;
+}
+
+typedef struct sys_call {
+    lazy_sys_t lz;
+    const char *message;
+    size_t message_len;
+    double temperature;
+    char **out;
+    size_t *out_len;
+} sys_call_t;
+
+static hu_error_t attempt_with_system(hu_reliable_ctx_t *r, hu_allocator_t *alloc,
+                                      hu_provider_t *prov, const char *model, size_t model_len,
+                                      void *call) {
+    sys_call_t *c = (sys_call_t *)call;
+    size_t sys_len = 0;
+    const char *sys = sys_for(alloc, &c->lz, attempt_local(r, prov, model, model_len), &sys_len);
+    if (!sys && c->lz.orig)
+        return c->lz.err;
+    return try_chat_with_system(r, alloc, prov, sys, sys_len, c->message, c->message_len, model,
+                                model_len, c->temperature, c->out, c->out_len);
+}
+
+typedef struct chat_call {
+    const hu_chat_request_t *request;
+    hu_private_request_t lz;
+    double temperature;
+    hu_chat_response_t *out;
+} chat_call_t;
+
+static hu_error_t attempt_chat(hu_reliable_ctx_t *r, hu_allocator_t *alloc, hu_provider_t *prov,
+                               const char *model, size_t model_len, void *call) {
+    chat_call_t *c = (chat_call_t *)call;
+    const hu_chat_request_t *req = hu_private_context_request_for(
+        alloc, attempt_local(r, prov, model, model_len), c->request, &c->lz);
+    if (!req)
+        return HU_ERR_OUT_OF_MEMORY;
+    return try_chat(r, alloc, prov, req, model, model_len, c->temperature, c->out);
+}
+
+static hu_error_t reliable_chat_with_system(void *ctx, hu_allocator_t *alloc,
+                                            const char *system_prompt, size_t system_prompt_len,
+                                            const char *message, size_t message_len,
+                                            const char *model, size_t model_len, double temperature,
+                                            char **out, size_t *out_len) {
+    *out = NULL;
+    *out_len = 0;
+    sys_call_t c = {.lz = {.orig = system_prompt, .orig_len = system_prompt_len, .err = HU_OK},
+                    .message = message,
+                    .message_len = message_len,
+                    .temperature = temperature,
+                    .out = out,
+                    .out_len = out_len};
+    hu_error_t err =
+        run_chain((hu_reliable_ctx_t *)ctx, alloc, model, model_len, attempt_with_system, &c);
+    if (c.lz.copy)
+        alloc->free(alloc->ctx, c.lz.copy, c.lz.copy_len + 1);
     return err;
 }
 
 static hu_error_t reliable_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_request_t *request,
                                 const char *model, size_t model_len, double temperature,
                                 hu_chat_response_t *out) {
-    hu_reliable_ctx_t *r = (hu_reliable_ctx_t *)ctx;
     memset(out, 0, sizeof(*out));
-
-    /* Same rule as reliable_chat_with_system: private blocks reach only the
-     * primary attempt. */
-    hu_private_request_t scratch;
-    const hu_chat_request_t *fb_req = hu_private_context_redact_request(alloc, request, &scratch);
-    if (!fb_req)
-        return HU_ERR_OUT_OF_MEMORY; /* never fall back unredacted */
-
-    hu_model_ref_t *chain = NULL;
-    size_t chain_count = 0;
-    hu_error_t err = model_chain(r, alloc, model, model_len, &chain, &chain_count);
-    if (err != HU_OK)
-        goto done;
-
-    for (size_t m = 0; m < chain_count; m++) {
-        const char *cur_model = chain[m].model;
-        size_t cur_len = chain[m].model_len;
-
-        if (!circuit_skip_primary(r)) {
-            err = try_chat(r, alloc, &r->inner, m == 0 ? request : fb_req, cur_model, cur_len,
-                           temperature, out);
-            if (err == HU_OK) {
-                circuit_record_success(r);
-                goto done;
-            }
-            circuit_record_failure(r);
-        }
-
-        /* Extras get the declared fallback models first; chain[0] is the
-         * primary's model and is their last resort. See extras_model(). */
-        hu_model_ref_t xm = extras_model(chain, m, chain_count);
-        for (size_t e = 0; e < r->extras_count; e++) {
-            err = try_chat(r, alloc, &r->extras[e].provider, fb_req, xm.model, xm.model_len,
-                           temperature, out);
-            if (err == HU_OK)
-                goto done;
-        }
-    }
-    err = final_failure(r);
-
-done:
-    if (chain)
-        alloc->free(alloc->ctx, chain, chain_count * sizeof(hu_model_ref_t));
-    hu_private_context_release(alloc, &scratch);
+    chat_call_t c = {.request = request, .temperature = temperature, .out = out};
+    memset(&c.lz, 0, sizeof(c.lz));
+    hu_error_t err = run_chain((hu_reliable_ctx_t *)ctx, alloc, model, model_len, attempt_chat, &c);
+    hu_private_context_release(alloc, &c.lz);
     return err;
 }
 
@@ -559,31 +607,26 @@ static hu_error_t reliable_stream_chat(void *ctx, hu_allocator_t *alloc,
                                        hu_stream_callback_t callback, void *callback_ctx,
                                        hu_stream_chat_result_t *out) {
     hu_reliable_ctx_t *r = (hu_reliable_ctx_t *)ctx;
-    /* Try inner provider first (fail-fast: no partial-stream replay) */
-    if (r->inner.vtable && r->inner.vtable->stream_chat) {
-        hu_error_t err =
-            r->inner.vtable->stream_chat(r->inner.ctx, alloc, request, model, model_len,
-                                         temperature, callback, callback_ctx, out);
-        if (err == HU_OK)
-            return HU_OK;
-    }
-    /* Cascade to extras on failure — redacted: private blocks reach only the
-     * primary attempt (private_context.h). */
-    hu_private_request_t scratch;
-    const hu_chat_request_t *fb_req = hu_private_context_redact_request(alloc, request, &scratch);
-    hu_error_t result = fb_req ? HU_ERR_NOT_SUPPORTED : HU_ERR_OUT_OF_MEMORY;
-    for (size_t e = 0; fb_req && e < r->extras_count; e++) {
-        hu_provider_t *ep = &r->extras[e].provider;
-        if (ep->vtable && ep->vtable->stream_chat) {
-            hu_error_t err = ep->vtable->stream_chat(ep->ctx, alloc, fb_req, model, model_len,
-                                                     temperature, callback, callback_ctx, out);
-            if (err == HU_OK) {
-                result = HU_OK;
-                break;
-            }
+    hu_private_request_t lz;
+    memset(&lz, 0, sizeof(lz));
+    hu_error_t result = HU_ERR_NOT_SUPPORTED;
+    /* Inner first (fail-fast: no partial-stream replay), then the extras;
+     * each attempt gets the private blocks only when it is local. */
+    for (size_t e = 0; e <= r->extras_count && result != HU_OK; e++) {
+        hu_provider_t *p = e == 0 ? &r->inner : &r->extras[e - 1].provider;
+        if (!p->vtable || !p->vtable->stream_chat)
+            continue;
+        const hu_chat_request_t *req = hu_private_context_request_for(
+            alloc, attempt_local(r, p, model, model_len), request, &lz);
+        if (!req) {
+            result = HU_ERR_OUT_OF_MEMORY;
+            break;
         }
+        if (p->vtable->stream_chat(p->ctx, alloc, req, model, model_len, temperature, callback,
+                                   callback_ctx, out) == HU_OK)
+            result = HU_OK;
     }
-    hu_private_context_release(alloc, &scratch);
+    hu_private_context_release(alloc, &lz);
     return result;
 }
 
@@ -630,6 +673,40 @@ hu_error_t hu_reliable_provider_create(hu_allocator_t *alloc, const hu_reliable_
     r->cb_recovery_seconds =
         config->recovery_timeout_seconds > 0 ? config->recovery_timeout_seconds : 60;
     return HU_OK;
+}
+
+bool hu_reliable_is_reliable(const hu_provider_t *prov) {
+    return prov && prov->ctx && prov->vtable == &reliable_vtable;
+}
+
+void hu_reliable_set_primary_local(hu_provider_t *reliable, bool local) {
+    if (hu_reliable_is_reliable(reliable))
+        ((hu_reliable_ctx_t *)reliable->ctx)->inner_local = local;
+}
+
+bool hu_reliable_primary_is_local(const hu_provider_t *reliable) {
+    return hu_reliable_is_reliable(reliable) &&
+           ((const hu_reliable_ctx_t *)reliable->ctx)->inner_local;
+}
+
+void hu_reliable_add_local_model(hu_provider_t *reliable, const char *model, size_t model_len) {
+    if (!hu_reliable_is_reliable(reliable) || !model || model_len == 0 || model_len >= 128)
+        return;
+    hu_reliable_ctx_t *r = (hu_reliable_ctx_t *)reliable->ctx;
+    if (model_is_declared_local(r, model, model_len) ||
+        r->local_models_count >= HU_RELIABLE_LOCAL_MODELS_MAX)
+        return;
+    memcpy(r->local_models[r->local_models_count], model, model_len);
+    r->local_models[r->local_models_count][model_len] = '\0';
+    r->local_models_count++;
+}
+
+bool hu_reliable_attempt_is_local(const hu_provider_t *reliable, const char *model,
+                                  size_t model_len) {
+    if (!hu_reliable_is_reliable(reliable))
+        return false;
+    const hu_reliable_ctx_t *r = (const hu_reliable_ctx_t *)reliable->ctx;
+    return r->inner_local && model_is_declared_local(r, model, model_len);
 }
 
 void hu_reliable_set_empty_failover(hu_provider_t *reliable, bool on) {
@@ -764,5 +841,11 @@ hu_error_t hu_reliable_create_ex(hu_allocator_t *alloc, hu_provider_t inner, uin
 
     out->ctx = r;
     out->vtable = &reliable_vtable;
+    /* Locality defaults (from_config refines them): the primary's reported
+     * name, and the model_fallbacks keys as the models it serves. */
+    r->inner_local = hu_private_context_attempt_is_local(&inner, NULL, 0);
+    for (size_t i = 0; i < r->model_fallbacks_count; i++)
+        hu_reliable_add_local_model(out, r->model_fallbacks[i].model,
+                                    r->model_fallbacks[i].model_len);
     return HU_OK;
 }

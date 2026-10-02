@@ -11,6 +11,7 @@
 #include "human/agent/gvr.h"
 #include "human/agent/hard_moment.h"
 #include "human/agent/humanness.h"
+#include "human/agent/immersive_context.h"
 #include "human/agent/input_guard.h"
 #include "human/agent/memory_loader.h"
 #include "human/agent/model_router.h"
@@ -66,6 +67,7 @@
 #include "human/persona/narrative_self.h"
 #include "human/persona/rag.h"
 #include "human/persona/somatic.h"
+#include "human/providers/private_context.h"
 #include "human/reflection.h" /* T7: reflection-loop slice in build_prompt */
 #include "human/security/moderation.h"
 #include "human/security/sycophancy_guard.h"
@@ -1125,6 +1127,7 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                 agent->config ? agent->config->prompt_budget.field_allowlist : NULL,
             .prompt_budget_field_allowlist_count =
                 agent->config ? agent->config->prompt_budget.field_allowlist_count : 0,
+            .private_context_local = hu_immersive_context_turn_is_local(agent),
         };
         /* B3 Phase 3 — observation half of the wire. Stack stats array
          * captures per-field bytes; hu_prompt_budget_observe folds them
@@ -1486,9 +1489,20 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
          * agent_turn.c. CPU-clock timing cannot see a blocking round
          * trip, which starved the M3 outcome filter of every sample. */
         uint64_t llm_start_ms = hu_agent_internal_monotonic_ms();
-        err = agent->provider.vtable->stream_chat(agent->provider.ctx, agent->alloc, &req,
-                                                  turn_model, turn_model_len, turn_temp,
-                                                  effective_cb, effective_ctx, &sresp);
+        /* Private prompt blocks reach only a local provider + local model,
+         * checked here where the model is final (private_context.h). */
+        hu_private_request_t priv_req;
+        memset(&priv_req, 0, sizeof(priv_req));
+        const hu_chat_request_t *send_req = hu_private_context_request_for(
+            agent->alloc,
+            hu_private_context_attempt_is_local(&agent->provider, turn_model, turn_model_len), &req,
+            &priv_req);
+        err = send_req
+                  ? agent->provider.vtable->stream_chat(agent->provider.ctx, agent->alloc, send_req,
+                                                        turn_model, turn_model_len, turn_temp,
+                                                        effective_cb, effective_ctx, &sresp)
+                  : HU_ERR_OUT_OF_MEMORY;
+        hu_private_context_release(agent->alloc, &priv_req);
         uint64_t llm_duration_ms = hu_agent_internal_monotonic_ms() - llm_start_ms;
 
         /* Flush any remaining partial buffer from the self-RAG filter. */

@@ -3,6 +3,7 @@
 #include "human/agent/best_of_n.h"
 #include "human/agent/graph_grounding.h"
 #include "human/agent/humanness.h"
+#include "human/agent/immersive_context.h"
 #include "human/agent/intent.h"
 #include "human/agent/reask.h"
 #include "human/agent/self_uncertainty.h"
@@ -16,6 +17,7 @@
 #include "human/data/loader.h"
 #include "human/moment.h"
 #include "human/persona/taste.h"
+#include "human/providers/private_context.h"
 
 #include "human/agent/choreography.h"
 #include "human/agent/frontier_persist.h"
@@ -2982,6 +2984,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
             .outcome_context_len = outcome_ctx_len,
             .persona_immersive = (persona_prompt && persona_prompt_len > 0),
             .persona = agent->persona,
+            .private_context_local = hu_immersive_context_turn_is_local(agent),
             .contact_context = enriched_contact ? enriched_contact : agent->contact_context,
             .contact_context_len =
                 enriched_contact ? enriched_contact_len : agent->contact_context_len,
@@ -4326,6 +4329,10 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                         turn_model ? turn_model : "(null)", req.messages_count, req.tools_count,
                         agent->sota.degradation_config.enabled);
         hu_degrade_strategy_t degrade_strategy = HU_DEGRADE_PRIMARY;
+        /* Private prompt blocks go only to a local provider + local model,
+         * checked per call: turn_model may be a cloud model routed by name
+         * (analytical tier, S3 fallback, on-device retry). Degradation and
+         * the reliable provider repeat the check per attempt. */
         if (agent->sota.degradation_config.enabled) {
             hu_degradation_result_t degrade_result;
             err = hu_provider_degrade_chat(&agent->sota.degradation_config, &agent->provider,
@@ -4366,7 +4373,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                 hu_best_of_n_config_t bcfg = {0};
                 bcfg.provider = &agent->provider;
                 bcfg.style = &agent->personal_model.style;
-                bcfg.request = &req;
+                bcfg.request = &req; /* llamacpp only: an on-device provider */
                 bcfg.model = turn_model;
                 bcfg.model_len = turn_model_len;
                 bcfg.temperature = turn_temp;
@@ -4375,8 +4382,8 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                 bcfg.observer = agent->observer;
                 err = hu_best_of_n_chat(&bcfg, agent->alloc, &resp);
             } else {
-                err = agent->provider.vtable->chat(agent->provider.ctx, agent->alloc, &req,
-                                                   turn_model, turn_model_len, turn_temp, &resp);
+                err = hu_private_context_chat(&agent->provider, agent->alloc, &req, turn_model,
+                                              turn_model_len, turn_temp, &resp);
             }
         }
 
@@ -4391,9 +4398,9 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                             "on-device failed (err=%d), falling back to cloud: %s", err,
                             fb_cfg.reflexive_model);
                 memset(&resp, 0, sizeof(resp));
-                err = agent->provider.vtable->chat(agent->provider.ctx, agent->alloc, &req,
-                                                   fb_cfg.reflexive_model,
-                                                   fb_cfg.reflexive_model_len, turn_temp, &resp);
+                err = hu_private_context_chat(&agent->provider, agent->alloc, &req,
+                                              fb_cfg.reflexive_model, fb_cfg.reflexive_model_len,
+                                              turn_temp, &resp);
             }
         }
 
