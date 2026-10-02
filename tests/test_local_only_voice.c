@@ -194,7 +194,7 @@ static hu_error_t ws_try(const char *url) {
     hu_ws_client_t *ws = NULL;
     hu_error_t err = hu_ws_connect(&alloc, url, &ws);
     if (ws)
-        hu_ws_close(ws, &alloc);
+        hu_ws_client_free(ws, &alloc); /* close + free the client struct */
     return err;
 }
 

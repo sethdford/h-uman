@@ -4328,6 +4328,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                 hu_log_info("agent_turn", agent->observer,
                             "on-device failed (err=%d), falling back to cloud: %s", err,
                             fb_cfg.reflexive_model);
+                hu_chat_response_free(agent->alloc, &resp); /* degrade honest-failure text */
                 memset(&resp, 0, sizeof(resp));
                 err = agent->provider.vtable->chat(agent->provider.ctx, agent->alloc, &req,
                                                    fb_cfg.reflexive_model,
