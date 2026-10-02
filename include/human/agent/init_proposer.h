@@ -358,6 +358,17 @@ typedef struct hu_proactive_compose_inputs {
     const char *due_followups_context;
     size_t due_followups_context_len;
 
+    /* HU_PROPOSER_CONTEXT (src/daemon/daemon_proposer_context.c): contact
+     * profile, recent thread and insights as one pre-rendered block carrying
+     * its own headers. Set ONLY on a call pinned to a local provider — it holds
+     * real message text. NULL = today's prompt, byte-identical. */
+    const char *proposer_context;
+    size_t proposer_context_len;
+    /* Set by a caller that falls back to another call when the model fails
+     * (HU_PROPOSER_CONTEXT live): an LLM/parse error then records no decision
+     * row, so the fallback's row is the only one. */
+    bool defer_llm_failure_row;
+
     /* Optional defensive callback: if non-NULL, init_proposer calls it
      * on memory_context before inclusion and treats a `false` return as
      * "skip the memory_context source for this tick". Lets us migrate
@@ -401,6 +412,33 @@ hu_error_t hu_init_proposer_tick_with_provider_ex(
 size_t hu_init_proposer_build_propose_user_message_ex(const hu_proactive_compose_inputs_t *inputs,
                                                       int64_t now_unix, int64_t last_inbound_unix,
                                                       char *out, size_t out_cap);
+
+/* One propose-or-skip call on exactly `provider` (no governor, no guard, no
+ * decision row, no logging): the same system prompt and user message as the
+ * _ex path. For a caller that must keep the prompt on one provider — the
+ * HU_PROPOSER_CONTEXT shadow run on the local model. Returns the provider's
+ * error, HU_ERR_PROVIDER_RESPONSE on an empty answer, or HU_ERR_JSON_PARSE. */
+hu_error_t hu_init_proposer_decide_once(hu_allocator_t *alloc, struct hu_provider *provider,
+                                        const char *model,
+                                        const hu_proactive_compose_inputs_t *inputs,
+                                        int64_t now_unix, int64_t last_inbound_unix,
+                                        hu_init_decision_t *out);
+
+/* The verdict the _ex path would reach for an already-parsed decision: the
+ * confidence threshold (cfg, default 0.85), the response guard (a rewrite
+ * replaces decision->draft) and the 14-day repeat guard. No logging, no DPO
+ * capture, no decision row. For comparing proposals on equal terms (the
+ * HU_PROPOSER_CONTEXT shadow run). */
+hu_init_proposer_result_t
+hu_init_proposer_final_verdict(const struct hu_initiative_config *cfg, const struct hu_agent *agent,
+                               hu_allocator_t *alloc, const hu_proactive_compose_inputs_t *inputs,
+                               int64_t now_unix, hu_init_decision_t *decision);
+
+/* The _ex path's verdict log line. When inputs carry a proposer_context block
+ * (real message text) the reason is reduced to its length. Pure. */
+size_t hu_init_proposer_format_ex_verdict(const hu_proactive_compose_inputs_t *inputs,
+                                          const hu_init_decision_t *d, int verdict,
+                                          size_t user_msg_bytes, char *out, size_t cap);
 
 /* M3 Dispatch T2 — pure verdict-mapping helper. Maps the outcome of
  * hu_response_guard_check_ex (run on a FIRED decision's draft) to the

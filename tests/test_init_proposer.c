@@ -727,9 +727,10 @@ static void test_assemble_context_no_persona_leaves_field_empty(void) {
  * transition going?" on 09-27. A check-in on the same topic as one sent in the
  * last two weeks is a repeat, however it is worded. */
 static void test_init_proposer_repeat_catches_rewordings(void) {
-    char recent[3][HU_PROACTIVE_REF_MAX] = {"Hey how are things settling in down in Florida",
-                                            "Morning Mindy, how are things settling in down there",
-                                            "How is the Florida house settling in coming along"};
+    const char recent[3][HU_PROACTIVE_REF_MAX] = {
+        "Hey how are things settling in down in Florida",
+        "Morning Mindy, how are things settling in down there",
+        "How is the Florida house settling in coming along"};
     const char *d1 = "Hey how's the Florida transition going?";
     const char *d2 = "Morning! Hope you're settling in okay down there";
     const char *d3 = "How is the florida settling in going";
@@ -739,7 +740,7 @@ static void test_init_proposer_repeat_catches_rewordings(void) {
 }
 
 static void test_init_proposer_repeat_allows_a_new_topic(void) {
-    char recent[1][HU_PROACTIVE_REF_MAX] = {"Hey how are things settling in down in Florida"};
+    const char recent[1][HU_PROACTIVE_REF_MAX] = {"Hey how are things settling in down in Florida"};
     const char *d = "Did you catch the Jazz game last night?";
     HU_ASSERT_FALSE(hu_init_proposer_repeats_recent(d, strlen(d), recent, 1));
     const char *hi = "Hey, thinking of you";

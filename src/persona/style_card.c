@@ -38,6 +38,7 @@ void hu_style_card_default(hu_style_card_t *out) {
     out->n = 0;
     out->substantive_agreement_opener_rate = -1.0;
     out->laugh_rate = -1.0; /* optional axis: absent renders nothing */
+    out->second_beat_rate = -1.0;
     /* Entity casing: -1 = axis absent. A card without it leaves the
      * governor's action D inert, which is the pre-2026-09-22 behaviour. */
     out->entity_cap_rate = -1.0;
@@ -156,6 +157,8 @@ hu_error_t hu_style_card_parse(hu_allocator_t *alloc, const char *json, size_t l
         /* Optional: cards measured before 2026-09-30 have no laugh axis. */
         if (!read_axis(axes, "laugh_rate", &card.laugh_rate))
             card.laugh_rate = -1.0;
+        if (!read_axis(axes, "second_beat_rate", &card.second_beat_rate))
+            card.second_beat_rate = -1.0;
         card.from_card = true;
         *out = card;
         err = HU_OK;
@@ -244,6 +247,10 @@ hu_error_t hu_style_card_render_substantive_rule(const hu_style_card_t *card, ch
     return HU_OK;
 }
 
+hu_gate_mode_t hu_style_second_beat_mode(void) {
+    return hu_gate_mode_from_env("HU_STYLE_SECOND_BEAT", HU_GATE_OFF);
+}
+
 hu_gate_mode_t hu_substantive_register_mode(void) {
     return hu_gate_mode_from_env("HU_SUBSTANTIVE_REGISTER", HU_GATE_OFF);
 }
@@ -275,13 +282,24 @@ hu_error_t hu_style_card_render_casual_rules(const hu_style_card_t *card, char *
         fmt_rate(card->laugh_rate, lr, sizeof(lr));
         snprintf(laugh, sizeof(laugh), " \"lol\"/\"haha\" %s, never as a reflex opener.", lr);
     }
+    /* Second beat, A/B-gated: 50% of Seth's replies add a second thought,
+     * 35% of the twin's (2026-10-02); the twin's questions trail his too. */
+    char beat[160] = "";
+    if (card->second_beat_rate >= 0.0 && hu_style_second_beat_mode() == HU_GATE_LIVE) {
+        char br[40];
+        fmt_rate(card->second_beat_rate, br, sizeof(br));
+        snprintf(beat, sizeof(beat),
+                 " A second beat (a quick follow-up question or one more detail, on its own "
+                 "line) in %s.",
+                 br);
+    }
     int n = snprintf(buf, cap,
                      "2. Normal capitalization (your phone capitalizes for you; a lowercase "
                      "start is %s); CAPS only when SHOUTING. About %d%% of your texts have "
                      "no period at the end — stop like a real text. Question marks only "
-                     "when actually asking (%s). Emoji %s, exclamation points %s.%s\n",
+                     "when actually asking (%s). Emoji %s, exclamation points %s.%s%s\n",
                      lower, (int)lround(card->no_terminal_punct_rate * 100.0), question, emoji,
-                     exclaim, laugh);
+                     exclaim, laugh, beat);
     if (n < 0 || (size_t)n + 1 > cap)
         return HU_ERR_OUT_OF_MEMORY;
     if (out_len)

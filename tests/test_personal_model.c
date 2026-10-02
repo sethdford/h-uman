@@ -288,7 +288,9 @@ static void personal_model_save_creates_parent_directory(void) {
     /* Make sure the directory does NOT exist yet — fresh-state assertion. */
     char rm_cmd[512];
     snprintf(rm_cmd, sizeof(rm_cmd), "rm -rf /tmp/hu_pm_mkdir_%d 2>/dev/null", (int)getpid());
-    (void)system(rm_cmd);
+    if (system(rm_cmd) != 0) {
+        /* best-effort cleanup; a (void) cast does not silence glibc warn_unused_result */
+    }
 
     hu_personal_model_t a;
     hu_personal_model_init(&a);
@@ -299,7 +301,9 @@ static void personal_model_save_creates_parent_directory(void) {
     HU_ASSERT_EQ(hu_personal_model_load(&b, path), HU_OK);
     HU_ASSERT_TRUE(hu_personal_model_has_content(&b));
 
-    (void)system(rm_cmd);
+    if (system(rm_cmd) != 0) {
+        /* best-effort cleanup; a (void) cast does not silence glibc warn_unused_result */
+    }
 }
 
 /* Round-trip via the resolver: save then load using the same default path

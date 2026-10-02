@@ -448,6 +448,7 @@ void run_outbound_crosstalk_tests(void);
  * the messages table directly via sqlite3, so source + tests are
  * gated by HU_ENABLE_SQLITE in CMakeLists.txt. Mirror that gate here. */
 void run_curiosity_gaps_tests(void);
+void run_agent_recall_provider_tests(void);
 void run_memory_loader_scope_tests(void);
 #ifdef HU_ENABLE_SQLITE
 void run_boundary_repo_tests(void);
@@ -505,6 +506,7 @@ void run_persona_eval_tests(void);
 void run_agent_tests(void); /* Sprint 46 R5.3 carryover */
 void run_lean_head_tests(void);
 void run_reply_prompt_tests(void);
+void run_length_policy_tests(void);
 void run_agent_turn_state_tests(void);            /* #26: per-turn state tracking */
 void run_agent_turn_transport_tests(void);        /* M4 follow-up: transport-error fast-fail */
 void run_turn_recording_provider_tests(void);     /* agent-turn carve: recording provider */
@@ -924,6 +926,7 @@ void run_daemon_proactive_tests(void);
 void run_reply_delay_model_tests(void);
 void run_daemon_promise_keeper_tests(void);
 void run_daemon_insight_overuse_tests(void);
+void run_daemon_proposer_context_tests(void);
 void run_daemon_config_reload_tests(void);
 void run_daemon_identity_graph_tests(void);
 void run_daemon_reply_fallback_tests(void);
@@ -1551,6 +1554,7 @@ int main(int argc, char **argv) {
     run_outbound_echo_tests();
     run_outbound_crosstalk_tests();
     run_curiosity_gaps_tests();
+    run_agent_recall_provider_tests();
     run_memory_loader_scope_tests();
 #ifdef HU_ENABLE_SQLITE
     run_boundary_repo_tests();
@@ -1601,6 +1605,7 @@ int main(int argc, char **argv) {
     run_agent_tests();
     run_lean_head_tests();
     run_reply_prompt_tests();
+    run_length_policy_tests();
     /* #26: per-turn state tracking unit tests (tool_count, hash, registers) */
     run_agent_turn_state_tests();
     /* M4 follow-up: transport-error fast-fail in agent_turn tool-loop */
@@ -2010,6 +2015,7 @@ int main(int argc, char **argv) {
     run_reply_delay_model_tests();
     run_daemon_promise_keeper_tests();
     run_daemon_insight_overuse_tests();
+    run_daemon_proposer_context_tests();
     run_daemon_config_reload_tests();
     run_daemon_identity_graph_tests();
     run_daemon_reply_fallback_tests();

@@ -196,6 +196,45 @@ static void render_laugh_rate_only_when_measured(void) {
     HU_ASSERT_STR_CONTAINS(buf, "never as a reflex opener");
 }
 
+/* Second beat (2026-10-02): 50% of Seth's replies carry a second thought (a
+ * second bubble or a second sentence), 35% of the twin's. The line renders
+ * only from a measured card AND with HU_STYLE_SECOND_BEAT=live: it changes
+ * what gets sent, so it is A/B-gated, unlike the descriptive rates above. */
+static void render_second_beat_only_when_measured_and_live(void) {
+    test_alloc = hu_system_allocator();
+    static const char beat_json[] =
+        "{\"schema\":\"style-card/v2\",\"n\":900,\"axes\":{"
+        "\"lowercase_start_rate\":{\"value\":0.05},\"no_terminal_punct_rate\":{\"value\":0.8},"
+        "\"question_rate\":{\"value\":0.1},\"exclamation_rate\":{\"value\":0.04},"
+        "\"emoji_rate\":{\"value\":0.1},\"second_beat_rate\":{\"value\":0.5}}}";
+    hu_style_card_t c;
+    HU_ASSERT_EQ(hu_style_card_parse(&test_alloc, beat_json, strlen(beat_json), &c), HU_OK);
+    HU_ASSERT_TRUE(c.second_beat_rate > 0.49 && c.second_beat_rate < 0.51);
+    char buf[1024];
+    size_t len = 0;
+    static const char *const modes[] = {NULL, "off", "shadow", "live"};
+    for (size_t i = 0; i < 4; i++) {
+        if (modes[i])
+            setenv("HU_STYLE_SECOND_BEAT", modes[i], 1);
+        else
+            unsetenv("HU_STYLE_SECOND_BEAT");
+        HU_ASSERT_EQ(hu_style_card_render_casual_rules(&c, buf, sizeof(buf), &len), HU_OK);
+        if (i == 3) {
+            HU_ASSERT_STR_CONTAINS(buf, "second beat");
+            HU_ASSERT_STR_CONTAINS(buf, "about 50% of texts");
+            HU_ASSERT_STR_CONTAINS(buf, "own line");
+        } else {
+            HU_ASSERT_STR_NOT_CONTAINS(buf, "second beat");
+        }
+    }
+    /* live, but a card without the axis: nothing invented */
+    HU_ASSERT_EQ(hu_style_card_parse(&test_alloc, card_json, strlen(card_json), &c), HU_OK);
+    HU_ASSERT_TRUE(c.second_beat_rate < 0.0);
+    HU_ASSERT_EQ(hu_style_card_render_casual_rules(&c, buf, sizeof(buf), &len), HU_OK);
+    HU_ASSERT_STR_NOT_CONTAINS(buf, "second beat");
+    unsetenv("HU_STYLE_SECOND_BEAT");
+}
+
 static void render_rejects_small_buffer(void) {
     hu_style_card_t c;
     hu_style_card_default(&c);
@@ -425,6 +464,7 @@ void run_style_card_tests(void) {
     HU_RUN_TEST(load_reads_card_from_persona_dir);
     HU_RUN_TEST(render_casual_rules_states_card_numbers);
     HU_RUN_TEST(render_laugh_rate_only_when_measured);
+    HU_RUN_TEST(render_second_beat_only_when_measured_and_live);
     HU_RUN_TEST(render_rejects_small_buffer);
     HU_RUN_TEST(render_near_zero_rate_says_almost_never);
     HU_RUN_TEST(absolute_rules_prefer_card_over_compiled_default);

@@ -54,7 +54,7 @@ graph.c / fast_capture.c  Knowledge graph with entity/relation extraction
 ## Memory Evolution
 
 ```
-consolidation.c         Merges and deduplicates memories
+consolidation.c         Deletes near-duplicates, entries past decay_days, and overflow past max_entries
 consolidation_engine.c  Background consolidation processing
 forgetting.c            Spaced-repetition based forgetting
 forgetting_curve.c      Ebbinghaus forgetting curve implementation

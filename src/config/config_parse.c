@@ -661,9 +661,6 @@ static hu_error_t parse_memory(hu_allocator_t *a, hu_config_t *cfg, const hu_jso
             a->free(a->ctx, cfg->memory.sqlite_path, strlen(cfg->memory.sqlite_path) + 1);
         cfg->memory.sqlite_path = hu_strdup(a, sqlite_path);
     }
-    double max_ent = hu_json_get_number(obj, "max_entries", cfg->memory.max_entries);
-    if (max_ent >= 0 && max_ent <= 1000000)
-        cfg->memory.max_entries = (uint32_t)max_ent;
     cfg->memory.auto_save = hu_json_get_bool(obj, "auto_save", cfg->memory.auto_save);
     /* W15 envelope encryption opt-in. Default stays false unless the
      * user explicitly sets memory.encrypt_at_rest = true. */
