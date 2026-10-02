@@ -99,3 +99,47 @@ The block sits between local-only markers (`include/human/providers/local_only.h
 Rollback: set `HU_THREAD_CONTEXT=off` (or delete the key) in
 `~/Library/LaunchAgents/ai.human.service-loop.plist`, then
 `launchctl bootout gui/$(id -u)/ai.human.service-loop && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.human.service-loop.plist`.
+
+## Gate 2: `HU_HISTORY_BUDGET` (request history budget, daemon plist)
+
+`hu_agent_internal_fit_history` (A1b, 2026-05-19) dropped the oldest history
+until the system prompt plus history fit 20 KB. The system prompt is capped at
+24 KB and often runs 22 KB, so that budget was spent before any history
+counted, and every prior message was dropped. The prod log shows it:
+`history truncated: dropped 6 oldest messages ... (now 2 msgs, 32836 bytes)`.
+
+| Value | Effect |
+|---|---|
+| `off` (default) | Legacy policy, byte-identical messages. |
+| `shadow` | Legacy policy is applied. One line per call: `[HU_HISTORY_BUDGET shadow] msgs_before=N msgs_after=N new_msgs_after=N sys_bytes=N hist_bytes=N new_keeps_more=0/1`. |
+| `live` | The 20 KB counts history only, the current message always stays, and system plus history is capped at `HU_HISTORY_BUDGET_MAX_TOTAL_BYTES` (default 40,960, clamped to 20,480–98,304). Logs `[HU_HISTORY_BUDGET live] ... total_bytes=N max_total=N`. |
+
+The old log-once `history truncated` warning is now a counter, logged on the
+first truncation and every 25th: `history truncated (N so far, logged every 25)`.
+
+The provider limit: GLM-4.5-Air's `max_position_embeddings` is 131,072
+tokens, and the mlx server on :8741 sets no `max_kv_size`. So the 96 KB clamp
+ceiling stays inside the window even at one byte per token. Latency is the
+real constraint: the 2026-09-06 re-measure saw cold prefill at 15.0 s for
+24 KB and 27.5 s for 40 KB. The 40 KB default is the largest prompt measured
+to answer.
+
+The stream path (`hu_agent_turn_stream_v2`) does not call this function. Prod
+runs with `mlx_local.streaming_enabled=false`, so every reply goes through
+`hu_agent_turn`.
+
+### Promotion: `shadow` → `live`
+
+1. Shadow share of calls where the new policy keeps more history:
+   ```bash
+   grep -o '\[HU_HISTORY_BUDGET shadow\].*new_keeps_more=[01]' ~/.human/logs/service-loop-error.log \
+     | awk '{n++; if ($NF ~ /=1$/) k++} END {print "calls", n, "keeps_more", k, k/n}'
+   ```
+2. Cold prefill latency at the new totals. Check the `[HU_HISTORY_BUDGET live]`
+   `total_bytes` distribution against the 2026-09-06 latency curve, and set
+   `HU_HISTORY_BUDGET_MAX_TOTAL_BYTES` lower if p90 latency is unacceptable.
+3. The same n=40 blind A/B as gate 1, with `HU_HISTORY_BUDGET=live` on the
+   generating instance.
+
+Rollback: `HU_HISTORY_BUDGET=off` (or delete the key) in the plist, then
+bootout and bootstrap as above.

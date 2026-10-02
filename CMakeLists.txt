@@ -785,6 +785,7 @@ set(HU_CORE_SOURCES
     src/agent/turn/turn_tools.c
     src/agent/turn/turn_tail.c
     src/agent/turn/reask.c
+    src/agent/turn/history_budget.c
     src/agent/best_of_n.c
     src/agent/humanness.c
     src/agent/context.c
@@ -4286,6 +4287,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_daemon_person_dates.c
     tests/test_commitment_sample.c
     tests/test_agent_fit_history.c
+    tests/test_history_budget.c
     tests/test_prospective.c
     tests/test_prospective_repo_sqlite.c
     tests/test_prospective_policy.c

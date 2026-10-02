@@ -828,6 +828,7 @@ void run_daemon_briefing_tests(void);
 void run_daemon_person_dates_tests(void);
 void run_commitment_sample_tests(void);
 void run_agent_fit_history_tests(void);
+void run_history_budget_tests(void);
 void run_prospective_tests(void);
 void run_prospective_repo_sqlite_tests(void);
 void run_prospective_policy_tests(void);
@@ -1903,6 +1904,7 @@ int main(int argc, char **argv) {
     run_daemon_person_dates_tests();
     run_commitment_sample_tests();
     run_agent_fit_history_tests();
+    run_history_budget_tests();
     run_prospective_tests();
     run_prospective_repo_sqlite_tests();
     run_prospective_policy_tests();
