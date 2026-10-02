@@ -1,0 +1,122 @@
+[
+ {
+  "sample_id": "conv-fx1",
+  "conversation": {
+   "speaker_a": "Dana",
+   "speaker_b": "Rory",
+   "session_1_date_time": "1:56 pm on 8 May, 2023",
+   "session_1": [
+    {
+     "speaker": "Dana",
+     "dia_id": "D1:1",
+     "text": "Hey Rory! Long time. How are things?"
+    },
+    {
+     "speaker": "Rory",
+     "dia_id": "D1:2",
+     "text": "Good! I just got back from Lisbon, the trip was amazing."
+    },
+    {
+     "speaker": "Dana",
+     "dia_id": "D1:3",
+     "text": "Nice. I started pottery classes yesterday at the Kiln Room.",
+     "img_url": [
+      "https://example.invalid/x.jpg"
+     ],
+     "blip_caption": "a photo of a clay bowl",
+     "query": "clay bowl"
+    },
+    {
+     "speaker": "Dana",
+     "dia_id": "D1:4",
+     "text": "Still terrible at it lol"
+    },
+    {
+     "speaker": "Rory",
+     "dia_id": "D1:5",
+     "text": "Ha, keep at it. My dog Biscuit says hi."
+    }
+   ],
+   "session_2_date_time": "7:10 pm on 20 May, 2023",
+   "session_2": [
+    {
+     "speaker": "Rory",
+     "dia_id": "D2:1",
+     "text": "I ran a charity 10k last Sunday for literacy."
+    },
+    {
+     "speaker": "Dana",
+     "dia_id": "D2:2",
+     "text": "That's great. I'm thinking about adopting a cat."
+    },
+    {
+     "speaker": "Rory",
+     "dia_id": "D2:3",
+     "text": "Do it. Biscuit would hate it though."
+    }
+   ]
+  },
+  "qa": [
+   {
+    "question": "What is the name of Rory's dog?",
+    "answer": "Biscuit",
+    "evidence": [
+     "D1:5"
+    ],
+    "category": 4
+   },
+   {
+    "question": "When did Dana start pottery classes?",
+    "answer": "7 May 2023",
+    "evidence": [
+     "D1:3"
+    ],
+    "category": 2
+   },
+   {
+    "question": "When did Rory run a charity race?",
+    "answer": 2023,
+    "evidence": [
+     "D2:1"
+    ],
+    "category": 2
+   },
+   {
+    "question": "What pets do Rory and Dana have or want?",
+    "answer": "dog, cat",
+    "evidence": [
+     "D1:5",
+     "D2:2"
+    ],
+    "category": 1
+   },
+   {
+    "question": "Would Dana likely enjoy a ceramics museum?",
+    "answer": "Yes; she takes pottery classes",
+    "evidence": [
+     "D1:3"
+    ],
+    "category": 3
+   },
+   {
+    "question": "What did Dana raise money for at the charity 10k?",
+    "evidence": [
+     "D2:1"
+    ],
+    "category": 5,
+    "adversarial_answer": "literacy"
+   },
+   {
+    "question": "Where did Rory travel?",
+    "answer": "Lisbon",
+    "evidence": [
+     "D:1:2"
+    ],
+    "category": 4
+   }
+  ],
+  "event_summary": {},
+  "observation": {},
+  "session_summary": {}
+ }
+]

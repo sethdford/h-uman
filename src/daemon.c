@@ -179,6 +179,7 @@
 #include "human/agent/proactive_ext.h"
 #include "human/agent/proactive_throttle.h"
 #include "human/agent/validators/builtin.h"
+#include "human/context/reply_fragment.h"
 #include "human/context/self_awareness.h"
 #include "human/observability/validator_telemetry.h"
 #ifdef HU_HAS_CRON
@@ -8937,9 +8938,6 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                          * only REMOVES markup — never adds HTML/mrkdwn — so it is a
                          * strict cleanup for every channel and cannot regress email/slack.
                          * Falls back to send_ptr if the strip fails — never a regression. */
-                        /* Plaintext-ify ONCE before the choreo/fragment split so every bubble
-                         * path inherits clean text (was: only the whole-reply fallback ran the
-                         * chain). NULL result → keep send_ptr (no regression). */
                         char *split_clean = NULL;
                         size_t split_clean_len = 0;
                         const char *split_src = send_ptr;
@@ -8949,7 +8947,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                                   &split_clean_len)) {
                             split_src = split_clean;
                             split_src_len = split_clean_len;
-                        }
+                        } /* every bubble path sends split_src: WARN on a fragment ending */
+                        split_src_len = hu_reply_final_check(split_src, split_src_len,
+                                                             agent ? agent->observer : NULL);
 
                         /* F2: Choreography-driven message delivery */
                         hu_message_plan_t choreo_plan = {0};

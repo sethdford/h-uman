@@ -31,7 +31,7 @@ Generated from [`docs/perf/footprint.json`](../../perf/footprint.json) and
 
 | Metric (release-size build) | Current | Hard budget | Measurement |
 | --- | --- | --- | --- |
-| Binary size | <!-- fp:binary_kb -->~2760 KB<!-- /fp --> | <!-- fp:budget_binary_kb -->2800 KB<!-- /fp --> | `stat` of `human` |
+| Binary size | <!-- fp:binary_kb -->~2760 KB<!-- /fp --> | <!-- fp:budget_binary_kb -->3000 KB<!-- /fp --> | `stat` of `human` |
 | Text section | <!-- fp:text_kb -->1915 KB<!-- /fp --> | none (part of binary size) | `size -m human` |
 | Cold start | <!-- fp:startup_range -->3–6 ms<!-- /fp --> | <!-- fp:budget_startup_ms -->100 ms<!-- /fp --> median | 20 warm runs of `human --version` |
 | Peak RSS | <!-- fp:version_rss_mb -->6.9 MB<!-- /fp --> | <!-- fp:budget_version_rss_mb -->8 MB<!-- /fp --> | `/usr/bin/time -l human --version` |

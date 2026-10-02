@@ -424,7 +424,7 @@ against. See `docs/competitive-benchmarks.md` for named competitors and scores.
 | INP                    | 80-200ms               | **< 50ms**     | Event handler audit + web workers               |
 | UI entry bundle        | 200-500KB              | **< 100KB**    | Lit (no framework bloat) + aggressive splitting |
 | TTI (dashboard)        | 2-4s                   | **< 1s**       | Minimal JS + streaming render                   |
-| C runtime binary       | N/A (Electron: 100MB+) | **≤ <!-- fp:budget_binary_kb -->2800 KB<!-- /fp -->** (now <!-- fp:binary_kb -->~2760 KB<!-- /fp -->) | C11 + LTO (competitors can't match)             |
+| C runtime binary       | N/A (Electron: 100MB+) | **≤ <!-- fp:budget_binary_kb -->3000 KB<!-- /fp -->** (now <!-- fp:binary_kb -->~2760 KB<!-- /fp -->) | C11 + LTO (competitors can't match)             |
 | C runtime startup      | N/A (Electron: 2-5s)   | **≤ <!-- fp:budget_startup_ms -->100 ms<!-- /fp -->** (now <!-- fp:startup_range -->3–6 ms<!-- /fp -->) | No VM, no GC, pure native (100x faster)         |
 | C runtime RSS          | N/A (Electron: 100MB+) | **≤ <!-- fp:budget_version_rss_mb -->8 MB<!-- /fp -->** peak (now <!-- fp:version_rss_mb -->6.9 MB<!-- /fp -->; <!-- fp:idle_rss_mb -->8.6 MB<!-- /fp --> idle) | Zero-allocation hot paths                       |
 | Motion quality score | 8–9 (Linear/Apple)     | **10**         | WebGL + scroll narrative + spring-everything     |

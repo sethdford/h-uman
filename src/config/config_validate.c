@@ -133,20 +133,23 @@ static const char *const hu_memory_keys[] = {
     "api_base_url",
     "api_key",
     "api_timeout_ms",
+    "encrypt_at_rest",
 };
 static const size_t hu_memory_keys_len = sizeof(hu_memory_keys) / sizeof(hu_memory_keys[0]);
 
+/* Only the keys parse_ensemble reads; `routing` had no parser or config field. */
 static const char *const hu_ensemble_keys[] = {
     "providers",
     "strategy",
-    "routing",
 };
 static const size_t hu_ensemble_keys_len = sizeof(hu_ensemble_keys) / sizeof(hu_ensemble_keys[0]);
 
 static const char *const hu_voice_keys[] = {
-    "local_stt_endpoint", "local_tts_endpoint", "stt_provider", "tts_provider", "tts_voice",
-    "tts_model",          "stt_model",          "stt_language", "mode",         "realtime_model",
-    "realtime_voice",     "privacy_mode",
+    "local_stt_endpoint",  "local_tts_endpoint", "stt_provider",
+    "tts_provider",        "tts_voice",          "tts_model",
+    "stt_model",           "stt_language",       "mode",
+    "realtime_model",      "realtime_voice",     "privacy_mode",
+    "vertex_access_token", "vertex_region",      "vertex_project",
 };
 static const size_t hu_voice_keys_len = sizeof(hu_voice_keys) / sizeof(hu_voice_keys[0]);
 

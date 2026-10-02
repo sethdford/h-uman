@@ -435,6 +435,7 @@ void run_validator_chain_cache_tests(void);
 void run_daemon_e2e_validator_tests(void);
 void run_response_guard_tests(void);
 void run_response_guard_retry_tests(void);
+void run_reply_fragment_tests(void);
 void run_outbound_pipeline_tests(void);
 void run_outbound_strip_tests(void);
 void run_style_governor_tests(void);
@@ -521,6 +522,7 @@ void run_turn_plan_tests(void);                   /* agent-turn: [ACTIVE_PLAN] r
 void run_turn_tail_tests(void);                   /* agent-turn carve: S17-S18 iteration tail */
 void run_agent_turn_history_window_tests(void);   /* agent-turn: short-history scan windows */
 void run_reask_tests(void);                       /* agent-turn: re-ask predicate */
+void run_spoken_turn_tests(void);                 /* voice: latency-first prompt profile */
 void run_turn_sources_tests(void);                /* agent-turn carve: source-presence pins */
 void run_agent_llm_latency_wall_clock_tests(void); /* M3 latency_ms measures wall clock */
 void run_agent_turn_request_overrides_tests(void); /* G11: per-turn override parity */
@@ -1541,6 +1543,7 @@ int main(int argc, char **argv) {
     run_daemon_e2e_validator_tests();
     run_response_guard_tests();
     run_response_guard_retry_tests();
+    run_reply_fragment_tests();
     run_outbound_pipeline_tests();
     run_outbound_strip_tests();
     run_style_governor_tests();
@@ -1621,6 +1624,7 @@ int main(int argc, char **argv) {
     run_turn_plan_tests();
     run_agent_turn_history_window_tests();
     run_reask_tests();
+    run_spoken_turn_tests();
     run_turn_sources_tests();
     /* M3 live-fire fix: provider latency_ms must span the blocking round trip */
     run_agent_llm_latency_wall_clock_tests();

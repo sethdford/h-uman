@@ -1,4 +1,5 @@
 #include "human/agent/choreography.h"
+#include "human/context/reply_fragment.h"
 #include "human/core/string.h"
 #include <ctype.h>
 #include <stdint.h>
@@ -140,7 +141,9 @@ static void choreo_merge_last_two(choreo_span_t *sp, size_t *n) {
  * after a comma, whichever such boundary is nearest the middle. Returns the
  * left segment's length (punctuation kept), 0 when there is no boundary, so
  * the reply stays one bubble. A character midpoint split mid-clause
- * ("nah too windy. just" | "hung out by the water", 2026-09-30). */
+ * ("nah too windy. just" | "hung out by the water", 2026-09-30). A boundary
+ * that would leave a 1-word bubble ("... by the water." | "peaceful") is not
+ * a candidate (hu_reply_cut_is_clean). */
 static size_t choreo_double_text_split(const char *r, size_t len) {
     static const char *const tiers[] = {".!?", ","};
     const size_t min_side = 4;
@@ -150,6 +153,8 @@ static size_t choreo_double_text_split(const char *r, size_t len) {
             if (!strchr(tiers[t], r[i]) || !isspace((unsigned char)r[i + 1]))
                 continue;
             size_t cut = i + 1;
+            if (!hu_reply_cut_is_clean(r, len, cut))
+                continue;
             size_t dist = cut > len / 2 ? cut - len / 2 : len / 2 - cut;
             if (dist < best_dist) {
                 best = cut;
