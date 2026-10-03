@@ -350,6 +350,91 @@ static void test_gateway_voice_on_conn_close_frees_slot(void) {
     hu_arena_destroy(arena);
 }
 
+/* voice.session.greet: Lester opens the conversation. Refused before a session exists;
+ * after start it hands the greeting cue to the agent as a message on this session. */
+typedef struct {
+    int received;
+    char id[64];
+    char message[HU_BUS_MSG_LEN];
+} greet_capture_t;
+
+static bool greet_capture_cb(hu_bus_event_type_t type, const hu_bus_event_t *ev, void *ctx) {
+    greet_capture_t *c = (greet_capture_t *)ctx;
+    if (type == HU_BUS_MESSAGE_RECEIVED && ev) {
+        c->received++;
+        snprintf(c->id, sizeof(c->id), "%s", ev->id);
+        snprintf(c->message, sizeof(c->message), "%s", ev->message);
+    }
+    return true;
+}
+
+/* Cartesia closes an idle TTS socket: after ~6.7 min idle a reply had no audio. */
+static void voice_stream_tts_is_reopened_only_after_a_long_idle(void) {
+    int64_t t0 = 1000000;
+    HU_ASSERT_FALSE(hu_voice_stream_tts_stale(t0, t0));
+    HU_ASSERT_FALSE(hu_voice_stream_tts_stale(t0 + 30 * 1000, t0));
+    HU_ASSERT_FALSE(hu_voice_stream_tts_stale(t0 + HU_VOICE_STREAM_TTS_IDLE_REOPEN_MS - 1, t0));
+    HU_ASSERT_TRUE(hu_voice_stream_tts_stale(t0 + HU_VOICE_STREAM_TTS_IDLE_REOPEN_MS, t0));
+    HU_ASSERT_TRUE(hu_voice_stream_tts_stale(t0 + 400 * 1000, t0));
+}
+
+static void gateway_voice_greet_starts_a_spoken_turn_after_session_start(void) {
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    cfg.arena = arena;
+    cfg.allocator = hu_arena_allocator(arena);
+    const char *json = "{\"providers\":[{\"name\":\"cartesia\",\"api_key\":\"ck-test\"}],"
+                       "\"voice\":{\"tts_voice\":\"v1\",\"tts_model\":\"m1\"}}";
+    HU_ASSERT_EQ(hu_config_parse_json(&cfg, json, strlen(json)), HU_OK);
+    hu_bus_t bus;
+    hu_bus_init(&bus);
+    greet_capture_t cap;
+    memset(&cap, 0, sizeof(cap));
+    HU_ASSERT_EQ(hu_bus_subscribe(&bus, greet_capture_cb, &cap, HU_BUS_EVENT_COUNT), HU_OK);
+    hu_app_context_t app = {.config = &cfg, .alloc = &backing, .bus = &bus};
+    hu_control_protocol_t proto = {0};
+    proto.alloc = &backing;
+    hu_ws_conn_t conn = {0};
+    conn.id = 81;
+    conn.active = true;
+    char *out = NULL;
+    size_t out_len = 0;
+
+    /* No session yet: refused, nothing published. */
+    HU_ASSERT_NEQ(cp_voice_session_greet(&backing, &app, &conn, &proto, NULL, &out, &out_len),
+                  HU_OK);
+    HU_ASSERT_EQ(cap.received, 0);
+
+    hu_json_value_t *root = NULL;
+    const char *start_req = "{\"type\":\"req\",\"id\":\"1\",\"method\":\"voice.session.start\","
+                            "\"params\":{}}";
+    HU_ASSERT_EQ(hu_json_parse(&backing, start_req, strlen(start_req), &root), HU_OK);
+    HU_ASSERT_EQ(cp_voice_session_start(&backing, &app, &conn, &proto, root, &out, &out_len),
+                 HU_OK);
+    if (out)
+        backing.free(backing.ctx, out, out_len);
+    hu_json_free(&backing, root);
+
+    out = NULL;
+    out_len = 0;
+    HU_ASSERT_EQ(cp_voice_session_greet(&backing, &app, &conn, &proto, NULL, &out, &out_len),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_STR_CONTAINS(out, "\"ok\":true");
+    backing.free(backing.ctx, out, out_len + 1);
+    HU_ASSERT_EQ(cap.received, 1);
+    HU_ASSERT_STR_EQ(cap.id, "voice");
+    HU_ASSERT_STR_CONTAINS(cap.message, "Say hello");
+
+    hu_bus_unsubscribe(&bus, greet_capture_cb, &cap);
+    hu_voice_stream_on_conn_close(&conn);
+    hu_bus_deinit(&bus);
+    hu_arena_destroy(arena);
+}
+
 static void test_gateway_voice_audio_end_no_data_returns_error(void) {
     hu_allocator_t backing = hu_system_allocator();
     hu_config_t cfg;
@@ -591,6 +676,8 @@ void run_gateway_voice_tests(void) {
     HU_RUN_TEST(test_gateway_voice_on_binary_accumulates);
     HU_RUN_TEST(test_gateway_voice_on_conn_close_frees_slot);
     HU_RUN_TEST(test_gateway_voice_audio_end_no_data_returns_error);
+    HU_RUN_TEST(gateway_voice_greet_starts_a_spoken_turn_after_session_start);
+    HU_RUN_TEST(voice_stream_tts_is_reopened_only_after_a_long_idle);
     HU_RUN_TEST(test_gateway_voice_double_start_reuses_slot);
     HU_RUN_TEST(test_gateway_voice_interrupt_without_session_returns_ok);
     HU_RUN_TEST(test_gateway_voice_clone_returns_voice_id);

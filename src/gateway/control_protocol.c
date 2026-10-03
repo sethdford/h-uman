@@ -76,6 +76,7 @@ static const hu_rpc_entry_t s_rpc_table[] = {
     {"voice.session.stop", cp_voice_session_stop},
     {"voice.session.interrupt", cp_voice_session_interrupt},
     {"voice.audio.end", cp_voice_audio_end},
+    {"voice.session.greet", cp_voice_session_greet},
     {"voice.tool_response", cp_voice_tool_response},
     {"voice.config", cp_voice_config},
     {"voice.clone", cp_voice_clone},
@@ -374,8 +375,8 @@ void hu_control_on_message(hu_ws_conn_t *conn, const char *data, size_t data_len
                 if (pos < res_cap)
                     res_buf[pos++] = '"';
             }
-            pos = hu_buf_appendf(res_buf, res_cap, pos, ",\"ok\":%s,\"payload\":",
-                                 ok ? "true" : "false");
+            pos = hu_buf_appendf(res_buf, res_cap, pos,
+                                 ",\"ok\":%s,\"payload\":", ok ? "true" : "false");
             if (pos + payload_len + 2 <= res_cap) {
                 memcpy(res_buf + pos, payload, payload_len);
                 pos += payload_len;
@@ -506,8 +507,8 @@ hu_error_t hu_control_send_response(hu_control_protocol_t *proto, hu_ws_conn_t *
         } else
             buf[pos++] = c;
     }
-    pos = hu_buf_appendf(buf, cap, pos, "\",\"ok\":%s,\"payload\":%s}",
-                         ok ? "true" : "false", payload);
+    pos = hu_buf_appendf(buf, cap, pos, "\",\"ok\":%s,\"payload\":%s}", ok ? "true" : "false",
+                         payload);
 
     hu_error_t err = hu_ws_server_send(proto->ws, conn, buf, pos);
     if (err != HU_OK) {

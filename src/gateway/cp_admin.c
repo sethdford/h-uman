@@ -131,6 +131,7 @@ hu_error_t cp_admin_connect(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_
                                           "voice.session.stop",
                                           "voice.session.interrupt",
                                           "voice.audio.end",
+                                          "voice.session.greet",
                                           "voice.config",
                                           "metrics.snapshot",
                                           "memory.status",
