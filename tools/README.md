@@ -37,3 +37,4 @@ Unlike the instruments above, these ship: `scripts/install-human-daemon.sh` buil
 | Dir | What | Docs |
 |---|---|---|
 | `calendar-free-busy/` | Swift/EventKit helper printing owner free/busy JSON (busy intervals only, no titles or attendees) for `HU_COMMITMENT_GUARD`. `build.sh` is a no-op off macOS. | `docs/guides/commitment-guard.md` |
+| `hu-vision-ocr/` | Swift/Apple Vision helper printing an image's OCR lines + scene labels as JSON, the authoritative text for `HU_LOCAL_VISION`. Built by `scripts/install-local-vision.sh` (not the daemon installer); `build.sh` is a no-op off macOS. | `docs/guides/local-vision.md` |

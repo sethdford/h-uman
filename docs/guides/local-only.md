@@ -60,7 +60,7 @@ through an atomic pointer, so a reload never races a reader.
 | On-device-failure retry | `gemini-3.1-flash-lite` | skipped |
 | Local-voice failure fallback (daemon T4) | the tier's cloud model | skipped |
 | Response-guard slim retry | gemini, then openai | primary only |
-| Image description | cloud vision route or the agent provider | no image bytes sent. A bare `[Photo]` becomes `[They sent a photo]` |
+| Image description | cloud vision route or the agent provider | no image bytes leave the machine. A bare `[Photo]` becomes `[They sent a photo]`, or with `HU_LOCAL_VISION=live` a loopback caption + OCR ([local-vision.md](local-vision.md)) |
 | Memory embedder | Vertex `text-embedding` when ADC is set | the local embedder |
 
 ## The backstop

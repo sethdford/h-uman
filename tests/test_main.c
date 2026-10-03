@@ -397,6 +397,7 @@ void run_input_guard_tests(void);
 void run_externalization_tests(void);
 void run_conversation_tests(void);
 void run_vision_tests(void);
+void run_local_vision_tests(void);
 void run_ab_response_tests(void);
 void run_event_extract_tests(void);
 void run_stm_tests(void);
@@ -1535,6 +1536,7 @@ int main(int argc, char **argv) {
     run_externalization_tests();
     run_conversation_tests();
     run_vision_tests();
+    run_local_vision_tests();
     run_ab_response_tests();
     run_event_extract_tests();
     run_stm_tests();

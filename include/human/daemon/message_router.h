@@ -210,6 +210,14 @@ const char *hu_daemon_unseen_photo(const char *text, size_t *len, char *buf, siz
  * when buf is too small. */
 const char *hu_daemon_photo_placeholder(const char *text, size_t *len, char *buf, size_t cap);
 
+/* local_only photo note, local vision first (HU_LOCAL_VISION, see
+ * context/local_vision.h). LIVE and the loopback caption/OCR succeeded: the
+ * image becomes "[They sent a photo: <description>]" (a caption is kept, as
+ * above). Anything else — OFF, SHADOW, a failure, a timeout — is exactly
+ * hu_daemon_photo_placeholder. path is the NUL-terminated attachment path. */
+const char *hu_daemon_local_photo(const char *path, const char *text, size_t *len, char *buf,
+                                  size_t cap);
+
 /* Quality-retry draft. The quality gate used to free a reply before asking for
  * a better one; when the retry came back empty the contact got nothing (Lexi,
  * 2026-09-23). keep() takes ownership of the draft for `key` (dropping any

@@ -2531,9 +2531,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 } else if (media_desc) {
                                     alloc->free(alloc->ctx, media_desc, media_desc_len + 1);
                                 }
-                            } else if (hu_local_only_enforced()) { /* no image bytes out */
-                                content_to_add = hu_daemon_photo_placeholder(
-                                    content_to_add, &mlen, augmented, sizeof(augmented));
+                            } else if (hu_local_only_enforced()) { /* loopback vision, or a note */
+                                content_to_add = hu_daemon_local_photo(
+                                    path, content_to_add, &mlen, augmented, sizeof(augmented));
                             } else if (agent->provider.vtable->supports_vision &&
                                        agent->provider.vtable->supports_vision(
                                            agent->provider.ctx)) {
