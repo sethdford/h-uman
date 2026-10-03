@@ -575,4 +575,11 @@ void run_local_vision_tests(void) {
     HU_RUN_TEST(compose_keeps_quote_the_ocr_confirms);
     HU_RUN_TEST(compose_neutralises_brackets_quotes_and_newlines);
     HU_RUN_TEST(compose_nothing_usable_is_not_found);
+    if (g_state_dir[0]) { /* the scratch state dir: one sample file at most */
+        char sp[320];
+        snprintf(sp, sizeof(sp), "%s/local_vision_shadow.jsonl", g_state_dir);
+        unlink(sp);
+        rmdir(g_state_dir);
+        g_state_dir[0] = '\0';
+    }
 }
