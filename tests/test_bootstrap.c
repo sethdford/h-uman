@@ -170,6 +170,30 @@ static void bootstrap_semantic_index_points_at_app_lifetime_embedder(void) {
 }
 #endif
 
+/* 2026-10-03: a gateway with a Cartesia voice config played every reply through
+ * afplay on the host's speakers, blocking each turn ~5 s. Bootstrap must keep the
+ * voice config (STT/TTS helpers need it) but leave local playback off. */
+static void bootstrap_voice_config_does_not_turn_on_local_playback(void) {
+    char dir[] = "/tmp/hu_bootstrap_voice_XXXXXX";
+    HU_ASSERT_NOT_NULL(mkdtemp(dir));
+    char cfg_path[256];
+    snprintf(cfg_path, sizeof(cfg_path), "%s/config.json", dir);
+    write_config_fixture(cfg_path, "{\"default_provider\":\"ollama\","
+                                   "\"memory\":{\"backend\":\"none\"},"
+                                   "\"voice\":{\"tts_provider\":\"cartesia\","
+                                   "\"stt_provider\":\"cartesia\"}}");
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_app_ctx_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    HU_ASSERT_EQ(hu_app_bootstrap(&ctx, &alloc, cfg_path, true, false), HU_OK);
+    HU_ASSERT_NOT_NULL(ctx.agent);
+    HU_ASSERT_NOT_NULL(ctx.agent->voice_config); /* voice is configured... */
+    HU_ASSERT_FALSE(ctx.agent->tts_enabled);     /* ...but nothing plays locally */
+    hu_app_teardown(&ctx);
+    unlink(cfg_path);
+    rmdir(dir);
+}
+
 /* 2026-09-20 dead-code audit (task 3): `agent.context_engine: "rag"` parsed
  * fine but bootstrap logged "not implemented" and silently installed the
  * legacy engine instead — `context_engine_rag.c` was complete and unlinked.
@@ -393,6 +417,7 @@ void run_bootstrap_tests(void) {
 #ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(bootstrap_semantic_index_points_at_app_lifetime_embedder);
 #endif
+    HU_RUN_TEST(bootstrap_voice_config_does_not_turn_on_local_playback);
 #if HU_HAS_PWA
     HU_RUN_TEST(bootstrap_starts_the_pwa_channel_it_registers);
 #endif
