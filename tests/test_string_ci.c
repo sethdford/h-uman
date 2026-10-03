@@ -143,6 +143,21 @@ static void test_word_ci_n_null_safe(void) {
     HU_ASSERT_FALSE(hu_str_contains_word_ci_n("warm", 0, "warm"));
 }
 
+/* The verifier / self-RAG sentence-prefix matcher, one shared copy. */
+static void test_sentence_starts_with_ci_boundaries(void) {
+    const char *a = "   I think so";
+    HU_ASSERT_TRUE(hu_str_sentence_starts_with_ci(a, strlen(a), "i think"));
+    const char *b = "I thinking";
+    HU_ASSERT_FALSE(hu_str_sentence_starts_with_ci(b, strlen(b), "I think"));
+    const char *c = "Maybe Berlin is right";
+    HU_ASSERT_TRUE(hu_str_sentence_starts_with_ci(c, strlen(c), "Maybe "));
+    const char *d = "I think's";
+    HU_ASSERT_FALSE(hu_str_sentence_starts_with_ci(d, strlen(d), "I think"));
+    HU_ASSERT_FALSE(hu_str_sentence_starts_with_ci("I", 1, "I think"));
+    HU_ASSERT_FALSE(hu_str_sentence_starts_with_ci(NULL, 0, "x"));
+    HU_ASSERT_FALSE(hu_str_sentence_starts_with_ci("abc", 3, ""));
+}
+
 void run_string_ci_tests(void) {
     HU_TEST_SUITE("string_ci");
     HU_RUN_TEST(test_str_contains_ci_basic_match);
@@ -166,4 +181,5 @@ void run_string_ci_tests(void) {
     HU_RUN_TEST(test_word_ci_n_bound_acts_as_right_boundary);
     HU_RUN_TEST(test_word_ci_n_ignores_bytes_past_bound);
     HU_RUN_TEST(test_word_ci_n_null_safe);
+    HU_RUN_TEST(test_sentence_starts_with_ci_boundaries);
 }

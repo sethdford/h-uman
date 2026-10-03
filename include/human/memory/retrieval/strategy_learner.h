@@ -3,6 +3,7 @@
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/gate_mode.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -12,6 +13,19 @@
  * and learns which retrieval strategy works best for which type.
  * Uses historical outcomes to route future queries optimally.
  */
+
+/* DEF-17 gate HU_STRATEGY_SIGNAL=off|shadow|live (default off).
+ * The learner's only "success" was `count > 0`, written inside
+ * `if (count > 0)` in memory_loader.c — success=1 on 4,850 of 4,850 prod
+ * rows, so recommend() picked an arbitrary all-success strategy and its own
+ * picks fed it more successes (SEMANTIC queries: 2,433 rows, all KEYWORD).
+ * LIVE stops writing that tautology and stops letting it steer retrieval;
+ * SHADOW logs how often the vacuous recommendation overrides the default. */
+hu_gate_mode_t hu_strategy_signal_mode(void);
+#if HU_IS_TEST
+/* Force the gate (hu_gate_mode_t value) in tests; -1 restores env reading. */
+void hu_strategy_signal_set_mode_for_test(int mode);
+#endif
 
 #ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>
@@ -64,6 +78,18 @@ hu_error_t hu_strategy_learner_record(hu_strategy_learner_t *learner, hu_query_c
  * Falls back to HYBRID if no data. */
 hu_retrieval_strategy_t hu_strategy_learner_recommend(hu_strategy_learner_t *learner,
                                                       hu_query_category_t category);
+
+/* HU_STRATEGY_SIGNAL-aware wrappers (the loader's entry points).
+ * OFF: identical to recommend / record. SHADOW: identical, plus one
+ * aggregate log line per recommendation. LIVE: recommend returns HYBRID
+ * (no override) and record writes nothing — there is no real retrieval
+ * outcome signal yet (see docs/guides/learning-loops.md). */
+hu_retrieval_strategy_t hu_strategy_learner_recommend_gated(hu_strategy_learner_t *learner,
+                                                            hu_query_category_t category);
+hu_error_t hu_strategy_learner_record_gated(hu_strategy_learner_t *learner,
+                                            hu_query_category_t category,
+                                            hu_retrieval_strategy_t strategy, bool success,
+                                            int64_t now_ts);
 
 #endif /* HU_ENABLE_SQLITE */
 #endif

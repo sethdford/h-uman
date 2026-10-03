@@ -1,12 +1,13 @@
 /* src/daemon/daemon_person_dates.c — contract in include/human/daemon/person_dates.h */
 #include "human/agent.h"
-#include "human/agent/outbound_sanitize.h"
 #include "human/channel.h"
 #include "human/core/gate_mode.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include "human/daemon.h"
 #include "human/daemon/person_dates.h"
 #include "human/daemon/share_queue.h"
+#include "human/daemon/unprompted_gate.h"
 #include "human/daemon_outbound_bus.h"
 #include "human/memory.h"
 #include "human/persona.h"
@@ -516,17 +517,34 @@ static void deliver_approved(struct hu_agent *agent, sqlite3 *db, const hu_conta
         size_t len = strlen(text);
         const char *why = NULL;
         hu_error_t err = HU_ERR_INVALID_ARGUMENT;
-        if (c && hu_outbound_sanitize(text, &len, &why) && len > 0)
+        /* Owner-approved, but still a message the contact did not ask for:
+         * the one unprompted gate stack (opt-out, cap, cool-off, quiet hours,
+         * circuit, sanitizer). A deny is reported to the owner like any other
+         * failure, naming the stage, so they can resend later. */
+        hu_unprompted_gate_t g;
+        hu_unprompted_reason_t verdict = HU_UNPROMPTED_DENY_INVALID;
+        if (c) {
+            hu_daemon_unprompted_gate_init(&g, agent->alloc, agent, channel_for(c), c->contact_id,
+                                           strlen(c->contact_id), now);
+            verdict = hu_unprompted_send_check(&g, c->contact_id, HU_UNPROMPTED_DATE_NOTE, now,
+                                               text, &len, true);
+        }
+        if (c && verdict == HU_UNPROMPTED_ALLOW && len > 0) {
             err = send_on(channels, count, channel_for(c), c->contact_id, text, len);
-        else
-            why = c ? (why ? why : "empty after cleanup") : "no such contact any more";
+            if (err == HU_OK)
+                hu_unprompted_record_sent(&g, c->contact_id, HU_UNPROMPTED_DATE_NOTE, now);
+        } else {
+            why = c ? (verdict != HU_UNPROMPTED_ALLOW ? hu_unprompted_reason_str(verdict)
+                                                      : "empty after cleanup")
+                    : "no such contact any more";
+        }
         (void)hu_date_drafts_repo_decide(db, rows[i].id, err == HU_OK ? "sent" : "failed", NULL,
                                          now);
         char who[64];
         first_name(c, rows[i].contact_id, who, sizeof(who));
         if (err == HU_OK) {
             hu_log_info("dates", agent->observer, "approved %s note sent to %s", rows[i].label,
-                        who);
+                        HU_LOG_WHO_CSTR(who));
             continue;
         }
         char note[256];
@@ -536,8 +554,19 @@ static void deliver_approved(struct hu_agent *agent, sqlite3 *db, const hu_conta
             (void)send_on(channels, count, channel_for(owner), owner->contact_id, note,
                           strlen(note));
         hu_log_warn("dates", agent->observer, "approved %s note to %s failed: %s", rows[i].label,
-                    who, why ? why : hu_error_string(err));
+                    HU_LOG_WHO_CSTR(who), why ? why : hu_error_string(err));
     }
+}
+
+bool hu_person_date_note_due_today(struct hu_agent *agent, const char *contact_id, int64_t now) {
+    if (!agent || !agent->persona || !contact_id || nudges_gate() != HU_GATE_LIVE)
+        return false;
+    candidate_t cand[16];
+    size_t n = collect(agent, now, 0, cand, 16);
+    for (size_t i = 0; i < n; i++)
+        if (strcmp(cand[i].contact_id, contact_id) == 0 && cand[i].days_away == 0)
+            return true;
+    return false;
 }
 
 void hu_date_nudges_tick(struct hu_agent *agent, struct hu_service_channel *channels,
@@ -615,6 +644,11 @@ void hu_date_nudges_tick(struct hu_agent *agent, struct hu_service_channel *chan
 }
 
 #else /* !HU_ENABLE_SQLITE */
+
+bool hu_person_date_note_due_today(struct hu_agent *agent, const char *contact_id, int64_t now) {
+    (void)agent, (void)contact_id, (void)now;
+    return false;
+}
 
 bool hu_person_dates_handle_owner_message(struct hu_agent *agent, const char *owner,
                                           size_t owner_len, const char *text, size_t len,

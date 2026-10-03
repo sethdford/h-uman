@@ -208,6 +208,23 @@ bool hu_str_contains_word_ci_n(const char *hay, size_t hlen, const char *needle)
     return hu_str_find_word_ci_n(hay, hlen, needle) >= 0;
 }
 
+bool hu_str_sentence_starts_with_ci(const char *s, size_t len, const char *prefix) {
+    if (!s || !prefix)
+        return false;
+    size_t i = 0;
+    while (i < len && isspace((unsigned char)s[i]))
+        i++;
+    size_t pl = strlen(prefix);
+    if (pl == 0 || len - i < pl || strncasecmp(s + i, prefix, pl) != 0)
+        return false;
+    if (isalpha((unsigned char)prefix[pl - 1]) && i + pl < len) {
+        char c = s[i + pl];
+        if (isalpha((unsigned char)c) || c == '_' || c == '\'')
+            return false;
+    }
+    return true;
+}
+
 bool hu_str_contains_word_ci(const char *s, const char *needle) {
     if (!s)
         return false;

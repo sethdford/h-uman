@@ -3,6 +3,7 @@
 #include "human/agent/approval_gate.h"
 #include "human/agent/awareness.h"
 #include "human/agent/commitment_store.h"
+#include "human/agent/history_budget.h"
 #include "human/agent/humanization_bandit.h"
 #include "human/agent/humanness.h"
 #include "human/agent/idempotency.h"
@@ -80,6 +81,7 @@
 #include "human/persona/genuine_boundaries.h"
 #include "human/persona/narrative_self.h"
 #include "human/provider.h"
+#include "human/providers/local_only_config.h"
 #include "human/security/arg_inspector.h"
 #include "human/voice.h"
 #ifdef HU_ENABLE_ML
@@ -2900,6 +2902,9 @@ hu_error_t hu_agent_reload_config(hu_agent_t *agent, char **summary_out, size_t 
      * by tests/test_config_reload.c). */
 #if !HU_IS_TEST
     hu_privacy_set_enforced(fresh_cfg.voice.privacy_mode);
+    /* privacy.local_only: re-resolve (mode + voice allow-list) from the fresh
+     * config; never cleared by a reload that merely omits the block. */
+    (void)hu_config_apply_local_only(&fresh_cfg);
 #endif
 
     char *summary_buf = (char *)agent->alloc->alloc(agent->alloc->ctx, 512);
@@ -3051,37 +3056,17 @@ static size_t fit_drop_front(hu_chat_message_t *msgs, size_t count, size_t drop_
 
 size_t hu_agent_internal_fit_history(const hu_agent_t *agent, hu_chat_message_t *msgs,
                                      size_t msgs_count) {
-    if (!msgs || msgs_count <= 2)
+    if (!msgs || msgs_count < 2)
         return msgs_count;
     /* Owner self-test: only the last few prior messages (plus the current). */
     if (agent && agent->history_msg_cap > 0 && msgs_count - 2 > agent->history_msg_cap)
         msgs_count = fit_drop_front(msgs, msgs_count, msgs_count - 1 - agent->history_msg_cap);
 
-    /* A1b — message-history budget cap (2026-05-19). A1 capped the system
-     * prompt at 16 KB, but the messages array grows with the conversation;
-     * multi-turn test A4 saw turn 5 onward fail ("Server returned nothing") once
-     * system prompt + history crossed the MLX backend's effective request cap.
-     * Keep [0] (system) and the last message; drop the oldest history until the
-     * total is under 20 KB (~4 KB of history: 8-10 short iMessage turns). */
-    const size_t HISTORY_BUDGET = 20 * 1024;
-    size_t total_bytes = 0;
-    for (size_t i = 0; i < msgs_count; i++)
-        total_bytes += hu_chat_message_estimate_bytes(&msgs[i]);
-    if (total_bytes <= HISTORY_BUDGET)
-        return msgs_count;
-    size_t drop_idx = 1; /* start after system */
-    while (total_bytes > HISTORY_BUDGET && drop_idx < msgs_count - 1)
-        total_bytes -= hu_chat_message_estimate_bytes(&msgs[drop_idx++]);
-    size_t dropped = drop_idx - 1;
-    if (dropped == 0)
-        return msgs_count;
-    msgs_count = fit_drop_front(msgs, msgs_count, drop_idx);
-    static atomic_bool warned_history_budget = false;
-    hu_log_warn_once(&warned_history_budget, "agent_turn", NULL,
-                     "history truncated: dropped %zu oldest messages to fit %zu-byte budget "
-                     "(now %zu msgs, %zu bytes)",
-                     dropped, HISTORY_BUDGET, msgs_count, total_bytes);
-    return msgs_count;
+    /* A1b byte budget (2026-05-19), now behind HU_HISTORY_BUDGET: OFF keeps
+     * system + history under 20 KB; LIVE budgets the history alone under a
+     * total cap. See include/human/agent/history_budget.h. */
+    return hu_history_budget_fit(msgs, msgs_count, hu_history_budget_mode(),
+                                 hu_history_budget_max_total(), NULL);
 }
 
 hu_provider_t *hu_agent_internal_recall_provider(hu_agent_t *agent, const char *msg,

@@ -126,6 +126,19 @@ void hu_turn_ctx_free(hu_turn_ctx_t *turn_ctx);
  * writes retrieval.*. HU_ERR_INVALID_ARGUMENT on a NULL ctx or agent. */
 hu_error_t hu_turn_retrieve(hu_turn_ctx_t *turn_ctx);
 
+/* Self-RAG relevance of retrieved memory to `msg` (hu_srag_verify_relevance
+ * with the agent's srag_config) — the check S3 uses to drop irrelevant flat
+ * memory. True when the memory may be used. */
+bool hu_turn_srag_memory_verified(hu_agent_t *agent, const char *msg, size_t msg_len,
+                                  const char *memory_ctx, size_t memory_ctx_len);
+
+/* Did this turn's memory retrieval find something relevant, by the same
+ * Self-RAG rules S3 applies (gate, then verify)? For a path that loads
+ * memory without S3 (the streaming turn), so the imperfect-delivery hedge
+ * (DEF-4) reads the same signal on both paths. False for empty memory. */
+bool hu_turn_memory_relevant(hu_agent_t *agent, const char *msg, size_t msg_len,
+                             const char *memory_ctx, size_t memory_ctx_len);
+
 /* S1 plan resume (src/agent/turn/turn_plan.c): a copy of the newest
  * "[ACTIVE_PLAN]" system message among the last 10 history entries, allocated
  * with agent->alloc (caller frees plan_len + 1 bytes), or NULL when there is
@@ -193,5 +206,23 @@ void hu_turn_note_history_shift(hu_turn_ctx_t *turn_ctx, size_t before, size_t a
  * HU_ERR_TIMEOUT return stay in the turn body (plan gap G7).
  * HU_ERR_INVALID_ARGUMENT on a NULL ctx or agent, else HU_OK. */
 hu_error_t hu_turn_exhausted(hu_turn_ctx_t *turn_ctx);
+
+/* Renders the personal-model prompt block for this turn into buf
+ * (src/agent/turn/personal_model_prompt.c): the HU_CONFIDENCE_BOUNDARY view
+ * of agent->personal_model, with the reflection-loop slice when that loop is
+ * on and the memory is sqlite. Returns the bytes written (0 when there is
+ * nothing to render, or on NULL/0-cap input). */
+size_t hu_turn_personal_model_prompt(hu_agent_t *agent, char *buf, size_t cap);
+
+/* Per-turn thread scope around agent_turn_run (src/agent/turn/turn_scope.c):
+ * tags the local-only guard's audit caller as "agent_turn" and, when the
+ * thread is untagged, sets the X-HU-Purpose to REPLY (a caller's tag wins).
+ * hu_turn_scope_exit restores both, in reverse order. */
+typedef struct hu_turn_scope {
+    const char *local_only_prev;
+    int llm_purpose_prev; /* hu_llm_purpose_t */
+} hu_turn_scope_t;
+hu_turn_scope_t hu_turn_scope_enter(void);
+void hu_turn_scope_exit(hu_turn_scope_t scope);
 
 #endif /* HU_AGENT_TURN_H */

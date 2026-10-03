@@ -6,6 +6,7 @@
 #include "human/context/conversation.h"
 #include "human/core/gate_mode.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include "human/daemon/promise_keeper.h"
 #include "human/memory/graph_ingest.h"
 
@@ -113,9 +114,9 @@ hu_error_t hu_agent_facts_record_reply(hu_graph_t *g, hu_memory_t *mem, const ch
         if (mode == HU_GATE_SHADOW) {
             hu_log_info("human", NULL,
                         "[agent-facts SHADOW] would ingest pred=%s subj_len=%zu obj_len=%zu "
-                        "(conf=%.2f, prov=%s) for %.*s",
+                        "(conf=%.2f, prov=%s) for %s",
                         f->predicate, strlen(f->subject), strlen(f->object), (double)scaled_conf,
-                        provenance, cid_trunc, contact_id);
+                        provenance, HU_LOG_WHO(contact_id, cid_len));
             continue;
         }
         if (!g)
@@ -123,8 +124,8 @@ hu_error_t hu_agent_facts_record_reply(hu_graph_t *g, hu_memory_t *mem, const ch
         hu_error_t ing_err = hu_graph_ingest_fact(g, contact_id, cid_len, f->subject, f->predicate,
                                                   f->object, scaled_conf, now, provenance);
         if (ing_err != HU_OK && ing_err != HU_ERR_NOT_SUPPORTED)
-            hu_log_warn("human", NULL, "[agent-facts] ingest failed (%d) for %.*s", (int)ing_err,
-                        cid_trunc, contact_id);
+            hu_log_warn("human", NULL, "[agent-facts] ingest failed (%d) for %s", (int)ing_err,
+                        HU_LOG_WHO(contact_id, cid_len));
     }
 
     char commitment[512];
@@ -138,8 +139,8 @@ hu_error_t hu_agent_facts_record_reply(hu_graph_t *g, hu_memory_t *mem, const ch
             /* Redacted on purpose: the commitment text is the daemon's own reply
              * to a real contact; the log carries its size, never its words. */
             hu_log_info("human", NULL,
-                        "[agent-facts SHADOW] would store commitment (%zu bytes) key=%s",
-                        strlen(commitment), key);
+                        "[agent-facts SHADOW] would store commitment (%zu bytes) for %s",
+                        strlen(commitment), HU_LOG_WHO(contact_id, cid_len));
         } else if (mem && mem->vtable && mem->vtable->store) {
             hu_memory_category_t cat;
             memset(&cat, 0, sizeof(cat));
@@ -147,8 +148,8 @@ hu_error_t hu_agent_facts_record_reply(hu_graph_t *g, hu_memory_t *mem, const ch
             hu_error_t store_err = mem->vtable->store(mem->ctx, key, strlen(key), commitment,
                                                       strlen(commitment), &cat, NULL, 0);
             if (store_err != HU_OK)
-                hu_log_warn("human", NULL, "[agent-facts] promise store failed (%d) key=%s",
-                            (int)store_err, key);
+                hu_log_warn("human", NULL, "[agent-facts] promise store failed (%d) for %s",
+                            (int)store_err, HU_LOG_WHO(contact_id, cid_len));
         }
     }
     return HU_OK;

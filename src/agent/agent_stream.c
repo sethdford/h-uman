@@ -13,6 +13,8 @@
 #include "human/agent/hard_moment.h"
 #include "human/agent/humanness.h"
 #include "human/agent/input_guard.h"
+#include "human/agent/learned_style_turn.h"
+#include "human/agent/local_only_route.h"
 #include "human/agent/memory_loader.h"
 #include "human/agent/model_router.h"
 #include "human/agent/outcomes.h"
@@ -29,6 +31,7 @@
 #include "human/agent/spoken_turn.h"
 #include "human/agent/superhuman.h"
 #include "human/agent/tool_call_parser.h"
+#include "human/agent/turn.h"
 #include "human/agent/validators/builtin.h"
 #include "human/agent/world_model_bridge.h"
 #include "human/cognition/attachment.h"
@@ -46,6 +49,7 @@
 #include "human/context/conversation.h"
 #include "human/context_engine.h"
 #include "human/core/json.h"
+#include "human/core/local_only_guard.h"
 #include "human/core/log.h"
 #include "human/core/paths.h"
 #include "human/core/string.h"
@@ -70,6 +74,7 @@
 #include "human/persona/somatic.h"
 #include "human/reflection.h" /* T7: reflection-loop slice in build_prompt */
 #include "human/security/moderation.h"
+#include "human/security/self_harm.h"
 #include "human/security/sycophancy_guard.h"
 #include "human/tool.h"
 #ifdef HU_ENABLE_SQLITE
@@ -294,9 +299,23 @@ hu_error_t hu_agent_turn_stream(hu_agent_t *agent, const char *msg, size_t msg_l
 
 #define STREAM_V2_MAX_TOOL_DEPTH 10
 
+static hu_error_t agent_turn_stream_v2_run(hu_agent_t *agent, const char *msg, size_t msg_len,
+                                           hu_agent_stream_event_cb on_event, void *event_ctx,
+                                           char **response_out, size_t *response_len_out);
+
 hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t msg_len,
                                    hu_agent_stream_event_cb on_event, void *event_ctx,
                                    char **response_out, size_t *response_len_out) {
+    const char *lo_prev = hu_local_only_enter("agent_turn"); /* audit/refusal caller tag */
+    hu_error_t err = agent_turn_stream_v2_run(agent, msg, msg_len, on_event, event_ctx,
+                                              response_out, response_len_out);
+    (void)hu_local_only_set_caller(lo_prev);
+    return err;
+}
+
+static hu_error_t agent_turn_stream_v2_run(hu_agent_t *agent, const char *msg, size_t msg_len,
+                                           hu_agent_stream_event_cb on_event, void *event_ctx,
+                                           char **response_out, size_t *response_len_out) {
     if (!agent || !msg || !response_out)
         return HU_ERR_INVALID_ARGUMENT;
     if (!agent->provider.vtable)
@@ -518,6 +537,7 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
     if (agent->outcomes && !agent->lean_prompt)
         outcome_ctx = hu_outcome_build_summary(agent->outcomes, agent->alloc, &outcome_ctx_len);
 
+    hu_learned_style_turn_t ls_turn = {0}; /* HU_LEARNED_STYLE, learned_style_turn.h */
     char *persona_prompt = NULL;
     size_t persona_prompt_len = 0;
     if (agent->persona) {
@@ -525,15 +545,16 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             /* Lean head: shared with offline prompt rendering (persona show
              * --contact). On failure the turn continues without a head, as the
              * inline version did when its strndup failed. */
-            (void)hu_agent_build_lean_persona_head(agent, msg, msg_len, &persona_prompt,
-                                                   &persona_prompt_len);
+            (void)hu_agent_build_head_learned(agent, true, NULL, 0, msg, msg_len, &persona_prompt,
+                                              &persona_prompt_len, &ls_turn);
         } else {
             /* HU_PERSONA_HEAD-gated head selection — shared helper, same as
              * hu_agent_turn (single-path wiring was dead in prod for
              * HU_WARMTH_TONE_VOCAB; this streaming path is the daemon's
              * PRIMARY inbound route). */
             hu_error_t perr =
-                hu_agent_build_persona_head(agent, NULL, 0, &persona_prompt, &persona_prompt_len);
+                hu_agent_build_head_learned(agent, false, NULL, 0, msg, msg_len, &persona_prompt,
+                                            &persona_prompt_len, &ls_turn);
             if (perr != HU_OK) {
                 if (memory_ctx)
                     agent->alloc->free(agent->alloc->ctx, memory_ctx, memory_ctx_len + 1);
@@ -1042,9 +1063,12 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
         size_t imperfect_dir_len = 0;
         char *residue_dir = NULL;
         size_t residue_dir_len = 0;
-        hu_agent_build_humanness_context(agent, msg, msg_len, memory_ctx, memory_ctx_len,
-                                         &humanness_ctx, &humanness_ctx_len, &imperfect_dir,
-                                         &imperfect_dir_len, &residue_dir, &residue_dir_len);
+        hu_agent_build_humanness_context(
+            agent, msg, msg_len, memory_ctx, memory_ctx_len,
+            hu_turn_memory_relevant(agent, msg, msg_len, memory_ctx, memory_ctx_len) ||
+                graph_ctx_len > 0,
+            &humanness_ctx, &humanness_ctx_len, &imperfect_dir, &imperfect_dir_len, &residue_dir,
+            &residue_dir_len);
         hu_prompt_config_t cfg = {
             .provider_name = agent->provider.vtable->get_name(agent->provider.ctx),
             .provider_name_len = 0,
@@ -1082,6 +1106,7 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             .contact_context = enriched_contact ? enriched_contact : agent->contact_context,
             .contact_context_len =
                 enriched_contact ? enriched_contact_len : agent->contact_context_len,
+            .learned_style_live = ls_turn.live,
             .conversation_context = agent->conversation_context,
             .conversation_context_len = agent->conversation_context_len,
             .max_response_chars = agent->max_response_chars,
@@ -1344,6 +1369,7 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             turn_model_len = agent->turn_model_len;
         } else if (early_tier >= HU_TIER_ANALYTICAL) {
             hu_model_router_config_t mr_cfg = hu_model_router_default_config();
+            hu_local_only_router_defaults(&mr_cfg, agent->model_name, agent->model_name_len);
             const char *rel = NULL;
             size_t rel_len = 0;
             if (agent->relationship.stage >= HU_REL_TRUSTED) {
@@ -2351,6 +2377,24 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             }
         }
 
+        /* 988 keyed to the INBOUND message, never to the reply's own words. */
+        if (final_content &&
+            hu_self_harm_reply_needs_resources(msg, msg_len, final_content, final_content_len)) {
+            size_t rl = 0;
+            const char *line = hu_self_harm_resource_line(&rl);
+            size_t new_len = final_content_len + 2 + rl;
+            char *expanded = (char *)agent->alloc->alloc(agent->alloc->ctx, new_len + 1);
+            if (expanded) {
+                memcpy(expanded, final_content, final_content_len);
+                memcpy(expanded + final_content_len, "\n\n", 2);
+                memcpy(expanded + final_content_len + 2, line, rl);
+                expanded[new_len] = '\0';
+                agent->alloc->free(agent->alloc->ctx, final_content, final_content_len + 1);
+                final_content = expanded;
+                final_content_len = new_len;
+            }
+        }
+
         /* Outbound moderation: check the response for safety (matches batch) */
         {
             hu_moderation_result_t mod_result;
@@ -2361,21 +2405,6 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                 hu_log_info("agent_stream_v2", NULL,
                             "outbound moderation flagged response (violence=%d self_harm=%d)",
                             mod_result.violence, mod_result.self_harm);
-                if (mod_result.self_harm) {
-                    static const char crisis[] = "\n\nIf you're in crisis, please reach out: "
-                                                 "988 Suicide & Crisis Lifeline (call/text 988), "
-                                                 "Crisis Text Line (text HOME to 741741)";
-                    size_t new_len = final_content_len + sizeof(crisis) - 1;
-                    char *expanded = (char *)agent->alloc->alloc(agent->alloc->ctx, new_len + 1);
-                    if (expanded) {
-                        memcpy(expanded, final_content, final_content_len);
-                        memcpy(expanded + final_content_len, crisis, sizeof(crisis) - 1);
-                        expanded[new_len] = '\0';
-                        agent->alloc->free(agent->alloc->ctx, final_content, final_content_len + 1);
-                        final_content = expanded;
-                        final_content_len = new_len;
-                    }
-                }
                 if (mod_result.violence) {
                     static const char deesc[] =
                         "[SAFETY] This response touches on violence. "

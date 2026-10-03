@@ -21,6 +21,7 @@
 #include "human/config.h"
 #include "human/core/gate_mode.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include "human/core/string.h"
 #include "human/daemon/agent_facade.h"
 #include "human/daemon/context_facade.h"
@@ -30,10 +31,16 @@
 #include "human/daemon/memory_facade.h"
 #include "human/daemon/persona_facade.h"
 #include "human/daemon/prospective.h"
+#include "human/daemon/thread_context.h"
+#ifdef HU_HAS_IMESSAGE
+#include "human/channels/imessage.h" /* hu_imessage_load_dm_history */
+#endif
 #include "human/daemon_maintenance.h"
 #include "human/humanness.h"
 #include "human/memory/opinion_challenge.h"
 #include "human/platform.h"
+#include "human/providers/local_only.h"
+#include "human/providers/reliable.h"
 #include "human/visual/content.h"
 
 #include <stdint.h>
@@ -656,10 +663,10 @@ void hu_daemon_reactive_prompt_build(hu_allocator_t *alloc, hu_agent_t *agent,
                                     if (!hold_would)
                                         continue;
                                     hu_log_info("opinion_hold", agent ? agent->observer : NULL,
-                                                "%s: inbound challenges stance [%.*s]",
+                                                "%s: inbound challenges stance [%s]",
                                                 hold_mode == HU_GATE_LIVE ? "live" : "shadow",
-                                                (int)evo_opinions[oi].topic_len,
-                                                evo_opinions[oi].topic);
+                                                HU_LOG_TEXT(evo_opinions[oi].topic,
+                                                            evo_opinions[oi].topic_len, 120));
                                     if (hold_dir && hold_len > 0)
                                         PHASE6_APPEND(hold_dir, hold_len);
                                     break; /* one hold directive max per turn */
@@ -1257,6 +1264,45 @@ void hu_daemon_reactive_prompt_build(hu_allocator_t *alloc, hu_agent_t *agent,
         }
     }
 #endif
+
+    /* HU_THREAD_CONTEXT: the last real messages of the 1:1 iMessage thread as
+     * a "## Recent thread" block — under llm_decides the model otherwise sees
+     * only the daemon-written session store. It reads its own DM-scoped
+     * loader (hu_imessage_load_dm_history: chat.style decides) and never the
+     * shared ctx_entries, whose handle join also returns group rows. Never
+     * for a group or a cloud primary. Activation to LIVE gated on the n=40
+     * blind A/B; see docs/guides/thread-context.md. */
+    if (llm_decides && !rt->is_group) {
+        hu_gate_mode_t tc_mode = hu_thread_context_mode();
+        if (tc_mode != HU_GATE_OFF) {
+            hu_channel_history_entry_t *tc_entries = NULL;
+            size_t tc_count = 0;
+#ifdef HU_HAS_IMESSAGE
+            const hu_channel_t *tc_ch = rt->ch ? rt->ch->channel : NULL;
+            const char *tc_ch_name = (tc_ch && tc_ch->vtable && tc_ch->vtable->name)
+                                         ? tc_ch->vtable->name(tc_ch->ctx)
+                                         : NULL;
+            if (tc_ch_name && strcmp(tc_ch_name, "imessage") == 0 &&
+                hu_imessage_load_dm_history(tc_ch->ctx, alloc, batch_key, key_len, 25, &tc_entries,
+                                            &tc_count) != HU_OK) {
+                tc_entries = NULL;
+                tc_count = 0;
+            }
+#endif
+            const hu_contact_profile_t *tc_cp =
+                (agent && agent->persona)
+                    ? hu_persona_find_contact(agent->persona, batch_key, key_len)
+                    : NULL;
+            const char *tc_name = tc_cp ? tc_cp->name : NULL;
+            bool tc_local = agent && (hu_reliable_primary_is_local(&agent->provider) ||
+                                      hu_local_only_provider_is_local(&agent->provider));
+            hu_daemon_thread_context_apply(alloc, tc_mode, tc_local, tc_entries, tc_count, tc_name,
+                                           tc_name ? strlen(tc_name) : 0, combined, combined_len,
+                                           time(NULL), &convo_ctx, &convo_ctx_len, NULL);
+            if (tc_entries)
+                alloc->free(alloc->ctx, tc_entries, 25 * sizeof(hu_channel_history_entry_t));
+        }
+    }
 
     /* 3. Build awareness context from history via shared analyzer.
      * Skip in llm_decides: director + persona are sufficient. */

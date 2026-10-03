@@ -17,7 +17,10 @@
 #include "human/autoresponder.h"
 #include "human/config.h"
 #include "human/core/json.h"
+#include "human/core/llm_purpose.h"
+#include "human/core/local_only_guard.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include "human/memory.h"
 #include "human/memory/proactive_decisions_repo.h" /* C5 Part A: decision log */
 #include "human/provider.h"
@@ -38,6 +41,11 @@ static atomic_bool g_warned_disabled = false;
 static atomic_bool g_warned_enabled = false;
 /* Guard for DND-gate diagnostic: alert when no config but gate fires */
 static atomic_bool g_warned_no_dnd_config = false;
+
+static const char *g_last_llm_caller = NULL;
+const char *hu_init_proposer_last_llm_caller_for_test(void) {
+    return g_last_llm_caller;
+}
 
 void hu_init_proposer_reset_warn_guards_for_test(void) {
 #if HU_IS_TEST
@@ -662,9 +670,13 @@ static hu_error_t init_proposer_call_llm(hu_allocator_t *alloc, struct hu_provid
     /* max_tokens 512, thinking_budget 0, json_object: see the comment above. */
     const hu_chat_oneshot_opts_t opts = {
         .temperature = 0.2, .max_tokens = 512, .json_object = true};
-    return hu_provider_chat_oneshot(alloc, provider, model, strlen(model), sys_prompt,
-                                    strlen(sys_prompt), user_msg, strlen(user_msg), &opts,
-                                    out_response, out_response_len);
+    /* Drafts are background work: X-HU-Priority: batch lets a reply jump them. */
+    hu_llm_purpose_t prev_purpose = hu_llm_purpose_set(HU_LLM_PURPOSE_PROACTIVE);
+    hu_error_t err = hu_provider_chat_oneshot(alloc, provider, model, strlen(model), sys_prompt,
+                                              strlen(sys_prompt), user_msg, strlen(user_msg), &opts,
+                                              out_response, out_response_len);
+    (void)hu_llm_purpose_set(prev_purpose);
+    return err;
 }
 
 /* 2026-05-26 issue-sweep — defense-in-depth fallback for truncated
@@ -789,7 +801,7 @@ hu_init_proposer_result_t hu_init_proposer_evaluate_decision(const hu_init_decis
     return HU_INIT_RESULT_FIRED;
 }
 
-hu_error_t hu_init_proposer_tick_with_provider(
+static hu_error_t init_proposer_tick_run(
     const struct hu_initiative_config *cfg, const struct hu_autoresponder_config *ar_cfg,
     int32_t tz_offset_seconds, struct hu_proactive_budget *budget, const struct hu_agent *agent,
     struct hu_provider *provider, hu_allocator_t *alloc, int64_t last_inbound_unix,
@@ -843,6 +855,7 @@ hu_error_t hu_init_proposer_tick_with_provider(
     static char user_msg[16384];
     hu_init_proposer_build_propose_prompt(&bundle, sys_prompt, sizeof(sys_prompt), user_msg,
                                           sizeof(user_msg));
+    g_last_llm_caller = hu_local_only_current_caller(); /* the tag this request carries */
 
 #if HU_IS_TEST
     /* Test builds: never make a real network call. Return SKIP so unit
@@ -890,8 +903,8 @@ hu_error_t hu_init_proposer_tick_with_provider(
         }
         preview[copy] = '\0';
         hu_log_warn("init_proposer", NULL,
-                    "response parse failed: err=%d response_len=%zu preview=%.*s%s", (int)perr,
-                    response_len, (int)copy, preview, response_len > copy ? "..." : "");
+                    "response parse failed: err=%d response_len=%zu preview=%s", (int)perr,
+                    response_len, HU_LOG_TEXT(preview, copy, 120));
         alloc->free(alloc->ctx, response, response_len + 1);
         if (out_result)
             *out_result = HU_INIT_RESULT_PARSE_ERROR;
@@ -904,9 +917,9 @@ hu_error_t hu_init_proposer_tick_with_provider(
 
     hu_log_info("init_proposer", NULL,
                 "LLM verdict: should_propose=%d confidence=%.3f draft_len=%zu result=%d "
-                "reason=%.*s",
+                "reason=%s",
                 decision.should_propose ? 1 : 0, decision.confidence, decision.draft_len,
-                (int)verdict, (int)decision.skip_reason_len, decision.skip_reason);
+                (int)verdict, HU_LOG_TEXT(decision.skip_reason, decision.skip_reason_len, 120));
 
     if (out_result)
         *out_result = verdict;
@@ -914,6 +927,22 @@ hu_error_t hu_init_proposer_tick_with_provider(
         memcpy(out_decision, &decision, sizeof(decision));
     return HU_OK;
 #endif
+}
+
+/* Tags the owner-initiative propose-model request "initiative" for local_only
+ * (the daemon calls this entry point directly; the _ex one tags "proactive"). */
+hu_error_t hu_init_proposer_tick_with_provider(
+    const struct hu_initiative_config *cfg, const struct hu_autoresponder_config *ar_cfg,
+    int32_t tz_offset_seconds, struct hu_proactive_budget *budget, const struct hu_agent *agent,
+    struct hu_provider *provider, hu_allocator_t *alloc, int64_t last_inbound_unix,
+    int64_t now_unix, int64_t *last_tick_unix_inout, uint64_t *tick_id_inout,
+    hu_init_proposer_result_t *out_result, hu_init_decision_t *out_decision) {
+    const char *lo_prev = hu_local_only_enter("initiative"); /* keeps an outer "proactive" */
+    hu_error_t err = init_proposer_tick_run(
+        cfg, ar_cfg, tz_offset_seconds, budget, agent, provider, alloc, last_inbound_unix, now_unix,
+        last_tick_unix_inout, tick_id_inout, out_result, out_decision);
+    (void)hu_local_only_set_caller(lo_prev);
+    return err;
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -1161,11 +1190,11 @@ size_t hu_init_proposer_format_ex_verdict(const hu_proactive_compose_inputs_t *i
     else
         n = snprintf(out, cap,
                      "LLM verdict (ex, channel=%.*s): should_propose=%d confidence=%.3f "
-                     "draft_len=%zu result=%d user_msg_bytes=%zu reason=%.*s",
+                     "draft_len=%zu result=%d user_msg_bytes=%zu reason=%s",
                      (int)inputs->channel_name_len,
                      inputs->channel_name ? inputs->channel_name : "", d->should_propose ? 1 : 0,
-                     d->confidence, d->draft_len, verdict, user_msg_bytes, (int)d->skip_reason_len,
-                     d->skip_reason);
+                     d->confidence, d->draft_len, verdict, user_msg_bytes,
+                     HU_LOG_TEXT(d->skip_reason, d->skip_reason_len, 120));
     if (n < 0)
         return 0;
     return (size_t)n < cap ? (size_t)n : cap - 1;
@@ -1216,13 +1245,14 @@ hu_init_proposer_result_t hu_init_proposer_evaluate_guard_outcome(int guard_outc
     }
 }
 
-hu_error_t hu_init_proposer_tick_with_provider_ex(
-    const struct hu_initiative_config *cfg, const struct hu_autoresponder_config *ar_cfg,
-    int32_t tz_offset_seconds, struct hu_proactive_budget *budget, const struct hu_agent *agent,
-    struct hu_provider *provider, hu_allocator_t *alloc,
-    const hu_proactive_compose_inputs_t *inputs, int64_t last_inbound_unix, int64_t now_unix,
-    int64_t *last_tick_unix_inout, uint64_t *tick_id_inout, hu_init_proposer_result_t *out_result,
-    hu_init_decision_t *out_decision) {
+static hu_error_t
+init_proposer_tick_ex_run(const struct hu_initiative_config *cfg,
+                          const struct hu_autoresponder_config *ar_cfg, int32_t tz_offset_seconds,
+                          struct hu_proactive_budget *budget, const struct hu_agent *agent,
+                          struct hu_provider *provider, hu_allocator_t *alloc,
+                          const hu_proactive_compose_inputs_t *inputs, int64_t last_inbound_unix,
+                          int64_t now_unix, int64_t *last_tick_unix_inout, uint64_t *tick_id_inout,
+                          hu_init_proposer_result_t *out_result, hu_init_decision_t *out_decision) {
     /* AC-6 backwards compatibility: inputs=NULL → identical to the
      * original function. T2-T8 will land additional behavior; T1 is
      * pure addition. */
@@ -1363,8 +1393,8 @@ hu_error_t hu_init_proposer_tick_with_provider_ex(
                         decision.draft_len);
         else
             hu_log_info("init_proposer", NULL,
-                        "FIRED draft rejected: repeats a check-in from the last 14 days (%.60s)",
-                        decision.draft);
+                        "FIRED draft rejected: repeats a check-in from the last 14 days (%s)",
+                        HU_LOG_TEXT(decision.draft, decision.draft_len, 60));
     }
 
     {
@@ -1395,6 +1425,22 @@ hu_error_t hu_init_proposer_tick_with_provider_ex(
                                   msg_ref_buf[0] ? msg_ref_buf : NULL, now_unix);
     return HU_OK;
 #endif
+}
+
+/* Tags every model request of a proactive tick "proactive" for local_only. */
+hu_error_t hu_init_proposer_tick_with_provider_ex(
+    const struct hu_initiative_config *cfg, const struct hu_autoresponder_config *ar_cfg,
+    int32_t tz_offset_seconds, struct hu_proactive_budget *budget, const struct hu_agent *agent,
+    struct hu_provider *provider, hu_allocator_t *alloc,
+    const hu_proactive_compose_inputs_t *inputs, int64_t last_inbound_unix, int64_t now_unix,
+    int64_t *last_tick_unix_inout, uint64_t *tick_id_inout, hu_init_proposer_result_t *out_result,
+    hu_init_decision_t *out_decision) {
+    const char *lo_prev = hu_local_only_set_caller("proactive");
+    hu_error_t err = init_proposer_tick_ex_run(
+        cfg, ar_cfg, tz_offset_seconds, budget, agent, provider, alloc, inputs, last_inbound_unix,
+        now_unix, last_tick_unix_inout, tick_id_inout, out_result, out_decision);
+    (void)hu_local_only_set_caller(lo_prev);
+    return err;
 }
 
 /* Content words of a check-in: lowercased letters, apostrophes dropped,

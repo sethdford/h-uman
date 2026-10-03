@@ -182,6 +182,12 @@ if [[ "$SKIP_INSTALL" == "false" ]]; then
     trap - EXIT
 fi
 
+# ── Calendar free/busy helper (commitment guard) ─────────────────────────
+# Best effort: a missing helper only makes HU_COMMITMENT_GUARD read
+# calendar=unknown. Never fails the install. docs/guides/commitment-guard.md.
+"$ROOT/tools/calendar-free-busy/build.sh" "$PREFIX/bin" ||
+    echo "warn: calendar helper not built; the commitment guard will read calendar=unknown" >&2
+
 # ── Render / update launchd plist ────────────────────────────────────────
 # Snapshot operator-set EnvironmentVariables BEFORE the heredoc overwrites the
 # plist. The template below only writes the base infra env (HOME/PATH/HU_DEBUG/

@@ -3,6 +3,7 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/log.h"
+#include "human/core/post_send_defer.h"
 #include "human/core/string.h"
 #include "human/memory.h"
 #include "human/platform.h"
@@ -15,6 +16,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "human/memory/confidence_repo.h"
 #include "human/memory/encrypted_store.h"
 #include "human/memory/entropy_gate.h"
 #include "human/memory/graph_index.h"
@@ -675,16 +677,8 @@ static const char *impl_name(void *ctx) {
 /* Embed one stored row into the semantic index. A failure here is logged and
  * NOT propagated: the row is stored; the vector is a derived index that the
  * reindex path can rebuild. */
-static void semantic_index_row(hu_sqlite_memory_t *self, const char *key, size_t key_len,
-                               const char *content, size_t content_len) {
-    if (!self || !self->sem_embedder || !self->sem_embedder->vtable || !self->sem_store ||
-        !self->sem_store->vtable || !key || key_len == 0 || !content || content_len == 0)
-        return;
-    /* Index policy: episodic "experience:" rows are stored (keyword recall,
-     * experience_log) but never embedded — they are harness scaffolding, not
-     * memories about the contact (semantic_recall.h). */
-    if (!hu_semantic_recall_key_is_indexable(key, key_len))
-        return;
+static void semantic_index_row_now(hu_sqlite_memory_t *self, const char *key, size_t key_len,
+                                   const char *content, size_t content_len) {
     hu_embedding_t emb = {0};
     hu_error_t err = self->sem_embedder->vtable->embed(self->sem_embedder->ctx, self->alloc,
                                                        content, content_len, &emb);
@@ -699,6 +693,67 @@ static void semantic_index_row(hu_sqlite_memory_t *self, const char *key, size_t
         hu_log_warn("memory.semantic", NULL, "vector insert failed for key %.*s: %s", (int)key_len,
                     key, hu_error_string(err));
     self->alloc->free(self->alloc->ctx, emb.values, emb.dim * sizeof(float));
+}
+
+/* HU_POST_SEND_DEFER (core/post_send_defer.h): the embedding of a row stored
+ * during a reply turn runs after the send. The row itself is stored now. */
+typedef struct sem_index_job {
+    hu_sqlite_memory_t *self;
+    char *key;
+    size_t key_len;
+    char *content;
+    size_t content_len;
+} sem_index_job_t;
+
+static void sem_index_job_run(void *arg) {
+    sem_index_job_t *j = (sem_index_job_t *)arg;
+    semantic_index_row_now(j->self, j->key, j->key_len, j->content, j->content_len);
+}
+
+static void sem_index_job_free(void *arg) {
+    sem_index_job_t *j = (sem_index_job_t *)arg;
+    hu_allocator_t *a = j->self->alloc;
+    a->free(a->ctx, j->key, j->key_len + 1);
+    a->free(a->ctx, j->content, j->content_len + 1);
+    a->free(a->ctx, j, sizeof(*j));
+}
+
+static bool semantic_index_row_defer(hu_sqlite_memory_t *self, const char *key, size_t key_len,
+                                     const char *content, size_t content_len) {
+    if (!hu_post_send_defer_armed())
+        return false;
+    sem_index_job_t *j = (sem_index_job_t *)self->alloc->alloc(self->alloc->ctx, sizeof(*j));
+    if (!j)
+        return false;
+    j->self = self;
+    j->key = hu_strndup(self->alloc, key, key_len);
+    j->key_len = key_len;
+    j->content = hu_strndup(self->alloc, content, content_len);
+    j->content_len = content_len;
+    if (j->key && j->content &&
+        hu_post_send_defer_offer(HU_POST_SEND_JOB_EMBED, sem_index_job_run, sem_index_job_free, j))
+        return true;
+    if (j->key)
+        self->alloc->free(self->alloc->ctx, j->key, key_len + 1);
+    if (j->content)
+        self->alloc->free(self->alloc->ctx, j->content, content_len + 1);
+    self->alloc->free(self->alloc->ctx, j, sizeof(*j));
+    return false;
+}
+
+static void semantic_index_row(hu_sqlite_memory_t *self, const char *key, size_t key_len,
+                               const char *content, size_t content_len) {
+    if (!self || !self->sem_embedder || !self->sem_embedder->vtable || !self->sem_store ||
+        !self->sem_store->vtable || !key || key_len == 0 || !content || content_len == 0)
+        return;
+    /* Index policy: episodic "experience:" rows are stored (keyword recall,
+     * experience_log) but never embedded — they are harness scaffolding, not
+     * memories about the contact (semantic_recall.h). */
+    if (!hu_semantic_recall_key_is_indexable(key, key_len))
+        return;
+    if (semantic_index_row_defer(self, key, key_len, content, content_len))
+        return;
+    semantic_index_row_now(self, key, key_len, content, content_len);
 }
 
 static hu_error_t impl_store(void *ctx, const char *key, size_t key_len, const char *content,
@@ -768,6 +823,7 @@ static hu_error_t impl_store(void *ctx, const char *key, size_t key_len, const c
 
     if (rc != SQLITE_DONE)
         return HU_ERR_MEMORY_STORE;
+    hu_confidence_repo_stamp(self->db, key, key_len, session_id, session_id_len);
 
     /* Feed into MAGMA graph index for multi-dimensional reranking */
     if (self->graph_initialized && content && content_len > 0) {
@@ -823,6 +879,7 @@ static hu_error_t impl_store_ex(void *ctx, const char *key, size_t key_len, cons
     hu_str_free(self->alloc, id);
     if (rc != SQLITE_DONE)
         return HU_ERR_MEMORY_STORE;
+    hu_confidence_repo_stamp(self->db, key, key_len, session_id, session_id_len);
 
     if (self->graph_initialized && content && content_len > 0) {
         (void)hu_graph_index_add(&self->graph_index, key, key_len, content, content_len,
@@ -1853,6 +1910,10 @@ hu_memory_t hu_sqlite_memory_create(hu_allocator_t *alloc, const char *db_path) 
      * memory-v2-design.md §4.1): additive typed columns + fired -> status. */
     if (hu_prospective_repo_ensure_schema(db) != HU_OK)
         hu_log_warn("memory.sqlite", NULL, "prospective_memories v2 migration failed");
+    /* Confidence boundary provenance (confidence_repo.h): source_contact +
+     * share_level, backfilled conservatively. Metadata only. */
+    if (hu_confidence_repo_ensure_schema(db) < 0)
+        hu_log_warn("memory.sqlite", NULL, "memories provenance migration failed");
 
     hu_sqlite_memory_t *self =
         (hu_sqlite_memory_t *)alloc->alloc(alloc->ctx, sizeof(hu_sqlite_memory_t));

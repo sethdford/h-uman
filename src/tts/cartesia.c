@@ -3,6 +3,7 @@
 #include "human/core/error.h"
 #include "human/core/http.h"
 #include "human/core/json.h"
+#include "human/core/local_only_guard.h"
 #include "human/core/privacy.h"
 #include "human/core/process_util.h"
 #include <stdio.h>
@@ -204,6 +205,10 @@ hu_error_t hu_cartesia_tts_synthesize(hu_allocator_t *alloc, const char *api_key
      * voice_privacy_active gate in hu_voice_tts. Block before mock or network. */
     if (hu_privacy_enforced())
         return HU_ERR_NOT_SUPPORTED;
+    /* local_only: reply text -> audio only when "tts:cartesia" is allowed. */
+    hu_error_t lo = hu_local_only_check_request("https://api.cartesia.ai/tts/bytes", NULL, 0);
+    if (lo != HU_OK)
+        return lo;
 
 #if HU_IS_TEST
     (void)output_format;
@@ -304,6 +309,11 @@ hu_error_t hu_cartesia_tts_synthesize(hu_allocator_t *alloc, const char *api_key
     /* Privacy kill-switch parity with the HU_ENABLE_CARTESIA build. */
     if (hu_privacy_enforced())
         return HU_ERR_NOT_SUPPORTED;
+    {
+        hu_error_t lo = hu_local_only_check_request("https://api.cartesia.ai/tts/bytes", NULL, 0);
+        if (lo != HU_OK)
+            return lo;
+    }
     static const unsigned char mock_header[4] = {0xFF, 0xFB, 0x90, 0x00};
     size_t mock_len = 4 * 100;
     unsigned char *mock = (unsigned char *)alloc->alloc(alloc->ctx, mock_len);
@@ -367,6 +377,12 @@ hu_error_t hu_cartesia_stt_transcribe(hu_allocator_t *alloc, const char *api_key
         return HU_ERR_INVALID_ARGUMENT;
     if (!audio_path || audio_path[0] == '\0')
         return HU_ERR_INVALID_ARGUMENT;
+    /* local_only: inbound audio -> text only when "stt:cartesia" is allowed. */
+    {
+        hu_error_t lo = hu_local_only_check_request("https://api.cartesia.ai/stt", NULL, 0);
+        if (lo != HU_OK)
+            return lo;
+    }
 
 #if HU_IS_TEST
     (void)api_key;

@@ -191,8 +191,8 @@ bool hu_daemon_outbound_final_gates_clear(hu_allocator_t *alloc, const char *tex
          * own reason, so an outage is not mistaken for flagged content. */
         if (hu_moderation_check(alloc, text, text_len, &mod) != HU_OK)
             why = "moderation_error";
-        else if (mod.flagged)
-            why = "moderation";
+        else if (mod.violence || mod.hate || mod.sexual)
+            why = "moderation"; /* self-harm wording alone is the model offering help */
         else if (hu_companion_safety_check(alloc, text, text_len, NULL, 0, &cs) != HU_OK)
             why = "companion_safety_error";
         else if (cs.flagged)

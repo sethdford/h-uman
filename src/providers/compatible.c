@@ -2,6 +2,7 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/json.h"
+#include "human/core/llm_purpose.h"
 #include "human/core/log.h"
 #include "human/core/string.h"
 #include "human/provider.h"
@@ -49,6 +50,23 @@
 #if !HU_IS_TEST
 static pthread_mutex_t g_compatible_chat_lock = PTHREAD_MUTEX_INITIALIZER;
 #endif
+
+/* X-HU-Purpose, plus X-HU-Priority: batch for background work, for a request
+ * made now on this thread (llm_purpose.h owns the purpose -> priority map).
+ * Test builds keep a copy so the suite can assert what the wire carries. */
+#if HU_IS_TEST
+static _Thread_local char s_test_last_headers[128];
+const char *hu_compatible_test_last_headers(void) {
+    return s_test_last_headers;
+}
+#endif
+static const char *compatible_request_headers(char *buf, size_t cap) {
+    size_t n = hu_llm_purpose_headers(hu_llm_purpose_current(), buf, cap);
+#if HU_IS_TEST
+    (void)snprintf(s_test_last_headers, sizeof(s_test_last_headers), "%s", buf);
+#endif
+    return n > 0 ? buf : NULL;
+}
 
 typedef struct hu_compatible_ctx {
     char *api_key;
@@ -394,8 +412,11 @@ static hu_error_t compatible_chat(void *ctx, hu_allocator_t *alloc,
     hu_compatible_ctx_t *cc = (hu_compatible_ctx_t *)ctx;
     if (!cc || !request || !out)
         return HU_ERR_INVALID_ARGUMENT;
+    char purpose_hdr[128];
+    const char *extra_headers = compatible_request_headers(purpose_hdr, sizeof(purpose_hdr));
 
 #if HU_IS_TEST
+    (void)extra_headers;
     (void)model;
     (void)model_len;
     (void)temperature;
@@ -475,8 +496,8 @@ static hu_error_t compatible_chat(void *ctx, hu_allocator_t *alloc,
     hu_http_request_opts_t http_opts;
     hu_compatible_request_opts_for_url(url_buf, (size_t)n, &http_opts);
     pthread_mutex_lock(&g_compatible_chat_lock);
-    err = hu_provider_http_post_json_opts(alloc, url_buf, auth, NULL, body, body_len, &http_opts,
-                                          &parsed);
+    err = hu_provider_http_post_json_opts(alloc, url_buf, auth, extra_headers, body, body_len,
+                                          &http_opts, &parsed);
     pthread_mutex_unlock(&g_compatible_chat_lock);
     alloc->free(alloc->ctx, body, body_len);
     if (err != HU_OK) {
@@ -971,17 +992,6 @@ static bool request_has_media(const hu_chat_request_t *req) {
     return false;
 }
 
-/* Task 10 (2026-09-01): the serving queue was 99.8% internal machinery. The
- * mlx-server admits requests tagged `X-HU-Priority: live` ahead of batch
- * work; the daemon process sets HU_LLM_PRIORITY=live in its launchd env, the
- * judges/arena/proposer scripts do not. Unset = no header = batch. */
-__attribute__((unused)) static const char *compatible_priority_header(void) {
-    const char *p = getenv("HU_LLM_PRIORITY");
-    if (p && strcmp(p, "live") == 0)
-        return "X-HU-Priority: live\r\n";
-    return NULL;
-}
-
 static hu_error_t compatible_stream_chat(void *ctx, hu_allocator_t *alloc,
                                          const hu_chat_request_t *request, const char *model,
                                          size_t model_len, double temperature,
@@ -1162,9 +1172,11 @@ static hu_error_t compatible_stream_chat(void *ctx, hu_allocator_t *alloc,
      * MLX upstream. See g_compatible_chat_lock declaration. The lock is
      * held for the duration of the stream (covers SSE keep-alive); other
      * iMessages dispatched in parallel will wait their turn. */
+    char purpose_hdr[128];
+    const char *extra_headers = compatible_request_headers(purpose_hdr, sizeof(purpose_hdr));
     pthread_mutex_lock(&g_compatible_chat_lock);
-    err = hu_http_post_json_stream(alloc, url_buf, auth, compatible_priority_header(), body,
-                                   body_len, compatible_stream_write_cb, &sctx);
+    err = hu_http_post_json_stream(alloc, url_buf, auth, extra_headers, body, body_len,
+                                   compatible_stream_write_cb, &sctx);
     pthread_mutex_unlock(&g_compatible_chat_lock);
     hu_provider_sse_parser_deinit(&sctx.parser);
     alloc->free(alloc->ctx, body, body_len);
@@ -1347,19 +1359,88 @@ static const hu_provider_vtable_t compatible_vtable = {
     .stream_chat = compatible_stream_chat,
 };
 
-static bool compatible_url_is_loopback(const char *url, size_t url_len) {
-    static const char *const prefixes[] = {"http://127.0.0.1", "http://localhost",
-                                           "https://127.0.0.1", "https://localhost"};
-    for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); i++) {
-        size_t plen = strlen(prefixes[i]);
-        if (url_len < plen || strncmp(url, prefixes[i], plen) != 0)
-            continue;
-        /* host must end here: "localhost" is not "localhost.example" */
-        char next = url_len > plen ? url[plen] : '\0';
-        if (next == '\0' || next == ':' || next == '/')
-            return true;
+static bool ascii_ieq(const char *a, size_t n, const char *lit) {
+    if (strlen(lit) != n)
+        return false;
+    for (size_t i = 0; i < n; i++) {
+        char c = a[i];
+        if (c >= 'A' && c <= 'Z')
+            c = (char)(c - 'A' + 'a');
+        if (c != lit[i])
+            return false;
     }
-    return false;
+    return true;
+}
+
+/* 127.0.0.0/8 as a strict dotted quad: four 1-3 digit octets, each <= 255,
+ * no leading zeros. */
+static bool host_is_ipv4_loopback(const char *h, size_t n) {
+    unsigned oct[4];
+    size_t k = 0, i = 0;
+    while (k < 4) {
+        size_t start = i;
+        unsigned v = 0;
+        while (i < n && h[i] >= '0' && h[i] <= '9' && i - start < 3)
+            v = v * 10 + (unsigned)(h[i++] - '0');
+        size_t digits = i - start;
+        if (digits == 0 || v > 255 || (digits > 1 && h[start] == '0'))
+            return false;
+        oct[k++] = v;
+        if (k < 4) {
+            if (i >= n || h[i] != '.')
+                return false;
+            i++;
+        }
+    }
+    return i == n && oct[0] == 127;
+}
+
+/* Real host extraction, not a prefix test: "http://127.0.0.1:8080@evil.com/"
+ * names the host evil.com. Scheme http/https required; userinfo and port
+ * stripped; host must be 127/8, localhost or [::1] exactly. */
+bool hu_compatible_url_is_loopback(const char *url, size_t url_len) {
+    if (!url)
+        return false;
+    size_t p;
+    if (url_len >= 7 && ascii_ieq(url, 7, "http://"))
+        p = 7;
+    else if (url_len >= 8 && ascii_ieq(url, 8, "https://"))
+        p = 8;
+    else
+        return false;
+    size_t end = p;
+    while (end < url_len && url[end] != '/' && url[end] != '?' && url[end] != '#')
+        end++;
+    size_t h = p; /* userinfo ends at the authority's last '@' */
+    for (size_t i = p; i < end; i++)
+        if (url[i] == '@')
+            h = i + 1;
+    size_t host_end, port_at;
+    if (h < end && url[h] == '[') {
+        size_t close = h;
+        while (close < end && url[close] != ']')
+            close++;
+        if (close >= end || !ascii_ieq(url + h + 1, close - h - 1, "::1"))
+            return false;
+        host_end = close + 1;
+        port_at = host_end;
+    } else {
+        host_end = h;
+        while (host_end < end && url[host_end] != ':')
+            host_end++;
+        port_at = host_end;
+        if (!ascii_ieq(url + h, host_end - h, "localhost") &&
+            !host_is_ipv4_loopback(url + h, host_end - h))
+            return false;
+    }
+    if (port_at == end)
+        return true;
+    if (url[port_at] != ':' || port_at + 1 == end)
+        return false;
+    for (size_t i = port_at + 1; i < end; i++)
+        if (url[i] < '0' || url[i] > '9')
+            return false;
+    return true;
 }
 
 void hu_compatible_request_opts_for_url(const char *url, size_t url_len,
@@ -1369,7 +1450,7 @@ void hu_compatible_request_opts_for_url(const char *url, size_t url_len,
     memset(out, 0, sizeof(*out));
     if (!url || url_len == 0)
         return;
-    if (compatible_url_is_loopback(url, url_len))
+    if (hu_compatible_url_is_loopback(url, url_len))
         out->timeout_secs = HU_COMPATIBLE_LOCAL_TIMEOUT_SECS;
 }
 
@@ -1377,7 +1458,7 @@ bool hu_compatible_is_loopback(const hu_provider_t *p) {
     if (!p || p->vtable != &compatible_vtable || !p->ctx)
         return false;
     const hu_compatible_ctx_t *cc = (const hu_compatible_ctx_t *)p->ctx;
-    return cc->base_url && compatible_url_is_loopback(cc->base_url, cc->base_url_len);
+    return cc->base_url && hu_compatible_url_is_loopback(cc->base_url, cc->base_url_len);
 }
 
 hu_error_t hu_compatible_create(hu_allocator_t *alloc, const char *api_key, size_t api_key_len,

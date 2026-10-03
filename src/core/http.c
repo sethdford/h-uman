@@ -1,6 +1,7 @@
 #include "human/core/http.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/local_only_guard.h"
 #include "human/core/log.h"
 #include <limits.h>
 #include <stdio.h>
@@ -78,6 +79,14 @@ static hu_error_t hu_http_get_impl(hu_allocator_t *alloc, const char *url, const
     return HU_OK;
 }
 
+/* Extra headers of the last mock POST, so tests can assert what the wire
+ * request would have carried (e.g. X-HU-Purpose / X-HU-Priority). */
+static _Thread_local char s_test_last_extra_headers[512];
+
+const char *hu_http_test_last_extra_headers(void) {
+    return s_test_last_extra_headers;
+}
+
 static hu_error_t hu_http_post_json_impl(hu_allocator_t *alloc, const char *url,
                                          const char *auth_header, const char *extra_headers,
                                          const char *json_body, size_t json_body_len,
@@ -85,10 +94,11 @@ static hu_error_t hu_http_post_json_impl(hu_allocator_t *alloc, const char *url,
                                          hu_http_response_t *out) {
     (void)url;
     (void)auth_header;
-    (void)extra_headers;
     (void)json_body;
     (void)json_body_len;
     (void)opts;
+    (void)snprintf(s_test_last_extra_headers, sizeof(s_test_last_extra_headers), "%s",
+                   extra_headers ? extra_headers : "");
 
     const char *mock =
         "{\"choices\":[{\"message\":{\"content\":\"Hello from mock HTTP\"}}],"
@@ -574,6 +584,11 @@ hu_error_t hu_http_post_json_opts(hu_allocator_t *alloc, const char *url, const 
         memset(out, 0, sizeof(*out));
         return HU_ERR_INVALID_ARGUMENT;
     }
+    hu_error_t lo = hu_local_only_check_request(url, json_body, json_body_len);
+    if (lo != HU_OK) {
+        memset(out, 0, sizeof(*out));
+        return lo;
+    }
     return hu_http_post_json_impl(alloc, url, auth_header, extra_headers, json_body, json_body_len,
                                   opts, out);
 }
@@ -599,9 +614,9 @@ hu_error_t hu_http_get_ex(hu_allocator_t *alloc, const char *url, const char *ex
     return hu_http_get_ex_impl(alloc, url, extra_headers, out);
 }
 
-hu_error_t hu_http_request(hu_allocator_t *alloc, const char *url, const char *method,
-                           const char *extra_headers, const char *body, size_t body_len,
-                           hu_http_response_t *out) {
+static hu_error_t http_request_transport(hu_allocator_t *alloc, const char *url, const char *method,
+                                         const char *extra_headers, const char *body,
+                                         size_t body_len, hu_http_response_t *out) {
     if (!alloc || !url || !method || !out)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -677,9 +692,9 @@ hu_error_t hu_http_get_ex(hu_allocator_t *alloc, const char *url, const char *ex
     return HU_ERR_NOT_SUPPORTED;
 }
 
-hu_error_t hu_http_request(hu_allocator_t *alloc, const char *url, const char *method,
-                           const char *extra_headers, const char *body, size_t body_len,
-                           hu_http_response_t *out) {
+static hu_error_t http_request_transport(hu_allocator_t *alloc, const char *url, const char *method,
+                                         const char *extra_headers, const char *body,
+                                         size_t body_len, hu_http_response_t *out) {
     (void)alloc;
     (void)url;
     (void)method;
@@ -708,20 +723,22 @@ hu_error_t hu_http_patch_json(hu_allocator_t *alloc, const char *url, const char
 }
 
 #if defined(HU_HTTP_CURL) && !HU_IS_TEST
-hu_error_t hu_http_post_json_stream(hu_allocator_t *alloc, const char *url, const char *auth_header,
-                                    const char *extra_headers, const char *json_body,
-                                    size_t json_body_len, hu_http_stream_cb callback,
-                                    void *userdata) {
+static hu_error_t http_post_json_stream_transport(hu_allocator_t *alloc, const char *url,
+                                                  const char *auth_header,
+                                                  const char *extra_headers, const char *json_body,
+                                                  size_t json_body_len, hu_http_stream_cb callback,
+                                                  void *userdata) {
     if (!hu_http_body_within_cap(url, json_body_len))
         return HU_ERR_INVALID_ARGUMENT;
     return hu_http_post_json_stream_impl(alloc, url, auth_header, extra_headers, json_body,
                                          json_body_len, callback, userdata);
 }
 #else
-hu_error_t hu_http_post_json_stream(hu_allocator_t *alloc, const char *url, const char *auth_header,
-                                    const char *extra_headers, const char *json_body,
-                                    size_t json_body_len, hu_http_stream_cb callback,
-                                    void *userdata) {
+static hu_error_t http_post_json_stream_transport(hu_allocator_t *alloc, const char *url,
+                                                  const char *auth_header,
+                                                  const char *extra_headers, const char *json_body,
+                                                  size_t json_body_len, hu_http_stream_cb callback,
+                                                  void *userdata) {
     (void)alloc;
     (void)url;
     (void)auth_header;
@@ -733,6 +750,31 @@ hu_error_t hu_http_post_json_stream(hu_allocator_t *alloc, const char *url, cons
     return HU_ERR_NOT_SUPPORTED;
 }
 #endif
+
+/* Local-only backstop (core/local_only_guard.h): every request that leaves
+ * through these entry points is checked before the transport. In OFF the
+ * check is a no-op; non-model URLs (feeds, channel APIs, OAuth) always pass. */
+hu_error_t hu_http_request(hu_allocator_t *alloc, const char *url, const char *method,
+                           const char *extra_headers, const char *body, size_t body_len,
+                           hu_http_response_t *out) {
+    if (out)
+        memset(out, 0, sizeof(*out));
+    hu_error_t lo = hu_local_only_check_request(url, body, body_len);
+    if (lo != HU_OK)
+        return lo;
+    return http_request_transport(alloc, url, method, extra_headers, body, body_len, out);
+}
+
+hu_error_t hu_http_post_json_stream(hu_allocator_t *alloc, const char *url, const char *auth_header,
+                                    const char *extra_headers, const char *json_body,
+                                    size_t json_body_len, hu_http_stream_cb callback,
+                                    void *userdata) {
+    hu_error_t lo = hu_local_only_check_request(url, json_body, json_body_len);
+    if (lo != HU_OK)
+        return lo;
+    return http_post_json_stream_transport(alloc, url, auth_header, extra_headers, json_body,
+                                           json_body_len, callback, userdata);
+}
 
 void hu_http_response_free(hu_allocator_t *alloc, hu_http_response_t *resp) {
     if (!resp || !alloc)

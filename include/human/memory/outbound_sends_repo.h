@@ -6,7 +6,9 @@
  * DELIVERED, so offline measurement can tell h-uman's chat.db rows from
  * Seth's own (both come from Seth's account). Fed by the iMessage send
  * observer via src/daemon/daemon_send_provenance.c; read by
- * scripts/eval_conversation_quality.py.
+ * scripts/eval_conversation_quality.py (message kinds) and
+ * scripts/learned_style_v2.py (kind 'tapback', to drop the twin's own
+ * reactions from the learned behaviour profile).
  *
  * Recall (memory) bounded context: the legal home for a raw sqlite3 include
  * (sqlite-includer-ratchet.md). Same free-function shape as
@@ -22,9 +24,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define HU_OUTBOUND_SEND_KIND_TEXT  "text"
-#define HU_OUTBOUND_SEND_KIND_MEDIA "media"
-#define HU_OUTBOUND_SEND_KIND_REPLY "reply"
+#define HU_OUTBOUND_SEND_KIND_TEXT    "text"
+#define HU_OUTBOUND_SEND_KIND_MEDIA   "media"
+#define HU_OUTBOUND_SEND_KIND_REPLY   "reply"
+#define HU_OUTBOUND_SEND_KIND_TAPBACK "tapback"
 
 #ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>
@@ -33,7 +36,10 @@
 extern "C" {
 #endif
 
-/* Idempotent CREATE TABLE/INDEX IF NOT EXISTS; cheap no-op after the first. */
+/* Idempotent CREATE TABLE/INDEX IF NOT EXISTS. A table created before
+ * 'tapback' joined the kind CHECK is rebuilt once under the new CHECK, every
+ * row and id kept (SQLite cannot ALTER a CHECK); after that it is a cheap
+ * no-op. */
 hu_error_t hu_outbound_sends_repo_ensure_schema(sqlite3 *db);
 
 /* Insert one delivered send.
@@ -55,6 +61,20 @@ hu_error_t hu_outbound_sends_repo_count(sqlite3 *db, int64_t *out_count);
 /* Newest delivered send to `contact` (unix ms); *have false when none. */
 hu_error_t hu_outbound_sends_repo_last_sent_ms(sqlite3 *db, const char *contact, int64_t *out_ms,
                                                bool *have);
+
+/* DEF-8: did the DAEMON deliver chat.db row `target_rowid`? A contact's
+ * tapback can land on any is_from_me row — Seth's own typing included — so
+ * a reaction is attributed to the daemon only when a recorded send for
+ * `contact` has its chat.db boundary in [prev_own_rowid, target_rowid) (so
+ * the target is the first message of ours after it) and was delivered within
+ * slack_ms of the target's chat.db date. Tapback records never qualify
+ * (the boundary skips reaction rows). *out_sent_at_ms = that send's
+ * time. HU_ERR_NOT_FOUND when no recorded send qualifies. */
+hu_error_t hu_outbound_sends_repo_find_delivery(sqlite3 *db, const char *channel,
+                                                const char *contact, size_t contact_len,
+                                                int64_t target_rowid, int64_t prev_own_rowid,
+                                                int64_t target_sent_ms, int64_t slack_ms,
+                                                int64_t *out_sent_at_ms);
 
 #ifdef __cplusplus
 }

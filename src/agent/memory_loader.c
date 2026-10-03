@@ -4,6 +4,7 @@
 #include "human/core/error.h"
 #include "human/core/json.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include "human/core/string.h"
 #include "human/memory/personal_model.h"
 #include "human/memory/retrieval/adaptive.h"
@@ -17,6 +18,7 @@
 #include "human/memory/retrieval/strategy_learner.h"
 #endif
 #include "human/core/gate_mode.h"
+#include "human/memory/confidence_boundary.h"
 #include "human/memory/contact_insights_repo.h"
 #include <stdatomic.h>
 
@@ -99,8 +101,8 @@ static void append_contact_wiki(hu_memory_loader_t *loader, hu_gate_mode_t mode,
                      mode == HU_GATE_LIVE ? "live" : "shadow");
     if (mode == HU_GATE_SHADOW) {
         hu_log_info("wiki-head", NULL,
-                    "shadow: would add %zu bytes of page head for %.*s (prompt unchanged)",
-                    wiki_len, (int)session_id_len, session_id);
+                    "shadow: would add %zu bytes of page head for %s (prompt unchanged)", wiki_len,
+                    HU_LOG_WHO(session_id, session_id_len));
         return;
     }
     const size_t hdr_len = sizeof(k_wiki_header) - 1;
@@ -191,8 +193,8 @@ static const char *curiosity_gap_for(hu_memory_loader_t *loader, const char *que
     const char *line = hu_curiosity_gap_line(t);
     if (cg == HU_GATE_SHADOW) {
         hu_log_info("curiosity-gaps", NULL,
-                    "shadow: would offer topic=%d for %.*s (prompt unchanged)", (int)t,
-                    (int)(sid_len > 24 ? 24 : sid_len), sid);
+                    "shadow: would offer topic=%d for %s (prompt unchanged)", (int)t,
+                    HU_LOG_WHO(sid, sid_len));
         return NULL;
     }
     return line;
@@ -243,8 +245,8 @@ static void append_contact_insights(hu_memory_loader_t *loader, const char *quer
                      mode == HU_GATE_LIVE ? "live" : "shadow");
     if (mode == HU_GATE_SHADOW) {
         hu_log_info("insight-stream", NULL,
-                    "shadow: would add %zu bytes of insights for %.*s (prompt unchanged)",
-                    lines_len, (int)session_id_len, session_id);
+                    "shadow: would add %zu bytes of insights for %s (prompt unchanged)", lines_len,
+                    HU_LOG_WHO(session_id, session_id_len));
     } else {
         const size_t hdr_len = sizeof(k_insight_header) - 1;
         size_t block_len = hdr_len + lines_len + gap_len;
@@ -361,7 +363,8 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
                 if (hu_strategy_learner_create(loader->alloc, sl_db, &sl) == HU_OK) {
                     hu_query_category_t qcat =
                         hu_strategy_classify_query(query ? query : "", query_len);
-                    hu_retrieval_strategy_t learned = hu_strategy_learner_recommend(&sl, qcat);
+                    hu_retrieval_strategy_t learned =
+                        hu_strategy_learner_recommend_gated(&sl, qcat);
                     switch (learned) {
                     case HU_RSTRAT_KEYWORD:
                         qa.recommended_strategy = HU_ADAPTIVE_KEYWORD_ONLY;
@@ -402,9 +405,9 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
                         hu_strategy_learner_init_tables(&sl);
                         hu_query_category_t qcat =
                             hu_strategy_classify_query(query ? query : "", query_len);
-                        hu_strategy_learner_record(&sl, qcat, HU_RSTRAT_GRAPH,
-                                                   pe == HU_OK && planner_len > 0,
-                                                   (int64_t)time(NULL));
+                        hu_strategy_learner_record_gated(&sl, qcat, HU_RSTRAT_GRAPH,
+                                                         pe == HU_OK && planner_len > 0,
+                                                         (int64_t)time(NULL));
                         hu_strategy_learner_deinit(&sl);
                     }
                 }
@@ -470,8 +473,8 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
                             used_strat = HU_RSTRAT_HYBRID;
                             break;
                         }
-                        hu_strategy_learner_record(&sl, qcat, used_strat, count > 0,
-                                                   (int64_t)time(NULL));
+                        hu_strategy_learner_record_gated(&sl, qcat, used_strat, count > 0,
+                                                         (int64_t)time(NULL));
                         hu_strategy_learner_deinit(&sl);
                     }
                 }
@@ -552,6 +555,11 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
                                   ? hu_wiki_recall_cap(loader->max_context_chars, wiki_len)
                                   : loader->max_context_chars;
 
+    /* Confidence boundary (HU_CONFIDENCE_BOUNDARY): a global row another
+     * contact's conversation wrote (experience, promises) passes
+     * keep_contact_scope; this drops it in LIVE, counts it in SHADOW. */
+    count = hu_confidence_filter_entries(loader->memory, loader->alloc, HU_CB_PATH_SEMANTIC,
+                                         &entries, count, session_id, session_id_len);
     if (!entries || count == 0)
         goto supplement;
 

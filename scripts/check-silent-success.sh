@@ -65,7 +65,7 @@ BASELINE_TABLES=" ab_tests avoidance_patterns behavioral_feedback boundaries can
 # any NEW discard still fails. Override the table only for the guard's own
 # smoke test.
 DISCARD_BASELINE_FILES=" src/agent/inspiration.c src/app/main_wasi.c src/context/context_engine_rag.c src/daemon/daemon_followup_sched.c src/daemon/daemon_proactive.c "
-DISCARD_BASELINE_COUNTS="${HU_SILENT_SUCCESS_COUNTS:- src/daemon.c:15 }"
+DISCARD_BASELINE_COUNTS="${HU_SILENT_SUCCESS_COUNTS:- src/daemon.c:14 }"
 
 fail=0
 
@@ -120,7 +120,11 @@ for f in "${FILES[@]}"; do
   while IFS=: read -r ln text; do
     [ -z "$ln" ] && continue
     # Allowed: assigned, tested, explicitly voided, or a declaration/typedef.
-    echo "$text" | grep -qE '=[[:space:]]*[a-zA-Z_(]|if[[:space:]]*\(|while[[:space:]]*\(|return|\(void\)|\(\*send\)|hu_error_t[[:space:]]' && continue
+    echo "$text" | grep -qE '=[[:space:]]*[a-zA-Z_(]|if[[:space:]]*\(|while[[:space:]]*\(|return|\(void\)|\(\*send\)|hu_error_t[[:space:]]|HU_ASSERT' && continue
+    # Allowed: the right-hand side of an assignment clang-format wrapped onto its
+    # own line ("hu_error_t err =" / "x =" ends the previous line).
+    prev=$(sed -n "$((ln - 1))p" "$f")
+    echo "$prev" | grep -qE '=[[:space:]]*$' && continue
     hits=$((hits + 1))
     report="$report"$'\n'"FAIL[silent-success]: $f:$ln discards a send/store return value"$'\n'"  ${text:0:96}"
   done < <(grep -nE '\->(send|store|write)\(|\bhu_(conversation_sched_save|reaction_handler_handle_event)\(' "$f" 2>/dev/null | head -40)

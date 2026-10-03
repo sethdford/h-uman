@@ -2,8 +2,10 @@
  * Creates an in-memory SQLite database with the iMessage schema and seed data,
  * then runs the same queries used by imessage.c to catch schema/column drift. */
 #if HU_HAS_IMESSAGE && defined(HU_ENABLE_SQLITE)
+#include "human/channel.h"
 #include "human/channels/imessage.h"
 #include "human/channels/imessage_chat_kind.h"
+#include "human/channels/imessage_send_observer.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "test_framework.h"
@@ -12,6 +14,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 static const char *schema_sql = "CREATE TABLE handle ("
                                 "  ROWID INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -347,6 +350,109 @@ static void test_chatdb_history_query_returns_both_directions(void) {
     HU_ASSERT_TRUE(outbound > 0);
 
     sqlite3_finalize(stmt);
+    sqlite3_close(db);
+}
+
+/* The DM-only loader (HU_THREAD_CONTEXT) mirrors hu_imessage_chat_is_group:
+ * chat.style decides; participant count only when style is unknown. The
+ * shared loader (every other consumer) keeps its original handle join. */
+static const char *k_dm_fixture_sql =
+    "INSERT INTO handle (id) VALUES ('+15550000002');" /* handle 3 */
+    /* chat 2: style-43 group with the contact + handle 3 */
+    "INSERT INTO chat (guid, style) VALUES ('iMessage;+;chat-group-1', 43);"
+    "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (2, 1);"
+    "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (2, 3);"
+    "INSERT INTO message (guid, text, handle_id, date, is_from_me) "
+    "  VALUES ('G-1', 'group-only from contact', 1, 790000000000000000, 0);"
+    "INSERT INTO chat_message_join VALUES (2, (SELECT ROWID FROM message WHERE guid='G-1'));"
+    "INSERT INTO message (guid, text, handle_id, date, is_from_me) "
+    "  VALUES ('G-2', 'group-only from seth', 1, 790000001000000000, 1);"
+    "INSERT INTO chat_message_join VALUES (2, (SELECT ROWID FROM message WHERE guid='G-2'));"
+    /* chat 3: style-45 DM that lists TWO handles (phone + email of one person) */
+    "INSERT INTO chat (guid, style) VALUES ('iMessage;-;dm-two-handles', 45);"
+    "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (3, 1);"
+    "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (3, 3);"
+    "INSERT INTO message (guid, text, handle_id, date, is_from_me) "
+    "  VALUES ('D-45', 'dm45 two handles', 1, 790000003000000000, 0);"
+    "INSERT INTO chat_message_join VALUES (3, (SELECT ROWID FROM message WHERE guid='D-45'));"
+    /* chat 4: style-43 group whose only listed other participant is the contact */
+    "INSERT INTO chat (guid, style) VALUES ('iMessage;+;group-one-handle', 43);"
+    "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (4, 1);"
+    "INSERT INTO message (guid, text, handle_id, date, is_from_me) "
+    "  VALUES ('G-43', 'group43 one handle', 1, 790000004000000000, 0);"
+    "INSERT INTO chat_message_join VALUES (4, (SELECT ROWID FROM message WHERE guid='G-43'));"
+    /* chat 1 (style NULL, one handle) row from Seth stored with handle_id 0 */
+    "INSERT INTO message (guid, text, handle_id, date, is_from_me) "
+    "  VALUES ('D-0', 'dm reply with no handle', 0, 790000002000000000, 1);"
+    "INSERT INTO chat_message_join VALUES (1, (SELECT ROWID FROM message WHERE guid='D-0'));";
+
+static int history_rows_containing(sqlite3 *db, const char *sql, const char *needle) {
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
+        return -1;
+    sqlite3_bind_text(stmt, 1, "+15559999999", -1, NULL);
+    sqlite3_bind_int(stmt, 2, 50);
+    int hits = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        const char *t = (const char *)sqlite3_column_text(stmt, 1);
+        if (t && strstr(t, needle))
+            hits++;
+    }
+    sqlite3_finalize(stmt);
+    return hits;
+}
+
+static void test_chatdb_dm_history_style_decides(void) {
+    sqlite3 *db = open_fixture();
+    HU_ASSERT_NOT_NULL(db);
+    HU_ASSERT_EQ(sqlite3_exec(db, k_dm_fixture_sql, NULL, NULL, NULL), SQLITE_OK);
+    const char *sql = HU_IMESSAGE_SQL_DM_HISTORY;
+    HU_ASSERT_EQ(history_rows_containing(db, sql, "Hello there"), 1); /* NULL style, 1 handle */
+    HU_ASSERT_EQ(history_rows_containing(db, sql, "dm45 two handles"), 1);   /* style 45 wins */
+    HU_ASSERT_EQ(history_rows_containing(db, sql, "group43 one handle"), 0); /* style 43 wins */
+    HU_ASSERT_EQ(history_rows_containing(db, sql, "group-only"), 0);
+    HU_ASSERT_EQ(history_rows_containing(db, sql, "dm reply with no handle"), 1);
+    sqlite3_close(db);
+}
+
+/* Existing consumers are unchanged: the shared query is the pre-2026-10-01
+ * text, byte for byte, and still joins on the handle alone. */
+static void test_chatdb_shared_history_query_unchanged(void) {
+    static const char k_original[] =
+        "SELECT m.is_from_me, m.text, "
+        "  datetime(m.date/1000000000 + 978307200, 'unixepoch', 'localtime') as ts, "
+        "  (SELECT COUNT(*) FROM message_attachment_join maj "
+        "   JOIN attachment a ON maj.attachment_id = a.ROWID "
+        "   WHERE maj.message_id = m.ROWID AND a.filename IS NOT NULL "
+        "   AND (LOWER(a.filename) LIKE '%.mov' OR LOWER(a.filename) LIKE '%.mp4' "
+        "     OR LOWER(a.filename) LIKE '%.m4v')) > 0 AS has_video, "
+        "  (SELECT COUNT(*) FROM message_attachment_join maj2 "
+        "   JOIN attachment a2 ON maj2.attachment_id = a2.ROWID "
+        "   WHERE maj2.message_id = m.ROWID AND a2.filename IS NOT NULL "
+        "   AND (LOWER(a2.filename) LIKE '%.jpg' OR LOWER(a2.filename) LIKE '%.jpeg' "
+        "     OR LOWER(a2.filename) LIKE '%.png' OR LOWER(a2.filename) LIKE '%.heic' "
+        "     OR LOWER(a2.filename) LIKE '%.gif' OR LOWER(a2.filename) LIKE "
+        "'%.webp')) > 0 AS has_image, "
+        "  (SELECT COUNT(*) FROM message_attachment_join maj3 "
+        "   JOIN attachment a3 ON maj3.attachment_id = a3.ROWID "
+        "   WHERE maj3.message_id = m.ROWID AND a3.filename IS NOT NULL "
+        "   AND (LOWER(a3.filename) LIKE '%.caf' OR LOWER(a3.filename) LIKE '%.m4a' "
+        "     OR LOWER(a3.filename) LIKE '%.mp3' OR LOWER(a3.filename) LIKE '%.aac' "
+        "     OR LOWER(a3.filename) LIKE '%.opus')) > 0 AS has_audio, "
+        "  m.attributedBody, "
+        "  m.balloon_bundle_id, "
+        "  m.expressive_send_style_id "
+        "FROM message m "
+        "JOIN handle h ON m.handle_id = h.ROWID "
+        "WHERE h.id = ?1 AND m.associated_message_type = 0 "
+        "ORDER BY m.date DESC LIMIT ?2";
+    HU_ASSERT_STR_EQ(HU_IMESSAGE_SQL_HANDLE_HISTORY, k_original);
+    sqlite3 *db = open_fixture();
+    HU_ASSERT_NOT_NULL(db);
+    HU_ASSERT_EQ(sqlite3_exec(db, k_dm_fixture_sql, NULL, NULL, NULL), SQLITE_OK);
+    HU_ASSERT_EQ(history_rows_containing(db, HU_IMESSAGE_SQL_HANDLE_HISTORY, "group-only"), 2);
+    HU_ASSERT_EQ(history_rows_containing(db, HU_IMESSAGE_SQL_HANDLE_HISTORY, "dm reply with no"),
+                 0);
     sqlite3_close(db);
 }
 
@@ -721,6 +827,72 @@ static void test_chatdb_my_reaction_count_reads_the_real_db(void) {
     HU_ASSERT_EQ(hu_imessage_my_reaction_count(1), (int64_t)1);
     HU_ASSERT_EQ(hu_imessage_my_reaction_count(2), (int64_t)0);
 
+    if (saved[0])
+        setenv("HU_CHATDB", saved, 1);
+    else
+        unsetenv("HU_CHATDB");
+    sqlite3_close(db);
+    remove(path);
+}
+
+/* The tapback boundary is read on the react path before any tier runs, so a
+ * locked chat.db must not stall the reaction: the read gets one open and a
+ * ~100 ms busy budget, then gives up with -1 (unknown). The shared text-send
+ * open (3 retries + 3 s busy timeout) would hold a tapback ~3.7 s. */
+static int64_t g_bnd_prior = -2;
+static int g_bnd_calls;
+static void bnd_capture(void *user, const hu_imessage_sent_event_t *ev) {
+    (void)user;
+    g_bnd_prior = ev->prior_max_rowid;
+    g_bnd_calls++;
+}
+
+static int64_t bnd_mono_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+static void test_chatdb_tapback_boundary_gives_up_fast_on_locked_db(void) {
+    char path[512];
+    HU_ASSERT_TRUE(hu_test_tmppath(path, sizeof(path), "boundary_chat.db"));
+    remove(path);
+    sqlite3 *db = NULL;
+    HU_ASSERT_EQ(sqlite3_open(path, &db), SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_exec(db, schema_sql, NULL, NULL, NULL), SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_exec(db, seed_sql, NULL, NULL, NULL), SQLITE_OK);
+    const char *prev = getenv("HU_CHATDB");
+    char saved[512] = {0};
+    if (prev)
+        snprintf(saved, sizeof(saved), "%s", prev);
+    setenv("HU_CHATDB", path, 1);
+
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    HU_ASSERT_EQ(hu_imessage_create(&alloc, "+15559999999", 12, NULL, 0, &ch), HU_OK);
+    hu_imessage_send_observer_set(bnd_capture, NULL);
+    g_bnd_calls = 0;
+
+    /* Unlocked: the boundary is the fixture's latest from-me ROWID (MSG-002). */
+    HU_ASSERT_EQ(ch.vtable->react(ch.ctx, "+15559999999", 12, 1, HU_REACTION_HEART), HU_OK);
+    HU_ASSERT_EQ(g_bnd_calls, 1);
+    HU_ASSERT_EQ(g_bnd_prior, (int64_t)2);
+
+    /* Locked by another writer: the read gives up within its short budget. */
+    sqlite3 *locker = NULL;
+    HU_ASSERT_EQ(sqlite3_open(path, &locker), SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_exec(locker, "BEGIN EXCLUSIVE", NULL, NULL, NULL), SQLITE_OK);
+    int64_t t0 = bnd_mono_ms();
+    HU_ASSERT_EQ(ch.vtable->react(ch.ctx, "+15559999999", 12, 1, HU_REACTION_THUMBS_UP), HU_OK);
+    int64_t elapsed = bnd_mono_ms() - t0;
+    HU_ASSERT_EQ(g_bnd_calls, 2);
+    HU_ASSERT_EQ(g_bnd_prior, (int64_t)-1);
+    HU_ASSERT_TRUE(elapsed < 1000);
+    sqlite3_exec(locker, "ROLLBACK", NULL, NULL, NULL);
+    sqlite3_close(locker);
+
+    hu_imessage_send_observer_set(NULL, NULL);
+    hu_imessage_destroy(&ch);
     if (saved[0])
         setenv("HU_CHATDB", saved, 1);
     else
@@ -1177,6 +1349,8 @@ void run_imessage_chatdb_fixture_tests(void) {
     HU_RUN_TEST(test_chatdb_poll_query_returns_inbound);
     HU_RUN_TEST(test_chatdb_tapback_query_counts_reactions);
     HU_RUN_TEST(test_chatdb_history_query_returns_both_directions);
+    HU_RUN_TEST(test_chatdb_dm_history_style_decides);
+    HU_RUN_TEST(test_chatdb_shared_history_query_unchanged);
     HU_RUN_TEST(test_chatdb_attachment_join_works);
     HU_RUN_TEST(test_chatdb_chat_guid_lookup);
     HU_RUN_TEST(test_chatdb_max_rowid);
@@ -1196,6 +1370,7 @@ void run_imessage_chatdb_fixture_tests(void) {
     HU_RUN_TEST(test_chatdb_retracted_detection);
     HU_RUN_TEST(test_chatdb_edited_detection);
     HU_RUN_TEST(test_chatdb_no_sent_rowid_for_unknown_handle);
+    HU_RUN_TEST(test_chatdb_tapback_boundary_gives_up_fast_on_locked_db);
     HU_RUN_TEST(test_chatdb_optimized_poll_exists_and_inline_retract);
     HU_RUN_TEST(test_chatdb_unix_timestamp_conversion);
     HU_RUN_TEST(test_chatdb_group_chat_participant_count);

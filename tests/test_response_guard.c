@@ -2441,6 +2441,37 @@ static void dpo_path_for_day_returns_zero_on_tiny_buffer(void) {
         (size_t)0);
 }
 
+/* Replay-harness review (PR #594): the live logger built its path from $HOME,
+ * so a replay pointed at a scratch HU_STATE_DIR still appended guard
+ * rejections to the real ~/.human/training-data. It must follow the state dir. */
+static void dpo_log_path_follows_state_dir_not_home(void) {
+    char prev_home[1024] = "", prev_state[1024] = "";
+    const char *h = getenv("HOME"), *st = getenv("HU_STATE_DIR");
+    bool had_home = h != NULL, had_state = st != NULL;
+    snprintf(prev_home, sizeof(prev_home), "%s", h ? h : "");
+    snprintf(prev_state, sizeof(prev_state), "%s", st ? st : "");
+    setenv("HOME", "/nonexistent-home", 1);
+    setenv("HU_STATE_DIR", "/run/replay/state", 1);
+    char buf[512];
+    size_t n = hu_response_guard_dpo_log_path((int64_t)1779840000, buf, sizeof(buf));
+    char unset_buf[512];
+    unsetenv("HU_STATE_DIR");
+    size_t n2 = hu_response_guard_dpo_log_path((int64_t)1779840000, unset_buf, sizeof(unset_buf));
+    if (had_home)
+        setenv("HOME", prev_home, 1);
+    else
+        unsetenv("HOME");
+    if (had_state)
+        setenv("HU_STATE_DIR", prev_state, 1);
+    else
+        unsetenv("HU_STATE_DIR");
+    HU_ASSERT_TRUE(n > 0);
+    HU_ASSERT_STR_EQ(buf, "/run/replay/state/training-data/m3-dpo-rejections-2026-05-27.jsonl");
+    HU_ASSERT_TRUE(n2 > 0);
+    HU_ASSERT_STR_EQ(unset_buf,
+                     "/nonexistent-home/.human/training-data/m3-dpo-rejections-2026-05-27.jsonl");
+}
+
 /* ── Sprint 41 follow-up #4 — per-channel G9 disable list ─────────────── */
 
 static void g9_disabled_for_channel_returns_false_when_list_empty(void) {
@@ -2859,6 +2890,7 @@ void run_response_guard_tests(void) {
     HU_RUN_TEST(dpo_path_for_day_rolls_at_utc_midnight);
     HU_RUN_TEST(dpo_path_for_day_returns_zero_on_null_home);
     HU_RUN_TEST(dpo_path_for_day_returns_zero_on_tiny_buffer);
+    HU_RUN_TEST(dpo_log_path_follows_state_dir_not_home);
 
     /* Sprint 41 follow-up #4 — per-channel G9 disable list. */
     HU_RUN_TEST(g9_disabled_for_channel_returns_false_when_list_empty);

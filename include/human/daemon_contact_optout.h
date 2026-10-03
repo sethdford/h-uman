@@ -47,9 +47,8 @@ bool hu_contact_optout_is_suppressed_db(struct sqlite3 *db, const char *contact)
 bool hu_daemon_contact_optout_observe(struct hu_agent *agent, const char *contact,
                                       size_t contact_len, const char *text, size_t len);
 
-/* Proactive candidate loop: true ⇒ do not run the proposer for this contact.
- * Like the reachability pre-filter, never writes a proactive_decisions row —
- * a suppressed contact is not a candidate, so it must not inflate FIR. */
-bool hu_daemon_contact_optout_should_skip(struct hu_agent *agent, const char *contact);
+/* Enforcement lives in the unprompted gate stack (stage 1 of
+ * hu_unprompted_send_check, human/daemon/unprompted_gate.h), which every
+ * unprompted send path now passes — not only the proactive proposer. */
 
 #endif /* HU_DAEMON_CONTACT_OPTOUT_H */

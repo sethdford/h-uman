@@ -1,6 +1,8 @@
 #include "human/agent/response_guard_retry.h"
 #include "human/agent/tool_call_parser.h"
 #include "human/config.h"
+#include "human/core/llm_purpose.h"
+#include "human/core/local_only_guard.h"
 #include "human/core/log.h"
 #include "human/core/string.h"
 #include "human/providers/factory.h"
@@ -117,7 +119,9 @@ static hu_error_t dispatch_slim_chat(hu_allocator_t *alloc, hu_observer_t *obs, 
 
     hu_chat_response_t resp;
     memset(&resp, 0, sizeof(resp));
+    hu_llm_purpose_t prev_purpose = hu_llm_purpose_set(HU_LLM_PURPOSE_GUARD_RETRY);
     hu_error_t err = prov->vtable->chat(prov->ctx, alloc, &req, model, model_len, 0.2, &resp);
+    (void)hu_llm_purpose_set(prev_purpose);
     /* Free the built system prompt now that the chat call has copied/consumed it. */
     if (built_instruction) {
         size_t free_cap = identity_anchor_len + 2 + sizeof(repair_instruction_base);
@@ -173,6 +177,11 @@ static hu_error_t dispatch_slim_chat(hu_allocator_t *alloc, hu_observer_t *obs, 
     return response_guard_retry_strip_text_tool_calls(alloc, out, out_len);
 }
 
+/* local_only LIVE: the retry stays on the primary; no cloud fallback. */
+bool hu_response_guard_retry_cloud_fallback_allowed(const hu_config_t *cfg) {
+    return cfg != NULL && !hu_local_only_enforced();
+}
+
 hu_error_t hu_response_guard_retry_slim_with_identity(
     hu_allocator_t *alloc, hu_observer_t *obs, const hu_config_t *cfg, hu_provider_t *primary,
     const char *model, size_t model_len, const char *user_msg, size_t user_msg_len,
@@ -192,7 +201,7 @@ hu_error_t hu_response_guard_retry_slim_with_identity(
 #ifndef HU_ENABLE_CURL
     (void)cfg;
 #else
-    if (!cfg)
+    if (!hu_response_guard_retry_cloud_fallback_allowed(cfg))
         return err;
 
     static const struct {

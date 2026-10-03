@@ -616,6 +616,31 @@ static const hu_provider_vtable_t disabled_vtable = {
     .chat_with_system = disabled_chat_with_system,
 };
 
+/* The owner-initiative propose-model request (daemon.c calls the non-_ex
+ * entry point) carries a local_only caller tag, not "unknown". */
+static void test_tick_with_provider_tags_the_llm_call_for_local_only(void) {
+    hu_init_proposer_reset_warn_guards_for_test();
+    hu_initiative_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.enabled = true;
+    cfg.tick_interval_sec = 1800;
+    cfg.confidence_threshold = 0.85;
+    cfg.per_contact_min_seconds = 600;
+    hu_provider_t provider = {.ctx = NULL, .vtable = &disabled_vtable};
+    hu_allocator_t alloc = hu_system_allocator();
+    int64_t last_tick = 0;
+    uint64_t tick_id = 0;
+    hu_init_proposer_result_t result = HU_INIT_RESULT_FIRED;
+    hu_init_decision_t decision;
+    memset(&decision, 0, sizeof(decision));
+    HU_ASSERT_EQ(hu_init_proposer_tick_with_provider(&cfg, NULL, 0, NULL, NULL, &provider, &alloc,
+                                                     0, 1779700000, &last_tick, &tick_id, &result,
+                                                     &decision),
+                 HU_OK);
+    HU_ASSERT_NOT_NULL(hu_init_proposer_last_llm_caller_for_test());
+    HU_ASSERT_STR_EQ(hu_init_proposer_last_llm_caller_for_test(), "initiative");
+}
+
 static void test_tick_with_provider_disabled_never_reaches_the_llm(void) {
     hu_init_proposer_reset_warn_guards_for_test();
     hu_initiative_config_t cfg;
@@ -807,6 +832,7 @@ void run_init_proposer_tests(void) {
     HU_RUN_TEST(arbiter_skip_returns_skip_when_user_texted_long_ago);
     HU_RUN_TEST(test_disabled_config_returns_disabled_no_state_change);
     HU_RUN_TEST(test_tick_with_provider_disabled_never_reaches_the_llm);
+    HU_RUN_TEST(test_tick_with_provider_tags_the_llm_call_for_local_only);
     HU_RUN_TEST(test_enabled_all_clear_returns_skip_advances_state);
     HU_RUN_TEST(test_interval_gate_blocks_back_to_back_ticks);
     HU_RUN_TEST(test_per_contact_recency_gates_when_seth_texted_recently);

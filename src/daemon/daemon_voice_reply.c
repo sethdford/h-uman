@@ -11,6 +11,7 @@
 #include "human/context/voice_intent.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
+#include "human/core/local_only_guard.h"
 #include "human/core/log.h"
 #include "human/daemon.h"
 #include "human/daemon/voice_facade.h"
@@ -88,10 +89,11 @@ bool hu_voice_reply_gates_clear(hu_allocator_t *alloc, const char *text, size_t 
     if (text && text_len > 0) {
         hu_moderation_result_t in_mod;
         memset(&in_mod, 0, sizeof(in_mod));
-        /* Same criterion as the daemon's SHIELD-005 inbound_crisis flag. */
+        /* Same criterion as the daemon's SHIELD-005 inbound_crisis flag: any
+         * tier, including someone-else-at-risk, is never a voice memo. */
         if (inbound && inbound_len > 0 &&
             (hu_moderation_check(alloc, inbound, inbound_len, &in_mod) != HU_OK ||
-             in_mod.self_harm))
+             in_mod.self_harm || in_mod.self_harm_tier != HU_SELF_HARM_NONE))
             why = "inbound_crisis";
         else /* the reply itself: the one definition of the outbound gates */
             clear = hu_daemon_outbound_final_gates_clear(alloc, text, text_len, &why);
@@ -382,11 +384,13 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, hu_agent_t *agent, const hu_co
                     unsigned char *audio_bytes = NULL;
                     size_t audio_len = 0;
                     hu_error_t tts_err = prep_err;
+                    const char *lo_prev = hu_local_only_set_caller("voice");
                     if (prep_err == HU_OK)
                         tts_err = hu_cartesia_tts_synthesize(
                             alloc, cartesia_key, strlen(cartesia_key), req.transcript,
                             req.transcript_len, &req.tts, hu_tts_format_for_channel(chn_voice),
                             &audio_bytes, &audio_len);
+                    (void)hu_local_only_set_caller(lo_prev);
                     if (tts_err == HU_OK && audio_bytes && audio_len > 0) {
                         char audio_path[512];
                         hu_error_t pipe_err =
@@ -427,8 +431,10 @@ bool hu_daemon_voice_reply(hu_allocator_t *alloc, hu_agent_t *agent, const hu_co
                 const char *say = vf->directed ? (tags_ok ? vf->rendered : vf->words) : sp.spoken;
                 size_t say_len =
                     vf->directed ? (tags_ok ? vf->rendered_len : vf->words_len) : sp.spoken_len;
+                const char *lo_prev = hu_local_only_set_caller("voice");
                 hu_error_t tts_err =
                     hu_voice_tts(alloc, &voice_cfg, say, say_len, &audio, &audio_len);
+                (void)hu_local_only_set_caller(lo_prev);
                 if (tts_err == HU_OK && audio && audio_len > 0) {
                     unsigned char *audio_bytes = (unsigned char *)audio;
                     char audio_path[512];

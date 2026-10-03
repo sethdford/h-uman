@@ -46,6 +46,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #ifdef HU_ENABLE_SQLITE
 #include "human/memory.h"
@@ -144,7 +145,7 @@ static void test_follow_up_watcher_within_interval_does_not_readvance(void) {
 #define FUW_C3 "+15555550103" /* unreplied, recent -> filtered by the age gate */
 
 /* now_unix used by every fixture test; ms form is what the finder answers in. */
-#define FUW_NOW_UNIX 1789000000LL
+#define FUW_NOW_UNIX 1789046800LL /* 13:26 UTC */
 #define FUW_NOW_MS   ((uint64_t)FUW_NOW_UNIX * 1000ULL)
 
 static unsigned g_fuw_finder_calls;
@@ -383,15 +384,42 @@ static void test_follow_up_watcher_on_without_text_source_does_not_send(void) {
     fuw_teardown();
 }
 
+#ifdef HU_ENABLE_SQLITE
+/* A follow-up is an unprompted send, so it now passes the unprompted gate
+ * stack (human/daemon/unprompted_gate.h, DEF-14): that stack counts the
+ * per-contact cap from the proactive_decisions ledger and FAILS CLOSED
+ * without one, and enforces a static 23:00-06:00 local sleep floor. So the
+ * sending tests need a SQLite memory and a pinned daytime local clock:
+ * TZ=UTC0 makes FUW_NOW_UNIX (13:26 UTC) 13:26 local on every runner. */
+static char g_fuw_saved_tz[64];
+static bool g_fuw_tz_saved;
+static void fuw_pin_tz_utc(void) {
+    const char *tz = getenv("TZ");
+    g_fuw_tz_saved = tz != NULL;
+    snprintf(g_fuw_saved_tz, sizeof(g_fuw_saved_tz), "%s", tz ? tz : "");
+    setenv("TZ", "UTC0", 1);
+    tzset();
+}
+static void fuw_restore_tz(void) {
+    if (g_fuw_tz_saved)
+        setenv("TZ", g_fuw_saved_tz, 1);
+    else
+        unsetenv("TZ");
+    tzset();
+}
+
 /* ON with a text source sends exactly once, to the one real candidate.
  * This is what proves the send path is actually wired rather than dead:
  * the same tick that sends 0 in shadow sends 1 here. */
 static void test_follow_up_watcher_on_with_text_source_sends_once(void) {
     fuw_reset("on");
+    fuw_pin_tz_utc();
     hu_daemon_follow_up_watcher_set_text_source(fuw_text_source, NULL);
     hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
     struct hu_agent agent = {0};
     agent.alloc = &alloc;
+    agent.memory = &mem;
     agent.persona = &g_fuw_persona;
     hu_proactive_throttle_t throttle;
     hu_proactive_throttle_init(&throttle, &alloc);
@@ -405,6 +433,8 @@ static void test_follow_up_watcher_on_with_text_source_sends_once(void) {
                                            &g_fuw_ar_cfg);
     HU_ASSERT_EQ(g_fuw_send_calls, 1u);
     HU_ASSERT_STR_EQ(g_fuw_last_sent, "sorry for the slow reply");
+    mem.vtable->deinit(mem.ctx);
+    fuw_restore_tz();
     fuw_teardown();
 }
 
@@ -418,14 +448,17 @@ static void test_follow_up_watcher_on_with_text_source_sends_once(void) {
  * invisible to the one budget the check-in path shares. */
 static void test_follow_up_watcher_on_respects_shared_daily_budget(void) {
     hu_allocator_t alloc = hu_system_allocator();
+    fuw_pin_tz_utc();
     hu_follow_up_watcher_config_t cfg = {.enabled = true, .interval_seconds = 300};
 
     /* Part 1: budget EXHAUSTED -> the candidate must NOT be sent. */
     fuw_reset("on");
     hu_daemon_follow_up_watcher_set_text_source(fuw_text_source, NULL);
     {
+        hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
         struct hu_agent agent = {0};
         agent.alloc = &alloc;
+        agent.memory = &mem;
         agent.persona = &g_fuw_persona;
         hu_proactive_throttle_t throttle;
         hu_proactive_throttle_init(&throttle, &alloc);
@@ -445,14 +478,17 @@ static void test_follow_up_watcher_on_respects_shared_daily_budget(void) {
          * stopped it, not an earlier filter. */
         HU_ASSERT_EQ(hu_daemon_follow_up_watcher_send_now_calls_for_test(), 1u);
         HU_ASSERT_EQ(g_fuw_send_calls, 0u);
+        mem.vtable->deinit(mem.ctx);
     }
 
     /* Part 2: fresh budget -> sends once AND the budget is debited. */
     fuw_reset("on");
     hu_daemon_follow_up_watcher_set_text_source(fuw_text_source, NULL);
     {
+        hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
         struct hu_agent agent = {0};
         agent.alloc = &alloc;
+        agent.memory = &mem;
         agent.persona = &g_fuw_persona;
         hu_proactive_throttle_t throttle;
         hu_proactive_throttle_init(&throttle, &alloc);
@@ -467,9 +503,12 @@ static void test_follow_up_watcher_on_respects_shared_daily_budget(void) {
         HU_ASSERT_EQ(g_fuw_send_calls, 1u);
         /* The send must be COUNTED against the shared budget, not free. */
         HU_ASSERT_TRUE(budget.daily_used > used_before);
+        mem.vtable->deinit(mem.ctx);
     }
+    fuw_restore_tz();
     fuw_teardown();
 }
+#endif /* HU_ENABLE_SQLITE */
 
 /* A NULL gov_budget must not silently mean "unlimited": `on` degrades to
  * shadow rather than sending outside the shared budget. */
@@ -648,8 +687,10 @@ void run_daemon_follow_up_watcher_tests(void) {
     HU_RUN_TEST(test_follow_up_watcher_shadow_filters_to_one_candidate);
     HU_RUN_TEST(test_follow_up_watcher_shadow_does_not_consume_throttle_budget);
     HU_RUN_TEST(test_follow_up_watcher_on_without_text_source_does_not_send);
+#ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(test_follow_up_watcher_on_with_text_source_sends_once);
     HU_RUN_TEST(test_follow_up_watcher_on_respects_shared_daily_budget);
+#endif
     HU_RUN_TEST(test_follow_up_watcher_on_without_budget_degrades_to_shadow);
     HU_RUN_TEST(test_follow_up_watcher_on_without_ar_cfg_degrades_to_shadow);
 #ifdef HU_ENABLE_SQLITE

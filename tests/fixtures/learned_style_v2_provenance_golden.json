@@ -1,0 +1,24 @@
+{
+  "generated_at": "2026-09-11T12:00:00Z",
+  "schema": "learned-style/v2",
+  "sources": {
+    "chatdb_samples": 68,
+    "chatdb_sent_n": 82,
+    "contacts": 2,
+    "extra_history": true,
+    "extra_history_overlap_dropped": 0,
+    "extra_history_samples": 12,
+    "global_n": 80,
+    "initiation_starts_n": 4,
+    "response_units_n": 75,
+    "tapback_provenance_excluded_n": 1,
+    "tapback_provenance_rows_n": 1,
+    "tapback_units_n": 72
+  },
+  "window": {
+    "days": 180,
+    "end": "2026-09-11T12:00:00Z",
+    "half_life_days": 21,
+    "start": "2026-03-15T12:00:00Z"
+  }
+}

@@ -30,7 +30,9 @@
 #include "human/config.h"
 #include "human/context/conversation.h"
 #include "human/context/vision.h"
+#include "human/core/local_only_guard.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include "human/core/paths.h"
 #include "human/core/time.h"
 #include "human/daemon.h"
@@ -65,8 +67,8 @@ void hu_daemon_log_send_effect(void *observer, const char *eff_ch, const char *t
 #ifndef HU_IS_TEST
     const char *eff = hu_conversation_classify_effect(text, len);
     if (eff)
-        hu_log_info("human", (hu_observer_t *)observer, "%s effect: %s (%.*s)", eff_ch, eff,
-                    (int)(len > 60 ? 60 : len), text);
+        hu_log_info("human", (hu_observer_t *)observer, "%s effect: %s (%s)", eff_ch, eff,
+                    HU_LOG_TEXT(text, len, 60));
 #else
     (void)observer;
     (void)eff_ch;
@@ -87,8 +89,30 @@ static bool reacted_to(int64_t message_id, int64_t now) {
     return message_id > 0 && s_reacted.message_id == message_id && now - s_reacted.at < 600;
 }
 
+/* The emoji that carries a director-chosen reaction (the channel maps it back
+ * to the native tapback). */
+static const char *director_reaction_emoji(hu_reaction_type_t r) {
+    switch (r) {
+    case HU_REACTION_THUMBS_UP:
+        return "👍";
+    case HU_REACTION_THUMBS_DOWN:
+        return "👎";
+    case HU_REACTION_HAHA:
+        return "😂";
+    case HU_REACTION_EMPHASIS:
+        return "‼️";
+    case HU_REACTION_QUESTION:
+        return "❓";
+    default:
+        return "❤️";
+    }
+}
+
 /* Dispatcher: route iMessage reply through predicate (Phase A) to choose
- * between threaded / flat / tapback based on reply style facts. */
+ * between threaded / flat / tapback based on reply style facts. The predicate
+ * picks only the shape of the text (threaded or flat); whether a reaction
+ * rides along is the director's call (`director_reaction`, NONE = no
+ * reaction). The reply text always goes out. */
 static hu_error_t dispatch_reply_inner(struct hu_channel *ch, const struct hu_persona *persona,
                                        const struct hu_agent *agent, const struct hu_config *config,
                                        const char *target, size_t target_len,
@@ -96,7 +120,7 @@ static hu_error_t dispatch_reply_inner(struct hu_channel *ch, const struct hu_pe
                                        const char *body, size_t body_len,
                                        const struct hu_conversation_snapshot *snapshot,
                                        int64_t inferred_message_id_for_react, bool *out_text_sent,
-                                       bool text_required) {
+                                       hu_reaction_type_t director_reaction) {
     if (out_text_sent)
         *out_text_sent = false;
     if (!ch || !ch->vtable || !target || !body) {
@@ -148,6 +172,10 @@ static hu_error_t dispatch_reply_inner(struct hu_channel *ch, const struct hu_pe
                              tb_key, &tb_band);
         hu_reply_style_t demoted =
             hu_daemon_demote_stale_tapback_style(style, facts.seconds_since_parent, &tb_band);
+        if (director_reaction != HU_REACTION_NONE &&
+            hu_daemon_demote_stale_tapback_style(HU_REPLY_STYLE_TAPBACK, facts.seconds_since_parent,
+                                                 &tb_band) != HU_REPLY_STYLE_TAPBACK)
+            director_reaction = HU_REACTION_NONE; /* never a late reaction */
         if (demoted != style) {
             hu_log_info("human", agent ? agent->observer : NULL,
                         "reply-style tapback stale (parent %llds old > band cap) — demoted to "
@@ -157,14 +185,28 @@ static hu_error_t dispatch_reply_inner(struct hu_channel *ch, const struct hu_pe
         }
     }
 
-    /* The text was decided upstream: never swallow it, never react twice. */
-    hu_reply_style_t style_chosen = style;
-    style = hu_imessage_reply_style_finalize(
-        style, reacted_to(inferred_message_id_for_react, (int64_t)time(NULL)), text_required);
+    /* The text was decided upstream: never swallow it. The predicate picks only
+     * its shape (threaded or flat); a reaction rides along, before the text and
+     * in whatever shape it has, only when the director asked for one and this
+     * message has none yet (DEF-2). */
+    style = hu_imessage_reply_style_finalize(style);
+    bool add_reaction = director_reaction != HU_REACTION_NONE &&
+                        !reacted_to(inferred_message_id_for_react, (int64_t)time(NULL));
 
     /* Pacing (C5) — start. */
     uint64_t pace_start = 0;
     hu_persona_pace_reply_start(&pace_start);
+
+    if (add_reaction && ch->vtable->react_emoji) {
+        const char *emoji = director_reaction_emoji(director_reaction);
+        if (ch->vtable->react_emoji(ch->ctx, target, target_len, inferred_message_id_for_react,
+                                    emoji, strlen(emoji)) == HU_OK) {
+            s_reacted.message_id = inferred_message_id_for_react;
+            s_reacted.at = (int64_t)time(NULL);
+            hu_log_info("human", agent ? agent->observer : NULL,
+                        "imessage_dispatch: director reaction sent with the text");
+        }
+    }
 
     /* Dispatch by style. `actual_style` tracks what was ACTUALLY sent (which
      * can differ from the chosen `style` — e.g. a THREADED attempt that the AX
@@ -237,59 +279,16 @@ static hu_error_t dispatch_reply_inner(struct hu_channel *ch, const struct hu_pe
         break;
     }
 
+    case HU_REPLY_STYLE_TAPBACK: /* finalize returns only THREADED or FLAT */
+    case HU_REPLY_STYLE_TAPBACK_PLUS_FLAT:
     case HU_REPLY_STYLE_FLAT:
+        actual_style = HU_REPLY_STYLE_FLAT;
         if (ch->vtable->send) {
             err = ch->vtable->send(ch->ctx, target, target_len, body, body_len, NULL, 0);
             if (err == HU_OK) {
                 tier_used = "flat";
                 hu_log_info("human", agent ? agent->observer : NULL,
                             "imessage_dispatch: flat send");
-            }
-        }
-        break;
-
-    case HU_REPLY_STYLE_TAPBACK:
-        if (ch->vtable->react_emoji) {
-            const char *emoji = "👍"; /* universal-positive default */
-            err = ch->vtable->react_emoji(ch->ctx, target, target_len,
-                                          inferred_message_id_for_react, emoji, strlen(emoji));
-            if (err == HU_OK) {
-                tier_used = "tapback";
-                hu_log_info("human", agent ? agent->observer : NULL,
-                            "imessage_dispatch: tapback emoji sent");
-            }
-        }
-        if (err != HU_OK || !ch->vtable->react_emoji) {
-            if (ch->vtable->send) {
-                err = ch->vtable->send(ch->ctx, target, target_len, body, body_len, NULL, 0);
-                if (err == HU_OK) {
-                    tier_used = "flat_fallback";
-                    actual_style = HU_REPLY_STYLE_FLAT;
-                    hu_log_info("human", agent ? agent->observer : NULL,
-                                "imessage_dispatch: tapback unavailable, flat fallback");
-                }
-            }
-        }
-        break;
-
-    case HU_REPLY_STYLE_TAPBACK_PLUS_FLAT:
-        /* Both: tapback first (best-effort), then text. */
-        if (ch->vtable->react_emoji) {
-            /* heart for emotional acknowledgment; a tapback upgraded to carry
-             * its bubble keeps the thumbs-up it was chosen as */
-            const char *emoji = style_chosen == HU_REPLY_STYLE_TAPBACK ? "👍" : "❤️";
-            if (ch->vtable->react_emoji(ch->ctx, target, target_len, inferred_message_id_for_react,
-                                        emoji, strlen(emoji)) == HU_OK) {
-                s_reacted.message_id = inferred_message_id_for_react;
-                s_reacted.at = (int64_t)time(NULL);
-            }
-        }
-        if (ch->vtable->send) {
-            err = ch->vtable->send(ch->ctx, target, target_len, body, body_len, NULL, 0);
-            if (err == HU_OK) {
-                tier_used = "tapback_plus_flat";
-                hu_log_info("human", agent ? agent->observer : NULL,
-                            "imessage_dispatch: tapback + flat");
             }
         }
         break;
@@ -577,13 +576,13 @@ hu_error_t hu_daemon_dispatch_imessage_reply(
     const struct hu_conversation_snapshot *snapshot, int64_t inferred_message_id_for_react) {
     return hu_daemon_dispatch_imessage_reply_ex(
         ch, persona, agent, config, target, target_len, parent_msg_guid, parent_guid_len, body,
-        body_len, snapshot, inferred_message_id_for_react, NULL, false);
+        body_len, snapshot, inferred_message_id_for_react, NULL, HU_REACTION_NONE);
 }
 
 hu_error_t hu_daemon_dispatch_imessage_reply_msg_ex(
     void *ch, const void *persona, const struct hu_agent *agent, const struct hu_config *config,
     const char *target, size_t target_len, const struct hu_channel_loop_msg *msg, const char *body,
-    size_t body_len, bool *out_text_sent, bool text_required) {
+    size_t body_len, bool *out_text_sent, hu_reaction_type_t director_reaction) {
     const hu_channel_loop_msg_t *m = (const hu_channel_loop_msg_t *)msg;
     if (out_text_sent)
         *out_text_sent = false;
@@ -597,8 +596,8 @@ hu_error_t hu_daemon_dispatch_imessage_reply_msg_ex(
     if (m && m->content[0] && body && body_len > 0 &&
         hu_conversation_reply_parrots_inbound(body, body_len, m->content, strlen(m->content))) {
         hu_log_warn("human", agent ? agent->observer : NULL,
-                    "parrot guard: dropped bubble echoing the inbound (%.*s…)",
-                    (int)(body_len > 40 ? 40 : body_len), body);
+                    "parrot guard: dropped bubble echoing the inbound (%s…)",
+                    HU_LOG_TEXT(body, body_len, 40));
         return HU_OK;
     }
 
@@ -608,7 +607,7 @@ hu_error_t hu_daemon_dispatch_imessage_reply_msg_ex(
         (struct hu_channel *)ch, (const struct hu_persona *)persona, agent, config, target,
         target_len, guid, guid ? strlen(guid) : 0, body, body_len,
         (const struct hu_conversation_snapshot *)&snap, m ? (int64_t)m->message_id : 0,
-        out_text_sent, text_required);
+        out_text_sent, director_reaction);
 }
 
 bool hu_daemon_reply_lost(bool delivered, bool any_send_err, uint64_t fails_before,
@@ -675,8 +674,8 @@ size_t hu_daemon_burst_carry(hu_channel_loop_msg_t *msgs, size_t *count, size_t 
             continue;
         }
         lost++;
-        hu_log_warn("human", NULL, "burst re-poll: no room to keep a message from %.20s — dropped",
-                    burst[i].session_key);
+        hu_log_warn("human", NULL, "burst re-poll: no room to keep a message from %s — dropped",
+                    HU_LOG_WHO_CSTR(burst[i].session_key));
     }
     return lost;
 }
@@ -707,6 +706,11 @@ hu_error_t hu_daemon_describe_image(hu_allocator_t *alloc, hu_agent_t *agent,
                                     size_t *desc_len) {
     if (!alloc || !agent)
         return HU_ERR_INVALID_ARGUMENT;
+    /* local_only: no image bytes leave the process — the cloud is off-limits
+     * and the local server is text-only (422s). The caller substitutes a
+     * placeholder the model can react to. */
+    if (hu_local_only_enforced())
+        return HU_ERR_NOT_SUPPORTED;
     const char *vp = NULL, *vm = NULL;
     if (hu_daemon_vision_route(cfg, model, model_len, &vp, &vm)) {
         hu_provider_t prov = {0};
@@ -723,6 +727,58 @@ hu_error_t hu_daemon_describe_image(hu_allocator_t *alloc, hu_agent_t *agent,
     }
     return hu_vision_describe_image(alloc, &agent->provider, path, path_len, model, model_len,
                                     desc_out, desc_len);
+}
+
+static const char k_obj_char[] = "\xEF\xBF\xBC"; /* U+FFFC, the attachment placeholder */
+
+/* text without any U+FFFC, trimmed of surrounding spaces/newlines, into buf.
+ * Returns the length, or (size_t)-1 when buf is too small. */
+static size_t strip_attachment_char(const char *text, size_t n, char *buf, size_t cap, bool *had) {
+    size_t o = 0;
+    *had = false;
+    for (size_t i = 0; i < n; i++) {
+        if (i + 3 <= n && memcmp(text + i, k_obj_char, 3) == 0) {
+            *had = true;
+            i += 2;
+            continue;
+        }
+        if (o + 1 >= cap)
+            return (size_t)-1;
+        buf[o++] = text[i];
+    }
+    while (o > 0 && (buf[o - 1] == ' ' || buf[o - 1] == '\n'))
+        o--;
+    size_t lead = 0;
+    while (lead < o && (buf[lead] == ' ' || buf[lead] == '\n'))
+        lead++;
+    memmove(buf, buf + lead, o - lead);
+    return o - lead;
+}
+
+/* buf[0..o) + (o ? "\n" : "") + note (NUL-terminated note of note_size). */
+static const char *append_note(const char *text, size_t *len, char *buf, size_t cap, size_t o,
+                               const char *note, size_t note_size) {
+    if (o + (o ? 1 : 0) + note_size > cap)
+        return text;
+    if (o)
+        buf[o++] = '\n';
+    memcpy(buf + o, note, note_size);
+    *len = o + note_size - 1;
+    return buf;
+}
+
+const char *hu_daemon_photo_placeholder(const char *text, size_t *len, char *buf, size_t cap) {
+    static const char note[] = "[They sent a photo]";
+    if (!text || !len || !buf || cap < sizeof(note) || text == buf)
+        return text;
+    size_t o = 0;
+    if (!(*len == 7 && memcmp(text, "[Photo]", 7) == 0)) { /* keep the caption */
+        bool had = false;
+        o = strip_attachment_char(text, *len, buf, cap, &had);
+        if (o == (size_t)-1)
+            return text;
+    }
+    return append_note(text, len, buf, cap, o, note, sizeof(note));
 }
 
 bool hu_daemon_tool_traffic(const struct hu_persona *p, const char *key, size_t key_len,
@@ -749,40 +805,15 @@ bool hu_daemon_hurt_withheld(const struct hu_persona *p, const char *key, size_t
 }
 
 const char *hu_daemon_unseen_photo(const char *text, size_t *len, char *buf, size_t cap) {
-    static const char obj[] = "\xEF\xBF\xBC"; /* U+FFFC, the attachment placeholder */
     static const char note[] =
         "[They sent a picture that didn't load on your phone \xE2\x80\x94 you can't see it]";
     if (!text || !len || !buf || cap == 0 || text == buf)
         return text;
-    size_t n = *len, o = 0;
     bool had = false;
-    for (size_t i = 0; i < n; i++) {
-        if (i + 3 <= n && memcmp(text + i, obj, 3) == 0) {
-            had = true;
-            i += 2;
-            continue;
-        }
-        if (o + 1 >= cap)
-            return text;
-        buf[o++] = text[i];
-    }
-    if (!had)
+    size_t o = strip_attachment_char(text, *len, buf, cap, &had);
+    if (o == (size_t)-1 || !had)
         return text;
-    while (o > 0 && (buf[o - 1] == ' ' || buf[o - 1] == '\n'))
-        o--;
-    size_t lead = 0;
-    while (lead < o && (buf[lead] == ' ' || buf[lead] == '\n'))
-        lead++;
-    memmove(buf, buf + lead, o - lead);
-    o -= lead;
-    size_t need = o + (o ? 1 : 0) + sizeof(note) - 1;
-    if (need + 1 > cap)
-        return text;
-    if (o)
-        buf[o++] = '\n';
-    memcpy(buf + o, note, sizeof(note));
-    *len = o + sizeof(note) - 1;
-    return buf;
+    return append_note(text, len, buf, cap, o, note, sizeof(note));
 }
 
 /* Every bubble is cased here, not only the reply's first line: shaping runs
@@ -829,7 +860,7 @@ hu_error_t hu_daemon_dispatch_imessage_reply_ex(
     const struct hu_config *config, const char *target, size_t target_len,
     const char *parent_msg_guid, size_t parent_guid_len, const char *body, size_t body_len,
     const struct hu_conversation_snapshot *snapshot, int64_t inferred_message_id_for_react,
-    bool *out_text_sent, bool text_required) {
+    bool *out_text_sent, hu_reaction_type_t director_reaction) {
     int64_t hold_ms = hu_daemon_reply_hold_wait_ms(target, target_len, hu_time_get_current_ms());
     if (hold_ms > 0) {
 #ifndef HU_IS_TEST
@@ -846,7 +877,7 @@ hu_error_t hu_daemon_dispatch_imessage_reply_ex(
     }
     return dispatch_reply_inner(ch, persona, agent, config, target, target_len, parent_msg_guid,
                                 parent_guid_len, body, body_len, snapshot,
-                                inferred_message_id_for_react, out_text_sent, text_required);
+                                inferred_message_id_for_react, out_text_sent, director_reaction);
 }
 
 /* One draft at a time: the reply loop handles one contact's batch at a time. */

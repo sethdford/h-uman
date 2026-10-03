@@ -69,6 +69,11 @@ size_t hu_person_dates_upcoming(struct hu_agent *agent, int64_t now, int window_
 size_t hu_date_draft_text(const char *name, const char *relationship, const char *label, char *buf,
                           size_t cap);
 
+/* True when HU_DATE_NUDGES is live and `contact_id` has a person date
+ * (owner-given or a Contacts birthday) today: a date note is due, so the
+ * unprompted gate skips that contact's routine check-ins for the day. */
+bool hu_person_date_note_due_today(struct hu_agent *agent, const char *contact_id, int64_t now);
+
 struct hu_service_channel;
 
 void hu_date_nudges_tick(struct hu_agent *agent, struct hu_service_channel *channels,

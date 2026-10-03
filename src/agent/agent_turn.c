@@ -2,19 +2,21 @@
 #include "agent_internal.h"
 #include "human/agent/best_of_n.h"
 #include "human/agent/graph_grounding.h"
+#include "human/agent/hard_moment.h"
 #include "human/agent/humanness.h"
 #include "human/agent/intent.h"
+#include "human/agent/learned_style_turn.h"
 #include "human/agent/reask.h"
 #include "human/agent/self_uncertainty.h"
 #include "human/agent/theory_of_mind.h"
 #include "human/agent/turn.h"
+#include "human/agent/turn_moment.h"
 #include "human/config.h"
 #include "human/core/json.h"
 #include "human/core/paths.h"
 #include "human/core/string.h"
 #include "human/core/tokens.h"
 #include "human/data/loader.h"
-#include "human/moment.h"
 #include "human/persona/taste.h"
 
 #include "human/agent/choreography.h"
@@ -35,6 +37,7 @@
 #include "human/persona/voice_maturity.h"
 
 #include "human/agent/conv_goals.h"
+#include "human/agent/local_only_route.h"
 #include "human/agent/model_router.h"
 /* Phase 2 Task 14 (RL SOTA): forward-declare the two reaction-handler
  * lifecycle hooks instead of including human/agent/reaction_handler.h.
@@ -80,6 +83,7 @@ int hu_reaction_lookup_last_response(const char *channel, const char *thread, ch
 #include "human/cognition/trust.h"
 #include "human/context/contact_style_overlay.h"
 #include "human/eval/consistency.h"
+#include "human/memory/confidence_boundary.h"
 #include "human/memory/fact_extract.h"
 #include "human/memory/hallucination_guard.h"
 #include "human/memory/neural_memory.h"
@@ -309,7 +313,9 @@ static hu_error_t agent_skill_route_embed_fn(void *embed_ctx, hu_allocator_t *al
 #include "human/cognition/emotional.h"
 #include "human/cognition/metacognition.h"
 #include "human/core/gate_mode.h"
+#include "human/core/local_only_guard.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include "human/humanness.h"
 #include "human/memory/evolved_opinions.h"
 #include "human/memory/lifecycle/semantic_cache.h"
@@ -365,6 +371,7 @@ static hu_error_t agent_skill_route_embed_fn(void *embed_ctx, hu_allocator_t *al
 #include "human/security/cot_audit.h"
 #include "human/security/history_scorer.h"
 #include "human/security/moderation.h"
+#include "human/security/self_harm.h"
 #include "human/security/sensitivity.h"
 #include "human/tools/cache_ttl.h"
 #include "human/voice.h"
@@ -843,38 +850,6 @@ hu_error_t hu_agent_finalize_system_prompt(hu_agent_t *agent, char **prompt, siz
     return err;
 }
 
-hu_error_t hu_agent_build_persona_head(hu_agent_t *agent, const char *topic, size_t topic_len,
-                                       char **out, size_t *out_len) {
-    if (!agent || !agent->alloc || !agent->persona || !out || !out_len)
-        return HU_ERR_INVALID_ARGUMENT;
-    const char *ch = agent->active_channel;
-    size_t ch_len = agent->active_channel_len;
-    hu_gate_mode_t mode = hu_gate_mode_from_env("HU_PERSONA_HEAD", HU_GATE_OFF);
-    if (mode == HU_GATE_LIVE) {
-        hu_error_t cerr = hu_persona_build_prompt_compact_immersive(agent->alloc, agent->persona,
-                                                                    ch, ch_len, out, out_len);
-        if (cerr == HU_OK)
-            return HU_OK;
-        /* fail-safe: any compact-build failure reverts to OFF behavior */
-    }
-    hu_error_t err = hu_persona_build_prompt(agent->alloc, agent->persona, ch, ch_len, topic,
-                                             topic_len, out, out_len);
-    if (err != HU_OK)
-        return err;
-    if (mode == HU_GATE_SHADOW) {
-        char *compact = NULL;
-        size_t compact_len = 0;
-        if (hu_persona_build_prompt_compact_immersive(agent->alloc, agent->persona, ch, ch_len,
-                                                      &compact, &compact_len) == HU_OK) {
-            hu_log_info("persona_head", agent->observer,
-                        "shadow: full_head=%zu compact_head=%zu budget=%d", *out_len, compact_len,
-                        HU_PROMPT_TRIM_BUDGET_BYTES);
-            agent->alloc->free(agent->alloc->ctx, compact, compact_len + 1);
-        }
-    }
-    return HU_OK;
-}
-
 /* Append the per-turn humanness directives — Theory-of-Mind, calibrated
  * self-uncertainty, intent-aware response-type — to the system prompt, and log
  * active gates once. Shared by BOTH hu_agent_turn (the non-streaming fallback)
@@ -978,9 +953,10 @@ void hu_agent_append_humanness_directives(hu_agent_t *agent, const char *contact
  * agent->alloc->free(ctx, p, len + 1). */
 void hu_agent_build_humanness_context(hu_agent_t *agent, const char *msg, size_t msg_len,
                                       const char *memory_ctx, size_t memory_ctx_len,
-                                      char **humanness_ctx_out, size_t *humanness_ctx_len_out,
-                                      char **imperfect_dir_out, size_t *imperfect_dir_len_out,
-                                      char **residue_dir_out, size_t *residue_dir_len_out) {
+                                      bool retrieval_relevant, char **humanness_ctx_out,
+                                      size_t *humanness_ctx_len_out, char **imperfect_dir_out,
+                                      size_t *imperfect_dir_len_out, char **residue_dir_out,
+                                      size_t *residue_dir_len_out) {
     if (humanness_ctx_out)
         *humanness_ctx_out = NULL;
     if (humanness_ctx_len_out)
@@ -1202,11 +1178,11 @@ void hu_agent_build_humanness_context(hu_agent_t *agent, const char *msg, size_t
         }
 #endif
 
-        /* Imperfect delivery — express genuine uncertainty */
+        /* Imperfect delivery — hedge only on low self-confidence + no relevant
+         * retrieval (DEF-4; no tool shortcut: tools have not run yet). */
         {
-            uint32_t tool_count = agent->tools_count > 0 ? (uint32_t)agent->tools_count : 0;
             hu_certainty_level_t cert = hu_certainty_classify(
-                msg, msg_len, (memory_ctx != NULL && memory_ctx_len > 0), tool_count);
+                retrieval_relevant, hu_metacog_trajectory_confidence(&agent->infra.metacognition));
             imperfect_dir = hu_imperfect_delivery_directive(agent->alloc, cert, &imperfect_dir_len);
             if ((sal_mode == HU_SALIENCE_SHADOW || sal_mode == HU_SALIENCE_LIVE) && imperfect_dir &&
                 imperfect_dir_len > 0 && sal_count < 8 &&
@@ -1588,11 +1564,13 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
     /* Build persona prompt fresh each turn (channel-dependent; no caching) */
     char *persona_prompt = NULL;
     size_t persona_prompt_len = 0;
+    hu_learned_style_turn_t ls_turn = {0}; /* HU_LEARNED_STYLE, learned_style_turn.h */
     if (agent->persona) {
-        /* HU_PERSONA_HEAD-gated head selection — shared helper, same as
-         * hu_agent_turn_stream_v2. */
+        /* HU_PERSONA_HEAD-gated head selection + HU_LEARNED_STYLE — shared
+         * helper, same as hu_agent_turn_stream_v2. */
         hu_error_t perr =
-            hu_agent_build_persona_head(agent, msg, msg_len, &persona_prompt, &persona_prompt_len);
+            hu_agent_build_head_learned(agent, false, msg, msg_len, msg, msg_len, &persona_prompt,
+                                        &persona_prompt_len, &ls_turn);
         if (perr != HU_OK) {
             if (pref_ctx)
                 agent->alloc->free(agent->alloc->ctx, pref_ctx, pref_ctx_len + 1);
@@ -1695,6 +1673,9 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
      * — measured 2026-07-11 (tools_dump_prompt.c): the legacy stage vocabulary never
      * fires on real personas, so the warmth vocabulary is what makes this note live. */
     hu_agent_apply_relationship_tone(agent, &persona_prompt, &persona_prompt_len);
+    if (persona_prompt) /* HU_HARD_MOMENT, same gate as agent_stream.c (DEF-13) */
+        (void)hu_hard_moment_apply(agent->alloc, hu_hard_moment_mode(), msg, msg_len,
+                                   &persona_prompt, &persona_prompt_len);
 
     /* Build skills context from skillforge if available */
     char *skills_ctx = NULL;
@@ -1865,6 +1846,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
     char *residue_dir = NULL;
     size_t residue_dir_len = 0;
     hu_agent_build_humanness_context(agent, msg, msg_len, memory_ctx, memory_ctx_len,
+                                     behavior_memory_ctx_nonempty || graph_ctx_len > 0,
                                      &humanness_ctx, &humanness_ctx_len, &imperfect_dir,
                                      &imperfect_dir_len, &residue_dir, &residue_dir_len);
 
@@ -1981,11 +1963,9 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                                     agent->relationship.total_turns = (uint32_t)rt;
                             }
                         }
-                        hu_log_info("agent", agent->observer, "frontier state restored for %.*s",
-                                    (int)(agent->memory_session_id_len > 20
-                                              ? 20
-                                              : agent->memory_session_id_len),
-                                    agent->memory_session_id);
+                        hu_log_info(
+                            "agent", agent->observer, "frontier state restored for %s",
+                            HU_LOG_WHO(agent->memory_session_id, agent->memory_session_id_len));
                     }
                 }
             }
@@ -2657,69 +2637,16 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
          * survives the entire turn until we free it. */
         char *personal_model_buf = (char *)agent->alloc->alloc(agent->alloc->ctx, 8192);
         const char *personal_model_ctx = NULL;
-        size_t personal_model_ctx_len = 0;
-        if (personal_model_buf && hu_personal_model_has_content(&agent->personal_model)) {
-            /* T7 of docs/plans/2026-05-26-reflection-loop: when the reflection
-             * loop is enabled in config, the per-channel slice is appended via
-             * _build_prompt_with_reflection (db + channel + max_patterns).
-             * Otherwise we fall back to the plain _build_prompt path so callers
-             * with no SQLite memory backend (or reflection disabled) keep the
-             * existing behavior. */
-            size_t pm_n = 0;
-#ifdef HU_ENABLE_SQLITE
-            if (agent->config && agent->config->reflection_loop.enabled && agent->memory &&
-                agent->active_channel && agent->active_channel_len > 0) {
-                sqlite3 *refl_db = hu_sqlite_memory_get_db(agent->memory);
-                const hu_persona_overlay_t *refl_overlay =
-                    agent->persona ? hu_persona_find_overlay(agent->persona, agent->active_channel,
-                                                             agent->active_channel_len)
-                                   : NULL;
-                pm_n = hu_personal_model_build_prompt_with_reflection(
-                    &agent->personal_model, refl_overlay, refl_db, agent->active_channel,
-                    /*max_patterns=*/5, personal_model_buf, 8192);
-            } else
-#endif
-            {
-                pm_n = hu_personal_model_build_prompt(&agent->personal_model, personal_model_buf,
-                                                      8192);
-            }
-            if (pm_n > 0) {
-                personal_model_ctx = personal_model_buf;
-                personal_model_ctx_len = pm_n;
-            }
-        }
+        size_t personal_model_ctx_len =
+            hu_turn_personal_model_prompt(agent, personal_model_buf, personal_model_buf ? 8192 : 0);
+        if (personal_model_ctx_len > 0)
+            personal_model_ctx = personal_model_buf;
 
-        /* Moment-context decision layer — bridges existing timing / persona /
-         * tone signals into a per-turn fragment for the LLM. Phase 3 minimal
-         * wiring: pass persona + per-channel overlay; history loader
-         * integration is a follow-up (today we pass NULL → predicate skips
-         * thread/style/topic fields gracefully). Future: load 25-turn history
-         * via the same path the daemon uses (load_conversation_history) and
-         * the contact_send_recency timestamps for full timing fidelity. */
+        /* Moment cue from the contact's real thread (src/agent/turn/turn_moment.c). */
         char moment_prompt_buf[512];
-        const char *moment_ctx = NULL;
-        size_t moment_ctx_len = 0;
-        if (agent->persona) {
-            const struct hu_persona_overlay_t *moment_overlay = NULL;
-            if (agent->active_channel && agent->active_channel_len > 0) {
-                moment_overlay = (const struct hu_persona_overlay_t *)hu_persona_find_overlay(
-                    agent->persona, agent->active_channel, agent->active_channel_len);
-            }
-            hu_moment_t moment;
-            hu_error_t mc_err = hu_moment_compose_from_inputs(
-                (const struct hu_persona_t *)agent->persona, moment_overlay,
-                /* history */ NULL, /* last_their_ts */ -1, /* last_our_ts */ -1,
-                /* contact_tz */ NULL, (int64_t)time(NULL), &moment);
-            if (mc_err == HU_OK) {
-                size_t mr_n = 0;
-                hu_error_t mr_err = hu_moment_render_prompt(&moment, moment_prompt_buf,
-                                                            sizeof(moment_prompt_buf), &mr_n);
-                if (mr_err == HU_OK && mr_n > 0) {
-                    moment_ctx = moment_prompt_buf;
-                    moment_ctx_len = mr_n;
-                }
-            }
-        }
+        size_t moment_ctx_len = hu_turn_moment_render(agent, (int64_t)time(NULL), moment_prompt_buf,
+                                                      sizeof(moment_prompt_buf));
+        const char *moment_ctx = moment_ctx_len > 0 ? moment_prompt_buf : NULL;
 
         /* W9 world-model snapshot (FIX 12). Cached for 60s by hu_world_model_load
          * so per-turn cost is dominated by the SQL fetch on first miss. We only
@@ -2964,6 +2891,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
             .outcome_context_len = outcome_ctx_len,
             .persona_immersive = (persona_prompt && persona_prompt_len > 0),
             .persona = agent->persona,
+            .learned_style_live = ls_turn.live,
             .contact_context = enriched_contact ? enriched_contact : agent->contact_context,
             .contact_context_len =
                 enriched_contact ? enriched_contact_len : agent->contact_context_len,
@@ -4067,6 +3995,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
         } else {
             /* Inline routing: emotional/vulnerable messages get better models */
             hu_model_router_config_t mr_cfg = hu_model_router_default_config();
+            hu_local_only_router_defaults(&mr_cfg, agent->model_name, agent->model_name_len);
             mr_cfg.on_device_available = agent->on_device_available;
             /* "Gemma = Seth" policy: when personalization.force_local_mlx is
              * set in config, route ALL tiers through the on-device model
@@ -4146,7 +4075,8 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
          * S2 content (PII) logs audit trail. */
         {
             hu_sensitivity_result_t sens = hu_sensitivity_classify_message(msg, msg_len);
-            if (hu_sensitivity_requires_local(sens.level)) {
+            /* local_only LIVE: every model is already local — no switch. */
+            if (hu_sensitivity_requires_local(sens.level) && !hu_local_only_enforced()) {
                 const char *prev_model = turn_model;
                 if (agent->sota.degradation_config.s3_local_model &&
                     agent->sota.degradation_config.s3_local_model_len > 0) {
@@ -4317,7 +4247,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
 
         /* On-device → cloud fallback: if on-device model failed, retry with cloud reflexive */
         if (err != HU_OK && turn_model && turn_model_len > 0 && agent->config &&
-            agent->config->agent.mr_on_device_enabled) {
+            agent->config->agent.mr_on_device_enabled && !hu_local_only_enforced()) {
             hu_model_router_config_t fb_cfg = hu_model_router_default_config();
             if (fb_cfg.on_device_model && turn_model_len == fb_cfg.on_device_model_len &&
                 memcmp(turn_model, fb_cfg.on_device_model, turn_model_len) == 0 &&
@@ -4325,6 +4255,7 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                 hu_log_info("agent_turn", agent->observer,
                             "on-device failed (err=%d), falling back to cloud: %s", err,
                             fb_cfg.reflexive_model);
+                hu_chat_response_free(agent->alloc, &resp); /* degrade honest-failure text */
                 memset(&resp, 0, sizeof(resp));
                 err = agent->provider.vtable->chat(agent->provider.ctx, agent->alloc, &req,
                                                    fb_cfg.reflexive_model,
@@ -6160,12 +6091,10 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                                         HU_OK &&
                                     got_blob) {
                                     if (got_blob->caption && got_blob->caption_len > 0)
-                                        hu_log_info(
-                                            "agent_turn", agent->observer,
-                                            "W10 blob %lld caption: %.*s", (long long)blob_id,
-                                            (int)(got_blob->caption_len < 80 ? got_blob->caption_len
-                                                                             : 80),
-                                            got_blob->caption);
+                                        hu_log_info("agent_turn", agent->observer,
+                                                    "W10 blob %lld caption: %s", (long long)blob_id,
+                                                    HU_LOG_TEXT(got_blob->caption,
+                                                                got_blob->caption_len, 80));
                                     hu_memory_blob_free(agent->alloc, got_blob);
                                 }
                             }
@@ -6590,25 +6519,6 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                                 "violence=%.2f self_harm=%.2f hate=%.2f",
                                 mod_result.violence_score, mod_result.self_harm_score,
                                 mod_result.hate_score);
-                    if (mod_result.self_harm) {
-                        /* Crisis escalation: inject crisis resources */
-                        static const char crisis[] =
-                            "\n\nIf you're in crisis, please reach out: "
-                            "988 Suicide & Crisis Lifeline (call/text 988), "
-                            "Crisis Text Line (text HOME to 741741)";
-                        size_t orig_len = *response_len_out;
-                        size_t new_len = orig_len + sizeof(crisis) - 1;
-                        char *expanded =
-                            (char *)agent->alloc->alloc(agent->alloc->ctx, new_len + 1);
-                        if (expanded) {
-                            memcpy(expanded, *response_out, orig_len);
-                            memcpy(expanded + orig_len, crisis, sizeof(crisis) - 1);
-                            expanded[new_len] = '\0';
-                            agent->alloc->free(agent->alloc->ctx, *response_out, orig_len + 1);
-                            *response_out = expanded;
-                            *response_len_out = new_len;
-                        }
-                    }
                     if (mod_result.violence) {
                         hu_log_warn("agent_turn", NULL,
                                     "CRITICAL FIX 2026-05-26: violence flagged "
@@ -6622,20 +6532,6 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                                     "user-facing reply. Band-aid: replace with safe "
                                     "decline; proper fix is regenerate-with-sterner-prompt.",
                                     mod_result.violence_score);
-                        /* Replace unsafe output with a safe canned decline.
-                         * Seth-shaped, short, no bracket markers, no directive
-                         * text. Channel receives this and sends. */
-                        static const char safe_decline[] = "rather not get into that one";
-                        size_t safe_len = sizeof(safe_decline) - 1;
-                        char *safe = (char *)agent->alloc->alloc(agent->alloc->ctx, safe_len + 1);
-                        if (safe) {
-                            memcpy(safe, safe_decline, safe_len);
-                            safe[safe_len] = '\0';
-                            agent->alloc->free(agent->alloc->ctx, *response_out,
-                                               *response_len_out + 1);
-                            *response_out = safe;
-                            *response_len_out = safe_len;
-                        }
                     }
                     if (mod_result.hate) {
                         hu_log_info("agent_turn", NULL,
@@ -6644,15 +6540,20 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                                     "[SAFETY] boundary directive to outgoing — same "
                                     "class of bug as the violence branch above)",
                                     mod_result.hate_score);
-                        /* Replace unsafe output with a safe canned decline.
-                         * Prior code prepended the boundary directive text to
-                         * *response_out, which sent the directive verbatim to
-                         * the recipient. */
-                        static const char hate_decline[] = "i'm gonna pass on this one";
-                        size_t safe_len = sizeof(hate_decline) - 1;
+                    }
+                    /* Replace unsafe output with a short decline (never the
+                     * directive text, which once reached the recipient). On a
+                     * crisis turn the SHIELD-005 floor instead: never a deflection. */
+                    if (mod_result.violence || mod_result.hate) {
+                        size_t safe_len = 0;
+                        const char *decline = hu_self_harm_decline_or_floor(
+                            msg, msg_len,
+                            mod_result.violence ? "rather not get into that one"
+                                                : "i'm gonna pass on this one",
+                            &safe_len);
                         char *safe = (char *)agent->alloc->alloc(agent->alloc->ctx, safe_len + 1);
                         if (safe) {
-                            memcpy(safe, hate_decline, safe_len);
+                            memcpy(safe, decline, safe_len);
                             safe[safe_len] = '\0';
                             agent->alloc->free(agent->alloc->ctx, *response_out,
                                                *response_len_out + 1);
@@ -6660,6 +6561,26 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                             *response_len_out = safe_len;
                         }
                     }
+                }
+            }
+
+            /* SHIELD-005: 988 keyed to the INBOUND message, never to the reply's own
+             * words (a reply offering 988 used to trip it and gain a second copy). */
+            if (*response_out && response_len_out &&
+                hu_self_harm_reply_needs_resources(msg, msg_len, *response_out,
+                                                   *response_len_out)) {
+                size_t rl = 0;
+                const char *line = hu_self_harm_resource_line(&rl);
+                size_t orig_len = *response_len_out, new_len = orig_len + 2 + rl;
+                char *expanded = (char *)agent->alloc->alloc(agent->alloc->ctx, new_len + 1);
+                if (expanded) {
+                    memcpy(expanded, *response_out, orig_len);
+                    memcpy(expanded + orig_len, "\n\n", 2);
+                    memcpy(expanded + orig_len + 2, line, rl);
+                    expanded[new_len] = '\0';
+                    agent->alloc->free(agent->alloc->ctx, *response_out, orig_len + 1);
+                    *response_out = expanded;
+                    *response_len_out = new_len;
                 }
             }
 
@@ -6801,6 +6722,11 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
                     *response_len_out = grounded_len;
                 }
             }
+            /* HU_CONFIDENCE_BOUNDARY backstop (live; shadow counts). */
+            if (*response_out && response_len_out)
+                (void)hu_confidence_backstop_apply(agent->alloc, agent->memory_session_id,
+                                                   agent->memory_session_id_len, response_out,
+                                                   response_len_out);
 
             /* No heuristic fact store here. The regex SPO extractor ran on both the
              * inbound text and our own reply, always with subject "user", and in
@@ -7050,7 +6976,9 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             *response_len_out = 0;
         return HU_ERR_OUT_OF_MEMORY;
     }
+    hu_turn_scope_t scope = hu_turn_scope_enter(); /* local-only caller tag + X-HU-Purpose */
     hu_error_t err = agent_turn_run(turn_ctx, agent, msg, msg_len, response_out, response_len_out);
+    hu_turn_scope_exit(scope);
     hu_turn_ctx_free(turn_ctx);
     return err;
 }

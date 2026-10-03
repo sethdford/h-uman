@@ -1,17 +1,22 @@
 #include "human/agent.h"
 #include "human/channel.h"
 #include "human/cognition/emotional.h"
+#include "human/config.h"
 #include "human/context/conversation.h"
 #include "human/core/error.h"
 #include "human/core/gate_mode.h"
+#include "human/core/local_only_guard.h"
 #include "human/core/log.h"
 #include "human/core/string.h"
 #include "human/daemon/common.h"
 #include "human/daemon/director.h"
+#include "human/daemon/director_v2.h"
 #include "human/daemon_comfort_summary.h"
 #include "human/memory.h"
 #include "human/memory/deep_extract.h"
 #include "human/provider.h"
+#include "human/providers/factory.h"
+#include "human/providers/local_only_config.h"
 
 /* Private agent header: the G6 wiring below sets agent-internal director
  * state (borrowed scene pointer + history ring). Same cross-module
@@ -36,6 +41,44 @@ bool g_classify_provider_ok = false;
 const char *g_classify_model = "gemini-3.1-flash-lite";
 size_t g_classify_model_len = 21;
 
+void hu_daemon_classify_provider_init(hu_allocator_t *alloc, const struct hu_config *config,
+                                      hu_agent_t *agent, bool any_llm_decides) {
+    if (!any_llm_decides || g_classify_provider_ok)
+        return;
+    if (hu_local_only_enforced()) {
+        /* local_only: the director reads the last messages of the thread, so
+         * it runs on the agent's own provider and model — never a cloud one.
+         * Borrowed, not owned: nothing deinits g_classify_provider. */
+        if (agent && agent->provider.vtable && agent->model_name && agent->model_name_len > 0 &&
+            hu_config_primary_is_local(config)) {
+            g_classify_provider = agent->provider;
+            g_classify_model = agent->model_name;
+            g_classify_model_len = agent->model_name_len;
+            g_classify_provider_ok = true;
+            hu_log_info("human", NULL, "classify provider: local_only — primary model %.*s",
+                        (int)agent->model_name_len, agent->model_name);
+        } else {
+            hu_log_warn("human", NULL,
+                        "classify provider: local_only and no local primary — director and LLM "
+                        "emotion detection skipped");
+        }
+        return;
+    }
+    const char *gemini_url = config ? hu_config_get_provider_base_url(config, "gemini") : NULL;
+    size_t gemini_url_len = gemini_url ? strlen(gemini_url) : 0;
+    hu_error_t cp_err = hu_provider_create(alloc, "gemini", 6, NULL, 0, gemini_url, gemini_url_len,
+                                           &g_classify_provider);
+    if (cp_err == HU_OK) {
+        g_classify_provider_ok = true;
+        hu_log_info("human", NULL, "hybrid routing: classify provider ready (gemini flash-lite)");
+    } else {
+        hu_log_error("human", NULL,
+                     "hybrid routing: classify provider failed (%s), "
+                     "classifications will be skipped",
+                     hu_error_string(cp_err));
+    }
+}
+
 /* W9: real-time emotion detection stays here (per-message, from live
  * history) while the world model caches a snapshot. The two compose:
  * this function feeds live state, the world model feeds trend. */
@@ -52,9 +95,13 @@ hu_emotional_state_t hu_daemon_detect_emotion(hu_allocator_t *alloc, hu_agent_t 
 #else
     /* Hybrid routing: prefer fast cloud classify provider when available */
     if (g_classify_provider_ok && g_classify_provider.vtable &&
-        g_classify_provider.vtable->chat_with_system)
-        return hu_conversation_detect_emotion_llm(alloc, &g_classify_provider, g_classify_model,
-                                                  g_classify_model_len, entries, count);
+        g_classify_provider.vtable->chat_with_system) {
+        const char *lo_prev = hu_local_only_set_caller("director");
+        hu_emotional_state_t st = hu_conversation_detect_emotion_llm(
+            alloc, &g_classify_provider, g_classify_model, g_classify_model_len, entries, count);
+        (void)hu_local_only_set_caller(lo_prev);
+        return st;
+    }
     if (agent && agent->provider.vtable && agent->provider.vtable->chat_with_system)
         return hu_conversation_detect_emotion_llm(alloc, &agent->provider, agent->model_name,
                                                   agent->model_name_len, entries, count);
@@ -399,11 +446,13 @@ bool hu_daemon_director_call(hu_allocator_t *alloc, const char *combined, size_t
     size_t sys_len = hu_daemon_director_system_prompt(sys_prompt, sys_cap);
     char *raw = NULL;
     size_t raw_len = 0;
+    const char *lo_prev = hu_local_only_set_caller("director");
     hu_error_t err = sys_len == 0
                          ? HU_ERR_INTERNAL
                          : g_classify_provider.vtable->chat_with_system(
                                g_classify_provider.ctx, alloc, sys_prompt, sys_len, user_buf, pos,
                                g_classify_model, g_classify_model_len, 0.4, &raw, &raw_len);
+    (void)hu_local_only_set_caller(lo_prev);
     alloc->free(alloc->ctx, sys_prompt, sys_cap);
 
     if (err != HU_OK || !raw || raw_len == 0 || raw_len > 500) {
@@ -424,6 +473,33 @@ bool hu_daemon_director_call(hu_allocator_t *alloc, const char *combined, size_t
     alloc->free(alloc->ctx, raw, raw_len + 1);
     return true;
 #endif
+}
+
+bool hu_daemon_director_decide(hu_allocator_t *alloc, hu_agent_t *agent, hu_channel_t *ch,
+                               const char *key, size_t key_len, const char *combined,
+                               size_t combined_len, const hu_channel_history_entry_t *entries,
+                               size_t entry_count, const char *situation,
+                               hu_director_result_t *result) {
+    /* HU_DIRECTOR_V2 (#590): OFF is exactly hu_daemon_director_call; SHADOW
+     * returns v1 and runs v2 off the reply path; LIVE runs v2, v1 on failure. */
+    return hu_director_v2_decide(alloc, agent, ch, key, key_len, combined, combined_len, entries,
+                                 entry_count, situation, result);
+}
+
+bool hu_daemon_director_silence_overridden(const char *msg, size_t msg_len) {
+    if (!msg || msg_len == 0)
+        return false;
+    if (memchr(msg, '?', msg_len) != NULL)
+        return true;
+    if (msg_len >= 30)
+        return false;
+    static const char *const k_greetings[] = {"hey", "Hey", "hi",    "Hi",    "yo",
+                                              "Yo",  "sup", "hello", "Hello", "what"};
+    for (size_t i = 0; i < sizeof(k_greetings) / sizeof(k_greetings[0]); i++) {
+        if (strstr(msg, k_greetings[i]))
+            return true;
+    }
+    return false;
 }
 
 /* F27: Classify our response type for comfort pattern learning.

@@ -46,6 +46,17 @@ typedef struct {
      * same place sender_handle / target_thread_id / target_message_ref
      * are freed. */
     const char *emoji;
+    /* DEF-8 (2026-10-02): what the reaction points AT, resolved by the
+     * producer from the same chat.db statement. target_is_ours = 1 when a
+     * CONTACT reacted to an is_from_me row — Seth's own typing included, so it
+     * is necessary, not sufficient: the handler attributes the row to the
+     * daemon only through an outbound_sends match. target_rowid = that row's
+     * chat.db ROWID; target_prev_own_rowid = the previous is_from_me ROWID in
+     * the same chat (0 = none); target_sent_ms = its send time (0 = unknown). */
+    int target_is_ours;
+    int64_t target_rowid;
+    int64_t target_prev_own_rowid;
+    int64_t target_sent_ms;
 } hu_reaction_event_t;
 
 /* iMessage tapback codes — AUTHORITY for the full set comes from the
@@ -73,6 +84,10 @@ typedef struct {
 hu_error_t hu_reaction_normalize_imessage(int32_t associated_message_type,
                                           hu_reaction_kind_t *out_kind,
                                           hu_reaction_polarity_t *out_polarity);
+
+/* Polarity of a custom-emoji tapback from its glyph: known negative ->
+ * NEGATIVE, known positive -> POSITIVE, unknown / absent -> NEUTRAL. */
+hu_reaction_polarity_t hu_reaction_emoji_polarity(const char *emoji);
 
 hu_error_t hu_reaction_normalize_slack(const char *reactji_name, hu_reaction_kind_t *out_kind,
                                        hu_reaction_polarity_t *out_polarity);

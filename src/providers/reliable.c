@@ -3,6 +3,7 @@
 #include "human/core/log.h"
 #include "human/core/string.h"
 #include "human/providers/error_classify.h"
+#include "human/providers/local_only.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -46,6 +47,11 @@ typedef struct hu_reliable_ctx {
      * circuit breaker (the server is up; it just said nothing). */
     bool empty_failover;
     bool last_empty;
+    /* Is the primary on-device? Local-only prompt spans (local_only.h) are
+     * stripped from every attempt on a provider that is not. Defaults to the
+     * primary's get_name; from_config overrides it with the configured name
+     * because an mlx_local instance reports "compatible". */
+    bool inner_local;
     /* Which provider answered the last call: 0 primary, e+1 extras[e], -1 none. */
     int last_served;
 } hu_reliable_ctx_t;
@@ -109,9 +115,10 @@ bool hu_reliable_error_ends_provider_attempts(hu_error_t err) {
  * these. Retrying them only multiplies the round-trips and the latency. */
 static bool error_code_is_terminal(hu_error_t err) {
     switch (err) {
-    case HU_ERR_PROVIDER_AUTH:    /* 401 — credentials will not change in 500ms */
-    case HU_ERR_INVALID_ARGUMENT: /* malformed request / unknown model */
-    case HU_ERR_NOT_SUPPORTED:    /* provider cannot serve this at all */
+    case HU_ERR_PROVIDER_AUTH:     /* 401 — credentials will not change in 500ms */
+    case HU_ERR_INVALID_ARGUMENT:  /* malformed request / unknown model */
+    case HU_ERR_NOT_SUPPORTED:     /* provider cannot serve this at all */
+    case HU_ERR_PERMISSION_DENIED: /* local_only refusal: policy, not transport */
         return true;
     default:
         return false;
@@ -360,6 +367,72 @@ static hu_error_t try_chat(hu_reliable_ctx_t *r, hu_allocator_t *alloc, hu_provi
     return final_failure(r);
 }
 
+/* The request a non-local attempt may send (see local_only.h); logs a strip. */
+static hu_error_t prepare_non_local(hu_allocator_t *alloc, const hu_chat_request_t *request,
+                                    bool endpoint_local, const char *model, size_t model_len,
+                                    hu_local_only_request_t *lo, const hu_chat_request_t **use) {
+    hu_error_t err = hu_local_only_request_prepare(alloc, request, lo, use);
+    if (lo->stripped > 0)
+        hu_local_only_log_strip_request(request, endpoint_local, model, model_len);
+    return err;
+}
+
+/* `endpoint_local`: this attempt's provider keeps prompts on the machine. The
+ * attempt is local only if that holds AND `model` is not a cloud model name
+ * (hu_local_only_attempt_is_local). A non-local attempt gets copies with every
+ * private span removed (and logs it); a strip that cannot allocate fails the
+ * attempt (never sends the unstripped text). */
+static hu_error_t attempt_chat_with_system(hu_reliable_ctx_t *r, hu_allocator_t *alloc,
+                                           hu_provider_t *prov, bool endpoint_local,
+                                           const char *system_prompt, size_t system_prompt_len,
+                                           const char *message, size_t message_len,
+                                           const char *model, size_t model_len, double temperature,
+                                           char **out, size_t *out_len) {
+    if (hu_local_only_attempt_is_local(endpoint_local, model, model_len))
+        return try_chat_with_system(r, alloc, prov, system_prompt, system_prompt_len, message,
+                                    message_len, model, model_len, temperature, out, out_len);
+    char *sp = NULL, *mp = NULL;
+    size_t sp_len = 0, mp_len = 0;
+    hu_error_t err = hu_local_only_strip(alloc, system_prompt, system_prompt_len, &sp, &sp_len);
+    if (err == HU_OK)
+        err = hu_local_only_strip(alloc, message, message_len, &mp, &mp_len);
+    if (sp)
+        hu_local_only_log_strip(system_prompt, system_prompt_len, endpoint_local, model, model_len);
+    else if (mp)
+        hu_local_only_log_strip(message, message_len, endpoint_local, model, model_len);
+    if (err == HU_OK)
+        err = try_chat_with_system(r, alloc, prov, sp ? sp : system_prompt,
+                                   sp ? sp_len : system_prompt_len, mp ? mp : message,
+                                   mp ? mp_len : message_len, model, model_len, temperature, out,
+                                   out_len);
+    if (sp)
+        alloc->free(alloc->ctx, sp, sp_len + 1);
+    if (mp)
+        alloc->free(alloc->ctx, mp, mp_len + 1);
+    return err;
+}
+
+static hu_error_t attempt_chat(hu_reliable_ctx_t *r, hu_allocator_t *alloc, hu_provider_t *prov,
+                               bool endpoint_local, const hu_chat_request_t *request,
+                               const char *model, size_t model_len, double temperature,
+                               hu_chat_response_t *out) {
+    if (hu_local_only_attempt_is_local(endpoint_local, model, model_len))
+        return try_chat(r, alloc, prov, request, model, model_len, temperature, out);
+    hu_local_only_request_t lo;
+    const hu_chat_request_t *use = NULL;
+    hu_error_t err = prepare_non_local(alloc, request, endpoint_local, model, model_len, &lo, &use);
+    if (err == HU_OK)
+        err = try_chat(r, alloc, prov, use, model, model_len, temperature, out);
+    hu_local_only_request_release(alloc, &lo);
+    return err;
+}
+
+/* An extra is local when from_config marked its endpoint local, or it is an
+ * in-process backend by name. */
+static bool extra_is_local(const hu_reliable_ctx_t *r, size_t e) {
+    return r->extras[e].local || hu_local_only_provider_is_local(&r->extras[e].provider);
+}
+
 static hu_error_t reliable_chat_with_system(void *ctx, hu_allocator_t *alloc,
                                             const char *system_prompt, size_t system_prompt_len,
                                             const char *message, size_t message_len,
@@ -382,9 +455,9 @@ static hu_error_t reliable_chat_with_system(void *ctx, hu_allocator_t *alloc,
 
         /* Try primary provider (skip if circuit open) */
         if (!circuit_skip_primary(r)) {
-            err =
-                try_chat_with_system(r, alloc, &r->inner, system_prompt, system_prompt_len, message,
-                                     message_len, cur_model, cur_len, temperature, out, out_len);
+            err = attempt_chat_with_system(r, alloc, &r->inner, r->inner_local, system_prompt,
+                                           system_prompt_len, message, message_len, cur_model,
+                                           cur_len, temperature, out, out_len);
             if (err == HU_OK) {
                 circuit_record_success(r);
                 r->last_served = 0;
@@ -398,9 +471,9 @@ static hu_error_t reliable_chat_with_system(void *ctx, hu_allocator_t *alloc,
          * when the operator declared model fallbacks. */
         hu_model_ref_t xm = extras_model(chain, m, chain_count);
         for (size_t e = 0; e < r->extras_count; e++) {
-            err = try_chat_with_system(r, alloc, &r->extras[e].provider, system_prompt,
-                                       system_prompt_len, message, message_len, xm.model,
-                                       xm.model_len, temperature, out, out_len);
+            err = attempt_chat_with_system(r, alloc, &r->extras[e].provider, extra_is_local(r, e),
+                                           system_prompt, system_prompt_len, message, message_len,
+                                           xm.model, xm.model_len, temperature, out, out_len);
             if (err == HU_OK) {
                 r->last_served = (int)e + 1;
                 alloc->free(alloc->ctx, chain, chain_count * sizeof(hu_model_ref_t));
@@ -431,7 +504,8 @@ static hu_error_t reliable_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_
         size_t cur_len = chain[m].model_len;
 
         if (!circuit_skip_primary(r)) {
-            err = try_chat(r, alloc, &r->inner, request, cur_model, cur_len, temperature, out);
+            err = attempt_chat(r, alloc, &r->inner, r->inner_local, request, cur_model, cur_len,
+                               temperature, out);
             if (err == HU_OK) {
                 circuit_record_success(r);
                 r->last_served = 0;
@@ -445,8 +519,8 @@ static hu_error_t reliable_chat(void *ctx, hu_allocator_t *alloc, const hu_chat_
          * primary's model and is their last resort. See extras_model(). */
         hu_model_ref_t xm = extras_model(chain, m, chain_count);
         for (size_t e = 0; e < r->extras_count; e++) {
-            err = try_chat(r, alloc, &r->extras[e].provider, request, xm.model, xm.model_len,
-                           temperature, out);
+            err = attempt_chat(r, alloc, &r->extras[e].provider, extra_is_local(r, e), request,
+                               xm.model, xm.model_len, temperature, out);
             if (err == HU_OK) {
                 r->last_served = (int)e + 1;
                 alloc->free(alloc->ctx, chain, chain_count * sizeof(hu_model_ref_t));
@@ -536,6 +610,25 @@ static bool reliable_supports_streaming(void *ctx) {
     return false;
 }
 
+/* One stream attempt; a non-local provider gets the request without its
+ * local-only spans (same rule as try_chat). */
+static hu_error_t try_stream(hu_allocator_t *alloc, hu_provider_t *prov, bool endpoint_local,
+                             const hu_chat_request_t *request, const char *model, size_t model_len,
+                             double temperature, hu_stream_callback_t callback, void *callback_ctx,
+                             hu_stream_chat_result_t *out) {
+    if (hu_local_only_attempt_is_local(endpoint_local, model, model_len))
+        return prov->vtable->stream_chat(prov->ctx, alloc, request, model, model_len, temperature,
+                                         callback, callback_ctx, out);
+    hu_local_only_request_t lo;
+    const hu_chat_request_t *use = NULL;
+    hu_error_t err = prepare_non_local(alloc, request, endpoint_local, model, model_len, &lo, &use);
+    if (err == HU_OK)
+        err = prov->vtable->stream_chat(prov->ctx, alloc, use, model, model_len, temperature,
+                                        callback, callback_ctx, out);
+    hu_local_only_request_release(alloc, &lo);
+    return err;
+}
+
 static hu_error_t reliable_stream_chat(void *ctx, hu_allocator_t *alloc,
                                        const hu_chat_request_t *request, const char *model,
                                        size_t model_len, double temperature,
@@ -544,9 +637,8 @@ static hu_error_t reliable_stream_chat(void *ctx, hu_allocator_t *alloc,
     hu_reliable_ctx_t *r = (hu_reliable_ctx_t *)ctx;
     /* Try inner provider first (fail-fast: no partial-stream replay) */
     if (r->inner.vtable && r->inner.vtable->stream_chat) {
-        hu_error_t err =
-            r->inner.vtable->stream_chat(r->inner.ctx, alloc, request, model, model_len,
-                                         temperature, callback, callback_ctx, out);
+        hu_error_t err = try_stream(alloc, &r->inner, r->inner_local, request, model, model_len,
+                                    temperature, callback, callback_ctx, out);
         if (err == HU_OK)
             return HU_OK;
     }
@@ -554,8 +646,8 @@ static hu_error_t reliable_stream_chat(void *ctx, hu_allocator_t *alloc,
     for (size_t e = 0; e < r->extras_count; e++) {
         hu_provider_t *ep = &r->extras[e].provider;
         if (ep->vtable && ep->vtable->stream_chat) {
-            hu_error_t err = ep->vtable->stream_chat(ep->ctx, alloc, request, model, model_len,
-                                                     temperature, callback, callback_ctx, out);
+            hu_error_t err = try_stream(alloc, ep, extra_is_local(r, e), request, model, model_len,
+                                        temperature, callback, callback_ctx, out);
             if (err == HU_OK)
                 return HU_OK;
         }
@@ -606,6 +698,18 @@ hu_error_t hu_reliable_provider_create(hu_allocator_t *alloc, const hu_reliable_
     r->cb_recovery_seconds =
         config->recovery_timeout_seconds > 0 ? config->recovery_timeout_seconds : 60;
     return HU_OK;
+}
+
+void hu_reliable_set_primary_local(hu_provider_t *reliable, bool local) {
+    if (!reliable || !reliable->ctx)
+        return;
+    ((hu_reliable_ctx_t *)reliable->ctx)->inner_local = local;
+}
+
+bool hu_reliable_primary_is_local(const hu_provider_t *reliable) {
+    if (!reliable || !reliable->ctx || reliable->vtable != &reliable_vtable)
+        return false;
+    return ((const hu_reliable_ctx_t *)reliable->ctx)->inner_local;
 }
 
 hu_error_t hu_reliable_primary(const hu_provider_t *reliable, hu_provider_t *out) {
@@ -716,6 +820,7 @@ hu_error_t hu_reliable_create_ex(hu_allocator_t *alloc, hu_provider_t inner, uin
     r->cb_failure_threshold = HU_RELIABLE_CIRCUIT_DEFAULT_THRESHOLD;
     r->cb_recovery_seconds = HU_RELIABLE_CIRCUIT_DEFAULT_RECOVERY_SECS;
     r->empty_failover = true;
+    r->inner_local = hu_local_only_provider_is_local(&inner);
     r->last_served = -1;
 
     if (extras_count > 0 && extras) {

@@ -32,6 +32,7 @@
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include "human/core/string.h"
 #include "human/observer.h"
 
@@ -1084,24 +1085,22 @@ void hu_guard_log_selection_audit(const void *observer, const char *contact_key,
                                   int best_quality, size_t response_len, const char *response,
                                   size_t response_text_len) {
     hu_observer_t *obs = (hu_observer_t *)observer;
-    int preview_n = (int)(response_text_len < 48 ? response_text_len : 48);
     hu_log_info("response_guard", obs,
-                "selection_audit contact=%.*s candidates=%zu best=%zu quality=%d len=%zu",
-                (int)(contact_key_len < 32 ? contact_key_len : 32), contact_key ? contact_key : "",
-                candidate_count, best_idx, best_quality, response_len);
+                "selection_audit contact=%s candidates=%zu best=%zu quality=%d len=%zu",
+                HU_LOG_WHO(contact_key, contact_key_len), candidate_count, best_idx, best_quality,
+                response_len);
     if (response && response_text_len > 0) {
         if (hu_guard_has_numbered_analysis_dump(response, response_text_len))
             hu_log_warn("response_guard", obs,
                         "selection_audit: shipped response has G1 numbered-analysis pattern "
-                        "(contact=%.*s best=%zu preview=%.*s)",
-                        (int)(contact_key_len < 32 ? contact_key_len : 32),
-                        contact_key ? contact_key : "", best_idx, preview_n, response);
+                        "(contact=%s best=%zu preview=%s)",
+                        HU_LOG_WHO(contact_key, contact_key_len), best_idx,
+                        HU_LOG_TEXT(response, response_text_len, 48));
         if (hu_guard_has_self_talk_pattern(response, response_text_len))
             hu_log_warn("response_guard", obs,
                         "selection_audit: shipped response has G2 self-talk pattern "
-                        "(contact=%.*s best=%zu)",
-                        (int)(contact_key_len < 32 ? contact_key_len : 32),
-                        contact_key ? contact_key : "", best_idx);
+                        "(contact=%s best=%zu)",
+                        HU_LOG_WHO(contact_key, contact_key_len), best_idx);
     }
 }
 

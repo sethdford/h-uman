@@ -4,10 +4,15 @@
  *
  * TZ is pinned to a POSIX US-Eastern rule. 2026-02-28 is a Saturday. */
 #include "human/agent.h"
+#include "human/agent/governor.h"
 #include "human/channel.h"
 #include "human/daemon.h"
 #include "human/daemon/briefing.h"
 #include "human/daemon/person_dates.h"
+#include "human/daemon/unprompted_gate.h"
+#include "human/daemon/unprompted_sends.h"
+#include "human/daemon_contact_optout.h"
+#include "human/daemon_proactive.h"
 #include "human/memory.h"
 #include "human/persona.h"
 #include "test_framework.h"
@@ -389,6 +394,93 @@ static void date_drafts_skip_and_shadow_send_nothing_to_the_contact(void) {
     HU_ASSERT_FALSE(say_at(&f, "send", at(2030, 3, 2, 10, 1), reply, sizeof(reply)));
     fixture_end(&f);
 }
+/* An approved note is still a message the contact did not ask for: it goes
+ * through the unprompted gate stack, so a contact who opted out is never
+ * texted, and the owner is told why instead of believing it went. */
+static void date_drafts_never_reach_a_contact_who_opted_out(void) {
+    fixture_t f;
+    fixture_begin(&f, "live");
+    setenv("HU_DATE_NUDGES", "live", 1);
+    char reply[256];
+    HU_ASSERT_TRUE(say(&f, OWNER, "mom's birthday is march 3", reply, sizeof(reply)));
+    hu_date_nudges_tick(&f.agent, &f.svc, 1, at(2032, 3, 3, 9, 5));
+    HU_ASSERT_EQ(f.rec.sends, 1); /* the question to the owner */
+    HU_ASSERT_TRUE(say_at(&f, "send", at(2032, 3, 3, 9, 8), reply, sizeof(reply)));
+    HU_ASSERT_TRUE(hu_daemon_contact_optout_observe(&f.agent, MOTHER, strlen(MOTHER),
+                                                    "please stop texting me", 22));
+    hu_date_nudges_tick(&f.agent, &f.svc, 1, at(2032, 3, 3, 9, 9));
+    HU_ASSERT_EQ(f.rec.sends, 2);
+    HU_ASSERT_STR_EQ(f.rec.target, OWNER); /* nothing reached Betty */
+    HU_ASSERT_STR_EQ(f.rec.text, "couldn't send your note to Betty (contact_optout)");
+    fixture_end(&f);
+}
+
+/* Runs the proactive check-in gate chain for `who` through the fixture's
+ * recording channel. Returns whether it was sent. */
+static bool routine_checkin(fixture_t *f, const char *who, int64_t now) {
+    hu_contact_profile_t cp = {0};
+    cp.contact_id = (char *)who;
+    hu_proactive_budget_t budget = {0};
+    budget.daily_max = 6;
+    budget.weekly_max = 15;
+    budget.relationship_multiplier = 1.0;
+    budget.cool_off_after_unanswered = UINT8_MAX;
+    time_t t = (time_t)now;
+    struct tm lt;
+    localtime_r(&t, &lt);
+    char text[64] = "hey hows your week going";
+    size_t len = strlen(text);
+    return hu_daemon_proactive_gate_and_send(&f->agent, &f->alloc, &f->channel, &cp, "imessage",
+                                             who, strlen(who), text, &len, now, &budget, NULL,
+                                             (int32_t)lt.tm_gmtoff, NULL);
+}
+
+/* A date note due today owns the contact's one unprompted slot: the routine
+ * check-in (proposer path and F25) steps aside for the day, the note goes
+ * out, and the cap is NOT loosened — a third unprompted send is refused. */
+static void date_note_due_today_pre_empts_the_routine_checkin(void) {
+    fixture_t f;
+    fixture_begin(&f, "live");
+    setenv("HU_DATE_NUDGES", "live", 1);
+    char reply[256];
+    HU_ASSERT_TRUE(say(&f, OWNER, "mom's birthday is march 3", reply, sizeof(reply)));
+
+    /* 09:01 on Betty's birthday, before anyone asked the owner: the routine
+     * check-in to Betty is skipped, F25 too ... */
+    int64_t t0 = at(2033, 3, 3, 9, 1);
+    HU_ASSERT_TRUE(hu_person_date_note_due_today(&f.agent, MOTHER, t0));
+    HU_ASSERT_FALSE(routine_checkin(&f, MOTHER, t0));
+    HU_ASSERT_EQ(f.rec.sends, 0);
+    hu_unprompted_gate_t g;
+    hu_daemon_unprompted_gate_init(&g, &f.alloc, &f.agent, "imessage", MOTHER, strlen(MOTHER), t0);
+    HU_ASSERT_EQ(hu_unprompted_send_check(&g, MOTHER, HU_UNPROMPTED_F25, t0, NULL, NULL, false),
+                 HU_UNPROMPTED_DENY_DATE_NOTE_TODAY);
+    /* ... while a contact with no date today is checked in on as usual. */
+    HU_ASSERT_FALSE(hu_person_date_note_due_today(&f.agent, SISTER, t0));
+    HU_ASSERT_TRUE(routine_checkin(&f, SISTER, t0));
+    HU_ASSERT_EQ(f.rec.sends, 1);
+    HU_ASSERT_STR_EQ(f.rec.target, SISTER);
+
+    /* The note itself is asked, approved and delivered to Betty. */
+    hu_date_nudges_tick(&f.agent, &f.svc, 1, at(2033, 3, 3, 9, 5));
+    HU_ASSERT_EQ(f.rec.sends, 2);
+    HU_ASSERT_STR_EQ(f.rec.target, OWNER);
+    HU_ASSERT_TRUE(say_at(&f, "send", at(2033, 3, 3, 9, 8), reply, sizeof(reply)));
+    hu_date_nudges_tick(&f.agent, &f.svc, 1, at(2033, 3, 3, 9, 9));
+    HU_ASSERT_EQ(f.rec.sends, 3);
+    HU_ASSERT_STR_EQ(f.rec.target, MOTHER);
+    HU_ASSERT_STR_EQ(f.rec.text, "happy birthday mom!");
+
+    /* Third unprompted send to Betty today — a bump, which does not yield to
+     * the date — is refused by the cap the note charged. */
+    char bump[512] = "hey, no rush on that";
+    HU_ASSERT_FALSE(hu_daemon_sched_deliver(&f.alloc, &f.agent, &f.channel, "imessage", MOTHER,
+                                            bump, strlen(bump), sizeof(bump), HU_UNPROMPTED_BUMP,
+                                            at(2033, 3, 3, 9, 30)));
+    HU_ASSERT_EQ(f.rec.sends, 3);
+    fixture_end(&f);
+}
+
 static void date_drafts_cannot_be_approved_if_the_question_never_arrived(void) {
     fixture_t f;
     fixture_begin(&f, "live");
@@ -423,5 +515,7 @@ void run_daemon_person_dates_tests(void) {
     HU_RUN_TEST(date_drafts_send_the_owners_own_words_and_report_a_failure);
     HU_RUN_TEST(date_drafts_skip_and_shadow_send_nothing_to_the_contact);
     HU_RUN_TEST(date_drafts_cannot_be_approved_if_the_question_never_arrived);
+    HU_RUN_TEST(date_drafts_never_reach_a_contact_who_opted_out);
+    HU_RUN_TEST(date_note_due_today_pre_empts_the_routine_checkin);
 #endif
 }

@@ -57,6 +57,11 @@ const char *hu_director_form_name(hu_director_form_t form);
  * HU_DIRECTOR_FORMS is shadow or live. Length written, 0 if it did not fit. */
 size_t hu_daemon_director_system_prompt(char *buf, size_t cap);
 
+/* Set up g_classify_provider (director, emotion detection, double-text) when
+ * any channel runs llm_decides. Idempotent once it succeeds. */
+void hu_daemon_classify_provider_init(hu_allocator_t *alloc, const struct hu_config *config,
+                                      hu_agent_t *agent, bool any_llm_decides);
+
 /* Real-time emotion detection: test builds use heuristic-only (no LLM), production uses hybrid
  * routing via g_classify_provider when available. */
 hu_emotional_state_t hu_daemon_detect_emotion(hu_allocator_t *alloc, hu_agent_t *agent,
@@ -128,6 +133,24 @@ void hu_daemon_director_end_turn(hu_agent_t *agent);
  * different contact. Same-contact consecutive batches keep their history.
  * `key`/`key_len` is the batch session key. */
 void hu_daemon_director_contact_boundary(hu_agent_t *agent, const char *key, size_t key_len);
+
+/* The reactive path's director decision — the one seam both hu_service_run
+ * and the replay harness call, so a new director (HU_DIRECTOR_V2, PR #590)
+ * hooks HERE and the harness measures it: it delegates to
+ * hu_director_v2_decide, which is hu_daemon_director_call while HU_DIRECTOR_V2
+ * is off; agent/channel/key feed v2's per-contact and learned data.
+ * Returns true when `result` is valid. */
+bool hu_daemon_director_decide(hu_allocator_t *alloc, hu_agent_t *agent, hu_channel_t *ch,
+                               const char *key, size_t key_len, const char *combined,
+                               size_t combined_len, const hu_channel_history_entry_t *entries,
+                               size_t entry_count, const char *situation,
+                               hu_director_result_t *result);
+
+/* A director SILENCE is overridden to a text reply when the message asks a
+ * question or is a short (< 30 bytes) greeting. `msg` must be NUL-terminated
+ * (the greeting check is strstr). Shared by the daemon and the replay
+ * harness. */
+bool hu_daemon_director_silence_overridden(const char *msg, size_t msg_len);
 
 /* F27: Classify our response type for comfort pattern learning.
  * Heuristic: haha/lol/joke -> distraction; sorry/i understand/that sucks -> empathy;

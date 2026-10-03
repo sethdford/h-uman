@@ -3,6 +3,9 @@
 #include "human/cron.h"
 #include "human/daemon.h"
 #include "human/daemon_cron.h"
+#ifdef HU_ENABLE_SQLITE
+#include "human/memory.h"
+#endif
 #include "test_framework.h"
 #include <stdlib.h>
 #include <string.h>
@@ -266,6 +269,12 @@ static size_t run_checkin_under(const char *mode, char *target_out, size_t targe
     memset(&agent, 0, sizeof(agent));
     agent.alloc = &alloc;
     agent.scheduler = sched;
+#ifdef HU_ENABLE_SQLITE
+    /* Contact-targeted cron sends also pass the unprompted gate stack (#597),
+     * which fails closed without a ledger: give it one. */
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    agent.memory = &mem;
+#endif
     cron_mock_channel_t mock;
     memset(&mock, 0, sizeof(mock));
     hu_channel_t ch = {.ctx = &mock, .vtable = &cron_mock_vtable};
@@ -273,10 +282,21 @@ static size_t run_checkin_under(const char *mode, char *target_out, size_t targe
     memset(&svc, 0, sizeof(svc));
     svc.channel = &ch;
 
-    HU_ASSERT_EQ(hu_service_run_agent_cron(&alloc, &agent, &svc, 1), HU_OK);
+    /* Local noon: quiet hours must not decide this test by wall-clock time. */
+    time_t t = time(NULL);
+    struct tm tm;
+    localtime_r(&t, &tm);
+    tm.tm_hour = 12;
+    tm.tm_min = 0;
+    tm.tm_sec = 0;
+    tm.tm_isdst = -1;
+    HU_ASSERT_EQ(hu_service_run_agent_cron_at(&alloc, &agent, &svc, 1, mktime(&tm)), HU_OK);
     if (target_out && target_cap)
         snprintf(target_out, target_cap, "%s", mock.last_target);
     hu_cron_destroy(sched, &alloc);
+#ifdef HU_ENABLE_SQLITE
+    mem.vtable->deinit(mem.ctx);
+#endif
 
     if (saved) {
         setenv("HU_PROACTIVE_CHECKINS", saved, 1);
@@ -298,8 +318,13 @@ static void checkin_runner_shadow_writes_but_sends_nothing(void) {
 
 static void checkin_runner_live_sends_to_the_single_handle(void) {
     char target[64] = {0};
+#ifdef HU_ENABLE_SQLITE
     HU_ASSERT_EQ(run_checkin_under("live", target, sizeof(target)), 1u);
     HU_ASSERT_STR_EQ(target, "+15550001111");
+#else
+    /* Without SQLite the unprompted stack has no ledger and fails closed. */
+    HU_ASSERT_EQ(run_checkin_under("live", target, sizeof(target)), 0u);
+#endif
 }
 
 void run_daemon_cron_tests(void) {

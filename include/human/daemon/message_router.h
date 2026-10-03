@@ -2,6 +2,7 @@
 #define HU_DAEMON_MESSAGE_ROUTER_H
 
 #include "human/behavior/tapback_band.h"          /* hu_tapback_band_t */
+#include "human/channel.h"                        /* hu_reaction_type_t */
 #include "human/channels/imessage_action.h"       /* hu_reply_style_t */
 #include "human/channels/imessage_action_facts.h" /* hu_conversation_snapshot_t */
 #include "human/core/allocator.h"
@@ -99,14 +100,16 @@ hu_conversation_snapshot_t hu_daemon_snapshot_for_msg(int64_t msg_timestamp_sec)
  * the stale-tapback demotion), and react message id from the inbound msg. */
 struct hu_channel_loop_msg;
 
-/* Same, reporting whether TEXT reached the contact: false when the dispatch
- * ended as a bare tapback, was dropped by the parrot guard, or failed. The
- * underlying form (hu_daemon_dispatch_imessage_reply in human/daemon.h) has
- * the same _ex variant. */
+/* Same, reporting whether TEXT reached the contact: false when the bubble was
+ * dropped by the parrot guard or the send failed. The text is always sent;
+ * `director_reaction` is the reaction the director asked to add alongside it
+ * (HU_REACTION_NONE = none — the reply-style predicate never invents one).
+ * The underlying form (hu_daemon_dispatch_imessage_reply in human/daemon.h)
+ * has the same _ex variant. */
 hu_error_t hu_daemon_dispatch_imessage_reply_msg_ex(
     void *ch, const void *persona, const struct hu_agent *agent, const struct hu_config *config,
     const char *target, size_t target_len, const struct hu_channel_loop_msg *msg, const char *body,
-    size_t body_len, bool *out_text_sent, bool text_required);
+    size_t body_len, bool *out_text_sent, hu_reaction_type_t director_reaction);
 struct hu_channel;
 struct hu_persona;
 struct hu_conversation_snapshot;
@@ -115,7 +118,7 @@ hu_error_t hu_daemon_dispatch_imessage_reply_ex(
     const struct hu_config *config, const char *target, size_t target_len,
     const char *parent_msg_guid, size_t parent_guid_len, const char *body, size_t body_len,
     const struct hu_conversation_snapshot *snapshot, int64_t inferred_message_id_for_react,
-    bool *out_text_sent, bool text_required);
+    bool *out_text_sent, hu_reaction_type_t director_reaction);
 
 /* Record one production_outcomes row for a reply that was actually DELIVERED,
  * with the text exactly as sent (after the shaping stages and the dispatch
@@ -200,6 +203,12 @@ bool hu_daemon_hurt_withheld(const struct hu_persona *p, const char *key, size_t
  * note that a picture came and did not load, kept after any text, written to
  * buf. Anything else is returned unchanged. *len is updated. */
 const char *hu_daemon_unseen_photo(const char *text, size_t *len, char *buf, size_t cap);
+
+/* local_only: an image the model may not see. A bare "[Photo]" becomes
+ * "[They sent a photo]"; a caption is kept (U+FFFC dropped) with the note on
+ * the next line. Written to buf; *len is updated. Returns text unchanged only
+ * when buf is too small. */
+const char *hu_daemon_photo_placeholder(const char *text, size_t *len, char *buf, size_t cap);
 
 /* Quality-retry draft. The quality gate used to free a reply before asking for
  * a better one; when the retry came back empty the contact got nothing (Lexi,

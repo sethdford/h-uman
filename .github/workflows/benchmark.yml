@@ -36,6 +36,11 @@ jobs:
       - name: Check binary size regression
         if: github.event_name == 'pull_request'
         run: |
+          # Bumped 2026-10-03: 3280824 bytes, measured on train PR #612 (run
+          # 37084560068), which lands 14 individually reviewed PRs at once
+          # (#581 #586 #587 #590 #594 #595 #596 #597 #601 #603 #604 #608
+          # #609 #611): +8.1% over the 2026-09-30 baseline. A per-PR 5% gate
+          # can't pass a batch that size; 5% headroom is preserved from here.
           # Bumped 2026-09-30: 3035192 bytes, the size every PR built on
           # main@7cd0f9816 measured (runs 36704620089, 36700851661; main's own
           # push run 36709428238 reports 2964 KB). Main had grown 5.0% since
@@ -43,7 +48,7 @@ jobs:
           # bytes under the ceiling, and the binary grows in 4 KiB pages, so
           # the next page of growth from any PR failed this step. 5% headroom
           # is preserved for growth.
-          BASELINE=3035192
+          BASELINE=3280824
           ACTUAL=$(stat -c%s build/human 2>/dev/null || stat -f%z build/human)
           THRESHOLD=$((BASELINE * 105 / 100))
           if [ "$ACTUAL" -gt "$THRESHOLD" ]; then

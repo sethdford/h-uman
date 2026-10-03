@@ -394,7 +394,7 @@ static void text_sent_true_on_flat_send_false_when_send_refuses(void) {
     bool sent = true;
     hu_error_t err = hu_daemon_dispatch_imessage_reply_ex(
         &mock_ch, &mock_persona, NULL, &mock_config, "+15555551212", 12, NULL, 0, "hi", 2,
-        (const struct hu_conversation_snapshot *)&snap, 6, &sent, false);
+        (const struct hu_conversation_snapshot *)&snap, 6, &sent, HU_REACTION_NONE);
     HU_ASSERT_EQ((int)err, (int)HU_OK);
     HU_ASSERT_TRUE(sent);
     HU_ASSERT(send_calls >= 1);
@@ -406,7 +406,7 @@ static void text_sent_true_on_flat_send_false_when_send_refuses(void) {
     sent = true;
     err = hu_daemon_dispatch_imessage_reply_ex(
         &mock_ch, &mock_persona, NULL, &mock_config, "+15555551212", 12, NULL, 0, "hi", 2,
-        (const struct hu_conversation_snapshot *)&snap, 6, &sent, false);
+        (const struct hu_conversation_snapshot *)&snap, 6, &sent, HU_REACTION_NONE);
     HU_ASSERT_NEQ((int)err, (int)HU_OK);
     HU_ASSERT_FALSE(sent);
 }
@@ -418,40 +418,33 @@ static void text_sent_true_when_feature_disabled_falls_back_to_flat(void) {
     bool sent = false;
     hu_error_t err = hu_daemon_dispatch_imessage_reply_ex(
         &mock_ch, &mock_persona, NULL, &mock_config, "+15555551212", 12, "GUID", 4, "hi", 2,
-        (const struct hu_conversation_snapshot *)&snap, 1, &sent, false);
+        (const struct hu_conversation_snapshot *)&snap, 1, &sent, HU_REACTION_NONE);
     HU_ASSERT_EQ((int)err, (int)HU_OK);
     HU_ASSERT_TRUE(sent);
     HU_ASSERT_EQ(send_calls, 1);
 }
 
-/* The reply text was decided upstream, so it always goes out — sometimes with
- * a reaction first. This test used to accept a bare tapback (text dropped) as
- * a valid outcome; that was the bug: live 2026-09-29 07:54 a split reply lost
- * its first bubble to a bare tapback and its second bubble tapped the same
- * message again. Sweeps seeds the way fresh_parent_still_reacts_tapback_sometimes
- * does, and checks BOTH outcomes. */
-static void text_always_sent_sometimes_with_a_reaction(void) {
-    bool saw_reaction = false, saw_plain = false;
-    for (int64_t mid = 1; mid <= 400 && !(saw_reaction && saw_plain); mid++) {
-        setup_mocks();
-        mock_vtable.reply = NULL; /* no threaded slot: text goes out flat */
+/* The reply text was decided upstream, so it always goes out. A reaction rides
+ * along exactly when the director asked for one — across the predicate's seed
+ * space, so no random draw can add or drop it (DEF-2, 2026-10-01; before, the
+ * draw decided, and live 2026-09-29 07:54 a split reply lost its first bubble
+ * to a bare tapback). */
+static void director_reaction_rides_along_with_the_text(void) {
+    for (int64_t mid = 1; mid <= 400; mid++) {
         hu_conversation_snapshot_t snap = {0};
         snap.conv_density_msgs_per_min = 20.0f;
         snap.parent_seconds_ago = 5;
         bool sent = false;
+        setup_mocks();
+        mock_vtable.reply = NULL; /* no threaded slot: text goes out flat */
         hu_error_t err = hu_daemon_dispatch_imessage_reply_ex(
             &mock_ch, &mock_persona, NULL, &mock_config, "+15555551212", 12, NULL, 0, "hi", 2,
-            (const struct hu_conversation_snapshot *)&snap, mid, &sent, true);
+            (const struct hu_conversation_snapshot *)&snap, mid, &sent, HU_REACTION_HAHA);
         HU_ASSERT_EQ((int)err, (int)HU_OK);
         HU_ASSERT_TRUE(sent);
         HU_ASSERT_EQ(send_calls, 1);
-        if (react_emoji_calls > 0)
-            saw_reaction = true;
-        else
-            saw_plain = true;
+        HU_ASSERT_EQ(react_emoji_calls, 1);
     }
-    HU_ASSERT_TRUE(saw_reaction);
-    HU_ASSERT_TRUE(saw_plain);
 }
 
 /* A second bubble answering the same inbound message never taps it again. */
@@ -465,7 +458,7 @@ static void second_bubble_never_reacts_to_the_same_message_again(void) {
         bool sent = false;
         (void)hu_daemon_dispatch_imessage_reply_ex(
             &mock_ch, &mock_persona, NULL, &mock_config, "+15555551212", 12, NULL, 0, "hi", 2,
-            (const struct hu_conversation_snapshot *)&snap, mid, &sent, true);
+            (const struct hu_conversation_snapshot *)&snap, mid, &sent, HU_REACTION_HEART);
         if (react_emoji_calls == 0)
             continue;
         for (int bubble = 0; bubble < 3; bubble++) {
@@ -473,7 +466,8 @@ static void second_bubble_never_reacts_to_the_same_message_again(void) {
             mock_vtable.reply = NULL;
             (void)hu_daemon_dispatch_imessage_reply_ex(
                 &mock_ch, &mock_persona, NULL, &mock_config, "+15555551212", 12, NULL, 0,
-                "and you?", 8, (const struct hu_conversation_snapshot *)&snap, mid, &sent, true);
+                "and you?", 8, (const struct hu_conversation_snapshot *)&snap, mid, &sent,
+                HU_REACTION_HEART);
             HU_ASSERT_EQ(react_emoji_calls, 0);
             HU_ASSERT_EQ(send_calls, 1);
         }
@@ -482,26 +476,53 @@ static void second_bubble_never_reacts_to_the_same_message_again(void) {
     HU_ASSERT_TRUE(false); /* no seed reacted: the sweep proved nothing */
 }
 
-/* A single-bubble reply keeps the bare tapback: "ok see you at 5" can be
- * answered by a thumbs-up alone (critic, 2026-09-29). */
-static void single_reply_may_still_be_a_bare_tapback(void) {
-    bool saw_bare = false;
-    for (int64_t mid = 2000; mid <= 2400 && !saw_bare; mid++) {
+/* Round-1 fix: a director reaction must not cost the reply its threading. When
+ * the predicate draws THREADED, the reply still goes through reply() (native
+ * thread) and the reaction is added alongside it. */
+static void director_reaction_keeps_a_threaded_reply_threaded(void) {
+    bool saw_threaded = false;
+    for (int64_t mid = 7000; mid <= 7400; mid++) {
+        setup_mocks();
+        hu_conversation_snapshot_t snap = {0};
+        snap.parent_seconds_ago = 400;
+        snap.parent_is_question = true;
+        snap.other_threaded_replies_recent = 3;
+        snap.conv_density_msgs_per_min = 6.0f;
+        bool sent = false;
+        hu_error_t err = hu_daemon_dispatch_imessage_reply_ex(
+            &mock_ch, &mock_persona, NULL, &mock_config, "+15555551212", 12, "GUID-1", 6, "yes", 3,
+            (const struct hu_conversation_snapshot *)&snap, mid, &sent, HU_REACTION_HEART);
+        HU_ASSERT_EQ((int)err, (int)HU_OK);
+        HU_ASSERT_TRUE(sent);
+        HU_ASSERT_EQ(react_emoji_calls, 1);
+        HU_ASSERT_EQ(reply_calls + send_calls, 1);
+        if (reply_calls == 1)
+            saw_threaded = true;
+    }
+    HU_ASSERT_TRUE(saw_threaded);
+}
+
+/* DEF-2 (2026-10-01): the director chose TEXT and the model wrote it; the
+ * whole-reply dispatch (daemon.c) used to let the reply-style predicate's
+ * random draw (p_tap 0.15) answer with a bare thumbs-up instead — 15
+ * "tapback emoji sent" in prod. Across the seed space the text always goes out
+ * and no reaction is invented. */
+static void director_text_reply_is_never_swallowed_by_a_random_tapback(void) {
+    for (int64_t mid = 3000; mid <= 3400; mid++) {
         setup_mocks();
         mock_vtable.reply = NULL;
         hu_conversation_snapshot_t snap = {0};
         snap.conv_density_msgs_per_min = 20.0f;
         snap.parent_seconds_ago = 5;
-        bool sent = true;
-        (void)hu_daemon_dispatch_imessage_reply_ex(
+        bool sent = false;
+        hu_error_t err = hu_daemon_dispatch_imessage_reply_ex(
             &mock_ch, &mock_persona, NULL, &mock_config, "+15555551212", 12, NULL, 0, "hi", 2,
-            (const struct hu_conversation_snapshot *)&snap, mid, &sent, false);
-        if (react_emoji_calls > 0 && send_calls == 0) {
-            HU_ASSERT_FALSE(sent);
-            saw_bare = true;
-        }
+            (const struct hu_conversation_snapshot *)&snap, mid, &sent, HU_REACTION_NONE);
+        HU_ASSERT_EQ((int)err, (int)HU_OK);
+        HU_ASSERT_TRUE(sent);
+        HU_ASSERT_EQ(send_calls, 1);
+        HU_ASSERT_EQ(react_emoji_calls, 0);
     }
-    HU_ASSERT_TRUE(saw_bare);
 }
 
 static void msg_ex_parrot_guard_reports_no_text_sent(void) {
@@ -515,7 +536,7 @@ static void msg_ex_parrot_guard_reports_no_text_sent(void) {
     bool sent = true;
     hu_error_t err = hu_daemon_dispatch_imessage_reply_msg_ex(
         &mock_ch, &mock_persona, NULL, &mock_config, "+15555551212", 12,
-        (const struct hu_channel_loop_msg *)&m, echo, strlen(echo), &sent, false);
+        (const struct hu_channel_loop_msg *)&m, echo, strlen(echo), &sent, HU_REACTION_NONE);
     HU_ASSERT_EQ((int)err, (int)HU_OK); /* dropped, not failed */
     HU_ASSERT_FALSE(sent);
     HU_ASSERT_EQ(send_calls + reply_calls + react_emoji_calls, 0);
@@ -754,9 +775,8 @@ static void snapshot_age_sec_handles_unknown_and_future(void) {
 }
 
 /* Dispatcher-level: a stale parent (audit case, 100 min) must NEVER produce a
- * react_emoji, across the predicate's whole seed space — the tapback mass is
- * ~20% per draw with these facts, so 50 seeds would hit it many times if the
- * demotion gate were missing. The reply text must still be delivered. */
+ * react_emoji, even when the director asked for a reaction — never a late
+ * tapback. The reply text must still be delivered. */
 static void stale_parent_never_reacts_tapback(void) {
     hu_conversation_snapshot_t snap = {0};
     snap.parent_seconds_ago = 100 * 60;
@@ -764,34 +784,31 @@ static void stale_parent_never_reacts_tapback(void) {
     for (int64_t mid = 1; mid <= 50; mid++) {
         setup_mocks();
         mock_vtable.reply = NULL; /* keep THREADED off the table for determinism */
-        hu_error_t err = hu_daemon_dispatch_imessage_reply(
+        bool sent = false;
+        hu_error_t err = hu_daemon_dispatch_imessage_reply_ex(
             &mock_ch, &mock_persona, NULL, &mock_config, "+15555551212", 12, NULL, 0, "hi", 2,
-            (const struct hu_conversation_snapshot *)&snap, mid);
+            (const struct hu_conversation_snapshot *)&snap, 5000 + mid, &sent, HU_REACTION_HEART);
         HU_ASSERT_EQ((int)err, (int)HU_OK);
         HU_ASSERT_EQ(react_emoji_calls, 0); /* no late tapback, ever */
         HU_ASSERT(send_calls >= 1);         /* the text still flows */
     }
 }
 
-/* Control for the sweep above: with a FRESH parent the same facts DO reach
- * react_emoji within 50 seeds — proving the stale sweep is non-vacuous (the
- * gate, not the predicate weights, is what suppresses the reaction). */
+/* Control for the sweep above: with a FRESH parent the same director request
+ * DOES reach react_emoji — proving the stale sweep is non-vacuous (the band,
+ * not a missing reaction, is what suppresses it). */
 static void fresh_parent_still_reacts_tapback_sometimes(void) {
     hu_conversation_snapshot_t snap = {0};
     snap.parent_seconds_ago = 30;
-
-    bool tapback_hit = false;
-    for (int64_t mid = 1; mid <= 50 && !tapback_hit; mid++) {
-        setup_mocks();
-        mock_vtable.reply = NULL;
-        hu_error_t err = hu_daemon_dispatch_imessage_reply(
-            &mock_ch, &mock_persona, NULL, &mock_config, "+15555551212", 12, NULL, 0, "hi", 2,
-            (const struct hu_conversation_snapshot *)&snap, mid);
-        HU_ASSERT_EQ((int)err, (int)HU_OK);
-        if (react_emoji_calls > 0)
-            tapback_hit = true;
-    }
-    HU_ASSERT(tapback_hit);
+    setup_mocks();
+    mock_vtable.reply = NULL;
+    bool sent = false;
+    hu_error_t err = hu_daemon_dispatch_imessage_reply_ex(
+        &mock_ch, &mock_persona, NULL, &mock_config, "+15555551212", 12, NULL, 0, "hi", 2,
+        (const struct hu_conversation_snapshot *)&snap, 6001, &sent, HU_REACTION_HEART);
+    HU_ASSERT_EQ((int)err, (int)HU_OK);
+    HU_ASSERT_EQ(react_emoji_calls, 1);
+    HU_ASSERT_EQ(send_calls, 1);
 }
 
 /* The burst re-poll before a reply consumes everything new on the channel.
@@ -1021,9 +1038,10 @@ void run_imessage_dispatcher_tests(void) {
     HU_RUN_TEST(flat_style_routes_to_send);
     HU_RUN_TEST(text_sent_true_on_flat_send_false_when_send_refuses);
     HU_RUN_TEST(text_sent_true_when_feature_disabled_falls_back_to_flat);
-    HU_RUN_TEST(text_always_sent_sometimes_with_a_reaction);
+    HU_RUN_TEST(director_reaction_rides_along_with_the_text);
     HU_RUN_TEST(second_bubble_never_reacts_to_the_same_message_again);
-    HU_RUN_TEST(single_reply_may_still_be_a_bare_tapback);
+    HU_RUN_TEST(director_text_reply_is_never_swallowed_by_a_random_tapback);
+    HU_RUN_TEST(director_reaction_keeps_a_threaded_reply_threaded);
     HU_RUN_TEST(msg_ex_parrot_guard_reports_no_text_sent);
     HU_RUN_TEST(record_delivered_reply_noops_without_collector);
     HU_RUN_TEST(burst_carry_keeps_other_senders_for_this_tick);

@@ -2,6 +2,7 @@
 #include "human/agent/reply_prompt.h"
 #include "human/agent.h"
 #include "human/agent/hard_moment.h"
+#include "human/agent/learned_style_turn.h"
 #include "human/agent/length_policy.h"
 #include "human/agent/prompt.h"
 #include "human/agent/prompt_budget.h"
@@ -94,8 +95,10 @@ hu_error_t hu_reply_prompt_render(hu_allocator_t *alloc, const hu_reply_prompt_r
 
     char *head = NULL;
     size_t head_len = 0;
-    hu_error_t err = hu_agent_build_lean_persona_head(&agent, req->incoming, req->incoming_len,
-                                                      &head, &head_len);
+    /* Lean head + HU_LEARNED_STYLE, the same helper the turn paths use. */
+    hu_learned_style_turn_t ls_turn;
+    hu_error_t err = hu_agent_build_head_learned(&agent, true, NULL, 0, req->incoming,
+                                                 req->incoming_len, &head, &head_len, &ls_turn);
     if (err != HU_OK)
         return err;
     hu_agent_apply_relationship_tone(&agent, &head, &head_len);
@@ -121,6 +124,7 @@ hu_error_t hu_reply_prompt_render(hu_allocator_t *alloc, const hu_reply_prompt_r
         .persona = NULL, /* lean path, as agent_stream.c */
         .contact_context = contact_ctx,
         .contact_context_len = contact_ctx_len,
+        .learned_style_live = ls_turn.live,
         .conversation_context = convo,
         .conversation_context_len = convo_len,
         .max_response_chars = lim.cap,

@@ -16,15 +16,25 @@ extern "C" {
  * backchannel_probability set (other fields left at caller's defaults).
  *
  * Decision logic:
- * - Sample θ from the contact's arm's Beta(α, β) posterior
+ * - θ = the posterior mean α / (α + β) of the contact's arm (this decision
+ *   never reports an outcome back, so it exploits rather than explores)
  * - If θ > 0.65: aggressive (disfluency=0.25, backchannel=0.45)
  * - Else if θ > 0.35: moderate (disfluency=0.15, backchannel=0.30)
  * - Else: conservative (disfluency=0.05, backchannel=0.10)
  * - New contacts default to conservative (safe)
  *
- * Thread-safe: reads bandit arm state only; does not modify. */
+ * Deterministic in (α, β); inserts an arm for an unseen contact, so call it
+ * from the daemon thread that owns the bandit. */
 hu_humanization_config_t hu_humanization_decide_contact_params(hu_contextual_bandit_t *bandit,
                                                                uint64_t contact_handle);
+
+/* One Thompson draw of theta ~ Beta(alpha, beta) for the contact's arm.
+ * Advances bandit->rng_seed, so repeated calls with a fixed posterior vary
+ * and average to alpha / (alpha + beta). An unseen contact gets a fresh
+ * Beta(1,1) arm (as hu_contextual_bandit_get_arm does). Returns
+ * HU_ERR_INVALID_ARGUMENT on NULL / zero handle. */
+hu_error_t hu_humanization_bandit_sample_theta(hu_contextual_bandit_t *bandit,
+                                               uint64_t contact_handle, double *out_theta);
 
 /* Apply bandit-based humanization override to params if gate is enabled.
  * Gate controlled by HU_BANDIT_HUMANIZATION env var (default OFF).

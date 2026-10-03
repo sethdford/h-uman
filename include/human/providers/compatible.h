@@ -14,6 +14,10 @@
  * that let a half-open socket freeze the daemon on 2026-09-03. */
 #define HU_COMPATIBLE_LOCAL_TIMEOUT_SECS 120L
 
+/* Pure predicate: true when `url` names a loopback host (127.0.0.1 or
+ * localhost, http or https, the host ending at ':', '/' or the end). NULL-safe. */
+bool hu_compatible_url_is_loopback(const char *url, size_t url_len);
+
 /* Pure predicate: fill *out with the transport caps compatible_chat will use
  * for `url`. Loopback hosts (127.0.0.1 / localhost) get
  * HU_COMPATIBLE_LOCAL_TIMEOUT_SECS; everything else gets the shared defaults
@@ -26,6 +30,12 @@ void hu_compatible_request_opts_for_url(const char *url, size_t url_len,
  * loopback interface (127.0.0.1 / localhost) — a model on this machine. False
  * for any other provider type, including wrappers around one. NULL-safe. */
 bool hu_compatible_is_loopback(const hu_provider_t *p);
+
+#if defined(HU_IS_TEST) && HU_IS_TEST
+/* Test builds only: the X-HU-Purpose / X-HU-Priority block this thread's last
+ * chat or stream_chat request carried (compatible_request_headers). */
+const char *hu_compatible_test_last_headers(void);
+#endif
 
 hu_error_t hu_compatible_create(hu_allocator_t *alloc, const char *api_key, size_t api_key_len,
                                 const char *base_url, size_t base_url_len, hu_provider_t *out);

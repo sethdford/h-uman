@@ -6,6 +6,7 @@ typedef int hu_prospective_unused_;
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include "human/core/string.h"
 #include "human/memory/prospective_policy.h"
 #include <sqlite3.h>
@@ -214,10 +215,10 @@ char *hu_prospective_directive_build(hu_allocator_t *alloc, sqlite3 *db, const c
             if (hu_prospective_mark_fired(db, entries, rendered) != HU_OK)
                 hu_log_warn("prospective", NULL, "could not retire %zu surfaced triggers",
                             rendered);
-            hu_log_info("prospective", NULL,
-                        "fired %zu of %zu open triggers for %.*s: %s (cue: %s)", rendered, count,
-                        (int)cid_len, contact_id ? contact_id : "", entries[0].action,
-                        entries[0].trigger_value);
+            hu_log_info("prospective", NULL, "fired %zu of %zu open triggers for %s: %s (cue: %s)",
+                        rendered, count, HU_LOG_WHO(contact_id, cid_len),
+                        HU_LOG_TEXT_CSTR(entries[0].action, 120),
+                        HU_LOG_TEXT_CSTR(entries[0].trigger_value, 120));
         }
     }
     alloc->free(alloc->ctx, entries, count * sizeof(hu_prospective_entry_t));

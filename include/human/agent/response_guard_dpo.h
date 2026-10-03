@@ -61,7 +61,7 @@ size_t hu_response_guard_format_dpo_negative_jsonl(const char *prompt, size_t pr
                                                    int64_t ts_unix, char *out, size_t out_cap);
 
 /* I/O wrapper — formats the JSONL line and appends it (with a final \n)
- * to ~/.human/training-data/m3-dpo-rejections.jsonl, creating the file
+ * to hu_response_guard_dpo_log_path() (under the state dir), creating the file
  * if it doesn't exist. NO-OP returning HU_OK under HU_IS_TEST so tests
  * don't write to disk. Returns HU_ERR_IO on file errors. */
 hu_error_t hu_response_guard_log_dpo_negative(const char *prompt, size_t prompt_len,
@@ -83,6 +83,13 @@ hu_error_t hu_response_guard_log_dpo_negative(const char *prompt, size_t prompt_
  * NULL inputs. */
 size_t hu_response_guard_dpo_path_for_day(const char *home, int64_t ts_unix, char *out,
                                           size_t out_cap);
+
+/* The file hu_response_guard_log_dpo_negative appends to:
+ * <state dir>/training-data/m3-dpo-rejections-YYYY-MM-DD.jsonl, where the
+ * state dir is hu_paths_state_dir() (HU_STATE_DIR, else $HOME/.human) — so a
+ * process pointed at a scratch state dir (the replay harness) never writes
+ * the live training data. Returns bytes written, 0 on failure. */
+size_t hu_response_guard_dpo_log_path(int64_t ts_unix, char *out, size_t out_cap);
 
 #ifdef __cplusplus
 }

@@ -1,5 +1,6 @@
 #include "human/agent/episodic.h"
 #include "human/core/string.h"
+#include "human/memory/confidence_boundary.h"
 #include "human/provider.h"
 #include <string.h>
 
@@ -194,6 +195,12 @@ hu_error_t hu_episodic_store(hu_memory_t *memory, hu_allocator_t *alloc, const c
 
 hu_error_t hu_episodic_load(hu_memory_t *memory, hu_allocator_t *alloc, char **out,
                             size_t *out_len) {
+    return hu_episodic_load_for_contact(memory, alloc, NULL, 0, out, out_len);
+}
+
+hu_error_t hu_episodic_load_for_contact(hu_memory_t *memory, hu_allocator_t *alloc,
+                                        const char *contact, size_t contact_len, char **out,
+                                        size_t *out_len) {
     if (!out || !alloc)
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
@@ -208,7 +215,12 @@ hu_error_t hu_episodic_load(hu_memory_t *memory, hu_allocator_t *alloc, char **o
     hu_error_t err = memory->vtable->recall(memory->ctx, alloc, HU_EPISODIC_KEY_PREFIX,
                                             HU_EPISODIC_KEY_PREFIX_LEN, HU_EPISODIC_MAX_LOAD, "", 0,
                                             &entries, &count);
-    if (err != HU_OK || !entries || count == 0)
+    if (err != HU_OK)
+        return HU_OK;
+    /* Every contact's session summaries come back; the boundary keeps this one's. */
+    count = hu_confidence_filter_entries(memory, alloc, HU_CB_PATH_EPISODIC, &entries, count,
+                                         contact, contact_len);
+    if (!entries || count == 0)
         return HU_OK;
 
     /* Format as "## Recent Sessions\n- <summary>\n- <summary>\n" */

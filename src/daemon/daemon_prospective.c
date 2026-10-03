@@ -42,6 +42,7 @@ size_t hu_daemon_prospective_history_render(const hu_channel_history_entry_t *en
 #ifdef HU_ENABLE_SQLITE
 
 #include "human/agent.h"
+#include "human/core/llm_purpose.h"
 #include "human/core/log.h"
 #include "human/daemon/share_queue.h"
 #include "human/memory.h"
@@ -123,8 +124,14 @@ hu_error_t hu_daemon_prospective_provider_judge(void *ctx, hu_allocator_t *alloc
      * and spends the whole budget before the verdict. */
     const hu_chat_oneshot_opts_t opts = {
         .temperature = 0.0, .max_tokens = 16, .json_object = false};
-    return hu_provider_chat_oneshot(alloc, jc->provider, jc->model, jc->model ? jc->model_len : 0,
-                                    system, system_len, user, user_len, &opts, out, out_len);
+    /* Label only: on the reactive path this judge is pre-send; from a proactive
+     * tick it runs inside the background lane and goes out as batch. */
+    hu_llm_purpose_t prev_purpose = hu_llm_purpose_set(HU_LLM_PURPOSE_JUDGE);
+    hu_error_t err =
+        hu_provider_chat_oneshot(alloc, jc->provider, jc->model, jc->model ? jc->model_len : 0,
+                                 system, system_len, user, user_len, &opts, out, out_len);
+    (void)hu_llm_purpose_set(prev_purpose);
+    return err;
 }
 
 void hu_daemon_prospective_log_counts(const char *tag, const hu_prospective_counts_t *c) {

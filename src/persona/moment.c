@@ -410,6 +410,16 @@ hu_error_t hu_moment_compose_from_inputs(const struct hu_persona_t *persona,
                                          const struct hu_conversation_history_t *history,
                                          int64_t last_their_ts_s, int64_t last_our_ts_s,
                                          const char *contact_tz, int64_t now_s, hu_moment_t *out) {
+    return hu_moment_compose_for_reply(persona, overlay, history, last_their_ts_s, last_our_ts_s,
+                                       contact_tz, NULL, now_s, out);
+}
+
+hu_error_t hu_moment_compose_for_reply(const struct hu_persona_t *persona,
+                                       const struct hu_persona_overlay_t *overlay,
+                                       const struct hu_conversation_history_t *history,
+                                       int64_t last_their_ts_s, int64_t last_our_ts_s,
+                                       const char *contact_tz, const char *answering_text,
+                                       int64_t now_s, hu_moment_t *out) {
     /* persona/overlay are reserved for future per-contact / per-channel
      * decision inputs; for now we only record their presence as provenance. */
     if (out == NULL)
@@ -504,6 +514,10 @@ hu_error_t hu_moment_compose_from_inputs(const struct hu_persona_t *persona,
      * Top-down — first matching rule wins. Order matters; comments call
      * out the override relationships (continuation overrides everything;
      * unusual-hour overrides phase-based greets). */
+    /* The open/defer cues answer the message being replied to: when the
+     * caller passes it (the burst is not part of `history`), it wins. */
+    if (answering_text != NULL && answering_text[0] != '\0')
+        last_inbound_text = answering_text;
     out->suggested_open = decide_open(out, last_inbound_text);
     out->suggested_close = decide_close(out);
     out->suggested_brevity = decide_brevity(out);

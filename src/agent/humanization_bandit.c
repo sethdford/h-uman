@@ -29,6 +29,24 @@ static hu_humanization_config_t tier_config(hum_tier_t t) {
     return config;
 }
 
+/* DEF-5 (2026-10-02): the sampler state MUST advance. This used to copy
+ * rng_seed into a local and drop it, so theta was a pure function of
+ * (alpha, beta) for the life of the process — every call for a contact drew
+ * the same "sample", and Thompson sampling degenerated into a fixed
+ * threshold on the posterior. Drawing through &bandit->rng_seed makes each
+ * call a fresh draw from the contact's posterior. */
+hu_error_t hu_humanization_bandit_sample_theta(hu_contextual_bandit_t *bandit,
+                                               uint64_t contact_handle, double *out_theta) {
+    if (!bandit || !out_theta || contact_handle == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_contextual_bandit_arm_t arm;
+    hu_error_t err = hu_contextual_bandit_get_arm(bandit, contact_handle, &arm);
+    if (err != HU_OK)
+        return err;
+    *out_theta = hu_contextual_bandit_sample_beta(arm.alpha, arm.beta, &bandit->rng_seed);
+    return HU_OK;
+}
+
 hu_humanization_config_t hu_humanization_decide_contact_params(hu_contextual_bandit_t *bandit,
                                                                uint64_t contact_handle) {
     if (!bandit || contact_handle == 0)
@@ -42,9 +60,15 @@ hu_humanization_config_t hu_humanization_decide_contact_params(hu_contextual_ban
     if (arm.alpha == 1.0 && arm.beta == 1.0 && arm.updates == 0)
         return tier_config(hum_conservative);
 
-    /* Thompson sample theta from Beta(alpha, beta). */
-    uint32_t seed = bandit->rng_seed;
-    double theta = hu_contextual_bandit_sample_beta(arm.alpha, arm.beta, &seed);
+    /* The backchannel tier is a decision that never reports back: nothing
+     * credits the arm when a backchannel lands or flops (the arm learns only
+     * from proactive REPLY/IGNORED outcomes). Thompson exploration without
+     * feedback is noise, so decide on the posterior mean — exploit what the
+     * outcomes say. Consumers that DO report back sample through
+     * hu_humanization_bandit_sample_theta.
+     * TODO(learning-loops): make this a (contact, tier) bandit credited on the
+     * contact's reply / DEF-8-joined tapback after a backchannel, then sample. */
+    double theta = arm.alpha / (arm.alpha + arm.beta);
 
     static int logged = 0;
     if (!logged) {

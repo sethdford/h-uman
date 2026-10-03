@@ -596,6 +596,9 @@ set(HU_CORE_SOURCES
     src/core/rand.c
     src/core/error.c
     src/core/gate_mode.c
+    src/core/local_only_guard.c
+    src/core/llm_purpose.c
+    src/core/post_send_defer.c
     src/core/arena.c
     src/core/string.c
     src/core/tokens.c
@@ -638,6 +641,7 @@ set(HU_CORE_SOURCES
     src/core/vertex_auth.c
     src/core/process_util.c
     src/core/log.c
+    src/core/log_redact.c
     src/websocket/websocket.c
     src/config/config.c
     src/config/config_schema.c
@@ -784,12 +788,18 @@ set(HU_CORE_SOURCES
     src/agent/turn/contact_stage_turn.c
     src/agent/turn/turn_perceive.c
     src/agent/turn/turn_entry.c
+    src/agent/turn/turn_scope.c
+    src/agent/turn/personal_model_prompt.c
     src/agent/turn/turn_silence.c
     src/agent/turn/turn_context.c
     src/agent/turn/turn_tools.c
     src/agent/turn/turn_tail.c
+    src/agent/turn/turn_moment.c
     src/agent/turn/turn_plan.c
     src/agent/turn/reask.c
+    src/agent/turn/learned_style_turn.c
+    src/agent/turn/persona_head.c
+    src/agent/turn/history_budget.c
     src/agent/turn/empty_retry.c
     src/agent/turn/spoken_turn.c
     src/agent/turn/length_policy.c
@@ -830,6 +840,7 @@ set(HU_CORE_SOURCES
     src/agent/orchestrator_llm.c
     src/agent/swarm.c
     src/agent/model_router.c
+    src/agent/turn/local_only_route.c
     src/agent/model_router_health.c
     src/agent/registry.c
     src/agent/undo.c
@@ -969,7 +980,9 @@ set(HU_CORE_SOURCES
     src/providers/sse.c
     src/providers/scrub.c
     src/providers/reliable.c
+    src/providers/local_only.c
     src/providers/from_config.c
+    src/providers/local_only_config.c
     src/providers/router.c
     src/providers/ensemble.c
     src/providers/codex_cli.c
@@ -1028,6 +1041,9 @@ set(HU_CORE_SOURCES
     src/memory/graph.c
     src/memory/graph_state.c
     src/memory/wiki_page.c
+    src/memory/confidence_boundary.c
+    src/memory/confidence_filters.c
+    src/memory/repos/confidence_repo_sqlite.c
     src/memory/graph_ingest.c
     src/memory/name_extract.c
     src/memory/agent_facts.c
@@ -1257,8 +1273,13 @@ set(HU_CORE_SOURCES
     src/interactions/choices.c
     src/daemon.c
     src/daemon/daemon_shape.c
+    src/daemon/daemon_outbound_sanitize.c
+    src/daemon/daemon_reactive_calibration.c
+    src/daemon/replay_harness_io.c
+    src/daemon/replay_turn.c
     src/daemon/daemon_comfort_summary.c
     src/daemon/daemon_name_catch.c
+    src/daemon/daemon_thread_context.c
     src/daemon/daemon_maintenance.c
     src/daemon/daemon_lifecycle.c
     src/daemon/daemon_cron.c
@@ -1275,6 +1296,8 @@ set(HU_CORE_SOURCES
     src/daemon/owner_notify.c
     src/daemon/daemon_reply_delay.c
     src/daemon/daemon_director.c
+    src/daemon/director_v2.c
+    src/daemon/director_tapback.c
     src/daemon/reply_dedup.c
     src/daemon/send_budget.c
     src/daemon/reactive_gates.c
@@ -1289,10 +1312,15 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_proactive_policy.c
     src/daemon/daemon_follow_up_watcher.c
     src/daemon/daemon_followup_sched.c
+    src/daemon/daemon_unprompted_sends.c
+    src/daemon/unprompted_gate.c
     src/daemon/daemon_voice_reply.c
+    src/daemon/daemon_crisis.c
     src/daemon/daemon_voice_first.c
     src/daemon/daemon_expressive.c
+    src/daemon/daemon_spontaneity.c
     src/daemon/daemon_share_queue.c
+    src/daemon/daemon_confidence_owner.c
     src/daemon/daemon_reminders.c
     src/daemon/daemon_briefing.c
     src/daemon/daemon_person_dates.c
@@ -1302,6 +1330,8 @@ set(HU_CORE_SOURCES
     src/daemon/daemon_insight_overuse.c
     src/daemon/daemon_proposer_context.c
     src/daemon/daemon_grief_decay.c
+    src/daemon/daemon_commitment_guard.c
+    src/daemon/calendar_free_busy.c
     src/daemon/cron.c
     src/daemon/crontab.c
     src/gateway/webhook.c
@@ -1310,6 +1340,7 @@ set(HU_CORE_SOURCES
     src/app/cli_commands.c
     src/app/cli_ctl.c
     src/app/cli_prospective.c
+    src/app/cli_replay.c
     src/app/cli_help.c
     src/eval/cli_evaluation.c
     src/eval/commitment_sample.c
@@ -1467,6 +1498,7 @@ list(APPEND HU_CORE_SOURCES
     src/security/escalate.c
     src/security/normalize.c
     src/security/moderation.c
+    src/security/self_harm.c
     src/security/companion_safety.c
     src/tools/code_sandbox.c
     src/tools/computer_use.c
@@ -1523,6 +1555,7 @@ list(APPEND HU_CORE_SOURCES
     src/persona/persona.c
     src/persona/card_file.c
     src/persona/style_card.c
+    src/persona/learned_style.c
     src/persona/emotion_card.c
     src/persona/pacing.c
     src/persona/render.c
@@ -3487,6 +3520,8 @@ set(HU_TEST_SOURCES
     tests/test_fact_extract.c
     tests/test_personal_model.c
     tests/test_personal_model_llm_extract.c
+    tests/test_llm_purpose.c
+    tests/test_post_send_defer.c
     tests/test_personal_model_atomic_save.c
     tests/test_personal_model_per_contact.c
     # Cross-channel ACL trust-property tests. File uses internal-#ifdef-wrap-
@@ -3520,6 +3555,7 @@ set(HU_TEST_SOURCES
     tests/test_lora_subprocess.c
     tests/test_persona_overlay_render.c
     tests/test_style_card.c
+    tests/test_learned_style.c
     tests/test_card_file.c
     tests/test_emotion_card.c
     tests/test_terseness.c
@@ -3634,6 +3670,7 @@ set(HU_TEST_SOURCES
     tests/test_daemon_routing.c
     tests/test_daemon_proactive.c
     tests/test_daemon_proactive_decline.c
+    tests/test_unprompted_gate.c
     tests/test_daemon_proactive_reachability.c
     tests/test_daemon_contact_optout.c
     tests/test_daemon_hurt_handoff.c
@@ -3644,9 +3681,11 @@ set(HU_TEST_SOURCES
     tests/test_daemon_insight_overuse.c
     tests/test_daemon_proposer_context.c
     tests/test_daemon_grief_decay.c
+    tests/test_daemon_commitment_guard.c
     tests/test_daemon_config_reload.c
     tests/test_daemon_identity_graph.c
     tests/test_daemon_name_catch.c
+    tests/test_daemon_thread_context.c
     tests/test_daemon_reply_fallback.c
     tests/test_reply_dedup.c
     tests/test_send_budget.c
@@ -3655,6 +3694,9 @@ set(HU_TEST_SOURCES
     tests/test_consecutive_limiter.c
     tests/test_proactive_policy.c
     tests/test_daemon_director.c
+    tests/test_daemon_director_local_only.c
+    tests/test_director_v2.c
+    tests/test_director_tapback.c
     tests/test_daemon_trust.c
     tests/test_config_parse.c
     tests/test_config_mutator_writes.c
@@ -3699,6 +3741,9 @@ set(HU_TEST_SOURCES
     tests/test_prompt.c
     tests/test_prompt_trim.c
     tests/test_gate_mode.c
+    tests/test_local_only_guard.c
+    tests/test_local_only_config.c
+    tests/test_local_only_voice.c
     tests/test_graph_grounding.c
     tests/test_uncertainty.c
     tests/test_tool_search.c
@@ -3731,6 +3776,7 @@ set(HU_TEST_SOURCES
     tests/test_imessage_replay_guard.c
     tests/test_chatdb_cursor_repo_sqlite.c
     tests/test_reliable_circuit.c
+    tests/test_local_only.c
     tests/test_imessage_adversarial.c
     tests/test_imessage_non_allowlisted.c
     tests/test_imessage_rich_link.c
@@ -3993,6 +4039,8 @@ tests/test_imessage_action_telemetry.c
     tests/test_arbitrator.c
     tests/test_salience.c
     tests/test_hard_moment.c
+    tests/test_turn_moment.c
+    tests/test_humanness_hedge_turn.c
     tests/test_planning.c
     tests/test_emotional_residue.c
     tests/test_consolidation_engine.c
@@ -4074,6 +4122,7 @@ tests/test_imessage_action_telemetry.c
     tests/test_sota_humanness.c
     tests/test_distiller.c
     tests/test_model_router.c
+    tests/test_local_only_route.c
     tests/test_model_router_health.c
     tests/test_cp_admin.c
     tests/test_humanness_context.c
@@ -4214,6 +4263,8 @@ list(APPEND HU_TEST_SOURCES tests/test_slack_reactions.c)
 # to keep minimal-build / no-sqlite / cross-arm64 builds linkable.
 if(HU_ENABLE_SQLITE)
     list(APPEND HU_TEST_SOURCES tests/test_reaction_handler_e2e.c)
+    # DEF-8: tapback -> production_outcomes join by (thread, send time).
+    list(APPEND HU_TEST_SOURCES tests/test_outcome_join.c)
 endif()
 
 # Sprint 59 Phase C (2026-05-26 Annie/Mindy/Betty incident): pin per-contact
@@ -4228,6 +4279,8 @@ endif()
 list(APPEND HU_TEST_SOURCES tests/test_curiosity_gaps.c)
 list(APPEND HU_TEST_SOURCES tests/test_agent_recall_provider.c)
 list(APPEND HU_TEST_SOURCES tests/test_memory_loader_scope.c)
+list(APPEND HU_TEST_SOURCES tests/test_confidence_boundary.c)
+list(APPEND HU_TEST_SOURCES tests/test_personal_model_prompt.c)
 
 # Sprint 60 follow-up — crosstalk SQLite lookup. Test seeds the
 # messages table directly via sqlite3 to verify the lookup returns
@@ -4312,12 +4365,14 @@ list(APPEND HU_TEST_SOURCES
     tests/test_daemon_voice_reply.c
     tests/test_daemon_voice_first.c
     tests/test_daemon_expressive.c
+    tests/test_daemon_spontaneity.c
     tests/test_daemon_share_queue.c
     tests/test_daemon_reminders.c
     tests/test_daemon_briefing.c
     tests/test_daemon_person_dates.c
     tests/test_commitment_sample.c
     tests/test_agent_fit_history.c
+    tests/test_history_budget.c
     tests/test_prospective.c
     tests/test_prospective_repo_sqlite.c
     tests/test_prospective_policy.c
@@ -4325,6 +4380,9 @@ list(APPEND HU_TEST_SOURCES
     tests/test_daemon_prospective_time.c
     tests/test_prospective_v2.c
     tests/test_cli_prospective.c
+    tests/test_replay_turn.c
+    tests/test_cli_replay.c
+    tests/test_daemon_outbound_sanitize.c
     tests/test_daemon_prospective.c
     tests/test_eval_score.c
     tests/test_corrective_rag.c
@@ -4370,6 +4428,7 @@ list(APPEND HU_TEST_SOURCES
     tests/test_otel.c
     tests/test_cot_audit.c
     tests/test_moderation.c
+    tests/test_self_harm.c
     tests/test_companion_safety.c
     tests/test_code_sandbox.c
     tests/test_computer_use.c

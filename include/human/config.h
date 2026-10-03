@@ -30,6 +30,12 @@ typedef struct hu_provider_entry {
     int threads;
     bool use_gpu;
     int n_gpu_layers;
+    /* providers[].local: whether prompts sent to this provider stay on this
+     * machine. 0 = unset (decided from base_url), 1 = local, -1 = not local.
+     * Read by the reliable provider's private-span strip (providers/local_only.h)
+     * and by privacy.local_only enforcement (core/local_only_guard.h). Both PRs
+     * (#581, #587) added this same field; the integration train keeps one. */
+    int local_override;
 } hu_provider_entry_t;
 
 typedef struct hu_diagnostics_config {
@@ -765,6 +771,20 @@ typedef struct hu_voice_settings {
                           2026-05-31) */
 } hu_voice_settings_t;
 
+/* privacy.local_only (2026-10-01): conversation content stays on this machine.
+ * Absent key: ON exactly when the primary provider's endpoint is local — see
+ * hu_local_only_resolve (core/local_only_guard.h). HU_LOCAL_ONLY overrides. */
+typedef struct hu_privacy_config {
+    bool local_only_set; /* the key was present in config.json */
+    bool local_only;
+    /* privacy.local_only_allow: voice services that may receive content
+     * under local_only ("tts:cartesia", "stt:<vendor>"). Unset = the default
+     * {"tts:cartesia", "stt:<voice.stt_provider or cartesia>"}. */
+    bool local_only_allow_set;
+    char **local_only_allow;
+    size_t local_only_allow_len;
+} hu_privacy_config_t;
+
 typedef struct hu_identity_config {
     char *format;
 } hu_identity_config_t;
@@ -835,6 +855,7 @@ typedef struct hu_config {
     hu_voice_settings_t voice;
     hu_session_config_t session;
     hu_identity_config_t identity;
+    hu_privacy_config_t privacy;
     hu_cost_config_t cost;
     hu_peripherals_config_t peripherals;
     hu_hardware_config_t hardware;
@@ -900,6 +921,8 @@ const char *hu_config_default_provider_key(const hu_config_t *cfg);
 bool hu_config_provider_requires_api_key(const char *provider);
 const char *hu_config_get_provider_base_url(const hu_config_t *cfg, const char *name);
 bool hu_config_get_provider_native_tools(const hu_config_t *cfg, const char *name);
+/* providers[].local as 1 / -1, or 0 when unset or the provider is absent. */
+int hu_config_get_provider_local_override(const hu_config_t *cfg, const char *name);
 const char *hu_config_get_web_search_provider(const hu_config_t *cfg);
 size_t hu_config_get_channel_configured_count(const hu_config_t *cfg, const char *key);
 bool hu_config_get_provider_ws_streaming(const hu_config_t *cfg, const char *name);

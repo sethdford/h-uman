@@ -13,6 +13,7 @@
  *   - the local-provider resolver refuses cloud providers and an open circuit. */
 #include "human/config.h"
 #include "human/core/allocator.h"
+#include "human/core/log_redact.h"
 #include "human/daemon/proposer_context.h"
 #include "human/persona.h"
 #include "human/providers/compatible.h"
@@ -747,13 +748,20 @@ static void verdict_log_drops_reason_text_when_the_block_was_used(void) {
     snprintf(d.skip_reason, sizeof(d.skip_reason), "she said the roof guy flaked again");
     d.skip_reason_len = strlen(d.skip_reason);
     char line[512];
+    hu_log_content_set_for_test(1); /* HU_LOG_CONTENT=1: the debug-only text line */
     hu_init_proposer_format_ex_verdict(&in, &d, 9, 100, line, sizeof(line));
-    HU_ASSERT_STR_CONTAINS(line, "reason=she said the roof guy"); /* pre: today's line */
+    HU_ASSERT_STR_CONTAINS(line, "reason=she said the roof guy");
+    hu_log_content_set_for_test(0); /* default: length only, even without the block */
+    hu_init_proposer_format_ex_verdict(&in, &d, 9, 100, line, sizeof(line));
+    HU_ASSERT_STR_NOT_CONTAINS(line, "roof");
+    HU_ASSERT_STR_CONTAINS(line, "reason=<34 chars>");
+    hu_log_content_set_for_test(1);
     in.proposer_context = "\n--- recent thread ---\n[1h ago] them: the roof guy flaked\n";
     in.proposer_context_len = strlen(in.proposer_context);
     hu_init_proposer_format_ex_verdict(&in, &d, 9, 100, line, sizeof(line));
     HU_ASSERT_STR_NOT_CONTAINS(line, "roof");
     HU_ASSERT_STR_CONTAINS(line, "reason_len=34");
+    hu_log_content_set_for_test(-1);
 }
 
 static void reliable_reports_which_provider_served(void) {

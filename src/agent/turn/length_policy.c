@@ -3,6 +3,7 @@
 #include "human/context/conversation.h"
 #include "human/core/log.h"
 #include "human/persona.h"
+#include "human/persona/learned_style.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -86,6 +87,27 @@ static uint32_t legacy_turn_cap(const hu_length_turn_t *t, uint32_t *unbriefed) 
     return cap;
 }
 
+/* Contact reply stats: the persona's hand-measured reply_chars, or — when
+ * those are absent and HU_LEARNED_STYLE=live — the learned profile's p50/p90
+ * for this contact and inbound shape (whole reply-turn bytes). Contact-level
+ * answers only: the global row would widen every contact's cap. The lookup
+ * reads the persona the last turn's head build selected
+ * (hu_learned_style_set_persona); before the first turn it finds nothing. */
+static void length_contact_stats(const hu_length_turn_t *t, uint32_t *p50, uint32_t *p90) {
+    *p50 = t->contact ? t->contact->reply_chars_p50 : 0u;
+    *p90 = t->contact ? t->contact->reply_chars_p90 : 0u;
+    if (*p50 || *p90 || !t->contact || !t->contact->contact_id ||
+        hu_learned_style_mode() != HU_GATE_LIVE)
+        return;
+    hu_learned_style_t ls;
+    if (hu_learned_style_lookup(t->contact->contact_id, strlen(t->contact->contact_id),
+                                hu_learned_style_shape_inbound(t->inbound, t->inbound_len), &ls) &&
+        ls.from_contact) {
+        *p50 = ls.len_p50;
+        *p90 = ls.len_p90;
+    }
+}
+
 void hu_length_policy_turn(const hu_length_turn_t *t, hu_gate_mode_t mode,
                            hu_length_turn_result_t *out) {
     if (!out)
@@ -104,11 +126,13 @@ void hu_length_policy_turn(const hu_length_turn_t *t, hu_gate_mode_t mode,
     if (t->channel_max > 0 && t->channel_max < bound)
         bound = t->channel_max;
     unsigned shape = hu_length_policy_inbound_shape(t->inbound, t->inbound_len);
+    uint32_t p50 = 0, p90 = 0;
+    length_contact_stats(t, &p50, &p90);
     hu_length_policy_input_t in = {
         .inbound_len = t->inbound_len,
         .shape = shape,
-        .contact_p50 = t->contact ? t->contact->reply_chars_p50 : 0u,
-        .contact_p90 = t->contact ? t->contact->reply_chars_p90 : 0u,
+        .contact_p50 = p50,
+        .contact_p90 = p90,
         .legacy_cap = old_cap,
         .unbriefed_cap = unbriefed,
         .hard_max = bound,

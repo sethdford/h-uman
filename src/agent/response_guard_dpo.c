@@ -3,6 +3,7 @@
 
 #include "human/agent/response_guard_dpo.h"
 #include "human/core/log.h"
+#include "human/core/paths.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -183,6 +184,23 @@ size_t hu_response_guard_dpo_path_for_day(const char *home, int64_t ts_unix, cha
     return (size_t)n;
 }
 
+size_t hu_response_guard_dpo_log_path(int64_t ts_unix, char *out, size_t out_cap) {
+    if (!out || out_cap == 0)
+        return 0;
+    time_t t = (time_t)ts_unix;
+    struct tm tm_buf;
+    if (!gmtime_r(&t, &tm_buf))
+        return 0;
+    int n = hu_paths_state(out, out_cap, "training-data/%s%04d-%02d-%02d.jsonl",
+                           HU_DPO_REJECTIONS_PREFIX, tm_buf.tm_year + 1900, tm_buf.tm_mon + 1,
+                           tm_buf.tm_mday);
+    if (n <= 0 || (size_t)n >= out_cap) {
+        out[0] = '\0';
+        return 0;
+    }
+    return (size_t)n;
+}
+
 hu_error_t hu_response_guard_log_dpo_negative(const char *prompt, size_t prompt_len,
                                               const char *rejected, size_t rejected_len,
                                               const char *detector, const char *channel,
@@ -200,13 +218,9 @@ hu_error_t hu_response_guard_log_dpo_negative(const char *prompt, size_t prompt_
     (void)ts_unix;
     return HU_OK;
 #else
-    const char *home = getenv("HOME");
-    if (!home || !home[0])
-        return HU_ERR_IO;
-
-    /* Build the daily-rotated path. */
+    /* Build the daily-rotated path under the state dir (HU_STATE_DIR wins). */
     char path[1024];
-    if (hu_response_guard_dpo_path_for_day(home, ts_unix, path, sizeof(path)) == 0)
+    if (hu_response_guard_dpo_log_path(ts_unix, path, sizeof(path)) == 0)
         return HU_ERR_IO;
 
     /* Format the JSONL line into a stack buffer. 8 KiB is more than enough

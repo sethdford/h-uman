@@ -1,5 +1,6 @@
 #include "human/core/gate_mode.h"
 #include "human/core/log.h"
+#include "human/core/log_redact.h"
 #include "human/core/string.h"
 #include "human/daemon/expressive.h"
 #include "human/daemon/share_queue.h"
@@ -506,8 +507,8 @@ void hu_expressive_unknown_event_guard(hu_director_result_t *d, const char *msg,
     if (!d || g == HU_GATE_OFF ||
         !hu_expressive_unknown_event(msg, msg_len, history, history_count, topic, sizeof(topic)))
         return;
-    hu_log_info("director", NULL, "unknown-event %s: topic=\"%s\" direction was \"%.80s\"",
-                g == HU_GATE_LIVE ? "live" : "shadow", topic, d->direction);
+    hu_log_info("director", NULL, "unknown-event %s: topic=\"%s\" direction was \"%s\"",
+                g == HU_GATE_LIVE ? "live" : "shadow", topic, HU_LOG_TEXT_CSTR(d->direction, 80));
     if (g == HU_GATE_LIVE)
         hu_expressive_unknown_event_direction(topic, d->direction, sizeof(d->direction));
 }
