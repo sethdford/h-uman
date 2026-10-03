@@ -53,6 +53,16 @@ public final class HumanConnection: Sendable {
 
     private nonisolated(unsafe) var _eventHandler: (@Sendable (String, [String: AnyCodable]?) -> Void)?
 
+    /// Called when a binary frame is received (the gateway streams voice audio
+    /// this way: raw little-endian PCM, no header). Invoked on the URLSession
+    /// delegate queue; copy the data before hopping elsewhere if needed.
+    public var dataHandler: (@Sendable (Data) -> Void)? {
+        get { Self.configQueue.sync { _dataHandler } }
+        set { Self.configQueue.sync { _dataHandler = newValue } }
+    }
+
+    private nonisolated(unsafe) var _dataHandler: (@Sendable (Data) -> Void)?
+
     private nonisolated(unsafe) var task: URLSessionWebSocketTask?
     private nonisolated(unsafe) var url: URL
     private let session = URLSession(configuration: .default)
@@ -128,6 +138,16 @@ public final class HumanConnection: Sendable {
         task?.send(.string(json)) { _ in }
     }
 
+    /// Send a binary frame (e.g. microphone audio for a voice session).
+    /// Returns false when not connected. The gateway rejects frames over
+    /// 512 KB by closing the socket, so callers should chunk larger payloads.
+    @discardableResult
+    public func sendData(_ data: Data) -> Bool {
+        guard _state == .connected, let task = task else { return false }
+        task.send(.data(data)) { _ in }
+        return true
+    }
+
     /// Register a push token with the gateway for push notifications.
     public func registerPushToken(token: String) {
         let id = "push-\(UUID().uuidString)"
@@ -156,6 +176,14 @@ public final class HumanConnection: Sendable {
     /// the `.connected` state at issue time, `.timeout` if no response
     /// arrives within `requestTimeoutSeconds`.
     public func request(method: String, params: [String: AnyCodable]? = nil) async throws -> ControlResponse {
+        try await request(method: method, params: params, timeout: nil)
+    }
+
+    /// Same as `request(method:params:)` with a per-call timeout. Voice calls
+    /// need it: `voice.audio.end` answers only after the whole spoken turn.
+    /// `nil` uses `requestTimeoutSeconds`.
+    public func request(method: String, params: [String: AnyCodable]? = nil,
+                        timeout: TimeInterval?) async throws -> ControlResponse {
         guard _state == .connected else {
             throw HumanConnectionError.notConnected
         }
@@ -165,6 +193,7 @@ public final class HumanConnection: Sendable {
         guard let text = String(data: data, encoding: .utf8) else {
             throw HumanConnectionError.encodingFailed
         }
+        let timeoutOverride = timeout
 
         return try await withCheckedThrowingContinuation { cont in
             pendingLock.lock()
@@ -182,7 +211,8 @@ public final class HumanConnection: Sendable {
             }
             requestTimeouts[id] = timeout
             pendingLock.unlock()
-            queue.asyncAfter(deadline: .now() + Self.requestTimeoutSeconds, execute: timeout)
+            queue.asyncAfter(deadline: .now() + (timeoutOverride ?? Self.requestTimeoutSeconds),
+                             execute: timeout)
 
             task?.send(.string(text)) { [weak self] error in
                 if let error = error {
@@ -232,8 +262,8 @@ public final class HumanConnection: Sendable {
                 switch message {
                 case .string(let text):
                     self.handleMessage(text)
-                case .data:
-                    break
+                case .data(let data):
+                    self._dataHandler?(data)
                 @unknown default:
                     break
                 }
