@@ -370,7 +370,7 @@ static hu_error_t agent_skill_route_embed_fn(void *embed_ctx, hu_allocator_t *al
 #include "human/security/companion_safety.h"
 #include "human/security/cot_audit.h"
 #include "human/security/history_scorer.h"
-#include "human/security/moderation.h"
+#include "human/security/moderation_context.h"
 #include "human/security/self_harm.h"
 #include "human/security/sensitivity.h"
 #include "human/tools/cache_ttl.h"
@@ -6507,62 +6507,11 @@ static hu_error_t agent_turn_run(hu_turn_ctx_t *turn_ctx, hu_agent_t *agent, con
             if (agent->turn_arena)
                 hu_arena_reset(agent->turn_arena);
 
-            /* SHIELD-004: Moderation check on outbound response */
-            if (*response_out && response_len_out && *response_len_out > 0) {
-                hu_moderation_result_t mod_result;
-                memset(&mod_result, 0, sizeof(mod_result));
-                if (hu_moderation_check(agent->alloc, *response_out, *response_len_out,
-                                        &mod_result) == HU_OK &&
-                    mod_result.flagged) {
-                    hu_log_info("agent_turn", NULL,
-                                "moderation flagged response: "
-                                "violence=%.2f self_harm=%.2f hate=%.2f",
-                                mod_result.violence_score, mod_result.self_harm_score,
-                                mod_result.hate_score);
-                    if (mod_result.violence) {
-                        hu_log_warn("agent_turn", NULL,
-                                    "CRITICAL FIX 2026-05-26: violence flagged "
-                                    "(score=%.2f); replacing unsafe LLM output with safe "
-                                    "canned response. Prior code path prepended the "
-                                    "internal [SAFETY] directive text TO the outgoing "
-                                    "message, which sent the directive verbatim to the "
-                                    "recipient (Betty Ford got '[SAFETY] This response "
-                                    "touches on violence. De-escalate...'). Directive was "
-                                    "intended for system-prompt regenerate, not "
-                                    "user-facing reply. Band-aid: replace with safe "
-                                    "decline; proper fix is regenerate-with-sterner-prompt.",
-                                    mod_result.violence_score);
-                    }
-                    if (mod_result.hate) {
-                        hu_log_info("agent_turn", NULL,
-                                    "hate speech flagged (score=%.2f); "
-                                    "replacing with safe decline (was prepending "
-                                    "[SAFETY] boundary directive to outgoing — same "
-                                    "class of bug as the violence branch above)",
-                                    mod_result.hate_score);
-                    }
-                    /* Replace unsafe output with a short decline (never the
-                     * directive text, which once reached the recipient). On a
-                     * crisis turn the SHIELD-005 floor instead: never a deflection. */
-                    if (mod_result.violence || mod_result.hate) {
-                        size_t safe_len = 0;
-                        const char *decline = hu_self_harm_decline_or_floor(
-                            msg, msg_len,
-                            mod_result.violence ? "rather not get into that one"
-                                                : "i'm gonna pass on this one",
-                            &safe_len);
-                        char *safe = (char *)agent->alloc->alloc(agent->alloc->ctx, safe_len + 1);
-                        if (safe) {
-                            memcpy(safe, decline, safe_len);
-                            safe[safe_len] = '\0';
-                            agent->alloc->free(agent->alloc->ctx, *response_out,
-                                               *response_len_out + 1);
-                            *response_out = safe;
-                            *response_len_out = safe_len;
-                        }
-                    }
-                }
-            }
+            /* SHIELD-004: moderation check on the outbound response. Violence-only
+             * hits get an HU_MODERATION_CONTEXT judgment (idiom vs real) before any
+             * replacement — see src/security/moderation_context.c. */
+            if (*response_out && response_len_out && *response_len_out > 0)
+                hu_moderation_shield_apply(agent, msg, msg_len, response_out, response_len_out);
 
             /* SHIELD-005: 988 keyed to the INBOUND message, never to the reply's own
              * words (a reply offering 988 used to trip it and gain a second copy). */
