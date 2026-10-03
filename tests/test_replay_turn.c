@@ -11,7 +11,9 @@
  *   4. the turn never touches the session store (memory.db stays unwritten).
  */
 #include "human/agent.h"
+#include "human/config.h"
 #include "human/core/allocator.h"
+#include "human/daemon/director_v2.h"
 #include "human/daemon/replay_turn.h"
 #include "human/memory.h"
 #include "human/persona.h"
@@ -159,6 +161,78 @@ static void replay_turn_director_tapback_skips_the_reply_turn(void) {
     HU_ASSERT_FALSE(r.director_valid);
     HU_ASSERT_GE(r.reply_calls, 1);
     hu_replay_turn_result_deinit(&f.alloc, &r);
+    rt_teardown(&f);
+}
+
+/* A replay must never queue a director-v2 SHADOW job: the shadow worker would
+ * call the live local endpoint with a replayed turn (#612 review). SHADOW in
+ * the environment replays as OFF (v1 only); LIVE stays LIVE, because the
+ * cut-over A/B measures HU_DIRECTOR_V2=live through this harness. */
+static int s_v2_worker_calls;
+
+static hu_error_t v2_worker_chat(void *ctx, hu_allocator_t *alloc, const char *sys, size_t sys_len,
+                                 const char *msg, size_t msg_len, const char *model,
+                                 size_t model_len, double temperature, char **out,
+                                 size_t *out_len) {
+    (void)ctx;
+    (void)sys;
+    (void)sys_len;
+    (void)msg;
+    (void)msg_len;
+    (void)model;
+    (void)model_len;
+    (void)temperature;
+    s_v2_worker_calls++;
+    static const char k_reply[] = "action:text|direction:engage fully";
+    *out = (char *)alloc->alloc(alloc->ctx, sizeof(k_reply));
+    if (!*out)
+        return HU_ERR_OUT_OF_MEMORY;
+    memcpy(*out, k_reply, sizeof(k_reply));
+    *out_len = sizeof(k_reply) - 1;
+    return HU_OK;
+}
+
+static const char *v2_worker_name(void *ctx) {
+    (void)ctx;
+    return "v2worker";
+}
+
+static const hu_provider_vtable_t k_v2_worker_vt = {.chat_with_system = v2_worker_chat,
+                                                    .get_name = v2_worker_name};
+
+static void replay_turn_director_v2_shadow_queues_no_shadow_job(void) {
+    rt_fixture_t f;
+    HU_ASSERT_TRUE(rt_setup(&f, "should never be asked"));
+    /* The replay agent's primary is the local endpoint, as in `human replay`. */
+    static hu_config_t cfg;
+    static hu_provider_entry_t entry;
+    memset(&cfg, 0, sizeof(cfg));
+    memset(&entry, 0, sizeof(entry));
+    entry.name = "trp";
+    entry.base_url = "http://127.0.0.1:8741/v1";
+    cfg.providers = &entry;
+    cfg.providers_len = 1;
+    cfg.default_provider = "trp";
+    const hu_config_t *saved_cfg = f.agent.config;
+    f.agent.config = &cfg;
+    HU_ASSERT_NOT_NULL(hu_director_v2_primary_endpoint(&f.agent)); /* shadow would enqueue */
+    hu_provider_t worker = {.ctx = NULL, .vtable = &k_v2_worker_vt};
+    hu_director_v2_set_worker_provider(&worker);
+    s_v2_worker_calls = 0;
+
+    setenv("HU_DIRECTOR_V2", "shadow", 1);
+    hu_replay_turn_input_t in = rt_input("k");
+    hu_replay_turn_result_t r;
+    HU_ASSERT_EQ(hu_replay_turn_run(&f.alloc, &f.agent, NULL, &f.rp, &in, &r), HU_OK);
+    HU_ASSERT_TRUE(hu_director_v2_shadow_drain(5000));
+    HU_ASSERT_EQ(s_v2_worker_calls, 0); /* no shadow job reached the endpoint */
+    HU_ASSERT_TRUE(r.director_valid);
+    HU_ASSERT_EQ(r.action, HU_REPLAY_ACTION_TAPBACK); /* v1 decided, as under OFF */
+    hu_replay_turn_result_deinit(&f.alloc, &r);
+
+    unsetenv("HU_DIRECTOR_V2");
+    hu_director_v2_set_worker_provider(NULL);
+    f.agent.config = saved_cfg;
     rt_teardown(&f);
 }
 
@@ -339,6 +413,7 @@ void run_replay_turn_tests(void) {
     HU_RUN_TEST(replay_channel_counts_every_outbound_entry);
     HU_RUN_TEST(replay_turn_never_calls_channel_send);
     HU_RUN_TEST(replay_turn_director_tapback_skips_the_reply_turn);
+    HU_RUN_TEST(replay_turn_director_v2_shadow_queues_no_shadow_job);
     HU_RUN_TEST(replay_turn_gate_env_changes_reply_request);
     HU_RUN_TEST(replay_provider_pins_model_and_temperature);
     HU_RUN_TEST(replay_turn_length_policy_live_changes_reply_request);

@@ -720,8 +720,13 @@ static void sem_index_job_free(void *arg) {
 
 static bool semantic_index_row_defer(hu_sqlite_memory_t *self, const char *key, size_t key_len,
                                      const char *content, size_t content_len) {
-    if (!hu_post_send_defer_armed())
+    hu_gate_mode_t mode = hu_post_send_defer_window_mode();
+    if (mode == HU_GATE_OFF)
         return false;
+    if (mode != HU_GATE_LIVE) { /* SHADOW: count it, copy nothing; the caller embeds inline */
+        (void)hu_post_send_defer_offer(HU_POST_SEND_JOB_EMBED, sem_index_job_run, NULL, NULL);
+        return false;
+    }
     sem_index_job_t *j = (sem_index_job_t *)self->alloc->alloc(self->alloc->ctx, sizeof(*j));
     if (!j)
         return false;

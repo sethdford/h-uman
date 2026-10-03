@@ -507,6 +507,8 @@ hu_gate_mode_t hu_proactive_checkin_mode(void) {
     return hu_gate_mode_from_env("HU_PROACTIVE_CHECKINS", HU_GATE_OFF);
 }
 
+/* No production caller since #597 dropped per-contact registration; schedule-tool / cron.add
+ * "proactive:*" jobs pass their own channel string. Kept for its tests. */
 int hu_proactive_checkin_target(char *buf, size_t cap, const char *channel,
                                 const char *contact_id) {
     if (!buf || cap == 0)

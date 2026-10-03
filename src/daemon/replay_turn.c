@@ -19,6 +19,7 @@
 #include "human/core/gate_mode.h"
 #include "human/core/string.h"
 #include "human/daemon/daemon_shape.h"
+#include "human/daemon/director_v2.h"
 #include "human/daemon/expressive.h"
 #include "human/daemon/message_router.h"
 #include "human/daemon/outbound_sanitize.h"
@@ -291,9 +292,11 @@ static bool replay_director(hu_allocator_t *alloc, hu_agent_t *agent, hu_channel
             situation, sizeof(situation),
             hu_daemon_voice_first_available(agent, in->contact_id, key_len, false), true, false,
             false);
-    out->director_valid =
-        hu_daemon_director_decide(alloc, agent, ch, in->contact_id, key_len, combined, combined_len,
-                                  in->history, in->history_count, situation, dr);
+    /* HU_DIRECTOR_V2 pinned for replays: SHADOW runs as OFF (no shadow job
+     * at the live endpoint), LIVE stays LIVE for the cut-over A/B. */
+    out->director_valid = hu_director_v2_decide_mode(
+        hu_director_v2_replay_mode(), alloc, agent, ch, in->contact_id, key_len, combined,
+        combined_len, in->history, in->history_count, situation, dr);
     if (!out->director_valid)
         return false;
     hu_expressive_unknown_event_guard(dr, combined, combined_len, in->history, in->history_count);

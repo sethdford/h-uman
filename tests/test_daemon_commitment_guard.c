@@ -548,6 +548,25 @@ static void run_tags_detector_calls_with_commitment_check_purpose(void) {
     g_alloc.free(g_alloc.ctx, draft, len + 1);
 }
 
+/* A proactive caller's PROACTIVE tag (batch priority) survives the guard's
+ * local calls: the guard labels only an untagged thread (#612 review). */
+static void run_keeps_a_proactive_callers_purpose(void) {
+    fake_llm_t f = {.replies = {k_plan_sat7, k_rewrite, k_none}, .n = 3};
+    fake_cal_t c = {.state = HU_CAL_BUSY};
+    hu_commitment_guard_io_t io = make_io(&f, &c);
+    size_t len;
+    char *draft = dup_draft("yeah saturday at 7 works", &len);
+    hu_commitment_guard_result_t r;
+    hu_llm_purpose_t outer = hu_llm_purpose_set(HU_LLM_PURPOSE_PROACTIVE);
+    HU_ASSERT_EQ(hu_commitment_guard_run(HU_GATE_LIVE, &io, "u free sat?", 11, &draft, &len, &r),
+                 HU_OK);
+    HU_ASSERT_STR_EQ(f.purpose_seen[0], "proactive");
+    HU_ASSERT_STR_EQ(f.purpose_seen[1], "proactive");
+    HU_ASSERT_EQ(hu_llm_purpose_current(), HU_LLM_PURPOSE_PROACTIVE); /* still the caller's */
+    (void)hu_llm_purpose_set(outer);
+    g_alloc.free(g_alloc.ctx, draft, len + 1);
+}
+
 /* ── compatible provider: the purpose reaches the wire ────────────────── */
 
 static void compatible_chat_sends_purpose_header_and_no_priority(void) {
@@ -679,6 +698,7 @@ void run_daemon_commitment_guard_tests(void) {
     HU_RUN_TEST(run_shadow_audits_every_nth_prefilter_miss);
     HU_RUN_TEST(run_never_calls_a_non_local_provider);
     HU_RUN_TEST(run_tags_detector_calls_with_commitment_check_purpose);
+    HU_RUN_TEST(run_keeps_a_proactive_callers_purpose);
     HU_RUN_TEST(compatible_chat_sends_purpose_header_and_no_priority);
     HU_RUN_TEST(glue_off_by_default_leaves_reply_untouched);
     HU_RUN_TEST(glue_live_without_a_local_provider_changes_nothing);

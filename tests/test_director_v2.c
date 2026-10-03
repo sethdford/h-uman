@@ -616,6 +616,21 @@ static void director_v2_live_falls_back_to_v1_when_v2_fails(void) {
     HU_ASSERT_EQ(memcmp(&got, &v1, sizeof(got)), 0);
 }
 
+/* Replays pin the gate: SHADOW runs as OFF (no shadow job), OFF and LIVE
+ * pass through (the cut-over A/B arms set HU_DIRECTOR_V2=off|live). */
+static void director_v2_replay_mode_pins_shadow_to_off(void) {
+    unsetenv("HU_DIRECTOR_V2");
+    HU_ASSERT_EQ((int)hu_director_v2_replay_mode(), (int)HU_GATE_OFF);
+    setenv("HU_DIRECTOR_V2", "shadow", 1);
+    HU_ASSERT_EQ((int)hu_gate_mode_from_env("HU_DIRECTOR_V2", HU_GATE_OFF), (int)HU_GATE_SHADOW);
+    HU_ASSERT_EQ((int)hu_director_v2_replay_mode(), (int)HU_GATE_OFF);
+    setenv("HU_DIRECTOR_V2", "live", 1);
+    HU_ASSERT_EQ((int)hu_director_v2_replay_mode(), (int)HU_GATE_LIVE);
+    setenv("HU_DIRECTOR_V2", "off", 1);
+    HU_ASSERT_EQ((int)hu_director_v2_replay_mode(), (int)HU_GATE_OFF);
+    unsetenv("HU_DIRECTOR_V2");
+}
+
 void run_director_v2_tests(void) {
     HU_TEST_SUITE("director_v2");
     HU_RUN_TEST(director_v2_brevity_flags_the_prod_directions);
@@ -638,4 +653,5 @@ void run_director_v2_tests(void) {
     HU_RUN_TEST(director_v2_shutdown_waits_for_the_worker);
     HU_RUN_TEST(director_v2_live_uses_v2_decision);
     HU_RUN_TEST(director_v2_live_falls_back_to_v1_when_v2_fails);
+    HU_RUN_TEST(director_v2_replay_mode_pins_shadow_to_off);
 }

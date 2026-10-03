@@ -86,9 +86,97 @@ static void personal_model_prompt_live_keeps_another_contacts_fact_out(void) {
     free(agent);
 }
 
+#ifdef HU_ENABLE_SQLITE
+#include "human/config.h"
+#include "human/memory.h"
+#include "human/reflection.h"
+#include <sqlite3.h>
+#include <time.h>
+
+/* One live, unsurfaced reflection pattern for `channel` (the shape
+ * hu_reflection_query_for_system_prompt reads; see
+ * tests/test_personal_model_reflection_slice.c). */
+static void pmp_seed_reflection(sqlite3 *db, const char *observation) {
+    HU_ASSERT_EQ(hu_reflection_storage_migrate(db), HU_OK);
+    HU_ASSERT_EQ(sqlite3_exec(db,
+                              "INSERT INTO reflection_runs (run_id, provider, started_at_ms, "
+                              "completed_at_ms, input_turns, status, prose_summary) VALUES "
+                              "('run_seed', 'mock', 1000, 2000, 5, 'ok', 'quiet week')",
+                              NULL, NULL, NULL),
+                 SQLITE_OK);
+    uint64_t now_ms = (uint64_t)time(NULL) * 1000ULL;
+    sqlite3_stmt *st = NULL;
+    HU_ASSERT_EQ(sqlite3_prepare_v2(
+                     db,
+                     "INSERT INTO reflection_patterns (id, type, subject, observation, confidence, "
+                     "evidence_json, channels_json, first_seen_run_id, last_seen_run_id, "
+                     "observation_count, created_at_ms, last_observed_at_ms, expires_at_ms, "
+                     "surfaced_to_user, retired) VALUES ('p1', 'preference', 'Seth', ?, 0.85, "
+                     "'[]', '[\"imessage\"]', 'run_seed', 'run_seed', 1, ?, ?, ?, 0, 0)",
+                     -1, &st, NULL),
+                 SQLITE_OK);
+    sqlite3_bind_text(st, 1, observation, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(st, 2, (sqlite3_int64)now_ms);
+    sqlite3_bind_int64(st, 3, (sqlite3_int64)now_ms);
+    sqlite3_bind_int64(st, 4, (sqlite3_int64)(now_ms + 30ULL * 86400000ULL));
+    HU_ASSERT_EQ(sqlite3_step(st), SQLITE_DONE);
+    sqlite3_finalize(st);
+}
+
+/* The reflection-loop branch: with reflection_loop.enabled, a SQLite memory
+ * and an active channel, the carve renders exactly what the pre-carve inline
+ * block did — hu_personal_model_build_prompt_with_reflection(model, overlay,
+ * db, channel, 5) — and the confidence gate OFF leaves it byte-identical. */
+static void personal_model_prompt_reflection_branch_matches_the_inline_build(void) {
+    hu_allocator_t a = hu_system_allocator();
+    hu_agent_t *agent = pmp_agent(&a);
+    pmp_add_fact(&agent->personal_model, "sister", "pregnant", k_pmp_a, "imessage_dm");
+    pmp_add_fact(&agent->personal_model, "user", "an oat latte person", NULL, "cli");
+    static const char k_obs[] = "shifts to one-word replies after 9pm";
+
+    /* The expected bytes come from a twin db: building with reflection marks
+     * the pattern surfaced, so each side needs its own copy. */
+    hu_memory_t want_mem = hu_sqlite_memory_create(&a, ":memory:");
+    hu_memory_t got_mem = hu_sqlite_memory_create(&a, ":memory:");
+    HU_ASSERT_NOT_NULL(want_mem.vtable);
+    HU_ASSERT_NOT_NULL(got_mem.vtable);
+    pmp_seed_reflection(hu_sqlite_memory_get_db(&want_mem), k_obs);
+    pmp_seed_reflection(hu_sqlite_memory_get_db(&got_mem), k_obs);
+
+    static char want[8192], plain[8192], got[8192];
+    size_t want_n = hu_personal_model_build_prompt_with_reflection(
+        &agent->personal_model, NULL, hu_sqlite_memory_get_db(&want_mem), "imessage",
+        /*max_patterns=*/5, want, sizeof(want));
+    size_t plain_n = hu_personal_model_build_prompt(&agent->personal_model, plain, sizeof(plain));
+    HU_ASSERT_NOT_NULL(strstr(want, k_obs)); /* the branch adds the slice... */
+    HU_ASSERT_NULL(strstr(plain, k_obs));    /* ...the plain build does not */
+    HU_ASSERT_TRUE(want_n > plain_n);
+
+    static hu_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.reflection_loop.enabled = true;
+    agent->config = &cfg;
+    agent->memory = &got_mem;
+    agent->active_channel = "imessage";
+    agent->active_channel_len = 8;
+    hu_confidence_set_mode_for_test(HU_GATE_OFF);
+    size_t got_n = hu_turn_personal_model_prompt(agent, got, sizeof(got));
+    hu_confidence_set_mode_for_test(-1);
+    HU_ASSERT_EQ(got_n, want_n);
+    HU_ASSERT_TRUE(memcmp(got, want, want_n) == 0);
+
+    want_mem.vtable->deinit(want_mem.ctx);
+    got_mem.vtable->deinit(got_mem.ctx);
+    free(agent);
+}
+#endif
+
 void run_personal_model_prompt_tests(void) {
     HU_TEST_SUITE("personal_model_prompt");
     HU_RUN_TEST(personal_model_prompt_empty_model_renders_nothing);
     HU_RUN_TEST(personal_model_prompt_off_is_the_plain_build);
     HU_RUN_TEST(personal_model_prompt_live_keeps_another_contacts_fact_out);
+#ifdef HU_ENABLE_SQLITE
+    HU_RUN_TEST(personal_model_prompt_reflection_branch_matches_the_inline_build);
+#endif
 }

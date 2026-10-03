@@ -211,6 +211,9 @@ Pass when all of these hold:
 
 **(b) Replay A/B.** Use `human replay` from the sibling PR
 `feat/replay-harness`. Reply depth must rise, and the fragment rate must not.
+A replay runs the director under `hu_director_v2_replay_mode()`: `shadow`
+replays as `off` (no shadow job is queued at the live local endpoint), while
+`off` and `live` pass through, so set `HU_DIRECTOR_V2=live` on the candidate arm.
 
 **(c) Blind gate.** Run `scripts/blind_ab_gate.py` with `HU_DIRECTOR_V2=live`
 on the candidate arm. Detection must hold or fall.

@@ -47,6 +47,10 @@ bool hu_post_send_defer_armed(void) {
     return s_psd.mode != HU_GATE_OFF;
 }
 
+hu_gate_mode_t hu_post_send_defer_window_mode(void) {
+    return s_psd.mode;
+}
+
 /* Run and release every queued job, FIFO, inside the background LLM lane.
  * Jobs may store rows or ingest messages: the window is already disarmed, so
  * their own offers run inline. */
