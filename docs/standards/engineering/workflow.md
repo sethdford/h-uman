@@ -103,7 +103,7 @@ cmake --build build-release -j$(sysctl -n hw.ncpu 2>/dev/null || nproc)
 
 1. All tests pass with zero ASan errors
 2. Release build compiles clean
-3. Binary size within the <!-- fp:budget_binary_kb -->3000 KB<!-- /fp --> budget (now <!-- fp:binary_kb -->~2760 KB<!-- /fp -->; CI fails a main build over it)
+3. Binary size within the <!-- fp:budget_binary_kb -->3000 KB<!-- /fp --> budget (now <!-- fp:binary_kb -->~2905 KB<!-- /fp -->; CI fails a main build over it)
 4. Startup time and RSS benchmarked -- no regressions
 5. CHANGELOG updated with this release's changes
 6. Run `./scripts/verify-all.sh` (full drift audit)

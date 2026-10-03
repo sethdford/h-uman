@@ -20,8 +20,8 @@ updated: 2026-03-02
 
 human is a C11 autonomous AI assistant runtime optimized for:
 
-- **Minimal binary size:** <!-- fp:binary_kb -->~2760 KB<!-- /fp --> (release-size build)
-- **Minimal memory footprint:** <!-- fp:version_rss_mb -->6.9 MB<!-- /fp --> peak RSS (budget <!-- fp:budget_version_rss_mb -->8 MB<!-- /fp -->), <!-- fp:idle_rss_mb -->8.6 MB<!-- /fp --> idle
+- **Minimal binary size:** <!-- fp:binary_kb -->~2905 KB<!-- /fp --> (release-size build)
+- **Minimal memory footprint:** <!-- fp:version_rss_mb -->6.7 MB<!-- /fp --> peak RSS (budget <!-- fp:budget_version_rss_mb -->8 MB<!-- /fp -->), <!-- fp:idle_rss_mb -->8.4 MB<!-- /fp --> idle
 - **Minimal dependencies:** libc, optional SQLite and libcurl
 - **Cross-platform:** POSIX (macOS, Linux), optional Windows
 

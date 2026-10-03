@@ -116,7 +116,7 @@ updated: 2026-03-02
 | Network         | HTTPS-only, URL allowlist          | No enforced HTTPS        |
 | Audit trail     | Structured, severity levels        | Basic logging            |
 | Supply chain    | SBOM, no package manager           | npm registry, lock files |
-| Binary size     | <!-- fp:binary_kb -->~2760 KB<!-- /fp --> | ~75 MB+ (node_modules)   |
+| Binary size     | <!-- fp:binary_kb -->~2905 KB<!-- /fp --> | ~75 MB+ (node_modules)   |
 
 ## 10. Recommendation
 

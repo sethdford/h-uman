@@ -296,7 +296,7 @@ struct MacOverviewPane: View {
                             .font(.custom("Avenir-Book", size: HUTokens.textSm))
                             .foregroundStyle(tokens.textMuted)
                         // fp-template: Text("{{startup_bound}}")
-                        Text("<6 ms")
+                        Text("<18 ms")
                             .font(.custom("Avenir-Heavy", size: HUTokens.textBase))
                             .foregroundStyle(tokens.text)
                     }
@@ -305,7 +305,7 @@ struct MacOverviewPane: View {
                             .font(.custom("Avenir-Book", size: HUTokens.textSm))
                             .foregroundStyle(tokens.textMuted)
                         // fp-template: Text("{{version_rss_mb}}")
-                        Text("6.9 MB")
+                        Text("6.7 MB")
                             .font(.custom("Avenir-Heavy", size: HUTokens.textBase))
                             .foregroundStyle(tokens.text)
                     }

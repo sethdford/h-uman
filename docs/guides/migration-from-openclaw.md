@@ -13,7 +13,7 @@ This guide walks you through migrating from [OpenClaw](https://github.com/opencl
 | Benefit          | OpenClaw                                                                       | Human                                           |
 | ---------------- | ------------------------------------------------------------------------------ | ----------------------------------------------- |
 | **Cost**         | $599+ setup (typical M-series Mac), $300+/mo API overhead from bloated runtime | $5 hardware—runs on ARM SBCs, Raspberry Pi Zero |
-| **Binary size**  | ~28 MB (npm dist)                                                              | **<!-- fp:binary_kb -->~2760 KB<!-- /fp -->** binary                         |
+| **Binary size**  | ~28 MB (npm dist)                                                              | **<!-- fp:binary_kb -->~2905 KB<!-- /fp -->** binary                         |
 | **Memory**       | Node.js heap (100+ MB typical)                                                 | **<!-- fp:idle_rss_bound --><9 MB<!-- /fp -->** idle RSS                             |
 | **Dependencies** | 1,200+ npm packages, Node.js ≥22                                               | **0**—libc + optional SQLite, libcurl           |
 | **Supply chain** | Large attack surface, malicious skill risk                                     | Single binary, curated skill registry           |

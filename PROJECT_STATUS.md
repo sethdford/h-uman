@@ -10,11 +10,11 @@ Last updated: 2026-10-02
 | Lines of C/H/ASM code          | **~426K**              |
 | Test files                     | ~308                   |
 | Tests passing                  | **14,691/14,691 (100%)** |
-| Binary size (MinSizeRel+LTO)   | **<!-- fp:binary_kb -->~2760 KB<!-- /fp -->** |
-| Idle RSS (`human mcp`)         | **<!-- fp:idle_rss_mb -->8.6 MB<!-- /fp -->** |
+| Binary size (MinSizeRel+LTO)   | **<!-- fp:binary_kb -->~2905 KB<!-- /fp -->** |
+| Idle RSS (`human mcp`)         | **<!-- fp:idle_rss_mb -->8.4 MB<!-- /fp -->** |
 
 Binary size and RSS are the release-size build (LTO, all channels, sqlite-vec off), measured
-<!-- fp:measured_date -->2026-09-29<!-- /fp --> on <!-- fp:measured_platform -->macOS arm64<!-- /fp -->; generated from [`docs/perf/footprint.json`](docs/perf/footprint.json).
+<!-- fp:measured_date -->2026-10-03<!-- /fp --> on <!-- fp:measured_platform -->macOS arm64<!-- /fp -->; generated from [`docs/perf/footprint.json`](docs/perf/footprint.json).
 
 ## Channels — Honest Status
 

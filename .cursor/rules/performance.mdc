@@ -12,9 +12,9 @@ Apply these rules when modifying hot paths (agent loop, provider calls, memory q
 
 - Read `docs/standards/engineering/performance.md` for hard limits.
 - Read `docs/standards/engineering/performance-testing.md` for measurement methodology.
-- Binary size budget: <!-- fp:budget_binary_kb -->3000 KB<!-- /fp --> for the release-size build (now <!-- fp:binary_kb -->~2760 KB<!-- /fp -->). Measure with `scripts/measure-build-footprint.sh`.
-- Startup time budget: <!-- fp:budget_startup_ms -->100 ms<!-- /fp --> median (now <!-- fp:startup_range -->3–6 ms<!-- /fp -->). No lazy initialization that blocks startup.
-- Peak RSS budget: <!-- fp:budget_version_rss_mb -->8 MB<!-- /fp --> for `human --version` (now <!-- fp:version_rss_mb -->6.9 MB<!-- /fp -->). No unnecessary heap allocations in the hot path.
+- Binary size budget: <!-- fp:budget_binary_kb -->3000 KB<!-- /fp --> for the release-size build (now <!-- fp:binary_kb -->~2905 KB<!-- /fp -->). Measure with `scripts/measure-build-footprint.sh`.
+- Startup time budget: <!-- fp:budget_startup_ms -->100 ms<!-- /fp --> median (now <!-- fp:startup_range -->8–18 ms<!-- /fp -->). No lazy initialization that blocks startup.
+- Peak RSS budget: <!-- fp:budget_version_rss_mb -->8 MB<!-- /fp --> for `human --version` (now <!-- fp:version_rss_mb -->6.7 MB<!-- /fp -->). No unnecessary heap allocations in the hot path.
 - Animate only compositor properties in UI (transform, opacity, filter).
 - Use `arena` allocator for per-turn allocations that can be bulk-freed.
 - Profile before optimizing — measure, don't guess.

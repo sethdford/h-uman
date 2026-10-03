@@ -71,7 +71,7 @@ Reviewers focus in this order. Higher priorities block merge; lower priorities c
 - No unnecessary allocations in hot paths
 - String operations use appropriate buffer sizes (no repeated `realloc` in loops)
 - Binary size impact considered for new features
-- Memory footprint considered: `human --version` peak RSS is <!-- fp:version_rss_mb -->6.9 MB<!-- /fp --> against a <!-- fp:budget_version_rss_mb -->8 MB<!-- /fp --> budget, and idle RSS (`human mcp`) is <!-- fp:idle_rss_mb -->8.6 MB<!-- /fp -->
+- Memory footprint considered: `human --version` peak RSS is <!-- fp:version_rss_mb -->6.7 MB<!-- /fp --> against a <!-- fp:budget_version_rss_mb -->8 MB<!-- /fp --> budget, and idle RSS (`human mcp`) is <!-- fp:idle_rss_mb -->8.4 MB<!-- /fp -->
   (release-size build; [footprint.json](../../perf/footprint.json), budgets in [footprint-budget.json](../../perf/footprint-budget.json), CI-enforced)
 
 ---

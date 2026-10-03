@@ -20,13 +20,13 @@ footprint number.
 
 | Metric (release-size build) | Measured | Budget |
 | --- | --- | --- |
-| Binary size (MinSizeRel + LTO, all channels, sqlite-vec off) | <!-- fp:binary_kb -->~2760 KB<!-- /fp --> | <!-- fp:budget_binary_kb -->3000 KB<!-- /fp --> |
-| Cold start (`human --version`, median of 20 warm runs) | <!-- fp:startup_range -->3–6 ms<!-- /fp --> | <!-- fp:budget_startup_ms -->100 ms<!-- /fp --> |
-| Peak RSS (`human --version`) | <!-- fp:version_rss_mb -->6.9 MB<!-- /fp --> | <!-- fp:budget_version_rss_mb -->8 MB<!-- /fp --> |
-| Idle RSS (`human mcp`, isolated HOME, no config) | <!-- fp:idle_rss_mb -->8.6 MB<!-- /fp --> | none; tracked |
-| Text section (`__text`) | <!-- fp:text_kb -->1915 KB<!-- /fp --> | none; it is part of binary size |
+| Binary size (MinSizeRel + LTO, all channels, sqlite-vec off) | <!-- fp:binary_kb -->~2905 KB<!-- /fp --> | <!-- fp:budget_binary_kb -->3000 KB<!-- /fp --> |
+| Cold start (`human --version`, median of 20 warm runs) | <!-- fp:startup_range -->8–18 ms<!-- /fp --> | <!-- fp:budget_startup_ms -->100 ms<!-- /fp --> |
+| Peak RSS (`human --version`) | <!-- fp:version_rss_mb -->6.7 MB<!-- /fp --> | <!-- fp:budget_version_rss_mb -->8 MB<!-- /fp --> |
+| Idle RSS (`human mcp`, isolated HOME, no config) | <!-- fp:idle_rss_mb -->8.4 MB<!-- /fp --> | none; tracked |
+| Text section (`__text`) | <!-- fp:text_kb -->2024 KB<!-- /fp --> | none; it is part of binary size |
 
-Measured <!-- fp:measured_date -->2026-09-29<!-- /fp --> on <!-- fp:measured_platform -->macOS arm64<!-- /fp -->, code at <!-- fp:measured_rev -->a0641b4dd<!-- /fp -->. The
+Measured <!-- fp:measured_date -->2026-10-03<!-- /fp --> on <!-- fp:measured_platform -->macOS arm64<!-- /fp -->, code at <!-- fp:measured_rev -->2a1d73b8f<!-- /fp -->. The
 full-feature `cmake --preset release` build (sqlite-vec, ML, embedded model and more) is
 <!-- fp:full_binary_mb -->3.3 MB<!-- /fp -->. MB means 1,000,000 bytes throughout.
 

@@ -80,7 +80,7 @@ For deeper health assessment:
 - Error rate > 5% over 5-minute window
 - Gateway process crash (exit code != 0)
 - Provider returns 5xx for > 3 consecutive requests
-- Binary startup time > 1 second (normally <!-- fp:startup_range -->3–6 ms<!-- /fp -->)
+- Binary startup time > 1 second (normally <!-- fp:startup_range -->8–18 ms<!-- /fp -->)
 
 ### Warning (investigate within the hour)
 
@@ -135,10 +135,10 @@ Maintain these baselines and alert on regression:
 
 | Metric                      | Baseline       | Alert If                          |
 | --------------------------- | -------------- | --------------------------------- |
-| Binary size (release-size build) | <!-- fp:binary_kb -->~2760 KB<!-- /fp --> | > <!-- fp:budget_binary_kb -->3000 KB<!-- /fp --> (CI fails the main build) |
-| Cold start (`--version`)    | <!-- fp:startup_range -->3–6 ms<!-- /fp --> | > 50 ms                           |
-| Peak RSS (`--version`)      | <!-- fp:version_rss_mb -->6.9 MB<!-- /fp --> | > <!-- fp:budget_version_rss_mb -->8 MB<!-- /fp --> (CI fails the main build) |
-| Idle RSS (`human mcp`)      | <!-- fp:idle_rss_mb -->8.6 MB<!-- /fp --> | no alert; tracked only |
+| Binary size (release-size build) | <!-- fp:binary_kb -->~2905 KB<!-- /fp --> | > <!-- fp:budget_binary_kb -->3000 KB<!-- /fp --> (CI fails the main build) |
+| Cold start (`--version`)    | <!-- fp:startup_range -->8–18 ms<!-- /fp --> | > 50 ms                           |
+| Peak RSS (`--version`)      | <!-- fp:version_rss_mb -->6.7 MB<!-- /fp --> | > <!-- fp:budget_version_rss_mb -->8 MB<!-- /fp --> (CI fails the main build) |
+| Idle RSS (`human mcp`)      | <!-- fp:idle_rss_mb -->8.4 MB<!-- /fp --> | no alert; tracked only |
 | Test throughput             | 700+ tests/sec | < 500 tests/sec                   |
 
 ---

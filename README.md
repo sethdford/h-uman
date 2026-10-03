@@ -10,7 +10,7 @@
 
 <p align="center">
   <strong>Bring AI to every device on Earth.</strong><br>
-  <strong><!-- fp:binary_kb -->~2760 KB<!-- /fp --> binary. <!-- fp:idle_rss_bound --><9 MB<!-- /fp --> idle RAM. Boots in <!-- fp:startup_bound --><6 ms<!-- /fp -->. Runs on anything with a CPU.</strong>
+  <strong><!-- fp:binary_kb -->~2905 KB<!-- /fp --> binary. <!-- fp:idle_rss_bound --><9 MB<!-- /fp --> idle RAM. Boots in <!-- fp:startup_bound --><18 ms<!-- /fp -->. Runs on anything with a CPU.</strong>
 </p>
 
 <p align="center">
@@ -21,13 +21,13 @@
 
 The smallest fully autonomous AI assistant infrastructure — a static C binary that fits on any $5 board, boots in milliseconds, and requires nothing but libc.
 
-**<!-- fp:binary_kb -->~2760 KB<!-- /fp --> binary · <!-- fp:startup_bound --><6 ms<!-- /fp --> startup · 14,691+ tests · 97 providers · 31 channels · 87 tools · Pluggable everything**
+**<!-- fp:binary_kb -->~2905 KB<!-- /fp --> binary · <!-- fp:startup_bound --><18 ms<!-- /fp --> startup · 14,691+ tests · 97 providers · 31 channels · 87 tools · Pluggable everything**
 
 ### Features
 
-- **Impossibly Small:** <!-- fp:binary_kb -->~2760 KB<!-- /fp --> static binary — no runtime, no VM, no framework overhead.
+- **Impossibly Small:** <!-- fp:binary_kb -->~2905 KB<!-- /fp --> static binary — no runtime, no VM, no framework overhead.
 - **Small Memory Footprint:** <!-- fp:idle_rss_bound --><9 MB<!-- /fp --> idle RSS (`human mcp`, no config). Runs comfortably on low-end ARM SBCs.
-- **Instant Startup:** <!-- fp:startup_range -->3–6 ms<!-- /fp --> for `human --version` on Apple Silicon.
+- **Instant Startup:** <!-- fp:startup_range -->8–18 ms<!-- /fp --> for `human --version` on Apple Silicon.
 - **True Portability:** Single self-contained binary across ARM, x86, and RISC-V. Drop it anywhere, it just runs.
 - **Feature-Complete:** 97 providers (9 core + 88 compatible), 31 channels, 87 tools, hybrid vector+FTS5 memory, multi-layer sandbox, tunnels, hardware peripherals, MCP, subagents, streaming, voice — the full stack.
 - **Interactive TUI:** Full-screen terminal UI with split panes, markdown rendering, multi-session tabs (Ctrl+T), tool approval prompts, streaming output, and input history. Build with `-DHU_ENABLE_TUI=ON` and run with `--tui`.
@@ -63,17 +63,17 @@ Similar projects in the autonomous AI assistant space (data sourced from each pr
 | ----------------- | ------------------------------------------------ | ------------------------------------------- | ---------------------------------------------- | ----------------------------------------------------- | ----------------- |
 | **Language**      | TypeScript                                       | Python                                      | Go                                             | Rust                                                  | **C**             |
 | **RAM** ¹         | —                                                | —                                           | < 10 MB                                        | < 5 MB                                                | **<!-- fp:idle_rss_bound --><9 MB<!-- /fp -->** ² |
-| **Binary Size** ¹ | ~28 MB (npm dist)                                | N/A (Python)                                | ~8 MB                                          | ~8.8 MB                                               | **<!-- fp:binary_kb -->~2760 KB<!-- /fp -->** ² |
+| **Binary Size** ¹ | ~28 MB (npm dist)                                | N/A (Python)                                | ~8 MB                                          | ~8.8 MB                                               | **<!-- fp:binary_kb -->~2905 KB<!-- /fp -->** ² |
 | **Runtime Deps**  | Node.js ≥22                                      | Python ≥3.11                                | None (static)                                  | None (static)                                         | **None (static)** |
 
 > ¹ RAM and binary size figures for other projects are self-reported from their respective READMEs.
 > ² Human's numbers are the release-size build (MinSizeRel + LTO, all channels, sqlite-vec off), measured with `scripts/measure-build-footprint.sh`; RAM is idle RSS of `human mcp`. Raw output with git rev and platform: [`docs/perf/footprint.json`](docs/perf/footprint.json).
 
-Human's measured numbers (<!-- fp:measured_platform -->macOS arm64<!-- /fp -->, <!-- fp:measured_date -->2026-09-29<!-- /fp -->, code at <!-- fp:measured_rev -->a0641b4dd<!-- /fp -->; generated from [`docs/perf/footprint.json`](docs/perf/footprint.json)):
+Human's measured numbers (<!-- fp:measured_platform -->macOS arm64<!-- /fp -->, <!-- fp:measured_date -->2026-10-03<!-- /fp -->, code at <!-- fp:measured_rev -->2a1d73b8f<!-- /fp -->; generated from [`docs/perf/footprint.json`](docs/perf/footprint.json)):
 
 | Build | Binary | Idle RSS (`human mcp`) | Peak RSS (`--version`) | Startup (`--version`) |
 | --- | --- | --- | --- | --- |
-| release-size: MinSizeRel + LTO, all channels, sqlite-vec off | <!-- fp:binary_kb -->~2760 KB<!-- /fp --> | <!-- fp:idle_rss_mb -->8.6 MB<!-- /fp --> | <!-- fp:version_rss_mb -->6.9 MB<!-- /fp --> | <!-- fp:startup_range -->3–6 ms<!-- /fp --> |
+| release-size: MinSizeRel + LTO, all channels, sqlite-vec off | <!-- fp:binary_kb -->~2905 KB<!-- /fp --> | <!-- fp:idle_rss_mb -->8.4 MB<!-- /fp --> | <!-- fp:version_rss_mb -->6.7 MB<!-- /fp --> | <!-- fp:startup_range -->8–18 ms<!-- /fp --> |
 | `cmake --preset release`: adds sqlite-vec, ML, embedded model, Cartesia, … | <!-- fp:full_binary_mb -->3.3 MB<!-- /fp --> (<!-- fp:full_binary_bytes -->3,327,168<!-- /fp --> bytes) | <!-- fp:full_idle_rss_mb -->8.8 MB<!-- /fp --> | | |
 
 Tests:         14,691 passing, 0 ASan errors
@@ -673,7 +673,7 @@ cmake --preset integration && cmake --build --preset integration
 ./build-integration/human_integration_tests
 ```
 
-Release-size build (<!-- fp:binary_kb -->~2760 KB<!-- /fp -->; the configuration CI re-measures on every main push):
+Release-size build (<!-- fp:binary_kb -->~2905 KB<!-- /fp -->; the configuration CI re-measures on every main push):
 
 ```bash
 cmake -B build-size -DCMAKE_BUILD_TYPE=MinSizeRel -DHU_ENABLE_LTO=ON \
@@ -706,7 +706,7 @@ Dependencies: libc + optional SQLite, libcurl
 
 ```
 
-Footprint (release-size build, <!-- fp:measured_platform -->macOS arm64<!-- /fp -->): <!-- fp:binary_kb -->~2760 KB<!-- /fp --> binary · <!-- fp:idle_rss_mb -->8.6 MB<!-- /fp --> idle RSS · <!-- fp:startup_range -->3–6 ms<!-- /fp --> startup. Source: [`docs/perf/footprint.json`](docs/perf/footprint.json).
+Footprint (release-size build, <!-- fp:measured_platform -->macOS arm64<!-- /fp -->): <!-- fp:binary_kb -->~2905 KB<!-- /fp --> binary · <!-- fp:idle_rss_mb -->8.4 MB<!-- /fp --> idle RSS · <!-- fp:startup_range -->8–18 ms<!-- /fp --> startup. Source: [`docs/perf/footprint.json`](docs/perf/footprint.json).
 
 ### Source Layout
 
