@@ -722,6 +722,29 @@ hu_error_t cp_voice_session_interrupt(hu_allocator_t *alloc, hu_app_context_t *a
     return err;
 }
 
+/* Arm Lester's voice for a new turn and hand `text` to the agent as the user's message.
+ * The reply arrives on the bus and is spoken by vs_bus_cb. */
+static void vs_start_spoken_turn(hu_app_context_t *app, hu_ws_conn_t *conn, vs_slot_t *sl,
+                                 const char *session_key, char *text) {
+    (void)snprintf(sl->tts_context, sizeof(sl->tts_context), "ctx-%llu-%u",
+                   (unsigned long long)conn->id, ++sl->turn_counter);
+    sl->tts_armed = true;
+    s_active_tts_slot = sl;
+
+    hu_bus_event_t bev;
+    memset(&bev, 0, sizeof(bev));
+    bev.type = HU_BUS_MESSAGE_RECEIVED;
+    (void)snprintf(bev.channel, sizeof(bev.channel), "control-ui");
+    (void)snprintf(bev.id, sizeof(bev.id), "%s", session_key);
+    bev.payload = text;
+    size_t tl = strlen(text);
+    if (tl >= HU_BUS_MSG_LEN)
+        tl = HU_BUS_MSG_LEN - 1;
+    memcpy(bev.message, text, tl);
+    bev.message[tl] = '\0';
+    hu_bus_publish(app->bus, &bev);
+}
+
 hu_error_t cp_voice_audio_end(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
                               const hu_control_protocol_t *proto, const hu_json_value_t *root,
                               char **out, size_t *out_len) {
@@ -882,23 +905,7 @@ hu_error_t cp_voice_audio_end(hu_allocator_t *alloc, hu_app_context_t *app, hu_w
                                       tpayload);
     alloc->free(alloc->ctx, tpayload, tplen + 1);
 
-    (void)snprintf(sl->tts_context, sizeof(sl->tts_context), "ctx-%llu-%u",
-                   (unsigned long long)conn->id, ++sl->turn_counter);
-    sl->tts_armed = true;
-    s_active_tts_slot = sl;
-
-    hu_bus_event_t bev;
-    memset(&bev, 0, sizeof(bev));
-    bev.type = HU_BUS_MESSAGE_RECEIVED;
-    (void)snprintf(bev.channel, sizeof(bev.channel), "control-ui");
-    (void)snprintf(bev.id, sizeof(bev.id), "%s", session_key);
-    bev.payload = text;
-    size_t tl = strlen(text);
-    if (tl >= HU_BUS_MSG_LEN)
-        tl = HU_BUS_MSG_LEN - 1;
-    memcpy(bev.message, text, tl);
-    bev.message[tl] = '\0';
-    hu_bus_publish(app->bus, &bev);
+    vs_start_spoken_turn(app, conn, sl, session_key, text);
     alloc->free(alloc->ctx, text, text_len + 1);
 
     hu_json_value_t *res = hu_json_object_new(alloc);
@@ -906,6 +913,39 @@ hu_error_t cp_voice_audio_end(hu_allocator_t *alloc, hu_app_context_t *app, hu_w
         return HU_ERR_OUT_OF_MEMORY;
     hu_json_object_set(alloc, res, "ok", hu_json_bool_new(alloc, true));
     err = hu_json_stringify(alloc, res, out, out_len);
+    hu_json_free(alloc, res);
+    return err;
+}
+
+/* The cue for the opening line of a voice conversation. It reaches the model as the
+ * user's turn, so it says what happened and what a natural greeting is, and asks the
+ * model not to mention it. The persona prompt carries the time and what Lester knows. */
+#define VS_GREETING_CUE                                                                  \
+    "(Seth just opened a voice conversation with you. Say hello the way you naturally "  \
+    "would right now: one short spoken line that fits the time of day and anything you " \
+    "know is going on with him. Do not mention this note.)"
+
+/* voice.session.greet: Lester opens the conversation, in his voice. */
+hu_error_t cp_voice_session_greet(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                                  const hu_control_protocol_t *proto, const hu_json_value_t *root,
+                                  char **out, size_t *out_len) {
+    (void)proto;
+    (void)root;
+    *out = NULL;
+    *out_len = 0;
+    if (!alloc || !app || !app->bus || !conn)
+        return HU_ERR_INVALID_ARGUMENT;
+    vs_slot_t *sl = vs_find_slot_by_conn(conn);
+    if (!sl || !sl->tts)
+        return HU_ERR_INVALID_ARGUMENT;
+    char cue[] = VS_GREETING_CUE;
+    vs_start_spoken_turn(app, conn, sl, sl->session_key, cue);
+
+    hu_json_value_t *res = hu_json_object_new(alloc);
+    if (!res)
+        return HU_ERR_OUT_OF_MEMORY;
+    hu_json_object_set(alloc, res, "ok", hu_json_bool_new(alloc, true));
+    hu_error_t err = hu_json_stringify(alloc, res, out, out_len);
     hu_json_free(alloc, res);
     return err;
 }
@@ -1029,6 +1069,19 @@ void hu_voice_stream_on_conn_close(hu_ws_conn_t *conn) {
 }
 
 hu_error_t cp_voice_tool_response(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                                  const hu_control_protocol_t *proto, const hu_json_value_t *root,
+                                  char **out, size_t *out_len) {
+    (void)alloc;
+    (void)app;
+    (void)conn;
+    (void)proto;
+    (void)root;
+    *out = NULL;
+    *out_len = 0;
+    return HU_ERR_NOT_SUPPORTED;
+}
+
+hu_error_t cp_voice_session_greet(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
                                   const hu_control_protocol_t *proto, const hu_json_value_t *root,
                                   char **out, size_t *out_len) {
     (void)alloc;
